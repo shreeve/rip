@@ -1,0 +1,93 @@
+# Calculator Grammar for Jison (CoffeeScript version)
+# This grammar defines a simple calculator that can handle basic arithmetic operations
+
+# The only dependency is on the **Jison.Parser**
+{Parser} = require 'jison'
+
+# Jison DSL
+# ---------
+
+# Since we're going to be wrapped in a function by Jison in any case, if our
+# action immediately returns a value, we can optimize by removing the function
+# wrapper and just returning the value directly.
+unwrap = /^function\s*\(\)\s*\{\s*return\s*([\s\S]*);\s*\}/
+
+# Our handy DSL for Jison grammar generation
+o = (patternString, action, options) ->
+  patternString = patternString.replace /\s{2,}/g, ' '
+  patternCount = patternString.split(' ').length
+  if action
+    # This code block does string replacements in the generated `parser.js`
+    # file, replacing the calls to the `LOC` function and other strings as
+    # listed below.
+    action = if match = unwrap.exec action then match[1] else "(#{action}())"
+    performActionFunctionString = "$$ = #{action};"
+  else
+    performActionFunctionString = '$$ = $1;'
+
+  [patternString, performActionFunctionString, options]
+
+# Grammatical Rules
+# -----------------
+
+# In all of the rules that follow, you'll see the name of the nonterminal as
+# the key to a list of alternative matches. With each match's action, the
+# dollar-sign variables are provided by Jison as references to the value of
+# their numeric position.
+grammar =
+
+  # The **Root** is the top-level node in the syntax tree.
+  Root: [
+    o 'Expression',                             -> $1
+  ]
+
+  # All the different types of expressions in our calculator language.
+  Expression: [
+    o 'Expression + Expression',                -> $1 + $3
+    o 'Expression - Expression',                -> $1 - $3
+    o 'Expression * Expression',                -> $1 * $3
+    o 'Expression / Expression',                -> $1 / $3
+    o '( Expression )',                         -> $2
+    o '- Expression',                           (-> -$2), prec: 'UMINUS'
+    o 'NUMBER',                                 -> Number($1)
+  ]
+
+# Precedence
+# ----------
+
+# Operators at the top of this list have higher precedence than the ones lower
+# down. Following these rules is what makes `2 + 3 * 4` parse as:
+#
+#     2 + (3 * 4)
+#
+# And not:
+#
+#     (2 + 3) * 4
+operators = [
+  ['right',     'UMINUS']
+  ['left',      '*', '/']
+  ['left',      '+', '-']
+]
+
+# Wrapping Up
+# -----------
+
+# Finally, now that we have our **grammar** and our **operators**, we can create
+# our **Jison.Parser**. We do this by processing all of our rules, recording all
+# terminals (every symbol which does not appear as the name of a rule above)
+# as "tokens".
+tokens = []
+for name, alternatives of grammar
+  grammar[name] = for alt in alternatives
+    for token in alt[0].split ' '
+      tokens.push token unless grammar[token]
+    alt
+
+# Initialize the **Parser** with our list of terminal **tokens**, our **grammar**
+# rules, and the name of the root. Reverse the operators because Jison orders
+# precedence from low to high, and we have it high to low.
+exports.parser = new Parser
+  tokens      : tokens.join ' '
+  bnf         : grammar
+  operators   : operators.reverse()
+  startSymbol : 'Root'
