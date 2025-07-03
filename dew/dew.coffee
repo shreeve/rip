@@ -865,12 +865,12 @@ resolveConflict = (production, op, reduce, shift) ->
 parser = {}
 
 parser.init = (dict) ->
-  @table = dict.table
+  @table          = dict.table
   @defaultActions = dict.defaultActions
-  @performAction = dict.performAction
-  @productions_ = dict.productions_
-  @symbols_ = dict.symbols_
-  @terminals_ = dict.terminals_
+  @performAction  = dict.performAction
+  @productions_   = dict.productions_
+  @symbols_       = dict.symbols_
+  @terminals_     = dict.terminals_
 
 # parser.trace = generator.trace;
 # parser.warn = generator.warn;
