@@ -391,7 +391,7 @@ class BaseGenerator
         # if token is a non-terminal, recursively add closures
         if symbol and @nonterminals[symbol]
           unless syms[symbol]
-            @nonterminals[symbol].productions.forEach(production) ->
+            @nonterminals[symbol].productions.forEach (production) ->
               newItem = new Item(production, 0)
               unless closureSet.contains(newItem)
                 itemQueue.push(newItem)
@@ -419,14 +419,14 @@ class BaseGenerator
     r = 2 # reduce
     a = 3 # accept
 
-    itemSets.forEach(itemSet, k) ->
+    itemSets.forEach (itemSet, k) ->
       state       = states[k] = {}
       action      = null # TODO: Is this needed?
       stackSymbol = null # TODO: Is this needed?
 
       # set shift and goto actions
       for stackSymbol of itemSet.edges
-        itemSet.forEach(item, j) ->
+        itemSet.forEach (item, j) ->
           # find shift and goto actions
           if item.markedSymbol is stackSymbol
             gotoState = itemSet.edges[stackSymbol]
@@ -437,7 +437,7 @@ class BaseGenerator
               state[@symbols_[stackSymbol]] = [s, gotoState]
 
       # set accept action
-      itemSet.forEach(item, j) ->
+      itemSet.forEach (item, j) ->
         if item.markedSymbol is @EOF
           # accept
           state[@symbols_[@EOF]] = [a]
@@ -445,11 +445,11 @@ class BaseGenerator
       allterms = if @lookAheads then false else @terminals
 
       # set reductions and resolve potential conflicts
-      itemSet.reductions.forEach(item, j) ->
+      itemSet.reductions.forEach (item, j) ->
         # if parser uses lookahead, only enumerate those terminals
         terminals = allterms or @lookAheads(itemSet, item)
 
-        terminals.forEach(stackSymbol) ->
+        terminals.forEach (stackSymbol) ->
           action = state[@symbols_[stackSymbol]]
           op = operators[stackSymbol]
 
@@ -496,7 +496,7 @@ class BaseGenerator
       cont = false
 
       # check if each production is nullable
-      @productions.forEach(production, k) ->
+      @productions.forEach (production, k) ->
         unless production.nullable
           n = 0
           i = 0
@@ -540,7 +540,7 @@ class BaseGenerator
     # loop until no further changes have been made
     while cont
       cont = false
-      productions.forEach(production, k) ->
+      productions.forEach (production, k) ->
         firsts = @first(production.handle)
         oldcount = nonterminals[production.symbol].first.length
         unionArrays(nonterminals[production.symbol].first, firsts)
@@ -578,7 +578,7 @@ class BaseGenerator
     while cont
       cont = false
 
-      productions.forEach(production, k) ->
+      productions.forEach (production, k) ->
         # q is used in Simple LALR algorithm to determine follows in context
         q = null # TODO: Is this needed?
         ctx = !!@go_
@@ -788,7 +788,7 @@ class LALRGenerator extends BaseGenerator
 # Iterate over objects
 each = (obj, func) ->
   if obj.forEach
-    obj.forEach(func)
+    obj.forEach func
   else
     for p of obj
       if obj.hasOwnProperty(p)
