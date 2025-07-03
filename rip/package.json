@@ -1,0 +1,32 @@
+{
+  "name": "rip",
+  "version": "0.1.0",
+  "description": "Rip language compiler",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js"
+  },
+  "files": [
+    "lib"
+  ],
+  "author": "Steve Shreeve <steve.shreeve@gmail.com>",
+  "license": "MIT",
+  "keywords": [
+    "rip",
+    "coffeescript",
+    "compiler",
+    "language",
+    "javascript",
+    "esmodules",
+    "transpiler",
+    "parser",
+    "estree",
+    "tokenizer",
+    "ast",
+    "source-to-source"
+  ],
+  "dependencies": {
+    "bun-coffeescript": "^1.0.3"
+  }
+}
