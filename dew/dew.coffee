@@ -293,7 +293,6 @@ class BaseGenerator
       else
         prods = bnf[symbol].slice(0)
 
-      console.log prods
       prods.forEach(buildProduction)
 
     for action of actionGroups
