@@ -414,6 +414,7 @@ class BaseGenerator
     nonterminals     = @nonterminals
     operators        = @operators
     conflictedStates = {} # array of [state, token] tuples
+
     s = 1 # shift
     r = 2 # reduce
     a = 3 # accept
@@ -709,7 +710,6 @@ class LALRGenerator extends BaseGenerator
     @buildNewGrammar()
     newg.computeLookaheads()
     @unionLookaheads()
-
     @table = @parseTable(@states)
     @defaultActions = findDefaults(@table)
 
@@ -933,8 +933,6 @@ parser.parse = (input) ->
     token
 
   yyval = {}
-
-  # TODO: Needed??? => symbol, preErrorSymbol, state, action, a, r, p, len, newState, expected
 
   while true
     # retreive state number from top of stack
