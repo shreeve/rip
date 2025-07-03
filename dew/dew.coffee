@@ -418,7 +418,7 @@ class BaseGenerator
     r = 2 # reduce
     a = 3 # accept
 
-    itemSets.forEach (itemSet, k) ->
+    itemSets.forEach (itemSet, k) =>
       state       = states[k] = {}
       action      = null # TODO: Is this needed?
       stackSymbol = null # TODO: Is this needed?
