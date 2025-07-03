@@ -385,7 +385,7 @@ class BaseGenerator
     loop
       itemQueue = new ItemSet()
       closureSet.concat(set)
-      set.forEach(item) ->
+      set.forEach (item) ->
         symbol = item.markedSymbol
 
         # if token is a non-terminal, recursively add closures
