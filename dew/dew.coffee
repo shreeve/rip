@@ -343,7 +343,7 @@ class BaseGenerator
     while marked isnt states.length
       itemSet = states[marked]
       marked++
-      itemSet.forEach (item) ->
+      itemSet.forEach (item) =>
         if item.markedSymbol and item.markedSymbol isnt @EOF
           @canonicalCollectionInsert(item.markedSymbol, itemSet, states, marked - 1)
 
@@ -369,7 +369,7 @@ class BaseGenerator
   gotoOperation: (itemSet, symbol) ->
     gotoSet = new ItemSet()
 
-    itemSet.forEach (item) ->
+    itemSet.forEach (item) =>
       if item.markedSymbol is symbol
         gotoSet.push(new Item(item.production, item.dotPosition + 1, item.follows, item.predecessor))
 
@@ -384,13 +384,13 @@ class BaseGenerator
     loop
       itemQueue = new ItemSet()
       closureSet.concat(set)
-      set.forEach (item) ->
+      set.forEach (item) =>
         symbol = item.markedSymbol
 
         # if token is a non-terminal, recursively add closures
         if symbol and @nonterminals[symbol]
           unless syms[symbol]
-            @nonterminals[symbol].productions.forEach (production) ->
+            @nonterminals[symbol].productions.forEach (production) =>
               newItem = new Item(production, 0)
               unless closureSet.contains(newItem)
                 itemQueue.push(newItem)
@@ -425,7 +425,7 @@ class BaseGenerator
 
       # set shift and goto actions
       for stackSymbol of itemSet.edges
-        itemSet.forEach (item, j) ->
+        itemSet.forEach (item, j) =>
           # find shift and goto actions
           if item.markedSymbol is stackSymbol
             gotoState = itemSet.edges[stackSymbol]
@@ -436,7 +436,7 @@ class BaseGenerator
               state[@symbols_[stackSymbol]] = [s, gotoState]
 
       # set accept action
-      itemSet.forEach (item, j) ->
+      itemSet.forEach (item, j) =>
         if item.markedSymbol is @EOF
           # accept
           state[@symbols_[@EOF]] = [a]
@@ -444,11 +444,11 @@ class BaseGenerator
       allterms = if @lookAheads then false else @terminals
 
       # set reductions and resolve potential conflicts
-      itemSet.reductions.forEach (item, j) ->
+      itemSet.reductions.forEach (item, j) =>
         # if parser uses lookahead, only enumerate those terminals
         terminals = allterms or @lookAheads(itemSet, item)
 
-        terminals.forEach (stackSymbol) ->
+        terminals.forEach (stackSymbol) =>
           action = state[@symbols_[stackSymbol]]
           op = operators[stackSymbol]
 
@@ -495,7 +495,7 @@ class BaseGenerator
       cont = false
 
       # check if each production is nullable
-      @productions.forEach (production, k) ->
+      @productions.forEach (production, k) =>
         unless production.nullable
           n = 0
           i = 0
@@ -539,7 +539,7 @@ class BaseGenerator
     # loop until no further changes have been made
     while cont
       cont = false
-      productions.forEach (production, k) ->
+      productions.forEach (production, k) =>
         firsts = @first(production.handle)
         oldcount = nonterminals[production.symbol].first.length
         unionArrays(nonterminals[production.symbol].first, firsts)
@@ -577,7 +577,7 @@ class BaseGenerator
     while cont
       cont = false
 
-      productions.forEach (production, k) ->
+      productions.forEach (production, k) =>
         # q is used in Simple LALR algorithm to determine follows in context
         q = null # TODO: Is this needed?
         ctx = !!@go_
@@ -741,8 +741,8 @@ class LALRGenerator extends BaseGenerator
   buildNewGrammar: ->
     newg = @newg
 
-    @states.forEach (state, i) ->
-      state.forEach (item) ->
+    @states.forEach (state, i) =>
+      state.forEach (item) =>
         if item.dotPosition is 0
           # new symbols are a combination of state and transition symbol
           symbol = "#{i}:#{item.production.symbol}"
@@ -767,15 +767,15 @@ class LALRGenerator extends BaseGenerator
     newg = @newg
     states = if !!@onDemandLookahead then @inadequateStates else @states
 
-    states.forEach (i) ->
+    states.forEach (i) =>
       state = if typeof i is 'number' then @states[i] else i
       if state.reductions.length
-        state.reductions.forEach (item) ->
+        state.reductions.forEach (item) =>
           follows = {}
           for k in [0...item.follows.length]
             follows[item.follows[k]] = true
-          state.goes[item.production.handle.join(' ')].forEach (symbol) ->
-            newg.nonterminals[symbol].follows.forEach (symbol) ->
+          state.goes[item.production.handle.join(' ')].forEach (symbol) =>
+            newg.nonterminals[symbol].follows.forEach (symbol) =>
               terminal = @terms_[symbol]
               unless follows[terminal]
                 follows[terminal] = true
