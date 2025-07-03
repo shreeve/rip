@@ -420,9 +420,7 @@ class BaseGenerator
     a = 3 # accept
 
     itemSets.forEach (itemSet, k) =>
-      state       = states[k] = {}
-      action      = null # TODO: Is this needed?
-      stackSymbol = null # TODO: Is this needed?
+      state = states[k] = {}
 
       # set shift and goto actions
       for stackSymbol of itemSet.edges
