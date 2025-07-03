@@ -326,25 +326,25 @@ class BaseGenerator
 
     @performAction = "function anonymous(#{parameters}) {\n#{actions}\n}"
 
-  buildTable: ->
-    @states         = @canonicalCollection()
-    @table          = @parseTable(@states)
-    @defaultActions = findDefaults(@table)
+  # TODO: Turn back on when it's ready...
+  # buildTable: ->
+  #   @states         = @canonicalCollection()
+  #   @table          = @parseTable(@states)
+  #   @defaultActions = findDefaults(@table)
 
   canonicalCollection: ->
+
     item1      = new Item(@productions[0], 0, [@EOF])
     firstSet   = new ItemSet(); firstSet.push(item1)
     firstState = @closureOperation(firstSet)
     states     = [firstState]
     marked     = 0
-    itemSet    = null # TODO: Is this needed?
 
     states.has = {}
     states.has[firstState.valueOf()] = 0
 
     while marked isnt states.length
-      itemSet = states[marked]
-      marked++
+      itemSet = states[marked++]
       itemSet.forEach (item) =>
         if item.markedSymbol and item.markedSymbol isnt @EOF
           @canonicalCollectionInsert(item.markedSymbol, itemSet, states, marked - 1)
