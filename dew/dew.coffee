@@ -186,48 +186,6 @@ class BaseGenerator
     # add error symbol; will be third symbol, or "2" ($accept, $end, error)
     addSymbol("error")
 
-    for symbol of bnf
-      continue unless bnf.hasOwnProperty(symbol)
-
-      addSymbol(symbol)
-      nonterminals[symbol] = new Nonterminal(symbol)
-
-      if typeof bnf[symbol] is 'string'
-        prods = bnf[symbol].split(/\s*\|\s*/g)
-      else
-        prods = bnf[symbol].slice(0)
-
-      prods.forEach(buildProduction)
-
-    for action of actionGroups
-      actions.push(actionGroups[action].join(' '), action, 'break;')
-
-    terms = []
-    terms_ = {}
-
-    each(symbols_, (id, sym) ->
-      unless nonterminals[sym]
-        terms.push(sym)
-        terms_[id] = sym
-    )
-
-    @hasErrorRecovery = her
-    @terminals        = terms
-    @terminals_       = terms_
-    @symbols_         = symbols_
-    @productions_     = productions_
-
-    actions.push('}')
-
-    actions = actions.join("\n")
-      .replace(/YYABORT/g, 'return false')
-      .replace(/YYACCEPT/g, 'return true')
-
-    parameters = "yytext, yyleng, yylineno, yy, yystate /* action[1] */, $$ /* vstack */, _$ /* lstack */"
-    parameters += ', ' + @parseParams.join(', ') if @parseParams
-
-    @performAction = "function anonymous(#{parameters}) {\n#{actions}\n}"
-
     buildProduction = (handle) ->
       # r, rhs, i # TODO: Do these need to be defined?
       if handle.constructor is Array
@@ -323,6 +281,49 @@ class BaseGenerator
       productions.push(r)
       productions_.push([symbols_[r.symbol], if r.handle[0] is '' then 0 else r.handle.length])
       nonterminals[symbol].productions.push(r)
+
+    for symbol of bnf
+      continue unless bnf.hasOwnProperty(symbol)
+
+      addSymbol(symbol)
+      nonterminals[symbol] = new Nonterminal(symbol)
+
+      if typeof bnf[symbol] is 'string'
+        prods = bnf[symbol].split(/\s*\|\s*/g)
+      else
+        prods = bnf[symbol].slice(0)
+
+      console.log prods
+      prods.forEach(buildProduction)
+
+    for action of actionGroups
+      actions.push(actionGroups[action].join(' '), action, 'break;')
+
+    terms = []
+    terms_ = {}
+
+    each(symbols_, (id, sym) ->
+      unless nonterminals[sym]
+        terms.push(sym)
+        terms_[id] = sym
+    )
+
+    @hasErrorRecovery = her
+    @terminals        = terms
+    @terminals_       = terms_
+    @symbols_         = symbols_
+    @productions_     = productions_
+
+    actions.push('}')
+
+    actions = actions.join("\n")
+      .replace(/YYABORT/g, 'return false')
+      .replace(/YYACCEPT/g, 'return true')
+
+    parameters = "yytext, yyleng, yylineno, yy, yystate /* action[1] */, $$ /* vstack */, _$ /* lstack */"
+    parameters += ', ' + @parseParams.join(', ') if @parseParams
+
+    @performAction = "function anonymous(#{parameters}) {\n#{actions}\n}"
 
   buildTable: ->
     @states         = @canonicalCollection()
