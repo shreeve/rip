@@ -1,118 +1,104 @@
 # Dew - CoffeeScript-based Jison Parser Generator
-# This is a CoffeeScript port of the jison.js parser generator
 
 # Grammar nonterminals with productions, first/follow sets
 class Nonterminal
   constructor: (symbol) ->
-    @symbol = symbol
+    @symbol      = symbol
     @productions = []
-    @first = []
-    @follows = []
-    @nullable = false
+    @first       = []
+    @follows     = []
+    @nullable    = false
 
-  toString: ->
-    str = "#{@symbol}\n"
-    str += if @nullable then 'nullable' else 'not nullable'
-    str += "\nFirsts: #{@first.join(', ')}"
-    str += "\nFollows: #{@first.join(', ')}"
-    str += "\nProductions:\n  #{@productions.join('\n  ')}"
-    return str
+    toString: -> """
+      #{@symbol}
+      #{if @nullable then 'nullable' else 'not nullable'}
+      Firsts:  #{@first  .join(', ')}
+      Follows: #{@follows.join(', ')}
+      Productions:
+          #{@productions.join('\n  ')}
+      """
 
 # Grammar productions with handles and precedence
 class Production
   constructor: (symbol, handle, id) ->
-    @symbol = symbol
-    @handle = handle
-    @nullable = false
-    @id = id
-    @first = []
+    @symbol     = symbol
+    @handle     = handle
+    @nullable   = false
+    @id         = id
+    @first      = []
     @precedence = 0
 
   toString: ->
-    return "#{@symbol} -> #{@handle.join(' ')}"
+    "#{@symbol} -> #{@handle.join(' ')}"
 
 # Represents LR items (productions with dot positions)
 class Item
   constructor: (production, dot, f, predecessor) ->
-    @production = production
-    @dotPosition = dot or 0
-    @follows = f or []
-    @predecessor = predecessor
-    @id = parseInt("#{production.id}a#{@dotPosition}", 36)
+    @production   = production
+    @dotPosition  = dot or 0
+    @follows      = f or []
+    @predecessor  = predecessor
+    @id           = parseInt("#{production.id}a#{@dotPosition}", 36)
     @markedSymbol = @production.handle[@dotPosition]
 
-  remainingHandle: ->
-    return @production.handle.slice(@dotPosition + 1)
+  remainingHandle: -> @production.handle.slice(@dotPosition + 1)
 
-  eq: (e) ->
-    return e.id is @id
+  eq: (e) -> e.id is @id
 
   handleToString: ->
     handle = @production.handle.slice(0)
     handle[@dotPosition] = ".#{handle[@dotPosition] or ''}"
-    return handle.join(' ')
+    handle.join(' ')
 
   toString: ->
     temp = @production.handle.slice(0)
     temp[@dotPosition] = ".#{temp[@dotPosition] or ''}"
-    return "#{@production.symbol} -> #{temp.join(' ')}#{if @follows.length is 0 then '' else " #lookaheads= #{@follows.join(' ')}"}"
+    look = " #lookaheads= #{@follows.join(' ')}" if @follows.length
+    "#{@production.symbol} -> #{temp.join(' ')}#{look}"
 
 # Manages set of LR items with deduplication
 class ItemSet
   constructor: ->
-    @map = new Map() # id -> item
+    @map        = new Map() # id -> item
     @reductions = []
-    @goes = {}
-    @edges = {}
-    @shifts = false
+    @goes       = {}
+    @edges      = {}
+    @shifts     = false
     @inadequate = false
 
-  push: (item) ->
-    unless @map.has(item.id)
-      @map.set(item.id, item)
-    return @map.size
+  contains: (item) -> @map.has(item.id)
+  forEach: (fn) -> fn(item) for item in @map.values()
+  isEmpty: -> @map.size is 0
+  items: -> Array.from @map.values()
+  toString: -> @items().toString()
 
   concat: (set) ->
     # Handle both ItemSet and array inputs
     items = if set.items then set.items() else set
-    for item in items
-      @push(item)
-    return @
+    @push(item) for item in items
+    @
 
-  contains: (item) ->
-    return @map.has(item.id)
+  push: (item) ->
+    @map.set(item.id, item) unless @map.has(item.id)
+    @map.size
 
   valueOf: ->
     # Memoized string representation for state deduplication
     v = Array.from(@map.keys()).sort().join('|')
     @valueOf = -> v
-    return v
-
-  forEach: (fn) ->
-    for item in @map.values()
-      fn(item)
-
-  isEmpty: ->
-    return @map.size is 0
-
-  items: ->
-    return Array.from(@map.values())
-
-  toString: ->
-    return @items().toString()
+    v
 
 # Base class for building parse tables and generating parsers
 class BaseGenerator
   constructor: (grammar, opt) ->
-    options = Object.assign({}, grammar.options, opt)
-    @terms = {}
-    @operators = {}
-    @productions = []
-    @conflicts = 0
-    @resolutions = []
-    @options = options
+    @conflicts   = 0
+    @operators   = {}
+    @options     = Object.assign {}, grammar.options, opt
     @parseParams = grammar.parseParams
-    @yy = {} # accessed as yy free variable in the parser/lexer actions
+    @productions = []
+    @resolutions = []
+    @terms       = {}
+    @yy          = {} # accessed as yy free variable in the parser/lexer actions
 
     # source included in semantic action execution scope
     if grammar.actionInclude
@@ -128,10 +114,10 @@ class BaseGenerator
   # ==[ Initialization ]=======================================================
 
   processGrammar: (grammar) ->
-    bnf = grammar.bnf
-    tokens = grammar.tokens
+    bnf          = grammar.bnf
+    tokens       = grammar.tokens
     nonterminals = @nonterminals = {}
-    productions = @productions
+    productions  = @productions
 
     if tokens
       if typeof tokens is 'string'
@@ -153,6 +139,7 @@ class BaseGenerator
   augmentGrammar: (grammar) ->
     if @productions.length is 0
       throw new Error("Grammar error: must have at least one rule.")
+
     # use specified start symbol, or default to first user defined production
     @startSymbol = grammar.start or grammar.startSymbol or @productions[0].symbol
     unless @nonterminals[@startSymbol]
@@ -184,12 +171,12 @@ class BaseGenerator
       'switch (yystate) {'
     ]
     actionGroups = {}
-    prods, symbol
+    her          = false # has error recovery
     productions_ = [0]
-    symbolId = 1
-    symbols_ = {}
-
-    her = false # has error recovery
+    symbols_     = {}
+    symbolId     = 1
+    prods        = null # TODO: Is this needed?
+    symbol       = null # TODO: Is this needed?
 
     addSymbol = (s) ->
       if s and not symbols_[s]
@@ -216,6 +203,7 @@ class BaseGenerator
       actions.push(actionGroups[action].join(' '), action, 'break;')
 
     sym, terms = [], terms_ = {}
+
     each(symbols_, (id, sym) ->
       unless nonterminals[sym]
         terms.push(sym)
@@ -223,12 +211,11 @@ class BaseGenerator
     )
 
     @hasErrorRecovery = her
+    @terminals        = terms
+    @terminals_       = terms_
+    @symbols_         = symbols_
+    @productions_     = productions_
 
-    @terminals = terms
-    @terminals_ = terms_
-    @symbols_ = symbols_
-
-    @productions_ = productions_
     actions.push('}')
 
     actions = actions.join("\n")
@@ -236,8 +223,7 @@ class BaseGenerator
       .replace(/YYACCEPT/g, 'return true')
 
     parameters = "yytext, yyleng, yylineno, yy, yystate /* action[1] */, $$ /* vstack */, _$ /* lstack */"
-    if @parseParams
-      parameters += ', ' + @parseParams.join(', ')
+    parameters += ', ' + @parseParams.join(', ') if @parseParams
 
     @performAction = "function anonymous(#{parameters}) {\n#{actions}\n}"
 
@@ -256,6 +242,7 @@ class BaseGenerator
             addSymbol(rhs[i])
 
         if typeof handle[1] is 'string' or handle.length is 3
+
           # semantic action specified
           label = "case #{productions.length + 1}:"
           action = handle[1]
@@ -287,16 +274,15 @@ class BaseGenerator
             )
 
           action = action
+
             # replace references to $$ with this.$, and @$ with this._$
             .replace(/([^'"])\$\$|^\$\$/g, '$1this.$').replace(/@[0$]/g, "this._$")
+
             # replace semantic value references ($n) with stack value (stack[n])
-            .replace(/\$(-?\d+)/g, (_, n) ->
-              return "$$[$0#{parseInt(n, 10) - rhs.length or ''}]"
-            )
+            .replace(/\$(-?\d+)/g, (_, n) -> "$$[$0#{parseInt(n, 10) - rhs.length or ''}]")
+
             # same as above for location references (@n)
-            .replace(/@(-?\d+)/g, (_, n) ->
-              return "_$[$0#{n - rhs.length or ''}]"
-            )
+            .replace(/@(-?\d+)/g, (_, n) -> "_$[$0#{n - rhs.length or ''}]")
 
           if action of actionGroups
             actionGroups[action].push(label)
@@ -338,18 +324,17 @@ class BaseGenerator
       nonterminals[symbol].productions.push(r)
 
   buildTable: ->
-    @states = @canonicalCollection()
-    @table = @parseTable(@states)
+    @states         = @canonicalCollection()
+    @table          = @parseTable(@states)
     @defaultActions = findDefaults(@table)
 
   canonicalCollection: ->
-    item1 = new Item(@productions[0], 0, [@EOF])
-    firstSet = new ItemSet()
-    firstSet.push(item1)
+    item1      = new Item(@productions[0], 0, [@EOF])
+    firstSet   = new ItemSet(); firstSet.push(item1)
     firstState = @closureOperation(firstSet)
-    states = [firstState]
-    marked = 0
-    itemSet
+    states     = [firstState]
+    marked     = 0
+    itemSet    = null # TODO: Is this needed?
 
     states.has = {}
     states.has[firstState.valueOf()] = 0
@@ -357,17 +342,16 @@ class BaseGenerator
     while marked isnt states.length
       itemSet = states[marked]
       marked++
-      itemSet.forEach((item) ->
+      itemSet.forEach (item) ->
         if item.markedSymbol and item.markedSymbol isnt @EOF
           @canonicalCollectionInsert(item.markedSymbol, itemSet, states, marked - 1)
-      )
 
-    return states
+    states
 
   canonicalCollectionInsert: (symbol, itemSet, states, stateNum) ->
     g = @gotoOperation(itemSet, symbol)
-    unless g.predecessors
-      g.predecessors = {}
+    g.predecessors = {} unless g.predecessors
+
     # add g to queue if not empty or duplicate
     unless g.isEmpty()
       gv = g.valueOf()
@@ -384,32 +368,31 @@ class BaseGenerator
   gotoOperation: (itemSet, symbol) ->
     gotoSet = new ItemSet()
 
-    itemSet.forEach((item) ->
+    itemSet.forEach (item) ->
       if item.markedSymbol is symbol
         gotoSet.push(new Item(item.production, item.dotPosition + 1, item.follows, item.predecessor))
-    )
 
-    return if gotoSet.isEmpty() then gotoSet else @closureOperation(gotoSet)
+    if gotoSet.isEmpty() then gotoSet else @closureOperation(gotoSet)
 
   closureOperation: (itemSet) ->
     closureSet = new ItemSet()
-    set = itemSet
-    itemQueue, syms = {}
+    set        = itemSet
+    syms       = {}
+    itemQueue  = null # TODO: Is this needed?
 
     loop
       itemQueue = new ItemSet()
       closureSet.concat(set)
-      set.forEach((item) ->
+      set.forEach(item) ->
         symbol = item.markedSymbol
 
         # if token is a non-terminal, recursively add closures
         if symbol and @nonterminals[symbol]
           unless syms[symbol]
-            @nonterminals[symbol].productions.forEach((production) ->
+            @nonterminals[symbol].productions.forEach(production) ->
               newItem = new Item(production, 0)
               unless closureSet.contains(newItem)
                 itemQueue.push(newItem)
-            )
             syms[symbol] = true
         else unless symbol
           # reduction
@@ -420,30 +403,28 @@ class BaseGenerator
           closureSet.shifts = true
           closureSet.inadequate = closureSet.reductions.length > 0
 
-      )
-
       set = itemQueue
       break if itemQueue.isEmpty()
 
-    return closureSet
+    closureSet
 
   parseTable: (itemSets) ->
-    states = []
-    nonterminals = @nonterminals
-    operators = @operators
+    states           = []
+    nonterminals     = @nonterminals
+    operators        = @operators
     conflictedStates = {} # array of [state, token] tuples
-    s = 1
-    r = 2
-    a = 3 # shift, reduce, accept
+    s = 1 # shift
+    r = 2 # reduce
+    a = 3 # accept
 
-    # for each item set
-    itemSets.forEach((itemSet, k) ->
-      state = states[k] = {}
-      action, stackSymbol
+    itemSets.forEach(itemSet, k) ->
+      state       = states[k] = {}
+      action      = null # TODO: Is this needed?
+      stackSymbol = null # TODO: Is this needed?
 
       # set shift and goto actions
       for stackSymbol of itemSet.edges
-        itemSet.forEach((item, j) ->
+        itemSet.forEach(item, j) ->
           # find shift and goto actions
           if item.markedSymbol is stackSymbol
             gotoState = itemSet.edges[stackSymbol]
@@ -452,35 +433,33 @@ class BaseGenerator
               state[@symbols_[stackSymbol]] = gotoState
             else
               state[@symbols_[stackSymbol]] = [s, gotoState]
-        )
 
       # set accept action
-      itemSet.forEach((item, j) ->
+      itemSet.forEach(item, j) ->
         if item.markedSymbol is @EOF
           # accept
           state[@symbols_[@EOF]] = [a]
-      )
 
       allterms = if @lookAheads then false else @terminals
 
       # set reductions and resolve potential conflicts
-      itemSet.reductions.forEach((item, j) ->
+      itemSet.reductions.forEach(item, j) ->
         # if parser uses lookahead, only enumerate those terminals
         terminals = allterms or @lookAheads(itemSet, item)
 
-        terminals.forEach((stackSymbol) ->
+        terminals.forEach(stackSymbol) ->
           action = state[@symbols_[stackSymbol]]
           op = operators[stackSymbol]
 
           # Reading a terminal and current position is at the end of a production, try to reduce
           if action or (action and action.length)
-            sol = resolveConflict(item.production, op, [r, item.production.id], if action[0] instanceof Array then action[0] else action)
-            @resolutions.push([k, stackSymbol, sol])
-            if sol.bydefault
+            sln = resolveConflict(item.production, op, [r, item.production.id], if action[0] instanceof Array then action[0] else action)
+            @resolutions.push([k, stackSymbol, sln])
+            if sln.bydefault
               @conflicts++
               throw new Error("Grammar ambiguous when lookahead is #{stackSymbol} in state #{k}")
             else
-              action = sol.action
+              action = sln.action
           else
             action = [r, item.production.id]
 
@@ -488,19 +467,15 @@ class BaseGenerator
             state[@symbols_[stackSymbol]] = action
           else if action is NONASSOC
             state[@symbols_[stackSymbol]] = undefined
-        )
-      )
-    )
 
     if @conflicts > 0
       conflictDetails = "\nStates with conflicts:"
-      each(conflictedStates, (val, state) ->
+      each conflictedStates, (val, state) ->
         conflictDetails += "\nState #{state}"
         conflictDetails += "\n  #{itemSets[state].join("\n  ")}"
-      )
       throw new Error("Grammar conflicts: #{@conflicts} #{conflictDetails}")
 
-    return states
+    states
 
   # ==[ Lookahead / Parsing algorithms ]=====================================
 
@@ -519,18 +494,16 @@ class BaseGenerator
       cont = false
 
       # check if each production is nullable
-      @productions.forEach((production, k) ->
+      @productions.forEach(production, k) ->
         unless production.nullable
           n = 0
           i = 0
-          t
+          t = null # TODO: Is this needed?
           for i in [0...production.handle.length]
             t = production.handle[i]
-            if @nullable(t)
-              n++
+            if @nullable(t) n++
           if n is i # production is nullable if all tokens are nullable
             production.nullable = cont = true
-      )
 
       # check if each symbol is nullable
       for symbol of nonterminals
@@ -548,8 +521,7 @@ class BaseGenerator
     else if Array.isArray(symbol)
       for i in [0...symbol.length]
         t = symbol[i]
-        unless @nullable(t)
-          return false
+        return false unless @nullable(t)
       return true
     # terminal
     else unless @nonterminals[symbol]
@@ -559,20 +531,18 @@ class BaseGenerator
       return @nonterminals[symbol].nullable
 
   firstSets: ->
-    productions = @productions
+    productions  = @productions
     nonterminals = @nonterminals
-    cont = true
+    cont         = true
 
     # loop until no further changes have been made
     while cont
       cont = false
-      productions.forEach((production, k) ->
+      productions.forEach(production, k) ->
         firsts = @first(production.handle)
         oldcount = nonterminals[production.symbol].first.length
         unionArrays(nonterminals[production.symbol].first, firsts)
-        if oldcount isnt nonterminals[production.symbol].first.length
-          cont = true
-      )
+        cont = true if oldcount isnt nonterminals[production.symbol].first.length
 
   first: (symbol) ->
     # epsilon
@@ -584,8 +554,7 @@ class BaseGenerator
       for i in [0...symbol.length]
         t = symbol[i]
         unless @nonterminals[t]
-          if firsts.indexOf(t) is -1
-            firsts.push(t)
+          if firsts.indexOf(t) is -1 then firsts.push(t)
         else
           unionArrays(firsts, @nonterminals[t].first)
         unless @nullable(t)
@@ -599,27 +568,26 @@ class BaseGenerator
       return @nonterminals[symbol].first
 
   followSets: ->
-    productions = @productions
+    productions  = @productions
     nonterminals = @nonterminals
-    cont = true
+    cont         = true
 
     # loop until no further changes have been made
     while cont
       cont = false
 
-      productions.forEach((production, k) ->
+      productions.forEach(production, k) ->
         # q is used in Simple LALR algorithm to determine follows in context
-        q
+        q = null # TODO: Is this needed?
         ctx = !!@go_
 
         set = []
         oldcount
         for i in [0...production.handle.length]
           t = production.handle[i]
-          unless nonterminals[t]
-            continue
+          continue unless nonterminals[t]
 
-          # For Simple LALR algorithm, this.go_ checks if
+          # For Simple LALR algorithm, @go_ checks if
           if ctx
             q = @go_(production.symbol, production.handle.slice(0, i))
             bool = not ctx or q is parseInt(@nterms_[t], 10)
@@ -641,29 +609,25 @@ class BaseGenerator
           unionArrays(nonterminals[t].follows, set)
           if oldcount isnt nonterminals[t].follows.length
             cont = true
-      )
 
   # ==[ Output/Generation ]==================================================
 
   generate: (opt) ->
-    opt = Object.assign({}, @options, opt)
+    opt = Object.assign {}, @options, opt
 
     # check for illegal identifier
     unless opt.moduleName or opt.moduleName.match(/^[A-Za-z_$][A-Za-z0-9_$]*$/)
       opt.moduleName = "parser"
 
     switch opt.moduleType
-      when "js"
-        return @generateModule(opt)
-      else
-        return @generateCommonJSModule(opt)
+      when "js" then @generateModule(opt)
+      else           @generateCommonJSModule(opt)
 
   generateCommonJSModule: (opt) ->
-    opt = Object.assign({}, @options, opt)
+    opt = Object.assign {}, @options, opt
     moduleName = opt.moduleName or "parser"
 
-    return "#{@generateModule(opt)}
-
+    @generateModule(opt)
 
 if (typeof require !== 'undefined' && typeof exports !== 'undefined') {
 exports.parser = #{moduleName};
