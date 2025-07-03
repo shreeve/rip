@@ -658,15 +658,14 @@ class BaseGenerator
     opt = Object.assign {}, @options, opt
     moduleName = opt.moduleName or "parser"
 
-    # FIXME: Clean this up!
-    "#{@generateModule(opt)}
-
-if (typeof require !== 'undefined' && typeof exports !== 'undefined') {
-  exports.parser = #{moduleName};
-  exports.Parser = #{moduleName}.Parser;
-  exports.parse = function () { return #{moduleName}.parse.apply(#{moduleName}, arguments); };
-  exports.main = function() {};
-}"
+    out  = @generateModule(opt)
+    out += "\n\n"
+    out += "if (typeof require !== 'undefined' && typeof exports !== 'undefined') {\n"
+    out += "  exports.parser = #{moduleName};\n"
+    out += "  exports.Parser = #{moduleName}.Parser;\n"
+    out += "  exports.parse = function () { return #{moduleName}.parse.apply(#{moduleName}, arguments); };\n"
+    out += "  exports.main = function() {};\n"
+    out += "}\n"
 
   # ==[ Error handling ]========================================================
 
