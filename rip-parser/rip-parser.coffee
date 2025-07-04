@@ -92,8 +92,14 @@ class ItemSet
     @valueOf = -> v
     v
 
-# Base class for building parse tables and generating parsers
-class BaseGenerator
+# Defensive getter for nonterminals
+getNonterminal = (nonterminals, s) ->
+  unless nonterminals[s]
+    nonterminals[s] = new Nonterminal(s)
+  nonterminals[s]
+
+# LALR(1) class for building parse tables and generating parsers
+class Generator
   constructor: (grammar, opt) ->
     @conflicts   = 0
     @operators   = {}
@@ -114,6 +120,21 @@ class BaseGenerator
     @moduleInclude = grammar.moduleInclude or ''
 
     @processGrammar(grammar)
+
+    @type = "LALR(1)"
+    options = opt or {}
+    @states = @canonicalCollection()
+    @terms_ = {}
+    @nterms_ = {}
+    @nonterminals = {}
+    @inadequateStates = []
+    @onDemandLookahead = options.onDemandLookahead or false
+
+    @buildNewGrammar()
+    @computeLookaheads()
+    @unionLookaheads()
+    @table = @parseTable(@states)
+    @defaultActions = findDefaults(@table)
 
   # ==[ Initialization ]=======================================================
 
@@ -163,7 +184,7 @@ class BaseGenerator
     @nonterminals.$accept.productions.push(acceptProduction)
 
     # add follow $ to start symbol
-    @nonterminals[@startSymbol].follows.push(@EOF)
+    getNonterminal(@nonterminals, @startSymbol).follows.push(@EOF)
 
   # ==[ Grammar building ]=====================================================
 
@@ -532,7 +553,7 @@ class BaseGenerator
       return false
     # nonterminal
     else
-      return @nonterminals[symbol].nullable
+      return getNonterminal(@nonterminals, symbol).nullable
 
   firstSets: ->
     productions  = @productions
@@ -544,9 +565,9 @@ class BaseGenerator
       cont = false
       productions.forEach (production, k) =>
         firsts = @first(production.handle)
-        oldcount = nonterminals[production.symbol].first.length
-        unionArrays(nonterminals[production.symbol].first, firsts)
-        cont = true if oldcount isnt nonterminals[production.symbol].first.length
+        oldcount = getNonterminal(@nonterminals, production.symbol).first.length
+        unionArrays(getNonterminal(@nonterminals, production.symbol).first, firsts)
+        cont = true if oldcount isnt getNonterminal(@nonterminals, production.symbol).first.length
 
   first: (symbol) ->
     switch
@@ -555,11 +576,11 @@ class BaseGenerator
         firsts = []
         for s in symbol
           break unless s
-          if e = @nonterminals[s] then unionArrays firsts, e.first
+          if e = @nonterminals[s] then unionArrays firsts, getNonterminal(@nonterminals, s).first
           else firsts.push s unless s in firsts
           break unless @nullable s
         firsts
-      when e = @nonterminals[symbol] then e.first # non-terminal
+      when e = @nonterminals[symbol] then getNonterminal(@nonterminals, symbol).first # non-terminal
       else [symbol] # terminal
 
   followSets: ->
@@ -580,7 +601,7 @@ class BaseGenerator
         oldcount
         for i in [0...production.handle.length]
           t = production.handle[i]
-          continue unless nonterminals[t]
+          continue unless @nonterminals[t]
 
           # For Simple LALR algorithm, @go_ checks if
           if ctx
@@ -588,22 +609,83 @@ class BaseGenerator
             bool = not ctx or q is parseInt(@nterms_[t], 10)
 
             if i is production.handle.length + 1 and bool
-              set = nonterminals[production.symbol].follows
+              set = getNonterminal(@nonterminals, production.symbol).follows
             else
               part = production.handle.slice(i + 1)
               set = @first(part)
               if @nullable(part) and bool
-                set.push.apply(set, nonterminals[production.symbol].follows)
+                set.push.apply(set, getNonterminal(@nonterminals, production.symbol).follows)
           else
             part = production.handle.slice(i + 1)
             set = @first(part)
             if @nullable(part)
-              set.push.apply(set, nonterminals[production.symbol].follows)
+              set.push.apply(set, getNonterminal(@nonterminals, production.symbol).follows)
 
-          oldcount = nonterminals[t].follows.length
-          unionArrays(nonterminals[t].follows, set)
-          if oldcount isnt nonterminals[t].follows.length
+          oldcount = getNonterminal(@nonterminals, t).follows.length
+          unionArrays(getNonterminal(@nonterminals, t).follows, set)
+          if oldcount isnt getNonterminal(@nonterminals, t).follows.length
             cont = true
+
+  # ==[ LALR-specific methods ]================================================
+
+  lookAheads: (state, item) ->
+    if !!@onDemandLookahead and not state.inadequate then @terminals else item.follows
+
+  go: (p, w) ->
+    q = parseInt(p, 10)
+    for i in [0...w.length]
+      q = @states[q].edges[w[i]] or q
+    q
+
+  goPath: (q, w) ->
+    t = null # TODO: Is this needed?
+    path = []
+    for i in [0...w.length]
+      t = if w[i] then "#{q}:#{w[i]}" else ''
+      if t then @nterms_[t] = q
+      path.push(t)
+      q = @states[q].edges[w[i]] or q
+      @terms_[t] = w[i]
+    {
+      path: path
+      endState: q
+    }
+
+  # Every disjoint reduction of a nonterminal becomes a production in G'
+  buildNewGrammar: ->
+    @states.forEach (state, i) =>
+      state.forEach (item) =>
+        if item.dotPosition is 0
+          symbol = "#{i}:#{item.production.symbol}"
+          @terms_[symbol] = item.production.symbol
+          @nterms_[symbol] = i
+          nt = getNonterminal(@nonterminals, symbol)
+          pathInfo = @goPath(i, item.production.handle)
+          p = new Production(symbol, pathInfo.path, @productions.length)
+          @productions.push(p)
+          nt.productions.push(p)
+          handle = item.production.handle.join(' ')
+          goes = @states[pathInfo.endState].goes
+          goes[handle] = [] unless goes[handle]
+          goes[handle].push(symbol)
+      if state.inadequate then @inadequateStates.push(i)
+
+  unionLookaheads: ->
+    states = if !!@onDemandLookahead then @inadequateStates else @states
+    states.forEach (i) =>
+      state = if typeof i is 'number' then @states[i] else i
+      if state.reductions.length
+        state.reductions.forEach (item) =>
+          follows = {}
+          for k in [0...item.follows.length]
+            follows[item.follows[k]] = true
+          state.goes[item.production.handle.join(' ')].forEach (symbol) =>
+            nt = getNonterminal(@nonterminals, symbol)
+            nt.follows.forEach (symbol) =>
+              terminal = @terms_[symbol]
+              unless follows[terminal]
+                follows[terminal] = true
+                item.follows.push(terminal)
 
   # ==[ Output/Generation ]==================================================
 
@@ -893,111 +975,6 @@ if (typeof require !== 'undefined' && typeof exports !== 'undefined') {
     args = Array.prototype.slice.call(arguments, 0)
     throw new Error("Warning: #{args.join('')}")
   error: (msg) -> throw new Error(msg)
-
-# ==[ LALR(1) Parsing ]=========================================================
-
-# LALRGenerator extends BaseGenerator for LALR(1) parsing
-class LALRGenerator extends BaseGenerator
-  constructor: (grammar, options) ->
-    super(grammar, options)
-
-    @type = "LALR(1)"
-
-    options = options or {}
-    @states = @canonicalCollection()
-    @terms_ = {}
-
-    newg = @newg = Object.assign Object.create(BaseGenerator.prototype),
-      oldg: @
-      trace: @trace
-      nterms_: {}
-      go_: (r, B) ->
-        r = r.split(":")[0] # grab state #
-        B = B.map((b) -> b.slice(b.indexOf(":") + 1))
-        @oldg.go(r, B)
-
-    newg.nonterminals = {}
-    newg.productions  = []
-
-    @inadequateStates = []
-
-    # if true, only lookaheads in inadequate states are computed (faster, larger table)
-    # if false, lookaheads for all reductions will be computed (slower, smaller table)
-    @onDemandLookahead = options.onDemandLookahead or false
-
-    @buildNewGrammar()
-    newg.computeLookaheads()
-    @unionLookaheads()
-    @table = @parseTable(@states)
-    @defaultActions = findDefaults(@table)
-
-  lookAheads: (state, item) ->
-    if !!@onDemandLookahead and not state.inadequate then @terminals else item.follows
-
-  go: (p, w) ->
-    q = parseInt(p, 10)
-    for i in [0...w.length]
-      q = @states[q].edges[w[i]] or q
-    q
-
-  goPath: (p, w) ->
-    q = parseInt(p, 10)
-    t = null # TODO: Is this needed?
-    path = []
-    for i in [0...w.length]
-      t = if w[i] then "#{q}:#{w[i]}" else ''
-      if t then @newg.nterms_[t] = q
-      path.push(t)
-      q = @states[q].edges[w[i]] or q
-      @terms_[t] = w[i]
-    {
-      path: path
-      endState: q
-    }
-
-  # Every disjoint reduction of a nonterminal becomes a produciton in G'
-  buildNewGrammar: ->
-    newg = @newg
-
-    @states.forEach (state, i) =>
-      state.forEach (item) =>
-        if item.dotPosition is 0
-          # new symbols are a combination of state and transition symbol
-          symbol = "#{i}:#{item.production.symbol}"
-          @terms_[symbol] = item.production.symbol
-          newg.nterms_[symbol] = i
-          unless newg.nonterminals[symbol]
-            newg.nonterminals[symbol] = new Nonterminal(symbol)
-          pathInfo = @goPath(i, item.production.handle)
-          p = new Production(symbol, pathInfo.path, newg.productions.length)
-          newg.productions.push(p)
-          newg.nonterminals[symbol].productions.push(p)
-
-          # store the transition that get's 'backed up to' after reduction on path
-          handle = item.production.handle.join(' ')
-          goes = @states[pathInfo.endState].goes
-          goes[handle] = [] unless goes[handle]
-          goes[handle].push(symbol)
-
-      if state.inadequate then @inadequateStates.push(i)
-
-  unionLookaheads: ->
-    newg = @newg
-    states = if !!@onDemandLookahead then @inadequateStates else @states
-
-    states.forEach (i) =>
-      state = if typeof i is 'number' then @states[i] else i
-      if state.reductions.length
-        state.reductions.forEach (item) =>
-          follows = {}
-          for k in [0...item.follows.length]
-            follows[item.follows[k]] = true
-          state.goes[item.production.handle.join(' ')].forEach (symbol) =>
-            newg.nonterminals[symbol].follows.forEach (symbol) =>
-              terminal = @terms_[symbol]
-              unless follows[terminal]
-                follows[terminal] = true
-                item.follows.push(terminal)
 
 # ==[ Helper Functions ]=======================================================
 
@@ -1300,7 +1277,7 @@ parser.parse = (input) ->
   true
 
 # Export the main parser generator
-exports.Parser = LALRGenerator
+exports.Parser = Generator
 
 # ==[ Command line invocation ]==
 
@@ -1352,7 +1329,7 @@ if !module.parent
       }
 
       # Generate the parser from the grammar data
-      parser_generator = new LALRGenerator(grammar)
+      parser_generator = new Generator(grammar)
       parser_code = parser_generator.generate(moduleMain: ->)
 
     else if grammar_module.parser
