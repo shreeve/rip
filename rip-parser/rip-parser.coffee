@@ -255,9 +255,9 @@ class Generator
     @buildProductions(bnf, productions, nonterminals, symbols, operators)
 
     # augment the grammar
-    @augmentGrammar(grammar)
+    @addAcceptProduction(grammar)
 
-  augmentGrammar: (grammar) ->
+  addAcceptProduction: (grammar) ->
     if @productions.length is 0
       throw new Error("Grammar error: must have at least one rule.")
 
@@ -450,7 +450,7 @@ class Generator
   buildLRStates: ->
     item1      = new Item(@productions[0], 0, [@EOF])
     firstSet   = new ItemSet(); firstSet.push(item1)
-    firstState = @computeClosure(firstSet)
+    firstState = @computeClosureSet(firstSet)
     states     = [firstState]
     marked     = 0
 
@@ -461,12 +461,12 @@ class Generator
       itemSet = states[marked++]
       itemSet.forEach (item) =>
         if item.markedSymbol and item.markedSymbol isnt @EOF
-          @insertLRState(item.markedSymbol, itemSet, states, marked - 1)
+          @addLRState(item.markedSymbol, itemSet, states, marked - 1)
 
     states
 
-  insertLRState: (symbol, itemSet, states, stateNum) ->
-    g = @computeGoto(itemSet, symbol)
+  addLRState: (symbol, itemSet, states, stateNum) ->
+    g = @computeGotoSet(itemSet, symbol)
     g.predecessors = {} unless g.predecessors
 
     # add g to queue if not empty or duplicate
@@ -482,16 +482,16 @@ class Generator
         itemSet.edges[symbol] = i # store goto transition for table
         states[i].predecessors[symbol].push(stateNum)
 
-  computeGoto: (itemSet, symbol) ->
+  computeGotoSet: (itemSet, symbol) ->
     gotoSet = new ItemSet()
 
     itemSet.forEach (item) =>
       if item.markedSymbol is symbol
         gotoSet.push(new Item(item.production, item.dotPosition + 1, item.follows, item.predecessor))
 
-    if gotoSet.isEmpty() then gotoSet else @computeClosure(gotoSet)
+    if gotoSet.isEmpty() then gotoSet else @computeClosureSet(gotoSet)
 
-  computeClosure: (itemSet) ->
+  computeClosureSet: (itemSet) ->
     closureSet = new ItemSet()
     set        = itemSet
     syms       = {}
@@ -528,11 +528,11 @@ class Generator
   # ==[ Lookahead Computation ]=================================================
 
   computeLookaheads: ->
-    @computeNullableSets()
+    @computeNullableSet()
     @computeFirstSets()
     @computeFollowSets()
 
-  computeNullableSets: ->
+  computeNullableSet: ->
     @firsts = {}
     nonterminals = @nonterminals
     cont = true
@@ -587,12 +587,12 @@ class Generator
     while cont
       cont = false
       productions.forEach (production, k) =>
-        firsts = @first(production.handle)
+        firsts = @computeFirstSet(production.handle)
         oldcount = getNonterminal(@nonterminals, production.symbol).first.length
         mergeArrays(getNonterminal(@nonterminals, production.symbol).first, firsts)
         cont = true if oldcount isnt getNonterminal(@nonterminals, production.symbol).first.length
 
-  first: (symbol) ->
+  computeFirstSet: (symbol) ->
     switch
       when symbol is '' then [] # epsilon
       when symbol instanceof Array # RHS
@@ -635,12 +635,12 @@ class Generator
               set = getNonterminal(@nonterminals, production.symbol).follows
             else
               part = production.handle.slice(i + 1)
-              set = @first(part)
+              set = @computeFirstSet(part)
               if @nullable(part) and bool
                 set.push.apply(set, getNonterminal(@nonterminals, production.symbol).follows)
           else
             part = production.handle.slice(i + 1)
-            set = @first(part)
+            set = @computeFirstSet(part)
             if @nullable(part)
               set.push.apply(set, getNonterminal(@nonterminals, production.symbol).follows)
 
