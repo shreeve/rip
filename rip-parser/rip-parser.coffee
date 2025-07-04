@@ -683,12 +683,10 @@ class Generator
           # accept
           state[@symbols_[@EOF]] = [a]
 
-      allterms = if @getLookaheads then false else @tokens
-
       # set reductions and resolve potential conflicts
       itemSet.reductions.forEach (item, j) =>
         # if parser uses lookahead, only enumerate those tokens
-        tokens = allterms or @getLookaheads(itemSet, item)
+        tokens = @getLookaheads?(itemSet, item) || @tokens
 
         tokens.forEach (stackSymbol) =>
           action = state[@symbols_[stackSymbol]]
