@@ -572,7 +572,7 @@ class Generator
         t = symbol[i]
         return false unless @nullable(t)
       return true
-    # terminal
+    # token
     else unless @nonterminals[symbol]
       return false
     # nonterminal
@@ -605,7 +605,7 @@ class Generator
           break unless @nullable s
         firsts
       when e = @nonterminals[symbol] then getNonterminal(@nonterminals, symbol).first # nonterminal
-      else [symbol] # terminal
+      else [symbol] # token
 
   computeFollowSets: ->
     rules  = @rules
@@ -693,8 +693,7 @@ class Generator
         tokens.forEach (stackSymbol) =>
           action = state[@symbols_[stackSymbol]]
           op = operators[stackSymbol]
-
-          # Reading a terminal and current position is at the end of a rule, try to reduce
+          # at a token and the current position is at the end of a rule, try to reduce
           if action or (action and action.length)
             sln = resolveConflict(item.rule, op, [r, item.rule.id], if action[0] instanceof Array then action[0] else action)
             @resolutions.push([k, stackSymbol, sln])
@@ -752,10 +751,10 @@ class Generator
           state.goes[item.rule.handle.join(' ')].forEach (symbol) =>
             nt = getNonterminal(@nonterminals, symbol)
             nt.follows.forEach (symbol) =>
-              terminal = @terms_[symbol]
-              unless follows[terminal]
-                follows[terminal] = true
-                item.follows.push(terminal)
+              token = @terms_[symbol]
+              unless follows[token]
+                follows[token] = true
+                item.follows.push(token)
 
   # ==[ LALR Helpers ]==========================================================
 
