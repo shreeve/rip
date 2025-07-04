@@ -221,7 +221,7 @@ class Generator
 
     @type = "LALR(1)"
     options = opt or {}
-    @states = @canonicalCollection()
+    @states = @buildLRStates()
     @terms_ = {}
     @nterms_ = {}
     @nonterminals = {}
@@ -447,7 +447,7 @@ class Generator
 
   # ==[ LR State Construction ]=================================================
 
-  canonicalCollection: ->
+  buildLRStates: ->
     item1      = new Item(@productions[0], 0, [@EOF])
     firstSet   = new ItemSet(); firstSet.push(item1)
     firstState = @closureOperation(firstSet)
@@ -461,11 +461,11 @@ class Generator
       itemSet = states[marked++]
       itemSet.forEach (item) =>
         if item.markedSymbol and item.markedSymbol isnt @EOF
-          @canonicalCollectionInsert(item.markedSymbol, itemSet, states, marked - 1)
+          @insertLRState(item.markedSymbol, itemSet, states, marked - 1)
 
     states
 
-  canonicalCollectionInsert: (symbol, itemSet, states, stateNum) ->
+  insertLRState: (symbol, itemSet, states, stateNum) ->
     g = @gotoOperation(itemSet, symbol)
     g.predecessors = {} unless g.predecessors
 
