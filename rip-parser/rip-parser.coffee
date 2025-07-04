@@ -9,6 +9,19 @@
 #   Date: July 4, 2025
 # ==============================================================================
 
+# Grammar productions with handles and precedence
+class Production
+  constructor: (symbol, handle, id) ->
+    @symbol     = symbol
+    @handle     = handle
+    @nullable   = false
+    @id         = id
+    @first      = []
+    @precedence = 0
+
+  toString: ->
+    "#{@symbol} -> #{@handle.join(' ')}"
+
 # Grammar nonterminals with productions, first/follow sets
 class Nonterminal
   constructor: (symbol) ->
@@ -26,19 +39,6 @@ class Nonterminal
       Productions:
           #{@productions.join('\n  ')}
       """
-
-# Grammar productions with handles and precedence
-class Production
-  constructor: (symbol, handle, id) ->
-    @symbol     = symbol
-    @handle     = handle
-    @nullable   = false
-    @id         = id
-    @first      = []
-    @precedence = 0
-
-  toString: ->
-    "#{@symbol} -> #{@handle.join(' ')}"
 
 # Represents LR items (productions with dot positions)
 class Item
@@ -99,13 +99,99 @@ class ItemSet
     @valueOf = -> v
     v
 
+# ==[ Helper Functions ]========================================================
+
+# Iterate over objects
+each = (obj, func) ->
+  if obj.forEach
+    obj.forEach func
+  else
+    for p of obj
+      if obj.hasOwnProperty(p)
+        func.call(obj, obj[p], p, obj)
+
+# Find default actions
+findDefaults = (states) ->
+  defaults = {}
+  states.forEach (state, k) ->
+    i = 0
+    for act of state
+      if {}.hasOwnProperty.call(state, act) then i++
+    if i is 1 and state[act][0] is 2
+      # only one action in state and it's a reduction
+      defaults[k] = state[act]
+  defaults
+
 # Defensive getter for nonterminals
 getNonterminal = (nonterminals, s) ->
   unless nonterminals[s]
     nonterminals[s] = new Nonterminal(s)
   nonterminals[s]
 
-# LALR(1) class for building parse tables and generating parsers
+# Set precedence and associativity of operators
+processOperators = (ops) ->
+  return {} unless ops
+  operators = {}
+  for i in [0...ops.length]
+    prec = ops[i]
+    for k in [1...prec.length]
+      operators[prec[k]] = { precedence: i + 1, assoc: prec[0] }
+  operators
+
+# Resolve conflicts of alternatives
+resolveConflict = (production, op, reduce, shift) ->
+  sln = { production: production, operator: op, r: reduce, s: shift }
+  s = 1 # shift
+  r = 2 # reduce
+  a = 3 # accept
+
+  if shift[0] is r
+    sln.msg = "Resolve R/R conflict (use first production declared in grammar.)"
+    sln.action = if shift[1] < reduce[1] then shift else reduce
+    if shift[1] isnt reduce[1] then sln.bydefault = true
+    return sln
+
+  # Special handling for empty productions (epsilon rules)
+  if production.handle.length is 0 or (production.handle.length is 1 and production.handle[0] is '')
+    sln.msg = "Resolve S/R conflict for empty production (reduce by default.)"
+    sln.bydefault = true
+    sln.action = reduce
+    return sln
+
+  if production.precedence is 0 or not op
+    sln.msg = "Resolve S/R conflict (shift by default.)"
+    sln.bydefault = true
+    sln.action = shift
+  else if production.precedence < op.precedence
+    sln.msg = "Resolve S/R conflict (shift for higher precedent operator.)"
+    sln.action = shift
+  else if production.precedence is op.precedence
+    if op.assoc is "right"
+      sln.msg = "Resolve S/R conflict (shift for right associative operator.)"
+      sln.action = shift
+    else if op.assoc is "left"
+      sln.msg = "Resolve S/R conflict (reduce for left associative operator.)"
+      sln.action = reduce
+    else if op.assoc is "nonassoc"
+      sln.msg = "Resolve S/R conflict (no action for non-associative operator.)"
+      sln.action = 0 # NONASSOC
+  else
+    sln.msg = "Resolve conflict (reduce for higher precedent production.)"
+    sln.action = reduce
+
+  sln
+
+# Merge arrays without duplicates
+unionArrays = (a, b) ->
+  ar = {}
+  for k in [a.length - 1..0]
+    ar[a[k]] = true
+  for i in [b.length - 1..0]
+    a.push(b[i]) unless ar[b[i]]
+  a
+
+# ==[ Main LALR(1) class for building and generating parsers ]==================
+
 class Generator
   constructor: (grammar, opt) ->
     @conflicts   = 0
@@ -355,7 +441,6 @@ class Generator
     parameters += ', ' + @parseParams.join(', ') if @parseParams?.length > 0
 
     @performAction = "function anonymous(#{parameters}) {\n#{actions}\n}"
-
 
   canonicalCollection: ->
     item1      = new Item(@productions[0], 0, [@EOF])
@@ -977,91 +1062,6 @@ if (typeof require !== 'undefined' && typeof exports !== 'undefined') {
     args = Array.prototype.slice.call(arguments, 0)
     throw new Error("Warning: #{args.join('')}")
   error: (msg) -> throw new Error(msg)
-
-# ==[ Helper Functions ]=======================================================
-
-# Iterate over objects
-each = (obj, func) ->
-  if obj.forEach
-    obj.forEach func
-  else
-    for p of obj
-      if obj.hasOwnProperty(p)
-        func.call(obj, obj[p], p, obj)
-
-# Find default actions
-findDefaults = (states) ->
-  defaults = {}
-  states.forEach (state, k) ->
-    i = 0
-    for act of state
-      if {}.hasOwnProperty.call(state, act) then i++
-    if i is 1 and state[act][0] is 2
-      # only one action in state and it's a reduction
-      defaults[k] = state[act]
-  defaults
-
-# Merge arrays without duplicates
-unionArrays = (a, b) ->
-  ar = {}
-  for k in [a.length - 1..0]
-    ar[a[k]] = true
-  for i in [b.length - 1..0]
-    a.push(b[i]) unless ar[b[i]]
-  a
-
-# Set precedence and associativity of operators
-processOperators = (ops) ->
-  return {} unless ops
-  operators = {}
-  for i in [0...ops.length]
-    prec = ops[i]
-    for k in [1...prec.length]
-      operators[prec[k]] = { precedence: i + 1, assoc: prec[0] }
-  operators
-
-# Resolve conflicts of alternatives
-resolveConflict = (production, op, reduce, shift) ->
-  sln = { production: production, operator: op, r: reduce, s: shift }
-  s = 1 # shift
-  r = 2 # reduce
-  a = 3 # accept
-
-  if shift[0] is r
-    sln.msg = "Resolve R/R conflict (use first production declared in grammar.)"
-    sln.action = if shift[1] < reduce[1] then shift else reduce
-    if shift[1] isnt reduce[1] then sln.bydefault = true
-    return sln
-
-  # Special handling for empty productions (epsilon rules)
-  if production.handle.length is 0 or (production.handle.length is 1 and production.handle[0] is '')
-    sln.msg = "Resolve S/R conflict for empty production (reduce by default.)"
-    sln.bydefault = true
-    sln.action = reduce
-    return sln
-
-  if production.precedence is 0 or not op
-    sln.msg = "Resolve S/R conflict (shift by default.)"
-    sln.bydefault = true
-    sln.action = shift
-  else if production.precedence < op.precedence
-    sln.msg = "Resolve S/R conflict (shift for higher precedent operator.)"
-    sln.action = shift
-  else if production.precedence is op.precedence
-    if op.assoc is "right"
-      sln.msg = "Resolve S/R conflict (shift for right associative operator.)"
-      sln.action = shift
-    else if op.assoc is "left"
-      sln.msg = "Resolve S/R conflict (reduce for left associative operator.)"
-      sln.action = reduce
-    else if op.assoc is "nonassoc"
-      sln.msg = "Resolve S/R conflict (no action for non-associative operator.)"
-      sln.action = 0 # NONASSOC
-  else
-    sln.msg = "Resolve conflict (reduce for higher precedent production.)"
-    sln.action = reduce
-
-  sln
 
 # ==[ Parser ]==================================================================
 
