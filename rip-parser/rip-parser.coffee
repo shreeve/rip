@@ -1064,11 +1064,6 @@ unless module.parent
     console.error "Error: #{error.message}"
     process.exit(1)
 
-
-
-
-
-
   # computeClosureSet: (itemSet) ->
   #   closureSet = new ItemSet()
   #   seen = new Set()
