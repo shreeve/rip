@@ -205,7 +205,7 @@ class Generator
     @parseParams = grammar.parseParams
     @rules       = []
     @resolutions = []
-    @terms       = {}
+    @tokens      = {}
     @yy          = {} # accessed as yy free variable in the parser/lexer actions
 
     # source included in semantic action execution scope
@@ -219,10 +219,10 @@ class Generator
 
     @processGrammar(grammar)
 
-    @type = "LALR(1)"
-    options = opt or {}
-    @states = @buildLRStates()
-    @terms_ = {}
+    @type    = "LALR(1)"
+    options  = opt or {}
+    @states  = @buildLRStates()
+    @tokens_ = {}
     @nterms_ = {}
     @nonterminals = {}
     @inadequateStates = []
@@ -419,19 +419,19 @@ class Generator
     for action of actionGroups
       actions.push(actionGroups[action].join(' '), action, 'break;')
 
-    terms = []
-    terms_ = {}
+    tokens  = []
+    tokens_ = {}
 
     forEach(symbols_, (id, sym) ->
       unless nonterminals[sym]
-        terms.push(sym)
-        terms_[id] = sym
+        tokens.push(sym)
+        tokens_[id] = sym
     )
 
     @hasErrorRecovery = her
 
-    @tokens   = terms
-    @tokens_  = terms_
+    @tokens   = tokens
+    @tokens_  = tokens_
     @symbols_ = symbols_
     @rules_   = rules_
 
@@ -551,7 +551,7 @@ class Generator
           for i in [0...rule.handle.length]
             t = rule.handle[i]
             if @nullable(t) then n++
-          if n is i # rule is nullable if all of its elements (terminals or nonterminals) are nullable
+          if n is i # rule is nullable if all of its elements (tokens or nonterminals) are nullable
             rule.nullable = cont = true
 
       # check if each symbol is nullable
@@ -726,7 +726,7 @@ class Generator
       state.forEach (item) =>
         if item.dotPosition is 0
           symbol = "#{i}:#{item.rule.symbol}"
-          @terms_[symbol] = item.rule.symbol
+          @tokens_[symbol] = item.rule.symbol
           @nterms_[symbol] = i
           nt = getNonterminal(@nonterminals, symbol)
           pathInfo = @goPath(i, item.rule.handle)
@@ -751,7 +751,7 @@ class Generator
           state.goes[item.rule.handle.join(' ')].forEach (symbol) =>
             nt = getNonterminal(@nonterminals, symbol)
             nt.follows.forEach (symbol) =>
-              token = @terms_[symbol]
+              token = @tokens_[symbol]
               unless follows[token]
                 follows[token] = true
                 item.follows.push(token)
@@ -769,7 +769,7 @@ class Generator
       if t then @nterms_[t] = q
       path.push(t)
       q = @states[q].edges[w[i]] or q
-      @terms_[t] = w[i]
+      @tokens_[t] = w[i]
     {
       path: path
       endState: q
