@@ -228,10 +228,10 @@ class Generator
     @inadequateStates = []
     @onDemandLookahead = options.onDemandLookahead or false
 
-    @buildNewGrammar()
+    @buildGrammar()
     @computeLookaheads()
     @unionLookaheads()
-    @table = @parseTable(@states)
+    @table = @buildParseTable(@states)
     @defaultActions = findDefaults(@table)
 
   processGrammar: (grammar) ->
@@ -651,7 +651,7 @@ class Generator
 
   # ==[ LALR Table Building ]===================================================
 
-  parseTable: (itemSets) ->
+  buildParseTable: (itemSets) ->
     states           = []
     nonterminals     = @nonterminals
     operators        = @operators
@@ -721,7 +721,7 @@ class Generator
     states
 
   # Every disjoint reduction of a nonterminal becomes a production in G'
-  buildNewGrammar: ->
+  buildGrammar: ->
     @states.forEach (state, i) =>
       state.forEach (item) =>
         if item.dotPosition is 0
