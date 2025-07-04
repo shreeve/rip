@@ -336,11 +336,9 @@ class Generator
                 names[rhs_i + "1"] = i + 1
                 count[rhs_i] = 1
 
-            action = action.replace(/\$([a-zA-Z][a-zA-Z0-9_]*)/g, (str, pl) ->
-              return if names[pl] then "$#{names[pl]}" else str
-            ).replace(/@([a-zA-Z][a-zA-Z0-9_]*)/g, (str, pl) ->
-              return if names[pl] then "@#{names[pl]}" else str
-            )
+            action = action
+              .replace(/\$([a-zA-Z][a-zA-Z0-9_]*)/g, (s, n) -> if names[n]? then "$#{names[n]}" else s)
+              .replace( /@([a-zA-Z][a-zA-Z0-9_]*)/g, (s, n) -> if names[n]? then "@#{names[n]}" else s)
 
           action = action
 
