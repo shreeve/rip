@@ -761,12 +761,6 @@ class Generator
   getLookaheads: (state, item) ->
     if !!@onDemandLookahead and not state.inadequate then @terminals else item.follows
 
-  go: (p, w) ->
-    q = parseInt(p, 10)
-    for i in [0...w.length]
-      q = @states[q].edges[w[i]] or q
-    q
-
   goPath: (q, w) ->
     t = null # TODO: Is this needed?
     path = []
