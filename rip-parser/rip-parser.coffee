@@ -70,7 +70,7 @@ class ItemSet
   constructor: ->
     @map        = new Map() # id -> item
     @reductions = []
-    @goes       = {}
+    @reductions = {}
     @edges      = {}
     @shifts     = false
     @inadequate = false
@@ -730,9 +730,9 @@ class Generator
           @rules.push(p)
           nt.rules.push(p)
           handle = item.rule.handle.join(' ')
-          goes = @states[pathInfo.endState].goes
-          goes[handle] = [] unless goes[handle]
-          goes[handle].push(symbol)
+          reductions = @states[pathInfo.endState].reductions
+          reductions[handle] = [] unless reductions[handle]
+          reductions[handle].push(symbol)
       if state.inadequate then @inadequateStates.push(i)
 
   mergeLookaheads: ->
@@ -744,7 +744,7 @@ class Generator
           follows = {}
           for k in [0...item.follows.length]
             follows[item.follows[k]] = true
-          state.goes[item.rule.handle.join(' ')].forEach (symbol) =>
+          state.reductions[item.rule.handle.join(' ')].forEach (symbol) =>
             nt = getNonterminal(@nonterminals, symbol)
             nt.follows.forEach (symbol) =>
               token = @tokens_[symbol]
