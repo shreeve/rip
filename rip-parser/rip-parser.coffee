@@ -837,6 +837,13 @@ resolveConflict = (production, op, reduce, shift) ->
     if shift[1] isnt reduce[1] then sln.bydefault = true
     return sln
 
+  # Special handling for empty productions (epsilon rules)
+  if production.handle.length is 0 or (production.handle.length is 1 and production.handle[0] is '')
+    sln.msg = "Resolve S/R conflict for empty production (reduce by default.)"
+    sln.bydefault = true
+    sln.action = reduce
+    return sln
+
   if production.precedence is 0 or not op
     sln.msg = "Resolve S/R conflict (shift by default.)"
     sln.bydefault = true
