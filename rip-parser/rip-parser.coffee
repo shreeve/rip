@@ -111,7 +111,7 @@ each = (obj, func) ->
         func.call(obj, obj[p], p, obj)
 
 # Merge arrays without duplicates
-unionArrays = (a, b) ->
+mergeArrays = (a, b) ->
   ar = {}
   for k in [a.length - 1..0]
     ar[a[k]] = true
@@ -589,7 +589,7 @@ class Generator
       productions.forEach (production, k) =>
         firsts = @first(production.handle)
         oldcount = getNonterminal(@nonterminals, production.symbol).first.length
-        unionArrays(getNonterminal(@nonterminals, production.symbol).first, firsts)
+        mergeArrays(getNonterminal(@nonterminals, production.symbol).first, firsts)
         cont = true if oldcount isnt getNonterminal(@nonterminals, production.symbol).first.length
 
   first: (symbol) ->
@@ -599,7 +599,7 @@ class Generator
         firsts = []
         for s in symbol
           break unless s
-          if e = @nonterminals[s] then unionArrays firsts, getNonterminal(@nonterminals, s).first
+          if e = @nonterminals[s] then mergeArrays firsts, getNonterminal(@nonterminals, s).first
           else firsts.push s unless s in firsts
           break unless @nullable s
         firsts
@@ -645,7 +645,7 @@ class Generator
               set.push.apply(set, getNonterminal(@nonterminals, production.symbol).follows)
 
           oldcount = getNonterminal(@nonterminals, t).follows.length
-          unionArrays(getNonterminal(@nonterminals, t).follows, set)
+          mergeArrays(getNonterminal(@nonterminals, t).follows, set)
           if oldcount isnt getNonterminal(@nonterminals, t).follows.length
             cont = true
 
