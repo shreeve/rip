@@ -99,7 +99,7 @@ class ItemSet
     @valueOf = -> v
     v
 
-# ==[ Helper Functions ]========================================================
+# ==[ Utility Functions ]=======================================================
 
 # Iterate over objects
 each = (obj, func) ->
@@ -110,17 +110,16 @@ each = (obj, func) ->
       if obj.hasOwnProperty(p)
         func.call(obj, obj[p], p, obj)
 
-# Find default actions
-findDefaults = (states) ->
-  defaults = {}
-  states.forEach (state, k) ->
-    i = 0
-    for act of state
-      if {}.hasOwnProperty.call(state, act) then i++
-    if i is 1 and state[act][0] is 2
-      # only one action in state and it's a reduction
-      defaults[k] = state[act]
-  defaults
+# Merge arrays without duplicates
+unionArrays = (a, b) ->
+  ar = {}
+  for k in [a.length - 1..0]
+    ar[a[k]] = true
+  for i in [b.length - 1..0]
+    a.push(b[i]) unless ar[b[i]]
+  a
+
+# ==[ Grammar Helpers ]=========================================================
 
 # Defensive getter for nonterminals
 getNonterminal = (nonterminals, s) ->
@@ -137,6 +136,20 @@ processOperators = (ops) ->
     for k in [1...prec.length]
       operators[prec[k]] = { precedence: i + 1, assoc: prec[0] }
   operators
+
+# ==[ Parser Helpers ]==========================================================
+
+# Find default actions
+findDefaults = (states) ->
+  defaults = {}
+  states.forEach (state, k) ->
+    i = 0
+    for act of state
+      if {}.hasOwnProperty.call(state, act) then i++
+    if i is 1 and state[act][0] is 2
+      # only one action in state and it's a reduction
+      defaults[k] = state[act]
+  defaults
 
 # Resolve conflicts of alternatives
 resolveConflict = (production, op, reduce, shift) ->
@@ -181,18 +194,12 @@ resolveConflict = (production, op, reduce, shift) ->
 
   sln
 
-# Merge arrays without duplicates
-unionArrays = (a, b) ->
-  ar = {}
-  for k in [a.length - 1..0]
-    ar[a[k]] = true
-  for i in [b.length - 1..0]
-    a.push(b[i]) unless ar[b[i]]
-  a
-
-# ==[ Main LALR(1) class for building and generating parsers ]==================
+# ==[ Main LALR(1) Parser Class  ]==============================================
 
 class Generator
+
+  # ==[ Constructor and Initialization ]========================================
+
   constructor: (grammar, opt) ->
     @conflicts   = 0
     @operators   = {}
@@ -228,8 +235,6 @@ class Generator
     @unionLookaheads()
     @table = @parseTable(@states)
     @defaultActions = findDefaults(@table)
-
-  # ==[ Initialization ]=======================================================
 
   processGrammar: (grammar) ->
     bnf          = grammar.bnf
@@ -279,7 +284,7 @@ class Generator
     # add follow $ to start symbol
     getNonterminal(@nonterminals, @startSymbol).follows.push(@EOF)
 
-  # ==[ Grammar building ]=====================================================
+  # ==[ Grammar Processing ]====================================================
 
   buildProductions: (bnf, productions, nonterminals, symbols, operators) ->
     actions = [
@@ -442,6 +447,8 @@ class Generator
 
     @performAction = "function anonymous(#{parameters}) {\n#{actions}\n}"
 
+  # ==[ LR State Construction ]=================================================
+
   canonicalCollection: ->
     item1      = new Item(@productions[0], 0, [@EOF])
     firstSet   = new ItemSet(); firstSet.push(item1)
@@ -520,76 +527,7 @@ class Generator
 
     closureSet
 
-  parseTable: (itemSets) ->
-    states           = []
-    nonterminals     = @nonterminals
-    operators        = @operators
-    conflictedStates = {} # array of [state, token] tuples
-
-    s = 1 # shift
-    r = 2 # reduce
-    a = 3 # accept
-
-    itemSets.forEach (itemSet, k) =>
-      state = states[k] = {}
-
-      # set shift and goto actions
-      for stackSymbol of itemSet.edges
-        itemSet.forEach (item, j) =>
-          # find shift and goto actions
-          if item.markedSymbol is stackSymbol
-            gotoState = itemSet.edges[stackSymbol]
-            if nonterminals[stackSymbol]
-              # store state to go to after a reduce
-              state[@symbols_[stackSymbol]] = gotoState
-            else
-              state[@symbols_[stackSymbol]] = [s, gotoState]
-
-      # set accept action
-      itemSet.forEach (item, j) =>
-        if item.markedSymbol is @EOF
-          # accept
-          state[@symbols_[@EOF]] = [a]
-
-      allterms = if @lookAheads then false else @terminals
-
-      # set reductions and resolve potential conflicts
-      itemSet.reductions.forEach (item, j) =>
-        # if parser uses lookahead, only enumerate those terminals
-        terminals = allterms or @lookAheads(itemSet, item)
-
-        terminals.forEach (stackSymbol) =>
-          action = state[@symbols_[stackSymbol]]
-          op = operators[stackSymbol]
-
-          # Reading a terminal and current position is at the end of a production, try to reduce
-          if action or (action and action.length)
-            sln = resolveConflict(item.production, op, [r, item.production.id], if action[0] instanceof Array then action[0] else action)
-            @resolutions.push([k, stackSymbol, sln])
-            if sln.bydefault
-              @conflicts++
-              # NOTE: Don't throw error for default resolutions - just log them
-              # console.log "Resolved conflict by default: #{sln.msg}"
-            action = sln.action
-          else
-            action = [r, item.production.id]
-
-          if action and action.length
-            state[@symbols_[stackSymbol]] = action
-          else if action is NONASSOC
-            state[@symbols_[stackSymbol]] = undefined
-
-    if @conflicts > 0
-      conflictDetails = "\nStates with conflicts:"
-      each conflictedStates, (val, state) ->
-        conflictDetails += "\nState #{state}"
-        conflictDetails += "\n  #{itemSets[state].join("\n  ")}"
-      # NOTE: Don't throw error for default resolutions - just log them
-      # console.log "Warning: Grammar conflicts: #{@conflicts} #{conflictDetails}"
-
-    states
-
-  # ==[ Lookahead / Parsing algorithms ]=====================================
+  # ==[ Lookahead Computation ]=================================================
 
   computeLookaheads: ->
     @nullableSets()
@@ -713,30 +651,76 @@ class Generator
           if oldcount isnt getNonterminal(@nonterminals, t).follows.length
             cont = true
 
-  # ==[ LALR-specific methods ]================================================
+  # ==[ LALR Table Building ]===================================================
 
-  lookAheads: (state, item) ->
-    if !!@onDemandLookahead and not state.inadequate then @terminals else item.follows
+  parseTable: (itemSets) ->
+    states           = []
+    nonterminals     = @nonterminals
+    operators        = @operators
+    conflictedStates = {} # array of [state, token] tuples
 
-  go: (p, w) ->
-    q = parseInt(p, 10)
-    for i in [0...w.length]
-      q = @states[q].edges[w[i]] or q
-    q
+    s = 1 # shift
+    r = 2 # reduce
+    a = 3 # accept
 
-  goPath: (q, w) ->
-    t = null # TODO: Is this needed?
-    path = []
-    for i in [0...w.length]
-      t = if w[i] then "#{q}:#{w[i]}" else ''
-      if t then @nterms_[t] = q
-      path.push(t)
-      q = @states[q].edges[w[i]] or q
-      @terms_[t] = w[i]
-    {
-      path: path
-      endState: q
-    }
+    itemSets.forEach (itemSet, k) =>
+      state = states[k] = {}
+
+      # set shift and goto actions
+      for stackSymbol of itemSet.edges
+        itemSet.forEach (item, j) =>
+          # find shift and goto actions
+          if item.markedSymbol is stackSymbol
+            gotoState = itemSet.edges[stackSymbol]
+            if nonterminals[stackSymbol]
+              # store state to go to after a reduce
+              state[@symbols_[stackSymbol]] = gotoState
+            else
+              state[@symbols_[stackSymbol]] = [s, gotoState]
+
+      # set accept action
+      itemSet.forEach (item, j) =>
+        if item.markedSymbol is @EOF
+          # accept
+          state[@symbols_[@EOF]] = [a]
+
+      allterms = if @lookAheads then false else @terminals
+
+      # set reductions and resolve potential conflicts
+      itemSet.reductions.forEach (item, j) =>
+        # if parser uses lookahead, only enumerate those terminals
+        terminals = allterms or @lookAheads(itemSet, item)
+
+        terminals.forEach (stackSymbol) =>
+          action = state[@symbols_[stackSymbol]]
+          op = operators[stackSymbol]
+
+          # Reading a terminal and current position is at the end of a production, try to reduce
+          if action or (action and action.length)
+            sln = resolveConflict(item.production, op, [r, item.production.id], if action[0] instanceof Array then action[0] else action)
+            @resolutions.push([k, stackSymbol, sln])
+            if sln.bydefault
+              @conflicts++
+              # NOTE: Don't throw error for default resolutions - just log them
+              # console.log "Resolved conflict by default: #{sln.msg}"
+            action = sln.action
+          else
+            action = [r, item.production.id]
+
+          if action and action.length
+            state[@symbols_[stackSymbol]] = action
+          else if action is NONASSOC
+            state[@symbols_[stackSymbol]] = undefined
+
+    if @conflicts > 0
+      conflictDetails = "\nStates with conflicts:"
+      each conflictedStates, (val, state) ->
+        conflictDetails += "\nState #{state}"
+        conflictDetails += "\n  #{itemSets[state].join("\n  ")}"
+      # NOTE: Don't throw error for default resolutions - just log them
+      # console.log "Warning: Grammar conflicts: #{@conflicts} #{conflictDetails}"
+
+    states
 
   # Every disjoint reduction of a nonterminal becomes a production in G'
   buildNewGrammar: ->
@@ -774,7 +758,32 @@ class Generator
                 follows[terminal] = true
                 item.follows.push(terminal)
 
-  # ==[ Output/Generation ]==================================================
+  # ==[ LALR Helpers ]==========================================================
+
+  lookAheads: (state, item) ->
+    if !!@onDemandLookahead and not state.inadequate then @terminals else item.follows
+
+  go: (p, w) ->
+    q = parseInt(p, 10)
+    for i in [0...w.length]
+      q = @states[q].edges[w[i]] or q
+    q
+
+  goPath: (q, w) ->
+    t = null # TODO: Is this needed?
+    path = []
+    for i in [0...w.length]
+      t = if w[i] then "#{q}:#{w[i]}" else ''
+      if t then @nterms_[t] = q
+      path.push(t)
+      q = @states[q].edges[w[i]] or q
+      @terms_[t] = w[i]
+    {
+      path: path
+      endState: q
+    }
+
+  # ==[ Code Generation ]=======================================================
 
   generate: (opt) ->
     opt = Object.assign {}, @options, opt
@@ -1055,7 +1064,7 @@ if (typeof require !== 'undefined' && typeof exports !== 'undefined') {
 
     return out
 
-  # ==[ Error handling ]========================================================
+  # ==[ Error Handling ]========================================================
 
   trace: ->
   warn: ->
@@ -1063,9 +1072,8 @@ if (typeof require !== 'undefined' && typeof exports !== 'undefined') {
     throw new Error("Warning: #{args.join('')}")
   error: (msg) -> throw new Error(msg)
 
-# ==[ Parser ]==================================================================
+# ==[ Parser Object ]===========================================================
 
-# TODO: Replace this with a proper Parser class
 parser = {}
 
 parser.init = (dict) ->
@@ -1281,7 +1289,7 @@ parser.parse = (input) ->
 # Export the main parser generator
 exports.Parser = Generator
 
-# ==[ Command line invocation ]==
+# ==[ Command Line ]============================================================
 
 if !module.parent
   fs = require 'fs'
