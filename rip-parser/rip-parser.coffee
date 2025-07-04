@@ -725,7 +725,7 @@ class Generator
           @tokens_[symbol] = item.rule.symbol
           @derived[symbol] = i
           nt = getNonterminal(@nonterminals, symbol)
-          pathInfo = @goPath(i, item.rule.handle)
+          pathInfo = @followHandle(i, item.rule.handle)
           p = new Rule(symbol, pathInfo.path, @rules.length)
           @rules.push(p)
           nt.rules.push(p)
@@ -757,7 +757,7 @@ class Generator
   getLookaheads: (state, item) ->
     if !!@onDemandLookahead and not state.inadequate then @tokens else item.follows
 
-  goPath: (q, w) ->
+  followHandle: (q, w) ->
     t = null # TODO: Is this needed?
     path = []
     for i in [0...w.length]
