@@ -106,17 +106,14 @@ forEach = (obj, func) ->
   if obj.forEach
     obj.forEach func
   else
-    for p of obj
-      if obj.hasOwnProperty(p)
-        func.call(obj, obj[p], p, obj)
+    for key, value of obj
+      func.call(obj, value, key, obj)
 
 # Merge arrays without duplicates
 mergeArrays = (a, b) ->
-  ar = {}
-  for k in [a.length - 1..0]
-    ar[a[k]] = true
-  for i in [b.length - 1..0]
-    a.push(b[i]) unless ar[b[i]]
+  seen = {}
+  seen[item] = true for item in a
+  a.push(item) for item in b when not seen[item]
   a
 
 # ==[ Grammar Helpers ]=========================================================
