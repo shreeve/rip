@@ -1063,3 +1063,37 @@ unless module.parent
   catch error
     console.error "Error: #{error.message}"
     process.exit(1)
+
+
+
+
+
+
+  # computeClosureSet: (itemSet) ->
+  #   closureSet = new ItemSet()
+  #   seen = new Set()
+  #   queue = itemSet.items()
+  #
+  #   while queue.length
+  #     item = queue.pop()
+  #     continue if seen.has(item.id)
+  #     seen.add(item.id)
+  #     closureSet.push(item)
+  #
+  #     symbol = item.markedSymbol
+  #
+  #     if symbol and @spells[symbol]
+  #       for rule in @spells[symbol].rules
+  #         newItem = new Item(rule, 0)
+  #         unless seen.has(newItem.id)
+  #           queue.push(newItem)
+  #     else unless symbol
+  #       # reduction
+  #       closureSet.reductions.push(item)
+  #       closureSet.inadequate = closureSet.reductions.length > 1 or closureSet.shifts
+  #     else
+  #       # shift
+  #       closureSet.shifts = true
+  #       closureSet.inadequate = closureSet.reductions.length > 0
+  #
+  #   closureSet
