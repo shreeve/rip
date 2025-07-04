@@ -1,25 +1,20 @@
-# Calculator Grammar for Jison (CoffeeScript version)
+# Calculator Grammar (Parser-Agnostic)
 # This grammar defines a simple calculator that can handle basic arithmetic operations
-
-# The only dependency is on the **Jison.Parser**
-{Parser} = require '../rip-parser'
 
 # Jison DSL
 # ---------
 
-# Since we're going to be wrapped in a function by Jison in any case, if our
+# Since we're going to be wrapped in a function by the parser generator in any case, if our
 # action immediately returns a value, we can optimize by removing the function
 # wrapper and just returning the value directly.
 unwrap = /^function\s*\(\)\s*\{\s*return\s*([\s\S]*);\s*\}/
 
-# Our handy DSL for Jison grammar generation
+# Our handy DSL for grammar generation
 o = (patternString, action, options) ->
   patternString = patternString.replace /\s{2,}/g, ' '
   patternCount = patternString.split(' ').length
   if action
-    # This code block does string replacements in the generated `parser.js`
-    # file, replacing the calls to the `LOC` function and other strings as
-    # listed below.
+    # This code block does string replacements in the generated parser file
     action = if match = unwrap.exec action then match[1] else "(#{action}())"
     performActionFunctionString = "$$ = #{action};"
   else
@@ -32,7 +27,7 @@ o = (patternString, action, options) ->
 
 # In all of the rules that follow, you'll see the name of the nonterminal as
 # the key to a list of alternative matches. With each match's action, the
-# dollar-sign variables are provided by Jison as references to the value of
+# dollar-sign variables are provided by the parser as references to the value of
 # their numeric position.
 grammar =
 
@@ -69,13 +64,10 @@ operators = [
   ['left',      '+', '-']
 ]
 
-# Wrapping Up
-# -----------
+# Extract tokens from grammar
+# ---------------------------
 
-# Finally, now that we have our **grammar** and our **operators**, we can create
-# our **Jison.Parser**. We do this by processing all of our rules, recording all
-# terminals (every symbol which does not appear as the name of a rule above)
-# as "tokens".
+# Extract all tokens from the grammar rules
 tokens = []
 for name, alternatives of grammar
   grammar[name] = for alt in alternatives
@@ -83,11 +75,11 @@ for name, alternatives of grammar
       tokens.push token unless grammar[token]
     alt
 
-# Initialize the **Parser** with our list of terminal **tokens**, our **grammar**
-# rules, and the name of the root. Reverse the operators because Jison orders
-# precedence from low to high, and we have it high to low.
-exports.parser = new Parser
-  tokens      : tokens.join ' '
-  bnf         : grammar
-  operators   : operators.reverse()
-  startSymbol : 'Root'
+# Export the grammar data (parser-agnostic)
+# -----------------------------------------
+
+# Export the grammar data that any parser generator can use
+exports.grammar = grammar
+exports.tokens = tokens.join ' '
+exports.operators = operators
+exports.startSymbol = 'Root'
