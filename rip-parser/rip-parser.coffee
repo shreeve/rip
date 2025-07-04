@@ -22,8 +22,8 @@ class Rule
   toString: ->
     "#{@symbol} -> #{@handle.join(' ')}"
 
-# Grammar nonterminals with rules, first/follow sets
-class Nonterminal
+# Grammar spells with rules, first/follow sets
+class Spell
   constructor: (symbol) ->
     @symbol      = symbol
     @rules       = []
@@ -121,11 +121,11 @@ mergeArrays = (a, b) ->
 
 # ==[ Grammar Helpers ]=========================================================
 
-# Defensive getter for nonterminals
-getNonterminal = (nonterminals, s) ->
-  unless nonterminals[s]
-    nonterminals[s] = new Nonterminal(s)
-  nonterminals[s]
+# Defensive getter for spells
+getSpell = (spells, s) ->
+  unless spells[s]
+    spells[s] = new Spell(s)
+  spells[s]
 
 # Set precedence and associativity of operators
 processOperators = (ops) ->
@@ -224,7 +224,7 @@ class Generator
     @states  = @buildLRStates()
     @tokens_ = {}
     @derived = {}
-    @nonterminals = {}
+    @spells = {}
     @inadequateStates = []
     @onDemandLookahead = options.onDemandLookahead or false
 
@@ -237,7 +237,7 @@ class Generator
   processGrammar: (grammar) ->
     bnf          = grammar.bnf
     tokens       = grammar.tokens
-    nonterminals = @nonterminals = {}
+    spells = @spells = {}
     rules        = @rules
 
     if tokens
@@ -252,7 +252,7 @@ class Generator
     operators = @operators = processOperators(grammar.operators)
 
     # build rules from cfg
-    @buildRules(bnf, rules, nonterminals, symbols, operators)
+    @buildRules(bnf, rules, spells, symbols, operators)
 
     # augment the grammar
     @addAcceptProduction(grammar)
@@ -263,8 +263,8 @@ class Generator
 
     # use specified start symbol, or default to first user defined rule
     @startSymbol = grammar.start or grammar.startSymbol or @rules[0].symbol
-    unless @nonterminals[@startSymbol]
-      throw new Error("Grammar error: startSymbol must be a nonterminal found in your grammar.")
+    unless @spells[@startSymbol]
+      throw new Error("Grammar error: startSymbol must be a spell found in your grammar.")
     @EOF = "$end"
 
     # augment the grammar
@@ -276,15 +276,15 @@ class Generator
     @symbols_[@EOF] = 1
     @tokens.unshift(@EOF)
 
-    @nonterminals.$accept = new Nonterminal("$accept")
-    @nonterminals.$accept.rules.push(acceptRule)
+    @spells.$accept = new Spell("$accept")
+    @spells.$accept.rules.push(acceptRule)
 
     # add follow $ to start symbol
-    getNonterminal(@nonterminals, @startSymbol).follows.push(@EOF)
+    getSpell(@spells, @startSymbol).follows.push(@EOF)
 
   # ==[ Grammar Processing ]====================================================
 
-  buildRules: (bnf, rules, nonterminals, symbols, operators) ->
+  buildRules: (bnf, rules, spells, symbols, operators) ->
     actions = [
       '/* this == yyval */'
       @actionInclude or ''
@@ -325,7 +325,7 @@ class Generator
           label = "case #{rules.length + 1}:"
           action = handle[1]
 
-          # replace named semantic values ($nonterminal)
+          # replace named semantic values ($spell)
           if action.match(/[$@][a-zA-Z][a-zA-Z0-9_]*/)
             count = {}
             names = {}
@@ -394,18 +394,18 @@ class Generator
       if r.precedence is 0
         # set precedence
         for i in [r.handle.length - 1..0]
-          if not (r.handle[i] of nonterminals) and r.handle[i] of operators
+          if not (r.handle[i] of spells) and r.handle[i] of operators
             r.precedence = operators[r.handle[i]].precedence
 
       rules.push(r)
       rules_.push([symbols_[r.symbol], if r.handle[0] is '' then 0 else r.handle.length])
-      nonterminals[symbol].rules.push(r)
+      spells[symbol].rules.push(r)
 
     for symbol of bnf
       continue unless bnf.hasOwnProperty(symbol)
 
       addSymbol(symbol)
-      nonterminals[symbol] = new Nonterminal(symbol)
+      spells[symbol] = new Spell(symbol)
 
       if typeof bnf[symbol] is 'string'
         prods = bnf[symbol].split(/\s*\|\s*/g)
@@ -421,7 +421,7 @@ class Generator
     tokens_ = {}
 
     forEach(symbols_, (id, sym) ->
-      unless nonterminals[sym]
+      unless spells[sym]
         tokens.push(sym)
         tokens_[id] = sym
     )
@@ -500,10 +500,10 @@ class Generator
       set.forEach (item) =>
         symbol = item.markedSymbol
 
-        # if symbol is a nonterminal, recursively add closures
-        if symbol and @nonterminals[symbol]
+        # if symbol is a spell, recursively add closures
+        if symbol and @spells[symbol]
           unless syms[symbol]
-            @nonterminals[symbol].rules.forEach (rule) =>
+            @spells[symbol].rules.forEach (rule) =>
               newItem = new Item(rule, 0)
               unless closureSet.contains(newItem)
                 itemQueue.push(newItem)
@@ -531,7 +531,7 @@ class Generator
 
   computeNullableSet: ->
     @firsts = {}
-    nonterminals = @nonterminals
+    spells = @spells
     more = true
 
     # loop until no further changes have been made
@@ -543,19 +543,19 @@ class Generator
         rule.nullable = more = true if rule.handle.every(@nullable.bind(@))
 
       # check if each symbol is nullable
-      for symbol of nonterminals when not @nullable(symbol)
-        if nonterminals[symbol].rules.some((rule) -> rule.nullable)
-          nonterminals[symbol].nullable = more = true
+      for symbol of spells when not @nullable(symbol)
+        if spells[symbol].rules.some((rule) -> rule.nullable)
+          spells[symbol].nullable = more = true
 
   nullable: (symbol) ->
     return true if symbol is '' # epsilon
     return symbol.every(@nullable.bind(@)) if Array.isArray(symbol) # RHS
-    return false unless @nonterminals[symbol] # token
-    return getNonterminal(@nonterminals, symbol).nullable # nonterminal
+    return false unless @spells[symbol] # token
+    return getSpell(@spells, symbol).nullable # spell
 
   computeFirstSets: ->
     rules        = @rules
-    nonterminals = @nonterminals
+    spells = @spells
     cont         = true
 
     # loop until no further changes have been made
@@ -563,9 +563,9 @@ class Generator
       cont = false
       rules.forEach (rule, k) =>
         firsts = @computeFirstSet(rule.handle)
-        before = getNonterminal(@nonterminals, rule.symbol).first.length
-        mergeArrays(getNonterminal(@nonterminals, rule.symbol).first, firsts)
-        cont = true if before isnt getNonterminal(@nonterminals, rule.symbol).first.length
+        before = getSpell(@spells, rule.symbol).first.length
+        mergeArrays(getSpell(@spells, rule.symbol).first, firsts)
+        cont = true if before isnt getSpell(@spells, rule.symbol).first.length
 
   computeFirstSet: (symbol) ->
     switch
@@ -574,16 +574,16 @@ class Generator
         firsts = []
         for s in symbol
           break unless s
-          if e = @nonterminals[s] then mergeArrays firsts, getNonterminal(@nonterminals, s).first
+          if e = @spells[s] then mergeArrays firsts, getSpell(@spells, s).first
           else firsts.push s unless s in firsts
           break unless @nullable s
         firsts
-      when e = @nonterminals[symbol] then getNonterminal(@nonterminals, symbol).first # nonterminal
+      when e = @spells[symbol] then getSpell(@spells, symbol).first # spell
       else [symbol] # token
 
   computeFollowSets: ->
     rules  = @rules
-    nonterminals = @nonterminals
+    spells = @spells
     cont         = true
 
     # loop until no further changes have been made
@@ -599,7 +599,7 @@ class Generator
         oldcount
         for i in [0...rule.handle.length]
           t = rule.handle[i]
-          continue unless @nonterminals[t]
+          continue unless @spells[t]
 
           # For Simple LALR algorithm, @go_ checks if
           if ctx
@@ -607,28 +607,28 @@ class Generator
             bool = not ctx or q is parseInt(@derived[t], 10)
 
             if i is rule.handle.length + 1 and bool
-              set = getNonterminal(@nonterminals, rule.symbol).follows
+              set = getSpell(@spells, rule.symbol).follows
             else
               part = rule.handle.slice(i + 1)
               set = @computeFirstSet(part)
               if @nullable(part) and bool
-                set.push.apply(set, getNonterminal(@nonterminals, rule.symbol).follows)
+                set.push.apply(set, getSpell(@spells, rule.symbol).follows)
           else
             part = rule.handle.slice(i + 1)
             set = @computeFirstSet(part)
             if @nullable(part)
-              set.push.apply(set, getNonterminal(@nonterminals, rule.symbol).follows)
+              set.push.apply(set, getSpell(@spells, rule.symbol).follows)
 
-          oldcount = getNonterminal(@nonterminals, t).follows.length
-          mergeArrays(getNonterminal(@nonterminals, t).follows, set)
-          if oldcount isnt getNonterminal(@nonterminals, t).follows.length
+          oldcount = getSpell(@spells, t).follows.length
+          mergeArrays(getSpell(@spells, t).follows, set)
+          if oldcount isnt getSpell(@spells, t).follows.length
             cont = true
 
   # ==[ LALR Table Building ]===================================================
 
   buildParseTable: (itemSets) ->
     states           = []
-    nonterminals     = @nonterminals
+    spells     = @spells
     operators        = @operators
     conflictedStates = {} # array of [state, token] tuples
 
@@ -645,7 +645,7 @@ class Generator
           # find shift and goto actions
           if item.markedSymbol is stackSymbol
             gotoState = itemSet.edges[stackSymbol]
-            if nonterminals[stackSymbol]
+            if spells[stackSymbol]
               # store state to go to after a reduce
               state[@symbols_[stackSymbol]] = gotoState
             else
@@ -692,7 +692,7 @@ class Generator
 
     states
 
-  # Every disjoint reduction of a nonterminal becomes a rule in G'
+  # Every disjoint reduction of a spell becomes a rule in G'
   buildGrammar: ->
     @states.forEach (state, i) =>
       state.forEach (item) =>
@@ -700,7 +700,7 @@ class Generator
           symbol = "#{i}:#{item.rule.symbol}"
           @tokens_[symbol] = item.rule.symbol
           @derived[symbol] = i
-          nt = getNonterminal(@nonterminals, symbol)
+          nt = getSpell(@spells, symbol)
           pathInfo = @followHandle(i, item.rule.handle)
           p = new Rule(symbol, pathInfo.path, @rules.length)
           @rules.push(p)
@@ -721,7 +721,7 @@ class Generator
           for k in [0...item.follows.length]
             follows[item.follows[k]] = true
           state.handles[item.rule.handle.join(' ')].forEach (symbol) =>
-            nt = getNonterminal(@nonterminals, symbol)
+            nt = getSpell(@spells, symbol)
             nt.follows.forEach (symbol) =>
               token = @tokens_[symbol]
               unless follows[token]
@@ -1234,10 +1234,10 @@ parser.parse = (input) ->
           vstack = vstack.slice(0, -1 * len)
           lstack = lstack.slice(0, -1 * len)
 
-        stack.push(@rules_[action[1]][0])    # push nonterminal (reduce)
+        stack.push(@rules_[action[1]][0])    # push spell (reduce)
         vstack.push(yyval.$)
         lstack.push(yyval._$)
-        # goto new state = table[STATE][NONTERMINAL]
+        # goto new state = table[STATE][SPELL]
         newState = table[stack[stack.length - 2]][stack[stack.length - 1]]
         stack.push(newState)
         break
