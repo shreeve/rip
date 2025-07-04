@@ -14,9 +14,6 @@
 # If you run the `cake build:parser` command, Jison constructs a parse table
 # from our rules and saves it into `lib/parser.js`.
 
-# The only dependency is on the **Jison.Parser**.
-{Parser} = require 'jison'
-
 # Jison DSL
 # ---------
 
@@ -55,9 +52,9 @@ o = (patternString, action, options) ->
     # is used to make sure that newly created node class objects get correct
     # location data assigned to them. By default, the grammar will assign the
     # location data spanned by *all* of the tokens on the left (e.g. a string
-    # such as `'Body TERMINATOR Line'`) to the “top-level” node returned by
-    # the grammar rule (the function on the right). But for “inner” node class
-    # objects created by grammar rules, they won’t get correct location data
+    # such as `'Body TERMINATOR Line'`) to the "top-level" node returned by
+    # the grammar rule (the function on the right). But for "inner" node class
+    # objects created by grammar rules, they won't get correct location data
     # assigned to them without adding `LOC`.
 
     # For example, consider the grammar rule `'NEW_TARGET . Property'`, which
@@ -67,11 +64,11 @@ o = (patternString, action, options) ->
     # in `LOC(3)` refers to the third token (`Property`). In order for the
     # `new IdentifierLiteral` to get assigned the location data corresponding
     # to `new` in the source code, we use
-    # `LOC(1)(new IdentifierLiteral ...)` to mean “assign the location data of
+    # `LOC(1)(new IdentifierLiteral ...)` to mean "assign the location data of
     # the *first* token of this grammar rule (`NEW_TARGET`) to this
-    # `new IdentifierLiteral`”. The `LOC(3)` means “assign the location data of
+    # `new IdentifierLiteral`". The `LOC(3)` means "assign the location data of
     # the *third* token of this grammar rule (`Property`) to this
-    # `new Access`”.
+    # `new Access`".
     returnsLoc = /^LOC/.test action
     action = action.replace /LOC\(([0-9]*)\)/g, getAddDataToNodeFunctionString('$1')
     # A call to `LOC` with two arguments, e.g. `LOC(2,4)`, sets the location
@@ -325,7 +322,7 @@ grammar =
     o 'AWAIT RETURN',                           -> new AwaitReturn null, returnKeyword: LOC(2)(new Literal $2)
   ]
 
-  # The **Code** node is the function literal. It’s defined by an indented block
+  # The **Code** node is the function literal. It's defined by an indented block
   # of **Block** preceded by a function arrow, with an optional parameter list.
   Code: [
     o 'PARAM_START ParamList PARAM_END FuncGlyph Block', -> new Code $2, $5, $4, LOC(1)(new Literal $1)
@@ -421,7 +418,7 @@ grammar =
     o 'SUPER INDEX_START INDENT Expression OUTDENT INDEX_END', -> new Super LOC(4)(new Index $4),  LOC(1)(new Literal $1)
   ]
 
-  # A “meta-property” access e.g. `new.target` or `import.meta`, where
+  # A "meta-property" access e.g. `new.target` or `import.meta`, where
   # something that looks like a property is referenced on a keyword.
   MetaProperty: [
     o 'NEW_TARGET . Property',                  -> new MetaProperty LOC(1)(new IdentifierLiteral $1), LOC(3)(new Access $3)
@@ -785,7 +782,7 @@ grammar =
   ]
 
   # The source of a comprehension is an array or object with an optional guard
-  # clause. If it’s an array comprehension, you can also choose to step through
+  # clause. If it's an array comprehension, you can also choose to step through
   # in fixed-size increments.
   ForSource: [
     o 'FORIN Expression',                                           -> source: $2
@@ -992,12 +989,8 @@ for name, alternatives of grammar
     alt[1] = "return #{alt[1]}" if name is 'Root'
     alt
 
-# Initialize the **Parser** with our list of terminal **tokens**, our **grammar**
-# rules, and the name of the root. Reverse the operators because Jison orders
-# precedence from low to high, and we have it high to low
-# (as in [Yacc](http://dinosaur.compilertools.net/yacc/index.html)).
-exports.parser = new Parser
-  tokens      : tokens.join ' '
-  bnf         : grammar
-  operators   : operators.reverse()
-  startSymbol : 'Root'
+# Export only grammar, operators, and tokens for rip-parser
+module.exports =
+  grammar: grammar
+  operators: operators.reverse()
+  tokens: tokens.join ' '
