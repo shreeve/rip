@@ -230,7 +230,7 @@ class Generator
 
     @buildGrammar()
     @computeLookaheads()
-    @unionLookaheads()
+    @mergeLookaheads()
     @table = @buildParseTable(@states)
     @defaultActions = findDefaults(@table)
 
@@ -682,12 +682,12 @@ class Generator
           # accept
           state[@symbols_[@EOF]] = [a]
 
-      allterms = if @lookAheads then false else @terminals
+      allterms = if @getLookaheads then false else @terminals
 
       # set reductions and resolve potential conflicts
       itemSet.reductions.forEach (item, j) =>
         # if parser uses lookahead, only enumerate those terminals
-        terminals = allterms or @lookAheads(itemSet, item)
+        terminals = allterms or @getLookaheads(itemSet, item)
 
         terminals.forEach (stackSymbol) =>
           action = state[@symbols_[stackSymbol]]
@@ -739,7 +739,7 @@ class Generator
           goes[handle].push(symbol)
       if state.inadequate then @inadequateStates.push(i)
 
-  unionLookaheads: ->
+  mergeLookaheads: ->
     states = if !!@onDemandLookahead then @inadequateStates else @states
     states.forEach (i) =>
       state = if typeof i is 'number' then @states[i] else i
@@ -758,7 +758,7 @@ class Generator
 
   # ==[ LALR Helpers ]==========================================================
 
-  lookAheads: (state, item) ->
+  getLookaheads: (state, item) ->
     if !!@onDemandLookahead and not state.inadequate then @terminals else item.follows
 
   go: (p, w) ->
