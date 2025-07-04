@@ -103,11 +103,9 @@ class ItemSet
 
 # Iterate over objects
 forEach = (obj, func) ->
-  if obj.forEach
-    obj.forEach func
-  else
-    for key, value of obj
-      func.call(obj, value, key, obj)
+  return obj.forEach func if obj.forEach
+  for key, value of obj
+    func.call(obj, value, key, obj)
 
 # Merge arrays without duplicates
 mergeArrays = (a, b) ->
