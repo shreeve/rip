@@ -264,7 +264,7 @@ class Generator
     # use specified start symbol, or default to first user defined rule
     @startSymbol = grammar.start or grammar.startSymbol or @rules[0].symbol
     unless @nonterminals[@startSymbol]
-      throw new Error("Grammar error: startSymbol must be a non-terminal found in your grammar.")
+      throw new Error("Grammar error: startSymbol must be a nonterminal found in your grammar.")
     @EOF = "$end"
 
     # augment the grammar
@@ -503,7 +503,7 @@ class Generator
       set.forEach (item) =>
         symbol = item.markedSymbol
 
-        # if token is a non-terminal, recursively add closures
+        # if symbol is a nonterminal, recursively add closures
         if symbol and @nonterminals[symbol]
           unless syms[symbol]
             @nonterminals[symbol].rules.forEach (rule) =>
@@ -550,7 +550,7 @@ class Generator
           for i in [0...rule.handle.length]
             t = rule.handle[i]
             if @nullable(t) then n++
-          if n is i # rule is nullable if all tokens are nullable
+          if n is i # rule is nullable if all of its elements (terminals or nonterminals) are nullable
             rule.nullable = cont = true
 
       # check if each symbol is nullable
@@ -603,7 +603,7 @@ class Generator
           else firsts.push s unless s in firsts
           break unless @nullable s
         firsts
-      when e = @nonterminals[symbol] then getNonterminal(@nonterminals, symbol).first # non-terminal
+      when e = @nonterminals[symbol] then getNonterminal(@nonterminals, symbol).first # nonterminal
       else [symbol] # terminal
 
   computeFollowSets: ->
