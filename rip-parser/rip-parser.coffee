@@ -658,11 +658,11 @@ const #{moduleName} = (() => {
     trace: () => {},
     yy: {},
     symbols_: #{JSON.stringify(@symbols_)},
-    terminals_: #{JSON.stringify(@terminals_).replace(/\"(\\d+)\":/g, '$1:')},
+    terminals_: #{JSON.stringify(@terminals_).replace(/"(\d+)":/g, '$1:')},
     productions_: #{JSON.stringify(@productions_)},
     performAction: #{String(@performAction)},
-    table: #{JSON.stringify(@table).replaceAll('"', '')},
-    defaultActions: #{JSON.stringify(@defaultActions).replaceAll('"', '')},
+    table: #{JSON.stringify(@table).replace(/"(\d+)":/g, '$1:')},
+    defaultActions: #{JSON.stringify(@defaultActions).replace(/"(\d+)":/g, '$1:')},
     parseError: (str, hash) => {
       if (hash.recoverable) {
         this.trace(str);
