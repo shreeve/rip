@@ -296,8 +296,6 @@ class Generator
     rules_       = [0]
     symbols_     = {}
     symbolId     = 1
-    prods        = null # TODO: Is this needed?
-    symbol       = null # TODO: Is this needed?
 
     addSymbol = (s) ->
       if s and not symbols_[s]
@@ -534,48 +532,26 @@ class Generator
   computeNullableSet: ->
     @firsts = {}
     nonterminals = @nonterminals
-    cont = true
+    more = true
 
     # loop until no further changes have been made
-    while cont
-      cont = false
+    while more
+      more = false
 
-      # check if each rule is nullable
-      @rules.forEach (rule, k) =>
-        unless rule.nullable
-          n = 0
-          i = 0
-          t = null # TODO: Is this needed?
-          for i in [0...rule.handle.length]
-            t = rule.handle[i]
-            if @nullable(t) then n++
-          if n is i # rule is nullable if all of its elements (tokens or nonterminals) are nullable
-            rule.nullable = cont = true
+      # rule is nullable if all of its elements are nullable
+      for rule in @rules when not rule.nullable
+        rule.nullable = more = true if rule.handle.every(@nullable.bind(@))
 
       # check if each symbol is nullable
-      for symbol of nonterminals
-        unless @nullable(symbol)
-          for i in [0...nonterminals[symbol].rules.length]
-            rule = nonterminals[symbol].rules[i]
-            if rule.nullable
-              nonterminals[symbol].nullable = cont = true
+      for symbol of nonterminals when not @nullable(symbol)
+        if nonterminals[symbol].rules.some((rule) -> rule.nullable)
+          nonterminals[symbol].nullable = more = true
 
   nullable: (symbol) ->
-    # epsilon
-    if symbol is ''
-      return true
-    # RHS
-    else if Array.isArray(symbol)
-      for i in [0...symbol.length]
-        t = symbol[i]
-        return false unless @nullable(t)
-      return true
-    # token
-    else unless @nonterminals[symbol]
-      return false
-    # nonterminal
-    else
-      return getNonterminal(@nonterminals, symbol).nullable
+    return true if symbol is '' # epsilon
+    return symbol.every(@nullable.bind(@)) if Array.isArray(symbol) # RHS
+    return false unless @nonterminals[symbol] # token
+    return getNonterminal(@nonterminals, symbol).nullable # nonterminal
 
   computeFirstSets: ->
     rules        = @rules
@@ -587,9 +563,9 @@ class Generator
       cont = false
       rules.forEach (rule, k) =>
         firsts = @computeFirstSet(rule.handle)
-        oldcount = getNonterminal(@nonterminals, rule.symbol).first.length
+        before = getNonterminal(@nonterminals, rule.symbol).first.length
         mergeArrays(getNonterminal(@nonterminals, rule.symbol).first, firsts)
-        cont = true if oldcount isnt getNonterminal(@nonterminals, rule.symbol).first.length
+        cont = true if before isnt getNonterminal(@nonterminals, rule.symbol).first.length
 
   computeFirstSet: (symbol) ->
     switch
