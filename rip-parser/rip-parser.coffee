@@ -274,7 +274,7 @@ class Generator
     # prepend parser tokens
     @symbols.unshift("$accept", @EOF)
     @symbols_[@EOF] = 1
-    @terminals.unshift(@EOF)
+    @tokens.unshift(@EOF)
 
     @nonterminals.$accept = new Nonterminal("$accept")
     @nonterminals.$accept.rules.push(acceptRule)
@@ -429,10 +429,11 @@ class Generator
     )
 
     @hasErrorRecovery = her
-    @terminals        = terms
-    @terminals_       = terms_
-    @symbols_         = symbols_
-    @rules_           = rules_
+
+    @tokens   = terms
+    @tokens_  = terms_
+    @symbols_ = symbols_
+    @rules_   = rules_
 
     actions.push('}')
 
@@ -682,14 +683,14 @@ class Generator
           # accept
           state[@symbols_[@EOF]] = [a]
 
-      allterms = if @getLookaheads then false else @terminals
+      allterms = if @getLookaheads then false else @tokens
 
       # set reductions and resolve potential conflicts
       itemSet.reductions.forEach (item, j) =>
-        # if parser uses lookahead, only enumerate those terminals
-        terminals = allterms or @getLookaheads(itemSet, item)
+        # if parser uses lookahead, only enumerate those tokens
+        tokens = allterms or @getLookaheads(itemSet, item)
 
-        terminals.forEach (stackSymbol) =>
+        tokens.forEach (stackSymbol) =>
           action = state[@symbols_[stackSymbol]]
           op = operators[stackSymbol]
 
@@ -759,7 +760,7 @@ class Generator
   # ==[ LALR Helpers ]==========================================================
 
   getLookaheads: (state, item) ->
-    if !!@onDemandLookahead and not state.inadequate then @terminals else item.follows
+    if !!@onDemandLookahead and not state.inadequate then @tokens else item.follows
 
   goPath: (q, w) ->
     t = null # TODO: Is this needed?
@@ -828,7 +829,7 @@ const #{moduleName} = (() => {
     trace: () => {},
     yy: {},
     symbols_: #{JSON.stringify(@symbols_)},
-    terminals_: #{JSON.stringify(@terminals_).replace(/"(\d+)":/g, '$1:')},
+    tokens_: #{JSON.stringify(@tokens_).replace(/"(\d+)":/g, '$1:')},
     rules_: #{JSON.stringify(@rules_)},
     performAction: #{String(@performAction)},
     table: #{JSON.stringify(@table).replace(/"(\d+)":/g, '$1:')},
@@ -924,18 +925,18 @@ const #{moduleName} = (() => {
             error_rule_depth = locateNearestErrorRecoveryRule(state);
             expected = [];
             for (p in table[state]) {
-              if (this.terminals_[p] && p > TERROR) {
-                expected.push(`'${this.terminals_[p]}'`);
+              if (this.tokens_[p] && p > TERROR) {
+                expected.push(`'${this.tokens_[p]}'`);
               }
             }
             if (lexer.showPosition) {
-              errStr = `Parse error on line ${yylineno + 1}:\\n${lexer.showPosition()}\\nExpecting ${expected.join(', ')}, got '${this.terminals_[symbol] || symbol}'`;
+              errStr = `Parse error on line ${yylineno + 1}:\\n${lexer.showPosition()}\\nExpecting ${expected.join(', ')}, got '${this.tokens_[symbol] || symbol}'`;
             } else {
-              errStr = `Parse error on line ${yylineno + 1}: Unexpected ${symbol === EOF ? 'end of input' : `'${this.terminals_[symbol] || symbol}'`}`;
+              errStr = `Parse error on line ${yylineno + 1}: Unexpected ${symbol === EOF ? 'end of input' : `'${this.tokens_[symbol] || symbol}'`}`;
             }
             this.parseError(errStr, {
               text: lexer.match,
-              token: this.terminals_[symbol] || symbol,
+              token: this.tokens_[symbol] || symbol,
               line: lexer.yylineno,
               loc: yyloc,
               expected: expected,
@@ -1072,9 +1073,9 @@ parser.init = (dict) ->
   @table          = dict.table
   @defaultActions = dict.defaultActions
   @performAction  = dict.performAction
-  @rules_   = dict.rules_
+  @rules_         = dict.rules_
   @symbols_       = dict.symbols_
-  @terminals_     = dict.terminals_
+  @tokens_        = dict.tokens_
 
 # parser.trace = generator.trace;
 # parser.warn = generator.warn;
@@ -1178,14 +1179,14 @@ parser.parse = (input) ->
         # Report error
         expected = []
         for p of table[state]
-          if @terminals_[p] and p > TERROR then expected.push("'#{@terminals_[p]}'")
+          if @tokens_[p] and p > TERROR then expected.push("'#{@tokens_[p]}'")
         if lexer.showPosition
-          errStr = "Parse error on line #{yylineno + 1}:\n#{lexer.showPosition()}\nExpecting #{expected.join(', ')}, got '#{@terminals_[symbol] or symbol}'"
+          errStr = "Parse error on line #{yylineno + 1}:\n#{lexer.showPosition()}\nExpecting #{expected.join(', ')}, got '#{@tokens_[symbol] or symbol}'"
         else
-          errStr = "Parse error on line #{yylineno + 1}: Unexpected #{if symbol is EOF then "end of input" else "'#{@terminals_[symbol] or symbol}'"}"
+          errStr = "Parse error on line #{yylineno + 1}: Unexpected #{if symbol is EOF then "end of input" else "'#{@tokens_[symbol] or symbol}'"}"
         @parseError(errStr, {
           text:        lexer.match
-          token:       @terminals_[symbol] or symbol
+          token:       @tokens_[symbol] or symbol
           line:        lexer.yylineno
           loc:         yyloc
           expected:    expected
