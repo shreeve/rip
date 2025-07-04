@@ -324,7 +324,7 @@ class BaseGenerator
       .replace(/YYACCEPT/g, 'return true')
 
     parameters = "yytext, yyleng, yylineno, yy, yystate /* action[1] */, $$ /* vstack */, _$ /* lstack */"
-    parameters += ', ' + @parseParams.join(', ') if @parseParams
+    parameters += ', ' + @parseParams.join(', ') if @parseParams?.length > 0
 
     @performAction = "function anonymous(#{parameters}) {\n#{actions}\n}"
 
