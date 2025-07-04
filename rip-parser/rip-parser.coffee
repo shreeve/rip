@@ -1021,3 +1021,71 @@ if (typeof require !== 'undefined' && typeof exports !== 'undefined') {
     args = Array.prototype.slice.call(arguments, 0)
     throw new Error("Warning: #{args.join('')}")
   error: (msg) -> throw new Error(msg)
+
+# ==[ Command Line ]============================================================
+
+if !module.parent
+  fs = require 'fs'
+  path = require 'path'
+
+  # Parse command line arguments
+  args = process.argv.slice(2)
+
+  if args.length < 1
+    console.log "Usage: coffee rip-parser.coffee <grammar-file> [-o <output-file>]"
+    console.log "Example: coffee rip-parser.coffee grammar.coffee -o parser.js"
+    process.exit(1)
+
+  grammar_file = args[0]
+  output_file = null
+
+  # Parse -o flag for output file
+  for i in [1...args.length]
+    if args[i] is '-o' and i + 1 < args.length
+      output_file = args[i + 1]
+      break
+
+  # Default output filename if not specified
+  if not output_file
+    grammar_name = path.basename(grammar_file, path.extname(grammar_file))
+    output_file = "#{grammar_name}-parser.js"
+
+  try
+    # Load the grammar file - supports both old parser format and new grammar format
+    grammar_module = require grammar_file
+
+    # Check if it's a new grammar format (exports grammar data) or old format (exports parser)
+    if grammar_module.grammar
+      # New format: grammar file exports { grammar, tokens, operators, startSymbol }
+      grammar_data = grammar_module
+      startSymbol = grammar_data.startSymbol or 'Root'
+
+      # Create a grammar object that rip-parser can understand
+      grammar = {
+        bnf: grammar_data.grammar
+        tokens: grammar_data.tokens
+        operators: grammar_data.operators
+        start: startSymbol
+        parseParams: grammar_data.parseParams or []
+        moduleInclude: grammar_data.moduleInclude or ''
+        actionInclude: grammar_data.actionInclude or ''
+      }
+
+      # Generate the parser from the grammar data
+      parser_generator = new Generator(grammar)
+      parser_code = parser_generator.generate(moduleMain: ->)
+
+    else if grammar_module.parser
+      # Old format: grammar file exports { parser }
+      parser_code = grammar_module.parser.generate(moduleMain: ->)
+
+    else
+      throw new Error("Grammar file must export either { grammar, tokens, operators, startSymbol } or { parser }")
+
+    # Write the generated parser to a file
+    fs.writeFileSync output_file, parser_code
+    console.log "Generated parser: #{output_file}"
+
+  catch error
+    console.error "Error: #{error.message}"
+    process.exit(1)
