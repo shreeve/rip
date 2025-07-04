@@ -549,27 +549,18 @@ class BaseGenerator
         cont = true if oldcount isnt nonterminals[production.symbol].first.length
 
   first: (symbol) ->
-    # epsilon
-    if symbol is ''
-      return []
-    # RHS
-    else if symbol instanceof Array
-      firsts = []
-      for i in [0...symbol.length]
-        t = symbol[i]
-        unless @nonterminals[t]
-          if firsts.indexOf(t) is -1 then firsts.push(t)
-        else
-          unionArrays(firsts, @nonterminals[t].first)
-        unless @nullable(t)
-          break
-      return firsts
-    # terminal
-    else unless @nonterminals[symbol]
-      return [symbol]
-    # nonterminal
-    else
-      return @nonterminals[symbol].first
+    switch
+      when symbol is '' then [] # epsilon
+      when symbol instanceof Array # RHS
+        firsts = []
+        for s in symbol
+          break unless s
+          if e = @nonterminals[s] then unionArrays firsts, e.first
+          else firsts.push s unless s in firsts
+          break unless @nullable s
+        firsts
+      when e = @nonterminals[symbol] then e.first # non-terminal
+      else [symbol] # terminal
 
   followSets: ->
     productions  = @productions
