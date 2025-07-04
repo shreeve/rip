@@ -396,10 +396,9 @@ class Generator
       addSymbol(symbol)
       spells[symbol] = new Spell(symbol)
 
-      if typeof bnf[symbol] is 'string'
-        prods = bnf[symbol].split(/\s*\|\s*/g)
-      else
-        prods = bnf[symbol].slice(0)
+      prods = if typeof bnf[symbol] is 'string' \
+        then bnf[symbol].split(/\s*\|\s*/g) \
+        else bnf[symbol].slice(0)
 
       prods.forEach(buildRule)
 
@@ -616,9 +615,10 @@ class Generator
   # ==[ LALR Table Building ]===================================================
 
   buildParseTable: (itemSets) ->
-    states           = []
-    spells     = @spells
-    operators        = @operators
+    states    = []
+    spells    = @spells
+    operators = @operators
+
     conflictedStates = {} # array of [state, token] tuples
 
     s = 1 # shift
