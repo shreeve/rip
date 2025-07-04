@@ -1304,41 +1304,43 @@ exports.Parser = LALRGenerator
 
 # ==[ Command line invocation ]==
 
-# # # isCLI = ->
-# # #   # Check if this is the main module being executed
-# # #   return false unless require.main is module
-# # #
-# # #   # Check if we have command line arguments (indicating CLI usage)
-# # #   return false unless process.argv.length > 2
-# # #
-# # #   # Additional check for Bun-specific environment
-# # #   return true if process.versions.bun?
-# # #
-# # #   # For Node.js, ensure we're not being required by another module
-# # #   return true
-
 if !module.parent
   fs = require 'fs'
-  # list = process.argv.slice 2
+  path = require 'path'
 
-  # grammar_file = process.argv[2] || '/Users/shreeve/Data/Code/rip/rip-parser/calc/grammar.coffee'
+  # Parse command line arguments
+  args = process.argv.slice(2)
 
-  grammar_file = '/Users/shreeve/Data/Code/rip/rip-parser/calc/grammar.coffee'
-  grammar_file = '/Users/shreeve/Data/Code/rip/rip-parser/coffee/grammar.coffee'
+  if args.length < 1
+    console.log "Usage: coffee rip-parser.coffee <grammar-file> [-o <output-file>]"
+    console.log "Example: coffee rip-parser.coffee grammar.coffee -o parser.js"
+    process.exit(1)
 
-  grammar = fs.readFileSync(grammar_file).toString()
-  # console.log grammar
+  grammar_file = args[0]
+  output_file = null
 
-  # Load the grammar file
-  # {parser} = require './grammar-calculator.coffee' # NOTE: This is the grammar file!
-  { parser } = require grammar_file
-  # console.log parser
+  # Parse -o flag for output file
+  for i in [1...args.length]
+    if args[i] is '-o' and i + 1 < args.length
+      output_file = args[i + 1]
+      break
 
-  # Generate the parser with the same options as CoffeeScript
-  # We don't need `moduleMain`, since the parser is unlikely to be run standalone.
-  parser_file = 'doo.js' # process.argv[3]
-  parser_code = parser.generate(moduleMain: ->)
-  console.log parser_code
+  # Default output filename if not specified
+  if not output_file
+    grammar_name = path.basename(grammar_file, path.extname(grammar_file))
+    output_file = "#{grammar_name}-parser.js"
 
-  # # Write the generated parser to a file
-  # fs.writeFileSync parser_file, parser_code # NOTE: This is the parser file!
+  try
+    # Load the grammar file
+    { parser } = require grammar_file
+
+    # Generate the parser
+    parser_code = parser.generate(moduleMain: ->)
+
+    # Write the generated parser to a file
+    fs.writeFileSync output_file, parser_code
+    console.log "Generated parser: #{output_file}"
+
+  catch error
+    console.error "Error: #{error.message}"
+    process.exit(1)
