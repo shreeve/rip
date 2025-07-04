@@ -450,7 +450,7 @@ class Generator
   buildLRStates: ->
     item1      = new Item(@productions[0], 0, [@EOF])
     firstSet   = new ItemSet(); firstSet.push(item1)
-    firstState = @closureOperation(firstSet)
+    firstState = @computeClosure(firstSet)
     states     = [firstState]
     marked     = 0
 
@@ -466,7 +466,7 @@ class Generator
     states
 
   insertLRState: (symbol, itemSet, states, stateNum) ->
-    g = @gotoOperation(itemSet, symbol)
+    g = @computeGoto(itemSet, symbol)
     g.predecessors = {} unless g.predecessors
 
     # add g to queue if not empty or duplicate
@@ -482,16 +482,16 @@ class Generator
         itemSet.edges[symbol] = i # store goto transition for table
         states[i].predecessors[symbol].push(stateNum)
 
-  gotoOperation: (itemSet, symbol) ->
+  computeGoto: (itemSet, symbol) ->
     gotoSet = new ItemSet()
 
     itemSet.forEach (item) =>
       if item.markedSymbol is symbol
         gotoSet.push(new Item(item.production, item.dotPosition + 1, item.follows, item.predecessor))
 
-    if gotoSet.isEmpty() then gotoSet else @closureOperation(gotoSet)
+    if gotoSet.isEmpty() then gotoSet else @computeClosure(gotoSet)
 
-  closureOperation: (itemSet) ->
+  computeClosure: (itemSet) ->
     closureSet = new ItemSet()
     set        = itemSet
     syms       = {}
@@ -528,11 +528,11 @@ class Generator
   # ==[ Lookahead Computation ]=================================================
 
   computeLookaheads: ->
-    @nullableSets()
-    @firstSets()
-    @followSets()
+    @computeNullableSets()
+    @computeFirstSets()
+    @computeFollowSets()
 
-  nullableSets: ->
+  computeNullableSets: ->
     @firsts = {}
     nonterminals = @nonterminals
     cont = true
@@ -578,7 +578,7 @@ class Generator
     else
       return getNonterminal(@nonterminals, symbol).nullable
 
-  firstSets: ->
+  computeFirstSets: ->
     productions  = @productions
     nonterminals = @nonterminals
     cont         = true
@@ -606,7 +606,7 @@ class Generator
       when e = @nonterminals[symbol] then getNonterminal(@nonterminals, symbol).first # non-terminal
       else [symbol] # terminal
 
-  followSets: ->
+  computeFollowSets: ->
     productions  = @productions
     nonterminals = @nonterminals
     cont         = true
