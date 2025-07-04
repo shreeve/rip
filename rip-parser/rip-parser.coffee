@@ -785,15 +785,15 @@ class Generator
       opt.moduleName = "parser"
 
     switch opt.moduleType
-      when "js" then @generateModule(opt)
-      else   @generateCommonJSModule(opt)
+      when "js" then @generateESModule(opt)
+      else   @generateCommonJS(opt)
 
-  generateModule: (opt) ->
+  generateESModule: (opt) ->
     opt = Object.assign {}, @options, opt
     moduleName = opt.moduleName or "parser"
 
     # Always create a fake lexer and assign it to parser.lexer
-    lexerCode = if @lexer and @lexer.generateModule then @lexer.generateModule() + '\n  parser.lexer = lexer;' else '''
+    lexerCode = if @lexer and @lexer.generateESModule then @lexer.generateESModule() + '\n  parser.lexer = lexer;' else '''
   // Minimal fake lexer for token arrays
   const fakeLexer = {
     setInput(tokens) { this.tokens = tokens; this.pos = 0; },
@@ -1040,11 +1040,11 @@ const #{moduleName} = (() => {
 
     return out
 
-  generateCommonJSModule: (opt) ->
+  generateCommonJS: (opt) ->
     opt = Object.assign {}, @options, opt
     moduleName = opt.moduleName or "parser"
 
-    out = @generateModule(opt)
+    out = @generateESModule(opt)
     out += """
 
 if (typeof require !== 'undefined' && typeof exports !== 'undefined') {
