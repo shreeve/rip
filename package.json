@@ -51,5 +51,8 @@
     "puppeteer": "~13.6.0",
     "underscore": "~1.13.3",
     "webpack": "~5.72.0"
+  },
+  "dependencies": {
+    "coffeescript": "^2.7.0"
   }
 }
