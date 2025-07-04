@@ -1,6 +1,13 @@
 #!/usr/bin/env coffee
 
+# ==============================================================================
 # rip-parser - A rip-lang based LALR(1) parser generator, derived from Jison
+# Author: Steve Shreeve <steve.shreeve@gmail.com>
+#         Cursor AI <cursor@cursor.com>
+#         Jison team | https://www.npmjs.com/package/jison
+#  Legal: MIT License
+#   Date: July 4, 2025
+# ==============================================================================
 
 # Grammar nonterminals with productions, first/follow sets
 class Nonterminal
