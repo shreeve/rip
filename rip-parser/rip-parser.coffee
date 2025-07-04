@@ -31,14 +31,14 @@ class Spell
     @follows     = []
     @nullable    = false
 
-    toString: -> """
-      #{@symbol}
-      #{if @nullable then 'nullable' else 'not nullable'}
-      Firsts:  #{@first  .join(', ')}
-      Follows: #{@follows.join(', ')}
-      Rules:
-          #{@rules.join('\n  ')}
-      """
+  toString: -> """
+    #{@symbol}
+    #{if @nullable then 'nullable' else 'not nullable'}
+    Firsts:  #{@first  .join(', ')}
+    Follows: #{@follows.join(', ')}
+    Rules:
+        #{@rules.join('\n  ')}
+    """
 
 # Represents LR items (rules with dot positions)
 class Item
@@ -531,8 +531,8 @@ class Generator
 
   computeNullableSet: ->
     @firsts = {}
-    spells = @spells
-    more = true
+    spells  = @spells
+    more    = true
 
     # loop until no further changes have been made
     while more
@@ -554,9 +554,9 @@ class Generator
     return getSpell(@spells, symbol).nullable # spell
 
   computeFirstSets: ->
-    rules        = @rules
+    rules  = @rules
     spells = @spells
-    cont         = true
+    cont   = true
 
     # loop until no further changes have been made
     while cont
@@ -584,7 +584,7 @@ class Generator
   computeFollowSets: ->
     rules  = @rules
     spells = @spells
-    cont         = true
+    cont   = true
 
     # loop until no further changes have been made
     while cont
@@ -1230,11 +1230,11 @@ parser.parse = (input) ->
 
         # pop off stack
         if len
-          stack  = stack.slice(0, -1 * len * 2)
+          stack  = stack .slice(0, -1 * len * 2)
           vstack = vstack.slice(0, -1 * len)
           lstack = lstack.slice(0, -1 * len)
 
-        stack.push(@rules_[action[1]][0])    # push spell (reduce)
+        stack.push(@rules_[action[1]][0]) # push spell (reduce)
         vstack.push(yyval.$)
         lstack.push(yyval._$)
         # goto new state = table[STATE][SPELL]
