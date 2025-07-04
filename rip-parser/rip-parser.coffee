@@ -9,8 +9,8 @@
 #   Date: July 4, 2025
 # ==============================================================================
 
-# Grammar productions with handles and precedence
-class Production
+# Grammar rules with handles and precedence
+class Rule
   constructor: (symbol, handle, id) ->
     @symbol     = symbol
     @handle     = handle
@@ -22,11 +22,11 @@ class Production
   toString: ->
     "#{@symbol} -> #{@handle.join(' ')}"
 
-# Grammar nonterminals with productions, first/follow sets
+# Grammar nonterminals with rules, first/follow sets
 class Nonterminal
   constructor: (symbol) ->
     @symbol      = symbol
-    @productions = []
+    @rules       = []
     @first       = []
     @follows     = []
     @nullable    = false
@@ -36,34 +36,34 @@ class Nonterminal
       #{if @nullable then 'nullable' else 'not nullable'}
       Firsts:  #{@first  .join(', ')}
       Follows: #{@follows.join(', ')}
-      Productions:
-          #{@productions.join('\n  ')}
+      Rules:
+          #{@rules.join('\n  ')}
       """
 
-# Represents LR items (productions with dot positions)
+# Represents LR items (rules with dot positions)
 class Item
-  constructor: (production, dot, f, predecessor) ->
-    @production   = production
+  constructor: (rule, dot, f, predecessor) ->
+    @rule         = rule
     @dotPosition  = dot or 0
     @follows      = f or []
     @predecessor  = predecessor
-    @id           = parseInt("#{production.id}a#{@dotPosition}", 36)
-    @markedSymbol = @production.handle[@dotPosition]
+    @id           = parseInt("#{rule.id}a#{@dotPosition}", 36)
+    @markedSymbol = @rule.handle[@dotPosition]
 
-  remainingHandle: -> @production.handle.slice(@dotPosition + 1)
+  remainingHandle: -> @rule.handle.slice(@dotPosition + 1)
 
   eq: (e) -> e.id is @id
 
   handleToString: ->
-    handle = @production.handle.slice(0)
+    handle = @rule.handle.slice(0)
     handle[@dotPosition] = ".#{handle[@dotPosition] or ''}"
     handle.join(' ')
 
   toString: ->
-    temp = @production.handle.slice(0)
+    temp = @rule.handle.slice(0)
     temp[@dotPosition] = ".#{temp[@dotPosition] or ''}"
     look = " #lookaheads= #{@follows.join(' ')}" if @follows.length
-    "#{@production.symbol} -> #{temp.join(' ')}#{look}"
+    "#{@rule.symbol} -> #{temp.join(' ')}#{look}"
 
 # Manages set of LR items with deduplication
 class ItemSet
@@ -152,33 +152,33 @@ findDefaults = (states) ->
   defaults
 
 # Resolve conflicts of alternatives
-resolveConflict = (production, op, reduce, shift) ->
-  sln = { production: production, operator: op, r: reduce, s: shift }
+resolveConflict = (rule, op, reduce, shift) ->
+  sln = { rule: rule, operator: op, r: reduce, s: shift }
   s = 1 # shift
   r = 2 # reduce
   a = 3 # accept
 
   if shift[0] is r
-    sln.msg = "Resolve R/R conflict (use first production declared in grammar.)"
+    sln.msg = "Resolve R/R conflict (use first rule declared in grammar.)"
     sln.action = if shift[1] < reduce[1] then shift else reduce
     if shift[1] isnt reduce[1] then sln.bydefault = true
     return sln
 
-  # Special handling for empty productions (epsilon rules)
-  if production.handle.length is 0 or (production.handle.length is 1 and production.handle[0] is '')
-    sln.msg = "Resolve S/R conflict for empty production (reduce by default.)"
+  # Special handling for empty rules (epsilon rules)
+  if rule.handle.length is 0 or (rule.handle.length is 1 and rule.handle[0] is '')
+    sln.msg = "Resolve S/R conflict for empty rule (reduce by default.)"
     sln.bydefault = true
     sln.action = reduce
     return sln
 
-  if production.precedence is 0 or not op
+  if rule.precedence is 0 or not op
     sln.msg = "Resolve S/R conflict (shift by default.)"
     sln.bydefault = true
     sln.action = shift
-  else if production.precedence < op.precedence
+  else if rule.precedence < op.precedence
     sln.msg = "Resolve S/R conflict (shift for higher precedent operator.)"
     sln.action = shift
-  else if production.precedence is op.precedence
+  else if rule.precedence is op.precedence
     if op.assoc is "right"
       sln.msg = "Resolve S/R conflict (shift for right associative operator.)"
       sln.action = shift
@@ -189,7 +189,7 @@ resolveConflict = (production, op, reduce, shift) ->
       sln.msg = "Resolve S/R conflict (no action for non-associative operator.)"
       sln.action = 0 # NONASSOC
   else
-    sln.msg = "Resolve conflict (reduce for higher precedent production.)"
+    sln.msg = "Resolve conflict (reduce for higher precedent rule.)"
     sln.action = reduce
 
   sln
@@ -203,7 +203,7 @@ class Generator
     @operators   = {}
     @options     = Object.assign {}, grammar.options, opt
     @parseParams = grammar.parseParams
-    @productions = []
+    @rules       = []
     @resolutions = []
     @terms       = {}
     @yy          = {} # accessed as yy free variable in the parser/lexer actions
@@ -238,7 +238,7 @@ class Generator
     bnf          = grammar.bnf
     tokens       = grammar.tokens
     nonterminals = @nonterminals = {}
-    productions  = @productions
+    rules        = @rules
 
     if tokens
       if typeof tokens is 'string'
@@ -251,25 +251,25 @@ class Generator
     # calculate precedence of operators
     operators = @operators = processOperators(grammar.operators)
 
-    # build productions from cfg
-    @buildProductions(bnf, productions, nonterminals, symbols, operators)
+    # build rules from cfg
+    @buildRules(bnf, rules, nonterminals, symbols, operators)
 
     # augment the grammar
     @addAcceptProduction(grammar)
 
   addAcceptProduction: (grammar) ->
-    if @productions.length is 0
+    if @rules.length is 0
       throw new Error("Grammar error: must have at least one rule.")
 
-    # use specified start symbol, or default to first user defined production
-    @startSymbol = grammar.start or grammar.startSymbol or @productions[0].symbol
+    # use specified start symbol, or default to first user defined rule
+    @startSymbol = grammar.start or grammar.startSymbol or @rules[0].symbol
     unless @nonterminals[@startSymbol]
       throw new Error("Grammar error: startSymbol must be a non-terminal found in your grammar.")
     @EOF = "$end"
 
     # augment the grammar
-    acceptProduction = new Production('$accept', [@startSymbol, '$end'], 0)
-    @productions.unshift(acceptProduction)
+    acceptRule = new Rule('$accept', [@startSymbol, '$end'], 0)
+    @rules.unshift(acceptRule)
 
     # prepend parser tokens
     @symbols.unshift("$accept", @EOF)
@@ -277,14 +277,14 @@ class Generator
     @terminals.unshift(@EOF)
 
     @nonterminals.$accept = new Nonterminal("$accept")
-    @nonterminals.$accept.productions.push(acceptProduction)
+    @nonterminals.$accept.rules.push(acceptRule)
 
     # add follow $ to start symbol
     getNonterminal(@nonterminals, @startSymbol).follows.push(@EOF)
 
   # ==[ Grammar Processing ]====================================================
 
-  buildProductions: (bnf, productions, nonterminals, symbols, operators) ->
+  buildRules: (bnf, rules, nonterminals, symbols, operators) ->
     actions = [
       '/* this == yyval */'
       @actionInclude or ''
@@ -293,7 +293,7 @@ class Generator
     ]
     actionGroups = {}
     her          = false # has error recovery
-    productions_ = [0]
+    rules_       = [0]
     symbols_     = {}
     symbolId     = 1
     prods        = null # TODO: Is this needed?
@@ -307,7 +307,7 @@ class Generator
     # add error symbol; will be third symbol, or "2" ($accept, $end, error)
     addSymbol("error")
 
-    buildProduction = (handle) ->
+    buildRule = (handle) ->
       # r, rhs, i # TODO: Do these need to be defined?
       if handle.constructor is Array
         rhs = if typeof handle[0] is 'string'
@@ -324,7 +324,7 @@ class Generator
         if typeof handle[1] is 'string' or handle.length is 3
 
           # semantic action specified
-          label = "case #{productions.length + 1}:"
+          label = "case #{rules.length + 1}:"
           action = handle[1]
 
           # replace named semantic values ($nonterminal)
@@ -371,7 +371,7 @@ class Generator
 
           # done with aliases; strip them.
           rhs = rhs.map((e, i) -> e.replace(/\[[a-zA-Z_][a-zA-Z0-9_-]*\]/g, ''))
-          r = new Production(symbol, rhs, productions.length + 1)
+          r = new Rule(symbol, rhs, rules.length + 1)
           # precedence specified also
           if handle[2] and operators[handle[2].prec]
             r.precedence = operators[handle[2].prec].precedence
@@ -379,7 +379,7 @@ class Generator
           # no action -> don't care about aliases; strip them.
           rhs = rhs.map((e, i) -> e.replace(/\[[a-zA-Z_][a-zA-Z0-9_-]*\]/g, ''))
           # only precedence specified
-          r = new Production(symbol, rhs, productions.length + 1)
+          r = new Rule(symbol, rhs, rules.length + 1)
           if operators[handle[1].prec]
             r.precedence = operators[handle[1].prec].precedence
       else
@@ -391,7 +391,7 @@ class Generator
             her = true
           unless symbols_[rhs[i]]
             addSymbol(rhs[i])
-        r = new Production(symbol, rhs, productions.length + 1)
+        r = new Rule(symbol, rhs, rules.length + 1)
 
       if r.precedence is 0
         # set precedence
@@ -399,9 +399,9 @@ class Generator
           if not (r.handle[i] of nonterminals) and r.handle[i] of operators
             r.precedence = operators[r.handle[i]].precedence
 
-      productions.push(r)
-      productions_.push([symbols_[r.symbol], if r.handle[0] is '' then 0 else r.handle.length])
-      nonterminals[symbol].productions.push(r)
+      rules.push(r)
+      rules_.push([symbols_[r.symbol], if r.handle[0] is '' then 0 else r.handle.length])
+      nonterminals[symbol].rules.push(r)
 
     for symbol of bnf
       continue unless bnf.hasOwnProperty(symbol)
@@ -414,7 +414,7 @@ class Generator
       else
         prods = bnf[symbol].slice(0)
 
-      prods.forEach(buildProduction)
+      prods.forEach(buildRule)
 
     for action of actionGroups
       actions.push(actionGroups[action].join(' '), action, 'break;')
@@ -432,7 +432,7 @@ class Generator
     @terminals        = terms
     @terminals_       = terms_
     @symbols_         = symbols_
-    @productions_     = productions_
+    @rules_           = rules_
 
     actions.push('}')
 
@@ -448,7 +448,7 @@ class Generator
   # ==[ LR State Construction ]=================================================
 
   buildLRStates: ->
-    item1      = new Item(@productions[0], 0, [@EOF])
+    item1      = new Item(@rules[0], 0, [@EOF])
     firstSet   = new ItemSet(); firstSet.push(item1)
     firstState = @computeClosureSet(firstSet)
     states     = [firstState]
@@ -487,7 +487,7 @@ class Generator
 
     itemSet.forEach (item) =>
       if item.markedSymbol is symbol
-        gotoSet.push(new Item(item.production, item.dotPosition + 1, item.follows, item.predecessor))
+        gotoSet.push(new Item(item.rule, item.dotPosition + 1, item.follows, item.predecessor))
 
     if gotoSet.isEmpty() then gotoSet else @computeClosureSet(gotoSet)
 
@@ -506,8 +506,8 @@ class Generator
         # if token is a non-terminal, recursively add closures
         if symbol and @nonterminals[symbol]
           unless syms[symbol]
-            @nonterminals[symbol].productions.forEach (production) =>
-              newItem = new Item(production, 0)
+            @nonterminals[symbol].rules.forEach (rule) =>
+              newItem = new Item(rule, 0)
               unless closureSet.contains(newItem)
                 itemQueue.push(newItem)
             syms[symbol] = true
@@ -541,24 +541,24 @@ class Generator
     while cont
       cont = false
 
-      # check if each production is nullable
-      @productions.forEach (production, k) =>
-        unless production.nullable
+      # check if each rule is nullable
+      @rules.forEach (rule, k) =>
+        unless rule.nullable
           n = 0
           i = 0
           t = null # TODO: Is this needed?
-          for i in [0...production.handle.length]
-            t = production.handle[i]
+          for i in [0...rule.handle.length]
+            t = rule.handle[i]
             if @nullable(t) then n++
-          if n is i # production is nullable if all tokens are nullable
-            production.nullable = cont = true
+          if n is i # rule is nullable if all tokens are nullable
+            rule.nullable = cont = true
 
       # check if each symbol is nullable
       for symbol of nonterminals
         unless @nullable(symbol)
-          for i in [0...nonterminals[symbol].productions.length]
-            production = nonterminals[symbol].productions[i]
-            if production.nullable
+          for i in [0...nonterminals[symbol].rules.length]
+            rule = nonterminals[symbol].rules[i]
+            if rule.nullable
               nonterminals[symbol].nullable = cont = true
 
   nullable: (symbol) ->
@@ -579,18 +579,18 @@ class Generator
       return getNonterminal(@nonterminals, symbol).nullable
 
   computeFirstSets: ->
-    productions  = @productions
+    rules        = @rules
     nonterminals = @nonterminals
     cont         = true
 
     # loop until no further changes have been made
     while cont
       cont = false
-      productions.forEach (production, k) =>
-        firsts = @computeFirstSet(production.handle)
-        oldcount = getNonterminal(@nonterminals, production.symbol).first.length
-        mergeArrays(getNonterminal(@nonterminals, production.symbol).first, firsts)
-        cont = true if oldcount isnt getNonterminal(@nonterminals, production.symbol).first.length
+      rules.forEach (rule, k) =>
+        firsts = @computeFirstSet(rule.handle)
+        oldcount = getNonterminal(@nonterminals, rule.symbol).first.length
+        mergeArrays(getNonterminal(@nonterminals, rule.symbol).first, firsts)
+        cont = true if oldcount isnt getNonterminal(@nonterminals, rule.symbol).first.length
 
   computeFirstSet: (symbol) ->
     switch
@@ -607,7 +607,7 @@ class Generator
       else [symbol] # terminal
 
   computeFollowSets: ->
-    productions  = @productions
+    rules  = @rules
     nonterminals = @nonterminals
     cont         = true
 
@@ -615,34 +615,34 @@ class Generator
     while cont
       cont = false
 
-      productions.forEach (production, k) =>
+      rules.forEach (rule, k) =>
         # q is used in Simple LALR algorithm to determine follows in context
         q = null # TODO: Is this needed?
         ctx = !!@go_
 
         set = []
         oldcount
-        for i in [0...production.handle.length]
-          t = production.handle[i]
+        for i in [0...rule.handle.length]
+          t = rule.handle[i]
           continue unless @nonterminals[t]
 
           # For Simple LALR algorithm, @go_ checks if
           if ctx
-            q = @go_(production.symbol, production.handle.slice(0, i))
+            q = @go_(rule.symbol, rule.handle.slice(0, i))
             bool = not ctx or q is parseInt(@nterms_[t], 10)
 
-            if i is production.handle.length + 1 and bool
-              set = getNonterminal(@nonterminals, production.symbol).follows
+            if i is rule.handle.length + 1 and bool
+              set = getNonterminal(@nonterminals, rule.symbol).follows
             else
-              part = production.handle.slice(i + 1)
+              part = rule.handle.slice(i + 1)
               set = @computeFirstSet(part)
               if @nullable(part) and bool
-                set.push.apply(set, getNonterminal(@nonterminals, production.symbol).follows)
+                set.push.apply(set, getNonterminal(@nonterminals, rule.symbol).follows)
           else
-            part = production.handle.slice(i + 1)
+            part = rule.handle.slice(i + 1)
             set = @computeFirstSet(part)
             if @nullable(part)
-              set.push.apply(set, getNonterminal(@nonterminals, production.symbol).follows)
+              set.push.apply(set, getNonterminal(@nonterminals, rule.symbol).follows)
 
           oldcount = getNonterminal(@nonterminals, t).follows.length
           mergeArrays(getNonterminal(@nonterminals, t).follows, set)
@@ -693,9 +693,9 @@ class Generator
           action = state[@symbols_[stackSymbol]]
           op = operators[stackSymbol]
 
-          # Reading a terminal and current position is at the end of a production, try to reduce
+          # Reading a terminal and current position is at the end of a rule, try to reduce
           if action or (action and action.length)
-            sln = resolveConflict(item.production, op, [r, item.production.id], if action[0] instanceof Array then action[0] else action)
+            sln = resolveConflict(item.rule, op, [r, item.rule.id], if action[0] instanceof Array then action[0] else action)
             @resolutions.push([k, stackSymbol, sln])
             if sln.bydefault
               @conflicts++
@@ -703,7 +703,7 @@ class Generator
               # console.log "Resolved conflict by default: #{sln.msg}"
             action = sln.action
           else
-            action = [r, item.production.id]
+            action = [r, item.rule.id]
 
           if action and action.length
             state[@symbols_[stackSymbol]] = action
@@ -720,20 +720,20 @@ class Generator
 
     states
 
-  # Every disjoint reduction of a nonterminal becomes a production in G'
+  # Every disjoint reduction of a nonterminal becomes a rule in G'
   buildGrammar: ->
     @states.forEach (state, i) =>
       state.forEach (item) =>
         if item.dotPosition is 0
-          symbol = "#{i}:#{item.production.symbol}"
-          @terms_[symbol] = item.production.symbol
+          symbol = "#{i}:#{item.rule.symbol}"
+          @terms_[symbol] = item.rule.symbol
           @nterms_[symbol] = i
           nt = getNonterminal(@nonterminals, symbol)
-          pathInfo = @goPath(i, item.production.handle)
-          p = new Production(symbol, pathInfo.path, @productions.length)
-          @productions.push(p)
-          nt.productions.push(p)
-          handle = item.production.handle.join(' ')
+          pathInfo = @goPath(i, item.rule.handle)
+          p = new Rule(symbol, pathInfo.path, @rules.length)
+          @rules.push(p)
+          nt.rules.push(p)
+          handle = item.rule.handle.join(' ')
           goes = @states[pathInfo.endState].goes
           goes[handle] = [] unless goes[handle]
           goes[handle].push(symbol)
@@ -748,7 +748,7 @@ class Generator
           follows = {}
           for k in [0...item.follows.length]
             follows[item.follows[k]] = true
-          state.goes[item.production.handle.join(' ')].forEach (symbol) =>
+          state.goes[item.rule.handle.join(' ')].forEach (symbol) =>
             nt = getNonterminal(@nonterminals, symbol)
             nt.follows.forEach (symbol) =>
               terminal = @terms_[symbol]
@@ -829,7 +829,7 @@ const #{moduleName} = (() => {
     yy: {},
     symbols_: #{JSON.stringify(@symbols_)},
     terminals_: #{JSON.stringify(@terminals_).replace(/"(\d+)":/g, '$1:')},
-    productions_: #{JSON.stringify(@productions_)},
+    rules_: #{JSON.stringify(@rules_)},
     performAction: #{String(@performAction)},
     table: #{JSON.stringify(@table).replace(/"(\d+)":/g, '$1:')},
     defaultActions: #{JSON.stringify(@defaultActions).replace(/"(\d+)":/g, '$1:')},
@@ -986,7 +986,7 @@ const #{moduleName} = (() => {
             }
             break;
           case 2:
-            len = this.productions_[action[1]][1];
+            len = this.rules_[action[1]][1];
             yyval.$ = vstack[vstack.length - len];
             yyval._$ = {
               first_line: lstack[lstack.length - (len || 1)].first_line,
@@ -1006,7 +1006,7 @@ const #{moduleName} = (() => {
               vstack = vstack.slice(0, -1 * len);
               lstack = lstack.slice(0, -1 * len);
             }
-            stack.push(this.productions_[action[1]][0]);
+            stack.push(this.rules_[action[1]][0]);
             vstack.push(yyval.$);
             lstack.push(yyval._$);
             newState = table[stack[stack.length - 2]][stack[stack.length - 1]];
@@ -1072,7 +1072,7 @@ parser.init = (dict) ->
   @table          = dict.table
   @defaultActions = dict.defaultActions
   @performAction  = dict.performAction
-  @productions_   = dict.productions_
+  @rules_   = dict.rules_
   @symbols_       = dict.symbols_
   @terminals_     = dict.terminals_
 
@@ -1244,7 +1244,7 @@ parser.parse = (input) ->
 
       when 2 # reduce
         # @reductionCount++;
-        len = @productions_[action[1]][1]
+        len = @rules_[action[1]][1]
         # perform semantic action
         yyval.$ = vstack[vstack.length - len] # default to $$ = $1
         # default location, uses first token for firsts, last for lasts
@@ -1265,7 +1265,7 @@ parser.parse = (input) ->
           vstack = vstack.slice(0, -1 * len)
           lstack = lstack.slice(0, -1 * len)
 
-        stack.push(@productions_[action[1]][0])    # push nonterminal (reduce)
+        stack.push(@rules_[action[1]][0])    # push nonterminal (reduce)
         vstack.push(yyval.$)
         lstack.push(yyval._$)
         # goto new state = table[STATE][NONTERMINAL]
