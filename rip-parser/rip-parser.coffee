@@ -194,11 +194,9 @@ resolveConflict = (production, op, reduce, shift) ->
 
   sln
 
-# ==[ Main LALR(1) Parser Class  ]==============================================
+# ==[ Main LALR(1) Parser Generator Class  ]====================================
 
 class Generator
-
-  # ==[ Constructor and Initialization ]========================================
 
   constructor: (grammar, opt) ->
     @conflicts   = 0
