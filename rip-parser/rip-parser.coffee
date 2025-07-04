@@ -356,11 +356,6 @@ class Generator
 
     @performAction = "function anonymous(#{parameters}) {\n#{actions}\n}"
 
-  # FIXME: Turn back on when it's ready...
-  # buildTable: ->
-  #   @states         = @canonicalCollection()
-  #   @table          = @parseTable(@states)
-  #   @defaultActions = findDefaults(@table)
 
   canonicalCollection: ->
     item1      = new Item(@productions[0], 0, [@EOF])
