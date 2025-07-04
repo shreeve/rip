@@ -118,18 +118,16 @@ mergeArrays = (a, b) ->
 
 # Defensive getter for spells
 getSpell = (spells, s) ->
-  unless spells[s]
-    spells[s] = new Spell(s)
-  spells[s]
+  spells[s] ?= new Spell(s)
 
 # Set precedence and associativity of operators
 processOperators = (ops) ->
   return {} unless ops
   operators = {}
-  for i in [0...ops.length]
-    prec = ops[i]
-    for k in [1...prec.length]
-      operators[prec[k]] = { precedence: i + 1, assoc: prec[0] }
+  for group, i in ops
+    assoc = group[0]
+    for op in group[1..]
+      operators[op] = { precedence: i + 1, assoc }
   operators
 
 # ==[ Parser Helpers ]==========================================================
