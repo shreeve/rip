@@ -1040,8 +1040,7 @@ const #{moduleName} = (() => {
     opt = Object.assign {}, @options, opt
     moduleName = opt.moduleName or "parser"
 
-    out = @generateESModule(opt)
-    out += """
+    @generateESModule(opt) + """
 
 if (typeof require !== 'undefined' && typeof exports !== 'undefined') {
   exports.parser = #{moduleName};
@@ -1049,8 +1048,6 @@ if (typeof require !== 'undefined' && typeof exports !== 'undefined') {
   exports.parse = function () { return #{moduleName}.parse.apply(#{moduleName}, arguments); };
   exports.main = function() {};
 }"""
-
-    return out
 
   # ==[ Error Handling ]========================================================
 
