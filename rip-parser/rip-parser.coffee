@@ -102,7 +102,7 @@ class ItemSet
 # ==[ Utility Functions ]=======================================================
 
 # Iterate over objects
-each = (obj, func) ->
+forEach = (obj, func) ->
   if obj.forEach
     obj.forEach func
   else
@@ -422,7 +422,7 @@ class Generator
     terms = []
     terms_ = {}
 
-    each(symbols_, (id, sym) ->
+    forEach(symbols_, (id, sym) ->
       unless nonterminals[sym]
         terms.push(sym)
         terms_[id] = sym
@@ -712,7 +712,7 @@ class Generator
 
     if @conflicts > 0
       conflictDetails = "\nStates with conflicts:"
-      each conflictedStates, (val, state) ->
+      forEach conflictedStates, (val, state) ->
         conflictDetails += "\nState #{state}"
         conflictDetails += "\n  #{itemSets[state].join("\n  ")}"
       # NOTE: Don't throw error for default resolutions - just log them
