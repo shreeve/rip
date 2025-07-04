@@ -76,9 +76,7 @@ class ItemSet
     @inadequate = false
 
   contains: (item) -> @map.has(item.id)
-  forEach: (fn) ->
-    @map.forEach (item, key) =>
-      fn(item)
+  forEach: (fn) -> @map.forEach (item, key) => fn(item)
   isEmpty: -> @map.size is 0
   items: -> Array.from @map.values()
   toString: -> @items().toString()
