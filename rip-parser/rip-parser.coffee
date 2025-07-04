@@ -460,7 +460,7 @@ class BaseGenerator
             @resolutions.push([k, stackSymbol, sln])
             if sln.bydefault
               @conflicts++
-              throw new Error("Grammar ambiguous when lookahead is #{stackSymbol} in state #{k}")
+              throw new Error("Grammar ambiguous when lookahead is #{JSON.stringify(stackSymbol)} in state #{k}")
             else
               action = sln.action
           else
