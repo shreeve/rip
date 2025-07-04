@@ -1331,11 +1331,36 @@ if !module.parent
     output_file = "#{grammar_name}-parser.js"
 
   try
-    # Load the grammar file
-    { parser } = require grammar_file
+    # Load the grammar file - supports both old parser format and new grammar format
+    grammar_module = require grammar_file
 
-    # Generate the parser
-    parser_code = parser.generate(moduleMain: ->)
+    # Check if it's a new grammar format (exports grammar data) or old format (exports parser)
+    if grammar_module.grammar
+      # New format: grammar file exports { grammar, tokens, operators, startSymbol }
+      grammar_data = grammar_module
+      startSymbol = grammar_data.startSymbol or 'Root'
+
+      # Create a grammar object that rip-parser can understand
+      grammar = {
+        bnf: grammar_data.grammar
+        tokens: grammar_data.tokens
+        operators: grammar_data.operators
+        start: startSymbol
+        parseParams: grammar_data.parseParams or []
+        moduleInclude: grammar_data.moduleInclude or ''
+        actionInclude: grammar_data.actionInclude or ''
+      }
+
+      # Generate the parser from the grammar data
+      parser_generator = new LALRGenerator(grammar)
+      parser_code = parser_generator.generate(moduleMain: ->)
+
+    else if grammar_module.parser
+      # Old format: grammar file exports { parser }
+      parser_code = grammar_module.parser.generate(moduleMain: ->)
+
+    else
+      throw new Error("Grammar file must export either { grammar, tokens, operators, startSymbol } or { parser }")
 
     # Write the generated parser to a file
     fs.writeFileSync output_file, parser_code
