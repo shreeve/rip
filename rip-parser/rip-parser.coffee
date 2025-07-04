@@ -428,8 +428,6 @@ class Generator
         tokens_[id] = sym
     )
 
-    @hasErrorRecovery = her
-
     @tokens   = tokens
     @tokens_  = tokens_
     @symbols_ = symbols_
