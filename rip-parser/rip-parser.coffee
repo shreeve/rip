@@ -223,7 +223,7 @@ class Generator
     options  = opt or {}
     @states  = @buildLRStates()
     @tokens_ = {}
-    @nterms_ = {}
+    @derived = {}
     @nonterminals = {}
     @inadequateStates = []
     @onDemandLookahead = options.onDemandLookahead or false
@@ -630,7 +630,7 @@ class Generator
           # For Simple LALR algorithm, @go_ checks if
           if ctx
             q = @go_(rule.symbol, rule.handle.slice(0, i))
-            bool = not ctx or q is parseInt(@nterms_[t], 10)
+            bool = not ctx or q is parseInt(@derived[t], 10)
 
             if i is rule.handle.length + 1 and bool
               set = getNonterminal(@nonterminals, rule.symbol).follows
@@ -725,7 +725,7 @@ class Generator
         if item.dotPosition is 0
           symbol = "#{i}:#{item.rule.symbol}"
           @tokens_[symbol] = item.rule.symbol
-          @nterms_[symbol] = i
+          @derived[symbol] = i
           nt = getNonterminal(@nonterminals, symbol)
           pathInfo = @goPath(i, item.rule.handle)
           p = new Rule(symbol, pathInfo.path, @rules.length)
@@ -764,7 +764,7 @@ class Generator
     path = []
     for i in [0...w.length]
       t = if w[i] then "#{q}:#{w[i]}" else ''
-      if t then @nterms_[t] = q
+      if t then @derived[t] = q
       path.push(t)
       q = @states[q].edges[w[i]] or q
       @tokens_[t] = w[i]
