@@ -62,14 +62,16 @@ The end product is a **single function `parse()`** that expects a lexer and retu
 
 ```coffee
 grammar =
+
   Expression: [
-    [ 'Expression "+" Term',  -> $1 + $3,             ]
-    [ 'Expression "*" Term',  -> $1 * $3, {prec: "*"} ]
-    [ 'Term',                 -> $1                   ]
+    o 'Expression "+" Term', -> $1 + $3
+    o 'Expression "*" Term', -> $1 * $3, {prec: "*"}
+    o 'Term'               , -> $1
   ]
+
   Term: [
-    [ 'NUMBER',               -> Number $1            ]
-    [ '"(" Expression ")"',   -> $2                   ]
+    o 'NUMBER'             , -> Number $1
+    o '"(" Expression ")"' , -> $2
   ]
 
 operators = [
@@ -81,16 +83,16 @@ gen    = new Generator()
 parser = gen.generate {
   grammar,
   operators,
-  start:  'Expression',
   tokens: 'NUMBER + - * / ( )'
+  start:  'Expression',
 }
 ```
 
 ### Notes
 
-- Each production is an array `[pattern, action, opts]`. `pattern` is a space-separated RHS; omit or use `''` for ε (empty).
+- Each production entry can be created with the helper `o pattern, action, opts`. `pattern` is a space-separated RHS; omit or use `''` for ε (empty).
 - `action` can be a CoffeeScript/JS function **or** an arrow-body string. Positional values `$1 … $n`, `$$` (result) and location variables `@1 … @n` are supported.
-- `opts.prec` lets you tag a production with an explicit precedence symbol.
+- `opts.prec` lets you tag a production with an explicit precedence symbol for operator resolution.
 
 ---
 
@@ -132,4 +134,4 @@ These print to the console and make it easier to reason about why a given gramma
 
 ## License
 
-MIT © 2025 Steve Shreeve & contributors
+MIT © 2025 The rip team & contributors
