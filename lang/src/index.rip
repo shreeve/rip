@@ -1,0 +1,10 @@
+import * as Rip from './rip.js'
+
+export default Rip
+
+export VERSION = Rip.VERSION
+export FILE_EXTENSIONS = Rip.FILE_EXTENSIONS
+export helpers = Rip.helpers
+export compile = Rip.compile
+export tokens = Rip.tokens
+export nodes = Rip.nodes
