@@ -1194,3 +1194,6 @@ if (typeof require !== 'undefined' && typeof module !== 'undefined') {
 # ==[ Export ]===============================================================
 
 module.exports = { Generator }
+
+if !module.parent
+  console.log "Add CLI here..."
