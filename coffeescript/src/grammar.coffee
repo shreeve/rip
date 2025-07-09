@@ -14,7 +14,7 @@
 # If you run the `cake build:parser` command, Jison constructs a parse table
 # from our rules and saves it into `lib/parser.js`.
 
-# Since we're going to be wrapped in a function by Jison in any case, if our
+# Since we're going to be wrapped in a function by rip-parser in any case, if our
 # action immediately returns a value, we can optimize by removing the function
 # wrapper and just returning the value directly.
 unwrap = /^function\s*\(\)\s*\{\s*return\s*([\s\S]*);\s*\}/
