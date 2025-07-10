@@ -3086,7 +3086,7 @@ graph LR
     report
 
   # ============================================================================
-  # Advanced Table Optimization and Compression (Bug #20 Fix)
+  # Advanced Table Optimization and Compression
   # ============================================================================
 
   # Comprehensive table optimization pipeline
@@ -3400,8 +3400,6 @@ graph LR
       size: compressedSize
     }
 
-
-
   # Bit-pack actions for maximum compression
   bitPackActions: ->
     console.log "Bit-packing actions..."
@@ -3503,24 +3501,14 @@ graph LR
     else
       action  # GOTO action
 
-
-
   # Enhanced table preparation with optimization
   prepareOptimizedTable: ->
     # Always return the basic table data for generateCommonJS
     # The optimization is handled in generateOptimizedCommonJS
     @prepareTable()
 
-
-
-
-
-
-
-
-
   # ============================================================================
-  # Smart Table Optimization (Bug #20 Fix - Performance Conscious)
+  # Smart Table Optimization, Performance Conscious
   # ============================================================================
 
   # Smart optimization that only runs when beneficial
@@ -3759,10 +3747,8 @@ graph LR
     hash
 
   # ============================================================================
-  # Source Map Generation (Bug #22 Fix - Part 1)
+  # Source Map Generation
   # ============================================================================
-
-
 
   # Source Map Tracker class for managing mappings
   class SourceMapTracker
@@ -3869,14 +3855,6 @@ graph LR
 
     # Base64 characters for VLQ encoding
     base64Chars: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-
-
-
-
-
-
-
-
 
   # Helper method to generate console function overloading
   generateConsoleOverrides: (options = {}) ->
