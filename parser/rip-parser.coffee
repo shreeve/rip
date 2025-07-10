@@ -260,7 +260,9 @@ class Generator
   getSymbol: (name, isTerminal) ->
     return sym if sym = @symbols.get(name)
     isTerminal = if isTerminal? then !!isTerminal else @tokens.has(name)
-    @symbols.set name, new Symbol(name, isTerminal, @symbols.size)
+    symbol = new Symbol(name, isTerminal, @symbols.size)
+    @symbols.set name, symbol
+    symbol
 
   # ============================================================================
   # Grammar Analysis
