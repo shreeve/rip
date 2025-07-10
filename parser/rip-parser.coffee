@@ -5312,15 +5312,12 @@ if !module.parent
   # Parse grammar file based on format
   parseGrammarFile = (source, options) ->
     try
-      # Try to evaluate as CoffeeScript/JavaScript
-      if options.inputFile.endsWith('.coffee')
-        # CoffeeScript grammar file
-        CoffeeScript = require('coffeescript')
-        compiledSource = CoffeeScript.compile(source, { bare: true })
-        grammar = eval(compiledSource)
-      else if options.inputFile.endsWith('.js')
-        # JavaScript grammar file
-        grammar = eval(source)
+      # Try to require the grammar file directly (works with coffee executable)
+      if options.inputFile.endsWith('.coffee') or options.inputFile.endsWith('.js')
+        # CoffeeScript/JavaScript grammar file - require directly
+        path = require('path')
+        absolutePath = path.resolve(options.inputFile)
+        grammar = require(absolutePath)
       else
         # Try JSON format
         grammar = JSON.parse(source)
