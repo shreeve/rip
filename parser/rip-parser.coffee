@@ -811,16 +811,36 @@ class Generator
   computeDefaultActions: ->
     @defaultActions = {}
 
+    # A state can have a default action if:
+    # 1. All actions in the state are reduces by the same rule, OR
+    # 2. The state has no shift actions and only one unique reduce action
     for state in @states
-      # If all actions in a state are reduces by the same rule
-      reductions = []
-      for item in state.items
-        if item.isComplete()
-          reductions.push(item.rule.id)
+      continue unless @table[state.id] # Skip if no table entry
 
-      if reductions.length > 0 and new Set(reductions).size == 1
-        # Can use default reduction
-        @defaultActions[state.id] = [2, reductions[0]]
+      actions = @table[state.id]
+      actionTypes = new Set()
+      reduceRules = new Set()
+      hasShift = false
+
+      # Analyze all actions in this state
+      for symbol, action of actions
+        if action.type is 'shift'
+          hasShift = true
+        else if action.type is 'reduce'
+          actionTypes.add('reduce')
+          reduceRules.add(action.rule)
+        else if action.type is 'accept'
+          actionTypes.add('accept')
+          # Accept states cannot have default actions
+          hasShift = true # Prevent default action
+
+      # Can use default reduction if:
+      # - No shift actions
+      # - Only reduce actions
+      # - All reduces are for the same rule
+      if not hasShift and actionTypes.size <= 1 and reduceRules.size == 1
+        ruleId = [...reduceRules][0]
+        @defaultActions[state.id] = [2, ruleId]
 
   # ============================================================================
   # Code Generation
