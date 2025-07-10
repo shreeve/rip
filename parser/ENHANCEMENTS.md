@@ -26,10 +26,9 @@ coreKey: -> @_coreKey ?= Item.makeCoreKey(@rule.id, @dot)
 ```
 
 ### Results
-✅ Consistent state merging and proper LALR(1) behavior
-✅ Enhanced memoization for better performance
-✅ Comprehensive comments with examples like `Expr → Expr + • Term, {';', ')', '$'}`
-
+- ✅ Consistent state merging and proper LALR(1) behavior
+- ✅ Enhanced memoization for better performance
+- ✅ Comprehensive comments with examples like `Expr → Expr + • Term, {';', ')', '$'}`
 ---
 
 ## 20250710-002 - Incorrect Lookahead Propagation Logic
@@ -64,10 +63,9 @@ computeLookaheads: ->
 ```
 
 ### Results
-✅ Proper distinction between spontaneous and propagated lookaheads
-✅ Standard LALR(1) algorithm compliance
-✅ Correct lookahead computation for complex grammars
-
+- ✅ Proper distinction between spontaneous and propagated lookaheads
+- ✅ Standard LALR(1) algorithm compliance
+- ✅ Correct lookahead computation for complex grammars
 ---
 
 ## 20250710-003 - Missing Null Pointer Checks
@@ -103,11 +101,10 @@ propagateLookaheads: ->
 ```
 
 ### Results
-✅ Robust error handling preventing crashes
-✅ Comprehensive validation for all data access
-✅ Enhanced error messages for debugging
-✅ Defensive programming throughout
-
+- ✅ Robust error handling preventing crashes
+- ✅ Comprehensive validation for all data access
+- ✅ Enhanced error messages for debugging
+- ✅ Defensive programming throughout
 ---
 
 ## 20250710-004 - Reduce/Reduce Conflict Resolution Bug
@@ -135,11 +132,10 @@ resolveConflict: (action1, action2, symbol) ->
 ```
 
 ### Results
-✅ Correct conflict resolution logic
-✅ Type safety throughout conflict handling
-✅ Graceful handling of malformed data
-✅ Enhanced debugging information
-
+- ✅ Correct conflict resolution logic
+- ✅ Type safety throughout conflict handling
+- ✅ Graceful handling of malformed data
+- ✅ Enhanced debugging information
 ---
 
 ## 20250710-005 - Semantic Action Parameter Substitution
@@ -173,11 +169,10 @@ action = action.replace /\$(\d+)/g, (match, n) ->
 ```
 
 ### Results
-✅ Correct parameter mapping for all rules
-✅ Proper stack access in generated parsers
-✅ Enhanced validation with warnings
-✅ Clear documentation with examples
-
+- ✅ Correct parameter mapping for all rules
+- ✅ Proper stack access in generated parsers
+- ✅ Enhanced validation with warnings
+- ✅ Clear documentation with examples
 ---
 
 ## 20250710-006 - First Set Computation Bug
@@ -212,11 +207,10 @@ computeFirstOfString: (symbols) ->
 ```
 
 ### Results
-✅ Correct FIRST set computation following standard algorithm
-✅ Proper sequence semantics with early termination
-✅ Accurate nullable symbol handling
-✅ Performance optimization through early stopping
-
+- ✅ Correct FIRST set computation following standard algorithm
+- ✅ Proper sequence semantics with early termination
+- ✅ Accurate nullable symbol handling
+- ✅ Performance optimization through early stopping
 ---
 
 ## 20250710-007 - Default Actions Computation
@@ -254,11 +248,10 @@ computeDefaultActions: ->
 ```
 
 ### Results
-✅ Proper table-based default action computation
-✅ Correct conflict detection and handling
-✅ Only reduce-only states get default actions
-✅ Significant table size reduction for appropriate states
-
+- ✅ Proper table-based default action computation
+- ✅ Correct conflict detection and handling
+- ✅ Only reduce-only states get default actions
+- ✅ Significant table size reduction for appropriate states
 ---
 
 ## 20250710-008 - Follow Set Computation Bug
@@ -298,11 +291,10 @@ computeFollow: ->
 ```
 
 ### Results
-✅ Correct left-to-right processing direction
-✅ Standard FOLLOW set algorithm implementation
-✅ Proper FIRST set integration
-✅ Accurate FOLLOW sets for all non-terminals
-
+- ✅ Correct left-to-right processing direction
+- ✅ Standard FOLLOW set algorithm implementation
+- ✅ Proper FIRST set integration
+- ✅ Accurate FOLLOW sets for all non-terminals
 ---
 
 ## 20250710-009 - Comprehensive Grammar Validation
@@ -345,13 +337,12 @@ validateGrammar: ->
 ```
 
 ### Results
-✅ **Comprehensive Validation**: All major grammar issues detected
-✅ **Reachability Analysis**: Identifies unreachable non-terminals
-✅ **Productivity Analysis**: Finds unproductive symbols
-✅ **Left Recursion Detection**: Both immediate and indirect
-✅ **Enhanced Error Reporting**: Clear, actionable error messages
-✅ **Warning System**: Non-fatal issues reported as warnings
-
+- ✅ **Comprehensive Validation**: All major grammar issues detected
+- ✅ **Reachability Analysis**: Identifies unreachable non-terminals
+- ✅ **Productivity Analysis**: Finds unproductive symbols
+- ✅ **Left Recursion Detection**: Both immediate and indirect
+- ✅ **Enhanced Error Reporting**: Clear, actionable error messages
+- ✅ **Warning System**: Non-fatal issues reported as warnings
 ---
 
 ## 20250710-010 - Eliminate Unreachable/Unproductive Symbols
@@ -393,12 +384,11 @@ reassignIds: ->
 ```
 
 ### Results
-✅ **Complete Symbol Elimination**: All unreachable/unproductive symbols removed
-✅ **Cascading Effect Handling**: Iterative elimination until convergence
-✅ **Proper Rule Cleanup**: All affected rules removed correctly
-✅ **ID Consistency**: Proper reassignment maintains system integrity
-✅ **Grammar Minimization**: Optimal grammar size after cleanup
-
+- ✅ **Complete Symbol Elimination**: All unreachable/unproductive symbols removed
+- ✅ **Cascading Effect Handling**: Iterative elimination until convergence
+- ✅ **Proper Rule Cleanup**: All affected rules removed correctly
+- ✅ **ID Consistency**: Proper reassignment maintains system integrity
+- ✅ **Grammar Minimization**: Optimal grammar size after cleanup
 ---
 
 ## 20250710-011 - Comprehensive Error Recovery System
@@ -436,12 +426,11 @@ attemptErrorRecovery: (errStr, hash, stack, vstack, lstack, symbol, lex, unlex) 
 ```
 
 ### Results
-✅ **Multi-Strategy Recovery**: Three complementary recovery approaches
-✅ **Automatic Error Productions**: Grammar automatically enhanced
-✅ **Token Buffer System**: Flexible token management for recovery
-✅ **Context-Aware Sync**: Smart synchronization point selection
-✅ **Continued Parsing**: Find multiple errors in single parse run
-
+- ✅ **Multi-Strategy Recovery**: Three complementary recovery approaches
+- ✅ **Automatic Error Productions**: Grammar automatically enhanced
+- ✅ **Token Buffer System**: Flexible token management for recovery
+- ✅ **Context-Aware Sync**: Smart synchronization point selection
+- ✅ **Continued Parsing**: Find multiple errors in single parse run
 ---
 
 ## 20250710-012 - Advanced Conflict Analysis and Reporting
@@ -481,12 +470,11 @@ analyzeConflict: (state, symbol, action1, action2) ->
 ```
 
 ### Results
-✅ **Comprehensive Conflict Analysis**: All conflict types tracked
-✅ **Intelligent Explanations**: Context-aware descriptions
-✅ **Actionable Suggestions**: Specific fix recommendations
-✅ **Visual Reporting**: Clear, organized conflict output
-✅ **Resolution Tracking**: Complete resolution reasoning
-
+- ✅ **Comprehensive Conflict Analysis**: All conflict types tracked
+- ✅ **Intelligent Explanations**: Context-aware descriptions
+- ✅ **Actionable Suggestions**: Specific fix recommendations
+- ✅ **Visual Reporting**: Clear, organized conflict output
+- ✅ **Resolution Tracking**: Complete resolution reasoning
 ---
 
 ## 20250710-013 - State Minimization and Optimization
@@ -526,12 +514,11 @@ minimizeStates: ->
 ```
 
 ### Results
-✅ **57% State Reduction**: Demonstrated on complex grammar (47→20 states)
-✅ **Multiple Optimization Strategies**: Unreachable, equivalent, and compatible merging
-✅ **Table Reconstruction**: Proper table rebuilding after minimization
-✅ **Performance Metrics**: Comprehensive statistics and tracking
-✅ **Significant Space Savings**: Dramatically smaller parsing tables
-
+- ✅ **57% State Reduction**: Demonstrated on complex grammar (47→20 states)
+- ✅ **Multiple Optimization Strategies**: Unreachable, equivalent, and compatible merging
+- ✅ **Table Reconstruction**: Proper table rebuilding after minimization
+- ✅ **Performance Metrics**: Comprehensive statistics and tracking
+- ✅ **Significant Space Savings**: Dramatically smaller parsing tables
 ---
 
 ## 20250710-014 - Enhanced Input Validation and Error Handling
@@ -576,12 +563,11 @@ validateGrammarInput: ({ grammar, operators, start, tokens }) ->
 ```
 
 ### Results
-✅ **Robust Error Handling**: Prevents crashes from malformed input
-✅ **Comprehensive Validation**: All input aspects thoroughly checked
-✅ **Clear Error Messages**: Actionable feedback for fixing issues
-✅ **Helpful Suggestions**: Guidance for common problems
-✅ **Graceful Degradation**: Continues validation to find all issues
-
+- ✅ **Robust Error Handling**: Prevents crashes from malformed input
+- ✅ **Comprehensive Validation**: All input aspects thoroughly checked
+- ✅ **Clear Error Messages**: Actionable feedback for fixing issues
+- ✅ **Helpful Suggestions**: Guidance for common problems
+- ✅ **Graceful Degradation**: Continues validation to find all issues
 ---
 
 ## 20250710-015 - Performance Optimizations and Caching
@@ -624,12 +610,11 @@ closure: (state) ->
 ```
 
 ### Results
-✅ **20% Cache Hit Rate**: Significant performance improvement
-✅ **189ms Generation Time**: Fast generation for complex grammars
-✅ **O(1) Rule Lookup**: Eliminated linear rule searches
-✅ **Memoized Computations**: Avoided redundant calculations
-✅ **Scalability Improvements**: Better performance on large grammars
-
+- ✅ **20% Cache Hit Rate**: Significant performance improvement
+- ✅ **189ms Generation Time**: Fast generation for complex grammars
+- ✅ **O(1) Rule Lookup**: Eliminated linear rule searches
+- ✅ **Memoized Computations**: Avoided redundant calculations
+- ✅ **Scalability Improvements**: Better performance on large grammars
 ---
 
 ## 20250710-016 - Comprehensive Debugging and Development Tools
@@ -677,12 +662,11 @@ generateDotVisualization: ->
 ```
 
 ### Results
-✅ **Complete Development Environment**: Professional-grade debugging tools
-✅ **Interactive Exploration**: Real-time grammar and state analysis
-✅ **Visual Representations**: DOT and Mermaid automaton diagrams
-✅ **Comprehensive Analysis**: Grammar complexity and recursion detection
-✅ **Development Assistance**: Enhanced conflict analysis and suggestions
-
+- ✅ **Complete Development Environment**: Professional-grade debugging tools
+- ✅ **Interactive Exploration**: Real-time grammar and state analysis
+- ✅ **Visual Representations**: DOT and Mermaid automaton diagrams
+- ✅ **Comprehensive Analysis**: Grammar complexity and recursion detection
+- ✅ **Development Assistance**: Enhanced conflict analysis and suggestions
 ---
 
 ## 20250710-017 - Advanced Table Optimization and Compression
@@ -729,12 +713,11 @@ applySparseTableCompression: ->
 ```
 
 ### Results
-✅ **Zero Overhead for Small Grammars**: Smart auto-detection
-✅ **Multiple Compression Formats**: COO, CSR, Dictionary, RLE support
-✅ **Significant Space Savings**: Up to 70% table size reduction
-✅ **Performance-Conscious**: Only applies when beneficial
-✅ **Adaptive Optimization**: Chooses best algorithm automatically
-
+- ✅ **Zero Overhead for Small Grammars**: Smart auto-detection
+- ✅ **Multiple Compression Formats**: COO, CSR, Dictionary, RLE support
+- ✅ **Significant Space Savings**: Up to 70% table size reduction
+- ✅ **Performance-Conscious**: Only applies when beneficial
+- ✅ **Adaptive Optimization**: Chooses best algorithm automatically
 ---
 
 ## 20250710-018 - High-Performance Runtime Parser Generation
@@ -790,12 +773,11 @@ generateOptimizedCommonJS: (options = {}) ->
 ```
 
 ### Results
-✅ **43% Smaller Generated Code**: 11,513 → 6,541 characters
-✅ **Equal Generation Speed**: No performance penalty during generation
-✅ **Pre-allocated Arrays**: Reduced memory allocation overhead
-✅ **Fast Table Lookup**: Optimized based on table characteristics
-✅ **Built-in Metrics**: Performance monitoring and statistics
-
+- ✅ **43% Smaller Generated Code**: 11,513 → 6,541 characters
+- ✅ **Equal Generation Speed**: No performance penalty during generation
+- ✅ **Pre-allocated Arrays**: Reduced memory allocation overhead
+- ✅ **Fast Table Lookup**: Optimized based on table characteristics
+- ✅ **Built-in Metrics**: Performance monitoring and statistics
 ---
 
 ## 20250710-019 - Source Map Generation Support
@@ -837,12 +819,107 @@ encodeVLQValue: (value) ->
 ```
 
 ### Results
-✅ **Multiple Source Map Formats**: Inline, external, and object support
-✅ **VLQ Encoding**: Proper Base64 VLQ implementation
-✅ **Standards Compliance**: Source Map v3 specification
-✅ **Enhanced Debugging**: Map generated code back to grammar source
-✅ **Minimal Overhead**: Optional feature with excellent performance
-✅ **Tool Integration**: Compatible with Chrome DevTools, VS Code, etc.
+- ✅ **Multiple Source Map Formats**: Inline, external, and object support
+- ✅ **VLQ Encoding**: Proper Base64 VLQ implementation
+- ✅ **Standards Compliance**: Source Map v3 specification
+- ✅ **Enhanced Debugging**: Map generated code back to grammar source
+- ✅ **Minimal Overhead**: Optional feature with excellent performance
+- ✅ **Tool Integration**: Compatible with Chrome DevTools, VS Code, etc.
+---
+
+## 20250710-020 - Comprehensive Command Line Interface
+
+### Problem Analysis
+The parser generator lacked a user-friendly command line interface, requiring users to write custom scripts for parser generation and providing no built-in tools for grammar analysis, optimization control, or debugging assistance.
+
+### Solution Implemented
+- **Professional CLI Design**: Full-featured command line interface with comprehensive help
+- **Flexible Output Control**: Multiple formats (CommonJS, ES6, UMD), verbosity levels, and output options
+- **Advanced Analysis Tools**: Detailed reports for grammar debugging and optimization
+- **Smart Optimization Control**: Auto-optimization that only runs when beneficial
+- **Interactive Exploration Mode**: Real-time grammar analysis and debugging
+- **Comprehensive Reporting**: Statistics, conflicts, states, grammar analysis, and performance metrics
+
+### Technical Details
+```coffeescript
+# CLI Options and Argument Parsing
+class CLIOptions
+  constructor: ->
+    @inputFile = null
+    @outputFile = null
+    @verbose = false
+    @debug = false
+    @showStats = false
+    @showStates = false
+    @showConflicts = false
+    @optimize = 'auto'  # auto, on, off
+    @compression = 'auto'  # auto, coo, csr, dictionary, rle, off
+    @sourceMap = false
+    @format = 'commonjs'  # commonjs, es6, umd
+    @interactive = false
+
+# Interactive Mode Implementation
+startInteractiveMode = (generator, options) ->
+  rl = readline.createInterface({
+    input: process.stdin
+    output: process.stdout
+    prompt: 'rip-parser> '
+  })
+
+  # Commands: states, state <id>, conflicts, grammar, symbols, stats, optimize
+  rl.on 'line', (input) ->
+    handleInteractiveCommand(input.trim(), generator, rl)
+
+# Comprehensive Report Generation
+generateReports = (generator, options) ->
+  reports = []
+  reports.push(generateStatsReport(generator)) if options.showStats
+  reports.push(generateStatesReport(generator)) if options.showStates
+  reports.push(generateConflictsReport(generator)) if options.showConflicts
+  reports.push(generateGrammarReport(generator)) if options.showGrammar
+  reports.push(generatePerformanceReport(generator)) if options.performance
+```
+
+### Key CLI Features
+- **Basic Usage**: `rip-parser grammar.coffee -o parser.js`
+- **Verbose Generation**: `rip-parser grammar.coffee --verbose --optimize on --stats`
+- **Comprehensive Analysis**: `rip-parser grammar.coffee --report analysis.md --conflicts --states`
+- **Performance Analysis**: `rip-parser grammar.coffee --performance --compression csr`
+- **Interactive Mode**: `rip-parser grammar.coffee --interactive`
+- **Debug with Source Maps**: `rip-parser grammar.coffee --debug --source-map parser.js.map`
+
+### Analysis & Reporting Options
+- **`--stats`**: Grammar statistics (productions, states, table size, sparsity)
+- **`--states`**: Complete state machine analysis with items and transitions
+- **`--conflicts`**: Comprehensive conflict analysis with explanations and suggestions
+- **`--grammar`**: Grammar analysis with FIRST/FOLLOW sets
+- **`--report [FILE]`**: Generate comprehensive markdown analysis reports
+- **`--performance`**: Performance metrics and timing analysis
+
+### Optimization Control
+- **`--optimize [auto|on|off]`**: Smart optimization control (default: auto)
+- **`--compression [METHOD]`**: Choose compression algorithm (COO, CSR, Dictionary, RLE)
+- **`--no-minimize`**: Disable state minimization
+- **Auto-optimization**: Only runs when beneficial for performance
+
+### Interactive Commands
+- **`states`**: List all states with item counts
+- **`state <id>`**: Explore specific state with items and transitions
+- **`conflicts`**: Show all conflicts with analysis
+- **`grammar`**: Display grammar rules and productions
+- **`symbols`**: Show symbol information (terminals/non-terminals)
+- **`stats`**: Display comprehensive statistics
+- **`optimize`**: Run optimization manually
+
+### Results
+- ✅ **Professional Development Experience**: Full-featured CLI with comprehensive help and usage examples
+- ✅ **Flexible Output Control**: Multiple formats, verbosity levels, and output destinations
+- ✅ **Advanced Analysis Capabilities**: Detailed reports for grammar debugging and optimization
+- ✅ **Performance-Conscious Design**: Smart optimization that only runs when beneficial
+- ✅ **Interactive Grammar Exploration**: Real-time analysis and debugging capabilities
+- ✅ **Comprehensive Error Handling**: Robust validation with helpful error messages
+- ✅ **Production-Ready Tooling**: Professional CLI suitable for build systems and workflows
+- ✅ **Extensive Documentation**: Built-in help with examples and clear usage patterns
 
 ---
 
