@@ -484,10 +484,6 @@ class Generator
         tempState.addItem(dummyItem.advance())
         @closureWithLookahead(tempState)
 
-        # NOTE: Claude Open 4 says this line looks unnecessary
-        # Find the corresponding item in the next state
-        coreItem = nextState.getCoreItem(item.rule.id, item.dot + 1)
-
         # Process items generated in closure
         for closureItem in tempState.items
           # Find corresponding item in next state
