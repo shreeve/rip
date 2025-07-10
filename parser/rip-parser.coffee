@@ -399,6 +399,7 @@ class Generator
 
         # Add advanced items
         for item in items
+          throw new Error("Cannot advance completed item") if @isComplete()
           newState.addItem(item.advance())
 
         # Compute closure
