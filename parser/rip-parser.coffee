@@ -744,8 +744,18 @@ class Generator
 
             else
               # Reduce/reduce conflict - use first rule (earliest in grammar)
-              if item.rule.id < existing.rule
+              if existing.type is 'reduce'
+                existingRuleId = existing.rule
+              else
+                # Unexpected: existing action is not shift or reduce
+                console.warn "Warning: Unexpected existing action type in reduce/reduce conflict: #{existing.type || 'undefined'}"
+                existingRuleId = existing.rule || existing
+
+              # Compare rule IDs and keep the earlier rule (lower ID)
+              if item.rule.id < existingRuleId
                 table[state.id][la] = { type: 'reduce', rule: item.rule.id }
+              # else keep the existing action (it has a lower rule ID)
+
               conflicts.rr++
           else
             table[state.id][la] = { type: 'reduce', rule: item.rule.id }
