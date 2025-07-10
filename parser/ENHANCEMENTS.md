@@ -675,7 +675,7 @@ generateDotVisualization: ->
 The parsing tables were stored as dense 2D arrays with 70-90% empty cells, wasting significant memory and impacting performance, especially for large grammars.
 
 ### Solution Implemented
-- **Multiple Compression Algorithms**: COO, CSR, Dictionary, RLE with auto-selection
+- **Multiple Compression Algorithms**: COO, CSR, Dictionary with auto-selection
 - **Symbol Encoding Optimization**: Frequency-based symbol ID optimization
 - **Row/Column Deduplication**: Pattern recognition and compression
 - **Action/Goto Table Splitting**: Separate tables for better cache locality
@@ -695,7 +695,7 @@ smartOptimizeTable: ->
 
 # Multiple compression strategies
 applySparseTableCompression: ->
-  algorithms = ['COO', 'CSR', 'Dictionary', 'RLE']
+  algorithms = ['COO', 'CSR', 'Dictionary']
   results = []
 
   for algorithm in algorithms
@@ -703,7 +703,6 @@ applySparseTableCompression: ->
       when 'COO' then @compressWithCOO()
       when 'CSR' then @compressWithCSR()
       when 'Dictionary' then @compressWithDictionary()
-      when 'RLE' then @compressWithRLE()
     results.push(result)
 
   # Choose best compression ratio
@@ -714,7 +713,7 @@ applySparseTableCompression: ->
 
 ### Results
 - ✅ **Zero Overhead for Small Grammars**: Smart auto-detection
-- ✅ **Multiple Compression Formats**: COO, CSR, Dictionary, RLE support
+- ✅ **Multiple Compression Formats**: COO, CSR, Dictionary support
 - ✅ **Significant Space Savings**: Up to 70% table size reduction
 - ✅ **Performance-Conscious**: Only applies when beneficial
 - ✅ **Adaptive Optimization**: Chooses best algorithm automatically
@@ -853,7 +852,7 @@ class CLIOptions
     @showStates = false
     @showConflicts = false
     @optimize = 'auto'  # auto, on, off
-    @compression = 'auto'  # auto, coo, csr, dictionary, rle, off
+    @compression = 'auto'  # auto, coo, csr, dictionary, off
     @sourceMap = false
     @format = 'commonjs'  # commonjs, es6, umd
     @interactive = false
@@ -898,7 +897,7 @@ generateReports = (generator, options) ->
 
 ### Optimization Control
 - **`--optimize [auto|on|off]`**: Smart optimization control (default: auto)
-- **`--compression [METHOD]`**: Choose compression algorithm (COO, CSR, Dictionary, RLE)
+- **`--compression [METHOD]`**: Choose compression algorithm (COO, CSR, Dictionary)
 - **`--no-minimize`**: Disable state minimization
 - **Auto-optimization**: Only runs when beneficial for performance
 

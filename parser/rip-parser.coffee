@@ -2543,7 +2543,6 @@ const parser = (() => {
         when 'COO' then @prepareCOOTableRuntime()
         when 'CSR' then @prepareCSRTableRuntime()
         when 'Dictionary' then @prepareDictionaryTableRuntime()
-        when 'RLE' then @prepareRLETableRuntime()
         else @prepareSimpleTableRuntime()
     else
       @prepareSimpleTableRuntime()
@@ -3424,8 +3423,7 @@ graph LR
     strategies = [
       @compressWithCOO.bind(this),      # Coordinate format
       @compressWithCSR.bind(this),      # Compressed Sparse Row
-      @compressWithDictionary.bind(this), # Dictionary encoding
-      @compressWithRLE.bind(this)       # Run-length encoding
+      @compressWithDictionary.bind(this) # Dictionary encoding
     ]
 
     bestCompression = null
@@ -3525,32 +3523,7 @@ graph LR
       size: compressedSize
     }
 
-  # Run-length encoding compression
-  compressWithRLE: ->
-    compressedRows = []
 
-    for stateId in [0...@states.length]
-      if @table[stateId]
-        row = []
-        for symbolId in [0...@symbols.size]
-          action = @table[stateId][symbolId]
-          row.push(if action then @encodeAction(action) else null)
-
-        # Apply RLE to row
-        compressedRow = @runLengthEncode(row)
-        compressedRows.push(compressedRow)
-      else
-        compressedRows.push([])
-
-    originalSize = @states.length * @symbols.size * 8
-    compressedSize = compressedRows.reduce(((sum, row) -> sum + row.length * 8), 0)
-
-    {
-      method: 'RLE',
-      data: compressedRows,
-      compressionRatio: ((originalSize - compressedSize) / originalSize) * 100,
-      size: compressedSize
-    }
 
   # Bit-pack actions for maximum compression
   bitPackActions: ->
@@ -3653,145 +3626,21 @@ graph LR
     else
       action  # GOTO action
 
-  runLengthEncode: (array) ->
-    if array.length == 0
-      return []
 
-    result = []
-    current = array[0]
-    count = 1
-
-    for i in [1...array.length]
-      if array[i] == current
-        count++
-      else
-        result.push([current, count])
-        current = array[i]
-        count = 1
-
-    result.push([current, count])
-    result
 
   # Enhanced table preparation with optimization
   prepareOptimizedTable: ->
-    if @optimizedTable
-      # Return optimized table format
-      switch @optimizedTable.format
-        when 'COO'
-          @prepareCOOTable()
-        when 'CSR'
-          @prepareCSRTable()
-        when 'Dictionary'
-          @prepareDictionaryTable()
-        when 'RLE'
-          @prepareRLETable()
-        when 'Simple'
-          @prepareTable()  # Use original for simple optimization
-        else
-          @prepareTable()  # Fallback to original
-    else
-      @prepareTable()  # No optimization, use original
+    # Always return the basic table data for generateCommonJS
+    # The optimization is handled in generateOptimizedCommonJS
+    @prepareTable()
 
-  prepareCOOTable: ->
-    # Generate COO format table for parser
-    entries = @optimizedTable.data
 
-    # Create lookup function
-    """
-    // COO format table lookup
-    const tableEntries = #{JSON.stringify(entries)};
-    const tableLookup = new Map();
 
-    // Build lookup map
-    for (const [state, symbol, action] of tableEntries) {
-      const key = (state << 16) | symbol;
-      tableLookup.set(key, action);
-    }
 
-    // Table access function
-    function getTableEntry(state, symbol) {
-      const key = (state << 16) | symbol;
-      return tableLookup.get(key);
-    }
-    """
 
-  prepareCSRTable: ->
-    # Generate CSR format table for parser
-    { values, columnIndices, rowPointers } = @optimizedTable.data
 
-    """
-    // CSR format table
-    const values = #{JSON.stringify(values)};
-    const columnIndices = #{JSON.stringify(columnIndices)};
-    const rowPointers = #{JSON.stringify(rowPointers)};
 
-    // Table access function
-    function getTableEntry(state, symbol) {
-      const start = rowPointers[state];
-      const end = rowPointers[state + 1];
 
-      for (let i = start; i < end; i++) {
-        if (columnIndices[i] === symbol) {
-          return values[i];
-        }
-      }
-      return undefined;
-    }
-    """
-
-  prepareDictionaryTable: ->
-    # Generate dictionary-compressed table for parser
-    { table, dictionary } = @optimizedTable.data
-
-    """
-    // Dictionary-compressed table
-    const actionDict = #{JSON.stringify(dictionary)};
-    const compressedTable = #{JSON.stringify(table)};
-
-    // Build reverse dictionary
-    const reverseDict = new Map();
-    for (const [action, id] of actionDict) {
-      reverseDict.set(id, JSON.parse(action));
-    }
-
-    // Table access function
-    function getTableEntry(state, symbol) {
-      const row = compressedTable[state];
-      if (row && row[symbol] !== null) {
-        return reverseDict.get(row[symbol]);
-      }
-      return undefined;
-    }
-    """
-
-  prepareRLETable: ->
-    # Generate RLE-compressed table for parser
-    compressedRows = @optimizedTable.data
-
-    """
-    // RLE-compressed table
-    const compressedRows = #{JSON.stringify(compressedRows)};
-
-    // Decompress row on demand
-    function decompressRow(rowData) {
-      const row = [];
-      for (const [value, count] of rowData) {
-        for (let i = 0; i < count; i++) {
-          row.push(value);
-        }
-      }
-      return row;
-    }
-
-    // Table access function with caching
-    const rowCache = new Map();
-    function getTableEntry(state, symbol) {
-      if (!rowCache.has(state)) {
-        rowCache.set(state, decompressRow(compressedRows[state]));
-      }
-      return rowCache.get(state)[symbol];
-    }
-    """
 
   # ============================================================================
   # Smart Table Optimization (Bug #20 Fix - Performance Conscious)
@@ -3979,10 +3828,10 @@ graph LR
     switch algorithm
       when 'COO'
         @compressedTable = @compressWithCOO()
-      when 'Dictionary'
-        @compressedTable = @compressWithDictionary()
+      when 'CSR'
+        @compressedTable = @compressWithCSR()
       else
-        @compressedTable = @compressWithRLE()
+        @compressedTable = @compressWithDictionary()
 
   # Choose compression algorithm without testing all
   chooseBestAlgorithmFast: ->
@@ -3995,7 +3844,7 @@ graph LR
     else if symbolCount > 20
       'Dictionary'  # Good for many symbols with repeated patterns
     else
-      'RLE'  # Good general purpose
+      'CSR'  # Good general purpose
 
   # Generate simple optimized table for dense tables
   generateSimpleOptimizedTable: ->
@@ -5055,7 +4904,7 @@ if !module.parent
       @generateReport = false
       @reportFile = null
       @optimize = 'auto'  # auto, on, off
-      @compression = 'auto'  # auto, coo, csr, dictionary, rle, off
+      @compression = 'auto'  # auto, coo, csr, dictionary, off
       @minimization = true
       @sourceMap = false
       @sourceMapFile = null
@@ -5186,7 +5035,7 @@ if !module.parent
 
     OPTIMIZATION:
       --optimize [auto|on|off]    Control table optimization (default: auto)
-      --compression [METHOD]      Compression method: auto, coo, csr, dictionary, rle, off
+      --compression [METHOD]      Compression method: auto, coo, csr, dictionary, off
       --no-minimize              Disable state minimization
       --source-map [FILE]        Generate source maps for debugging
 
@@ -5240,7 +5089,7 @@ if !module.parent
     Features:
     • Correct LALR(1) algorithm implementation
     • State minimization and table optimization
-    • Multiple compression algorithms (COO, CSR, Dictionary, RLE)
+    • Multiple compression algorithms (COO, CSR, Dictionary)
     • Source map generation for debugging
     • Comprehensive conflict analysis and resolution
     • Interactive grammar exploration tools

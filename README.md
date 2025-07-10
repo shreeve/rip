@@ -64,7 +64,7 @@ Since **generation** happens at runtime, you can create parsers on-the-fly or bu
 - Advanced error recovery with panic mode and token synchronization
 
 ### ⚡ **Performance Optimizations**
-- Multiple table compression algorithms (COO, CSR, Dictionary, RLE)
+- Multiple table compression algorithms (COO, CSR, Dictionary)
 - Intelligent caching with 20%+ hit rates
 - High-performance runtime generation
 - Smart optimization that adapts to grammar complexity

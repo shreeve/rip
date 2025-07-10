@@ -93,7 +93,7 @@ rip-parser implements **4 different compression algorithms** and automatically s
 1. **Dictionary Compression** - Excellent for repeated patterns (selected for CoffeeScript)
 2. **COO (Coordinate Format)** - Sparse matrix representation with coordinate triplets
 3. **CSR (Compressed Sparse Row)** - Row-compressed sparse matrix format
-4. **RLE (Run-Length Encoding)** - Efficient for data with consecutive repeated values
+
 
 ### **Compression Test Results**
 For the CoffeeScript grammar compilation:
