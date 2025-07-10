@@ -298,6 +298,36 @@ class Generator
     # Process operators (precedence and associativity)
     @processOperators(operators) if operators
 
+    # Add error recovery productions
+    @addErrorRecoveryProductions()
+
+  # Add error recovery productions to the grammar
+  addErrorRecoveryProductions: ->
+    # Find non-terminals that could benefit from error recovery
+    # Typically these are statement-level constructs
+    candidateNonTerminals = []
+
+    for [name, symbol] from @symbols
+      if not symbol.isTerminal
+        # Look for non-terminals that appear in multiple rules
+        # These are good candidates for error recovery
+        ruleCount = 0
+        for rule in @rules
+          if rule.lhs == name
+            ruleCount++
+
+        if ruleCount >= 2 or name.toLowerCase().includes('stmt') or
+           name.toLowerCase().includes('expr') or name.toLowerCase().includes('decl')
+          candidateNonTerminals.push(name)
+
+    # Add error productions for promising candidates
+    for ntName in candidateNonTerminals.slice(0, 3) # Limit to avoid too many
+      # Add: NonTerminal → error
+      errorRule = new Rule(ntName, ['error'], '/* error recovery */')
+      @rules.push(errorRule)
+
+      console.log("Added error recovery rule: #{ntName} → error")
+
   # Operator precedence and associativity
   processOperators: (operators) ->
     @precedence = {}
@@ -1234,6 +1264,95 @@ const parser = (() => {
       }
     },
 
+    attemptErrorRecovery(errStr, hash, stack, vstack, lstack, symbol, lex, unlex) {
+      // Error recovery strategies:
+      // 1. Look for error productions in current state
+      // 2. Panic mode: pop stack until we find a state that can handle 'error'
+      // 3. Skip tokens until we find a synchronizing token
+
+      const TERROR = 2;
+      const errorSymbol = TERROR;
+
+      // Strategy 1: Check if current state has an error production
+      let state = stack[stack.length - 1];
+      if (this.table[state] && this.table[state][errorSymbol]) {
+        // Shift the error token
+        stack.push(errorSymbol);
+        vstack.push(hash);
+        lstack.push(hash.loc || {});
+        stack.push(this.table[state][errorSymbol][1]);
+        return true; // Recovery successful
+      }
+
+      // Strategy 2: Panic mode - pop stack until we find a state with error production
+      let popCount = 0;
+      const maxPops = Math.min(stack.length / 2, 10); // Limit stack unwinding
+
+      while (popCount < maxPops && stack.length > 2) {
+        // Pop one symbol from stack
+        stack.pop(); // state
+        stack.pop(); // symbol
+        vstack.pop();
+        lstack.pop();
+        popCount++;
+
+        state = stack[stack.length - 1];
+        if (this.table[state] && this.table[state][errorSymbol]) {
+          // Found a state that can handle error
+          stack.push(errorSymbol);
+          vstack.push(hash);
+          lstack.push(hash.loc || {});
+          stack.push(this.table[state][errorSymbol][1]);
+
+          // Skip tokens until we find a synchronizing token
+          this.skipToSynchronizingToken(lex, unlex, hash.expected || []);
+          return true; // Recovery successful
+        }
+      }
+
+      // Strategy 3: If we can't find error production, try simple token skipping
+      if (this.skipToSynchronizingToken(lex, unlex, hash.expected || [])) {
+        return false; // Let caller decide what to do
+      }
+
+      return false; // Recovery failed
+    },
+
+    skipToSynchronizingToken(lex, unlex, expected) {
+      // Common synchronizing tokens (customize based on language)
+      const syncTokens = new Set([
+        ';', '}', ')', ']', 'EOF', 'NEWLINE', 'INDENT', 'OUTDENT'
+      ]);
+
+      // Also consider expected tokens as potential sync points
+      for (const exp of expected) {
+        if (exp && typeof exp === 'string') {
+          syncTokens.add(exp.replace(/'/g, '')); // Remove quotes
+        }
+      }
+
+      let skipped = 0;
+      const maxSkip = 20; // Prevent infinite loops
+
+      while (skipped < maxSkip) {
+        const token = lex();
+        if (!token || token === 1) { // EOF
+          return false;
+        }
+
+        const tokenName = this.terminals_[token] || token;
+        if (syncTokens.has(tokenName)) {
+          // Found a synchronizing token, put it back for normal processing
+          unlex(token);
+          return true;
+        }
+
+        skipped++;
+      }
+
+      return false; // Couldn't find sync token
+    },
+
     parse(input) {
       const self = this;
       let stack = [0];
@@ -1278,6 +1397,7 @@ const parser = (() => {
       }
 
       let symbol, preErrorSymbol, state, action, r, yyval = {}, p, len, newState, expected;
+      let tokenBuffer = []; // Buffer for putting back tokens during error recovery
 
       while (true) {
         // Retrieve state from top of stack
@@ -1314,6 +1434,22 @@ const parser = (() => {
                       ("'" + (this.terminals_[symbol] || symbol) + "'"));
           }
 
+          // Try error recovery
+          if (this.attemptErrorRecovery(errStr, {
+            text: lexer.match,
+            token: this.terminals_[symbol] || symbol,
+            line: lexer.yylineno,
+            loc: yyloc,
+            expected: expected,
+            recoverable: true
+          }, stack, vstack, lstack, symbol, lex, unlex)) {
+            // Recovery successful, continue parsing
+            recovering = 3; // Set recovery mode for next few tokens
+            symbol = null; // Force getting next token
+            continue;
+          }
+
+          // Recovery failed, call parseError
           this.parseError(errStr, {
             text: lexer.match,
             token: this.terminals_[symbol] || symbol,
@@ -1389,6 +1525,11 @@ const parser = (() => {
       }
 
       function lex() {
+        // First check if we have buffered tokens from error recovery
+        if (tokenBuffer.length > 0) {
+          return tokenBuffer.shift();
+        }
+
         let token = lexer.lex() || EOF;
         // Convert string tokens to numeric IDs
         if (typeof token !== 'number') {
@@ -1400,6 +1541,11 @@ const parser = (() => {
           }
         }
         return token;
+      }
+
+      // Function to put a token back for later consumption
+      function unlex(token) {
+        tokenBuffer.unshift(token);
       }
     }
   };
