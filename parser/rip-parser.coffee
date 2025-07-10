@@ -8,9 +8,8 @@
 # ==============================================================================
 
 class Symbol # Terminal or Nonterminal
-  constructor: (@name, isTerminal, id = 0) ->
+  constructor: (@name, @isTerminal, id = 0) ->
     @id         = id
-    @isTerminal = if isTerminal? then isTerminal else !/[a-z]/.test(@name)
     @nullable   = false
     @first      = new Set()
     @follow     = new Set()
@@ -258,8 +257,9 @@ class Generator
       precedenceLevel++
 
   # Get or create a symbol
-  getSymbol: (name, isTerminal) ->
+  getSymbol: (name, setTerminal) ->
     return sym if sym = @symbols.get(name)
+    isTerminal = if setTerminal? then !!setTerminal else @tokens.has(name)
     @symbols.set name, new Symbol(name, isTerminal, @symbols.size)
 
   # ============================================================================
