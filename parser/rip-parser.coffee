@@ -490,27 +490,37 @@ class Generator
         nextState = state.transitions.get(nextSym)
         continue unless nextState
 
-        # For the item B → β X • γ in state J
-        # We need to find which lookaheads are spontaneous and which propagate
+        # Standard LALR(1) lookahead computation algorithm:
+        # 1. Create closure of current state with dummy "#" lookahead
+        # 2. Advance all items on the transition symbol
+        # 3. Determine which lookaheads are spontaneous vs propagated
 
-        # Create a dummy item with special "#" lookahead marker
-        dummyItem = new Item(item.rule, item.dot, new Set(['#']))
-
-        # Compute closure with the dummy lookahead (find spontaneous/propagated)
+        # Create a temporary state with the current item having "#" lookahead
         tempState = new State()
-        tempState.addItem(dummyItem.advance())
+        dummyItem = new Item(item.rule, item.dot, new Set(['#']))
+        tempState.addItem(dummyItem)
         @closureWithLookahead(tempState)
 
-        # Process items generated in closure
+        # Now advance all items in the closure on the transition symbol
+        gotoState = new State()
         for closureItem in tempState.items
-          # Find corresponding item in next state
-          targetItem = nextState.getCoreItem(closureItem.rule.id, closureItem.dot)
+          if closureItem.nextSymbol() == nextSym
+            advancedItem = closureItem.advance()
+            gotoState.addItem(advancedItem)
+
+        # Compute closure of the goto state
+        @closureWithLookahead(gotoState)
+
+        # Analyze lookaheads to determine propagation vs spontaneous
+        for gotoItem in gotoState.items
+          # Find corresponding item in the actual next state
+          targetItem = nextState.getCoreItem(gotoItem.rule.id, gotoItem.dot)
           continue unless targetItem
 
-          # Check lookaheads
-          for la from closureItem.lookahead
+          # Check each lookahead in the goto item
+          for la from gotoItem.lookahead
             if la == '#'
-              # This indicates propagation
+              # This indicates propagation from the original item
               fromKey = "#{state.id}-#{item.rule.id}-#{item.dot}"
               toKey = "#{nextState.id}-#{targetItem.rule.id}-#{targetItem.dot}"
 
@@ -586,12 +596,16 @@ class Generator
       for [fromKey, toKeys] from @propagateLinks
         [fromStateId, fromRuleId, fromPosition] = fromKey.split('-').map (x) -> parseInt(x)
         fromState = @states[fromStateId]
+        continue unless fromState # Safety check for invalid state ID
+
         fromItem = fromState.getCoreItem(fromRuleId, fromPosition)
         continue unless fromItem
 
         for toKey from toKeys
           [toStateId, toRuleId, toPosition] = toKey.split('-').map (x) -> parseInt(x)
           toState = @states[toStateId]
+          continue unless toState # Safety check for invalid state ID
+
           toItem = toState.getCoreItem(toRuleId, toPosition)
           continue unless toItem
 
