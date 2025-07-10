@@ -1859,7 +1859,6 @@ class Generator
     # Parameter mapping for rule A → B C D (length=3):
     # $1 → B → $$[$0-2], $2 → C → $$[$0-1], $3 → D → $$[$0]
     # @1 → B → _$[_$.length-1-2], @2 → C → _$[_$.length-1-1], @3 → D → _$[_$.length-1]
-    for rule, i in @rules
     actionCases = for rule, i in @rules
       action = rule.action || 'this.$ = $$[$0];'
 
