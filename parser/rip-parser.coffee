@@ -843,6 +843,9 @@ class Generator
     actions = []
 
     # Process each rule and its action
+    # Parameter mapping for rule A → B C D (length=3):
+    # $1 → B → $$[$0-2], $2 → C → $$[$0-1], $3 → D → $$[$0]
+    # @1 → B → _$[_$.length-1-2], @2 → C → _$[_$.length-1-1], @3 → D → _$[_$.length-1]
     for rule, i in @rules
       action = rule.action || 'this.$ = $$[$0];'
 
@@ -866,21 +869,37 @@ class Generator
       action = action.replace /\$\$/g, 'this.$'
 
       # Then replace positional parameters ($1, $2, etc.) with stack references
+      # For rule A → B C D, the stack has [..., B, C, D] where:
+      # $1 should access B (at $$[$0-2]), $2 → C (at $$[$0-1]), $3 → D (at $$[$0])
       action = action.replace /\$(\d+)/g, (match, n) ->
-        index = parseInt(n, 10) - 1
-        offset = rule.rhs.length - 1 - index
-        if offset < 0
-          "$$[$0+#{Math.abs(offset)}]"
+        paramNum = parseInt(n, 10)
+        if paramNum < 1 or paramNum > rule.rhs.length
+          console.warn "Warning: Parameter $#{paramNum} out of range for rule with #{rule.rhs.length} symbols: #{rule.lhs} → #{rule.rhs.join(' ')}"
+          return match # Leave unchanged if invalid
+
+        # Calculate stack offset: $1 is at the bottom, $N is at the top
+        stackOffset = rule.rhs.length - paramNum
+        if stackOffset == 0
+          "$$[$0]"  # Top of stack
         else
-          "$$[$0-#{offset}]"
+          "$$[$0-#{stackOffset}]"  # Offset from top
 
       # Replace $0 with rule length
       action = action.replace /\$0/g, '$0'
 
       # Replace @ location references (@1, @2, etc.) with JavaScript equivalents
       action = action.replace /@(\d+)/g, (match, n) ->
-        index = parseInt(n, 10) - 1
-        "_$[_$.length - #{rule.rhs.length - index}]"
+        paramNum = parseInt(n, 10)
+        if paramNum < 1 or paramNum > rule.rhs.length
+          console.warn "Warning: Location parameter @#{paramNum} out of range for rule with #{rule.rhs.length} symbols: #{rule.lhs} → #{rule.rhs.join(' ')}"
+          return match # Leave unchanged if invalid
+
+        # Calculate location stack offset: @1 is at the bottom, @N is at the top
+        stackOffset = rule.rhs.length - paramNum
+        if stackOffset == 0
+          "_$[_$.length - 1]"  # Top of location stack
+        else
+          "_$[_$.length - 1 - #{stackOffset}]"  # Offset from top
 
       # Add case
       actions.push "      case #{i}:"
