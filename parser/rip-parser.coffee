@@ -125,27 +125,44 @@ class Generator
     unreachable
 
   eliminateUnreachable: ->
-    unreachable = @findUnreachableSymbols()
-    return if unreachable.length == 0
+    totalRemoved = 0
 
-    console.warn "\n⚠️  Found unreachable non-terminals: #{unreachable.join(', ')}"
+    # Iterate until no more unreachable symbols found
+    loop
+      unreachable = @findUnreachableSymbols()
+      break if unreachable.length == 0
 
-    # Remove rules with unreachable LHS
-    @rules = @rules.filter (rule) ->
-      if rule.lhs in unreachable
-        console.warn "  Removing rule: #{rule.lhs} → #{rule.rhs.join(' ')}"
-        false
-      else
+      if totalRemoved == 0
+        console.warn "\n⚠️  Found unreachable non-terminals: #{unreachable.join(', ')}"
+
+      # Remove rules with unreachable LHS or RHS
+      initialRuleCount = @rules.length
+      @rules = @rules.filter (rule) =>
+        # Remove if LHS is unreachable
+        if rule.lhs in unreachable
+          console.warn "  Removing rule with unreachable LHS: #{rule.lhs} → #{rule.rhs.join(' ')}"
+          return false
+
+        # Remove if any RHS symbol is unreachable (and not a terminal)
+        for symbol in rule.rhs
+          if symbol in unreachable and not @getSymbol(symbol).isTerminal
+            console.warn "  Removing rule with unreachable RHS: #{rule.lhs} → #{rule.rhs.join(' ')}"
+            return false
+
         true
 
-    # Remove unreachable symbols
-    for symbol in unreachable
-      @symbols.delete(symbol)
+      # Remove unreachable symbols from symbol table
+      for symbol in unreachable
+        @symbols.delete(symbol)
 
-    # Reset rule IDs
-    Rule.idno = 0
-    for rule in @rules
-      rule.id = Rule.idno++
+      totalRemoved += unreachable.length
+
+      # If no rules were removed, we're done (prevents infinite loop)
+      break if @rules.length == initialRuleCount
+
+    if totalRemoved > 0
+      console.warn "  Total unreachable symbols removed: #{totalRemoved}"
+      @reassignIds()
 
   findUnproductiveSymbols: ->
     # A symbol is productive if it can derive a string of terminals
@@ -184,34 +201,56 @@ class Generator
     unproductive
 
   eliminateUnproductive: ->
-    unproductive = @findUnproductiveSymbols()
-    return if unproductive.length == 0
+    totalRemoved = 0
 
-    console.warn "\n⚠️  Found unproductive non-terminals: #{unproductive.join(', ')}"
+    # Iterate until no more unproductive symbols found
+    loop
+      unproductive = @findUnproductiveSymbols()
+      break if unproductive.length == 0
 
-    # Remove rules containing unproductive symbols
-    @rules = @rules.filter (rule) ->
-      # Remove if LHS is unproductive
-      if rule.lhs in unproductive
-        console.warn "  Removing unproductive rule: #{rule.lhs} → #{rule.rhs.join(' ')}"
-        return false
+      if totalRemoved == 0
+        console.warn "\n⚠️  Found unproductive non-terminals: #{unproductive.join(', ')}"
 
-      # Remove if any RHS symbol is unproductive
-      for symbol in rule.rhs
-        if symbol in unproductive
-          console.warn "  Removing rule with unproductive RHS: #{rule.lhs} → #{rule.rhs.join(' ')}"
+      # Remove rules containing unproductive symbols
+      initialRuleCount = @rules.length
+      @rules = @rules.filter (rule) =>
+        # Remove if LHS is unproductive
+        if rule.lhs in unproductive
+          console.warn "  Removing rule with unproductive LHS: #{rule.lhs} → #{rule.rhs.join(' ')}"
           return false
 
-      true
+        # Remove if any RHS symbol is unproductive (and not a terminal)
+        for symbol in rule.rhs
+          if symbol in unproductive and not @getSymbol(symbol).isTerminal
+            console.warn "  Removing rule with unproductive RHS: #{rule.lhs} → #{rule.rhs.join(' ')}"
+            return false
 
-    # Remove unproductive symbols
-    for symbol in unproductive
-      @symbols.delete(symbol)
+        true
 
+      # Remove unproductive symbols from symbol table
+      for symbol in unproductive
+        @symbols.delete(symbol)
+
+      totalRemoved += unproductive.length
+
+      # If no rules were removed, we're done (prevents infinite loop)
+      break if @rules.length == initialRuleCount
+
+    if totalRemoved > 0
+      console.warn "  Total unproductive symbols removed: #{totalRemoved}"
+      @reassignIds()
+
+  # Helper method to reassign rule and symbol IDs after elimination
+  reassignIds: ->
     # Reset rule IDs
     Rule.idno = 0
     for rule in @rules
       rule.id = Rule.idno++
+
+    # Reassign symbol IDs to maintain consistency
+    symbolId = 0
+    for [name, symbol] from @symbols
+      symbol.id = symbolId++
 
   # Work starts here
   processGrammar: ({ grammar, operators, start, tokens }) ->
@@ -1007,8 +1046,19 @@ class Generator
   # Generate parser code
   generate: (options = {}) ->
     @processGrammar(options)
-    @eliminateUnreachable()
-    @eliminateUnproductive()
+
+    # Grammar cleanup - iterate until no more changes
+    # Order matters: unproductive first, then unreachable
+    loop
+      initialRuleCount = @rules.length
+      initialSymbolCount = @symbols.size
+
+      @eliminateUnproductive()
+      @eliminateUnreachable()
+
+      # Stop if no changes were made
+      break if @rules.length == initialRuleCount and @symbols.size == initialSymbolCount
+
     @computeNullable()
     @computeFirst()
     @computeFollow()
