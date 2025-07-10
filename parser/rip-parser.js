@@ -2476,6 +2476,8 @@
       this.table = this.buildTable();
       // State minimization and optimization
       this.minimizeStates();
+      // Advanced table optimization and compression (Bug #20 Fix)
+      this.optimizeTable();
       this.computeDefaultActions();
       if (this.conflicts.length > 0) {
         // Report conflicts if any
@@ -2661,7 +2663,7 @@ ${actions.join('\n')}
     generateCommonJS(options = {}) {
       var performAction, rules, symbols, table, tokens;
       // Prepare data structures
-      table = this.prepareTable();
+      table = this.prepareOptimizedTable();
       rules = this.prepareRules();
       symbols = this.prepareSymbols();
       tokens = this.prepareTokens();
@@ -3845,6 +3847,648 @@ exportDebugInfo: function() {
         details: this.conflicts
       };
       return report;
+    }
+
+    // ============================================================================
+    // Advanced Table Optimization and Compression (Bug #20 Fix)
+    // ============================================================================
+
+      // Comprehensive table optimization pipeline
+    optimizeTable() {
+      var tableStats;
+      console.log("\n🔧 Table Optimization:");
+      console.log("=====================");
+      // Step 1: Analyze table characteristics
+      tableStats = this.analyzeTableCharacteristics();
+      console.log(`Original table size: ${tableStats.totalCells} cells`);
+      console.log(`Sparsity: ${tableStats.sparsity}%`);
+      console.log(`Unique rows: ${tableStats.uniqueRows}`);
+      console.log(`Unique columns: ${tableStats.uniqueColumns}`);
+      // Step 2: Optimize symbol encoding based on frequency
+      this.optimizeSymbolEncoding();
+      // Step 3: Apply row/column compression
+      this.compressTableRows();
+      this.compressTableColumns();
+      // Step 4: Split action and goto tables
+      this.splitActionGotoTables();
+      // Step 5: Apply sparse table compression
+      this.applySparseTableCompression();
+      // Step 6: Bit-pack actions for maximum compression
+      this.bitPackActions();
+      // Step 7: Generate final optimized table
+      this.generateOptimizedTable();
+      // Report optimization results
+      return this.reportOptimizationResults(tableStats);
+    }
+
+    // Analyze table characteristics for optimization
+    analyzeTableCharacteristics() {
+      var action, actionFrequency, actionKey, columnHashes, filledCells, i, l, len, m, o, ref, ref1, ref2, rowData, rowHash, rowHashes, sparsity, state, symbolId, totalCells, uniqueColumns;
+      totalCells = 0;
+      filledCells = 0;
+      rowHashes = new Set();
+      columnHashes = new Map();
+      actionFrequency = new Map();
+      ref = this.states;
+      // Analyze each state's table row
+      for (l = 0, len = ref.length; l < len; l++) {
+        state = ref[l];
+        if (this.table[state.id]) {
+          rowData = [];
+          for (symbolId = m = 0, ref1 = this.symbols.size; (0 <= ref1 ? m < ref1 : m > ref1); symbolId = 0 <= ref1 ? ++m : --m) {
+            action = this.table[state.id][symbolId];
+            if (action != null) {
+              filledCells++;
+              rowData.push(JSON.stringify(action));
+              // Track action frequency
+              actionKey = this.getActionKey(action);
+              actionFrequency.set(actionKey, (actionFrequency.get(actionKey) || 0) + 1);
+            } else {
+              rowData.push(null);
+            }
+            totalCells++;
+          }
+          // Create row hash for deduplication
+          rowHash = this.hashArray(rowData);
+          rowHashes.add(rowHash);
+// Track column patterns
+          for (i = o = 0, ref2 = rowData.length; (0 <= ref2 ? o < ref2 : o > ref2); i = 0 <= ref2 ? ++o : --o) {
+            if (!columnHashes.has(i)) {
+              columnHashes.set(i, new Set());
+            }
+            columnHashes.get(i).add(rowData[i]);
+          }
+        }
+      }
+      sparsity = Math.round(((totalCells - filledCells) / totalCells) * 100);
+      uniqueColumns = [...columnHashes.values()].reduce((function(sum, set) {
+        return sum + set.size;
+      }), 0);
+      return {
+        totalCells,
+        filledCells,
+        sparsity,
+        uniqueRows: rowHashes.size,
+        uniqueColumns,
+        actionFrequency,
+        mostFrequentActions: [...actionFrequency.entries()].sort(function(a, b) {
+          return b[1] - a[1];
+        }).slice(0, 10)
+      };
+    }
+
+    // Optimize symbol encoding based on frequency analysis
+    optimizeSymbolEncoding() {
+      var action, l, len, newId, oldId, ref, ref1, ref2, sortedSymbols, state, symbol, symbolFrequency, symbolId;
+      console.log("Optimizing symbol encoding...");
+      // Calculate symbol usage frequency
+      symbolFrequency = new Map();
+      ref = this.states;
+      for (l = 0, len = ref.length; l < len; l++) {
+        state = ref[l];
+        if (this.table[state.id]) {
+          ref1 = this.table[state.id];
+          for (symbol in ref1) {
+            action = ref1[symbol];
+            symbolId = (ref2 = this.symbols.get(symbol)) != null ? ref2.id : void 0;
+            if (symbolId != null) {
+              symbolFrequency.set(symbolId, (symbolFrequency.get(symbolId) || 0) + 1);
+            }
+          }
+        }
+      }
+      // Sort symbols by frequency (most frequent first)
+      sortedSymbols = [...symbolFrequency.entries()].sort(function(a, b) {
+        return b[1] - a[1];
+      }).map(function([id, freq]) {
+        return id;
+      });
+      // Create optimized symbol mapping
+      this.optimizedSymbolMap = new Map();
+      this.reverseSymbolMap = new Map();
+      for (newId in sortedSymbols) {
+        oldId = sortedSymbols[newId];
+        this.optimizedSymbolMap.set(oldId, newId);
+        this.reverseSymbolMap.set(newId, oldId);
+      }
+      return console.log(`Symbol encoding optimized (${sortedSymbols.length} symbols)`);
+    }
+
+    // Compress table rows by finding identical patterns
+    compressTableRows() {
+      var action, compressedRowId, compressedRows, l, len, m, originalRows, reduction, ref, ref1, rowData, rowHash, rowMap, state, symbolId;
+      console.log("Compressing table rows...");
+      rowMap = new Map();
+      this.rowCompression = new Map();
+      compressedRowId = 0;
+      ref = this.states;
+      for (l = 0, len = ref.length; l < len; l++) {
+        state = ref[l];
+        if (this.table[state.id]) {
+          // Create canonical row representation
+          rowData = [];
+          for (symbolId = m = 0, ref1 = this.symbols.size; (0 <= ref1 ? m < ref1 : m > ref1); symbolId = 0 <= ref1 ? ++m : --m) {
+            action = this.table[state.id][symbolId];
+            rowData.push(action ? JSON.stringify(action) : null);
+          }
+          rowHash = this.hashArray(rowData);
+          if (rowMap.has(rowHash)) {
+            // Reuse existing row
+            this.rowCompression.set(state.id, rowMap.get(rowHash));
+          } else {
+            // Create new compressed row
+            rowMap.set(rowHash, compressedRowId);
+            this.rowCompression.set(state.id, compressedRowId);
+            compressedRowId++;
+          }
+        }
+      }
+      originalRows = this.states.length;
+      compressedRows = rowMap.size;
+      reduction = Math.round(((originalRows - compressedRows) / originalRows) * 100);
+      return console.log(`Row compression: ${originalRows} → ${compressedRows} (${reduction}% reduction)`);
+    }
+
+    // Compress table columns by finding patterns
+    compressTableColumns() {
+      var action, columnData, columnHash, columnPatterns, compressedColumns, hash, l, len, len1, m, o, originalColumns, reduction, ref, ref1, ref2, ref3, representative, state, symbol, symbolId, symbols, y;
+      console.log("Analyzing column patterns...");
+      columnPatterns = new Map();
+      this.columnCompression = new Map();
+// Analyze each symbol column
+      for (symbolId = l = 0, ref = this.symbols.size; (0 <= ref ? l < ref : l > ref); symbolId = 0 <= ref ? ++l : --l) {
+        columnData = [];
+        ref1 = this.states;
+        for (m = 0, len = ref1.length; m < len; m++) {
+          state = ref1[m];
+          action = (ref2 = this.table[state.id]) != null ? ref2[symbolId] : void 0;
+          columnData.push(action ? JSON.stringify(action) : null);
+        }
+        columnHash = this.hashArray(columnData);
+        if (!columnPatterns.has(columnHash)) {
+          columnPatterns.set(columnHash, []);
+        }
+        columnPatterns.get(columnHash).push(symbolId);
+      }
+// Group symbols with identical column patterns
+      for (y of columnPatterns) {
+        [hash, symbols] = y;
+        if (symbols.length > 1) {
+          // Multiple symbols share the same column pattern
+          representative = symbols[0];
+          ref3 = symbols.slice(1);
+          for (o = 0, len1 = ref3.length; o < len1; o++) {
+            symbol = ref3[o];
+            this.columnCompression.set(symbol, representative);
+          }
+        }
+      }
+      compressedColumns = columnPatterns.size;
+      originalColumns = this.symbols.size;
+      reduction = Math.round(((originalColumns - compressedColumns) / originalColumns) * 100);
+      return console.log(`Column analysis: ${originalColumns} → ${compressedColumns} unique patterns (${reduction}% reduction)`);
+    }
+
+    // Split action and goto tables for better organization
+    splitActionGotoTables() {
+      var action, actionRow, gotoRow, l, len, ref, ref1, state, symbol, symbolObj;
+      console.log("Splitting action and goto tables...");
+      this.actionTable = [];
+      this.gotoTable = [];
+      ref = this.states;
+      for (l = 0, len = ref.length; l < len; l++) {
+        state = ref[l];
+        actionRow = {};
+        gotoRow = {};
+        if (this.table[state.id]) {
+          ref1 = this.table[state.id];
+          for (symbol in ref1) {
+            action = ref1[symbol];
+            symbolObj = this.symbols.get(symbol);
+            if (symbolObj != null ? symbolObj.isTerminal : void 0) {
+              actionRow[symbolObj.id] = action;
+            } else {
+              gotoRow[symbolObj.id] = action;
+            }
+          }
+        }
+        this.actionTable.push(actionRow);
+        this.gotoTable.push(gotoRow);
+      }
+      return console.log(`Tables split: action table (${this.actionTable.length} rows), goto table (${this.gotoTable.length} rows)`);
+    }
+
+    // Apply sparse table compression using various algorithms
+    applySparseTableCompression() {
+      var bestCompression, bestRatio, l, len, result, strategies, strategy;
+      console.log("Applying sparse table compression...");
+      // Try different compression strategies
+      strategies = [this.compressWithCOO.bind(this), this.compressWithCSR.bind(this), this.compressWithDictionary.bind(this), this.compressWithRLE.bind(this)]; // Coordinate format // Compressed Sparse Row // Dictionary encoding // Run-length encoding
+      bestCompression = null;
+      bestRatio = 0;
+      for (l = 0, len = strategies.length; l < len; l++) {
+        strategy = strategies[l];
+        result = strategy();
+        if (result.compressionRatio > bestRatio) {
+          bestRatio = result.compressionRatio;
+          bestCompression = result;
+        }
+      }
+      this.compressedTable = bestCompression;
+      return console.log(`Best compression: ${bestCompression.method} (${Math.round(bestRatio)}% reduction)`);
+    }
+
+    // Coordinate (COO) format compression
+    compressWithCOO() {
+      var action, compressedSize, entries, l, originalSize, ref, ref1, ref2, stateId, symbol, symbolId;
+      entries = [];
+      for (stateId = l = 0, ref = this.states.length; (0 <= ref ? l < ref : l > ref); stateId = 0 <= ref ? ++l : --l) {
+        if (this.table[stateId]) {
+          ref1 = this.table[stateId];
+          for (symbol in ref1) {
+            action = ref1[symbol];
+            symbolId = (ref2 = this.symbols.get(symbol)) != null ? ref2.id : void 0;
+            if ((symbolId != null) && (action != null)) {
+              entries.push([stateId, symbolId, this.encodeAction(action)]);
+            }
+          }
+        }
+      }
+      originalSize = this.states.length * this.symbols.size * 8; // Estimate 8 bytes per cell
+      compressedSize = entries.length * 12; // 3 integers per entry
+      return {
+        method: 'COO',
+        data: entries,
+        compressionRatio: ((originalSize - compressedSize) / originalSize) * 100,
+        size: compressedSize
+      };
+    }
+
+    // Compressed Sparse Row (CSR) format
+    compressWithCSR() {
+      var action, columnIndices, compressedSize, l, originalSize, ref, ref1, ref2, rowPointers, stateId, symbol, symbolId, values;
+      values = [];
+      columnIndices = [];
+      rowPointers = [0];
+      for (stateId = l = 0, ref = this.states.length; (0 <= ref ? l < ref : l > ref); stateId = 0 <= ref ? ++l : --l) {
+        if (this.table[stateId]) {
+          ref1 = this.table[stateId];
+          for (symbol in ref1) {
+            action = ref1[symbol];
+            symbolId = (ref2 = this.symbols.get(symbol)) != null ? ref2.id : void 0;
+            if ((symbolId != null) && (action != null)) {
+              values.push(this.encodeAction(action));
+              columnIndices.push(symbolId);
+            }
+          }
+        }
+        rowPointers.push(values.length);
+      }
+      originalSize = this.states.length * this.symbols.size * 8;
+      compressedSize = values.length * 4 + columnIndices.length * 4 + rowPointers.length * 4;
+      return {
+        method: 'CSR',
+        data: {values, columnIndices, rowPointers},
+        compressionRatio: ((originalSize - compressedSize) / originalSize) * 100,
+        size: compressedSize
+      };
+    }
+
+    // Dictionary encoding compression
+    compressWithDictionary() {
+      var action, actionDictionary, actionKey, compressedSize, compressedTable, dictionaryId, l, m, o, originalSize, ref, ref1, ref2, ref3, row, stateId, symbol, symbolId;
+      actionDictionary = new Map();
+      dictionaryId = 0;
+// Build action dictionary
+      for (stateId = l = 0, ref = this.states.length; (0 <= ref ? l < ref : l > ref); stateId = 0 <= ref ? ++l : --l) {
+        if (this.table[stateId]) {
+          ref1 = this.table[stateId];
+          for (symbol in ref1) {
+            action = ref1[symbol];
+            if (action != null) {
+              actionKey = JSON.stringify(action);
+              if (!actionDictionary.has(actionKey)) {
+                actionDictionary.set(actionKey, dictionaryId++);
+              }
+            }
+          }
+        }
+      }
+      // Encode table using dictionary
+      compressedTable = [];
+      for (stateId = m = 0, ref2 = this.states.length; (0 <= ref2 ? m < ref2 : m > ref2); stateId = 0 <= ref2 ? ++m : --m) {
+        row = [];
+        if (this.table[stateId]) {
+          for (symbolId = o = 0, ref3 = this.symbols.size; (0 <= ref3 ? o < ref3 : o > ref3); symbolId = 0 <= ref3 ? ++o : --o) {
+            action = this.table[stateId][symbolId];
+            if (action != null) {
+              actionKey = JSON.stringify(action);
+              row.push(actionDictionary.get(actionKey));
+            } else {
+              row.push(null);
+            }
+          }
+        }
+        compressedTable.push(row);
+      }
+      originalSize = this.states.length * this.symbols.size * 8;
+      compressedSize = compressedTable.length * this.symbols.size * 2 + actionDictionary.size * 20;
+      return {
+        method: 'Dictionary',
+        data: {
+          table: compressedTable,
+          dictionary: [...actionDictionary.entries()]
+        },
+        compressionRatio: ((originalSize - compressedSize) / originalSize) * 100,
+        size: compressedSize
+      };
+    }
+
+    // Run-length encoding compression
+    compressWithRLE() {
+      var action, compressedRow, compressedRows, compressedSize, l, m, originalSize, ref, ref1, row, stateId, symbolId;
+      compressedRows = [];
+      for (stateId = l = 0, ref = this.states.length; (0 <= ref ? l < ref : l > ref); stateId = 0 <= ref ? ++l : --l) {
+        if (this.table[stateId]) {
+          row = [];
+          for (symbolId = m = 0, ref1 = this.symbols.size; (0 <= ref1 ? m < ref1 : m > ref1); symbolId = 0 <= ref1 ? ++m : --m) {
+            action = this.table[stateId][symbolId];
+            row.push(action ? this.encodeAction(action) : null);
+          }
+          // Apply RLE to row
+          compressedRow = this.runLengthEncode(row);
+          compressedRows.push(compressedRow);
+        } else {
+          compressedRows.push([]);
+        }
+      }
+      originalSize = this.states.length * this.symbols.size * 8;
+      compressedSize = compressedRows.reduce((function(sum, row) {
+        return sum + row.length * 8;
+      }), 0);
+      return {
+        method: 'RLE',
+        data: compressedRows,
+        compressionRatio: ((originalSize - compressedSize) / originalSize) * 100,
+        size: compressedSize
+      };
+    }
+
+    // Bit-pack actions for maximum compression
+    bitPackActions() {
+      var action, actionTypes, l, ref, ref1, ruleBits, ruleRanges, stateBits, stateId, stateRanges, symbol, typeBits;
+      console.log("Bit-packing actions...");
+      // Analyze action types and ranges
+      actionTypes = new Set();
+      stateRanges = {
+        min: 2e308,
+        max: -2e308
+      };
+      ruleRanges = {
+        min: 2e308,
+        max: -2e308
+      };
+      for (stateId = l = 0, ref = this.states.length; (0 <= ref ? l < ref : l > ref); stateId = 0 <= ref ? ++l : --l) {
+        if (this.table[stateId]) {
+          ref1 = this.table[stateId];
+          for (symbol in ref1) {
+            action = ref1[symbol];
+            if (action != null ? action.type : void 0) {
+              actionTypes.add(action.type);
+              if (action.type === 'shift') {
+                stateRanges.min = Math.min(stateRanges.min, action.state);
+                stateRanges.max = Math.max(stateRanges.max, action.state);
+              } else if (action.type === 'reduce') {
+                ruleRanges.min = Math.min(ruleRanges.min, action.rule);
+                ruleRanges.max = Math.max(ruleRanges.max, action.rule);
+              }
+            }
+          }
+        }
+      }
+      // Calculate required bits
+      typeBits = Math.ceil(Math.log2(actionTypes.size + 1));
+      stateBits = Math.ceil(Math.log2(stateRanges.max + 1));
+      ruleBits = Math.ceil(Math.log2(ruleRanges.max + 1));
+      this.bitPackingInfo = {
+        typeBits,
+        stateBits,
+        ruleBits,
+        totalBits: Math.max(typeBits + stateBits, typeBits + ruleBits, 8)
+      };
+      return console.log(`Bit-packing: ${this.bitPackingInfo.totalBits} bits per action`);
+    }
+
+    // Generate final optimized table
+    generateOptimizedTable() {
+      console.log("Generating optimized table...");
+      return this.optimizedTable = {
+        format: this.compressedTable.method,
+        data: this.compressedTable.data,
+        metadata: {
+          states: this.states.length,
+          symbols: this.symbols.size,
+          compression: this.compressedTable.method,
+          symbolMap: this.optimizedSymbolMap || new Map(),
+          rowCompression: this.rowCompression || new Map(),
+          columnCompression: this.columnCompression || new Map(),
+          bitPacking: this.bitPackingInfo
+        }
+      };
+    }
+
+    // Report optimization results
+    reportOptimizationResults(originalStats) {
+      var rowReduction;
+      console.log("\n📊 Optimization Results:");
+      console.log("========================");
+      if (this.compressedTable) {
+        console.log(`Compression method: ${this.compressedTable.method}`);
+        console.log(`Size reduction: ${Math.round(this.compressedTable.compressionRatio)}%`);
+        console.log(`Original size: ${originalStats.totalCells} cells`);
+        console.log(`Compressed size: ${this.compressedTable.size} bytes`);
+      }
+      if (this.rowCompression) {
+        rowReduction = Math.round(((originalStats.uniqueRows - this.rowCompression.size) / originalStats.uniqueRows) * 100);
+        console.log(`Row compression: ${rowReduction}% reduction`);
+      }
+      if (this.bitPackingInfo) {
+        console.log(`Bit-packing: ${this.bitPackingInfo.totalBits} bits per action`);
+      }
+      return console.log("Table optimization complete!");
+    }
+
+    // Helper methods for table optimization
+    getActionKey(action) {
+      if (action != null ? action.type : void 0) {
+        return `${action.type}:${action.state || action.rule || ''}`;
+      } else {
+        return `goto:${action}`;
+      }
+    }
+
+    hashArray(array) {
+      var char, hash, i, l, ref, str;
+      // Simple hash function for arrays
+      hash = 0;
+      str = JSON.stringify(array);
+      for (i = l = 0, ref = str.length; (0 <= ref ? l < ref : l > ref); i = 0 <= ref ? ++l : --l) {
+        char = str.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash; // Convert to 32-bit integer
+      }
+      return hash;
+    }
+
+    encodeAction(action) {
+      if ((action != null ? action.type : void 0) === 'shift') {
+        return (1 << 24) | action.state;
+      } else if ((action != null ? action.type : void 0) === 'reduce') {
+        return (2 << 24) | action.rule;
+      } else if ((action != null ? action.type : void 0) === 'accept') {
+        return 3 << 24;
+      } else {
+        return action; // GOTO action
+      }
+    }
+
+    runLengthEncode(array) {
+      var count, current, i, l, ref, result;
+      if (array.length === 0) {
+        return [];
+      }
+      result = [];
+      current = array[0];
+      count = 1;
+      for (i = l = 1, ref = array.length; (1 <= ref ? l < ref : l > ref); i = 1 <= ref ? ++l : --l) {
+        if (array[i] === current) {
+          count++;
+        } else {
+          result.push([current, count]);
+          current = array[i];
+          count = 1;
+        }
+      }
+      result.push([current, count]);
+      return result;
+    }
+
+    // Enhanced table preparation with optimization
+    prepareOptimizedTable() {
+      if (this.optimizedTable) {
+        // Return optimized table format
+        switch (this.optimizedTable.format) {
+          case 'COO':
+            return this.prepareCOOTable();
+          case 'CSR':
+            return this.prepareCSRTable();
+          case 'Dictionary':
+            return this.prepareDictionaryTable();
+          case 'RLE':
+            return this.prepareRLETable();
+          default:
+            return this.prepareTable(); // Fallback to original
+        }
+      } else {
+        return this.prepareTable();
+      }
+    }
+
+    prepareCOOTable() {
+      var entries;
+      // Generate COO format table for parser
+      entries = this.optimizedTable.data;
+      // Create lookup function
+      return `// COO format table lookup
+const tableEntries = ${JSON.stringify(entries)};
+const tableLookup = new Map();
+
+// Build lookup map
+for (const [state, symbol, action] of tableEntries) {
+  const key = (state << 16) | symbol;
+  tableLookup.set(key, action);
+}
+
+// Table access function
+function getTableEntry(state, symbol) {
+  const key = (state << 16) | symbol;
+  return tableLookup.get(key);
+}`;
+    }
+
+    prepareCSRTable() {
+      var columnIndices, rowPointers, values;
+      // Generate CSR format table for parser
+      ({values, columnIndices, rowPointers} = this.optimizedTable.data);
+      return `// CSR format table
+const values = ${JSON.stringify(values)};
+const columnIndices = ${JSON.stringify(columnIndices)};
+const rowPointers = ${JSON.stringify(rowPointers)};
+
+// Table access function
+function getTableEntry(state, symbol) {
+  const start = rowPointers[state];
+  const end = rowPointers[state + 1];
+
+  for (let i = start; i < end; i++) {
+    if (columnIndices[i] === symbol) {
+      return values[i];
+    }
+  }
+  return undefined;
+}`;
+    }
+
+    prepareDictionaryTable() {
+      var dictionary, table;
+      // Generate dictionary-compressed table for parser
+      ({table, dictionary} = this.optimizedTable.data);
+      return `// Dictionary-compressed table
+const actionDict = ${JSON.stringify(dictionary)};
+const compressedTable = ${JSON.stringify(table)};
+
+// Build reverse dictionary
+const reverseDict = new Map();
+for (const [action, id] of actionDict) {
+  reverseDict.set(id, JSON.parse(action));
+}
+
+// Table access function
+function getTableEntry(state, symbol) {
+  const row = compressedTable[state];
+  if (row && row[symbol] !== null) {
+    return reverseDict.get(row[symbol]);
+  }
+  return undefined;
+}`;
+    }
+
+    prepareRLETable() {
+      var compressedRows;
+      // Generate RLE-compressed table for parser
+      compressedRows = this.optimizedTable.data;
+      return `// RLE-compressed table
+const compressedRows = ${JSON.stringify(compressedRows)};
+
+// Decompress row on demand
+function decompressRow(rowData) {
+  const row = [];
+  for (const [value, count] of rowData) {
+    for (let i = 0; i < count; i++) {
+      row.push(value);
+    }
+  }
+  return row;
+}
+
+// Table access function with caching
+const rowCache = new Map();
+function getTableEntry(state, symbol) {
+  if (!rowCache.has(state)) {
+    rowCache.set(state, decompressRow(compressedRows[state]));
+  }
+  return rowCache.get(state)[symbol];
+}`;
     }
 
   };

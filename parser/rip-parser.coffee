@@ -96,6 +96,16 @@ class Generator
     @conflicts         = []        # Detailed conflict information
     @onDemandLookahead = opts.onDemandLookahead ? true
 
+    # Table optimization configuration (Bug #20 Fix)
+    @optimizationConfig = {
+      enabled: opts.optimize ? false           # Default: disabled for performance
+      auto: opts.autoOptimize ? true           # Auto-enable for large grammars
+      minStatesForAuto: opts.minStatesForAuto ? 20  # Threshold for auto-optimization
+      verbose: opts.optimizeVerbose ? false    # Detailed logging
+      algorithms: opts.algorithms ? ['auto']   # Which compression algorithms to try
+      skipIfSmall: opts.skipIfSmall ? true     # Skip for small tables
+    }
+
     # Performance optimization caches
     @rulesByLHS        = new Map() # LHS -> [Rules] for O(1) rule lookup
     @coreCache         = new Map() # state -> core hash for memoization
@@ -104,7 +114,8 @@ class Generator
       closureCalls: 0,
       cacheHits: 0,
       stateCreations: 0,
-      lookaheadComputations: 0
+      lookaheadComputations: 0,
+      optimizationTime: 0         # Track optimization overhead
     }
 
   findUnreachableSymbols: ->
@@ -1760,6 +1771,14 @@ class Generator
     console.log "Rules processed: #{@rules.length}"
     console.log "Symbols: #{@symbols.size}"
 
+    # Table optimization timing
+    if @performanceStats.optimizationTime > 0
+      console.log "Table optimization: #{@performanceStats.optimizationTime}ms"
+      if @optimizedTable
+        console.log "Optimization method: #{@optimizedTable.format}"
+      else
+        console.log "Optimization: skipped (small grammar)"
+
     # Memory usage estimates
     cacheSize = @coreCache.size + @closureCache.size
     console.log "Cache entries: #{cacheSize}"
@@ -1807,6 +1826,9 @@ class Generator
 
     # State minimization and optimization
     @minimizeStates()
+
+    # Smart table optimization (Bug #20 Fix) - only when beneficial
+    @smartOptimizeTable()
 
     @computeDefaultActions()
 
@@ -1950,7 +1972,7 @@ class Generator
   # Generate CommonJS module
   generateCommonJS: (options = {}) ->
     # Prepare data structures
-    table   = @prepareTable()
+    table   = @prepareOptimizedTable()
     rules   = @prepareRules()
     symbols = @prepareSymbols()
     tokens  = @prepareTokens()
@@ -2904,6 +2926,829 @@ if (typeof require !== 'undefined' && typeof module !== 'undefined') {
       details: @conflicts
     }
     report
+
+  # ============================================================================
+  # Advanced Table Optimization and Compression (Bug #20 Fix)
+  # ============================================================================
+
+  # Comprehensive table optimization pipeline
+  optimizeTable: ->
+    console.log "\n🔧 Table Optimization:"
+    console.log "====================="
+
+    # Step 1: Analyze table characteristics
+    tableStats = @analyzeTableCharacteristics()
+    console.log "Original table size: #{tableStats.totalCells} cells"
+    console.log "Sparsity: #{tableStats.sparsity}%"
+    console.log "Unique rows: #{tableStats.uniqueRows}"
+    console.log "Unique columns: #{tableStats.uniqueColumns}"
+
+    # Step 2: Optimize symbol encoding based on frequency
+    @optimizeSymbolEncoding()
+
+    # Step 3: Apply row/column compression
+    @compressTableRows()
+    @compressTableColumns()
+
+    # Step 4: Split action and goto tables
+    @splitActionGotoTables()
+
+    # Step 5: Apply sparse table compression
+    @applySparseTableCompression()
+
+    # Step 6: Bit-pack actions for maximum compression
+    @bitPackActions()
+
+    # Step 7: Generate final optimized table
+    @generateOptimizedTable()
+
+    # Report optimization results
+    @reportOptimizationResults(tableStats)
+
+  # Analyze table characteristics for optimization
+  analyzeTableCharacteristics: ->
+    totalCells = 0
+    filledCells = 0
+    rowHashes = new Set()
+    columnHashes = new Map()
+    actionFrequency = new Map()
+
+    # Analyze each state's table row
+    for state in @states
+      if @table[state.id]
+        rowData = []
+        for symbolId in [0...@symbols.size]
+          action = @table[state.id][symbolId]
+          if action?
+            filledCells++
+            rowData.push(JSON.stringify(action))
+
+            # Track action frequency
+            actionKey = @getActionKey(action)
+            actionFrequency.set(actionKey, (actionFrequency.get(actionKey) || 0) + 1)
+          else
+            rowData.push(null)
+          totalCells++
+
+        # Create row hash for deduplication
+        rowHash = @hashArray(rowData)
+        rowHashes.add(rowHash)
+
+        # Track column patterns
+        for i in [0...rowData.length]
+          unless columnHashes.has(i)
+            columnHashes.set(i, new Set())
+          columnHashes.get(i).add(rowData[i])
+
+    sparsity = Math.round(((totalCells - filledCells) / totalCells) * 100)
+    uniqueColumns = [...columnHashes.values()].reduce(((sum, set) -> sum + set.size), 0)
+
+    {
+      totalCells,
+      filledCells,
+      sparsity,
+      uniqueRows: rowHashes.size,
+      uniqueColumns,
+      actionFrequency,
+      mostFrequentActions: [...actionFrequency.entries()]
+        .sort((a, b) -> b[1] - a[1])
+        .slice(0, 10)
+    }
+
+  # Optimize symbol encoding based on frequency analysis
+  optimizeSymbolEncoding: ->
+    console.log "Optimizing symbol encoding..."
+
+    # Calculate symbol usage frequency
+    symbolFrequency = new Map()
+    for state in @states
+      if @table[state.id]
+        for symbol, action of @table[state.id]
+          symbolId = @symbols.get(symbol)?.id
+          if symbolId?
+            symbolFrequency.set(symbolId, (symbolFrequency.get(symbolId) || 0) + 1)
+
+    # Sort symbols by frequency (most frequent first)
+    sortedSymbols = [...symbolFrequency.entries()]
+      .sort((a, b) -> b[1] - a[1])
+      .map(([id, freq]) -> id)
+
+    # Create optimized symbol mapping
+    @optimizedSymbolMap = new Map()
+    @reverseSymbolMap = new Map()
+
+    for newId, oldId of sortedSymbols
+      @optimizedSymbolMap.set(oldId, newId)
+      @reverseSymbolMap.set(newId, oldId)
+
+    console.log "Symbol encoding optimized (#{sortedSymbols.length} symbols)"
+
+  # Compress table rows by finding identical patterns
+  compressTableRows: ->
+    console.log "Compressing table rows..."
+
+    rowMap = new Map()
+    @rowCompression = new Map()
+    compressedRowId = 0
+
+    for state in @states
+      if @table[state.id]
+        # Create canonical row representation
+        rowData = []
+        for symbolId in [0...@symbols.size]
+          action = @table[state.id][symbolId]
+          rowData.push(if action then JSON.stringify(action) else null)
+
+        rowHash = @hashArray(rowData)
+
+        if rowMap.has(rowHash)
+          # Reuse existing row
+          @rowCompression.set(state.id, rowMap.get(rowHash))
+        else
+          # Create new compressed row
+          rowMap.set(rowHash, compressedRowId)
+          @rowCompression.set(state.id, compressedRowId)
+          compressedRowId++
+
+    originalRows = @states.length
+    compressedRows = rowMap.size
+    reduction = Math.round(((originalRows - compressedRows) / originalRows) * 100)
+
+    console.log "Row compression: #{originalRows} → #{compressedRows} (#{reduction}% reduction)"
+
+  # Compress table columns by finding patterns
+  compressTableColumns: ->
+    console.log "Analyzing column patterns..."
+
+    columnPatterns = new Map()
+    @columnCompression = new Map()
+
+    # Analyze each symbol column
+    for symbolId in [0...@symbols.size]
+      columnData = []
+      for state in @states
+        action = @table[state.id]?[symbolId]
+        columnData.push(if action then JSON.stringify(action) else null)
+
+      columnHash = @hashArray(columnData)
+
+      unless columnPatterns.has(columnHash)
+        columnPatterns.set(columnHash, [])
+      columnPatterns.get(columnHash).push(symbolId)
+
+    # Group symbols with identical column patterns
+    for [hash, symbols] from columnPatterns
+      if symbols.length > 1
+        # Multiple symbols share the same column pattern
+        representative = symbols[0]
+        for symbol in symbols.slice(1)
+          @columnCompression.set(symbol, representative)
+
+    compressedColumns = columnPatterns.size
+    originalColumns = @symbols.size
+    reduction = Math.round(((originalColumns - compressedColumns) / originalColumns) * 100)
+
+    console.log "Column analysis: #{originalColumns} → #{compressedColumns} unique patterns (#{reduction}% reduction)"
+
+  # Split action and goto tables for better organization
+  splitActionGotoTables: ->
+    console.log "Splitting action and goto tables..."
+
+    @actionTable = []
+    @gotoTable = []
+
+    for state in @states
+      actionRow = {}
+      gotoRow = {}
+
+      if @table[state.id]
+        for symbol, action of @table[state.id]
+          symbolObj = @symbols.get(symbol)
+          if symbolObj?.isTerminal
+            actionRow[symbolObj.id] = action
+          else
+            gotoRow[symbolObj.id] = action
+
+      @actionTable.push(actionRow)
+      @gotoTable.push(gotoRow)
+
+    console.log "Tables split: action table (#{@actionTable.length} rows), goto table (#{@gotoTable.length} rows)"
+
+  # Apply sparse table compression using various algorithms
+  applySparseTableCompression: ->
+    console.log "Applying sparse table compression..."
+
+    # Try different compression strategies
+    strategies = [
+      @compressWithCOO.bind(this),      # Coordinate format
+      @compressWithCSR.bind(this),      # Compressed Sparse Row
+      @compressWithDictionary.bind(this), # Dictionary encoding
+      @compressWithRLE.bind(this)       # Run-length encoding
+    ]
+
+    bestCompression = null
+    bestRatio = 0
+
+    for strategy in strategies
+      result = strategy()
+      if result.compressionRatio > bestRatio
+        bestRatio = result.compressionRatio
+        bestCompression = result
+
+    @compressedTable = bestCompression
+    console.log "Best compression: #{bestCompression.method} (#{Math.round(bestRatio)}% reduction)"
+
+  # Coordinate (COO) format compression
+  compressWithCOO: ->
+    entries = []
+
+    for stateId in [0...@states.length]
+      if @table[stateId]
+        for symbol, action of @table[stateId]
+          symbolId = @symbols.get(symbol)?.id
+          if symbolId? and action?
+            entries.push([stateId, symbolId, @encodeAction(action)])
+
+    originalSize = @states.length * @symbols.size * 8  # Estimate 8 bytes per cell
+    compressedSize = entries.length * 12  # 3 integers per entry
+
+    {
+      method: 'COO',
+      data: entries,
+      compressionRatio: ((originalSize - compressedSize) / originalSize) * 100,
+      size: compressedSize
+    }
+
+  # Compressed Sparse Row (CSR) format
+  compressWithCSR: ->
+    values = []
+    columnIndices = []
+    rowPointers = [0]
+
+    for stateId in [0...@states.length]
+      if @table[stateId]
+        for symbol, action of @table[stateId]
+          symbolId = @symbols.get(symbol)?.id
+          if symbolId? and action?
+            values.push(@encodeAction(action))
+            columnIndices.push(symbolId)
+
+      rowPointers.push(values.length)
+
+    originalSize = @states.length * @symbols.size * 8
+    compressedSize = values.length * 4 + columnIndices.length * 4 + rowPointers.length * 4
+
+    {
+      method: 'CSR',
+      data: { values, columnIndices, rowPointers },
+      compressionRatio: ((originalSize - compressedSize) / originalSize) * 100,
+      size: compressedSize
+    }
+
+  # Dictionary encoding compression
+  compressWithDictionary: ->
+    actionDictionary = new Map()
+    dictionaryId = 0
+
+    # Build action dictionary
+    for stateId in [0...@states.length]
+      if @table[stateId]
+        for symbol, action of @table[stateId]
+          if action?
+            actionKey = JSON.stringify(action)
+            unless actionDictionary.has(actionKey)
+              actionDictionary.set(actionKey, dictionaryId++)
+
+    # Encode table using dictionary
+    compressedTable = []
+    for stateId in [0...@states.length]
+      row = []
+      if @table[stateId]
+        for symbolId in [0...@symbols.size]
+          action = @table[stateId][symbolId]
+          if action?
+            actionKey = JSON.stringify(action)
+            row.push(actionDictionary.get(actionKey))
+          else
+            row.push(null)
+      compressedTable.push(row)
+
+    originalSize = @states.length * @symbols.size * 8
+    compressedSize = compressedTable.length * @symbols.size * 2 + actionDictionary.size * 20
+
+    {
+      method: 'Dictionary',
+      data: { table: compressedTable, dictionary: [...actionDictionary.entries()] },
+      compressionRatio: ((originalSize - compressedSize) / originalSize) * 100,
+      size: compressedSize
+    }
+
+  # Run-length encoding compression
+  compressWithRLE: ->
+    compressedRows = []
+
+    for stateId in [0...@states.length]
+      if @table[stateId]
+        row = []
+        for symbolId in [0...@symbols.size]
+          action = @table[stateId][symbolId]
+          row.push(if action then @encodeAction(action) else null)
+
+        # Apply RLE to row
+        compressedRow = @runLengthEncode(row)
+        compressedRows.push(compressedRow)
+      else
+        compressedRows.push([])
+
+    originalSize = @states.length * @symbols.size * 8
+    compressedSize = compressedRows.reduce(((sum, row) -> sum + row.length * 8), 0)
+
+    {
+      method: 'RLE',
+      data: compressedRows,
+      compressionRatio: ((originalSize - compressedSize) / originalSize) * 100,
+      size: compressedSize
+    }
+
+  # Bit-pack actions for maximum compression
+  bitPackActions: ->
+    console.log "Bit-packing actions..."
+
+    # Analyze action types and ranges
+    actionTypes = new Set()
+    stateRanges = { min: Infinity, max: -Infinity }
+    ruleRanges = { min: Infinity, max: -Infinity }
+
+    for stateId in [0...@states.length]
+      if @table[stateId]
+        for symbol, action of @table[stateId]
+          if action?.type
+            actionTypes.add(action.type)
+            if action.type == 'shift'
+              stateRanges.min = Math.min(stateRanges.min, action.state)
+              stateRanges.max = Math.max(stateRanges.max, action.state)
+            else if action.type == 'reduce'
+              ruleRanges.min = Math.min(ruleRanges.min, action.rule)
+              ruleRanges.max = Math.max(ruleRanges.max, action.rule)
+
+    # Calculate required bits
+    typeBits = Math.ceil(Math.log2(actionTypes.size + 1))
+    stateBits = Math.ceil(Math.log2(stateRanges.max + 1))
+    ruleBits = Math.ceil(Math.log2(ruleRanges.max + 1))
+
+    @bitPackingInfo = {
+      typeBits,
+      stateBits,
+      ruleBits,
+      totalBits: Math.max(typeBits + stateBits, typeBits + ruleBits, 8)
+    }
+
+    console.log "Bit-packing: #{@bitPackingInfo.totalBits} bits per action"
+
+  # Generate final optimized table
+  generateOptimizedTable: ->
+    console.log "Generating optimized table..."
+
+    @optimizedTable = {
+      format: @compressedTable.method,
+      data: @compressedTable.data,
+      metadata: {
+        states: @states.length,
+        symbols: @symbols.size,
+        compression: @compressedTable.method,
+        symbolMap: @optimizedSymbolMap or new Map(),
+        rowCompression: @rowCompression or new Map(),
+        columnCompression: @columnCompression or new Map(),
+        bitPacking: @bitPackingInfo
+      }
+    }
+
+  # Report optimization results
+  reportOptimizationResults: (originalStats) ->
+    console.log "\n📊 Optimization Results:"
+    console.log "========================"
+
+    if @compressedTable
+      console.log "Compression method: #{@compressedTable.method}"
+      console.log "Size reduction: #{Math.round(@compressedTable.compressionRatio)}%"
+      console.log "Original size: #{originalStats.totalCells} cells"
+      console.log "Compressed size: #{@compressedTable.size} bytes"
+
+    if @rowCompression
+      rowReduction = Math.round(((originalStats.uniqueRows - @rowCompression.size) / originalStats.uniqueRows) * 100)
+      console.log "Row compression: #{rowReduction}% reduction"
+
+    if @bitPackingInfo
+      console.log "Bit-packing: #{@bitPackingInfo.totalBits} bits per action"
+
+    console.log "Table optimization complete!"
+
+  # Helper methods for table optimization
+
+  getActionKey: (action) ->
+    if action?.type
+      "#{action.type}:#{action.state || action.rule || ''}"
+    else
+      "goto:#{action}"
+
+  hashArray: (array) ->
+    # Simple hash function for arrays
+    hash = 0
+    str = JSON.stringify(array)
+    for i in [0...str.length]
+      char = str.charCodeAt(i)
+      hash = ((hash << 5) - hash) + char
+      hash = hash & hash  # Convert to 32-bit integer
+    hash
+
+  encodeAction: (action) ->
+    if action?.type == 'shift'
+      (1 << 24) | action.state
+    else if action?.type == 'reduce'
+      (2 << 24) | action.rule
+    else if action?.type == 'accept'
+      (3 << 24)
+    else
+      action  # GOTO action
+
+  runLengthEncode: (array) ->
+    if array.length == 0
+      return []
+
+    result = []
+    current = array[0]
+    count = 1
+
+    for i in [1...array.length]
+      if array[i] == current
+        count++
+      else
+        result.push([current, count])
+        current = array[i]
+        count = 1
+
+    result.push([current, count])
+    result
+
+  # Enhanced table preparation with optimization
+  prepareOptimizedTable: ->
+    if @optimizedTable
+      # Return optimized table format
+      switch @optimizedTable.format
+        when 'COO'
+          @prepareCOOTable()
+        when 'CSR'
+          @prepareCSRTable()
+        when 'Dictionary'
+          @prepareDictionaryTable()
+        when 'RLE'
+          @prepareRLETable()
+        when 'Simple'
+          @prepareTable()  # Use original for simple optimization
+        else
+          @prepareTable()  # Fallback to original
+    else
+      @prepareTable()  # No optimization, use original
+
+  prepareCOOTable: ->
+    # Generate COO format table for parser
+    entries = @optimizedTable.data
+
+    # Create lookup function
+    """
+    // COO format table lookup
+    const tableEntries = #{JSON.stringify(entries)};
+    const tableLookup = new Map();
+
+    // Build lookup map
+    for (const [state, symbol, action] of tableEntries) {
+      const key = (state << 16) | symbol;
+      tableLookup.set(key, action);
+    }
+
+    // Table access function
+    function getTableEntry(state, symbol) {
+      const key = (state << 16) | symbol;
+      return tableLookup.get(key);
+    }
+    """
+
+  prepareCSRTable: ->
+    # Generate CSR format table for parser
+    { values, columnIndices, rowPointers } = @optimizedTable.data
+
+    """
+    // CSR format table
+    const values = #{JSON.stringify(values)};
+    const columnIndices = #{JSON.stringify(columnIndices)};
+    const rowPointers = #{JSON.stringify(rowPointers)};
+
+    // Table access function
+    function getTableEntry(state, symbol) {
+      const start = rowPointers[state];
+      const end = rowPointers[state + 1];
+
+      for (let i = start; i < end; i++) {
+        if (columnIndices[i] === symbol) {
+          return values[i];
+        }
+      }
+      return undefined;
+    }
+    """
+
+  prepareDictionaryTable: ->
+    # Generate dictionary-compressed table for parser
+    { table, dictionary } = @optimizedTable.data
+
+    """
+    // Dictionary-compressed table
+    const actionDict = #{JSON.stringify(dictionary)};
+    const compressedTable = #{JSON.stringify(table)};
+
+    // Build reverse dictionary
+    const reverseDict = new Map();
+    for (const [action, id] of actionDict) {
+      reverseDict.set(id, JSON.parse(action));
+    }
+
+    // Table access function
+    function getTableEntry(state, symbol) {
+      const row = compressedTable[state];
+      if (row && row[symbol] !== null) {
+        return reverseDict.get(row[symbol]);
+      }
+      return undefined;
+    }
+    """
+
+  prepareRLETable: ->
+    # Generate RLE-compressed table for parser
+    compressedRows = @optimizedTable.data
+
+    """
+    // RLE-compressed table
+    const compressedRows = #{JSON.stringify(compressedRows)};
+
+    // Decompress row on demand
+    function decompressRow(rowData) {
+      const row = [];
+      for (const [value, count] of rowData) {
+        for (let i = 0; i < count; i++) {
+          row.push(value);
+        }
+      }
+      return row;
+    }
+
+    // Table access function with caching
+    const rowCache = new Map();
+    function getTableEntry(state, symbol) {
+      if (!rowCache.has(state)) {
+        rowCache.set(state, decompressRow(compressedRows[state]));
+      }
+      return rowCache.get(state)[symbol];
+    }
+    """
+
+  # ============================================================================
+  # Smart Table Optimization (Bug #20 Fix - Performance Conscious)
+  # ============================================================================
+
+  # Smart optimization that only runs when beneficial
+  smartOptimizeTable: ->
+    startTime = Date.now()
+
+    # Check if optimization should run
+    shouldOptimize = @shouldRunOptimization()
+
+    if shouldOptimize
+      if @optimizationConfig.verbose
+        console.log "\n🔧 Smart Table Optimization:"
+        console.log "============================="
+        console.log "Grammar size: #{@states.length} states, #{@symbols.size} symbols"
+        console.log "Optimization triggered: #{@getOptimizationReason()}"
+
+      @optimizeTableConditional()
+    else
+      if @optimizationConfig.verbose
+        console.log "\n⚡ Skipping table optimization (small grammar, better performance without)"
+
+      # For small grammars, use fast path
+      @optimizedTable = null
+
+    @performanceStats.optimizationTime = Date.now() - startTime
+
+  # Determine if optimization should run
+  shouldRunOptimization: ->
+    # Explicit enable/disable
+    return true if @optimizationConfig.enabled
+    return false unless @optimizationConfig.auto
+
+    # Auto-optimization criteria
+    stateCount = @states.length
+    symbolCount = @symbols.size
+    tableSize = stateCount * symbolCount
+
+    # Don't optimize very small grammars
+    return false if stateCount < @optimizationConfig.minStatesForAuto
+    return false if @optimizationConfig.skipIfSmall and tableSize < 100
+
+    # Estimate sparsity quickly
+    filledCells = 0
+    totalCells = 0
+
+    # Sample a few states for quick sparsity estimate
+    sampleSize = Math.min(5, @states.length)
+    for i in [0...sampleSize]
+      state = @states[i]
+      if @table[state.id]
+        for symbol, action of @table[state.id]
+          filledCells++ if action?
+        totalCells += symbolCount
+
+    sparsity = if totalCells > 0 then ((totalCells - filledCells) / totalCells) * 100 else 0
+
+    # Optimize if sparse enough or large enough
+    return true if sparsity > 50  # Sparse tables benefit from compression
+    return true if stateCount > 50  # Large grammars benefit from optimization
+    return true if tableSize > 1000  # Large tables benefit from compression
+
+    false
+
+  # Get reason for optimization (for logging)
+  getOptimizationReason: ->
+    return "explicitly enabled" if @optimizationConfig.enabled
+
+    stateCount = @states.length
+    symbolCount = @symbols.size
+    tableSize = stateCount * symbolCount
+
+    return "large grammar (#{stateCount} states)" if stateCount > 50
+    return "large table (#{tableSize} cells)" if tableSize > 1000
+    return "auto-optimization threshold met"
+
+  # Conditional optimization with performance focus
+  optimizeTableConditional: ->
+    # Quick analysis for decision making
+    quickStats = @quickAnalyzeTable()
+
+    if @optimizationConfig.verbose
+      console.log "Quick analysis: #{quickStats.sparsity}% sparse, #{quickStats.uniqueRows} unique rows"
+
+    # Step 1: Always do symbol encoding (low cost, good benefit)
+    @optimizeSymbolEncodingFast()
+
+    # Step 2: Row compression (medium cost, good benefit for many states)
+    if @states.length > 10
+      @compressTableRowsFast()
+
+    # Step 3: Sparse compression (higher cost, only for sparse tables)
+    if quickStats.sparsity > 30
+      @applySparseTableCompressionFast()
+    else
+      # For dense tables, use simpler approach
+      @generateSimpleOptimizedTable()
+
+    # Step 4: Generate final optimized table
+    @generateOptimizedTableFast()
+
+  # Quick table analysis (minimal overhead)
+  quickAnalyzeTable: ->
+    totalCells = @states.length * @symbols.size
+    filledCells = 0
+    rowHashes = new Set()
+
+    for state in @states
+      if @table[state.id]
+        rowData = []
+        for symbolId in [0...@symbols.size]
+          action = @table[state.id][symbolId]
+          if action?
+            filledCells++
+            rowData.push(JSON.stringify(action))
+          else
+            rowData.push(null)
+
+        rowHash = @quickHash(rowData.join('|'))
+        rowHashes.add(rowHash)
+
+    sparsity = if totalCells > 0 then Math.round(((totalCells - filledCells) / totalCells) * 100) else 0
+
+    {
+      totalCells,
+      filledCells,
+      sparsity,
+      uniqueRows: rowHashes.size
+    }
+
+  # Fast symbol encoding (simplified)
+  optimizeSymbolEncodingFast: ->
+    # Only reorder if significant benefit expected
+    return unless @symbols.size > 10
+
+    symbolFrequency = new Map()
+    for state in @states
+      if @table[state.id]
+        for symbol, action of @table[state.id]
+          symbolId = @symbols.get(symbol)?.id
+          if symbolId?
+            symbolFrequency.set(symbolId, (symbolFrequency.get(symbolId) || 0) + 1)
+
+    # Only create mapping if there's significant variation
+    frequencies = [...symbolFrequency.values()]
+    if frequencies.length > 0
+      maxFreq = Math.max(...frequencies)
+      minFreq = Math.min(...frequencies)
+
+      # Only optimize if there's significant frequency variation
+      if maxFreq > minFreq * 2
+        sortedSymbols = [...symbolFrequency.entries()]
+          .sort((a, b) -> b[1] - a[1])
+          .map(([id, freq]) -> id)
+
+        @optimizedSymbolMap = new Map()
+        for newId, oldId of sortedSymbols
+          @optimizedSymbolMap.set(oldId, newId)
+
+  # Fast row compression (simplified)
+  compressTableRowsFast: ->
+    rowMap = new Map()
+    @rowCompression = new Map()
+    compressedRowId = 0
+
+    for state in @states
+      if @table[state.id]
+        # Create simple row signature
+        signature = Object.keys(@table[state.id]).sort().join(',')
+
+        if rowMap.has(signature)
+          @rowCompression.set(state.id, rowMap.get(signature))
+        else
+          rowMap.set(signature, compressedRowId)
+          @rowCompression.set(state.id, compressedRowId)
+          compressedRowId++
+
+  # Fast sparse compression (single algorithm)
+  applySparseTableCompressionFast: ->
+    # Choose best algorithm based on table characteristics
+    algorithm = @chooseBestAlgorithmFast()
+
+    switch algorithm
+      when 'COO'
+        @compressedTable = @compressWithCOO()
+      when 'Dictionary'
+        @compressedTable = @compressWithDictionary()
+      else
+        @compressedTable = @compressWithRLE()
+
+  # Choose compression algorithm without testing all
+  chooseBestAlgorithmFast: ->
+    stateCount = @states.length
+    symbolCount = @symbols.size
+
+    # Quick heuristics based on table characteristics
+    if stateCount > symbolCount * 2
+      'COO'  # Good for tall, sparse tables
+    else if symbolCount > 20
+      'Dictionary'  # Good for many symbols with repeated patterns
+    else
+      'RLE'  # Good general purpose
+
+  # Generate simple optimized table for dense tables
+  generateSimpleOptimizedTable: ->
+    @compressedTable = {
+      method: 'Simple',
+      data: @table,
+      compressionRatio: 0,
+      size: @states.length * @symbols.size * 8
+    }
+
+  # Fast table generation
+  generateOptimizedTableFast: ->
+    @optimizedTable = {
+      format: @compressedTable.method,
+      data: @compressedTable.data,
+      metadata: {
+        states: @states.length,
+        symbols: @symbols.size,
+        compression: @compressedTable.method,
+        symbolMap: @optimizedSymbolMap or new Map(),
+        rowCompression: @rowCompression or new Map(),
+        optimizationTime: @performanceStats.optimizationTime
+      }
+    }
+
+  # Simple hash function (faster than JSON.stringify)
+  quickHash: (str) ->
+    hash = 0
+    return hash if str.length == 0
+
+    for i in [0...Math.min(str.length, 100)]  # Limit for performance
+      char = str.charCodeAt(i)
+      hash = ((hash << 5) - hash) + char
+      hash = hash & hash  # Convert to 32-bit integer
+    hash
 
 # ==[ Export ]===============================================================
 
