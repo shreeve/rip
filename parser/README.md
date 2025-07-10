@@ -16,18 +16,39 @@ Inspired by classic tools like **Yacc/Bison** but pared down to the minimal set 
 
 ---
 
-## Quick glance
+## How it works
 
-```coffee
-Generator = require('./rip-parser').Generator
-parser    = new Generator().generate grammarSpec
-result    = parser.parse(source, lexer)
+**rip-parser** turns grammar definitions into working parsers through a simple pipeline:
+
+```
+grammar.coffee  →  rip-parser  →  parser.js  →  run your programs
+(your language     (generator)    (generated     (parse & execute)
+ definition)                       parser)
 ```
 
-* `grammarSpec` – a plain object defining non-terminals, productions and operator precedence.
-* `lexer` (optional) – any object exposing a `lex()` method; tokens are simple strings.
+### The three stages:
 
-The `generate` step happens at **runtime**, so you can build grammars programmatically or even on the fly.
+1. **Define your language** – Write a grammar file that describes your language's syntax and behavior
+2. **Generate a parser** – Feed your grammar to rip-parser, which outputs JavaScript parser code
+3. **Parse programs** – Use the generated parser to read and execute programs written in your language
+
+### In practice:
+
+```coffee
+# 1. Load your grammar definition
+grammar = require './my-language-grammar'
+
+# 2. Generate parser code
+{Generator} = require './rip-parser'
+parserCode = new Generator().generate(grammar)
+fs.writeFileSync('my-language-parser.js', parserCode)
+
+# 3. Use the parser to run programs
+parser = require './my-language-parser'
+ast = parser.parse(programSource)
+```
+
+Since **generation** happens at runtime, you can create parsers on-the-fly or build grammars programmatically. The generated parser is a standalone JavaScript module with no dependencies except a lexer (tokenizer) that you provide.
 
 ---
 
@@ -37,24 +58,24 @@ The `generate` step happens at **runtime**, so you can build grammars programmat
 
 | Class      | Role |
 |------------|------|
-| `Symbol`   | Metadata for every terminal & non-terminal (id, FIRST/FOLLOW sets, etc.) |
+| `Symbol`   | Metadata for every terminal & non-terminal (id, nullable, FIRST/FOLLOW sets) |
 | `Rule`     | One production *A → β* (+ optional semantic action & precedence tag). |
 | `Item`     | LR(1) item  *A → β · γ , LA*  used during state construction. |
-| `State`    | A set of LR(0) core items plus transitions to other states. |
-| `Generator`| The orchestrator – performs grammar analysis, builds the LALR automaton, resolves conflicts and finally spits out JS code. |
+| `State`    | A set of LR items plus transitions to other states. |
+| `Generator`| The orchestrator – performs grammar analysis, builds the LALR automaton, resolves conflicts and finally generates JS code. |
 
 ### Pipeline inside `Generator`
 
-1. **Grammar ingestion**: converts your spec into `Symbol`/`Rule` objects, maps tokens, infers the start symbol and inserts the augmented `$accept` rule.
-2. **Sanity passes**: strips unreachable or unproductive symbols so the final table is minimal.
+1. **Grammar ingestion**: converts your spec into `Symbol`/`Rule` objects, maps tokens, infers the start symbol and inserts the augmented `$accept → start $end` rule.
+2. **Sanity passes**: eliminates unreachable and unproductive symbols so the final table is minimal.
 3. **Nullable / FIRST / FOLLOW**: classic fixed-point algorithms compute these sets for every non-terminal.
 4. **State building**: constructs the canonical LR(0) machine, merging equivalent cores to produce LALR states.
-5. **Look-ahead propagation**: calculates spontaneous look-aheads and iteratively propagates them until convergence.
+5. **Look-ahead computation**: calculates spontaneous look-aheads and propagation links, then iteratively propagates them until convergence.
 6. **Conflict handling**: detects shift/reduce or reduce/reduce conflicts.
-   − If you provide `operators` precedence info, many conflicts are auto-resolved; unresolved states are flagged as “inadequate”.
-7. **Table & code generation**: compiles actions (`shift`, `reduce`, `accept`) into a compact integer table, serialises symbols and rules, then embeds everything – plus your semantic actions – into a CommonJS module.
+   − If you provide `operators` precedence info, many conflicts are auto-resolved; unresolved states are flagged as "inadequate".
+7. **Table & code generation**: compiles actions (`shift`, `reduce`, `accept`) into a compact table, serialises symbols and rules, then embeds everything – plus your semantic actions – into a CommonJS module.
 
-The end product is a **single function `parse()`** that expects a lexer and returns your AST (or whatever your actions build).
+The end product is a **complete parser module** with `parse()`, `Parser` class, and optional CLI support.
 
 ---
 
@@ -79,8 +100,8 @@ operators = [
   [ 'left', '*', '/' ]
 ]
 
-gen    = new Generator()
-parser = gen.generate {
+gen = new Generator()
+parserCode = gen.generate {
   grammar,
   operators,
   tokens: 'NUMBER + - * / ( )'
@@ -90,48 +111,111 @@ parser = gen.generate {
 
 ### Notes
 
-- Each production entry can be created with the helper `o pattern, action, opts`. `pattern` is a space-separated RHS; omit or use `''` for ε (empty).
-- `action` can be a CoffeeScript/JS function **or** an arrow-body string. Positional values `$1 … $n`, `$$` (result) and location variables `@1 … @n` are supported.
-- `opts.prec` lets you tag a production with an explicit precedence symbol for operator resolution.
+- Each production is an array: `[pattern, action, options]`
+- `pattern` is a space-separated RHS; use `''` or omit for ε (empty).
+- `action` can be a function or arrow function. Positional values `$1 … $n`, `$$` (result), `@$` (result location) and location variables `@1 … @n` are supported.
+- `options.prec` lets you tag a production with an explicit precedence symbol for conflict resolution.
+- In the generated parser, `$$` is shorthand for `this.$` (the semantic value being constructed).
 
 ---
 
 ## Conflict resolution & defaults
 
 When both a shift and a reduce are possible on the same look-ahead, `rip-parser` applies:
-1. **Higher precedence wins** (from `operators`).
+1. **Higher precedence wins** (from `operators` array - later entries have higher precedence).
 2. **Equal precedence** ⇒ associativity decides (`left` ⇒ reduce, `right` ⇒ shift, `nonassoc` ⇒ error).
+3. **No precedence info** ⇒ defaults to shift (and warns about the conflict).
 
-States that still harbour ambiguities are marked as *inadequate*; their cores are listed when you enable the debug helpers below.
+States that still harbour ambiguities are marked as *inadequate*; you'll see warnings during generation.
+
+---
+
+## Lexer interface
+
+The generated parser expects a lexer object with:
+```javascript
+{
+  lex()        // returns next token (string) or '' for EOF
+  setInput()   // initialize with source string
+  yytext       // current token text
+  yylloc       // location info {first_line, last_line, first_column, last_column}
+  yylineno     // current line number
+  yyleng       // current token length
+}
+```
 
 ---
 
 ## Debugging helpers
 
-The generator ships with several methods you can call before code-gen:
+The generator provides several methods you can call after grammar processing:
 
 ```coffee
-gen.printStatistics()   # basic counts
-gen.debugTable()        # every state & item
-gen.reportConflicts()   # detailed conflict list
+gen = new Generator()
+gen.processGrammar(spec)  # Parse the grammar first
+
+gen.printStatistics()     # Basic counts
+gen.debugTable()          # Every state & item
+gen.reportConflicts()     # Detailed conflict list
+gen.validateGrammar()     # Check for undefined symbols
 ```
 
-These print to the console and make it easier to reason about why a given grammar misbehaves.
+These print to the console and make it easier to understand grammar behavior.
 
 ---
 
-## Roadmap / missing pieces
+## Advanced features
 
-`rip-parser` is functional but still early-stage. Planned improvements include:
+### Default reductions
+The generator automatically detects states where all actions are the same reduction and optimizes them with default actions, reducing table size.
 
-- **On-demand look-ahead** to further slim down tables.
-- **Better error-recovery & messages** in generated parsers.
-- **Improved conflict diagnostics** with example inputs and suggestions.
-- **ESM output** alongside CommonJS.
-- **Source-map support** for semantic action errors.
+### Symbol elimination
+Before table generation, the parser automatically:
+- Removes unreachable non-terminals (not derivable from start symbol)
+- Removes unproductive non-terminals (can't derive terminal strings)
+- Warns about these removals to help debug grammar issues
+
+### Action code transformations
+Semantic actions support several convenience notations:
+- `$1, $2, ...` → stack values
+- `$$` → result value (`this.$`)
+- `@1, @2, ...` → location info for positions
+- `@$` → result location
+
+---
+
+## Generated parser API
+
+```javascript
+const parser = require('./generated-parser');
+
+// Basic usage
+result = parser.parse(inputString);
+
+// With custom lexer
+parser.lexer = myLexer;
+result = parser.parse(inputString);
+
+// Access parser class
+const p = new parser.Parser();
+p.yy = { /* shared state */ };
+result = p.parse(inputString);
+```
+
+---
+
+## Roadmap / known limitations
+
+`rip-parser` is functional but still evolving. Current limitations and planned improvements:
+
+- **Error recovery**: The `error` token is defined but error recovery rules aren't fully implemented.
+- **Reduce/reduce conflicts**: Currently resolved by earliest rule order; could be improved.
+- **Better conflict diagnostics**: Commented code shows planned example-based explanations.
+- **GLR mode**: For handling truly ambiguous grammars.
+- **Tree-sitter output**: Alternative backend for incremental parsing.
 
 ---
 
 ## License
 
-MIT © 2025 The rip team & contributors
+MIT © 2025 Steve Shreeve and Claude 4 Opus
