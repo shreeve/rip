@@ -2300,7 +2300,7 @@ if (typeof require !== 'undefined' && typeof module !== 'undefined') {
     """
 
   # ============================================================================
-  # Debugging
+  # Debugging and Development Tools
   # ============================================================================
 
   printStatistics: ->
@@ -2318,6 +2318,490 @@ if (typeof require !== 'undefined' && typeof module !== 'undefined') {
       console.log "\nState #{state.id}:"
       console.log "Core: #{core}"
       console.log "Items: #{state.items.length}"
+
+  # Generate comprehensive debugging information
+  generateDebugInfo: ->
+    debugInfo = {
+      grammar: @generateGrammarDebugInfo()
+      states: @generateStateDebugInfo()
+      conflicts: @generateConflictDebugInfo()
+      symbols: @generateSymbolDebugInfo()
+      rules: @generateRuleDebugInfo()
+      table: @generateTableDebugInfo()
+      performance: @performanceStats
+    }
+    debugInfo
+
+  # Generate grammar debugging information
+  generateGrammarDebugInfo: ->
+    {
+      startSymbol: @start
+      ruleCount: @rules.length
+      symbolCount: @symbols.size
+      terminalCount: [...@symbols.values()].filter((s) -> s.isTerminal).length
+      nonterminalCount: [...@symbols.values()].filter((s) -> !s.isTerminal).length
+      stateCount: @states.length
+      conflictCount: @conflicts.length
+      inadequateStateCount: @inadequateStates.length
+      hasLeftRecursion: @checkForLeftRecursion()
+      hasRightRecursion: @checkForRightRecursion()
+      cyclomaticComplexity: @calculateGrammarComplexity()
+    }
+
+  # Generate detailed state debugging information
+  generateStateDebugInfo: ->
+    stateInfo = []
+    for state in @states
+      stateData = {
+        id: state.id
+        itemCount: state.items.length
+        items: state.items.map (item) -> item.toString()
+        transitions: {}
+        isInadequate: state.inadequate
+        conflicts: @getStateConflicts(state.id)
+        reductions: @getStateReductions(state)
+        shifts: @getStateShifts(state)
+        gotos: @getStateGotos(state)
+      }
+
+      # Add transition information
+      for [symbol, nextState] from state.transitions
+        stateData.transitions[symbol] = nextState.id
+
+      stateInfo.push(stateData)
+    stateInfo
+
+  # Generate conflict debugging information
+  generateConflictDebugInfo: ->
+    conflictInfo = {
+      total: @conflicts.length
+      shiftReduce: @conflicts.filter((c) -> c.type == 'shift/reduce').length
+      reduceReduce: @conflicts.filter((c) -> c.type == 'reduce/reduce').length
+      resolved: @conflicts.filter((c) -> c.resolved).length
+      unresolved: @conflicts.filter((c) -> !c.resolved).length
+      details: @conflicts.map (conflict) -> {
+        type: conflict.type
+        state: conflict.state
+        symbol: conflict.lookahead
+        resolved: conflict.resolved
+        resolution: conflict.resolution
+        explanation: conflict.explanation
+      }
+    }
+    conflictInfo
+
+  # Generate symbol debugging information
+  generateSymbolDebugInfo: ->
+    symbolInfo = {}
+    for [name, symbol] from @symbols
+      symbolInfo[name] = {
+        id: symbol.id
+        isTerminal: symbol.isTerminal
+        nullable: symbol.nullable
+        first: [...symbol.first]
+        follow: [...symbol.follow]
+        usedInRules: @getRulesUsingSymbol(name)
+        definedInRules: if symbol.isTerminal then [] else @getRulesDefiningSymbol(name)
+      }
+    symbolInfo
+
+  # Generate rule debugging information
+  generateRuleDebugInfo: ->
+    ruleInfo = []
+    for rule in @rules
+      ruleInfo.push {
+        id: rule.id
+        lhs: rule.lhs
+        rhs: rule.rhs
+        action: rule.action
+        precedence: rule.precedence
+        isRecursive: @isRuleRecursive(rule)
+        recursionType: @getRuleRecursionType(rule)
+        length: rule.rhs.length
+        usedInStates: @getStatesUsingRule(rule)
+      }
+    ruleInfo
+
+  # Generate parsing table debugging information
+  generateTableDebugInfo: ->
+    tableInfo = {
+      size: @states.length
+      totalActions: 0
+      actionTypes: { shift: 0, reduce: 0, goto: 0, accept: 0 }
+      defaultActions: Object.keys(@defaultActions).length
+      sparsity: 0
+    }
+
+    totalCells = 0
+    filledCells = 0
+
+    for state in @states
+      if @table[state.id]
+        for symbol, action of @table[state.id]
+          totalCells++
+          if action?
+            filledCells++
+            tableInfo.totalActions++
+
+            if action.type
+              tableInfo.actionTypes[action.type]++
+            else
+              tableInfo.actionTypes.goto++
+
+      totalCells += @symbols.size
+
+    tableInfo.sparsity = Math.round((1 - filledCells / totalCells) * 100)
+    tableInfo
+
+  # Interactive debugging methods
+  exploreState: (stateId) ->
+    return "Invalid state ID" unless stateId >= 0 and stateId < @states.length
+
+    state = @states[stateId]
+    console.log "\n🔍 EXPLORING STATE #{stateId}"
+    console.log "=" * 30
+    console.log "Items:"
+    for item in state.items
+      console.log "  #{item.toString()}"
+
+    console.log "\nTransitions:"
+    for [symbol, nextState] from state.transitions
+      symbolType = if @getSymbol(symbol).isTerminal then "T" else "NT"
+      console.log "  #{symbol} (#{symbolType}) → State #{nextState.id}"
+
+    if @table[stateId]
+      console.log "\nActions:"
+      for symbol, action of @table[stateId]
+        if action.type
+          console.log "  #{symbol}: #{action.type} #{action.state || action.rule || ''}"
+        else
+          console.log "  #{symbol}: goto #{action}"
+
+    conflicts = @getStateConflicts(stateId)
+    if conflicts.length > 0
+      console.log "\nConflicts:"
+      for conflict in conflicts
+        console.log "  #{conflict.type} on '#{conflict.lookahead}'"
+
+  exploreRule: (ruleId) ->
+    return "Invalid rule ID" unless ruleId >= 0 and ruleId < @rules.length
+
+    rule = @rules[ruleId]
+    console.log "\n🔍 EXPLORING RULE #{ruleId}"
+    console.log "=" * 30
+    console.log "Production: #{rule.lhs} → #{rule.rhs.join(' ')}"
+    console.log "Action: #{rule.action || 'default'}"
+    console.log "Precedence: #{rule.precedence || 'none'}"
+
+    # Find states containing this rule
+    statesWithRule = []
+    for state in @states
+      for item in state.items
+        if item.rule.id == ruleId
+          statesWithRule.push({ state: state.id, dot: item.dot, lookahead: [...item.lookahead] })
+
+    if statesWithRule.length > 0
+      console.log "\nUsed in states:"
+      for usage in statesWithRule
+        console.log "  State #{usage.state}: dot at #{usage.dot}, lookahead [#{usage.lookahead.join(', ')}]"
+
+  exploreConflict: (conflictIndex) ->
+    return "Invalid conflict index" unless conflictIndex >= 0 and conflictIndex < @conflicts.length
+
+    conflict = @conflicts[conflictIndex]
+    console.log "\n🔍 EXPLORING CONFLICT #{conflictIndex}"
+    console.log "=" * 35
+    console.log conflict.explanation
+
+    # Show the state causing the conflict
+    console.log "\nState #{conflict.state} details:"
+    @exploreState(conflict.state)
+
+  # Generate visual representation of the automaton
+  generateStateMachineVisualization: (format = 'dot') ->
+    switch format
+      when 'dot'
+        @generateDotVisualization()
+      when 'mermaid'
+        @generateMermaidVisualization()
+      else
+        "Unsupported format. Use 'dot' or 'mermaid'"
+
+  generateDotVisualization: ->
+    lines = ['digraph LALR1_Automaton {']
+    lines.push '  rankdir=LR;'
+    lines.push '  node [shape=circle];'
+
+    # Add states
+    for state in @states
+      label = "#{state.id}"
+      if state.inadequate
+        lines.push "  #{state.id} [label=\"#{label}\", color=red];"
+      else
+        lines.push "  #{state.id} [label=\"#{label}\"];"
+
+    # Add transitions
+    for state in @states
+      for [symbol, nextState] from state.transitions
+        lines.push "  #{state.id} -> #{nextState.id} [label=\"#{symbol}\"];"
+
+    lines.push '}'
+    lines.join('\n')
+
+  generateMermaidVisualization: ->
+    lines = ['graph LR']
+
+    # Add states with styling
+    for state in @states
+      if state.inadequate
+        lines.push "  #{state.id}[\"State #{state.id}\"]:::conflict"
+      else
+        lines.push "  #{state.id}[\"State #{state.id}\"]"
+
+    # Add transitions
+    for state in @states
+      for [symbol, nextState] from state.transitions
+        lines.push "  #{state.id} -->|#{symbol}| #{nextState.id}"
+
+    # Add styling
+    lines.push '  classDef conflict fill:#ffcccc,stroke:#ff0000'
+
+    lines.join('\n')
+
+  # Helper methods for debugging information
+  checkForLeftRecursion: ->
+    for rule in @rules
+      if @isLeftRecursive(rule.lhs, new Set())
+        return true
+    false
+
+  checkForRightRecursion: ->
+    for rule in @rules
+      if @isRightRecursive(rule.lhs, new Set())
+        return true
+    false
+
+  calculateGrammarComplexity: ->
+    # Simple complexity metric based on rule count and branching factor
+    totalBranching = 0
+    for [name, symbol] from @symbols
+      unless symbol.isTerminal
+        rulesForSymbol = @rulesByLHS.get(name) || []
+        totalBranching += rulesForSymbol.length
+
+    Math.round(totalBranching / @symbols.size)
+
+  getStateConflicts: (stateId) ->
+    @conflicts.filter (conflict) -> conflict.state == stateId
+
+  getStateReductions: (state) ->
+    reductions = []
+    for item in state.items
+      if item.isComplete() and item.rule.lhs != '$accept'
+        reductions.push {
+          rule: item.rule.id
+          lookahead: [...item.lookahead]
+        }
+    reductions
+
+  getStateShifts: (state) ->
+    shifts = []
+    for [symbol, nextState] from state.transitions
+      if @getSymbol(symbol).isTerminal
+        shifts.push { symbol, nextState: nextState.id }
+    shifts
+
+  getStateGotos: (state) ->
+    gotos = []
+    for [symbol, nextState] from state.transitions
+      unless @getSymbol(symbol).isTerminal
+        gotos.push { symbol, nextState: nextState.id }
+    gotos
+
+  getRulesUsingSymbol: (symbolName) ->
+    rules = []
+    for rule in @rules
+      if symbolName in rule.rhs
+        rules.push rule.id
+    rules
+
+  getRulesDefiningSymbol: (symbolName) ->
+    rules = []
+    for rule in @rules
+      if rule.lhs == symbolName
+        rules.push rule.id
+    rules
+
+  isRuleRecursive: (rule) ->
+    rule.lhs in rule.rhs
+
+  getRuleRecursionType: (rule) ->
+    return 'none' unless @isRuleRecursive(rule)
+    return 'left' if rule.rhs[0] == rule.lhs
+    return 'right' if rule.rhs[rule.rhs.length - 1] == rule.lhs
+    'middle'
+
+  getStatesUsingRule: (rule) ->
+    states = []
+    for state in @states
+      for item in state.items
+        if item.rule.id == rule.id
+          states.push state.id
+    states
+
+  isLeftRecursive: (symbol, visited) ->
+    return false if visited.has(symbol)
+    visited.add(symbol)
+
+    rulesForSymbol = @rulesByLHS.get(symbol) || []
+    for rule in rulesForSymbol
+      if rule.rhs.length > 0 and rule.rhs[0] == symbol
+        return true
+      if rule.rhs.length > 0 and not @getSymbol(rule.rhs[0]).isTerminal
+        if @isLeftRecursive(rule.rhs[0], new Set(visited))
+          return true
+
+    false
+
+  isRightRecursive: (symbol, visited) ->
+    return false if visited.has(symbol)
+    visited.add(symbol)
+
+    rulesForSymbol = @rulesByLHS.get(symbol) || []
+    for rule in rulesForSymbol
+      if rule.rhs.length > 0 and rule.rhs[rule.rhs.length - 1] == symbol
+        return true
+      if rule.rhs.length > 0 and not @getSymbol(rule.rhs[rule.rhs.length - 1]).isTerminal
+        if @isRightRecursive(rule.rhs[rule.rhs.length - 1], new Set(visited))
+          return true
+
+    false
+
+  # Generate enhanced parser with debugging capabilities
+  generateDebugParser: (options = {}) ->
+    debugOptions = Object.assign({
+      traceEnabled: true
+      stepMode: false
+      showStack: true
+      showLookahead: true
+      logActions: true
+    }, options.debug || {})
+
+    # Generate base parser
+    baseParser = @generateCommonJS(options)
+
+    # Add debugging enhancements
+    debugEnhancements = @generateDebugEnhancements(debugOptions)
+
+    # Inject debugging code into parser
+    baseParser.replace(
+      'const parser = {'
+      "const parser = {\n#{debugEnhancements}"
+    )
+
+  # Generate debugging enhancements for parser
+  generateDebugEnhancements: (options) ->
+    """
+    // Enhanced debugging capabilities
+    _debugOptions: #{JSON.stringify(options)},
+    _parseTrace: [],
+    _stepMode: #{options.stepMode},
+    _currentStep: 0,
+
+    // Enable/disable debugging
+    enableDebug: function() { this._debugOptions.traceEnabled = true; },
+    disableDebug: function() { this._debugOptions.traceEnabled = false; },
+
+    // Step-by-step debugging
+    enableStepMode: function() { this._stepMode = true; },
+    disableStepMode: function() { this._stepMode = false; },
+
+    // Get parse trace
+    getParseTrace: function() { return this._parseTrace; },
+    clearTrace: function() { this._parseTrace = []; },
+
+    // Debug trace method
+    debugTrace: function(action, state, symbol, stack, vstack) {
+      if (!this._debugOptions.traceEnabled) return;
+
+      const traceEntry = {
+        step: this._currentStep++,
+        action: action,
+        state: state,
+        symbol: symbol,
+        stackSize: stack.length / 2,
+        stack: this._debugOptions.showStack ? [...stack] : null,
+        valueStack: this._debugOptions.showStack ? [...vstack] : null,
+        timestamp: Date.now()
+      };
+
+      this._parseTrace.push(traceEntry);
+
+      if (this._debugOptions.logActions) {
+        console.log(`Step ${traceEntry.step}: ${action} in state ${state} on symbol '${symbol}'`);
+        if (this._debugOptions.showStack) {
+          console.log(`  Stack: [${stack.join(', ')}]`);
+        }
+      }
+
+      // Step mode: pause for user input
+      if (this._stepMode && typeof window !== 'undefined') {
+        const continueStep = confirm(`Step ${traceEntry.step}: ${action} in state ${state} on symbol '${symbol}'\\nContinue?`);
+        if (!continueStep) {
+          throw new Error('Debugging stopped by user');
+        }
+      }
+    },
+
+    // Inspect parser state
+    inspectState: function(stateId) {
+      const stateInfo = this._getStateInfo(stateId);
+      console.table(stateInfo);
+      return stateInfo;
+    },
+
+    // Get detailed state information
+    _getStateInfo: function(stateId) {
+      const actions = this.table[stateId] || {};
+      const info = [];
+
+      for (const symbol in actions) {
+        const action = actions[symbol];
+        info.push({
+          symbol: symbol,
+          action: action.type || 'goto',
+          target: action.state || action.rule || action,
+          description: this._describeAction(action, symbol)
+        });
+      }
+
+      return info;
+    },
+
+    // Describe an action in human-readable form
+    _describeAction: function(action, symbol) {
+      if (!action.type) return `Go to state ${action}`;
+
+      switch (action.type) {
+        case 'shift': return `Shift '${symbol}' and go to state ${action.state}`;
+        case 'reduce': return `Reduce by rule ${action.rule}`;
+        case 'accept': return 'Accept input';
+        default: return `Unknown action: ${action.type}`;
+      }
+    },
+
+    // Export debug information
+    exportDebugInfo: function() {
+      return {
+        trace: this._parseTrace,
+        options: this._debugOptions,
+        statistics: {
+          totalSteps: this._currentStep,
+          traceSize: this._parseTrace.length
+        }
+      };
+    }
+    """
 
   debugTable: ->
     console.log "\n=== PARSER STATES ==="

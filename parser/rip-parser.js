@@ -3008,7 +3008,7 @@ if (typeof require !== 'undefined' && typeof module !== 'undefined') {
     }
 
     // ============================================================================
-    // Debugging
+    // Debugging and Development Tools
     // ============================================================================
     printStatistics() {
       console.log("\n=== GRAMMAR STATISTICS ===");
@@ -3036,6 +3036,675 @@ if (typeof require !== 'undefined' && typeof module !== 'undefined') {
         results.push(console.log(`Items: ${state.items.length}`));
       }
       return results;
+    }
+
+    // Generate comprehensive debugging information
+    generateDebugInfo() {
+      var debugInfo;
+      debugInfo = {
+        grammar: this.generateGrammarDebugInfo(),
+        states: this.generateStateDebugInfo(),
+        conflicts: this.generateConflictDebugInfo(),
+        symbols: this.generateSymbolDebugInfo(),
+        rules: this.generateRuleDebugInfo(),
+        table: this.generateTableDebugInfo(),
+        performance: this.performanceStats
+      };
+      return debugInfo;
+    }
+
+    // Generate grammar debugging information
+    generateGrammarDebugInfo() {
+      return {
+        startSymbol: this.start,
+        ruleCount: this.rules.length,
+        symbolCount: this.symbols.size,
+        terminalCount: [...this.symbols.values()].filter(function(s) {
+          return s.isTerminal;
+        }).length,
+        nonterminalCount: [...this.symbols.values()].filter(function(s) {
+          return !s.isTerminal;
+        }).length,
+        stateCount: this.states.length,
+        conflictCount: this.conflicts.length,
+        inadequateStateCount: this.inadequateStates.length,
+        hasLeftRecursion: this.checkForLeftRecursion(),
+        hasRightRecursion: this.checkForRightRecursion(),
+        cyclomaticComplexity: this.calculateGrammarComplexity()
+      };
+    }
+
+    // Generate detailed state debugging information
+    generateStateDebugInfo() {
+      var l, len, nextState, ref, ref1, state, stateData, stateInfo, symbol, y;
+      stateInfo = [];
+      ref = this.states;
+      for (l = 0, len = ref.length; l < len; l++) {
+        state = ref[l];
+        stateData = {
+          id: state.id,
+          itemCount: state.items.length,
+          items: state.items.map(function(item) {
+            return item.toString();
+          }),
+          transitions: {},
+          isInadequate: state.inadequate,
+          conflicts: this.getStateConflicts(state.id),
+          reductions: this.getStateReductions(state),
+          shifts: this.getStateShifts(state),
+          gotos: this.getStateGotos(state)
+        };
+        ref1 = state.transitions;
+        // Add transition information
+        for (y of ref1) {
+          [symbol, nextState] = y;
+          stateData.transitions[symbol] = nextState.id;
+        }
+        stateInfo.push(stateData);
+      }
+      return stateInfo;
+    }
+
+    // Generate conflict debugging information
+    generateConflictDebugInfo() {
+      var conflictInfo;
+      conflictInfo = {
+        total: this.conflicts.length,
+        shiftReduce: this.conflicts.filter(function(c) {
+          return c.type === 'shift/reduce';
+        }).length,
+        reduceReduce: this.conflicts.filter(function(c) {
+          return c.type === 'reduce/reduce';
+        }).length,
+        resolved: this.conflicts.filter(function(c) {
+          return c.resolved;
+        }).length,
+        unresolved: this.conflicts.filter(function(c) {
+          return !c.resolved;
+        }).length,
+        details: this.conflicts.map(function(conflict) {
+          return {
+            type: conflict.type,
+            state: conflict.state,
+            symbol: conflict.lookahead,
+            resolved: conflict.resolved,
+            resolution: conflict.resolution,
+            explanation: conflict.explanation
+          };
+        })
+      };
+      return conflictInfo;
+    }
+
+    // Generate symbol debugging information
+    generateSymbolDebugInfo() {
+      var name, ref, symbol, symbolInfo, y;
+      symbolInfo = {};
+      ref = this.symbols;
+      for (y of ref) {
+        [name, symbol] = y;
+        symbolInfo[name] = {
+          id: symbol.id,
+          isTerminal: symbol.isTerminal,
+          nullable: symbol.nullable,
+          first: [...symbol.first],
+          follow: [...symbol.follow],
+          usedInRules: this.getRulesUsingSymbol(name),
+          definedInRules: symbol.isTerminal ? [] : this.getRulesDefiningSymbol(name)
+        };
+      }
+      return symbolInfo;
+    }
+
+    // Generate rule debugging information
+    generateRuleDebugInfo() {
+      var l, len, ref, rule, ruleInfo;
+      ruleInfo = [];
+      ref = this.rules;
+      for (l = 0, len = ref.length; l < len; l++) {
+        rule = ref[l];
+        ruleInfo.push({
+          id: rule.id,
+          lhs: rule.lhs,
+          rhs: rule.rhs,
+          action: rule.action,
+          precedence: rule.precedence,
+          isRecursive: this.isRuleRecursive(rule),
+          recursionType: this.getRuleRecursionType(rule),
+          length: rule.rhs.length,
+          usedInStates: this.getStatesUsingRule(rule)
+        });
+      }
+      return ruleInfo;
+    }
+
+    // Generate parsing table debugging information
+    generateTableDebugInfo() {
+      var action, filledCells, l, len, ref, ref1, state, symbol, tableInfo, totalCells;
+      tableInfo = {
+        size: this.states.length,
+        totalActions: 0,
+        actionTypes: {
+          shift: 0,
+          reduce: 0,
+          goto: 0,
+          accept: 0
+        },
+        defaultActions: Object.keys(this.defaultActions).length,
+        sparsity: 0
+      };
+      totalCells = 0;
+      filledCells = 0;
+      ref = this.states;
+      for (l = 0, len = ref.length; l < len; l++) {
+        state = ref[l];
+        if (this.table[state.id]) {
+          ref1 = this.table[state.id];
+          for (symbol in ref1) {
+            action = ref1[symbol];
+            totalCells++;
+            if (action != null) {
+              filledCells++;
+              tableInfo.totalActions++;
+              if (action.type) {
+                tableInfo.actionTypes[action.type]++;
+              } else {
+                tableInfo.actionTypes.goto++;
+              }
+            }
+          }
+        }
+        totalCells += this.symbols.size;
+      }
+      tableInfo.sparsity = Math.round((1 - filledCells / totalCells) * 100);
+      return tableInfo;
+    }
+
+    // Interactive debugging methods
+    exploreState(stateId) {
+      var action, conflict, conflicts, item, l, len, len1, m, nextState, ref, ref1, ref2, results, state, symbol, symbolType, y;
+      if (!(stateId >= 0 && stateId < this.states.length)) {
+        return "Invalid state ID";
+      }
+      state = this.states[stateId];
+      console.log(`\n🔍 EXPLORING STATE ${stateId}`);
+      console.log("=" * 30);
+      console.log("Items:");
+      ref = state.items;
+      for (l = 0, len = ref.length; l < len; l++) {
+        item = ref[l];
+        console.log(`  ${item.toString()}`);
+      }
+      console.log("\nTransitions:");
+      ref1 = state.transitions;
+      for (y of ref1) {
+        [symbol, nextState] = y;
+        symbolType = this.getSymbol(symbol).isTerminal ? "T" : "NT";
+        console.log(`  ${symbol} (${symbolType}) → State ${nextState.id}`);
+      }
+      if (this.table[stateId]) {
+        console.log("\nActions:");
+        ref2 = this.table[stateId];
+        for (symbol in ref2) {
+          action = ref2[symbol];
+          if (action.type) {
+            console.log(`  ${symbol}: ${action.type} ${action.state || action.rule || ''}`);
+          } else {
+            console.log(`  ${symbol}: goto ${action}`);
+          }
+        }
+      }
+      conflicts = this.getStateConflicts(stateId);
+      if (conflicts.length > 0) {
+        console.log("\nConflicts:");
+        results = [];
+        for (m = 0, len1 = conflicts.length; m < len1; m++) {
+          conflict = conflicts[m];
+          results.push(console.log(`  ${conflict.type} on '${conflict.lookahead}'`));
+        }
+        return results;
+      }
+    }
+
+    exploreRule(ruleId) {
+      var item, l, len, len1, len2, m, o, ref, ref1, results, rule, state, statesWithRule, usage;
+      if (!(ruleId >= 0 && ruleId < this.rules.length)) {
+        return "Invalid rule ID";
+      }
+      rule = this.rules[ruleId];
+      console.log(`\n🔍 EXPLORING RULE ${ruleId}`);
+      console.log("=" * 30);
+      console.log(`Production: ${rule.lhs} → ${rule.rhs.join(' ')}`);
+      console.log(`Action: ${rule.action || 'default'}`);
+      console.log(`Precedence: ${rule.precedence || 'none'}`);
+      // Find states containing this rule
+      statesWithRule = [];
+      ref = this.states;
+      for (l = 0, len = ref.length; l < len; l++) {
+        state = ref[l];
+        ref1 = state.items;
+        for (m = 0, len1 = ref1.length; m < len1; m++) {
+          item = ref1[m];
+          if (item.rule.id === ruleId) {
+            statesWithRule.push({
+              state: state.id,
+              dot: item.dot,
+              lookahead: [...item.lookahead]
+            });
+          }
+        }
+      }
+      if (statesWithRule.length > 0) {
+        console.log("\nUsed in states:");
+        results = [];
+        for (o = 0, len2 = statesWithRule.length; o < len2; o++) {
+          usage = statesWithRule[o];
+          results.push(console.log(`  State ${usage.state}: dot at ${usage.dot}, lookahead [${usage.lookahead.join(', ')}]`));
+        }
+        return results;
+      }
+    }
+
+    exploreConflict(conflictIndex) {
+      var conflict;
+      if (!(conflictIndex >= 0 && conflictIndex < this.conflicts.length)) {
+        return "Invalid conflict index";
+      }
+      conflict = this.conflicts[conflictIndex];
+      console.log(`\n🔍 EXPLORING CONFLICT ${conflictIndex}`);
+      console.log("=" * 35);
+      console.log(conflict.explanation);
+      // Show the state causing the conflict
+      console.log(`\nState ${conflict.state} details:`);
+      return this.exploreState(conflict.state);
+    }
+
+    // Generate visual representation of the automaton
+    generateStateMachineVisualization(format = 'dot') {
+      switch (format) {
+        case 'dot':
+          return this.generateDotVisualization();
+        case 'mermaid':
+          return this.generateMermaidVisualization();
+        default:
+          return "Unsupported format. Use 'dot' or 'mermaid'";
+      }
+    }
+
+    generateDotVisualization() {
+      var l, label, len, len1, lines, m, nextState, ref, ref1, ref2, state, symbol, y;
+      lines = ['digraph LALR1_Automaton {'];
+      lines.push('  rankdir=LR;');
+      lines.push('  node [shape=circle];');
+      ref = this.states;
+      // Add states
+      for (l = 0, len = ref.length; l < len; l++) {
+        state = ref[l];
+        label = `${state.id}`;
+        if (state.inadequate) {
+          lines.push(`  ${state.id} [label=\"${label}\", color=red];`);
+        } else {
+          lines.push(`  ${state.id} [label=\"${label}\"];`);
+        }
+      }
+      ref1 = this.states;
+      // Add transitions
+      for (m = 0, len1 = ref1.length; m < len1; m++) {
+        state = ref1[m];
+        ref2 = state.transitions;
+        for (y of ref2) {
+          [symbol, nextState] = y;
+          lines.push(`  ${state.id} -> ${nextState.id} [label=\"${symbol}\"];`);
+        }
+      }
+      lines.push('}');
+      return lines.join('\n');
+    }
+
+    generateMermaidVisualization() {
+      var l, len, len1, lines, m, nextState, ref, ref1, ref2, state, symbol, y;
+      lines = ['graph LR'];
+      ref = this.states;
+      // Add states with styling
+      for (l = 0, len = ref.length; l < len; l++) {
+        state = ref[l];
+        if (state.inadequate) {
+          lines.push(`  ${state.id}[\"State ${state.id}\"]:::conflict`);
+        } else {
+          lines.push(`  ${state.id}[\"State ${state.id}\"]`);
+        }
+      }
+      ref1 = this.states;
+      // Add transitions
+      for (m = 0, len1 = ref1.length; m < len1; m++) {
+        state = ref1[m];
+        ref2 = state.transitions;
+        for (y of ref2) {
+          [symbol, nextState] = y;
+          lines.push(`  ${state.id} -->|${symbol}| ${nextState.id}`);
+        }
+      }
+      // Add styling
+      lines.push('  classDef conflict fill:#ffcccc,stroke:#ff0000');
+      return lines.join('\n');
+    }
+
+    // Helper methods for debugging information
+    checkForLeftRecursion() {
+      var l, len, ref, rule;
+      ref = this.rules;
+      for (l = 0, len = ref.length; l < len; l++) {
+        rule = ref[l];
+        if (this.isLeftRecursive(rule.lhs, new Set())) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    checkForRightRecursion() {
+      var l, len, ref, rule;
+      ref = this.rules;
+      for (l = 0, len = ref.length; l < len; l++) {
+        rule = ref[l];
+        if (this.isRightRecursive(rule.lhs, new Set())) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    calculateGrammarComplexity() {
+      var name, ref, rulesForSymbol, symbol, totalBranching, y;
+      // Simple complexity metric based on rule count and branching factor
+      totalBranching = 0;
+      ref = this.symbols;
+      for (y of ref) {
+        [name, symbol] = y;
+        if (!symbol.isTerminal) {
+          rulesForSymbol = this.rulesByLHS.get(name) || [];
+          totalBranching += rulesForSymbol.length;
+        }
+      }
+      return Math.round(totalBranching / this.symbols.size);
+    }
+
+    getStateConflicts(stateId) {
+      return this.conflicts.filter(function(conflict) {
+        return conflict.state === stateId;
+      });
+    }
+
+    getStateReductions(state) {
+      var item, l, len, reductions, ref;
+      reductions = [];
+      ref = state.items;
+      for (l = 0, len = ref.length; l < len; l++) {
+        item = ref[l];
+        if (item.isComplete() && item.rule.lhs !== '$accept') {
+          reductions.push({
+            rule: item.rule.id,
+            lookahead: [...item.lookahead]
+          });
+        }
+      }
+      return reductions;
+    }
+
+    getStateShifts(state) {
+      var nextState, ref, shifts, symbol, y;
+      shifts = [];
+      ref = state.transitions;
+      for (y of ref) {
+        [symbol, nextState] = y;
+        if (this.getSymbol(symbol).isTerminal) {
+          shifts.push({
+            symbol,
+            nextState: nextState.id
+          });
+        }
+      }
+      return shifts;
+    }
+
+    getStateGotos(state) {
+      var gotos, nextState, ref, symbol, y;
+      gotos = [];
+      ref = state.transitions;
+      for (y of ref) {
+        [symbol, nextState] = y;
+        if (!this.getSymbol(symbol).isTerminal) {
+          gotos.push({
+            symbol,
+            nextState: nextState.id
+          });
+        }
+      }
+      return gotos;
+    }
+
+    getRulesUsingSymbol(symbolName) {
+      var l, len, ref, rule, rules;
+      rules = [];
+      ref = this.rules;
+      for (l = 0, len = ref.length; l < len; l++) {
+        rule = ref[l];
+        if (indexOf.call(rule.rhs, symbolName) >= 0) {
+          rules.push(rule.id);
+        }
+      }
+      return rules;
+    }
+
+    getRulesDefiningSymbol(symbolName) {
+      var l, len, ref, rule, rules;
+      rules = [];
+      ref = this.rules;
+      for (l = 0, len = ref.length; l < len; l++) {
+        rule = ref[l];
+        if (rule.lhs === symbolName) {
+          rules.push(rule.id);
+        }
+      }
+      return rules;
+    }
+
+    isRuleRecursive(rule) {
+      var ref;
+      return ref = rule.lhs, indexOf.call(rule.rhs, ref) >= 0;
+    }
+
+    getRuleRecursionType(rule) {
+      if (!this.isRuleRecursive(rule)) {
+        return 'none';
+      }
+      if (rule.rhs[0] === rule.lhs) {
+        return 'left';
+      }
+      if (rule.rhs[rule.rhs.length - 1] === rule.lhs) {
+        return 'right';
+      }
+      return 'middle';
+    }
+
+    getStatesUsingRule(rule) {
+      var item, l, len, len1, m, ref, ref1, state, states;
+      states = [];
+      ref = this.states;
+      for (l = 0, len = ref.length; l < len; l++) {
+        state = ref[l];
+        ref1 = state.items;
+        for (m = 0, len1 = ref1.length; m < len1; m++) {
+          item = ref1[m];
+          if (item.rule.id === rule.id) {
+            states.push(state.id);
+          }
+        }
+      }
+      return states;
+    }
+
+    isLeftRecursive(symbol, visited) {
+      var l, len, rule, rulesForSymbol;
+      if (visited.has(symbol)) {
+        return false;
+      }
+      visited.add(symbol);
+      rulesForSymbol = this.rulesByLHS.get(symbol) || [];
+      for (l = 0, len = rulesForSymbol.length; l < len; l++) {
+        rule = rulesForSymbol[l];
+        if (rule.rhs.length > 0 && rule.rhs[0] === symbol) {
+          return true;
+        }
+        if (rule.rhs.length > 0 && !this.getSymbol(rule.rhs[0]).isTerminal) {
+          if (this.isLeftRecursive(rule.rhs[0], new Set(visited))) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    isRightRecursive(symbol, visited) {
+      var l, len, rule, rulesForSymbol;
+      if (visited.has(symbol)) {
+        return false;
+      }
+      visited.add(symbol);
+      rulesForSymbol = this.rulesByLHS.get(symbol) || [];
+      for (l = 0, len = rulesForSymbol.length; l < len; l++) {
+        rule = rulesForSymbol[l];
+        if (rule.rhs.length > 0 && rule.rhs[rule.rhs.length - 1] === symbol) {
+          return true;
+        }
+        if (rule.rhs.length > 0 && !this.getSymbol(rule.rhs[rule.rhs.length - 1]).isTerminal) {
+          if (this.isRightRecursive(rule.rhs[rule.rhs.length - 1], new Set(visited))) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    // Generate enhanced parser with debugging capabilities
+    generateDebugParser(options = {}) {
+      var baseParser, debugEnhancements, debugOptions;
+      debugOptions = Object.assign({
+        traceEnabled: true,
+        stepMode: false,
+        showStack: true,
+        showLookahead: true,
+        logActions: true
+      }, options.debug || {});
+      // Generate base parser
+      baseParser = this.generateCommonJS(options);
+      // Add debugging enhancements
+      debugEnhancements = this.generateDebugEnhancements(debugOptions);
+      // Inject debugging code into parser
+      return baseParser.replace('const parser = {', `const parser = {\n${debugEnhancements}`);
+    }
+
+    // Generate debugging enhancements for parser
+    generateDebugEnhancements(options) {
+      return `// Enhanced debugging capabilities
+_debugOptions: ${JSON.stringify(options)},
+_parseTrace: [],
+_stepMode: ${options.stepMode},
+_currentStep: 0,
+
+// Enable/disable debugging
+enableDebug: function() { this._debugOptions.traceEnabled = true; },
+disableDebug: function() { this._debugOptions.traceEnabled = false; },
+
+// Step-by-step debugging
+enableStepMode: function() { this._stepMode = true; },
+disableStepMode: function() { this._stepMode = false; },
+
+// Get parse trace
+getParseTrace: function() { return this._parseTrace; },
+clearTrace: function() { this._parseTrace = []; },
+
+// Debug trace method
+debugTrace: function(action, state, symbol, stack, vstack) {
+  if (!this._debugOptions.traceEnabled) return;
+
+  const traceEntry = {
+    step: this._currentStep++,
+    action: action,
+    state: state,
+    symbol: symbol,
+    stackSize: stack.length / 2,
+    stack: this._debugOptions.showStack ? [...stack] : null,
+    valueStack: this._debugOptions.showStack ? [...vstack] : null,
+    timestamp: Date.now()
+  };
+
+  this._parseTrace.push(traceEntry);
+
+  if (this._debugOptions.logActions) {
+    console.log(\`Step \${traceEntry.step}: \${action} in state \${state} on symbol '\${symbol}'\`);
+    if (this._debugOptions.showStack) {
+      console.log(\`  Stack: [\${stack.join(', ')}]\`);
+    }
+  }
+
+  // Step mode: pause for user input
+  if (this._stepMode && typeof window !== 'undefined') {
+    const continueStep = confirm(\`Step \${traceEntry.step}: \${action} in state \${state} on symbol '\${symbol}'\\nContinue?\`);
+    if (!continueStep) {
+      throw new Error('Debugging stopped by user');
+    }
+  }
+},
+
+// Inspect parser state
+inspectState: function(stateId) {
+  const stateInfo = this._getStateInfo(stateId);
+  console.table(stateInfo);
+  return stateInfo;
+},
+
+// Get detailed state information
+_getStateInfo: function(stateId) {
+  const actions = this.table[stateId] || {};
+  const info = [];
+
+  for (const symbol in actions) {
+    const action = actions[symbol];
+    info.push({
+      symbol: symbol,
+      action: action.type || 'goto',
+      target: action.state || action.rule || action,
+      description: this._describeAction(action, symbol)
+    });
+  }
+
+  return info;
+},
+
+// Describe an action in human-readable form
+_describeAction: function(action, symbol) {
+  if (!action.type) return \`Go to state \${action}\`;
+
+  switch (action.type) {
+    case 'shift': return \`Shift '\${symbol}' and go to state \${action.state}\`;
+    case 'reduce': return \`Reduce by rule \${action.rule}\`;
+    case 'accept': return 'Accept input';
+    default: return \`Unknown action: \${action.type}\`;
+  }
+},
+
+// Export debug information
+exportDebugInfo: function() {
+  return {
+    trace: this._parseTrace,
+    options: this._debugOptions,
+    statistics: {
+      totalSteps: this._currentStep,
+      traceSize: this._parseTrace.length
+    }
+  };
+}`;
     }
 
     debugTable() {
