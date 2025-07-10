@@ -66,9 +66,8 @@ Resolution: shift (token has higher precedence) ✅
 ### **Optimization Statistics**
 - **19% cache hit rate** - Excellent cache utilization reducing redundant computations
 - **20ms table optimization** - Lightning-fast optimization with multiple compression algorithms
-- **5 compression algorithms tested** - VLQ, Dictionary, COO, CSR, and Run-Length Encoding
+- **4 compression algorithms tested** - Dictionary, COO, CSR, and Run-Length Encoding
 - **Dictionary compression selected** - Automatically chosen as optimal for parser table data
-- **VLQ compression implemented** - Variable Length Quantity encoding available for sparse data
 - **Memory efficiency** - Optimized data structures for large-scale grammar processing
 
 ### **Performance Breakdown**
@@ -89,13 +88,12 @@ Cache entries: 17,754
 ## 🗜️ **Compression Algorithm Analysis**
 
 ### **Multiple Compression Strategies**
-rip-parser implements **5 different compression algorithms** and automatically selects the best one:
+rip-parser implements **4 different compression algorithms** and automatically selects the best one:
 
-1. **VLQ (Variable Length Quantity)** - Optimal for sparse data with delta encoding
-2. **Dictionary Compression** - Excellent for repeated patterns (selected for CoffeeScript)
-3. **COO (Coordinate Format)** - Sparse matrix representation with coordinate triplets
-4. **CSR (Compressed Sparse Row)** - Row-compressed sparse matrix format
-5. **RLE (Run-Length Encoding)** - Efficient for data with consecutive repeated values
+1. **Dictionary Compression** - Excellent for repeated patterns (selected for CoffeeScript)
+2. **COO (Coordinate Format)** - Sparse matrix representation with coordinate triplets
+3. **CSR (Compressed Sparse Row)** - Row-compressed sparse matrix format
+4. **RLE (Run-Length Encoding)** - Efficient for data with consecutive repeated values
 
 ### **Compression Test Results**
 For the CoffeeScript grammar compilation:
