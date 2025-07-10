@@ -480,8 +480,12 @@ class Generator
 
   # Compute initial (spontaneous) lookaheads and propagation links
   computeLookaheads: ->
+    # Validate that we have states to process
+    return unless @states?.length > 0
+
     # For each state and item, determine spontaneous lookaheads and propagation links
     for state in @states
+      continue unless state?.items?.length > 0
       for item in state.items
         continue if item.isComplete()
 
@@ -532,8 +536,11 @@ class Generator
               targetItem.lookahead.add(la)
 
     # Add initial lookahead for start state
-    startItem = @states[0].items[0]
-    startItem.lookahead.add('$end')
+    if @states.length > 0 and @states[0].items.length > 0
+      startItem = @states[0].items[0]
+      startItem.lookahead.add('$end')
+    else
+      throw new Error("No start state or start item found during lookahead computation")
 
   # Closure with lookahead computation
   closureWithLookahead: (state) ->
@@ -594,7 +601,12 @@ class Generator
       changed = false
 
       for [fromKey, toKeys] from @propagateLinks
-        [fromStateId, fromRuleId, fromPosition] = fromKey.split('-').map (x) -> parseInt(x)
+        # Parse and validate the from key
+        fromParts = fromKey.split('-')
+        continue unless fromParts.length >= 3
+        [fromStateId, fromRuleId, fromPosition] = fromParts.map (x) -> parseInt(x)
+        continue unless fromStateId >= 0 and fromStateId < @states.length
+
         fromState = @states[fromStateId]
         continue unless fromState # Safety check for invalid state ID
 
@@ -602,7 +614,12 @@ class Generator
         continue unless fromItem
 
         for toKey from toKeys
-          [toStateId, toRuleId, toPosition] = toKey.split('-').map (x) -> parseInt(x)
+          # Parse and validate the to key
+          toParts = toKey.split('-')
+          continue unless toParts.length >= 3
+          [toStateId, toRuleId, toPosition] = toParts.map (x) -> parseInt(x)
+          continue unless toStateId >= 0 and toStateId < @states.length
+
           toState = @states[toStateId]
           continue unless toState # Safety check for invalid state ID
 
