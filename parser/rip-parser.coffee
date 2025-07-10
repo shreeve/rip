@@ -1920,12 +1920,15 @@ class Generator
       case #{i}: // #{rule.lhs} → #{rule.rhs.join(' ')}
         var $0 = $$.length - 1;
         #{action}
-        break;"""
+        break;
+      """
 
-    """performAction: function(yytext, yyleng, yylineno, yy, yystate, $$, _$) {
+    """
+    performAction: function(yytext, yyleng, yylineno, yy, yystate, $$, _$) {
       switch (yystate) {#{actionCases.join('')}
       }
-    }"""
+    }
+    """
 
   # Convert table to format expected by parser
   prepareTable: ->
@@ -2840,15 +2843,14 @@ const parser = (() => {
       for [symbol, nextState] from state.transitions
         "  #{state.id} -> #{nextState.id} [label=\"#{symbol}\"];"
 
-    """
-digraph LALR1_Automaton {
-  rankdir=LR;
-  node [shape=circle];
+    """digraph LALR1_Automaton {
+      rankdir=LR;
+      node [shape=circle];
 
-#{stateDeclarations.join('\n')}
+    #{stateDeclarations.join('\n')}
 
-#{transitions.flat().join('\n')}
-}"""
+    #{transitions.flat().join('\n')}
+    }"""
 
   generateMermaidVisualization: ->
     stateNodes = for state in @states
