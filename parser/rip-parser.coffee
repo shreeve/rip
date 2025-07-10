@@ -510,7 +510,8 @@ class Generator
     return false if name.length == 0
 
     # Allow alphanumeric, underscore, hyphen, and some special characters for terminals
-    /^[a-zA-Z_][a-zA-Z0-9_-]*$|^[+\-*/(){}[\];,.'":=<>!&|?~^%$#@\\]+$/.test(name)
+    # Also allow CoffeeScript-style tokens like BIN?, UNARY?, etc.
+    /^[a-zA-Z_][a-zA-Z0-9_?-]*$|^[+\-*/(){}[\];,.'":=<>!&|?~^%$#@\\]+$/.test(name)
 
     # Check for problematic circular dependencies (excluding valid left recursion)
   checkCircularDependencies: (grammar, errors) ->
