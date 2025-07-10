@@ -2639,7 +2639,7 @@ const parser = (() => {
 
     state = @states[stateId]
     console.log "\n🔍 EXPLORING STATE #{stateId}"
-    console.log "=" * 30
+    console.log "=============================="
     console.log "Items:"
     for item in state.items
       console.log "  #{item.toString()}"
@@ -2668,7 +2668,7 @@ const parser = (() => {
 
     rule = @rules[ruleId]
     console.log "\n🔍 EXPLORING RULE #{ruleId}"
-    console.log "=" * 30
+    console.log "=============================="
     console.log "Production: #{rule.lhs} → #{rule.rhs.join(' ')}"
     console.log "Action: #{rule.action || 'default'}"
     console.log "Precedence: #{rule.precedence || 'none'}"
@@ -2690,7 +2690,7 @@ const parser = (() => {
 
     conflict = @conflicts[conflictIndex]
     console.log "\n🔍 EXPLORING CONFLICT #{conflictIndex}"
-    console.log "=" * 35
+    console.log "==================================="
     console.log conflict.explanation
 
     # Show the state causing the conflict
@@ -3018,7 +3018,7 @@ graph LR
     # Report unresolved conflicts first (most important)
     if unresolvedSR.length > 0
       console.log "🚨 UNRESOLVED CONFLICTS (require attention):"
-      console.log "=" * 50
+      console.log "=================================================="
       for conflict in unresolvedSR
         console.log conflict.explanation
         console.log ""
@@ -3026,7 +3026,7 @@ graph LR
     # Report resolved conflicts
     if resolvedSR.length > 0
       console.log "✅ RESOLVED SHIFT/REDUCE CONFLICTS:"
-      console.log "=" * 40
+      console.log "========================================"
       for conflict in resolvedSR
         console.log conflict.explanation
         console.log ""
@@ -3034,7 +3034,7 @@ graph LR
     # Report reduce/reduce conflicts
     if rrConflicts.length > 0
       console.log "⚠️  REDUCE/REDUCE CONFLICTS:"
-      console.log "=" * 30
+      console.log "=============================="
       for conflict in rrConflicts
         console.log conflict.explanation
         console.log ""
@@ -3044,7 +3044,7 @@ graph LR
 
   reportConflictSummary: (unresolved, resolved, reduceReduce) ->
     console.log "📊 CONFLICT SUMMARY:"
-    console.log "=" * 20
+    console.log "===================="
 
     if unresolved > 0
       console.log "❌ #{unresolved} unresolved shift/reduce conflicts need attention"
