@@ -620,9 +620,19 @@ class Generator
 
   # Build LR(0) states
   buildStates: ->
+    # Find the augmented start rule ($accept → start $end)
+    startRule = null
+    for rule in @rules
+      if rule.lhs is '$accept'
+        startRule = rule
+        break
+
+    unless startRule
+      throw new Error("No augmented start rule found")
+
     # Create initial state with augmented start rule
     startState = new State()
-    startItem = new Item(@rules[@rules.length - 1], 0, new Set(['$end']))
+    startItem = new Item(startRule, 0, new Set(['$end']))
     startState.addItem(startItem)
     @closure(startState)
     @addState(startState)
@@ -1132,6 +1142,260 @@ class Generator
 
     fixes.join('\n')
 
+  # Comprehensive state minimization
+  minimizeStates: ->
+    initialStateCount = @states.length
+    console.log "\n🔧 State Minimization:"
+    console.log "Initial states: #{initialStateCount}"
+
+    # Step 1: Remove unreachable states
+    reachableStates = @findReachableStates()
+    unreachableCount = @states.length - reachableStates.size
+    if unreachableCount > 0
+      @removeUnreachableStates(reachableStates)
+      console.log "Removed #{unreachableCount} unreachable states"
+
+    # Step 2: Merge equivalent states (same actions for all symbols)
+    mergedCount = @mergeEquivalentStates()
+    if mergedCount > 0
+      console.log "Merged #{mergedCount} equivalent states"
+
+    # Step 3: Merge weakly compatible states
+    weakMergedCount = @mergeWeaklyCompatibleStates()
+    if weakMergedCount > 0
+      console.log "Merged #{weakMergedCount} weakly compatible states"
+
+    # Step 4: Rebuild table with minimized states
+    @rebuildTableAfterMinimization()
+
+    finalStateCount = @states.length
+    reduction = initialStateCount - finalStateCount
+    reductionPercent = Math.round((reduction / initialStateCount) * 100)
+
+    console.log "Final states: #{finalStateCount}"
+    if reduction > 0
+      console.log "Reduction: #{reduction} states (#{reductionPercent}%)"
+    else
+      console.log "No states eliminated"
+
+  # Find all states reachable from the start state
+  findReachableStates: ->
+    reachable = new Set()
+    workList = [@states[0]] # Start with initial state
+    reachable.add(@states[0])
+
+    while workList.length > 0
+      state = workList.shift()
+
+      for [symbol, nextState] from state.transitions
+        unless reachable.has(nextState)
+          reachable.add(nextState)
+          workList.push(nextState)
+
+    reachable
+
+  # Remove unreachable states
+  removeUnreachableStates: (reachableStates) ->
+    # Filter states to keep only reachable ones
+    @states = @states.filter (state) -> reachableStates.has(state)
+
+    # Reassign state IDs
+    for state, i in @states
+      state.id = i
+
+    # Update inadequate states list
+    @inadequateStates = @inadequateStates.filter (state) -> reachableStates.has(state)
+
+  # Merge states that have identical actions for all symbols
+  mergeEquivalentStates: ->
+    mergedCount = 0
+    stateGroups = new Map() # action signature -> [states]
+
+    # Group states by their action signatures
+    for state in @states
+      signature = @computeActionSignature(state)
+      unless stateGroups.has(signature)
+        stateGroups.set(signature, [])
+      stateGroups.get(signature).push(state)
+
+    # Merge groups with multiple states
+    for [signature, states] from stateGroups
+      if states.length > 1
+        # Keep the first state, merge others into it
+        targetState = states[0]
+
+        for i in [1...states.length]
+          sourceState = states[i]
+          @mergeStateInto(sourceState, targetState)
+          mergedCount++
+
+    # Remove merged states and reassign IDs
+    @states = Array.from(stateGroups.values()).map (group) -> group[0]
+    for state, i in @states
+      state.id = i
+
+    mergedCount
+
+  # Compute a signature representing the actions available in a state
+  computeActionSignature: (state) ->
+    actions = []
+
+    # Add shift actions
+    for [symbol, nextState] from state.transitions
+      if @getSymbol(symbol).isTerminal
+        actions.push("shift:#{symbol}")
+      else
+        actions.push("goto:#{symbol}")
+
+    # Add reduce actions
+    for item in state.items
+      if item.isComplete()
+        for la from item.lookahead
+          actions.push("reduce:#{la}:#{item.rule.id}")
+
+    actions.sort().join('|')
+
+    # Merge weakly compatible states (experimental)
+  mergeWeaklyCompatibleStates: ->
+    mergedCount = 0
+
+    # Find pairs of states that are weakly compatible
+    # (have no conflicting actions for any symbol)
+    i = 0
+    while i < @states.length
+      j = i + 1
+      merged = false
+      while j < @states.length
+        state1 = @states[i]
+        state2 = @states[j]
+
+        # Safety check - ensure states exist and have required properties
+        if state1 and state2 and state1.transitions and state2.transitions and @areWeaklyCompatible(state1, state2)
+          # Merge state2 into state1
+          @mergeStateInto(state2, state1)
+          @states.splice(j, 1) # Remove state2
+          mergedCount++
+          merged = true
+          break # Restart the inner loop
+        else
+          j++
+
+      if not merged
+        i++
+
+    # Reassign state IDs
+    for state, i in @states
+      state.id = i
+
+    mergedCount
+
+    # Check if two states are weakly compatible
+  areWeaklyCompatible: (state1, state2) ->
+    # Safety checks
+    return false unless state1 and state2
+    return false unless state1.transitions and state2.transitions
+    return false unless state1.items and state2.items
+
+    # Get all symbols that have actions in either state
+    symbols = new Set()
+
+    for [symbol, _] from state1.transitions
+      symbols.add(symbol)
+    for [symbol, _] from state2.transitions
+      symbols.add(symbol)
+
+    for item in state1.items
+      if item and item.isComplete and item.isComplete()
+        for la from item.lookahead
+          symbols.add(la)
+
+    for item in state2.items
+      if item and item.isComplete and item.isComplete()
+        for la from item.lookahead
+          symbols.add(la)
+
+    # Check each symbol for conflicts
+    for symbol from symbols
+      action1 = @getStateAction(state1, symbol)
+      action2 = @getStateAction(state2, symbol)
+
+      # If both states have actions for this symbol, they must be the same
+      if action1 and action2 and not @actionsEqual(action1, action2)
+        return false
+
+    true
+
+  # Get the action for a symbol in a state
+  getStateAction: (state, symbol) ->
+    # Check transitions first
+    if state.transitions.has(symbol)
+      nextState = state.transitions.get(symbol)
+      if @getSymbol(symbol).isTerminal
+        return { type: 'shift', state: nextState.id }
+      else
+        return { type: 'goto', state: nextState.id }
+
+    # Check reduce actions
+    for item in state.items
+      if item.isComplete() and item.lookahead.has(symbol)
+        if item.rule.lhs is '$accept'
+          return { type: 'accept' }
+        else
+          return { type: 'reduce', rule: item.rule.id }
+
+    null
+
+  # Check if two actions are equal
+  actionsEqual: (action1, action2) ->
+    return false if action1.type != action2.type
+
+    switch action1.type
+      when 'shift', 'goto'
+        action1.state == action2.state
+      when 'reduce'
+        action1.rule == action2.rule
+      when 'accept'
+        true
+      else
+        false
+
+    # Merge one state into another
+  mergeStateInto: (sourceState, targetState) ->
+    # Safety checks
+    return unless sourceState and targetState
+    return unless sourceState.items and targetState.items
+
+    # Merge items (this is complex due to lookaheads)
+    for sourceItem in sourceState.items
+      continue unless sourceItem and sourceItem.rule
+
+      # Find corresponding item in target state
+      targetItem = targetState.getCoreItem(sourceItem.rule.id, sourceItem.dot)
+
+      if targetItem
+        # Merge lookaheads
+        if sourceItem.lookahead
+          for la from sourceItem.lookahead
+            targetItem.lookahead.add(la)
+      else
+        # Add the item to target state
+        targetState.addItem(sourceItem)
+
+    # Update all transitions that point to sourceState
+    for state in @states
+      continue unless state and state.transitions
+      for [symbol, nextState] from state.transitions
+        if nextState == sourceState
+          state.transitions.set(symbol, targetState)
+
+  # Rebuild the parsing table after state minimization
+  rebuildTableAfterMinimization: ->
+    # Clear existing table
+    @table = []
+
+    # Rebuild from minimized states
+    @table = @buildTable()
+
   computeDefaultActions: ->
     @defaultActions = {}
 
@@ -1193,6 +1457,10 @@ class Generator
     @computeLookaheads()
     @propagateLookaheads()
     @table = @buildTable()
+
+    # State minimization and optimization
+    @minimizeStates()
+
     @computeDefaultActions()
 
     # Report conflicts if any
@@ -1247,8 +1515,8 @@ class Generator
         else
           "$$[$0-#{stackOffset}]"  # Offset from top
 
-      # Replace $0 with rule length
-      action = action.replace /\$0/g, '$0'
+      # Replace $0 with rule length (keep as is for now)
+      action = action.replace /\$0/g, rule.rhs.length.toString()
 
       # Replace @ location references (@1, @2, etc.) with JavaScript equivalents
       action = action.replace /@(\d+)/g, (match, n) ->
