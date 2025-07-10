@@ -309,7 +309,7 @@ class Generator
           @getSymbol(rule.lhs).nullable = true
           changed = true
 
-  # Compute FIRST sets
+    # Compute FIRST sets
   computeFirst: ->
     # First(terminal) = {terminal}
     for [name, symbol] from @symbols
@@ -321,18 +321,23 @@ class Generator
       changed = false
       for rule in @rules
         lhsSymbol = @getSymbol(rule.lhs)
+        oldSize = lhsSymbol.first.size
 
-        for rhsName in rule.rhs
-          rhsSymbol = @getSymbol(rhsName)
+        # Compute FIRST of the RHS sequence incrementally
+        # For rule A → B C D, we need FIRST(B C D)
+        for i in [0...rule.rhs.length]
+          rhsSymbol = @getSymbol(rule.rhs[i])
 
-          # Add First(rhsSymbol) to First(lhs)
+          # Add FIRST(current symbol) to FIRST(LHS)
           for item from rhsSymbol.first
-            unless lhsSymbol.first.has(item)
-              lhsSymbol.first.add(item)
-              changed = true
+            lhsSymbol.first.add(item)
 
-          # If rhsSymbol is not nullable, stop
+          # If current symbol is not nullable, we're done with this rule
           break unless rhsSymbol.nullable
+
+        # Check if we added anything new to trigger another iteration
+        if lhsSymbol.first.size > oldSize
+          changed = true
 
   # Compute FOLLOW sets
   computeFollow: ->
