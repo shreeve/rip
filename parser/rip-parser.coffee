@@ -255,7 +255,8 @@ class Generator
 
   # Work starts here
   processGrammar: ({ grammar, operators, start, tokens }) ->
-    throw new Error('Invalid language format') unless grammar
+    # Comprehensive input validation
+    @validateGrammarInput({ grammar, operators, start, tokens })
 
     # Convert tokens to a set
     @tokens = new Set(tokens.trim().split(/\s+/))
@@ -265,26 +266,33 @@ class Generator
     @getSymbol '$end' , true
     @getSymbol 'error', true; @tokens.add('error')
 
-    # Process all rules
+    # Process all rules with enhanced validation
     for nonterminal, productions of grammar
-      for production in productions
-        [pattern, action, options] = production
+      for production, i in productions
+        try
+          [pattern, action, options] = production
 
-        # Parse the pattern into RHS symbols
-        rhs = if pattern then pattern.split(/\s+/) else []
+          # Validate and parse the pattern
+          rhs = @parseProductionPattern(pattern, nonterminal, i)
 
-        # Create the rule
-        rule = new Rule(nonterminal, rhs, action)
-        rule.precedence = options?.prec
+          # Validate action code
+          @validateActionCode(action, rhs.length, nonterminal, i) if action?
 
-        @rules.push(rule)
+          # Create the rule
+          rule = new Rule(nonterminal, rhs, action)
+          rule.precedence = options?.prec
 
-        # Track nonterminal
-        @getSymbol(nonterminal, false)
+          @rules.push(rule)
 
-        # Track terminals in RHS
-        for symbol in rhs
-          @getSymbol(symbol)
+          # Track nonterminal
+          @getSymbol(nonterminal, false)
+
+          # Track terminals in RHS
+          for symbol in rhs
+            @getSymbol(symbol)
+
+        catch error
+          throw new Error("Error processing production #{i} for '#{nonterminal}': #{error.message}")
 
     # Set start symbol
     @start = switch
@@ -339,6 +347,247 @@ class Generator
       for symbol in symbols
         @precedence[symbol] = { level: precedenceLevel, assoc }
       precedenceLevel++
+
+  # Comprehensive grammar input validation
+  validateGrammarInput: ({ grammar, operators, start, tokens }) ->
+    errors = []
+
+    # 1. Basic structure validation
+    unless grammar?
+      errors.push("Grammar object is required")
+
+    unless typeof grammar is 'object'
+      errors.push("Grammar must be an object, got #{typeof grammar}")
+
+    unless tokens?
+      errors.push("Tokens string is required")
+
+    unless typeof tokens is 'string'
+      errors.push("Tokens must be a string, got #{typeof tokens}")
+
+    # Early exit if basic structure is invalid
+    if errors.length > 0
+      throw new Error("Grammar validation failed:\n  #{errors.join('\n  ')}")
+
+    # 2. Grammar structure validation
+    if Object.keys(grammar).length == 0
+      errors.push("Grammar cannot be empty")
+
+    # 3. Validate each non-terminal and its productions
+    for nonterminal, productions of grammar
+      # Validate non-terminal name
+      unless @isValidSymbolName(nonterminal)
+        errors.push("Invalid non-terminal name '#{nonterminal}': must be alphanumeric with underscores")
+
+      # Validate productions array
+      unless Array.isArray(productions)
+        errors.push("Productions for '#{nonterminal}' must be an array, got #{typeof productions}")
+        continue
+
+      if productions.length == 0
+        errors.push("Non-terminal '#{nonterminal}' has no productions")
+        continue
+
+      # Validate each production
+      for production, i in productions
+        unless Array.isArray(production)
+          errors.push("Production #{i} for '#{nonterminal}' must be an array, got #{typeof production}")
+          continue
+
+        if production.length == 0
+          errors.push("Production #{i} for '#{nonterminal}' cannot be empty")
+          continue
+
+        [pattern, action, options] = production
+
+        # Validate pattern
+        if pattern? and typeof pattern isnt 'string'
+          errors.push("Pattern in production #{i} for '#{nonterminal}' must be a string, got #{typeof pattern}")
+
+        # Validate action if present
+        if action? and typeof action isnt 'string' and typeof action isnt 'function'
+          errors.push("Action in production #{i} for '#{nonterminal}' must be a string or function, got #{typeof action}")
+
+        # Validate options if present
+        if options? and typeof options isnt 'object'
+          errors.push("Options in production #{i} for '#{nonterminal}' must be an object, got #{typeof options}")
+
+        # Validate symbols in pattern
+        if pattern?
+          symbols = pattern.trim().split(/\s+/)
+          for symbol in symbols when symbol
+            unless @isValidSymbolName(symbol)
+              errors.push("Invalid symbol '#{symbol}' in production #{i} for '#{nonterminal}'")
+
+    # 4. Validate start symbol
+    if start?
+      unless typeof start is 'string'
+        errors.push("Start symbol must be a string, got #{typeof start}")
+      else unless @isValidSymbolName(start)
+        errors.push("Invalid start symbol name '#{start}'")
+
+    # 5. Validate operators if present
+    if operators?
+      unless Array.isArray(operators)
+        errors.push("Operators must be an array, got #{typeof operators}")
+      else
+        for group, i in operators
+          unless Array.isArray(group)
+            errors.push("Operator group #{i} must be an array, got #{typeof group}")
+            continue
+
+          if group.length < 2
+            errors.push("Operator group #{i} must have at least associativity and one operator")
+            continue
+
+          [assoc, symbols...] = group
+          unless assoc in ['left', 'right', 'nonassoc']
+            errors.push("Invalid associativity '#{assoc}' in operator group #{i}, must be 'left', 'right', or 'nonassoc'")
+
+          for symbol in symbols
+            unless @isValidSymbolName(symbol)
+              errors.push("Invalid operator symbol '#{symbol}' in group #{i}")
+
+    # 6. Validate tokens
+    tokenList = tokens.trim().split(/\s+/)
+    for token in tokenList when token
+      unless @isValidSymbolName(token)
+        errors.push("Invalid token name '#{token}'")
+
+    # 7. Check for circular dependencies (disabled - LALR(1) can handle these)
+    # Note: Circular dependencies through parentheses and other constructs are valid
+    # if grammar
+    #   @checkCircularDependencies(grammar, errors)
+
+    # Throw error if any validation failed
+    if errors.length > 0
+      throw new Error("Grammar validation failed:\n  #{errors.join('\n  ')}")
+
+  # Check if a symbol name is valid
+  isValidSymbolName: (name) ->
+    return false unless name? and typeof name is 'string'
+    return false if name.length == 0
+
+    # Allow alphanumeric, underscore, hyphen, and some special characters for terminals
+    /^[a-zA-Z_][a-zA-Z0-9_-]*$|^[+\-*/(){}[\];,.'":=<>!&|?~^%$#@\\]+$/.test(name)
+
+    # Check for problematic circular dependencies (excluding valid left recursion)
+  checkCircularDependencies: (grammar, errors) ->
+    # Build dependency graph - only track non-leftmost dependencies
+    dependencies = new Map()
+
+    for nonterminal, productions of grammar
+      deps = new Set()
+
+      for production in productions
+        [pattern] = production
+        if pattern?
+          symbols = pattern.trim().split(/\s+/)
+          # Skip the first symbol to allow left recursion (A → A α is valid)
+          for symbol in symbols.slice(1) when symbol and grammar[symbol]
+            deps.add(symbol)
+
+      dependencies.set(nonterminal, deps)
+
+    # Check for cycles in non-leftmost positions (these are problematic)
+    visited = new Set()
+    recursionStack = new Set()
+
+    checkCycle = (node, path = []) =>
+      if recursionStack.has(node)
+        cycle = path.slice(path.indexOf(node)).concat([node])
+        # Only report if this is a non-trivial cycle (length > 1)
+        if cycle.length > 2
+          errors.push("Problematic circular dependency detected: #{cycle.join(' → ')}")
+        return true
+
+      if visited.has(node)
+        return false
+
+      visited.add(node)
+      recursionStack.add(node)
+      path.push(node)
+
+      deps = dependencies.get(node) || new Set()
+      for dep from deps
+        if checkCycle(dep, path.slice())
+          return true
+
+      recursionStack.delete(node)
+      path.pop()
+      return false
+
+    for nonterminal of grammar
+      unless visited.has(nonterminal)
+        checkCycle(nonterminal)
+
+  # Enhanced processGrammar with better error handling
+  processGrammarSafely: ({ grammar, operators, start, tokens }) ->
+    try
+      # Process all rules with enhanced validation
+      for nonterminal, productions of grammar
+        for production, i in productions
+          try
+            [pattern, action, options] = production
+
+            # Validate and parse the pattern
+            rhs = @parseProductionPattern(pattern, nonterminal, i)
+
+            # Validate action code
+            @validateActionCode(action, rhs.length, nonterminal, i) if action?
+
+            # Create the rule
+            rule = new Rule(nonterminal, rhs, action)
+            rule.precedence = options?.prec
+
+            @rules.push(rule)
+
+            # Track nonterminal
+            @getSymbol(nonterminal, false)
+
+            # Track terminals in RHS
+            for symbol in rhs
+              @getSymbol(symbol)
+
+          catch error
+            throw new Error("Error processing production #{i} for '#{nonterminal}': #{error.message}")
+
+    catch error
+      throw new Error("Grammar processing failed: #{error.message}")
+
+  # Parse and validate production pattern
+  parseProductionPattern: (pattern, nonterminal, productionIndex) ->
+    unless pattern?
+      return [] # Empty production (epsilon)
+
+    unless typeof pattern is 'string'
+      throw new Error("Pattern must be a string")
+
+    # Split into symbols and validate each
+    symbols = pattern.trim().split(/\s+/).filter((s) -> s.length > 0)
+
+    for symbol in symbols
+      unless @isValidSymbolName(symbol)
+        throw new Error("Invalid symbol '#{symbol}' in pattern")
+
+    symbols
+
+  # Validate action code for common issues
+  validateActionCode: (action, rhsLength, nonterminal, productionIndex) ->
+    return unless action?
+
+    actionStr = if typeof action is 'function' then action.toString() else action
+
+    # Check for parameter references beyond RHS length
+    paramMatches = actionStr.match(/\$(\d+)/g) || []
+    for match in paramMatches
+      paramNum = parseInt(match.substring(1), 10)
+      if paramNum > rhsLength
+        console.warn("Warning: Parameter #{match} in action for '#{nonterminal}' production #{productionIndex} exceeds RHS length (#{rhsLength})")
+
+    # Check for common syntax issues
+    if actionStr.includes('$$') and not actionStr.includes('this.$')
+      console.warn("Warning: Use 'this.$' instead of '$$' in action for '#{nonterminal}' production #{productionIndex}")
 
   # Get or create a symbol
   getSymbol: (name, isTerminal) ->
@@ -1436,7 +1685,20 @@ class Generator
 
   # Generate parser code
   generate: (options = {}) ->
-    @processGrammar(options)
+    try
+      @processGrammar(options)
+    catch error
+      # Enhanced error reporting for grammar validation failures
+      console.error("\n❌ GRAMMAR VALIDATION ERROR:")
+      console.error("=" * 50)
+      console.error(error.message)
+      console.error("\n💡 Common fixes:")
+      console.error("  - Check grammar object structure")
+      console.error("  - Verify all non-terminals have valid productions")
+      console.error("  - Ensure symbol names are valid identifiers")
+      console.error("  - Check for typos in production patterns")
+      console.error("  - Validate action code syntax")
+      throw error
 
     # Grammar cleanup - iterate until no more changes
     # Order matters: unproductive first, then unreachable

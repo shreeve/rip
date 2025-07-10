@@ -366,10 +366,9 @@
 
     // Work starts here
     processGrammar({grammar, operators, start, tokens}) {
-      var action, l, len, len1, m, nonterminal, options, pattern, production, productions, rhs, rule, symbol;
-      if (!grammar) {
-        throw new Error('Invalid language format');
-      }
+      var action, error, i, l, len, len1, m, nonterminal, options, pattern, production, productions, rhs, rule, symbol;
+      // Comprehensive input validation
+      this.validateGrammarInput({grammar, operators, start, tokens});
       // Convert tokens to a set
       this.tokens = new Set(tokens.trim().split(/\s+/));
       // Create special symbols (starts with id = 0, 1, 2)
@@ -377,24 +376,33 @@
       this.getSymbol('$end', true);
       this.getSymbol('error', true);
       this.tokens.add('error');
-// Process all rules
+// Process all rules with enhanced validation
       for (nonterminal in grammar) {
         productions = grammar[nonterminal];
-        for (l = 0, len = productions.length; l < len; l++) {
-          production = productions[l];
-          [pattern, action, options] = production;
-          // Parse the pattern into RHS symbols
-          rhs = pattern ? pattern.split(/\s+/) : [];
-          // Create the rule
-          rule = new Rule(nonterminal, rhs, action);
-          rule.precedence = options != null ? options.prec : void 0;
-          this.rules.push(rule);
-          // Track nonterminal
-          this.getSymbol(nonterminal, false);
+        for (i = l = 0, len = productions.length; l < len; i = ++l) {
+          production = productions[i];
+          try {
+            [pattern, action, options] = production;
+            // Validate and parse the pattern
+            rhs = this.parseProductionPattern(pattern, nonterminal, i);
+            if (action != null) {
+              // Validate action code
+              this.validateActionCode(action, rhs.length, nonterminal, i);
+            }
+            // Create the rule
+            rule = new Rule(nonterminal, rhs, action);
+            rule.precedence = options != null ? options.prec : void 0;
+            this.rules.push(rule);
+            // Track nonterminal
+            this.getSymbol(nonterminal, false);
 // Track terminals in RHS
-          for (m = 0, len1 = rhs.length; m < len1; m++) {
-            symbol = rhs[m];
-            this.getSymbol(symbol);
+            for (m = 0, len1 = rhs.length; m < len1; m++) {
+              symbol = rhs[m];
+              this.getSymbol(symbol);
+            }
+          } catch (error1) {
+            error = error1;
+            throw new Error(`Error processing production ${i} for '${nonterminal}': ${error.message}`);
           }
         }
       }
@@ -480,6 +488,315 @@
         results.push(precedenceLevel++);
       }
       return results;
+    }
+
+    // Comprehensive grammar input validation
+    validateGrammarInput({grammar, operators, start, tokens}) {
+      var action, assoc, errors, group, i, l, len, len1, len2, len3, len4, m, nonterminal, o, options, p, pattern, production, productions, q, symbol, symbols, token, tokenList;
+      errors = [];
+      // 1. Basic structure validation
+      if (grammar == null) {
+        errors.push("Grammar object is required");
+      }
+      if (typeof grammar !== 'object') {
+        errors.push(`Grammar must be an object, got ${typeof grammar}`);
+      }
+      if (tokens == null) {
+        errors.push("Tokens string is required");
+      }
+      if (typeof tokens !== 'string') {
+        errors.push(`Tokens must be a string, got ${typeof tokens}`);
+      }
+      // Early exit if basic structure is invalid
+      if (errors.length > 0) {
+        throw new Error(`Grammar validation failed:\n  ${errors.join('\n  ')}`);
+      }
+      // 2. Grammar structure validation
+      if (Object.keys(grammar).length === 0) {
+        errors.push("Grammar cannot be empty");
+      }
+// 3. Validate each non-terminal and its productions
+      for (nonterminal in grammar) {
+        productions = grammar[nonterminal];
+        // Validate non-terminal name
+        if (!this.isValidSymbolName(nonterminal)) {
+          errors.push(`Invalid non-terminal name '${nonterminal}': must be alphanumeric with underscores`);
+        }
+        // Validate productions array
+        if (!Array.isArray(productions)) {
+          errors.push(`Productions for '${nonterminal}' must be an array, got ${typeof productions}`);
+          continue;
+        }
+        if (productions.length === 0) {
+          errors.push(`Non-terminal '${nonterminal}' has no productions`);
+          continue;
+        }
+// Validate each production
+        for (i = l = 0, len = productions.length; l < len; i = ++l) {
+          production = productions[i];
+          if (!Array.isArray(production)) {
+            errors.push(`Production ${i} for '${nonterminal}' must be an array, got ${typeof production}`);
+            continue;
+          }
+          if (production.length === 0) {
+            errors.push(`Production ${i} for '${nonterminal}' cannot be empty`);
+            continue;
+          }
+          [pattern, action, options] = production;
+          // Validate pattern
+          if ((pattern != null) && typeof pattern !== 'string') {
+            errors.push(`Pattern in production ${i} for '${nonterminal}' must be a string, got ${typeof pattern}`);
+          }
+          // Validate action if present
+          if ((action != null) && typeof action !== 'string' && typeof action !== 'function') {
+            errors.push(`Action in production ${i} for '${nonterminal}' must be a string or function, got ${typeof action}`);
+          }
+          // Validate options if present
+          if ((options != null) && typeof options !== 'object') {
+            errors.push(`Options in production ${i} for '${nonterminal}' must be an object, got ${typeof options}`);
+          }
+          // Validate symbols in pattern
+          if (pattern != null) {
+            symbols = pattern.trim().split(/\s+/);
+            for (m = 0, len1 = symbols.length; m < len1; m++) {
+              symbol = symbols[m];
+              if (symbol) {
+                if (!this.isValidSymbolName(symbol)) {
+                  errors.push(`Invalid symbol '${symbol}' in production ${i} for '${nonterminal}'`);
+                }
+              }
+            }
+          }
+        }
+      }
+      // 4. Validate start symbol
+      if (start != null) {
+        if (typeof start !== 'string') {
+          errors.push(`Start symbol must be a string, got ${typeof start}`);
+        } else if (!this.isValidSymbolName(start)) {
+          errors.push(`Invalid start symbol name '${start}'`);
+        }
+      }
+      // 5. Validate operators if present
+      if (operators != null) {
+        if (!Array.isArray(operators)) {
+          errors.push(`Operators must be an array, got ${typeof operators}`);
+        } else {
+          for (i = o = 0, len2 = operators.length; o < len2; i = ++o) {
+            group = operators[i];
+            if (!Array.isArray(group)) {
+              errors.push(`Operator group ${i} must be an array, got ${typeof group}`);
+              continue;
+            }
+            if (group.length < 2) {
+              errors.push(`Operator group ${i} must have at least associativity and one operator`);
+              continue;
+            }
+            [assoc, ...symbols] = group;
+            if (assoc !== 'left' && assoc !== 'right' && assoc !== 'nonassoc') {
+              errors.push(`Invalid associativity '${assoc}' in operator group ${i}, must be 'left', 'right', or 'nonassoc'`);
+            }
+            for (p = 0, len3 = symbols.length; p < len3; p++) {
+              symbol = symbols[p];
+              if (!this.isValidSymbolName(symbol)) {
+                errors.push(`Invalid operator symbol '${symbol}' in group ${i}`);
+              }
+            }
+          }
+        }
+      }
+      // 6. Validate tokens
+      tokenList = tokens.trim().split(/\s+/);
+      for (q = 0, len4 = tokenList.length; q < len4; q++) {
+        token = tokenList[q];
+        if (token) {
+          if (!this.isValidSymbolName(token)) {
+            errors.push(`Invalid token name '${token}'`);
+          }
+        }
+      }
+      // 7. Check for circular dependencies (disabled - LALR(1) can handle these)
+      // Note: Circular dependencies through parentheses and other constructs are valid
+      // if grammar
+      //   @checkCircularDependencies(grammar, errors)
+
+      // Throw error if any validation failed
+      if (errors.length > 0) {
+        throw new Error(`Grammar validation failed:\n  ${errors.join('\n  ')}`);
+      }
+    }
+
+    // Check if a symbol name is valid
+    isValidSymbolName(name) {
+      if (!((name != null) && typeof name === 'string')) {
+        return false;
+      }
+      if (name.length === 0) {
+        return false;
+      }
+      // Allow alphanumeric, underscore, hyphen, and some special characters for terminals
+      return /^[a-zA-Z_][a-zA-Z0-9_-]*$|^[+\-*\/(){}[\];,.'":=<>!&|?~^%$#@\\]+$/.test(name);
+    }
+
+    // Check for problematic circular dependencies (excluding valid left recursion)
+    checkCircularDependencies(grammar, errors) {
+      var checkCycle, dependencies, deps, l, len, len1, m, nonterminal, pattern, production, productions, recursionStack, ref, results, symbol, symbols, visited;
+      // Build dependency graph - only track non-leftmost dependencies
+      dependencies = new Map();
+      for (nonterminal in grammar) {
+        productions = grammar[nonterminal];
+        deps = new Set();
+        for (l = 0, len = productions.length; l < len; l++) {
+          production = productions[l];
+          [pattern] = production;
+          if (pattern != null) {
+            symbols = pattern.trim().split(/\s+/);
+            ref = symbols.slice(1);
+            // Skip the first symbol to allow left recursion (A → A α is valid)
+            for (m = 0, len1 = ref.length; m < len1; m++) {
+              symbol = ref[m];
+              if (symbol && grammar[symbol]) {
+                deps.add(symbol);
+              }
+            }
+          }
+        }
+        dependencies.set(nonterminal, deps);
+      }
+      // Check for cycles in non-leftmost positions (these are problematic)
+      visited = new Set();
+      recursionStack = new Set();
+      checkCycle = (node, path = []) => {
+        var cycle, dep;
+        if (recursionStack.has(node)) {
+          cycle = path.slice(path.indexOf(node)).concat([node]);
+          // Only report if this is a non-trivial cycle (length > 1)
+          if (cycle.length > 2) {
+            errors.push(`Problematic circular dependency detected: ${cycle.join(' → ')}`);
+          }
+          return true;
+        }
+        if (visited.has(node)) {
+          return false;
+        }
+        visited.add(node);
+        recursionStack.add(node);
+        path.push(node);
+        deps = dependencies.get(node) || new Set();
+        for (dep of deps) {
+          if (checkCycle(dep, path.slice())) {
+            return true;
+          }
+        }
+        recursionStack.delete(node);
+        path.pop();
+        return false;
+      };
+      results = [];
+      for (nonterminal in grammar) {
+        if (!visited.has(nonterminal)) {
+          results.push(checkCycle(nonterminal));
+        } else {
+          results.push(void 0);
+        }
+      }
+      return results;
+    }
+
+    // Enhanced processGrammar with better error handling
+    processGrammarSafely({grammar, operators, start, tokens}) {
+      var action, error, i, nonterminal, options, pattern, production, productions, results, rhs, rule, symbol;
+      try {
+      // Process all rules with enhanced validation
+        results = [];
+        for (nonterminal in grammar) {
+          productions = grammar[nonterminal];
+          results.push((function() {
+            var l, len, results1;
+            results1 = [];
+            for (i = l = 0, len = productions.length; l < len; i = ++l) {
+              production = productions[i];
+              try {
+                [pattern, action, options] = production;
+                // Validate and parse the pattern
+                rhs = this.parseProductionPattern(pattern, nonterminal, i);
+                if (action != null) {
+                  // Validate action code
+                  this.validateActionCode(action, rhs.length, nonterminal, i);
+                }
+                // Create the rule
+                rule = new Rule(nonterminal, rhs, action);
+                rule.precedence = options != null ? options.prec : void 0;
+                this.rules.push(rule);
+                // Track nonterminal
+                this.getSymbol(nonterminal, false);
+                results1.push((function() {
+                  var len1, m, results2;
+// Track terminals in RHS
+                  results2 = [];
+                  for (m = 0, len1 = rhs.length; m < len1; m++) {
+                    symbol = rhs[m];
+                    results2.push(this.getSymbol(symbol));
+                  }
+                  return results2;
+                }).call(this));
+              } catch (error1) {
+                error = error1;
+                throw new Error(`Error processing production ${i} for '${nonterminal}': ${error.message}`);
+              }
+            }
+            return results1;
+          }).call(this));
+        }
+        return results;
+      } catch (error1) {
+        error = error1;
+        throw new Error(`Grammar processing failed: ${error.message}`);
+      }
+    }
+
+    // Parse and validate production pattern
+    parseProductionPattern(pattern, nonterminal, productionIndex) {
+      var l, len, symbol, symbols;
+      if (pattern == null) {
+        return []; // Empty production (epsilon)
+      }
+      if (typeof pattern !== 'string') {
+        throw new Error("Pattern must be a string");
+      }
+      // Split into symbols and validate each
+      symbols = pattern.trim().split(/\s+/).filter(function(s) {
+        return s.length > 0;
+      });
+      for (l = 0, len = symbols.length; l < len; l++) {
+        symbol = symbols[l];
+        if (!this.isValidSymbolName(symbol)) {
+          throw new Error(`Invalid symbol '${symbol}' in pattern`);
+        }
+      }
+      return symbols;
+    }
+
+    // Validate action code for common issues
+    validateActionCode(action, rhsLength, nonterminal, productionIndex) {
+      var actionStr, l, len, match, paramMatches, paramNum;
+      if (action == null) {
+        return;
+      }
+      actionStr = typeof action === 'function' ? action.toString() : action;
+      // Check for parameter references beyond RHS length
+      paramMatches = actionStr.match(/\$(\d+)/g) || [];
+      for (l = 0, len = paramMatches.length; l < len; l++) {
+        match = paramMatches[l];
+        paramNum = parseInt(match.substring(1), 10);
+        if (paramNum > rhsLength) {
+          console.warn(`Warning: Parameter ${match} in action for '${nonterminal}' production ${productionIndex} exceeds RHS length (${rhsLength})`);
+        }
+      }
+      // Check for common syntax issues
+      if (actionStr.includes('$$') && !actionStr.includes('this.$')) {
+        return console.warn(`Warning: Use 'this.$' instead of '$$' in action for '${nonterminal}' production ${productionIndex}`);
+      }
     }
 
     // Get or create a symbol
@@ -2058,8 +2375,23 @@
 
       // Generate parser code
     generate(options = {}) {
-      var initialRuleCount, initialSymbolCount;
-      this.processGrammar(options);
+      var error, initialRuleCount, initialSymbolCount;
+      try {
+        this.processGrammar(options);
+      } catch (error1) {
+        error = error1;
+        // Enhanced error reporting for grammar validation failures
+        console.error("\n❌ GRAMMAR VALIDATION ERROR:");
+        console.error("=" * 50);
+        console.error(error.message);
+        console.error("\n💡 Common fixes:");
+        console.error("  - Check grammar object structure");
+        console.error("  - Verify all non-terminals have valid productions");
+        console.error("  - Ensure symbol names are valid identifiers");
+        console.error("  - Check for typos in production patterns");
+        console.error("  - Validate action code syntax");
+        throw error;
+      }
       while (true) {
         // Grammar cleanup - iterate until no more changes
         // Order matters: unproductive first, then unreachable
