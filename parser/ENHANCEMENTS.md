@@ -4,7 +4,7 @@ This document tracks all enhancements made to the rip-parser LALR(1) parser gene
 
 ---
 
-## 20250711-001 - Inconsistent State Core Computation
+## 20250710-001 - Inconsistent State Core Computation
 
 ### Problem Analysis
 The LALR(1) parser implementation had a critical bug in state core computation where the `addItem` method included lookaheads in deduplication logic, but `computeCore` didn't account for lookaheads properly. This caused inconsistent state merging and incorrect LALR(1) behavior.
@@ -32,7 +32,7 @@ coreKey: -> @_coreKey ?= Item.makeCoreKey(@rule.id, @dot)
 
 ---
 
-## 20250711-002 - Incorrect Lookahead Propagation Logic
+## 20250710-002 - Incorrect Lookahead Propagation Logic
 
 ### Problem Analysis
 The lookahead propagation algorithm had a fundamental flaw where it advanced the dummy item before computing closure, violating the standard LALR(1) procedure and causing incorrect distinction between spontaneous and propagated lookaheads.
@@ -70,7 +70,7 @@ computeLookaheads: ->
 
 ---
 
-## 20250711-003 - Missing Null Pointer Checks
+## 20250710-003 - Missing Null Pointer Checks
 
 ### Problem Analysis
 The `propagateLookaheads` method lacked safety checks for state access, key parsing, and array bounds, creating potential runtime errors and crashes with malformed data.
@@ -110,7 +110,7 @@ propagateLookaheads: ->
 
 ---
 
-## 20250711-004 - Reduce/Reduce Conflict Resolution Bug
+## 20250710-004 - Reduce/Reduce Conflict Resolution Bug
 
 ### Problem Analysis
 The conflict resolution code had a type comparison error where it compared a number to an object, causing incorrect conflict resolution and potential runtime errors.
@@ -142,7 +142,7 @@ resolveConflict: (action1, action2, symbol) ->
 
 ---
 
-## 20250711-005 - Semantic Action Parameter Substitution
+## 20250710-005 - Semantic Action Parameter Substitution
 
 ### Problem Analysis
 The semantic action parameter substitution had wrong stack index calculations for `$1`, `$2`, etc., causing incorrect parameter mapping and runtime errors in generated parsers.
@@ -180,7 +180,7 @@ action = action.replace /\$(\d+)/g, (match, n) ->
 
 ---
 
-## 20250711-006 - First Set Computation Bug
+## 20250710-006 - First Set Computation Bug
 
 ### Problem Analysis
 The FIRST set computation processed RHS symbols individually without proper sequence semantics, violating the fundamental rule that processing should stop at the first non-nullable symbol.
@@ -219,7 +219,7 @@ computeFirstOfString: (symbols) ->
 
 ---
 
-## 20250711-007 - Default Actions Computation
+## 20250710-007 - Default Actions Computation
 
 ### Problem Analysis
 The default actions computation only looked at complete items and ignored the actual parsing table, missing the proper algorithm that should analyze actual table actions and detect conflicts correctly.
@@ -261,7 +261,7 @@ computeDefaultActions: ->
 
 ---
 
-## 20250711-008 - Follow Set Computation Bug
+## 20250710-008 - Follow Set Computation Bug
 
 ### Problem Analysis
 The FOLLOW set computation processed symbols in the wrong direction (right-to-left instead of left-to-right), violating the standard algorithm where `A → αBβ` should add FIRST(β) to FOLLOW(B).
@@ -305,7 +305,7 @@ computeFollow: ->
 
 ---
 
-## 20250711-009 - Comprehensive Grammar Validation
+## 20250710-009 - Comprehensive Grammar Validation
 
 ### Problem Analysis
 The grammar validation only checked for undefined symbols, missing critical validations like reachability analysis, productivity analysis, left recursion detection, and other essential grammar properties.
@@ -354,7 +354,7 @@ validateGrammar: ->
 
 ---
 
-## 20250711-010 - Eliminate Unreachable/Unproductive Symbols
+## 20250710-010 - Eliminate Unreachable/Unproductive Symbols
 
 ### Problem Analysis
 The symbol elimination used single-pass elimination that missed cascading effects where removing one symbol makes others unreachable or unproductive, leading to incomplete grammar cleanup.
@@ -401,7 +401,7 @@ reassignIds: ->
 
 ---
 
-## 20250711-011 - Comprehensive Error Recovery System
+## 20250710-011 - Comprehensive Error Recovery System
 
 ### Problem Analysis
 The parser had no error recovery mechanisms, causing parsing to fail completely on the first syntax error instead of attempting recovery and continuing to find additional errors.
@@ -444,7 +444,7 @@ attemptErrorRecovery: (errStr, hash, stack, vstack, lstack, symbol, lex, unlex) 
 
 ---
 
-## 20250711-012 - Advanced Conflict Analysis and Reporting
+## 20250710-012 - Advanced Conflict Analysis and Reporting
 
 ### Problem Analysis
 The conflict reporting was basic with no detailed analysis, providing minimal information about conflicts and no actionable suggestions for resolution.
@@ -489,7 +489,7 @@ analyzeConflict: (state, symbol, action1, action2) ->
 
 ---
 
-## 20250711-013 - State Minimization and Optimization
+## 20250710-013 - State Minimization and Optimization
 
 ### Problem Analysis
 The parser generator lacked state minimization after LALR(1) construction, resulting in larger than necessary parsing tables and suboptimal performance.
@@ -534,7 +534,7 @@ minimizeStates: ->
 
 ---
 
-## 20250711-014 - Enhanced Input Validation and Error Handling
+## 20250710-014 - Enhanced Input Validation and Error Handling
 
 ### Problem Analysis
 The parser generator had insufficient validation for malformed grammar input, leading to crashes and unclear error messages when processing invalid grammar definitions.
@@ -584,7 +584,7 @@ validateGrammarInput: ({ grammar, operators, start, tokens }) ->
 
 ---
 
-## 20250711-015 - Performance Optimizations and Caching
+## 20250710-015 - Performance Optimizations and Caching
 
 ### Problem Analysis
 The parser generator had poor performance on large grammars due to algorithmic inefficiencies, lack of caching, and repeated computations.
@@ -632,7 +632,7 @@ closure: (state) ->
 
 ---
 
-## 20250711-016 - Comprehensive Debugging and Development Tools
+## 20250710-016 - Comprehensive Debugging and Development Tools
 
 ### Problem Analysis
 The parser generator lacked modern debugging and development assistance features, making it difficult for users to understand grammar behavior and debug issues.
@@ -685,7 +685,7 @@ generateDotVisualization: ->
 
 ---
 
-## 20250711-017 - Advanced Table Optimization and Compression
+## 20250710-017 - Advanced Table Optimization and Compression
 
 ### Problem Analysis
 The parsing tables were stored as dense 2D arrays with 70-90% empty cells, wasting significant memory and impacting performance, especially for large grammars.
@@ -737,7 +737,7 @@ applySparseTableCompression: ->
 
 ---
 
-## 20250711-018 - High-Performance Runtime Parser Generation
+## 20250710-018 - High-Performance Runtime Parser Generation
 
 ### Problem Analysis
 The generated parser had several runtime performance bottlenecks including inefficient table lookup, excessive array operations, redundant object creation, and suboptimal action dispatch.
@@ -798,7 +798,7 @@ generateOptimizedCommonJS: (options = {}) ->
 
 ---
 
-## 20250711-019 - Source Map Generation Support
+## 20250710-019 - Source Map Generation Support
 
 ### Problem Analysis
 The parser generator lacked source map support, making it difficult to debug generated parser code by mapping it back to original grammar definitions, especially for complex grammars and semantic actions.
