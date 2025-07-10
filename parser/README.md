@@ -9,7 +9,7 @@ Inspired by classic tools like **Yacc/Bison** but pared down to the minimal set 
 
 ## Why another parser generator?
 
-1. **Succinctness first** – the entire generator fits in a single CoffeeScript file (~1 k lines) and emits a single JS module you can `require()` immediately.
+1. **Succinctness first** – the entire generator fits in a single CoffeeScript file and emits a single JS module you can `require()` immediately.
 2. **Modern runtime** – the generated parser is CommonJS compatible, uses plain JavaScript data structures, and has no runtime dependencies besides an external lexer you supply.
 3. **Full LALR(1) power** – comparable look-ahead power to Bison, including precedence/associativity handling and conflict detection.
 4. **Great ergonomics** – grammars are written as ordinary CoffeeScript/JS objects; semantic actions are just functions.
