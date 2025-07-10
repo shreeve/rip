@@ -19,7 +19,9 @@ class Rule # A → B C D
   constructor: (@lhs, @rhs, @action = null, @precedence = null) ->
     @id = Rule.idno++ # unique id
 
-class Item # LR Item: A → B • C D with lookahead
+# An Item is a rule with its dot position and lookahead
+# Example: Expr → Expr + • Term, {';', ')', '$'}
+class Item
   constructor: (@rule, @dot = 0, @lookahead = new Set()) ->
 
   # Check if the dot is at the end
@@ -34,6 +36,12 @@ class Item # LR Item: A → B • C D with lookahead
   # Create item without lookahead (for LR(0) core)
   core: -> new Item(@rule, @dot, new Set())
 
+  # Generate core key from rule ID and dot position
+  @makeCoreKey: (ruleId, dot) -> "#{ruleId}-#{dot}"
+
+  # Get the core key (without lookaheads) for deduplication
+  coreKey: -> @_coreKey ?= Item.makeCoreKey(@rule.id, @dot)
+
   # String for debugging
   toString: ->
     rhs = @rule.rhs.slice()
@@ -45,25 +53,31 @@ class State # Set of LR(0) items
   constructor: ->
     @id          = State.idno++ # unique id
     @items       = []           # Array of Items
-    @itemsMap    = new Map()    # For quick lookups
+    @coreMap     = new Map()    # Core key -> Item (for LR(0) cores)
     @transitions = new Map()    # symbol -> state
     @inadequate  = false        # Has shift/reduce conflicts?
 
+  # Add item to state, merging lookaheads if core already exists
   addItem: (item) ->
-    key = "#{item.rule.id}-#{item.dot}-#{Array.from(item.lookahead).sort().join(',')}"
-    if @itemsMap.has(key)
-      false
+    coreKey = item.coreKey()
+
+    if @coreMap.has(coreKey)
+      # Merge lookaheads with existing item
+      existingItem = @coreMap.get(coreKey)
+      oldSize = existingItem.lookahead.size
+      for la from item.lookahead
+        existingItem.lookahead.add(la)
+      # Return true if lookaheads were actually added
+      return existingItem.lookahead.size > oldSize
     else
-      @itemsMap.set(key, item)
+      # Add new item
+      @coreMap.set(coreKey, item)
       @items.push(item)
-      true
+      return true
 
   # Get core item by rule and dot
   getCoreItem: (ruleId, dot) ->
-    for item in @items
-      if item.rule.id == ruleId and item.dot == dot
-        return item
-    null
+    @coreMap.get(Item.makeCoreKey(ruleId, dot))
 
 # ==[ LALR(1) Parser Generator ]================================================
 
@@ -421,7 +435,8 @@ class Generator
     while changed
       changed = false
 
-      for item in state.items.slice()  # Copy to avoid modification during iteration
+      # Process all current items (use slice to avoid modification during iteration)
+      for item in state.items.slice()
         continue if item.isComplete()
 
         nextSym = item.nextSymbol()
@@ -433,6 +448,7 @@ class Generator
 
           # For LR(0) construction, use empty lookahead
           newItem = new Item(rule, 0, new Set())
+          # addItem now handles merging automatically
           if state.addItem(newItem)
             changed = true
 
@@ -454,10 +470,9 @@ class Generator
     state
 
   computeCore: (state) ->
-    items = []
-    for item in state.items
-      items.push("#{item.rule.id}-#{item.dot}")
-    items.sort().join('|')
+    # Use the core keys from the coreMap for consistent hashing
+    coreKeys = Array.from(state.coreMap.keys()).sort()
+    coreKeys.join('|')
 
   # ============================================================================
   # LALR Lookaheads
@@ -557,22 +572,8 @@ class Generator
 
           newItem = new Item(rule, 0, newLookahead)
 
-          # Check if this item already exists with these lookaheads
-          existingItem = null
-          for stateItem in state.items
-            if stateItem.rule.id == newItem.rule.id and stateItem.dot == newItem.dot
-              existingItem = stateItem
-              break
-
-          if existingItem
-            # Merge lookaheads
-            oldSize = existingItem.lookahead.size
-            for la from newLookahead
-              existingItem.lookahead.add(la)
-            if existingItem.lookahead.size > oldSize
-              changed = true
-          else
-            state.addItem(newItem)
+          # addItem now handles lookahead merging automatically
+          if state.addItem(newItem)
             changed = true
 
   # Propagate lookaheads until convergence
