@@ -283,11 +283,150 @@ class Generator
   # ============================================================================
 
   validateGrammar: ->
-    # Check all RHS symbols are defined
+    errors = []
+    warnings = []
+
+    # 1. Check all RHS symbols are defined
     for rule in @rules
       for symbol in rule.rhs
         unless @symbols.has(symbol)
-          throw new Error("Undefined symbol '#{symbol}' in rule: #{rule.lhs} → #{rule.rhs.join(' ')}")
+          errors.push("Undefined symbol '#{symbol}' in rule: #{rule.lhs} → #{rule.rhs.join(' ')}")
+
+    # 2. Check start symbol is defined and is a non-terminal
+    unless @symbols.has(@start)
+      errors.push("Start symbol '#{@start}' is not defined")
+    else if @getSymbol(@start).isTerminal
+      errors.push("Start symbol '#{@start}' cannot be a terminal")
+
+    # 3. Check for unreachable symbols (symbols that can't be derived from start)
+    reachable = new Set()
+    workList = [@start]
+    reachable.add(@start)
+
+    while workList.length > 0
+      current = workList.shift()
+      for rule in @rules
+        if rule.lhs == current
+          for symbol in rule.rhs
+            unless reachable.has(symbol)
+              reachable.add(symbol)
+              workList.push(symbol) unless @getSymbol(symbol).isTerminal
+
+    # Report unreachable non-terminals
+    for [name, symbol] from @symbols
+      if not symbol.isTerminal and not reachable.has(name)
+        warnings.push("Non-terminal '#{name}' is unreachable from start symbol '#{@start}'")
+
+    # 4. Check for unproductive symbols (symbols that can't derive terminal strings)
+    productive = new Set()
+
+    # First, all terminals are productive
+    for [name, symbol] from @symbols
+      if symbol.isTerminal
+        productive.add(name)
+
+    # Iterate until no more productive symbols found
+    changed = true
+    while changed
+      changed = false
+      for rule in @rules
+        # If all RHS symbols are productive, then LHS is productive
+        if not productive.has(rule.lhs)
+          allProductive = true
+          for symbol in rule.rhs
+            unless productive.has(symbol)
+              allProductive = false
+              break
+
+          if allProductive
+            productive.add(rule.lhs)
+            changed = true
+
+    # Report unproductive non-terminals
+    for [name, symbol] from @symbols
+      if not symbol.isTerminal and not productive.has(name)
+        warnings.push("Non-terminal '#{name}' is unproductive (cannot derive any terminal string)")
+
+    # 5. Check for left recursion (warning, not error)
+    @checkLeftRecursion(warnings)
+
+    # 6. Check for empty grammar
+    if @rules.length == 0
+      errors.push("Grammar has no rules")
+
+    # 7. Check for rules with same LHS and RHS (useless rules)
+    for rule in @rules
+      if rule.rhs.length == 1 and rule.lhs == rule.rhs[0]
+        warnings.push("Useless rule: #{rule.lhs} → #{rule.rhs[0]} (unit production to self)")
+
+    # 8. Check for duplicate rules
+    ruleStrings = new Set()
+    for rule in @rules
+      ruleStr = "#{rule.lhs} → #{rule.rhs.join(' ')}"
+      if ruleStrings.has(ruleStr)
+        warnings.push("Duplicate rule: #{ruleStr}")
+      else
+        ruleStrings.add(ruleStr)
+
+    # Report results
+    if warnings.length > 0
+      console.warn("\n=== GRAMMAR WARNINGS ===")
+      for warning in warnings
+        console.warn("Warning: #{warning}")
+
+    if errors.length > 0
+      console.error("\n=== GRAMMAR ERRORS ===")
+      for error in errors
+        console.error("Error: #{error}")
+      throw new Error("Grammar validation failed with #{errors.length} errors")
+
+    if warnings.length > 0
+      console.warn("\nGrammar has #{warnings.length} warnings but is valid")
+    else
+      console.log("Grammar validation passed")
+
+    # Check for left recursion
+  checkLeftRecursion: (warnings) ->
+    # Check for immediate left recursion (A → A α)
+    for rule in @rules
+      if rule.rhs.length > 0 and rule.lhs == rule.rhs[0]
+        warnings.push("Immediate left recursion in rule: #{rule.lhs} → #{rule.rhs.join(' ')}")
+
+    # Check for indirect left recursion using a simplified approach
+    # For each non-terminal, see if it can derive itself as the leftmost symbol
+    for [name, symbol] from @symbols
+      continue if symbol.isTerminal
+
+      if @canDeriveLeftmost(name, name, new Set())
+        # Check if we already reported immediate left recursion for this symbol
+        hasImmediate = false
+        for rule in @rules
+          if rule.lhs == name and rule.rhs.length > 0 and rule.rhs[0] == name
+            hasImmediate = true
+            break
+
+        unless hasImmediate
+          warnings.push("Indirect left recursion involving non-terminal '#{name}'")
+
+  # Helper method to check if a non-terminal can derive itself as leftmost symbol
+  canDeriveLeftmost: (start, target, visited) ->
+    return false if visited.has(start)
+    visited.add(start)
+
+    for rule in @rules
+      if rule.lhs == start and rule.rhs.length > 0
+        leftmost = rule.rhs[0]
+
+        # If leftmost symbol is the target, we found left recursion
+        if leftmost == target
+          return true
+
+        # If leftmost is a non-terminal, check recursively
+        if not @getSymbol(leftmost).isTerminal
+          if @canDeriveLeftmost(leftmost, target, new Set(visited))
+            return true
+
+    false
 
   # Compute nullable symbols
   computeNullable: ->
