@@ -1471,25 +1471,18 @@ class Generator
   # Comprehensive state minimization
   minimizeStates: ->
     initialStateCount = @states.length
-    console.log "\n🔧 State Minimization:"
-    console.log "Initial states: #{initialStateCount}"
 
     # Step 1: Remove unreachable states
     reachableStates = @findReachableStates()
     unreachableCount = @states.length - reachableStates.size
     if unreachableCount > 0
       @removeUnreachableStates(reachableStates)
-      console.log "Removed #{unreachableCount} unreachable states"
 
     # Step 2: Merge equivalent states (same actions for all symbols)
     mergedCount = @mergeEquivalentStates()
-    if mergedCount > 0
-      console.log "Merged #{mergedCount} equivalent states"
 
     # Step 3: Merge weakly compatible states
     weakMergedCount = @mergeWeaklyCompatibleStates()
-    if weakMergedCount > 0
-      console.log "Merged #{weakMergedCount} weakly compatible states"
 
     # Step 4: Rebuild table with minimized states
     @rebuildTableAfterMinimization()
@@ -1498,11 +1491,22 @@ class Generator
     reduction = initialStateCount - finalStateCount
     reductionPercent = Math.round((reduction / initialStateCount) * 100)
 
-    console.log "Final states: #{finalStateCount}"
-    if reduction > 0
-      console.log "Reduction: #{reduction} states (#{reductionPercent}%)"
-    else
-      console.log "No states eliminated"
+    # Report minimization results
+    unreachableText = if unreachableCount > 0 then "Removed #{unreachableCount} unreachable states" else ""
+    mergedText = if mergedCount > 0 then "Merged #{mergedCount} equivalent states" else ""
+    weakMergedText = if weakMergedCount > 0 then "Merged #{weakMergedCount} weakly compatible states" else ""
+    reductionText = if reduction > 0 then "Reduction: #{reduction} states (#{reductionPercent}%)" else "No states eliminated"
+
+    console.log """
+
+    🔧 State Minimization:
+    Initial states: #{initialStateCount}
+    #{unreachableText}
+    #{mergedText}
+    #{weakMergedText}
+    Final states: #{finalStateCount}
+    #{reductionText}
+    """
 
   # Find all states reachable from the start state
   findReachableStates: ->
@@ -1758,30 +1762,37 @@ class Generator
 
   # Report performance statistics
   reportPerformanceStats: ->
-    console.log "\n📊 Performance Statistics:"
-    console.log "========================="
-    console.log "Closure computations: #{@performanceStats.closureCalls}"
-    console.log "Cache hits: #{@performanceStats.cacheHits}"
-
-    if @performanceStats.closureCalls > 0
+    hitRateText = if @performanceStats.closureCalls > 0
       hitRate = Math.round((@performanceStats.cacheHits / @performanceStats.closureCalls) * 100)
-      console.log "Cache hit rate: #{hitRate}%"
+      "Cache hit rate: #{hitRate}%"
+    else
+      ""
 
-    console.log "States created: #{@states.length}"
-    console.log "Rules processed: #{@rules.length}"
-    console.log "Symbols: #{@symbols.size}"
-
-    # Table optimization timing
-    if @performanceStats.optimizationTime > 0
-      console.log "Table optimization: #{@performanceStats.optimizationTime}ms"
+    optimizationText = if @performanceStats.optimizationTime > 0
       if @optimizedTable
-        console.log "Optimization method: #{@optimizedTable.format}"
+        """Table optimization: #{@performanceStats.optimizationTime}ms
+        Optimization method: #{@optimizedTable.format}"""
       else
-        console.log "Optimization: skipped (small grammar)"
+        """Table optimization: #{@performanceStats.optimizationTime}ms
+        Optimization: skipped (small grammar)"""
+    else
+      ""
 
-    # Memory usage estimates
     cacheSize = @coreCache.size + @closureCache.size
-    console.log "Cache entries: #{cacheSize}"
+
+    console.log """
+
+    📊 Performance Statistics:
+    =========================
+    Closure computations: #{@performanceStats.closureCalls}
+    Cache hits: #{@performanceStats.cacheHits}
+    #{hitRateText}
+    States created: #{@states.length}
+    Rules processed: #{@rules.length}
+    Symbols: #{@symbols.size}
+    #{optimizationText}
+    Cache entries: #{cacheSize}
+    """
 
   # ============================================================================
   # Code Generation
@@ -1843,24 +1854,24 @@ class Generator
 
   # Build performAction from grammar
   buildPerformAction: ->
-    actions = []
 
     # Process each rule and its action
     # Parameter mapping for rule A → B C D (length=3):
     # $1 → B → $$[$0-2], $2 → C → $$[$0-1], $3 → D → $$[$0]
     # @1 → B → _$[_$.length-1-2], @2 → C → _$[_$.length-1-1], @3 → D → _$[_$.length-1]
     for rule, i in @rules
+    actionCases = for rule, i in @rules
       action = rule.action || 'this.$ = $$[$0];'
 
-      # If action is a function, convert to string
+      # Convert action to string if it's a function
       if typeof action is 'function'
         action = action.toString()
-        # Extract the function body (everything after the arrow)
+        # Extract function body
         match = action.match(/^(?:function\s*\([^)]*\)|[^=]+=>)\s*\{?\s*([\s\S]*?)\s*\}?\s*$/)
         if match
           action = match[1]
         else
-          # For simple arrow functions like -> $1 + $3
+          # Handle arrow functions without braces
           match = action.match(/^[^>]+>\s*(.*)$/)
           action = if match then match[1] else action
 
@@ -1887,7 +1898,7 @@ class Generator
         else
           "$$[$0-#{stackOffset}]"  # Offset from top
 
-      # Replace $0 with rule length (keep as is for now)
+      # Replace $0 with rule length
       action = action.replace /\$0/g, rule.rhs.length.toString()
 
       # Replace @ location references (@1, @2, etc.) with JavaScript equivalents
@@ -1904,15 +1915,15 @@ class Generator
         else
           "_$[_$.length - 1 - #{stackOffset}]"  # Offset from top
 
-      # Add case
-      actions.push "      case #{i}:"
-      actions.push "        var $0 = $$.length - 1;"
-      actions.push "        #{action}"
-      actions.push "        break;"
+      # Generate case statement
+      """
+      case #{i}: // #{rule.lhs} → #{rule.rhs.join(' ')}
+        var $0 = $$.length - 1;
+        #{action}
+        break;"""
 
     """performAction: function(yytext, yyleng, yylineno, yy, yystate, $$, _$) {
-      switch (yystate) {
-#{actions.join('\n')}
+      switch (yystate) {#{actionCases.join('')}
       }
     }"""
 
@@ -2557,15 +2568,13 @@ const parser = (() => {
     """
 
   prepareOptimizedActionDispatch: ->
-    actions = []
-    for rule, i in @rules
-      if rule.action and rule.action != 'this.$ = $$[$0];'
-        actionCode = @convertActionToOptimized(rule.action, rule.rhs.length)
-        actions.push "  #{i}: #{actionCode},"
+    actionEntries = for rule, i in @rules when rule.action and rule.action != 'this.$ = $$[$0];'
+      actionCode = @convertActionToOptimized(rule.action, rule.rhs.length)
+      "  #{i}: #{actionCode},"
 
     """
     const actionTable = {
-#{actions.join('\n')}
+#{actionEntries.join('\n')}
     };
     """
 
@@ -2820,45 +2829,46 @@ const parser = (() => {
         "Unsupported format. Use 'dot' or 'mermaid'"
 
   generateDotVisualization: ->
-    lines = ['digraph LALR1_Automaton {']
-    lines.push '  rankdir=LR;'
-    lines.push '  node [shape=circle];'
-
-    # Add states
-    for state in @states
+    stateDeclarations = for state in @states
       label = "#{state.id}"
       if state.inadequate
-        lines.push "  #{state.id} [label=\"#{label}\", color=red];"
+        "  #{state.id} [label=\"#{label}\", color=red];"
       else
-        lines.push "  #{state.id} [label=\"#{label}\"];"
+        "  #{state.id} [label=\"#{label}\"];"
 
-    # Add transitions
-    for state in @states
+    transitions = for state in @states
       for [symbol, nextState] from state.transitions
-        lines.push "  #{state.id} -> #{nextState.id} [label=\"#{symbol}\"];"
+        "  #{state.id} -> #{nextState.id} [label=\"#{symbol}\"];"
 
-    lines.push '}'
-    lines.join('\n')
+    """
+digraph LALR1_Automaton {
+  rankdir=LR;
+  node [shape=circle];
+
+#{stateDeclarations.join('\n')}
+
+#{transitions.flat().join('\n')}
+}"""
 
   generateMermaidVisualization: ->
-    lines = ['graph LR']
-
-    # Add states with styling
-    for state in @states
+    stateNodes = for state in @states
       if state.inadequate
-        lines.push "  #{state.id}[\"State #{state.id}\"]:::conflict"
+        "  #{state.id}[\"State #{state.id}\"]:::conflict"
       else
-        lines.push "  #{state.id}[\"State #{state.id}\"]"
+        "  #{state.id}[\"State #{state.id}\"]"
 
-    # Add transitions
-    for state in @states
+    transitions = for state in @states
       for [symbol, nextState] from state.transitions
-        lines.push "  #{state.id} -->|#{symbol}| #{nextState.id}"
+        "  #{state.id} -->|#{symbol}| #{nextState.id}"
 
-    # Add styling
-    lines.push '  classDef conflict fill:#ffcccc,stroke:#ff0000'
+    """
+graph LR
 
-    lines.join('\n')
+#{stateNodes.join('\n')}
+
+#{transitions.flat().join('\n')}
+
+  classDef conflict fill:#ffcccc,stroke:#ff0000"""
 
   # Helper methods for debugging information
   checkForLeftRecursion: ->
@@ -4581,24 +4591,23 @@ if (typeof require !== 'undefined' && typeof module !== 'undefined') {
         if result.length > 0 and result[result.length - 1] != ';'
           result.push(',')
 
-        # Encode the mapping
-        segment = []
-        segment.push(@encodeVLQValue(mapping.generatedColumn - prevGeneratedColumn))
+        # Encode the mapping - build segment as string
+        segmentParts = [@encodeVLQValue(mapping.generatedColumn - prevGeneratedColumn)]
         prevGeneratedColumn = mapping.generatedColumn
 
         if mapping.source?
-          segment.push(@encodeVLQValue(mapping.source - prevSource))
+          segmentParts.push(@encodeVLQValue(mapping.source - prevSource))
           prevSource = mapping.source
-          segment.push(@encodeVLQValue(mapping.originalLine - prevOriginalLine))
+          segmentParts.push(@encodeVLQValue(mapping.originalLine - prevOriginalLine))
           prevOriginalLine = mapping.originalLine
-          segment.push(@encodeVLQValue(mapping.originalColumn - prevOriginalColumn))
+          segmentParts.push(@encodeVLQValue(mapping.originalColumn - prevOriginalColumn))
           prevOriginalColumn = mapping.originalColumn
 
           if mapping.name?
-            segment.push(@encodeVLQValue(mapping.name - prevName))
+            segmentParts.push(@encodeVLQValue(mapping.name - prevName))
             prevName = mapping.name
 
-        result.push(segment.join(''))
+        result.push(segmentParts.join(''))
 
       result.join('')
 
@@ -4640,9 +4649,7 @@ if (typeof require !== 'undefined' && typeof module !== 'undefined') {
 
   # Build performAction with source map support
   buildPerformActionWithSourceMap: ->
-    actions = []
-
-    for rule, i in @rules
+    actionCases = for rule, i in @rules
       action = rule.action || 'this.$ = $$[$0];'
       originalLocation = @getOriginalActionLocation(rule)
 
@@ -4667,14 +4674,14 @@ if (typeof require !== 'undefined' && typeof module !== 'undefined') {
         "case_#{i}"
       ) if originalLocation
 
-      actions.push "      case #{i}: // #{rule.lhs} → #{rule.rhs.join(' ')}"
-      actions.push "        var $0 = $$.length - 1;"
-      actions.push "        #{action}"
-      actions.push "        break;"
+      """
+      case #{i}: // #{rule.lhs} → #{rule.rhs.join(' ')}
+        var $0 = $$.length - 1;
+        #{action}
+        break;"""
 
     """performAction: function(yytext, yyleng, yylineno, yy, yystate, $$, _$) {
-      switch (yystate) {
-#{actions.join('\n')}
+      switch (yystate) {#{actionCases.join('')}
       }
     }"""
 
@@ -5317,9 +5324,11 @@ if !module.parent
         grammar = JSON.parse(source)
 
       if options.verbose
-        console.log "✅ Grammar file parsed successfully"
-        console.log "📊 Productions: #{Object.keys(grammar.grammar || {}).length}"
-        console.log "🎯 Start symbol: #{grammar.start || 'unknown'}"
+        console.log """
+        ✅ Grammar file parsed successfully
+        📊 Productions: #{Object.keys(grammar.grammar || {}).length}
+        🎯 Start symbol: #{grammar.start || 'unknown'}
+        """
 
       grammar
 
@@ -5358,11 +5367,13 @@ if !module.parent
     }
 
     if options.verbose
-      console.log "⚙️  Configuration:"
-      console.log "   Optimization: #{options.optimize}"
-      console.log "   Compression: #{options.compression}"
-      console.log "   Minimization: #{options.minimization}"
-      console.log "   Source Maps: #{options.sourceMap}"
+      console.log """
+      ⚙️  Configuration:
+         Optimization: #{options.optimize}
+         Compression: #{options.compression}
+         Minimization: #{options.minimization}
+         Source Maps: #{options.sourceMap}
+      """
 
   # Generate parser with configured options
   generateParser = (generator, grammar, options) ->
@@ -5404,9 +5415,11 @@ if !module.parent
     if options.outputFile
       fs.writeFileSync(options.outputFile, content, 'utf8')
       if options.verbose
-        console.log "📝 Parser written to: #{options.outputFile}"
-        console.log "📏 Size: #{content.length} characters"
-        console.log "⏱️  Generation time: #{generationTime}ms"
+        console.log """
+        📝 Parser written to: #{options.outputFile}
+        📏 Size: #{content.length} characters
+        ⏱️  Generation time: #{generationTime}ms
+        """
     else
       console.log content
 
@@ -5472,64 +5485,74 @@ if !module.parent
 
   # Generate states report
   generateStatesReport = (generator) ->
-    report = ["## State Machine Analysis\n"]
+    stateReports = for state, i in generator.states
+      items = ("  - #{item.toString()}" for item in state.items).join('\n')
 
-    for state, i in generator.states
-      report.push "**State #{i}:**"
-      report.push "Items:"
-      for item in state.items
-        report.push "  - #{item.toString()}"
+      transitions = if state.transitions?.size > 0
+        transitionList = ("  - #{symbol} → State #{nextState.id}" for [symbol, nextState] from state.transitions).join('\n')
+        "\nTransitions:\n#{transitionList}"
+      else
+        ""
 
-      if state.transitions?.size > 0
-        report.push "Transitions:"
-        for [symbol, nextState] from state.transitions
-          report.push "  - #{symbol} → State #{nextState.id}"
+      "**State #{i}:**\nItems:\n#{items}#{transitions}"
 
-      report.push ""
+    """
+## State Machine Analysis
 
-    report.join('\n')
+#{stateReports.join('\n\n')}
+"""
 
   # Generate conflicts report
   generateConflictsReport = (generator) ->
     if generator.conflicts?.length > 0
-      report = ["## Conflicts Analysis\n"]
+      conflictReports = for conflict in generator.conflicts
+        explanationText = if conflict.explanation then "\n- Explanation: #{conflict.explanation}" else ""
 
-      for conflict in generator.conflicts
-        report.push "**#{conflict.type} Conflict in State #{conflict.state}:**"
-        report.push "- Lookahead: #{conflict.lookahead}"
-        report.push "- Actions: #{conflict.actions.map((a) -> JSON.stringify(a)).join(', ')}"
-        report.push "- Resolved: #{conflict.resolved}"
-        if conflict.explanation
-          report.push "- Explanation: #{conflict.explanation}"
-        if conflict.suggestions?.length > 0
-          report.push "- Suggestions:"
-          for suggestion in conflict.suggestions
-            report.push "  - #{suggestion}"
-        report.push ""
+        suggestionsText = if conflict.suggestions?.length > 0
+          suggestionList = ("  - #{suggestion}" for suggestion in conflict.suggestions).join('\n')
+          "\n- Suggestions:\n#{suggestionList}"
+        else
+          ""
 
-      report.join('\n')
+        """**#{conflict.type} Conflict in State #{conflict.state}:**
+- Lookahead: #{conflict.lookahead}
+- Actions: #{conflict.actions.map((a) -> JSON.stringify(a)).join(', ')}
+- Resolved: #{conflict.resolved}#{explanationText}#{suggestionsText}"""
+
+      """
+## Conflicts Analysis
+
+#{conflictReports.join('\n\n')}
+"""
     else
-      "## Conflicts Analysis\n\n✅ No conflicts detected!"
+      """
+## Conflicts Analysis
+
+✅ No conflicts detected!
+"""
 
   # Generate grammar report
   generateGrammarReport = (generator) ->
-    report = ["## Grammar Analysis\n"]
+    productions = ("- #{rule.lhs} → #{rule.rhs.join(' ')}" for rule in generator.rules).join('\n')
 
-    report.push "**Productions:**"
-    for rule in generator.rules
-      report.push "- #{rule.lhs} → #{rule.rhs.join(' ')}"
+    firstSets = for [symbol, symbolObj] from generator.symbols when not symbolObj.isTerminal and symbolObj.first?.size > 0
+      "- FIRST(#{symbol}) = {#{[...symbolObj.first].join(', ')}}"
 
-    report.push "\n**First Sets:**"
-    for [symbol, symbolObj] from generator.symbols
-      if not symbolObj.isTerminal and symbolObj.first?.size > 0
-        report.push "- FIRST(#{symbol}) = {#{[...symbolObj.first].join(', ')}}"
+    followSets = for [symbol, symbolObj] from generator.symbols when not symbolObj.isTerminal and symbolObj.follow?.size > 0
+      "- FOLLOW(#{symbol}) = {#{[...symbolObj.follow].join(', ')}}"
 
-    report.push "\n**Follow Sets:**"
-    for [symbol, symbolObj] from generator.symbols
-      if not symbolObj.isTerminal and symbolObj.follow?.size > 0
-        report.push "- FOLLOW(#{symbol}) = {#{[...symbolObj.follow].join(', ')}}"
+    """
+## Grammar Analysis
 
-    report.join('\n')
+**Productions:**
+#{productions}
+
+**First Sets:**
+#{firstSets.join('\n')}
+
+**Follow Sets:**
+#{followSets.join('\n')}
+"""
 
   # Generate performance report
   generatePerformanceReport = (generator) ->
@@ -5637,11 +5660,14 @@ if !module.parent
 
       when 'stats'
         stats = generator.getStatistics()
-        console.log "\n📊 Statistics:"
-        console.log "  States: #{stats.states}"
-        console.log "  Productions: #{stats.productions}"
-        console.log "  Terminals: #{stats.terminals}"
-        console.log "  Non-terminals: #{stats.nonterminals}"
+        console.log """
+
+        📊 Statistics:
+          States: #{stats.states}
+          Productions: #{stats.productions}
+          Terminals: #{stats.terminals}
+          Non-terminals: #{stats.nonterminals}
+        """
 
       when 'optimize'
         console.log "\n🔧 Running optimization..."
