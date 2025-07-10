@@ -1875,6 +1875,13 @@ class Generator
           match = action.match(/^[^>]+>\s*(.*)$/)
           action = if match then match[1] else action
 
+      # Handle the special case where CoffeeScript grammar uses @1 and $1 in empty productions
+      # These need to be replaced with default values FIRST, before any other processing
+      if rule.rhs.length == 0
+        # For empty productions, @1 and $1 should use default values
+        action = action.replace /@1/g, '{ first_line: 1, first_column: 0, last_line: 1, last_column: 0 }'
+        action = action.replace /\$1/g, 'null'
+
       # Replace @$ with this.$
       action = action.replace /@\$/g, 'this.$'
 
