@@ -347,28 +347,47 @@ class Generator
     changed = true
     while changed
       changed = false
+
       for rule in @rules
-        follow = new Set(@getSymbol(rule.lhs).follow)
+        # For each symbol in the RHS, compute what can follow it
+        for i in [0...rule.rhs.length]
+          lhsSymbol = @getSymbol(rule.lhs)
+          currentSymbol = @getSymbol(rule.rhs[i])
 
-        # Process RHS from right to left
-        for i in [rule.rhs.length - 1..0] by -1
-          rhsName = rule.rhs[i]
-          rhsSymbol = @getSymbol(rhsName)
+          # Skip terminals - they don't have FOLLOW sets
+          continue if currentSymbol.isTerminal
 
-          # Add follow to Follow(rhsSymbol)
-          for item from follow
-            unless rhsSymbol.follow.has(item)
-              rhsSymbol.follow.add(item)
-              changed = true
+          # Get the suffix β after the current symbol
+          beta = rule.rhs.slice(i + 1)
 
-          # Update follow for next iteration
-          if rhsSymbol.nullable
-            # Add First(rhsSymbol) to follow
-            for item from rhsSymbol.first
-              follow.add(item)
+          if beta.length > 0
+            # Case 1: A → αBβ where β is non-empty
+            # Add FIRST(β) to FOLLOW(B)
+            firstBeta = @firstOfString(beta)
+            for item from firstBeta
+              unless currentSymbol.follow.has(item)
+                currentSymbol.follow.add(item)
+                changed = true
+
+            # If β is nullable, also add FOLLOW(A) to FOLLOW(B)
+            betaNullable = true
+            for sym in beta
+              unless @getSymbol(sym).nullable
+                betaNullable = false
+                break
+
+            if betaNullable
+              for item from lhsSymbol.follow
+                unless currentSymbol.follow.has(item)
+                  currentSymbol.follow.add(item)
+                  changed = true
           else
-            # Replace follow with First(rhsSymbol)
-            follow = new Set(rhsSymbol.first)
+            # Case 2: A → αB (β is empty)
+            # Add FOLLOW(A) to FOLLOW(B)
+            for item from lhsSymbol.follow
+              unless currentSymbol.follow.has(item)
+                currentSymbol.follow.add(item)
+                changed = true
 
   # Compute FIRST set of a string of symbols
   firstOfString: (symbols, startIndex = 0) ->
