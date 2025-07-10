@@ -4059,7 +4059,7 @@ graph LR
     parserCode = @generateParserCodeWithSourceMap(table, rules, symbols, tokens, performAction)
 
     # Generate the source map
-    sourceMap = @sourceMapTracker.generateSourceMap()
+    sourceMap = @sourceMapTracker?.generateSourceMap()
 
     if options.sourceMap == 'inline'
       # Inline source map
@@ -4505,7 +4505,7 @@ if (typeof require !== 'undefined' && typeof module !== 'undefined') {
     parserCode = @generateParserCodeWithSourceMap(table, rules, symbols, tokens, performAction)
 
     # Generate the source map
-    sourceMap = @sourceMapTracker.generateSourceMap()
+    sourceMap = @sourceMapTracker?.generateSourceMap()
 
     if options.sourceMap == 'inline'
       # Inline source map
