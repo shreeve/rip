@@ -25,8 +25,8 @@
 
   Rule = (function() {
     class Rule { // A → B C D
-      constructor(lhs, rhs1, action3 = null, precedence = null) {
-        this.lhs = lhs;
+      constructor(lhs1, rhs1, action3 = null, precedence = null) {
+        this.lhs = lhs1;
         this.rhs = rhs1;
         this.action = action3;
         this.precedence = precedence;
@@ -153,6 +153,16 @@
       this.inadequateStates = []; // States with conflicts
       this.conflicts = []; // Detailed conflict information
       this.onDemandLookahead = (ref = opts.onDemandLookahead) != null ? ref : true;
+      // Performance optimization caches
+      this.rulesByLHS = new Map(); // LHS -> [Rules] for O(1) rule lookup
+      this.coreCache = new Map(); // state -> core hash for memoization
+      this.closureCache = new Map(); // state core -> closure items for memoization
+      this.performanceStats = { // Track performance metrics
+        closureCalls: 0,
+        cacheHits: 0,
+        stateCreations: 0,
+        lookaheadComputations: 0
+      };
     }
 
     findUnreachableSymbols() {
@@ -345,7 +355,7 @@
 
     // Helper method to reassign rule and symbol IDs after elimination
     reassignIds() {
-      var l, len, name, ref, ref1, results, rule, symbol, symbolId, y;
+      var l, len, name, ref, ref1, rule, symbol, symbolId, y;
       // Reset rule IDs
       Rule.idno = 0;
       ref = this.rules;
@@ -356,10 +366,34 @@
       // Reassign symbol IDs to maintain consistency
       symbolId = 0;
       ref1 = this.symbols;
-      results = [];
       for (y of ref1) {
         [name, symbol] = y;
-        results.push(symbol.id = symbolId++);
+        symbol.id = symbolId++;
+      }
+      // Rebuild rule lookup cache after ID reassignment
+      return this.buildRuleLookupCache();
+    }
+
+    // Build optimized rule lookup cache for O(1) access by LHS
+    buildRuleLookupCache() {
+      var l, len, lhs, ref, ref1, results, rule, rules, y;
+      this.rulesByLHS.clear();
+      ref = this.rules;
+      for (l = 0, len = ref.length; l < len; l++) {
+        rule = ref[l];
+        if (!this.rulesByLHS.has(rule.lhs)) {
+          this.rulesByLHS.set(rule.lhs, []);
+        }
+        this.rulesByLHS.get(rule.lhs).push(rule);
+      }
+      ref1 = this.rulesByLHS;
+      // Performance optimization: pre-sort rules by LHS for consistent iteration
+      results = [];
+      for (y of ref1) {
+        [lhs, rules] = y;
+        results.push(rules.sort(function(a, b) {
+          return a.id - b.id;
+        }));
       }
       return results;
     }
@@ -422,6 +456,8 @@
       }
       // Add augmented start rule: $accept → start $end
       this.rules.push(new Rule('$accept', [this.start, '$end']));
+      // Build performance optimization caches
+      this.buildRuleLookupCache();
       if (operators) {
         // Process operators (precedence and associativity)
         this.processOperators(operators);
@@ -1308,53 +1344,56 @@
       return results;
     }
 
-    // Compute closure of a state (LR(0) - no lookaheads yet)
+    // Compute closure of a state (LR(0) - no lookaheads yet) - OPTIMIZED
     closure(state) {
-      var changed, item, newItem, nextSym, results, rule;
-      changed = true;
-      results = [];
-      while (changed) {
-        changed = false;
-        results.push((function() {
-          var l, len, ref, results1;
-          ref = state.items.slice();
-          // Process all current items (use slice to avoid modification during iteration)
-          results1 = [];
-          for (l = 0, len = ref.length; l < len; l++) {
-            item = ref[l];
-            if (item.isComplete()) {
-              continue;
-            }
-            nextSym = item.nextSymbol();
-            if (this.getSymbol(nextSym).isTerminal) {
-              continue;
-            }
-            results1.push((function() {
-              var len1, m, ref1, results2;
-              ref1 = this.rules;
-              // Add items for all productions of nextSym
-              results2 = [];
-              for (m = 0, len1 = ref1.length; m < len1; m++) {
-                rule = ref1[m];
-                if (rule.lhs !== nextSym) {
-                  continue;
-                }
-                // For LR(0) construction, use empty lookahead
-                newItem = new Item(rule, 0, new Set());
-                // addItem now handles merging automatically
-                if (state.addItem(newItem)) {
-                  results2.push(changed = true);
-                } else {
-                  results2.push(void 0);
-                }
-              }
-              return results2;
-            }).call(this));
-          }
-          return results1;
-        }).call(this));
+      var cachedItems, coreKey, item, l, len, len1, m, newItem, newItems, nextSym, originalItems, processedSymbols, rule, rulesForSymbol, workQueue;
+      this.performanceStats.closureCalls++;
+      // Check closure cache first
+      coreKey = this.computeCore(state);
+      if (this.closureCache.has(coreKey)) {
+        this.performanceStats.cacheHits++;
+        // Apply cached closure items to current state
+        cachedItems = this.closureCache.get(coreKey);
+        for (l = 0, len = cachedItems.length; l < len; l++) {
+          item = cachedItems[l];
+          state.addItem(item);
+        }
+        return;
       }
-      return results;
+      // Track original items to cache the closure
+      originalItems = state.items.slice();
+      // Use work queue instead of fixed-point iteration for better performance
+      workQueue = state.items.slice();
+      processedSymbols = new Set();
+      while (workQueue.length > 0) {
+        item = workQueue.shift();
+        if (item.isComplete()) {
+          continue;
+        }
+        nextSym = item.nextSymbol();
+        if (this.getSymbol(nextSym).isTerminal) {
+          continue;
+        }
+        if (processedSymbols.has(nextSym)) {
+          continue;
+        }
+        // Mark symbol as processed to avoid redundant work
+        processedSymbols.add(nextSym);
+        // Use optimized rule lookup instead of linear search
+        rulesForSymbol = this.rulesByLHS.get(nextSym) || [];
+        for (m = 0, len1 = rulesForSymbol.length; m < len1; m++) {
+          rule = rulesForSymbol[m];
+          // For LR(0) construction, use empty lookahead
+          newItem = new Item(rule, 0, new Set());
+          // addItem now handles merging automatically
+          if (state.addItem(newItem)) {
+            workQueue.push(newItem);
+          }
+        }
+      }
+      // Cache the closure items (only the new ones added)
+      newItems = state.items.slice(originalItems.length);
+      return this.closureCache.set(coreKey, newItems);
     }
 
     // Find existing state or add new one
@@ -1378,10 +1417,17 @@
     }
 
     computeCore(state) {
-      var coreKeys;
+      var core, coreKeys;
+      // Check cache first
+      if (this.coreCache.has(state)) {
+        return this.coreCache.get(state);
+      }
       // Use the core keys from the coreMap for consistent hashing
       coreKeys = Array.from(state.coreMap.keys()).sort();
-      return coreKeys.join('|');
+      core = coreKeys.join('|');
+      // Cache the result
+      this.coreCache.set(state, core);
+      return core;
     }
 
     // ============================================================================
@@ -1473,76 +1519,74 @@
       }
     }
 
-    // Closure with lookahead computation
+    // Closure with lookahead computation - OPTIMIZED
     closureWithLookahead(state) {
-      var allNullable, beta, changed, f, firstBeta, item, la, newItem, newLookahead, nextSym, results, rule, sym;
-      changed = true;
+      var allNullable, beta, f, firstBeta, item, itemKey, la, newItem, newLookahead, nextSym, processedItems, results, rule, rulesForSymbol, sym, workQueue;
+      this.performanceStats.closureCalls++;
+      // Use work queue for better performance
+      workQueue = state.items.slice();
+      processedItems = new Set();
       results = [];
-      while (changed) {
-        changed = false;
+      while (workQueue.length > 0) {
+        item = workQueue.shift();
+        if (item.isComplete()) {
+          continue;
+        }
+        // Create unique key for this item to avoid reprocessing
+        itemKey = `${item.rule.id}-${item.dot}-${[...item.lookahead].sort().join(',')}`;
+        if (processedItems.has(itemKey)) {
+          continue;
+        }
+        processedItems.add(itemKey);
+        nextSym = item.nextSymbol();
+        if (this.getSymbol(nextSym).isTerminal) {
+          continue;
+        }
+        // Compute lookahead for new items
+        // For A → α • B β, la
+        // Add B → • γ with FIRST(β la)
+        beta = item.rule.rhs.slice(item.dot + 1);
+        // Use optimized rule lookup instead of linear search
+        rulesForSymbol = this.rulesByLHS.get(nextSym) || [];
         results.push((function() {
-          var l, len, ref, results1;
-          ref = state.items.slice();
+          var l, len, len1, m, ref, results1;
           results1 = [];
-          for (l = 0, len = ref.length; l < len; l++) {
-            item = ref[l];
-            if (item.isComplete()) {
-              continue;
-            }
-            nextSym = item.nextSymbol();
-            if (this.getSymbol(nextSym).isTerminal) {
-              continue;
-            }
-            // Compute lookahead for new items
-            // For A → α • B β, la
-            // Add B → • γ with FIRST(β la)
-            beta = item.rule.rhs.slice(item.dot + 1);
-            results1.push((function() {
-              var len1, len2, m, o, ref1, ref2, results2;
-              ref1 = this.rules;
-              results2 = [];
-              for (m = 0, len1 = ref1.length; m < len1; m++) {
-                rule = ref1[m];
-                if (rule.lhs !== nextSym) {
-                  continue;
-                }
-                // Compute FIRST(β la)
-                newLookahead = new Set();
-                // First, add FIRST(β)
-                firstBeta = this.firstOfString(beta);
-                // If β is nullable or empty, include the original lookahead
-                allNullable = beta.length === 0;
-                if (beta.length > 0) {
-                  allNullable = true;
-                  for (o = 0, len2 = beta.length; o < len2; o++) {
-                    sym = beta[o];
-                    if (!this.getSymbol(sym).nullable) {
-                      allNullable = false;
-                      break;
-                    }
-                  }
-                }
-                if (allNullable) {
-                  ref2 = item.lookahead;
-                  // Add original lookahead
-                  for (la of ref2) {
-                    newLookahead.add(la);
-                  }
-                }
-// Add FIRST(β)
-                for (f of firstBeta) {
-                  newLookahead.add(f);
-                }
-                newItem = new Item(rule, 0, newLookahead);
-                // addItem now handles lookahead merging automatically
-                if (state.addItem(newItem)) {
-                  results2.push(changed = true);
-                } else {
-                  results2.push(void 0);
+          for (l = 0, len = rulesForSymbol.length; l < len; l++) {
+            rule = rulesForSymbol[l];
+            // Compute FIRST(β la)
+            newLookahead = new Set();
+            // First, add FIRST(β)
+            firstBeta = this.firstOfString(beta);
+            // If β is nullable or empty, include the original lookahead
+            allNullable = beta.length === 0;
+            if (beta.length > 0) {
+              allNullable = true;
+              for (m = 0, len1 = beta.length; m < len1; m++) {
+                sym = beta[m];
+                if (!this.getSymbol(sym).nullable) {
+                  allNullable = false;
+                  break;
                 }
               }
-              return results2;
-            }).call(this));
+            }
+            if (allNullable) {
+              ref = item.lookahead;
+              // Add original lookahead
+              for (la of ref) {
+                newLookahead.add(la);
+              }
+            }
+// Add FIRST(β)
+            for (f of firstBeta) {
+              newLookahead.add(f);
+            }
+            newItem = new Item(rule, 0, newLookahead);
+            // addItem now handles lookahead merging automatically
+            if (state.addItem(newItem)) {
+              results1.push(workQueue.push(newItem));
+            } else {
+              results1.push(void 0);
+            }
           }
           return results1;
         }).call(this));
@@ -2369,6 +2413,25 @@
       return results;
     }
 
+    // Report performance statistics
+    reportPerformanceStats() {
+      var cacheSize, hitRate;
+      console.log("\n📊 Performance Statistics:");
+      console.log("=========================");
+      console.log(`Closure computations: ${this.performanceStats.closureCalls}`);
+      console.log(`Cache hits: ${this.performanceStats.cacheHits}`);
+      if (this.performanceStats.closureCalls > 0) {
+        hitRate = Math.round((this.performanceStats.cacheHits / this.performanceStats.closureCalls) * 100);
+        console.log(`Cache hit rate: ${hitRate}%`);
+      }
+      console.log(`States created: ${this.states.length}`);
+      console.log(`Rules processed: ${this.rules.length}`);
+      console.log(`Symbols: ${this.symbols.size}`);
+      // Memory usage estimates
+      cacheSize = this.coreCache.size + this.closureCache.size;
+      return console.log(`Cache entries: ${cacheSize}`);
+    }
+
     // ============================================================================
     // Code Generation
     // ============================================================================
@@ -2418,6 +2481,8 @@
         // Report conflicts if any
         this.reportConflicts();
       }
+      // Report performance statistics
+      this.reportPerformanceStats();
       // Now generate the parser code
       return this.generateCommonJS(options);
     }

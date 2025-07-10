@@ -96,6 +96,17 @@ class Generator
     @conflicts         = []        # Detailed conflict information
     @onDemandLookahead = opts.onDemandLookahead ? true
 
+    # Performance optimization caches
+    @rulesByLHS        = new Map() # LHS -> [Rules] for O(1) rule lookup
+    @coreCache         = new Map() # state -> core hash for memoization
+    @closureCache      = new Map() # state core -> closure items for memoization
+    @performanceStats  = {        # Track performance metrics
+      closureCalls: 0,
+      cacheHits: 0,
+      stateCreations: 0,
+      lookaheadComputations: 0
+    }
+
   findUnreachableSymbols: ->
     # Mark all symbols as unreachable initially
     reachable = new Set()
@@ -253,6 +264,22 @@ class Generator
     for [name, symbol] from @symbols
       symbol.id = symbolId++
 
+    # Rebuild rule lookup cache after ID reassignment
+    @buildRuleLookupCache()
+
+  # Build optimized rule lookup cache for O(1) access by LHS
+  buildRuleLookupCache: ->
+    @rulesByLHS.clear()
+
+    for rule in @rules
+      unless @rulesByLHS.has(rule.lhs)
+        @rulesByLHS.set(rule.lhs, [])
+      @rulesByLHS.get(rule.lhs).push(rule)
+
+    # Performance optimization: pre-sort rules by LHS for consistent iteration
+    for [lhs, rules] from @rulesByLHS
+      rules.sort((a, b) -> a.id - b.id)
+
   # Work starts here
   processGrammar: ({ grammar, operators, start, tokens }) ->
     # Comprehensive input validation
@@ -303,6 +330,9 @@ class Generator
 
     # Add augmented start rule: $accept → start $end
     @rules.push(new Rule('$accept', [@start, '$end']))
+
+    # Build performance optimization caches
+    @buildRuleLookupCache()
 
     # Process operators (precedence and associativity)
     @processOperators(operators) if operators
@@ -920,29 +950,50 @@ class Generator
         if existingState is newState
           workList.push(newState)
 
-  # Compute closure of a state (LR(0) - no lookaheads yet)
+  # Compute closure of a state (LR(0) - no lookaheads yet) - OPTIMIZED
   closure: (state) ->
-    changed = true
+    @performanceStats.closureCalls++
 
-    while changed
-      changed = false
+    # Check closure cache first
+    coreKey = @computeCore(state)
+    if @closureCache.has(coreKey)
+      @performanceStats.cacheHits++
+      # Apply cached closure items to current state
+      cachedItems = @closureCache.get(coreKey)
+      for item in cachedItems
+        state.addItem(item)
+      return
 
-      # Process all current items (use slice to avoid modification during iteration)
-      for item in state.items.slice()
-        continue if item.isComplete()
+    # Track original items to cache the closure
+    originalItems = state.items.slice()
 
-        nextSym = item.nextSymbol()
-        continue if @getSymbol(nextSym).isTerminal
+    # Use work queue instead of fixed-point iteration for better performance
+    workQueue = state.items.slice()
+    processedSymbols = new Set()
 
-        # Add items for all productions of nextSym
-        for rule in @rules
-          continue unless rule.lhs is nextSym
+    while workQueue.length > 0
+      item = workQueue.shift()
+      continue if item.isComplete()
 
-          # For LR(0) construction, use empty lookahead
-          newItem = new Item(rule, 0, new Set())
-          # addItem now handles merging automatically
-          if state.addItem(newItem)
-            changed = true
+      nextSym = item.nextSymbol()
+      continue if @getSymbol(nextSym).isTerminal
+      continue if processedSymbols.has(nextSym)
+
+      # Mark symbol as processed to avoid redundant work
+      processedSymbols.add(nextSym)
+
+      # Use optimized rule lookup instead of linear search
+      rulesForSymbol = @rulesByLHS.get(nextSym) || []
+      for rule in rulesForSymbol
+        # For LR(0) construction, use empty lookahead
+        newItem = new Item(rule, 0, new Set())
+        # addItem now handles merging automatically
+        if state.addItem(newItem)
+          workQueue.push(newItem)
+
+    # Cache the closure items (only the new ones added)
+    newItems = state.items.slice(originalItems.length)
+    @closureCache.set(coreKey, newItems)
 
   # Find existing state or add new one
   findOrAddState: (newState) ->
@@ -962,9 +1013,17 @@ class Generator
     state
 
   computeCore: (state) ->
+    # Check cache first
+    if @coreCache.has(state)
+      return @coreCache.get(state)
+
     # Use the core keys from the coreMap for consistent hashing
     coreKeys = Array.from(state.coreMap.keys()).sort()
-    coreKeys.join('|')
+    core = coreKeys.join('|')
+
+    # Cache the result
+    @coreCache.set(state, core)
+    core
 
   # ============================================================================
   # LALR Lookaheads
@@ -1034,56 +1093,63 @@ class Generator
     else
       throw new Error("No start state or start item found during lookahead computation")
 
-  # Closure with lookahead computation
+  # Closure with lookahead computation - OPTIMIZED
   closureWithLookahead: (state) ->
-    changed = true
+    @performanceStats.closureCalls++
 
-    while changed
-      changed = false
+    # Use work queue for better performance
+    workQueue = state.items.slice()
+    processedItems = new Set()
 
-      for item in state.items.slice()
-        continue if item.isComplete()
+    while workQueue.length > 0
+      item = workQueue.shift()
+      continue if item.isComplete()
 
-        nextSym = item.nextSymbol()
-        continue if @getSymbol(nextSym).isTerminal
+      # Create unique key for this item to avoid reprocessing
+      itemKey = "#{item.rule.id}-#{item.dot}-#{[...item.lookahead].sort().join(',')}"
+      continue if processedItems.has(itemKey)
+      processedItems.add(itemKey)
 
-        # Compute lookahead for new items
-        # For A → α • B β, la
-        # Add B → • γ with FIRST(β la)
-        beta = item.rule.rhs.slice(item.dot + 1)
+      nextSym = item.nextSymbol()
+      continue if @getSymbol(nextSym).isTerminal
 
-        for rule in @rules
-          continue unless rule.lhs is nextSym
+      # Compute lookahead for new items
+      # For A → α • B β, la
+      # Add B → • γ with FIRST(β la)
+      beta = item.rule.rhs.slice(item.dot + 1)
 
-          # Compute FIRST(β la)
-          newLookahead = new Set()
+      # Use optimized rule lookup instead of linear search
+      rulesForSymbol = @rulesByLHS.get(nextSym) || []
+      for rule in rulesForSymbol
+        # Compute FIRST(β la)
+        newLookahead = new Set()
 
-          # First, add FIRST(β)
-          firstBeta = @firstOfString(beta)
+        # First, add FIRST(β)
+        firstBeta = @firstOfString(beta)
 
-          # If β is nullable or empty, include the original lookahead
-          allNullable = beta.length == 0
-          if beta.length > 0
-            allNullable = true
-            for sym in beta
-              unless @getSymbol(sym).nullable
-                allNullable = false
-                break
+        # If β is nullable or empty, include the original lookahead
+        allNullable = beta.length == 0
+        if beta.length > 0
+          allNullable = true
+          for sym in beta
+            unless @getSymbol(sym).nullable
+              allNullable = false
+              break
 
-          if allNullable
-            # Add original lookahead
-            for la from item.lookahead
-              newLookahead.add(la)
+        if allNullable
+          # Add original lookahead
+          for la from item.lookahead
+            newLookahead.add(la)
 
-          # Add FIRST(β)
-          for f from firstBeta
-            newLookahead.add(f)
+        # Add FIRST(β)
+        for f from firstBeta
+          newLookahead.add(f)
 
-          newItem = new Item(rule, 0, newLookahead)
+        newItem = new Item(rule, 0, newLookahead)
 
-          # addItem now handles lookahead merging automatically
-          if state.addItem(newItem)
-            changed = true
+        # addItem now handles lookahead merging automatically
+        if state.addItem(newItem)
+          workQueue.push(newItem)
 
   # Propagate lookaheads until convergence
   propagateLookaheads: ->
@@ -1679,6 +1745,25 @@ class Generator
         ruleId = [...reduceRules][0]
         @defaultActions[state.id] = [2, ruleId]
 
+  # Report performance statistics
+  reportPerformanceStats: ->
+    console.log "\n📊 Performance Statistics:"
+    console.log "========================="
+    console.log "Closure computations: #{@performanceStats.closureCalls}"
+    console.log "Cache hits: #{@performanceStats.cacheHits}"
+
+    if @performanceStats.closureCalls > 0
+      hitRate = Math.round((@performanceStats.cacheHits / @performanceStats.closureCalls) * 100)
+      console.log "Cache hit rate: #{hitRate}%"
+
+    console.log "States created: #{@states.length}"
+    console.log "Rules processed: #{@rules.length}"
+    console.log "Symbols: #{@symbols.size}"
+
+    # Memory usage estimates
+    cacheSize = @coreCache.size + @closureCache.size
+    console.log "Cache entries: #{cacheSize}"
+
   # ============================================================================
   # Code Generation
   # ============================================================================
@@ -1727,6 +1812,9 @@ class Generator
 
     # Report conflicts if any
     @reportConflicts() if @conflicts.length > 0
+
+    # Report performance statistics
+    @reportPerformanceStats()
 
     # Now generate the parser code
     @generateCommonJS(options)
