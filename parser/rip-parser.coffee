@@ -1853,89 +1853,107 @@ class Generator
     # Now generate the parser code
     @generateCommonJS(options)
 
-  # Build performAction from grammar
-  buildPerformAction: ->
+  # Prepare rules array for parser table
+  prepareRules: (withSourceMap = false) ->
+    rules = []
+    for rule, i in @rules
+      # Track original grammar location if source maps are requested
+      if withSourceMap
+        originalLocation = @getOriginalRuleLocation(rule)
+        if originalLocation and @sourceMapTracker
+          @sourceMapTracker.addMapping(
+            { line: @getCurrentGeneratedLine(), column: 0 },
+            originalLocation,
+            0,
+            rule.lhs
+          )
 
-    # Process each rule and its action
-    # Parameter mapping for rule A → B C D (length=3):
-    # $1 → B → $$[$0-2], $2 → C → $$[$0-1], $3 → D → $$[$0]
-    # @1 → B → _$[_$.length-1-2], @2 → C → _$[_$.length-1-1], @3 → D → _$[_$.length-1]
+      ruleData = [rule.lhs, rule.rhs.length]
+      rules.push(ruleData)
+
+    rules
+
+  # Build performAction from grammar
+  buildPerformAction: (withSourceMap = false) ->
     actionCases = for rule, i in @rules
       action = rule.action || 'this.$ = $$[$0];'
+
+      # Handle source map tracking if requested
+      if withSourceMap
+        originalLocation = @getOriginalActionLocation(rule)
+        if originalLocation and @sourceMapTracker
+          @sourceMapTracker.addMapping(
+            { line: @getCurrentGeneratedLine(), column: 6 },
+            originalLocation,
+            0,
+            "case_#{i}"
+          )
 
       # Convert action to string if it's a function
       if typeof action is 'function'
         action = action.toString()
-        # Extract function body
         match = action.match(/^(?:function\s*\([^)]*\)|[^=]+=>)\s*\{?\s*([\s\S]*?)\s*\}?\s*$/)
         if match
           action = match[1]
         else
-          # Handle arrow functions without braces
           match = action.match(/^[^>]+>\s*(.*)$/)
           action = if match then match[1] else action
 
-      # Handle the special case where CoffeeScript grammar uses @1 and $1 in empty productions
-      # These need to be replaced with default values FIRST, before any other processing
-      if rule.rhs.length == 0
-        # For empty productions, @1 and $1 should use default values
-        action = action.replace /@1/g, '{ first_line: 1, first_column: 0, last_line: 1, last_column: 0 }'
-        action = action.replace /\$1/g, 'null'
+      # Replace action code patterns (with optional source map support)
+      if withSourceMap
+        action = @transformActionWithSourceMap(action, rule, originalLocation)
+      else
+        action = @transformAction(action, rule)
 
-      # Replace @$ with this.$
-      action = action.replace /@\$/g, 'this.$'
-
-      # First replace standalone $$ with this.$ (assignment target)
-      # This must be done before replacing $1, $2, etc.
-      action = action.replace /\$\$/g, 'this.$'
-
-      # Then replace positional parameters ($1, $2, etc.) with stack references
-      # For rule A → B C D, the stack has [..., B, C, D] where:
-      # $1 should access B (at $$[$0-2]), $2 → C (at $$[$0-1]), $3 → D (at $$[$0])
-      action = action.replace /\$(\d+)/g, (match, n) ->
-        paramNum = parseInt(n, 10)
-        if paramNum < 1 or paramNum > rule.rhs.length
-          console.warn "Warning: Parameter $#{paramNum} out of range for rule with #{rule.rhs.length} symbols: #{rule.lhs} → #{rule.rhs.join(' ')}"
-          return match # Leave unchanged if invalid
-
-        # Calculate stack offset: $1 is at the bottom, $N is at the top
-        stackOffset = rule.rhs.length - paramNum
-        if stackOffset == 0
-          "$$[$0]"  # Top of stack
-        else
-          "$$[$0-#{stackOffset}]"  # Offset from top
-
-      # Replace $0 with rule length
-      action = action.replace /\$0/g, rule.rhs.length.toString()
-
-      # Replace @ location references (@1, @2, etc.) with JavaScript equivalents
-      action = action.replace /@(\d+)/g, (match, n) ->
-        paramNum = parseInt(n, 10)
-        if paramNum < 1 or paramNum > rule.rhs.length
-          console.warn "Warning: Location parameter @#{paramNum} out of range for rule with #{rule.rhs.length} symbols: #{rule.lhs} → #{rule.rhs.join(' ')}"
-          return match # Leave unchanged if invalid
-
-        # Calculate location stack offset: @1 is at the bottom, @N is at the top
-        stackOffset = rule.rhs.length - paramNum
-        if stackOffset == 0
-          "_$[_$.length - 1]"  # Top of location stack
-        else
-          "_$[_$.length - 1 - #{stackOffset}]"  # Offset from top
-
-      # Generate case statement
       """
       case #{i}: // #{rule.lhs} → #{rule.rhs.join(' ')}
         var $0 = $$.length - 1;
         #{action}
-        break;
-      """
+        break;"""
 
-    """
-    performAction: function(yytext, yyleng, yylineno, yy, yystate, $$, _$) {
+    """performAction: function(yytext, yyleng, yylineno, yy, yystate, $$, _$) {
       switch (yystate) {#{actionCases.join('')}
       }
-    }
-    """
+    }"""
+
+  # Transform action code (standard version)
+  transformAction: (action, rule) ->
+    # Handle the special case where CoffeeScript grammar uses @1 and $1 in empty productions
+    # These need to be replaced with default values FIRST, before any other processing
+    if rule.rhs.length == 0
+      # For empty productions, @1 and $1 should use default values
+      action = action.replace /@1/g, '{ first_line: 1, first_column: 0, last_line: 1, last_column: 0 }'
+      action = action.replace /\$1/g, 'null'
+
+    # Replace @$ with this.$
+    action = action.replace /@\$/g, 'this.$'
+
+    # Replace $$ with this.$
+    action = action.replace /\$\$/g, 'this.$'
+
+    # Replace positional parameters
+    action = action.replace /\$(\d+)/g, (match, n) =>
+      paramNum = parseInt(n, 10)
+      if paramNum < 1 or paramNum > rule.rhs.length
+        console.warn "Warning: Parameter $#{paramNum} out of range for rule: #{rule.lhs} → #{rule.rhs.join(' ')}"
+        return match
+
+      stackOffset = rule.rhs.length - paramNum
+      if stackOffset == 0 then "$$[$0]" else "$$[$0-#{stackOffset}]"
+
+    # Replace location references
+    action = action.replace /@(\d+)/g, (match, n) =>
+      paramNum = parseInt(n, 10)
+      if paramNum < 1 or paramNum > rule.rhs.length
+        return match
+
+      stackOffset = rule.rhs.length - paramNum
+      if stackOffset == 0
+        "_$[_$.length - 1]"
+      else
+        "_$[_$.length - 1 - #{stackOffset}]"
+
+    action
 
   # Convert table to format expected by parser
   prepareTable: ->
@@ -1959,16 +1977,6 @@ class Generator
               stateTable[symbolId] = action
       table.push stateTable
     table
-
-  # Prepare rules array for parser
-  prepareRules: ->
-    rulesArray = [0, 0] # seed with zeroes
-    # two elements are nonterminal_id and handle_length
-    for rule in @rules
-      nonterminalId = @symbols.get(rule.lhs)?.id || 0
-      handleLength = rule.rhs.length
-      rulesArray.push nonterminalId, handleLength
-    rulesArray
 
   # Prepare symbols object
   prepareSymbols: ->
@@ -1996,23 +2004,24 @@ class Generator
     if options.highPerformance
       return @generateOptimizedCommonJS(options)
 
-    # Check if source maps are requested
+    # Initialize source map tracking if requested
     if options.sourceMap
-      return @generateWithSourceMap(options)
+      @sourceMapTracker = new SourceMapTracker(options)
 
-    # Prepare data structures
+    # Prepare data structures (with optional source map tracking)
     table   = @prepareOptimizedTable()
-    rules   = @prepareRules()
+    rules   = @prepareRules(options.sourceMap)
     symbols = @prepareSymbols()
     tokens  = @prepareTokens()
 
-    # Get semantic actions from grammar
-    performAction = options.performAction || @buildPerformAction()
+    # Get semantic actions from grammar (with optional source map tracking)
+    performAction = options.performAction || @buildPerformAction(options.sourceMap)
 
     # Generate console overrides if needed
     consoleOverrides = @generateConsoleOverrides(options)
 
-    """
+    # Generate the main parser code
+    parserCode = """
 /* Generated by rip-parser 1.0.0 */
 
 const parser = (() => {
@@ -2037,204 +2046,77 @@ const parser = (() => {
       }
     },
 
-    attemptErrorRecovery(errStr, hash, stack, vstack, lstack, symbol, lex, unlex) {
-      // Error recovery strategies:
-      // 1. Look for error productions in current state
-      // 2. Panic mode: pop stack until we find a state that can handle 'error'
-      // 3. Skip tokens until we find a synchronizing token
-
-      const TERROR = 2;
-      const errorSymbol = TERROR;
-
-      // Strategy 1: Check if current state has an error production
-      let state = stack[stack.length - 1];
-      if (this.table[state] && this.table[state][errorSymbol]) {
-        // Shift the error token
-        stack.push(errorSymbol);
-        vstack.push(hash);
-        lstack.push(hash.loc || {});
-        stack.push(this.table[state][errorSymbol][1]);
-        return true; // Recovery successful
-      }
-
-      // Strategy 2: Panic mode - pop stack until we find a state with error production
-      let popCount = 0;
-      const maxPops = Math.min(stack.length / 2, 10); // Limit stack unwinding
-
-      while (popCount < maxPops && stack.length > 2) {
-        // Pop one symbol from stack
-        stack.pop(); // state
-        stack.pop(); // symbol
-        vstack.pop();
-        lstack.pop();
-        popCount++;
-
-        state = stack[stack.length - 1];
-        if (this.table[state] && this.table[state][errorSymbol]) {
-          // Found a state that can handle error
-          stack.push(errorSymbol);
-          vstack.push(hash);
-          lstack.push(hash.loc || {});
-          stack.push(this.table[state][errorSymbol][1]);
-
-          // Skip tokens until we find a synchronizing token
-          this.skipToSynchronizingToken(lex, unlex, hash.expected || []);
-          return true; // Recovery successful
-        }
-      }
-
-      // Strategy 3: If we can't find error production, try simple token skipping
-      if (this.skipToSynchronizingToken(lex, unlex, hash.expected || [])) {
-        return false; // Let caller decide what to do
-      }
-
-      return false; // Recovery failed
-    },
-
-    skipToSynchronizingToken(lex, unlex, expected) {
-      // Common synchronizing tokens (customize based on language)
-      const syncTokens = new Set([
-        ';', '}', ')', ']', 'EOF', 'NEWLINE', 'INDENT', 'OUTDENT'
-      ]);
-
-      // Also consider expected tokens as potential sync points
-      for (const exp of expected) {
-        if (exp && typeof exp === 'string') {
-          syncTokens.add(exp.replace(/'/g, '')); // Remove quotes
-        }
-      }
-
-      let skipped = 0;
-      const maxSkip = 20; // Prevent infinite loops
-
-      while (skipped < maxSkip) {
-        const token = lex();
-        if (!token || token === 1) { // EOF
-          return false;
-        }
-
-        const tokenName = this.terminals_[token] || token;
-        if (syncTokens.has(tokenName)) {
-          // Found a synchronizing token, put it back for normal processing
-          unlex(token);
-          return true;
-        }
-
-        skipped++;
-      }
-
-      return false; // Couldn't find sync token
-    },
-
     parse(input) {
       const self = this;
-      let stack = [0];
-      let vstack = [null];
-      let lstack = [];
+      const stack = [0];
+      const vstack = [null];
+      const lstack = [{
+        first_line: 1,
+        first_column: 0,
+        last_line: 1,
+        last_column: 0
+      }];
+      const table = self.table;
+      const productions = self.productions_;
+      const symbols = self.symbols_;
+      const EOF = 1;
       let yytext = '';
-      let yylineno = 0;
       let yyleng = 0;
-      let recovering = 0;
-      let TERROR = 2;
-      let EOF = 1;
+      let yylineno = 1;
+      let yy = self.yy;
+      let yyval = {};
+      let lexer = input.lexer || input;
+      let symbol = null;
+      let action = null;
+      let preErrorSymbol = null;
 
-      const args = [].slice.call(arguments, 1);
+      if (typeof lexer.setInput === 'function') {
+        lexer.setInput(input.input || input);
+      }
 
-      // The generated parser doesn't have a lexer, it's provided externally
-      const lexer = Object.assign({}, this.lexer, this.yy.lexer);
-      const sharedState = { yy: {} };
-
-      // Copy state
-      for (const k in this.yy) {
-        if (Object.prototype.hasOwnProperty.call(this.yy, k)) {
-          sharedState.yy[k] = this.yy[k];
+      function lex() {
+        let token = lexer.lex() || EOF;
+        if (typeof token !== 'number') {
+          if (token === '') {
+            token = EOF;
+          } else {
+            token = symbols[token] || token;
+          }
         }
+        return token;
       }
-
-      lexer.setInput(input, sharedState.yy);
-      sharedState.yy.lexer = lexer;
-      sharedState.yy.parser = this;
-
-      if (typeof lexer.yylloc === 'undefined') {
-        lexer.yylloc = {};
-      }
-      let yyloc = lexer.yylloc;
-      lstack.push(yyloc);
-
-      const ranges = lexer.options && lexer.options.ranges;
-
-      if (typeof sharedState.yy.parseError === 'function') {
-        this.parseError = sharedState.yy.parseError;
-      } else {
-        this.parseError = Object.getPrototypeOf(this).parseError;
-      }
-
-      let symbol, preErrorSymbol, state, action, r, yyval = {}, p, len, newState, expected;
-      let tokenBuffer = []; // Buffer for putting back tokens during error recovery
 
       while (true) {
-        // Retrieve state from top of stack
-        state = stack[stack.length - 1];
+        const state = stack[stack.length - 1];
 
-        // Use default action if available
         if (this.defaultActions[state]) {
           action = this.defaultActions[state];
         } else {
-          if (symbol === null || symbol === undefined) {
+          if (symbol === null) {
             symbol = lex();
           }
-          // Get action from table
-          action = this.table[state] && this.table[state][symbol];
+          action = table[state] && table[state][symbol];
         }
 
-        // Handle parsing error
-        if (typeof action === 'undefined' || !action.length || !action[0]) {
-          let errStr = '';
-
-          // Collect expected tokens
-          expected = [];
-          for (p in this.table[state]) {
-            if (this.terminals_[p] && p > TERROR) {
-              expected.push("'" + this.terminals_[p] + "'");
+        if (!action || !action.length) {
+          if (!preErrorSymbol) {
+            const expected = [];
+            for (const p in table[state]) {
+              if (this.terminals_[p] && p > 2) {
+                expected.push("'" + this.terminals_[p] + "'");
+              }
             }
+            const errStr = 'Parse error on line ' + (yylineno + 1) + ":\\n" + lexer.showPosition() + "\\nExpecting " + expected.join(', ') + ", got '" + (this.terminals_[symbol] || symbol) + "'";
+            this.parseError(errStr, {
+              text: lexer.match,
+              token: this.terminals_[symbol] || symbol,
+              line: lexer.yylineno,
+              loc: lexer.yylloc,
+              expected: expected,
+              recoverable: false
+            });
           }
-
-          if (lexer.showPosition) {
-            errStr = 'Parse error on line ' + (yylineno + 1) + ":\\n" + lexer.showPosition() + "\\nExpecting " + expected.join(', ') + ", got '" + (this.terminals_[symbol] || symbol) + "'";
-          } else {
-            errStr = 'Parse error on line ' + (yylineno + 1) + ": Unexpected " +
-                     (symbol == EOF ? "end of input" :
-                      ("'" + (this.terminals_[symbol] || symbol) + "'"));
-          }
-
-          // Try error recovery
-          if (this.attemptErrorRecovery(errStr, {
-            text: lexer.match,
-            token: this.terminals_[symbol] || symbol,
-            line: lexer.yylineno,
-            loc: yyloc,
-            expected: expected,
-            recoverable: true
-          }, stack, vstack, lstack, symbol, lex, unlex)) {
-            // Recovery successful, continue parsing
-            recovering = 3; // Set recovery mode for next few tokens
-            symbol = null; // Force getting next token
-            continue;
-          }
-
-          // Recovery failed, call parseError
-          this.parseError(errStr, {
-            text: lexer.match,
-            token: this.terminals_[symbol] || symbol,
-            line: lexer.yylineno,
-            loc: yyloc,
-            expected: expected
-          });
-        }
-
-        // Execute action
-        if (action[0] instanceof Array && action.length > 1) {
-          throw new Error('Parse Error: multiple actions possible at state: ' + state + ', token: ' + symbol);
+          return false;
         }
 
         switch (action[0]) {
@@ -2248,9 +2130,8 @@ const parser = (() => {
               yyleng = lexer.yyleng;
               yytext = lexer.yytext;
               yylineno = lexer.yylineno;
-              yyloc = lexer.yylloc;
-              if (recovering > 0) {
-                recovering--;
+              if (lexer.yylloc) {
+                lstack[lstack.length - 1] = lexer.yylloc;
               }
             } else {
               symbol = preErrorSymbol;
@@ -2259,7 +2140,7 @@ const parser = (() => {
             break;
 
           case 2: // reduce
-            len = this.productions_[action[1] * 2 + 1];
+            const len = productions[action[1]][1];
             yyval.$ = vstack[vstack.length - len];
             yyval._$ = {
               first_line: lstack[lstack.length - (len || 1)].first_line,
@@ -2267,58 +2148,25 @@ const parser = (() => {
               first_column: lstack[lstack.length - (len || 1)].first_column,
               last_column: lstack[lstack.length - 1].last_column
             };
-            if (ranges) {
-              yyval._$.range = [
-                lstack[lstack.length - (len || 1)].range[0],
-                lstack[lstack.length - 1].range[1]
-              ];
-            }
-            r = this.performAction.apply(yyval, [yytext, yyleng, yylineno, sharedState.yy, action[1], vstack, lstack].concat(args));
-
+            const r = this.performAction.call(yyval, yytext, yyleng, yylineno, yy, action[1], vstack, lstack);
             if (typeof r !== 'undefined') {
               return r;
             }
-
             if (len) {
               stack = stack.slice(0, -1 * len * 2);
               vstack = vstack.slice(0, -1 * len);
               lstack = lstack.slice(0, -1 * len);
             }
-
-            stack.push(this.productions_[action[1] * 2]);
+            stack.push(productions[action[1]][0]);
             vstack.push(yyval.$);
             lstack.push(yyval._$);
-            newState = this.table[stack[stack.length - 2]][stack[stack.length - 1]];
+            const newState = table[stack[stack.length - 2]][stack[stack.length - 1]];
             stack.push(newState);
             break;
 
           case 3: // accept
             return true;
         }
-      }
-
-      function lex() {
-        // First check if we have buffered tokens from error recovery
-        if (tokenBuffer.length > 0) {
-          return tokenBuffer.shift();
-        }
-
-        let token = lexer.lex() || EOF;
-        // Convert string tokens to numeric IDs
-        if (typeof token !== 'number') {
-          // Handle CoffeeScript's empty string as EOF
-          if (token === '') {
-            token = EOF;
-          } else {
-            token = self.symbols_[token] || token;
-          }
-        }
-        return token;
-      }
-
-      // Function to put a token back for later consumption
-      function unlex(token) {
-        tokenBuffer.unshift(token);
       }
     }
   };
@@ -2353,6 +2201,28 @@ if (typeof require !== 'undefined' && typeof module !== 'undefined') {
   }
 }
     """
+
+    # Handle source map generation if requested
+    if options.sourceMap
+      sourceMap = @sourceMapTracker.generateSourceMap()
+
+      if options.sourceMap == 'inline'
+        # Inline source map
+        sourceMapBase64 = Buffer.from(JSON.stringify(sourceMap)).toString('base64')
+        parserCode + "\n//# sourceMappingURL=data:application/json;base64,#{sourceMapBase64}"
+      else if options.sourceMap == 'external'
+        # External source map file
+        sourceMapFile = options.sourceMapFile || 'parser.js.map'
+        parserCode + "\n//# sourceMappingURL=#{sourceMapFile}"
+      else
+        # Return both parser and source map
+        {
+          code: parserCode
+          map: sourceMap
+          mapFile: options.sourceMapFile || 'parser.js.map'
+        }
+    else
+      parserCode
 
   # ============================================================================
   # High-Performance Parser Generation (Bug #21 Fix)
@@ -3898,40 +3768,225 @@ graph LR
     if options.highPerformance
       return @generateOptimizedCommonJS(options)
 
-    # Check if source maps are requested
+    # Initialize source map tracking if requested
     if options.sourceMap
-      return @generateWithSourceMap(options)
+      @sourceMapTracker = new SourceMapTracker(options)
 
-    # Prepare data structures
+    # Prepare data structures (with optional source map tracking)
     table   = @prepareOptimizedTable()
-    rules   = @prepareRulesWithSourceMap()
+    rules   = @prepareRules(options.sourceMap)
     symbols = @prepareSymbols()
     tokens  = @prepareTokens()
 
-    # Build performAction with source map support
-    performAction = @buildPerformActionWithSourceMap()
+    # Get semantic actions from grammar (with optional source map tracking)
+    performAction = options.performAction || @buildPerformAction(options.sourceMap)
 
-    # Generate the parser code with embedded source map information
-    parserCode = @generateParserCodeWithSourceMap(table, rules, symbols, tokens, performAction)
+    # Generate console overrides if needed
+    consoleOverrides = @generateConsoleOverrides(options)
 
-    # Generate the source map
-    sourceMap = @sourceMapTracker?.generateSourceMap()
+    # Generate the main parser code
+    parserCode = """
+/* Generated by rip-parser 1.0.0 */
 
-    if options.sourceMap == 'inline'
-      # Inline source map
-      sourceMapBase64 = Buffer.from(JSON.stringify(sourceMap)).toString('base64')
-      parserCode + "\n//# sourceMappingURL=data:application/json;base64,#{sourceMapBase64}"
-    else if options.sourceMap == 'external'
-      # External source map file
-      sourceMapFile = options.sourceMapFile || 'parser.js.map'
-      parserCode + "\n//# sourceMappingURL=#{sourceMapFile}"
-    else
-      # Return both parser and source map
-      {
-        code: parserCode
-        map: sourceMap
-        mapFile: options.sourceMapFile || 'parser.js.map'
+const parser = (() => {
+#{consoleOverrides}
+  const parser = {
+    trace: () => { },
+    yy: { },
+    symbols_: #{ JSON.stringify(symbols) },
+    terminals_: #{ @jsonStringifyWithNumericKeys(tokens) },
+    productions_: #{ JSON.stringify(rules) },
+    #{performAction},
+    table: #{ @jsonStringifyWithNumericKeys(table) },
+    defaultActions: #{ JSON.stringify(@defaultActions) },
+
+    parseError(str, hash) {
+      if (hash.recoverable) {
+        this.trace(str);
+      } else {
+        const err = new Error(str);
+        err.hash = hash;
+        throw err;
       }
+    },
+
+    parse(input) {
+      const self = this;
+      const stack = [0];
+      const vstack = [null];
+      const lstack = [{
+        first_line: 1,
+        first_column: 0,
+        last_line: 1,
+        last_column: 0
+      }];
+      const table = self.table;
+      const productions = self.productions_;
+      const symbols = self.symbols_;
+      const EOF = 1;
+      let yytext = '';
+      let yyleng = 0;
+      let yylineno = 1;
+      let yy = self.yy;
+      let yyval = {};
+      let lexer = input.lexer || input;
+      let symbol = null;
+      let action = null;
+      let preErrorSymbol = null;
+
+      if (typeof lexer.setInput === 'function') {
+        lexer.setInput(input.input || input);
+      }
+
+      function lex() {
+        let token = lexer.lex() || EOF;
+        if (typeof token !== 'number') {
+          if (token === '') {
+            token = EOF;
+          } else {
+            token = symbols[token] || token;
+          }
+        }
+        return token;
+      }
+
+      while (true) {
+        const state = stack[stack.length - 1];
+
+        if (this.defaultActions[state]) {
+          action = this.defaultActions[state];
+        } else {
+          if (symbol === null) {
+            symbol = lex();
+          }
+          action = table[state] && table[state][symbol];
+        }
+
+        if (!action || !action.length) {
+          if (!preErrorSymbol) {
+            const expected = [];
+            for (const p in table[state]) {
+              if (this.terminals_[p] && p > 2) {
+                expected.push("'" + this.terminals_[p] + "'");
+              }
+            }
+            const errStr = 'Parse error on line ' + (yylineno + 1) + ":\\n" + lexer.showPosition() + "\\nExpecting " + expected.join(', ') + ", got '" + (this.terminals_[symbol] || symbol) + "'";
+            this.parseError(errStr, {
+              text: lexer.match,
+              token: this.terminals_[symbol] || symbol,
+              line: lexer.yylineno,
+              loc: lexer.yylloc,
+              expected: expected,
+              recoverable: false
+            });
+          }
+          return false;
+        }
+
+        switch (action[0]) {
+          case 1: // shift
+            stack.push(symbol);
+            vstack.push(lexer.yytext);
+            lstack.push(lexer.yylloc);
+            stack.push(action[1]);
+            symbol = null;
+            if (!preErrorSymbol) {
+              yyleng = lexer.yyleng;
+              yytext = lexer.yytext;
+              yylineno = lexer.yylineno;
+              if (lexer.yylloc) {
+                lstack[lstack.length - 1] = lexer.yylloc;
+              }
+            } else {
+              symbol = preErrorSymbol;
+              preErrorSymbol = null;
+            }
+            break;
+
+          case 2: // reduce
+            const len = productions[action[1]][1];
+            yyval.$ = vstack[vstack.length - len];
+            yyval._$ = {
+              first_line: lstack[lstack.length - (len || 1)].first_line,
+              last_line: lstack[lstack.length - 1].last_line,
+              first_column: lstack[lstack.length - (len || 1)].first_column,
+              last_column: lstack[lstack.length - 1].last_column
+            };
+            const r = this.performAction.call(yyval, yytext, yyleng, yylineno, yy, action[1], vstack, lstack);
+            if (typeof r !== 'undefined') {
+              return r;
+            }
+            if (len) {
+              stack = stack.slice(0, -1 * len * 2);
+              vstack = vstack.slice(0, -1 * len);
+              lstack = lstack.slice(0, -1 * len);
+            }
+            stack.push(productions[action[1]][0]);
+            vstack.push(yyval.$);
+            lstack.push(yyval._$);
+            const newState = table[stack[stack.length - 2]][stack[stack.length - 1]];
+            stack.push(newState);
+            break;
+
+          case 3: // accept
+            return true;
+        }
+      }
+    }
+  };
+
+  // Export parser and Parser class
+  parser.Parser = parser.Parser || function Parser() { this.yy = {}; };
+  parser.Parser.prototype = parser;
+  parser.parse = parser.parse;
+  return parser;
+})();
+
+// CommonJS module export
+if (typeof require !== 'undefined' && typeof module !== 'undefined') {
+  module.exports = {
+    parser,
+    Parser: parser.Parser,
+    parse: (...args) => parser.parse(...args),
+    main(args = process.argv.slice(1)) {
+      const [prog, file] = args;
+      if (!file) {
+        console.error(`Usage: ${prog} FILE`);
+        process.exit(1);
+      }
+      const fs = require('fs');
+      const path = require('path');
+      const source = fs.readFileSync(path.resolve(file), 'utf8');
+      return parser.parse(source);
+    }
+  };
+  if (require.main === module) {
+    module.exports.main();
+  }
+}
+    """
+
+    # Handle source map generation if requested
+    if options.sourceMap
+      sourceMap = @sourceMapTracker.generateSourceMap()
+
+      if options.sourceMap == 'inline'
+        # Inline source map
+        sourceMapBase64 = Buffer.from(JSON.stringify(sourceMap)).toString('base64')
+        parserCode + "\n//# sourceMappingURL=data:application/json;base64,#{sourceMapBase64}"
+      else if options.sourceMap == 'external'
+        # External source map file
+        sourceMapFile = options.sourceMapFile || 'parser.js.map'
+        parserCode + "\n//# sourceMappingURL=#{sourceMapFile}"
+      else
+        # Return both parser and source map
+        {
+          code: parserCode
+          map: sourceMap
+          mapFile: options.sourceMapFile || 'parser.js.map'
+        }
+    else
+      parserCode
 
   # Source Map Tracker class for managing mappings
   class SourceMapTracker
@@ -4039,345 +4094,10 @@ graph LR
     # Base64 characters for VLQ encoding
     base64Chars: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 
-  # Prepare rules with source map information
-  prepareRulesWithSourceMap: ->
-    rules = []
-    for rule, i in @rules
-      # Track original grammar location if available
-      originalLocation = @getOriginalRuleLocation(rule)
 
-      ruleData = [rule.lhs, rule.rhs.length]
-      rules.push(ruleData)
-
-      # Add source mapping for this rule
-      if originalLocation
-        @sourceMapTracker.addMapping(
-          { line: @getCurrentGeneratedLine(), column: 0 },
-          originalLocation,
-          0,
-          rule.lhs
-        )
-
-    rules
-
-  # Build performAction with source map support
-  buildPerformActionWithSourceMap: ->
-    actions = []
-
-    for rule, i in @rules
-      action = rule.action || 'this.$ = $$[$0];'
-      originalLocation = @getOriginalActionLocation(rule)
-
-      # Convert action to string if it's a function
-      if typeof action is 'function'
-        action = action.toString()
-        match = action.match(/^(?:function\s*\([^)]*\)|[^=]+=>)\s*\{?\s*([\s\S]*?)\s*\}?\s*$/)
-        if match
-          action = match[1]
-        else
-          match = action.match(/^[^>]+>\s*(.*)$/)
-          action = if match then match[1] else action
-
-      # Replace action code patterns with source map support
-      action = @transformActionWithSourceMap(action, rule, originalLocation)
-
-      # Add case with source map annotation
-      @sourceMapTracker.addMapping(
-        { line: @getCurrentGeneratedLine(), column: 6 },
-        originalLocation,
-        0,
-        "case_#{i}"
-      ) if originalLocation
-
-      actions.push "      case #{i}: // #{rule.lhs} → #{rule.rhs.join(' ')}"
-      actions.push "        var $0 = $$.length - 1;"
-      actions.push "        #{action}"
-      actions.push "        break;"
-
-    """performAction: function(yytext, yyleng, yylineno, yy, yystate, $$, _$) {
-      switch (yystate) {
-#{actions.join('\n')}
-      }
-    }"""
-
-  # Transform action code with source map information
-  transformActionWithSourceMap: (action, rule, originalLocation) ->
-    # Replace @$ with this.$
-    action = action.replace /@\$/g, 'this.$'
-
-    # Replace $$ with this.$
-    action = action.replace /\$\$/g, 'this.$'
-
-    # Replace positional parameters with source map annotations
-    action = action.replace /\$(\d+)/g, (match, n) =>
-      paramNum = parseInt(n, 10)
-      if paramNum < 1 or paramNum > rule.rhs.length
-        console.warn "Warning: Parameter $#{paramNum} out of range for rule: #{rule.lhs} → #{rule.rhs.join(' ')}"
-        return match
-
-      stackOffset = rule.rhs.length - paramNum
-      stackRef = if stackOffset == 0 then "$$[$0]" else "$$[$0-#{stackOffset}]"
-
-      # Add source map annotation for parameter access
-      if originalLocation
-        @sourceMapTracker.addMapping(
-          { line: @getCurrentGeneratedLine(), column: 0 },
-          { line: originalLocation.line, column: originalLocation.column + match.index || 0 },
-          0,
-          "$#{paramNum}"
-        )
-
-      stackRef
-
-    # Replace location references
-    action = action.replace /@(\d+)/g, (match, n) =>
-      paramNum = parseInt(n, 10)
-      if paramNum < 1 or paramNum > rule.rhs.length
-        return match
-
-      stackOffset = rule.rhs.length - paramNum
-      if stackOffset == 0
-        "_$[_$.length - 1]"
-      else
-        "_$[_$.length - 1 - #{stackOffset}]"
-
-    action
-
-  # Generate parser code with source map support
-  generateParserCodeWithSourceMap: (table, rules, symbols, tokens, performAction) ->
-    @currentGeneratedLine = 1
-
-    """/* Generated by rip-parser 1.0.0 with source maps */
-
-const parser = (() => {
-  const parser = {
-    trace: () => { },
-    yy: { },
-    symbols_: #{JSON.stringify(symbols)},
-    terminals_: #{@jsonStringifyWithNumericKeys(tokens)},
-    productions_: #{JSON.stringify(rules)},
-    #{performAction},
-    table: #{@jsonStringifyWithNumericKeys(table)},
-    defaultActions: #{JSON.stringify(@defaultActions)},
-
-    parseError(str, hash) {
-      if (hash.recoverable) {
-        this.trace(str);
-      } else {
-        const err = new Error(str);
-        err.hash = hash;
-        throw err;
-      }
-    },
-
-    parse(input) {
-      const self = this;
-      let stack = [0];
-      let vstack = [null];
-      let lstack = [];
-      let yytext = '';
-      let yylineno = 0;
-      let yyleng = 0;
-      let recovering = 0;
-      let TERROR = 2;
-      let EOF = 1;
-
-      const args = [].slice.call(arguments, 1);
-      const lexer = Object.assign({}, this.lexer, this.yy.lexer);
-      const sharedState = { yy: {} };
-
-      for (const k in this.yy) {
-        if (Object.prototype.hasOwnProperty.call(this.yy, k)) {
-          sharedState.yy[k] = this.yy[k];
-        }
-      }
-
-      lexer.setInput(input, sharedState.yy);
-      sharedState.yy.lexer = lexer;
-      sharedState.yy.parser = this;
-
-      if (typeof lexer.yylloc === 'undefined') {
-        lexer.yylloc = {};
-      }
-      let yyloc = lexer.yylloc;
-      lstack.push(yyloc);
-
-      const ranges = lexer.options && lexer.options.ranges;
-
-      if (typeof sharedState.yy.parseError === 'function') {
-        this.parseError = sharedState.yy.parseError;
-      } else {
-        this.parseError = Object.getPrototypeOf(this).parseError;
-      }
-
-      let symbol, preErrorSymbol, state, action, r, yyval = {}, p, len, newState, expected;
-
-      while (true) {
-        state = stack[stack.length - 1];
-
-        if (this.defaultActions[state]) {
-          action = this.defaultActions[state];
-        } else {
-          if (symbol === null || symbol === undefined) {
-            symbol = lex();
-          }
-          action = this.table[state] && this.table[state][symbol];
-        }
-
-        if (typeof action === 'undefined' || !action.length || !action[0]) {
-          let errStr = '';
-          expected = [];
-          for (p in this.table[state]) {
-            if (this.terminals_[p] && p > TERROR) {
-              expected.push("'" + this.terminals_[p] + "'");
-            }
-          }
-
-          if (lexer.showPosition) {
-            errStr = 'Parse error on line ' + (yylineno + 1) + ":\\n" + lexer.showPosition() + "\\nExpecting " + expected.join(', ') + ", got '" + (this.terminals_[symbol] || symbol) + "'";
-          } else {
-            errStr = 'Parse error on line ' + (yylineno + 1) + ": Unexpected " +
-                     (symbol == EOF ? "end of input" :
-                      ("'" + (this.terminals_[symbol] || symbol) + "'"));
-          }
-
-          this.parseError(errStr, {
-            text: lexer.match,
-            token: this.terminals_[symbol] || symbol,
-            line: lexer.yylineno,
-            loc: yyloc,
-            expected: expected
-          });
-        }
-
-        if (action[0] instanceof Array && action.length > 1) {
-          throw new Error('Parse Error: multiple actions possible at state: ' + state + ', token: ' + symbol);
-        }
-
-        switch (action[0]) {
-          case 1: // shift
-            stack.push(symbol);
-            vstack.push(lexer.yytext);
-            lstack.push(lexer.yylloc);
-            stack.push(action[1]);
-            symbol = null;
-            if (!preErrorSymbol) {
-              yyleng = lexer.yyleng;
-              yytext = lexer.yytext;
-              yylineno = lexer.yylineno;
-              yyloc = lexer.yylloc;
-              if (recovering > 0) {
-                recovering--;
-              }
-            } else {
-              symbol = preErrorSymbol;
-              preErrorSymbol = null;
-            }
-            break;
-
-          case 2: // reduce
-            len = this.productions_[action[1] * 2 + 1];
-            yyval.$ = vstack[vstack.length - len];
-            yyval._$ = {
-              first_line: lstack[lstack.length - (len || 1)].first_line,
-              last_line: lstack[lstack.length - 1].last_line,
-              first_column: lstack[lstack.length - (len || 1)].first_column,
-              last_column: lstack[lstack.length - 1].last_column
-            };
-            if (ranges) {
-              yyval._$.range = [
-                lstack[lstack.length - (len || 1)].range[0],
-                lstack[lstack.length - 1].range[1]
-              ];
-            }
-            r = this.performAction.apply(yyval, [yytext, yyleng, yylineno, sharedState.yy, action[1], vstack, lstack].concat(args));
-
-            if (typeof r !== 'undefined') {
-              return r;
-            }
-
-            if (len) {
-              stack = stack.slice(0, -1 * len * 2);
-              vstack = vstack.slice(0, -1 * len);
-              lstack = lstack.slice(0, -1 * len);
-            }
-
-            stack.push(this.productions_[action[1] * 2]);
-            vstack.push(yyval.$);
-            lstack.push(yyval._$);
-            newState = this.table[stack[stack.length - 2]][stack[stack.length - 1]];
-            stack.push(newState);
-            break;
-
-          case 3: // accept
-            return true;
-        }
-      }
-
-      function lex() {
-        let token = lexer.lex() || EOF;
-        if (typeof token !== 'number') {
-          if (token === '') {
-            token = EOF;
-          } else {
-            token = self.symbols_[token] || token;
-          }
-        }
-        return token;
-      }
-    }
-  };
-
-  parser.Parser = parser.Parser || function Parser() { this.yy = {}; };
-  parser.Parser.prototype = parser;
-  parser.parse = parser.parse;
-  return parser;
-})();
-
-if (typeof require !== 'undefined' && typeof module !== 'undefined') {
-  module.exports = {
-    parser,
-    Parser: parser.Parser,
-    parse: (...args) => parser.parse(...args)
-  };
-}
-    """
 
   # Generate parser with source maps
-  generateWithSourceMap: (options = {}) ->
-    # Initialize source map tracking
-    @sourceMapTracker = new SourceMapTracker(options)
 
-    # Prepare data structures with source tracking
-    table = @prepareOptimizedTable()
-    rules = @prepareRulesWithSourceMap()
-    symbols = @prepareSymbols()
-    tokens = @prepareTokens()
-
-    # Build performAction with source map support
-    performAction = @buildPerformActionWithSourceMap()
-
-    # Generate the parser code with embedded source map information
-    parserCode = @generateParserCodeWithSourceMap(table, rules, symbols, tokens, performAction)
-
-    # Generate the source map
-    sourceMap = @sourceMapTracker?.generateSourceMap()
-
-    if options.sourceMap == 'inline'
-      # Inline source map
-      sourceMapBase64 = Buffer.from(JSON.stringify(sourceMap)).toString('base64')
-      parserCode + "\n//# sourceMappingURL=data:application/json;base64,#{sourceMapBase64}"
-    else if options.sourceMap == 'external'
-      # External source map file
-      sourceMapFile = options.sourceMapFile || 'parser.js.map'
-      parserCode + "\n//# sourceMappingURL=#{sourceMapFile}"
-    else
-      # Return both parser and source map
-      {
-        code: parserCode
-        map: sourceMap
-        mapFile: options.sourceMapFile || 'parser.js.map'
-      }
 
   # Source Map Tracker class for managing mappings
   class SourceMapTracker
@@ -4484,107 +4204,7 @@ if (typeof require !== 'undefined' && typeof module !== 'undefined') {
     # Base64 characters for VLQ encoding
     base64Chars: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 
-  # Prepare rules with source map information
-  prepareRulesWithSourceMap: ->
-    rules = []
-    for rule, i in @rules
-      # Track original grammar location if available
-      originalLocation = @getOriginalRuleLocation(rule)
 
-      ruleData = [rule.lhs, rule.rhs.length]
-      rules.push(ruleData)
-
-      # Add source mapping for this rule
-      if originalLocation
-        @sourceMapTracker.addMapping(
-          { line: @getCurrentGeneratedLine(), column: 0 },
-          originalLocation,
-          0,
-          rule.lhs
-        )
-
-    rules
-
-  # Build performAction with source map support
-  buildPerformActionWithSourceMap: ->
-    actionCases = for rule, i in @rules
-      action = rule.action || 'this.$ = $$[$0];'
-      originalLocation = @getOriginalActionLocation(rule)
-
-      # Convert action to string if it's a function
-      if typeof action is 'function'
-        action = action.toString()
-        match = action.match(/^(?:function\s*\([^)]*\)|[^=]+=>)\s*\{?\s*([\s\S]*?)\s*\}?\s*$/)
-        if match
-          action = match[1]
-        else
-          match = action.match(/^[^>]+>\s*(.*)$/)
-          action = if match then match[1] else action
-
-      # Replace action code patterns with source map support
-      action = @transformActionWithSourceMap(action, rule, originalLocation)
-
-      # Add case with source map annotation
-      @sourceMapTracker.addMapping(
-        { line: @getCurrentGeneratedLine(), column: 6 },
-        originalLocation,
-        0,
-        "case_#{i}"
-      ) if originalLocation
-
-      """
-      case #{i}: // #{rule.lhs} → #{rule.rhs.join(' ')}
-        var $0 = $$.length - 1;
-        #{action}
-        break;"""
-
-    """performAction: function(yytext, yyleng, yylineno, yy, yystate, $$, _$) {
-      switch (yystate) {#{actionCases.join('')}
-      }
-    }"""
-
-  # Transform action code with source map information
-  transformActionWithSourceMap: (action, rule, originalLocation) ->
-    # Replace @$ with this.$
-    action = action.replace /@\$/g, 'this.$'
-
-    # Replace $$ with this.$
-    action = action.replace /\$\$/g, 'this.$'
-
-    # Replace positional parameters with source map annotations
-    action = action.replace /\$(\d+)/g, (match, n) =>
-      paramNum = parseInt(n, 10)
-      if paramNum < 1 or paramNum > rule.rhs.length
-        console.warn "Warning: Parameter $#{paramNum} out of range for rule: #{rule.lhs} → #{rule.rhs.join(' ')}"
-        return match
-
-      stackOffset = rule.rhs.length - paramNum
-      stackRef = if stackOffset == 0 then "$$[$0]" else "$$[$0-#{stackOffset}]"
-
-      # Add source map annotation for parameter access
-      if originalLocation
-        @sourceMapTracker.addMapping(
-          { line: @getCurrentGeneratedLine(), column: 0 },
-          { line: originalLocation.line, column: originalLocation.column + match.index || 0 },
-          0,
-          "$#{paramNum}"
-        )
-
-      stackRef
-
-    # Replace location references
-    action = action.replace /@(\d+)/g, (match, n) =>
-      paramNum = parseInt(n, 10)
-      if paramNum < 1 or paramNum > rule.rhs.length
-        return match
-
-      stackOffset = rule.rhs.length - paramNum
-      if stackOffset == 0
-        "_$[_$.length - 1]"
-      else
-        "_$[_$.length - 1 - #{stackOffset}]"
-
-    action
 
   # Generate parser code with source map support
   generateParserCodeWithSourceMap: (table, rules, symbols, tokens, performAction) ->
@@ -4882,6 +4502,78 @@ if (typeof require !== 'undefined' && typeof module !== 'undefined') {
 """
     else
       ""
+
+  # Transform action code with source map information
+  transformActionWithSourceMap: (action, rule, originalLocation) ->
+    # Handle the special case where CoffeeScript grammar uses @1 and $1 in empty productions
+    # These need to be replaced with default values FIRST, before any other processing
+    if rule.rhs.length == 0
+      # For empty productions, @1 and $1 should use default values
+      action = action.replace /@1/g, '{ first_line: 1, first_column: 0, last_line: 1, last_column: 0 }'
+      action = action.replace /\$1/g, 'null'
+
+    # Replace @$ with this.$
+    action = action.replace /@\$/g, 'this.$'
+
+    # Replace $$ with this.$
+    action = action.replace /\$\$/g, 'this.$'
+
+    # Replace positional parameters with source map annotations
+    action = action.replace /\$(\d+)/g, (match, n) =>
+      paramNum = parseInt(n, 10)
+      if paramNum < 1 or paramNum > rule.rhs.length
+        console.warn "Warning: Parameter $#{paramNum} out of range for rule: #{rule.lhs} → #{rule.rhs.join(' ')}"
+        return match
+
+      stackOffset = rule.rhs.length - paramNum
+      stackRef = if stackOffset == 0 then "$$[$0]" else "$$[$0-#{stackOffset}]"
+
+      # Add source map annotation for parameter access
+      if originalLocation
+        @sourceMapTracker.addMapping(
+          { line: @getCurrentGeneratedLine(), column: 0 },
+          { line: originalLocation.line, column: originalLocation.column + match.index || 0 },
+          0,
+          "$#{paramNum}"
+        )
+
+      stackRef
+
+    # Replace location references
+    action = action.replace /@(\d+)/g, (match, n) =>
+      paramNum = parseInt(n, 10)
+      if paramNum < 1 or paramNum > rule.rhs.length
+        return match
+
+      stackOffset = rule.rhs.length - paramNum
+      if stackOffset == 0
+        "_$[_$.length - 1]"
+      else
+        "_$[_$.length - 1 - #{stackOffset}]"
+
+    action
+
+  # Get original grammar location for a rule
+  getOriginalRuleLocation: (rule) ->
+    # Return location information if available
+    if rule.location
+      { line: rule.location.line, column: rule.location.column }
+    else
+      null
+
+  # Get original action location for a rule
+  getOriginalActionLocation: (rule) ->
+    # Return action location information if available
+    if rule.actionLocation
+      { line: rule.actionLocation.line, column: rule.actionLocation.column }
+    else if rule.location
+      { line: rule.location.line, column: rule.location.column }
+    else
+      null
+
+  # Get current generated line number
+  getCurrentGeneratedLine: ->
+    @currentGeneratedLine || 1
 
 # ==[ Export ]===============================================================
 
