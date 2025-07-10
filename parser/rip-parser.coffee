@@ -4,7 +4,7 @@
 # rip-parser: A modern, LALR(1) parser generator for the rip ecosystem
 #
 # Author: Steve Shreeve <steve.shreeve@gmail.com> and Claude 4 Opus
-#  Stats: July 9, 2025 (version 0.2.0) MIT License
+#  Stats: July 10, 2025 (version 0.3.0) MIT License
 # ==============================================================================
 
 class Symbol # Terminal or Nonterminal
@@ -93,6 +93,7 @@ class Generator
     @stateMap          = new Map() # core hash -> State
     @propagateLinks    = new Map() # "stateId-itemKey" -> Set of "stateId-itemKey"
     @inadequateStates  = []        # States with conflicts
+    @conflicts         = []        # Detailed conflict information
     @onDemandLookahead = opts.onDemandLookahead ? true
 
   findUnreachableSymbols: ->
@@ -911,68 +912,50 @@ class Generator
               resolved = @resolveConflict(item.rule, la)
               if resolved == 'reduce'
                 table[state.id][la] = { type: 'reduce', rule: item.rule.id }
+                # Add resolved conflict information
+                conflict = {
+                  type: 'shift/reduce'
+                  state: state.id
+                  lookahead: la
+                  shiftTo: existing.state
+                  reduceBy: item.rule
+                  resolved: true
+                  resolution: 'reduce'
+                  explanation: @explainShiftReduceConflict(state, item, existing, la, 'reduce')
+                }
+                @conflicts.push(conflict)
               else if resolved == 'shift'
                 # keep existing shift (default)
+                # Add resolved conflict information
+                conflict = {
+                  type: 'shift/reduce'
+                  state: state.id
+                  lookahead: la
+                  shiftTo: existing.state
+                  reduceBy: item.rule
+                  resolved: true
+                  resolution: 'shift'
+                  explanation: @explainShiftReduceConflict(state, item, existing, la, 'shift')
+                }
+                @conflicts.push(conflict)
               else
                 # unresolved conflict
                 conflicts.sr++
                 state.inadequate = true
                 @inadequateStates.push(state) unless @inadequateStates.includes(state)
 
-                # NOTE: This is easy to add
-                # ----
-                # # Add conflict details
-                # conflict = {
-                #   type: 'shift/reduce',
-                #   state: state.id,
-                #   lookahead: la,
-                #   shiftTo: existing.state,
-                #   reduceBy: item.rule,
-                #   explanation: @explainConflict(item, existing, la)
-                # }
-                # @conflicts.push(conflict)
-                #
-                # NOTE: It could be paired with this
-                # ----
-                # explainConflict: (reduceItem, shiftAction, lookahead) ->
-                #   """
-                #   Shift/Reduce conflict in state #{state.id}:
-                #
-                #   When seeing '#{lookahead}', the parser could either:
-                #   1. Shift to state #{shiftAction.state}
-                #   2. Reduce using: #{reduceItem.rule.lhs} → #{reduceItem.rule.rhs.join(' ')}
-                #
-                #   Example input that causes this: ...
-                #   """
-                #
-                # NOTE: Example output
-                # ----
-                # Warning: Shift/Reduce conflict in state 15:
-                #
-                # When parsing: "if (x) if (y) foo() else bar()"
-                # The 'else' could belong to either 'if'
-                #
-                # Conflict resolution: Shifting (else binds to nearest if)
-                # To fix: Use explicit braces or precedence declarations
-                #
-                # NOTE: Another example
-                # ----
-                # reportDetailedConflicts: ->
-                #   console.log "\n=== DETAILED CONFLICT ANALYSIS ==="
-                #
-                #   for conflict in @conflicts
-                #     console.log conflict.explanation
-                #
-                #     # Show the grammar rules involved
-                #     console.log "\nProductions that cause this conflict:"
-                #     for rule in @findConflictingRules(conflict)
-                #       console.log "  #{rule.lhs} → #{rule.rhs.join(' ')}"
-                #
-                #     # Suggest fixes
-                #     console.log "\nPossible solutions:"
-                #     console.log "  - Add precedence declarations"
-                #     console.log "  - Rewrite grammar to be unambiguous"
-                #     console.log "  - Accept the default resolution"
+                # Add detailed conflict information
+                conflict = {
+                  type: 'shift/reduce'
+                  state: state.id
+                  lookahead: la
+                  shiftTo: existing.state
+                  reduceBy: item.rule
+                  resolved: false
+                  resolution: 'shift' # default resolution
+                  explanation: @explainShiftReduceConflict(state, item, existing, la)
+                }
+                @conflicts.push(conflict)
 
             else
               # Reduce/reduce conflict - use first rule (earliest in grammar)
@@ -984,9 +967,25 @@ class Generator
                 existingRuleId = existing.rule || existing
 
               # Compare rule IDs and keep the earlier rule (lower ID)
+              winningRule = if item.rule.id < existingRuleId then item.rule else @rules[existingRuleId]
+              losingRule = if item.rule.id < existingRuleId then @rules[existingRuleId] else item.rule
+
               if item.rule.id < existingRuleId
                 table[state.id][la] = { type: 'reduce', rule: item.rule.id }
               # else keep the existing action (it has a lower rule ID)
+
+              # Add reduce/reduce conflict information
+              conflict = {
+                type: 'reduce/reduce'
+                state: state.id
+                lookahead: la
+                rule1: winningRule
+                rule2: losingRule
+                resolved: true
+                resolution: "rule #{winningRule.id} (first declared)"
+                explanation: @explainReduceReduceConflict(state, winningRule, losingRule, la)
+              }
+              @conflicts.push(conflict)
 
               conflicts.rr++
           else
@@ -1034,6 +1033,104 @@ class Generator
         return @precedence[symbol]
 
     null
+
+  # Explain a shift/reduce conflict in detail
+  explainShiftReduceConflict: (state, reduceItem, shiftAction, lookahead, resolution = null) ->
+    explanation = []
+    explanation.push "Shift/Reduce conflict in state #{state.id}:"
+    explanation.push ""
+    explanation.push "When seeing '#{lookahead}', the parser could either:"
+    explanation.push "  1. Shift to state #{shiftAction.state}"
+    explanation.push "  2. Reduce using: #{reduceItem.rule.lhs} → #{reduceItem.rule.rhs.join(' ')}"
+    explanation.push ""
+
+    if resolution
+      explanation.push "Resolution: #{resolution} (#{@getResolutionReason(reduceItem.rule, lookahead, resolution)})"
+    else
+      explanation.push "Resolution: shift (default - no precedence declared)"
+
+    explanation.push ""
+    explanation.push @suggestShiftReduceFixes(reduceItem.rule, lookahead)
+
+    explanation.join('\n')
+
+  # Explain a reduce/reduce conflict in detail
+  explainReduceReduceConflict: (state, rule1, rule2, lookahead) ->
+    explanation = []
+    explanation.push "Reduce/Reduce conflict in state #{state.id}:"
+    explanation.push ""
+    explanation.push "When seeing '#{lookahead}', the parser could reduce using either:"
+    explanation.push "  1. #{rule1.lhs} → #{rule1.rhs.join(' ')} (rule #{rule1.id})"
+    explanation.push "  2. #{rule2.lhs} → #{rule2.rhs.join(' ')} (rule #{rule2.id})"
+    explanation.push ""
+    explanation.push "Resolution: Using rule #{rule1.id} (first declared in grammar)"
+    explanation.push ""
+    explanation.push @suggestReduceReduceFixes(rule1, rule2, lookahead)
+
+    explanation.join('\n')
+
+  # Get the reason for conflict resolution
+  getResolutionReason: (rule, lookahead, resolution) ->
+    rulePrecedence = @getRulePrecedence(rule)
+    tokenPrecedence = @precedence[lookahead]
+
+    return "no precedence declared" unless rulePrecedence and tokenPrecedence
+
+    if rulePrecedence.level > tokenPrecedence.level
+      "rule has higher precedence"
+    else if rulePrecedence.level < tokenPrecedence.level
+      "token has higher precedence"
+    else
+      switch rulePrecedence.assoc
+        when 'left' then "left associative"
+        when 'right' then "right associative"
+        when 'nonassoc' then "non-associative"
+        else "same precedence, unknown associativity"
+
+  # Suggest fixes for shift/reduce conflicts
+  suggestShiftReduceFixes: (rule, lookahead) ->
+    fixes = []
+    fixes.push "Possible solutions:"
+
+    rulePrecedence = @getRulePrecedence(rule)
+    tokenPrecedence = @precedence[lookahead]
+
+    if not rulePrecedence and not tokenPrecedence
+      fixes.push "  - Add precedence declarations for '#{lookahead}' and rule symbols"
+      fixes.push "  - Use %left, %right, or %nonassoc to declare precedence"
+    else if not rulePrecedence
+      fixes.push "  - Add precedence declaration for rule: %prec SYMBOL"
+    else if not tokenPrecedence
+      fixes.push "  - Add precedence declaration for token '#{lookahead}'"
+    else
+      fixes.push "  - Adjust precedence levels to resolve ambiguity"
+
+    fixes.push "  - Rewrite grammar to be unambiguous"
+    fixes.push "  - Accept the default resolution (shift)"
+
+    fixes.join('\n')
+
+  # Suggest fixes for reduce/reduce conflicts
+  suggestReduceReduceFixes: (rule1, rule2, lookahead) ->
+    fixes = []
+    fixes.push "Possible solutions:"
+    fixes.push "  - Combine similar rules if they represent the same construct"
+    fixes.push "  - Add distinguishing tokens to make rules unambiguous"
+    fixes.push "  - Use semantic predicates if available"
+    fixes.push "  - Restructure grammar to eliminate ambiguity"
+    fixes.push "  - Accept the default resolution (first rule declared)"
+
+    # Check if rules have similar structure
+    if rule1.rhs.length == rule2.rhs.length
+      similarities = 0
+      for i in [0...rule1.rhs.length]
+        if rule1.rhs[i] == rule2.rhs[i]
+          similarities++
+
+      if similarities > rule1.rhs.length / 2
+        fixes.push "  - Rules appear similar - consider if they can be merged"
+
+    fixes.join('\n')
 
   computeDefaultActions: ->
     @defaultActions = {}
@@ -1097,6 +1194,9 @@ class Generator
     @propagateLookaheads()
     @table = @buildTable()
     @computeDefaultActions()
+
+    # Report conflicts if any
+    @reportConflicts() if @conflicts.length > 0
 
     # Now generate the parser code
     @generateCommonJS(options)
@@ -1617,18 +1717,91 @@ if (typeof require !== 'undefined' && typeof module !== 'undefined') {
       console.log "  #{sym.id}: #{name} (#{if sym.isTerminal then 'terminal' else 'non-terminal'})"
 
   reportConflicts: ->
-    return unless @inadequateStates.length > 0
+    return unless @conflicts.length > 0
 
-    console.log "\n=== GRAMMAR CONFLICTS ==="
-    for state in @inadequateStates
-      console.log "\nState #{state.id} has conflicts:"
+    console.log "\n=== DETAILED CONFLICT ANALYSIS ==="
+    console.log "Total conflicts: #{@conflicts.length}"
 
-      # Show the conflicting items
-      for item in state.items
-        console.log "  #{item.toString()}"
+    # Group conflicts by type
+    srConflicts = @conflicts.filter (c) -> c.type == 'shift/reduce'
+    rrConflicts = @conflicts.filter (c) -> c.type == 'reduce/reduce'
 
-      # Show the conflict details
-      # (would need to track these during table building)
+    resolvedSR = srConflicts.filter (c) -> c.resolved
+    unresolvedSR = srConflicts.filter (c) -> not c.resolved
+
+    console.log "  Shift/Reduce: #{srConflicts.length} (#{resolvedSR.length} resolved, #{unresolvedSR.length} unresolved)"
+    console.log "  Reduce/Reduce: #{rrConflicts.length} (all resolved by default)"
+    console.log ""
+
+    # Report unresolved conflicts first (most important)
+    if unresolvedSR.length > 0
+      console.log "🚨 UNRESOLVED CONFLICTS (require attention):"
+      console.log "=" * 50
+      for conflict in unresolvedSR
+        console.log conflict.explanation
+        console.log ""
+
+    # Report resolved conflicts
+    if resolvedSR.length > 0
+      console.log "✅ RESOLVED SHIFT/REDUCE CONFLICTS:"
+      console.log "=" * 40
+      for conflict in resolvedSR
+        console.log conflict.explanation
+        console.log ""
+
+    # Report reduce/reduce conflicts
+    if rrConflicts.length > 0
+      console.log "⚠️  REDUCE/REDUCE CONFLICTS:"
+      console.log "=" * 30
+      for conflict in rrConflicts
+        console.log conflict.explanation
+        console.log ""
+
+    # Summary and recommendations
+    @reportConflictSummary(unresolvedSR.length, resolvedSR.length, rrConflicts.length)
+
+  reportConflictSummary: (unresolved, resolved, reduceReduce) ->
+    console.log "📊 CONFLICT SUMMARY:"
+    console.log "=" * 20
+
+    if unresolved > 0
+      console.log "❌ #{unresolved} unresolved shift/reduce conflicts need attention"
+      console.log "   These use default shift resolution but may cause unexpected parsing"
+      console.log "   Consider adding precedence declarations or restructuring grammar"
+
+    if resolved > 0
+      console.log "✅ #{resolved} shift/reduce conflicts resolved by precedence/associativity"
+      console.log "   These are handled correctly but you may want to verify the resolution"
+
+    if reduceReduce > 0
+      console.log "⚠️  #{reduceReduce} reduce/reduce conflicts resolved by rule order"
+      console.log "   These indicate grammar ambiguity and should be fixed if possible"
+
+    if unresolved + reduceReduce == 0
+      console.log "🎉 All conflicts are properly resolved!"
+    else
+      console.log ""
+      console.log "💡 GENERAL RECOMMENDATIONS:"
+      console.log "   - Use %left, %right, %nonassoc to declare operator precedence"
+      console.log "   - Use %prec to assign precedence to specific rules"
+      console.log "   - Restructure ambiguous grammar rules when possible"
+      console.log "   - Test parser behavior with edge cases"
+
+  # Generate a conflict report for external tools
+  generateConflictReport: ->
+    report = {
+      total: @conflicts.length
+      shiftReduce: {
+        total: @conflicts.filter((c) -> c.type == 'shift/reduce').length
+        resolved: @conflicts.filter((c) -> c.type == 'shift/reduce' and c.resolved).length
+        unresolved: @conflicts.filter((c) -> c.type == 'shift/reduce' and not c.resolved).length
+      }
+      reduceReduce: {
+        total: @conflicts.filter((c) -> c.type == 'reduce/reduce').length
+      }
+      details: @conflicts
+    }
+    report
 
 # ==[ Export ]===============================================================
 
