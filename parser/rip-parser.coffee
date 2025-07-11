@@ -3383,10 +3383,10 @@ function getTableAction(state, symbol) {
 
   printStatistics: ->
     console.log "\n=== GRAMMAR STATISTICS ==="
-    console.log "Rules: #{@rules.length}"
+    console.log "Terminals: #{[...@symbols.values()].filter((s) -> s.isTerminal).length}"
+    console.log "Non-terminals: #{[...@symbols.values()].filter((s) -> !s.isTerminal).length}"
     console.log "Symbols: #{@symbols.size}"
-    console.log "  Terminals: #{[...@symbols.values()].filter((s) -> s.isTerminal).length}"
-    console.log "  Non-terminals: #{[...@symbols.values()].filter((s) -> !s.isTerminal).length}"
+    console.log "Rules: #{@rules.length}"
     console.log "States: #{@states.length}"
     console.log "Inadequate states: #{@inadequateStates.length}"
 
@@ -3801,7 +3801,12 @@ unless module.parent
         ⏱️  Generation time: #{generationTime}ms
         """
     else
-      console.log content
+      # No output file specified - skip JS output for analysis mode
+      if options.verbose
+        console.log """
+        ✨ Parser generated (#{content.length} characters) - use -o filename to save
+        ⏱️  Generation time: #{generationTime}ms
+        """
 
     # Write source map if generated
     if sourceMap and options.sourceMapFile
@@ -3845,9 +3850,9 @@ unless module.parent
     ## Parser Statistics
 
     **Grammar:**
-    - Rules: #{stats.rules}
-    - Terminals: #{stats.terminals}
     - Non-terminals: #{stats.nonterminals}
+    - Terminals: #{stats.terminals}
+    - Rules: #{stats.rules}
     - Start symbol: #{stats.startSymbol}
 
     **State Machine:**
