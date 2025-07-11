@@ -1852,7 +1852,10 @@ class Generator
     @reportPerformanceStats()
 
     # Now generate the parser code
-    @generateCommonJS(options)
+    if options.compact
+      @generateCompactCommonJS(options)
+    else
+      @generateCommonJS(options)
 
   # Prepare rules array for parser table
   prepareRules: (withSourceMap = false) ->
@@ -4008,6 +4011,390 @@ graph LR
   getCurrentGeneratedLine: ->
     @currentGeneratedLine || 1
 
+  # ============================================================================
+  # Compact Grammar Variable Generation
+  # ============================================================================
+
+  # Generate compact symbols array (symbols__ = ["$accept","$end","error",...])
+  prepareCompactSymbols: ->
+    # Create array where index = symbol ID, value = symbol name
+    symbolArray = new Array(@symbols.size)
+    for [name, symbol] from @symbols
+      symbolArray[symbol.id] = name
+    symbolArray
+
+  # Generate compact terminals array (terminals__ = [2,6,14,32,...])
+  prepareCompactTerminals: ->
+    terminalIds = []
+    for [name, symbol] from @symbols
+      if symbol.isTerminal
+        terminalIds.push(symbol.id)
+    terminalIds.sort((a, b) -> a - b)
+
+  # Generate compact productions map (productions__ = Map {3=>[0,1], 4=>[1,3,2],...})
+  prepareCompactProductions: ->
+    productionMap = new Map()
+
+    for rule in @rules
+      lhsSymbol = @symbols.get(rule.lhs)
+      continue unless lhsSymbol
+
+      lhsId = lhsSymbol.id
+      rhsLength = rule.rhs.length
+
+      unless productionMap.has(lhsId)
+        productionMap.set(lhsId, [])
+      productionMap.get(lhsId).push(rhsLength)
+
+    productionMap
+
+  # Generate compact table using nested array format
+  prepareCompactTable: ->
+    compactTable = []
+
+    for state, i in @states
+      continue unless @table[i]
+
+      # Create subarray for this state: [stateId, symbol1, action1, symbol2, action2, ...]
+      stateArray = [i]  # Start with state number
+
+      for symbol, action of @table[i]
+        symbolObj = @symbols.get(symbol)
+        continue unless symbolObj
+
+        # Add symbol ID
+        stateArray.push(symbolObj.id)
+
+        # Create bit-packed value based on action type
+        if action?.type
+          switch action.type
+            when 'shift'
+              # SHIFT: (state << 1) | 0
+              value = (action.state << 1) | 0
+            when 'reduce'
+              # REDUCE: (rule << 1) | 0 (but we'll store negative to distinguish from shift)
+              value = ((-action.rule) << 1) | 0
+            when 'accept'
+              # ACCEPT: (0 << 1) | 0
+              value = (0 << 1) | 0
+            else
+              continue
+        else
+          # GOTO: (state << 1) | 1
+          value = (action << 1) | 1
+
+        # Add action value
+        stateArray.push(value)
+
+      # Only add state if it has symbols (length > 1)
+      if stateArray.length > 1
+        compactTable.push(stateArray)
+
+    compactTable
+
+  # Generate complete compact grammar representation
+  generateCompactGrammar: ->
+    {
+      symbols: @prepareCompactSymbols()
+      terminals: @prepareCompactTerminals()
+      productions: @prepareCompactProductions()
+      table: @prepareCompactTable()
+    }
+
+    # Convert compact grammar to JavaScript code
+  generateCompactGrammarCode: ->
+    compact = @generateCompactGrammar()
+
+    # Convert Map to object for productions
+    productionObject = {}
+    for [key, value] from compact.productions
+      productionObject[key] = value
+
+    # Custom stringify for productions that removes quotes from numeric keys
+    productionsString = JSON.stringify(productionObject).replace(/"(\d+)":/g, '$1:')
+
+    """
+    // Compact grammar representation
+    const symbols__ = #{JSON.stringify(compact.symbols)};
+    const terminals__ = #{JSON.stringify(compact.terminals)};
+    const productions__ = #{productionsString};
+    const table__ = #{JSON.stringify(compact.table)};
+    """
+
+  # Generate runtime functions for compact grammar access
+  generateCompactRuntimeFunctions: ->
+    """
+    // Runtime functions for compact grammar access
+    function getSymbolId(name) {
+      return symbols__.indexOf(name);
+    }
+
+    function getSymbolName(id) {
+      return symbols__[id];
+    }
+
+    function isTerminal(symbolId) {
+      return terminals__.includes(symbolId);
+    }
+
+        function getProductions(lhsId) {
+      return productions__[lhsId] || [];
+    }
+
+        function getTableAction(state, symbol) {
+      // Find the state subarray
+      for (const stateArray of table__) {
+        if (stateArray[0] === state) {
+          // Found the state, now look for the symbol
+          for (let i = 1; i < stateArray.length; i += 2) {
+            if (stateArray[i] === symbol) {
+              const value = stateArray[i + 1];
+
+              const isGoto = value & 1;
+              const target = value >> 1;
+
+              if (isGoto === 1) {
+                // GOTO action
+                return target;
+              } else {
+                // SHIFT/REDUCE/ACCEPT action
+                if (target === 0) {
+                  return { type: 'accept' };
+                } else if (target > 0) {
+                  // Positive target = SHIFT action
+                  return { type: 'shift', state: target };
+                } else {
+                  // Negative target = REDUCE action (convert back to positive rule ID)
+                  return { type: 'reduce', rule: Math.abs(target) };
+                }
+              }
+            }
+          }
+          break; // Found state but not symbol, return null
+        }
+      }
+      return null;
+    }
+    """
+
+  # Generate complete compact CommonJS parser
+  generateCompactCommonJS: (options = {}) ->
+    # Initialize source map tracking if requested
+    if options.sourceMap
+      @sourceMapTracker = new SourceMapTracker(options)
+
+    # Generate compact grammar data
+    compactGrammarCode = @generateCompactGrammarCode()
+    compactRuntimeFunctions = @generateCompactRuntimeFunctions()
+
+    # Get semantic actions from grammar (with optional source map tracking)
+    performAction = options.performAction || @buildPerformAction(options.sourceMap)
+
+    # Generate console overrides if needed
+    consoleOverrides = @generateConsoleOverrides(options)
+
+    # Generate the compact parser code
+    """
+/* Generated by rip-parser 1.0.0 - Compact Format */
+
+const parser = (() => {
+#{consoleOverrides}
+#{compactGrammarCode}
+#{compactRuntimeFunctions}
+
+  const parser = {
+    trace: () => { },
+    yy: { },
+
+    // Legacy compatibility - convert compact format to original format on demand
+    get symbols_() {
+      const symbols = {};
+      for (let i = 0; i < symbols__.length; i++) {
+        symbols[symbols__[i]] = i;
+      }
+      return symbols;
+    },
+
+    get terminals_() {
+      const terminals = {};
+      for (const id of terminals__) {
+        terminals[id] = symbols__[id];
+      }
+      return terminals;
+    },
+
+    get productions_() {
+      const productions = [];
+      for (const lhsId in productions__) {
+        const lhsName = symbols__[lhsId];
+        const rhsLengths = productions__[lhsId];
+        for (const rhsLength of rhsLengths) {
+          productions.push([lhsName, rhsLength]);
+        }
+      }
+      return productions;
+    },
+
+    get table() {
+      const table = [];
+      for (let state = 0; state < 1000; state++) { // Reasonable upper bound
+        const row = {};
+        let hasEntries = false;
+
+        for (let symbol = 0; symbol < symbols__.length; symbol++) {
+          const action = getTableAction(state, symbol);
+          if (action !== null) {
+            row[symbol] = action;
+            hasEntries = true;
+          }
+        }
+
+        if (hasEntries) {
+          table[state] = row;
+        }
+      }
+      return table;
+    },
+
+    #{performAction},
+
+    parseError(str, hash) {
+      if (hash.recoverable) {
+        this.trace(str);
+      } else {
+        const err = new Error(str);
+        err.hash = hash;
+        throw err;
+      }
+    },
+
+    parse(input) {
+      const self = this;
+      const stack = [0];
+      const vstack = [null];
+      const lstack = [{
+        first_line: 1,
+        first_column: 0,
+        last_line: 1,
+        last_column: 0
+      }];
+      const EOF = 1;
+      let yytext = '';
+      let yyleng = 0;
+      let yylineno = 1;
+      let yy = self.yy;
+      let yyval = {};
+      let lexer = input.lexer || input;
+      let symbol = null;
+      let action = null;
+      let preErrorSymbol = null;
+
+      if (typeof lexer.setInput === 'function') {
+        lexer.setInput(input.input || input);
+      }
+
+      function lex() {
+        let token = lexer.lex() || EOF;
+        if (typeof token !== 'number') {
+          if (token === '') {
+            token = EOF;
+          } else {
+            token = getSymbolId(token) || token;
+          }
+        }
+        return token;
+      }
+
+      symbol = lex();
+
+      while (true) {
+        const state = stack[stack.length - 1];
+
+        // Use compact table lookup
+        action = getTableAction(state, symbol);
+
+        if (!action) {
+          const errStr = 'Parse error on line ' + (yylineno + 1) + ': Unexpected ' +
+            (symbol === EOF ? 'end of input' :
+             (typeof symbol === 'string' ? symbol : getSymbolName(symbol)));
+          this.parseError(errStr, {
+            text: lexer.match,
+            token: getSymbolName(symbol) || symbol,
+            line: lexer.yylineno
+          });
+        }
+
+        if (typeof action === 'number') {
+          // GOTO action
+          stack.push(symbol);
+          vstack.push(lexer.yytext);
+          lstack.push(lexer.yylloc);
+          stack.push(action);
+          symbol = lex();
+          continue;
+        }
+
+        switch (action.type) {
+          case 'shift':
+            stack.push(symbol);
+            vstack.push(lexer.yytext);
+            lstack.push(lexer.yylloc);
+            stack.push(action.state);
+            symbol = lex();
+            break;
+
+          case 'reduce':
+            const ruleId = action.rule;
+            const productions = this.productions_;
+            const len = productions[ruleId][1];
+
+            yyval.$ = vstack[vstack.length - len];
+            yyval._$ = {
+              first_line: lstack[lstack.length - (len || 1)].first_line,
+              last_line: lstack[lstack.length - 1].last_line,
+              first_column: lstack[lstack.length - (len || 1)].first_column,
+              last_column: lstack[lstack.length - 1].last_column
+            };
+
+            const r = this.performAction.call(yyval, yytext, yyleng, yylineno, yy, ruleId, vstack, lstack);
+            if (typeof r !== 'undefined') {
+              return r;
+            }
+
+            if (len) {
+              stack = stack.slice(0, -1 * len * 2);
+              vstack = vstack.slice(0, -1 * len);
+              lstack = lstack.slice(0, -1 * len);
+            }
+
+            const lhsId = getSymbolId(productions[ruleId][0]);
+            stack.push(lhsId);
+            vstack.push(yyval.$);
+            lstack.push(yyval._$);
+
+            const newState = getTableAction(stack[stack.length - 2], lhsId);
+            stack.push(newState);
+            break;
+
+          case 'accept':
+            return true;
+        }
+      }
+    }
+  };
+
+  // Export parser and Parser class
+  parser.Parser = parser.Parser || function Parser() { this.yy = {}; };
+  parser.Parser.prototype = parser;
+  parser.parse = parser.parse;
+  return parser;
+})();
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = parser;
+}
+    """
+
 # ==[ Export ]===============================================================
 
 module.exports = { Generator }
@@ -4049,6 +4436,7 @@ if !module.parent
       @production = false  # NEW: Generate production-ready parser (no console output)
       @silentParser = false  # NEW: Completely silent parser (all console functions as no-ops)
       @logLevel = 'normal'  # NEW: normal, minimal, silent
+      @compact = false  # NEW: Use compact format with bit-packed table
 
   # Parse command line arguments
   parseArgs = (args) ->
@@ -4129,6 +4517,8 @@ if !module.parent
           else
             console.error "Error: --log-level requires a value"
             process.exit(1)
+        when '--compact'
+          options.compact = true
         else
           if not arg.startsWith('-')
             options.inputFile = arg
@@ -4174,6 +4564,7 @@ if !module.parent
     OUTPUT FORMAT:
       --format [commonjs|es6|umd] Output format (default: commonjs)
       --namespace NAME           Namespace for UMD format (default: parser)
+      --compact                  Use compact format with bit-packed table (smaller file size)
 
     CONSOLE OUTPUT CONTROL:
       --production               Generate production-ready parser (silent console output)
@@ -4374,6 +4765,7 @@ if !module.parent
       production: options.production
       silentParser: options.silentParser
       logLevel: options.logLevel
+      compact: options.compact
     })
 
     if options.verbose
