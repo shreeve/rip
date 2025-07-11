@@ -121,14 +121,19 @@ class Generator
       enabled: opts.optimize ? false
       auto: opts.autoOptimize ? true
       minStatesForAuto: opts.minStatesForAuto ? 20
-      verbose: opts.optimizeVerbose ? false
       algorithms: opts.algorithms ? ['auto']
       skipIfSmall: opts.skipIfSmall ? true
     }
 
-    # Debug configuration
+    # Debug levels will use module-level constants
+
+    # Parse debug level from options (handle 0 as valid value)
+    debugInput = if opts.debugLevel? then opts.debugLevel else (opts.verbose || opts.debug || 'normal')
+    @debugLevel = @parseDebugLevel(debugInput)
+
+    # Legacy debug configuration (for backward compatibility)
     @debugConfig = {
-      verbose: opts.verbose ? false
+      enabled: @debugLevel >= DEBUG
     }
 
     # Configure options
@@ -162,6 +167,20 @@ class Generator
     @timing "🏗️ CONSTRUCTOR"
 
   # ============================================================================
+  # DEBUG LEVEL PARSING - Convert various debug options to numeric levels
+  # ============================================================================
+
+  parseDebugLevel: (level) ->
+    switch level
+      when 0, 'silent'  then 0  # SILENT
+      when 1, 'normal'  then 1  # NORMAL
+      when 2, 'verbose' then 2  # VERBOSE
+      when 3, 'debug'   then 3  # DEBUG
+      when true         then 2  # VERBOSE - --verbose flag
+      when false        then 1  # NORMAL - default when verbose=false
+      else 1  # fallback to normal
+
+  # ============================================================================
   # TIMING UTILITY - Flexible timing for both function wrapping and manual timing
   # ============================================================================
 
@@ -174,8 +193,8 @@ class Generator
     @_timers ?= new Map()
 
     if fn?
-      # Function wrapper mode - only time if verbose
-      if @debugConfig?.verbose
+      # Function wrapper mode - only time if verbose or higher
+      if @debugLevel >= VERBOSE
         startTime = Date.now()
         result = fn.call(this)
         endTime = Date.now()
@@ -185,8 +204,8 @@ class Generator
       else
         fn.call(this)
     else
-      # Manual timing mode - only time if verbose
-      if @debugConfig?.verbose
+      # Manual timing mode - only time if verbose or higher
+      if @debugLevel >= VERBOSE
         if @_timers.has(description)
           # End timer
           startTime = @_timers.get(description)
@@ -570,8 +589,8 @@ class Generator
       errorRule = new Rule(ntName, ['error'], '/* error recovery */')
       @rules.push(errorRule)
 
-      # Only show in verbose mode
-      if @debugConfig?.verbose
+      # Only show in debug mode (internal implementation details)
+      if @debugLevel >= DEBUG
         console.log("Added error recovery rule: #{ntName} → error")
 
   # Build optimized rule lookup cache for O(1) access by LHS
@@ -1343,23 +1362,24 @@ class Generator
     reduction = initialStateCount - finalStateCount
     reductionPercent = Math.round((reduction / initialStateCount) * 100)
 
-    # Report minimization results
-    unreachableText = if unreachableCount > 0 then "Removed #{unreachableCount} unreachable states" else ""
-    mergedText = if mergedCount > 0 then "Merged #{mergedCount} equivalent states" else ""
-    weakMergedText = if weakMergedCount > 0 then "Merged #{weakMergedCount} weakly compatible states" else ""
-    reductionText = if reduction > 0 then "Reduction: #{reduction} states (#{reductionPercent}%)" else "No states eliminated"
+    # Report minimization results - always show in normal mode and above
+    if @debugLevel >= NORMAL
+      unreachableText = if unreachableCount > 0 then "Removed #{unreachableCount} unreachable states" else ""
+      mergedText = if mergedCount > 0 then "Merged #{mergedCount} equivalent states" else ""
+      weakMergedText = if weakMergedCount > 0 then "Merged #{weakMergedCount} weakly compatible states" else ""
+      reductionText = if reduction > 0 then "Reduction: #{reduction} states (#{reductionPercent}%)" else "No states eliminated"
 
-    console.log """
+      console.log """
 
-    🔧 State Minimization:
+      🔧 State Minimization:
 
-    Initial states: #{initialStateCount}
-    #{unreachableText}
-    #{mergedText}
-    #{weakMergedText}
-    Final states: #{finalStateCount}
-    #{reductionText}
-    """
+      Initial states: #{initialStateCount}
+      #{unreachableText}
+      #{mergedText}
+      #{weakMergedText}
+      Final states: #{finalStateCount}
+      #{reductionText}
+      """
 
   # Find all states reachable from the start state
   findReachableStates: ->
@@ -1563,7 +1583,7 @@ class Generator
     shouldOptimize = @shouldRunOptimization()
 
     if shouldOptimize
-      if @optimizationConfig.verbose
+      if @debugLevel >= VERBOSE
         console.log "\n🔧 Smart Table Optimization:"
         console.log "============================="
         console.log "Grammar size: #{@states.length} states, #{@symbols.size} symbols"
@@ -1571,7 +1591,7 @@ class Generator
 
       @optimizeTableConditional()
     else
-      if @optimizationConfig.verbose
+      if @debugLevel >= VERBOSE
         console.log "\n⚡ Skipping table optimization (small grammar, better performance without)"
 
       # For small grammars, use fast path
@@ -1633,7 +1653,7 @@ class Generator
     # Quick analysis for decision making
     quickStats = @quickAnalyzeTable()
 
-    if @optimizationConfig.verbose
+    if @debugLevel >= VERBOSE
       console.log "Quick analysis: #{quickStats.sparsity}% sparse, #{quickStats.uniqueRows} unique rows"
 
     # Step 1: Always do symbol encoding (low cost, good benefit)
@@ -3337,8 +3357,8 @@ function getTableAction(state, symbol) {
     resolvedSR = srConflicts.filter (c) -> c.resolved
     unresolvedSR = srConflicts.filter (c) -> not c.resolved
 
-    # Show detailed analysis only in verbose mode
-    if @debugConfig?.verbose
+    # Show detailed analysis only in verbose mode or higher
+    if @debugLevel >= VERBOSE
       console.log "\n=== DETAILED CONFLICT ANALYSIS ==="
       console.log "Total conflicts: #{@conflicts.length}"
       console.log "  Shift/Reduce: #{srConflicts.length} (#{resolvedSR.length} resolved, #{unresolvedSR.length} unresolved)"
@@ -3373,6 +3393,8 @@ function getTableAction(state, symbol) {
     @reportConflictSummary(unresolvedSR.length, resolvedSR.length, rrConflicts.length)
 
   reportConflictSummary: (unresolved, resolved, reduceReduce) ->
+    return unless @debugLevel >= NORMAL
+
     console.log ""
     console.log "📊 CONFLICT SUMMARY:"
     console.log "===================="
@@ -3403,6 +3425,8 @@ function getTableAction(state, symbol) {
 
   # Report performance statistics
   reportPerformanceStats: ->
+    return unless @debugLevel >= NORMAL
+
     hitRateText = if @performanceStats.closureCalls > 0
       hitRate = Math.round((@performanceStats.cacheHits / @performanceStats.closureCalls) * 100)
       "Cache hit rate: #{hitRate}%"
@@ -3579,10 +3603,16 @@ function getTableAction(state, symbol) {
       console.log "  #{sym.id}: #{name} (#{if sym.isTerminal then 'terminal' else 'non-terminal'})"
 
 # ============================================================================
-# EXPORT GENERATOR CLASS
+# EXPORT GENERATOR CLASS AND DEBUG CONSTANTS
 # ============================================================================
 
-module.exports = { Generator }
+# Debug level constants (also available as module exports)
+SILENT = 0   # Errors only
+NORMAL = 1   # Basic summary (default)
+VERBOSE = 2  # Detailed analysis
+DEBUG = 3    # Everything + internals
+
+module.exports = { Generator, SILENT, NORMAL, VERBOSE, DEBUG }
 
 # ============================================================================
 # COMPREHENSIVE CLI INTERFACE
@@ -3598,7 +3628,7 @@ unless module.parent
     constructor: ->
       @inputFile = null
       @outputFile = null
-      @verbose = false
+      @debugLevel = 1  # Default to NORMAL
       @debug = false
       @quiet = false
       @showStats = false
@@ -3636,11 +3666,22 @@ unless module.parent
         when '-v', '--version'
           options.version = true
         when '-V', '--verbose'
-          options.verbose = true
+          options.debugLevel = VERBOSE
         when '-d', '--debug'
-          options.debug = true
+          options.debugLevel = DEBUG
         when '-q', '--quiet'
-          options.quiet = true
+          options.debugLevel = SILENT
+        when '--debug-level'
+          if args[i + 1] and not args[i + 1].startsWith('-')
+            level = parseInt(args[++i], 10)
+            if level >= 0 and level <= 3
+              options.debugLevel = level
+            else
+              console.error "Error: Invalid debug level '#{level}'. Use 0-3."
+              process.exit(1)
+          else
+            console.error "Error: --debug-level requires a value (0-3)"
+            process.exit(1)
         when '--stats'
           options.showStats = true
         when '--states'
@@ -3724,9 +3765,10 @@ unless module.parent
     OPTIONS:
       -h, --help              Show this help message
       -v, --version           Show version information
-      -V, --verbose           Enable verbose output
-      -d, --debug             Enable debug mode with detailed tracing
-      -q, --quiet             Suppress all output except errors
+      -V, --verbose           Enable verbose output (same as --debug-level 2)
+      -d, --debug             Enable debug mode (same as --debug-level 3)
+      -q, --quiet             Suppress all output except errors (same as --debug-level 0)
+      --debug-level LEVEL     Set debug level: 0=silent, 1=normal, 2=verbose, 3=debug
       -o, --output FILE       Output file (default: stdout)
 
     ANALYSIS:
@@ -3826,9 +3868,9 @@ unless module.parent
         process.exit(1)
 
       # Configure output verbosity
-      if options.quiet
+      if options.debugLevel == SILENT
         console.log = -> # Suppress normal output
-      else if options.verbose
+      else if options.debugLevel >= VERBOSE
         console.log "🚀 rip-parser - Advanced LALR(1) Parser Generator"
         console.log "📁 Input: #{options.inputFile}"
 
@@ -3837,7 +3879,7 @@ unless module.parent
       grammar = parseGrammarFile(grammarSource, options)
 
       # Create generator with grammar data and configuration
-      generator = new Generator(grammar)
+      generator = new Generator(grammar, {debugLevel: options.debugLevel})
       configureGenerator(generator, options)
 
       # Generate the parser
@@ -3895,7 +3937,6 @@ unless module.parent
       auto: options.optimize == 'auto'
       skipIfSmall: options.optimize == 'auto'
       minStatesForAuto: 20
-      verbose: options.verbose or options.debug
       compression: options.compression
       minimization: options.minimization
       performance: options.performance
@@ -3903,8 +3944,7 @@ unless module.parent
 
     # Set debug configuration
     generator.debugConfig = {
-      enabled: options.debug
-      verbose: options.verbose
+      enabled: options.debugLevel >= DEBUG
       showStates: options.showStates
       showConflicts: options.showConflicts
       showGrammar: options.showGrammar
@@ -3918,7 +3958,7 @@ unless module.parent
       logLevel: options.logLevel
     }
 
-    if options.verbose
+    if options.debugLevel >= VERBOSE
       console.log """
       ⚙️  Configuration:
          Optimization: #{options.optimize}
@@ -3929,7 +3969,7 @@ unless module.parent
 
   # Generate parser with configured options
   generateParser = (generator, grammar, options) ->
-    if options.verbose
+    if options.debugLevel >= VERBOSE
       console.log "\n🔧 Generating parser..."
 
     # Use the new compile method for code generation
@@ -3945,7 +3985,7 @@ unless module.parent
       compact: options.compact
     })
 
-    if options.verbose
+    if options.debugLevel >= VERBOSE
       console.log "✅ Parser generated successfully"
 
     parser
@@ -3963,7 +4003,7 @@ unless module.parent
     # Write main output
     if options.outputFile
       fs.writeFileSync(options.outputFile, content, 'utf8')
-      if options.verbose
+      if options.debugLevel >= VERBOSE
         console.log """
         📝 Parser written to: #{options.outputFile}
         📏 Size: #{content.length} characters
@@ -3971,7 +4011,7 @@ unless module.parent
         """
     else
       # No output file specified - skip JS output for analysis mode
-      if options.verbose
+      if options.debugLevel >= VERBOSE
         console.log """
         ✨ Parser generated (#{content.length} characters) - use -o filename to save
         ⏱️  Generation time: #{generationTime}ms
@@ -3980,7 +4020,7 @@ unless module.parent
     # Write source map if generated
     if sourceMap and options.sourceMapFile
       fs.writeFileSync(options.sourceMapFile, JSON.stringify(sourceMap, null, 2), 'utf8')
-      if options.verbose
+      if options.debugLevel >= VERBOSE
         console.log "🗺️  Source map written to: #{options.sourceMapFile}"
 
   # Generate comprehensive reports
