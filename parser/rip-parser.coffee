@@ -3629,8 +3629,6 @@ unless module.parent
       @inputFile = null
       @outputFile = null
       @debugLevel = 1  # Default to NORMAL
-      @debug = false
-      @quiet = false
       @showStats = false
       @showStates = false
       @showConflicts = false
@@ -3900,7 +3898,7 @@ unless module.parent
 
     catch error
       console.error "❌ Error: #{error.message}"
-      if options.debug
+      if options.debugLevel >= DEBUG
         console.error error.stack
       process.exit(1)
 
@@ -3917,7 +3915,7 @@ unless module.parent
         # Try JSON format
         grammar = JSON.parse(source)
 
-      if options.verbose
+      if options.debugLevel >= VERBOSE
         console.log """
         ✅ Grammar file parsed successfully
         📊 Productions: #{Object.keys(grammar.grammar || {}).length}
