@@ -238,8 +238,8 @@ class Generator
     # Process operators (precedence and associativity)
     @processOperators(operators) if operators
 
-         # Add error recovery productions
-     @addErrorRecoveryProductions()
+    # Add error recovery productions
+    @addErrorRecoveryProductions()
 
   # Comprehensive grammar input validation
   validateGrammarInput: ({ grammar, operators, start, tokens }) ->
@@ -1958,7 +1958,7 @@ class Generator
     info = {
       stateMinimization: @states.length
       tableOptimization: @optimizedTable?.format || 'none'
-      defaultActions: @defaultActions ? Object.keys(@defaultActions).length : 0
+      defaultActions: if @defaultActions then Object.keys(@defaultActions).length else 0
     }
     info
 
@@ -2165,12 +2165,13 @@ class Generator
 
       # Categorize states by item count
       itemCount = state.items.length
-      range = if itemCount <= 5 then '1-5'
-              else if itemCount <= 10 then '6-10'
-              else if itemCount <= 15 then '11-15'
-              else '16+'
+      range = switch
+        when itemCount <= 5 then '1-5'
+        when itemCount <= 10 then '6-10'
+        when itemCount <= 15 then '11-15'
+        else '16+'
 
-      analysis.stateDistribution[range] = (analysis.stateDistribution[range] || 0) + 1
+      analysis.stateDistribution[range] = (analysis.stateDistribution[range] or 0) + 1
 
     analysis.averageItemsPerState = Math.round(totalItems / @states.length)
     analysis
@@ -2324,7 +2325,7 @@ const parser = (() => {
             }
 
             const errStr = `Parse error at token ${symbol} (${symbols[symbol] || 'unknown'})`;
-            throw new Error(errStr + (expected.length > 0 ? `, expected: ${expected.join(', ')}` : ''));
+            throw new Error(errStr + (if expected.length > 0 then `, expected: ${expected.join(', ')}` else ''));
           }
 
           // Error recovery
@@ -2640,7 +2641,7 @@ const parser = (() => {
       }
 
       const errStr = `Parse error at token ${symbol} in state ${state}`;
-      throw new Error(errStr + (expected.length > 0 ? `, expected: ${expected.join(', ')}` : ''));
+      throw new Error(errStr + (if expected.length > 0 then `, expected: ${expected.join(', ')}` else ''));
     }
   }
 
@@ -2990,7 +2991,7 @@ function getTableAction(state, symbol) {
     const tableData = #{JSON.stringify(@table)};
     function getTableEntry(state, symbol) {
       const row = tableData[state];
-      return row ? row[symbol] : undefined;
+      return if row then row[symbol] else undefined;
     }
     """
 
