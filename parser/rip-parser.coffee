@@ -134,9 +134,9 @@ class Generator
       console.error(error.message)
       console.error("\n💡 Common fixes:")
       console.error("  - Check grammar object structure")
-      console.error("  - Verify all non-terminals have valid productions")
+      console.error("  - Verify all non-terminals have valid rules")
       console.error("  - Ensure symbol names are valid identifiers")
-      console.error("  - Check for typos in production patterns")
+      console.error("  - Check for typos in rule patterns")
       console.error("  - Validate action code syntax")
       throw error
 
@@ -195,13 +195,13 @@ class Generator
     @getSymbol 'error', true; @tokens.add('error')
 
     # Process all rules with enhanced validation
-    for nonterminal, productions of grammar
-      for production, i in productions
+    for nonterminal, rules of grammar
+      for rule, i in rules
         try
-          [pattern, action, options] = production
+          [pattern, action, options] = rule
 
           # Validate and parse the pattern
-          rhs = @parseProductionPattern(pattern, nonterminal, i)
+          rhs = @parseRulePattern(pattern, nonterminal, i)
 
           # Validate action code
           @validateActionCode(action, rhs.length, nonterminal, i) if action?
@@ -220,7 +220,7 @@ class Generator
             @getSymbol(symbol)
 
         catch error
-          throw new Error("Error processing production #{i} for '#{nonterminal}': #{error.message}")
+          throw new Error("Error processing rule #{i} for '#{nonterminal}': #{error.message}")
 
     # Set start symbol
     @start = switch
@@ -238,8 +238,8 @@ class Generator
     # Process operators (precedence and associativity)
     @processOperators(operators) if operators
 
-    # Add error recovery productions
-    @addErrorRecoveryProductions()
+    # Add error recovery rules
+    @addErrorRecoveryRules()
 
   # Comprehensive grammar input validation
   validateGrammarInput: ({ grammar, operators, start, tokens }) ->
@@ -266,51 +266,51 @@ class Generator
     if Object.keys(grammar).length == 0
       errors.push("Grammar cannot be empty")
 
-    # 3. Validate each non-terminal and its productions
-    for nonterminal, productions of grammar
+    # 3. Validate each non-terminal and its rules
+    for nonterminal, rules of grammar
       # Validate non-terminal name
       unless @isValidSymbolName(nonterminal)
         errors.push("Invalid non-terminal name '#{nonterminal}': must be alphanumeric with underscores")
 
-      # Validate productions array
-      unless Array.isArray(productions)
-        errors.push("Productions for '#{nonterminal}' must be an array, got #{typeof productions}")
+      # Validate rules array
+      unless Array.isArray(rules)
+        errors.push("Rules for '#{nonterminal}' must be an array, got #{typeof rules}")
         continue
 
-      if productions.length == 0
-        errors.push("Non-terminal '#{nonterminal}' has no productions")
+      if rules.length == 0
+        errors.push("Non-terminal '#{nonterminal}' has no rules")
         continue
 
-      # Validate each production
-      for production, i in productions
-        unless Array.isArray(production)
-          errors.push("Production #{i} for '#{nonterminal}' must be an array, got #{typeof production}")
+      # Validate each rule
+      for rule, i in rules
+        unless Array.isArray(rule)
+          errors.push("Rule #{i} for '#{nonterminal}' must be an array, got #{typeof rule}")
           continue
 
-        if production.length == 0
-          errors.push("Production #{i} for '#{nonterminal}' cannot be empty")
+        if rule.length == 0
+          errors.push("Rule #{i} for '#{nonterminal}' cannot be empty")
           continue
 
-        [pattern, action, options] = production
+        [pattern, action, options] = rule
 
         # Validate pattern
         if pattern? and typeof pattern isnt 'string'
-          errors.push("Pattern in production #{i} for '#{nonterminal}' must be a string, got #{typeof pattern}")
+          errors.push("Pattern in rule #{i} for '#{nonterminal}' must be a string, got #{typeof pattern}")
 
         # Validate action if present
         if action? and typeof action isnt 'string' and typeof action isnt 'function'
-          errors.push("Action in production #{i} for '#{nonterminal}' must be a string or function, got #{typeof action}")
+          errors.push("Action in rule #{i} for '#{nonterminal}' must be a string or function, got #{typeof action}")
 
         # Validate options if present
         if options? and typeof options isnt 'object'
-          errors.push("Options in production #{i} for '#{nonterminal}' must be an object, got #{typeof options}")
+          errors.push("Options in rule #{i} for '#{nonterminal}' must be an object, got #{typeof options}")
 
         # Validate symbols in pattern
         if pattern?
           symbols = pattern.trim().split(/\s+/)
           for symbol in symbols when symbol
             unless @isValidSymbolName(symbol)
-              errors.push("Invalid symbol '#{symbol}' in production #{i} for '#{nonterminal}'")
+              errors.push("Invalid symbol '#{symbol}' in rule #{i} for '#{nonterminal}'")
 
     # 4. Validate start symbol
     if start?
@@ -351,10 +351,10 @@ class Generator
     if errors.length > 0
       throw new Error("Grammar validation failed:\n  #{errors.join('\n  ')}")
 
-  # Parse and validate production pattern
-  parseProductionPattern: (pattern, nonterminal, productionIndex) ->
+  # Parse and validate rule pattern
+  parseRulePattern: (pattern, nonterminal, ruleIndex) ->
     unless pattern?
-      return [] # Empty production (epsilon)
+      return [] # Empty rule (epsilon)
 
     unless typeof pattern is 'string'
       throw new Error("Pattern must be a string")
@@ -369,7 +369,7 @@ class Generator
     symbols
 
   # Validate action code for common issues
-  validateActionCode: (action, rhsLength, nonterminal, productionIndex) ->
+  validateActionCode: (action, rhsLength, nonterminal, ruleIndex) ->
     return unless action?
 
     actionStr = if typeof action is 'function' then action.toString() else action
@@ -379,7 +379,7 @@ class Generator
     for match in paramMatches
       paramNum = parseInt(match.substring(1), 10)
       if paramNum > rhsLength and not (rhsLength == 0 and paramNum == 1) and not (nonterminal == '$accept' and paramNum == 0)
-        console.warn("Warning: Parameter #{match} in action for '#{nonterminal}' production #{productionIndex} exceeds RHS length (#{rhsLength})")
+        console.warn("Warning: Parameter #{match} in action for '#{nonterminal}' rule #{ruleIndex} exceeds RHS length (#{rhsLength})")
 
   # Operator precedence and associativity
   processOperators: (operators) ->
@@ -392,8 +392,8 @@ class Generator
         @precedence[symbol] = { level: precedenceLevel, assoc }
       precedenceLevel++
 
-  # Add error recovery productions to the grammar
-  addErrorRecoveryProductions: ->
+  # Add error recovery rules to the grammar
+  addErrorRecoveryRules: ->
     # Find non-terminals that could benefit from error recovery
     candidateNonTerminals = []
 
@@ -409,7 +409,7 @@ class Generator
            name.toLowerCase().includes('expr') or name.toLowerCase().includes('decl')
           candidateNonTerminals.push(name)
 
-    # Add error productions for promising candidates
+    # Add error rules for promising candidates
     for ntName in candidateNonTerminals.slice(0, 3) # Limit to avoid too many
       # Add: NonTerminal → error
       errorRule = new Rule(ntName, ['error'], '/* error recovery */')
@@ -621,8 +621,8 @@ class Generator
       for rule in @rules
         continue if @getSymbol(rule.lhs).nullable
 
-        # A nonterminal is nullable if it has an empty production
-        # or if all symbols in one of its productions are nullable
+        # A nonterminal is nullable if it has an empty rule
+        # or if all symbols in one of its rules are nullable
         allNullable = true
         for symbol in rule.rhs
           unless @getSymbol(symbol).nullable
@@ -2351,7 +2351,7 @@ const parser = (() => {
             symbol = null;
             if (recovering > 0) recovering--;
           } else if (actionType === 2) { // REDUCE
-            const rule = getProduction(target);
+            const rule = getRule(target);
             if (!rule) {
               throw new Error(`Invalid rule ${target}`);
             }
@@ -2453,7 +2453,7 @@ const parser = (() => {
   #{optimizedSymbols}
   #{optimizedActions}
 
-  // Production metadata for reductions
+  // Rule metadata for reductions
   const productions = #{JSON.stringify(rules)};
   const defaultActions = #{JSON.stringify(@defaultActions)};
 
@@ -2582,12 +2582,12 @@ const parser = (() => {
             if (recovering > 0) recovering--;
             this.stats.shifts++;
           } else if (actionType === REDUCE) {
-            const production = productions[target];
-            if (!production) {
-              throw new Error(`Invalid production ${target}`);
+            const rule = productions[target];
+            if (!rule) {
+              throw new Error(`Invalid rule ${target}`);
             }
 
-            const [lhs, length] = production;
+            const [lhs, length] = rule;
             const yyval = {};
             const yyloc = {};
 
@@ -2701,10 +2701,10 @@ const parser = (() => {
 
   # Transform action code replacing $1, @1, etc.
   transformAction: (action, rule) ->
-    # Handle the special case where CoffeeScript grammar uses @1 and $1 in empty productions
+    # Handle the special case where CoffeeScript grammar uses @1 and $1 in empty rules
     # These need to be replaced with default values FIRST, before any other processing
     if rule.rhs.length == 0
-      # For empty productions, @1 and $1 should use default values
+      # For empty rules, @1 and $1 should use default values
       action = action.replace /@1/g, '{ first_line: 1, first_column: 0, last_line: 1, last_column: 0 }'
       action = action.replace /\$1/g, 'null'
 
@@ -2742,10 +2742,10 @@ const parser = (() => {
 
   # Transform action code with source map information
   transformActionWithSourceMap: (action, rule, originalLocation) ->
-    # Handle the special case where CoffeeScript grammar uses @1 and $1 in empty productions
+    # Handle the special case where CoffeeScript grammar uses @1 and $1 in empty rules
     # These need to be replaced with default values FIRST, before any other processing
     if rule.rhs.length == 0
-      # For empty productions, @1 and $1 should use default values
+      # For empty rules, @1 and $1 should use default values
       action = action.replace /@1/g, '{ first_line: 1, first_column: 0, last_line: 1, last_column: 0 }'
       action = action.replace /\$1/g, 'null'
 
@@ -2802,7 +2802,7 @@ const parser = (() => {
     # Get basic compact data
     symbols = @prepareCompactSymbols()
     terminals = @prepareCompactTerminals()
-    productions = @prepareCompactProductions()
+    rules = @prepareCompactProductions()
 
     # Generate unified states array with symbol 0 optimization
     states = @prepareUnifiedStates()
@@ -2810,7 +2810,7 @@ const parser = (() => {
     {
       symbols: symbols
       terminals: terminals
-      rules: productions  # Renamed from productions to rules
+      rules: rules  # Renamed from productions to rules
       states: states      # Unified array: symbol 0 = statics, other symbols = actions
     }
 
@@ -2858,7 +2858,7 @@ function getRules(lhsId) {
   return rules[lhsId] || [];
 }
 
-function getProduction(ruleId) {
+function getRule(ruleId) {
   const ruleInfo = rules[ruleId];
   if (!ruleInfo) return null;
   return {
@@ -2922,16 +2922,16 @@ function getTableAction(state, symbol) {
         terminalIds.push(symbol.id)
     terminalIds.sort((a, b) -> a - b)
 
-  # Generate compact productions map (productions__ = Map {3=>[0,1], 4=>[1,3,2],...})
+  # Generate compact rules map (rules__ = Map {3=>[0,1], 4=>[1,3,2],...})
   prepareCompactProductions: ->
-    productions = []
+    rules = []
     for rule, id in @rules
       lhsSymbol = @symbols.get(rule.lhs)
       continue unless lhsSymbol
       lhsId = lhsSymbol.id
       rhsLength = rule.rhs.length
-      productions[id] = [lhsId, rhsLength]
-    productions
+      rules[id] = [lhsId, rhsLength]
+    rules
 
   # Generate compact table using nested array format
   prepareCompactTable: ->
@@ -3269,8 +3269,8 @@ function getTableAction(state, symbol) {
 
 # ✅ COMPLETED PHASES (Functions already implemented above):
 # 1. Entry Point: generate()
-# 2. Grammar Processing: processGrammar(), validateGrammarInput(), parseProductionPattern(),
-#    validateActionCode(), processOperators(), addErrorRecoveryProductions(), buildRuleLookupCache()
+# 2. Grammar Processing: processGrammar(), validateGrammarInput(), parseRulePattern(),
+#    validateActionCode(), processOperators(), addErrorRecoveryRules(), buildRuleLookupCache()
 # 3. Grammar Cleanup: eliminateUnproductive(), eliminateUnreachable(), reassignIds()
 # 4. LALR Analysis: computeNullable(), computeFirst(), computeFollow(), firstOfString()
 # 5. State Construction: buildStates(), closure(), findOrAddState(), computeCore()
@@ -3904,7 +3904,7 @@ unless module.parent
 
         📊 Statistics:
           States: #{stats.states}
-          Productions: #{stats.productions}
+          Rules: #{stats.rules}
           Terminals: #{stats.terminals}
           Non-terminals: #{stats.nonterminals}
         """
@@ -3981,7 +3981,7 @@ unless module.parent
     rule = @rules[ruleId]
     console.log "\n🔍 EXPLORING RULE #{ruleId}"
     console.log "=============================="
-    console.log "Production: #{rule.lhs} → #{rule.rhs.join(' ')}"
+    console.log "Rule: #{rule.lhs} → #{rule.rhs.join(' ')}"
     console.log "Action: #{rule.action || 'default'}"
     console.log "Precedence: #{rule.precedence || 'none'}"
 
