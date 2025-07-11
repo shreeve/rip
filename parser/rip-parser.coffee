@@ -2059,17 +2059,41 @@ const parser = (() => {
     let yylineno = 1;
     let yy = self.yy;
     let yyval = {};
-    let lexer = input.lexer || input;
     let symbol = null;
     let action = null;
     let preErrorSymbol = null;
 
-    if (typeof lexer.setInput === 'function') {
-      lexer.setInput(input.input || input);
+    // Handle both token arrays (from CoffeeScript) and lexer objects
+    let tokenIndex = 0;
+    let tokens = null;
+    let lexer = null;
+
+    if (Array.isArray(input)) {
+      // Input is a token array from CoffeeScript
+      tokens = input;
+    } else {
+      // Input is a lexer object
+      lexer = input.lexer || input;
+      if (typeof lexer.setInput === 'function') {
+        lexer.setInput(input.input || input);
+      }
     }
 
     function lex() {
-      let token = lexer.lex() || EOF;
+      let token;
+      if (tokens) {
+        // Get next token from array
+        if (tokenIndex >= tokens.length) {
+          token = EOF;
+        } else {
+          const currentToken = tokens[tokenIndex++];
+          token = currentToken[0]; // Token type is the first element
+        }
+      } else {
+        // Get token from lexer
+        token = lexer.lex() || EOF;
+      }
+
       if (typeof token !== 'number') {
         if (token === '') {
           token = EOF;
@@ -4303,17 +4327,41 @@ const parser = (() => {
     let yylineno = 1;
     let yy = self.yy;
     let yyval = {};
-    let lexer = input.lexer || input;
     let symbol = null;
     let action = null;
     let preErrorSymbol = null;
 
-    if (typeof lexer.setInput === 'function') {
-      lexer.setInput(input.input || input);
+    // Handle both token arrays (from CoffeeScript) and lexer objects
+    let tokenIndex = 0;
+    let tokens = null;
+    let lexer = null;
+
+    if (Array.isArray(input)) {
+      // Input is a token array from CoffeeScript
+      tokens = input;
+    } else {
+      // Input is a lexer object
+      lexer = input.lexer || input;
+      if (typeof lexer.setInput === 'function') {
+        lexer.setInput(input.input || input);
+      }
     }
 
     function lex() {
-      let token = lexer.lex() || EOF;
+      let token;
+      if (tokens) {
+        // Get next token from array
+        if (tokenIndex >= tokens.length) {
+          token = EOF;
+        } else {
+          const currentToken = tokens[tokenIndex++];
+          token = currentToken[0]; // Token type is the first element
+        }
+      } else {
+        // Get token from lexer
+        token = lexer.lex() || EOF;
+      }
+
       if (typeof token !== 'number') {
         if (token === '') {
           token = EOF;
