@@ -2,10 +2,9 @@
 
 # ==============================================================================
 # rip-parser: A modern, LALR(1) parser generator for the rip ecosystem
-# REORGANIZED VERSION - Functions ordered by execution flow
 #
 # Author: Steve Shreeve <steve.shreeve@gmail.com> and Claude 4 Opus/Sonnet
-#  Stats: July 10, 2025 (version 0.3.0) MIT License
+#  Stats: July 11, 2025 (version 0.4.0) MIT License
 # ==============================================================================
 
 class Symbol # Terminal or Nonterminal
