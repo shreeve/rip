@@ -415,7 +415,9 @@ class Generator
       errorRule = new Rule(ntName, ['error'], '/* error recovery */')
       @rules.push(errorRule)
 
-      console.log("Added error recovery rule: #{ntName} → error")
+      # Only show in verbose mode
+      if @debugConfig?.verbose
+        console.log("Added error recovery rule: #{ntName} → error")
 
   # Build optimized rule lookup cache for O(1) access by LHS
   buildRuleLookupCache: ->
