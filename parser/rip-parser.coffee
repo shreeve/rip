@@ -3692,24 +3692,24 @@ unless module.parent
   # Parse grammar file based on format
   parseGrammarFile = (source, options) ->
     try
-      # Support different formats
-      if options.inputFile.endsWith('.json')
-        return JSON.parse(source)
-      else if options.inputFile.endsWith('.js') or options.inputFile.endsWith('.coffee')
-        # Use eval for JavaScript/CoffeeScript grammar files
-        # This is safe in CLI context but should be used carefully
-        if source.includes('module.exports')
-          # Node.js module format
-          eval(source)
-        else
-          # Direct object format
-          eval("(#{source})")
+      # Try to require the grammar file directly (works with coffee executable)
+      if options.inputFile.endsWith('.coffee') or options.inputFile.endsWith('.js')
+        # CoffeeScript/JavaScript grammar file - require directly
+        path = require('path')
+        absolutePath = path.resolve(options.inputFile)
+        grammar = require(absolutePath)
       else
-        # Try to parse as JSON first, then as JavaScript
-        try
-          JSON.parse(source)
-        catch
-          eval("(#{source})")
+        # Try JSON format
+        grammar = JSON.parse(source)
+
+      if options.verbose
+        console.log """
+        ✅ Grammar file parsed successfully
+        📊 Productions: #{Object.keys(grammar.grammar || {}).length}
+        🎯 Start symbol: #{grammar.start || 'unknown'}
+        """
+
+      grammar
 
     catch error
       throw new Error("Failed to parse grammar file: #{error.message}")
