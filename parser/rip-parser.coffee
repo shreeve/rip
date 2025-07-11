@@ -149,11 +149,11 @@ class Generator
       throw error
 
     # Grammar cleanup - iterate until no more changes
-    # Order matters: unproductive first, then unreachable
     loop
       initialRuleCount = @rules.length
       initialSymbolCount = @symbols.size
 
+      # Order matters: unproductive first, then unreachable
       @eliminateUnproductive()
       @eliminateUnreachable()
 
