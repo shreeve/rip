@@ -3330,9 +3330,6 @@ function getTableAction(state, symbol) {
   reportConflicts: ->
     return unless @conflicts.length > 0
 
-    console.log "\n=== DETAILED CONFLICT ANALYSIS ==="
-    console.log "Total conflicts: #{@conflicts.length}"
-
     # Group conflicts by type
     srConflicts = @conflicts.filter (c) -> c.type == 'shift/reduce'
     rrConflicts = @conflicts.filter (c) -> c.type == 'reduce/reduce'
@@ -3340,35 +3337,39 @@ function getTableAction(state, symbol) {
     resolvedSR = srConflicts.filter (c) -> c.resolved
     unresolvedSR = srConflicts.filter (c) -> not c.resolved
 
-    console.log "  Shift/Reduce: #{srConflicts.length} (#{resolvedSR.length} resolved, #{unresolvedSR.length} unresolved)"
-    console.log "  Reduce/Reduce: #{rrConflicts.length} (all resolved by default)"
-    console.log ""
-
-    # Report unresolved conflicts first (most important)
-    if unresolvedSR.length > 0
+    # Show detailed analysis only in verbose mode
+    if @debugConfig?.verbose
+      console.log "\n=== DETAILED CONFLICT ANALYSIS ==="
+      console.log "Total conflicts: #{@conflicts.length}"
+      console.log "  Shift/Reduce: #{srConflicts.length} (#{resolvedSR.length} resolved, #{unresolvedSR.length} unresolved)"
+      console.log "  Reduce/Reduce: #{rrConflicts.length} (all resolved by default)"
       console.log ""
-      console.log "🚨 UNRESOLVED CONFLICTS (require attention):"
-      console.log "=================================================="
-      for conflict in unresolvedSR
-        console.log conflict.explanation
 
-    # Report resolved conflicts
-    if resolvedSR.length > 0
-      console.log ""
-      console.log "✅ RESOLVED SHIFT/REDUCE CONFLICTS:"
-      console.log "========================================"
-      for conflict in resolvedSR
-        console.log conflict.explanation
+      # Report unresolved conflicts first (most important)
+      if unresolvedSR.length > 0
+        console.log ""
+        console.log "🚨 UNRESOLVED CONFLICTS (require attention):"
+        console.log "=================================================="
+        for conflict in unresolvedSR
+          console.log conflict.explanation
 
-    # Report reduce/reduce conflicts
-    if rrConflicts.length > 0
-      console.log ""
-      console.log "⚠️  REDUCE/REDUCE CONFLICTS:"
-      console.log "=============================="
-      for conflict in rrConflicts
-        console.log conflict.explanation
+      # Report resolved conflicts
+      if resolvedSR.length > 0
+        console.log ""
+        console.log "✅ RESOLVED SHIFT/REDUCE CONFLICTS:"
+        console.log "========================================"
+        for conflict in resolvedSR
+          console.log conflict.explanation
 
-    # Summary and recommendations
+      # Report reduce/reduce conflicts
+      if rrConflicts.length > 0
+        console.log ""
+        console.log "⚠️  REDUCE/REDUCE CONFLICTS:"
+        console.log "=============================="
+        for conflict in rrConflicts
+          console.log conflict.explanation
+
+    # Always show summary and recommendations (essential info)
     @reportConflictSummary(unresolvedSR.length, resolvedSR.length, rrConflicts.length)
 
   reportConflictSummary: (unresolved, resolved, reduceReduce) ->
@@ -3424,13 +3425,13 @@ function getTableAction(state, symbol) {
 
     📊 Performance Statistics:
     =========================
-    Closure computations: #{@performanceStats.closureCalls}
-    Cache hits: #{@performanceStats.cacheHits}
-    #{hitRateText}
     Terminals: #{@tokens.size}
     Symbols: #{@symbols.size}
     Rules processed: #{@rules.length}
     States created: #{@states.length}
+    Closure computations: #{@performanceStats.closureCalls}
+    Cache hits: #{@performanceStats.cacheHits}
+    #{hitRateText}
     #{optimizationText}
     Cache entries: #{cacheSize}
     """
