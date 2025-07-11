@@ -9,47 +9,35 @@
 
 class Symbol # Terminal or Nonterminal
   constructor: (name, isTerminal = false, id = 0) ->
-    @id         = id
-    @name       = name
-    @isTerminal = isTerminal
-    @nullable   = false
-    @first      = new Set()
-    @follow     = new Set()
+    @id         = id         # unique symbol id
+    @name       = name       # symbol name (eg - Expression)
+    @isTerminal = isTerminal # true if terminal, false if nonterminal
+    @nullable   = false      # LALR(1) nullable computation
+    @first      = new Set()  # LALR(1) FIRST sets
+    @follow     = new Set()  # LALR(1) FOLLOW sets
 
 class Rule # A → B C D
   @idno = 0
   constructor: (lhs, rhs, action = null, precedence = null) ->
-    @id         = Rule.idno++ # unique id
-    @lhs        = lhs
-    @rhs        = rhs
-    @action     = action
-    @precedence = precedence
+    @id         = Rule.idno++ # unique rule id
+    @lhs        = lhs         # left-hand side symbol
+    @rhs        = rhs         # right-hand side symbol sequence
+    @action     = action      # semantic action
+    @precedence = precedence  # precedence for conflict resolution
 
-# An Item is a rule with its dot position and lookahead
-# Example: Expr → Expr + • Term, {';', ')', '$'}
-class Item
+class Item # Rule with a dot position and lookahead: [A → α • β, a]
+  @makeCoreKey: (ruleId, dot) -> "#{ruleId}-#{dot}" # Canonical key for core
+
   constructor: (rule, dot = 0, lookahead = new Set()) ->
-    @rule      = rule
-    @dot       = dot
-    @lookahead = lookahead
+    @rule      = rule        # associated production rule
+    @dot       = dot         # dot position (• marker)
+    @lookahead = lookahead   # LALR(1) lookahead set
 
-  # Check if the dot is at the end
-  isComplete: -> @dot >= @rule.rhs.length
-
-  # Get the symbol after the dot
-  nextSymbol: -> @rule.rhs[@dot]
-
-  # Create a new item with the dot moved forward
-  advance: -> new Item(@rule, @dot + 1, new Set(@lookahead))
-
-  # Create item without lookahead (for LR(0) core)
-  core: -> new Item(@rule, @dot, new Set())
-
-  # Generate core key from rule ID and dot position
-  @makeCoreKey: (ruleId, dot) -> "#{ruleId}-#{dot}"
-
-  # Get the core key (without lookaheads) for deduplication
-  coreKey: -> @_coreKey ?= Item.makeCoreKey(@rule.id, @dot)
+  isComplete: -> @dot >= @rule.rhs.length                        # reduction check (is dot at end?)
+  nextSymbol: -> @rule.rhs[@dot]                                 # next symbol after dot
+  advance:    -> new Item(@rule, @dot + 1, new Set(@lookahead))  # new item with dot advanced
+  core:       -> new Item(@rule, @dot, new Set())                # LR(0) core (item without lookahead)
+  coreKey:    -> @_coreKey ?= Item.makeCoreKey(@rule.id, @dot)   # core key, supports deduplication
 
   # String for debugging
   toString: ->
@@ -60,11 +48,11 @@ class Item
 class State # Set of LR(0) items
   @idno = 0
   constructor: ->
-    @id          = State.idno++ # unique id
-    @items       = []           # Array of Items
-    @coreMap     = new Map()    # Core key -> Item (for LR(0) cores)
-    @transitions = new Map()    # symbol -> state
-    @inadequate  = false        # Has shift/reduce conflicts?
+    @id          = State.idno++ # unique state id
+    @items       = []           # collection of item
+    @coreMap     = new Map()    # core-based deduplication (core key -> item)
+    @transitions = new Map()    # state transitions (symbol -> state)
+    @inadequate  = false        # has shift/reduce conflicts?
 
   # Add item to state, merging lookaheads if core already exists
   addItem: (item) ->
