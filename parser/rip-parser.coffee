@@ -1586,7 +1586,7 @@ class Generator
 
     actions.sort().join('|')
 
-    # Merge weakly compatible states (experimental)
+  # Merge weakly compatible states (experimental)
   mergeWeaklyCompatibleStates: ->
     mergedCount = 0
 
@@ -1912,7 +1912,7 @@ class Generator
         #{action}
         break;"""
 
-    """performAction: function(yytext, yyleng, yylineno, yy, yystate, $$, _$) {
+    """function(yytext, yyleng, yylineno, yy, yystate, $$, _$) {
       switch (yystate) {#{actionCases.join('')}
       }
     }"""
@@ -2030,10 +2030,8 @@ const parser = (() => {
 #{@generateUnifiedRuntimeFunctions()}
 
   const parser = {
-    trace: () => { },
-    yy: { },
-    #{performAction},
-    defaultActions: #{ JSON.stringify(@defaultActions) },
+    yy: { }
+  };
 
     parseError(str, hash) {
       if (hash.recoverable) {
@@ -2045,128 +2043,126 @@ const parser = (() => {
       }
     },
 
-    parse(input) {
-      const self = this;
-      const stack = [0];
-      const vstack = [null];
-      const lstack = [{
-        first_line: 1,
-        first_column: 0,
-        last_line: 1,
-        last_column: 0
-      }];
-      const table = self.table;
-      const productions = self.productions_;
-      const symbols = self.symbols_;
-      const EOF = 1;
-      let yytext = '';
-      let yyleng = 0;
-      let yylineno = 1;
-      let yy = self.yy;
-      let yyval = {};
-      let lexer = input.lexer || input;
-      let symbol = null;
-      let action = null;
-      let preErrorSymbol = null;
+  parser.parse = function parse(input) {
+    const self = this;
+    const stack = [0];
+    const vstack = [null];
+    const lstack = [{
+      first_line: 1,
+      first_column: 0,
+      last_line: 1,
+      last_column: 0
+    }];
+    const EOF = 1;
+    let yytext = '';
+    let yyleng = 0;
+    let yylineno = 1;
+    let yy = self.yy;
+    let yyval = {};
+    let lexer = input.lexer || input;
+    let symbol = null;
+    let action = null;
+    let preErrorSymbol = null;
 
-      if (typeof lexer.setInput === 'function') {
-        lexer.setInput(input.input || input);
-      }
+    if (typeof lexer.setInput === 'function') {
+      lexer.setInput(input.input || input);
+    }
 
-      function lex() {
-        let token = lexer.lex() || EOF;
-        if (typeof token !== 'number') {
-          if (token === '') {
-            token = EOF;
-          } else {
-            token = getSymbolId(token) || token;
-          }
-        }
-        return token;
-      }
-
-      while (true) {
-        const state = stack[stack.length - 1];
-
-        if (this.defaultActions[state]) {
-          action = this.defaultActions[state];
+    function lex() {
+      let token = lexer.lex() || EOF;
+      if (typeof token !== 'number') {
+        if (token === '') {
+          token = EOF;
         } else {
-          if (symbol === null) {
-            symbol = lex();
-          }
-          action = getTableAction(state, symbol);
+          token = getSymbolId(token) || token;
         }
+      }
+      return token;
+    }
 
-        if (!action || !action.length) {
+    while (true) {
+      const state = stack[stack.length - 1];
+
+      if (this.defaultActions[state]) {
+        action = this.defaultActions[state];
+      } else {
+        if (symbol === null) {
+          symbol = lex();
+        }
+        action = getTableAction(state, symbol);
+      }
+
+      if (!action || !action.length) {
+        if (!preErrorSymbol) {
+          const expected = [];
+          for (const p in getStateActions(state)) {
+            if (isTerminal(p) && p > 2) {
+              expected.push("'" + getSymbolName(p) + "'");
+            }
+          }
+          const errStr = `Parse error on line ${yylineno + 1}:
+${lexer.showPosition()}
+Expecting ${expected.join(', ')}, got '${getSymbolName(symbol) || symbol}'`;
+          this.parseError(errStr, {
+            text: lexer.match,
+            token: getSymbolName(symbol) || symbol,
+            line: lexer.yylineno,
+            loc: lexer.yylloc,
+            expected: expected,
+            recoverable: false
+          });
+        }
+        return false;
+      }
+
+      switch (action[0]) {
+        case 1: // shift
+          stack.push(symbol);
+          vstack.push(lexer.yytext);
+          lstack.push(lexer.yylloc);
+          stack.push(action[1]);
+          symbol = null;
           if (!preErrorSymbol) {
-            const expected = [];
-            for (const p in getStateActions(state)) {
-              if (isTerminal(p) && p > 2) {
-                expected.push("'" + getSymbolName(p) + "'");
-              }
+            yyleng = lexer.yyleng;
+            yytext = lexer.yytext;
+            yylineno = lexer.yylineno;
+            if (lexer.yylloc) {
+              lstack[lstack.length - 1] = lexer.yylloc;
             }
-            const errStr = 'Parse error on line ' + (yylineno + 1) + ":\\n" + lexer.showPosition() + "\\nExpecting " + expected.join(', ') + ", got '" + (getSymbolName(symbol) || symbol) + "'";
-            this.parseError(errStr, {
-              text: lexer.match,
-              token: getSymbolName(symbol) || symbol,
-              line: lexer.yylineno,
-              loc: lexer.yylloc,
-              expected: expected,
-              recoverable: false
-            });
+          } else {
+            symbol = preErrorSymbol;
+            preErrorSymbol = null;
           }
-          return false;
-        }
+          break;
 
-        switch (action[0]) {
-          case 1: // shift
-            stack.push(symbol);
-            vstack.push(lexer.yytext);
-            lstack.push(lexer.yylloc);
-            stack.push(action[1]);
-            symbol = null;
-            if (!preErrorSymbol) {
-              yyleng = lexer.yyleng;
-              yytext = lexer.yytext;
-              yylineno = lexer.yylineno;
-              if (lexer.yylloc) {
-                lstack[lstack.length - 1] = lexer.yylloc;
-              }
-            } else {
-              symbol = preErrorSymbol;
-              preErrorSymbol = null;
-            }
-            break;
+        case 2: // reduce
+          const productionInfo = getProduction(action[1]);
+          const len = productionInfo.length;
+          yyval.$ = vstack[vstack.length - len];
+          yyval._$ = {
+            first_line: lstack[lstack.length - (len || 1)].first_line,
+            last_line: lstack[lstack.length - 1].last_line,
+            first_column: lstack[lstack.length - (len || 1)].first_column,
+            last_column: lstack[lstack.length - 1].last_column
+          };
+          const r = this.performAction.call(yyval, yytext, yyleng, yylineno, yy, action[1], vstack, lstack);
+          if (typeof r !== 'undefined') {
+            return r;
+          }
+          if (len) {
+            stack = stack.slice(0, -1 * len * 2);
+            vstack = vstack.slice(0, -1 * len);
+            lstack = lstack.slice(0, -1 * len);
+          }
+          stack.push(productionInfo.lhs);
+          vstack.push(yyval.$);
+          lstack.push(yyval._$);
+          const newState = getTableAction(stack[stack.length - 2], stack[stack.length - 1]);
+          stack.push(newState);
+          break;
 
-          case 2: // reduce
-            const productionInfo = getProduction(action[1]);
-            const len = productionInfo.length;
-            yyval.$ = vstack[vstack.length - len];
-            yyval._$ = {
-              first_line: lstack[lstack.length - (len || 1)].first_line,
-              last_line: lstack[lstack.length - 1].last_line,
-              first_column: lstack[lstack.length - (len || 1)].first_column,
-              last_column: lstack[lstack.length - 1].last_column
-            };
-            const r = this.performAction.call(yyval, yytext, yyleng, yylineno, yy, action[1], vstack, lstack);
-            if (typeof r !== 'undefined') {
-              return r;
-            }
-            if (len) {
-              stack = stack.slice(0, -1 * len * 2);
-              vstack = vstack.slice(0, -1 * len);
-              lstack = lstack.slice(0, -1 * len);
-            }
-            stack.push(productionInfo.lhs);
-            vstack.push(yyval.$);
-            lstack.push(yyval._$);
-            const newState = getTableAction(stack[stack.length - 2], stack[stack.length - 1]);
-            stack.push(newState);
-            break;
-
-          case 3: // accept
-            return true;
-        }
+        case 3: // accept
+          return true;
       }
     }
   };
@@ -2178,26 +2174,13 @@ const parser = (() => {
   return parser;
 })();
 
-// CommonJS module export
-if (typeof require !== 'undefined' && typeof module !== 'undefined') {
-  module.exports = {
-    parser,
-    Parser: parser.Parser,
-    parse: (...args) => parser.parse(...args),
-    main(args = process.argv.slice(1)) {
-      const [prog, file] = args;
-      if (!file) {
-        console.error(`Usage: ${prog} FILE`);
-        process.exit(1);
-      }
-      const fs = require('fs');
-      const path = require('path');
-      const source = fs.readFileSync(path.resolve(file), 'utf8');
-      return parser.parse(source);
-    }
-  };
-  if (require.main === module) {
-    module.exports.main();
+if (typeof require !== 'undefined' && typeof exports !== 'undefined') {
+  exports.parser = parser;
+  exports.Parser = parser.Parser;
+  exports.parse = function () { return parser.parse.apply(parser, arguments); };
+  exports.main = function() {};
+  if (typeof module !== 'undefined' && require.main === module) {
+    exports.main(process.argv.slice(1));
   }
 }
     """
@@ -2342,8 +2325,27 @@ const parser = (() => {
           action = this.getTableAction(state, symbol);
         }
 
-        if (!action) {
-          throw new Error(\`Parse error at token \${symbol}\`);
+        if (!action || !action.length) {
+          if (!preErrorSymbol) {
+            const expected = [];
+            for (const p in getStateActions(state)) {
+              if (isTerminal(p) && p > 2) {
+                expected.push("'" + getSymbolName(p) + "'");
+              }
+            }
+            const errStr = `Parse error on line ${yylineno + 1}:
+${lexer.showPosition()}
+Expecting ${expected.join(', ')}, got '${getSymbolName(symbol) || symbol}'`;
+            this.parseError(errStr, {
+              text: lexer.match,
+              token: getSymbolName(symbol) || symbol,
+              line: lexer.yylineno,
+              loc: lexer.yylloc,
+              expected: expected,
+              recoverable: false
+            });
+          }
+          return false;
         }
 
         switch (action[0]) {
@@ -4027,20 +4029,14 @@ graph LR
 
   # Generate compact productions map (productions__ = Map {3=>[0,1], 4=>[1,3,2],...})
   prepareCompactProductions: ->
-    productionMap = new Map()
-
-    for rule in @rules
+    productions = []
+    for rule, id in @rules
       lhsSymbol = @symbols.get(rule.lhs)
       continue unless lhsSymbol
-
       lhsId = lhsSymbol.id
       rhsLength = rule.rhs.length
-
-      unless productionMap.has(lhsId)
-        productionMap.set(lhsId, [])
-      productionMap.get(lhsId).push(rhsLength)
-
-    productionMap
+      productions[id] = [lhsId, rhsLength]
+    productions
 
   # Generate compact table using nested array format
   prepareCompactTable: ->
@@ -4272,142 +4268,143 @@ const parser = (() => {
 #{unifiedRuntimeFunctions}
 
   const parser = {
-    trace: () => { },
-    yy: { },
+    yy: { }
+  };
 
-    // Direct unified format - no legacy compatibility needed
+  parser.trace = function trace() { };
 
-    #{performAction},
+  parser.performAction = #{performAction};
 
-    parseError(str, hash) {
-      if (hash.recoverable) {
-        this.trace(str);
-      } else {
-        const err = new Error(str);
-        err.hash = hash;
-        throw err;
-      }
-    },
+  parser.parseError = function parseError(str, hash) {
+    if (hash.recoverable) {
+      this.trace(str);
+    } else {
+      const err = new Error(str);
+      err.hash = hash;
+      throw err;
+    }
+  };
 
-    parse(input) {
-      const self = this;
-      const stack = [0];
-      const vstack = [null];
-      const lstack = [{
-        first_line: 1,
-        first_column: 0,
-        last_line: 1,
-        last_column: 0
-      }];
-      const EOF = 1;
-      let yytext = '';
-      let yyleng = 0;
-      let yylineno = 1;
-      let yy = self.yy;
-      let yyval = {};
-      let lexer = input.lexer || input;
-      let symbol = null;
-      let action = null;
-      let preErrorSymbol = null;
+  parser.parse = function parse(input) {
+    const self = this;
+    const stack = [0];
+    const vstack = [null];
+    const lstack = [{
+      first_line: 1,
+      first_column: 0,
+      last_line: 1,
+      last_column: 0
+    }];
+    const EOF = 1;
+    let yytext = '';
+    let yyleng = 0;
+    let yylineno = 1;
+    let yy = self.yy;
+    let yyval = {};
+    let lexer = input.lexer || input;
+    let symbol = null;
+    let action = null;
+    let preErrorSymbol = null;
 
-      if (typeof lexer.setInput === 'function') {
-        lexer.setInput(input.input || input);
-      }
+    if (typeof lexer.setInput === 'function') {
+      lexer.setInput(input.input || input);
+    }
 
-      function lex() {
-        let token = lexer.lex() || EOF;
-        if (typeof token !== 'number') {
-          if (token === '') {
-            token = EOF;
-          } else {
-            token = getSymbolId(token) || token;
-          }
-        }
-        return token;
-      }
-
-      while (true) {
-        const state = stack[stack.length - 1];
-
-        if (this.defaultActions[state]) {
-          action = this.defaultActions[state];
+    function lex() {
+      let token = lexer.lex() || EOF;
+      if (typeof token !== 'number') {
+        if (token === '') {
+          token = EOF;
         } else {
-          if (symbol === null) {
-            symbol = lex();
-          }
-          action = getTableAction(state, symbol);
+          token = getSymbolId(token) || token;
         }
+      }
+      return token;
+    }
 
-        if (!action || !action.length) {
+    while (true) {
+      const state = stack[stack.length - 1];
+
+      if (this.defaultActions[state]) {
+        action = this.defaultActions[state];
+      } else {
+        if (symbol === null) {
+          symbol = lex();
+        }
+        action = getTableAction(state, symbol);
+      }
+
+      if (!action || !action.length) {
+        if (!preErrorSymbol) {
+          const expected = [];
+          for (const p in getStateActions(state)) {
+            if (isTerminal(p) && p > 2) {
+              expected.push("'" + getSymbolName(p) + "'");
+            }
+          }
+          const errStr = `Parse error on line ${yylineno + 1}:
+${lexer.showPosition()}
+Expecting ${expected.join(', ')}, got '${getSymbolName(symbol) || symbol}'`;
+          this.parseError(errStr, {
+            text: lexer.match,
+            token: getSymbolName(symbol) || symbol,
+            line: lexer.yylineno,
+            loc: lexer.yylloc,
+            expected: expected,
+            recoverable: false
+          });
+        }
+        return false;
+      }
+
+      switch (action[0]) {
+        case 1: // shift
+          stack.push(symbol);
+          vstack.push(lexer.yytext);
+          lstack.push(lexer.yylloc);
+          stack.push(action[1]);
+          symbol = null;
           if (!preErrorSymbol) {
-            const expected = [];
-            for (const p in getStateActions(state)) {
-              if (isTerminal(p) && p > 2) {
-                expected.push("'" + getSymbolName(p) + "'");
-              }
+            yyleng = lexer.yyleng;
+            yytext = lexer.yytext;
+            yylineno = lexer.yylineno;
+            if (lexer.yylloc) {
+              lstack[lstack.length - 1] = lexer.yylloc;
             }
-            const errStr = 'Parse error on line ' + (yylineno + 1) + ":\\n" + lexer.showPosition() + "\\nExpecting " + expected.join(', ') + ", got '" + (getSymbolName(symbol) || symbol) + "'";
-            this.parseError(errStr, {
-              text: lexer.match,
-              token: getSymbolName(symbol) || symbol,
-              line: lexer.yylineno,
-              loc: lexer.yylloc,
-              expected: expected,
-              recoverable: false
-            });
+          } else {
+            symbol = preErrorSymbol;
+            preErrorSymbol = null;
           }
-          return false;
-        }
+          break;
 
-        switch (action[0]) {
-          case 1: // shift
-            stack.push(symbol);
-            vstack.push(lexer.yytext);
-            lstack.push(lexer.yylloc);
-            stack.push(action[1]);
-            symbol = null;
-            if (!preErrorSymbol) {
-              yyleng = lexer.yyleng;
-              yytext = lexer.yytext;
-              yylineno = lexer.yylineno;
-              if (lexer.yylloc) {
-                lstack[lstack.length - 1] = lexer.yylloc;
-              }
-            } else {
-              symbol = preErrorSymbol;
-              preErrorSymbol = null;
-            }
-            break;
+        case 2: // reduce
+          const productionInfo = getProduction(action[1]);
+          const len = productionInfo.length;
+          yyval.$ = vstack[vstack.length - len];
+          yyval._$ = {
+            first_line: lstack[lstack.length - (len || 1)].first_line,
+            last_line: lstack[lstack.length - 1].last_line,
+            first_column: lstack[lstack.length - (len || 1)].first_column,
+            last_column: lstack[lstack.length - 1].last_column
+          };
+          const r = this.performAction.call(yyval, yytext, yyleng, yylineno, yy, action[1], vstack, lstack);
+          if (typeof r !== 'undefined') {
+            return r;
+          }
+          if (len) {
+            stack = stack.slice(0, -1 * len * 2);
+            vstack = vstack.slice(0, -1 * len);
+            lstack = lstack.slice(0, -1 * len);
+          }
+          stack.push(productionInfo.lhs);
+          vstack.push(yyval.$);
+          lstack.push(yyval._$);
+          const newState = getTableAction(stack[stack.length - 2], stack[stack.length - 1]);
+          stack.push(newState);
+          break;
 
-          case 2: // reduce
-            const productionInfo = getProduction(action[1]);
-            const len = productionInfo.length;
-            yyval.$ = vstack[vstack.length - len];
-            yyval._$ = {
-              first_line: lstack[lstack.length - (len || 1)].first_line,
-              last_line: lstack[lstack.length - 1].last_line,
-              first_column: lstack[lstack.length - (len || 1)].first_column,
-              last_column: lstack[lstack.length - 1].last_column
-            };
-            const r = this.performAction.call(yyval, yytext, yyleng, yylineno, yy, action[1], vstack, lstack);
-            if (typeof r !== 'undefined') {
-              return r;
-            }
-            if (len) {
-              stack = stack.slice(0, -1 * len * 2);
-              vstack = vstack.slice(0, -1 * len);
-              lstack = lstack.slice(0, -1 * len);
-            }
-            stack.push(productionInfo.lhs);
-            vstack.push(yyval.$);
-            lstack.push(yyval._$);
-            const newState = getTableAction(stack[stack.length - 2], stack[stack.length - 1]);
-            stack.push(newState);
-            break;
-
-          case 3: // accept
-            return true;
-        }
+        case 3: // accept
+          return true;
       }
     }
   };
