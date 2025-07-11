@@ -29,6 +29,14 @@ class Item # Rule with a dot position and lookahead: [A → α • β, a]
   @makeCoreKey: (ruleId, dot) -> "#{ruleId}-#{dot}" # Canonical key for core
 
   constructor: (rule, dot = 0, lookahead = new Set()) ->
+    # Validate inputs
+    unless rule?
+      throw new Error("Item constructor requires a rule")
+    unless typeof dot is 'number' or dot < 0
+      throw new Error("Item dot position must be a non-negative number")
+    unless dot <= rule.rhs.length
+      throw new Error("Item dot position (#{dot}) cannot exceed rule RHS length (#{rule.rhs.length})")
+
     @rule      = rule        # associated production rule
     @dot       = dot         # dot position (• marker)
     @lookahead = lookahead   # LALR(1) lookahead set
@@ -91,31 +99,36 @@ class Generator
     @stateMap          = new Map() # core hash -> State
     @propagateLinks    = new Map() # "stateId-itemKey" -> Set of "stateId-itemKey"
     @inadequateStates  = []        # States with conflicts
-    @conflicts         = []        # Detailed conflict information
-    @onDemandLookahead = opts.onDemandLookahead ? true
-    @analyzed          = false     # Track analysis state
-
-    # Table optimization configuration (Bug #20 Fix)
-    @optimizationConfig = {
-      enabled: opts.optimize ? false           # Default: disabled for performance
-      auto: opts.autoOptimize ? true           # Auto-enable for large grammars
-      minStatesForAuto: opts.minStatesForAuto ? 20  # Threshold for auto-optimization
-      verbose: opts.optimizeVerbose ? false    # Detailed logging
-      algorithms: opts.algorithms ? ['auto']   # Which compression algorithms to try
-      skipIfSmall: opts.skipIfSmall ? true     # Skip for small tables
-    }
-
-    # Performance optimization caches
+    @conflicts         = []        # Conflict information
+    @analyzed          = false     # Track if analysis is complete
     @rulesByLHS        = new Map() # LHS -> [Rules] for O(1) rule lookup
-    @coreCache         = new Map() # state -> core hash for memoization
-    @closureCache      = new Map() # state core -> closure items for memoization
-    @performanceStats  = {        # Track performance metrics
+    @performanceStats  = {         # Track performance metrics
       closureCalls: 0,
       cacheHits: 0,
       stateCreations: 0,
       lookaheadComputations: 0,
-      optimizationTime: 0         # Track optimization overhead
+      optimizationTime: 0
     }
+    @coreCache         = new Map() # state core -> closure items for memoization
+    @closureCache      = new Map() # state -> core hash for memoization
+
+    # Table optimization configuration
+    @optimizationConfig = {
+      enabled: opts.optimize ? false
+      auto: opts.autoOptimize ? true
+      minStatesForAuto: opts.minStatesForAuto ? 20
+      verbose: opts.optimizeVerbose ? false
+      algorithms: opts.algorithms ? ['auto']
+      skipIfSmall: opts.skipIfSmall ? true
+    }
+
+    # Debug configuration
+    @debugConfig = {
+      verbose: opts.verbose ? false
+    }
+
+    # Configure options
+    @options = opts
 
     # If grammar data provided, process it immediately
     if grammarData
@@ -133,8 +146,8 @@ class Generator
           })
         @analyze()
       catch error
-        # Re-throw with better context
-        throw new Error("Failed to initialize Generator: #{error.message}")
+        console.error("❌ Constructor failed to process grammar:", error.message)
+        throw error
 
   # ============================================================================
   # 1. MAIN ANALYSIS METHOD - Performs complete LALR(1) analysis
@@ -145,6 +158,13 @@ class Generator
 
     unless @grammar
       throw new Error("No grammar loaded. Use new Generator(grammarData) or call processGrammar() first.")
+
+    # Validate that we have the essential components
+    unless @start
+      throw new Error("No start symbol defined in grammar")
+
+    unless @rules.length > 0
+      throw new Error("No production rules found in grammar")
 
     try
       # Grammar cleanup - iterate until no more changes
