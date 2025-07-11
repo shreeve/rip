@@ -2083,14 +2083,10 @@ const parser = (() => {
     while (true) {
       const state = stack[stack.length - 1];
 
-      if (this.defaultActions[state]) {
-        action = this.defaultActions[state];
-      } else {
-        if (symbol === null) {
-          symbol = lex();
-        }
-        action = getTableAction(state, symbol);
+      if (symbol === null) {
+        symbol = lex();
       }
+      action = getTableAction(state, symbol);
 
       if (!action || !action.length) {
         if (!preErrorSymbol) {
@@ -4097,6 +4093,12 @@ graph LR
 
       # Collect all actions for this state
       actions = []
+
+      # FIRST: Check for default action and add it at symbol 0
+      if @defaultActions[state]
+        actions.push([0, @defaultActions[state]])
+
+      # THEN: Add regular actions
       for symbol, action of stateTable
         symbolObj = @symbols.get(symbol)
         continue unless symbolObj
@@ -4325,14 +4327,10 @@ const parser = (() => {
     while (true) {
       const state = stack[stack.length - 1];
 
-      if (this.defaultActions[state]) {
-        action = this.defaultActions[state];
-      } else {
-        if (symbol === null) {
-          symbol = lex();
-        }
-        action = getTableAction(state, symbol);
+      if (symbol === null) {
+        symbol = lex();
       }
+      action = getTableAction(state, symbol);
 
       if (!action || !action.length) {
         if (!preErrorSymbol) {
