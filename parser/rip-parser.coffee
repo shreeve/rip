@@ -4055,7 +4055,7 @@ graph LR
     for state, i in @states
       continue unless @table[i]
 
-      # Create subarray for this state: [stateId, symbol1, action1, symbol2, action2, ...]
+      # Create subarray for this state: [stateId, symbol1, type1, target1, symbol2, type2, target2, ...]
       stateArray = [i]  # Start with state number
 
       for symbol, action of @table[i]
@@ -4065,26 +4065,24 @@ graph LR
         # Add symbol ID
         stateArray.push(symbolObj.id)
 
-        # Create bit-packed value based on action type
+        # Add type and target based on action
         if action?.type
           switch action.type
             when 'shift'
-              # SHIFT: (state << 1) | 0
-              value = (action.state << 1) | 0
+              stateArray.push(1)  # type: 1=shift
+              stateArray.push(action.state)  # target: state number
             when 'reduce'
-              # REDUCE: (rule << 1) | 0 (but we'll store negative to distinguish from shift)
-              value = ((-action.rule) << 1) | 0
+              stateArray.push(2)  # type: 2=reduce
+              stateArray.push(action.rule)  # target: rule number
             when 'accept'
-              # ACCEPT: (0 << 1) | 0
-              value = (0 << 1) | 0
+              stateArray.push(3)  # type: 3=accept
+              stateArray.push(0)  # target: not used for accept
             else
               continue
         else
-          # GOTO: (state << 1) | 1
-          value = (action << 1) | 1
-
-        # Add action value
-        stateArray.push(value)
+          # GOTO action
+          stateArray.push(0)  # type: 0=goto
+          stateArray.push(action)  # target: state number
 
       # Only add state if it has symbols (length > 1)
       if stateArray.length > 1
@@ -4124,6 +4122,7 @@ graph LR
   # Generate runtime functions for compact grammar access
   generateCompactRuntimeFunctions: ->
     """
+
     // Runtime functions for compact grammar access
     function getSymbolId(name) {
       return symbols__.indexOf(name);
@@ -4146,27 +4145,22 @@ graph LR
       for (const stateArray of table__) {
         if (stateArray[0] === state) {
           // Found the state, now look for the symbol
-          for (let i = 1; i < stateArray.length; i += 2) {
+          for (let i = 1; i < stateArray.length; i += 3) {
             if (stateArray[i] === symbol) {
-              const value = stateArray[i + 1];
+              const type = stateArray[i + 1];
+              const target = stateArray[i + 2];
 
-              const isGoto = value & 1;
-              const target = value >> 1;
-
-              if (isGoto === 1) {
-                // GOTO action
-                return target;
-              } else {
-                // SHIFT/REDUCE/ACCEPT action
-                if (target === 0) {
-                  return { type: 'accept' };
-                } else if (target > 0) {
-                  // Positive target = SHIFT action
+              switch (type) {
+                case 0: // GOTO
+                  return target;
+                case 1: // SHIFT
                   return { type: 'shift', state: target };
-                } else {
-                  // Negative target = REDUCE action (convert back to positive rule ID)
-                  return { type: 'reduce', rule: Math.abs(target) };
-                }
+                case 2: // REDUCE
+                  return { type: 'reduce', rule: target };
+                case 3: // ACCEPT
+                  return { type: 'accept' };
+                default:
+                  return null;
               }
             }
           }
