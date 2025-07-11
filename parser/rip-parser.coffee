@@ -79,7 +79,8 @@ class State # Set of LR(0) items
 # ==[ LALR(1) Parser Generator ]================================================
 
 class Generator
-  constructor: (opts = {}) ->
+  constructor: (grammarData = null, opts = {}) ->
+    # Initialize all data structures
     @grammar           = null      # Store grammar
     @start             = null      # Start symbol
     @tokens            = null      # Store tokens for terminal identification
@@ -92,6 +93,7 @@ class Generator
     @inadequateStates  = []        # States with conflicts
     @conflicts         = []        # Detailed conflict information
     @onDemandLookahead = opts.onDemandLookahead ? true
+    @analyzed          = false     # Track analysis state
 
     # Table optimization configuration (Bug #20 Fix)
     @optimizationConfig = {
@@ -115,53 +117,85 @@ class Generator
       optimizationTime: 0         # Track optimization overhead
     }
 
+    # If grammar data provided, process it immediately
+    if grammarData
+      try
+        if grammarData.grammar
+          # Grammar data is in the expected format { grammar, operators, start, tokens }
+          @processGrammar(grammarData)
+        else
+          # Legacy format - assume grammarData is the grammar object itself
+          @processGrammar({
+            grammar: grammarData.grammar or grammarData
+            operators: grammarData.operators
+            start: grammarData.start
+            tokens: grammarData.tokens
+          })
+        @analyze()
+      catch error
+        # Re-throw with better context
+        throw new Error("Failed to initialize Generator: #{error.message}")
+
   # ============================================================================
-  # 1. ENTRY POINT - Main orchestration function
+  # 1. MAIN ANALYSIS METHOD - Performs complete LALR(1) analysis
   # ============================================================================
 
-  generate: (options = {}) ->
+  analyze: ->
+    return if @analyzed
+
+    unless @grammar
+      throw new Error("No grammar loaded. Use new Generator(grammarData) or call processGrammar() first.")
+
     try
-      @processGrammar(options)
+      # Grammar cleanup - iterate until no more changes
+      loop
+        initialRuleCount = @rules.length
+        initialSymbolCount = @symbols.size
+
+        # Order matters: unproductive first, then unreachable
+        @eliminateUnproductive()
+        @eliminateUnreachable()
+
+        # Stop if no changes were made
+        break if @rules.length == initialRuleCount and @symbols.size == initialSymbolCount
+
+      @computeNullable()
+      @computeFirst()
+      @computeFollow()
+      @buildStates()
+      @computeLookaheads()
+      @propagateLookaheads()
+      @table = @buildTable()
+
+      # State minimization and optimization
+      @minimizeStates()
+
+      # Smart table optimization (Bug #20 Fix) - only when beneficial
+      @smartOptimizeTable()
+
+      @computeDefaultActions()
+
+      @analyzed = true
+
     catch error
-      # Enhanced error reporting for grammar validation failures
-      console.error("\n❌ GRAMMAR VALIDATION ERROR:")
+      # Enhanced error reporting for analysis failures
+      console.error("\n❌ LALR(1) ANALYSIS ERROR:")
       console.error("=" * 50)
       console.error(error.message)
       console.error("\n💡 Common fixes:")
-      console.error("  - Check grammar object structure")
-      console.error("  - Verify all non-terminals have valid rules")
-      console.error("  - Ensure symbol names are valid identifiers")
-      console.error("  - Check for typos in rule patterns")
-      console.error("  - Validate action code syntax")
+      console.error("  - Check for circular dependencies in grammar")
+      console.error("  - Verify all symbols are properly defined")
+      console.error("  - Check for ambiguous grammar rules")
+      console.error("  - Validate precedence declarations")
       throw error
 
-    # Grammar cleanup - iterate until no more changes
-    loop
-      initialRuleCount = @rules.length
-      initialSymbolCount = @symbols.size
+  # ============================================================================
+  # 2. MAIN COMPILATION METHOD - Generates parser code
+  # ============================================================================
 
-      # Order matters: unproductive first, then unreachable
-      @eliminateUnproductive()
-      @eliminateUnreachable()
-
-      # Stop if no changes were made
-      break if @rules.length == initialRuleCount and @symbols.size == initialSymbolCount
-
-    @computeNullable()
-    @computeFirst()
-    @computeFollow()
-    @buildStates()
-    @computeLookaheads()
-    @propagateLookaheads()
-    @table = @buildTable()
-
-    # State minimization and optimization
-    @minimizeStates()
-
-    # Smart table optimization (Bug #20 Fix) - only when beneficial
-    @smartOptimizeTable()
-
-    @computeDefaultActions()
+  compile: (options = {}) ->
+    # Ensure grammar is analyzed
+    @analyze() unless @analyzed
 
     # Report conflicts if any
     @reportConflicts() if @conflicts.length > 0
@@ -173,13 +207,55 @@ class Generator
     @generateCommonJS(options)
 
   # ============================================================================
-  # 2. GRAMMAR PROCESSING PHASE
+  # 3. ANALYSIS INSPECTION METHODS
+  # ============================================================================
+
+  getStatistics: ->
+    @analyze() unless @analyzed
+    {
+      states: @states.length
+      rules: @rules.length
+      terminals: [...@symbols.values()].filter((s) -> s.isTerminal).length
+      nonterminals: [...@symbols.values()].filter((s) -> !s.isTerminal).length
+      conflicts: @conflicts.length
+      symbols: @symbols.size
+      inadequateStates: @inadequateStates.length
+    }
+
+  hasConflicts: ->
+    @analyze() unless @analyzed
+    @conflicts.length > 0
+
+  isAnalyzed: -> @analyzed
+
+  # ============================================================================
+  # 4. LEGACY SUPPORT - Maintain backward compatibility
+  # ============================================================================
+
+  # Legacy method for backward compatibility
+  generate: (options = {}) ->
+    # If no grammar loaded, try to process from options
+    unless @grammar
+      if options.grammar
+        @processGrammar(options)
+        @analyze()
+      else
+        throw new Error("No grammar data provided. Use new Generator(grammarData) or provide grammar in options.")
+
+    # Delegate to compile method
+    @compile(options)
+
+  # ============================================================================
+  # 5. GRAMMAR PROCESSING PHASE
   # ============================================================================
 
   # Work starts here
   processGrammar: ({ grammar, operators, start, tokens }) ->
     # Comprehensive input validation
     @validateGrammarInput({ grammar, operators, start, tokens })
+
+    # Store the grammar for later reference
+    @grammar = grammar
 
     # Convert tokens to a set
     @tokens = new Set(tokens.trim().split(/\s+/))
@@ -443,7 +519,7 @@ class Generator
     symbol
 
   # ============================================================================
-  # 3. GRAMMAR CLEANUP PHASE
+  # 6. GRAMMAR CLEANUP PHASE
   # ============================================================================
 
   findUnproductiveSymbols: ->
@@ -607,7 +683,7 @@ class Generator
     @buildRuleLookupCache()
 
   # ============================================================================
-  # 4. LALR(1) ANALYSIS PHASE
+  # 7. LALR(1) ANALYSIS PHASE
   # ============================================================================
 
   # Compute nullable symbols
@@ -727,7 +803,7 @@ class Generator
     first
 
   # ============================================================================
-  # 5. STATE MACHINE CONSTRUCTION
+  # 8. STATE MACHINE CONSTRUCTION
   # ============================================================================
 
   # Build LR(0) states
@@ -859,7 +935,7 @@ class Generator
     core
 
   # ============================================================================
-  # 6. LOOKAHEAD COMPUTATION
+  # 9. LOOKAHEAD COMPUTATION
   # ============================================================================
 
   # Compute initial (spontaneous) lookaheads and propagation links
@@ -1029,7 +1105,7 @@ class Generator
           console.warn "Warning: Item has no lookaheads: #{item.toString()}"
 
   # ============================================================================
-  # 7. PARSING TABLE CONSTRUCTION
+  # 10. PARSING TABLE CONSTRUCTION
   # ============================================================================
 
   # Build parse table
@@ -1157,7 +1233,7 @@ class Generator
     null
 
   # ============================================================================
-  # 8. OPTIMIZATION PHASE
+  # 11. OPTIMIZATION PHASE
   # ============================================================================
 
   # State minimization to reduce parse table size
@@ -1705,7 +1781,7 @@ class Generator
     hash
 
   # ============================================================================
-  # 9. DEFAULT ACTIONS PHASE
+  # 12. DEFAULT ACTIONS PHASE
   # ============================================================================
 
   computeDefaultActions: ->
@@ -1791,7 +1867,7 @@ class Generator
     states
 
   # ============================================================================
-  # 10. DEBUGGING & ANALYSIS FUNCTIONS
+  # 13. DEBUGGING & ANALYSIS FUNCTIONS
   # ============================================================================
 
   # Check if a symbol is left-recursive
@@ -2022,7 +2098,7 @@ class Generator
     states
 
   # ============================================================================
-  # 11. SOURCE MAP SUPPORT INFRASTRUCTURE
+  # 14. SOURCE MAP SUPPORT INFRASTRUCTURE
   # ============================================================================
 
   # Source map tracker for debugging support
@@ -2104,7 +2180,7 @@ class Generator
     @sourceMapTracker.generateSourceMap()
 
   # ============================================================================
-  # 12. VISUALIZATION FUNCTIONS
+  # 15. VISUALIZATION FUNCTIONS
   # ============================================================================
 
   # Generate DOT format visualization of the state machine
@@ -2231,7 +2307,7 @@ class Generator
   # (Already added above in the debugging section, but moving them here as requested)
 
   # ============================================================================
-  # 13. CODE GENERATION PHASE
+  # 16. CODE GENERATION PHASE
   # ============================================================================
 
   # Generate complete unified CommonJS parser (new default format)
@@ -3163,7 +3239,7 @@ function getTableAction(state, symbol) {
     JSON.stringify(obj).replace(/"(\d+)":/g, '$1:')
 
   # ============================================================================
-  # 11. FINAL STEPS
+  # 15. FINAL STEPS
   # ============================================================================
 
   reportConflicts: ->
@@ -3275,7 +3351,7 @@ function getTableAction(state, symbol) {
     """
 
   # ============================================================================
-  # 15. UTILITY FUNCTIONS
+  # 19. UTILITY FUNCTIONS
   # ============================================================================
 
   # Interactive debugging functions (called by CLI)
@@ -3674,8 +3750,8 @@ unless module.parent
       grammarSource = fs.readFileSync(options.inputFile, 'utf8')
       grammar = parseGrammarFile(grammarSource, options)
 
-      # Create generator with appropriate configuration
-      generator = new Generator()
+      # Create generator with grammar data and configuration
+      generator = new Generator(grammar)
       configureGenerator(generator, options)
 
       # Generate the parser
@@ -3770,12 +3846,8 @@ unless module.parent
     if options.verbose
       console.log "\n🔧 Generating parser..."
 
-    # Generate the parser using the complete workflow
-    parser = generator.generate({
-      grammar: grammar.grammar
-      operators: grammar.operators
-      start: grammar.start
-      tokens: grammar.tokens
+    # Use the new compile method for code generation
+    parser = generator.compile({
       format: options.format
       namespace: options.namespace
       sourceMap: options.sourceMap
@@ -4041,6 +4113,9 @@ unless module.parent
           Rules: #{stats.rules}
           Terminals: #{stats.terminals}
           Non-terminals: #{stats.nonterminals}
+          Symbols: #{stats.symbols}
+          Conflicts: #{stats.conflicts}
+          Inadequate States: #{stats.inadequateStates}
         """
 
       when 'optimize'
