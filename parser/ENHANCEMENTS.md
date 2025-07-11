@@ -307,8 +307,8 @@ The grammar validation only checked for undefined symbols, missing critical vali
 - **Productivity Analysis**: Find symbols that can't derive terminal strings
 - **Left Recursion Detection**: Both immediate and indirect recursion
 - **Empty Grammar Detection**: Check for grammars with no rules
-- **Duplicate Rule Detection**: Identify redundant productions
-- **Useless Rule Detection**: Find unit productions to self
+- **Duplicate Rule Detection**: Identify redundant rules
+- **Useless Rule Detection**: Find unit rules to self
 
 ### Technical Details
 ```coffeescript
@@ -397,8 +397,8 @@ reassignIds: ->
 The parser had no error recovery mechanisms, causing parsing to fail completely on the first syntax error instead of attempting recovery and continuing to find additional errors.
 
 ### Solution Implemented
-- **Multi-Strategy Recovery**: Error productions, panic mode, and token skipping
-- **Automatic Error Production Injection**: Adds error rules to grammar automatically
+- **Multi-Strategy Recovery**: Error rules, panic mode, and token skipping
+- **Automatic Error Rule Injection**: Adds error rules to grammar automatically
 - **Token Buffer System**: Unlex capability for putting tokens back
 - **Context-Aware Synchronization**: Smart synchronization token selection
 - **Recovery State Management**: Proper recovery mode tracking
@@ -407,18 +407,18 @@ The parser had no error recovery mechanisms, causing parsing to fail completely 
 ```coffeescript
 # Comprehensive error recovery
 attemptErrorRecovery: (errStr, hash, stack, vstack, lstack, symbol, lex, unlex) ->
-  # Strategy 1: Look for error productions
+  # Strategy 1: Look for error rules
   errorAction = @getAction(state, TERROR)
   if errorAction
     @pushState(errorAction[1], TERROR, null, hash.loc)
     return true
 
-  # Strategy 2: Panic mode - pop stack until error production found
+  # Strategy 2: Panic mode - pop stack until error rule found
   while stack.length > 2
     stack.pop(); stack.pop(); vstack.pop(); lstack.pop()
     state = stack[stack.length - 1]
     if @table[state]?[TERROR]
-      # Found error production, recover
+      # Found error rule, recover
       return true
 
   # Strategy 3: Token skipping to synchronization points
@@ -427,7 +427,7 @@ attemptErrorRecovery: (errStr, hash, stack, vstack, lstack, symbol, lex, unlex) 
 
 ### Results
 - ✅ **Multi-Strategy Recovery**: Three complementary recovery approaches
-- ✅ **Automatic Error Productions**: Grammar automatically enhanced
+- ✅ **Automatic Error Rules**: Grammar automatically enhanced
 - ✅ **Token Buffer System**: Flexible token management for recovery
 - ✅ **Context-Aware Sync**: Smart synchronization point selection
 - ✅ **Continued Parsing**: Find multiple errors in single parse run
@@ -529,7 +529,7 @@ The parser generator had insufficient validation for malformed grammar input, le
 ### Solution Implemented
 - **Grammar Structure Validation**: Complete grammar object structure checking
 - **Symbol Name Validation**: Ensure valid identifier patterns
-- **Production Pattern Validation**: Validate all production patterns
+- **Rule Pattern Validation**: Validate all rule patterns
 - **Action Code Validation**: Check semantic action syntax
 - **Operator Precedence Validation**: Validate precedence declarations
 - **Enhanced Error Reporting**: Helpful suggestions and clear messages
@@ -544,21 +544,21 @@ validateGrammarInput: ({ grammar, operators, start, tokens }) ->
   unless grammar and typeof grammar == 'object'
     errors.push("Grammar must be a non-null object")
 
-  # Validate each production
-  for nonterminal, productions of grammar
+  # Validate each rule
+for nonterminal, rules of grammar
     unless @isValidSymbolName(nonterminal)
       errors.push("Invalid non-terminal name: '#{nonterminal}'")
 
-    unless Array.isArray(productions)
-      errors.push("Productions for '#{nonterminal}' must be an array")
+    unless Array.isArray(rules)
+      errors.push("Rules for '#{nonterminal}' must be an array")
 
-    for production, i in productions
-      unless Array.isArray(production)
-        errors.push("Production #{i} for '#{nonterminal}' must be an array")
+    for rule, i in rules
+      unless Array.isArray(rule)
+        errors.push("Rule #{i} for '#{nonterminal}' must be an array")
         continue
 
-      [pattern, action, options] = production
-      @validateProductionPattern(pattern, nonterminal, i, errors)
+      [pattern, action, options] = rule
+      @validateRulePattern(pattern, nonterminal, i, errors)
       @validateActionCode(action, pattern?.split(' ').length || 0, nonterminal, i, errors)
 ```
 

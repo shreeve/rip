@@ -170,10 +170,10 @@ operators = [
 
 ### Notes
 
-- Each production is an array: `[pattern, action, options]`
+- Each rule is an array: `[pattern, action, options]`
 - `pattern` is a space-separated RHS; use `''` or omit for ε (empty).
 - `action` can be a function or arrow function. Positional values `$1 … $n`, `$$` (result), `@$` (result location) and location variables `@1 … @n` are supported.
-- `options.prec` lets you tag a production with an explicit precedence symbol for conflict resolution.
+- `options.prec` lets you tag a rule with an explicit precedence symbol for conflict resolution.
 - In the generated parser, `$$` is shorthand for `this.$` (the semantic value being constructed).
 
 ## Command Line Options
@@ -196,7 +196,7 @@ operators = [
 | Class      | Role |
 |------------|------|
 | `Symbol`   | Metadata for every terminal & non-terminal (id, nullable, FIRST/FOLLOW sets) |
-| `Rule`     | One production *A → β* (+ optional semantic action & precedence tag). |
+| `Rule`     | One rule *A → β* (+ optional semantic action & precedence tag). |
 | `Item`     | LR(1) item  *A → β · γ , LA*  used during state construction. |
 | `State`    | A set of LR items plus transitions to other states. |
 | `Generator`| The orchestrator – performs grammar analysis, builds the LALR automaton, resolves conflicts and finally generates JS code. |

@@ -122,7 +122,7 @@ Dictionary compression was optimal for CoffeeScript because:
 - **Robust parsing** - Handled complex grammar structures and edge cases
 
 ### **Error Handling**
-- **Minor warnings only** - Only expected warnings about empty productions using `$1`
+- **Minor warnings only** - Only expected warnings about empty rules using `$1`
 - **Graceful degradation** - Continued processing despite non-critical issues
 - **Comprehensive validation** - Thorough grammar validation before processing
 
@@ -257,7 +257,7 @@ Our revolutionary format was **battle-tested** with the complete CoffeeScript gr
 #### **Performance Verification**
 ```bash
 # Generated parser verification
-✅ 409 rules processed - All CoffeeScript productions
+✅ 409 rules processed - All CoffeeScript rules
 ✅ 206 symbols handled - Complete language vocabulary
 ✅ 405 states created - Full LALR(1) automaton
 ✅ 2,250 conflicts resolved - Perfect precedence handling

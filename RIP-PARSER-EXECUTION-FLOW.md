@@ -12,10 +12,10 @@
 ### **2. Grammar Processing Phase**
 - **`processGrammar(options)`** - Validates and processes the input grammar structure
   - **`validateGrammarInput()`** - Comprehensive validation of grammar, operators, tokens
-  - **`parseProductionPattern()`** - Parses production patterns into symbol arrays
+  - **`parseRulePattern()`** - Parses rule patterns into symbol arrays
   - **`validateActionCode()`** - Validates semantic action code syntax
   - **`processOperators()`** - Processes precedence and associativity rules
-  - **`addErrorRecoveryProductions()`** - Adds error recovery rules to the grammar
+  - **`addErrorRecoveryRules()`** - Adds error recovery rules to the grammar
   - **`buildRuleLookupCache()`** - Builds optimized O(1) rule lookup by LHS
 
 ### **3. Grammar Cleanup Phase**
@@ -77,7 +77,7 @@
 Based on the execution flow, the functions should be organized in this order:
 
 1. **Entry Point**: `generate()`
-2. **Grammar Processing**: `processGrammar()`, `validateGrammarInput()`, `parseProductionPattern()`, `validateActionCode()`, `processOperators()`, `addErrorRecoveryProductions()`, `buildRuleLookupCache()`
+2. **Grammar Processing**: `processGrammar()`, `validateGrammarInput()`, `parseRulePattern()`, `validateActionCode()`, `processOperators()`, `addErrorRecoveryRules()`, `buildRuleLookupCache()`
 3. **Grammar Cleanup**: `eliminateUnproductive()`, `eliminateUnreachable()`, `reassignIds()`
 4. **LALR Analysis**: `computeNullable()`, `computeFirst()`, `computeFollow()`, `firstOfString()`
 5. **State Construction**: `buildStates()`, `closure()`, `findOrAddState()`, `computeCore()`
