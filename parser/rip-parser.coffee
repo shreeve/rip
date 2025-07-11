@@ -131,7 +131,6 @@ class Generator
   # 1. ENTRY POINT - Main orchestration function
   # ============================================================================
 
-  # Generate parser code
   generate: (options = {}) ->
     try
       @processGrammar(options)
@@ -3198,34 +3197,36 @@ function getTableAction(state, symbol) {
 
     # Report unresolved conflicts first (most important)
     if unresolvedSR.length > 0
+      console.log ""
       console.log "🚨 UNRESOLVED CONFLICTS (require attention):"
       console.log "=================================================="
       for conflict in unresolvedSR
         console.log conflict.explanation
-        console.log ""
 
     # Report resolved conflicts
     if resolvedSR.length > 0
+      console.log ""
       console.log "✅ RESOLVED SHIFT/REDUCE CONFLICTS:"
       console.log "========================================"
       for conflict in resolvedSR
         console.log conflict.explanation
-        console.log ""
 
     # Report reduce/reduce conflicts
     if rrConflicts.length > 0
+      console.log ""
       console.log "⚠️  REDUCE/REDUCE CONFLICTS:"
       console.log "=============================="
       for conflict in rrConflicts
         console.log conflict.explanation
-        console.log ""
 
     # Summary and recommendations
     @reportConflictSummary(unresolvedSR.length, resolvedSR.length, rrConflicts.length)
 
   reportConflictSummary: (unresolved, resolved, reduceReduce) ->
+    console.log ""
     console.log "📊 CONFLICT SUMMARY:"
     console.log "===================="
+    console.log ""
 
     if unresolved > 0
       console.log "❌ #{unresolved} unresolved shift/reduce conflicts need attention"
