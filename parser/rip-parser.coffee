@@ -2094,7 +2094,7 @@ const parser = (() => {
           if (symbol === null) {
             symbol = lex();
           }
-          action = getAction(state, symbol);
+          action = getTableAction(state, symbol);
         }
 
         if (!action || !action.length) {
@@ -2160,7 +2160,7 @@ const parser = (() => {
             stack.push(productionInfo.lhs);
             vstack.push(yyval.$);
             lstack.push(yyval._$);
-            const newState = getAction(stack[stack.length - 2], stack[stack.length - 1]);
+            const newState = getTableAction(stack[stack.length - 2], stack[stack.length - 1]);
             stack.push(newState);
             break;
 
@@ -2285,7 +2285,7 @@ const parser = (() => {
       this.stackTop = 0;
     }
 
-    getAction(state, symbol) {
+    getTableAction(state, symbol) {
       this.stats.tableHits++;
       return getTableEntry(state, symbol);
     }
@@ -2339,7 +2339,7 @@ const parser = (() => {
             symbol = this.nextToken();
             this.stats.tokens++;
           }
-          action = this.getAction(state, symbol);
+          action = this.getTableAction(state, symbol);
         }
 
         if (!action) {
@@ -2372,7 +2372,7 @@ const parser = (() => {
             // Push LHS and new state
             const lhs = productions[ruleId * 2];
             const lhsId = symbolToId[lhs];
-            const newState = this.getAction(this.stateStack[this.stackTop], lhsId);
+            const newState = this.getTableAction(this.stateStack[this.stackTop], lhsId);
             this.pushState(newState, lhsId, result, {});
 
             if (result !== undefined && typeof result === 'object' && result._return) {
@@ -3142,7 +3142,7 @@ graph LR
             rowData.push(JSON.stringify(action))
 
             # Track action frequency
-            actionKey = @getActionKey(action)
+            actionKey = @getTableActionKey(action)
             actionFrequency.set(actionKey, (actionFrequency.get(actionKey) || 0) + 1)
           else
             rowData.push(null)
@@ -3475,7 +3475,7 @@ graph LR
 
   # Helper methods for table optimization
 
-  getActionKey: (action) ->
+  getTableActionKey: (action) ->
     if action?.type
       "#{action.type}:#{action.state || action.rule || ''}"
     else
@@ -4084,56 +4084,47 @@ graph LR
 
     compactTable
 
-  # Prepare unified states array with symbol 0 for statics optimization
+    # Prepare unified states array with dense format + statics optimization
   prepareUnifiedStates: ->
+    # Find the maximum state ID to size the array
+    maxState = Math.max(...Object.keys(@table || {}).map(Number))
     states = []
 
-    # Initialize states array with empty Maps for all possible states
-    maxState = Math.max(...Object.keys(@table || {}).map(Number))
+    # Initialize array with empty objects for all states
     for i in [0..maxState]
-      states[i] = new Map()
+      states[i] = {}
 
-    # Process each state in the table
+    # SINGLE PASS: For each state, either make it static OR multi-action
     for stateId, stateTable of @table
       state = parseInt(stateId)
-      stateMap = states[state]
-      actionCount = 0
+      stateObj = states[state]
 
       # Collect all actions for this state
+      actions = []
       for symbol, action of stateTable
         symbolObj = @symbols.get(symbol)
         continue unless symbolObj
-        actionCount++
 
-        if action?.type
+        actionArray = if action?.type
           switch action.type
-            when 'shift'
-              stateMap.set(symbolObj.id, [1, action.state])  # [type, target]
-            when 'reduce'
-              stateMap.set(symbolObj.id, [2, action.rule])   # [type, target]
-            when 'accept'
-              stateMap.set(symbolObj.id, [3, 0])             # [type, target]
+            when 'shift' then [1, action.state]
+            when 'reduce' then [2, action.rule]
+            when 'accept' then [3, 0]
         else
-          # GOTO action
-          stateMap.set(symbolObj.id, [0, action])           # [type, target]
+          [0, action]  # GOTO action
 
-      # If this state has only one action, optimize it using symbol 0
-      if actionCount == 1
-        # Move the single action to symbol 0 (statics slot)
-        for [symbol, action] from stateMap
-          stateMap.clear()
-          stateMap.set(0, action)  # Store at symbol 0 (unused by $accept)
-          break
+        actions.push([symbolObj.id, actionArray])
 
-    # Convert Maps to objects for JSON serialization
-    statesArray = []
-    for i in [0..maxState]
-      stateObj = {}
-      for [symbol, action] from states[i]
-        stateObj[symbol] = action
-      statesArray[i] = stateObj
+      # Decision: Single action = static, Multiple actions = full mapping
+      if actions.length == 1
+        # Static state: put the action at symbol 0
+        stateObj[0] = actions[0][1]
+      else
+        # Multi-action state: put all actions at their symbol IDs
+        for [symbolId, actionArray] in actions
+          stateObj[symbolId] = actionArray
 
-    statesArray
+    states
 
   # Generate complete compact grammar representation (legacy compatibility)
   generateCompactGrammar: ->
@@ -4229,12 +4220,11 @@ function getStateActions(state) {
 }
 
 function getTableAction(state, symbol) {
-  // Direct lookup in unified states array
+  // Dense format with statics optimization
   const stateActions = states[state];
   if (!stateActions) return null;
 
   // Try static action first (symbol 0), then specific symbol
-  // This is the key optimization: symbol 0 is never used by $accept during parsing
   const action = stateActions[0] || stateActions[symbol];
   if (!action) return null;
 
@@ -4367,7 +4357,7 @@ const parser = (() => {
           if (symbol === null) {
             symbol = lex();
           }
-          action = getAction(state, symbol);
+          action = getTableAction(state, symbol);
         }
 
         if (!action || !action.length) {
@@ -4433,7 +4423,7 @@ const parser = (() => {
             stack.push(productionInfo.lhs);
             vstack.push(yyval.$);
             lstack.push(yyval._$);
-            const newState = getAction(stack[stack.length - 2], stack[stack.length - 1]);
+            const newState = getTableAction(stack[stack.length - 2], stack[stack.length - 1]);
             stack.push(newState);
             break;
 
