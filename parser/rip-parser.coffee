@@ -88,6 +88,10 @@ class State # Set of LR(0) items
 
 class Generator
   constructor: (grammarData = null, opts = {}) ->
+    @timing "🏗️ CONSTRUCTOR"
+
+    @timing "  📋 Data structure initialization"
+
     # Initialize all data structures
     @grammar           = null      # Store grammar
     @start             = null      # Start symbol
@@ -131,24 +135,69 @@ class Generator
     @options = opts
     @options.grammarData = grammarData  # Store for lazy loading
 
+    @timing "  📋 Data structure initialization"
+
     # If grammar data provided, process it immediately (unless lazy loading requested)
     if grammarData and not opts.lazy
       try
-        if grammarData.grammar
-          # Grammar data is in the expected format { grammar, operators, start, tokens }
-          @processGrammar(grammarData)
-        else
-          # Legacy format - assume grammarData is the grammar object itself
-          @processGrammar({
-            grammar: grammarData.grammar or grammarData
-            operators: grammarData.operators
-            start: grammarData.start
-            tokens: grammarData.tokens
-          })
-        @analyze()
+        @timing "  📁 Grammar processing", =>
+          if grammarData.grammar
+            # Grammar data is in the expected format { grammar, operators, start, tokens }
+            @processGrammar(grammarData)
+          else
+            # Legacy format - assume grammarData is the grammar object itself
+            @processGrammar({
+              grammar: grammarData.grammar or grammarData
+              operators: grammarData.operators
+              start: grammarData.start
+              tokens: grammarData.tokens
+            })
+
+        @timing "  🔍 Analysis", => @analyze()
+
       catch error
         console.error("❌ Constructor failed to process grammar:", error.message)
         throw error
+
+    @timing "🏗️ CONSTRUCTOR"
+
+  # ============================================================================
+  # TIMING UTILITY - Flexible timing for both function wrapping and manual timing
+  # ============================================================================
+
+  # Usage:
+  #   @timing "📋 Phase description", => @fn()  # Function wrapper
+  #   @timing "📋 Phase description"            # Start timer
+  #   @timing "📋 Phase description"            # End timer and show duration
+  timing: (description, fn) ->
+    # Initialize timers map if not exists
+    @_timers ?= new Map()
+
+    if fn?
+      # Function wrapper mode - only time if verbose
+      if @debugConfig?.verbose
+        startTime = Date.now()
+        result = fn.call(this)
+        endTime = Date.now()
+        duration = endTime - startTime
+        console.log("#{description}: #{duration}ms")
+        result
+      else
+        fn.call(this)
+    else
+      # Manual timing mode - only time if verbose
+      if @debugConfig?.verbose
+        if @_timers.has(description)
+          # End timer
+          startTime = @_timers.get(description)
+          endTime = Date.now()
+          duration = endTime - startTime
+          console.log("#{description}: #{duration}ms")
+          @_timers.delete(description)
+        else
+          # Start timer
+          @_timers.set(description, Date.now())
+      # Return nothing for manual timing mode
 
   # ============================================================================
   # 1. MAIN ANALYSIS METHOD - Performs complete LALR(1) analysis
@@ -168,46 +217,41 @@ class Generator
       throw new Error("No production rules found in grammar")
 
     try
-      # Grammar cleanup - iterate until no more changes
-      loop
-        initialRuleCount = @rules.length
-        initialSymbolCount = @symbols.size
+      @timing "📊 TOTAL ANALYSIS TIME"
 
-        # Order matters: unproductive first, then unreachable
-        @eliminateUnproductive()
-        @eliminateUnreachable()
+      @timing "  ⚡ Phase 1: Nullable computation", => @computeNullable()
+      @timing "  ⚡ Phase 2: FIRST sets computation", => @computeFirst()
+      @timing "  ⚡ Phase 3: FOLLOW sets computation", => @computeFollow()
+      @timing "  ⚡ Phase 4: Grammar cleanup", =>
+        # Grammar cleanup - iterate until no more changes
+        loop
+          initialRuleCount = @rules.length
+          initialSymbolCount = @symbols.size
 
-        # Stop if no changes were made
-        break if @rules.length == initialRuleCount and @symbols.size == initialSymbolCount
+          # Order matters: unproductive first, then unreachable
+          @eliminateUnproductive()
+          @eliminateUnreachable()
 
-      @computeNullable()
-      @computeFirst()
-      @computeFollow()
-      @buildStates()
-      @computeLookaheads()
-      @propagateLookaheads()
-      @table = @buildTable()
+          # Stop if no changes were made
+          break if @rules.length == initialRuleCount and @symbols.size == initialSymbolCount
 
-      # State minimization and optimization
-      @minimizeStates()
+      @timing "  ⚡ Phase 5: Error recovery rules", => @addErrorRecoveryRules()
+      @timing "  ⚡ Phase 6: State construction", => @buildStates()
+      @timing "  ⚡ Phase 7: LALR(1) lookahead computation", =>
+        @computeLookaheads()
+        @propagateLookaheads()
+      @timing "  ⚡ Phase 8: Parse table construction", => @table = @buildTable()
+      @timing "  ⚡ Phase 9: State optimization", =>
+        @minimizeStates() # State minimization and optimization
+        @smartOptimizeTable() # Smart table optimization (Bug #20 Fix) - only when beneficial
+        @computeDefaultActions()
 
-      # Smart table optimization (Bug #20 Fix) - only when beneficial
-      @smartOptimizeTable()
-
-      @computeDefaultActions()
+      @timing "📊 TOTAL ANALYSIS TIME"
 
       @analyzed = true
 
     catch error
-      # Enhanced error reporting for analysis failures
-      console.error("\n❌ LALR(1) ANALYSIS ERROR:")
-      console.error("=" * 50)
-      console.error(error.message)
-      console.error("\n💡 Common fixes:")
-      console.error("  - Check for circular dependencies in grammar")
-      console.error("  - Verify all symbols are properly defined")
-      console.error("  - Check for ambiguous grammar rules")
-      console.error("  - Validate precedence declarations")
+      console.error("❌ Analysis failed:", error.message)
       throw error
 
   # ============================================================================
@@ -215,34 +259,36 @@ class Generator
   # ============================================================================
 
   compile: (options = {}) ->
+    @timing "🔧 COMPILE METHOD"
+
     # If grammar wasn't processed yet (lazy loading), process it now
     unless @grammar
-      if @options.grammarData
-        # Process the stored grammar data
-        grammarData = @options.grammarData
-        if grammarData.grammar
-          @processGrammar(grammarData)
+      @timing "  📁 Processing grammar (lazy loading)", =>
+        if @options.grammarData
+          # Process the stored grammar data
+          grammarData = @options.grammarData
+          if grammarData.grammar
+            @processGrammar(grammarData)
+          else
+            @processGrammar({
+              grammar: grammarData.grammar or grammarData
+              operators: grammarData.operators
+              start: grammarData.start
+              tokens: grammarData.tokens
+            })
         else
-          @processGrammar({
-            grammar: grammarData.grammar or grammarData
-            operators: grammarData.operators
-            start: grammarData.start
-            tokens: grammarData.tokens
-          })
-      else
-        throw new Error("No grammar data available for lazy loading")
+          throw new Error("No grammar data available for lazy loading")
 
-    # Ensure grammar is analyzed
-    @analyze() unless @analyzed
-
-    # Report conflicts if any
-    @reportConflicts() if @conflicts.length > 0
-
-    # Report performance statistics
-    @reportPerformanceStats()
+    @timing "  🔍 Analysis (if needed)" , => @analyze() unless @analyzed
+    @timing "  📋 Conflict reporting"   , => @reportConflicts() if @conflicts.length > 0
+    @timing "  📊 Performance reporting", => @reportPerformanceStats()
 
     # Generate the parser code using unified format
-    @generateCommonJS(options)
+    result = @timing "  🏗️ Code generation", => @generateCommonJS(options)
+
+    @timing "🔧 COMPILE METHOD"
+
+    result
 
   # ============================================================================
   # 3. ANALYSIS INSPECTION METHODS
@@ -1306,6 +1352,7 @@ class Generator
     console.log """
 
     🔧 State Minimization:
+
     Initial states: #{initialStateCount}
     #{unreachableText}
     #{mergedText}
