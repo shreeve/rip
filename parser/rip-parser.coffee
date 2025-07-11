@@ -4161,11 +4161,11 @@ graph LR
     for [key, value] from unified.rules
       rulesObject[key] = value
 
-    # Custom stringify for rules that removes quotes from numeric keys
-    rulesString = JSON.stringify(rulesObject).replace(/"(\d+)":/g, '$1:')
+    # Custom stringify for rules that removes all quotes (all keys and values are numeric)
+    rulesString = JSON.stringify(rulesObject).replace(/"/g, '')
 
-    # Custom stringify for states that removes quotes from numeric keys
-    statesString = JSON.stringify(unified.states).replace(/"(\d+)":/g, '$1:')
+    # Custom stringify for states that removes all quotes (all keys and values are numeric)
+    statesString = JSON.stringify(unified.states).replace(/"/g, '')
 
     """
     // Modern unified grammar representation - single data structure!
