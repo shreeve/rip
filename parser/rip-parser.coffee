@@ -4046,6 +4046,10 @@ function getTableAction(state, symbol) {
 
   # Generate complete unified CommonJS parser (new default format)
   generateCommonJS: (options = {}) ->
+    # Check if high-performance mode is requested
+    if options.highPerformance
+      return @generateOptimizedCommonJS(options)
+
     # Initialize source map tracking if requested
     if options.sourceMap
       @sourceMapTracker = new SourceMapTracker(options)
