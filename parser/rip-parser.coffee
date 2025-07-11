@@ -8,21 +8,30 @@
 # ==============================================================================
 
 class Symbol # Terminal or Nonterminal
-  constructor: (@name, @isTerminal = false, id = 0) ->
+  constructor: (name, isTerminal = false, id = 0) ->
     @id         = id
+    @name       = name
+    @isTerminal = isTerminal
     @nullable   = false
     @first      = new Set()
     @follow     = new Set()
 
 class Rule # A → B C D
   @idno = 0
-  constructor: (@lhs, @rhs, @action = null, @precedence = null) ->
-    @id = Rule.idno++ # unique id
+  constructor: (lhs, rhs, action = null, precedence = null) ->
+    @id         = Rule.idno++ # unique id
+    @lhs        = lhs
+    @rhs        = rhs
+    @action     = action
+    @precedence = precedence
 
 # An Item is a rule with its dot position and lookahead
 # Example: Expr → Expr + • Term, {';', ')', '$'}
 class Item
-  constructor: (@rule, @dot = 0, @lookahead = new Set()) ->
+  constructor: (rule, dot = 0, lookahead = new Set()) ->
+    @rule      = rule
+    @dot       = dot
+    @lookahead = lookahead
 
   # Check if the dot is at the end
   isComplete: -> @dot >= @rule.rhs.length
