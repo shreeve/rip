@@ -1159,8 +1159,549 @@ class Generator
   # 8. OPTIMIZATION PHASE
   # ============================================================================
 
-  # NOTE: minimizeStates() and smartOptimizeTable() would go here
-  # These are complex optimization functions not yet extracted from original
+  # State minimization to reduce parse table size
+  minimizeStates: ->
+    initialStateCount = @states.length
+
+    # Step 1: Remove unreachable states
+    reachableStates = @findReachableStates()
+    unreachableCount = @states.length - reachableStates.size
+    if unreachableCount > 0
+      @removeUnreachableStates(reachableStates)
+
+    # Step 2: Merge equivalent states (same actions for all symbols)
+    mergedCount = @mergeEquivalentStates()
+
+    # Step 3: Merge weakly compatible states
+    weakMergedCount = @mergeWeaklyCompatibleStates()
+
+    # Step 4: Rebuild table with minimized states
+    @rebuildTableAfterMinimization()
+
+    finalStateCount = @states.length
+    reduction = initialStateCount - finalStateCount
+    reductionPercent = Math.round((reduction / initialStateCount) * 100)
+
+    # Report minimization results
+    unreachableText = if unreachableCount > 0 then "Removed #{unreachableCount} unreachable states" else ""
+    mergedText = if mergedCount > 0 then "Merged #{mergedCount} equivalent states" else ""
+    weakMergedText = if weakMergedCount > 0 then "Merged #{weakMergedCount} weakly compatible states" else ""
+    reductionText = if reduction > 0 then "Reduction: #{reduction} states (#{reductionPercent}%)" else "No states eliminated"
+
+    console.log """
+
+    🔧 State Minimization:
+    Initial states: #{initialStateCount}
+    #{unreachableText}
+    #{mergedText}
+    #{weakMergedText}
+    Final states: #{finalStateCount}
+    #{reductionText}
+    """
+
+  # Find all states reachable from the start state
+  findReachableStates: ->
+    reachable = new Set()
+    workList = [@states[0]] # Start with initial state
+    reachable.add(@states[0])
+
+    while workList.length > 0
+      state = workList.shift()
+
+      for [symbol, nextState] from state.transitions
+        unless reachable.has(nextState)
+          reachable.add(nextState)
+          workList.push(nextState)
+
+    reachable
+
+  # Remove unreachable states
+  removeUnreachableStates: (reachableStates) ->
+    # Filter states to keep only reachable ones
+    @states = @states.filter (state) -> reachableStates.has(state)
+
+    # Reassign state IDs
+    for state, i in @states
+      state.id = i
+
+    # Update inadequate states list
+    @inadequateStates = @inadequateStates.filter (state) -> reachableStates.has(state)
+
+  # Merge states that have identical actions for all symbols
+  mergeEquivalentStates: ->
+    mergedCount = 0
+    stateGroups = new Map() # action signature -> [states]
+
+    # Group states by their action signatures
+    for state in @states
+      signature = @computeActionSignature(state)
+      unless stateGroups.has(signature)
+        stateGroups.set(signature, [])
+      stateGroups.get(signature).push(state)
+
+    # Merge groups with multiple states
+    for [signature, states] from stateGroups
+      if states.length > 1
+        # Keep the first state, merge others into it
+        targetState = states[0]
+
+        for i in [1...states.length]
+          sourceState = states[i]
+          @mergeStateInto(sourceState, targetState)
+          mergedCount++
+
+    # Remove merged states and reassign IDs
+    @states = Array.from(stateGroups.values()).map (group) -> group[0]
+    for state, i in @states
+      state.id = i
+
+    mergedCount
+
+  # Compute a signature representing the actions available in a state
+  computeActionSignature: (state) ->
+    actions = []
+
+    # Add shift actions
+    for [symbol, nextState] from state.transitions
+      if @getSymbol(symbol).isTerminal
+        actions.push("shift:#{symbol}")
+      else
+        actions.push("goto:#{symbol}")
+
+    # Add reduce actions
+    for item in state.items
+      if item.isComplete()
+        for la from item.lookahead
+          actions.push("reduce:#{la}:#{item.rule.id}")
+
+    actions.sort().join('|')
+
+  # Merge weakly compatible states (experimental)
+  mergeWeaklyCompatibleStates: ->
+    mergedCount = 0
+
+    # Find pairs of states that are weakly compatible
+    # (have no conflicting actions for any symbol)
+    i = 0
+    while i < @states.length
+      j = i + 1
+      merged = false
+      while j < @states.length
+        state1 = @states[i]
+        state2 = @states[j]
+
+        # Safety check - ensure states exist and have required properties
+        if state1 and state2 and state1.transitions and state2.transitions and @areWeaklyCompatible(state1, state2)
+          # Merge state2 into state1
+          @mergeStateInto(state2, state1)
+          @states.splice(j, 1) # Remove state2
+          mergedCount++
+          merged = true
+          break # Restart the inner loop
+        else
+          j++
+
+      if not merged
+        i++
+
+    # Reassign state IDs
+    for state, i in @states
+      state.id = i
+
+    mergedCount
+
+  # Check if two states are weakly compatible
+  areWeaklyCompatible: (state1, state2) ->
+    # Check if actions conflict for any symbol
+    allSymbols = new Set()
+
+    # Collect all symbols from both states
+    for [symbol, nextState] from state1.transitions
+      allSymbols.add(symbol)
+    for [symbol, nextState] from state2.transitions
+      allSymbols.add(symbol)
+
+    # Check reduce actions
+    for item in state1.items
+      if item.isComplete()
+        for la from item.lookahead
+          allSymbols.add(la)
+
+    for item in state2.items
+      if item.isComplete()
+        for la from item.lookahead
+          allSymbols.add(la)
+
+    # Check each symbol for conflicts
+    for symbol from allSymbols
+      action1 = @getStateAction(state1, symbol)
+      action2 = @getStateAction(state2, symbol)
+
+      # If both states have actions for this symbol, they must be compatible
+      if action1 and action2
+        # Different action types = conflict
+        if action1.type != action2.type
+          return false
+        # Same type but different targets = conflict
+        if action1.type == 'shift' and action1.state != action2.state
+          return false
+        if action1.type == 'reduce' and action1.rule != action2.rule
+          return false
+        if action1.type == 'goto' and action1 != action2
+          return false
+
+    true
+
+  # Get the action a state would take for a given symbol
+  getStateAction: (state, symbol) ->
+    # Check transitions first
+    if state.transitions.has(symbol)
+      nextState = state.transitions.get(symbol)
+      if @getSymbol(symbol).isTerminal
+        return { type: 'shift', state: nextState.id }
+      else
+        return { type: 'goto', target: nextState.id }
+
+    # Check reduce actions
+    for item in state.items
+      if item.isComplete() and item.lookahead.has(symbol)
+        if item.rule.lhs == '$accept'
+          return { type: 'accept' }
+        else
+          return { type: 'reduce', rule: item.rule.id }
+
+    null
+
+  # Merge one state into another
+  mergeStateInto: (sourceState, targetState) ->
+    # Merge items
+    for item in sourceState.items
+      targetState.addItem(item)
+
+    # Update all transitions pointing to sourceState to point to targetState
+    for state in @states
+      continue unless state and state.transitions
+      for [symbol, nextState] from state.transitions
+        if nextState == sourceState
+          state.transitions.set(symbol, targetState)
+
+  # Rebuild the parsing table after state minimization
+  rebuildTableAfterMinimization: ->
+    # Clear existing table
+    @table = []
+
+    # Rebuild from minimized states
+    @table = @buildTable()
+
+  # Smart optimization that only runs when beneficial
+  smartOptimizeTable: ->
+    startTime = Date.now()
+
+    # Check if optimization should run
+    shouldOptimize = @shouldRunOptimization()
+
+    if shouldOptimize
+      if @optimizationConfig.verbose
+        console.log "\n🔧 Smart Table Optimization:"
+        console.log "============================="
+        console.log "Grammar size: #{@states.length} states, #{@symbols.size} symbols"
+        console.log "Optimization triggered: #{@getOptimizationReason()}"
+
+      @optimizeTableConditional()
+    else
+      if @optimizationConfig.verbose
+        console.log "\n⚡ Skipping table optimization (small grammar, better performance without)"
+
+      # For small grammars, use fast path
+      @optimizedTable = null
+
+    @performanceStats.optimizationTime = Date.now() - startTime
+
+  # Determine if optimization should run
+  shouldRunOptimization: ->
+    # Explicit enable/disable
+    return true if @optimizationConfig.enabled
+    return false unless @optimizationConfig.auto
+
+    # Auto-optimization criteria
+    stateCount = @states.length
+    symbolCount = @symbols.size
+    tableSize = stateCount * symbolCount
+
+    # Don't optimize very small grammars
+    return false if stateCount < @optimizationConfig.minStatesForAuto
+    return false if @optimizationConfig.skipIfSmall and tableSize < 100
+
+    # Estimate sparsity quickly
+    filledCells = 0
+    totalCells = 0
+
+    # Sample a few states for quick sparsity estimate
+    sampleSize = Math.min(5, @states.length)
+    for i in [0...sampleSize]
+      state = @states[i]
+      if @table[state.id]
+        for symbol, action of @table[state.id]
+          filledCells++ if action?
+        totalCells += symbolCount
+
+    sparsity = if totalCells > 0 then ((totalCells - filledCells) / totalCells) * 100 else 0
+
+    # Optimize if sparse enough or large enough
+    return true if sparsity > 50  # Sparse tables benefit from compression
+    return true if stateCount > 50  # Large grammars benefit from optimization
+    return true if tableSize > 1000  # Large tables benefit from compression
+
+    false
+
+  # Get reason for optimization (for logging)
+  getOptimizationReason: ->
+    return "explicitly enabled" if @optimizationConfig.enabled
+
+    stateCount = @states.length
+    symbolCount = @symbols.size
+    tableSize = stateCount * symbolCount
+
+    return "large grammar (#{stateCount} states)" if stateCount > 50
+    return "large table (#{tableSize} cells)" if tableSize > 1000
+    return "auto-optimization threshold met"
+
+  # Conditional optimization with performance focus
+  optimizeTableConditional: ->
+    # Quick analysis for decision making
+    quickStats = @quickAnalyzeTable()
+
+    if @optimizationConfig.verbose
+      console.log "Quick analysis: #{quickStats.sparsity}% sparse, #{quickStats.uniqueRows} unique rows"
+
+    # Step 1: Always do symbol encoding (low cost, good benefit)
+    @optimizeSymbolEncodingFast()
+
+    # Step 2: Row compression (medium cost, good benefit for many states)
+    if @states.length > 10
+      @compressTableRowsFast()
+
+    # Step 3: Sparse compression (higher cost, only for sparse tables)
+    if quickStats.sparsity > 30
+      @applySparseTableCompressionFast()
+    else
+      # For dense tables, use simpler approach
+      @generateSimpleOptimizedTable()
+
+    # Step 4: Generate final optimized table
+    @generateOptimizedTableFast()
+
+  # Quick table analysis (minimal overhead)
+  quickAnalyzeTable: ->
+    totalCells = @states.length * @symbols.size
+    filledCells = 0
+    rowHashes = new Set()
+
+    for state in @states
+      if @table[state.id]
+        rowData = []
+        for symbolId in [0...@symbols.size]
+          action = @table[state.id][symbolId]
+          if action?
+            filledCells++
+            rowData.push(JSON.stringify(action))
+          else
+            rowData.push(null)
+
+        rowHash = @quickHash(rowData.join('|'))
+        rowHashes.add(rowHash)
+
+    sparsity = if totalCells > 0 then Math.round(((totalCells - filledCells) / totalCells) * 100) else 0
+
+    {
+      totalCells,
+      filledCells,
+      sparsity,
+      uniqueRows: rowHashes.size
+    }
+
+  # Fast symbol encoding (simplified)
+  optimizeSymbolEncodingFast: ->
+    # Only reorder if significant benefit expected
+    return unless @symbols.size > 10
+
+    symbolFrequency = new Map()
+    for state in @states
+      if @table[state.id]
+        for symbol, action of @table[state.id]
+          symbolId = @symbols.get(symbol)?.id
+          if symbolId?
+            symbolFrequency.set(symbolId, (symbolFrequency.get(symbolId) || 0) + 1)
+
+    # Only create mapping if there's significant variation
+    frequencies = [...symbolFrequency.values()]
+    if frequencies.length > 0
+      maxFreq = Math.max(...frequencies)
+      minFreq = Math.min(...frequencies)
+
+      # Only optimize if there's significant frequency variation
+      if maxFreq > minFreq * 2
+        sortedSymbols = [...symbolFrequency.entries()]
+          .sort((a, b) -> b[1] - a[1])
+          .map(([id, freq]) -> id)
+
+        @optimizedSymbolMap = new Map()
+        for newId, oldId of sortedSymbols
+          @optimizedSymbolMap.set(oldId, newId)
+
+  # Fast row compression (simplified)
+  compressTableRowsFast: ->
+    rowMap = new Map()
+    @rowCompression = new Map()
+    compressedRowId = 0
+
+    for state in @states
+      if @table[state.id]
+        # Create simple row signature
+        signature = Object.keys(@table[state.id]).sort().join(',')
+
+        if rowMap.has(signature)
+          @rowCompression.set(state.id, rowMap.get(signature))
+        else
+          rowMap.set(signature, compressedRowId)
+          @rowCompression.set(state.id, compressedRowId)
+          compressedRowId++
+
+  # Fast sparse compression (single algorithm)
+  applySparseTableCompressionFast: ->
+    # Choose best algorithm based on table characteristics
+    algorithm = @chooseBestAlgorithmFast()
+
+    switch algorithm
+      when 'COO'
+        @compressedTable = @compressWithCOO()
+      when 'CSR'
+        @compressedTable = @compressWithCSR()
+      else
+        @compressedTable = @compressWithDictionary()
+
+  # Choose compression algorithm without testing all
+  chooseBestAlgorithmFast: ->
+    stateCount = @states.length
+    symbolCount = @symbols.size
+
+    # Quick heuristics based on table characteristics
+    if stateCount > symbolCount * 2
+      'COO'  # Good for tall, sparse tables
+    else if symbolCount > 20
+      'Dictionary'  # Good for many symbols with repeated patterns
+    else
+      'CSR'  # Good general purpose
+
+  # Generate simple optimized table for dense tables
+  generateSimpleOptimizedTable: ->
+    @compressedTable = {
+      method: 'Simple',
+      data: @table,
+      compressionRatio: 0,
+      size: @states.length * @symbols.size * 8
+    }
+
+  # Fast table generation
+  generateOptimizedTableFast: ->
+    @optimizedTable = {
+      format: @compressedTable.method,
+      data: @compressedTable.data,
+      metadata: {
+        states: @states.length,
+        symbols: @symbols.size,
+        compression: @compressedTable.method,
+        symbolMap: @optimizedSymbolMap or new Map(),
+        rowCompression: @rowCompression or new Map(),
+        optimizationTime: @performanceStats.optimizationTime
+      }
+    }
+
+  # Compression algorithm implementations
+  compressWithCOO: ->
+    entries = []
+
+    for stateId in [0...@states.length]
+      if @table[stateId]
+        for symbol, action of @table[stateId]
+          symbolId = @symbols.get(symbol)?.id
+          if symbolId? and action?
+            entries.push([stateId, symbolId, @encodeAction(action)])
+
+    originalSize = @states.length * @symbols.size * 8  # Estimate 8 bytes per cell
+    compressedSize = entries.length * 12  # 3 integers per entry
+
+    {
+      method: 'COO',
+      data: entries,
+      compressionRatio: ((originalSize - compressedSize) / originalSize) * 100,
+      size: compressedSize
+    }
+
+  compressWithCSR: ->
+    entries = []
+    rowStarts = [0]
+
+    for stateId in [0...@states.length]
+      if @table[stateId]
+        for symbol, action of @table[stateId]
+          symbolId = @symbols.get(symbol)?.id
+          if symbolId? and action?
+            entries.push([symbolId, @encodeAction(action)])
+      rowStarts.push(entries.length)
+
+    originalSize = @states.length * @symbols.size * 8
+    compressedSize = entries.length * 8 + rowStarts.length * 4
+
+    {
+      method: 'CSR',
+      data: { entries, rowStarts },
+      compressionRatio: ((originalSize - compressedSize) / originalSize) * 100,
+      size: compressedSize
+    }
+
+  compressWithDictionary: ->
+    actionMap = new Map()
+    actionId = 0
+
+    for stateId in [0...@states.length]
+      if @table[stateId]
+        for symbol, action of @table[stateId]
+          actionKey = JSON.stringify(action)
+          unless actionMap.has(actionKey)
+            actionMap.set(actionKey, actionId++)
+
+    originalSize = @states.length * @symbols.size * 8
+    compressedSize = actionMap.size * 16 + @states.length * @symbols.size * 2
+
+    {
+      method: 'Dictionary',
+      data: actionMap,
+      compressionRatio: ((originalSize - compressedSize) / originalSize) * 100,
+      size: compressedSize
+    }
+
+  # Encode action for compression
+  encodeAction: (action) ->
+    if action?.type == 'shift'
+      (1 << 24) | action.state
+    else if action?.type == 'reduce'
+      (2 << 24) | action.rule
+    else if action?.type == 'accept'
+      (3 << 24)
+    else
+      action  # GOTO action
+
+  # Simple hash function (faster than JSON.stringify)
+  quickHash: (str) ->
+    hash = 0
+    return hash if str.length == 0
+
+    for i in [0...Math.min(str.length, 100)]  # Limit for performance
+      char = str.charCodeAt(i)
+      hash = ((hash << 5) - hash) + char
+      hash = hash & hash  # Convert to 32-bit integer
+    hash
 
   # ============================================================================
   # 9. DEFAULT ACTIONS PHASE
