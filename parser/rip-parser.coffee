@@ -624,12 +624,12 @@ class Generator
     paramMatches = actionStr.match(/\$(\d+)/g) || []
     for match in paramMatches
       paramNum = parseInt(match.substring(1), 10)
-      if paramNum > rhsLength
+      # Skip validation for empty productions that use $1 - this is valid for CoffeeScript grammar
+      # Also skip validation for $accept rule which legitimately uses $0
+      if paramNum > rhsLength and not (rhsLength == 0 and paramNum == 1) and not (nonterminal == '$accept' and paramNum == 0)
         console.warn("Warning: Parameter #{match} in action for '#{nonterminal}' production #{productionIndex} exceeds RHS length (#{rhsLength})")
 
-    # Check for common syntax issues
-    if actionStr.includes('$$') and not actionStr.includes('this.$')
-      console.warn("Warning: Use 'this.$' instead of '$$' in action for '#{nonterminal}' production #{productionIndex}")
+    # Note: $$ is standard Jison syntax and is perfectly valid - no warning needed
 
   # Get or create a symbol
   getSymbol: (name, isTerminal) ->
@@ -1935,8 +1935,10 @@ class Generator
     # Replace positional parameters
     action = action.replace /\$(\d+)/g, (match, n) =>
       paramNum = parseInt(n, 10)
+      # Skip validation for $accept rule which legitimately uses $0
       if paramNum < 1 or paramNum > rule.rhs.length
-        console.warn "Warning: Parameter $#{paramNum} out of range for rule: #{rule.lhs} → #{rule.rhs.join(' ')}"
+        unless rule.lhs == '$accept' and paramNum == 0
+          console.warn "Warning: Parameter $#{paramNum} out of range for rule: #{rule.lhs} → #{rule.rhs.join(' ')}"
         return match
 
       stackOffset = rule.rhs.length - paramNum
@@ -3950,8 +3952,10 @@ graph LR
     # Replace positional parameters with source map annotations
     action = action.replace /\$(\d+)/g, (match, n) =>
       paramNum = parseInt(n, 10)
+      # Skip validation for $accept rule which legitimately uses $0
       if paramNum < 1 or paramNum > rule.rhs.length
-        console.warn "Warning: Parameter $#{paramNum} out of range for rule: #{rule.lhs} → #{rule.rhs.join(' ')}"
+        unless rule.lhs == '$accept' and paramNum == 0
+          console.warn "Warning: Parameter $#{paramNum} out of range for rule: #{rule.lhs} → #{rule.rhs.join(' ')}"
         return match
 
       stackOffset = rule.rhs.length - paramNum
