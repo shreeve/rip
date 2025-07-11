@@ -4243,29 +4243,7 @@ function getTableAction(state, symbol) {
   }
 }
 
-    function getTableAction(state, symbol) {
-      const table = hydrateParseTable();
-      const stateMap = table.get(state);
-      if (!stateMap) return null;
 
-      // Try static action first (symbol 0), then specific symbol
-      const action = stateMap.get(0) || stateMap.get(symbol);
-      if (!action) return null;
-
-      const [type, target] = action;
-      switch (type) {
-        case 0: // GOTO
-          return target;
-        case 1: // SHIFT
-          return { type: 'shift', state: target };
-        case 2: // REDUCE
-          return { type: 'reduce', rule: target };
-        case 3: // ACCEPT
-          return { type: 'accept' };
-        default:
-          return null;
-      }
-    }
     """
 
   # Generate complete unified CommonJS parser (new default format)
