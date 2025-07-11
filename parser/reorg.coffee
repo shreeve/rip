@@ -3939,3 +3939,349 @@ unless module.parent
 
   # Run the CLI
   main()
+
+    # ============================================================================
+  # 15. MISSING UTILITY FUNCTIONS FROM ORIGINAL
+  # ============================================================================
+
+  # Interactive debugging functions (called by CLI)
+  exploreState: (stateId) ->
+    return "Invalid state ID" unless stateId >= 0 and stateId < @states.length
+
+    state = @states[stateId]
+    console.log "\n🔍 EXPLORING STATE #{stateId}"
+    console.log "=============================="
+    console.log "Items:"
+    for item in state.items
+      console.log "  #{item.toString()}"
+
+    console.log "\nTransitions:"
+    for [symbol, nextState] from state.transitions
+      symbolType = if @getSymbol(symbol).isTerminal then "T" else "NT"
+      console.log "  #{symbol} (#{symbolType}) → State #{nextState.id}"
+
+    if @table[stateId]
+      console.log "\nActions:"
+      for symbol, action of @table[stateId]
+        if action.type
+          console.log "  #{symbol}: #{action.type} #{action.state || action.rule || ''}"
+        else
+          console.log "  #{symbol}: goto #{action}"
+
+    conflicts = @getStateConflicts(stateId)
+    if conflicts.length > 0
+      console.log "\nConflicts:"
+      for conflict in conflicts
+        console.log "  #{conflict.type} on '#{conflict.lookahead}'"
+
+  exploreRule: (ruleId) ->
+    return "Invalid rule ID" unless ruleId >= 0 and ruleId < @rules.length
+
+    rule = @rules[ruleId]
+    console.log "\n🔍 EXPLORING RULE #{ruleId}"
+    console.log "=============================="
+    console.log "Production: #{rule.lhs} → #{rule.rhs.join(' ')}"
+    console.log "Action: #{rule.action || 'default'}"
+    console.log "Precedence: #{rule.precedence || 'none'}"
+
+    # Find states containing this rule
+    statesWithRule = []
+    for state in @states
+      for item in state.items
+        if item.rule.id == ruleId
+          statesWithRule.push({ state: state.id, dot: item.dot, lookahead: [...item.lookahead] })
+
+    if statesWithRule.length > 0
+      console.log "\nUsed in states:"
+      for usage in statesWithRule
+        console.log "  State #{usage.state}: dot at #{usage.dot}, lookahead [#{usage.lookahead.join(', ')}]"
+
+  exploreConflict: (conflictIndex) ->
+    return "Invalid conflict index" unless conflictIndex >= 0 and conflictIndex < @conflicts.length
+
+    conflict = @conflicts[conflictIndex]
+    console.log "\n🔍 EXPLORING CONFLICT #{conflictIndex}"
+    console.log "==================================="
+    console.log conflict.explanation
+
+    # Show the state causing the conflict
+    console.log "\nState #{conflict.state} details:"
+    @exploreState(conflict.state)
+
+  # Statistics and utility functions (called by CLI)
+  getStatistics: ->
+    stats = {
+      rules: @rules.length
+      states: @states.length
+      transitions: 0
+      terminals: [...@symbols.values()].filter((s) -> s.isTerminal).length
+      nonterminals: [...@symbols.values()].filter((s) -> !s.isTerminal).length
+      conflicts: @conflicts.length
+      startSymbol: @start
+      tableSize: 0
+      density: 0
+      compression: @optimizedTable?.format || 'none'
+    }
+
+    # Count transitions
+    for state in @states
+      stats.transitions += state.transitions.size
+
+    # Calculate table statistics
+    totalCells = 0
+    filledCells = 0
+    for state in @states
+      if @table[state.id]
+        for symbol, action of @table[state.id]
+          totalCells++
+          if action?
+            filledCells++
+            stats.tableSize++
+      totalCells += @symbols.size
+
+    stats.density = Math.round((filledCells / totalCells) * 100) if totalCells > 0
+    stats
+
+  optimizeTables: ->
+    console.log "\n🔧 Running table optimization..."
+
+    # Run the smart optimization
+    @smartOptimizeTable()
+
+    console.log "✅ Table optimization complete!"
+
+    # Report results
+    if @optimizedTable
+      console.log "  Format: #{@optimizedTable.format}"
+      if @optimizedTable.compressionRatio
+        console.log "  Compression ratio: #{Math.round(@optimizedTable.compressionRatio * 100)}%"
+    else
+      console.log "  Optimization skipped (table too small or no benefit)"
+
+  printStatistics: ->
+    console.log "\n=== GRAMMAR STATISTICS ==="
+    console.log "Rules: #{@rules.length}"
+    console.log "Symbols: #{@symbols.size}"
+    console.log "  Terminals: #{[...@symbols.values()].filter((s) -> s.isTerminal).length}"
+    console.log "  Non-terminals: #{[...@symbols.values()].filter((s) -> !s.isTerminal).length}"
+    console.log "States: #{@states.length}"
+    console.log "Inadequate states: #{@inadequateStates.length}"
+
+  debugTable: ->
+    console.log "\n=== PARSER STATES ==="
+    for state in @states
+      console.log "\nState #{state.id}:"
+      for item in state.items
+        console.log "  #{item.toString()}"
+
+      console.log "  Transitions:"
+      for [sym, target] from state.transitions
+        console.log "    #{sym} -> #{target.id}"
+
+    console.log "\n=== SYMBOL TABLE ==="
+    for [name, sym] from @symbols
+      console.log "  #{sym.id}: #{name} (#{if sym.isTerminal then 'terminal' else 'non-terminal'})"
+
+  # Source map helper functions (called in code generation)
+  getOriginalRuleLocation: (rule) ->
+    # Simplified location tracking - in a real implementation this would
+    # track the original source location from the grammar definition
+    {
+      line: rule.id + 1  # Approximate line based on rule position
+      column: 0
+      source: 'grammar'
+    }
+
+  getCurrentGeneratedLine: ->
+    # Track current line in generated code - simplified implementation
+    @_currentGeneratedLine ?= 1
+    @_currentGeneratedLine
+
+  getOriginalActionLocation: (rule) ->
+    # Track original action location - simplified implementation
+    {
+      line: rule.id + 1
+      column: 0
+      source: 'actions'
+    }
+
+  # Parser generation helper functions
+  generateDebugParser: (options = {}) ->
+    debugOptions = Object.assign({
+      traceEnabled: true
+      stepMode: false
+      showStack: true
+      showLookahead: true
+      logActions: true
+    }, options.debug || {})
+
+    # Generate base parser
+    baseParser = @generateCommonJS(options)
+
+    # Add debugging enhancements
+    debugEnhancements = @generateDebugEnhancements(debugOptions)
+
+    # Inject debugging code into parser
+    baseParser.replace(
+      'const parser = {'
+      "const parser = {\n#{debugEnhancements}"
+    )
+
+  generateDebugEnhancements: (options) ->
+    """
+    // Enhanced debugging capabilities
+    _debugOptions: #{JSON.stringify(options)},
+    _parseTrace: [],
+    _stepMode: #{options.stepMode},
+    _currentStep: 0,
+
+    // Enable/disable debugging
+    enableDebug: function() { this._debugOptions.traceEnabled = true; },
+    disableDebug: function() { this._debugOptions.traceEnabled = false; },
+
+    // Step-by-step debugging
+    enableStepMode: function() { this._stepMode = true; },
+    disableStepMode: function() { this._stepMode = false; },
+
+    // Get parse trace
+    getParseTrace: function() { return this._parseTrace; },
+    clearTrace: function() { this._parseTrace = []; },
+
+    // Debug trace method
+    debugTrace: function(action, state, symbol, stack, vstack) {
+      if (!this._debugOptions.traceEnabled) return;
+
+      const traceEntry = {
+        step: this._currentStep++,
+        action: action,
+        state: state,
+        symbol: symbol,
+        stackSize: stack.length / 2,
+        stack: this._debugOptions.showStack ? [...stack] : null,
+        valueStack: this._debugOptions.showStack ? [...vstack] : null,
+        timestamp: Date.now()
+      };
+
+      this._parseTrace.push(traceEntry);
+
+      if (this._debugOptions.logActions) {
+        console.log(`Step ${traceEntry.step}: ${action} in state ${state} on symbol '${symbol}'`);
+        if (this._debugOptions.showStack) {
+          console.log(`  Stack: [${stack.join(', ')}]`);
+        }
+      }
+
+      // Step mode: pause for user input
+      if (this._stepMode && typeof window !== 'undefined') {
+        const continueStep = confirm(`Step ${traceEntry.step}: ${action} in state ${state} on symbol '${symbol}'\\nContinue?`);
+        if (!continueStep) {
+          throw new Error('Debugging stopped by user');
+        }
+      }
+    },
+
+    // Inspect parser state
+    inspectState: function(stateId) {
+      const stateInfo = this._getStateInfo(stateId);
+      console.table(stateInfo);
+      return stateInfo;
+    },
+
+    // Get detailed state information
+    _getStateInfo: function(stateId) {
+      const actions = this.table[stateId] || {};
+      const info = [];
+
+      for (const symbol in actions) {
+        const action = actions[symbol];
+        info.push({
+          symbol: symbol,
+          action: action.type || 'goto',
+          target: action.state || action.rule || action,
+          description: this._describeAction(action, symbol)
+        });
+      }
+
+      return info;
+    },
+
+    // Describe an action in human-readable form
+    _describeAction: function(action, symbol) {
+      if (!action.type) return `Go to state ${action}`;
+
+      switch (action.type) {
+        case 'shift': return `Shift '${symbol}' and go to state ${action.state}`;
+        case 'reduce': return `Reduce by rule ${action.rule}`;
+        case 'accept': return 'Accept input';
+        default: return `Unknown action: ${action.type}`;
+      }
+    },
+
+    // Export debug information
+    exportDebugInfo: function() {
+      return {
+        trace: this._parseTrace,
+        options: this._debugOptions,
+        statistics: {
+          totalSteps: this._currentStep,
+          traceSize: this._parseTrace.length
+        }
+      };
+    }
+    """
+
+  # Legacy table preparation functions
+  prepareTable: ->
+    table = []
+    for state, i in @states
+      stateTable = {}
+      if @table[i]
+        for symbol, action of @table[i]
+          symbolId = @symbols.get(symbol)?.id
+          if symbolId?
+            if action.type?
+              # Terminal action (shift/reduce/accept)
+              if action.type == 'shift'
+                stateTable[symbolId] = [1, action.state]
+              else if action.type == 'reduce'
+                stateTable[symbolId] = [2, action.rule]
+              else if action.type == 'accept'
+                stateTable[symbolId] = [3]
+            else
+              # Nonterminal goto
+              stateTable[symbolId] = action
+      table.push stateTable
+    table
+
+  prepareSymbols: ->
+    symbols = {}
+    for [name, symbol] from @symbols
+      symbols[name] = symbol.id
+    symbols
+
+  prepareTokens: ->
+    tokens = {}
+    # tokens[v.id] = k for [k, v] from @symbols when v.isTerminal
+    tokens[v.id] = k for [k, v] from @symbols when @tokens.has(k)
+    tokens
+
+  # State comparison debugging
+  debugStateComparison: ->
+    console.log "\n=== STATE CORES ==="
+    for [core, state] from @stateMap
+      console.log "\nState #{state.id}:"
+      console.log "Core: #{core}"
+      console.log "Items: #{state.items.length}"
+
+  # Generate comprehensive debugging information
+  generateDebugInfo: ->
+    debugInfo = {
+      grammar: @generateGrammarDebugInfo()
+      states: @generateStateDebugInfo()
+      conflicts: @generateConflictDebugInfo()
+      symbols: @generateSymbolDebugInfo()
+      rules: @generateRuleDebugInfo()
+      table: @generateTableDebugInfo()
+      performance: @performanceStats
+    }
+    debugInfo
