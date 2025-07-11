@@ -2742,6 +2742,14 @@ const parser = (() => {
       else
         "_$[_$.length - 1 - #{stackOffset}]"
 
+    # Ensure the action has a proper return statement or expression
+    # If the action doesn't already have a return statement and isn't a simple assignment,
+    # treat it as an expression that should be returned
+    action = action.trim()
+    unless action.match(/^(return\s|this\.\$\s*=|var\s|let\s|const\s|\$\$\s*=)/) or action == '' or action.includes(';')
+      # If it's not already a statement, make it a return statement
+      action = "return #{action}"
+
     action
 
   # Transform action code with source map information
