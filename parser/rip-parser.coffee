@@ -1788,8 +1788,8 @@ class Generator
     Closure computations: #{@performanceStats.closureCalls}
     Cache hits: #{@performanceStats.cacheHits}
     #{hitRateText}
-    Symbols: #{@symbols.size}
     Terminals: #{@tokens.size}
+    Symbols: #{@symbols.size}
     Rules processed: #{@rules.length}
     States created: #{@states.length}
     #{optimizationText}
