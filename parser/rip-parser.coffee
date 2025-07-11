@@ -129,9 +129,10 @@ class Generator
 
     # Configure options
     @options = opts
+    @options.grammarData = grammarData  # Store for lazy loading
 
-    # If grammar data provided, process it immediately
-    if grammarData
+    # If grammar data provided, process it immediately (unless lazy loading requested)
+    if grammarData and not opts.lazy
       try
         if grammarData.grammar
           # Grammar data is in the expected format { grammar, operators, start, tokens }
@@ -214,6 +215,23 @@ class Generator
   # ============================================================================
 
   compile: (options = {}) ->
+    # If grammar wasn't processed yet (lazy loading), process it now
+    unless @grammar
+      if @options.grammarData
+        # Process the stored grammar data
+        grammarData = @options.grammarData
+        if grammarData.grammar
+          @processGrammar(grammarData)
+        else
+          @processGrammar({
+            grammar: grammarData.grammar or grammarData
+            operators: grammarData.operators
+            start: grammarData.start
+            tokens: grammarData.tokens
+          })
+      else
+        throw new Error("No grammar data available for lazy loading")
+
     # Ensure grammar is analyzed
     @analyze() unless @analyzed
 
