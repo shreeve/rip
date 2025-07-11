@@ -1155,6 +1155,218 @@ class Generator
 
     null
 
+  # ============================================================================
+  # 8. OPTIMIZATION PHASE
+  # ============================================================================
+
+  # NOTE: minimizeStates() and smartOptimizeTable() would go here
+  # These are complex optimization functions not yet extracted from original
+
+  # ============================================================================
+  # 9. DEFAULT ACTIONS PHASE
+  # ============================================================================
+
+  computeDefaultActions: ->
+    @defaultActions = {}
+
+    # A state can have a default action if:
+    # 1. All actions in the state are reduces by the same rule, OR
+    # 2. The state has no shift actions and only one unique reduce action
+    for state in @states
+      continue unless @table[state.id] # Skip if no table entry
+
+      actions = @table[state.id]
+      actionTypes = new Set()
+      reduceRules = new Set()
+      hasShift = false
+
+      # Analyze all actions in this state
+      for symbol, action of actions
+        if action.type is 'shift'
+          hasShift = true
+        else if action.type is 'reduce'
+          actionTypes.add('reduce')
+          reduceRules.add(action.rule)
+        else if action.type is 'accept'
+          actionTypes.add('accept')
+          # Accept states cannot have default actions
+          hasShift = true # Prevent default action
+
+      # Can use default reduction if:
+      # - No shift actions
+      # - Only reduce actions
+      # - All reduces are for the same rule
+      if not hasShift and actionTypes.size <= 1 and reduceRules.size == 1
+        ruleId = [...reduceRules][0]
+        @defaultActions[state.id] = [2, ruleId]
+
+  # Prepare unified states array with dense format + statics optimization
+  prepareUnifiedStates: ->
+    # Find the maximum state ID to size the array
+    maxState = Math.max(...Object.keys(@table || {}).map(Number))
+    states = []
+
+    # Initialize array with empty objects for all states
+    for i in [0..maxState]
+      states[i] = {}
+
+    # SINGLE PASS: For each state, either make it static OR multi-action
+    for stateId, stateTable of @table
+      state = parseInt(stateId)
+      stateObj = states[state]
+
+      # Collect all actions for this state
+      actions = []
+
+      # FIRST: Check for default action and add it at symbol 0
+      if @defaultActions[state]
+        actions.push([0, @defaultActions[state]])
+
+      # THEN: Add regular actions
+      for symbol, action of stateTable
+        symbolObj = @symbols.get(symbol)
+        continue unless symbolObj
+
+        actionArray = if action?.type
+          switch action.type
+            when 'shift' then [1, action.state]
+            when 'reduce' then [2, action.rule]
+            when 'accept' then [3, 0]
+        else
+          [0, action]  # GOTO action
+
+        actions.push([symbolObj.id, actionArray])
+
+      # Decision: Single action = static, Multiple actions = full mapping
+      if actions.length == 1
+        # Static state: put the action at symbol 0
+        stateObj[0] = actions[0][1]
+      else
+        # Multi-action state: put all actions at their symbol IDs
+        for [symbolId, actionArray] in actions
+          stateObj[symbolId] = actionArray
+
+    states
+
+  # ============================================================================
+  # 10. CODE GENERATION PHASE
+  # ============================================================================
+
+  # NOTE: Code generation functions would go here:
+  # generateCommonJS(), generateOptimizedCommonJS(), buildPerformAction(),
+  # transformAction(), prepareRules(), generateUnifiedGrammarCode(),
+  # generateUnifiedRuntimeFunctions(), etc.
+
+  # ============================================================================
+  # 11. FINAL STEPS
+  # ============================================================================
+
+  reportConflicts: ->
+    return unless @conflicts.length > 0
+
+    console.log "\n=== DETAILED CONFLICT ANALYSIS ==="
+    console.log "Total conflicts: #{@conflicts.length}"
+
+    # Group conflicts by type
+    srConflicts = @conflicts.filter (c) -> c.type == 'shift/reduce'
+    rrConflicts = @conflicts.filter (c) -> c.type == 'reduce/reduce'
+
+    resolvedSR = srConflicts.filter (c) -> c.resolved
+    unresolvedSR = srConflicts.filter (c) -> not c.resolved
+
+    console.log "  Shift/Reduce: #{srConflicts.length} (#{resolvedSR.length} resolved, #{unresolvedSR.length} unresolved)"
+    console.log "  Reduce/Reduce: #{rrConflicts.length} (all resolved by default)"
+    console.log ""
+
+    # Report unresolved conflicts first (most important)
+    if unresolvedSR.length > 0
+      console.log "🚨 UNRESOLVED CONFLICTS (require attention):"
+      console.log "=================================================="
+      for conflict in unresolvedSR
+        console.log conflict.explanation
+        console.log ""
+
+    # Report resolved conflicts
+    if resolvedSR.length > 0
+      console.log "✅ RESOLVED SHIFT/REDUCE CONFLICTS:"
+      console.log "========================================"
+      for conflict in resolvedSR
+        console.log conflict.explanation
+        console.log ""
+
+    # Report reduce/reduce conflicts
+    if rrConflicts.length > 0
+      console.log "⚠️  REDUCE/REDUCE CONFLICTS:"
+      console.log "=============================="
+      for conflict in rrConflicts
+        console.log conflict.explanation
+        console.log ""
+
+    # Summary and recommendations
+    @reportConflictSummary(unresolvedSR.length, resolvedSR.length, rrConflicts.length)
+
+  reportConflictSummary: (unresolved, resolved, reduceReduce) ->
+    console.log "📊 CONFLICT SUMMARY:"
+    console.log "===================="
+
+    if unresolved > 0
+      console.log "❌ #{unresolved} unresolved shift/reduce conflicts need attention"
+      console.log "   These use default shift resolution but may cause unexpected parsing"
+      console.log "   Consider adding precedence declarations or restructuring grammar"
+
+    if resolved > 0
+      console.log "✅ #{resolved} shift/reduce conflicts resolved by precedence/associativity"
+      console.log "   These are handled correctly but you may want to verify the resolution"
+
+    if reduceReduce > 0
+      console.log "⚠️  #{reduceReduce} reduce/reduce conflicts resolved by rule order"
+      console.log "   These indicate grammar ambiguity and should be fixed if possible"
+
+    if unresolved + reduceReduce == 0
+      console.log "🎉 All conflicts are properly resolved!"
+    else
+      console.log ""
+      console.log "💡 GENERAL RECOMMENDATIONS:"
+      console.log "   - Use %left, %right, %nonassoc to declare operator precedence"
+      console.log "   - Use %prec to assign precedence to specific rules"
+      console.log "   - Restructure ambiguous grammar rules when possible"
+      console.log "   - Test parser behavior with edge cases"
+
+  # Report performance statistics
+  reportPerformanceStats: ->
+    hitRateText = if @performanceStats.closureCalls > 0
+      hitRate = Math.round((@performanceStats.cacheHits / @performanceStats.closureCalls) * 100)
+      "Cache hit rate: #{hitRate}%"
+    else
+      ""
+
+    optimizationText = if @performanceStats.optimizationTime > 0
+      if @optimizedTable
+        """Table optimization: #{@performanceStats.optimizationTime}ms
+        Optimization method: #{@optimizedTable.format}"""
+      else
+        """Table optimization: #{@performanceStats.optimizationTime}ms
+        Optimization: skipped (small grammar)"""
+    else
+      ""
+
+    cacheSize = @coreCache.size + @closureCache.size
+
+    console.log """
+
+    📊 Performance Statistics:
+    =========================
+    Closure computations: #{@performanceStats.closureCalls}
+    Cache hits: #{@performanceStats.cacheHits}
+    #{hitRateText}
+    Terminals: #{@tokens.size}
+    Symbols: #{@symbols.size}
+    Rules processed: #{@rules.length}
+    States created: #{@states.length}
+    #{optimizationText}
+    Cache entries: #{cacheSize}
+    """
+
 # ============================================================================
 # REORGANIZATION STATUS
 # ============================================================================
@@ -1168,14 +1380,15 @@ class Generator
 # 5. State Construction: buildStates(), closure(), findOrAddState(), computeCore()
 # 6. Lookahead: computeLookaheads(), closureWithLookahead(), propagateLookaheads(), validateLookaheads()
 # 7. Table Construction: buildTable(), resolveConflict(), getRulePrecedence()
+# 9. Default Actions: computeDefaultActions(), prepareUnifiedStates()
+# 11. Final Steps: reportConflicts(), reportPerformanceStats()
 
 # 🔄 STILL MISSING (Functions that need to be extracted from original file):
 # 8. Optimization Phase: minimizeStates(), smartOptimizeTable()
-# 9. Default Actions: computeDefaultActions(), prepareUnifiedStates()
 # 10. Code Generation: generateCommonJS(), generateOptimizedCommonJS(), buildPerformAction(),
 #     transformAction(), prepareRules(), generateUnifiedGrammarCode(), generateUnifiedRuntimeFunctions()
-# 11. Final Steps: reportConflicts(), reportPerformanceStats()
 # Plus various helper functions and utilities
 
-# The reorganization is approximately 70% complete with all core parsing logic implemented.
-# The remaining functions are primarily optimization and code generation utilities.
+# The reorganization is now approximately 80% complete with all core parsing logic
+# and most utility functions implemented. The remaining functions are primarily
+# optimization algorithms and code generation utilities.
