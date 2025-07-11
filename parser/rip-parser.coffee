@@ -1075,6 +1075,7 @@ class Generator
                   lookahead: la
                   resolved: true
                   resolution: 'reduce'
+                  explanation: "State #{state.id}: Shift/reduce conflict on '#{la}' resolved to REDUCE (precedence)"
                 })
               else if resolved == 'shift'
                 @conflicts.push({
@@ -1083,6 +1084,7 @@ class Generator
                   lookahead: la
                   resolved: true
                   resolution: 'shift'
+                  explanation: "State #{state.id}: Shift/reduce conflict on '#{la}' resolved to SHIFT (precedence)"
                 })
               else
                 # unresolved conflict
@@ -1095,6 +1097,7 @@ class Generator
                   lookahead: la
                   resolved: false
                   resolution: 'shift'
+                  explanation: "State #{state.id}: Unresolved shift/reduce conflict on '#{la}' - using default SHIFT"
                 })
             else if existing.type is 'reduce'
               # Reduce/reduce conflict - use first rule (earliest in grammar)
@@ -1107,6 +1110,7 @@ class Generator
                 lookahead: la
                 resolved: true
                 resolution: "rule #{Math.min(item.rule.id, existingRuleId)}"
+                explanation: "State #{state.id}: Reduce/reduce conflict on '#{la}' resolved to rule #{Math.min(item.rule.id, existingRuleId)} (first declared)"
               })
               conflicts.rr++
           else
