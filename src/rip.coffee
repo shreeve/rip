@@ -293,12 +293,7 @@ class Generator
           if grammarData.grammar
             @processGrammar(grammarData)
           else
-            @processGrammar({
-              grammar: grammarData.grammar or grammarData
-              operators: grammarData.operators
-              start: grammarData.start
-              tokens: grammarData.tokens
-            })
+            @processGrammar({ grammar, operators = grammarData, start, tokens } = grammarData)
         else
           throw new Error("No grammar data available for lazy loading")
 
