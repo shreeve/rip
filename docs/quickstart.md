@@ -45,6 +45,17 @@ rip my-program.js      # Run JavaScript via language pack (future)
 - Use the `--stats` and `--verbose` flags for more detailed output.
 - For help, see the [full documentation](./README.md) or open an issue on GitHub.
 
+## What to Read Next
+
+Now that you're up and running, here's what to explore next:
+
+- **[How It Works](./how-it-works.md)** - Understand the universal language platform
+- **[Language Packs](./language-packs.md)** - Learn about available languages and creating your own
+- **[Grammar Authoring](./grammar-authoring.md)** - Create custom language grammars
+- **[Runtime Engine](./runtime-engine.md)** - Deep dive into the universal parser
+
+For a complete overview, check out the [Documentation Index](./README.md).
+
 ---
 
-For more advanced usage, see the other docs in this folder!
+*Ready to build the future of programming languages?* 🚀
