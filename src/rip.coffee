@@ -320,17 +320,20 @@ class Generator
   getStatistics: ->
     @analyze() unless @analyzed
     stats =
-      states:            @states.length
-      rules:             @rules.length
-      terminals:         [...@symbols.values()].filter((s) -> s.isTerminal).length
-      nonterminals:      [...@symbols.values()].filter((s) -> !s.isTerminal).length
-      conflicts:         @conflicts.length
-      symbols:           @symbols.size
-      inadequateStates:  @inadequateStates.length
-      expandedRules:     @rules.length - (@stats.sourceRules + @stats.errorRecoveryRules + @stats.augmentedRules)
-      sourceRules:       @stats.sourceRules
-      errorRecoveryRules:@stats.errorRecoveryRules
-      augmentedRules:    @stats.augmentedRules
+      states:                @states.length
+      rules:                 @rules.length
+      terminals:             [...@symbols.values()].filter((s) -> s.isTerminal).length
+      nonterminals:          [...@symbols.values()].filter((s) -> !s.isTerminal).length
+      conflicts:             @conflicts.length
+      symbols:               @symbols.size
+      inadequateStates:      @inadequateStates.length
+
+      # Rule details
+      sourceRules:           @stats.sourceRules
+      expandedRules:         @rules.length - (@stats.sourceRules + @stats.errorRecoveryRules + @stats.augmentedRules)
+      errorRecoveryRules:    @stats.errorRecoveryRules
+      augmentedRules:        @stats.augmentedRules
+
       # Performance metrics
       closureCalls:          @stats.closureCalls
       cacheHits:             @stats.cacheHits
