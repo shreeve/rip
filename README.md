@@ -633,3 +633,44 @@ MIT © 2025 Steve Shreeve and Claude 4 Opus
 ---
 
 *Succinctness is power. Let 'er rip!* 🚀
+
+---
+
+## Compacted Grammar Format
+
+To maximize efficiency and portability, a grammar for a language can be distilled down to a minimal, highly compact format. This enables fast loading, small bundle sizes, and easy language pack distribution.
+
+### **Minimum Required Fields**
+
+- **symbols**: List of all symbols (terminals and nonterminals) by name or string.
+- **terminals**: List of which symbols are terminals (by symbol index/number).
+- **rules**: For each rule#, a mapping (array of objects or tuples) containing:
+  - `lhs`: the LHS nonterminal (needed for reduce actions)
+  - `len`: the RHS length (needed to pop the stack on reduce)
+  (This is the minimal information needed for each rule#.)
+- **states**: The parse table, mapping (state#, symbol#) → (action_type, target). This encodes all parser logic:
+  - `action_type`: 0 = goto, 1 = shift, 2 = reduce, 3 = accept
+  - `target`: next state (for shift/goto), rule# (for reduce), or unused (for accept)
+- **actions**: Semantic actions (JS or other code) for each rule, typically as a switch or function table.
+- **start**: The start symbol (by name or index). Optional if always defaulting to 'Root' or the first rule.
+
+> **Note:** The full RHS for each rule (the `rules` array) is not needed for runtime parsing—only for grammar introspection or pretty-printing.
+
+### **Symbol 0: Default Action Mapping**
+
+- In the state table, symbol 0 is reserved and not a valid symbol for parsing.
+- **Convention:** Symbol 0 is used as a shortcut for the "default action mapping"—meaning that a specific state will always take a certain action regardless of the symbol# (unless overridden by a more specific mapping).
+- This allows all default actions to be expressed in the same state table/matrix, making the format even more compact and efficient.
+
+### **Summary Table**
+
+| Field      | Required? | Notes                                                                 |
+|------------|-----------|-----------------------------------------------------------------------|
+| symbols    | Yes       | Names for symbol numbers                                              |
+| terminals  | Yes       | Which symbols are terminals                                           |
+| rules      | Yes       | For each rule#: LHS nonterminal and RHS length                        |
+| states     | Yes       | The parse table (core logic)                                          |
+| actions    | Yes       | Semantic actions for each rule                                        |
+| start      | Yes/Opt   | Start symbol (optional if always 'Root' or first rule)                |
+
+With these fields, you have everything needed for a fully functional, compressed parser for any supported language.
