@@ -328,6 +328,12 @@ class Generator
   getStatistics: ->
     @analyze() unless @analyzed
     {
+      # FIXME: @ruleStats
+      # errorRecovery = @ruleStats.errorRecovery
+      # augmented = @ruleStats.augmented
+      # source = @ruleStats.source
+      # expanded = totalRules - (source + errorRecovery + augmented)
+
       states: @states.length
       rules: @rules.length
       terminals: [...@symbols.values()].filter((s) -> s.isTerminal).length
@@ -4281,6 +4287,11 @@ if (typeof module != 'undefined' and not module.parent) or (typeof process != 'u
           Conflicts: #{stats.conflicts}
           Inadequate States: #{stats.inadequateStates}
         """
+        # FIXME: @ruleStats
+        # console.log "• Rules Breakdown: #{totalRules} total = #{source} source + ~#{expanded} expanded + #{errorRecovery} error recovery + #{augmented} augmented start"
+        # console.log "• Error Recovery Rules: Exactly #{errorRecovery} rules added automatically"
+        # console.log "• Parser States: #{states} LALR(1) states generated"
+        # console.log "• Symbol Count: #{totalSymbols} total symbols (#{terminals} terminals + #{nonterminals} non-terminals)"
 
       when 'optimize'
         console.log "\n🔧 Running optimization..."
