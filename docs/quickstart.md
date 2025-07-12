@@ -33,7 +33,7 @@ coffee rip.coffee grammar.coffee --production -o parser.js
 ## Running Your First Program
 
 ```bash
-rip my-program.rip     # Run Rip language (CoffeeScript-like syntax)
+rip my-program.rip     # Run Rip language (modern echo of CoffeeScript)
 rip my-program.coffee  # Run CoffeeScript via language pack
 rip my-program.py      # Run Python via language pack (future)
 rip my-program.js      # Run JavaScript via language pack (future)

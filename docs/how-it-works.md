@@ -59,7 +59,7 @@ const CoffeeScriptPack = {
 
 ## 🎯 **The Rip Language**
 
-### Modern CoffeeScript Revival
+### A Modern Echo of CoffeeScript
 Rip's default language is a modern echo of CoffeeScript, maintaining all the elegance and expressiveness that made CoffeeScript beloved while focusing on core syntax.
 
 ```coffeescript
