@@ -21,13 +21,13 @@ languageInfo =
 # All AST node constructors extracted from the reference grammar
 # Organized by category with beautiful alignment and clean syntax
 
-# === CORE STRUCTURAL NODES ===
+# Core structural nodes
 Root                      = (body)                                      -> new Root(body or new Block)
 Block                     = (statements = [])                           -> new Block statements
 Line                      = (expr)                                      -> expr
 Body                      = (statements)                                -> Block statements
 
-# === LITERALS ===
+# Literals
 NumberLiteral             = (value, opts = {})                         -> new NumberLiteral value.toString(), parsedValue: opts.parsedValue or value.parsedValue
 StringLiteral             = (value, opts = {})                         -> new StringLiteral value.slice(1, -1),
                                                                            quote: opts.quote or value.quote
@@ -55,7 +55,7 @@ Literal                   = (value)                                     -> new L
 StatementLiteral          = (value)                                     -> new StatementLiteral value
 DefaultLiteral            = (value)                                     -> new DefaultLiteral value
 
-# === IDENTIFIERS AND REFERENCES ===
+# Identifiers and references
 IdentifierLiteral         = (name)                                      -> new IdentifierLiteral name
 PropertyName              = (name)                                      -> new PropertyName name.toString()
 ComputedPropertyName      = (expr)                                      -> new ComputedPropertyName expr
@@ -67,7 +67,7 @@ JSXTag                    = (value, opts = {})                         -> new JS
                                                                            closingTagNameLocationData: opts.closingTagNameLocationData
                                                                            closingTagClosingBracketLocationData: opts.closingTagClosingBracketLocationData
 
-# === VALUES AND EXPRESSIONS ===
+# Values and expressions
 Value                     = (base, properties = [], context)           -> new Value base, properties, context
 Op                        = (op, left, right, flip, opts = {})         -> new Op op, left, right, flip,
                                                                            originalOperator: opts.originalOperator
@@ -78,14 +78,14 @@ Assign                    = (left, right, context, opts = {})          -> new As
                                                                            originalContext: opts.originalContext
                                                                            moduleDeclaration: opts.moduleDeclaration
 
-# === FUNCTION RELATED ===
+# Function related
 Code                      = (params, body, glyph, opts = {})           -> new Code params, body, glyph, opts.paramStart
 FuncGlyph                 = (glyph)                                     -> new FuncGlyph glyph
 Param                     = (name, defaultValue, splat, opts = {})     -> new Param name, defaultValue, splat, postfix: opts.postfix
 Expansion                 = ()                                          -> new Expansion
 Splat                     = (name, opts = {})                          -> new Splat name, postfix: opts.postfix
 
-# === FUNCTION CALLS ===
+# Function calls
 Call                      = (variable, args, soak)                     -> new Call variable, args, soak
 SuperCall                 = (superKeyword, args, soak, token)          -> new SuperCall superKeyword, args, soak, token
 DynamicImportCall         = (importKeyword, args)                      -> new DynamicImportCall importKeyword, args
@@ -94,7 +94,7 @@ Super                     = (accessor, superKeyword)                    -> new S
 MetaProperty              = (meta, property)                           -> new MetaProperty meta, property
 DynamicImport             = ()                                          -> new DynamicImport
 
-# === CONTROL FLOW ===
+# Control flow
 If                        = (condition, body, opts = {})               -> new If condition, body,
                                                                            type: opts.type
                                                                            postfix: opts.postfix
@@ -124,26 +124,26 @@ Return                    = (expression)                               -> new Re
 YieldReturn               = (expression, opts = {})                    -> new YieldReturn expression, returnKeyword: opts.returnKeyword
 AwaitReturn               = (expression, opts = {})                    -> new AwaitReturn expression, returnKeyword: opts.returnKeyword
 
-# === COLLECTIONS ===
+# Collections
 Arr                       = (objects)                                   -> new Arr objects
 Obj                       = (properties, generated)                    -> new Obj properties, generated
 Range                     = (from, to, exclusive)                      -> new Range from, to, exclusive
 Slice                     = (range)                                     -> new Slice range
 Elision                   = ()                                          -> new Elision
 
-# === ACCESSORS ===
+# Accessors
 Access                    = (name, opts = {})                          -> new Access name,
                                                                            soak: opts.soak
                                                                            shorthand: opts.shorthand
 Index                     = (index, opts = {})                         -> new Index index, soak: opts.soak
 
-# === INTERPOLATION ===
+# Interpolation
 Interpolation             = (expression)                               -> new Interpolation expression
 
-# === CLASSES ===
+# Classes
 Class                     = (variable, superclass, body)               -> new Class variable, superclass, body
 
-# === MODULES ===
+# Modules
 ImportDeclaration         = (clause, source, assertions)              -> new ImportDeclaration clause, source, assertions
 ImportClause              = (defaultBinding, namedImports)             -> new ImportClause defaultBinding, namedImports
 ImportDefaultSpecifier    = (local)                                    -> new ImportDefaultSpecifier local
@@ -156,11 +156,11 @@ ExportAllDeclaration      = (exported, source, assertions)            -> new Exp
 ExportSpecifier           = (local, exported)                         -> new ExportSpecifier local, exported
 ExportSpecifierList       = (specifiers)                              -> new ExportSpecifierList specifiers
 
-# === PARENTHETICAL AND UTILITIES ===
+# Parenthetical and utilities
 Parens                    = (body)                                      -> new Parens body
 extend                    = (object, properties)                       -> yy.extend object, properties
 
-# === UTILITY FUNCTIONS ===
+# Utility functions
 BlockWrap                 = (statements)                               -> Block.wrap statements
 List                      = (item)                                     -> [item]
 Concat                    = (list, item)                               -> list.concat item
@@ -175,7 +175,7 @@ o = (pattern, action, options) -> [pattern, action or (-> $1), options]
 
 grammar =
 
-  # === ROOT AND STRUCTURE ===
+  # Root and structure
   Root: [
     o '',                                                               -> Root()
     o 'Body',                                                           -> Root $1
@@ -199,7 +199,7 @@ grammar =
     o 'AwaitReturn'
   ]
 
-  # === STATEMENTS ===
+  # Statements
   Statement: [
     o 'Return'
     o 'STATEMENT',                                                      -> StatementLiteral $1
@@ -207,7 +207,7 @@ grammar =
     o 'Export'
   ]
 
-  # === EXPRESSIONS ===
+  # Expressions
   Expression: [
     o 'Value'
     o 'Code'
@@ -236,13 +236,13 @@ grammar =
     o 'YIELD FROM Expression',                                          -> Op $1.concat($2), $3
   ]
 
-  # === BLOCKS ===
+  # Blocks
   Block: [
     o 'INDENT OUTDENT',                                                 -> Block()
     o 'INDENT Body OUTDENT',                                            -> $2
   ]
 
-  # === IDENTIFIERS ===
+  # Identifiers
   Identifier: [
     o 'IDENTIFIER',                                                     -> IdentifierLiteral $1
     o 'JSX_TAG',                                                        -> JSXTag $1.toString(),
@@ -257,7 +257,7 @@ grammar =
     o 'PROPERTY',                                                       -> PropertyName $1.toString()
   ]
 
-  # === LITERALS ===
+  # Literals
   AlphaNumeric: [
     o 'NUMBER',                                                         -> NumberLiteral $1.toString(), parsedValue: $1.parsedValue
     o 'String'
@@ -307,7 +307,7 @@ grammar =
     o 'NAN',                                                            -> NaNLiteral $1
   ]
 
-  # === ASSIGNMENT ===
+  # Assignment
   Assign: [
     o 'Assignable = Expression',                                        -> Assign $1, $3
     o 'Assignable = TERMINATOR Expression',                             -> Assign $1, $4
@@ -364,7 +364,7 @@ grammar =
     o 'ObjSpreadExpr Accessor',                                         -> Value($1).add $2
   ]
 
-  # === RETURNS ===
+  # Returns
   Return: [
     o 'RETURN Expression',                                              -> Return $2
     o 'RETURN INDENT Object OUTDENT',                                   -> Return Value($3)
@@ -381,7 +381,7 @@ grammar =
     o 'AWAIT RETURN',                                                   -> AwaitReturn null, returnKeyword: Literal($2)
   ]
 
-  # === FUNCTIONS ===
+  # Functions
   Code: [
     o 'PARAM_START ParamList PARAM_END FuncGlyph Block',                -> Code $2, $5, $4, Literal($1)
     o 'FuncGlyph Block',                                                -> Code [], $2, $1
@@ -430,7 +430,7 @@ grammar =
     o '... Expression',                                                 -> Splat $2, postfix: no
   ]
 
-  # === ASSIGNABLES ===
+  # Assignables
   SimpleAssignable: [
     o 'Identifier',                                                     -> Value $1
     o 'Value Accessor',                                                 -> $1.add $2
@@ -444,7 +444,7 @@ grammar =
     o 'Object',                                                         -> Value $1
   ]
 
-  # === VALUES ===
+  # Values
   Value: [
     o 'Assignable'
     o 'Literal',                                                        -> Value $1
@@ -468,7 +468,7 @@ grammar =
     o 'IMPORT_META . Property',                                         -> MetaProperty IdentifierLiteral($1), Access($3)
   ]
 
-  # === ACCESSORS ===
+  # Accessors
   Accessor: [
     o '. Property',                                                     -> Access $2
     o '?. Property',                                                    -> Access $2, soak: yes
@@ -490,7 +490,7 @@ grammar =
     o 'Slice',                                                          -> Slice $1
   ]
 
-  # === OBJECTS ===
+  # Objects
   Object: [
     o '{ AssignList OptComma }',                                        -> Obj $2, $1.generated
   ]
@@ -503,7 +503,7 @@ grammar =
     o 'AssignList OptComma INDENT AssignList OptComma OUTDENT',         -> $1.concat $4
   ]
 
-  # === CLASSES ===
+  # Classes
   Class: [
     o 'CLASS',                                                          -> Class()
     o 'CLASS Block',                                                    -> Class null, null, $2
@@ -515,7 +515,7 @@ grammar =
     o 'CLASS SimpleAssignable EXTENDS Expression Block',                -> Class $2, $4, $5
   ]
 
-  # === IMPORTS ===
+  # Imports
   Import: [
     o 'IMPORT String',                                                  -> ImportDeclaration null, $2
     o 'IMPORT String ASSERT Object',                                    -> ImportDeclaration null, $2, $4
@@ -556,7 +556,7 @@ grammar =
     o 'IMPORT_ALL AS Identifier',                                       -> ImportNamespaceSpecifier Literal($1), $3
   ]
 
-  # === EXPORTS ===
+  # Exports
   Export: [
     o 'EXPORT { }',                                                     -> ExportNamedDeclaration ExportSpecifierList([])
     o 'EXPORT { ExportSpecifierList OptComma }',                        -> ExportNamedDeclaration ExportSpecifierList($3)
@@ -590,7 +590,7 @@ grammar =
     o 'DEFAULT AS Identifier',                                          -> ExportSpecifier DefaultLiteral($1), $3
   ]
 
-  # === INVOCATIONS ===
+  # Invocations
   Invocation: [
     o 'Value OptFuncExist String',                                      -> TaggedTemplateCall $1, $3, $2.soak
     o 'Value OptFuncExist Arguments',                                   -> Call $1, $3, $2.soak
@@ -608,7 +608,7 @@ grammar =
     o 'CALL_START ArgList OptComma CALL_END',                           -> $2.implicit = $1.generated; $2
   ]
 
-  # === THIS ===
+  # This
   This: [
     o 'THIS',                                                           -> Value ThisLiteral($1)
     o '@',                                                              -> Value ThisLiteral($1)
@@ -618,7 +618,7 @@ grammar =
     o '@ Property',                                                     -> Value ThisLiteral($1), [Access($2)], 'this'
   ]
 
-  # === ARRAYS ===
+  # Arrays
   Array: [
     o '[ ]',                                                            -> Arr []
     o '[ Elisions ]',                                                   -> Arr $2
@@ -644,7 +644,7 @@ grammar =
     o 'RangeDots',                                                      -> Range null, null, if $1.exclusive then 'exclusive' else 'inclusive'
   ]
 
-  # === ARGUMENT LISTS ===
+  # Argument lists
   ArgList: [
     o 'Arg',                                                            -> [$1]
     o 'ArgList , Arg',                                                  -> $1.concat $3
@@ -695,7 +695,7 @@ grammar =
     o 'SimpleArgs , ExpressionLine',                                    -> [].concat $1, $3
   ]
 
-  # === EXCEPTION HANDLING ===
+  # Exception handling
   Try: [
     o 'TRY Block',                                                      -> Try $2
     o 'TRY Block Catch',                                                -> Try $2, $3
@@ -714,13 +714,13 @@ grammar =
     o 'THROW INDENT Object OUTDENT',                                    -> Throw Value($3)
   ]
 
-  # === PARENTHETICAL ===
+  # Parenthetical
   Parenthetical: [
     o '( Body )',                                                       -> Parens $2
     o '( INDENT Body OUTDENT )',                                        -> Parens $3
   ]
 
-  # === WHILE LOOPS ===
+  # While loops
   WhileLineSource: [
     o 'WHILE ExpressionLine',                                           -> While $2
     o 'WHILE ExpressionLine WHEN ExpressionLine',                       -> While $2, guard: $4
@@ -750,7 +750,7 @@ grammar =
     o 'LOOP Expression',                                                -> While(BooleanLiteral('true'), isLoop: yes).addBody BlockWrap([$2])
   ]
 
-  # === FOR LOOPS ===
+  # For loops
   For: [
     o 'Statement ForBody',                                              -> $2.postfix = yes; $2.addBody $1
     o 'Expression ForBody',                                             -> $2.postfix = yes; $2.addBody $1
@@ -831,7 +831,7 @@ grammar =
     o 'FORFROM ExpressionLine WHEN ExpressionLine',                     -> source: $2, guard: $4, from: yes
   ]
 
-  # === SWITCH STATEMENTS ===
+  # Switch statements
   Switch: [
     o 'SWITCH Expression INDENT Whens OUTDENT',                         -> Switch $2, $4
     o 'SWITCH ExpressionLine INDENT Whens OUTDENT',                     -> Switch $2, $4
@@ -851,7 +851,7 @@ grammar =
     o 'LEADING_WHEN SimpleArgs Block TERMINATOR',                       -> SwitchWhen $2, $3
   ]
 
-  # === IF STATEMENTS ===
+  # If statements
   IfBlock: [
     o 'IF Expression Block',                                            -> If $2, $3, type: $1
     o 'IfBlock ELSE IF Expression Block',                               -> $1.addElse If($4, $5, type: $3)
@@ -876,7 +876,7 @@ grammar =
     o 'Expression POST_IF ExpressionLine',                              -> If $3, BlockWrap([$1]), type: $2, postfix: true
   ]
 
-  # === OPERATIONS ===
+  # Operations
   OperationLine: [
     o 'UNARY ExpressionLine',                                           -> Op $1, $2
     o 'DO ExpressionLine',                                              -> Op $1, $2
