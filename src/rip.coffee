@@ -326,12 +326,6 @@ class Generator
   getStatistics: ->
     @analyze() unless @analyzed
     {
-      # FIXME: @ruleStats
-      # errorRecovery = @ruleStats.errorRecovery
-      # augmented = @ruleStats.augmented
-      # source = @ruleStats.source
-      # expanded = totalRules - (source + errorRecovery + augmented)
-
       states: @states.length
       rules: @rules.length
       terminals: [...@symbols.values()].filter((s) -> s.isTerminal).length
@@ -387,11 +381,13 @@ class Generator
     @getSymbol '$end' , true
     @getSymbol 'error', true; @tokens.add('error')
 
+    # Rule stats
+    @performanceStats.sourceRules        = 0
+    @performanceStats.expandedRules      = 0
+    @performanceStats.errorRecoveryRules = 0
+    @performanceStats.augmentedRules     = 0
+
     # Process all rules with enhanced validation
-    @ruleStats.source = 0
-    @ruleStats.expanded = 0
-    @ruleStats.errorRecovery = 0
-    @ruleStats.augmented = 0
     ruleCountBefore = @rules.length
     for nonterminal, rules of grammar
       for rule, i in rules
@@ -417,7 +413,7 @@ class Generator
           for symbol in rhs
             @getSymbol(symbol)
 
-          @ruleStats.source++
+          @performanceStats.sourceRules++
         catch error
           throw new Error("Error processing rule #{i} for '#{nonterminal}': #{error.message}")
 
@@ -427,7 +423,7 @@ class Generator
 
     # Add augmented start rule: $accept → start $end
     @rules.push(new Rule('$accept', [@start, '$end']))
-    @ruleStats.augmented = 1
+    @performanceStats.augmentedRules = 1
 
     # Build performance optimization caches
     @buildRuleLookupCache()
@@ -610,7 +606,7 @@ class Generator
       # Add: NonTerminal → error
       errorRule = new Rule(ntName, ['error'], '/* error recovery */')
       @rules.push(errorRule)
-      @ruleStats.errorRecovery++
+      @performanceStats.errorRecoveryRules++
 
       # Only show in debug mode (internal implementation details)
       if @debugLevel >= DEBUG
