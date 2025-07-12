@@ -3646,9 +3646,8 @@ function getTableAction(state, symbol) {
 # ============================================================================
 
 
-# Modern ES6 exports for the bootstrap phase
-export { Generator, SILENT, NORMAL, VERBOSE, DEBUG }
-export default { Generator, SILENT, NORMAL, VERBOSE, DEBUG }
+# CommonJS exports for maximum compatibility
+module.exports = { Generator, SILENT, NORMAL, VERBOSE, DEBUG }
 
 # ============================================================================
 # COMPREHENSIVE CLI INTERFACE
