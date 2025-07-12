@@ -3630,25 +3630,6 @@ function getTableAction(state, symbol) {
     else
       console.log "  Optimization skipped (table too small or no benefit)"
 
-  printStatistics: ->
-    terminals = [...@symbols.values()].filter((s) -> s.isTerminal).length
-    nonterminals = [...@symbols.values()].filter((s) -> !s.isTerminal).length
-    totalSymbols = @symbols.size
-    totalRules = @rules.length
-    states = @states.length
-    errorRecovery = @ruleStats.errorRecovery
-    augmented = @ruleStats.augmented
-    source = @ruleStats.source
-    expanded = totalRules - (source + errorRecovery + augmented)
-    perf = @performanceStats?.totalTime ? null
-    console.log "\n=== GRAMMAR STATISTICS ==="
-    console.log "• Rules Breakdown: #{totalRules} total = #{source} source + ~#{expanded} expanded + #{errorRecovery} error recovery + #{augmented} augmented start"
-    console.log "• Error Recovery Rules: Exactly #{errorRecovery} rules added automatically"
-    console.log "• Parser States: #{states} LALR(1) states generated"
-    console.log "• Symbol Count: #{totalSymbols} total symbols (#{terminals} terminals + #{nonterminals} non-terminals)"
-    if perf? then console.log "• Performance: ~#{perf}ms total generation time"
-    else console.log "• Performance: (timing not available)"
-
   debugTable: ->
     console.log "\n=== PARSER STATES ==="
     for state in @states
