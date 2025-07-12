@@ -1,0 +1,69 @@
+{
+  "name": "rip-lang",
+  "version": "2.0.0",
+  "description": "🚀 Revolutionary Universal Parser - Built for the Future with Bun",
+  "type": "module",
+    "main": "./src/rip.coffee",
+  "exports": {
+    ".": "./src/rip.coffee",
+    "./parser": "./src/parser.coffee",
+    "./generator": "./src/rip.coffee",
+    "./languages/*": "./languages/*.coffee"
+  },
+  "bin": {
+    "rip": "./src/rip.coffee"
+  },
+  "scripts": {
+    "dev": "bun src/rip.coffee",
+    "test": "bun examples/test-direct-coffee.js",
+    "test:parser": "bun examples/test-direct-coffee.js",
+    "demo": "bun examples/demo.js",
+    "benchmark": "bun scripts/benchmark.js",
+    "lint": "bun x prettier --write src/**/*.coffee languages/**/*.coffee",
+    "start": "bun src/rip.coffee",
+    "repl": "bun src/repl.coffee"
+  },
+  "keywords": [
+    "parser",
+    "compiler",
+    "language",
+    "universal",
+    "rip",
+    "bun",
+    "modern",
+    "es6",
+    "cross-platform",
+    "revolutionary"
+  ],
+  "author": "Rip Language Team",
+  "license": "MIT",
+  "engines": {
+    "bun": ">=1.0.0",
+    "node": ">=18.0.0"
+  },
+  "trustedDependencies": [
+    "coffeescript"
+  ],
+  "devDependencies": {
+    "coffeescript": "^2.7.0",
+    "prettier": "^3.0.0"
+  },
+  "dependencies": {
+    "bun-coffeescript": "^1.0.3"
+  },
+  "files": [
+    "src/",
+    "languages/",
+    "bunfig.toml",
+    "README.md",
+    "LICENSE"
+  ],
+  "bun": {
+    "build": {
+      "target": "bun",
+      "format": "esm",
+      "minify": false,
+      "sourcemap": "external"
+    }
+  }
+}

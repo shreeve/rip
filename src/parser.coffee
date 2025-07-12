@@ -271,5 +271,5 @@ UniversalParser.determineTerminals = (symbols, rules) ->
 
   return terminals
 
-# Export for use
-module.exports = UniversalParser
+# Export for ES6 modules
+export default UniversalParser
