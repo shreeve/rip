@@ -113,20 +113,18 @@ class Generator
     @analyzed          = false     # track if analysis is complete
     @rulesByLHS        = new Map() # LHS -> [Rules] for O(1) rule lookup
     @performanceStats  = {         # track performance metrics
-      closureCalls: 0,
-      cacheHits: 0,
-      stateCreations: 0,
-      lookaheadComputations: 0,
-      optimizationTime: 0
+      closureCalls:          0,    # closure calls
+      cacheHits:             0,    # cache hits
+      stateCreations:        0,    # state creations
+      lookaheadComputations: 0,    # lookahead computations
+      optimizationTime:      0,    # optimization time
+      sourceRules:           0,    # direct from grammar file
+      expandedRules:         0,    # expanded/flattened
+      errorRecoveryRules:    0,    # error recovery rules
+      augmentedRules:        0     # augmented start rule
     }
     @coreCache         = new Map() # state core -> closure items for memoization
     @closureCache      = new Map() # state -> core hash for memoization
-    @ruleStats = {
-      source: 0,         # direct from grammar
-      expanded: 0,       # expanded/flattened
-      errorRecovery: 0,  # error recovery rules
-      augmented: 0       # augmented start rule
-    }
 
     # Table optimization configuration
     @optimizationConfig = {
