@@ -3112,6 +3112,12 @@ function getTableAction(state, symbol) {
         terminalIds.push(symbol.id)
     terminalIds.sort((a, b) -> a - b)
 
+  # Determine terminals from symbols and rules (for language packs without explicit terminals)
+  # This delegates to the shared utility in the universal parser
+  determineTerminalsFromGrammar: (symbols, rules) ->
+    UniversalParser = require('./parser.coffee')
+    UniversalParser.determineTerminals(symbols, rules)
+
   # Generate compact rules map (rules__ = Map {3=>[0,1], 4=>[1,3,2],...})
   prepareCompactProductions: ->
     rules = []

@@ -19,10 +19,12 @@ class UniversalParser
 
     # Extract language-specific data from the pack
     @symbols = @languagePack.symbols or []           # Symbol names: ["Root", "Body", "Expression", ...]
-    @terminals = @languagePack.terminals or []       # Terminal IDs: [1, 2, 3, ...]
     @rules = @languagePack.rules or {}               # Grammar rules: {0: [lhs, rhsLength], ...}
     @states = @languagePack.states or []             # LALR(1) state table: [{token: [action, target], ...}, ...]
     @actions = @languagePack.actions or {}           # AST builders: {ruleIndex: function, ...}
+
+    # Determine terminals automatically (symbols that aren't left-hand sides of rules)
+    @terminals = @getTerminals()
 
     # Validate the language pack
     @validateLanguagePack()
@@ -32,8 +34,30 @@ class UniversalParser
     @valueStack = []      # Stack of semantic values (AST nodes)
     @locationStack = []   # Stack of source locations
 
+  # Get terminals from language pack or determine automatically
+  getTerminals: ->
+    terminals = @languagePack.terminals
+
+    # Handle different terminal formats
+    if typeof terminals is 'function'
+      # Language pack provides a function to compute terminals
+      return terminals.call(@languagePack)
+    else if Array.isArray(terminals)
+      # Language pack provides explicit terminal list
+      return terminals
+    else if terminals?
+      # Language pack provides some other format
+      return terminals
+    else
+      # No terminals provided, determine automatically
+      return @determineTerminals()
+
+  # Automatically determine terminals from symbols and rules
+  determineTerminals: ->
+    UniversalParser.determineTerminals(@symbols, @rules)
+
   validateLanguagePack: ->
-    required = ['symbols', 'terminals', 'rules', 'states', 'actions']
+    required = ['symbols', 'rules', 'states']
     for prop in required
       unless @languagePack[prop]?
         throw new Error("Language pack missing required property: #{prop}")
@@ -204,6 +228,48 @@ class UniversalParser
     error.token = token
     error.parseStack = @stateStack.slice()  # Copy of state stack for debugging
     throw error
+
+# Static utility method for determining terminals from symbols and rules
+# This can be used by both the parser and the generator
+#
+# Algorithm: A symbol is a terminal if it never appears as the left-hand side of any rule.
+# This works for most grammars and eliminates the need for explicit terminal lists.
+#
+# Usage:
+#   terminals = UniversalParser.determineTerminals(symbols, rules)
+#
+# Parameters:
+#   symbols - Array of symbol names: ['Root', 'Body', 'IDENTIFIER', 'NUMBER']
+#   rules - Object or Array of rules:
+#           Object format: {0: [lhsSymbol, rhsLength], 1: [lhsSymbol, rhsLength]}
+#           Array format: [{lhs: 'Root', rhs: [...]}, {lhs: 'Body', rhs: [...]}]
+#
+# Returns:
+#   Array of terminal symbol indices: [2, 3] (for 'IDENTIFIER', 'NUMBER')
+UniversalParser.determineTerminals = (symbols, rules) ->
+  # Get all symbols that appear as left-hand sides of rules (non-terminals)
+  nonTerminals = new Set()
+
+  # Handle different rule formats
+  if typeof rules is 'object' and not Array.isArray(rules)
+    # Rules as object: {0: [lhsSymbol, rhsLength]} or {0: [lhsIndex, rhsLength]}
+    for ruleId, rule of rules
+      if rule and rule.length >= 2
+        nonTerminals.add(rule[0])  # Add left-hand side symbol/index
+  else if Array.isArray(rules)
+    # Rules as array of rule objects with .lhs property
+    for rule in rules
+      if rule?.lhs
+        nonTerminals.add(rule.lhs)
+
+  # All symbols that aren't non-terminals are terminals
+  terminals = []
+  for symbol, index in symbols
+    # Check both symbol name and index (handles different rule formats)
+    unless nonTerminals.has(symbol) or nonTerminals.has(index)
+      terminals.push(index)
+
+  return terminals
 
 # Export for use
 module.exports = UniversalParser
