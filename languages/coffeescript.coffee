@@ -123,7 +123,7 @@ grammar =
     o 'Import'
     o 'Export'
     o 'Class'
-    o 'STATEMENT',                              -> StatementLit($1)
+    o 'STATEMENT',                              -> StatementLit $1
   ]
 
   # Expressions - mostly pass-through
@@ -163,8 +163,8 @@ grammar =
 
   # Literals - direct constructor usage
   Literal: [
-    o 'NUMBER',                                 -> NumberLit $1, $1.toString()
-    o 'STRING',                                 -> StringLit $1, $1.toString()
+    o 'NUMBER',                                 -> NumberLit  $1, $1.toString()
+    o 'STRING',                                 -> StringLit  $1, $1.toString()
     o 'BOOL',                                   -> BooleanLit $1, $1.toString()
     o 'NULL',                                   -> NullLit()
     o 'UNDEFINED',                              -> UndefinedLit()
@@ -174,39 +174,39 @@ grammar =
     # Operations - direct constructor usage for clarity
   Operation: [
     # Unary operations
-    o 'UNARY Expression',                       -> Unary $1, $2
-    o '- Expression',                           -> Unary '-', $2
-    o '+ Expression',                           -> Unary '+', $2
+    o 'UNARY Expression',                       -> Unary $1  , $2
+    o '- Expression',                           -> Unary '-' , $2
+    o '+ Expression',                           -> Unary '+' , $2
     o '++ SimpleAssignable',                    -> Unary '++', $2
     o '-- SimpleAssignable',                    -> Unary '--', $2
     o 'SimpleAssignable ++',                    -> Unary '++', $1, false
     o 'SimpleAssignable --',                    -> Unary '--', $1, false
 
     # Binary operations
-    o 'Expression + Expression',                -> Binary '+', $1, $3
-    o 'Expression - Expression',                -> Binary '-', $1, $3
-    o 'Expression * Expression',                -> Binary '*', $1, $3
-    o 'Expression / Expression',                -> Binary '/', $1, $3
-    o 'Expression % Expression',                -> Binary '%', $1, $3
+    o 'Expression +  Expression',               -> Binary '+' , $1, $3
+    o 'Expression -  Expression',               -> Binary '-' , $1, $3
+    o 'Expression *  Expression',               -> Binary '*' , $1, $3
+    o 'Expression /  Expression',               -> Binary '/' , $1, $3
+    o 'Expression %  Expression',               -> Binary '%' , $1, $3
     o 'Expression ** Expression',               -> Binary '**', $1, $3
     o 'Expression == Expression',               -> Binary '==', $1, $3
     o 'Expression != Expression',               -> Binary '!=', $1, $3
-    o 'Expression < Expression',                -> Binary '<', $1, $3
-    o 'Expression > Expression',                -> Binary '>', $1, $3
+    o 'Expression <  Expression',               -> Binary '<' , $1, $3
+    o 'Expression >  Expression',               -> Binary '>' , $1, $3
     o 'Expression <= Expression',               -> Binary '<=', $1, $3
     o 'Expression >= Expression',               -> Binary '>=', $1, $3
     o 'Expression && Expression',               -> Binary '&&', $1, $3
     o 'Expression || Expression',               -> Binary '||', $1, $3
-    o 'Expression & Expression',                -> Binary '&', $1, $3
-    o 'Expression | Expression',                -> Binary '|', $1, $3
-    o 'Expression ^ Expression',                -> Binary '^', $1, $3
+    o 'Expression &  Expression',               -> Binary '&' , $1, $3
+    o 'Expression |  Expression',               -> Binary '|' , $1, $3
+    o 'Expression ^  Expression',               -> Binary '^' , $1, $3
     o 'Expression << Expression',               -> Binary '<<', $1, $3
     o 'Expression >> Expression',               -> Binary '>>', $1, $3
   ]
 
   # Assignment - direct constructor usage
   Assign: [
-    o 'Assignable = Expression',                -> Assign '=', $1, $3
+    o 'Assignable  = Expression',               -> Assign '=' , $1, $3
     o 'Assignable += Expression',               -> Assign '+=', $1, $3
     o 'Assignable -= Expression',               -> Assign '-=', $1, $3
     o 'Assignable *= Expression',               -> Assign '*=', $1, $3
@@ -263,7 +263,7 @@ grammar =
 
   # Object properties
   Property: [
-    o 'IDENTIFIER : Expression',                -> Property (Id $1), $3
+    o 'IDENTIFIER : Expression',                -> Property (Id $1       ), $3
     o 'STRING : Expression',                    -> Property (StringLit $1), $3
     o 'NUMBER : Expression',                    -> Property (NumberLit $1), $3
   ]
@@ -295,9 +295,9 @@ grammar =
   # Functions - compact format
   Code: [
     o 'PARAM_START ParamList PARAM_END -> Block',  -> Function $2, $5
-    o 'PARAM_START ParamList PARAM_END => Block',  -> Arrow $2, $5
-    o '-> Block',                               -> Function [], $2
-    o '=> Block',                               -> Arrow [], $2
+    o 'PARAM_START ParamList PARAM_END => Block',  -> Arrow    $2, $5
+    o '-> Block',                                  -> Function [], $2
+    o '=> Block',                                  -> Arrow    [], $2
   ]
 
   # Parameter list
