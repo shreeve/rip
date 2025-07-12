@@ -98,22 +98,20 @@ class Generator
     @timing "  📋 Data structure initialization"
 
     # Initialize all data structures
-    @grammar          = null       # store grammar
-    @start            = null       # start symbol
-    @tokens           = null       # store tokens for terminal identification
-    @symbols          = new Map()  # name -> Symbol
-    @rules            = []         # array of Rules
-    @precedence       = {}         # symbol -> {level, assoc}
-    @states           = []         # array of States
-    @stateMap         = new Map()  # core hash -> State
-    @coreCache        = new Map()  # state core -> closure items for memoization
-    @closureCache     = new Map()  # state -> core hash for memoization
-    @propagateLinks   = new Map()  # stateId-itemKey -> Set of stateId-itemKey
-    @inadequateStates = []         # states with conflicts
-    @conflicts        = []         # conflict information
-    @analyzed         = false      # track if analysis is complete
-    @rulesByLHS       = new Map()  # LHS -> [Rules] for O(1) rule lookup
-    @stats            =            # unified statistics and performance metrics
+    @grammar           = null      # store grammar
+    @start             = null      # start symbol
+    @tokens            = null      # store tokens for terminal identification
+    @symbols           = new Map() # name -> Symbol
+    @rules             = []        # array of Rules
+    @precedence        = {}        # symbol -> {level, assoc}
+    @states            = []        # array of States
+    @stateMap          = new Map() # core hash -> State
+    @propagateLinks    = new Map() # stateId-itemKey -> Set of stateId-itemKey
+    @inadequateStates  = []        # states with conflicts
+    @conflicts         = []        # conflict information
+    @analyzed          = false     # track if analysis is complete
+    @rulesByLHS        = new Map() # LHS -> [Rules] for O(1) rule lookup
+    @stats             =
       closureCalls:          0     # closure calls
       cacheHits:             0     # cache hits
       stateCreations:        0     # state creations
@@ -125,13 +123,12 @@ class Generator
       augmentedRules:        0     # augmented start rule
 
     # Table optimization configuration
-    @optimizationConfig = {
-      enabled: opts.optimize ? false
-      auto: opts.autoOptimize ? true
+    @optimizationConfig =
+      enabled:         opts.optimize ? false
+      auto:            opts.autoOptimize ? true
       minStatesForAuto: opts.minStatesForAuto ? 20
-      algorithms: opts.algorithms ? ['auto']
-      skipIfSmall: opts.skipIfSmall ? true
-    }
+      algorithms:      opts.algorithms ? ['auto']
+      skipIfSmall:     opts.skipIfSmall ? true
 
     # Debug levels will use module-level constants
 
@@ -140,9 +137,8 @@ class Generator
     @debugLevel = @parseDebugLevel(debugInput)
 
     # Legacy debug configuration (for backward compatibility)
-    @debugConfig = {
+    @debugConfig =
       enabled: @debugLevel >= DEBUG
-    }
 
     # Configure options
     @options = opts
@@ -323,25 +319,25 @@ class Generator
 
   getStatistics: ->
     @analyze() unless @analyzed
-    {
-      states: @states.length
-      rules: @rules.length
-      terminals: [...@symbols.values()].filter((s) -> s.isTerminal).length
-      nonterminals: [...@symbols.values()].filter((s) -> !s.isTerminal).length
-      conflicts: @conflicts.length
-      symbols: @symbols.size
-      inadequateStates: @inadequateStates.length,
-      expandedRules: @rules.length - (@stats.sourceRules + @stats.errorRecoveryRules + @stats.augmentedRules),
-      sourceRules: @stats.sourceRules,
-      errorRecoveryRules: @stats.errorRecoveryRules,
-      augmentedRules: @stats.augmentedRules,
+    stats =
+      states:            @states.length
+      rules:             @rules.length
+      terminals:         [...@symbols.values()].filter((s) -> s.isTerminal).length
+      nonterminals:      [...@symbols.values()].filter((s) -> !s.isTerminal).length
+      conflicts:         @conflicts.length
+      symbols:           @symbols.size
+      inadequateStates:  @inadequateStates.length
+      expandedRules:     @rules.length - (@stats.sourceRules + @stats.errorRecoveryRules + @stats.augmentedRules)
+      sourceRules:       @stats.sourceRules
+      errorRecoveryRules:@stats.errorRecoveryRules
+      augmentedRules:    @stats.augmentedRules
       # Performance metrics
-      closureCalls: @stats.closureCalls,
-      cacheHits: @stats.cacheHits,
-      stateCreations: @stats.stateCreations,
-      lookaheadComputations: @stats.lookaheadComputations,
-      optimizationTime: @stats.optimizationTime
-    }
+      closureCalls:          @stats.closureCalls
+      cacheHits:             @stats.cacheHits
+      stateCreations:        @stats.stateCreations
+      lookaheadComputations: @stats.lookaheadComputations
+      optimizationTime:      @stats.optimizationTime
+    stats
 
   hasConflicts: ->
     @analyze() unless @analyzed
@@ -3977,31 +3973,28 @@ if (typeof module != 'undefined' and not module.parent) or (typeof process != 'u
   # Configure generator with CLI options
   configureGenerator = (generator, options) ->
     # Set optimization configuration
-    generator.optimizationConfig = {
-      enabled: options.optimize == 'on'
-      auto: options.optimize == 'auto'
-      skipIfSmall: options.optimize == 'auto'
-      minStatesForAuto: 20
-      compression: options.compression
-      minimization: options.minimization
-      performance: options.performance
-    }
+    generator.optimizationConfig =
+      enabled:         options.optimize == 'on'
+      auto:            options.optimize == 'auto'
+      skipIfSmall:     options.optimize == 'auto'
+      minStatesForAuto:20
+      compression:     options.compression
+      minimization:    options.minimization
+      performance:     options.performance
 
     # Set debug configuration
-    generator.debugConfig = {
-      enabled: options.debugLevel >= DEBUG
-      showStates: options.showStates
-      showConflicts: options.showConflicts
-      showGrammar: options.showGrammar
-      interactive: options.interactive
-    }
+    generator.debugConfig =
+      enabled:        options.debugLevel >= DEBUG
+      showStates:     options.showStates
+      showConflicts:  options.showConflicts
+      showGrammar:    options.showGrammar
+      interactive:    options.interactive
 
     # Set console output configuration
-    generator.consoleConfig = {
-      production: options.production
-      silentParser: options.silentParser
-      logLevel: options.logLevel
-    }
+    generator.consoleConfig =
+      production:    options.production
+      silentParser:  options.silentParser
+      logLevel:      options.logLevel
 
     if options.debugLevel >= VERBOSE
       console.log """
