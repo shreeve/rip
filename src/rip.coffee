@@ -366,8 +366,11 @@ class Generator
     # Store the grammar for later reference
     @grammar = grammar
 
-    # Convert tokens to a set
-    @tokens = new Set(tokens.trim().split(/\s+/))
+    # Auto-detect tokens if not provided, otherwise use provided tokens
+    @tokens = if tokens
+      new Set(tokens.trim().split(/\s+/))
+    else
+      @autoDetectTerminals(grammar)
 
     # Create special symbols (starts with id = 0, 1, 2)
     @getSymbol '$accept'
@@ -402,11 +405,9 @@ class Generator
         catch error
           throw new Error("Error processing rule #{i} for '#{nonterminal}': #{error.message}")
 
-    # Set start symbol
-    @start = switch
-      when grammar[start ] then start
-      when grammar['Root'] then 'Root'
-      else Object.keys(grammar)[0]
+    # Smart start symbol detection with fallbacks
+    @start = start ||
+             (if grammar['Root'] then 'Root' else Object.keys(grammar)[0])
     throw new Error('Start symbol not found') unless @start
 
     # Add augmented start rule: $accept → start $end
@@ -432,10 +433,8 @@ class Generator
     unless typeof grammar is 'object'
       errors.push("Grammar must be an object, got #{typeof grammar}")
 
-    unless tokens?
-      errors.push("Tokens string is required")
-
-    unless typeof tokens is 'string'
+    # Tokens are now optional (auto-detected if not provided)
+    if tokens? and typeof tokens isnt 'string'
       errors.push("Tokens must be a string, got #{typeof tokens}")
 
     # Early exit if basic structure is invalid
@@ -521,11 +520,12 @@ class Generator
             unless @isValidSymbolName(symbol)
               errors.push("Invalid operator symbol '#{symbol}' in group #{i}")
 
-    # 6. Validate tokens
-    tokenList = tokens.trim().split(/\s+/)
-    for token in tokenList when token
-      unless @isValidSymbolName(token)
-        errors.push("Invalid token name '#{token}'")
+    # 6. Validate tokens (only if provided)
+    if tokens?
+      tokenList = tokens.trim().split(/\s+/)
+      for token in tokenList when token
+        unless @isValidSymbolName(token)
+          errors.push("Invalid token name '#{token}'")
 
     # Throw error if any validation failed
     if errors.length > 0
@@ -611,6 +611,33 @@ class Generator
     # Performance optimization: pre-sort rules by LHS for consistent iteration
     for [lhs, rules] from @rulesByLHS
       rules.sort((a, b) -> a.id - b.id)
+
+  # Auto-detect terminal symbols from grammar rules
+  # A symbol is a terminal if it never appears as the left-hand side of any rule
+  autoDetectTerminals: (grammar) ->
+    allSymbols = new Set()
+    nonTerminals = new Set()
+
+    # Collect all non-terminals (LHS symbols)
+    for lhs, rules of grammar
+      nonTerminals.add(lhs)
+
+    # Collect all symbols from RHS of rules
+    for lhs, rules of grammar
+      for rule in rules
+        [pattern] = rule
+        if pattern and typeof pattern is 'string'
+          symbols = pattern.trim().split(/\s+/).filter((s) -> s.length > 0)
+          for symbol in symbols
+            allSymbols.add(symbol)
+
+    # Terminals are symbols that appear in RHS but not as LHS
+    terminals = new Set()
+    for symbol from allSymbols
+      unless nonTerminals.has(symbol)
+        terminals.add(symbol)
+
+    terminals
 
   # Check if a symbol name is valid
   isValidSymbolName: (name) ->
@@ -3619,14 +3646,15 @@ function getTableAction(state, symbol) {
 # ============================================================================
 
 
-# Keep as traditional CommonJS for now (bootstrapping phase)
-module.exports = { Generator, SILENT, NORMAL, VERBOSE, DEBUG }
+# Modern ES6 exports for the bootstrap phase
+export { Generator, SILENT, NORMAL, VERBOSE, DEBUG }
+export default { Generator, SILENT, NORMAL, VERBOSE, DEBUG }
 
 # ============================================================================
 # COMPREHENSIVE CLI INTERFACE
 # ============================================================================
 
-unless module.parent
+if (typeof module != 'undefined' and not module.parent) or (typeof process != 'undefined' and process.argv?[1]?.includes('rip.coffee'))
   # CLI Implementation
   fs = require 'fs'
   path = require 'path'
@@ -4279,5 +4307,6 @@ unless module.parent
       else
         console.log "❌ Unknown command: #{cmd}. Type 'help' for available commands."
 
-    # Run the CLI
-  main()
+    # Run the CLI only if this is the main module (CommonJS) or if we're in Node.js
+  if (typeof module != 'undefined' and not module.parent) or (typeof process != 'undefined' and process.argv?[1]?.includes('rip.coffee'))
+    main()
