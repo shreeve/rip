@@ -95,7 +95,6 @@ class State # Set of LR(0) items
 class Generator
   constructor: (grammarData = null, opts = {}) ->
     @timing "🏗️ CONSTRUCTOR"
-
     @timing "  📋 Data structure initialization"
 
     # Initialize all data structures
@@ -107,24 +106,23 @@ class Generator
     @precedence        = {}        # symbol -> {level, assoc}
     @states            = []        # array of States
     @stateMap          = new Map() # core hash -> State
+    @coreCache         = new Map() # state core -> closure items for memoization
+    @closureCache      = new Map() # state -> core hash for memoization
     @propagateLinks    = new Map() # stateId-itemKey -> Set of stateId-itemKey
     @inadequateStates  = []        # states with conflicts
     @conflicts         = []        # conflict information
     @analyzed          = false     # track if analysis is complete
     @rulesByLHS        = new Map() # LHS -> [Rules] for O(1) rule lookup
-    @performanceStats  = {         # track performance metrics
-      closureCalls:          0,    # closure calls
-      cacheHits:             0,    # cache hits
-      stateCreations:        0,    # state creations
-      lookaheadComputations: 0,    # lookahead computations
-      optimizationTime:      0,    # optimization time
-      sourceRules:           0,    # direct from grammar file
-      expandedRules:         0,    # expanded/flattened
-      errorRecoveryRules:    0,    # error recovery rules
+    @stats =                       # unified statistics and performance metrics
+      closureCalls:          0     # closure calls
+      cacheHits:             0     # cache hits
+      stateCreations:        0     # state creations
+      lookaheadComputations: 0     # lookahead computations
+      optimizationTime:      0     # optimization time
+      sourceRules:           0     # direct from grammar file
+      expandedRules:         0     # expanded/flattened
+      errorRecoveryRules:    0     # error recovery rules
       augmentedRules:        0     # augmented start rule
-    }
-    @coreCache         = new Map() # state core -> closure items for memoization
-    @closureCache      = new Map() # state -> core hash for memoization
 
     # Table optimization configuration
     @optimizationConfig = {
@@ -333,10 +331,16 @@ class Generator
       conflicts: @conflicts.length
       symbols: @symbols.size
       inadequateStates: @inadequateStates.length,
-      expandedRules: @rules.length - (@performanceStats.sourceRules + @performanceStats.errorRecoveryRules + @performanceStats.augmentedRules),
-      sourceRules: @performanceStats.sourceRules,
-      errorRecoveryRules: @performanceStats.errorRecoveryRules,
-      augmentedRules: @performanceStats.augmentedRules
+      expandedRules: @rules.length - (@stats.sourceRules + @stats.errorRecoveryRules + @stats.augmentedRules),
+      sourceRules: @stats.sourceRules,
+      errorRecoveryRules: @stats.errorRecoveryRules,
+      augmentedRules: @stats.augmentedRules,
+      # Performance metrics
+      closureCalls: @stats.closureCalls,
+      cacheHits: @stats.cacheHits,
+      stateCreations: @stats.stateCreations,
+      lookaheadComputations: @stats.lookaheadComputations,
+      optimizationTime: @stats.optimizationTime
     }
 
   hasConflicts: ->
@@ -386,10 +390,10 @@ class Generator
     @getSymbol 'error', true; @tokens.add('error')
 
     # Rule stats
-    @performanceStats.sourceRules        = 0
-    @performanceStats.expandedRules      = 0
-    @performanceStats.errorRecoveryRules = 0
-    @performanceStats.augmentedRules     = 0
+    @stats.sourceRules        = 0
+    @stats.expandedRules      = 0
+    @stats.errorRecoveryRules = 0
+    @stats.augmentedRules     = 0
 
     # Process all rules with enhanced validation
     ruleCountBefore = @rules.length
@@ -417,7 +421,7 @@ class Generator
           for symbol in rhs
             @getSymbol(symbol)
 
-          @performanceStats.sourceRules++
+          @stats.sourceRules++
         catch error
           throw new Error("Error processing rule #{i} for '#{nonterminal}': #{error.message}")
 
@@ -427,7 +431,7 @@ class Generator
 
     # Add augmented start rule: $accept → start $end
     @rules.push(new Rule('$accept', [@start, '$end']))
-    @performanceStats.augmentedRules = 1
+    @stats.augmentedRules = 1
 
     # Build performance optimization caches
     @buildRuleLookupCache()
@@ -610,7 +614,7 @@ class Generator
       # Add: NonTerminal → error
       errorRule = new Rule(ntName, ['error'], '/* error recovery */')
       @rules.push(errorRule)
-      @performanceStats.errorRecoveryRules++
+      @stats.errorRecoveryRules++
 
       # Only show in debug mode (internal implementation details)
       if @debugLevel >= DEBUG
@@ -1014,12 +1018,12 @@ class Generator
 
   # Compute closure of a state (LR(0) - no lookaheads yet) - OPTIMIZED
   closure: (state) ->
-    @performanceStats.closureCalls++
+    @stats.closureCalls++
 
     # Check closure cache first
     coreKey = @computeCore(state)
     if @closureCache.has(coreKey)
-      @performanceStats.cacheHits++
+      @stats.cacheHits++
       # Apply cached closure items to current state
       cachedItems = @closureCache.get(coreKey)
       for item in cachedItems
@@ -1153,7 +1157,7 @@ class Generator
 
   # Closure with lookahead computation - OPTIMIZED
   closureWithLookahead: (state) ->
-    @performanceStats.closureCalls++
+    @stats.closureCalls++
 
     # Use work queue for better performance
     workQueue = state.items.slice()
@@ -1647,7 +1651,7 @@ class Generator
       # For small grammars, use fast path
       @optimizedTable = null
 
-    @performanceStats.optimizationTime = Date.now() - startTime
+    @stats.optimizationTime = Date.now() - startTime
 
   # Determine if optimization should run
   shouldRunOptimization: ->
@@ -1845,7 +1849,7 @@ class Generator
         compression: @compressedTable.method,
         symbolMap: @optimizedSymbolMap or new Map(),
         rowCompression: @rowCompression or new Map(),
-        optimizationTime: @performanceStats.optimizationTime
+        optimizationTime: @stats.optimizationTime
       }
     }
 
@@ -3483,18 +3487,18 @@ function getTableAction(state, symbol) {
   reportPerformanceStats: ->
     return unless @debugLevel >= NORMAL
 
-    hitRateText = if @performanceStats.closureCalls > 0
-      hitRate = Math.round((@performanceStats.cacheHits / @performanceStats.closureCalls) * 100)
+    hitRateText = if @stats.closureCalls > 0
+      hitRate = Math.round((@stats.cacheHits / @stats.closureCalls) * 100)
       "Cache hit rate: #{hitRate}%"
     else
       ""
 
-    optimizationText = if @performanceStats.optimizationTime > 0
+    optimizationText = if @stats.optimizationTime > 0
       if @optimizedTable
-        """Table optimization: #{@performanceStats.optimizationTime}ms
+        """Table optimization: #{@stats.optimizationTime}ms
         Optimization method: #{@optimizedTable.format}"""
       else
-        """Table optimization: #{@performanceStats.optimizationTime}ms
+        """Table optimization: #{@stats.optimizationTime}ms
         Optimization: skipped (small grammar)"""
     else
       ""
@@ -3509,8 +3513,8 @@ function getTableAction(state, symbol) {
     Symbols: #{@symbols.size}
     Rules processed: #{@rules.length}
     States created: #{@states.length}
-    Closure computations: #{@performanceStats.closureCalls}
-    Cache hits: #{@performanceStats.cacheHits}
+    Closure computations: #{@stats.closureCalls}
+    Cache hits: #{@stats.cacheHits}
     #{hitRateText}
     #{optimizationText}
     Cache entries: #{cacheSize}
@@ -4169,7 +4173,7 @@ if (typeof module != 'undefined' and not module.parent) or (typeof process != 'u
 
   # Generate performance report
   generatePerformanceReport = (generator) ->
-    perf = generator.performanceStats
+    perf = generator.stats
 
     """
     ## Performance Analysis
