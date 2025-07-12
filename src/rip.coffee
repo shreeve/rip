@@ -332,7 +332,11 @@ class Generator
       nonterminals: [...@symbols.values()].filter((s) -> !s.isTerminal).length
       conflicts: @conflicts.length
       symbols: @symbols.size
-      inadequateStates: @inadequateStates.length
+      inadequateStates: @inadequateStates.length,
+      expandedRules: @rules.length - (@performanceStats.sourceRules + @performanceStats.errorRecoveryRules + @performanceStats.augmentedRules),
+      sourceRules: @performanceStats.sourceRules,
+      errorRecoveryRules: @performanceStats.errorRecoveryRules,
+      augmentedRules: @performanceStats.augmentedRules
     }
 
   hasConflicts: ->
@@ -4273,19 +4277,14 @@ if (typeof module != 'undefined' and not module.parent) or (typeof process != 'u
 
           📊 Grammar Statistics:
           =====================
-          States: #{stats.states}
-          Rules: #{stats.rules}
+          Rules: #{stats.rules} total = #{stats.sourceRules} source + ~#{stats.expandedRules} + #{stats.errorRecoveryRules} error recovery + #{stats.augmentedRules} augmented start"
           Terminals: #{stats.terminals}
           Non-terminals: #{stats.nonterminals}
           Symbols: #{stats.symbols}
+          States: #{stats.states}
           Conflicts: #{stats.conflicts}
           Inadequate States: #{stats.inadequateStates}
         """
-        # FIXME: @ruleStats
-        # console.log "• Rules Breakdown: #{totalRules} total = #{source} source + ~#{expanded} expanded + #{errorRecovery} error recovery + #{augmented} augmented start"
-        # console.log "• Error Recovery Rules: Exactly #{errorRecovery} rules added automatically"
-        # console.log "• Parser States: #{states} LALR(1) states generated"
-        # console.log "• Symbol Count: #{totalSymbols} total symbols (#{terminals} terminals + #{nonterminals} non-terminals)"
 
       when 'optimize'
         console.log "\n🔧 Running optimization..."
