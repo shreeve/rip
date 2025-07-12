@@ -1,14 +1,14 @@
-# rip-parser
+# rip
 
 **An advanced LALR(1) Parser Generator for JavaScript**
 
-A production-ready parser generator that transforms context-free grammars into efficient JavaScript parsers. Built with mathematical rigor and practical usability in mind. `rip-parser` is the parsing engine that powers the emerging **rip** language ecosystem.
+A production-ready parser generator that transforms context-free grammars into efficient JavaScript parsers. Built with mathematical rigor and practical usability in mind. `rip` is the parsing engine that powers the emerging **rip** language ecosystem.
 
-*Inspired by classic tools like **Yacc/Bison** but pared down to the minimal set of moving parts, rip-parser turns a declarative grammar description into a ready-to-run JavaScript parser—no external code-generation step required.*
+*Inspired by classic tools like **Yacc/Bison** but pared down to the minimal set of moving parts, rip turns a declarative grammar description into a ready-to-run JavaScript parser—no external code-generation step required.*
 
 ## Overview
 
-rip-parser implements the LALR(1) parsing algorithm with comprehensive optimizations and developer-friendly features. It generates fast, reliable parsers suitable for everything from simple DSLs to complex programming languages.
+rip implements the LALR(1) parsing algorithm with comprehensive optimizations and developer-friendly features. It generates fast, reliable parsers suitable for everything from simple DSLs to complex programming languages.
 
 **Mathematical Foundation**: LALR(1) ∈ LR(1) ⊆ Context-Free Languages
 **Grammar Class**: Deterministic context-free grammars with 1-token lookahead
@@ -16,10 +16,10 @@ rip-parser implements the LALR(1) parsing algorithm with comprehensive optimizat
 
 ## How it works
 
-**rip-parser** turns grammar definitions into working parsers through a simple pipeline:
+**rip** turns grammar definitions into working parsers through a simple pipeline:
 
 ```
-**grammar.coffee**  →  **rip-parser**  →  **parser.js**  →  **run your programs**
+**grammar.coffee**  →  **rip**  →  **parser.js**  →  **run your programs**
 (your language         (generator)       (generated        (parse & execute)
  definition)                             parser)
 ```
@@ -27,7 +27,7 @@ rip-parser implements the LALR(1) parsing algorithm with comprehensive optimizat
 ### The three stages:
 
 1. **Define your language** – Write a grammar file that describes your language's syntax and behavior
-2. **Generate a parser** – Feed your grammar to rip-parser, which outputs JavaScript parser code
+2. **Generate a parser** – Feed your grammar to rip, which outputs JavaScript parser code
 3. **Parse programs** – Use the generated parser to read and execute programs written in your language
 
 ### In practice:
@@ -37,7 +37,7 @@ rip-parser implements the LALR(1) parsing algorithm with comprehensive optimizat
 grammar = require './my-language-grammar'
 
 # 2. Generate parser code
-{Generator} = require './rip-parser'
+{Generator} = require './rip'
 parserCode = new Generator().generate(grammar)
 fs.writeFileSync('my-language-parser.js', parserCode)
 
@@ -48,7 +48,7 @@ ast = parser.parse(programSource)
 
 Since **generation** happens at runtime, you can create parsers on-the-fly or build grammars programmatically. The generated parser is a standalone JavaScript module with no dependencies except a lexer (tokenizer) that you provide.
 
-## Why rip-parser?
+## Why rip?
 
 1. **Succinctness first** – the entire generator fits in a single CoffeeScript file and emits a single JS module you can `require()` immediately.
 2. **Modern runtime** – the generated parser is CommonJS compatible, uses plain JavaScript data structures, and has no runtime dependencies besides an external lexer you supply.
@@ -90,16 +90,16 @@ Since **generation** happens at runtime, you can create parsers on-the-fly or bu
 
 ```bash
 # Generate a parser from a grammar file
-coffee rip-parser.coffee grammar.coffee -o parser.js
+coffee rip.coffee grammar.coffee -o parser.js
 
 # With optimization and analysis
-coffee rip-parser.coffee grammar.coffee --optimize --stats --verbose
+coffee rip.coffee grammar.coffee --optimize --stats --verbose
 
 # Interactive exploration mode
-coffee rip-parser.coffee grammar.coffee --interactive
+coffee rip.coffee grammar.coffee --interactive
 
 # Production-ready parser (no console output)
-coffee rip-parser.coffee grammar.coffee --production -o parser.js
+coffee rip.coffee grammar.coffee --production -o parser.js
 ```
 
 ## Example: Calculator Grammar
@@ -145,7 +145,7 @@ module.exports = {
 
 **Usage:**
 ```bash
-coffee rip-parser.coffee calculator.coffee -o calculator-parser.js
+coffee rip.coffee calculator.coffee -o calculator-parser.js
 ```
 
 The generated parser correctly handles precedence:
@@ -191,7 +191,7 @@ operators = [
 
 ## Architecture Overview
 
-`rip-parser.coffee` is organised around a handful of small, single-purpose classes:
+`rip.coffee` is organised around a handful of small, single-purpose classes:
 
 | Class      | Role |
 |------------|------|
@@ -216,7 +216,7 @@ operators = [
 
 ### **The Four Variables That Define a Language**
 
-rip-parser generates parsers using just **4 ultra-optimized JavaScript data structures** that contain everything needed to parse a complete programming language:
+rip generates parsers using just **4 ultra-optimized JavaScript data structures** that contain everything needed to parse a complete programming language:
 
 ```javascript
 const symbols = [...];     // Symbol ID ↔ Name mapping (Array)
@@ -266,7 +266,7 @@ Automatically reduces parser states through equivalence analysis, significantly 
 - **Reduce/Reduce**: Resolved by rule order with detailed analysis
 - **Comprehensive Reporting**: Detailed explanations and suggestions
 
-When both a shift and a reduce are possible on the same look-ahead, rip-parser applies:
+When both a shift and a reduce are possible on the same look-ahead, rip applies:
 1. **Higher precedence wins** (from `operators` array - later entries have higher precedence).
 2. **Equal precedence** ⇒ associativity decides (`left` ⇒ reduce, `right` ⇒ shift, `nonassoc` ⇒ error).
 3. **No precedence info** ⇒ defaults to shift (and warns about the conflict).
@@ -340,7 +340,7 @@ For detailed technical information about all enhancements and optimizations, see
 
 ## Theory & Implementation
 
-rip-parser implements the LALR(1) algorithm with several key optimizations:
+rip implements the LALR(1) algorithm with several key optimizations:
 
 - **FIRST/FOLLOW computation** with fixed-point iteration
 - **LR(0) state construction** with optimized closure operations
@@ -353,7 +353,7 @@ The generated parsers use efficient table-driven parsing with multiple compressi
 
 ### **Reorganization Status: 100% COMPLETE** ✅
 
-The rip-parser codebase has been completely reorganized from a monolithic 4976-line file into a clean, logically-structured 2850-line masterpiece. All **11 phases** of parser generation are now fully implemented and properly organized by execution flow:
+The rip codebase has been completely reorganized from a monolithic 4976-line file into a clean, logically-structured 2850-line masterpiece. All **11 phases** of parser generation are now fully implemented and properly organized by execution flow:
 
 #### **✅ Complete Implementation:**
 
@@ -406,7 +406,7 @@ Replaced traditional parser tables with an elegant four-variable architecture:
 
 ### **File Organization**
 
-The reorganized `reorg.coffee` file follows the natural execution flow:
+The reorganized `rip.coffee` file follows the natural execution flow:
 
 ```
 ┌─ 1. Entry Point (generate)
@@ -430,7 +430,7 @@ The reorganized `reorg.coffee` file follows the natural execution flow:
 - **Complete Feature Set**: All advanced features from the original parser plus new optimizations
 - **Maintainable Codebase**: Clean organization enabling future development and debugging
 
-This reorganization transforms rip-parser from a complex monolithic tool into a well-structured, highly-optimized, and maintainable parser generator that serves as both a practical tool and a reference implementation of advanced LALR(1) techniques.
+This reorganization transforms rip from a complex monolithic tool into a well-structured, highly-optimized, and maintainable parser generator that serves as both a practical tool and a reference implementation of advanced LALR(1) techniques.
 
 ## License
 
