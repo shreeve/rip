@@ -138,21 +138,21 @@ console.log formatted
 
 ### The Complete System
 ```
-┌─────────────────────┐    ┌─────────────────────┐    ┌─────────────────────┐
-│   Language Pack     │    │  Universal Parser   │    │   Rip Executable    │
-│   (2KB each)        │───▶│     Runtime         │───▶│   (CLI Interface)   │
-│                     │    │      (7KB)          │    │                     │
-│ • Grammar Rules     │    │                     │    │ • File Detection     │
-│ • State Tables      │    │ • LALR(1) Algorithm │    │ • Language Routing   │
-│ • Semantic Actions  │    │ • Stack Management  │    │ • Error Handling    │
-│ • Symbol Mappings   │    │ • Error Handling    │    │ • Output Formatting │
-└─────────────────────┘    └─────────────────────┘    └─────────────────────┘
+┌───────────────────────┐    ┌────────────────────────────┐    ┌──────────────────────────────┐
+│   Language Pack       │    │ Universal Parser Runtime   │    │   Rip Executable             │
+│   (2KB each)          │───▶│         (7KB)              │───▶│   (CLI Interface)            │
+│                       │    │                            │    │                              │
+│ • Grammar Rules       │    │ • LALR(1) Algorithm        │    │ • File Detection             │
+│ • State Tables        │    │ • Stack Management         │    │ • Language Routing           │
+│ • Semantic Actions    │    │ • Error Handling           │    │ • Error Handling             │
+│ • Symbol Mappings     │    │                            │    │ • Output Formatting          │
+└───────────────────────┘    └────────────────────────────┘    └──────────────────────────────┘
                                       │
                                       ▼
-
-                              │    Parsed AST       │
-                              │   (Any Language)    │
-                              └─────────────────────┘
+                        ┌────────────────────────────┐
+                        │      Parsed AST            │
+                        │     (Any Language)         │
+                        └────────────────────────────┘
 ```
 
 ### Development Workflow
