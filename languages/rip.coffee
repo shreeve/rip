@@ -1,4 +1,4 @@
-# Rip Language Pack - Clean CoffeeScript Foundation
+# Rip Language Pack - A modern echo of CoffeeScript
 # CoffeeScript without JSX and literate coffee support
 
 # ============================================================================
@@ -8,7 +8,7 @@
 languageInfo =
   name: 'Rip'
   version: '1.0.0'
-  description: 'Rip programming language - Enhanced CoffeeScript without JSX/literate support'
+  description: 'A modern echo of CoffeeScript'
   author: 'Rip Language Team'
   license: 'MIT'
   website: 'https://rip-lang.org'
