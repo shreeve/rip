@@ -3618,6 +3618,7 @@ NORMAL = 1   # Basic summary (default)
 VERBOSE = 2  # Detailed analysis
 DEBUG = 3    # Everything + internals
 
+# Keep as traditional CommonJS for now (bootstrapping phase)
 module.exports = { Generator, SILENT, NORMAL, VERBOSE, DEBUG }
 
 # ============================================================================

@@ -351,22 +351,128 @@ createLexer = (input, options = {}) ->
   tokens = []
   position = 0
 
-  # Basic example tokenization
+  # Simple tokenizer for our test case: "x = 41 + 1"
   tokenize = (input) ->
-    # This would integrate with an actual lexer
-    # For now, return a simple token stream
-    ['IDENTIFIER', 'NUMBER', '=', 'TERMINATOR', 'EOF']
+    tokens = []
+    i = 0
+
+    while i < input.length
+      char = input[i]
+
+      # Skip whitespace
+      if /\s/.test(char)
+        i++
+        continue
+
+      # Numbers
+      if /\d/.test(char)
+        start = i
+        while i < input.length and /\d/.test(input[i])
+          i++
+        tokens.push(['NUMBER', input.slice(start, i)])
+        continue
+
+      # Identifiers
+      if /[a-zA-Z_]/.test(char)
+        start = i
+        while i < input.length and /[a-zA-Z_0-9]/.test(input[i])
+          i++
+        tokens.push(['IDENTIFIER', input.slice(start, i)])
+        continue
+
+      # Operators and symbols
+      switch char
+        when '='
+          tokens.push(['=', '='])
+        when '+'
+          tokens.push(['+', '+'])
+        when '-'
+          tokens.push(['-', '-'])
+        when '*'
+          tokens.push(['*', '*'])
+        when '/'
+          tokens.push(['/', '/'])
+        when '('
+          tokens.push(['(', '('])
+        when ')'
+          tokens.push([')', ')'])
+        else
+          throw new Error("Unexpected character: #{char}")
+
+      i++
+
+    tokens.push(['EOF', ''])
+    return tokens
 
   tokens = tokenize(input)
+  console.log "Tokens:", tokens  # Debug output
 
   lex: ->
     if position >= tokens.length
       return 'EOF'
     token = tokens[position++]
-    return token
+    @yytext = token[1]
+    return token[0]
 
-  yytext: tokens[position - 1] or ''
+  yytext: ''
   yylloc: {first_line: 1, last_line: 1, first_column: 1, last_column: 1}
+
+# ============================================================================
+# TEST FUNCTION
+# ============================================================================
+
+testSimpleAssignment = ->
+  console.log "Testing: x = 41 + 1"
+
+  # Create a mock parser environment
+  lexer = createLexer("x = 41 + 1")
+
+  # Mock AST node classes for testing
+  global.Root = class Root
+    constructor: (@body) ->
+    toString: -> "Root(#{@body})"
+
+  global.Block = class Block
+    constructor: (@statements) ->
+    toString: -> "Block([#{@statements.join(', ')}])"
+
+  global.Assign = class Assign
+    constructor: (@left, @right, @op) ->
+    toString: -> "Assign(#{@left}, #{@op}, #{@right})"
+
+  global.Op = class Op
+    constructor: (@op, @left, @right, @flip) ->
+    toString: -> "Op(#{@op}, #{@left}, #{@right})"
+
+  global.IdentifierLiteral = class IdentifierLiteral
+    constructor: (@name) ->
+    toString: -> "Id(#{@name})"
+
+  global.NumberLiteral = class NumberLiteral
+    constructor: (@value, @options) ->
+    toString: -> "Num(#{@value})"
+
+  # Test the lexer
+  console.log "Lexer test:"
+  testLexer = createLexer("x = 41 + 1")
+  while true
+    token = testLexer.lex()
+    console.log "Token:", token, "Text:", testLexer.yytext
+    break if token == 'EOF'
+
+  console.log "Grammar rules that should match:"
+  console.log "- Root -> Body"
+  console.log "- Body -> Line"
+  console.log "- Line -> Expression"
+  console.log "- Expression -> Assign"
+  console.log "- Assign -> Assignable = Expression"
+  console.log "- Assignable -> Identifier"
+  console.log "- Identifier -> IDENTIFIER"
+  console.log "- Expression -> Operation"
+  console.log "- Operation -> Expression + Expression"
+  console.log "- Expression -> Value"
+  console.log "- Value -> Literal"
+  console.log "- Literal -> NUMBER"
 
 # ============================================================================
 # LANGUAGE PACK EXPORT
@@ -423,6 +529,7 @@ languagePack =
   debug:
     showGrammar: -> console.log grammar
     showAST: -> console.log "Rip AST structure"
+    testSimple: testSimpleAssignment
 
 # ============================================================================
 # RIP LANGUAGE FEATURES
@@ -460,5 +567,21 @@ languagePack =
 # - WASM compilation
 ###
 
-# Export for ES6 modules
+# Export for ES6 modules (modern approach)
 export default languagePack
+
+# Also support named exports for flexibility
+export {
+  languageInfo,
+  grammar,
+  operators,
+  createLexer,
+  testSimpleAssignment,
+
+  # Export constructor functions for direct use
+  Root, Block, Binary, Unary, Assign, Call,
+  NumberLit, StringLit, BooleanLit, NullLit, UndefinedLit, RegexLit,
+  Id, This, PropertyName, Property, If, While, Return, Function, Arrow,
+  List, Concat, Push, Value, Access, Index, Literal,
+  SuperCall, ArrayExpr, ObjectExpr, StatementLit, YieldReturn, AwaitReturn
+}
