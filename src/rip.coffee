@@ -7,6 +7,12 @@
 #  Stats: July 11, 2025 (version 0.4.0) MIT License
 # ==============================================================================
 
+# Debug level constants (defined at top for use throughout)
+SILENT = 0   # Errors only
+NORMAL = 1   # Basic summary (default)
+VERBOSE = 2  # Detailed analysis
+DEBUG = 3    # Everything + internals
+
 class Symbol # Terminal or Nonterminal
   constructor: (name, isTerminal = false, id = 0) ->
     @id         = id         # unique symbol id
@@ -3612,11 +3618,6 @@ function getTableAction(state, symbol) {
 # EXPORT GENERATOR CLASS AND DEBUG CONSTANTS
 # ============================================================================
 
-# Debug level constants (also available as module exports)
-SILENT = 0   # Errors only
-NORMAL = 1   # Basic summary (default)
-VERBOSE = 2  # Detailed analysis
-DEBUG = 3    # Everything + internals
 
 # Keep as traditional CommonJS for now (bootstrapping phase)
 module.exports = { Generator, SILENT, NORMAL, VERBOSE, DEBUG }
