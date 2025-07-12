@@ -307,7 +307,6 @@ grammar =
     o 'NAN',                                                            -> NaNLiteral $1
   ]
 
-  # Assignment
   Assign: [
     o 'Assignable = Expression',                                        -> Assign $1, $3
     o 'Assignable = TERMINATOR Expression',                             -> Assign $1, $4
@@ -644,7 +643,6 @@ grammar =
     o 'RangeDots',                                                      -> Range null, null, if $1.exclusive then 'exclusive' else 'inclusive'
   ]
 
-  # Argument lists
   ArgList: [
     o 'Arg',                                                            -> [$1]
     o 'ArgList , Arg',                                                  -> $1.concat $3
@@ -695,7 +693,6 @@ grammar =
     o 'SimpleArgs , ExpressionLine',                                    -> [].concat $1, $3
   ]
 
-  # Exception handling
   Try: [
     o 'TRY Block',                                                      -> Try $2
     o 'TRY Block Catch',                                                -> Try $2, $3
@@ -720,7 +717,6 @@ grammar =
     o '( INDENT Body OUTDENT )',                                        -> Parens $3
   ]
 
-  # While loops
   WhileLineSource: [
     o 'WHILE ExpressionLine',                                           -> While $2
     o 'WHILE ExpressionLine WHEN ExpressionLine',                       -> While $2, guard: $4
@@ -750,7 +746,6 @@ grammar =
     o 'LOOP Expression',                                                -> While(BooleanLiteral('true'), isLoop: yes).addBody BlockWrap([$2])
   ]
 
-  # For loops
   For: [
     o 'Statement ForBody',                                              -> $2.postfix = yes; $2.addBody $1
     o 'Expression ForBody',                                             -> $2.postfix = yes; $2.addBody $1
@@ -876,7 +871,6 @@ grammar =
     o 'Expression POST_IF ExpressionLine',                              -> If $3, BlockWrap([$1]), type: $2, postfix: true
   ]
 
-  # Operations
   OperationLine: [
     o 'UNARY ExpressionLine',                                           -> Op $1, $2
     o 'DO ExpressionLine',                                              -> Op $1, $2
