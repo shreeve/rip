@@ -22,58 +22,58 @@ languageInfo =
 # These are used directly in grammar rules for clarity and flexibility
 
 # Core structural nodes
-Root = (body) -> new Root(body or new Block)
-Block = (statements = []) -> new Block statements
+Root         = (body)            -> new Root(body or new Block)
+Block        = (statements = []) -> new Block statements
 
 # Expressions - CoffeeScript-compatible Op nodes
-Binary = (op, left, right) -> new Op op, left, right
-Unary = (op, arg, prefix = true) -> new Op op, arg, null, not prefix
-Assign = (op, left, right) -> new Assign left, right, op
-Call = (callee, args, optional = false) -> new Call callee, args, optional
+Binary       = (op, left, right)                -> new Op op, left, right
+Unary        = (op, arg, prefix = true)         -> new Op op, arg, null, not prefix
+Assign       = (op, left, right)                -> new Assign left, right, op
+Call         = (callee, args, optional = false) -> new Call callee, args, optional
 
 # Literals - CoffeeScript-compatible nodes
-NumberLit = (value, raw) -> new NumberLiteral value, parsedValue: parseFloat(value)
-StringLit = (value, raw) -> new StringLiteral value.slice(1, -1), quote: value[0]
-BooleanLit = (value, raw) -> new BooleanLiteral value.toString(), originalValue: value
-NullLit = -> new NullLiteral
-UndefinedLit = -> new UndefinedLiteral
-RegexLit = (pattern, flags) -> new RegexLiteral pattern, flags
+NumberLit    = (value, raw)     -> new NumberLiteral value, parsedValue: parseFloat(value)
+StringLit    = (value, raw)     -> new StringLiteral value.slice(1, -1), quote: value[0]
+BooleanLit   = (value, raw)     -> new BooleanLiteral value.toString(), originalValue: value
+NullLit      =                  -> new NullLiteral
+UndefinedLit =                  -> new UndefinedLiteral
+RegexLit     = (pattern, flags) -> new RegexLiteral pattern, flags
 
 # Identifiers and references
-Id = (name) -> new IdentifierLiteral name
-This = -> new Value new ThisLiteral
+Id           = (name) -> new IdentifierLiteral name
+This         =        -> new Value new ThisLiteral
 PropertyName = (name) -> new PropertyName name
 
 # Control flow
-If = (test, consequent, alternate) -> new If test, consequent, alternate
-While = (test, body) -> new While test, body
-Return = (arg) -> new Return arg
+If           = (test, consequent, alternate) -> new If test, consequent, alternate
+While        = (test, body)                  -> new While test, body
+Return       = (arg)                         -> new Return arg
 
 # Functions
-Function = (params, body, glyph = '->') -> new Code params, body, glyph
-Arrow = (params, body) -> new Code params, body, '=>'
+Function     = (params, body, glyph = '->') -> new Code params, body, glyph
+Arrow        = (params, body)               -> new Code params, body, '=>'
 
 # Collections
-List = (item) -> [item]
-Concat = (list, item) -> list.concat(item)
-Push = (list, item) -> list.push(item); list
+List         = (item)       -> [item]
+Concat       = (list, item) -> list.concat(item)
+Push         = (list, item) -> list.push(item); list
 
 # Values and accessors
-Value = (base, properties = []) -> new Value base, properties
-Access = (property) -> new Access property
-Index = (expr) -> new Index expr
+Value        = (base, properties = []) -> new Value base, properties
+Access       = (property)              -> new Access property
+Index        = (expr)                  -> new Index expr
 
 # Missing constructors for consistency
-SuperCall = (args) -> new SuperCall(new Super, args)
-Property = (key, value) -> new Property key, value
-ArrayExpr = (elements = []) -> new Arr elements
-ObjectExpr = (properties = []) -> new Obj properties
-StatementLit = (value) -> new StatementLiteral value
-YieldReturn = (arg) -> new YieldReturn arg
-AwaitReturn = (arg) -> new AwaitReturn arg
+SuperCall    = (args)            -> new SuperCall(new Super, args)
+Property     = (key, value)      -> new Property key, value
+ArrayExpr    = (elements = [])   -> new Arr elements
+ObjectExpr   = (properties = []) -> new Obj properties
+StatementLit = (value)           -> new StatementLiteral value
+YieldReturn  = (arg)             -> new YieldReturn arg
+AwaitReturn  = (arg)             -> new AwaitReturn arg
 
 # Utility constructors
-Literal = (value) -> new Literal value
+Literal      = (value) -> new Literal value
 
 # Helper function - enhanced 'o' with smart defaults
 o = (pattern, action, options) ->
