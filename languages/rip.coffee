@@ -14,561 +14,865 @@ languageInfo =
   repository: 'https://github.com/rip-lang/rip'
 
 # ============================================================================
-# HYBRID GRAMMAR SYSTEM
+# COMPLETE CONSTRUCTOR SYSTEM
 # ============================================================================
-
-# Smart constructor system for AST nodes - Direct Usage Style
-# These are used directly in grammar rules for clarity and flexibility
 
 # Core structural nodes
-Root         = (body)                           -> new Root(body or new Block)
-Block        = (statements = [])                -> new Block statements
-
-# Expressions
-Binary       = (op, left, right)                -> new Op op, left, right
-Unary        = (op, arg, prefix = true)         -> new Op op, arg, null, not prefix
-Assign       = (op, left, right)                -> new Assign left, right, op
-Call         = (callee, args, optional = false) -> new Call callee, args, optional
+Root                      = (body)                              -> new Root(body or new Block)
+Block                     = (statements = [])                   -> new Block statements
+Line                      = (expr)                              -> expr
+Body                      = (statements)                        -> Block statements
 
 # Literals
-NumberLit    = (value, raw)                     -> new NumberLiteral value, parsedValue: parseFloat(value)
-StringLit    = (value, raw)                     -> new StringLiteral value.slice(1, -1), quote: value[0]
-BooleanLit   = (value, raw)                     -> new BooleanLiteral value.toString(), originalValue: value
-NullLit      =                                  -> new NullLiteral
-UndefinedLit =                                  -> new UndefinedLiteral
-RegexLit     = (pattern, flags)                 -> new RegexLiteral pattern, flags
+NumberLiteral             = (value, opts = {})                  -> new NumberLiteral value.toString(), ({ parsedValue = value.parsedValue } = opts)
+StringLiteral             = (value, opts = {})                  -> new StringLiteral value.slice(1, -1), ({ quote = value.quote, initialChunk = value.initialChunk, finalChunk = value.finalChunk, indent = value.indent, double = value.double, heregex = value.heregex } = opts)
+StringWithInterpolations  = (interpolations, opts = {})         -> new StringWithInterpolations Block.wrap(interpolations), ({ quote, startQuote } = opts.quote)
+BooleanLiteral            = (value, opts = {})                  -> new BooleanLiteral value.toString(), ({ originalValue = value.original } = opts)
+NullLiteral               = (value)                             -> new NullLiteral value
+UndefinedLiteral          = (value)                             -> new UndefinedLiteral value
+InfinityLiteral           = (value, opts = {})                  -> new InfinityLiteral value.toString(), ({ originalValue = value.original } = opts)
+NaNLiteral                = (value)                             -> new NaNLiteral value
+RegexLiteral              = (value, opts = {})                  -> new RegexLiteral value.toString(), ({ delimiter = value.delimiter, heregexCommentTokens = value.heregexCommentTokens } = opts)
+RegexWithInterpolations   = (invocation, opts = {})             -> new RegexWithInterpolations invocation, ({ heregexCommentTokens } = opts)
+PassthroughLiteral        = (value, opts = {})                  -> new PassthroughLiteral value.toString(), ({ here = value.here, generated = value.generated } = opts)
+Literal                   = (value)                             -> new Literal value
+StatementLiteral          = (value)                             -> new StatementLiteral value
+DefaultLiteral            = (value)                             -> new DefaultLiteral value
 
 # Identifiers and references
-Id           = (name)                           -> new IdentifierLiteral name
-This         =                                  -> new Value new ThisLiteral
-PropertyName = (name)                           -> new PropertyName name
+IdentifierLiteral         = (name)                              -> new IdentifierLiteral name
+PropertyName              = (name)                              -> new PropertyName name.toString()
+ComputedPropertyName      = (expr)                              -> new ComputedPropertyName expr
+ThisLiteral               = (value)                             -> new ThisLiteral value
+
+# Values and expressions
+Value                     = (base, properties = [], context)    -> new Value base, properties, context
+Op                        = (op, left, right, flip, opts = {})  -> new Op op, left, right, flip, ({ originalOperator, invertOperator } = opts)
+Existence                 = (expr)                              -> new Existence expr
+Assign                    = (left, right, context, opts = {})   -> new Assign left, right, context, ({ operatorToken, originalContext, moduleDeclaration } = opts)
+
+# Function related
+Code                      = (params, body, glyph, opts = {})    -> new Code params, body, glyph, opts.paramStart
+FuncGlyph                 = (glyph)                             -> new FuncGlyph glyph
+Param                     = (name, fallback, splat, opts = {})  -> new Param name, fallback, splat, ({ postfix } = opts)
+Expansion                 = ()                                  -> new Expansion
+Splat                     = (name, opts = {})                   -> new Splat name, ({ postfix } = opts)
+
+# Function calls
+Call                      = (variable, args, soak)              -> new Call variable, args, soak
+SuperCall                 = (superKeyword, args, soak, token)   -> new SuperCall superKeyword, args, soak, token
+DynamicImportCall         = (importKeyword, args)               -> new DynamicImportCall importKeyword, args
+TaggedTemplateCall        = (variable, arg, soak)               -> new TaggedTemplateCall variable, arg, soak
+Super                     = (accessor, superKeyword)            -> new Super accessor, superKeyword
+MetaProperty              = (meta, property)                    -> new MetaProperty meta, property
+DynamicImport             = ()                                  -> new DynamicImport
 
 # Control flow
-If           = (test, consequent, alternate)    -> new If test, consequent, alternate
-While        = (test, body)                     -> new While test, body
-Return       = (arg)                            -> new Return arg
-
-# Functions
-Function     = (params, body, glyph = '->')     -> new Code params, body, glyph
-Arrow        = (params, body)                   -> new Code params, body, '=>'
+If                        = (condition, body, opts = {})        -> new If condition, body, ({ type, postfix } = opts)
+While                     = (condition, opts = {})              -> new While condition, ({ guard, invert, isLoop } = opts)
+For                       = (body, opts = {})                   -> new For body, ({source, guard, step, name, index, awaitTag, own, ownTag, object, from, postfix} = opts) #!# FIXME: lost 'await'?
+Switch                    = (subject, cases, defaultCase)       -> new Switch subject, cases, defaultCase
+SwitchWhen                = (conditions, body)                  -> new SwitchWhen conditions, body
+Try                       = (attempt, err, recover, ensure, kw) -> new Try attempt, err, recover, ensure, kw
+Catch                     = (body, err)                         -> new Catch body, err
+Throw                     = (expression)                        -> new Throw expression
+Return                    = (expression)                        -> new Return expression
+YieldReturn               = (expression, opts = {})             -> new YieldReturn expression, ({ returnKeyword } = opts)
+AwaitReturn               = (expression, opts = {})             -> new AwaitReturn expression, ({ returnKeyword } = opts)
 
 # Collections
-List         = (item)                           -> [item]
-Concat       = (list, item)                     -> list.concat(item)
-Push         = (list, item)                     -> list.push(item); list
+Arr                       = (objects)                           -> new Arr objects
+Obj                       = (properties, generated)             -> new Obj properties, generated
+Range                     = (from, to, exclusive)               -> new Range from, to, exclusive
+Slice                     = (range)                             -> new Slice range
+Elision                   = ()                                  -> new Elision
 
-# Values and accessors
-Value        = (base, properties = [])          -> new Value base, properties
-Access       = (property)                       -> new Access property
-Index        = (expr)                           -> new Index expr
+# Accessors
+Access                    = (name, opts = {})                   -> new Access name, ({ soak, shorthand } = opts)
+Index                     = (index, opts = {})                  -> new Index index, ({ soak            } = opts)
 
-# Missing constructors for consistency
-SuperCall    = (args)                           -> new SuperCall(new Super, args)
-Property     = (key, value)                     -> new Property key, value
-ArrayExpr    = (elements = [])                  -> new Arr elements
-ObjectExpr   = (properties = [])                -> new Obj properties
-StatementLit = (value)                          -> new StatementLiteral value
-YieldReturn  = (arg)                            -> new YieldReturn arg
-AwaitReturn  = (arg)                            -> new AwaitReturn arg
+# Interpolation
+Interpolation             = (expression)                        -> new Interpolation expression
 
-# Utility constructors
-Literal      = (value)                          -> new Literal value
+# Classes
+Class                     = (variable, superclass, body)        -> new Class variable, superclass, body
+
+# Modules
+ImportDeclaration         = (clause, source, assertions)        -> new ImportDeclaration clause, source, assertions
+ImportClause              = (defaultBinding, namedImports)      -> new ImportClause defaultBinding, namedImports
+ImportDefaultSpecifier    = (local)                             -> new ImportDefaultSpecifier local
+ImportNamespaceSpecifier  = (local, imported)                   -> new ImportNamespaceSpecifier local, imported
+ImportSpecifier           = (imported, local)                   -> new ImportSpecifier imported, local
+ImportSpecifierList       = (specifiers)                        -> new ImportSpecifierList specifiers
+ExportNamedDeclaration    = (specifiers, source, assertions)    -> new ExportNamedDeclaration specifiers, source, assertions
+ExportDefaultDeclaration  = (declaration)                       -> new ExportDefaultDeclaration declaration
+ExportAllDeclaration      = (exported, source, assertions)      -> new ExportAllDeclaration exported, source, assertions
+ExportSpecifier           = (local, exported)                   -> new ExportSpecifier local, exported
+ExportSpecifierList       = (specifiers)                        -> new ExportSpecifierList specifiers
+
+# Parentheses and utilities
+Parens                    = (body)                              -> new Parens body
+extend                    = (object, properties)                -> yy.extend object, properties
+
+# Utility functions
+BlockWrap                 = (statements)                        -> Block.wrap statements
+List                      = (item)                              -> [item]
+Concat                    = (list, item)                        -> list.concat item
+Push                      = (list, item)                        -> list.push item; list
 
 # ============================================================================
-# COMPACT GRAMMAR RULES
+# COMPLETE GRAMMAR RULES
 # ============================================================================
 
+# Beautiful, aligned grammar rules extracted from the complete reference
 o = (pattern, action, options) -> [pattern, action or (-> $1), options]
 
 grammar =
-  # Root - ultra-compact
+
   Root: [
-    o '',                                       -> Root()
-    o 'Body',                                   -> Root $1
+    o '',                                                           -> Root()
+    o 'Body',                                                       -> Root $1
   ]
 
-  # Body - simple and clean
   Body: [
-    o 'Line',                                   -> Block [$1]
-    o 'Body TERMINATOR Line',                   -> Block $1.statements.concat [$3]
+    o 'Line',                                                       -> BlockWrap [$1]
+    o 'Body TERMINATOR Line',                                       -> $1.push $3
     o 'Body TERMINATOR'
   ]
 
-  # Line - pass-through by default
   Line: [
     o 'Expression'
+    o 'ExpressionLine'
     o 'Statement'
     o 'FuncDirective'
   ]
 
-  # Statements
-  Statement: [
-    o 'Return'
-    o 'Import'
-    o 'Export'
-    o 'Class'
-    o 'STATEMENT',                              -> StatementLit $1
+  FuncDirective: [
+    o 'YieldReturn'
+    o 'AwaitReturn'
   ]
 
-  # Expressions - mostly pass-through
+  Statement: [
+    o 'Return'
+    o 'STATEMENT',                                                  -> StatementLiteral $1
+    o 'Import'
+    o 'Export'
+  ]
+
   Expression: [
     o 'Value'
     o 'Code'
     o 'Operation'
     o 'Assign'
     o 'If'
+    o 'Try'
     o 'While'
     o 'For'
-    o 'Try'
+    o 'Switch'
+    o 'Class'
     o 'Throw'
+    o 'Yield'
   ]
 
-  # Values - clean and simple
-  Value: [
-    o 'Literal'
-    o 'Identifier'
-    o 'This'
-    o 'Parenthetical'
-    o 'Array'
-    o 'Object'
-    o 'Invocation'
+  ExpressionLine: [
+    o 'CodeLine'
+    o 'IfLine'
+    o 'OperationLine'
   ]
 
-  # Identifiers
-  Identifier: [
-    o 'IDENTIFIER',                             -> Id $1
+  Yield: [
+    o 'YIELD',                                                      -> Op $1, Value(Literal '')
+    o 'YIELD Expression',                                           -> Op $1, $2
+    o 'YIELD INDENT Object OUTDENT',                                -> Op $1, $3
+    o 'YIELD FROM Expression',                                      -> Op $1.concat($2), $3
   ]
 
-  # This references
-  This: [
-    o 'THIS',                                   -> This()
-    o '@',                                      -> This()
-  ]
-
-  # Literals - direct constructor usage
-  Literal: [
-    o 'NUMBER',                                 -> NumberLit  $1, $1.toString()
-    o 'STRING',                                 -> StringLit  $1, $1.toString()
-    o 'BOOL',                                   -> BooleanLit $1, $1.toString()
-    o 'NULL',                                   -> NullLit()
-    o 'UNDEFINED',                              -> UndefinedLit()
-    o 'REGEX',                                  -> RegexLit $1
-  ]
-
-  # Operations - direct constructor usage for clarity
-  Operation: [
-    # Unary operations
-    o 'UNARY Expression',                       -> Unary $1  , $2
-    o '- Expression',                           -> Unary '-' , $2
-    o '+ Expression',                           -> Unary '+' , $2
-    o '++ SimpleAssignable',                    -> Unary '++', $2
-    o '-- SimpleAssignable',                    -> Unary '--', $2
-    o 'SimpleAssignable ++',                    -> Unary '++', $1, false
-    o 'SimpleAssignable --',                    -> Unary '--', $1, false
-
-    # Binary operations
-    o 'Expression +  Expression',               -> Binary '+' , $1, $3
-    o 'Expression -  Expression',               -> Binary '-' , $1, $3
-    o 'Expression *  Expression',               -> Binary '*' , $1, $3
-    o 'Expression /  Expression',               -> Binary '/' , $1, $3
-    o 'Expression %  Expression',               -> Binary '%' , $1, $3
-    o 'Expression ** Expression',               -> Binary '**', $1, $3
-    o 'Expression == Expression',               -> Binary '==', $1, $3
-    o 'Expression != Expression',               -> Binary '!=', $1, $3
-    o 'Expression <  Expression',               -> Binary '<' , $1, $3
-    o 'Expression >  Expression',               -> Binary '>' , $1, $3
-    o 'Expression <= Expression',               -> Binary '<=', $1, $3
-    o 'Expression >= Expression',               -> Binary '>=', $1, $3
-    o 'Expression && Expression',               -> Binary '&&', $1, $3
-    o 'Expression || Expression',               -> Binary '||', $1, $3
-    o 'Expression &  Expression',               -> Binary '&' , $1, $3
-    o 'Expression |  Expression',               -> Binary '|' , $1, $3
-    o 'Expression ^  Expression',               -> Binary '^' , $1, $3
-    o 'Expression << Expression',               -> Binary '<<', $1, $3
-    o 'Expression >> Expression',               -> Binary '>>', $1, $3
-  ]
-
-  # Assignment - direct constructor usage
-  Assign: [
-    o 'Assignable  = Expression',               -> Assign '=' , $1, $3
-    o 'Assignable += Expression',               -> Assign '+=', $1, $3
-    o 'Assignable -= Expression',               -> Assign '-=', $1, $3
-    o 'Assignable *= Expression',               -> Assign '*=', $1, $3
-    o 'Assignable /= Expression',               -> Assign '/=', $1, $3
-  ]
-
-  # Assignable targets
-  Assignable: [
-    o 'Identifier'
-    o 'Value Accessor',                         -> Value $1, [$2]
-  ]
-
-  SimpleAssignable: [
-    o 'Identifier'
-    o 'Value Accessor',                         -> Value $1, [$2]
-  ]
-
-  # Function calls - clean and simple
-  Invocation: [
-    o 'Value Arguments',                        -> Call $1, $2
-    o 'Value ? Arguments',                      -> Call $1, $3, true
-    o 'SUPER Arguments',                        -> SuperCall $2
-  ]
-
-  # Arguments
-  Arguments: [
-    o 'CALL_START CALL_END',                    -> []
-    o 'CALL_START ArgList CALL_END',            -> $2
-  ]
-
-  # Argument list - direct usage
-  ArgList: [
-    o 'Expression',                             -> List $1
-    o 'ArgList , Expression',                   -> Concat $1, $3
-  ]
-
-  # Arrays - simple and clean
-  Array: [
-    o '[ ]',                                    -> ArrayExpr []
-    o '[ ArgList ]',                            -> ArrayExpr $2
-  ]
-
-  # Objects
-  Object: [
-    o '{ }',                                    -> ObjectExpr []
-    o '{ PropertyList }',                       -> ObjectExpr $2
-  ]
-
-  # Property list
-  PropertyList: [
-    o 'Property',                               -> List $1
-    o 'PropertyList , Property',                -> Concat $1, $3
-  ]
-
-  # Object properties
-  Property: [
-    o 'IDENTIFIER : Expression',                -> Property (Id $1       ), $3
-    o 'STRING : Expression',                    -> Property (StringLit $1), $3
-    o 'NUMBER : Expression',                    -> Property (NumberLit $1), $3
-  ]
-
-  # Parenthetical expressions
-  Parenthetical: [
-    o '( Expression )',                         -> $2
-  ]
-
-  # Control flow - if statements
-  If: [
-    o 'IF Expression Block',                    -> If $2, $3
-    o 'IF Expression Block ELSE Block',         -> If $2, $3, $5
-    o 'Expression IF Expression',               -> If $3, Block [$1]
-  ]
-
-  # Blocks
   Block: [
-    o 'INDENT Body OUTDENT',                    -> $2
-    o 'INDENT OUTDENT',                         -> Block []
+    o 'INDENT OUTDENT',                                             -> Block()
+    o 'INDENT Body OUTDENT',                                        -> $2
   ]
 
-  # Return statements
+  Identifier: [
+    o 'IDENTIFIER',                                                 -> IdentifierLiteral $1
+  ]
+
+  Property: [
+    o 'PROPERTY',                                                   -> PropertyName $1.toString()
+  ]
+
+  AlphaNumeric: [
+    o 'NUMBER',                                                     -> NumberLiteral $1.toString(), parsedValue: $1.parsedValue
+    o 'String'
+  ]
+
+  String: [
+    o 'STRING',                                                     -> StringLiteral $1.slice(1, -1), quote: $1.quote, initialChunk: $1.initialChunk, finalChunk: $1.finalChunk, indent: $1.indent, double: $1.double, heregex: $1.heregex
+    o 'STRING_START Interpolations STRING_END',                     -> StringWithInterpolations BlockWrap($2), quote: $1.quote, startQuote: Literal($1.toString())
+  ]
+
+  Interpolations: [
+    o 'InterpolationChunk',                                         -> [$1]
+    o 'Interpolations InterpolationChunk',                          -> $1.concat $2
+  ]
+
+  InterpolationChunk: [
+    o 'INTERPOLATION_START Body INTERPOLATION_END',                 -> Interpolation $2
+    o 'INTERPOLATION_START INDENT Body OUTDENT INTERPOLATION_END',  -> Interpolation $3
+    o 'INTERPOLATION_START INTERPOLATION_END',                      -> Interpolation()
+    o 'String',                                                     -> $1
+  ]
+
+  Regex: [
+    o 'REGEX',                                                      -> RegexLiteral $1.toString(), delimiter: $1.delimiter, heregexCommentTokens: $1.heregexCommentTokens
+    o 'REGEX_START Invocation REGEX_END',                           -> RegexWithInterpolations $2,                          heregexCommentTokens: $3.heregexCommentTokens
+  ]
+
+  Literal: [
+    o 'AlphaNumeric'
+    o 'JS',                                                         -> PassthroughLiteral $1.toString(), here: $1.here, generated: $1.generated
+    o 'Regex'
+    o 'UNDEFINED',                                                  -> UndefinedLiteral $1
+    o 'NULL',                                                       -> NullLiteral $1
+    o 'BOOL',                                                       -> BooleanLiteral  $1.toString(), originalValue: $1.original
+    o 'INFINITY',                                                   -> InfinityLiteral $1.toString(), originalValue: $1.original
+    o 'NAN',                                                        -> NaNLiteral $1
+  ]
+
+  Assign: [
+    o 'Assignable = Expression',                                    -> Assign $1, $3
+    o 'Assignable = TERMINATOR Expression',                         -> Assign $1, $4
+    o 'Assignable = INDENT Expression OUTDENT',                     -> Assign $1, $4
+  ]
+
+  AssignObj: [
+    o 'ObjAssignable',                                              -> Value $1
+    o 'ObjRestValue'
+    o 'ObjAssignable : Expression',                                 -> Assign Value($1), $3, 'object', operatorToken: Literal($2)
+    o 'ObjAssignable : INDENT Expression OUTDENT',                  -> Assign Value($1), $4, 'object', operatorToken: Literal($2)
+    o 'SimpleObjAssignable = Expression',                           -> Assign Value($1), $3, null    , operatorToken: Literal($2)
+    o 'SimpleObjAssignable = INDENT Expression OUTDENT',            -> Assign Value($1), $4, null    , operatorToken: Literal($2)
+  ]
+
+  SimpleObjAssignable: [
+    o 'Identifier'
+    o 'Property'
+    o 'ThisProperty'
+  ]
+
+  ObjAssignable: [
+    o 'SimpleObjAssignable'
+    o '[ Expression ]',                                             -> Value ComputedPropertyName($2)
+    o '@ [ Expression ]',                                           -> Value ThisLiteral($1), [ComputedPropertyName($3)], 'this'
+    o 'AlphaNumeric'
+  ]
+
+  ObjRestValue: [
+    o 'SimpleObjAssignable ...',                                    -> Splat Value($1)
+    o '... SimpleObjAssignable',                                    -> Splat Value($2), postfix: no
+    o 'ObjSpreadExpr ...',                                          -> Splat $1
+    o '... ObjSpreadExpr',                                          -> Splat $2       , postfix: no
+  ]
+
+  ObjSpreadExpr: [
+    o 'ObjSpreadIdentifier'
+    o 'Object'
+    o 'Parenthetical'
+    o 'Super'
+    o 'This'
+    o 'SUPER OptFuncExist Arguments',                               -> SuperCall Super(), $3, $2.soak, $1
+    o 'DYNAMIC_IMPORT Arguments',                                   -> DynamicImportCall DynamicImport(), $2
+    o 'SimpleObjAssignable OptFuncExist Arguments',                 -> Call Value($1), $3, $2.soak
+    o 'ObjSpreadExpr OptFuncExist Arguments',                       -> Call $1, $3, $2.soak
+  ]
+
+  ObjSpreadIdentifier: [
+    o 'SimpleObjAssignable Accessor',                               -> Value($1).add $2
+    o 'ObjSpreadExpr Accessor',                                     -> Value($1).add $2
+  ]
+
   Return: [
-    o 'RETURN',                                 -> Return()
-    o 'RETURN Expression',                      -> Return $2
+    o 'RETURN Expression',                                          -> Return $2
+    o 'RETURN INDENT Object OUTDENT',                               -> Return Value($3)
+    o 'RETURN',                                                     -> Return()
   ]
 
-  # Functions - compact format
+  YieldReturn: [
+    o 'YIELD RETURN Expression',                                    -> YieldReturn $3, returnKeyword: Literal($2)
+    o 'YIELD RETURN',                                               -> YieldReturn null, returnKeyword: Literal($2)
+  ]
+
+  AwaitReturn: [
+    o 'AWAIT RETURN Expression',                                    -> AwaitReturn $3, returnKeyword: Literal($2)
+    o 'AWAIT RETURN',                                               -> AwaitReturn null, returnKeyword: Literal($2)
+  ]
+
+  # Functions
   Code: [
-    o 'PARAM_START ParamList PARAM_END -> Block',  -> Function $2, $5
-    o 'PARAM_START ParamList PARAM_END => Block',  -> Arrow    $2, $5
-    o '-> Block',                                  -> Function [], $2
-    o '=> Block',                                  -> Arrow    [], $2
+    o 'PARAM_START ParamList PARAM_END FuncGlyph Block',            -> Code $2, $5, $4, Literal($1)
+    o 'FuncGlyph Block',                                            -> Code [], $2, $1
   ]
 
-  # Parameter list
-  ParamList: [
-    o '',                                       -> []
-    o 'IDENTIFIER',                             -> [Id $1]
-    o 'ParamList , IDENTIFIER',                 -> $1.concat [Id $3]
+  CodeLine: [
+    o 'PARAM_START ParamList PARAM_END FuncGlyph Line',             -> Code $2, BlockWrap([$5]), $4, Literal($1)
+    o 'FuncGlyph Line',                                             -> Code [], BlockWrap([$2]), $1
   ]
 
-  # Accessors
-  Accessor: [
-    o '. IDENTIFIER',                           -> Access PropertyName $2
-    o '[ Expression ]',                         -> Index $2
+  FuncGlyph: [
+    o '->',                                                         -> FuncGlyph $1
+    o '=>',                                                         -> FuncGlyph $1
   ]
 
-  # Optional comma
   OptComma: [
     o ''
     o ','
   ]
 
-  # Function directives
-  FuncDirective: [
-    o 'YieldReturn'
-    o 'AwaitReturn'
+  ParamList: [
+    o '',                                                           -> []
+    o 'Param',                                                      -> [$1]
+    o 'ParamList , Param',                                          -> $1.concat $3
+    o 'ParamList OptComma TERMINATOR Param',                        -> $1.concat $4
+    o 'ParamList OptComma INDENT ParamList OptComma OUTDENT',       -> $1.concat $4
   ]
 
-  YieldReturn: [
-    o 'YIELD RETURN',                           -> YieldReturn null
-    o 'YIELD RETURN Expression',                -> YieldReturn $3
+  Param: [
+    o 'ParamVar',                                                   -> Param $1
+    o 'ParamVar ...',                                               -> Param $1, null, on
+    o '... ParamVar',                                               -> Param $2, null, postfix: no
+    o 'ParamVar = Expression',                                      -> Param $1, $3
+    o '...',                                                        -> Expansion()
   ]
 
-  AwaitReturn: [
-    o 'AWAIT RETURN',                           -> AwaitReturn null
-    o 'AWAIT RETURN Expression',                -> AwaitReturn $3
+  ParamVar: [
+    o 'Identifier'
+    o 'ThisProperty'
+    o 'Array'
+    o 'Object'
+  ]
+
+  Splat: [
+    o 'Expression ...',                                             -> Splat $1
+    o '... Expression',                                             -> Splat $2, postfix: no
+  ]
+
+  # Assignables
+  SimpleAssignable: [
+    o 'Identifier',                                                 -> Value $1
+    o 'Value Accessor',                                             -> $1.add $2
+    o 'Code Accessor',                                              -> Value($1).add $2
+    o 'ThisProperty'
+  ]
+
+  Assignable: [
+    o 'SimpleAssignable'
+    o 'Array',                                                      -> Value $1
+    o 'Object',                                                     -> Value $1
+  ]
+
+  Value: [
+    o 'Assignable'
+    o 'Literal',                                                    -> Value $1
+    o 'Parenthetical',                                              -> Value $1
+    o 'Range',                                                      -> Value $1
+    o 'Invocation',                                                 -> Value $1
+    o 'DoIife',                                                     -> Value $1
+    o 'This'
+    o 'Super',                                                      -> Value $1
+    o 'MetaProperty',                                               -> Value $1
+  ]
+
+  Super: [
+    o 'SUPER . Property',                                           -> Super Access($3), Literal($1)
+    o 'SUPER INDEX_START Expression INDEX_END',                     -> Super Index($3), Literal($1)
+    o 'SUPER INDEX_START INDENT Expression OUTDENT INDEX_END',      -> Super Index($4), Literal($1)
+  ]
+
+  MetaProperty: [
+    o 'NEW_TARGET . Property',                                      -> MetaProperty IdentifierLiteral($1), Access($3)
+    o 'IMPORT_META . Property',                                     -> MetaProperty IdentifierLiteral($1), Access($3)
+  ]
+
+  Accessor: [
+    o '. Property',                                                 -> Access $2
+    o '?. Property',                                                -> Access $2, soak: yes
+    o ':: Property',                                                -> [Access(PropertyName('prototype'), shorthand: yes           ), Access($2)]
+    o '?:: Property',                                               -> [Access(PropertyName('prototype'), shorthand: yes, soak: yes), Access($2)]
+    o '::',                                                         -> Access  PropertyName('prototype'), shorthand: yes
+    o '?::',                                                        -> Access  PropertyName('prototype'), shorthand: yes, soak: yes
+    o 'Index'
+  ]
+
+  Index: [
+    o 'INDEX_START IndexValue INDEX_END',                           -> $2
+    o 'INDEX_START INDENT IndexValue OUTDENT INDEX_END',            -> $3
+    o 'INDEX_SOAK Index',                                           -> extend $2, soak: yes
+  ]
+
+  IndexValue: [
+    o 'Expression',                                                 -> Index $1
+    o 'Slice',                                                      -> Slice $1
+  ]
+
+  Object: [
+    o '{ AssignList OptComma }',                                    -> Obj $2, $1.generated
+  ]
+
+  AssignList: [
+    o '',                                                           -> []
+    o 'AssignObj',                                                  -> [$1]
+    o 'AssignList , AssignObj',                                     -> $1.concat $3
+    o 'AssignList OptComma TERMINATOR AssignObj',                   -> $1.concat $4
+    o 'AssignList OptComma INDENT AssignList OptComma OUTDENT',     -> $1.concat $4
+  ]
+
+  Class: [
+    o 'CLASS',                                                      -> Class()
+    o 'CLASS Block',                                                -> Class null, null, $2
+    o 'CLASS EXTENDS Expression',                                   -> Class null, $3
+    o 'CLASS EXTENDS Expression Block',                             -> Class null, $3, $4
+    o 'CLASS SimpleAssignable',                                     -> Class $2
+    o 'CLASS SimpleAssignable Block',                               -> Class $2, null, $3
+    o 'CLASS SimpleAssignable EXTENDS Expression',                  -> Class $2, $4
+    o 'CLASS SimpleAssignable EXTENDS Expression Block',            -> Class $2, $4, $5
+  ]
+
+  Import: [
+    o 'IMPORT String',                                              -> ImportDeclaration null, $2
+    o 'IMPORT String ASSERT Object',                                -> ImportDeclaration null, $2, $4
+    o 'IMPORT ImportDefaultSpecifier FROM String',                  -> ImportDeclaration ImportClause($2, null), $4
+    o 'IMPORT ImportDefaultSpecifier FROM String ASSERT Object',    -> ImportDeclaration ImportClause($2, null), $4, $6
+    o 'IMPORT ImportNamespaceSpecifier FROM String',                -> ImportDeclaration ImportClause(null, $2), $4
+    o 'IMPORT ImportNamespaceSpecifier FROM String ASSERT Object',  -> ImportDeclaration ImportClause(null, $2), $4, $6
+    o 'IMPORT { } FROM String',                                     -> ImportDeclaration ImportClause(null, ImportSpecifierList([])), $5
+    o 'IMPORT { } FROM String ASSERT Object',                       -> ImportDeclaration ImportClause(null, ImportSpecifierList([])), $5, $7
+    o 'IMPORT { ImportSpecifierList OptComma } FROM String',        -> ImportDeclaration ImportClause(null, ImportSpecifierList($3)), $7
+    o 'IMPORT { ImportSpecifierList OptComma } FROM String ASSERT Object', -> ImportDeclaration ImportClause(null, ImportSpecifierList($3)), $7, $9
+    o 'IMPORT ImportDefaultSpecifier , ImportNamespaceSpecifier FROM String', -> ImportDeclaration ImportClause($2, $4), $6
+    o 'IMPORT ImportDefaultSpecifier , ImportNamespaceSpecifier FROM String ASSERT Object', -> ImportDeclaration ImportClause($2, $4), $6, $8
+    o 'IMPORT ImportDefaultSpecifier , { ImportSpecifierList OptComma } FROM String', -> ImportDeclaration ImportClause($2, ImportSpecifierList($5)), $9
+    o 'IMPORT ImportDefaultSpecifier , { ImportSpecifierList OptComma } FROM String ASSERT Object', -> ImportDeclaration ImportClause($2, ImportSpecifierList($5)), $9, $11
+  ]
+
+  ImportSpecifierList: [
+    o 'ImportSpecifier',                                            -> [$1]
+    o 'ImportSpecifierList , ImportSpecifier',                      -> $1.concat $3
+    o 'ImportSpecifierList OptComma TERMINATOR ImportSpecifier',    -> $1.concat $4
+    o 'INDENT ImportSpecifierList OptComma OUTDENT',                -> $2
+    o 'ImportSpecifierList OptComma INDENT ImportSpecifierList OptComma OUTDENT', -> $1.concat $4
+  ]
+
+  ImportSpecifier: [
+    o 'Identifier',                                                 -> ImportSpecifier $1
+    o 'Identifier AS Identifier',                                   -> ImportSpecifier $1, $3
+    o 'DEFAULT',                                                    -> ImportSpecifier DefaultLiteral($1)
+    o 'DEFAULT AS Identifier',                                      -> ImportSpecifier DefaultLiteral($1), $3
+  ]
+
+  ImportDefaultSpecifier: [
+    o 'Identifier',                                                 -> ImportDefaultSpecifier $1
+  ]
+
+  ImportNamespaceSpecifier: [
+    o 'IMPORT_ALL AS Identifier',                                   -> ImportNamespaceSpecifier Literal($1), $3
+  ]
+
+  Export: [
+    o 'EXPORT { }',                                                 -> ExportNamedDeclaration ExportSpecifierList([])
+    o 'EXPORT { ExportSpecifierList OptComma }',                    -> ExportNamedDeclaration ExportSpecifierList($3)
+    o 'EXPORT Class',                                               -> ExportNamedDeclaration $2
+    o 'EXPORT Identifier = Expression',                             -> ExportNamedDeclaration Assign($2, $4, null, moduleDeclaration: 'export')
+    o 'EXPORT Identifier = TERMINATOR Expression',                  -> ExportNamedDeclaration Assign($2, $5, null, moduleDeclaration: 'export')
+    o 'EXPORT Identifier = INDENT Expression OUTDENT',              -> ExportNamedDeclaration Assign($2, $5, null, moduleDeclaration: 'export')
+    o 'EXPORT DEFAULT Expression',                                  -> ExportDefaultDeclaration $3
+    o 'EXPORT DEFAULT INDENT Object OUTDENT',                       -> ExportDefaultDeclaration Value($4)
+    o 'EXPORT EXPORT_ALL FROM String',                              -> ExportAllDeclaration Literal($2), $4
+    o 'EXPORT EXPORT_ALL FROM String ASSERT Object',                -> ExportAllDeclaration Literal($2), $4, $6
+    o 'EXPORT { } FROM String',                                     -> ExportNamedDeclaration ExportSpecifierList([]), $5
+    o 'EXPORT { } FROM String ASSERT Object',                       -> ExportNamedDeclaration ExportSpecifierList([]), $5, $7
+    o 'EXPORT { ExportSpecifierList OptComma } FROM String',        -> ExportNamedDeclaration ExportSpecifierList($3), $7
+    o 'EXPORT { ExportSpecifierList OptComma } FROM String ASSERT Object', -> ExportNamedDeclaration ExportSpecifierList($3), $7, $9
+  ]
+
+  ExportSpecifierList: [
+    o 'ExportSpecifier',                                            -> [$1]
+    o 'ExportSpecifierList , ExportSpecifier',                      -> $1.concat $3
+    o 'ExportSpecifierList OptComma TERMINATOR ExportSpecifier',    -> $1.concat $4
+    o 'INDENT ExportSpecifierList OptComma OUTDENT',                -> $2
+    o 'ExportSpecifierList OptComma INDENT ExportSpecifierList OptComma OUTDENT', -> $1.concat $4
+  ]
+
+  ExportSpecifier: [
+    o 'Identifier',                                                 -> ExportSpecifier $1
+    o 'Identifier AS Identifier',                                   -> ExportSpecifier $1, $3
+    o 'Identifier AS DEFAULT',                                      -> ExportSpecifier $1, DefaultLiteral($3)
+    o 'DEFAULT',                                                    -> ExportSpecifier DefaultLiteral($1)
+    o 'DEFAULT AS Identifier',                                      -> ExportSpecifier DefaultLiteral($1), $3
+  ]
+
+  Invocation: [
+    o 'Value OptFuncExist String',                                  -> TaggedTemplateCall $1, $3, $2.soak
+    o 'Value OptFuncExist Arguments',                               -> Call $1, $3, $2.soak
+    o 'SUPER OptFuncExist Arguments',                               -> SuperCall Super(), $3, $2.soak, $1
+    o 'DYNAMIC_IMPORT Arguments',                                   -> DynamicImportCall DynamicImport(), $2
+  ]
+
+  OptFuncExist: [
+    o '',                                                           -> soak: no
+    o 'FUNC_EXIST',                                                 -> soak: yes
+  ]
+
+  Arguments: [
+    o 'CALL_START CALL_END',                                        -> []
+    o 'CALL_START ArgList OptComma CALL_END',                       -> $2.implicit = $1.generated; $2
+  ]
+
+  This: [
+    o 'THIS',                                                       -> Value ThisLiteral($1)
+    o '@',                                                          -> Value ThisLiteral($1)
+  ]
+
+  ThisProperty: [
+    o '@ Property',                                                 -> Value ThisLiteral($1), [Access($2)], 'this'
+  ]
+
+  Array: [
+    o '[ ]',                                                        -> Arr []
+    o '[ Elisions ]',                                               -> Arr $2
+    o '[ ArgElisionList OptElisions ]',                             -> Arr [].concat($2, $3)
+  ]
+
+  RangeDots: [
+    o '..',                                                         -> exclusive: no
+    o '...',                                                        -> exclusive: yes
+  ]
+
+  Range: [
+    o '[ Expression RangeDots Expression ]',                        -> Range $2, $4, if $3.exclusive then 'exclusive' else 'inclusive'
+    o '[ ExpressionLine RangeDots Expression ]',                    -> Range $2, $4, if $3.exclusive then 'exclusive' else 'inclusive'
+  ]
+
+  Slice: [
+    o 'Expression RangeDots Expression',                            -> Range $1  , $3  , if $2.exclusive then 'exclusive' else 'inclusive'
+    o 'Expression RangeDots',                                       -> Range $1  , null, if $2.exclusive then 'exclusive' else 'inclusive'
+    o 'ExpressionLine RangeDots Expression',                        -> Range $1  , $3  , if $2.exclusive then 'exclusive' else 'inclusive'
+    o 'ExpressionLine RangeDots',                                   -> Range $1  , null, if $2.exclusive then 'exclusive' else 'inclusive'
+    o 'RangeDots Expression',                                       -> Range null, $2  , if $1.exclusive then 'exclusive' else 'inclusive'
+    o 'RangeDots',                                                  -> Range null, null, if $1.exclusive then 'exclusive' else 'inclusive'
+  ]
+
+  ArgList: [
+    o 'Arg',                                                        -> [$1]
+    o 'ArgList , Arg',                                              -> $1.concat $3
+    o 'ArgList OptComma TERMINATOR Arg',                            -> $1.concat $4
+    o 'INDENT ArgList OptComma OUTDENT',                            -> $2
+    o 'ArgList OptComma INDENT ArgList OptComma OUTDENT',           -> $1.concat $4
+  ]
+
+  Arg: [
+    o 'Expression'
+    o 'ExpressionLine'
+    o 'Splat'
+    o '...',                                                        -> Expansion()
+  ]
+
+  ArgElisionList: [
+    o 'ArgElision'
+    o 'ArgElisionList , ArgElision',                                -> $1.concat $3
+    o 'ArgElisionList OptComma TERMINATOR ArgElision',              -> $1.concat $4
+    o 'INDENT ArgElisionList OptElisions OUTDENT',                  -> $2.concat $3
+    o 'ArgElisionList OptElisions INDENT ArgElisionList OptElisons OUTDENT', -> $1.concat($2, $4, $5)
+  ]
+
+  ArgElision: [
+    o 'Arg',                                                        -> [$1]
+    o 'Elisions Arg',                                               -> $1.concat $2
+  ]
+
+  OptElisions: [
+    o 'OptComma',                                                   -> []
+    o ', Elisions',                                                 -> [].concat $2
+  ]
+
+  Elisions: [
+    o 'Elision',                                                    -> [$1]
+    o 'Elisions Elision',                                           -> $1.concat $2
+  ]
+
+  Elision: [
+    o ',',                                                          -> Elision()
+    o 'Elision TERMINATOR',                                         -> $1
+  ]
+
+  SimpleArgs: [
+    o 'Expression'
+    o 'ExpressionLine'
+    o 'SimpleArgs , Expression',                                    -> [].concat $1, $3
+    o 'SimpleArgs , ExpressionLine',                                -> [].concat $1, $3
+  ]
+
+  Try: [
+    o 'TRY Block',                                                  -> Try $2
+    o 'TRY Block Catch',                                            -> Try $2, $3
+    o 'TRY Block FINALLY Block',                                    -> Try $2, null, $4, Literal($3)
+    o 'TRY Block Catch FINALLY Block',                              -> Try $2, $3  , $5, Literal($4)
+  ]
+
+  Catch: [
+    o 'CATCH Identifier Block',                                     -> Catch $3, $2
+    o 'CATCH Object Block',                                         -> Catch $3, Value($2)
+    o 'CATCH Block',                                                -> Catch $2
+  ]
+
+  Throw: [
+    o 'THROW Expression',                                           -> Throw $2
+    o 'THROW INDENT Object OUTDENT',                                -> Throw Value($3)
+  ]
+
+  # Parenthetical
+  Parenthetical: [
+    o '( Body )',                                                   -> Parens $2
+    o '( INDENT Body OUTDENT )',                                    -> Parens $3
+  ]
+
+  WhileLineSource: [
+    o 'WHILE ExpressionLine',                                       -> While $2
+    o 'WHILE ExpressionLine WHEN ExpressionLine',                   -> While $2, guard: $4
+    o 'UNTIL ExpressionLine',                                       -> While $2, invert: true
+    o 'UNTIL ExpressionLine WHEN ExpressionLine',                   -> While $2, invert: true, guard: $4
+  ]
+
+  WhileSource: [
+    o 'WHILE Expression',                                           -> While $2
+    o 'WHILE Expression WHEN Expression',                           -> While $2, guard: $4
+    o 'WHILE ExpressionLine WHEN Expression',                       -> While $2, guard: $4
+    o 'UNTIL Expression',                                           -> While $2, invert: true
+    o 'UNTIL Expression WHEN Expression',                           -> While $2, invert: true, guard: $4
+    o 'UNTIL ExpressionLine WHEN Expression',                       -> While $2, invert: true, guard: $4
+  ]
+
+  While: [
+    o 'WhileSource Block',                                          -> $1.addBody $2
+    o 'WhileLineSource Block',                                      -> $1.addBody $2
+    o 'Statement WhileSource',                                      -> (Object.assign $2, postfix: yes).addBody BlockWrap([$1])
+    o 'Expression WhileSource',                                     -> (Object.assign $2, postfix: yes).addBody BlockWrap([$1])
+    o 'Loop',                                                       -> $1
+  ]
+
+  Loop: [
+    o 'LOOP Block',                                                 -> While(BooleanLiteral('true'), isLoop: yes).addBody $2
+    o 'LOOP Expression',                                            -> While(BooleanLiteral('true'), isLoop: yes).addBody BlockWrap([$2])
+  ]
+
+  For: [
+    o 'Statement ForBody',                                          -> $2.postfix = yes; $2.addBody $1
+    o 'Expression ForBody',                                         -> $2.postfix = yes; $2.addBody $1
+    o 'ForBody Block',                                              -> $1.addBody $2
+    o 'ForLineBody Block',                                          -> $1.addBody $2
+  ]
+
+  ForBody: [
+    o 'FOR Range',                                                  -> For [], source: Value($2)
+    o 'FOR Range BY Expression',                                    -> For [], source: Value($2), step: $4
+    o 'ForStart ForSource',                                         -> $1.addSource $2
+  ]
+
+  ForLineBody: [
+    o 'FOR Range BY ExpressionLine',                                -> For [], source: Value($2), step: $4
+    o 'ForStart ForLineSource',                                     -> $1.addSource $2
+  ]
+
+  ForStart: [
+    o 'FOR ForVariables',                                           -> For [], name: $2[0], index: $2[1]
+    o 'FOR AWAIT ForVariables',                                     -> [name, index] = $3; For [], name: name, index: index, await: yes, awaitTag: Literal($2)
+    o 'FOR OWN ForVariables',                                       -> [name, index] = $3; For [], name: name, index: index, own: yes, ownTag: Literal($2)
+  ]
+
+  ForValue: [
+    o 'Identifier'
+    o 'ThisProperty'
+    o 'Array',                                                      -> Value $1
+    o 'Object',                                                     -> Value $1
+  ]
+
+  ForVariables: [
+    o 'ForValue',                                                   -> [$1]
+    o 'ForValue , ForValue',                                        -> [$1, $3]
+  ]
+
+  ForSource: [
+    o 'FORIN Expression',                                           -> source: $2
+    o 'FOROF Expression',                                           -> source: $2,             object: yes
+    o 'FORIN Expression WHEN Expression',                           -> source: $2, guard:  $4
+    o 'FORIN ExpressionLine WHEN Expression',                       -> source: $2, guard:  $4
+    o 'FOROF Expression WHEN Expression',                           -> source: $2, guard:  $4, object: yes
+    o 'FOROF ExpressionLine WHEN Expression',                       -> source: $2, guard:  $4, object: yes
+    o 'FORIN Expression BY Expression',                             -> source: $2, step:   $4
+    o 'FORIN ExpressionLine BY Expression',                         -> source: $2, step:   $4
+    o 'FORIN Expression WHEN Expression BY Expression',             -> source: $2, guard:  $4, step:   $6
+    o 'FORIN ExpressionLine WHEN Expression BY Expression',         -> source: $2, guard:  $4, step:   $6
+    o 'FORIN Expression WHEN ExpressionLine BY Expression',         -> source: $2, guard:  $4, step:   $6
+    o 'FORIN ExpressionLine WHEN ExpressionLine BY Expression',     -> source: $2, guard:  $4, step:   $6
+    o 'FORIN Expression BY Expression WHEN Expression',             -> source: $2, step:   $4, guard:  $6
+    o 'FORIN ExpressionLine BY Expression WHEN Expression',         -> source: $2, step:   $4, guard:  $6
+    o 'FORIN Expression BY ExpressionLine WHEN Expression',         -> source: $2, step:   $4, guard:  $6
+    o 'FORIN ExpressionLine BY ExpressionLine WHEN Expression',     -> source: $2, step:   $4, guard:  $6
+    o 'FORFROM Expression',                                         -> source: $2,             from:   yes
+    o 'FORFROM Expression WHEN Expression',                         -> source: $2, guard:  $4, from:   yes
+    o 'FORFROM ExpressionLine WHEN Expression',                     -> source: $2, guard:  $4, from:   yes
+  ]
+
+  ForLineSource: [
+    o 'FORIN ExpressionLine',                                       -> source: $2
+    o 'FOROF ExpressionLine',                                       -> source: $2, object: yes
+    o 'FORIN Expression WHEN ExpressionLine',                       -> source: $2, guard:  $4
+    o 'FORIN ExpressionLine WHEN ExpressionLine',                   -> source: $2, guard:  $4
+    o 'FOROF Expression WHEN ExpressionLine',                       -> source: $2, guard:  $4, object: yes
+    o 'FOROF ExpressionLine WHEN ExpressionLine',                   -> source: $2, guard:  $4, object: yes
+    o 'FORIN Expression BY ExpressionLine',                         -> source: $2, step:   $4
+    o 'FORIN ExpressionLine BY ExpressionLine',                     -> source: $2, step:   $4
+    o 'FORIN Expression WHEN Expression BY ExpressionLine',         -> source: $2, guard:  $4, step:  $6
+    o 'FORIN ExpressionLine WHEN Expression BY ExpressionLine',     -> source: $2, guard:  $4, step:  $6
+    o 'FORIN Expression WHEN ExpressionLine BY ExpressionLine',     -> source: $2, guard:  $4, step:  $6
+    o 'FORIN ExpressionLine WHEN ExpressionLine BY ExpressionLine', -> source: $2, guard:  $4, step:  $6
+    o 'FORIN Expression BY Expression WHEN ExpressionLine',         -> source: $2, step:   $4, guard: $6
+    o 'FORIN ExpressionLine BY Expression WHEN ExpressionLine',     -> source: $2, step:   $4, guard: $6
+    o 'FORIN Expression BY ExpressionLine WHEN ExpressionLine',     -> source: $2, step:   $4, guard: $6
+    o 'FORIN ExpressionLine BY ExpressionLine WHEN ExpressionLine', -> source: $2, step:   $4, guard: $6
+    o 'FORFROM ExpressionLine',                                     -> source: $2, from:   yes
+    o 'FORFROM Expression WHEN ExpressionLine',                     -> source: $2, guard:  $4, from: yes
+    o 'FORFROM ExpressionLine WHEN ExpressionLine',                 -> source: $2, guard:  $4, from: yes
+  ]
+
+  Switch: [
+    o 'SWITCH Expression INDENT Whens OUTDENT',                     -> Switch $2, $4
+    o 'SWITCH ExpressionLine INDENT Whens OUTDENT',                 -> Switch $2, $4
+    o 'SWITCH Expression INDENT Whens ELSE Block OUTDENT',          -> Switch $2, $4, $6
+    o 'SWITCH ExpressionLine INDENT Whens ELSE Block OUTDENT',      -> Switch $2, $4, $6
+    o 'SWITCH INDENT Whens OUTDENT',                                -> Switch null, $3
+    o 'SWITCH INDENT Whens ELSE Block OUTDENT',                     -> Switch null, $3, $5
+  ]
+
+  Whens: [
+    o 'When',                                                       -> [$1]
+    o 'Whens When',                                                 -> $1.concat $2
+  ]
+
+  When: [
+    o 'LEADING_WHEN SimpleArgs Block',                              -> SwitchWhen $2, $3
+    o 'LEADING_WHEN SimpleArgs Block TERMINATOR',                   -> SwitchWhen $2, $3
+  ]
+
+  IfBlock: [
+    o 'IF Expression Block',                                        -> If $2, $3, type: $1
+    o 'IfBlock ELSE IF Expression Block',                           -> $1.addElse If($4, $5, type: $3)
+  ]
+
+  If: [
+    o 'IfBlock'
+    o 'IfBlock ELSE Block',                                         -> $1.addElse $3
+    o 'Statement POST_IF Expression',                               -> If $3, BlockWrap([$1]), type: $2, postfix: true
+    o 'Expression POST_IF Expression',                              -> If $3, BlockWrap([$1]), type: $2, postfix: true
+  ]
+
+  IfBlockLine: [
+    o 'IF ExpressionLine Block',                                    -> If $2, $3, type: $1
+    o 'IfBlockLine ELSE IF ExpressionLine Block',                   -> $1.addElse If($4, $5, type: $3)
+  ]
+
+  IfLine: [
+    o 'IfBlockLine'
+    o 'IfBlockLine ELSE Block',                                     -> $1.addElse $3
+    o 'Statement POST_IF ExpressionLine',                           -> If $3, BlockWrap([$1]), type: $2, postfix: true
+    o 'Expression POST_IF ExpressionLine',                          -> If $3, BlockWrap([$1]), type: $2, postfix: true
+  ]
+
+  OperationLine: [
+    o 'UNARY ExpressionLine',                                       -> Op $1, $2
+    o 'DO ExpressionLine',                                          -> Op $1, $2
+    o 'DO_IIFE CodeLine',                                           -> Op $1, $2
+  ]
+
+  Operation: [
+    o 'UNARY Expression',                                           -> Op $1.toString(), $2, undefined, undefined, originalOperator: $1.original
+    o 'DO Expression',                                              -> Op $1, $2
+    o 'UNARY_MATH Expression',                                      -> Op $1, $2
+    o '- Expression',                                               -> Op '-', $2
+    o '+ Expression',                                               -> Op '+', $2
+    o 'AWAIT Expression',                                           -> Op $1, $2
+    o 'AWAIT INDENT Object OUTDENT',                                -> Op $1, $3
+    o '-- SimpleAssignable',                                        -> Op '--', $2
+    o '++ SimpleAssignable',                                        -> Op '++', $2
+    o 'SimpleAssignable --',                                        -> Op '--', $1, null, true
+    o 'SimpleAssignable ++',                                        -> Op '++', $1, null, true
+    o 'Expression ?',                                               -> Existence $1
+    o 'Expression + Expression',                                    -> Op '+', $1, $3
+    o 'Expression - Expression',                                    -> Op '-', $1, $3
+    o 'Expression MATH Expression',                                 -> Op $2, $1, $3
+    o 'Expression ** Expression',                                   -> Op $2, $1, $3
+    o 'Expression SHIFT Expression',                                -> Op $2, $1, $3
+    o 'Expression COMPARE Expression',                              -> Op $2.toString(), $1, $3, undefined, originalOperator: $2.original
+    o 'Expression & Expression',                                    -> Op $2, $1, $3
+    o 'Expression ^ Expression',                                    -> Op $2, $1, $3
+    o 'Expression | Expression',                                    -> Op $2, $1, $3
+    o 'Expression && Expression',                                   -> Op $2.toString(), $1, $3, undefined, originalOperator: $2.original
+    o 'Expression || Expression',                                   -> Op $2.toString(), $1, $3, undefined, originalOperator: $2.original
+    o 'Expression BIN? Expression',                                 -> Op $2, $1, $3
+    o 'Expression RELATION Expression',                             -> Op $2.toString(), $1, $3, undefined, invertOperator: $2.invert?.original ? $2.invert
+    o 'SimpleAssignable COMPOUND_ASSIGN Expression',                -> Assign $1, $3, $2.toString(), originalContext: $2.original
+    o 'SimpleAssignable COMPOUND_ASSIGN INDENT Expression OUTDENT', -> Assign $1, $4, $2.toString(), originalContext: $2.original
+    o 'SimpleAssignable COMPOUND_ASSIGN TERMINATOR Expression',     -> Assign $1, $4, $2.toString(), originalContext: $2.original
+  ]
+
+  DoIife: [
+    o 'DO_IIFE Code',                                               -> Op $1, $2
   ]
 
 # ============================================================================
-# OPERATOR PRECEDENCE
+# COMPLETE OPERATOR PRECEDENCE
 # ============================================================================
+
+o = (assoc, ops...) -> [assoc].concat ops.join(' ').trim().split(/\s+/)
 
 operators = [
-  ['right', '=>', '->']
-  ['left' , 'IF', 'UNLESS', 'WHILE', 'UNTIL']
-  ['right', '=', '+=', '-=', '*=', '/=']
-  ['left' , '||']
-  ['left' , '&&']
-  ['left' , '|']
-  ['left' , '^']
-  ['left' , '&']
-  ['left' , '==', '!=']
-  ['left' , '<', '>', '<=', '>=']
-  ['left' , '<<', '>>']
-  ['left' , '+', '-']
-  ['left' , '*', '/', '%']
-  ['right', 'UNARY', '++', '--']
-  ['right', '**']
-  ['left' , '.']
-  ['left' , 'CALL_START', 'CALL_END']
+  o 'right',     'DO_IIFE'
+  o 'left',      '. ?. :: ?::'
+  o 'left',      'CALL_START CALL_END'
+  o 'nonassoc',  '++ --'
+  o 'left',      '?'
+  o 'right',     'UNARY DO'
+  o 'right',     'AWAIT'
+  o 'right',     '**'
+  o 'right',     'UNARY_MATH'
+  o 'left',      'MATH'
+  o 'left',      '+ -'
+  o 'left',      'SHIFT'
+  o 'left',      'RELATION'
+  o 'left',      'COMPARE'
+  o 'left',      '&'
+  o 'left',      '^'
+  o 'left',      '|'
+  o 'left',      '&&'
+  o 'left',      '||'
+  o 'left',      'BIN?'
+  o 'nonassoc',  'INDENT OUTDENT'
+  o 'right',     'YIELD'
+  o 'right',     '= : COMPOUND_ASSIGN RETURN THROW EXTENDS'
+  o 'right',     'FORIN FOROF FORFROM BY WHEN'
+  o 'right',     'IF ELSE FOR WHILE UNTIL LOOP SUPER CLASS IMPORT EXPORT DYNAMIC_IMPORT'
+  o 'left',      'POST_IF'
 ]
-
-# ============================================================================
-# LEXER INTEGRATION
-# ============================================================================
-
-createLexer = (input, options = {}) ->
-  tokens = []
-  position = 0
-
-  # Simple tokenizer for our test case: "x = 41 + 1"
-  tokenize = (input) ->
-    tokens = []
-    i = 0
-
-    while i < input.length
-      char = input[i]
-
-      # Skip whitespace
-      if /\s/.test(char)
-        i++
-        continue
-
-      # Numbers
-      if /\d/.test(char)
-        start = i
-        while i < input.length and /\d/.test(input[i])
-          i++
-        tokens.push(['NUMBER', input.slice(start, i)])
-        continue
-
-      # Identifiers
-      if /[a-zA-Z_]/.test(char)
-        start = i
-        while i < input.length and /[a-zA-Z_0-9]/.test(input[i])
-          i++
-        tokens.push(['IDENTIFIER', input.slice(start, i)])
-        continue
-
-      # Operators and symbols
-      switch char
-        when '='
-          tokens.push(['=', '='])
-        when '+'
-          tokens.push(['+', '+'])
-        when '-'
-          tokens.push(['-', '-'])
-        when '*'
-          tokens.push(['*', '*'])
-        when '/'
-          tokens.push(['/', '/'])
-        when '('
-          tokens.push(['(', '('])
-        when ')'
-          tokens.push([')', ')'])
-        else
-          throw new Error("Unexpected character: #{char}")
-
-      i++
-
-    tokens.push(['EOF', ''])
-    return tokens
-
-  tokens = tokenize(input)
-  console.log "Tokens:", tokens  # Debug output
-
-  lex: ->
-    if position >= tokens.length
-      return 'EOF'
-    token = tokens[position++]
-    @yytext = token[1]
-    return token[0]
-
-  yytext: ''
-  yylloc: {first_line: 1, last_line: 1, first_column: 1, last_column: 1}
-
-# ============================================================================
-# TEST FUNCTION
-# ============================================================================
-
-testSimpleAssignment = ->
-  console.log "Testing: x = 41 + 1"
-
-  # Create a mock parser environment
-  lexer = createLexer("x = 41 + 1")
-
-  # Mock AST node classes for testing
-  global.Root = class Root
-    constructor: (@body) ->
-    toString: -> "Root(#{@body})"
-
-  global.Block = class Block
-    constructor: (@statements) ->
-    toString: -> "Block([#{@statements.join(', ')}])"
-
-  global.Assign = class Assign
-    constructor: (@left, @right, @op) ->
-    toString: -> "Assign(#{@left}, #{@op}, #{@right})"
-
-  global.Op = class Op
-    constructor: (@op, @left, @right, @flip) ->
-    toString: -> "Op(#{@op}, #{@left}, #{@right})"
-
-  global.IdentifierLiteral = class IdentifierLiteral
-    constructor: (@name) ->
-    toString: -> "Id(#{@name})"
-
-  global.NumberLiteral = class NumberLiteral
-    constructor: (@value, @options) ->
-    toString: -> "Num(#{@value})"
-
-  # Test the lexer
-  console.log "Lexer test:"
-  testLexer = createLexer("x = 41 + 1")
-  while true
-    token = testLexer.lex()
-    console.log "Token:", token, "Text:", testLexer.yytext
-    break if token == 'EOF'
-
-  console.log "Grammar rules that should match:"
-  console.log "- Root -> Body"
-  console.log "- Body -> Line"
-  console.log "- Line -> Expression"
-  console.log "- Expression -> Assign"
-  console.log "- Assign -> Assignable = Expression"
-  console.log "- Assignable -> Identifier"
-  console.log "- Identifier -> IDENTIFIER"
-  console.log "- Expression -> Operation"
-  console.log "- Operation -> Expression + Expression"
-  console.log "- Expression -> Value"
-  console.log "- Value -> Literal"
-  console.log "- Literal -> NUMBER"
 
 # ============================================================================
 # LANGUAGE PACK EXPORT
 # ============================================================================
 
 language =
-  # Language metadata
-  info: languageInfo
-
-  # Core grammar data
-  symbols: Object.keys(grammar)
-  rules: grammar
-  states: null  # Generated by Rip
-
-  # Operator precedence
+  info:      languageInfo
+  grammar:   grammar
   operators: operators.reverse()
 
-  # Start symbol
-  start: 'Root'
-
-  # Lexer factory
-  createLexer: createLexer
-
-  # Optional: Override automatic terminal detection if needed
-  # terminals: [1, 2, 3, ...]  # Uncomment to provide explicit terminal list
-  #
-  # Advanced: If you need to compute terminals from a different grammar format:
-  # terminals: () -> Generator.determineTerminalsFromGrammar(@symbols, @rules)
-
-  # Direct constructor functions
-  constructors: {
-    Root, Block, Binary, Unary, Assign, Call,
-    NumberLit, StringLit, BooleanLit, NullLit, UndefinedLit, RegexLit,
-    Id, This, PropertyName, Property, If, While, Return, Function, Arrow,
-    List, Concat, Push, Value, Access, Index, Literal,
-    SuperCall, ArrayExpr, ObjectExpr, StatementLit, YieldReturn, AwaitReturn
-  }
-
-  # Enhanced 'o' helper
-  o: o
-
-  # Utilities
-  helpers:
-    # Convert to standard AST format
-    normalize: (ast) -> ast
-
-    # Compile to JavaScript
-    compile: (ast) -> "// Compiled Rip → JavaScript would go here"
-
-    # Evaluate code
-    evaluate: (code) -> "// Rip evaluation result"
-
-  # Development helpers
-  debug:
-    showGrammar: -> console.log grammar
-    showAST: -> console.log "Rip AST structure"
-    testSimple: testSimpleAssignment
-
 # ============================================================================
-# RIP LANGUAGE FEATURES
-# ============================================================================
-
-###
-# Rip Language Features (v1.0):
-#
-# ✅ INCLUDED (from CoffeeScript):
-# - Elegant syntax with significant whitespace
-# - Arrow functions (-> and =>)
-# - Classes and inheritance
-# - Destructuring assignment
-# - String interpolation
-# - Comprehensions
-# - Existential operators (? and ?.)
-# - Splats and rest parameters
-# - Async/await support
-# - Import/export statements
-# - All standard operators and control flow
-#
-# ❌ REMOVED (from CoffeeScript):
-# - JSX support (JSX_TAG, JSX_CLOSE tokens)
-# - Literate CoffeeScript (.litcoffee files)
-# - JSX-related grammar rules
-# - Literate comment parsing
-#
-# 🚀 FUTURE ENHANCEMENTS:
-# - Optional typing
-# - Pattern matching
-# - Pipe operators
-# - Enhanced error handling
-# - Universal parser integration
-# - Cross-language interop
-# - WASM compilation
-###
-
-# =========================================================================
 # COMMONJS MODULE EXPORT ONLY
-# =========================================================================
+# ============================================================================
 
 module.exports = language
