@@ -8,7 +8,7 @@
 languageInfo =
   name: 'CoffeeScript'
   version: '2.7.0'
-  description: 'Complete CoffeeScript language pack for Rip Universal Parser'
+  description: 'Complete CoffeeScript language pack for Rip multilanguage universal runtime'
   author: 'Jeremy Ashkenas, Rip Team'
   license: 'MIT'
   website: 'https://coffeescript.org'

@@ -35,7 +35,7 @@ o 'IDENTIFIER',                           -> {type: 'Identifier', name: $1}
 - **Maintainable** - change behavior in one place
 - **Debuggable** - clear stack traces to exact locations
 
-### 2. Universal Language Platform
+### 2. Multilanguage Universal Runtime
 - **7KB runtime** + **2KB language packs** = infinite languages
 - **One parser engine** handles ANY programming language
 - **Pluggable architecture** for ultimate flexibility

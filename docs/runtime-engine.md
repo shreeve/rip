@@ -2,7 +2,7 @@
 
 # Runtime Engine
 
-**The 7KB Engine That Powers Any Programming Language**
+**The 7KB Engine That Powers the Multilanguage Universal Runtime**
 
 The Universal Parser Runtime (`src/parser.coffee`) is the revolutionary heart of the Rip platform. This single 209-line CoffeeScript file implements a complete LALR(1) parser that can parse any programming language when paired with a language pack.
 

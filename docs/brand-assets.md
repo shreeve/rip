@@ -109,7 +109,7 @@ To create the actual logo files:
 
 ## Tagline Integration
 When used with tagline, consider:
-- "Rip ⟨Universal Language Platform⟩"
+- "Rip ⟨Multilanguage Universal Runtime⟩"
 - "⟨R⟩ Rip - Parse Everything"
 - "Rip ⟨Code Without Borders⟩"
 
@@ -138,7 +138,7 @@ Terminal/CLI:
 ⟨R⟩ rip build grammar.rip
 
 GitHub README:
-# ⟨R⟩ Rip - Universal Language Platform
+# ⟨R⟩ Rip - Multilanguage Universal Runtime
 
 Website Header:
 ⟨R⟩ Rip | Parse Everything
@@ -155,3 +155,12 @@ Social Media:
 ---
 
 *Official Rip Brand Assets - Use with pride!* 🚀
+
+## Consistency in Tagline Usage
+
+To maintain a strong and unified brand identity, always use the official taglines consistently across all documentation, marketing materials, and source code:
+
+- **Platform tagline:** "multilanguage universal runtime"
+- **Rip language tagline:** "A modern echo of CoffeeScript"
+
+This consistency ensures clarity for users, contributors, and the broader community, reinforcing Rip’s vision and positioning in every context.

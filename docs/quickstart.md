@@ -2,7 +2,7 @@
 
 # Quickstart
 
-Welcome to Rip! This guide will help you get up and running quickly.
+Welcome to Rip, the **multilanguage universal runtime**! This guide will help you get up and running quickly.
 
 ## Installation
 
@@ -49,7 +49,7 @@ rip my-program.js      # Run JavaScript via language pack (future)
 
 Now that you're up and running, here's what to explore next:
 
-- **[How It Works](./how-it-works.md)** - Understand the universal language platform
+- **[How It Works](./how-it-works.md)** - Understand the multilanguage universal runtime
 - **[Language Packs](./language-packs.md)** - Learn about available languages and creating your own
 - **[Grammar Authoring](./grammar-authoring.md)** - Create custom language grammars
 - **[Runtime Engine](./runtime-engine.md)** - Deep dive into the universal parser

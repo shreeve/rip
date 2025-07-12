@@ -1,4 +1,4 @@
-# Universal Parser Runtime
+# Multilanguage Universal Runtime
 # A generic LALR(1) parser that works with any language pack
 #
 # This implements the standard LALR(1) parsing algorithm using:

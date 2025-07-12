@@ -1,6 +1,6 @@
 # Rip Logo Assets
 
-This directory contains the official logo files for the Rip Universal Language Platform.
+This directory contains the official logo files for the Rip multilanguage universal runtime.
 
 ## Logo Files
 
@@ -52,7 +52,7 @@ The `rip-icon.svg` can be converted to favicon formats:
 
 The **⟨R⟩** logo represents:
 - **Angle Brackets**: Universal parsing notation, familiar to developers
-- **R**: Rip, the universal language platform
+- **R**: Rip, the multilanguage universal runtime
 - **Connection**: The brackets embrace and connect all programming languages
 - **Simplicity**: Clean, minimal design that works at any size
 

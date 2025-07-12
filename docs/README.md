@@ -2,7 +2,7 @@
 
 # Documentation Index
 
-Welcome to the **Rip Universal Language Platform** documentation suite! This directory contains everything you need to understand, use, and contribute to the Rip project.
+Welcome to the **Rip multilanguage universal runtime** documentation suite! This directory contains everything you need to understand, use, and contribute to the Rip project.
 
 ---
 

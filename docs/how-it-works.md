@@ -2,7 +2,7 @@
 
 # How It Works
 
-**The Universal Language Platform in Action**
+**The Multilanguage Universal Runtime in Action**
 
 Rip transforms how we think about programming languages by providing a single, universal runtime that can execute code written in any language through interchangeable language packs.
 
@@ -222,4 +222,4 @@ ast = parser.parse('5 + 3')
 
 ---
 
-*The Universal Language Platform: One engine, infinite possibilities.* 🚀
+*The Multilanguage Universal Runtime: One engine, infinite possibilities.* 🚀
