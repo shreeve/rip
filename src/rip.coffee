@@ -98,22 +98,22 @@ class Generator
     @timing "  📋 Data structure initialization"
 
     # Initialize all data structures
-    @grammar           = null      # store grammar
-    @start             = null      # start symbol
-    @tokens            = null      # store tokens for terminal identification
-    @symbols           = new Map() # name -> Symbol
-    @rules             = []        # array of Rules
-    @precedence        = {}        # symbol -> {level, assoc}
-    @states            = []        # array of States
-    @stateMap          = new Map() # core hash -> State
-    @coreCache         = new Map() # state core -> closure items for memoization
-    @closureCache      = new Map() # state -> core hash for memoization
-    @propagateLinks    = new Map() # stateId-itemKey -> Set of stateId-itemKey
-    @inadequateStates  = []        # states with conflicts
-    @conflicts         = []        # conflict information
-    @analyzed          = false     # track if analysis is complete
-    @rulesByLHS        = new Map() # LHS -> [Rules] for O(1) rule lookup
-    @stats =                       # unified statistics and performance metrics
+    @grammar          = null       # store grammar
+    @start            = null       # start symbol
+    @tokens           = null       # store tokens for terminal identification
+    @symbols          = new Map()  # name -> Symbol
+    @rules            = []         # array of Rules
+    @precedence       = {}         # symbol -> {level, assoc}
+    @states           = []         # array of States
+    @stateMap         = new Map()  # core hash -> State
+    @coreCache        = new Map()  # state core -> closure items for memoization
+    @closureCache     = new Map()  # state -> core hash for memoization
+    @propagateLinks   = new Map()  # stateId-itemKey -> Set of stateId-itemKey
+    @inadequateStates = []         # states with conflicts
+    @conflicts        = []         # conflict information
+    @analyzed         = false      # track if analysis is complete
+    @rulesByLHS       = new Map()  # LHS -> [Rules] for O(1) rule lookup
+    @stats            =            # unified statistics and performance metrics
       closureCalls:          0     # closure calls
       cacheHits:             0     # cache hits
       stateCreations:        0     # state creations
