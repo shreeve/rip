@@ -323,6 +323,9 @@ class Generator
   # 3. ANALYSIS INSPECTION METHODS
   # ============================================================================
 
+  # FIXME: Steve
+  # @performanceStats.expanded = @rules.length - @performanceStats.sourceRules + @performanceStats.errorRecoveryRules + @performanceStats.augmentedRules
+
   getStatistics: ->
     @analyze() unless @analyzed
     {
