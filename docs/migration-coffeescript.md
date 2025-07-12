@@ -1,10 +1,8 @@
-<div align="center">
-  <img src="assets/logos/rip-icon-512wa.png" alt="Rip Logo" width="200">
-</div>
+<img src="assets/logos/rip-icon-512wa.png" style="width:50px;float:left;" /><br>
 
-# CoffeeScript Grammar Migration & Analysis
+# Migration Case Study: CoffeeScript
 
-## Overview
+**Complete Migration & Analysis of CoffeeScript 2.7.0 Grammar**
 
 This document details the complete migration of the CoffeeScript 2.7.0 grammar into the Rip Universal Runtime ecosystem, including comprehensive analysis of grammar rules, parser statistics, and implementation details.
 
@@ -257,31 +255,6 @@ operators = [
 - **Memory Efficient**: Compressed parse tables
 - **Fast Generation**: Sub-second parser creation
 
-## Future Enhancements
-
-### Planned Improvements
-1. **Grammar Validation**: Enhanced error checking
-2. **Performance Profiling**: Detailed timing analysis
-3. **Memory Optimization**: Reduced table sizes
-4. **Error Recovery**: More sophisticated error handling
-5. **Grammar Visualization**: Rule relationship diagrams
-
-### Language Pack Ecosystem
-1. **Multiple Languages**: Support for other languages
-2. **Grammar Sharing**: Common rule patterns
-3. **Version Management**: Grammar versioning system
-4. **Testing Framework**: Automated grammar validation
-
-## Conclusion
-
-The CoffeeScript grammar migration represents a complete transformation from the original CoffeeScript parser to a modern, maintainable, and extensible language pack system. The 97 source grammar rules expand into 412 total parser rules, creating a robust LALR(1) parser with 428 states that can handle all CoffeeScript language features with excellent performance characteristics.
-
-This migration establishes the foundation for a universal parser ecosystem that can support multiple programming languages while maintaining the high quality and feature completeness of the original CoffeeScript implementation.
-
----
-
-# Detailed Rule Analysis & Parser Statistics
-
 ## Understanding the "412 Rules" in Parser Output
 
 When you run the Rip parser generator on the CoffeeScript language pack, you see output like:
@@ -358,4 +331,41 @@ Rules that are implied by the grammar structure but not explicitly written.
 These are automatically generated rules like:
 - `Expression → error` (error recovery for expressions)
 - `Statement → error` (error recovery for statements)
-- `
+- `Block → error` (error recovery for blocks)
+
+#### 4. Augmented Start Rule (1)
+
+Special rule for complete program parsing:
+```
+$accept → Root $end
+```
+
+## Future Enhancements
+
+### Planned Improvements
+1. **Grammar Validation**: Enhanced error checking
+2. **Performance Profiling**: Detailed timing analysis
+3. **Memory Optimization**: Reduced table sizes
+4. **Error Recovery**: More sophisticated error handling
+5. **Grammar Visualization**: Rule relationship diagrams
+
+### Language Pack Ecosystem
+1. **Multiple Languages**: Support for other languages
+2. **Grammar Sharing**: Common rule patterns
+3. **Version Management**: Grammar versioning system
+4. **Testing Framework**: Automated grammar validation
+
+## Conclusion
+
+The CoffeeScript grammar migration represents a complete transformation from the original CoffeeScript parser to a modern, maintainable, and extensible language pack system. The 97 source grammar rules expand into 412 total parser rules, creating a robust LALR(1) parser with 428 states that can handle all CoffeeScript language features with excellent performance characteristics.
+
+This migration establishes the foundation for a universal parser ecosystem that can support multiple programming languages while maintaining the high quality and feature completeness of the original CoffeeScript implementation.
+
+## Related Docs
+- [Grammar Authoring](./grammar-authoring.md) - Creating language packs
+- [Language Packs](./language-packs.md) - Available implementations
+- [Runtime Engine](./runtime-engine.md) - Technical implementation
+
+---
+
+*The CoffeeScript Migration: From legacy parser to universal runtime.* 🚀

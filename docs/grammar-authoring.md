@@ -1,8 +1,6 @@
-<div align="center">
-  <img src="assets/logos/rip-icon-512wa.png" alt="Rip Logo" width="200">
-</div>
+<img src="assets/logos/rip-icon-512wa.png" style="width:50px;float:left;" /><br>
 
-# Revolutionary Grammar Format
+# Grammar Authoring
 
 **The Perfect Balance of Elegance and Power**
 
@@ -10,14 +8,14 @@ The Rip grammar format represents a groundbreaking advancement in parser generat
 
 ## 🌟 What We've Achieved
 
-### **The Perfect Grammar Format**
+### The Perfect Grammar Format
 We've combined:
 - ✨ **Original CoffeeScript elegance** - that beautiful, compact style
 - 🎯 **Modern consistency** - smart constructors, no `new` clutter
 - 🔧 **Ultimate flexibility** - easy to customize and extend
 - 📚 **Crystal clarity** - immediately readable and understandable
 
-### **Revolutionary Hybrid System**
+### Revolutionary Hybrid System
 ```coffeescript
 # This is BEAUTIFUL:
 o 'Expression + Expression',              -> Binary '+', $1, $3
@@ -31,36 +29,27 @@ o 'IDENTIFIER',                           -> {type: 'Identifier', name: $1}
 
 ## 🎯 Why This Is Game-Changing
 
-### **1. Language Pack Revolution**
+### 1. Language Pack Revolution
 - **90% less boilerplate** than traditional approaches
 - **Consistent patterns** across all language constructs
 - **Maintainable** - change behavior in one place
 - **Debuggable** - clear stack traces to exact locations
 
-### **2. Universal Language Platform**
+### 2. Universal Language Platform
 - **7KB runtime** + **2KB language packs** = infinite languages
 - **One parser engine** handles ANY programming language
 - **Pluggable architecture** for ultimate flexibility
 - **Cross-language interoperability** built-in
 
-### **3. Developer Experience Paradise**
+### 3. Developer Experience Paradise
 - **Write once, parse everywhere** - same patterns for all languages
 - **No mental overhead** - natural, readable grammar definitions
 - **Instant understanding** - see exactly what each rule does
 - **Easy extension** - add new languages in minutes, not days
 
-## 🌍 The Bigger Picture
-
-This isn't just a parser generator - it's **the foundation for a new era of programming language development**:
-
-- 🔄 **Polyglot Development** - seamlessly mix languages in one project
-- 🚀 **Rapid Language Creation** - build DSLs and languages effortlessly
-- 🌐 **Universal Interoperability** - languages that truly work together
-- 📦 **Language Pack Ecosystem** - community-driven language marketplace
-
 ## 💎 The Beauty of the Format
 
-### **Ultra-Clean Grammar Rules**
+### Ultra-Clean Grammar Rules
 ```coffeescript
 # Root - ultra-compact
 Root: [
@@ -85,7 +74,7 @@ Literal: [
 
 ## 🔧 Smart Constructor System
 
-### **Consistent Wrapper Functions**
+### Consistent Wrapper Functions
 ```coffeescript
 # All constructors follow the same pattern - no 'new' needed in grammar
 Binary = (op, left, right) -> new Op op, left, right
@@ -94,7 +83,7 @@ Id = (name) -> new IdentifierLiteral name
 Call = (callee, args, optional = false) -> new Call callee, args, optional
 ```
 
-### **Benefits of This Approach**
+### Benefits of This Approach
 - ✅ **Uniform Interface** - all constructors work the same way
 - ✅ **Easy to Remember** - never use `new` in grammar actions
 - ✅ **Flexibility** - easy to add common enhancements
@@ -102,7 +91,7 @@ Call = (callee, args, optional = false) -> new Call callee, args, optional
 
 ## 🎨 CoffeeScript Style Optimizations
 
-### **Elegant Parentheses Usage**
+### Elegant Parentheses Usage
 ```coffeescript
 # Before (verbose with unnecessary parens)
 o 'Expression + Expression',              -> Binary('+', $1, $3)
@@ -115,20 +104,20 @@ o 'IDENTIFIER',                           -> Id $1
 o 'Value Arguments',                      -> Call $1, $2
 ```
 
-### **Strategic Parentheses**
+### Strategic Parentheses
 Parentheses are kept only where needed for clarity:
 - `Root()` - No arguments, parens required
 - `Property (Id $1), $3` - Parens around nested call for clarity
 
 ## 📊 Format Comparison
 
-### **Original CoffeeScript (Elegant but Inconsistent)**
+### Original CoffeeScript (Elegant but Inconsistent)
 ```coffeescript
 o 'Expression +  Expression',               -> new Op '+' , $1, $3
 o 'IDENTIFIER',                             -> new IdentifierLiteral $1
 ```
 
-### **Traditional Parser Generators (Verbose)**
+### Traditional Parser Generators (Verbose)
 ```coffeescript
 o 'Expression + Expression', -> {
   type: 'BinaryExpression'
@@ -138,7 +127,7 @@ o 'Expression + Expression', -> {
 }
 ```
 
-### **Rip Hybrid Format (Perfect Balance)**
+### Rip Hybrid Format (Perfect Balance)
 ```coffeescript
 o 'Expression + Expression',              -> Binary '+', $1, $3
 o 'IDENTIFIER',                           -> Id $1
@@ -148,7 +137,7 @@ o 'IDENTIFIER',                           -> Id $1
 
 The hybrid system enables different approaches based on complexity:
 
-### **1. Ultra-Compact (Pass-through)**
+### 1. Ultra-Compact (Pass-through)
 ```coffeescript
 Line: [
   o 'Expression'        # Implicit: -> $1
@@ -156,7 +145,7 @@ Line: [
 ]
 ```
 
-### **2. Constructor-Based (Clear Intent)**
+### 2. Constructor-Based (Clear Intent)
 ```coffeescript
 Literal: [
   o 'NUMBER',                               -> NumberLit $1, $1.toString()
@@ -164,7 +153,7 @@ Literal: [
 ]
 ```
 
-### **3. Full Explicit (When Needed)**
+### 3. Full Explicit (When Needed)
 ```coffeescript
 If: [
   o 'IF Expression Block ELSE Block', -> {
@@ -179,7 +168,7 @@ If: [
 
 ## 🔍 Enhanced 'o' Helper
 
-### **Smart Defaults**
+### Smart Defaults
 ```coffeescript
 o = (pattern, action, options) ->
   # If no action provided, default to pass-through
@@ -192,14 +181,14 @@ o = (pattern, action, options) ->
   [pattern, action, options]
 ```
 
-### **Benefits**
+### Benefits
 - **Automatic pass-through** for simple cases
 - **Reduced boilerplate** by 80%
 - **Consistent behavior** across all rules
 
 ## 🏗️ Architecture Benefits
 
-### **Maintainability**
+### Maintainability
 ```coffeescript
 # Change constructor behavior in one place
 NumberLit = (value, raw) -> new NumberLiteral value,
@@ -210,19 +199,19 @@ NumberLit = (value, raw) -> new NumberLiteral value,
 # All number literals automatically get the enhancement
 ```
 
-### **Debugging**
+### Debugging
 - **Clear stack traces** point to exact rule locations
 - **No template function indirection**
 - **Direct constructor calls** for easy breakpoint setting
 
-### **Performance**
+### Performance
 - **Zero overhead** language switching
 - **No hydration step** required
 - **Direct JavaScript data structure access**
 
 ## 🌟 Real-World Impact
 
-### **Language Pack Creation**
+### Language Pack Creation
 Creating a new language pack becomes trivial:
 ```coffeescript
 # Python-like language in minutes
@@ -234,7 +223,7 @@ grammar =
   ]
 ```
 
-### **Cross-Language Development**
+### Cross-Language Development
 ```coffeescript
 # Mix languages seamlessly
 pythonResult = rip.call 'python', 'math_utils.py', 'calculate', [1, 2, 3]
@@ -243,7 +232,7 @@ jsFunction = rip.import 'javascript', 'utils.js', 'formatDate'
 
 ## 📈 Performance Characteristics
 
-### **Size Comparison**
+### Size Comparison
 ```
 Traditional Approach:
 ├── Python Parser: 50KB
@@ -259,30 +248,13 @@ Rip Universal Approach:
 └── Total: 13KB (90% reduction!)
 ```
 
-### **Development Speed**
+### Development Speed
 - **Traditional**: Days to weeks for new language support
 - **Rip**: Minutes to hours for complete language implementation
 
-## 🔮 Future Possibilities
-
-### **Language Pack Marketplace**
-- **Community-driven** language ecosystem
-- **Version management** for language packs
-- **Automatic updates** and compatibility checking
-
-### **IDE Integration**
-- **Universal syntax highlighting** based on grammar rules
-- **Intelligent code completion** across all languages
-- **Real-time error checking** with grammar validation
-
-### **Compilation Targets**
-- **WebAssembly** for ultimate performance
-- **Native compilation** for system languages
-- **JIT compilation** for dynamic optimization
-
 ## 🎯 Getting Started
 
-### **Basic Language Pack Structure**
+### Basic Language Pack Structure
 ```coffeescript
 module.exports =
   # Core grammar data (the 4 essential variables)
@@ -307,7 +279,7 @@ module.exports =
   start: 'Root'
 ```
 
-### **Example Grammar Rule**
+### Example Grammar Rule
 ```coffeescript
 Expression: [
   o 'Value'                                 # Pass-through
@@ -316,6 +288,23 @@ Expression: [
   o 'IDENTIFIER ( ArgList )',               -> Call (Id $1), $3
 ]
 ```
+
+## 🔮 Future Possibilities
+
+### Language Pack Marketplace
+- **Community-driven** language ecosystem
+- **Version management** for language packs
+- **Automatic updates** and compatibility checking
+
+### IDE Integration
+- **Universal syntax highlighting** based on grammar rules
+- **Intelligent code completion** across all languages
+- **Real-time error checking** with grammar validation
+
+### Compilation Targets
+- **WebAssembly** for ultimate performance
+- **Native compilation** for system languages
+- **JIT compilation** for dynamic optimization
 
 ## 🏆 Conclusion
 
@@ -328,6 +317,11 @@ This revolutionary grammar format represents the **perfect synthesis** of:
 **Clean. Elegant. Powerful. Revolutionary.**
 
 We've created the **future of language development** - a system where creating and maintaining programming languages is as natural as writing the code itself.
+
+## Related Docs
+- [Runtime Engine](./runtime-engine.md) - Technical implementation
+- [Language Packs](./language-packs.md) - Available implementations
+- [How It Works](./how-it-works.md) - High-level overview
 
 ---
 

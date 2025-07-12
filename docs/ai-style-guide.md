@@ -1,4 +1,6 @@
-# AI-NOTES.md
+<img src="assets/logos/rip-icon-512wa.png" style="width:50px;float:left;" /><br>
+
+# ai-style-guide.md
 
 ## Code Style: Object Literal Alignment (Configuration Blocks)
 

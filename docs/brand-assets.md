@@ -1,4 +1,10 @@
-# Rip Logo & Icon Concepts
+<img src="assets/logos/rip-icon-512wa.png" style="width:50px;float:left;" /><br>
+
+# Brand Assets
+
+**Official Rip Branding & Visual Identity**
+
+This document provides official Rip branding assets, including logos, icons, and visual identity guidelines. Use these resources to represent Rip in your projects, articles, and community contributions.
 
 ## Design Philosophy
 - **Simple**: Clean, minimal, instantly recognizable
@@ -212,3 +218,12 @@ Website Header:
 Social Media:
 ⟨R⟩ Just released Rip v2.0! 🚀
 ```
+
+## Related Docs
+- [README](../README.md) - Project overview
+- [Future Roadmap](./future-roadmap.md) - Long-term vision
+- [Quickstart](./quickstart.md) - Getting started
+
+---
+
+*Official Rip Brand Assets - Use with pride!* 🚀

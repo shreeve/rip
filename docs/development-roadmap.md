@@ -1,11 +1,12 @@
-# 🌍 RIP WORLD DOMINATION TASKS
-## From Bootstrap to Universal Language Platform
+<img src="assets/logos/rip-icon-512wa.png" style="width:50px;float:left;" /><br>
+
+# Development Roadmap
+
+**From Bootstrap to Universal Language Platform**
 
 *"The best way to predict the future is to invent it."* - Alan Kay
 
 **Mission**: Transform software development from language silos to a unified, interoperable ecosystem where any language can work seamlessly with any other language.
-
----
 
 ## 🎯 **CURRENT PHASE: Bootstrap Cycle**
 *Getting the traditional CoffeeScript generator to produce modern ES6 parsers*
@@ -217,6 +218,11 @@ Every task completed brings us closer to a world where:
 - **The best tool for each job can be used seamlessly**
 
 **Let's build this together and change the world!** 🌍✨
+
+## Related Docs
+- [Future Roadmap](./future-roadmap.md) - Long-term vision and strategy
+- [Runtime Engine](./runtime-engine.md) - Technical implementation
+- [Grammar Authoring](./grammar-authoring.md) - Creating language packs
 
 ---
 
