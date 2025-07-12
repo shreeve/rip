@@ -75,26 +75,11 @@ AwaitReturn  = (arg)                            -> new AwaitReturn arg
 # Utility constructors
 Literal      = (value)                          -> new Literal value
 
-# Helper function - enhanced 'o' with smart defaults
-o = (pattern, action, options) ->
-  # If no action provided, default to pass-through
-  unless action
-    if pattern.split(' ').length is 1
-      action = -> $1  # Single token pass-through
-    else
-      action = -> $1  # Default to first element
-
-  # If action is a string, treat as AST constructor
-  if typeof action is 'string'
-    constructor = AST[action]
-    if constructor
-      action = -> constructor.apply(null, arguments)
-
-  [pattern, action, options]
-
 # ============================================================================
 # COMPACT GRAMMAR RULES
 # ============================================================================
+
+o = (pattern, action, options) -> [pattern, action or (-> $1), options]
 
 grammar =
   # Root - ultra-compact
