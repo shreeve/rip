@@ -572,8 +572,3 @@ language =
 # =========================================================================
 
 module.exports = language
-
-# (Removed ES6 export default and browser global export for Node compatibility)
-# export default language
-# @RipLanguagePack = language
-# @language = language
