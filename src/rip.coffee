@@ -121,6 +121,12 @@ class Generator
     }
     @coreCache         = new Map() # state core -> closure items for memoization
     @closureCache      = new Map() # state -> core hash for memoization
+    @ruleStats = {
+      source: 0,         # direct from grammar
+      expanded: 0,       # expanded/flattened
+      errorRecovery: 0,  # error recovery rules
+      augmented: 0       # augmented start rule
+    }
 
     # Table optimization configuration
     @optimizationConfig = {
@@ -378,6 +384,11 @@ class Generator
     @getSymbol 'error', true; @tokens.add('error')
 
     # Process all rules with enhanced validation
+    @ruleStats.source = 0
+    @ruleStats.expanded = 0
+    @ruleStats.errorRecovery = 0
+    @ruleStats.augmented = 0
+    ruleCountBefore = @rules.length
     for nonterminal, rules of grammar
       for rule, i in rules
         try
@@ -402,16 +413,17 @@ class Generator
           for symbol in rhs
             @getSymbol(symbol)
 
+          @ruleStats.source++
         catch error
           throw new Error("Error processing rule #{i} for '#{nonterminal}': #{error.message}")
 
     # Smart start symbol detection with fallbacks
-    @start = start ||
-             (if grammar['Root'] then 'Root' else Object.keys(grammar)[0])
+    @start = start || (if grammar['Root'] then 'Root' else Object.keys(grammar)[0])
     throw new Error('Start symbol not found') unless @start
 
     # Add augmented start rule: $accept → start $end
     @rules.push(new Rule('$accept', [@start, '$end']))
+    @ruleStats.augmented = 1
 
     # Build performance optimization caches
     @buildRuleLookupCache()
@@ -594,6 +606,7 @@ class Generator
       # Add: NonTerminal → error
       errorRule = new Rule(ntName, ['error'], '/* error recovery */')
       @rules.push(errorRule)
+      @ruleStats.errorRecovery++
 
       # Only show in debug mode (internal implementation details)
       if @debugLevel >= DEBUG
@@ -3618,13 +3631,23 @@ function getTableAction(state, symbol) {
       console.log "  Optimization skipped (table too small or no benefit)"
 
   printStatistics: ->
+    terminals = [...@symbols.values()].filter((s) -> s.isTerminal).length
+    nonterminals = [...@symbols.values()].filter((s) -> !s.isTerminal).length
+    totalSymbols = @symbols.size
+    totalRules = @rules.length
+    states = @states.length
+    errorRecovery = @ruleStats.errorRecovery
+    augmented = @ruleStats.augmented
+    source = @ruleStats.source
+    expanded = totalRules - (source + errorRecovery + augmented)
+    perf = @performanceStats?.totalTime ? null
     console.log "\n=== GRAMMAR STATISTICS ==="
-    console.log "Terminals: #{[...@symbols.values()].filter((s) -> s.isTerminal).length}"
-    console.log "Non-terminals: #{[...@symbols.values()].filter((s) -> !s.isTerminal).length}"
-    console.log "Symbols: #{@symbols.size}"
-    console.log "Rules: #{@rules.length}"
-    console.log "States: #{@states.length}"
-    console.log "Inadequate states: #{@inadequateStates.length}"
+    console.log "• Rules Breakdown: #{totalRules} total = #{source} source + ~#{expanded} expanded + #{errorRecovery} error recovery + #{augmented} augmented start"
+    console.log "• Error Recovery Rules: Exactly #{errorRecovery} rules added automatically"
+    console.log "• Parser States: #{states} LALR(1) states generated"
+    console.log "• Symbol Count: #{totalSymbols} total symbols (#{terminals} terminals + #{nonterminals} non-terminals)"
+    if perf? then console.log "• Performance: ~#{perf}ms total generation time"
+    else console.log "• Performance: (timing not available)"
 
   debugTable: ->
     console.log "\n=== PARSER STATES ==="
