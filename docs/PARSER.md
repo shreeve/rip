@@ -10,7 +10,7 @@ The Universal Parser Runtime (`src/parser.coffee`) is the revolutionary heart of
 
 ## What Makes It Universal?
 
-Traditional parser generators create language-specific parsers. Rip takes a different approach: **one universal parser runtime + language-specific data packs**. This architectural innovation enables:
+Traditional parser generators create language-specific parsers. Rip takes a different approach: **one universal runtime engine + language-specific data packs**. This architectural innovation enables:
 
 - 🎯 **Language Agnostic**: Parse any LALR(1) language with the same engine
 - 🚀 **Ultra Compact**: 7KB runtime handles unlimited languages

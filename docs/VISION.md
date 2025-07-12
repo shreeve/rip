@@ -224,7 +224,7 @@ fn process_user(user: UserData) -> ProcessedUser {
 
 ## 🏗️ **The Technical Foundation**
 
-### **Universal Parser Engine (Already Built!):**
+### **Universal Runtime Engine (Already Built!):**
 - **`src/parser.coffee`** - Universal LALR(1) runtime
 - **`src/rip.coffee`** - Language platform + built-in parser generation
 - **Language packs** - Pluggable language definitions

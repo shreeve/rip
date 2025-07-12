@@ -6,7 +6,7 @@
 
 ## Overview
 
-This document details the complete migration of the CoffeeScript 2.7.0 grammar into the Rip Universal Parser ecosystem, including comprehensive analysis of grammar rules, parser statistics, and implementation details.
+This document details the complete migration of the CoffeeScript 2.7.0 grammar into the Rip Universal Runtime ecosystem, including comprehensive analysis of grammar rules, parser statistics, and implementation details.
 
 ## Grammar Migration Summary
 
@@ -240,7 +240,7 @@ operators = [
 ### 1. Clean Architecture
 - **Separation of Concerns**: Grammar separate from parser logic
 - **Modular Design**: Language packs as independent modules
-- **Reusable Components**: Universal parser generator
+- **Reusable Components**: Universal runtime generator
 
 ### 2. Maintainability
 - **Readable Grammar**: Human-friendly rule definitions
@@ -358,80 +358,4 @@ Rules that are implied by the grammar structure but not explicitly written.
 These are automatically generated rules like:
 - `Expression → error` (error recovery for expressions)
 - `Statement → error` (error recovery for statements)
-- `Block → error` (error recovery for blocks)
-
-The exact number depends on how many non-terminals the parser thinks need error recovery.
-
-#### 4. Augmented Start Rule (1)
-
-Just one rule:
-```
-$accept → Root $end
-```
-
-This is the special "accept" rule that tells the parser when it has successfully parsed a complete program.
-
-### Why Only 3 Error Recovery Rules?
-
-The limit of 3 error recovery rules is a **design choice** to:
-- **Prevent grammar bloat** - Too many error rules can make the parser table huge
-- **Focus on key constructs** - Target the most important non-terminals
-- **Maintain performance** - Keep the parser efficient
-
-### Summary
-
-So the breakdown is roughly:
-- **97** source grammar rules (from coffeescript.coffee)
-- **~311** expanded/flattened rules
-- **3** error recovery rules
-- **1** augmented start rule
-- **= 412 total rules**
-
-The expansion happens because the parser generator needs to convert the high-level, human-readable grammar into a complete set of low-level parsing rules that can handle every possible input combination.
-
-## Error Recovery Rules Analysis
-
-### How Many Error Recovery Rules Does Rip Add?
-
-**Rip adds exactly 3 error recovery rules** to the CoffeeScript grammar.
-
-### Selection Criteria
-
-1. **Candidate Selection**: Rip looks for non-terminals that meet these criteria:
-   - Appear in **multiple rules** (≥2 rules), OR
-   - Have names containing `'stmt'`, `'expr'`, or `'decl'`
-
-2. **Limited to 3**: The code explicitly limits error recovery rules to the first 3 candidates:
-   ```coffeescript
-   for ntName in candidateNonTerminals.slice(0, 3) # Limit to avoid too many
-   ```
-
-3. **Rule Format**: Each error recovery rule follows this pattern:
-   ```
-   NonTerminal → error
-   ```
-
-### Typical Error Recovery Rules for CoffeeScript
-
-Based on the CoffeeScript grammar structure, the 3 error recovery rules are likely added for:
-
-1. **`Expression`** - Most common non-terminal, appears in many rules
-2. **`Statement`** - Core statement construct, appears in multiple contexts
-3. **`Block`** - Block structure, appears in many rules
-
-### Why Only 3 Rules?
-
-The limit of 3 error recovery rules is a **design choice** to:
-- **Prevent grammar bloat** - Too many error rules can make the parser table huge
-- **Focus on key constructs** - Target the most important non-terminals
-- **Maintain performance** - Keep the parser efficient
-
-### Summary
-
-- **Error Recovery Rules**: **3 rules**
-- **Augmented Start Rule**: **1 rule** (`$accept → Root $end`)
-- **Source Grammar Rules**: **97 rules** (from coffeescript.coffee)
-- **Expanded Rules**: **~311 rules** (97 + 3 + 1 = 101, so ~311 additional expansions)
-- **Total**: **412 rules**
-
-So out of the 412 total rules, only **4 rules** (3 error recovery + 1 augmented start) are added by the parser generator - the rest come from expanding the original 97 grammar rules.
+- `

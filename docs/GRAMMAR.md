@@ -322,7 +322,7 @@ Expression: [
 This revolutionary grammar format represents the **perfect synthesis** of:
 - **Elegance** from the original CoffeeScript approach
 - **Consistency** from modern software engineering practices
-- **Power** from the universal parser architecture
+- **Power** from the universal runtime architecture
 - **Simplicity** from smart defaults and conventions
 
 **Clean. Elegant. Powerful. Revolutionary.**
