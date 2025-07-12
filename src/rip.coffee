@@ -93,20 +93,20 @@ class Generator
     @timing "  📋 Data structure initialization"
 
     # Initialize all data structures
-    @grammar           = null      # Store grammar
-    @start             = null      # Start symbol
-    @tokens            = null      # Store tokens for terminal identification
+    @grammar           = null      # store grammar
+    @start             = null      # start symbol
+    @tokens            = null      # store tokens for terminal identification
     @symbols           = new Map() # name -> Symbol
-    @rules             = []        # Array of Rules
+    @rules             = []        # array of Rules
     @precedence        = {}        # symbol -> {level, assoc}
-    @states            = []        # Array of States
+    @states            = []        # array of States
     @stateMap          = new Map() # core hash -> State
-    @propagateLinks    = new Map() # "stateId-itemKey" -> Set of "stateId-itemKey"
-    @inadequateStates  = []        # States with conflicts
-    @conflicts         = []        # Conflict information
-    @analyzed          = false     # Track if analysis is complete
+    @propagateLinks    = new Map() # stateId-itemKey -> Set of stateId-itemKey
+    @inadequateStates  = []        # states with conflicts
+    @conflicts         = []        # conflict information
+    @analyzed          = false     # track if analysis is complete
     @rulesByLHS        = new Map() # LHS -> [Rules] for O(1) rule lookup
-    @performanceStats  = {         # Track performance metrics
+    @performanceStats  = {         # track performance metrics
       closureCalls: 0,
       cacheHits: 0,
       stateCreations: 0,
