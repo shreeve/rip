@@ -879,5 +879,13 @@ language =
   grammar:   grammar
   operators: operators.reverse()
 
-# Export for ES6 modules
-export default language
+# ============================================================================
+# COMMONJS MODULE EXPORT ONLY
+# ============================================================================
+
+module.exports = language
+
+# (Removed ES6 export default and browser global export for Node compatibility)
+# export default language
+# @CoffeeScriptLanguagePack = language
+# @language = language

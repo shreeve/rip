@@ -567,21 +567,13 @@ language =
 # - WASM compilation
 ###
 
-# Export for ES6 modules (modern approach)
-export default language
+# =========================================================================
+# COMMONJS MODULE EXPORT ONLY
+# =========================================================================
 
-# Also support named exports for flexibility
-export {
-  languageInfo,
-  grammar,
-  operators,
-  createLexer,
-  testSimpleAssignment,
+module.exports = language
 
-  # Export constructor functions for direct use
-  Root, Block, Binary, Unary, Assign, Call,
-  NumberLit, StringLit, BooleanLit, NullLit, UndefinedLit, RegexLit,
-  Id, This, PropertyName, Property, If, While, Return, Function, Arrow,
-  List, Concat, Push, Value, Access, Index, Literal,
-  SuperCall, ArrayExpr, ObjectExpr, StatementLit, YieldReturn, AwaitReturn
-}
+# (Removed ES6 export default and browser global export for Node compatibility)
+# export default language
+# @RipLanguagePack = language
+# @language = language
