@@ -124,11 +124,11 @@ class Generator
 
     # Table optimization configuration
     @optimizationConfig =
-      enabled:         opts.optimize ? false
-      auto:            opts.autoOptimize ? true
+      enabled:          opts.optimize         ? false
+      auto:             opts.autoOptimize     ? true
       minStatesForAuto: opts.minStatesForAuto ? 20
-      algorithms:      opts.algorithms ? ['auto']
-      skipIfSmall:     opts.skipIfSmall ? true
+      algorithms:       opts.algorithms       ? ['auto']
+      skipIfSmall:      opts.skipIfSmall      ? true
 
     # Debug levels will use module-level constants
 
@@ -3974,23 +3974,21 @@ if (typeof module != 'undefined' and not module.parent) or (typeof process != 'u
   configureGenerator = (generator, options) ->
     # Set optimization configuration
     generator.optimizationConfig =
-      enabled:         options.optimize == 'on'
-      auto:            options.optimize == 'auto'
-      skipIfSmall:     options.optimize == 'auto'
-      minStatesForAuto:20
-      compression:     options.compression
-      minimization:    options.minimization
-      performance:     options.performance
+      enabled:          options.optimize         == 'on'
+      auto:             options.optimize         == 'auto'
+      skipIfSmall:      options.optimize         == 'auto'
+      minStatesForAuto: 20
+      compression:      options.compression
+      minimization:     options.minimization
+      performance:      options.performance
 
-    # Set debug configuration
     generator.debugConfig =
-      enabled:        options.debugLevel >= DEBUG
+      enabled:        options.debugLevel        >= DEBUG
       showStates:     options.showStates
       showConflicts:  options.showConflicts
       showGrammar:    options.showGrammar
       interactive:    options.interactive
 
-    # Set console output configuration
     generator.consoleConfig =
       production:    options.production
       silentParser:  options.silentParser
