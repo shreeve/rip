@@ -68,7 +68,7 @@ terminals = [
 ]
 
 # ============================================================================
-# GRAMMAR RULES (Rip-FRIENDLY FORMAT)
+# GRAMMAR RULES (RIP-FRIENDLY FORMAT)
 # ============================================================================
 
 # Convert CoffeeScript grammar to Rip format
