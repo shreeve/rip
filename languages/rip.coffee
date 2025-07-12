@@ -478,7 +478,7 @@ testSimpleAssignment = ->
 # LANGUAGE PACK EXPORT
 # ============================================================================
 
-languagePack =
+language =
   # Language metadata
   info: languageInfo
 
@@ -568,7 +568,7 @@ languagePack =
 ###
 
 # Export for ES6 modules (modern approach)
-export default languagePack
+export default language
 
 # Also support named exports for flexibility
 export {
