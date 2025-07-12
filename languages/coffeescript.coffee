@@ -432,4 +432,6 @@ languagePack =
 # - Automatic terminal detection eliminates explicit terminal lists
 # - Language packs can override terminal detection if needed
 # - Universal parser runtime works with any language pack
-###
+
+# Export for ES6 modules (modern approach)
+export default language
