@@ -4271,7 +4271,7 @@ if (typeof module != 'undefined' and not module.parent) or (typeof process != 'u
         stats = generator.getStatistics()
         console.log """
 
-        📊 Statistics:
+        📊 Grammar Statistics:
           States: #{stats.states}
           Rules: #{stats.rules}
           Terminals: #{stats.terminals}
