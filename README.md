@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/logos/rip-icon-512wa.png" alt="Rip Logo" width="200">
+  <img src="docs/assets/logos/rip-icon-512wa.png" alt="Rip Logo" width="200">
 </div>
 
 # rip
