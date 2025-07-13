@@ -197,6 +197,41 @@ class Language
       @analyzed = true
       @timing "🔍 Analysis"
 
+  # ============================================================================
+  # PHASE 1: SYMBOL AND RULE ANALYSIS
+  # ============================================================================
+
+  # Extract symbols from rules and identify terminals
+  buildSymbols: ->
+
+    # Add all symbols from rules
+    for rule in @rules
+      @getSymbol(rule.lhs, false)  # Nonterminal
+      @getSymbol(symbol, true) for symbol in rule.rhs  # Assume terminal initially
+
+    # Mark as terminal if never appears on LHS
+    lhsSymbols = new Set(rule.lhs for rule in @rules)
+    for [name, symbol] from @symbols
+      unless lhsSymbols.has(name)
+        symbol.isTerminal = true
+        @tokens.add(name)
+
+  # Create rule lookup by symbol
+  buildSymbolRules: ->
+    for rule in @rules
+      lhs = rule.lhs
+      @symbolRules.set(lhs, []) unless @symbolRules.has(lhs)
+      @symbolRules.get(lhs).push(rule)
+
+  # Process operator precedence and associativity
+  buildPrecedence: ->
+    level = 1
+    for group in @operators
+      [assoc, ...symbols] = group
+      for symbol in symbols
+        @precedence[symbol] = {level, assoc}
+      level++
+
   # Get or create a symbol
   getSymbol: (name, isTerminal) ->
     return sym if sym = @symbols.get(name)
