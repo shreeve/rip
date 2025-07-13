@@ -54,7 +54,7 @@ class State # Set of LR(0) items
   @idno = 0
   constructor: ->
     @id          = State.idno++ # unique state id
-    @items       = []           # collection of item
+    @items       = []           # collection of items
     @coreMap     = new Map()    # core-based deduplication (core key -> item)
     @transitions = new Map()    # state transitions (symbol -> state)
     @inadequate  = false        # has shift/reduce conflicts?
