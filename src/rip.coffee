@@ -34,13 +34,7 @@ class Item # Rule with a dot position and lookahead: [A → α • β, a]
   @makeCoreKey: (ruleId, dot) -> "#{ruleId}-#{dot}" # Canonical key for core
 
   constructor: (rule, dot = 0, lookahead = new Set()) ->
-    unless rule?
-        throw new Error("Item constructor requires a rule")
-    unless typeof dot is 'number' or dot < 0
-        throw new Error("Item dot position must be non-negative number")
-    unless dot <= rule.rhs.length
-        throw new Error("Item dot position (#{dot}) cannot exceed rule RHS length (#{rule.rhs.length})")
-
+    throw new Error("Item dot position") if dot < 0 or dot >= rule.rhs.length
     @rule      = rule      # associated production rule
     @dot       = dot       # dot position (• marker)
     @lookahead = lookahead # LALR(1) lookahead set
