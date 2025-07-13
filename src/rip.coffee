@@ -244,8 +244,8 @@ class Language
       @buildSymbolRules()     # @rules → @symbolRules
 
       # Phase 2: LALR(1) State Machine Construction
-      @buildStates()          #  @rules → @states, @stateMap
-      @computeLookaheads()    #  @states → @propagateLinks
+      @buildStates()          # @rules → @states, @stateMap
+      @computeLookaheads()    # @states → @propagateLinks
 
       # Phase 3: Parse Table and Optimization
       @buildTable()           # @states → @table
