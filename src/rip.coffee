@@ -190,8 +190,8 @@ class Language
 
     # Add all symbols from rules
     for rule in @rules
-      @getSymbol(rule.lhs, false)  # Nonterminal
-      @getSymbol(symbol, true) for symbol in rule.rhs  # Assume terminal initially
+      @getSymbol(rule.lhs, false) # Nonterminal
+      @getSymbol(symbol, true) for symbol in rule.rhs # Assume terminal initially
 
     # Mark as terminal if never appears on LHS
     lhsSymbols = new Set(rule.lhs for rule in @rules)
