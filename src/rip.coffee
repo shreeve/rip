@@ -276,6 +276,10 @@ class Language
     @rules.push(new Rule('$accept', [@start, '$end']))
     @stats.augmentedRules = 1
 
+  # ============================================================================
+  # PHASE 1: SYMBOL AND RULE ANALYSIS
+  # ============================================================================
+
   # Extract symbols from rules and identify terminals
   buildSymbols: ->
 
