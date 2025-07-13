@@ -135,8 +135,6 @@ class Language
       # Optimizations
       optimizationTime:      0    # Optimization time
 
-    # FIXME: Not sure which of these are used
-
     # Optimization
     @optimizationConfig =
       enabled:          opts.optimize         ? false
