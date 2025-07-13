@@ -98,6 +98,8 @@ class Language
   constructor: (@language = {}, opts = {}) ->
     @timing "🔤 Language constructor"
 
+    # Set debugging level and perform language validation
+    @debug = @parseDebug opts.debug ? NORMAL
     @validateLanguage()
 
     # Input (foundational data)
@@ -120,9 +122,6 @@ class Language
     @table            = null      # Parse table
     @defaultActions   = {}        # Default actions for states
     @cache            = new Map() # Performance cache
-
-    # Debugging level
-    @debug = @parseDebug opts.debug ? NORMAL
 
     # Statistics
     @stats =
