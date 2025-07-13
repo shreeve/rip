@@ -145,10 +145,6 @@ class Language
 
     @timing "🔤 Language constructor"
 
-  # ============================================================================
-  # LANGUAGE ANALYSIS AND CONSTRUCTION
-  # ============================================================================
-
   # Comprehensive language input validation
   validateLanguage: ->
     @timing "🔍 Validate Language"
@@ -227,6 +223,10 @@ class Language
       throw new Error "Language validation failed:\n  #{errors.join('\n  ')}"
 
     @timing "🔍 Validate Language"
+
+  # ============================================================================
+  # LANGUAGE ANALYSIS AND CONSTRUCTION
+  # ============================================================================
 
   # Transform input → output
   analyze: ->
