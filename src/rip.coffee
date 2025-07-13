@@ -243,13 +243,26 @@ class Language
       @buildPrecedence()      # @operators → @precedence
       @buildSymbolRules()     # @rules → @symbolRules
 
-      # Phase 2: LALR(1) State Machine Construction
+      # Phase 2: LALR(1) Set Computations
+      @computeNullable()      # @symbols → @nullable
+      @computeFirst()         # @symbols → @first
+      @computeFollow()        # @symbols → @follow
+
+      # Phase 3: Grammar Cleanup
+      @cleanupGrammar()       # Eliminate unproductive/unreachable symbols
+
+      # Phase 4: Error Recovery
+      @addErrorRecoveryRules() # Add error recovery rules
+
+      # Phase 5: LALR(1) State Machine Construction
       @buildStates()          # @rules → @states, @stateMap
       @computeLookaheads()    # @states → @propagateLinks
 
-      # Phase 3: Parse Table and Optimization
+      # Phase 6: Parse Table and Optimization
       @buildTable()           # @states → @table
       @resolveConflicts()     # @states → @conflicts, @inadequateStates
+      @minimizeStates()       # State minimization
+      @optimizeTable()        # Smart table optimization
       @buildDefaultActions()  # @states → @defaultActions
 
       @analyzed = true
