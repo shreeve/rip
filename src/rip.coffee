@@ -256,14 +256,25 @@ class Language
       @timing "🔍 Analysis"
 
   # ============================================================================
-  # PHASE 1: SYMBOL AND RULE ANALYSIS
+  # PHASE 0: LANGUAGE PREPARATION
   # ============================================================================
+
+  loadLanguage: ->
+    @info      = {...(@language.info      or {})}
+    @rules     = [...(@language.rules     or [])]
+    @operators = [...(@language.operators or [])]
+    @start     =      @language.start     or 'Root'
 
   # Create fundamental LALR(1) symbols
   createSpecialSymbols: ->
     @getSymbol '$accept'
     @getSymbol '$end' , true
     @getSymbol 'error', true; @tokens.add('error') # 'error' is also a terminal
+
+  # Add augmented start rule: $accept → start $end
+  augmentStartRule: ->
+    @rules.push(new Rule('$accept', [@start, '$end']))
+    @stats.augmentedRules = 1
 
   # Extract symbols from rules and identify terminals
   buildSymbols: ->
@@ -296,10 +307,6 @@ class Language
       @symbolRules.set(lhs, []) unless @symbolRules.has(lhs)
       @symbolRules.get(lhs).push(rule)
 
-  # Add augmented start rule: $accept → start $end
-  augmentStartRule: ->
-    @rules.push(new Rule('$accept', [@start, '$end']))
-    @stats.augmentedRules = 1
 
   # Get or create a symbol
   getSymbol: (name, isTerminal) ->
