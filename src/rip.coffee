@@ -299,7 +299,7 @@ class Generator
 
     @timing "  🔍 Analysis (if needed)" , => @analyze() unless @analyzed
     @timing "  📋 Conflict reporting"   , => @reportConflicts() if @conflicts.length > 0
-    @timing "  📊 Performance reporting", => @reportPerformanceStats()
+    @timing "  📊 Statistics display"   , => @displayStats()
 
     # Generate the parser code using unified format
     result = @timing "  🏗️ Code generation", => @generateCommonJS(options)
@@ -3616,6 +3616,98 @@ function getTableAction(state, symbol) {
     stats.density = Math.round((filledCells / totalCells) * 100) if totalCells > 0
     stats
 
+  # Unified statistics display function
+  displayStats: ->
+    return unless @debugLevel >= NORMAL
+
+    # ANSI color codes
+    RESET = '\x1b[0m'
+    BOLD = '\x1b[1m'
+    CYAN = '\x1b[36m'
+    YELLOW = '\x1b[33m'
+    GREEN = '\x1b[32m'
+    RED = '\x1b[31m'
+    GRAY = '\x1b[90m'
+
+    # Box drawing
+    topBox    = '╔' + '═'.repeat(46) + '╗'
+    midBox    = '╟' + '─'.repeat(46) + '╢'
+    botBox    = '╚' + '═'.repeat(46) + '╝'
+    sectionTop= '┌' + '─'.repeat(44) + '┐'
+    sectionBot= '└' + '─'.repeat(44) + '┘'
+
+    # Get comprehensive statistics
+    stats = @getStatistics()
+
+    # Calculate additional metrics
+    hitRate = if @stats.closureCalls > 0
+      Math.round((@stats.cacheHits / @stats.closureCalls) * 100)
+    else
+      0
+
+    cacheSize = @coreCache?.size + @closureCache?.size || 0
+    compressionRatio = if @optimizedTable?.compressionRatio
+      Math.round(@optimizedTable.compressionRatio * 100)
+    else
+      null
+
+    # Conflict breakdown
+    shiftReduce = @conflicts.filter((c) -> c.type == 'shift/reduce').length
+    reduceReduce = @conflicts.filter((c) -> c.type == 'reduce/reduce').length
+    warning = (msg) -> RED + BOLD + msg + RESET
+    number = (n) -> YELLOW + BOLD + n + RESET
+    label  = (s) -> CYAN + BOLD + s + RESET
+
+    console.log """
+#{topBox}
+║          #{label('📊  COMPREHENSIVE STATISTICS')}          ║
+#{botBox}
+
+#{sectionTop}
+│ #{label('GRAMMAR ANALYSIS').padEnd(42)} │
+#{midBox}
+│ Non-terminals:   #{number(stats.nonterminals).padEnd(28)}│
+│ Terminals:       #{number(stats.terminals).padEnd(28)}│
+│ Total symbols:   #{number(stats.symbols).padEnd(28)}│
+│ Start symbol:    #{GREEN + stats.startSymbol + RESET}".padEnd(44) + '│'
+│ Source rules:    #{number(@stats.sourceRules).padEnd(28)}│
+│ Expanded rules:  #{number(@stats.expandedRules).padEnd(28)}│
+│ Error recovery:  #{number(@stats.errorRecoveryRules).padEnd(28)}│
+│ Augmented start: #{number(@stats.augmentedRules).padEnd(28)}│
+│ Total rules:     #{number(stats.rules).padEnd(28)}│
+#{sectionBot}
+
+#{sectionTop}
+│ #{label('STATE MACHINE').padEnd(42)} │
+#{midBox}
+│ States:            #{number(stats.states).padEnd(24)}│
+│ Transitions:       #{number(stats.transitions).padEnd(24)}│
+│ Inadequate states: #{number(@inadequateStates.length).padEnd(24)}│
+│ Conflicts:         #{number(stats.conflicts).padEnd(24)}│
+│  • Shift/Reduce:   #{number(shiftReduce).padEnd(20)}│
+│  • Reduce/Reduce:  #{number(reduceReduce).padEnd(20)}│
+#{sectionBot}
+
+#{sectionTop}
+│ #{label('TABLE & OUTPUT').padEnd(42)} │
+#{midBox}
+│ Table entries:     #{number(stats.tableSize).padEnd(24)}│
+│ Table density:     #{number(stats.density) + '%'.padEnd(23)}│
+│ Compression:       #{GREEN + stats.compression + RESET}".padEnd(44) + '│'
+#{if compressionRatio? then "│ Compression ratio: #{number(compressionRatio) + '%'.padEnd(23)}│" else ''}
+#{sectionBot}
+
+#{sectionTop}
+│ #{label('PERFORMANCE').padEnd(42)} │
+#{midBox}
+│ Closure calls:     #{number(@stats.closureCalls).padEnd(24)}│
+│ Cache hits:        #{number(@stats.cacheHits).padEnd(24)}│
+│ Cache hit rate:    #{number(hitRate) + '%'.padEnd(23)}│
+│ Cache entries:     #{number(cacheSize).padEnd(24)}│
+#{if @stats.optimizationTime > 0 then "│ Optimization time: #{number(@stats.optimizationTime) + 'ms'.padEnd(21)}│" else ''}
+#{sectionBot}
+"""
+
   optimizeTables: ->
     console.log "\n🔧 Running table optimization..."
 
@@ -4062,7 +4154,8 @@ if (typeof module != 'undefined' and not module.parent) or (typeof process != 'u
     reports = []
 
     if options.showStats
-      reports.push(generateStatsReport(generator))
+      # Use the new unified stats display
+      generator.displayStats()
 
     if options.showStates
       reports.push(generateStatesReport(generator))
@@ -4265,19 +4358,7 @@ if (typeof module != 'undefined' and not module.parent) or (typeof process != 'u
           console.log "  #{name} (#{type})"
 
       when 'stats'
-        stats = generator.getStatistics()
-        console.log """
-
-          📊 Grammar Statistics:
-          =====================
-          Rules: #{stats.rules} total = #{stats.sourceRules} source + ~#{stats.expandedRules} + #{stats.errorRecoveryRules} error recovery + #{stats.augmentedRules} augmented start"
-          Terminals: #{stats.terminals}
-          Non-terminals: #{stats.nonterminals}
-          Symbols: #{stats.symbols}
-          States: #{stats.states}
-          Conflicts: #{stats.conflicts}
-          Inadequate States: #{stats.inadequateStates}
-        """
+        generator.displayStats()
 
       when 'optimize'
         console.log "\n🔧 Running optimization..."
