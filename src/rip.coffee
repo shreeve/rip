@@ -149,6 +149,85 @@ class Language
   # LANGUAGE ANALYSIS AND CONSTRUCTION
   # ============================================================================
 
+  # Comprehensive language input validation
+  validateLanguage: ->
+    @timing "🔍 Validate Language"
+
+    errors = []
+
+    # Validate basic structure
+    unless @language?
+      errors.push "Language object is required"
+    else unless typeof @language is 'object'
+      errors.push "Language must be an object, got #{typeof @language}"
+    else if Object.keys(@language).length == 0
+      errors.push "Language cannot be empty"
+
+    # Validate rules
+    rules = @language?.rules or []
+    unless Array.isArray(rules)
+      errors.push "Rules must be an array, got #{typeof rules}"
+    else if rules.length == 0
+      errors.push "Language must have at least one rule"
+    else
+      for rule, i in rules
+        unless rule?
+          errors.push "Rule #{i} is null or undefined"
+        else unless typeof rule is 'object'
+          errors.push "Rule #{i} must be an object, got #{typeof rule}"
+        else
+          # Validate LHS
+          unless rule.lhs?
+            errors.push "Rule #{i} missing left-hand side (lhs)"
+          else unless typeof rule.lhs is 'string'
+            errors.push "Rule #{i} lhs must be a string, got #{typeof rule.lhs}"
+          else unless @isValidSymbolName rule.lhs
+            errors.push "Rule #{i} has invalid lhs name '#{rule.lhs}'"
+
+          # Validate RHS
+          unless rule.rhs?
+            errors.push "Rule #{i} missing right-hand side (rhs)"
+          else unless Array.isArray(rule.rhs)
+            errors.push "Rule #{i} rhs must be an array, got #{typeof rule.rhs}"
+          else
+            for symbol, j in rule.rhs
+              unless typeof symbol is 'string'
+                errors.push "Rule #{i} rhs[#{j}] must be a string, got #{typeof symbol}"
+              else unless @isValidSymbolName symbol
+                errors.push "Rule #{i} rhs[#{j}] has invalid symbol name '#{symbol}'"
+
+    # Validate start symbol
+    if @language?.start?
+      unless typeof @language.start is 'string'
+        errors.push "Start symbol must be a string, got #{typeof @language.start}"
+      else unless @isValidSymbolName @language.start
+        errors.push "Invalid start symbol name '#{@language.start}'"
+
+    # Validate operators
+    operators = @language?.operators or []
+    unless Array.isArray(operators)
+      errors.push "Operators must be an array, got #{typeof operators}"
+    else
+      for group, i in operators
+        unless Array.isArray(group)
+          errors.push "Operator group #{i} must be an array, got #{typeof group}"
+        else if group.length < 2
+          errors.push "Operator group #{i} must have at least associativity and one operator"
+        else
+          [assoc, ...symbols] = group
+          unless assoc in ['left', 'right', 'nonassoc']
+            errors.push "Invalid associativity '#{assoc}' in operator group #{i}"
+          else
+            for symbol in symbols
+              unless @isValidSymbolName symbol
+                errors.push "Invalid operator symbol '#{symbol}' in group #{i}"
+
+    # Throw errors if any found
+    if errors.length > 0
+      throw new Error "Language validation failed:\n  #{errors.join('\n  ')}"
+
+    @timing "🔍 Validate Language"
+
   # Transform input → output
   analyze: ->
     unless @analyzed
@@ -229,16 +308,15 @@ class Language
     @symbols.set name, symbol
     symbol
 
-  # Check if a symbol name is valid
-  isValidSymbolName: (name) ->
-    return false unless name? and typeof name is 'string'
-    return false if name.length == 0
-    # Allow alphanumeric, underscore, hyphen, and some special characters for terminals
-    /^[a-zA-Z_][a-zA-Z0-9_?-]*$|^[+\-*/(){}[\];,.'":=<>!&|?~^%$#@\\]+$/.test(name)
-
   # ============================================================================
   # HELPER FUNCTIONS
   # ============================================================================
+
+  # Check if a symbol name is valid
+  isValidSymbolName: (name) ->
+    return false unless name? and typeof name is 'string' and name.length > 0
+    # Allow alphanumeric, underscore, hyphen, and some special characters for terminals
+    /^[a-zA-Z_][a-zA-Z0-9_?-]*$|^[+\-*/(){}[\];,.'":=<>!&|?~^%$#@\\]+$/.test(name)
 
   # Determine how much to debug or log
   parseDebug: (level) ->
