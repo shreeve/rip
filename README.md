@@ -92,6 +92,40 @@ parser = require './my-language-parser'
 ast = parser.parse(programSource)
 ```
 
+## The Value Chain
+
+Each step in the rip pipeline provides different value for different use cases:
+
+```coffee
+# 1. Define your language
+lang = new Language({
+  rules: [...],
+  operators: [...],
+  start: 'Root'
+})
+
+# 2. Analyze for diagnostics/stats
+lang.analyze()
+console.log "States: #{lang.states.length}"
+console.log "Conflicts: #{lang.conflicts.length}"
+console.log "Symbols: #{lang.symbols.size}"
+
+# 3. Compile for language pack
+lang.compile()  # Returns: {symbols, terminals, rules, states, actions}
+
+# 4. Generate for parser
+lang.generate()  # Returns: "function parser(input) { ... }"
+```
+
+### **What Each Step Provides**
+
+| Step | Returns | Purpose | Value |
+|------|---------|---------|-------|
+| **Define** | Language object | Grammar definition | Grammar validation |
+| **Analyze** | Statistics | Build LALR(1) state machine | Diagnostics, conflict info |
+| **Compile** | Language pack | Convert to runtime format | Optimized data for Universal Parser |
+| **Generate** | JavaScript code | Create standalone parser | Complete parser for distribution |
+
 Since **generation** happens at runtime, you can create parsers on-the-fly or build grammars programmatically. The generated parser is a standalone JavaScript module with no dependencies except a lexer (tokenizer) that you provide.
 
 ## Why rip?
