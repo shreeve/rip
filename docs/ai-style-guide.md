@@ -33,6 +33,28 @@ This style should be applied throughout the codebase unless a specific block is 
 - To maximize clarity and maintainability for both humans and AI tools.
 - To provide a clear, machine-readable style guide for future AI assistants or code formatters.
 
+## Code Style: Comment Spacing
+
+**Policy:**
+Inline comments should use only one space before the comment marker, unless alignment is needed for readability across multiple lines.
+
+**Example (Preferred Style):**
+
+```coffeescript
+# Single space for inline comments
+value = 42 # This is the answer
+
+# Multiple spaces only when aligning comments
+enabled:          opts.optimize         ? false  # Auto-detect
+auto:             opts.autoOptimize     ? true   # Use auto mode
+minStatesForAuto: opts.minStatesForAuto ? 20     # Threshold
+```
+
+**Guidelines:**
+- Use one space before `#` for inline comments
+- Use multiple spaces only when aligning comments across multiple lines for readability
+- Prefer single-space comments in most cases
+
 ---
 
 *This file is intended for AI and human developers to understand and enforce project-specific code style conventions. Update as new conventions are established.*
