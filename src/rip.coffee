@@ -234,22 +234,23 @@ class Language
       @timing "🔍 Analysis"
 
       # Phase 0: Language Preparation
-      @createSpecialSymbols() # Create fundamental LALR(1) symbols
+      @loadLanguage()         # @language → @rules, @start, @operators
+      @createSpecialSymbols() # Create $accept, $end, error symbols
+      @augmentStartRule()     # Add $accept → start $end
 
       # Phase 1: Symbol and Rule Analysis
-      @buildSymbols()        # @rules → @symbols, @tokens
-      @buildPrecedence()     # @operators → @precedence
-      @buildSymbolRules()    # @rules → @symbolRules
+      @buildSymbols()         # @rules → @symbols, @tokens
+      @buildPrecedence()      # @operators → @precedence
+      @buildSymbolRules()     # @rules → @symbolRules
 
       # Phase 2: LALR(1) State Machine Construction
-      @augmentStartRule()    # Add $accept → start $end
-      @buildStates()         # @rules → @states, @stateMap
-      @computeLookaheads()   # @states → @propagateLinks
+      @buildStates()          #  @rules → @states, @stateMap
+      @computeLookaheads()    #  @states → @propagateLinks
 
       # Phase 3: Parse Table and Optimization
-      @buildTable()          # @states → @table
-      @resolveConflicts()    # @states → @conflicts, @inadequateStates
-      @buildDefaultActions() # @states → @defaultActions
+      @buildTable()           # @states → @table
+      @resolveConflicts()     # @states → @conflicts, @inadequateStates
+      @buildDefaultActions()  # @states → @defaultActions
 
       @analyzed = true
       @timing "🔍 Analysis"
