@@ -1,5 +1,7 @@
 #!/usr/bin/env coffee
 
+# NOTE: This is the last version of the comprehensive engine.
+
 # ==============================================================================
 # rip: A modern, LALR(1) parser generator for the Rip ecosystem
 #
