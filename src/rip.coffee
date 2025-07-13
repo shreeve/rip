@@ -183,7 +183,7 @@ class Language
   createSpecialSymbols: ->
     @getSymbol '$accept'
     @getSymbol '$end' , true
-    @getSymbol 'error', true; @tokens.add('error')
+    @getSymbol 'error', true; @tokens.add('error') # 'error' is also a terminal
 
   # Extract symbols from rules and identify terminals
   buildSymbols: ->
