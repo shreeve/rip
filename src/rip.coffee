@@ -200,13 +200,6 @@ class Language
         symbol.isTerminal = true
         @tokens.add(name)
 
-  # Create rule lookup by symbol
-  buildSymbolRules: ->
-    for rule in @rules
-      lhs = rule.lhs
-      @symbolRules.set(lhs, []) unless @symbolRules.has(lhs)
-      @symbolRules.get(lhs).push(rule)
-
   # Process operator precedence and associativity
   buildPrecedence: ->
     level = 1
@@ -215,6 +208,13 @@ class Language
       for symbol in symbols
         @precedence[symbol] = {level, assoc}
       level++
+
+  # Create rule lookup by symbol
+  buildSymbolRules: ->
+    for rule in @rules
+      lhs = rule.lhs
+      @symbolRules.set(lhs, []) unless @symbolRules.has(lhs)
+      @symbolRules.get(lhs).push(rule)
 
   # Add augmented start rule: $accept → start $end
   augmentStartRule: ->
