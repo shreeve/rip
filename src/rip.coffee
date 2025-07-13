@@ -153,6 +153,10 @@ class Language
 
     @timing "🔤 Language constructor"
 
+  # ============================================================================
+  # LANGUAGE ANALYSIS AND CONSTRUCTION
+  # ============================================================================
+
   clear: ->
     if @stats.clearCount++
       @analyzed = false
@@ -175,16 +179,22 @@ class Language
       @timing "🔍 Analysis"
 
       @clear()
+
+      # Phase 1: Symbol and Rule Analysis
       @buildSymbols()        # @rules → @symbols, @tokens
       @buildSymbolRules()    # @rules → @symbolRules
       @buildPrecedence()     # @operators → @precedence
+
+      # Phase 2: LALR(1) State Machine Construction
       @buildStates()         # @rules → @states, @stateMap
       @computeLookaheads()   # @states → @propagateLinks
+
+      # Phase 3: Parse Table and Optimization
       @buildTable()          # @states → @table
       @resolveConflicts()    # @states → @conflicts, @inadequateStates
       @buildDefaultActions() # @states → @defaultActions
-      @analyzed = true
 
+      @analyzed = true
       @timing "🔍 Analysis"
 
   # Get or create a symbol
