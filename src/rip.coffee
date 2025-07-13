@@ -95,16 +95,18 @@ class State # Set of LR(0) items
 # ==============================================================================
 
 class Language
-  constructor: (language = {}, opts = {}) ->
+  constructor: (@language = {}, opts = {}) ->
     @timing "🔤 Language constructor"
 
-    # Input (user provides and we make a shallow copy)
-    @info      = {...(language.info      or {})}   # Language metadata
-    @rules     = [...(language.rules     or [])]   # Grammar rules
-    @operators = [...(language.operators or [])]   # Precedence/associativity
-    @start     =      language.start     or 'Root' # Start symbol
+    @validateLanguage()
 
-    # Output (computed during analysis)
+    # Input (foundational data)
+    @info             = {}        # Language metadata
+    @rules            = []        # Language rules
+    @operators        = []        # Precedence/associativity
+    @start            = null      # Start symbol
+
+    # Output (derived during analysis)
     @analyzed         = false     # Analysis done?
     @symbols          = new Map() # Symbol table
     @tokens           = new Set() # Terminal symbols
@@ -124,7 +126,6 @@ class Language
 
     # Statistics
     @stats =
-      clearCount:            0    # Number of times clear() was called
 
       # Input processing
       sourceRules:           0    # Direct from grammar file
@@ -157,35 +158,21 @@ class Language
   # LANGUAGE ANALYSIS AND CONSTRUCTION
   # ============================================================================
 
-  clear: ->
-    if @stats.clearCount++
-      @analyzed = false
-      @symbols.clear()
-      @tokens.clear()
-      @symbolRules.clear()
-      @precedence = {}
-      @states.length = 0
-      @stateMap.clear()
-      @propagateLinks.clear()
-      @inadequateStates.length = 0
-      @conflicts.length = 0
-      @table = null
-      @defaultActions = {}
-      @cache.clear()
-
   # Transform input → output
   analyze: ->
     unless @analyzed
       @timing "🔍 Analysis"
 
-      @clear()
+      # Phase 0: Language Preparation
+      @createSpecialSymbols() # Create fundamental LALR(1) symbols
 
       # Phase 1: Symbol and Rule Analysis
       @buildSymbols()        # @rules → @symbols, @tokens
-      @buildSymbolRules()    # @rules → @symbolRules
       @buildPrecedence()     # @operators → @precedence
+      @buildSymbolRules()    # @rules → @symbolRules
 
       # Phase 2: LALR(1) State Machine Construction
+      @augmentStartRule()    # Add $accept → start $end
       @buildStates()         # @rules → @states, @stateMap
       @computeLookaheads()   # @states → @propagateLinks
 
@@ -200,6 +187,12 @@ class Language
   # ============================================================================
   # PHASE 1: SYMBOL AND RULE ANALYSIS
   # ============================================================================
+
+  # Create fundamental LALR(1) symbols
+  createSpecialSymbols: ->
+    @getSymbol '$accept'
+    @getSymbol '$end' , true
+    @getSymbol 'error', true; @tokens.add('error')
 
   # Extract symbols from rules and identify terminals
   buildSymbols: ->
@@ -231,6 +224,11 @@ class Language
       for symbol in symbols
         @precedence[symbol] = {level, assoc}
       level++
+
+  # Add augmented start rule: $accept → start $end
+  augmentStartRule: ->
+    @rules.push(new Rule('$accept', [@start, '$end']))
+    @stats.augmentedRules = 1
 
   # Get or create a symbol
   getSymbol: (name, isTerminal) ->
