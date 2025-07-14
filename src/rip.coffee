@@ -800,7 +800,9 @@ class Language
           changed = true if nextItem.lookahead.size > oldSize
 
     if iterationCount >= maxIterations
+      # FIXME: This could indicate a bug in the grammar or state construction
       console.warn("Lookahead propagation exceeded maximum iterations (#{maxIterations})")
+      console.warn("Consider checking for left recursion or other grammar issues")
 
   # ============================================================================
   # PHASE 6: PARSE TABLE AND OPTIMIZATION
