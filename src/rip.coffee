@@ -280,7 +280,7 @@ class Language
     @info      = {...(@language.info      or {})}
     @rules     = [...(@language.rules     or [])]
     @operators = [...(@language.operators or [])]
-    @start     =      @language.start     or 'Root'
+    @start     =      @language.start
 
     # Assign unique rule ids
     @rules.forEach(rule, i) -> rule.id = i++
@@ -329,6 +329,15 @@ class Language
       unless lhsSymbols.has(name)
         symbol.isTerminal = true
         @tokens.add(name)
+
+    # Handle start symbol detection
+    if @start?
+      throw new Error("No start symbol '#{@start}'") unless @symbols.has @start
+    else
+      for [name, symbol] from @symbols when not symbol.isTerminal
+        @start = name
+        break
+      throw new Error("No start symbol found") unless @start
 
   # Process operator precedence and associativity
   buildPrecedence: ->
