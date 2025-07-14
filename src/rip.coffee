@@ -1023,11 +1023,12 @@ class Language
     for state in @states
       @stateMap.set(state.core(), state)
 
-    # Update all transitions to point to new state IDs
+    # Update all transitions to point to the correct states after minimization
     for state in @states
       for [symbol, nextState] from state.transitions
-        # Find the new state by core
-        newState = @stateMap.get(nextState.core()) or throw new Error("State minimization error: cannot find state with core '#{nextState.core()}'")
+        # Find the new state by core (cache core computation)
+        nextCore = nextState.core()
+        newState = @stateMap.get(nextCore) or throw new Error("State minimization error: cannot find state with core '#{nextCore}'")
         state.transitions.set(symbol, newState)
 
     if mergedCount > 0
