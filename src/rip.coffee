@@ -605,6 +605,158 @@ class Language
   # PHASE 5: LALR(1) STATE MACHINE CONSTRUCTION
   # ============================================================================
 
+  # Build LR(0) state machine
+  buildStates: ->
+
+    # Create initial state with augmented start rule
+    startState = new State
+    startState.addItem(new Item(@rules[@startRule], 0, new Set(['$end'])))
+    @closure(startState)
+    @addState(startState)
+
+    # Build all states
+    workList = [startState]
+    while workList.length > 0
+      state = workList.shift()
+
+      # Group items by next symbol
+      transitions = new Map()
+      for item in state.items when not item.isComplete()
+        nextSym = item.nextSymbol()
+        transitions.set(nextSym, []) unless transitions.has(nextSym)
+        transitions.get(nextSym).push(item)
+
+      # Create new states for each transition
+      for [symbol, items] from transitions
+        newState = new State
+        newState.addItem(item.advance()) for item in items
+        @closure(newState)
+
+        # Add or merge state
+        existingState = @getState(newState)
+        state.transitions.set(symbol, existingState)
+        workList.push(newState) if existingState is newState
+
+  # Compute closure of a state (LR(0) - no lookaheads yet)
+  closure: (state) ->
+    @stats.closureCalls++
+
+    # Check closure cache first
+    coreKey = @computeCore(state)
+    if @cache.has(coreKey)
+      @stats.cacheHits++
+      return
+
+    # Compute closure using standard algorithm
+    workList = [...state.items]
+    while workList.length > 0
+      item = workList.shift()
+
+      # Skip if item is complete
+      continue if item.isComplete()
+
+      # Get next symbol after dot
+      nextSym = item.nextSymbol()
+      nextSymbol = @getSymbol(nextSym)
+
+      # Skip if next symbol is terminal
+      continue if nextSymbol.isTerminal
+
+      # Find all rules for this nonterminal
+      rules = @symbolRules.get(nextSym) or []
+      for rule in rules
+        # Create new item: [A → • α, lookahead]
+        newItem = new Item(rule, 0, new Set())
+
+        # Add to state if not already present
+        if state.addItem(newItem)
+          workList.push(newItem)
+
+    # Cache the closure result
+    @cache.set(coreKey, true)
+
+  # Compute core hash for state deduplication
+  computeCore: (state) ->
+    state.core
+
+  # Get existing state or add new one (similar to getSymbol)
+  getState: (state) ->
+    coreKey = @computeCore(state)
+
+    if @stateMap.has(coreKey)
+      existingState = @stateMap.get(coreKey)
+      # Merge lookaheads from new state into existing state
+      for item in state.items
+        existingItem = existingState.getCoreItem(item.rule.id, item.dot)
+        if existingItem
+          existingItem.lookahead.add(la) for la from item.lookahead
+      existingState
+    else
+      @addState(state)
+      state
+
+  # Add state to state list
+  addState: (state) ->
+    state.id = @states.length
+    @states.push(state)
+    @stateMap.set(@computeCore(state), state)
+    @stats.stateCreations++
+    state
+
+  # Compute LALR(1) lookahead sets
+  computeLookaheads: ->
+    @timing "📋 Compute Lookaheads"
+
+    # First pass: compute spontaneous lookaheads
+    for state in @states
+      for item in state.items
+        continue if item.isComplete()
+
+        # Cache suffix computation to avoid computing twice
+        suffix = item.rule.rhs.slice(item.dot + 1)
+        lookahead = @firstOfString(suffix)
+
+        # Check if suffix is nullable (includes original lookahead)
+        if suffix.some((sym) => @getSymbol(sym).nullable)
+          lookahead.add(la) for la from item.lookahead
+
+        # Add spontaneous lookaheads
+        item.lookahead.add(la) for la from lookahead
+
+    # Second pass: propagate lookaheads
+    @propagateLookaheads()
+
+    @timing "📋 Compute Lookaheads"
+
+  # Propagate lookaheads until convergence
+  propagateLookaheads: ->
+    changed = true
+    maxIterations = 1000
+    iterationCount = 0
+
+    while changed and iterationCount++ < maxIterations
+      changed = false
+
+      for state in @states
+        for item in state.items
+          continue if item.isComplete()
+
+          nextSym = item.nextSymbol()
+          nextState = state.transitions.get(nextSym)
+          continue unless nextState
+
+          # Find corresponding item in next state
+          nextItem = nextState.getCoreItem(item.rule.id, item.dot + 1)
+          continue unless nextItem
+
+          # Propagate lookaheads
+          oldSize = nextItem.lookahead.size
+          nextItem.lookahead.add(la) for la from item.lookahead
+          changed = true if nextItem.lookahead.size > oldSize
+
+    if iterationCount >= maxIterations
+      console.warn("Lookahead propagation exceeded maximum iterations (#{maxIterations})")
+
   # ============================================================================
   # PHASE 6: PARSE TABLE AND OPTIMIZATION
   # ============================================================================
