@@ -1160,7 +1160,9 @@ class Language
 # ==============================================================================
 
 # Only run CLI if this script is executed directly
-if require.main is module
+if process.argv[1]?.includes('rip.coffee') or process.argv[1]?.includes('rip.js')
+
+  # Parse command line arguments
   args = process.argv.slice(2)
   options = {}
   outputFile = null
