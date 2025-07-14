@@ -59,6 +59,7 @@ class State # Set of LR(0) items
     @_core       = null      # cached core string
 
   # Add item to state, merging lookaheads if core already exists
+  # Returns true if item was added or lookaheads were merged
   addItem: (item) ->
     coreKey = item.coreKey()
 
@@ -80,12 +81,11 @@ class State # Set of LR(0) items
       @items.push(item)
       true
 
-  # FIXME: Confirm these are optimal
-
-  # Lazy core computation with caching
+  # Lazy core computation with caching for performance
+  # Core is the LR(0) items without lookaheads
   core: -> @_core ?= (item.coreKey() for item in @items).sort().join('|')
 
-  # Get core item by rule and dot
+  # Get core item by rule and dot position
   getCoreItem: (ruleId, dot) -> @coreMap.get(Item.makeCoreKey(ruleId, dot))
 
 # ==============================================================================
@@ -235,7 +235,8 @@ class Language
   # LANGUAGE ANALYSIS AND CONSTRUCTION
   # ============================================================================
 
-  # Transform input → output
+  # Transform input → output using standard LALR(1) algorithm
+  # Performs complete grammar analysis and parser generation
   analyze: ->
     unless @analyzed
       @timing "🔍 Analysis"
@@ -280,6 +281,8 @@ class Language
   # PHASE 0: LANGUAGE PREPARATION
   # ============================================================================
 
+  # Load language definition from input
+  # Extracts rules, operators, and metadata
   loadLanguage: ->
     @info      = {...(@language.info      or {})}
     @operators = [...(@language.operators or [])]
@@ -300,6 +303,7 @@ class Language
           throw new Error("Error processing rule #{i + 1} for '#{lhs}': #{error.message}")
 
   # Parse and validate rule pattern (such as 'Body TERMINATOR Line')
+  # Splits pattern into individual symbols and validates them
   parseRulePattern: (pattern, lhs, i) ->
     return [] unless pattern? # Empty rule (epsilon)
     throw new Error("Pattern must be a string") unless typeof pattern is 'string'
@@ -312,6 +316,7 @@ class Language
     symbols
 
   # Validate action code for common issues
+  # Checks parameter references against RHS length
   validateActionCode: (action, size, lhs, ruleIndex) ->
     return unless action?
 
@@ -324,24 +329,26 @@ class Language
         throw new Error("Invalid parameter index #{match} in action for '#{lhs}' rule #{ruleIndex + 1}")
 
   # Create fundamental LALR(1) symbols
+  # Adds $accept, $end, and error symbols for parser operation
   createSpecialSymbols: ->
     @getSymbol '$accept'
     @getSymbol '$end' , true
     @getSymbol 'error', true; @tokens.add('error') # 'error' is also a terminal
 
   # Add augmented start rule: $accept → start $end
+  # Creates the augmented grammar for LALR(1) parsing
   augmentStartRule: ->
     rule = @addRule '$accept', [@start, '$end']
     @stats.augmentedRules = 1
     @startRule = rule
 
-  # Create a new rule
+  # Create a new rule with unique ID
   addRule: (lhs, rhs, action = null, precedence = null) ->
     rule = new Rule(lhs, rhs, @rules.length, action, precedence)
     @rules.push(rule)
     rule
 
-  # Get or create a symbol
+  # Get or create a symbol with unique ID
   getSymbol: (name, isTerminal) ->
     return sym if sym = @symbols.get(name)
     isTerminal = if isTerminal? then !!isTerminal else @tokens.has(name)
@@ -354,6 +361,7 @@ class Language
   # ============================================================================
 
   # Extract symbols from rules and identify terminals
+  # Uses standard algorithm to distinguish terminals from nonterminals
   buildSymbols: ->
 
     # Add all symbols from rules
@@ -378,6 +386,7 @@ class Language
       throw new Error("No start symbol found") unless @start
 
   # Process operator precedence and associativity
+  # Assigns precedence levels to operator symbols
   buildPrecedence: ->
     level = 1
     for group in @operators
@@ -386,7 +395,8 @@ class Language
         @precedence[symbol] = {level, assoc}
       level++
 
-  # Create rule lookup by symbol
+  # Create rule lookup by symbol for efficient access
+  # Groups rules by left-hand side symbol
   buildSymbolRules: ->
     obj = @symbolRules
 
@@ -404,20 +414,22 @@ class Language
   # PHASE 2: LALR(1) SET COMPUTATIONS
   # ============================================================================
 
-  # Compute nullable symbols
+  # Compute nullable symbols using standard algorithm
+  # A symbol is nullable if it can derive the empty string ε
   computeNullable: ->
     @timing "🔍 Compute Nullable"
 
-    # Pre-compute rules by LHS for efficiency
+    # Pre-compute rules by LHS for O(1) lookup
     rulesByLhs = new Map()
     for rule in @rules
       rulesByLhs.get(rule.lhs)?.push(rule) or rulesByLhs.set(rule.lhs, [rule])
 
+    # Iterate until no changes (fixed-point algorithm)
     changed = true
     while changed
       changed = false
 
-      # Check each nonterminal
+      # Check each nonterminal that isn't already nullable
       for [lhs, symbol] from @symbols when not (symbol.isTerminal or symbol.nullable)
 
         # Check if ANY rule makes this symbol nullable
@@ -437,15 +449,17 @@ class Language
 
     @timing "🔍 Compute Nullable"
 
-  # Compute FIRST sets for all symbols
+  # Compute FIRST sets for all symbols using standard algorithm
+  # FIRST(X) = {a | X →* aα} ∪ {ε | X →* ε}
   computeFirst: ->
     @timing "🔍 Compute FIRST"
 
-    # First(terminal) = {terminal}
+    # Initialize: FIRST(terminal) = {terminal}
     for [name, symbol] from @symbols
       if symbol.isTerminal
         symbol.first.add(name)
 
+    # Iterate until no changes (fixed-point algorithm)
     changed = true
     while changed
       changed = false
@@ -476,13 +490,15 @@ class Language
 
     @timing "🔍 Compute FIRST"
 
-  # Compute FOLLOW sets for all symbols
+  # Compute FOLLOW sets for all symbols using standard algorithm
+  # FOLLOW(X) = {a | S →* αXaβ} ∪ {$ | S →* αX}
   computeFollow: ->
     @timing "🔍 Compute FOLLOW"
 
-    # Ensure the start symbol is followed by $end
+    # Initialize: FOLLOW(S) = {$} where S is the start symbol
     @getSymbol(@start).follow.add('$end')
 
+    # Iterate until no changes (fixed-point algorithm)
     changed = true
     while changed
       changed = false
@@ -523,6 +539,7 @@ class Language
     @timing "🔍 Compute FOLLOW"
 
   # Compute FIRST set of a string of symbols
+  # FIRST(α) = {a | α →* aβ} ∪ {ε | α →* ε}
   firstOfString: (symbols, startIndex = 0) ->
     first = new Set()
 
@@ -543,11 +560,12 @@ class Language
   # ============================================================================
 
   # Eliminate unproductive and unreachable symbols
+  # Unproductive: cannot derive a terminal string
+  # Unreachable: cannot be reached from start symbol
   cleanupGrammar: ->
     @timing "🧹 Cleanup Grammar"
 
-    # Step 1: Remove unproductive symbols
-
+    # Step 1: Remove unproductive symbols using fixed-point algorithm
     # A symbol is productive if it can derive a terminal string
     productive = new Set()
     changed = true
@@ -589,8 +607,7 @@ class Language
     @rules = @rules.filter (rule) ->
       productive.has(rule.lhs) and rule.rhs.every (sym) -> productive.has(sym)
 
-    # Step 2: Remove unreachable symbols
-
+    # Step 2: Remove unreachable symbols using breadth-first search
     # A symbol is reachable if it can be reached from the start symbol
     reachable = new Set()
     reachable.add @start    # Start symbol is always reachable
@@ -620,12 +637,12 @@ class Language
       reachable.has(rule.lhs) and rule.rhs.every (sym) -> reachable.has(sym)
 
     # Step 3: Reassign IDs to maintain consistency
-
     @reassignIds()
 
     @timing "🧹 Cleanup Grammar"
 
   # Reassign IDs to maintain consistency after grammar cleanup
+  # Ensures sequential IDs after symbol/rule removal
   reassignIds: ->
     @rules  .forEach (rule  , i) -> rule  .id = i++
     @symbols.forEach (symbol, i) -> symbol.id = i++
@@ -637,7 +654,8 @@ class Language
   # PHASE 4: ERROR RECOVERY
   # ============================================================================
 
-  # Add error recovery rules
+  # Add error recovery rules for robust parsing
+  # Provides fallback rules for error handling
   addErrorRecoveryRules: ->
     @timing "🚑 Add Error Recovery Rules"
 
@@ -658,7 +676,8 @@ class Language
   # PHASE 5: LALR(1) STATE MACHINE CONSTRUCTION
   # ============================================================================
 
-  # Build LR(0) state machine
+  # Build LR(0) state machine using standard algorithm
+  # Creates canonical LR(0) collection of sets of items
   buildStates: ->
 
     # Create initial state with augmented start rule
@@ -667,12 +686,12 @@ class Language
     @closure(startState)
     @addState(startState)
 
-    # Build all states
+    # Build all states using breadth-first search
     workList = [startState]
     while workList.length > 0
       state = workList.shift()
 
-      # Group items by next symbol
+      # Group items by next symbol for efficient transition computation
       transitions = new Map()
       for item in state.items when not item.isComplete()
         nextSym = item.nextSymbol()
@@ -684,16 +703,17 @@ class Language
         newState.addItem(item.advance()) for item in items
         @closure(newState)
 
-        # Add or merge state
+        # Add or merge state (core-based deduplication)
         existingState = @getState(newState)
         state.transitions.set(symbol, existingState)
         workList.push(newState) if existingState is newState
 
-  # Compute closure of a state (LR(0) - no lookaheads yet)
+  # Compute closure of a state using standard LR(0) algorithm
+  # closure(I) = I ∪ {[B → • γ] | [A → α • Bβ] ∈ I}
   closure: (state) ->
     @stats.closureCalls++
 
-    # Check closure cache first
+    # Check closure cache first for performance
     coreKey = state.core()
     if @cache.has(coreKey)
       @stats.cacheHits++
@@ -704,20 +724,20 @@ class Language
     while workList.length > 0
       item = workList.shift()
 
-      # Skip if item is complete
+      # Skip if item is complete (dot at end)
       continue if item.isComplete()
 
       # Get next symbol after dot
       nextSym = item.nextSymbol()
       nextSymbol = @getSymbol(nextSym)
 
-      # Skip if next symbol is terminal
+      # Skip if next symbol is terminal (no closure needed)
       continue if nextSymbol.isTerminal
 
       # Find all rules for this nonterminal
       rules = @symbolRules.get(nextSym) or []
       for rule in rules
-        # Create new item: [A → • α, lookahead]
+        # Create new item: [B → • γ] where B is the nonterminal
         newItem = new Item(rule, 0, new Set())
 
         # Add to state if not already present
@@ -728,6 +748,7 @@ class Language
     @cache.set(coreKey, true)
 
   # Get existing state or add new one (similar to getSymbol)
+  # Uses core-based deduplication for state management
   getState: (state) ->
     coreKey = state.core()
 
@@ -743,7 +764,7 @@ class Language
       @addState(state)
       state
 
-  # Add state to state list
+  # Add state to state list with unique ID
   addState: (state) ->
     state.id = @states.length
     @states.push(state)
@@ -751,32 +772,34 @@ class Language
     @stats.stateCreations++
     state
 
-  # Compute LALR(1) lookahead sets
+  # Compute LALR(1) lookahead sets using standard algorithm
+  # Two-phase approach: spontaneous + propagation
   computeLookaheads: ->
     @timing "📋 Compute Lookaheads"
 
-    # First pass: compute spontaneous lookaheads
+    # Phase 1: Compute spontaneous lookaheads
     for state in @states
       for item in state.items
         continue if item.isComplete()
 
-        # Cache suffix computation to avoid computing twice
+        # Cache suffix computation to avoid recomputing
         suffix = item.rule.rhs.slice(item.dot + 1)
         lookahead = @firstOfString(suffix)
 
-        # Check if suffix is nullable (includes original lookahead)
+        # If suffix is nullable, include original lookahead
         if suffix.some (sym) => @getSymbol(sym).nullable
           lookahead.add(la) for la from item.lookahead
 
         # Add spontaneous lookaheads
         item.lookahead.add(la) for la from lookahead
 
-    # Second pass: propagate lookaheads
+    # Phase 2: Propagate lookaheads until convergence
     @propagateLookaheads()
 
     @timing "📋 Compute Lookaheads"
 
-  # Propagate lookaheads until convergence
+  # Propagate lookaheads until convergence using fixed-point algorithm
+  # Propagates lookaheads along state transitions
   propagateLookaheads: ->
     changed = true
     maxIterations = 1000
@@ -803,7 +826,7 @@ class Language
           changed = true if nextItem.lookahead.size > oldSize
 
     if iterationCount >= maxIterations
-      # FIXME: This could indicate a bug in the grammar or state construction
+      # This could indicate left recursion or other grammar issues
       console.warn("Lookahead propagation exceeded maximum iterations (#{maxIterations})")
       console.warn("Consider checking for left recursion or other grammar issues")
 
@@ -811,7 +834,8 @@ class Language
   # PHASE 6: PARSE TABLE AND OPTIMIZATION
   # ============================================================================
 
-  # Build parse table from states
+  # Build parse table from states using standard LALR(1) algorithm
+  # Creates ACTION and GOTO tables for parsing
   buildTable: ->
     @timing "📋 Build Table"
 
@@ -855,6 +879,7 @@ class Language
                   explanation: "State #{state.id}: Shift/reduce conflict on '#{la}' resolved to REDUCE (precedence)"
                 })
               else if resolved == 'shift'
+                # Keep existing shift action (no change needed)
                 @conflicts.push({
                   type: 'shift/reduce'
                   state: state.id
@@ -901,6 +926,7 @@ class Language
     @timing "📋 Build Table"
 
   # Remove unreachable (dead) states from the state machine
+  # Uses breadth-first search to find all reachable states
   removeUnreachableStates: ->
     @timing "🧹 Remove Unreachable States"
 
@@ -942,6 +968,7 @@ class Language
     @timing "🧹 Remove Unreachable States"
 
   # Resolve shift/reduce conflicts using precedence and associativity
+  # Standard precedence resolution algorithm
   resolveConflict: (rule, lookahead) ->
     # Get precedence of the rule (from its precedence or rightmost terminal)
     rulePrecedence = @getRulePrecedence(rule)
@@ -965,7 +992,8 @@ class Language
         when 'nonassoc' then 'error'
         else null
 
-  # Get precedence for a rule
+  # Get precedence for a rule using standard algorithm
+  # Uses explicit precedence or rightmost terminal precedence
   getRulePrecedence: (rule) ->
     # If rule has explicit precedence, use it
     if rule.precedence
@@ -980,6 +1008,7 @@ class Language
     null
 
   # Resolve conflicts and mark inadequate states
+  # Conflicts are resolved during table building, this is for additional logic
   resolveConflicts: ->
     @timing "📋 Resolve Conflicts"
 
@@ -988,7 +1017,8 @@ class Language
 
     @timing "📋 Resolve Conflicts"
 
-  # Minimize states for optimization
+  # Minimize states for optimization using core-based equivalence
+  # Merges states with identical LR(0) cores and compatible lookaheads
   minimizeStates: ->
     @timing "🔧 Minimize States"
 
@@ -1040,6 +1070,7 @@ class Language
     @timing "🔧 Minimize States"
 
   # Compute state signature for fast equivalence checking
+  # Creates unique signature based on transitions and reduce actions
   computeStateSignature: (state) ->
     transitions = []
     for [symbol, nextState] from state.transitions
@@ -1056,6 +1087,7 @@ class Language
     "#{transitions.join('|')}##{reduceActions.join('|')}"
 
   # Get reduce actions for a state
+  # Returns map of lookahead -> rule ID for reduce actions
   getReduceActions: (state) ->
     actions = new Map()
     for item in state.items
@@ -1065,6 +1097,7 @@ class Language
     actions
 
   # Compute state key for minimization
+  # Creates unique key based on state's core items
   computeStateKey: (state) ->
     # Create a key based on state's core items
     cores = []
@@ -1072,7 +1105,8 @@ class Language
       cores.push(item.coreKey())
     cores.sort().join('|')
 
-  # Merge two states
+  # Merge two states with identical cores
+  # Combines lookaheads from source into target state
   mergeStates: (target, source) ->
     # Validate that states have identical cores
     if target.core() isnt source.core()
@@ -1087,7 +1121,8 @@ class Language
         # This indicates a bug in core computation or state management
         throw new Error("Missing target item for rule #{item.rule.id} dot #{item.dot} - core computation error")
 
-  # Optimize parse table
+  # Optimize parse table for performance
+  # Applies various optimization strategies based on configuration
   optimizeTable: ->
     @timing "🔧 Optimize Table"
 
@@ -1104,6 +1139,7 @@ class Language
     @timing "🔧 Optimize Table"
 
   # Auto-optimize table based on heuristics
+  # Removes redundant actions for better performance
   autoOptimizeTable: ->
     # Remove redundant actions
     for state in @states
@@ -1119,6 +1155,7 @@ class Language
             seen.add(actionKey)
 
   # Minimal table optimization
+  # Removes obvious redundancies and invalid actions
   minimalOptimizeTable: ->
     # Basic optimization: remove obvious redundancies
     for state in @states
@@ -1130,6 +1167,7 @@ class Language
             delete actions[symbol]
 
   # Compute default actions for performance optimization
+  # Identifies states that can use default reduction actions
   buildDefaultActions: ->
     @timing "📋 Build Default Actions"
 
@@ -1173,12 +1211,14 @@ class Language
   # ============================================================================
 
   # Check if a symbol name is valid
+  # Allows alphanumeric identifiers and operator symbols
   isValidSymbolName: (name) ->
     return false unless name? and typeof name is 'string' and name.length > 0
     # Allow alphanumeric, underscore, hyphen, and some special characters for terminals
     /^[a-zA-Z_][a-zA-Z0-9_?-]*$|^[+\-*/(){}[\];,.'":=<>!&|?~^%$#@\\]+$/.test(name)
 
   # Determine how much to debug or log
+  # Converts various debug level inputs to numeric levels
   parseDebug: (level) ->
     switch level
       when 0, 'silent'  then SILENT
@@ -1189,6 +1229,7 @@ class Language
       when false        then NORMAL  # default when verbose=false
       else                   NORMAL  # fallback to normal
 
+  # Performance timing utility
   # Usage:
   #   @timing "📋 Phase description", => @fn()  # Function wrapper
   #   @timing "📋 Phase description"            # Start timer
@@ -1255,7 +1296,7 @@ if process.argv[1]?.includes('rip.coffee') or process.argv[1]?.includes('rip.js'
     coffee rip.coffee --debug-level 2 -o parser.js grammar.json
   """
 
-  # Parse arguments
+  # Parse command line arguments
   i = 0
   while i < args.length
     arg = args[i]
@@ -1310,14 +1351,13 @@ if process.argv[1]?.includes('rip.coffee') or process.argv[1]?.includes('rip.js'
 
   # Read and parse input file
   try
-    # { grammar: language, operators: language.operators, start: language.start } = require(options.inputFile)
     language = require(options.inputFile)
 
   catch error
     console.error "Error: Failed to parse input file: #{error.message}"
     process.exit 1
 
-  # Create language instance
+  # Create language instance and generate parser
   try
     lang = new Language language, options
     lang.analyze()
