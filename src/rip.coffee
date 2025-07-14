@@ -1154,3 +1154,126 @@ class Language
           # Start timer
           @timers.set(description, Date.now())
       # Return nothing for manual timing mode
+
+# ==============================================================================
+# CLI SUPPORT
+# ==============================================================================
+
+# Only run CLI if this script is executed directly
+if require.main is module
+  args = process.argv.slice(2)
+  options = {}
+  outputFile = null
+
+  # Help text
+  helpText = """
+  rip: The multilanguage universal runtime powering the Rip ecosystem.
+
+  Usage: coffee rip.coffee [options] <language-file>
+
+  Options:
+    -h, --help              Show this help message
+    -v, --version           Show version information
+    -V, --verbose           Enable verbose output (same as --debug-level 2)
+    -d, --debug             Enable debug mode (same as --debug-level 3)
+    -q, --quiet             Suppress all output except errors (same as --debug-level 0)
+    --debug-level LEVEL     Set debug level: 0=silent, 1=normal, 2=verbose, 3=debug
+    -o, --output FILE       Output file (default: stdout)
+
+  Examples:
+    coffee rip.coffee grammar.json
+    coffee rip.coffee -V grammar.json
+    coffee rip.coffee --debug-level 2 -o parser.js grammar.json
+  """
+
+  # Parse arguments
+  i = 0
+  while i < args.length
+    arg = args[i]
+
+    switch arg
+      when '-h', '--help'
+        console.log helpText
+        process.exit 0
+      when '-v', '--version'
+        console.log "rip version 0.5.0"
+        process.exit 0
+      when '-V', '--verbose'
+        options.debug = VERBOSE
+      when '-d', '--debug'
+        options.debug = DEBUG
+      when '-q', '--quiet'
+        options.debug = SILENT
+      when '--debug-level'
+        if i + 1 >= args.length
+          console.error "Error: --debug-level requires a value"
+          process.exit 1
+        level = parseInt(args[i + 1])
+        if isNaN(level) or level < 0 or level > 3
+          console.error "Error: debug level must be 0, 1, 2, or 3"
+          process.exit 1
+        options.debug = level
+        i++ # Skip the next argument since we consumed it
+      when '-o', '--output'
+        if i + 1 >= args.length
+          console.error "Error: --output requires a filename"
+          process.exit 1
+        outputFile = args[i + 1]
+        i++ # Skip the next argument since we consumed it
+      else
+        # Assume this is the input file
+        if options.inputFile?
+          console.error "Error: Multiple input files specified"
+          process.exit 1
+        options.inputFile = arg
+    i++
+
+  # Validate input file
+  unless options.inputFile?
+    console.error "Error: No input file specified"
+    console.log helpText
+    process.exit 1
+
+  # Check if input file exists
+  fs = require 'fs'
+  unless fs.existsSync options.inputFile
+    console.error "Error: Input file '#{options.inputFile}' not found"
+    process.exit 11
+
+  # Read and parse input file
+  try
+    { grammar: language, operators: language.operators, start: language.start } = require(options.inputFile)
+
+  catch error
+    console.error "Error: Failed to parse input file: #{error.message}"
+    process.exit 1
+
+  # Create language instance
+  try
+    lang = new Language language, options
+    lang.analyze()
+
+    # Generate output
+    output = {
+      symbols: Array.from(lang.symbols.entries())
+      rules: lang.rules
+      states: lang.states.length
+      conflicts: lang.conflicts.length
+      table: lang.table
+      defaultActions: lang.defaultActions
+    }
+
+    # Output to file or stdout
+    if outputFile?
+      try
+        fs.writeFileSync outputFile, JSON.stringify(output, null, 2)
+        console.log "Output written to #{outputFile}" unless options.debug is SILENT
+      catch error
+        console.error "Error: Failed to write output file: #{error.message}"
+        process.exit 1
+    else
+      console.log JSON.stringify(output, null, 2)
+
+  catch error
+    console.error "Error: #{error.message}"
+    process.exit 1
