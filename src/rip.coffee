@@ -438,9 +438,11 @@ class Language
   # PHASE 3: GRAMMAR CLEANUP
   # ============================================================================
 
-  # Eliminate unproductive symbols (symbols that cannot derive any terminal string)
+  # Eliminate unproductive and unreachable symbols
   cleanupGrammar: ->
     @timing "🧹 Cleanup Grammar"
+
+    # Step 1: Remove unproductive symbols
 
     # A symbol is productive if it can derive a terminal string
     productive = new Set()
@@ -482,6 +484,40 @@ class Language
     # Remove rules involving unproductive symbols
     @rules = @rules.filter (rule) ->
       productive.has(rule.lhs) and rule.rhs.every (sym) -> productive.has(sym)
+
+    # Step 2: Remove unreachable symbols
+
+    # A symbol is reachable if it can be reached from the start symbol
+    reachable = new Set()
+    reachable.add @start    # Start symbol is always reachable
+    reachable.add '$accept' # Special symbols are reachable
+    reachable.add '$end'
+    reachable.add 'error'
+
+    changed = true
+    while changed
+      changed = false
+
+      for rule in @rules
+        # If LHS is reachable, all RHS symbols become reachable
+        if reachable.has(rule.lhs)
+          for symbol in rule.rhs
+            unless reachable.has(symbol)
+              reachable.add(symbol)
+              changed = true
+
+    # Remove unreachable symbols from symbols map
+    for [name, symbol] from @symbols
+      unless reachable.has(name)
+        @symbols.delete(name)
+
+    # Remove rules involving unreachable symbols
+    @rules = @rules.filter (rule) ->
+      reachable.has(rule.lhs) and rule.rhs.every (sym) -> reachable.has(sym)
+
+    # Step 3: Reassign IDs to maintain consistency
+
+    @reassignIds()
 
     @timing "🧹 Cleanup Grammar"
 
