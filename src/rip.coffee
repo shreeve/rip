@@ -492,7 +492,7 @@ class Language
             changed = true if currentSymbol.follow.size > oldSize
 
             # If β is nullable, also add FOLLOW(A) to FOLLOW(B)
-            if beta.every((sym) => @getSymbol(sym).nullable)
+            if beta.every (sym) => @getSymbol(sym).nullable
               oldSize = currentSymbol.follow.size
               currentSymbol.follow.add(item) for item from lhsSymbol.follow
               changed = true if currentSymbol.follow.size > oldSize
