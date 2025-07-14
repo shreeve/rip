@@ -964,7 +964,7 @@ class Language
     # Rebuild state map
     @stateMap.clear()
     for state in @states
-      @stateMap.set(@computeCore(state), state)
+      @stateMap.set(state.core(), state)
 
     # Update all transitions to point to new state IDs
     for state in @states
