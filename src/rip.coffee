@@ -233,36 +233,37 @@ class Language
       @timing "🔍 Analysis"
 
       # Phase 0: Language Preparation
-      @loadLanguage()         # @language → @rules, @start, @operators
-      @createSpecialSymbols() # Create $accept, $end, error symbols
-      @augmentStartRule()     # Add $accept → start $end
+      @loadLanguage()            # @language → @rules, @start, @operators
+      @createSpecialSymbols()    # Create $accept, $end, error symbols
+      @augmentStartRule()        # Add $accept → start $end
 
       # Phase 1: Symbol and Rule Analysis
-      @buildSymbols()         # @rules → @symbols, @tokens
-      @buildPrecedence()      # @operators → @precedence
-      @buildSymbolRules()     # @rules → @symbolRules
+      @buildSymbols()            # @rules → @symbols, @tokens
+      @buildPrecedence()         # @operators → @precedence
+      @buildSymbolRules()        # @rules → @symbolRules
 
       # Phase 2: LALR(1) Set Computations
-      @computeNullable()      # @symbols → @nullable
-      @computeFirst()         # @symbols → @first
-      @computeFollow()        # @symbols → @follow
+      @computeNullable()         # @symbols → @nullable
+      @computeFirst()            # @symbols → @first
+      @computeFollow()           # @symbols → @follow
 
       # Phase 3: Grammar Cleanup
-      @cleanupGrammar()       # Eliminate unproductive/unreachable symbols
+      @cleanupGrammar()          # Eliminate unproductive/unreachable symbols
 
       # Phase 4: Error Recovery
-      @addErrorRecoveryRules() # Add error recovery rules
+      @addErrorRecoveryRules()   # Add error recovery rules
 
       # Phase 5: LALR(1) State Machine Construction
-      @buildStates()          # @rules → @states, @stateMap
-      @computeLookaheads()    # @states → @propagateLinks
+      @buildStates()             # @rules → @states, @stateMap
+      @computeLookaheads()       # @states → @propagateLinks
 
       # Phase 6: Parse Table and Optimization
-      @buildTable()           # @states → @table
-      @resolveConflicts()     # @states → @conflicts, @inadequateStates
-      @minimizeStates()       # State minimization
-      @optimizeTable()        # Smart table optimization
-      @buildDefaultActions()  # @states → @defaultActions
+      @buildTable()              # @states → @table
+      @removeUnreachableStates() # Remove dead states
+      @resolveConflicts()        # @states → @conflicts, @inadequateStates
+      @minimizeStates()          # State minimization
+      @optimizeTable()           # Smart table optimization
+      @buildDefaultActions()     # @states → @defaultActions
 
       @analyzed = true
       @timing "🔍 Analysis"
