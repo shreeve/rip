@@ -623,8 +623,7 @@ class Language
       transitions = new Map()
       for item in state.items when not item.isComplete()
         nextSym = item.nextSymbol()
-        transitions.set(nextSym, []) unless transitions.has(nextSym)
-        transitions.get(nextSym).push(item)
+        transitions.get(nextSym)?.push(item) or transitions.set(nextSym, [item])
 
       # Create new states for each transition
       for [symbol, items] from transitions
