@@ -1066,11 +1066,18 @@ class Language
 
   # Merge two states
   mergeStates: (target, source) ->
+    # Validate that states have identical cores
+    if target.core() isnt source.core()
+      throw new Error("Cannot merge states with different cores")
+
     # Merge lookaheads from source into target
     for item in source.items
       targetItem = target.getCoreItem(item.rule.id, item.dot)
       if targetItem
         targetItem.lookahead.add(la) for la from item.lookahead
+      else
+        # This indicates a bug in core computation or state management
+        throw new Error("Missing target item for rule #{item.rule.id} dot #{item.dot} - core computation error")
 
   # Optimize parse table
   optimizeTable: ->
