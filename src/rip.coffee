@@ -305,13 +305,13 @@ class Language
   # Parse and validate rule pattern (such as 'Body TERMINATOR Line')
   # Splits pattern into individual symbols and validates them
   parseRulePattern: (pattern, lhs, i) ->
-    return [] unless pattern # Empty rule (epsilon)
     throw new Error("Pattern must be a string") unless typeof pattern is 'string'
 
     # Make sure each pattern is a valid symbol name
-    symbols = pattern.trim().split(/\s+/)
-    for symbol in symbols when symbol.length > 0
-      throw new Error("Invalid symbol '#{symbol}'") unless @isValidSymbolName symbol
+    symbols = pattern.trim().split(/\s+/).filter((s) -> s.length > 0)
+    for symbol in symbols
+      unless @isValidSymbolName symbol
+        throw new Error("Invalid symbol '#{symbol}'")
 
     symbols
 
