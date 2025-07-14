@@ -641,7 +641,7 @@ class Language
     @stats.closureCalls++
 
     # Check closure cache first
-    coreKey = @computeCore(state)
+    coreKey = state.core()
     if @cache.has(coreKey)
       @stats.cacheHits++
       return
