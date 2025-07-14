@@ -39,11 +39,18 @@ class Item # Rule with a dot position and lookahead: [A → α • β, a]
     @dot       = dot       # dot position (• marker)
     @lookahead = lookahead # LALR(1) lookahead set
 
+  core:    -> new Item(@rule, @dot, new Set()) # LR(0) core (item without lookahead)
+  coreKey: -> @_coreKey ?= Item.makeCoreKey(@rule.id, @dot)  # core key, supports deduplication
+
   isComplete: -> @dot >= @rule.rhs.length                       # reduction check (is dot at end?)
-  nextSymbol: -> @rule.rhs[@dot]                                # next symbol after dot
-  advance:    -> new Item(@rule, @dot + 1, new Set(@lookahead)) # new item with dot advanced
-  core:       -> new Item(@rule, @dot    , new Set()          ) # LR(0) core (item without lookahead)
-  coreKey:    -> @_coreKey ?= Item.makeCoreKey(@rule.id, @dot)  # core key, supports deduplication
+
+  advance: ->
+    @isComplete() and throw new Error("Cannot advance complete item")
+    new Item(@rule, @dot + 1, new Set(@lookahead)) # new item with dot advanced
+
+  nextSymbol: ->
+    @isComplete() and throw new Error("Cannot get next symbol for complete item")
+    @rule.rhs[@dot] # next symbol after dot
 
   toString: ->
     rhs = @rule.rhs.slice()
