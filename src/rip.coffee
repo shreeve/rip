@@ -147,6 +147,8 @@ class Language
       minStatesForAuto: opts.minStatesForAuto ? 20
       algorithms:       opts.algorithms       ? ['auto']
       skipIfSmall:      opts.skipIfSmall      ? true
+      minimizeStates:   opts.minimizeStates   ? true
+      safeMinimization: opts.safeMinimization ? true
 
     @timing "🔤 Language constructor"
 
@@ -267,7 +269,7 @@ class Language
       @buildTable()              # @states → @table
       @removeUnreachableStates() # Remove dead states
       @resolveConflicts()        # @states → @conflicts, @inadequateStates
-      @minimizeStates()          # State minimization
+      @minimizeStates() if @optimizationConfig.minimizeStates # State minimization
       @optimizeTable()           # Smart table optimization
       @buildDefaultActions()     # @states → @defaultActions
 
@@ -826,8 +828,7 @@ class Language
           table[state.id][symbol] = nextState.id  # GOTO
 
       # Reduce actions
-      for item in state.items
-        continue unless item.isComplete()
+      for item in state.items when item.isComplete()
 
         # Special case for accept
         if item.rule.lhs is '$accept'
@@ -993,25 +994,33 @@ class Language
     originalCount = @states.length
     mergedCount = 0
 
-    # Pre-compute state signatures for faster comparison
-    stateSignatures = new Map()
-    for state, i in @states
-      signature = @computeStateSignature(state)
-      if stateSignatures.has(signature)
-        # Merge with existing state
-        existingState = stateSignatures.get(signature)
-        @mergeStates(existingState, state)
-        @states[i] = null # Mark as merged
-        mergedCount++
-      else
-        stateSignatures.set(signature, state)
+    # Phase 1: Find equivalent states using core-based comparison
+    stateGroups = new Map()
+    for state in @states
+      core = state.core()
+      stateGroups.get(core)?.push(state) or stateGroups.set(core, [state])
 
-    # Remove merged states and reassign IDs
+    # Phase 2: Merge states with identical cores and compatible lookaheads
+    for [core, states] from stateGroups
+      continue if states.length <= 1 # No merging needed
+
+      # Sort states by ID for consistent merging
+      states.sort((a, b) -> a.id - b.id)
+      targetState = states[0]
+
+      # Merge all other states into the first one
+      for i in [1...states.length]
+        sourceState = states[i]
+        @mergeStates(targetState, sourceState)
+        @states[sourceState.id] = null # Mark as merged
+        mergedCount++
+
+    # Phase 3: Clean up merged states
     @states = @states.filter (state) -> state?
     for state, i in @states
       state.id = i
 
-    # Rebuild state map
+    # Phase 4: Rebuild state map and update transitions
     @stateMap.clear()
     for state in @states
       @stateMap.set(state.core(), state)
@@ -1019,10 +1028,9 @@ class Language
     # Update all transitions to point to new state IDs
     for state in @states
       for [symbol, nextState] from state.transitions
-        # Find the new state ID for the target state
-        newStateId = nextState.id
-        # Update transition to point to the correct state
-        state.transitions.set(symbol, @states[newStateId])
+        # Find the new state by core
+        newState = @stateMap.get(nextState.core()) or throw new Error("State minimization error: cannot find state with core '#{nextState.core()}'")
+        state.transitions.set(symbol, newState)
 
     if mergedCount > 0
       console.log("Merged #{mergedCount} equivalent states (from #{originalCount} to #{@states.length})")
@@ -1031,15 +1039,13 @@ class Language
 
   # Compute state signature for fast equivalence checking
   computeStateSignature: (state) ->
-    # Create signature based on transitions and reduce actions
     transitions = []
     for [symbol, nextState] from state.transitions
-      transitions.push("#{symbol}:#{nextState.id}")
+      transitions.push("#{symbol}:#{nextState.core()}") # core-based not by id!
     transitions.sort()
 
     reduceActions = []
-    for item in state.items
-      continue unless item.isComplete()
+    for item in state.items when item.isComplete()
       for lookahead from item.lookahead
         reduceActions.push("#{lookahead}:#{item.rule.id}")
     reduceActions.sort()
