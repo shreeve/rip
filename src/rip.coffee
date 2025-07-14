@@ -405,17 +405,14 @@ class Language
   computeNullable: ->
     @timing "🔍 Compute Nullable"
 
+    # Pre-compute rules by LHS for efficiency
+    rulesByLhs = new Map()
+    for rule in @rules
+      rulesByLhs.get(rule.lhs)?.push(rule) or rulesByLhs.set(rule.lhs, [rule])
+
     changed = true
     while changed
       changed = false
-
-      # Group rules by LHS for efficient processing
-      rulesByLhs = new Map()
-      for rule in @rules
-        if rulesByLhs.has(rule.lhs)
-          rulesByLhs.get(rule.lhs).push(rule)
-        else
-          rulesByLhs.set(rule.lhs, [rule])
 
       # Check each nonterminal
       for [lhs, symbol] from @symbols when not (symbol.isTerminal or symbol.nullable)
