@@ -167,38 +167,35 @@ class Language
     else if Object.keys(@language).length == 0
       errors.push "Language cannot be empty"
 
-    # Validate rules
-    rules = @language?.rules or []
-    unless Array.isArray(rules)
-      errors.push "Rules must be an array, got #{typeof rules}"
-    else if rules.length == 0
-      errors.push "Language must have at least one rule"
+    # Validate rules (support object format in .grammar or .rules)
+    rulesObj = @language?.grammar ? @language?.rules
+    if not rulesObj? or typeof rulesObj isnt 'object' or Array.isArray(rulesObj)
+      errors.push "Rules/grammar must be an object with nonterminal names as keys and arrays of rules as values"
+    else if Object.keys(rulesObj).length == 0
+      errors.push "Language must have at least one rule in grammar/rules object"
     else
-      for rule, i in rules
-        unless rule?
-          errors.push "Rule #{i} is null or undefined"
-        else unless typeof rule is 'object'
-          errors.push "Rule #{i} must be an object, got #{typeof rule}"
+      for lhs, rules of rulesObj
+        unless @isValidSymbolName(lhs)
+          errors.push "Invalid nonterminal name '#{lhs}' in grammar/rules object"
+        else unless Array.isArray(rules)
+          errors.push "Rules for '#{lhs}' must be an array, got #{typeof rules}"
+        else if rules.length == 0
+          errors.push "Nonterminal '#{lhs}' must have at least one rule"
         else
-          # Validate LHS
-          unless rule.lhs?
-            errors.push "Rule #{i} missing left-hand side (lhs)"
-          else unless typeof rule.lhs is 'string'
-            errors.push "Rule #{i} lhs must be a string, got #{typeof rule.lhs}"
-          else unless @isValidSymbolName rule.lhs
-            errors.push "Rule #{i} has invalid lhs name '#{rule.lhs}'"
-
-          # Validate RHS
-          unless rule.rhs?
-            errors.push "Rule #{i} missing right-hand side (rhs)"
-          else unless Array.isArray(rule.rhs)
-            errors.push "Rule #{i} rhs must be an array, got #{typeof rule.rhs}"
-          else
-            for symbol, j in rule.rhs
-              unless typeof symbol is 'string'
-                errors.push "Rule #{i} rhs[#{j}] must be a string, got #{typeof symbol}"
-              else unless @isValidSymbolName symbol
-                errors.push "Rule #{i} rhs[#{j}] has invalid symbol name '#{symbol}'"
+          for rule, i in rules
+            unless Array.isArray(rule)
+              errors.push "Rule #{i} for '#{lhs}' must be an array [pattern, action, options]"
+              continue
+            [pattern, action, options] = rule
+            unless typeof pattern is 'string'
+              errors.push "Rule #{i} for '#{lhs}' has invalid pattern (must be string)"
+            else
+              # Validate each symbol in the pattern
+              symbols = pattern.trim().split(/\s+/).filter((s) -> s.length > 0)
+              for symbol, j in symbols
+                unless @isValidSymbolName(symbol)
+                  errors.push "Rule #{i} for '#{lhs}' has invalid symbol '#{symbol}' in pattern"
+            # Optionally validate action and options if needed
 
     # Validate start symbol
     if @language?.start?
