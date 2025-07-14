@@ -13,7 +13,7 @@ VERBOSE = 2 # Detailed analysis
 DEBUG   = 3 # Everything + internals
 
 class Symbol # Terminal or Nonterminal
-  constructor: (name, isTerminal = false, id = 0) ->
+  constructor: (name, isTerminal = false, id) ->
     @id         = id         # unique symbol id
     @name       = name       # symbol name (eg - Expression)
     @isTerminal = isTerminal # true if terminal, false if nonterminal
@@ -22,9 +22,8 @@ class Symbol # Terminal or Nonterminal
     @follow     = new Set()  # LALR(1) FOLLOW sets
 
 class Rule # A → B C D
-  @idno = 0
-  constructor: (lhs, rhs, action = null, precedence = null) ->
-    @id         = Rule.idno++ # unique rule id
+  constructor: (lhs, rhs, id, action = null, precedence = null) ->
+    @id         = id          # unique rule id
     @lhs        = lhs         # left-hand side symbol
     @rhs        = rhs         # right-hand side symbol sequence
     @action     = action      # semantic action
@@ -278,6 +277,9 @@ class Language
     @operators = [...(@language.operators or [])]
     @start     =      @language.start     or 'Root'
 
+    # Assign unique rule ids
+    @rules.forEach(rule, i) -> rule.id = i++
+
   # Create fundamental LALR(1) symbols
   createSpecialSymbols: ->
     @getSymbol '$accept'
@@ -286,7 +288,7 @@ class Language
 
   # Add augmented start rule: $accept → start $end
   augmentStartRule: ->
-    @rules.push(new Rule('$accept', [@start, '$end']))
+    @addRule '$accept', [@start, '$end']
     @stats.augmentedRules = 1
 
   # ============================================================================
@@ -521,6 +523,14 @@ class Language
 
     @timing "🧹 Cleanup Grammar"
 
+  # Reassign IDs to maintain consistency after grammar cleanup
+  reassignIds: ->
+    @rules  .forEach (rule  , i) -> rule  .id = i++
+    @symbols.forEach (symbol, i) -> symbol.id = i++
+
+    # Rebuild symbol rules lookup
+    @buildSymbolRules()
+
   # Add error recovery rules
   addErrorRecoveryRules: ->
     @timing "🚑 Add Error Recovery Rules"
@@ -533,7 +543,7 @@ class Language
       ['error'  , ['$accept']] # error → $accept
     ]
 
-    @rules.push(new Rule(lhs, rhs)) for [lhs, rhs] in errorRules
+    @addRule(lhs, rhs) for [lhs, rhs] in errorRules
     @stats.errorRecoveryRules = errorRules.length
 
     @timing "🚑 Add Error Recovery Rules"
