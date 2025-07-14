@@ -396,6 +396,9 @@ class Language
       lhs = rule.lhs
       if obj.has(lhs) then obj.get(lhs).push(rule) else obj.set(lhs, [rule])
 
+    # Sort rules by ID for consistent iteration (needed after reassignIds)
+    for [lhs, rules] from obj
+      rules.sort((a, b) -> a.id - b.id)
 
   # ============================================================================
   # PHASE 2: LALR(1) SET COMPUTATIONS
