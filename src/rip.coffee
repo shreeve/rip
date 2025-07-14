@@ -291,6 +291,20 @@ class Language
     @addRule '$accept', [@start, '$end']
     @stats.augmentedRules = 1
 
+  # Create a new rule
+  addRule: (lhs, rhs, action = null, precedence = null) ->
+    rule = new Rule(lhs, rhs, @rules.length, action, precedence)
+    @rules.push(rule)
+    rule
+
+  # Get or create a symbol
+  getSymbol: (name, isTerminal) ->
+    return sym if sym = @symbols.get(name)
+    isTerminal = if isTerminal? then !!isTerminal else @tokens.has(name)
+    symbol = new Symbol(name, isTerminal, @symbols.size)
+    @symbols.set name, symbol
+    symbol
+
   # ============================================================================
   # PHASE 1: SYMBOL AND RULE ANALYSIS
   # ============================================================================
@@ -565,13 +579,6 @@ class Language
     @timing "🚑 Add Error Recovery Rules"
 
 
-  # Get or create a symbol
-  getSymbol: (name, isTerminal) ->
-    return sym if sym = @symbols.get(name)
-    isTerminal = if isTerminal? then !!isTerminal else @tokens.has(name)
-    symbol = new Symbol(name, isTerminal, @symbols.size)
-    @symbols.set name, symbol
-    symbol
 
   # ============================================================================
   # HELPER FUNCTIONS
