@@ -295,8 +295,7 @@ class Language
   augmentStartRule: ->
     rule = @addRule '$accept', [@start, '$end']
     @stats.augmentedRules = 1
-    @startRule = rule.id
-    rule
+    @startRule = rule
 
   # Create a new rule
   addRule: (lhs, rhs, action = null, precedence = null) ->
