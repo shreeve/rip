@@ -396,9 +396,6 @@ class Language
       lhs = rule.lhs
       if obj.has(lhs) then obj.get(lhs).push(rule) else obj.set(lhs, [rule])
 
-    # Performance optimization: pre-sort rules by LHS for consistent iteration
-    for [lhs, rules] from obj
-      rules.sort((a, b) -> a.id - b.id)
 
   # ============================================================================
   # PHASE 2: LALR(1) SET COMPUTATIONS
