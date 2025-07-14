@@ -403,16 +403,15 @@ class Language
   # Create rule lookup by symbol for efficient access
   # Groups rules by left-hand side symbol
   buildSymbolRules: ->
-    obj = @symbolRules
 
     # Group rules by LHS in a single pass
-    obj.clear()
+    @symbolRules.clear()
     for rule in @rules
       lhs = rule.lhs
-      if obj.has(lhs) then obj.get(lhs).push(rule) else obj.set(lhs, [rule])
+      @symbolRules.get(lhs)?.push(rule) or @symbolRules.set(lhs, [rule])
 
     # Sort rules by ID for consistent iteration (needed after reassignIds)
-    for [lhs, rules] from obj
+    for [lhs, rules] from @symbolRules
       rules.sort((a, b) -> a.id - b.id)
 
   # ============================================================================
