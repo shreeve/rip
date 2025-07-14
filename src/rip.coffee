@@ -452,6 +452,7 @@ class Language
 
         # Compute FIRST of the RHS sequence incrementally
         # For rule A → B C D, we need FIRST(B C D)
+        allNullable = true
         for symbol in rule.rhs
           rhsSymbol = @getSymbol(symbol)
 
@@ -459,11 +460,13 @@ class Language
           lhsSymbol.first.add(item) for item from rhsSymbol.first
 
           # If current symbol is not nullable, we're done with this rule
-          break unless rhsSymbol.nullable
+          unless rhsSymbol.nullable
+            allNullable = false
+            break
 
         # If entire RHS is nullable, add ε to FIRST(LHS)
-        if rule.rhs.length == 0 or rule.rhs.every (sym) -> @getSymbol(sym).nullable
-          lhsSymbol.first.add('') # Add ε (empty string)
+        if rule.rhs.length == 0 or allNullable
+          lhsSymbol.first.add '' # Add ε (empty string)
 
         # Check if we added anything new to trigger another iteration
         changed = true if lhsSymbol.first.size > oldSize
