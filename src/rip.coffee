@@ -409,21 +409,33 @@ class Language
     changed = true
     while changed
       changed = false
-      for rule in @rules
-        lhsSymbol = @getSymbol(rule.lhs)
-        continue if lhsSymbol.nullable
 
-        # A nonterminal is nullable if it has an empty rule
-        # or if all symbols in one of its rules are nullable
-        allNullable = true
-        for symbol in rule.rhs
-          unless @getSymbol(symbol).nullable
-            allNullable = false
+      # Group rules by LHS for efficient processing
+      rulesByLhs = new Map()
+      for rule in @rules
+        if rulesByLhs.has(rule.lhs)
+          rulesByLhs.get(rule.lhs).push(rule)
+        else
+          rulesByLhs.set(rule.lhs, [rule])
+
+      # Check each nonterminal
+      for [lhs, symbol] from @symbols
+        continue if symbol.isTerminal or symbol.nullable
+
+        # Check if ANY rule makes this symbol nullable
+        rules = rulesByLhs.get(lhs) or []
+        for rule in rules
+          # Empty rule (A → ε) makes symbol nullable
+          if rule.rhs.length == 0
+            symbol.nullable = true
+            changed = true
             break
 
-        if allNullable
-          lhsSymbol.nullable = true
-          changed = true
+          # Rule is nullable if all RHS symbols are nullable
+          if rule.rhs.every (sym) -> @getSymbol(sym).nullable
+            symbol.nullable = true
+            changed = true
+            break
 
     @timing "🔍 Compute Nullable"
 
