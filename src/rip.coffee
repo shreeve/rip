@@ -280,12 +280,46 @@ class Language
 
   loadLanguage: ->
     @info      = {...(@language.info      or {})}
-    @rules     = [...(@language.rules     or [])]
     @operators = [...(@language.operators or [])]
     @start     =      @language.start
 
-    # Assign unique rule ids
-    @rules.forEach (rule, i) -> rule.id = i
+    # Load grammar rules
+    for lhs, rules of (@language.grammar ? @language.rules)
+      for rule, i in rules
+        try
+          [pattern, action, options] = rule
+
+          rhs = @parseRulePattern(pattern, lhs, i)
+          @validateActionCode(action, rhs.length, lhs, i) if action?
+          @rules.push(new Rule(lhs, rhs, @rules.length, action, options?.prec))
+
+          @stats.sourceRules++
+        catch error
+          throw new Error("Error processing rule #{i + 1} for '#{lhs}': #{error.message}")
+
+  # Parse and validate rule pattern (such as 'Body TERMINATOR Line')
+  parseRulePattern: (pattern, lhs, i) ->
+    return [] unless pattern? # Empty rule (epsilon)
+    throw new Error("Pattern must be a string") unless typeof pattern is 'string'
+
+    # Make sure each pattern is a valid symbol name
+    symbols = pattern.trim().split(/\s+/)
+    for symbol in symbols
+      throw new Error("Invalid symbol '#{symbol}'") unless @isValidSymbol symbol
+
+    symbols
+
+  # Validate action code for common issues
+  validateActionCode: (action, size, lhs, ruleIndex) ->
+    return unless action?
+
+    # Check for parameter references beyond RHS length
+    string = if typeof action is 'function' then action.toString() else action
+    params = string.match(/\$(\d+)/g) || []
+    for match in params
+      param = parseInt(match.substring(1), 10)
+      if param > size and not (size == 0 and param == 1) and not (lhs == '$accept' and param == 0)
+        throw new Error("Invalid parameter index #{match} in action for '#{lhs}' rule #{ruleIndex + 1}")
 
   # Create fundamental LALR(1) symbols
   createSpecialSymbols: ->
