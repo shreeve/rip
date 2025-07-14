@@ -319,10 +319,13 @@ class Language
 
   # Create rule lookup by symbol
   buildSymbolRules: ->
+    obj = @symbolRules
+
+    # Group rules by LHS in a single pass
+    obj.clear()
     for rule in @rules
       lhs = rule.lhs
-      @symbolRules.set(lhs, []) unless @symbolRules.has(lhs)
-      @symbolRules.get(lhs).push(rule)
+      if obj.has(lhs) then obj.get(lhs).push(rule) else obj.set(lhs, [rule])
 
   # ============================================================================
   # PHASE 2: LALR(1) SET COMPUTATIONS
