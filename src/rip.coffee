@@ -760,6 +760,350 @@ class Language
   # PHASE 6: PARSE TABLE AND OPTIMIZATION
   # ============================================================================
 
+  # Build parse table from states
+  buildTable: ->
+    @timing "📋 Build Table"
+
+    table = []
+    conflicts = { sr: 0, rr: 0 }
+
+    for state in @states
+      table[state.id] = {}
+
+      # Shift actions and GOTO
+      for [symbol, nextState] from state.transitions
+        if @getSymbol(symbol).isTerminal
+          table[state.id][symbol] = { type: 'shift', state: nextState.id }
+        else
+          table[state.id][symbol] = nextState.id  # GOTO
+
+      # Reduce actions
+      for item in state.items
+        continue unless item.isComplete()
+
+        # Special case for accept
+        if item.rule.lhs is '$accept'
+          table[state.id]['$end'] = { type: 'accept' }
+          continue
+
+        # Add reduce action for each lookahead
+        for la from item.lookahead
+          if table[state.id][la]?
+            # Conflict! Try to resolve with precedence
+            existing = table[state.id][la]
+            if existing.type is 'shift'
+              # Shift/reduce conflict
+              resolved = @resolveConflict(item.rule, la)
+              if resolved == 'reduce'
+                table[state.id][la] = { type: 'reduce', rule: item.rule.id }
+                @conflicts.push({
+                  type: 'shift/reduce'
+                  state: state.id
+                  lookahead: la
+                  resolved: true
+                  resolution: 'reduce'
+                  explanation: "State #{state.id}: Shift/reduce conflict on '#{la}' resolved to REDUCE (precedence)"
+                })
+              else if resolved == 'shift'
+                @conflicts.push({
+                  type: 'shift/reduce'
+                  state: state.id
+                  lookahead: la
+                  resolved: true
+                  resolution: 'shift'
+                  explanation: "State #{state.id}: Shift/reduce conflict on '#{la}' resolved to SHIFT (precedence)"
+                })
+              else
+                # unresolved conflict
+                conflicts.sr++
+                state.inadequate = true
+                @inadequateStates.push(state) unless @inadequateStates.includes(state)
+                @conflicts.push({
+                  type: 'shift/reduce'
+                  state: state.id
+                  lookahead: la
+                  resolved: false
+                  resolution: 'shift'
+                  explanation: "State #{state.id}: Unresolved shift/reduce conflict on '#{la}' - using default SHIFT"
+                })
+            else if existing.type is 'reduce'
+              # Reduce/reduce conflict - use first rule (earliest in grammar)
+              existingRuleId = existing.rule
+              if item.rule.id < existingRuleId
+                table[state.id][la] = { type: 'reduce', rule: item.rule.id }
+
+              @conflicts.push({
+                type: 'reduce/reduce'
+                state: state.id
+                lookahead: la
+                resolved: true
+                resolution: "rule #{Math.min(item.rule.id, existingRuleId)}"
+                explanation: "State #{state.id}: Reduce/reduce conflict on '#{la}' resolved to rule #{Math.min(item.rule.id, existingRuleId)} (first declared)"
+              })
+              conflicts.rr++
+          else
+            table[state.id][la] = { type: 'reduce', rule: item.rule.id }
+
+    if conflicts.sr or conflicts.rr
+      console.warn("Grammar has conflicts: #{conflicts.sr} shift/reduce, #{conflicts.rr} reduce/reduce")
+
+    @table = table
+    @timing "📋 Build Table"
+
+  # Remove unreachable (dead) states from the state machine
+  removeUnreachableStates: ->
+    @timing "🧹 Remove Unreachable States"
+
+    # Find all reachable states starting from state 0 (initial state)
+    reachable = new Set()
+    workList = [@states[0]] # Start with initial state
+    reachable.add(@states[0])
+
+    # Breadth-first search to find all reachable states
+    while workList.length > 0
+      state = workList.shift()
+
+      # Follow all transitions from this state
+      for [symbol, nextState] from state.transitions
+        unless reachable.has(nextState)
+          reachable.add(nextState)
+          workList.push(nextState)
+
+    # Remove unreachable states
+    originalCount = @states.length
+    @states = @states.filter (state) -> reachable.has(state)
+    removedCount = originalCount - @states.length
+
+    # Rebuild state map with new state IDs
+    @stateMap.clear()
+    for state, i in @states
+      state.id = i
+      @stateMap.set(@computeCore(state), state)
+
+    # Update transitions to point to new state IDs
+    for state in @states
+      for [symbol, nextState] from state.transitions
+        # Update transition to point to the new state ID
+        state.transitions.set(symbol, nextState)
+
+    if removedCount > 0
+      console.log("Removed #{removedCount} unreachable states (from #{originalCount} to #{@states.length})")
+
+    @timing "🧹 Remove Unreachable States"
+
+  # Resolve shift/reduce conflicts using precedence and associativity
+  resolveConflict: (rule, lookahead) ->
+    # Get precedence of the rule (from its precedence or rightmost terminal)
+    rulePrecedence = @getRulePrecedence(rule)
+
+    # Get precedence of the lookahead token
+    tokenPrecedence = @precedence[lookahead]
+
+    # If either lacks precedence, can't resolve
+    return false unless rulePrecedence and tokenPrecedence
+
+    # Higher precedence wins
+    if rulePrecedence.level > tokenPrecedence.level
+      'reduce'
+    else if rulePrecedence.level < tokenPrecedence.level
+      'shift'
+    else
+      # Same precedence - use associativity
+      switch rulePrecedence.assoc
+        when 'left'     then 'reduce'
+        when 'right'    then 'shift'
+        when 'nonassoc' then 'error'
+        else null
+
+  # Get precedence for a rule
+  getRulePrecedence: (rule) ->
+    # If rule has explicit precedence, use it
+    if rule.precedence
+      return @precedence[rule.precedence]
+
+    # Otherwise, use precedence of rightmost terminal
+    for i in [rule.rhs.length - 1..0] by -1
+      symbol = rule.rhs[i]
+      if @tokens.has(symbol) and @precedence[symbol]
+        return @precedence[symbol]
+
+    null
+
+  # Resolve conflicts and mark inadequate states
+  resolveConflicts: ->
+    @timing "📋 Resolve Conflicts"
+
+    # Conflicts are already resolved during table building
+    # This method is for any additional conflict resolution logic
+
+    @timing "📋 Resolve Conflicts"
+
+  # Minimize states for optimization
+  minimizeStates: ->
+    @timing "🔧 Minimize States"
+
+    originalCount = @states.length
+    mergedCount = 0
+
+    # Pre-compute state signatures for faster comparison
+    stateSignatures = new Map()
+    for state, i in @states
+      signature = @computeStateSignature(state)
+      if stateSignatures.has(signature)
+        # Merge with existing state
+        existingState = stateSignatures.get(signature)
+        @mergeStates(existingState, state)
+        @states[i] = null # Mark as merged
+        mergedCount++
+      else
+        stateSignatures.set(signature, state)
+
+    # Remove merged states and reassign IDs
+    @states = @states.filter (state) -> state?
+    for state, i in @states
+      state.id = i
+
+    # Rebuild state map
+    @stateMap.clear()
+    for state in @states
+      @stateMap.set(@computeCore(state), state)
+
+    # Update all transitions to point to new state IDs
+    for state in @states
+      for [symbol, nextState] from state.transitions
+        # Find the new state ID for the target state
+        newStateId = nextState.id
+        # Update transition to point to the correct state
+        state.transitions.set(symbol, @states[newStateId])
+
+    if mergedCount > 0
+      console.log("Merged #{mergedCount} equivalent states (from #{originalCount} to #{@states.length})")
+
+    @timing "🔧 Minimize States"
+
+  # Compute state signature for fast equivalence checking
+  computeStateSignature: (state) ->
+    # Create signature based on transitions and reduce actions
+    transitions = []
+    for [symbol, nextState] from state.transitions
+      transitions.push("#{symbol}:#{nextState.id}")
+    transitions.sort()
+
+    reduceActions = []
+    for item in state.items
+      continue unless item.isComplete()
+      for lookahead from item.lookahead
+        reduceActions.push("#{lookahead}:#{item.rule.id}")
+    reduceActions.sort()
+
+    # Combine transitions and reduce actions for unique signature
+    "#{transitions.join('|')}##{reduceActions.join('|')}"
+
+  # Get reduce actions for a state
+  getReduceActions: (state) ->
+    actions = new Map()
+    for item in state.items
+      continue unless item.isComplete()
+      for lookahead from item.lookahead
+        actions.set(lookahead, item.rule.id)
+    actions
+
+  # Compute state key for minimization
+  computeStateKey: (state) ->
+    # Create a key based on state's core items
+    cores = []
+    for item in state.items
+      cores.push(item.coreKey())
+    cores.sort().join('|')
+
+  # Merge two states
+  mergeStates: (target, source) ->
+    # Merge lookaheads from source into target
+    for item in source.items
+      targetItem = target.getCoreItem(item.rule.id, item.dot)
+      if targetItem
+        targetItem.lookahead.add(la) for la from item.lookahead
+
+  # Optimize parse table
+  optimizeTable: ->
+    @timing "🔧 Optimize Table"
+
+    # Smart table optimization - only when beneficial
+    if @optimizationConfig.enabled and @states.length >= @optimizationConfig.minStatesForAuto
+      # Apply optimizations based on configuration
+      for algorithm in @optimizationConfig.algorithms
+        switch algorithm
+          when 'auto'
+            @autoOptimizeTable()
+          when 'minimal'
+            @minimalOptimizeTable()
+
+    @timing "🔧 Optimize Table"
+
+  # Auto-optimize table based on heuristics
+  autoOptimizeTable: ->
+    # Remove redundant actions
+    for state in @states
+      if @table[state.id]?
+        actions = @table[state.id]
+        # Remove duplicate actions
+        seen = new Set()
+        for symbol, action of actions
+          actionKey = "#{action.type}-#{action.state or action.rule}"
+          if seen.has(actionKey)
+            delete actions[symbol]
+          else
+            seen.add(actionKey)
+
+  # Minimal table optimization
+  minimalOptimizeTable: ->
+    # Basic optimization: remove obvious redundancies
+    for state in @states
+      if @table[state.id]?
+        actions = @table[state.id]
+        # Remove empty actions
+        for symbol, action of actions
+          if not action or (action.type is 'reduce' and not action.rule?)
+            delete actions[symbol]
+
+  # Compute default actions for performance optimization
+  buildDefaultActions: ->
+    @timing "📋 Build Default Actions"
+
+    @defaultActions = {}
+
+    # A state can have a default action if:
+    # 1. All actions in the state are reduces by the same rule, OR
+    # 2. The state has no shift actions and only one unique reduce action
+    for state in @states
+      continue unless @table[state.id] # Skip if no table entry
+
+      actions = @table[state.id]
+      actionTypes = new Set()
+      reduceRules = new Set()
+      hasShift = false
+
+      # Analyze all actions in this state
+      for symbol, action of actions
+        if action.type is 'shift'
+          hasShift = true
+        else if action.type is 'reduce'
+          actionTypes.add('reduce')
+          reduceRules.add(action.rule)
+        else if action.type is 'accept'
+          actionTypes.add('accept')
+          # Accept states cannot have default actions
+          hasShift = true # Prevent default action
+
+      # Can use default reduction if:
+      # - No shift actions
+      # - Only reduce actions
+      # - All reduces are for the same rule
+      if not hasShift and actionTypes.size <= 1 and reduceRules.size == 1
+        ruleId = [...reduceRules][0]
+        @defaultActions[state.id] = [2, ruleId]
+
+    @timing "📋 Build Default Actions"
 
   # ============================================================================
   # HELPER FUNCTIONS
