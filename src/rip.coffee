@@ -454,6 +454,10 @@ class Language
           # If current symbol is not nullable, we're done with this rule
           break unless rhsSymbol.nullable
 
+        # If entire RHS is nullable, add ε to FIRST(LHS)
+        if rule.rhs.length == 0 or rule.rhs.every (sym) -> @getSymbol(sym).nullable
+          lhsSymbol.first.add('') # Add ε (empty string)
+
         # Check if we added anything new to trigger another iteration
         changed = true if lhsSymbol.first.size > oldSize
 
