@@ -105,8 +105,9 @@ class Language
     @analyzed         = false     # Analysis done?
     @symbols          = new Map() # Symbol table
     @tokens           = new Set() # Terminal symbols
-    @symbolRules      = new Map() # Lookup rules by symbol
     @precedence       = {}        # Symbol precedence table
+    @symbolRules      = new Map() # Lookup rules by symbol
+    @startRule        = null      # Cached augmented start rule
     @states           = []        # State machine
     @stateMap         = new Map() # State lookup
     @propagateLinks   = new Map() # LALR(1) lookahead propagation
@@ -289,8 +290,10 @@ class Language
 
   # Add augmented start rule: $accept → start $end
   augmentStartRule: ->
-    @addRule '$accept', [@start, '$end']
+    rule = @addRule '$accept', [@start, '$end']
     @stats.augmentedRules = 1
+    @startRule = rule.id
+    rule
 
   # Create a new rule
   addRule: (lhs, rhs, action = null, precedence = null) ->
