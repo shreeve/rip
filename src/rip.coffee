@@ -80,11 +80,11 @@ class State # Set of LR(0) items
       @items.push(item)
       true
 
+  # Lazy core computation with caching
+  core: -> @_core ?= (item.coreKey() for item in @items).sort().join('|')
+
   # Get core item by rule and dot
   getCoreItem: (ruleId, dot) -> @coreMap.get(Item.makeCoreKey(ruleId, dot))
-
-  # Lazy core computation with caching
-  get core() -> @_core ?= (item.coreKey() for item in @items).sort().join('|')
 
 # ==============================================================================
 # UNIVERSAL LANGUAGE DEFINITION
