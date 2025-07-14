@@ -418,8 +418,7 @@ class Language
           rulesByLhs.set(rule.lhs, [rule])
 
       # Check each nonterminal
-      for [lhs, symbol] from @symbols
-        continue if symbol.isTerminal or symbol.nullable
+      for [lhs, symbol] from @symbols when not (symbol.isTerminal or symbol.nullable)
 
         # Check if ANY rule makes this symbol nullable
         rules = rulesByLhs.get(lhs) or []
