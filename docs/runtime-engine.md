@@ -276,6 +276,86 @@ module.exports = {
   - **`validateActionCode()`** - Validates semantic action code syntax
   - **`processOperators()`** - Processes precedence and associativity rules
   - **`addErrorRecoveryRules()`** - Adds error recovery rules to the grammar
+
+### Error Recovery Rules
+
+The parser generator automatically adds special error recovery rules to enable robust parsing even when encountering syntax errors. These rules follow a standard pattern that allows the parser to recover gracefully from unexpected input.
+
+#### Standard Error Recovery Rules
+
+The generator adds these fundamental error recovery rules to every grammar:
+
+```json
+{
+  "id": 405,
+  "lhs": "$accept",
+  "rhs": ["Root", "$end"],
+  "action": null,
+  "precedence": null
+},
+{
+  "id": 406,
+  "lhs": "$accept",
+  "rhs": ["error"],
+  "action": null,
+  "precedence": null
+},
+{
+  "id": 407,
+  "lhs": "error",
+  "rhs": ["error"],
+  "action": null,
+  "precedence": null
+},
+{
+  "id": 408,
+  "lhs": "error",
+  "rhs": ["$end"],
+  "action": null,
+  "precedence": null
+},
+{
+  "id": 409,
+  "lhs": "error",
+  "rhs": ["$accept"],
+  "action": null,
+  "precedence": null
+}
+```
+
+#### Purpose and Functionality
+
+Each rule serves a specific purpose in error recovery:
+
+- **Rule 405**: Standard augmented start rule (`$accept → Root $end`) - The normal parsing path
+- **Rule 406**: Error recovery for start symbol (`$accept → error`) - Allows recovery from top-level errors
+- **Rule 407**: Self-referencing error rule (`error → error`) - Enables error tokens to be consumed repeatedly (error synchronization)
+- **Rule 408**: Error recovery to end of input (`error → $end`) - Allows recovery by consuming tokens until end-of-input
+- **Rule 409**: Error recovery back to start (`error → $accept`) - Provides a fallback recovery mechanism
+
+#### How Error Recovery Works
+
+1. **Error Detection**: When the parser encounters an unexpected token, it enters error recovery mode
+2. **Error Synchronization**: The parser discards tokens until it finds a "safe" token (using Rule 407)
+3. **Recovery**: The parser uses Rules 406, 408, or 409 to find a valid parsing path
+4. **Continuation**: Once recovered, parsing continues normally
+
+#### Advanced Error Recovery
+
+For more sophisticated error handling, the generator also adds language-specific error recovery rules:
+
+```coffeescript
+# Dynamically selects non-terminals that appear in multiple rules
+# or contain 'stmt', 'expr', 'decl' in their names
+# Then adds: NonTerminal → error
+
+# Examples:
+Expression → error    # Most common non-terminal
+Statement → error     # Core statement construct
+Block → error         # Block structure
+```
+
+This allows the parser to recover from errors at different levels of the syntax tree, providing more granular error recovery capabilities.
   - **`buildRuleLookupCache()`** - Builds optimized O(1) rule lookup by LHS
 
 ##### **3. Grammar Cleanup Phase**
