@@ -431,6 +431,74 @@ class Language
 
     @timing "🔍 Compute FOLLOW"
 
+  # ============================================================================
+  # PHASE 3: GRAMMAR CLEANUP
+  # ============================================================================
+
+  # Eliminate unproductive symbols (symbols that cannot derive any terminal string)
+  cleanupGrammar: ->
+    @timing "🧹 Cleanup Grammar"
+
+    # A symbol is productive if it can derive a terminal string
+    productive = new Set()
+    changed = true
+
+    while changed
+      changed = false
+
+      for [name, symbol] from @symbols
+        # Skip if already marked as productive
+        continue if productive.has(name)
+
+        # Terminals are always productive
+        if symbol.isTerminal
+          productive.add(name)
+          changed = true
+          continue
+
+        # Check if this nonterminal has a productive rule
+        rules = @symbolRules.get(name) or []
+        for rule in rules
+          # Empty rule (A → ε) is productive
+          if rule.rhs.length == 0
+            productive.add(name)
+            changed = true
+            break
+
+          # Rule is productive if all RHS symbols are productive
+          if rule.rhs.every (sym) -> productive.has(sym)
+            productive.add(name)
+            changed = true
+            break
+
+    # Remove unproductive symbols from symbols map
+    for [name, symbol] from @symbols
+      unless productive.has(name)
+        @symbols.delete(name)
+
+    # Remove rules involving unproductive symbols
+    @rules = @rules.filter (rule) ->
+      productive.has(rule.lhs) and rule.rhs.every (sym) -> productive.has(sym)
+
+    @timing "🧹 Cleanup Grammar"
+
+  # Add error recovery rules
+  addErrorRecoveryRules: ->
+    @timing "🚑 Add Error Recovery Rules"
+
+    # Basic error recovery rules for robust parsing
+    errorRules = [
+      ['$accept', ['error'  ]] # $accept → error
+      ['error'  , ['error'  ]] # error → error
+      ['error'  , ['$end'   ]] # error → $end
+      ['error'  , ['$accept']] # error → $accept
+    ]
+
+    @rules.push(new Rule(lhs, rhs)) for [lhs, rhs] in errorRules
+    @stats.errorRecoveryRules = errorRules.length
+
+    @timing "🚑 Add Error Recovery Rules"
+
 
   # Get or create a symbol
   getSymbol: (name, isTerminal) ->
