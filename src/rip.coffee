@@ -324,6 +324,113 @@ class Language
       @symbolRules.set(lhs, []) unless @symbolRules.has(lhs)
       @symbolRules.get(lhs).push(rule)
 
+  # ============================================================================
+  # PHASE 2: LALR(1) SET COMPUTATIONS
+  # ============================================================================
+
+  # Compute nullable symbols
+  computeNullable: ->
+    @timing "🔍 Compute Nullable"
+
+    changed = true
+    while changed
+      changed = false
+      for rule in @rules
+        lhsSymbol = @getSymbol(rule.lhs)
+        continue if lhsSymbol.nullable
+
+        # A nonterminal is nullable if it has an empty rule
+        # or if all symbols in one of its rules are nullable
+        allNullable = true
+        for symbol in rule.rhs
+          unless @getSymbol(symbol).nullable
+            allNullable = false
+            break
+
+        if allNullable
+          lhsSymbol.nullable = true
+          changed = true
+
+    @timing "🔍 Compute Nullable"
+
+  # Compute FIRST sets for all symbols
+  computeFirst: ->
+    @timing "🔍 Compute FIRST"
+
+    # First(terminal) = {terminal}
+    for [name, symbol] from @symbols
+      if symbol.isTerminal
+        symbol.first.add(name)
+
+    changed = true
+    while changed
+      changed = false
+      for rule in @rules
+        lhsSymbol = @getSymbol(rule.lhs)
+        oldSize = lhsSymbol.first.size
+
+        # Compute FIRST of the RHS sequence incrementally
+        # For rule A → B C D, we need FIRST(B C D)
+        for symbol in rule.rhs
+          rhsSymbol = @getSymbol(symbol)
+
+          # Add FIRST(current symbol) to FIRST(LHS)
+          lhsSymbol.first.add(item) for item from rhsSymbol.first
+
+          # If current symbol is not nullable, we're done with this rule
+          break unless rhsSymbol.nullable
+
+        # Check if we added anything new to trigger another iteration
+        changed = true if lhsSymbol.first.size > oldSize
+
+    @timing "🔍 Compute FIRST"
+
+  # Compute FOLLOW sets for all symbols
+  computeFollow: ->
+    @timing "🔍 Compute FOLLOW"
+
+    # Ensure the start symbol is followed by $end
+    @getSymbol(@start).follow.add('$end')
+
+    changed = true
+    while changed
+      changed = false
+
+      for rule in @rules
+        lhsSymbol = @getSymbol(rule.lhs)
+
+        # For each symbol in the RHS, compute what can follow it
+        for symbol, i in rule.rhs
+          currentSymbol = @getSymbol(symbol)
+
+          # Skip terminals - they don't have FOLLOW sets
+          continue if currentSymbol.isTerminal
+
+          # Get the suffix β after the current symbol
+          beta = rule.rhs.slice(i + 1)
+
+          if beta.length > 0
+            # Case 1: A → αBβ where β is non-empty
+            # Add FIRST(β) to FOLLOW(B)
+            firstBeta = @firstOfString(beta)
+            oldSize = currentSymbol.follow.size
+            currentSymbol.follow.add(item) for item from firstBeta
+            changed = true if currentSymbol.follow.size > oldSize
+
+            # If β is nullable, also add FOLLOW(A) to FOLLOW(B)
+            if beta.every((sym) => @getSymbol(sym).nullable)
+              oldSize = currentSymbol.follow.size
+              currentSymbol.follow.add(item) for item from lhsSymbol.follow
+              changed = true if currentSymbol.follow.size > oldSize
+          else
+            # Case 2: A → αB (β is empty)
+            # Add FOLLOW(A) to FOLLOW(B)
+            oldSize = currentSymbol.follow.size
+            currentSymbol.follow.add(item) for item from lhsSymbol.follow
+            changed = true if currentSymbol.follow.size > oldSize
+
+    @timing "🔍 Compute FOLLOW"
+
 
   # Get or create a symbol
   getSymbol: (name, isTerminal) ->
