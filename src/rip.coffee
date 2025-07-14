@@ -442,7 +442,7 @@ class Language
             break
 
           # Rule is nullable if all RHS symbols are nullable
-          if rule.rhs.every (sym) -> @getSymbol(sym).nullable
+          if rule.rhs.every (sym) => @getSymbol(sym).nullable
             symbol.nullable = true
             changed = true
             break
@@ -593,7 +593,7 @@ class Language
             break
 
           # Rule is productive if all RHS symbols are productive
-          if rule.rhs.every (sym) -> productive.has(sym)
+          if rule.rhs.every (sym) => productive.has(sym)
             productive.add(name)
             changed = true
             break
@@ -605,7 +605,7 @@ class Language
 
     # Remove rules involving unproductive symbols
     @rules = @rules.filter (rule) ->
-      productive.has(rule.lhs) and rule.rhs.every (sym) -> productive.has(sym)
+      productive.has(rule.lhs) and rule.rhs.every (sym) => productive.has(sym)
 
     # Step 2: Remove unreachable symbols using breadth-first search
     # A symbol is reachable if it can be reached from the start symbol
@@ -634,7 +634,7 @@ class Language
 
     # Remove rules involving unreachable symbols
     @rules = @rules.filter (rule) ->
-      reachable.has(rule.lhs) and rule.rhs.every (sym) -> reachable.has(sym)
+      reachable.has(rule.lhs) and rule.rhs.every (sym) => reachable.has(sym)
 
     # Step 3: Reassign IDs to maintain consistency
     @reassignIds()
