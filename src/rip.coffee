@@ -1245,7 +1245,8 @@ if process.argv[1]?.includes('rip.coffee') or process.argv[1]?.includes('rip.js'
 
   # Read and parse input file
   try
-    { grammar: language, operators: language.operators, start: language.start } = require(options.inputFile)
+    # { grammar: language, operators: language.operators, start: language.start } = require(options.inputFile)
+    language = require(options.inputFile)
 
   catch error
     console.error "Error: Failed to parse input file: #{error.message}"
