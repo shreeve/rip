@@ -764,7 +764,7 @@ class Language
         lookahead = @firstOfString(suffix)
 
         # Check if suffix is nullable (includes original lookahead)
-        if suffix.some((sym) => @getSymbol(sym).nullable)
+        if suffix.some (sym) => @getSymbol(sym).nullable
           lookahead.add(la) for la from item.lookahead
 
         # Add spontaneous lookaheads
