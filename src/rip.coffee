@@ -283,7 +283,7 @@ class Language
     @start     =      @language.start
 
     # Assign unique rule ids
-    @rules.forEach(rule, i) -> rule.id = i++
+    @rules.forEach (rule, i) -> rule.id = i
 
   # Create fundamental LALR(1) symbols
   createSpecialSymbols: ->
