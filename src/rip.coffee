@@ -305,7 +305,7 @@ class Language
     # Make sure each pattern is a valid symbol name
     symbols = pattern.trim().split(/\s+/)
     for symbol in symbols
-      throw new Error("Invalid symbol '#{symbol}'") unless @isValidSymbol symbol
+      throw new Error("Invalid symbol '#{symbol}'") unless @isValidSymbolName symbol
 
     symbols
 
