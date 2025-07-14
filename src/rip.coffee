@@ -34,7 +34,7 @@ class Item # Rule with a dot position and lookahead: [A → α • β, a]
 
   constructor: (rule, dot = 0, lookahead = new Set()) ->
     if dot < 0 or dot > rule.rhs.length
-      throw new Error("Rule '#{rule.lhs}' → '#{rule.rhs.join(' ')}' (dot position #{dot} out of bounds)")
+      throw new Error("Rule [#{rule.lhs} → #{rule.rhs.join ' '}] (dot position #{dot} out of bounds)")
     @rule      = rule      # associated production rule
     @dot       = dot       # dot position (• marker)
     @lookahead = lookahead # LALR(1) lookahead set
