@@ -682,7 +682,7 @@ class Language
 
     # Create initial state with augmented start rule
     startState = new State
-    startState.addItem(new Item(@rules[@startRule], 0, new Set(['$end'])))
+    startState.addItem(new Item(@startRule, 0, new Set(['$end'])))
     @closure(startState)
     @addState(startState)
 
