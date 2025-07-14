@@ -1232,7 +1232,6 @@ if process.argv[1]?.includes('rip.coffee') or process.argv[1]?.includes('rip.js'
 
   # Validate input file
   unless options.inputFile?
-    console.error "Error: No input file specified"
     console.log helpText
     process.exit 1
 
