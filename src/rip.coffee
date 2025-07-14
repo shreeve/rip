@@ -674,10 +674,6 @@ class Language
     # Cache the closure result
     @cache.set(coreKey, true)
 
-  # Compute core hash for state deduplication
-  computeCore: (state) ->
-    state.core
-
   # Get existing state or add new one (similar to getSymbol)
   getState: (state) ->
     coreKey = @computeCore(state)
