@@ -50,8 +50,8 @@ class Item # Rule with a dot position and lookahead: [A → α • β, a]
     "#{@rule.lhs} → #{rhs.join(' ')} [#{[...@lookahead].join(',')}]"
 
 class State # Set of LR(0) items
-  constructor: (id) ->
-    @id          = id        # unique state id
+  constructor: ->
+    @id          = null      # unique state id
     @items       = []        # collection of items
     @coreMap     = new Map() # core-based deduplication (core key -> item)
     @transitions = new Map() # state transitions (symbol -> state)
