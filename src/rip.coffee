@@ -56,6 +56,7 @@ class State # Set of LR(0) items
     @coreMap     = new Map() # core-based deduplication (core key -> item)
     @transitions = new Map() # state transitions (symbol -> state)
     @inadequate  = false     # has shift/reduce conflicts?
+    @_core       = null      # cached core string
 
   # Add item to state, merging lookaheads if core already exists
   addItem: (item) ->
@@ -74,13 +75,16 @@ class State # Set of LR(0) items
     else
 
       # Add new item
+      @_core = null # Invalidate cached core
       @coreMap.set(coreKey, item)
       @items.push(item)
       true
 
   # Get core item by rule and dot
-  getCoreItem: (ruleId, dot) ->
-    @coreMap.get(Item.makeCoreKey(ruleId, dot))
+  getCoreItem: (ruleId, dot) -> @coreMap.get(Item.makeCoreKey(ruleId, dot))
+
+  # Lazy core computation with caching
+  get core() -> @_core ?= (item.coreKey() for item in @items).sort().join('|')
 
 # ==============================================================================
 # UNIVERSAL LANGUAGE DEFINITION
