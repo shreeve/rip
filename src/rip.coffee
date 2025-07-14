@@ -301,7 +301,7 @@ class Language
 
           rhs = @parseRulePattern(pattern, lhs, i)
           @validateActionCode(action, rhs.length, lhs, i) if action?
-          @rules.push(new Rule(lhs, rhs, @rules.length, action, options?.prec))
+          @rules.push @addRule(lhs, rhs, action, options?.prec)
 
           @stats.sourceRules++
         catch error
