@@ -436,6 +436,22 @@ class Language
 
     @timing "🔍 Compute FOLLOW"
 
+  # Compute FIRST set of a string of symbols
+  firstOfString: (symbols, startIndex = 0) ->
+    first = new Set()
+
+    for i in [startIndex...symbols.length]
+      symbol = @getSymbol(symbols[i])
+
+      # Add FIRST(symbol) to result
+      for item from symbol.first
+        first.add(item)
+
+      # If symbol is not nullable, we're done
+      break unless symbol.nullable
+
+    first
+
   # ============================================================================
   # PHASE 3: GRAMMAR CLEANUP
   # ============================================================================
