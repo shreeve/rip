@@ -80,6 +80,8 @@ class State # Set of LR(0) items
       @items.push(item)
       true
 
+  # FIXME: Confirm these are optimal
+
   # Lazy core computation with caching
   core: -> @_core ?= (item.coreKey() for item in @items).sort().join('|')
 
@@ -676,7 +678,7 @@ class Language
 
   # Get existing state or add new one (similar to getSymbol)
   getState: (state) ->
-    coreKey = @computeCore(state)
+    coreKey = state.core()
 
     if @stateMap.has(coreKey)
       existingState = @stateMap.get(coreKey)
@@ -694,7 +696,7 @@ class Language
   addState: (state) ->
     state.id = @states.length
     @states.push(state)
-    @stateMap.set(@computeCore(state), state)
+    @stateMap.set(state.core(), state)
     @stats.stateCreations++
     state
 
@@ -874,7 +876,7 @@ class Language
     @stateMap.clear()
     for state, i in @states
       state.id = i
-      @stateMap.set(@computeCore(state), state)
+      @stateMap.set(state.core(), state)
 
     # Update transitions to point to new state IDs
     for state in @states
