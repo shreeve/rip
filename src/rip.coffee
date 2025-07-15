@@ -173,34 +173,34 @@ class Language
     # @validateLanguage()
 
     # Input (foundational data)
-    @info             = {}        # Language metadata
-    @rules            = []        # Language rules
-    @operators        = []        # Precedence/associativity
-    @start            = null      # Start symbol
+    @info             = {}      # Language metadata
+    @rules            = []      # Language rules
+    @operators        = []      # Precedence/associativity
+    @start            = null    # Start symbol
 
     # Output (derived during analysis)
-    @analyzed         = false     # Analysis done?
-    @symbols          = new Map() # Symbol table
-    @tokens           = new Set() # Terminal symbols
-    @precedence       = {}        # Symbol precedence table
-    @symbolRules      = new Map() # Lookup rules by symbol
-    @startRule        = null      # Cached augmented start rule
-    @states           = []        # State machine
-    @stateMap         = new Map() # State lookup
-    @propagateLinks   = new Map() # LALR(1) lookahead propagation
-    @inadequateStates = []        # Conflict states
-    @conflicts        = []        # Conflict details
-    @table            = null      # Parse table
-    @defaultActions   = {}        # Default actions for states
-    @cache            = new Map() # Performance cache
+    @analyzed         = false   # Analysis done?
+    @symbols          = new Map # Symbol table
+    @tokens           = new Set # Terminal symbols
+    @precedence       = {}      # Symbol precedence table
+    @symbolRules      = new Map # Lookup rules by symbol
+    @startRule        = null    # Cached augmented start rule
+    @states           = []      # State machine
+    @stateMap         = new Map # State lookup
+    @propagateLinks   = new Map # LALR(1) lookahead propagation
+    @inadequateStates = []      # Conflict states
+    @conflicts        = []      # Conflict details
+    @table            = null    # Parse table
+    @defaultActions   = {}      # Default actions for states
+    @cache            = new Map # Performance cache
 
     # Statistics
     @stats =
 
       # Grammar rules
-      lhsCount:              0    # LHS count (97)
-      sourceRules:           0    # Direct from grammar file (405)
-      augmentedRules:        0    # Augmented start rule (1)
+      lhsCount:              0  # LHS count (97)
+      sourceRules:           0  # Direct from grammar file (405)
+      augmentedRules:        0  # Augmented start rule (1)
       # expandedRules:         0    # Expanded/flattened (0)
       # errorRecoveryRules:    0    # Error recovery rules (4)
 
