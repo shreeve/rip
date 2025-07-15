@@ -413,7 +413,6 @@ class Language
       for symbol in symbols
         @precedence[symbol] = {level, assoc}
       level++
-    @precedence
 
   # Create rule lookup by symbol for efficient access
   # Groups rules by left-hand side symbol
