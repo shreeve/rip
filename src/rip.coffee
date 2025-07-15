@@ -194,8 +194,8 @@ class Language
     @cache            = new Map # Performance cache
 
     # ID counters
-    @symbolId = 2 # Starts at 2 (0 and 1 are reserved for $accept and $end)
     @ruleId   = 1 # Starts at 1 (0 is reserved for the augmented start rule)
+    @symbolId = 2 # Starts at 2 (0 and 1 are reserved for $accept and $end)
 
     # Statistics
     @stats =
