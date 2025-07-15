@@ -173,3 +173,60 @@ class Language
       safeMinimization: opts.safeMinimization ? true
 
     @timing "🔤 Language constructor"
+
+  # ============================================================================
+  # HELPER FUNCTIONS
+  # ============================================================================
+
+  # Check if a symbol name is valid
+  # Allows alphanumeric identifiers and operator symbols
+  isValidSymbolName: (name) ->
+    return false unless name? and typeof name is 'string' and name.length > 0
+    # Allow alphanumeric, underscore, hyphen, and some special characters for terminals
+    /^[a-zA-Z_][a-zA-Z0-9_?-]*$|^[+\-*/(){}[\];,.'":=<>!&|?~^%$#@\\]+$/.test(name)
+
+  # Determine how much to debug or log
+  # Converts various debug level inputs to numeric levels
+  parseDebug: (level) ->
+    switch level
+      when 0, 'silent'  then SILENT
+      when 1, 'normal'  then NORMAL
+      when 2, 'verbose' then VERBOSE
+      when 3, 'debug'   then DEBUG
+      when true         then VERBOSE # -V --verbose flag
+      when false        then NORMAL  # default when verbose=false
+      else                   NORMAL  # fallback to normal
+
+  # Performance timing utility
+  # Usage:
+  #   @timing "📋 Phase description", => @fn()  # Function wrapper
+  #   @timing "📋 Phase description"            # Start timer
+  #   @timing "📋 Phase description"            # End timer and show duration
+  timing: (description, fn) ->
+    @timers ?= new Map()
+
+    if fn?
+      # Function wrapper mode - only time if verbose or higher
+      if @debug >= VERBOSE
+        startTime = Date.now()
+        result    = fn.call(this)
+        endTime   = Date.now()
+        duration  = endTime - startTime
+        console.log("#{description}: #{duration}ms")
+        result
+      else
+        fn.call(this)
+    else
+      # Manual timing mode - only time if verbose or higher
+      if @debug >= VERBOSE
+        if @timers.has(description)
+          # End timer
+          startTime = @timers.get(description)
+          endTime   = Date.now()
+          duration  = endTime - startTime
+          console.log("#{description}: #{duration}ms")
+          @timers.delete(description)
+        else
+          # Start timer
+          @timers.set(description, Date.now())
+      # Return nothing for manual timing mode
