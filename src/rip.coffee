@@ -133,11 +133,12 @@ class Language
     # Statistics
     @stats =
 
-      # Input processing
-      sourceRules:           0    # Direct from grammar file
-      expandedRules:         0    # Expanded/flattened
-      errorRecoveryRules:    0    # Error recovery rules
-      augmentedRules:        0    # Augmented start rule
+      # Grammar rules
+      lhsCount:              0    # LHS count (97)
+      sourceRules:           0    # Direct from grammar file (405)
+      expandedRules:         0    # Expanded/flattened (0)
+      errorRecoveryRules:    0    # Error recovery rules (4)
+      augmentedRules:        0    # Augmented start rule (1)
 
       # 206 symbols
 
