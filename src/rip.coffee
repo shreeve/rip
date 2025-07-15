@@ -608,6 +608,64 @@ class Language
     # Use the comprehensive version in docs/potentially-useful-code.md for debugging malformed grammars
     return
 
+  # ============================================================================
+  # PHASE 4: ERROR RECOVERY
+  # ============================================================================
+
+  # Add error recovery rules for robust parsing
+  # Hybrid approach: combines simplicity of tiny with intelligence of full
+  addErrorRecoveryRules: ->
+    @timing "🚑 Add Error Recovery Rules"
+
+    # Always add the basic fallback rule (from rip-tiny)
+    @addRule('$accept', ['error'])
+    @stats.errorRecoveryRules = 1
+
+    # Add intelligent error recovery rules (from rip-full)
+    # Find promising candidates for error recovery
+    candidates = @findErrorRecoveryCandidates()
+
+    # Add error rules for top candidates (limit to avoid conflicts)
+    addedCount = 0
+    for candidate in candidates.slice(0, 2) # Conservative limit
+      @addRule(candidate, ['error'])
+      addedCount++
+
+      if @debug >= DEBUG
+        console.log "  Added error recovery rule: #{candidate} → error"
+
+    @stats.errorRecoveryRules += addedCount
+
+    if @debug >= NORMAL and @stats.errorRecoveryRules > 1
+      console.log "🚑 Added #{@stats.errorRecoveryRules} error recovery rules"
+
+    @timing "🚑 Add Error Recovery Rules"
+
+  # Find good candidates for error recovery rules
+  # Uses heuristics from rip-full with safety measures from rip-pain
+  findErrorRecoveryCandidates: ->
+    candidates = []
+
+    for [name, symbol] from @symbols
+      # Skip terminals and essential symbols
+      continue if symbol.isTerminal
+      continue if name in ['$accept', '$end', 'error', @start]
+
+      # Count rules for this symbol
+      ruleCount = (@symbolRules.get(name) or []).length
+
+      # Heuristic: Symbols with multiple rules (likely important constructs)
+      if ruleCount >= 2
+        candidates.push(name)
+
+    # Sort by rule count (descending) to prioritize important symbols
+    candidates.sort (a, b) =>
+      rulesA = (@symbolRules.get(a) or []).length
+      rulesB = (@symbolRules.get(b) or []).length
+      rulesB - rulesA
+
+    candidates
+
 # ==============================================================================
 # COMMAND LINE INTERFACE
 # ==============================================================================
