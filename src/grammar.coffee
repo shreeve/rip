@@ -989,7 +989,7 @@ for name, alternatives of grammar
     alt[1] = "return #{alt[1]}" if name is 'Root'
     alt
 
-# Export only grammar, operators, and tokens for rip-parser
+# Export only grammar, operators, and tokens for parser generator
 module.exports =
   grammar: grammar
   operators: operators.reverse()
