@@ -200,37 +200,37 @@ class Language
       # Grammar rules
       lhsCount:              0    # LHS count (97)
       sourceRules:           0    # Direct from grammar file (405)
-      expandedRules:         0    # Expanded/flattened (0)
-      errorRecoveryRules:    0    # Error recovery rules (4)
       augmentedRules:        0    # Augmented start rule (1)
+      # expandedRules:         0    # Expanded/flattened (0)
+      # errorRecoveryRules:    0    # Error recovery rules (4)
 
       # 206 symbols
 
       # Operator statistics
-      precedenceLevels:      0    # Number of precedence levels (23)
-      totalOperators:        0    # Total number of operators (100)
-      leftAssocGroups:       0    # Number of left-associative groups (10)
-      rightAssocGroups:      0    # Number of right-associative groups (10)
-      nonAssocGroups:        0    # Number of non-associative groups (3)
+      # precedenceLevels:      0    # Number of precedence levels (23)
+      # totalOperators:        0    # Total number of operators (100)
+      # leftAssocGroups:       0    # Number of left-associative groups (10)
+      # rightAssocGroups:      0    # Number of right-associative groups (10)
+      # nonAssocGroups:        0    # Number of non-associative groups (3)
 
       # LALR(1) computation
-      closureCalls:          0    # Closure calls
-      cacheHits:             0    # Cache hits
-      stateCreations:        0    # State creations
-      lookaheadComputations: 0    # Lookahead computations
+      # closureCalls:          0    # Closure calls
+      # cacheHits:             0    # Cache hits
+      # stateCreations:        0    # State creations
+      # lookaheadComputations: 0    # Lookahead computations
 
       # Optimizations
-      optimizationTime:      0    # Optimization time
+      # optimizationTime:      0    # Optimization time
 
-    # Optimization
-    @optimizationConfig =
-      enabled:          opts.optimize         ? false
-      auto:             opts.autoOptimize     ? true
-      minStatesForAuto: opts.minStatesForAuto ? 20
-      algorithms:       opts.algorithms       ? ['auto']
-      skipIfSmall:      opts.skipIfSmall      ? true
-      minimizeStates:   opts.minimizeStates   ? true
-      safeMinimization: opts.safeMinimization ? true
+    # # Optimization
+    # @optimizationConfig =
+    #   enabled:          opts.optimize         ? false
+    #   auto:             opts.autoOptimize     ? true
+    #   minStatesForAuto: opts.minStatesForAuto ? 20
+    #   algorithms:       opts.algorithms       ? ['auto']
+    #   skipIfSmall:      opts.skipIfSmall      ? true
+    #   minimizeStates:   opts.minimizeStates   ? true
+    #   safeMinimization: opts.safeMinimization ? true
 
     @timing "🔤 Language constructor"
 
