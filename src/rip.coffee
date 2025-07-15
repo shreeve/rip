@@ -449,6 +449,152 @@ class Language
     for [lhs, rules] from @symbolRules
       rules.sort (a, b) -> a.id - b.id
 
+  # ============================================================================
+  # PHASE 2: LALR(1) SET COMPUTATIONS
+  # ============================================================================
+
+  # Compute nullable symbols using standard algorithm
+  # A symbol is nullable if it can derive the empty string ε
+  computeNullable: ->
+    @timing "🔍 Compute Nullable"
+
+    # Pre-compute rules by LHS for O(1) lookup
+    rulesByLhs = new Map()
+    for rule in @rules
+      rulesByLhs.get(rule.lhs)?.push(rule) or rulesByLhs.set(rule.lhs, [rule])
+
+    # Iterate until no changes (fixed-point algorithm)
+    changed = true
+    while changed
+      changed = false
+
+      # Check each nonterminal that isn't already nullable
+      for [lhs, symbol] from @symbols when not (symbol.isTerminal or symbol.nullable)
+
+        # Check if ANY rule makes this symbol nullable
+        rules = rulesByLhs.get(lhs) or []
+        for rule in rules
+          # Empty rule (A → ε) makes symbol nullable
+          if rule.rhs.length == 0
+            symbol.nullable = true
+            changed = true
+            break
+
+          # Rule is nullable if all RHS symbols are nullable
+          if rule.rhs.every (sym) => @getSymbol(sym).nullable
+            symbol.nullable = true
+            changed = true
+            break
+
+    @timing "🔍 Compute Nullable"
+
+  # Compute FIRST sets for all symbols using standard algorithm
+  # FIRST(X) = {a | X →* aα} ∪ {ε | X →* ε}
+  computeFirst: ->
+    @timing "🔍 Compute FIRST"
+
+    # Initialize: FIRST(terminal) = {terminal}
+    for [name, symbol] from @symbols
+      if symbol.isTerminal
+        symbol.first.add(name)
+
+    # Iterate until no changes (fixed-point algorithm)
+    changed = true
+    while changed
+      changed = false
+
+      for rule in @rules
+        lhsSymbol = @getSymbol(rule.lhs)
+        oldSize = lhsSymbol.first.size
+
+        # Compute FIRST of the RHS sequence incrementally
+        # For rule A → B C D, we need FIRST(B C D)
+        allNullable = true
+        for symbol in rule.rhs
+          rhsSymbol = @getSymbol(symbol)
+
+          # Add FIRST(current symbol) to FIRST(LHS)
+          lhsSymbol.first.add(item) for item from rhsSymbol.first
+
+          # If current symbol is not nullable, we're done with this rule
+          unless rhsSymbol.nullable
+            allNullable = false
+            break
+
+        # If entire RHS is nullable, add ε to FIRST(LHS)
+        if rule.rhs.length == 0 or allNullable
+          lhsSymbol.first.add '' # Add ε (empty string)
+
+        # Check if we added anything new to trigger another iteration
+        changed = true if lhsSymbol.first.size > oldSize
+
+    @timing "🔍 Compute FIRST"
+
+  # Compute FOLLOW sets for all symbols using standard algorithm
+  # FOLLOW(X) = {a | S →* αXaβ} ∪ {$ | S →* αX}
+  computeFollow: ->
+    @timing "🔍 Compute FOLLOW"
+
+    # Initialize: FOLLOW(S) = {$} where S is the start symbol
+    @getSymbol(@start).follow.add('$end')
+
+    # Iterate until no changes (fixed-point algorithm)
+    changed = true
+    while changed
+      changed = false
+
+      for rule in @rules
+        lhsSymbol = @getSymbol(rule.lhs)
+
+        # For each symbol in the RHS, compute what can follow it
+        for symbol, i in rule.rhs
+          currentSymbol = @getSymbol(symbol)
+
+          # Skip terminals - they don't have FOLLOW sets
+          continue if currentSymbol.isTerminal
+
+          # Get the suffix β after the current symbol
+          beta = rule.rhs.slice(i + 1)
+
+          if beta.length > 0
+            # Case 1: A → αBβ where β is non-empty
+            # Add FIRST(β) to FOLLOW(B), excluding empty string
+            firstBeta = @firstOfString(beta)
+            oldSize = currentSymbol.follow.size
+            currentSymbol.follow.add(item) for item from firstBeta when item != ''
+            changed = true if currentSymbol.follow.size > oldSize
+
+            # If β is nullable, also add FOLLOW(A) to FOLLOW(B)
+            if beta.every (sym) => @getSymbol(sym).nullable
+              oldSize = currentSymbol.follow.size
+              currentSymbol.follow.add(item) for item from lhsSymbol.follow
+              changed = true if currentSymbol.follow.size > oldSize
+          else
+            # Case 2: A → αB (β is empty)
+            # Add FOLLOW(A) to FOLLOW(B)
+            oldSize = currentSymbol.follow.size
+            currentSymbol.follow.add(item) for item from lhsSymbol.follow
+            changed = true if currentSymbol.follow.size > oldSize
+
+    @timing "🔍 Compute FOLLOW"
+
+  # Compute FIRST set of a string of symbols
+  # FIRST(α) = {a | α →* aβ} ∪ {ε | α →* ε}
+  firstOfString: (symbols, startIndex = 0) ->
+    first = new Set()
+
+    for i in [startIndex...symbols.length]
+      symbol = @getSymbol(symbols[i])
+
+      # Add FIRST(symbol) to result
+      for item from symbol.first
+        first.add(item)
+
+      # If symbol is not nullable, we're done
+      break unless symbol.nullable
+
+    first
+
 # ==============================================================================
 # COMMAND LINE INTERFACE
 # ==============================================================================
