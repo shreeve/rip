@@ -318,7 +318,7 @@ class Language
 
   # Parse and validate rule pattern (such as 'Body TERMINATOR Line')
   # Splits pattern into individual symbols and validates them
-  parseRulePattern: (pattern, lhs, i) ->
+  parseRulePattern: (pattern, lhs) ->
     throw new Error("Pattern must be a string") unless typeof pattern is 'string'
 
     # Make sure each pattern is a valid symbol name
