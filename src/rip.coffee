@@ -377,18 +377,20 @@ class Language
   # Extract symbols from rules and identify terminals
   # Uses standard algorithm to distinguish terminals from nonterminals
   buildSymbols: ->
-
-    # Add all symbols from rules
-    for rule in @rules
-      @getSymbol(rule.lhs, false) # Nonterminal
-      @getSymbol(symbol, true) for symbol in rule.rhs # Assume terminal initially
-
-    # Mark as terminal if never appears on LHS
+    # Collect all LHS symbols (these are nonterminals)
     lhsSymbols = new Set(rule.lhs for rule in @rules)
-    for [name, symbol] from @symbols
-      unless lhsSymbols.has(name)
-        symbol.isTerminal = true
-        @tokens.add(name)
+
+    # Add all symbols from rules with correct classification
+    for rule in @rules
+      @getSymbol(rule.lhs, false) # LHS is always nonterminal
+      for symbol in rule.rhs
+        isTerminal = not lhsSymbols.has(symbol)
+        @getSymbol(symbol, isTerminal) # Classify correctly from the start
+
+    # Build tokens set from terminal symbols
+    @tokens.clear()
+    for [name, symbol] from @symbols when symbol.isTerminal
+      @tokens.add(name)
 
     # Handle start symbol detection
     if @start?
