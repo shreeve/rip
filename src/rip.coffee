@@ -595,6 +595,19 @@ class Language
 
     first
 
+  # ============================================================================
+  # PHASE 3: GRAMMAR CLEANUP
+  # ============================================================================
+
+  # Grammar cleanup for production use
+  # For well-formed grammars, cleanup is usually unnecessary
+  # See docs/potentially-useful-code.md for comprehensive cleanup implementation
+  cleanupGrammar: ->
+    # Skip cleanup for well-formed grammars
+    # Most production language packs don't need this step
+    # Use the comprehensive version in docs/potentially-useful-code.md for debugging malformed grammars
+    return
+
 # ==============================================================================
 # COMMAND LINE INTERFACE
 # ==============================================================================
