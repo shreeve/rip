@@ -276,3 +276,105 @@ class Language
 
       @analyzed = true
       @timing "🔍 Analysis"
+
+# ==============================================================================
+# COMMAND LINE INTERFACE
+# ==============================================================================
+
+# Only run CLI if this script is executed directly
+unless module.parent
+
+  # Parse command line arguments
+  args = process.argv.slice(2)
+  options = {}
+  inputFile = null
+
+  # Help text
+  helpText = """
+  rip: The multilanguage universal runtime powering the Rip ecosystem.
+
+  Usage: coffee rip.coffee [options] <language-file>
+
+  Options:
+    -h, --help              Show this help message
+    -v, --version           Show version information
+    -s, --silent            Silent mode (errors only)
+    -V, --verbose           Verbose mode (detailed output)
+    -d, --debug             Debug mode (everything + internals)
+    --debug-level LEVEL     Set debug level: 0=silent, 1=normal, 2=verbose, 3=debug
+
+  Examples:
+    coffee rip.coffee grammar.json
+    coffee rip.coffee --verbose grammar.json
+    coffee rip.coffee --debug-level 2 grammar.json
+  """
+
+  # Parse command line arguments
+  i = 0
+  while i < args.length
+    arg = args[i]
+
+    switch arg
+      when '-h', '--help'
+        console.log helpText
+        process.exit 0
+      when '-v', '--version'
+        console.log "rip version 0.6.0"
+        process.exit 0
+      when '-s', '--silent'
+        options.debug = SILENT
+      when '-V', '--verbose'
+        options.debug = VERBOSE
+      when '-d', '--debug'
+        options.debug = DEBUG
+      when '--debug-level'
+        if i + 1 >= args.length
+          console.error "Error: --debug-level requires a value"
+          process.exit 1
+        level = parseInt(args[i + 1])
+        if isNaN(level) or level < 0 or level > 3
+          console.error "Error: debug level must be 0, 1, 2, or 3"
+          process.exit 1
+        options.debug = level
+        i++ # Skip the next argument since we consumed it
+      else
+        # Assume this is the input file
+        if inputFile?
+          console.error "Error: Multiple input files specified"
+          process.exit 1
+        inputFile = arg
+    i++
+
+  # Validate input file
+  unless inputFile?
+    console.log helpText
+    process.exit 1
+
+  # Check if input file exists
+  fs = require 'fs'
+  unless fs.existsSync inputFile
+    console.error "Error: Input file '#{inputFile}' not found"
+    process.exit 1
+
+  # Read and parse input file
+  try
+    language = JSON.parse(fs.readFileSync(inputFile, 'utf8'))
+  catch error
+    console.error "Error: Failed to parse input file: #{error.message}"
+    process.exit 1
+
+  # Create language instance and analyze
+  try
+    lang = new Language language, options
+    lang.analyze()
+
+    # Show basic results
+    console.log "✅ Analysis complete!"
+    console.log "   States: #{lang.states.length}"
+    console.log "   Rules: #{lang.rules.length}"
+    console.log "   Symbols: #{lang.symbols.size}"
+    console.log "   Conflicts: #{lang.conflicts.length}"
+
+  catch error
+    console.error "❌ Error: #{error.message}"
+    process.exit 1
