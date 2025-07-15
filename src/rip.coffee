@@ -210,11 +210,11 @@ class Language
       # 206 symbols
 
       # Operator statistics
-      # precedenceLevels:      0    # Number of precedence levels (23)
-      # totalOperators:        0    # Total number of operators (100)
-      # leftAssocGroups:       0    # Number of left-associative groups (10)
-      # rightAssocGroups:      0    # Number of right-associative groups (10)
-      # nonAssocGroups:        0    # Number of non-associative groups (3)
+      precedenceLevels:      0    # Number of precedence levels (23)
+      totalOperators:        0    # Total number of operators (100)
+      leftAssocGroups:       0    # Number of left-associative groups (10)
+      rightAssocGroups:      0    # Number of right-associative groups (10)
+      nonAssocGroups:        0    # Number of non-associative groups (3)
 
       # LALR(1) computation
       # closureCalls:          0    # Closure calls
@@ -406,6 +406,48 @@ class Language
     # Add augmented start rule: $accept → start $end
     @rules[0] ?= new Rule('$accept', [@start, '$end'], 0)
     @stats.augmentedRules = 1
+
+  # ============================================================================
+  # PHASE 1: SYMBOL AND RULE ANALYSIS
+  # ============================================================================
+
+  # Create Symbol objects from rules using existing terminal classification
+  # Uses @tokens set populated by resetTokens() in Phase 0
+  buildSymbols: ->
+    for rule in @rules
+      @getSymbol(rule.lhs, false) # LHS is always nonterminal
+      for symbol in rule.rhs
+        @getSymbol(symbol, @tokens.has(symbol)) # Use @tokens to classify
+
+  # Process operator precedence and associativity
+  # Assigns precedence levels to operator symbols
+  buildPrecedence: ->
+    level = 1
+    @stats.precedenceLevels = @operators.length
+    for group in @operators
+      [assoc, ...symbols] = group
+      @stats.totalOperators += symbols.length
+      switch assoc
+        when 'left'     then @stats. leftAssocGroups++
+        when 'right'    then @stats.rightAssocGroups++
+        when 'nonassoc' then @stats.  nonAssocGroups++
+      for symbol in symbols
+        @precedence[symbol] = {level, assoc}
+      level++
+
+  # Create rule lookup by symbol for efficient access
+  # Groups rules by left-hand side symbol
+  buildSymbolRules: ->
+    @symbolRules.clear()
+
+    # Group rules by LHS in a single pass
+    for rule in @rules
+      lhs = rule.lhs
+      @symbolRules.get(lhs)?.push(rule) or @symbolRules.set(lhs, [rule])
+
+    # Sort rules by ID for consistent iteration (needed after reassignIds)
+    for [lhs, rules] from @symbolRules
+      rules.sort (a, b) -> a.id - b.id
 
 # ==============================================================================
 # COMMAND LINE INTERFACE
