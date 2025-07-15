@@ -350,11 +350,11 @@ class Language
     @getSymbol 'error', true; @tokens.add('error') # 'error' is also a terminal
 
   # Add augmented start rule: $accept → start $end
-  # Creates the augmented grammar for LALR(1) parsing
+  # Prepends the augmented grammar rule for LALR(1) and reassigns rule IDs
   augmentStartRule: ->
-    rule = @addRule '$accept', [@start, '$end']
+    @rules.unshift new Rule('$accept', [@start, '$end'], 0)
+    @rules.forEach (r, i) => r.id = i
     @stats.augmentedRules = 1
-    @startRule = rule
 
   # Create a new rule with unique ID
   addRule: (lhs, rhs, action = null, precedence = null) ->
@@ -701,9 +701,10 @@ class Language
   # Creates canonical LR(0) collection of sets of items
   buildStates: ->
 
-    # Create initial state with augmented start rule
+    # Create initial state with our prepended augmented start rule (index 0)
     startState = new State
-    startState.addItem(new Item(@startRule, 0, new Set(['$end'])))
+    startState.addItem(new Item(@rules[0], 0, new Set(['$end'])))
+
     @closure(startState)
     @addState(startState)
 
