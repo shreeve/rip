@@ -609,6 +609,291 @@ class Language
     return
 
   # ============================================================================
+  # PHASE 5: LALR(1) STATE MACHINE CONSTRUCTION
+  # ============================================================================
+
+  # Build LR(0) state machine using hybrid approach
+  # Combines rip-tiny's clarity with rip-full's optimizations
+  buildStates: ->
+    @timing "🏗️ Build States"
+
+    # Initialize performance tracking
+    @cache = new Map() if not @cache
+    @stats.stateCreations = 0
+    @stats.closureCalls = 0
+    @stats.cacheHits = 0
+
+    # Create initial state with augmented start rule (rule 0)
+    startState = new State()
+    startState.addItem(new Item(@rules[0], 0, new Set(['$end'])))
+    @closure(startState)
+    @addState(startState)
+
+    # Build all states using breadth-first search
+    workList = [startState]
+    while workList.length > 0
+      state = workList.shift()
+
+      # Group items by next symbol for efficient transition computation
+      transitions = new Map()
+      for item in state.items when not item.isComplete()
+        nextSym = item.nextSymbol()
+        transitions.get(nextSym)?.push(item) or transitions.set(nextSym, [item])
+
+      # Create new states for each transition
+      for [symbol, items] from transitions
+        newState = new State()
+        newState.addItem(item.advance()) for item in items
+        @closure(newState)
+
+        # Add or merge state (core-based deduplication)
+        existingState = @getState(newState)
+        state.transitions.set(symbol, existingState)
+        workList.push(newState) if existingState is newState
+
+    if @debug >= VERBOSE
+      console.log "🏗️ States: #{@states.length}, Closures: #{@stats.closureCalls}, Cache hits: #{@stats.cacheHits}"
+
+    @timing "🏗️ Build States"
+
+  # Compute closure of a state using optimized LR(0) algorithm
+  # Combines rip-tiny's clarity with rip-full's performance optimizations
+  closure: (state) ->
+    @stats.closureCalls++
+
+    # Check closure cache first for performance (from rip-full)
+    coreKey = state.name()
+    if @cache.has(coreKey)
+      @stats.cacheHits++
+      return
+
+    # Compute closure using work queue algorithm (from rip-tiny)
+    workList = [...state.items]
+    while workList.length > 0
+      item = workList.shift()
+
+      # Skip if item is complete (dot at end)
+      continue if item.isComplete()
+
+      # Get next symbol after dot
+      nextSym = item.nextSymbol()
+      nextSymbol = @getSymbol(nextSym)
+
+      # Skip if next symbol is terminal (no closure needed)
+      continue if nextSymbol.isTerminal
+
+      # Find all rules for this nonterminal (optimized lookup)
+      rules = @symbolRules.get(nextSym) or []
+      for rule in rules
+        # Create new item: [B → • γ] where B is the nonterminal
+        newItem = new Item(rule, 0, new Set())
+
+        # Add to state if not already present
+        if state.addItem(newItem)
+          workList.push(newItem)
+
+    # Cache the closure result for performance
+    @cache.set(coreKey, true)
+
+  # Get existing state or add new one using core-based deduplication
+  # Uses rip-tiny's clean approach with proper lookahead merging
+  getState: (state) ->
+    coreKey = state.name()
+
+    if @stateMap.has(coreKey)
+      existingState = @stateMap.get(coreKey)
+      # Merge lookaheads from new state into existing state
+      for item in state.items
+        existingItem = existingState.core(item.rule.id, item.dot)
+        if existingItem
+          existingItem.lookahead.add(la) for la from item.lookahead
+      existingState
+    else
+      @addState(state)
+      state
+
+  # Add state to state list with unique ID
+  addState: (state) ->
+    state.id = @states.length
+    @states.push(state)
+    @stateMap.set(state.name(), state)
+    @stats.stateCreations++
+    state
+
+  # Compute LALR(1) lookahead sets using hybrid approach
+  # Combines rip-tiny's simplicity with rip-full's correctness
+  computeLookaheads: ->
+    @timing "🔍 Compute Lookaheads"
+
+    # Initialize propagation links
+    @propagateLinks = new Map()
+
+    # Phase 1: Compute spontaneous lookaheads and propagation links
+    # Uses rip-full's correct algorithm
+    for state in @states
+      for item in state.items
+        continue if item.isComplete()
+
+        nextSym = item.nextSymbol()
+        nextState = state.transitions.get(nextSym)
+        continue unless nextState
+
+        # Standard LALR(1) lookahead computation algorithm:
+        # Create a temporary state with the current item having "#" lookahead
+        tempState = new State()
+        dummyItem = new Item(item.rule, item.dot, new Set(['#']))
+        tempState.addItem(dummyItem)
+        @closureWithLookahead(tempState)
+
+        # Now advance all items in the closure on the transition symbol
+        gotoState = new State()
+        for closureItem in tempState.items
+          continue if closureItem.isComplete()
+          if closureItem.nextSymbol() == nextSym
+            advancedItem = closureItem.advance()
+            gotoState.addItem(advancedItem)
+
+        # Compute closure of the goto state
+        @closureWithLookahead(gotoState)
+
+        # Analyze lookaheads to determine propagation vs spontaneous
+        for gotoItem in gotoState.items
+          # Find corresponding item in the actual next state
+          targetItem = nextState.core(gotoItem.rule.id, gotoItem.dot)
+          continue unless targetItem
+
+          # Check each lookahead in the goto item
+          for la from gotoItem.lookahead
+            if la == '#'
+              # This indicates propagation from the original item
+              fromKey = "#{state.id}-#{item.rule.id}-#{item.dot}"
+              toKey = "#{nextState.id}-#{targetItem.rule.id}-#{targetItem.dot}"
+
+              unless @propagateLinks.has(fromKey)
+                @propagateLinks.set(fromKey, new Set())
+              @propagateLinks.get(fromKey).add(toKey)
+            else
+              # This is a spontaneous lookahead
+              targetItem.lookahead.add(la)
+
+    # Add initial lookahead for start state
+    if @states.length > 0 and @states[0].items.length > 0
+      startItem = @states[0].items[0]
+      startItem.lookahead.add('$end')
+
+    # Phase 2: Propagate lookaheads until convergence
+    @propagateLookaheads()
+
+    @timing "🔍 Compute Lookaheads"
+
+  # Specialized closure for lookahead computation
+  # Uses rip-full's optimized approach with proper FIRST computation
+  closureWithLookahead: (state) ->
+    @stats.closureCalls++
+
+    # Use work queue for better performance
+    workQueue = state.items.slice()
+    processedItems = new Set()
+
+    while workQueue.length > 0
+      item = workQueue.shift()
+      continue if item.isComplete()
+
+      # Create unique key for this item to avoid reprocessing
+      itemKey = "#{item.rule.id}-#{item.dot}-#{[...item.lookahead].sort().join(',')}"
+      continue if processedItems.has(itemKey)
+      processedItems.add(itemKey)
+
+      nextSym = item.nextSymbol()
+      continue if @getSymbol(nextSym).isTerminal
+
+      # Compute lookahead for new items
+      # For A → α • B β, la
+      # Add B → • γ with FIRST(β la)
+      beta = item.rule.rhs.slice(item.dot + 1)
+
+      # Use optimized rule lookup instead of linear search
+      rulesForSymbol = @symbolRules.get(nextSym) || []
+      for rule in rulesForSymbol
+        # Compute FIRST(β la)
+        newLookahead = new Set()
+
+        # First, add FIRST(β)
+        firstBeta = @firstOfString(beta)
+
+        # If β is nullable or empty, include the original lookahead
+        allNullable = beta.length == 0
+        if beta.length > 0
+          allNullable = true
+          for sym in beta
+            unless @getSymbol(sym).nullable
+              allNullable = false
+              break
+
+        if allNullable
+          # Add original lookahead
+          for la from item.lookahead
+            newLookahead.add(la)
+
+        # Add FIRST(β)
+        for f from firstBeta
+          newLookahead.add(f)
+
+        newItem = new Item(rule, 0, newLookahead)
+
+        # addItem now handles lookahead merging automatically
+        if state.addItem(newItem)
+          workQueue.push(newItem)
+
+  # Propagate lookaheads until convergence using fixed-point algorithm
+  # Uses rip-tiny's clean approach with rip-full's safety checks
+  propagateLookaheads: ->
+    changed = true
+    maxIterations = 1000
+    iterationCount = 0
+
+    while changed and iterationCount++ < maxIterations
+      changed = false
+
+      for [fromKey, toKeys] from @propagateLinks
+        # Parse and validate the from key
+        fromParts = fromKey.split('-')
+        continue unless fromParts.length >= 3
+        [fromStateId, fromRuleId, fromPosition] = fromParts.map (x) -> parseInt(x)
+        continue unless fromStateId >= 0 and fromStateId < @states.length
+
+        fromState = @states[fromStateId]
+        continue unless fromState # Safety check for invalid state ID
+
+        fromItem = fromState.core(fromRuleId, fromPosition)
+        continue unless fromItem
+
+        for toKey from toKeys
+          # Parse and validate the to key
+          toParts = toKey.split('-')
+          continue unless toParts.length >= 3
+          [toStateId, toRuleId, toPosition] = toParts.map (x) -> parseInt(x)
+          continue unless toStateId >= 0 and toStateId < @states.length
+
+          toState = @states[toStateId]
+          continue unless toState # Safety check for invalid state ID
+
+          toItem = toState.core(toRuleId, toPosition)
+          continue unless toItem
+
+          # Propagate lookaheads
+          oldSize = toItem.lookahead.size
+          for la from fromItem.lookahead
+            toItem.lookahead.add(la)
+
+          if toItem.lookahead.size > oldSize
+            changed = true
+
+    if iterationCount >= maxIterations
+      console.warn("⚠️  Lookahead propagation exceeded maximum iterations (#{maxIterations})")
+      console.warn("   Consider checking for left recursion or other grammar issues")
+
+  # ============================================================================
   # PHASE 4: ERROR RECOVERY
   # ============================================================================
 
