@@ -402,8 +402,14 @@ class Language
   # Assigns precedence levels to operator symbols
   buildPrecedence: ->
     level = 1
+    @stats.precedenceLevels = @operators.length
     for group in @operators
       [assoc, ...symbols] = group
+      @stats.totalOperators += symbols.length
+      switch assoc
+        when 'left'     then @stats. leftAssocGroups++
+        when 'right'    then @stats.rightAssocGroups++
+        when 'nonassoc' then @stats.  nonAssocGroups++
       for symbol in symbols
         @precedence[symbol] = {level, assoc}
       level++
