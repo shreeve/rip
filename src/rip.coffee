@@ -284,6 +284,130 @@ class Language
       @analyzed = true
       @timing "🔍 Analysis"
 
+  # ============================================================================
+  # PHASE 0: LANGUAGE PREPARATION
+  # ============================================================================
+
+  # Load language definition from input
+  # Extracts rules, operators, and metadata
+  loadLanguage: ->
+    @info      = {...(@language.info      or {})}
+    @operators = [...(@language.operators or [])]
+    start      =      @language.start
+
+    # Determine where to find the rules
+    obj = @language.grammar ? @language.rules
+    obj or throw new Error("No rules found in language definition")
+
+    # Load rules from grammar or rules object
+    for lhs, rules of obj
+        @stats.lhsCount++
+        for rule, i in rules
+          try
+            [pattern, action, options] = rule
+            rhs = @parseRulePattern(pattern, lhs)
+            @validateActionCode(action, rhs.length, lhs, i) if action?
+            @addRule(lhs, rhs, action, options?.prec)
+            @stats.sourceRules++
+          catch error
+            throw new Error("Error processing rule #{i + 1} for '#{lhs}': #{error.message}")
+
+    # Reset tokens, so grammar file doesn't have to do it
+    @resetTokens obj
+
+    # Detect start symbol if not provided
+    @start = start ? Object.keys(obj)[0]
+    @start or throw new Error("No start symbol found")
+
+  # Parse and validate rule pattern (such as 'Body TERMINATOR Line')
+  # Splits pattern into individual symbols and validates them
+  parseRulePattern: (pattern, lhs) ->
+    throw new Error("Pattern must be a string") unless typeof pattern is 'string'
+
+    # Make sure each pattern is a valid symbol name
+    symbols = pattern.trim().split(/\s+/).filter((s) -> s.length > 0)
+    for symbol in symbols
+      unless @isValidSymbolName symbol
+        throw new Error("Invalid symbol '#{symbol}'")
+
+    symbols
+
+  # Validate action code for common issues
+  # Checks parameter references against RHS length
+  validateActionCode: (action, size, lhs, ruleIndex) ->
+    return unless action?
+
+    # Check for parameter references beyond RHS length
+    string = if typeof action is 'function' then action.toString() else action
+    params = string.match(/\$(\d+)/g) || []
+    for match in params
+      param = parseInt(match.substring(1), 10)
+      if param > size and not (size == 0 and param == 1) and not (lhs == '$accept' and param == 0)
+        throw new Error("Invalid parameter index #{match} in action for '#{lhs}' rule #{ruleIndex + 1}")
+
+  # Create a new rule with unique ID
+  addRule: (lhs, rhs, action = null, precedence = null) ->
+    rule = new Rule(lhs, rhs, @ruleId++, action, precedence)
+    @rules.push(rule)
+    rule
+
+  # Scan grammar to detect and set @tokens (terminals)
+  resetTokens: (grammar) ->
+    lhsSymbols = new Set
+    rhsSymbols = new Set
+
+    @tokens.clear() if @tokens.size > 0
+
+    # Iterate over all LHS and RHS symbols
+    for lhs, rules of grammar
+      lhsSymbols.add lhs
+      for rule in rules
+        [pattern] = rule
+        if pattern and typeof pattern is 'string'
+          symbols = pattern.trim().split(/\s+/).filter((s) -> s.length > 0)
+          for symbol in symbols
+            rhsSymbols.add(symbol)
+
+    # Terminals are symbols appearing on RHS but not LHS
+    for symbol from rhsSymbols
+      unless lhsSymbols.has(symbol)
+        @tokens.add(symbol)
+
+    @tokens
+
+  # Create fundamental LALR(1) symbols
+  # Adds $accept, $end, and error symbols for parser operation
+  createSpecialSymbols: ->
+    @tokens.add '$end'
+    @tokens.add 'error'
+
+    @getSymbol '$accept', false, 0
+    @getSymbol '$end'   , true , 1
+    @getSymbol 'error'  , true , 2
+
+  # Get or create a symbol with unique ID
+  getSymbol: (name, isTerminal, id = null) ->
+    return sym if sym = @symbols.get(name)
+    isTerminal = if isTerminal? then !!isTerminal else @tokens.has(name)
+    symbol = new Symbol(name, isTerminal, id ? @symbolId++)
+    @symbols.set name, symbol
+    symbol
+
+  # Set first rule as augmented start rule: $accept → start $end
+  augmentStartRule: ->
+
+    # Validate start symbol
+    throw new Error("No start symbol defined") unless @start
+    throw new Error("Invalid start symbol name '#{@start}'") unless @isValidSymbolName(@start)
+
+    # Ensure start symbol has production rules
+    hasStartRule = @rules.some (rule) => rule.lhs == @start
+    throw new Error("Start symbol '#{@start}' has no production rules") unless hasStartRule
+
+    # Add augmented start rule: $accept → start $end
+    @rules[0] ?= new Rule('$accept', [@start, '$end'], 0)
+    @stats.augmentedRules = 1
+
 # ==============================================================================
 # COMMAND LINE INTERFACE
 # ==============================================================================
@@ -365,7 +489,7 @@ unless module.parent
 
   # Read and parse input file
   try
-    language = JSON.parse(fs.readFileSync(inputFile, 'utf8'))
+    language = require(inputFile)
   catch error
     console.error "Error: Failed to parse input file: #{error.message}"
     process.exit 1
@@ -377,9 +501,9 @@ unless module.parent
 
     # Show basic results
     console.log "✅ Analysis complete!"
-    console.log "   States: #{lang.states.length}"
     console.log "   Rules: #{lang.rules.length}"
     console.log "   Symbols: #{lang.symbols.size}"
+    console.log "   States: #{lang.states.length}"
     console.log "   Conflicts: #{lang.conflicts.length}"
 
   catch error
