@@ -1,0 +1,101 @@
+#!/usr/bin/env coffee
+
+# ==============================================================================
+# rip: The multilanguage universal runtime powering the Rip ecosystem.
+#
+# Author: Steve Shreeve <steve.shreeve@gmail.com> and my AI friends.
+#  Stats: July 14, 2025 (version 0.6.0) MIT License
+# ==============================================================================
+
+SILENT  = 0 # Errors only
+NORMAL  = 1 # Basic summary (default)
+VERBOSE = 2 # Detailed analysis
+DEBUG   = 3 # Everything + internals
+
+class Symbol # Terminal or Nonterminal
+  constructor: (name, isTerminal = false, id) ->
+    @id         = id         # unique symbol id
+    @name       = name       # symbol name (eg - Expression)
+    @isTerminal = isTerminal # true if terminal, false if nonterminal
+    @nullable   = false      # LALR(1) nullable computation
+    @first      = new Set    # LALR(1) FIRST sets
+    @follow     = new Set    # LALR(1) FOLLOW sets
+
+class Rule # A → B C D
+  constructor: (lhs, rhs, id, action = null, precedence = null) ->
+    @id         = id          # unique rule id
+    @lhs        = lhs         # left-hand side symbol
+    @rhs        = rhs         # right-hand side symbol sequence
+    @action     = action      # semantic action
+    @precedence = precedence  # precedence for conflict resolution
+
+class Item # Rule with a dot position and lookahead: [A → α • β, a]
+  @makeName: (ruleId, dot) -> "#{ruleId}-#{dot}" # Unique name for item
+
+  constructor: (rule, dot = 0, lookahead = new Set) ->
+    if dot < 0 or dot > rule.rhs.length
+      throw new Error("Rule [#{rule.lhs} → #{rule.rhs.join ' '}] (dot position #{dot} out of bounds)")
+    @rule      = rule      # associated production rule
+    @dot       = dot       # dot position (• marker)
+    @lookahead = lookahead # LALR(1) lookahead set
+
+  # Unique name for this item (something like "3-2")
+  name: -> @_name ?= Item.makeName(@rule.id, @dot)
+
+  # Create LR(0) version of this item (without lookahead)
+  core: -> new Item(@rule, @dot, new Set)
+
+  # Is this item complete? (dot at end of rule)
+  isComplete: -> @dot >= @rule.rhs.length
+
+  # Creates a new Item with the dot moved forward
+  advance: ->
+    @isComplete() and throw new Error("Cannot advance complete item")
+    new Item(@rule, @dot + 1, new Set(@lookahead)) # new item with dot advanced
+
+  # Returns the symbol that comes after the dot
+  nextSymbol: ->
+    @isComplete() and throw new Error("Cannot get next symbol for complete item")
+    @rule.rhs[@dot] # next symbol after dot
+
+  toString: ->
+    rhs = @rule.rhs.slice()
+    rhs.splice(@dot, 0, '•')
+    "#{@rule.lhs} → #{rhs.join(' ')} [#{[...@lookahead].join(',')}]"
+
+class State # Set of LR(0) items
+  constructor: ->
+    @id          = null      # unique state id
+    @items       = []        # collection of items
+    @coreMap     = new Map() # core-based deduplication (core key -> item)
+    @transitions = new Map() # state transitions (symbol -> state)
+    @inadequate  = false     # has shift/reduce conflicts?
+
+  # Unique name for state (something like "3-2|3-3")
+  name: -> @_name ?= (item.name() for item in @items).sort().join('|')
+
+  # Get item by rule ID and dot position
+  core: (ruleId, dot) -> @coreMap.get(Item.makeName(ruleId, dot))
+
+  # Add item to state, merging lookaheads if core already exists
+  # Returns true if item was added or lookaheads were merged
+  addItem: (item) ->
+    name = item.name()
+
+    # If item already exists, merge lookaheads
+    if core = @coreMap.get(name)
+
+      # Merge lookaheads with existing item
+      orig = core.lookahead.size
+      core.lookahead.add(la) for la from item.lookahead
+
+      # Return true if lookaheads were actually added
+      core.lookahead.size > orig
+
+    else
+
+      # Otherwise, add new item
+      @_name = null # invalidate cached name
+      @coreMap.set(name, item)
+      @items.push(item)
+      true
