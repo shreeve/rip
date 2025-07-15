@@ -99,3 +99,77 @@ class State # Set of LR(0) items
       @coreMap.set(name, item)
       @items.push(item)
       true
+
+# ==============================================================================
+# UNIVERSAL LANGUAGE DEFINITION
+# ==============================================================================
+
+class Language
+  constructor: (@language = {}, opts = {}) ->
+    @timing "🔤 Language constructor"
+
+    # Set debugging level and perform language validation
+    @debug = @parseDebug opts.debug ? NORMAL
+    # @validateLanguage()
+
+    # Input (foundational data)
+    @info             = {}        # Language metadata
+    @rules            = []        # Language rules
+    @operators        = []        # Precedence/associativity
+    @start            = null      # Start symbol
+
+    # Output (derived during analysis)
+    @analyzed         = false     # Analysis done?
+    @symbols          = new Map() # Symbol table
+    @tokens           = new Set() # Terminal symbols
+    @precedence       = {}        # Symbol precedence table
+    @symbolRules      = new Map() # Lookup rules by symbol
+    @startRule        = null      # Cached augmented start rule
+    @states           = []        # State machine
+    @stateMap         = new Map() # State lookup
+    @propagateLinks   = new Map() # LALR(1) lookahead propagation
+    @inadequateStates = []        # Conflict states
+    @conflicts        = []        # Conflict details
+    @table            = null      # Parse table
+    @defaultActions   = {}        # Default actions for states
+    @cache            = new Map() # Performance cache
+
+    # Statistics
+    @stats =
+
+      # Grammar rules
+      lhsCount:              0    # LHS count (97)
+      sourceRules:           0    # Direct from grammar file (405)
+      expandedRules:         0    # Expanded/flattened (0)
+      errorRecoveryRules:    0    # Error recovery rules (4)
+      augmentedRules:        0    # Augmented start rule (1)
+
+      # 206 symbols
+
+      # Operator statistics
+      precedenceLevels:      0    # Number of precedence levels (23)
+      totalOperators:        0    # Total number of operators (100)
+      leftAssocGroups:       0    # Number of left-associative groups (10)
+      rightAssocGroups:      0    # Number of right-associative groups (10)
+      nonAssocGroups:        0    # Number of non-associative groups (3)
+
+      # LALR(1) computation
+      closureCalls:          0    # Closure calls
+      cacheHits:             0    # Cache hits
+      stateCreations:        0    # State creations
+      lookaheadComputations: 0    # Lookahead computations
+
+      # Optimizations
+      optimizationTime:      0    # Optimization time
+
+    # Optimization
+    @optimizationConfig =
+      enabled:          opts.optimize         ? false
+      auto:             opts.autoOptimize     ? true
+      minStatesForAuto: opts.minStatesForAuto ? 20
+      algorithms:       opts.algorithms       ? ['auto']
+      skipIfSmall:      opts.skipIfSmall      ? true
+      minimizeStates:   opts.minimizeStates   ? true
+      safeMinimization: opts.safeMinimization ? true
+
+    @timing "🔤 Language constructor"
