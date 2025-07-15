@@ -139,6 +139,15 @@ class Language
       errorRecoveryRules:    0    # Error recovery rules
       augmentedRules:        0    # Augmented start rule
 
+      # 206 symbols
+
+      # Operator statistics
+      precedenceLevels:      0    # Number of precedence levels (23)
+      totalOperators:        0    # Total number of operators (100)
+      leftAssocGroups:       0    # Number of left-associative groups (10)
+      rightAssocGroups:      0    # Number of right-associative groups (10)
+      nonAssocGroups:        0    # Number of non-associative groups (3)
+
       # LALR(1) computation
       closureCalls:          0    # Closure calls
       cacheHits:             0    # Cache hits
