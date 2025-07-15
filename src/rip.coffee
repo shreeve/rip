@@ -298,11 +298,9 @@ class Language
       for rule, i in rules
         try
           [pattern, action, options] = rule
-
           rhs = @parseRulePattern(pattern, lhs, i)
           @validateActionCode(action, rhs.length, lhs, i) if action?
-          @rules.push @addRule(lhs, rhs, action, options?.prec)
-
+          @addRule(lhs, rhs, action, options?.prec)
           @stats.sourceRules++
         catch error
           throw new Error("Error processing rule #{i + 1} for '#{lhs}': #{error.message}")
