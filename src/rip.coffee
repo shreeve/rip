@@ -180,8 +180,8 @@ class Language
 
     # Output (derived during analysis)
     @analyzed         = false   # Analysis done?
-    @symbols          = new Map # Symbol table
     @tokens           = new Set # Terminal symbols
+    @symbols          = new Map # Symbol table
     @precedence       = {}      # Symbol precedence table
     @symbolRules      = new Map # Lookup rules by symbol
     @startRule        = null    # Cached augmented start rule
