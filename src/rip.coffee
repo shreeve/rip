@@ -182,8 +182,8 @@ class Language
     @analyzed         = false   # Analysis done?
     @tokens           = new Set # Terminal symbols
     @symbols          = new Map # Symbol table
-    @precedence       = {}      # Symbol precedence table
     @symbolRules      = new Map # Lookup rules by symbol
+    @precedence       = {}      # Symbol precedence table
     @states           = []      # State machine
     @stateMap         = new Map # State lookup
     @propagateLinks   = new Map # LALR(1) lookahead propagation
