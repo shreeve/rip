@@ -301,20 +301,25 @@ class Language
   loadLanguage: ->
     @info      = {...(@language.info      or {})}
     @operators = [...(@language.operators or [])]
-    @start     =      @language.start
+    start      =      @language.start
 
-    # Load grammar rules
-    for lhs, rules of (@language.grammar ? @language.rules)
-      @stats.lhsCount++
-      for rule, i in rules
-        try
-          [pattern, action, options] = rule
-          rhs = @parseRulePattern(pattern, lhs, i)
-          @validateActionCode(action, rhs.length, lhs, i) if action?
-          @addRule(lhs, rhs, action, options?.prec)
-          @stats.sourceRules++
-        catch error
-          throw new Error("Error processing rule #{i + 1} for '#{lhs}': #{error.message}")
+    # Load rules from grammar or rules object
+    obj = @language.grammar ? @language.rules
+    for lhs, rules of obj
+        @stats.lhsCount++
+        for rule, i in rules
+          try
+            [pattern, action, options] = rule
+            rhs = @parseRulePattern(pattern, lhs)
+            @validateActionCode(action, rhs.length, lhs, i) if action?
+            @addRule(lhs, rhs, action, options?.prec)
+            @stats.sourceRules++
+          catch error
+            throw new Error("Error processing rule #{i + 1} for '#{lhs}': #{error.message}")
+
+    # Detect start symbol if not provided
+    @start = if info[start] then start else Object.keys(obj)[0]
+    @start or throw new Error("No start symbol found")
 
   # Parse and validate rule pattern (such as 'Body TERMINATOR Line')
   # Splits pattern into individual symbols and validates them
