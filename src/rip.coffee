@@ -295,6 +295,7 @@ class Language
 
     # Load grammar rules
     for lhs, rules of (@language.grammar ? @language.rules)
+      @stats.lhsCount++
       for rule, i in rules
         try
           [pattern, action, options] = rule
