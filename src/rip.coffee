@@ -184,7 +184,6 @@ class Language
     @symbols          = new Map # Symbol table
     @precedence       = {}      # Symbol precedence table
     @symbolRules      = new Map # Lookup rules by symbol
-    @startRule        = null    # Cached augmented start rule
     @states           = []      # State machine
     @stateMap         = new Map # State lookup
     @propagateLinks   = new Map # LALR(1) lookahead propagation
