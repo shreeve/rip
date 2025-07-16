@@ -1,11 +1,67 @@
 
+# Instructions for AI
 
 
 
+# restore the original CoffeeScript 2.7.0 parser
+cp lib/coffeescript/parser{-jison,}.js
+
+# compile a new parser.js, using our updated Jison and uncompressed output
+time cake build:parser && ls -l --block-size=1 lib/coffeescript/parser.js && npm test
+
+# extract the key variables from original parser.js
+grep -E '^(symbolMap|terminals_|productionTable|stateTable|defaultActions):' lib/coffeescript/parser.js > sonar/vars-jison.txt
+
+# create a sonar based parser.js
+sonar/sonar.coffee src/grammar.coffee -o sonar/parser.js
+
+# extract the key variables from sonar parser.js
+grep -E '^  (symbolMap|terminals_|productionTable|stateTable|defaultActions):' sonar/parser.js | cut -c 3- > sonar/vars-sonar.txt
+
+# compare the two variables
+diff sonar/vars-jison.txt sonar/vars-sonar.txt
 
 ==
 
-Deeply analyze this code
+Deeply analyze the code in sonar/jison.js and sonar/sonar.coffee
+
+jison.js is a production LALR(1) lookahead generation engine and sonar.coffee is derived from it, but written in CoffeeScript
+
+The goal is to get the sonar.coffee file to produce identical output as jison.js
+
+Instead of comparing the final parsers for each, we are going to start by only comparing the output data, which is a sort of "fingerprint" on the result of the algorithm.
+
+The variables from jison.js have been stored in sonar/vars-jison.txt
+
+To build a new parser with sonar.coffee, use this command:
+
+sonar/sonar.coffee src/grammar.coffee -o sonar/parser.js
+
+Then, extract the key variables from this file, using this command:
+
+grep -E '^  (symbolMap|terminals_|productionTable|stateTable|defaultActions):' sonar/parser.js | cut -c 3- > sonar/vars-sonar.txt
+
+Then, compare sonar/vars-jison.txt and sonar/vars-sonar.txt to see if they match exactly.
+
+If not, review the code in jison.js and then make changes to sonar.coffee and recompile it to produce a new sonar/parser.js file.
+
+Then, extract the variables from this new sonar/parser.js file and write them to sonar/vars-sonar.txt using the command above.
+
+Then, iterate until (hopefully) the values from both are identical.
+
+==
+
+
+
+Each time you build a new parser with sonar.coffee, you can extract it's variable
+
+
+
+
+
+
+
+
 
 To compile a new version use:
 
@@ -56,3 +112,7 @@ cp lib/coffeescript/parser{-jison,}.js && sonar/sonar.coffee src/grammar.coffee 
 The code in parser-jison.js includes those variables. Ensure that sonar.coffee generates the same values for the variables.
 
 Iterate and adjust the algorithm as needed so those variables that sonar.coffee writes to parser.js match the values from jison.js
+
+==
+
+do-jison.coffee | grep -E '^(symbolMap|terminals_|productionTable|stateTable|defaultActions):' | tee vars-jison.txt

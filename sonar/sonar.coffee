@@ -564,53 +564,15 @@ class LALRGenerator
 
     for state, k in states
       actions = {}
-      reduceActions = {}
-      shiftActions = {}
-      gotoActions = {}
-
-      # Categorize all actions in this state
       for symbol, action of state when state.hasOwnProperty symbol
         actions[symbol] = action
 
-        switch action[0]
-          when 1  # Shift action
-            shiftActions[symbol] = action
-          when 2  # Reduce action
-            reduceActionKey = JSON.stringify(action)
-            reduceActions[reduceActionKey] = (reduceActions[reduceActionKey] || []).concat(symbol)
-          when 3  # Goto action
-            gotoActions[symbol] = action
-
       actionCount = Object.keys(actions).length
 
-      # Safe cases for default actions:
-      # 1. State has exactly one action (original behavior)
-      # 2. State has only reduce actions and they're all the same
-      # 3. State has shifts + one dominant reduce action (reduce applies to all other symbols)
-
       if actionCount == 1
-        # Safe: only one action in the entire state
         for symbol, action of actions
           if action[0] == 2  # Only for reduce actions
             defaults[k] = action
-          break
-      else if Object.keys(shiftActions).length == 0 and Object.keys(gotoActions).length == 0 and Object.keys(reduceActions).length == 1
-        # Safe: state has only reduce actions and they're all identical
-        for reduceActionKey, symbols of reduceActions
-          if symbols.length == actionCount  # All actions are the same reduce action
-            defaults[k] = JSON.parse(reduceActionKey)
-          break
-      else if Object.keys(reduceActions).length == 1
-        # Potentially safe: one reduce action dominates, shifts are explicit
-        for reduceActionKey, symbols of reduceActions
-          reduceAction = JSON.parse(reduceActionKey)
-          totalReduceSymbols = symbols.length
-          totalShiftSymbols = Object.keys(shiftActions).length
-          totalGotoSymbols = Object.keys(gotoActions).length
-
-          # If reduce action applies to significantly more symbols than shifts+gotos
-          if totalReduceSymbols > totalShiftSymbols + totalGotoSymbols
-            defaults[k] = reduceAction
           break
 
     defaults
@@ -715,21 +677,6 @@ class LALRGenerator
     var parser = #{module.moduleCode};
     #{@moduleInclude}
 
-    // Helper function to get action with default fallback
-    parser.getAction = function(state, symbol) {
-      var stateObj = parser.stateTable[state];
-      if (stateObj && stateObj.hasOwnProperty(symbol)) {
-        return stateObj[symbol];
-      }
-      // Fall back to default action for this state
-      var defaultAction = parser.defaultActions[state];
-      if (defaultAction) {
-        return defaultAction;
-      }
-      // No action found - this should trigger a parse error
-      return null;
-    };
-
     function Parser () {
       this.yy = {};
     }
@@ -758,34 +705,8 @@ class LALRGenerator
     {commonCode: tableCode.commonCode, moduleCode}
 
   _generateTableCode: (stateTable) ->
-    # Enhanced compression with safe default actions
-    compressedTable = {}
-    defaultActions = @defaultActions || {}
-
-    for stateId, state of stateTable
-      compressedState = {}
-      defaultAction = defaultActions[stateId]
-
-      # If we have a default action, only store actions that differ from it
-      # If we don't have a default action, store all actions
-      if defaultAction
-        for symbol, action of state
-          if JSON.stringify(action) != JSON.stringify(defaultAction)
-            compressedState[symbol] = action
-
-        # Only include state if it has non-default actions
-        if Object.keys(compressedState).length > 0
-          compressedTable[stateId] = compressedState
-      else
-        # No default action - store all actions for this state
-        compressedTable[stateId] = state
-
-    # Generate compact JSON with optimized spacing
-    moduleCode = JSON.stringify(compressedTable, null, 0)
+    moduleCode = JSON.stringify(stateTable, null, 0)
       .replace(/"([0-9]+)"(?=:)/g, "$1")  # Remove quotes from numeric keys
-      .replace(/\[\s*([0-9])\s*,\s*([0-9]+)\s*\]/g, '[$1,$2]')  # Compact arrays
-      .replace(/\{\s*([0-9]+):/g, '{$1:')  # Compact object start
-      .replace(/,\s*([0-9]+):/g, ',$1:')  # Compact object properties
 
     {commonCode: '', moduleCode}
 
