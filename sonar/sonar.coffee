@@ -107,32 +107,75 @@ class LALRGenerator
     @_buildParser grammar
 
   _buildParser: (grammar) ->
-    phases = [
-      'processGrammar'
-      'buildLRAutomaton'
-      'buildAugmentedGrammar'
-      'computeLookaheads'
-      'unionLookaheads'
-      'buildParseTable'
-      'computeDefaultActions'
-    ]
+    console.time 'processGrammar'
+    @processGrammar grammar
+    console.timeEnd 'processGrammar'
 
-    for phase in phases
-      console.time phase
-      switch phase
-        when 'processGrammar'
-          result = @[phase] grammar
-        when 'buildParseTable'
-          result = @[phase] @states
-        when 'computeDefaultActions'
-          result = @[phase] @stateTable
-        else
-          result = @[phase]()
+    console.time 'buildLRAutomaton'
+    @states = @buildLRAutomaton()
+    console.timeEnd 'buildLRAutomaton'
 
-      @stateTable = result if phase is 'buildParseTable'
-      @states = result if phase is 'buildLRAutomaton'
-      @defaultActions = result if phase is 'computeDefaultActions'
-      console.timeEnd phase
+    @terminalMap = {}
+
+    # Initialize lookahead state (replaces newg creation)
+    @lookahead = {
+      nonterminalMap: {},
+      nonterminals: {},
+      productions: []
+    }
+
+    @conflictStates = []
+    @onDemandLookahead = @options.onDemandLookahead or false
+
+    console.time 'buildAugmentedGrammar'
+    @buildAugmentedGrammar()
+    console.timeEnd 'buildAugmentedGrammar'
+
+    # Compute lookaheads in lookahead context (replaces newg.computeLookaheads())
+    savedNonterminals = @nonterminals
+    savedProductions = @productions
+
+    @nonterminals = @lookahead.nonterminals
+    @productions = @lookahead.productions
+
+    console.time 'computeLookaheads'
+    @computeLookaheads()
+    console.timeEnd 'computeLookaheads'
+
+    @nonterminals = savedNonterminals
+    @productions = savedProductions
+
+    console.time 'unionLookaheads'
+    @unionLookaheads()
+    console.timeEnd 'unionLookaheads'
+
+    console.time 'buildParseTable'
+    @stateTable = @buildParseTable @states
+    console.timeEnd 'buildParseTable'
+
+    console.time 'computeDefaultActions'
+    @defaultActions = @computeDefaultActions @stateTable
+    console.timeEnd 'computeDefaultActions'
+
+  # Specialized GOTO method for lookahead computation (DeRemer-Pennello algorithm)
+  gotoEncoded: (stateId, symbolSequence) ->
+    stateId = stateId.split(":")[0]
+    symbolSequence = symbolSequence.map (s) -> s.slice(s.indexOf(":") + 1)
+    @gotoState stateId, symbolSequence
+
+  # Navigate through parser states following a symbol sequence
+  gotoState: (startState, symbolSequence) ->
+    currentState = parseInt startState, 10
+    for symbol in symbolSequence
+      currentState = @states[currentState].transitions[symbol] or currentState
+    currentState
+
+  # Get lookahead symbols for an item in a state
+  getLookaheadSet: (state, item) ->
+    if @onDemandLookahead and not state.hasConflicts
+      @terminals
+    else
+      item.follows
 
   # ---------------------------------------------------------------------------
   # Grammar Processing
@@ -184,38 +227,6 @@ class LALRGenerator
     @nonterminals.$accept = new Nonterminal "$accept"
     @nonterminals.$accept.productions.push acceptProduction
     @nonterminals[@startSymbol].follows.push @EOF
-
-  # Process semantic actions and precedence
-  _processSemanticAction: (handle, symbol, productions, actionGroups, operators, rhs) ->
-    if typeof handle[1] is 'string'
-      # Handle has semantic action
-      action = handle[1]
-      prec = handle[2]
-    else
-      # Handle has precedence info
-      action = handle.action or ''
-      prec = handle[1]
-
-    # Store semantic action - group by action content
-    if action
-      actionGroups[action] ?= []
-      actionGroups[action].push "case #{productions.length}:"
-
-    # Handle precedence
-    if prec
-      if typeof prec is 'string'
-        # Named precedence
-        @_precedenceMap ?= {}
-        @_precedenceMap[productions.length] = prec
-      else if prec.prec
-        # Precedence object
-        @_precedenceMap ?= {}
-        @_precedenceMap[productions.length] = prec.prec
-
-  # Set precedence for a production
-  _setPrecedence: (production, precedence) ->
-    if precedence
-      production.precedence = precedence
 
   _buildProductions: (bnf, productions, nonterminals, symbols, operators) ->
     actions = [
@@ -269,29 +280,84 @@ class LALRGenerator
     @performAction = "function anonymous(#{parameters}) {\n#{actionsCode}\n}"
 
   _processProduction: (handle, symbol, productions, nonterminals, addSymbol, actionGroups, operators, symbolMap, productionTable) ->
-    # Implementation details for processing individual productions
-    # This would contain the complex logic for handling different production formats
-    # For brevity, showing the structure rather than full implementation
+    r = null
+    rhs = null
+    i = 0
 
     if Array.isArray handle
       rhs = if typeof handle[0] is 'string' then handle[0].trim().split(' ') else handle[0][..]
-      addSymbol token for token in rhs
 
-      # Handle semantic actions and precedence
+      for token in rhs
+        addSymbol token
+
       if typeof handle[1] is 'string' or handle.length is 3
-        @_processSemanticAction handle, symbol, productions, actionGroups, operators, rhs
+        label = 'case ' + (productions.length + 1) + ':'
+        action = handle[1]
 
-      production = new Production symbol, rhs, productions.length + 1
+        # Process named semantic values
+        if action.match(/[$@][a-zA-Z][a-zA-Z0-9_]*/)
+          count = {}
+          names = {}
+
+          for token, i in rhs
+            rhs_i = token.match(/\[[a-zA-Z][a-zA-Z0-9_-]*\]/)
+            if rhs_i
+              rhs_i = rhs_i[0].substr(1, rhs_i[0].length - 2)
+              rhs[i] = token.substr(0, token.indexOf('['))
+            else
+              rhs_i = token
+
+            if names[rhs_i]
+              names[rhs_i + (++count[rhs_i])] = i + 1
+            else
+              names[rhs_i] = i + 1
+              names[rhs_i + "1"] = i + 1
+              count[rhs_i] = 1
+
+          action = action.replace /\$([a-zA-Z][a-zA-Z0-9_]*)/g, (str, pl) ->
+            if names[pl] then '$' + names[pl] else str
+          action = action.replace /@([a-zA-Z][a-zA-Z0-9_]*)/g, (str, pl) ->
+            if names[pl] then '@' + names[pl] else str
+
+        action = action
+          .replace(/([^'"])\$\$|^\$\$/g, '$1this.$')
+          .replace(/@[0$]/g, "this._$")
+          .replace(/\$(-?\d+)/g, (_, n) ->
+            "$$[$0" + (parseInt(n, 10) - rhs.length || '') + "]")
+          .replace(/@(-?\d+)/g, (_, n) ->
+            "_$[$0" + (n - rhs.length || '') + "]")
+
+        if actionGroups[action]
+          actionGroups[action].push label
+        else
+          actionGroups[action] = [label]
+
+        rhs = rhs.map (e) -> e.replace(/\[[a-zA-Z_][a-zA-Z0-9_-]*\]/g, '')
+
+        r = new Production symbol, rhs, productions.length + 1
+        if handle[2] and operators[handle[2].prec]
+          r.precedence = operators[handle[2].prec].precedence
+      else
+        rhs = rhs.map (e) -> e.replace(/\[[a-zA-Z_][a-zA-Z0-9_-]*\]/g, '')
+        r = new Production symbol, rhs, productions.length + 1
+        if operators[handle[1].prec]
+          r.precedence = operators[handle[1].prec].precedence
     else
       handle = handle.replace /\[[a-zA-Z_][a-zA-Z0-9_-]*\]/g, ''
       rhs = handle.trim().split ' '
-      addSymbol token for token in rhs
-      production = new Production symbol, rhs, productions.length + 1
+      for token in rhs
+        addSymbol token
+      r = new Production symbol, rhs, productions.length + 1
 
-    @_setPrecedence production, operators
-    productions.push production
-    productionTable.push [symbolMap[production.symbol], if production.handle[0] is '' then 0 else production.handle.length]
-    nonterminals[symbol].productions.push production
+    if r.precedence is 0
+      for i in [r.handle.length - 1..0]
+        if not (r.handle[i] in nonterminals) and r.handle[i] in operators
+          r.precedence = operators[r.handle[i]].precedence
+          break
+
+    productions.push r
+    productionTable.push [symbolMap[r.symbol], if r.handle[0] is '' then 0 else r.handle.length]
+    nonterminals[symbol].productions.push r
 
   _buildTerminalMappings: (symbolMap, nonterminals) ->
     terminals = []
@@ -382,13 +448,20 @@ class LALRGenerator
       changed = false
 
       for production in @productions
+        q = !!@go_
+        ctx = q
+
         for symbol, i in production.handle when @nonterminals[symbol]
-          followSet = if i is production.handle.length - 1
+          if ctx
+            q = @gotoEncoded production.symbol, production.handle[0...i]
+          bool = not ctx or q is parseInt(@lookahead.nonterminalMap[symbol], 10)
+
+          followSet = if i is production.handle.length - 1 and bool
             @nonterminals[production.symbol].follows
           else
             part = production.handle[i + 1..]
             firstSet = @_first part
-            if @_isNullable part
+            if @_isNullable(part) and bool
               firstSet.concat @nonterminals[production.symbol].follows
             else
               firstSet
@@ -499,7 +572,7 @@ class LALRGenerator
 
       # Set reductions
       for item in itemSet.reductions
-        terminals = @_getLookaheadSet?(itemSet, item) ? @terminals
+        terminals = if @getLookaheadSet then @getLookaheadSet(itemSet, item) else @terminals
 
         for stackSymbol in terminals
           action = state[@symbolMap[stackSymbol]]
@@ -712,10 +785,147 @@ class LALRGenerator
       throw error
 
   parse: (input) ->
-    # Implementation would contain the full LR parsing algorithm
-    # This is a complex method that drives the actual parsing process
-    # For brevity, showing structure rather than full implementation
-    throw new Error "Parse method needs full implementation"
+    stk = [0]
+    val = [null]
+    loc = []
+    stateTable = @stateTable
+    yytext = ''
+    yylineno = 0
+    yyleng = 0
+    recovering = 0
+    TERROR = 2
+    EOF = 1
+
+    lexer = Object.create @lexer
+    sharedState = { yy: {} }
+
+    for k of @yy when Object.prototype.hasOwnProperty.call(@yy, k)
+      sharedState.yy[k] = @yy[k]
+
+    lexer.setInput input, sharedState.yy
+    sharedState.yy.lexer = lexer
+    sharedState.yy.parser = this
+
+    unless typeof lexer.yylloc isnt 'undefined'
+      lexer.yylloc = {}
+    yyloc = lexer.yylloc
+    loc.push yyloc
+
+    ranges = lexer.options and lexer.options.ranges
+
+    if typeof sharedState.yy.parseError is 'function'
+      @parseError = sharedState.yy.parseError
+    else
+      @parseError = Object.getPrototypeOf(this).parseError
+
+    lex = =>
+      token = lexer.lex() or EOF
+      if typeof token isnt 'number'
+        token = @symbolMap[token] or token
+      token
+
+    symbol = null
+    preErrorSymbol = null
+    state = null
+    action = null
+    r = null
+    yyval = {}
+    p = null
+    len = null
+    newState = null
+    expected = null
+
+    while true
+      stkLen = stk.length
+      state = stk[stkLen - 1]
+
+      if @defaultActions[state]
+        action = @defaultActions[state]
+      else
+        if symbol is null or typeof symbol is 'undefined'
+          symbol = lex()
+        action = stateTable[state] and stateTable[state][symbol]
+
+      if typeof action is 'undefined' or not action.length or not action[0]
+        errStr = ''
+
+        unless recovering
+          expected = []
+          for p of stateTable[state]
+            if @terminals_[p] and p > TERROR
+              expected.push "'" + @terminals_[p] + "'"
+          if lexer.showPosition
+            errStr = 'Parse error on line ' + (yylineno + 1) + ":\n" +
+              lexer.showPosition() + "\nExpecting " + expected.join(', ') +
+              ", got '" + (@terminals_[symbol] or symbol) + "'"
+          else
+            errStr = 'Parse error on line ' + (yylineno + 1) + ": Unexpected " +
+              (if symbol is EOF then "end of input" else "'" + (@terminals_[symbol] or symbol) + "'")
+          @parseError errStr, {
+            text: lexer.match
+            token: @terminals_[symbol] or symbol
+            line: lexer.yylineno
+            loc: yyloc
+            expected: expected
+          }
+
+        throw new Error errStr
+
+      if action[0] instanceof Array and action.length > 1
+        throw new Error 'Parse Error: multiple actions possible at state: ' + state + ', token: ' + symbol
+
+      switch action[0]
+        when 1 # shift
+          stk.push symbol
+          val.push lexer.yytext
+          loc.push lexer.yylloc
+          stk.push action[1]
+          symbol = null
+          unless preErrorSymbol
+            yyleng = lexer.yyleng
+            yytext = lexer.yytext
+            yylineno = lexer.yylineno
+            yyloc = lexer.yylloc
+            if recovering > 0
+              recovering--
+          else
+            symbol = preErrorSymbol
+            preErrorSymbol = null
+
+        when 2 # reduce
+          len = @productionTable[action[1]][1]
+          valLen = val.length
+          locLen = loc.length
+          yyval.$ = val[valLen - len]
+          locFirst = loc[locLen - (len or 1)]
+          locLast = loc[locLen - 1]
+          yyval._$ = {
+            first_line: locFirst.first_line
+            last_line: locLast.last_line
+            first_column: locFirst.first_column
+            last_column: locLast.last_column
+          }
+          if ranges
+            yyval._$.range = [locFirst.range[0], locLast.range[1]]
+          r = @performAction.apply yyval, [yytext, yyleng, yylineno, sharedState.yy, action[1], val, loc]
+
+          if typeof r isnt 'undefined'
+            return r
+
+          if len
+            stk.length = stk.length - (len * 2)
+            val.length = val.length - len
+            loc.length = loc.length - len
+
+          stk.push @productionTable[action[1]][0]
+          val.push yyval.$
+          loc.push yyval._$
+          stkLen = stk.length
+          newState = stateTable[stk[stkLen - 2]][stk[stkLen - 1]]
+          stk.push newState
+
+        when 3 # accept
+          return true
 
   trace: ->
     # Debug tracing - no-op by default
@@ -748,8 +958,12 @@ Sonar.Parser = (grammar, options) ->
 
 exports.LALRGenerator = LALRGenerator
 
+Sonar.Generator = (g, options) ->
+  opt = Object.assign {}, g.options, options
+  new LALRGenerator g, opt
+
 exports.Parser = (grammar, options) ->
-  generator = new LALRGenerator grammar, options
+  generator = Sonar.Generator grammar, options
   generator.createParser()
 
 # =============================================================================
