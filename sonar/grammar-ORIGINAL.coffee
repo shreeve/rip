@@ -14,7 +14,13 @@
 # If you run the `cake build:parser` command, Jison constructs a parse table
 # from our rules and saves it into `lib/parser.js`.
 
-# Since we're going to be wrapped in a function by rip-parser in any case, if our
+# The only dependency is on the **Jison.Parser**.
+{Parser} = require './jison'
+
+# Jison DSL
+# ---------
+
+# Since we're going to be wrapped in a function by Jison in any case, if our
 # action immediately returns a value, we can optimize by removing the function
 # wrapper and just returning the value directly.
 unwrap = /^function\s*\(\)\s*\{\s*return\s*([\s\S]*);\s*\}/
@@ -990,10 +996,8 @@ for name, alternatives of grammar
 # rules, and the name of the root. Reverse the operators because Jison orders
 # precedence from low to high, and we have it high to low
 # (as in [Yacc](http://dinosaur.compilertools.net/yacc/index.html)).
-
-# Export only grammar, operators, and tokens for parser generator
-module.exports =
-  grammar:   grammar
-  operators: operators.reverse()
-  tokens:    tokens.join ' '
-  start:     'Root'
+exports.parser = new Parser
+  tokens      : tokens.join ' '
+  bnf         : grammar
+  operators   : operators.reverse()
+  startSymbol : 'Root'
