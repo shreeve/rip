@@ -1,0 +1,29 @@
+Deeply analyze this code
+
+To compile a new version use:
+
+time cake build:parser && ls -l --block-size=1 lib/coffeescript/parser.js && npm test
+
+This will compile a new parser.js and check it's filesize and then test everything.
+
+If you need to reset due to a failed parser.js, you can copy parser-jison.js over the top of parser.js to reset it
+
+==
+
+zlib = require('zlib')
+fs = require('fs');
+data = fs.readFileSync('/Users/shreeve/Desktop/play.coffee')
+data.length # 152120
+b = zlib.gzipSync(data)
+b.length # 12109
+b.toString('base64')
+b.toString('base64').length # 16148
+
+info = JSON.parse(json)
+json = JSON.stringify(info)
+
+==
+
+From the root of this repo, run the following command until it passes the 'npm test' suite:
+
+cp lib/coffeescript/parser{-jison,}.js && sonar/sonar.coffee src/grammar.coffee -o lib/coffeescript/parser.js && npm test
