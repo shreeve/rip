@@ -198,6 +198,11 @@ class LALRGenerator
 
     # Store semantic action - group by action content
     if action
+      # Convert jison location tracking syntax to proper JavaScript
+      # @1, @2, etc. should become _$[$0], _$[$1], etc.
+      # Note: jison uses 1-based indexing, but JavaScript arrays are 0-based
+      action = action.replace /@(\d+)/g, (match, num) -> "_$[#{parseInt(num) - 1}]"
+
       actionGroups[action] ?= []
       actionGroups[action].push "case #{productions.length}:"
 
