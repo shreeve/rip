@@ -46,7 +46,7 @@
     "codemirror": "~5.65.3",
     "docco": "~0.9.1",
     "highlight.js": "~11.5.1",
-    "jison": "~0.4.18",
+    "jison": "https://github.com/shreeve/jison.git",
     "markdown-it": "~13.0.0",
     "puppeteer": "~13.6.0",
     "underscore": "~1.13.3",

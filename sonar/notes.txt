@@ -1,3 +1,10 @@
+
+
+
+
+
+==
+
 Deeply analyze this code
 
 To compile a new version use:
@@ -24,6 +31,28 @@ json = JSON.stringify(info)
 
 ==
 
+Use the sonar/jison.js file as a reference for how to follow the algorithm and export of parser variables.
+
 From the root of this repo, run the following command until it passes the 'npm test' suite:
 
 cp lib/coffeescript/parser{-jison,}.js && sonar/sonar.coffee src/grammar.coffee -o lib/coffeescript/parser.js && npm test
+
+The embedded parser in parser-jison.js is wrapped and exported in a very specific way. Ensure that sonar.coffee generates the same shape of object and exports.
+
+==
+
+First, read the code in sonar/jison.js to understand deeply what this code does. It is an advanced LALR(1) with lookahead generation.
+
+It processes a grammar and then outputs some specific variables:
+
+symbols, terminal, productions, state table, and default actions
+
+Before getting sonar.coffee able to do the same thing, let's just focus on getting sonar.coffee to emit the same exact variable values as are embedded in the lib/coffeescript/parser-jison.js file.
+
+Use the sonar/jison.js file as a reference for how to follow the algorithm and export of parser variables.
+
+cp lib/coffeescript/parser{-jison,}.js && sonar/sonar.coffee src/grammar.coffee -o lib/coffeescript/parser.js
+
+The code in parser-jison.js includes those variables. Ensure that sonar.coffee generates the same values for the variables.
+
+Iterate and adjust the algorithm as needed so those variables that sonar.coffee writes to parser.js match the values from jison.js

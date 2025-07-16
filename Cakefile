@@ -57,6 +57,34 @@ buildParser = ->
   parser = require('./lib/coffeescript/grammar').parser.generate(moduleMain: ->)
   fs.writeFileSync 'lib/coffeescript/parser.js', parser
 
+# New Sonar-based parser builder
+buildParserWithSonar = ->
+  helpers.extend global, require 'util'
+
+  # Require Sonar instead of Jison
+  {Parser} = require './node_modules/jison/lib/sonar'
+
+  # Get the grammar definition (same as before)
+  grammarModule = require './lib/coffeescript/grammar'
+
+  # Extract grammar specification from the parser object
+  grammarSpec =
+    tokens: grammarModule.parser.tokens
+    bnf: grammarModule.parser.bnf
+    operators: grammarModule.parser.operators
+    startSymbol: grammarModule.parser.startSymbol
+
+  # Create parser using Sonar
+  parser = new Parser grammarSpec
+
+  # Generate the parser code
+  generatedCode = parser.generate()
+
+  # Write to the same location
+  fs.writeFileSync 'lib/coffeescript/parser.js', generatedCode
+
+  console.log "✨ Parser generated with Sonar!"
+
 buildExceptParser = (callback) ->
   files = fs.readdirSync 'src'
   files = ('src/' + file for file in files when file.match(/\.(lit)?coffee$/))
@@ -124,6 +152,8 @@ watchAndBuildAndTest = (harmony = no) ->
 task 'build', 'build the CoffeeScript compiler from source', build
 
 task 'build:parser', 'build the Jison parser only', buildParser
+
+task 'build:parser:sonar', 'build the parser using Sonar', buildParserWithSonar
 
 task 'build:except-parser', 'build the CoffeeScript compiler, except for the Jison parser', buildExceptParser
 
