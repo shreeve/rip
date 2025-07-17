@@ -272,13 +272,13 @@ class Language
       @buildStates()             # @rules → @states, @stateMap
       @computeLookaheads()       # @states → @propagateLinks
 
-      # Phase 6: Parse Table and Optimization
-      @buildTable()              # @states → @table
-      @removeUnreachableStates() # Remove dead states
-      @resolveConflicts()        # @states → @conflicts, @inadequateStates
-      @minimizeStates() if @optimizationConfig.minimizeStates # State minimization
-      @optimizeTable()           # Smart table optimization
-      @buildDefaultActions()     # @states → @defaultActions
+      # # Phase 6: Parse Table and Optimization
+      # @buildTable()              # @states → @table
+      # @removeUnreachableStates() # Remove dead states
+      # @resolveConflicts()        # @states → @conflicts, @inadequateStates
+      # @minimizeStates() if @optimizationConfig.minimizeStates # State minimization
+      # @optimizeTable()           # Smart table optimization
+      # @buildDefaultActions()     # @states → @defaultActions
 
       @analyzed = true
       @timing "🔍 Analysis"
@@ -404,8 +404,12 @@ class Language
     throw new Error("Start symbol '#{@start}' has no production rules") unless hasStartRule
 
     # Add augmented start rule: $accept → start $end
-    @rules[0] ?= new Rule('$accept', [@start, '$end'], 0)
+    augmentedRule = new Rule('$accept', [@start, '$end'], 0)
+    @rules.unshift(augmentedRule)  # Insert at beginning instead of assignment
     @stats.augmentedRules = 1
+
+    if @debug >= DEBUG
+      console.log "🔧 Created augmented start rule: #{augmentedRule.lhs} → #{augmentedRule.rhs.join(' ')}"
 
   # ============================================================================
   # PHASE 1: SYMBOL AND RULE ANALYSIS
@@ -960,6 +964,7 @@ unless module.parent
 
   # Parse command line arguments
   args = process.argv.slice(2)
+
   options = {}
   inputFile = null
 

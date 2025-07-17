@@ -1,0 +1,204 @@
+
+# Instructions for AI
+
+
+
+# restore the original CoffeeScript 2.7.0 parser
+cp lib/coffeescript/parser{-jison,}.js
+
+# compile a new parser.js, using our updated Jison and uncompressed output
+time cake build:parser && ls -l --block-size=1 lib/coffeescript/parser.js && npm test
+
+# extract the key variables from original parser.js
+grep -E '^(symbolMap|terminals_|productionTable|stateTable|defaultActions):' lib/coffeescript/parser.js > sonar/vars-jison.txt
+
+# create a sonar based parser.js
+sonar/sonar.coffee src/grammar.coffee -o sonar/parser.js
+
+# extract the key variables from sonar parser.js
+grep -E '^  (symbolMap|terminals_|productionTable|stateTable|defaultActions):' sonar/parser.js | cut -c 3- > sonar/vars-sonar.txt
+
+# compare the two variables
+diff sonar/vars-jison.txt sonar/vars-sonar.txt
+
+==
+
+Deeply analyze the code in sonar/jison.js and sonar/sonar.coffee
+
+jison.js is a production LALR(1) lookahead generation engine and sonar.coffee is derived from it, but written in CoffeeScript
+
+The goal is to get the sonar.coffee file to produce identical output as jison.js
+
+Instead of comparing the final parsers for each, we are going to start by only comparing the output data, which is a sort of "fingerprint" on the result of the algorithm.
+
+The variables from jison.js have been stored in sonar/vars-jison.txt
+
+To build a new parser with sonar.coffee, use this command:
+
+sonar/sonar.coffee src/grammar.coffee -o sonar/parser.js
+
+Then, extract the key variables from this file, using this command:
+
+grep -E '^  (symbolMap|terminals_|productionTable|stateTable|defaultActions):' sonar/parser.js | cut -c 3- > sonar/vars-sonar.txt
+
+Then, compare sonar/vars-jison.txt and sonar/vars-sonar.txt to see if they match exactly.
+
+If not, review the code in jison.js and then make changes to sonar.coffee and recompile it to produce a new sonar/parser.js file.
+
+Then, extract the variables from this new sonar/parser.js file and write them to sonar/vars-sonar.txt using the command above.
+
+Then, iterate until (hopefully) the values from both are identical.
+
+==
+
+
+
+Each time you build a new parser with sonar.coffee, you can extract it's variable
+
+
+
+
+
+
+
+
+
+To compile a new version use:
+
+time cake build:parser && ls -l --block-size=1 lib/coffeescript/parser.js && npm test
+
+This will compile a new parser.js and check it's filesize and then test everything.
+
+If you need to reset due to a failed parser.js, you can copy parser-jison.js over the top of parser.js to reset it
+
+==
+
+zlib = require('zlib')
+fs = require('fs');
+data = fs.readFileSync('/Users/shreeve/Desktop/play.coffee')
+data.length # 152120
+b = zlib.gzipSync(data)
+b.length # 12109
+b.toString('base64')
+b.toString('base64').length # 16148
+
+info = JSON.parse(json)
+json = JSON.stringify(info)
+
+==
+
+Use the sonar/jison.js file as a reference for how to follow the algorithm and export of parser variables.
+
+From the root of this repo, run the following command until it passes the 'npm test' suite:
+
+cp lib/coffeescript/parser{-jison,}.js && sonar/sonar.coffee src/grammar.coffee -o lib/coffeescript/parser.js && npm test
+
+The embedded parser in parser-jison.js is wrapped and exported in a very specific way. Ensure that sonar.coffee generates the same shape of object and exports.
+
+==
+
+First, read the code in sonar/jison.js to understand deeply what this code does. It is an advanced LALR(1) with lookahead generation.
+
+It processes a grammar and then outputs some specific variables:
+
+symbols, terminal, productions, state table, and default actions
+
+Before getting sonar.coffee able to do the same thing, let's just focus on getting sonar.coffee to emit the same exact variable values as are embedded in the lib/coffeescript/parser-jison.js file.
+
+Use the sonar/jison.js file as a reference for how to follow the algorithm and export of parser variables.
+
+cp lib/coffeescript/parser{-jison,}.js && sonar/sonar.coffee src/grammar.coffee -o lib/coffeescript/parser.js
+
+The code in parser-jison.js includes those variables. Ensure that sonar.coffee generates the same values for the variables.
+
+Iterate and adjust the algorithm as needed so those variables that sonar.coffee writes to parser.js match the values from jison.js
+
+==
+
+do-jison.coffee | grep -E '^(symbolMap|terminals_|productionTable|stateTable|defaultActions):' | tee vars-jison.txt
+
+==
+
+###
+__END__
+###
+
+
+# Input (user provides)
+@info      = {}        # Language metadata
+# Sample: { name: 'MyLang', version: '1.0', author: 'Me' }
+
+@rules     = []        # Grammar rules
+# Sample: [['Expression', ['Number', '+', 'Number']], ['Expression', ['Number']]]
+
+@operators = []        # Precedence/associativity
+# Sample: [['left', '+', '-'], ['right', '**']]
+
+@start     = 'Root'    # Start symbol
+# Sample: 'Root' or 'Program' or 'Expression'
+
+@analyzed         = false     # Analysis done
+
+@symbols          = new Map() # Symbol table
+# Sample: Map { 'Expression' => Symbol('Expression', false), 'Number' => Symbol('Number', true) }
+
+@tokens           = new Set() # Terminal symbols
+# Sample: Set { 'Number', '+', '-', '*', '/', 'IDENTIFIER' }
+
+@symbolRules      = new Map() # Lookup rules by symbol
+# Sample: Map { 'Expression' => [Rule1, Rule2], 'Statement' => [Rule3] }
+
+@precedence       = {}        # Symbol precedence table
+# Sample: { '+': {level: 1, assoc: 'left'}, '*': {level: 2, assoc: 'left'} }
+
+@states           = []        # State machine
+# Sample: [State(id: 0, items: [...], transitions: {...}), State(id: 1, ...)]
+
+@stateMap         = new Map() # State lookup
+# Sample: Map { '0-1-2' => State0, '1-0-1' => State1 }
+
+@propagateLinks   = new Map() # LALR(1) lookahead propagation
+# Sample: Map { '0-1-0' => Set{'1-2-0', '2-1-1'} }
+
+@inadequateStates = []        # Conflict states
+# Sample: [State1, State3]  # States with shift/reduce conflicts
+
+@conflicts        = []        # Conflict details
+# Sample: [{type: 'shift/reduce', state: 1, symbol: '+', resolved: true}]
+
+@table            = null      # Parse table
+# Sample: { 0: {'NUMBER': [1, 3], 'IDENTIFIER': [1, 4]}, 1: {'$end': [3, 0]} }
+
+@defaultActions   = {}        # Default actions for states
+# Sample: { 1: [2, 5], 3: [2, 2] }  # State 1 defaults to reduce rule 5
+
+@cache            = new Map() # Performance cache
+# Sample: Map { 'closure-0-1' => [...], 'core-1-2' => [...] }
+
+
+
+
+
+
+    # Prepare
+    @info  = language.info # language info (name, description, website, etc)
+    @rules = language.rules or [] # rules define all languages
+
+    # Populate the language
+    @symbols = new Map()     # name -> Symbol
+    @tokens = new Set()
+    #
+
+    # Populate the rest of the language
+    @info     = language.info
+    @symbols  = new Map()     # name -> Symbol
+    @tokens   =
+
+    # Create special symbols (starts with id = 0, 1, 2)
+    @getSymbol '$accept'
+    @getSymbol '$end' , true
+    @getSymbol 'error', true; @tokens.add('error')
+
+    @info  = language.info
+
+->
