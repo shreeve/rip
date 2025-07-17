@@ -53,11 +53,25 @@ run = (args, callback) ->
 buildParser = ->
   helpers.extend global, require 'util'
   grammar = require('./lib/coffeescript/grammar')
-  # Use our rip-parser instead of Jison
-  {Generator} = require '../parser/rip-parser'
-  gen = new Generator grammar
-  parser = gen.generate()
-  fs.writeFileSync 'lib/coffeescript/parser.js', parser
+
+  who = if 0 then 'jison' else './sonar'
+  gen = (require who).Generator
+    bnf       : grammar.grammar
+    operators : grammar.operators
+    tokens    : grammar.tokens
+    start     : grammar.start
+  src = gen.generate()
+  fs.writeFileSync 'lib/coffeescript/parser.js', src
+
+  # # # Use our rip-parser instead of Jison
+  # # {Generator} = require '../parser/rip-parser'
+  # # gen = new Generator grammar
+  # # parser = gen.generate()
+  #
+  # require 'jison'
+  # # We don't need `moduleMain`, since the parser is unlikely to be run standalone.
+  # parser = require('./lib/coffeescript/grammar').parser.generate(moduleMain: ->)
+  # fs.writeFileSync 'lib/coffeescript/parser.js', parser
 
 buildExceptParser = (callback) ->
   files = fs.readdirSync 'src'

@@ -82,7 +82,7 @@
 // https://github.com/zaach/jison/blob/master/lib/jison.js
 
 var Jison = exports.Jison = exports;
-var version = require('../package.json').version;
+var version = '0.5.0'; // require('../package.json').version;
 
 // Merge array b into array a, avoiding duplicates
 function union(a, b) {
