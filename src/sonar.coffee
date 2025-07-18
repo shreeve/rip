@@ -36,17 +36,15 @@ class Item
 # Set of LR items (parser state)
 class LRState
   constructor: (items...) ->
-    @list = items
+    @items = new Set(items)
     @handleToSymbols = {}
     @reductions = []
     @transitions = {}
     @hasShifts = false
     @hasConflicts = false
-    @keys = {}
 
-    @keys[item.id] = true for item in @list
+  valueOf: -> @_value or= (item.id for item from @items).sort().join('|')
 
-  valueOf: -> @_value or= @list.map((item) -> item.id).sort().join('|')
 
 # =============================================================================
 # LALR(1) Parser Generator
@@ -465,28 +463,26 @@ class LALRGenerator
 
     while marked isnt states.length
       itemSet = states[marked++]
-      for item in itemSet.list when item.nextSymbol and item.nextSymbol isnt @EOF
+      for item from itemSet.items when item.nextSymbol and item.nextSymbol isnt @EOF
         @_insertLRState item.nextSymbol, itemSet, states, marked - 1
 
     states
 
   _closure: (itemSet) ->
     closureSet = new LRState()
-    queue = itemSet.list or itemSet
+    workingSet = new Set(itemSet.items)
     processed = {}
 
-    while queue.length > 0
-      newItems = []
-      closureSet.keys[item.id] = true for item in queue
-      closureSet.list.push queue...
+    while workingSet.size > 0
+      newItems = new Set()
+      closureSet.items.add item for item from workingSet
 
-      for item in queue
+      for item from workingSet
         {nextSymbol} = item
 
         if nextSymbol and @nonterminals[nextSymbol] and not processed[nextSymbol]
-          for production in @nonterminals[nextSymbol].productions
-            newItem = new Item production, 0
-            newItems.push newItem unless closureSet.keys[newItem.id]?
+          for production in @nonterminals[nextSymbol].productions when not closureSet.items.has(production.id)
+            newItems.add(new Item production, 0)
           processed[nextSymbol] = true
         else unless nextSymbol
           closureSet.reductions.push item
@@ -495,24 +491,23 @@ class LALRGenerator
           closureSet.hasShifts = true
           closureSet.hasConflicts = closureSet.reductions.length > 0
 
-      queue = newItems
+      workingSet = newItems
 
     closureSet
 
   _goto: (itemSet, symbol) ->
     gotoSet = new LRState()
 
-    for item, n in itemSet.list when item.nextSymbol is symbol
-      newItem = new Item item.production, item.dot + 1, item.follows, n
-      gotoSet.keys[newItem.id] = true
-      gotoSet.list.push newItem
+    for item from itemSet.items when item.nextSymbol is symbol
+      newItem = new Item item.production, item.dot + 1, item.follows
+      gotoSet.items.add newItem
 
-    if gotoSet.list.length is 0 then gotoSet else @_closure gotoSet
+    if gotoSet.items.size is 0 then gotoSet else @_closure gotoSet
 
   _insertLRState: (symbol, itemSet, states, stateNum) ->
     gotoSet = @_goto itemSet, symbol
 
-    if gotoSet.list.length > 0
+    if gotoSet.items.size > 0
       gotoValue = gotoSet.valueOf()
       existingIndex = states.has[gotoValue]
 
@@ -541,7 +536,7 @@ class LALRGenerator
 
       # Set shift and goto actions
       for stackSymbol, gotoState of itemSet.transitions
-        for item in itemSet.list when item.nextSymbol is stackSymbol
+        for item from itemSet.items when item.nextSymbol is stackSymbol
           # Skip symbols that aren't in the symbolMap (prevents undefined keys)
           continue unless @symbolMap[stackSymbol]?
 
@@ -551,7 +546,7 @@ class LALRGenerator
             state[@symbolMap[stackSymbol]] = [SHIFT, gotoState]
 
       # Set accept action
-      for item in itemSet.list when item.nextSymbol is @EOF
+      for item from itemSet.items when item.nextSymbol is @EOF
         # Skip if EOF symbol not in symbolMap (prevents undefined keys)
         continue unless @symbolMap[@EOF]?
 
@@ -641,7 +636,7 @@ class LALRGenerator
     @terminalMap = {}
 
     for state, i in @states
-      for item in state.list when item.dot is 0
+      for item from state.items when item.dot is 0
         symbol = "#{i}:#{item.production.symbol}"
         @terminalMap[symbol] = item.production.symbol
         @lookahead.nonterminalMap[symbol] = i
@@ -1148,7 +1143,7 @@ if require.main is module
     for stateId in generator.conflictStates
       state = generator.states[stateId]
       console.log "State #{stateId}:"
-      console.log "  Items: #{state.list?.length || 0}"
+      console.log "  Items: #{state.items?.size || 0}"
       console.log "  Reductions: #{state.reductions?.length || 0}"
       console.log "  Shifts: #{Object.keys(state.transitions || {}).length}"
       console.log ""
