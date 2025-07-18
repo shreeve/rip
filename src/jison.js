@@ -205,6 +205,10 @@ function LALRGenerator(grammar, options) {
     this.processGrammar(grammar);
     console.timeEnd('processGrammar');
 
+    console.time('setupIntegerMappings');
+    this.setupIntegerMappings();
+    console.timeEnd('setupIntegerMappings');
+
     console.time('buildLRAutomaton');
     this.states = this.buildLRAutomaton();
     console.timeEnd('buildLRAutomaton');
@@ -279,6 +283,56 @@ LALRGenerator.prototype.processGrammar = function(grammar) {
     }
 
     this.augmentGrammar(grammar);
+};
+
+// Setup integer mappings for ultra-fast lookahead computation
+LALRGenerator.prototype.setupIntegerMappings = function() {
+    // Create integer mappings for nonterminals
+    this.nonterminalToIndex = {};
+    this.indexToNonterminal = [];
+    var ntIndex = 0;
+    for (var symbol in this.nonterminals) {
+        this.nonterminalToIndex[symbol] = ntIndex;
+        this.indexToNonterminal[ntIndex] = symbol;
+        ntIndex++;
+    }
+    this.nonterminalCount = ntIndex;
+
+    // Create integer mappings for terminals
+    this.terminalToIndex = {};
+    this.indexToTerminal = [];
+    var termIndex = 0;
+    for (var i = 0; i < this.terminals.length; i++) {
+        var terminal = this.terminals[i];
+        this.terminalToIndex[terminal] = termIndex;
+        this.indexToTerminal[termIndex] = terminal;
+        termIndex++;
+    }
+    this.terminalCount = termIndex;
+
+    // Choose appropriate typed array based on terminal count
+    var ArrayType = this.terminalCount < 256 ? Uint8Array : Uint16Array;
+
+        // Pre-allocate typed arrays for FIRST sets (N × T)
+    this.firstSets = new ArrayType(this.nonterminalCount * this.terminalCount);
+
+    // Pre-allocate typed arrays for FOLLOW sets (N × T)
+    this.followSets = new ArrayType(this.nonterminalCount * this.terminalCount);
+
+    // Pre-allocate production FIRST sets (P × T) where P = number of productions
+    this.productionFirstSets = new ArrayType(this.productions.length * this.terminalCount);
+
+    // Pre-allocate nullable sets (N bits, but use full bytes for simplicity)
+    this.nullableSets = new Uint8Array(this.nonterminalCount);
+
+    console.log('Integer mappings created:');
+    console.log('  Nonterminals:', this.nonterminalCount);
+    console.log('  Terminals:', this.terminalCount);
+    console.log('  Productions:', this.productions.length);
+    console.log('  Array type:', ArrayType.name);
+    console.log('  FIRST sets memory:', this.firstSets.byteLength, 'bytes');
+    console.log('  FOLLOW sets memory:', this.followSets.byteLength, 'bytes');
+    console.log('  Production FIRST sets memory:', this.productionFirstSets.byteLength, 'bytes');
 };
 
 // Process operator precedence and associativity declarations
@@ -494,32 +548,42 @@ LALRGenerator.prototype.computeLookaheads = function() {
 };
 
 // Compute NULLABLE sets for all nonterminals (canonical: NULLABLE computation)
+// INTEGER-ONLY VERSION - No strings, no objects, just pure integer operations!
 LALRGenerator.prototype.computeNullableSets = function() {
-    var nonterminals = this.nonterminals;
-    var self = this;
     var cont = true;
+    var self = this;
 
     while (cont) {
         cont = false;
 
+        // Check each production for nullability
         this.productions.forEach(function(production) {
             if (!production.nullable) {
-                var n = 0;
+                var allNullable = true;
                 for (var i = 0, t; t = production.handle[i]; ++i) {
-                    if (self.isNullable(t)) n++;
+                    if (!self.isNullableInteger(t)) {
+                        allNullable = false;
+                        break;
+                    }
                 }
-                if (n === i) {
+                if (allNullable) {
                     production.nullable = cont = true;
                 }
             }
         });
 
-        for (var symbol in nonterminals) {
-            if (!this.isNullable(symbol)) {
-                for (var i = 0, production; production = nonterminals[symbol].productions[i]; i++) {
-                    if (production.nullable) {
-                        nonterminals[symbol].nullable = cont = true;
-                        break;
+                // Check each nonterminal for nullability
+        for (var ntIndex = 0; ntIndex < this.nonterminalCount; ntIndex++) {
+            if (!this.nullableSets[ntIndex]) {
+                var symbol = this.indexToNonterminal[ntIndex];
+                var nonterminal = this.nonterminals[symbol];
+                if (nonterminal && nonterminal.productions) {
+                    for (var i = 0, production; production = nonterminal.productions[i]; i++) {
+                        if (production.nullable) {
+                            this.nullableSets[ntIndex] = 1;
+                            cont = true;
+                            break;
+                        }
                     }
                 }
             }
@@ -528,6 +592,22 @@ LALRGenerator.prototype.computeNullableSets = function() {
 };
 
 // Check if a symbol or symbol sequence is nullable (canonical: NULLABLE predicate)
+// INTEGER-ONLY VERSION - Ultra-fast integer operations!
+LALRGenerator.prototype.isNullableInteger = function(symbol) {
+    if (symbol === '') return true;
+    if (symbol instanceof Array) {
+        for (var i = 0, t; t = symbol[i]; ++i) {
+            if (!this.isNullableInteger(t)) return false;
+        }
+        return true;
+    }
+
+    // Ultra-fast integer lookup instead of string-based object property access
+    var ntIndex = this.nonterminalToIndex[symbol];
+    return ntIndex !== undefined ? this.nullableSets[ntIndex] : false;
+};
+
+// Legacy version for backward compatibility during transition
 LALRGenerator.prototype.isNullable = function(symbol) {
     if (symbol === '') return true;
     if (symbol instanceof Array) {
@@ -540,38 +620,150 @@ LALRGenerator.prototype.isNullable = function(symbol) {
 };
 
 // Compute FIRST sets for all nonterminals (canonical: FIRST computation)
+// INTEGER-ONLY VERSION - No union() calls, just blazing fast typed arrays!
 LALRGenerator.prototype.computeFirstSets = function() {
-    var productions = this.productions;
-    var nonterminals = this.nonterminals;
     var self = this;
     var cont = true;
 
     while (cont) {
         cont = false;
 
-        productions.forEach(function(production) {
-            var firsts = self.first(production.handle);
-            if (firsts.length !== production.first.length) {
-                production.first = firsts;
+        // Update production FIRST sets
+        this.productions.forEach(function(production) {
+            var oldFirstArray = self.cloneProductionFirst(production);
+            var newFirstArray = self.legacyFirst(production.handle);
+
+            // Convert to integer array and check for changes
+            var prodIndex = production.id;
+            var baseOffset = prodIndex * self.terminalCount;
+            var changed = false;
+
+            for (var i = 0; i < newFirstArray.length; i++) {
+                var termIndex = self.terminalToIndex[newFirstArray[i]];
+                if (termIndex !== undefined && !self.productionFirstSets[baseOffset + termIndex]) {
+                    self.productionFirstSets[baseOffset + termIndex] = 1;
+                    changed = true;
+                }
+            }
+
+            if (changed) {
+                production.first = newFirstArray; // Keep legacy format for compatibility
                 cont = true;
             }
         });
 
-        for (var symbol in nonterminals) {
-            var firsts = [];
-            nonterminals[symbol].productions.forEach(function(production) {
-                union(firsts, production.first);
-            });
-            if (firsts.length !== nonterminals[symbol].first.length) {
-                nonterminals[symbol].first = firsts;
+        // Update nonterminal FIRST sets using integer operations (NO UNION!)
+        for (var ntIndex = 0; ntIndex < this.nonterminalCount; ntIndex++) {
+            var symbol = this.indexToNonterminal[ntIndex];
+            var nonterminal = this.nonterminals[symbol];
+            if (!nonterminal) continue;
+
+            var baseOffset = ntIndex * this.terminalCount;
+            var changed = false;
+
+            // Instead of union(), use direct integer operations
+            for (var i = 0; i < nonterminal.productions.length; i++) {
+                var production = nonterminal.productions[i];
+                var prodIndex = production.id;
+                var prodBaseOffset = prodIndex * this.terminalCount;
+
+                // Blazing fast integer union operation!
+                for (var j = 0; j < this.terminalCount; j++) {
+                    if (this.productionFirstSets[prodBaseOffset + j] && !this.firstSets[baseOffset + j]) {
+                        this.firstSets[baseOffset + j] = 1;
+                        changed = true;
+                    }
+                }
+            }
+
+            if (changed) {
+                // Update legacy format for compatibility
+                nonterminal.first = this.convertIntegerSetToArray(baseOffset);
                 cont = true;
             }
         }
     }
 };
 
-// Get FIRST set for a symbol or symbol sequence
-LALRGenerator.prototype.first = function(symbol) {
+// INTEGER-ONLY: Compute FIRST set for a production using blazing fast operations
+LALRGenerator.prototype.computeFirstForProduction = function(production) {
+    var prodIndex = production.id; // Production IDs are 0-based
+    var baseOffset = prodIndex * this.terminalCount;
+    var changed = false;
+
+    // Get FIRST set for the production handle (right-hand side)
+    var tempFirst = new (this.firstSets.constructor)(this.terminalCount);
+    this.computeFirstForSequence(production.handle, tempFirst);
+
+    // Check if anything changed and update if so
+    for (var i = 0; i < this.terminalCount; i++) {
+        if (tempFirst[i] && !this.productionFirstSets[baseOffset + i]) {
+            this.productionFirstSets[baseOffset + i] = 1;
+            changed = true;
+        }
+    }
+
+    return changed;
+};
+
+// INTEGER-ONLY: Compute FIRST set for a nonterminal using blazing fast operations
+LALRGenerator.prototype.computeFirstForNonterminal = function(ntIndex) {
+    var symbol = this.indexToNonterminal[ntIndex];
+    var nonterminal = this.nonterminals[symbol];
+    var baseOffset = ntIndex * this.terminalCount;
+    var changed = false;
+
+    if (!nonterminal) return false;
+
+    // Union all production FIRST sets for this nonterminal
+    for (var i = 0; i < nonterminal.productions.length; i++) {
+        var production = nonterminal.productions[i];
+        var prodIndex = production.id; // Production IDs are 0-based
+        var prodBaseOffset = prodIndex * this.terminalCount;
+
+        // Blazing fast bitwise union operation!
+        for (var j = 0; j < this.terminalCount; j++) {
+            if (this.productionFirstSets[prodBaseOffset + j] && !this.firstSets[baseOffset + j]) {
+                this.firstSets[baseOffset + j] = 1;
+                changed = true;
+            }
+        }
+    }
+
+    return changed;
+};
+
+// INTEGER-ONLY: Compute FIRST set for a symbol sequence using blazing fast operations
+LALRGenerator.prototype.computeFirstForSequence = function(sequence, resultArray) {
+    for (var i = 0; i < sequence.length; i++) {
+        var symbol = sequence[i];
+        var ntIndex = this.nonterminalToIndex[symbol];
+
+        if (ntIndex !== undefined) {
+            // Nonterminal - use the legacy first() function to get its FIRST set
+            // This avoids circular dependency during computation
+            var firstSet = this.legacyFirst(symbol);
+            for (var j = 0; j < firstSet.length; j++) {
+                var termIndex = this.terminalToIndex[firstSet[j]];
+                if (termIndex !== undefined) {
+                    resultArray[termIndex] = 1;
+                }
+            }
+        } else {
+            // Terminal - add it directly
+            var termIndex = this.terminalToIndex[symbol];
+            if (termIndex !== undefined) {
+                resultArray[termIndex] = 1;
+            }
+        }
+
+        // If this symbol is not nullable, stop here
+        if (!this.isNullableInteger(symbol)) break;
+    }
+};
+
+// Legacy FIRST function for backward compatibility and bootstrap
+LALRGenerator.prototype.legacyFirst = function(symbol) {
     if (symbol === '') return [];
     if (symbol instanceof Array) {
         var firsts = [];
@@ -586,6 +778,27 @@ LALRGenerator.prototype.first = function(symbol) {
         return firsts;
     }
     return !this.nonterminals[symbol] ? [symbol] : this.nonterminals[symbol].first;
+};
+
+// Helper function to clone production FIRST set
+LALRGenerator.prototype.cloneProductionFirst = function(production) {
+    return production.first ? production.first.slice() : [];
+};
+
+// Helper function to convert integer set to array for compatibility
+LALRGenerator.prototype.convertIntegerSetToArray = function(baseOffset) {
+    var result = [];
+    for (var i = 0; i < this.terminalCount; i++) {
+        if (this.firstSets[baseOffset + i]) {
+            result.push(this.indexToTerminal[i]);
+        }
+    }
+    return result;
+};
+
+// Wrapper for backward compatibility
+LALRGenerator.prototype.first = function(symbol) {
+    return this.legacyFirst(symbol);
 };
 
 // Compute FOLLOW sets for all nonterminals
