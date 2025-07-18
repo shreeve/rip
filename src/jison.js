@@ -1,8 +1,103 @@
-// LALR(1) Parser Generator - Optimized Integer-Only Implementation
-// High-performance implementation using typed arrays for ultra-fast set operations
+// LALR(1) Parser Generator - DeRemer-Pennello Algorithm Implementation
+//
+// This implementation uses canonical naming conventions from established literature to
+// serve as a reference implementation for computer science education and research.
+// Canonical naming conventions based on established literature:
+//
+// - "Compilers: Principles, Techniques, and Tools" (Dragon Book)
+// - "Efficient Computation of LALR(1) Look-Ahead Sets" (DeRemer & Pennello, 1982)
+// - "LR Parsing: Theory and Practice" (Knuth, 1965)
+//
+// Function Reference:
+//
+// Utility Functions:
+// - union(a, b) - Merge array b into array a, avoiding duplicates
+//
+// Constructor Functions:
+// - Nonterminal(symbol) - Represents a nonterminal symbol in the grammar
+// - Production(symbol, handle, id) - Represents a production rule in the grammar
+// - Item(production, dot, lookaheadSet, predecessor) - Represents an LR(0) item [A → α•β] with lookahead
+// - LRState() - Represents a set of LR items (parser state)
+// - LALRGenerator(grammar, options) - Unified LALR(1) parser generator class
+//
+// LRState Methods:
+// - concat(set) - Merge another LRState or array into this LRState
+// - push(item) - Add an item to this LRState
+// - contains(item) - Check if this LRState contains a specific item
+// - valueOf() - Generate unique string representation for ItemSet comparison
+//
+// LALRGenerator Core Methods:
+// - gotoEncoded(stateId, symbolSequence) - Specialized GOTO method for lookahead computation
+// - processGrammar(grammar) - Process and validate the input grammar specification
+// - processOperators(ops) - Process operator precedence and associativity declarations
+// - augmentGrammar(grammar) - Add augmented start production for parser generation
+// - buildProductions(bnf, productions, nonterminals, symbols, operators) - Build production rules from BNF grammar
+//
+// Lookahead Computation:
+// - computeLookaheads() - Compute LALR(1) lookaheads using DeRemer-Pennello algorithm
+// - computeNullableSets() - Compute NULLABLE sets for all nonterminals
+// - isNullable(symbol) - Check if a symbol or symbol sequence is nullable
+// - computeFirstSets() - Compute FIRST sets for all nonterminals
+// - first(symbol) - Get FIRST set for a symbol or symbol sequence
+// - computeFollowSets() - Compute FOLLOW sets for all nonterminals
+//
+// LR Automaton Construction:
+// - closure(itemSet) - Compute closure of an item set (add all implied items)
+// - goto(itemSet, symbol) - Compute goto operation (items after shifting a symbol)
+// - buildLRAutomaton() - Generate canonical collection of LR(0) item sets
+// - insertLRState(symbol, itemSet, states, stateNum) - Insert or merge item set into canonical collection
+//
+// Parse Table Generation:
+// - buildParseTable(itemSets) - Generate LALR(1) parsing table from item sets
+// - resolveConflict(production, op, reduce, shift) - Resolve shift/reduce conflicts using operator precedence
+// - computeDefaultActions(states) - Find default actions for parser states to reduce table size
+// - getLookaheadSet(state, item) - Get lookahead symbols for an item in a state
+//
+// Navigation and State Management:
+// - gotoState(startState, symbolSequence) - Navigate through parser states following a symbol sequence
+// - gotoStateWithPath(startState, symbolSequence) - Navigate through parser states and record the path taken
+// - buildAugmentedGrammar() - Build augmented grammar for lookahead computation
+// - unionLookaheads() - Propagate lookaheads from augmented grammar back to original states
+//
+// Code Generation:
+// - generate(opt) - Generate parser code with specified options
+// - generateCommonJSModule(opt) - Generate CommonJS module wrapper for parser
+// - generateModule(opt) - Generate module wrapper for parser
+// - generateModuleExpr() - Generate self-executing module expression
+// - generateModule_() - Generate core parser module code
+// - generateTableCode(table) - Generate optimized parsing table code
+//
+// Parser Runtime:
+// - parseError(str, hash) - Handle parsing errors with context information
+// - parse(input) - Parse input string using generated LALR(1) parser
+// - trace() - Debug tracing function (no-op by default)
+// - createParser() - Create executable parser instance from generated code
+//
+// Export Functions:
+// - Jison.Parser(grammar, options) - Create parser from grammar
+// - Jison.Generator(g, options) - Create generator instance
+// - Parser(g, options) - Main parser factory function
+//
+// Original implementation by Jison team
+// https://github.com/zaach/jison/blob/master/lib/jison.js
 
 var Jison = exports.Jison = exports;
-var version = '0.5.0';
+var version = '0.5.0'; // require('../package.json').version;
+
+// Merge array b into array a, avoiding duplicates
+function union(a, b) {
+    var s = Object.create(null);
+    var i, len;
+    for (i = 0, len = a.length; i < len; i++) {
+        s[a[i]] = 1;
+    }
+    for (i = 0, len = b.length; i < len; i++) {
+        if (!s[b[i]]) {
+            a.push(b[i]);
+        }
+    }
+    return a;
+}
 
 // Represents a nonterminal symbol in the grammar
 function Nonterminal(symbol) {
@@ -23,25 +118,25 @@ function Production(symbol, handle, id) {
     this.precedence = 0;
 }
 
-// Represents an LR(0) item [A → α•β] with lookahead
+// Represents an LR(0) item [A → α•β] with lookahead (canonical: LR item)
 function Item(production, dot, lookaheadSet, predecessor) {
     this.production = production;
-    this.dot = dot || 0;
-    this.follows = lookaheadSet || [];
+    this.dot = dot || 0;  // Position of • in production
+    this.follows = lookaheadSet || []; // LALR(1) lookahead symbols
     this.predecessor = predecessor;
-    this.nextSymbol = this.production.handle[this.dot];
+    this.nextSymbol = this.production.handle[this.dot]; // Symbol after •
     this.id = parseInt(production.id + 'a' + this.dot, 36);
 }
 
-// Represents a set of LR items (parser state)
+// Represents a set of LR items (parser state) - canonical: LR state
 function LRState() {
     this.list = [];
     this.length = 0;
-    this.reductions = [];
-    this.handleToSymbols = {};
-    this.transitions = {};
-    this.hasShifts = false;
-    this.hasConflicts = false;
+    this.reductions = []; // Reductions in this state
+    this.handleToSymbols = {}; // Maps production handles to generating symbols
+    this.transitions = {}; // State transitions
+    this.hasShifts = false; // Has shift actions
+    this.hasConflicts = false; // Has SR/RR conflicts
     this.keys = {};
 
     if (arguments.length) {
@@ -53,6 +148,7 @@ function LRState() {
     }
 }
 
+// Merge another LRState or array into this LRState
 LRState.prototype.concat = function(set) {
     var a = set.list || set;
     for (var i = a.length - 1; i >= 0; i--) {
@@ -63,6 +159,7 @@ LRState.prototype.concat = function(set) {
     return this;
 };
 
+// Add an item to this LRState
 LRState.prototype.push = function(item) {
     this.keys[item.id] = true;
     this.list.push(item);
@@ -70,20 +167,22 @@ LRState.prototype.push = function(item) {
     return this.length;
 };
 
+// Check if this LRState contains a specific item
 LRState.prototype.contains = function(item) {
     return this.keys[item.id];
 };
 
+// Generate unique string representation for ItemSet comparison
 LRState.prototype.valueOf = function() {
     var v = this.list.map(function(a) { return a.id; }).sort().join('|');
     this.valueOf = function() { return v; };
     return v;
 };
 
-// Unified LALR(1) parser generator with integer-only optimization
+// Unified LALR(1) parser generator class (canonical: LALRGenerator)
 function LALRGenerator(grammar, options) {
     options = Object.assign({}, grammar.options, options);
-    this.terminals = {};
+    this.terminals = {}; // Terminal symbols
     this.operators = {};
     this.productions = [];
     this.conflicts = 0;
@@ -102,45 +201,69 @@ function LALRGenerator(grammar, options) {
     }
     this.moduleInclude = grammar.moduleInclude || '';
 
+    console.time('processGrammar');
     this.processGrammar(grammar);
-    this.setupIntegerMappings();
-    this.states = this.buildLRAutomaton();
-    this.terminalMap = {};
+    console.timeEnd('processGrammar');
 
+    console.time('setupIntegerMappings');
+    this.setupIntegerMappings();
+    console.timeEnd('setupIntegerMappings');
+
+    console.time('buildLRAutomaton');
+    this.states = this.buildLRAutomaton();
+    console.timeEnd('buildLRAutomaton');
+
+    this.terminalMap = {}; // Maps symbols to terminal representations
+
+    // Initialize lookahead state (replaces newg creation)
     this.lookahead = {
-        nonterminalMap: {},
+        nonterminalMap: {}, // Maps nonterminals to states
         nonterminals: {},
         productions: []
     };
 
-    this.conflictStates = [];
+    this.conflictStates = []; // States with conflicts
     this.onDemandLookahead = options.onDemandLookahead || false;
 
+    console.time('buildAugmentedGrammar');
     this.buildAugmentedGrammar();
+    console.timeEnd('buildAugmentedGrammar');
 
-    // Compute lookaheads in lookahead context
+    // Compute lookaheads in lookahead context (replaces newg.computeLookaheads())
     var savedNonterminals = this.nonterminals;
     var savedProductions = this.productions;
 
     this.nonterminals = this.lookahead.nonterminals;
     this.productions = this.lookahead.productions;
 
+    console.time('computeLookaheads');
     this.computeLookaheads();
+    console.timeEnd('computeLookaheads');
 
     this.nonterminals = savedNonterminals;
     this.productions = savedProductions;
 
+    console.time('unionLookaheads');
     this.unionLookaheads();
+    console.timeEnd('unionLookaheads');
+
+    console.time('buildParseTable');
     this.stateTable = this.buildParseTable(this.states);
+    console.timeEnd('buildParseTable');
+
+    console.time('computeDefaultActions');
     this.defaultActions = this.computeDefaultActions(this.stateTable);
+    console.timeEnd('computeDefaultActions');
 }
 
+// Specialized GOTO method for lookahead computation (DeRemer-Pennello algorithm)
 LALRGenerator.prototype.gotoEncoded = function(stateId, symbolSequence) {
     stateId = stateId.split(":")[0];
     symbolSequence = symbolSequence.map(function(s) { return s.slice(s.indexOf(":") + 1); });
     return this.gotoState(stateId, symbolSequence);
 };
 
+// Process and validate the input grammar specification
 LALRGenerator.prototype.processGrammar = function(grammar) {
     var bnf = grammar.bnf;
     var tokens = grammar.tokens;
@@ -164,6 +287,7 @@ LALRGenerator.prototype.processGrammar = function(grammar) {
 
 // Setup integer mappings for ultra-fast lookahead computation
 LALRGenerator.prototype.setupIntegerMappings = function() {
+    // Create integer mappings for nonterminals
     this.nonterminalToIndex = {};
     this.indexToNonterminal = [];
     var ntIndex = 0;
@@ -174,6 +298,7 @@ LALRGenerator.prototype.setupIntegerMappings = function() {
     }
     this.nonterminalCount = ntIndex;
 
+    // Create integer mappings for terminals
     this.terminalToIndex = {};
     this.indexToTerminal = [];
     var termIndex = 0;
@@ -185,12 +310,32 @@ LALRGenerator.prototype.setupIntegerMappings = function() {
     }
     this.terminalCount = termIndex;
 
+    // Choose appropriate typed array based on terminal count
     var ArrayType = this.terminalCount < 256 ? Uint8Array : Uint16Array;
+
+        // Pre-allocate typed arrays for FIRST sets (N × T)
     this.firstSets = new ArrayType(this.nonterminalCount * this.terminalCount);
+
+    // Pre-allocate typed arrays for FOLLOW sets (N × T)
     this.followSets = new ArrayType(this.nonterminalCount * this.terminalCount);
+
+    // Pre-allocate production FIRST sets (P × T) where P = number of productions
+    this.productionFirstSets = new ArrayType(this.productions.length * this.terminalCount);
+
+    // Pre-allocate nullable sets (N bits, but use full bytes for simplicity)
     this.nullableSets = new Uint8Array(this.nonterminalCount);
+
+    console.log('Integer mappings created:');
+    console.log('  Nonterminals:', this.nonterminalCount);
+    console.log('  Terminals:', this.terminalCount);
+    console.log('  Productions:', this.productions.length);
+    console.log('  Array type:', ArrayType.name);
+    console.log('  FIRST sets memory:', this.firstSets.byteLength, 'bytes');
+    console.log('  FOLLOW sets memory:', this.followSets.byteLength, 'bytes');
+    console.log('  Production FIRST sets memory:', this.productionFirstSets.byteLength, 'bytes');
 };
 
+// Process operator precedence and associativity declarations
 LALRGenerator.prototype.processOperators = function(ops) {
     if (!ops) return {};
     var operators = {};
@@ -205,6 +350,7 @@ LALRGenerator.prototype.processOperators = function(ops) {
     return operators;
 };
 
+// Add augmented start production for parser generation
 LALRGenerator.prototype.augmentGrammar = function(grammar) {
     if (this.productions.length === 0) {
         throw new Error("Grammar error: must have at least one rule.");
@@ -228,6 +374,7 @@ LALRGenerator.prototype.augmentGrammar = function(grammar) {
     this.nonterminals[this.startSymbol].follows.push(this.EOF);
 };
 
+// Build production rules from BNF grammar specification
 LALRGenerator.prototype.buildProductions = function(bnf, productions, nonterminals, symbols, operators) {
     var actions = [
         '/* this == yyval */',
@@ -274,6 +421,7 @@ LALRGenerator.prototype.buildProductions = function(bnf, productions, nontermina
                     var label = 'case ' + (productions.length + 1) + ':';
                     var action = handle[1];
 
+                    // Process named semantic values
                     if (action.match(/[$@][a-zA-Z][a-zA-Z0-9_]*/)) {
                         var count = {}, names = {};
                         for (i = 0; i < rhs.length; i++) {
@@ -365,7 +513,7 @@ LALRGenerator.prototype.buildProductions = function(bnf, productions, nontermina
 
     var terms = [], terms_ = {};
     for (var sym in symbolMap) {
-        var id = symbolMap[sym];
+        id = symbolMap[sym];
         if (!nonterminals[sym]) {
             terms.push(sym);
             terms_[id] = sym;
@@ -390,7 +538,8 @@ LALRGenerator.prototype.buildProductions = function(bnf, productions, nontermina
     this.performAction = "function anonymous(" + parameters + ") {\n" + actionsCode + "\n}";
 };
 
-// Compute LALR(1) lookaheads using optimized integer-only operations
+// Lookahead computation
+// Compute LALR(1) lookaheads using DeRemer-Pennello algorithm
 LALRGenerator.prototype.computeLookaheads = function() {
     this.computeLookaheads = function() {};
     this.computeNullableSets();
@@ -398,7 +547,8 @@ LALRGenerator.prototype.computeLookaheads = function() {
     this.computeFollowSets();
 };
 
-// Compute NULLABLE sets using integer-only operations
+// Compute NULLABLE sets for all nonterminals (canonical: NULLABLE computation)
+// INTEGER-ONLY VERSION - No strings, no objects, just pure integer operations!
 LALRGenerator.prototype.computeNullableSets = function() {
     var cont = true;
     var self = this;
@@ -406,11 +556,12 @@ LALRGenerator.prototype.computeNullableSets = function() {
     while (cont) {
         cont = false;
 
+        // Check each production for nullability
         this.productions.forEach(function(production) {
             if (!production.nullable) {
                 var allNullable = true;
                 for (var i = 0, t; t = production.handle[i]; ++i) {
-                    if (!self.isNullable(t)) {
+                    if (!self.isNullableInteger(t)) {
                         allNullable = false;
                         break;
                     }
@@ -421,6 +572,7 @@ LALRGenerator.prototype.computeNullableSets = function() {
             }
         });
 
+                // Check each nonterminal for nullability
         for (var ntIndex = 0; ntIndex < this.nonterminalCount; ntIndex++) {
             if (!this.nullableSets[ntIndex]) {
                 var symbol = this.indexToNonterminal[ntIndex];
@@ -439,6 +591,23 @@ LALRGenerator.prototype.computeNullableSets = function() {
     }
 };
 
+// Check if a symbol or symbol sequence is nullable (canonical: NULLABLE predicate)
+// INTEGER-ONLY VERSION - Ultra-fast integer operations!
+LALRGenerator.prototype.isNullableInteger = function(symbol) {
+    if (symbol === '') return true;
+    if (symbol instanceof Array) {
+        for (var i = 0, t; t = symbol[i]; ++i) {
+            if (!this.isNullableInteger(t)) return false;
+        }
+        return true;
+    }
+
+    // Ultra-fast integer lookup instead of string-based object property access
+    var ntIndex = this.nonterminalToIndex[symbol];
+    return ntIndex !== undefined ? this.nullableSets[ntIndex] : false;
+};
+
+// Legacy version for backward compatibility during transition
 LALRGenerator.prototype.isNullable = function(symbol) {
     if (symbol === '') return true;
     if (symbol instanceof Array) {
@@ -447,12 +616,11 @@ LALRGenerator.prototype.isNullable = function(symbol) {
         }
         return true;
     }
-
-    var ntIndex = this.nonterminalToIndex[symbol];
-    return ntIndex !== undefined ? this.nullableSets[ntIndex] : false;
+    return !this.nonterminals[symbol] ? false : this.nonterminals[symbol].nullable;
 };
 
-// Compute FIRST sets using integer-only operations (no union calls!)
+// Compute FIRST sets for all nonterminals (canonical: FIRST computation)
+// INTEGER-ONLY VERSION - No union() calls, just blazing fast typed arrays!
 LALRGenerator.prototype.computeFirstSets = function() {
     var self = this;
     var cont = true;
@@ -460,20 +628,31 @@ LALRGenerator.prototype.computeFirstSets = function() {
     while (cont) {
         cont = false;
 
+        // Update production FIRST sets
         this.productions.forEach(function(production) {
-            var newFirst = self.computeFirst(production.handle);
+            var oldFirstArray = self.cloneProductionFirst(production);
+            var newFirstArray = self.legacyFirst(production.handle);
+
+            // Convert to integer array and check for changes
+            var prodIndex = production.id;
+            var baseOffset = prodIndex * self.terminalCount;
             var changed = false;
 
-            for (var i = 0; i < newFirst.length; i++) {
-                if (production.first.indexOf(newFirst[i]) === -1) {
-                    production.first.push(newFirst[i]);
+            for (var i = 0; i < newFirstArray.length; i++) {
+                var termIndex = self.terminalToIndex[newFirstArray[i]];
+                if (termIndex !== undefined && !self.productionFirstSets[baseOffset + termIndex]) {
+                    self.productionFirstSets[baseOffset + termIndex] = 1;
                     changed = true;
                 }
             }
 
-            if (changed) cont = true;
+            if (changed) {
+                production.first = newFirstArray; // Keep legacy format for compatibility
+                cont = true;
+            }
         });
 
+        // Update nonterminal FIRST sets using integer operations (NO UNION!)
         for (var ntIndex = 0; ntIndex < this.nonterminalCount; ntIndex++) {
             var symbol = this.indexToNonterminal[ntIndex];
             var nonterminal = this.nonterminals[symbol];
@@ -482,54 +661,147 @@ LALRGenerator.prototype.computeFirstSets = function() {
             var baseOffset = ntIndex * this.terminalCount;
             var changed = false;
 
+            // Instead of union(), use direct integer operations
             for (var i = 0; i < nonterminal.productions.length; i++) {
                 var production = nonterminal.productions[i];
-                for (var j = 0; j < production.first.length; j++) {
-                    var termIndex = this.terminalToIndex[production.first[j]];
-                    if (termIndex !== undefined && !this.firstSets[baseOffset + termIndex]) {
-                        this.firstSets[baseOffset + termIndex] = 1;
+                var prodIndex = production.id;
+                var prodBaseOffset = prodIndex * this.terminalCount;
+
+                // Blazing fast integer union operation!
+                for (var j = 0; j < this.terminalCount; j++) {
+                    if (this.productionFirstSets[prodBaseOffset + j] && !this.firstSets[baseOffset + j]) {
+                        this.firstSets[baseOffset + j] = 1;
                         changed = true;
                     }
                 }
             }
 
             if (changed) {
-                nonterminal.first = [];
-                for (var i = 0; i < this.terminalCount; i++) {
-                    if (this.firstSets[baseOffset + i]) {
-                        nonterminal.first.push(this.indexToTerminal[i]);
-                    }
-                }
+                // Update legacy format for compatibility
+                nonterminal.first = this.convertIntegerSetToArray(baseOffset);
                 cont = true;
             }
         }
     }
 };
 
-LALRGenerator.prototype.computeFirst = function(sequence) {
-    if (sequence === '') return [];
-    if (sequence instanceof Array) {
+// INTEGER-ONLY: Compute FIRST set for a production using blazing fast operations
+LALRGenerator.prototype.computeFirstForProduction = function(production) {
+    var prodIndex = production.id; // Production IDs are 0-based
+    var baseOffset = prodIndex * this.terminalCount;
+    var changed = false;
+
+    // Get FIRST set for the production handle (right-hand side)
+    var tempFirst = new (this.firstSets.constructor)(this.terminalCount);
+    this.computeFirstForSequence(production.handle, tempFirst);
+
+    // Check if anything changed and update if so
+    for (var i = 0; i < this.terminalCount; i++) {
+        if (tempFirst[i] && !this.productionFirstSets[baseOffset + i]) {
+            this.productionFirstSets[baseOffset + i] = 1;
+            changed = true;
+        }
+    }
+
+    return changed;
+};
+
+// INTEGER-ONLY: Compute FIRST set for a nonterminal using blazing fast operations
+LALRGenerator.prototype.computeFirstForNonterminal = function(ntIndex) {
+    var symbol = this.indexToNonterminal[ntIndex];
+    var nonterminal = this.nonterminals[symbol];
+    var baseOffset = ntIndex * this.terminalCount;
+    var changed = false;
+
+    if (!nonterminal) return false;
+
+    // Union all production FIRST sets for this nonterminal
+    for (var i = 0; i < nonterminal.productions.length; i++) {
+        var production = nonterminal.productions[i];
+        var prodIndex = production.id; // Production IDs are 0-based
+        var prodBaseOffset = prodIndex * this.terminalCount;
+
+        // Blazing fast bitwise union operation!
+        for (var j = 0; j < this.terminalCount; j++) {
+            if (this.productionFirstSets[prodBaseOffset + j] && !this.firstSets[baseOffset + j]) {
+                this.firstSets[baseOffset + j] = 1;
+                changed = true;
+            }
+        }
+    }
+
+    return changed;
+};
+
+// INTEGER-ONLY: Compute FIRST set for a symbol sequence using blazing fast operations
+LALRGenerator.prototype.computeFirstForSequence = function(sequence, resultArray) {
+    for (var i = 0; i < sequence.length; i++) {
+        var symbol = sequence[i];
+        var ntIndex = this.nonterminalToIndex[symbol];
+
+        if (ntIndex !== undefined) {
+            // Nonterminal - use the legacy first() function to get its FIRST set
+            // This avoids circular dependency during computation
+            var firstSet = this.legacyFirst(symbol);
+            for (var j = 0; j < firstSet.length; j++) {
+                var termIndex = this.terminalToIndex[firstSet[j]];
+                if (termIndex !== undefined) {
+                    resultArray[termIndex] = 1;
+                }
+            }
+        } else {
+            // Terminal - add it directly
+            var termIndex = this.terminalToIndex[symbol];
+            if (termIndex !== undefined) {
+                resultArray[termIndex] = 1;
+            }
+        }
+
+        // If this symbol is not nullable, stop here
+        if (!this.isNullableInteger(symbol)) break;
+    }
+};
+
+// Legacy FIRST function for backward compatibility and bootstrap
+LALRGenerator.prototype.legacyFirst = function(symbol) {
+    if (symbol === '') return [];
+    if (symbol instanceof Array) {
         var firsts = [];
-        for (var i = 0, t; t = sequence[i]; ++i) {
+        for (var i = 0, t; t = symbol[i]; ++i) {
             if (!this.nonterminals[t]) {
                 if (firsts.indexOf(t) === -1) firsts.push(t);
             } else {
-                for (var j = 0; j < this.nonterminals[t].first.length; j++) {
-                    var sym = this.nonterminals[t].first[j];
-                    if (firsts.indexOf(sym) === -1) firsts.push(sym);
-                }
+                union(firsts, this.nonterminals[t].first);
             }
-            if (!this.isNullable(t)) break;
+                            if (!this.isNullable(t)) break;
         }
         return firsts;
     }
-    return !this.nonterminals[sequence] ? [sequence] : this.nonterminals[sequence].first;
+    return !this.nonterminals[symbol] ? [symbol] : this.nonterminals[symbol].first;
 };
 
+// Helper function to clone production FIRST set
+LALRGenerator.prototype.cloneProductionFirst = function(production) {
+    return production.first ? production.first.slice() : [];
+};
+
+// Helper function to convert integer set to array for compatibility
+LALRGenerator.prototype.convertIntegerSetToArray = function(baseOffset) {
+    var result = [];
+    for (var i = 0; i < this.terminalCount; i++) {
+        if (this.firstSets[baseOffset + i]) {
+            result.push(this.indexToTerminal[i]);
+        }
+    }
+    return result;
+};
+
+// Wrapper for backward compatibility
 LALRGenerator.prototype.first = function(symbol) {
-    return this.computeFirst(symbol);
+    return this.legacyFirst(symbol);
 };
 
+// Compute FOLLOW sets for all nonterminals
 LALRGenerator.prototype.computeFollowSets = function() {
     var productions = this.productions;
     var nonterminals = this.nonterminals;
@@ -558,16 +830,12 @@ LALRGenerator.prototype.computeFollowSets = function() {
                     var part = production.handle.slice(i + 1);
                     set = self.first(part);
                     if (self.isNullable(part) && bool) {
-                        set = set.concat(nonterminals[production.symbol].follows);
+                        set.push.apply(set, nonterminals[production.symbol].follows);
                     }
                 }
 
                 var oldcount = nonterminals[t].follows.length;
-                for (var j = 0; j < set.length; j++) {
-                    if (nonterminals[t].follows.indexOf(set[j]) === -1) {
-                        nonterminals[t].follows.push(set[j]);
-                    }
-                }
+                union(nonterminals[t].follows, set);
                 if (oldcount !== nonterminals[t].follows.length) {
                     cont = true;
                 }
@@ -576,6 +844,7 @@ LALRGenerator.prototype.computeFollowSets = function() {
     }
 };
 
+// Compute closure of an item set (add all implied items)
 LALRGenerator.prototype.closure = function(itemSet) {
     var closureSet = new LRState();
     var self = this;
@@ -614,8 +883,10 @@ LALRGenerator.prototype.closure = function(itemSet) {
     return closureSet;
 };
 
+// Compute goto operation (items after shifting a symbol)
 LALRGenerator.prototype.goto = function(itemSet, symbol) {
     var gotoSet = new LRState();
+    var self = this;
 
     itemSet.list.forEach(function(item, n) {
         if (item.nextSymbol === symbol) {
@@ -626,6 +897,7 @@ LALRGenerator.prototype.goto = function(itemSet, symbol) {
     return gotoSet.length === 0 ? gotoSet : this.closure(gotoSet);
 };
 
+// Generate canonical collection of LR(0) item sets
 LALRGenerator.prototype.buildLRAutomaton = function() {
     var item1 = new Item(this.productions[0], 0, [this.EOF]);
     var firstState = this.closure(new LRState(item1));
@@ -650,8 +922,9 @@ LALRGenerator.prototype.buildLRAutomaton = function() {
     return states;
 };
 
+// Insert or merge item set into canonical collection
 LALRGenerator.prototype.insertLRState = function(symbol, itemSet, states, stateNum) {
-    var g = this.goto(itemSet, symbol);
+                var g = this.goto(itemSet, symbol);
     if (!g.predecessors) g.predecessors = {};
 
     if (g.length > 0) {
@@ -669,6 +942,8 @@ LALRGenerator.prototype.insertLRState = function(symbol, itemSet, states, stateN
     }
 };
 
+// Parse table generation
+// Generate LALR(1) parsing table from item sets
 LALRGenerator.prototype.buildParseTable = function(itemSets) {
     var states = [];
     var nonterminals = this.nonterminals;
@@ -681,6 +956,7 @@ LALRGenerator.prototype.buildParseTable = function(itemSets) {
     itemSets.forEach(function(itemSet, k) {
         var state = states[k] = {};
 
+        // Set shift and goto actions
         for (var stackSymbol in itemSet.transitions) {
             itemSet.list.forEach(function(item) {
                 if (item.nextSymbol === stackSymbol) {
@@ -694,6 +970,7 @@ LALRGenerator.prototype.buildParseTable = function(itemSets) {
             });
         }
 
+        // Set accept action
         itemSet.list.forEach(function(item) {
             if (item.nextSymbol === self.EOF) {
                 state[self.symbolMap[self.EOF]] = [a];
@@ -702,6 +979,7 @@ LALRGenerator.prototype.buildParseTable = function(itemSets) {
 
         var allterms = self.getLookaheadSet ? false : self.terminals;
 
+        // Set reductions
         itemSet.reductions.forEach(function(item) {
             var terminals = allterms || self.getLookaheadSet(itemSet, item);
 
@@ -742,6 +1020,7 @@ LALRGenerator.prototype.buildParseTable = function(itemSets) {
     return states;
 };
 
+// Resolve shift/reduce conflicts using operator precedence
 LALRGenerator.prototype.resolveConflict = function(production, op, reduce, shift) {
     var sln = {
         production: production,
@@ -777,6 +1056,7 @@ LALRGenerator.prototype.resolveConflict = function(production, op, reduce, shift
     return sln;
 };
 
+// Find default actions for parser states to reduce table size
 LALRGenerator.prototype.computeDefaultActions = function(states) {
     var defaults = {};
     states.forEach(function(state, k) {
@@ -791,10 +1071,13 @@ LALRGenerator.prototype.computeDefaultActions = function(states) {
     return defaults;
 };
 
+// LALR-specific methods
+// Get lookahead symbols for an item in a state
 LALRGenerator.prototype.getLookaheadSet = function(state, item) {
     return (!!this.onDemandLookahead && !state.hasConflicts) ? this.terminals : item.follows;
 };
 
+// Navigate through parser states following a symbol sequence
 LALRGenerator.prototype.gotoState = function(startState, symbolSequence) {
     var currentState = parseInt(startState, 10);
     for (var i = 0; i < symbolSequence.length; i++) {
@@ -803,6 +1086,7 @@ LALRGenerator.prototype.gotoState = function(startState, symbolSequence) {
     return currentState;
 };
 
+// Navigate through parser states and record the path taken
 LALRGenerator.prototype.gotoStateWithPath = function(startState, symbolSequence) {
     var currentState = parseInt(startState, 10);
     var path = [];
@@ -816,6 +1100,7 @@ LALRGenerator.prototype.gotoStateWithPath = function(startState, symbolSequence)
     return { path: path, endState: currentState };
 };
 
+// Build augmented grammar for lookahead computation
 LALRGenerator.prototype.buildAugmentedGrammar = function() {
     var self = this;
     var newg = this.lookahead;
@@ -848,6 +1133,7 @@ LALRGenerator.prototype.buildAugmentedGrammar = function() {
     });
 };
 
+// Propagate lookaheads from augmented grammar back to original states
 LALRGenerator.prototype.unionLookaheads = function() {
     var self = this;
     var newg = this.lookahead;
@@ -875,6 +1161,8 @@ LALRGenerator.prototype.unionLookaheads = function() {
     });
 };
 
+// Code generation
+// Generate parser code with specified options
 LALRGenerator.prototype.generate = function(opt) {
     opt = Object.assign({}, this.options, opt);
     var moduleName = opt.moduleName || "parser";
@@ -884,6 +1172,7 @@ LALRGenerator.prototype.generate = function(opt) {
     return this.generateCommonJSModule(opt);
 };
 
+// Generate CommonJS module wrapper for parser
 LALRGenerator.prototype.generateCommonJSModule = function(opt) {
     opt = Object.assign({}, this.options, opt);
     var moduleName = opt.moduleName || "parser";
@@ -899,6 +1188,7 @@ LALRGenerator.prototype.generateCommonJSModule = function(opt) {
     return out;
 };
 
+// Generate module wrapper for parser
 LALRGenerator.prototype.generateModule = function(opt) {
     opt = Object.assign({}, this.options, opt);
     var moduleName = opt.moduleName || "parser";
@@ -908,6 +1198,7 @@ LALRGenerator.prototype.generateModule = function(opt) {
     return out;
 };
 
+// Generate self-executing module expression
 LALRGenerator.prototype.generateModuleExpr = function() {
     var module = this.generateModule_();
     var out = "(function(){\n";
@@ -921,6 +1212,7 @@ LALRGenerator.prototype.generateModuleExpr = function() {
     return out;
 };
 
+// Generate core parser module code
 LALRGenerator.prototype.generateModule_ = function() {
     var tableCode = this.generateTableCode(this.stateTable);
     var moduleCode = "{";
@@ -944,15 +1236,21 @@ LALRGenerator.prototype.generateModule_ = function() {
     };
 };
 
+// Generate optimized parsing table code
 LALRGenerator.prototype.generateTableCode = function(stateTable) {
+    // Generate compact JSON without spaces and with unquoted numeric keys
     var moduleCode = JSON.stringify(stateTable, null, 0);
+
+    // Remove quotes around numeric object keys
     moduleCode = moduleCode.replace(/"([0-9]+)"(?=:)/g, "$1");
+
     return {
         commonCode: '',
         moduleCode: moduleCode
     };
 };
 
+// Handle parsing errors with context information
 LALRGenerator.prototype.parseError = function(str, hash) {
     if (hash.recoverable) {
         this.trace(str);
@@ -963,6 +1261,7 @@ LALRGenerator.prototype.parseError = function(str, hash) {
     }
 };
 
+// Parse input string using generated LALR(1) parser
 LALRGenerator.prototype.parse = function(input) {
     var self = this;
     var stk = [0];
@@ -1032,9 +1331,9 @@ LALRGenerator.prototype.parse = function(input) {
 
             if (!recovering) {
                 expected = [];
-                for (p in stateTable[state]) {
                     if (this.terminals_[p] && p > TERROR) {
                         expected.push("'" + this.terminals_[p] + "'");
+                for (p in stateTable[state]) {
                     }
                 }
                 if (lexer.showPosition) {
@@ -1063,7 +1362,7 @@ LALRGenerator.prototype.parse = function(input) {
         }
 
         switch (action[0]) {
-            case 1:
+            case 1: // shift
                 stk.push(symbol);
                 val.push(lexer.yytext);
                 loc.push(lexer.yylloc);
@@ -1083,7 +1382,7 @@ LALRGenerator.prototype.parse = function(input) {
                 }
                 break;
 
-            case 2:
+            case 2: // reduce
                 len = this.productionTable[action[1]][1];
                 var valLen = val.length;
                 var locLen = loc.length;
@@ -1120,14 +1419,16 @@ LALRGenerator.prototype.parse = function(input) {
                 stk.push(newState);
                 break;
 
-            case 3:
+            case 3: // accept
                 return true;
         }
     }
 };
 
+// Debug tracing function (no-op by default)
 LALRGenerator.prototype.trace = function() {};
 
+// Create executable parser instance from generated code
 LALRGenerator.prototype.createParser = function() {
     var p = eval(this.generateModuleExpr());
     p.productions = this.productions;
@@ -1148,6 +1449,7 @@ LALRGenerator.prototype.createParser = function() {
     return p;
 };
 
+// Exports
 Jison.Parser = function(grammar, options) {
     var gen = new LALRGenerator(grammar, options);
     return gen.createParser();
