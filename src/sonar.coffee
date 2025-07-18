@@ -378,9 +378,7 @@ class LALRGenerator
 
       for production in @productions when not production.nullable
         nullableCount = 0
-        for symbol in production.handle
-          nullableCount++ if @_isNullable symbol
-
+        nullableCount++ for symbol in production.handle when @_isNullable symbol
         if nullableCount is production.handle.length
           production.nullable = changed = true
 
@@ -404,20 +402,17 @@ class LALRGenerator
         firsts = @_first production.handle
         oldSize = production.first.size
         production.first.clear()
-        for item in firsts
-          production.first.add(item)
-
-        if production.first.size > oldSize
-          changed = true
+        production.first.add(item) for item in firsts
+        changed = true if production.first.size > oldSize
 
       for symbol, nonterminal of @nonterminals
         oldSize = nonterminal.first.size
         nonterminal.first.clear()
         for production in nonterminal.productions
-          production.first.forEach (symbol) -> nonterminal.first.add(symbol)
+          nonterminal.first.add(symbol) for symbol in Array.from(production.first)
+        changed = true if nonterminal.first.size > oldSize
 
-        if nonterminal.first.size > oldSize
-          changed = true
+    null
 
   _first: (symbols) ->
     return [] if symbols is ''
@@ -471,6 +466,8 @@ class LALRGenerator
                 @nonterminals[symbol].follows.add(item)
 
           changed = true if @nonterminals[symbol].follows.size > oldSize
+
+    null
 
   # ---------------------------------------------------------------------------
   # LR Automaton Construction
@@ -545,6 +542,8 @@ class LALRGenerator
       else
         itemSet.transitions[symbol] = existingIndex
         states[existingIndex].predecessors[symbol].push stateNum
+
+    null
 
   # ---------------------------------------------------------------------------
   # Parse Table Generation
@@ -679,6 +678,8 @@ class LALRGenerator
 
       @conflictStates.push i if state.hasConflicts
 
+    null
+
   _gotoStateWithPath: (startState, symbolSequence) ->
     currentState = parseInt startState, 10
     path = []
@@ -711,6 +712,8 @@ class LALRGenerator
                 follows[terminal] = true
                 item.follows.push terminal
 
+    null
+
   # ---------------------------------------------------------------------------
   # Code Generation
   # ---------------------------------------------------------------------------
@@ -722,7 +725,7 @@ class LALRGenerator
     moduleName = options.moduleName or "parser"
     moduleName = "parser" unless moduleName.match /^[A-Za-z_$][A-Za-z0-9_$]*$/
 
-    out = @generateModule(options) + """
+    @generateModule(options) + """
       \n\n
       if (typeof require !== 'undefined' && typeof exports !== 'undefined') {
         exports.parser = #{moduleName};
