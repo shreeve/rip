@@ -81,6 +81,8 @@
 // Original implementation by Jison team
 // https://github.com/zaach/jison/blob/master/lib/jison.js
 
+console.log("\n\n\n==[ Using Jison ]==\n\n\n");
+
 var Jison = exports.Jison = exports;
 var version = '0.5.0'; // require('../package.json').version;
 
