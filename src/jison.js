@@ -10,9 +10,6 @@
 //
 // Function Reference:
 //
-// Utility Functions:
-// - union(a, b) - Merge array b into array a, avoiding duplicates
-//
 // Constructor Functions:
 // - Nonterminal(symbol) - Represents a nonterminal symbol in the grammar
 // - Production(symbol, handle, id) - Represents a production rule in the grammar
@@ -85,21 +82,6 @@ console.log("\n==[ Using Jison ]==\n");
 
 var Jison = exports.Jison = exports;
 var version = '0.5.0'; // require('../package.json').version;
-
-// Merge array b into array a, avoiding duplicates
-function union(a, b) {
-    var s = Object.create(null);
-    var i, len;
-    for (i = 0, len = a.length; i < len; i++) {
-        s[a[i]] = 1;
-    }
-    for (i = 0, len = b.length; i < len; i++) {
-        if (!s[b[i]]) {
-            a.push(b[i]);
-        }
-    }
-    return a;
-}
 
 // Represents a nonterminal symbol in the grammar
 function Nonterminal(symbol) {
@@ -208,14 +190,14 @@ function LALRGenerator(grammar, options) {
     console.timeEnd('processGrammar');
 
     // Debug: Output all grammar information available after processGrammar
-    this.debugGrammarInfo();
+    // this.debugGrammarInfo();
 
     console.time('buildLRAutomaton');
     this.states = this.buildLRAutomaton();
     console.timeEnd('buildLRAutomaton');
 
     // Debug: Output LR(0) automaton information
-    this.debugAutomatonInfo();
+    // this.debugAutomatonInfo();
 
     this.terminalMap = {}; // Maps symbols to terminal representations
 
@@ -643,9 +625,25 @@ LALRGenerator.prototype.buildProductions = function(bnf, productions, nontermina
 // Compute LALR(1) lookaheads using DeRemer-Pennello algorithm
 LALRGenerator.prototype.computeLookaheads = function() {
     this.computeLookaheads = function() {};
+    this.initializeSets();
     this.computeNullableSets();
     this.computeFirstSets();
     this.computeFollowSets();
+};
+
+// Initialize FIRST and FOLLOW sets as Sets for O(1) operations
+LALRGenerator.prototype.initializeSets = function() {
+    // Note: this.productions and this.nonterminals refer to the lookahead context here
+    // Initialize production.first as Set
+    for (var i = 0; i < this.productions.length; i++) {
+        this.productions[i].first = new Set();
+    }
+
+    // Initialize nonterminal.first and nonterminal.follows as Sets
+    for (var symbol in this.nonterminals) {
+        this.nonterminals[symbol].first = new Set();
+        this.nonterminals[symbol].follows = new Set();
+    }
 };
 
 // Compute NULLABLE sets for all nonterminals (canonical: NULLABLE computation)
@@ -706,19 +704,27 @@ LALRGenerator.prototype.computeFirstSets = function() {
 
         productions.forEach(function(production) {
             var firsts = self.first(production.handle);
-            if (firsts.length !== production.first.length) {
-                production.first = firsts;
+            var oldSize = production.first.size;
+            // Clear and rebuild the Set
+            production.first.clear();
+            for (var i = 0; i < firsts.length; i++) {
+                production.first.add(firsts[i]);
+            }
+            if (production.first.size > oldSize) {
                 cont = true;
             }
         });
 
         for (var symbol in nonterminals) {
-            var firsts = [];
+            var oldSize = nonterminals[symbol].first.size;
+            nonterminals[symbol].first.clear();
             nonterminals[symbol].productions.forEach(function(production) {
-                union(firsts, production.first);
+                // Fast Set union using forEach
+                production.first.forEach(function(item) {
+                    nonterminals[symbol].first.add(item);
+                });
             });
-            if (firsts.length !== nonterminals[symbol].first.length) {
-                nonterminals[symbol].first = firsts;
+            if (nonterminals[symbol].first.size > oldSize) {
                 cont = true;
             }
         }
@@ -730,17 +736,32 @@ LALRGenerator.prototype.first = function(symbol) {
     if (symbol === '') return [];
     if (symbol instanceof Array) {
         var firsts = [];
+        var firstsSet = new Set();
         for (var i = 0, t; t = symbol[i]; ++i) {
             if (!this.nonterminals[t]) {
-                if (firsts.indexOf(t) === -1) firsts.push(t);
+                firstsSet.add(t);
             } else {
-                union(firsts, this.nonterminals[t].first);
+                // Fast Set union using forEach
+                this.nonterminals[t].first.forEach(function(item) {
+                    firstsSet.add(item);
+                });
             }
-                            if (!this.isNullable(t)) break;
+            if (!this.isNullable(t)) break;
         }
+        // Convert Set back to Array
+        firstsSet.forEach(function(item) {
+            firsts.push(item);
+        });
         return firsts;
     }
-    return !this.nonterminals[symbol] ? [symbol] : this.nonterminals[symbol].first;
+    if (!this.nonterminals[symbol]) return [symbol];
+
+    // Convert Set to Array
+    var result = [];
+    this.nonterminals[symbol].first.forEach(function(item) {
+        result.push(item);
+    });
+    return result;
 };
 
 // Compute FOLLOW sets for all nonterminals
@@ -765,20 +786,31 @@ LALRGenerator.prototype.computeFollowSets = function() {
                 }
                 var bool = !ctx || q === parseInt(self.lookahead.nonterminalMap[t], 10);
 
-                var set;
+                var oldSize = nonterminals[t].follows.size;
+
                 if (i === production.handle.length - 1 && bool) {
-                    set = nonterminals[production.symbol].follows;
+                    // Add all items from production.symbol.follows to t.follows
+                    nonterminals[production.symbol].follows.forEach(function(item) {
+                        nonterminals[t].follows.add(item);
+                    });
                 } else {
                     var part = production.handle.slice(i + 1);
-                    set = self.first(part);
+                    var firstSet = self.first(part); // Returns array
+
+                    // Add first set items
+                    for (var j = 0; j < firstSet.length; j++) {
+                        nonterminals[t].follows.add(firstSet[j]);
+                    }
+
+                    // If nullable, also add production.symbol.follows
                     if (self.isNullable(part) && bool) {
-                        set.push.apply(set, nonterminals[production.symbol].follows);
+                        nonterminals[production.symbol].follows.forEach(function(item) {
+                            nonterminals[t].follows.add(item);
+                        });
                     }
                 }
 
-                var oldcount = nonterminals[t].follows.length;
-                union(nonterminals[t].follows, set);
-                if (oldcount !== nonterminals[t].follows.length) {
+                if (nonterminals[t].follows.size > oldSize) {
                     cont = true;
                 }
             }
