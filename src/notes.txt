@@ -1,4 +1,11 @@
 
+
+
+cd /Users/shreeve/Data/Code/rip/src/old/coffeescript && time cake build:parser && npm test
+
+
+==
+
 # Instructions for AI
 
 
@@ -202,3 +209,79 @@ __END__
     @info  = language.info
 
 ->
+
+==
+
+After processGrammar we have:
+
+• All nonterminals and their productions
+• All terminals (tokens)
+• Complete production rules with their handles
+• Operator precedence and associativity
+• Grammar relationships (which nonterminals appear in which productions)
+• Production counts and indices
+• Symbol relationships (which symbols can appear after which others)
+
+--
+
+• Pre-compute relationships between symbols?
+• Build lookup tables for faster access during FIRST/FOLLOW computation?
+• Create optimized data structures that take advantage of knowing the complete grammar upfront?
+• Pre-allocate memory for all the sets we'll need?
+• Compute invariants that don't change during the iterative process?
+
+--
+
+I'm just thinking that after processGrammar, that we just refer to things as int's and not their names.
+
+So, for example... to calculate a union... we would do something like this:
+
+set a has 5 nonterminals:
+
+a = Uint8Array of 108 elements = [ 0 0 0 0 0 0 1 0 0 0 0 1 1 0 0 1 1 0 0 0 ... ]
+b = Uint8Array of 108 elements = [ 0 0 0 1 0 0 0 1 0 ... ]
+
+If we want to union them... then we just logically
+
+--
+
+  STATE 6:
+    Items (17 total):
+      [8] Line -> Statement •
+      [366] If -> Statement • POST_IF Expression
+      [291] While -> Statement • WhileSource
+      [296] For -> Statement • ForBody
+      [372] IfLine -> Statement • POST_IF ExpressionLine
+      [283] WhileSource -> • WHILE Expression
+      [284] WhileSource -> • WHILE Expression WHEN Expression
+      [285] WhileSource -> • WHILE ExpressionLine WHEN Expression
+      [286] WhileSource -> • UNTIL Expression
+      [287] WhileSource -> • UNTIL Expression WHEN Expression
+      [288] WhileSource -> • UNTIL ExpressionLine WHEN Expression
+      [300] ForBody -> • FOR Range
+      [301] ForBody -> • FOR Range BY Expression
+      [302] ForBody -> • ForStart ForSource
+      [305] ForStart -> • FOR ForVariables
+      [306] ForStart -> • FOR AWAIT ForVariables
+      [307] ForStart -> • FOR OWN ForVariables
+    Transitions:
+      "POST_IF" -> State 124
+      "WhileSource" -> State 125
+      "ForBody" -> State 126
+      "WHILE" -> State 120
+      "UNTIL" -> State 121
+      "FOR" -> State 122
+      "ForStart" -> State 123
+    Predecessors:
+      "Statement" <- States [0, 0, 0, 0, 0, 39, 39, 39, 39, 39, 75, 75, 75, 75, 75, 102, 102, 102, 102, 102, 151, 151, 151, 151, 151, 215, 215, 215, 215, 215, 283, 283, 283, 283, 283, 450, 450, 450, 450, 450, 468, 468, 468, 468, 468]
+    Reductions (1 total):
+      [8] Line -> Statement
+    Flags: hasShifts, hasConflicts
+
+--
+
+For these items:
+
+1) If the • is at the end... then, we just finished parsing what's on the left
+2) If the • is in the middle... we are mid-flight on a possible outcome
+3) If the • is at the beginning... things we might start parsing next
