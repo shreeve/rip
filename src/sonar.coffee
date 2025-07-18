@@ -88,7 +88,7 @@ class LALRGenerator
 
     @terminalMap = {}
 
-    # Initialize lookahead state (replaces newg creation)
+    # Initialize lookahead state
     @lookahead = {
       nonterminalMap: {},
       nonterminals: {},
@@ -102,7 +102,7 @@ class LALRGenerator
     @buildAugmentedGrammar()
     console.timeEnd 'buildAugmentedGrammar'
 
-    # Compute lookaheads in lookahead context (replaces newg.computeLookaheads())
+    # Compute lookaheads in lookahead context
     savedNonterminals = @nonterminals
     savedProductions = @productions
 
