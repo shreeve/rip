@@ -63,7 +63,6 @@ class LALRGenerator
     @parseParams = grammar.parseParams
     @yy = {}
 
-    # Process action includes
     if grammar.actionInclude
       if typeof grammar.actionInclude is 'function'
         @actionInclude = String(grammar.actionInclude)
