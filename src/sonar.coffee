@@ -249,7 +249,7 @@ class LALRGenerator
     addSymbol "error"
 
     # Process each nonterminal
-    for symbol, rules of bnf when bnf.hasOwnProperty symbol
+    for own symbol, rules of bnf
       addSymbol symbol
       nonterminals[symbol] = new Nonterminal symbol
 
@@ -364,7 +364,7 @@ class LALRGenerator
     terminals = []
     terminalsMap = {}
 
-    for name, id of symbolMap when symbolMap.hasOwnProperty(name)
+    for own name, id of symbolMap
       unless nonterminals[name]
         terminals.push name
         terminalsMap[id] = name
@@ -656,7 +656,7 @@ class LALRGenerator
       actionCount = 0
       lastAction = null
 
-      for action of state when state.hasOwnProperty action
+      for own action of state
         actionCount++
         lastAction = state[action]
 
