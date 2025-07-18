@@ -551,65 +551,26 @@ LALRGenerator.prototype.computeFirstSets = function() {
 
         productions.forEach(function(production) {
             var firsts = self.first(production.handle);
-            var changed = false;
 
-            // Check if any new elements were added
+            // Add new elements directly (monotonic growth)
             for (var firstSym in firsts) {
                 if (!production.first[firstSym]) {
-                    changed = true;
-                    break;
+                    production.first[firstSym] = true;
+                    cont = true;
                 }
-            }
-
-            // Check if any old elements were removed
-            if (!changed) {
-                for (var firstSym in production.first) {
-                    if (!firsts[firstSym]) {
-                        changed = true;
-                        break;
-                    }
-                }
-            }
-
-            if (changed) {
-                production.first = firsts;
-                cont = true;
             }
         });
 
         for (var symbol in nonterminals) {
-            var firsts = Object.create(null);
+            // Add elements from all productions directly (monotonic growth)
             nonterminals[symbol].productions.forEach(function(production) {
-                // Add all elements from production's first set
                 for (var firstSym in production.first) {
-                    firsts[firstSym] = true;
-                }
-            });
-
-            var changed = false;
-
-            // Check if any new elements were added
-            for (var firstSym in firsts) {
-                if (!nonterminals[symbol].first[firstSym]) {
-                    changed = true;
-                    break;
-                }
-            }
-
-            // Check if any old elements were removed
-            if (!changed) {
-                for (var firstSym in nonterminals[symbol].first) {
-                    if (!firsts[firstSym]) {
-                        changed = true;
-                        break;
+                    if (!nonterminals[symbol].first[firstSym]) {
+                        nonterminals[symbol].first[firstSym] = true;
+                        cont = true;
                     }
                 }
-            }
-
-            if (changed) {
-                nonterminals[symbol].first = firsts;
-                cont = true;
-            }
+            });
         }
     }
 };
@@ -663,14 +624,12 @@ LALRGenerator.prototype.computeFollowSets = function() {
                 }
                 var bool = !ctx || q === parseInt(self.lookahead.nonterminalMap[t], 10);
 
-                                var changed = false;
-
-                if (i === production.handle.length - 1 && bool) {
+                                                if (i === production.handle.length - 1 && bool) {
                     // Add FOLLOW(production.symbol) to FOLLOW(t)
                     for (var followSym in nonterminals[production.symbol].follows) {
                         if (!nonterminals[t].follows[followSym]) {
                             nonterminals[t].follows[followSym] = true;
-                            changed = true;
+                            cont = true;
                         }
                     }
                 } else {
@@ -681,7 +640,7 @@ LALRGenerator.prototype.computeFollowSets = function() {
                     for (var firstSym in firstSet) {
                         if (!nonterminals[t].follows[firstSym]) {
                             nonterminals[t].follows[firstSym] = true;
-                            changed = true;
+                            cont = true;
                         }
                     }
 
@@ -690,14 +649,10 @@ LALRGenerator.prototype.computeFollowSets = function() {
                         for (var followSym in nonterminals[production.symbol].follows) {
                             if (!nonterminals[t].follows[followSym]) {
                                 nonterminals[t].follows[followSym] = true;
-                                changed = true;
+                                cont = true;
                             }
                         }
                     }
-                }
-
-                if (changed) {
-                    cont = true;
                 }
             }
         });
