@@ -414,17 +414,18 @@ class LALRGenerator
       for production in @productions
         firsts = @_first production.handle
         oldSize = production.first.size
-        production.first = new Set(firsts)
+        production.first.clear()
+        for item in firsts
+          production.first.add(item)
 
         if production.first.size > oldSize
           changed = true
 
       for symbol, nonterminal of @nonterminals
         oldSize = nonterminal.first.size
-        allFirsts = []
+        nonterminal.first.clear()
         for production in nonterminal.productions
-          production.first.forEach (symbol) -> allFirsts.push(symbol)
-        nonterminal.first = new Set(allFirsts)
+          production.first.forEach (symbol) -> nonterminal.first.add(symbol)
 
         if nonterminal.first.size > oldSize
           changed = true
@@ -473,7 +474,8 @@ class LALRGenerator
             firstSet = @_first part
 
             # Add first set items
-            firstSet.forEach (item) => @nonterminals[symbol].follows.add(item)
+            for item in firstSet
+              @nonterminals[symbol].follows.add(item)
 
             # If nullable, also add production.symbol.follows
             if @_isNullable(part) and bool
