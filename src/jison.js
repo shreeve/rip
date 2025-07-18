@@ -103,8 +103,8 @@ function union(a, b) {
 function Nonterminal(symbol) {
     this.symbol = symbol;
     this.productions = [];
-    this.first = [];
-    this.follows = [];
+    this.first = Object.create(null);
+    this.follows = Object.create(null);
     this.nullable = false;
 }
 
@@ -114,7 +114,7 @@ function Production(symbol, handle, id) {
     this.handle = handle;
     this.id = id;
     this.nullable = false;
-    this.first = [];
+    this.first = Object.create(null);
     this.precedence = 0;
 }
 
@@ -122,7 +122,7 @@ function Production(symbol, handle, id) {
 function Item(production, dot, lookaheadSet, predecessor) {
     this.production = production;
     this.dot = dot || 0;  // Position of • in production
-    this.follows = lookaheadSet || []; // LALR(1) lookahead symbols
+    this.follows = lookaheadSet || Object.create(null); // LALR(1) lookahead symbols
     this.predecessor = predecessor;
     this.nextSymbol = this.production.handle[this.dot]; // Symbol after •
     this.id = parseInt(production.id + 'a' + this.dot, 36);
@@ -317,7 +317,7 @@ LALRGenerator.prototype.augmentGrammar = function(grammar) {
 
     this.nonterminals.$accept = new Nonterminal("$accept");
     this.nonterminals.$accept.productions.push(acceptProduction);
-    this.nonterminals[this.startSymbol].follows.push(this.EOF);
+    this.nonterminals[this.startSymbol].follows[this.EOF] = true;
 };
 
 // Build production rules from BNF grammar specification
@@ -551,18 +551,62 @@ LALRGenerator.prototype.computeFirstSets = function() {
 
         productions.forEach(function(production) {
             var firsts = self.first(production.handle);
-            if (firsts.length !== production.first.length) {
+            var changed = false;
+
+            // Check if any new elements were added
+            for (var firstSym in firsts) {
+                if (!production.first[firstSym]) {
+                    changed = true;
+                    break;
+                }
+            }
+
+            // Check if any old elements were removed
+            if (!changed) {
+                for (var firstSym in production.first) {
+                    if (!firsts[firstSym]) {
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+
+            if (changed) {
                 production.first = firsts;
                 cont = true;
             }
         });
 
         for (var symbol in nonterminals) {
-            var firsts = [];
+            var firsts = Object.create(null);
             nonterminals[symbol].productions.forEach(function(production) {
-                union(firsts, production.first);
+                // Add all elements from production's first set
+                for (var firstSym in production.first) {
+                    firsts[firstSym] = true;
+                }
             });
-            if (firsts.length !== nonterminals[symbol].first.length) {
+
+            var changed = false;
+
+            // Check if any new elements were added
+            for (var firstSym in firsts) {
+                if (!nonterminals[symbol].first[firstSym]) {
+                    changed = true;
+                    break;
+                }
+            }
+
+            // Check if any old elements were removed
+            if (!changed) {
+                for (var firstSym in nonterminals[symbol].first) {
+                    if (!firsts[firstSym]) {
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+
+            if (changed) {
                 nonterminals[symbol].first = firsts;
                 cont = true;
             }
@@ -572,20 +616,29 @@ LALRGenerator.prototype.computeFirstSets = function() {
 
 // Get FIRST set for a symbol or symbol sequence
 LALRGenerator.prototype.first = function(symbol) {
-    if (symbol === '') return [];
+    if (symbol === '') return Object.create(null);
     if (symbol instanceof Array) {
-        var firsts = [];
+        var firsts = Object.create(null);
         for (var i = 0, t; t = symbol[i]; ++i) {
             if (!this.nonterminals[t]) {
-                if (firsts.indexOf(t) === -1) firsts.push(t);
+                firsts[t] = true;
             } else {
-                union(firsts, this.nonterminals[t].first);
+                // Add all elements from nonterminal's first set
+                for (var firstSym in this.nonterminals[t].first) {
+                    firsts[firstSym] = true;
+                }
             }
-                            if (!this.isNullable(t)) break;
+            if (!this.isNullable(t)) break;
         }
         return firsts;
     }
-    return !this.nonterminals[symbol] ? [symbol] : this.nonterminals[symbol].first;
+    if (!this.nonterminals[symbol]) {
+        // Terminal symbol
+        var result = Object.create(null);
+        result[symbol] = true;
+        return result;
+    }
+    return this.nonterminals[symbol].first;
 };
 
 // Compute FOLLOW sets for all nonterminals
@@ -610,20 +663,40 @@ LALRGenerator.prototype.computeFollowSets = function() {
                 }
                 var bool = !ctx || q === parseInt(self.lookahead.nonterminalMap[t], 10);
 
-                var set;
+                                var changed = false;
+
                 if (i === production.handle.length - 1 && bool) {
-                    set = nonterminals[production.symbol].follows;
+                    // Add FOLLOW(production.symbol) to FOLLOW(t)
+                    for (var followSym in nonterminals[production.symbol].follows) {
+                        if (!nonterminals[t].follows[followSym]) {
+                            nonterminals[t].follows[followSym] = true;
+                            changed = true;
+                        }
+                    }
                 } else {
                     var part = production.handle.slice(i + 1);
-                    set = self.first(part);
+                    var firstSet = self.first(part);
+
+                    // Add FIRST(β) to FOLLOW(t)
+                    for (var firstSym in firstSet) {
+                        if (!nonterminals[t].follows[firstSym]) {
+                            nonterminals[t].follows[firstSym] = true;
+                            changed = true;
+                        }
+                    }
+
+                    // If β is nullable, add FOLLOW(production.symbol) to FOLLOW(t)
                     if (self.isNullable(part) && bool) {
-                        set.push.apply(set, nonterminals[production.symbol].follows);
+                        for (var followSym in nonterminals[production.symbol].follows) {
+                            if (!nonterminals[t].follows[followSym]) {
+                                nonterminals[t].follows[followSym] = true;
+                                changed = true;
+                            }
+                        }
                     }
                 }
 
-                var oldcount = nonterminals[t].follows.length;
-                union(nonterminals[t].follows, set);
-                if (oldcount !== nonterminals[t].follows.length) {
+                if (changed) {
                     cont = true;
                 }
             }
@@ -861,7 +934,7 @@ LALRGenerator.prototype.computeDefaultActions = function(states) {
 // LALR-specific methods
 // Get lookahead symbols for an item in a state
 LALRGenerator.prototype.getLookaheadSet = function(state, item) {
-    return (!!this.onDemandLookahead && !state.hasConflicts) ? this.terminals : item.follows;
+    return (!!this.onDemandLookahead && !state.hasConflicts) ? this.terminals : Object.keys(item.follows);
 };
 
 // Navigate through parser states following a symbol sequence
@@ -930,18 +1003,14 @@ LALRGenerator.prototype.unionLookaheads = function() {
         var state = typeof i === 'number' ? self.states[i] : i;
         if (state.reductions.length) {
             state.reductions.forEach(function(item) {
-                var follows = {};
-                for (var k = 0; k < item.follows.length; k++) {
-                    follows[item.follows[k]] = true;
-                }
+                var follows = item.follows; // follows is already an object
                 state.handleToSymbols[item.production.handle.join(' ')].forEach(function(symbol) {
-                    newg.nonterminals[symbol].follows.forEach(function(symbol) {
-                        var terminal = self.terminalMap[symbol];
+                    for (var followSymbol in newg.nonterminals[symbol].follows) {
+                        var terminal = self.terminalMap[followSymbol];
                         if (!follows[terminal]) {
                             follows[terminal] = true;
-                            item.follows.push(terminal);
                         }
-                    });
+                    }
                 });
             });
         }
