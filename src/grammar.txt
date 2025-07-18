@@ -1,0 +1,2008 @@
+
+==[ Using Jison ]==
+
+processGrammar: 2.495ms
+
+=== GRAMMAR INFO AFTER processGrammar ===
+
+NONTERMINALS (98 total):
+  Root -> 2 productions
+    nullable: false
+    first: []
+    follows: [$end]
+  Body -> 3 productions
+    nullable: false
+    first: []
+    follows: []
+  Line -> 4 productions
+    nullable: false
+    first: []
+    follows: []
+  FuncDirective -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  Statement -> 4 productions
+    nullable: false
+    first: []
+    follows: []
+  Expression -> 12 productions
+    nullable: false
+    first: []
+    follows: []
+  ExpressionLine -> 3 productions
+    nullable: false
+    first: []
+    follows: []
+  Yield -> 4 productions
+    nullable: false
+    first: []
+    follows: []
+  Block -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  Identifier -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  Property -> 1 productions
+    nullable: false
+    first: []
+    follows: []
+  AlphaNumeric -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  String -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  Interpolations -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  InterpolationChunk -> 4 productions
+    nullable: false
+    first: []
+    follows: []
+  Regex -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  Literal -> 8 productions
+    nullable: false
+    first: []
+    follows: []
+  Assign -> 3 productions
+    nullable: false
+    first: []
+    follows: []
+  AssignObj -> 6 productions
+    nullable: false
+    first: []
+    follows: []
+  SimpleObjAssignable -> 3 productions
+    nullable: false
+    first: []
+    follows: []
+  ObjAssignable -> 4 productions
+    nullable: false
+    first: []
+    follows: []
+  ObjRestValue -> 4 productions
+    nullable: false
+    first: []
+    follows: []
+  ObjSpreadExpr -> 9 productions
+    nullable: false
+    first: []
+    follows: []
+  ObjSpreadIdentifier -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  Return -> 3 productions
+    nullable: false
+    first: []
+    follows: []
+  YieldReturn -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  AwaitReturn -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  Code -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  CodeLine -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  FuncGlyph -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  OptComma -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  ParamList -> 5 productions
+    nullable: false
+    first: []
+    follows: []
+  Param -> 5 productions
+    nullable: false
+    first: []
+    follows: []
+  ParamVar -> 4 productions
+    nullable: false
+    first: []
+    follows: []
+  Splat -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  SimpleAssignable -> 4 productions
+    nullable: false
+    first: []
+    follows: []
+  Assignable -> 3 productions
+    nullable: false
+    first: []
+    follows: []
+  Value -> 9 productions
+    nullable: false
+    first: []
+    follows: []
+  Super -> 3 productions
+    nullable: false
+    first: []
+    follows: []
+  MetaProperty -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  Accessor -> 7 productions
+    nullable: false
+    first: []
+    follows: []
+  Index -> 3 productions
+    nullable: false
+    first: []
+    follows: []
+  IndexValue -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  Object -> 1 productions
+    nullable: false
+    first: []
+    follows: []
+  AssignList -> 5 productions
+    nullable: false
+    first: []
+    follows: []
+  Class -> 8 productions
+    nullable: false
+    first: []
+    follows: []
+  Import -> 14 productions
+    nullable: false
+    first: []
+    follows: []
+  ImportSpecifierList -> 5 productions
+    nullable: false
+    first: []
+    follows: []
+  ImportSpecifier -> 4 productions
+    nullable: false
+    first: []
+    follows: []
+  ImportDefaultSpecifier -> 1 productions
+    nullable: false
+    first: []
+    follows: []
+  ImportNamespaceSpecifier -> 1 productions
+    nullable: false
+    first: []
+    follows: []
+  Export -> 14 productions
+    nullable: false
+    first: []
+    follows: []
+  ExportSpecifierList -> 5 productions
+    nullable: false
+    first: []
+    follows: []
+  ExportSpecifier -> 5 productions
+    nullable: false
+    first: []
+    follows: []
+  Invocation -> 4 productions
+    nullable: false
+    first: []
+    follows: []
+  OptFuncExist -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  Arguments -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  This -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  ThisProperty -> 1 productions
+    nullable: false
+    first: []
+    follows: []
+  Array -> 3 productions
+    nullable: false
+    first: []
+    follows: []
+  RangeDots -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  Range -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  Slice -> 6 productions
+    nullable: false
+    first: []
+    follows: []
+  ArgList -> 5 productions
+    nullable: false
+    first: []
+    follows: []
+  Arg -> 4 productions
+    nullable: false
+    first: []
+    follows: []
+  ArgElisionList -> 5 productions
+    nullable: false
+    first: []
+    follows: []
+  ArgElision -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  OptElisions -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  Elisions -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  Elision -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  SimpleArgs -> 4 productions
+    nullable: false
+    first: []
+    follows: []
+  Try -> 4 productions
+    nullable: false
+    first: []
+    follows: []
+  Catch -> 3 productions
+    nullable: false
+    first: []
+    follows: []
+  Throw -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  Parenthetical -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  WhileLineSource -> 4 productions
+    nullable: false
+    first: []
+    follows: []
+  WhileSource -> 6 productions
+    nullable: false
+    first: []
+    follows: []
+  While -> 5 productions
+    nullable: false
+    first: []
+    follows: []
+  Loop -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  For -> 4 productions
+    nullable: false
+    first: []
+    follows: []
+  ForBody -> 3 productions
+    nullable: false
+    first: []
+    follows: []
+  ForLineBody -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  ForStart -> 3 productions
+    nullable: false
+    first: []
+    follows: []
+  ForValue -> 4 productions
+    nullable: false
+    first: []
+    follows: []
+  ForVariables -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  ForSource -> 19 productions
+    nullable: false
+    first: []
+    follows: []
+  ForLineSource -> 19 productions
+    nullable: false
+    first: []
+    follows: []
+  Switch -> 6 productions
+    nullable: false
+    first: []
+    follows: []
+  Whens -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  When -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  IfBlock -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  If -> 4 productions
+    nullable: false
+    first: []
+    follows: []
+  IfBlockLine -> 2 productions
+    nullable: false
+    first: []
+    follows: []
+  IfLine -> 4 productions
+    nullable: false
+    first: []
+    follows: []
+  OperationLine -> 3 productions
+    nullable: false
+    first: []
+    follows: []
+  Operation -> 28 productions
+    nullable: false
+    first: []
+    follows: []
+  DoIife -> 1 productions
+    nullable: false
+    first: []
+    follows: []
+  $accept -> 1 productions
+    nullable: false
+    first: []
+    follows: []
+
+TERMINALS (108 total):
+  "0" -> "$end"
+  "1" -> "error"
+  "2" -> "TERMINATOR"
+  "3" -> "STATEMENT"
+  "4" -> "YIELD"
+  "5" -> "INDENT"
+  "6" -> "OUTDENT"
+  "7" -> "FROM"
+  "8" -> "IDENTIFIER"
+  "9" -> "JSX_TAG"
+  "10" -> "PROPERTY"
+  "11" -> "NUMBER"
+  "12" -> "STRING"
+  "13" -> "STRING_START"
+  "14" -> "STRING_END"
+  "15" -> "INTERPOLATION_START"
+  "16" -> "INTERPOLATION_END"
+  "17" -> "REGEX"
+  "18" -> "REGEX_START"
+  "19" -> "REGEX_END"
+  "20" -> "JS"
+  "21" -> "UNDEFINED"
+  "22" -> "NULL"
+  "23" -> "BOOL"
+  "24" -> "INFINITY"
+  "25" -> "NAN"
+  "26" -> "="
+  "27" -> ":"
+  "28" -> "["
+  "29" -> "]"
+  "30" -> "@"
+  "31" -> "..."
+  "32" -> "SUPER"
+  "33" -> "DYNAMIC_IMPORT"
+  "34" -> "RETURN"
+  "35" -> "AWAIT"
+  "36" -> "PARAM_START"
+  "37" -> "PARAM_END"
+  "38" -> "->"
+  "39" -> "=>"
+  "40" -> ","
+  "41" -> "."
+  "42" -> "INDEX_START"
+  "43" -> "INDEX_END"
+  "44" -> "NEW_TARGET"
+  "45" -> "IMPORT_META"
+  "46" -> "?."
+  "47" -> "::"
+  "48" -> "?::"
+  "49" -> "INDEX_SOAK"
+  "50" -> "{"
+  "51" -> "}"
+  "52" -> "CLASS"
+  "53" -> "EXTENDS"
+  "54" -> "IMPORT"
+  "55" -> "ASSERT"
+  "56" -> "AS"
+  "57" -> "DEFAULT"
+  "58" -> "IMPORT_ALL"
+  "59" -> "EXPORT"
+  "60" -> "EXPORT_ALL"
+  "61" -> "FUNC_EXIST"
+  "62" -> "CALL_START"
+  "63" -> "CALL_END"
+  "64" -> "THIS"
+  "65" -> ".."
+  "66" -> "TRY"
+  "67" -> "FINALLY"
+  "68" -> "CATCH"
+  "69" -> "THROW"
+  "70" -> "("
+  "71" -> ")"
+  "72" -> "WHILE"
+  "73" -> "WHEN"
+  "74" -> "UNTIL"
+  "75" -> "LOOP"
+  "76" -> "FOR"
+  "77" -> "BY"
+  "78" -> "OWN"
+  "79" -> "FORIN"
+  "80" -> "FOROF"
+  "81" -> "FORFROM"
+  "82" -> "SWITCH"
+  "83" -> "ELSE"
+  "84" -> "LEADING_WHEN"
+  "85" -> "IF"
+  "86" -> "POST_IF"
+  "87" -> "UNARY"
+  "88" -> "DO"
+  "89" -> "DO_IIFE"
+  "90" -> "UNARY_MATH"
+  "91" -> "-"
+  "92" -> "+"
+  "93" -> "--"
+  "94" -> "++"
+  "95" -> "?"
+  "96" -> "MATH"
+  "97" -> "**"
+  "98" -> "SHIFT"
+  "99" -> "COMPARE"
+  "100" -> "&"
+  "101" -> "^"
+  "102" -> "|"
+  "103" -> "&&"
+  "104" -> "||"
+  "105" -> "BIN?"
+  "106" -> "RELATION"
+  "107" -> "COMPOUND_ASSIGN"
+
+PRODUCTIONS (406 total):
+  [0] $accept -> [Root, $end]
+    nullable: false, precedence: 0
+    first: []
+  [1] Root -> []
+    nullable: false, precedence: 0
+    first: []
+  [2] Root -> [Body]
+    nullable: false, precedence: 0
+    first: []
+  [3] Body -> [Line]
+    nullable: false, precedence: 0
+    first: []
+  [4] Body -> [Body, TERMINATOR, Line]
+    nullable: false, precedence: 0
+    first: []
+  [5] Body -> [Body, TERMINATOR]
+    nullable: false, precedence: 0
+    first: []
+  [6] Line -> [Expression]
+    nullable: false, precedence: 0
+    first: []
+  [7] Line -> [ExpressionLine]
+    nullable: false, precedence: 0
+    first: []
+  [8] Line -> [Statement]
+    nullable: false, precedence: 0
+    first: []
+  [9] Line -> [FuncDirective]
+    nullable: false, precedence: 0
+    first: []
+  [10] FuncDirective -> [YieldReturn]
+    nullable: false, precedence: 0
+    first: []
+  [11] FuncDirective -> [AwaitReturn]
+    nullable: false, precedence: 0
+    first: []
+  [12] Statement -> [Return]
+    nullable: false, precedence: 0
+    first: []
+  [13] Statement -> [STATEMENT]
+    nullable: false, precedence: 0
+    first: []
+  [14] Statement -> [Import]
+    nullable: false, precedence: 0
+    first: []
+  [15] Statement -> [Export]
+    nullable: false, precedence: 0
+    first: []
+  [16] Expression -> [Value]
+    nullable: false, precedence: 0
+    first: []
+  [17] Expression -> [Code]
+    nullable: false, precedence: 0
+    first: []
+  [18] Expression -> [Operation]
+    nullable: false, precedence: 0
+    first: []
+  [19] Expression -> [Assign]
+    nullable: false, precedence: 0
+    first: []
+  [20] Expression -> [If]
+    nullable: false, precedence: 0
+    first: []
+  [21] Expression -> [Try]
+    nullable: false, precedence: 0
+    first: []
+  [22] Expression -> [While]
+    nullable: false, precedence: 0
+    first: []
+  [23] Expression -> [For]
+    nullable: false, precedence: 0
+    first: []
+  [24] Expression -> [Switch]
+    nullable: false, precedence: 0
+    first: []
+  [25] Expression -> [Class]
+    nullable: false, precedence: 0
+    first: []
+  [26] Expression -> [Throw]
+    nullable: false, precedence: 0
+    first: []
+  [27] Expression -> [Yield]
+    nullable: false, precedence: 0
+    first: []
+  [28] ExpressionLine -> [CodeLine]
+    nullable: false, precedence: 0
+    first: []
+  [29] ExpressionLine -> [IfLine]
+    nullable: false, precedence: 0
+    first: []
+  [30] ExpressionLine -> [OperationLine]
+    nullable: false, precedence: 0
+    first: []
+  [31] Yield -> [YIELD]
+    nullable: false, precedence: 5
+    first: []
+  [32] Yield -> [YIELD, Expression]
+    nullable: false, precedence: 5
+    first: []
+  [33] Yield -> [YIELD, INDENT, Object, OUTDENT]
+    nullable: false, precedence: 6
+    first: []
+  [34] Yield -> [YIELD, FROM, Expression]
+    nullable: false, precedence: 5
+    first: []
+  [35] Block -> [INDENT, OUTDENT]
+    nullable: false, precedence: 6
+    first: []
+  [36] Block -> [INDENT, Body, OUTDENT]
+    nullable: false, precedence: 6
+    first: []
+  [37] Identifier -> [IDENTIFIER]
+    nullable: false, precedence: 0
+    first: []
+  [38] Identifier -> [JSX_TAG]
+    nullable: false, precedence: 0
+    first: []
+  [39] Property -> [PROPERTY]
+    nullable: false, precedence: 0
+    first: []
+  [40] AlphaNumeric -> [NUMBER]
+    nullable: false, precedence: 0
+    first: []
+  [41] AlphaNumeric -> [String]
+    nullable: false, precedence: 0
+    first: []
+  [42] String -> [STRING]
+    nullable: false, precedence: 0
+    first: []
+  [43] String -> [STRING_START, Interpolations, STRING_END]
+    nullable: false, precedence: 0
+    first: []
+  [44] Interpolations -> [InterpolationChunk]
+    nullable: false, precedence: 0
+    first: []
+  [45] Interpolations -> [Interpolations, InterpolationChunk]
+    nullable: false, precedence: 0
+    first: []
+  [46] InterpolationChunk -> [INTERPOLATION_START, Body, INTERPOLATION_END]
+    nullable: false, precedence: 0
+    first: []
+  [47] InterpolationChunk -> [INTERPOLATION_START, INDENT, Body, OUTDENT, INTERPOLATION_END]
+    nullable: false, precedence: 6
+    first: []
+  [48] InterpolationChunk -> [INTERPOLATION_START, INTERPOLATION_END]
+    nullable: false, precedence: 0
+    first: []
+  [49] InterpolationChunk -> [String]
+    nullable: false, precedence: 0
+    first: []
+  [50] Regex -> [REGEX]
+    nullable: false, precedence: 0
+    first: []
+  [51] Regex -> [REGEX_START, Invocation, REGEX_END]
+    nullable: false, precedence: 0
+    first: []
+  [52] Literal -> [AlphaNumeric]
+    nullable: false, precedence: 0
+    first: []
+  [53] Literal -> [JS]
+    nullable: false, precedence: 0
+    first: []
+  [54] Literal -> [Regex]
+    nullable: false, precedence: 0
+    first: []
+  [55] Literal -> [UNDEFINED]
+    nullable: false, precedence: 0
+    first: []
+  [56] Literal -> [NULL]
+    nullable: false, precedence: 0
+    first: []
+  [57] Literal -> [BOOL]
+    nullable: false, precedence: 0
+    first: []
+  [58] Literal -> [INFINITY]
+    nullable: false, precedence: 0
+    first: []
+  [59] Literal -> [NAN]
+    nullable: false, precedence: 0
+    first: []
+  [60] Assign -> [Assignable, =, Expression]
+    nullable: false, precedence: 4
+    first: []
+  [61] Assign -> [Assignable, =, TERMINATOR, Expression]
+    nullable: false, precedence: 4
+    first: []
+  [62] Assign -> [Assignable, =, INDENT, Expression, OUTDENT]
+    nullable: false, precedence: 6
+    first: []
+  [63] AssignObj -> [ObjAssignable]
+    nullable: false, precedence: 0
+    first: []
+  [64] AssignObj -> [ObjRestValue]
+    nullable: false, precedence: 0
+    first: []
+  [65] AssignObj -> [ObjAssignable, :, Expression]
+    nullable: false, precedence: 4
+    first: []
+  [66] AssignObj -> [ObjAssignable, :, INDENT, Expression, OUTDENT]
+    nullable: false, precedence: 6
+    first: []
+  [67] AssignObj -> [SimpleObjAssignable, =, Expression]
+    nullable: false, precedence: 4
+    first: []
+  [68] AssignObj -> [SimpleObjAssignable, =, INDENT, Expression, OUTDENT]
+    nullable: false, precedence: 6
+    first: []
+  [69] SimpleObjAssignable -> [Identifier]
+    nullable: false, precedence: 0
+    first: []
+  [70] SimpleObjAssignable -> [Property]
+    nullable: false, precedence: 0
+    first: []
+  [71] SimpleObjAssignable -> [ThisProperty]
+    nullable: false, precedence: 0
+    first: []
+  [72] ObjAssignable -> [SimpleObjAssignable]
+    nullable: false, precedence: 0
+    first: []
+  [73] ObjAssignable -> [[, Expression, ]]
+    nullable: false, precedence: 0
+    first: []
+  [74] ObjAssignable -> [@, [, Expression, ]]
+    nullable: false, precedence: 0
+    first: []
+  [75] ObjAssignable -> [AlphaNumeric]
+    nullable: false, precedence: 0
+    first: []
+  [76] ObjRestValue -> [SimpleObjAssignable, ...]
+    nullable: false, precedence: 0
+    first: []
+  [77] ObjRestValue -> [..., SimpleObjAssignable]
+    nullable: false, precedence: 0
+    first: []
+  [78] ObjRestValue -> [ObjSpreadExpr, ...]
+    nullable: false, precedence: 0
+    first: []
+  [79] ObjRestValue -> [..., ObjSpreadExpr]
+    nullable: false, precedence: 0
+    first: []
+  [80] ObjSpreadExpr -> [ObjSpreadIdentifier]
+    nullable: false, precedence: 0
+    first: []
+  [81] ObjSpreadExpr -> [Object]
+    nullable: false, precedence: 0
+    first: []
+  [82] ObjSpreadExpr -> [Parenthetical]
+    nullable: false, precedence: 0
+    first: []
+  [83] ObjSpreadExpr -> [Super]
+    nullable: false, precedence: 0
+    first: []
+  [84] ObjSpreadExpr -> [This]
+    nullable: false, precedence: 0
+    first: []
+  [85] ObjSpreadExpr -> [SUPER, OptFuncExist, Arguments]
+    nullable: false, precedence: 2
+    first: []
+  [86] ObjSpreadExpr -> [DYNAMIC_IMPORT, Arguments]
+    nullable: false, precedence: 2
+    first: []
+  [87] ObjSpreadExpr -> [SimpleObjAssignable, OptFuncExist, Arguments]
+    nullable: false, precedence: 0
+    first: []
+  [88] ObjSpreadExpr -> [ObjSpreadExpr, OptFuncExist, Arguments]
+    nullable: false, precedence: 0
+    first: []
+  [89] ObjSpreadIdentifier -> [SimpleObjAssignable, Accessor]
+    nullable: false, precedence: 0
+    first: []
+  [90] ObjSpreadIdentifier -> [ObjSpreadExpr, Accessor]
+    nullable: false, precedence: 0
+    first: []
+  [91] Return -> [RETURN, Expression]
+    nullable: false, precedence: 4
+    first: []
+  [92] Return -> [RETURN, INDENT, Object, OUTDENT]
+    nullable: false, precedence: 6
+    first: []
+  [93] Return -> [RETURN]
+    nullable: false, precedence: 4
+    first: []
+  [94] YieldReturn -> [YIELD, RETURN, Expression]
+    nullable: false, precedence: 4
+    first: []
+  [95] YieldReturn -> [YIELD, RETURN]
+    nullable: false, precedence: 4
+    first: []
+  [96] AwaitReturn -> [AWAIT, RETURN, Expression]
+    nullable: false, precedence: 4
+    first: []
+  [97] AwaitReturn -> [AWAIT, RETURN]
+    nullable: false, precedence: 4
+    first: []
+  [98] Code -> [PARAM_START, ParamList, PARAM_END, FuncGlyph, Block]
+    nullable: false, precedence: 0
+    first: []
+  [99] Code -> [FuncGlyph, Block]
+    nullable: false, precedence: 0
+    first: []
+  [100] CodeLine -> [PARAM_START, ParamList, PARAM_END, FuncGlyph, Line]
+    nullable: false, precedence: 0
+    first: []
+  [101] CodeLine -> [FuncGlyph, Line]
+    nullable: false, precedence: 0
+    first: []
+  [102] FuncGlyph -> [->]
+    nullable: false, precedence: 0
+    first: []
+  [103] FuncGlyph -> [=>]
+    nullable: false, precedence: 0
+    first: []
+  [104] OptComma -> []
+    nullable: false, precedence: 0
+    first: []
+  [105] OptComma -> [,]
+    nullable: false, precedence: 0
+    first: []
+  [106] ParamList -> []
+    nullable: false, precedence: 0
+    first: []
+  [107] ParamList -> [Param]
+    nullable: false, precedence: 0
+    first: []
+  [108] ParamList -> [ParamList, ,, Param]
+    nullable: false, precedence: 0
+    first: []
+  [109] ParamList -> [ParamList, OptComma, TERMINATOR, Param]
+    nullable: false, precedence: 0
+    first: []
+  [110] ParamList -> [ParamList, OptComma, INDENT, ParamList, OptComma, OUTDENT]
+    nullable: false, precedence: 6
+    first: []
+  [111] Param -> [ParamVar]
+    nullable: false, precedence: 0
+    first: []
+  [112] Param -> [ParamVar, ...]
+    nullable: false, precedence: 0
+    first: []
+  [113] Param -> [..., ParamVar]
+    nullable: false, precedence: 0
+    first: []
+  [114] Param -> [ParamVar, =, Expression]
+    nullable: false, precedence: 4
+    first: []
+  [115] Param -> [...]
+    nullable: false, precedence: 0
+    first: []
+  [116] ParamVar -> [Identifier]
+    nullable: false, precedence: 0
+    first: []
+  [117] ParamVar -> [ThisProperty]
+    nullable: false, precedence: 0
+    first: []
+  [118] ParamVar -> [Array]
+    nullable: false, precedence: 0
+    first: []
+  [119] ParamVar -> [Object]
+    nullable: false, precedence: 0
+    first: []
+  [120] Splat -> [Expression, ...]
+    nullable: false, precedence: 0
+    first: []
+  [121] Splat -> [..., Expression]
+    nullable: false, precedence: 0
+    first: []
+  [122] SimpleAssignable -> [Identifier]
+    nullable: false, precedence: 0
+    first: []
+  [123] SimpleAssignable -> [Value, Accessor]
+    nullable: false, precedence: 0
+    first: []
+  [124] SimpleAssignable -> [Code, Accessor]
+    nullable: false, precedence: 0
+    first: []
+  [125] SimpleAssignable -> [ThisProperty]
+    nullable: false, precedence: 0
+    first: []
+  [126] Assignable -> [SimpleAssignable]
+    nullable: false, precedence: 0
+    first: []
+  [127] Assignable -> [Array]
+    nullable: false, precedence: 0
+    first: []
+  [128] Assignable -> [Object]
+    nullable: false, precedence: 0
+    first: []
+  [129] Value -> [Assignable]
+    nullable: false, precedence: 0
+    first: []
+  [130] Value -> [Literal]
+    nullable: false, precedence: 0
+    first: []
+  [131] Value -> [Parenthetical]
+    nullable: false, precedence: 0
+    first: []
+  [132] Value -> [Range]
+    nullable: false, precedence: 0
+    first: []
+  [133] Value -> [Invocation]
+    nullable: false, precedence: 0
+    first: []
+  [134] Value -> [DoIife]
+    nullable: false, precedence: 0
+    first: []
+  [135] Value -> [This]
+    nullable: false, precedence: 0
+    first: []
+  [136] Value -> [Super]
+    nullable: false, precedence: 0
+    first: []
+  [137] Value -> [MetaProperty]
+    nullable: false, precedence: 0
+    first: []
+  [138] Super -> [SUPER, ., Property]
+    nullable: false, precedence: 25
+    first: []
+  [139] Super -> [SUPER, INDEX_START, Expression, INDEX_END]
+    nullable: false, precedence: 2
+    first: []
+  [140] Super -> [SUPER, INDEX_START, INDENT, Expression, OUTDENT, INDEX_END]
+    nullable: false, precedence: 6
+    first: []
+  [141] MetaProperty -> [NEW_TARGET, ., Property]
+    nullable: false, precedence: 25
+    first: []
+  [142] MetaProperty -> [IMPORT_META, ., Property]
+    nullable: false, precedence: 25
+    first: []
+  [143] Accessor -> [., Property]
+    nullable: false, precedence: 25
+    first: []
+  [144] Accessor -> [?., Property]
+    nullable: false, precedence: 25
+    first: []
+  [145] Accessor -> [::, Property]
+    nullable: false, precedence: 25
+    first: []
+  [146] Accessor -> [?::, Property]
+    nullable: false, precedence: 25
+    first: []
+  [147] Accessor -> [::]
+    nullable: false, precedence: 25
+    first: []
+  [148] Accessor -> [?::]
+    nullable: false, precedence: 25
+    first: []
+  [149] Accessor -> [Index]
+    nullable: false, precedence: 0
+    first: []
+  [150] Index -> [INDEX_START, IndexValue, INDEX_END]
+    nullable: false, precedence: 0
+    first: []
+  [151] Index -> [INDEX_START, INDENT, IndexValue, OUTDENT, INDEX_END]
+    nullable: false, precedence: 6
+    first: []
+  [152] Index -> [INDEX_SOAK, Index]
+    nullable: false, precedence: 0
+    first: []
+  [153] IndexValue -> [Expression]
+    nullable: false, precedence: 0
+    first: []
+  [154] IndexValue -> [Slice]
+    nullable: false, precedence: 0
+    first: []
+  [155] Object -> [{, AssignList, OptComma, }]
+    nullable: false, precedence: 0
+    first: []
+  [156] AssignList -> []
+    nullable: false, precedence: 0
+    first: []
+  [157] AssignList -> [AssignObj]
+    nullable: false, precedence: 0
+    first: []
+  [158] AssignList -> [AssignList, ,, AssignObj]
+    nullable: false, precedence: 0
+    first: []
+  [159] AssignList -> [AssignList, OptComma, TERMINATOR, AssignObj]
+    nullable: false, precedence: 0
+    first: []
+  [160] AssignList -> [AssignList, OptComma, INDENT, AssignList, OptComma, OUTDENT]
+    nullable: false, precedence: 6
+    first: []
+  [161] Class -> [CLASS]
+    nullable: false, precedence: 2
+    first: []
+  [162] Class -> [CLASS, Block]
+    nullable: false, precedence: 2
+    first: []
+  [163] Class -> [CLASS, EXTENDS, Expression]
+    nullable: false, precedence: 4
+    first: []
+  [164] Class -> [CLASS, EXTENDS, Expression, Block]
+    nullable: false, precedence: 4
+    first: []
+  [165] Class -> [CLASS, SimpleAssignable]
+    nullable: false, precedence: 2
+    first: []
+  [166] Class -> [CLASS, SimpleAssignable, Block]
+    nullable: false, precedence: 2
+    first: []
+  [167] Class -> [CLASS, SimpleAssignable, EXTENDS, Expression]
+    nullable: false, precedence: 4
+    first: []
+  [168] Class -> [CLASS, SimpleAssignable, EXTENDS, Expression, Block]
+    nullable: false, precedence: 4
+    first: []
+  [169] Import -> [IMPORT, String]
+    nullable: false, precedence: 2
+    first: []
+  [170] Import -> [IMPORT, String, ASSERT, Object]
+    nullable: false, precedence: 2
+    first: []
+  [171] Import -> [IMPORT, ImportDefaultSpecifier, FROM, String]
+    nullable: false, precedence: 2
+    first: []
+  [172] Import -> [IMPORT, ImportDefaultSpecifier, FROM, String, ASSERT, Object]
+    nullable: false, precedence: 2
+    first: []
+  [173] Import -> [IMPORT, ImportNamespaceSpecifier, FROM, String]
+    nullable: false, precedence: 2
+    first: []
+  [174] Import -> [IMPORT, ImportNamespaceSpecifier, FROM, String, ASSERT, Object]
+    nullable: false, precedence: 2
+    first: []
+  [175] Import -> [IMPORT, {, }, FROM, String]
+    nullable: false, precedence: 2
+    first: []
+  [176] Import -> [IMPORT, {, }, FROM, String, ASSERT, Object]
+    nullable: false, precedence: 2
+    first: []
+  [177] Import -> [IMPORT, {, ImportSpecifierList, OptComma, }, FROM, String]
+    nullable: false, precedence: 2
+    first: []
+  [178] Import -> [IMPORT, {, ImportSpecifierList, OptComma, }, FROM, String, ASSERT, Object]
+    nullable: false, precedence: 2
+    first: []
+  [179] Import -> [IMPORT, ImportDefaultSpecifier, ,, ImportNamespaceSpecifier, FROM, String]
+    nullable: false, precedence: 2
+    first: []
+  [180] Import -> [IMPORT, ImportDefaultSpecifier, ,, ImportNamespaceSpecifier, FROM, String, ASSERT, Object]
+    nullable: false, precedence: 2
+    first: []
+  [181] Import -> [IMPORT, ImportDefaultSpecifier, ,, {, ImportSpecifierList, OptComma, }, FROM, String]
+    nullable: false, precedence: 2
+    first: []
+  [182] Import -> [IMPORT, ImportDefaultSpecifier, ,, {, ImportSpecifierList, OptComma, }, FROM, String, ASSERT, Object]
+    nullable: false, precedence: 2
+    first: []
+  [183] ImportSpecifierList -> [ImportSpecifier]
+    nullable: false, precedence: 0
+    first: []
+  [184] ImportSpecifierList -> [ImportSpecifierList, ,, ImportSpecifier]
+    nullable: false, precedence: 0
+    first: []
+  [185] ImportSpecifierList -> [ImportSpecifierList, OptComma, TERMINATOR, ImportSpecifier]
+    nullable: false, precedence: 0
+    first: []
+  [186] ImportSpecifierList -> [INDENT, ImportSpecifierList, OptComma, OUTDENT]
+    nullable: false, precedence: 6
+    first: []
+  [187] ImportSpecifierList -> [ImportSpecifierList, OptComma, INDENT, ImportSpecifierList, OptComma, OUTDENT]
+    nullable: false, precedence: 6
+    first: []
+  [188] ImportSpecifier -> [Identifier]
+    nullable: false, precedence: 0
+    first: []
+  [189] ImportSpecifier -> [Identifier, AS, Identifier]
+    nullable: false, precedence: 0
+    first: []
+  [190] ImportSpecifier -> [DEFAULT]
+    nullable: false, precedence: 0
+    first: []
+  [191] ImportSpecifier -> [DEFAULT, AS, Identifier]
+    nullable: false, precedence: 0
+    first: []
+  [192] ImportDefaultSpecifier -> [Identifier]
+    nullable: false, precedence: 0
+    first: []
+  [193] ImportNamespaceSpecifier -> [IMPORT_ALL, AS, Identifier]
+    nullable: false, precedence: 0
+    first: []
+  [194] Export -> [EXPORT, {, }]
+    nullable: false, precedence: 2
+    first: []
+  [195] Export -> [EXPORT, {, ExportSpecifierList, OptComma, }]
+    nullable: false, precedence: 2
+    first: []
+  [196] Export -> [EXPORT, Class]
+    nullable: false, precedence: 2
+    first: []
+  [197] Export -> [EXPORT, Identifier, =, Expression]
+    nullable: false, precedence: 4
+    first: []
+  [198] Export -> [EXPORT, Identifier, =, TERMINATOR, Expression]
+    nullable: false, precedence: 4
+    first: []
+  [199] Export -> [EXPORT, Identifier, =, INDENT, Expression, OUTDENT]
+    nullable: false, precedence: 6
+    first: []
+  [200] Export -> [EXPORT, DEFAULT, Expression]
+    nullable: false, precedence: 2
+    first: []
+  [201] Export -> [EXPORT, DEFAULT, INDENT, Object, OUTDENT]
+    nullable: false, precedence: 6
+    first: []
+  [202] Export -> [EXPORT, EXPORT_ALL, FROM, String]
+    nullable: false, precedence: 2
+    first: []
+  [203] Export -> [EXPORT, EXPORT_ALL, FROM, String, ASSERT, Object]
+    nullable: false, precedence: 2
+    first: []
+  [204] Export -> [EXPORT, {, }, FROM, String]
+    nullable: false, precedence: 2
+    first: []
+  [205] Export -> [EXPORT, {, }, FROM, String, ASSERT, Object]
+    nullable: false, precedence: 2
+    first: []
+  [206] Export -> [EXPORT, {, ExportSpecifierList, OptComma, }, FROM, String]
+    nullable: false, precedence: 2
+    first: []
+  [207] Export -> [EXPORT, {, ExportSpecifierList, OptComma, }, FROM, String, ASSERT, Object]
+    nullable: false, precedence: 2
+    first: []
+  [208] ExportSpecifierList -> [ExportSpecifier]
+    nullable: false, precedence: 0
+    first: []
+  [209] ExportSpecifierList -> [ExportSpecifierList, ,, ExportSpecifier]
+    nullable: false, precedence: 0
+    first: []
+  [210] ExportSpecifierList -> [ExportSpecifierList, OptComma, TERMINATOR, ExportSpecifier]
+    nullable: false, precedence: 0
+    first: []
+  [211] ExportSpecifierList -> [INDENT, ExportSpecifierList, OptComma, OUTDENT]
+    nullable: false, precedence: 6
+    first: []
+  [212] ExportSpecifierList -> [ExportSpecifierList, OptComma, INDENT, ExportSpecifierList, OptComma, OUTDENT]
+    nullable: false, precedence: 6
+    first: []
+  [213] ExportSpecifier -> [Identifier]
+    nullable: false, precedence: 0
+    first: []
+  [214] ExportSpecifier -> [Identifier, AS, Identifier]
+    nullable: false, precedence: 0
+    first: []
+  [215] ExportSpecifier -> [Identifier, AS, DEFAULT]
+    nullable: false, precedence: 0
+    first: []
+  [216] ExportSpecifier -> [DEFAULT]
+    nullable: false, precedence: 0
+    first: []
+  [217] ExportSpecifier -> [DEFAULT, AS, Identifier]
+    nullable: false, precedence: 0
+    first: []
+  [218] Invocation -> [Value, OptFuncExist, String]
+    nullable: false, precedence: 0
+    first: []
+  [219] Invocation -> [Value, OptFuncExist, Arguments]
+    nullable: false, precedence: 0
+    first: []
+  [220] Invocation -> [SUPER, OptFuncExist, Arguments]
+    nullable: false, precedence: 2
+    first: []
+  [221] Invocation -> [DYNAMIC_IMPORT, Arguments]
+    nullable: false, precedence: 2
+    first: []
+  [222] OptFuncExist -> []
+    nullable: false, precedence: 0
+    first: []
+  [223] OptFuncExist -> [FUNC_EXIST]
+    nullable: false, precedence: 0
+    first: []
+  [224] Arguments -> [CALL_START, CALL_END]
+    nullable: false, precedence: 24
+    first: []
+  [225] Arguments -> [CALL_START, ArgList, OptComma, CALL_END]
+    nullable: false, precedence: 24
+    first: []
+  [226] This -> [THIS]
+    nullable: false, precedence: 0
+    first: []
+  [227] This -> [@]
+    nullable: false, precedence: 0
+    first: []
+  [228] ThisProperty -> [@, Property]
+    nullable: false, precedence: 0
+    first: []
+  [229] Array -> [[, ]]
+    nullable: false, precedence: 0
+    first: []
+  [230] Array -> [[, Elisions, ]]
+    nullable: false, precedence: 0
+    first: []
+  [231] Array -> [[, ArgElisionList, OptElisions, ]]
+    nullable: false, precedence: 0
+    first: []
+  [232] RangeDots -> [..]
+    nullable: false, precedence: 0
+    first: []
+  [233] RangeDots -> [...]
+    nullable: false, precedence: 0
+    first: []
+  [234] Range -> [[, Expression, RangeDots, Expression, ]]
+    nullable: false, precedence: 0
+    first: []
+  [235] Range -> [[, ExpressionLine, RangeDots, Expression, ]]
+    nullable: false, precedence: 0
+    first: []
+  [236] Slice -> [Expression, RangeDots, Expression]
+    nullable: false, precedence: 0
+    first: []
+  [237] Slice -> [Expression, RangeDots]
+    nullable: false, precedence: 0
+    first: []
+  [238] Slice -> [ExpressionLine, RangeDots, Expression]
+    nullable: false, precedence: 0
+    first: []
+  [239] Slice -> [ExpressionLine, RangeDots]
+    nullable: false, precedence: 0
+    first: []
+  [240] Slice -> [RangeDots, Expression]
+    nullable: false, precedence: 0
+    first: []
+  [241] Slice -> [RangeDots]
+    nullable: false, precedence: 0
+    first: []
+  [242] ArgList -> [Arg]
+    nullable: false, precedence: 0
+    first: []
+  [243] ArgList -> [ArgList, ,, Arg]
+    nullable: false, precedence: 0
+    first: []
+  [244] ArgList -> [ArgList, OptComma, TERMINATOR, Arg]
+    nullable: false, precedence: 0
+    first: []
+  [245] ArgList -> [INDENT, ArgList, OptComma, OUTDENT]
+    nullable: false, precedence: 6
+    first: []
+  [246] ArgList -> [ArgList, OptComma, INDENT, ArgList, OptComma, OUTDENT]
+    nullable: false, precedence: 6
+    first: []
+  [247] Arg -> [Expression]
+    nullable: false, precedence: 0
+    first: []
+  [248] Arg -> [ExpressionLine]
+    nullable: false, precedence: 0
+    first: []
+  [249] Arg -> [Splat]
+    nullable: false, precedence: 0
+    first: []
+  [250] Arg -> [...]
+    nullable: false, precedence: 0
+    first: []
+  [251] ArgElisionList -> [ArgElision]
+    nullable: false, precedence: 0
+    first: []
+  [252] ArgElisionList -> [ArgElisionList, ,, ArgElision]
+    nullable: false, precedence: 0
+    first: []
+  [253] ArgElisionList -> [ArgElisionList, OptComma, TERMINATOR, ArgElision]
+    nullable: false, precedence: 0
+    first: []
+  [254] ArgElisionList -> [INDENT, ArgElisionList, OptElisions, OUTDENT]
+    nullable: false, precedence: 6
+    first: []
+  [255] ArgElisionList -> [ArgElisionList, OptElisions, INDENT, ArgElisionList, OptElisions, OUTDENT]
+    nullable: false, precedence: 6
+    first: []
+  [256] ArgElision -> [Arg]
+    nullable: false, precedence: 0
+    first: []
+  [257] ArgElision -> [Elisions, Arg]
+    nullable: false, precedence: 0
+    first: []
+  [258] OptElisions -> [OptComma]
+    nullable: false, precedence: 0
+    first: []
+  [259] OptElisions -> [,, Elisions]
+    nullable: false, precedence: 0
+    first: []
+  [260] Elisions -> [Elision]
+    nullable: false, precedence: 0
+    first: []
+  [261] Elisions -> [Elisions, Elision]
+    nullable: false, precedence: 0
+    first: []
+  [262] Elision -> [,]
+    nullable: false, precedence: 0
+    first: []
+  [263] Elision -> [Elision, TERMINATOR]
+    nullable: false, precedence: 0
+    first: []
+  [264] SimpleArgs -> [Expression]
+    nullable: false, precedence: 0
+    first: []
+  [265] SimpleArgs -> [ExpressionLine]
+    nullable: false, precedence: 0
+    first: []
+  [266] SimpleArgs -> [SimpleArgs, ,, Expression]
+    nullable: false, precedence: 0
+    first: []
+  [267] SimpleArgs -> [SimpleArgs, ,, ExpressionLine]
+    nullable: false, precedence: 0
+    first: []
+  [268] Try -> [TRY, Block]
+    nullable: false, precedence: 0
+    first: []
+  [269] Try -> [TRY, Block, Catch]
+    nullable: false, precedence: 0
+    first: []
+  [270] Try -> [TRY, Block, FINALLY, Block]
+    nullable: false, precedence: 0
+    first: []
+  [271] Try -> [TRY, Block, Catch, FINALLY, Block]
+    nullable: false, precedence: 0
+    first: []
+  [272] Catch -> [CATCH, Identifier, Block]
+    nullable: false, precedence: 0
+    first: []
+  [273] Catch -> [CATCH, Object, Block]
+    nullable: false, precedence: 0
+    first: []
+  [274] Catch -> [CATCH, Block]
+    nullable: false, precedence: 0
+    first: []
+  [275] Throw -> [THROW, Expression]
+    nullable: false, precedence: 4
+    first: []
+  [276] Throw -> [THROW, INDENT, Object, OUTDENT]
+    nullable: false, precedence: 6
+    first: []
+  [277] Parenthetical -> [(, Body, )]
+    nullable: false, precedence: 0
+    first: []
+  [278] Parenthetical -> [(, INDENT, Body, OUTDENT, )]
+    nullable: false, precedence: 6
+    first: []
+  [279] WhileLineSource -> [WHILE, ExpressionLine]
+    nullable: false, precedence: 2
+    first: []
+  [280] WhileLineSource -> [WHILE, ExpressionLine, WHEN, ExpressionLine]
+    nullable: false, precedence: 3
+    first: []
+  [281] WhileLineSource -> [UNTIL, ExpressionLine]
+    nullable: false, precedence: 2
+    first: []
+  [282] WhileLineSource -> [UNTIL, ExpressionLine, WHEN, ExpressionLine]
+    nullable: false, precedence: 3
+    first: []
+  [283] WhileSource -> [WHILE, Expression]
+    nullable: false, precedence: 2
+    first: []
+  [284] WhileSource -> [WHILE, Expression, WHEN, Expression]
+    nullable: false, precedence: 3
+    first: []
+  [285] WhileSource -> [WHILE, ExpressionLine, WHEN, Expression]
+    nullable: false, precedence: 3
+    first: []
+  [286] WhileSource -> [UNTIL, Expression]
+    nullable: false, precedence: 2
+    first: []
+  [287] WhileSource -> [UNTIL, Expression, WHEN, Expression]
+    nullable: false, precedence: 3
+    first: []
+  [288] WhileSource -> [UNTIL, ExpressionLine, WHEN, Expression]
+    nullable: false, precedence: 3
+    first: []
+  [289] While -> [WhileSource, Block]
+    nullable: false, precedence: 0
+    first: []
+  [290] While -> [WhileLineSource, Block]
+    nullable: false, precedence: 0
+    first: []
+  [291] While -> [Statement, WhileSource]
+    nullable: false, precedence: 0
+    first: []
+  [292] While -> [Expression, WhileSource]
+    nullable: false, precedence: 0
+    first: []
+  [293] While -> [Loop]
+    nullable: false, precedence: 0
+    first: []
+  [294] Loop -> [LOOP, Block]
+    nullable: false, precedence: 2
+    first: []
+  [295] Loop -> [LOOP, Expression]
+    nullable: false, precedence: 2
+    first: []
+  [296] For -> [Statement, ForBody]
+    nullable: false, precedence: 0
+    first: []
+  [297] For -> [Expression, ForBody]
+    nullable: false, precedence: 0
+    first: []
+  [298] For -> [ForBody, Block]
+    nullable: false, precedence: 0
+    first: []
+  [299] For -> [ForLineBody, Block]
+    nullable: false, precedence: 0
+    first: []
+  [300] ForBody -> [FOR, Range]
+    nullable: false, precedence: 2
+    first: []
+  [301] ForBody -> [FOR, Range, BY, Expression]
+    nullable: false, precedence: 3
+    first: []
+  [302] ForBody -> [ForStart, ForSource]
+    nullable: false, precedence: 0
+    first: []
+  [303] ForLineBody -> [FOR, Range, BY, ExpressionLine]
+    nullable: false, precedence: 3
+    first: []
+  [304] ForLineBody -> [ForStart, ForLineSource]
+    nullable: false, precedence: 0
+    first: []
+  [305] ForStart -> [FOR, ForVariables]
+    nullable: false, precedence: 2
+    first: []
+  [306] ForStart -> [FOR, AWAIT, ForVariables]
+    nullable: false, precedence: 20
+    first: []
+  [307] ForStart -> [FOR, OWN, ForVariables]
+    nullable: false, precedence: 2
+    first: []
+  [308] ForValue -> [Identifier]
+    nullable: false, precedence: 0
+    first: []
+  [309] ForValue -> [ThisProperty]
+    nullable: false, precedence: 0
+    first: []
+  [310] ForValue -> [Array]
+    nullable: false, precedence: 0
+    first: []
+  [311] ForValue -> [Object]
+    nullable: false, precedence: 0
+    first: []
+  [312] ForVariables -> [ForValue]
+    nullable: false, precedence: 0
+    first: []
+  [313] ForVariables -> [ForValue, ,, ForValue]
+    nullable: false, precedence: 0
+    first: []
+  [314] ForSource -> [FORIN, Expression]
+    nullable: false, precedence: 3
+    first: []
+  [315] ForSource -> [FOROF, Expression]
+    nullable: false, precedence: 3
+    first: []
+  [316] ForSource -> [FORIN, Expression, WHEN, Expression]
+    nullable: false, precedence: 3
+    first: []
+  [317] ForSource -> [FORIN, ExpressionLine, WHEN, Expression]
+    nullable: false, precedence: 3
+    first: []
+  [318] ForSource -> [FOROF, Expression, WHEN, Expression]
+    nullable: false, precedence: 3
+    first: []
+  [319] ForSource -> [FOROF, ExpressionLine, WHEN, Expression]
+    nullable: false, precedence: 3
+    first: []
+  [320] ForSource -> [FORIN, Expression, BY, Expression]
+    nullable: false, precedence: 3
+    first: []
+  [321] ForSource -> [FORIN, ExpressionLine, BY, Expression]
+    nullable: false, precedence: 3
+    first: []
+  [322] ForSource -> [FORIN, Expression, WHEN, Expression, BY, Expression]
+    nullable: false, precedence: 3
+    first: []
+  [323] ForSource -> [FORIN, ExpressionLine, WHEN, Expression, BY, Expression]
+    nullable: false, precedence: 3
+    first: []
+  [324] ForSource -> [FORIN, Expression, WHEN, ExpressionLine, BY, Expression]
+    nullable: false, precedence: 3
+    first: []
+  [325] ForSource -> [FORIN, ExpressionLine, WHEN, ExpressionLine, BY, Expression]
+    nullable: false, precedence: 3
+    first: []
+  [326] ForSource -> [FORIN, Expression, BY, Expression, WHEN, Expression]
+    nullable: false, precedence: 3
+    first: []
+  [327] ForSource -> [FORIN, ExpressionLine, BY, Expression, WHEN, Expression]
+    nullable: false, precedence: 3
+    first: []
+  [328] ForSource -> [FORIN, Expression, BY, ExpressionLine, WHEN, Expression]
+    nullable: false, precedence: 3
+    first: []
+  [329] ForSource -> [FORIN, ExpressionLine, BY, ExpressionLine, WHEN, Expression]
+    nullable: false, precedence: 3
+    first: []
+  [330] ForSource -> [FORFROM, Expression]
+    nullable: false, precedence: 3
+    first: []
+  [331] ForSource -> [FORFROM, Expression, WHEN, Expression]
+    nullable: false, precedence: 3
+    first: []
+  [332] ForSource -> [FORFROM, ExpressionLine, WHEN, Expression]
+    nullable: false, precedence: 3
+    first: []
+  [333] ForLineSource -> [FORIN, ExpressionLine]
+    nullable: false, precedence: 3
+    first: []
+  [334] ForLineSource -> [FOROF, ExpressionLine]
+    nullable: false, precedence: 3
+    first: []
+  [335] ForLineSource -> [FORIN, Expression, WHEN, ExpressionLine]
+    nullable: false, precedence: 3
+    first: []
+  [336] ForLineSource -> [FORIN, ExpressionLine, WHEN, ExpressionLine]
+    nullable: false, precedence: 3
+    first: []
+  [337] ForLineSource -> [FOROF, Expression, WHEN, ExpressionLine]
+    nullable: false, precedence: 3
+    first: []
+  [338] ForLineSource -> [FOROF, ExpressionLine, WHEN, ExpressionLine]
+    nullable: false, precedence: 3
+    first: []
+  [339] ForLineSource -> [FORIN, Expression, BY, ExpressionLine]
+    nullable: false, precedence: 3
+    first: []
+  [340] ForLineSource -> [FORIN, ExpressionLine, BY, ExpressionLine]
+    nullable: false, precedence: 3
+    first: []
+  [341] ForLineSource -> [FORIN, Expression, WHEN, Expression, BY, ExpressionLine]
+    nullable: false, precedence: 3
+    first: []
+  [342] ForLineSource -> [FORIN, ExpressionLine, WHEN, Expression, BY, ExpressionLine]
+    nullable: false, precedence: 3
+    first: []
+  [343] ForLineSource -> [FORIN, Expression, WHEN, ExpressionLine, BY, ExpressionLine]
+    nullable: false, precedence: 3
+    first: []
+  [344] ForLineSource -> [FORIN, ExpressionLine, WHEN, ExpressionLine, BY, ExpressionLine]
+    nullable: false, precedence: 3
+    first: []
+  [345] ForLineSource -> [FORIN, Expression, BY, Expression, WHEN, ExpressionLine]
+    nullable: false, precedence: 3
+    first: []
+  [346] ForLineSource -> [FORIN, ExpressionLine, BY, Expression, WHEN, ExpressionLine]
+    nullable: false, precedence: 3
+    first: []
+  [347] ForLineSource -> [FORIN, Expression, BY, ExpressionLine, WHEN, ExpressionLine]
+    nullable: false, precedence: 3
+    first: []
+  [348] ForLineSource -> [FORIN, ExpressionLine, BY, ExpressionLine, WHEN, ExpressionLine]
+    nullable: false, precedence: 3
+    first: []
+  [349] ForLineSource -> [FORFROM, ExpressionLine]
+    nullable: false, precedence: 3
+    first: []
+  [350] ForLineSource -> [FORFROM, Expression, WHEN, ExpressionLine]
+    nullable: false, precedence: 3
+    first: []
+  [351] ForLineSource -> [FORFROM, ExpressionLine, WHEN, ExpressionLine]
+    nullable: false, precedence: 3
+    first: []
+  [352] Switch -> [SWITCH, Expression, INDENT, Whens, OUTDENT]
+    nullable: false, precedence: 6
+    first: []
+  [353] Switch -> [SWITCH, ExpressionLine, INDENT, Whens, OUTDENT]
+    nullable: false, precedence: 6
+    first: []
+  [354] Switch -> [SWITCH, Expression, INDENT, Whens, ELSE, Block, OUTDENT]
+    nullable: false, precedence: 6
+    first: []
+  [355] Switch -> [SWITCH, ExpressionLine, INDENT, Whens, ELSE, Block, OUTDENT]
+    nullable: false, precedence: 6
+    first: []
+  [356] Switch -> [SWITCH, INDENT, Whens, OUTDENT]
+    nullable: false, precedence: 6
+    first: []
+  [357] Switch -> [SWITCH, INDENT, Whens, ELSE, Block, OUTDENT]
+    nullable: false, precedence: 6
+    first: []
+  [358] Whens -> [When]
+    nullable: false, precedence: 0
+    first: []
+  [359] Whens -> [Whens, When]
+    nullable: false, precedence: 0
+    first: []
+  [360] When -> [LEADING_WHEN, SimpleArgs, Block]
+    nullable: false, precedence: 0
+    first: []
+  [361] When -> [LEADING_WHEN, SimpleArgs, Block, TERMINATOR]
+    nullable: false, precedence: 0
+    first: []
+  [362] IfBlock -> [IF, Expression, Block]
+    nullable: false, precedence: 2
+    first: []
+  [363] IfBlock -> [IfBlock, ELSE, IF, Expression, Block]
+    nullable: false, precedence: 2
+    first: []
+  [364] If -> [IfBlock]
+    nullable: false, precedence: 0
+    first: []
+  [365] If -> [IfBlock, ELSE, Block]
+    nullable: false, precedence: 2
+    first: []
+  [366] If -> [Statement, POST_IF, Expression]
+    nullable: false, precedence: 1
+    first: []
+  [367] If -> [Expression, POST_IF, Expression]
+    nullable: false, precedence: 1
+    first: []
+  [368] IfBlockLine -> [IF, ExpressionLine, Block]
+    nullable: false, precedence: 2
+    first: []
+  [369] IfBlockLine -> [IfBlockLine, ELSE, IF, ExpressionLine, Block]
+    nullable: false, precedence: 2
+    first: []
+  [370] IfLine -> [IfBlockLine]
+    nullable: false, precedence: 0
+    first: []
+  [371] IfLine -> [IfBlockLine, ELSE, Block]
+    nullable: false, precedence: 2
+    first: []
+  [372] IfLine -> [Statement, POST_IF, ExpressionLine]
+    nullable: false, precedence: 1
+    first: []
+  [373] IfLine -> [Expression, POST_IF, ExpressionLine]
+    nullable: false, precedence: 1
+    first: []
+  [374] OperationLine -> [UNARY, ExpressionLine]
+    nullable: false, precedence: 21
+    first: []
+  [375] OperationLine -> [DO, ExpressionLine]
+    nullable: false, precedence: 21
+    first: []
+  [376] OperationLine -> [DO_IIFE, CodeLine]
+    nullable: false, precedence: 26
+    first: []
+  [377] Operation -> [UNARY, Expression]
+    nullable: false, precedence: 21
+    first: []
+  [378] Operation -> [DO, Expression]
+    nullable: false, precedence: 21
+    first: []
+  [379] Operation -> [UNARY_MATH, Expression]
+    nullable: false, precedence: 18
+    first: []
+  [380] Operation -> [-, Expression]
+    nullable: false, precedence: 18
+    first: []
+  [381] Operation -> [+, Expression]
+    nullable: false, precedence: 18
+    first: []
+  [382] Operation -> [AWAIT, Expression]
+    nullable: false, precedence: 20
+    first: []
+  [383] Operation -> [AWAIT, INDENT, Object, OUTDENT]
+    nullable: false, precedence: 6
+    first: []
+  [384] Operation -> [--, SimpleAssignable]
+    nullable: false, precedence: 23
+    first: []
+  [385] Operation -> [++, SimpleAssignable]
+    nullable: false, precedence: 23
+    first: []
+  [386] Operation -> [SimpleAssignable, --]
+    nullable: false, precedence: 23
+    first: []
+  [387] Operation -> [SimpleAssignable, ++]
+    nullable: false, precedence: 23
+    first: []
+  [388] Operation -> [Expression, ?]
+    nullable: false, precedence: 22
+    first: []
+  [389] Operation -> [Expression, +, Expression]
+    nullable: false, precedence: 16
+    first: []
+  [390] Operation -> [Expression, -, Expression]
+    nullable: false, precedence: 16
+    first: []
+  [391] Operation -> [Expression, MATH, Expression]
+    nullable: false, precedence: 17
+    first: []
+  [392] Operation -> [Expression, **, Expression]
+    nullable: false, precedence: 19
+    first: []
+  [393] Operation -> [Expression, SHIFT, Expression]
+    nullable: false, precedence: 15
+    first: []
+  [394] Operation -> [Expression, COMPARE, Expression]
+    nullable: false, precedence: 13
+    first: []
+  [395] Operation -> [Expression, &, Expression]
+    nullable: false, precedence: 12
+    first: []
+  [396] Operation -> [Expression, ^, Expression]
+    nullable: false, precedence: 11
+    first: []
+  [397] Operation -> [Expression, |, Expression]
+    nullable: false, precedence: 10
+    first: []
+  [398] Operation -> [Expression, &&, Expression]
+    nullable: false, precedence: 9
+    first: []
+  [399] Operation -> [Expression, ||, Expression]
+    nullable: false, precedence: 8
+    first: []
+  [400] Operation -> [Expression, BIN?, Expression]
+    nullable: false, precedence: 7
+    first: []
+  [401] Operation -> [Expression, RELATION, Expression]
+    nullable: false, precedence: 14
+    first: []
+  [402] Operation -> [SimpleAssignable, COMPOUND_ASSIGN, Expression]
+    nullable: false, precedence: 4
+    first: []
+  [403] Operation -> [SimpleAssignable, COMPOUND_ASSIGN, INDENT, Expression, OUTDENT]
+    nullable: false, precedence: 6
+    first: []
+  [404] Operation -> [SimpleAssignable, COMPOUND_ASSIGN, TERMINATOR, Expression]
+    nullable: false, precedence: 4
+    first: []
+  [405] DoIife -> [DO_IIFE, Code]
+    nullable: false, precedence: 26
+    first: []
+
+SYMBOLS (206 total):
+  "0" -> $accept
+  "1" -> $end
+  "2" -> error
+  "3" -> Root
+  "4" -> Body
+  "5" -> Line
+  "6" -> TERMINATOR
+  "7" -> Expression
+  "8" -> ExpressionLine
+  "9" -> Statement
+  "10" -> FuncDirective
+  "11" -> YieldReturn
+  "12" -> AwaitReturn
+  "13" -> Return
+  "14" -> STATEMENT
+  "15" -> Import
+  "16" -> Export
+  "17" -> Value
+  "18" -> Code
+  "19" -> Operation
+  "20" -> Assign
+  "21" -> If
+  "22" -> Try
+  "23" -> While
+  "24" -> For
+  "25" -> Switch
+  "26" -> Class
+  "27" -> Throw
+  "28" -> Yield
+  "29" -> CodeLine
+  "30" -> IfLine
+  "31" -> OperationLine
+  "32" -> YIELD
+  "33" -> INDENT
+  "34" -> Object
+  "35" -> OUTDENT
+  "36" -> FROM
+  "37" -> Block
+  "38" -> Identifier
+  "39" -> IDENTIFIER
+  "40" -> JSX_TAG
+  "41" -> Property
+  "42" -> PROPERTY
+  "43" -> AlphaNumeric
+  "44" -> NUMBER
+  "45" -> String
+  "46" -> STRING
+  "47" -> STRING_START
+  "48" -> Interpolations
+  "49" -> STRING_END
+  "50" -> InterpolationChunk
+  "51" -> INTERPOLATION_START
+  "52" -> INTERPOLATION_END
+  "53" -> Regex
+  "54" -> REGEX
+  "55" -> REGEX_START
+  "56" -> Invocation
+  "57" -> REGEX_END
+  "58" -> Literal
+  "59" -> JS
+  "60" -> UNDEFINED
+  "61" -> NULL
+  "62" -> BOOL
+  "63" -> INFINITY
+  "64" -> NAN
+  "65" -> Assignable
+  "66" -> =
+  "67" -> AssignObj
+  "68" -> ObjAssignable
+  "69" -> ObjRestValue
+  "70" -> :
+  "71" -> SimpleObjAssignable
+  "72" -> ThisProperty
+  "73" -> [
+  "74" -> ]
+  "75" -> @
+  "76" -> ...
+  "77" -> ObjSpreadExpr
+  "78" -> ObjSpreadIdentifier
+  "79" -> Parenthetical
+  "80" -> Super
+  "81" -> This
+  "82" -> SUPER
+  "83" -> OptFuncExist
+  "84" -> Arguments
+  "85" -> DYNAMIC_IMPORT
+  "86" -> Accessor
+  "87" -> RETURN
+  "88" -> AWAIT
+  "89" -> PARAM_START
+  "90" -> ParamList
+  "91" -> PARAM_END
+  "92" -> FuncGlyph
+  "93" -> ->
+  "94" -> =>
+  "95" -> OptComma
+  "96" -> ,
+  "97" -> Param
+  "98" -> ParamVar
+  "99" -> Array
+  "100" -> Splat
+  "101" -> SimpleAssignable
+  "102" -> Range
+  "103" -> DoIife
+  "104" -> MetaProperty
+  "105" -> .
+  "106" -> INDEX_START
+  "107" -> INDEX_END
+  "108" -> NEW_TARGET
+  "109" -> IMPORT_META
+  "110" -> ?.
+  "111" -> ::
+  "112" -> ?::
+  "113" -> Index
+  "114" -> IndexValue
+  "115" -> INDEX_SOAK
+  "116" -> Slice
+  "117" -> {
+  "118" -> AssignList
+  "119" -> }
+  "120" -> CLASS
+  "121" -> EXTENDS
+  "122" -> IMPORT
+  "123" -> ASSERT
+  "124" -> ImportDefaultSpecifier
+  "125" -> ImportNamespaceSpecifier
+  "126" -> ImportSpecifierList
+  "127" -> ImportSpecifier
+  "128" -> AS
+  "129" -> DEFAULT
+  "130" -> IMPORT_ALL
+  "131" -> EXPORT
+  "132" -> ExportSpecifierList
+  "133" -> EXPORT_ALL
+  "134" -> ExportSpecifier
+  "135" -> FUNC_EXIST
+  "136" -> CALL_START
+  "137" -> CALL_END
+  "138" -> ArgList
+  "139" -> THIS
+  "140" -> Elisions
+  "141" -> ArgElisionList
+  "142" -> OptElisions
+  "143" -> RangeDots
+  "144" -> ..
+  "145" -> Arg
+  "146" -> ArgElision
+  "147" -> Elision
+  "148" -> SimpleArgs
+  "149" -> TRY
+  "150" -> Catch
+  "151" -> FINALLY
+  "152" -> CATCH
+  "153" -> THROW
+  "154" -> (
+  "155" -> )
+  "156" -> WhileLineSource
+  "157" -> WHILE
+  "158" -> WHEN
+  "159" -> UNTIL
+  "160" -> WhileSource
+  "161" -> Loop
+  "162" -> LOOP
+  "163" -> ForBody
+  "164" -> ForLineBody
+  "165" -> FOR
+  "166" -> BY
+  "167" -> ForStart
+  "168" -> ForSource
+  "169" -> ForLineSource
+  "170" -> ForVariables
+  "171" -> OWN
+  "172" -> ForValue
+  "173" -> FORIN
+  "174" -> FOROF
+  "175" -> FORFROM
+  "176" -> SWITCH
+  "177" -> Whens
+  "178" -> ELSE
+  "179" -> When
+  "180" -> LEADING_WHEN
+  "181" -> IfBlock
+  "182" -> IF
+  "183" -> POST_IF
+  "184" -> IfBlockLine
+  "185" -> UNARY
+  "186" -> DO
+  "187" -> DO_IIFE
+  "188" -> UNARY_MATH
+  "189" -> -
+  "190" -> +
+  "191" -> --
+  "192" -> ++
+  "193" -> ?
+  "194" -> MATH
+  "195" -> **
+  "196" -> SHIFT
+  "197" -> COMPARE
+  "198" -> &
+  "199" -> ^
+  "200" -> |
+  "201" -> &&
+  "202" -> ||
+  "203" -> BIN?
+  "204" -> RELATION
+  "205" -> COMPOUND_ASSIGN
+
+OPERATORS (53 total):
+  "POST_IF" -> precedence: 1, assoc: left
+  "IF" -> precedence: 2, assoc: right
+  "ELSE" -> precedence: 2, assoc: right
+  "FOR" -> precedence: 2, assoc: right
+  "WHILE" -> precedence: 2, assoc: right
+  "UNTIL" -> precedence: 2, assoc: right
+  "LOOP" -> precedence: 2, assoc: right
+  "SUPER" -> precedence: 2, assoc: right
+  "CLASS" -> precedence: 2, assoc: right
+  "IMPORT" -> precedence: 2, assoc: right
+  "EXPORT" -> precedence: 2, assoc: right
+  "DYNAMIC_IMPORT" -> precedence: 2, assoc: right
+  "FORIN" -> precedence: 3, assoc: right
+  "FOROF" -> precedence: 3, assoc: right
+  "FORFROM" -> precedence: 3, assoc: right
+  "BY" -> precedence: 3, assoc: right
+  "WHEN" -> precedence: 3, assoc: right
+  "=" -> precedence: 4, assoc: right
+  ":" -> precedence: 4, assoc: right
+  "COMPOUND_ASSIGN" -> precedence: 4, assoc: right
+  "RETURN" -> precedence: 4, assoc: right
+  "THROW" -> precedence: 4, assoc: right
+  "EXTENDS" -> precedence: 4, assoc: right
+  "YIELD" -> precedence: 5, assoc: right
+  "INDENT" -> precedence: 6, assoc: nonassoc
+  "OUTDENT" -> precedence: 6, assoc: nonassoc
+  "BIN?" -> precedence: 7, assoc: left
+  "||" -> precedence: 8, assoc: left
+  "&&" -> precedence: 9, assoc: left
+  "|" -> precedence: 10, assoc: left
+  "^" -> precedence: 11, assoc: left
+  "&" -> precedence: 12, assoc: left
+  "COMPARE" -> precedence: 13, assoc: left
+  "RELATION" -> precedence: 14, assoc: left
+  "SHIFT" -> precedence: 15, assoc: left
+  "+" -> precedence: 16, assoc: left
+  "-" -> precedence: 16, assoc: left
+  "MATH" -> precedence: 17, assoc: left
+  "UNARY_MATH" -> precedence: 18, assoc: right
+  "**" -> precedence: 19, assoc: right
+  "AWAIT" -> precedence: 20, assoc: right
+  "UNARY" -> precedence: 21, assoc: right
+  "DO" -> precedence: 21, assoc: right
+  "?" -> precedence: 22, assoc: left
+  "++" -> precedence: 23, assoc: nonassoc
+  "--" -> precedence: 23, assoc: nonassoc
+  "CALL_START" -> precedence: 24, assoc: left
+  "CALL_END" -> precedence: 24, assoc: left
+  "." -> precedence: 25, assoc: left
+  "?." -> precedence: 25, assoc: left
+  "::" -> precedence: 25, assoc: left
+  "?::" -> precedence: 25, assoc: left
+  "DO_IIFE" -> precedence: 26, assoc: right
+
+OTHER PROPERTIES:
+  startSymbol: Root
+  resolutions: 0
+  conflicts: 0
+  options: {}
+
+=== END GRAMMAR INFO ===
+
+buildLRAutomaton: 908.871ms
+buildAugmentedGrammar: 47.69ms
+computeLookaheads: 6.341s
+unionLookaheads: 421.404ms
+buildParseTable: 30.265ms
+computeDefaultActions: 1.606ms
