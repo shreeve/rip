@@ -37,7 +37,6 @@ class Item
 class LRState
   constructor: (items...) ->
     @list = items
-    @length = @list.length
     @reductions = []
     @handleToSymbols = {}
     @transitions = {}
@@ -481,7 +480,6 @@ class LALRGenerator
       newItems = []
       closureSet.keys[item.id] = true for item in queue
       closureSet.list.push queue...
-      closureSet.length = closureSet.list.length
 
       for item in queue
         {nextSymbol} = item
@@ -509,15 +507,14 @@ class LALRGenerator
       newItem = new Item item.production, item.dot + 1, item.follows, n
       gotoSet.keys[newItem.id] = true
       gotoSet.list.push newItem
-      gotoSet.length = gotoSet.list.length
 
-    if gotoSet.length is 0 then gotoSet else @_closure gotoSet
+    if gotoSet.list.length is 0 then gotoSet else @_closure gotoSet
 
   _insertLRState: (symbol, itemSet, states, stateNum) ->
     gotoSet = @_goto itemSet, symbol
     gotoSet.predecessors ?= {}
 
-    if gotoSet.length > 0
+    if gotoSet.list.length > 0
       gotoValue = gotoSet.valueOf()
       existingIndex = states.has[gotoValue]
 
