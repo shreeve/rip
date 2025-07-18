@@ -243,6 +243,10 @@ function LALRGenerator(grammar, options) {
     this.unionLookaheads();
     console.timeEnd('unionLookaheads');
 
+    console.time('convertSetsToTypedArrays');
+    this.convertSetsToTypedArrays();
+    console.timeEnd('convertSetsToTypedArrays');
+
     console.time('buildParseTable');
     this.stateTable = this.buildParseTable(this.states);
     console.timeEnd('buildParseTable');
@@ -318,6 +322,13 @@ LALRGenerator.prototype.augmentGrammar = function(grammar) {
     this.nonterminals.$accept = new Nonterminal("$accept");
     this.nonterminals.$accept.productions.push(acceptProduction);
     this.nonterminals[this.startSymbol].follows[this.EOF] = true;
+
+    // Create terminal ID mapping for typed array optimization (after augmentation)
+    this.terminalIds = Object.create(null);
+    for (var i = 0; i < this.terminals.length; i++) {
+        this.terminalIds[this.terminals[i]] = i;
+    }
+    this.terminalCount = this.terminals.length;
 };
 
 // Build production rules from BNF grammar specification
@@ -482,6 +493,47 @@ LALRGenerator.prototype.buildProductions = function(bnf, productions, nontermina
     }
 
     this.performAction = "function anonymous(" + parameters + ") {\n" + actionsCode + "\n}";
+};
+
+// Convert FIRST/FOLLOW sets from objects to typed arrays for ultra-fast lookups
+LALRGenerator.prototype.convertSetsToTypedArrays = function() {
+    // Convert nonterminal FIRST and FOLLOW sets
+    for (var symbol in this.nonterminals) {
+        var nt = this.nonterminals[symbol];
+
+        // Convert FIRST set
+        var firstArray = new Uint8Array(this.terminalCount);
+        for (var terminal in nt.first) {
+            var id = this.terminalIds[terminal];
+            if (id !== undefined) {
+                firstArray[id] = 1;
+            }
+        }
+        nt.first = firstArray;
+
+        // Convert FOLLOW set
+        var followArray = new Uint8Array(this.terminalCount);
+        for (var terminal in nt.follows) {
+            var id = this.terminalIds[terminal];
+            if (id !== undefined) {
+                followArray[id] = 1;
+            }
+        }
+        nt.follows = followArray;
+    }
+
+    // Convert production FIRST sets
+    for (var i = 0; i < this.productions.length; i++) {
+        var production = this.productions[i];
+        var firstArray = new Uint8Array(this.terminalCount);
+        for (var terminal in production.first) {
+            var id = this.terminalIds[terminal];
+            if (id !== undefined) {
+                firstArray[id] = 1;
+            }
+        }
+        production.first = firstArray;
+    }
 };
 
 // Lookahead computation
@@ -889,7 +941,26 @@ LALRGenerator.prototype.computeDefaultActions = function(states) {
 // LALR-specific methods
 // Get lookahead symbols for an item in a state
 LALRGenerator.prototype.getLookaheadSet = function(state, item) {
-    return (!!this.onDemandLookahead && !state.hasConflicts) ? this.terminals : Object.keys(item.follows);
+    if (!!this.onDemandLookahead && !state.hasConflicts) {
+        return this.terminals;
+    }
+
+    // Convert follows to string array (handles both objects and typed arrays)
+    var result = [];
+    if (item.follows.constructor === Uint8Array) {
+        // Typed array
+        for (var i = 0; i < item.follows.length; i++) {
+            if (item.follows[i]) {
+                result.push(this.terminals[i]);
+            }
+        }
+    } else {
+        // Object-based set
+        for (var terminal in item.follows) {
+            result.push(terminal);
+        }
+    }
+    return result;
 };
 
 // Navigate through parser states following a symbol sequence
