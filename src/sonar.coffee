@@ -37,8 +37,8 @@ class Item
 class LRState
   constructor: (items...) ->
     @list = items
-    @reductions = []
     @handleToSymbols = {}
+    @reductions = []
     @transitions = {}
     @hasShifts = false
     @hasConflicts = false
