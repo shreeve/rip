@@ -1,0 +1,17 @@
+processGrammar: 3.775ms
+buildLRAutomaton: 976.909ms
+buildAugmentedGrammar: 40.009ms
+computeLookaheads: 6.755s
+unionLookaheads: 495.398ms
+buildParseTable: 33.783ms
+computeDefaultActions: 1.692ms
+{
+  "nullableCount": 0,
+  "firstTotal": 0,
+  "followTotal": 1,
+  "stateCount": 775,
+  "productionCount": 406,
+  "conflictCount": 206,
+  "stateHash": "0fb91cf1450f9f75e65d757a80d119176105d17bb2451bbf21182aaa330637a0",
+  "prodHash": "097cff8d5a6745a996daa7899cf0c3af2fe44583b5e5e7c10ac402818f9a3f13"
+}
