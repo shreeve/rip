@@ -29,7 +29,7 @@ class Production
 
 # LR(0) item: [A → α•β] with LALR(1) lookahead
 class Item
-  constructor: (@production, @dot = 0, @follows = [], @predecessor = null) ->
+  constructor: (@production, @dot = 0, @follows = []) ->
     @nextSymbol = @production.handle[@dot]
     @id = parseInt("#{@production.id}a#{@dot}", 36)
 
@@ -512,7 +512,6 @@ class LALRGenerator
 
   _insertLRState: (symbol, itemSet, states, stateNum) ->
     gotoSet = @_goto itemSet, symbol
-    gotoSet.predecessors ?= {}
 
     if gotoSet.list.length > 0
       gotoValue = gotoSet.valueOf()
@@ -522,10 +521,8 @@ class LALRGenerator
         states.has[gotoValue] = states.length
         itemSet.transitions[symbol] = states.length
         states.push gotoSet
-        gotoSet.predecessors[symbol] = [stateNum]
       else
         itemSet.transitions[symbol] = existingIndex
-        states[existingIndex].predecessors[symbol].push stateNum
 
     null
 
