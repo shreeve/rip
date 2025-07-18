@@ -214,6 +214,9 @@ function LALRGenerator(grammar, options) {
     this.states = this.buildLRAutomaton();
     console.timeEnd('buildLRAutomaton');
 
+    // Debug: Output LR(0) automaton information
+    this.debugAutomatonInfo();
+
     this.terminalMap = {}; // Maps symbols to terminal representations
 
     // Initialize lookahead state (replaces newg creation)
@@ -305,35 +308,26 @@ LALRGenerator.prototype.debugGrammarInfo = function() {
     // 2. Terminals
     console.log('\nTERMINALS (' + Object.keys(this.terminals).length + ' total):');
     var terminalNames = Object.keys(this.terminals);
-    for (var i = 0; i < Math.min(20, terminalNames.length); i++) {
+    for (var i = 0; i < terminalNames.length; i++) {
         var name = terminalNames[i];
         console.log('  "' + name + '" -> "' + this.terminals[name] + '"');
-    }
-    if (terminalNames.length > 20) {
-        console.log('  ... and ' + (terminalNames.length - 20) + ' more terminals');
     }
 
     // 3. Productions
     console.log('\nPRODUCTIONS (' + this.productions.length + ' total):');
-    for (var i = 0; i < Math.min(20, this.productions.length); i++) {
+    for (var i = 0; i < this.productions.length; i++) {
         var prod = this.productions[i];
         console.log('  [' + prod.id + '] ' + prod.symbol + ' -> [' + prod.handle.join(', ') + ']');
         console.log('    nullable: ' + prod.nullable + ', precedence: ' + prod.precedence);
         console.log('    first: [' + prod.first.join(', ') + ']');
     }
-    if (this.productions.length > 20) {
-        console.log('  ... and ' + (this.productions.length - 20) + ' more productions');
-    }
 
     // 4. Symbols
     console.log('\nSYMBOLS (' + Object.keys(this.symbols).length + ' total):');
     var symbolNames = Object.keys(this.symbols);
-    for (var i = 0; i < Math.min(20, symbolNames.length); i++) {
+    for (var i = 0; i < symbolNames.length; i++) {
         var name = symbolNames[i];
         console.log('  "' + name + '" -> ' + this.symbols[name]);
-    }
-    if (symbolNames.length > 20) {
-        console.log('  ... and ' + (symbolNames.length - 20) + ' more symbols');
     }
 
     // 5. Operators
@@ -353,6 +347,93 @@ LALRGenerator.prototype.debugGrammarInfo = function() {
     console.log('  options: ' + JSON.stringify(this.options || {}));
 
     console.log('\n=== END GRAMMAR INFO ===\n');
+};
+
+// Debug: Output LR(0) automaton information
+LALRGenerator.prototype.debugAutomatonInfo = function() {
+    console.log('\n=== LR(0) AUTOMATON INFO ===\n');
+
+    console.log('STATES (' + this.states.length + ' total):');
+
+    for (var i = 0; i < this.states.length; i++) {
+        var state = this.states[i];
+        console.log('\n  STATE ' + i + ':');
+
+        // Show items in this state
+        console.log('    Items (' + state.list.length + ' total):');
+        for (var j = 0; j < state.list.length; j++) {
+            var item = state.list[j];
+            var handle = item.production.handle.slice(); // copy array
+            handle.splice(item.dot, 0, '•'); // insert dot at position
+            console.log('      [' + item.production.id + '] ' + item.production.symbol + ' -> ' + handle.join(' '));
+        }
+
+        // Show transitions from this state
+        var transitions = Object.keys(state.transitions || {});
+        if (transitions.length > 0) {
+            console.log('    Transitions:');
+            for (var k = 0; k < transitions.length; k++) {
+                var symbol = transitions[k];
+                var targetState = state.transitions[symbol];
+                console.log('      "' + symbol + '" -> State ' + targetState);
+            }
+        }
+
+        // Show predecessors to this state
+        var predecessors = Object.keys(state.predecessors || {});
+        if (predecessors.length > 0) {
+            console.log('    Predecessors:');
+            for (var k = 0; k < predecessors.length; k++) {
+                var symbol = predecessors[k];
+                var sourceStates = state.predecessors[symbol];
+                console.log('      "' + symbol + '" <- States [' + sourceStates.join(', ') + ']');
+            }
+        }
+
+        // Show reductions
+        if (state.reductions && state.reductions.length > 0) {
+            console.log('    Reductions (' + state.reductions.length + ' total):');
+            for (var k = 0; k < state.reductions.length; k++) {
+                var reduction = state.reductions[k];
+                console.log('      [' + reduction.production.id + '] ' + reduction.production.symbol + ' -> ' + reduction.production.handle.join(' '));
+            }
+        }
+
+        // Show flags
+        var flags = [];
+        if (state.hasShifts) flags.push('hasShifts');
+        if (state.hasConflicts) flags.push('hasConflicts');
+        if (flags.length > 0) {
+            console.log('    Flags: ' + flags.join(', '));
+        }
+    }
+
+    // Summary statistics
+    console.log('\nAUTOMATON SUMMARY:');
+    var totalItems = 0;
+    var totalTransitions = 0;
+    var statesWithReductions = 0;
+    var statesWithShifts = 0;
+    var statesWithConflicts = 0;
+
+    for (var i = 0; i < this.states.length; i++) {
+        var state = this.states[i];
+        totalItems += state.list.length;
+        totalTransitions += Object.keys(state.transitions || {}).length;
+        if (state.reductions && state.reductions.length > 0) statesWithReductions++;
+        if (state.hasShifts) statesWithShifts++;
+        if (state.hasConflicts) statesWithConflicts++;
+    }
+
+    console.log('  Total items across all states: ' + totalItems);
+    console.log('  Total transitions: ' + totalTransitions);
+    console.log('  States with reductions: ' + statesWithReductions);
+    console.log('  States with shifts: ' + statesWithShifts);
+    console.log('  States with conflicts: ' + statesWithConflicts);
+    console.log('  Average items per state: ' + (totalItems / this.states.length).toFixed(2));
+    console.log('  Average transitions per state: ' + (totalTransitions / this.states.length).toFixed(2));
+
+    console.log('\n=== END AUTOMATON INFO ===\n');
 };
 
 // Process operator precedence and associativity declarations
