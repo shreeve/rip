@@ -81,7 +81,7 @@
 // Original implementation by Jison team
 // https://github.com/zaach/jison/blob/master/lib/jison.js
 
-console.log("\n\n\n==[ Using Jison ]==\n\n\n");
+console.log("\n==[ Using Jison ]==\n");
 
 var Jison = exports.Jison = exports;
 var version = '0.5.0'; // require('../package.json').version;
@@ -207,6 +207,9 @@ function LALRGenerator(grammar, options) {
     this.processGrammar(grammar);
     console.timeEnd('processGrammar');
 
+    // Debug: Output all grammar information available after processGrammar
+    this.debugGrammarInfo();
+
     console.time('buildLRAutomaton');
     this.states = this.buildLRAutomaton();
     console.timeEnd('buildLRAutomaton');
@@ -281,6 +284,75 @@ LALRGenerator.prototype.processGrammar = function(grammar) {
     }
 
     this.augmentGrammar(grammar);
+};
+
+// Debug: Output all grammar information available after processGrammar
+LALRGenerator.prototype.debugGrammarInfo = function() {
+    console.log('\n=== GRAMMAR INFO AFTER processGrammar ===\n');
+
+    // 1. Nonterminals
+    console.log('NONTERMINALS (' + Object.keys(this.nonterminals).length + ' total):');
+    var nonterminalNames = Object.keys(this.nonterminals);
+    for (var i = 0; i < nonterminalNames.length; i++) {
+        var name = nonterminalNames[i];
+        var nt = this.nonterminals[name];
+        console.log('  ' + name + ' -> ' + nt.productions.length + ' productions');
+        console.log('    nullable: ' + nt.nullable);
+        console.log('    first: [' + nt.first.join(', ') + ']');
+        console.log('    follows: [' + nt.follows.join(', ') + ']');
+    }
+
+    // 2. Terminals
+    console.log('\nTERMINALS (' + Object.keys(this.terminals).length + ' total):');
+    var terminalNames = Object.keys(this.terminals);
+    for (var i = 0; i < Math.min(20, terminalNames.length); i++) {
+        var name = terminalNames[i];
+        console.log('  "' + name + '" -> "' + this.terminals[name] + '"');
+    }
+    if (terminalNames.length > 20) {
+        console.log('  ... and ' + (terminalNames.length - 20) + ' more terminals');
+    }
+
+    // 3. Productions
+    console.log('\nPRODUCTIONS (' + this.productions.length + ' total):');
+    for (var i = 0; i < Math.min(20, this.productions.length); i++) {
+        var prod = this.productions[i];
+        console.log('  [' + prod.id + '] ' + prod.symbol + ' -> [' + prod.handle.join(', ') + ']');
+        console.log('    nullable: ' + prod.nullable + ', precedence: ' + prod.precedence);
+        console.log('    first: [' + prod.first.join(', ') + ']');
+    }
+    if (this.productions.length > 20) {
+        console.log('  ... and ' + (this.productions.length - 20) + ' more productions');
+    }
+
+    // 4. Symbols
+    console.log('\nSYMBOLS (' + Object.keys(this.symbols).length + ' total):');
+    var symbolNames = Object.keys(this.symbols);
+    for (var i = 0; i < Math.min(20, symbolNames.length); i++) {
+        var name = symbolNames[i];
+        console.log('  "' + name + '" -> ' + this.symbols[name]);
+    }
+    if (symbolNames.length > 20) {
+        console.log('  ... and ' + (symbolNames.length - 20) + ' more symbols');
+    }
+
+    // 5. Operators
+    if (this.operators && Object.keys(this.operators).length > 0) {
+        console.log('\nOPERATORS (' + Object.keys(this.operators).length + ' total):');
+        for (var op in this.operators) {
+            var opInfo = this.operators[op];
+            console.log('  "' + op + '" -> precedence: ' + opInfo.precedence + ', assoc: ' + opInfo.assoc);
+        }
+    }
+
+    // 6. Other key properties
+    console.log('\nOTHER PROPERTIES:');
+    console.log('  startSymbol: ' + this.startSymbol);
+    console.log('  resolutions: ' + (this.resolutions || []).length);
+    console.log('  conflicts: ' + (this.conflicts || []).length);
+    console.log('  options: ' + JSON.stringify(this.options || {}));
+
+    console.log('\n=== END GRAMMAR INFO ===\n');
 };
 
 // Process operator precedence and associativity declarations
