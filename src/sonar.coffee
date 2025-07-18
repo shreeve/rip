@@ -15,10 +15,7 @@
 # Grammar symbol (nonterminal)
 class Nonterminal
   constructor: (@symbol) ->
-    # Core collections
     @productions = []
-
-    # Analysis results
     @nullable = false
     @first = new Set()
     @follows = new Set()
@@ -26,35 +23,24 @@ class Nonterminal
 # Production rule: A → α
 class Production
   constructor: (@symbol, @handle, @id) ->
-    # Analysis results
     @nullable = false
     @first = new Set()
-
-    # Metadata
     @precedence = 0
 
 # LR(0) item: [A → α•β] with LALR(1) lookahead
 class Item
   constructor: (@production, @dot = 0, @follows = []) ->
-    # Derived properties (computed from core data)
     @nextSymbol = @production.handle[@dot]
     @id = parseInt("#{@production.id}a#{@dot}", 36)
 
 # Set of LR items (parser state)
 class LRState
   constructor: (items...) ->
-    # Core data
     @items = new Set(items)
-
-    # Collections for analysis results
     @reductions = []
     @transitions = {}
-
-    # State flags
     @hasShifts = false
     @hasConflicts = false
-
-    # Working data
     @handleToSymbols = {}
 
   valueOf: -> @_value or= (item.id for item from @items).sort().join('|')
