@@ -414,17 +414,17 @@ class LALRGenerator
       for production in @productions
         firsts = @_first production.handle
         oldSize = production.first.size
-        production.first = new Set(firsts)
+        production.first.clear()
+        production.first.add(symbol) for symbol in firsts
 
         if production.first.size > oldSize
           changed = true
 
       for symbol, nonterminal of @nonterminals
         oldSize = nonterminal.first.size
-        allFirsts = []
+        nonterminal.first.clear()
         for production in nonterminal.productions
-          production.first.forEach (symbol) -> allFirsts.push(symbol)
-        nonterminal.first = new Set(allFirsts)
+          production.first.forEach (symbol) -> nonterminal.first.add(symbol)
 
         if nonterminal.first.size > oldSize
           changed = true
@@ -436,17 +436,22 @@ class LALRGenerator
     Array.from(@nonterminals[symbols].first)
 
   _firstOfSequence: (symbols) ->
+    firsts = []
     firstsSet = new Set()
     for symbol in symbols
       unless @nonterminals[symbol]
-        firstsSet.add(symbol)
+        unless firstsSet.has(symbol)
+          firsts.push symbol
+          firstsSet.add(symbol)
       else
         @nonterminals[symbol].first.forEach (s) ->
-          firstsSet.add(s)
+          unless firstsSet.has(s)
+            firsts.push s
+            firstsSet.add(s)
 
       break unless @_isNullable symbol
 
-    Array.from(firstsSet)
+    firsts
 
   _computeFollowSets: ->
     changed = true
@@ -473,7 +478,8 @@ class LALRGenerator
             firstSet = @_first part
 
             # Add first set items
-            firstSet.forEach (item) => @nonterminals[symbol].follows.add(item)
+            for item in firstSet
+              @nonterminals[symbol].follows.add(item)
 
             # If nullable, also add production.symbol.follows
             if @_isNullable(part) and bool
