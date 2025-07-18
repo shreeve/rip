@@ -103,6 +103,9 @@ class LALRGenerator
     @conflictStates = []
     @onDemandLookahead = @options.onDemandLookahead or false
 
+    # EXPERIMENTAL: Enable DeRemer-Pennello algorithm
+    @go_ = true
+
     # Phase 3: Build augmented grammar for lookahead computation
     console.time 'buildAugmentedGrammar'
     @buildAugmentedGrammar()
@@ -431,6 +434,7 @@ class LALRGenerator
 
     Array.from(firsts)
 
+  # Compute FOLLOW sets: what terminals can appear immediately after each nonterminal
   _computeFollowSets: ->
     changed = true
     while changed
