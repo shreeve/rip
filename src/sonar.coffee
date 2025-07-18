@@ -59,9 +59,6 @@ class LRState
     @list.push item
     @length = @list.length
 
-  contains: (item) ->
-    @keys[item.id]?
-
   valueOf: ->
     return @_value if @_value?
     @_value = @list.map((item) -> item.id).sort().join('|')
@@ -504,7 +501,7 @@ class LALRGenerator
         if nextSymbol and @nonterminals[nextSymbol] and not processed[nextSymbol]
           for production in @nonterminals[nextSymbol].productions
             newItem = new Item production, 0
-            newItems.push newItem unless closureSet.contains newItem
+            newItems.push newItem unless closureSet.keys[newItem.id]?
           processed[nextSymbol] = true
         else unless nextSymbol
           closureSet.reductions.push item
