@@ -59,9 +59,7 @@ class LRState
     @list.push item
     @length = @list.length
 
-  valueOf: ->
-    return @_value if @_value?
-    @_value = @list.map((item) -> item.id).sort().join('|')
+  valueOf: -> @_value or= @list.map((item) -> item.id).sort().join('|')
 
 # =============================================================================
 # LALR(1) Parser Generator
