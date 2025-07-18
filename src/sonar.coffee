@@ -12,17 +12,6 @@
 # Core Data Structures
 # =============================================================================
 
-# Utility: merge arrays without duplicates
-union = (target, source) ->
-  seen = Object.create null
-  seen[item] = true for item in target
-
-  for item in source when not seen[item]
-    target.push item
-    seen[item] = true
-
-  target
-
 # Grammar symbol (nonterminal)
 class Nonterminal
   constructor: (@symbol) ->
