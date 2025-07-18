@@ -749,19 +749,12 @@ LALRGenerator.prototype.first = function(symbol) {
             if (!this.isNullable(t)) break;
         }
         // Convert Set back to Array
-        firstsSet.forEach(function(item) {
-            firsts.push(item);
-        });
-        return firsts;
+        return Array.from(firstsSet);
     }
     if (!this.nonterminals[symbol]) return [symbol];
 
     // Convert Set to Array
-    var result = [];
-    this.nonterminals[symbol].first.forEach(function(item) {
-        result.push(item);
-    });
-    return result;
+    return Array.from(this.nonterminals[symbol].first);
 };
 
 // Compute FOLLOW sets for all nonterminals
