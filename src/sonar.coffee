@@ -47,18 +47,6 @@ class LRState
 
     @keys[item.id] = true for item in @list
 
-  concat: (set) ->
-    items = set.list ? set
-    @keys[item.id] = true for item in items
-    @list.push items...
-    @length = @list.length
-    this
-
-  push: (item) ->
-    @keys[item.id] = true
-    @list.push item
-    @length = @list.length
-
   valueOf: -> @_value or= @list.map((item) -> item.id).sort().join('|')
 
 # =============================================================================
@@ -491,7 +479,9 @@ class LALRGenerator
 
     while queue.length > 0
       newItems = []
-      closureSet.concat queue
+      closureSet.keys[item.id] = true for item in queue
+      closureSet.list.push queue...
+      closureSet.length = closureSet.list.length
 
       for item in queue
         {nextSymbol} = item
@@ -516,7 +506,10 @@ class LALRGenerator
     gotoSet = new LRState()
 
     for item, n in itemSet.list when item.nextSymbol is symbol
-      gotoSet.push new Item item.production, item.dot + 1, item.follows, n
+      newItem = new Item item.production, item.dot + 1, item.follows, n
+      gotoSet.keys[newItem.id] = true
+      gotoSet.list.push newItem
+      gotoSet.length = gotoSet.list.length
 
     if gotoSet.length is 0 then gotoSet else @_closure gotoSet
 
