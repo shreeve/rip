@@ -409,7 +409,7 @@ class LALRGenerator
         oldSize = nonterminal.first.size
         nonterminal.first.clear()
         for production in nonterminal.productions
-          nonterminal.first.add(symbol) for symbol in Array.from(production.first)
+          production.first.forEach (symbol) => nonterminal.first.add(symbol)
         changed = true if nonterminal.first.size > oldSize
 
     null
@@ -421,16 +421,16 @@ class LALRGenerator
     Array.from(@nonterminals[symbols].first)
 
   _firstOfSequence: (symbols) ->
-    firstsSet = new Set()
+    firsts = new Set()
     for symbol in symbols
-      unless @nonterminals[symbol]
-        firstsSet.add(symbol)
+      if @nonterminals[symbol]
+        @nonterminals[symbol].first.forEach (s) => firsts.add(s)
       else
-        @nonterminals[symbol].first.forEach (s) -> firstsSet.add(s)
+        firsts.add(symbol)
 
       break unless @_isNullable symbol
 
-    Array.from(firstsSet)
+    Array.from(firsts)
 
   _computeFollowSets: ->
     changed = true
@@ -484,7 +484,6 @@ class LALRGenerator
 
     while marked isnt states.length
       itemSet = states[marked++]
-
       for item in itemSet.list when item.nextSymbol and item.nextSymbol isnt @EOF
         @_insertLRState item.nextSymbol, itemSet, states, marked - 1
 
