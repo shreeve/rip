@@ -442,8 +442,7 @@ class LALRGenerator
       unless @nonterminals[symbol]
         firstsSet.add(symbol)
       else
-        @nonterminals[symbol].first.forEach (s) ->
-          firstsSet.add(s)
+        @nonterminals[symbol].first.forEach (s) -> firstsSet.add(s)
 
       break unless @_isNullable symbol
 
