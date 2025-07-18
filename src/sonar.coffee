@@ -43,6 +43,7 @@ class LRState
     @hasConflicts = false
     @handleToSymbols = {}
 
+  # Generate unique string representation for state deduplication
   valueOf: -> @_value or= (item.id for item from @items).sort().join('|')
 
 # =============================================================================
@@ -51,6 +52,7 @@ class LRState
 
 class LALRGenerator
   constructor: (grammar, options = {}) ->
+
     # Input configuration
     @options = Object.assign {}, grammar.options, options
     @parseParams = grammar.parseParams
@@ -80,6 +82,7 @@ class LALRGenerator
     @_buildParser grammar
 
   _buildParser: (grammar) ->
+
     # Phase 1: Process input grammar
     console.time 'processGrammar'
     @processGrammar grammar
@@ -149,10 +152,7 @@ class LALRGenerator
 
   # Get lookahead symbols for an item in a state
   getLookaheadSet: (state, item) ->
-    if @onDemandLookahead and not state.hasConflicts
-      @terminals
-    else
-      item.follows
+    if @onDemandLookahead and not state.hasConflicts then @terminals else item.follows
 
   # ---------------------------------------------------------------------------
   # Grammar Processing
@@ -164,8 +164,7 @@ class LALRGenerator
     @operators = @_processOperators grammar.operators
 
     tokens = grammar.tokens
-    if tokens
-      tokens = if typeof tokens is 'string' then tokens.trim().split(' ') else tokens[..]
+    tokens and= if typeof tokens is 'string' then tokens.trim().split(' ') else tokens[..]
 
     @_buildProductions grammar.bnf, @productions, @nonterminals, @symbols, @operators
 
@@ -353,39 +352,46 @@ class LALRGenerator
   # Lookahead Computation (DeRemer-Pennello Algorithm)
   # ---------------------------------------------------------------------------
 
+  # Compute NULLABLE, FIRST, and FOLLOW sets for LALR(1) parser generation
   computeLookaheads: ->
     @computeLookaheads = -> # Prevent re-computation
     @_computeNullableSets()
     @_computeFirstSets()
     @_computeFollowSets()
 
+  # Determine which grammar symbols can derive the empty string (ε)
   _computeNullableSets: ->
     changed = true
     while changed
       changed = false
 
+      # Check each production: if all symbols in handle are nullable, mark production as nullable
       for production in @productions when not production.nullable
         nullableCount = 0
         nullableCount++ for symbol in production.handle when @_isNullable symbol
         if nullableCount is production.handle.length
           production.nullable = changed = true
 
+      # Propagate production nullability up to parent nonterminals
       for symbol, nonterminal of @nonterminals when not @_isNullable symbol
         for production in nonterminal.productions when production.nullable
           nonterminal.nullable = changed = true
           break
 
+  # Check if a symbol (or sequence of symbols) can derive the empty string
   _isNullable: (symbol) ->
     return true if symbol is ''
     return symbol.every((s) => @_isNullable s) if Array.isArray symbol
     return false unless @nonterminals[symbol]
     @nonterminals[symbol].nullable
 
+  # Compute FIRST sets: what terminals can begin strings derived from each production
   _computeFirstSets: ->
     changed = true
     while changed
       changed = false
 
+      # Compute FIRST sets for each production by analyzing its handle symbols
       for production in @productions
         firsts = @_first production.handle
         oldSize = production.first.size
@@ -393,6 +399,7 @@ class LALRGenerator
         production.first.add(item) for item in firsts
         changed = true if production.first.size > oldSize
 
+      # Collect FIRST sets from all productions and propagate to parent nonterminals
       for symbol, nonterminal of @nonterminals
         oldSize = nonterminal.first.size
         nonterminal.first.clear()
@@ -402,14 +409,18 @@ class LALRGenerator
 
     null
 
+  # Get FIRST set for a symbol or sequence of symbols
   _first: (symbols) ->
     return [] if symbols is ''
     return @_firstOfSequence symbols if Array.isArray symbols
     return [symbols] unless @nonterminals[symbols]
     Array.from(@nonterminals[symbols].first)
 
+  # Compute FIRST set for a sequence by processing symbols left-to-right until non-nullable
   _firstOfSequence: (symbols) ->
     firsts = new Set()
+
+    # Add FIRST symbols from each symbol in sequence, stopping at first non-nullable
     for symbol in symbols
       if @nonterminals[symbol]
         @nonterminals[symbol].first.forEach (s) => firsts.add(s)
@@ -425,10 +436,12 @@ class LALRGenerator
     while changed
       changed = false
 
+      # Process each production rule to determine FOLLOW relationships
       for production in @productions
         q = !!@go_
         ctx = q
 
+        # For each nonterminal symbol in the production, compute what can follow it
         for symbol, i in production.handle when @nonterminals[symbol]
           if ctx
             q = @gotoEncoded production.symbol, production.handle[0...i]
@@ -436,6 +449,7 @@ class LALRGenerator
 
           oldSize = @nonterminals[symbol].follows.size
 
+          # If symbol is at the end of production (nothing follows), inherit FOLLOW from left-hand side
           if i is production.handle.length - 1 and bool
             # Add all items from production.symbol.follows to symbol.follows
             @nonterminals[production.symbol].follows.forEach (item) =>
@@ -461,6 +475,7 @@ class LALRGenerator
   # LR Automaton Construction
   # ---------------------------------------------------------------------------
 
+  # Build the collection of LR(0) states for the parser automaton
   buildLRAutomaton: ->
     item1 = new Item @productions[0], 0, [@EOF]
     firstState = @_closure new LRState item1
@@ -477,6 +492,7 @@ class LALRGenerator
 
     states
 
+  # Compute closure of an LR item set by adding all implied items
   _closure: (itemSet) ->
     closureSet = new LRState()
     workingSet = new Set(itemSet.items)
@@ -504,6 +520,7 @@ class LALRGenerator
 
     closureSet
 
+  # Compute GOTO(state, symbol): the state reached by shifting on a symbol
   _goto: (itemSet, symbol) ->
     gotoSet = new LRState()
 
@@ -513,6 +530,7 @@ class LALRGenerator
 
     if gotoSet.items.size is 0 then gotoSet else @_closure gotoSet
 
+  # Insert or merge a new LR state into the state collection
   _insertLRState: (symbol, itemSet, states, stateNum) ->
     gotoSet = @_goto itemSet, symbol
 
@@ -533,6 +551,7 @@ class LALRGenerator
   # Parse Table Generation
   # ---------------------------------------------------------------------------
 
+  # Build LALR(1) parse table with shift/reduce/accept actions
   buildParseTable: (itemSets) ->
     states = []
     {nonterminals, operators} = this
@@ -595,6 +614,7 @@ class LALRGenerator
 
     states
 
+  # Resolve shift/reduce conflicts using operator precedence and associativity
   _resolveConflict: (production, op, reduce, shift) ->
     solution = {production, operator: op, r: reduce, s: shift}
     [SHIFT, REDUCE] = [1, 2]
@@ -621,6 +641,7 @@ class LALRGenerator
 
     solution
 
+  # Optimize parse table by computing default actions for single-action states
   computeDefaultActions: (states) ->
     defaults = {}
     for state, k in states
@@ -639,6 +660,7 @@ class LALRGenerator
   # Augmented Grammar for Lookahead Computation
   # ---------------------------------------------------------------------------
 
+  # Build augmented grammar with state-specific symbols for lookahead computation
   buildAugmentedGrammar: ->
     @lookahead = {nonterminalMap: {}, nonterminals: {}, productions: []}
     @conflictStates = []
@@ -664,6 +686,7 @@ class LALRGenerator
 
     null
 
+  # Navigate through states following a symbol sequence, recording the path
   _gotoStateWithPath: (startState, symbolSequence) ->
     currentState = parseInt startState, 10
     path = []
@@ -678,6 +701,7 @@ class LALRGenerator
 
     {path, endState: currentState}
 
+  # Union computed lookaheads from augmented grammar back to original items
   unionLookaheads: ->
     statesToProcess = if @onDemandLookahead then @conflictStates else @states
 
@@ -702,9 +726,11 @@ class LALRGenerator
   # Code Generation
   # ---------------------------------------------------------------------------
 
+  # Generate parser code using default options (CommonJS format)
   generate: (options = {}) ->
     @generateCommonJSModule Object.assign {}, @options, options
 
+  # Generate CommonJS module with exports for Node.js compatibility
   generateCommonJSModule: (options = {}) ->
     moduleName = options.moduleName or "parser"
     moduleName = "parser" unless moduleName.match /^[A-Za-z_$][A-Za-z0-9_$]*$/
@@ -722,6 +748,7 @@ class LALRGenerator
       }
       """
 
+  # Generate standalone parser module declaration
   generateModule: (options = {}) ->
     moduleName = options.moduleName or "parser"
     version = '0.5.1'; # require('./package.json').version
@@ -730,6 +757,7 @@ class LALRGenerator
     out += if moduleName.match /\./ then moduleName else "var #{moduleName}"
     out += " = #{@generateModuleExpr()}"
 
+  # Generate self-executing function expression containing the parser
   generateModuleExpr: ->
     module = @_generateModuleCore()
     """
@@ -746,6 +774,7 @@ class LALRGenerator
     })();
     """
 
+  # Generate the core parser object with all tables and methods
   _generateModuleCore: ->
     tableCode = @_generateTableCode @stateTable
 
@@ -764,6 +793,7 @@ class LALRGenerator
 
     {commonCode: tableCode.commonCode, moduleCode}
 
+  # Generate compressed JSON representation of the parse table
   _generateTableCode: (stateTable) ->
     moduleCode = JSON.stringify(stateTable, null, 0)
       .replace /"([0-9]+)"(?=:)/g, "$1"
