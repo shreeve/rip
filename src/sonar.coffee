@@ -15,36 +15,49 @@
 # Grammar symbol (nonterminal)
 class Nonterminal
   constructor: (@symbol) ->
+    # Core collections
     @productions = []
+
+    # Analysis results
+    @nullable = false
     @first = new Set()
     @follows = new Set()
-    @nullable = false
 
 # Production rule: A → α
 class Production
   constructor: (@symbol, @handle, @id) ->
+    # Analysis results
     @nullable = false
     @first = new Set()
+
+    # Metadata
     @precedence = 0
 
 # LR(0) item: [A → α•β] with LALR(1) lookahead
 class Item
   constructor: (@production, @dot = 0, @follows = []) ->
+    # Derived properties (computed from core data)
     @nextSymbol = @production.handle[@dot]
     @id = parseInt("#{@production.id}a#{@dot}", 36)
 
 # Set of LR items (parser state)
 class LRState
   constructor: (items...) ->
+    # Core data
     @items = new Set(items)
-    @handleToSymbols = {}
+
+    # Collections for analysis results
     @reductions = []
     @transitions = {}
+
+    # State flags
     @hasShifts = false
     @hasConflicts = false
 
-  valueOf: -> @_value or= (item.id for item from @items).sort().join('|')
+    # Working data
+    @handleToSymbols = {}
 
+  valueOf: -> @_value or= (item.id for item from @items).sort().join('|')
 
 # =============================================================================
 # LALR(1) Parser Generator
@@ -52,15 +65,21 @@ class LRState
 
 class LALRGenerator
   constructor: (grammar, options = {}) ->
+    # Input configuration
     @options = Object.assign {}, grammar.options, options
-    @terminals = {}
-    @operators = {}
-    @productions = []
-    @conflicts = 0
-    @resolutions = []
     @parseParams = grammar.parseParams
     @yy = {}
 
+    # Core grammar data structures
+    @terminals = {}
+    @operators = {}
+    @productions = []
+
+    # Analysis results and metrics
+    @conflicts = 0
+    @resolutions = []
+
+    # Code generation configuration
     if grammar.actionInclude
       if typeof grammar.actionInclude is 'function'
         @actionInclude = String(grammar.actionInclude)
@@ -75,31 +94,32 @@ class LALRGenerator
     @_buildParser grammar
 
   _buildParser: (grammar) ->
+    # Phase 1: Process input grammar
     console.time 'processGrammar'
     @processGrammar grammar
     console.timeEnd 'processGrammar'
 
+    # Phase 2: Build LR automaton (sets @states, @symbols, @nonterminals, etc.)
     console.time 'buildLRAutomaton'
     @states = @buildLRAutomaton()
     console.timeEnd 'buildLRAutomaton'
 
+    # Initialize lookahead computation data structures
     @terminalMap = {}
-
-    # Initialize lookahead state
     @lookahead = {
       nonterminalMap: {},
       nonterminals: {},
       productions: []
     }
-
     @conflictStates = []
     @onDemandLookahead = @options.onDemandLookahead or false
 
+    # Phase 3: Build augmented grammar for lookahead computation
     console.time 'buildAugmentedGrammar'
     @buildAugmentedGrammar()
     console.timeEnd 'buildAugmentedGrammar'
 
-    # Compute lookaheads in lookahead context
+    # Phase 4: Compute lookaheads in augmented grammar context
     savedNonterminals = @nonterminals
     savedProductions = @productions
 
@@ -110,13 +130,16 @@ class LALRGenerator
     @computeLookaheads()
     console.timeEnd 'computeLookaheads'
 
+    # Restore original grammar context
     @nonterminals = savedNonterminals
     @productions = savedProductions
 
+    # Phase 5: Union lookaheads back to original items
     console.time 'unionLookaheads'
     @unionLookaheads()
     console.timeEnd 'unionLookaheads'
 
+    # Phase 6: Build final parse table and optimizations
     console.time 'buildParseTable'
     @stateTable = @buildParseTable @states
     console.timeEnd 'buildParseTable'
