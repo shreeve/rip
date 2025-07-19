@@ -7,35 +7,43 @@
 # Core Data Structures
 # ==============================================================================
 
-# Grammar nonterminal symbol
+# Nonterminal symbol
 class Nonterminal
-  constructor: (@symbol) ->
+  constructor: (symbol) ->
+    @symbol      = symbol
     @productions = []
-    @nullable = false
-    @first = new Set()
-    @follows = new Set()
+    @nullable    = false
+    @first       = new Set
+    @follows     = new Set
 
 # Production rule: A → α
 class Production
-  constructor: (@symbol, @handle, @id) ->
-    @nullable = false
-    @first = new Set()
+  constructor: (symbol, handle, id) ->
+    @symbol     = symbol
+    @handle     = handle
+    @id         = id
+    @nullable   = false
+    @first      = new Set
     @precedence = 0
 
 # LR(0) item: [A → α•β] with LALR(1) lookahead
 class Item
-  constructor: (@production, @dot = 0, @follows = []) ->
+  constructor: (production, dot = 0, follows = []) ->
+    @production = production
+    @dot        = dot
+    @follows    = follows
     @nextSymbol = @production.handle[@dot]
-    @id = parseInt("#{@production.id}a#{@dot}", 36)
+    @id         = parseInt("#{@production.id}a#{@dot}", 36)
 
 # LR parser state (set of items)
 class LRState
   constructor: (items...) ->
-    @items = new Set(items)
-    @reductions = []
-    @transitions = {}
-    @hasShifts = false
+    @items        = new Set(items)
+    @reductions   = []
+    @transitions  = {}
+    @hasShifts    = false
     @hasConflicts = false
+    @id           = null
 
 # ==============================================================================
 # LALR(1) Parser Generator
@@ -43,16 +51,17 @@ class LRState
 
 class LALRGenerator
   constructor: (grammar, options = {}) ->
+
     # Configuration
     @options = Object.assign {}, grammar.options, options
     @parseParams = grammar.parseParams
     @yy = {}
 
     # Grammar structures
-    @terminals = {}
-    @operators = {}
+    @terminals   = {}
+    @operators   = {}
     @productions = []
-    @conflicts = 0
+    @conflicts   = 0
     @resolutions = []
 
     # Code generation setup
@@ -71,34 +80,12 @@ class LALRGenerator
     @moduleInclude = grammar.moduleInclude or ''
 
   _buildParser: (grammar) ->
-    # Phase 1: Process grammar rules and tokens
-    console.time 'processGrammar'
     @processGrammar grammar
-    console.timeEnd 'processGrammar'
-
-    # Phase 2: Build LR automaton
-    console.time 'buildLRAutomaton'
-    @states = @buildLRAutomaton()
-    console.timeEnd 'buildLRAutomaton'
-
-    # Phase 3: Compute LALR(1) lookaheads
-    console.time 'computeLookaheads'
+    @buildLRAutomaton()
     @computeLookaheads()
-    console.timeEnd 'computeLookaheads'
-
-    # Phase 4: Assign lookaheads to reduction items
-    console.time 'assignItemLookaheads'
     @assignItemLookaheads()
-    console.timeEnd 'assignItemLookaheads'
-
-    # Phase 5: Build parse table
-    console.time 'buildParseTable'
-    @stateTable = @buildParseTable @states
-    console.timeEnd 'buildParseTable'
-
-    console.time 'computeDefaultActions'
-    @defaultActions = @computeDefaultActions @stateTable
-    console.timeEnd 'computeDefaultActions'
+    @buildParseTable @states
+    @computeDefaultActions @stateTable
 
   # ============================================================================
   # Grammar Processing
@@ -185,11 +172,7 @@ class LALRGenerator
         if action
           action = @_processSemanticAction action, rhs
           label = 'case ' + (productions.length + 1) + ':'
-
-          if actionGroups[action]
-            actionGroups[action].push label
-          else
-            actionGroups[action] = [label]
+          actionGroups[action]?.push(label) or actionGroups[action] = [label]
 
         # Create production
         production = new Production symbol, rhs, productions.length + 1
@@ -249,7 +232,7 @@ class LALRGenerator
       names = {}
 
       for token, i in rhs
-        rhs_i = token.match(/\[[a-zA-Z][a-zA-Z0-9_-]*\]/)
+        rhs_i = token.match(/\[[a-zA-Z][a-zA-Z0-9_-]*\]/) # Like [var]
         if rhs_i
           rhs_i = rhs_i[0].substr(1, rhs_i[0].length - 2)
         else
@@ -263,19 +246,15 @@ class LALRGenerator
           count[rhs_i] = 1
 
       action = action
-        .replace /\$([a-zA-Z][a-zA-Z0-9_]*)/g, (str, pl) ->
-          if names[pl] then '$' + names[pl] else str
-        .replace /@([a-zA-Z][a-zA-Z0-9_]*)/g, (str, pl) ->
-          if names[pl] then '@' + names[pl] else str
+        .replace /\$([a-zA-Z][a-zA-Z0-9_]*)/g, (str, pl) -> if names[pl] then '$' + names[pl] else str # Like $var
+        .replace  /@([a-zA-Z][a-zA-Z0-9_]*)/g, (str, pl) -> if names[pl] then '@' + names[pl] else str # Like @var
 
     # Transform $$ and positional references
     action
-      .replace(/([^'"])\$\$|^\$\$/g, '$1this.$')
-      .replace(/@[0$]/g, "this._$")
-      .replace(/\$(-?\d+)/g, (_, n) ->
-        "$$[$0" + (parseInt(n, 10) - rhs.length || '') + "]")
-      .replace(/@(-?\d+)/g, (_, n) ->
-        "_$[$0" + (n - rhs.length || '') + "]")
+      .replace(/([^'"])\$\$|^\$\$/g, '$1this.$') # Like $$var
+      .replace(/@[0$]/g, "this._$") # Like @var
+      .replace(/\$(-?\d+)/g, (_, n) -> "$$[$0" + (parseInt(n, 10) - rhs.length || '') + "]") # Like $1
+      .replace( /@(-?\d+)/g, (_, n) -> "_$[$0" +               (n - rhs.length || '') + "]") # Like @1
 
   _buildTerminalMappings: (symbolMap, nonterminals) ->
     terminals = []
@@ -286,11 +265,11 @@ class LALRGenerator
         terminals.push name
         terminalsMap[id] = name
 
-    @terminals = terminals
+    @terminals  = terminals
     @terminals_ = terminalsMap
 
   # ============================================================================
-  # Lookahead Computation (LALR(1))
+  # Lookahead Computation - LALR(1) algorithm
   # ============================================================================
 
   computeLookaheads: ->
@@ -411,7 +390,7 @@ class LALRGenerator
       for item from itemSet.items when item.nextSymbol and item.nextSymbol isnt @EOF
         @_insertLRState item.nextSymbol, itemSet, states, marked - 1
 
-    states
+    @states = states
 
   # Compute closure of item set
   _closure: (itemSet) ->
@@ -511,8 +490,9 @@ class LALRGenerator
           op = operators[stackSymbol]
 
           if action
-            solution = @_resolveConflict item.production, op, [REDUCE, item.production.id],
-                                         if action[0] instanceof Array then action[0] else action
+            # Resolve conflict
+            which = if action[0] instanceof Array then action[0] else action
+            solution = @_resolveConflict item.production, op, [REDUCE, item.production.id], which
             @resolutions.push [k, stackSymbol, solution]
 
             if solution.bydefault
@@ -531,7 +511,7 @@ class LALRGenerator
           else if action is NONASSOC
             state[@symbolMap[stackSymbol]] = undefined
 
-    states
+    @stateTable = states
 
   # Resolve conflicts using precedence and associativity
   _resolveConflict: (production, op, reduce, shift) ->
@@ -572,7 +552,7 @@ class LALRGenerator
 
       defaults[k] = lastAction if actionCount is 1 and lastAction[0] is 2
 
-    defaults
+    @defaultActions = defaults
 
   # ============================================================================
   # Code Generation
@@ -592,15 +572,13 @@ class LALRGenerator
         exports.Parser = #{moduleName}.Parser;
         exports.parse = function () { return #{moduleName}.parse.apply(#{moduleName}, arguments); };
         exports.main = function() {};
-        if (typeof module !== 'undefined' && require.main === module) {
-          exports.main(process.argv.slice(1));
-        }
+        if (typeof module !== 'undefined' && require.main === module) { exports.main(process.argv.slice(1)); }
       }
       """
 
   generateModule: (options = {}) ->
     moduleName = options.moduleName or "parser"
-    version = '0.5.1'
+    version = '0.5.2'
     out = "/* parser generated by sonar #{version} */\n"
     out += if moduleName.match /\./ then moduleName else "var #{moduleName}"
     out += " = #{@generateModuleExpr()}"
@@ -613,9 +591,7 @@ class LALRGenerator
     #{module.commonCode}
     var parser = #{module.moduleCode};
     #{@moduleInclude}
-    function Parser () {
-      this.yy = {};
-    }
+    function Parser () { this.yy = {}; }
     Parser.prototype = parser;
     parser.Parser = Parser;
     return new Parser;
@@ -668,8 +644,7 @@ class LALRGenerator
     lexer.setInput input, sharedState.yy
     [sharedState.yy.lexer, sharedState.yy.parser] = [lexer, this]
 
-    unless lexer.yylloc?
-      lexer.yylloc = {}
+    lexer.yylloc = {} unless lexer.yylloc?
     yyloc = lexer.yylloc
     loc.push yyloc
 
