@@ -7,6 +7,17 @@
 # Core Data Structures
 # ==============================================================================
 
+# Unified Symbol class for both terminals and nonterminals
+class Symbol
+  constructor: (name, isTerminal = false, id) ->
+    @id         = id         # unique symbol id
+    @name       = name       # symbol name (e.g. "Expression", "IF", "$end")
+    @isTerminal = isTerminal # true if terminal, false if nonterminal
+    @nullable   = false      # LALR(1) nullable computation (nonterminals only)
+    @first      = new Set()  # LALR(1) FIRST sets (nonterminals only)
+    @follows    = new Set()  # LALR(1) FOLLOW sets (nonterminals only)
+    @productions = []        # Productions for this nonterminal (nonterminals only)
+
 # Nonterminal symbol
 class Nonterminal
   constructor: (symbol) ->
@@ -67,6 +78,58 @@ class LALRGenerator
     @_setupCodeGeneration grammar
     @_buildParser grammar
 
+  # ==============================================================================
+  # Unified Symbol Management
+  # ==============================================================================
+
+  # Create or get a symbol, returning its Symbol object
+  getOrCreateSymbol: (name, isTerminal = null) ->
+    return null unless name
+
+    if @symbols?.has name
+      return @symbols.get name
+
+    # If not using unified symbols yet, fall back to legacy lookup
+    return null unless @symbols
+
+    # Auto-detect type if not specified (but be safe about @nonterminals)
+    if isTerminal is null
+      isTerminal = !(@nonterminals?[name])
+
+    id = @nextSymbolId++
+    symbol = new Symbol name, isTerminal, id
+
+    @symbols.set name, symbol
+    @symbolsById.set id, symbol
+
+    # For nonterminals, also store in legacy structure during transition
+    if not isTerminal and @nonterminals
+      @nonterminals[name] = symbol
+
+    return symbol
+
+  # Initialize unified symbol system (call this before processing grammar)
+  initializeUnifiedSymbols: ->
+    @symbols = new Map()
+    @symbolsById = new Map()
+    @nextSymbolId = 0
+
+    # Explicitly create special symbols with known types
+    # $accept is a nonterminal (augmented grammar start)
+    acceptSymbol = new Symbol "$accept", false, @nextSymbolId++
+    @symbols.set "$accept", acceptSymbol
+    @symbolsById.set acceptSymbol.id, acceptSymbol
+
+    # $end is a terminal (EOF marker)
+    endSymbol = new Symbol "$end", true, @nextSymbolId++
+    @symbols.set "$end", endSymbol
+    @symbolsById.set endSymbol.id, endSymbol
+
+    # error is a terminal (error recovery token)
+    errorSymbol = new Symbol "error", true, @nextSymbolId++
+    @symbols.set "error", errorSymbol
+    @symbolsById.set errorSymbol.id, errorSymbol
+
   _setupCodeGeneration: (grammar) ->
     if grammar.actionInclude
       @actionInclude = if typeof grammar.actionInclude is 'function'
@@ -85,6 +148,9 @@ class LALRGenerator
       console.timeEnd(label)
       result
 
+    # Initialize unified symbol system
+    @initializeUnifiedSymbols()
+
     timing 'sonar', =>
       timing 'processGrammar'       , => @processGrammar grammar
       timing 'buildLRAutomaton'     , => @buildLRAutomaton()
@@ -99,18 +165,43 @@ class LALRGenerator
 
   processGrammar: (grammar) ->
     @nonterminals = {}
-    @symbols = ["$accept", "$end", "error"]  # Pre-allocate all special symbols to avoid unshift
+    # Special symbols already created by initializeUnifiedSymbols()
     @operators = @_processOperators grammar.operators
 
     tokens = grammar.tokens
     tokens = if typeof tokens is 'string' then tokens.trim().split(' ') else tokens?[..]
 
-    @_buildProductions grammar.bnf ? grammar.grammar, @productions, @nonterminals, @symbols, @operators
+    @_buildProductions grammar.bnf ? grammar.grammar, @productions, @nonterminals, null, @operators
 
-    if tokens and @terminals.length isnt tokens.length
+    # Build legacy arrays for compatibility during transition
+    @_buildLegacyArrays()
+
+    if tokens and @_getTerminalCount() isnt tokens.length
       @trace "Warning: declared tokens differ from tokens found in rules."
 
     @_augmentGrammar grammar
+
+  # Build legacy arrays for compatibility during transition
+  _buildLegacyArrays: ->
+    @symbolsArray = []        # Legacy array for compatibility if needed
+    @terminals = []
+    @symbolMap = {}
+    @terminals_ = {}
+
+    for symbol from @symbols.values()  # @symbols is the unified Map
+      @symbolsArray.push symbol.name
+      @symbolMap[symbol.name] = symbol.id
+
+      if symbol.isTerminal
+        @terminals.push symbol.name
+        @terminals_[symbol.id] = symbol.name
+
+  # Helper to get terminal count from unified symbols
+  _getTerminalCount: ->
+    count = 0
+    for symbol from @symbols.values()
+      count++ if symbol.isTerminal
+    count
 
   _processOperators: (ops) ->
     return {} unless ops
@@ -146,26 +237,37 @@ class LALRGenerator
 
     actionGroups = {}
     productionTable = [0]
-    symbolId = 3  # Start after pre-allocated "$accept"(0), "$end"(1), and "error"(2)
-    symbolMap = {"$accept": 0, "$end": 1, "error": 2}  # Pre-map all reserved symbols
 
-    addSymbol = (s) ->
-      if s and not symbolMap[s]
-        symbolMap[s] = symbolId++
-        symbols.push s
+    # Use unified symbol system instead of local management
+    addSymbol = (name) =>
+      return unless name
+      symbol = @getOrCreateSymbol name
+      return symbol.id
+
+    # Build symbolMap from unified symbols for compatibility
+    symbolMap = {}
+    for symbol from @symbols.values()
+      symbolMap[symbol.name] = symbol.id
 
     # Process nonterminals and their productions
     for own symbol, rules of bnf
-      addSymbol symbol
-      nonterminals[symbol] = new Nonterminal symbol
+      # Explicitly create the nonterminal symbol first
+      symbolObj = @getOrCreateSymbol symbol, false  # false = nonterminal
+
+      # Defensive check
+      if not symbolObj
+        console.error "Failed to create/get symbol: #{symbol}"
+        continue
+
+      nonterminals[symbol] = symbolObj
 
       prods = if typeof rules is 'string' then rules.split(/\s*\|\s*/g) else rules[..]
+      for i, prod of prods
+        [rhs, action, precedence] = @_parseHandle prod
 
-      for handle in prods
-        [rhs, action, precedence] = @_parseHandle handle
-
-        # Add symbols to grammar
-        addSymbol token for token in rhs
+        # Add symbols from right-hand side (auto-detect their types)
+        for rhsSymbol in rhs when rhsSymbol
+          addSymbol rhsSymbol
 
         # Process semantic actions
         if action
@@ -173,23 +275,23 @@ class LALRGenerator
           label = 'case ' + (productions.length + 1) + ':'
           actionGroups[action]?.push(label) or actionGroups[action] = [label]
 
-        # Create production
         production = new Production symbol, rhs, productions.length + 1
+        production.precedence = precedence?.precedence
 
-        # Set precedence
-        if precedence and operators[precedence.prec]
-          production.precedence = operators[precedence.prec].precedence
-        else if production.precedence is 0
+        if not precedence
           # Use rightmost terminal's precedence
           for i in [(rhs.length - 1)..0] by -1
             tok = rhs[i]
-            if operators[tok] and not nonterminals[tok]
+            tokenSymbol = @symbols.get tok
+            if operators[tok] and tokenSymbol?.isTerminal
               production.precedence = operators[tok].precedence
               break
 
         productions.push production
         productionTable.push [symbolMap[symbol], if rhs[0] is '' then 0 else rhs.length]
-        nonterminals[symbol].productions.push production
+
+        # This should now work since we explicitly created symbolObj
+        symbolObj.productions.push production
 
     # Generate action code
     for action, labels of actionGroups
