@@ -99,7 +99,7 @@ class LALRGenerator
     tokens = grammar.tokens
     tokens = if typeof tokens is 'string' then tokens.trim().split(' ') else tokens?[..]
 
-    @_buildProductions grammar.bnf, @productions, @nonterminals, @symbols, @operators
+    @_buildProductions grammar.bnf ? grammar.grammar, @productions, @nonterminals, @symbols, @operators
 
     if tokens and @terminals.length isnt tokens.length
       @trace "Warning: declared tokens differ from tokens found in rules."
@@ -834,14 +834,7 @@ if require.main is module
 
     # Load grammar
     grammar = if grammarFile.endsWith('.coffee')
-      # Mock jison to capture grammar
-      capturedGrammar = null
-      MockParser = (spec) -> capturedGrammar = spec; {generate: -> ''}
-
-      require.cache[require.resolve('jison')] = {exports: {Parser: MockParser}}
-      delete require.cache[path.resolve(grammarFile)]
-      require path.resolve(grammarFile)
-      capturedGrammar
+      require(path.resolve(grammarFile))
     else if grammarFile.endsWith('.json')
       JSON.parse fs.readFileSync(grammarFile, 'utf8')
     else
