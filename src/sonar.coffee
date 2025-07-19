@@ -70,9 +70,9 @@ class LALRGenerator
 
     # Pre-create special symbols with exact same IDs as original system
     # This is critical for LALR(1) compatibility
-    @_createSpecialSymbol "$accept", false  # ID = 0 (nonterminal)
-    @_createSpecialSymbol "$end", true      # ID = 1 (terminal)
-    @_createSpecialSymbol "error", true     # ID = 2 (terminal)
+    @_createSpecialSymbol "$accept", false, 0 # ID = 0 (nonterminal)
+    @_createSpecialSymbol "$end"   , true , 1 # ID = 1 (terminal)
+    @_createSpecialSymbol "error"  , true , 2 # ID = 2 (terminal)
 
     # Code generation setup
     @_setupCodeGeneration grammar
@@ -83,20 +83,10 @@ class LALRGenerator
   # ==============================================================================
 
   # Create special symbols with guaranteed ID assignment
-  _createSpecialSymbol: (name, isTerminal) ->
-    # Explicit ID assignment for critical LALR(1) compatibility
-    if name is "$accept"
-      id = 0
-    else if name is "$end"
-      id = 1
-    else if name is "error"
-      id = 2
-    else
-      throw new Error "Unknown special symbol: #{name}"
-
+  _createSpecialSymbol: (name, isTerminal, id) ->
     symbol = new Symbol name, isTerminal, id
     @symbols.set name, symbol
-    return symbol
+    symbol
 
   _setupCodeGeneration: (grammar) ->
     if grammar.actionInclude
