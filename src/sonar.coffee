@@ -78,9 +78,9 @@ class LALRGenerator
     @_setupCodeGeneration grammar
     @_buildParser grammar
 
-  # ==============================================================================
-  # Unified Symbol Management
-  # ==============================================================================
+  # ============================================================================
+  # Symbol Management
+  # ============================================================================
 
   # Create special symbols with guaranteed ID assignment
   _createSpecialSymbol: (name, isTerminal, id) ->
@@ -308,7 +308,7 @@ class LALRGenerator
     @terminals_ = terminalsMap
 
   # ============================================================================
-  # Lookahead Computation - LALR(1) algorithm
+  # Lookahead Computation - LALR(1) Algorithm
   # ============================================================================
 
   computeLookaheads: ->
@@ -411,9 +411,9 @@ class LALRGenerator
           item.follows.length = 0
           item.follows.push terminal for terminal from follows
 
-# ==============================================================================
-# LR Automaton Construction
-# ==============================================================================
+  # ============================================================================
+  # LR Automaton Construction
+  # ============================================================================
 
   buildLRAutomaton: ->
     item1 = new Item @productions[@acceptProductionIndex], 0, ["$end"]
