@@ -12,21 +12,11 @@ class Symbol
   constructor: (name, isTerminal = false, id) ->
     @id         = id         # unique symbol id
     @name       = name       # symbol name (e.g. "Expression", "IF", "$end")
-    @symbol     = name       # compatibility with old Nonterminal.symbol property
     @isTerminal = isTerminal # true if terminal, false if nonterminal
     @nullable   = false      # LALR(1) nullable computation (nonterminals only)
     @first      = new Set()  # LALR(1) FIRST sets (nonterminals only)
     @follows    = new Set()  # LALR(1) FOLLOW sets (nonterminals only)
     @productions = []        # Productions for this nonterminal (nonterminals only)
-
-# Nonterminal symbol
-class Nonterminal
-  constructor: (symbol) ->
-    @symbol      = symbol
-    @productions = []
-    @nullable    = false
-    @first       = new Set
-    @follows     = new Set
 
 # Production rule: A → α
 class Production
@@ -77,8 +67,6 @@ class LALRGenerator
 
     # Initialize unified symbol system
     @symbols = new Map()      # name -> Symbol object
-    @symbolsById = new Map()  # id -> Symbol object
-    @nextSymbolId = 0
 
     # Pre-create special symbols with exact same IDs as original system
     # This is critical for LALR(1) compatibility
@@ -96,30 +84,18 @@ class LALRGenerator
 
   # Create special symbols with guaranteed ID assignment
   _createSpecialSymbol: (name, isTerminal) ->
-    id = @nextSymbolId++
+    # Explicit ID assignment for critical LALR(1) compatibility
+    if name is "$accept"
+      id = 0
+    else if name is "$end"
+      id = 1
+    else if name is "error"
+      id = 2
+    else
+      throw new Error "Unknown special symbol: #{name}"
+
     symbol = new Symbol name, isTerminal, id
     @symbols.set name, symbol
-    @symbolsById.set id, symbol
-    return symbol
-
-  # Get or create a symbol with explicit type specification
-  getOrCreateSymbol: (name, isTerminal) ->
-    return null unless name
-    return null if isTerminal is null  # Must be explicit
-
-    # Return existing symbol if already created
-    if @symbols.has name
-      existing = @symbols.get name
-      # Verify type consistency
-      if existing.isTerminal isnt isTerminal
-        throw new Error "Symbol type conflict: #{name} defined as both terminal and nonterminal"
-      return existing
-
-    # Create new symbol
-    id = @nextSymbolId++
-    symbol = new Symbol name, isTerminal, id
-    @symbols.set name, symbol
-    @symbolsById.set id, symbol
     return symbol
 
   _setupCodeGeneration: (grammar) ->
@@ -223,7 +199,6 @@ class LALRGenerator
           id = symbolId++  # Use original system's ID assignment
           symbol = new Symbol s, isTerminal, id
           @symbols.set s, symbol
-          @symbolsById.set id, symbol
           symbolMap[s] = id
         symbols.push s
 
