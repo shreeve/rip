@@ -3,7 +3,7 @@
 // Original implementation by Jison team
 // https://github.com/zaach/jison/blob/master/lib/jison.js
 //
-// Updated work and optimization by Steve Shreeve <steve.shreeve@gmail.com>
+// Updates and optimization by Steve Shreeve <steve.shreeve@gmail.com>
 // https://github.com/shreeve/jison
 
 var Jison = exports.Jison = exports;
@@ -73,6 +73,7 @@ function LALRGenerator(grammar, options) {
     this._buildParser(grammar);
 }
 
+// Setup code generation includes and module wrapper
 LALRGenerator.prototype._setupCodeGeneration = function(grammar) {
     if (grammar.actionInclude) {
         if (typeof grammar.actionInclude === 'function') {
@@ -86,6 +87,7 @@ LALRGenerator.prototype._setupCodeGeneration = function(grammar) {
     this.moduleInclude = grammar.moduleInclude || '';
 };
 
+// Build parser by processing grammar and computing parse table
 LALRGenerator.prototype._buildParser = function(grammar) {
     this.processGrammar(grammar);
     this.buildLRAutomaton();
@@ -102,7 +104,7 @@ LALRGenerator.prototype.processGrammar = function(grammar) {
     var nonterminals = this.nonterminals = {};
     var productions = this.productions;
     var symbols = this.symbols = [];
-    var operators = this.operators = this.processOperators(grammar.operators);
+    var operators = this.operators = this._processOperators(grammar.operators);
 
     if (tokens) {
         tokens = typeof tokens === 'string' ? tokens.trim().split(' ') : tokens.slice(0);
@@ -118,7 +120,7 @@ LALRGenerator.prototype.processGrammar = function(grammar) {
 };
 
 // Process operator precedence and associativity declarations
-LALRGenerator.prototype.processOperators = function(ops) {
+LALRGenerator.prototype._processOperators = function(ops) {
     if (!ops) return {};
     var operators = {};
     for (var i = 0, prec; prec = ops[i]; i++) {
@@ -169,6 +171,7 @@ LALRGenerator.prototype.buildProductions = function(bnf, productions, nontermina
     var symbolId = 1;
     var symbolMap = {};
 
+    // Add symbol to symbol table if not already present
     function addSymbol(s) {
         if (s && !symbolMap[s]) {
             symbolMap[s] = ++symbolId;
@@ -321,13 +324,11 @@ LALRGenerator.prototype.buildProductions = function(bnf, productions, nontermina
 };
 
 // Lookahead computation
-// Compute LALR(1) lookaheads using DeRemer-Pennello algorithm
 LALRGenerator.prototype.computeLookaheads = function() {
-    this.computeLookaheads = function() {};
-    this.initializeSets();
-    this.computeNullableSets();
-    this.computeFirstSets();
-    this.computeFollowSets();
+    this.computeLookaheads = function() {}; // Prevent re-computation
+    this._computeNullableSets();
+    this._computeFirstSets();
+    this._computeFollowSets();
 };
 
 // Assign FOLLOW sets to reduction items for LALR(1)
@@ -361,120 +362,115 @@ LALRGenerator.prototype.initializeSets = function() {
     }
 };
 
-// Compute NULLABLE sets for all nonterminals (canonical: NULLABLE computation)
-LALRGenerator.prototype.computeNullableSets = function() {
-    var nonterminals = this.nonterminals;
+// Determine nullable symbols (can derive ε)
+LALRGenerator.prototype._computeNullableSets = function() {
+    var changed = true;
     var self = this;
-    var cont = true;
 
-    while (cont) {
-        cont = false;
+    while (changed) {
+        changed = false;
 
+        // Mark productions nullable if all handle symbols are nullable
         this.productions.forEach(function(production) {
             if (!production.nullable) {
-                var n = 0;
-                for (var i = 0, t; t = production.handle[i]; ++i) {
-                    if (self.isNullable(t)) n++;
-                }
-                if (n === i) {
-                    production.nullable = cont = true;
+                var allNullable = production.handle.every(function(symbol) {
+                    return self.isNullable(symbol);
+                });
+                if (allNullable) {
+                    production.nullable = changed = true;
                 }
             }
         });
 
-        for (var symbol in nonterminals) {
+        // Propagate to nonterminals
+        for (var symbol in this.nonterminals) {
             if (!this.isNullable(symbol)) {
-                for (var i = 0, production; production = nonterminals[symbol].productions[i]; i++) {
-                    if (production.nullable) {
-                        nonterminals[symbol].nullable = cont = true;
-                        break;
-                    }
+                var hasNullableProduction = this.nonterminals[symbol].productions.some(function(production) {
+                    return production.nullable;
+                });
+                if (hasNullableProduction) {
+                    this.nonterminals[symbol].nullable = changed = true;
                 }
             }
         }
     }
 };
 
-// Check if a symbol or symbol sequence is nullable (canonical: NULLABLE predicate)
+// Check if symbol or symbol sequence can derive empty string
 LALRGenerator.prototype.isNullable = function(symbol) {
     if (symbol === '') return true;
-    if (symbol instanceof Array) {
-        for (var i = 0, t; t = symbol[i]; ++i) {
-            if (!this.isNullable(t)) return false;
-        }
-        return true;
+    if (Array.isArray(symbol)) {
+        var self = this;
+        return symbol.every(function(s) { return self.isNullable(s); });
     }
-    return !this.nonterminals[symbol] ? false : this.nonterminals[symbol].nullable;
+    return this.nonterminals[symbol] ? this.nonterminals[symbol].nullable : false;
 };
 
-// Compute FIRST sets for all nonterminals (canonical: FIRST computation)
-LALRGenerator.prototype.computeFirstSets = function() {
-    var productions = this.productions;
-    var nonterminals = this.nonterminals;
+// Compute FIRST sets (terminals that can begin derivations)
+LALRGenerator.prototype._computeFirstSets = function() {
+    var changed = true;
     var self = this;
-    var cont = true;
 
-    while (cont) {
-        cont = false;
+    while (changed) {
+        changed = false;
 
-        productions.forEach(function(production) {
+        this.productions.forEach(function(production) {
             var firsts = self.first(production.handle);
             var oldSize = production.first.size;
-            // Clear and rebuild the Set
             production.first.clear();
             for (var i = 0; i < firsts.length; i++) {
                 production.first.add(firsts[i]);
             }
             if (production.first.size > oldSize) {
-                cont = true;
+                changed = true;
             }
         });
 
-        for (var symbol in nonterminals) {
-            var oldSize = nonterminals[symbol].first.size;
-            nonterminals[symbol].first.clear();
-            nonterminals[symbol].productions.forEach(function(production) {
-                // Fast Set union using forEach
-                production.first.forEach(function(item) {
-                    nonterminals[symbol].first.add(item);
+        for (var symbol in this.nonterminals) {
+            var nonterminal = this.nonterminals[symbol];
+            var oldSize = nonterminal.first.size;
+            nonterminal.first.clear();
+            nonterminal.productions.forEach(function(production) {
+                production.first.forEach(function(s) {
+                    nonterminal.first.add(s);
                 });
             });
-            if (nonterminals[symbol].first.size > oldSize) {
-                cont = true;
+            if (nonterminal.first.size > oldSize) {
+                changed = true;
             }
         }
     }
 };
 
-// Get FIRST set for a symbol or symbol sequence
-LALRGenerator.prototype.first = function(symbol) {
-    if (symbol === '') return [];
-    if (symbol instanceof Array) {
-        var firsts = [];
-        var firstsSet = new Set();
-        for (var i = 0, t; t = symbol[i]; ++i) {
-            if (!this.nonterminals[t]) {
-                firstsSet.add(t);
-            } else {
-                // Fast Set union using forEach
-                this.nonterminals[t].first.forEach(function(item) {
-                    firstsSet.add(item);
-                });
-            }
-            if (!this.isNullable(t)) break;
-        }
-        // Convert Set back to Array
-        return Array.from(firstsSet);
-    }
-    if (!this.nonterminals[symbol]) return [symbol];
+// Get FIRST set for symbol or symbol sequence
+LALRGenerator.prototype.first = function(symbols) {
+    if (symbols === '') return [];
+    if (Array.isArray(symbols)) return this._firstOfSequence(symbols);
+    if (!this.nonterminals[symbols]) return [symbols];
+    return Array.from(this.nonterminals[symbols].first);
+};
 
-    // Convert Set to Array
-    return Array.from(this.nonterminals[symbol].first);
+// Compute FIRST set for a sequence of symbols
+LALRGenerator.prototype._firstOfSequence = function(symbols) {
+    var firsts = new Set();
+    var self = this;
+    for (var i = 0; i < symbols.length; i++) {
+        var symbol = symbols[i];
+        if (this.nonterminals[symbol]) {
+            this.nonterminals[symbol].first.forEach(function(s) {
+                firsts.add(s);
+            });
+        } else {
+            firsts.add(symbol);
+        }
+        if (!this.isNullable(symbol)) break;
+    }
+    return Array.from(firsts);
 };
 
 // Compute FOLLOW sets for all nonterminals
 // Compute FOLLOW sets (terminals that can follow nonterminals)
-LALRGenerator.prototype.computeFollowSets = function() {
+LALRGenerator.prototype._computeFollowSets = function() {
     var changed = true;
     var self = this;
 
@@ -520,7 +516,7 @@ LALRGenerator.prototype.computeFollowSets = function() {
 };
 
 // Compute closure of an item set (add all implied items)
-LALRGenerator.prototype.closure = function(itemSet) {
+LALRGenerator.prototype._closure = function(itemSet) {
     var closureSet = new LRState();
     var self = this;
     var set = itemSet;
@@ -562,7 +558,7 @@ LALRGenerator.prototype.closure = function(itemSet) {
 };
 
 // Compute goto operation (items after shifting a symbol)
-LALRGenerator.prototype.goto = function(itemSet, symbol) {
+LALRGenerator.prototype._goto = function(itemSet, symbol) {
     var gotoSet = new LRState();
     var self = this;
 
@@ -572,13 +568,13 @@ LALRGenerator.prototype.goto = function(itemSet, symbol) {
         }
     });
 
-    return gotoSet.items.size === 0 ? gotoSet : this.closure(gotoSet);
+    return gotoSet.items.size === 0 ? gotoSet : this._closure(gotoSet);
 };
 
 // Generate canonical collection of LR(0) item sets
 LALRGenerator.prototype.buildLRAutomaton = function() {
     var item1 = new Item(this.productions[0], 0, [this.EOF]);
-    var firstState = this.closure(new LRState(item1));
+    var firstState = this._closure(new LRState(item1));
     var states = [firstState];
     var marked = 0;
     var self = this;
@@ -587,12 +583,10 @@ LALRGenerator.prototype.buildLRAutomaton = function() {
     states.has[firstState] = 0;
 
     while (marked !== states.length) {
-        var itemSet = states[marked];
-        marked++;
-
+        var itemSet = states[marked++];
         itemSet.items.forEach(function(item) {
             if (item.nextSymbol && item.nextSymbol !== self.EOF) {
-                self.insertLRState(item.nextSymbol, itemSet, states, marked - 1);
+                self._insertLRState(item.nextSymbol, itemSet, states, marked - 1);
             }
         });
     }
@@ -601,8 +595,8 @@ LALRGenerator.prototype.buildLRAutomaton = function() {
 };
 
 // Insert or merge item set into canonical collection
-LALRGenerator.prototype.insertLRState = function(symbol, itemSet, states, stateNum) {
-                var g = this.goto(itemSet, symbol);
+LALRGenerator.prototype._insertLRState = function(symbol, itemSet, states, stateNum) {
+                var g = this._goto(itemSet, symbol);
     if (!g.predecessors) g.predecessors = {};
 
     if (g.items.size > 0) {
@@ -628,8 +622,7 @@ LALRGenerator.prototype.buildParseTable = function(itemSets) {
     var operators = this.operators;
     var conflictedStates = {};
     var self = this;
-    var s = 1, r = 2, a = 3;
-    var NONASSOC = 0;
+    var NONASSOC = 0, SHIFT = 1, REDUCE = 2, ACCEPT = 3;
 
     itemSets.forEach(function(itemSet, k) {
         var state = states[k] = {};
@@ -642,7 +635,7 @@ LALRGenerator.prototype.buildParseTable = function(itemSets) {
                     if (nonterminals[stackSymbol]) {
                         state[self.symbolMap[stackSymbol]] = gotoState;
                     } else {
-                        state[self.symbolMap[stackSymbol]] = [s, gotoState];
+                        state[self.symbolMap[stackSymbol]] = [SHIFT, gotoState];
                     }
                 }
             });
@@ -651,7 +644,7 @@ LALRGenerator.prototype.buildParseTable = function(itemSets) {
         // Set accept action
         itemSet.items.forEach(function(item) {
             if (item.nextSymbol === self.EOF) {
-                state[self.symbolMap[self.EOF]] = [a];
+                state[self.symbolMap[self.EOF]] = [ACCEPT];
             }
         });
 
@@ -666,7 +659,7 @@ LALRGenerator.prototype.buildParseTable = function(itemSets) {
                 var op = operators[stackSymbol];
 
                 if (action || (action && action.length)) {
-                    var sol = self.resolveConflict(item.production, op, [r, item.production.id],
+                    var sol = self.resolveConflict(item.production, op, [REDUCE, item.production.id],
                         action[0] instanceof Array ? action[0] : action);
                     self.resolutions.push([k, stackSymbol, sol]);
 
@@ -683,7 +676,7 @@ LALRGenerator.prototype.buildParseTable = function(itemSets) {
                         action = sol.action;
                     }
                 } else {
-                    action = [r, item.production.id];
+                    action = [REDUCE, item.production.id];
                 }
 
                 if (action && action.length) {
@@ -1067,6 +1060,8 @@ LALRGenerator.prototype.createParser = function() {
 };
 
 // Exports
+
+// Create parser directly from grammar
 Jison.Parser = function(grammar, options) {
     var gen = new LALRGenerator(grammar, options);
     return gen.createParser();
@@ -1074,11 +1069,13 @@ Jison.Parser = function(grammar, options) {
 
 exports.LALRGenerator = LALRGenerator;
 
+// Create generator instance from grammar
 Jison.Generator = function(g, options) {
     var opt = Object.assign({}, g.options, options);
     return new LALRGenerator(g, opt);
 };
 
+// Main parser factory function
 return function Parser(g, options) {
     var gen = Jison.Generator(g, options);
     return gen.createParser();
