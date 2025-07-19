@@ -80,12 +80,19 @@ class LALRGenerator
     @moduleInclude = grammar.moduleInclude or ''
 
   _buildParser: (grammar) ->
-    @processGrammar grammar
-    @buildLRAutomaton()
-    @computeLookaheads()
-    @assignItemLookaheads()
-    @buildParseTable @states
-    @computeDefaultActions @stateTable
+    timing = (label, fn) =>
+      console.time(label)
+      result = fn() if fn
+      console.timeEnd(label)
+      result
+
+    timing 'sonar', =>
+      timing 'processGrammar'       , => @processGrammar grammar
+      timing 'buildLRAutomaton'     , => @buildLRAutomaton()
+      timing 'computeLookaheads'    , => @computeLookaheads()
+      timing 'assignItemLookaheads' , => @assignItemLookaheads()
+      timing 'buildParseTable'      , => @buildParseTable @states
+      timing 'computeDefaultActions', => @computeDefaultActions @stateTable
 
   # ============================================================================
   # Grammar Processing
