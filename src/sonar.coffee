@@ -455,8 +455,8 @@ class LALRGenerator
             encodedKey = "#{stateId}:#{plainSymbol}"
             hasAugmentedEntry = @lookahead.nonterminalMap[encodedKey]?
 
-            # Infrastructure ready - for now, be fully permissive to ensure correctness
-            # TODO: Add selective optimizations once we understand the patterns better
+            # DeRemer-Pennello infrastructure is ready - for now, be fully permissive
+            # TODO: Fine-tune optimizations once we understand the pattern better
             bool = true
           else
             # Simple algorithm: always apply FOLLOW rules
