@@ -7,6 +7,18 @@
 # Core Data Structures
 # ==============================================================================
 
+# Unified Symbol class for both terminals and nonterminals
+class Symbol
+  constructor: (name, isTerminal = false, id) ->
+    @id         = id         # unique symbol id
+    @name       = name       # symbol name (e.g. "Expression", "IF", "$end")
+    @symbol     = name       # compatibility with old Nonterminal.symbol property
+    @isTerminal = isTerminal # true if terminal, false if nonterminal
+    @nullable   = false      # LALR(1) nullable computation (nonterminals only)
+    @first      = new Set()  # LALR(1) FIRST sets (nonterminals only)
+    @follows    = new Set()  # LALR(1) FOLLOW sets (nonterminals only)
+    @productions = []        # Productions for this nonterminal (nonterminals only)
+
 # Nonterminal symbol
 class Nonterminal
   constructor: (symbol) ->
@@ -63,9 +75,52 @@ class LALRGenerator
     @productions = []
     @conflicts   = 0
 
+    # Initialize unified symbol system
+    @symbols = new Map()      # name -> Symbol object
+    @symbolsById = new Map()  # id -> Symbol object
+    @nextSymbolId = 0
+
+    # Pre-create special symbols with exact same IDs as original system
+    # This is critical for LALR(1) compatibility
+    @_createSpecialSymbol "$accept", false  # ID = 0 (nonterminal)
+    @_createSpecialSymbol "$end", true      # ID = 1 (terminal)
+    @_createSpecialSymbol "error", true     # ID = 2 (terminal)
+
     # Code generation setup
     @_setupCodeGeneration grammar
     @_buildParser grammar
+
+  # ==============================================================================
+  # Unified Symbol Management
+  # ==============================================================================
+
+  # Create special symbols with guaranteed ID assignment
+  _createSpecialSymbol: (name, isTerminal) ->
+    id = @nextSymbolId++
+    symbol = new Symbol name, isTerminal, id
+    @symbols.set name, symbol
+    @symbolsById.set id, symbol
+    return symbol
+
+  # Get or create a symbol with explicit type specification
+  getOrCreateSymbol: (name, isTerminal) ->
+    return null unless name
+    return null if isTerminal is null  # Must be explicit
+
+    # Return existing symbol if already created
+    if @symbols.has name
+      existing = @symbols.get name
+      # Verify type consistency
+      if existing.isTerminal isnt isTerminal
+        throw new Error "Symbol type conflict: #{name} defined as both terminal and nonterminal"
+      return existing
+
+    # Create new symbol
+    id = @nextSymbolId++
+    symbol = new Symbol name, isTerminal, id
+    @symbols.set name, symbol
+    @symbolsById.set id, symbol
+    return symbol
 
   _setupCodeGeneration: (grammar) ->
     if grammar.actionInclude
@@ -99,13 +154,15 @@ class LALRGenerator
 
   processGrammar: (grammar) ->
     @nonterminals = {}
-    @symbols = ["$accept", "$end", "error"]  # Pre-allocate all special symbols to avoid unshift
+    # Special symbols already created by unified symbol system
+    # Just need to maintain legacy array structure for compatibility
+    @symbolsArray = ["$accept", "$end", "error"]  # Legacy array compatibility
     @operators = @_processOperators grammar.operators
 
     tokens = grammar.tokens
     tokens = if typeof tokens is 'string' then tokens.trim().split(' ') else tokens?[..]
 
-    @_buildProductions grammar.bnf ? grammar.grammar, @productions, @nonterminals, @symbols, @operators
+    @_buildProductions grammar.bnf ? grammar.grammar, @productions, @nonterminals, @symbolsArray, @operators
 
     if tokens and @terminals.length isnt tokens.length
       @trace "Warning: declared tokens differ from tokens found in rules."
@@ -131,7 +188,9 @@ class LALRGenerator
     acceptProduction = new Production "$accept", [@startSymbol, "$end"], 0
     @productions.push acceptProduction
     @acceptProductionIndex = @productions.length - 1
-    @nonterminals.$accept = new Nonterminal "$accept"
+
+    # Use unified Symbol for $accept (already created in initialization)
+    @nonterminals.$accept = @symbols.get "$accept"
     @nonterminals.$accept.productions.push acceptProduction
     @nonterminals[@startSymbol].follows.add "$end"
 
@@ -146,18 +205,34 @@ class LALRGenerator
 
     actionGroups = {}
     productionTable = [0]
-    symbolId = 3  # Start after pre-allocated "$accept"(0), "$end"(1), and "error"(2)
+    # symbolId starts at 3 because special symbols are already assigned IDs 0, 1, 2
+    symbolId = 3
     symbolMap = {"$accept": 0, "$end": 1, "error": 2}  # Pre-map all reserved symbols
 
-    addSymbol = (s) ->
+    # Use unified symbol system but maintain exact same ID assignment
+    addSymbol = (s) =>
       if s and not symbolMap[s]
-        symbolMap[s] = symbolId++
+        # Check if symbol already exists in unified system from special symbol initialization
+        existingSymbol = @symbols.get s
+        if existingSymbol
+          # Use existing ID (for special symbols)
+          symbolMap[s] = existingSymbol.id
+        else
+          # Create new symbol with exact same ID as original system would assign
+          isTerminal = !bnf[s]  # If not in BNF rules, it's a terminal
+          id = symbolId++  # Use original system's ID assignment
+          symbol = new Symbol s, isTerminal, id
+          @symbols.set s, symbol
+          @symbolsById.set id, symbol
+          symbolMap[s] = id
         symbols.push s
 
     # Process nonterminals and their productions
     for own symbol, rules of bnf
       addSymbol symbol
-      nonterminals[symbol] = new Nonterminal symbol
+      # Use unified Symbol instead of separate Nonterminal
+      unifiedSymbol = @symbols.get symbol
+      nonterminals[symbol] = unifiedSymbol
 
       prods = if typeof rules is 'string' then rules.split(/\s*\|\s*/g) else rules[..]
 
