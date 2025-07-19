@@ -62,7 +62,6 @@ class LALRGenerator
     @operators   = {}
     @productions = []
     @conflicts   = 0
-    @resolutions = []
 
     # Code generation setup
     @_setupCodeGeneration grammar
@@ -500,7 +499,6 @@ class LALRGenerator
             # Resolve conflict
             which = if action[0] instanceof Array then action[0] else action
             solution = @_resolveConflict item.production, op, [REDUCE, item.production.id], which
-            @resolutions.push [k, stackSymbol, solution]
 
             if solution.bydefault
               @conflicts++
