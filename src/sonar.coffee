@@ -99,7 +99,7 @@ class LALRGenerator
 
   processGrammar: (grammar) ->
     @nonterminals = {}
-    @symbols = []
+    @symbols = ["$accept", "$end", "error"]  # Pre-allocate all special symbols to avoid unshift
     @operators = @_processOperators grammar.operators
 
     tokens = grammar.tokens
@@ -128,17 +128,12 @@ class LALRGenerator
     unless @nonterminals[@startSymbol]
       throw new Error "Grammar error: startSymbol must be a non-terminal found in your grammar."
 
-    @EOF = "$end"
-    acceptProduction = new Production '$accept', [@startSymbol, '$end'], 0
-    @productions.unshift acceptProduction
-    @symbols.unshift "$accept", @EOF
-    @symbolMap.$accept = 0
-    @symbolMap[@EOF] = 1
-    @terminals.unshift @EOF
-
+    acceptProduction = new Production "$accept", [@startSymbol, "$end"], 0
+    @productions.push acceptProduction
+    @acceptProductionIndex = @productions.length - 1
     @nonterminals.$accept = new Nonterminal "$accept"
     @nonterminals.$accept.productions.push acceptProduction
-    @nonterminals[@startSymbol].follows.add @EOF
+    @nonterminals[@startSymbol].follows.add "$end"
 
   _buildProductions: (bnf, productions, nonterminals, symbols, operators) ->
     actions = [
@@ -151,15 +146,13 @@ class LALRGenerator
 
     actionGroups = {}
     productionTable = [0]
-    symbolId = 1
-    symbolMap = {}
+    symbolId = 3  # Start after pre-allocated "$accept"(0), "$end"(1), and "error"(2)
+    symbolMap = {"$accept": 0, "$end": 1, "error": 2}  # Pre-map all reserved symbols
 
     addSymbol = (s) ->
       if s and not symbolMap[s]
-        symbolMap[s] = ++symbolId
+        symbolMap[s] = symbolId++
         symbols.push s
-
-    addSymbol "error"
 
     # Process nonterminals and their productions
     for own symbol, rules of bnf
@@ -263,12 +256,12 @@ class LALRGenerator
       .replace( /@(-?\d+)/g, (_, n) -> "_$[$0" +               (n - rhs.length || '') + "]") # Like @1
 
   _buildTerminalMappings: (symbolMap, nonterminals) ->
-    terminals = []
+    terminals = ["$end", "error"]  # Pre-include special terminals to avoid unshift
     terminalsMap = {}
 
     for own name, id of symbolMap
       unless nonterminals[name]
-        terminals.push name
+        terminals.push name if name isnt "$end" and name isnt "error"
         terminalsMap[id] = name
 
     @terminals  = terminals
@@ -383,7 +376,7 @@ class LALRGenerator
 # ==============================================================================
 
   buildLRAutomaton: ->
-    item1 = new Item @productions[0], 0, [@EOF]
+    item1 = new Item @productions[@acceptProductionIndex], 0, ["$end"]
     firstState = @_closure new LRState item1
     states = [firstState]
     marked = 0
@@ -393,7 +386,7 @@ class LALRGenerator
 
     while marked isnt states.length
       itemSet = states[marked++]
-      for item from itemSet.items when item.nextSymbol and item.nextSymbol isnt @EOF
+      for item from itemSet.items when item.nextSymbol and item.nextSymbol isnt "$end"
         @_insertLRState item.nextSymbol, itemSet, states, marked - 1
 
     @states = states
@@ -483,8 +476,8 @@ class LALRGenerator
             state[@symbolMap[stackSymbol]] = [SHIFT, gotoState]
 
       # Accept action
-      for item from itemSet.items when item.nextSymbol is @EOF and @symbolMap[@EOF]?
-        state[@symbolMap[@EOF]] = [ACCEPT]
+      for item from itemSet.items when item.nextSymbol is "$end" and @symbolMap["$end"]?
+        state[@symbolMap["$end"]] = [ACCEPT]
 
       # Reduce actions
       for item from itemSet.reductions
