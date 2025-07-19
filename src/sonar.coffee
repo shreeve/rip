@@ -18,15 +18,6 @@ class Symbol
     @follows    = new Set()  # LALR(1) FOLLOW sets (nonterminals only)
     @productions = []        # Productions for this nonterminal (nonterminals only)
 
-# Nonterminal symbol
-class Nonterminal
-  constructor: (symbol) ->
-    @symbol      = symbol
-    @productions = []
-    @nullable    = false
-    @first       = new Set
-    @follows     = new Set
-
 # Production rule: A → α
 class Production
   constructor: (symbol, handle, id) ->
@@ -222,7 +213,9 @@ class LALRGenerator
     acceptProduction = new Production "$accept", [@startSymbol, "$end"], 0
     @productions.push acceptProduction
     @acceptProductionIndex = @productions.length - 1
-    @nonterminals.$accept = new Nonterminal "$accept"
+
+    # Use unified Symbol instead of separate Nonterminal class
+    @nonterminals.$accept = @symbols.get "$accept"
     @nonterminals.$accept.productions.push acceptProduction
     @nonterminals[@startSymbol].follows.add "$end"
 
