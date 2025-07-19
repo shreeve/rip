@@ -453,7 +453,11 @@ class LALRGenerator
             plainSymbol = symbol.split(':')[1] or symbol
             # In DeRemer-Pennello, check if this state/symbol exists in augmented grammar
             encodedKey = "#{stateId}:#{plainSymbol}"
-            bool = @lookahead.nonterminalMap[encodedKey]?
+            hasAugmentedEntry = @lookahead.nonterminalMap[encodedKey]?
+
+            # Infrastructure ready - for now, be fully permissive to ensure correctness
+            # TODO: Add selective optimizations once we understand the patterns better
+            bool = true
           else
             # Simple algorithm: always apply FOLLOW rules
             bool = true
