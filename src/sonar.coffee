@@ -2,8 +2,6 @@
 
 # Sonar - LALR(1) Parser Generator
 # Elegant CoffeeScript implementation of standard LALR(1) parsing
-#
-# Based on: "Compilers: Principles, Techniques, and Tools" (Dragon Book)
 
 # =============================================================================
 # Core Data Structures
