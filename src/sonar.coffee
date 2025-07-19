@@ -1,17 +1,15 @@
 #!/usr/bin/env coffee
 
 # Sonar - LALR(1) Parser Generator
-# An elegant CoffeeScript implementation of standard LALR(1) parsing
+# Elegant CoffeeScript implementation of standard LALR(1) parsing
 #
-# Based on canonical literature:
-# - "Compilers: Principles, Techniques, and Tools" (Dragon Book)
-# - "LR Parsing: Theory and Practice" (Knuth, 1965)
+# Based on: "Compilers: Principles, Techniques, and Tools" (Dragon Book)
 
 # =============================================================================
 # Core Data Structures
 # =============================================================================
 
-# Grammar symbol (nonterminal)
+# Grammar nonterminal symbol
 class Nonterminal
   constructor: (@symbol) ->
     @productions = []
@@ -32,7 +30,7 @@ class Item
     @nextSymbol = @production.handle[@dot]
     @id = parseInt("#{@production.id}a#{@dot}", 36)
 
-# Set of LR items (parser state)
+# LR parser state (set of items)
 class LRState
   constructor: (items...) ->
     @items = new Set(items)
@@ -40,9 +38,8 @@ class LRState
     @transitions = {}
     @hasShifts = false
     @hasConflicts = false
-    @handleToSymbols = {}
 
-  # Generate unique string representation for state deduplication
+  # Unique identifier for state deduplication
   valueOf: -> @_value or= (item.id for item from @items).sort().join('|')
 
 # =============================================================================
@@ -51,58 +48,55 @@ class LRState
 
 class LALRGenerator
   constructor: (grammar, options = {}) ->
-
-    # Input configuration
+    # Configuration
     @options = Object.assign {}, grammar.options, options
     @parseParams = grammar.parseParams
     @yy = {}
 
-    # Core grammar data structures
+    # Grammar structures
     @terminals = {}
     @operators = {}
     @productions = []
-
-    # Analysis results and metrics
     @conflicts = 0
     @resolutions = []
 
-    # Code generation configuration
+    # Code generation setup
+    @_setupCodeGeneration grammar
+    @_buildParser grammar
+
+  _setupCodeGeneration: (grammar) ->
     if grammar.actionInclude
-      if typeof grammar.actionInclude is 'function'
-        @actionInclude = String(grammar.actionInclude)
+      @actionInclude = if typeof grammar.actionInclude is 'function'
+        String(grammar.actionInclude)
           .replace(/^\s*function \(\) \{/, '')
           .replace(/\}\s*$/, '')
       else
-        @actionInclude = grammar.actionInclude
+        grammar.actionInclude
 
     @moduleInclude = grammar.moduleInclude or ''
 
-    # Build parser in phases with timing
-    @_buildParser grammar
-
   _buildParser: (grammar) ->
-
-    # Phase 1: Process input grammar
+    # Phase 1: Process grammar rules and tokens
     console.time 'processGrammar'
     @processGrammar grammar
     console.timeEnd 'processGrammar'
 
-    # Phase 2: Build LR automaton (sets @states, @symbols, @nonterminals, etc.)
+    # Phase 2: Build LR automaton
     console.time 'buildLRAutomaton'
     @states = @buildLRAutomaton()
     console.timeEnd 'buildLRAutomaton'
 
-    # Phase 3: Compute lookaheads using standard LALR(1) FOLLOW sets
+    # Phase 3: Compute LALR(1) lookaheads
     console.time 'computeLookaheads'
     @computeLookaheads()
     console.timeEnd 'computeLookaheads'
 
-    # Phase 4: Assign LALR(1) lookaheads to reduction items
+    # Phase 4: Assign lookaheads to reduction items
     console.time 'assignItemLookaheads'
     @assignItemLookaheads()
     console.timeEnd 'assignItemLookaheads'
 
-    # Phase 5: Build final parse table and optimizations
+    # Phase 5: Build parse table
     console.time 'buildParseTable'
     @stateTable = @buildParseTable @states
     console.timeEnd 'buildParseTable'
@@ -111,20 +105,9 @@ class LALRGenerator
     @defaultActions = @computeDefaultActions @stateTable
     console.timeEnd 'computeDefaultActions'
 
-  # Navigate through parser states following a symbol sequence
-  gotoState: (startState, symbolSequence) ->
-    currentState = parseInt startState, 10
-    for symbol in symbolSequence
-      currentState = @states[currentState].transitions[symbol] or currentState
-    currentState
-
-  # Get lookahead symbols for an item in a state
-  getLookaheadSet: (state, item) ->
-    item.follows
-
-  # ---------------------------------------------------------------------------
+  # =============================================================================
   # Grammar Processing
-  # ---------------------------------------------------------------------------
+  # =============================================================================
 
   processGrammar: (grammar) ->
     @nonterminals = {}
@@ -132,7 +115,7 @@ class LALRGenerator
     @operators = @_processOperators grammar.operators
 
     tokens = grammar.tokens
-    tokens and= if typeof tokens is 'string' then tokens.trim().split(' ') else tokens[..]
+    tokens = if typeof tokens is 'string' then tokens.trim().split(' ') else tokens?[..]
 
     @_buildProductions grammar.bnf, @productions, @nonterminals, @symbols, @operators
 
@@ -147,10 +130,7 @@ class LALRGenerator
     operators = {}
     for precedence, i in ops
       for k in [1...precedence.length]
-        operators[precedence[k]] =
-          precedence: i + 1
-          assoc: precedence[0]
-
+        operators[precedence[k]] = {precedence: i + 1, assoc: precedence[0]}
     operators
 
   _augmentGrammar: (grammar) ->
@@ -177,6 +157,7 @@ class LALRGenerator
       '/* this == yyval */'
       @actionInclude or ''
       'var $0 = $$.length - 1;'
+      'hasProp = {}.hasOwnProperty;'
       'switch (yystate) {'
     ]
 
@@ -192,7 +173,7 @@ class LALRGenerator
 
     addSymbol "error"
 
-    # Process each nonterminal
+    # Process nonterminals and their productions
     for own symbol, rules of bnf
       addSymbol symbol
       nonterminals[symbol] = new Nonterminal symbol
@@ -200,14 +181,43 @@ class LALRGenerator
       prods = if typeof rules is 'string' then rules.split(/\s*\|\s*/g) else rules[..]
 
       for handle in prods
-        @_processProduction handle, symbol, productions, nonterminals,
-                            addSymbol, actionGroups, operators, symbolMap, productionTable
+        [rhs, action, precedence] = @_parseHandle handle
 
-    # Build action code
+        # Add symbols to grammar
+        addSymbol token for token in rhs
+
+        # Process semantic actions
+        if action
+          action = @_processSemanticAction action, rhs
+          label = 'case ' + (productions.length + 1) + ':'
+
+          if actionGroups[action]
+            actionGroups[action].push label
+          else
+            actionGroups[action] = [label]
+
+        # Create production
+        production = new Production symbol, rhs, productions.length + 1
+
+        # Set precedence
+        if precedence and operators[precedence.prec]
+          production.precedence = operators[precedence.prec].precedence
+        else if production.precedence is 0
+          # Use rightmost terminal's precedence
+          for i in [(rhs.length - 1)..0] by -1
+            tok = rhs[i]
+            if operators[tok] and not nonterminals[tok]
+              production.precedence = operators[tok].precedence
+              break
+
+        productions.push production
+        productionTable.push [symbolMap[symbol], if rhs[0] is '' then 0 else rhs.length]
+        nonterminals[symbol].productions.push production
+
+    # Generate action code
     for action, labels of actionGroups
       actions.push labels.join(' '), action, 'break;'
 
-    # Build terminal mappings
     @_buildTerminalMappings symbolMap, nonterminals
 
     @symbolMap = symbolMap
@@ -223,86 +233,54 @@ class LALRGenerator
 
     @performAction = "function anonymous(#{parameters}) {\n#{actionsCode}\n}"
 
-  _processProduction: (handle, symbol, productions, nonterminals, addSymbol, actionGroups, operators, symbolMap, productionTable) ->
-    r = null
-    rhs = null
-    i = 0
-
+  _parseHandle: (handle) ->
     if Array.isArray handle
       rhs = if typeof handle[0] is 'string' then handle[0].trim().split(' ') else handle[0][..]
+      rhs = rhs.map (e) -> e.replace(/\[[a-zA-Z_][a-zA-Z0-9_-]*\]/g, '')
 
-      for token in rhs
-        addSymbol token
+      action = if typeof handle[1] is 'string' or handle.length is 3 then handle[1] else null
+      precedence = if handle[2] then handle[2] else if handle[1] and typeof handle[1] isnt 'string' then handle[1] else null
 
-      if typeof handle[1] is 'string' or handle.length is 3
-        label = 'case ' + (productions.length + 1) + ':'
-        action = handle[1]
-
-        # Process named semantic values
-        if action.match(/[$@][a-zA-Z][a-zA-Z0-9_]*/)
-          count = {}
-          names = {}
-
-          for token, i in rhs
-            rhs_i = token.match(/\[[a-zA-Z][a-zA-Z0-9_-]*\]/)
-            if rhs_i
-              rhs_i = rhs_i[0].substr(1, rhs_i[0].length - 2)
-              rhs[i] = token.substr(0, token.indexOf('['))
-            else
-              rhs_i = token
-
-            if names[rhs_i]
-              names[rhs_i + (++count[rhs_i])] = i + 1
-            else
-              names[rhs_i] = i + 1
-              names[rhs_i + "1"] = i + 1
-              count[rhs_i] = 1
-
-          action = action.replace /\$([a-zA-Z][a-zA-Z0-9_]*)/g, (str, pl) ->
-            if names[pl] then '$' + names[pl] else str
-          action = action.replace /@([a-zA-Z][a-zA-Z0-9_]*)/g, (str, pl) ->
-            if names[pl] then '@' + names[pl] else str
-
-        action = action
-          .replace(/([^'"])\$\$|^\$\$/g, '$1this.$')
-          .replace(/@[0$]/g, "this._$")
-          .replace(/\$(-?\d+)/g, (_, n) ->
-            "$$[$0" + (parseInt(n, 10) - rhs.length || '') + "]")
-          .replace(/@(-?\d+)/g, (_, n) ->
-            "_$[$0" + (n - rhs.length || '') + "]")
-
-        if actionGroups[action]
-          actionGroups[action].push label
-        else
-          actionGroups[action] = [label]
-
-        rhs = rhs.map (e) -> e.replace(/\[[a-zA-Z_][a-zA-Z0-9_-]*\]/g, '')
-
-        r = new Production symbol, rhs, productions.length + 1
-        if handle[2] and operators[handle[2].prec]
-          r.precedence = operators[handle[2].prec].precedence
-      else
-        rhs = rhs.map (e) -> e.replace(/\[[a-zA-Z_][a-zA-Z0-9_-]*\]/g, '')
-        r = new Production symbol, rhs, productions.length + 1
-        if operators[handle[1].prec]
-          r.precedence = operators[handle[1].prec].precedence
+      [rhs, action, precedence]
     else
       handle = handle.replace /\[[a-zA-Z_][a-zA-Z0-9_-]*\]/g, ''
       rhs = handle.trim().split ' '
-      for token in rhs
-        addSymbol token
-      r = new Production symbol, rhs, productions.length + 1
+      [rhs, null, null]
 
-    if r.precedence is 0
-      for i in [(r.handle.length - 1)..0] by -1
-        tok = r.handle[i]
-        if tok of operators and tok not of nonterminals
-          r.precedence = operators[tok].precedence
-          break
+  _processSemanticAction: (action, rhs) ->
+    # Process named semantic values
+    if action.match(/[$@][a-zA-Z][a-zA-Z0-9_]*/)
+      count = {}
+      names = {}
 
-    productions.push r
-    productionTable.push [symbolMap[r.symbol], if r.handle[0] is '' then 0 else r.handle.length]
-    nonterminals[symbol].productions.push r
+      for token, i in rhs
+        rhs_i = token.match(/\[[a-zA-Z][a-zA-Z0-9_-]*\]/)
+        if rhs_i
+          rhs_i = rhs_i[0].substr(1, rhs_i[0].length - 2)
+        else
+          rhs_i = token
+
+        if names[rhs_i]
+          names[rhs_i + (++count[rhs_i])] = i + 1
+        else
+          names[rhs_i] = i + 1
+          names[rhs_i + "1"] = i + 1
+          count[rhs_i] = 1
+
+      action = action
+        .replace /\$([a-zA-Z][a-zA-Z0-9_]*)/g, (str, pl) ->
+          if names[pl] then '$' + names[pl] else str
+        .replace /@([a-zA-Z][a-zA-Z0-9_]*)/g, (str, pl) ->
+          if names[pl] then '@' + names[pl] else str
+
+    # Transform $$ and positional references
+    action
+      .replace(/([^'"])\$\$|^\$\$/g, '$1this.$')
+      .replace(/@[0$]/g, "this._$")
+      .replace(/\$(-?\d+)/g, (_, n) ->
+        "$$[$0" + (parseInt(n, 10) - rhs.length || '') + "]")
+      .replace(/@(-?\d+)/g, (_, n) ->
+        "_$[$0" + (n - rhs.length || '') + "]")
 
   _buildTerminalMappings: (symbolMap, nonterminals) ->
     terminals = []
@@ -316,129 +294,114 @@ class LALRGenerator
     @terminals = terminals
     @terminals_ = terminalsMap
 
-  # ---------------------------------------------------------------------------
-  # Lookahead Computation
-  # ---------------------------------------------------------------------------
+  # =============================================================================
+  # Lookahead Computation (LALR(1))
+  # =============================================================================
 
-  # Compute NULLABLE, FIRST, and FOLLOW sets for LALR(1) parser generation
   computeLookaheads: ->
     @computeLookaheads = -> # Prevent re-computation
     @_computeNullableSets()
     @_computeFirstSets()
     @_computeFollowSets()
 
-  # Determine which grammar symbols can derive the empty string (ε)
+  # Determine nullable symbols (can derive ε)
   _computeNullableSets: ->
     changed = true
     while changed
       changed = false
 
-      # Check each production: if all symbols in handle are nullable, mark production as nullable
+      # Mark productions nullable if all handle symbols are nullable
       for production in @productions when not production.nullable
-        nullableCount = 0
-        nullableCount++ for symbol in production.handle when @_isNullable symbol
-        if nullableCount is production.handle.length
+        if production.handle.every (symbol) => @_isNullable symbol
           production.nullable = changed = true
 
-      # Propagate production nullability up to parent nonterminals
+      # Propagate to nonterminals
       for symbol, nonterminal of @nonterminals when not @_isNullable symbol
-        for production in nonterminal.productions when production.nullable
+        if nonterminal.productions.some (p) -> p.nullable
           nonterminal.nullable = changed = true
-          break
 
-  # Check if a symbol (or sequence of symbols) can derive the empty string
   _isNullable: (symbol) ->
     return true if symbol is ''
     return symbol.every((s) => @_isNullable s) if Array.isArray symbol
-    return false unless @nonterminals[symbol]
-    @nonterminals[symbol].nullable
+    @nonterminals[symbol]?.nullable or false
 
-  # Compute FIRST sets: what terminals can begin strings derived from each production
+  # Compute FIRST sets (terminals that can begin derivations)
   _computeFirstSets: ->
     changed = true
     while changed
       changed = false
 
-      # Compute FIRST sets for each production by analyzing its handle symbols
       for production in @productions
         firsts = @_first production.handle
         oldSize = production.first.size
         production.first.clear()
-        production.first.add(item) for item in firsts
+        production.first.add item for item in firsts
         changed = true if production.first.size > oldSize
 
-      # Collect FIRST sets from all productions and propagate to parent nonterminals
       for symbol, nonterminal of @nonterminals
         oldSize = nonterminal.first.size
         nonterminal.first.clear()
         for production in nonterminal.productions
-          production.first.forEach (symbol) => nonterminal.first.add(symbol)
+          production.first.forEach (s) => nonterminal.first.add s
         changed = true if nonterminal.first.size > oldSize
 
-    null
-
-  # Get FIRST set for a symbol or sequence of symbols
   _first: (symbols) ->
     return [] if symbols is ''
     return @_firstOfSequence symbols if Array.isArray symbols
     return [symbols] unless @nonterminals[symbols]
-    Array.from(@nonterminals[symbols].first)
+    Array.from @nonterminals[symbols].first
 
-  # Compute FIRST set for a sequence by processing symbols left-to-right until non-nullable
   _firstOfSequence: (symbols) ->
     firsts = new Set()
-
-    # Add FIRST symbols from each symbol in sequence, stopping at first non-nullable
     for symbol in symbols
       if @nonterminals[symbol]
-        @nonterminals[symbol].first.forEach (s) => firsts.add(s)
+        @nonterminals[symbol].first.forEach (s) => firsts.add s
       else
-        firsts.add(symbol)
-
+        firsts.add symbol
       break unless @_isNullable symbol
+    Array.from firsts
 
-    Array.from(firsts)
-
-  # Compute FOLLOW sets: what terminals can appear immediately after each nonterminal
+  # Compute FOLLOW sets (terminals that can follow nonterminals)
   _computeFollowSets: ->
     changed = true
     while changed
       changed = false
 
-      # Process each production rule to determine FOLLOW relationships
       for production in @productions
-
-        # For each nonterminal symbol in the production, compute what can follow it
         for symbol, i in production.handle when @nonterminals[symbol]
           oldSize = @nonterminals[symbol].follows.size
 
-          # If symbol is at the end of production (nothing follows), inherit FOLLOW from left-hand side
           if i is production.handle.length - 1
-            # Add all items from production.symbol.follows to symbol.follows
+            # Symbol at end: add FOLLOW(LHS)
             @nonterminals[production.symbol].follows.forEach (item) =>
-              @nonterminals[symbol].follows.add(item)
+              @nonterminals[symbol].follows.add item
           else
-            part = production.handle[i + 1..]
-            firstSet = @_first part
+            # Add FIRST(β) where β follows symbol
+            beta = production.handle[i + 1..]
+            firstSet = @_first beta
 
-            # Add first set items
-            for item in firstSet
-              @nonterminals[symbol].follows.add(item)
+            @nonterminals[symbol].follows.add item for item in firstSet
 
-            # If nullable, also add production.symbol.follows
-            if @_isNullable(part)
+            # If β is nullable, also add FOLLOW(LHS)
+            if @_isNullable beta
               @nonterminals[production.symbol].follows.forEach (item) =>
-                @nonterminals[symbol].follows.add(item)
+                @nonterminals[symbol].follows.add item
 
           changed = true if @nonterminals[symbol].follows.size > oldSize
 
-    null
+  # Assign FOLLOW sets to reduction items for LALR(1)
+  assignItemLookaheads: ->
+    for state in @states
+      for item in state.reductions
+        follows = @nonterminals[item.production.symbol]?.follows
+        if follows
+          item.follows.length = 0
+          item.follows.push terminal for terminal from follows
 
-  # ---------------------------------------------------------------------------
+  # =============================================================================
   # LR Automaton Construction
-  # ---------------------------------------------------------------------------
+  # =============================================================================
 
-  # Build the collection of LR(0) states for the parser automaton
   buildLRAutomaton: ->
     item1 = new Item @productions[0], 0, [@EOF]
     firstState = @_closure new LRState item1
@@ -455,7 +418,7 @@ class LALRGenerator
 
     states
 
-  # Compute closure of an LR item set by adding all implied items
+  # Compute closure of item set
   _closure: (itemSet) ->
     closureSet = new LRState()
     workingSet = new Set(itemSet.items)
@@ -469,8 +432,9 @@ class LALRGenerator
         {nextSymbol} = item
 
         if nextSymbol and @nonterminals[nextSymbol] and not processed[nextSymbol]
-          for production in @nonterminals[nextSymbol].productions when not closureSet.items.has(production.id)
-            newItems.add(new Item production, 0)
+          for production in @nonterminals[nextSymbol].productions
+            unless closureSet.items.has production.id
+              newItems.add new Item production, 0
           processed[nextSymbol] = true
         else unless nextSymbol
           closureSet.reductions.push item
@@ -483,7 +447,7 @@ class LALRGenerator
 
     closureSet
 
-  # Compute GOTO(state, symbol): the state reached by shifting on a symbol
+  # Compute GOTO(state, symbol)
   _goto: (itemSet, symbol) ->
     gotoSet = new LRState()
 
@@ -493,7 +457,7 @@ class LALRGenerator
 
     if gotoSet.items.size is 0 then gotoSet else @_closure gotoSet
 
-  # Insert or merge a new LR state into the state collection
+  # Insert new state into automaton
   _insertLRState: (symbol, itemSet, states, stateNum) ->
     gotoSet = @_goto itemSet, symbol
 
@@ -501,56 +465,53 @@ class LALRGenerator
       gotoValue = gotoSet.valueOf()
       existingIndex = states.has[gotoValue]
 
-      if existingIndex is -1 or not existingIndex?
+      if not existingIndex?
         states.has[gotoValue] = states.length
         itemSet.transitions[symbol] = states.length
         states.push gotoSet
       else
         itemSet.transitions[symbol] = existingIndex
 
-    null
+  # Navigate through states following symbol sequence
+  gotoState: (startState, symbolSequence) ->
+    currentState = parseInt startState, 10
+    for symbol in symbolSequence
+      currentState = @states[currentState].transitions[symbol] or currentState
+    currentState
 
-  # ---------------------------------------------------------------------------
+  getLookaheadSet: (state, item) -> item.follows
+
+  # =============================================================================
   # Parse Table Generation
-  # ---------------------------------------------------------------------------
+  # =============================================================================
 
-  # Build LALR(1) parse table with shift/reduce/accept actions
   buildParseTable: (itemSets) ->
     states = []
     {nonterminals, operators} = this
     conflictedStates = {}
-    [SHIFT, REDUCE, ACCEPT] = [1, 2, 3]
-    NONASSOC = 0
+    [SHIFT, REDUCE, ACCEPT, NONASSOC] = [1, 2, 3, 0]
 
     for itemSet, k in itemSets
       state = states[k] = {}
 
-      # Set shift and goto actions
-      for stackSymbol, gotoState of itemSet.transitions
+      # Shift and goto actions
+      for stackSymbol, gotoState of itemSet.transitions when @symbolMap[stackSymbol]?
         for item from itemSet.items when item.nextSymbol is stackSymbol
-          # Skip symbols that aren't in the symbolMap (prevents undefined keys)
-          continue unless @symbolMap[stackSymbol]?
-
           if nonterminals[stackSymbol]
             state[@symbolMap[stackSymbol]] = gotoState
           else
             state[@symbolMap[stackSymbol]] = [SHIFT, gotoState]
 
-      # Set accept action
-      for item from itemSet.items when item.nextSymbol is @EOF
-        # Skip if EOF symbol not in symbolMap (prevents undefined keys)
-        continue unless @symbolMap[@EOF]?
-
+      # Accept action
+      for item from itemSet.items when item.nextSymbol is @EOF and @symbolMap[@EOF]?
         state[@symbolMap[@EOF]] = [ACCEPT]
 
-      # Set reductions
+      # Reduce actions
       for item in itemSet.reductions
-        terminals = if @getLookaheadSet then @getLookaheadSet(itemSet, item) else @terminals
+        terminals = @getLookaheadSet? itemSet, item
+        terminals or= @terminals
 
-        for stackSymbol in terminals
-          # Skip symbols that aren't in the symbolMap (prevents undefined keys)
-          continue unless @symbolMap[stackSymbol]?
-
+        for stackSymbol in terminals when @symbolMap[stackSymbol]?
           action = state[@symbolMap[stackSymbol]]
           op = operators[stackSymbol]
 
@@ -577,11 +538,10 @@ class LALRGenerator
 
     states
 
-  # Resolve shift/reduce conflicts using operator precedence and associativity
+  # Resolve conflicts using precedence and associativity
   _resolveConflict: (production, op, reduce, shift) ->
     solution = {production, operator: op, r: reduce, s: shift}
-    [SHIFT, REDUCE] = [1, 2]
-    NONASSOC = 0
+    [SHIFT, REDUCE, NONASSOC] = [1, 2, 0]
 
     if shift[0] is REDUCE
       solution.action = if shift[1] < reduce[1] then shift else reduce
@@ -604,7 +564,7 @@ class LALRGenerator
 
     solution
 
-  # Optimize parse table by computing default actions for single-action states
+  # Compute default actions for single-action states
   computeDefaultActions: (states) ->
     defaults = {}
     for state, k in states
@@ -619,28 +579,13 @@ class LALRGenerator
 
     defaults
 
-  # Assign LALR(1) lookaheads to reduction items based on FOLLOW sets
-  assignItemLookaheads: ->
-    for state in @states
-      for item in state.reductions
-        # For reduction items [A → α•], assign FOLLOW(A) as lookaheads
-        follows = @nonterminals[item.production.symbol]?.follows
-        if follows
-          item.follows.length = 0  # Clear existing follows
-          follows.forEach (terminal) =>
-            item.follows.push terminal
-
-    null
-
-  # ---------------------------------------------------------------------------
+  # =============================================================================
   # Code Generation
-  # ---------------------------------------------------------------------------
+  # =============================================================================
 
-  # Generate parser code using default options (CommonJS format)
   generate: (options = {}) ->
     @generateCommonJSModule Object.assign {}, @options, options
 
-  # Generate CommonJS module with exports for Node.js compatibility
   generateCommonJSModule: (options = {}) ->
     moduleName = options.moduleName or "parser"
     moduleName = "parser" unless moduleName.match /^[A-Za-z_$][A-Za-z0-9_$]*$/
@@ -658,20 +603,18 @@ class LALRGenerator
       }
       """
 
-  # Generate standalone parser module declaration
   generateModule: (options = {}) ->
     moduleName = options.moduleName or "parser"
-    version = '0.5.1'; # require('./package.json').version
-
+    version = '0.5.1'
     out = "/* parser generated by sonar #{version} */\n"
     out += if moduleName.match /\./ then moduleName else "var #{moduleName}"
     out += " = #{@generateModuleExpr()}"
 
-  # Generate self-executing function expression containing the parser
   generateModuleExpr: ->
     module = @_generateModuleCore()
     """
     (function(){
+    var hasProp = {}.hasOwnProperty;
     #{module.commonCode}
     var parser = #{module.moduleCode};
     #{@moduleInclude}
@@ -684,7 +627,6 @@ class LALRGenerator
     })();
     """
 
-  # Generate the core parser object with all tables and methods
   _generateModuleCore: ->
     tableCode = @_generateTableCode @stateTable
 
@@ -703,16 +645,13 @@ class LALRGenerator
 
     {commonCode: tableCode.commonCode, moduleCode}
 
-  # Generate compressed JSON representation of the parse table
   _generateTableCode: (stateTable) ->
-    moduleCode = JSON.stringify(stateTable, null, 0)
-      .replace /"([0-9]+)"(?=:)/g, "$1"
-
+    moduleCode = JSON.stringify(stateTable, null, 0).replace /"([0-9]+)"(?=:)/g, "$1"
     {commonCode: '', moduleCode}
 
-  # ---------------------------------------------------------------------------
-  # Runtime Parser Methods
-  # ---------------------------------------------------------------------------
+  # =============================================================================
+  # Runtime Parser
+  # =============================================================================
 
   parseError: (str, hash) ->
     if hash.recoverable
@@ -723,159 +662,110 @@ class LALRGenerator
       throw error
 
   parse: (input) ->
-    stk = [0]
-    val = [null]
-    loc = []
-    stateTable = @stateTable
-    yytext = ''
-    yylineno = 0
-    yyleng = 0
-    recovering = 0
-    TERROR = 2
-    EOF = 1
+    [stk, val, loc] = [[0], [null], []]
+    [stateTable, yytext, yylineno, yyleng, recovering] = [@stateTable, '', 0, 0, 0]
+    [TERROR, EOF] = [2, 1]
 
     lexer = Object.create @lexer
-    sharedState = { yy: {} }
-
-    for k of @yy when Object.prototype.hasOwnProperty.call(@yy, k)
-      sharedState.yy[k] = @yy[k]
+    sharedState = {yy: {}}
+    sharedState.yy[k] = v for own k, v of @yy
 
     lexer.setInput input, sharedState.yy
-    sharedState.yy.lexer = lexer
-    sharedState.yy.parser = this
+    [sharedState.yy.lexer, sharedState.yy.parser] = [lexer, this]
 
-    unless typeof lexer.yylloc isnt 'undefined'
+    unless lexer.yylloc?
       lexer.yylloc = {}
     yyloc = lexer.yylloc
     loc.push yyloc
 
-    ranges = lexer.options and lexer.options.ranges
+    ranges = lexer.options?.ranges
 
-    if typeof sharedState.yy.parseError is 'function'
-      @parseError = sharedState.yy.parseError
+    @parseError = if typeof sharedState.yy.parseError is 'function'
+      sharedState.yy.parseError
     else
-      @parseError = Object.getPrototypeOf(this).parseError
+      Object.getPrototypeOf(this).parseError
 
     lex = =>
       token = lexer.lex() or EOF
-      if typeof token isnt 'number'
-        token = @symbolMap[token] or token
+      token = @symbolMap[token] or token unless typeof token is 'number'
       token
 
-    symbol = null
-    preErrorSymbol = null
-    state = null
-    action = null
-    r = null
-    yyval = {}
-    p = null
-    len = null
-    newState = null
-    expected = null
+    [symbol, preErrorSymbol, state, action, r, yyval, p, len, newState, expected] =
+      [null, null, null, null, null, {}, null, null, null, null]
 
-    while true
-      stkLen = stk.length
-      state = stk[stkLen - 1]
+    loop
+      state = stk[stk.length - 1]
+      action = @defaultActions[state] or (
+        symbol = lex() if not symbol?
+        stateTable[state]?[symbol]
+      )
 
-      if @defaultActions[state]
-        action = @defaultActions[state]
-      else
-        if symbol is null or typeof symbol is 'undefined'
-          symbol = lex()
-        action = stateTable[state] and stateTable[state][symbol]
-
-      if typeof action is 'undefined' or not action.length or not action[0]
+      unless action?.length and action[0]
         errStr = ''
-
         unless recovering
-          expected = []
-          for p of stateTable[state]
-            if @terminals_[p] and p > TERROR
-              expected.push "'" + @terminals_[p] + "'"
-          if lexer.showPosition
-            errStr = 'Parse error on line ' + (yylineno + 1) + ":\n" +
-              lexer.showPosition() + "\nExpecting " + expected.join(', ') +
-              ", got '" + (@terminals_[symbol] or symbol) + "'"
+          expected = ("'#{@terminals_[p]}'" for own p of stateTable[state] when @terminals_[p] and p > TERROR)
+          errStr = if lexer.showPosition
+            "Parse error on line #{yylineno + 1}:\n#{lexer.showPosition()}\nExpecting #{expected.join(', ')}, got '#{@terminals_[symbol] or symbol}'"
           else
-            errStr = 'Parse error on line ' + (yylineno + 1) + ": Unexpected " +
-              (if symbol is EOF then "end of input" else "'" + (@terminals_[symbol] or symbol) + "'")
+            "Parse error on line #{yylineno + 1}: Unexpected #{if symbol is EOF then "end of input" else "'#{@terminals_[symbol] or symbol}'"}"
+
           @parseError errStr, {
             text: lexer.match
             token: @terminals_[symbol] or symbol
             line: lexer.yylineno
             loc: yyloc
-            expected: expected
+            expected
           }
-
         throw new Error errStr
 
-      if action[0] instanceof Array and action.length > 1
-        throw new Error 'Parse Error: multiple actions possible at state: ' + state + ', token: ' + symbol
+      throw new Error "Parse Error: multiple actions possible at state: #{state}, token: #{symbol}" if action[0] instanceof Array and action.length > 1
 
       switch action[0]
         when 1 # shift
-          stk.push symbol
+          stk.push symbol, action[1]
           val.push lexer.yytext
           loc.push lexer.yylloc
-          stk.push action[1]
           symbol = null
           unless preErrorSymbol
-            yyleng = lexer.yyleng
-            yytext = lexer.yytext
-            yylineno = lexer.yylineno
-            yyloc = lexer.yylloc
-            if recovering > 0
-              recovering--
+            [yyleng, yytext, yylineno, yyloc] = [lexer.yyleng, lexer.yytext, lexer.yylineno, lexer.yylloc]
+            recovering-- if recovering > 0
           else
-            symbol = preErrorSymbol
-            preErrorSymbol = null
+            [symbol, preErrorSymbol] = [preErrorSymbol, null]
 
         when 2 # reduce
           len = @productionTable[action[1]][1]
-          valLen = val.length
-          locLen = loc.length
-          yyval.$ = val[valLen - len]
-          locFirst = loc[locLen - (len or 1)]
-          locLast = loc[locLen - 1]
+          yyval.$ = val[val.length - len]
+          [locFirst, locLast] = [loc[loc.length - (len or 1)], loc[loc.length - 1]]
           yyval._$ = {
-            first_line: locFirst.first_line
-            last_line: locLast.last_line
-            first_column: locFirst.first_column
-            last_column: locLast.last_column
+            first_line: locFirst.first_line, last_line: locLast.last_line
+            first_column: locFirst.first_column, last_column: locLast.last_column
           }
-          if ranges
-            yyval._$.range = [locFirst.range[0], locLast.range[1]]
-          r = @performAction.apply yyval, [yytext, yyleng, yylineno, sharedState.yy, action[1], val, loc]
+          yyval._$.range = [locFirst.range[0], locLast.range[1]] if ranges
 
-          if typeof r isnt 'undefined'
-            return r
+          r = @performAction.apply yyval, [yytext, yyleng, yylineno, sharedState.yy, action[1], val, loc]
+          return r if r?
 
           if len
-            stk.length = stk.length - (len * 2)
-            val.length = val.length - len
-            loc.length = loc.length - len
+            stk.length -= len * 2
+            val.length -= len
+            loc.length -= len
 
           stk.push @productionTable[action[1]][0]
           val.push yyval.$
           loc.push yyval._$
-          stkLen = stk.length
-          newState = stateTable[stk[stkLen - 2]][stk[stkLen - 1]]
+          newState = stateTable[stk[stk.length - 2]][stk[stk.length - 1]]
           stk.push newState
 
         when 3 # accept
           return true
 
-  trace: ->
-    # Debug tracing - no-op by default
+  trace: -> # Debug output (no-op)
 
   createParser: ->
     parser = eval @generateModuleExpr()
     parser.productions = @productions
 
-    bindMethod = (method) =>
-      =>
-        @lexer = parser.lexer
-        @[method].apply this, arguments
+    bindMethod = (method) => => @lexer = parser.lexer; @[method].apply this, arguments
 
     parser.lexer = @lexer
     parser.generate = bindMethod 'generate'
@@ -897,8 +787,7 @@ Sonar.Parser = (grammar, options) ->
 exports.LALRGenerator = LALRGenerator
 
 Sonar.Generator = (g, options) ->
-  opt = Object.assign {}, g.options, options
-  new LALRGenerator g, opt
+  new LALRGenerator g, Object.assign({}, g.options, options)
 
 exports.Parser = (grammar, options) ->
   generator = Sonar.Generator grammar, options
@@ -912,9 +801,6 @@ if require.main is module
   fs = require 'fs'
   path = require 'path'
 
-  # Parse command line arguments
-  args = process.argv[2..]
-
   showHelp = ->
     console.log """
     Sonar - LALR(1) Parser Generator
@@ -923,402 +809,89 @@ if require.main is module
     Usage: coffee sonar.coffee [options] [grammar-file]
 
     Options:
-      -h, --help              Show this help message
-      -s, --stats             Show grammar statistics and analysis
-      -g, --generate          Generate parser code (default)
+      -h, --help              Show this help
+      -s, --stats             Show grammar statistics
+      -g, --generate          Generate parser (default)
       -o, --output <file>     Output file (default: parser.js)
-      -l, --language <lang>   Language pack output (js, coffee, json)
-      -v, --verbose           Verbose output with timing
-      -t, --table             Show parse table information
-      -c, --conflicts         Show shift/reduce conflicts
-      --format <format>       Output format (commonjs, module, standalone)
-      --optimize              Enable parser optimizations
-      --debug                 Include debug information
+      -v, --verbose           Verbose output
 
     Examples:
       coffee sonar.coffee grammar.coffee
-      coffee sonar.coffee --stats --verbose grammar.coffee
-      coffee sonar.coffee --generate --output parser.js grammar.coffee
-      coffee sonar.coffee --language json --output grammar.json grammar.coffee
-
-    Grammar Statistics:
-      Use --stats to see detailed information about:
-      • Symbol counts (terminals, nonterminals)
-      • Production rule analysis
-      • Parser state information
-      • Conflict detection and resolution
-
-    Language Packs:
-      Use --language to export grammar in different formats:
-      • js: JavaScript module
-      • coffee: CoffeeScript module
-      • json: JSON data structure
+      coffee sonar.coffee --stats grammar.coffee
+      coffee sonar.coffee -o parser.js grammar.coffee
     """
 
-  showStats = (generator, options = {}) ->
-    # Get raw grammar symbols (user-defined)
-    capturedGrammar = generator.originalGrammar || {}
-
-    # Calculate user-defined symbols
-    userSymbols = new Set()
-    if capturedGrammar.bnf
-      for rule of capturedGrammar.bnf
-        userSymbols.add(rule)
-    if capturedGrammar.tokens
-      for token in capturedGrammar.tokens.split(' ') when token.trim()
-        userSymbols.add(token.trim())
-    if capturedGrammar.startSymbol
-      userSymbols.add(capturedGrammar.startSymbol)
-
-    userSymbolCount = userSymbols.size
-
-    # Calculate parser statistics
-    totalSymbols = Object.keys(generator.symbolMap || {}).length
-    terminals = Object.keys(generator.terminals_ || {}).length
-    nonterminals = Object.keys(generator.nonterminals || {}).length
-    productions = generator.productions?.length || 0
-    states = generator.states?.length || 0
-    conflicts = generator.conflictStates?.length || 0
-
-    # System symbols (added by parser generator)
-    systemSymbols = ['error', '$accept', '$end']
-    systemSymbolCount = systemSymbols.filter((s) -> s in Object.keys(generator.symbolMap || {})).length
-
-    # Calculate average production length
-    avgProdLength = if productions > 0
-      totalLength = generator.productions.reduce(((sum, p) -> sum + p.handle.length), 0)
-      (totalLength / productions).toFixed(1)
-    else
-      0
-
-    # Calculate parse table statistics
-    stateTableSize = Object.keys(generator.stateTable || {}).length
-    defaultActionsSize = Object.keys(generator.defaultActions || {}).length
-
-    # Calculate action types in parse table
-    actionStats = {shift: 0, reduce: 0, accept: 0, error: 0}
-    if generator.stateTable
-      for stateId, state of generator.stateTable
-        for symbol, action of state
-          if Array.isArray(action)
-            switch action[0]
-              when 1 then actionStats.shift++
-              when 2 then actionStats.reduce++
-              when 3 then actionStats.accept++
-          else
-            actionStats.error++
-
-    # Default mode: Show only user-defined symbols
-    if not options.debug and not options.verbose
-      console.log """
-      📊 Grammar Statistics
-      ====================
-
-      Symbols:
-      • Terminals: #{terminals}
-      • Nonterminals: #{nonterminals}
-      • Total Symbols: #{userSymbolCount}
-
-      Productions:
-      • Total Productions: #{productions}
-      • Average Production Length: #{avgProdLength}
-
-      Parser States:
-      • Total States: #{states}
-      • States with Conflicts: #{conflicts}
-      • Conflict Rate: #{if states > 0 then (conflicts / states * 100).toFixed(1) else 0}%
-
-      Parse Table:
-      • Total Actions: #{stateTableSize}
-      • Shift Actions: #{actionStats.shift}
-      • Reduce Actions: #{actionStats.reduce}
-      • Accept Actions: #{actionStats.accept}
-      """
-
-    # Debug/verbose mode: Show detailed breakdown
-    else
-      console.log """
-      📊 Grammar Statistics (Debug Mode)
-      ==================================
-
-      Symbols:
-      • User-defined symbols: #{userSymbolCount}
-      • Parser-generated symbols: #{systemSymbolCount} (#{systemSymbols.join(', ')})
-      • Total symbols in parser: #{totalSymbols}
-
-      Symbol Classification:
-      • Terminals: #{terminals}
-      • Nonterminals: #{nonterminals}
-      • System symbols: #{systemSymbolCount}
-
-      Productions:
-      • Total Productions: #{productions}
-      • Average Production Length: #{avgProdLength}
-      • Shortest Production: #{if productions > 0 then Math.min(...generator.productions.map((p) -> p.handle.length)) else 0}
-      • Longest Production: #{if productions > 0 then Math.max(...generator.productions.map((p) -> p.handle.length)) else 0}
-
-      Parser States:
-      • Total States: #{states}
-      • States with Conflicts: #{conflicts}
-      • Conflict Rate: #{if states > 0 then (conflicts / states * 100).toFixed(1) else 0}%
-
-      Parse Table:
-      • Total Actions: #{stateTableSize}
-      • Shift Actions: #{actionStats.shift}
-      • Reduce Actions: #{actionStats.reduce}
-      • Accept Actions: #{actionStats.accept}
-      • Default Actions: #{defaultActionsSize}
-      """
-
-    if generator.conflictStates?.length > 0
-      console.log """
-
-      ⚠️  Conflicts Detected:
-      • States with conflicts: #{generator.conflictStates.join(', ')}
-      • Use --conflicts for detailed conflict analysis
-      """
-
-  showConflicts = (generator) ->
-    if not generator.conflictStates?.length
-      console.log "✅ No conflicts detected in grammar"
-      return
+  showStats = (generator) ->
+    terminals = Object.keys(generator.terminals_ or {}).length
+    nonterminals = Object.keys(generator.nonterminals or {}).length
+    productions = generator.productions?.length or 0
+    states = generator.states?.length or 0
+    conflicts = generator.conflictStates?.length or 0
 
     console.log """
-    ⚠️  Shift/Reduce Conflicts
-    =========================
-
+    Grammar Statistics:
+    • Terminals: #{terminals}
+    • Nonterminals: #{nonterminals}
+    • Productions: #{productions}
+    • States: #{states}
+    • Conflicts: #{conflicts}
     """
 
-    for stateId in generator.conflictStates
-      state = generator.states[stateId]
-      console.log "State #{stateId}:"
-      console.log "  Items: #{state.items?.size || 0}"
-      console.log "  Reductions: #{state.reductions?.length || 0}"
-      console.log "  Shifts: #{Object.keys(state.transitions || {}).length}"
-      console.log ""
-
-  generateLanguagePack = (generator, language, outputFile) ->
-    switch language.toLowerCase()
-      when 'js', 'javascript'
-        content = """
-        // Generated by Sonar LALR(1) Parser Generator
-        module.exports = {
-          symbols: #{JSON.stringify(generator.symbols_ || {}, null, 2)},
-          terminals: #{JSON.stringify(generator.terminals_ || {}, null, 2)},
-          productions: #{JSON.stringify(generator.productions || [], null, 2)},
-          states: #{generator.states?.length || 0},
-          conflicts: #{generator.conflictStates?.length || 0}
-        };
-        """
-
-      when 'coffee', 'coffeescript'
-        content = """
-        # Generated by Sonar LALR(1) Parser Generator
-        module.exports =
-          symbols: #{JSON.stringify(generator.symbols_ || {})}
-          terminals: #{JSON.stringify(generator.terminals_ || {})}
-          productions: #{JSON.stringify(generator.productions || [])}
-          states: #{generator.states?.length || 0}
-          conflicts: #{generator.conflictStates?.length || 0}
-        """
-
-      when 'json'
-        content = JSON.stringify({
-          symbols: generator.symbols_ || {}
-          terminals: generator.terminals_ || {}
-          productions: generator.productions || []
-          states: generator.states?.length || 0
-          conflicts: generator.conflictStates?.length || 0
-          metadata:
-            generator: "Sonar LALR(1)"
-            generated: new Date().toISOString()
-        }, null, 2)
-
-      else
-        throw new Error "Unsupported language: #{language}"
-
-    fs.writeFileSync outputFile, content
-    console.log "✅ Language pack written to #{outputFile}"
-
-  # Parse options
-  options = {
-    help: false
-    stats: false
-    generate: true
-    output: 'parser.js'
-    language: null
-    verbose: false
-    table: false
-    conflicts: false
-    format: 'commonjs'
-    optimize: false
-    debug: false
-  }
-
+  # Parse command line
+  options = {help: false, stats: false, generate: true, output: 'parser.js', verbose: false}
   grammarFile = null
+
   i = 0
-
-  while i < args.length
-    arg = args[i]
-
+  while i < process.argv.length - 2
+    arg = process.argv[i + 2]
     switch arg
-      when '-h', '--help'
-        options.help = true
-      when '-s', '--stats'
-        options.stats = true
-      when '-g', '--generate'
-        options.generate = true
-      when '-o', '--output'
-        options.output = args[++i]
-      when '-l', '--language'
-        options.language = args[++i]
-      when '-v', '--verbose'
-        options.verbose = true
-      when '-t', '--table'
-        options.table = true
-      when '-c', '--conflicts'
-        options.conflicts = true
-      when '--format'
-        options.format = args[++i]
-      when '--optimize'
-        options.optimize = true
-      when '--debug'
-        options.debug = true
-      else
-        if not grammarFile and not arg.startsWith('-')
-          grammarFile = arg
-        else
-          console.error "Unknown option: #{arg}"
-          process.exit 1
-
+      when '-h', '--help' then options.help = true
+      when '-s', '--stats' then options.stats = true
+      when '-g', '--generate' then options.generate = true
+      when '-o', '--output' then options.output = process.argv[++i + 2]
+      when '-v', '--verbose' then options.verbose = true
+      else grammarFile = arg unless arg.startsWith('-')
     i++
 
-  # Show help if requested or no arguments
-  if options.help or (not grammarFile and not options.stats)
+  if options.help or not grammarFile
     showHelp()
     process.exit 0
 
-  # Main execution
   try
-    if grammarFile
-      unless fs.existsSync grammarFile
-        console.error "❌ Grammar file not found: #{grammarFile}"
-        process.exit 1
-
-      # Read and parse grammar
-      grammarContent = fs.readFileSync grammarFile, 'utf8'
-
-      # Parse grammar based on file type
-      if grammarFile.endsWith('.coffee')
-        # Try to require the grammar file directly first
-        try
-          grammarModule = require(path.resolve(grammarFile))
-
-          # Check if it's a direct export of grammar specification
-          if grammarModule.grammar and grammarModule.operators and grammarModule.tokens
-            # Transform the grammar format to match LALRGenerator expectations
-            grammar = {
-              bnf: grammarModule.grammar           # LALRGenerator expects 'bnf' not 'grammar'
-              operators: grammarModule.operators
-              tokens: grammarModule.tokens
-              start: grammarModule.start
-              startSymbol: grammarModule.start     # Some code paths check for 'startSymbol'
-            }
-          else
-            # Fall back to the jison mocking approach for other CoffeeScript grammar files
-            capturedGrammar = null
-            MockParser = (spec) ->
-              capturedGrammar = spec
-              return {
-                generate: -> ''
-                generateModule: -> ''
-                generateCommonJSModule: -> ''
-              }
-
-            # Temporarily replace the jison module
-            originalJison = require.cache[require.resolve('jison')]
-            mockJison = { Parser: MockParser }
-            require.cache[require.resolve('jison')] = { exports: mockJison }
-
-            # Delete the cached module and require again
-            delete require.cache[path.resolve(grammarFile)]
-            grammarModule = require(path.resolve(grammarFile))
-
-            # Restore original jison module
-            if originalJison
-              require.cache[require.resolve('jison')] = originalJison
-            else
-              delete require.cache[require.resolve('jison')]
-
-            grammar = capturedGrammar
-
-        catch error
-          console.error "❌ Failed to load grammar from #{grammarFile}: #{error.message}"
-          process.exit 1
-
-        unless grammar
-          console.error "❌ Failed to capture grammar from #{grammarFile}"
-          process.exit 1
-
-      else if grammarFile.endsWith('.json')
-        grammar = JSON.parse(grammarContent)
-
-      else
-        console.error "❌ Unsupported grammar format. Use .coffee or .json"
-        process.exit 1
-
-      if options.verbose
-        console.log "🔧 Processing grammar: #{grammarFile}"
-
-            # Create generator
-      generator = new LALRGenerator grammar, {
-        optimize: options.optimize
-        debug: options.debug
-      }
-
-      # Store original grammar for user-defined symbol counting
-      generator.originalGrammar = grammar
-
-      # Show statistics
-      if options.stats
-        showStats generator, options
-
-      # Show conflicts
-      if options.conflicts
-        showConflicts generator
-
-      # Generate language pack
-      if options.language
-        generateLanguagePack generator, options.language, options.output
-
-      # Generate parser
-      else if options.generate
-        if options.verbose
-          console.log "🚀 Generating parser..."
-
-        parserCode = generator.generate({
-          format: options.format
-          debug: options.debug
-        })
-
-        fs.writeFileSync options.output, parserCode
-
-        stats = fs.statSync options.output
-        console.log "✅ Parser generated successfully!"
-        console.log "   Output: #{options.output}"
-        console.log "   Size: #{stats.size} bytes"
-
-        if options.verbose
-          console.log "   States: #{generator.states?.length || 0}"
-          console.log "   Productions: #{generator.productions?.length || 0}"
-          console.log "   Conflicts: #{generator.conflictStates?.length || 0}"
-
-    else
-      console.error "❌ No grammar file specified"
+    unless fs.existsSync grammarFile
+      console.error "Grammar file not found: #{grammarFile}"
       process.exit 1
 
+    # Load grammar
+    grammar = if grammarFile.endsWith('.coffee')
+      # Mock jison to capture grammar
+      capturedGrammar = null
+      MockParser = (spec) -> capturedGrammar = spec; {generate: -> ''}
+
+      require.cache[require.resolve('jison')] = {exports: {Parser: MockParser}}
+      delete require.cache[path.resolve(grammarFile)]
+      require path.resolve(grammarFile)
+      capturedGrammar
+    else if grammarFile.endsWith('.json')
+      JSON.parse fs.readFileSync(grammarFile, 'utf8')
+    else
+      throw new Error "Unsupported format. Use .coffee or .json"
+
+    unless grammar
+      throw new Error "Failed to load grammar"
+
+    # Generate parser
+    generator = new LALRGenerator grammar
+
+    if options.stats
+      showStats generator
+
+    if options.generate
+      parserCode = generator.generate()
+      fs.writeFileSync options.output, parserCode
+      console.log "Parser generated: #{options.output}"
+
   catch error
-    console.error "❌ Error:", error.message
-    if options.verbose
-      console.error error.stack
+    console.error "Error:", error.message
+    console.error error.stack if options.verbose
     process.exit 1
