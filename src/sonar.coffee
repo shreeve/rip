@@ -1,11 +1,10 @@
 #!/usr/bin/env coffee
 
 # Sonar - LALR(1) Parser Generator
-# An elegant CoffeeScript implementation of the DeRemer-Pennello algorithm
+# An elegant CoffeeScript implementation of standard LALR(1) parsing
 #
 # Based on canonical literature:
 # - "Compilers: Principles, Techniques, and Tools" (Dragon Book)
-# - "Efficient Computation of LALR(1) Look-Ahead Sets" (DeRemer & Pennello, 1982)
 # - "LR Parsing: Theory and Practice" (Knuth, 1965)
 
 # =============================================================================
@@ -93,45 +92,17 @@ class LALRGenerator
     @states = @buildLRAutomaton()
     console.timeEnd 'buildLRAutomaton'
 
-    # Initialize lookahead computation data structures
-    @terminalMap = {}
-    @lookahead = {
-      nonterminalMap: {},
-      nonterminals: {},
-      productions: []
-    }
-    @conflictStates = []
-    @onDemandLookahead = @options.onDemandLookahead or false
-
-    # Enable DeRemer-Pennello LALR(1) algorithm for sophisticated lookahead computation
-    @dp = if @options.deremerrPennello? then @options.deremerrPennello else true
-
-    # Phase 3: Build augmented grammar for lookahead computation
-    console.time 'buildAugmentedGrammar'
-    @buildAugmentedGrammar()
-    console.timeEnd 'buildAugmentedGrammar'
-
-    # Phase 4: Compute lookaheads in augmented grammar context
-    savedNonterminals = @nonterminals
-    savedProductions = @productions
-
-    @nonterminals = @lookahead.nonterminals
-    @productions = @lookahead.productions
-
+    # Phase 3: Compute lookaheads using standard LALR(1) FOLLOW sets
     console.time 'computeLookaheads'
     @computeLookaheads()
     console.timeEnd 'computeLookaheads'
 
-    # Restore original grammar context
-    @nonterminals = savedNonterminals
-    @productions = savedProductions
+    # Phase 4: Assign LALR(1) lookaheads to reduction items
+    console.time 'assignItemLookaheads'
+    @assignItemLookaheads()
+    console.timeEnd 'assignItemLookaheads'
 
-    # Phase 5: Union lookaheads back to original items
-    console.time 'unionLookaheads'
-    @unionLookaheads()
-    console.timeEnd 'unionLookaheads'
-
-    # Phase 6: Build final parse table and optimizations
+    # Phase 5: Build final parse table and optimizations
     console.time 'buildParseTable'
     @stateTable = @buildParseTable @states
     console.timeEnd 'buildParseTable'
@@ -139,12 +110,6 @@ class LALRGenerator
     console.time 'computeDefaultActions'
     @defaultActions = @computeDefaultActions @stateTable
     console.timeEnd 'computeDefaultActions'
-
-  # Specialized GOTO method for lookahead computation (DeRemer-Pennello algorithm)
-  gotoEncoded: (stateId, symbolSequence) ->
-    stateId = stateId.split(":")[0]
-    symbolSequence = symbolSequence.map (s) -> s.slice(s.indexOf(":") + 1)
-    @gotoState stateId, symbolSequence
 
   # Navigate through parser states following a symbol sequence
   gotoState: (startState, symbolSequence) ->
@@ -155,7 +120,7 @@ class LALRGenerator
 
   # Get lookahead symbols for an item in a state
   getLookaheadSet: (state, item) ->
-    if @onDemandLookahead and not state.hasConflicts then @terminals else item.follows
+    item.follows
 
   # ---------------------------------------------------------------------------
   # Grammar Processing
@@ -352,7 +317,7 @@ class LALRGenerator
     @terminals_ = terminalsMap
 
   # ---------------------------------------------------------------------------
-  # Lookahead Computation (DeRemer-Pennello Algorithm)
+  # Lookahead Computation
   # ---------------------------------------------------------------------------
 
   # Compute NULLABLE, FIRST, and FOLLOW sets for LALR(1) parser generation
@@ -445,27 +410,10 @@ class LALRGenerator
 
         # For each nonterminal symbol in the production, compute what can follow it
         for symbol, i in production.handle when @nonterminals[symbol]
-          # Use DeRemer-Pennello contextual analysis or simple algorithm
-          if @dp
-            # Start from initial state and follow the production symbols up to current position
-            stateId = @gotoState 0, production.handle[0...i]
-            # Extract plain symbol name from encoded symbol (e.g., "40:Assign" -> "Assign")
-            plainSymbol = symbol.split(':')[1] or symbol
-            # In DeRemer-Pennello, check if this state/symbol exists in augmented grammar
-            encodedKey = "#{stateId}:#{plainSymbol}"
-            hasAugmentedEntry = @lookahead.nonterminalMap[encodedKey]?
-
-            # DeRemer-Pennello infrastructure is ready - for now, be fully permissive
-            # TODO: Fine-tune optimizations once we understand the pattern better
-            bool = true
-          else
-            # Simple algorithm: always apply FOLLOW rules
-            bool = true
-
           oldSize = @nonterminals[symbol].follows.size
 
           # If symbol is at the end of production (nothing follows), inherit FOLLOW from left-hand side
-          if i is production.handle.length - 1 and bool
+          if i is production.handle.length - 1
             # Add all items from production.symbol.follows to symbol.follows
             @nonterminals[production.symbol].follows.forEach (item) =>
               @nonterminals[symbol].follows.add(item)
@@ -478,7 +426,7 @@ class LALRGenerator
               @nonterminals[symbol].follows.add(item)
 
             # If nullable, also add production.symbol.follows
-            if @_isNullable(part) and bool
+            if @_isNullable(part)
               @nonterminals[production.symbol].follows.forEach (item) =>
                 @nonterminals[symbol].follows.add(item)
 
@@ -671,69 +619,16 @@ class LALRGenerator
 
     defaults
 
-  # ---------------------------------------------------------------------------
-  # Augmented Grammar for Lookahead Computation
-  # ---------------------------------------------------------------------------
-
-  # Build augmented grammar with state-specific symbols for lookahead computation
-  buildAugmentedGrammar: ->
-    @lookahead = {nonterminalMap: {}, nonterminals: {}, productions: []}
-    @conflictStates = []
-    @terminalMap = {}
-
-    for state, i in @states
-      for item from state.items when item.dot is 0
-        symbol = "#{i}:#{item.production.symbol}"
-        @terminalMap[symbol] = item.production.symbol
-        @lookahead.nonterminalMap[symbol] = i
-        @lookahead.nonterminals[symbol] ?= new Nonterminal symbol
-
-        pathInfo = @_gotoStateWithPath i, item.production.handle
-        production = new Production symbol, pathInfo.path, @lookahead.productions.length
-        @lookahead.productions.push production
-        @lookahead.nonterminals[symbol].productions.push production
-
-        handle = item.production.handle.join ' '
-        handleToSymbols = @states[pathInfo.endState].handleToSymbols
-        (handleToSymbols[handle] ?= []).push symbol
-
-      @conflictStates.push i if state.hasConflicts
-
-    null
-
-  # Navigate through states following a symbol sequence, recording the path
-  _gotoStateWithPath: (startState, symbolSequence) ->
-    currentState = parseInt startState, 10
-    path = []
-
-    for symbol in symbolSequence
-      transition = if symbol then "#{currentState}:#{symbol}" else ''
-      if transition
-        @lookahead.nonterminalMap[transition] = currentState
-      path.push transition
-      currentState = @states[currentState].transitions[symbol] or currentState
-      @terminalMap[transition] = symbol
-
-    {path, endState: currentState}
-
-  # Union computed lookaheads from augmented grammar back to original items
-  unionLookaheads: ->
-    statesToProcess = if @onDemandLookahead then @conflictStates else @states
-
-    for i in statesToProcess
-      state = if typeof i is 'number' then @states[i] else i
-
-      if state.reductions.length
-        for item in state.reductions
-          follows = {}
-          follows[follow] = true for follow in item.follows
-
-          for symbol in state.handleToSymbols[item.production.handle.join ' ']
-            @lookahead.nonterminals[symbol].follows.forEach (followSymbol) =>
-              terminal = @terminalMap[followSymbol]
-              unless follows[terminal]
-                follows[terminal] = true
-                item.follows.push terminal
+  # Assign LALR(1) lookaheads to reduction items based on FOLLOW sets
+  assignItemLookaheads: ->
+    for state in @states
+      for item in state.reductions
+        # For reduction items [A → α•], assign FOLLOW(A) as lookaheads
+        follows = @nonterminals[item.production.symbol]?.follows
+        if follows
+          item.follows.length = 0  # Clear existing follows
+          follows.forEach (terminal) =>
+            item.follows.push terminal
 
     null
 
