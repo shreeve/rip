@@ -447,9 +447,13 @@ class LALRGenerator
         for symbol, i in production.handle when @nonterminals[symbol]
           # Use DeRemer-Pennello contextual analysis or simple algorithm
           if @dp
-            stateId = @gotoEncoded production.symbol, production.handle[0...i]
-            # For now, always return true to test infrastructure
-            bool = true
+            # Start from initial state and follow the production symbols up to current position
+            stateId = @gotoState 0, production.handle[0...i]
+            # Extract plain symbol name from encoded symbol (e.g., "40:Assign" -> "Assign")
+            plainSymbol = symbol.split(':')[1] or symbol
+            # In DeRemer-Pennello, check if this state/symbol exists in augmented grammar
+            encodedKey = "#{stateId}:#{plainSymbol}"
+            bool = @lookahead.nonterminalMap[encodedKey]?
           else
             # Simple algorithm: always apply FOLLOW rules
             bool = true
