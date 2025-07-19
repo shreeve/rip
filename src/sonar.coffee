@@ -37,9 +37,6 @@ class LRState
     @hasShifts = false
     @hasConflicts = false
 
-  # Unique identifier for state deduplication
-  valueOf: -> @_value or= (item.id for item from @items).sort().join('|')
-
 # ==============================================================================
 # LALR(1) Parser Generator
 # ==============================================================================
@@ -460,7 +457,7 @@ class LALRGenerator
     gotoSet = @_goto itemSet, symbol
 
     if gotoSet.items.size > 0
-      gotoValue = gotoSet.valueOf()
+      gotoValue = gotoSet.id ?= (e.id for e from gotoSet.items).sort().join('|')
       existingIndex = states.has[gotoValue]
 
       if not existingIndex?
