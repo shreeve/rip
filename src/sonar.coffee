@@ -39,7 +39,7 @@ class Item
 class LRState
   constructor: (items...) ->
     @items        = new Set(items)
-    @reductions   = []
+    @reductions   = new Set()
     @transitions  = {}
     @hasShifts    = false
     @hasConflicts = false
@@ -372,7 +372,7 @@ class LALRGenerator
   # Assign FOLLOW sets to reduction items for LALR(1)
   assignItemLookaheads: ->
     for state in @states
-      for item in state.reductions
+      for item from state.reductions
         follows = @nonterminals[item.production.symbol]?.follows
         if follows
           item.follows.length = 0
@@ -417,11 +417,11 @@ class LALRGenerator
               newItems.add new Item production, 0
           processed[nextSymbol] = true
         else unless nextSymbol
-          closureSet.reductions.push item
-          closureSet.hasConflicts = closureSet.reductions.length > 1 or closureSet.hasShifts
+          closureSet.reductions.add item
+          closureSet.hasConflicts = closureSet.reductions.size > 1 or closureSet.hasShifts
         else
           closureSet.hasShifts = true
-          closureSet.hasConflicts = closureSet.reductions.length > 0
+          closureSet.hasConflicts = closureSet.reductions.size > 0
 
       workingSet = newItems
 
@@ -487,7 +487,7 @@ class LALRGenerator
         state[@symbolMap[@EOF]] = [ACCEPT]
 
       # Reduce actions
-      for item in itemSet.reductions
+      for item from itemSet.reductions
         terminals = @getLookaheadSet? itemSet, item
         terminals or= @terminals
 
