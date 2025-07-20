@@ -85,7 +85,13 @@ class LALRGenerator
 
     # Build parser
     console.time("processGrammar") if @options.timing
-    @processGrammar()
+
+    # Check if we have pre-parsed data
+    if typeof @grammar is 'string' and @grammar.endsWith('.json')
+      @loadFromJSON(@grammar)
+    else
+      @processGrammar()
+
     console.timeEnd("processGrammar") if @options.timing
 
     console.time("buildLR0Automaton") if @options.timing
@@ -495,6 +501,70 @@ class LALRGenerator
     return
 
   # ==========================================================================
+  # Grammar Loading from JSON
+  # ==========================================================================
+
+  loadFromJSON: (filename) ->
+    fs = require 'fs'
+    data = JSON.parse(fs.readFileSync(filename, 'utf8'))
+
+    # Load metadata
+    @startSymbolName = data.metadata.startSymbol
+    @conflicts = data.metadata.conflicts || 0
+
+    # Load symbols
+    for symbolData in data.symbols
+      symbol = new Symbol(symbolData.name, symbolData.isTerminal)
+      symbol.nullable = symbolData.nullable || false
+      symbol.first = new Set(symbolData.first || [])
+      symbol.follows = new Set(symbolData.follows || [])
+
+      if symbol.isTerminal
+        @terminals.set(symbol.name, symbol)
+      else
+        @nonterminals.set(symbol.name, symbol)
+
+    # Set start symbol reference
+    @startSymbol = @nonterminals.get("$accept")
+
+    # Load productions
+    for prodData in data.productions
+      lhsSymbol = @nonterminals.get(prodData.symbol)
+      unless lhsSymbol
+        throw new Error("Production LHS symbol not found: #{prodData.symbol}")
+
+      # Convert handle symbol names to symbol objects
+      rhs = []
+      for symbolName in prodData.handle
+        # Skip empty strings (epsilon productions)
+        if symbolName is ''
+          continue
+
+        symbol = @terminals.get(symbolName) || @nonterminals.get(symbolName)
+        unless symbol
+          throw new Error("Production RHS symbol not found: #{symbolName}")
+        rhs.push(symbol)
+
+      production = new Production(lhsSymbol, rhs, prodData.id)
+      production.nullable = prodData.nullable || false
+      production.first = new Set(prodData.first || [])
+      production.precedence = prodData.precedence
+
+      @productions.push(production)
+      lhsSymbol.productions.push(production)
+
+    # Load operators
+    @operators = {}
+    for own op, opData of (data.operators || {})
+      @operators[op] = {
+        precedence: opData.precedence
+        assoc: opData.assoc
+      }
+
+    metadata = data.metadata || {}
+    console.log("Loaded grammar: #{metadata.symbolCount || 0} symbols, #{metadata.productionCount || 0} productions")
+
+  # ==========================================================================
   # Code Generation
   # ==========================================================================
 
@@ -684,19 +754,39 @@ if typeof exports isnt 'undefined'
 if require.main is module
   args = process.argv[2..]
   if args.length < 1
-    console.log "Usage: sonar.coffee <grammar.coffee> [-o output.js]"
+    console.log """
+    Usage: sonar.coffee <grammar.coffee|grammar.json> [-o output.js]
+
+    Examples:
+      sonar.coffee grammar.coffee -o parser.js         # Parse .coffee grammar
+      sonar.coffee grammar-data.json -o parser.js      # Use pre-parsed JSON
+    """
     process.exit 1
 
   fs = require 'fs'
+  path = require 'path'
   grammarFile = args[0]
   outputFile = if args.indexOf('-o') >= 0 then args[args.indexOf('-o') + 1] else 'parser.js'
 
   try
-    grammar = require(require('path').resolve(grammarFile))
-    generator = new LALRGenerator(grammar, {timing: true})
+    unless fs.existsSync grammarFile
+      console.error "Grammar file not found: #{grammarFile}"
+      process.exit 1
+
+    # Determine input type and load accordingly
+    if grammarFile.endsWith('.json')
+      # Pre-parsed JSON grammar data
+      generator = new LALRGenerator(grammarFile, {timing: true})
+    else
+      # Regular .coffee grammar file
+      grammar = require(path.resolve(grammarFile))
+      generator = new LALRGenerator(grammar, {timing: true})
+
     output = generator.generate()
     fs.writeFileSync(outputFile, output)
     console.log "Parser generated: #{outputFile}"
+
   catch error
     console.error "Error: #{error.message}"
+    console.error error.stack
     process.exit 1

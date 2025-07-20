@@ -55,8 +55,9 @@ buildParser = ->
   grammar = require('./lib/coffeescript/grammar')
 
   # who = './jison'
-  who = './sonar'
   # who = './rip'
+  who = '../../sonar'
+  # who = '../../sonar-original'
 
   gen = (require who).Generator
     bnf       : grammar.grammar

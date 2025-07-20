@@ -767,6 +767,79 @@ class LALRGenerator
 
     parser
 
+  # ============================================================================
+  # Grammar Export for New LALR(1) Generator
+  # ============================================================================
+
+  exportGrammarData: (filename) ->
+    # Serialize symbols
+    symbolsData = []
+    for symbol from @symbols.values()
+      symbolsData.push {
+        name: symbol.name
+        isTerminal: symbol.isTerminal
+        id: symbol.id
+        nullable: symbol.nullable
+        first: Array.from(symbol.first || [])
+        follows: Array.from(symbol.follows || [])
+        productions: symbol.productions?.map((p) -> p.id) || []
+      }
+
+    # Serialize productions
+    productionsData = []
+    for production in @productions
+      productionsData.push {
+        id: production.id
+        symbol: production.symbol
+        handle: production.handle[..]
+        nullable: production.nullable
+        first: Array.from(production.first || [])
+        precedence: production.precedence
+      }
+
+    # Serialize operators
+    operatorsData = {}
+    for own op, data of @operators
+      operatorsData[op] = {
+        precedence: data.precedence
+        assoc: data.assoc
+      }
+
+    # Serialize nonterminals info
+    nonterminalsData = {}
+    for own name, symbol of @nonterminals
+      nonterminalsData[name] = {
+        name: symbol.name
+        id: symbol.id
+        nullable: symbol.nullable
+        first: Array.from(symbol.first || [])
+        follows: Array.from(symbol.follows || [])
+        productions: symbol.productions?.map((p) -> p.id) || []
+      }
+
+    # Create the export object
+    grammarData = {
+      metadata: {
+        exportedAt: new Date().toISOString()
+        startSymbol: @startSymbol
+        acceptProductionIndex: @acceptProductionIndex
+        conflicts: @conflicts
+        symbolCount: @symbols.size
+        productionCount: @productions.length
+      }
+      symbols: symbolsData
+      productions: productionsData
+      operators: operatorsData
+      nonterminals: nonterminalsData
+      terminals: Object.keys(@terminals)
+    }
+
+    # Write to file
+    fs = require 'fs'
+    fs.writeFileSync filename, JSON.stringify(grammarData, null, 2)
+    console.log "Grammar data exported to #{filename}"
+    grammarData
+
 # ==============================================================================
 # Exports
 # ==============================================================================
@@ -805,13 +878,15 @@ if require.main is module
       -h, --help              Show this help
       -s, --stats             Show grammar statistics
       -g, --generate          Generate parser (default)
-      -o, --output <file>     Output file (default: parser.js)
+      -e, --export            Export grammar data to JSON
+      -o, --output <file>     Output file (default: parser.js or grammar-data.json)
       -v, --verbose           Verbose output
 
     Examples:
       coffee sonar.coffee grammar.coffee
       coffee sonar.coffee --stats grammar.coffee
       coffee sonar.coffee -o parser.js grammar.coffee
+      coffee sonar.coffee --export -o grammar-data.json grammar.coffee
     """
 
   showStats = (generator) ->
@@ -831,7 +906,7 @@ if require.main is module
     """
 
   # Parse command line
-  options = {help: false, stats: false, generate: true, output: 'parser.js', verbose: false}
+  options = {help: false, stats: false, generate: true, export: false, output: null, verbose: false}
   grammarFile = null
 
   i = 0
@@ -841,6 +916,7 @@ if require.main is module
       when '-h', '--help' then options.help = true
       when '-s', '--stats' then options.stats = true
       when '-g', '--generate' then options.generate = true
+      when '-e', '--export' then options.export = true; options.generate = false
       when '-o', '--output' then options.output = process.argv[++i + 2]
       when '-v', '--verbose' then options.verbose = true
       else grammarFile = arg unless arg.startsWith('-')
@@ -849,6 +925,9 @@ if require.main is module
   if options.help or not grammarFile
     showHelp()
     process.exit 0
+
+  # Set default output based on mode
+  options.output ||= if options.export then 'grammar-data.json' else 'parser.js'
 
   try
     unless fs.existsSync grammarFile
@@ -871,6 +950,9 @@ if require.main is module
 
     if options.stats
       showStats generator
+
+    if options.export
+      generator.exportGrammarData options.output
 
     if options.generate
       parserCode = generator.generate()
