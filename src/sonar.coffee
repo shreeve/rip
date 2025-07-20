@@ -487,7 +487,7 @@ class LALRGenerator
     states = []
     {nonterminals, operators} = this
     conflictedStates = {}
-    [SHIFT, REDUCE, ACCEPT, NONASSOC] = [1, 2, 3, 0]
+    [NONASSOC, SHIFT, REDUCE, ACCEPT] = [0, 1, 2, 3]
 
     for itemSet, k in itemSets
       state = states[k] = {}
@@ -539,7 +539,7 @@ class LALRGenerator
   # Resolve conflicts using precedence and associativity
   _resolveConflict: (production, op, reduce, shift) ->
     solution = {production, operator: op, r: reduce, s: shift}
-    [SHIFT, REDUCE, NONASSOC] = [1, 2, 0]
+    [NONASSOC, SHIFT, REDUCE] = [0, 1, 2]
 
     if shift[0] is REDUCE
       solution.action = if shift[1] < reduce[1] then shift else reduce
