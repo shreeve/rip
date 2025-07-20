@@ -7,18 +7,18 @@
 # Core Data Structures
 # ==============================================================================
 
-# Unified Symbol class for both terminals and nonterminals
+# Unified Symbol (terminals and nonterminals)
 class Symbol
   constructor: (name, isTerminal = false, id) ->
-    @id         = id         # unique symbol id
-    @name       = name       # symbol name (e.g. "Expression", "IF", "$end")
-    @isTerminal = isTerminal # true if terminal, false if nonterminal
-    @nullable   = false      # LALR(1) nullable computation (nonterminals only)
-    @first      = new Set()  # LALR(1) FIRST sets (nonterminals only)
-    @follows    = new Set()  # LALR(1) FOLLOW sets (nonterminals only)
-    @productions = []        # Productions for this nonterminal (nonterminals only)
+    @id          = id         # unique symbol id
+    @name        = name       # symbol name (e.g. "Expression", "IF", "$end")
+    @isTerminal  = isTerminal # true if terminal, false if nonterminal
+    @nullable    = false      # LALR(1) nullable computation (nonterminals only)
+    @first       = new Set()  # LALR(1) FIRST sets (nonterminals only)
+    @follows     = new Set()  # LALR(1) FOLLOW sets (nonterminals only)
+    @productions = []         # Productions for this nonterminal (nonterminals only)
 
-# Production rule: A → α
+# Production rule: [Expression → Expression + Term]
 class Production
   constructor: (symbol, handle, id) ->
     @symbol     = symbol
@@ -28,7 +28,7 @@ class Production
     @first      = new Set
     @precedence = 0
 
-# LR(0) item: [A → α•β] with LALR(1) lookahead
+# LR(0) item: [Expression → Expression • + Term] with LALR(1) dot and lookahead
 class Item
   constructor: (production, dot = 0, follows = []) ->
     @production = production
@@ -70,25 +70,12 @@ class LALRGenerator
 
     # Pre-create special symbols with exact same IDs as original system
     # This is critical for LALR(1) compatibility
-    @_createSpecialSymbol "$accept", false, 0 # ID = 0 (nonterminal)
-    @_createSpecialSymbol "$end"   , true , 1 # ID = 1 (terminal)
-    @_createSpecialSymbol "error"  , true , 2 # ID = 2 (terminal)
+    symbol = new Symbol "$accept", false, 0; @symbols.set symbol.name, symbol
+    symbol = new Symbol "$end"   , true , 1; @symbols.set symbol.name, symbol
+    symbol = new Symbol "error"  , true , 2; @symbols.set symbol.name, symbol
 
     # Code generation setup
-    @_setupCodeGeneration grammar
-    @_buildParser grammar
-
-  # ============================================================================
-  # Symbol Management
-  # ============================================================================
-
-  # Create special symbols with guaranteed ID assignment
-  _createSpecialSymbol: (name, isTerminal, id) ->
-    symbol = new Symbol name, isTerminal, id
-    @symbols.set name, symbol
-    symbol
-
-  _setupCodeGeneration: (grammar) ->
+    @moduleInclude = grammar.moduleInclude or ''
     if grammar.actionInclude
       @actionInclude = if typeof grammar.actionInclude is 'function'
         String(grammar.actionInclude)
@@ -97,22 +84,24 @@ class LALRGenerator
       else
         grammar.actionInclude
 
-    @moduleInclude = grammar.moduleInclude or ''
+    # Build parser
+    @timing 'sonar', =>
+      @timing 'processGrammar'       , => @processGrammar grammar
+      @timing 'buildLRAutomaton'     , => @buildLRAutomaton()
+      @timing 'computeLookaheads'    , => @computeLookaheads()
+      @timing 'assignItemLookaheads' , => @assignItemLookaheads()
+      @timing 'buildParseTable'      , => @buildParseTable @states
+      @timing 'computeDefaultActions', => @computeDefaultActions @stateTable
 
-  _buildParser: (grammar) ->
-    timing = (label, fn) =>
-      console.time(label)
-      result = fn() if fn
-      console.timeEnd(label)
-      result
+  # ============================================================================
+  # Helper Functions
+  # ============================================================================
 
-    timing 'sonar', =>
-      timing 'processGrammar'       , => @processGrammar grammar
-      timing 'buildLRAutomaton'     , => @buildLRAutomaton()
-      timing 'computeLookaheads'    , => @computeLookaheads()
-      timing 'assignItemLookaheads' , => @assignItemLookaheads()
-      timing 'buildParseTable'      , => @buildParseTable @states
-      timing 'computeDefaultActions', => @computeDefaultActions @stateTable
+  timing: (label, fn) ->
+    console.time(label)
+    result = fn() if fn
+    console.timeEnd(label)
+    result
 
   # ============================================================================
   # Grammar Processing
