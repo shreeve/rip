@@ -109,15 +109,12 @@ class LALRGenerator
 
   processGrammar: (grammar) ->
     @nonterminals = {}
-    # Special symbols already created by unified symbol system
-    # Just need to maintain legacy array structure for compatibility
-    @symbolsArray = ["$accept", "$end", "error"]  # Legacy array compatibility
     @operators = @_processOperators grammar.operators
 
     tokens = grammar.tokens
     tokens = if typeof tokens is 'string' then tokens.trim().split(' ') else tokens?[..]
 
-    @_buildProductions grammar.bnf ? grammar.grammar, @productions, @nonterminals, @symbolsArray, @operators
+    @_buildProductions grammar.bnf ? grammar.grammar, @productions, @nonterminals, @operators
 
     if tokens and @terminals.length isnt tokens.length
       @trace "Warning: declared tokens differ from tokens found in rules."
@@ -149,7 +146,7 @@ class LALRGenerator
     @nonterminals.$accept.productions.push acceptProduction
     @nonterminals[@startSymbol].follows.add "$end"
 
-  _buildProductions: (bnf, productions, nonterminals, symbols, operators) ->
+  _buildProductions: (bnf, productions, nonterminals, operators) ->
     actions = [
       '/* this == yyval */'
       @actionInclude or ''
@@ -179,7 +176,6 @@ class LALRGenerator
           symbol = new Symbol s, isTerminal, id
           @symbols.set s, symbol
           symbolMap[s] = id
-        symbols.push s
 
     # Process nonterminals and their productions
     for own symbol, rules of bnf
