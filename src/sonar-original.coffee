@@ -840,6 +840,28 @@ class LALRGenerator
     console.log "Grammar data exported to #{filename}"
     grammarData
 
+  exportParseData: (filename) ->
+    parseData = {
+      metadata: {
+        generator: "Original Sonar Parser Generator"
+        exportedAt: new Date().toISOString()
+        states: @stateTable.length
+        conflicts: @conflicts
+        algorithm: "Original LALR(1)"
+      }
+      symbolMap: @symbolMap
+      terminals_: @terminals_
+      productionTable: @productionTable
+      stateTable: @stateTable
+      defaultActions: @defaultActions
+    }
+
+    # Write to file
+    fs = require 'fs'
+    fs.writeFileSync filename, JSON.stringify(parseData, null, 2)
+    console.log "Parse table data exported to #{filename} (original)"
+    parseData
+
 # ==============================================================================
 # Exports
 # ==============================================================================
@@ -879,6 +901,7 @@ if require.main is module
       -s, --stats             Show grammar statistics
       -g, --generate          Generate parser (default)
       -e, --export            Export grammar data to JSON
+      --export-parse-data     Export parse table data to JSON
       -o, --output <file>     Output file (default: parser.js or grammar-data.json)
       -v, --verbose           Verbose output
 
@@ -887,6 +910,7 @@ if require.main is module
       coffee sonar.coffee --stats grammar.coffee
       coffee sonar.coffee -o parser.js grammar.coffee
       coffee sonar.coffee --export -o grammar-data.json grammar.coffee
+      coffee sonar.coffee --export-parse-data -o parse-data.json grammar.coffee
     """
 
   showStats = (generator) ->
@@ -906,7 +930,7 @@ if require.main is module
     """
 
   # Parse command line
-  options = {help: false, stats: false, generate: true, export: false, output: null, verbose: false}
+  options = {help: false, stats: false, generate: true, export: false, exportParseData: false, output: null, verbose: false}
   grammarFile = null
 
   i = 0
@@ -917,6 +941,7 @@ if require.main is module
       when '-s', '--stats' then options.stats = true
       when '-g', '--generate' then options.generate = true
       when '-e', '--export' then options.export = true; options.generate = false
+      when '--export-parse-data' then options.exportParseData = true; options.generate = false
       when '-o', '--output' then options.output = process.argv[++i + 2]
       when '-v', '--verbose' then options.verbose = true
       else grammarFile = arg unless arg.startsWith('-')
@@ -927,7 +952,7 @@ if require.main is module
     process.exit 0
 
   # Set default output based on mode
-  options.output ||= if options.export then 'grammar-data.json' else 'parser.js'
+  options.output ||= if options.export then 'grammar-data.json' else if options.exportParseData then 'parse-data.json' else 'parser.js'
 
   try
     unless fs.existsSync grammarFile
@@ -953,6 +978,9 @@ if require.main is module
 
     if options.export
       generator.exportGrammarData options.output
+
+    if options.exportParseData
+      generator.exportParseData options.output
 
     if options.generate
       parserCode = generator.generate()

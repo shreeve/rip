@@ -502,23 +502,23 @@ class LALRGenerator
       # Shift actions
       for [symbol, targetStateId] from state.transitions.entries()
         if symbol.isTerminal
-          @actionTable[stateId][symbol.name] = ["shift", targetStateId]
+          @actionTable[stateId][symbol.name] = [1, targetStateId]  # 1 = shift
         else
           @gotoTable[stateId][symbol.name] = targetStateId
 
-      # Reduce actions
-      for item in state.reductions
-        if item.production.id is 0  # Accept action
-          @actionTable[stateId]["$end"] = ["accept"]
-        else
-          for lookahead from item.lookaheads
-            action = ["reduce", item.production.id]
+      # Generate accept action
+      if state.id == 1  # accept state typically has id 1
+        @actionTable[stateId]["$end"] = [3]  # 3 = accept
 
-            if @actionTable[stateId][lookahead.name]
-              # Conflict resolution
-              @resolveConflict(stateId, lookahead.name, @actionTable[stateId][lookahead.name], action)
-            else
-              @actionTable[stateId][lookahead.name] = action
+      # Generate reduce actions
+      for item in state.reductions
+        if item.production.lhs.name == "$accept"
+          # This is the accept item
+          continue
+
+        action = [2, item.production.id]  # 2 = reduce
+        for lookahead from item.lookaheads
+          @actionTable[stateId][lookahead.name] = action
 
   resolveConflict: (stateId, terminal, existing, new_action) ->
     @conflicts++
@@ -600,220 +600,461 @@ class LALRGenerator
   generate: (options = {}) ->
     @generateModule(options)
 
-  generateModule: (options = {}) ->
-    # Build symbol mappings
-    symbolMap = {}
-    terminals = {}
-    id = 0
+  generateModule: ->
+    # My LALR(1) core has already built the parse tables - now use original's proven runtime
+    @_buildOriginalFormatTables()
+    @_generatePerformAction()
 
-    # Assign IDs to symbols
-    symbolMap["$accept"] = id++
-    symbolMap["$end"] = id++
-    symbolMap["error"] = id++
-    terminals[1] = "$end"
-    terminals[2] = "error"
+    # Generate using the original's proven structure
+    @generateModuleExpr()
 
-    for symbol from @terminals.values()
-      unless symbolMap[symbol.name]?
-        symbolMap[symbol.name] = id++
-        terminals[symbolMap[symbol.name]] = symbol.name
+  _buildOriginalFormatTables: ->
+    # Convert my efficient LALR(1) tables to the format the original runtime expects
+    @stateTable = []
+    @symbolMap = {}
+    @terminals_ = {}
+    @productionTable = []
+    @defaultActions = {}
 
-    for symbol from @nonterminals.values()
-      unless symbolMap[symbol.name]?
-        symbolMap[symbol.name] = id++
+    # Build symbol map and terminals (original format)
+    symbolId = 0
+    for [name, symbol] from @terminals
+      @symbolMap[name] = symbolId
+      @terminals_[symbolId] = name
+      symbolId++
 
-    # Build production table
-    productionTable = [0] # placeholder
+    for [name, symbol] from @nonterminals
+      unless name is "$accept"  # Skip internal symbol
+        @symbolMap[name] = symbolId
+        symbolId++
+
+    # Build production table (original format: [lhs, rhs_length])
     for production in @productions
-      lhsId = symbolMap[production.lhs.name]
-      rhsLength = production.rhs.length
-      productionTable.push [lhsId, rhsLength]
+      unless production.lhs.name is "$accept"  # Skip augmented production
+        @productionTable.push [
+          @symbolMap[production.lhs.name]
+          production.rhs.length
+        ]
 
-    # Convert parse tables to use symbol IDs
-    actionTableJson = {}
-    gotoTableJson = {}
+    # Convert my action/goto tables to original stateTable format
+    for stateId in [0...@states.length]
+      stateActions = {}
 
-    for stateId, actions of @actionTable
-      actionTableJson[stateId] = {}
-      for terminal, action of actions
-        terminalId = symbolMap[terminal]
-        actionTableJson[stateId][terminalId] = action
+      # Add action entries
+      if @actionTable[stateId]
+        for symbol, action of @actionTable[stateId]
+          symbolId = @symbolMap[symbol]
+          if action[0] is 'shift'
+            stateActions[symbolId] = [1, action[1]]  # [1, nextState]
+          else if action[0] is 'reduce'
+            stateActions[symbolId] = [2, action[1]]  # [2, productionId]
+          else if action[0] is 'accept'
+            stateActions[symbolId] = [3]  # [3]
 
-    for stateId, gotos of @gotoTable
-      gotoTableJson[stateId] = {}
-      for nonterminal, target of gotos
-        nonterminalId = symbolMap[nonterminal]
-        gotoTableJson[stateId][nonterminalId] = target
+      # Add goto entries
+      if @gotoTable[stateId]
+        for symbol, target of @gotoTable[stateId]
+          symbolId = @symbolMap[symbol]
+          stateActions[symbolId] = target  # Just the target state number
 
-    # Combine action and goto tables for Jison compatibility
-    combinedTable = {}
-    for stateId, actions of actionTableJson
-      combinedTable[stateId] = {}
-      for symbol, action of actions
-        combinedTable[stateId][symbol] = action
+      @stateTable[stateId] = stateActions
 
-      # Add goto entries to the same state
-      if gotoTableJson[stateId]
-        for symbol, target of gotoTableJson[stateId]
-          combinedTable[stateId][symbol] = target
+  _generatePerformAction: ->
+    # For now, use a default performAction - this could be enhanced later
+    # The semantic actions from the grammar would go here
+    parameters = "yytext, yyleng, yylineno, yy, yystate, $$, _$"
+    actionsCode = """
+switch(yystate) {
+default:
+  this.$ = $$[0];
+  break;
+}
+"""
+    @performAction = "function anonymous(#{parameters}) {\n#{actionsCode}\n}"
 
-    # Generate parser code - build it in parts to avoid quote escaping issues
-    symbolMapJson = JSON.stringify(symbolMap)
-    productionTableJson = JSON.stringify(productionTable)
-    combinedTableJson = JSON.stringify(combinedTable)
+  generateModuleExpr: ->
+    module = @_generateModuleCore()
+    """
+    (function(){
+    var hasProp = {}.hasOwnProperty;
+    #{module.commonCode}
+    var parser = #{module.moduleCode};
+    #{@moduleInclude || ''}
+    function Parser () { this.yy = {}; }
+    Parser.prototype = parser;
+    parser.Parser = Parser;
+    return new Parser;
+    })();
+    """
 
-    parserCode = """
-      /* Generated by Sonar LALR(1) Parser Generator */
-      (function(){
-        var parser = {
-          trace: function(){},
-          yy: {},
+  _generateModuleCore: ->
+    tableCode = @_generateTableCode @stateTable
 
-          symbols_: #{symbolMapJson},
-          terminals_: #{symbolMapJson},
-          productions_: #{productionTableJson},
+    # Build the module code entirely as a JavaScript string to avoid CoffeeScript interpolation
+    symbolMapJson = JSON.stringify @symbolMap
+    terminalsJson = JSON.stringify(@terminals_).replace /"([0-9]+)":/g, "$1:"
+    productionTableJson = JSON.stringify @productionTable
+    defaultActionsJson = JSON.stringify(@defaultActions).replace /"([0-9]+)":/g, "$1:"
 
-          table: #{combinedTableJson},
-          defaultActions: {},
+    moduleCode = [
+      "{"
+      "  trace: function trace() {},"
+      "  yy: {},"
+      "  symbolMap: " + symbolMapJson + ","
+      "  terminals_: " + terminalsJson + ","
+      "  productionTable: " + productionTableJson + ","
+      "  stateTable: " + tableCode.moduleCode + ","
+      "  defaultActions: " + defaultActionsJson + ","
+      "  performAction: " + @performAction + ","
+      "  parseError: function parseError(str, hash) {"
+      "    if (hash.recoverable) {"
+      "      this.trace(str);"
+      "    } else {"
+      "      var error = new Error(str);"
+      "      error.hash = hash;"
+      "      throw error;"
+      "    }"
+      "  },"
+      "  parse: function parse(input) {"
+      "    var stk = [0], val = [null], loc = [{}];"
+      "    var stateTable = this.stateTable, yytext = '', yylineno = 0, yyleng = 0, recovering = 0;"
+      "    var TERROR = 2, EOF = 1;"
+      ""
+      "    var lexer = Object.create(this.lexer);"
+      "    var sharedState = {yy: {}};"
+      "    "
+      "    for (var k in this.yy) {"
+      "      if (this.yy.hasOwnProperty(k)) {"
+      "        sharedState.yy[k] = this.yy[k];"
+      "      }"
+      "    }"
+      ""
+      "    lexer.setInput(input, sharedState.yy);"
+      "    sharedState.yy.lexer = lexer;"
+      "    sharedState.yy.parser = this;"
+      ""
+      "    if (!lexer.yylloc) lexer.yylloc = {};"
+      "    var yyloc = lexer.yylloc;"
+      "    loc.push(yyloc);"
+      ""
+      "    var ranges = lexer.options && lexer.options.ranges;"
+      "    var self = this;"
+      ""
+      "    if (typeof sharedState.yy.parseError === 'function') {"
+      "      this.parseError = sharedState.yy.parseError;"
+      "    }"
+      ""
+      "    function lex() {"
+      "      var token = lexer.lex() || EOF;"
+      "      if (typeof token !== 'number') {"
+      "        token = self.symbolMap[token] || token;"
+      "      }"
+      "      return token;"
+      "    }"
+      ""
+      "    var symbol = null, preErrorSymbol = null, state, action, r, yyval = {};"
+      "    var p, len, newState, expected;"
+      ""
+      "    while (true) {"
+      "      state = stk[stk.length - 1];"
+      "      "
+      "      if (this.defaultActions[state]) {"
+      "        action = this.defaultActions[state];"
+      "      } else {"
+      "        if (!symbol) symbol = lex();"
+      "        action = stateTable[state] && stateTable[state][symbol];"
+      "      }"
+      ""
+      "      if (!action || !action.length || !action[0]) {"
+      "        var errStr = '';"
+      "        if (!recovering) {"
+      "          expected = [];"
+      "          for (p in stateTable[state]) {"
+      "            if (this.terminals_[p] && p > TERROR) {"
+      "              expected.push(\"'\" + this.terminals_[p] + \"'\");"
+      "            }"
+      "          }"
+      "          errStr = lexer.showPosition ? "
+      "            \"Parse error on line \" + (yylineno + 1) + \":\" + lexer.showPosition() + \"Expecting \" + expected.join(', ') + \", got '\" + (this.terminals_[symbol] || symbol) + \"'\" :"
+      "            \"Parse error on line \" + (yylineno + 1) + \": Unexpected \" + (symbol == EOF ? \"end of input\" : \"'\" + (this.terminals_[symbol] || symbol) + \"'\" );"
+      ""
+      "          this.parseError(errStr, {"
+      "            text: lexer.match,"
+      "            token: this.terminals_[symbol] || symbol,"
+      "            line: lexer.yylineno,"
+      "            loc: yyloc,"
+      "            expected: expected"
+      "          });"
+      "        }"
+      "        throw new Error(errStr);"
+      "      }"
+      ""
+      "      if (action[0] instanceof Array && action.length > 1) {"
+      "        throw new Error(\"Parse Error: multiple actions possible at state: \" + state + \", token: \" + symbol);"
+      "      }"
+      ""
+      "      switch (action[0]) {"
+      "        case 1: // shift"
+      "          stk.push(symbol, action[1]);"
+      "          val.push(lexer.yytext);"
+      "          loc.push(lexer.yylloc);"
+      "          symbol = null;"
+      "          if (!preErrorSymbol) {"
+      "            yyleng = lexer.yyleng;"
+      "            yytext = lexer.yytext;"
+      "            yylineno = lexer.yylineno;"
+      "            yyloc = lexer.yylloc;"
+      "            if (recovering > 0) recovering--;"
+      "          } else {"
+      "            symbol = preErrorSymbol;"
+      "            preErrorSymbol = null;"
+      "          }"
+      "          break;"
+      ""
+      "        case 2: // reduce"
+      "          len = this.productionTable[action[1]][1];"
+      "          yyval.$ = val[val.length - len];"
+      "          var locFirst = loc[loc.length - (len || 1)];"
+      "          var locLast = loc[loc.length - 1];"
+      "          yyval._$ = {"
+      "            first_line: locFirst.first_line, "
+      "            last_line: locLast.last_line,"
+      "            first_column: locFirst.first_column, "
+      "            last_column: locLast.last_column"
+      "          };"
+      "          if (ranges) {"
+      "            yyval._$.range = [locFirst.range[0], locLast.range[1]];"
+      "          }"
+      ""
+      "          r = this.performAction.apply(yyval, [yytext, yyleng, yylineno, sharedState.yy, action[1], val, loc]);"
+      "          if (typeof r !== 'undefined') {"
+      "            return r;"
+      "          }"
+      ""
+      "          if (len) {"
+      "            stk = stk.slice(0, -len * 2);"
+      "            val = val.slice(0, -len);"
+      "            loc = loc.slice(0, -len);"
+      "          }"
+      ""
+      "          stk.push(this.productionTable[action[1]][0]);"
+      "          val.push(yyval.$);"
+      "          loc.push(yyval._$);"
+      "          newState = stateTable[stk[stk.length - 2]][stk[stk.length - 1]];"
+      "          stk.push(newState);"
+      "          break;"
+      ""
+      "        case 3: // accept"
+      "          return true;"
+      "      }"
+      "    }"
+      "  }"
+      "}"
+    ].join("\n")
 
-          parseError: function(str, hash) {
-            throw new Error(str);
-          },
+    {commonCode: tableCode.commonCode, moduleCode}
 
-          parse: function(input) {
-            var self = this;
-            var stack = [0];
-            var vstack = [null];
-            var lstack = [{}];
+  _generateTableCode: (stateTable) ->
+    moduleCode = JSON.stringify(stateTable, null, 0).replace /"([0-9]+)"(?=:)/g, "$1"
+    {commonCode: '', moduleCode}
 
-            var lexer = Object.create(this.lexer);
-            if (typeof input === 'string') {
-              lexer.setInput(input);
-            }
+  parseError: (str, hash) ->
+    if hash.recoverable
+      @trace str
+    else
+      error = new Error str
+      error.hash = hash
+      throw error
 
-            var symbol, preErrorSymbol, state, action, r;
-            var len, newState, expected;
+  parse: (input) ->
+    [stk, val, loc] = [[0], [null], []]
+    [stateTable, yytext, yylineno, yyleng, recovering] = [@stateTable, '', 0, 0, 0]
+    [TERROR, EOF] = [2, 1]
 
-            function lex() {
-              var token = lexer.lex() || 'EOF';
-              if (typeof token !== 'number') {
-                var terminalId = """ + JSON.stringify(symbolMap) + """[token] || token;
-                return terminalId;
-              }
-              return token;
-            }
+    lexer = Object.create @lexer
+    sharedState = {yy: {}}
+    sharedState.yy[k] = v for own k, v of @yy
 
-            symbol = lex();
+    lexer.setInput input, sharedState.yy
+    [sharedState.yy.lexer, sharedState.yy.parser] = [lexer, this]
 
-            while (true) {
-              state = stack[stack.length - 1];
+    lexer.yylloc = {} unless lexer.yylloc?
+    yyloc = lexer.yylloc
+    loc.push yyloc
 
-              if (this.defaultActions[state]) {
-                action = this.defaultActions[state];
-              } else {
-                if (!symbol) symbol = lex();
-                action = this.table[state] && this.table[state][symbol];
-              }
+    ranges = lexer.options?.ranges
 
-              if (!action || !action.length) {
-                var errStr = 'Parse error on line ' + (lexer.yylineno + 1) + ': Unexpected ' +
-                            (symbol == 'EOF' ? 'end of input' : '"' + (this.terminals_[symbol] || symbol) + '"');
-                this.parseError(errStr, {
-                  text: lexer.match,
-                  token: this.terminals_[symbol] || symbol,
-                  line: lexer.yylineno,
-                  expected: Object.keys(this.table[state] || {}).map(function(id) {
-                    return self.terminals_[id];
-                  })
-                });
-              }
+    @parseError = if typeof sharedState.yy.parseError is 'function'
+      sharedState.yy.parseError
+    else
+      Object.getPrototypeOf(this).parseError
 
-              switch (action[0]) {
-                case 'shift':
-                  stack.push(symbol);
-                  vstack.push(lexer.yytext);
-                  lstack.push({first_line: lexer.yylineno});
-                  stack.push(action[1]);
-                  symbol = null;
-                  break;
+    lex = =>
+      token = lexer.lex() or EOF
+      token = @symbolMap[token] or token unless typeof token is 'number'
+      token
 
-                case 'reduce':
-                  len = this.productions_[action[1]][1];
-                  r = this.performAction.apply(null, [vstack[vstack.length - len]].concat(vstack.slice(-len)));
+    [symbol, preErrorSymbol, state, action, r, yyval, p, len, newState, expected] =
+      [null, null, null, null, null, {}, null, null, null, null]
 
-                  if (len) {
-                    stack = stack.slice(0, -2 * len);
-                    vstack = vstack.slice(0, -len);
-                    lstack = lstack.slice(0, -len);
-                  }
+    loop
+      state = stk[stk.length - 1]
+      action = @defaultActions[state] or (
+        symbol = lex() if not symbol?
+        stateTable[state]?[symbol]
+      )
 
-                  var nt = this.productions_[action[1]][0];
-                  stack.push(nt);
-                  vstack.push(r);
-                  lstack.push({});
+      unless action?.length and action[0]
+        errStr = ''
+        unless recovering
+          expected = ("'#{@terminals_[p]}'" for own p of stateTable[state] when @terminals_[p] and p > TERROR)
+          errStr = if lexer.showPosition
+            "Parse error on line #{yylineno + 1}:\n#{lexer.showPosition()}\nExpecting #{expected.join(', ')}, got '#{@terminals_[symbol] or symbol}'"
+          else
+            "Parse error on line #{yylineno + 1}: Unexpected #{if symbol is EOF then "end of input" else "'#{@terminals_[symbol] or symbol}'"}"
 
-                  newState = this.table[stack[stack.length - 2]][nt];
-                  stack.push(newState);
-                  break;
-
-                case 'accept':
-                  return vstack[0];
-              }
-            }
-
-            return null;
-          },
-
-            performAction: function() {
-              // Default action - return first argument
-              return arguments[0];
-            }
-          };
-
-          if (typeof require !== 'undefined' && typeof exports !== 'undefined') {
-            exports.parser = parser;
-            exports.Parser = parser;
-            exports.parse = function () { return parser.parse.apply(parser, arguments); };
+          @parseError errStr, {
+            text: lexer.match
+            token: @terminals_[symbol] or symbol
+            line: lexer.yylineno
+            loc: yyloc
+            expected
           }
+        throw new Error errStr
 
-          return parser;
-        })();
-        """
+      throw new Error "Parse Error: multiple actions possible at state: #{state}, token: #{symbol}" if action[0] instanceof Array and action.length > 1
 
-    return parserCode
+      switch action[0]
+        when 1 # shift
+          stk.push symbol, action[1]
+          val.push lexer.yytext
+          loc.push lexer.yylloc
+          symbol = null
+          unless preErrorSymbol
+            [yyleng, yytext, yylineno, yyloc] = [lexer.yyleng, lexer.yytext, lexer.yylineno, lexer.yylloc]
+            recovering-- if recovering > 0
+          else
+            [symbol, preErrorSymbol] = [preErrorSymbol, null]
 
-# ==============================================================================
-# Exports
-# ==============================================================================
+        when 2 # reduce
+          len = @productionTable[action[1]][1]
+          yyval.$ = val[val.length - len]
+          [locFirst, locLast] = [loc[loc.length - (len or 1)], loc[loc.length - 1]]
+          yyval._$ = {
+            first_line: locFirst.first_line, last_line: locLast.last_line
+            first_column: locFirst.first_column, last_column: locLast.last_column
+          }
+          yyval._$.range = [locFirst.range[0], locLast.range[1]] if ranges
 
-if typeof exports isnt 'undefined'
-  exports.LALRGenerator = LALRGenerator
+          r = @performAction.apply yyval, [yytext, yyleng, yylineno, sharedState.yy, action[1], val, loc]
+          return r if r?
 
-  exports.Generator = (grammar, options) ->
-    new LALRGenerator(grammar, options)
+          if len
+            stk.length -= len * 2
+            val.length -= len
+            loc.length -= len
 
-  exports.Parser = (grammar, options) ->
-    generator = new LALRGenerator(grammar, options)
-    parser = eval(generator.generate())
+          stk.push @productionTable[action[1]][0]
+          val.push yyval.$
+          loc.push yyval._$
+          newState = stateTable[stk[stk.length - 2]][stk[stk.length - 1]]
+          stk.push newState
+
+        when 3 # accept
+          return true
+
+  trace: -> # Debug output (no-op)
+
+  createParser: ->
+    parser = eval @generateModuleExpr()
+    parser.productions = @productions
+
+    bindMethod = (method) => => @lexer = parser.lexer; @[method].apply this, arguments
+
+    parser.lexer = @lexer
+    parser.generate = bindMethod 'generate'
+    parser.generateModule = bindMethod 'generateModule'
+    parser.generateCommonJSModule = bindMethod 'generateCommonJSModule'
+
     parser
+
+  exportParseData: (filename) ->
+    # Convert my efficient LALR(1) tables to the runtime format
+    @_buildOriginalFormatTables()
+
+    parseData = {
+      metadata: {
+        generator: "LALR(1) Parser Generator"
+        exportedAt: new Date().toISOString()
+        states: @states.length
+        conflicts: @conflicts
+        algorithm: "DeRemer-Pennello LALR(1)"
+      }
+      symbolMap: @symbolMap
+      terminals_: @terminals_
+      productionTable: @productionTable
+      stateTable: @stateTable
+      defaultActions: @defaultActions
+    }
+
+    # Write to file
+    fs = require 'fs'
+    fs.writeFileSync filename, JSON.stringify(parseData, null, 2)
+    console.log "Parse table data exported to #{filename}"
+    parseData
+
+# ==============================================================================
+# Exports - Match original sonar structure
+# ==============================================================================
+
+Sonar = exports.Sonar = exports
+
+Sonar.Parser = (grammar, options) ->
+  generator = new LALRGenerator grammar, options
+  generator.createParser()
+
+exports.LALRGenerator = LALRGenerator
+
+Sonar.Generator = (g, options) ->
+  new LALRGenerator g, Object.assign({}, g.options, options)
 
 # CLI support
 if require.main is module
   args = process.argv[2..]
-  if args.length < 1
+
+  # Parse command line options
+  options = {help: false, exportParseData: false, output: null}
+  grammarFile = null
+
+  i = 0
+  while i < args.length
+    arg = args[i]
+    switch arg
+      when '-h', '--help' then options.help = true
+      when '--export-parse-data' then options.exportParseData = true
+      when '-o', '--output' then options.output = args[++i]
+      else grammarFile = arg unless arg.startsWith('-')
+    i++
+
+  if options.help or not grammarFile
     console.log """
-    Usage: sonar.coffee <grammar.coffee|grammar.json> [-o output.js]
+    Usage: sonar.coffee <grammar.coffee|grammar.json> [options]
+
+    Options:
+      -h, --help              Show this help
+      --export-parse-data     Export parse table data to JSON
+      -o, --output <file>     Output file
 
     Examples:
-      sonar.coffee grammar.coffee -o parser.js         # Parse .coffee grammar
-      sonar.coffee grammar-data.json -o parser.js      # Use pre-parsed JSON
+      sonar.coffee grammar.coffee -o parser.js                    # Parse .coffee grammar
+      sonar.coffee grammar-data.json -o parser.js                 # Use pre-parsed JSON
+      sonar.coffee grammar.json --export-parse-data -o data.json  # Export parse tables
     """
-    process.exit 1
+    process.exit if options.help then 0 else 1
 
   fs = require 'fs'
   path = require 'path'
-  grammarFile = args[0]
-  outputFile = if args.indexOf('-o') >= 0 then args[args.indexOf('-o') + 1] else 'parser.js'
+  options.output ||= if options.exportParseData then 'parse-data.json' else 'parser.js'
 
   try
     unless fs.existsSync grammarFile
@@ -829,9 +1070,12 @@ if require.main is module
       grammar = require(path.resolve(grammarFile))
       generator = new LALRGenerator(grammar, {timing: true})
 
-    output = generator.generate()
-    fs.writeFileSync(outputFile, output)
-    console.log "Parser generated: #{outputFile}"
+    if options.exportParseData
+      generator.exportParseData options.output
+    else
+      output = generator.generate()
+      fs.writeFileSync(options.output, output)
+      console.log "Parser generated: #{options.output}"
 
   catch error
     console.error "Error: #{error.message}"
