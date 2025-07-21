@@ -49,7 +49,7 @@ run = (args, callback) ->
     callback() if typeof callback is 'function'
 
 
-# Build the CoffeeScript language from source.
+# Build the CoffeeScript language from source using split architecture.
 buildParser = ->
   helpers.extend global, require 'util'
   grammar = require('./lib/coffeescript/grammar')
@@ -63,8 +63,25 @@ buildParser = ->
     operators : grammar.operators
     tokens    : grammar.tokens
     start     : grammar.start
-  src = gen.generate()
-  fs.writeFileSync 'lib/coffeescript/parser.js', src
+
+        # Create languages directory if it doesn't exist
+  languagesDir = '/Users/shreeve/Data/Code/rip/languages'
+  unless fs.existsSync languagesDir
+    fs.mkdirSync languagesDir, recursive: true
+
+  # Generate split architecture: language data file + generic parser
+  languageFile = gen.generateLanguageFile languageName: 'coffeescript'
+  parserFile = gen.generateSplitParser
+    languageName: 'coffeescript'
+    languageFile: '/Users/shreeve/Data/Code/rip/languages/coffeescript'
+
+  # Write both files
+  fs.writeFileSync (path.join languagesDir, 'coffeescript.js'), languageFile
+  fs.writeFileSync 'lib/coffeescript/parser.js', parserFile
+
+  parserKB = Math.round parserFile.length / 1024
+  languageKB = Math.round languageFile.length / 1024
+  log 'generated', green, "split parser architecture (parser: #{parserKB}KB, language: #{languageKB}KB)"
 
   # # # Use our rip-parser instead of Jison
   # # {Generator} = require '../parser/rip-parser'
