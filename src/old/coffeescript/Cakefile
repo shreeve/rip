@@ -56,8 +56,8 @@ buildParser = ->
 
   # who = './jison'
   # who = './rip'
-  who = '../../sonar'
-  # who = '../../sonar-original'
+  # who = '../../sonar'
+  who = '../../sonar-original'
 
   gen = (require who).Generator
     bnf       : grammar.grammar
