@@ -64,7 +64,7 @@ buildParser = ->
     tokens    : grammar.tokens
     start     : grammar.start
 
-        # Create languages directory if it doesn't exist
+  # Create languages directory if it doesn't exist
   languagesDir = '/Users/shreeve/Data/Code/rip/languages'
   unless fs.existsSync languagesDir
     fs.mkdirSync languagesDir, recursive: true

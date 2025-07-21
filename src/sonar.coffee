@@ -798,6 +798,7 @@ class LALRGenerator
       throw new Error "Parse Error: multiple actions possible at state: #{state}, token: #{symbol}" if action[0] instanceof Array and action.length > 1
 
       switch action[0]
+
         when 1 # shift
           stk.push symbol, action[1]
           val.push lexer.yytext
@@ -813,10 +814,9 @@ class LALRGenerator
           len = @productionTable[action[1]][1]
           yyval.$ = val[val.length - len]
           [locFirst, locLast] = [loc[loc.length - (len or 1)], loc[loc.length - 1]]
-          yyval._$ = {
-            first_line: locFirst.first_line, last_line: locLast.last_line
+          yyval._$ =
+            first_line:   locFirst.first_line  , last_line:   locLast.last_line
             first_column: locFirst.first_column, last_column: locLast.last_column
-          }
           yyval._$.range = [locFirst.range[0], locLast.range[1]] if ranges
 
           r = @performAction.apply yyval, [yytext, yyleng, yylineno, sharedState.yy, action[1], val, loc]
@@ -830,8 +830,7 @@ class LALRGenerator
           stk.push @productionTable[action[1]][0]
           val.push yyval.$
           loc.push yyval._$
-          newState = stateTable[stk[stk.length - 2]][stk[stk.length - 1]]
-          stk.push newState
+          stk.push stateTable[stk[stk.length - 2]][stk[stk.length - 1]]
 
         when 3 # accept
           return true
@@ -922,11 +921,12 @@ if require.main is module
   while i < process.argv.length - 2
     arg = process.argv[i + 2]
     switch arg
-      when '-h', '--help' then options.help = true
-      when '-s', '--stats' then options.stats = true
+      when '-h', '--help'     then options.help     = true
+      when '-s', '--stats'    then options.stats    = true
       when '-g', '--generate' then options.generate = true
-      when '-o', '--output' then options.output = process.argv[++i + 2]
-      when '-v', '--verbose' then options.verbose = true
+      when '-o', '--output'   then options.output   = process.argv[++i + 2]
+      when '-v', '--verbose'  then options.verbose  = true
+      when '-l', '--language' then options.language = process.argv[++i + 2]
       else grammarFile = arg unless arg.startsWith('-')
     i++
 
