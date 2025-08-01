@@ -56,7 +56,7 @@ buildParser = ->
   language =
     bnf       : grammar.grammar
     operators : grammar.operators
-  {Generator} = require '../../solar'
+  {Generator} = require '../src/solar'
   parser = Generator(language).generate(compress: !true)
   fs.writeFileSync 'lib/coffeescript/parser.js', parser
 
