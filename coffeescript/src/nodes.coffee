@@ -1161,6 +1161,17 @@ exports.IdentifierLiteral = class IdentifierLiteral extends Literal
   eachName: (iterator) ->
     iterator @
 
+  # rip: Override compilation to handle async call operator (!)
+  compileNode: (o) ->
+    # Check if identifier ends with ! (async call operator)
+    if @value.endsWith('!')
+      # Remove the ! and wrap with await and parentheses
+      name = @value.slice(0, -1)
+      [@makeCode("await #{name}()")]
+    else
+      # Normal identifier compilation
+      super(o)
+
   astType: ->
     if @jsx
       'JSXIdentifier'
@@ -1451,6 +1462,12 @@ exports.Value = class Value extends Base
   compileNode: (o) ->
     @base.front = @front
     props = @properties
+
+    # rip: Check if last property ends with ! (async call operator)
+    lastProp = props[props.length - 1]
+    isAsyncCall = lastProp?.name?.value?.endsWith?('!')
+    isBeingCalled = @isBeingCalled
+
     if props.length and @base.cached?
       # Cached fragments enable correct order of the compilation,
       # and reuse of variables in the scope.
@@ -1463,10 +1480,25 @@ exports.Value = class Value extends Base
       fragments = @base.compileToFragments o, (if props.length then LEVEL_ACCESS else null)
     if props.length and SIMPLENUM.test fragmentsToText fragments
       fragments.push @makeCode '.'
-    for prop in props
-      fragments.push (prop.compileToFragments o)...
 
-    fragments
+    for prop, i in props
+      if isAsyncCall and i is props.length - 1
+        # For the last property with !, remove the !
+        propName = prop.name.value.slice(0, -1)
+        if isBeingCalled
+          # If being called, just remove ! (Call will handle await and args)
+          fragments.push @makeCode(".#{propName}")
+        else
+          # If not being called, add () and await
+          fragments.push @makeCode(".#{propName}()")
+      else
+        fragments.push (prop.compileToFragments o)...
+
+    # rip: Wrap entire expression with await if last property had ! and not being called
+    if isAsyncCall and not isBeingCalled
+      [[@makeCode('await ')], fragments...].flat()
+    else
+      fragments
 
   # Unfold a soak into an `If`: `a?.b` -> `a.b if a?`
   unfoldSoak: (o) ->
@@ -2061,6 +2093,11 @@ exports.Call = class Call extends Base
     @checkForNewSuper()
     @variable?.front = @front
     compiledArgs = []
+
+    # rip: Check if this is an async call (variable ends with !)
+    lastProp = @variable?.properties?[@variable.properties.length - 1]
+    isAsyncCall = lastProp?.name?.value?.endsWith?('!')
+
     # If variable is `Accessor` fragments are cached and used later
     # in `Value::compileNode` to ensure correct order of the compilation,
     # and reuse of variables in the scope.
@@ -2081,6 +2118,13 @@ exports.Call = class Call extends Base
     fragments = []
     if @isNew
       fragments.push @makeCode 'new '
+
+    # rip: Handle async call with arguments
+    if isAsyncCall
+      # Mark the variable to not add automatic () in Value.compileNode
+      @variable.isBeingCalled = yes
+      fragments.push @makeCode 'await '
+
     fragments.push @variable.compileToFragments(o, LEVEL_ACCESS)...
     fragments.push @makeCode('('), compiledArgs..., @makeCode(')')
     fragments

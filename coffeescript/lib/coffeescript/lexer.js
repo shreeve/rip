@@ -1783,7 +1783,8 @@
   BOM = 65279;
 
   // Token matching regexes.
-  IDENTIFIER = /^(?!\d)((?:(?!\s)[$\w\x7f-\uffff])+)([^\n\S]*:(?!:))?/; // Is this a property name?
+  IDENTIFIER = /^(?!\d)((?:(?!\s)[$\w\x7f-\uffff])+!?)([^\n\S]*:(?!:))?/; // rip: allow optional trailing ! for async calls
+  // Is this a property name?
 
   // Like `IDENTIFIER`, but includes `-`s
   JSX_IDENTIFIER_PART = /(?:(?!\s)[\-$\w\x7f-\uffff])+/.source;

@@ -1646,6 +1646,20 @@
         return iterator(this);
       }
 
+      // rip: Override compilation to handle async call operator (!)
+      compileNode(o) {
+        var name;
+        // Check if identifier ends with ! (async call operator)  
+        if (this.value.endsWith('!')) {
+          // Remove the ! and wrap with await and parentheses
+          name = this.value.slice(0, -1);
+          return [this.makeCode(`await ${name}()`)];
+        } else {
+          // Normal identifier compilation
+          return super.compileNode(o);
+        }
+      }
+
       astType() {
         if (this.jsx) {
           return 'JSXIdentifier';
@@ -2147,9 +2161,14 @@
       // operators `?.` interspersed. Then we have to take care not to accidentally
       // evaluate anything twice when building the soak chain.
       compileNode(o) {
-        var fragments, j, len1, prop, props;
+        var fragments, i, isAsyncCall, isBeingCalled, j, lastProp, len1, prop, propName, props, ref1, ref2;
         this.base.front = this.front;
         props = this.properties;
+        
+        // rip: Check if last property ends with ! (async call operator)
+        lastProp = props[props.length - 1];
+        isAsyncCall = lastProp != null ? (ref1 = lastProp.name) != null ? (ref2 = ref1.value) != null ? typeof ref2.endsWith === "function" ? ref2.endsWith('!') : void 0 : void 0 : void 0 : void 0;
+        isBeingCalled = this.isBeingCalled;
         if (props.length && (this.base.cached != null)) {
           // Cached fragments enable correct order of the compilation,
           // and reuse of variables in the scope.
@@ -2164,11 +2183,28 @@
         if (props.length && SIMPLENUM.test(fragmentsToText(fragments))) {
           fragments.push(this.makeCode('.'));
         }
-        for (j = 0, len1 = props.length; j < len1; j++) {
-          prop = props[j];
-          fragments.push(...(prop.compileToFragments(o)));
+        for (i = j = 0, len1 = props.length; j < len1; i = ++j) {
+          prop = props[i];
+          if (isAsyncCall && i === props.length - 1) {
+            // For the last property with !, remove the !
+            propName = prop.name.value.slice(0, -1);
+            if (isBeingCalled) {
+              // If being called, just remove ! (Call will handle await and args)
+              fragments.push(this.makeCode(`.${propName}`));
+            } else {
+              // If not being called, add () and await
+              fragments.push(this.makeCode(`.${propName}()`));
+            }
+          } else {
+            fragments.push(...(prop.compileToFragments(o)));
+          }
         }
-        return fragments;
+        // rip: Wrap entire expression with await if last property had ! and not being called
+        if (isAsyncCall && !isBeingCalled) {
+          return [[this.makeCode('await ')], ...fragments].flat();
+        } else {
+          return fragments;
+        }
       }
 
       // Unfold a soak into an `If`: `a?.b` -> `a.b if a?`
@@ -3027,12 +3063,17 @@
 
       // Compile a vanilla function call.
       compileNode(o) {
-        var arg, argCode, argIndex, cache, compiledArgs, fragments, j, len1, ref1, ref2, ref3, ref4, varAccess;
+        var arg, argCode, argIndex, cache, compiledArgs, fragments, isAsyncCall, j, lastProp, len1, ref1, ref2, ref3, ref4, ref5, ref6, ref7, ref8, varAccess;
         this.checkForNewSuper();
         if ((ref1 = this.variable) != null) {
           ref1.front = this.front;
         }
         compiledArgs = [];
+        
+        // rip: Check if this is an async call (variable ends with !)
+        lastProp = (ref2 = this.variable) != null ? (ref3 = ref2.properties) != null ? ref3[this.variable.properties.length - 1] : void 0 : void 0;
+        isAsyncCall = lastProp != null ? (ref4 = lastProp.name) != null ? (ref5 = ref4.value) != null ? typeof ref5.endsWith === "function" ? ref5.endsWith('!') : void 0 : void 0 : void 0 : void 0;
+        
         // If variable is `Accessor` fragments are cached and used later
         // in `Value::compileNode` to ensure correct order of the compilation,
         // and reuse of variables in the scope.
@@ -3040,13 +3081,13 @@
         // `a(x = 5).b(-> x = 6)` should compile in the same order as
         // `a(x = 5); b(-> x = 6)`
         // (see issue #4437, https://github.com/jashkenas/coffeescript/issues/4437)
-        varAccess = ((ref2 = this.variable) != null ? (ref3 = ref2.properties) != null ? ref3[0] : void 0 : void 0) instanceof Access;
+        varAccess = ((ref6 = this.variable) != null ? (ref7 = ref6.properties) != null ? ref7[0] : void 0 : void 0) instanceof Access;
         argCode = (function() {
-          var j, len1, ref4, results1;
-          ref4 = this.args || [];
+          var j, len1, ref8, results1;
+          ref8 = this.args || [];
           results1 = [];
-          for (j = 0, len1 = ref4.length; j < len1; j++) {
-            arg = ref4[j];
+          for (j = 0, len1 = ref8.length; j < len1; j++) {
+            arg = ref8[j];
             if (arg instanceof Code) {
               results1.push(arg);
             }
@@ -3059,9 +3100,9 @@
           });
           this.variable.base.cached = cache;
         }
-        ref4 = this.args;
-        for (argIndex = j = 0, len1 = ref4.length; j < len1; argIndex = ++j) {
-          arg = ref4[argIndex];
+        ref8 = this.args;
+        for (argIndex = j = 0, len1 = ref8.length; j < len1; argIndex = ++j) {
+          arg = ref8[argIndex];
           if (argIndex) {
             compiledArgs.push(this.makeCode(", "));
           }
@@ -3070,6 +3111,13 @@
         fragments = [];
         if (this.isNew) {
           fragments.push(this.makeCode('new '));
+        }
+        
+        // rip: Handle async call with arguments
+        if (isAsyncCall) {
+          // Mark the variable to not add automatic () in Value.compileNode
+          this.variable.isBeingCalled = true;
+          fragments.push(this.makeCode('await '));
         }
         fragments.push(...this.variable.compileToFragments(o, LEVEL_ACCESS));
         fragments.push(this.makeCode('('), ...compiledArgs, this.makeCode(')'));
