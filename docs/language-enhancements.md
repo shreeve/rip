@@ -1,4 +1,6 @@
-# <img src="assets/logos/rip-icon-512wa.png" style="width:60px;float:top; float:left;" /> &nbsp; Language Enhancements
+<img src="assets/logos/rip-icon-512wa.png" style="width:50px" /> <br>
+
+# Language Enhancements
 
 This document chronicles the language enhancements made in Rip compared to traditional CoffeeScript. Each enhancement is designed to generate cleaner, more modern JavaScript while maintaining full compatibility with existing CoffeeScript code.
 

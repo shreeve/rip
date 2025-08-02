@@ -1,4 +1,6 @@
-# <img src="assets/logos/rip-icon-512wa.png" style="width:60px;float:top; float:left;" /> &nbsp; Documentation Index
+<img src="assets/logos/rip-icon-512wa.png" style="width:50px" /> <br>
+
+# Documentation Index
 
 Welcome to the **Rip multilanguage universal runtime** documentation suite! This directory contains everything you need to understand, use, and contribute to the Rip project.
 
