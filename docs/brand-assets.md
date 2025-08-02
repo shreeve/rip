@@ -1,4 +1,4 @@
-# Brand Assets <img src="assets/logos/rip-icon-512wa.png" style="width:60px;float:right;" />
+# <img src="assets/logos/rip-icon-512wa.png" style="width:60px;float:top; float:left;" /> &nbsp; Brand Assets
 
 **Official Rip Branding & Visual Identity**
 

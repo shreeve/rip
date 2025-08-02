@@ -5406,10 +5406,12 @@
         vvar = value.compileToFragments(o, LEVEL_LIST);
         vvarText = fragmentsToText(vvar);
         assigns = [];
-        pushAssign = (variable, val) => assigns.push(new Assign(variable, val, null, {
+        pushAssign = (variable, val) => {
+          return assigns.push(new Assign(variable, val, null, {
             param: this.param,
             subpattern: true
           }).compileToFragments(o, LEVEL_LIST));
+        };
         if (isSplat) {
           splatVar = objects[splats[0]].name.unwrap();
           if (splatVar instanceof Arr || splatVar instanceof Obj) {
@@ -5867,7 +5869,7 @@
       // parameters after the splat, they are declared via expressions in the
       // function body.
       compileNode(o) {
-        var answer, body, boundMethodCheck, comment, condition, expr, exprs, generatedVariables, haveBodyParam, haveSplatParam, i, ifTrue, j, k, l, len1, len2, len3, m, methodScope, modifiers, name, param, paramToAddToScope, params, paramsAfterSplat, ref, ref1, ref2, ref3, ref4, ref5, ref6, ref7, ref8, scopeVariablesCount, signature, splatParamName, thisAssignments, wasEmpty, yieldNode;
+        var answer, body, boundMethodCheck, comment, condition, exprs, generatedVariables, haveBodyParam, haveSplatParam, i, ifTrue, j, k, l, len1, len2, len3, m, methodScope, modifiers, name, param, paramToAddToScope, params, paramsAfterSplat, ref, ref1, ref2, ref3, ref4, ref5, ref6, ref7, ref8, scopeVariablesCount, signature, splatParamName, thisAssignments, wasEmpty, yieldNode;
         this.checkForAsyncOrGeneratorConstructor();
         if (this.bound) {
           if ((ref1 = o.scope.method) != null ? ref1.bound : void 0) {
@@ -6134,7 +6136,6 @@
           answer.push(...name);
         }
         answer.push(...signature);
-
         if (this.bound && !this.isMethod) {
           answer.push(this.makeCode(' =>'));
         }
@@ -6200,8 +6201,6 @@
           return false;
         }
       }
-
-
 
       disallowSuperInParamDefaults({forAst} = {}) {
         if (!this.ctor) {
@@ -6270,7 +6269,9 @@
         if (!this.ctor) {
           return false;
         }
-        seenSuper = this.eachSuperCall(this.body, (superCall) => superCall.expressions = thisAssignments);
+        seenSuper = this.eachSuperCall(this.body, (superCall) => {
+          return superCall.expressions = thisAssignments;
+        });
         haveThisParam = thisAssignments.length && thisAssignments.length !== ((ref1 = this.thisAssignments) != null ? ref1.length : void 0);
         if (this.ctor === 'derived' && !seenSuper && haveThisParam) {
           param = thisAssignments[0].variable;
@@ -8752,7 +8753,7 @@
 
   LEVEL_ACCESS = 6; // ...[0]
 
-
+  
   // Tabs are two spaces for pretty printing.
   TAB = '  ';
 
