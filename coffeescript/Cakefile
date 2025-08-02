@@ -63,6 +63,7 @@ buildParser = ->
 buildExceptParser = (callback) ->
   files = fs.readdirSync 'src'
   files = ('src/' + file for file in files when file.match(/\.(lit)?coffee$/))
+  # Compile CoffeeScript's own source without --bare to keep IIFE wrapper for bootstrap stability
   run ['-c', '-o', 'lib/coffeescript'].concat(files), callback
 
 build = (callback) ->
