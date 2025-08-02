@@ -396,9 +396,11 @@
         quote,
         indent,
         endOffset: end
-      }, (value) => this.validateUnicodeCodePointEscapes(value, {
+      }, (value) => {
+        return this.validateUnicodeCodePointEscapes(value, {
           delimiter: quote
-        }));
+        });
+      });
       if (this.atJSXTag()) {
         this.token(',', ',', {
           length: 0,
@@ -669,7 +671,9 @@
             heregex: {flags},
             endOffset: end - flags.length,
             quote: '///'
-          }, (str) => this.validateUnicodeCodePointEscapes(str, {delimiter}));
+          }, (str) => {
+            return this.validateUnicodeCodePointEscapes(str, {delimiter});
+          });
           if (flags) {
             this.token(',', ',', {
               offset: index - 1,
@@ -1004,9 +1008,11 @@
           this.mergeInterpolationTokens(tokens, {
             endOffset: end,
             jsx: true
-          }, (value) => this.validateUnicodeCodePointEscapes(value, {
+          }, (value) => {
+            return this.validateUnicodeCodePointEscapes(value, {
               delimiter: '>'
-            }));
+            });
+          });
           match = JSX_IDENTIFIER.exec(this.chunk.slice(end)) || JSX_FRAGMENT_IDENTIFIER.exec(this.chunk.slice(end));
           if (!match || match[1] !== `${jsxTag.name}${((function() {
             var k, len1, ref1, results;

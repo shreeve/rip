@@ -6134,22 +6134,15 @@
           answer.push(...name);
         }
         answer.push(...signature);
-        // rip: Generate concise arrow functions when possible
-        if (this.bound && !this.isMethod && this.isSimpleArrowBody()) {
-          answer.push(this.makeCode(' => '));
-          // Get the return expression directly, skip the return statement wrapper
-          expr = this.body.expressions[0].expression;
-          answer.push(...expr.compileToFragments(o, LEVEL_PAREN));
-        } else {
-          if (this.bound && !this.isMethod) {
-            answer.push(this.makeCode(' =>'));
-          }
-          answer.push(this.makeCode(' {'));
-          if (body != null ? body.length : void 0) {
-            answer.push(this.makeCode('\n'), ...body, this.makeCode(`\n${this.tab}`));
-          }
-          answer.push(this.makeCode('}'));
+
+        if (this.bound && !this.isMethod) {
+          answer.push(this.makeCode(' =>'));
         }
+        answer.push(this.makeCode(' {'));
+        if (body != null ? body.length : void 0) {
+          answer.push(this.makeCode('\n'), ...body, this.makeCode(`\n${this.tab}`));
+        }
+        answer.push(this.makeCode('}'));
         if (this.isMethod) {
           return indentInitial(answer, this);
         }
@@ -6208,59 +6201,7 @@
         }
       }
 
-      // rip: Check if this arrow function can be made concise
-      isSimpleArrowBody() {
-        var expr, expressions, ref1, ref2, ref3, returnExpr;
-        if (!this.bound) { // Only for arrow functions
-          return false;
-        }
-        if (this.body.isEmpty()) { // Empty body
-          return false;
-        }
-        expressions = this.body.expressions;
-        if (expressions.length !== 1) { // Must be single expression
-          return false;
-        }
-        expr = expressions[0];
-        if (!(expr instanceof Return)) { // Must be a return
-          return false;
-        }
-        if (!expr.expression) { // Must return something
-          return false;
-        }
-        
-        // Be conservative with complex cases that might need special scoping
-        returnExpr = expr.expression;
-        if (returnExpr instanceof JSXElement) {
-          // Skip JSX elements - they can be complex
-          return false;
-        }
-        if (typeof returnExpr.contains === "function" ? returnExpr.contains(function(node) {
-          return node instanceof SuperCall;
-        }) : void 0) {
-          // Skip if the return expression contains function calls that might need complex scoping
-          return false;
-        }
-        if (((ref1 = expr.comments) != null ? ref1.length : void 0) > 0 || ((ref2 = this.comments) != null ? ref2.length : void 0) > 0) {
-          // Skip if the function has complex comments (like Flow types)
-          return false;
-        }
-        if (returnExpr instanceof Obj) { // Skip object literals
-          // Skip complex expressions that might span multiple lines or have complex structure
-          // Be very conservative to avoid brace misalignment issues
-          return false;
-        }
-        if (returnExpr instanceof Arr) { // Skip array literals
-          return false;
-        }
-        if (returnExpr instanceof Call && ((ref3 = returnExpr.args) != null ? ref3.length : void 0) > 1) {
-          
-          // Skip function calls with multiple arguments (they often span multiple lines)
-          // This catches the original problem case: someFunction(value, {delimiter: quote})
-          return false;
-        }
-        return true;
-      }
+
 
       disallowSuperInParamDefaults({forAst} = {}) {
         if (!this.ctor) {
@@ -8811,7 +8752,7 @@
 
   LEVEL_ACCESS = 6; // ...[0]
 
-  
+
   // Tabs are two spaces for pretty printing.
   TAB = '  ';
 
