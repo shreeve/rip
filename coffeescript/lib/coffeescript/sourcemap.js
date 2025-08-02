@@ -17,7 +17,7 @@
   // A **LineMap** object keeps track of information about original line and column
   // positions for a single line of output JavaScript code.
   // **SourceMaps** are implemented in terms of **LineMaps**.
-  var LineMap, SourceMap;
+  let LineMap, SourceMap;
 
   LineMap = class LineMap {
     constructor(line1) {
@@ -38,7 +38,7 @@
     }
 
     sourceLocation(column) {
-      var mapping;
+      let mapping;
       while (!((mapping = this.columns[column]) || (column <= 0))) {
         column--;
       }
@@ -48,7 +48,7 @@
   };
 
   SourceMap = (function() {
-    var BASE64_CHARS, VLQ_CONTINUATION_BIT, VLQ_SHIFT, VLQ_VALUE_MASK;
+    let BASE64_CHARS, VLQ_CONTINUATION_BIT, VLQ_SHIFT, VLQ_VALUE_MASK;
 
     // SourceMap
     // ---------
@@ -69,7 +69,7 @@
       // is already a mapping for the specified `line` and `column`, this will have no
       // effect.
       add(sourceLocation, generatedLocation, options = {}) {
-        var base, column, line, lineMap;
+        let base, column, line, lineMap;
         [line, column] = generatedLocation;
         lineMap = ((base = this.lines)[line] || (base[line] = new LineMap(line)));
         return lineMap.add(column, sourceLocation, options);
@@ -78,7 +78,7 @@
       // Look up the original position of a given `line` and `column` in the generated
       // code.
       sourceLocation([line, column]) {
-        var lineMap;
+        let lineMap;
         while (!((lineMap = this.lines[line]) || (line <= 0))) {
           line--;
         }
@@ -103,7 +103,7 @@
       // map.  Also, `options.sourceFiles` and `options.generatedFile` may be passed to
       // set "sources" and "file", respectively.
       generate(options = {}, code = null) {
-        var buffer, i, j, lastColumn, lastSourceColumn, lastSourceLine, len, len1, lineMap, lineNumber, mapping, needComma, ref, ref1, sources, v3, writingline;
+        let buffer, i, j, lastColumn, lastSourceColumn, lastSourceLine, len, len1, lineMap, lineNumber, mapping, needComma, ref, ref1, sources, v3, writingline;
         writingline = 0;
         lastColumn = 0;
         lastSourceLine = 0;
@@ -167,7 +167,7 @@
       }
 
       encodeVlq(value) {
-        var answer, nextChunk, signBit, valueToEncode;
+        let answer, nextChunk, signBit, valueToEncode;
         answer = '';
         // Least significant bit represents the sign.
         signBit = value < 0 ? 1 : 0;
