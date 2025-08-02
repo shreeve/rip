@@ -4,7 +4,7 @@
   // to make things work smoothly when compiling code directly in the browser.
   // We add support for loading remote Coffee scripts via **XHR**, and
   // `text/coffeescript` script tags, source maps via data-URLs, and so on.
-  let CoffeeScript, compile,
+  var CoffeeScript, compile,
     indexOf = [].indexOf;
 
   CoffeeScript = require('./coffeescript');
@@ -16,7 +16,7 @@
   // CoffeeScript compiler. (So that `cake test:browser` also works in Node,
   // use either `window.eval` or `global.eval` as appropriate).
   CoffeeScript.eval = function(code, options = {}) {
-    let globalRoot;
+    var globalRoot;
     if (options.bare == null) {
       options.bare = true;
     }
@@ -52,7 +52,7 @@
 
   // Load a remote script from the current domain via XHR.
   CoffeeScript.load = function(url, callback, options = {}, hold = false) {
-    let xhr;
+    var xhr;
     options.sourceFiles = [url];
     xhr = window.ActiveXObject ? new window.ActiveXObject('Microsoft.XMLHTTP') : new window.XMLHttpRequest();
     xhr.open('GET', url, true);
@@ -60,7 +60,7 @@
       xhr.overrideMimeType('text/plain');
     }
     xhr.onreadystatechange = function() {
-      let param, ref;
+      var param, ref;
       if (xhr.readyState === 4) {
         if ((ref = xhr.status) === 0 || ref === 200) {
           param = [xhr.responseText, options];
@@ -82,11 +82,11 @@
   // all script tags with a content-type of `text/coffeescript`.
   // This happens on page load.
   CoffeeScript.runScripts = function() {
-    let coffees, coffeetypes, execute, i, index, j, len, s, script, scripts;
+    var coffees, coffeetypes, execute, i, index, j, len, s, script, scripts;
     scripts = window.document.getElementsByTagName('script');
     coffeetypes = ['text/coffeescript', 'text/literate-coffeescript'];
     coffees = (function() {
-      let j, len, ref, results;
+      var j, len, ref, results;
       results = [];
       for (j = 0, len = scripts.length; j < len; j++) {
         s = scripts[j];
@@ -98,7 +98,7 @@
     })();
     index = 0;
     execute = function() {
-      let param;
+      var param;
       param = coffees[index];
       if (param instanceof Array) {
         CoffeeScript.run(...param);
@@ -109,7 +109,7 @@
     for (i = j = 0, len = coffees.length; j < len; i = ++j) {
       script = coffees[i];
       (function(script, i) {
-        let options, source;
+        var options, source;
         options = {
           literate: script.type === coffeetypes[1]
         };

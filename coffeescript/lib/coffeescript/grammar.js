@@ -21,7 +21,7 @@
   // Since we're going to be wrapped in a parser function in any case, if our
   // action immediately returns a value, we can optimize by removing the function
   // wrapper and just returning the value directly.
-  let alt, alternatives, grammar, name, o, operators, unwrap,
+  var alt, alternatives, grammar, name, o, operators, unwrap,
     hasProp = {}.hasOwnProperty;
 
   unwrap = /^function\s*\(\)\s*\{\s*return\s*([\s\S]*);\s*\}/;
@@ -32,7 +32,7 @@
   // optionally. If no action is specified, we simply pass the value of the
   // previous nonterminal.
   o = function(patternString, action, options) {
-    let getAddDataToNodeFunctionString, match, patternCount, performActionFunctionString, returnsLoc;
+    var getAddDataToNodeFunctionString, match, patternCount, performActionFunctionString, returnsLoc;
     patternString = patternString.replace(/\s{2,}/g, ' ');
     patternCount = patternString.split(' ').length;
     if (action) {
@@ -189,7 +189,7 @@
       }),
       o('JSX_TAG',
       function() {
-        let ref,
+        var ref,
       ref1,
       ref2,
       ref3;
@@ -1697,7 +1697,7 @@
       }),
       o('FOR AWAIT ForVariables',
       function() {
-        let index,
+        var index,
       name;
         [name,
       index] = $3;
@@ -1711,7 +1711,7 @@
       }),
       o('FOR OWN ForVariables',
       function() {
-        let index,
+        var index,
       name;
         [name,
       index] = $3;
@@ -2387,7 +2387,7 @@
       }),
       o('Expression RELATION Expression',
       function() {
-        let ref,
+        var ref,
       ref1;
         return new Op($2.toString(),
       $1,
@@ -2451,7 +2451,7 @@
     if (!hasProp.call(grammar, name)) continue;
     alternatives = grammar[name];
     grammar[name] = (function() {
-      let i, len, results;
+      var i, len, results;
       results = [];
       for (i = 0, len = alternatives.length; i < len; i++) {
         alt = alternatives[i];

@@ -7,7 +7,7 @@
   // interactive REPL.
 
   // External dependencies.
-  let BANNER, CoffeeScript, EventEmitter, SWITCHES, buildCSOptionParser, compileJoin, compileOptions, compilePath, compileScript, compileStdio, exec, findDirectoryIndex, forkNode, fs, helpers, hidden, joinTimeout, makePrelude, mkdirp, notSources, optionParser, optparse, opts, outputPath, parseOptions, path, printLine, printTokens, printWarn, removeSource, removeSourceDir, silentUnlink, sourceCode, sources, spawn, timeLog, usage, useWinPathSep, version, wait, watch, watchDir, watchedDirs, writeJs,
+  var BANNER, CoffeeScript, EventEmitter, SWITCHES, buildCSOptionParser, compileJoin, compileOptions, compilePath, compileScript, compileStdio, exec, findDirectoryIndex, forkNode, fs, helpers, hidden, joinTimeout, makePrelude, mkdirp, notSources, optionParser, optparse, opts, outputPath, parseOptions, path, printLine, printTokens, printWarn, removeSource, removeSourceDir, silentUnlink, sourceCode, sources, spawn, timeLog, usage, useWinPathSep, version, wait, watch, watchDir, watchedDirs, writeJs,
     indexOf = [].indexOf;
 
   fs = require('fs');
@@ -70,7 +70,7 @@ If called without options, \`coffee\` will run your script.`;
   // Many flags cause us to divert before compiling anything. Flags passed after
   // `--` will be passed verbatim to your script as arguments in `process.argv`
   exports.run = function() {
-    let err, i, len, literals, outputBasename, ref, replCliOpts, results, source;
+    var err, i, len, literals, outputBasename, ref, replCliOpts, results, source;
     optionParser = buildCSOptionParser();
     try {
       parseOptions();
@@ -162,7 +162,7 @@ with...
 
   makePrelude = function(requires) {
     return requires.map(function(module) {
-      let full, match, name;
+      var full, match, name;
       if (match = module.match(/^(.*)=(.*)$/)) {
         [full, name, module] = match;
       }
@@ -175,7 +175,7 @@ with...
   // is passed, recursively compile all '.coffee', '.litcoffee', and '.coffee.md'
   // extension source files in it and all subdirectories.
   compilePath = function(source, topLevel, base) {
-    let code, err, file, files, i, len, results, stats;
+    var code, err, file, files, i, len, results, stats;
     if (indexOf.call(sources, source) >= 0 || watchedDirs[source] || !topLevel && (notSources[source] || hidden(source))) {
       return;
     }
@@ -241,7 +241,7 @@ with...
   };
 
   findDirectoryIndex = function(source) {
-    let err, ext, i, index, len, ref;
+    var err, ext, i, index, len, ref;
     ref = CoffeeScript.FILE_EXTENSIONS;
     for (i = 0, len = ref.length; i < len; i++) {
       ext = ref[i];
@@ -265,7 +265,7 @@ with...
   // requested options. If evaluating the script directly, set `__filename`,
   // `__dirname` and `module.filename` to be correct relative to the script's path.
   compileScript = function(file, input, base = null) {
-    let compiled, err, message, options, saveTo, task;
+    var compiled, err, message, options, saveTo, task;
     options = compileOptions(file, base);
     try {
       task = {file, input, options};
@@ -323,7 +323,7 @@ with...
   // Attach the appropriate listeners to compile scripts incoming over **stdin**,
   // and write them back to **stdout**.
   compileStdio = function() {
-    let buffers, stdin;
+    var buffers, stdin;
     if (opts.map) {
       console.error('--stdio and --map cannot be used together');
       process.exit(1);
@@ -362,7 +362,7 @@ with...
   // time the file is updated. May be used in combination with other options,
   // such as `--print`.
   watch = function(source, base) {
-    let compile, compileTimeout, err, prevStats, rewatch, startWatcher, watchErr, watcher;
+    var compile, compileTimeout, err, prevStats, rewatch, startWatcher, watchErr, watcher;
     watcher = null;
     prevStats = null;
     compileTimeout = null;
@@ -426,7 +426,7 @@ with...
 
   // Watch a directory of files for new additions.
   watchDir = function(source, base) {
-    let err, readdirTimeout, startWatcher, stopWatcher, watcher;
+    var err, readdirTimeout, startWatcher, stopWatcher, watcher;
     watcher = null;
     readdirTimeout = null;
     startWatcher = function() {
@@ -438,7 +438,7 @@ with...
       }).on('change', function() {
         clearTimeout(readdirTimeout);
         return readdirTimeout = wait(25, function() {
-          let err, file, files, i, len, results;
+          var err, file, files, i, len, results;
           try {
             files = fs.readdirSync(source);
           } catch (error) {
@@ -473,7 +473,7 @@ with...
   };
 
   removeSourceDir = function(source, base) {
-    let file, i, len, sourcesChanged;
+    var file, i, len, sourcesChanged;
     delete watchedDirs[source];
     sourcesChanged = false;
     for (i = 0, len = sources.length; i < len; i++) {
@@ -492,7 +492,7 @@ with...
   // Remove a file from our source list, and source code cache. Optionally remove
   // the compiled JS version as well.
   removeSource = function(source, base) {
-    let index;
+    var index;
     index = sources.indexOf(source);
     sources.splice(index, 1);
     sourceCode.splice(index, 1);
@@ -504,7 +504,7 @@ with...
   };
 
   silentUnlink = function(path) {
-    let err, ref;
+    var err, ref;
     try {
       return fs.unlinkSync(path);
     } catch (error) {
@@ -517,7 +517,7 @@ with...
 
   // Get the corresponding output JavaScript path for a source file.
   outputPath = function(source, base, extension = ".js") {
-    let basename, dir, srcDir;
+    var basename, dir, srcDir;
     basename = helpers.baseFileName(source, true, useWinPathSep);
     srcDir = path.dirname(source);
     dir = !opts.outputPath ? srcDir : source === base ? opts.outputPath : path.join(opts.outputPath, path.relative(base, srcDir));
@@ -526,7 +526,7 @@ with...
 
   // Recursively mkdir, like `mkdir -p`.
   mkdirp = function(dir, fn) {
-    let mkdirs, mode;
+    var mkdirs, mode;
     mode = 0o777 & ~process.umask();
     return (mkdirs = function(p, fn) {
       return fs.exists(p, function(exists) {
@@ -553,7 +553,7 @@ with...
   // If `generatedSourceMap` is provided, this will write a `.js.map` file into the
   // same directory as the `.js` file.
   writeJs = function(base, sourcePath, js, jsPath, generatedSourceMap = null) {
-    let compile, jsDir, sourceMapPath;
+    var compile, jsDir, sourceMapPath;
     sourceMapPath = `${jsPath}.map`;
     jsDir = path.dirname(jsPath);
     compile = function() {
@@ -603,9 +603,9 @@ with...
 
   // Pretty-print a stream of tokens, sans location data.
   printTokens = function(tokens) {
-    let strings, tag, token, value;
+    var strings, tag, token, value;
     strings = (function() {
-      let i, len, results;
+      var i, len, results;
       results = [];
       for (i = 0, len = tokens.length; i < len; i++) {
         token = tokens[i];
@@ -621,7 +621,7 @@ with...
   // Use the [OptionParser module](optparse.html) to extract all options from
   // `process.argv` that are specified in `SWITCHES`.
   parseOptions = function() {
-    let o;
+    var o;
     o = opts = optionParser.parse(process.argv.slice(2));
     o.compile || (o.compile = !!o.output);
     o.run = !(o.compile || o.print || o.map);
@@ -630,7 +630,7 @@ with...
 
   // The compile-time options to pass to the CoffeeScript compiler.
   compileOptions = function(filename, base) {
-    let answer, cwd, jsDir, jsPath;
+    var answer, cwd, jsDir, jsPath;
     if (opts.transpile) {
       try {
         // The user has requested that the CoffeeScript compiler also transpile
@@ -713,7 +713,7 @@ See https://coffeescript.org/#transpilation`);
   // Start up a new Node.js instance with the arguments in `--nodejs` passed to
   // the `node` binary, preserving the other options.
   forkNode = function() {
-    let args, i, len, nodeArgs, p, ref, signal;
+    var args, i, len, nodeArgs, p, ref, signal;
     nodeArgs = opts.nodejs.split(/\s+/);
     args = process.argv.slice(1);
     args.splice(args.indexOf('--nodejs'), 2);

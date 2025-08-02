@@ -4,7 +4,7 @@
   // on Node.js/V8, or to run CoffeeScript directly in the browser. This module
   // contains the main entry functions for tokenizing, parsing, and compiling
   // source CoffeeScript into JavaScript.
-  let FILE_EXTENSIONS, Lexer, SourceMap, base64encode, checkShebangLine, compile, getSourceMap, helpers, lexer, packageJson, parser, registerCompiled, withPrettyErrors;
+  var FILE_EXTENSIONS, Lexer, SourceMap, base64encode, checkShebangLine, compile, getSourceMap, helpers, lexer, packageJson, parser, registerCompiled, withPrettyErrors;
 
   ({Lexer} = require('./lexer'));
 
@@ -55,7 +55,7 @@
   // lexer/parser/compiler.
   withPrettyErrors = function(fn) {
     return function(code, options = {}) {
-      let err;
+      var err;
       try {
         return fn.call(this, code, options);
       } catch (error) {
@@ -79,7 +79,7 @@
   // object, where sourceMap is a sourcemap.coffee#SourceMap object, handy for
   // doing programmatic lookups.
   exports.compile = compile = withPrettyErrors(function(code, options = {}) {
-    let ast, currentColumn, currentLine, encoded, filename, fragment, fragments, generateSourceMap, header, i, j, js, len, len1, map, newLines, nodes, range, ref, sourceCodeLastLine, sourceCodeNumberOfLines, sourceMapDataURI, sourceURL, token, tokens, transpiler, transpilerOptions, transpilerOutput, v3SourceMap;
+    var ast, currentColumn, currentLine, encoded, filename, fragment, fragments, generateSourceMap, header, i, js, len, map, newLines, nodes, range, sourceCodeLastLine, sourceCodeNumberOfLines, sourceMapDataURI, sourceURL, token, tokens, transpiler, transpilerOptions, transpilerOutput, v3SourceMap;
     // Clone `options`, to avoid mutating the `options` object passed in.
     options = Object.assign({}, options);
     generateSourceMap = options.sourceMap || options.inlineMap || (options.filename == null);
@@ -92,7 +92,7 @@
     // Pass a list of referenced variables, so that generated variables won’t get
     // the same name.
     options.referencedVars = (function() {
-      let i, len, results;
+      var i, len, results;
       results = [];
       for (i = 0, len = tokens.length; i < len; i++) {
         token = tokens[i];
@@ -102,15 +102,9 @@
       }
       return results;
     })();
-    // Check for import or export; if found, force bare mode.
-    if (!((options.bare != null) && options.bare === true)) {
-      for (i = 0, len = tokens.length; i < len; i++) {
-        token = tokens[i];
-        if ((ref = token[0]) === 'IMPORT' || ref === 'EXPORT') {
-          options.bare = true;
-          break;
-        }
-      }
+    // rip: Default to bare mode (modern ES6 output by default)
+    if (options.bare !== false) {
+      options.bare = true;
     }
     nodes = parser.parse(tokens);
     // If all that was requested was a POJO representation of the nodes, e.g.
@@ -146,8 +140,8 @@
     }
     currentColumn = 0;
     js = "";
-    for (j = 0, len1 = fragments.length; j < len1; j++) {
-      fragment = fragments[j];
+    for (i = 0, len = fragments.length; i < len; i++) {
+      fragment = fragments[i];
       // Update the sourcemap with data from each fragment.
       if (generateSourceMap) {
         // Do not include empty, whitespace, or semicolon-only fragments.
@@ -253,7 +247,7 @@
       ranges: true
     },
     lex: function() {
-      let tag, token;
+      var tag, token;
       token = parser.tokens[this.pos++];
       if (token) {
         [tag, this.yytext, this.yylloc] = token;
@@ -278,7 +272,7 @@
 
   // Override Jison's default error handling function.
   parser.yy.parseError = function(message, {token}) {
-    let errorLoc, errorTag, errorText, errorToken, tokens;
+    var errorLoc, errorTag, errorText, errorToken, tokens;
     // Disregard Jison's message, it contains redundant line number information.
     // Disregard the token, we take its value directly from the lexer in case
     // the error is caused by a generated token which might refer to its origin.
@@ -304,11 +298,11 @@
   };
 
   exports.patchStackTrace = function() {
-    let formatSourcePosition, getSourceMapping;
+    var formatSourcePosition, getSourceMapping;
     // Based on http://v8.googlecode.com/svn/branches/bleeding_edge/src/messages.js
     // Modified to handle sourceMap
     formatSourcePosition = function(frame, getSourceMapping) {
-      let as, column, fileLocation, filename, functionName, isConstructor, isMethodCall, line, methodName, source, tp, typeName;
+      var as, column, fileLocation, filename, functionName, isConstructor, isMethodCall, line, methodName, source, tp, typeName;
       filename = void 0;
       fileLocation = '';
       if (frame.isNative()) {
@@ -356,7 +350,7 @@
       }
     };
     getSourceMapping = function(filename, line, column) {
-      let answer, sourceMap;
+      var answer, sourceMap;
       sourceMap = getSourceMap(filename, line, column);
       if (sourceMap != null) {
         answer = sourceMap.sourceLocation([line - 1, column - 1]);
@@ -372,9 +366,9 @@
     // sourceMap, so we must monkey-patch Error to display CoffeeScript source
     // positions.
     return Error.prepareStackTrace = function(err, stack) {
-      let frame, frames;
+      var frame, frames;
       frames = (function() {
-        let i, len, results;
+        var i, len, results;
         results = [];
         for (i = 0, len = stack.length; i < len; i++) {
           frame = stack[i];
@@ -391,7 +385,7 @@
   };
 
   checkShebangLine = function(file, input) {
-    let args, firstLine, ref, rest;
+    var args, firstLine, ref, rest;
     firstLine = input.split(/$/m, 1)[0];
     rest = firstLine != null ? firstLine.match(/^#!\s*([^\s]+\s*)(.*)/) : void 0;
     args = rest != null ? (ref = rest[2]) != null ? ref.split(/\s/).filter(function(s) {
