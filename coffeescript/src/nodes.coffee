@@ -4128,10 +4128,18 @@ exports.Code = class Code extends Base
     answer.push @makeCode ' ' if modifiers.length and name
     answer.push name... if name
     answer.push signature...
-    answer.push @makeCode ' =>' if @bound and not @isMethod
-    answer.push @makeCode ' {'
-    answer.push @makeCode('\n'), body..., @makeCode("\n#{@tab}") if body?.length
-    answer.push @makeCode '}'
+
+    # rip: Generate concise arrow functions when possible
+    if @bound and not @isMethod and @isSimpleArrowBody()
+      answer.push @makeCode ' => '
+      # Get the return expression directly, skip the return statement wrapper
+      expr = @body.expressions[0].expression
+      answer.push expr.compileToFragments(o, LEVEL_PAREN)...
+    else
+      answer.push @makeCode ' =>' if @bound and not @isMethod
+      answer.push @makeCode ' {'
+      answer.push @makeCode('\n'), body..., @makeCode("\n#{@tab}") if body?.length
+      answer.push @makeCode '}'
 
     return indentInitial answer, @ if @isMethod
     if @front or (o.level >= LEVEL_ACCESS) then @wrapInParentheses answer else answer
@@ -4164,6 +4172,36 @@ exports.Code = class Code extends Base
       super child, replacement
     else
       false
+
+    # rip: Check if this arrow function can be made concise
+  isSimpleArrowBody: ->
+    return no unless @bound  # Only for arrow functions
+    return no if @body.isEmpty()  # Empty body
+    expressions = @body.expressions
+    return no unless expressions.length is 1  # Must be single expression
+    expr = expressions[0]
+    return no unless expr instanceof Return  # Must be a return
+    return no unless expr.expression  # Must return something
+
+    # Be conservative with complex cases that might need special scoping
+    returnExpr = expr.expression
+    # Skip JSX elements - they can be complex
+    return no if returnExpr instanceof JSXElement
+    # Skip if the return expression contains function calls that might need complex scoping
+    return no if returnExpr.contains? (node) -> node instanceof SuperCall
+    # Skip if the function has complex comments (like Flow types)
+    return no if expr.comments?.length > 0 or @comments?.length > 0
+
+    # Skip complex expressions that might span multiple lines or have complex structure
+    # Be very conservative to avoid brace misalignment issues
+    return no if returnExpr instanceof Obj  # Skip object literals
+    return no if returnExpr instanceof Arr  # Skip array literals
+
+    # Skip function calls with multiple arguments (they often span multiple lines)
+    # This catches the original problem case: someFunction(value, {delimiter: quote})
+    return no if returnExpr instanceof Call and returnExpr.args?.length > 1
+
+    yes
 
   disallowSuperInParamDefaults: ({forAst} = {}) ->
     return false unless @ctor
