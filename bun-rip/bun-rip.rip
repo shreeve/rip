@@ -1,0 +1,14 @@
+import rip from '../coffeescript/lib/coffeescript'
+
+Bun.plugin
+  name: "bun-rip"
+  setup: (file) ->
+    file.onLoad filter: /\.rip$/, (args) ->
+      src = Bun.file(args.path).text!
+      js = rip.compile src,
+        filename: args.path
+        header: true
+        bare: true
+        inlineMap: true
+      contents: js
+      loader: "js"
