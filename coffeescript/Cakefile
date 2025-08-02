@@ -54,7 +54,7 @@ buildParser = ->
   helpers.extend global, require 'util'
   grammar = require('./lib/coffeescript/grammar')
   language =
-    bnf       : grammar.grammar
+    bnf       : grammar.bnf
     operators : grammar.operators
   {Generator} = require '../src/solar'
   parser = Generator(language).generate(compress: true)
