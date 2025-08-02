@@ -1,14 +1,17 @@
 {
-  "name": "coffeescript",
-  "description": "Unfancy JavaScript",
+  "name": "rip",
+  "description": "Modern CoffeeScript reimagined for the ES6+ era",
   "keywords": [
     "javascript",
     "language",
     "coffeescript",
-    "compiler"
+    "rip",
+    "compiler",
+    "es6",
+    "modern"
   ],
   "author": "Jeremy Ashkenas",
-  "version": "2.7.0",
+  "version": "0.1.0",
   "license": "MIT",
   "engines": {
     "node": ">=6"

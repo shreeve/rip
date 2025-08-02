@@ -743,7 +743,7 @@ See https://coffeescript.org/#transpilation`);
 
   // Print the `--version` message and exit.
   version = function() {
-    return printLine(`CoffeeScript version ${CoffeeScript.VERSION}`);
+    return printLine(`Rip version ${CoffeeScript.VERSION}`);
   };
 
 }).call(this);
