@@ -1,0 +1,5 @@
+# Keep temporary test/debug files here
+tmp/
+*.tmp
+*.test
+*.debug
