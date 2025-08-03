@@ -1,5 +1,5 @@
 /**
- * ActiveRip - ActiveRecord-inspired ORM for Bun
+ * rip-schema - ActiveRecord-inspired schema DSL for Bun
  *
  * A beautiful schema DSL that brings the elegance of Rails to the Bun ecosystem
  */

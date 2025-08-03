@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * ActiveRip CLI
+ * rip-schema CLI
  *
  * Modern database tooling for Bun applications
  */
@@ -31,7 +31,7 @@ const command = positionals[0]
 // Help text
 function showHelp() {
   console.log(`
-🚀 ActiveRip CLI
+🚀 rip-schema CLI
 
 Commands:
   db:push              Sync your schema to the database (no migrations)
@@ -45,9 +45,9 @@ Options:
   -h, --help           Show this help message
 
 Examples:
-  bun active-rip db:push
-  bun active-rip db:push -s ./schema.rip -d ./dev.db
-  bun active-rip db:drop
+  bun rip-schema db:push
+  bun rip-schema db:push -s ./schema.rip -d ./dev.db
+  bun rip-schema db:drop
 `)
 }
 

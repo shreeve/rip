@@ -1,10 +1,10 @@
-# ActiveRip 🚀
+# rip-schema 🚀
 
 ActiveRecord-inspired schema DSL for Drizzle ORM and Bun. Write beautiful, expressive database schemas with the elegance of Rails and the performance of Bun.
 
-## Why ActiveRip?
+## Why rip-schema?
 
-- 🎯 **Familiar Syntax**: If you know ActiveRecord, you already know ActiveRip
+- 🎯 **Familiar Syntax**: If you know ActiveRecord, you already know rip-schema
 - 🔥 **Bun-First**: Built specifically for the Bun ecosystem
 - 🛡️ **Type-Safe**: Full TypeScript support with Drizzle ORM under the hood
 - ⚡ **Fast**: No runtime overhead - compiles to efficient Drizzle schemas
@@ -140,7 +140,7 @@ export default schema ->
 
 ## Using with Drizzle
 
-ActiveRip generates standard Drizzle schemas:
+rip-schema generates standard Drizzle schemas:
 
 ```coffeescript
 import { drizzle } from 'drizzle-orm/bun-sqlite'
@@ -168,7 +168,7 @@ migrate '20240101000000', 'add_avatar_to_users', ->
 
 ## ActiveRecord Compatibility
 
-ActiveRip supports the schema patterns you know and love:
+rip-schema supports the schema patterns you know and love:
 
 - ✅ `!` notation for required fields
 - ✅ Array notation for defaults: `[0]`, `[""]`
@@ -200,7 +200,7 @@ MIT
 
 ## Contributing
 
-ActiveRip is part of the Rip ecosystem. Contributions welcome!
+rip-schema is part of the Rip ecosystem. Contributions welcome!
 
 ---
 

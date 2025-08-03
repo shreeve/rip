@@ -1,5 +1,5 @@
 {
-  "name": "@rip/active-rip",
+  "name": "@rip/schema",
   "version": "0.1.0",
   "description": "ActiveRecord-inspired schema DSL for Drizzle ORM and Bun",
   "type": "module",
@@ -10,7 +10,7 @@
     "./migrations": "./migrations.rip"
   },
   "bin": {
-    "active-rip": "./cli.ts"
+    "rip-schema": "./cli.ts"
   },
   "scripts": {
     "test": "bun test",
