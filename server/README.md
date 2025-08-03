@@ -1,4 +1,4 @@
-<img src="/assets/logos/rip-icon-512wa.png" style="width:50px" /> <br>
+<img src="/assets/rip-icon-512wa.png" style="width:50px" /> <br>
 
 # Rip Server - Production-Ready Application Framework
 
