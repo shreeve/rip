@@ -20,6 +20,9 @@ import { join } from 'node:path'
 // Configuration
 const managerId = parseInt(process.argv[2] ?? '0')
 const managerNum = managerId + 1 // Human-friendly manager number (1-indexed)
+
+// Set process title for better visibility
+process.title = `rip-manager-${managerNum}`
 const numWorkers = parseInt(process.argv[3]) || 3
 const maxRequestsPerWorker =
   parseInt(process.argv[4]) ||

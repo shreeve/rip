@@ -12,6 +12,9 @@ import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'bun'
 
+// Set process title for better visibility in ps/top
+process.title = 'rip-server'
+
 const SCRIPT_DIR = import.meta.dir
 const RIP_CONFIG_DIR = join(homedir(), '.rip-server')
 const CA_DIR = join(RIP_CONFIG_DIR, 'ca')
@@ -215,11 +218,21 @@ async function loadFileConfig(appDir: string): Promise<Partial<Config>> {
 // Helper to kill all rip processes
 async function killAll() {
   console.log('🛑 Stopping all rip-server processes...')
-  const proc = spawn(['pkill', '-f', 'manager.ts|worker.ts|server.ts'], {
+
+  // Kill the main rip-server process
+  const proc1 = spawn(['pkill', '-f', 'rip-server'], {
     stdout: 'pipe',
     stderr: 'pipe',
   })
-  await proc.exited
+  await proc1.exited
+
+  // Also kill any lingering server components
+  const proc2 = spawn(['pkill', '-f', 'server/(manager|worker|server).ts'], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+  })
+  await proc2.exited
+
   console.log('✅ All processes stopped')
 }
 

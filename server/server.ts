@@ -19,6 +19,9 @@
 // Configuration
 const serverId = parseInt(process.argv[2] ?? '0')
 const serverNum = serverId + 1 // Human-friendly server number (1-indexed)
+
+// Set process title for better visibility
+process.title = `rip-server-${serverNum}`
 const port = parseInt(process.argv[3]) || 3000
 const numWorkers = parseInt(process.argv[4]) || 3
 const httpsPort = parseInt(process.argv[5]) || 3443

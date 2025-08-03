@@ -20,6 +20,9 @@ export {}
 // Configuration
 const workerId = parseInt(process.argv[2] ?? '0')
 const workerNum = workerId + 1 // Human-friendly worker number (1-indexed)
+
+// Set process title for better visibility
+process.title = `rip-worker-${workerNum}`
 const baseMaxRequests = parseInt(process.argv[3] ?? '100')
 
 // 🎯 Rolling restart strategy: Stagger request limits to prevent simultaneous shutdowns

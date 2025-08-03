@@ -1,5 +1,12 @@
 ## Changelog
 
+### v3.0.1 - August 3, 2025 - 🛑 **Enhanced Stop Command**
+
+**🛑 Improved Process Management:**
+* `rip-server stop` now uses `pkill -f "rip-server"` for complete cleanup
+* Ensures all rip-server processes and components are terminated
+* More reliable than the previous implementation
+
 ### v3.0.0 - August 3, 2025 - 🎯 **Flexible Arguments & Pure TypeScript**
 
 **🚀 Pure TypeScript Implementation:**
