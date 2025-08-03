@@ -45,8 +45,8 @@ const spawnWorker = async (workerId: number): Promise<Worker> => {
     // Socket didn't exist, that's fine
   }
 
-  const process = Bun.spawn([
-    "bun",
+  const workerProcess = Bun.spawn([
+    process.execPath, // Use full path to current bun executable
     join(__dirname, "worker.ts"),
     workerId.toString(),
     maxRequestsPerWorker.toString(),
@@ -54,18 +54,19 @@ const spawnWorker = async (workerId: number): Promise<Worker> => {
   ], {
     stdout: "inherit",
     stderr: "inherit",
-    cwd: appDirectory
+    cwd: appDirectory,
+    env: process.env // Inherit environment variables
   });
 
   const worker: Worker = {
-    process,
+    process: workerProcess,
     id: workerId,
     restartCount: (workers[workerId]?.restartCount || 0) + 1,
     socketPath
   };
 
   // Handle worker exit
-  process.exited.then(({ code }) => {
+  workerProcess.exited.then(({ code }) => {
     if (!isShuttingDown) {
       console.log(`[${getTimestamp()}] W${workerId + 1} exited (code ${code}) - respawning...`);
 
@@ -219,8 +220,7 @@ const main = async () => {
   // Setup file watching for hot reload
   setupFileWatcher();
 
-  // Hot reload is active (shown in endpoint summary)
-  console.log(`[${getTimestamp()}              ] 🚀 Server ready!`);
+    // Hot reload is active (shown in endpoint summary)
 };
 
 // Fire it up!

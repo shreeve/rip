@@ -345,6 +345,14 @@ if (httpsEnabled && cert && key) {
   servers.push(httpServer);
 }
 
+// Add proper server startup logging
+const getTimestamp = () => new Date().toISOString().replace('T', ' ').replace('Z', '-06:00');
+
+// Announce when server is actually ready
+setTimeout(() => {
+  console.log(`[${getTimestamp()}              ] Server ready! 🚀`);
+}, 50);
+
 /**
  * Graceful shutdown
  */
