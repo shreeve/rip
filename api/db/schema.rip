@@ -1,4 +1,4 @@
-import { schema as Schema } from '../../schema/schema-builder-v2'
+import { schema as Schema } from '../../schema/schema-builder'
 
 export default Schema ->
   @table 'lawfirms', ->

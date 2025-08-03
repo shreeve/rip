@@ -10,7 +10,7 @@
     "./migrations": "./migrations.rip"
   },
   "bin": {
-    "rip-schema": "./cli.ts"
+    "rip-schema": "./rip-schema.ts"
   },
   "scripts": {
     "test": "bun test",

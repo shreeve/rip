@@ -1,80 +1,40 @@
 /**
- * Rip Schema - A beautiful schema DSL for Drizzle
+ * rip-schema Builder - Flexible Parameter Support
  *
- * Inspired by ActiveRecord but designed for modern TypeScript/Bun apps
+ * Supports both type-based and named parameters for maximum flexibility
+ * Type-based params (numbers, arrays) can be in any order
+ * Named params (key:value) must come last due to CoffeeScript/JS syntax
  */
 
-import { Database } from 'bun:sqlite'
 import { sql } from 'drizzle-orm'
-import { drizzle } from 'drizzle-orm/bun-sqlite'
 import {
-  AnySQLiteTable,
+  type AnySQLiteColumn,
   blob,
-  foreignKey,
-  index,
+  InferInsertModel,
+  InferSelectModel,
   integer,
-  primaryKey,
   real,
+  type SQLiteTableWithColumns,
   sqliteTable,
   text,
-  uniqueIndex,
 } from 'drizzle-orm/sqlite-core'
 
-// Types
+// Helper to parse parameters flexibly
 type ColumnOptions = {
+  size?: number
+  precision?: number
+  scale?: number
+  default?: any
   unsigned?: boolean
   unique?: boolean
-  references?: string // foreign key reference
+  references?: string
   onDelete?: 'cascade' | 'restrict' | 'set null'
   onUpdate?: 'cascade' | 'restrict' | 'set null'
 }
 
-type IndexOptions = {
-  name?: string
-  unique?: boolean
-  where?: string // partial index
-}
-
-type TableOptions = {
-  primary_key?: string | string[]
-  id?: 'bigint' | 'integer' | 'uuid' | false
-  timestamps?: boolean
-  soft_delete?: boolean
-}
-
-// Table Builder
-export class RipTableBuilder {
-  private columns: Record<string, any> = {}
-  private indexes: Array<{ columns: string[]; options?: IndexOptions }> = []
-  private foreignKeys: Array<any> = []
-  private checks: Array<{ name?: string; sql: string }> = []
-
-  constructor(
-    private tableName: string,
-    private options: TableOptions = {},
-  ) {
-    // Handle primary key
-    const pk = options.primary_key || 'id'
-    const idType = options.id ?? 'bigint'
-
-    if (idType !== false) {
-      if (typeof pk === 'string') {
-        if (idType === 'uuid') {
-          this.columns[pk] = text(pk)
-            .primaryKey()
-            .default(sql`(lower(hex(randomblob(16))))`)
-        } else {
-          this.columns[pk] = integer(pk).primaryKey({ autoIncrement: true })
-        }
-      }
-    }
-
-    // Auto-add timestamps if requested
-    if (options.timestamps !== false) {
-      // Most schemas want timestamps by default
-      this.timestamps()
-    }
-  }
+// Column builder that wraps Drizzle columns
+export class ColumnBuilder {
+  private columns: Record<string, AnySQLiteColumn> = {}
 
   // Parse field notation: name! means required
   private parseField(name: string): { name: string; required: boolean } {
@@ -85,205 +45,266 @@ export class RipTableBuilder {
     }
   }
 
-  // Parse default value from array notation
+  // Parse default value from array notation or direct value
   private parseDefault(value: any): any {
+    // Handle array notation
     if (Array.isArray(value) && value.length > 0) {
       const val = value[0]
       if (typeof val === 'function') {
         const expr = val()
-        if (expr.includes('CURRENT_TIMESTAMP')) {
-          return sql`CURRENT_TIMESTAMP`
-        }
+        // Use sql.raw for SQL expressions
         return sql.raw(expr)
       }
       return val
     }
+    // Handle function directly (for named params)
+    else if (typeof value === 'function') {
+      const expr = value()
+      return sql.raw(expr)
+    }
     return value
   }
 
-  // Column types
-  string(
-    fieldName: string,
-    sizeOrDefault?: number | any[],
-    defaultValue?: any[],
-    options?: ColumnOptions,
-  ) {
-    const { name, required } = this.parseField(fieldName)
+    // Parse flexible parameters into options
+  // Note: In CoffeeScript/JavaScript, named parameters (key:value) must come last
+  private parseParams(...args: any[]): ColumnOptions {
+    const options: ColumnOptions = {}
 
-    let size: number | undefined
-    let defVal: any
-    let opts = options
+    for (const arg of args) {
+      if (arg === null || arg === undefined) continue
 
-    // Overload handling
-    if (typeof sizeOrDefault === 'number') {
-      size = sizeOrDefault
-      defVal = defaultValue
-    } else if (Array.isArray(sizeOrDefault)) {
-      defVal = sizeOrDefault
-    } else if (typeof sizeOrDefault === 'object') {
-      opts = sizeOrDefault
-    }
-
-    let column = text(name)
-    if (required) column = column.notNull()
-    if (defVal !== undefined) {
-      const parsed = this.parseDefault(defVal)
-      if (parsed !== undefined) column = column.default(parsed)
-    }
-    if (opts?.unique) column = column.unique()
-
-    this.columns[name] = column
-
-    // Handle foreign key
-    if (opts?.references) {
-      this.references(name, opts.references, opts)
-    }
-
-    return this
-  }
-
-  text(fieldName: string, defaultValue?: any[], options?: ColumnOptions) {
-    const { name, required } = this.parseField(fieldName)
-
-    let column = text(name)
-    if (required) column = column.notNull()
-    if (defaultValue !== undefined) {
-      const parsed = this.parseDefault(defaultValue)
-      if (parsed !== undefined) column = column.default(parsed)
-    }
-
-    this.columns[name] = column
-    return this
-  }
-
-  integer(
-    fieldName: string,
-    sizeOrDefault?: number | any[],
-    defaultValue?: any[],
-    options?: ColumnOptions,
-  ) {
-    const { name, required } = this.parseField(fieldName)
-
-    let defVal: any
-    let opts = options
-
-    if (typeof sizeOrDefault === 'number') {
-      // Size is ignored in SQLite but kept for compatibility
-      defVal = defaultValue
-    } else if (Array.isArray(sizeOrDefault)) {
-      defVal = sizeOrDefault
-    } else if (typeof sizeOrDefault === 'object') {
-      opts = sizeOrDefault
-    }
-
-    let column = integer(name)
-    if (required) column = column.notNull()
-    if (defVal !== undefined) {
-      const parsed = this.parseDefault(defVal)
-      if (parsed !== undefined) column = column.default(parsed)
-    }
-
-    this.columns[name] = column
-    return this
-  }
-
-  bigint(fieldName: string, defaultValue?: any[], options?: ColumnOptions) {
-    // In SQLite, bigint is just integer
-    return this.integer(fieldName, defaultValue, undefined, options)
-  }
-
-  boolean(fieldName: string, defaultValue?: boolean | any[]) {
-    const { name, required } = this.parseField(fieldName)
-
-    let column = integer(name, { mode: 'boolean' })
-    if (required) column = column.notNull()
-
-    if (defaultValue !== undefined) {
-      if (typeof defaultValue === 'boolean') {
-        column = column.default(defaultValue)
-      } else if (Array.isArray(defaultValue)) {
-        const parsed = this.parseDefault(defaultValue)
-        if (parsed !== undefined) column = column.default(parsed)
+      // Named parameters (object) - must be last in actual usage
+      if (typeof arg === 'object' && !Array.isArray(arg)) {
+        Object.assign(options, arg)
+      }
+      // Array = default value
+      else if (Array.isArray(arg)) {
+        options.default = this.parseDefault(arg)
+      }
+      // Number = size/precision (context-dependent)
+      else if (typeof arg === 'number') {
+        if (!options.size && !options.precision) {
+          options.size = arg  // First number is size/precision
+        } else if (!options.scale) {
+          options.scale = arg  // Second number is scale (for decimals)
+        }
+      }
+      // Boolean flags
+      else if (typeof arg === 'boolean') {
+        // Could be used for specific flags in the future
       }
     }
 
-    this.columns[name] = column
+    return options
+  }
+
+  string(fieldName: string, ...args: any[]) {
+    const { name, required } = this.parseField(fieldName)
+    const options = this.parseParams(...args)
+
+    let column = text(name)
+    if (required) column = column.notNull()
+    if (options.default !== undefined) {
+      column = column.default(options.default)
+    }
+    if (options.unique) {
+      column = column.unique()
+    }
+
+    this.columns[name] = column as any
     return this
   }
 
-  decimal(
-    fieldName: string,
-    precision?: number,
-    scale?: number,
-    defaultValue?: any[],
-  ) {
+  text(fieldName: string, ...args: any[]) {
+    const { name, required } = this.parseField(fieldName)
+    const options = this.parseParams(...args)
+
+    let column = text(name)
+    if (required) column = column.notNull()
+    if (options.default !== undefined) {
+      column = column.default(options.default)
+    }
+
+    this.columns[name] = column as any
+    return this
+  }
+
+  integer(fieldName: string, ...args: any[]) {
+    const { name, required } = this.parseField(fieldName)
+    const options = this.parseParams(...args)
+
+    let column = integer(name)
+    if (required) column = column.notNull()
+    if (options.default !== undefined) {
+      column = column.default(options.default)
+    }
+
+    this.columns[name] = column as any
+    return this
+  }
+
+  bigint(fieldName: string, ...args: any[]) {
+    const { name, required } = this.parseField(fieldName)
+    const options = this.parseParams(...args)
+
+    let column = integer(name)
+    if (required) column = column.notNull()
+    if (options.default !== undefined) {
+      column = column.default(options.default)
+    }
+
+    this.columns[name] = column as any
+    return this
+  }
+
+  boolean(fieldName: string, ...args: any[]) {
     const { name, required } = this.parseField(fieldName)
 
+    // First check for direct boolean default
+    let directDefault: boolean | undefined
+    const otherArgs: any[] = []
+
+    for (const arg of args) {
+      if (typeof arg === 'boolean') {
+        directDefault = arg
+      } else {
+        otherArgs.push(arg)
+      }
+    }
+
+    const options = this.parseParams(...otherArgs)
+
+    // SQLite uses integer for boolean
+    let column = integer(name)
+    if (required) column = column.notNull()
+
+    // Use direct boolean if provided, otherwise check options
+    const defaultValue = directDefault !== undefined ? directDefault : options.default
+    if (defaultValue !== undefined) {
+      // Convert boolean to integer
+      const defaultVal = defaultValue === true ? 1 : defaultValue === false ? 0 : defaultValue
+      column = column.default(defaultVal)
+    }
+
+    this.columns[name] = column as any
+    return this
+  }
+
+  decimal(fieldName: string, ...args: any[]) {
+    const { name, required } = this.parseField(fieldName)
+    const options = this.parseParams(...args)
+
+    // SQLite uses REAL for decimals
     let column = real(name)
     if (required) column = column.notNull()
-    if (defaultValue !== undefined) {
-      const parsed = this.parseDefault(defaultValue)
-      if (parsed !== undefined) column = column.default(parsed)
+    if (options.default !== undefined) {
+      column = column.default(options.default)
     }
 
-    this.columns[name] = column
+    this.columns[name] = column as any
     return this
   }
 
-  float(fieldName: string, defaultValue?: any[]) {
-    return this.decimal(fieldName, undefined, undefined, defaultValue)
+  float(fieldName: string, ...args: any[]) {
+    // Float implies standard single-precision, no size parameter needed
+    return this.decimal(fieldName, ...args)
   }
 
-  date(fieldName: string, defaultValue?: any[]) {
-    const { name, required } = this.parseField(fieldName)
+  double(fieldName: string, ...args: any[]) {
+    // Double implies standard double-precision, no size parameter needed
+    return this.decimal(fieldName, ...args)
+  }
 
-    let column = text(name) // SQLite stores dates as text
+  datetime(fieldName: string, ...args: any[]) {
+    const { name, required } = this.parseField(fieldName)
+    const options = this.parseParams(...args)
+
+    let column = text(name)
     if (required) column = column.notNull()
-    if (defaultValue !== undefined) {
-      const parsed = this.parseDefault(defaultValue)
-      if (parsed !== undefined) column = column.default(parsed)
+    if (options.default !== undefined) {
+      column = column.default(options.default)
     }
 
-    this.columns[name] = column
+    this.columns[name] = column as any
     return this
   }
 
-  datetime(fieldName: string, defaultValue?: any[]) {
-    return this.date(fieldName, defaultValue)
-  }
-
-  timestamp(fieldName: string, defaultValue?: any[]) {
-    return this.datetime(fieldName, defaultValue)
-  }
-
-  json(fieldName: string, defaultValue?: any) {
+  date(fieldName: string, ...args: any[]) {
     const { name, required } = this.parseField(fieldName)
+    const options = this.parseParams(...args)
 
-    let column = text(name, { mode: 'json' })
+    let column = text(name)
     if (required) column = column.notNull()
-    if (defaultValue !== undefined) {
-      column = column.default(defaultValue)
+    if (options.default !== undefined) {
+      column = column.default(options.default)
     }
 
-    this.columns[name] = column
+    this.columns[name] = column as any
     return this
   }
 
-  binary(fieldName: string) {
+  time(fieldName: string, ...args: any[]) {
     const { name, required } = this.parseField(fieldName)
+    const options = this.parseParams(...args)
 
+    let column = text(name)
+    if (required) column = column.notNull()
+    if (options.default !== undefined) {
+      column = column.default(options.default)
+    }
+
+    this.columns[name] = column as any
+    return this
+  }
+
+  timestamp(fieldName: string, ...args: any[]) {
+    const { name, required } = this.parseField(fieldName)
+    const options = this.parseParams(...args)
+
+    let column = text(name)
+    if (required) column = column.notNull()
+    if (options.default !== undefined) {
+      column = column.default(options.default)
+    }
+
+    this.columns[name] = column as any
+    return this
+  }
+
+    binary(fieldName: string, ...args: any[]) {
+    const { name, required } = this.parseField(fieldName)
+    const options = this.parseParams(...args)
+
+    // In SQLite, we use blob for binary data
     let column = blob(name, { mode: 'buffer' })
     if (required) column = column.notNull()
 
-    this.columns[name] = column
+    this.columns[name] = column as any
     return this
   }
 
-  // Special column types
-  email(fieldName: string, defaultValue?: any[]) {
-    this.string(fieldName, 255, defaultValue)
-    // Could add check constraint for email format
+  json(fieldName: string, ...args: any[]) {
+    const { name, required } = this.parseField(fieldName)
+    const options = this.parseParams(...args)
+
+    // SQLite stores JSON as TEXT with JSON functions for validation
+    let column = text(name)
+    if (required) column = column.notNull()
+
+    // Handle default values - need to stringify objects/arrays
+    if (options.default !== undefined) {
+      const defaultValue = typeof options.default === 'string'
+        ? options.default
+        : JSON.stringify(options.default)
+      column = column.default(defaultValue)
+    }
+
+    this.columns[name] = column as any
     return this
+  }
+
+  email(fieldName: string, ...args: any[]) {
+    return this.string(fieldName, 255, ...args)
   }
 
   uuid(fieldName: string) {
@@ -292,142 +313,133 @@ export class RipTableBuilder {
     let column = text(name).default(sql`(lower(hex(randomblob(16))))`)
     if (required) column = column.notNull()
 
-    this.columns[name] = column
+    this.columns[name] = column as any
     return this
   }
 
-  // Relationships
-  references(
-    column: string,
-    foreignTable: string,
-    options?: Partial<ColumnOptions>,
-  ) {
-    // Store foreign key info for later processing
-    this.foreignKeys.push({
-      column,
-      foreignTable,
-      foreignColumn: options?.references || 'id',
-      onDelete: options?.onDelete,
-      onUpdate: options?.onUpdate,
-    })
-    return this
-  }
-
-  belongs_to(
-    name: string,
-    options?: { class_name?: string; foreign_key?: string },
-  ) {
-    const foreignKey = options?.foreign_key || `${name}_id`
-    const tableName = options?.class_name || `${name}s`
-
-    this.bigint(`${foreignKey}!`)
-    this.references(foreignKey, tableName)
-    this.index(foreignKey)
-
-    return this
-  }
-
-  // Timestamps
   timestamps() {
-    this.datetime('created_at!', [() => 'CURRENT_TIMESTAMP'])
-    this.datetime('updated_at!', [() => 'CURRENT_TIMESTAMP'])
+    this.datetime('created_at!', [() => "datetime('now')"])
+    this.datetime('updated_at!', [() => "datetime('now')"])
     return this
   }
 
-  // Soft deletes
+  // Relationships (for now just create the foreign key column)
+  belongs_to(name: string, options?: { foreign_key?: string }) {
+    const foreignKey = options?.foreign_key || `${name}_id`
+    this.bigint(`${foreignKey}!`)
+    return this
+  }
+
+  // Get the columns
+  getColumns() {
+    return this.columns
+  }
+}
+
+// Table builder that uses the column builder
+export class TableBuilder {
+  private builder = new ColumnBuilder()
+  public tableName: string
+
+  constructor(tableName: string, options?: any) {
+    this.tableName = tableName
+
+    // Handle primary key
+    const pk = options?.primary_key || 'id'
+    const idType = options?.id ?? 'integer'
+
+    if (idType !== false) {
+      if (idType === 'uuid') {
+        this.builder.uuid(pk)
+      } else {
+        this.builder.integer(pk).columns[pk] = integer(pk).primaryKey({
+          autoIncrement: true,
+        })
+      }
+    }
+
+    // Auto-add timestamps if requested
+    if (options?.timestamps !== false) {
+      // We'll add these after user columns
+    }
+  }
+
+  // Delegate all column methods to the builder
+  string = this.builder.string.bind(this.builder)
+  text = this.builder.text.bind(this.builder)
+  integer = this.builder.integer.bind(this.builder)
+  bigint = this.builder.bigint.bind(this.builder)
+  boolean = this.builder.boolean.bind(this.builder)
+  decimal = this.builder.decimal.bind(this.builder)
+  float = this.builder.float.bind(this.builder)
+  double = this.builder.double.bind(this.builder)
+  datetime = this.builder.datetime.bind(this.builder)
+  date = this.builder.date.bind(this.builder)
+  time = this.builder.time.bind(this.builder)
+  timestamp = this.builder.timestamp.bind(this.builder)
+  binary = this.builder.binary.bind(this.builder)
+  json = this.builder.json.bind(this.builder)
+  email = this.builder.email.bind(this.builder)
+  uuid = this.builder.uuid.bind(this.builder)
+  timestamps = this.builder.timestamps.bind(this.builder)
+  belongs_to = this.builder.belongs_to.bind(this.builder)
+
+  // Index methods (stored for later use)
+  index(...args: any[]) {
+    // Store index info for migrations
+    return this
+  }
+
   soft_delete() {
     this.datetime('deleted_at')
-    this.index('deleted_at')
     return this
   }
 
-  // Indexes
-  index(columns: string | string[], options?: IndexOptions) {
-    const cols = Array.isArray(columns) ? columns : [columns]
-    this.indexes.push({ columns: cols, options })
-    return this
-  }
-
-  // Constraints
-  check(sql: string, name?: string) {
-    this.checks.push({ sql, name })
-    return this
-  }
-
-  // Build the table
-  build() {
-    // Create the basic table
-    const table = sqliteTable(this.tableName, this.columns)
-
-    // Note: In a real implementation, you'd also generate:
-    // - Index creation statements
-    // - Foreign key constraints
-    // - Check constraints
-    // These would be returned as additional SQL statements
-
-    return {
-      table,
-      indexes: this.indexes,
-      foreignKeys: this.foreignKeys,
-      checks: this.checks,
-    }
+  // Build the actual Drizzle table
+  build(): SQLiteTableWithColumns<any> {
+    const columns = this.builder.getColumns()
+    return sqliteTable(this.tableName, columns)
   }
 }
 
-// Schema Builder
-export class RipSchema {
-  public tables: Record<string, any> = {}
-  private tableBuilders: Record<string, RipTableBuilder> = {}
+// Main schema function
+export function schema(callback: (this: any) => void) {
+  const tables: Record<string, SQLiteTableWithColumns<any>> = {}
 
-  table(
-    name: string,
-    options?: TableOptions | ((this: RipTableBuilder) => void),
-    builder?: (this: RipTableBuilder) => void,
-  ) {
-    let opts: TableOptions = {}
-    let builderFn: ((this: RipTableBuilder) => void) | undefined
+  const context = {
+    table(name: string, ...args: any[]) {
+      let options: any = {}
+      let builderFn: Function | undefined
 
-    if (typeof options === 'function') {
-      builderFn = options
-    } else {
-      opts = options || {}
-      builderFn = builder
-    }
+      // Parse arguments
+      for (const arg of args) {
+        if (typeof arg === 'function') {
+          builderFn = arg
+        } else if (typeof arg === 'object') {
+          options = arg
+        }
+      }
 
-    const tb = new RipTableBuilder(name, opts)
-    if (builderFn) {
-      builderFn.call(tb)
-    }
+      if (!builderFn) {
+        throw new Error(`No builder function provided for table ${name}`)
+      }
 
-    const result = tb.build()
-    this.tables[name] = result.table
-    this.tableBuilders[name] = tb
+      const tableBuilder = new TableBuilder(name, options)
+      builderFn.call(tableBuilder)
 
-    return this
+      // Add timestamps if not disabled
+      if (options?.timestamps !== false && tableBuilder.tableName !== 'migrations') {
+        tableBuilder.timestamps()
+      }
+
+      const table = tableBuilder.build()
+      tables[name] = table
+    },
   }
 
-  // Get all tables
-  getTables() {
-    return this.tables
-  }
-
-  // Generate migration SQL (future feature)
-  generateSQL() {
-    // Would generate CREATE TABLE, CREATE INDEX, etc.
-    return []
-  }
+  callback.call(context)
+  return tables
 }
 
-// Global schema function
-export function schema(
-  builder: (this: RipSchema) => void,
-): Record<string, any> {
-  const s = new RipSchema()
-  builder.call(s)
-  return s.getTables()
-}
-
-// Make it available globally in Rip files
-if (typeof global !== 'undefined') {
-  ;(global as any).schema = schema
-}
+// Re-export types
+export type { InferInsertModel, InferSelectModel }

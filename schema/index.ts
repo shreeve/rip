@@ -4,11 +4,11 @@
  * A beautiful schema DSL that brings the elegance of Rails to the Bun ecosystem
  */
 
-// Use v2 which properly integrates with Drizzle
-export * from './schema-builder-v2'
+// Export the schema builder
+export * from './schema-builder'
 
 // Re-export key functions for convenience
-export { Schema, schema, TableBuilder } from './schema-builder-v2'
+export { Schema, schema, TableBuilder } from './schema-builder'
 
 // Version
 export const version = '0.2.0'
