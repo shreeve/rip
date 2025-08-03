@@ -12,7 +12,7 @@
 #   ./start.sh dev false /app/path 3443 cert.pem key.pem  # With HTTPS
 
 MODE=${1:-dev}
-FOREGROUND=${2:-false}
+FOREGROUND=${2:-true}
 
 echo "🚀 Starting Rip Application Server..."
 echo "🌍 Mode: $MODE"
