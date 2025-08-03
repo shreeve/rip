@@ -1,7 +1,7 @@
-import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { Database } from 'bun:sqlite'
-import { join, dirname } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { drizzle } from 'drizzle-orm/bun-sqlite'
 import schema from './schema.rip'
 
 // Get the directory of this file

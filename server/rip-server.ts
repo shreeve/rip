@@ -167,7 +167,6 @@ function parseArgs(args: string[]): Config {
     if (arg === 'https:quick' || arg === 'https:ca' || arg === 'https:smart') {
       config.protocol = 'https'
       config.httpsMode = arg.split(':')[1] as 'quick' | 'ca' | 'smart'
-      continue
     }
   }
 
@@ -637,7 +636,7 @@ async function start(config: Config) {
     } else {
       // Need to generate/find certificates
       switch (httpsMode) {
-        case 'quick':
+        case 'quick': {
           console.log('🔐 Generating quick self-signed certificate...')
           console.log('⚠️  Self-signed certificates are for development only!')
           console.log('   Browsers will show security warnings.')
@@ -647,8 +646,9 @@ async function start(config: Config) {
           actualCertPath = '/tmp/rip-cert.pem'
           actualKeyPath = '/tmp/rip-key.pem'
           break
+        }
 
-        case 'ca':
+        case 'ca': {
           console.log('🔐 Using CA-signed certificate...')
           const caCert = await generateCACert('localhost')
           await Bun.write('/tmp/rip-cert.pem', caCert.cert)
@@ -661,6 +661,7 @@ async function start(config: Config) {
             )
           }
           break
+        }
 
         case 'smart':
         default:
@@ -897,7 +898,7 @@ Configuration files:
 
     case 'start':
     case 'dev':
-    case 'prod':
+    case 'prod': {
       // Load file config
       const fileConfig = await loadFileConfig(config.appDir || defaults.appDir)
 
@@ -911,8 +912,9 @@ Configuration files:
 
       await start(finalConfig)
       break
+    }
 
-    default:
+    default: {
       // Treat as start with arguments
       const startConfig = await loadFileConfig(config.appDir || defaults.appDir)
       const finalStartConfig = {
@@ -921,6 +923,7 @@ Configuration files:
         ...config,
       }
       await start(finalStartConfig)
+    }
   }
 }
 

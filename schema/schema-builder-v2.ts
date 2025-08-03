@@ -4,29 +4,29 @@
  * This version actually generates real Drizzle table objects
  */
 
+import { sql } from 'drizzle-orm'
 import {
-  sqliteTable,
-  text,
+  type AnySQLiteColumn,
+  blob,
+  InferInsertModel,
+  InferSelectModel,
   integer,
   real,
-  blob,
-  AnySQLiteColumn,
-  SQLiteTableWithColumns,
-  InferSelectModel,
-  InferInsertModel
+  type SQLiteTableWithColumns,
+  sqliteTable,
+  text,
 } from 'drizzle-orm/sqlite-core'
-import { sql } from 'drizzle-orm'
 
 // Column builder that wraps Drizzle columns
 export class ColumnBuilder {
   private columns: Record<string, AnySQLiteColumn> = {}
 
   // Parse field notation: name! means required
-  private parseField(name: string): { name: string, required: boolean } {
+  private parseField(name: string): { name: string; required: boolean } {
     const required = name.endsWith('!')
     return {
       name: required ? name.slice(0, -1) : name,
-      required
+      required,
     }
   }
 
@@ -44,7 +44,11 @@ export class ColumnBuilder {
     return value
   }
 
-  string(fieldName: string, sizeOrDefault?: number | any[], defaultValue?: any[]) {
+  string(
+    fieldName: string,
+    sizeOrDefault?: number | any[],
+    defaultValue?: any[],
+  ) {
     const { name, required } = this.parseField(fieldName)
 
     let defVal: any
@@ -119,7 +123,12 @@ export class ColumnBuilder {
     return this
   }
 
-  decimal(fieldName: string, precision?: number, scale?: number, defaultValue?: any[]) {
+  decimal(
+    fieldName: string,
+    precision?: number,
+    scale?: number,
+    defaultValue?: any[],
+  ) {
     const { name, required } = this.parseField(fieldName)
 
     let column = real(name)
@@ -200,7 +209,9 @@ export class TableBuilder {
       if (idType === 'uuid') {
         this.builder.uuid(pk)
       } else {
-        this.builder.integer(pk).columns[pk] = integer(pk).primaryKey({ autoIncrement: true })
+        this.builder.integer(pk).columns[pk] = integer(pk).primaryKey({
+          autoIncrement: true,
+        })
       }
     }
 
@@ -246,7 +257,11 @@ export class TableBuilder {
 export class Schema {
   private tables: Record<string, SQLiteTableWithColumns<any>> = {}
 
-  table(name: string, options?: any | ((this: TableBuilder) => void), builderFn?: (this: TableBuilder) => void) {
+  table(
+    name: string,
+    options?: any | ((this: TableBuilder) => void),
+    builderFn?: (this: TableBuilder) => void,
+  ) {
     let opts: any = {}
     let fn: ((this: TableBuilder) => void) | undefined
 
@@ -272,7 +287,9 @@ export class Schema {
 }
 
 // Main schema function
-export function schema(builderFn: (this: Schema) => void): Record<string, SQLiteTableWithColumns<any>> {
+export function schema(
+  builderFn: (this: Schema) => void,
+): Record<string, SQLiteTableWithColumns<any>> {
   const s = new Schema()
   builderFn.call(s)
   return s.getTables()
@@ -280,5 +297,5 @@ export function schema(builderFn: (this: Schema) => void): Record<string, SQLite
 
 // Make it globally available for Rip files
 if (typeof global !== 'undefined') {
-  (global as any).schema = schema
+  ;(global as any).schema = schema
 }

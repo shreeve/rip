@@ -4,27 +4,27 @@
  * Inspired by ActiveRecord but designed for modern TypeScript/Bun apps
  */
 
-import {
-  sqliteTable,
-  text,
-  integer,
-  real,
-  blob,
-  primaryKey,
-  index,
-  uniqueIndex,
-  foreignKey,
-  AnySQLiteTable
-} from 'drizzle-orm/sqlite-core'
+import { Database } from 'bun:sqlite'
 import { sql } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
-import { Database } from 'bun:sqlite'
+import {
+  AnySQLiteTable,
+  blob,
+  foreignKey,
+  index,
+  integer,
+  primaryKey,
+  real,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from 'drizzle-orm/sqlite-core'
 
 // Types
 type ColumnOptions = {
   unsigned?: boolean
   unique?: boolean
-  references?: string  // foreign key reference
+  references?: string // foreign key reference
   onDelete?: 'cascade' | 'restrict' | 'set null'
   onUpdate?: 'cascade' | 'restrict' | 'set null'
 }
@@ -32,7 +32,7 @@ type ColumnOptions = {
 type IndexOptions = {
   name?: string
   unique?: boolean
-  where?: string  // partial index
+  where?: string // partial index
 }
 
 type TableOptions = {
@@ -45,13 +45,13 @@ type TableOptions = {
 // Table Builder
 export class RipTableBuilder {
   private columns: Record<string, any> = {}
-  private indexes: Array<{ columns: string[], options?: IndexOptions }> = []
+  private indexes: Array<{ columns: string[]; options?: IndexOptions }> = []
   private foreignKeys: Array<any> = []
-  private checks: Array<{ name?: string, sql: string }> = []
+  private checks: Array<{ name?: string; sql: string }> = []
 
   constructor(
     private tableName: string,
-    private options: TableOptions = {}
+    private options: TableOptions = {},
   ) {
     // Handle primary key
     const pk = options.primary_key || 'id'
@@ -60,7 +60,9 @@ export class RipTableBuilder {
     if (idType !== false) {
       if (typeof pk === 'string') {
         if (idType === 'uuid') {
-          this.columns[pk] = text(pk).primaryKey().default(sql`(lower(hex(randomblob(16))))`)
+          this.columns[pk] = text(pk)
+            .primaryKey()
+            .default(sql`(lower(hex(randomblob(16))))`)
         } else {
           this.columns[pk] = integer(pk).primaryKey({ autoIncrement: true })
         }
@@ -75,11 +77,11 @@ export class RipTableBuilder {
   }
 
   // Parse field notation: name! means required
-  private parseField(name: string): { name: string, required: boolean } {
+  private parseField(name: string): { name: string; required: boolean } {
     const required = name.endsWith('!')
     return {
       name: required ? name.slice(0, -1) : name,
-      required
+      required,
     }
   }
 
@@ -100,7 +102,12 @@ export class RipTableBuilder {
   }
 
   // Column types
-  string(fieldName: string, sizeOrDefault?: number | any[], defaultValue?: any[], options?: ColumnOptions) {
+  string(
+    fieldName: string,
+    sizeOrDefault?: number | any[],
+    defaultValue?: any[],
+    options?: ColumnOptions,
+  ) {
     const { name, required } = this.parseField(fieldName)
 
     let size: number | undefined
@@ -149,7 +156,12 @@ export class RipTableBuilder {
     return this
   }
 
-  integer(fieldName: string, sizeOrDefault?: number | any[], defaultValue?: any[], options?: ColumnOptions) {
+  integer(
+    fieldName: string,
+    sizeOrDefault?: number | any[],
+    defaultValue?: any[],
+    options?: ColumnOptions,
+  ) {
     const { name, required } = this.parseField(fieldName)
 
     let defVal: any
@@ -199,7 +211,12 @@ export class RipTableBuilder {
     return this
   }
 
-  decimal(fieldName: string, precision?: number, scale?: number, defaultValue?: any[]) {
+  decimal(
+    fieldName: string,
+    precision?: number,
+    scale?: number,
+    defaultValue?: any[],
+  ) {
     const { name, required } = this.parseField(fieldName)
 
     let column = real(name)
@@ -220,7 +237,7 @@ export class RipTableBuilder {
   date(fieldName: string, defaultValue?: any[]) {
     const { name, required } = this.parseField(fieldName)
 
-    let column = text(name)  // SQLite stores dates as text
+    let column = text(name) // SQLite stores dates as text
     if (required) column = column.notNull()
     if (defaultValue !== undefined) {
       const parsed = this.parseDefault(defaultValue)
@@ -280,19 +297,26 @@ export class RipTableBuilder {
   }
 
   // Relationships
-  references(column: string, foreignTable: string, options?: Partial<ColumnOptions>) {
+  references(
+    column: string,
+    foreignTable: string,
+    options?: Partial<ColumnOptions>,
+  ) {
     // Store foreign key info for later processing
     this.foreignKeys.push({
       column,
       foreignTable,
       foreignColumn: options?.references || 'id',
       onDelete: options?.onDelete,
-      onUpdate: options?.onUpdate
+      onUpdate: options?.onUpdate,
     })
     return this
   }
 
-  belongs_to(name: string, options?: { class_name?: string, foreign_key?: string }) {
+  belongs_to(
+    name: string,
+    options?: { class_name?: string; foreign_key?: string },
+  ) {
     const foreignKey = options?.foreign_key || `${name}_id`
     const tableName = options?.class_name || `${name}s`
 
@@ -345,7 +369,7 @@ export class RipTableBuilder {
       table,
       indexes: this.indexes,
       foreignKeys: this.foreignKeys,
-      checks: this.checks
+      checks: this.checks,
     }
   }
 }
@@ -355,7 +379,11 @@ export class RipSchema {
   public tables: Record<string, any> = {}
   private tableBuilders: Record<string, RipTableBuilder> = {}
 
-  table(name: string, options?: TableOptions | ((this: RipTableBuilder) => void), builder?: (this: RipTableBuilder) => void) {
+  table(
+    name: string,
+    options?: TableOptions | ((this: RipTableBuilder) => void),
+    builder?: (this: RipTableBuilder) => void,
+  ) {
     let opts: TableOptions = {}
     let builderFn: ((this: RipTableBuilder) => void) | undefined
 
@@ -391,7 +419,9 @@ export class RipSchema {
 }
 
 // Global schema function
-export function schema(builder: (this: RipSchema) => void): Record<string, any> {
+export function schema(
+  builder: (this: RipSchema) => void,
+): Record<string, any> {
   const s = new RipSchema()
   builder.call(s)
   return s.getTables()
@@ -399,5 +429,5 @@ export function schema(builder: (this: RipSchema) => void): Record<string, any> 
 
 // Make it available globally in Rip files
 if (typeof global !== 'undefined') {
-  (global as any).schema = schema
+  ;(global as any).schema = schema
 }

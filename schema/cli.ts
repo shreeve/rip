@@ -1,18 +1,19 @@
 #!/usr/bin/env bun
+
 /**
  * rip-schema CLI
  *
  * Modern database tooling for Bun applications
  */
 
-import { parseArgs } from 'node:util'
-import { schema as schemaBuilder } from './schema-builder-v2'
 import { Database } from 'bun:sqlite'
-import { drizzle } from 'drizzle-orm/bun-sqlite'
-import { sql } from 'drizzle-orm'
-import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { existsSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { parseArgs } from 'node:util'
+import { sql } from 'drizzle-orm'
+import { drizzle } from 'drizzle-orm/bun-sqlite'
+import { schema as schemaBuilder } from './schema-builder-v2'
 
 // Parse command line arguments
 const { values, positionals } = parseArgs({
@@ -77,7 +78,10 @@ function generateCreateTableSQL(tableName: string, table: any): string {
               const sqlValue = chunks[0].value[0]
               def += ` DEFAULT (${sqlValue})`
             }
-          } else if (col.default.value && typeof col.default.value === 'string') {
+          } else if (
+            col.default.value &&
+            typeof col.default.value === 'string'
+          ) {
             // Handle sql.raw() style
             def += ` DEFAULT ${col.default.value}`
           } else {
@@ -132,7 +136,9 @@ async function dbPush() {
   const schema = schemaModule.default || schemaModule.schema
 
   if (!schema || typeof schema !== 'object') {
-    console.error('❌ Invalid schema export. Make sure your schema file exports a schema object.')
+    console.error(
+      '❌ Invalid schema export. Make sure your schema file exports a schema object.',
+    )
     process.exit(1)
   }
 
