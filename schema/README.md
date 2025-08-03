@@ -183,6 +183,77 @@ rip-schema supports the schema patterns you know and love:
 - ✅ Check constraints
 - ✅ `timestamps()` helper
 - ✅ `soft_delete()` helper
+- ✅ JSON fields with object/array defaults
+
+## Future Enhancements (TODO)
+
+The following features are planned for future releases:
+
+### 1. **Check Constraints with Range Syntax**
+```coffee
+@integer 'age', 18..120                    # Range syntax
+@integer 'age', min: 18, max: 120          # Named parameters
+@decimal 'rating', 0.0..5.0                # Works for decimals too
+```
+
+### 2. **Enum Support**
+```coffee
+@enum 'status', ['New', 'Active', 'Archived'], default: 'New'
+# or
+@integer 'status', values: {0: 'New', 1: 'Active', 2: 'Archived'}, default: 0
+```
+
+### 3. **Foreign Key Relationships**
+```coffee
+@references 'user'                         # Creates user_id automatically
+@bigint 'user_id!', references: 'users.id', on_delete: 'cascade'
+```
+
+### 4. **Computed/Generated Columns**
+```coffee
+@string 'full_name', generated: "first_name || ' ' || last_name"
+@integer 'age', generated: "date('now') - birthdate"
+```
+
+### 5. **Advanced Index Options**
+```coffee
+@index 'email', unique: true, where: 'deleted_at IS NULL'  # Partial index
+@index 'name', using: 'gin'                                # Index type
+@index 'description', include: ['status']                  # Covering index
+```
+
+### 6. **Column Collation**
+```coffee
+@string 'name', collate: 'NOCASE'          # Case-insensitive
+@string 'title', collate: 'RTRIM'          # Ignore trailing spaces
+```
+
+### 7. **Triggers as Part of Schema**
+```coffee
+@trigger 'increment_views',
+  after: 'update',
+  when: 'NEW.viewed > OLD.viewed',
+  do: 'UPDATE posts SET view_count = view_count + 1 WHERE id = NEW.id'
+```
+
+### 8. **Virtual Tables / Views**
+```coffee
+@view 'active_users', ->
+  @from 'users'
+  @where 'deleted_at IS NULL AND last_login > date("now", "-30 days")'
+```
+
+### 9. **Polymorphic Associations**
+```coffee
+@polymorphic 'attachable'                  # Creates attachable_id and attachable_type
+```
+
+### 10. **Migration CLI Commands**
+```coffee
+rip-schema db:migrate                      # Run pending migrations
+rip-schema db:rollback                     # Rollback last migration
+rip-schema generate:migration AddUserEmail # Generate migration file
+```
 
 ## Installation
 
