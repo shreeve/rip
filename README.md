@@ -1024,3 +1024,15 @@ To maximize efficiency and portability, a grammar for a language can be distille
 | start      | Yes/Opt   | Start symbol (optional if always 'Root' or first rule)                |
 
 With these fields, you have everything needed for a fully functional, compressed parser for any supported language.
+
+## License
+
+MIT
+
+## Contributing
+
+Rip is part of the Rip ecosystem. Contributions welcome!
+
+---
+
+Built with ❤️ for the Bun community

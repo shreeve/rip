@@ -161,4 +161,16 @@ To maintain a strong and unified brand identity, always use the official tagline
 - **Platform tagline:** "multilanguage universal runtime"
 - **Rip language tagline:** "A modern echo of CoffeeScript"
 
-This consistency ensures clarity for users, contributors, and the broader community, reinforcing Rip’s vision and positioning in every context.
+This consistency ensures clarity for users, contributors, and the broader community, reinforcing Rip's vision and positioning in every context.
+
+## License
+
+MIT
+
+## Contributing
+
+Rip Brand Assets are part of the Rip ecosystem. Contributions welcome!
+
+---
+
+Built with ❤️ for the Bun community

@@ -115,3 +115,15 @@ export default app
 ---
 
 **Get started with modern web development!** 🚀
+
+## License
+
+MIT
+
+## Contributing
+
+Rip Server Examples are part of the Rip ecosystem. Contributions welcome!
+
+---
+
+Built with ❤️ for the Bun community

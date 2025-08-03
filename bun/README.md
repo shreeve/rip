@@ -58,6 +58,14 @@ Bun.plugin({
 - Transpilation happens once at import time
 - Cached by Bun's module system
 
+## License
+
+MIT
+
+## Contributing
+
+rip-bun is part of the Rip ecosystem. Contributions welcome!
+
 ---
 
-Part of the Rip ecosystem 🌟
+Built with ❤️ for the Bun community

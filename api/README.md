@@ -260,6 +260,14 @@ With the multi-worker architecture:
 - [ ] More entity types
 - [ ] Relationship modeling
 
+## License
+
+MIT
+
+## Contributing
+
+Rip API is part of the Rip ecosystem. Contributions welcome!
+
 ---
 
-Built with ❤️ using Rip, Bun, and modern web technologies.
+Built with ❤️ for the Bun community

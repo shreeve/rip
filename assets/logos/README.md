@@ -60,4 +60,12 @@ The **⟨R⟩** logo represents:
 
 ## License
 
-These logo files are part of the Rip project and should be used in accordance with the project's licensing terms.
+MIT
+
+## Contributing
+
+Rip Logo Assets are part of the Rip ecosystem. Contributions welcome!
+
+---
+
+Built with ❤️ for the Bun community

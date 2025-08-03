@@ -289,3 +289,15 @@ Benefits:
 ## 📚 Documentation
 
 - **[Architecture Deep Dive](architecture.md)** - Detailed technical overview and design philosophy
+
+## License
+
+MIT
+
+## Contributing
+
+rip-server is part of the Rip ecosystem. Contributions welcome!
+
+---
+
+Built with ❤️ for the Bun community
