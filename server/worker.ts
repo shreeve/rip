@@ -104,9 +104,9 @@ const main = async () => {
       // 🎯 Sequential Processing: Only handle one request at a time
       if (requestInProgress) {
         console.log(`⏸️ [Worker ${workerId}] Request queued - worker busy with request #${requestsHandled}`);
-        return new Response("Worker busy - perfect isolation in progress", { 
+        return new Response("Worker busy - perfect isolation in progress", {
           status: 503,
-          headers: { 
+          headers: {
             "Content-Type": "text/plain",
             "Retry-After": "1"
           }
@@ -139,7 +139,7 @@ const main = async () => {
           });
         }
 
-        console.log(`✅ [Worker ${workerId}] Completed request #${requestsHandled} - perfect isolation maintained`);
+        console.log(`✅ [Worker ${workerId}] Completed request #${requestsHandled}`);
 
         // Check if worker should shut down
         if (requestsHandled >= maxRequests) {
@@ -191,7 +191,6 @@ const main = async () => {
   process.on('SIGINT', () => gracefulShutdown('SIGINT received'));
 
   console.log(`🚀 [Worker ${workerId}] Ready on ${socketPath}`);
-  console.log(`🎯 [Worker ${workerId}] Sequential mode: One request at a time for perfect isolation`);
   console.log(`⚡ [Worker ${workerId}] Waiting for requests...`);
 };
 
