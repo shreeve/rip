@@ -277,6 +277,12 @@ async function start(config: Config) {
     console.log(
       '🔐 No certificate provided, generating self-signed certificate...',
     )
+    console.log(
+      '⚠️  Self-signed certificates are for development only!',
+    )
+    console.log(
+      '   Browsers will show security warnings. For production, use real certificates.',
+    )
     const { cert, key } = await generateSelfSignedCert()
     await Bun.write('/tmp/rip-cert.pem', cert)
     await Bun.write('/tmp/rip-key.pem', key)
