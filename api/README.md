@@ -71,7 +71,7 @@ api/
 ### 1. **Rip Transpilation**
 The `bunfig.toml` configures Bun to automatically transpile `.rip` files:
 ```toml
-preload = ["/path/to/rip-bun/rip-bun.ts"]
+preload = ["/path/to/bun/rip-bun.ts"]
 ```
 
 ### 2. **Database Schema**
