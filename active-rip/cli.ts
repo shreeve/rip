@@ -21,7 +21,6 @@ const { values, positionals } = parseArgs({
     help: { type: 'boolean', short: 'h' },
     schema: { type: 'string', short: 's', default: './db/schema.rip' },
     database: { type: 'string', short: 'd', default: './db/api.db' },
-    force: { type: 'boolean', short: 'f' },
     verbose: { type: 'boolean', short: 'v' },
   },
   allowPositionals: true,
@@ -42,14 +41,13 @@ Commands:
 Options:
   -s, --schema PATH    Path to schema file (default: ./db/schema.rip)
   -d, --database PATH  Path to database file (default: ./db/api.db)
-  -f, --force          Skip confirmation prompts
   -v, --verbose        Show detailed output
   -h, --help           Show this help message
 
 Examples:
   bun active-rip db:push
   bun active-rip db:push -s ./schema.rip -d ./dev.db
-  bun active-rip db:drop --force
+  bun active-rip db:drop
 `)
 }
 
@@ -170,15 +168,7 @@ async function dbPush() {
     console.log(`📌 Existing tables: ${existing.join(', ')}`)
   }
 
-  // Execute the SQL
-  if (!values.force && toCreate.length > 0) {
-    console.log('\n⚠️  This will create the above tables.')
-    const answer = prompt('Continue? (y/N) ')
-    if (answer?.toLowerCase() !== 'y') {
-      console.log('❌ Cancelled')
-      process.exit(0)
-    }
-  }
+  // Execute the SQL - no confirmation needed, user explicitly ran db:push
 
   // Run the statements
   for (const statement of statements) {
@@ -219,14 +209,12 @@ async function dbDrop() {
 
   console.log(`Tables to drop: ${[...tables].join(', ')}`)
 
-  if (!values.force) {
-    console.log('\n⚠️  WARNING: This will DELETE ALL DATA!')
-    const answer = prompt('Are you sure? Type "yes" to confirm: ')
-    if (answer !== 'yes') {
-      console.log('❌ Cancelled')
-      sqlite.close()
-      process.exit(0)
-    }
+  console.log('\n⚠️  WARNING: This will DELETE ALL DATA!')
+  const answer = prompt('Are you sure? Type "yes" to confirm: ')
+  if (answer !== 'yes') {
+    console.log('❌ Cancelled')
+    sqlite.close()
+    process.exit(0)
   }
 
   // Drop each table
