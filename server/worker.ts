@@ -1,10 +1,12 @@
 /**
- * 🔥 Rip Worker - Request Handler
+ * 🔥 Rip Worker - Sequential Request Handler
  *
- * Handles HTTP requests with:
+ * Handles HTTP requests with perfect isolation:
+ * - One request at a time per worker (sequential processing)
  * - Full .rip language support via transpilation
  * - Unix socket communication for performance
  * - Graceful shutdown on request limits or SIGTERM
+ * - Perfect request isolation and predictable resource usage
  * - Auto-restart capability
  *
  * Usage: bun worker.ts [workerId] [maxRequests] [appDirectory]
@@ -17,6 +19,7 @@ const appDirectory = process.argv[4] ?? process.cwd();
 
 let requestsHandled = 0;
 let isShuttingDown = false;
+let requestInProgress = false;
 
 const socketPath = `/tmp/rip_worker_${workerId}.sock`;
 
@@ -98,7 +101,23 @@ const main = async () => {
         return new Response("Server shutting down", { status: 503 });
       }
 
+      // 🎯 Sequential Processing: Only handle one request at a time
+      if (requestInProgress) {
+        console.log(`⏸️ [Worker ${workerId}] Request queued - worker busy with request #${requestsHandled}`);
+        return new Response("Worker busy - perfect isolation in progress", { 
+          status: 503,
+          headers: { 
+            "Content-Type": "text/plain",
+            "Retry-After": "1"
+          }
+        });
+      }
+
+      // Mark request as in progress for perfect isolation
+      requestInProgress = true;
       requestsHandled++;
+
+      console.log(`🎯 [Worker ${workerId}] Processing request #${requestsHandled} (sequential mode)`);
 
       try {
         // Call the user's application
@@ -115,10 +134,12 @@ const main = async () => {
           response = await ripApp.handler(req);
         } else {
           // Fallback
-          response = new Response(`Rip Worker ${workerId} - Request #${requestsHandled}`, {
+          response = new Response(`Rip Worker ${workerId} - Request #${requestsHandled} (Sequential Mode)`, {
             headers: { "Content-Type": "text/plain" }
           });
         }
+
+        console.log(`✅ [Worker ${workerId}] Completed request #${requestsHandled} - perfect isolation maintained`);
 
         // Check if worker should shut down
         if (requestsHandled >= maxRequests) {
@@ -133,12 +154,15 @@ const main = async () => {
         return response;
 
       } catch (error) {
-        console.error(`❌ [Worker ${workerId}] Request error:`, error);
+        console.error(`❌ [Worker ${workerId}] Request #${requestsHandled} error:`, error);
 
         return new Response(`Rip Worker ${workerId} Error: ${error.message}`, {
           status: 500,
           headers: { "Content-Type": "text/plain" }
         });
+      } finally {
+        // 🎯 Release the worker for the next request
+        requestInProgress = false;
       }
     },
   });
@@ -167,7 +191,8 @@ const main = async () => {
   process.on('SIGINT', () => gracefulShutdown('SIGINT received'));
 
   console.log(`🚀 [Worker ${workerId}] Ready on ${socketPath}`);
-  console.log(`🎯 [Worker ${workerId}] Waiting for requests...`);
+  console.log(`🎯 [Worker ${workerId}] Sequential mode: One request at a time for perfect isolation`);
+  console.log(`⚡ [Worker ${workerId}] Waiting for requests...`);
 };
 
 // Start the worker

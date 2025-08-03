@@ -2,7 +2,14 @@
  * 🌐 Rip Server - HTTP Server and Load Balancer
  *
  * High-performance HTTP server that load balances requests across Rip workers.
- * Uses Unix sockets for maximum performance and automatic failover.
+ * Features intelligent 503 failover for perfect sequential processing.
+ *
+ * Key Features:
+ * - Round-robin load balancing with automatic worker failover
+ * - Intelligent 503 handling: busy worker → try next worker
+ * - Unix sockets for maximum performance
+ * - Health checks and metrics endpoints
+ * - Perfect isolation support for sequential processing
  *
  * This is the FRONT-END of the architecture - clients connect here.
  *
@@ -104,6 +111,15 @@ const server = Bun.serve({
         // Update stats
         stats.requests++;
 
+        // 🎯 Intelligent 503 Failover: If worker is busy, try next worker
+        if (workerResponse.status === 503) {
+          console.log(`⏸️ [Server] Worker ${socketPath} busy (503) - trying next worker...`);
+
+          // Don't return yet, let the loop try the next worker
+          continue;
+        }
+
+        // Worker available - return the response
         return workerResponse;
 
       } catch (error) {
@@ -130,6 +146,19 @@ const server = Bun.serve({
         continue;
       }
     }
+
+    // 🚨 All workers are busy - return 503 to client
+    console.warn(`🚨 [Server] All ${workerSocketPaths.length} workers are busy - returning 503 to client`);
+    return new Response(
+      `🚨 All Workers Busy\n\nAll ${workerSocketPaths.length} workers are currently processing requests.\nThis ensures perfect isolation - please retry in a moment.\n\nTip: Each worker processes one request at a time for maximum reliability.`,
+      {
+        status: 503,
+        headers: {
+          'Content-Type': 'text/plain',
+          'Retry-After': '1'
+        }
+      }
+    );
   },
 });
 

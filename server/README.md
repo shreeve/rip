@@ -15,9 +15,10 @@ A production-ready replacement for nginx + unicorn + ruby that combines:
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │     server      │───▶│     manager     │───▶│     worker      │
 │                 │    │                 │    │                 │
-│ HTTP Server +   │    │ Process Mgr +   │    │ Rip Handler +   │
-│ Port :3000      │    │ File Watcher +  │    │ Unix Socket     │
-│ Load Balancer   │    │ Hot Reload      │    │ Auto-restart    │
+│ HTTP Server +   │    │ Process Mgr +   │    │ Sequential      │
+│ Port :3000      │    │ File Watcher +  │    │ Request Handler │
+│ Load Balancer   │    │ Hot Reload      │    │ Perfect         │
+│                 │    │                 │    │ Isolation       │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
 ```
 
@@ -26,9 +27,10 @@ A production-ready replacement for nginx + unicorn + ruby that combines:
 1. **🔧 Development**: File watching in manager → graceful worker restarts
 2. **🚀 Production**: Same architecture, file watching dormant
 3. **⚡ Emergency**: Production hot-fixes via file watching
-4. **🛡️ Fault Tolerance**: Individual worker failures don't affect system
-5. **📊 Scalability**: Add workers = add capacity
-6. **🌍 Universal**: One system for all environments
+4. **🎯 Perfect Isolation**: Sequential processing per worker - no shared state
+5. **🛡️ Fault Tolerance**: Individual worker failures don't affect system
+6. **📊 Scalability**: Add workers = add capacity
+7. **🌍 Universal**: One system for all environments
 
 ## 🚀 Quick Start
 
@@ -48,6 +50,7 @@ bun run worker    # Just worker process
 ## ✨ Features
 
 - **🔥 Hot Reload** - .rip file changes trigger graceful worker restarts
+- **🎯 Sequential Processing** - One request per worker for perfect isolation
 - **🔄 Load Balancing** - Round-robin across multiple worker processes
 - **⚡ Auto Failover** - Dead workers replaced instantly
 - **🛡️ Graceful Shutdown** - Workers finish requests before restarting
@@ -55,6 +58,7 @@ bun run worker    # Just worker process
 - **🔌 Unix Sockets** - High-performance inter-process communication
 - **🎯 Rip Language** - Full .rip transpilation support
 - **🌍 Universal** - Same code in development and production
+- **🛡️ Perfect Isolation** - No shared state between requests within workers
 
 ## 🎯 Production Deployment
 
