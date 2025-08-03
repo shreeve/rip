@@ -1,13 +1,13 @@
 import { schema as Schema } from '../schema/schema-builder-v2'
 
 export default Schema ->
-  # Table with custom primary key (bigint)
+  # Table with custom primary key (bigint) - showcasing both syntaxes
   @table 'accounts', primary_key: 'AccountNum', id: 'bigint', ->
-    @string   'Description', [""]                 # Default empty string array
-    @integer  'AcctType!', 1, [0], unsigned: true # Size, default array, options
-    @string   'BankNumber', [""]                  # Default empty string array
-    @integer  'Inactive!', 1, [0], unsigned: true # Size, default array, options
-    @integer  'AccountColor!', [0]                # Default array without size
+    @string   'Description', [""]                                           # Type-based: array for default
+    @integer  'AcctType!', 1, [0], unsigned: true                          # Type-based: size, default, options
+    @string   'BankNumber', default: ""                                     # Named: cleaner for simple cases
+    @integer  'Inactive!', size: 1, default: 0, unsigned: true             # Named: explicit and clear
+    @integer  'AccountColor!', [0]                                          # Type-based: compact for simple default
 
   # Various column types with different default patterns
   @table 'appointments', ->

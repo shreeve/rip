@@ -1,7 +1,7 @@
 /**
- * rip-schema Builder v2 - Proper Drizzle Integration
+ * rip-schema Builder v2 - Flexible Parameter Support
  *
- * This version actually generates real Drizzle table objects
+ * Supports both type-based and named parameters for maximum flexibility
  */
 
 import { sql } from 'drizzle-orm'
@@ -17,6 +17,19 @@ import {
   text,
 } from 'drizzle-orm/sqlite-core'
 
+// Helper to parse parameters flexibly
+type ColumnOptions = {
+  size?: number
+  precision?: number
+  scale?: number
+  default?: any
+  unsigned?: boolean
+  unique?: boolean
+  references?: string
+  onDelete?: 'cascade' | 'restrict' | 'set null'
+  onUpdate?: 'cascade' | 'restrict' | 'set null'
+}
+
 // Column builder that wraps Drizzle columns
 export class ColumnBuilder {
   private columns: Record<string, AnySQLiteColumn> = {}
@@ -30,8 +43,9 @@ export class ColumnBuilder {
     }
   }
 
-  // Parse default value from array notation
+  // Parse default value from array notation or direct value
   private parseDefault(value: any): any {
+    // Handle array notation
     if (Array.isArray(value) && value.length > 0) {
       const val = value[0]
       if (typeof val === 'function') {
@@ -41,169 +55,216 @@ export class ColumnBuilder {
       }
       return val
     }
+    // Handle function directly (for named params)
+    else if (typeof value === 'function') {
+      const expr = value()
+      return sql.raw(expr)
+    }
     return value
   }
 
-  string(
-    fieldName: string,
-    sizeOrDefault?: number | any[],
-    defaultValue?: any[],
-  ) {
-    const { name, required } = this.parseField(fieldName)
-
-    let defVal: any
-
-    // Handle overloads
-    if (typeof sizeOrDefault === 'number') {
-      defVal = defaultValue
-    } else if (Array.isArray(sizeOrDefault)) {
-      defVal = sizeOrDefault
+  // Parse flexible parameters into options
+  private parseParams(...args: any[]): ColumnOptions {
+    const options: ColumnOptions = {}
+    
+    for (const arg of args) {
+      if (arg === null || arg === undefined) continue
+      
+      // Named parameters (object)
+      if (typeof arg === 'object' && !Array.isArray(arg)) {
+        Object.assign(options, arg)
+      }
+      // Array = default value
+      else if (Array.isArray(arg)) {
+        options.default = this.parseDefault(arg)
+      }
+      // Number = size/precision (context-dependent)
+      else if (typeof arg === 'number') {
+        if (!options.size && !options.precision) {
+          options.size = arg  // First number is size/precision
+        } else if (!options.scale) {
+          options.scale = arg  // Second number is scale (for decimals)
+        }
+      }
+      // Boolean flags
+      else if (typeof arg === 'boolean') {
+        // Could be used for specific flags in the future
+      }
     }
+    
+    return options
+  }
+
+  string(fieldName: string, ...args: any[]) {
+    const { name, required } = this.parseField(fieldName)
+    const options = this.parseParams(...args)
 
     let column = text(name)
     if (required) column = column.notNull()
-    if (defVal !== undefined) {
-      const parsed = this.parseDefault(defVal)
-      if (parsed !== undefined) column = column.default(parsed)
+    if (options.default !== undefined) {
+      column = column.default(options.default)
+    }
+    if (options.unique) {
+      column = column.unique()
     }
 
     this.columns[name] = column as any
     return this
   }
 
-  text(fieldName: string, defaultValue?: any[]) {
+  text(fieldName: string, ...args: any[]) {
     const { name, required } = this.parseField(fieldName)
+    const options = this.parseParams(...args)
 
     let column = text(name)
     if (required) column = column.notNull()
-    if (defaultValue !== undefined) {
-      const parsed = this.parseDefault(defaultValue)
-      if (parsed !== undefined) column = column.default(parsed)
+    if (options.default !== undefined) {
+      column = column.default(options.default)
     }
 
     this.columns[name] = column as any
     return this
   }
 
-  integer(fieldName: string, defaultValue?: any[]) {
+  integer(fieldName: string, ...args: any[]) {
     const { name, required } = this.parseField(fieldName)
+    const options = this.parseParams(...args)
 
     let column = integer(name)
     if (required) column = column.notNull()
-    if (defaultValue !== undefined) {
-      const parsed = this.parseDefault(defaultValue)
-      if (parsed !== undefined) column = column.default(parsed)
+    if (options.default !== undefined) {
+      column = column.default(options.default)
     }
 
     this.columns[name] = column as any
     return this
   }
 
-  bigint(fieldName: string, defaultValue?: any[]) {
-    // SQLite doesn't have true bigint, use integer
-    return this.integer(fieldName, defaultValue)
+  bigint(fieldName: string, ...args: any[]) {
+    const { name, required } = this.parseField(fieldName)
+    const options = this.parseParams(...args)
+
+    let column = integer(name)
+    if (required) column = column.notNull()
+    if (options.default !== undefined) {
+      column = column.default(options.default)
+    }
+
+    this.columns[name] = column as any
+    return this
   }
 
-  boolean(fieldName: string, defaultValue?: boolean | any[]) {
+  boolean(fieldName: string, ...args: any[]) {
     const { name, required } = this.parseField(fieldName)
-
-    let column = integer(name, { mode: 'boolean' })
-    if (required) column = column.notNull()
-
-    if (defaultValue !== undefined) {
-      if (typeof defaultValue === 'boolean') {
-        column = column.default(defaultValue)
-      } else if (Array.isArray(defaultValue)) {
-        const parsed = this.parseDefault(defaultValue)
-        if (parsed !== undefined) column = column.default(parsed)
+    
+    // First check for direct boolean default
+    let directDefault: boolean | undefined
+    const otherArgs: any[] = []
+    
+    for (const arg of args) {
+      if (typeof arg === 'boolean') {
+        directDefault = arg
+      } else {
+        otherArgs.push(arg)
       }
     }
+    
+    const options = this.parseParams(...otherArgs)
+    
+    // SQLite uses integer for boolean
+    let column = integer(name)
+    if (required) column = column.notNull()
+    
+    // Use direct boolean if provided, otherwise check options
+    const defaultValue = directDefault !== undefined ? directDefault : options.default
+    if (defaultValue !== undefined) {
+      // Convert boolean to integer
+      const defaultVal = defaultValue === true ? 1 : defaultValue === false ? 0 : defaultValue
+      column = column.default(defaultVal)
+    }
 
     this.columns[name] = column as any
     return this
   }
 
-  decimal(
-    fieldName: string,
-    precision?: number,
-    scale?: number,
-    defaultValue?: any[],
-  ) {
+  decimal(fieldName: string, ...args: any[]) {
     const { name, required } = this.parseField(fieldName)
+    const options = this.parseParams(...args)
 
+    // SQLite uses REAL for decimals
     let column = real(name)
     if (required) column = column.notNull()
-    if (defaultValue !== undefined) {
-      const parsed = this.parseDefault(defaultValue)
-      if (parsed !== undefined) column = column.default(parsed)
+    if (options.default !== undefined) {
+      column = column.default(options.default)
     }
 
     this.columns[name] = column as any
     return this
   }
 
-  float(fieldName: string, defaultValue?: any[]) {
-    return this.decimal(fieldName, undefined, undefined, defaultValue)
+  float(fieldName: string, ...args: any[]) {
+    return this.decimal(fieldName, ...args)
   }
 
-  datetime(fieldName: string, defaultValue?: any[]) {
+  datetime(fieldName: string, ...args: any[]) {
     const { name, required } = this.parseField(fieldName)
+    const options = this.parseParams(...args)
 
     let column = text(name)
     if (required) column = column.notNull()
-    if (defaultValue !== undefined) {
-      const parsed = this.parseDefault(defaultValue)
-      if (parsed !== undefined) column = column.default(parsed)
+    if (options.default !== undefined) {
+      column = column.default(options.default)
     }
 
     this.columns[name] = column as any
     return this
   }
 
-  date(fieldName: string, defaultValue?: any[]) {
+  date(fieldName: string, ...args: any[]) {
     const { name, required } = this.parseField(fieldName)
+    const options = this.parseParams(...args)
 
     let column = text(name)
     if (required) column = column.notNull()
-    if (defaultValue !== undefined) {
-      const parsed = this.parseDefault(defaultValue)
-      if (parsed !== undefined) column = column.default(parsed)
+    if (options.default !== undefined) {
+      column = column.default(options.default)
     }
 
     this.columns[name] = column as any
     return this
   }
 
-  time(fieldName: string, defaultValue?: any[]) {
+  time(fieldName: string, ...args: any[]) {
     const { name, required } = this.parseField(fieldName)
+    const options = this.parseParams(...args)
 
     let column = text(name)
     if (required) column = column.notNull()
-    if (defaultValue !== undefined) {
-      const parsed = this.parseDefault(defaultValue)
-      if (parsed !== undefined) column = column.default(parsed)
+    if (options.default !== undefined) {
+      column = column.default(options.default)
     }
 
     this.columns[name] = column as any
     return this
   }
 
-  timestamp(fieldName: string, defaultValue?: any[]) {
+  timestamp(fieldName: string, ...args: any[]) {
     const { name, required } = this.parseField(fieldName)
+    const options = this.parseParams(...args)
 
     let column = text(name)
     if (required) column = column.notNull()
-    if (defaultValue !== undefined) {
-      const parsed = this.parseDefault(defaultValue)
-      if (parsed !== undefined) column = column.default(parsed)
+    if (options.default !== undefined) {
+      column = column.default(options.default)
     }
 
     this.columns[name] = column as any
     return this
   }
 
-  binary(fieldName: string, options?: any) {
+  binary(fieldName: string, ...args: any[]) {
     const { name, required } = this.parseField(fieldName)
+    const options = this.parseParams(...args)
     
     // In SQLite, we use blob for binary data
     let column = blob(name, { mode: 'buffer' })
@@ -213,8 +274,8 @@ export class ColumnBuilder {
     return this
   }
 
-  email(fieldName: string, defaultValue?: any[]) {
-    return this.string(fieldName, 255, defaultValue)
+  email(fieldName: string, ...args: any[]) {
+    return this.string(fieldName, 255, ...args)
   }
 
   uuid(fieldName: string) {
@@ -246,10 +307,10 @@ export class ColumnBuilder {
   }
 }
 
-// Table builder that creates actual Drizzle tables
+// Table builder that uses the column builder
 export class TableBuilder {
   private builder = new ColumnBuilder()
-  private tableName: string
+  public tableName: string
 
   constructor(tableName: string, options?: any) {
     this.tableName = tableName
@@ -310,49 +371,44 @@ export class TableBuilder {
   }
 }
 
-// Schema class that manages tables
-export class Schema {
-  private tables: Record<string, SQLiteTableWithColumns<any>> = {}
-
-  table(
-    name: string,
-    options?: any | ((this: TableBuilder) => void),
-    builderFn?: (this: TableBuilder) => void,
-  ) {
-    let opts: any = {}
-    let fn: ((this: TableBuilder) => void) | undefined
-
-    if (typeof options === 'function') {
-      fn = options
-    } else {
-      opts = options || {}
-      fn = builderFn
-    }
-
-    const builder = new TableBuilder(name, opts)
-    if (fn) {
-      fn.call(builder)
-    }
-
-    this.tables[name] = builder.build()
-    return this
-  }
-
-  getTables() {
-    return this.tables
-  }
-}
-
 // Main schema function
-export function schema(
-  builderFn: (this: Schema) => void,
-): Record<string, SQLiteTableWithColumns<any>> {
-  const s = new Schema()
-  builderFn.call(s)
-  return s.getTables()
+export function schema(callback: (this: any) => void) {
+  const tables: Record<string, SQLiteTableWithColumns<any>> = {}
+
+  const context = {
+    table(name: string, ...args: any[]) {
+      let options: any = {}
+      let builderFn: Function | undefined
+
+      // Parse arguments
+      for (const arg of args) {
+        if (typeof arg === 'function') {
+          builderFn = arg
+        } else if (typeof arg === 'object') {
+          options = arg
+        }
+      }
+
+      if (!builderFn) {
+        throw new Error(`No builder function provided for table ${name}`)
+      }
+
+      const tableBuilder = new TableBuilder(name, options)
+      builderFn.call(tableBuilder)
+
+      // Add timestamps if not disabled
+      if (options?.timestamps !== false && tableBuilder.tableName !== 'migrations') {
+        tableBuilder.timestamps()
+      }
+
+      const table = tableBuilder.build()
+      tables[name] = table
+    },
+  }
+
+  callback.call(context)
+  return tables
 }
 
-// Make it globally available for Rip files
-if (typeof global !== 'undefined') {
-  ;(global as any).schema = schema
-}
+// Re-export types
+export type { InferInsertModel, InferSelectModel }
