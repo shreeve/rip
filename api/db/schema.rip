@@ -18,7 +18,7 @@ tables = schema ->
     @decimal  'hourly_rate', 10, 2
     @integer  'employee_count'
     @timestamps()
-    
+
     @index    'name'
     @index    ['state', 'city']
     @index    'active'
