@@ -1,4 +1,6 @@
-# 🚀 Rip API - Modern Database-Backed API
+<img src="/assets/logos/rip-icon-512wa.png" style="width:50px" /> <br>
+
+# Rip API - Modern Database-Backed API
 
 A blazing-fast API built with the Rip language, featuring SQLite database persistence, type-safe schema validation, and automatic data generation.
 

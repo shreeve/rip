@@ -1,4 +1,6 @@
-# rip-schema 🚀
+<img src="/assets/logos/rip-icon-512wa.png" style="width:50px" /> <br>
+
+# rip-schema
 
 ActiveRecord-inspired schema DSL for Drizzle ORM and Bun. Write beautiful, expressive database schemas with the elegance of Rails and the performance of Bun.
 

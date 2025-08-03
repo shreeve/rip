@@ -1,4 +1,6 @@
-# rip-bun 🚀
+<img src="/assets/logos/rip-icon-512wa.png" style="width:50px" /> <br>
+
+# rip-bun
 
 **Bun Plugin for Rip Language Transpilation**
 

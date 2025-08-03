@@ -1,4 +1,6 @@
-# 🚀 Rip Server Examples
+<img src="/assets/logos/rip-icon-512wa.png" style="width:50px" /> <br>
+
+# Rip Server Examples
 
 These examples show the capabilities of the Rip Application Server.
 

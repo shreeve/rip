@@ -1,4 +1,6 @@
-# 🚀 Rip Application Server
+<img src="/assets/logos/rip-icon-512wa.png" style="width:50px" /> <br>
+
+# Rip Application Server
 
 **Bun-Powered Application Server Framework**
 

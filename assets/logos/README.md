@@ -1,3 +1,5 @@
+<img src="/assets/logos/rip-icon-512wa.png" style="width:50px" /> <br>
+
 # Rip Logo Assets
 
 This directory contains the official logo files for the Rip multilanguage universal runtime.
