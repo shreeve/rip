@@ -28,8 +28,10 @@ async function killAll() {
 // Start command
 async function start(
   _mode: string = 'dev',
-  foreground: string = 'true',
   appDir: string = process.cwd(),
+  httpsPort?: string,
+  certPath?: string,
+  keyPath?: string,
 ) {
   const appPath = resolve(appDir)
 
@@ -48,9 +50,14 @@ async function start(
     process.exit(1)
   }
 
+  const endpoints = [`   📡 HTTP:    http://localhost:3000`]
+  if (httpsPort && certPath && keyPath) {
+    endpoints.unshift(`   🔒 HTTPS:   https://localhost:${httpsPort}`)
+  }
+
   console.log(`
 🌐 Endpoints:
-   📡 HTTP:    http://localhost:3000
+${endpoints.join('\n')}
    🏥 Health:  http://localhost:3000/health
    📈 Metrics: http://localhost:3000/metrics
 
@@ -79,14 +86,18 @@ async function start(
   await new Promise(resolve => setTimeout(resolve, 3000))
 
   // Start server
-  const server = spawn(
-    ['bun', join(SCRIPT_DIR, 'server.ts'), '0', '3000', '3'],
-    {
-      stdout: 'inherit',
-      stderr: 'inherit',
-      stdin: 'inherit',
-    },
-  )
+  const serverArgs = ['bun', join(SCRIPT_DIR, 'server.ts'), '0', '3000', '3']
+
+  // Add HTTPS args if provided
+  if (httpsPort && certPath && keyPath) {
+    serverArgs.push(httpsPort, certPath, keyPath)
+  }
+
+  const server = spawn(serverArgs, {
+    stdout: 'inherit',
+    stderr: 'inherit',
+    stdin: 'inherit',
+  })
 
   // Monitor server
   server.exited.then(code => {
@@ -103,28 +114,8 @@ async function start(
     process.exit(0)
   })
 
-  // Keep running
-  if (foreground === 'true') {
-    // Wait forever
-    await new Promise(() => {})
-  } else {
-    // Background mode - wait a bit then check health
-    await new Promise(resolve => setTimeout(resolve, 2000))
-
-    try {
-      const response = await fetch('http://localhost:3000/health')
-      if (response.ok) {
-        console.log('✅ Server launched successfully!')
-        console.log('🛑 Stop with: rip-server stop')
-      } else {
-        throw new Error('Health check failed')
-      }
-    } catch (_e) {
-      console.error('❌ Server failed to start')
-      await killAll()
-      process.exit(1)
-    }
-  }
+  // Keep running (always foreground)
+  await new Promise(() => {})
 }
 
 // Main command handler
@@ -133,9 +124,12 @@ switch (command) {
   case 'dev':
   case 'prod': {
     const mode = command === 'start' ? args[0] || 'dev' : command
-    const foreground = args[command === 'start' ? 1 : 0] || 'true'
-    const appDir = args[command === 'start' ? 2 : 1] || process.cwd()
-    await start(mode, foreground, appDir)
+    const baseIdx = command === 'start' ? 1 : 0
+    const appDir = args[baseIdx] || process.cwd()
+    const httpsPort = args[baseIdx + 1]
+    const certPath = args[baseIdx + 2]
+    const keyPath = args[baseIdx + 3]
+    await start(mode, appDir, httpsPort, certPath, keyPath)
     break
   }
 
@@ -161,16 +155,17 @@ switch (command) {
     console.log(`🚀 Rip Application Server
 
 Usage:
-  rip-server start [mode] [foreground] [app_dir]
-  rip-server dev   [foreground] [app_dir]
-  rip-server prod  [foreground] [app_dir]
+  rip-server start [mode] [app_dir] [https_port] [cert_path] [key_path]
+  rip-server dev   [app_dir] [https_port] [cert_path] [key_path]
+  rip-server prod  [app_dir] [https_port] [cert_path] [key_path]
   rip-server stop
   rip-server test
 
 Examples:
   rip-server                        # Start dev server (default)
   rip-server dev                    # Start development server
-  rip-server dev true ./api         # Dev server with specific app
+  rip-server dev ./api              # Dev server with specific app
+  rip-server dev ./api 3443 cert.pem key.pem  # With HTTPS
   rip-server stop                   # Stop all processes
   rip-server test                   # Run test suite
 
@@ -179,5 +174,5 @@ Examples:
 
   default:
     // Default to dev mode
-    await start('dev', args[0] || 'true', args[1] || process.cwd())
+    await start('dev', args[0] || process.cwd(), args[1], args[2], args[3])
 }

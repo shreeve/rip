@@ -239,8 +239,8 @@ const setupGracefulShutdown = () => {
  */
 const main = async () => {
   console.log(
-  `[${getTimestamp()}              ] M${managerNum} ready (${numWorkers} workers, ${maxRequestsPerWorker} requests each)`,
-)
+    `[${getTimestamp()}              ] M${managerNum} ready (${numWorkers} workers, ${maxRequestsPerWorker} requests each)`,
+  )
 
   // Setup graceful shutdown first
   setupGracefulShutdown()

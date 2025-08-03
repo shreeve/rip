@@ -35,28 +35,29 @@ A production-ready replacement for nginx + unicorn + ruby that combines:
 ## 🚀 Quick Start
 
 ```bash
-# 🔒 HTTPS by Default (Recommended)
-bun run dev       # Development HTTPS + HTTP (auto-generates certificates)
-bun run start     # Production HTTPS + HTTP
+# Install globally (recommended)
+sudo ln -sf /path/to/server/rip-server.ts /usr/local/bin/rip-server
 
-# 📡 HTTP Only (when you specifically need it)
-bun run dev:http  # Development HTTP only
-bun run start:http # Production HTTP only
+# Start development server
+rip-server              # Uses current directory
+rip-server dev ./api    # Specific app directory
 
-# Foreground modes (see all logs)
-bun run dev:fg    # Development foreground (HTTPS + HTTP)
-bun run start:fg  # Production foreground (HTTPS + HTTP)
+# Production mode
+rip-server prod         # Production server
 
-# Testing
-bun run test      # Test HTTPS endpoint (default)
-bun run test:http # Test HTTP endpoint
-bun run health    # HTTPS health check (default)
-bun run health:http # HTTP health check
+# Management commands
+rip-server stop         # Stop all processes
+rip-server test         # Run test suite
+rip-server help         # Show help
 
-# Custom configuration
-bun run server    # Just HTTP server
-bun run manager   # Just process manager
-bun run worker    # Just worker process
+# HTTPS Support (optional)
+rip-server dev ./api 3443 cert.pem key.pem
+
+# Or use npm scripts from server directory
+bun run dev            # Development mode
+bun run start          # Production mode
+bun run stop           # Stop all processes
+bun run test           # Run tests
 ```
 
 ## 📊 Request Logging
