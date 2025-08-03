@@ -1,10 +1,10 @@
 /**
- * 🌐 RIP Server - Revolutionary HTTP Load Balancer
+ * 🌐 Rip Server - HTTP Server and Load Balancer
  *
- * High-performance HTTP server that load balances requests across RIP workers.
+ * High-performance HTTP server that load balances requests across Rip workers.
  * Uses Unix sockets for maximum performance and automatic failover.
  *
- * This is the FRONT-END of the revolutionary architecture - clients connect here.
+ * This is the FRONT-END of the architecture - clients connect here.
  *
  * Usage: bun server.ts [port] [numWorkers]
  */
@@ -50,7 +50,7 @@ const handleHealthCheck = (req: Request) => {
 
   if (url.pathname === '/metrics') {
     const metrics = [
-      `# RIP Server Metrics`,
+      `# Rip Server Metrics`,
       `rip_total_requests ${totalRequests}`,
       `rip_workers_total ${numWorkers}`,
       `rip_uptime_seconds ${process.uptime()}`,
@@ -118,7 +118,7 @@ const server = Bun.serve({
           console.error(`🚨 [Server] All ${workerSocketPaths.length} workers unavailable!`);
 
           return new Response(
-            `🚨 RIP Server Error: All workers unavailable\n\nTried ${workerSocketPaths.length} workers, all failed.\nLast error: ${error.message}\n\nIs the manager running? (bun manager.ts)`,
+            `🚨 Rip Server Error: All workers unavailable\n\nTried ${workerSocketPaths.length} workers, all failed.\nLast error: ${error.message}\n\nIs the manager running? (bun manager.ts)`,
             {
               status: 503,
               headers: { 'Content-Type': 'text/plain' }
@@ -151,11 +151,11 @@ process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 // Startup messages
-console.log(`🚀 RIP Revolutionary Server listening on http://localhost:${port}`);
+console.log(`🚀 Rip Server listening on http://localhost:${port}`);
 console.log(`📊 Load balancing across ${workerSocketPaths.length} workers`);
 console.log(`🏥 Health check: http://localhost:${port}/health`);
 console.log(`📈 Metrics: http://localhost:${port}/metrics`);
-console.log(`🌟 The future of web servers is here!`);
+console.log(`🌟 Server ready!`);
 console.log(`\n🔗 Worker sockets:`);
 workerSocketPaths.forEach((path, i) => {
   console.log(`   Worker ${i}: ${path}`);

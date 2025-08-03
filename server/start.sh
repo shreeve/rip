@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# 🚀 Revolutionary RIP Application Server Startup
-# The future of web servers starts here!
+# 🚀 Rip Application Server Startup
+# Modern application server architecture
 
 MODE=${1:-dev}
 FOREGROUND=${2:-false}
 
-echo "🚀 Starting Revolutionary RIP Application Server..."
+echo "🚀 Starting Rip Application Server..."
 echo "🌍 Mode: $MODE"
 
 # Configuration based on mode
@@ -41,16 +41,16 @@ else
     echo "🔇 Background mode: Quiet startup, 'bun run stop' to stop"
 fi
 
-# Start the revolutionary manager (spawns workers + handles hot reload)
+# Start the manager (spawns workers + handles hot reload)
 if [ "$FOREGROUND" = "true" ]; then
-    echo "🧠 Starting Revolutionary Manager..."
+    echo "🧠 Starting Manager..."
     bun manager.ts $NUM_WORKERS $MAX_REQUESTS "$APP_DIR" &
     MANAGER_PID=$!
 
     echo "⏳ Waiting for workers to initialize..."
     sleep 3
 
-    echo "🌐 Starting HTTP Load Balancer..."
+    echo "🌐 Starting HTTP Server..."
     bun server.ts 3000 $NUM_WORKERS &
     SERVER_PID=$!
 
@@ -71,7 +71,7 @@ fi
 
 if [ "$FOREGROUND" = "true" ]; then
     echo ""
-    echo "🎉 REVOLUTIONARY RIP APPLICATION SERVER IS RUNNING!"
+    echo "🎉 RIP APPLICATION SERVER IS RUNNING!"
     echo ""
     echo "🌐 HTTP Server: http://localhost:3000"
     echo "🏥 Health Check: http://localhost:3000/health"
@@ -95,7 +95,7 @@ if [ "$FOREGROUND" = "true" ]; then
 
     echo "💡 Press Ctrl-C to stop"
     echo ""
-    echo "🌟 Welcome to the FUTURE of web servers! 🚀⚡🔥"
+    echo "🌟 Server started successfully! 🚀"
 
     # Wait in foreground - logs will show, Ctrl-C will kill
     wait

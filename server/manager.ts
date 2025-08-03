@@ -1,5 +1,5 @@
 /**
- * 🚀 RIP Manager - Revolutionary Process Manager + Hot Reload
+ * 🚀 Rip Manager - Process Manager + Hot Reload
  *
  * This is where the MAGIC happens! Combines:
  * - Multi-process worker management (like Unicorn)
@@ -204,7 +204,7 @@ const setupGracefulShutdown = () => {
  * Main initialization
  */
 const main = async () => {
-  console.log(`🚀 [Manager] RIP Revolutionary Manager starting...`);
+  console.log(`🚀 [Manager] Rip Manager starting...`);
   console.log(`🌍 [Manager] Environment: ${process.env.NODE_ENV || 'development'}`);
 
   // Setup graceful shutdown first
@@ -216,9 +216,9 @@ const main = async () => {
   // Setup file watching for hot reload
   setupFileWatcher();
 
-  console.log(`🎉 [Manager] Revolutionary RIP Manager ready!`);
+  console.log(`🎉 [Manager] Rip Manager ready!`);
   console.log(`🔥 [Manager] Managing ${numWorkers} workers with hot reload capability`);
-  console.log(`🌟 [Manager] The future of web servers is here!`);
+  console.log(`🌟 [Manager] Server ready!`);
 };
 
 // Fire it up!

@@ -1,5 +1,5 @@
 /**
- * 🔥 RIP Worker - Revolutionary Request Handler
+ * 🔥 Rip Worker - Request Handler
  *
  * Handles HTTP requests with:
  * - Full .rip language support via transpilation
@@ -57,7 +57,7 @@ const loadRipApplication = async () => {
     console.log(`⚠️ [Worker ${workerId}] No .rip app found, using default handler`);
     return {
       fetch: (req: Request) => {
-        return new Response(`Hello from RIP Worker ${workerId}! (request #${requestsHandled + 1})\n\nNo .rip application found. Create index.rip, app.rip, or server.rip in ${appDirectory}`, {
+        return new Response(`Hello from Rip Worker ${workerId}! (request #${requestsHandled + 1})\n\nNo .rip application found. Create index.rip, app.rip, or server.rip in ${appDirectory}`, {
           headers: { "Content-Type": "text/plain" }
         });
       }
@@ -69,7 +69,7 @@ const loadRipApplication = async () => {
     // Return error handler
     return {
       fetch: (req: Request) => {
-        return new Response(`Error in RIP Worker ${workerId}: ${error.message}`, {
+        return new Response(`Error in Rip Worker ${workerId}: ${error.message}`, {
           status: 500,
           headers: { "Content-Type": "text/plain" }
         });
@@ -82,7 +82,7 @@ const loadRipApplication = async () => {
  * Main worker logic
  */
 const main = async () => {
-  console.log(`🔥 [Worker ${workerId}] Starting RIP worker...`);
+  console.log(`🔥 [Worker ${workerId}] Starting Rip worker...`);
   console.log(`📊 [Worker ${workerId}] Will handle up to ${maxRequests} requests`);
   console.log(`📁 [Worker ${workerId}] App directory: ${appDirectory}`);
 
@@ -115,7 +115,7 @@ const main = async () => {
           response = await ripApp.handler(req);
         } else {
           // Fallback
-          response = new Response(`RIP Worker ${workerId} - Request #${requestsHandled}`, {
+          response = new Response(`Rip Worker ${workerId} - Request #${requestsHandled}`, {
             headers: { "Content-Type": "text/plain" }
           });
         }
@@ -135,7 +135,7 @@ const main = async () => {
       } catch (error) {
         console.error(`❌ [Worker ${workerId}] Request error:`, error);
 
-        return new Response(`RIP Worker ${workerId} Error: ${error.message}`, {
+        return new Response(`Rip Worker ${workerId} Error: ${error.message}`, {
           status: 500,
           headers: { "Content-Type": "text/plain" }
         });

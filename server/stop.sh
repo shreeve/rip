@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# 🛑 Revolutionary RIP Application Server Stop Script
+# 🛑 Rip Application Server Stop Script
 # Graceful shutdown of the entire server architecture
 
-echo "🛑 Stopping Revolutionary RIP Application Server..."
+echo "🛑 Stopping Rip Application Server..."
 
 # Send SIGTERM for graceful shutdown
 echo "👋 Sending graceful shutdown signals..."
@@ -24,5 +24,5 @@ pkill -KILL -f "bun worker.ts" 2>/dev/null
 echo "🧹 Cleaning up socket files..."
 rm -f /tmp/rip_worker_*.sock
 
-echo "✅ Revolutionary RIP Application Server stopped and cleaned up"
-echo "🌟 Thanks for using the future of web servers!"
+echo "✅ Rip Application Server stopped and cleaned up"
+echo "🌟 Server stopped successfully"

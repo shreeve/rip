@@ -32,7 +32,7 @@ Internet → server.ts → manager.ts → worker.ts (×N)
 
 This three-tier architecture provides clean separation of concerns:
 
-### **🌐 server.ts** - HTTP Load Balancer
+### **🌐 server.ts** - HTTP Server and Load Balancer
 - Receives all HTTP requests on port 3000
 - Round-robin distributes to workers via Unix sockets
 - Automatic failover when workers fail

@@ -1,6 +1,6 @@
 # 🚀 RIP Application Server
 
-**The Revolutionary Bun-Powered Application Server Framework**
+**Bun-Powered Application Server Framework**
 
 A production-ready replacement for nginx + unicorn + ruby that combines:
 - 🔥 **Hot Reload Development** - Instant .rip file changes
@@ -9,19 +9,19 @@ A production-ready replacement for nginx + unicorn + ruby that combines:
 - 🌍 **Universal Deployment** - Same code dev → production
 - 📊 **Load Balancing** - Round-robin with Unix sockets
 
-## 🏗️ Revolutionary Architecture
+## 🏗️ Architecture
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │     server      │───▶│     manager     │───▶│     worker      │
 │                 │    │                 │    │                 │
-│ HTTP Load Bal.  │    │ Process Mgr +   │    │ Rip Handler +   │
+│ HTTP Server +   │    │ Process Mgr +   │    │ Rip Handler +   │
 │ Port :3000      │    │ File Watcher +  │    │ Unix Socket     │
-│ Round-robin     │    │ Hot Reload      │    │ Auto-restart    │
+│ Load Balancer   │    │ Hot Reload      │    │ Auto-restart    │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
 ```
 
-### 🔥 What Makes This Revolutionary:
+### 🔥 Key Features:
 
 1. **🔧 Development**: File watching in manager → graceful worker restarts
 2. **🚀 Production**: Same architecture, file watching dormant
@@ -78,7 +78,7 @@ Benefits:
 
 ---
 
-**Modern application server architecture for the Bun era** 🔥⚡🚀
+**Modern application server architecture built with Bun** 🚀
 
 ---
 
