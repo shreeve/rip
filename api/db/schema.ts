@@ -11,10 +11,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const dbPath = join(__dirname, 'api.db')
 const sqlite = new Database(dbPath)
 
-// Create Drizzle instance with our ActiveRip schema
+// Create Drizzle instance with our rip-schema
 export const db = drizzle(sqlite, { schema })
 
-// Export the lawfirms table from our ActiveRip schema
+// Export the lawfirms table from our rip-schema
 export const lawfirmsTable = schema.lawfirms
 
 // Initialize the database table

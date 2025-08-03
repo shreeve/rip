@@ -1,5 +1,5 @@
 /**
- * ActiveRip Schema Builder v2 - Proper Drizzle Integration
+ * rip-schema Builder v2 - Proper Drizzle Integration
  *
  * This version actually generates real Drizzle table objects
  */

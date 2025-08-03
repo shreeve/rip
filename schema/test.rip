@@ -1,4 +1,4 @@
-# Test ActiveRip functionality
+# Test rip-schema functionality
 import { schema } from './schema-builder'
 
 # Define a simple test schema
@@ -14,4 +14,4 @@ testSchema = schema ->
 # Log the generated schema
 console.log 'Generated schema:', testSchema
 
-# You can run this with: bun active-rip/test.rip
+# You can run this with: bun schema/test.rip

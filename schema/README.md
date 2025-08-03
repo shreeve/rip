@@ -96,7 +96,7 @@ Flexible index definitions:
 ## Real-World Example
 
 ```coffeescript
-import { schema } from '@rip/active-rip'
+import { schema } from '@rip/schema'
 
 export default schema ->
 
