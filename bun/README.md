@@ -1,10 +1,8 @@
 <img src="/assets/logos/rip-icon-512wa.png" style="width:50px" /> <br>
 
-# rip-bun
+# Rip Bun - Seamless Language Transpilation
 
-**Bun Plugin for Rip Language Transpilation**
-
-A lightweight Bun plugin that enables seamless transpilation of `.rip` files to JavaScript, allowing you to write in the elegant Rip language while leveraging Bun's blazing-fast runtime.
+**Transform .rip Files to JavaScript with Zero Configuration**
 
 ## 🎯 What it does
 

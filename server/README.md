@@ -1,8 +1,8 @@
 <img src="/assets/logos/rip-icon-512wa.png" style="width:50px" /> <br>
 
-# Rip Application Server
+# Rip Server - Production-Ready Application Framework
 
-**Bun-Powered Application Server Framework**
+**Bun-Powered Multi-Process Server with Hot Reload**
 
 A production-ready replacement for nginx + unicorn + ruby that combines:
 - 🔥 **Hot Reload Development** - Instant .rip file changes
