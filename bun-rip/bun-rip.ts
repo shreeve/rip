@@ -9,8 +9,8 @@ Bun.plugin({
       loader: "js",
       contents: rip.compile(await Bun.file(path).text(), {
         filename: path,
-        header: true,
         bare: true,
+        header: true,
         inlineMap: true,
       }),
     }));
