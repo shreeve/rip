@@ -69,10 +69,10 @@ export class ColumnBuilder {
   // Note: In CoffeeScript/JavaScript, named parameters (key:value) must come last
   private parseParams(...args: any[]): ColumnOptions {
     const options: ColumnOptions = {}
-    
+
     for (const arg of args) {
       if (arg === null || arg === undefined) continue
-      
+
       // Named parameters (object) - must be last in actual usage
       if (typeof arg === 'object' && !Array.isArray(arg)) {
         Object.assign(options, arg)
@@ -94,7 +94,7 @@ export class ColumnBuilder {
         // Could be used for specific flags in the future
       }
     }
-    
+
     return options
   }
 
