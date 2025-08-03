@@ -1,14 +1,12 @@
-import rip from '../coffeescript/lib/coffeescript'
+import { compile } from '../coffeescript/lib/coffeescript'
 
 Bun.plugin
   name: "bun-rip"
   setup: ({ onLoad }) ->
     onLoad filter: /\.rip$/, ({ path }) ->
-      src = Bun.file(path).text!
-      js = rip.compile src,
-        filename: path
-        header: on
-        bare: on
-        inlineMap: on
-      contents: js
       loader: "js"
+      contents: compile Bun.file(path).text!,
+        bare: on
+        header: on
+        filename: path
+        inlineMap: on
