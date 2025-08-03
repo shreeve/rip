@@ -44,12 +44,12 @@ const loadRipApplication = async () => {
     for (const file of possibleFiles) {
       try {
         const appPath = `${appDirectory}/${file}`;
-        console.log(`🔍 [Worker ${workerNum}] Trying to load: ${appPath}`);
+
 
         // Import the .rip file (will be transpiled by bunfig.toml)
         const app = await import(appPath);
 
-        console.log(`✅ [Worker ${workerNum}] Loaded application from: ${file}`);
+
         return app.default || app;
       } catch (error) {
         // Try next file
@@ -58,7 +58,7 @@ const loadRipApplication = async () => {
     }
 
     // Fallback: create a simple default handler
-    console.log(`⚠️ [Worker ${workerNum}] No .rip app found, using default handler`);
+
     return {
       fetch: (req: Request) => {
         return new Response(`Hello from Rip Worker ${workerNum}! (request #${requestsHandled + 1})\n\nNo .rip application found. Create index.rip, app.rip, or server.rip in ${appDirectory}`, {
@@ -68,7 +68,7 @@ const loadRipApplication = async () => {
     };
 
   } catch (error) {
-    console.error(`❌ [Worker ${workerNum}] Error loading application:`, error);
+    console.error(`[${getTimestamp()}] ❌ W${workerNum} app load error:`, error);
 
     // Return error handler
     return {
@@ -86,9 +86,14 @@ const loadRipApplication = async () => {
  * Main worker logic
  */
 const main = async () => {
-  console.log(`🔥 [Worker ${workerNum}] Starting Rip worker...`);
-console.log(`📊 [Worker ${workerNum}] Will handle up to ${maxRequests} requests`);
-console.log(`📁 [Worker ${workerNum}] App directory: ${appDirectory}`);
+  // Shared timestamp function
+const getTimestamp = () => {
+  const now = new Date();
+  return now.toISOString().slice(0, 23).replace('T', ' ') +
+         (now.getTimezoneOffset() <= 0 ? '+' : '-') +
+         String(Math.abs(Math.floor(now.getTimezoneOffset() / 60))).padStart(2, '0') +
+         ':' + String(Math.abs(now.getTimezoneOffset() % 60)).padStart(2, '0');
+};
 
   // Load the user's Rip application
   const ripApp = await loadRipApplication();
@@ -104,7 +109,7 @@ console.log(`📁 [Worker ${workerNum}] App directory: ${appDirectory}`);
 
       // 🎯 Sequential Processing: Only handle one request at a time
       if (requestInProgress) {
-        console.log(`⏸️ [Worker ${workerNum}] Request queued - worker busy with request #${requestsHandled}`);
+        console.log(`[${getTimestamp()}] W${workerNum} busy - request queued`);
         return new Response("Worker busy - perfect isolation in progress", {
           status: 503,
           headers: {
@@ -140,7 +145,7 @@ console.log(`📁 [Worker ${workerNum}] App directory: ${appDirectory}`);
 
         // Check if worker should shut down
         if (requestsHandled >= maxRequests) {
-          console.log(`✅ [Worker ${workerNum}] Reached ${maxRequests} requests. Scheduling graceful shutdown.`);
+          console.log(`[${getTimestamp()}] W${workerNum} reached ${maxRequests} requests - shutting down`);
 
           // Schedule shutdown after this request completes
           setTimeout(() => {
@@ -151,7 +156,7 @@ console.log(`📁 [Worker ${workerNum}] App directory: ${appDirectory}`);
         return response;
 
       } catch (error) {
-        console.error(`❌ [Worker ${workerNum}] Request #${requestsHandled} error:`, error);
+        console.error(`[${getTimestamp()}] ❌ W${workerNum} request error:`, error);
 
         return new Response(`Rip Worker ${workerNum} Error: ${error.message}`, {
           status: 500,
@@ -184,8 +189,7 @@ console.log(`📁 [Worker ${workerNum}] App directory: ${appDirectory}`);
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM received'));
   process.on('SIGINT', () => gracefulShutdown('SIGINT received'));
 
-  console.log(`🚀 [Worker ${workerNum}] Ready on ${socketPath}`);
-  console.log(`⚡ [Worker ${workerNum}] Waiting for requests...`);
+  console.log(`[${getTimestamp()}] W${workerNum} ready`);
 };
 
 // Start the worker

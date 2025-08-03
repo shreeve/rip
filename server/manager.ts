@@ -36,7 +36,7 @@ let fileWatchingEnabled = true;
 const spawnWorker = async (workerId: number): Promise<Worker> => {
   const socketPath = `/tmp/rip_worker_${workerId}.sock`;
 
-  console.log(`🚀 [Manager] Spawning worker ${workerId}... (restart #${workers[workerId]?.restartCount || 1})`);
+  console.log(`[${getTimestamp()}] W${workerId + 1} starting...`);
 
   // Clean up any existing socket
   try {
@@ -67,7 +67,7 @@ const spawnWorker = async (workerId: number): Promise<Worker> => {
   // Handle worker exit
   process.exited.then(({ code }) => {
     if (!isShuttingDown) {
-      console.log(`⚡ [Manager] Worker ${workerId} exited with code ${code}. Respawning...`);
+      console.log(`[${getTimestamp()}] W${workerId + 1} exited (code ${code}) - respawning...`);
 
       // Small delay to prevent rapid restart loops
       setTimeout(() => {
@@ -102,8 +102,17 @@ const gracefulRestartWorker = async (workerId: number) => {
 /**
  * Gracefully restart all workers (rolling restart)
  */
+// Shared timestamp function
+const getTimestamp = () => {
+  const now = new Date();
+  return now.toISOString().slice(0, 23).replace('T', ' ') +
+         (now.getTimezoneOffset() <= 0 ? '+' : '-') +
+         String(Math.abs(Math.floor(now.getTimezoneOffset() / 60))).padStart(2, '0') +
+         ':' + String(Math.abs(now.getTimezoneOffset() % 60)).padStart(2, '0');
+};
+
 const gracefulRestartAllWorkers = async (reason: string) => {
-  console.log(`🔄 [Manager] Rolling restart of all workers: ${reason}`);
+  console.log(`[${getTimestamp()}] ⚠️  ${reason} - restarting all workers`);
 
   // Restart workers one by one to maintain availability
   for (let i = 0; i < workers.length; i++) {
@@ -115,16 +124,14 @@ const gracefulRestartAllWorkers = async (reason: string) => {
     }
   }
 
-  console.log(`✅ [Manager] Rolling restart complete`);
+  console.log(`[${getTimestamp()}] All workers restarted`);
 };
 
 /**
  * Initialize all workers
  */
 const initializeWorkers = async () => {
-  console.log(`🎯 [Manager] Starting ${numWorkers} workers...`);
-  console.log(`📈 [Manager] Max requests per worker: ${maxRequestsPerWorker}`);
-  console.log(`📁 [Manager] App directory: ${appDirectory}`);
+
 
   for (let i = 0; i < numWorkers; i++) {
     const worker = await spawnWorker(i);
@@ -141,11 +148,11 @@ const initializeWorkers = async () => {
 const setupFileWatcher = () => {
   if (!fileWatchingEnabled) return;
 
-  console.log("👀 [Manager] Setting up file watcher for hot reload...");
+
 
   const watcher = watch(appDirectory, { recursive: true }, (eventType, filename) => {
     if (filename && filename.endsWith('.rip') && eventType === 'change') {
-      console.log(`📁 [Manager] Rip file changed: ${filename}`);
+      console.log(`[${getTimestamp()}] ⚠️  File changed: ${filename}`);
 
       // Graceful rolling restart of all workers
       gracefulRestartAllWorkers(`File change: ${filename}`);
@@ -161,7 +168,7 @@ const setupFileWatcher = () => {
     watcher.close();
   });
 
-  console.log(`🔥 [Manager] File watching active on: ${appDirectory}`);
+
 };
 
 /**
@@ -201,8 +208,7 @@ const setupGracefulShutdown = () => {
  * Main initialization
  */
 const main = async () => {
-  console.log(`🚀 [Manager] Rip Manager starting...`);
-  console.log(`🌍 [Manager] Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`[${getTimestamp()}] Manager starting (${numWorkers} workers, ${maxRequestsPerWorker} req/worker)`);
 
   // Setup graceful shutdown first
   setupGracefulShutdown();
@@ -213,9 +219,8 @@ const main = async () => {
   // Setup file watching for hot reload
   setupFileWatcher();
 
-  console.log(`🎉 [Manager] Rip Manager ready!`);
-  console.log(`🔥 [Manager] Managing ${numWorkers} workers with hot reload capability`);
-  console.log(`🌟 [Manager] Server ready!`);
+  console.log(`[${getTimestamp()}] 🔥 Hot reload active`);
+  console.log(`[${getTimestamp()}] 🚀 Server ready!`);
 };
 
 // Fire it up!

@@ -109,7 +109,7 @@ const handleRequest = async (req: Request) => {
     if (healthResponse) return healthResponse;
 
     const url = new URL(req.url);
-    const requestStart = Date.now();
+    const requestStart = performance.now();
     const startDate = new Date();
 
     // Round-robin load balancing with automatic failover
@@ -122,17 +122,18 @@ const handleRequest = async (req: Request) => {
 
       try {
         // Forward request to worker via Unix socket
-        const workerStart = Date.now();
+        const workerStart = performance.now();
         const workerResponse = await fetch(`http://localhost${url.pathname}${url.search}`, {
           method: req.method,
           headers: req.headers,
           body: req.body,
           unix: socketPath,
         });
-        const workerEnd = Date.now();
+        const workerEnd = performance.now();
 
         // Update stats
         stats.requests++;
+        const workerRequestNum = stats.requests; // Current request number for this worker
 
         // 🎯 Intelligent 503 Failover: If worker is busy, try next worker
         if (workerResponse.status === 503) {
@@ -146,21 +147,65 @@ const handleRequest = async (req: Request) => {
         const responseToReturn = workerResponse.clone();
 
         // Start response transmission timing
-        const responseStart = Date.now();
+        const responseStart = performance.now();
 
         // Schedule detailed logging after response is fully sent
         setImmediate(() => {
-          const responseEnd = Date.now();
+          const responseEnd = performance.now();
 
-          // 📊 Comprehensive timing breakdown
-          const workerTime = workerEnd - workerStart;     // Worker processing time
-          const totalTime = responseEnd - requestStart;   // Total request time
-          const serverTime = totalTime - workerTime;      // Server overhead time
+          // 📊 Meaningful timing breakdown (in microseconds)
+          const workerTime = (workerEnd - workerStart) * 1000;       // Worker processing time in µs
+          const transmissionTime = (responseEnd - responseStart) * 1000; // Response transmission time in µs
+
+          // 🎯 Canonical timing formatter (inspired by your Ruby scale function!)
+                    const scale = (value: number, unit: string, base: number = 1000): string => {
+            if (value === 0) {
+              // Dash in rightmost position of 3-char format + separator space for seconds + unit
+              return `  - ${unit}`; // 2 spaces + dash + space + unit (assuming seconds)
+            }
+
+            const prefixes = ["G", "M", "K", "", "m", "µ", "n"];
+            let slot = 5; // Start at "µ" (microseconds)
+            let show = value; // Value is already in microseconds
+
+            // Scale down to smaller units (ms, µs, ns)
+            while (show > 0 && show < 1.0 && slot < 6) {
+              show *= base;
+              slot += 1;
+            }
+
+            // Scale up to larger units (Ks, Ms, Gs)
+            while (show >= base && slot > 0) {
+              show /= base;
+              slot -= 1;
+            }
+
+            if (slot < 0 || slot > 6) return "(ovflow)";
+
+            // 3-character digit formatting
+            let digits;
+            if (show < 10) {
+              digits = show.toFixed(1);  // "3.2"
+            } else if (show < 100) {
+              digits = " " + Math.round(show).toString(); // " 27"
+            } else {
+              digits = Math.round(show).toString(); // "320"
+            }
+
+            const prefix = prefixes[slot];
+            const separator = (prefix === "") ? " " : ""; // Space separator only for seconds (empty prefix)
+
+            return `${digits}${separator}${prefix}${unit}`;
+          };
 
           const timestamp = startDate.toISOString().slice(0, 23).replace('T', ' ') +
                            (startDate.getTimezoneOffset() <= 0 ? '+' : '-') +
                            String(Math.abs(Math.floor(startDate.getTimezoneOffset() / 60))).padStart(2, '0') +
                            ':' + String(Math.abs(startDate.getTimezoneOffset() % 60)).padStart(2, '0');
+
+          // Clean 2-duration timing display with microsecond precision
+          const workerFormatted = scale(workerTime, 's');        // Worker processing time
+          const transmissionFormatted = scale(transmissionTime, 's'); // Response transmission time
 
           const workerNum = parseInt(socketPath.match(/worker_(\d+)\.sock$/)?.[1] || '0') + 1;
           const method = req.method;
@@ -176,7 +221,7 @@ const handleRequest = async (req: Request) => {
             .replace('image/', 'img/')
             .substring(0, 8);
 
-          console.log(`[${timestamp}] W${workerNum} ${method} ${path} → ${status} ${shortType} ${contentLength}b ${totalTime}ms (worker:${workerTime}ms server:${serverTime}ms)`);
+          console.log(`[${timestamp} ${workerFormatted} ${transmissionFormatted}] W${workerNum}.${workerRequestNum} ${method} ${path} → ${status} ${shortType} ${contentLength}B`);
         });
 
         // Worker available - return the response immediately
