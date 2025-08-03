@@ -1,3 +1,5 @@
+/// <reference types="bun-types" />
+
 /**
  * 🚀 Rip Manager - Process Manager + Hot Reload
  *

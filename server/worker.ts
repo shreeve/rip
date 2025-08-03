@@ -12,17 +12,26 @@
  * Usage: bun worker.ts [workerId] [maxRequests] [appDirectory]
  */
 
+/// <reference types="bun-types" />
+
+// Make this a module to allow top-level await
+export {};
+
 // Configuration
-const workerId = parseInt(process.argv[2] ?? "0");
+const workerId = parseInt(process.argv[2] ?? '0');
 const workerNum = workerId + 1; // Human-friendly worker number (1-indexed)
-const baseMaxRequests = parseInt(process.argv[3] ?? "100");
+const baseMaxRequests = parseInt(process.argv[3] ?? '100');
 
 // 🎯 Rolling restart strategy: Stagger request limits to prevent simultaneous shutdowns
 // Worker 0: 90-110% of base limit, Worker 1: 95-105%, Worker 2: 100-120%, etc.
 const requestVariance = Math.floor(baseMaxRequests * 0.1); // 10% variance
-const workerOffset = (workerId * 0.05) - 0.05; // -5%, 0%, +5%, +10%, etc.
-const maxRequests = Math.max(1, baseMaxRequests + Math.floor(baseMaxRequests * workerOffset) +
-                            Math.floor(Math.random() * requestVariance));
+const workerOffset = workerId * 0.05 - 0.05; // -5%, 0%, +5%, +10%, etc.
+const maxRequests = Math.max(
+  1,
+  baseMaxRequests +
+    Math.floor(baseMaxRequests * workerOffset) +
+    Math.floor(Math.random() * requestVariance)
+);
 
 const appDirectory = process.argv[4] ?? process.cwd();
 
@@ -53,10 +62,8 @@ const loadRipApplication = async () => {
       try {
         const appPath = `${appDirectory}/${file}`;
 
-
         // Import the .rip file (will be transpiled by bunfig.toml)
         const app = await import(appPath);
-
 
         return app.default || app;
       } catch (error) {
@@ -69,23 +76,31 @@ const loadRipApplication = async () => {
 
     return {
       fetch: (req: Request) => {
-        return new Response(`Hello from Rip Worker ${workerNum}! (request #${requestsHandled + 1})\n\nNo .rip application found. Create index.rip, app.rip, or server.rip in ${appDirectory}`, {
-          headers: { "Content-Type": "text/plain" }
-        });
-      }
+        return new Response(
+          `Hello from Rip Worker ${workerNum}! (request #${requestsHandled + 1})\n\nNo .rip application found. Create index.rip, app.rip, or server.rip in ${appDirectory}`,
+          {
+            headers: { 'Content-Type': 'text/plain' },
+          }
+        );
+      },
     };
-
   } catch (error) {
-         console.error(`[${getTimestamp()}              ] ❌ W${workerNum} app load error:`, error);
+    console.error(
+      `[${getTimestamp()}              ] ❌ W${workerNum} app load error:`,
+      error
+    );
 
     // Return error handler
     return {
       fetch: (req: Request) => {
-        return new Response(`Error in Rip Worker ${workerNum}: ${error.message}`, {
-          status: 500,
-          headers: { "Content-Type": "text/plain" }
-        });
-      }
+        return new Response(
+          `Error in Rip Worker ${workerNum}: ${error.message}`,
+          {
+            status: 500,
+            headers: { 'Content-Type': 'text/plain' },
+          }
+        );
+      },
     };
   }
 };
@@ -95,13 +110,19 @@ const loadRipApplication = async () => {
  */
 const main = async () => {
   // Shared timestamp function
-const getTimestamp = () => {
-  const now = new Date();
-  return now.toISOString().slice(0, 23).replace('T', ' ') +
-         (now.getTimezoneOffset() <= 0 ? '+' : '-') +
-         String(Math.abs(Math.floor(now.getTimezoneOffset() / 60))).padStart(2, '0') +
-         ':' + String(Math.abs(now.getTimezoneOffset() % 60)).padStart(2, '0');
-};
+  const getTimestamp = () => {
+    const now = new Date();
+    return (
+      now.toISOString().slice(0, 23).replace('T', ' ') +
+      (now.getTimezoneOffset() <= 0 ? '+' : '-') +
+      String(Math.abs(Math.floor(now.getTimezoneOffset() / 60))).padStart(
+        2,
+        '0'
+      ) +
+      ':' +
+      String(Math.abs(now.getTimezoneOffset() % 60)).padStart(2, '0')
+    );
+  };
 
   // Load the user's Rip application
   const ripApp = await loadRipApplication();
@@ -112,18 +133,20 @@ const getTimestamp = () => {
     async fetch(req) {
       // Check if shutting down
       if (isShuttingDown) {
-        return new Response("Server shutting down", { status: 503 });
+        return new Response('Server shutting down', { status: 503 });
       }
 
       // 🎯 Sequential Processing: Only handle one request at a time
       if (requestInProgress) {
-                 console.log(`[${getTimestamp()}              ] W${workerNum} busy - request queued`);
-        return new Response("Worker busy - perfect isolation in progress", {
+        console.log(
+          `[${getTimestamp()}              ] W${workerNum} busy - request queued`
+        );
+        return new Response('Worker busy - perfect isolation in progress', {
           status: 503,
           headers: {
-            "Content-Type": "text/plain",
-            "Retry-After": "1"
-          }
+            'Content-Type': 'text/plain',
+            'Retry-After': '1',
+          },
         });
       }
 
@@ -147,29 +170,36 @@ const getTimestamp = () => {
           response = await ripApp.handler(req);
         } else {
           // Fallback
-          response = new Response(`Rip Worker ${workerNum} - Request #${requestsHandled} (Sequential Mode)`, {
-            headers: { "Content-Type": "text/plain" }
-          });
+          response = new Response(
+            `Rip Worker ${workerNum} - Request #${requestsHandled} (Sequential Mode)`,
+            {
+              headers: { 'Content-Type': 'text/plain' },
+            }
+          );
         }
 
-                // Check if worker should shut down (after completing this request)
+        // Check if worker should shut down (after completing this request)
         if (requestsHandled >= maxRequests) {
-          console.log(`[${getTimestamp()}              ] W${workerNum} reached ${maxRequests} requests - shutting down`);
+          console.log(
+            `[${getTimestamp()}              ] W${workerNum} reached ${maxRequests} requests - shutting down`
+          );
 
           // Schedule shutdown after this request completes
           setTimeout(() => {
-            gracefulShutdown("Request limit reached");
+            gracefulShutdown('Request limit reached');
           }, 0);
         }
 
         return response;
-
       } catch (error) {
-                 console.error(`[${getTimestamp()}              ] ❌ W${workerNum} request error:`, error);
+        console.error(
+          `[${getTimestamp()}              ] ❌ W${workerNum} request error:`,
+          error
+        );
 
         return new Response(`Rip Worker ${workerNum} Error: ${error.message}`, {
           status: 500,
-          headers: { "Content-Type": "text/plain" }
+          headers: { 'Content-Type': 'text/plain' },
         });
       } finally {
         // 🎯 Release the worker for the next request
@@ -198,7 +228,7 @@ const getTimestamp = () => {
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM received'));
   process.on('SIGINT', () => gracefulShutdown('SIGINT received'));
 
-     console.log(`[${getTimestamp()}              ] W${workerNum} ready`);
+  console.log(`[${getTimestamp()}              ] W${workerNum} ready`);
 };
 
 // Start the worker

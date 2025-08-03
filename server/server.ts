@@ -21,7 +21,7 @@ const port = parseInt(process.argv[2]) || 3000;
 const numWorkers = parseInt(process.argv[3]) || 3;
 const httpsPort = parseInt(process.argv[4]) || 3443;
 const certPath = process.argv[5]; // Optional: path to SSL certificate
-const keyPath = process.argv[6];  // Optional: path to SSL private key
+const keyPath = process.argv[6]; // Optional: path to SSL private key
 
 // HTTPS Configuration
 const httpsEnabled = certPath && keyPath;
@@ -42,8 +42,9 @@ if (httpsEnabled) {
 }
 
 // Generate worker socket paths
-const workerSocketPaths = Array.from({ length: numWorkers }, (_, i) =>
-  `/tmp/rip_worker_${i}.sock`
+const workerSocketPaths = Array.from(
+  { length: numWorkers },
+  (_, i) => `/tmp/rip_worker_${i}.sock`
 );
 
 let currentWorker = 0;
@@ -51,7 +52,7 @@ let totalRequests = 0;
 const workerStats = new Map<string, { requests: number; errors: number }>();
 
 // Initialize worker stats
-workerSocketPaths.forEach(path => {
+workerSocketPaths.forEach((path) => {
   workerStats.set(path, { requests: 0, errors: 0 });
 });
 
@@ -70,11 +71,11 @@ const handleHealthCheck = (req: Request) => {
       workers: numWorkers,
       workerStats: Object.fromEntries(workerStats),
       uptime: process.uptime(),
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     };
 
     const response = new Response(JSON.stringify(stats, null, 2), {
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json' },
     });
 
     // Log the health check request with consistent timing format
@@ -85,16 +86,25 @@ const handleHealthCheck = (req: Request) => {
     const responseStart = performance.now();
     const responseTime = 50; // Estimate ~50µs for direct response (minimal transmission)
 
-    const timestamp = startDate.toISOString().slice(0, 23).replace('T', ' ') +
-                     (startDate.getTimezoneOffset() <= 0 ? '+' : '-') +
-                     String(Math.abs(Math.floor(startDate.getTimezoneOffset() / 60))).padStart(2, '0') +
-                     ':' + String(Math.abs(startDate.getTimezoneOffset() % 60)).padStart(2, '0');
+    const timestamp =
+      startDate.toISOString().slice(0, 23).replace('T', ' ') +
+      (startDate.getTimezoneOffset() <= 0 ? '+' : '-') +
+      String(Math.abs(Math.floor(startDate.getTimezoneOffset() / 60))).padStart(
+        2,
+        '0'
+      ) +
+      ':' +
+      String(Math.abs(startDate.getTimezoneOffset() % 60)).padStart(2, '0');
 
     // Use same timing formatter as workers
-    const scale = (value: number, unit: string, base: number = 1000): string => {
+    const scale = (
+      value: number,
+      unit: string,
+      base: number = 1000
+    ): string => {
       if (value === 0) return `  - ${unit}`;
 
-      const prefixes = ["G", "M", "K", "", "m", "µ", "n"];
+      const prefixes = ['G', 'M', 'K', '', 'm', 'µ', 'n'];
       let slot = 5; // Start at "µ" (microseconds)
       let show = value; // Value is already in microseconds
 
@@ -110,19 +120,19 @@ const handleHealthCheck = (req: Request) => {
         slot -= 1;
       }
 
-      if (slot < 0 || slot > 6) return "(ovflow)";
+      if (slot < 0 || slot > 6) return '(ovflow)';
 
       let digits;
       if (show < 10) {
         digits = show.toFixed(1);
       } else if (show < 100) {
-        digits = " " + Math.round(show).toString();
+        digits = ' ' + Math.round(show).toString();
       } else {
         digits = Math.round(show).toString();
       }
 
       const prefix = prefixes[slot];
-      const separator = (prefix === "") ? " " : "";
+      const separator = prefix === '' ? ' ' : '';
 
       return `${digits}${separator}${prefix}${unit}`;
     };
@@ -130,7 +140,9 @@ const handleHealthCheck = (req: Request) => {
     const processingFormatted = scale(processingTime, 's').padStart(6);
     const responseFormatted = scale(responseTime, 's').padStart(6);
 
-    console.log(`[${timestamp} ${processingFormatted} ${responseFormatted}] S1.1 ${req.method} /health → 200 json ${JSON.stringify(stats).length}B`);
+    console.log(
+      `[${timestamp} ${processingFormatted} ${responseFormatted}] S1.1 ${req.method} /health → 200 json ${JSON.stringify(stats).length}B`
+    );
 
     return response;
   }
@@ -141,16 +153,17 @@ const handleHealthCheck = (req: Request) => {
       `rip_total_requests ${totalRequests}`,
       `rip_workers_total ${numWorkers}`,
       `rip_uptime_seconds ${process.uptime()}`,
-      ...Array.from(workerStats.entries()).map(([path, stats]) =>
-        `rip_worker_requests{worker="${path}"} ${stats.requests}`
+      ...Array.from(workerStats.entries()).map(
+        ([path, stats]) =>
+          `rip_worker_requests{worker="${path}"} ${stats.requests}`
       ),
-      ...Array.from(workerStats.entries()).map(([path, stats]) =>
-        `rip_worker_errors{worker="${path}"} ${stats.errors}`
-      )
+      ...Array.from(workerStats.entries()).map(
+        ([path, stats]) => `rip_worker_errors{worker="${path}"} ${stats.errors}`
+      ),
     ].join('\n');
 
     const response = new Response(metrics, {
-      headers: { 'Content-Type': 'text/plain' }
+      headers: { 'Content-Type': 'text/plain' },
     });
 
     // Log the metrics request with consistent timing format
@@ -160,16 +173,23 @@ const handleHealthCheck = (req: Request) => {
     // Measure response transmission (minimal for direct responses, but consistent)
     const responseTime = 40; // Estimate ~40µs for direct response (minimal transmission)
 
-    const timestamp = startDate.toISOString().slice(0, 23).replace('T', ' ') +
-                     (startDate.getTimezoneOffset() <= 0 ? '+' : '-') +
-                     String(Math.abs(Math.floor(startDate.getTimezoneOffset() / 60))).padStart(2, '0') +
-                     ':' + String(Math.abs(startDate.getTimezoneOffset() % 60)).padStart(2, '0');
+    const timestamp =
+      startDate.toISOString().slice(0, 23).replace('T', ' ') +
+      (startDate.getTimezoneOffset() <= 0 ? '+' : '-') +
+      String(Math.abs(Math.floor(startDate.getTimezoneOffset() / 60))).padStart(
+        2,
+        '0'
+      ) +
+      ':' +
+      String(Math.abs(startDate.getTimezoneOffset() % 60)).padStart(2, '0');
 
     // Use same timing formatter as workers (function already defined above)
     const processingFormatted = scale(processingTime, 's').padStart(6);
     const responseFormatted = scale(responseTime, 's').padStart(6);
 
-    console.log(`[${timestamp} ${processingFormatted} ${responseFormatted}] S1.1 ${req.method} /metrics → 200 plain ${metrics.length}B`);
+    console.log(
+      `[${timestamp} ${processingFormatted} ${responseFormatted}] S1.1 ${req.method} /metrics → 200 plain ${metrics.length}B`
+    );
 
     return response;
   }
@@ -181,172 +201,196 @@ const handleHealthCheck = (req: Request) => {
  * Shared request handler for both HTTP and HTTPS
  */
 const handleRequest = async (req: Request) => {
-    totalRequests++;
+  totalRequests++;
 
-    // Handle health check and metrics endpoints
-    const healthResponse = handleHealthCheck(req);
-    if (healthResponse) return healthResponse;
+  // Handle health check and metrics endpoints
+  const healthResponse = handleHealthCheck(req);
+  if (healthResponse) return healthResponse;
 
-    const url = new URL(req.url);
-    const requestStart = performance.now();
-    const startDate = new Date();
+  const url = new URL(req.url);
+  const requestStart = performance.now();
+  const startDate = new Date();
 
-    // Round-robin load balancing with automatic failover
-    for (let attempts = 0; attempts < workerSocketPaths.length; attempts++) {
-      const socketPath = workerSocketPaths[currentWorker];
-      const nextWorker = (currentWorker + 1) % workerSocketPaths.length;
-      currentWorker = nextWorker;
+  // Round-robin load balancing with automatic failover
+  for (let attempts = 0; attempts < workerSocketPaths.length; attempts++) {
+    const socketPath = workerSocketPaths[currentWorker];
+    const nextWorker = (currentWorker + 1) % workerSocketPaths.length;
+    currentWorker = nextWorker;
 
-      const stats = workerStats.get(socketPath)!;
+    const stats = workerStats.get(socketPath)!;
 
-      try {
-        // Forward request to worker via Unix socket
-        const workerStart = performance.now();
-        const workerResponse = await fetch(`http://localhost${url.pathname}${url.search}`, {
+    try {
+      // Forward request to worker via Unix socket
+      const workerStart = performance.now();
+      const workerResponse = await fetch(
+        `http://localhost${url.pathname}${url.search}`,
+        {
           method: req.method,
           headers: req.headers,
           body: req.body,
           unix: socketPath,
-        });
-        const workerEnd = performance.now();
-
-        // Update stats
-        stats.requests++;
-        const workerRequestNum = stats.requests; // Current request number for this worker
-
-        // 🎯 Intelligent 503 Failover: If worker is busy, try next worker
-        if (workerResponse.status === 503) {
-          console.log(`⏸️ [Server] Worker ${socketPath} busy (503) - trying next worker...`);
-
-          // Don't return yet, let the loop try the next worker
-          continue;
         }
+      );
+      const workerEnd = performance.now();
 
-        // Clone response to return to client while we handle logging
-        const responseToReturn = workerResponse.clone();
+      // Update stats
+      stats.requests++;
+      const workerRequestNum = stats.requests; // Current request number for this worker
 
-        // Start response transmission timing
-        const responseStart = performance.now();
+      // 🎯 Intelligent 503 Failover: If worker is busy, try next worker
+      if (workerResponse.status === 503) {
+        console.log(
+          `⏸️ [Server] Worker ${socketPath} busy (503) - trying next worker...`
+        );
 
-        // Schedule detailed logging after response is fully sent
-        setImmediate(() => {
-          const responseEnd = performance.now();
-
-          // 📊 Meaningful timing breakdown (in microseconds)
-          const workerTime = (workerEnd - workerStart) * 1000;       // Worker processing time in µs
-          const transmissionTime = (responseEnd - responseStart) * 1000; // Response transmission time in µs
-
-          // 🎯 Canonical timing formatter (inspired by your Ruby scale function!)
-                    const scale = (value: number, unit: string, base: number = 1000): string => {
-            if (value === 0) {
-              // Dash in rightmost position of 3-char format + separator space for seconds + unit
-              return `  - ${unit}`; // 2 spaces + dash + space + unit (assuming seconds)
-            }
-
-            const prefixes = ["G", "M", "K", "", "m", "µ", "n"];
-            let slot = 5; // Start at "µ" (microseconds)
-            let show = value; // Value is already in microseconds
-
-            // Scale down to smaller units (ms, µs, ns)
-            while (show > 0 && show < 1.0 && slot < 6) {
-              show *= base;
-              slot += 1;
-            }
-
-            // Scale up to larger units (Ks, Ms, Gs)
-            while (show >= base && slot > 0) {
-              show /= base;
-              slot -= 1;
-            }
-
-            if (slot < 0 || slot > 6) return "(ovflow)";
-
-            // 3-character digit formatting
-            let digits;
-            if (show < 10) {
-              digits = show.toFixed(1);  // "3.2"
-            } else if (show < 100) {
-              digits = " " + Math.round(show).toString(); // " 27"
-            } else {
-              digits = Math.round(show).toString(); // "320"
-            }
-
-            const prefix = prefixes[slot];
-            const separator = (prefix === "") ? " " : ""; // Space separator only for seconds (empty prefix)
-
-            return `${digits}${separator}${prefix}${unit}`;
-          };
-
-          const timestamp = startDate.toISOString().slice(0, 23).replace('T', ' ') +
-                           (startDate.getTimezoneOffset() <= 0 ? '+' : '-') +
-                           String(Math.abs(Math.floor(startDate.getTimezoneOffset() / 60))).padStart(2, '0') +
-                           ':' + String(Math.abs(startDate.getTimezoneOffset() % 60)).padStart(2, '0');
-
-          // Clean 2-duration timing display with microsecond precision
-          const workerFormatted = scale(workerTime, 's');        // Worker processing time
-          const transmissionFormatted = scale(transmissionTime, 's'); // Response transmission time
-
-          const workerNum = parseInt(socketPath.match(/worker_(\d+)\.sock$/)?.[1] || '0') + 1;
-          const method = req.method;
-          const path = url.pathname;
-          const status = workerResponse.status;
-          const contentType = workerResponse.headers.get('content-type') || 'unknown';
-          const contentLength = workerResponse.headers.get('content-length') || '?';
-
-          // Format content type (shorten common ones)
-          const shortType = contentType.split(';')[0]
-            .replace('application/', '')
-            .replace('text/', '')
-            .replace('image/', 'img/')
-            .substring(0, 8);
-
-                              // Pad timing info for consistent bracket alignment (timing inside brackets)
-          const paddedWorker = workerFormatted.padStart(6);       // "  2.2ms" or " 1.5ms"
-          const paddedTransmission = transmissionFormatted.padStart(6); // "  40µs" or " 120µs"
-
-          console.log(`[${timestamp} ${paddedWorker} ${paddedTransmission}] W${workerNum}.${workerRequestNum} ${method} ${path} → ${status} ${shortType} ${contentLength}B`);
-        });
-
-        // Worker available - return the response immediately
-        return responseToReturn;
-
-      } catch (error) {
-        // Update error stats
-        stats.errors++;
-
-        console.error(`⚠️ [Server] Worker ${socketPath} failed: ${error.message}`);
-
-        // Try next worker (automatic failover)
-        if (attempts === workerSocketPaths.length - 1) {
-          // All workers failed
-          console.error(`🚨 [Server] All ${workerSocketPaths.length} workers unavailable!`);
-
-          return new Response(
-            `🚨 Rip Server Error: All workers unavailable\n\nTried ${workerSocketPaths.length} workers, all failed.\nLast error: ${error.message}\n\nIs the manager running? (bun manager.ts)`,
-            {
-              status: 503,
-              headers: { 'Content-Type': 'text/plain' }
-            }
-          );
-        }
-
-        // Continue to next worker (silent failover)
+        // Don't return yet, let the loop try the next worker
         continue;
       }
-    }
 
-    // 🚨 All workers are busy - return 503 to client
-    console.warn(`🚨 [Server] All ${workerSocketPaths.length} workers are busy - returning 503 to client`);
-    return new Response(
-      `🚨 All Workers Busy\n\nAll ${workerSocketPaths.length} workers are currently processing requests.\nThis ensures perfect isolation - please retry in a moment.\n\nTip: Each worker processes one request at a time for maximum reliability.`,
-      {
-        status: 503,
-        headers: {
-          'Content-Type': 'text/plain',
-          'Retry-After': '1'
-        }
+      // Clone response to return to client while we handle logging
+      const responseToReturn = workerResponse.clone();
+
+      // Start response transmission timing
+      const responseStart = performance.now();
+
+      // Schedule detailed logging after response is fully sent
+      setImmediate(() => {
+        const responseEnd = performance.now();
+
+        // 📊 Meaningful timing breakdown (in microseconds)
+        const workerTime = (workerEnd - workerStart) * 1000; // Worker processing time in µs
+        const transmissionTime = (responseEnd - responseStart) * 1000; // Response transmission time in µs
+
+        // 🎯 Canonical timing formatter (inspired by your Ruby scale function!)
+        const scale = (
+          value: number,
+          unit: string,
+          base: number = 1000
+        ): string => {
+          if (value === 0) {
+            // Dash in rightmost position of 3-char format + separator space for seconds + unit
+            return `  - ${unit}`; // 2 spaces + dash + space + unit (assuming seconds)
+          }
+
+          const prefixes = ['G', 'M', 'K', '', 'm', 'µ', 'n'];
+          let slot = 5; // Start at "µ" (microseconds)
+          let show = value; // Value is already in microseconds
+
+          // Scale down to smaller units (ms, µs, ns)
+          while (show > 0 && show < 1.0 && slot < 6) {
+            show *= base;
+            slot += 1;
+          }
+
+          // Scale up to larger units (Ks, Ms, Gs)
+          while (show >= base && slot > 0) {
+            show /= base;
+            slot -= 1;
+          }
+
+          if (slot < 0 || slot > 6) return '(ovflow)';
+
+          // 3-character digit formatting
+          let digits;
+          if (show < 10) {
+            digits = show.toFixed(1); // "3.2"
+          } else if (show < 100) {
+            digits = ' ' + Math.round(show).toString(); // " 27"
+          } else {
+            digits = Math.round(show).toString(); // "320"
+          }
+
+          const prefix = prefixes[slot];
+          const separator = prefix === '' ? ' ' : ''; // Space separator only for seconds (empty prefix)
+
+          return `${digits}${separator}${prefix}${unit}`;
+        };
+
+        const timestamp =
+          startDate.toISOString().slice(0, 23).replace('T', ' ') +
+          (startDate.getTimezoneOffset() <= 0 ? '+' : '-') +
+          String(
+            Math.abs(Math.floor(startDate.getTimezoneOffset() / 60))
+          ).padStart(2, '0') +
+          ':' +
+          String(Math.abs(startDate.getTimezoneOffset() % 60)).padStart(2, '0');
+
+        // Clean 2-duration timing display with microsecond precision
+        const workerFormatted = scale(workerTime, 's'); // Worker processing time
+        const transmissionFormatted = scale(transmissionTime, 's'); // Response transmission time
+
+        const workerNum =
+          parseInt(socketPath.match(/worker_(\d+)\.sock$/)?.[1] || '0') + 1;
+        const method = req.method;
+        const path = url.pathname;
+        const status = workerResponse.status;
+        const contentType =
+          workerResponse.headers.get('content-type') || 'unknown';
+        const contentLength =
+          workerResponse.headers.get('content-length') || '?';
+
+        // Format content type (shorten common ones)
+        const shortType = contentType
+          .split(';')[0]
+          .replace('application/', '')
+          .replace('text/', '')
+          .replace('image/', 'img/')
+          .substring(0, 8);
+
+        // Pad timing info for consistent bracket alignment (timing inside brackets)
+        const paddedWorker = workerFormatted.padStart(6); // "  2.2ms" or " 1.5ms"
+        const paddedTransmission = transmissionFormatted.padStart(6); // "  40µs" or " 120µs"
+
+        console.log(
+          `[${timestamp} ${paddedWorker} ${paddedTransmission}] W${workerNum}.${workerRequestNum} ${method} ${path} → ${status} ${shortType} ${contentLength}B`
+        );
+      });
+
+      // Worker available - return the response immediately
+      return responseToReturn;
+    } catch (error) {
+      // Update error stats
+      stats.errors++;
+
+      console.error(
+        `⚠️ [Server] Worker ${socketPath} failed: ${error.message}`
+      );
+
+      // Try next worker (automatic failover)
+      if (attempts === workerSocketPaths.length - 1) {
+        // All workers failed
+        console.error(
+          `🚨 [Server] All ${workerSocketPaths.length} workers unavailable!`
+        );
+
+        return new Response(
+          `🚨 Rip Server Error: All workers unavailable\n\nTried ${workerSocketPaths.length} workers, all failed.\nLast error: ${error.message}\n\nIs the manager running? (bun manager.ts)`,
+          {
+            status: 503,
+            headers: { 'Content-Type': 'text/plain' },
+          }
+        );
       }
-    );
+
+      // Continue to next worker (silent failover)
+      continue;
+    }
+  }
+
+  // 🚨 All workers are busy - return 503 to client
+  console.warn(
+    `🚨 [Server] All ${workerSocketPaths.length} workers are busy - returning 503 to client`
+  );
+  return new Response(
+    `🚨 All Workers Busy\n\nAll ${workerSocketPaths.length} workers are currently processing requests.\nThis ensures perfect isolation - please retry in a moment.\n\nTip: Each worker processes one request at a time for maximum reliability.`,
+    {
+      status: 503,
+      headers: {
+        'Content-Type': 'text/plain',
+        'Retry-After': '1',
+      },
+    }
+  );
 };
 
 /**
@@ -359,9 +403,9 @@ const handleHttpRedirect = (req: Request) => {
   return new Response(null, {
     status: 302,
     headers: {
-      'Location': httpsUrl,
-      'Cache-Control': 'no-cache'
-    }
+      Location: httpsUrl,
+      'Cache-Control': 'no-cache',
+    },
   });
 };
 
@@ -390,7 +434,6 @@ if (httpsEnabled && cert && key) {
     fetch: handleHttpRedirect,
   });
   servers.push(httpRedirectServer);
-
 } else {
   // HTTP-only mode (full functionality)
   const httpServer = Bun.serve({
@@ -401,7 +444,8 @@ if (httpsEnabled && cert && key) {
 }
 
 // Add proper server startup logging
-const getTimestamp = () => new Date().toISOString().replace('T', ' ').replace('Z', '-06:00');
+const getTimestamp = () =>
+  new Date().toISOString().replace('T', ' ').replace('Z', '-06:00');
 
 // Announce when server is actually ready
 setTimeout(() => {
@@ -413,7 +457,7 @@ setTimeout(() => {
  */
 const gracefulShutdown = (signal: string) => {
   // Stop all servers
-  servers.forEach(server => {
+  servers.forEach((server) => {
     if (server) {
       server.stop();
     }
