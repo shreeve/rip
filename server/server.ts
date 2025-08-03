@@ -109,6 +109,8 @@ const handleRequest = async (req: Request) => {
     if (healthResponse) return healthResponse;
 
     const url = new URL(req.url);
+    const requestStart = Date.now();
+    const startDate = new Date();
 
     // Round-robin load balancing with automatic failover
     for (let attempts = 0; attempts < workerSocketPaths.length; attempts++) {
@@ -120,12 +122,14 @@ const handleRequest = async (req: Request) => {
 
       try {
         // Forward request to worker via Unix socket
+        const workerStart = Date.now();
         const workerResponse = await fetch(`http://localhost${url.pathname}${url.search}`, {
           method: req.method,
           headers: req.headers,
           body: req.body,
           unix: socketPath,
         });
+        const workerEnd = Date.now();
 
         // Update stats
         stats.requests++;
@@ -138,8 +142,45 @@ const handleRequest = async (req: Request) => {
           continue;
         }
 
-        // Worker available - return the response
-        return workerResponse;
+        // Clone response to return to client while we handle logging
+        const responseToReturn = workerResponse.clone();
+
+        // Start response transmission timing
+        const responseStart = Date.now();
+
+        // Schedule detailed logging after response is fully sent
+        setImmediate(() => {
+          const responseEnd = Date.now();
+
+          // 📊 Comprehensive timing breakdown
+          const workerTime = workerEnd - workerStart;     // Worker processing time
+          const totalTime = responseEnd - requestStart;   // Total request time
+          const serverTime = totalTime - workerTime;      // Server overhead time
+
+          const timestamp = startDate.toISOString().slice(0, 23).replace('T', ' ') +
+                           (startDate.getTimezoneOffset() <= 0 ? '+' : '-') +
+                           String(Math.abs(Math.floor(startDate.getTimezoneOffset() / 60))).padStart(2, '0') +
+                           ':' + String(Math.abs(startDate.getTimezoneOffset() % 60)).padStart(2, '0');
+
+          const workerNum = parseInt(socketPath.match(/worker_(\d+)\.sock$/)?.[1] || '0') + 1;
+          const method = req.method;
+          const path = url.pathname;
+          const status = workerResponse.status;
+          const contentType = workerResponse.headers.get('content-type') || 'unknown';
+          const contentLength = workerResponse.headers.get('content-length') || '?';
+
+          // Format content type (shorten common ones)
+          const shortType = contentType.split(';')[0]
+            .replace('application/', '')
+            .replace('text/', '')
+            .replace('image/', 'img/')
+            .substring(0, 8);
+
+          console.log(`[${timestamp}] W${workerNum} ${method} ${path} → ${status} ${shortType} ${contentLength}b ${totalTime}ms (worker:${workerTime}ms server:${serverTime}ms)`);
+        });
+
+        // Worker available - return the response immediately
+        return responseToReturn;
 
       } catch (error) {
         // Update error stats

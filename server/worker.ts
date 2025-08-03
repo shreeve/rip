@@ -118,12 +118,6 @@ console.log(`📁 [Worker ${workerNum}] App directory: ${appDirectory}`);
       requestInProgress = true;
       requestsHandled++;
 
-      // Capture request details for logging
-      const startDate = new Date();
-      const startTime = startDate.getTime();
-      const method = req.method;
-      const url = new URL(req.url).pathname;
-
       try {
         // Call the user's application
         let response;
@@ -143,26 +137,6 @@ console.log(`📁 [Worker ${workerNum}] App directory: ${appDirectory}`);
             headers: { "Content-Type": "text/plain" }
           });
         }
-
-        // Calculate duration and response details
-        const duration = Date.now() - startTime;
-        const timestamp = startDate.toISOString().slice(0, 23).replace('T', ' ') +
-                         (startDate.getTimezoneOffset() <= 0 ? '+' : '-') +
-                         String(Math.abs(Math.floor(startDate.getTimezoneOffset() / 60))).padStart(2, '0') +
-                         ':' + String(Math.abs(startDate.getTimezoneOffset() % 60)).padStart(2, '0'); // YYYY-MM-DD HH:MM:SS.mmm±HH:MM format
-        const status = response.status;
-        const contentType = response.headers.get('content-type') || 'unknown';
-        const contentLength = response.headers.get('content-length') || '?';
-
-        // Format content type (shorten common ones)
-        const shortType = contentType.split(';')[0]
-          .replace('application/', '')
-          .replace('text/', '')
-          .replace('image/', 'img/')
-          .substring(0, 8); // Limit length
-
-        // Clean, compact one-line log
-        console.log(`[${timestamp}] W${workerNum}.${requestsHandled} ${method} ${url} → ${status} ${shortType} ${contentLength}b ${duration}ms`);
 
         // Check if worker should shut down
         if (requestsHandled >= maxRequests) {
