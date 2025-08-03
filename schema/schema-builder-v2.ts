@@ -2,6 +2,8 @@
  * rip-schema Builder v2 - Flexible Parameter Support
  *
  * Supports both type-based and named parameters for maximum flexibility
+ * Type-based params (numbers, arrays) can be in any order
+ * Named params (key:value) must come last due to CoffeeScript/JS syntax
  */
 
 import { sql } from 'drizzle-orm'
@@ -63,14 +65,15 @@ export class ColumnBuilder {
     return value
   }
 
-  // Parse flexible parameters into options
+    // Parse flexible parameters into options
+  // Note: In CoffeeScript/JavaScript, named parameters (key:value) must come last
   private parseParams(...args: any[]): ColumnOptions {
     const options: ColumnOptions = {}
     
     for (const arg of args) {
       if (arg === null || arg === undefined) continue
       
-      // Named parameters (object)
+      // Named parameters (object) - must be last in actual usage
       if (typeof arg === 'object' && !Array.isArray(arg)) {
         Object.assign(options, arg)
       }
@@ -156,11 +159,11 @@ export class ColumnBuilder {
 
   boolean(fieldName: string, ...args: any[]) {
     const { name, required } = this.parseField(fieldName)
-    
+
     // First check for direct boolean default
     let directDefault: boolean | undefined
     const otherArgs: any[] = []
-    
+
     for (const arg of args) {
       if (typeof arg === 'boolean') {
         directDefault = arg
@@ -168,13 +171,13 @@ export class ColumnBuilder {
         otherArgs.push(arg)
       }
     }
-    
+
     const options = this.parseParams(...otherArgs)
-    
+
     // SQLite uses integer for boolean
     let column = integer(name)
     if (required) column = column.notNull()
-    
+
     // Use direct boolean if provided, otherwise check options
     const defaultValue = directDefault !== undefined ? directDefault : options.default
     if (defaultValue !== undefined) {
@@ -265,7 +268,7 @@ export class ColumnBuilder {
   binary(fieldName: string, ...args: any[]) {
     const { name, required } = this.parseField(fieldName)
     const options = this.parseParams(...args)
-    
+
     // In SQLite, we use blob for binary data
     let column = blob(name, { mode: 'buffer' })
     if (required) column = column.notNull()
