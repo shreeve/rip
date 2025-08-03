@@ -268,7 +268,7 @@ export class ColumnBuilder {
     binary(fieldName: string, ...args: any[]) {
     const { name, required } = this.parseField(fieldName)
     const options = this.parseParams(...args)
-    
+
     // In SQLite, we use blob for binary data
     let column = blob(name, { mode: 'buffer' })
     if (required) column = column.notNull()
@@ -284,11 +284,11 @@ export class ColumnBuilder {
     // SQLite stores JSON as TEXT with JSON functions for validation
     let column = text(name)
     if (required) column = column.notNull()
-    
+
     // Handle default values - need to stringify objects/arrays
     if (options.default !== undefined) {
-      const defaultValue = typeof options.default === 'string' 
-        ? options.default 
+      const defaultValue = typeof options.default === 'string'
+        ? options.default
         : JSON.stringify(options.default)
       column = column.default(defaultValue)
     }
