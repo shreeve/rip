@@ -1,0 +1,142 @@
+# Complete Rip Schema Example
+import { schema } from './schema-builder'
+
+# Define your entire database schema with beautiful DSL
+export default schema ->
+
+  # Users table with all the goodies
+  @table 'users', ->
+    @string   'name!', 100
+    @email    'email!'
+    @string   'password_digest!'
+    @boolean  'active', true
+    @boolean  'admin', false
+    @string   'avatar_url'
+    @json     'preferences', {}
+    @string   'time_zone', ['UTC']
+    @datetime 'last_login_at'
+    @datetime 'locked_at'
+    @integer  'failed_attempts', [0]
+
+    @index    'email', unique: true
+    @index    ['active', 'last_login_at']
+    @check    'length(email) >= 5', 'email_min_length'
+
+  # Posts with relationships
+  @table 'posts', ->
+    @belongs_to 'user'              # Creates user_id! and indexes it
+    @string     'title!', 200
+    @string     'slug!', 200
+    @text       'content!'
+    @text       'excerpt'
+    @boolean    'published', false
+    @datetime   'published_at'
+    @integer    'view_count', [0]
+    @json       'metadata'
+    @string     'status!', ['draft']  # draft, published, archived
+
+    @index      'slug', unique: true
+    @index      ['user_id', 'published', 'published_at']
+    @index      'published_at', where: 'published = 1'  # Partial index!
+
+  # Comments with soft delete
+  @table 'comments', ->
+    @belongs_to 'post'
+    @belongs_to 'user'
+    @text       'content!'
+    @boolean    'approved', false
+    @integer    'likes', [0]
+    @string     'ip_address'
+
+    @soft_delete()  # Adds deleted_at column
+    @index      ['post_id', 'approved', 'created_at']
+
+  # Categories - simple join table
+  @table 'categories', ->
+    @string     'name!', 50
+    @string     'slug!', 50
+    @text       'description'
+    @integer    'position', [0]
+
+    @index      'slug', unique: true
+    @index      'position'
+
+  # Many-to-many join table
+  @table 'post_categories', id: false, timestamps: false, ->
+    @bigint     'post_id!'
+    @bigint     'category_id!'
+
+    @index      ['post_id', 'category_id'], unique: true
+    @index      'category_id'
+
+  # Settings - key/value store
+  @table 'settings', primary_key: 'key', id: false, ->
+    @string     'key!', 100
+    @text       'value'
+    @string     'data_type!', ['string']  # string, integer, boolean, json
+    @text       'description'
+
+    @timestamps()
+
+  # Audit log with everything
+  @table 'audit_logs', ->
+    @belongs_to 'user', foreign_key: 'actor_id'
+    @string     'action!', 50        # create, update, delete
+    @string     'auditable_type!', 50
+    @bigint     'auditable_id!'
+    @json       'changes!'
+    @string     'ip_address'
+    @string     'user_agent'
+    @uuid       'request_id'
+
+    @index      ['auditable_type', 'auditable_id']
+    @index      ['user_id', 'created_at']
+    @index      'created_at'
+    @index      'request_id'
+
+  # Your original tables - perfectly supported!
+  @table 'account', primary_key: 'AccountNum', ->
+    @string     'Description', [""]
+    @integer    'AcctType!', 1, [0], unsigned: true
+    @string     'BankNumber', [""]
+    @integer    'Inactive!', 1, [0], unsigned: true
+    @integer    'AccountColor!', [0]
+
+  @table 'alertitem', primary_key: 'AlertItemNum', ->
+    @bigint     'ClinicNum!'
+    @string     'Description!', 2000
+    @integer    'Type!', 1
+    @integer    'Severity!', 1
+    @integer    'Actions!', 1
+    @integer    'FormToOpen!', 1
+    @bigint     'FKey!'
+    @string     'ItemValue!', 4000
+    @bigint     'UserNum!'
+    @datetime   'SecDateTEntry!', ["0001-01-01 00:00:00"]
+
+    @index      'ClinicNum', name: "ClinicNum"
+    @index      'FKey', name: "FKey"
+    @index      'UserNum', name: "UserNum"
+
+# You can also define individual tables
+export lawfirms = schema ->
+  @table 'lawfirms', ->
+    @string     'name!', 100
+    @string     'address', 100
+    @string     'city', 50
+    @string     'state', 2
+    @string     'zip', 10
+    @string     'phone', 20
+    @email      'email'
+    @string     'fax', 20
+    @string     'website'
+    @text       'notes'
+    @boolean    'active', true
+    @decimal    'hourly_rate', 10, 2
+    @integer    'employee_count'
+
+    @belongs_to 'parent', class_name: 'lawfirms', foreign_key: 'parent_firm_id'
+
+    @index      'name'
+    @index      ['state', 'city']
+    @index      'parent_firm_id', where: 'parent_firm_id IS NOT NULL'
