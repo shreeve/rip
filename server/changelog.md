@@ -19,10 +19,23 @@
 * bunfig.toml: `[rip-server]` section
 * Command line arguments override file configs
 
-**🔒 Enhanced HTTPS Support:**
-* Auto-generates self-signed certificates when needed
-* Just specify port 3443 or use prod mode
-* Provide your own certs in any order: `rip-server cert.pem key.pem`
+**🔒 Revolutionary HTTPS Support:**
+* **Smart Mode** (`https`) - Automatically uses best certificate option
+* **Quick Mode** (`https:quick`) - Instant self-signed certificates
+* **CA Mode** (`https:ca`) - Professional CA-signed certificates
+* **Certificate Authority Management:**
+  - `ca:init` - One-time CA setup
+  - `ca:trust` - Trust CA in system (no more warnings!)
+  - `ca:export` - Export CA for manual import
+  - `ca:info` - Show CA details
+  - `ca:list` - List generated certificates
+  - `ca:clean` - Clean old certificates
+* **Protocol Options:**
+  - `http` - HTTP only (default)
+  - `https` - HTTPS with smart selection
+  - `http+https` - Both protocols simultaneously
+* Auto-generates certificates when needed
+* Supports custom certificates: `rip-server cert.pem key.pem`
 
 **⚡ Simplified Commands:**
 * Removed background/foreground modes (always foreground)
@@ -33,6 +46,7 @@
 * Shell scripts removed (start.sh, stop.sh, test.sh)
 * Background mode removed
 * Old positional argument syntax deprecated
+* Default is now HTTP-only (use `https` for HTTPS)
 
 ### v2.0.0 - August 3, 2025 - 🚀 **API-Rip: HTTPS-by-Default Revolution**
 

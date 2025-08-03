@@ -39,23 +39,35 @@ A production-ready replacement for nginx + unicorn + ruby that combines:
 sudo ln -sf /path/to/server/rip-server.ts /usr/local/bin/rip-server
 
 # Flexible argument syntax - provide options in ANY order!
-rip-server                          # Dev mode, current directory, defaults
-rip-server 8080                     # Dev mode on port 8080
+rip-server                          # HTTP only (default)
+rip-server https                    # HTTPS with smart certificates
+rip-server https:quick              # HTTPS with quick self-signed cert
+rip-server https:ca                 # HTTPS with CA-signed cert
+rip-server http+https               # Both HTTP and HTTPS
+rip-server 8080                     # Custom HTTP port
+rip-server https 8443               # Custom HTTPS port
 rip-server prod                     # Production mode
 rip-server ./api                    # Specific app directory
 rip-server w:5 r:100                # 5 workers, 100 requests each
 rip-server cert.pem key.pem         # HTTPS with your certificates
-rip-server 3443                     # HTTPS on port 3443 (auto-generates cert)
 
 # Mix and match in any order!
-rip-server prod 8080 w:10           # Production, port 8080, 10 workers
-rip-server ./api w:5 r:50 9000      # Custom everything
-rip-server key.pem cert.pem prod    # HTTPS production (order doesn't matter!)
+rip-server prod https w:10          # Production HTTPS, 10 workers
+rip-server ./api http+https         # Both protocols for API
+rip-server https:ca 8443 w:5        # CA cert on port 8443
 
 # Management commands
 rip-server stop                     # Stop all processes
 rip-server test                     # Run test suite
 rip-server help                     # Show help
+
+# Certificate Authority commands
+rip-server ca:init                  # Initialize CA (one-time setup)
+rip-server ca:trust                 # Trust CA in system (macOS)
+rip-server ca:export                # Export CA certificate
+rip-server ca:info                  # Show CA information
+rip-server ca:list                  # List generated certificates
+rip-server ca:clean                 # Clean old certificates
 
 # Configuration files (optional)
 # package.json: { "rip-server": { "workers": 5, "requests": 100 } }
@@ -142,6 +154,51 @@ Drop in your existing SSL certificates from trusted CAs:
 - **🎯 Rip Language** - Full .rip transpilation support
 - **🌍 Universal** - Same code in development and production
 - **🛡️ Perfect Isolation** - No shared state between requests within workers
+
+## 🔒 HTTPS Support
+
+### Smart Certificate Management
+
+**rip-server** offers multiple HTTPS options to match your needs:
+
+1. **Smart Mode** (`https`) - Automatically selects the best option:
+   ```bash
+   rip-server https              # Uses CA if available, creates if not
+   ```
+
+2. **Quick Self-Signed** (`https:quick`) - For quick testing:
+   ```bash
+   rip-server https:quick        # Browser warnings, but works immediately
+   ```
+
+3. **CA-Signed Certificates** (`https:ca`) - Professional development:
+   ```bash
+   rip-server ca:init           # One-time CA setup
+   rip-server ca:trust          # Trust in system (no more warnings!)
+   rip-server https:ca          # Use CA-signed certificates
+   ```
+
+4. **Your Own Certificates** - For production:
+   ```bash
+   rip-server cert.pem key.pem  # Use your Let's Encrypt or other certs
+   ```
+
+### Certificate Authority Benefits
+
+After running `ca:init` and `ca:trust` once:
+- ✅ No more browser warnings
+- ✅ Valid HTTPS for all local development
+- ✅ Wildcard support (*.localhost)
+- ✅ Works with custom domains
+- ✅ 2-year validity
+
+### Both Protocols
+
+Need HTTP and HTTPS together?
+```bash
+rip-server http+https         # Both on default ports (3000 & 3443)
+rip-server http+https 8080 8443  # Custom ports for both
+```
 
 ## 🎯 Production Deployment
 
