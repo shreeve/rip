@@ -185,7 +185,7 @@ rip-schema supports the schema patterns you know and love:
 ## Installation
 
 ```bash
-bun add @rip/active-rip
+bun add @rip/schema
 ```
 
 ## Requirements

@@ -45,9 +45,9 @@ Options:
   -h, --help           Show this help message
 
 Examples:
-  bun rip-schema db:push
-  bun rip-schema db:push -s ./schema.rip -d ./dev.db
-  bun rip-schema db:drop
+  rip-schema db:push
+  rip-schema db:push -s ./schema.rip -d ./dev.db
+  rip-schema db:drop
 `)
 }
 
