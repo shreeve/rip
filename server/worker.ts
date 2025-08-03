@@ -13,7 +13,8 @@
  */
 
 // Configuration
-const workerId = process.argv[2] ?? "0";
+const workerId = parseInt(process.argv[2] ?? "0");
+const workerNum = workerId + 1; // Human-friendly worker number (1-indexed)
 const maxRequests = parseInt(process.argv[3] ?? "100");
 const appDirectory = process.argv[4] ?? process.cwd();
 
@@ -43,12 +44,12 @@ const loadRipApplication = async () => {
     for (const file of possibleFiles) {
       try {
         const appPath = `${appDirectory}/${file}`;
-        console.log(`🔍 [Worker ${workerId}] Trying to load: ${appPath}`);
+        console.log(`🔍 [Worker ${workerNum}] Trying to load: ${appPath}`);
 
         // Import the .rip file (will be transpiled by bunfig.toml)
         const app = await import(appPath);
 
-        console.log(`✅ [Worker ${workerId}] Loaded application from: ${file}`);
+        console.log(`✅ [Worker ${workerNum}] Loaded application from: ${file}`);
         return app.default || app;
       } catch (error) {
         // Try next file
@@ -57,22 +58,22 @@ const loadRipApplication = async () => {
     }
 
     // Fallback: create a simple default handler
-    console.log(`⚠️ [Worker ${workerId}] No .rip app found, using default handler`);
+    console.log(`⚠️ [Worker ${workerNum}] No .rip app found, using default handler`);
     return {
       fetch: (req: Request) => {
-        return new Response(`Hello from Rip Worker ${workerId}! (request #${requestsHandled + 1})\n\nNo .rip application found. Create index.rip, app.rip, or server.rip in ${appDirectory}`, {
+        return new Response(`Hello from Rip Worker ${workerNum}! (request #${requestsHandled + 1})\n\nNo .rip application found. Create index.rip, app.rip, or server.rip in ${appDirectory}`, {
           headers: { "Content-Type": "text/plain" }
         });
       }
     };
 
   } catch (error) {
-    console.error(`❌ [Worker ${workerId}] Error loading application:`, error);
+    console.error(`❌ [Worker ${workerNum}] Error loading application:`, error);
 
     // Return error handler
     return {
       fetch: (req: Request) => {
-        return new Response(`Error in Rip Worker ${workerId}: ${error.message}`, {
+        return new Response(`Error in Rip Worker ${workerNum}: ${error.message}`, {
           status: 500,
           headers: { "Content-Type": "text/plain" }
         });
@@ -85,9 +86,9 @@ const loadRipApplication = async () => {
  * Main worker logic
  */
 const main = async () => {
-  console.log(`🔥 [Worker ${workerId}] Starting Rip worker...`);
-  console.log(`📊 [Worker ${workerId}] Will handle up to ${maxRequests} requests`);
-  console.log(`📁 [Worker ${workerId}] App directory: ${appDirectory}`);
+  console.log(`🔥 [Worker ${workerNum}] Starting Rip worker...`);
+console.log(`📊 [Worker ${workerNum}] Will handle up to ${maxRequests} requests`);
+console.log(`📁 [Worker ${workerNum}] App directory: ${appDirectory}`);
 
   // Load the user's Rip application
   const ripApp = await loadRipApplication();
@@ -103,7 +104,7 @@ const main = async () => {
 
       // 🎯 Sequential Processing: Only handle one request at a time
       if (requestInProgress) {
-        console.log(`⏸️ [Worker ${workerId}] Request queued - worker busy with request #${requestsHandled}`);
+        console.log(`⏸️ [Worker ${workerNum}] Request queued - worker busy with request #${requestsHandled}`);
         return new Response("Worker busy - perfect isolation in progress", {
           status: 503,
           headers: {
@@ -117,7 +118,11 @@ const main = async () => {
       requestInProgress = true;
       requestsHandled++;
 
-      console.log(`🎯 [Worker ${workerId}] Processing request #${requestsHandled} (sequential mode)`);
+      // Capture request details for logging
+      const startDate = new Date();
+      const startTime = startDate.getTime();
+      const method = req.method;
+      const url = new URL(req.url).pathname;
 
       try {
         // Call the user's application
@@ -134,16 +139,34 @@ const main = async () => {
           response = await ripApp.handler(req);
         } else {
           // Fallback
-          response = new Response(`Rip Worker ${workerId} - Request #${requestsHandled} (Sequential Mode)`, {
+          response = new Response(`Rip Worker ${workerNum} - Request #${requestsHandled} (Sequential Mode)`, {
             headers: { "Content-Type": "text/plain" }
           });
         }
 
-        console.log(`✅ [Worker ${workerId}] Completed request #${requestsHandled}`);
+        // Calculate duration and response details
+        const duration = Date.now() - startTime;
+        const timestamp = startDate.toISOString().slice(0, 23).replace('T', ' ') +
+                         (startDate.getTimezoneOffset() <= 0 ? '+' : '-') +
+                         String(Math.abs(Math.floor(startDate.getTimezoneOffset() / 60))).padStart(2, '0') +
+                         ':' + String(Math.abs(startDate.getTimezoneOffset() % 60)).padStart(2, '0'); // YYYY-MM-DD HH:MM:SS.mmm±HH:MM format
+        const status = response.status;
+        const contentType = response.headers.get('content-type') || 'unknown';
+        const contentLength = response.headers.get('content-length') || '?';
+
+        // Format content type (shorten common ones)
+        const shortType = contentType.split(';')[0]
+          .replace('application/', '')
+          .replace('text/', '')
+          .replace('image/', 'img/')
+          .substring(0, 8); // Limit length
+
+        // Clean, compact one-line log
+        console.log(`[${timestamp}] W${workerNum}.${requestsHandled} ${method} ${url} → ${status} ${shortType} ${contentLength}b ${duration}ms`);
 
         // Check if worker should shut down
         if (requestsHandled >= maxRequests) {
-          console.log(`✅ [Worker ${workerId}] Reached ${maxRequests} requests. Scheduling graceful shutdown.`);
+          console.log(`✅ [Worker ${workerNum}] Reached ${maxRequests} requests. Scheduling graceful shutdown.`);
 
           // Schedule shutdown after this request completes
           setTimeout(() => {
@@ -154,9 +177,9 @@ const main = async () => {
         return response;
 
       } catch (error) {
-        console.error(`❌ [Worker ${workerId}] Request #${requestsHandled} error:`, error);
+        console.error(`❌ [Worker ${workerNum}] Request #${requestsHandled} error:`, error);
 
-        return new Response(`Rip Worker ${workerId} Error: ${error.message}`, {
+        return new Response(`Rip Worker ${workerNum} Error: ${error.message}`, {
           status: 500,
           headers: { "Content-Type": "text/plain" }
         });
@@ -187,8 +210,8 @@ const main = async () => {
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM received'));
   process.on('SIGINT', () => gracefulShutdown('SIGINT received'));
 
-  console.log(`🚀 [Worker ${workerId}] Ready on ${socketPath}`);
-  console.log(`⚡ [Worker ${workerId}] Waiting for requests...`);
+  console.log(`🚀 [Worker ${workerNum}] Ready on ${socketPath}`);
+  console.log(`⚡ [Worker ${workerNum}] Waiting for requests...`);
 };
 
 // Start the worker
