@@ -28,7 +28,7 @@ async function killAll() {
 // Start command
 async function start(mode: string = "dev", foreground: string = "true", appDir: string = process.cwd()) {
   const appPath = resolve(appDir);
-  
+
   // Verify app directory exists
   if (!existsSync(appPath)) {
     console.error(`❌ App directory not found: ${appPath}`);
@@ -113,7 +113,7 @@ async function start(mode: string = "dev", foreground: string = "true", appDir: 
   } else {
     // Background mode - wait a bit then check health
     await new Promise(resolve => setTimeout(resolve, 2000));
-    
+
     try {
       const response = await fetch("http://localhost:3000/health");
       if (response.ok) {

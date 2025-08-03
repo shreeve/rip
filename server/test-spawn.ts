@@ -75,18 +75,18 @@ const testCases = [
 for (const test of testCases) {
   console.log(`\n${test.name}:`);
   console.log(`Command: ${JSON.stringify(test.cmd)}`);
-  
+
   try {
     const proc = Bun.spawn(test.cmd, {
       ...test.options,
       stdout: "pipe",
       stderr: "pipe"
     });
-    
+
     const output = await new Response(proc.stdout).text();
     const error = await new Response(proc.stderr).text();
     const exitCode = await proc.exited;
-    
+
     console.log(`✅ Success! Exit code: ${exitCode}`);
     if (output.trim()) console.log(`Output: ${output.trim()}`);
     if (error.trim()) console.log(`Error: ${error.trim()}`);

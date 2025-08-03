@@ -8,7 +8,7 @@ try {
   const proc = Bun.spawn(["echo", "hello"], {
     stdout: "pipe"
   });
-  
+
   const output = await new Response(proc.stdout).text();
   console.log("✅ Basic spawn works:", output.trim());
 } catch (err) {
@@ -21,7 +21,7 @@ try {
     stdout: "pipe",
     stderr: "pipe"
   });
-  
+
   const output = await new Response(proc.stdout).text();
   console.log("✅ Bun spawn works:", output.trim());
 } catch (err) {
@@ -34,7 +34,7 @@ try {
     stdout: "pipe",
     stderr: "pipe"
   });
-  
+
   const output = await new Response(proc.stdout).text();
   console.log("✅ Absolute path spawn works:", output.trim());
 } catch (err) {
