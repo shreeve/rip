@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/assets/logos/rip-icon-512wa.png" alt="Rip Logo" width="200">
+  <img src="assets/logos/rip-icon-512wa.png" alt="Rip Logo" width="200">
 </div>
 
 # rip
@@ -972,7 +972,7 @@ curl -k https://localhost:3443  # if using HTTPS
 - **[Architecture Deep Dive](server/architecture.md)** - Technical implementation details
 - **[Production SSL Guide](server/production-ssl.md)** - Enterprise certificate setup
 - **[Examples](server/examples/)** - Working application samples
-- **[Documentation Hub](docs/README.md)** - All documentation index
+
 
 *The Rip Application Server: Where elegant code meets enterprise performance.* ⚡
 
