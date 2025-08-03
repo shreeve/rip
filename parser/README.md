@@ -10,7 +10,7 @@ A modern SLR(1) parser generator that creates fast, reliable parsers from gramma
 
 Solar is a clean SLR(1) parser generator implementation, influenced by Jison but rewritten in CoffeeScript for clarity and efficiency. It generates compact, dependency-free JavaScript parsers from grammar definitions.
 
-**Mathematical Foundation**: SLR(1) ⊆ LALR(1) ⊆ LR(1) ⊆ Context-Free Languages  
+**Mathematical Foundation**: SLR(1) ⊆ LALR(1) ⊆ LR(1) ⊆ Context-Free Languages
 **Grammar Class**: Deterministic context-free grammars with 1-token lookahead
 
 ### Key Features
@@ -53,7 +53,7 @@ grammar =
     ["factor", ["NUMBER"], -> Number($1)]
     ["factor", ["(", "expression", ")"], -> $2]
   ]
-  
+
   operators: [
     ["left", "+", "-"]
     ["left", "*", "/"]
@@ -205,7 +205,7 @@ grammar =
     ["expr", ["NUMBER"], -> Number($1)]
     ["expr", ["(", "expr", ")"], -> $2]
   ]
-  
+
   operators: [
     ["left", "+", "-"]
     ["left", "*", "/"]
