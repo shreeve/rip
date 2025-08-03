@@ -1,4 +1,4 @@
-import { schema as Schema } from '../schema/schema-builder-v2'
+import { schema as Schema } from './schema-builder-v2'
 
 export default Schema ->
   # Table with custom primary key (bigint) - showcasing both syntaxes
@@ -150,7 +150,7 @@ export default Schema ->
     @json      'Metadata'              # Optional JSON field
     @string    'Category!', 50
     @timestamps()
-    
+
     @index     'Key', unique: true
     @index     'Category'
 
@@ -163,7 +163,7 @@ export default Schema ->
     @json      'Tags', [[]]            # Array of tags
     @datetime  'OccurredAt!'
     @timestamps()
-    
+
     @index     'EventType'
     @index     'OccurredAt'
 
@@ -179,7 +179,7 @@ export default Schema ->
     @date      'PublishedDate'
     @time      'PublishTime'
     @timestamps()
-    
+
     @index     'Title'
     @index     ['IsPublished', 'PublishedDate']
 
@@ -189,28 +189,28 @@ export default Schema ->
     @string    'StringField', 100
     @text      'TextField'
     @email     'EmailField!'
-    
+
     # Numeric types
     @integer   'IntField', 4
     @bigint    'BigIntField'
     @float     'FloatField', 53
     @decimal   'DecimalField', 10, 2
-    
+
     # Date/Time types
     @date      'DateField'
     @time      'TimeField'
     @datetime  'DateTimeField'
     @timestamp 'TimestampField'
-    
+
     # Binary and JSON
     @binary    'BinaryField', size: 'medium'
     @json      'JsonField', [{ key: "value" }]
-    
+
     # Boolean
     @boolean   'BoolField', true
-    
+
     @timestamps()
-    
+
     # Various index patterns
     @index     'EmailField', unique: true
     @index     ['DateField', 'TimeField']
