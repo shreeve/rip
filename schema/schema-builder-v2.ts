@@ -160,6 +160,59 @@ export class ColumnBuilder {
     return this
   }
 
+  date(fieldName: string, defaultValue?: any[]) {
+    const { name, required } = this.parseField(fieldName)
+
+    let column = text(name)
+    if (required) column = column.notNull()
+    if (defaultValue !== undefined) {
+      const parsed = this.parseDefault(defaultValue)
+      if (parsed !== undefined) column = column.default(parsed)
+    }
+
+    this.columns[name] = column as any
+    return this
+  }
+
+  time(fieldName: string, defaultValue?: any[]) {
+    const { name, required } = this.parseField(fieldName)
+
+    let column = text(name)
+    if (required) column = column.notNull()
+    if (defaultValue !== undefined) {
+      const parsed = this.parseDefault(defaultValue)
+      if (parsed !== undefined) column = column.default(parsed)
+    }
+
+    this.columns[name] = column as any
+    return this
+  }
+
+  timestamp(fieldName: string, defaultValue?: any[]) {
+    const { name, required } = this.parseField(fieldName)
+
+    let column = text(name)
+    if (required) column = column.notNull()
+    if (defaultValue !== undefined) {
+      const parsed = this.parseDefault(defaultValue)
+      if (parsed !== undefined) column = column.default(parsed)
+    }
+
+    this.columns[name] = column as any
+    return this
+  }
+
+  binary(fieldName: string, options?: any) {
+    const { name, required } = this.parseField(fieldName)
+    
+    // In SQLite, we use blob for binary data
+    let column = blob(name, { mode: 'buffer' })
+    if (required) column = column.notNull()
+
+    this.columns[name] = column as any
+    return this
+  }
+
   email(fieldName: string, defaultValue?: any[]) {
     return this.string(fieldName, 255, defaultValue)
   }
@@ -230,6 +283,10 @@ export class TableBuilder {
   decimal = this.builder.decimal.bind(this.builder)
   float = this.builder.float.bind(this.builder)
   datetime = this.builder.datetime.bind(this.builder)
+  date = this.builder.date.bind(this.builder)
+  time = this.builder.time.bind(this.builder)
+  timestamp = this.builder.timestamp.bind(this.builder)
+  binary = this.builder.binary.bind(this.builder)
   email = this.builder.email.bind(this.builder)
   uuid = this.builder.uuid.bind(this.builder)
   timestamps = this.builder.timestamps.bind(this.builder)
