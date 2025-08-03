@@ -97,49 +97,7 @@ rip-server ca:clean                 # Clean old certificates
 
 **Perfect for monitoring, debugging, and performance analysis!** 🎯
 
-## 🔒 HTTPS by Default
 
-**HTTPS is now the default!** 🚀 Certificates are auto-generated on first run.
-
-```bash
-# Just run normally - HTTPS works automatically!
-bun run dev             # HTTPS + HTTP (certificates auto-generated)
-bun run start           # Production HTTPS + HTTP
-
-# Both servers start automatically:
-# 🔒 HTTPS: https://localhost:3443  (primary, secure)
-# 📡 HTTP:  http://localhost:3000   (fallback, compatibility)
-
-# Manual certificate generation (optional)
-./generate-ssl.sh       # If you want to pre-generate
-
-# HTTP-only mode (when you specifically need it)
-bun run dev:http        # Developers who need HTTP-only
-bun run start:http      # Legacy systems requiring HTTP
-```
-
-**Why HTTPS by Default?**
-- 🔒 **Security-first** development
-- 🌍 **Modern web standards** (HTTPS everywhere)
-- 🎯 **Production parity** (matches real deployment)
-- ⚡ **Zero configuration** (auto-generates certificates)
-
-### **🏭 Using Production SSL Certificates**
-
-Drop in your existing SSL certificates from trusted CAs:
-
-```bash
-# Let's Encrypt certificates
-./start.sh prod false /app 3443 /etc/letsencrypt/live/yourdomain.com/fullchain.pem /etc/letsencrypt/live/yourdomain.com/privkey.pem
-
-# Custom SSL certificates
-./start.sh prod false /app 3443 /path/to/your/cert.pem /path/to/your/key.pem
-
-# Update package.json for easy deployment
-"start:prod": "cd /Users/shreeve/Data/Code/rip/server && ./start.sh prod false /app 3443 /etc/ssl/certs/yourdomain.pem /etc/ssl/private/yourdomain.key"
-```
-
-**📖 See [production-ssl.md](production-ssl.md) for complete production SSL setup guide**
 
 ## ✨ Features
 
@@ -178,7 +136,7 @@ Drop in your existing SSL certificates from trusted CAs:
    rip-server https:ca          # Use CA-signed certificates
    ```
 
-4. **Your Own Certificates** - For production:
+4. **Your Own Certificates** - For any environment:
    ```bash
    rip-server cert.pem key.pem  # Use your Let's Encrypt or other certs
    ```
@@ -198,6 +156,106 @@ Need HTTP and HTTPS together?
 ```bash
 rip-server http+https         # Both on default ports (3000 & 3443)
 rip-server http+https 8080 8443  # Custom ports for both
+```
+
+### Using Your Own SSL Certificates
+
+**Drop in your existing SSL certificates from trusted Certificate Authorities** like Let's Encrypt, DigiCert, Comodo, etc.
+
+#### Quick Start with Existing Certificates
+
+```bash
+# Using your existing certificates (arguments in ANY order!)
+rip-server prod https /path/to/cert.pem /path/to/key.pem
+rip-server cert.pem key.pem prod https w:10
+rip-server /etc/ssl/cert.pem /etc/ssl/key.pem
+
+# Let's Encrypt example
+rip-server prod https /etc/letsencrypt/live/yourdomain.com/fullchain.pem /etc/letsencrypt/live/yourdomain.com/privkey.pem
+
+# Custom SSL directory
+rip-server prod https /opt/ssl/yourdomain.com/certificate.pem /opt/ssl/yourdomain.com/private.key
+```
+
+#### Configuration File Method
+
+```json
+// package.json
+{
+  "rip-server": {
+    "workers": 10,
+    "requests": 100,
+    "protocol": "https",
+    "httpsPort": 443,
+    "certPath": "/etc/ssl/certs/server.crt",
+    "keyPath": "/etc/ssl/private/server.key"
+  }
+}
+```
+
+Then just run:
+```bash
+rip-server prod
+```
+
+#### Symlink Method
+
+```bash
+# Create standard location for certificates
+mkdir -p ~/.rip-server/certs
+ln -s /etc/letsencrypt/live/yourdomain.com/fullchain.pem ~/.rip-server/certs/server.crt
+ln -s /etc/letsencrypt/live/yourdomain.com/privkey.pem ~/.rip-server/certs/server.key
+
+# Then run normally
+rip-server prod https
+```
+
+#### Docker/Container Usage
+
+```dockerfile
+FROM oven/bun:1.0
+
+# Copy SSL certificates
+COPY ssl/certificate.pem /app/ssl/
+COPY ssl/private.key /app/ssl/
+RUN chmod 644 /app/ssl/certificate.pem
+RUN chmod 600 /app/ssl/private.key
+
+# Copy application
+COPY . /app
+WORKDIR /app
+
+# Start with certificates
+CMD ["rip-server", "prod", "https", "/app/ssl/certificate.pem", "/app/ssl/private.key"]
+```
+
+#### Security Best Practices
+
+```bash
+# Set correct permissions
+chmod 644 /path/to/certificate.pem    # Certificate can be world-readable
+chmod 600 /path/to/private.key        # Private key should be owner-only
+
+# Verify certificate and key match
+openssl x509 -noout -modulus -in certificate.pem | openssl md5
+openssl rsa -noout -modulus -in private.key | openssl md5
+# The MD5 hashes should match
+
+# Check certificate expiration
+openssl x509 -noout -dates -in certificate.pem
+```
+
+#### Zero-Downtime Certificate Updates
+
+When certificates need renewal:
+```bash
+# 1. Update certificates in place
+cp new-certificate.pem /etc/ssl/certs/yourdomain.pem
+cp new-private.key /etc/ssl/private/yourdomain.key
+
+# 2. Graceful restart
+rip-server stop  # Graceful shutdown
+rip-server prod https /etc/ssl/certs/yourdomain.pem /etc/ssl/private/yourdomain.key
 ```
 
 ## 🎯 Production Deployment

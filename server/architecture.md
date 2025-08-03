@@ -130,7 +130,6 @@ rip-server/
 ├── ⚙️ bunfig.toml     # Rip transpiler config
 ├── 📖 README.md       # Usage documentation
 ├── 🏗️ architecture.md # This file - technical deep dive
-├── 🔒 production-ssl.md # Production SSL certificate guide
 └── 🌟 examples/       # Working examples
     ├── simple/        # Basic Rip app
     └── api/           # Advanced REST API
