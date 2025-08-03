@@ -12,7 +12,7 @@ import { spawn } from 'bun'
 const SCRIPT_DIR = import.meta.dir
 
 // Parse command line arguments
-const [, , command = 'help', ...args] = process.argv
+const [, , command = 'dev', ...args] = process.argv
 
 // Helper to kill all rip processes
 async function killAll() {
@@ -168,6 +168,7 @@ Usage:
   rip-server test
 
 Examples:
+  rip-server                        # Start dev server (default)
   rip-server dev                    # Start development server
   rip-server dev true ./api         # Dev server with specific app
   rip-server stop                   # Stop all processes
