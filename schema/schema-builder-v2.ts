@@ -206,6 +206,7 @@ export class ColumnBuilder {
   }
 
   float(fieldName: string, ...args: any[]) {
+    // Float implies standard single-precision, no size parameter needed
     return this.decimal(fieldName, ...args)
   }
 

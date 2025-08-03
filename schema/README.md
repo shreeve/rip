@@ -41,8 +41,8 @@ All your favorite column types with intuitive syntax:
   @integer    'view_count', [0]       # Integer with default 0
   @bigint     'user_id!'              # Required bigint
   @boolean    'published', false      # Boolean with default
-  @decimal    'price', 10, 2          # Decimal(10,2)
-  @float      'rating'                # Float
+  @decimal    'price', 10, 2          # Decimal(10,2) - exact numeric
+  @float      'rating'                # Float - standard precision, no size needed
   @json       'metadata', {}          # JSON with default
 
   # Date/time types
