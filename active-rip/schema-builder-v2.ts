@@ -36,9 +36,7 @@ export class ColumnBuilder {
       const val = value[0]
       if (typeof val === 'function') {
         const expr = val()
-        if (expr === 'CURRENT_TIMESTAMP') {
-          return sql`CURRENT_TIMESTAMP`
-        }
+        // Use sql.raw for SQL expressions
         return sql.raw(expr)
       }
       return val
@@ -168,8 +166,8 @@ export class ColumnBuilder {
   }
 
   timestamps() {
-    this.datetime('created_at!', [() => 'CURRENT_TIMESTAMP'])
-    this.datetime('updated_at!', [() => 'CURRENT_TIMESTAMP'])
+    this.datetime('created_at!', [() => "datetime('now')"])
+    this.datetime('updated_at!', [() => "datetime('now')"])
     return this
   }
 

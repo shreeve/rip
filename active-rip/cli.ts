@@ -70,11 +70,16 @@ function generateCreateTableSQL(tableName: string, table: any): string {
           if (col.default.type === 'sql' && col.default.value) {
             def += ` DEFAULT ${col.default.value}`
           } else if (col.default.queryChunks) {
-            // Handle sql`CURRENT_TIMESTAMP` style
+            // Handle sql`...` style
             const chunks = col.default.queryChunks
-            if (chunks.length === 1 && typeof chunks[0] === 'string') {
-              def += ` DEFAULT ${chunks[0]}`
+            if (chunks.length > 0 && chunks[0].value) {
+              // StringChunk has a value array
+              const sqlValue = chunks[0].value[0]
+              def += ` DEFAULT (${sqlValue})`
             }
+          } else if (col.default.value && typeof col.default.value === 'string') {
+            // Handle sql.raw() style
+            def += ` DEFAULT ${col.default.value}`
           } else {
             // Other objects - try to stringify
             def += ` DEFAULT ${JSON.stringify(col.default)}`
