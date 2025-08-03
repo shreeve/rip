@@ -1,8 +1,8 @@
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { Database } from 'bun:sqlite'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import schema from './schema.rip'
 
 // Get the directory of this file
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -10,22 +10,15 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 // Create SQLite database in the db directory
 const dbPath = join(__dirname, 'api.db')
 const sqlite = new Database(dbPath)
-export const db = drizzle(sqlite)
 
-// Define the lawfirms table
-export const lawfirmsTable = sqliteTable('lawfirms', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  name: text('name').notNull(),
-  email: text('email'),
-  phone: text('phone'),
-  address: text('address'),
-  city: text('city'),
-  state: text('state'),
-  zip: text('zip'),
-  createdAt: text('created_at').notNull().default('CURRENT_TIMESTAMP'),
-})
+// Create Drizzle instance with our ActiveRip schema
+export const db = drizzle(sqlite, { schema })
+
+// Export the lawfirms table from our schema
+export const lawfirmsTable = schema.lawfirms
 
 // Initialize the database table
+// Note: In production, you'd use proper migrations
 sqlite.run(`
   CREATE TABLE IF NOT EXISTS lawfirms (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,6 +29,13 @@ sqlite.run(`
     city TEXT,
     state TEXT,
     zip TEXT,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    fax TEXT,
+    website TEXT,
+    notes TEXT,
+    active INTEGER DEFAULT 1,
+    hourly_rate REAL,
+    employee_count INTEGER,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   )
 `)

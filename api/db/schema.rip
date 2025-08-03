@@ -1,0 +1,28 @@
+# API Database Schema using ActiveRip
+import { schema } from '../../active-rip'
+
+# Define the schema for our API
+tables = schema ->
+  @table 'lawfirms', ->
+    @string   'name!', 100
+    @string   'address', 100
+    @string   'city', 50
+    @string   'state', 2
+    @string   'zip', 10
+    @string   'phone', 20
+    @email    'email'
+    @string   'fax', 20
+    @string   'website'
+    @text     'notes'
+    @boolean  'active', true
+    @decimal  'hourly_rate', 10, 2
+    @integer  'employee_count'
+    @timestamps()
+    
+    @index    'name'
+    @index    ['state', 'city']
+    @index    'active'
+
+# Export the schema and tables
+export default tables
+export lawfirms = tables.lawfirms
