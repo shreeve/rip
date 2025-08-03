@@ -24,7 +24,7 @@
     @boolean  'active', true      # Default value
     @timestamps()                 # Adds created_at, updated_at
 
-    @index    'email', unique: true  # Could be @index 'email!' for unique
+    @index    'email', unique: true  # Or use @index 'email!' (! = unique)
 ```
 
 ## Features
@@ -172,7 +172,7 @@ migrate '20240101000000', 'add_avatar_to_users', ->
 
 rip-schema supports the schema patterns you know and love:
 
-- ✅ `!` notation for required fields
+- ✅ `!` notation: required fields (`'name!'`) and unique indexes (`@index 'email!'`)
 - ✅ Array notation for defaults: `[0]`, `[""]`
 - ✅ Size hints: `string 'name', 50`
 - ✅ Options hash for columns
