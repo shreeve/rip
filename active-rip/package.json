@@ -9,6 +9,9 @@
     "./schema": "./schema-builder.ts",
     "./migrations": "./migrations.rip"
   },
+  "bin": {
+    "active-rip": "./cli.ts"
+  },
   "scripts": {
     "test": "bun test",
     "lint": "bun x biome check .",

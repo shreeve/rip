@@ -52,7 +52,7 @@ lawfirmSchema = z.object
 
 # GET all law firms
 lawfirmsApp.get '/', (c) ->
-  firms = await db.select().from(lawfirmsTable).all()
+  firms = db.select().from(lawfirmsTable).all!
   c.json firms
 
 # POST - Generate random law firm with faker
@@ -66,7 +66,7 @@ lawfirmsApp.post '/generate', (c) ->
     state: faker.location.state({ abbreviated: true })
     zip: faker.location.zipCode()
 
-  result = await db.insert(lawfirmsTable).values(firmData).returning().get()
+  result = db.insert(lawfirmsTable).values(firmData).returning().get!
   c.json result, 201
 
 # Mount the lawfirms routes
