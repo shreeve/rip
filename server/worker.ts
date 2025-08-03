@@ -15,7 +15,15 @@
 // Configuration
 const workerId = parseInt(process.argv[2] ?? "0");
 const workerNum = workerId + 1; // Human-friendly worker number (1-indexed)
-const maxRequests = parseInt(process.argv[3] ?? "100");
+const baseMaxRequests = parseInt(process.argv[3] ?? "100");
+
+// 🎯 Rolling restart strategy: Stagger request limits to prevent simultaneous shutdowns
+// Worker 0: 90-110% of base limit, Worker 1: 95-105%, Worker 2: 100-120%, etc.
+const requestVariance = Math.floor(baseMaxRequests * 0.1); // 10% variance
+const workerOffset = (workerId * 0.05) - 0.05; // -5%, 0%, +5%, +10%, etc.
+const maxRequests = Math.max(1, baseMaxRequests + Math.floor(baseMaxRequests * workerOffset) +
+                            Math.floor(Math.random() * requestVariance));
+
 const appDirectory = process.argv[4] ?? process.cwd();
 
 let requestsHandled = 0;
@@ -132,6 +140,7 @@ const getTimestamp = () => {
           response = await ripApp(req);
         } else if (ripApp && typeof ripApp.fetch === 'function') {
           // Hono-style app with fetch method
+
           response = await ripApp.fetch(req);
         } else if (ripApp && typeof ripApp.handler === 'function') {
           // Custom handler function
@@ -146,7 +155,7 @@ const getTimestamp = () => {
                 // Check if worker should shut down (after completing this request)
         if (requestsHandled >= maxRequests) {
           console.log(`[${getTimestamp()}              ] W${workerNum} reached ${maxRequests} requests - shutting down`);
-          
+
           // Schedule shutdown after this request completes
           setTimeout(() => {
             gracefulShutdown("Request limit reached");

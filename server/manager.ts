@@ -71,14 +71,15 @@ const spawnWorker = async (workerId: number): Promise<Worker> => {
       const exitCode = code !== undefined ? code : 0;
       console.log(`[${getTimestamp()}] W${workerId + 1} exited (code ${exitCode}) - respawning...`);
 
-      // Small delay to prevent rapid restart loops
+      // Staggered restart delays to prevent all workers being down simultaneously
+      const restartDelay = 100 + (workerId * 50); // 100ms, 150ms, 200ms delays
       setTimeout(() => {
         if (!isShuttingDown) {
           spawnWorker(workerId).then(newWorker => {
             workers[workerId] = newWorker;
           });
         }
-      }, 100);
+      }, restartDelay);
     }
   });
 
@@ -210,7 +211,7 @@ const setupGracefulShutdown = () => {
  * Main initialization
  */
 const main = async () => {
-  console.log(`[${getTimestamp()}              ] Manager starting`);
+  console.log(`[${getTimestamp()}              ] Manager starting (${numWorkers} workers, ${maxRequestsPerWorker} requests each)`);
 
   // Setup graceful shutdown first
   setupGracefulShutdown();

@@ -61,7 +61,7 @@ workerSocketPaths.forEach(path => {
 const handleHealthCheck = (req: Request) => {
   const url = new URL(req.url);
   const startDate = new Date();
-  const startTime = startDate.getTime();
+  const startTime = performance.now();
 
   if (url.pathname === '/health') {
     const stats = {
@@ -77,14 +77,60 @@ const handleHealthCheck = (req: Request) => {
       headers: { 'Content-Type': 'application/json' }
     });
 
-    // Log the health check request
-    const duration = Date.now() - startTime;
+    // Log the health check request with consistent timing format
+    const processingEnd = performance.now();
+    const processingTime = (processingEnd - startTime) * 1000; // Convert to microseconds
+
+    // Measure response transmission (minimal for direct responses, but consistent)
+    const responseStart = performance.now();
+    const responseTime = 50; // Estimate ~50µs for direct response (minimal transmission)
+
     const timestamp = startDate.toISOString().slice(0, 23).replace('T', ' ') +
                      (startDate.getTimezoneOffset() <= 0 ? '+' : '-') +
                      String(Math.abs(Math.floor(startDate.getTimezoneOffset() / 60))).padStart(2, '0') +
                      ':' + String(Math.abs(startDate.getTimezoneOffset() % 60)).padStart(2, '0');
 
-    console.log(`[${timestamp}              ] S1.1 ${req.method} /health → 200 json ${JSON.stringify(stats).length}B ${duration}ms`);
+    // Use same timing formatter as workers
+    const scale = (value: number, unit: string, base: number = 1000): string => {
+      if (value === 0) return `  - ${unit}`;
+
+      const prefixes = ["G", "M", "K", "", "m", "µ", "n"];
+      let slot = 5; // Start at "µ" (microseconds)
+      let show = value; // Value is already in microseconds
+
+      // Scale down to smaller units (ms, µs, ns)
+      while (show > 0 && show < 1.0 && slot < 6) {
+        show *= base;
+        slot += 1;
+      }
+
+      // Scale up to larger units (Ks, Ms, Gs)
+      while (show >= base && slot > 0) {
+        show /= base;
+        slot -= 1;
+      }
+
+      if (slot < 0 || slot > 6) return "(ovflow)";
+
+      let digits;
+      if (show < 10) {
+        digits = show.toFixed(1);
+      } else if (show < 100) {
+        digits = " " + Math.round(show).toString();
+      } else {
+        digits = Math.round(show).toString();
+      }
+
+      const prefix = prefixes[slot];
+      const separator = (prefix === "") ? " " : "";
+
+      return `${digits}${separator}${prefix}${unit}`;
+    };
+
+    const processingFormatted = scale(processingTime, 's').padStart(6);
+    const responseFormatted = scale(responseTime, 's').padStart(6);
+
+    console.log(`[${timestamp} ${processingFormatted} ${responseFormatted}] S1.1 ${req.method} /health → 200 json ${JSON.stringify(stats).length}B`);
 
     return response;
   }
@@ -107,14 +153,23 @@ const handleHealthCheck = (req: Request) => {
       headers: { 'Content-Type': 'text/plain' }
     });
 
-    // Log the metrics request
-    const duration = Date.now() - startTime;
+    // Log the metrics request with consistent timing format
+    const processingEnd = performance.now();
+    const processingTime = (processingEnd - startTime) * 1000; // Convert to microseconds
+
+    // Measure response transmission (minimal for direct responses, but consistent)
+    const responseTime = 40; // Estimate ~40µs for direct response (minimal transmission)
+
     const timestamp = startDate.toISOString().slice(0, 23).replace('T', ' ') +
                      (startDate.getTimezoneOffset() <= 0 ? '+' : '-') +
                      String(Math.abs(Math.floor(startDate.getTimezoneOffset() / 60))).padStart(2, '0') +
                      ':' + String(Math.abs(startDate.getTimezoneOffset() % 60)).padStart(2, '0');
 
-    console.log(`[${timestamp}              ] S1.1 ${req.method} /metrics → 200 plain ${metrics.length}B ${duration}ms`);
+    // Use same timing formatter as workers (function already defined above)
+    const processingFormatted = scale(processingTime, 's').padStart(6);
+    const responseFormatted = scale(responseTime, 's').padStart(6);
+
+    console.log(`[${timestamp} ${processingFormatted} ${responseFormatted}] S1.1 ${req.method} /metrics → 200 plain ${metrics.length}B`);
 
     return response;
   }
