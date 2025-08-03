@@ -143,10 +143,10 @@ const getTimestamp = () => {
           });
         }
 
-        // Check if worker should shut down
+                // Check if worker should shut down (after completing this request)
         if (requestsHandled >= maxRequests) {
-                     console.log(`[${getTimestamp()}              ] W${workerNum} reached ${maxRequests} requests - shutting down`);
-
+          console.log(`[${getTimestamp()}              ] W${workerNum} reached ${maxRequests} requests - shutting down`);
+          
           // Schedule shutdown after this request completes
           setTimeout(() => {
             gracefulShutdown("Request limit reached");

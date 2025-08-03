@@ -68,7 +68,8 @@ const spawnWorker = async (workerId: number): Promise<Worker> => {
   // Handle worker exit
   workerProcess.exited.then(({ code }) => {
     if (!isShuttingDown) {
-      console.log(`[${getTimestamp()}] W${workerId + 1} exited (code ${code}) - respawning...`);
+      const exitCode = code !== undefined ? code : 0;
+      console.log(`[${getTimestamp()}] W${workerId + 1} exited (code ${exitCode}) - respawning...`);
 
       // Small delay to prevent rapid restart loops
       setTimeout(() => {

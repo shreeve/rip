@@ -84,7 +84,7 @@ const handleHealthCheck = (req: Request) => {
                      String(Math.abs(Math.floor(startDate.getTimezoneOffset() / 60))).padStart(2, '0') +
                      ':' + String(Math.abs(startDate.getTimezoneOffset() % 60)).padStart(2, '0');
 
-    console.log(`[${timestamp}              ] SERVER /health → 200 json ${JSON.stringify(stats).length}B ${duration}ms`);
+    console.log(`[${timestamp}              ] S1.1 ${req.method} /health → 200 json ${JSON.stringify(stats).length}B ${duration}ms`);
 
     return response;
   }
@@ -114,7 +114,7 @@ const handleHealthCheck = (req: Request) => {
                      String(Math.abs(Math.floor(startDate.getTimezoneOffset() / 60))).padStart(2, '0') +
                      ':' + String(Math.abs(startDate.getTimezoneOffset() % 60)).padStart(2, '0');
 
-    console.log(`[${timestamp}              ] SERVER /metrics → 200 plain ${metrics.length}B ${duration}ms`);
+    console.log(`[${timestamp}              ] S1.1 ${req.method} /metrics → 200 plain ${metrics.length}B ${duration}ms`);
 
     return response;
   }
