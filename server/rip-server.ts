@@ -233,6 +233,14 @@ async function killAll() {
   })
   await proc2.exited
 
+  // Clean up Unix socket files
+  const proc3 = spawn(['rm', '-f', '/tmp/rip_worker_*.sock'], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+    shell: true, // Need shell to expand the wildcard
+  })
+  await proc3.exited
+
   console.log('✅ All processes stopped')
 }
 
