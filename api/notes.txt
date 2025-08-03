@@ -77,4 +77,4 @@ https://fakerjs.dev/
 
 ==
 
-bun x biome check --write --unsafe bun-rip/
+bun x biome check --write --unsafe rip-bun/

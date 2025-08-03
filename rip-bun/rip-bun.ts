@@ -3,7 +3,7 @@
 import { compile } from '../coffeescript/lib/coffeescript'
 
 Bun.plugin({
-  name: 'bun-rip',
+  name: 'rip-bun',
   setup({ onLoad }) {
     onLoad({ filter: /\.rip$/ }, async ({ path }) => ({
       loader: 'js',
