@@ -81,6 +81,7 @@ export default Schema ->
     @integer   'RegularInt'        # Regular integer
     @bigint    'BigIntCol'         # Bigint
     @float     'FloatCol'          # Float (single precision)
+    @double    'DoubleCol'         # Double (double precision)
     @decimal   'DecimalCol', 10, 2 # Decimal with precision and scale
     @decimal   'MoneyCol', 19, 4   # Money-like decimal
 
@@ -194,6 +195,7 @@ export default Schema ->
     @integer   'IntField', 4
     @bigint    'BigIntField'
     @float     'FloatField'
+    @double    'DoubleField'
     @decimal   'DecimalField', 10, 2
 
     # Date/Time types

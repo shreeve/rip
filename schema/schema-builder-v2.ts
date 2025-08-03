@@ -210,6 +210,11 @@ export class ColumnBuilder {
     return this.decimal(fieldName, ...args)
   }
 
+  double(fieldName: string, ...args: any[]) {
+    // Double implies standard double-precision, no size parameter needed
+    return this.decimal(fieldName, ...args)
+  }
+
   datetime(fieldName: string, ...args: any[]) {
     const { name, required } = this.parseField(fieldName)
     const options = this.parseParams(...args)
@@ -367,6 +372,7 @@ export class TableBuilder {
   boolean = this.builder.boolean.bind(this.builder)
   decimal = this.builder.decimal.bind(this.builder)
   float = this.builder.float.bind(this.builder)
+  double = this.builder.double.bind(this.builder)
   datetime = this.builder.datetime.bind(this.builder)
   date = this.builder.date.bind(this.builder)
   time = this.builder.time.bind(this.builder)

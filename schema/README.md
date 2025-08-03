@@ -43,6 +43,7 @@ All your favorite column types with intuitive syntax:
   @boolean    'published', false      # Boolean with default
   @decimal    'price', 10, 2          # Decimal(10,2) - exact numeric
   @float      'rating'                # Float - standard precision, no size needed
+  @double     'latitude'              # Double - double precision, no size needed
   @json       'metadata', {}          # JSON with default
 
   # Date/time types
