@@ -9,7 +9,7 @@ Welcome to the **Rip multilanguage universal runtime** documentation suite! This
 ## 📚 Table of Contents
 
 ### 🚀 Getting Started
-- [Quickstart](./quickstart.md) — How to install and run your first Rip program
+- **[Main README](../README.md#-getting-started)** — Installation and quickstart guide
 - [How It Works](./how-it-works.md) — High-level overview of the platform
 
 ### 🌐 Rip Application Server
@@ -34,7 +34,7 @@ Welcome to the **Rip multilanguage universal runtime** documentation suite! This
 ### 💡 Advanced & Technical
 - [Technical Insights](./technical-insights.md) — Deep technical notes and advanced topics
 - [Brand Assets](./brand-assets.md) — Logos, branding, and usage guidelines
-- [Language Enhancements](./language-enhancements.md) — Rip improvements over CoffeeScript
+- **[Language Enhancements](../README.md#-language-enhancements)** — Rip improvements over CoffeeScript
 
 ---
 
