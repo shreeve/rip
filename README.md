@@ -809,7 +809,7 @@ These print to the console and make it easier to understand grammar behavior.
 ## Documentation
 
 For detailed technical information about all enhancements and optimizations, see:
-**[ENHANCEMENTS.md](ENHANCEMENTS.md)** - Complete development history with 22 major improvements
+
 
 ## Theory & Implementation
 
@@ -970,7 +970,7 @@ curl -k https://localhost:3443  # if using HTTPS
 
 - **[Server README](server/README.md)** - Complete usage guide
 - **[Architecture Deep Dive](server/architecture.md)** - Technical implementation details
-- **[Production SSL Guide](server/production-ssl.md)** - Enterprise certificate setup
+
 - **[Examples](server/examples/)** - Working application samples
 
 

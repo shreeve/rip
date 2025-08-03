@@ -148,9 +148,7 @@ Social Media:
 ```
 
 ## Related Docs
-- [README](../README.md) - Project overview
-- [Future Roadmap](./future-roadmap.md) - Long-term vision
-- [Quickstart](./quickstart.md) - Getting started
+- [README](README.md) - Project overview
 
 ---
 
