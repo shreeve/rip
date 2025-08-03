@@ -16,7 +16,7 @@ export default Schema ->
     @date      'AdjDate!', ["0001-01-01"]                     # Date with array default
     @float     'AdjAmt!', 53, [0.0]                           # Float with precision and default
     @text      'AdjNote'                                      # Optional text
-    @timestamp 'SecDateTEdit!', [-> { "CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP" }] # Lambda default
+    @timestamp 'SecDateTEdit!'                                       # Timestamp field
     @boolean   'RteNasCan'                                    # Optional boolean
     @time      'StartTime!', ["2000-01-01 00:00:00"]          # Time field
 
@@ -104,7 +104,7 @@ export default Schema ->
   # Soft deletes and audit fields
   @table 'audit_logs', ->
     @bigint    'UserNum!'
-    @datetime  'DateTStamp!', [-> { "CURRENT_TIMESTAMP" }]
+    @datetime  'DateTStamp!'
     @string    'TableName!', 50
     @bigint    'FKey!'
     @integer   'FKeyType!', 1
@@ -142,3 +142,76 @@ export default Schema ->
     @binary    'FileData', size: 'long'
 
     @index     ['AttachableType', 'AttachableId'], name: 'polymorphic'
+
+  # JSON fields for flexible data storage
+  @table 'configurations', ->
+    @string    'Key!', 50
+    @json      'Value!', [{}]          # JSON with empty object default
+    @json      'Metadata'              # Optional JSON field
+    @string    'Category!', 50
+    @timestamps()
+    
+    @index     'Key', unique: true
+    @index     'Category'
+
+  # Table with various JSON use cases
+  @table 'events', ->
+    @string    'EventType!', 50
+    @json      'Payload!', [{}]        # Event data
+    @json      'Headers', [{}]         # HTTP headers, etc
+    @json      'Context'               # Optional context
+    @json      'Tags', [[]]            # Array of tags
+    @datetime  'OccurredAt!'
+    @timestamps()
+    
+    @index     'EventType'
+    @index     'OccurredAt'
+
+  # Mixed column types including new ones
+  @table 'documents', ->
+    @string    'Title!', 255
+    @text      'Content!'
+    @json      'Metadata!', [{ version: 1, draft: true }]  # Complex default
+    @binary    'Attachment'
+    @string    'MimeType', 100
+    @integer   'Version!', [1]
+    @boolean   'IsPublished!', false
+    @date      'PublishedDate'
+    @time      'PublishTime'
+    @timestamps()
+    
+    @index     'Title'
+    @index     ['IsPublished', 'PublishedDate']
+
+  # Table showcasing all field types
+  @table 'kitchen_sink', ->
+    # Text types
+    @string    'StringField', 100
+    @text      'TextField'
+    @email     'EmailField!'
+    
+    # Numeric types
+    @integer   'IntField', 4
+    @bigint    'BigIntField'
+    @float     'FloatField', 53
+    @decimal   'DecimalField', 10, 2
+    
+    # Date/Time types
+    @date      'DateField'
+    @time      'TimeField'
+    @datetime  'DateTimeField'
+    @timestamp 'TimestampField'
+    
+    # Binary and JSON
+    @binary    'BinaryField', size: 'medium'
+    @json      'JsonField', [{ key: "value" }]
+    
+    # Boolean
+    @boolean   'BoolField', true
+    
+    @timestamps()
+    
+    # Various index patterns
+    @index     'EmailField', unique: true
+    @index     ['DateField', 'TimeField']
+    @index     'TextField', 50  # Index with length limit
