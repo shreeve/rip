@@ -1,5 +1,39 @@
 ## Changelog
 
+### v3.0.0 - August 3, 2025 - 🎯 **Flexible Arguments & Pure TypeScript**
+
+**🚀 Pure TypeScript Implementation:**
+* Eliminated all shell scripts - 100% TypeScript/Bun
+* Fixed Bun.spawn() issues completely
+* No more exec chains or environment problems
+* Modern, maintainable codebase
+
+**🎯 Flexible Argument System:**
+* Arguments can be provided in ANY order!
+* Smart type detection (ports, paths, certificates, w:, r:)
+* Sensible defaults for everything
+* Examples: `rip-server 8080 w:5`, `rip-server prod ./api`, `rip-server w:10 r:100 3443`
+
+**📋 Configuration File Support:**
+* package.json: `{ "rip-server": { "workers": 5, "requests": 100 } }`
+* bunfig.toml: `[rip-server]` section
+* Command line arguments override file configs
+
+**🔒 Enhanced HTTPS Support:**
+* Auto-generates self-signed certificates when needed
+* Just specify port 3443 or use prod mode
+* Provide your own certs in any order: `rip-server cert.pem key.pem`
+
+**⚡ Simplified Commands:**
+* Removed background/foreground modes (always foreground)
+* Use systemd/Docker/PM2 for production process management
+* Cleaner, more intuitive command structure
+
+**Breaking Changes:**
+* Shell scripts removed (start.sh, stop.sh, test.sh)
+* Background mode removed
+* Old positional argument syntax deprecated
+
 ### v2.0.0 - August 3, 2025 - 🚀 **API-Rip: HTTPS-by-Default Revolution**
 
 **🔒 HTTPS-by-Default Architecture:**

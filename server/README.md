@@ -38,26 +38,30 @@ A production-ready replacement for nginx + unicorn + ruby that combines:
 # Install globally (recommended)
 sudo ln -sf /path/to/server/rip-server.ts /usr/local/bin/rip-server
 
-# Start development server
-rip-server              # Uses current directory
-rip-server dev ./api    # Specific app directory
+# Flexible argument syntax - provide options in ANY order!
+rip-server                          # Dev mode, current directory, defaults
+rip-server 8080                     # Dev mode on port 8080
+rip-server prod                     # Production mode
+rip-server ./api                    # Specific app directory
+rip-server w:5 r:100                # 5 workers, 100 requests each
+rip-server cert.pem key.pem         # HTTPS with your certificates
+rip-server 3443                     # HTTPS on port 3443 (auto-generates cert)
 
-# Production mode
-rip-server prod         # Production server
+# Mix and match in any order!
+rip-server prod 8080 w:10           # Production, port 8080, 10 workers
+rip-server ./api w:5 r:50 9000      # Custom everything
+rip-server key.pem cert.pem prod    # HTTPS production (order doesn't matter!)
 
 # Management commands
-rip-server stop         # Stop all processes
-rip-server test         # Run test suite
-rip-server help         # Show help
+rip-server stop                     # Stop all processes
+rip-server test                     # Run test suite
+rip-server help                     # Show help
 
-# HTTPS Support (optional)
-rip-server dev ./api 3443 cert.pem key.pem
-
-# Or use npm scripts from server directory
-bun run dev            # Development mode
-bun run start          # Production mode
-bun run stop           # Stop all processes
-bun run test           # Run tests
+# Configuration files (optional)
+# package.json: { "rip-server": { "workers": 5, "requests": 100 } }
+# bunfig.toml:  [rip-server]
+#               workers = 5
+#               requests = 100
 ```
 
 ## 📊 Request Logging

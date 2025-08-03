@@ -1,5 +1,12 @@
 # 🔒 Using Production SSL Certificates
 
+> **Note**: With rip-server v3.0+, you can provide certificates in any order:
+> ```bash
+> rip-server cert.pem key.pem prod    # Any order!
+> rip-server prod 3443 key.pem cert.pem w:10
+> rip-server /etc/ssl/cert.pem /etc/ssl/key.pem
+> ```
+
 **Drop in your own SSL certificates for production use**
 
 The Rip Application Server fully supports existing SSL certificates from trusted Certificate Authorities (CAs) like Let's Encrypt, DigiCert, Comodo, etc.

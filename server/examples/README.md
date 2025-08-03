@@ -9,12 +9,17 @@ These examples show the capabilities of the Rip Application Server.
 - Shows worker information
 - Demonstrates hot reload
 
-**Usage:**
+**Usage (flexible arguments in ANY order!):**
 ```bash
+# From server directory
+rip-server examples/simple              # Basic start
+rip-server examples/simple 8080         # Custom port
+rip-server w:5 examples/simple          # 5 workers
+rip-server examples/simple prod w:10    # Production with 10 workers
+
+# Or traditional npm scripts from example directory
 cd simple
-bun run dev       # Development with HTTPS + HTTP (auto-generates certificates)
-bun run dev:http  # Development HTTP-only mode
-bun run start     # Production HTTPS + HTTP
+bun run dev
 ```
 
 ### `api/` - Advanced API Example
@@ -23,12 +28,17 @@ bun run start     # Production HTTPS + HTTP
 - In-memory data store
 - Worker stats
 
-**Usage:**
+**Usage (flexible arguments in ANY order!):**
 ```bash
-cd api
-bun run dev       # Development with HTTPS + HTTP (auto-generates certificates)
-curl -k https://localhost:3443/users  # Test HTTPS (default)
-curl http://localhost:3000/users      # Test HTTP (fallback)
+# From server directory
+rip-server examples/api                 # Basic start
+rip-server examples/api 3443            # HTTPS (auto-generates cert)
+rip-server examples/api w:5 r:50        # 5 workers, 50 requests each
+rip-server cert.pem key.pem examples/api # With your certificates
+
+# Test endpoints
+curl http://localhost:3000/users        # HTTP
+curl -k https://localhost:3443/users    # HTTPS (if configured)
 ```
 
 ## 🔒 HTTPS by Default

@@ -141,17 +141,22 @@ rip-server/
 
 ## 🧪 Getting Started
 
-1. **Start the server:**
+1. **Start the server (flexible arguments in ANY order):**
    ```bash
-   cd rip-server
-   bun run dev examples/simple
+   # Simple start
+   rip-server examples/simple
+
+   # With options (any order!)
+   rip-server w:5 8080 examples/simple
+   rip-server examples/simple prod w:10 r:100
+   rip-server 3443 examples/simple  # HTTPS with auto-cert
    ```
 
 2. **Test hot reload:**
    - Edit `examples/simple/index.rip`
    - Save the file
    - Watch workers gracefully restart
-   - Test: `curl http://localhost:3000`
+   - Test: `curl http://localhost:3000` (or your custom port)
 
 3. **Performance test:**
    ```bash

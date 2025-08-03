@@ -15,5 +15,9 @@
     "@hono/zod-validator": "^0.7.2",
     "drizzle-orm": "^0.44.4",
     "zod": "^4.0.14"
+  },
+  "rip-server": {
+    "workers": 4,
+    "requests": 20
   }
 }
