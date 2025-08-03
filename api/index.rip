@@ -30,5 +30,23 @@ app.get '/info', (c) ->
     runtime: 'Bun'
     worker: process.pid
 
-# Export the app for rip-server to use
-export default app
+# Determine what to export based on context
+exportValue = if import.meta.main
+  # Running directly - start the server
+  console.log "🚀 Starting Rip API Server..."
+
+  server = Bun.serve({
+    port: 3000
+    fetch: app.fetch.bind(app)
+  })
+
+  console.log "📡 Rip API Server running at http://localhost:#{server.port}"
+
+  # Export simple object to prevent Bun auto-server detection
+  { message: "Server started manually" }
+else
+  # Being imported by rip-server - export the Hono app
+  app
+
+# Single export statement at top level
+export default exportValue

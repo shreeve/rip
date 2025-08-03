@@ -14,7 +14,7 @@
 
 import { watch } from "fs";
 import { join } from "path";
-import { spawn } from "child_process";
+// Using Bun.spawn instead of Node.js child_process
 
 // Configuration
 const managerId = parseInt(process.argv[2] ?? '0');
@@ -50,18 +50,18 @@ const spawnWorker = async (workerId: number): Promise<Worker> => {
     // Socket didn't exist, that's fine
   }
 
-  // Use absolute path to bun executable
-  const bunPath = '/Users/shreeve/.bun/bin/bun';
-
-  const workerProcess = spawn(bunPath, [
+  // Use Bun's subprocess API with explicit stdio configuration
+  const workerProcess = Bun.spawn([
+    "bun",
     join(__dirname, "worker.ts"),
     workerId.toString(),
     maxRequestsPerWorker.toString(),
     appDirectory
   ], {
-    stdio: "inherit",
+    stdout: "inherit",
+    stderr: "inherit",
+    stdin: "inherit",
     cwd: appDirectory,
-    shell: false, // No shell
     env: process.env
   });
 
@@ -72,10 +72,10 @@ const spawnWorker = async (workerId: number): Promise<Worker> => {
     socketPath
   };
 
-  // Handle worker exit (Node.js child_process API)
-  workerProcess.on('exit', (code) => {
+    // Handle worker exit (Bun.spawn API)
+  workerProcess.exited.then(({ code }) => {
     if (!isShuttingDown) {
-      const exitCode = code !== null ? code : 0;
+      const exitCode = code !== undefined ? code : 0;
       console.log(`[${getTimestamp()}              ] W${workerId + 1} exited (code ${exitCode}) - respawning...`);
 
       // Staggered restart delays to prevent all workers being down simultaneously
@@ -102,8 +102,8 @@ const gracefulRestartWorker = async (workerId: number) => {
 
   console.log(`[${getTimestamp()}              ] M${managerNum} graceful restart W${workerId + 1}...`);
 
-  // Send SIGTERM for graceful shutdown (Node.js child_process API)
-  worker.process.kill('SIGTERM');
+  // Send SIGTERM for graceful shutdown (Bun.spawn API)
+  worker.process.kill("SIGTERM");
 
   // Wait for exit, then spawn will handle restart automatically
   // The worker will finish current requests before shutting down
@@ -192,7 +192,7 @@ const setupGracefulShutdown = () => {
     // Send SIGTERM to all workers quietly
     workers.forEach((worker, id) => {
       if (worker?.process) {
-        worker.process.kill('SIGTERM');
+        worker.process.kill("SIGTERM");
       }
     });
 
