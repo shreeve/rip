@@ -14,7 +14,7 @@ export default Schema ->
     @bigint    'PatNum!'                                      # Required bigint
     @datetime  'DateTimeLastActive!', ["0001-01-01 00:00:00"] # Array default
     @date      'AdjDate!', ["0001-01-01"]                     # Date with array default
-    @float     'AdjAmt!', 53, [0.0]                           # Float with precision and default
+    @float     'AdjAmt!', [0.0]                               # Float with default
     @text      'AdjNote'                                      # Optional text
     @timestamp 'SecDateTEdit!'                                       # Timestamp field
     @boolean   'RteNasCan'                                    # Optional boolean
@@ -80,7 +80,7 @@ export default Schema ->
     @integer   'SmallInt', 2       # 2 byte integer
     @integer   'RegularInt'        # Regular integer
     @bigint    'BigIntCol'         # Bigint
-    @float     'FloatCol', 53      # Float with precision
+    @float     'FloatCol'          # Float (single precision)
     @decimal   'DecimalCol', 10, 2 # Decimal with precision and scale
     @decimal   'MoneyCol', 19, 4   # Money-like decimal
 
@@ -193,7 +193,7 @@ export default Schema ->
     # Numeric types
     @integer   'IntField', 4
     @bigint    'BigIntField'
-    @float     'FloatField', 53
+    @float     'FloatField'
     @decimal   'DecimalField', 10, 2
 
     # Date/Time types
