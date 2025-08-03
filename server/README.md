@@ -35,11 +35,23 @@ A production-ready replacement for nginx + unicorn + ruby that combines:
 ## 🚀 Quick Start
 
 ```bash
-# Development (with hot reload)
-bun run dev
+# 🔒 HTTPS by Default (Recommended)
+bun run dev       # Development HTTPS + HTTP (auto-generates certificates)
+bun run start     # Production HTTPS + HTTP
 
-# Production
-bun run start
+# 📡 HTTP Only (when you specifically need it)
+bun run dev:http  # Development HTTP only
+bun run start:http # Production HTTP only
+
+# Foreground modes (see all logs)
+bun run dev:fg    # Development foreground (HTTPS + HTTP)
+bun run start:fg  # Production foreground (HTTPS + HTTP)
+
+# Testing
+bun run test      # Test HTTPS endpoint (default)
+bun run test:http # Test HTTP endpoint
+bun run health    # HTTPS health check (default)
+bun run health:http # HTTP health check
 
 # Custom configuration
 bun run server    # Just HTTP server
@@ -47,10 +59,55 @@ bun run manager   # Just process manager
 bun run worker    # Just worker process
 ```
 
+## 🔒 HTTPS by Default
+
+**HTTPS is now the default!** 🚀 Certificates are auto-generated on first run.
+
+```bash
+# Just run normally - HTTPS works automatically!
+bun run dev             # HTTPS + HTTP (certificates auto-generated)
+bun run start           # Production HTTPS + HTTP
+
+# Both servers start automatically:
+# 🔒 HTTPS: https://localhost:3443  (primary, secure)
+# 📡 HTTP:  http://localhost:3000   (fallback, compatibility)
+
+# Manual certificate generation (optional)
+./generate-ssl.sh       # If you want to pre-generate
+
+# HTTP-only mode (when you specifically need it)
+bun run dev:http        # Developers who need HTTP-only
+bun run start:http      # Legacy systems requiring HTTP
+```
+
+**Why HTTPS by Default?**
+- 🔒 **Security-first** development
+- 🌍 **Modern web standards** (HTTPS everywhere)
+- 🎯 **Production parity** (matches real deployment)
+- ⚡ **Zero configuration** (auto-generates certificates)
+
+### **🏭 Using Production SSL Certificates**
+
+Drop in your existing SSL certificates from trusted CAs:
+
+```bash
+# Let's Encrypt certificates
+./start.sh prod false /app 3443 /etc/letsencrypt/live/yourdomain.com/fullchain.pem /etc/letsencrypt/live/yourdomain.com/privkey.pem
+
+# Custom SSL certificates
+./start.sh prod false /app 3443 /path/to/your/cert.pem /path/to/your/key.pem
+
+# Update package.json for easy deployment
+"start:prod": "cd /Users/shreeve/Data/Code/rip/server && ./start.sh prod false /app 3443 /etc/ssl/certs/yourdomain.pem /etc/ssl/private/yourdomain.key"
+```
+
+**📖 See [production-ssl.md](production-ssl.md) for complete production SSL setup guide**
+
 ## ✨ Features
 
 - **🔥 Hot Reload** - .rip file changes trigger graceful worker restarts
 - **🎯 Sequential Processing** - One request per worker for perfect isolation
+- **🔒 HTTPS Support** - Native TLS/SSL with automatic HTTP + HTTPS servers
 - **🔄 Load Balancing** - Round-robin across multiple worker processes
 - **⚡ Auto Failover** - Dead workers replaced instantly
 - **🛡️ Graceful Shutdown** - Workers finish requests before restarting

@@ -33,10 +33,12 @@ Internet → server.ts → manager.ts → worker.ts (×N)
 This three-tier architecture provides clean separation of concerns:
 
 ### **🌐 server.ts** - HTTP Server and Load Balancer
-- Receives all HTTP requests on port 3000
+- **HTTPS by default on port 3443** (auto-generates certificates)
+- HTTP fallback on port 3000 for compatibility
 - Round-robin distributes to workers via Unix sockets
+- Intelligent 503 failover (busy worker → try next worker)
 - Automatic failover when workers fail
-- Health checks and metrics endpoints
+- Health checks and metrics endpoints on both protocols
 
 ### **🧠 manager.ts** - Process Manager
 - Spawns and monitors worker processes
@@ -46,8 +48,10 @@ This three-tier architecture provides clean separation of concerns:
 - Fault recovery and auto-restart
 
 ### **🔥 worker.ts** - Application Handlers
+- **Sequential processing** - one request per worker for perfect isolation
 - Load and run .rip applications
 - Handle HTTP requests via Unix sockets
+- Return 503 when busy (triggers intelligent server failover)
 - Graceful shutdown after request limits
 - Full .rip language transpilation support
 
@@ -75,23 +79,43 @@ Inter-process communication via Unix sockets provides:
 - **Automatic load balancing** across workers
 - **Memory leak prevention** (worker cycling)
 
+### **🔒 HTTPS by Default Design**
+Modern web development demands security-first thinking:
+- **HTTPS is the default** - no configuration required
+- **Auto-generates SSL certificates** for development
+- **HTTP only when explicitly requested** (dev:http, start:http)
+- **Both protocols available simultaneously** (HTTPS primary, HTTP fallback)
+- **Production parity** - same security model dev → production
+- **Zero-configuration security** - developers start secure from day one
+
+### **🎯 Sequential Processing Pattern**
+Each worker handles exactly one request at a time:
+- **Perfect isolation** - zero shared state between requests
+- **Predictable resource usage** - bounded memory and CPU per worker
+- **Erlang/WhatsApp-style reliability** - battle-tested pattern
+- **Easy debugging** - linear request flow, no async complexity
+- **Intelligent 503 failover** - busy worker triggers next worker attempt
+
 ## 🎯 Usage Patterns
 
 ```bash
-# Development (3 workers, hot reload active)
-bun run dev
+# 🔒 HTTPS by Default (Recommended)
+bun run dev       # Development: HTTPS + HTTP (auto-generates certificates)
+bun run start     # Production: HTTPS + HTTP (same architecture)
 
-# Production (8 workers, optimized for scale)
-bun run start
+# 📡 HTTP Only (when specifically needed)
+bun run dev:http  # Development: HTTP only
+bun run start:http # Production: HTTP only
 
-# Custom configuration
-./start.sh dev /path/to/your/app
-./start.sh prod /path/to/your/app
+# Foreground modes (see all logs)
+bun run dev:fg    # Development with verbose logging
+bun run start:fg  # Production with verbose logging
 
 # Monitoring
-bun run health    # Health check
-bun run metrics   # Performance metrics
-bun run test      # Test suite
+bun run health    # HTTPS health check (default)
+bun run health:http # HTTP health check
+bun run test      # HTTPS endpoint test (default)
+bun run test:http # HTTP endpoint test
 ```
 
 ## 📁 Project Structure
@@ -99,14 +123,17 @@ bun run test      # Test suite
 ```
 rip-server/
 ├── 🧠 manager.ts      # Process manager + hot reload
-├── 🌐 server.ts       # HTTP load balancer (port 3000)
-├── 🔥 worker.ts       # Application handlers
-├── 🚀 start.sh        # One-command startup (dev/prod)
+├── 🌐 server.ts       # HTTPS/HTTP load balancer (ports 3443/3000)
+├── 🔥 worker.ts       # Sequential request handlers
+├── 🚀 start.sh        # One-command startup (dev/prod + HTTPS support)
 ├── 🛑 stop.sh         # Graceful shutdown
 ├── 🧪 test.sh         # Complete test suite
+├── 🔐 generate-ssl.sh # SSL certificate generation utility
 ├── 📋 package.json    # Scripts & dependencies
 ├── ⚙️ bunfig.toml     # Rip transpiler config
 ├── 📖 README.md       # Usage documentation
+├── 🏗️ architecture.md # This file - technical deep dive
+├── 🔒 production-ssl.md # Production SSL certificate guide
 └── 🌟 examples/       # Working examples
     ├── simple/        # Basic Rip app
     └── api/           # Advanced REST API

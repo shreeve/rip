@@ -13,12 +13,33 @@
  *
  * This is the FRONT-END of the architecture - clients connect here.
  *
- * Usage: bun server.ts [port] [numWorkers]
+ * Usage: bun server.ts [port] [numWorkers] [httpsPort] [certPath] [keyPath]
  */
 
 // Configuration
 const port = parseInt(process.argv[2]) || 3000;
 const numWorkers = parseInt(process.argv[3]) || 3;
+const httpsPort = parseInt(process.argv[4]) || 3443;
+const certPath = process.argv[5]; // Optional: path to SSL certificate
+const keyPath = process.argv[6];  // Optional: path to SSL private key
+
+// HTTPS Configuration
+const httpsEnabled = certPath && keyPath;
+let cert: string | undefined;
+let key: string | undefined;
+
+if (httpsEnabled) {
+  try {
+    cert = await Bun.file(certPath).text();
+    key = await Bun.file(keyPath).text();
+    console.log(`🔒 [Server] HTTPS enabled with cert: ${certPath}`);
+  } catch (error) {
+    console.error(`❌ [Server] Failed to load HTTPS certificates: ${error}`);
+    console.error(`   Cert path: ${certPath}`);
+    console.error(`   Key path: ${keyPath}`);
+    process.exit(1);
+  }
+}
 
 // Generate worker socket paths
 const workerSocketPaths = Array.from({ length: numWorkers }, (_, i) =>
@@ -78,11 +99,9 @@ const handleHealthCheck = (req: Request) => {
 };
 
 /**
- * Main HTTP server with load balancing
+ * Shared request handler for both HTTP and HTTPS
  */
-const server = Bun.serve({
-  port,
-  async fetch(req) {
+const handleRequest = async (req: Request) => {
     totalRequests++;
 
     // Handle health check and metrics endpoints
@@ -159,8 +178,33 @@ const server = Bun.serve({
         }
       }
     );
-  },
+};
+
+/**
+ * Create HTTP and HTTPS servers
+ */
+const servers: any[] = [];
+
+// HTTP Server
+const httpServer = Bun.serve({
+  port,
+  fetch: handleRequest,
 });
+servers.push(httpServer);
+
+// HTTPS Server (if certificates provided)
+let httpsServer: any = null;
+if (httpsEnabled && cert && key) {
+  httpsServer = Bun.serve({
+    port: httpsPort,
+    fetch: handleRequest,
+    tls: {
+      cert,
+      key,
+    },
+  });
+  servers.push(httpsServer);
+}
 
 /**
  * Graceful shutdown
@@ -168,7 +212,12 @@ const server = Bun.serve({
 const gracefulShutdown = (signal: string) => {
   console.log(`\n👋 [Server] Received ${signal}, shutting down gracefully...`);
 
-  server.stop();
+  // Stop all servers
+  servers.forEach(server => {
+    if (server) {
+      server.stop();
+    }
+  });
 
   setTimeout(() => {
     console.log(`✅ [Server] Shutdown complete`);
@@ -180,11 +229,18 @@ process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 // Startup messages
-console.log(`🚀 Rip Server listening on http://localhost:${port}`);
+console.log(`🚀 Rip Server listening on:`);
+console.log(`   📡 HTTP:  http://localhost:${port}`);
+if (httpsEnabled) {
+  console.log(`   🔒 HTTPS: https://localhost:${httpsPort}`);
+}
 console.log(`📊 Load balancing across ${workerSocketPaths.length} workers`);
 console.log(`🏥 Health check: http://localhost:${port}/health`);
 console.log(`📈 Metrics: http://localhost:${port}/metrics`);
-console.log(`🌟 Server ready!`);
+if (httpsEnabled) {
+  console.log(`🔒 Secure endpoints: https://localhost:${httpsPort}/health, https://localhost:${httpsPort}/metrics`);
+}
+console.log(`🌟 Server ready! ${httpsEnabled ? '(HTTP + HTTPS)' : '(HTTP only)'}`);
 console.log(`\n🔗 Worker sockets:`);
 workerSocketPaths.forEach((path, i) => {
   console.log(`   Worker ${i}: ${path}`);

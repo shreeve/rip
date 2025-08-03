@@ -12,8 +12,9 @@ These examples show the capabilities of the Rip Application Server.
 **Usage:**
 ```bash
 cd simple
-bun run dev   # Development with hot reload
-bun run start # Production mode
+bun run dev       # Development with HTTPS + HTTP (auto-generates certificates)
+bun run dev:http  # Development HTTP-only mode
+bun run start     # Production HTTPS + HTTP
 ```
 
 ### `api/` - Advanced API Example
@@ -25,8 +26,23 @@ bun run start # Production mode
 **Usage:**
 ```bash
 cd api
-bun run dev   # Development with hot reload
-curl http://localhost:3000/users
+bun run dev       # Development with HTTPS + HTTP (auto-generates certificates)
+curl -k https://localhost:3443/users  # Test HTTPS (default)
+curl http://localhost:3000/users      # Test HTTP (fallback)
+```
+
+## 🔒 HTTPS by Default
+
+All examples now start with HTTPS by default:
+- **🚀 Auto-generates SSL certificates** on first run
+- **🔒 Primary endpoint: `https://localhost:3443`**
+- **📡 Fallback endpoint: `http://localhost:3000`**
+- **⚡ Zero configuration required**
+
+Use `-k` flag with curl for self-signed certificates:
+```bash
+curl -k https://localhost:3443    # HTTPS (default)
+curl http://localhost:3000        # HTTP (fallback)
 ```
 
 ## 🔥 Hot Reload Testing
@@ -35,23 +51,29 @@ curl http://localhost:3000/users
 2. Edit the `.rip` file (change a message)
 3. Save the file
 4. Watch the workers gracefully restart!
-5. Test: `curl http://localhost:3000`
+5. Test: `curl -k https://localhost:3443` (HTTPS) or `curl http://localhost:3000` (HTTP)
 
 ## 📊 Monitoring
 
-Each example includes monitoring endpoints:
+Each example includes monitoring endpoints on both protocols:
 
-- `GET /health` - Server health and stats
-- `GET /metrics` - Prometheus-style metrics
-- `GET /stats` - Worker-specific stats (if implemented)
+**HTTPS (default):**
+- `GET https://localhost:3443/health` - Server health and stats
+- `GET https://localhost:3443/metrics` - Prometheus-style metrics
+
+**HTTP (fallback):**
+- `GET http://localhost:3000/health` - Server health and stats
+- `GET http://localhost:3000/metrics` - Prometheus-style metrics
 
 ## 🧪 Load Testing
 
 ```bash
-# Light load test
-wrk -t4 -c10 -d30s http://localhost:3000
+# HTTPS load testing (default)
+wrk -t4 -c10 -d30s https://localhost:3443
+wrk -t12 -c100 -d60s https://localhost:3443
 
-# Heavy load test
+# HTTP load testing (fallback)
+wrk -t4 -c10 -d30s http://localhost:3000
 wrk -t12 -c100 -d60s http://localhost:3000
 ```
 
