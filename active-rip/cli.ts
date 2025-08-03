@@ -209,14 +209,6 @@ async function dbDrop() {
 
   console.log(`Tables to drop: ${[...tables].join(', ')}`)
 
-  console.log('\n⚠️  WARNING: This will DELETE ALL DATA!')
-  const answer = prompt('Are you sure? Type "yes" to confirm: ')
-  if (answer !== 'yes') {
-    console.log('❌ Cancelled')
-    sqlite.close()
-    process.exit(0)
-  }
-
   // Drop each table
   for (const table of tables) {
     try {
