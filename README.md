@@ -1,8 +1,6 @@
-<div align="center">
-  <img src="assets/logos/rip-icon-512wa.png" alt="Rip Logo" width="200">
-</div>
+<div align="center"><img src="/assets/logos/rip-icon-512wa.png" style="width:200px" alt="Rip Logo" /><br></div>
 
-# rip
+# Rip
 
 **A multilanguage universal runtime**
 
