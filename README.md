@@ -678,6 +678,56 @@ All algorithms are clearly commented and separated by phase, and the codebase is
 
 This ensures that rip is not only feature-rich and performant, but also correct and reliable for use with complex grammars and real-world language development.
 
+## 🚀 Rip Application Server
+
+The **Rip Application Server** is a revolutionary, Bun-powered multi-process HTTP server designed specifically for Rip applications. It combines the elegance of the Rip language with enterprise-grade server architecture.
+
+### ✨ **Key Features**
+
+- **🔥 Hot Reloading**: Automatic transpilation and restart on `.rip` file changes
+- **🔒 HTTPS by Default**: Auto-generates SSL certificates for secure development
+- **⚡ Multi-Process Architecture**: Server → Manager → Workers for maximum performance
+- **🎯 Sequential Processing**: Perfect request isolation with intelligent failover
+- **📊 Advanced Logging**: Microsecond-precision timing and comprehensive metrics
+- **🌐 Load Balancing**: Built-in round-robin distribution across worker processes
+- **🛡️ Graceful Shutdowns**: Zero-downtime deployments and restarts
+
+### 🏗️ **Architecture**
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   🌐 Server     │────│   🧠 Manager    │────│   🔥 Workers    │
+│ Load Balancer   │    │ Process Control │    │ Rip Apps (1-N)  │
+│ HTTPS + HTTP    │    │ File Watching   │    │ Sequential Proc │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
+
+### 🚀 **Quick Start**
+
+```bash
+# Create a new Rip application
+echo 'app = new (require "hono").Hono
+app.get "/", (c) -> c.text "Hello from Rip! 🚀"
+export default app' > index.rip
+
+# Start with HTTPS (auto-generates certificates)
+rip-server dev
+
+# Test your app
+curl -k https://localhost:3443
+```
+
+### 📖 **Documentation**
+
+- **[Server README](server/README.md)** - Complete usage guide
+- **[Architecture Deep Dive](server/architecture.md)** - Technical implementation details
+- **[Production SSL Guide](server/production-ssl.md)** - Enterprise certificate setup
+- **[Examples](server/examples/)** - Working application samples
+
+*The Rip Application Server: Where elegant code meets enterprise performance.* ⚡
+
+---
+
 ## License
 
 MIT © 2025 Steve Shreeve and Claude 4 Opus

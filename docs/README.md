@@ -12,6 +12,12 @@ Welcome to the **Rip multilanguage universal runtime** documentation suite! This
 - [Quickstart](./quickstart.md) — How to install and run your first Rip program
 - [How It Works](./how-it-works.md) — High-level overview of the platform
 
+### 🌐 Rip Application Server
+- **[Server Overview](../server/README.md)** — Complete Bun-powered server guide
+- **[Architecture Deep Dive](../server/architecture.md)** — Multi-process server internals
+- **[Production SSL Setup](../server/production-ssl.md)** — Enterprise HTTPS deployment
+- **[Working Examples](../server/examples/)** — Real applications and demos
+
 ### 🛠️ Core Concepts & Architecture
 - [Runtime Engine](./runtime-engine.md) — Deep dive into the universal parser runtime
 - [Grammar Authoring](./grammar-authoring.md) — Guide to creating new language packs and grammars
@@ -28,6 +34,7 @@ Welcome to the **Rip multilanguage universal runtime** documentation suite! This
 ### 💡 Advanced & Technical
 - [Technical Insights](./technical-insights.md) — Deep technical notes and advanced topics
 - [Brand Assets](./brand-assets.md) — Logos, branding, and usage guidelines
+- [Language Enhancements](./language-enhancements.md) — Rip improvements over CoffeeScript
 
 ---
 
