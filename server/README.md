@@ -59,6 +59,27 @@ bun run manager   # Just process manager
 bun run worker    # Just worker process
 ```
 
+## 📊 Request Logging
+
+**Beautiful, comprehensive request logs** for development and debugging:
+
+```
+[2025-08-03 14:30:15.123-08:00] W1.5 GET / → 200 plain 26b 3ms
+[2025-08-03 14:30:15.456-08:00] W2.3 GET /health → 200 plain 7b 1ms
+[2025-08-03 14:30:15.789-08:00] W3.1 GET /info → 200 json 248b 12ms
+```
+
+**📊 What Each Field Shows:**
+- `[2025-08-03 14:30:15.123-08:00]` - Full timestamp with timezone
+- `W1.5` - Worker 1, Request #5 (human-friendly 1-indexed)
+- `GET /health` - HTTP method + path
+- `→ 200` - Response status code
+- `plain` - Content type (shortened)
+- `7b` - Response size in bytes
+- `3ms` - Request duration
+
+**Perfect for monitoring, debugging, and performance analysis!** 🎯
+
 ## 🔒 HTTPS by Default
 
 **HTTPS is now the default!** 🚀 Certificates are auto-generated on first run.
