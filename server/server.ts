@@ -210,8 +210,6 @@ if (httpsEnabled && cert && key) {
  * Graceful shutdown
  */
 const gracefulShutdown = (signal: string) => {
-  console.log(`\n👋 [Server] Received ${signal}, shutting down gracefully...`);
-
   // Stop all servers
   servers.forEach(server => {
     if (server) {
@@ -220,7 +218,6 @@ const gracefulShutdown = (signal: string) => {
   });
 
   setTimeout(() => {
-    console.log(`✅ [Server] Shutdown complete`);
     process.exit(0);
   }, 1000);
 };

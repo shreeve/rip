@@ -169,14 +169,12 @@ const setupFileWatcher = () => {
  */
 const setupGracefulShutdown = () => {
   const shutdown = (signal: string) => {
-    console.log(`\n👋 [Manager] Received ${signal}, shutting down gracefully...`);
     isShuttingDown = true;
     fileWatchingEnabled = false;
 
-    // Send SIGTERM to all workers
+    // Send SIGTERM to all workers quietly
     workers.forEach((worker, id) => {
       if (worker?.process) {
-        console.log(`🛑 [Manager] Stopping worker ${id}...`);
         worker.process.kill("SIGTERM");
       }
     });
@@ -191,7 +189,6 @@ const setupGracefulShutdown = () => {
     Promise.all(
       workers.map(worker => worker?.process?.exited || Promise.resolve())
     ).then(() => {
-      console.log(`✅ [Manager] All workers stopped. Exiting.`);
       process.exit(0);
     });
   };

@@ -174,14 +174,11 @@ const main = async () => {
     if (isShuttingDown) return;
 
     isShuttingDown = true;
-    console.log(`👋 [Worker ${workerId}] Graceful shutdown: ${reason}`);
-
     // Stop accepting new requests
     server.stop(false); // false = don't force, wait for current requests
 
     // Exit after a delay to ensure cleanup
     setTimeout(() => {
-      console.log(`✅ [Worker ${workerId}] Shutdown complete`);
       process.exit(0);
     }, 100);
   };

@@ -105,6 +105,29 @@ if [ "$FOREGROUND" = "true" ]; then
     SERVER_PID=$!
 
     sleep 2
+
+    # Setup graceful shutdown handler for foreground mode
+    cleanup() {
+        echo ""
+        echo "🛑 Shutting down Rip Application Server..."
+        echo "⏳ Please wait for graceful shutdown..."
+
+        # Stop server first (stops accepting new requests)
+        if kill -TERM $SERVER_PID 2>/dev/null; then
+            wait $SERVER_PID 2>/dev/null
+        fi
+
+        # Then stop manager (stops workers)
+        if kill -TERM $MANAGER_PID 2>/dev/null; then
+            wait $MANAGER_PID 2>/dev/null
+        fi
+
+        echo "✅ Shutdown complete!"
+        exit 0
+    }
+
+    # Trap Ctrl-C and handle cleanup
+    trap cleanup SIGINT SIGTERM
 else
     # Background mode - quiet startup
     echo "🧠 Starting manager and workers..."
@@ -157,12 +180,14 @@ if [ "$FOREGROUND" = "true" ]; then
         echo ""
     fi
 
-    echo "💡 Press Ctrl-C to stop"
+    echo "🛑 Press Ctrl-C to stop"
     echo ""
-    echo "🌟 Server started successfully! 🚀"
+    echo "🌟 Server is ready for development!"
 
-    # Wait in foreground - logs will show, Ctrl-C will kill
-    wait
+    # Wait indefinitely until interrupted
+    while true; do
+        sleep 1
+    done
 else
     # Background mode - just success message
     # Quick health check to make sure it started
