@@ -68,7 +68,7 @@ const loadRipApplication = async () => {
     };
 
   } catch (error) {
-    console.error(`[${getTimestamp()}] ❌ W${workerNum} app load error:`, error);
+         console.error(`[${getTimestamp()}              ] ❌ W${workerNum} app load error:`, error);
 
     // Return error handler
     return {
@@ -109,7 +109,7 @@ const getTimestamp = () => {
 
       // 🎯 Sequential Processing: Only handle one request at a time
       if (requestInProgress) {
-        console.log(`[${getTimestamp()}] W${workerNum} busy - request queued`);
+                 console.log(`[${getTimestamp()}              ] W${workerNum} busy - request queued`);
         return new Response("Worker busy - perfect isolation in progress", {
           status: 503,
           headers: {
@@ -145,7 +145,7 @@ const getTimestamp = () => {
 
         // Check if worker should shut down
         if (requestsHandled >= maxRequests) {
-          console.log(`[${getTimestamp()}] W${workerNum} reached ${maxRequests} requests - shutting down`);
+                     console.log(`[${getTimestamp()}              ] W${workerNum} reached ${maxRequests} requests - shutting down`);
 
           // Schedule shutdown after this request completes
           setTimeout(() => {
@@ -156,7 +156,7 @@ const getTimestamp = () => {
         return response;
 
       } catch (error) {
-        console.error(`[${getTimestamp()}] ❌ W${workerNum} request error:`, error);
+                 console.error(`[${getTimestamp()}              ] ❌ W${workerNum} request error:`, error);
 
         return new Response(`Rip Worker ${workerNum} Error: ${error.message}`, {
           status: 500,
@@ -189,7 +189,7 @@ const getTimestamp = () => {
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM received'));
   process.on('SIGINT', () => gracefulShutdown('SIGINT received'));
 
-  console.log(`[${getTimestamp()}] W${workerNum} ready`);
+     console.log(`[${getTimestamp()}              ] W${workerNum} ready`);
 };
 
 // Start the worker

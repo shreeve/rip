@@ -36,7 +36,7 @@ let fileWatchingEnabled = true;
 const spawnWorker = async (workerId: number): Promise<Worker> => {
   const socketPath = `/tmp/rip_worker_${workerId}.sock`;
 
-  console.log(`[${getTimestamp()}] W${workerId + 1} starting...`);
+  // Start worker silently
 
   // Clean up any existing socket
   try {
@@ -112,7 +112,7 @@ const getTimestamp = () => {
 };
 
 const gracefulRestartAllWorkers = async (reason: string) => {
-  console.log(`[${getTimestamp()}] ⚠️  ${reason} - restarting all workers`);
+  console.log(`[${getTimestamp()}            ] ⚠️  ${reason} - restarting all workers`);
 
   // Restart workers one by one to maintain availability
   for (let i = 0; i < workers.length; i++) {
@@ -208,7 +208,7 @@ const setupGracefulShutdown = () => {
  * Main initialization
  */
 const main = async () => {
-  console.log(`[${getTimestamp()}] Manager starting (${numWorkers} workers, ${maxRequestsPerWorker} req/worker)`);
+  console.log(`[${getTimestamp()}              ] Manager starting`);
 
   // Setup graceful shutdown first
   setupGracefulShutdown();
@@ -219,8 +219,8 @@ const main = async () => {
   // Setup file watching for hot reload
   setupFileWatcher();
 
-  console.log(`[${getTimestamp()}] 🔥 Hot reload active`);
-  console.log(`[${getTimestamp()}] 🚀 Server ready!`);
+  // Hot reload is active (shown in endpoint summary)
+  console.log(`[${getTimestamp()}              ] 🚀 Server ready!`);
 };
 
 // Fire it up!

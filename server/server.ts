@@ -32,7 +32,7 @@ if (httpsEnabled) {
   try {
     cert = await Bun.file(certPath).text();
     key = await Bun.file(keyPath).text();
-    console.log(`🔒 [Server] HTTPS enabled with cert: ${certPath}`);
+    // HTTPS cert loaded silently - details shown in start.sh
   } catch (error) {
     console.error(`❌ [Server] Failed to load HTTPS certificates: ${error}`);
     console.error(`   Cert path: ${certPath}`);
@@ -56,10 +56,12 @@ workerSocketPaths.forEach(path => {
 });
 
 /**
- * Health check endpoint
+ * Health check endpoint (with logging)
  */
 const handleHealthCheck = (req: Request) => {
   const url = new URL(req.url);
+  const startDate = new Date();
+  const startTime = startDate.getTime();
 
   if (url.pathname === '/health') {
     const stats = {
@@ -71,9 +73,20 @@ const handleHealthCheck = (req: Request) => {
       timestamp: new Date().toISOString()
     };
 
-    return new Response(JSON.stringify(stats, null, 2), {
+    const response = new Response(JSON.stringify(stats, null, 2), {
       headers: { 'Content-Type': 'application/json' }
     });
+
+    // Log the health check request
+    const duration = Date.now() - startTime;
+    const timestamp = startDate.toISOString().slice(0, 23).replace('T', ' ') +
+                     (startDate.getTimezoneOffset() <= 0 ? '+' : '-') +
+                     String(Math.abs(Math.floor(startDate.getTimezoneOffset() / 60))).padStart(2, '0') +
+                     ':' + String(Math.abs(startDate.getTimezoneOffset() % 60)).padStart(2, '0');
+
+    console.log(`[${timestamp}              ] SERVER /health → 200 json ${JSON.stringify(stats).length}B ${duration}ms`);
+
+    return response;
   }
 
   if (url.pathname === '/metrics') {
@@ -90,9 +103,20 @@ const handleHealthCheck = (req: Request) => {
       )
     ].join('\n');
 
-    return new Response(metrics, {
+    const response = new Response(metrics, {
       headers: { 'Content-Type': 'text/plain' }
     });
+
+    // Log the metrics request
+    const duration = Date.now() - startTime;
+    const timestamp = startDate.toISOString().slice(0, 23).replace('T', ' ') +
+                     (startDate.getTimezoneOffset() <= 0 ? '+' : '-') +
+                     String(Math.abs(Math.floor(startDate.getTimezoneOffset() / 60))).padStart(2, '0') +
+                     ':' + String(Math.abs(startDate.getTimezoneOffset() % 60)).padStart(2, '0');
+
+    console.log(`[${timestamp}              ] SERVER /metrics → 200 plain ${metrics.length}B ${duration}ms`);
+
+    return response;
   }
 
   return null; // Not a health/metrics request
@@ -221,7 +245,11 @@ const handleRequest = async (req: Request) => {
             .replace('image/', 'img/')
             .substring(0, 8);
 
-          console.log(`[${timestamp} ${workerFormatted} ${transmissionFormatted}] W${workerNum}.${workerRequestNum} ${method} ${path} → ${status} ${shortType} ${contentLength}B`);
+                              // Pad timing info for consistent bracket alignment (timing inside brackets)
+          const paddedWorker = workerFormatted.padStart(6);       // "  2.2ms" or " 1.5ms"
+          const paddedTransmission = transmissionFormatted.padStart(6); // "  40µs" or " 120µs"
+
+          console.log(`[${timestamp} ${paddedWorker} ${paddedTransmission}] W${workerNum}.${workerRequestNum} ${method} ${path} → ${status} ${shortType} ${contentLength}B`);
         });
 
         // Worker available - return the response immediately
@@ -267,21 +295,31 @@ const handleRequest = async (req: Request) => {
 };
 
 /**
- * Create HTTP and HTTPS servers
+ * HTTP redirect handler (when HTTPS is primary)
+ */
+const handleHttpRedirect = (req: Request) => {
+  const url = new URL(req.url);
+  const httpsUrl = `https://localhost:${httpsPort}${url.pathname}${url.search}`;
+
+  return new Response(null, {
+    status: 302,
+    headers: {
+      'Location': httpsUrl,
+      'Cache-Control': 'no-cache'
+    }
+  });
+};
+
+/**
+ * Create servers
  */
 const servers: any[] = [];
 
-// HTTP Server
-const httpServer = Bun.serve({
-  port,
-  fetch: handleRequest,
-});
-servers.push(httpServer);
-
-// HTTPS Server (if certificates provided)
-let httpsServer: any = null;
 if (httpsEnabled && cert && key) {
-  httpsServer = Bun.serve({
+  // HTTPS mode: Primary HTTPS server + HTTP redirect server
+
+  // Primary HTTPS server (full functionality)
+  const httpsServer = Bun.serve({
     port: httpsPort,
     fetch: handleRequest,
     tls: {
@@ -290,6 +328,21 @@ if (httpsEnabled && cert && key) {
     },
   });
   servers.push(httpsServer);
+
+  // HTTP redirect server (302 redirects to HTTPS)
+  const httpRedirectServer = Bun.serve({
+    port,
+    fetch: handleHttpRedirect,
+  });
+  servers.push(httpRedirectServer);
+
+} else {
+  // HTTP-only mode (full functionality)
+  const httpServer = Bun.serve({
+    port,
+    fetch: handleRequest,
+  });
+  servers.push(httpServer);
 }
 
 /**
@@ -311,21 +364,4 @@ const gracefulShutdown = (signal: string) => {
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-// Startup messages
-console.log(`🚀 Rip Server listening on:`);
-console.log(`   📡 HTTP:  http://localhost:${port}`);
-if (httpsEnabled) {
-  console.log(`   🔒 HTTPS: https://localhost:${httpsPort}`);
-}
-console.log(`📊 Load balancing across ${workerSocketPaths.length} workers`);
-console.log(`🏥 Health check: http://localhost:${port}/health`);
-console.log(`📈 Metrics: http://localhost:${port}/metrics`);
-if (httpsEnabled) {
-  console.log(`🔒 Secure endpoints: https://localhost:${httpsPort}/health, https://localhost:${httpsPort}/metrics`);
-}
-console.log(`🌟 Server ready! ${httpsEnabled ? '(HTTP + HTTPS)' : '(HTTP only)'}`);
-console.log(`\n🔗 Worker sockets:`);
-workerSocketPaths.forEach((path, i) => {
-  console.log(`   Worker ${i}: ${path}`);
-});
-console.log(``);
+// Server startup (no console output - handled by start.sh)
