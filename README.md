@@ -15,7 +15,7 @@ A revolutionary universal parser platform that enables elegant programming acros
 ### 🎯 **Design Philosophy: The 4 C's**
 Everything in the Rip ecosystem follows four core principles, in order of importance:
 
-1. **Correct**: Accurate, reliable, and thoroughly tested
+1. **Correct** *(Most Important)*: Accurate, reliable, and thoroughly tested
    - *If the code doesn't work correctly, nothing else matters*
    - *Bugs and errors undermine trust and usability*
    - *This is the foundation everything else builds on*
