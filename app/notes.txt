@@ -1,0 +1,74 @@
+# Initialize project
+bun init
+
+# Web framework ecosystem together
+bun add hono @hono/cors @hono/logger @hono/compress @hono/timing @hono/zod-validator zod
+
+# Data & testing tools
+bun add @faker-js/faker drizzle-orm
+
+# Development tools
+bun add -d drizzle-kit
+
+# Recommended for TypeScript support
+bun add -d @types/bun typescript
+
+==
+
+/Users/shreeve/Data/Code/trust/lienstar/api-rip/
+├── db/
+│   └── schema.ts
+├── routes/
+│   └── lawfirms.coffee
+├── index.coffee
+├── drizzle.config.ts
+└── bunfig.toml
+
+==
+
+curl http://localhost:3000/lawfirms
+
+==[ index.rip ]==
+
+import { Database } from 'bun:sqlite'  # Built-in, no install needed!
+import { drizzle } from 'drizzle-orm/bun-sqlite'
+import { Hono } from 'hono'
+import { faker } from '@faker-js/faker'
+
+import { zValidator } from '@hono/zod-validator'
+import { z } from 'zod'
+
+# Create database connection
+db = new Database('app.db')
+orm = drizzle(db)
+
+app = new Hono
+db = new Database('app.db')
+orm = drizzle(db)
+
+export default app
+
+==
+
+export default ->
+  @createTable 'lawfirms', ->
+    @string   'name!', 50
+
+    @string   'address', 50
+    @string   'city', 50
+    @string   'state', 10
+    @string   'zip', 10
+
+    @string   'phone', 20
+    @string   'email', 50
+    @string   'fax', 20
+
+    @datetime 'created_at'
+    @datetime 'updated_at'
+
+    @index    'name'
+
+==
+
+https://github.com/faker-js/faker
+https://fakerjs.dev/
