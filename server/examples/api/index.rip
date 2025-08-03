@@ -19,7 +19,7 @@ app.use '*', (c, next) ->
 # API Routes
 app.get '/', (c) ->
   c.json
-    message: 'Revolutionary RIP API Server'
+    message: 'Revolutionary Rip API Server'
     version: '2.0.0'
     worker: process.pid
     endpoints: [

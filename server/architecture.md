@@ -1,12 +1,12 @@
-# 🚀 RIP Application Server - Architecture & Design
+# 🚀 Rip Application Server - Architecture & Design
 
 **Modern Bun-Powered Application Server Framework**
 
-This document explores the architecture and design philosophy behind the RIP Application Server - a unified solution that brings together the best aspects of modern application hosting.
+This document explores the architecture and design philosophy behind the Rip Application Server - a unified solution that brings together the best aspects of modern application hosting.
 
 ## 🤯 What This Solves
 
-The RIP Application Server addresses a common challenge: managing separate systems for development and production. Instead of juggling multiple tools:
+The Rip Application Server addresses a common challenge: managing separate systems for development and production. Instead of juggling multiple tools:
 
 - ❌ nginx (HTTP server/load balancer)
 - ❌ unicorn (process manager)
@@ -196,7 +196,7 @@ The development approach focused on solving real problems:
 
 ## 🚀 What This Enables
 
-The RIP Application Server provides a foundation for:
+The Rip Application Server provides a foundation for:
 - **Production deployments** with enterprise-grade reliability
 - **Rapid development** with instant feedback loops
 - **Simplified operations** (one system to learn and maintain)

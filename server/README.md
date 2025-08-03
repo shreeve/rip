@@ -1,4 +1,4 @@
-# 🚀 RIP Application Server
+# 🚀 Rip Application Server
 
 **Bun-Powered Application Server Framework**
 

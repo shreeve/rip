@@ -1,4 +1,4 @@
-# 🚀 RIP API Server
+# 🚀 Rip API Server
 # Simple Hono-based API that works seamlessly with rip-server
 
 import { Hono } from 'hono'
@@ -11,7 +11,7 @@ app.get '/', (c) ->
   c.json
     success: true
     timestamp: new Date().toISOString()
-    message: "🚀 RIP API has PERFECT LOGGING!"
+    message: "🚀 Rip API has PERFECT LOGGING!"
     server: "enterprise-grade-architecture"
 
 # Health check route (optional but good practice)
@@ -24,7 +24,7 @@ app.get '/health', (c) ->
 # API info route
 app.get '/info', (c) ->
   c.json
-    name: 'RIP API Server'
+    name: 'Rip API Server'
     version: '1.0.0'
     framework: 'Hono'
     runtime: 'Bun'

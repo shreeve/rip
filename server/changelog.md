@@ -1,6 +1,6 @@
 ## Changelog
 
-### v2.0.0 - August 3, 2025 - 🚀 **API-RIP: HTTPS-by-Default Revolution**
+### v2.0.0 - August 3, 2025 - 🚀 **API-Rip: HTTPS-by-Default Revolution**
 
 **🔒 HTTPS-by-Default Architecture:**
 * HTTPS is now the default for all development and production

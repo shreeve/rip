@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# 🚀 RIP Server Global Wrapper
-# Location-independent wrapper for the RIP Application Server
+# 🚀 Rip Server Global Wrapper
+# Location-independent wrapper for the Rip Application Server
 # Add this to your PATH for global access
 
 # Find the rip-server installation directory (script is now IN the server directory)
@@ -21,7 +21,7 @@ fi
 
 # Check if server files exist
 if [ ! -f "$RIP_SERVER_DIR/start.sh" ]; then
-    echo "❌ RIP Server components not found at: $RIP_SERVER_DIR"
+    echo "❌ Rip Server components not found at: $RIP_SERVER_DIR"
     echo "💡 Make sure this script is in the server directory with start.sh, stop.sh, etc."
     exit 1
 fi
@@ -38,7 +38,7 @@ case "${1:-help}" in
         exec "$RIP_SERVER_DIR/test.sh"
         ;;
     "help"|"-h"|"--help")
-        echo "🚀 RIP Application Server - Global Wrapper"
+        echo "🚀 Rip Application Server - Global Wrapper"
         echo ""
         echo "Usage:"
         echo "  rip-server start [mode] [foreground] [app_dir] [https_port] [cert_path] [key_path]"
