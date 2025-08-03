@@ -13,11 +13,27 @@ A revolutionary universal parser platform that enables elegant programming acros
 ## The Rip Ecosystem
 
 ### 🎯 **Design Philosophy: The 4 C's**
-Everything in the Rip ecosystem follows four core principles:
-- **Consistent**: Unified patterns and naming across all components
-- **Concise**: Minimal, elegant code without unnecessary complexity
-- **Correct**: Accurate, reliable, and thoroughly tested
-- **Clear**: Easy to understand, well-documented, and intuitive
+Everything in the Rip ecosystem follows four core principles, in order of importance:
+
+1. **Correct**: Accurate, reliable, and thoroughly tested
+   - *If the code doesn't work correctly, nothing else matters*
+   - *Bugs and errors undermine trust and usability*
+   - *This is the foundation everything else builds on*
+
+2. **Clear**: Easy to understand, well-documented, and intuitive
+   - *Even correct code is useless if no one can understand it*
+   - *Clear code is maintainable and extensible*
+   - *Good documentation enables adoption and contribution*
+
+3. **Consistent**: Unified patterns and naming across all components
+   - *Makes the codebase predictable and learnable*
+   - *Reduces cognitive load when moving between components*
+   - *Essential for team collaboration*
+
+4. **Concise**: Minimal, elegant code without unnecessary complexity
+   - *Important, but only after the other three are satisfied*
+   - *Premature optimization for brevity can harm clarity*
+   - *Elegance is the cherry on top, not the foundation*
 
 ### 🌍 **Universal Language Platform**
 - **rip executable**: A multilanguage universal runtime
