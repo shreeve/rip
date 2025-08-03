@@ -1,8 +1,6 @@
-# API Database Schema using rip-schema
-import { schema } from '../../schema/schema-builder-v2'
+import { schema as Schema } from '../../schema/schema-builder-v2'
 
-# Define the schema for our API
-tables = schema ->
+export default Schema ->
   @table 'lawfirms', ->
     @string   'name!', 100
     @string   'address', 100
@@ -10,8 +8,7 @@ tables = schema ->
     @string   'state', 2
     @string   'zip', 10
     @string   'phone', 20
-    @email    'email'
-    @string   'fax', 20
+    @email    'email!'
     @string   'website'
     @text     'notes'
     @boolean  'active', true
@@ -22,7 +19,3 @@ tables = schema ->
     @index    'name'
     @index    ['state', 'city']
     @index    'active'
-
-# Export the schema and tables
-export default tables
-export lawfirms = tables.lawfirms
