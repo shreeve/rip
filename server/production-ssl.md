@@ -3,7 +3,7 @@
 > **Note**: With rip-server v3.0+, you can provide certificates in any order:
 > ```bash
 > rip-server cert.pem key.pem prod    # Any order!
-> rip-server prod 3443 key.pem cert.pem w:10
+> rip-server prod https key.pem cert.pem w:10
 > rip-server /etc/ssl/cert.pem /etc/ssl/key.pem
 > ```
 
@@ -16,31 +16,46 @@ The Rip Application Server fully supports existing SSL certificates from trusted
 ### Method 1: Direct Command Line
 ```bash
 # Using your existing certificates
-./start.sh prod false /path/to/app 3443 /path/to/your/cert.pem /path/to/your/key.pem
+rip-server prod https /path/to/your/cert.pem /path/to/your/key.pem
 
 # Example with Let's Encrypt certificates
-./start.sh prod false /path/to/app 3443 /etc/letsencrypt/live/yourdomain.com/fullchain.pem /etc/letsencrypt/live/yourdomain.com/privkey.pem
+rip-server prod https /etc/letsencrypt/live/yourdomain.com/fullchain.pem /etc/letsencrypt/live/yourdomain.com/privkey.pem
+
+# Arguments in any order!
+rip-server /etc/ssl/cert.pem /etc/ssl/key.pem prod https ./app
 ```
 
-### Method 2: Update package.json Scripts
-```json
-{
-  "scripts": {
-    "start:prod": "cd /Users/shreeve/Data/Code/rip/server && ./start.sh prod false /path/to/app 3443 /etc/ssl/certs/yourdomain.com.pem /etc/ssl/private/yourdomain.com.key",
-    "start:prod:fg": "cd /Users/shreeve/Data/Code/rip/server && ./start.sh prod true /path/to/app 3443 /etc/ssl/certs/yourdomain.com.pem /etc/ssl/private/yourdomain.com.key"
+### Method 2: Symlink Your Certificates
+```bash
+# Create standard location
+mkdir -p ~/.rip-server/certs
+ln -s /etc/letsencrypt/live/yourdomain.com/fullchain.pem ~/.rip-server/certs/server.crt
+ln -s /etc/letsencrypt/live/yourdomain.com/privkey.pem ~/.rip-server/certs/server.key
+
+# Then just run
+rip-server prod https
   }
 }
 ```
 
-### Method 3: Environment Variables (Recommended for Production)
-```bash
-# Set environment variables
-export SSL_CERT_PATH="/etc/letsencrypt/live/yourdomain.com/fullchain.pem"
-export SSL_KEY_PATH="/etc/letsencrypt/live/yourdomain.com/privkey.pem"
-export APP_PATH="/path/to/your/app"
+### Method 3: Configuration Files
+```json
+// package.json
+{
+  "rip-server": {
+    "workers": 10,
+    "requests": 100,
+    "protocol": "https",
+    "httpsPort": 443,
+    "certPath": "/etc/ssl/certs/server.crt",
+    "keyPath": "/etc/ssl/private/server.key"
+  }
+}
+```
 
-# Start with environment variables
-./start.sh prod false "$APP_PATH" 3443 "$SSL_CERT_PATH" "$SSL_KEY_PATH"
+Then just run:
+```bash
+rip-server prod
 ```
 
 ## 📋 Common Certificate Locations
@@ -52,7 +67,7 @@ CERT_PATH="/etc/letsencrypt/live/yourdomain.com/fullchain.pem"
 KEY_PATH="/etc/letsencrypt/live/yourdomain.com/privkey.pem"
 
 # Usage:
-./start.sh prod false /app 3443 "$CERT_PATH" "$KEY_PATH"
+rip-server prod https "$CERT_PATH" "$KEY_PATH"
 ```
 
 ### Custom SSL Directory
@@ -62,7 +77,7 @@ CERT_PATH="/opt/ssl/yourdomain.com/certificate.pem"
 KEY_PATH="/opt/ssl/yourdomain.com/private.key"
 
 # Usage:
-./start.sh prod false /app 3443 "$CERT_PATH" "$KEY_PATH"
+rip-server prod https "$CERT_PATH" "$KEY_PATH"
 ```
 
 ### Cloud Provider Certificates

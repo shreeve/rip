@@ -84,22 +84,22 @@ export default app
 # Navigate to your app directory
 cd my-rip-app
 
-# Start with HTTPS (auto-generates certificates)
-bun run dev
+# Start the server (HTTP by default)
+rip-server
 
-# Or start with HTTP only
-bun run dev:http
+# Or start with HTTPS
+rip-server https
 ```
 
 ### 3. **Test Your App**
 ```bash
-# Test HTTPS (default)
-curl -k https://localhost:3443
-curl -k https://localhost:3443/greet/Developer
-curl -k https://localhost:3443/health
-
-# Test HTTP (if using :http mode)
+# Test HTTP (default)
 curl http://localhost:3000
+curl http://localhost:3000/greet/Developer
+curl http://localhost:3000/health
+
+# Test HTTPS (if using https mode)
+curl -k https://localhost:3443
 ```
 
 ---

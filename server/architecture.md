@@ -33,7 +33,7 @@ Internet → server.ts → manager.ts → worker.ts (×N)
 This three-tier architecture provides clean separation of concerns:
 
 ### **🌐 server.ts** - HTTP Server and Load Balancer
-- **HTTPS by default on port 3443** (auto-generates certificates)
+- **Flexible protocol support** - HTTP, HTTPS, or both
 - HTTP fallback on port 3000 for compatibility
 - Round-robin distributes to workers via Unix sockets
 - Intelligent 503 failover (busy worker → try next worker)
@@ -79,14 +79,14 @@ Inter-process communication via Unix sockets provides:
 - **Automatic load balancing** across workers
 - **Memory leak prevention** (worker cycling)
 
-### **🔒 HTTPS by Default Design**
-Modern web development demands security-first thinking:
-- **HTTPS is the default** - no configuration required
-- **Auto-generates SSL certificates** for development
-- **HTTP only when explicitly requested** (dev:http, start:http)
-- **Both protocols available simultaneously** (HTTPS primary, HTTP fallback)
-- **Production parity** - same security model dev → production
-- **Zero-configuration security** - developers start secure from day one
+### **🔒 Flexible HTTPS Support**
+Modern web development with pragmatic security options:
+- **HTTP by default** - simple and fast for development
+- **Smart HTTPS modes** - quick, CA-based, or custom certificates
+- **Protocol flexibility** - http, https, or http+https
+- **Certificate Authority support** - one-time setup for trusted HTTPS
+- **Production ready** - bring your own certificates
+- **Zero-configuration option** - auto-generates certs when needed
 
 ### **🎯 Sequential Processing Pattern**
 Each worker handles exactly one request at a time:
@@ -100,7 +100,7 @@ Each worker handles exactly one request at a time:
 
 ```bash
 # 🔒 HTTPS by Default (Recommended)
-bun run dev       # Development: HTTPS + HTTP (auto-generates certificates)
+bun run dev       # Development mode (defaults to HTTP)
 bun run start     # Production: HTTPS + HTTP (same architecture)
 
 # 📡 HTTP Only (when specifically needed)
@@ -125,10 +125,7 @@ rip-server/
 ├── 🧠 manager.ts      # Process manager + hot reload
 ├── 🌐 server.ts       # HTTPS/HTTP load balancer (ports 3443/3000)
 ├── 🔥 worker.ts       # Sequential request handlers
-├── 🚀 start.sh        # One-command startup (dev/prod + HTTPS support)
-├── 🛑 stop.sh         # Graceful shutdown
-├── 🧪 test.sh         # Complete test suite
-├── 🔐 generate-ssl.sh # SSL certificate generation utility
+├── 🚀 rip-server.ts   # Pure TypeScript CLI with flexible args
 ├── 📋 package.json    # Scripts & dependencies
 ├── ⚙️ bunfig.toml     # Rip transpiler config
 ├── 📖 README.md       # Usage documentation

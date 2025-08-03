@@ -685,7 +685,7 @@ The **Rip Application Server** is a revolutionary, Bun-powered multi-process HTT
 ### ✨ **Key Features**
 
 - **🔥 Hot Reloading**: Automatic transpilation and restart on `.rip` file changes
-- **🔒 HTTPS by Default**: Auto-generates SSL certificates for secure development
+- **🔒 Flexible HTTPS**: Smart certificate management with CA support
 - **⚡ Multi-Process Architecture**: Server → Manager → Workers for maximum performance
 - **🎯 Sequential Processing**: Perfect request isolation with intelligent failover
 - **📊 Advanced Logging**: Microsecond-precision timing and comprehensive metrics
@@ -710,11 +710,15 @@ echo 'app = new (require "hono").Hono
 app.get "/", (c) -> c.text "Hello from Rip! 🚀"
 export default app' > index.rip
 
-# Start with HTTPS (auto-generates certificates)
+# Start the server (HTTP by default)
 rip-server dev
 
+# Or with HTTPS
+rip-server https
+
 # Test your app
-curl -k https://localhost:3443
+curl http://localhost:3000
+curl -k https://localhost:3443  # if using HTTPS
 ```
 
 ### 📖 **Documentation**
