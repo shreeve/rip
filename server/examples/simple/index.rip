@@ -1,0 +1,40 @@
+# Simple RIP Application Example
+# This demonstrates the revolutionary server with a basic Rip app
+
+import { Hono } from 'hono'
+
+app = new Hono
+
+# Basic route
+app.get '/', (c) ->
+  c.text 'Hello from Revolutionary RIP Server! 🚀⚡'
+
+# Dynamic route with worker info
+app.get '/info', (c) ->
+  c.json
+    message: 'Revolutionary RIP Application Server'
+    worker: process.env.WORKER_ID || 'unknown'
+    requests: process.env.REQUESTS_HANDLED || 0
+    uptime: process.uptime()
+    timestamp: new Date().toISOString()
+
+# Health check route
+app.get '/ping', (c) ->
+  c.text 'pong'
+
+# Simulate some work
+app.get '/work/:seconds', (c) ->
+  seconds = parseInt(c.req.param('seconds')) || 1
+
+  # Simulate work
+  start = Date.now()
+  while Date.now() - start < seconds * 1000
+    # Busy wait
+
+  c.json
+    message: "Worked for #{seconds} seconds"
+    worker: process.env.WORKER_ID || 'unknown'
+    duration: Date.now() - start
+
+# Export the app for the worker to use
+export default app

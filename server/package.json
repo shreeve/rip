@@ -1,0 +1,46 @@
+{
+  "name": "rip-application-server",
+  "version": "2.0.0",
+  "description": "Revolutionary Bun-powered application server - the future of web servers!",
+  "main": "server.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "./start.sh dev",
+    "start": "./start.sh prod",
+    "stop": "./stop.sh",
+    "server": "bun server.ts",
+    "manager": "bun manager.ts",
+    "worker": "bun worker.ts",
+    "test": "curl -s http://localhost:3000",
+    "health": "curl -s http://localhost:3000/health | jq .",
+    "metrics": "curl -s http://localhost:3000/metrics",
+    "load-test": "wrk -t4 -c10 -d10s http://localhost:3000",
+    "stress-test": "wrk -t12 -c100 -d60s http://localhost:3000"
+  },
+  "keywords": [
+    "rip",
+    "application-server",
+    "bun",
+    "http",
+    "load-balancer",
+    "unix-sockets",
+    "hot-reload",
+    "high-performance",
+    "revolutionary"
+  ],
+  "author": "RIP Ecosystem",
+  "license": "MIT",
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rip-ecosystem/application-server"
+  },
+  "dependencies": {
+    "hono": "^4.8.12"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}
