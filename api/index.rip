@@ -30,6 +30,48 @@ app.get '/info', (c) ->
     runtime: 'Bun'
     worker: process.pid
 
+# Lawfirms routes (temporarily inline until we figure out imports)
+import { z } from 'zod'
+import { zValidator } from '@hono/zod-validator'
+import { faker } from '@faker-js/faker'
+import { db, lawfirmsTable } from './db/schema.ts'
+import { eq } from 'drizzle-orm'
+
+# Create a sub-app for lawfirms
+lawfirmsApp = new Hono
+
+# Schema for creating/updating a law firm
+lawfirmSchema = z.object
+  name: z.string().min(1, "Name is required")
+  email: z.string().email().optional()
+  phone: z.string().optional()
+  address: z.string().optional()
+  city: z.string().optional()
+  state: z.string().optional()
+  zip: z.string().optional()
+
+# GET all law firms
+lawfirmsApp.get '/', (c) ->
+  firms = await db.select().from(lawfirmsTable).all()
+  c.json firms
+
+# POST - Generate random law firm with faker
+lawfirmsApp.post '/generate', (c) ->
+  firmData =
+    name: faker.company.name() + " Law Firm"
+    email: faker.internet.email()
+    phone: faker.phone.number()
+    address: faker.location.streetAddress()
+    city: faker.location.city()
+    state: faker.location.state({ abbreviated: true })
+    zip: faker.location.zipCode()
+
+  result = await db.insert(lawfirmsTable).values(firmData).returning().get()
+  c.json result, 201
+
+# Mount the lawfirms routes
+app.route '/api/lawfirms', lawfirmsApp
+
 # Determine what to export based on context
 exportValue = if import.meta.main
   # Running directly - start the server
