@@ -1,5 +1,5 @@
 # API Database Schema using ActiveRip
-import { schema } from '../../active-rip'
+import { schema } from '../../active-rip/schema-builder-v2'
 
 # Define the schema for our API
 tables = schema ->

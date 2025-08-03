@@ -14,7 +14,7 @@ const sqlite = new Database(dbPath)
 // Create Drizzle instance with our ActiveRip schema
 export const db = drizzle(sqlite, { schema })
 
-// Export the lawfirms table from our schema
+// Export the lawfirms table from our ActiveRip schema
 export const lawfirmsTable = schema.lawfirms
 
 // Initialize the database table
