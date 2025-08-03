@@ -1,4 +1,7 @@
 # Migration system for Rip Schema
+# NOTE: This is a concept/prototype - not yet implemented
+# See README.md for the roadmap
+
 import { schema } from './builder'
 
 # Migration DSL
