@@ -2,6 +2,7 @@
 
 # 🧪 Rip Server Test Suite
 # Comprehensive testing of the server architecture
+# Location-independent - can be run from anywhere
 
 echo "🧪 Testing Rip Application Server"
 echo "=============================================="

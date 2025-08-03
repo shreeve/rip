@@ -1,0 +1,19 @@
+{
+  "name": "app",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "^1.2.19",
+    "drizzle-kit": "^0.31.4"
+  },
+  "peerDependencies": {
+    "typescript": "^5.9.2"
+  },
+  "dependencies": {
+    "@faker-js/faker": "^9.9.0",
+    "@hono/zod-validator": "^0.7.2",
+    "drizzle-orm": "^0.44.4",
+    "zod": "^4.0.14"
+  }
+}

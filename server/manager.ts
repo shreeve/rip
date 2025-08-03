@@ -14,11 +14,14 @@
 
 import { watch } from "fs";
 import { join } from "path";
+import { spawn } from "child_process";
 
 // Configuration
-const numWorkers = parseInt(process.argv[2]) || 3;
-const maxRequestsPerWorker = parseInt(process.argv[3]) || (process.env.NODE_ENV === "production" ? 1000 : 10);
-const appDirectory = process.argv[4] || process.cwd();
+const managerId = parseInt(process.argv[2] ?? '0');
+const managerNum = managerId + 1; // Human-friendly manager number (1-indexed)
+const numWorkers = parseInt(process.argv[3]) || 3;
+const maxRequestsPerWorker = parseInt(process.argv[4]) || (process.env.NODE_ENV === "production" ? 1000 : 10);
+const appDirectory = process.argv[5] || process.cwd();
 
 // Worker tracking
 interface Worker {
@@ -47,17 +50,19 @@ const spawnWorker = async (workerId: number): Promise<Worker> => {
     // Socket didn't exist, that's fine
   }
 
-  const workerProcess = Bun.spawn([
-    process.execPath, // Use full path to current bun executable
+  // Use absolute path to bun executable
+  const bunPath = '/Users/shreeve/.bun/bin/bun';
+
+  const workerProcess = spawn(bunPath, [
     join(__dirname, "worker.ts"),
     workerId.toString(),
     maxRequestsPerWorker.toString(),
     appDirectory
   ], {
-    stdout: "inherit",
-    stderr: "inherit",
+    stdio: "inherit",
     cwd: appDirectory,
-    env: process.env // Inherit environment variables
+    shell: false, // No shell
+    env: process.env
   });
 
   const worker: Worker = {
@@ -67,11 +72,11 @@ const spawnWorker = async (workerId: number): Promise<Worker> => {
     socketPath
   };
 
-  // Handle worker exit
-  workerProcess.exited.then(({ code }) => {
+  // Handle worker exit (Node.js child_process API)
+  workerProcess.on('exit', (code) => {
     if (!isShuttingDown) {
-      const exitCode = code !== undefined ? code : 0;
-      console.log(`[${getTimestamp()}] W${workerId + 1} exited (code ${exitCode}) - respawning...`);
+      const exitCode = code !== null ? code : 0;
+      console.log(`[${getTimestamp()}              ] W${workerId + 1} exited (code ${exitCode}) - respawning...`);
 
       // Staggered restart delays to prevent all workers being down simultaneously
       const restartDelay = 100 + (workerId * 50); // 100ms, 150ms, 200ms delays
@@ -95,10 +100,10 @@ const gracefulRestartWorker = async (workerId: number) => {
   const worker = workers[workerId];
   if (!worker) return;
 
-  console.log(`🔄 [Manager] Graceful restart of worker ${workerId}...`);
+  console.log(`[${getTimestamp()}              ] M${managerNum} graceful restart W${workerId + 1}...`);
 
-  // Send SIGTERM for graceful shutdown
-  worker.process.kill("SIGTERM");
+  // Send SIGTERM for graceful shutdown (Node.js child_process API)
+  worker.process.kill('SIGTERM');
 
   // Wait for exit, then spawn will handle restart automatically
   // The worker will finish current requests before shutting down
@@ -117,7 +122,7 @@ const getTimestamp = () => {
 };
 
 const gracefulRestartAllWorkers = async (reason: string) => {
-  console.log(`[${getTimestamp()}            ] ⚠️  ${reason} - restarting all workers`);
+  console.log(`[${getTimestamp()}              ] M${managerNum} ${reason} - restarting all workers`);
 
   // Restart workers one by one to maintain availability
   for (let i = 0; i < workers.length; i++) {
@@ -129,7 +134,7 @@ const gracefulRestartAllWorkers = async (reason: string) => {
     }
   }
 
-  console.log(`[${getTimestamp()}] All workers restarted`);
+  console.log(`[${getTimestamp()}              ] M${managerNum} all workers restarted`);
 };
 
 /**
@@ -157,7 +162,7 @@ const setupFileWatcher = () => {
 
   const watcher = watch(appDirectory, { recursive: true }, (eventType, filename) => {
     if (filename && filename.endsWith('.rip') && eventType === 'change') {
-      console.log(`[${getTimestamp()}] ⚠️  File changed: ${filename}`);
+      console.log(`[${getTimestamp()}              ] M${managerNum} file changed: ${filename}`);
 
       // Graceful rolling restart of all workers
       gracefulRestartAllWorkers(`File change: ${filename}`);
@@ -187,22 +192,20 @@ const setupGracefulShutdown = () => {
     // Send SIGTERM to all workers quietly
     workers.forEach((worker, id) => {
       if (worker?.process) {
-        worker.process.kill("SIGTERM");
+        worker.process.kill('SIGTERM');
       }
     });
 
     // Force exit after timeout
     setTimeout(() => {
-      console.log(`💥 [Manager] Force exit after timeout`);
+      console.log(`[${getTimestamp()}              ] M${managerNum} force exit after timeout`);
       process.exit(1);
     }, 10000);
 
-    // Wait for all workers to exit
-    Promise.all(
-      workers.map(worker => worker?.process?.exited || Promise.resolve())
-    ).then(() => {
+    // Wait for all workers to exit (or timeout)
+    setTimeout(() => {
       process.exit(0);
-    });
+    }, 2000);
   };
 
   process.on('SIGINT', () => shutdown('SIGINT'));
@@ -213,7 +216,7 @@ const setupGracefulShutdown = () => {
  * Main initialization
  */
 const main = async () => {
-  console.log(`[${getTimestamp()}              ] Manager starting (${numWorkers} workers, ${maxRequestsPerWorker} requests each)`);
+  console.log(`[${getTimestamp()}              ] M${managerNum} starting (${numWorkers} workers, ${maxRequestsPerWorker} requests each)`);
 
   // Setup graceful shutdown first
   setupGracefulShutdown();

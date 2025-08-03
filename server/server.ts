@@ -13,15 +13,17 @@
  *
  * This is the FRONT-END of the architecture - clients connect here.
  *
- * Usage: bun server.ts [port] [numWorkers] [httpsPort] [certPath] [keyPath]
+ * Usage: bun server.ts [serverId] [port] [numWorkers] [httpsPort] [certPath] [keyPath]
  */
 
 // Configuration
-const port = parseInt(process.argv[2]) || 3000;
-const numWorkers = parseInt(process.argv[3]) || 3;
-const httpsPort = parseInt(process.argv[4]) || 3443;
-const certPath = process.argv[5]; // Optional: path to SSL certificate
-const keyPath = process.argv[6];  // Optional: path to SSL private key
+const serverId = parseInt(process.argv[2] ?? '0');
+const serverNum = serverId + 1; // Human-friendly server number (1-indexed)
+const port = parseInt(process.argv[3]) || 3000;
+const numWorkers = parseInt(process.argv[4]) || 3;
+const httpsPort = parseInt(process.argv[5]) || 3443;
+const certPath = process.argv[6]; // Optional: path to SSL certificate
+const keyPath = process.argv[7];  // Optional: path to SSL private key
 
 // HTTPS Configuration
 const httpsEnabled = certPath && keyPath;
@@ -134,7 +136,7 @@ const handleHealthCheck = (req: Request) => {
     const processingFormatted = scale(processingTime, 's').padStart(6);
     const responseFormatted = scale(responseTime, 's').padStart(6);
 
-    console.log(`[${timestamp} ${processingFormatted} ${responseFormatted}] S1.1 ${req.method} /health → 200 json ${JSON.stringify(stats).length}B`);
+    console.log(`[${timestamp} ${processingFormatted} ${responseFormatted}] S${serverNum}.1 ${req.method} /health → 200 json ${JSON.stringify(stats).length}B`);
 
     return response;
   }
@@ -173,7 +175,7 @@ const handleHealthCheck = (req: Request) => {
     const processingFormatted = scale(processingTime, 's').padStart(6);
     const responseFormatted = scale(responseTime, 's').padStart(6);
 
-    console.log(`[${timestamp} ${processingFormatted} ${responseFormatted}] S1.1 ${req.method} /metrics → 200 plain ${metrics.length}B`);
+    console.log(`[${timestamp} ${processingFormatted} ${responseFormatted}] S${serverNum}.1 ${req.method} /metrics → 200 plain ${metrics.length}B`);
 
     return response;
   }
@@ -220,7 +222,11 @@ const handleRequest = async (req: Request) => {
 
         // 🎯 Intelligent 503 Failover: If worker is busy, try next worker
         if (workerResponse.status === 503) {
-          console.log(`⏸️ [Server] Worker ${socketPath} busy (503) - trying next worker...`);
+          const timestamp = startDate.toISOString().slice(0, 23).replace('T', ' ') +
+                           (startDate.getTimezoneOffset() <= 0 ? '+' : '-') +
+                           String(Math.abs(Math.floor(startDate.getTimezoneOffset() / 60))).padStart(2, '0') +
+                           ':' + String(Math.abs(startDate.getTimezoneOffset() % 60)).padStart(2, '0');
+          console.log(`[${timestamp}              ] ⏸️  Worker ${socketPath} busy (503) - trying next worker...`);
 
           // Don't return yet, let the loop try the next worker
           continue;
@@ -318,12 +324,20 @@ const handleRequest = async (req: Request) => {
         // Update error stats
         stats.errors++;
 
-        console.error(`⚠️ [Server] Worker ${socketPath} failed: ${error.message}`);
+        const timestamp = startDate.toISOString().slice(0, 23).replace('T', ' ') +
+                         (startDate.getTimezoneOffset() <= 0 ? '+' : '-') +
+                         String(Math.abs(Math.floor(startDate.getTimezoneOffset() / 60))).padStart(2, '0') +
+                         ':' + String(Math.abs(startDate.getTimezoneOffset() % 60)).padStart(2, '0');
+        console.error(`[${timestamp}              ] ⚠️  Worker ${socketPath} failed: ${error.message}`);
 
         // Try next worker (automatic failover)
         if (attempts === workerSocketPaths.length - 1) {
           // All workers failed
-          console.error(`🚨 [Server] All ${workerSocketPaths.length} workers unavailable!`);
+          const timestamp = startDate.toISOString().slice(0, 23).replace('T', ' ') +
+                           (startDate.getTimezoneOffset() <= 0 ? '+' : '-') +
+                           String(Math.abs(Math.floor(startDate.getTimezoneOffset() / 60))).padStart(2, '0') +
+                           ':' + String(Math.abs(startDate.getTimezoneOffset() % 60)).padStart(2, '0');
+          console.error(`[${timestamp}              ] 🚨 All ${workerSocketPaths.length} workers unavailable!`);
 
           return new Response(
             `🚨 Rip Server Error: All workers unavailable\n\nTried ${workerSocketPaths.length} workers, all failed.\nLast error: ${error.message}\n\nIs the manager running? (bun manager.ts)`,
@@ -340,7 +354,12 @@ const handleRequest = async (req: Request) => {
     }
 
     // 🚨 All workers are busy - return 503 to client
-    console.warn(`🚨 [Server] All ${workerSocketPaths.length} workers are busy - returning 503 to client`);
+    const now = new Date();
+    const timestamp = now.toISOString().slice(0, 23).replace('T', ' ') +
+                     (now.getTimezoneOffset() <= 0 ? '+' : '-') +
+                     String(Math.abs(Math.floor(now.getTimezoneOffset() / 60))).padStart(2, '0') +
+                     ':' + String(Math.abs(now.getTimezoneOffset() % 60)).padStart(2, '0');
+    console.warn(`[${timestamp}              ] 🚨 All ${workerSocketPaths.length} workers are busy - returning 503 to client`);
     return new Response(
       `🚨 All Workers Busy\n\nAll ${workerSocketPaths.length} workers are currently processing requests.\nThis ensures perfect isolation - please retry in a moment.\n\nTip: Each worker processes one request at a time for maximum reliability.`,
       {
@@ -409,7 +428,7 @@ const getTimestamp = () => new Date().toISOString().replace('T', ' ').replace('Z
 
 // Announce when server is actually ready
 setTimeout(() => {
-  console.log(`[${getTimestamp()}              ] Server ready! 🚀`);
+  console.log(`[${getTimestamp()}              ] S${serverNum} ready! 🚀`);
 }, 50);
 
 /**

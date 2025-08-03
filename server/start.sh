@@ -5,11 +5,16 @@
 #
 # Usage:
 #   ./start.sh [mode] [foreground] [app_dir] [https_port] [cert_path] [key_path]
+#   /path/to/server/start.sh [mode] [foreground] [app_dir] [https_port] [cert_path] [key_path]
 #
 # Examples:
 #   ./start.sh dev                                    # HTTP only
 #   ./start.sh prod true                              # Production, foreground
 #   ./start.sh dev false /app/path 3443 cert.pem key.pem  # With HTTPS
+#   /Users/shreeve/Data/Code/rip/server/start.sh dev  # Run from anywhere
+
+# 🎯 Location-independent: Find the script's directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 MODE=${1:-dev}
 FOREGROUND=${2:-true}
@@ -28,10 +33,10 @@ else
     MAX_REQUESTS=10
 fi
 
-# Silent cleanup
-pkill -f "bun manager.ts" 2>/dev/null
-pkill -f "bun server.ts" 2>/dev/null
-pkill -f "bun worker.ts" 2>/dev/null
+# Silent cleanup (location-independent)
+pkill -f "bun.*manager.ts" 2>/dev/null
+pkill -f "bun.*server.ts" 2>/dev/null
+pkill -f "bun.*worker.ts" 2>/dev/null
 
 # Clean up socket files
 rm -f /tmp/rip_worker_*.sock 2>/dev/null
@@ -44,12 +49,20 @@ HTTPS_PORT=${4:-3443}
 CERT_PATH=${5}    # Optional: SSL certificate path
 KEY_PATH=${6}     # Optional: SSL private key path
 
-# Check HTTPS configuration
+# Check HTTPS configuration (location-independent)
 if [ -n "$CERT_PATH" ] && [ -n "$KEY_PATH" ]; then
+    # Make cert paths absolute if they're relative
+    if [[ ! "$CERT_PATH" = /* ]]; then
+        CERT_PATH="$SCRIPT_DIR/$CERT_PATH"
+    fi
+    if [[ ! "$KEY_PATH" = /* ]]; then
+        KEY_PATH="$SCRIPT_DIR/$KEY_PATH"
+    fi
+
     if [ -f "$CERT_PATH" ] && [ -f "$KEY_PATH" ]; then
         HTTPS_ENABLED=true
     else
-        # Auto-generate SSL certificates silently
+        # Auto-generate SSL certificates silently (location-independent)
         SSL_DIR=$(dirname "$CERT_PATH")
         mkdir -p "$SSL_DIR"
 
@@ -96,17 +109,17 @@ if [ "$FOREGROUND" = "true" ]; then
     echo "🛑 Press Ctrl-C to stop"
     echo ""
 
-    # Start manager silently
-    bun manager.ts $NUM_WORKERS $MAX_REQUESTS "$APP_DIR" &
+    # Start manager silently (location-independent)
+    cd "$SCRIPT_DIR" && bun manager.ts 0 $NUM_WORKERS $MAX_REQUESTS "$APP_DIR" &
     MANAGER_PID=$!
 
     sleep 3
 
-    # Start server silently
+    # Start server silently (location-independent)
     if [ "$HTTPS_ENABLED" = "true" ]; then
-        bun server.ts 3000 $NUM_WORKERS $HTTPS_PORT "$CERT_PATH" "$KEY_PATH" &
+        cd "$SCRIPT_DIR" && bun server.ts 0 3000 $NUM_WORKERS $HTTPS_PORT "$CERT_PATH" "$KEY_PATH" &
     else
-        bun server.ts 3000 $NUM_WORKERS &
+        cd "$SCRIPT_DIR" && bun server.ts 0 3000 $NUM_WORKERS &
     fi
     SERVER_PID=$!
 
@@ -132,17 +145,17 @@ if [ "$FOREGROUND" = "true" ]; then
     # Trap Ctrl-C and handle cleanup
     trap cleanup SIGINT SIGTERM
 else
-    # Background mode - quiet startup
+    # Background mode - quiet startup (location-independent)
     echo "🧠 Starting manager and workers..."
-    bun manager.ts $NUM_WORKERS $MAX_REQUESTS "$APP_DIR" >/dev/null 2>&1 &
+    cd "$SCRIPT_DIR" && bun manager.ts 0 $NUM_WORKERS $MAX_REQUESTS "$APP_DIR" >/dev/null 2>&1 &
     MANAGER_PID=$!
 
     sleep 3
 
     if [ "$HTTPS_ENABLED" = "true" ]; then
-        bun server.ts 3000 $NUM_WORKERS $HTTPS_PORT "$CERT_PATH" "$KEY_PATH" >/dev/null 2>&1 &
+        cd "$SCRIPT_DIR" && bun server.ts 0 3000 $NUM_WORKERS $HTTPS_PORT "$CERT_PATH" "$KEY_PATH" >/dev/null 2>&1 &
     else
-        bun server.ts 3000 $NUM_WORKERS >/dev/null 2>&1 &
+        cd "$SCRIPT_DIR" && bun server.ts 0 3000 $NUM_WORKERS >/dev/null 2>&1 &
     fi
     SERVER_PID=$!
 

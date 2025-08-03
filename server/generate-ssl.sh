@@ -6,13 +6,13 @@
 echo "🔐 Generating self-signed SSL certificate for HTTPS testing..."
 
 # Create ssl directory if it doesn't exist
-mkdir -p ssl
+mkdir -p ../ssl
 
 # Generate private key
-openssl genrsa -out ssl/server.key 2048
+openssl genrsa -out ../ssl/server.key 2048
 
 # Generate certificate
-openssl req -new -x509 -key ssl/server.key -out ssl/server.crt -days 365 -subj "/C=US/ST=Development/L=Localhost/O=Rip Server/CN=localhost"
+openssl req -new -x509 -key ../ssl/server.key -out ../ssl/server.crt -days 365 -subj "/C=US/ST=Development/L=Localhost/O=Rip Server/CN=localhost"
 
 echo "✅ SSL certificate generated:"
 echo "   🔑 Private Key: ssl/server.key"
@@ -28,8 +28,8 @@ echo "⚠️  Note: Self-signed certificates will show browser warnings"
 echo "   For production, use certificates from a trusted CA"
 
 # Make certificate readable
-chmod 644 ssl/server.crt
-chmod 600 ssl/server.key
+chmod 644 ../ssl/server.crt
+chmod 600 ../ssl/server.key
 
 echo ""
 echo "🔒 Certificate ready for development use!"
