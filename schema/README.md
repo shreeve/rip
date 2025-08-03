@@ -24,7 +24,7 @@
     @boolean  'active', true      # Default value
     @timestamps()                 # Adds created_at, updated_at
 
-    @index    'email', unique: true  # Unique index on email
+    @index    'email', unique: true  # Could be @index 'email!' for unique
 ```
 
 ## Features
