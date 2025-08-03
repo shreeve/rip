@@ -1,5 +1,5 @@
 # Test rip-schema functionality
-import { schema } from './schema-builder'
+import { schema } from './builder'
 
 # Define a simple test schema
 testSchema = schema ->

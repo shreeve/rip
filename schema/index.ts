@@ -5,10 +5,10 @@
  */
 
 // Export the schema builder
-export * from './schema-builder'
+export * from './builder'
 
 // Re-export key functions for convenience
-export { Schema, schema, TableBuilder } from './schema-builder'
+export { Schema, schema, TableBuilder } from './builder'
 
 // Version
 export const version = '0.2.0'

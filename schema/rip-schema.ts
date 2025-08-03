@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { sql } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
-import { schema as schemaBuilder } from './schema-builder'
+import { schema as schemaBuilder } from './builder'
 
 // Parse command line arguments
 const { values, positionals } = parseArgs({

@@ -1,5 +1,5 @@
 # Complete Rip Schema Example
-import { schema } from './schema-builder'
+import { schema } from './builder'
 
 # Define your entire database schema with beautiful DSL
 export default schema ->

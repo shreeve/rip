@@ -1,5 +1,5 @@
 # Migration system for Rip Schema
-import { schema } from './schema-builder'
+import { schema } from './builder'
 
 # Migration DSL
 export class Migration
