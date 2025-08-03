@@ -1,2 +1,0 @@
-for food in ['toast', 'cheese', 'wine']
-  console.log "#{food} is yummy!"
