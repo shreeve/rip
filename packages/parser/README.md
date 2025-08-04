@@ -237,6 +237,95 @@ parser.lexer = lexer;
 const ast = parser.parse('input string');
 ```
 
+## Future Language Enhancements
+
+With `rip-parser`, we have the power to evolve the language itself. Here are some exciting possibilities:
+
+### 🎯 Pattern Matching
+```coffeescript
+match response
+  | { status: 200, data } -> processData(data)
+  | { status: 404 } -> showNotFound()
+  | { error } -> handleError(error)
+```
+
+### 🚀 Pipeline Operator
+```coffeescript
+users
+  |> filter (u) -> u.active
+  |> map (u) -> u.email
+  |> sort()
+  |> take 10
+```
+
+### 🔢 Open-Ended Ranges (In Progress)
+```coffeescript
+@integer 'age', 18..      # 18 or more
+@string 'bio', ..5000     # up to 5000 chars
+@decimal 'price', 0.01..  # at least 0.01
+```
+
+### 🛡️ Null-Safe Chaining with Defaults
+```coffeescript
+name = user?.profile?.name ?? "Anonymous"
+```
+
+### 🎭 Range Pattern Matching
+```coffeescript
+grade = match score
+  | 90.. -> 'A'
+  | 80..89 -> 'B'
+  | 70..79 -> 'C'
+  | ..69 -> 'F'
+```
+
+### 🧩 Partial Application
+```coffeescript
+add = (a, b) -> a + b
+add5 = add(5, ?)
+result = add5(3)  # 8
+```
+
+### 📝 Tagged Template Literals
+```coffeescript
+sql`SELECT * FROM users WHERE age >= ${minAge}`
+html`<div class=${className}>${content}</div>`
+```
+
+### 🏷️ Optional Type Annotations
+```coffeescript
+square = (n: number): number -> n * n
+greet = (name: string, formal: boolean = false) ->
+  if formal then "Good day, #{name}" else "Hi #{name}!"
+```
+
+### 🔀 Destructuring Enhancements
+```coffeescript
+# Nested destructuring with defaults
+{user: {name = "Anonymous", age = 0}} = data
+
+# Array destructuring with rest in middle
+[first, ...middle, last] = items
+```
+
+### ➡️ Arrow Function Variations
+```coffeescript
+# Auto-return for object literals
+getUser = () -> { name: "Alice", age: 30 }
+
+# Async arrow functions
+fetchData = async () -> await api.getData()
+```
+
+### 🎲 Custom Operators
+```coffeescript
+# Define custom operators for domain-specific needs
+a <=> b  # spaceship operator for comparison
+x ** y   # exponentiation (already in ES6)
+```
+
+These enhancements would make Rip not just a CoffeeScript successor, but a truly modern language that evolves with developer needs!
+
 ## License
 
 MIT
