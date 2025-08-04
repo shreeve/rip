@@ -11,7 +11,7 @@ Use 2-element arrays where `null` means "unbounded":
 ```coffeescript
 @model 'User', ->
   @string  'name!', [3, 50]        # 3 to 50 chars
-  @string  'bio', [null, 5000]     # up to 5000 chars  
+  @string  'bio', [null, 5000]     # up to 5000 chars
   @integer 'age', [18, 120]        # 18 to 120
   @integer 'score', [0, null]      # 0 or more
   @decimal 'price', [0.01, 9999]   # 0.01 to 9999
@@ -39,7 +39,7 @@ Use strings with `..` for a more Ruby-like feel:
 @model 'User', ->
   @string  'name!', '3..50'      # 3 to 50 chars
   @string  'bio', '..5000'       # up to 5000 chars
-  @integer 'age', '18..120'      # 18 to 120  
+  @integer 'age', '18..120'      # 18 to 120
   @integer 'score', '0..'        # 0 or more
   @decimal 'price', '0.01..9999' # 0.01 to 9999
 ```
@@ -109,12 +109,12 @@ Use **Array Notation** as the primary syntax because:
   @string  'sku!', [8, 12]         # 8-12 chars
   @string  'name!', [1, 200]       # 1-200 chars
   @text    'description', [null, 5000]  # up to 5000
-  
-  # Numeric constraints  
+
+  # Numeric constraints
   @decimal 'price!', [0.01, 99999.99]
   @integer 'stock', [0, null]      # non-negative
   @integer 'min_order', [1, 1000]
-  
+
   # Array constraints
   @array   'images', [1, 10]       # 1-10 images
   @array   'tags', [null, 50]      # up to 50 tags
@@ -124,7 +124,7 @@ Use **Array Notation** as the primary syntax because:
   @string  'password!', [8, null], pattern: /(?=.*[A-Z])(?=.*[0-9])/
   @integer 'age', [13, 120]
   @email   'email!', [null, 255]
-  
+
 @model 'ApiLimit', ->
   @integer 'requests_per_hour', [1, 10000]
   @integer 'burst_size', [1, 100]
