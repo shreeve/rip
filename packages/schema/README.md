@@ -143,18 +143,15 @@ export default Schema ->
     @index    'post_id'
 ```
 
-## Future Enhancements (TODO)
+## Documentation
 
-1. **Check Constraints** - `@check 'age >= 18'`
-2. **Enums** - `@enum 'status', ['draft', 'published']`
-3. **Foreign Keys** - `@references 'users'`
-4. **Generated Columns** - `generated: "price * quantity"`
-5. **Advanced Indexes** - Partial, covering indexes
-6. **Collation** - `collate: 'NOCASE'`
-7. **Triggers** - `@trigger 'update_total'`
-8. **Views** - `@view 'active_users'`
-9. **Polymorphic Relations** - `@polymorphic 'taggable'`
-10. **Migration CLI** - `db:migrate`, `db:rollback`
+- 📋 [**Development Roadmap**](./ROADMAP.md) - Current status, upcoming features, and timeline
+- 📝 [**Changelog**](./CHANGELOG.md) - Version history and release notes
+- 🚀 [**Examples**](../../examples/) - Real-world usage patterns
+
+## Next Release: v0.2.0
+
+**Zod Validation Generation** - Transform your elegant schema definitions into Zod validation schemas! See the [Roadmap](./ROADMAP.md) for details.
 
 ## License
 
