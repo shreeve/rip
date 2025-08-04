@@ -52,29 +52,4 @@ export default app
 
 ==
 
-export default ->
-  @createTable 'lawfirms', ->
-    @string   'name!', 50
-
-    @string   'address', 50
-    @string   'city', 50
-    @string   'state', 10
-    @string   'zip', 10
-
-    @string   'phone', 20
-    @string   'email', 50
-    @string   'fax', 20
-
-    @datetime 'created_at'
-    @datetime 'updated_at'
-
-    @index    'name'
-
-==
-
-https://github.com/faker-js/faker
-https://fakerjs.dev/
-
-==
-
 bun x biome check --write --unsafe bun/

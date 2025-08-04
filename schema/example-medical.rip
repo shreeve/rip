@@ -1,3 +1,5 @@
+# Rip Schema Example - Medical/Enterprise System
+# Comprehensive test schema covering ALL column types and patterns
 import { schema as Schema } from './builder'
 
 export default Schema ->
