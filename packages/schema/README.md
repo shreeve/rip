@@ -145,13 +145,13 @@ export default Schema ->
 
 ## Documentation
 
-- 📋 [**Development Roadmap**](./ROADMAP.md) - Current status, upcoming features, and timeline
+- 📋 [**Development Status**](./docs/status.md) - Current status, roadmap, and timeline
 - 📝 [**Changelog**](./CHANGELOG.md) - Version history and release notes
 - 🚀 [**Examples**](../../examples/) - Real-world usage patterns
 
 ## Next Release: v0.2.0
 
-**Zod Validation Generation** - Transform your elegant schema definitions into Zod validation schemas! See the [Roadmap](./ROADMAP.md) for details.
+**Zod Validation Generation** - Transform your elegant schema definitions into Zod validation schemas! See the [Status](./docs/status.md) for details.
 
 ## License
 

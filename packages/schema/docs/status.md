@@ -4,7 +4,7 @@
 
 ## 🎯 Current Status
 
-**Version**: 0.1.0 (Database Schema Generation)  
+**Version**: 0.1.0 (Database Schema Generation)
 **Status**: Production-ready for database schemas, validation coming soon
 
 ### ✅ Completed Features
@@ -129,7 +129,7 @@ Areas where we need help:
 ## 📅 Release Timeline
 
 - **v0.2.0** - Q1 2024 - Zod validation generation
-- **v0.3.0** - Q2 2024 - Advanced validation features  
+- **v0.3.0** - Q2 2024 - Advanced validation features
 - **v0.4.0** - Q3 2024 - Migration system
 - **v0.5.0** - Q4 2024 - Multi-database support
 
