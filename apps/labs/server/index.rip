@@ -1,0 +1,258 @@
+# 🚀 Labs Server - Rip Implementation
+# Drop-in replacement for BHVR Labs server
+
+import { Hono } from 'hono'
+import { cors } from 'hono/cors'
+import { logger } from 'hono/logger'
+import { drizzle } from 'drizzle-orm/bun-sqlite'
+import { Database } from 'bun:sqlite'
+import { eq, desc, and as andOp, or as orOp, like } from 'drizzle-orm'
+import { z } from 'zod'
+import { zValidator } from '@hono/zod-validator'
+
+# Import schema
+import schema from './db/schema.rip'
+{ users, orders, specimens, results } = schema
+
+# Create database connection
+# Using SQLite instead of MySQL for simplicity
+sqlite = new Database './db/labs.db'
+db = drizzle sqlite, { schema }
+
+# Create Hono app
+app = new Hono
+
+# CORS for development (client is on 8205)
+app.use cors
+  origin: 'http://localhost:8205'
+  credentials: true
+
+# Logger
+app.use logger()
+
+# Health check
+app.get '/ping', (c) -> c.text 'pong'
+
+# ====== CONFIG ROUTES ======
+configRouter = new Hono
+
+configRouter.get '/', (c) ->
+  # Mock config response
+  c.json
+    config:
+      client:
+        appName: 'Labs (Rip)'
+        apiUrl: 'http://localhost:8305'
+        features:
+          auth: true
+          orders: true
+          results: true
+
+app.route '/config', configRouter
+
+# ====== AUTH ROUTES ======
+authRouter = new Hono
+
+# Login/signup with code
+authRouter.post '/code', zValidator('json', z.object({
+  email: z.string().email()
+  firstName: z.string().optional()
+  lastName: z.string().optional()
+})), (c) ->
+  data = c.req.valid 'json'
+
+  # Generate 6-digit code
+  code = Math.floor(100000 + Math.random() * 900000).toString()
+  codeExpiresAt = new Date(Date.now() + 10 * 60 * 1000) # 10 minutes
+
+  # Find or create user
+  existingUser = await db.select().from(users).where(eq(users.email, data.email)).get()
+
+  if existingUser
+    # Update existing user with new code
+    db.update(users)
+      .set({ code, codeExpiresAt })
+      .where(eq(users.email, data.email))
+      .run!
+  else
+    # Create new user
+    db.insert(users).values({
+      email: data.email
+      firstName: data.firstName || 'First'
+      lastName: data.lastName || 'Last'
+      phone: '000-000-0000'
+      sex: 'Other'
+      dob: '2000-01-01'
+      code: code
+      codeExpiresAt: codeExpiresAt
+    }).run!
+
+  # In real app, would send email
+  console.log "Auth code for #{data.email}: #{code}"
+
+  c.json { success: true, message: 'Code sent to email' }
+
+# Verify code
+authRouter.post '/verify', zValidator('json', z.object({
+  email: z.string().email()
+  code: z.string()
+})), (c) ->
+  data = c.req.valid 'json'
+
+  user = db.select().from(users)
+    .where(andOp(
+      eq(users.email, data.email),
+      eq(users.code, data.code)
+    ))
+    .get!
+
+  if !user
+    return c.json { error: 'Invalid code' }, 401
+
+  if user.codeExpiresAt && new Date(user.codeExpiresAt) < new Date()
+    return c.json { error: 'Code expired' }, 401
+
+  # Clear code after successful verification
+  db.update(users)
+    .set({ code: null, codeExpiresAt: null })
+    .where(eq(users.id, user.id))
+    .run!
+
+  # Return user data (in real app, would create JWT)
+  c.json {
+    user: {
+      id: user.id
+      email: user.email
+      firstName: user.firstName
+      lastName: user.lastName
+      admin: user.admin
+    }
+    token: 'mock-jwt-token-' + user.id
+  }
+
+app.route '/auth', authRouter
+
+# ====== USER ROUTES ======
+userRouter = new Hono
+
+# Get current user
+userRouter.get '/me', (c) ->
+  # Mock auth - in real app would verify JWT
+  mockUserId = 1
+
+  user = db.select().from(users).where(eq(users.id, mockUserId)).get!
+
+  if !user
+    return c.json { error: 'Not authenticated' }, 401
+
+  c.json { user }
+
+# Update user
+userRouter.patch '/me', zValidator('json', z.object({
+  firstName: z.string().optional()
+  lastName: z.string().optional()
+  phone: z.string().optional()
+  dob: z.string().optional()
+  shippingAddress: z.any().optional()
+})), (c) ->
+  mockUserId = 1
+  data = c.req.valid 'json'
+
+  db.update(users)
+    .set(data)
+    .where(eq(users.id, mockUserId))
+    .run!
+
+  updatedUser = db.select().from(users).where(eq(users.id, mockUserId)).get!
+  c.json { user: updatedUser }
+
+app.route '/user', userRouter
+
+# Users list (admin)
+usersRouter = new Hono
+
+usersRouter.get '/', (c) ->
+  allUsers = db.select().from(users).orderBy(desc(users.createdAt)).all!
+  c.json { users: allUsers }
+
+app.route '/users', usersRouter
+
+# ====== TEST ROUTES ======
+testRouter = new Hono
+
+# Get available tests
+testRouter.get '/', (c) ->
+  # Mock test data
+  tests = [
+    { id: 1, name: 'Basic Health Panel', price: 9900, description: 'Essential health markers' }
+    { id: 2, name: 'Comprehensive Panel', price: 19900, description: 'Full health screening' }
+    { id: 3, name: 'Hormone Panel', price: 14900, description: 'Hormone levels check' }
+  ]
+
+  c.json { tests }
+
+app.route '/tests', testRouter
+
+# ====== ORDER ROUTES ======
+orderRouter = new Hono
+
+# Create order
+orderRouter.post '/', zValidator('json', z.object({
+  items: z.array(z.object({
+    testId: z.number()
+    quantity: z.number()
+  }))
+  payment: z.string()
+})), (c) ->
+  mockUserId = 1
+  data = c.req.valid 'json'
+
+  # Calculate totals (mock)
+  subtotal = data.items.reduce ((sum, item) -> sum + (item.testId * 10000)), 0
+  total = subtotal
+
+  # Generate order number
+  orderNumber = 'LAB-' + Date.now().toString(36).toUpperCase()
+
+  result = db.insert(orders).values({
+    userId: mockUserId
+    number: orderNumber
+    payment: data.payment
+    subtotal: subtotal
+    total: total
+    meta: { items: data.items }
+  }).returning().get!
+
+  c.json { order: result }
+
+# Get user's orders
+orderRouter.get '/', (c) ->
+  mockUserId = 1
+
+  userOrders = db.select().from(orders)
+    .where(eq(orders.userId, mockUserId))
+    .orderBy(desc(orders.createdAt))
+    .all!
+
+  c.json { orders: userOrders }
+
+app.route '/orders', orderRouter
+
+# ====== RESULT ROUTES ======
+resultRouter = new Hono
+
+# Get user's results
+resultRouter.get '/', (c) ->
+  mockUserId = 1
+
+  userResults = db.select().from(results)
+    .where(eq(results.userId, mockUserId))
+    .orderBy(desc(results.createdAt))
+    .all!
+
+  c.json { results: userResults }
+
+app.route '/results', resultRouter
+
+# Export for rip-server
+export default app

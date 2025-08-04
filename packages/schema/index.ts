@@ -8,7 +8,7 @@
 export * from './builder'
 
 // Re-export key functions for convenience
-export { Schema, schema, TableBuilder } from './builder'
+export { schema, TableBuilder } from './builder'
 
 // Version
 export const version = '0.2.0'

@@ -1,0 +1,11 @@
+# Test async with ! suffix
+import { Hono } from 'hono'
+
+app = new Hono()
+
+# Simple route with ! suffix
+app.get '/', (c) ->
+  result = fetch('http://example.com')!
+  c.text 'ok'
+
+export default app

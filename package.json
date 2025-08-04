@@ -5,12 +5,14 @@
   "description": "Rip - A multilanguage universal runtime",
   "workspaces": [
     "packages/*",
-    "examples/*"
+    "examples/*",
+    "apps/*/client",
+    "apps/*/server"
   ],
   "scripts": {
     "lint": "biome check .",
     "format": "biome format . --write",
-    "clean": "rm -rf node_modules packages/*/node_modules examples/*/node_modules"
+    "clean": "rm -rf node_modules packages/*/node_modules examples/*/node_modules apps/*/client/node_modules apps/*/server/node_modules"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.5.3"

@@ -1,0 +1,12 @@
+# Simple test server for Rip
+import { Hono } from 'hono'
+
+app = new Hono
+
+app.get '/test', (c) ->
+  c.json { message: 'Hello from Rip!' }
+
+app.get '/api/users', (c) ->
+  c.json { users: [{ id: 1, name: 'Test User' }] }
+
+export default app

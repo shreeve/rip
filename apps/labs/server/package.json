@@ -1,0 +1,25 @@
+{
+  "name": "labs-server-rip",
+  "version": "1.0.0",
+  "description": "Rip-based replacement for BHVR Labs server",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "rip-server . 8305",
+    "db:push": "rip-schema db:push",
+    "db:seed": "bun seed.rip"
+  },
+  "dependencies": {
+    "@rip/schema": "workspace:*",
+    "hono": "^4.7.8",
+    "drizzle-orm": "^0.38.3",
+    "@faker-js/faker": "^9.3.0",
+    "zod": "^3.23.8",
+    "@hono/zod-validator": "^0.4.2",
+    "bun": "latest"
+  },
+  "rip-server": {
+    "port": 8305,
+    "workers": 2
+  }
+}

@@ -1,0 +1,60 @@
+import { schema } from '@rip/schema'
+
+export default schema ->
+
+  @table 'users', ->
+    @integer  'id!', primary: true, autoIncrement: true
+    @email    'email!', unique: true
+    @string   'firstName!', 100
+    @string   'lastName!', 100
+    @string   'phone!', 20
+    @string   'sex!', 10  # Male, Female, or Other
+    @string   'dob!', 10  # Date of birth as string
+    @string   'photo'
+    @json     'cart'
+    @json     'shippingAddress'
+    @json     'meta'
+    @string   'code', unique: true
+    @datetime 'codeExpiresAt'
+    @boolean  'admin', false
+    @timestamps()
+
+    @index 'email'
+    @index 'code'
+
+  @table 'orders', ->
+    @integer  'id!', primary: true, autoIncrement: true
+    @integer  'userId!'
+    @string   'number!', 50
+    @string   'payment!', 100
+    @integer  'subtotal!'
+    @integer  'total!'
+    @json     'meta!'
+    @datetime 'shippedAt'
+    @datetime 'deliveredAt'
+    @datetime 'completedAt'
+    @timestamps()
+
+    @index 'userId'
+    @index 'number'
+
+  @table 'specimens', ->
+    @integer  'id!', primary: true, autoIncrement: true
+    @integer  'userId!'
+    @integer  'testId!'
+    @string   'barcode!', 50, unique: true
+    @datetime 'registeredAt'
+    @datetime 'collectedAt'
+    @datetime 'reportedAt'
+    @timestamps()
+
+    @index 'userId'
+    @index 'barcode'
+
+  @table 'results', ->
+    @integer  'id!', primary: true, autoIncrement: true
+    @integer  'userId!'
+    @string   'resultUrl!', 255
+    @timestamps()
+
+    @index 'userId'
