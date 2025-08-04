@@ -1,0 +1,107 @@
+# 🚀 Blog API Example
+# A simple blog API with posts, comments, and categories
+
+import { Hono } from 'hono'
+import { drizzle } from 'drizzle-orm/bun-sqlite'
+import { Database } from 'bun:sqlite'
+import { sql } from 'drizzle-orm'
+import { faker } from '@faker-js/faker'
+
+# Import schema
+import schema from './db/schema.rip'
+
+# Create database connection
+sqlite = new Database './db/blog.db'
+db = drizzle sqlite, { schema }
+
+# Create Hono app
+app = new Hono
+
+# Basic routes
+app.get '/', (c) ->
+  c.json
+    name: 'Blog API'
+    version: '1.0.0'
+    endpoints: [
+      'GET /api/posts'
+      'GET /api/posts/:id'
+      'POST /api/posts/generate'
+      'GET /api/users'
+      'POST /api/users/generate'
+    ]
+
+# Posts API
+postsApp = new Hono
+app.route '/api/posts', postsApp
+
+# Get all posts
+postsApp.get '/', (c) ->
+  posts = db.select().from(schema.posts).all!
+  c.json posts
+
+# Get single post
+postsApp.get '/:id', (c) ->
+  id = parseInt c.req.param 'id'
+  post = db.select().from(schema.posts).where(sql`id = ${id}`).get!
+  if post
+    c.json post
+  else
+    c.json { error: 'Post not found' }, 404
+
+# Generate random post
+postsApp.post '/generate', (c) ->
+  # First, ensure we have a user
+  users = db.select().from(schema.users).all!
+  if users.length == 0
+    # Create a default user
+    user = db.insert(schema.users).values({
+      name: faker.person.fullName()
+      email: faker.internet.email()
+      password_digest: 'hashed_password'
+      active: true
+      preferences: {}
+    }).returning().get!
+    userId = user.id
+  else
+    userId = users[0].id
+
+  # Generate post
+  title = faker.lorem.sentence()
+  postData =
+    user_id: userId
+    title: title
+    slug: title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+    content: faker.lorem.paragraphs(5)
+    published: faker.datatype.boolean()
+    published_at: faker.date.past().toISOString()
+    view_count: faker.number.int({ min: 0, max: 1000 })
+
+  result = db.insert(schema.posts).values(postData).returning().get!
+  c.json result, 201
+
+# Users API
+usersApp = new Hono
+app.route '/api/users', usersApp
+
+# Get all users
+usersApp.get '/', (c) ->
+  users = db.select().from(schema.users).all!
+  c.json users
+
+# Generate random user
+usersApp.post '/generate', (c) ->
+  userData =
+    name: faker.person.fullName()
+    email: faker.internet.email()
+    password_digest: 'hashed_password'
+    active: faker.datatype.boolean()
+    preferences: {
+      theme: faker.helpers.arrayElement(['light', 'dark'])
+      notifications: faker.datatype.boolean()
+    }
+
+  result = db.insert(schema.users).values(userData).returning().get!
+  c.json result, 201
+
+# Export for rip-server
+export default app
