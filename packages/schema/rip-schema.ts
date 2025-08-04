@@ -72,12 +72,12 @@ Examples:
     # SQLite (file-based)
   rip-schema schema:dump --from-db -d ./db/labs.db
   rip-schema schema:dump --from-db -d ./db/labs.db -o schema-backup.rip
-  
-  # MySQL (server-based)  
+
+  # MySQL (server-based)
   rip-schema schema:dump --from-db --db-name elation -u root -p mypassword
   rip-schema schema:dump --from-db --db-name elation -u root -o elation-schema.rip
   rip-schema schema:dump --from-db --host 192.168.1.100 --db-name myapp -u admin -p
-  
+
   # Other commands
   rip-schema db:push
   rip-schema zod:generate > ./types/schema.ts
@@ -923,7 +923,7 @@ async function schemaDump() {
         // Save to file
         const outputPath = values.output
         writeFileSync(outputPath, schemaOutput, 'utf8')
-        
+
         console.log('📋 Generated Rip Schema:')
         console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
         console.log('')
@@ -974,7 +974,7 @@ async function schemaDump() {
       if (values.output) {
         // Save to file
         writeFileSync(values.output, exampleOutput, 'utf8')
-        
+
         console.log('📋 Complete Schema Dump (including auto-generated indexes)')
         console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
         console.log('')
