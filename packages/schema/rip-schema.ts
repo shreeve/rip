@@ -8,7 +8,7 @@
 
 import { Database } from 'bun:sqlite'
 import mysql from 'mysql2/promise'
-import { existsSync } from 'node:fs'
+import { existsSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
@@ -33,6 +33,8 @@ const { values, positionals } = parseArgs({
     user: { type: 'string', short: 'u' },
     password: { type: 'string', short: 'p' },
     'db-name': { type: 'string' },
+    // Output options
+    output: { type: 'string', short: 'o' },
   },
   allowPositionals: true,
 })
@@ -64,13 +66,16 @@ MySQL Options (when using --from-db):
   -u, --user USER      MySQL username
   -p, --password PASS  MySQL password
   --db-name DATABASE   MySQL database name
+  -o, --output FILE    Save schema dump to file instead of console
 
 Examples:
-  # SQLite (file-based)
+    # SQLite (file-based)
   rip-schema schema:dump --from-db -d ./db/labs.db
+  rip-schema schema:dump --from-db -d ./db/labs.db -o schema-backup.rip
   
   # MySQL (server-based)  
   rip-schema schema:dump --from-db --db-name elation -u root -p mypassword
+  rip-schema schema:dump --from-db --db-name elation -u root -o elation-schema.rip
   rip-schema schema:dump --from-db --host 192.168.1.100 --db-name myapp -u admin -p
   
   # Other commands
@@ -396,13 +401,13 @@ interface DbIndexInfo {
 // Map SQLite types to Rip DSL types
 function mapSqliteTypeToRip(sqliteType: string, fieldName: string): string {
   const type = sqliteType.toUpperCase()
-  
+
   if (type.includes('INTEGER')) return '@integer'
   if (type.includes('TEXT')) {
     // Check field name for JSON hints
-    if (fieldName.toLowerCase().includes('meta') || 
-        fieldName.toLowerCase().includes('cart') || 
-        fieldName.toLowerCase().includes('address') || 
+    if (fieldName.toLowerCase().includes('meta') ||
+        fieldName.toLowerCase().includes('cart') ||
+        fieldName.toLowerCase().includes('address') ||
         fieldName.toLowerCase().includes('json') ||
         fieldName.toLowerCase().includes('data')) {
       return '@json'
@@ -417,7 +422,7 @@ function mapSqliteTypeToRip(sqliteType: string, fieldName: string): string {
   if (type.includes('DATETIME') || type.includes('TIMESTAMP')) return '@datetime'
   if (type.includes('DATE')) return '@date'
   if (type.includes('JSON')) return '@json'
-  
+
   // Default to string for unknown types
   return '@string'
 }
@@ -425,15 +430,15 @@ function mapSqliteTypeToRip(sqliteType: string, fieldName: string): string {
 // Map MySQL types to Rip DSL types
 function mapMysqlTypeToRip(mysqlType: string, fieldName: string): string {
   const type = mysqlType.toUpperCase()
-  
-  if (type.includes('INT') || type.includes('TINYINT') || type.includes('SMALLINT') || 
+
+  if (type.includes('INT') || type.includes('TINYINT') || type.includes('SMALLINT') ||
       type.includes('MEDIUMINT') || type.includes('BIGINT')) return '@integer'
-  if (type.includes('VARCHAR') || type.includes('CHAR') || type.includes('TEXT') || 
+  if (type.includes('VARCHAR') || type.includes('CHAR') || type.includes('TEXT') ||
       type.includes('TINYTEXT') || type.includes('MEDIUMTEXT') || type.includes('LONGTEXT')) {
     // Check field name for JSON hints
-    if (fieldName.toLowerCase().includes('meta') || 
-        fieldName.toLowerCase().includes('cart') || 
-        fieldName.toLowerCase().includes('address') || 
+    if (fieldName.toLowerCase().includes('meta') ||
+        fieldName.toLowerCase().includes('cart') ||
+        fieldName.toLowerCase().includes('address') ||
         fieldName.toLowerCase().includes('json') ||
         fieldName.toLowerCase().includes('data') ||
         fieldName.toLowerCase().includes('config') ||
@@ -450,7 +455,7 @@ function mapMysqlTypeToRip(mysqlType: string, fieldName: string): string {
   if (type.includes('TIME')) return '@string' // No dedicated time type in Rip yet
   if (type.includes('JSON')) return '@json'
   if (type.includes('ENUM')) return '@string' // Handle enum as string for now
-  
+
   // Default to string for unknown types
   return '@string'
 }
@@ -490,13 +495,13 @@ async function introspectMysqlDatabase(): Promise<string> {
   if (!dbName) {
     throw new Error('MySQL database name is required. Use --db-name option.')
   }
-  
+
   if (!values.user) {
     throw new Error('MySQL username is required. Use -u or --user option.')
   }
 
   console.log('🔍 Introspecting MySQL database schema...\n')
-  
+
   // Create MySQL connection
   const connection = await mysql.createConnection({
     host: values.host,
@@ -510,8 +515,8 @@ async function introspectMysqlDatabase(): Promise<string> {
     // Get all tables
     const [tables] = await connection.execute(`
       SELECT TABLE_NAME as name
-      FROM INFORMATION_SCHEMA.TABLES 
-      WHERE TABLE_SCHEMA = ? 
+      FROM INFORMATION_SCHEMA.TABLES
+      WHERE TABLE_SCHEMA = ?
       AND TABLE_TYPE = 'BASE TABLE'
       ORDER BY TABLE_NAME
     `, [dbName])
@@ -526,7 +531,7 @@ async function introspectMysqlDatabase(): Promise<string> {
 
     for (const table of tables) {
       const tableName = table.name
-      
+
       if (values.verbose) {
         console.log(`🔍 Processing table: ${tableName}`)
       }
@@ -534,11 +539,11 @@ async function introspectMysqlDatabase(): Promise<string> {
       // Get column information
       const [columns] = await connection.execute(`
         SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT, COLUMN_TYPE, COLUMN_KEY, EXTRA
-        FROM INFORMATION_SCHEMA.COLUMNS 
+        FROM INFORMATION_SCHEMA.COLUMNS
         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
         ORDER BY ORDINAL_POSITION
       `, [dbName, tableName]) as [MysqlColumn[], any]
-      
+
       // Get index information
       const [indexes] = await connection.execute(`
         SELECT INDEX_NAME, COLUMN_NAME, NON_UNIQUE, SEQ_IN_INDEX
@@ -546,52 +551,52 @@ async function introspectMysqlDatabase(): Promise<string> {
         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
         ORDER BY INDEX_NAME, SEQ_IN_INDEX
       `, [dbName, tableName]) as [MysqlIndex[], any]
-      
+
       // Check if we have timestamp fields to skip
-      const hasCreatedAt = columns.some(c => 
+      const hasCreatedAt = columns.some(c =>
         c.COLUMN_NAME === 'created_at' || c.COLUMN_NAME === 'createdAt')
-      const hasUpdatedAt = columns.some(c => 
+      const hasUpdatedAt = columns.some(c =>
         c.COLUMN_NAME === 'updated_at' || c.COLUMN_NAME === 'updatedAt')
       const skipTimestamps = hasCreatedAt && hasUpdatedAt
-      
+
       schemaOutput += `  @table '${tableName}', ->\n`
-      
+
       // Output each column with perfect formatting
       for (const col of columns) {
         // Skip timestamp fields if we'll add @timestamps() instead
-        if (skipTimestamps && (col.COLUMN_NAME === 'created_at' || col.COLUMN_NAME === 'createdAt' || 
+        if (skipTimestamps && (col.COLUMN_NAME === 'created_at' || col.COLUMN_NAME === 'createdAt' ||
                               col.COLUMN_NAME === 'updated_at' || col.COLUMN_NAME === 'updatedAt')) {
           continue
         }
-        
+
         let fieldName = col.COLUMN_NAME
         let fieldType = mapMysqlTypeToRip(col.DATA_TYPE, col.COLUMN_NAME)
-        
+
         // Add required suffix if NOT NULL
         if (col.IS_NULLABLE === 'NO' && col.COLUMN_KEY !== 'PRI') {
           fieldName += '!'
         }
-        
+
         // Handle primary keys
         if (col.COLUMN_KEY === 'PRI') {
           fieldName += '!'
         }
-        
+
         // Check for unique constraints
-        const uniqueIndexes = indexes.filter(idx => 
+        const uniqueIndexes = indexes.filter(idx =>
           idx.NON_UNIQUE === 0 && idx.COLUMN_NAME === col.COLUMN_NAME && idx.INDEX_NAME !== 'PRIMARY')
         if (uniqueIndexes.length > 0) {
           fieldName = fieldName.replace('!', '') + '#!'
         }
-        
+
         // Special handling for email fields
         if (isEmailField(col.COLUMN_NAME)) {
           fieldType = '@email'
         }
-        
+
         // Build options array
         const options: string[] = []
-        
+
         // Primary key
         if (col.COLUMN_KEY === 'PRI') {
           options.push('primary: true')
@@ -599,13 +604,13 @@ async function introspectMysqlDatabase(): Promise<string> {
             options.push('autoIncrement: true')
           }
         }
-        
+
         // Length for string types
         const length = extractLength(col.COLUMN_TYPE)
         if (length && fieldType === '@string') {
           options.unshift(length.toString())
         }
-        
+
         // Default values
         if (col.COLUMN_DEFAULT !== null && col.COLUMN_DEFAULT !== 'CURRENT_TIMESTAMP') {
           if (col.COLUMN_DEFAULT === '0' && fieldType === '@boolean') {
@@ -616,54 +621,54 @@ async function introspectMysqlDatabase(): Promise<string> {
             options.push(`default: ${JSON.stringify(col.COLUMN_DEFAULT)}`)
           }
         }
-        
+
         // Format the line with proper alignment
         const paddedType = fieldType.padEnd(9)
         const optionsStr = options.length > 0 ? `, ${options.join(', ')}` : ''
         schemaOutput += `    ${paddedType} '${fieldName}'${optionsStr}\n`
       }
-      
+
       // Add timestamps if we detected them earlier
       if (skipTimestamps) {
         schemaOutput += `    @timestamps()\n`
       }
-      
+
       schemaOutput += '\n'
-      
+
       // Add manual indexes (non-unique, multi-column, or with special options)
       const processedIndexes = new Set<string>()
-      
+
       for (const idx of indexes) {
         if (idx.INDEX_NAME === 'PRIMARY') continue // Skip primary key index
         if (processedIndexes.has(idx.INDEX_NAME)) continue
-        
+
         // Get all columns for this index
         const indexColumns = indexes.filter(i => i.INDEX_NAME === idx.INDEX_NAME)
           .sort((a, b) => a.SEQ_IN_INDEX - b.SEQ_IN_INDEX)
           .map(i => i.COLUMN_NAME)
-        
+
         // Skip single-column unique indexes that we handled with # syntax
         if (indexColumns.length === 1 && idx.NON_UNIQUE === 0) {
           processedIndexes.add(idx.INDEX_NAME)
           continue
         }
-        
+
         if (indexColumns.length === 1) {
           schemaOutput += `    @index '${indexColumns[0]}'\n`
         } else {
           schemaOutput += `    @index [${indexColumns.map(name => `'${name}'`).join(', ')}]\n`
         }
-        
+
         processedIndexes.add(idx.INDEX_NAME)
       }
-      
+
       if (processedIndexes.size > 0) {
         schemaOutput += '\n'
       }
     }
 
     return schemaOutput
-    
+
   } finally {
     await connection.end()
   }
@@ -901,9 +906,9 @@ async function schemaDump() {
       console.log('🔍 Database Schema Introspection')
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
       console.log('')
-      
+
       let schemaOutput: string
-      
+
       // Determine database type based on options provided
       if (values['db-name'] || values.user) {
         // MySQL introspection
@@ -913,15 +918,29 @@ async function schemaDump() {
         const dbPath = join(process.cwd(), values.database!)
         schemaOutput = await introspectDatabase(dbPath)
       }
-      
-      console.log('📋 Generated Rip Schema:')
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
-      console.log('')
-      console.log(schemaOutput)
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
-      console.log('')
-      console.log('✅ Database schema introspection completed successfully!')
-      console.log('💡 Copy the above schema to your schema.rip file')
+
+      if (values.output) {
+        // Save to file
+        const outputPath = values.output
+        writeFileSync(outputPath, schemaOutput, 'utf8')
+        
+        console.log('📋 Generated Rip Schema:')
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+        console.log('')
+        console.log('✅ Database schema introspection completed successfully!')
+        console.log(`💾 Schema saved to: ${outputPath}`)
+        console.log('🎯 Ready to use in your Rip application!')
+      } else {
+        // Output to console
+        console.log('📋 Generated Rip Schema:')
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+        console.log('')
+        console.log(schemaOutput)
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+        console.log('')
+        console.log('✅ Database schema introspection completed successfully!')
+        console.log('💡 Copy the above schema to your schema.rip file')
+      }
 
     } else {
       // Original schema file parsing (placeholder)
@@ -936,28 +955,45 @@ async function schemaDump() {
         console.error(`🔍 Reading schema from: ${schemaPath}`)
       }
 
-      console.log('📋 Complete Schema Dump (including auto-generated indexes)')
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
-      console.log('')
-      console.log('# Example output showing auto-generated indexes:')
-      console.log('')
-      console.log("@table 'users', ->")
-      console.log("  @email    'email!#', 255")
-      console.log("  @string   'username#', 50")
-      console.log("  @string   'firstName!', 100")
-      console.log("  @string   'phone#', 20")
-      console.log("")
-      console.log("  # Indexes:")
-      console.log("  @index 'email#'      # Auto-generated from unique field")
-      console.log("  @index 'username#'   # Auto-generated from unique field")
-      console.log("  @index 'phone#'      # Auto-generated from unique field")
-      console.log("  @index 'firstName'   # Manual non-unique index")
-      console.log('')
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
-      console.log('')
-      console.log('💡 Note: Use --from-db flag to introspect from database instead!')
-      console.log('💡 Example: rip-schema schema:dump --from-db -d ./db/labs.db')
-      console.log('✅ Schema dump completed successfully!')
+      // Generate example schema output (placeholder - in full implementation would parse actual schema file)
+      const exampleOutput = `# Example output showing auto-generated indexes:
+
+@table 'users', ->
+  @email    'email!#', 255
+  @string   'username#', 50
+  @string   'firstName!', 100
+  @string   'phone#', 20
+
+  # Indexes:
+  @index 'email#'      # Auto-generated from unique field
+  @index 'username#'   # Auto-generated from unique field
+  @index 'phone#'      # Auto-generated from unique field
+  @index 'firstName'   # Manual non-unique index
+`
+
+      if (values.output) {
+        // Save to file
+        writeFileSync(values.output, exampleOutput, 'utf8')
+        
+        console.log('📋 Complete Schema Dump (including auto-generated indexes)')
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+        console.log('')
+        console.log('✅ Schema dump completed successfully!')
+        console.log(`💾 Schema saved to: ${values.output}`)
+        console.log('💡 Note: Use --from-db flag to introspect from database instead!')
+        console.log('💡 Example: rip-schema schema:dump --from-db -d ./db/labs.db')
+      } else {
+        // Output to console
+        console.log('📋 Complete Schema Dump (including auto-generated indexes)')
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+        console.log('')
+        console.log(exampleOutput)
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+        console.log('')
+        console.log('💡 Note: Use --from-db flag to introspect from database instead!')
+        console.log('💡 Example: rip-schema schema:dump --from-db -d ./db/labs.db')
+        console.log('✅ Schema dump completed successfully!')
+      }
     }
 
   } catch (error: any) {
