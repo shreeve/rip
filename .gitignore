@@ -1,5 +1,14 @@
-# Keep temporary test/debug files here
+# Temporary files
 tmp/
 *.tmp
 *.test
 *.debug
+
+# Database files
+*.db
+
+# IDE files
+.DS_Store
+
+# Node modules
+node_modules/
