@@ -94,6 +94,12 @@ rip-schema db:push
 # Push schema to database (default: ./db/schema.rip → ./db.db)
 rip-schema db:push
 
+# Generate Zod validation schemas
+rip-schema zod:generate
+
+# Save generated schemas to file
+rip-schema zod:generate > types/schemas.ts
+
 # Custom paths
 rip-schema db:push -s myschema.rip -d mydb.db
 
@@ -103,6 +109,94 @@ rip-schema db:drop
 # Verbose output
 rip-schema db:push -v
 ```
+
+## 🎯 Zod Generation - Single Source of Truth
+
+**Generate type-safe Zod validation schemas directly from your database schema!**
+
+### The Complete Workflow
+
+```bash
+# 1. Define your schema once
+vim db/schema.rip
+
+# 2. Push to database
+rip-schema db:push
+
+# 3. Generate validation schemas
+rip-schema zod:generate > types/schemas.ts
+
+# 4. Use in your API with full type safety!
+```
+
+### From Schema to Validation
+
+**Input** (`db/schema.rip`):
+```coffeescript
+export default schema ->
+  @table 'users', ->
+    @integer  'id!', primary: true, autoIncrement: true
+    @email    'email!', unique: true
+    @string   'firstName!', 100
+    @string   'lastName!', 100
+    @string   'phone!', 20
+    @boolean  'admin', false
+    @json     'preferences'
+    @timestamps()
+```
+
+**Generated Output** (`types/schemas.ts`):
+```typescript
+import { z } from 'zod'
+
+export const UserSchema = z.object({
+  id: z.number().int(),
+  email: z.string().email(),
+  firstName: z.string().max(100),
+  lastName: z.string().max(100),
+  phone: z.string().max(20),
+  admin: z.boolean().default(false),
+  preferences: z.record(z.unknown()).optional()
+})
+
+export type User = z.infer<typeof UserSchema>
+```
+
+### Use in Your API
+
+```coffeescript
+# Import generated schemas
+import { UserSchema } from './types/schemas'
+import { zValidator } from '@hono/zod-validator'
+
+# Type-safe API endpoints
+app.post '/users', zValidator('json', UserSchema.pick({
+  email: true
+  firstName: true
+  lastName: true
+  phone: true
+})), (c) ->
+  data = c.req.valid 'json'  # Fully validated & typed!
+
+  user = db.insert(users).values(data).returning().get!
+  c.json { user }
+
+# Partial updates
+app.patch '/users/:id', zValidator('json', UserSchema.partial().pick({
+  firstName: true
+  lastName: true
+  preferences: true
+})), (c) ->
+  data = c.req.valid 'json'  # Type-safe partial updates!
+```
+
+### Benefits
+
+- ✅ **Single Source of Truth** - One schema for database + validation
+- ✅ **Type Safety** - Generated TypeScript types with `z.infer`
+- ✅ **Auto-Completion** - Full IDE support for all fields
+- ✅ **Validation** - Request/response validation with Zod
+- ✅ **Consistency** - Database structure matches API contracts
 
 ## Real Example
 
@@ -149,9 +243,9 @@ export default Schema ->
 - 📝 [**Changelog**](./CHANGELOG.md) - Version history and release notes
 - 🚀 [**Examples**](../../examples/) - Real-world usage patterns
 
-## Next Release: v0.2.0
+## ✅ Latest Features
 
-**Zod Validation Generation** - Transform your elegant schema definitions into Zod validation schemas! See the [Status](./docs/status.md) for details.
+**🎉 Zod Validation Generation** - Now available! Generate type-safe Zod schemas directly from your database schema with `rip-schema zod:generate`. Complete single-source-of-truth workflow from schema → database → API validation.
 
 ## License
 
