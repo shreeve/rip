@@ -82,7 +82,7 @@ rip-schema db:push
 # Table options
 @table 'posts', id: false, timestamps: false, ->
   @bigint 'custom_id!'
-  
+
 # Custom primary key
 @table 'accounts', primary_key: 'account_num', ->
   @string 'account_num!', 20
@@ -110,7 +110,7 @@ rip-schema db:push -v
 import { schema as Schema } from '@rip/schema'
 
 export default Schema ->
-  
+
   @table 'users', ->
     @string   'name!', 100
     @email    'email!'
@@ -118,7 +118,7 @@ export default Schema ->
     @boolean  'active', true
     @json     'preferences', {}
     @timestamps()
-    
+
     @index    'email', unique: true
 
   @table 'posts', ->
@@ -129,7 +129,7 @@ export default Schema ->
     @boolean  'published', false
     @datetime 'published_at'
     @timestamps()
-    
+
     @index    'slug', unique: true
     @index    ['user_id', 'published']
 
@@ -139,7 +139,7 @@ export default Schema ->
     @text     'content!'
     @boolean  'approved', false
     @timestamps()
-    
+
     @index    'post_id'
 ```
 
