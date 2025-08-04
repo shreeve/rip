@@ -1,1 +1,1 @@
-preload = ["../../bun/rip-bun.ts"]
+preload = ["../../packages/bun/rip-bun.ts"]

@@ -1,0 +1,10 @@
+{
+  "name": "users-example",
+  "version": "1.0.0",
+  "description": "Users API example",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "hono": "^3.11.7"
+  }
+}

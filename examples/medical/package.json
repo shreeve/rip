@@ -1,0 +1,10 @@
+{
+  "name": "medical-example",
+  "version": "1.0.0",
+  "description": "Medical system schema example",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "@rip/schema": "workspace:*"
+  }
+}

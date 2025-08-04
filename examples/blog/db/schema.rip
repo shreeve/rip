@@ -1,6 +1,6 @@
 # Rip Schema Example - Blog Application
 # A simple, practical example showing common patterns for a blog
-import { schema as Schema } from './builder'
+import { schema as Schema } from '@rip/schema'
 export default Schema ->
 
   # Users table with authentication

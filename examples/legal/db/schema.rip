@@ -1,4 +1,4 @@
-import { schema as Schema } from '../../../schema/builder'
+import { schema as Schema } from '@rip/schema'
 
 export default Schema ->
   @table 'lawfirms', ->

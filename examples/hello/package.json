@@ -1,0 +1,10 @@
+{
+  "name": "hello-example",
+  "version": "1.0.0",
+  "description": "Hello World example",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "hono": "^3.11.7"
+  }
+}

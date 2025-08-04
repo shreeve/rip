@@ -1,0 +1,18 @@
+{
+  "name": "rip",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Rip - A multilanguage universal runtime",
+  "workspaces": [
+    "packages/*",
+    "examples/*"
+  ],
+  "scripts": {
+    "lint": "biome check .",
+    "format": "biome format . --write",
+    "clean": "rm -rf node_modules packages/*/node_modules examples/*/node_modules"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.5.3"
+  }
+}

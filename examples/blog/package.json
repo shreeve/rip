@@ -1,9 +1,11 @@
 {
-  "name": "blog-api-example",
+  "name": "blog-example",
   "version": "1.0.0",
   "description": "Blog API example using Rip",
   "type": "module",
+  "private": true,
   "dependencies": {
+    "@rip/schema": "workspace:*",
     "hono": "^3.11.7",
     "drizzle-orm": "^0.29.1",
     "@faker-js/faker": "^8.3.1"

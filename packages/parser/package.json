@@ -1,0 +1,10 @@
+{
+  "name": "@rip/parser",
+  "version": "1.0.0",
+  "description": "SLR(1) Parser Generator for Rip",
+  "type": "module",
+  "main": "rip-parser.rip",
+  "exports": {
+    ".": "./rip-parser.rip"
+  }
+}
