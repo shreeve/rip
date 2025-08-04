@@ -31,8 +31,9 @@
   "author": "Rip Team",
   "license": "MIT",
   "dependencies": {
+    "bun": "*",
     "drizzle-orm": "^0.29.1",
-    "bun": "*"
+    "mysql2": "^3.14.3"
   },
   "devDependencies": {
     "@types/bun": "latest"
