@@ -682,7 +682,7 @@ export class TableBuilder {
           // Perfect comma wall: field name padded to max width, comma right after, one space after comma
           const alignedFieldName = parsed.fieldNamePart.padEnd(fieldNameMaxWidth)
           const options = parsed.afterCommaParts.map(option => option.trim()).join(', ')
-          
+
           return `${alignedMethodCall} ${alignedFieldName}, ${options}`
         } else {
           // No comma for fields without options - don't pad field name
