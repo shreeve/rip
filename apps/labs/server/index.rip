@@ -135,6 +135,12 @@ app.route '/auth', authRouter
 # ====== USER ROUTES ======
 userRouter = new Hono
 
+userRouter.get '/ok', (c) ->
+
+  list = db.select().from(users).all!
+
+  c.json { list }
+
 # Get current user
 userRouter.get '/me', (c) ->
   # Mock auth - in real app would verify JWT
