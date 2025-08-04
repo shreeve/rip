@@ -32,10 +32,10 @@ Solar is a clean SLR(1) parser generator implementation, influenced by Jison but
 
 ```bash
 # Run the parser generator
-coffee parser/rip-parser.rip grammar.coffee -o parser.js
+coffee packages/parser/rip-parser.rip grammar.coffee -o parser.js
 
 # Or with Bun + Rip
-bun parser/rip-parser.rip grammar.coffee -o parser.js
+bun packages/parser/rip-parser.rip grammar.coffee -o parser.js
 ```
 
 ### Example: Calculator Grammar

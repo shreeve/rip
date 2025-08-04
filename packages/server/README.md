@@ -37,8 +37,11 @@ A production-ready replacement for nginx + unicorn + ruby that combines:
 ## 🚀 Quick Start
 
 ```bash
-# Install globally (recommended)
-sudo ln -sf /path/to/server/rip-server.ts /usr/local/bin/rip-server
+# Install globally
+bun link @rip/server
+
+# Or link manually
+sudo ln -sf $(pwd)/packages/server/rip-server.ts /usr/local/bin/rip-server
 
 # Flexible argument syntax - provide options in ANY order!
 rip-server                          # HTTP only (default)

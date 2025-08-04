@@ -16,7 +16,11 @@
 ### 1. Configure in `bunfig.toml`
 
 ```toml
-preload = ["/path/to/bun/rip-bun.ts"]
+# For monorepo root
+preload = ["./packages/bun/rip-bun.ts"]
+
+# For individual projects
+preload = ["../../packages/bun/rip-bun.ts"]
 ```
 
 ### 2. Import `.rip` files directly

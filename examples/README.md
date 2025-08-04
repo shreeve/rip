@@ -39,7 +39,7 @@
 ## Running Examples
 
 ```bash
-# Install dependencies (from example directory)
+# Install all dependencies (from project root)
 bun install
 
 # Run with rip-server

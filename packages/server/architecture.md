@@ -121,18 +121,22 @@ bun run test:http # HTTP endpoint test
 ## 📁 Project Structure
 
 ```
-rip-server/
+packages/server/
 ├── 🧠 manager.ts      # Process manager + hot reload
-├── 🌐 server.ts       # HTTPS/HTTP load balancer (ports 3443/3000)
+├── 🌐 server.ts       # HTTPS/HTTP load balancer
 ├── 🔥 worker.ts       # Sequential request handlers
 ├── 🚀 rip-server.ts   # Pure TypeScript CLI with flexible args
-├── 📋 package.json    # Scripts & dependencies
-├── ⚙️ bunfig.toml     # Rip transpiler config
+├── 📋 package.json    # Package configuration
 ├── 📖 README.md       # Usage documentation
 ├── 🏗️ architecture.md # This file - technical deep dive
-└── 🌟 examples/       # Working examples
-    ├── simple/        # Basic Rip app
-    └── api/           # Advanced REST API
+└── 📝 changelog.md    # Version history
+
+Examples at: /examples/
+├── hello/            # Minimal example
+├── users/            # User management API
+├── blog/             # Full blog application
+├── legal/            # Law firm management
+└── medical/          # Medical system schema
 ```
 
 ## 🧪 Getting Started
@@ -140,16 +144,16 @@ rip-server/
 1. **Start the server (flexible arguments in ANY order):**
    ```bash
    # Simple start
-   rip-server examples/simple
+   rip-server examples/hello
 
    # With options (any order!)
-   rip-server w:5 8080 examples/simple
-   rip-server examples/simple prod w:10 r:100
-   rip-server 3443 examples/simple  # HTTPS with auto-cert
+   rip-server w:5 8080 examples/blog
+   rip-server examples/legal prod w:10 r:100
+   rip-server 3443 examples/users  # HTTPS with auto-cert
    ```
 
 2. **Test hot reload:**
-   - Edit `examples/simple/index.rip`
+   - Edit any `.rip` file in the app directory
    - Save the file
    - Watch workers gracefully restart
    - Test: `curl http://localhost:3000` (or your custom port)

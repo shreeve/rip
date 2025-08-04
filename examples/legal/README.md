@@ -69,7 +69,7 @@ api/
 Using rip-schema DSL in `db/schema.rip`:
 
 ```coffeescript
-import { schema as Schema } from '../../schema/builder'
+import { schema as Schema } from '@rip/schema'
 
 export default Schema ->
   @table 'lawfirms', ->

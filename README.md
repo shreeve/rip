@@ -4,13 +4,10 @@
 
 **A multilanguage universal runtime**
 
-A revolutionary universal parser platform that enables elegant programming across multiple languages. The `rip` executable can run programs written in various languages through interchangeable language packs, with the default **Rip language** serving as a modern echo of CoffeeScript.
+A revolutionary universal parser platform that enables elegant programming across multiple languages. Built as a monorepo with interchangeable components that can be mixed, matched, and shared across the development ecosystem.
 
-*The rip ecosystem transforms language development from monolithic parsers to elegant, interoperable components that can be mixed, matched, and shared across the entire development ecosystem.*
+## 🎯 Design Philosophy: The 4 C's
 
-## The Rip Ecosystem
-
-### 🎯 **Design Philosophy: The 4 C's**
 Everything in the Rip ecosystem follows four core principles, in order of importance:
 
 1. **Correct** *(Most Important)*: Accurate, reliable, and thoroughly tested
@@ -33,84 +30,98 @@ Everything in the Rip ecosystem follows four core principles, in order of import
    - *Premature optimization for brevity can harm clarity*
    - *Elegance is the cherry on top, not the foundation*
 
-## 🚀 Key Components
+## 📦 Packages
 
-### **[Rip Parser](parser/)**
-SLR(1) parser generator that creates fast, reliable parsers from grammar definitions. The foundation of the Rip ecosystem.
+### **[@rip/parser](packages/parser/)**
+SLR(1) parser generator that creates fast, reliable parsers from grammar definitions.
 
-### **[Rip Server](server/)**
-Production-ready application server with multi-process architecture, hot reload, and built-in HTTPS support.
+### **[@rip/server](packages/server/)**
+Production-ready application server with multi-process architecture, hot reload, and HTTPS.
 
-### **[Rip Schema](schema/)**
+### **[@rip/schema](packages/schema/)**
 ActiveRecord-inspired database DSL for elegant schema definitions with Drizzle ORM.
 
-### **[Rip API](api/)**
-Modern database-backed API showcase using the Rip language, Hono, and SQLite.
-
-### **[Rip Bun](bun/)**
+### **[@rip/bun](packages/bun/)**
 Seamless transpilation plugin enabling `.rip` files to run directly in Bun.
+
+## 🚀 Examples
+
+Explore working examples in the [`/examples`](examples/) directory:
+- **[blog](examples/blog/)** - Full blog API with posts, users, and comments
+- **[legal](examples/legal/)** - Law firm management system
+- **[medical](examples/medical/)** - Complex medical schema showcase
+- **[users](examples/users/)** - Simple user management API
+- **[hello](examples/hello/)** - Minimal hello world
 
 ## The Rip Language
 
-**Rip** is a modern echo of CoffeeScript - maintaining all the elegance and expressiveness that made CoffeeScript beloved, while focusing on the core syntax without JSX or literate support.
+**Rip** is a modern echo of CoffeeScript - maintaining elegance and expressiveness while focusing on core syntax.
 
-### ✨ **What Makes Rip Special**
-- **Elegant Syntax**: All the beauty of CoffeeScript's significant whitespace and expressive operators
-- **Modern Runtime**: Designed for today's JavaScript engines (Bun, Node, Deno, browsers)
-- **Clean Focus**: Core language features without JSX or literate extensions
-- **Universal Parsing**: Built on our revolutionary parser architecture
+### Key Features
 
-### 🎯 **Key Language Features**
-
-#### Clean Syntax
 ```coffee
-# Functions with implicit returns
-greet = (name) ->
-  "Hello, #{name}!"
+# Clean function syntax
+greet = (name) -> "Hello, #{name}!"
 
-# Object destructuring
-{name, age} = person
+# Async with ! suffix
+data = fetch(url)!
+result = processData(data)!
 
-# Array comprehensions
-squares = (x * x for x in [1..10])
+# Pattern matching
+status = switch response.code
+  when 200 then 'success'
+  when 404 then 'not found'
+  else 'error'
+
+# Null-safe operations
+userName = user?.profile?.name ? 'Anonymous'
 ```
 
-#### Async Made Simple
-```coffee
-# Using the ! suffix for await
-data = fetch('/api/data')!
-users = db.getUsers()!
-```
+## Quick Start
 
-## 🚀 Getting Started
-
-### Prerequisites
-- **Bun** (v1.0.0+) - [Install Bun](https://bun.sh)
-- **Node.js** (v18+) - For compatibility (optional)
-
-### Quick Start
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/rip.git
-cd rip
-
 # Install dependencies
 bun install
 
-# Run a Rip program
-bun api/index.rip
+# Run an example
+rip-server ./examples/blog
 
-# Start the development server
-cd api && rip-server
+# Create a schema
+cd examples/medical
+rip-schema db:push
+
+# Run directly with Bun
+bun examples/hello/index.rip
 ```
 
-## 📚 Documentation
+## Project Structure
 
-- **[Parser Documentation](parser/)** - SLR(1) parser generator details
-- **[Server Documentation](server/)** - Application server architecture
-- **[Schema Documentation](schema/)** - Database DSL reference
-- **[API Examples](api/)** - Real-world API implementation
-- **[Brand Assets](BRANDING.md)** - Logos and brand guidelines
+```
+rip/
+├── packages/          # Core packages
+│   ├── bun/          # @rip/bun - Transpiler
+│   ├── parser/       # @rip/parser - Parser generator
+│   ├── schema/       # @rip/schema - Database DSL
+│   └── server/       # @rip/server - Multi-worker server
+├── examples/         # Example applications
+├── docs/            # Documentation and assets
+└── coffeescript/    # Standalone CoffeeScript compiler
+```
+
+## Development
+
+This is a Bun workspace monorepo:
+
+```bash
+# Install all dependencies
+bun install
+
+# Run linting
+bun run lint
+
+# Format code
+bun run format
+```
 
 ## License
 
@@ -118,7 +129,7 @@ MIT
 
 ## Contributing
 
-Rip is part of the Rip ecosystem. Contributions welcome!
+Contributions welcome! Please follow the 4 C's principles.
 
 ---
 
