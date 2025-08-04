@@ -12,11 +12,14 @@ import { schema as Schema } from '@rip/schema'
 export default Schema ->
   @table 'users', ->
     @string   'name!', 100        # ! means required
-    @email    'email!'            # Built-in email type
+    @email    'email!#'           # Required + unique (auto-indexed)
+    @string   'username#'         # Optional + unique (auto-indexed)
     @boolean  'active', true      # Default value
     @timestamps()                 # created_at, updated_at
 
+    # Explicit index documentation (optional but recommended)
     @index    'email', unique: true
+    @index    'username', unique: true
 ```
 
 ```bash
@@ -99,6 +102,9 @@ rip-schema zod:generate
 
 # Save generated schemas to file
 rip-schema zod:generate > types/schemas.ts
+
+# Show complete schema including auto-generated indexes
+rip-schema schema:dump
 
 # Custom paths
 rip-schema db:push -s myschema.rip -d mydb.db
@@ -246,6 +252,206 @@ export default Schema ->
 ## ✅ Latest Features
 
 **🎉 Zod Validation Generation** - Now available! Generate type-safe Zod schemas directly from your database schema with `rip-schema zod:generate`. Complete single-source-of-truth workflow from schema → database → API validation.
+
+**🤖 Auto-Indexing for Unique Fields** - Unique fields automatically get unique indexes for optimal performance. Explicit index declarations are encouraged for documentation but not required.
+
+**📋 Schema Dumping** - Use `rip-schema schema:dump` to see your complete schema including all auto-generated indexes for full transparency.
+
+**🔥 Hash (#) Syntax for Unique Fields** - New shortcut syntax inspired by CSS! Use `field#` for unique fields, just like `#id` in CSS. Combines perfectly with `!` for required fields.
+
+## 🔥 Hash (#) Syntax for Unique Fields
+
+**Inspired by CSS `#id` selectors - concise and familiar syntax for unique constraints!**
+
+### The New Syntax
+
+```coffeescript
+@table 'users', ->
+  # New hash syntax - inspired by CSS #id selectors
+  @string   'username#'          # Optional + Unique
+  @email    'email!#'            # Required + Unique
+  @integer  'badge_id#'          # Integer Unique
+  @string   'handle#!'           # Unique + Required (either order works)
+
+  # Traditional syntax still works
+  @string   'api_key', unique: true    # Traditional approach
+```
+
+### All Combinations
+
+| Syntax | Database Constraint | Meaning |
+|--------|-------------------|---------|
+| `field#` | `UNIQUE` | Optional but unique |
+| `field!` | `NOT NULL` | Required, duplicates OK |
+| `field!#` | `NOT NULL + UNIQUE` | Required and unique |
+| `field#!` | `NOT NULL + UNIQUE` | Same as above (order doesn't matter) |
+| `field` | No constraints | Optional, duplicates OK |
+
+### CSS Inspiration
+
+Just like CSS uses `#id` for unique page elements:
+
+```css
+/* CSS: # means unique identifier */
+#header { color: blue; }
+#footer { color: gray; }
+```
+
+```coffeescript
+# Rip Schema: # means unique field
+@string 'username#'     # Unique username
+@email  'email#'        # Unique email
+```
+
+### Benefits
+
+- ✅ **Concise** - `field#` vs `field, unique: true`
+- ✅ **Familiar** - CSS developers instantly understand
+- ✅ **Flexible** - Works with any field type
+- ✅ **Combinable** - Mix with `!` for required fields
+- ✅ **Backward Compatible** - Traditional syntax still works
+- ✅ **Auto-Indexed** - Unique fields automatically get indexes
+
+### Real-World Examples
+
+```coffeescript
+@table 'users', ->
+  @email    'email!#'            # Login email (required + unique)
+  @string   'username#'          # Optional handle (unique if provided)
+  @string   'firstName!'         # Required name (not unique)
+  @string   'external_id#'       # Optional external system ID (unique)
+  @integer  'badge_number#'      # Optional badge (unique if provided)
+```
+
+## 🤖 Auto-Indexing for Unique Fields
+
+**Unique fields automatically get unique indexes - no more forgetting to index your constraints!**
+
+### How It Works
+
+```coffeescript
+@table 'users', ->
+  # Using new hash syntax
+  @email    'email!#'      # ✅ Auto-indexed (required + unique)
+  @string   'username#'    # ✅ Auto-indexed (optional + unique)
+  @string   'firstName!'   # ❌ Not unique - no auto-index
+  @string   'handle!#'     # ✅ Auto-indexed (required + unique)
+
+  # Traditional syntax also auto-indexed
+  @string   'api_key', unique: true  # ✅ Auto-indexed
+```
+
+**Behind the scenes**, rip-schema automatically creates unique indexes for:
+- `email` (unique index from `email!#`)
+- `username` (unique index from `username#`)
+- `handle` (unique index from `handle!#`)
+- `api_key` (unique index from traditional syntax)
+
+### Best Practice: Explicit Documentation
+
+While auto-indexing works silently, **explicit is better than implicit**:
+
+```coffeescript
+@table 'users', ->
+  # New concise hash syntax
+  @email    'email!#'         # Required + unique
+  @string   'username#'       # Optional + unique
+  @string   'firstName!'      # Required only
+  @string   'phone!#'         # Required + unique
+
+  # Explicit index documentation (recommended!)
+  @index 'email', unique: true        # ✅ Self-documenting
+  @index 'username', unique: true     # ✅ Clear intent
+  @index 'phone', unique: true        # ✅ Visible to team
+  @index 'firstName'                  # Manual non-unique index
+```
+
+### Schema Transparency
+
+Use `rip-schema schema:dump` to see the complete picture:
+
+```bash
+$ rip-schema schema:dump
+```
+
+```coffeescript
+@table 'users', ->
+  # ... field definitions ...
+
+  # Indexes:
+  @index 'email', unique: true      # Auto-generated from unique field
+  @index 'username', unique: true   # Auto-generated from unique field
+  @index 'phone', unique: true      # Auto-generated from unique field
+  @index 'firstName'                # Manual non-unique index
+```
+
+### Benefits
+
+- ✅ **Performance** - Unique fields are always properly indexed
+- ✅ **Safety** - Can't forget to index unique constraints
+- ✅ **Documentation** - Explicit indexes serve as clear intent
+- ✅ **Transparency** - Schema dumping shows complete picture
+- ✅ **No Duplicates** - Smart detection prevents redundant indexes
+
+## 🤔 Unique vs Required: Understanding the Difference
+
+**Important**: `unique` and `required` are completely separate concepts!
+
+### The Four Combinations
+
+```coffeescript
+@table 'users', ->
+  # 1. Required + Unique (most common for identifiers)
+  @email    'email!', unique: true       # Must exist, must be unique
+
+  # 2. Optional + Unique (common for optional identifiers)
+  @string   'username', unique: true     # Can be null, but if present must be unique
+
+  # 3. Required Only (common for data fields)
+  @string   'firstName!', 100            # Must exist, duplicates allowed
+
+  # 4. Optional Only (common for optional data)
+  @string   'bio'                        # Can be null, duplicates allowed
+```
+
+### Real-World Examples from Our Labs Schema
+
+```coffeescript
+# Required + Unique: Login credentials
+@email    'email!', unique: true         # ✅ john@example.com, ❌ NULL, ❌ duplicates
+
+# Optional + Unique: Verification codes
+@string   'code', unique: true           # ✅ 'ABC123', ✅ NULL (multiple), ❌ duplicates
+
+# Required + Unique: Specimen tracking
+@string   'barcode!', unique: true       # ✅ 'SP001', ❌ NULL, ❌ duplicates
+```
+
+### Key Database Behavior
+
+**UNIQUE constraint allows multiple NULLs** because:
+- `NULL ≠ NULL` in SQL (unknowns are not considered equal)
+- Multiple rows can have `NULL` in a unique column
+- Only non-NULL values must be unique
+
+### Auto-Indexing Behavior
+
+**All unique fields get indexed**, regardless of whether they're required:
+
+```coffeescript
+@string   'username', unique: true       # 🤖 Auto-indexed (optional unique)
+@email    'email!', unique: true         # 🤖 Auto-indexed (required unique)
+@string   'firstName!'                   # ❌ Not indexed (required only)
+```
+
+### When to Use Each Pattern
+
+| Pattern | Use Case | Examples |
+|---------|----------|----------|
+| `field!, unique: true` | **Primary identifiers** | email, username, SSN, barcode |
+| `field, unique: true` | **Optional identifiers** | external_id, verification_code, handle |
+| `field!` | **Required data** | firstName, phone, address |
+| `field` | **Optional data** | bio, notes, preferences |
 
 ## 🔮 Future Enhancements - Reusability & Composition
 

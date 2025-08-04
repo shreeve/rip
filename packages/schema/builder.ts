@@ -10,8 +10,6 @@ import { sql } from 'drizzle-orm'
 import {
   type AnySQLiteColumn,
   blob,
-  InferInsertModel,
-  InferSelectModel,
   integer,
   real,
   type SQLiteTableWithColumns,
@@ -32,16 +30,55 @@ type ColumnOptions = {
   onUpdate?: 'cascade' | 'restrict' | 'set null'
 }
 
+// Index definition interface
+interface IndexDefinition {
+  name: string
+  columns: string[]
+  unique: boolean
+  auto: boolean  // true = auto-generated, false = manual
+  options?: {
+    partial?: string  // For partial indexes like: substr(email, 1, 10)
+    where?: string    // For conditional indexes
+  }
+}
+
 // Column builder that wraps Drizzle columns
 export class ColumnBuilder {
   private columns: Record<string, AnySQLiteColumn> = {}
+  private uniqueFields: Set<string> = new Set()  // Track fields marked as unique
 
-  // Parse field notation: name! means required
-  private parseField(name: string): { name: string; required: boolean } {
-    const required = name.endsWith('!')
+  // Parse field notation: name! means required, name# means unique
+  private parseField(name: string): { name: string; required: boolean; unique: boolean } {
+    let fieldName = name
+    let required = false
+    let unique = false
+
+    // Handle combined suffixes first
+    if (fieldName.endsWith('!#')) {
+      required = true
+      unique = true
+      fieldName = fieldName.slice(0, -2)
+    } else if (fieldName.endsWith('#!')) {
+      unique = true
+      required = true
+      fieldName = fieldName.slice(0, -2)
+    } else {
+      // Handle individual suffixes
+      if (fieldName.endsWith('!')) {
+        required = true
+        fieldName = fieldName.slice(0, -1)
+      }
+
+      if (fieldName.endsWith('#')) {
+        unique = true
+        fieldName = fieldName.slice(0, -1)
+      }
+    }
+
     return {
-      name: required ? name.slice(0, -1) : name,
+      name: fieldName,
       required,
+      unique,
     }
   }
 
@@ -99,7 +136,7 @@ export class ColumnBuilder {
   }
 
   string(fieldName: string, ...args: any[]) {
-    const { name, required } = this.parseField(fieldName)
+    const { name, required, unique } = this.parseField(fieldName)
     const options = this.parseParams(...args)
 
     let column = text(name)
@@ -107,8 +144,13 @@ export class ColumnBuilder {
     if (options.default !== undefined) {
       column = column.default(options.default)
     }
-    if (options.unique) {
+
+    // Check for unique from field name syntax OR options
+    const isUnique = unique || options.unique
+    if (isUnique) {
       column = column.unique()
+      // Track unique field for auto-indexing
+      this.uniqueFields.add(name)
     }
 
     this.columns[name] = column as any
@@ -116,7 +158,7 @@ export class ColumnBuilder {
   }
 
   text(fieldName: string, ...args: any[]) {
-    const { name, required } = this.parseField(fieldName)
+    const { name, required, unique } = this.parseField(fieldName)
     const options = this.parseParams(...args)
 
     let column = text(name)
@@ -125,18 +167,34 @@ export class ColumnBuilder {
       column = column.default(options.default)
     }
 
+    // Check for unique from field name syntax OR options
+    const isUnique = unique || options.unique
+    if (isUnique) {
+      column = column.unique()
+      // Track unique field for auto-indexing
+      this.uniqueFields.add(name)
+    }
+
     this.columns[name] = column as any
     return this
   }
 
   integer(fieldName: string, ...args: any[]) {
-    const { name, required } = this.parseField(fieldName)
+    const { name, required, unique } = this.parseField(fieldName)
     const options = this.parseParams(...args)
 
     let column = integer(name)
     if (required) column = column.notNull()
     if (options.default !== undefined) {
       column = column.default(options.default)
+    }
+
+    // Check for unique from field name syntax OR options
+    const isUnique = unique || options.unique
+    if (isUnique) {
+      column = column.unique()
+      // Track unique field for auto-indexing
+      this.uniqueFields.add(name)
     }
 
     this.columns[name] = column as any
@@ -334,12 +392,25 @@ export class ColumnBuilder {
   getColumns() {
     return this.columns
   }
+
+  // Get unique fields (for TableBuilder access)
+  getUniqueFields(): Set<string> {
+    return this.uniqueFields
+  }
+
+  // Special method to add primary key with auto-increment
+  addPrimaryKey(name: string, autoIncrement: boolean = true) {
+    const column = integer(name).primaryKey({ autoIncrement })
+    this.columns[name] = column as any
+    return this
+  }
 }
 
 // Table builder that uses the column builder
 export class TableBuilder {
   private builder = new ColumnBuilder()
   public tableName: string
+  private indexes: IndexDefinition[] = []  // Track all indexes for this table
 
   constructor(tableName: string, options?: any) {
     this.tableName = tableName
@@ -352,9 +423,7 @@ export class TableBuilder {
       if (idType === 'uuid') {
         this.builder.uuid(pk)
       } else {
-        this.builder.integer(pk).columns[pk] = integer(pk).primaryKey({
-          autoIncrement: true,
-        })
+        this.builder.addPrimaryKey(pk, true)
       }
     }
 
@@ -384,9 +453,61 @@ export class TableBuilder {
   timestamps = this.builder.timestamps.bind(this.builder)
   belongs_to = this.builder.belongs_to.bind(this.builder)
 
-  // Index methods (stored for later use)
+  // Index methods - enhanced to handle auto-indexing logic
   index(...args: any[]) {
-    // Store index info for migrations
+    if (args.length === 0) return this
+
+    // Parse index arguments
+    let columns: string[] = []
+    let options: any = {}
+    let indexName: string | undefined
+
+    for (const arg of args) {
+      if (typeof arg === 'string') {
+        columns.push(arg)
+      } else if (Array.isArray(arg)) {
+        columns.push(...arg)
+      } else if (typeof arg === 'object') {
+        options = { ...options, ...arg }
+      }
+    }
+
+    if (columns.length === 0) return this
+
+    // Generate index name if not provided
+    if (!indexName) {
+      const suffix = options.unique ? 'unique' : 'idx'
+      indexName = `${this.tableName}_${columns.join('_')}_${suffix}`
+    }
+
+    // Check if this is a single-column unique index on a field that's already unique
+    if (columns.length === 1 && options.unique) {
+      const columnName = columns[0]
+      const uniqueFields = this.builder.getUniqueFields()
+
+      if (uniqueFields.has(columnName)) {
+        // Field is already unique - this is explicit documentation (good practice!)
+        if (!options.partial && !options.where) {
+          // This is just explicit documentation of the auto-generated index
+          // Allow it silently - explicit is better than implicit
+          console.log(`✅ Explicit unique index on '${columnName}' (matches auto-generated)`)
+        }
+      }
+    }
+
+    // Store the index definition
+    const indexDef: IndexDefinition = {
+      name: indexName,
+      columns,
+      unique: Boolean(options.unique),
+      auto: false,  // This is a manual index
+      options: {
+        partial: options.partial,
+        where: options.where
+      }
+    }
+
+    this.indexes.push(indexDef)
     return this
   }
 
@@ -395,10 +516,74 @@ export class TableBuilder {
     return this
   }
 
+  // Generate auto-indexes for unique fields
+  private generateAutoIndexes() {
+    const uniqueFields = this.builder.getUniqueFields()
+
+    for (const fieldName of uniqueFields) {
+      // Check if there's already a manual index for this field (any type)
+      const hasManualIndex = this.indexes.some(idx =>
+        idx.columns.length === 1 &&
+        idx.columns[0] === fieldName
+      )
+
+      if (!hasManualIndex) {
+        // Auto-generate unique index only if no manual index exists
+        const indexDef: IndexDefinition = {
+          name: `${this.tableName}_${fieldName}_unique`,
+          columns: [fieldName],
+          unique: true,
+          auto: true  // This is an auto-generated index
+        }
+
+        this.indexes.push(indexDef)
+      }
+    }
+  }
+
+  // Get all indexes (manual + auto-generated)
+  getIndexes(): IndexDefinition[] {
+    this.generateAutoIndexes()
+    return this.indexes
+  }
+
+  // Dump complete schema including auto-generated indexes
+  dumpSchema(): string {
+    this.generateAutoIndexes() // Ensure auto-indexes are generated
+
+    const lines: string[] = []
+    lines.push(`@table '${this.tableName}', ->`)
+
+    // Add field definitions (we'd need to track these to show properly)
+    lines.push(`  # Field definitions would be shown here`)
+    lines.push(`  # (requires field tracking enhancement)`)
+    lines.push('')
+
+    // Add all indexes
+    if (this.indexes.length > 0) {
+      lines.push('  # Indexes:')
+
+      for (const index of this.indexes) {
+        const autoComment = index.auto ? '  # Auto-generated from unique field' : ''
+        const uniqueFlag = index.unique ? ', unique: true' : ''
+        const partialOption = index.options?.partial ? `, partial: '${index.options.partial}'` : ''
+        const whereOption = index.options?.where ? `, where: '${index.options.where}'` : ''
+
+        if (index.columns.length === 1) {
+          lines.push(`  @index '${index.columns[0]}'${uniqueFlag}${partialOption}${whereOption}${autoComment}`)
+        } else {
+          lines.push(`  @index [${index.columns.map(c => `'${c}'`).join(', ')}]${uniqueFlag}${partialOption}${whereOption}${autoComment}`)
+        }
+      }
+    }
+
+    return lines.join('\n')
+  }
+
   // Build the actual Drizzle table
   build(): SQLiteTableWithColumns<any> {
     const columns = this.builder.getColumns()
-    return sqliteTable(this.tableName, columns)
+    return sqliteTable(this.tableName, columns as any)
   }
 }
 
@@ -441,5 +626,4 @@ export function schema(callback: (this: any) => void) {
   return tables
 }
 
-// Re-export types
-export type { InferInsertModel, InferSelectModel }
+// Re-export types (removed InferInsertModel, InferSelectModel as they're not in sqlite-core)
