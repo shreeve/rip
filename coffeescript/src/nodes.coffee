@@ -3956,6 +3956,13 @@ exports.Code = class Code extends Base
         @isAsync = yes
       if node instanceof For and node.isAwait()
         @isAsync = yes
+      # rip: Detect ! suffix (async call operator) to set @isAsync
+      if node instanceof IdentifierLiteral and node.value?.endsWith?('!')
+        @isAsync = yes
+      if node instanceof Value
+        lastProp = node.properties?[node.properties.length - 1]
+        if lastProp?.name?.value?.endsWith?('!')
+          @isAsync = yes
 
     @propagateLhs()
 

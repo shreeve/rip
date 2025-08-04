@@ -1649,7 +1649,7 @@
       // rip: Override compilation to handle async call operator (!)
       compileNode(o) {
         var name;
-        // Check if identifier ends with ! (async call operator)  
+        // Check if identifier ends with ! (async call operator)
         if (this.value.endsWith('!')) {
           // Remove the ! and wrap with await and parentheses
           name = this.value.slice(0, -1);
@@ -2164,7 +2164,6 @@
         var fragments, i, isAsyncCall, isBeingCalled, j, lastProp, len1, prop, propName, props, ref1, ref2;
         this.base.front = this.front;
         props = this.properties;
-        
         // rip: Check if last property ends with ! (async call operator)
         lastProp = props[props.length - 1];
         isAsyncCall = lastProp != null ? (ref1 = lastProp.name) != null ? (ref2 = ref1.value) != null ? typeof ref2.endsWith === "function" ? ref2.endsWith('!') : void 0 : void 0 : void 0 : void 0;
@@ -3069,11 +3068,9 @@
           ref1.front = this.front;
         }
         compiledArgs = [];
-        
         // rip: Check if this is an async call (variable ends with !)
         lastProp = (ref2 = this.variable) != null ? (ref3 = ref2.properties) != null ? ref3[this.variable.properties.length - 1] : void 0 : void 0;
         isAsyncCall = lastProp != null ? (ref4 = lastProp.name) != null ? (ref5 = ref4.value) != null ? typeof ref5.endsWith === "function" ? ref5.endsWith('!') : void 0 : void 0 : void 0 : void 0;
-        
         // If variable is `Accessor` fragments are cached and used later
         // in `Value::compileNode` to ensure correct order of the compilation,
         // and reuse of variables in the scope.
@@ -3112,7 +3109,6 @@
         if (this.isNew) {
           fragments.push(this.makeCode('new '));
         }
-        
         // rip: Handle async call with arguments
         if (isAsyncCall) {
           // Mark the variable to not add automatic () in Value.compileNode
@@ -5889,6 +5885,7 @@
         this.isAsync = false;
         this.isMethod = false;
         this.body.traverseChildren(false, (node) => {
+          var lastProp, ref2, ref3, ref4, ref5;
           if ((node instanceof Op && node.isYield()) || node instanceof YieldReturn) {
             this.isGenerator = true;
           }
@@ -5896,7 +5893,17 @@
             this.isAsync = true;
           }
           if (node instanceof For && node.isAwait()) {
-            return this.isAsync = true;
+            this.isAsync = true;
+          }
+          // rip: Detect ! suffix (async call operator) to set @isAsync
+          if (node instanceof IdentifierLiteral && ((ref2 = node.value) != null ? typeof ref2.endsWith === "function" ? ref2.endsWith('!') : void 0 : void 0)) {
+            this.isAsync = true;
+          }
+          if (node instanceof Value) {
+            lastProp = (ref3 = node.properties) != null ? ref3[node.properties.length - 1] : void 0;
+            if (lastProp != null ? (ref4 = lastProp.name) != null ? (ref5 = ref4.value) != null ? typeof ref5.endsWith === "function" ? ref5.endsWith('!') : void 0 : void 0 : void 0 : void 0) {
+              return this.isAsync = true;
+            }
           }
         });
         this.propagateLhs();
