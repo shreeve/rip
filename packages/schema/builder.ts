@@ -42,10 +42,21 @@ interface IndexDefinition {
   }
 }
 
+// Field definition for schema dumping
+interface FieldDefinition {
+  name: string
+  type: string
+  required: boolean
+  unique: boolean
+  options: any
+  originalCall: string // The original method call like 'string', 'integer', etc.
+}
+
 // Column builder that wraps Drizzle columns
 export class ColumnBuilder {
   private columns: Record<string, AnySQLiteColumn> = {}
   private uniqueFields: Set<string> = new Set()  // Track fields marked as unique
+  private fieldDefinitions: FieldDefinition[] = [] // Track all field definitions for schema dumping
 
   // Parse field notation: name! means required, name# means unique
   private parseField(name: string): { name: string; required: boolean; unique: boolean } {
@@ -135,6 +146,18 @@ export class ColumnBuilder {
     return options
   }
 
+  // Track field definition for schema dumping
+  private trackField(fieldName: string, type: string, isRequired: boolean, isUnique: boolean, options: any, originalCall: string) {
+    this.fieldDefinitions.push({
+      name: fieldName,
+      type,
+      required: isRequired,
+      unique: isUnique,
+      options,
+      originalCall
+    })
+  }
+
   string(fieldName: string, ...args: any[]) {
     const { name, required, unique } = this.parseField(fieldName)
     const options = this.parseParams(...args)
@@ -152,6 +175,9 @@ export class ColumnBuilder {
       // Track unique field for auto-indexing
       this.uniqueFields.add(name)
     }
+
+    // Track field definition for schema dumping
+    this.trackField(name, 'string', required, isUnique || false, options, 'string')
 
     this.columns[name] = column as any
     return this
@@ -196,6 +222,9 @@ export class ColumnBuilder {
       // Track unique field for auto-indexing
       this.uniqueFields.add(name)
     }
+
+    // Track field definition for schema dumping
+    this.trackField(name, 'integer', required, isUnique || false, options, 'integer')
 
     this.columns[name] = column as any
     return this
@@ -398,6 +427,11 @@ export class ColumnBuilder {
     return this.uniqueFields
   }
 
+  // Get all field definitions for schema dumping
+  getFieldDefinitions(): FieldDefinition[] {
+    return this.fieldDefinitions
+  }
+
   // Special method to add primary key with auto-increment
   addPrimaryKey(name: string, autoIncrement: boolean = true) {
     const column = integer(name).primaryKey({ autoIncrement })
@@ -547,34 +581,190 @@ export class TableBuilder {
     return this.indexes
   }
 
-  // Dump complete schema including auto-generated indexes
+  // Dump complete schema with beautiful schemazing.rb-style alignment
   dumpSchema(): string {
     this.generateAutoIndexes() // Ensure auto-indexes are generated
 
     const lines: string[] = []
     lines.push(`@table '${this.tableName}', ->`)
 
-    // Add field definitions (we'd need to track these to show properly)
-    lines.push(`  # Field definitions would be shown here`)
-    lines.push(`  # (requires field tracking enhancement)`)
-    lines.push('')
+    // Get field definitions with canonical field#! ordering
+    const fieldDefinitions = this.builder.getFieldDefinitions()
 
-    // Add all indexes
+    if (fieldDefinitions.length > 0) {
+      // Build field lines first
+      const fieldLines: string[] = []
+
+      for (const field of fieldDefinitions) {
+        // Create canonical field name with #! ordering (unique first, then required)
+        let canonicalName = field.name
+        if (field.unique && field.required) {
+          canonicalName = `${field.name}#!`
+        } else if (field.unique) {
+          canonicalName = `${field.name}#`
+        } else if (field.required) {
+          canonicalName = `${field.name}!`
+        }
+
+        // Build the method call part
+        const methodCall = `  @${field.originalCall}`
+        const fieldNamePart = `'${canonicalName}'`
+
+        // Build options part
+        const optionParts: string[] = []
+
+        // Add size/precision options
+        if (field.options.size && field.originalCall === 'string') {
+          optionParts.push(field.options.size.toString())
+        }
+        if (field.options.precision && field.options.scale) {
+          optionParts.push(`[${field.options.precision}, ${field.options.scale}]`)
+        }
+
+        // Add default value
+        if (field.options.default !== undefined) {
+          if (typeof field.options.default === 'string') {
+            optionParts.push(`["${field.options.default}"]`)
+          } else if (typeof field.options.default === 'boolean' && !field.required) {
+            // Only show boolean defaults if not required (required booleans default to false automatically)
+            optionParts.push(`[${field.options.default}]`)
+          } else if (typeof field.options.default === 'number') {
+            optionParts.push(`[${field.options.default}]`)
+          }
+        }
+
+        // Build complete field line
+        let fieldLine = `${methodCall} ${fieldNamePart}`
+        if (optionParts.length > 0) {
+          fieldLine += `, ${optionParts.join(', ')}`
+        }
+
+        fieldLines.push(fieldLine)
+      }
+
+      // ✨ PHASE 1: Find column widths (simplified - no number alignment complexity)
+      let methodCallMaxWidth = 0
+      let fieldNameMaxWidth = 0
+
+      // Parse all lines to find maximum widths
+      const parsedLines = fieldLines.map(line => {
+        const parts = line.split(', ')
+        const beforeCommaPart = parts[0]
+        const afterCommaParts = parts.slice(1)
+
+        const methodCallMatch = beforeCommaPart.match(/^(\s*@\w+)\s+(.+)$/)
+        if (methodCallMatch) {
+          const methodCall = methodCallMatch[1]
+          const fieldNamePart = methodCallMatch[2]
+
+          methodCallMaxWidth = Math.max(methodCallMaxWidth, methodCall.length)
+          fieldNameMaxWidth = Math.max(fieldNameMaxWidth, fieldNamePart.length)
+
+          return {
+            methodCall,
+            fieldNamePart,
+            afterCommaParts,
+            original: line
+          }
+        }
+
+        return { original: line }
+      })
+
+      // ✨ PHASE 2: Apply perfect alignment
+      const alignedFieldLines = parsedLines.map(parsed => {
+        if (!parsed.methodCall) return parsed.original
+
+        // Align method call with exactly 1 space after
+        const alignedMethodCall = parsed.methodCall.padEnd(methodCallMaxWidth)
+
+                if (parsed.afterCommaParts.length > 0) {
+          // Perfect comma wall: field name padded to max width, comma right after, one space after comma
+          const alignedFieldName = parsed.fieldNamePart.padEnd(fieldNameMaxWidth)
+          const options = parsed.afterCommaParts.map(option => option.trim()).join(', ')
+          
+          return `${alignedMethodCall} ${alignedFieldName}, ${options}`
+        } else {
+          // No comma for fields without options - don't pad field name
+          return `${alignedMethodCall} ${parsed.fieldNamePart}`
+        }
+      })
+
+      lines.push(...alignedFieldLines)
+    }
+
+    // Add spacer line before indexes (like schemazing.rb)
     if (this.indexes.length > 0) {
-      lines.push('  # Indexes:')
+      lines.push('')
+
+      // Build index lines
+      const indexLines: string[] = []
 
       for (const index of this.indexes) {
         const autoComment = index.auto ? '  # Auto-generated from unique field' : ''
-        const uniqueFlag = index.unique ? ', unique: true' : ''
         const partialOption = index.options?.partial ? `, partial: '${index.options.partial}'` : ''
         const whereOption = index.options?.where ? `, where: '${index.options.where}'` : ''
 
+        let indexLine: string
         if (index.columns.length === 1) {
-          lines.push(`  @index '${index.columns[0]}'${uniqueFlag}${partialOption}${whereOption}${autoComment}`)
+          // Use # suffix for unique indexes (consistent with field syntax)
+          const columnName = index.unique ? `${index.columns[0]}#` : index.columns[0]
+          indexLine = `  @index '${columnName}'${partialOption}${whereOption}${autoComment}`
         } else {
-          lines.push(`  @index [${index.columns.map(c => `'${c}'`).join(', ')}]${uniqueFlag}${partialOption}${whereOption}${autoComment}`)
+          // For multi-column indexes, still use unique: true since # suffix doesn't make sense for arrays
+          const uniqueFlag = index.unique ? ', unique: true' : ''
+          indexLine = `  @index [${index.columns.map(c => `'${c}'`).join(', ')}]${uniqueFlag}${partialOption}${whereOption}${autoComment}`
         }
+
+        indexLines.push(indexLine)
       }
+
+      // Apply same perfect alignment to index lines
+      let indexMethodMaxWidth = 0
+      let indexFieldMaxWidth = 0
+
+      // Parse index lines to find maximum widths
+      const parsedIndexLines = indexLines.map(line => {
+        const parts = line.split(', ')
+        const beforeCommaPart = parts[0]
+        const afterCommaParts = parts.slice(1)
+
+        const methodCallMatch = beforeCommaPart.match(/^(\s*@\w+)\s+(.+)$/)
+        if (methodCallMatch) {
+          const methodCall = methodCallMatch[1]
+          const fieldNamePart = methodCallMatch[2]
+
+          indexMethodMaxWidth = Math.max(indexMethodMaxWidth, methodCall.length)
+          indexFieldMaxWidth = Math.max(indexFieldMaxWidth, fieldNamePart.length)
+
+          return {
+            methodCall,
+            fieldNamePart,
+            afterCommaParts,
+            original: line
+          }
+        }
+
+        return { original: line }
+      })
+
+      const alignedIndexLines = parsedIndexLines.map(parsed => {
+        if (!parsed.methodCall) return parsed.original
+
+        // Align method call with exactly 1 space after
+        const alignedMethodCall = parsed.methodCall.padEnd(indexMethodMaxWidth)
+
+        // Align field name
+        const alignedFieldName = parsed.fieldNamePart.padEnd(indexFieldMaxWidth)
+
+        if (parsed.afterCommaParts.length > 0) {
+          return `${alignedMethodCall} ${alignedFieldName},${parsed.afterCommaParts.join(', ')}`
+        } else {
+          return `${alignedMethodCall} ${alignedFieldName}`
+        }
+      })
+
+      lines.push(...alignedIndexLines)
     }
 
     return lines.join('\n')

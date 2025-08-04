@@ -18,8 +18,8 @@ export default Schema ->
     @timestamps()                 # created_at, updated_at
 
     # Explicit index documentation (optional but recommended)
-    @index    'email', unique: true
-    @index    'username', unique: true
+    @index    'email#'
+    @index    'username#'
 ```
 
 ```bash
@@ -77,7 +77,7 @@ rip-schema db:push
 ```coffeescript
 # Required fields and unique indexes
 @string   'email!'            # ! suffix = required
-@index    'email!'            # ! suffix = unique
+@index    'email#'            # # suffix = unique
 
 # Timestamps helper
 @timestamps()                 # Adds created_at, updated_at
@@ -219,7 +219,7 @@ export default Schema ->
     @json     'preferences', {}
     @timestamps()
 
-    @index    'email', unique: true
+    @index    'email#'
 
   @table 'posts', ->
     @bigint   'user_id!'
@@ -230,7 +230,7 @@ export default Schema ->
     @datetime 'published_at'
     @timestamps()
 
-    @index    'slug', unique: true
+    @index    'slug#'
     @index    ['user_id', 'published']
 
   @table 'comments', ->
@@ -360,9 +360,9 @@ While auto-indexing works silently, **explicit is better than implicit**:
   @string   'phone!#'         # Required + unique
 
   # Explicit index documentation (recommended!)
-  @index 'email', unique: true        # ✅ Self-documenting
-  @index 'username', unique: true     # ✅ Clear intent
-  @index 'phone', unique: true        # ✅ Visible to team
+  @index 'email#'                    # ✅ Self-documenting
+  @index 'username#'                 # ✅ Clear intent
+  @index 'phone#'                    # ✅ Visible to team
   @index 'firstName'                  # Manual non-unique index
 ```
 
@@ -379,9 +379,9 @@ $ rip-schema schema:dump
   # ... field definitions ...
 
   # Indexes:
-  @index 'email', unique: true      # Auto-generated from unique field
-  @index 'username', unique: true   # Auto-generated from unique field
-  @index 'phone', unique: true      # Auto-generated from unique field
+  @index 'email#'                   # Auto-generated from unique field
+  @index 'username#'                # Auto-generated from unique field
+  @index 'phone#'                   # Auto-generated from unique field
   @index 'firstName'                # Manual non-unique index
 ```
 
