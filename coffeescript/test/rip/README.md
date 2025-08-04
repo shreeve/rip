@@ -15,6 +15,19 @@ This directory contains tests specific to **rip's modernization features**.
 - `future-features.coffee` - Tests for upcoming ES6+ features
 - `regression.coffee` - Tests to prevent regressions in modernization
 
+## Language Notes
+
+### Range Syntax
+CoffeeScript's range operator `..` creates arrays and doesn't support open-ended ranges:
+- `1..10` creates `[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]`
+- `5..` is **not valid** CoffeeScript syntax
+- `..20` is **not valid** CoffeeScript syntax
+
+For DSLs needing range constraints, consider alternatives like:
+- Array notation: `[3, 50]` for "3 to 50"
+- Use `null` for unbounded: `[0, null]` for "0 or more"
+- String notation: `'3..50'`, `'0..'`, `'..100'`
+
 ## Running Tests
 
 ```bash
