@@ -1,6 +1,6 @@
 /// <reference types="bun-types" />
 
-import { compile } from '../coffeescript/lib/coffeescript'
+import { compile } from '../../coffeescript/lib/coffeescript'
 
 Bun.plugin({
   name: 'rip-bun',
