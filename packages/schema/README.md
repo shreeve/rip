@@ -247,6 +247,236 @@ export default Schema ->
 
 **🎉 Zod Validation Generation** - Now available! Generate type-safe Zod schemas directly from your database schema with `rip-schema zod:generate`. Complete single-source-of-truth workflow from schema → database → API validation.
 
+## 🔮 Future Enhancements - Reusability & Composition
+
+**Reusable field groups and composable schemas for even cleaner definitions:**
+
+### Reusable Field Mixins
+```coffeescript
+# Define reusable field groups
+@mixin 'AddressFields', ->
+  @string 'street!'
+  @string 'city!'
+  @string 'state!', 2
+  @string 'zip!', { regex: /^\d{5}$/ }
+
+# Use in multiple tables
+@table 'users', ->
+  @string 'name!'
+  @email  'email!'
+  @include AddressFields  # Injects all address fields
+  @timestamps()
+
+@table 'companies', ->
+  @string 'name!'
+  @include AddressFields  # Same address fields
+  @timestamps()
+```
+
+### Composable Schema Objects
+```coffeescript
+# Define reusable schema objects
+@object 'Address', ->
+  @string 'street!'
+  @string 'city!'
+  @string 'state!', 2
+  @string 'zip!', { regex: /^\d{5}$/ }
+
+@object 'ContactInfo', ->
+  @email  'email!'
+  @string 'phone!', 20
+
+# Compose into tables
+@table 'profiles', ->
+  @string 'name!'
+  @embed  Address      # Embeds as nested fields
+  @embed  ContactInfo  # Reusable contact fields
+  @timestamps()
+```
+
+### Macro Fields - Advanced Composition
+```coffeescript
+# Define reusable field macros
+export SoftDeletes = =>
+  @datetime 'deleted_at'
+
+export Timestamps = =>
+  @datetime 'created_at'
+  @datetime 'updated_at'
+
+# Use in tables
+@table 'comments', ->
+  @text 'content!'
+  @include Timestamps
+  @include SoftDeletes
+
+# Or even better - as helper methods
+@table 'comments', ->
+  @text 'content!'
+  @timestamps()    # still fine
+  @softDeletes()
+```
+
+### Advanced: Nested Reuse
+```coffeescript
+# Compose macros from other macros
+export Auditable = =>
+  @include Timestamps
+  @include SoftDeletes
+
+# Use the composed macro
+@table 'posts', ->
+  @string 'title!'
+  @text   'content!'
+  @include Auditable    # Gets both timestamps and soft deletes
+```
+
+### Enum Support - Named Value Sets
+```coffeescript
+# Define enums with clean syntax
+@enum 'order_status', 'pending', 'paid', 'shipped'
+@enum 'user_role', 'admin', 'user', 'guest'
+@enum 'priority', 'low', 'medium', 'high', 'critical'
+
+# Use in tables
+@table 'orders', ->
+  @string 'number!'
+  @enum   'status!', 'order_status'    # References the enum
+  @timestamps()
+
+@table 'users', ->
+  @string 'name!'
+  @enum   'role!', 'user_role', default: 'user'
+  @timestamps()
+```
+
+### Generated Output
+```typescript
+// Generated enum types
+export enum OrderStatus {
+  PENDING = 'pending',
+  PAID = 'paid',
+  SHIPPED = 'shipped'
+}
+
+// Generated Zod schemas
+export const OrderSchema = z.object({
+  number: z.string(),
+  status: z.nativeEnum(OrderStatus),
+  created_at: z.date(),
+  updated_at: z.date()
+})
+```
+
+### Benefits
+- ✅ **DRY Principle** - Define common patterns once
+- ✅ **Consistency** - Same validation across tables
+- ✅ **Maintainability** - Update address format in one place
+- ✅ **Composability** - Mix and match field groups
+- ✅ **Macro Power** - Domain-specific field patterns
+- ✅ **Nested Composition** - Macros can include other macros
+- ✅ **Enum Support** - Clean named value sets with TypeScript enums
+- ✅ **Type Safety** - Generated Zod schemas include mixins
+
+## 🎯 Real-World Terminal Examples
+
+**See it in action! Here's actual terminal output from a working Rip project:**
+
+### Basic Zod Generation
+```bash
+$ rip-schema zod:generate
+import { z } from 'zod'
+
+export const UserSchema = z.object({
+  id: z.number().int(),
+  email: z.string().email(),
+  firstName: z.string().max(100),
+  lastName: z.string().max(100),
+  phone: z.string().max(20),
+  sex: z.string().max(10),
+  dob: z.string().max(10),
+  photo: z.string().optional(),
+  cart: z.record(z.unknown()).optional(),
+  shippingAddress: z.record(z.unknown()).optional(),
+  meta: z.record(z.unknown()).optional(),
+  admin: z.boolean().default(false)
+})
+
+export type User = z.infer<typeof UserSchema>
+
+export const OrderSchema = z.object({
+  id: z.number().int(),
+  userId: z.number().int(),
+  number: z.string().max(50),
+  payment: z.string().max(100),
+  subtotal: z.number().int(),
+  total: z.number().int(),
+  meta: z.record(z.unknown())
+})
+
+export type Order = z.infer<typeof OrderSchema>
+```
+
+### Save to File
+```bash
+$ mkdir -p types && rip-schema zod:generate > types/schemas.ts
+$ ls -la types/
+total 8.0K
+drwxr-xr-x  4 shreeve staff  128 Aug  3 22:42 ./
+drwxr-xr-x 12 shreeve staff  384 Aug  3 22:39 ../
+-rw-r--r--  1 shreeve staff 1.5K Aug  3 22:42 complete-schemas.ts
+-rw-r--r--  1 shreeve staff  645 Aug  3 22:39 schemas.ts
+```
+
+### Verbose Output
+```bash
+$ rip-schema zod:generate -v
+🔍 Reading schema from: /Users/shreeve/Data/Code/rip/apps/labs/server/db/schema.rip
+import { z } from 'zod'
+export const UserSchema = z.object({
+  id: z.number().int(),
+  email: z.string().email(),
+  firstName: z.string().max(100),
+  lastName: z.string().max(100),
+  phone: z.string().max(20),
+  admin: z.boolean().default(false)
+})
+export type User = z.infer<typeof UserSchema>
+✅ Zod schemas generated successfully!
+```
+
+### Available Commands
+```bash
+$ rip-schema --help
+🚀 rip-schema CLI
+
+Commands:
+  db:push              Sync your schema to the database (no migrations)
+  db:drop              Drop all tables (dangerous!)
+  db:seed              Run seed files
+  zod:generate         Generate Zod validation schemas from your schema
+
+Options:
+  -s, --schema PATH    Path to schema file (default: ./db/schema.rip)
+  -d, --database PATH  Path to database file (default: ./db/api.db)
+  -v, --verbose        Show detailed output
+  -h, --help           Show this help message
+
+Examples:
+  rip-schema db:push
+  rip-schema db:push -s ./schema.rip -d ./dev.db
+  rip-schema db:drop
+  rip-schema zod:generate > ./types/schema.ts
+```
+
+### 🎉 Key Features Demonstrated
+- ✅ **Automatic type detection**: `email!` → `z.string().email()`
+- ✅ **Size constraints**: `string 100` → `z.string().max(100)`
+- ✅ **Optional fields**: Missing `!` → `.optional()`
+- ✅ **Default values**: `boolean false` → `z.boolean().default(false)`
+- ✅ **JSON support**: `json` → `z.record(z.unknown())`
+- ✅ **TypeScript inference**: `z.infer<typeof UserSchema>`
+
 ## License
 
 MIT
