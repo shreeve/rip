@@ -12,3 +12,6 @@ tmp/
 
 # Node modules
 node_modules/
+
+# Compiled JavaScript in CoffeeScript src (use lib instead)
+coffeescript/src/*.js
