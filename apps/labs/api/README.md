@@ -48,7 +48,7 @@ This is a complete reimagining of web application architecture using:
 # 1. Start the revolutionary data server
 bun run data:start
 
-# 2. Push database schema  
+# 2. Push database schema
 bun run db:push
 
 # 3. Seed with test data
@@ -63,7 +63,7 @@ bun run dev
 The revolutionary `rip-data-server` supports multiple connection methods:
 
 - **HTTP API**: `http://localhost:8306` - REST endpoints
-- **WebSocket**: `ws://localhost:8307` - Real-time streaming  
+- **WebSocket**: `ws://localhost:8307` - Real-time streaming
 - **PostgreSQL**: `localhost:5433` - Use any PostgreSQL tool (psql, DBeaver, etc.)
 - **Direct CLI**: `duckdb ./db/labs.duckdb` - Native DuckDB access
 
