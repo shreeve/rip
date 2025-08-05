@@ -25,7 +25,7 @@ withHelpers app
 # 🔥 Revolutionary HTTP decorators with auto-response detection!
 @get '/ping', -> 'pong'                    # Auto-detects string → text response
 
-# Example of automatic JSON detection  
+# Example of automatic JSON detection
 @get '/user/me', -> name: 'larry', role: 'admin'  # Auto-detects object → JSON response
 
 # Traditional syntax still works for comparison
