@@ -18,7 +18,7 @@
   // Or elegant one-liner:            code = (val =~ /regex/; if _ then _[1] else null)
 
 // Email regex (simplified version)
-var _currentContext, bool, emailRegex, falsy, isBlank, parseDate, parseDateTime, parseDateUTC, parseJsonSafely, toName, toPhone, truthy,
+var _currentContext, _currentApp, bool, emailRegex, falsy, isBlank, parseDate, parseDateTime, parseDateUTC, parseJsonSafely, toName, toPhone, truthy,
   hasProp = {}.hasOwnProperty;
 
 emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -523,15 +523,108 @@ Object.defineProperty(global, 'text', {
       // Otherwise, just return the string
       return data.toString();
     }
-  }
+  },
+  configurable: true
 });
 
-({
+// 🔥 REVOLUTIONARY: Smart response helper that auto-detects types!
+Object.defineProperty(global, 'respond', {
+  value: function(data) {
+    if (!_currentContext) return;
+
+    // Auto-detect the best response type
+    if (typeof data === 'string') {
+      return _currentContext.text(data);
+    } else if (typeof data === 'object' && data != null) {
+      return _currentContext.json(data);
+    } else if (typeof data === 'number' || typeof data === 'boolean') {
+      return _currentContext.text(data.toString());
+    } else {
+      return _currentContext.text(String(data || ''));
+    }
+  },
+  configurable: true
+});
+
+// 🔥 REVOLUTIONARY: Smart route wrapper that auto-detects return values!
+var smartRoute = function(handler) {
+  return function(c) {
+    // Set context for this handler
+    _currentContext = c;
+    try {
+      var result = handler(c);
+
+      // If handler returned a value, auto-detect response type
+      if (result != null) {
+        if (typeof result === 'string') {
+          return c.text(result);
+        } else if (typeof result === 'object') {
+          return c.json(result);
+        } else if (typeof result === 'number' || typeof result === 'boolean') {
+          return c.text(result.toString());
+        } else {
+          return c.text(String(result));
+        }
+      }
+
+      // If no return value, assume handler called response methods directly
+      return result;
+    } finally {
+      _currentContext = null;
+    }
+  };
+};
+
+// 🔥 REVOLUTIONARY: Smart HTTP method decorators!
+Object.defineProperty(global, '@get', {
+  value: function(path, handler) {
+    if (_currentApp) {
+      return _currentApp.get(path, smartRoute(handler));
+    } else {
+      throw new Error("@get called without app context. Use withHelpers() first.");
+    }
+  },
+  configurable: true
+});
+
+Object.defineProperty(global, '@post', {
+  value: function(path, handler) {
+    if (_currentApp) {
+      return _currentApp.post(path, smartRoute(handler));
+    } else {
+      throw new Error("@post called without app context. Use withHelpers() first.");
+    }
+  },
+  configurable: true
+});
+
+Object.defineProperty(global, '@put', {
+  value: function(path, handler) {
+    if (_currentApp) {
+      return _currentApp.put(path, smartRoute(handler));
+    } else {
+      throw new Error("@put called without app context. Use withHelpers() first.");
+    }
+  },
+  configurable: true
+});
+
+Object.defineProperty(global, '@delete', {
+  value: function(path, handler) {
+    if (_currentApp) {
+      return _currentApp.delete(path, smartRoute(handler));
+    } else {
+      throw new Error("@delete called without app context. Use withHelpers() first.");
+    }
+  },
   configurable: true
 });
 
 // Export helper for Hono context binding - Sinatra-style!
 export var withHelpers = function(app) {
+  // Store app globally for decorator functions
+  _currentApp = app;
+
   return app.use(async function(c, next) {
     var body, data, error, k, query, ref, v;
     // Set global context for this request (like Sinatra's request scope)

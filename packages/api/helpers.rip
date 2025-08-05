@@ -325,6 +325,7 @@ export read = (keyOrContext, key = null, tag = null, miss = null) ->
 
 # Global context storage for request-scoped access
 _currentContext = null
+_currentApp = null
 
 # Global context accessors - pure Sinatra style!
 export env = -> _currentContext  # THE primary variable - just like 'read'!
@@ -368,8 +369,84 @@ Object.defineProperty global, 'text',
       data.toString()
 configurable: true
 
+# 🔥 REVOLUTIONARY: Smart response helper that auto-detects types!
+Object.defineProperty global, 'respond',
+  value: (data) ->
+    return unless _currentContext?
+
+    # Auto-detect the best response type
+    if typeof data == 'string'
+      _currentContext.text(data)
+    else if typeof data == 'object' and data?
+      _currentContext.json(data)
+    else if typeof data == 'number' or typeof data == 'boolean'
+      _currentContext.text(data.toString())
+    else
+      _currentContext.text(String(data or ''))
+configurable: true
+
+# 🔥 REVOLUTIONARY: Smart route wrapper that auto-detects return values!
+smartRoute = (handler) ->
+  (c) ->
+    # Set context for this handler
+    _currentContext = c
+    try
+      result = handler(c)
+
+      # If handler returned a value, auto-detect response type
+      if result?
+        if typeof result == 'string'
+          return c.text(result)
+        else if typeof result == 'object'
+          return c.json(result)
+        else if typeof result == 'number' or typeof result == 'boolean'
+          return c.text(result.toString())
+        else
+          return c.text(String(result))
+
+      # If no return value, assume handler called response methods directly
+      return result
+    finally
+      _currentContext = null
+
+# 🔥 REVOLUTIONARY: Smart HTTP method decorators!
+Object.defineProperty global, '@get',
+  value: (path, handler) ->
+    if _currentApp?
+      _currentApp.get path, smartRoute(handler)
+    else
+      throw new Error("@get called without app context. Use withHelpers() first.")
+configurable: true
+
+Object.defineProperty global, '@post',
+  value: (path, handler) ->
+    if _currentApp?
+      _currentApp.post path, smartRoute(handler)
+    else
+      throw new Error("@post called without app context. Use withHelpers() first.")
+configurable: true
+
+Object.defineProperty global, '@put',
+  value: (path, handler) ->
+    if _currentApp?
+      _currentApp.put path, smartRoute(handler)
+    else
+      throw new Error("@put called without app context. Use withHelpers() first.")
+configurable: true
+
+Object.defineProperty global, '@delete',
+  value: (path, handler) ->
+    if _currentApp?
+      _currentApp.delete path, smartRoute(handler)
+    else
+      throw new Error("@delete called without app context. Use withHelpers() first.")
+configurable: true
+
 # Export helper for Hono context binding - Sinatra-style!
 export withHelpers = (app) ->
+  # Store app globally for decorator functions
+  _currentApp = app
+
   app.use (c, next) ->
     # Set global context for this request (like Sinatra's request scope)
     _currentContext = c
