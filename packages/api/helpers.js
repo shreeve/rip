@@ -533,14 +533,14 @@ export var withHelpers = function(app) {
 // app.post '/signup', (c) ->
 //   mail = read 'email', 'email!'     # All calls synchronous
 //   phon = read 'phone', 'phone'      # Pure elegance
-//   c.json success: true, user: mail, phon
+//   c.json { success: true, user: { mail, phon } }
 
 // OPTION 2: Clean return or json helper - ULTIMATE ELEGANCE!
 // app.post '/signup', ->
 //   mail = read 'email', 'email!'     # All calls synchronous
 //   phon = read 'phone', 'phone'      # Pure elegance
-//   success: true, user: mail, phon  # Just return data!
-//   # OR: json success: true, user: mail, phon  # Clean json helper
+//   { success: true, user: { mail, phon } }  # Just return data!
+//   # OR: json { success: true, user: { mail, phon } }  # Clean json helper
 
 //   # SHOWCASE: Geographic validation with =~ MASTERY
 //   stat = c.read 'state', 'state!'     # CA, ny -> CA, NY
