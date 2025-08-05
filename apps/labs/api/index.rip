@@ -1,0 +1,281 @@
+# 🔥 Revolutionary Labs API - The Future of Web Development
+# Using @rip/data + @rip/schema + @rip/api for maximum elegance!
+
+import { Hono } from 'hono'
+import { cors } from 'hono/cors'
+import { logger } from 'hono/logger'
+import { RipDataClient } from '@rip/data'
+import { withHelpers } from '@rip/api'
+
+# Revolutionary DuckDB connection via @rip/data
+dataClient = new RipDataClient 'http://localhost:8306'
+
+# Create Hono app with revolutionary middleware
+app = new Hono
+
+# CORS for development (client is on 8205)
+app.use cors
+  origin: 'http://localhost:8205'
+  credentials: true
+
+# Logger for development
+app.use logger()
+
+# 🔥 Revolutionary middleware that makes everything context-free!
+app.use withHelpers dataClient
+
+# Health check
+app.get '/ping', -> 'pong'
+
+# ====== CONFIG ROUTES ======
+app.get '/config', ->
+  json
+    config:
+      client:
+        appName: 'Labs (Revolutionary Rip + DuckDB)'
+        apiUrl: 'http://localhost:8305'
+        features:
+          auth: true
+          orders: true
+          results: true
+          analytics: true  # 🔥 NEW: Real-time analytics!
+
+# ====== AUTH ROUTES ======
+app.post '/auth/code', ->
+  # 🔥 Perfect validation with range constraints!
+  email = read 'email', 'email', [5, 255]
+  firstName = read 'firstName', 'string', [1, 100]
+  lastName = read 'lastName', 'string', [1, 100]
+
+  return json error: 'Invalid email' unless email
+
+  # Check if user exists
+  existingUser = dataClient.query! '''
+    SELECT * FROM users WHERE email = ?
+  ''', [email]
+
+  if existingUser.length > 0
+    user = existingUser[0]
+  else
+    # Create new user
+    user = dataClient.execute! '''
+      INSERT INTO users (email, firstName, lastName, phone, sex, dob, admin)
+      VALUES (?, ?, ?, '', 'Other', '1990-01-01', false)
+      RETURNING *
+    ''', [email, firstName || 'User', lastName || 'Name']
+    user = user[0]
+
+  # Generate auth code
+  code = Math.floor(100000 + Math.random() * 900000).toString()
+  expiresAt = new Date(Date.now() + 10 * 60 * 1000) # 10 minutes
+
+  # Update user with code
+  dataClient.execute! '''
+    UPDATE users 
+    SET code = ?, codeExpiresAt = ?
+    WHERE id = ?
+  ''', [code, expiresAt, user.id]
+
+  console.log "🔑 Auth code for #{email}: #{code}"
+
+  json success: true, message: 'Code sent!'
+
+app.post '/auth/verify', ->
+  email = read 'email', 'email', [5, 255]
+  code = read 'code', 'string', [6, 6]
+
+  return json error: 'Invalid email or code' unless email and code
+
+  # Verify code
+  user = dataClient.query! '''
+    SELECT * FROM users 
+    WHERE email = ? AND code = ? AND codeExpiresAt > ?
+  ''', [email, code, new Date()]
+
+  return json error: 'Invalid or expired code' unless user.length > 0
+
+  # Clear the code
+  dataClient.execute! '''
+    UPDATE users SET code = NULL, codeExpiresAt = NULL WHERE id = ?
+  ''', [user[0].id]
+
+  json
+    success: true
+    user: user[0]
+    token: "mock-jwt-#{user[0].id}"  # Mock JWT for now
+
+# ====== USER ROUTES ======
+app.get '/user/me', ->
+  # Mock current user (in real app, extract from JWT)
+  userId = 1
+
+  user = dataClient.query! '''
+    SELECT * FROM users WHERE id = ?
+  ''', [userId]
+
+  return json error: 'User not found' unless user.length > 0
+
+  json user: user[0]
+
+app.patch '/user/me', ->
+  userId = 1  # Mock current user
+
+  # 🔥 Perfect validation with our elegant read() function!
+  firstName = read 'firstName', 'string', [1, 100]
+  lastName = read 'lastName', 'string', [1, 100]
+  phone = read 'phone', 'string', [10, 20]
+  sex = read 'sex', 'string', [4, 10]
+  dob = read 'dob', 'string', [8, 10]
+
+  # Build update query dynamically
+  updates = []
+  params = []
+
+  if firstName
+    updates.push 'firstName = ?'
+    params.push firstName
+
+  if lastName
+    updates.push 'lastName = ?'
+    params.push lastName
+
+  if phone
+    updates.push 'phone = ?'
+    params.push phone
+
+  if sex
+    updates.push 'sex = ?'
+    params.push sex
+
+  if dob
+    updates.push 'dob = ?'
+    params.push dob
+
+  return json error: 'No updates provided' unless updates.length > 0
+
+  params.push userId
+
+  user = dataClient.execute! """
+    UPDATE users SET #{updates.join(', ')}
+    WHERE id = ?
+    RETURNING *
+  """, params
+
+  json user: user[0]
+
+# ====== ADMIN ROUTES ======
+app.get '/users', ->
+  # Mock admin check
+  users = dataClient.query! '''
+    SELECT id, email, firstName, lastName, phone, sex, dob, admin, createdAt
+    FROM users
+    ORDER BY createdAt DESC
+  '''
+
+  json users: users
+
+# ====== TEST ROUTES ======
+app.get '/tests', ->
+  # Mock test catalog
+  json tests: [
+    { id: 1, name: 'Basic Health Panel', price: 9900, description: 'Essential health markers' }
+    { id: 2, name: 'Comprehensive Panel', price: 19900, description: 'Full health screening' }
+    { id: 3, name: 'Hormone Panel', price: 14900, description: 'Hormone levels check' }
+  ]
+
+# ====== ORDER ROUTES ======
+app.post '/orders', ->
+  userId = 1  # Mock current user
+
+  # 🔥 Elegant validation with perfect range constraints!
+  testIds = read 'testIds', 'array'
+  payment = read 'payment', 'string', [3, 20], 'stripe'
+
+  return json error: 'No tests selected' unless testIds and testIds.length > 0
+
+  # Calculate totals (mock pricing)
+  subtotal = testIds.length * 9900  # $99 per test
+  total = subtotal
+
+  # Generate order number
+  orderNumber = 'LAB-' + Math.random().toString(36).substr(2, 8).toUpperCase()
+
+  # Create order
+  order = dataClient.execute! '''
+    INSERT INTO orders (userId, number, payment, subtotal, total, meta)
+    VALUES (?, ?, ?, ?, ?, ?)
+    RETURNING *
+  ''', [userId, orderNumber, payment, subtotal, total, JSON.stringify({ testIds })]
+
+  json order: order[0]
+
+app.get '/orders', ->
+  userId = 1  # Mock current user
+
+  orders = dataClient.query! '''
+    SELECT * FROM orders 
+    WHERE userId = ?
+    ORDER BY createdAt DESC
+  ''', [userId]
+
+  json orders: orders
+
+# ====== RESULTS ROUTES ======
+app.get '/results', ->
+  userId = 1  # Mock current user
+
+  results = dataClient.query! '''
+    SELECT * FROM results 
+    WHERE userId = ?
+    ORDER BY createdAt DESC
+  ''', [userId]
+
+  json results: results
+
+# 🔥 REVOLUTIONARY ANALYTICS ENDPOINTS (DuckDB Power!)
+app.get '/analytics/dashboard', ->
+  # Real-time analytics queries that would be impossible with traditional setup!
+  
+  # User growth over time
+  userGrowth = dataClient.query! '''
+    SELECT 
+      DATE_TRUNC('day', createdAt) as date,
+      COUNT(*) as new_users,
+      SUM(COUNT(*)) OVER (ORDER BY DATE_TRUNC('day', createdAt)) as total_users
+    FROM users
+    GROUP BY DATE_TRUNC('day', createdAt)
+    ORDER BY date DESC
+    LIMIT 30
+  '''
+
+  # Revenue analytics
+  revenue = dataClient.query! '''
+    SELECT 
+      DATE_TRUNC('day', createdAt) as date,
+      COUNT(*) as orders,
+      SUM(total) as revenue,
+      AVG(total) as avg_order_value
+    FROM orders
+    GROUP BY DATE_TRUNC('day', createdAt)
+    ORDER BY date DESC
+    LIMIT 30
+  '''
+
+  # Test popularity
+  testPopularity = dataClient.query! '''
+    SELECT 
+      JSON_EXTRACT(meta, '$.testIds') as test_ids,
+      COUNT(*) as order_count
+    FROM orders
+    GROUP BY JSON_EXTRACT(meta, '$.testIds')
+    ORDER BY order_count DESC
+  '''
+
+  json
+    userGrowth: userGrowth
+    revenue: revenue
+    testPopularity: testPopularity
+    generatedAt: new Date()
+
+# Export the app
+export default app

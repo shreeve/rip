@@ -1,0 +1,121 @@
+# 🔥 Revolutionary Seed Script - DuckDB + @rip/data Power!
+# Perfect data seeding for the future of web development
+
+import { RipDataClient } from '@rip/data'
+import { faker } from '@faker-js/faker'
+
+console.log '🌱 Seeding Revolutionary Labs Database...'
+
+# Connect to our revolutionary data server
+dataClient = new RipDataClient 'http://localhost:8306'
+
+# Create test users with perfect data
+console.log '👥 Creating test users...'
+
+testUsers = []
+for i in [1..10]
+  user = dataClient.execute! '''
+    INSERT INTO users (email, firstName, lastName, phone, sex, dob, admin)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    RETURNING *
+  ''', [
+    if i == 1 then 'test@example.com' else faker.internet.email()
+    faker.person.firstName()
+    faker.person.lastName()
+    faker.phone.number('##########')
+    faker.helpers.arrayElement(['Male', 'Female', 'Other'])
+    faker.date.birthdate({ min: 18, max: 80, mode: 'age' }).toISOString().split('T')[0]
+    i == 1  # First user is admin
+  ]
+
+  testUsers.push user[0]
+  console.log "✅ Created user: #{user[0].email} (ID: #{user[0].id})"
+
+# Create orders for users
+console.log '📦 Creating test orders...'
+
+for user in testUsers[0..4]  # First 5 users get orders
+  for i in [1..faker.number.int({ min: 1, max: 3 })]
+    testIds = faker.helpers.arrayElements([1, 2, 3], faker.number.int({ min: 1, max: 3 }))
+    subtotal = testIds.length * 9900
+    total = subtotal + faker.number.int({ min: 0, max: 1000 })  # Add some variation
+    
+    orderNumber = 'LAB-' + faker.string.alphanumeric(8).toUpperCase()
+    
+    order = dataClient.execute! '''
+      INSERT INTO orders (userId, number, payment, subtotal, total, meta, shippedAt, completedAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      RETURNING *
+    ''', [
+      user.id
+      orderNumber
+      faker.helpers.arrayElement(['stripe', 'paypal', 'card'])
+      subtotal
+      total
+      JSON.stringify({ testIds, items: testIds.map(id => ({ testId: id, quantity: 1 })) })
+      if faker.datatype.boolean() then faker.date.recent({ days: 30 }) else null
+      if faker.datatype.boolean() then faker.date.recent({ days: 20 }) else null
+    ]
+
+    console.log "✅ Created order: #{order[0].number} for #{user.email}"
+
+# Create specimens
+console.log '🧪 Creating test specimens...'
+
+for user in testUsers[0..6]  # First 7 users get specimens
+  for i in [1..faker.number.int({ min: 1, max: 4 })]
+    barcode = 'SP-' + faker.string.alphanumeric(10).toUpperCase()
+    
+    specimen = dataClient.execute! '''
+      INSERT INTO specimens (userId, testId, barcode, registeredAt, collectedAt, reportedAt)
+      VALUES (?, ?, ?, ?, ?, ?)
+      RETURNING *
+    ''', [
+      user.id
+      faker.number.int({ min: 1, max: 3 })
+      barcode
+      faker.date.recent({ days: 60 })
+      if faker.datatype.boolean() then faker.date.recent({ days: 30 }) else null
+      if faker.datatype.boolean() then faker.date.recent({ days: 10 }) else null
+    ]
+
+    console.log "✅ Created specimen: #{specimen[0].barcode} for #{user.email}"
+
+# Create results
+console.log '📊 Creating test results...'
+
+for user in testUsers[0..4]  # First 5 users get results
+  for i in [1..faker.number.int({ min: 1, max: 2 })]
+    resultUrl = "https://results.labs.example.com/#{faker.string.uuid()}"
+    
+    result = dataClient.execute! '''
+      INSERT INTO results (userId, resultUrl)
+      VALUES (?, ?)
+      RETURNING *
+    ''', [user.id, resultUrl]
+
+    console.log "✅ Created result: #{result[0].id} for #{user.email}"
+
+# Show summary statistics
+console.log '\n🎯 Database Seeding Complete!'
+console.log '📊 Summary Statistics:'
+
+userCount = dataClient.query! 'SELECT COUNT(*) as count FROM users'
+orderCount = dataClient.query! 'SELECT COUNT(*) as count FROM orders'
+specimenCount = dataClient.query! 'SELECT COUNT(*) as count FROM specimens'
+resultCount = dataClient.query! 'SELECT COUNT(*) as count FROM results'
+
+console.log "👥 Users: #{userCount[0].count}"
+console.log "📦 Orders: #{orderCount[0].count}"
+console.log "🧪 Specimens: #{specimenCount[0].count}"
+console.log "📊 Results: #{resultCount[0].count}"
+
+# Show test credentials
+console.log '\n🔑 Test Credentials:'
+console.log 'Email: test@example.com'
+console.log 'Use auth code endpoint to get login code'
+
+console.log '\n🔥 Revolutionary DuckDB + Rip Stack Ready!'
+console.log '🚀 API: http://localhost:8305'
+console.log '📊 Data Server: http://localhost:8306'
+console.log '💻 Client: http://localhost:8205'

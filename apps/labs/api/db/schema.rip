@@ -1,0 +1,64 @@
+# 🔥 Revolutionary Labs Schema using @rip/schema + @rip/data
+# Perfect consistency with range validation and DuckDB power!
+
+import { schema } from '@rip/schema'
+
+export default schema ->
+
+  @table 'users', ->
+    @integer  'id!', primary: true, autoIncrement: true
+    @email    'email!', [5, 255], unique: true
+    @string   'firstName!', [1, 100]
+    @string   'lastName!', [1, 100]
+    @string   'phone!', [10, 20]
+    @string   'sex!', [4, 10]  # Male, Female, Other
+    @string   'dob!', [8, 10]  # Date of birth as YYYY-MM-DD
+    @string   'photo', max: 500
+    @json     'cart'
+    @json     'shippingAddress'
+    @json     'meta'
+    @string   'code', [6, 10], unique: true
+    @datetime 'codeExpiresAt'
+    @boolean  'admin', false
+    @timestamps()
+
+    @index 'email'
+    @index 'code'
+
+  @table 'orders', ->
+    @integer  'id!', primary: true, autoIncrement: true
+    @integer  'userId!', references: 'users.id', onDelete: 'cascade'
+    @string   'number!', [8, 50], unique: true
+    @string   'payment!', [3, 100]
+    @integer  'subtotal!', min: 0
+    @integer  'total!', min: 0
+    @json     'meta!'
+    @datetime 'shippedAt'
+    @datetime 'deliveredAt'
+    @datetime 'completedAt'
+    @timestamps()
+
+    @index 'userId'
+    @index 'number'
+
+  @table 'specimens', ->
+    @integer  'id!', primary: true, autoIncrement: true
+    @integer  'userId!', references: 'users.id', onDelete: 'cascade'
+    @integer  'testId!', [1, 999]
+    @string   'barcode!', [8, 50], unique: true
+    @datetime 'registeredAt'
+    @datetime 'collectedAt'
+    @datetime 'reportedAt'
+    @timestamps()
+
+    @index 'userId'
+    @index 'barcode'
+    @index 'testId'
+
+  @table 'results', ->
+    @integer  'id!', primary: true, autoIncrement: true
+    @integer  'userId!', references: 'users.id', onDelete: 'cascade'
+    @string   'resultUrl!', [10, 1000]
+    @timestamps()
+
+    @index 'userId'

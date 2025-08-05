@@ -1,0 +1,28 @@
+{
+  "name": "labs-api-rip",
+  "version": "1.0.0",
+  "description": "Revolutionary Rip-based Labs API using @rip/data, @rip/schema, and @rip/api",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "rip-server . 8305",
+    "db:push": "rip-schema db:push",
+    "db:seed": "bun seed.rip",
+    "data:start": "bun data-server.rip"
+  },
+  "dependencies": {
+    "@rip/data": "workspace:*",
+    "@rip/schema": "workspace:*",
+    "@rip/api": "workspace:*",
+    "@rip/server": "workspace:*",
+    "@faker-js/faker": "^9.3.0",
+    "hono": "^4.7.8"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.0.0"
+  },
+  "rip-server": {
+    "port": 8305,
+    "workers": 2
+  }
+}

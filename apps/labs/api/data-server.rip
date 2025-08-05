@@ -1,0 +1,22 @@
+# 🔥 Revolutionary Labs Data Server - DuckDB Power!
+# Single process serving multiple clients with @rip/data
+
+import { RipDataServer } from '@rip/data'
+
+console.log '🔥 Starting Revolutionary Labs Data Server...'
+
+# Create the revolutionary data server
+dataServer = new RipDataServer
+  dbPath: './db/labs.duckdb'
+  port: 8306  # Data server on different port
+  enableS3: true
+  enableStreaming: true
+  batchSize: 100
+  flushInterval: 1000
+
+# Start the server
+dataServer.start!
+
+console.log '🚀 Labs Data Server running on port 8306'
+console.log '🎯 DuckDB: Transactional AND Analytical in one!'
+console.log '📊 Ready for real-time analytics and OLTP workloads'

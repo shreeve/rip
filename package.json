@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "Rip - A multilanguage universal runtime",
-  "workspaces": ["packages/*", "examples/*", "apps/*/client", "apps/*/server"],
+  "workspaces": ["packages/*", "examples/*", "apps/*/api", "apps/*/app"],
   "scripts": {
     "lint": "biome check .",
     "format": "biome format . --write",
