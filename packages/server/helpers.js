@@ -290,21 +290,21 @@ export var read = async function(c, key = null, tag = null, miss = null) {
       // Enhanced email validation using =~ - BEAUTIFUL ONE-LINER!
       val = ((_ = val.match(/^([a-zA-Z0-9._%+-]+)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})$/), _), _ ? _[0].toLowerCase() : null);
       break;
-    // 🔥 LEGENDARY CLEAN PATTERN - ONE-LINE CONDITIONALS! 🔥
+    // 🔥 LEGENDARY CLEAN PATTERNS - POSTFIX IF PERFECTION! 🔥
     case 'state':
-      val = ((_ = val.match(/^([a-z][a-z])$/i), _) ? _[1].toUpperCase() : null);
+      val = ((_ = val.match(/^([a-z][a-z])$/i), _) ? _[1].toUpperCase() : void 0);
       break;
     case 'zip':
-      val = ((_ = val.match(/^(\d{5})/), _) ? _[1] : null);
+      val = ((_ = val.match(/^(\d{5})/), _) ? _[1] : void 0);
       break;
     case 'zipplus4':
-      val = ((_ = val.match(/^(\d{5})-?(\d{4})$/), _) ? `${_[1]}-${_[2]}` : null);
+      val = ((_ = val.match(/^(\d{5})-?(\d{4})$/), _) ? `${_[1]}-${_[2]}` : void 0);
       break;
     case 'ssn':
-      val = ((_ = val.match(/^(\d{3})-?(\d{2})-?(\d{4})$/), _) ? `${_[1]}${_[2]}${_[3]}` : null);
+      val = ((_ = val.match(/^(\d{3})-?(\d{2})-?(\d{4})$/), _) ? `${_[1]}${_[2]}${_[3]}` : void 0);
       break;
     case 'sex':
-      val = ((_ = val.match(/^(m|male|f|female|o|other)$/i), _) ? _[1][0].toUpperCase() : null);
+      val = ((_ = val.match(/^(m|male|f|female|o|other)$/i), _) ? _[1][0].toUpperCase() : void 0);
       break;
     // Advanced validations - NOW WITH =~ ONE-LINERS!
     case 'creditcard':

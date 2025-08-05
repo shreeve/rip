@@ -194,12 +194,12 @@ export read = (c, key = null, tag = null, miss = null) ->
       # Enhanced email validation using =~ - BEAUTIFUL ONE-LINER!
       val = (val =~ /^([a-zA-Z0-9._%+-]+)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})$/; if _ then _[0].toLowerCase() else null)
 
-    # 🔥 LEGENDARY CLEAN PATTERN - ONE-LINE CONDITIONALS! 🔥
-    when 'state'   then val = (if val =~ /^([a-z][a-z])$/i then _[1].toUpperCase() else null)
-    when 'zip'     then val = (if val =~ /^(\d{5})/ then _[1] else null)
-    when 'zipplus4' then val = (if val =~ /^(\d{5})-?(\d{4})$/ then "#{_[1]}-#{_[2]}" else null)
-    when 'ssn'     then val = (if val =~ /^(\d{3})-?(\d{2})-?(\d{4})$/ then "#{_[1]}#{_[2]}#{_[3]}" else null)
-    when 'sex'     then val = (if val =~ /^(m|male|f|female|o|other)$/i then _[1][0].toUpperCase() else null)
+    # 🔥 LEGENDARY CLEAN PATTERNS - POSTFIX IF PERFECTION! 🔥
+    when 'state'    then val = (_[1].toUpperCase() if val =~ /^([a-z][a-z])$/i)
+    when 'zip'      then val = (_[1] if val =~ /^(\d{5})/)
+    when 'zipplus4' then val = ("#{_[1]}-#{_[2]}" if val =~ /^(\d{5})-?(\d{4})$/)
+    when 'ssn'      then val = ("#{_[1]}#{_[2]}#{_[3]}" if val =~ /^(\d{3})-?(\d{2})-?(\d{4})$/)
+    when 'sex'      then val = (_[1][0].toUpperCase() if val =~ /^(m|male|f|female|o|other)$/i)
 
     # Advanced validations - NOW WITH =~ ONE-LINERS!
     when 'creditcard'
