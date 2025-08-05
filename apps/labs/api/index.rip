@@ -5,6 +5,8 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
 import { withHelpers, read } from '@rip/api'
+# Import text helper for convenience (though it's also global)
+text = global.text
 # import { RipDataClient } from '@rip/data'
 
 # Mock data client for now (until data server is fixed)
@@ -25,7 +27,7 @@ app.use logger()
 withHelpers app
 
 # Health check
-app.get '/ping', (c) -> c.text 'pong'
+app.get '/ping', -> text 'pongs'
 
 # ====== CONFIG ROUTES ======
 app.get '/config', ->
