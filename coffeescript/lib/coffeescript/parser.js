@@ -1110,127 +1110,127 @@ break;
 }
 },
   parseError: function parseError(str, hash) {
-    var error;
-    if (hash.recoverable) {
-      return this.trace(str);
-    } else {
-      error = new Error(str);
-      error.hash = hash;
-      throw error;
-    }
-  },
+      var error;
+      if (hash.recoverable) {
+        return this.trace(str);
+      } else {
+        error = new Error(str);
+        error.hash = hash;
+        throw error;
+      }
+    },
   parse: function parse(input) {
-    var EOF, TERROR, action, errStr, expected, k, len, lex, lexer, loc, locFirst, locLast, newState, p, parseTable, preErrorSymbol, r, ranges, recovering, ref, ref1, ref2, sharedState, state, stk, symbol, v, val, yyleng, yylineno, yyloc, yytext, yyval;
-    [stk, val, loc] = [[0], [null], []];
-    [parseTable, yytext, yylineno, yyleng, recovering] = [this.parseTable, '', 0, 0, 0];
-    [TERROR, EOF] = [2, 1];
-    lexer = Object.create(this.lexer);
-    sharedState = {
-      yy: {}
-    };
-    ref = this.yy;
-    for (k in ref) {
-      if (!hasProp.call(ref, k)) continue;
-      v = ref[k];
-      sharedState.yy[k] = v;
-    }
-    lexer.setInput(input, sharedState.yy);
-    [sharedState.yy.lexer, sharedState.yy.parser] = [lexer, this];
-    if (lexer.yylloc == null) {
-      lexer.yylloc = {};
-    }
-    yyloc = lexer.yylloc;
-    loc.push(yyloc);
-    ranges = (ref1 = lexer.options) != null ? ref1.ranges : void 0;
-    this.parseError = typeof sharedState.yy.parseError === 'function' ? sharedState.yy.parseError : Object.getPrototypeOf(this).parseError;
-    lex = () => {
-      var token;
-      token = lexer.lex() || EOF;
-      if (typeof token !== 'number') {
-        token = this.symbolIds[token] || token;
+      var EOF, TERROR, action, errStr, expected, k, len, lex, lexer, loc, locFirst, locLast, newState, p, parseTable, preErrorSymbol, r, ranges, recovering, ref, ref1, ref2, sharedState, state, stk, symbol, v, val, yyleng, yylineno, yyloc, yytext, yyval;
+      [stk, val, loc] = [[0], [null], []];
+      [parseTable, yytext, yylineno, yyleng, recovering] = [this.parseTable, '', 0, 0, 0];
+      [TERROR, EOF] = [2, 1];
+      lexer = Object.create(this.lexer);
+      sharedState = {
+        yy: {}
+      };
+      ref = this.yy;
+      for (k in ref) {
+        if (!hasProp.call(ref, k)) continue;
+        v = ref[k];
+        sharedState.yy[k] = v;
       }
-      return token;
-    };
-    [symbol, preErrorSymbol, state, action, r, yyval, p, len, newState, expected] = [null, null, null, null, null, {}, null, null, null, null];
-    while (true) {
-      state = stk[stk.length - 1];
-      action = this.defaultActions[state] || (symbol == null ? symbol = lex() : void 0, (ref2 = parseTable[state]) != null ? ref2[symbol] : void 0);
-      if (!((action != null ? action.length : void 0) && action[0])) {
-        errStr = '';
-        if (!recovering) {
-          expected = (function() {
-            var ref3, results;
-            ref3 = parseTable[state];
-            results = [];
-            for (p in ref3) {
-              if (!hasProp.call(ref3, p)) continue;
-              if (this.terminalNames[p] && p > TERROR) {
-                results.push(`'${this.terminalNames[p]}'`);
-              }
-            }
-            return results;
-          }).call(this);
+      lexer.setInput(input, sharedState.yy);
+      [sharedState.yy.lexer, sharedState.yy.parser] = [lexer, this];
+      if (lexer.yylloc == null) {
+        lexer.yylloc = {};
+      }
+      yyloc = lexer.yylloc;
+      loc.push(yyloc);
+      ranges = (ref1 = lexer.options) != null ? ref1.ranges : void 0;
+      this.parseError = typeof sharedState.yy.parseError === 'function' ? sharedState.yy.parseError : Object.getPrototypeOf(this).parseError;
+      lex = () => {
+        var token;
+        token = lexer.lex() || EOF;
+        if (typeof token !== 'number') {
+          token = this.symbolIds[token] || token;
         }
-        errStr = lexer.showPosition ? `Parse error on line ${yylineno + 1}:\n${lexer.showPosition()}\nExpecting ${expected.join(', ')}, got '${this.terminalNames[symbol] || symbol}'` : (`Parse error on line ${yylineno + 1}: Unexpected ${symbol === EOF ? "end of input" : `'${this.terminalNames[symbol] || symbol}'`}`, this.parseError(errStr, {
-          text: lexer.match,
-          token: this.terminalNames[symbol] || symbol,
-          line: lexer.yylineno,
-          loc: yyloc,
-          expected
-        }));
-        throw new Error(errStr);
-      }
-      if (action[0] instanceof Array && action.length > 1) {
-        throw new Error(`Parse Error: multiple actions possible at state: ${state}, token: ${symbol}`);
-      }
-      switch (action[0]) {
-        case 1: // shift
-          stk.push(symbol, action[1]);
-          val.push(lexer.yytext);
-          loc.push(lexer.yylloc);
-          symbol = null;
-          if (!preErrorSymbol) {
-            [yyleng, yytext, yylineno, yyloc] = [lexer.yyleng, lexer.yytext, lexer.yylineno, lexer.yylloc];
-            if (recovering > 0) {
-              recovering--;
+        return token;
+      };
+      [symbol, preErrorSymbol, state, action, r, yyval, p, len, newState, expected] = [null, null, null, null, null, {}, null, null, null, null];
+      while (true) {
+        state = stk[stk.length - 1];
+        action = this.defaultActions[state] || (symbol == null ? symbol = lex() : void 0, (ref2 = parseTable[state]) != null ? ref2[symbol] : void 0);
+        if (!((action != null ? action.length : void 0) && action[0])) {
+          errStr = '';
+          if (!recovering) {
+            expected = (function() {
+              var ref3, results;
+              ref3 = parseTable[state];
+              results = [];
+              for (p in ref3) {
+                if (!hasProp.call(ref3, p)) continue;
+                if (this.terminalNames[p] && p > TERROR) {
+                  results.push(`'${this.terminalNames[p]}'`);
+                }
+              }
+              return results;
+            }).call(this);
+          }
+          errStr = lexer.showPosition ? `Parse error on line ${yylineno + 1}:\n${lexer.showPosition()}\nExpecting ${expected.join(', ')}, got '${this.terminalNames[symbol] || symbol}'` : (`Parse error on line ${yylineno + 1}: Unexpected ${symbol === EOF ? "end of input" : `'${this.terminalNames[symbol] || symbol}'`}`, this.parseError(errStr, {
+            text: lexer.match,
+            token: this.terminalNames[symbol] || symbol,
+            line: lexer.yylineno,
+            loc: yyloc,
+            expected
+          }));
+          throw new Error(errStr);
+        }
+        if (action[0] instanceof Array && action.length > 1) {
+          throw new Error(`Parse Error: multiple actions possible at state: ${state}, token: ${symbol}`);
+        }
+        switch (action[0]) {
+          case 1: // shift
+            stk.push(symbol, action[1]);
+            val.push(lexer.yytext);
+            loc.push(lexer.yylloc);
+            symbol = null;
+            if (!preErrorSymbol) {
+              [yyleng, yytext, yylineno, yyloc] = [lexer.yyleng, lexer.yytext, lexer.yylineno, lexer.yylloc];
+              if (recovering > 0) {
+                recovering--;
+              }
+            } else {
+              [symbol, preErrorSymbol] = [preErrorSymbol, null];
             }
-          } else {
-            [symbol, preErrorSymbol] = [preErrorSymbol, null];
-          }
-          break;
-        case 2: // reduce
-          len = this.productionData[action[1]][1];
-          yyval.$ = val[val.length - len];
-          [locFirst, locLast] = [loc[loc.length - (len || 1)], loc[loc.length - 1]];
-          yyval._$ = {
-            first_line: locFirst.first_line,
-            last_line: locLast.last_line,
-            first_column: locFirst.first_column,
-            last_column: locLast.last_column
-          };
-          if (ranges) {
-            yyval._$.range = [locFirst.range[0], locLast.range[1]];
-          }
-          r = this.performAction.apply(yyval, [yytext, yyleng, yylineno, sharedState.yy, action[1], val, loc]);
-          if (r != null) {
-            return r;
-          }
-          if (len) {
-            stk.length -= len * 2;
-            val.length -= len;
-            loc.length -= len;
-          }
-          stk.push(this.productionData[action[1]][0]);
-          val.push(yyval.$);
-          loc.push(yyval._$);
-          newState = parseTable[stk[stk.length - 2]][stk[stk.length - 1]];
-          stk.push(newState);
-          break;
-        case 3: // accept
-          return true;
+            break;
+          case 2: // reduce
+            len = this.productionData[action[1]][1];
+            yyval.$ = val[val.length - len];
+            [locFirst, locLast] = [loc[loc.length - (len || 1)], loc[loc.length - 1]];
+            yyval._$ = {
+              first_line: locFirst.first_line,
+              last_line: locLast.last_line,
+              first_column: locFirst.first_column,
+              last_column: locLast.last_column
+            };
+            if (ranges) {
+              yyval._$.range = [locFirst.range[0], locLast.range[1]];
+            }
+            r = this.performAction.apply(yyval, [yytext, yyleng, yylineno, sharedState.yy, action[1], val, loc]);
+            if (r != null) {
+              return r;
+            }
+            if (len) {
+              stk.length -= len * 2;
+              val.length -= len;
+              loc.length -= len;
+            }
+            stk.push(this.productionData[action[1]][0]);
+            val.push(yyval.$);
+            loc.push(yyval._$);
+            newState = parseTable[stk[stk.length - 2]][stk[stk.length - 1]];
+            stk.push(newState);
+            break;
+          case 3: // accept
+            return true;
+        }
       }
     }
-  }
 };
 
 function Parser () { this.yy = {}; }
