@@ -4,11 +4,11 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
-import { RipDataClient } from '@rip/data'
-import { withHelpers } from '@rip/api'
+import { withHelpers, read } from '@rip/api'
+# import { RipDataClient } from '@rip/data'
 
-# Revolutionary DuckDB connection via @rip/data
-dataClient = new RipDataClient 'http://localhost:8306'
+# Mock data client for now (until data server is fixed)
+# dataClient = new RipDataClient 'http://localhost:8306'
 
 # Create Hono app with revolutionary middleware
 app = new Hono
@@ -25,7 +25,7 @@ app.use logger()
 withHelpers app
 
 # Health check
-app.get '/ping', (c) -> c.text 'pong'
+app.get '/ping', (c) -> c.text 'pongs'
 
 # ====== CONFIG ROUTES ======
 app.get '/config', ->
@@ -49,36 +49,14 @@ app.post '/auth/code', ->
 
   return json error: 'Invalid email' unless email
 
-  # Check if user exists
-  existingUser = dataClient.query! '''
-    SELECT * FROM users WHERE email = ?
-  ''', [email]
-
-  if existingUser.length > 0
-    user = existingUser[0]
-  else
-    # Create new user
-    user = dataClient.execute! '''
-      INSERT INTO users (email, firstName, lastName, phone, sex, dob, admin)
-      VALUES (?, ?, ?, '', 'Other', '1990-01-01', false)
-      RETURNING *
-    ''', [email, firstName || 'User', lastName || 'Name']
-    user = user[0]
-
-  # Generate auth code
+  # Generate auth code (mock for now)
   code = Math.floor(100000 + Math.random() * 900000).toString()
-  expiresAt = new Date(Date.now() + 10 * 60 * 1000) # 10 minutes
-
-  # Update user with code
-  dataClient.execute! '''
-    UPDATE users
-    SET code = ?, codeExpiresAt = ?
-    WHERE id = ?
-  ''', [code, expiresAt, user.id]
-
   console.log "🔑 Auth code for #{email}: #{code}"
 
-  json success: true, message: 'Code sent!'
+  json
+    success: true
+    message: 'Code sent!'
+    mockCode: code  # For testing
 
 app.post '/auth/verify', ->
   email = read 'email', 'email', [5, 255]
@@ -86,36 +64,37 @@ app.post '/auth/verify', ->
 
   return json error: 'Invalid email or code' unless email and code
 
-  # Verify code
-  user = dataClient.query! '''
-    SELECT * FROM users
-    WHERE email = ? AND code = ? AND codeExpiresAt > ?
-  ''', [email, code, new Date()]
+  # Mock verification (accept any 6-digit code for now)
+  return json error: 'Invalid or expired code' unless code.length == 6
 
-  return json error: 'Invalid or expired code' unless user.length > 0
-
-  # Clear the code
-  dataClient.execute! '''
-    UPDATE users SET code = NULL, codeExpiresAt = NULL WHERE id = ?
-  ''', [user[0].id]
+  # Mock user data
+  mockUser = 
+    id: 1
+    email: email
+    firstName: 'John'
+    lastName: 'Doe'
+    admin: false
 
   json
     success: true
-    user: user[0]
-    token: "mock-jwt-#{user[0].id}"  # Mock JWT for now
+    user: mockUser
+    token: "mock-jwt-#{mockUser.id}"
 
 # ====== USER ROUTES ======
 app.get '/user/me', ->
-  # Mock current user (in real app, extract from JWT)
-  userId = 1
+  # Mock current user
+  mockUser = 
+    id: 1
+    email: 'john.doe@example.com'
+    firstName: 'John'
+    lastName: 'Doe'
+    phone: '555-123-4567'
+    sex: 'Male'
+    dob: '1990-01-01'
+    admin: false
+    createdAt: '2024-01-01T00:00:00Z'
 
-  user = dataClient.query! '''
-    SELECT * FROM users WHERE id = ?
-  ''', [userId]
-
-  return json error: 'User not found' unless user.length > 0
-
-  json user: user[0]
+  json user: mockUser
 
 app.patch '/user/me', ->
   userId = 1  # Mock current user
@@ -155,33 +134,39 @@ app.patch '/user/me', ->
 
   params.push userId
 
-  user = dataClient.execute! '''
-    UPDATE users SET #{updates.join(', ')}
-    WHERE id = ?
-    RETURNING *
-  ''', params
+  # Mock updated user (in real app, this would update the database)
+  updatedUser = 
+    id: userId
+    email: 'john.doe@example.com'
+    firstName: firstName || 'John'
+    lastName: lastName || 'Doe'
+    phone: phone || '555-123-4567'
+    sex: sex || 'Male'
+    dob: dob || '1990-01-01'
+    admin: false
+    createdAt: '2024-01-01T00:00:00Z'
 
-  json user: user[0]
+  json user: updatedUser
 
 # ====== ADMIN ROUTES ======
 app.get '/users', ->
-  # Mock admin check
-  users = dataClient.query! '''
-    SELECT id, email, firstName, lastName, phone, sex, dob, admin, createdAt
-    FROM users
-    ORDER BY createdAt DESC
-  '''
+  # Mock admin check and users list
+  mockUsers = [
+    { id: 1, email: 'john.doe@example.com', firstName: 'John', lastName: 'Doe', phone: '555-123-4567', sex: 'Male', dob: '1990-01-01', admin: false, createdAt: '2024-01-01T00:00:00Z' },
+    { id: 2, email: 'jane.smith@example.com', firstName: 'Jane', lastName: 'Smith', phone: '555-987-6543', sex: 'Female', dob: '1985-05-15', admin: false, createdAt: '2024-01-02T00:00:00Z' }
+  ]
 
-  json users: users
+  json users: mockUsers
 
 # ====== TEST ROUTES ======
 app.get '/tests', ->
   # Mock test catalog
-  json tests: [
-    { id: 1, name: 'Basic Health Panel', price: 9900, description: 'Essential health markers' }
-    { id: 2, name: 'Comprehensive Panel', price: 19900, description: 'Full health screening' }
-    { id: 3, name: 'Hormone Panel', price: 14900, description: 'Hormone levels check' }
-  ]
+  json
+    tests: [
+      { id: 1, name: 'Basic Health Panel', price: 9900, description: 'Essential health markers' },
+      { id: 2, name: 'Comprehensive Panel', price: 19900, description: 'Full health screening' },
+      { id: 3, name: 'Hormone Panel', price: 14900, description: 'Hormone levels check' }
+    ]
 
 # ====== ORDER ROUTES ======
 app.post '/orders', ->
@@ -200,81 +185,71 @@ app.post '/orders', ->
   # Generate order number
   orderNumber = 'LAB-' + Math.random().toString(36).substr(2, 8).toUpperCase()
 
-  # Create order
-  order = dataClient.execute! '''
-    INSERT INTO orders (userId, number, payment, subtotal, total, meta)
-    VALUES (?, ?, ?, ?, ?, ?)
-    RETURNING *
-  ''', [userId, orderNumber, payment, subtotal, total, JSON.stringify({ testIds })]
+  # Mock order creation
+  mockOrder = 
+    id: Math.floor(Math.random() * 1000) + 1
+    userId: userId
+    number: orderNumber
+    payment: payment
+    subtotal: subtotal
+    total: total
+    meta: JSON.stringify({ testIds })
+    createdAt: new Date().toISOString()
 
-  json order: order[0]
+  json order: mockOrder
 
 app.get '/orders', ->
   userId = 1  # Mock current user
 
-  orders = dataClient.query! '''
-    SELECT * FROM orders
-    WHERE userId = ?
-    ORDER BY createdAt DESC
-  ''', [userId]
+  # Mock orders list
+  mockOrders = [
+    { id: 1, userId: 1, number: 'LAB-ABC123', payment: 'stripe', subtotal: 9900, total: 9900, meta: '{"testIds":[1]}', createdAt: '2024-01-15T10:30:00Z' },
+    { id: 2, userId: 1, number: 'LAB-XYZ789', payment: 'stripe', subtotal: 19800, total: 19800, meta: '{"testIds":[1,2]}', createdAt: '2024-01-10T14:20:00Z' }
+  ]
 
-  json orders: orders
+  json orders: mockOrders
 
 # ====== RESULTS ROUTES ======
 app.get '/results', ->
   userId = 1  # Mock current user
 
-  results = dataClient.query! '''
-    SELECT * FROM results
-    WHERE userId = ?
-    ORDER BY createdAt DESC
-  ''', [userId]
+  # Mock results list
+  mockResults = [
+    { id: 1, userId: 1, orderId: 1, testName: 'Basic Health Panel', status: 'completed', values: '{"cholesterol": 180, "glucose": 95}', createdAt: '2024-01-16T09:00:00Z' },
+    { id: 2, userId: 1, orderId: 2, testName: 'Comprehensive Panel', status: 'pending', values: null, createdAt: '2024-01-11T16:45:00Z' }
+  ]
 
-  json results: results
+  json results: mockResults
 
-# 🔥 REVOLUTIONARY ANALYTICS ENDPOINTS (DuckDB Power!)
+# 🔥 REVOLUTIONARY ANALYTICS ENDPOINTS (Mock Data for Now!)
 app.get '/analytics/dashboard', ->
-  # Real-time analytics queries that would be impossible with traditional setup!
+  # Mock analytics data (in real app, this would be powered by DuckDB!)
 
-  # User growth over time
-  userGrowth = dataClient.query! '''
-    SELECT
-      DATE_TRUNC('day', createdAt) as date,
-      COUNT(*) as new_users,
-      SUM(COUNT(*)) OVER (ORDER BY DATE_TRUNC('day', createdAt)) as total_users
-    FROM users
-    GROUP BY DATE_TRUNC('day', createdAt)
-    ORDER BY date DESC
-    LIMIT 30
-  '''
+  # Mock user growth over time
+  mockUserGrowth = [
+    { date: '2024-01-15', new_users: 5, total_users: 25 },
+    { date: '2024-01-14', new_users: 3, total_users: 20 },
+    { date: '2024-01-13', new_users: 7, total_users: 17 }
+  ]
 
-  # Revenue analytics
-  revenue = dataClient.query! '''
-    SELECT
-      DATE_TRUNC('day', createdAt) as date,
-      COUNT(*) as orders,
-      SUM(total) as revenue,
-      AVG(total) as avg_order_value
-    FROM orders
-    GROUP BY DATE_TRUNC('day', createdAt)
-    ORDER BY date DESC
-    LIMIT 30
-  '''
+  # Mock revenue analytics
+  mockRevenue = [
+    { date: '2024-01-15', orders: 8, revenue: 79200, avg_order_value: 9900 },
+    { date: '2024-01-14', orders: 5, revenue: 49500, avg_order_value: 9900 },
+    { date: '2024-01-13', orders: 12, revenue: 118800, avg_order_value: 9900 }
+  ]
 
-  # Test popularity
-  testPopularity = dataClient.query! '''
-    SELECT
-      JSON_EXTRACT(meta, '$.testIds') as test_ids,
-      COUNT(*) as order_count
-    FROM orders
-    GROUP BY JSON_EXTRACT(meta, '$.testIds')
-    ORDER BY order_count DESC
-  '''
+  # Mock test popularity
+  mockTestPopularity = [
+    { test_ids: '[1]', order_count: 15 },
+    { test_ids: '[1,2]', order_count: 8 },
+    { test_ids: '[3]', order_count: 5 }
+  ]
 
   json
-    userGrowth: userGrowth
-    revenue: revenue
-    testPopularity: testPopularity
+    userGrowth: mockUserGrowth
+    revenue: mockRevenue
+    testPopularity: mockTestPopularity
     generatedAt: new Date()
 
 # Start the server
