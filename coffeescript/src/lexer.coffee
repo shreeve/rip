@@ -1319,6 +1319,7 @@ NUMBER     = ///
 
 OPERATOR   = /// ^ (
   ?: [-=]>             # function
+   | =~                # regex match operator
    | [-+*/%<>&|^!?=]=  # compound assign / compare
    | >>>=?             # zero-fill right shift
    | ([-+:])\1         # doubles
@@ -1435,7 +1436,7 @@ UNARY_MATH = ['!', '~']
 SHIFT = ['<<', '>>', '>>>']
 
 # Comparison tokens.
-COMPARE = ['==', '!=', '<', '>', '<=', '>=']
+COMPARE = ['==', '!=', '<', '>', '<=', '>=', '=~']
 
 # Mathematical tokens.
 MATH = ['*', '/', '%', '//', '%%']

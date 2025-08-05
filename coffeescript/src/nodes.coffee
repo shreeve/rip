@@ -4811,6 +4811,7 @@ exports.Op = class Op extends Base
       when '?'  then @compileExistence o, @second.isDefaultValue
       when '//' then @compileFloorDivision o
       when '%%' then @compileModulo o
+      when '=~' then @compileMatch o
       else
         lhs = @first.compileToFragments o, LEVEL_OP
         rhs = @second.compileToFragments o, LEVEL_OP
@@ -4887,6 +4888,25 @@ exports.Op = class Op extends Base
   compileModulo: (o) ->
     mod = new Value new Literal utility 'modulo', o
     new Call(mod, [@first, @second]).compileToFragments o
+
+  compileMatch: (o) ->
+    # Create the match call: val.match(/regex/)
+    matchMethod = new Access new PropertyName 'match'
+    matchValue = new Value @first, [matchMethod]
+    matchCall = new Call matchValue, [@second]
+
+    # Create _ identifier - THE MOST ELEGANT CHOICE!
+    underscore = new IdentifierLiteral '_'
+
+    # Create assignment: _ = matchCall
+    assignment = new Assign underscore, matchCall
+
+    # Create reference to _ for return value
+    underscoreRef = new IdentifierLiteral '_'
+
+    # Create sequence: (_ = val.match(/regex/), _)
+    sequence = new Block [assignment, underscoreRef]
+    new Parens(sequence).compileToFragments o
 
   toString: (idt) ->
     super idt, @constructor.name + ' ' + @operator
