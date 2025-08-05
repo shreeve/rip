@@ -405,25 +405,27 @@ export var c = function() {
 };
 
 export var env = function() {
-  return _currentContext; // Alias for those who prefer 'env'
+  return _currentContext; // THE ONE - just like 'read'!
 };
 
 
-// Sinatra-style instance variables - ULTIMATE ELEGANCE!
-Object.defineProperty(global, '@c', {
+// Make env globally available (like read function)
+Object.defineProperty(global, 'env', {
   get: function() {
     return _currentContext;
   },
   configurable: true
 });
 
-Object.defineProperty(global, '@ctx', {
+// Also make req globally available for request-only access
+Object.defineProperty(global, 'req', {
   get: function() {
-    return _currentContext;
+    return _currentContext != null ? _currentContext.req : void 0;
   },
   configurable: true
 });
 
+// Keep @ versions as aliases for those who prefer instance variable style
 Object.defineProperty(global, '@env', {
   get: function() {
     return _currentContext;
@@ -434,13 +436,6 @@ Object.defineProperty(global, '@env', {
 Object.defineProperty(global, '@req', {
   get: function() {
     return _currentContext != null ? _currentContext.req : void 0;
-  },
-  configurable: true
-});
-
-Object.defineProperty(global, '@res', {
-  get: function() {
-    return _currentContext; // In Hono, context handles response
   },
   configurable: true
 });
@@ -524,11 +519,11 @@ export var withHelpers = function(app) {
 //   phon = read 'phone', 'phone'      # Context-free everything!
 //   c().json { success: true, user: { mail, phon } }  # c() gets global context
 
-// OPTION 3: Sinatra-style @env - THE ONE ULTIMATE VARIABLE!
+// OPTION 3: Global env - THE ONE ULTIMATE VARIABLE! (like read)
 // app.post '/signup', ->
 //   mail = read 'email', 'email!'     # All calls synchronous
 //   phon = read 'phone', 'phone'      # Pure elegance
-//   @env.json { success: true, user: { mail, phon } }  # @env does it ALL!
+//   env.json { success: true, user: { mail, phon } }  # env does it ALL!
 
 //   # SHOWCASE: Geographic validation with =~ MASTERY
 //   stat = c.read 'state', 'state!'     # CA, ny -> CA, NY

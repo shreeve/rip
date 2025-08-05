@@ -275,27 +275,25 @@ _currentContext = null
 
 # Global context accessors - pure Sinatra style!
 export c = -> _currentContext
-export env = -> _currentContext  # Alias for those who prefer 'env'
+export env = -> _currentContext  # THE ONE - just like 'read'!
 
-# Sinatra-style instance variables - ULTIMATE ELEGANCE!
-Object.defineProperty global, '@c',
+# Make env globally available (like read function)
+Object.defineProperty global, 'env', 
   get: -> _currentContext
   configurable: true
 
-Object.defineProperty global, '@ctx',
-  get: -> _currentContext
-  configurable: true
-
-Object.defineProperty global, '@env',
-  get: -> _currentContext
-  configurable: true
-
-Object.defineProperty global, '@req',
+# Also make req globally available for request-only access
+Object.defineProperty global, 'req', 
   get: -> _currentContext?.req
   configurable: true
 
-Object.defineProperty global, '@res',
-  get: -> _currentContext  # In Hono, context handles response
+# Keep @ versions as aliases for those who prefer instance variable style
+Object.defineProperty global, '@env', 
+  get: -> _currentContext
+  configurable: true
+
+Object.defineProperty global, '@req', 
+  get: -> _currentContext?.req
   configurable: true
 
 # Export helper for Hono context binding - Sinatra-style!
@@ -362,11 +360,11 @@ export withHelpers = (app) ->
 #   phon = read 'phone', 'phone'      # Context-free everything!
 #   c().json { success: true, user: { mail, phon } }  # c() gets global context
 #
-# OPTION 3: Sinatra-style @env - THE ONE ULTIMATE VARIABLE!
+# OPTION 3: Global env - THE ONE ULTIMATE VARIABLE! (like read)
 # app.post '/signup', ->
 #   mail = read 'email', 'email!'     # All calls synchronous
 #   phon = read 'phone', 'phone'      # Pure elegance
-#   @env.json { success: true, user: { mail, phon } }  # @env does it ALL!
+#   env.json { success: true, user: { mail, phon } }  # env does it ALL!
 #
 #   # SHOWCASE: Geographic validation with =~ MASTERY
 #   stat = c.read 'state', 'state!'     # CA, ny -> CA, NY
