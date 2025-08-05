@@ -125,8 +125,31 @@
     // Block and statements, which make up a line in a body. FuncDirective is a
     // statement, but not included in Statement because that results in an ambiguous
     // grammar.
-    Line: [o('Expression'), o('ExpressionLine'), o('Statement'), o('FuncDirective')],
+    Line: [o('Expression'), o('ExpressionLine'), o('Statement'), o('FuncDirective'), o('RegexAssignThen')],
     FuncDirective: [o('YieldReturn'), o('AwaitReturn')],
+    // Special regex assignment with then/else that must be parsed at line level
+    RegexAssignThen: [
+      o('SimpleAssignable REGEX_THEN_ASSIGN Expression THEN Expression',
+      function() {
+        return new Assign($1,
+      new If($3,
+      $5,
+      {
+          type: 'if'
+        }).addElse(new Literal('null')),
+      '~=');
+      }),
+      o('SimpleAssignable REGEX_THEN_ASSIGN Expression THEN Expression ELSE Expression',
+      function() {
+        return new Assign($1,
+      new If($3,
+      $5,
+      {
+          type: 'if'
+        }).addElse($7),
+      '~=');
+      })
+    ],
     // Pure statements which cannot be expressions.
     Statement: [
       o('Return'),
@@ -2444,7 +2467,7 @@
   // And not:
 
   //     (2 + 3) * 4
-  operators = [['right', 'DO_IIFE'], ['left', '.', '?.', '::', '?::'], ['left', 'CALL_START', 'CALL_END'], ['nonassoc', '++', '--'], ['left', '?'], ['right', 'UNARY', 'DO'], ['right', 'AWAIT'], ['right', '**'], ['right', 'UNARY_MATH'], ['left', 'MATH'], ['left', '+', '-'], ['left', 'SHIFT'], ['left', 'RELATION'], ['left', 'COMPARE'], ['left', '&'], ['left', '^'], ['left', '|'], ['left', '&&'], ['left', '||'], ['left', 'BIN?'], ['nonassoc', 'INDENT', 'OUTDENT'], ['right', 'YIELD'], ['right', '=', ':', 'COMPOUND_ASSIGN', 'RETURN', 'THROW', 'EXTENDS'], ['right', 'FORIN', 'FOROF', 'FORFROM', 'BY', 'WHEN'], ['right', 'IF', 'ELSE', 'FOR', 'WHILE', 'UNTIL', 'LOOP', 'SUPER', 'CLASS', 'IMPORT', 'EXPORT', 'DYNAMIC_IMPORT'], ['left', 'POST_IF']];
+  operators = [['right', 'DO_IIFE'], ['left', '.', '?.', '::', '?::'], ['left', 'CALL_START', 'CALL_END'], ['nonassoc', '++', '--'], ['left', '?'], ['right', 'UNARY', 'DO'], ['right', 'AWAIT'], ['right', '**'], ['right', 'UNARY_MATH'], ['left', 'MATH'], ['left', '+', '-'], ['left', 'SHIFT'], ['left', 'RELATION'], ['left', 'COMPARE'], ['left', '&'], ['left', '^'], ['left', '|'], ['left', '&&'], ['left', '||'], ['left', 'BIN?'], ['nonassoc', 'INDENT', 'OUTDENT'], ['right', 'YIELD'], ['right', '=', ':', 'COMPOUND_ASSIGN', 'RETURN', 'THROW', 'EXTENDS'], ['right', 'FORIN', 'FOROF', 'FORFROM', 'BY', 'WHEN'], ['right', 'IF', 'ELSE', 'THEN', 'FOR', 'WHILE', 'UNTIL', 'LOOP', 'SUPER', 'CLASS', 'IMPORT', 'EXPORT', 'DYNAMIC_IMPORT'], ['left', 'POST_IF']];
 
   for (name in grammar) {
     if (!hasProp.call(grammar, name)) continue;

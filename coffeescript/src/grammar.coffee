@@ -117,11 +117,20 @@ grammar =
     o 'ExpressionLine'
     o 'Statement'
     o 'FuncDirective'
+    o 'RegexAssignThen'
   ]
 
   FuncDirective: [
     o 'YieldReturn'
     o 'AwaitReturn'
+  ]
+
+  # Special regex assignment with then/else that must be parsed at line level
+  RegexAssignThen: [
+    o 'SimpleAssignable REGEX_THEN_ASSIGN Expression THEN Expression', ->
+      new Assign $1, new If($3, $5, type: 'if').addElse(new Literal('null')), '~='
+    o 'SimpleAssignable REGEX_THEN_ASSIGN Expression THEN Expression ELSE Expression', ->
+      new Assign $1, new If($3, $5, type: 'if').addElse($7), '~='
   ]
 
   # Pure statements which cannot be expressions.
@@ -927,6 +936,7 @@ grammar =
        INDENT Expression OUTDENT',              -> new Assign $1, $4, $2.toString(), originalContext: $2.original
     o 'SimpleAssignable COMPOUND_ASSIGN TERMINATOR
        Expression',                             -> new Assign $1, $4, $2.toString(), originalContext: $2.original
+
   ]
 
   DoIife: [
@@ -969,7 +979,7 @@ operators = [
   ['right',     'YIELD']
   ['right',     '=', ':', 'COMPOUND_ASSIGN', 'RETURN', 'THROW', 'EXTENDS']
   ['right',     'FORIN', 'FOROF', 'FORFROM', 'BY', 'WHEN']
-  ['right',     'IF', 'ELSE', 'FOR', 'WHILE', 'UNTIL', 'LOOP', 'SUPER', 'CLASS', 'IMPORT', 'EXPORT', 'DYNAMIC_IMPORT']
+  ['right',     'IF', 'ELSE', 'THEN', 'FOR', 'WHILE', 'UNTIL', 'LOOP', 'SUPER', 'CLASS', 'IMPORT', 'EXPORT', 'DYNAMIC_IMPORT']
   ['left',      'POST_IF']
 ]
 

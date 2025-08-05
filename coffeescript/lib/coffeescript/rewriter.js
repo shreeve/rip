@@ -5,7 +5,7 @@
   // a series of passes over the token stream, using this **Rewriter** to convert
   // shorthand into the unambiguous long form, add implicit indentation and
   // parentheses, and generally clean things up.
-  var BALANCED_PAIRS, CALL_CLOSERS, CONTROL_IN_IMPLICIT, DISCARDED, EXPRESSION_CLOSE, EXPRESSION_END, EXPRESSION_START, IMPLICIT_CALL, IMPLICIT_END, IMPLICIT_FUNC, IMPLICIT_UNSPACED_CALL, INVERSES, LINEBREAKS, Rewriter, SINGLE_CLOSERS, SINGLE_LINERS, UNFINISHED, extractAllCommentTokens, generate, k, left, len, moveComments, right, throwSyntaxError,
+  var BALANCED_PAIRS, CALL_CLOSERS, CONTROL_IN_IMPLICIT, DISCARDED, EXPRESSION_CLOSE, EXPRESSION_END, EXPRESSION_START, IMPLICIT_CALL, IMPLICIT_END, IMPLICIT_FUNC, IMPLICIT_UNSPACED_CALL, INVERSES, LINEBREAKS, Rewriter, SINGLE_CLOSERS, SINGLE_LINERS, UNFINISHED, extractAllCommentTokens, generate, l, left, len, moveComments, right, throwSyntaxError,
     indexOf = [].indexOf,
     hasProp = {}.hasOwnProperty;
 
@@ -13,15 +13,15 @@
 
   // Move attached comments from one token to another.
   moveComments = function(fromToken, toToken) {
-    var comment, k, len, ref, unshiftedComments;
+    var comment, l, len, ref, unshiftedComments;
     if (!fromToken.comments) {
       return;
     }
     if (toToken.comments && toToken.comments.length !== 0) {
       unshiftedComments = [];
       ref = fromToken.comments;
-      for (k = 0, len = ref.length; k < len; k++) {
-        comment = ref[k];
+      for (l = 0, len = ref.length; l < len; l++) {
+        comment = ref[l];
         if (comment.unshift) {
           unshiftedComments.push(comment);
         } else {
@@ -70,11 +70,11 @@
             console.log('Initial token stream:');
           }
           console.log(((function() {
-            var k, len, ref1, results;
+            var l, len, ref1, results;
             ref1 = this.tokens;
             results = [];
-            for (k = 0, len = ref1.length; k < len; k++) {
-              t = ref1[k];
+            for (l = 0, len = ref1.length; l < len; l++) {
+              t = ref1[l];
               results.push(t[0] + '/' + t[1] + (t.comments ? '*' : ''));
             }
             return results;
@@ -83,6 +83,7 @@
         this.removeLeadingNewlines();
         this.closeOpenCalls();
         this.closeOpenIndexes();
+        this.tagRegexThenAssignments();
         this.normalizeLines();
         this.tagPostfixConditionals();
         this.addImplicitBracesAndParens();
@@ -96,11 +97,11 @@
             console.log('Rewritten token stream:');
           }
           console.log(((function() {
-            var k, len, ref2, results;
+            var l, len, ref2, results;
             ref2 = this.tokens;
             results = [];
-            for (k = 0, len = ref2.length; k < len; k++) {
-              t = ref2[k];
+            for (l = 0, len = ref2.length; l < len; l++) {
+              t = ref2[l];
               results.push(t[0] + '/' + t[1] + (t.comments ? '*' : ''));
             }
             return results;
@@ -151,9 +152,9 @@
       // Leading newlines would introduce an ambiguity in the grammar, so we
       // dispatch them here.
       removeLeadingNewlines() {
-        var i, k, l, leadingNewlineToken, len, len1, ref, ref1, tag;
+        var i, l, leadingNewlineToken, len, len1, m, ref, ref1, tag;
         ref = this.tokens;
-        for (i = k = 0, len = ref.length; k < len; i = ++k) {
+        for (i = l = 0, len = ref.length; l < len; i = ++l) {
           [tag] = ref[i];
           if (tag !== 'TERMINATOR') {
             // Find the index of the first non-`TERMINATOR` token.
@@ -166,8 +167,8 @@
         ref1 = this.tokens.slice(0, i);
         // If there are any comments attached to the tokens we’re about to discard,
         // shift them forward to what will become the new first token.
-        for (l = 0, len1 = ref1.length; l < len1; l++) {
-          leadingNewlineToken = ref1[l];
+        for (m = 0, len1 = ref1.length; m < len1; m++) {
+          leadingNewlineToken = ref1[m];
           moveComments(leadingNewlineToken, this.tokens[i]);
         }
         // Discard all the leading newline tokens.
@@ -223,9 +224,9 @@
       // `pattern` may consist of strings (equality), an array of strings (one of)
       // or null (wildcard). Returns the index of the match or -1 if no match.
       indexOfTag(i, ...pattern) {
-        var fuzz, j, k, ref, ref1;
+        var fuzz, j, l, ref, ref1;
         fuzz = 0;
-        for (j = k = 0, ref = pattern.length; (0 <= ref ? k < ref : k > ref); j = 0 <= ref ? ++k : --k) {
+        for (j = l = 0, ref = pattern.length; (0 <= ref ? l < ref : l > ref); j = 0 <= ref ? ++l : --l) {
           if (pattern[j] == null) {
             continue;
           }
@@ -288,7 +289,7 @@
         stack = [];
         start = null;
         return this.scanTokens(function(token, i, tokens) {
-          var endImplicitCall, endImplicitObject, forward, implicitObjectContinues, implicitObjectIndent, inControlFlow, inImplicit, inImplicitCall, inImplicitControl, inImplicitObject, isImplicit, isImplicitCall, isImplicitObject, k, newLine, nextTag, nextToken, offset, preContinuationLineIndent, preObjectToken, prevTag, prevToken, ref, ref1, ref2, ref3, ref4, ref5, s, sameLine, stackIdx, stackItem, stackNext, stackTag, stackTop, startIdx, startImplicitCall, startImplicitObject, startIndex, startTag, startsLine, tag;
+          var endImplicitCall, endImplicitObject, forward, implicitObjectContinues, implicitObjectIndent, inControlFlow, inImplicit, inImplicitCall, inImplicitControl, inImplicitObject, isImplicit, isImplicitCall, isImplicitObject, l, newLine, nextTag, nextToken, offset, preContinuationLineIndent, preObjectToken, prevTag, prevToken, ref, ref1, ref2, ref3, ref4, ref5, s, sameLine, stackIdx, stackItem, stackNext, stackTag, stackTop, startIdx, startImplicitCall, startImplicitObject, startIndex, startTag, startsLine, tag;
           [tag] = token;
           [prevTag] = prevToken = i > 0 ? tokens[i - 1] : [];
           [nextTag] = nextToken = i < tokens.length - 1 ? tokens[i + 1] : [];
@@ -536,8 +537,8 @@
 
           // Mark all enclosing objects as not sameLine
           if (indexOf.call(LINEBREAKS, tag) >= 0) {
-            for (k = stack.length - 1; k >= 0; k += -1) {
-              stackItem = stack[k];
+            for (l = stack.length - 1; l >= 0; l += -1) {
+              stackItem = stack[l];
               if (!isImplicit(stackItem)) {
                 break;
               }
@@ -641,7 +642,7 @@
           return false;
         };
         shiftCommentsForward = function(token, i, tokens) {
-          var comment, j, k, len, ref, ref1, ref2;
+          var comment, j, l, len, ref, ref1, ref2;
           // Find the next surviving token and attach this token’s comments to it,
           // with a flag that we know to output such comments *before* that
           // token’s own compilation. (Otherwise comments are output following
@@ -652,8 +653,8 @@
           }
           if (!(j === tokens.length || (ref1 = tokens[j][0], indexOf.call(DISCARDED, ref1) >= 0))) {
             ref2 = token.comments;
-            for (k = 0, len = ref2.length; k < len; k++) {
-              comment = ref2[k];
+            for (l = 0, len = ref2.length; l < len; l++) {
+              comment = ref2[l];
               comment.unshift = true;
             }
             moveComments(token, tokens[j]);
@@ -796,7 +797,7 @@
           this.allComments = extractAllCommentTokens(this.tokens);
         }
         findPrecedingComment = (token, {afterPosition, indentSize, first, indented}) => {
-          var comment, k, l, lastMatching, matches, ref, ref1, tokenStart;
+          var comment, l, lastMatching, m, matches, ref, ref1, tokenStart;
           tokenStart = token[2].range[0];
           matches = function(comment) {
             if (comment.outdented) {
@@ -818,8 +819,8 @@
           if (first) {
             lastMatching = null;
             ref = this.allComments;
-            for (k = ref.length - 1; k >= 0; k += -1) {
-              comment = ref[k];
+            for (l = ref.length - 1; l >= 0; l += -1) {
+              comment = ref[l];
               if (matches(comment)) {
                 lastMatching = comment;
               } else if (lastMatching) {
@@ -829,8 +830,8 @@
             return lastMatching;
           }
           ref1 = this.allComments;
-          for (l = ref1.length - 1; l >= 0; l += -1) {
-            comment = ref1[l];
+          for (m = ref1.length - 1; m >= 0; m += -1) {
+            comment = ref1[m];
             if (matches(comment)) {
               return comment;
             }
@@ -936,7 +937,7 @@
           return i + 2;
         };
         return this.scanTokens(function(token, i, tokens) {
-          var conditionTag, j, k, ref, ref1, ref2, tag;
+          var conditionTag, isRegexThenPattern, j, k, l, m, o, ref, ref1, ref2, ref3, ref4, ref5, ref6, tag;
           [tag] = token;
           conditionTag = (tag === '->' || tag === '=>') && this.findTagsBackwards(i, ['IF', 'WHILE', 'FOR', 'UNTIL', 'SWITCH', 'WHEN', 'LEADING_WHEN', '[', 'INDEX_START']) && !(this.findTagsBackwards(i, ['THEN', '..', '...']));
           if (tag === 'TERMINATOR') {
@@ -954,7 +955,7 @@
             }
           }
           if (tag === 'CATCH') {
-            for (j = k = 1; k <= 2; j = ++k) {
+            for (j = l = 1; l <= 2; j = ++l) {
               if (!((ref1 = this.tag(i + j)) === 'OUTDENT' || ref1 === 'TERMINATOR' || ref1 === 'FINALLY')) {
                 continue;
               }
@@ -967,7 +968,28 @@
             tokens.splice(i + 1, 0, indent, outdent);
             return 1;
           }
-          if (indexOf.call(SINGLE_LINERS, tag) >= 0 && this.tag(i + 1) !== 'INDENT' && !(tag === 'ELSE' && this.tag(i + 1) === 'IF') && !conditionTag) {
+          // Check if this is part of a REGEX_THEN_ASSIGN pattern
+          isRegexThenPattern = false;
+          if (tag === 'THEN' && i > 2 && this.tag(i - 2) === 'REGEX_THEN_ASSIGN') {
+            isRegexThenPattern = true;
+          } else if (tag === 'ELSE') {
+// Look back for REGEX_THEN_ASSIGN followed by THEN
+            for (j = m = ref3 = Math.max(0, i - 15), ref4 = i; (ref3 <= ref4 ? m < ref4 : m > ref4); j = ref3 <= ref4 ? ++m : --m) {
+              if (this.tag(j) === 'REGEX_THEN_ASSIGN') {
+// Found REGEX_THEN_ASSIGN, now check if there's a THEN between it and this ELSE
+                for (k = o = ref5 = j + 1, ref6 = i; (ref5 <= ref6 ? o < ref6 : o > ref6); k = ref5 <= ref6 ? ++o : --o) {
+                  if (this.tag(k) === 'THEN') {
+                    isRegexThenPattern = true;
+                    break;
+                  }
+                }
+                if (isRegexThenPattern) {
+                  break;
+                }
+              }
+            }
+          }
+          if (indexOf.call(SINGLE_LINERS, tag) >= 0 && this.tag(i + 1) !== 'INDENT' && !(tag === 'ELSE' && this.tag(i + 1) === 'IF') && !conditionTag && !isRegexThenPattern) {
             starter = tag;
             [indent, outdent] = this.indentation(tokens[i]);
             if (starter === 'THEN') {
@@ -1017,6 +1039,52 @@
           }
           original = token;
           this.detectEnd(i + 1, condition, action);
+          return 1;
+        });
+      }
+
+      // Tag compound assignments followed by THEN for special handling
+      tagRegexThenAssignments() {
+        return this.scanTokens(function(token, i) {
+          var bracketLevel, j, parenLevel, tag;
+          if (!(token[0] === 'COMPOUND_ASSIGN' && token[1] === '~=')) {
+            return 1;
+          }
+          
+          // Look for pattern: SimpleAssignable ~= Expression THEN Expression [ELSE Expression]
+          // We need to find where the expression after ~= ends and check if THEN follows
+          j = i + 1;
+          parenLevel = 0;
+          bracketLevel = 0;
+          
+            // Skip the expression after ~=
+          while (j < this.tokens.length) {
+            [tag] = this.tokens[j];
+            if (tag === 'CALL_START' || tag === '(') {
+              parenLevel++;
+            } else if (tag === 'CALL_END' || tag === ')') {
+              parenLevel--;
+            } else if (tag === '[') {
+              bracketLevel++;
+            } else if (tag === ']') {
+              bracketLevel--;
+            } else if (parenLevel === 0 && bracketLevel === 0) {
+              // Check if we've found the end of the expression
+              if (tag === 'TERMINATOR' || tag === 'OUTDENT' || tag === 'THEN' || tag === 'ELSE' || tag === ',' || tag === ';') {
+                break;
+              }
+            }
+            j++;
+          }
+          
+          // Check if THEN follows the expression
+          if (j < this.tokens.length && this.tokens[j][0] === 'THEN') {
+            // Tag the ~= token so the grammar knows this is a special case
+            token[0] = 'REGEX_THEN_ASSIGN';
+            token.original = 'COMPOUND_ASSIGN';
+          }
+          // Important: consume the THEN token so it's not processed again
+          // We'll let the grammar handle the actual THEN in its rule
           return 1;
         });
       }
@@ -1088,8 +1156,8 @@
 
   EXPRESSION_END = [];
 
-  for (k = 0, len = BALANCED_PAIRS.length; k < len; k++) {
-    [left, right] = BALANCED_PAIRS[k];
+  for (l = 0, len = BALANCED_PAIRS.length; l < len; l++) {
+    [left, right] = BALANCED_PAIRS[l];
     EXPRESSION_START.push(INVERSES[right] = left);
     EXPRESSION_END.push(INVERSES[left] = right);
   }
