@@ -170,7 +170,7 @@ parseDateUTC = function(val) {
 // Enhanced read function with miss parameter - the star of the show!
 // Supports both: read(c, key, tag, miss) and read(key, tag, miss) when using withHelpers
 export var read = function(keyOrContext, key = null, tag = null, miss = null) {
-  var _, bam, c, cleanVal, end, error, i, id, idList, len, numVal, originalTag, readData, ref, start, strLen, temp, val, validIds;
+  var _, bam, c, cleanVal, end, error, i, id, idList, len, maxVal, minVal, numVal, originalTag, readData, ref, start, strLen, temp, val, valid, validIds;
   // Handle both calling styles: read(c, key, tag, miss) vs read(key, tag, miss)
   if ((keyOrContext != null ? (ref = keyOrContext.req) != null ? ref.method : void 0 : void 0) != null) {
     c = keyOrContext;
@@ -404,7 +404,6 @@ export var read = function(keyOrContext, key = null, tag = null, miss = null) {
         // Range check - elegant [min, max] format for numbers OR string length
         start = Math.min(originalTag[0], originalTag[1]);
         end = Math.max(originalTag[0], originalTag[1]);
-        
         // For numeric tags, validate the number value
         if ((tag === 'id' || tag === 'whole' || tag === 'decimal' || tag === 'money') || (typeof val === 'number')) {
           numVal = parseInt(val);
@@ -413,6 +412,40 @@ export var read = function(keyOrContext, key = null, tag = null, miss = null) {
         } else if (typeof val === 'string') {
           strLen = val.length;
           val = strLen >= start && strLen <= end ? val : null;
+        } else {
+          val = null;
+        }
+      } else if (typeof originalTag === 'object' && (((originalTag != null ? originalTag.min : void 0) != null) || ((originalTag != null ? originalTag.max : void 0) != null))) {
+        // Range check - explicit min/max object format { min: 1, max: 10 } or { min: 5 } or { max: 20 }
+        minVal = originalTag.min;
+        maxVal = originalTag.max;
+        
+        // For numeric tags, validate the number value
+        if ((tag === 'id' || tag === 'whole' || tag === 'decimal' || tag === 'money') || (typeof val === 'number')) {
+          numVal = parseInt(val);
+          if (!isNaN(numVal)) {
+            valid = true;
+            if ((minVal != null) && numVal < minVal) {
+              valid = false;
+            }
+            if ((maxVal != null) && numVal > maxVal) {
+              valid = false;
+            }
+            val = valid ? numVal : null;
+          } else {
+            val = null;
+          }
+        // For string-like tags, validate the string length
+        } else if (typeof val === 'string') {
+          strLen = val.length;
+          valid = true;
+          if ((minVal != null) && strLen < minVal) {
+            valid = false;
+          }
+          if ((maxVal != null) && strLen > maxVal) {
+            valid = false;
+          }
+          val = valid ? val : null;
         } else {
           val = null;
         }

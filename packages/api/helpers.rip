@@ -289,6 +289,30 @@ export read = (keyOrContext, key = null, tag = null, miss = null) ->
           val = if strLen >= start and strLen <= end then val else null
         else
           val = null
+      else if typeof originalTag == 'object' and (originalTag?.min? or originalTag?.max?)
+        # Range check - explicit min/max object format { min: 1, max: 10 } or { min: 5 } or { max: 20 }
+        minVal = originalTag.min
+        maxVal = originalTag.max
+        
+        # For numeric tags, validate the number value
+        if tag in ['id', 'whole', 'decimal', 'money'] or (typeof val == 'number')
+          numVal = parseInt(val)
+          if !isNaN(numVal)
+            valid = true
+            valid = false if minVal? and numVal < minVal
+            valid = false if maxVal? and numVal > maxVal
+            val = if valid then numVal else null
+          else
+            val = null
+        # For string-like tags, validate the string length
+        else if typeof val == 'string'
+          strLen = val.length
+          valid = true
+          valid = false if minVal? and strLen < minVal
+          valid = false if maxVal? and strLen > maxVal
+          val = if valid then val else null
+        else
+          val = null
 
   # Handle required/optional logic with miss parameter
   if isBlank(val)

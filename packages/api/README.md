@@ -346,18 +346,34 @@ admin_ids = read 'admins', 'ids'   # Clean and simple
 ```
 
 #### **Range Validation (Elegant!)**
+
+**✅ Common Things Easy** - `[min, max]` (90% of use cases):
 ```rip
-# Numbers: value range
+# Numbers: value range - super clean!
 age = read 'age', [18, 120]        # Between 18 and 120
 priority = read 'priority', [1, 10], 5  # Range 1-10, default 5
 score = read 'score', [0, 100]     # Percentage validation
 rating = read 'rating', [1, 5]     # Star rating system
 
-# Strings: length range
+# Strings: length range - equally clean!
 username = read 'username', [3, 20]  # 3-20 characters
 title = read 'title', [1, 100]      # 1-100 characters
 bio = read 'bio', [0, 500]          # Up to 500 characters
 code = read 'code', [6, 6]          # Exactly 6 characters
+```
+
+**🎯 Rare Things Possible** - `min:` / `max:` (10% of use cases):
+```rip
+# Only minimum (when max doesn't matter)
+views = read 'views', min: 0          # Non-negative numbers
+comment = read 'comment', min: 10     # At least 10 characters
+
+# Only maximum (when min doesn't matter)  
+discount = read 'discount', max: 1.0  # Up to 100% discount
+bio_short = read 'bio', max: 200      # Reasonable bio limit
+
+# Explicit both (rare but clear)
+custom_rating = read 'rating', min: 1, max: 5  # Explicit 1-5 range
 ```
 
 ### 🔥 Legendary Regex Patterns - The Secret Sauce

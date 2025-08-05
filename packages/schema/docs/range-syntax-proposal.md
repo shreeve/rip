@@ -43,7 +43,7 @@ Using elegant `[min, max]` arrays - simple, clear, and consistent with the `read
 ### Range Detection
 ```typescript
 // In our parseParams method
-if (Array.isArray(arg) && arg.length === 2 && 
+if (Array.isArray(arg) && arg.length === 2 &&
     typeof arg[0] === 'number' && typeof arg[1] === 'number') {
   // It's a range array!
   options.min = Math.min(arg[0], arg[1])
