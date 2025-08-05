@@ -198,51 +198,49 @@ const stats = await db.stats()
 console.log('Query performance:', stats.stats)
 ```
 
-## 🔌 Protocol Support
+## 🔌 Connection Methods
 
-### HTTP API
+**Multiple ways to connect to your RipData server:**
 
-Standard REST endpoints:
-
+### **1. HTTP/REST API** (Port 8080)
 ```bash
-# Query data
 curl -X POST http://localhost:8080/api/query \
   -d '{"sql": "SELECT * FROM users LIMIT 10"}'
-
-# Execute writes
-curl -X POST http://localhost:8080/api/execute \
-  -d '{"sql": "INSERT INTO users (name) VALUES (?)", "params": ["Bob"]}'
-
-# Batch operations
-curl -X POST http://localhost:8080/api/batch \
-  -d '{"queries": [{"sql": "BEGIN"}, {"sql": "INSERT ..."}, {"sql": "COMMIT"}]}'
 ```
 
-### WebSocket Streaming
-
+### **2. WebSocket Streaming** (Port 8081)
 ```javascript
 const ws = new WebSocket('ws://localhost:8081')
-
-// Subscribe to live data
 ws.send(JSON.stringify({
   type: 'subscribe',
   query: 'SELECT COUNT(*) FROM users',
   interval: 1000
 }))
-
-ws.onmessage = (event) => {
-  const { data } = JSON.parse(event.data)
-  console.log('Live user count:', data[0]['COUNT(*)'])
-}
 ```
 
-### PostgreSQL Wire Protocol (Coming Soon)
-
-Connect with any PostgreSQL-compatible tool:
-
+### **3. PostgreSQL Wire Protocol** (Port 5432)
 ```bash
+# Use ANY PostgreSQL tool!
 psql -h localhost -p 5432 -U admin -d ripdata
+# DBeaver, pgAdmin, DataGrip, etc. all work!
 ```
+
+### **4. Direct DuckDB CLI**
+```bash
+# Install DuckDB CLI
+brew install duckdb
+# Connect to database file directly
+duckdb ./path/to/your.duckdb
+```
+
+### **5. Programmatic (Rip/TypeScript)**
+```typescript
+import { RipDataClient } from '@rip/data'
+const db = new RipDataClient('http://localhost:8080')
+const users = await db.query('SELECT * FROM users')
+```
+
+**📖 For complete connection examples and advanced usage, see [connection-guide.md](./connection-guide.md)**
 
 ## 🏗️ Architecture Examples
 

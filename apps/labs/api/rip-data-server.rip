@@ -5,10 +5,18 @@ import { RipDataServer } from '@rip/data'
 
 console.log '🔥 Starting Revolutionary Labs Data Server...'
 
-# Create the revolutionary data server
+# Create the revolutionary data server with ALL protocols
 dataServer = new RipDataServer
   dbPath: './db/labs.duckdb'
-  port: 8306  # Data server on different port
+  protocols:
+    http: { port: 8306 }      # HTTP/REST API
+    websocket: { port: 8307 } # WebSocket streaming  
+    postgres: { port: 5433 }  # PostgreSQL wire protocol (non-standard port to avoid conflicts)
+  s3:
+    region: 'us-east-1'
+    endpoint: null  # Use AWS S3 by default
+  maxConnections: 200
+  writeQueueSize: 1000
   enableS3: true
   enableStreaming: true
   batchSize: 100
@@ -17,6 +25,17 @@ dataServer = new RipDataServer
 # Start the server
 dataServer.start!
 
-console.log '🚀 Labs Data Server running on port 8306'
-console.log '🎯 DuckDB: Transactional AND Analytical in one!'
+console.log '🚀 Revolutionary Labs Data Server - ALL PROTOCOLS ACTIVE!'
+console.log '📊 HTTP API:        http://localhost:8306'
+console.log '🔄 WebSocket:       ws://localhost:8307'  
+console.log '🐘 PostgreSQL:      localhost:5433 (use any PostgreSQL tool!)'
+console.log '📁 Direct File:     ./db/labs.duckdb (use DuckDB CLI)'
+console.log ''
+console.log '🎯 DuckDB: Transactional AND Analytical in ONE system!'
+console.log '🔥 Connect with: curl, WebSocket, psql, DBeaver, or DuckDB CLI'
 console.log '📊 Ready for real-time analytics and OLTP workloads'
+console.log ''
+console.log '💡 Quick connections:'
+console.log '   curl -X POST localhost:8306/api/query -d \'{"sql":"SELECT COUNT(*) FROM users"}\''
+console.log '   duckdb ./db/labs.duckdb'
+console.log '   psql -h localhost -p 5433 -U admin -d labs'

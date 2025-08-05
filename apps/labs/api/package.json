@@ -8,7 +8,10 @@
     "dev": "rip-server . 8305",
     "db:push": "rip-schema db:push",
     "db:seed": "bun seed.rip",
-    "data:start": "bun rip-data-server.rip"
+    "data:start": "bun rip-data-server.rip",
+    "data:cli": "bun rip-data-cli.rip server",
+    "data:repl": "bun rip-data-cli.rip direct",
+    "data:connect": "duckdb ./db/labs.duckdb"
   },
   "dependencies": {
     "@rip/data": "workspace:*",
