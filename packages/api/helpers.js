@@ -18,7 +18,7 @@
   // Or elegant one-liner:            code = (val =~ /regex/; if _ then _[1] else null)
 
 // Email regex (simplified version)
-var bool, emailRegex, falsy, isBlank, parseDate, parseDateTime, parseDateUTC, parseJsonSafely, toName, toPhone, truthy,
+var _currentContext, bool, emailRegex, falsy, isBlank, parseDate, parseDateTime, parseDateUTC, parseJsonSafely, toName, toPhone, truthy,
   hasProp = {}.hasOwnProperty;
 
 emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -168,8 +168,21 @@ parseDateUTC = function(val) {
 };
 
 // Enhanced read function with miss parameter - the star of the show!
-export var read = async function(c, key = null, tag = null, miss = null) {
-  var _, bam, body, cleanVal, data, error, i, id, idList, k, len, numVal, originalTag, query, readData, temp, v, val, validIds;
+// Supports both: read(c, key, tag, miss) and read(key, tag, miss) when using withHelpers
+export var read = async function(keyOrContext, key = null, tag = null, miss = null) {
+  var _, bam, body, c, cleanVal, data, error, i, id, idList, k, len, numVal, originalTag, query, readData, ref, temp, v, val, validIds;
+  // Handle both calling styles: read(c, key, tag, miss) vs read(key, tag, miss)
+  if ((keyOrContext != null ? (ref = keyOrContext.req) != null ? ref.method : void 0 : void 0) != null) {
+    c = keyOrContext;
+  } else {
+    // Context-free call - use global context set by withHelpers
+    c = _currentContext;
+    if (!c) {
+      throw new Error("read() called without context. Use withHelpers() middleware or pass context explicitly.");
+    }
+    // Shift parameters when context is implicit
+    [key, tag, miss] = [keyOrContext, key, tag]; // If first param looks like Hono context
+  }
   // Initialize @read cache on context if not exists
   if (c.get('_read') == null) {
     try {
@@ -424,24 +437,37 @@ export var read = async function(c, key = null, tag = null, miss = null) {
   return val;
 };
 
-// Export helper for Hono context binding
+// Global context storage for request-scoped access
+_currentContext = null;
+
+// Export helper for Hono context binding - Sinatra-style!
 export var withHelpers = function(app) {
   return app.use(async function(c, next) {
-    // Bind read method to context for easy access
+    // Set global context for this request (like Sinatra's request scope)
+    _currentContext = c;
+    
+    // Bind read method to context for easy access (both styles supported)
     c.read = function(key, tag, miss) {
-      return read(c, key, tag, miss);
+      return read(key, tag, miss); // Context-free version
     };
-    return (await next());
+    try {
+      return (await next());
+    } finally {
+      // Clean up context after request
+      _currentContext = null;
+    }
   });
 };
 
 // Enhanced usage examples with LEGENDARY =~ and _ syntax - PURE POETRY:
 
+// app.use withHelpers  # Enable Sinatra-style context-free read calls
+
 // app.post '/signup', (c) ->
-//   # Basic required/optional fields
-//   mail = c.read 'email', 'email!'     # required email - throws if missing
-//   phon = c.read 'phone', 'phone'      # optional phone with formatting
-//   fnam = c.read 'first_name', 'name!' # required name with capitalization
+//   # Sinatra-style context-free calls - PURE ELEGANCE!
+//   mail = read! 'email', 'email!'     # required email - throws if missing  
+//   phon = read 'phone', 'phone'       # optional phone with formatting
+//   fnam = read 'first_name', 'name!'  # required name with capitalization
 
 //   # SHOWCASE: Geographic validation with =~ MASTERY
 //   stat = c.read 'state', 'state!'     # CA, ny -> CA, NY
