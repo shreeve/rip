@@ -440,6 +440,16 @@ export var read = async function(keyOrContext, key = null, tag = null, miss = nu
 // Global context storage for request-scoped access
 _currentContext = null;
 
+// Global context accessors - pure Sinatra style!
+export var c = function() {
+  return _currentContext;
+};
+
+export var env = function() {
+  return _currentContext; // Alias for those who prefer 'env'
+};
+
+
 // Export helper for Hono context binding - Sinatra-style!
 export var withHelpers = function(app) {
   return app.use(async function(c, next) {
@@ -461,13 +471,19 @@ export var withHelpers = function(app) {
 
 // Enhanced usage examples with LEGENDARY =~ and _ syntax - PURE POETRY:
 
-// app.use withHelpers  # Enable Sinatra-style context-free read calls
+// app.use withHelpers  # Enable Sinatra-style context-free calls
 
+// OPTION 1: Traditional endpoint with context parameter
 // app.post '/signup', (c) ->
-//   # Sinatra-style context-free calls - PURE ELEGANCE!
-//   mail = read! 'email', 'email!'     # required email - throws if missing  
-//   phon = read 'phone', 'phone'       # optional phone with formatting
-//   fnam = read 'first_name', 'name!'  # required name with capitalization
+//   mail = read! 'email', 'email!'     # context-free read calls
+//   phon = read 'phone', 'phone'       # no 'c' needed in read!
+//   c.json { success: true, user: { mail, phon } }
+
+// OPTION 2: Pure Sinatra-style - NO context parameter needed!
+// app.post '/signup', ->
+//   mail = read! 'email', 'email!'     # context-free read calls
+//   phon = read 'phone', 'phone'       # context-free everything!
+//   c().json { success: true, user: { mail, phon } }  # c() gets global context
 
 //   # SHOWCASE: Geographic validation with =~ MASTERY
 //   stat = c.read 'state', 'state!'     # CA, ny -> CA, NY

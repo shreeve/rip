@@ -75,15 +75,20 @@ app.post('/signup', async (req, res) => {
 
 ```rip
 # Rip API validation - PURE POETRY (Sinatra-style!)
-import { read, withHelpers } from '@rip/api'
+import { read, c, withHelpers } from '@rip/api'
 
-app.use withHelpers  # Enable context-free read calls
+app.use withHelpers  # Enable context-free everything!
 
-app.post '/signup', (c) ->
-  email = read! 'email', 'email!'     # Required email - no context needed!
-  phone = read 'phone', 'phone'      # Optional phone formatting (cached, sync)
-  state = read 'state', 'state!'     # Required state transformation (cached, sync)
-  # ... validation complete in 3 lines vs 50+ (Sinatra elegance!)
+# OPTION 1: Traditional (context parameter)
+app.post '/signup', (ctx) ->
+  email = read! 'email', 'email!'     # No context in read calls!
+  ctx.json { success: true, email }
+
+# OPTION 2: Pure Sinatra-style (NO context parameter!)  
+app.post '/signup', ->
+  email = read! 'email', 'email!'     # Context-free read calls
+  phone = read 'phone', 'phone'      # Context-free everything!
+  c().json { success: true, email, phone }  # c() gets global context
 ```
 
 ## 🔥 The `helpers.rip` Powerhouse
@@ -112,13 +117,21 @@ The crown jewel of `@rip/api` is the **`read()` function** - a validation and pa
 
 ### Core API: The `read()` Function
 
-**Two calling styles supported**:
+**Three calling styles supported**:
 
 ```rip
-# Sinatra-style (context-free) - RECOMMENDED
-read(key, validator, fallback)
+# Pure Sinatra-style (context-free everything) - ULTIMATE ELEGANCE
+import { read, c } from '@rip/api'
+app.post '/endpoint', ->
+  data = read! 'key', 'validator'
+  c().json { data }
 
-# Explicit context (when not using withHelpers)  
+# Traditional with context-free read calls - RECOMMENDED
+app.post '/endpoint', (ctx) ->
+  data = read! 'key', 'validator'  # No context in read!
+  ctx.json { data }
+
+# Explicit context (backward compatible)
 read(context, key, validator, fallback)
 ```
 
@@ -128,25 +141,32 @@ read(context, key, validator, fallback)
 - **`fallback`**: Value to use if validation fails (optional)
 - **`context`**: Hono request context (only needed without withHelpers)
 
+**Global Context Access**:
+- **`c()`**: Returns current request context (like Sinatra's `request`)
+- **`env()`**: Alias for `c()` for those who prefer `env`
+
 ### Basic Usage Examples
 
 ```rip
-import { read, withHelpers } from '@rip/api'
+import { read, c, withHelpers } from '@rip/api'
 
 app.use withHelpers  # Enable Sinatra-style context-free calls
 
-app.post '/api/users', (c) ->
-  # Basic field extraction (first call triggers async request parsing)
-  name = read! 'name'              # Raw value - no context needed!
-  
-  # Required fields (throws if missing) - subsequent calls use cached data
-  email = read 'email', 'email!'  # Required email
-  
-  # Optional with fallback  
-  role = read 'role', ['admin', 'user'], 'user'  # Default to 'user'
-  
-  # Complex validation with transformation
+# STYLE 1: Traditional with context parameter
+app.post '/api/users', (ctx) ->
+  name = read! 'name'              # Context-free read calls!
+  email = read 'email', 'email!'  # No context needed!
+  ctx.json { name, email }
+
+# STYLE 2: Pure Sinatra-style - NO context parameter!
+app.post '/api/users', ->
+  name = read! 'name'              # Context-free everything!
+  email = read 'email', 'email!'  # Pure elegance!
+  role = read 'role', ['admin', 'user'], 'user'  # Default fallback
   phone = read 'phone', 'phone'   # Formats as 123-456-7890
+  
+  # Access context when needed
+  c().json { name, email, role, phone }
 ```
 
 ### 🔄 **Sync vs Async: Smart Caching Explained**
@@ -178,7 +198,7 @@ bio = read 'bio', 'text'           # Preserves paragraphs (cached, sync)
 full_name = read 'name', 'name'    # Capitalizes Each Word (cached, sync)
 ```
 
-#### **Contact Information**  
+#### **Contact Information**
 ```rip
 email = read! 'email', 'email'     # Validates & normalizes email (first call, async)
 phone = read 'phone', 'phone'      # Formats: (123) 456-7890 → 123-456-7890 (cached, sync)
@@ -226,7 +246,7 @@ price = read 'price', 'currency'   # Currency: $1,234.56 → 1234.56 (cached, sy
 ```rip
 active = read! 'active', 'bool'    # Smart boolean parsing (first call, async)
 tags = read 'tags', 'array'        # Preserves arrays (cached, sync)
-config = read 'config', 'hash'     # Preserves objects (cached, sync)  
+config = read 'config', 'hash'     # Preserves objects (cached, sync)
 admin_ids = read 'admins', 'ids'   # Validates ID lists: "1,2,3" → [1,2,3] (cached, sync)
 ```
 
@@ -301,7 +321,7 @@ priority = read 'priority', { start: 1, end: 10 }, 5
 app.post '/api/users', (c) ->
   # Get all user data in one call (parses request body, async)
   userData = read! null  # Returns: { name: "John", email: "john@...", ... }
-  
+
   # Then validate individual fields as needed (cached, sync)
   name = read 'name', 'name!'
   email = read 'email', 'email!'
@@ -362,12 +382,12 @@ app.post('/signup', async (req, res) => {
 
 #### **After** (Rip with @rip/api):
 ```rip
-# 8 lines total - same functionality, bulletproof validation
-import { read, withHelpers } from '@rip/api'
+# 6 lines total - same functionality, bulletproof validation, PURE SINATRA ELEGANCE!
+import { read, c, withHelpers } from '@rip/api'
 
-app.use withHelpers  # Enable Sinatra-style context-free calls
+app.use withHelpers  # Enable Sinatra-style context-free everything!
 
-app.post '/signup', (c) ->
+app.post '/signup', ->  # NO context parameter needed!
   email = read! 'email', 'email!'                    # Required, validated, normalized (first call, async)
   name = read 'name', 'name!'                        # Required, trimmed, formatted (cached, sync)
   phone = read 'phone', 'phone'                      # Optional, formatted as 123-456-7890 (cached, sync)
@@ -375,7 +395,7 @@ app.post '/signup', (c) ->
   age = read 'age', { start: 18, end: 120 }, null    # Range validated (cached, sync)
   
   user = createUser! { email, name, phone, state, age } # Use ! suffix for async operations
-  c.json { success: true, user }
+  c().json { success: true, user }  # Global context access - pure Sinatra style!
 ```
 
 ### Performance & Production Benefits
@@ -413,11 +433,17 @@ app = new Hono()
 # Enable helper binding (optional)
 app.use withHelpers
 
-# Now you can use context-free read calls - pure Sinatra style!
-app.post '/api/users', (c) ->
-  email = read! 'email', 'email!'  # First call, async - no context needed!
-  name = read 'name', 'name!'      # Cached, sync - no context needed!
-  c.json { success: true, user: { email, name } }
+# STYLE 1: Traditional with context parameter
+app.post '/api/users', (ctx) ->
+  email = read! 'email', 'email!'  # Context-free read calls!
+  name = read 'name', 'name!'      # No context needed in read!
+  ctx.json { success: true, user: { email, name } }
+
+# STYLE 2: Pure Sinatra-style - NO context parameter!
+app.post '/api/users', ->
+  email = read! 'email', 'email!'  # Context-free everything!
+  name = read 'name', 'name!'      # Pure Sinatra elegance!
+  c().json { success: true, user: { email, name } }  # Global context access
 ```
 
 ### Migration from Traditional APIs
