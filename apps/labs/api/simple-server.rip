@@ -22,15 +22,15 @@ app.get '/ping', (c) -> c.text 'pong'
 # Config endpoint
 app.get '/config', (c) ->
   c.json
-    config:
-      client:
-        appName: 'Labs (Revolutionary Rip + DuckDB)'
-        apiUrl: 'http://localhost:8305'
-        features:
-          auth: true
-          orders: true
-          results: true
-          analytics: true
+    appName: 'Labs (Revolutionary Rip + DuckDB)'
+    logo: 'https://via.placeholder.com/200x80/0066cc/ffffff?text=Labs'
+    userAgreementUrl: 'https://example.com/terms'
+    apiUrl: 'http://localhost:8305'
+    features:
+      auth: true
+      orders: true
+      results: true
+      analytics: true
 
 # Mock auth endpoints
 app.post '/auth/code', (c) ->
