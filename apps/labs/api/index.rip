@@ -27,7 +27,7 @@ app.use logger()
 withHelpers app
 
 # Health check
-app.get '/ping', -> text 'pongs'
+app.get '/ping', -> text 'pong'
 
 # ====== CONFIG ROUTES ======
 app.get '/config', ->
