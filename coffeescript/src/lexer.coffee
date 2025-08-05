@@ -91,9 +91,105 @@ exports.Lexer = class Lexer
     return @tokens if opts.rewrite is off
     (new Rewriter).rewrite @tokens
 
+  # Transform ~= with then/else syntax into parseable form
+  # Converts: var ~= /regex/ then expr else expr
+  # Into: var ~= (if /regex/ then expr else expr)
+  transformRegexThenElse: ->
+    i = 0
+    while i < @tokens.length - 4
+      # Look for pattern: IDENTIFIER ~= REGEX then
+      if @tokens[i + 1]?[0] is 'COMPOUND_ASSIGN' and
+         @tokens[i + 1]?[1] is '~=' and
+         @tokens[i + 2]?[0] is 'REGEX' and
+         @tokens[i + 3]?[1] is 'then'
+
+        # Simple approach: just insert ( if before the regex
+        # This transforms: var ~= /regex/ then expr else expr
+        # Into: var ~= (if /regex/ then expr else expr)
+
+        locationData = @tokens[i + 2][2]
+
+        # Insert opening paren and 'if' before the regex
+        @tokens.splice i + 2, 0,
+          ['(', '(', locationData],
+          ['IF', 'if', locationData]
+
+        # Find the end of the entire then/else expression and add closing paren
+        endIndex = @findThenElseEnd(i + 6)  # Start after 'then'
+        @tokens.splice endIndex, 0, [')', ')', @tokens[endIndex - 1][2]]
+
+        i = endIndex + 1  # Skip past this transformation
+      else
+        i++
+    return
+
+  # Find matching 'else' for 'then' at the same nesting level
+  findMatchingElse: (startIndex) ->
+    level = 0
+    for i in [startIndex...@tokens.length]
+      token = @tokens[i]
+      switch token[0]
+        when '(', '[', '{'
+          level++
+        when ')', ']', '}'
+          level--
+        when 'IF'
+          level++
+        when 'ELSE'
+          if level is 0
+            return i
+          else if token[1] is 'else'  # Make sure it's actually 'else' keyword
+            level--
+    return -1
+
+  # Find the end of a then/else expression
+  findThenElseEnd: (startIndex) ->
+    level = 0
+    foundElse = false
+
+    for i in [startIndex...@tokens.length]
+      token = @tokens[i]
+      switch token[0]
+        when '(', '[', '{'
+          level++
+        when ')', ']', '}'
+          level--
+        when 'IF'
+          level++ if level >= 0
+        when 'ELSE'
+          if level is 0 and not foundElse
+            foundElse = true
+          else if level > 0
+            level--
+        when 'TERMINATOR', 'OUTDENT'
+          if level is 0 and foundElse
+            return i
+          else if level is 0 and not foundElse
+            # No else clause, return end of then expression
+            return i
+
+    return @tokens.length
+
+  # Find the end of an expression (simplified)
+  findExpressionEnd: (startIndex) ->
+    level = 0
+    for i in [startIndex...@tokens.length]
+      token = @tokens[i]
+      switch token[0]
+        when '(', '[', '{'
+          level++
+        when ')', ']', '}'
+          level--
+        when 'TERMINATOR', 'OUTDENT'
+          return i if level is 0
+        when 'ELSE', 'THEN'
+          return i if level is 0
+      # Continue if we haven't found the end
+    return @tokens.length
+
   # Preprocess the code to remove leading and trailing whitespace, carriage
-  # returns, etc. If we’re lexing literate CoffeeScript, strip external Markdown
-  # by removing all lines that aren’t indented by at least four spaces or a tab.
+  # returns, etc. If we're lexing literate CoffeeScript, strip external Markdown
+  # by removing all lines that aren't indented by at least four spaces or a tab.
   clean: (code) ->
     thusFar = 0
     if code.charCodeAt(0) is BOM
@@ -1320,6 +1416,7 @@ NUMBER     = ///
 OPERATOR   = /// ^ (
   ?: [-=]>             # function
    | =~                # regex match operator
+   | ~=                # compound regex assignment operator
    | [-+*/%<>&|^!?=]=  # compound assign / compare
    | >>>=?             # zero-fill right shift
    | ([-+:])\1         # doubles
@@ -1424,7 +1521,7 @@ TRAILING_SPACES     = /\s+$/
 # Compound assignment tokens.
 COMPOUND_ASSIGN = [
   '-=', '+=', '/=', '*=', '%=', '||=', '&&=', '?=', '<<=', '>>=', '>>>='
-  '&=', '^=', '|=', '**=', '//=', '%%='
+  '&=', '^=', '|=', '**=', '//=', '%%=', '~='
 ]
 
 # Unary tokens.

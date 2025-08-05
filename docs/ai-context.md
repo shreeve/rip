@@ -9,6 +9,7 @@ This document provides comprehensive context for AI assistants working on the Ri
 ### Key Value Propositions
 - **Clean Async Syntax**: `fetch!` instead of `await fetch()`
 - **LEGENDARY Regex Matching**: `val =~ /regex/` with automatic `_` assignment
+- **REVOLUTIONARY Compound Regex Assignment**: `val ~= /regex/` combines match and assign
 - **Modern Web Stack**: Bun + Hono + Drizzle ORM integration
 - **Type-Safe Database**: Custom DSL for schema definition
 - **Hot Reload**: Development server with file watching
@@ -149,8 +150,26 @@ val =~ /^([A-Z]{2})$/
 code = _?[1]?.toUpperCase()
 ```
 
+### The `~=` Compound Regex Assignment Enhancement
+**Problem**: Even with `=~`, regex validation still required two lines and manual result handling.
+
+**Solution**: Added `~=` compound assignment operator that combines regex matching with variable assignment:
+- **Lexer**: Added `'~='` to `COMPOUND_ASSIGN` array and `OPERATOR` regex in `/coffeescript/src/lexer.coffee`
+- **Nodes**: Added `compileRegexAssign` method in `/coffeescript/src/nodes.coffee` that generates compound assignment
+
+**Result**: Revolutionary one-line regex assignment with automatic null fallback:
+```coffeescript
+# Before (two lines)
+val =~ /^([A-Z]{2})$/
+result = _?[1]?.toUpperCase()
+
+# After (REVOLUTIONARY)
+val ~= /^([A-Z]{2})$/
+result = val?[1]?.toUpperCase()
+```
+
 ### Transpilation Pipeline
-1. **Write**: `.rip` files with `!` suffix and `=~` regex syntax
+1. **Write**: `.rip` files with `!` suffix, `=~` regex matching, and `~=` compound assignment
 2. **Transpile**: `rip-bun.ts` plugin calls enhanced CoffeeScript compiler
 3. **Execute**: Bun runs the compiled JavaScript
 4. **Serve**: rip-server handles HTTP requests
@@ -225,6 +244,7 @@ bun -e "const app = await import('./index.rip'); console.log(typeof app.default)
 ### ✅ Working Features
 - `!` suffix automatic async detection
 - `=~` regex matching with automatic `_` assignment
+- `~=` compound regex assignment with null fallback
 - Full web server with Hono framework
 - Database schema DSL with SQLite
 - Hot reload development server

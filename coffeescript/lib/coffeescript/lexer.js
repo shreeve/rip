@@ -91,9 +91,145 @@
       return (new Rewriter()).rewrite(this.tokens);
     }
 
+    // Transform ~= with then/else syntax into parseable form
+    // Converts: var ~= /regex/ then expr else expr
+    // Into: var ~= (if /regex/ then expr else expr)
+    transformRegexThenElse() {
+      var endIndex, i, locationData, ref, ref1, ref2, ref3;
+      i = 0;
+      while (i < this.tokens.length - 4) {
+        // Look for pattern: IDENTIFIER ~= REGEX then
+        if (((ref = this.tokens[i + 1]) != null ? ref[0] : void 0) === 'COMPOUND_ASSIGN' && ((ref1 = this.tokens[i + 1]) != null ? ref1[1] : void 0) === '~=' && ((ref2 = this.tokens[i + 2]) != null ? ref2[0] : void 0) === 'REGEX' && ((ref3 = this.tokens[i + 3]) != null ? ref3[1] : void 0) === 'then') {
+          
+          // Simple approach: just insert ( if before the regex
+          // This transforms: var ~= /regex/ then expr else expr
+          // Into: var ~= (if /regex/ then expr else expr)
+          locationData = this.tokens[i + 2][2];
+          
+          // Insert opening paren and 'if' before the regex
+          this.tokens.splice(i + 2, 0, ['(', '(', locationData], ['IF', 'if', locationData]);
+          
+          // Find the end of the entire then/else expression and add closing paren
+          endIndex = this.findThenElseEnd(i + 6); // Start after 'then'
+          this.tokens.splice(endIndex, 0, [')', ')', this.tokens[endIndex - 1][2]]);
+          i = endIndex + 1; // Skip past this transformation
+        } else {
+          i++;
+        }
+      }
+    }
+
+    // Find matching 'else' for 'then' at the same nesting level
+    findMatchingElse(startIndex) {
+      var i, j, level, ref, ref1, token;
+      level = 0;
+      for (i = j = ref = startIndex, ref1 = this.tokens.length; (ref <= ref1 ? j < ref1 : j > ref1); i = ref <= ref1 ? ++j : --j) {
+        token = this.tokens[i];
+        switch (token[0]) {
+          case '(':
+          case '[':
+          case '{':
+            level++;
+            break;
+          case ')':
+          case ']':
+          case '}':
+            level--;
+            break;
+          case 'IF':
+            level++;
+            break;
+          case 'ELSE':
+            if (level === 0) {
+              return i;
+            } else if (token[1] === 'else') { // Make sure it's actually 'else' keyword
+              level--;
+            }
+        }
+      }
+      return -1;
+    }
+
+    // Find the end of a then/else expression
+    findThenElseEnd(startIndex) {
+      var foundElse, i, j, level, ref, ref1, token;
+      level = 0;
+      foundElse = false;
+      for (i = j = ref = startIndex, ref1 = this.tokens.length; (ref <= ref1 ? j < ref1 : j > ref1); i = ref <= ref1 ? ++j : --j) {
+        token = this.tokens[i];
+        switch (token[0]) {
+          case '(':
+          case '[':
+          case '{':
+            level++;
+            break;
+          case ')':
+          case ']':
+          case '}':
+            level--;
+            break;
+          case 'IF':
+            if (level >= 0) {
+              level++;
+            }
+            break;
+          case 'ELSE':
+            if (level === 0 && !foundElse) {
+              foundElse = true;
+            } else if (level > 0) {
+              level--;
+            }
+            break;
+          case 'TERMINATOR':
+          case 'OUTDENT':
+            if (level === 0 && foundElse) {
+              return i;
+            } else if (level === 0 && !foundElse) {
+              // No else clause, return end of then expression
+              return i;
+            }
+        }
+      }
+      return this.tokens.length;
+    }
+
+    // Find the end of an expression (simplified)
+    findExpressionEnd(startIndex) {
+      var i, j, level, ref, ref1, token;
+      level = 0;
+      for (i = j = ref = startIndex, ref1 = this.tokens.length; (ref <= ref1 ? j < ref1 : j > ref1); i = ref <= ref1 ? ++j : --j) {
+        token = this.tokens[i];
+        switch (token[0]) {
+          case '(':
+          case '[':
+          case '{':
+            level++;
+            break;
+          case ')':
+          case ']':
+          case '}':
+            level--;
+            break;
+          case 'TERMINATOR':
+          case 'OUTDENT':
+            if (level === 0) {
+              return i;
+            }
+            break;
+          case 'ELSE':
+          case 'THEN':
+            if (level === 0) {
+              return i;
+            }
+        }
+      }
+      // Continue if we haven't found the end
+      return this.tokens.length;
+    }
+
     // Preprocess the code to remove leading and trailing whitespace, carriage
-    // returns, etc. If we’re lexing literate CoffeeScript, strip external Markdown
-    // by removing all lines that aren’t indented by at least four spaces or a tab.
+    // returns, etc. If we're lexing literate CoffeeScript, strip external Markdown
+    // by removing all lines that aren't indented by at least four spaces or a tab.
     clean(code) {
       var base, thusFar;
       thusFar = 0;
@@ -1814,8 +1950,9 @@
   // decimal without support for numeric literal separators for reference:
   // \d*\.?\d+ (?:e[+-]?\d+)?
 
-  OPERATOR = /^(?:[-=]>|=~|[-+*\/%<>&|^!?=]=|>>>=?|([-+:])\1|([&|<>*\/%])\2=?|\?(\.|::)|\.{2,3})/; // function
+  OPERATOR = /^(?:[-=]>|=~|~=|[-+*\/%<>&|^!?=]=|>>>=?|([-+:])\1|([&|<>*\/%])\2=?|\?(\.|::)|\.{2,3})/; // function
   // regex match operator
+  // compound regex assignment operator
   // compound assign / compare
   // zero-fill right shift
   // doubles
@@ -1895,7 +2032,7 @@
   TRAILING_SPACES = /\s+$/;
 
   // Compound assignment tokens.
-  COMPOUND_ASSIGN = ['-=', '+=', '/=', '*=', '%=', '||=', '&&=', '?=', '<<=', '>>=', '>>>=', '&=', '^=', '|=', '**=', '//=', '%%='];
+  COMPOUND_ASSIGN = ['-=', '+=', '/=', '*=', '%=', '||=', '&&=', '?=', '<<=', '>>=', '>>>=', '&=', '^=', '|=', '**=', '//=', '%%=', '~='];
 
   // Unary tokens.
   UNARY = ['NEW', 'TYPEOF', 'DELETE'];

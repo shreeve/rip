@@ -5374,6 +5374,9 @@
           if ((ref1 = this.context) === '//=' || ref1 === '%%=') {
             return this.compileSpecialMath(o);
           }
+          if (this.context === '~=') {
+            return this.compileRegexAssign(o);
+          }
         }
         this.addScopeVariables(o);
         if (this.value instanceof Code) {
@@ -5734,6 +5737,48 @@
         var left, right;
         [left, right] = this.variable.cacheReference(o);
         return new Assign(left, new Op(this.context.slice(0, -1), right, this.value)).compileToFragments(o);
+      }
+
+      // Compile the compound regex assignment operator `~=`
+      // Supports: a ~= /regex/ (basic) and a ~= /regex/ then expr else expr (advanced)
+      compileRegexAssign(o) {
+        var conditionalValue, elsePart, left, nullLiteral, regex, regexMatch, right, sequence, thenPart, underscoreVar;
+        [left, right] = this.variable.cacheReference(o);
+        // Check if @value is an If node (indicating then/else syntax)
+        if (this.value instanceof If) {
+          // Advanced syntax: val ~= /regex/ then expr else expr
+          // The If node's condition should be the regex, body is then part, elseBody is else part
+          regex = this.value.condition;
+          thenPart = this.value.body;
+          elsePart = this.value.elseBody;
+          // Create the regex match operation: right =~ regex
+          regexMatch = new Op('=~', right, regex);
+          // Create conditional: _ ? thenPart : elsePart
+          underscoreVar = new IdentifierLiteral('_');
+          conditionalValue = new If(underscoreVar, thenPart, {
+            type: 'if'
+          }).addElse(elsePart || new Literal('null'));
+          // Create a sequence: (regexMatch, conditionalValue)
+          sequence = new Block([regexMatch, conditionalValue]);
+          // Create the final assignment: left = sequence
+          return new Assign(left, new Parens(sequence)).compileToFragments(o);
+        } else {
+          // Basic syntax: a ~= /regex/ becomes: a = (a =~ /regex/) ? _ : null
+
+          // Create the regex match operation: right =~ @value
+          regexMatch = new Op('=~', right, this.value);
+          // Create conditional: _ ? _ : null (if match successful, use _, else null)
+          underscoreVar = new IdentifierLiteral('_');
+          nullLiteral = new Literal('null');
+          conditionalValue = new If(underscoreVar, underscoreVar, {
+            type: 'if'
+          }).addElse(nullLiteral);
+          // Create a sequence: (regexMatch, conditionalValue)
+          // This ensures the match happens first, then we use the result
+          sequence = new Block([regexMatch, conditionalValue]);
+          // Create the final assignment: left = sequence
+          return new Assign(left, new Parens(sequence)).compileToFragments(o);
+        }
       }
 
       // Compile the assignment from an array splice literal, using JavaScript's
@@ -7266,16 +7311,12 @@
         matchMethod = new Access(new PropertyName('match'));
         matchValue = new Value(this.first, [matchMethod]);
         matchCall = new Call(matchValue, [this.second]);
-        
         // Create _ identifier - THE MOST ELEGANT CHOICE!
         underscore = new IdentifierLiteral('_');
-        
         // Create assignment: _ = matchCall
         assignment = new Assign(underscore, matchCall);
-        
         // Create reference to _ for return value
         underscoreRef = new IdentifierLiteral('_');
-        
         // Create sequence: (_ = val.match(/regex/), _)
         sequence = new Block([assignment, underscoreRef]);
         return new Parens(sequence).compileToFragments(o);

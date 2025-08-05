@@ -1,0 +1,371 @@
+# Rip Server Helpers - Enhanced Request Data Reading & Validation
+# Based on the newer Trust/Sinatra helpers.rb version
+# Usage: mail = read 'email', 'email!', -> signout!  # with fallback action
+#
+# 🔥 SHOWCASING RIP'S LEGENDARY REGEX OPERATORS! 🔥
+# This file demonstrates the most elegant regex matching ever created:
+#
+# =~ operator (match and assign to _):
+#   val =~ /^(\d{3})-?(\d{2})-?(\d{4})$/  # Match and auto-assign to _
+#   result = _?[1] and "#{_[1]}#{_[2]}#{_[3]}"  # Use with optional chaining
+#
+# ~= operator (compound assignment - TWO FORMS):
+#   Form 1: val ~= /regex/                    # Assigns match array or null
+#   Form 2: val ~= /regex/; if _ then transform else fallback
+#
+# Transform verbose JavaScript:    match = val.match(/regex/); code = match?[1]
+# Into pure poetry:                val =~ /regex/; code = _?[1]
+
+# Email regex (simplified version)
+emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+# Phone formatting helper - SHOWCASING =~ ELEGANCE!
+toPhone = (val) ->
+  return null unless val
+
+  # Extract all digits and format with beautiful =~ pattern matching
+  digits = val.replace(/\D/g, '')
+  return null if digits.length < 10
+
+  # 10-digit format: 1234567890 -> 123-456-7890
+  digits =~ /^(\d{3})(\d{3})(\d{4})$/
+  return "#{_[1]}-#{_[2]}-#{_[3]}" if _ and digits.length == 10
+
+  # 11-digit with country code: 11234567890 -> 123-456-7890
+  digits =~ /^1(\d{3})(\d{3})(\d{4})$/
+  return "#{_[1]}-#{_[2]}-#{_[3]}" if _ and digits.length == 11
+
+  null
+
+# Name formatting helper
+toName = (val, type = 'name') ->
+  return null unless val
+  cleaned = val.trim().replace(/\s+/g, ' ')
+  return null if cleaned.length == 0
+
+  if type == 'name'
+    # Capitalize first letter of each word
+    words = cleaned.split(' ')
+    capitalizedWords = words.map (word) ->
+      word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+    capitalizedWords.join(' ')
+  else if type == 'address'
+    # Basic address formatting
+    cleaned
+  else
+    cleaned
+
+# Boolean helpers
+truthy = (val) ->
+  return true if val in [true, 'true', '1', 1, 'yes', 'on', 'y']
+  false
+
+falsy = (val) ->
+  return true if val in [false, 'false', '0', 0, 'no', 'off', 'n']
+  false
+
+bool = (val) ->
+  return true if truthy(val)
+  return false if falsy(val)
+  null
+
+# Check if value is blank (null, undefined, empty string, or whitespace)
+isBlank = (val) ->
+  return true if not val?
+  return true if val == ''
+  return true if typeof val == 'string' and val.trim() == ''
+  false
+
+# JSON parsing helper
+parseJsonSafely = (body) ->
+  try
+    JSON.parse(body)
+  catch error
+    console.warn "Failed to parse JSON body: #{error.message}"
+    {}
+
+# Date parsing helpers
+parseDate = (val) ->
+  try
+    date = new Date(val)
+    if isNaN(date.getTime())
+      null
+    else
+      date.toISOString().split('T')[0]
+  catch error
+    null
+
+parseDateTime = (val) ->
+  try
+    date = new Date(val)
+    if isNaN(date.getTime()) then null else date
+  catch error
+    null
+
+parseDateUTC = (val) ->
+  try
+    date = new Date(val)
+    if isNaN(date.getTime()) then null else date.toISOString()
+  catch error
+    null
+
+# Enhanced read function with miss parameter - the star of the show!
+export read = (c, key = null, tag = null, miss = null) ->
+  # Initialize @read cache on context if not exists
+  unless c.get('_read')?
+    try
+      # Get request body for POST/PUT/PATCH
+      data = {}
+      if c.req.method != 'GET'
+        body = await c.req.text()
+        if body
+          data = parseJsonSafely(body)
+
+      # Add query params (like Rails params)
+      query = c.req.query() or {}
+      for own k, v of query
+        data[k] = v
+
+      # Transform string values (trim whitespace)
+      if typeof data == 'object' and data?
+        for own k, v of data
+          if typeof v == 'string'
+            data[k] = v.trim()
+
+      # Handle array data
+      if Array.isArray(data)
+        data = { list: data }
+
+      c.set('_read', data)
+    catch error
+      console.warn "ERROR: unable to parse request data, #{error}"
+      c.set('_read', {})
+
+  # Get cached data
+  readData = c.get('_read')
+  val = if key then readData[key] else readData
+
+  # If no tag specified, return raw value
+  return val unless key and tag
+
+  # Handle tag modifiers (! for required)
+  originalTag = tag
+  bam = false  # required flag
+
+  if typeof tag == 'string'
+    if tag.endsWith('!')
+      tag = tag.slice(0, -1)
+      bam = true
+
+  # Convert value to string for processing (unless it's array/hash)
+  if Array.isArray(val)
+    val = if tag == 'array' then val else val.join(',')
+  else if typeof val == 'object' and val?
+    val = if tag == 'hash' then val else String(val)
+  else
+    val = String(val or '')
+
+  # Process based on tag type - SHOWCASING =~ MASTERY!
+  switch tag
+    when 'id'
+      val =~ /^([1-9]\d{0,19})$/
+      return parseInt(_?[1]) if _
+    when 'whole'
+      val =~ /^(0|[1-9]\d{0,19})$/
+      return parseInt(_?[1]) if _
+    when 'decimal'
+      val =~ /^([-+]?\d+(?:\.\d*)?|\.\d+)$/
+      val = parseFloat(_?[1]?.replace(/\.$/, ''))
+    when 'money'
+      val =~ /^([-+]?\d+(?:\.\d*)?|\.\d+)$/
+      val = _?[1] and Math.round(parseFloat(_[1].replace(/\.$/, '')) * 100) / 100
+
+    # One-liner cases - super scannable!
+    when 'string'  then val = val.replace(/\s\s+/g, ' ')
+    when 'text'    then val = val.replace(/  +/g, ' ')
+    when 'name'    then val = toName(val, 'name')
+    when 'phone'   then val = toPhone(val)
+    when 'address' then val = toName(val, 'address')
+    when 'time'    then val = parseDateTime(val)
+    when 'date'    then val = parseDate(val)
+    when 'dateutc' then val = parseDateUTC(val)
+    when 'truthy'  then val = truthy(val)
+    when 'falsy'   then val = falsy(val)
+
+    when 'email'
+      val = val.toLowerCase()
+      # Enhanced email validation using =~ - BEAUTIFUL!
+      val =~ /^([a-zA-Z0-9._%+-]+)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})$/
+      val = _?[0]  # Return full match if valid
+
+        # 🔥 LEGENDARY NEW ~= COMPOUND REGEX ASSIGNMENT - CHANGE 004! 🔥
+    when 'state'
+      val ~= /^([a-z][a-z])$/i
+      val = if _ then _[1]?.toUpperCase() else null
+    when 'zip'
+      val ~= /^(\d{5})/
+      val = if _ then _[1] else null
+    when 'zipplus4'
+      val =~ /^(\d{5})-?(\d{4})$/
+      val = _?[1] and "#{_[1]}-#{_[2]}"
+    when 'ssn'
+      val =~ /^(\d{3})-?(\d{2})-?(\d{4})$/
+      val = _?[1] and "#{_[1]}#{_[2]}#{_[3]}"
+    when 'sex'
+      val =~ /^(m|male|f|female|o|other)$/i
+      val = _?[1]?[0]?.toUpperCase()
+
+    # Advanced =~ validations - SHOWCASING MASTERY!
+    when 'creditcard'
+      val =~ /^(\d{4})-?(\d{4})-?(\d{4})-?(\d{4})$/
+      val = _?[1] and "#{_[1]}-#{_[2]}-#{_[3]}-#{_[4]}"
+    when 'url'
+      val =~ /^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$/
+      val = _?[0]
+    when 'username'
+      val =~ /^([a-zA-Z0-9_-]{3,20})$/
+      val = _?[1]?.toLowerCase()
+    when 'color'
+      val =~ /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
+      val = _?[1] and "##{_[1].toLowerCase()}"
+    when 'ip'
+      val =~ /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/
+      val = _?[0] if _ and _[1..4].every((n) -> parseInt(n) <= 255)
+    when 'mac'
+      val =~ /^([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})$/
+      val = _?[1] and "#{_[1]}:#{_[2]}:#{_[3]}:#{_[4]}:#{_[5]}:#{_[6]}".toLowerCase()
+    when 'semver'
+      val =~ /^(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*))?$/
+      val = _?[0]
+    when 'uuid'
+      val =~ /^([0-9a-f]{8})-?([0-9a-f]{4})-?([0-9a-f]{4})-?([0-9a-f]{4})-?([0-9a-f]{12})$/i
+      val = _?[1] and "#{_[1]}-#{_[2]}-#{_[3]}-#{_[4]}-#{_[5]}".toLowerCase()
+    when 'time24'
+      val =~ /^([01]?[0-9]|2[0-3]):([0-5][0-9])(?::([0-5][0-9]))?$/
+      val = _?[0]
+    when 'time12'
+      val =~ /^(1[0-2]|0?[1-9]):([0-5][0-9])\s?(am|pm)$/i
+      val = _?[0]?.toLowerCase()
+    when 'currency'
+      val =~ /^\$?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)$/
+      val = _?[1] and parseFloat(_[1].replace(/,/g, ''))
+    when 'slug'
+      val =~ /^([a-z0-9]+(?:-[a-z0-9]+)*)$/
+      val = _?[1]
+
+    when 'bool'
+      val = bool(val)
+      return val unless val?
+
+    when 'array'
+      val = if Array.isArray(readData[key]) then readData[key] else null
+
+    when 'hash'
+      val = if typeof readData[key] == 'object' and readData[key]? then readData[key] else null
+
+    when 'ids'
+      # Enhanced IDs validation - parses comma/space separated list of valid IDs
+      # SHOWCASING =~ MASTERY IN LIST PROCESSING!
+      if val and val.trim()
+        try
+          # Clean up the string and split on commas/spaces
+          cleanVal = val.replace(/[, ]+/g, ' ').trim()
+          idList = cleanVal.split(' ')
+
+          # Validate each ID using our LEGENDARY =~ syntax
+          validIds = []
+          for id in idList
+            id =~ /^([1-9]\d{0,19})$/
+            if _
+              validIds.push(parseInt(_[1]))
+            else
+              throw new Error("Invalid ID: #{id}")
+
+          # Return unique, sorted array
+          val = validIds.filter((id, index, arr) -> arr.indexOf(id) == index).sort((a, b) -> a - b)
+          val = null if val.length == 0
+        catch error
+          val = null
+      else
+        val = null
+
+    else
+      # Handle array/regex/range validation (like Ruby)
+      if Array.isArray(originalTag)
+        val = if originalTag.includes(val) then val else null
+        # Call miss function if validation fails and miss is a function
+        if val == null and typeof miss == 'function'
+          miss()
+      else if originalTag instanceof RegExp
+        val = if originalTag.test(val) then val else null
+        # Call miss function if validation fails and miss is a function
+        if val == null and typeof miss == 'function'
+          miss()
+      else if typeof originalTag == 'object' and originalTag?.start? and originalTag?.end?
+        # Range check
+        numVal = parseInt(val)
+        val = if !isNaN(numVal) and numVal >= originalTag.start and numVal <= originalTag.end then numVal else null
+
+  # Handle required/optional logic with miss parameter
+  if isBlank(val)
+    if bam
+      throw new Error("Missing required field: #{key}")
+    else
+      val = if typeof miss == 'function' then miss() else miss
+
+  val
+
+# Export helper for Hono context binding
+export withHelpers = (app) ->
+  app.use (c, next) ->
+    # Bind read method to context for easy access
+    c.read = (key, tag, miss) -> read(c, key, tag, miss)
+    await next()
+
+# Enhanced usage examples with LEGENDARY =~ and _ syntax - PURE POETRY:
+#
+# app.post '/signup', (c) ->
+#   # Basic required/optional fields
+#   mail = c.read 'email', 'email!'     # required email - throws if missing
+#   phon = c.read 'phone', 'phone'      # optional phone with formatting
+#   fnam = c.read 'first_name', 'name!' # required name with capitalization
+#
+#   # SHOWCASE: Geographic validation with =~ MASTERY
+#   stat = c.read 'state', 'state!'     # CA, ny -> CA, NY
+#   zipc = c.read 'zipcode', 'zipplus4' # 90210-1234 or 90210
+#
+#   # SHOWCASE: Identity & Security validation - =~ POETRY!
+#   ssn = c.read 'ssn', 'ssn'           # 123-45-6789 -> 123456789
+#   cc = c.read 'credit_card', 'creditcard' # 1234-5678-9012-3456
+#
+#   # SHOWCASE: Digital identity validation - =~ ARTISTRY!
+#   user = c.read 'username', 'username!' # JohnDoe123 -> johndoe123
+#   uuid = c.read 'user_id', 'uuid'     # Formats UUID with dashes
+#
+#   # SHOWCASE: Web & Network validation - =~ MASTERY!
+#   site = c.read 'website', 'url'      # Validates and normalizes URLs
+#   addr = c.read 'ip_address', 'ip'    # 192.168.1.1 validation
+#   mac = c.read 'device_mac', 'mac'    # AB:CD:EF:12:34:56 formatting
+#
+#   # SHOWCASE: Technical validation - DEVELOPER =~ PARADISE!
+#   vers = c.read 'version', 'semver'   # 1.2.3-beta.1 validation
+#   colr = c.read 'theme_color', 'color' # #ff0000 or #f00
+#   slug = c.read 'url_slug', 'slug'    # my-awesome-post
+#
+#   # SHOWCASE: Time & Money validation - =~ ELEGANCE!
+#   time = c.read 'meeting_time', 'time24' # 14:30:00
+#   appt = c.read 'appointment', 'time12'  # 2:30 pm
+#   cost = c.read 'price', 'currency'      # $1,234.56 -> 1234.56
+#
+#   # With fallback functions and arrays
+#   adminIds = c.read 'admin_ids', 'ids', -> []  # Validates ID lists with =~
+#   role = c.read 'role', ['admin', 'user', 'guest'], -> 'guest'
+#   code = c.read 'code', /^[A-Z]{3,6}$/, -> throw new Error('Invalid code')
+#
+#   c.json {
+#     success: true,
+#     user: { mail, phon, fnam, user, stat, zipc },
+#     security: { ssn, cc, uuid },
+#     technical: { site, addr, mac, vers, colr, slug },
+#     scheduling: { time, appt, cost }
+#   }
