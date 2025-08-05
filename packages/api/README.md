@@ -78,9 +78,9 @@ app.post('/signup', async (req, res) => {
 import { read } from '@rip/api'
 
 app.post '/signup', (c) ->
-  email = read!(c, 'email', 'email!')     # Required email with validation & normalization
-  phone = read(c, 'phone', 'phone')      # Optional phone with formatting (cached, sync)
-  state = read(c, 'state', 'state!')     # Required state with case transformation (cached, sync)
+  email = read! c, 'email', 'email!'     # Required email with validation & normalization
+  phone = read c, 'phone', 'phone'      # Optional phone with formatting (cached, sync)
+  state = read c, 'state', 'state!'     # Required state with case transformation (cached, sync)
   # ... validation complete in 3 lines vs 50+
 ```
 
@@ -127,16 +127,16 @@ import { read } from '@rip/api'
 
 app.post '/api/users', (c) ->
   # Basic field extraction (first call triggers async request parsing)
-  name = read!(c, 'name')              # Raw value
+  name = read! c, 'name'              # Raw value
   
   # Required fields (throws if missing) - subsequent calls use cached data
-  email = read(c, 'email', 'email!')  # Required email
+  email = read c, 'email', 'email!'  # Required email
   
   # Optional with fallback  
-  role = read(c, 'role', ['admin', 'user'], 'user')  # Default to 'user'
+  role = read c, 'role', ['admin', 'user'], 'user'  # Default to 'user'
   
   # Complex validation with transformation
-  phone = read(c, 'phone', 'phone')   # Formats as 123-456-7890
+  phone = read c, 'phone', 'phone'   # Formats as 123-456-7890
 ```
 
 ### 🔄 **Sync vs Async: Smart Caching Explained**
@@ -144,10 +144,10 @@ app.post '/api/users', (c) ->
 **Why async?** The `read()` function parses the request body once per request (async), then caches the result.
 
 **Pattern**:
-- **First call**: `read!(c, ...)` - Async (parses request body, caches data)
-- **Subsequent calls**: `read(c, ...)` - Sync (uses cached data)
+- **First call**: `read! c, ...` - Async (parses request body, caches data)
+- **Subsequent calls**: `read c, ...` - Sync (uses cached data)
 
-**In Practice**: You can use `read!()` everywhere for simplicity - if data is cached, it returns immediately!
+**In Practice**: You can use `read!` everywhere for simplicity - if data is cached, it returns immediately!
 
 ### The 36 Built-in Validators
 
@@ -155,69 +155,69 @@ app.post '/api/users', (c) ->
 
 #### **Basic Types**
 ```rip
-id = read!(c, 'user_id', 'id!')        # Positive integers: 1, 2, 3... (first call, async)
-count = read(c, 'count', 'whole')      # Non-negative: 0, 1, 2... (cached, sync)
-price = read(c, 'price', 'decimal')    # Numbers: 123.45, -67.89 (cached, sync)
-cost = read(c, 'cost', 'money')        # Currency: rounds to 2 decimal places (cached, sync)
+id = read! c, 'user_id', 'id!'        # Positive integers: 1, 2, 3... (first call, async)
+count = read c, 'count', 'whole'      # Non-negative: 0, 1, 2... (cached, sync)
+price = read c, 'price', 'decimal'    # Numbers: 123.45, -67.89 (cached, sync)
+cost = read c, 'cost', 'money'        # Currency: rounds to 2 decimal places (cached, sync)
 ```
 
 #### **Text Processing**
 ```rip
-title = read!(c, 'title', 'string')    # Normalizes whitespace (first call, async)
-bio = read(c, 'bio', 'text')           # Preserves paragraphs (cached, sync)
-full_name = read(c, 'name', 'name')    # Capitalizes Each Word (cached, sync)
+title = read! c, 'title', 'string'    # Normalizes whitespace (first call, async)
+bio = read c, 'bio', 'text'           # Preserves paragraphs (cached, sync)
+full_name = read c, 'name', 'name'    # Capitalizes Each Word (cached, sync)
 ```
 
 #### **Contact Information**  
 ```rip
-email = read!(c, 'email', 'email')     # Validates & normalizes email (first call, async)
-phone = read(c, 'phone', 'phone')      # Formats: (123) 456-7890 → 123-456-7890 (cached, sync)
-address = read(c, 'address', 'address') # Basic address formatting (cached, sync)
+email = read! c, 'email', 'email'     # Validates & normalizes email (first call, async)
+phone = read c, 'phone', 'phone'      # Formats: (123) 456-7890 → 123-456-7890 (cached, sync)
+address = read c, 'address', 'address' # Basic address formatting (cached, sync)
 ```
 
 #### **Geographic Data**
 ```rip
-state = read!(c, 'state', 'state')     # ca, ny → CA, NY (first call, async)
-zip = read(c, 'zip', 'zip')            # Extracts 5-digit ZIP (cached, sync)
-zipplus4 = read(c, 'zip', 'zipplus4')  # Formats: 90210-1234 (cached, sync)
+state = read! c, 'state', 'state'     # ca, ny → CA, NY (first call, async)
+zip = read c, 'zip', 'zip'            # Extracts 5-digit ZIP (cached, sync)
+zipplus4 = read c, 'zip', 'zipplus4'  # Formats: 90210-1234 (cached, sync)
 ```
 
 #### **Identity & Security**
 ```rip
-ssn = read!(c, 'ssn', 'ssn')           # 123-45-6789 → 123456789 (first call, async)
-sex = read(c, 'gender', 'sex')         # male, f, other → M, F, O (cached, sync)
-username = read(c, 'username', 'username') # Validates & lowercases (cached, sync)
+ssn = read! c, 'ssn', 'ssn'           # 123-45-6789 → 123456789 (first call, async)
+sex = read c, 'gender', 'sex'         # male, f, other → M, F, O (cached, sync)
+username = read c, 'username', 'username' # Validates & lowercases (cached, sync)
 ```
 
 #### **Web & Technical**
 ```rip
-website = read!(c, 'website', 'url')   # URL validation & normalization (first call, async)
-ip = read(c, 'ip_address', 'ip')       # IPv4 validation: 192.168.1.1 (cached, sync)
-mac = read(c, 'mac', 'mac')            # MAC address: AB:CD:EF:12:34:56 (cached, sync)
-color = read(c, 'color', 'color')      # Hex colors: #ff0000, #f00 (cached, sync)
+website = read! c, 'website', 'url'   # URL validation & normalization (first call, async)
+ip = read c, 'ip_address', 'ip'       # IPv4 validation: 192.168.1.1 (cached, sync)
+mac = read c, 'mac', 'mac'            # MAC address: AB:CD:EF:12:34:56 (cached, sync)
+color = read c, 'color', 'color'      # Hex colors: #ff0000, #f00 (cached, sync)
 ```
 
 #### **Development & Standards**
 ```rip
-version = read!(c, 'version', 'semver') # Semantic versioning: 1.2.3-beta.1 (first call, async)
-user_id = read(c, 'user_id', 'uuid')   # UUID validation & formatting (cached, sync)
-slug = read(c, 'slug', 'slug')         # URL slugs: my-awesome-post (cached, sync)
-credit_card = read(c, 'cc', 'creditcard') # 1234-5678-9012-3456 (cached, sync)
+version = read! c, 'version', 'semver' # Semantic versioning: 1.2.3-beta.1 (first call, async)
+user_id = read c, 'user_id', 'uuid'   # UUID validation & formatting (cached, sync)
+slug = read c, 'slug', 'slug'         # URL slugs: my-awesome-post (cached, sync)
+credit_card = read c, 'cc', 'creditcard' # 1234-5678-9012-3456 (cached, sync)
 ```
 
 #### **Time & Money**
 ```rip
-meeting = read!(c, 'time', 'time24')   # 24-hour: 14:30:00 (first call, async)
-appointment = read(c, 'time', 'time12') # 12-hour: 2:30 pm (cached, sync)
-price = read(c, 'price', 'currency')   # Currency: $1,234.56 → 1234.56 (cached, sync)
+meeting = read! c, 'time', 'time24'   # 24-hour: 14:30:00 (first call, async)
+appointment = read c, 'time', 'time12' # 12-hour: 2:30 pm (cached, sync)
+price = read c, 'price', 'currency'   # Currency: $1,234.56 → 1234.56 (cached, sync)
 ```
 
 #### **Boolean & Collections**
 ```rip
-active = read!(c, 'active', 'bool')    # Smart boolean parsing (first call, async)
-tags = read(c, 'tags', 'array')        # Preserves arrays (cached, sync)
-config = read(c, 'config', 'hash')     # Preserves objects (cached, sync)  
-admin_ids = read(c, 'admins', 'ids')   # Validates ID lists: "1,2,3" → [1,2,3] (cached, sync)
+active = read! c, 'active', 'bool'    # Smart boolean parsing (first call, async)
+tags = read c, 'tags', 'array'        # Preserves arrays (cached, sync)
+config = read c, 'config', 'hash'     # Preserves objects (cached, sync)  
+admin_ids = read c, 'admins', 'ids'   # Validates ID lists: "1,2,3" → [1,2,3] (cached, sync)
 ```
 
 ### 🔥 Legendary Regex Patterns - The Secret Sauce
@@ -269,20 +269,20 @@ state = (_[1].toUpperCase() if val =~ /^([a-z][a-z])$/i)
 #### **Required Fields with Custom Error Handling**
 ```rip
 # The ! suffix makes fields required
-email = read!(c, 'email', 'email!', -> signout!)  # Custom error handler (first call, async)
-admin_role = read(c, 'role', ['admin'], -> bail!('Access denied'))  # Cached validation
+email = read! c, 'email', 'email!', -> signout!  # Custom error handler (first call, async)
+admin_role = read c, 'role', ['admin'], -> bail! 'Access denied'  # Cached validation
 ```
 
 #### **Complex Validation with Fallbacks**
 ```rip
 # Array validation with default
-roles = read!(c, 'roles', ['admin', 'user', 'guest'], ['guest'])  # First call, async
+roles = read! c, 'roles', ['admin', 'user', 'guest'], ['guest']  # First call, async
 
 # Regex validation (cached, sync)
-code = read(c, 'code', /^[A-Z]{3,6}$/, -> throw new Error('Invalid code'))
+code = read c, 'code', /^[A-Z]{3,6}$/, -> throw new Error 'Invalid code'
 
 # Range validation (cached, sync)
-priority = read(c, 'priority', { start: 1, end: 10 }, 5)
+priority = read c, 'priority', { start: 1, end: 10 }, 5
 ```
 
 #### **Batch Processing**
@@ -290,12 +290,12 @@ priority = read(c, 'priority', { start: 1, end: 10 }, 5)
 # Process entire request payload
 app.post '/api/users', (c) ->
   # Get all user data in one call (parses request body, async)
-  userData = read!(c)  # Returns: { name: "John", email: "john@...", ... }
+  userData = read! c  # Returns: { name: "John", email: "john@...", ... }
   
   # Then validate individual fields as needed (cached, sync)
-  name = read(c, 'name', 'name!')
-  email = read(c, 'email', 'email!')
-  phone = read(c, 'phone', 'phone')
+  name = read c, 'name', 'name!'
+  email = read c, 'email', 'email!'
+  phone = read c, 'phone', 'phone'
 ```
 
 ### Real-World Impact: Before & After
@@ -356,13 +356,13 @@ app.post('/signup', async (req, res) => {
 import { read } from '@rip/api'
 
 app.post '/signup', (c) ->
-  email = read!(c, 'email', 'email!')                    # Required, validated, normalized (first call, async)
-  name = read(c, 'name', 'name!')                        # Required, trimmed, formatted (cached, sync)
-  phone = read(c, 'phone', 'phone')                      # Optional, formatted as 123-456-7890 (cached, sync)
-  state = read(c, 'state', 'state!')                     # Required, normalized to uppercase (cached, sync)
-  age = read(c, 'age', { start: 18, end: 120 }, null)    # Range validated (cached, sync)
+  email = read! c, 'email', 'email!'                    # Required, validated, normalized (first call, async)
+  name = read c, 'name', 'name!'                        # Required, trimmed, formatted (cached, sync)
+  phone = read c, 'phone', 'phone'                      # Optional, formatted as 123-456-7890 (cached, sync)
+  state = read c, 'state', 'state!'                     # Required, normalized to uppercase (cached, sync)
+  age = read c, 'age', { start: 18, end: 120 }, null    # Range validated (cached, sync)
   
-  user = createUser!({ email, name, phone, state, age }) # Use ! suffix for async operations
+  user = createUser! { email, name, phone, state, age } # Use ! suffix for async operations
   c.json { success: true, user }
 ```
 
@@ -403,8 +403,8 @@ app.use withHelpers
 
 # Now you can use c.read() directly
 app.post '/api/users', (c) ->
-  email = c.read!('email', 'email!')  # First call, async
-  name = c.read('name', 'name!')      # Cached, sync
+  email = c.read! 'email', 'email!'  # First call, async
+  name = c.read 'name', 'name!'      # Cached, sync
   c.json { success: true, user: { email, name } }
 ```
 
@@ -414,7 +414,7 @@ Replace verbose validation blocks with single `read()` calls:
 
 ```rip
 # Instead of 10+ lines of manual validation:
-email = read!(c, 'email', 'email!')  # One line does it all - uses legendary ! suffix
+email = read! c, 'email', 'email!'  # One line does it all - uses legendary ! suffix
 ```
 
 ## 🎯 Roadmap
