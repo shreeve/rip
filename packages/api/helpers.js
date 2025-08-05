@@ -421,6 +421,14 @@ Object.defineProperty(global, 'req', {
   configurable: true
 });
 
+// Global json helper - clean and simple!
+Object.defineProperty(global, 'json', {
+  value: function(data) {
+    return _currentContext != null ? _currentContext.json(data) : void 0;
+  },
+  configurable: true
+});
+
 // Export helper for Hono context binding - Sinatra-style!
 export var withHelpers = function(app) {
   return app.use(async function(c, next) {
@@ -494,11 +502,12 @@ export var withHelpers = function(app) {
 //   phon = read 'phone', 'phone'      # Pure elegance
 //   c.json { success: true, user: { mail, phon } }
 
-// OPTION 2: Global env - THE ONE ULTIMATE VARIABLE! (like read)
+// OPTION 2: Clean return or json helper - ULTIMATE ELEGANCE!
 // app.post '/signup', ->
 //   mail = read 'email', 'email!'     # All calls synchronous
 //   phon = read 'phone', 'phone'      # Pure elegance
-//   env.json { success: true, user: { mail, phon } }  # env does it ALL!
+//   { success: true, user: { mail, phon } }  # Just return data!
+//   # OR: json success: true, user: { mail, phon }  # Clean json helper
 
 //   # SHOWCASE: Geographic validation with =~ MASTERY
 //   stat = c.read 'state', 'state!'     # CA, ny -> CA, NY

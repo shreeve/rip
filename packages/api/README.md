@@ -84,11 +84,12 @@ app.post '/signup', (ctx) ->
   email = read 'email', 'email!'     # All calls synchronous (middleware pre-parses)
   ctx.json { success: true, email }
 
-# OPTION 2: Global env - ULTIMATE ELEGANCE! (like read)
+# OPTION 2: Clean return or json helper - ULTIMATE ELEGANCE!
 app.post '/signup', ->
   email = read 'email', 'email!'     # All calls synchronous (middleware pre-parses)
   phone = read 'phone', 'phone'      # Pure synchronous elegance!
-  env.json { success: true, email, phone }  # env does it all - just like read!
+  { success: true, email, phone }    # Just return data!
+  # OR: json success: true, email, phone  # Clean json helper
 ```
 
 ## 🔥 The `helpers.rip` Powerhouse
@@ -120,11 +121,12 @@ The crown jewel of `@rip/api` is the **`read()` function** - a validation and pa
 **Three calling styles supported**:
 
 ```rip
-# Global env - ULTIMATE ELEGANCE (like read)
+# Clean return or json helper - ULTIMATE ELEGANCE!
 import { read, withHelpers } from '@rip/api'
 app.post '/endpoint', ->
   data = read 'key', 'validator'  # All calls synchronous!
-  env.json { data }               # env does it all - just like read!
+  { data }                        # Just return data!
+  # OR: json data: data           # Clean json helper
 
 # Traditional with context parameter
 app.post '/endpoint', (ctx) ->
@@ -140,9 +142,11 @@ read(context, key, validator, fallback)
 - **`validator`**: Validation/transformation rule
 - **`fallback`**: Value to use if validation fails (optional)
 
-**Global Context Access**:
-- **`env`**: The ONE variable that does it all! (ULTIMATE!) - like `read`
-- **`req`**: Request-only access (when you only need request data)
+**Global Helpers**:
+- **`read`**: Data validation and parsing - like `read 'email', 'email!'`
+- **`json`**: Response helper - like `json success: true, data`
+- **`req`**: Request-only access - like `req.method`
+- **`env`**: Full context access (when needed) - like `env.status(201)`
 
 ### Basic Usage Examples
 
@@ -157,15 +161,16 @@ app.post '/api/users', (ctx) ->
   email = read 'email', 'email!'  # Pure synchronous elegance!
   ctx.json { name, email }
 
-# STYLE 2: Global env - ULTIMATE ELEGANCE! (like read)
+# STYLE 2: Clean return or json helper - ULTIMATE ELEGANCE!
 app.post '/api/users', ->
   name = read 'name'              # All calls synchronous (middleware pre-parses)
   email = read 'email', 'email!'  # No async complexity!
   role = read 'role', ['admin', 'user'], 'user'  # Clean and simple!
   phone = read 'phone', 'phone'   # Pure elegance!
 
-  # env does it all - just like read function!
-  env.json { name, email, role, phone }
+  # Just return data - cleanest approach!
+  { name, email, role, phone }
+  # OR: json name, email, role, phone  # Clean json helper
 ```
 
 ### 🔄 **Pure Synchronous Elegance: Middleware Pre-Parsing**
@@ -179,32 +184,30 @@ app.post '/api/users', ->
 
 **In Practice**: Just use `read()` everywhere - it's always synchronous and fast!
 
-### 🎯 **env: The ONE Ultimate Variable (like read)**
+### 🎯 **Clean API Design: Just Return Data**
 
-**`env` does EVERYTHING you need - just like the `read` function:**
+**The cleanest approach - just return what you want to send:**
 
 ```rip
 app.post '/api/users', ->
-  # REQUEST ACCESS
-  method = env.req.method           # "POST"
-  userAgent = env.req.header('User-Agent')
-  query = env.req.query()           # URL parameters
+  # REQUEST ACCESS (when needed)
+  method = req.method               # "POST"
+  userAgent = req.header('User-Agent')
 
   # DATA PROCESSING (all synchronous!)
   email = read 'email', 'email!'
   name = read 'name', 'name!'
   age = read 'age', { start: 18, end: 120 }
 
-  # RESPONSE OPERATIONS - all through env!
-  env
-    .status(201)                     # Set status
-    .header('X-API-Version', '1.0')  # Set headers
-    .cookie('session', 'abc123')     # Set cookies
-    .json({                          # Send JSON response
-      success: true
-      user: { email, name, age }
-      meta: { created: new Date() }
-    })
+  # RESPONSE - just return data!
+  {
+    success: true
+    user: { email, name, age }
+    meta: { created: new Date(), method }
+  }
+
+  # OR use clean json helper:
+  # json success: true, user: { email, name, age }
 ```
 
 **Perfect Sinatra Comparison:**
@@ -221,14 +224,15 @@ end
 ```
 
 ```rip
-# Rip with env - nearly identical!
+# Rip - even cleaner!
 app.post '/api/users', ->
   email = read 'email'
   name = read 'name'
 
-  env.status(201)
-     .header('X-API-Version', '1.0')
-     .json({ user: { email, name } })
+  # Just return data!
+  { user: { email, name } }
+
+  # OR: json user: { email, name }
 ```
 
 ### The 36 Built-in Validators
@@ -447,7 +451,7 @@ app.post '/signup', ->  # NO context parameter needed!
   age = read 'age', { start: 18, end: 120 }, null    # Pure elegance
 
   user = createUser! { email, name, phone, state, age } # Use ! suffix for async operations
-  env.json { success: true, user }  # env does it all - just like read!
+  { success: true, user }  # Just return data - cleanest approach!
 ```
 
 ### Performance & Production Benefits
@@ -491,11 +495,11 @@ app.post '/api/users', (ctx) ->
   name = read 'name', 'name!'      # Pure synchronous elegance
   ctx.json { success: true, user: { email, name } }
 
-# STYLE 2: Global env - ULTIMATE ELEGANCE! (like read)
+# STYLE 2: Clean return - ULTIMATE ELEGANCE!
 app.post '/api/users', ->
   email = read 'email', 'email!'  # All calls synchronous (middleware pre-parses)
   name = read 'name', 'name!'      # No async complexity
-  env.json { success: true, user: { email, name } }  # env does it all!
+  { success: true, user: { email, name } }  # Just return data!
 ```
 
 ### Migration from Traditional APIs
@@ -505,7 +509,7 @@ Replace verbose validation blocks with single `read()` calls:
 ```rip
 # Instead of 10+ lines of manual validation:
 email = read 'email', 'email!'  # One line does it all
-env.json { success: true, email }  # env does it all - just like read!
+{ success: true, email }  # Just return data - cleanest approach!
 ```
 
 ## 🎯 Roadmap
