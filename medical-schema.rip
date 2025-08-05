@@ -1,0 +1,1192 @@
+import { schema } from '@rip/schema'
+
+export default schema ->
+
+  @table 'appointment', ->
+    @integer  'id!', primary: true
+    @integer  'patient_id'
+    @integer  'practice_id!'
+    @datetime 'appt_time!'
+    @integer  'physician_user_id'
+    @string   'appt_type', 50
+    @string   'description'
+    @integer  'duration!'
+    @string   'status', 15
+    @datetime 'last_modified'
+    @decimal  'copay_amount'
+    @datetime 'copay_collection_date'
+    @string   'billing_note'
+    @string   'referring_provider', 100
+    @string   'referring_provider_state', 2
+    @datetime 'creation_time'
+    @integer  'created_by_user_id'
+    @datetime 'deletion_time'
+    @integer  'deleted_by_user_id'
+
+    @index 'patient_id'
+    @index 'physician_user_id'
+    @index 'practice_id'
+
+  @table 'appointment_status', ->
+    @integer  'id!', primary: true
+    @integer  'appointment_id!'
+    @string   'status!', 15
+    @string   'note'
+    @string   'name', 100
+    @datetime 'creation_time'
+    @integer  'created_by_user_id'
+    @datetime 'deletion_time'
+    @integer  'deleted_by_user_id'
+
+    @index 'appointment_id'
+
+  @table 'bill', ->
+    @integer  'id!', primary: true
+    @integer  'visit_note_id!'
+    @integer  'practice_id!'
+    @string   'notes'
+    @datetime 'billing_date'
+    @string   'ref_number', 50
+    @integer  'service_location_id'
+    @integer  'place_of_service'
+    @string   'billing_status', 15
+    @string   'billing_error', 200
+    @integer  'show_dual_coding!'
+    @decimal  'copay_amount'
+    @datetime 'copay_collection_date'
+    @string   'referring_provider', 100
+    @string   'referring_provider_state', 2
+    @integer  'deferred_bill!'
+    @datetime 'creation_time'
+    @integer  'created_by_user_id'
+    @datetime 'last_modified'
+
+    @index 'practice_id'
+    @index 'service_location_id'
+    @index 'visit_note_id'
+
+  @table 'bill_item', ->
+    @integer  'id!', primary: true
+    @integer  'bill_id!'
+    @string   'cpt!', 20
+    @integer  'seqno!', default: "0"
+    @datetime 'last_modified'
+    @string   'modifier_1', 20
+    @string   'modifier_2', 20
+    @string   'modifier_3', 20
+    @string   'modifier_4', 20
+    @decimal  'units'
+    @decimal  'unit_charge'
+    @datetime 'creation_time'
+    @integer  'created_by_user_id'
+    @datetime 'deletion_time'
+    @integer  'deleted_by_user_id'
+
+    @index 'bill_id'
+
+  @table 'bill_item_dx', ->
+    @integer  'bill_item_id!'
+    @integer  'seqno!', default: "0"
+    @string   'dx!', 20
+    @integer  'icd10_id!'
+    @integer  'icd9_id'
+
+    @index 'icd10_id'
+    @index 'icd9_id'
+    @index 'bill_item_id'
+
+  @table 'canonical_physician', ->
+    @integer  'id!', primary: true
+    @string   'npi', 20
+    @string   'first_name!', 50
+    @string   'last_name!', 60
+    @string   'org_name', 100
+    @string   'credentials', 20
+    @string   'specialty', 100
+
+  @table 'clinical_form_collection', ->
+    @integer  'item_id!'
+    @integer  'patient_id!'
+    @string   'form_name!', 50
+    @string   'form_category!', 20
+    @string   'answer!', 300, default: ""
+    @string   'clinical_form_question!', 300
+    @integer  'sequence_number!'
+    @string   'loinc_answer_code', 10
+    @integer  'score'
+    @string   'answer_type!', 30
+    @integer  'loinc_id'
+    @datetime 'creation_time!'
+    @integer  'created_by_user_id!'
+
+    @index 'patient_id'
+
+  @table 'direct_messages', ->
+    @integer  'id!', primary: true, default: "0"
+    @json     'from_address!', default: ""
+    @json     'to_address!', default: ""
+    @string   'subject', 500
+    @string   'message'
+    @integer  'patient_id'
+    @integer  'practice_id'
+    @integer  'to_user_id'
+    @string   'state', 128
+    @datetime 'time_sent'
+    @datetime 'time_completed'
+    @integer  'from_user_id'
+    @integer  'to_physician_id'
+    @datetime 'creation_time'
+    @integer  'created_by_user_id'
+    @datetime 'deletion_time'
+    @integer  'deleted_by_user_id'
+    @datetime 'signed_time'
+    @integer  'signed_by_user_id'
+    @string   'direction!', 8, default: ""
+
+    @index 'patient_id'
+    @index 'practice_id'
+
+  @table 'discontinue_med_order', ->
+    @integer  'id!', primary: true
+    @integer  'patient_id!'
+    @integer  'practice_id!'
+    @integer  'prescribing_user_id'
+    @integer  'med_order_id'
+    @date     'discontinue_date!'
+    @string   'reason'
+    @integer  'is_documented!'
+    @integer  'medication_id'
+    @datetime 'last_modified'
+    @datetime 'creation_time'
+    @integer  'created_by_user_id'
+    @datetime 'deletion_time'
+    @integer  'deleted_by_user_id'
+    @datetime 'signed_time'
+    @integer  'signed_by_user_id'
+    @integer  'from_plr!', default: "0"
+
+    @index 'med_order_id'
+    @index 'medication_id'
+    @index 'patient_id'
+    @index 'practice_id'
+
+  @table 'document_tag', ->
+    @integer  'id!', primary: true
+    @integer  'practice_id'
+    @string   'value!', 100
+    @string   'description', 500
+    @string   'code_type!', 7, default: ""
+    @string   'code', 50
+    @string   'concept_name', 50
+
+    @index 'practice_id'
+
+  @table 'external_patient_id', ->
+    @integer  'id!', primary: true
+    @string   'external_system!', 255
+    @string   'external_patient_id!', 255
+    @datetime 'deletion_time'
+    @integer  'deleted_by_user_id'
+    @integer  'master_id!'
+
+  @table 'health_maintenance', ->
+    @integer  'id!', primary: true
+    @integer  'patient_id!'
+    @string   'confidential!', 3, default: ""
+    @date     'date!'
+    @string   'note'
+    @string   'name!', 200
+    @string   'measure_code!', 100
+    @string   'abnormal_result!', 200
+    @string   'normal_result!', 200
+    @integer  'doc_tag_id'
+    @integer  'lab_report_id'
+    @integer  'physician_id'
+    @string   'firstName', 50
+    @string   'lastName', 60
+    @datetime 'created_date'
+    @datetime 'deleted_date'
+
+  @table 'icd10', ->
+    @string   'icd10_id!', 40, primary: true
+    @integer  'id!'
+    @string   'code!', 50
+    @string   'description!', 300
+    @integer  'imo_id'
+
+    @index 'id'
+
+  @table 'icd9', ->
+    @string   'icd9_id!', 40, primary: true
+    @integer  'id!'
+    @string   'code!', 50
+    @string   'description!', 50
+    @integer  'imo_id'
+
+    @index 'id'
+
+  @table 'imo', ->
+    @integer  'id!', primary: true
+    @string   'imo_code!', 50
+    @string   'description!', 1000
+    @integer  'snomed_id!'
+
+    @index 'snomed_id'
+
+  @table 'insurance_company', ->
+    @integer  'id!', primary: true
+    @json     'address!'
+    @string   'suite', 40
+    @string   'city!', 50
+    @string   'state!', 2
+    @string   'zip!', 10
+    @string   'phone', 20
+    @string   'carrier!', 200
+    @string   'extension', 6
+    @integer  'practice_id'
+    @integer  'enterprise_id'
+    @string   'county_code!', 10
+    @datetime 'creation_time'
+    @integer  'created_by_user_id'
+    @datetime 'deletion_time'
+    @integer  'deleted_by_user_id'
+
+    @index 'practice_id'
+
+  @table 'lab_order', ->
+    @integer  'id!', primary: true
+    @string   'req_number', 100
+    @integer  'patient_id!'
+    @string   'lab_vendor', 100
+    @string   'lab_site', 255
+    @string   'lab_center', 200
+    @date     'date_for_test'
+    @string   'follow_up_notes', 100
+    @string   'order_status', 20
+    @integer  'resolving_document_id'
+    @integer  'ordering_provider'
+    @datetime 'last_modified'
+    @integer  'is_eorder!', default: "0"
+    @string   'pt_cond!', 18, default: ""
+    @string   'STAT!', 3, default: ""
+    @string   'bill_type', 50
+    @string   'testCenterNotes'
+    @string   'frequency', 50
+    @date     'frequency_end_date'
+    @integer  'has_reminder!', default: "0"
+    @date     'remind_date'
+    @string   'order_state', 200
+    @datetime 'creation_time'
+    @integer  'created_by_user_id'
+    @datetime 'deletion_time'
+    @integer  'deleted_by_user_id'
+    @datetime 'signed_time'
+    @integer  'signed_by_user_id'
+    @integer  'lab_order_tests_id!'
+
+    @index 'patient_id'
+
+  @table 'lab_order_answers', ->
+    @integer  'id!'
+    @string   'question'
+    @string   'question_code', 100
+    @string   'answer'
+    @integer  'lab_order_id!'
+    @integer  'question_id!'
+    @integer  'lab_order_tests_id'
+
+  @table 'lab_order_tests', ->
+    @integer  'id!', primary: true, default: "0"
+    @integer  'test_id!'
+    @integer  'lab_order_id!'
+    @string   'name', 255
+    @string   'code', 50
+
+    @index 'lab_order_id'
+
+  @table 'lab_result', ->
+    @integer  'id!', primary: true
+    @integer  'lab_report_id!'
+    @datetime 'collected_date!'
+    @datetime 'resulted_date!'
+    @string   'accession_number!', 100
+    @string   'accession_status!', 20
+    @string   'test_category', 200
+    @string   'test_name', 255
+    @string   'test_status!', 10
+    @string   'value!', 500
+    @string   'units', 20
+    @string   'value_type', 50
+    @string   'reference_min', 100
+    @string   'reference_max', 100
+    @integer  'is_abnormal!'
+    @string   'abnormal_flag!', 3
+    @string   'report_text!'
+    @string   'value_note!'
+    @string   'note!'
+    @string   'loinc', 250
+
+  @table 'master_patient', ->
+    @integer  'id!', primary: true
+    @integer  'canonical_physician_id'
+    @integer  'primary_care_provider_id'
+    @datetime 'deletion_time'
+    @integer  'deleted_by_user_id'
+
+    @index 'canonical_physician_id'
+    @index 'primary_care_provider_id'
+
+  @table 'med_order', ->
+    @integer  'id!', primary: true
+    @integer  'patient_id!'
+    @integer  'practice_id!'
+    @integer  'prescribing_user_id'
+    @string   'type', 250
+    @string   'route', 64
+    @string   'strength', 255
+    @string   'form', 255
+    @string   'ndc', 255
+    @integer  'medication_id!'
+    @string   'displayed_medication_name!', 1024
+    @string   'medication_type!', 50, default: "prescription"
+    @string   'directions', 1000
+    @string   'indication', 200
+    @decimal  'qty'
+    @string   'qty_units', 100
+    @integer  'auth_refills'
+    @string   'auth_refills_qualifier', 50
+    @date     'start_date!'
+    @integer  'documenting_personnel_id'
+    @string   'pharmacy_instructions'
+    @integer  'substitutions'
+    @string   'origin!', 11, default: ""
+    @string   'notes'
+    @string   'pharmacy_ncpdpid', 21
+    @string   'fulfillment_type', 64
+    @integer  'med_order_thread_id!'
+    @datetime 'last_modified'
+    @datetime 'creation_time'
+    @integer  'created_by_user_id'
+    @datetime 'deletion_time'
+    @integer  'deleted_by_user_id'
+    @datetime 'signed_time'
+    @integer  'signed_by_user_id'
+    @integer  'from_plr!', default: "0"
+
+    @index 'medication_id'
+    @index 'patient_id'
+    @index 'practice_id'
+
+  @table 'med_order_fill', ->
+    @integer  'id!', primary: true
+    @integer  'med_order_id!'
+    @integer  'patient_id'
+    @integer  'medication_id'
+    @string   'medication_name', 255
+    @string   'medication_route', 64
+    @string   'medication_strength', 255
+    @string   'medication _strength', 255
+    @integer  'controlled'
+    @string   'quantity', 100
+    @string   'quantity_unit', 50
+    @string   'quantity_note', 100
+    @string   'medication_description', 100
+    @string   'days_supply', 50
+    @datetime 'last_fill_date'
+    @datetime 'written_date'
+    @string   'pharmacy_ncpdpid', 21
+    @string   'pharmacy_name', 105
+    @json     'pharmacy_address_line1'
+    @json     'pharmacy_address_line2'
+    @string   'pharmacy_city', 105
+    @string   'pharmacy_state', 6
+    @string   'pharmacy_zip', 33
+    @string   'pharmacy_phone_primary', 75
+    @string   'pharmacy_npi', 30
+    @integer  'prescriber_id'
+    @string   'prior_auth', 250
+    @integer  'active'
+    @string   'fuzziness', 100
+
+  @table 'med_order_icd10_codes', ->
+    @integer  'id!', primary: true, default: "0"
+    @integer  'med_order_id!'
+    @integer  'icd10_code!'
+    @integer  'seqno!'
+
+  @table 'med_order_thread', ->
+    @integer  'id!', primary: true
+    @integer  'patient_id!'
+    @integer  'practice_id!'
+    @integer  'is_permanent!', default: "0"
+    @integer  'discontinue_order_id'
+    @integer  'latest_med_order_id'
+    @date     'start_date!'
+    @datetime 'document_date!'
+    @integer  'manual_start_date!'
+    @integer  'shareable!'
+    @datetime 'creation_time'
+    @integer  'created_by_user_id'
+    @datetime 'deletion_time'
+    @integer  'deleted_by_user_id'
+
+  @table 'medication', ->
+    @integer  'id!', primary: true
+    @integer  'practice_created_id'
+    @string   'display_name', 255
+    @string   'route', 64
+    @string   'strength', 255
+    @string   'brand_name!', 255
+    @string   'generic_name', 255
+    @string   'form', 255
+    @string   'type!', 50
+    @integer  'controlled!'
+    @string   'dea_description', 64
+    @integer  'is_drug'
+    @string   'brand_type', 16
+    @integer  'is_maintenance_drug'
+    @string   'creation_type!', 8
+
+  @table 'medication_rxnorm', ->
+    @integer  'medication_id!'
+    @string   'cui!', 128
+    @string   'name!', 1024
+    @string   'description!', 1024
+
+    @index 'medication_id'
+
+  @table 'misc_orders', ->
+    @string   'Type!', 15, default: ""
+    @integer  'id!', default: "0"
+    @integer  'patient_id!', default: "0"
+    @integer  'practice_id!', default: "0"
+    @date     'date_for_test'
+    @integer  'prescriber_user_id'
+    @string   'follow_up_method', 100
+    @string   'clinical_reason'
+    @string   'patient_instructions'
+    @string   'icd10_code', 50
+    @string   'notes'
+    @string   'test_name', 255
+    @integer  'test_score'
+    @string   'allergies', 400
+    @string   'b_blocker', 400
+    @string   'stat', 50
+    @integer  'confidential'
+    @string   'test_center_name', 100
+    @string   'test_company_name', 200
+    @datetime 'creation_time'
+    @integer  'created_by_user_id'
+    @datetime 'deletion_time'
+    @integer  'deleted_by_user_id'
+    @datetime 'signed_time'
+    @integer  'signed_by_user_id'
+
+  @table 'non_visit_note', ->
+    @integer  'id!', primary: true
+    @integer  'patient_id!'
+    @integer  'practice_id!'
+    @string   'note_type', 20
+    @datetime 'document_date!'
+    @datetime 'chart_feed_date!'
+    @datetime 'last_modified'
+    @datetime 'creation_time'
+    @integer  'created_by_user_id'
+    @datetime 'deletion_time'
+    @integer  'deleted_by_user_id'
+    @datetime 'signed_time'
+    @integer  'signed_by_user_id'
+    @integer  'from_plr!', default: "0"
+
+    @index 'patient_id'
+    @index 'practice_id'
+
+  @table 'non_visit_note_bullet', ->
+    @integer  'id!', primary: true
+    @integer  'non_visit_note_id!'
+    @integer  'sequence!'
+    @string   'text!'
+
+    @index 'non_visit_note_id'
+
+  @table 'non_visit_note_document_tag', ->
+    @integer  'non_visit_note_id!'
+    @integer  'document_tag_id!'
+
+    @index 'document_tag_id'
+    @index 'non_visit_note_id'
+
+  @table 'office_messages', ->
+    @integer  'id!', primary: true
+    @integer  'patient_id!'
+    @integer  'thread_id!'
+    @string   'text!'
+    @datetime 'date_sent!', default: "2013-11-26 23:14:52"
+    @integer  'urgent!', default: "0"
+    @integer  'sender_id!'
+    @datetime 'post_date'
+    @datetime 'creation_time'
+    @integer  'created_by_user_id'
+    @datetime 'deletion_time'
+    @integer  'deleted_by_user_id'
+    @datetime 'signed_time'
+    @integer  'signed_by_user_id'
+
+    @index 'patient_id'
+
+  @table 'office_messages_recipients', ->
+    @integer  'id!', primary: true
+    @integer  'thread_id!'
+    @integer  'sent_to'
+    @integer  'staff_group_id'
+    @string   'staff_group_name', 50
+    @string   'status!', 15
+    @datetime 'ack_time'
+
+  @table 'other_vital_item', ->
+    @integer  'id!', primary: true
+    @integer  'vital_id!'
+    @datetime 'record_date!', default: "2015-12-18 00:59:53"
+    @string   'name!', 10
+    @string   'value!', 10, default: ""
+    @string   'units', 10
+    @string   'extra_note!', 250, default: ""
+    @string   'previous_value', 10
+    @datetime 'previous_record_time'
+    @datetime 'last_modified'
+    @datetime 'creation_time'
+    @integer  'created_by_user_id'
+    @datetime 'deletion_time'
+    @integer  'deleted_by_user_id'
+
+    @index 'vital_id'
+
+  @table 'passport', ->
+    @integer  'id!', default: "0"
+    @string   'message_type', 100
+    @string   'sent_to_role', 2
+    @datetime 'time_sent!'
+    @string   'sent_from!', 8, default: ""
+    @integer  'sender_practice_id'
+    @integer  'recipient_physician_id'
+    @integer  'patient_id!', default: "0"
+    @datetime 'last_modified'
+    @string   'letter_content!'
+    @datetime 'practice_time_viewed'
+    @datetime 'patient_viewed_time'
+    @string   'title!', 200, default: ""
+    @integer  'bulk_letter!', default: "0"
+    @datetime 'creation_time'
+    @integer  'created_by_user_id'
+    @datetime 'deletion_time'
+    @integer  'deleted_by_user_id'
+    @datetime 'signed_time'
+    @integer  'signed_by_user_id'
+    @integer  'number_responses!', default: "0"
+
+    @index 'patient_id'
+
+  @table 'passport_message_thread', ->
+    @integer  'id!'
+    @integer  'passport_id!'
+    @string   'message!'
+    @string   'sent_from', 301
+    @datetime 'message_thread_creation_time!'
+    @datetime 'creation_time'
+    @integer  'created_by_user_id'
+    @datetime 'signed_time'
+    @integer  'signed_by_user_id'
+
+  @table 'passport_messages', ->
+    @integer  'id!'
+    @string   'message!'
+    @integer  'passport_id!'
+    @datetime 'creation_time'
+    @integer  'created_by_user_id'
+    @datetime 'signed_time'
+    @integer  'signed_by_user_id'
+
+  @table 'patient', ->
+    @integer  'id!', primary: true
+    @integer  'master_id'
+    @string   'first_name!', 70
+    @string   'last_name!', 70
+    @string   'middle_name!', 50
+    @string   'suffix!', 20
+    @string   'prefix!', 20
+    @date     'dob'
+    @string   'sex!', 1, default: ""
+    @string   'gender_identity!', 55, default: ""
+    @string   'sexual_orientation!', 31, default: ""
+    @string   'ssn', 37
+    @string   'marital_status', 30
+    @string   'occupation', 100
+    @string   'preferred_language', 100
+    @string   'preferred_contact', 50
+    @string   'preferred_notification', 50
+    @string   'race!', 41, default: ""
+    @string   'secondary_race!', 41, default: ""
+    @string   'ethnicity!', 22, default: ""
+    @integer  'verified!'
+    @string   'notes'
+    @integer  'practice_id!'
+    @integer  'primary_physician_user_id!'
+    @integer  'primary_practice_provider_user_id!'
+    @email    'email'
+    @integer  'patient_passport_user_id'
+    @json     'address_line1'
+    @json     'address_line2'
+    @string   'city', 50
+    @string   'state', 2
+    @string   'zip', 10
+    @string   'pref_pharmacy1_ncpdpid', 21
+    @string   'pref_pharmacy2_ncpdpid', 21
+    @string   'emergency_first_name', 70
+    @string   'emergency_last_name', 70
+    @string   'emergency_phone', 20
+    @json     'emergency_address_line1'
+    @json     'emergency_address_line2'
+    @string   'emergency_city', 50
+    @string   'emergency_state', 2
+    @string   'emergency_zip', 10
+    @string   'emergency_relationship', 30
+    @string   'default_referring_provider', 100
+    @datetime 'last_modified'
+    @datetime 'creation_time'
+    @integer  'created_by_user_id'
+    @datetime 'deletion_time'
+    @integer  'deleted_by_user_id'
+
+    @index 'master_id'
+
+  @table 'patient_allergy', ->
+    @integer  'id!', primary: true, default: "0"
+    @integer  'patient_id!', default: "0"
+    @string   'reaction', 200
+    @string   'status', 10
+    @datetime 'start_date'
+    @string   'name!', 255, default: ""
+    @string   'allergen_type', 13
+    @string   'last_modified!', 19, default: ""
+    @datetime 'creation_time'
+    @integer  'created_by_user_id'
+    @datetime 'deletion_time'
+    @integer  'deleted_by_user_id'
+
+    @index 'patient_id'
+
+  @table 'patient_allergy_rxnorm', ->
+    @integer  'allergy_id!'
+    @string   'cui!', 128
+
+    @index 'allergy_id'
+
+  @table 'patient_drug_intolerance', ->
+    @integer  'id!', primary: true, default: "0"
+    @integer  'patient_id!', default: "0"
+    @string   'reaction', 200
+    @string   'status', 10
+    @datetime 'start_date'
+    @string   'name!', 255, default: ""
+    @string   'allergen_type', 13
+    @string   'last_modified!', 19, default: ""
+    @datetime 'creation_time'
+    @integer  'created_by_user_id'
+    @datetime 'deletion_time'
+    @integer  'deleted_by_user_id'
+
+    @index 'patient_id'
+
+  @table 'patient_drug_intolerance_rxnorm', ->
+    @integer  'intolerance_id!'
+    @string   'cui!', 128
+
+    @index 'intolerance_id'
+
+  @table 'patient_employer', ->
+    @integer  'patient_id!'
+    @string   'code!', 50
+    @string   'name', 255
+    @string   'description', 255
+
+    @index 'patient_id'
+
+  @table 'patient_hcc', ->
+    @integer  'id!', primary: true, default: "0"
+    @integer  'patient_id!'
+    @integer  'is_current!'
+    @decimal  'community!'
+    @decimal  'institutional!'
+    @datetime 'valid_since!'
+    @datetime 'valid_till!'
+    @decimal  'community_2017'
+    @decimal  'institutional_2017'
+
+    @index 'patient_id'
+
+  @table 'patient_history', ->
+    @integer  'id!', primary: true, default: "0"
+    @string   'relationship_type', 20
+    @integer  'patient_id!', default: "0"
+    @string   'value'
+    @string   'type!', 20, default: ""
+    @integer  'rank!', default: "0"
+    @integer  'icd9_id'
+    @integer  'snomed_id'
+    @string   'last_modified!', 19, default: ""
+    @datetime 'creation_time'
+    @integer  'created_by_user_id'
+    @datetime 'deletion_time'
+    @integer  'deleted_by_user_id'
+
+    @index 'icd9_id'
+    @index 'snomed_id'
+    @index 'patient_id'
+
+  @table 'patient_immunization', ->
+    @integer  'id!', primary: true
+    @integer  'patient_id!'
+    @integer  'cvx'
+    @string   'name', 255
+    @integer  'administering_physician_id'
+    @string   'description', 255
+    @datetime 'administered_date!'
+    @decimal  'qty'
+    @string   'qty_units', 100
+    @string   'lot_number', 255
+    @string   'manufacturer_name', 255
+    @string   'reason'
+    @date     'expiration_date'
+    @string   'vis'
+    @string   'method', 255
+    @string   'site', 255
+    @string   'notes'
+    @integer  'ordering_physician_id'
+    @string   'publicity_code', 2
+    @string   'vfc_eligibility', 6
+    @string   'info_source', 2
+    @integer  'allowed_sharing'
+    @string   'last_modified!', 19, default: ""
+    @datetime 'creation_time'
+    @integer  'created_by_user_id'
+    @datetime 'deletion_time'
+    @integer  'deleted_by_user_id'
+
+    @index 'patient_id'
+
+  @table 'patient_immunization_declined', ->
+    @integer  'id!', primary: true
+    @integer  'patient_id!'
+    @string   'cdc_type!', 100
+    @datetime 'declined_date!'
+    @string   'declined_reason', 2
+    @integer  'immunity!'
+    @string   'last_modified!', 19, default: ""
+    @datetime 'creation_time'
+    @integer  'created_by_user_id'
+    @datetime 'deletion_time'
+    @integer  'deleted_by_user_id'
+
+    @index 'patient_id'
+
+  @table 'patient_insurance', ->
+    @integer  'id!', primary: true
+    @integer  'patient_id!'
+    @integer  'insurance_company_id'
+    @string   'carrier', 200
+    @string   'member_id', 50
+    @string   'group_id', 50
+    @integer  'rank!'
+    @string   'plan', 200
+    @json     'address_line1'
+    @json     'address_line2'
+    @string   'city', 50
+    @string   'state', 2
+    @string   'zip', 10
+    @decimal  'copay'
+    @decimal  'deductible'
+    @json     'guarantor_address_line1'
+    @json     'guarantor_address_line2'
+    @string   'guarantor_city', 50
+    @string   'guarantor_state', 2
+    @string   'guarantor_zip', 10
+    @string   'guarantor_full_name', 211
+    @string   'guarantor_last_name', 105
+    @string   'guarantor_first_name', 105
+    @string   'guarantor_middle_name', 105
+    @string   'insured_person_name', 200
+    @string   'relationship_to_insured', 20
+    @string   'insured_person_first_name', 200
+    @string   'insured_person_last_name', 200
+    @string   'phone', 20
+    @string   'extension', 6
+    @json     'insured_person_address'
+    @string   'insured_person_city', 50
+    @string   'insured_person_state', 2
+    @string   'insured_person_zip', 10
+    @string   'insured_person_id', 50
+    @string   'insured_person_dob', 50
+    @string   'insured_person_gender', 1
+    @string   'insured_person_ssn', 11
+    @datetime 'last_modified'
+
+    @index 'insurance_company_id'
+    @index 'patient_id'
+
+  @table 'patient_phone', ->
+    @integer  'id!', primary: true
+    @integer  'patient_id!'
+    @string   'phone', 20
+    @string   'phone_type!', 50
+    @datetime 'last_modified'
+
+    @index 'patient_id'
+
+  @table 'patient_problem', ->
+    @integer  'id!', primary: true
+    @integer  'patient_id!'
+    @string   'description!', 200
+    @integer  'rank!'
+    @date     'start_date!'
+    @date     'resolved_date'
+    @string   'status!', 15
+    @string   'synopsis'
+    @string   'last_modified!', 19, default: ""
+    @datetime 'creation_time'
+    @integer  'created_by_user_id'
+    @datetime 'deletion_time'
+    @integer  'deleted_by_user_id'
+
+    @index 'patient_id'
+
+  @table 'patient_problem_code', ->
+    @integer  'patient_problem_id!', default: "0"
+    @string   'imo_code', 50
+    @integer  'icd10_id'
+    @integer  'icd9_id'
+    @integer  'snomed_id'
+
+    @index 'icd10_id'
+    @index 'icd9_id'
+    @index 'patient_problem_id'
+    @index 'snomed_id'
+
+  @table 'patient_problem_code_hcc', ->
+    @integer  'icd10_id!'
+    @string   'hcc_code!', 50
+    @string   'hcc_label!', 300
+    @decimal  'hcc_community_factor'
+    @decimal  'hcc_institutional_factor'
+
+  @table 'patient_tag', ->
+    @integer  'id!', primary: true, default: "0"
+    @integer  'patient_id!'
+    @string   'tag_value!', 100
+
+    @index 'patient_id'
+
+  @table 'patient_vendor_identifier', ->
+    @integer  'patient_id!'
+    @string   'vendor_name!', 100
+    @string   'identifier!', 100
+
+    @index 'patient_id'
+
+  @table 'pharmacy', ->
+    @string   'ncpdpid!', 21, primary: true
+    @string   'store_name', 105
+    @json     'address_line1'
+    @json     'address_line2'
+    @string   'city', 105
+    @string   'state', 6
+    @string   'zip', 33
+    @string   'phone_primary', 75
+    @string   'fax', 75
+    @email    'email'
+
+  @table 'practice', ->
+    @integer  'id!', primary: true
+    @string   'name!', 200
+    @json     'address_line1!'
+    @json     'address_line2'
+    @string   'city!', 50
+    @string   'state!', 2
+    @string   'zip!', 10
+    @string   'phone', 20
+    @string   'fax', 20
+
+  @table 'provider_letter', ->
+    @integer  'id!', primary: true
+    @integer  'patient_id!'
+    @integer  'practice_id!'
+    @string   'send_to_name', 200
+    @string   'subject!', 200
+    @string   'body!'
+    @email    'email_to'
+    @string   'delivery_method!', 20
+    @datetime 'delivery_date'
+    @string   'recipient_firstname', 50
+    @string   'recipient_lastname', 60
+    @string   'recipient_middlename', 50
+    @string   'recipient_npi', 20
+    @string   'recipient_credentials', 20
+    @string   'recipient_contacttype', 20
+    @json     'recipient_address'
+    @string   'recipient_city', 50
+    @string   'recipient_state', 2
+    @string   'recipient_zip', 10
+    @string   'recipient_fax', 20
+    @string   'recipient_org_name', 100
+    @string   'recipient_specialty', 100
+    @datetime 'document_date!'
+    @datetime 'chart_feed_date!'
+    @datetime 'last_modified'
+    @datetime 'creation_time'
+    @integer  'created_by_user_id'
+    @datetime 'deletion_time'
+    @integer  'deleted_by_user_id'
+    @datetime 'signed_time'
+    @integer  'signed_by_user_id'
+    @integer  'from_plr!', default: "0"
+
+    @index 'patient_id'
+    @index 'practice_id'
+
+  @table 'referral_order', ->
+    @integer  'id!', primary: true
+    @integer  'patient_id!'
+    @integer  'practice_id!'
+    @string   'send_to_name', 200
+    @string   'subject!', 200
+    @string   'body!'
+    @email    'email_to'
+    @string   'delivery_method!', 20
+    @datetime 'delivery_date'
+    @string   'fax_status', 20
+    @string   'clinical_reason!'
+    @integer  'prescribing_user_id'
+    @string   'authorization_for!', 30
+    @string   'auth_number', 20
+    @string   'recipient_firstname', 50
+    @string   'recipient_lastname', 60
+    @string   'recipient_middlename', 50
+    @string   'recipient_npi', 20
+    @string   'recipient_credentials', 20
+    @string   'recipient_contacttype', 20
+    @json     'recipient_address'
+    @string   'recipient_city', 50
+    @string   'recipient_state', 2
+    @string   'recipient_zip', 10
+    @string   'recipient_fax', 20
+    @string   'recipient_org_name', 100
+    @string   'recipient_specialty', 100
+    @datetime 'document_date!'
+    @datetime 'chart_feed_date!'
+    @datetime 'last_modified'
+    @datetime 'creation_time'
+    @integer  'created_by_user_id'
+    @datetime 'deletion_time'
+    @integer  'deleted_by_user_id'
+    @datetime 'signed_time'
+    @integer  'signed_by_user_id'
+    @integer  'from_plr!', default: "0"
+
+    @index 'patient_id'
+    @index 'practice_id'
+
+  @table 'report', ->
+    @integer  'id!', primary: true
+    @integer  'patient_id!'
+    @integer  'practice_id!'
+    @datetime 'reported_date_time'
+    @string   'report_type!', 20
+    @string   'requisition_number', 100
+    @string   'order_status', 20
+    @string   'ordering_provider_name', 100
+    @string   'copies_to', 200
+    @string   'vendor_name', 64
+    @string   'custom_title', 255
+    @datetime 'document_date!'
+    @datetime 'chart_feed_date!'
+    @datetime 'last_modified'
+    @datetime 'creation_time'
+    @integer  'created_by_user_id'
+    @datetime 'deletion_time'
+    @integer  'deleted_by_user_id'
+    @datetime 'signed_time'
+    @integer  'signed_by_user_id'
+    @integer  'from_plr!', default: "0"
+
+    @index 'patient_id'
+    @index 'practice_id'
+
+  @table 'report_addendum', ->
+    @integer  'id!', primary: true
+    @integer  'report_id!'
+    @string   'text!'
+
+    @index 'report_id'
+
+  @table 'report_document_tag', ->
+    @integer  'report_id!'
+    @integer  'document_tag_id!'
+
+    @index 'document_tag_id'
+    @index 'report_id'
+
+  @table 'service_location', ->
+    @integer  'id!', primary: true
+    @json     'address!'
+    @string   'suite', 40
+    @string   'city!', 50
+    @string   'state!', 2
+    @string   'zip!', 10
+    @string   'phone', 20
+    @string   'fax', 20
+    @integer  'practice_id!'
+    @integer  'is_primary!', default: "0"
+    @datetime 'creation_time'
+    @integer  'created_by_user_id'
+    @datetime 'deletion_time'
+    @integer  'deleted_by_user_id'
+
+  @table 'snomed', ->
+    @integer  'id!', primary: true
+    @string   'code!', 50
+    @string   'description', 250
+
+  @table 'user', ->
+    @integer  'id!', primary: true, default: "0"
+    @email    'email!'
+    @integer  'is_active!'
+    @integer  'practice_id!'
+    @string   'first_name', 50
+    @string   'last_name', 60
+    @integer  'is_practice_admin!'
+    @string   'user_type!', 9, default: ""
+    @integer  'office_staff_id'
+    @integer  'physician_id'
+    @string   'specialty', 100
+    @string   'credentials', 20
+    @string   'npi', 10
+    @string   'tin', 10
+    @integer  'verified'
+    @integer  'canonical_physician_id'
+
+    @index 'practice_id'
+
+  @table 'visit_note', ->
+    @integer  'id!', primary: true
+    @integer  'patient_id!'
+    @integer  'practice_id!'
+    @string   'name', 50
+    @datetime 'document_date!'
+    @datetime 'chart_feed_date!'
+    @integer  'physician_user_id'
+    @datetime 'last_modified'
+    @datetime 'creation_time'
+    @integer  'created_by_user_id'
+    @datetime 'deletion_time'
+    @integer  'deleted_by_user_id'
+    @datetime 'signed_time'
+    @integer  'signed_by_user_id'
+    @integer  'from_plr!', default: "0"
+    @string   'transition_of_care', 20
+    @integer  'meds_reconciled', default: "0"
+    @integer  'current_meds_documented'
+
+    @index 'patient_id'
+    @index 'practice_id'
+
+  @table 'visit_note_bullet', ->
+    @integer  'id!', primary: true
+    @integer  'visit_note_id!'
+    @integer  'parent_bullet_id'
+    @integer  'from_amendment!', default: "0"
+    @string   'category!', 13, default: ""
+    @integer  'sequence!'
+    @blob     'imo_code'
+    @blob     'icd9'
+    @blob     'icd10'
+    @string   'text!'
+    @datetime 'deleted_date'
+    @integer  'deleted_by_user_id'
+
+    @index 'visit_note_id'
+
+  @table 'visit_note_document_tag', ->
+    @integer  'visit_note_id!'
+    @integer  'document_tag_id!'
+
+    @index 'document_tag_id'
+    @index 'visit_note_id'
+
+  @table 'visitnotebullet_imo_join', ->
+    @integer  'id!', primary: true, default: "0"
+    @integer  'visit_note_bullet_id!'
+    @integer  'imo_id'
+
+    @index 'imo_id'
+    @index 'visit_note_bullet_id'
+
+  @table 'vital', ->
+    @integer  'id!', primary: true
+    @integer  'patient_id!'
+    @integer  'practice_id!'
+    @integer  'visit_note_id'
+    @string   'bp_d', 10
+    @string   'bp_s', 10
+    @string   'bp_note', 250
+    @string   'hc', 10, default: "-1"
+    @string   'hc_note', 250, default: ""
+    @string   'height', 10
+    @string   'height_units', 10
+    @string   'height_note', 250
+    @string   'weight', 10
+    @string   'weight_units', 10
+    @string   'weight_note', 250
+    @decimal  'bmi'
+    @string   'hr', 10
+    @string   'hr_note', 250
+    @string   'o2_percent', 10
+    @string   'o2_note', 250
+    @string   'pain', 10
+    @string   'pain_note', 250
+    @string   'rr', 10
+    @string   'rr_note', 250
+    @string   'temperature', 10
+    @string   'temperature_units', 10
+    @string   'temperature_note', 250
+    @datetime 'document_date!'
+    @datetime 'chart_feed_date!'
+    @datetime 'last_modified'
+    @datetime 'creation_time'
+    @integer  'created_by_user_id'
+    @datetime 'deletion_time'
+    @integer  'deleted_by_user_id'
+    @datetime 'signed_time'
+    @integer  'signed_by_user_id'
+
+    @index 'patient_id'
+    @index 'practice_id'
+    @index 'visit_note_id'
+
+  @table 'vital_bp', ->
+    @integer  'id!', primary: true
+    @integer  'vital_id!'
+    @integer  'patient_id!'
+    @integer  'practice_id!'
+    @integer  'visit_note_id'
+    @string   'bp_d!', 10
+    @string   'bp_s!', 10
+    @string   'bp_note!', 250
+    @datetime 'document_date!'
+    @datetime 'chart_feed_date!'
+    @datetime 'last_modified'
+    @datetime 'creation_time'
+    @integer  'created_by_user_id'
+    @datetime 'deletion_time'
+    @integer  'deleted_by_user_id'
+    @datetime 'signed_time'
+    @integer  'signed_by_user_id'
+
