@@ -355,7 +355,18 @@ Object.defineProperty global, 'json',
     # Otherwise, serialize to JSON string
     else
       JSON.stringify(data)
-  configurable: true
+configurable: true
+
+# Global text helper - for plain text responses!
+Object.defineProperty global, 'text',
+  value: (data) ->
+    # If we have context, send text response
+    if _currentContext?
+      _currentContext.text(data.toString())
+    # Otherwise, just return the string
+    else
+      data.toString()
+configurable: true
 
 # Export helper for Hono context binding - Sinatra-style!
 export withHelpers = (app) ->

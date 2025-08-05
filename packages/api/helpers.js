@@ -419,7 +419,6 @@ export var read = function(keyOrContext, key = null, tag = null, miss = null) {
         // Range check - explicit min/max object format { min: 1, max: 10 } or { min: 5 } or { max: 20 }
         minVal = originalTag.min;
         maxVal = originalTag.max;
-        
         // For numeric tags, validate the number value
         if ((tag === 'id' || tag === 'whole' || tag === 'decimal' || tag === 'money') || (typeof val === 'number')) {
           numVal = parseInt(val);
@@ -507,7 +506,27 @@ Object.defineProperty(global, 'json', {
       // Otherwise, serialize to JSON string
       return JSON.stringify(data);
     }
-  },
+  }
+});
+
+({
+  configurable: true
+});
+
+// Global text helper - for plain text responses!
+Object.defineProperty(global, 'text', {
+  value: function(data) {
+    // If we have context, send text response
+    if (_currentContext != null) {
+      return _currentContext.text(data.toString());
+    } else {
+      // Otherwise, just return the string
+      return data.toString();
+    }
+  }
+});
+
+({
   configurable: true
 });
 
