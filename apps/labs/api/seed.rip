@@ -39,9 +39,9 @@ for user in testUsers[0..4]  # First 5 users get orders
     testIds = faker.helpers.arrayElements([1, 2, 3], faker.number.int({ min: 1, max: 3 }))
     subtotal = testIds.length * 9900
     total = subtotal + faker.number.int({ min: 0, max: 1000 })  # Add some variation
-    
+
     orderNumber = 'LAB-' + faker.string.alphanumeric(8).toUpperCase()
-    
+
     order = dataClient.execute! '''
       INSERT INTO orders (userId, number, payment, subtotal, total, meta, shippedAt, completedAt)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -65,7 +65,7 @@ console.log '🧪 Creating test specimens...'
 for user in testUsers[0..6]  # First 7 users get specimens
   for i in [1..faker.number.int({ min: 1, max: 4 })]
     barcode = 'SP-' + faker.string.alphanumeric(10).toUpperCase()
-    
+
     specimen = dataClient.execute! '''
       INSERT INTO specimens (userId, testId, barcode, registeredAt, collectedAt, reportedAt)
       VALUES (?, ?, ?, ?, ?, ?)
@@ -87,7 +87,7 @@ console.log '📊 Creating test results...'
 for user in testUsers[0..4]  # First 5 users get results
   for i in [1..faker.number.int({ min: 1, max: 2 })]
     resultUrl = "https://results.labs.example.com/#{faker.string.uuid()}"
-    
+
     result = dataClient.execute! '''
       INSERT INTO results (userId, resultUrl)
       VALUES (?, ?)

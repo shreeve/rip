@@ -4,7 +4,7 @@
 
 This is a complete reimagining of web application architecture using:
 - **@rip/data** - DuckDB as both transactional AND analytical store
-- **@rip/schema** - Elegant database schema with perfect range validation  
+- **@rip/schema** - Elegant database schema with perfect range validation
 - **@rip/api** - Context-free endpoints with intelligent `read()` function
 - **@rip/server** - Multi-process production server with hot reload
 
@@ -38,7 +38,7 @@ This is a complete reimagining of web application architecture using:
 ### **3. Revolutionary Schema**
 ```rip
 @string 'email!', [5, 255], unique: true    # Perfect validation
-@integer 'age', [18, 120]                   # Clear constraints  
+@integer 'age', [18, 120]                   # Clear constraints
 @string 'bio', max: 2000                    # Flexible limits
 ```
 
@@ -48,7 +48,7 @@ This is a complete reimagining of web application architecture using:
 # 1. Start the revolutionary data server
 bun run data:start
 
-# 2. Push database schema  
+# 2. Push database schema
 bun run db:push
 
 # 3. Seed with test data
@@ -64,13 +64,13 @@ bun run dev
 - `GET /ping` - Health check
 - `GET /config` - Client configuration
 
-### **Authentication** 
+### **Authentication**
 - `POST /auth/code` - Request auth code (email-based)
 - `POST /auth/verify` - Verify auth code
 
 ### **User Management**
 - `GET /user/me` - Get current user profile
-- `PATCH /user/me` - Update user profile  
+- `PATCH /user/me` - Update user profile
 - `GET /users` - List all users (admin)
 
 ### **Lab Operations**
@@ -89,7 +89,7 @@ bun run dev
 email = read 'email', 'email', [5, 255]      # Email with length validation
 code = read 'code', 'string', [6, 6]         # Exact 6-digit code
 
-# User Profile  
+# User Profile
 firstName = read 'firstName', 'string', [1, 100]  # Required name
 phone = read 'phone', 'string', [10, 20]          # Phone number range
 age = read 'age', 'integer', [13, 120]            # Reasonable age range
@@ -105,7 +105,7 @@ payment = read 'payment', 'string', [3, 20], 'stripe'  # Payment method with def
 ```rip
 # This query runs instantly on the same data used for transactions!
 userGrowth = dataClient.query! '''
-  SELECT 
+  SELECT
     DATE_TRUNC('day', createdAt) as date,
     COUNT(*) as new_users,
     SUM(COUNT(*)) OVER (ORDER BY DATE_TRUNC('day', createdAt)) as total_users
@@ -145,7 +145,7 @@ React → Express → PostgreSQL → ETL → Data Warehouse → BI Tools
 Complex  Verbose   OLTP only   Slow    Expensive    Delayed
 ```
 
-### **Revolutionary Rip Stack**  
+### **Revolutionary Rip Stack**
 ```
 React → Rip API → DuckDB (OLTP + OLAP)
   ↓       ↓          ↓
@@ -180,6 +180,6 @@ This isn't just an API - it's a **paradigm shift**:
 ## 🔗 Related Packages
 
 - [`@rip/data`](../../packages/data) - Revolutionary DuckDB data platform
-- [`@rip/schema`](../../packages/schema) - Perfect database schema DSL  
+- [`@rip/schema`](../../packages/schema) - Perfect database schema DSL
 - [`@rip/api`](../../packages/api) - Context-free API helpers
 - [`@rip/server`](../../packages/server) - Production-ready server

@@ -8,7 +8,7 @@
     "dev": "rip-server . 8305",
     "db:push": "rip-schema db:push",
     "db:seed": "bun seed.rip",
-    "data:start": "bun data-server.rip"
+    "data:start": "bun rip-data-server.rip"
   },
   "dependencies": {
     "@rip/data": "workspace:*",

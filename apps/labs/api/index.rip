@@ -71,7 +71,7 @@ app.post '/auth/code', ->
 
   # Update user with code
   dataClient.execute! '''
-    UPDATE users 
+    UPDATE users
     SET code = ?, codeExpiresAt = ?
     WHERE id = ?
   ''', [code, expiresAt, user.id]
@@ -88,7 +88,7 @@ app.post '/auth/verify', ->
 
   # Verify code
   user = dataClient.query! '''
-    SELECT * FROM users 
+    SELECT * FROM users
     WHERE email = ? AND code = ? AND codeExpiresAt > ?
   ''', [email, code, new Date()]
 
@@ -213,7 +213,7 @@ app.get '/orders', ->
   userId = 1  # Mock current user
 
   orders = dataClient.query! '''
-    SELECT * FROM orders 
+    SELECT * FROM orders
     WHERE userId = ?
     ORDER BY createdAt DESC
   ''', [userId]
@@ -225,7 +225,7 @@ app.get '/results', ->
   userId = 1  # Mock current user
 
   results = dataClient.query! '''
-    SELECT * FROM results 
+    SELECT * FROM results
     WHERE userId = ?
     ORDER BY createdAt DESC
   ''', [userId]
@@ -235,10 +235,10 @@ app.get '/results', ->
 # 🔥 REVOLUTIONARY ANALYTICS ENDPOINTS (DuckDB Power!)
 app.get '/analytics/dashboard', ->
   # Real-time analytics queries that would be impossible with traditional setup!
-  
+
   # User growth over time
   userGrowth = dataClient.query! '''
-    SELECT 
+    SELECT
       DATE_TRUNC('day', createdAt) as date,
       COUNT(*) as new_users,
       SUM(COUNT(*)) OVER (ORDER BY DATE_TRUNC('day', createdAt)) as total_users
@@ -250,7 +250,7 @@ app.get '/analytics/dashboard', ->
 
   # Revenue analytics
   revenue = dataClient.query! '''
-    SELECT 
+    SELECT
       DATE_TRUNC('day', createdAt) as date,
       COUNT(*) as orders,
       SUM(total) as revenue,
@@ -263,7 +263,7 @@ app.get '/analytics/dashboard', ->
 
   # Test popularity
   testPopularity = dataClient.query! '''
-    SELECT 
+    SELECT
       JSON_EXTRACT(meta, '$.testIds') as test_ids,
       COUNT(*) as order_count
     FROM orders
