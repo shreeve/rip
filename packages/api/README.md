@@ -44,7 +44,7 @@ app.post '/users', ->
   email = read 'email', [5, 255]          # Same syntax!
   views = read 'views', min: 0             # Same syntax!
   bio = read 'bio', max: 500               # Same syntax!
-  
+
   json success: true, user: { username, age, email, views, bio }
 ```
 
@@ -408,7 +408,7 @@ custom_rating = read 'rating', min: 1, max: 5  # Explicit 1-5 range
 
 **🎯 Perfect Design Philosophy:**
 - **Common Things Easy**: `[min, max]` covers 90% of validation needs with shortest syntax
-- **Rare Things Possible**: `min:` / `max:` handles edge cases with explicit clarity  
+- **Rare Things Possible**: `min:` / `max:` handles edge cases with explicit clarity
 - **Identical to @rip/schema**: Same syntax everywhere for perfect consistency
 
 ### 🔥 Legendary Regex Patterns - The Secret Sauce

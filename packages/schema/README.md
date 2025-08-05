@@ -95,7 +95,7 @@ rip-schema db:push
 @integer  'views', min: 0            # Non-negative numbers
 @string   'comment', min: 10         # At least 10 characters
 
-# Only maximum (when min doesn't matter)  
+# Only maximum (when min doesn't matter)
 @decimal  'discount', max: 1.0       # Up to 100% discount
 @text     'bio_short', max: 200      # Reasonable bio limit
 

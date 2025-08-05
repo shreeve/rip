@@ -30,6 +30,27 @@ Everything in the Rip ecosystem follows four core principles, in order of import
    - *Premature optimization for brevity can harm clarity*
    - *Elegance is the cherry on top, not the foundation*
 
+## 🎯 The Larry Wall Principle
+
+> *"Common things should be easy, rare things should be possible"*  
+> **— Larry Wall, creator of Perl** *(Personal conversation, Open Source Conference, San Diego, 2002)*
+
+This foundational principle guides every API design decision in Rip:
+
+**✅ Common Things Easy** *(90% of use cases)*:
+- **Range validation**: `[min, max]` - shortest, clearest syntax
+- **Regex matching**: `val =~ /pattern/` - elegant and intuitive  
+- **Function calls**: `read 'email', 'email'` - clean and simple
+- **Object returns**: `{ success: true, data }` - natural and concise
+
+**🎯 Rare Things Possible** *(10% of use cases)*:
+- **One-sided ranges**: `min: 0` or `max: 100` - explicit when needed
+- **Complex patterns**: `min: 1, max: 5, default: 3` - powerful when required
+- **Advanced regex**: Full CoffeeScript regex features available
+- **Custom validation**: Extensible patterns for edge cases
+
+**💫 Perfect Balance**: Learn the common patterns first (covers 90% of needs), discover advanced features as you grow. No feature bloat, no cognitive overload, just elegant progression from simple to sophisticated.
+
 ## 📦 Packages
 
 ### **[@rip/parser](packages/parser/)**
