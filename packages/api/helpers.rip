@@ -278,23 +278,23 @@ export c = -> _currentContext
 export env = -> _currentContext  # Alias for those who prefer 'env'
 
 # Sinatra-style instance variables - ULTIMATE ELEGANCE!
-Object.defineProperty global, '@c', 
+Object.defineProperty global, '@c',
   get: -> _currentContext
   configurable: true
 
-Object.defineProperty global, '@ctx', 
+Object.defineProperty global, '@ctx',
   get: -> _currentContext
   configurable: true
 
-Object.defineProperty global, '@env', 
+Object.defineProperty global, '@env',
   get: -> _currentContext
   configurable: true
 
-Object.defineProperty global, '@req', 
+Object.defineProperty global, '@req',
   get: -> _currentContext?.req
   configurable: true
 
-Object.defineProperty global, '@res', 
+Object.defineProperty global, '@res',
   get: -> _currentContext  # In Hono, context handles response
   configurable: true
 
@@ -362,11 +362,11 @@ export withHelpers = (app) ->
 #   phon = read 'phone', 'phone'      # Context-free everything!
 #   c().json { success: true, user: { mail, phon } }  # c() gets global context
 #
-# OPTION 3: Sinatra-style instance variables - ULTIMATE ELEGANCE!
+# OPTION 3: Sinatra-style @env - THE ONE ULTIMATE VARIABLE!
 # app.post '/signup', ->
 #   mail = read 'email', 'email!'     # All calls synchronous
 #   phon = read 'phone', 'phone'      # Pure elegance
-#   @c.json { success: true, user: { mail, phon } }  # @c is like Sinatra's @env!
+#   @env.json { success: true, user: { mail, phon } }  # @env does it ALL!
 #
 #   # SHOWCASE: Geographic validation with =~ MASTERY
 #   stat = c.read 'state', 'state!'     # CA, ny -> CA, NY

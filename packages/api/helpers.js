@@ -524,11 +524,11 @@ export var withHelpers = function(app) {
 //   phon = read 'phone', 'phone'      # Context-free everything!
 //   c().json { success: true, user: { mail, phon } }  # c() gets global context
 
-// OPTION 3: Sinatra-style instance variables - ULTIMATE ELEGANCE!
+// OPTION 3: Sinatra-style @env - THE ONE ULTIMATE VARIABLE!
 // app.post '/signup', ->
 //   mail = read 'email', 'email!'     # All calls synchronous
 //   phon = read 'phone', 'phone'      # Pure elegance
-//   @c.json { success: true, user: { mail, phon } }  # @c is like Sinatra's @env!
+//   @env.json { success: true, user: { mail, phon } }  # @env does it ALL!
 
 //   # SHOWCASE: Geographic validation with =~ MASTERY
 //   stat = c.read 'state', 'state!'     # CA, ny -> CA, NY

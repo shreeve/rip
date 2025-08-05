@@ -90,11 +90,11 @@ app.post '/signup', ->
   phone = read 'phone', 'phone'      # Pure synchronous elegance!
   c().json { success: true, email, phone }  # c() gets global context
 
-# OPTION 3: Sinatra-style instance variables - ULTIMATE ELEGANCE!
+# OPTION 3: Sinatra-style @env - ULTIMATE ELEGANCE!
 app.post '/signup', ->
   email = read 'email', 'email!'     # All calls synchronous (middleware pre-parses)
   phone = read 'phone', 'phone'      # Pure synchronous elegance!
-  @c.json { success: true, email, phone }  # @c is like Sinatra's @env!
+  @env.json { success: true, email, phone }  # @env does it all - just like Sinatra!
 ```
 
 ## 🔥 The `helpers.rip` Powerhouse
@@ -126,13 +126,13 @@ The crown jewel of `@rip/api` is the **`read()` function** - a validation and pa
 **Four calling styles supported**:
 
 ```rip
-# Sinatra-style instance variables - ULTIMATE ELEGANCE
+# Sinatra-style @env - ULTIMATE ELEGANCE
 import { read, withHelpers } from '@rip/api'
 app.post '/endpoint', ->
   data = read 'key', 'validator'  # All calls synchronous!
-  @c.json { data }                # @c is like Sinatra's @env!
+  @env.json { data }              # @env does it all - just like Sinatra!
 
-# Function-based global context  
+# Function-based global context
 app.post '/endpoint', ->
   data = read 'key', 'validator'  # All calls synchronous!
   c().json { data }               # c() gets global context
@@ -148,14 +148,14 @@ read(context, key, validator, fallback)
 
 **Parameters**:
 - **`key`**: Field name to extract (or `null` for entire payload)
-- **`validator`**: Validation/transformation rule  
+- **`validator`**: Validation/transformation rule
 - **`fallback`**: Value to use if validation fails (optional)
 
 **Global Context Access**:
-- **`@c`, `@ctx`, `@env`**: Sinatra-style instance variables (ULTIMATE!)
-- **`@req`**: Direct access to request object
-- **`@res`**: Direct access to response context  
-- **`c()`, `env()`**: Function-based accessors
+- **`@env`**: The ONE Sinatra-style variable that does it all! (ULTIMATE!)
+- **`@req`**: Request-only access (when you only need request data)
+- **`c()`, `env()`**: Function-based accessors (alternative style)
+- **`@c`, `@ctx`, `@res`**: Available as aliases for flexibility
 
 ### Basic Usage Examples
 
@@ -176,19 +176,19 @@ app.post '/api/users', ->
   email = read 'email', 'email!'  # No async complexity!
   role = read 'role', ['admin', 'user'], 'user'  # Clean and simple!
   phone = read 'phone', 'phone'   # Pure elegance!
-  
+
   # Access context when needed
   c().json { name, email, role, phone }
 
-# STYLE 3: Sinatra-style instance variables - ULTIMATE ELEGANCE!
+# STYLE 3: Sinatra-style @env - ULTIMATE ELEGANCE!
 app.post '/api/users', ->
   name = read 'name'              # All calls synchronous (middleware pre-parses)
   email = read 'email', 'email!'  # No async complexity!
   role = read 'role', ['admin', 'user'], 'user'  # Clean and simple!
   phone = read 'phone', 'phone'   # Pure elegance!
-  
-  # Sinatra-style instance variable access - just like Ruby!
-  @c.json { name, email, role, phone }
+
+  # @env does it all - just like Ruby Sinatra!
+  @env.json { name, email, role, phone }
 ```
 
 ### 🔄 **Pure Synchronous Elegance: Middleware Pre-Parsing**
@@ -201,6 +201,58 @@ app.post '/api/users', ->
 - **Pure simplicity**: No need to worry about first call vs subsequent calls
 
 **In Practice**: Just use `read()` everywhere - it's always synchronous and fast!
+
+### 🎯 **@env: The ONE Ultimate Variable**
+
+**`@env` does EVERYTHING you need in a Sinatra-style endpoint:**
+
+```rip
+app.post '/api/users', ->
+  # REQUEST ACCESS
+  method = @env.req.method           # "POST"
+  userAgent = @env.req.header('User-Agent')
+  query = @env.req.query()           # URL parameters
+  
+  # DATA PROCESSING (all synchronous!)
+  email = read 'email', 'email!'
+  name = read 'name', 'name!'
+  age = read 'age', { start: 18, end: 120 }
+  
+  # RESPONSE OPERATIONS - all through @env!
+  @env
+    .status(201)                     # Set status
+    .header('X-API-Version', '1.0')  # Set headers
+    .cookie('session', 'abc123')     # Set cookies
+    .json({                          # Send JSON response
+      success: true
+      user: { email, name, age }
+      meta: { created: new Date() }
+    })
+```
+
+**Perfect Sinatra Comparison:**
+```ruby
+# Ruby Sinatra
+post '/api/users' do
+  email = params[:email]
+  name = params[:name]
+  
+  status 201
+  headers 'X-API-Version' => '1.0'
+  json({ user: { email: email, name: name } })
+end
+```
+
+```rip
+# Rip with @env - nearly identical!
+app.post '/api/users', ->
+  email = read 'email'
+  name = read 'name'
+  
+  @env.status(201)
+      .header('X-API-Version', '1.0')
+      .json({ user: { email, name } })
+```
 
 ### The 36 Built-in Validators
 
@@ -418,7 +470,7 @@ app.post '/signup', ->  # NO context parameter needed!
   age = read 'age', { start: 18, end: 120 }, null    # Pure elegance
 
   user = createUser! { email, name, phone, state, age } # Use ! suffix for async operations
-  c().json { success: true, user }  # Global context access - pure Sinatra style!
+  @env.json { success: true, user }  # @env does it all - pure Sinatra style!
 ```
 
 ### Performance & Production Benefits
@@ -462,11 +514,11 @@ app.post '/api/users', (ctx) ->
   name = read 'name', 'name!'      # Pure synchronous elegance
   ctx.json { success: true, user: { email, name } }
 
-# STYLE 2: Pure Sinatra-style - NO context parameter!
+# STYLE 2: Sinatra-style @env - ULTIMATE ELEGANCE!
 app.post '/api/users', ->
   email = read 'email', 'email!'  # All calls synchronous (middleware pre-parses)
   name = read 'name', 'name!'      # No async complexity
-  c().json { success: true, user: { email, name } }  # Global context access
+  @env.json { success: true, user: { email, name } }  # @env does it all!
 ```
 
 ### Migration from Traditional APIs
@@ -475,7 +527,8 @@ Replace verbose validation blocks with single `read()` calls:
 
 ```rip
 # Instead of 10+ lines of manual validation:
-email = read 'email', 'email!'  # One line does it all - pure synchronous Sinatra elegance
+email = read 'email', 'email!'  # One line does it all
+@env.json { success: true, email }  # @env does it all - pure Sinatra elegance!
 ```
 
 ## 🎯 Roadmap
