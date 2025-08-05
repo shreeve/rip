@@ -84,11 +84,17 @@ app.post '/signup', (ctx) ->
   email = read 'email', 'email!'     # All calls synchronous (middleware pre-parses)
   ctx.json { success: true, email }
 
-# OPTION 2: Pure Sinatra-style (NO context parameter!)  
+# OPTION 2: Function-based global context
 app.post '/signup', ->
   email = read 'email', 'email!'     # All calls synchronous (middleware pre-parses)
   phone = read 'phone', 'phone'      # Pure synchronous elegance!
   c().json { success: true, email, phone }  # c() gets global context
+
+# OPTION 3: Sinatra-style instance variables - ULTIMATE ELEGANCE!
+app.post '/signup', ->
+  email = read 'email', 'email!'     # All calls synchronous (middleware pre-parses)
+  phone = read 'phone', 'phone'      # Pure synchronous elegance!
+  @c.json { success: true, email, phone }  # @c is like Sinatra's @env!
 ```
 
 ## 🔥 The `helpers.rip` Powerhouse
@@ -117,18 +123,23 @@ The crown jewel of `@rip/api` is the **`read()` function** - a validation and pa
 
 ### Core API: The `read()` Function
 
-**Three calling styles supported**:
+**Four calling styles supported**:
 
 ```rip
-# Pure Sinatra-style (context-free everything) - ULTIMATE ELEGANCE
-import { read, c } from '@rip/api'
+# Sinatra-style instance variables - ULTIMATE ELEGANCE
+import { read, withHelpers } from '@rip/api'
 app.post '/endpoint', ->
-  data = read! 'key', 'validator'
-  c().json { data }
+  data = read 'key', 'validator'  # All calls synchronous!
+  @c.json { data }                # @c is like Sinatra's @env!
 
-# Traditional with context-free read calls - RECOMMENDED
+# Function-based global context  
+app.post '/endpoint', ->
+  data = read 'key', 'validator'  # All calls synchronous!
+  c().json { data }               # c() gets global context
+
+# Traditional with context parameter
 app.post '/endpoint', (ctx) ->
-  data = read! 'key', 'validator'  # No context in read!
+  data = read 'key', 'validator'  # All calls synchronous!
   ctx.json { data }
 
 # Explicit context (backward compatible)
@@ -137,13 +148,14 @@ read(context, key, validator, fallback)
 
 **Parameters**:
 - **`key`**: Field name to extract (or `null` for entire payload)
-- **`validator`**: Validation/transformation rule
+- **`validator`**: Validation/transformation rule  
 - **`fallback`**: Value to use if validation fails (optional)
-- **`context`**: Hono request context (only needed without withHelpers)
 
 **Global Context Access**:
-- **`c()`**: Returns current request context (like Sinatra's `request`)
-- **`env()`**: Alias for `c()` for those who prefer `env`
+- **`@c`, `@ctx`, `@env`**: Sinatra-style instance variables (ULTIMATE!)
+- **`@req`**: Direct access to request object
+- **`@res`**: Direct access to response context  
+- **`c()`, `env()`**: Function-based accessors
 
 ### Basic Usage Examples
 
@@ -158,7 +170,7 @@ app.post '/api/users', (ctx) ->
   email = read 'email', 'email!'  # Pure synchronous elegance!
   ctx.json { name, email }
 
-# STYLE 2: Pure Sinatra-style - NO context parameter!
+# STYLE 2: Function-based global context
 app.post '/api/users', ->
   name = read 'name'              # All calls synchronous (middleware pre-parses)
   email = read 'email', 'email!'  # No async complexity!
@@ -167,6 +179,16 @@ app.post '/api/users', ->
   
   # Access context when needed
   c().json { name, email, role, phone }
+
+# STYLE 3: Sinatra-style instance variables - ULTIMATE ELEGANCE!
+app.post '/api/users', ->
+  name = read 'name'              # All calls synchronous (middleware pre-parses)
+  email = read 'email', 'email!'  # No async complexity!
+  role = read 'role', ['admin', 'user'], 'user'  # Clean and simple!
+  phone = read 'phone', 'phone'   # Pure elegance!
+  
+  # Sinatra-style instance variable access - just like Ruby!
+  @c.json { name, email, role, phone }
 ```
 
 ### 🔄 **Pure Synchronous Elegance: Middleware Pre-Parsing**
@@ -199,7 +221,7 @@ bio = read 'bio', 'text'           # Pure synchronous elegance
 full_name = read 'name', 'name'    # Clean and simple
 ```
 
-#### **Contact Information**  
+#### **Contact Information**
 ```rip
 email = read 'email', 'email'     # All calls synchronous (middleware pre-parses)
 phone = read 'phone', 'phone'      # No async complexity
@@ -322,7 +344,7 @@ priority = read 'priority', { start: 1, end: 10 }, 5
 app.post '/api/users', ->
   # Get all user data in one call (synchronous!)
   userData = read null  # Returns: { name: "John", email: "john@...", ... }
-  
+
   # Then validate individual fields as needed (all synchronous)
   name = read 'name', 'name!'
   email = read 'email', 'email!'

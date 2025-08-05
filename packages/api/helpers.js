@@ -409,6 +409,42 @@ export var env = function() {
 };
 
 
+// Sinatra-style instance variables - ULTIMATE ELEGANCE!
+Object.defineProperty(global, '@c', {
+  get: function() {
+    return _currentContext;
+  },
+  configurable: true
+});
+
+Object.defineProperty(global, '@ctx', {
+  get: function() {
+    return _currentContext;
+  },
+  configurable: true
+});
+
+Object.defineProperty(global, '@env', {
+  get: function() {
+    return _currentContext;
+  },
+  configurable: true
+});
+
+Object.defineProperty(global, '@req', {
+  get: function() {
+    return _currentContext != null ? _currentContext.req : void 0;
+  },
+  configurable: true
+});
+
+Object.defineProperty(global, '@res', {
+  get: function() {
+    return _currentContext; // In Hono, context handles response
+  },
+  configurable: true
+});
+
 // Export helper for Hono context binding - Sinatra-style!
 export var withHelpers = function(app) {
   return app.use(async function(c, next) {
@@ -416,10 +452,8 @@ export var withHelpers = function(app) {
     // Set global context for this request (like Sinatra's request scope)
     _currentContext = c;
     try {
-      
       // Pre-parse request data (body + query params)
       data = {};
-      
       // Parse request body for POST/PUT/PATCH requests
       if ((ref = c.req.method) === 'POST' || ref === 'PUT' || ref === 'PATCH') {
         try {
@@ -432,7 +466,6 @@ export var withHelpers = function(app) {
           console.warn(`ERROR: unable to parse request body, ${error}`);
         }
       }
-      
       // Add query params (like Rails params) for all requests
       query = c.req.query() || {};
       for (k in query) {
@@ -462,7 +495,6 @@ export var withHelpers = function(app) {
       console.warn(`ERROR: unable to parse request data, ${error}`);
       c.set('_read', {});
     }
-    
     // Bind read method to context for easy access (both styles supported)
     c.read = function(key, tag, miss) {
       return read(key, tag, miss); // Context-free version
@@ -482,15 +514,21 @@ export var withHelpers = function(app) {
 
 // OPTION 1: Traditional endpoint with context parameter
 // app.post '/signup', (c) ->
-//   mail = read! 'email', 'email!'     # context-free read calls
-//   phon = read 'phone', 'phone'       # no 'c' needed in read!
+//   mail = read 'email', 'email!'     # All calls synchronous
+//   phon = read 'phone', 'phone'      # Pure elegance
 //   c.json { success: true, user: { mail, phon } }
 
-// OPTION 2: Pure Sinatra-style - NO context parameter needed!
+// OPTION 2: Function-based global context
 // app.post '/signup', ->
-//   mail = read! 'email', 'email!'     # context-free read calls
-//   phon = read 'phone', 'phone'       # context-free everything!
+//   mail = read 'email', 'email!'     # All calls synchronous
+//   phon = read 'phone', 'phone'      # Context-free everything!
 //   c().json { success: true, user: { mail, phon } }  # c() gets global context
+
+// OPTION 3: Sinatra-style instance variables - ULTIMATE ELEGANCE!
+// app.post '/signup', ->
+//   mail = read 'email', 'email!'     # All calls synchronous
+//   phon = read 'phone', 'phone'      # Pure elegance
+//   @c.json { success: true, user: { mail, phon } }  # @c is like Sinatra's @env!
 
 //   # SHOWCASE: Geographic validation with =~ MASTERY
 //   stat = c.read 'state', 'state!'     # CA, ny -> CA, NY
