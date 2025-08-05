@@ -329,6 +329,23 @@ export var read = function(keyOrContext, key = null, tag = null, miss = null) {
     case 'hash':
       val = typeof readData[key] === 'object' && (readData[key] != null) ? readData[key] : null;
       break;
+    case 'json':
+      // Smart JSON parsing - handles strings and validates objects
+      if (typeof val === 'string') {
+        try {
+          val = JSON.parse(val);
+        } catch (error1) {
+          error = error1;
+          console.warn(`JSON parse error for key '${key}':`, error.message);
+          val = null;
+        }
+      // If already an object, keep it (allowing pre-parsed JSON)
+      } else if ((val != null) && typeof val === 'object') {
+        val = val;
+      } else {
+        val = null;
+      }
+      break;
     case 'ids':
       // Enhanced IDs validation - parses comma/space separated list of valid IDs
       // SHOWCASING =~ MASTERY IN LIST PROCESSING!
