@@ -353,7 +353,7 @@ priority = read 'priority', [1, 10], 5  # Range 1-10, default 5
 score = read 'score', [0, 100]     # Percentage validation
 rating = read 'rating', [1, 5]     # Star rating system
 
-# Strings: length range  
+# Strings: length range
 username = read 'username', [3, 20]  # 3-20 characters
 title = read 'title', [1, 100]      # 1-100 characters
 bio = read 'bio', [0, 500]          # Up to 500 characters

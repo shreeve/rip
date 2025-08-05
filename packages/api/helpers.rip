@@ -278,7 +278,7 @@ export read = (keyOrContext, key = null, tag = null, miss = null) ->
         # Range check - elegant [min, max] format for numbers OR string length
         start = Math.min(originalTag[0], originalTag[1])
         end = Math.max(originalTag[0], originalTag[1])
-        
+
         # For numeric tags, validate the number value
         if tag in ['id', 'whole', 'decimal', 'money'] or (typeof val == 'number')
           numVal = parseInt(val)
