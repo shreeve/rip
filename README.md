@@ -71,9 +71,8 @@ result = processData(data)!
 state =~ /^([A-Z]{2})$/     # Match and auto-assign to _
 code = _?[1]?.toUpperCase() # Access match groups elegantly
 
-# REVOLUTIONARY compound regex assignment with ~=
-state ~= /^([A-Z]{2})$/     # Match and assign in one operation
-code = state?[1]?.toUpperCase() # Direct access to match array
+# Elegant conditional transformations with semicolon pattern
+code = (state =~ /^([A-Z]{2})$/; if _ then _[1].toUpperCase() else null)
 
 # Pattern matching
 status = switch response.code

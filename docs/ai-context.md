@@ -9,7 +9,7 @@ This document provides comprehensive context for AI assistants working on the Ri
 ### Key Value Propositions
 - **Clean Async Syntax**: `fetch!` instead of `await fetch()`
 - **LEGENDARY Regex Matching**: `val =~ /regex/` with automatic `_` assignment
-- **REVOLUTIONARY Compound Regex Assignment**: `val ~= /regex/` combines match and assign
+- **Elegant Conditional Patterns**: `(val =~ /regex/; if _ then transform else fallback)`
 - **Modern Web Stack**: Bun + Hono + Drizzle ORM integration
 - **Type-Safe Database**: Custom DSL for schema definition
 - **Hot Reload**: Development server with file watching
@@ -150,26 +150,25 @@ val =~ /^([A-Z]{2})$/
 code = _?[1]?.toUpperCase()
 ```
 
-### The `~=` Compound Regex Assignment Enhancement
-**Problem**: Even with `=~`, regex validation still required two lines and manual result handling.
+### The Semicolon Pattern for Conditional Regex
+**Problem**: Even with `=~`, regex validation often required conditional logic for transformations.
 
-**Solution**: Added `~=` compound assignment operator that combines regex matching with variable assignment:
-- **Lexer**: Added `'~='` to `COMPOUND_ASSIGN` array and `OPERATOR` regex in `/coffeescript/src/lexer.coffee`
-- **Nodes**: Added `compileRegexAssign` method in `/coffeescript/src/nodes.coffee` that generates compound assignment
+**Solution**: Discovered that CoffeeScript's existing semicolon operator combined with `=~` provides an elegant pattern:
+- **No New Syntax**: Works with existing CoffeeScript/Rip features
+- **Clear Separation**: Semicolon clearly separates match from transformation
+- **Flexible**: Can handle any conditional logic using `if` expressions
 
-**Result**: Revolutionary one-line regex assignment with automatic null fallback:
+**Result**: Elegant one-line conditional transformations:
 ```coffeescript
-# Before (two lines)
-val =~ /^([A-Z]{2})$/
-result = _?[1]?.toUpperCase()
+# Pattern: match, then conditionally transform
+result = (val =~ /^([A-Z]{2})$/; if _ then _[1].toUpperCase() else null)
 
-# After (REVOLUTIONARY)
-val ~= /^([A-Z]{2})$/
-result = val?[1]?.toUpperCase()
+# With custom fallback
+result = (val =~ /^([A-Z]{2})$/; if _ then _[1].toUpperCase() else "UNKNOWN")
 ```
 
 ### Transpilation Pipeline
-1. **Write**: `.rip` files with `!` suffix, `=~` regex matching, and `~=` compound assignment
+1. **Write**: `.rip` files with `!` suffix and `=~` regex matching
 2. **Transpile**: `rip-bun.ts` plugin calls enhanced CoffeeScript compiler
 3. **Execute**: Bun runs the compiled JavaScript
 4. **Serve**: rip-server handles HTTP requests
@@ -244,7 +243,7 @@ bun -e "const app = await import('./index.rip'); console.log(typeof app.default)
 ### ✅ Working Features
 - `!` suffix automatic async detection
 - `=~` regex matching with automatic `_` assignment
-- `~=` compound regex assignment with null fallback
+- Semicolon pattern for conditional regex transformations
 - Full web server with Hono framework
 - Database schema DSL with SQLite
 - Hot reload development server

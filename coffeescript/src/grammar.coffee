@@ -117,20 +117,11 @@ grammar =
     o 'ExpressionLine'
     o 'Statement'
     o 'FuncDirective'
-    o 'RegexAssignThen'
   ]
 
   FuncDirective: [
     o 'YieldReturn'
     o 'AwaitReturn'
-  ]
-
-  # Special regex assignment with then/else that must be parsed at line level
-  RegexAssignThen: [
-    o 'SimpleAssignable REGEX_THEN_ASSIGN Expression THEN Expression', ->
-      new Assign $1, new If($3, $5, type: 'if').addElse(new Literal('null')), '~='
-    o 'SimpleAssignable REGEX_THEN_ASSIGN Expression THEN Expression ELSE Expression', ->
-      new Assign $1, new If($3, $5, type: 'if').addElse($7), '~='
   ]
 
   # Pure statements which cannot be expressions.

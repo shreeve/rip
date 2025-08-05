@@ -50,7 +50,6 @@ exports.Rewriter = class Rewriter
     @removeLeadingNewlines()
     @closeOpenCalls()
     @closeOpenIndexes()
-    @tagRegexThenAssignments()
     @normalizeLines()
     @tagPostfixConditionals()
     @addImplicitBracesAndParens()
@@ -716,26 +715,9 @@ exports.Rewriter = class Rewriter
         tokens.splice i + 1, 0, indent, outdent
         return 1
 
-      # Check if this is part of a REGEX_THEN_ASSIGN pattern
-      isRegexThenPattern = false
-      if tag is 'THEN' and i > 2 and @tag(i - 2) is 'REGEX_THEN_ASSIGN'
-        isRegexThenPattern = true
-      else if tag is 'ELSE'
-        # Look back for REGEX_THEN_ASSIGN followed by THEN
-        for j in [(Math.max 0, i-15)...i]
-          if @tag(j) is 'REGEX_THEN_ASSIGN'
-            # Found REGEX_THEN_ASSIGN, now check if there's a THEN between it and this ELSE
-            for k in [(j+1)...i]
-              if @tag(k) is 'THEN'
-                isRegexThenPattern = true
-
-                break
-            break if isRegexThenPattern
-
       if tag in SINGLE_LINERS and @tag(i + 1) isnt 'INDENT' and
          not (tag is 'ELSE' and @tag(i + 1) is 'IF') and
-         not conditionTag and
-         not isRegexThenPattern
+         not conditionTag
         starter = tag
         [indent, outdent] = @indentation tokens[i]
         indent.fromThen   = true if starter is 'THEN'
@@ -770,46 +752,6 @@ exports.Rewriter = class Rewriter
       return 1 unless token[0] is 'IF'
       original = token
       @detectEnd i + 1, condition, action
-      return 1
-
-  # Tag compound assignments followed by THEN for special handling
-  tagRegexThenAssignments: ->
-    @scanTokens (token, i) ->
-      return 1 unless token[0] is 'COMPOUND_ASSIGN' and token[1] is '~='
-
-      # Look for pattern: SimpleAssignable ~= Expression THEN Expression [ELSE Expression]
-      # We need to find where the expression after ~= ends and check if THEN follows
-      j = i + 1
-      parenLevel = 0
-      bracketLevel = 0
-
-      # Skip the expression after ~=
-      while j < @tokens.length
-        [tag] = @tokens[j]
-
-        if tag in ['CALL_START', '(']
-          parenLevel++
-        else if tag in ['CALL_END', ')']
-          parenLevel--
-        else if tag is '['
-          bracketLevel++
-        else if tag is ']'
-          bracketLevel--
-        else if parenLevel is 0 and bracketLevel is 0
-          # Check if we've found the end of the expression
-          if tag in ['TERMINATOR', 'OUTDENT', 'THEN', 'ELSE', ',', ';']
-
-            break
-
-        j++
-
-      # Check if THEN follows the expression
-      if j < @tokens.length and @tokens[j][0] is 'THEN'
-
-        # Tag the ~= token so the grammar knows this is a special case
-        token[0] = 'REGEX_THEN_ASSIGN'
-        token.original = 'COMPOUND_ASSIGN'
-
       return 1
 
   # For tokens with extra data, we want to make that data visible to the grammar

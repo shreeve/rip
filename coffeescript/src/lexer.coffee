@@ -91,25 +91,6 @@ exports.Lexer = class Lexer
     return @tokens if opts.rewrite is off
     (new Rewriter).rewrite @tokens
 
-
-
-  # Find the end of an expression (simplified)
-  findExpressionEnd: (startIndex) ->
-    level = 0
-    for i in [startIndex...@tokens.length]
-      token = @tokens[i]
-      switch token[0]
-        when '(', '[', '{'
-          level++
-        when ')', ']', '}'
-          level--
-        when 'TERMINATOR', 'OUTDENT'
-          return i if level is 0
-        when 'ELSE', 'THEN'
-          return i if level is 0
-      # Continue if we haven't found the end
-    return @tokens.length
-
   # Preprocess the code to remove leading and trailing whitespace, carriage
   # returns, etc. If we're lexing literate CoffeeScript, strip external Markdown
   # by removing all lines that aren't indented by at least four spaces or a tab.
@@ -1339,7 +1320,6 @@ NUMBER     = ///
 OPERATOR   = /// ^ (
   ?: [-=]>             # function
    | =~                # regex match operator
-   | ~=                # compound regex assignment operator
    | [-+*/%<>&|^!?=]=  # compound assign / compare
    | >>>=?             # zero-fill right shift
    | ([-+:])\1         # doubles
@@ -1444,7 +1424,7 @@ TRAILING_SPACES     = /\s+$/
 # Compound assignment tokens.
 COMPOUND_ASSIGN = [
   '-=', '+=', '/=', '*=', '%=', '||=', '&&=', '?=', '<<=', '>>=', '>>>='
-  '&=', '^=', '|=', '**=', '//=', '%%=', '~='
+  '&=', '^=', '|=', '**=', '//=', '%%='
 ]
 
 # Unary tokens.
