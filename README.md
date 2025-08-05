@@ -32,14 +32,14 @@ Everything in the Rip ecosystem follows four core principles, in order of import
 
 ## 🎯 The Larry Wall Principle
 
-> *"Common things should be easy, rare things should be possible"*  
+> *"Common things should be easy, rare things should be possible"*
 > **— Larry Wall, creator of Perl** *(Personal conversation, Open Source Conference, San Diego, 2002)*
 
 This foundational principle guides every API design decision in Rip:
 
 **✅ Common Things Easy** *(90% of use cases)*:
 - **Range validation**: `[min, max]` - shortest, clearest syntax
-- **Regex matching**: `val =~ /pattern/` - elegant and intuitive  
+- **Regex matching**: `val =~ /pattern/` - elegant and intuitive
 - **Function calls**: `read 'email', 'email'` - clean and simple
 - **Object returns**: `{ success: true, data }` - natural and concise
 

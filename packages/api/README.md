@@ -6,6 +6,8 @@
 
 `@rip/api` is the **API development toolkit** for the Rip language ecosystem. It provides elegant, battle-tested utilities that transform verbose, error-prone API development into clean, readable, and maintainable code.
 
+**🔥 Ruby Analogy**: This layer is analogous to **Ruby's Sinatra or Rails application layer** - it's where your business logic lives, where you handle requests, validate data, and craft responses. Just as Sinatra gives you elegant routing and request handling, `@rip/api` gives you elegant validation and data processing.
+
 **Core Philosophy**: API development should be **intuitive, safe, and beautiful**. Every function in this toolkit eliminates boilerplate, prevents common errors, and makes your intent crystal clear.
 
 ## 🏗️ Package Architecture

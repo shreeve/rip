@@ -4,6 +4,8 @@
 
 **Bun-Powered Multi-Process Server with Hot Reload**
 
+**🔥 Ruby Analogy**: This layer is analogous to **nginx + unicorn in the Ruby ecosystem** - it's the production server infrastructure that handles HTTP requests, manages worker processes, provides load balancing, and ensures fault tolerance. Just as nginx + unicorn gives you production-grade Ruby deployment, `@rip/server` gives you production-grade Rip deployment.
+
 A production-ready replacement for nginx + unicorn + ruby that combines:
 - 🔥 **Hot Reload Development** - Instant .rip file changes
 - ⚡ **Multi-Process Production** - Unicorn-style architecture
