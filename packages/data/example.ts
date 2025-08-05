@@ -2,7 +2,7 @@
 
 /**
  * @rip/data Example - Revolutionary Data Platform Demo
- * 
+ *
  * This example demonstrates:
  * - Starting a RipData server
  * - Transactional operations (INSERT, UPDATE)
@@ -58,7 +58,7 @@ async function main() {
 
   // 4. Insert sample data (transactional operations)
   console.log('📝 Inserting sample data...')
-  
+
   const users = [
     ['Alice Johnson', 'alice@example.com', 'pro'],
     ['Bob Smith', 'bob@example.com', 'free'],
@@ -79,11 +79,11 @@ async function main() {
   for (let i = 0; i < 50; i++) {
     const userId = Math.floor(Math.random() * 5) + 1
     const eventType = eventTypes[Math.floor(Math.random() * eventTypes.length)]
-    const properties = JSON.stringify({ 
+    const properties = JSON.stringify({
       page: `/page-${Math.floor(Math.random() * 10)}`,
       duration: Math.floor(Math.random() * 300)
     })
-    
+
     await db.execute(
       'INSERT INTO events (user_id, event_type, properties) VALUES (?, ?, ?)',
       [userId, eventType, properties]
@@ -97,7 +97,7 @@ async function main() {
 
   // User analytics
   const userStats = await db.query(`
-    SELECT 
+    SELECT
       plan,
       COUNT(*) as user_count,
       COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as percentage
@@ -114,7 +114,7 @@ async function main() {
 
   // Event analytics with joins
   const eventStats = await db.query(`
-    SELECT 
+    SELECT
       u.plan,
       e.event_type,
       COUNT(*) as event_count,
@@ -138,7 +138,7 @@ async function main() {
 
   // Time-based analytics
   const timeStats = await db.query(`
-    SELECT 
+    SELECT
       strftime('%H', timestamp) as hour,
       COUNT(*) as events_per_hour
     FROM events
@@ -155,9 +155,9 @@ async function main() {
 
   // 6. Real-time streaming demo
   console.log('🌊 Setting up real-time streaming...')
-  
+
   await db.connectWebSocket()
-  
+
   // Subscribe to live user count
   const userCountSub = await db.subscribe(
     'SELECT COUNT(*) as total_users FROM users',
@@ -169,13 +169,13 @@ async function main() {
 
   // Subscribe to recent events
   const recentEventsSub = await db.subscribe(
-    `SELECT 
-       u.name, 
-       e.event_type, 
+    `SELECT
+       u.name,
+       e.event_type,
        e.timestamp
-     FROM events e 
-     JOIN users u ON e.user_id = u.id 
-     ORDER BY e.timestamp DESC 
+     FROM events e
+     JOIN users u ON e.user_id = u.id
+     ORDER BY e.timestamp DESC
      LIMIT 5`,
     (data) => {
       console.log('\n🔄 Recent Events:')
@@ -190,33 +190,33 @@ async function main() {
 
   // 7. Simulate some live activity
   console.log('🎭 Simulating live activity...')
-  
+
   let activityCount = 0
   const activityInterval = setInterval(async () => {
     const userId = Math.floor(Math.random() * 5) + 1
     const eventType = eventTypes[Math.floor(Math.random() * eventTypes.length)]
-    
+
     await db.execute(
       'INSERT INTO events (user_id, event_type) VALUES (?, ?)',
       [userId, eventType]
     )
-    
+
     activityCount++
-    
+
     // Stop after 10 events
     if (activityCount >= 10) {
       clearInterval(activityInterval)
-      
+
       // Clean up and exit
       setTimeout(async () => {
         console.log('\n🛑 Cleaning up...')
-        
+
         db.unsubscribe(userCountSub)
         db.unsubscribe(recentEventsSub)
         db.disconnect()
-        
+
         await server.stop()
-        
+
         console.log('✅ Demo completed successfully!')
         console.log('\n🎯 What you just saw:')
         console.log('   • Transactional operations (INSERT, UPDATE)')
@@ -224,7 +224,7 @@ async function main() {
         console.log('   • Real-time streaming subscriptions')
         console.log('   • All in ONE database system!')
         console.log('\n🔥 This is the future of web application data architecture!')
-        
+
         process.exit(0)
       }, 5000)
     }

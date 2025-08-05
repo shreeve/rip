@@ -61,7 +61,7 @@ export class RipDataServer {
 
   private setupDatabase() {
     const conn = this.db.connect()
-    
+
     try {
       // Enable S3 extension if configured
       if (this.config.s3) {
@@ -70,7 +70,7 @@ export class RipDataServer {
           LOAD httpfs;
           SET s3_region='${this.config.s3.region || 'us-east-1'}';
         `)
-        
+
         if (this.config.s3.endpoint) {
           conn.exec(`SET s3_endpoint='${this.config.s3.endpoint}';`)
         }
@@ -103,7 +103,7 @@ export class RipDataServer {
       await this.startHTTPServer()
     }
 
-    // Start WebSocket server  
+    // Start WebSocket server
     if (this.config.protocols?.websocket) {
       await this.startWebSocketServer()
     }
@@ -145,22 +145,22 @@ export class RipDataServer {
       switch (path) {
         case '/api/query':
           return await this.handleQuery(req, corsHeaders)
-        
+
         case '/api/execute':
           return await this.handleExecute(req, corsHeaders)
-        
+
         case '/api/batch':
           return await this.handleBatch(req, corsHeaders)
-        
+
         case '/api/stats':
           return await this.handleStats(req, corsHeaders)
 
         case '/health':
-          return new Response(JSON.stringify({ 
-            status: 'healthy', 
+          return new Response(JSON.stringify({
+            status: 'healthy',
             timestamp: new Date().toISOString(),
             connections: this.subscriptions.size
-          }), { 
+          }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
           })
 
@@ -169,17 +169,17 @@ export class RipDataServer {
           return await this.handleS3Request(req, corsHeaders)
 
         default:
-          return new Response('Not Found', { 
-            status: 404, 
-            headers: corsHeaders 
+          return new Response('Not Found', {
+            status: 404,
+            headers: corsHeaders
           })
       }
     } catch (error) {
       console.error('❌ HTTP request error:', error)
-      return new Response(JSON.stringify({ 
-        error: error instanceof Error ? error.message : 'Unknown error' 
-      }), { 
-        status: 500, 
+      return new Response(JSON.stringify({
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }), {
+        status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       })
     }
@@ -191,7 +191,7 @@ export class RipDataServer {
 
     // Create new connection for this read operation
     const conn = this.db.connect()
-    
+
     try {
       const result = await this.executeQuery(conn, sql, params)
       const executionTime = Date.now() - startTime
@@ -199,10 +199,10 @@ export class RipDataServer {
       // Log stats
       this.logQueryStats('SELECT', executionTime, result.length)
 
-      return new Response(JSON.stringify({ 
-        success: true, 
+      return new Response(JSON.stringify({
+        success: true,
         data: result,
-        executionTime 
+        executionTime
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       })
@@ -213,22 +213,22 @@ export class RipDataServer {
 
   private async handleExecute(req: Request, corsHeaders: Record<string, string>): Promise<Response> {
     const { sql, params } = await req.json()
-    
+
     return new Promise((resolve) => {
       if (this.writeQueue.length >= (this.config.writeQueueSize || 1000)) {
-        resolve(new Response(JSON.stringify({ 
-          success: false, 
-          error: 'Write queue full' 
-        }), { 
+        resolve(new Response(JSON.stringify({
+          success: false,
+          error: 'Write queue full'
+        }), {
           status: 503,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         }))
         return
       }
 
-      this.writeQueue.push({ 
-        sql, 
-        params, 
+      this.writeQueue.push({
+        sql,
+        params,
         resolve: (response) => {
           // Add CORS headers to the queued response
           const newResponse = new Response(response.body, {
@@ -238,7 +238,7 @@ export class RipDataServer {
           resolve(newResponse)
         }
       })
-      
+
       this.processWriteQueue()
     })
   }
@@ -249,20 +249,20 @@ export class RipDataServer {
 
     // Execute batch as a transaction
     const conn = this.db.connect()
-    
+
     try {
       await this.executeQuery(conn, 'BEGIN TRANSACTION', [])
-      
+
       for (const { sql, params } of queries) {
         const result = await this.executeQuery(conn, sql, params)
         results.push({ success: true, data: result })
       }
-      
+
       await this.executeQuery(conn, 'COMMIT', [])
-      
-      return new Response(JSON.stringify({ 
-        success: true, 
-        results 
+
+      return new Response(JSON.stringify({
+        success: true,
+        results
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       })
@@ -276,21 +276,21 @@ export class RipDataServer {
 
   private async handleStats(req: Request, corsHeaders: Record<string, string>): Promise<Response> {
     const conn = this.db.connect()
-    
+
     try {
       const stats = await this.executeQuery(conn, `
-        SELECT 
+        SELECT
           query_type,
           COUNT(*) as total_queries,
           AVG(execution_time_ms) as avg_execution_time,
           SUM(rows_affected) as total_rows_affected
-        FROM _rip_data_stats 
+        FROM _rip_data_stats
         WHERE timestamp > NOW() - INTERVAL '1 hour'
         GROUP BY query_type
       `, [])
 
-      return new Response(JSON.stringify({ 
-        success: true, 
+      return new Response(JSON.stringify({
+        success: true,
         stats,
         activeConnections: this.subscriptions.size,
         writeQueueSize: this.writeQueue.length
@@ -309,26 +309,26 @@ export class RipDataServer {
     const query = url.searchParams.get('query')
 
     if (!bucket || !key) {
-      return new Response(JSON.stringify({ 
-        error: 'Missing bucket or key parameter' 
-      }), { 
+      return new Response(JSON.stringify({
+        error: 'Missing bucket or key parameter'
+      }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       })
     }
 
     const conn = this.db.connect()
-    
+
     try {
       const s3Path = `s3://${bucket}/${key}`
       const sql = query || `SELECT * FROM '${s3Path}' LIMIT 1000`
-      
+
       const result = await this.executeQuery(conn, sql, [])
-      
-      return new Response(JSON.stringify({ 
-        success: true, 
+
+      return new Response(JSON.stringify({
+        success: true,
         data: result,
-        source: s3Path 
+        source: s3Path
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       })
@@ -342,35 +342,35 @@ export class RipDataServer {
 
     this.isProcessingWrites = true
     const conn = this.db.connect()
-    
+
     try {
       // Process writes in batches for better performance
       const batchSize = Math.min(50, this.writeQueue.length)
       const batch = this.writeQueue.splice(0, batchSize)
-      
+
       await this.executeQuery(conn, 'BEGIN TRANSACTION', [])
-      
+
       for (const { sql, params, resolve } of batch) {
         try {
           const startTime = Date.now()
           const result = await this.executeQuery(conn, sql, params)
           const executionTime = Date.now() - startTime
-          
+
           this.logQueryStats('WRITE', executionTime, Array.isArray(result) ? result.length : 1)
-          
-          resolve(new Response(JSON.stringify({ 
-            success: true, 
+
+          resolve(new Response(JSON.stringify({
+            success: true,
             result,
-            executionTime 
+            executionTime
           })))
         } catch (error) {
-          resolve(new Response(JSON.stringify({ 
-            success: false, 
-            error: error instanceof Error ? error.message : 'Unknown error' 
+          resolve(new Response(JSON.stringify({
+            success: false,
+            error: error instanceof Error ? error.message : 'Unknown error'
           }), { status: 500 }))
         }
       }
-      
+
       await this.executeQuery(conn, 'COMMIT', [])
     } catch (error) {
       await this.executeQuery(conn, 'ROLLBACK', [])
@@ -378,7 +378,7 @@ export class RipDataServer {
     } finally {
       conn.close()
       this.isProcessingWrites = false
-      
+
       // Process next batch if there are more writes queued
       if (this.writeQueue.length > 0) {
         setImmediate(() => this.processWriteQueue())
@@ -390,21 +390,21 @@ export class RipDataServer {
     const port = this.config.protocols!.websocket!.port
 
     this.wsServer = new WebSocketServer({ port })
-    
+
     this.wsServer.on('connection', (ws) => {
       console.log('🔄 New WebSocket connection')
-      
+
       ws.on('message', (data) => {
         try {
           const message = JSON.parse(data.toString())
           this.handleWebSocketMessage(ws, message)
         } catch (error) {
-          ws.send(JSON.stringify({ 
-            error: 'Invalid JSON message' 
+          ws.send(JSON.stringify({
+            error: 'Invalid JSON message'
           }))
         }
       })
-      
+
       ws.on('close', () => {
         // Clean up subscriptions for this connection
         for (const [id, sub] of this.subscriptions) {
@@ -424,18 +424,18 @@ export class RipDataServer {
       case 'subscribe':
         this.handleSubscribe(ws, message)
         break
-      
+
       case 'unsubscribe':
         this.handleUnsubscribe(message.id)
         break
-      
+
       case 'query':
         this.handleWebSocketQuery(ws, message)
         break
-      
+
       default:
-        ws.send(JSON.stringify({ 
-          error: 'Unknown message type' 
+        ws.send(JSON.stringify({
+          error: 'Unknown message type'
         }))
     }
   }
@@ -443,29 +443,29 @@ export class RipDataServer {
   private handleSubscribe(ws: WebSocket, message: any): void {
     const { query, interval = 5000 } = message
     const id = `sub_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-    
+
     const subscription: StreamSubscription = {
       id,
       query,
       interval,
       ws
     }
-    
+
     // Execute query immediately
     this.executeSubscriptionQuery(subscription)
-    
+
     // Set up interval for live updates
     subscription.timer = setInterval(() => {
       this.executeSubscriptionQuery(subscription)
     }, interval)
-    
+
     this.subscriptions.set(id, subscription)
-    
-    ws.send(JSON.stringify({ 
-      type: 'subscribed', 
+
+    ws.send(JSON.stringify({
+      type: 'subscribed',
       id,
       query,
-      interval 
+      interval
     }))
   }
 
@@ -480,17 +480,17 @@ export class RipDataServer {
   private async handleWebSocketQuery(ws: WebSocket, message: any): Promise<void> {
     const { sql, params } = message
     const conn = this.db.connect()
-    
+
     try {
       const result = await this.executeQuery(conn, sql, params)
-      ws.send(JSON.stringify({ 
-        type: 'query_result', 
-        data: result 
+      ws.send(JSON.stringify({
+        type: 'query_result',
+        data: result
       }))
     } catch (error) {
-      ws.send(JSON.stringify({ 
-        type: 'error', 
-        error: error instanceof Error ? error.message : 'Unknown error' 
+      ws.send(JSON.stringify({
+        type: 'error',
+        error: error instanceof Error ? error.message : 'Unknown error'
       }))
     } finally {
       conn.close()
@@ -499,10 +499,10 @@ export class RipDataServer {
 
   private async executeSubscriptionQuery(subscription: StreamSubscription): Promise<void> {
     const conn = this.db.connect()
-    
+
     try {
       const result = await this.executeQuery(conn, subscription.query, [])
-      
+
       if (subscription.ws.readyState === WebSocket.OPEN) {
         subscription.ws.send(JSON.stringify({
           type: 'data',
@@ -553,7 +553,7 @@ export class RipDataServer {
 
   async stop(): Promise<void> {
     console.log('🛑 Stopping RipData Server...')
-    
+
     // Close all subscriptions
     for (const [id, sub] of this.subscriptions) {
       if (sub.timer) clearInterval(sub.timer)
@@ -562,19 +562,19 @@ export class RipDataServer {
       }
     }
     this.subscriptions.clear()
-    
+
     // Close servers
     if (this.wsServer) {
       this.wsServer.close()
     }
-    
+
     if (this.httpServer) {
       this.httpServer.stop()
     }
-    
+
     // Close database
     this.db.close()
-    
+
     console.log('✅ RipData Server stopped')
   }
 }

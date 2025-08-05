@@ -14,7 +14,7 @@ describe('@rip/data', () => {
         websocket: { port: 8083 }
       }
     })
-    
+
     await server.start()
     client = new RipDataClient('http://localhost:8082')
   })
@@ -32,7 +32,7 @@ describe('@rip/data', () => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `)
-    
+
     expect(createResult.success).toBe(true)
 
     // Insert test data
@@ -40,13 +40,13 @@ describe('@rip/data', () => {
       'INSERT INTO test_users (name) VALUES (?)',
       ['Test User']
     )
-    
+
     expect(insertResult.success).toBe(true)
   })
 
   it('should query data', async () => {
     const result = await client.query('SELECT * FROM test_users')
-    
+
     expect(result.success).toBe(true)
     expect(result.data).toBeDefined()
     expect(result.data!.length).toBe(1)
@@ -60,7 +60,7 @@ describe('@rip/data', () => {
       { sql: 'INSERT INTO test_users (name) VALUES (?)', params: ['Batch User 2'] },
       { sql: 'COMMIT' }
     ])
-    
+
     expect(result.success).toBe(true)
 
     // Verify batch insert worked
@@ -70,7 +70,7 @@ describe('@rip/data', () => {
 
   it('should provide server stats', async () => {
     const stats = await client.stats()
-    
+
     expect(stats.success).toBe(true)
     expect(stats.activeConnections).toBeDefined()
     expect(stats.writeQueueSize).toBeDefined()
@@ -78,7 +78,7 @@ describe('@rip/data', () => {
 
   it('should check server health', async () => {
     const health = await client.health()
-    
+
     expect(health.status).toBe('healthy')
     expect(health.timestamp).toBeDefined()
     expect(health.connections).toBeDefined()
@@ -86,15 +86,15 @@ describe('@rip/data', () => {
 
   it('should handle WebSocket connections', async () => {
     const ws = await client.connectWebSocket()
-    
+
     expect(ws.readyState).toBe(WebSocket.OPEN)
-    
+
     client.disconnect()
   })
 
   it('should handle errors gracefully', async () => {
     const result = await client.query('SELECT * FROM nonexistent_table')
-    
+
     expect(result.success).toBe(false)
     expect(result.error).toBeDefined()
   })
@@ -103,15 +103,15 @@ describe('@rip/data', () => {
     // Insert more test data
     await client.execute('INSERT INTO test_users (name) VALUES (?)', ['Analytics User 1'])
     await client.execute('INSERT INTO test_users (name) VALUES (?)', ['Analytics User 2'])
-    
+
     // Run analytical query
     const result = await client.query(`
-      SELECT 
+      SELECT
         COUNT(*) as total_users,
         COUNT(CASE WHEN name LIKE 'Analytics%' THEN 1 END) as analytics_users
       FROM test_users
     `)
-    
+
     expect(result.success).toBe(true)
     expect(result.data![0].total_users).toBe(5)
     expect(result.data![0].analytics_users).toBe(2)

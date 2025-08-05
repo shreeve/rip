@@ -65,13 +65,13 @@ const db = new RipDataClient('http://localhost:8080')
 
 // Transactional operations
 await db.execute(`
-  INSERT INTO users (name, email) 
+  INSERT INTO users (name, email)
   VALUES (?, ?)
 `, ['Alice', 'alice@example.com'])
 
 // Analytical queries
 const stats = await db.query(`
-  SELECT 
+  SELECT
     date_trunc('hour', created_at) as hour,
     count(*) as signups,
     avg(session_duration) as avg_session
@@ -135,7 +135,7 @@ Query data directly from S3:
 const insights = await db.queryS3(
   'analytics-bucket',
   'events/*.parquet',
-  `SELECT event_type, COUNT(*) 
+  `SELECT event_type, COUNT(*)
    FROM 's3://analytics-bucket/events/*.parquet'
    WHERE date >= '2024-01-01'
    GROUP BY event_type`
@@ -143,7 +143,7 @@ const insights = await db.queryS3(
 
 // Hybrid queries: local + S3
 const combined = await db.query(`
-  SELECT 
+  SELECT
     local.user_id,
     local.name,
     s3_events.event_count
@@ -209,7 +209,7 @@ Standard REST endpoints:
 curl -X POST http://localhost:8080/api/query \
   -d '{"sql": "SELECT * FROM users LIMIT 10"}'
 
-# Execute writes  
+# Execute writes
 curl -X POST http://localhost:8080/api/execute \
   -d '{"sql": "INSERT INTO users (name) VALUES (?)", "params": ["Bob"]}'
 
@@ -258,19 +258,19 @@ const db = new RipDataClient('http://localhost:8080')
 // Transactional endpoint
 app.post('/api/users', async (c) => {
   const { name, email } = await c.req.json()
-  
+
   const result = await db.execute(
     'INSERT INTO users (name, email) VALUES (?, ?) RETURNING id',
     [name, email]
   )
-  
+
   return c.json({ id: result.data[0].id })
 })
 
 // Analytics endpoint
 app.get('/api/analytics/users', async (c) => {
   const stats = await db.query(`
-    SELECT 
+    SELECT
       date_trunc('day', created_at) as date,
       count(*) as signups,
       count(DISTINCT email) as unique_emails
@@ -279,7 +279,7 @@ app.get('/api/analytics/users', async (c) => {
     GROUP BY date
     ORDER BY date
   `)
-  
+
   return c.json(stats.data)
 })
 ```
@@ -320,7 +320,7 @@ metrics.forEach((query, index) => {
 ### Migration Path:
 
 1. **Start Simple** - Replace your current database
-2. **Add Analytics** - Query your transactional data directly  
+2. **Add Analytics** - Query your transactional data directly
 3. **Scale Up** - Add S3 integration for historical data
 4. **Go Real-Time** - Add WebSocket subscriptions
 5. **Optimize** - Fine-tune performance and caching
@@ -333,21 +333,21 @@ metrics.forEach((query, index) => {
 const server = new RipDataServer({
   // Database file path
   dbPath: './my-app.duckdb',
-  
+
   // Protocol configuration
   protocols: {
     http: { port: 8080 },
     websocket: { port: 8081 },
     postgres: { port: 5432 } // Coming soon
   },
-  
+
   // S3 integration
   s3: {
     bucket: 'my-data-lake',
     region: 'us-east-1',
     endpoint: 'https://s3.amazonaws.com' // Optional
   },
-  
+
   // Performance tuning
   maxConnections: 100,
   writeQueueSize: 1000
@@ -384,7 +384,7 @@ const db = new RipDataClient({
 ## 🛣️ Roadmap
 
 - **✅ HTTP API** - Complete REST interface
-- **✅ WebSocket Streaming** - Real-time subscriptions  
+- **✅ WebSocket Streaming** - Real-time subscriptions
 - **✅ S3 Integration** - Data lake connectivity
 - **🚧 PostgreSQL Wire Protocol** - Tool compatibility
 - **🚧 Authentication** - JWT, API keys, role-based access
@@ -397,7 +397,7 @@ const db = new RipDataClient({
 Check out the `/examples` directory for complete applications:
 
 - **Blog Analytics** - Real-time blog metrics
-- **E-commerce Dashboard** - Sales analytics with live updates  
+- **E-commerce Dashboard** - Sales analytics with live updates
 - **IoT Data Pipeline** - Sensor data ingestion and analysis
 - **Social Media Analytics** - User engagement tracking
 
@@ -414,7 +414,7 @@ MIT License - see [LICENSE](LICENSE) for details.
 Traditional web applications are **data-poor** because analytics are **hard**. You have to:
 
 - Set up separate analytical databases
-- Build complex ETL pipelines  
+- Build complex ETL pipelines
 - Deal with data consistency issues
 - Manage multiple systems
 
@@ -429,7 +429,7 @@ Traditional web applications are **data-poor** because analytics are **hard**. Y
 
 ---
 
-**Ready to revolutionize your data architecture?** 
+**Ready to revolutionize your data architecture?**
 
 ```bash
 bun add @rip/data

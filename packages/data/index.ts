@@ -1,14 +1,14 @@
 export { RipDataServer } from './rip-data-server'
 export { RipDataClient, createClient, QueryBuilder } from './rip-data-client'
-export type { 
-  RipDataConfig, 
-  QueryRequest, 
-  StreamSubscription 
+export type {
+  RipDataConfig,
+  QueryRequest,
+  StreamSubscription
 } from './rip-data-server'
-export type { 
-  RipDataClientConfig, 
-  QueryResult, 
-  BatchQuery 
+export type {
+  RipDataClientConfig,
+  QueryResult,
+  BatchQuery
 } from './rip-data-client'
 
 // Convenience function to start a server quickly

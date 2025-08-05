@@ -76,7 +76,7 @@ export class RipDataClient {
   async queryS3(bucket: string, key: string, customQuery?: string): Promise<QueryResult> {
     const params = new URLSearchParams({ bucket, key })
     if (customQuery) params.set('query', customQuery)
-    
+
     const response = await fetch(`${this.config.baseUrl}/s3?${params}`)
     return response.json()
   }
@@ -88,17 +88,17 @@ export class RipDataClient {
     return new Promise((resolve, reject) => {
       const wsUrl = this.config.baseUrl.replace('http', 'ws').replace(':8080', ':8081')
       this.ws = new WebSocket(wsUrl)
-      
+
       this.ws.onopen = () => {
         console.log('🔄 Connected to RipData WebSocket')
         resolve(this.ws!)
       }
-      
+
       this.ws.onerror = (error) => {
         console.error('❌ WebSocket connection failed:', error)
         reject(error)
       }
-      
+
       this.ws.onmessage = (event) => {
         try {
           const message = JSON.parse(event.data)
@@ -107,7 +107,7 @@ export class RipDataClient {
           console.error('❌ Failed to parse WebSocket message:', error)
         }
       }
-      
+
       this.ws.onclose = () => {
         console.log('🔄 WebSocket connection closed')
         this.subscriptions.clear()
@@ -145,7 +145,7 @@ export class RipDataClient {
         id: subscriptionId
       }))
     }
-    
+
     this.subscriptions.delete(subscriptionId)
   }
 
@@ -199,12 +199,12 @@ export class RipDataClient {
 
   private async makeRequest(endpoint: string, body: any): Promise<QueryResult> {
     let lastError: Error | null = null
-    
+
     for (let attempt = 0; attempt < (this.config.retries || 3); attempt++) {
       try {
         const controller = new AbortController()
         const timeoutId = setTimeout(() => controller.abort(), this.config.timeout || 30000)
-        
+
         const response = await fetch(`${this.config.baseUrl}${endpoint}`, {
           method: 'POST',
           headers: {
@@ -213,29 +213,29 @@ export class RipDataClient {
           body: JSON.stringify(body),
           signal: controller.signal,
         })
-        
+
         clearTimeout(timeoutId)
-        
+
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`)
         }
-        
+
         return await response.json()
       } catch (error) {
         lastError = error instanceof Error ? error : new Error('Unknown error')
-        
+
         // Don't retry on client errors (4xx)
         if (error instanceof Error && error.message.includes('HTTP 4')) {
           break
         }
-        
+
         // Wait before retry (exponential backoff)
         if (attempt < (this.config.retries || 3) - 1) {
           await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000))
         }
       }
     }
-    
+
     throw lastError || new Error('Request failed after retries')
   }
 
@@ -247,15 +247,15 @@ export class RipDataClient {
           callback(message.data)
         }
         break
-      
+
       case 'error':
         console.error(`❌ Subscription error for ${message.id}:`, message.error)
         break
-      
+
       case 'subscribed':
         console.log(`✅ Subscribed to live query: ${message.id}`)
         break
-      
+
       default:
         console.log('📨 Unknown WebSocket message:', message)
     }
@@ -327,19 +327,19 @@ class SelectBuilder {
 
   async execute(): Promise<QueryResult> {
     let sql = `SELECT ${this.columns.join(', ')} FROM ${this.table}`
-    
+
     if (this.whereClause) {
       sql += ` WHERE ${this.whereClause}`
     }
-    
+
     if (this.orderByClause) {
       sql += ` ${this.orderByClause}`
     }
-    
+
     if (this.limitValue) {
       sql += ` LIMIT ${this.limitValue}`
     }
-    
+
     return this.client.query(sql, this.params)
   }
 }
@@ -363,9 +363,9 @@ class InsertBuilder {
     const columns = Object.keys(this.data)
     const placeholders = columns.map(() => '?').join(', ')
     const values = Object.values(this.data)
-    
+
     const sql = `INSERT INTO ${this.table} (${columns.join(', ')}) VALUES (${placeholders})`
-    
+
     return this.client.execute(sql, values)
   }
 }
@@ -397,14 +397,14 @@ class UpdateBuilder {
     const columns = Object.keys(this.data)
     const setClause = columns.map(col => `${col} = ?`).join(', ')
     const values = Object.values(this.data)
-    
+
     let sql = `UPDATE ${this.table} SET ${setClause}`
-    
+
     if (this.whereClause) {
       sql += ` WHERE ${this.whereClause}`
       values.push(...this.whereParams)
     }
-    
+
     return this.client.execute(sql, values)
   }
 }
@@ -428,11 +428,11 @@ class DeleteBuilder {
 
   async execute(): Promise<QueryResult> {
     let sql = `DELETE FROM ${this.table}`
-    
+
     if (this.whereClause) {
       sql += ` WHERE ${this.whereClause}`
     }
-    
+
     return this.client.execute(sql, this.params)
   }
 }
