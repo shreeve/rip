@@ -262,7 +262,7 @@ export var read = function(keyOrContext, key = null, tag = null, miss = null) {
       // Enhanced email validation using =~ - BEAUTIFUL ONE-LINER!
       val = ((_ = val.match(/^([a-zA-Z0-9._%+-]+)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})$/), _), _ ? _[0].toLowerCase() : null);
       break;
-    // 🔥 LEGENDARY CLEAN PATTERNS - POSTFIX IF PERFECTION! 🔥
+    // 🔥 LEGENDARY CLEAN PATTERNS - TWO BEAUTIFUL STYLES! 🔥
     case 'state':
       val = ((_ = val.match(/^([a-z][a-z])$/i), _) ? _[1].toUpperCase() : void 0);
       break;

@@ -175,7 +175,7 @@ export read = (keyOrContext, key = null, tag = null, miss = null) ->
       # Enhanced email validation using =~ - BEAUTIFUL ONE-LINER!
       val = (val =~ /^([a-zA-Z0-9._%+-]+)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})$/; if _ then _[0].toLowerCase() else null)
 
-    # 🔥 LEGENDARY CLEAN PATTERNS - POSTFIX IF PERFECTION! 🔥
+    # 🔥 LEGENDARY CLEAN PATTERNS - TWO BEAUTIFUL STYLES! 🔥
     when 'state'    then val = (_[1].toUpperCase() if val =~ /^([a-z][a-z])$/i)
     when 'zip'      then val = (_[1] if val =~ /^(\d{5})/)
     when 'zipplus4' then val = ("#{_[1]}-#{_[2]}" if val =~ /^(\d{5})-?(\d{4})$/)
