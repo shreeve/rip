@@ -8,6 +8,7 @@ This document provides comprehensive context for AI assistants working on the Ri
 
 ### Key Value Propositions
 - **Clean Async Syntax**: `fetch!` instead of `await fetch()`
+- **LEGENDARY Regex Matching**: `val =~ /regex/` with automatic `_` assignment
 - **Modern Web Stack**: Bun + Hono + Drizzle ORM integration
 - **Type-Safe Database**: Custom DSL for schema definition
 - **Hot Reload**: Development server with file watching
@@ -130,8 +131,26 @@ if node instanceof Value
 
 **Result**: Functions using `db.select().get!` automatically become `async` functions.
 
+### The `=~` and `_` Regex Enhancement
+**Problem**: JavaScript regex matching required verbose `.match()` calls and manual result assignment.
+
+**Solution**: Added Ruby-style `=~` operator with automatic `_` variable assignment:
+- **Lexer**: Added `'=~'` to `COMPARE` array in `/coffeescript/src/lexer.coffee`
+- **Nodes**: Added `compileMatch` method in `/coffeescript/src/nodes.coffee` that generates `(_ = val.match(/regex/), _)`
+
+**Result**: Elegant regex syntax with automatic match result capture:
+```coffeescript
+# Before (verbose)
+match = val.match(/^([A-Z]{2})$/)
+code = match?[1]?.toUpperCase()
+
+# After (LEGENDARY)
+val =~ /^([A-Z]{2})$/
+code = _?[1]?.toUpperCase()
+```
+
 ### Transpilation Pipeline
-1. **Write**: `.rip` files with `!` suffix syntax
+1. **Write**: `.rip` files with `!` suffix and `=~` regex syntax
 2. **Transpile**: `rip-bun.ts` plugin calls enhanced CoffeeScript compiler
 3. **Execute**: Bun runs the compiled JavaScript
 4. **Serve**: rip-server handles HTTP requests
@@ -205,6 +224,7 @@ bun -e "const app = await import('./index.rip'); console.log(typeof app.default)
 
 ### ✅ Working Features
 - `!` suffix automatic async detection
+- `=~` regex matching with automatic `_` assignment
 - Full web server with Hono framework
 - Database schema DSL with SQLite
 - Hot reload development server
@@ -231,7 +251,8 @@ bun -e "const app = await import('./index.rip'); console.log(typeof app.default)
 3. **Rebuild CoffeeScript** after any language changes: `./bin/cake build`
 4. **Test transpilation** before testing server functionality
 5. **Database issues** are separate from language functionality
-6. **The `!` suffix** is the key language enhancement that makes Rip special
+6. **The `!` suffix and `=~` operator** are the key language enhancements that make Rip special
+7. **🧹 IMPORTANT: Test script hygiene** - Always place experimental test files in `/tmp/` directory, never in the root or project directories. Clean up test files immediately after experimentation to keep the codebase clean.
 
 ## 🎉 Success Metrics
 
