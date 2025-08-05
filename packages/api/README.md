@@ -235,7 +235,7 @@ app.post '/api/users', ->
   # DATA PROCESSING (all synchronous!)
   email = read 'email', 'email!'
   name = read 'name', 'name!'
-  age = read 'age', { start: 18, end: 120 }
+  age = read 'age', [18, 120]
 
   # RESPONSE - just return data!
   {
@@ -345,6 +345,14 @@ settings = read 'settings', 'json' # Smart JSON parsing!
 admin_ids = read 'admins', 'ids'   # Clean and simple
 ```
 
+#### **Range Validation (Elegant!)**
+```rip
+age = read 'age', [18, 120]        # Between 18 and 120
+priority = read 'priority', [1, 10], 5  # Range 1-10, default 5
+score = read 'score', [0, 100]     # Percentage validation
+rating = read 'rating', [1, 5]     # Star rating system
+```
+
 ### 🔥 Legendary Regex Patterns - The Secret Sauce
 
 What makes `helpers.rip` truly revolutionary is **Rip's `=~` operator** - the most elegant regex syntax ever created.
@@ -362,7 +370,7 @@ when 'id'
 when 'state'
   val = (if val =~ /^([a-z][a-z])$/i then _[1].toUpperCase())
 
-when 'zip'  
+when 'zip'
   val = (if val =~ /^(\d{5})/ then _[1])
 
 when 'email'
@@ -508,7 +516,7 @@ app.post '/signup', ->  # NO context parameter needed!
   name = read 'name', 'name!'                        # Pure synchronous elegance
   phone = read 'phone', 'phone'                      # No async complexity
   state = read 'state', 'state!'                     # Clean and simple
-  age = read 'age', { start: 18, end: 120 }, null    # Pure elegance
+  age = read 'age', [18, 120], null    # Pure elegance
 
   user = createUser! email, name, phone, state, age # Use ! suffix for async operations
   { success: true, user }  # Just return data - cleanest approach!

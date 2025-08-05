@@ -170,7 +170,7 @@ parseDateUTC = function(val) {
 // Enhanced read function with miss parameter - the star of the show!
 // Supports both: read(c, key, tag, miss) and read(key, tag, miss) when using withHelpers
 export var read = function(keyOrContext, key = null, tag = null, miss = null) {
-  var _, bam, c, cleanVal, error, i, id, idList, len, numVal, originalTag, readData, ref, temp, val, validIds;
+  var _, bam, c, cleanVal, end, error, i, id, idList, len, numVal, originalTag, readData, ref, start, temp, val, validIds;
   // Handle both calling styles: read(c, key, tag, miss) vs read(key, tag, miss)
   if ((keyOrContext != null ? (ref = keyOrContext.req) != null ? ref.method : void 0 : void 0) != null) {
     c = keyOrContext;
@@ -397,9 +397,15 @@ export var read = function(keyOrContext, key = null, tag = null, miss = null) {
           miss();
         }
       } else if (typeof originalTag === 'object' && ((originalTag != null ? originalTag.start : void 0) != null) && ((originalTag != null ? originalTag.end : void 0) != null)) {
-        // Range check
+        // Range check - object format { start: 1, end: 10 }
         numVal = parseInt(val);
         val = !isNaN(numVal) && numVal >= originalTag.start && numVal <= originalTag.end ? numVal : null;
+      } else if (Array.isArray(originalTag) && originalTag.length === 2 && typeof originalTag[0] === 'number' && typeof originalTag[1] === 'number') {
+        // Range check - elegant [min, max] format
+        numVal = parseInt(val);
+        start = Math.min(originalTag[0], originalTag[1]);
+        end = Math.max(originalTag[0], originalTag[1]);
+        val = !isNaN(numVal) && numVal >= start && numVal <= end ? numVal : null;
       }
   }
   // Handle required/optional logic with miss parameter
