@@ -7,9 +7,9 @@
  * Flexible argument parsing - provide arguments in ANY order!
  */
 
-import { existsSync, mkdirSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { existsSync, mkdirSync } from 'fs'
+import { homedir } from 'os'
+import { join, resolve } from 'path'
 import { spawn } from 'bun'
 
 // Set process title for better visibility in ps/top

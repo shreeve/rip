@@ -22,7 +22,8 @@
       "recommended": true,
       "style": {
         "noNonNullAssertion": "off",
-        "useConst": "error"
+        "useConst": "error",
+        "useNodejsImportProtocol": "off"
       }
     }
   },

@@ -7,10 +7,10 @@
  */
 
 import { Database } from 'bun:sqlite'
-import { existsSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { parseArgs } from 'node:util'
+import { existsSync, writeFileSync } from 'fs'
+import { dirname, join } from 'path'
+import { fileURLToPath } from 'url'
+import { parseArgs } from 'util'
 import { sql } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { drizzle as drizzleMySQL } from 'drizzle-orm/mysql2'

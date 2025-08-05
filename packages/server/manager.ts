@@ -12,8 +12,8 @@
  * Usage: bun manager.ts [numWorkers] [maxRequestsPerWorker]
  */
 
-import { watch } from 'node:fs'
-import { join } from 'node:path'
+import { watch } from 'fs'
+import { join } from 'path'
 
 // Using Bun.spawn instead of Node.js child_process
 

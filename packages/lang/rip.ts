@@ -7,8 +7,8 @@
  * Currently under construction as we "build the 747 mid-flight".
  */
 
-import { readFileSync } from 'node:fs'
-import { parseArgs } from 'node:util'
+import { readFileSync } from 'fs'
+import { parseArgs } from 'util'
 import { VERSION, compile } from './index.ts'
 
 function showHelp() {

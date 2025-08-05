@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'path'
+import { fileURLToPath } from 'url'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import schema from './schema.rip'
 
