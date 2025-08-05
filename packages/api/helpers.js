@@ -169,8 +169,8 @@ parseDateUTC = function(val) {
 
 // Enhanced read function with miss parameter - the star of the show!
 // Supports both: read(c, key, tag, miss) and read(key, tag, miss) when using withHelpers
-export var read = async function(keyOrContext, key = null, tag = null, miss = null) {
-  var _, bam, body, c, cleanVal, data, error, i, id, idList, k, len, numVal, originalTag, query, readData, ref, temp, v, val, validIds;
+export var read = function(keyOrContext, key = null, tag = null, miss = null) {
+  var _, bam, c, cleanVal, error, i, id, idList, len, numVal, originalTag, readData, ref, temp, val, validIds;
   // Handle both calling styles: read(c, key, tag, miss) vs read(key, tag, miss)
   if ((keyOrContext != null ? (ref = keyOrContext.req) != null ? ref.method : void 0 : void 0) != null) {
     c = keyOrContext;
@@ -183,49 +183,8 @@ export var read = async function(keyOrContext, key = null, tag = null, miss = nu
     // Shift parameters when context is implicit
     [key, tag, miss] = [keyOrContext, key, tag]; // If first param looks like Hono context
   }
-  // Initialize @read cache on context if not exists
-  if (c.get('_read') == null) {
-    try {
-      // Get request body for POST/PUT/PATCH
-      data = {};
-      if (c.req.method !== 'GET') {
-        body = (await c.req.text());
-        if (body) {
-          data = parseJsonSafely(body);
-        }
-      }
-      // Add query params (like Rails params)
-      query = c.req.query() || {};
-      for (k in query) {
-        if (!hasProp.call(query, k)) continue;
-        v = query[k];
-        data[k] = v;
-      }
-      // Transform string values (trim whitespace)
-      if (typeof data === 'object' && (data != null)) {
-        for (k in data) {
-          if (!hasProp.call(data, k)) continue;
-          v = data[k];
-          if (typeof v === 'string') {
-            data[k] = v.trim();
-          }
-        }
-      }
-      // Handle array data
-      if (Array.isArray(data)) {
-        data = {
-          list: data
-        };
-      }
-      c.set('_read', data);
-    } catch (error1) {
-      error = error1;
-      console.warn(`ERROR: unable to parse request data, ${error}`);
-      c.set('_read', {});
-    }
-  }
-  // Get cached data
-  readData = c.get('_read');
+  // Get pre-parsed data from middleware (always available and synchronous!)
+  readData = c.get('_read') || {};
   val = key ? readData[key] : readData;
   if (!(key && tag)) {
     // If no tag specified, return raw value
@@ -453,8 +412,56 @@ export var env = function() {
 // Export helper for Hono context binding - Sinatra-style!
 export var withHelpers = function(app) {
   return app.use(async function(c, next) {
+    var body, data, error, k, query, ref, v;
     // Set global context for this request (like Sinatra's request scope)
     _currentContext = c;
+    try {
+      
+      // Pre-parse request data (body + query params)
+      data = {};
+      
+      // Parse request body for POST/PUT/PATCH requests
+      if ((ref = c.req.method) === 'POST' || ref === 'PUT' || ref === 'PATCH') {
+        try {
+          body = (await c.req.text());
+          if (body) {
+            data = parseJsonSafely(body);
+          }
+        } catch (error1) {
+          error = error1;
+          console.warn(`ERROR: unable to parse request body, ${error}`);
+        }
+      }
+      
+      // Add query params (like Rails params) for all requests
+      query = c.req.query() || {};
+      for (k in query) {
+        if (!hasProp.call(query, k)) continue;
+        v = query[k];
+        data[k] = v;
+      }
+      // Transform string values (trim whitespace)
+      if (typeof data === 'object' && (data != null)) {
+        for (k in data) {
+          if (!hasProp.call(data, k)) continue;
+          v = data[k];
+          if (typeof v === 'string') {
+            data[k] = v.trim();
+          }
+        }
+      }
+      // Handle array data
+      if (Array.isArray(data)) {
+        data = {
+          list: data
+        };
+      }
+      c.set('_read', data);
+    } catch (error1) {
+      error = error1;
+      console.warn(`ERROR: unable to parse request data, ${error}`);
+      c.set('_read', {});
+    }
     
     // Bind read method to context for easy access (both styles supported)
     c.read = function(key, tag, miss) {

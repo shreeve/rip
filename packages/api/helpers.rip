@@ -122,38 +122,8 @@ export read = (keyOrContext, key = null, tag = null, miss = null) ->
       throw new Error("read() called without context. Use withHelpers() middleware or pass context explicitly.")
     # Shift parameters when context is implicit
     [key, tag, miss] = [keyOrContext, key, tag]
-  # Initialize @read cache on context if not exists
-  unless c.get('_read')?
-    try
-      # Get request body for POST/PUT/PATCH
-      data = {}
-      if c.req.method != 'GET'
-        body = await c.req.text()
-        if body
-          data = parseJsonSafely(body)
-
-      # Add query params (like Rails params)
-      query = c.req.query() or {}
-      for own k, v of query
-        data[k] = v
-
-      # Transform string values (trim whitespace)
-      if typeof data == 'object' and data?
-        for own k, v of data
-          if typeof v == 'string'
-            data[k] = v.trim()
-
-      # Handle array data
-      if Array.isArray(data)
-        data = { list: data }
-
-      c.set('_read', data)
-    catch error
-      console.warn "ERROR: unable to parse request data, #{error}"
-      c.set('_read', {})
-
-  # Get cached data
-  readData = c.get('_read')
+  # Get pre-parsed data from middleware (always available and synchronous!)
+  readData = c.get('_read') or {}
   val = if key then readData[key] else readData
 
   # If no tag specified, return raw value
@@ -312,6 +282,39 @@ export withHelpers = (app) ->
   app.use (c, next) ->
     # Set global context for this request (like Sinatra's request scope)
     _currentContext = c
+    
+    # Pre-parse request data (body + query params)
+    try
+      data = {}
+      
+      # Parse request body for POST/PUT/PATCH requests
+      if c.req.method in ['POST', 'PUT', 'PATCH']
+        try
+          body = await c.req.text()
+          if body
+            data = parseJsonSafely(body)
+        catch error
+          console.warn "ERROR: unable to parse request body, #{error}"
+          
+      # Add query params (like Rails params) for all requests
+      query = c.req.query() or {}
+      for own k, v of query
+        data[k] = v
+
+      # Transform string values (trim whitespace)
+      if typeof data == 'object' and data?
+        for own k, v of data
+          if typeof v == 'string'
+            data[k] = v.trim()
+
+      # Handle array data
+      if Array.isArray(data)
+        data = { list: data }
+
+      c.set '_read', data
+    catch error
+      console.warn "ERROR: unable to parse request data, #{error}"
+      c.set '_read', {}
     
     # Bind read method to context for easy access (both styles supported)
     c.read = (key, tag, miss) -> read(key, tag, miss)  # Context-free version
