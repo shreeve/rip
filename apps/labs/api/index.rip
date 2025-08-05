@@ -22,8 +22,14 @@ app.use cors
 # 🔥 Revolutionary middleware that makes everything context-free!
 withHelpers app
 
-# Health check - back to working version for now
-app.get '/ping', -> text 'pong'
+# 🔥 Revolutionary HTTP decorators with auto-response detection!
+@get '/ping', -> 'pong'                    # Auto-detects string → text response
+
+# Example of automatic JSON detection  
+@get '/user/me', -> name: 'larry', role: 'admin'  # Auto-detects object → JSON response
+
+# Traditional syntax still works for comparison
+app.get '/ping-old', -> text 'pong'
 
 # ====== CONFIG ROUTES ======
 app.get '/config', ->
