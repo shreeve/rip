@@ -1814,7 +1814,8 @@
   // decimal without support for numeric literal separators for reference:
   // \d*\.?\d+ (?:e[+-]?\d+)?
 
-  OPERATOR = /^(?:[-=]>|[-+*\/%<>&|^!?=]=|>>>=?|([-+:])\1|([&|<>*\/%])\2=?|\?(\.|::)|\.{2,3})/; // function
+  OPERATOR = /^(?:[-=]>|=~|[-+*\/%<>&|^!?=]=|>>>=?|([-+:])\1|([&|<>*\/%])\2=?|\?(\.|::)|\.{2,3})/; // function
+  // regex match operator
   // compound assign / compare
   // zero-fill right shift
   // doubles
@@ -1905,7 +1906,7 @@
   SHIFT = ['<<', '>>', '>>>'];
 
   // Comparison tokens.
-  COMPARE = ['==', '!=', '<', '>', '<=', '>='];
+  COMPARE = ['==', '!=', '<', '>', '<=', '>=', '=~'];
 
   // Mathematical tokens.
   MATH = ['*', '/', '%', '//', '%%'];

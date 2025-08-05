@@ -7140,6 +7140,8 @@
             return this.compileFloorDivision(o);
           case '%%':
             return this.compileModulo(o);
+          case '=~':
+            return this.compileMatch(o);
           default:
             lhs = this.first.compileToFragments(o, LEVEL_OP);
             rhs = this.second.compileToFragments(o, LEVEL_OP);
@@ -7256,6 +7258,27 @@
         var mod;
         mod = new Value(new Literal(utility('modulo', o)));
         return new Call(mod, [this.first, this.second]).compileToFragments(o);
+      }
+
+      compileMatch(o) {
+        var assignment, matchCall, matchMethod, matchValue, sequence, underscore, underscoreRef;
+        // Create the match call: val.match(/regex/)
+        matchMethod = new Access(new PropertyName('match'));
+        matchValue = new Value(this.first, [matchMethod]);
+        matchCall = new Call(matchValue, [this.second]);
+        
+        // Create _ identifier - THE MOST ELEGANT CHOICE!
+        underscore = new IdentifierLiteral('_');
+        
+        // Create assignment: _ = matchCall
+        assignment = new Assign(underscore, matchCall);
+        
+        // Create reference to _ for return value
+        underscoreRef = new IdentifierLiteral('_');
+        
+        // Create sequence: (_ = val.match(/regex/), _)
+        sequence = new Block([assignment, underscoreRef]);
+        return new Parens(sequence).compileToFragments(o);
       }
 
       toString(idt) {
