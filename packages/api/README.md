@@ -84,13 +84,7 @@ app.post '/signup', (ctx) ->
   email = read 'email', 'email!'     # All calls synchronous (middleware pre-parses)
   ctx.json { success: true, email }
 
-# OPTION 2: Function-based global context
-app.post '/signup', ->
-  email = read 'email', 'email!'     # All calls synchronous (middleware pre-parses)
-  phone = read 'phone', 'phone'      # Pure synchronous elegance!
-  c().json { success: true, email, phone }  # c() gets global context
-
-# OPTION 3: Global env - ULTIMATE ELEGANCE! (like read)
+# OPTION 2: Global env - ULTIMATE ELEGANCE! (like read)
 app.post '/signup', ->
   email = read 'email', 'email!'     # All calls synchronous (middleware pre-parses)
   phone = read 'phone', 'phone'      # Pure synchronous elegance!
@@ -123,7 +117,7 @@ The crown jewel of `@rip/api` is the **`read()` function** - a validation and pa
 
 ### Core API: The `read()` Function
 
-**Four calling styles supported**:
+**Three calling styles supported**:
 
 ```rip
 # Global env - ULTIMATE ELEGANCE (like read)
@@ -131,11 +125,6 @@ import { read, withHelpers } from '@rip/api'
 app.post '/endpoint', ->
   data = read 'key', 'validator'  # All calls synchronous!
   env.json { data }               # env does it all - just like read!
-
-# Function-based global context
-app.post '/endpoint', ->
-  data = read 'key', 'validator'  # All calls synchronous!
-  c().json { data }               # c() gets global context
 
 # Traditional with context parameter
 app.post '/endpoint', (ctx) ->
@@ -154,13 +143,11 @@ read(context, key, validator, fallback)
 **Global Context Access**:
 - **`env`**: The ONE variable that does it all! (ULTIMATE!) - like `read`
 - **`req`**: Request-only access (when you only need request data)
-- **`c()`, `env()`**: Function-based accessors (alternative style)
-- **`@env`, `@req`**: Instance variable style (for those who prefer @)
 
 ### Basic Usage Examples
 
 ```rip
-import { read, c, withHelpers } from '@rip/api'
+import { read, withHelpers } from '@rip/api'
 
 app.use withHelpers  # Enable Sinatra-style context-free calls
 
@@ -170,17 +157,7 @@ app.post '/api/users', (ctx) ->
   email = read 'email', 'email!'  # Pure synchronous elegance!
   ctx.json { name, email }
 
-# STYLE 2: Function-based global context
-app.post '/api/users', ->
-  name = read 'name'              # All calls synchronous (middleware pre-parses)
-  email = read 'email', 'email!'  # No async complexity!
-  role = read 'role', ['admin', 'user'], 'user'  # Clean and simple!
-  phone = read 'phone', 'phone'   # Pure elegance!
-
-  # Access context when needed
-  c().json { name, email, role, phone }
-
-# STYLE 3: Global env - ULTIMATE ELEGANCE! (like read)
+# STYLE 2: Global env - ULTIMATE ELEGANCE! (like read)
 app.post '/api/users', ->
   name = read 'name'              # All calls synchronous (middleware pre-parses)
   email = read 'email', 'email!'  # No async complexity!

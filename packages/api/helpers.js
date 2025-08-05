@@ -400,12 +400,8 @@ export var read = function(keyOrContext, key = null, tag = null, miss = null) {
 _currentContext = null;
 
 // Global context accessors - pure Sinatra style!
-export var c = function() {
-  return _currentContext;
-};
-
 export var env = function() {
-  return _currentContext; // THE ONE - just like 'read'!
+  return _currentContext; // THE primary variable - just like 'read'!
 };
 
 
@@ -417,23 +413,8 @@ Object.defineProperty(global, 'env', {
   configurable: true
 });
 
-// Also make req globally available for request-only access
+// Keep req for request-only access (genuinely useful)
 Object.defineProperty(global, 'req', {
-  get: function() {
-    return _currentContext != null ? _currentContext.req : void 0;
-  },
-  configurable: true
-});
-
-// Keep @ versions as aliases for those who prefer instance variable style
-Object.defineProperty(global, '@env', {
-  get: function() {
-    return _currentContext;
-  },
-  configurable: true
-});
-
-Object.defineProperty(global, '@req', {
   get: function() {
     return _currentContext != null ? _currentContext.req : void 0;
   },
@@ -490,7 +471,7 @@ export var withHelpers = function(app) {
       console.warn(`ERROR: unable to parse request data, ${error}`);
       c.set('_read', {});
     }
-    // Bind read method to context for easy access (both styles supported)
+    // Bind read method to context for easy access
     c.read = function(key, tag, miss) {
       return read(key, tag, miss); // Context-free version
     };
@@ -513,13 +494,7 @@ export var withHelpers = function(app) {
 //   phon = read 'phone', 'phone'      # Pure elegance
 //   c.json { success: true, user: { mail, phon } }
 
-// OPTION 2: Function-based global context
-// app.post '/signup', ->
-//   mail = read 'email', 'email!'     # All calls synchronous
-//   phon = read 'phone', 'phone'      # Context-free everything!
-//   c().json { success: true, user: { mail, phon } }  # c() gets global context
-
-// OPTION 3: Global env - THE ONE ULTIMATE VARIABLE! (like read)
+// OPTION 2: Global env - THE ONE ULTIMATE VARIABLE! (like read)
 // app.post '/signup', ->
 //   mail = read 'email', 'email!'     # All calls synchronous
 //   phon = read 'phone', 'phone'      # Pure elegance

@@ -274,25 +274,15 @@ export read = (keyOrContext, key = null, tag = null, miss = null) ->
 _currentContext = null
 
 # Global context accessors - pure Sinatra style!
-export c = -> _currentContext
-export env = -> _currentContext  # THE ONE - just like 'read'!
+export env = -> _currentContext  # THE primary variable - just like 'read'!
 
 # Make env globally available (like read function)
 Object.defineProperty global, 'env', 
   get: -> _currentContext
   configurable: true
 
-# Also make req globally available for request-only access
+# Keep req for request-only access (genuinely useful)
 Object.defineProperty global, 'req', 
-  get: -> _currentContext?.req
-  configurable: true
-
-# Keep @ versions as aliases for those who prefer instance variable style
-Object.defineProperty global, '@env', 
-  get: -> _currentContext
-  configurable: true
-
-Object.defineProperty global, '@req', 
   get: -> _currentContext?.req
   configurable: true
 
@@ -335,7 +325,7 @@ export withHelpers = (app) ->
       console.warn "ERROR: unable to parse request data, #{error}"
       c.set '_read', {}
 
-    # Bind read method to context for easy access (both styles supported)
+    # Bind read method to context for easy access
     c.read = (key, tag, miss) -> read(key, tag, miss)  # Context-free version
 
     try
@@ -354,13 +344,7 @@ export withHelpers = (app) ->
 #   phon = read 'phone', 'phone'      # Pure elegance
 #   c.json { success: true, user: { mail, phon } }
 #
-# OPTION 2: Function-based global context
-# app.post '/signup', ->
-#   mail = read 'email', 'email!'     # All calls synchronous
-#   phon = read 'phone', 'phone'      # Context-free everything!
-#   c().json { success: true, user: { mail, phon } }  # c() gets global context
-#
-# OPTION 3: Global env - THE ONE ULTIMATE VARIABLE! (like read)
+# OPTION 2: Global env - THE ONE ULTIMATE VARIABLE! (like read)
 # app.post '/signup', ->
 #   mail = read 'email', 'email!'     # All calls synchronous
 #   phon = read 'phone', 'phone'      # Pure elegance
