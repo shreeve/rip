@@ -9,31 +9,37 @@
 #   val =~ /^(\d{3})-?(\d{2})-?(\d{4})$/  # Match and auto-assign to _
 #   result = _?[1] and "#{_[1]}#{_[2]}#{_[3]}"  # Use with optional chaining
 #
-# ~= operator (compound assignment - TWO FORMS):
+# ~= operator (compound assignment - THREE FORMS):
 #   Form 1: val ~= /regex/                    # Assigns match array or null
-#   Form 2: val ~= /regex/; if _ then transform else fallback
+#   Form 2: val ~= /regex/ then transform      # Transform with implicit null
+#   Form 3: val ~= /regex/ then transform else fallback  # Transform with explicit fallback
 #
 # Transform verbose JavaScript:    match = val.match(/regex/); code = match?[1]
-# Into pure poetry:                val =~ /regex/; code = _?[1]
+# Into pure poetry (=~):           val =~ /regex/; code = _?[1]
+# Or REVOLUTIONARY elegance (~=):   code = val ~= /regex/ then _[1]
 
 # Email regex (simplified version)
 emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-# Phone formatting helper - SHOWCASING =~ ELEGANCE!
+# Phone formatting helper - SHOWCASING ~= REVOLUTIONARY SYNTAX!
 toPhone = (val) ->
   return null unless val
 
-  # Extract all digits and format with beautiful =~ pattern matching
+  # Extract all digits and format with beautiful ~= one-liners
   digits = val.replace(/\D/g, '')
   return null if digits.length < 10
 
   # 10-digit format: 1234567890 -> 123-456-7890
-  digits =~ /^(\d{3})(\d{3})(\d{4})$/
-  return "#{_[1]}-#{_[2]}-#{_[3]}" if _ and digits.length == 10
+  if digits.length == 10
+    temp = digits
+    temp ~= /^(\d{3})(\d{3})(\d{4})$/ then "#{_[1]}-#{_[2]}-#{_[3]}"
+    return temp
 
   # 11-digit with country code: 11234567890 -> 123-456-7890
-  digits =~ /^1(\d{3})(\d{3})(\d{4})$/
-  return "#{_[1]}-#{_[2]}-#{_[3]}" if _ and digits.length == 11
+  if digits.length == 11
+    temp = digits
+    temp ~= /^1(\d{3})(\d{3})(\d{4})$/ then "#{_[1]}-#{_[2]}-#{_[3]}"
+    return temp
 
   null
 
@@ -165,20 +171,18 @@ export read = (c, key = null, tag = null, miss = null) ->
   else
     val = String(val or '')
 
-  # Process based on tag type - SHOWCASING =~ MASTERY!
+  # Process based on tag type - SHOWCASING ~= REVOLUTIONARY ONE-LINERS!
   switch tag
     when 'id'
-      val =~ /^([1-9]\d{0,19})$/
-      return parseInt(_?[1]) if _
+      val ~= /^([1-9]\d{0,19})$/ then parseInt(_[1])
+      return val if val
     when 'whole'
-      val =~ /^(0|[1-9]\d{0,19})$/
-      return parseInt(_?[1]) if _
+      val ~= /^(0|[1-9]\d{0,19})$/ then parseInt(_[1])
+      return val if val
     when 'decimal'
-      val =~ /^([-+]?\d+(?:\.\d*)?|\.\d+)$/
-      val = parseFloat(_?[1]?.replace(/\.$/, ''))
+      val ~= /^([-+]?\d+(?:\.\d*)?|\.\d+)$/ then parseFloat(_[1].replace(/\.$/, ''))
     when 'money'
-      val =~ /^([-+]?\d+(?:\.\d*)?|\.\d+)$/
-      val = _?[1] and Math.round(parseFloat(_[1].replace(/\.$/, '')) * 100) / 100
+      val ~= /^([-+]?\d+(?:\.\d*)?|\.\d+)$/ then Math.round(parseFloat(_[1].replace(/\.$/, '')) * 100) / 100
 
     # One-liner cases - super scannable!
     when 'string'  then val = val.replace(/\s\s+/g, ' ')
@@ -193,65 +197,46 @@ export read = (c, key = null, tag = null, miss = null) ->
     when 'falsy'   then val = falsy(val)
 
     when 'email'
-      val = val.toLowerCase()
-      # Enhanced email validation using =~ - BEAUTIFUL!
-      val =~ /^([a-zA-Z0-9._%+-]+)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})$/
-      val = _?[0]  # Return full match if valid
+      # Enhanced email validation using ~= - BEAUTIFUL ONE-LINER!
+      val ~= /^([a-zA-Z0-9._%+-]+)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})$/ then _[0].toLowerCase()
 
-        # 🔥 LEGENDARY NEW ~= COMPOUND REGEX ASSIGNMENT - CHANGE 004! 🔥
+    # 🔥 LEGENDARY NEW ~= COMPOUND REGEX ASSIGNMENT - CHANGE 004! 🔥
     when 'state'
-      val ~= /^([a-z][a-z])$/i
-      val = if _ then _[1]?.toUpperCase() else null
+      val ~= /^([a-z][a-z])$/i then _[1].toUpperCase()
     when 'zip'
-      val ~= /^(\d{5})/
-      val = if _ then _[1] else null
+      val ~= /^(\d{5})/ then _[1]
     when 'zipplus4'
-      val =~ /^(\d{5})-?(\d{4})$/
-      val = _?[1] and "#{_[1]}-#{_[2]}"
+      val ~= /^(\d{5})-?(\d{4})$/ then "#{_[1]}-#{_[2]}"
     when 'ssn'
-      val =~ /^(\d{3})-?(\d{2})-?(\d{4})$/
-      val = _?[1] and "#{_[1]}#{_[2]}#{_[3]}"
+      val ~= /^(\d{3})-?(\d{2})-?(\d{4})$/ then "#{_[1]}#{_[2]}#{_[3]}"
     when 'sex'
-      val =~ /^(m|male|f|female|o|other)$/i
-      val = _?[1]?[0]?.toUpperCase()
+      val ~= /^(m|male|f|female|o|other)$/i then _[1][0].toUpperCase()
 
-    # Advanced =~ validations - SHOWCASING MASTERY!
+    # Advanced validations - NOW WITH ~= ONE-LINERS!
     when 'creditcard'
-      val =~ /^(\d{4})-?(\d{4})-?(\d{4})-?(\d{4})$/
-      val = _?[1] and "#{_[1]}-#{_[2]}-#{_[3]}-#{_[4]}"
+      val ~= /^(\d{4})-?(\d{4})-?(\d{4})-?(\d{4})$/ then "#{_[1]}-#{_[2]}-#{_[3]}-#{_[4]}"
     when 'url'
-      val =~ /^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$/
-      val = _?[0]
+      val ~= /^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$/ then _[0]
     when 'username'
-      val =~ /^([a-zA-Z0-9_-]{3,20})$/
-      val = _?[1]?.toLowerCase()
+      val ~= /^([a-zA-Z0-9_-]{3,20})$/ then _[1].toLowerCase()
     when 'color'
-      val =~ /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
-      val = _?[1] and "##{_[1].toLowerCase()}"
+      val ~= /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/ then "##{_[1].toLowerCase()}"
     when 'ip'
-      val =~ /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/
-      val = _?[0] if _ and _[1..4].every((n) -> parseInt(n) <= 255)
+      val ~= /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/ then (if _[1..4].every((n) -> parseInt(n) <= 255) then _[0] else null)
     when 'mac'
-      val =~ /^([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})$/
-      val = _?[1] and "#{_[1]}:#{_[2]}:#{_[3]}:#{_[4]}:#{_[5]}:#{_[6]}".toLowerCase()
+      val ~= /^([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})$/ then "#{_[1]}:#{_[2]}:#{_[3]}:#{_[4]}:#{_[5]}:#{_[6]}".toLowerCase()
     when 'semver'
-      val =~ /^(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*))?$/
-      val = _?[0]
+      val ~= /^(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*))?$/ then _[0]
     when 'uuid'
-      val =~ /^([0-9a-f]{8})-?([0-9a-f]{4})-?([0-9a-f]{4})-?([0-9a-f]{4})-?([0-9a-f]{12})$/i
-      val = _?[1] and "#{_[1]}-#{_[2]}-#{_[3]}-#{_[4]}-#{_[5]}".toLowerCase()
+      val ~= /^([0-9a-f]{8})-?([0-9a-f]{4})-?([0-9a-f]{4})-?([0-9a-f]{4})-?([0-9a-f]{12})$/i then "#{_[1]}-#{_[2]}-#{_[3]}-#{_[4]}-#{_[5]}".toLowerCase()
     when 'time24'
-      val =~ /^([01]?[0-9]|2[0-3]):([0-5][0-9])(?::([0-5][0-9]))?$/
-      val = _?[0]
+      val ~= /^([01]?[0-9]|2[0-3]):([0-5][0-9])(?::([0-5][0-9]))?$/ then _[0]
     when 'time12'
-      val =~ /^(1[0-2]|0?[1-9]):([0-5][0-9])\s?(am|pm)$/i
-      val = _?[0]?.toLowerCase()
+      val ~= /^(1[0-2]|0?[1-9]):([0-5][0-9])\s?(am|pm)$/i then _[0].toLowerCase()
     when 'currency'
-      val =~ /^\$?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)$/
-      val = _?[1] and parseFloat(_[1].replace(/,/g, ''))
+      val ~= /^\$?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)$/ then parseFloat(_[1].replace(/,/g, ''))
     when 'slug'
-      val =~ /^([a-z0-9]+(?:-[a-z0-9]+)*)$/
-      val = _?[1]
+      val ~= /^([a-z0-9]+(?:-[a-z0-9]+)*)$/ then _[1]
 
     when 'bool'
       val = bool(val)
@@ -272,12 +257,13 @@ export read = (c, key = null, tag = null, miss = null) ->
           cleanVal = val.replace(/[, ]+/g, ' ').trim()
           idList = cleanVal.split(' ')
 
-          # Validate each ID using our LEGENDARY =~ syntax
+          # Validate each ID using our REVOLUTIONARY ~= syntax!
           validIds = []
           for id in idList
-            id =~ /^([1-9]\d{0,19})$/
-            if _
-              validIds.push(parseInt(_[1]))
+            temp = id
+            temp ~= /^([1-9]\d{0,19})$/ then parseInt(_[1])
+            if temp
+              validIds.push(temp)
             else
               throw new Error("Invalid ID: #{id}")
 
