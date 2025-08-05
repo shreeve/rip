@@ -88,7 +88,7 @@ app.post '/signup', (ctx) ->
 app.post '/signup', ->
   email = read 'email', 'email!'     # All calls synchronous (middleware pre-parses)
   phone = read 'phone', 'phone'      # Pure synchronous elegance!
-  { success: true, email, phone }    # Just return data!
+  success: true, email, phone    # Just return data!
   # OR: json success: true, email, phone  # Smart json helper
 ```
 
@@ -125,13 +125,13 @@ The crown jewel of `@rip/api` is the **`read()` function** - a validation and pa
 import { read, withHelpers } from '@rip/api'
 app.post '/endpoint', ->
   data = read 'key', 'validator'  # All calls synchronous!
-  { data }                        # Just return data!
-  # OR: json data: data           # Clean json helper
+  data                        # Just return data!
+  # OR: json data           # Clean json helper
 
 # Traditional with context parameter
 app.post '/endpoint', (ctx) ->
   data = read 'key', 'validator'  # All calls synchronous!
-  ctx.json { data }
+  ctx.json data
 
 # Explicit context (backward compatible)
 read(context, key, validator, fallback)
@@ -159,7 +159,7 @@ app.use withHelpers  # Enable Sinatra-style context-free calls
 app.post '/api/users', (ctx) ->
   name = read 'name'              # All calls synchronous (middleware pre-parses)
   email = read 'email', 'email!'  # Pure synchronous elegance!
-  ctx.json { name, email }
+  ctx.json name, email
 
 # STYLE 2: Clean return or json helper - ULTIMATE ELEGANCE!
 app.post '/api/users', ->
@@ -169,7 +169,7 @@ app.post '/api/users', ->
   phone = read 'phone', 'phone'   # Pure elegance!
 
   # Just return data - cleanest approach!
-  { name, email, role, phone }
+  name, email, role, phone
   # OR: json name, email, role, phone  # Clean json helper
 ```
 
@@ -191,15 +191,15 @@ app.post '/api/users', ->
 ```rip
 # PARSING: String → Object
 jsonString = '{"name": "John", "age": 30}'
-user = json jsonString  # Returns: { name: "John", age: 30 }
+user = json jsonString  # Returns: name: "John", age: 30
 
 # SERIALIZING: Object → String (when no context)
-data = { name: "John", age: 30 }
+data = name: "John", age: 30
 jsonString = json data  # Returns: '{"name":"John","age":30}'
 
 # RESPONSE: Object → HTTP JSON Response (in endpoint)
 app.post '/users', ->
-  user = { name: "John", age: 30 }
+  user = name: "John", age: 30
   json user  # Sends JSON response to client
 ```
 
@@ -224,14 +224,12 @@ app.post '/api/users', ->
   age = read 'age', { start: 18, end: 120 }
 
   # RESPONSE - just return data!
-  {
-    success: true
-    user: { email, name, age }
-    meta: { created: new Date(), method }
-  }
+  success: true
+  user: email, name, age
+  meta: created: new Date(), method
 
   # OR use smart json helper:
-  # json success: true, user: { email, name, age }
+  # json success: true, user: email, name, age
 ```
 
 **Perfect Sinatra Comparison:**
@@ -253,10 +251,10 @@ app.post '/api/users', ->
   email = read 'email'
   name = read 'name'
 
-  # Just return data!
-  { user: { email, name } }
+    # Just return data!
+  user: email, name
 
-  # OR: json user: { email, name }
+  # OR: json user: email, name
 ```
 
 ### The 36 Built-in Validators
@@ -474,8 +472,8 @@ app.post '/signup', ->  # NO context parameter needed!
   state = read 'state', 'state!'                     # Clean and simple
   age = read 'age', { start: 18, end: 120 }, null    # Pure elegance
 
-  user = createUser! { email, name, phone, state, age } # Use ! suffix for async operations
-  { success: true, user }  # Just return data - cleanest approach!
+  user = createUser! email, name, phone, state, age # Use ! suffix for async operations
+  success: true, user  # Just return data - cleanest approach!
 ```
 
 ### Performance & Production Benefits
@@ -517,13 +515,13 @@ app.use withHelpers
 app.post '/api/users', (ctx) ->
   email = read 'email', 'email!'  # All calls synchronous (middleware pre-parses)
   name = read 'name', 'name!'      # Pure synchronous elegance
-  ctx.json { success: true, user: { email, name } }
+  ctx.json success: true, user: email, name
 
 # STYLE 2: Clean return - ULTIMATE ELEGANCE!
 app.post '/api/users', ->
   email = read 'email', 'email!'  # All calls synchronous (middleware pre-parses)
   name = read 'name', 'name!'      # No async complexity
-  { success: true, user: { email, name } }  # Just return data!
+  success: true, user: email, name  # Just return data!
 ```
 
 ### Migration from Traditional APIs
@@ -533,7 +531,7 @@ Replace verbose validation blocks with single `read()` calls:
 ```rip
 # Instead of 10+ lines of manual validation:
 email = read 'email', 'email!'  # One line does it all
-{ success: true, email }  # Just return data - cleanest approach!
+success: true, email  # Just return data - cleanest approach!
 ```
 
 ## 🎯 Roadmap
