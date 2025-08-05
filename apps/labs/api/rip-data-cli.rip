@@ -11,9 +11,9 @@ mode = args[0] || 'server'
 if mode == 'server'
   console.log '🔥 RipData CLI - Server Mode'
   console.log 'Connecting to http://localhost:8306...'
-  
+
   client = new RipDataClient 'http://localhost:8306'
-  
+
   # Test connection
   try
     health = client.health!
@@ -23,7 +23,7 @@ if mode == 'server'
     console.log '❌ Connection failed:', error.message
     console.log '💡 Make sure rip-data-server is running: bun run data:start'
     process.exit(1)
-  
+
   console.log ''
   console.log '🎯 Interactive RipData REPL'
   console.log 'Type SQL queries and press Enter. Type .exit to quit.'
@@ -33,39 +33,39 @@ if mode == 'server'
   console.log '  .tables'
   console.log '  .schema users'
   console.log ''
-  
+
   # Simple REPL loop
   readline = require 'readline'
   rl = readline.createInterface
     input: process.stdin
     output: process.stdout
     prompt: 'ripdata> '
-  
+
   rl.prompt()
-  
+
   rl.on 'line', (input) ->
     query = input.trim()
-    
+
     if query == '.exit'
       console.log '👋 Goodbye!'
       process.exit(0)
-    
+
     if query == '.tables'
       query = "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
-    
+
     if query.startsWith('.schema ')
       tableName = query.split(' ')[1]
       query = "DESCRIBE #{tableName}"
-    
+
     if query == ''
       rl.prompt()
       return
-    
+
     try
       if query.toLowerCase().startsWith('select') or query.toLowerCase().startsWith('with') or query.toLowerCase().startsWith('describe') or query.includes('information_schema')
         # Read query
         result = client.query! query
-        
+
         if result.length == 0
           console.log '(no rows)'
         else
@@ -78,9 +78,9 @@ if mode == 'server'
           console.table result
     catch error
       console.log '❌ Error:', error.message
-    
+
     rl.prompt()
-  
+
   rl.on 'close', ->
     console.log '👋 Goodbye!'
     process.exit(0)
@@ -89,7 +89,7 @@ else if mode == 'direct'
   console.log '🔥 RipData CLI - Direct File Mode'
   dbPath = args[1] || './db/labs.duckdb'
   console.log "Connecting to #{dbPath}..."
-  
+
   try
     db = new Database dbPath
     conn = db.connect()
@@ -97,40 +97,40 @@ else if mode == 'direct'
   catch error
     console.log '❌ Connection failed:', error.message
     process.exit(1)
-  
+
   console.log ''
   console.log '🎯 Interactive DuckDB REPL (Direct File Access)'
   console.log 'Type SQL queries and press Enter. Type .exit to quit.'
   console.log ''
-  
+
   readline = require 'readline'
   rl = readline.createInterface
     input: process.stdin
     output: process.stdout
     prompt: 'duckdb> '
-  
+
   rl.prompt()
-  
+
   rl.on 'line', (input) ->
     query = input.trim()
-    
+
     if query == '.exit'
       conn.close()
       db.close()
       console.log '👋 Goodbye!'
       process.exit(0)
-    
+
     if query == '.tables'
       query = "SHOW TABLES"
-    
+
     if query.startsWith('.schema ')
       tableName = query.split(' ')[1]
       query = "DESCRIBE #{tableName}"
-    
+
     if query == ''
       rl.prompt()
       return
-    
+
     try
       conn.all query, (err, result) ->
         if err
@@ -144,7 +144,7 @@ else if mode == 'direct'
     catch error
       console.log '❌ Error:', error.message
       rl.prompt()
-  
+
   rl.on 'close', ->
     conn.close()
     db.close()
