@@ -7,8 +7,7 @@
   "scripts": {
     "dev": "../../../packages/server/rip-server.ts . 8305",
     "db:push": "rip-schema db:push",
-    "db:seed": "bun db/seed.rip",
-    "data:start": "bun rip-data-server.rip"
+    "db:seed": "bun db/seed.rip"
   },
   "dependencies": {
     "@rip/data": "workspace:*",
