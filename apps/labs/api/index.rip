@@ -22,23 +22,23 @@ app.use cors
 app.use logger()
 
 # 🔥 Revolutionary middleware that makes everything context-free!
-app.use withHelpers dataClient
+withHelpers app
 
 # Health check
-app.get '/ping', -> 'pong'
+app.get '/ping', (c) -> c.text 'pong'
 
 # ====== CONFIG ROUTES ======
 app.get '/config', ->
   json
-    config:
-      client:
-        appName: 'Labs (Revolutionary Rip + DuckDB)'
-        apiUrl: 'http://localhost:8305'
-        features:
-          auth: true
-          orders: true
-          results: true
-          analytics: !true  # 🔥 NEW: Real-time analytics!
+    appName: 'Labs (Revolutionary Rip + DuckDB)'
+    logo: 'https://via.placeholder.com/200x80/0066cc/ffffff?text=Labs'
+    userAgreementUrl: 'https://example.com/terms'
+    apiUrl: 'http://localhost:8305'
+    features:
+      auth: true
+      orders: true
+      results: true
+      analytics: true  # 🔥 NEW: Real-time analytics!
 
 # ====== AUTH ROUTES ======
 app.post '/auth/code', ->
@@ -155,11 +155,11 @@ app.patch '/user/me', ->
 
   params.push userId
 
-  user = dataClient.execute! """
+  user = dataClient.execute! '''
     UPDATE users SET #{updates.join(', ')}
     WHERE id = ?
     RETURNING *
-  """, params
+  ''', params
 
   json user: user[0]
 
@@ -276,6 +276,13 @@ app.get '/analytics/dashboard', ->
     revenue: revenue
     testPopularity: testPopularity
     generatedAt: new Date()
+
+# Start the server
+Bun.serve
+  port: 8305
+  fetch: app.fetch
+
+console.log 'Listening on http://localhost:8305'
 
 # Export the app
 export default app
