@@ -67,6 +67,10 @@ greet = (name) -> "Hello, #{name}!"
 data = fetch(url)!
 result = processData(data)!
 
+# LEGENDARY regex matching with =~ and _
+state =~ /^([A-Z]{2})$/     # Match and auto-assign to _
+code = _?[1]?.toUpperCase() # Access match groups elegantly
+
 # Pattern matching
 status = switch response.code
   when 200 then 'success'
