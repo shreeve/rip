@@ -22,6 +22,8 @@ type ColumnOptions = {
   size?: number
   precision?: number
   scale?: number
+  min?: number
+  max?: number
   default?: any
   unsigned?: boolean
   unique?: boolean
@@ -129,9 +131,17 @@ export class ColumnBuilder {
       if (typeof arg === 'object' && !Array.isArray(arg)) {
         Object.assign(options, arg)
       }
-      // Array = default value
+      // Array handling - distinguish between ranges and defaults
       else if (Array.isArray(arg)) {
-        options.default = this.parseDefault(arg)
+        // Range array: [min, max] - exactly 2 numbers
+        if (arg.length === 2 && typeof arg[0] === 'number' && typeof arg[1] === 'number') {
+          options.min = Math.min(arg[0], arg[1])
+          options.max = Math.max(arg[0], arg[1])
+        }
+        // Default value array: [value] or multiple values
+        else {
+          options.default = this.parseDefault(arg)
+        }
       }
       // Number = size/precision (context-dependent)
       else if (typeof arg === 'number') {
