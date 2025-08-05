@@ -347,10 +347,17 @@ admin_ids = read 'admins', 'ids'   # Clean and simple
 
 #### **Range Validation (Elegant!)**
 ```rip
+# Numbers: value range
 age = read 'age', [18, 120]        # Between 18 and 120
 priority = read 'priority', [1, 10], 5  # Range 1-10, default 5
 score = read 'score', [0, 100]     # Percentage validation
 rating = read 'rating', [1, 5]     # Star rating system
+
+# Strings: length range  
+username = read 'username', [3, 20]  # 3-20 characters
+title = read 'title', [1, 100]      # 1-100 characters
+bio = read 'bio', [0, 500]          # Up to 500 characters
+code = read 'code', [6, 6]          # Exactly 6 characters
 ```
 
 ### 🔥 Legendary Regex Patterns - The Secret Sauce

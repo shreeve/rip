@@ -170,7 +170,7 @@ parseDateUTC = function(val) {
 // Enhanced read function with miss parameter - the star of the show!
 // Supports both: read(c, key, tag, miss) and read(key, tag, miss) when using withHelpers
 export var read = function(keyOrContext, key = null, tag = null, miss = null) {
-  var _, bam, c, cleanVal, end, error, i, id, idList, len, numVal, originalTag, readData, ref, start, temp, val, validIds;
+  var _, bam, c, cleanVal, end, error, i, id, idList, len, numVal, originalTag, readData, ref, start, strLen, temp, val, validIds;
   // Handle both calling styles: read(c, key, tag, miss) vs read(key, tag, miss)
   if ((keyOrContext != null ? (ref = keyOrContext.req) != null ? ref.method : void 0 : void 0) != null) {
     c = keyOrContext;
@@ -401,11 +401,21 @@ export var read = function(keyOrContext, key = null, tag = null, miss = null) {
         numVal = parseInt(val);
         val = !isNaN(numVal) && numVal >= originalTag.start && numVal <= originalTag.end ? numVal : null;
       } else if (Array.isArray(originalTag) && originalTag.length === 2 && typeof originalTag[0] === 'number' && typeof originalTag[1] === 'number') {
-        // Range check - elegant [min, max] format
-        numVal = parseInt(val);
+        // Range check - elegant [min, max] format for numbers OR string length
         start = Math.min(originalTag[0], originalTag[1]);
         end = Math.max(originalTag[0], originalTag[1]);
-        val = !isNaN(numVal) && numVal >= start && numVal <= end ? numVal : null;
+        
+        // For numeric tags, validate the number value
+        if ((tag === 'id' || tag === 'whole' || tag === 'decimal' || tag === 'money') || (typeof val === 'number')) {
+          numVal = parseInt(val);
+          val = !isNaN(numVal) && numVal >= start && numVal <= end ? numVal : null;
+        // For string-like tags, validate the string length
+        } else if (typeof val === 'string') {
+          strLen = val.length;
+          val = strLen >= start && strLen <= end ? val : null;
+        } else {
+          val = null;
+        }
       }
   }
   // Handle required/optional logic with miss parameter

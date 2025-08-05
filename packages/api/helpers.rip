@@ -275,11 +275,20 @@ export read = (keyOrContext, key = null, tag = null, miss = null) ->
         numVal = parseInt(val)
         val = if !isNaN(numVal) and numVal >= originalTag.start and numVal <= originalTag.end then numVal else null
       else if Array.isArray(originalTag) and originalTag.length == 2 and typeof originalTag[0] == 'number' and typeof originalTag[1] == 'number'
-        # Range check - elegant [min, max] format
-        numVal = parseInt(val)
+        # Range check - elegant [min, max] format for numbers OR string length
         start = Math.min(originalTag[0], originalTag[1])
         end = Math.max(originalTag[0], originalTag[1])
-        val = if !isNaN(numVal) and numVal >= start and numVal <= end then numVal else null
+        
+        # For numeric tags, validate the number value
+        if tag in ['id', 'whole', 'decimal', 'money'] or (typeof val == 'number')
+          numVal = parseInt(val)
+          val = if !isNaN(numVal) and numVal >= start and numVal <= end then numVal else null
+        # For string-like tags, validate the string length
+        else if typeof val == 'string'
+          strLen = val.length
+          val = if strLen >= start and strLen <= end then val else null
+        else
+          val = null
 
   # Handle required/optional logic with miss parameter
   if isBlank(val)
