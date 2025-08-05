@@ -72,9 +72,10 @@ export class ZodGenerator {
 
     // Add default
     if (options.default !== undefined) {
-      const defaultVal = typeof options.default === 'string'
-        ? `'${options.default}'`
-        : JSON.stringify(options.default)
+      const defaultVal =
+        typeof options.default === 'string'
+          ? `'${options.default}'`
+          : JSON.stringify(options.default)
       zodChain += `.default(${defaultVal})`
     }
 
@@ -87,9 +88,9 @@ export class ZodGenerator {
   }
 
   generateModel(name: string, fields: any[]): string {
-    const fieldDefs = fields.map(field =>
-      this.generateField(field.name, field.type, field.options)
-    ).join(',\n')
+    const fieldDefs = fields
+      .map(field => this.generateField(field.name, field.type, field.options))
+      .join(',\n')
 
     return `
 export const ${name}Schema = z.object({
@@ -102,9 +103,9 @@ export type ${name} = z.infer<typeof ${name}Schema>
 
   generate(models: any[]): string {
     const imports = `import { z } from 'zod'\n`
-    const schemas = models.map(model =>
-      this.generateModel(model.name, model.fields)
-    ).join('\n')
+    const schemas = models
+      .map(model => this.generateModel(model.name, model.fields))
+      .join('\n')
 
     return imports + schemas
   }

@@ -24,7 +24,7 @@ export const UserSchema = z.object({
   age: z.number().int().min(18).max(120).optional(),
   active: z.boolean().default(true),
   preferences: z.record(z.unknown()).default({}),
-  lastLoginAt: z.date().optional()
+  lastLoginAt: z.date().optional(),
 })
 
 export type User = z.infer<typeof UserSchema>
@@ -33,7 +33,7 @@ export type User = z.infer<typeof UserSchema>
 export const UserValidation = {
   parse: (data: unknown) => UserSchema.parse(data),
   safeParse: (data: unknown) => UserSchema.safeParse(data),
-  isValid: (data: unknown) => UserSchema.safeParse(data).success
+  isValid: (data: unknown) => UserSchema.safeParse(data).success,
 }
 
 // Example of more complex generation:
@@ -50,13 +50,14 @@ export const UserValidation = {
     "Published posts must have a publishedAt date"
 */
 
-export const PostSchema = z.object({
-  userId: z.bigint(),
-  title: z.string().max(200),
-  content: z.string(),
-  status: z.enum(['draft', 'published', 'archived']).default('draft'),
-  publishedAt: z.date().optional()
-}).refine(
-  (post) => post.publishedAt || post.status !== 'published',
-  { message: "Published posts must have a publishedAt date" }
-)
+export const PostSchema = z
+  .object({
+    userId: z.bigint(),
+    title: z.string().max(200),
+    content: z.string(),
+    status: z.enum(['draft', 'published', 'archived']).default('draft'),
+    publishedAt: z.date().optional(),
+  })
+  .refine(post => post.publishedAt || post.status !== 'published', {
+    message: 'Published posts must have a publishedAt date',
+  })

@@ -6,14 +6,14 @@
  */
 
 export interface RipCompilerOptions {
-  bare?: boolean;
-  sourceMap?: boolean;
-  filename?: string;
+  bare?: boolean
+  sourceMap?: boolean
+  filename?: string
 }
 
 export interface CompileResult {
-  js: string;
-  sourceMap?: string;
+  js: string
+  sourceMap?: string
 }
 
 /**
@@ -22,11 +22,16 @@ export interface CompileResult {
  * @param options - Compilation options
  * @returns Compiled JavaScript and optional source map
  */
-export function compile(source: string, options: RipCompilerOptions = {}): CompileResult {
+export function compile(
+  source: string,
+  options: RipCompilerOptions = {},
+): CompileResult {
   // TODO: Implement clean RIP compiler
   // For now, this is a placeholder that will eventually replace the CoffeeScript-based implementation
 
-  throw new Error('RIP clean compiler not yet implemented - currently using CoffeeScript-based implementation in /coffeescript');
+  throw new Error(
+    'RIP clean compiler not yet implemented - currently using CoffeeScript-based implementation in /coffeescript',
+  )
 }
 
 /**
@@ -36,17 +41,17 @@ export function compile(source: string, options: RipCompilerOptions = {}): Compi
  */
 export function parse(source: string): any {
   // TODO: Implement RIP parser
-  throw new Error('RIP parser not yet implemented');
+  throw new Error('RIP parser not yet implemented')
 }
 
 // Export version info
-export const VERSION = '0.1.0';
+export const VERSION = '0.1.0'
 export const FEATURES = [
-  'async-bang-syntax',      // fetch!
-  'regex-match-operator',   // =~ with automatic _
-  'clean-function-syntax',  // (x) -> x * 2
-  'null-safe-chaining',     // obj?.prop?.method?()
-  'pattern-matching',       // switch expressions
-] as const;
+  'async-bang-syntax', // fetch!
+  'regex-match-operator', // =~ with automatic _
+  'clean-function-syntax', // (x) -> x * 2
+  'null-safe-chaining', // obj?.prop?.method?()
+  'pattern-matching', // switch expressions
+] as const
 
-export default { compile, parse, VERSION, FEATURES };
+export default { compile, parse, VERSION, FEATURES }

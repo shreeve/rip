@@ -18,12 +18,12 @@
 export {}
 
 // Configuration
-const workerId = parseInt(process.argv[2] ?? '0')
+const workerId = Number.parseInt(process.argv[2] ?? '0')
 const workerNum = workerId + 1 // Human-friendly worker number (1-indexed)
 
 // Set process title for better visibility
 process.title = `rip-worker-${workerNum}`
-const baseMaxRequests = parseInt(process.argv[3] ?? '100')
+const baseMaxRequests = Number.parseInt(process.argv[3] ?? '100')
 
 // 🎯 Rolling restart strategy: Stagger request limits to prevent simultaneous shutdowns
 // Worker 0: 90-110% of base limit, Worker 1: 95-105%, Worker 2: 100-120%, etc.
@@ -112,16 +112,14 @@ const main = async () => {
   // Shared timestamp function
   const getTimestamp = () => {
     const now = new Date()
-    return (
+    return `${
       now.toISOString().slice(0, 23).replace('T', ' ') +
       (now.getTimezoneOffset() <= 0 ? '+' : '-') +
       String(Math.abs(Math.floor(now.getTimezoneOffset() / 60))).padStart(
         2,
         '0',
-      ) +
-      ':' +
-      String(Math.abs(now.getTimezoneOffset() % 60)).padStart(2, '0')
-    )
+      )
+    }:${String(Math.abs(now.getTimezoneOffset() % 60)).padStart(2, '0')}`
   }
 
   // Load the user's Rip application

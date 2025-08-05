@@ -7,7 +7,7 @@
   },
   "files": {
     "ignoreUnknown": false,
-    "experimentalScannerIgnores": ["coffeescript/**", "**/node_modules/**"]
+    "ignore": ["coffeescript/**", "**/node_modules/**"]
   },
   "formatter": {
     "enabled": true,
@@ -43,14 +43,6 @@
       "indentStyle": "space",
       "indentWidth": 2,
       "trailingCommas": "none"
-    }
-  },
-  "assist": {
-    "enabled": true,
-    "actions": {
-      "source": {
-        "organizeImports": "on"
-      }
     }
   }
 }

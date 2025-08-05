@@ -9,27 +9,34 @@ import { TableBuilder } from './builder'
 
 console.log('📋 Demo: Schema Dumping - Complete Transparency\n')
 
-console.log('🎯 Creating schema with mixed manual and auto-generated indexes...')
-console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+console.log(
+  '🎯 Creating schema with mixed manual and auto-generated indexes...',
+)
+console.log(
+  '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+)
 
 // Create a realistic table schema
 const userTable = new TableBuilder('users')
 
 // Add fields with mixed indexing scenarios
-userTable.string('email!', { unique: true })                    // Will auto-generate unique index
-userTable.string('username!', { unique: true })                 // Will auto-generate unique index
-userTable.string('firstName!', 100)                             // Required but not unique
-userTable.string('lastName!', 100)                              // Required but not unique
-userTable.string('phone!', 20, { unique: true })                // Will auto-generate unique index
-userTable.text('bio')                                           // Optional field
-userTable.integer('external_id', { unique: true })              // Will auto-generate unique index
+userTable.string('email!', { unique: true }) // Will auto-generate unique index
+userTable.string('username!', { unique: true }) // Will auto-generate unique index
+userTable.string('firstName!', 100) // Required but not unique
+userTable.string('lastName!', 100) // Required but not unique
+userTable.string('phone!', 20, { unique: true }) // Will auto-generate unique index
+userTable.text('bio') // Optional field
+userTable.integer('external_id', { unique: true }) // Will auto-generate unique index
 
 // Add some manual indexes
-userTable.index('firstName')                                     // Manual non-unique index
-userTable.index('lastName')                                      // Manual non-unique index
-userTable.index(['firstName', 'lastName'])                       // Compound index
-userTable.index('email', { unique: true })                      // Explicit unique (matches auto)
-userTable.index('username', { unique: true, partial: 'substr(username, 1, 10)' }) // Custom partial index
+userTable.index('firstName') // Manual non-unique index
+userTable.index('lastName') // Manual non-unique index
+userTable.index(['firstName', 'lastName']) // Compound index
+userTable.index('email', { unique: true }) // Explicit unique (matches auto)
+userTable.index('username', {
+  unique: true,
+  partial: 'substr(username, 1, 10)',
+}) // Custom partial index
 
 console.log('\n1️⃣  Original Schema Definition:')
 console.log('```coffeescript')
@@ -41,21 +48,27 @@ console.log("  @string 'lastName!', 100")
 console.log("  @string 'phone!', 20, unique: true")
 console.log("  @text   'bio'")
 console.log("  @integer 'external_id', unique: true")
-console.log("")
-console.log("  # Manual indexes")
+console.log('')
+console.log('  # Manual indexes')
 console.log("  @index 'firstName'")
 console.log("  @index 'lastName'")
 console.log("  @index ['firstName', 'lastName']")
 console.log("  @index 'email', unique: true")
-console.log("  @index 'username', unique: true, partial: 'substr(username, 1, 10)'")
+console.log(
+  "  @index 'username', unique: true, partial: 'substr(username, 1, 10)'",
+)
 console.log('```')
 
 console.log('\n2️⃣  Complete Dumped Schema (including auto-generated):')
-console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+console.log(
+  '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+)
 console.log('```coffeescript')
 console.log(userTable.dumpSchema())
 console.log('```')
-console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+console.log(
+  '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+)
 
 console.log('\n3️⃣  Index Analysis:')
 const allIndexes = userTable.getIndexes()
@@ -71,7 +84,9 @@ console.log(`   👤 Manual: ${manualIndexes.length}`)
 
 console.log('\n🤖 Auto-Generated Indexes:')
 autoIndexes.forEach(idx => {
-  console.log(`   • ${idx.columns.join(', ')} (${idx.unique ? 'unique' : 'index'})`)
+  console.log(
+    `   • ${idx.columns.join(', ')} (${idx.unique ? 'unique' : 'index'})`,
+  )
 })
 
 console.log('\n👤 Manual Indexes:')

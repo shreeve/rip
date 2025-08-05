@@ -7,7 +7,6 @@
  */
 
 import { Database } from 'bun:sqlite'
-import mysql from 'mysql2/promise'
 import { existsSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -15,6 +14,7 @@ import { parseArgs } from 'node:util'
 import { sql } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { drizzle as drizzleMySQL } from 'drizzle-orm/mysql2'
+import mysql from 'mysql2/promise'
 import { schema as schemaBuilder } from './builder'
 import { ZodGenerator } from './zod-generator'
 
@@ -122,7 +122,7 @@ function generateCreateTableSQL(tableName: string, table: any): string {
           }
         } else if (typeof col.default === 'function') {
           // For SQL functions like CURRENT_TIMESTAMP
-          def += ` DEFAULT CURRENT_TIMESTAMP`
+          def += ' DEFAULT CURRENT_TIMESTAMP'
         } else {
           def += ` DEFAULT ${typeof col.default === 'string' ? `'${col.default}'` : col.default}`
         }
@@ -312,8 +312,8 @@ async function zodGenerate() {
         { name: 'meta', type: 'json', options: {} },
         { name: 'code', type: 'string', options: { unique: true } },
         { name: 'codeExpiresAt', type: 'datetime', options: {} },
-        { name: 'admin', type: 'boolean', options: { default: false } }
-      ]
+        { name: 'admin', type: 'boolean', options: { default: false } },
+      ],
     })
 
     models.push({
@@ -328,8 +328,8 @@ async function zodGenerate() {
         { name: 'meta!', type: 'json', options: {} },
         { name: 'shippedAt', type: 'datetime', options: {} },
         { name: 'deliveredAt', type: 'datetime', options: {} },
-        { name: 'completedAt', type: 'datetime', options: {} }
-      ]
+        { name: 'completedAt', type: 'datetime', options: {} },
+      ],
     })
 
     models.push({
@@ -338,11 +338,15 @@ async function zodGenerate() {
         { name: 'id!', type: 'integer', options: {} },
         { name: 'userId!', type: 'integer', options: {} },
         { name: 'testId!', type: 'integer', options: {} },
-        { name: 'barcode!', type: 'string', options: { size: 50, unique: true } },
+        {
+          name: 'barcode!',
+          type: 'string',
+          options: { size: 50, unique: true },
+        },
         { name: 'registeredAt', type: 'datetime', options: {} },
         { name: 'collectedAt', type: 'datetime', options: {} },
-        { name: 'reportedAt', type: 'datetime', options: {} }
-      ]
+        { name: 'reportedAt', type: 'datetime', options: {} },
+      ],
     })
 
     models.push({
@@ -350,8 +354,8 @@ async function zodGenerate() {
       fields: [
         { name: 'id!', type: 'integer', options: {} },
         { name: 'userId!', type: 'integer', options: {} },
-        { name: 'resultUrl!', type: 'string', options: { size: 255 } }
-      ]
+        { name: 'resultUrl!', type: 'string', options: { size: 255 } },
+      ],
     })
 
     const generator = new ZodGenerator()
@@ -363,7 +367,6 @@ async function zodGenerate() {
     if (values.verbose) {
       console.error('✅ Zod schemas generated successfully!')
     }
-
   } catch (error: any) {
     console.error(`❌ Error generating Zod schemas: ${error.message}`)
     if (values.verbose) {
@@ -405,21 +408,29 @@ function mapSqliteTypeToRip(sqliteType: string, fieldName: string): string {
   if (type.includes('INTEGER')) return '@integer'
   if (type.includes('TEXT')) {
     // Check field name for JSON hints
-    if (fieldName.toLowerCase().includes('meta') ||
-        fieldName.toLowerCase().includes('cart') ||
-        fieldName.toLowerCase().includes('address') ||
-        fieldName.toLowerCase().includes('json') ||
-        fieldName.toLowerCase().includes('data')) {
+    if (
+      fieldName.toLowerCase().includes('meta') ||
+      fieldName.toLowerCase().includes('cart') ||
+      fieldName.toLowerCase().includes('address') ||
+      fieldName.toLowerCase().includes('json') ||
+      fieldName.toLowerCase().includes('data')
+    ) {
       return '@json'
     }
     return '@string'
   }
   if (type.includes('VARCHAR')) return '@string'
   if (type.includes('CHAR')) return '@string'
-  if (type.includes('REAL') || type.includes('NUMERIC') || type.includes('DECIMAL')) return '@decimal'
+  if (
+    type.includes('REAL') ||
+    type.includes('NUMERIC') ||
+    type.includes('DECIMAL')
+  )
+    return '@decimal'
   if (type.includes('BLOB')) return '@blob'
   if (type.includes('BOOLEAN')) return '@boolean'
-  if (type.includes('DATETIME') || type.includes('TIMESTAMP')) return '@datetime'
+  if (type.includes('DATETIME') || type.includes('TIMESTAMP'))
+    return '@datetime'
   if (type.includes('DATE')) return '@date'
   if (type.includes('JSON')) return '@json'
 
@@ -431,26 +442,57 @@ function mapSqliteTypeToRip(sqliteType: string, fieldName: string): string {
 function mapMysqlTypeToRip(mysqlType: string, fieldName: string): string {
   const type = mysqlType.toUpperCase()
 
-  if (type.includes('INT') || type.includes('TINYINT') || type.includes('SMALLINT') ||
-      type.includes('MEDIUMINT') || type.includes('BIGINT')) return '@integer'
-  if (type.includes('VARCHAR') || type.includes('CHAR') || type.includes('TEXT') ||
-      type.includes('TINYTEXT') || type.includes('MEDIUMTEXT') || type.includes('LONGTEXT')) {
+  if (
+    type.includes('INT') ||
+    type.includes('TINYINT') ||
+    type.includes('SMALLINT') ||
+    type.includes('MEDIUMINT') ||
+    type.includes('BIGINT')
+  )
+    return '@integer'
+  if (
+    type.includes('VARCHAR') ||
+    type.includes('CHAR') ||
+    type.includes('TEXT') ||
+    type.includes('TINYTEXT') ||
+    type.includes('MEDIUMTEXT') ||
+    type.includes('LONGTEXT')
+  ) {
     // Check field name for JSON hints
-    if (fieldName.toLowerCase().includes('meta') ||
-        fieldName.toLowerCase().includes('cart') ||
-        fieldName.toLowerCase().includes('address') ||
-        fieldName.toLowerCase().includes('json') ||
-        fieldName.toLowerCase().includes('data') ||
-        fieldName.toLowerCase().includes('config') ||
-        fieldName.toLowerCase().includes('settings')) {
+    if (
+      fieldName.toLowerCase().includes('meta') ||
+      fieldName.toLowerCase().includes('cart') ||
+      fieldName.toLowerCase().includes('address') ||
+      fieldName.toLowerCase().includes('json') ||
+      fieldName.toLowerCase().includes('data') ||
+      fieldName.toLowerCase().includes('config') ||
+      fieldName.toLowerCase().includes('settings')
+    ) {
       return '@json'
     }
     return '@string'
   }
-  if (type.includes('DECIMAL') || type.includes('NUMERIC') || type.includes('FLOAT') || type.includes('DOUBLE')) return '@decimal'
-  if (type.includes('BLOB') || type.includes('BINARY') || type.includes('VARBINARY')) return '@blob'
-  if (type.includes('BOOLEAN') || type.includes('BOOL') || type === 'TINYINT(1)') return '@boolean'
-  if (type.includes('DATETIME') || type.includes('TIMESTAMP')) return '@datetime'
+  if (
+    type.includes('DECIMAL') ||
+    type.includes('NUMERIC') ||
+    type.includes('FLOAT') ||
+    type.includes('DOUBLE')
+  )
+    return '@decimal'
+  if (
+    type.includes('BLOB') ||
+    type.includes('BINARY') ||
+    type.includes('VARBINARY')
+  )
+    return '@blob'
+  if (
+    type.includes('BOOLEAN') ||
+    type.includes('BOOL') ||
+    type === 'TINYINT(1)'
+  )
+    return '@boolean'
+  if (type.includes('DATETIME') || type.includes('TIMESTAMP'))
+    return '@datetime'
   if (type.includes('DATE')) return '@date'
   if (type.includes('TIME')) return '@string' // No dedicated time type in Rip yet
   if (type.includes('JSON')) return '@json'
@@ -463,7 +505,7 @@ function mapMysqlTypeToRip(mysqlType: string, fieldName: string): string {
 // Extract length from SQLite type (e.g., VARCHAR(255) -> 255)
 function extractLength(sqliteType: string): number | null {
   const match = sqliteType.match(/\((\d+)\)/)
-  return match ? parseInt(match[1]) : null
+  return match ? Number.parseInt(match[1]) : null
 }
 
 // Detect email fields by name
@@ -505,7 +547,7 @@ async function introspectMysqlDatabase(): Promise<string> {
   // Create MySQL connection
   const connection = await mysql.createConnection({
     host: values.host,
-    port: parseInt(values.port || '3306'),
+    port: Number.parseInt(values.port || '3306'),
     user: values.user,
     password: values.password || '',
     database: dbName,
@@ -513,21 +555,27 @@ async function introspectMysqlDatabase(): Promise<string> {
 
   try {
     // Get all tables
-    const [tables] = await connection.execute(`
+    const [tables] = await connection.execute(
+      `
       SELECT TABLE_NAME as name
       FROM INFORMATION_SCHEMA.TABLES
       WHERE TABLE_SCHEMA = ?
       AND TABLE_TYPE = 'BASE TABLE'
       ORDER BY TABLE_NAME
-    `, [dbName])
+    `,
+      [dbName],
+    )
 
     if (!Array.isArray(tables) || tables.length === 0) {
       throw new Error('No tables found in database')
     }
 
-    console.log(`📊 Found ${tables.length} tables: ${tables.map((t: any) => t.name).join(', ')}\n`)
+    console.log(
+      `📊 Found ${tables.length} tables: ${tables.map((t: any) => t.name).join(', ')}\n`,
+    )
 
-    let schemaOutput = "import { schema } from '@rip/schema'\n\nexport default schema ->\n\n"
+    let schemaOutput =
+      "import { schema } from '@rip/schema'\n\nexport default schema ->\n\n"
 
     for (const table of tables) {
       const tableName = table.name
@@ -537,26 +585,34 @@ async function introspectMysqlDatabase(): Promise<string> {
       }
 
       // Get column information
-      const [columns] = await connection.execute(`
+      const [columns] = (await connection.execute(
+        `
         SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT, COLUMN_TYPE, COLUMN_KEY, EXTRA
         FROM INFORMATION_SCHEMA.COLUMNS
         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
         ORDER BY ORDINAL_POSITION
-      `, [dbName, tableName]) as [MysqlColumn[], any]
+      `,
+        [dbName, tableName],
+      )) as [MysqlColumn[], any]
 
       // Get index information
-      const [indexes] = await connection.execute(`
+      const [indexes] = (await connection.execute(
+        `
         SELECT INDEX_NAME, COLUMN_NAME, NON_UNIQUE, SEQ_IN_INDEX
         FROM INFORMATION_SCHEMA.STATISTICS
         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
         ORDER BY INDEX_NAME, SEQ_IN_INDEX
-      `, [dbName, tableName]) as [MysqlIndex[], any]
+      `,
+        [dbName, tableName],
+      )) as [MysqlIndex[], any]
 
       // Check if we have timestamp fields to skip
-      const hasCreatedAt = columns.some(c =>
-        c.COLUMN_NAME === 'created_at' || c.COLUMN_NAME === 'createdAt')
-      const hasUpdatedAt = columns.some(c =>
-        c.COLUMN_NAME === 'updated_at' || c.COLUMN_NAME === 'updatedAt')
+      const hasCreatedAt = columns.some(
+        c => c.COLUMN_NAME === 'created_at' || c.COLUMN_NAME === 'createdAt',
+      )
+      const hasUpdatedAt = columns.some(
+        c => c.COLUMN_NAME === 'updated_at' || c.COLUMN_NAME === 'updatedAt',
+      )
       const skipTimestamps = hasCreatedAt && hasUpdatedAt
 
       schemaOutput += `  @table '${tableName}', ->\n`
@@ -564,8 +620,13 @@ async function introspectMysqlDatabase(): Promise<string> {
       // Output each column with perfect formatting
       for (const col of columns) {
         // Skip timestamp fields if we'll add @timestamps() instead
-        if (skipTimestamps && (col.COLUMN_NAME === 'created_at' || col.COLUMN_NAME === 'createdAt' ||
-                              col.COLUMN_NAME === 'updated_at' || col.COLUMN_NAME === 'updatedAt')) {
+        if (
+          skipTimestamps &&
+          (col.COLUMN_NAME === 'created_at' ||
+            col.COLUMN_NAME === 'createdAt' ||
+            col.COLUMN_NAME === 'updated_at' ||
+            col.COLUMN_NAME === 'updatedAt')
+        ) {
           continue
         }
 
@@ -583,10 +644,14 @@ async function introspectMysqlDatabase(): Promise<string> {
         }
 
         // Check for unique constraints
-        const uniqueIndexes = indexes.filter(idx =>
-          idx.NON_UNIQUE === 0 && idx.COLUMN_NAME === col.COLUMN_NAME && idx.INDEX_NAME !== 'PRIMARY')
+        const uniqueIndexes = indexes.filter(
+          idx =>
+            idx.NON_UNIQUE === 0 &&
+            idx.COLUMN_NAME === col.COLUMN_NAME &&
+            idx.INDEX_NAME !== 'PRIMARY',
+        )
         if (uniqueIndexes.length > 0) {
-          fieldName = fieldName.replace('!', '') + '#!'
+          fieldName = `${fieldName.replace('!', '')}#!`
         }
 
         // Special handling for email fields
@@ -612,7 +677,10 @@ async function introspectMysqlDatabase(): Promise<string> {
         }
 
         // Default values
-        if (col.COLUMN_DEFAULT !== null && col.COLUMN_DEFAULT !== 'CURRENT_TIMESTAMP') {
+        if (
+          col.COLUMN_DEFAULT !== null &&
+          col.COLUMN_DEFAULT !== 'CURRENT_TIMESTAMP'
+        ) {
           if (col.COLUMN_DEFAULT === '0' && fieldType === '@boolean') {
             options.push('default: false')
           } else if (col.COLUMN_DEFAULT === '1' && fieldType === '@boolean') {
@@ -630,7 +698,7 @@ async function introspectMysqlDatabase(): Promise<string> {
 
       // Add timestamps if we detected them earlier
       if (skipTimestamps) {
-        schemaOutput += `    @timestamps()\n`
+        schemaOutput += '    @timestamps()\n'
       }
 
       schemaOutput += '\n'
@@ -643,7 +711,8 @@ async function introspectMysqlDatabase(): Promise<string> {
         if (processedIndexes.has(idx.INDEX_NAME)) continue
 
         // Get all columns for this index
-        const indexColumns = indexes.filter(i => i.INDEX_NAME === idx.INDEX_NAME)
+        const indexColumns = indexes
+          .filter(i => i.INDEX_NAME === idx.INDEX_NAME)
           .sort((a, b) => a.SEQ_IN_INDEX - b.SEQ_IN_INDEX)
           .map(i => i.COLUMN_NAME)
 
@@ -668,7 +737,6 @@ async function introspectMysqlDatabase(): Promise<string> {
     }
 
     return schemaOutput
-
   } finally {
     await connection.end()
   }
@@ -698,9 +766,12 @@ async function introspectDatabase(dbPath: string): Promise<string> {
     throw new Error('No tables found in database')
   }
 
-  console.log(`📊 Found ${tables.length} tables: ${tables.map((t: any) => t.name).join(', ')}\n`)
+  console.log(
+    `📊 Found ${tables.length} tables: ${tables.map((t: any) => t.name).join(', ')}\n`,
+  )
 
-  let schemaOutput = "import { schema } from '@rip/schema'\n\nexport default schema ->\n\n"
+  let schemaOutput =
+    "import { schema } from '@rip/schema'\n\nexport default schema ->\n\n"
 
   for (const table of tables) {
     const tableName = table.name
@@ -710,10 +781,14 @@ async function introspectDatabase(dbPath: string): Promise<string> {
     }
 
     // Get column information
-    const columns: DbColumn[] = await db.all(sql.raw(`PRAGMA table_info(${tableName})`))
+    const columns: DbColumn[] = await db.all(
+      sql.raw(`PRAGMA table_info(${tableName})`),
+    )
 
     // Get index information
-    const indexes: DbIndex[] = await db.all(sql.raw(`PRAGMA index_list(${tableName})`))
+    const indexes: DbIndex[] = await db.all(
+      sql.raw(`PRAGMA index_list(${tableName})`),
+    )
 
     // Build table definition using our TableBuilder
     const tableBuilder = new (require('./builder').TableBuilder)(tableName, {})
@@ -771,9 +846,11 @@ async function introspectDatabase(dbPath: string): Promise<string> {
       // Check for unique constraints in indexes
       for (const idx of indexes) {
         if (idx.unique === 1) {
-          const indexInfo: DbIndexInfo[] = await db.all(sql.raw(`PRAGMA index_info(${idx.name})`))
+          const indexInfo: DbIndexInfo[] = await db.all(
+            sql.raw(`PRAGMA index_info(${idx.name})`),
+          )
           if (indexInfo.length === 1 && indexInfo[0].name === col.name) {
-            fieldName = fieldName.replace('!', '') + '#!'
+            fieldName = `${fieldName.replace('!', '')}#!`
             uniqueFields.add(col.name)
             break
           }
@@ -792,15 +869,24 @@ async function introspectDatabase(dbPath: string): Promise<string> {
     schemaOutput += `  @table '${tableName}', ->\n`
 
     // Check if we have timestamp fields to skip
-    const hasCreatedAt = columns.some(c => c.name === 'created_at' || c.name === 'createdAt')
-    const hasUpdatedAt = columns.some(c => c.name === 'updated_at' || c.name === 'updatedAt')
+    const hasCreatedAt = columns.some(
+      c => c.name === 'created_at' || c.name === 'createdAt',
+    )
+    const hasUpdatedAt = columns.some(
+      c => c.name === 'updated_at' || c.name === 'updatedAt',
+    )
     const skipTimestamps = hasCreatedAt && hasUpdatedAt
 
     // Output each column with perfect formatting
     for (const col of columns) {
       // Skip timestamp fields if we'll add @timestamps() instead
-      if (skipTimestamps && (col.name === 'created_at' || col.name === 'createdAt' ||
-                            col.name === 'updated_at' || col.name === 'updatedAt')) {
+      if (
+        skipTimestamps &&
+        (col.name === 'created_at' ||
+          col.name === 'createdAt' ||
+          col.name === 'updated_at' ||
+          col.name === 'updatedAt')
+      ) {
         continue
       }
 
@@ -820,9 +906,11 @@ async function introspectDatabase(dbPath: string): Promise<string> {
       // Check for unique constraints
       for (const idx of indexes) {
         if (idx.unique === 1) {
-          const indexInfo: DbIndexInfo[] = await db.all(sql.raw(`PRAGMA index_info(${idx.name})`))
+          const indexInfo: DbIndexInfo[] = await db.all(
+            sql.raw(`PRAGMA index_info(${idx.name})`),
+          )
           if (indexInfo.length === 1 && indexInfo[0].name === col.name) {
-            fieldName = fieldName.replace('!', '') + '#!'
+            fieldName = `${fieldName.replace('!', '')}#!`
             break
           }
         }
@@ -869,7 +957,7 @@ async function introspectDatabase(dbPath: string): Promise<string> {
 
     // Add timestamps if we detected them earlier
     if (skipTimestamps) {
-      schemaOutput += `    @timestamps()\n`
+      schemaOutput += '    @timestamps()\n'
     }
 
     schemaOutput += '\n'
@@ -883,7 +971,9 @@ async function introspectDatabase(dbPath: string): Promise<string> {
 
     if (manualIndexes.length > 0) {
       for (const idx of manualIndexes) {
-        const indexInfo: DbIndexInfo[] = await db.all(sql.raw(`PRAGMA index_info(${idx.name})`))
+        const indexInfo: DbIndexInfo[] = await db.all(
+          sql.raw(`PRAGMA index_info(${idx.name})`),
+        )
         const columnNames = indexInfo.map(info => info.name)
 
         if (columnNames.length === 1) {
@@ -904,7 +994,9 @@ async function schemaDump() {
   try {
     if (values['from-db']) {
       console.log('🔍 Database Schema Introspection')
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+      console.log(
+        '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+      )
       console.log('')
 
       let schemaOutput: string
@@ -925,7 +1017,9 @@ async function schemaDump() {
         writeFileSync(outputPath, schemaOutput, 'utf8')
 
         console.log('📋 Generated Rip Schema:')
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+        console.log(
+          '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+        )
         console.log('')
         console.log('✅ Database schema introspection completed successfully!')
         console.log(`💾 Schema saved to: ${outputPath}`)
@@ -933,15 +1027,18 @@ async function schemaDump() {
       } else {
         // Output to console
         console.log('📋 Generated Rip Schema:')
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+        console.log(
+          '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+        )
         console.log('')
         console.log(schemaOutput)
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+        console.log(
+          '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+        )
         console.log('')
         console.log('✅ Database schema introspection completed successfully!')
         console.log('💡 Copy the above schema to your schema.rip file')
       }
-
     } else {
       // Original schema file parsing (placeholder)
       const schemaPath = join(process.cwd(), values.schema!)
@@ -975,27 +1072,44 @@ async function schemaDump() {
         // Save to file
         writeFileSync(values.output, exampleOutput, 'utf8')
 
-        console.log('📋 Complete Schema Dump (including auto-generated indexes)')
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+        console.log(
+          '📋 Complete Schema Dump (including auto-generated indexes)',
+        )
+        console.log(
+          '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+        )
         console.log('')
         console.log('✅ Schema dump completed successfully!')
         console.log(`💾 Schema saved to: ${values.output}`)
-        console.log('💡 Note: Use --from-db flag to introspect from database instead!')
-        console.log('💡 Example: rip-schema schema:dump --from-db -d ./db/labs.db')
+        console.log(
+          '💡 Note: Use --from-db flag to introspect from database instead!',
+        )
+        console.log(
+          '💡 Example: rip-schema schema:dump --from-db -d ./db/labs.db',
+        )
       } else {
         // Output to console
-        console.log('📋 Complete Schema Dump (including auto-generated indexes)')
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+        console.log(
+          '📋 Complete Schema Dump (including auto-generated indexes)',
+        )
+        console.log(
+          '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+        )
         console.log('')
         console.log(exampleOutput)
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+        console.log(
+          '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+        )
         console.log('')
-        console.log('💡 Note: Use --from-db flag to introspect from database instead!')
-        console.log('💡 Example: rip-schema schema:dump --from-db -d ./db/labs.db')
+        console.log(
+          '💡 Note: Use --from-db flag to introspect from database instead!',
+        )
+        console.log(
+          '💡 Example: rip-schema schema:dump --from-db -d ./db/labs.db',
+        )
         console.log('✅ Schema dump completed successfully!')
       }
     }
-
   } catch (error: any) {
     console.error(`❌ Error dumping schema: ${error.message}`)
     if (values.verbose) {

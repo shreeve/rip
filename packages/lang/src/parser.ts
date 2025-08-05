@@ -5,41 +5,41 @@
  * Future clean implementation - currently under construction.
  */
 
-import { Token, TokenType } from './lexer.ts';
+import { type Token, TokenType } from './lexer.ts'
 
 export interface ASTNode {
-  type: string;
-  line: number;
-  column: number;
+  type: string
+  line: number
+  column: number
 }
 
 export interface FunctionNode extends ASTNode {
-  type: 'Function';
-  params: string[];
-  body: ASTNode[];
-  isAsync: boolean;  // For functions with ! suffix calls
+  type: 'Function'
+  params: string[]
+  body: ASTNode[]
+  isAsync: boolean // For functions with ! suffix calls
 }
 
 export interface RegexMatchNode extends ASTNode {
-  type: 'RegexMatch';
-  left: ASTNode;     // The value being matched
-  right: ASTNode;    // The regex pattern
-  autoAssign: true;  // Automatically assigns to _ variable
+  type: 'RegexMatch'
+  left: ASTNode // The value being matched
+  right: ASTNode // The regex pattern
+  autoAssign: true // Automatically assigns to _ variable
 }
 
 export interface CallNode extends ASTNode {
-  type: 'Call';
-  callee: ASTNode;
-  args: ASTNode[];
-  isAsync: boolean;  // For calls with ! suffix
+  type: 'Call'
+  callee: ASTNode
+  args: ASTNode[]
+  isAsync: boolean // For calls with ! suffix
 }
 
 export class Parser {
-  private tokens: Token[];
-  private position: number = 0;
+  private tokens: Token[]
+  private position = 0
 
   constructor(tokens: Token[]) {
-    this.tokens = tokens;
+    this.tokens = tokens
   }
 
   parse(): ASTNode[] {
@@ -49,21 +49,23 @@ export class Parser {
     // - Clean function syntax ((x) -> x * 2)
     // - All CoffeeScript-inspired features
 
-    throw new Error('RIP parser not yet implemented - building the 747 mid-flight!');
+    throw new Error(
+      'RIP parser not yet implemented - building the 747 mid-flight!',
+    )
   }
 
   private parseExpression(): ASTNode {
     // TODO: Implement expression parsing
-    throw new Error('Expression parsing not implemented');
+    throw new Error('Expression parsing not implemented')
   }
 
   private parseFunction(): FunctionNode {
     // TODO: Implement function parsing with async detection
-    throw new Error('Function parsing not implemented');
+    throw new Error('Function parsing not implemented')
   }
 
   private parseRegexMatch(): RegexMatchNode {
     // TODO: Implement =~ operator parsing with automatic _ assignment
-    throw new Error('Regex match parsing not implemented');
+    throw new Error('Regex match parsing not implemented')
   }
 }

@@ -17,14 +17,14 @@
  */
 
 // Configuration
-const serverId = parseInt(process.argv[2] ?? '0')
+const serverId = Number.parseInt(process.argv[2] ?? '0')
 const serverNum = serverId + 1 // Human-friendly server number (1-indexed)
 
 // Set process title for better visibility
 process.title = `rip-server-${serverNum}`
-const port = parseInt(process.argv[3]) || 3000
-const numWorkers = parseInt(process.argv[4]) || 3
-const httpsPort = parseInt(process.argv[5]) || 3443
+const port = Number.parseInt(process.argv[3]) || 3000
+const numWorkers = Number.parseInt(process.argv[4]) || 3
+const httpsPort = Number.parseInt(process.argv[5]) || 3443
 const certPath = process.argv[6] // Optional: path to SSL certificate
 const keyPath = process.argv[7] // Optional: path to SSL private key
 
@@ -64,7 +64,7 @@ workerSocketPaths.forEach(path => {
 /**
  * 🎯 Canonical timing formatter (shared across endpoints)
  */
-const scale = (value: number, unit: string, base: number = 1000): string => {
+const scale = (value: number, unit: string, base = 1000): string => {
   if (value === 0) return `  - ${unit}`
 
   const prefixes = ['G', 'M', 'K', '', 'm', 'µ', 'n']
@@ -130,15 +130,14 @@ const handleHealthCheck = (req: Request) => {
     const _responseStart = performance.now()
     const responseTime = 50 // Estimate ~50µs for direct response (minimal transmission)
 
-    const timestamp =
+    const timestamp = `${
       startDate.toISOString().slice(0, 23).replace('T', ' ') +
       (startDate.getTimezoneOffset() <= 0 ? '+' : '-') +
       String(Math.abs(Math.floor(startDate.getTimezoneOffset() / 60))).padStart(
         2,
         '0',
-      ) +
-      ':' +
-      String(Math.abs(startDate.getTimezoneOffset() % 60)).padStart(2, '0')
+      )
+    }:${String(Math.abs(startDate.getTimezoneOffset() % 60)).padStart(2, '0')}`
 
     // Use shared timing formatter
 
@@ -154,7 +153,7 @@ const handleHealthCheck = (req: Request) => {
 
   if (url.pathname === '/metrics') {
     const metrics = [
-      `# Rip Server Metrics`,
+      '# Rip Server Metrics',
       `rip_total_requests ${totalRequests}`,
       `rip_workers_total ${numWorkers}`,
       `rip_uptime_seconds ${process.uptime()}`,
@@ -179,15 +178,14 @@ const handleHealthCheck = (req: Request) => {
     // Measure response transmission (minimal for direct responses, but consistent)
     const responseTime = 40 // Estimate ~40µs for direct response (minimal transmission)
 
-    const timestamp =
+    const timestamp = `${
       startDate.toISOString().slice(0, 23).replace('T', ' ') +
       (startDate.getTimezoneOffset() <= 0 ? '+' : '-') +
       String(Math.abs(Math.floor(startDate.getTimezoneOffset() / 60))).padStart(
         2,
         '0',
-      ) +
-      ':' +
-      String(Math.abs(startDate.getTimezoneOffset() % 60)).padStart(2, '0')
+      )
+    }:${String(Math.abs(startDate.getTimezoneOffset() % 60)).padStart(2, '0')}`
 
     // Use shared timing formatter
     const processingFormatted = scale(processingTime, 's').padStart(6)
@@ -245,14 +243,13 @@ const handleRequest = async (req: Request) => {
 
       // 🎯 Intelligent 503 Failover: If worker is busy, try next worker
       if (workerResponse.status === 503) {
-        const timestamp =
+        const timestamp = `${
           startDate.toISOString().slice(0, 23).replace('T', ' ') +
           (startDate.getTimezoneOffset() <= 0 ? '+' : '-') +
           String(
             Math.abs(Math.floor(startDate.getTimezoneOffset() / 60)),
-          ).padStart(2, '0') +
-          ':' +
-          String(Math.abs(startDate.getTimezoneOffset() % 60)).padStart(2, '0')
+          ).padStart(2, '0')
+        }:${String(Math.abs(startDate.getTimezoneOffset() % 60)).padStart(2, '0')}`
         console.log(
           `[${timestamp}              ] ⏸️  Worker ${socketPath} busy (503) - trying next worker...`,
         )
@@ -276,11 +273,7 @@ const handleRequest = async (req: Request) => {
         const transmissionTime = (responseEnd - responseStart) * 1000 // Response transmission time in µs
 
         // 🎯 Canonical timing formatter (inspired by your Ruby scale function!)
-        const scale = (
-          value: number,
-          unit: string,
-          base: number = 1000,
-        ): string => {
+        const scale = (value: number, unit: string, base = 1000): string => {
           if (value === 0) {
             // Dash in rightmost position of 3-char format + separator space for seconds + unit
             return `  - ${unit}` // 2 spaces + dash + space + unit (assuming seconds)
@@ -320,21 +313,21 @@ const handleRequest = async (req: Request) => {
           return `${digits}${separator}${prefix}${unit}`
         }
 
-        const timestamp =
+        const timestamp = `${
           startDate.toISOString().slice(0, 23).replace('T', ' ') +
           (startDate.getTimezoneOffset() <= 0 ? '+' : '-') +
           String(
             Math.abs(Math.floor(startDate.getTimezoneOffset() / 60)),
-          ).padStart(2, '0') +
-          ':' +
-          String(Math.abs(startDate.getTimezoneOffset() % 60)).padStart(2, '0')
+          ).padStart(2, '0')
+        }:${String(Math.abs(startDate.getTimezoneOffset() % 60)).padStart(2, '0')}`
 
         // Clean 2-duration timing display with microsecond precision
         const workerFormatted = scale(workerTime, 's') // Worker processing time
         const transmissionFormatted = scale(transmissionTime, 's') // Response transmission time
 
         const workerNum =
-          parseInt(socketPath.match(/worker_(\d+)\.sock$/)?.[1] || '0') + 1
+          Number.parseInt(socketPath.match(/worker_(\d+)\.sock$/)?.[1] || '0') +
+          1
         const method = req.method
         const path = url.pathname
         const status = workerResponse.status
@@ -366,14 +359,13 @@ const handleRequest = async (req: Request) => {
       // Update error stats
       stats.errors++
 
-      const timestamp =
+      const timestamp = `${
         startDate.toISOString().slice(0, 23).replace('T', ' ') +
         (startDate.getTimezoneOffset() <= 0 ? '+' : '-') +
         String(
           Math.abs(Math.floor(startDate.getTimezoneOffset() / 60)),
-        ).padStart(2, '0') +
-        ':' +
-        String(Math.abs(startDate.getTimezoneOffset() % 60)).padStart(2, '0')
+        ).padStart(2, '0')
+      }:${String(Math.abs(startDate.getTimezoneOffset() % 60)).padStart(2, '0')}`
       console.error(
         `[${timestamp}              ] ⚠️  Worker ${socketPath} failed: ${error.message}`,
       )
@@ -381,14 +373,13 @@ const handleRequest = async (req: Request) => {
       // Try next worker (automatic failover)
       if (attempts === workerSocketPaths.length - 1) {
         // All workers failed
-        const timestamp =
+        const timestamp = `${
           startDate.toISOString().slice(0, 23).replace('T', ' ') +
           (startDate.getTimezoneOffset() <= 0 ? '+' : '-') +
           String(
             Math.abs(Math.floor(startDate.getTimezoneOffset() / 60)),
-          ).padStart(2, '0') +
-          ':' +
-          String(Math.abs(startDate.getTimezoneOffset() % 60)).padStart(2, '0')
+          ).padStart(2, '0')
+        }:${String(Math.abs(startDate.getTimezoneOffset() % 60)).padStart(2, '0')}`
         console.error(
           `[${timestamp}              ] 🚨 All ${workerSocketPaths.length} workers unavailable!`,
         )
@@ -406,15 +397,11 @@ const handleRequest = async (req: Request) => {
 
   // 🚨 All workers are busy - return 503 to client
   const now = new Date()
-  const timestamp =
+  const timestamp = `${
     now.toISOString().slice(0, 23).replace('T', ' ') +
     (now.getTimezoneOffset() <= 0 ? '+' : '-') +
-    String(Math.abs(Math.floor(now.getTimezoneOffset() / 60))).padStart(
-      2,
-      '0',
-    ) +
-    ':' +
-    String(Math.abs(now.getTimezoneOffset() % 60)).padStart(2, '0')
+    String(Math.abs(Math.floor(now.getTimezoneOffset() / 60))).padStart(2, '0')
+  }:${String(Math.abs(now.getTimezoneOffset() % 60)).padStart(2, '0')}`
   console.warn(
     `[${timestamp}              ] 🚨 All ${workerSocketPaths.length} workers are busy - returning 503 to client`,
   )

@@ -9,10 +9,10 @@
 import { sql } from 'drizzle-orm'
 import {
   type AnySQLiteColumn,
+  type SQLiteTableWithColumns,
   blob,
   integer,
   real,
-  type SQLiteTableWithColumns,
   sqliteTable,
   text,
 } from 'drizzle-orm/sqlite-core'
@@ -35,10 +35,10 @@ interface IndexDefinition {
   name: string
   columns: string[]
   unique: boolean
-  auto: boolean  // true = auto-generated, false = manual
+  auto: boolean // true = auto-generated, false = manual
   options?: {
-    partial?: string  // For partial indexes like: substr(email, 1, 10)
-    where?: string    // For conditional indexes
+    partial?: string // For partial indexes like: substr(email, 1, 10)
+    where?: string // For conditional indexes
   }
 }
 
@@ -55,11 +55,15 @@ interface FieldDefinition {
 // Column builder that wraps Drizzle columns
 export class ColumnBuilder {
   private columns: Record<string, AnySQLiteColumn> = {}
-  private uniqueFields: Set<string> = new Set()  // Track fields marked as unique
+  private uniqueFields: Set<string> = new Set() // Track fields marked as unique
   private fieldDefinitions: FieldDefinition[] = [] // Track all field definitions for schema dumping
 
   // Parse field notation: name! means required, name# means unique
-  private parseField(name: string): { name: string; required: boolean; unique: boolean } {
+  private parseField(name: string): {
+    name: string
+    required: boolean
+    unique: boolean
+  } {
     let fieldName = name
     let required = false
     let unique = false
@@ -106,14 +110,14 @@ export class ColumnBuilder {
       return val
     }
     // Handle function directly (for named params)
-    else if (typeof value === 'function') {
+    if (typeof value === 'function') {
       const expr = value()
       return sql.raw(expr)
     }
     return value
   }
 
-    // Parse flexible parameters into options
+  // Parse flexible parameters into options
   // Note: In CoffeeScript/JavaScript, named parameters (key:value) must come last
   private parseParams(...args: any[]): ColumnOptions {
     const options: ColumnOptions = {}
@@ -132,9 +136,9 @@ export class ColumnBuilder {
       // Number = size/precision (context-dependent)
       else if (typeof arg === 'number') {
         if (!options.size && !options.precision) {
-          options.size = arg  // First number is size/precision
+          options.size = arg // First number is size/precision
         } else if (!options.scale) {
-          options.scale = arg  // Second number is scale (for decimals)
+          options.scale = arg // Second number is scale (for decimals)
         }
       }
       // Boolean flags
@@ -147,14 +151,21 @@ export class ColumnBuilder {
   }
 
   // Track field definition for schema dumping
-  private trackField(fieldName: string, type: string, isRequired: boolean, isUnique: boolean, options: any, originalCall: string) {
+  private trackField(
+    fieldName: string,
+    type: string,
+    isRequired: boolean,
+    isUnique: boolean,
+    options: any,
+    originalCall: string,
+  ) {
     this.fieldDefinitions.push({
       name: fieldName,
       type,
       required: isRequired,
       unique: isUnique,
       options,
-      originalCall
+      originalCall,
     })
   }
 
@@ -177,7 +188,14 @@ export class ColumnBuilder {
     }
 
     // Track field definition for schema dumping
-    this.trackField(name, 'string', required, isUnique || false, options, 'string')
+    this.trackField(
+      name,
+      'string',
+      required,
+      isUnique || false,
+      options,
+      'string',
+    )
 
     this.columns[name] = column as any
     return this
@@ -224,7 +242,14 @@ export class ColumnBuilder {
     }
 
     // Track field definition for schema dumping
-    this.trackField(name, 'integer', required, isUnique || false, options, 'integer')
+    this.trackField(
+      name,
+      'integer',
+      required,
+      isUnique || false,
+      options,
+      'integer',
+    )
 
     this.columns[name] = column as any
     return this
@@ -266,10 +291,12 @@ export class ColumnBuilder {
     if (required) column = column.notNull()
 
     // Use direct boolean if provided, otherwise check options
-    const defaultValue = directDefault !== undefined ? directDefault : options.default
+    const defaultValue =
+      directDefault !== undefined ? directDefault : options.default
     if (defaultValue !== undefined) {
       // Convert boolean to integer
-      const defaultVal = defaultValue === true ? 1 : defaultValue === false ? 0 : defaultValue
+      const defaultVal =
+        defaultValue === true ? 1 : defaultValue === false ? 0 : defaultValue
       column = column.default(defaultVal)
     }
 
@@ -358,7 +385,7 @@ export class ColumnBuilder {
     return this
   }
 
-    binary(fieldName: string, ...args: any[]) {
+  binary(fieldName: string, ...args: any[]) {
     const { name, required } = this.parseField(fieldName)
     const options = this.parseParams(...args)
 
@@ -380,9 +407,10 @@ export class ColumnBuilder {
 
     // Handle default values - need to stringify objects/arrays
     if (options.default !== undefined) {
-      const defaultValue = typeof options.default === 'string'
-        ? options.default
-        : JSON.stringify(options.default)
+      const defaultValue =
+        typeof options.default === 'string'
+          ? options.default
+          : JSON.stringify(options.default)
       column = column.default(defaultValue)
     }
 
@@ -433,7 +461,7 @@ export class ColumnBuilder {
   }
 
   // Special method to add primary key with auto-increment
-  addPrimaryKey(name: string, autoIncrement: boolean = true) {
+  addPrimaryKey(name: string, autoIncrement = true) {
     const column = integer(name).primaryKey({ autoIncrement })
     this.columns[name] = column as any
     return this
@@ -444,7 +472,7 @@ export class ColumnBuilder {
 export class TableBuilder {
   private builder = new ColumnBuilder()
   public tableName: string
-  private indexes: IndexDefinition[] = []  // Track all indexes for this table
+  private indexes: IndexDefinition[] = [] // Track all indexes for this table
 
   constructor(tableName: string, options?: any) {
     this.tableName = tableName
@@ -492,7 +520,7 @@ export class TableBuilder {
     if (args.length === 0) return this
 
     // Parse index arguments
-    let columns: string[] = []
+    const columns: string[] = []
     let options: any = {}
     let indexName: string | undefined
 
@@ -524,7 +552,9 @@ export class TableBuilder {
         if (!options.partial && !options.where) {
           // This is just explicit documentation of the auto-generated index
           // Allow it silently - explicit is better than implicit
-          console.log(`✅ Explicit unique index on '${columnName}' (matches auto-generated)`)
+          console.log(
+            `✅ Explicit unique index on '${columnName}' (matches auto-generated)`,
+          )
         }
       }
     }
@@ -534,11 +564,11 @@ export class TableBuilder {
       name: indexName,
       columns,
       unique: Boolean(options.unique),
-      auto: false,  // This is a manual index
+      auto: false, // This is a manual index
       options: {
         partial: options.partial,
-        where: options.where
-      }
+        where: options.where,
+      },
     }
 
     this.indexes.push(indexDef)
@@ -556,9 +586,8 @@ export class TableBuilder {
 
     for (const fieldName of uniqueFields) {
       // Check if there's already a manual index for this field (any type)
-      const hasManualIndex = this.indexes.some(idx =>
-        idx.columns.length === 1 &&
-        idx.columns[0] === fieldName
+      const hasManualIndex = this.indexes.some(
+        idx => idx.columns.length === 1 && idx.columns[0] === fieldName,
       )
 
       if (!hasManualIndex) {
@@ -567,7 +596,7 @@ export class TableBuilder {
           name: `${this.tableName}_${fieldName}_unique`,
           columns: [fieldName],
           unique: true,
-          auto: true  // This is an auto-generated index
+          auto: true, // This is an auto-generated index
         }
 
         this.indexes.push(indexDef)
@@ -618,14 +647,19 @@ export class TableBuilder {
           optionParts.push(field.options.size.toString())
         }
         if (field.options.precision && field.options.scale) {
-          optionParts.push(`[${field.options.precision}, ${field.options.scale}]`)
+          optionParts.push(
+            `[${field.options.precision}, ${field.options.scale}]`,
+          )
         }
 
         // Add default value
         if (field.options.default !== undefined) {
           if (typeof field.options.default === 'string') {
             optionParts.push(`["${field.options.default}"]`)
-          } else if (typeof field.options.default === 'boolean' && !field.required) {
+          } else if (
+            typeof field.options.default === 'boolean' &&
+            !field.required
+          ) {
             // Only show boolean defaults if not required (required booleans default to false automatically)
             optionParts.push(`[${field.options.default}]`)
           } else if (typeof field.options.default === 'number') {
@@ -664,7 +698,7 @@ export class TableBuilder {
             methodCall,
             fieldNamePart,
             afterCommaParts,
-            original: line
+            original: line,
           }
         }
 
@@ -678,16 +712,18 @@ export class TableBuilder {
         // Align method call with exactly 1 space after
         const alignedMethodCall = parsed.methodCall.padEnd(methodCallMaxWidth)
 
-                if (parsed.afterCommaParts.length > 0) {
+        if (parsed.afterCommaParts.length > 0) {
           // Perfect comma wall: field name padded to max width, comma right after, one space after comma
-          const alignedFieldName = parsed.fieldNamePart.padEnd(fieldNameMaxWidth)
-          const options = parsed.afterCommaParts.map(option => option.trim()).join(', ')
+          const alignedFieldName =
+            parsed.fieldNamePart.padEnd(fieldNameMaxWidth)
+          const options = parsed.afterCommaParts
+            .map(option => option.trim())
+            .join(', ')
 
           return `${alignedMethodCall} ${alignedFieldName}, ${options}`
-        } else {
-          // No comma for fields without options - don't pad field name
-          return `${alignedMethodCall} ${parsed.fieldNamePart}`
         }
+        // No comma for fields without options - don't pad field name
+        return `${alignedMethodCall} ${parsed.fieldNamePart}`
       })
 
       lines.push(...alignedFieldLines)
@@ -701,14 +737,22 @@ export class TableBuilder {
       const indexLines: string[] = []
 
       for (const index of this.indexes) {
-        const autoComment = index.auto ? '  # Auto-generated from unique field' : ''
-        const partialOption = index.options?.partial ? `, partial: '${index.options.partial}'` : ''
-        const whereOption = index.options?.where ? `, where: '${index.options.where}'` : ''
+        const autoComment = index.auto
+          ? '  # Auto-generated from unique field'
+          : ''
+        const partialOption = index.options?.partial
+          ? `, partial: '${index.options.partial}'`
+          : ''
+        const whereOption = index.options?.where
+          ? `, where: '${index.options.where}'`
+          : ''
 
         let indexLine: string
         if (index.columns.length === 1) {
           // Use # suffix for unique indexes (consistent with field syntax)
-          const columnName = index.unique ? `${index.columns[0]}#` : index.columns[0]
+          const columnName = index.unique
+            ? `${index.columns[0]}#`
+            : index.columns[0]
           indexLine = `  @index '${columnName}'${partialOption}${whereOption}${autoComment}`
         } else {
           // For multi-column indexes, still use unique: true since # suffix doesn't make sense for arrays
@@ -735,13 +779,16 @@ export class TableBuilder {
           const fieldNamePart = methodCallMatch[2]
 
           indexMethodMaxWidth = Math.max(indexMethodMaxWidth, methodCall.length)
-          indexFieldMaxWidth = Math.max(indexFieldMaxWidth, fieldNamePart.length)
+          indexFieldMaxWidth = Math.max(
+            indexFieldMaxWidth,
+            fieldNamePart.length,
+          )
 
           return {
             methodCall,
             fieldNamePart,
             afterCommaParts,
-            original: line
+            original: line,
           }
         }
 
@@ -759,9 +806,8 @@ export class TableBuilder {
 
         if (parsed.afterCommaParts.length > 0) {
           return `${alignedMethodCall} ${alignedFieldName},${parsed.afterCommaParts.join(', ')}`
-        } else {
-          return `${alignedMethodCall} ${alignedFieldName}`
         }
+        return `${alignedMethodCall} ${alignedFieldName}`
       })
 
       lines.push(...alignedIndexLines)
@@ -803,7 +849,10 @@ export function schema(callback: (this: any) => void) {
       builderFn.call(tableBuilder)
 
       // Add timestamps if not disabled
-      if (options?.timestamps !== false && tableBuilder.tableName !== 'migrations') {
+      if (
+        options?.timestamps !== false &&
+        tableBuilder.tableName !== 'migrations'
+      ) {
         tableBuilder.timestamps()
       }
 

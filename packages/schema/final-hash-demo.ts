@@ -12,14 +12,14 @@ console.log('🌟 Creating a realistic user table with all syntax variations...'
 const userTable = new TableBuilder('users')
 
 // Demonstrate all syntax combinations
-userTable.string('email!#')                    // Required + unique (most common)
-userTable.string('username#')                  // Optional + unique (common for handles)
-userTable.string('firstName!')                 // Required only (names)
-userTable.string('lastName!')                  // Required only
-userTable.string('bio')                        // Optional only
-userTable.integer('badge_id#')                 // Optional unique ID
-userTable.string('external_id#!')              // Unique + required (alt order)
-userTable.string('phone!', { unique: true })   // Mixed syntax
+userTable.string('email!#') // Required + unique (most common)
+userTable.string('username#') // Optional + unique (common for handles)
+userTable.string('firstName!') // Required only (names)
+userTable.string('lastName!') // Required only
+userTable.string('bio') // Optional only
+userTable.integer('badge_id#') // Optional unique ID
+userTable.string('external_id#!') // Unique + required (alt order)
+userTable.string('phone!', { unique: true }) // Mixed syntax
 
 console.log('✅ Schema created with hash syntax!')
 
@@ -34,7 +34,9 @@ indexes.forEach((idx, i) => {
 })
 
 console.log('\n🎯 Schema Comparison:')
-console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+console.log(
+  '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+)
 console.log('❌ Old Verbose Syntax:')
 console.log('   @email    "email!", unique: true')
 console.log('   @string   "username", unique: true')
@@ -44,14 +46,18 @@ console.log('✅ New Concise Hash Syntax:')
 console.log('   @email    "email!#"      # Required + unique')
 console.log('   @string   "username#"    # Optional + unique')
 console.log('   @integer  "badge_id#"    # Optional + unique')
-console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+console.log(
+  '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+)
 
 console.log('\n💡 CSS Inspiration:')
 console.log('HTML/CSS:   <div id="nav">  →  #nav { color: blue; }')
 console.log('Rip Schema: @string "nav#"  →  UNIQUE constraint + auto-index')
 
 console.log('\n🚀 Benefits Achieved:')
-console.log('   ✅ 60% shorter syntax (@string "field#" vs @string "field", unique: true)')
+console.log(
+  '   ✅ 60% shorter syntax (@string "field#" vs @string "field", unique: true)',
+)
 console.log('   ✅ Instantly familiar to web developers (CSS #id pattern)')
 console.log('   ✅ Works with all field types (string, integer, email, etc.)')
 console.log('   ✅ Flexible ordering (field!# or field#! both work)')

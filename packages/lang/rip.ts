@@ -7,9 +7,9 @@
  * Currently under construction as we "build the 747 mid-flight".
  */
 
-import { parseArgs } from 'util'
-import { readFileSync } from 'fs'
-import { compile, VERSION } from './index.ts'
+import { readFileSync } from 'node:fs'
+import { parseArgs } from 'node:util'
+import { VERSION, compile } from './index.ts'
 
 function showHelp() {
   console.log(`
@@ -75,7 +75,9 @@ async function main() {
   // For now, show a message that this is under construction
   console.log('🚧 RIP Clean Compiler - Under Construction')
   console.log('')
-  console.log('This is the future home of the clean RIP language implementation.')
+  console.log(
+    'This is the future home of the clean RIP language implementation.',
+  )
   console.log('Currently using the CoffeeScript-based implementation.')
   console.log('')
   console.log('To use RIP now, try:')

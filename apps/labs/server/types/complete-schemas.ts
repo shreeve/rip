@@ -14,11 +14,10 @@ export const UserSchema = z.object({
   meta: z.record(z.unknown()).optional(),
   code: z.string().optional(),
   codeExpiresAt: z.date().optional(),
-  admin: z.boolean().default(false)
+  admin: z.boolean().default(false),
 })
 
 export type User = z.infer<typeof UserSchema>
-
 
 export const OrderSchema = z.object({
   id: z.number().int(),
@@ -30,11 +29,10 @@ export const OrderSchema = z.object({
   meta: z.record(z.unknown()),
   shippedAt: z.date().optional(),
   deliveredAt: z.date().optional(),
-  completedAt: z.date().optional()
+  completedAt: z.date().optional(),
 })
 
 export type Order = z.infer<typeof OrderSchema>
-
 
 export const SpecimenSchema = z.object({
   id: z.number().int(),
@@ -43,17 +41,15 @@ export const SpecimenSchema = z.object({
   barcode: z.string().max(50),
   registeredAt: z.date().optional(),
   collectedAt: z.date().optional(),
-  reportedAt: z.date().optional()
+  reportedAt: z.date().optional(),
 })
 
 export type Specimen = z.infer<typeof SpecimenSchema>
 
-
 export const ResultSchema = z.object({
   id: z.number().int(),
   userId: z.number().int(),
-  resultUrl: z.string().max(255)
+  resultUrl: z.string().max(255),
 })
 
 export type Result = z.infer<typeof ResultSchema>
-

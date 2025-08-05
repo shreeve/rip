@@ -18,14 +18,14 @@ import { join } from 'node:path'
 // Using Bun.spawn instead of Node.js child_process
 
 // Configuration
-const managerId = parseInt(process.argv[2] ?? '0')
+const managerId = Number.parseInt(process.argv[2] ?? '0')
 const managerNum = managerId + 1 // Human-friendly manager number (1-indexed)
 
 // Set process title for better visibility
 process.title = `rip-manager-${managerNum}`
-const numWorkers = parseInt(process.argv[3]) || 3
+const numWorkers = Number.parseInt(process.argv[3]) || 3
 const maxRequestsPerWorker =
-  parseInt(process.argv[4]) ||
+  Number.parseInt(process.argv[4]) ||
   (process.env.NODE_ENV === 'production' ? 1000 : 10)
 const appDirectory = process.argv[5] || process.cwd()
 
@@ -128,16 +128,11 @@ const gracefulRestartWorker = async (workerId: number) => {
 // Shared timestamp function
 const getTimestamp = () => {
   const now = new Date()
-  return (
+  return `${
     now.toISOString().slice(0, 23).replace('T', ' ') +
     (now.getTimezoneOffset() <= 0 ? '+' : '-') +
-    String(Math.abs(Math.floor(now.getTimezoneOffset() / 60))).padStart(
-      2,
-      '0',
-    ) +
-    ':' +
-    String(Math.abs(now.getTimezoneOffset() % 60)).padStart(2, '0')
-  )
+    String(Math.abs(Math.floor(now.getTimezoneOffset() / 60))).padStart(2, '0')
+  }:${String(Math.abs(now.getTimezoneOffset() % 60)).padStart(2, '0')}`
 }
 
 const gracefulRestartAllWorkers = async (reason: string) => {

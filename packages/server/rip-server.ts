@@ -113,19 +113,19 @@ function parseArgs(args: string[]): Config {
   for (const arg of otherArgs) {
     // Worker count: w:5
     if (arg.match(/^w:\d+$/)) {
-      config.workers = parseInt(arg.substring(2))
+      config.workers = Number.parseInt(arg.substring(2))
       continue
     }
 
     // Request count: r:100
     if (arg.match(/^r:\d+$/)) {
-      config.requests = parseInt(arg.substring(2))
+      config.requests = Number.parseInt(arg.substring(2))
       continue
     }
 
     // Port number (1-65535)
-    const port = parseInt(arg)
-    if (!isNaN(port) && port >= 1 && port <= 65535) {
+    const port = Number.parseInt(arg)
+    if (!Number.isNaN(port) && port >= 1 && port <= 65535) {
       // If HTTPS is configured, this is HTTPS port, otherwise HTTP
       if (config.certPath && config.keyPath) {
         config.httpsPort = port
@@ -203,10 +203,10 @@ async function loadFileConfig(appDir: string): Promise<Partial<Config>> {
         const httpPort = section.match(/httpPort\s*=\s*(\d+)/)
         const httpsPort = section.match(/httpsPort\s*=\s*(\d+)/)
 
-        if (workers) config.workers = parseInt(workers[1])
-        if (requests) config.requests = parseInt(requests[1])
-        if (httpPort) config.httpPort = parseInt(httpPort[1])
-        if (httpsPort) config.httpsPort = parseInt(httpsPort[1])
+        if (workers) config.workers = Number.parseInt(workers[1])
+        if (requests) config.requests = Number.parseInt(requests[1])
+        if (httpPort) config.httpPort = Number.parseInt(httpPort[1])
+        if (httpsPort) config.httpsPort = Number.parseInt(httpsPort[1])
       }
     } catch {}
   }
@@ -356,7 +356,7 @@ async function initCA(): Promise<void> {
 
 // Generate CA-signed certificate
 async function generateCACert(
-  domain: string = 'localhost',
+  domain = 'localhost',
 ): Promise<{ cert: string; key: string }> {
   ensureDirectories()
 
@@ -662,8 +662,6 @@ async function start(config: Config) {
           }
           break
         }
-
-        case 'smart':
         default:
           // Smart mode: prefer CA if available, otherwise quick
           if (hasCA()) {
