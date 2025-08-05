@@ -421,10 +421,27 @@ Object.defineProperty(global, 'req', {
   configurable: true
 });
 
-// Global json helper - clean and simple!
+// Global json helper - smart bidirectional!
 Object.defineProperty(global, 'json', {
   value: function(data) {
-    return _currentContext != null ? _currentContext.json(data) : void 0;
+    var error;
+    
+    // If it's a string, parse it TO JSON object
+    if (typeof data === 'string') {
+      try {
+        return JSON.parse(data);
+      } catch (error1) {
+        error = error1;
+        console.warn("JSON parse error:", error.message);
+        return null;
+      }
+    // If it's an object/array and we have context, send JSON response
+    } else if (_currentContext != null) {
+      return _currentContext.json(data);
+    } else {
+      // Otherwise, serialize to JSON string
+      return JSON.stringify(data);
+    }
   },
   configurable: true
 });

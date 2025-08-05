@@ -89,7 +89,7 @@ app.post '/signup', ->
   email = read 'email', 'email!'     # All calls synchronous (middleware pre-parses)
   phone = read 'phone', 'phone'      # Pure synchronous elegance!
   { success: true, email, phone }    # Just return data!
-  # OR: json success: true, email, phone  # Clean json helper
+  # OR: json success: true, email, phone  # Smart json helper
 ```
 
 ## 🔥 The `helpers.rip` Powerhouse
@@ -144,7 +144,7 @@ read(context, key, validator, fallback)
 
 **Global Helpers**:
 - **`read`**: Data validation and parsing - like `read 'email', 'email!'`
-- **`json`**: Response helper - like `json success: true, data`
+- **`json`**: Smart bidirectional JSON - parse strings OR send responses
 - **`req`**: Request-only access - like `req.method`
 - **`env`**: Full context access (when needed) - like `env.status(201)`
 
@@ -184,6 +184,30 @@ app.post '/api/users', ->
 
 **In Practice**: Just use `read()` everywhere - it's always synchronous and fast!
 
+### 🎯 **Smart Bidirectional `json` Helper**
+
+**The `json` function intelligently handles both directions:**
+
+```rip
+# PARSING: String → Object
+jsonString = '{"name": "John", "age": 30}'
+user = json jsonString  # Returns: { name: "John", age: 30 }
+
+# SERIALIZING: Object → String (when no context)
+data = { name: "John", age: 30 }
+jsonString = json data  # Returns: '{"name":"John","age":30}'
+
+# RESPONSE: Object → HTTP JSON Response (in endpoint)
+app.post '/users', ->
+  user = { name: "John", age: 30 }
+  json user  # Sends JSON response to client
+```
+
+**Smart Behavior:**
+- **String input**: Parse TO JSON object (with error handling)
+- **Object + context**: Send HTTP JSON response
+- **Object + no context**: Serialize to JSON string
+
 ### 🎯 **Clean API Design: Just Return Data**
 
 **The cleanest approach - just return what you want to send:**
@@ -206,7 +230,7 @@ app.post '/api/users', ->
     meta: { created: new Date(), method }
   }
 
-  # OR use clean json helper:
+  # OR use smart json helper:
   # json success: true, user: { email, name, age }
 ```
 

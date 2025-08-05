@@ -277,18 +277,31 @@ _currentContext = null
 export env = -> _currentContext  # THE primary variable - just like 'read'!
 
 # Make env globally available (like read function)
-Object.defineProperty global, 'env', 
+Object.defineProperty global, 'env',
   get: -> _currentContext
   configurable: true
 
 # Keep req for request-only access (genuinely useful)
-Object.defineProperty global, 'req', 
+Object.defineProperty global, 'req',
   get: -> _currentContext?.req
   configurable: true
 
-# Global json helper - clean and simple!
+# Global json helper - smart bidirectional!
 Object.defineProperty global, 'json', 
-  value: (data) -> _currentContext?.json(data)
+  value: (data) -> 
+    # If it's a string, parse it TO JSON object
+    if typeof data == 'string'
+      try
+        JSON.parse(data)
+      catch error
+        console.warn "JSON parse error:", error.message
+        null
+    # If it's an object/array and we have context, send JSON response
+    else if _currentContext?
+      _currentContext.json(data)
+    # Otherwise, serialize to JSON string
+    else
+      JSON.stringify(data)
   configurable: true
 
 # Export helper for Hono context binding - Sinatra-style!
