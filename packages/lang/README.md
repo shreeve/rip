@@ -256,8 +256,9 @@ The `=~` operator works seamlessly with CoffeeScript's existing features:
 
 This enhancement brings the elegance of Ruby's regex handling to JavaScript while maintaining full compatibility with existing code patterns.
 
-### Change 004 - Compound Regex Assignment (~=)
-**Timestamp**: 2025-08-05 01:30:00 -0600
+### Change 004 - Compound Regex Assignment (~=) ✅ COMPLETED
+**Timestamp**: 2025-08-05 01:30:00 -0600  
+**Completed**: 2025-08-08 - All three forms now fully functional!
 
 **The Problem**: Two-Step Regex Operations
 While Change 003's `=~` operator significantly improved regex matching, practical applications often required a two-step process:
@@ -287,17 +288,25 @@ Building on CoffeeScript's compound assignment pattern (`+=`, `||=`, `&&=`), we 
 ```coffeescript
 # Compound regex assignment - REVOLUTIONARY 1-STEP!
 validateAndTransform = (input) ->
-  input =~ /^([a-z]{2})$/i then _[1].toUpperCase()
+  input ~= /^([a-z]{2})$/i then _[1].toUpperCase()
 ```
 
 **Technical Implementation**:
-The `~=` operator required extending CoffeeScript's compound assignment infrastructure:
+The `~=` operator required sophisticated extensions to CoffeeScript's infrastructure:
 
-1. **Lexer Integration**: Added `'~='` to the `COMPOUND_ASSIGN` array alongside existing operators
-2. **Grammar Rules**: Leveraged existing compound assignment grammar patterns
-3. **Compilation Strategy**: Added `compileRegexAssign` method to handle the unique regex case
-4. **JavaScript Output**: Generates `val = ((_ = val.match(/regex/), _), _ ? _ : null)`
-5. **Null Fallback**: Automatically returns `null` for non-matching input
+1. **Lexer Integration**: Added `'~='` to both `OPERATOR` regex and `COMPOUND_ASSIGN` array
+2. **Rewriter Enhancement**: Created `tagRegexThenAssignments` method to detect `~= ... then` patterns
+   - Scans for `COMPOUND_ASSIGN` tokens with value `'~='`
+   - Tracks parentheses and brackets to find expression boundaries
+   - Tags as `REGEX_THEN_ASSIGN` when followed by `THEN`
+3. **Grammar Extension**: Added new `RegexAssignThen` production with two rules:
+   - `SimpleAssignable REGEX_THEN_ASSIGN Expression THEN Expression` (implicit null)
+   - `SimpleAssignable REGEX_THEN_ASSIGN Expression THEN Expression ELSE Expression` (explicit fallback)
+4. **AST Construction**: Creates `Assign` node containing `If` node for then/else semantics
+5. **Code Generation**: Enhanced `compileRegexAssign` in nodes.coffee to handle:
+   - Basic form: `val = ((_ = val.match(/regex/), _), _ ? _ : null)`
+   - If-node form: Transforms then/else into conditional assignment
+6. **ELSE Handling**: Modified `addImplicitIndentation` to recognize `REGEX_THEN_ASSIGN` patterns
 
 **Key Design Principles**:
 - **Consistent with CoffeeScript**: Follows the same pattern as `value += 1` or `result ||= default`
@@ -305,26 +314,26 @@ The `~=` operator required extending CoffeeScript's compound assignment infrastr
 - **Safe by default**: Returns `null` instead of leaving undefined state
 - **Composable**: Works with the `_` variable for complex transformations
 
-**Practical Applications** (Future Revolutionary Syntax):
+**Practical Applications** (Now Fully Implemented! 🎉):
 
 ```coffeescript
 # API parameter validation - PURE ELEGANCE WITH _!
 parseApiParams = (params) ->
-  state = params.state =~ /^([A-Z]{2})$/ then _[1]
+  state = params.state ~= /^([A-Z]{2})$/ then _[1]
   # state now contains: extracted code or null
 
 # Form field processing - REVOLUTIONARY BREVITY!
 processFormData = (form) ->
-  zipCode = form.zip =~ /^(\d{5})(-\d{4})?$/ then _[1]
-  phoneNumber = form.phone =~ /^(\d{3})-?(\d{3})-?(\d{4})$/ then "#{_[1]}-#{_[2]}-#{_[3]}"
+  zipCode = form.zip ~= /^(\d{5})(-\d{4})?$/ then _[1]
+  phoneNumber = form.phone ~= /^(\d{3})-?(\d{3})-?(\d{4})$/ then "#{_[1]}-#{_[2]}-#{_[3]}"
   # Each line: validate, extract, transform in one atomic operation
 
 # URL routing with validation - LEGENDARY CONCISENESS!
 routeHandler = (path) ->
-  userId = path =~ /^\/users\/(\d+)$/ then parseInt(_[1])
+  userId = path ~= /^\/users\/(\d+)$/ then parseInt(_[1])
   return { type: 'user', id: userId } if userId
 
-  productId = path =~ /^\/products\/(\w+)$/ then _[1].toUpperCase()
+  productId = path ~= /^\/products\/(\w+)$/ then _[1].toUpperCase()
   return { type: 'product', id: productId } if productId
 
   null  # No match
@@ -334,17 +343,17 @@ routeHandler = (path) ->
 The `~=` operator works particularly well in validation helper functions:
 
 ```coffeescript
-# Helper method pattern - FUTURE REVOLUTIONARY SYNTAX!
+# Helper method pattern - NOW WORKING!
 read = (value, type) ->
   switch type
     when 'state'
-      value =~ /^([a-z]{2})$/i then _[1].toUpperCase()  # implicit else null
+      value ~= /^([a-z]{2})$/i then _[1].toUpperCase()  # implicit else null
     when 'zip'
-      value =~ /^(\d{5})/ then _[1]                     # implicit else null
+      value ~= /^(\d{5})/ then _[1]                     # implicit else null
     when 'email'
-      value =~ /^[^@]+@[^@]+\.[^@]+$/ then _[0].toLowerCase()  # implicit else null
+      value ~= /^[^@]+@[^@]+\.[^@]+$/ then _[0].toLowerCase()  # implicit else null
     when 'phone'
-      value =~ /^(\d{3})-?(\d{3})-?(\d{4})$/ then "#{_[1]}-#{_[2]}-#{_[3]}" else "INVALID"
+      value ~= /^(\d{3})-?(\d{3})-?(\d{4})$/ then "#{_[1]}-#{_[2]}-#{_[3]}" else "INVALID"
 ```
 
 **The Three Forms of `~=`**:
@@ -411,14 +420,14 @@ function validateState(input) {
   return match ? match[1].toUpperCase() : null;
 }
 
-# Current RIP with =~ (better, but still 2 steps)
+# Previous RIP with =~ (better, but still 2 steps)
 validateState = (input) ->
   input =~ /^([A-Z]{2})$/
   if _ then _[1].toUpperCase() else null
 
-# Future RIP with then/else (REVOLUTIONARY - 1 step)
+# Current RIP with ~= then/else (REVOLUTIONARY - 1 step)
 validateState = (input) ->
-  input =~ /^([A-Z]{2})$/ then _[1].toUpperCase()
+  input ~= /^([A-Z]{2})$/ then _[1].toUpperCase()
 ```
 
 **Key Advantages of then/else syntax**:
@@ -430,8 +439,8 @@ validateState = (input) ->
 
 **When to Use Each Form**:
 - **Form 1**: When you need the full match data for complex processing
-- **Form 2**: Current best practice for transformation patterns
-- **Form 3**: Future ultimate elegance - the goal state for simple transformations
+- **Form 2**: Best for simple transformations with null fallback
+- **Form 3**: When you need a custom fallback value instead of null
 
 **Performance Characteristics**:
 - **Single regex execution** - no performance penalty over manual approach
@@ -445,6 +454,9 @@ The `~=` operator complements RIP's other enhancements:
 - **Bare compilation ready**: Generates clean, debuggable JavaScript output
 
 This enhancement completes RIP's regex handling story, providing a complete toolkit for pattern matching that reduces boilerplate while maintaining clarity and safety.
+
+**🎉 Implementation Complete!**  
+As of 2025-08-08, all three forms of the `~=` operator are fully functional. The implementation required careful coordination between the lexer, rewriter, grammar, and code generator, but the result is a clean, elegant syntax that transforms regex operations from verbose multi-step processes into concise compound assignments. This represents a significant advancement in making regex operations as natural and readable as any other assignment in the language.
 
 ## 🏗️ "Building the 747 Mid-Flight"
 
