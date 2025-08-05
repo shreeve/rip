@@ -5,7 +5,7 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "rip-server . 8305",
+    "dev": "../../../packages/server/rip-server.ts . 8305",
     "db:push": "rip-schema db:push",
     "db:seed": "bun db/seed.rip",
     "data:start": "bun rip-data-server.rip"

@@ -25,7 +25,7 @@ app.use logger()
 withHelpers app
 
 # Health check
-app.get '/ping', (c) -> c.text 'pongs'
+app.get '/ping', (c) -> c.text 'pong'
 
 # ====== CONFIG ROUTES ======
 app.get '/config', ->
@@ -68,7 +68,7 @@ app.post '/auth/verify', ->
   return json error: 'Invalid or expired code' unless code.length == 6
 
   # Mock user data
-  mockUser = 
+  mockUser =
     id: 1
     email: email
     firstName: 'John'
@@ -83,7 +83,7 @@ app.post '/auth/verify', ->
 # ====== USER ROUTES ======
 app.get '/user/me', ->
   # Mock current user
-  mockUser = 
+  mockUser =
     id: 1
     email: 'john.doe@example.com'
     firstName: 'John'
@@ -135,7 +135,7 @@ app.patch '/user/me', ->
   params.push userId
 
   # Mock updated user (in real app, this would update the database)
-  updatedUser = 
+  updatedUser =
     id: userId
     email: 'john.doe@example.com'
     firstName: firstName || 'John'
@@ -186,7 +186,7 @@ app.post '/orders', ->
   orderNumber = 'LAB-' + Math.random().toString(36).substr(2, 8).toUpperCase()
 
   # Mock order creation
-  mockOrder = 
+  mockOrder =
     id: Math.floor(Math.random() * 1000) + 1
     userId: userId
     number: orderNumber
