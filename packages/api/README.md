@@ -81,13 +81,13 @@ app.use withHelpers  # Enable context-free everything!
 
 # OPTION 1: Traditional (context parameter)
 app.post '/signup', (ctx) ->
-  email = read! 'email', 'email!'     # No context in read calls!
+  email = read! 'email', 'email!'     # First call async (parses request body)
   ctx.json { success: true, email }
 
 # OPTION 2: Pure Sinatra-style (NO context parameter!)  
 app.post '/signup', ->
-  email = read! 'email', 'email!'     # Context-free read calls
-  phone = read 'phone', 'phone'      # Context-free everything!
+  email = read! 'email', 'email!'     # First call async (parses request body)
+  phone = read 'phone', 'phone'      # Subsequent calls sync (cached data)
   c().json { success: true, email, phone }  # c() gets global context
 ```
 
@@ -137,7 +137,7 @@ read(context, key, validator, fallback)
 
 **Parameters**:
 - **`key`**: Field name to extract (or `null` for entire payload)
-- **`validator`**: Validation/transformation rule  
+- **`validator`**: Validation/transformation rule
 - **`fallback`**: Value to use if validation fails (optional)
 - **`context`**: Hono request context (only needed without withHelpers)
 
@@ -154,16 +154,16 @@ app.use withHelpers  # Enable Sinatra-style context-free calls
 
 # STYLE 1: Traditional with context parameter
 app.post '/api/users', (ctx) ->
-  name = read! 'name'              # Context-free read calls!
-  email = read 'email', 'email!'  # No context needed!
+  name = read! 'name'              # First call async (parses request body)
+  email = read 'email', 'email!'  # Subsequent calls sync (cached data)
   ctx.json { name, email }
 
 # STYLE 2: Pure Sinatra-style - NO context parameter!
 app.post '/api/users', ->
-  name = read! 'name'              # Context-free everything!
-  email = read 'email', 'email!'  # Pure elegance!
-  role = read 'role', ['admin', 'user'], 'user'  # Default fallback
-  phone = read 'phone', 'phone'   # Formats as 123-456-7890
+  name = read! 'name'              # First call async (parses request body)
+  email = read 'email', 'email!'  # Subsequent calls sync (cached data)
+  role = read 'role', ['admin', 'user'], 'user'  # Sync (cached data)
+  phone = read 'phone', 'phone'   # Sync (cached data)
   
   # Access context when needed
   c().json { name, email, role, phone }
@@ -185,69 +185,69 @@ app.post '/api/users', ->
 
 #### **Basic Types**
 ```rip
-id = read! 'user_id', 'id!'        # Positive integers: 1, 2, 3... (first call, async)
-count = read 'count', 'whole'      # Non-negative: 0, 1, 2... (cached, sync)
-price = read 'price', 'decimal'    # Numbers: 123.45, -67.89 (cached, sync)
-cost = read 'cost', 'money'        # Currency: rounds to 2 decimal places (cached, sync)
+id = read! 'user_id', 'id!'        # First call async (parses request body)
+count = read 'count', 'whole'      # Subsequent calls sync (cached data)
+price = read 'price', 'decimal'    # Sync (cached data)
+cost = read 'cost', 'money'        # Sync (cached data)
 ```
 
 #### **Text Processing**
 ```rip
-title = read! 'title', 'string'    # Normalizes whitespace (first call, async)
-bio = read 'bio', 'text'           # Preserves paragraphs (cached, sync)
-full_name = read 'name', 'name'    # Capitalizes Each Word (cached, sync)
+title = read! 'title', 'string'    # First call async (parses request body)
+bio = read 'bio', 'text'           # Subsequent calls sync (cached data)
+full_name = read 'name', 'name'    # Sync (cached data)
 ```
 
-#### **Contact Information**
+#### **Contact Information**  
 ```rip
-email = read! 'email', 'email'     # Validates & normalizes email (first call, async)
-phone = read 'phone', 'phone'      # Formats: (123) 456-7890 → 123-456-7890 (cached, sync)
-address = read 'address', 'address' # Basic address formatting (cached, sync)
+email = read! 'email', 'email'     # First call async (parses request body)
+phone = read 'phone', 'phone'      # Sync (cached data)
+address = read 'address', 'address' # Sync (cached data)
 ```
 
 #### **Geographic Data**
 ```rip
-state = read! 'state', 'state'     # ca, ny → CA, NY (first call, async)
-zip = read 'zip', 'zip'            # Extracts 5-digit ZIP (cached, sync)
-zipplus4 = read 'zip', 'zipplus4'  # Formats: 90210-1234 (cached, sync)
+state = read! 'state', 'state'     # First call async (parses request body)
+zip = read 'zip', 'zip'            # Sync (cached data)
+zipplus4 = read 'zip', 'zipplus4'  # Sync (cached data)
 ```
 
 #### **Identity & Security**
 ```rip
-ssn = read! 'ssn', 'ssn'           # 123-45-6789 → 123456789 (first call, async)
-sex = read 'gender', 'sex'         # male, f, other → M, F, O (cached, sync)
-username = read 'username', 'username' # Validates & lowercases (cached, sync)
+ssn = read! 'ssn', 'ssn'           # First call async (parses request body)
+sex = read 'gender', 'sex'         # Sync (cached data)
+username = read 'username', 'username' # Sync (cached data)
 ```
 
 #### **Web & Technical**
 ```rip
-website = read! 'website', 'url'   # URL validation & normalization (first call, async)
-ip = read 'ip_address', 'ip'       # IPv4 validation: 192.168.1.1 (cached, sync)
-mac = read 'mac', 'mac'            # MAC address: AB:CD:EF:12:34:56 (cached, sync)
-color = read 'color', 'color'      # Hex colors: #ff0000, #f00 (cached, sync)
+website = read! 'website', 'url'   # First call async (parses request body)
+ip = read 'ip_address', 'ip'       # Sync (cached data)
+mac = read 'mac', 'mac'            # Sync (cached data)
+color = read 'color', 'color'      # Sync (cached data)
 ```
 
 #### **Development & Standards**
 ```rip
-version = read! 'version', 'semver' # Semantic versioning: 1.2.3-beta.1 (first call, async)
-user_id = read 'user_id', 'uuid'   # UUID validation & formatting (cached, sync)
-slug = read 'slug', 'slug'         # URL slugs: my-awesome-post (cached, sync)
-credit_card = read 'cc', 'creditcard' # 1234-5678-9012-3456 (cached, sync)
+version = read! 'version', 'semver' # First call async (parses request body)
+user_id = read 'user_id', 'uuid'   # Sync (cached data)
+slug = read 'slug', 'slug'         # Sync (cached data)
+credit_card = read 'cc', 'creditcard' # Sync (cached data)
 ```
 
 #### **Time & Money**
 ```rip
-meeting = read! 'time', 'time24'   # 24-hour: 14:30:00 (first call, async)
-appointment = read 'time', 'time12' # 12-hour: 2:30 pm (cached, sync)
-price = read 'price', 'currency'   # Currency: $1,234.56 → 1234.56 (cached, sync)
+meeting = read! 'time', 'time24'   # First call async (parses request body)
+appointment = read 'time', 'time12' # Sync (cached data)
+price = read 'price', 'currency'   # Sync (cached data)
 ```
 
 #### **Boolean & Collections**
 ```rip
-active = read! 'active', 'bool'    # Smart boolean parsing (first call, async)
-tags = read 'tags', 'array'        # Preserves arrays (cached, sync)
-config = read 'config', 'hash'     # Preserves objects (cached, sync)
-admin_ids = read 'admins', 'ids'   # Validates ID lists: "1,2,3" → [1,2,3] (cached, sync)
+active = read! 'active', 'bool'    # First call async (parses request body)
+tags = read 'tags', 'array'        # Sync (cached data)
+config = read 'config', 'hash'     # Sync (cached data)
+admin_ids = read 'admins', 'ids'   # Sync (cached data)
 ```
 
 ### 🔥 Legendary Regex Patterns - The Secret Sauce
@@ -299,30 +299,30 @@ state = (_[1].toUpperCase() if val =~ /^([a-z][a-z])$/i)
 #### **Required Fields with Custom Error Handling**
 ```rip
 # The ! suffix makes fields required
-email = read! 'email', 'email!', -> signout!  # Custom error handler (first call, async)
-admin_role = read 'role', ['admin'], -> bail! 'Access denied'  # Cached validation
+email = read! 'email', 'email!', -> signout!  # First call async (parses request body)
+admin_role = read 'role', ['admin'], -> bail! 'Access denied'  # Sync (cached data)
 ```
 
 #### **Complex Validation with Fallbacks**
 ```rip
 # Array validation with default
-roles = read! 'roles', ['admin', 'user', 'guest'], ['guest']  # First call, async
+roles = read! 'roles', ['admin', 'user', 'guest'], ['guest']  # First call async
 
-# Regex validation (cached, sync)
+# Regex validation (sync - cached data)
 code = read 'code', /^[A-Z]{3,6}$/, -> throw new Error 'Invalid code'
 
-# Range validation (cached, sync)
+# Range validation (sync - cached data)
 priority = read 'priority', { start: 1, end: 10 }, 5
 ```
 
 #### **Batch Processing**
 ```rip
 # Process entire request payload
-app.post '/api/users', (c) ->
+app.post '/api/users', ->
   # Get all user data in one call (parses request body, async)
   userData = read! null  # Returns: { name: "John", email: "john@...", ... }
-
-  # Then validate individual fields as needed (cached, sync)
+  
+  # Then validate individual fields as needed (sync - cached data)
   name = read 'name', 'name!'
   email = read 'email', 'email!'
   phone = read 'phone', 'phone'
@@ -388,12 +388,12 @@ import { read, c, withHelpers } from '@rip/api'
 app.use withHelpers  # Enable Sinatra-style context-free everything!
 
 app.post '/signup', ->  # NO context parameter needed!
-  email = read! 'email', 'email!'                    # Required, validated, normalized (first call, async)
-  name = read 'name', 'name!'                        # Required, trimmed, formatted (cached, sync)
-  phone = read 'phone', 'phone'                      # Optional, formatted as 123-456-7890 (cached, sync)
-  state = read 'state', 'state!'                     # Required, normalized to uppercase (cached, sync)
-  age = read 'age', { start: 18, end: 120 }, null    # Range validated (cached, sync)
-  
+  email = read! 'email', 'email!'                    # First call async (parses request body)
+  name = read 'name', 'name!'                        # Subsequent calls sync (cached data)
+  phone = read 'phone', 'phone'                      # Sync (cached data)
+  state = read 'state', 'state!'                     # Sync (cached data)
+  age = read 'age', { start: 18, end: 120 }, null    # Sync (cached data)
+
   user = createUser! { email, name, phone, state, age } # Use ! suffix for async operations
   c().json { success: true, user }  # Global context access - pure Sinatra style!
 ```
@@ -435,14 +435,14 @@ app.use withHelpers
 
 # STYLE 1: Traditional with context parameter
 app.post '/api/users', (ctx) ->
-  email = read! 'email', 'email!'  # Context-free read calls!
-  name = read 'name', 'name!'      # No context needed in read!
+  email = read! 'email', 'email!'  # First call async (parses request body)
+  name = read 'name', 'name!'      # Subsequent calls sync (cached data)
   ctx.json { success: true, user: { email, name } }
 
 # STYLE 2: Pure Sinatra-style - NO context parameter!
 app.post '/api/users', ->
-  email = read! 'email', 'email!'  # Context-free everything!
-  name = read 'name', 'name!'      # Pure Sinatra elegance!
+  email = read! 'email', 'email!'  # First call async (parses request body)
+  name = read 'name', 'name!'      # Subsequent calls sync (cached data)
   c().json { success: true, user: { email, name } }  # Global context access
 ```
 
