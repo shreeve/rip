@@ -38,7 +38,7 @@ app.get '/config', ->
           auth: true
           orders: true
           results: true
-          analytics: true  # 🔥 NEW: Real-time analytics!
+          analytics: !true  # 🔥 NEW: Real-time analytics!
 
 # ====== AUTH ROUTES ======
 app.post '/auth/code', ->

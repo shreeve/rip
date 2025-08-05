@@ -1,0 +1,108 @@
+# 🔥 Simple Labs API Server for Testing
+# Simplified version without complex middleware
+
+import { Hono } from 'hono'
+import { cors } from 'hono/cors'
+import { logger } from 'hono/logger'
+
+# Create simple Hono app
+app = new Hono
+
+# CORS for development (client is on 8205)
+app.use cors
+  origin: 'http://localhost:8205'
+  credentials: true
+
+# Logger for development
+app.use logger()
+
+# Health check
+app.get '/ping', (c) -> c.text 'pong'
+
+# Config endpoint
+app.get '/config', (c) ->
+  c.json
+    config:
+      client:
+        appName: 'Labs (Revolutionary Rip + DuckDB)'
+        apiUrl: 'http://localhost:8305'
+        features:
+          auth: true
+          orders: true
+          results: true
+          analytics: true
+
+# Mock auth endpoints
+app.post '/auth/code', (c) ->
+  c.json success: true, message: 'Code sent!'
+
+app.post '/auth/verify', (c) ->
+  c.json
+    success: true
+    user: { id: 1, email: 'test@example.com', firstName: 'Test', lastName: 'User' }
+    token: 'mock-jwt-1'
+
+# Mock user endpoints
+app.get '/user/me', (c) ->
+  c.json user: { id: 1, email: 'test@example.com', firstName: 'Test', lastName: 'User' }
+
+app.patch '/user/me', (c) ->
+  c.json user: { id: 1, email: 'test@example.com', firstName: 'Updated', lastName: 'User' }
+
+# Mock admin endpoint
+app.get '/users', (c) ->
+  c.json users: [
+    { id: 1, email: 'test@example.com', firstName: 'Test', lastName: 'User', admin: true }
+    { id: 2, email: 'user2@example.com', firstName: 'User', lastName: 'Two', admin: false }
+  ]
+
+# Mock tests endpoint
+app.get '/tests', (c) ->
+  c.json tests: [
+    { id: 1, name: 'Basic Health Panel', price: 9900, description: 'Essential health markers' }
+    { id: 2, name: 'Comprehensive Panel', price: 19900, description: 'Full health screening' }
+    { id: 3, name: 'Hormone Panel', price: 14900, description: 'Hormone levels check' }
+  ]
+
+# Mock orders endpoints
+app.post '/orders', (c) ->
+  c.json order: { id: 1, number: 'LAB-12345678', total: 9900, status: 'created' }
+
+app.get '/orders', (c) ->
+  c.json orders: [
+    { id: 1, number: 'LAB-12345678', total: 9900, status: 'completed', createdAt: '2024-08-01' }
+    { id: 2, number: 'LAB-87654321', total: 19900, status: 'processing', createdAt: '2024-08-03' }
+  ]
+
+# Mock results endpoint
+app.get '/results', (c) ->
+  c.json results: [
+    { id: 1, resultUrl: 'https://results.example.com/result1', createdAt: '2024-08-01' }
+  ]
+
+# Mock analytics endpoint
+app.get '/analytics/dashboard', (c) ->
+  c.json
+    userGrowth: [
+      { date: '2024-08-05', new_users: 5, total_users: 25 }
+      { date: '2024-08-04', new_users: 3, total_users: 20 }
+    ]
+    revenue: [
+      { date: '2024-08-05', orders: 2, revenue: 29800, avg_order_value: 14900 }
+      { date: '2024-08-04', orders: 1, revenue: 9900, avg_order_value: 9900 }
+    ]
+    generatedAt: new Date()
+
+# Helper function
+json = (obj) -> obj
+
+console.log '🚀 Simple Labs API Server starting...'
+console.log '📊 API: http://localhost:8305'
+console.log '🎯 Ready to serve BHVR client requests!'
+
+# Start the server
+Bun.serve
+  port: 8305
+  fetch: app.fetch
+
+console.log 'Listening on http://localhost:8305'
