@@ -293,7 +293,7 @@ export read = (keyOrContext, key = null, tag = null, miss = null) ->
         # Range check - explicit min/max object format { min: 1, max: 10 } or { min: 5 } or { max: 20 }
         minVal = originalTag.min
         maxVal = originalTag.max
-        
+
         # For numeric tags, validate the number value
         if tag in ['id', 'whole', 'decimal', 'money'] or (typeof val == 'number')
           numVal = parseInt(val)

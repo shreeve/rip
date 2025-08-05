@@ -24,6 +24,36 @@
 - **Type Safe** - Leverages Rip's elegant syntax for bulletproof validation
 - **Performance First** - Optimized patterns that scale to production
 
+## 🎯 Perfect Consistency with @rip/schema
+
+**🔥 IDENTICAL SYNTAX EVERYWHERE!** Define your schema once with `@rip/schema`, then use the exact same validation syntax in your API with `read()`:
+
+```rip
+# Schema definition (packages/schema)
+@model 'User', ->
+  @string   'username', [3, 20]        # 3-20 characters
+  @integer  'age', [18, 120]          # 18-120 years
+  @email    'email', [5, 255]         # Email length limit
+  @integer  'views', min: 0           # Non-negative numbers
+  @text     'bio', max: 500           # Up to 500 characters
+
+# API validation (packages/api) - IDENTICAL SYNTAX!
+app.post '/users', ->
+  username = read 'username', [3, 20]      # Same syntax!
+  age = read 'age', [18, 120]             # Same syntax!
+  email = read 'email', [5, 255]          # Same syntax!
+  views = read 'views', min: 0             # Same syntax!
+  bio = read 'bio', max: 500               # Same syntax!
+  
+  json success: true, user: { username, age, email, views, bio }
+```
+
+**✅ Benefits:**
+- **Learn Once**: Same range syntax in schema and validation
+- **No Mental Context Switching**: Consistent patterns everywhere
+- **Perfect Maintainability**: Change validation rules in one place
+- **Developer Happiness**: Elegant, predictable, beautiful
+
 ## 🌟 Why @rip/api Exists
 
 ### The API Development Problem
@@ -368,13 +398,18 @@ code = read 'code', [6, 6]          # Exactly 6 characters
 views = read 'views', min: 0          # Non-negative numbers
 comment = read 'comment', min: 10     # At least 10 characters
 
-# Only maximum (when min doesn't matter)  
+# Only maximum (when min doesn't matter)
 discount = read 'discount', max: 1.0  # Up to 100% discount
 bio_short = read 'bio', max: 200      # Reasonable bio limit
 
 # Explicit both (rare but clear)
 custom_rating = read 'rating', min: 1, max: 5  # Explicit 1-5 range
 ```
+
+**🎯 Perfect Design Philosophy:**
+- **Common Things Easy**: `[min, max]` covers 90% of validation needs with shortest syntax
+- **Rare Things Possible**: `min:` / `max:` handles edge cases with explicit clarity  
+- **Identical to @rip/schema**: Same syntax everywhere for perfect consistency
 
 ### 🔥 Legendary Regex Patterns - The Secret Sauce
 

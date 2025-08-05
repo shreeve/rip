@@ -72,6 +72,51 @@ rip-schema db:push
 @string   'code', size: 10, default: 'ABC'
 ```
 
+## 🎯 Range Validation (Perfect Design!)
+
+**✅ Common Things Easy** - `[min, max]` (90% of use cases):
+```coffeescript
+# Numbers: value constraints - super clean!
+@integer  'age', [18, 120]           # Between 18 and 120
+@integer  'priority', [1, 10], [5]   # Range 1-10, default 5
+@decimal  'price', [0.01, 9999.99]   # Price range
+@integer  'rating', [1, 5]           # Star rating system
+
+# Strings: length constraints - equally clean!
+@string   'username', [3, 20]        # 3-20 characters
+@string   'title', [1, 100]          # 1-100 characters
+@text     'bio', [0, 500]            # Up to 500 characters
+@string   'code', [6, 6]             # Exactly 6 characters
+```
+
+**🎯 Rare Things Possible** - `min:` / `max:` (10% of use cases):
+```coffeescript
+# Only minimum (when max doesn't matter)
+@integer  'views', min: 0            # Non-negative numbers
+@string   'comment', min: 10         # At least 10 characters
+
+# Only maximum (when min doesn't matter)  
+@decimal  'discount', max: 1.0       # Up to 100% discount
+@text     'bio_short', max: 200      # Reasonable bio limit
+
+# Explicit both (rare but crystal clear)
+@integer  'custom_rating', min: 1, max: 5  # Explicit 1-5 range
+```
+
+**🔥 Perfect Consistency with `read()` Function:**
+```coffeescript
+# IDENTICAL SYNTAX - Define once, validate everywhere!
+# Schema definition:
+@string   'username', [3, 20]
+@integer  'age', [18, 120]
+@integer  'views', min: 0
+
+# Runtime validation (in your API):
+username = read 'username', [3, 20]      # Same syntax!
+age = read 'age', [18, 120]             # Same syntax!
+views = read 'views', min: 0             # Same syntax!
+```
+
 ## Special Features
 
 ```coffeescript
