@@ -12,3 +12,4 @@ tmp/
 
 # Node modules
 node_modules/
+*.duckdb*
