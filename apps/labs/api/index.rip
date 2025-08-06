@@ -22,7 +22,7 @@ app.get '/read-demo', (c) ->
   c.text("reads: #{value}")
 
 # Add revolutionary clean syntax examples
-get '/ping', -> 'sser'
+get '/ping', -> 'pong'
 
 get '/user', -> { name: 'larry', role: 'admin' }
 
