@@ -1,0 +1,166 @@
+$ ../../../packages/server/rip-server.ts . 8305
+
+🌐 Endpoints:
+   📡 HTTP:    http://localhost:8305
+   🏥 Health:  http://localhost:8305/health
+   📈 Metrics: http://localhost:8305/metrics
+
+⚙️  Configuration:
+   📁 App:      /Users/shreeve/Data/Code/rip/apps/labs/api
+   🔧 Mode:     dev
+   👷 Workers:  1
+   📊 Requests: 10 per worker
+
+🔥 Hot Reload: /Users/shreeve/Data/Code/rip/apps/labs/api
+
+🛑 Press Ctrl-C to stop
+
+[2025-08-06 18:31:32.722-06:00              ] M1 ready (1 workers, 10 requests each)
+[2025-08-06 18:31:32.843-06:00              ] W1 ready
+[2025-08-06 18:31:35.799-06:00              ] S1 ready
+[2025-08-06 18:31:38.284-06:00   23ms  320µs] W1.1 GET /ping → 200 plain 25B
+[2025-08-06 18:31:39.012-06:00  752µs   92µs] W1.2 GET /ping → 200 plain 25B
+[2025-08-06 18:31:39.218-06:00  683µs   81µs] W1.3 GET /ping → 200 plain 25B
+[2025-08-06 18:31:39.383-06:00  643µs   46µs] W1.4 GET /ping → 200 plain 25B
+[2025-08-06 18:31:39.531-06:00  701µs   46µs] W1.5 GET /ping → 200 plain 25B
+[2025-08-06 18:31:39.696-06:00  731µs   48µs] W1.6 GET /ping → 200 plain 25B
+[2025-08-06 18:31:39.863-06:00  751µs   48µs] W1.7 GET /ping → 200 plain 25B
+[2025-08-06 18:31:40.061-06:00  615µs   33µs] W1.8 GET /ping → 200 plain 25B
+[2025-08-06 18:31:40.246-06:00              ] W1 reached 9 requests - shutting down
+[2025-08-06 18:31:40.246-06:00  707µs   54µs] W1.9 GET /ping → 200 plain 25B
+[2025-08-06 18:31:40.353-06:00              ] W1 exited (code 0) - respawning...
+[2025-08-06 18:31:40.430-06:00              ] ⚠️  Worker /tmp/rip_worker_0.sock failed: Was there a typo in the url or port?
+[2025-08-06 18:31:40.430-06:00              ] 🚨 All 1 workers unavailable!
+[2025-08-06 18:31:40.599-06:00              ] W1 ready
+[2025-08-06 18:31:40.597-06:00  8.9ms   36µs] W1.10 GET /ping → 200 plain 25B
+[2025-08-06 18:31:40.763-06:00  994µs   36µs] W1.11 GET /ping → 200 plain 25B
+[2025-08-06 18:31:40.897-06:00  598µs   44µs] W1.12 GET /ping → 200 plain 25B
+[2025-08-06 18:31:41.080-06:00  582µs   85µs] W1.13 GET /ping → 200 plain 25B
+[2025-08-06 18:31:41.263-06:00  744µs   47µs] W1.14 GET /ping → 200 plain 25B
+[2025-08-06 18:31:41.968-06:00  403µs   19µs] W1.15 GET /ping → 200 plain 25B
+[2025-08-06 18:31:47.384-06:00  973µs   32µs] W1.16 GET /hello → 200 plain 23B
+206 |     return parseInt(_[1]);
+207 |   if (tag === "whole" && (_ = val.match(/^(0|[1-9]\d{,19})$/)) && _[0])
+208 |     return parseInt(_[1]);
+209 |   val = function() {
+210 |     switch (tag) {
+211 |         return (_ = val.match(/^([-+]?\d+(?:\.\d*)?|\.\d+)$/)) && _[0] && parseFloat(_[1].replace(/\.$/, ""));
+                      ^
+ReferenceError: _ is not defined
+      at <anonymous> (/Users/shreeve/Data/Code/rip/packages/api/helpers.rip:253:17)
+      at read (/Users/shreeve/Data/Code/rip/packages/api/helpers.rip:373:26)
+      at <anonymous> (/Users/shreeve/Data/Code/rip/apps/labs/api/index.rip:52:7)
+      at <anonymous> (/Users/shreeve/Data/Code/rip/packages/api/helpers.rip:170:23)
+
+[2025-08-06 18:31:48.662-06:00  1.0ms   33µs] W1.17 GET /calc → 500 plain 21B
+[2025-08-06 18:31:50.320-06:00              ] W1 reached 9 requests - shutting down
+[2025-08-06 18:31:50.318-06:00  2.3ms  185µs] W1.18 GET /ping → 200 plain 25B
+[2025-08-06 18:31:50.426-06:00              ] W1 exited (code 0) - respawning...
+[2025-08-06 18:31:50.497-06:00              ] ⚠️  Worker /tmp/rip_worker_0.sock failed: Was there a typo in the url or port?
+[2025-08-06 18:31:50.497-06:00              ] 🚨 All 1 workers unavailable!
+[2025-08-06 18:31:50.659-06:00              ] W1 ready
+[2025-08-06 18:31:50.676-06:00  3.0ms   37µs] W1.19 GET /ping → 200 plain 25B
+[2025-08-06 18:31:50.856-06:00  335µs   19µs] W1.20 GET /ping → 200 plain 25B
+[2025-08-06 18:31:51.311-06:00  547µs   87µs] W1.21 GET /ping → 200 plain 25B
+[2025-08-06 18:31:51.488-06:00  1.3ms   56µs] W1.22 GET /ping → 200 plain 25B
+[2025-08-06 18:31:51.651-06:00  639µs   30µs] W1.23 GET /ping → 200 plain 25B
+[2025-08-06 18:31:51.845-06:00  787µs   70µs] W1.24 GET /ping → 200 plain 25B
+[2025-08-06 18:31:52.014-06:00  662µs   38µs] W1.25 GET /ping → 200 plain 25B
+[2025-08-06 18:31:52.210-06:00  673µs   49µs] W1.26 GET /ping → 200 plain 25B
+[2025-08-06 18:31:52.387-06:00              ] W1 reached 9 requests - shutting down
+[2025-08-06 18:31:52.385-06:00  2.3ms   70µs] W1.27 GET /ping → 200 plain 25B
+[2025-08-06 18:31:52.493-06:00              ] W1 exited (code 0) - respawning...
+[2025-08-06 18:31:52.535-06:00              ] ⚠️  Worker /tmp/rip_worker_0.sock failed: Was there a typo in the url or port?
+[2025-08-06 18:31:52.535-06:00              ] 🚨 All 1 workers unavailable!
+[2025-08-06 18:31:52.719-06:00              ] ⚠️  Worker /tmp/rip_worker_0.sock failed: Was there a typo in the url or port?
+[2025-08-06 18:31:52.719-06:00              ] 🚨 All 1 workers unavailable!
+[2025-08-06 18:31:52.755-06:00              ] W1 ready
+[2025-08-06 18:31:54.050-06:00  6.8ms   59µs] W1.28 GET /ping → 200 plain 25B
+[2025-08-06 18:31:54.352-06:00  945µs   44µs] W1.29 GET /ping → 200 plain 25B
+[2025-08-06 18:31:54.520-06:00  858µs  133µs] W1.30 GET /ping → 200 plain 25B
+[2025-08-06 18:31:54.666-06:00  617µs   57µs] W1.31 GET /ping → 200 plain 25B
+[2025-08-06 18:31:55.415-06:00  796µs   35µs] W1.32 GET /ping → 200 plain 25B
+[2025-08-06 18:31:55.597-06:00  583µs  199µs] W1.33 GET /ping → 200 plain 25B
+[2025-08-06 18:31:55.816-06:00  1.1ms  125µs] W1.34 GET /ping → 200 plain 25B
+[2025-08-06 18:32:02.320-06:00  597µs   74µs] W1.35 GET /ping → 200 plain 25B
+[2025-08-06 18:32:09.875-06:00              ] M1 file changed: index.rip
+[2025-08-06 18:32:09.876-06:00              ] M1 File change: index.rip - restarting all workers
+[2025-08-06 18:32:09.876-06:00              ] M1 graceful restart W1...
+[2025-08-06 18:32:09.980-06:00              ] W1 exited (code 0) - respawning...
+[2025-08-06 18:32:10.205-06:00              ] W1 ready
+[2025-08-06 18:32:10.376-06:00              ] M1 all workers restarted
+[2025-08-06 18:32:10.805-06:00  2.6ms   33µs] W1.36 GET /ping → 200 plain 4B
+[2025-08-06 18:32:24.072-06:00  640µs   34µs] W1.37 GET /ping → 200 plain 4B
+[2025-08-06 18:32:24.523-06:00  617µs   37µs] W1.38 GET /ping → 200 plain 4B
+[2025-08-06 18:32:24.699-06:00  651µs   43µs] W1.39 GET /ping → 200 plain 4B
+[2025-08-06 18:32:24.849-06:00  785µs   51µs] W1.40 GET /ping → 200 plain 4B
+230 |         return parseDateUTC(val);
+231 |       case "truthy":
+232 |         return truthy(val);
+233 |       case "falsy":
+234 |         return falsy(val);
+235 |         return (_ = val.match(/^([a-zA-Z0-9._%+-]+)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})$/)) && _[0] && _[0].toLowerCase();
+                      ^
+ReferenceError: _ is not defined
+      at <anonymous> (/Users/shreeve/Data/Code/rip/packages/api/helpers.rip:277:17)
+      at read (/Users/shreeve/Data/Code/rip/packages/api/helpers.rip:373:26)
+      at <anonymous> (/Users/shreeve/Data/Code/rip/apps/labs/api/index.rip:34:11)
+      at <anonymous> (/Users/shreeve/Data/Code/rip/packages/api/helpers.rip:170:23)
+
+[2025-08-06 18:32:30.034-06:00  3.0ms   64µs] W1.41 GET /email → 500 plain 21B
+230 |         return parseDateUTC(val);
+231 |       case "truthy":
+232 |         return truthy(val);
+233 |       case "falsy":
+234 |         return falsy(val);
+235 |         return (_ = val.match(/^([a-zA-Z0-9._%+-]+)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})$/)) && _[0] && _[0].toLowerCase();
+                      ^
+ReferenceError: _ is not defined
+      at <anonymous> (/Users/shreeve/Data/Code/rip/packages/api/helpers.rip:277:17)
+      at read (/Users/shreeve/Data/Code/rip/packages/api/helpers.rip:373:26)
+      at <anonymous> (/Users/shreeve/Data/Code/rip/apps/labs/api/index.rip:34:11)
+      at <anonymous> (/Users/shreeve/Data/Code/rip/packages/api/helpers.rip:170:23)
+
+[2025-08-06 18:32:37.910-06:00  1.1ms   56µs] W1.42 GET /email → 500 plain 21B
+230 |         return parseDateUTC(val);
+231 |       case "truthy":
+232 |         return truthy(val);
+233 |       case "falsy":
+234 |         return falsy(val);
+235 |         return (_ = val.match(/^([a-zA-Z0-9._%+-]+)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})$/)) && _[0] && _[0].toLowerCase();
+                      ^
+ReferenceError: _ is not defined
+      at <anonymous> (/Users/shreeve/Data/Code/rip/packages/api/helpers.rip:277:17)
+      at read (/Users/shreeve/Data/Code/rip/packages/api/helpers.rip:373:26)
+      at <anonymous> (/Users/shreeve/Data/Code/rip/apps/labs/api/index.rip:34:11)
+      at <anonymous> (/Users/shreeve/Data/Code/rip/packages/api/helpers.rip:170:23)
+
+[2025-08-06 18:32:38.921-06:00  944µs   38µs] W1.43 GET /email → 500 plain 21B
+230 |         return parseDateUTC(val);
+231 |       case "truthy":
+232 |         return truthy(val);
+233 |       case "falsy":
+234 |         return falsy(val);
+235 |         return (_ = val.match(/^([a-zA-Z0-9._%+-]+)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})$/)) && _[0] && _[0].toLowerCase();
+                      ^
+ReferenceError: _ is not defined
+      at <anonymous> (/Users/shreeve/Data/Code/rip/packages/api/helpers.rip:277:17)
+      at read (/Users/shreeve/Data/Code/rip/packages/api/helpers.rip:373:26)
+      at <anonymous> (/Users/shreeve/Data/Code/rip/apps/labs/api/index.rip:34:11)
+      at <anonymous> (/Users/shreeve/Data/Code/rip/packages/api/helpers.rip:170:23)
+
+[2025-08-06 18:32:39.146-06:00              ] W1 reached 9 requests - shutting down
+[2025-08-06 18:32:39.145-06:00  1.1ms   63µs] W1.44 GET /email → 500 plain 21B
+[2025-08-06 18:32:39.255-06:00              ] W1 exited (code 0) - respawning...
+[2025-08-06 18:32:39.275-06:00              ] ⚠️  Worker /tmp/rip_worker_0.sock failed: Was there a typo in the url or port?
+[2025-08-06 18:32:39.275-06:00              ] 🚨 All 1 workers unavailable!
+[2025-08-06 18:32:39.440-06:00              ] ⚠️  Worker /tmp/rip_worker_0.sock failed: Was there a typo in the url or port?
+[2025-08-06 18:32:39.440-06:00              ] 🚨 All 1 workers unavailable!
+[2025-08-06 18:32:39.490-06:00              ] W1 ready
+
+🛑 Shutting down...
+🛑 Stopping all rip-server processes...
+
+🛑 Shutting down...
+🛑 Stopping all rip-server processes...
+✅ All processes stopped
