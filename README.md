@@ -92,6 +92,12 @@ result = processData(data)!
 state =~ /^([A-Z]{2})$/     # Match and auto-assign to _
 code = _?[1]?.toUpperCase() # Access match groups elegantly
 
+# 🔥 NEW: Ruby-style regex indexing (Change 005)
+phone = "1234567890"
+areaCode = phone[/^(\d{3})(\d{3})(\d{4})$/, 1]  # "123"
+initial = name[/[A-Z]/]                         # "J" from "Jonathan"
+word = text[/(\w+)/].toUpperCase()              # Extract and transform
+
 # Elegant conditional transformations with semicolon pattern
 code = (state =~ /^([A-Z]{2})$/; if _ then _[1].toUpperCase() else null)
 
