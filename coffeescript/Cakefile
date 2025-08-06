@@ -529,6 +529,10 @@ runRipTests = ->
   global.ok = (condition, message) ->
     throw new Error(message) unless condition
 
+  global.eq = (actual, expected, message) ->
+    message ?= "Expected #{expected}, got #{actual}"
+    throw new Error(message) unless actual == expected
+
   # Make CoffeeScript available to tests
   global.CoffeeScript = CoffeeScript
 
