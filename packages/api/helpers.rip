@@ -1,7 +1,7 @@
 # Rip Server Helpers - Enhanced Request Data Reading & Validation
 # Based on the newer Trust/Sinatra helpers.rb version
 # Usage: mail = read 'email', 'email!', -> signout!  # with fallback action
-#
+
 # 🔥 SHOWCASING RIP'S LEGENDARY REGEX OPERATOR! 🔥
 # This file demonstrates the most elegant regex matching ever created:
 #
@@ -17,37 +17,32 @@
 # Or elegant one-liner:            code = (val =~ /regex/; if _ then _[1] else null)
 
 # Email regex (simplified version)
-emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+emailRegex = /^[^\s@]+@[^-\s@]+\.[^\s@]+$/
 
 # Phone formatting helper - SHOWCASING =~ ELEGANT SYNTAX!
 toPhone = (val) ->
   return null unless val
-
   # Extract all digits and format with beautiful =~ one-liners
   digits = val.replace(/\D/g, '')
   return null if digits.length < 10
-
   # 10-digit format: 1234567890 -> 123-456-7890
   if digits.length == 10
     return (digits =~ /^(\d{3})(\d{3})(\d{4})$/; if _ then "#{_[1]}-#{_[2]}-#{_[3]}" else null)
-
   # 11-digit with country code: 11234567890 -> 123-456-7890
   if digits.length == 11
     return (digits =~ /^1(\d{3})(\d{3})(\d{4})$/; if _ then "#{_[1]}-#{_[2]}-#{_[3]}" else null)
-
   null
 
 # Name formatting helper
+# Capitalizes first letter of each word for names, basic formatting for addresses
 toName = (val, type = 'name') ->
   return null unless val
   cleaned = val.trim().replace(/\s+/g, ' ')
   return null if cleaned.length == 0
-
   if type == 'name'
     # Capitalize first letter of each word
     words = cleaned.split(' ')
-    capitalizedWords = words.map (word) ->
-      word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+    capitalizedWords = words.map (word) -> word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
     capitalizedWords.join(' ')
   else if type == 'address'
     # Basic address formatting
@@ -56,110 +51,45 @@ toName = (val, type = 'name') ->
     cleaned
 
 # Boolean helpers
-truthy = (val) ->
-  return true if val in [true, 'true', '1', 1, 'yes', 'on', 'y']
-  false
-
-falsy = (val) ->
-  return true if val in [false, 'false', '0', 0, 'no', 'off', 'n']
-  false
-
-bool = (val) ->
-  return true if truthy(val)
-  return false if falsy(val)
-  null
-
-# Check if value is blank (null, undefined, empty string, or whitespace)
-isBlank = (val) ->
-  return true if not val?
-  return true if val == ''
-  return true if typeof val == 'string' and val.trim() == ''
-  false
+truthy = (val) -> val in [true, 'true', '1', 1, 'yes', 'on', 'y']
+falsy = (val) -> val in [false, 'false', '0', 0, 'no', 'off', 'n']
+bool = (val) -> return true if truthy(val); return false if falsy(val); null
+isBlank = (val) -> not val? or val == '' or (typeof val == 'string' and val.trim() == '')
 
 # JSON parsing helper
-parseJsonSafely = (body) ->
-  try
-    JSON.parse(body)
-  catch error
-    console.warn "Failed to parse JSON body: #{error.message}"
-    {}
+parseJsonSafely = (body) -> try JSON.parse(body) catch error {}
 
 # Date parsing helpers
-parseDate = (val) ->
-  try
-    date = new Date(val)
-    if isNaN(date.getTime())
-      null
-    else
-      date.toISOString().split('T')[0]
-  catch error
-    null
+parseDate = (val) -> try date = new Date(val); if isNaN(date.getTime()) then null else date.toISOString().split('T')[0] catch error null
+parseDateTime = (val) -> try date = new Date(val); if isNaN(date.getTime()) then null else date catch error null
+parseDateUTC = (val) -> try date = new Date(val); if isNaN(date.getTime()) then null else date.toISOString() catch error null
 
-parseDateTime = (val) ->
-  try
-    date = new Date(val)
-    if isNaN(date.getTime()) then null else date
-  catch error
-    null
+import { requestContext } from '../../apps/labs/api/context.ts'
 
-parseDateUTC = (val) ->
-  try
-    date = new Date(val)
-    if isNaN(date.getTime()) then null else date.toISOString()
-  catch error
-    null
-
-# Enhanced read function with miss parameter - the star of the show!
-# Supports both: read(c, key, tag, miss) and read(key, tag, miss) when using withHelpers
 export read = (keyOrContext, key = null, tag = null, miss = null) ->
-  # Handle both calling styles: read(c, key, tag, miss) vs read(key, tag, miss)
-  if keyOrContext?.req?.method?  # If first param looks like Hono context
-    c = keyOrContext
-  else
-    # Context-free call - use global context set by withHelpers
-    c = _currentContext
-    if not c
-      throw new Error("read() called without context. Use withHelpers() middleware or pass context explicitly.")
-    # Shift parameters when context is implicit
-    [key, tag, miss] = [keyOrContext, key, tag]
-  # Get pre-parsed data from middleware (always available and synchronous!)
-  readData = c.get('_read') or {}
-  val = if key then readData[key] else readData
-
-  # If no tag specified, return raw value
+  ctx = requestContext?.getStore()
+  c = if keyOrContext?.req?.method? then keyOrContext else ctx?.c
+  data = ctx?.data or {}
+  throw new Error('read() called without context') unless c
+  [key, tag, miss] = [keyOrContext, key, tag] unless key and tag and miss is not undefined
+  val = if key then data[key] else data
   return val unless key and tag
-
-  # Handle tag modifiers (! for required)
   originalTag = tag
-  bam = false  # required flag
-
-  if typeof tag == 'string'
-    if tag.endsWith('!')
-      tag = tag.slice(0, -1)
-      bam = true
-
-  # Convert value to string for processing (unless it's array/hash)
+  bam = false
+  if typeof tag == 'string' and tag.endsWith('!')
+    tag = tag.slice(0, -1)
+    bam = true
   if Array.isArray(val)
     val = if tag == 'array' then val else val.join(',')
   else if typeof val == 'object' and val?
     val = if tag == 'hash' then val else String(val)
   else
     val = String(val or '')
-
-  # Process based on tag type - SHOWCASING =~ ELEGANT ONE-LINERS!
   switch tag
-    when 'id'
-      val = (val =~ /^([1-9]\d{0,19})$/; if _ then parseInt(_[1]) else null)
-      return val if val
-    when 'whole'
-      val = (val =~ /^(0|[1-9]\d{0,19})$/; if _ then parseInt(_[1]) else null)
-      return val if val
-    when 'decimal'
-      val = (val =~ /^([-+]?\d+(?:\.\d*)?|\.\d+)$/; if _ then parseFloat(_[1].replace(/\.$/, '')) else null)
-    when 'money'
-      val = (val =~ /^([-+]?\d+(?:\.\d*)?|\.\d+)$/; if _ then Math.round(parseFloat(_[1].replace(/\.$/, '')) * 100) / 100 else null)
-
-    # One-liner cases - super scannable!
+    when 'id'      then val = (val =~ /^([1-9]\d{0,19})$/; if _ then parseInt(_[1]) else null); return val if val
+    when 'whole'   then val = (val =~ /^(0|[1-9]\d{0,19})$/; if _ then parseInt(_[1]) else null); return val if val
+    when 'decimal' then val = (val =~ /^([-+]?\d+(?:\.\d*)?|\.\d+)$/; if _ then parseFloat(_[1].replace(/\.$/, '')) else null)
+    when 'money'   then val = (val =~ /^([-+]?\d+(?:\.\d*)?|\.\d+)$/; if _ then Math.round(parseFloat(_[1].replace(/\.$/, '')) * 100) / 100 else null)
     when 'string'  then val = val.replace(/\s\s+/g, ' ')
     when 'text'    then val = val.replace(/  +/g, ' ')
     when 'name'    then val = toName(val, 'name')
@@ -170,131 +100,53 @@ export read = (keyOrContext, key = null, tag = null, miss = null) ->
     when 'dateutc' then val = parseDateUTC(val)
     when 'truthy'  then val = truthy(val)
     when 'falsy'   then val = falsy(val)
-
-    when 'email'
-      # Enhanced email validation using =~ - BEAUTIFUL ONE-LINER!
-      val = (val =~ /^([a-zA-Z0-9._%+-]+)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})$/; if _ then _[0].toLowerCase() else null)
-
-    # 🔥 LEGENDARY CLEAN PATTERNS - TWO BEAUTIFUL STYLES! 🔥
-    when 'state'    then val = (_[1].toUpperCase() if val =~ /^([a-z][a-z])$/i)
-    when 'zip'      then val = (_[1] if val =~ /^(\d{5})/)
+    when 'email'   then val = (val =~ /^([a-zA-Z0-9._%+-]+)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})$/; if _ then _[0].toLowerCase() else null)
+    when 'state'   then val = (_[1].toUpperCase() if val =~ /^([a-z][a-z])$/i)
+    when 'zip'     then val = (_[1] if val =~ /^(\d{5})/)
     when 'zipplus4' then val = ("#{_[1]}-#{_[2]}" if val =~ /^(\d{5})-?(\d{4})$/)
-    when 'ssn'      then val = ("#{_[1]}#{_[2]}#{_[3]}" if val =~ /^(\d{3})-?(\d{2})-?(\d{4})$/)
-    when 'sex'      then val = (_[1][0].toUpperCase() if val =~ /^(m|male|f|female|o|other)$/i)
-
-    # Advanced validations - NOW WITH =~ ONE-LINERS!
-    when 'creditcard'
-      val = (val =~ /^(\d{4})-?(\d{4})-?(\d{4})-?(\d{4})$/; if _ then "#{_[1]}-#{_[2]}-#{_[3]}-#{_[4]}" else null)
-    when 'url'
-      val = (val =~ /^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$/; if _ then _[0] else null)
-    when 'username'
-      val = (val =~ /^([a-zA-Z0-9_-]{3,20})$/; if _ then _[1].toLowerCase() else null)
-    when 'color'
-      val = (val =~ /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/; if _ then "##{_[1].toLowerCase()}" else null)
-    when 'ip'
-      val = (val =~ /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/; if _ then (if _[1..4].every((n) -> parseInt(n) <= 255) then _[0] else null) else null)
-    when 'mac'
-      val = (val =~ /^([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})$/; if _ then "#{_[1]}:#{_[2]}:#{_[3]}:#{_[4]}:#{_[5]}:#{_[6]}".toLowerCase() else null)
-    when 'semver'
-      val = (val =~ /^(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*))?$/; if _ then _[0] else null)
-    when 'uuid'
-      val = (val =~ /^([0-9a-f]{8})-?([0-9a-f]{4})-?([0-9a-f]{4})-?([0-9a-f]{4})-?([0-9a-f]{12})$/i; if _ then "#{_[1]}-#{_[2]}-#{_[3]}-#{_[4]}-#{_[5]}".toLowerCase() else null)
-    when 'time24'
-      val = (val =~ /^([01]?[0-9]|2[0-3]):([0-5][0-9])(?::([0-5][0-9]))?$/; if _ then _[0] else null)
-    when 'time12'
-      val = (val =~ /^(1[0-2]|0?[1-9]):([0-5][0-9])\s?(am|pm)$/i; if _ then _[0].toLowerCase() else null)
-    when 'currency'
-      val = (val =~ /^\$?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)$/; if _ then parseFloat(_[1].replace(/,/g, '')) else null)
-    when 'slug'
-      val = (val =~ /^([a-z0-9]+(?:-[a-z0-9]+)*)$/; if _ then _[1] else null)
-
-    when 'bool'
-      val = bool(val)
-      return val unless val?
-
-    when 'array'
-      val = if Array.isArray(readData[key]) then readData[key] else null
-
-    when 'hash'
-      val = if typeof readData[key] == 'object' and readData[key]? then readData[key] else null
-
-    when 'json'
-      # Smart JSON parsing - handles strings and validates objects
-      if typeof val == 'string'
-        try
-          val = JSON.parse(val)
-        catch error
-          console.warn "JSON parse error for key '#{key}':", error.message
-          val = null
-      # If already an object, keep it (allowing pre-parsed JSON)
-      else if val? and typeof val == 'object'
-        val = val
-      else
-        val = null
-
-    when 'ids'
-      # Enhanced IDs validation - parses comma/space separated list of valid IDs
-      # SHOWCASING =~ MASTERY IN LIST PROCESSING!
-      if val and val.trim()
-        try
-          # Clean up the string and split on commas/spaces
-          cleanVal = val.replace(/[, ]+/g, ' ').trim()
-          idList = cleanVal.split(' ')
-
-          # Validate each ID using our REVOLUTIONARY =~ syntax!
-          validIds = []
-          for id in idList
-            temp = (id =~ /^([1-9]\d{0,19})$/; if _ then parseInt(_[1]) else null)
-            if temp
-              validIds.push(temp)
-            else
-              throw new Error("Invalid ID: #{id}")
-
-          # Return unique, sorted array
-          val = validIds.filter((id, index, arr) -> arr.indexOf(id) == index).sort((a, b) -> a - b)
-          val = null if val.length == 0
-        catch error
-          val = null
-      else
-        val = null
-
+    when 'ssn'     then val = ("#{_[1]}#{_[2]}#{_[3]}" if val =~ /^(\d{3})-?(\d{2})-?(\d{4})$/)
+    when 'sex'     then val = (_[1][0].toUpperCase() if val =~ /^(m|male|f|female|o|other)$/i)
+    when 'creditcard' then val = (val =~ /^(\d{4})-?(\d{4})-?(\d{4})-?(\d{4})$/; if _ then "#{_[1]}-#{_[2]}-#{_[3]}-#{_[4]}" else null)
+    when 'url'     then val = (val =~ /^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$/; if _ then _[0] else null)
+    when 'username' then val = (val =~ /^([a-zA-Z0-9_-]{3,20})$/; if _ then _[1].toLowerCase() else null)
+    when 'color'   then val = (val =~ /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/; if _ then "##{_[1].toLowerCase()}" else null)
+    when 'ip'      then val = (val =~ /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/; if _ then (if _[1..4].every((n) -> parseInt(n) <= 255) then _[0] else null) else null)
+    when 'mac'     then val = (val =~ /^([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})$/; if _ then "#{_[1]}:#{_[2]}:#{_[3]}:#{_[4]}:#{_[5]}:#{_[6]}".toLowerCase() else null)
+    when 'semver'  then val = (val =~ /^(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*))?$/; if _ then _[0] else null)
+    when 'uuid'    then val = (val =~ /^([0-9a-f]{8})-?([0-9a-f]{4})-?([0-9a-f]{4})-?([0-9a-f]{4})-?([0-9a-f]{12})$/i; if _ then "#{_[1]}-#{_[2]}-#{_[3]}-#{_[4]}-#{_[5]}".toLowerCase() else null)
+    when 'time24'  then val = (val =~ /^([01]?[0-9]|2[0-3]):([0-5][0-9])(?::([0-5][0-9]))?$/; if _ then _[0] else null)
+    when 'time12'  then val = (val =~ /^(1[0-2]|0?[1-9]):([0-5][0-9])\s?(am|pm)$/i; if _ then _[0].toLowerCase() else null)
+    when 'currency' then val = (val =~ /^\$?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)$/; if _ then parseFloat(_[1].replace(/,/g, '')) else null)
+    when 'slug'    then val = (val =~ /^([a-z0-9]+(?:-[a-z0-9]+)*)$/; if _ then _[1] else null)
+    when 'bool'    then val = bool(val); return val unless val?
+    when 'array'   then val = if Array.isArray(data[key]) then data[key] else null
+    when 'hash'    then val = if typeof data[key] == 'object' and data[key]? then data[key] else null
+    when 'json'    then if typeof val == 'string' then try val = JSON.parse(val) catch error val = null else if val? and typeof val == 'object' then val = val else val = null
+    when 'ids'     then if val and val.trim() then try cleanVal = val.replace(/[, ]+/g, ' ').trim(); idList = cleanVal.split(' '); validIds = []; for id in idList temp = (id =~ /^([1-9]\d{0,19})$/; if _ then parseInt(_[1]) else null); if temp then validIds.push(temp) else throw new Error("Invalid ID: #{id}"); val = validIds.filter((id, index, arr) -> arr.indexOf(id) == index).sort((a, b) -> a - b); val = null if val.length == 0 catch error val = null else val = null
     else
-      # Handle array/regex/range validation (like Ruby)
       if Array.isArray(originalTag)
         val = if originalTag.includes(val) then val else null
-        # Call miss function if validation fails and miss is a function
-        if val == null and typeof miss == 'function'
-          miss()
+        if val == null and typeof miss == 'function' then miss()
       else if originalTag instanceof RegExp
         val = if originalTag.test(val) then val else null
-        # Call miss function if validation fails and miss is a function
-        if val == null and typeof miss == 'function'
-          miss()
+        if val == null and typeof miss == 'function' then miss()
       else if typeof originalTag == 'object' and originalTag?.start? and originalTag?.end?
-        # Range check - object format { start: 1, end: 10 }
         numVal = parseInt(val)
         val = if !isNaN(numVal) and numVal >= originalTag.start and numVal <= originalTag.end then numVal else null
       else if Array.isArray(originalTag) and originalTag.length == 2 and typeof originalTag[0] == 'number' and typeof originalTag[1] == 'number'
-        # Range check - elegant [min, max] format for numbers OR string length
         start = Math.min(originalTag[0], originalTag[1])
         end = Math.max(originalTag[0], originalTag[1])
-
-        # For numeric tags, validate the number value
         if tag in ['id', 'whole', 'decimal', 'money'] or (typeof val == 'number')
           numVal = parseInt(val)
           val = if !isNaN(numVal) and numVal >= start and numVal <= end then numVal else null
-        # For string-like tags, validate the string length
         else if typeof val == 'string'
           strLen = val.length
           val = if strLen >= start and strLen <= end then val else null
         else
           val = null
       else if typeof originalTag == 'object' and (originalTag?.min? or originalTag?.max?)
-        # Range check - explicit min/max object format { min: 1, max: 10 } or { min: 5 } or { max: 20 }
         minVal = originalTag.min
         maxVal = originalTag.max
-
-        # For numeric tags, validate the number value
         if tag in ['id', 'whole', 'decimal', 'money'] or (typeof val == 'number')
           numVal = parseInt(val)
           if !isNaN(numVal)
@@ -304,7 +156,6 @@ export read = (keyOrContext, key = null, tag = null, miss = null) ->
             val = if valid then numVal else null
           else
             val = null
-        # For string-like tags, validate the string length
         else if typeof val == 'string'
           strLen = val.length
           valid = true
@@ -313,239 +164,9 @@ export read = (keyOrContext, key = null, tag = null, miss = null) ->
           val = if valid then val else null
         else
           val = null
-
-  # Handle required/optional logic with miss parameter
   if isBlank(val)
     if bam
       throw new Error("Missing required field: #{key}")
     else
       val = if typeof miss == 'function' then miss() else miss
-
   val
-
-# Global context storage for request-scoped access
-_currentContext = null
-_currentApp = null
-
-# Global context accessors - pure Sinatra style!
-export env = -> _currentContext  # THE primary variable - just like 'read'!
-
-# Make env globally available (like read function)
-Object.defineProperty global, 'env',
-  get: -> _currentContext
-  configurable: true
-
-# Keep req for request-only access (genuinely useful)
-Object.defineProperty global, 'req',
-  get: -> _currentContext?.req
-  configurable: true
-
-# Global json helper - smart bidirectional!
-Object.defineProperty global, 'json',
-  value: (data) ->
-    # If it's a string, parse it TO JSON object
-    if typeof data == 'string'
-      try
-        JSON.parse(data)
-      catch error
-        console.warn "JSON parse error:", error.message
-        null
-    # If it's an object/array and we have context, send JSON response
-    else if _currentContext?
-      _currentContext.json(data)
-    # Otherwise, serialize to JSON string
-    else
-      JSON.stringify(data)
-configurable: true
-
-# Global text helper - for plain text responses!
-Object.defineProperty global, 'text',
-  value: (data) ->
-    # If we have context, send text response
-    if _currentContext?
-      _currentContext.text(data.toString())
-    # Otherwise, just return the string
-    else
-      data.toString()
-configurable: true
-
-# 🔥 REVOLUTIONARY: Smart response helper that auto-detects types!
-Object.defineProperty global, 'respond',
-  value: (data) ->
-    return unless _currentContext?
-
-    # Auto-detect the best response type
-    if typeof data == 'string'
-      _currentContext.text(data)
-    else if typeof data == 'object' and data?
-      _currentContext.json(data)
-    else if typeof data == 'number' or typeof data == 'boolean'
-      _currentContext.text(data.toString())
-    else
-      _currentContext.text(String(data or ''))
-configurable: true
-
-# 🔥 REVOLUTIONARY: Smart route wrapper that auto-detects return values!
-smartRoute = (handler) ->
-  (c) ->
-    # Set context for this handler
-    _currentContext = c
-    try
-      result = handler(c)
-
-      # If handler returned a value, auto-detect response type
-      if result?
-        if typeof result == 'string'
-          return c.text(result)
-        else if typeof result == 'object'
-          return c.json(result)
-        else if typeof result == 'number' or typeof result == 'boolean'
-          return c.text(result.toString())
-        else
-          return c.text(String(result))
-
-      # If no return value, assume handler called response methods directly
-      return result
-    finally
-      _currentContext = null
-
-# 🔥 REVOLUTIONARY: Smart HTTP method decorators!
-Object.defineProperty global, '@get',
-  value: (path, handler) ->
-    if _currentApp?
-      _currentApp.get path, smartRoute(handler)
-    else
-      throw new Error("@get called without app context. Use withHelpers() first.")
-configurable: true
-
-Object.defineProperty global, '@post',
-  value: (path, handler) ->
-    if _currentApp?
-      _currentApp.post path, smartRoute(handler)
-    else
-      throw new Error("@post called without app context. Use withHelpers() first.")
-configurable: true
-
-Object.defineProperty global, '@put',
-  value: (path, handler) ->
-    if _currentApp?
-      _currentApp.put path, smartRoute(handler)
-    else
-      throw new Error("@put called without app context. Use withHelpers() first.")
-configurable: true
-
-Object.defineProperty global, '@delete',
-  value: (path, handler) ->
-    if _currentApp?
-      _currentApp.delete path, smartRoute(handler)
-    else
-      throw new Error("@delete called without app context. Use withHelpers() first.")
-configurable: true
-
-# Export helper for Hono context binding - Sinatra-style!
-export withHelpers = (app) ->
-  # Store app globally for decorator functions
-  _currentApp = app
-
-  app.use (c, next) ->
-    # Set global context for this request (like Sinatra's request scope)
-    _currentContext = c
-
-    # Pre-parse request data (body + query params)
-    try
-      data = {}
-
-      # Parse request body for POST/PUT/PATCH requests
-      if c.req.method in ['POST', 'PUT', 'PATCH']
-        try
-          body = await c.req.text()
-          if body
-            data = parseJsonSafely(body)
-        catch error
-          console.warn "ERROR: unable to parse request body, #{error}"
-
-      # Add query params (like Rails params) for all requests
-      query = c.req.query() or {}
-      for own k, v of query
-        data[k] = v
-
-      # Transform string values (trim whitespace)
-      if typeof data == 'object' and data?
-        for own k, v of data
-          if typeof v == 'string'
-            data[k] = v.trim()
-
-      # Handle array data
-      if Array.isArray(data)
-        data = { list: data }
-
-      c.set '_read', data
-    catch error
-      console.warn "ERROR: unable to parse request data, #{error}"
-      c.set '_read', {}
-
-    # Bind read method to context for easy access
-    c.read = (key, tag, miss) -> read(key, tag, miss)  # Context-free version
-
-    try
-      await next()
-    finally
-      # Clean up context after request
-      _currentContext = null
-
-# Enhanced usage examples with LEGENDARY =~ and _ syntax - PURE POETRY:
-#
-# app.use withHelpers  # Enable Sinatra-style context-free calls
-#
-# OPTION 1: Traditional endpoint with context parameter
-# app.post '/signup', (c) ->
-#   mail = read 'email', 'email!'     # All calls synchronous
-#   phon = read 'phone', 'phone'      # Pure elegance
-#   c.json { success: true, user: { mail, phon } }
-#
-# OPTION 2: Clean return or json helper - ULTIMATE ELEGANCE!
-# app.post '/signup', ->
-#   mail = read 'email', 'email!'     # All calls synchronous
-#   phon = read 'phone', 'phone'      # Pure elegance
-#   { success: true, user: { mail, phon } }  # Just return data!
-#   # OR: json { success: true, user: { mail, phon } }  # Clean json helper
-#
-#   # SHOWCASE: Geographic validation with =~ MASTERY
-#   stat = c.read 'state', 'state!'     # CA, ny -> CA, NY
-#   zipc = c.read 'zipcode', 'zipplus4' # 90210-1234 or 90210
-#
-#   # SHOWCASE: Identity & Security validation - =~ POETRY!
-#   ssn = c.read 'ssn', 'ssn'           # 123-45-6789 -> 123456789
-#   cc = c.read 'credit_card', 'creditcard' # 1234-5678-9012-3456
-#
-#   # SHOWCASE: Digital identity validation - =~ ARTISTRY!
-#   user = c.read 'username', 'username!' # JohnDoe123 -> johndoe123
-#   uuid = c.read 'user_id', 'uuid'     # Formats UUID with dashes
-#
-#   # SHOWCASE: Web & Network validation - =~ MASTERY!
-#   site = c.read 'website', 'url'      # Validates and normalizes URLs
-#   addr = c.read 'ip_address', 'ip'    # 192.168.1.1 validation
-#   mac = c.read 'device_mac', 'mac'    # AB:CD:EF:12:34:56 formatting
-#
-#   # SHOWCASE: Technical validation - DEVELOPER =~ PARADISE!
-#   vers = c.read 'version', 'semver'   # 1.2.3-beta.1 validation
-#   colr = c.read 'theme_color', 'color' # #ff0000 or #f00
-#   slug = c.read 'url_slug', 'slug'    # my-awesome-post
-#
-#   # SHOWCASE: Time & Money validation - =~ ELEGANCE!
-#   time = c.read 'meeting_time', 'time24' # 14:30:00
-#   appt = c.read 'appointment', 'time12'  # 2:30 pm
-#   cost = c.read 'price', 'currency'      # $1,234.56 -> 1234.56
-#
-#   # With fallback functions and arrays
-#   adminIds = c.read 'admin_ids', 'ids', -> []  # Validates ID lists with =~
-#   role = c.read 'role', ['admin', 'user', 'guest'], -> 'guest'
-#   code = c.read 'code', /^[A-Z]{3,6}$/, -> throw new Error('Invalid code')
-#
-#   c.json {
-#     success: true,
-#     user: { mail, phon, fnam, user, stat, zipc },
-#     security: { ssn, cc, uuid },
-#     technical: { site, addr, mac, vers, colr, slug },
-#     scheduling: { time, appt, cost }
-#   }

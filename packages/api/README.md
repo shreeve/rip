@@ -10,21 +10,14 @@
 
 **Core Philosophy**: API development should be **intuitive, safe, and beautiful**. Every function in this toolkit eliminates boilerplate, prevents common errors, and makes your intent crystal clear.
 
-## 🏗️ Package Architecture
+## 🏗️ Design Principles
 
-```
-@rip/api/
-├── helpers.rip        # Request validation & parsing (the star of the show)
-├── middleware.rip     # Common middleware patterns (planned)
-├── responses.rip      # Structured response helpers (planned)
-└── validation.rip     # Advanced validation utilities (planned)
-```
-
-**Design Principles**:
 - **Zero Configuration** - Works out of the box with sensible defaults
 - **Framework Agnostic** - Built for Hono but adaptable to any framework
 - **Type Safe** - Leverages Rip's elegant syntax for bulletproof validation
 - **Performance First** - Optimized patterns that scale to production
+
+> **Note:** `helpers.rip` is the only required file for most projects. All core validation, parsing, and helper logic lives here. Future extensions may add more files, but helpers.rip is the heart of @rip/api.
 
 ## 🎯 Perfect Consistency with @rip/schema
 
@@ -657,3 +650,49 @@ email = read 'email', 'email!'  # One line does it all
 **Transform your API development from verbose boilerplate to pure poetry with `@rip/api`** 🔥
 
 *"90% less code, 100% more clarity"*
+
+### One-Liner Validation Styles: CoffeeScript Patterns
+
+Rip and CoffeeScript allow for a variety of beautiful, concise one-liner validation styles. Here are five common patterns, with their pros and cons:
+
+#### 1. Semicolon Block Style
+```coffeescript
+when 'id' then val = (val =~ /^([1-9]\d{0,19})$/; if _ then parseInt(_[1]) else null); return val if val
+```
+- **Pros:** Explicitly separates regex match and result; familiar to CoffeeScript users.
+- **Cons:** Slightly more verbose; less visually direct.
+
+#### 2. Inline If Style
+```coffeescript
+when 'id' then val = (if val =~ /^([1-9]\d{0,19})$/ then parseInt(_[1]) else null); return val if val
+```
+- **Pros:** Reads like English; clear condition and result.
+- **Cons:** Still a bit verbose; returns `null` if not matched.
+
+#### 3. Concise Inline If (No Else)
+```coffeescript
+when 'id' then val = (if val =~ /^([1-9]\d{0,19})$/ then parseInt(_[1])); return val if val
+```
+- **Pros:** Even more concise; returns `undefined` if not matched.
+- **Cons:** May be less explicit about the fallback value.
+
+#### 4. Direct Return, Postfix If (Most Idiomatic)
+```coffeescript
+when 'id' then return parseInt(_[1]) if val =~ /^([1-9]\d{0,19})$/
+```
+- **Pros:** Most idiomatic, readable, and concise; emphasizes the transformation; easy to scan.
+- **Cons:** Only works if you want to return immediately; not suitable if you need to do more with `val` after.
+
+#### 5. Direct Return, Parentheses Optional
+```coffeescript
+when 'id' then return parseInt(_[1]) if val =~ /^([1-9]\d{0,19})$/
+```
+- **Pros:** Parentheses are not needed in CoffeeScript for this pattern; cleanest for direct returns.
+- **Cons:** Same as above; only for direct returns.
+
+**Guidance:**
+- Use the direct return/postfix if style for most one-liner validators—it's the most readable and idiomatic.
+- Use the semicolon or inline if style if you need to do more with the value after validation.
+- All styles are supported in helpers.rip; choose the one that best fits your intent and code clarity.
+
+**See `helpers.rip` for real-world usage and more examples.**
