@@ -23,6 +23,6 @@
   },
   "rip-server": {
     "port": 8305,
-    "workers": 2
+    "workers": 1
   }
 }

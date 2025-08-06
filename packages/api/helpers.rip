@@ -58,8 +58,22 @@ _currentContext = null
 smartRoute = (handler) ->
   (c) ->
     _currentContext = c
+
+        # Extract and prepare data just like the middleware does
+    data = await c.req.query() or {}
+    if c.req.method in ['POST', 'PUT', 'PATCH']
+      try
+        body = await c.req.json()
+        for own k, v of body
+          data[k] = v
+      catch error
+        null
+
+    # Store data on the context for read function
+    c._ripData = data
+
     try
-      result = handler(c)
+      result = await handler()  # Call handler without context - pure Sinatra style
       if typeof result == 'string'
         return c.text(result)
       else if typeof result == 'object' && result != null
@@ -92,10 +106,11 @@ export withHelpers = (app) ->
   return app
 
 export read = (keyOrContext, key = null, tag = null, miss = null) ->
-  ctx = requestContext?.getStore()
-  c = if keyOrContext?.req?.method? then keyOrContext else ctx?.c
-  data = ctx?.data or {}
+  # Pure Sinatra style - always use the current smartRoute context
+  c = _currentContext
   throw new Error('read() called without context') unless c
+
+  data = c._ripData or {}
   [key, tag, miss] = [keyOrContext, key, tag] unless key and tag and miss is not undefined
   val = if key then data[key] else data
   return val unless key and tag

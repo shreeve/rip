@@ -1,31 +1,48 @@
 import { Hono } from 'hono'
-import { requestContext } from '../../../packages/api/context.ts'
 import { read, withHelpers } from '../../../packages/api/helpers.rip'
 
 app = new Hono
 app = withHelpers app
 
-app.use (c, next) ->
-  data = c.req.query() or {}
-  if c.req.method in ['POST', 'PUT', 'PATCH']
-    try
-      body = await c.req.json()
-      for own k, v of body
-        data[k] = v
-    catch error
-      null
-  console.log '[middleware] All params:', data
-  requestContext.run { c, data }, -> next()
+# 🎯 Sinatra Style Examples - Test Hot Reload!
 
-app.get '/read-demo', (c) ->
-  value = read('email', 'string')
-  c.text("reads: #{value}")
+# Simple ping endpoint
+get '/ping', -> 'pong - server is working!'
 
-# Add revolutionary clean syntax examples
-get '/ping', -> 'pong'
+# Hello with parameter
+get '/hello', ->
+  name = read('name', 'string') or 'World'
+  "Hello, #{name}! 👋"
 
-get '/user', -> { name: 'larry', role: 'admin' }
+# Email validation demo
+get '/email', ->
+  email = read('email', 'email')
+  if email
+    { valid: true, email: email, message: "#{email} looks good!" }
+  else
+    { valid: false, message: 'Please provide a valid email (e.g., ?email=test@example.com)' }
 
-patch '/user/me', -> 'updated'
+# Calculator demo
+get '/calc', ->
+  a = read('a', 'decimal') or 0
+  b = read('b', 'decimal') or 0
+  op = read('op', 'string') or 'add'
+
+  result = switch op
+    when 'add' then a + b
+    when 'sub' then a - b
+    when 'mul' then a * b
+    when 'div'
+      if b != 0
+        a / b
+      else
+        'Cannot divide by zero!'
+    else 'Unknown operation'
+
+  { a: a, b: b, operation: op, result: result }
+
+# User mock
+get '/user', ->
+  { name: 'larry', role: 'admin', timestamp: Date.now() }
 
 export default app
