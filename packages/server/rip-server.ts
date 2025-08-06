@@ -7,7 +7,7 @@
  * Flexible argument parsing - provide arguments in ANY order!
  */
 
-import { existsSync, mkdirSync } from 'fs'
+import { existsSync, mkdirSync, statSync } from 'fs'
 import { homedir } from 'os'
 import { join, resolve } from 'path'
 import { spawn } from 'bun'
@@ -146,7 +146,7 @@ function parseArgs(args: string[]): Config {
 
     // Check if it's an existing directory
     const resolved = resolve(arg)
-    if (existsSync(resolved) && Bun.file(resolved).size === undefined) {
+    if (existsSync(resolved) && statSync(resolved).isDirectory()) {
       config.appDir = resolved
       continue
     }

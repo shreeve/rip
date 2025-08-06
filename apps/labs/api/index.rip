@@ -1,257 +1,31 @@
-# 🔥 Revolutionary Labs API - The Future of Web Development
-# Using @rip/data + @rip/schema + @rip/api for maximum elegance!
-
 import { Hono } from 'hono'
-import { cors } from 'hono/cors'
-import { withHelpers, read } from '@rip/api'
-# import { RipDataClient } from '@rip/data'
+import { requestContext } from '../../../packages/api/context.ts'
+import { read, withHelpers } from '../../../packages/api/helpers.rip'
 
-# Mock data client for now (until data server is fixed)
-# dataClient = new RipDataClient 'http://localhost:8306'
-
-# Create Hono app with revolutionary middleware
 app = new Hono
+app = withHelpers app
 
-# CORS for development (client is on 8205)
-app.use cors
-  origin: 'http://localhost:8205'
-  credentials: true
+app.use (c, next) ->
+  data = c.req.query() or {}
+  if c.req.method in ['POST', 'PUT', 'PATCH']
+    try
+      body = await c.req.json()
+      for own k, v of body
+        data[k] = v
+    catch error
+      null
+  console.log '[middleware] All params:', data
+  requestContext.run { c, data }, -> next()
 
-# Logger handled by revolutionary @rip/server - no need for basic Hono logger!
+app.get '/read-demo', (c) ->
+  value = read('email', 'string')
+  c.text("reads: #{value}")
 
-# 🔥 Revolutionary middleware that makes everything context-free!
-withHelpers app
+# Add revolutionary clean syntax examples
+get '/ping', -> 'sser'
 
-# 🔥 Revolutionary HTTP decorators with auto-response detection!
-get '/ping', -> 'pong'                    # Auto-detects string → text response
+get '/user', -> { name: 'larry', role: 'admin' }
 
-# Example of automatic JSON detection
-get '/user/larry', -> name: 'larry', role: 'admin'  # Auto-detects object → JSON response
+patch '/user/me', -> 'updated'
 
-# Traditional syntax still works for comparison
-get '/ping-old', -> text 'pong'
-
-# ====== CONFIG ROUTES ======
-get '/config', ->
-  appName: 'Labs (Revolutionary Rip + DuckDB)'
-  logo: 'https://via.placeholder.com/200x80/0066cc/ffffff?text=Labs'
-  userAgreementUrl: 'https://example.com/terms'
-  apiUrl: 'http://localhost:8305'
-  features:
-    auth: true
-    orders: true
-    results: true
-    analytics: true  # 🔥 NEW: Real-time analytics!
-
-# ====== AUTH ROUTES ======
-post '/auth/code', ->
-  # 🔥 Perfect validation with range constraints!
-  email = read 'email', 'email', [5, 255]
-  firstName = read 'firstName', 'string', [1, 100]
-  lastName = read 'lastName', 'string', [1, 100]
-
-  return error: 'Invalid email' unless email
-
-  # Generate auth code (mock for now)
-  code = Math.floor(100000 + Math.random() * 900000).toString()
-  console.log "🔑 Auth code for #{email}: #{code}"
-
-  success: true
-  message: 'Code sent!'
-  mockCode: code  # For testing
-
-post '/auth/verify', ->
-  email = read 'email', 'email', [5, 255]
-  code = read 'code', 'string', [6, 6]
-
-  return error: 'Invalid email or code' unless email and code
-
-  # Mock verification (accept any 6-digit code for now)
-  return error: 'Invalid or expired code' unless code.length == 6
-
-  # Mock user data
-  mockUser =
-    id: 1
-    email: email
-    firstName: 'John'
-    lastName: 'Doe'
-    admin: false
-
-  success: true
-  user: mockUser
-  token: "mock-jwt-#{mockUser.id}"
-
-# ====== USER ROUTES ======
-get '/user/me', ->
-  # Mock current user
-  mockUser =
-    id: 1
-    email: 'john.doe@example.com'
-    firstName: 'John'
-    lastName: 'Doe'
-    phone: '555-123-4567'
-    sex: 'Male'
-    dob: '1990-01-01'
-    admin: false
-    createdAt: '2024-01-01T00:00:00Z'
-
-  user: mockUser
-
-patch '/user/me', ->
-  userId = 1  # Mock current user
-
-  # 🔥 Perfect validation with our elegant read() function!
-  firstName = read 'firstName', 'string', [1, 100]
-  lastName = read 'lastName', 'string', [1, 100]
-  phone = read 'phone', 'string', [10, 20]
-  sex = read 'sex', 'string', [4, 10]
-  dob = read 'dob', 'string', [8, 10]
-
-  # Build update query dynamically
-  updates = []
-  params = []
-
-  if firstName
-    updates.push 'firstName = ?'
-    params.push firstName
-
-  if lastName
-    updates.push 'lastName = ?'
-    params.push lastName
-
-  if phone
-    updates.push 'phone = ?'
-    params.push phone
-
-  if sex
-    updates.push 'sex = ?'
-    params.push sex
-
-  if dob
-    updates.push 'dob = ?'
-    params.push dob
-
-  return error: 'No updates provided' unless updates.length > 0
-
-  params.push userId
-
-  # Mock updated user (in real app, this would update the database)
-  updatedUser =
-    id: userId
-    email: 'john.doe@example.com'
-    firstName: firstName || 'John'
-    lastName: lastName || 'Doe'
-    phone: phone || '555-123-4567'
-    sex: sex || 'Male'
-    dob: dob || '1990-01-01'
-    admin: false
-    createdAt: '2024-01-01T00:00:00Z'
-
-  user: updatedUser
-
-# ====== ADMIN ROUTES ======
-get '/users', ->
-  # Mock admin check and users list
-  mockUsers = [
-    { id: 1, email: 'john.doe@example.com', firstName: 'John', lastName: 'Doe', phone: '555-123-4567', sex: 'Male', dob: '1990-01-01', admin: false, createdAt: '2024-01-01T00:00:00Z' },
-    { id: 2, email: 'jane.smith@example.com', firstName: 'Jane', lastName: 'Smith', phone: '555-987-6543', sex: 'Female', dob: '1985-05-15', admin: false, createdAt: '2024-01-02T00:00:00Z' }
-  ]
-
-  users: mockUsers
-
-# ====== TEST ROUTES ======
-get '/tests', ->
-  # Mock test catalog
-  json
-    tests: [
-      { id: 1, name: 'Basic Health Panel', price: 9900, description: 'Essential health markers' },
-      { id: 2, name: 'Comprehensive Panel', price: 19900, description: 'Full health screening' },
-      { id: 3, name: 'Hormone Panel', price: 14900, description: 'Hormone levels check' }
-    ]
-
-# ====== ORDER ROUTES ======
-post '/orders', ->
-  userId = 1  # Mock current user
-
-  # 🔥 Elegant validation with perfect range constraints!
-  testIds = read 'testIds', 'array'
-  payment = read 'payment', 'string', [3, 20], 'stripe'
-
-  return json error: 'No tests selected' unless testIds and testIds.length > 0
-
-  # Calculate totals (mock pricing)
-  subtotal = testIds.length * 9900  # $99 per test
-  total = subtotal
-
-  # Generate order number
-  orderNumber = 'LAB-' + Math.random().toString(36).substr(2, 8).toUpperCase()
-
-  # Mock order creation
-  mockOrder =
-    id: Math.floor(Math.random() * 1000) + 1
-    userId: userId
-    number: orderNumber
-    payment: payment
-    subtotal: subtotal
-    total: total
-    meta: JSON.stringify({ testIds })
-    createdAt: new Date().toISOString()
-
-  json order: mockOrder
-
-get '/orders', ->
-  userId = 1  # Mock current user
-
-  # Mock orders list
-  mockOrders = [
-    { id: 1, userId: 1, number: 'LAB-ABC123', payment: 'stripe', subtotal: 9900, total: 9900, meta: '{"testIds":[1]}', createdAt: '2024-01-15T10:30:00Z' },
-    { id: 2, userId: 1, number: 'LAB-XYZ789', payment: 'stripe', subtotal: 19800, total: 19800, meta: '{"testIds":[1,2]}', createdAt: '2024-01-10T14:20:00Z' }
-  ]
-
-  json orders: mockOrders
-
-# ====== RESULTS ROUTES ======
-get '/results', ->
-  userId = 1  # Mock current user
-
-  # Mock results list
-  mockResults = [
-    { id: 1, userId: 1, orderId: 1, testName: 'Basic Health Panel', status: 'completed', values: '{"cholesterol": 180, "glucose": 95}', createdAt: '2024-01-16T09:00:00Z' },
-    { id: 2, userId: 1, orderId: 2, testName: 'Comprehensive Panel', status: 'pending', values: null, createdAt: '2024-01-11T16:45:00Z' }
-  ]
-
-  json results: mockResults
-
-# 🔥 REVOLUTIONARY ANALYTICS ENDPOINTS (Mock Data for Now!)
-get '/analytics/dashboard', ->
-  # Mock analytics data (in real app, this would be powered by DuckDB!)
-
-  # Mock user growth over time
-  mockUserGrowth = [
-    { date: '2024-01-15', new_users: 5, total_users: 25 },
-    { date: '2024-01-14', new_users: 3, total_users: 20 },
-    { date: '2024-01-13', new_users: 7, total_users: 17 }
-  ]
-
-  # Mock revenue analytics
-  mockRevenue = [
-    { date: '2024-01-15', orders: 8, revenue: 79200, avg_order_value: 9900 },
-    { date: '2024-01-14', orders: 5, revenue: 49500, avg_order_value: 9900 },
-    { date: '2024-01-13', orders: 12, revenue: 118800, avg_order_value: 9900 }
-  ]
-
-  # Mock test popularity
-  mockTestPopularity = [
-    { test_ids: '[1]', order_count: 15 },
-    { test_ids: '[1,2]', order_count: 8 },
-    { test_ids: '[3]', order_count: 5 }
-  ]
-
-  json
-    userGrowth: mockUserGrowth
-    revenue: mockRevenue
-    testPopularity: mockTestPopularity
-    generatedAt: new Date()
-
-# Export the app (let rip-server handle the server startup)
 export default app

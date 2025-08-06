@@ -69,7 +69,12 @@ const loadRipApplication = async () => {
         const app = await import(appPath)
 
         return app.default || app
-      } catch (_error) {}
+      } catch (error) {
+        // Only log actual errors, not "file not found" which is expected
+        if (!error.message.includes('Cannot find module')) {
+          console.error(`Failed to import ${file}:`, error)
+        }
+      }
     }
 
     // Fallback: create a simple default handler
