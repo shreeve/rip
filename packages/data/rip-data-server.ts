@@ -118,7 +118,7 @@ export class RipDataServer {
 
     this.httpServer = Bun.serve({
       port,
-      async fetch(req) {
+      fetch: async (req) => {
         return this.handleHTTPRequest(req)
       }
     })

@@ -11,9 +11,6 @@ This directory contains tests specific to **rip's modernization features**.
 ## Test Categories
 
 - `modern-output.coffee` - Tests for clean, modern JavaScript output
-- `async-call-operator.coffee` - Tests for the `!` async call operator
-- `branding.coffee` - Tests for proper Rip branding in generated output
-- `regex-index.coffee` - Tests for Ruby-style `variable[/regex/]` syntax
 - `bare-mode.coffee` - Tests for IIFE-free compilation
 - `future-features.coffee` - Tests for upcoming ES6+ features
 - `regression.coffee` - Tests to prevent regressions in modernization
