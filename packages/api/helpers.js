@@ -575,46 +575,46 @@ var smartRoute = function(handler) {
   };
 };
 
-// 🔥 REVOLUTIONARY: Smart HTTP method decorators!
-Object.defineProperty(global, '@get', {
+// 🔥 REVOLUTIONARY: Clean HTTP method decorators (no @ needed)!
+Object.defineProperty(global, 'get', {
   value: function(path, handler) {
     if (_currentApp) {
       return _currentApp.get(path, smartRoute(handler));
     } else {
-      throw new Error("@get called without app context. Use withHelpers() first.");
+      throw new Error("get called without app context. Use withHelpers() first.");
     }
   },
   configurable: true
 });
 
-Object.defineProperty(global, '@post', {
+Object.defineProperty(global, 'post', {
   value: function(path, handler) {
     if (_currentApp) {
       return _currentApp.post(path, smartRoute(handler));
     } else {
-      throw new Error("@post called without app context. Use withHelpers() first.");
+      throw new Error("post called without app context. Use withHelpers() first.");
     }
   },
   configurable: true
 });
 
-Object.defineProperty(global, '@put', {
+Object.defineProperty(global, 'put', {
   value: function(path, handler) {
     if (_currentApp) {
       return _currentApp.put(path, smartRoute(handler));
     } else {
-      throw new Error("@put called without app context. Use withHelpers() first.");
+      throw new Error("put called without app context. Use withHelpers() first.");
     }
   },
   configurable: true
 });
 
-Object.defineProperty(global, '@delete', {
+Object.defineProperty(global, 'del', {
   value: function(path, handler) {
     if (_currentApp) {
       return _currentApp.delete(path, smartRoute(handler));
     } else {
-      throw new Error("@delete called without app context. Use withHelpers() first.");
+      throw new Error("del called without app context. Use withHelpers() first.");
     }
   },
   configurable: true

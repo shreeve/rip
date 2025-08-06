@@ -23,53 +23,51 @@ app.use cors
 withHelpers app
 
 # 🔥 Revolutionary HTTP decorators with auto-response detection!
-@get '/ping', -> 'pong'                    # Auto-detects string → text response
+get '/ping', -> 'pong'                    # Auto-detects string → text response
 
 # Example of automatic JSON detection
-@get '/user/me', -> name: 'larry', role: 'admin'  # Auto-detects object → JSON response
+get '/user/larry', -> name: 'larry', role: 'admin'  # Auto-detects object → JSON response
 
 # Traditional syntax still works for comparison
-app.get '/ping-old', -> text 'pong'
+get '/ping-old', -> text 'pong'
 
 # ====== CONFIG ROUTES ======
-app.get '/config', ->
-  json
-    appName: 'Labs (Revolutionary Rip + DuckDB)'
-    logo: 'https://via.placeholder.com/200x80/0066cc/ffffff?text=Labs'
-    userAgreementUrl: 'https://example.com/terms'
-    apiUrl: 'http://localhost:8305'
-    features:
-      auth: true
-      orders: true
-      results: true
-      analytics: true  # 🔥 NEW: Real-time analytics!
+get '/config', ->
+  appName: 'Labs (Revolutionary Rip + DuckDB)'
+  logo: 'https://via.placeholder.com/200x80/0066cc/ffffff?text=Labs'
+  userAgreementUrl: 'https://example.com/terms'
+  apiUrl: 'http://localhost:8305'
+  features:
+    auth: true
+    orders: true
+    results: true
+    analytics: true  # 🔥 NEW: Real-time analytics!
 
 # ====== AUTH ROUTES ======
-app.post '/auth/code', ->
+post '/auth/code', ->
   # 🔥 Perfect validation with range constraints!
   email = read 'email', 'email', [5, 255]
   firstName = read 'firstName', 'string', [1, 100]
   lastName = read 'lastName', 'string', [1, 100]
 
-  return json error: 'Invalid email' unless email
+  return error: 'Invalid email' unless email
 
   # Generate auth code (mock for now)
   code = Math.floor(100000 + Math.random() * 900000).toString()
   console.log "🔑 Auth code for #{email}: #{code}"
 
-  json
-    success: true
-    message: 'Code sent!'
-    mockCode: code  # For testing
+  success: true
+  message: 'Code sent!'
+  mockCode: code  # For testing
 
-app.post '/auth/verify', ->
+post '/auth/verify', ->
   email = read 'email', 'email', [5, 255]
   code = read 'code', 'string', [6, 6]
 
-  return json error: 'Invalid email or code' unless email and code
+  return error: 'Invalid email or code' unless email and code
 
   # Mock verification (accept any 6-digit code for now)
-  return json error: 'Invalid or expired code' unless code.length == 6
+  return error: 'Invalid or expired code' unless code.length == 6
 
   # Mock user data
   mockUser =
@@ -79,13 +77,12 @@ app.post '/auth/verify', ->
     lastName: 'Doe'
     admin: false
 
-  json
-    success: true
-    user: mockUser
-    token: "mock-jwt-#{mockUser.id}"
+  success: true
+  user: mockUser
+  token: "mock-jwt-#{mockUser.id}"
 
 # ====== USER ROUTES ======
-app.get '/user/me', ->
+get '/user/me', ->
   # Mock current user
   mockUser =
     id: 1
@@ -98,9 +95,9 @@ app.get '/user/me', ->
     admin: false
     createdAt: '2024-01-01T00:00:00Z'
 
-  json user: mockUser
+  user: mockUser
 
-app.patch '/user/me', ->
+patch '/user/me', ->
   userId = 1  # Mock current user
 
   # 🔥 Perfect validation with our elegant read() function!
@@ -134,7 +131,7 @@ app.patch '/user/me', ->
     updates.push 'dob = ?'
     params.push dob
 
-  return json error: 'No updates provided' unless updates.length > 0
+  return error: 'No updates provided' unless updates.length > 0
 
   params.push userId
 
@@ -150,20 +147,20 @@ app.patch '/user/me', ->
     admin: false
     createdAt: '2024-01-01T00:00:00Z'
 
-  json user: updatedUser
+  user: updatedUser
 
 # ====== ADMIN ROUTES ======
-app.get '/users', ->
+get '/users', ->
   # Mock admin check and users list
   mockUsers = [
     { id: 1, email: 'john.doe@example.com', firstName: 'John', lastName: 'Doe', phone: '555-123-4567', sex: 'Male', dob: '1990-01-01', admin: false, createdAt: '2024-01-01T00:00:00Z' },
     { id: 2, email: 'jane.smith@example.com', firstName: 'Jane', lastName: 'Smith', phone: '555-987-6543', sex: 'Female', dob: '1985-05-15', admin: false, createdAt: '2024-01-02T00:00:00Z' }
   ]
 
-  json users: mockUsers
+  users: mockUsers
 
 # ====== TEST ROUTES ======
-app.get '/tests', ->
+get '/tests', ->
   # Mock test catalog
   json
     tests: [
@@ -173,7 +170,7 @@ app.get '/tests', ->
     ]
 
 # ====== ORDER ROUTES ======
-app.post '/orders', ->
+post '/orders', ->
   userId = 1  # Mock current user
 
   # 🔥 Elegant validation with perfect range constraints!
@@ -202,7 +199,7 @@ app.post '/orders', ->
 
   json order: mockOrder
 
-app.get '/orders', ->
+get '/orders', ->
   userId = 1  # Mock current user
 
   # Mock orders list
@@ -214,7 +211,7 @@ app.get '/orders', ->
   json orders: mockOrders
 
 # ====== RESULTS ROUTES ======
-app.get '/results', ->
+get '/results', ->
   userId = 1  # Mock current user
 
   # Mock results list
@@ -226,7 +223,7 @@ app.get '/results', ->
   json results: mockResults
 
 # 🔥 REVOLUTIONARY ANALYTICS ENDPOINTS (Mock Data for Now!)
-app.get '/analytics/dashboard', ->
+get '/analytics/dashboard', ->
   # Mock analytics data (in real app, this would be powered by DuckDB!)
 
   # Mock user growth over time
@@ -256,12 +253,5 @@ app.get '/analytics/dashboard', ->
     testPopularity: mockTestPopularity
     generatedAt: new Date()
 
-# Start the server
-Bun.serve
-  port: 8305
-  fetch: app.fetch
-
-console.log 'Listening on http://localhost:8305'
-
-# Export the app
+# Export the app (let rip-server handle the server startup)
 export default app
