@@ -27,22 +27,68 @@ get '/calc', ->
   a = read('a', 'decimal') or 0
   b = read('b', 'decimal') or 0
   op = read('op', 'string') or 'add'
-
+  
   result = switch op
     when 'add' then a + b
     when 'sub' then a - b
     when 'mul' then a * b
-    when 'div'
-      if b != 0
-        a / b
-      else
+    when 'div' 
+      if b != 0 
+        a / b 
+      else 
         'Cannot divide by zero!'
     else 'Unknown operation'
-
+  
   { a: a, b: b, operation: op, result: result }
 
-# User mock
+# User mock with timestamp
 get '/user', ->
   { name: 'larry', role: 'admin', timestamp: Date.now() }
+
+# Phone number formatting demo
+get '/format-phone', ->
+  phone = read('phone', 'string')
+  if phone
+    formatted = phone.replace(/\D/g, '').replace(/(\d{3})(\d{3})(\d{4})/, '($1) $2-$3')
+    { original: phone, formatted: formatted }
+  else
+    { error: 'Please provide a phone number (e.g., ?phone=1234567890)' }
+
+# Age validation demo
+get '/age-check', ->
+  age = read('age', 'whole')
+  if age
+    status = if age >= 21 then 'adult' else if age >= 13 then 'teen' else 'child'
+    { age: age, status: status, canVote: age >= 18, canDrink: age >= 21 }
+  else
+    { error: 'Please provide your age (e.g., ?age=25)' }
+
+# Username validation
+get '/username', ->
+  username = read('username', 'string')
+  if username
+    isValid = username.length >= 3 and /^[a-zA-Z0-9_]+$/.test(username)
+    { username: username, valid: isValid, length: username.length }
+  else
+    { error: 'Please provide a username (e.g., ?username=john_doe)' }
+
+# Profile creation demo
+post '/create-user', ->
+  name = read('name', 'string')
+  email = read('email', 'email') 
+  age = read('age', 'whole')
+  
+  if name and email and age
+    { 
+      success: true
+      user: { id: Math.floor(Math.random() * 1000), name, email, age }
+      message: 'User created successfully!'
+    }
+  else
+    { 
+      success: false
+      error: 'Missing required fields: name, email, age'
+      received: { name, email, age }
+    }
 
 export default app
