@@ -1,2 +1,1 @@
-# Rip transpilation support for the entire project
-preload = ["../../../packages/bun/rip-bun.ts"]
+preload = ["./packages/bun/rip-bun.ts"]
