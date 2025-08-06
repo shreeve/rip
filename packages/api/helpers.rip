@@ -111,10 +111,12 @@ export read = (keyOrContext, key = null, tag = null, miss = null) ->
   else
     val = String(val or '')
 
-  # Process the tag
+  # Early returns for simple cases (Ruby-style)
+  if tag == 'id'    and val[/^([1-9]\d{0,19})$/]  then return parseInt(_[1])
+  if tag == 'whole' and val[/^(0|[1-9]\d{,19})$/] then return parseInt(_[1])
+
+  # Process remaining tags with switch expression
   val = switch tag
-    # when 'id'       then val =~ /^([1-9]\d{0,19})$/   and parseInt(_[1]); return val if val
-    # when 'whole'    then val =~ /^(0|[1-9]\d{0,19})$/ and parseInt(_[1]); return val if val
     when 'decimal'    then val[/^([-+]?\d+(?:\.\d*)?|\.\d+)$/] and parseFloat(_[1].replace(/\.$/, ''))
     when 'money'      then val[/^([-+]?\d+(?:\.\d*)?|\.\d+)$/] and Math.round(parseFloat(_[1].replace(/\.$/, '')) * 100) / 100
     when 'string'     then val.replace(/\s\s+/g, ' ')
