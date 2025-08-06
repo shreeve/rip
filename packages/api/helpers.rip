@@ -115,8 +115,8 @@ export read = (keyOrContext, key = null, tag = null, miss = null) ->
   val = switch tag
     # when 'id'       then val =~ /^([1-9]\d{0,19})$/   and parseInt(_[1]); return val if val
     # when 'whole'    then val =~ /^(0|[1-9]\d{0,19})$/ and parseInt(_[1]); return val if val
-    when 'decimal'    then val =~ /^([-+]?\d+(?:\.\d*)?|\.\d+)$/ and parseFloat(_[1].replace(/\.$/, ''))
-    when 'money'      then val =~ /^([-+]?\d+(?:\.\d*)?|\.\d+)$/ and Math.round(parseFloat(_[1].replace(/\.$/, '')) * 100) / 100
+    when 'decimal'    then val[/^([-+]?\d+(?:\.\d*)?|\.\d+)$/] and parseFloat(_[1].replace(/\.$/, ''))
+    when 'money'      then val[/^([-+]?\d+(?:\.\d*)?|\.\d+)$/] and Math.round(parseFloat(_[1].replace(/\.$/, '')) * 100) / 100
     when 'string'     then val.replace(/\s\s+/g, ' ')
     when 'text'       then val.replace(/  +/g, ' ')
     when 'name'       then toName(val, 'name')
@@ -127,29 +127,29 @@ export read = (keyOrContext, key = null, tag = null, miss = null) ->
     when 'dateutc'    then parseDateUTC(val)
     when 'truthy'     then truthy(val)
     when 'falsy'      then falsy(val)
-    when 'email'      then val =~ /^([a-zA-Z0-9._%+-]+)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})$/ and _[0].toLowerCase()
-    when 'state'      then val =~ /^([a-z][a-z])$/i and _[1].toUpperCase()
-    when 'zip'        then val =~ /^(\d{5})/ and _[1]
-    when 'zipplus4'   then val =~ /^(\d{5})-?(\d{4})$/ and "#{_[1]}-#{_[2]}"
-    when 'ssn'        then val =~ /^(\d{3})-?(\d{2})-?(\d{4})$/ and "#{_[1]}#{_[2]}#{_[3]}"
-    when 'sex'        then val =~ /^(m|male|f|female|o|other)$/i and _[1][0].toUpperCase()
-    when 'creditcard' then val =~ /^(\d{4})-?(\d{4})-?(\d{4})-?(\d{4})$/ and "#{_[1]}-#{_[2]}-#{_[3]}-#{_[4]}"
-    when 'url'        then val =~ /^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$/ and _[0]
-    when 'username'   then val =~ /^([a-zA-Z0-9_-]{3,20})$/ and _[1].toLowerCase()
-    when 'color'      then val =~ /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/ and "##{_[1].toLowerCase()}"
-    when 'ip'         then val =~ /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/ and (if _[1..4].every((n) -> parseInt(n) <= 255) then _[0])
-    when 'mac'        then val =~ /^([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})$/ and "#{_[1]}:#{_[2]}:#{_[3]}:#{_[4]}:#{_[5]}:#{_[6]}".toLowerCase()
-    when 'semver'     then val =~ /^(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*))?$/ and _[0]
-    when 'uuid'       then val =~ /^([0-9a-f]{8})-?([0-9a-f]{4})-?([0-9a-f]{4})-?([0-9a-f]{4})-?([0-9a-f]{12})$/i and "#{_[1]}-#{_[2]}-#{_[3]}-#{_[4]}-#{_[5]}".toLowerCase()
-    when 'time24'     then val =~ /^([01]?[0-9]|2[0-3]):([0-5][0-9])(?::([0-5][0-9]))?$/ and _[0]
-    when 'time12'     then val =~ /^(1[0-2]|0?[1-9]):([0-5][0-9])\s?(am|pm)$/i and _[0].toLowerCase()
-    when 'currency'   then val =~ /^\$?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)$/ and parseFloat(_[1].replace(/,/g, ''))
-    when 'slug'       then val =~ /^([a-z0-9]+(?:-[a-z0-9]+)*)$/ and _[1]
+    when 'email'      then val[/^([a-zA-Z0-9._%+-]+)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})$/] and _[0].toLowerCase()
+    when 'state'      then val[/^([a-z][a-z])$/i] and _[1].toUpperCase()
+    when 'zip'        then val[/^\d{5}/]
+    when 'zipplus4'   then val[/^(\d{5})-?(\d{4})$/] and "#{_[1]}-#{_[2]}"
+    when 'ssn'        then val[/^(\d{3})-?(\d{2})-?(\d{4})$/] and "#{_[1]}#{_[2]}#{_[3]}"
+    when 'sex'        then val[/^(m|male|f|female|o|other)$/i] and _[1][0].toUpperCase()
+    when 'creditcard' then val[/^(\d{4})-?(\d{4})-?(\d{4})-?(\d{4})$/] and "#{_[1]}-#{_[2]}-#{_[3]}-#{_[4]}"
+    when 'url'        then val[/^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$/] and _[0]
+    when 'username'   then val[/^([a-zA-Z0-9_-]{3,20})$/] and _[1].toLowerCase()
+    when 'color'      then val[/^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/] and "##{_[1].toLowerCase()}"
+    when 'ip'         then val[/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/] and (if _[1..4].every((n) -> parseInt(n) <= 255) then _[0])
+    when 'mac'        then val[/^([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})$/] and "#{_[1]}:#{_[2]}:#{_[3]}:#{_[4]}:#{_[5]}:#{_[6]}".toLowerCase()
+    when 'semver'     then val[/^(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*))?$/] and _[0]
+    when 'uuid'       then val[/^([0-9a-f]{8})-?([0-9a-f]{4})-?([0-9a-f]{4})-?([0-9a-f]{4})-?([0-9a-f]{12})$/i] and "#{_[1]}-#{_[2]}-#{_[3]}-#{_[4]}-#{_[5]}".toLowerCase()
+    when 'time24'     then val[/^([01]?[0-9]|2[0-3]):([0-5][0-9])(?::([0-5][0-9]))?$/] and _[0]
+    when 'time12'     then val[/^(1[0-2]|0?[1-9]):([0-5][0-9])\s?(am|pm)$/i] and _[0].toLowerCase()
+    when 'currency'   then val[/^\$?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)$/] and parseFloat(_[1].replace(/,/g, ''))
+    when 'slug'       then val[/^([a-z0-9]+(?:-[a-z0-9]+)*)$/] and _[1]
     when 'bool'       then val = bool(val); val = null unless val?
     when 'array'      then val = if Array.isArray(data[key]) then data[key] else null
     when 'hash'       then val = if typeof data[key] == 'object' and data[key]? then data[key] else null
     when 'json'       then val = if typeof val == 'string' then try JSON.parse(val) catch error then null else if val? and typeof val == 'object' then val else null
-    when 'ids'        then val = if val and val.trim() then try cleanVal = val.replace(/[, ]+/g, ' ').trim(); idList = cleanVal.split(' '); validIds = []; for id in idList temp = (id =~ /^([1-9]\d{0,19})$/ and parseInt(_[1])); if temp then validIds.push(temp) else throw new Error("Invalid ID: #{id}"); result = validIds.filter((id, index, arr) -> arr.indexOf(id) == index).sort((a, b) -> a - b); if result.length == 0 then null else result catch error then null
+    when 'ids'        then val = if val and val.trim() then try cleanVal = val.replace(/[, ]+/g, ' ').trim(); idList = cleanVal.split(' '); validIds = []; for id in idList temp = (id[/^([1-9]\d{0,19})$/] and parseInt(_[1])); if temp then validIds.push(temp) else throw new Error("Invalid ID: #{id}"); result = validIds.filter((id, index, arr) -> arr.indexOf(id) == index).sort((a, b) -> a - b); if result.length == 0 then null else result catch error then null
     else
       if Array.isArray(originalTag)
         val = if originalTag.includes(val) then val else null

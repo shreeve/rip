@@ -446,6 +446,12 @@ grammar =
   IndexValue: [
     o 'Expression',                             -> new Index $1
     o 'Slice',                                  -> new Slice $1
+    o 'Regex',                                  -> new RegexIndex $1
+    o 'RegexWithIndex',                         -> $1
+  ]
+
+  RegexWithIndex: [
+    o 'Regex , Expression',                     -> new RegexIndex $1, $3
   ]
 
   # In CoffeeScript, an object literal is simply a list of assignments.

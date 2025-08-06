@@ -3,7 +3,7 @@
   // nodes are created as the result of actions in the [grammar](grammar.html),
   // but some are created by other nodes as a method of code generation. To convert
   // the syntax tree into a string of JavaScript code, call `compile()` on the root.
-  var Access, Arr, Assign, AwaitReturn, Base, Block, BooleanLiteral, Call, Catch, Class, ClassProperty, ClassPrototypeProperty, Code, CodeFragment, ComputedPropertyName, DefaultLiteral, Directive, DynamicImport, DynamicImportCall, Elision, EmptyInterpolation, ExecutableClassBody, Existence, Expansion, ExportAllDeclaration, ExportDeclaration, ExportDefaultDeclaration, ExportNamedDeclaration, ExportSpecifier, ExportSpecifierList, Extends, For, FuncDirectiveReturn, FuncGlyph, HEREGEX_OMIT, HereComment, HoistTarget, IdentifierLiteral, If, ImportClause, ImportDeclaration, ImportDefaultSpecifier, ImportNamespaceSpecifier, ImportSpecifier, ImportSpecifierList, In, Index, InfinityLiteral, Interpolation, JSXAttribute, JSXAttributes, JSXElement, JSXEmptyExpression, JSXExpressionContainer, JSXIdentifier, JSXNamespacedName, JSXTag, JSXText, JS_FORBIDDEN, LEADING_BLANK_LINE, LEVEL_ACCESS, LEVEL_COND, LEVEL_LIST, LEVEL_OP, LEVEL_PAREN, LEVEL_TOP, LineComment, Literal, MetaProperty, ModuleDeclaration, ModuleSpecifier, ModuleSpecifierList, NEGATE, NO, NaNLiteral, NullLiteral, NumberLiteral, Obj, ObjectProperty, Op, Param, Parens, PassthroughLiteral, PropertyName, Range, RegexLiteral, RegexWithInterpolations, Return, Root, SIMPLENUM, SIMPLE_STRING_OMIT, STRING_OMIT, Scope, Sequence, Slice, Splat, StatementLiteral, StringLiteral, StringWithInterpolations, Super, SuperCall, Switch, SwitchCase, SwitchWhen, TAB, THIS, TRAILING_BLANK_LINE, TaggedTemplateCall, TemplateElement, ThisLiteral, Throw, Try, UTILITIES, UndefinedLiteral, Value, While, YES, YieldReturn, addDataToNode, astAsBlockIfNeeded, attachCommentsToNode, compact, del, emptyExpressionLocationData, ends, extend, extractSameLineLocationDataFirst, extractSameLineLocationDataLast, flatten, fragmentsToText, greater, hasLineComments, indentInitial, isAstLocGreater, isFunction, isLiteralArguments, isLiteralThis, isLocationDataEndGreater, isLocationDataStartGreater, isNumber, isPlainObject, isUnassignable, jisonLocationDataToAstLocationData, lesser, locationDataToString, makeDelimitedLiteral, merge, mergeAstLocationData, mergeLocationData, moveComments, multident, parseNumber, replaceUnicodeCodePointEscapes, shouldCacheOrIsAssignable, sniffDirectives, some, starts, throwSyntaxError, unfoldSoak, unshiftAfterComments, utility, zeroWidthLocationDataFromEndLocation,
+  var Access, Arr, Assign, AwaitReturn, Base, Block, BooleanLiteral, Call, Catch, Class, ClassProperty, ClassPrototypeProperty, Code, CodeFragment, ComputedPropertyName, DefaultLiteral, Directive, DynamicImport, DynamicImportCall, Elision, EmptyInterpolation, ExecutableClassBody, Existence, Expansion, ExportAllDeclaration, ExportDeclaration, ExportDefaultDeclaration, ExportNamedDeclaration, ExportSpecifier, ExportSpecifierList, Extends, For, FuncDirectiveReturn, FuncGlyph, HEREGEX_OMIT, HereComment, HoistTarget, IdentifierLiteral, If, ImportClause, ImportDeclaration, ImportDefaultSpecifier, ImportNamespaceSpecifier, ImportSpecifier, ImportSpecifierList, In, Index, InfinityLiteral, Interpolation, JSXAttribute, JSXAttributes, JSXElement, JSXEmptyExpression, JSXExpressionContainer, JSXIdentifier, JSXNamespacedName, JSXTag, JSXText, JS_FORBIDDEN, LEADING_BLANK_LINE, LEVEL_ACCESS, LEVEL_COND, LEVEL_LIST, LEVEL_OP, LEVEL_PAREN, LEVEL_TOP, LineComment, Literal, MetaProperty, ModuleDeclaration, ModuleSpecifier, ModuleSpecifierList, NEGATE, NO, NaNLiteral, NullLiteral, NumberLiteral, Obj, ObjectProperty, Op, Param, Parens, PassthroughLiteral, PropertyName, Range, RegexIndex, RegexLiteral, RegexWithInterpolations, Return, Root, SIMPLENUM, SIMPLE_STRING_OMIT, STRING_OMIT, Scope, Sequence, Slice, Splat, StatementLiteral, StringLiteral, StringWithInterpolations, Super, SuperCall, Switch, SwitchCase, SwitchWhen, TAB, THIS, TRAILING_BLANK_LINE, TaggedTemplateCall, TemplateElement, ThisLiteral, Throw, Try, UTILITIES, UndefinedLiteral, Value, While, YES, YieldReturn, addDataToNode, astAsBlockIfNeeded, attachCommentsToNode, compact, del, emptyExpressionLocationData, ends, extend, extractSameLineLocationDataFirst, extractSameLineLocationDataLast, flatten, fragmentsToText, greater, hasLineComments, indentInitial, isAstLocGreater, isFunction, isLiteralArguments, isLiteralThis, isLocationDataEndGreater, isLocationDataStartGreater, isNumber, isPlainObject, isUnassignable, jisonLocationDataToAstLocationData, lesser, locationDataToString, makeDelimitedLiteral, merge, mergeAstLocationData, mergeLocationData, moveComments, multident, parseNumber, replaceUnicodeCodePointEscapes, shouldCacheOrIsAssignable, sniffDirectives, some, starts, throwSyntaxError, unfoldSoak, unshiftAfterComments, utility, zeroWidthLocationDataFromEndLocation,
     indexOf = [].indexOf,
     splice = [].splice,
     slice1 = [].slice;
@@ -2161,7 +2161,7 @@
       // operators `?.` interspersed. Then we have to take care not to accidentally
       // evaluate anything twice when building the soak chain.
       compileNode(o) {
-        var fragments, i, isAsyncCall, isBeingCalled, j, lastProp, len1, prop, propName, props, ref1, ref2;
+        var captureCode, fragments, i, indexStr, isAsyncCall, isBeingCalled, j, lastProp, len1, prop, propName, props, ref1, ref2, regexCode;
         this.base.front = this.front;
         props = this.properties;
         // rip: Check if last property ends with ! (async call operator)
@@ -2194,6 +2194,12 @@
               // If not being called, add () and await
               fragments.push(this.makeCode(`.${propName}()`));
             }
+          } else if (prop instanceof RegexIndex) {
+            // Handle regex indexing: obj[/regex/] -> (_ = obj.match(/regex/)) && _[0]
+            // Or with capture group: obj[/regex/, 1] -> (_ = obj.match(/regex/)) && _[1]
+            regexCode = prop.regex.compileToFragments(o, LEVEL_PAREN);
+            indexStr = prop.captureIndex ? (captureCode = prop.captureIndex.compileToFragments(o, LEVEL_PAREN), `[${fragmentsToText(captureCode)}]`) : "[0]";
+            fragments = [this.makeCode("(_ = "), ...fragments, this.makeCode(".match("), ...regexCode, this.makeCode(`)) && _${indexStr}`)];
           } else {
             fragments.push(...(prop.compileToFragments(o)));
           }
@@ -3452,9 +3458,9 @@
       }
 
       astNode(o) {
-        // Babel doesn’t have an AST node for `Index`, but rather just includes
-        // this Index node’s child `index` Identifier node as the `property` of
-        // the `MemberExpression` node. The fact that the `MemberExpression`’s
+        // Babel doesn't have an AST node for `Index`, but rather just includes
+        // this Index node's child `index` Identifier node as the `property` of
+        // the `MemberExpression` node. The fact that the `MemberExpression`'s
         // `property` is an Index means that `computed` is `true` for the
         // `MemberExpression`.
         return this.index.ast(o);
@@ -3465,6 +3471,32 @@
     Index.prototype.children = ['index'];
 
     return Index;
+
+  }).call(this);
+
+  //### RegexIndex
+
+  // A `[ /regex/ ]` indexed access that performs regex matching.
+  exports.RegexIndex = RegexIndex = (function() {
+    class RegexIndex extends Base {
+      constructor(regex1, captureIndex = null) {
+        super();
+        this.regex = regex1;
+        this.captureIndex = captureIndex;
+      }
+
+      astNode(o) {
+        // For now, treat as a computed member expression
+        return this.regex.ast(o);
+      }
+
+    };
+
+    RegexIndex.prototype.children = ['regex', 'captureIndex'];
+
+    RegexIndex.prototype.shouldCache = NO;
+
+    return RegexIndex;
 
   }).call(this);
 

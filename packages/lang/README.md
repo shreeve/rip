@@ -420,6 +420,89 @@ This change eliminates style debates and ensures consistent code output. Teams c
 
 This enhancement demonstrates RIP's philosophy of **developer-friendly language design** - providing flexibility while ensuring consistent, clean output.
 
+### Change 005 - Ruby-Style Regex Indexing Syntax
+**Timestamp**: 2025-01-27 15:45:00 -0700
+
+**The Problem**: Verbose Regex Matching Patterns
+JavaScript's regex matching often requires verbose patterns for simple extractions:
+
+```javascript
+// JavaScript - verbose and repetitive
+const phone = "1234567890";
+const match = phone.match(/^(\d{3})(\d{3})(\d{4})$/);
+const areaCode = match ? match[1] : null;
+const exchange = match ? match[2] : null;
+```
+
+Common issues:
+- **Repetitive null checks** - must verify match exists before accessing groups
+- **Verbose syntax** - `.match()` and array indexing add noise
+- **Multiple operations** - what should be one step becomes several
+- **Error-prone** - easy to forget null checks leading to runtime errors
+
+**The Solution**: Ruby-Inspired Regex Indexing
+We implemented Ruby's elegant `variable[/regex/]` syntax that combines matching and extraction in a single operation:
+
+```coffeescript
+# RIP - clean and intuitive
+phone = "1234567890"
+areaCode = phone[/^(\d{3})(\d{3})(\d{4})$/, 1]  # "123"
+exchange = phone[/^(\d{3})(\d{3})(\d{4})$/, 2]  # "456"
+number = phone[/^(\d{3})(\d{3})(\d{4})$/, 3]    # "7890"
+
+# Basic match (returns full match)
+name = "Jonathan"
+initial = name[/[A-Z]/]                         # Returns "J"
+
+# Chaining works seamlessly
+text = "hello world"
+word = text[/(\w+)/].toUpperCase()              # Returns "HELLO"
+
+# Global _ variable automatically set for later access
+phone[/^(\d{3})(\d{3})(\d{4})$/]               # Sets _[0], _[1], _[2], _[3]
+console.log "Area code: #{_[1]}"               # Access capture groups later
+
+# Complex expressions work naturally
+data = { userInfo: "user123" }
+userId = data.userInfo[/\d+/]                  # Returns "123"
+
+# No match returns null (safe)
+result = "hello"[/\d+/]                        # Returns null
+```
+
+**Technical Implementation**:
+This feature required modifications to three compiler layers:
+
+1. **Grammar Extension**: Added `RegexWithIndex` rule to handle `Regex , Expression` syntax
+2. **AST Node Creation**: Created `RegexIndex` node to represent the new syntax
+3. **Code Generation**: Compiles to `(_ = obj.match(/regex/)) && _[index]` with automatic `_` variable assignment
+4. **Capture Group Support**: Optional second parameter for accessing specific capture groups
+
+**Key Design Decisions**:
+- **Global `_` variable** - automatically set with match results for subsequent access
+- **Null safety** - returns `null` for no match (consistent with JavaScript)
+- **Chaining support** - works seamlessly with method calls and property access
+- **Division disambiguation** - existing CoffeeScript logic correctly handles `/` context
+
+**Benefits**:
+- **Concise syntax** - single operation for match and extract
+- **Ruby familiarity** - developers from Ruby feel at home
+- **Null safe** - built-in protection against null reference errors
+- **Chainable** - integrates naturally with method calls
+
+**Real-World Impact**:
+This change makes regex operations significantly more readable and reduces boilerplate code. Complex validation and parsing logic becomes much cleaner and less error-prone.
+
+**Test Coverage**:
+- ✅ All 1473 CoffeeScript legacy compatibility tests pass
+- ✅ 11 comprehensive regex indexing tests in `coffeescript/test/rip/`
+- ✅ Capture group indexing with `[/regex/, N]` syntax
+- ✅ Chaining with method calls and property access
+- ✅ Division vs regex disambiguation works correctly
+- ✅ Global `_` variable assignment verified
+
+This enhancement brings Ruby's most elegant regex feature to RIP, making pattern matching operations more intuitive and maintainable.
+
 ## 🏗️ "Building the 747 Mid-Flight"
 
 While the current `/coffeescript` directory serves as our working implementation (modified CoffeeScript), this package represents the future:

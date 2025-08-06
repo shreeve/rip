@@ -1491,6 +1491,16 @@ exports.Value = class Value extends Base
         else
           # If not being called, add () and await
           fragments.push @makeCode(".#{propName}()")
+      else if prop instanceof RegexIndex
+        # Handle regex indexing: obj[/regex/] -> (_ = obj.match(/regex/)) && _[0]
+        # Or with capture group: obj[/regex/, 1] -> (_ = obj.match(/regex/)) && _[1]
+        regexCode = prop.regex.compileToFragments(o, LEVEL_PAREN)
+        indexStr = if prop.captureIndex
+          captureCode = prop.captureIndex.compileToFragments(o, LEVEL_PAREN)
+          "[#{fragmentsToText(captureCode)}]"
+        else
+          "[0]"
+        fragments = [@makeCode("(_ = "), fragments..., @makeCode(".match("), regexCode..., @makeCode(")) && _#{indexStr}")]
       else
         fragments.push (prop.compileToFragments o)...
 
@@ -2335,12 +2345,27 @@ exports.Index = class Index extends Base
     @index.shouldCache()
 
   astNode: (o) ->
-    # Babel doesn’t have an AST node for `Index`, but rather just includes
-    # this Index node’s child `index` Identifier node as the `property` of
-    # the `MemberExpression` node. The fact that the `MemberExpression`’s
+    # Babel doesn't have an AST node for `Index`, but rather just includes
+    # this Index node's child `index` Identifier node as the `property` of
+    # the `MemberExpression` node. The fact that the `MemberExpression`'s
     # `property` is an Index means that `computed` is `true` for the
     # `MemberExpression`.
     @index.ast o
+
+#### RegexIndex
+
+# A `[ /regex/ ]` indexed access that performs regex matching.
+exports.RegexIndex = class RegexIndex extends Base
+  constructor: (@regex, @captureIndex = null) ->
+    super()
+
+  children: ['regex', 'captureIndex']
+
+  shouldCache: NO
+
+  astNode: (o) ->
+    # For now, treat as a computed member expression
+    @regex.ast o
 
 #### Range
 

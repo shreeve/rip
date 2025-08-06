@@ -810,6 +810,21 @@
       o('Slice',
       function() {
         return new Slice($1);
+      }),
+      o('Regex',
+      function() {
+        return new RegexIndex($1);
+      }),
+      o('RegexWithIndex',
+      function() {
+        return $1;
+      })
+    ],
+    RegexWithIndex: [
+      o('Regex , Expression',
+      function() {
+        return new RegexIndex($1,
+      $3);
       })
     ],
     // In CoffeeScript, an object literal is simply a list of assignments.
