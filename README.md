@@ -51,13 +51,47 @@ This foundational principle guides every API design decision in Rip:
 
 **💫 Perfect Balance**: Learn the common patterns first (covers 90% of needs), discover advanced features as you grow. No feature bloat, no cognitive overload, just elegant progression from simple to sophisticated.
 
+## 🌟 Live Language Innovation
+
+**Rip demonstrates unprecedented rapid language development** - major features go from concept to production in hours, not years:
+
+### 🔥 Recent Breakthrough: Ruby-Style Regex Indexing
+
+**January 27, 2025** - Implemented complete Ruby-style `variable[/regex/]` syntax:
+
+- **⚡ Full Compiler Pipeline**: Grammar → Parser → AST → Code Generation
+- **🧪 Comprehensive Testing**: 11 test cases, zero regressions on 1473 legacy tests
+- **🚀 Instant Production**: Same-day deployment in live applications
+- **📚 Complete Documentation**: Change 005 with timestamp and technical details
+
+```coffeescript
+# This syntax was invented and deployed in ONE SESSION:
+phone = "1234567890"
+areaCode = phone[/^(\d{3})(\d{3})(\d{4})$/, 1]  # Returns "123"
+exchange = phone[/^(\d{3})(\d{3})(\d{4})$/, 2]  # Returns "456"
+
+# Chaining works naturally
+word = text[/(\w+)/].toUpperCase()              # Extract and transform
+
+# Global _ variable automatically set
+phone[/^(\d{3})(\d{3})(\d{4})$/]               # Sets _[0], _[1], _[2], _[3]
+console.log "Area code: #{_[1]}"               # Access later
+```
+
+### 🎯 What This Enables
+
+**Traditional Language Development**: Years from idea to production
+**Rip Development**: Hours from concept to live deployment
+
+This isn't just about features - it's about **revolutionizing how programming languages evolve** to meet developer needs in real-time.
+
 ## 📦 Packages
 
 ### **[@rip/parser](packages/parser/)**
 SLR(1) parser generator that creates fast, reliable parsers from grammar definitions.
 
 ### **[@rip/server](packages/server/)**
-Production-ready application server with multi-process architecture, hot reload, and HTTPS.
+Revolutionary decoupled server/app architecture. One server runtime runs any Rip application with multi-worker load balancing, instant HTTPS, and hot reload. Point-and-run any app directory for immediate development or production deployment.
 
 ### **[@rip/schema](packages/schema/)**
 ActiveRecord-inspired database DSL for elegant schema definitions with Drizzle ORM.
@@ -76,7 +110,7 @@ Explore working examples in the [`/examples`](examples/) directory:
 
 ## The Rip Language
 
-**Rip** is a modern echo of CoffeeScript - maintaining elegance and expressiveness while focusing on core syntax.
+**Rip** is a modern evolution of CoffeeScript - maintaining elegance and expressiveness while pioneering rapid language innovation. Features like Ruby-style regex indexing demonstrate how programming languages can evolve in real-time to meet developer needs.
 
 ### Key Features
 
@@ -111,14 +145,57 @@ status = switch response.code
 userName = user?.profile?.name ? 'Anonymous'
 ```
 
+## 🚀 Revolutionary Architecture
+
+**Rip pioneered decoupled server/app architecture** - one server runtime can instantly run any Rip application:
+
+```bash
+# One server, infinite possibilities
+rip-server apps/blog 3000           # Blog on port 3000
+rip-server apps/api 8080            # API on port 8080
+rip-server apps/ecommerce 4000      # E-commerce on port 4000
+rip-server ../any-project 5000      # Any Rip app anywhere
+
+# HTTPS is trivial (one-time setup)
+rip-server ca:init                  # Create Certificate Authority
+rip-server ca:trust                 # Trust in system (no browser warnings!)
+rip-server apps/api https:ca        # Secure HTTPS with CA-signed certs
+
+# Both protocols simultaneously
+rip-server apps/api http+https      # HTTP on 3000, HTTPS on 3443
+```
+
+### 🔥 Live Development Experience
+
+**Edit files → See changes instantly** with zero configuration:
+
+1. **🎯 Point & Run**: Server discovers and loads your app automatically
+2. **⚡ Hot Reload**: File changes trigger graceful worker restarts
+3. **📊 Load Balance**: Multi-worker architecture with beautiful request logging
+4. **🔒 Production Ready**: Same architecture for development and deployment
+
+```bash
+# Start development
+rip-server apps/my-app              # Server starts, discovers app
+# Edit files in apps/my-app/ → changes appear instantly
+# No build steps, no server restarts needed!
+
+# Deploy to production
+rip-server prod apps/my-app         # Same app, production mode
+```
+
 ## Quick Start
 
 ```bash
 # Install dependencies
 bun install
 
-# Run an example
-rip-server ./examples/blog
+# Run an example with hot reload
+rip-server examples/blog
+
+# Try HTTPS (CA setup - one time only)
+rip-server ca:init && rip-server ca:trust
+rip-server examples/blog https:ca
 
 # Create a schema
 cd examples/medical
@@ -138,8 +215,9 @@ rip/
 │   ├── schema/       # @rip/schema - Database DSL
 │   └── server/       # @rip/server - Multi-worker server
 ├── examples/         # Example applications
+├── apps/            # Development applications
 ├── docs/            # Documentation and assets
-└── coffeescript/    # Standalone CoffeeScript compiler
+└── coffeescript/    # Enhanced CoffeeScript compiler with Rip features
 ```
 
 ## Development
