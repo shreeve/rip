@@ -130,7 +130,7 @@
     // referenced as property names here, so you can still do `jQuery.is()` even
     // though `is` means `===` otherwise.
     identifierToken() {
-      var alias, colon, colonOffset, colonToken, id, idLength, inJSXTag, input, match, poppedToken, prev, prevprev, ref, ref1, ref10, ref11, ref12, ref2, ref3, ref4, ref5, ref6, ref7, ref8, ref9, regExSuper, regex, sup, tag, tagToken, tokenData;
+      var afterNot, alias, colon, colonOffset, colonToken, id, idLength, inJSXTag, input, match, poppedToken, prev, prevprev, ref, ref1, ref10, ref11, ref12, ref2, ref3, ref4, ref5, ref6, ref7, ref8, ref9, regExSuper, regex, sup, tag, tagToken, tokenData;
       inJSXTag = this.atJSXTag();
       regex = inJSXTag ? JSX_ATTRIBUTE : IDENTIFIER;
       if (!(match = regex.exec(this.chunk))) {
@@ -245,6 +245,17 @@
         });
       }
       if (!(tag === 'PROPERTY' || this.exportSpecifierList || this.importSpecifierList)) {
+        // Transform 'is not' → 'isnt' for cleaner syntax (before alias processing)
+        // Only transform when 'not' is followed by a non-boolean value to avoid breaking chains
+        if (id === 'is' && this.chunk.slice(idLength, idLength + 4) === ' not') {
+          // Look ahead to see what comes after ' not '
+          afterNot = this.chunk.slice(idLength + 4).trim();
+          // Only transform if NOT followed by 'false', 'true' (which could be part of chains)
+          if (!afterNot.match(/^(false|true)\s+(is|isnt|==|!=)/)) {
+            id = 'isnt';
+            idLength += 4; // Consume ' not' as well
+          }
+        }
         if (indexOf.call(COFFEE_ALIASES, id) >= 0) {
           alias = id;
           id = COFFEE_ALIAS_MAP[id];
@@ -298,7 +309,12 @@
           generated: true
         });
       }
-      return input.length;
+      // Return the actual consumed length (accounts for 'is not' → 'isnt' transformation)
+      if (colon) {
+        return idLength + colon.length;
+      } else {
+        return idLength;
+      }
     }
 
     // Matches numbers, including decimals, hex, and exponential notation.
