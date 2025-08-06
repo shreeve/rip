@@ -5,7 +5,7 @@ import { startRipDataServer } from '@rip/data'
 console.log('🚀 Starting RipData Server for Labs API...')
 
 const server = await startRipDataServer({
-  dbPath: './db/api.db',
+  dbPath: './db/labs.duckdb',
   protocols: {
     http: { port: 8306 },
     websocket: { port: 8307 }

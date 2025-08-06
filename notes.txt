@@ -1,3 +1,9 @@
+
+
+cd apps/labs/api && sleep 3 && curl -X POST http://localhost:8306/api/execute -H "Content-Type: application/json" -d '{"sql": "SHOW TABLES"}'
+
+==
+
 # Initialize project
 bun init
 
