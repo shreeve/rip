@@ -131,6 +131,89 @@ rip-server ca:clean                 # Clean old certificates
 
 **Perfect for monitoring, debugging, and performance analysis!** 🎯
 
+## 🎯 **Complete Server Management Demo**
+
+**Step-by-step practical workflow** - everything you need to know:
+
+### **📊 1. Check Status (Always Start Here)**
+```bash
+bun server status                    # Check if anything is running
+# OR
+rip-server status                    # Same thing, direct command
+```
+
+### **🚀 2. Start Server with App**
+```bash
+# From monorepo root (recommended)
+bun server apps/labs/api             # Start labs API
+bun server examples/blog             # Start blog example
+bun server examples/legal            # Start legal example
+
+# From app directory (POLS magic)
+cd apps/labs/api && rip-server       # Auto-finds index.rip
+cd examples/blog && rip-server       # Auto-finds index.rip
+```
+
+### **🔄 3. Restart Server (Smart Behavior)**
+```bash
+# If server is already running, this restarts it
+bun server apps/labs/api             # Smart restart
+rip-server apps/labs/api             # Same thing
+```
+
+### **📡 4. Test Your Running App**
+```bash
+curl http://localhost:3000/ping      # Test endpoint
+curl http://localhost:3000/health    # Health check
+curl http://localhost:3000/metrics   # Performance metrics
+```
+
+### **🔍 5. Monitor Server**
+```bash
+bun server status                    # Detailed status with PID, memory, runtime
+# Shows:
+# ✅ Status: Running
+# 📋 Active Processes: PID, memory usage, runtime
+# 🌐 Port Status: HTTP 200 checks
+```
+
+### **🛑 6. Stop Server**
+```bash
+bun server stop                     # Graceful shutdown
+rip-server stop                     # Same thing, direct
+```
+
+### **⚡ 7. Advanced Options**
+```bash
+# Custom ports and workers
+bun server apps/labs/api 8080       # Custom port
+rip-server w:5 r:100                # 5 workers, 100 requests each
+rip-server https                    # HTTPS with auto-cert
+rip-server prod                     # Production mode
+```
+
+### **🎯 Typical Workflow:**
+```bash
+# 1. Check what's running
+bun server status
+
+# 2. Start your app  
+bun server apps/labs/api
+
+# 3. Test it
+curl http://localhost:3000/ping
+
+# 4. Check status anytime
+bun server status
+
+# 5. Stop when done
+bun server stop
+```
+
+**🔥 The beauty**: It's all **smart and predictable** - commands do exactly what you expect with **Principle of Least Surprise (POLS)**!
+
+---
+
 ## 🎛️ Smart Lifecycle Management
 
 **Following the Principle of Least Surprise** - commands do exactly what you expect:
@@ -419,7 +502,7 @@ Transform any machine into a **Heroku-like platform** with the RIP Platform Cont
 rip-server platform
 
 🌐 RIP Platform running on :3000
-📊 Dashboard: http://localhost:3000/platform  
+📊 Dashboard: http://localhost:3000/platform
 ✨ Ready to deploy apps dynamically...
 ```
 
@@ -444,7 +527,7 @@ rip-server undeploy blog       # Remove blog app completely
 ### **🎛️ Visual Management Dashboard:**
 
 - **📊 Real-time stats**: Memory, CPU, request counts
-- **⚡ One-click scaling**: Add/remove workers instantly  
+- **⚡ One-click scaling**: Add/remove workers instantly
 - **📈 Performance monitoring**: Response times, throughput
 - **🔧 Hot deployments**: Deploy new versions without downtime
 - **📱 Mobile-friendly**: Manage from anywhere
