@@ -985,13 +985,17 @@ async function main() {
       console.log(`🚀 Rip Application Server
 
 Usage:
-  rip-server [options...]
+  bun server [options...]      # Recommended (from monorepo root)
+  rip-server [options...]      # Direct usage
 
 Smart Behavior:
-  rip-server                    Start server (or restart if already running)
-  rip-server [options]          Start/restart with options (default behavior)
-  rip-server stop               Stop server (if running)
+  bun server apps/my-app        Start/restart server (recommended)
+  bun server status             Show detailed server status
+  bun server stop               Stop server (if running)
+
+  rip-server [options]          Start/restart with options (direct)
   rip-server status             Show detailed server status
+  rip-server stop               Stop server (if running)
 
 Commands:
   dev       Development mode
@@ -1023,18 +1027,18 @@ Protocol Options:
   http+https          Both HTTP and HTTPS
 
 Examples:
-  rip-server                        # Start/restart HTTP server
+  bun server apps/my-app            # Start/restart app (recommended)
+  bun server apps/api https         # Start/restart with HTTPS
+  bun server apps/blog 8080         # Start/restart on custom port
+  bun server status                 # Show server status
+  bun server stop                   # Stop server
+
+  rip-server                        # Start/restart HTTP server (direct)
   rip-server https                  # Start/restart with HTTPS
   rip-server https:quick            # Start/restart with self-signed cert
-  rip-server https:ca               # Start/restart with CA cert
-  rip-server http+https             # Start/restart both protocols
-  rip-server 8080                   # Start/restart on custom port
-  rip-server https 8443             # Start/restart HTTPS on custom port
-  rip-server ./api prod             # Start/restart production mode for ./api
-  rip-server w:5 r:50               # Start/restart with 5 workers, 50 requests each
-  rip-server cert.pem key.pem       # Start/restart with custom cert
-  rip-server prod https w:10        # Start/restart prod HTTPS, 10 workers
-  rip-server stop                   # Stop server (only explicit stop command)
+  rip-server ./api prod             # Start/restart production mode
+  rip-server w:5 r:50               # Start/restart with 5 workers, 50 requests
+  rip-server stop                   # Stop server
 
 Certificate Authority:
   rip-server ca:init                # One-time CA setup

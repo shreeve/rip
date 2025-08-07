@@ -176,18 +176,18 @@ userName = user?.profile?.name ? 'Anonymous'
 
 ```bash
 # One server, infinite possibilities
-rip-server apps/blog 3000           # Blog on port 3000
-rip-server apps/api 8080            # API on port 8080
-rip-server apps/ecommerce 4000      # E-commerce on port 4000
-rip-server ../any-project 5000      # Any Rip app anywhere
+bun server apps/blog 3000           # Blog on port 3000
+bun server apps/api 8080            # API on port 8080
+bun server apps/ecommerce 4000      # E-commerce on port 4000
+bun server ../any-project 5000      # Any Rip app anywhere
 
 # HTTPS is trivial (one-time setup)
-rip-server ca:init                  # Create Certificate Authority
-rip-server ca:trust                 # Trust in system (no browser warnings!)
-rip-server apps/api https:ca        # Secure HTTPS with CA-signed certs
+bun server ca:init                  # Create Certificate Authority
+bun server ca:trust                 # Trust in system (no browser warnings!)
+bun server apps/api https:ca        # Secure HTTPS with CA-signed certs
 
 # Both protocols simultaneously
-rip-server apps/api http+https      # HTTP on 3000, HTTPS on 3443
+bun server apps/api http+https      # HTTP on 3000, HTTPS on 3443
 ```
 
 ### 🔥 Live Development Experience
@@ -201,12 +201,12 @@ rip-server apps/api http+https      # HTTP on 3000, HTTPS on 3443
 
 ```bash
 # Start development
-rip-server apps/my-app              # Server starts, discovers app
+bun server apps/my-app              # Server starts, discovers app
 # Edit files in apps/my-app/ → changes appear instantly
 # No build steps, no server restarts needed!
 
 # Deploy to production
-rip-server prod apps/my-app         # Same app, production mode
+bun server prod apps/my-app         # Same app, production mode
 ```
 
 ## Quick Start
@@ -216,11 +216,11 @@ rip-server prod apps/my-app         # Same app, production mode
 bun install
 
 # Run an example with hot reload
-rip-server examples/blog
+bun server examples/blog
 
 # Try HTTPS (CA setup - one time only)
-rip-server ca:init && rip-server ca:trust
-rip-server examples/blog https:ca
+bun server ca:init && bun server ca:trust
+bun server examples/blog https:ca
 
 # Create a schema
 cd examples/medical

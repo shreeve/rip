@@ -42,8 +42,8 @@
 # Install all dependencies (from project root)
 bun install
 
-# Run with rip-server
-rip-server ./examples/blog
+# Run with bun server
+bun server ./examples/blog
 
 # Or run directly
 cd examples/blog && bun index.rip
