@@ -31,7 +31,7 @@
     "repl.js"
   ],
   "scripts": {
-    "test":     "NODE_OPTIONS=\"--no-warnings=ExperimentalWarning\" node ./bin/cake test",
+    "test": "NODE_OPTIONS=\"--no-warnings=ExperimentalWarning\" node ./bin/cake test",
     "test:rip": "NODE_OPTIONS=\"--no-warnings=ExperimentalWarning\" node ./bin/cake test:rip",
     "test:all": "NODE_OPTIONS=\"--no-warnings=ExperimentalWarning\" node ./bin/cake test:all"
   },
