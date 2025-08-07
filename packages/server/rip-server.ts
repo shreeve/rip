@@ -934,7 +934,6 @@ async function startPlatform(config: Config): Promise<void> {
 }
 
 async function deployApp(config: Config, args: string[]): Promise<void> {
-  // For deploy commands, we use the API instead of the instance
   const platformUrl = 'http://localhost:3000'
 
   // Parse deploy arguments: rip-server deploy <name> <directory> [--port <port>] [--workers <workers>]
@@ -944,9 +943,13 @@ async function deployApp(config: Config, args: string[]): Promise<void> {
   }
 
   const [name, directory] = args
-  const deployConfig: Partial<AppConfig> & { name: string, directory: string } = {
+  const deployConfig: any = {
     name,
-    directory: resolve(directory)
+    directory: resolve(directory),
+    port: 3001,
+    workers: 2,
+    mode: 'dev',
+    protocol: 'http'
   }
 
   // Parse additional options
@@ -962,29 +965,43 @@ async function deployApp(config: Config, args: string[]): Promise<void> {
         deployConfig.workers = parseInt(value)
         break
       case '--mode':
-        deployConfig.mode = value as 'dev' | 'prod'
+        deployConfig.mode = value
         break
       case '--protocol':
-        deployConfig.protocol = value as 'http' | 'https' | 'http+https'
+        deployConfig.protocol = value
         break
     }
   }
 
   try {
-    const app = await platformInstance.deployApp(deployConfig)
+    console.log(`🚀 Deploying app '${name}' from ${directory}...`)
+    
+    const response = await fetch(`${platformUrl}/api/deploy`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(deployConfig)
+    })
+
+    if (!response.ok) {
+      const error = await response.text()
+      throw new Error(`HTTP ${response.status}: ${error}`)
+    }
+
+    const result = await response.json()
     console.log(`✅ App '${name}' deployed successfully`)
-    console.log(`🌐 Available at: http://localhost:${app.config.port}`)
-  } catch (error) {
-    console.error(`❌ Failed to deploy app '${name}': ${error.message}`)
+    console.log(`🌐 Available at: http://localhost:${deployConfig.port}`)
+  } catch (error: any) {
+    if (error.cause?.code === 'ECONNREFUSED' || error.message.includes('ECONNREFUSED')) {
+      console.error('❌ Platform not running. Start with: rip-server platform')
+    } else {
+      console.error(`❌ Failed to deploy app '${name}': ${error.message}`)
+    }
     process.exit(1)
   }
 }
 
 async function undeployApp(args: string[]): Promise<void> {
-  if (!platformInstance) {
-    console.error('❌ Platform not running. Start with: rip-server platform')
-    process.exit(1)
-  }
+  const platformUrl = 'http://localhost:3000'
 
   if (args.length < 1) {
     console.error('❌ Usage: rip-server undeploy <name>')
@@ -994,62 +1011,87 @@ async function undeployApp(args: string[]): Promise<void> {
   const [name] = args
 
   try {
-    await platformInstance.undeployApp(name)
+    console.log(`🛑 Undeploying app '${name}'...`)
+    
+    const response = await fetch(`${platformUrl}/api/undeploy/${name}`, {
+      method: 'DELETE'
+    })
+
+    if (!response.ok) {
+      const error = await response.text()
+      throw new Error(`HTTP ${response.status}: ${error}`)
+    }
+
     console.log(`✅ App '${name}' undeployed successfully`)
-  } catch (error) {
-    console.error(`❌ Failed to undeploy app '${name}': ${error.message}`)
+  } catch (error: any) {
+    if (error.cause?.code === 'ECONNREFUSED' || error.message.includes('ECONNREFUSED')) {
+      console.error('❌ Platform not running. Start with: rip-server platform')
+    } else {
+      console.error(`❌ Failed to undeploy app '${name}': ${error.message}`)
+    }
     process.exit(1)
   }
 }
 
 async function listPlatformApps(): Promise<void> {
-  if (!platformInstance) {
-    console.error('❌ Platform not running. Start with: rip-server platform')
+  const platformUrl = 'http://localhost:3000'
+
+  try {
+    console.log('📋 Fetching platform status...')
+    
+    const response = await fetch(`${platformUrl}/api/stats`)
+
+    if (!response.ok) {
+      const error = await response.text()
+      throw new Error(`HTTP ${response.status}: ${error}`)
+    }
+
+    const data = await response.json()
+
+    console.log('🚀 RIP Platform Status')
+    console.log(`📊 Total Apps: ${data.totalApps || 0} | Running: ${data.runningApps || 0} | Workers: ${data.totalWorkers || 0}`)
+    console.log(`⏱️  Platform Uptime: ${Math.round((data.uptime || 0) / 1000 / 60)} minutes`)
+    console.log('')
+
+    if (!data.apps || data.apps.length === 0) {
+      console.log('📱 No apps deployed')
+      console.log('💡 Deploy an app with: rip-server deploy <name> <directory>')
+      return
+    }
+
+    console.log('📱 Deployed Apps:')
+    data.apps.forEach((app: any) => {
+      const statusEmoji = {
+        'running': '🟢',
+        'starting': '🟡',
+        'stopping': '🟠',
+        'stopped': '⚫',
+        'error': '🔴'
+      }[app.status] || '⚪'
+
+      const runtime = app.startedAt ? Math.round((Date.now() - new Date(app.startedAt).getTime()) / 1000 / 60) : 0
+
+      console.log(`   ${statusEmoji} ${app.name.padEnd(15)} :${app.port.toString().padEnd(5)} ${app.workers}w ${app.mode.padEnd(4)} ${runtime}m`)
+
+      if (app.error) {
+        console.log(`      ❌ ${app.error}`)
+      }
+    })
+
+    console.log('')
+    console.log('🌐 Platform Dashboard: http://localhost:3000/platform')
+  } catch (error: any) {
+    if (error.cause?.code === 'ECONNREFUSED' || error.message.includes('ECONNREFUSED')) {
+      console.error('❌ Platform not running. Start with: rip-server platform')
+    } else {
+      console.error(`❌ Failed to get platform status: ${error.message}`)
+    }
     process.exit(1)
   }
-
-  const apps = platformInstance.listApps()
-  const stats = platformInstance.getStats()
-
-  console.log('🚀 RIP Platform Status')
-  console.log(`📊 Total Apps: ${stats.totalApps} | Running: ${stats.runningApps} | Workers: ${stats.totalWorkers}`)
-  console.log(`⏱️  Platform Uptime: ${Math.round(stats.uptime / 1000 / 60)} minutes`)
-  console.log('')
-
-  if (apps.length === 0) {
-    console.log('📱 No apps deployed')
-    console.log('💡 Deploy an app with: rip-server deploy <name> <directory>')
-    return
-  }
-
-  console.log('📱 Deployed Apps:')
-  apps.forEach(app => {
-    const statusEmoji = {
-      'running': '🟢',
-      'starting': '🟡',
-      'stopping': '🟠',
-      'stopped': '⚫',
-      'error': '🔴'
-    }[app.status] || '⚪'
-
-    const runtime = Math.round((Date.now() - app.startedAt.getTime()) / 1000 / 60)
-
-    console.log(`   ${statusEmoji} ${app.config.name.padEnd(15)} :${app.config.port.toString().padEnd(5)} ${app.config.workers}w ${app.config.mode.padEnd(4)} ${runtime}m`)
-
-    if (app.error) {
-      console.log(`      ❌ ${app.error}`)
-    }
-  })
-
-  console.log('')
-  console.log('🌐 Platform Dashboard: http://localhost:3000/platform')
 }
 
 async function scalePlatformApp(args: string[]): Promise<void> {
-  if (!platformInstance) {
-    console.error('❌ Platform not running. Start with: rip-server platform')
-    process.exit(1)
-  }
+  const platformUrl = 'http://localhost:3000'
 
   if (args.length < 2) {
     console.error('❌ Usage: rip-server scale <name> <workers>')
@@ -1065,19 +1107,32 @@ async function scalePlatformApp(args: string[]): Promise<void> {
   }
 
   try {
-    await platformInstance.scaleApp(name, workers)
+    console.log(`⚡ Scaling app '${name}' to ${workers} workers...`)
+    
+    const response = await fetch(`${platformUrl}/api/scale/${name}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workers })
+    })
+
+    if (!response.ok) {
+      const error = await response.text()
+      throw new Error(`HTTP ${response.status}: ${error}`)
+    }
+
     console.log(`✅ App '${name}' scaled to ${workers} workers`)
-  } catch (error) {
-    console.error(`❌ Failed to scale app '${name}': ${error.message}`)
+  } catch (error: any) {
+    if (error.cause?.code === 'ECONNREFUSED' || error.message.includes('ECONNREFUSED')) {
+      console.error('❌ Platform not running. Start with: rip-server platform')
+    } else {
+      console.error(`❌ Failed to scale app '${name}': ${error.message}`)
+    }
     process.exit(1)
   }
 }
 
 async function restartPlatformApp(args: string[]): Promise<void> {
-  if (!platformInstance) {
-    console.error('❌ Platform not running. Start with: rip-server platform')
-    process.exit(1)
-  }
+  const platformUrl = 'http://localhost:3000'
 
   if (args.length < 1) {
     console.error('❌ Usage: rip-server restart <name>')
@@ -1087,10 +1142,24 @@ async function restartPlatformApp(args: string[]): Promise<void> {
   const [name] = args
 
   try {
-    await platformInstance.restartApp(name)
+    console.log(`🔄 Restarting app '${name}'...`)
+    
+    const response = await fetch(`${platformUrl}/api/restart/${name}`, {
+      method: 'POST'
+    })
+
+    if (!response.ok) {
+      const error = await response.text()
+      throw new Error(`HTTP ${response.status}: ${error}`)
+    }
+
     console.log(`✅ App '${name}' restarted successfully`)
-  } catch (error) {
-    console.error(`❌ Failed to restart app '${name}': ${error.message}`)
+  } catch (error: any) {
+    if (error.cause?.code === 'ECONNREFUSED' || error.message.includes('ECONNREFUSED')) {
+      console.error('❌ Platform not running. Start with: rip-server platform')
+    } else {
+      console.error(`❌ Failed to restart app '${name}': ${error.message}`)
+    }
     process.exit(1)
   }
 }
@@ -1276,9 +1345,12 @@ Single App Examples:
   rip-server ./api prod             # Start/restart production mode
 
 Platform Examples (Multi-App Management):
+  # Terminal 1: Start platform
   rip-server platform               # Start the platform controller
-  rip-server deploy blog apps/blog --port 3001 --workers 3
-  rip-server deploy api apps/api --port 8080 --workers 5
+  
+  # Terminal 2: Deploy and manage apps  
+  rip-server deploy blog examples/blog --port 3001 --workers 3
+  rip-server deploy api apps/labs/api --port 3002 --workers 5
   rip-server list                   # Show all deployed apps
   rip-server scale api 10           # Scale API to 10 workers
   rip-server restart blog           # Restart blog app

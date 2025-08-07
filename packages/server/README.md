@@ -509,10 +509,13 @@ rip-server platform
 ### **🎯 Deploy Multiple Apps Instantly:**
 
 ```bash
-# Deploy apps dynamically - no restarts needed!
-rip-server deploy blog apps/blog --port 3001 --workers 3
-rip-server deploy api apps/api --port 8080 --workers 5
-rip-server deploy shop apps/ecommerce --port 3002 --workers 7
+# First, start the platform in one terminal
+rip-server platform
+
+# Then, in another terminal, deploy apps dynamically
+rip-server deploy blog examples/blog --port 3001 --workers 3
+rip-server deploy api apps/labs/api --port 3002 --workers 5
+rip-server deploy legal examples/legal --port 3003 --workers 2
 
 # Scale in real-time
 rip-server scale api 10        # Scale API to 10 workers
@@ -522,6 +525,22 @@ rip-server scale blog 1        # Scale blog to 1 worker
 rip-server list                # Show all deployed apps
 rip-server restart api         # Restart just the API app
 rip-server undeploy blog       # Remove blog app completely
+```
+
+### **🎯 Complete Platform Workflow:**
+
+```bash
+# Terminal 1: Start the platform
+rip-server platform
+# 🌐 RIP Platform running on :3000
+# 📊 Dashboard: http://localhost:3000/platform
+
+# Terminal 2: Deploy and manage apps
+rip-server deploy api apps/labs/api --port 3001 --workers 2
+rip-server list                # See all deployed apps
+rip-server scale api 5         # Scale to 5 workers
+rip-server restart api         # Restart the app
+rip-server undeploy api        # Remove the app
 ```
 
 ### **🎛️ Visual Management Dashboard:**
