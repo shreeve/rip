@@ -54,6 +54,7 @@ function parseArgs(args: string[]): Config {
     'prod',
     'start',
     'stop',
+    'status',
     'test',
     'help',
     '-h',
@@ -225,6 +226,108 @@ async function isRunning(): Promise<boolean> {
     return code === 0
   } catch {
     return false
+  }
+}
+
+// Comprehensive status check
+async function showStatus() {
+  console.log('🔍 rip-server Status\n')
+
+  try {
+    // Check if any rip-server processes are running
+    const proc = spawn(['pgrep', '-fl', 'rip-server'], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    const output = await new Response(proc.stdout).text()
+    const code = await proc.exited
+
+    if (code === 0 && output.trim()) {
+      console.log('✅ Status: RUNNING\n')
+
+      const lines = output.trim().split('\n')
+      console.log('📋 Active Processes:')
+
+      for (const line of lines) {
+        const [pid, ...cmdParts] = line.split(' ')
+        const cmd = cmdParts.join(' ')
+
+        // Get process details
+        try {
+          const psProc = spawn(['ps', '-p', pid, '-o', 'pid,ppid,etime,rss,args'], {
+            stdout: 'pipe',
+            stderr: 'pipe',
+          })
+          const psOutput = await new Response(psProc.stdout).text()
+          const psLines = psOutput.trim().split('\n')
+
+          if (psLines.length > 1) {
+            const [header, processLine] = psLines
+            const parts = processLine.trim().split(/\s+/)
+            const [procPid, ppid, etime, rss, ...args] = parts
+            const command = args.join(' ')
+
+            console.log(`   • PID: ${procPid} | Parent: ${ppid} | Runtime: ${etime} | Memory: ${Math.round(parseInt(rss) / 1024)}MB`)
+
+            // Extract port information from command line
+            const portMatch = command.match(/(\d{4,5})/)
+            if (portMatch) {
+              const port = portMatch[1]
+              console.log(`     Port: ${port} | Command: ${command.length > 80 ? command.substring(0, 80) + '...' : command}`)
+
+              // Test if port is actually listening
+              try {
+                const response = await fetch(`http://localhost:${port}/health`, {
+                  signal: AbortSignal.timeout(2000)
+                })
+                if (response.ok) {
+                  console.log(`     🟢 Health check: HEALTHY (${response.status})`)
+                } else {
+                  console.log(`     🟡 Health check: UNHEALTHY (${response.status})`)
+                }
+              } catch {
+                console.log(`     🔴 Health check: NO RESPONSE`)
+              }
+            } else {
+              console.log(`     Command: ${command.length > 80 ? command.substring(0, 80) + '...' : command}`)
+            }
+          }
+        } catch {
+          console.log(`   • PID: ${pid} | Command: ${cmd}`)
+        }
+        console.log('')
+      }
+
+      // Check for common ports
+      console.log('🌐 Port Status:')
+      const commonPorts = [3000, 3001, 3002, 3443, 8080, 8443]
+
+      for (const port of commonPorts) {
+        try {
+          const response = await fetch(`http://localhost:${port}/health`, {
+            signal: AbortSignal.timeout(1000)
+          })
+          console.log(`   • Port ${port}: 🟢 ACTIVE (HTTP ${response.status})`)
+        } catch {
+          try {
+            const response = await fetch(`https://localhost:${port}/health`, {
+              signal: AbortSignal.timeout(1000)
+            })
+            console.log(`   • Port ${port}: 🟢 ACTIVE (HTTPS ${response.status})`)
+          } catch {
+            // Port not responding - don't show anything for inactive ports
+          }
+        }
+      }
+
+    } else {
+      console.log('❌ Status: NOT RUNNING')
+      console.log('\n💡 To start: rip-server [options]')
+    }
+
+  } catch (error) {
+    console.log('❌ Status: ERROR checking processes')
+    console.error('Error:', error)
   }
 }
 
@@ -799,25 +902,28 @@ async function main() {
   const args = process.argv.slice(2)
   const config = parseArgs(args)
 
-  // Determine command
-  const command = config.command || (args.length === 0 ? 'dev' : 'start')
+  // Determine command - default to 'start' for everything except explicit commands
+  const command = config.command || 'start'
 
   switch (command) {
     case 'start': {
       const running = await isRunning()
       if (running) {
-        console.log('✅ rip-server is already running')
-      } else {
-        console.log('🚀 Starting rip-server...')
-        // Load file config and start
-        const fileConfig = await loadFileConfig(config.appDir || defaults.appDir)
-        const finalConfig = {
-          ...defaults,
-          ...fileConfig,
-          ...config,
-        }
-        await start(finalConfig)
+        console.log('🔄 rip-server is already running, restarting...')
+        await killAll()
+        // Small delay to ensure clean shutdown
+        await new Promise(resolve => setTimeout(resolve, 1000))
       }
+
+      console.log('🚀 Starting rip-server...')
+      // Load file config and start
+      const fileConfig = await loadFileConfig(config.appDir || defaults.appDir)
+      const finalConfig = {
+        ...defaults,
+        ...fileConfig,
+        ...config,
+      }
+      await start(finalConfig)
       break
     }
 
@@ -829,6 +935,11 @@ async function main() {
       } else {
         console.log('✅ rip-server is already stopped')
       }
+      break
+    }
+
+    case 'status': {
+      await showStatus()
       break
     }
 
@@ -874,13 +985,18 @@ async function main() {
       console.log(`🚀 Rip Application Server
 
 Usage:
-  rip-server [command] [options...]
+  rip-server [options...]
+
+Smart Behavior:
+  rip-server                    Start server (or restart if already running)
+  rip-server [options]          Start/restart with options (default behavior)
+  rip-server stop               Stop server (if running)
+  rip-server status             Show detailed server status
 
 Commands:
-  dev       Development mode (default)
+  dev       Development mode
   prod      Production mode
-  start     Start server (if not already running)
-  stop      Stop server (if running)
+  status    Show server status and health
   test      Run test suite
   help      Show this help
 
@@ -907,17 +1023,18 @@ Protocol Options:
   http+https          Both HTTP and HTTPS
 
 Examples:
-  rip-server                        # HTTP only, current dir
-  rip-server https                  # HTTPS with smart certs
-  rip-server https:quick            # HTTPS with self-signed
-  rip-server https:ca               # HTTPS with CA cert
-  rip-server http+https             # Both protocols
-  rip-server 8080                   # Custom HTTP port
-  rip-server https 8443             # Custom HTTPS port
-  rip-server ./api prod             # Production mode for ./api
-  rip-server w:5 r:50               # 5 workers, 50 requests each
-  rip-server cert.pem key.pem       # HTTPS with custom cert
-  rip-server prod https w:10        # Prod HTTPS, 10 workers
+  rip-server                        # Start/restart HTTP server
+  rip-server https                  # Start/restart with HTTPS
+  rip-server https:quick            # Start/restart with self-signed cert
+  rip-server https:ca               # Start/restart with CA cert
+  rip-server http+https             # Start/restart both protocols
+  rip-server 8080                   # Start/restart on custom port
+  rip-server https 8443             # Start/restart HTTPS on custom port
+  rip-server ./api prod             # Start/restart production mode for ./api
+  rip-server w:5 r:50               # Start/restart with 5 workers, 50 requests each
+  rip-server cert.pem key.pem       # Start/restart with custom cert
+  rip-server prod https w:10        # Start/restart prod HTTPS, 10 workers
+  rip-server stop                   # Stop server (only explicit stop command)
 
 Certificate Authority:
   rip-server ca:init                # One-time CA setup
