@@ -268,6 +268,24 @@ rip-server stop
 - **Safe**: All commands are idempotent and automation-friendly
 - **Predictable**: No surprises, follows Principle of Least Surprise
 
+### **🧰 Machine-Readable Status and Exit Codes**
+
+Use `--json` (or `-j`) to get structured status output that's easy to parse in scripts:
+
+```bash
+rip-server status --json
+# {
+#   "running": true,
+#   "processes": [{ "pid": 12345, "port": 3000, "health": "HEALTHY", ... }],
+#   "ports": [{ "port": 3000, "protocol": "http", "status": "ACTIVE" }]
+# }
+```
+
+Exit codes for automation:
+- `status`: exits `0` when running; exits `3` when not running
+- `stop`: always exits `0` (whether it stopped something or was already stopped)
+- `start/dev/prod`: exit `0` upon successful launch
+
 ## 🎯 Server/App Separation Architecture
 
 **Decoupled Design** - The server runtime is separated from your application code, enabling flexibility and developer productivity:
