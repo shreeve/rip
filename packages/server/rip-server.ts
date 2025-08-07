@@ -726,19 +726,19 @@ async function start(config: Config) {
   if (!hasValidEntryPoint) {
     console.error(`❌ No entry point found in: ${appDir}`)
     console.error(`   Looking for: ${possibleEntryPoints.join(', ')}`)
-    
+
     // Check if we're in a monorepo root and suggest better usage
-    const isMonorepoRoot = existsSync(join(appDir, 'packages')) || 
+    const isMonorepoRoot = existsSync(join(appDir, 'packages')) ||
                           existsSync(join(appDir, 'examples')) ||
                           existsSync(join(appDir, 'apps'))
-    
+
     if (isMonorepoRoot) {
       console.error(``)
       console.error(`💡 Looks like you're in a monorepo root. Try:`)
       console.error(`   bun server apps/your-app     # From monorepo root`)
       console.error(`   cd apps/your-app && rip-server  # Navigate to app first`)
     }
-    
+
     process.exit(1)
   }
 
