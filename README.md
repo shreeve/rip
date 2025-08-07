@@ -51,6 +51,31 @@ This foundational principle guides every API design decision in Rip:
 
 **💫 Perfect Balance**: Learn the common patterns first (covers 90% of needs), discover advanced features as you grow. No feature bloat, no cognitive overload, just elegant progression from simple to sophisticated.
 
+## 🎯 The Matz Principle
+
+> *"Ruby is designed to make programmers happy"*
+> *"I hope to see Ruby help every programmer in the world to be productive, and to enjoy programming, and to be happy."*
+> **— Yukihiro "Matz" Matsumoto, creator of Ruby**
+
+Matz's **Principle of Least Surprise (POLS)** is deeply woven into Rip's DNA. Every interface should behave exactly as developers naturally expect:
+
+**✅ Intuitive Defaults**:
+- `rip-server` → Start/restart (what you want most of the time)
+- `rip-server status` → Show status (explicit intent, explicit result)
+- `rip-server stop` → Stop server (clear action, predictable outcome)
+
+**✅ Natural Language Flow**:
+- `read 'email', 'email'` → Reads like English, works like you'd expect
+- `phone[/(\d{3})/]` → Bracket notation works just like arrays
+- `state =~ /^([A-Z]{2})$/` → Regex matching feels natural
+
+**✅ Happy Developer Experience**:
+- **No surprises**: Commands do exactly what they say
+- **Consistent patterns**: Learn once, use everywhere
+- **Elegant progression**: Simple things are simple, complex things are possible
+
+**💡 The Goal**: When you use Rip, it should feel like the computer is reading your mind. The syntax and behavior should match your mental model so perfectly that the tool disappears and you can focus purely on solving problems.
+
 ## 🌟 Live Language Innovation
 
 **Rip demonstrates unprecedented rapid language development** - major features go from concept to production in hours, not years:
