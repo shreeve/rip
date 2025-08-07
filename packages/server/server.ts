@@ -62,6 +62,53 @@ workerSocketPaths.forEach(path => {
 })
 
 /**
+ * Wait for at least one worker to become ready (basic gating to reduce cold-start 503s)
+ */
+async function isWorkerReady(socketPath: string): Promise<boolean> {
+  try {
+    // Any successful fetch over the unix socket indicates the worker is up
+    // Use a short timeout to keep polling responsive
+    const res = await fetch('http://localhost/', {
+      unix: socketPath,
+      signal: AbortSignal.timeout(300),
+    })
+    // If we got a response at all, the worker is reachable
+    return !!res
+  } catch {
+    return false
+  }
+}
+
+async function waitForAnyWorkerReady(
+  paths: string[],
+  maxWaitMs = 5000,
+  intervalMs = 150,
+): Promise<boolean> {
+  const start = Date.now()
+  let announced = false
+  while (Date.now() - start < maxWaitMs) {
+    for (const p of paths) {
+      if (await isWorkerReady(p)) {
+        if (announced) {
+          const ts = new Date().toISOString().replace('T', ' ').replace('Z', '-06:00')
+          console.log(`[${ts}              ] Worker ready detected on ${p}`)
+        }
+        return true
+      }
+    }
+    if (!announced) {
+      const ts = new Date().toISOString().replace('T', ' ').replace('Z', '-06:00')
+      console.log(`[${ts}              ] Waiting for worker readiness (up to ${maxWaitMs}ms)...`)
+      announced = true
+    }
+    await new Promise(r => setTimeout(r, intervalMs))
+  }
+  const ts = new Date().toISOString().replace('T', ' ').replace('Z', '-06:00')
+  console.warn(`[${ts}              ] No workers ready after ${maxWaitMs}ms; starting front-end anyway`)
+  return false
+}
+
+/**
  * 🎯 Canonical timing formatter (shared across endpoints)
  */
 const scale = (value: number, unit: string, base = 1000): string => {
@@ -437,6 +484,9 @@ const handleHttpRedirect = (req: Request) => {
  * Create servers
  */
 const servers: any[] = []
+
+// Basic readiness gating: wait briefly for a worker to be reachable to reduce initial 503s
+await waitForAnyWorkerReady(workerSocketPaths)
 
 if (httpsEnabled && cert && key) {
   // HTTPS mode: Primary HTTPS server + HTTP redirect server

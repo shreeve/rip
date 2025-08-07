@@ -926,7 +926,7 @@ ${endpoints.join('\n')}
   })
 
   // Wait for workers to start
-  await new Promise(resolve => setTimeout(resolve, 3000))
+  await new Promise(resolve => setTimeout(resolve, 300))
 
   // Start server
   const serverArgs = ['bun', join(SCRIPT_DIR, 'server.ts'), '0']
