@@ -3,7 +3,7 @@
 /**
  * Rip Transpiler Plugin
  *
- * Transpiles .rip files (CoffeeScript syntax) to JavaScript using the Bun plugin system.
+ * Transpiles .rip files (based on CoffeeScript) to JavaScript using the Bun plugin system.
  * This plugin is preloaded globally via bunfig.toml for the entire monorepo.
  */
 
