@@ -28,7 +28,7 @@ export class RipDataClient {
       this.config = {
         timeout: 30000,
         retries: 3,
-        ...config
+        ...config,
       }
     }
   }
@@ -65,7 +65,11 @@ export class RipDataClient {
   /**
    * Check server health
    */
-  async health(): Promise<{ status: string; timestamp: string; connections: number }> {
+  async health(): Promise<{
+    status: string
+    timestamp: string
+    connections: number
+  }> {
     const response = await fetch(`${this.config.baseUrl}/health`)
     return response.json()
   }
@@ -73,7 +77,11 @@ export class RipDataClient {
   /**
    * Query S3 data through DuckDB
    */
-  async queryS3(bucket: string, key: string, customQuery?: string): Promise<QueryResult> {
+  async queryS3(
+    bucket: string,
+    key: string,
+    customQuery?: string,
+  ): Promise<QueryResult> {
     const params = new URLSearchParams({ bucket, key })
     if (customQuery) params.set('query', customQuery)
 
@@ -86,7 +94,9 @@ export class RipDataClient {
    */
   connectWebSocket(): Promise<WebSocket> {
     return new Promise((resolve, reject) => {
-      const wsUrl = this.config.baseUrl.replace('http', 'ws').replace(':8080', ':8081')
+      const wsUrl = this.config.baseUrl
+        .replace('http', 'ws')
+        .replace(':8080', ':8081')
       this.ws = new WebSocket(wsUrl)
 
       this.ws.onopen = () => {
@@ -94,12 +104,12 @@ export class RipDataClient {
         resolve(this.ws!)
       }
 
-      this.ws.onerror = (error) => {
+      this.ws.onerror = error => {
         console.error('❌ WebSocket connection failed:', error)
         reject(error)
       }
 
-      this.ws.onmessage = (event) => {
+      this.ws.onmessage = event => {
         try {
           const message = JSON.parse(event.data)
           this.handleWebSocketMessage(message)
@@ -118,7 +128,11 @@ export class RipDataClient {
   /**
    * Subscribe to live query updates
    */
-  async subscribe(query: string, callback: (data: any) => void, interval = 5000): Promise<string> {
+  async subscribe(
+    query: string,
+    callback: (data: any) => void,
+    interval = 5000,
+  ): Promise<string> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       await this.connectWebSocket()
     }
@@ -126,11 +140,13 @@ export class RipDataClient {
     const subscriptionId = `sub_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     this.subscriptions.set(subscriptionId, callback)
 
-    this.ws!.send(JSON.stringify({
-      type: 'subscribe',
-      query,
-      interval
-    }))
+    this.ws!.send(
+      JSON.stringify({
+        type: 'subscribe',
+        query,
+        interval,
+      }),
+    )
 
     return subscriptionId
   }
@@ -140,10 +156,12 @@ export class RipDataClient {
    */
   unsubscribe(subscriptionId: string): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({
-        type: 'unsubscribe',
-        id: subscriptionId
-      }))
+      this.ws.send(
+        JSON.stringify({
+          type: 'unsubscribe',
+          id: subscriptionId,
+        }),
+      )
     }
 
     this.subscriptions.delete(subscriptionId)
@@ -203,7 +221,10 @@ export class RipDataClient {
     for (let attempt = 0; attempt < (this.config.retries || 3); attempt++) {
       try {
         const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), this.config.timeout || 30000)
+        const timeoutId = setTimeout(
+          () => controller.abort(),
+          this.config.timeout || 30000,
+        )
 
         const response = await fetch(`${this.config.baseUrl}${endpoint}`, {
           method: 'POST',
@@ -231,7 +252,9 @@ export class RipDataClient {
 
         // Wait before retry (exponential backoff)
         if (attempt < (this.config.retries || 3) - 1) {
-          await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000))
+          await new Promise(resolve =>
+            setTimeout(resolve, Math.pow(2, attempt) * 1000),
+          )
         }
       }
     }

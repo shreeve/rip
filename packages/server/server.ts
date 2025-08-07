@@ -100,14 +100,18 @@ async function waitForAnyWorkerReady(
     if (!announced) {
       const ts = new Date()
       const t = `${ts.toISOString().slice(0, 23).replace('T', ' ')}${ts.getTimezoneOffset() <= 0 ? '+' : '-'}${String(Math.abs(Math.floor(ts.getTimezoneOffset() / 60))).padStart(2, '0')}:${String(Math.abs(ts.getTimezoneOffset() % 60)).padStart(2, '0')}`
-      console.log(`[${t}              ] Waiting for worker readiness (up to ${maxWaitMs}ms)...`)
+      console.log(
+        `[${t}              ] Waiting for worker readiness (up to ${maxWaitMs}ms)...`,
+      )
       announced = true
     }
     await new Promise(r => setTimeout(r, intervalMs))
   }
   const ts = new Date()
   const t = `${ts.toISOString().slice(0, 23).replace('T', ' ')}${ts.getTimezoneOffset() <= 0 ? '+' : '-'}${String(Math.abs(Math.floor(ts.getTimezoneOffset() / 60))).padStart(2, '0')}:${String(Math.abs(ts.getTimezoneOffset() % 60)).padStart(2, '0')}`
-  console.warn(`[${t}              ] No workers ready after ${maxWaitMs}ms; starting front-end anyway`)
+  console.warn(
+    `[${t}              ] No workers ready after ${maxWaitMs}ms; starting front-end anyway`,
+  )
   return false
 }
 

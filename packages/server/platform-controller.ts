@@ -70,7 +70,9 @@ export class RipPlatform {
    */
   async start(): Promise<void> {
     console.log('🚀 Starting Rip Platform Controller...')
-    console.log(`📊 Platform Dashboard: http://localhost:${this.platformPort}/platform`)
+    console.log(
+      `📊 Platform Dashboard: http://localhost:${this.platformPort}/platform`,
+    )
     console.log(`🔧 Management API: http://localhost:${this.platformPort}/api`)
     console.log('✨ Ready to deploy apps dynamically!')
 
@@ -81,7 +83,9 @@ export class RipPlatform {
   /**
    * Deploy a new application
    */
-  async deployApp(config: Partial<AppConfig> & { name: string, directory: string }): Promise<AppInstance> {
+  async deployApp(
+    config: Partial<AppConfig> & { name: string; directory: string },
+  ): Promise<AppInstance> {
     const appName = config.name
 
     // Validate app doesn't already exist
@@ -95,13 +99,21 @@ export class RipPlatform {
     }
 
     // Check for valid entry points
-    const possibleEntryPoints = ['index.rip', 'app.rip', 'server.rip', 'main.rip', 'index.ts']
+    const possibleEntryPoints = [
+      'index.rip',
+      'app.rip',
+      'server.rip',
+      'main.rip',
+      'index.ts',
+    ]
     const hasValidEntryPoint = possibleEntryPoints.some(file =>
-      existsSync(join(config.directory, file))
+      existsSync(join(config.directory, file)),
     )
 
     if (!hasValidEntryPoint) {
-      throw new Error(`No entry point found in ${config.directory}. Looking for: ${possibleEntryPoints.join(', ')}`)
+      throw new Error(
+        `No entry point found in ${config.directory}. Looking for: ${possibleEntryPoints.join(', ')}`,
+      )
     }
 
     // Auto-assign port if not specified
@@ -118,7 +130,7 @@ export class RipPlatform {
       httpsPort: config.httpsPort,
       certPath: config.certPath,
       keyPath: config.keyPath,
-      env: config.env || {}
+      env: config.env || {},
     }
 
     // Reserve the port
@@ -131,7 +143,7 @@ export class RipPlatform {
     const appInstance: AppInstance = {
       config: fullConfig,
       status: 'starting',
-      startedAt: new Date()
+      startedAt: new Date(),
     }
 
     this.apps.set(appName, appInstance)
@@ -217,7 +229,9 @@ export class RipPlatform {
       // Restart the app with new worker count
       await this.restartApp(appName)
 
-      console.log(`✅ App '${appName}' scaled from ${oldWorkers} to ${workers} workers`)
+      console.log(
+        `✅ App '${appName}' scaled from ${oldWorkers} to ${workers} workers`,
+      )
     } catch (error) {
       // Revert on failure
       app.config.workers = oldWorkers
@@ -276,7 +290,7 @@ export class RipPlatform {
       runningApps: runningApps.length,
       totalWorkers,
       uptime,
-      memoryUsage: process.memoryUsage()
+      memoryUsage: process.memoryUsage(),
     }
   }
 
@@ -314,13 +328,13 @@ export class RipPlatform {
         config.directory, // app directory
         config.workers.toString(),
         '10', // requests per worker (default)
-        config.mode
+        config.mode,
       ]
 
       app.manager = spawn(managerArgs, {
         stdout: 'pipe',
         stderr: 'pipe',
-        env: { ...process.env, ...config.env }
+        env: { ...process.env, ...config.env },
       })
 
       // Wait a bit for manager to start
@@ -332,7 +346,7 @@ export class RipPlatform {
         join(scriptDir, 'server.ts'),
         '0', // server ID
         config.port.toString(),
-        config.workers.toString()
+        config.workers.toString(),
       ]
 
       // Add HTTPS args if needed
@@ -345,7 +359,7 @@ export class RipPlatform {
       app.server = spawn(serverArgs, {
         stdout: 'pipe',
         stderr: 'pipe',
-        env: { ...process.env, ...config.env }
+        env: { ...process.env, ...config.env },
       })
 
       // Monitor processes
@@ -355,7 +369,6 @@ export class RipPlatform {
       await new Promise(resolve => setTimeout(resolve, 1000))
       app.status = 'running'
       app.pid = app.server.pid
-
     } catch (error) {
       app.status = 'error'
       app.error = error.message
@@ -373,7 +386,9 @@ export class RipPlatform {
     if (app.manager) {
       app.manager.exited.then(code => {
         if (app.status !== 'stopping') {
-          console.error(`❌ Manager for app '${config.name}' exited with code ${code}`)
+          console.error(
+            `❌ Manager for app '${config.name}' exited with code ${code}`,
+          )
           app.status = 'error'
           app.error = `Manager process exited with code ${code}`
         }
@@ -384,7 +399,9 @@ export class RipPlatform {
     if (app.server) {
       app.server.exited.then(code => {
         if (app.status !== 'stopping') {
-          console.error(`❌ Server for app '${config.name}' exited with code ${code}`)
+          console.error(
+            `❌ Server for app '${config.name}' exited with code ${code}`,
+          )
           app.status = 'error'
           app.error = `Server process exited with code ${code}`
         }
@@ -398,7 +415,7 @@ export class RipPlatform {
   private async startPlatformServer(): Promise<void> {
     const server = Bun.serve({
       port: this.platformPort,
-      fetch: async (req) => {
+      fetch: async req => {
         const url = new URL(req.url)
 
         // API endpoints
@@ -412,10 +429,13 @@ export class RipPlatform {
         }
 
         // Default response
-        return new Response('🚀 Rip Platform Controller\n\nVisit /platform for dashboard\nVisit /api for API docs', {
-          headers: { 'Content-Type': 'text/plain' }
-        })
-      }
+        return new Response(
+          '🚀 Rip Platform Controller\n\nVisit /platform for dashboard\nVisit /api for API docs',
+          {
+            headers: { 'Content-Type': 'text/plain' },
+          },
+        )
+      },
     })
 
     console.log(`🌐 Platform server started on port ${this.platformPort}`)
@@ -449,7 +469,10 @@ export class RipPlatform {
 
         case 'POST':
           if (path === '/apps') {
-            const body = await req.json() as Partial<AppConfig> & { name: string, directory: string }
+            const body = (await req.json()) as Partial<AppConfig> & {
+              name: string
+              directory: string
+            }
             const app = await this.deployApp(body)
             return Response.json(app, { status: 201 })
           }
@@ -466,7 +489,7 @@ export class RipPlatform {
         case 'PUT':
           if (path.startsWith('/apps/') && path.endsWith('/scale')) {
             const appName = path.split('/')[2]
-            const { workers } = await req.json() as { workers: number }
+            const { workers } = (await req.json()) as { workers: number }
             await this.scaleApp(appName, workers)
             return Response.json({ message: 'App scaled successfully' })
           }
@@ -479,7 +502,6 @@ export class RipPlatform {
       }
 
       return Response.json({ error: 'Not found' }, { status: 404 })
-
     } catch (error) {
       return Response.json({ error: error.message }, { status: 400 })
     }
@@ -552,13 +574,18 @@ export class RipPlatform {
     </div>
 
     <div class="apps">
-        ${apps.length === 0 ? `
+        ${
+          apps.length === 0
+            ? `
             <div class="no-apps">
                 <h3>No apps deployed yet</h3>
                 <p>Use the CLI to deploy your first app:</p>
                 <code>rip-server deploy apps/my-app --port 3001</code>
             </div>
-        ` : apps.map(app => `
+        `
+            : apps
+                .map(
+                  app => `
             <div class="app ${app.status}">
                 <div class="app-header">
                     <div class="app-name">📱 ${app.config.name}</div>
@@ -586,14 +613,21 @@ export class RipPlatform {
                 </div>
 
                 <div class="actions">
-                    ${app.status === 'running' ? `
+                    ${
+                      app.status === 'running'
+                        ? `
                         <button class="btn btn-primary" onclick="restartApp('${app.config.name}')">🔄 Restart</button>
                         <button class="btn btn-warning" onclick="scaleApp('${app.config.name}')">📊 Scale</button>
-                    ` : ''}
+                    `
+                        : ''
+                    }
                     <button class="btn btn-danger" onclick="undeployApp('${app.config.name}')">🗑️ Undeploy</button>
                 </div>
             </div>
-        `).join('')}
+        `,
+                )
+                .join('')
+        }
     </div>
 
     <script>
@@ -651,7 +685,7 @@ export class RipPlatform {
 </html>`
 
     return new Response(html, {
-      headers: { 'Content-Type': 'text/html' }
+      headers: { 'Content-Type': 'text/html' },
     })
   }
 }

@@ -22,8 +22,8 @@ async function main() {
     dbPath: ':memory:', // Use in-memory database for demo
     protocols: {
       http: { port: 8080 },
-      websocket: { port: 8081 }
-    }
+      websocket: { port: 8081 },
+    },
   })
 
   await server.start()
@@ -64,14 +64,15 @@ async function main() {
     ['Bob Smith', 'bob@example.com', 'free'],
     ['Carol Davis', 'carol@example.com', 'enterprise'],
     ['David Wilson', 'david@example.com', 'pro'],
-    ['Eve Brown', 'eve@example.com', 'free']
+    ['Eve Brown', 'eve@example.com', 'free'],
   ]
 
   for (const [name, email, plan] of users) {
-    await db.execute(
-      'INSERT INTO users (name, email, plan) VALUES (?, ?, ?)',
-      [name, email, plan]
-    )
+    await db.execute('INSERT INTO users (name, email, plan) VALUES (?, ?, ?)', [
+      name,
+      email,
+      plan,
+    ])
   }
 
   // Insert sample events
@@ -81,12 +82,12 @@ async function main() {
     const eventType = eventTypes[Math.floor(Math.random() * eventTypes.length)]
     const properties = JSON.stringify({
       page: `/page-${Math.floor(Math.random() * 10)}`,
-      duration: Math.floor(Math.random() * 300)
+      duration: Math.floor(Math.random() * 300),
     })
 
     await db.execute(
       'INSERT INTO events (user_id, event_type, properties) VALUES (?, ?, ?)',
-      [userId, eventType, properties]
+      [userId, eventType, properties],
     )
   }
 
@@ -108,7 +109,9 @@ async function main() {
 
   console.log('👥 User Distribution by Plan:')
   userStats.data?.forEach(row => {
-    console.log(`   ${row.plan}: ${row.user_count} users (${row.percentage.toFixed(1)}%)`)
+    console.log(
+      `   ${row.plan}: ${row.user_count} users (${row.percentage.toFixed(1)}%)`,
+    )
   })
   console.log()
 
@@ -132,7 +135,9 @@ async function main() {
       currentPlan = row.plan
       console.log(`\n   ${currentPlan} users:`)
     }
-    console.log(`     ${row.event_type}: ${row.event_count} events (${row.unique_users} users)`)
+    console.log(
+      `     ${row.event_type}: ${row.event_count} events (${row.unique_users} users)`,
+    )
   })
   console.log()
 
@@ -161,10 +166,10 @@ async function main() {
   // Subscribe to live user count
   const userCountSub = await db.subscribe(
     'SELECT COUNT(*) as total_users FROM users',
-    (data) => {
+    data => {
       console.log(`📊 Live user count: ${data[0].total_users}`)
     },
-    2000 // Update every 2 seconds
+    2000, // Update every 2 seconds
   )
 
   // Subscribe to recent events
@@ -177,13 +182,15 @@ async function main() {
      JOIN users u ON e.user_id = u.id
      ORDER BY e.timestamp DESC
      LIMIT 5`,
-    (data) => {
+    data => {
       console.log('\n🔄 Recent Events:')
       data.forEach(event => {
-        console.log(`   ${event.name}: ${event.event_type} at ${event.timestamp}`)
+        console.log(
+          `   ${event.name}: ${event.event_type} at ${event.timestamp}`,
+        )
       })
     },
-    3000 // Update every 3 seconds
+    3000, // Update every 3 seconds
   )
 
   console.log('✅ Streaming subscriptions active!\n')
@@ -196,10 +203,10 @@ async function main() {
     const userId = Math.floor(Math.random() * 5) + 1
     const eventType = eventTypes[Math.floor(Math.random() * eventTypes.length)]
 
-    await db.execute(
-      'INSERT INTO events (user_id, event_type) VALUES (?, ?)',
-      [userId, eventType]
-    )
+    await db.execute('INSERT INTO events (user_id, event_type) VALUES (?, ?)', [
+      userId,
+      eventType,
+    ])
 
     activityCount++
 
@@ -223,7 +230,9 @@ async function main() {
         console.log('   • Complex analytical queries with JOINs')
         console.log('   • Real-time streaming subscriptions')
         console.log('   • All in ONE database system!')
-        console.log('\n🔥 This is the future of web application data architecture!')
+        console.log(
+          '\n🔥 This is the future of web application data architecture!',
+        )
 
         process.exit(0)
       }, 5000)

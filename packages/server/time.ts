@@ -16,5 +16,3 @@ export function formatTimestamp(date: Date = new Date()): string {
   const minutes = String(abs % 60).padStart(2, '0')
   return `${base}${sign}${hours}:${minutes}`
 }
-
-

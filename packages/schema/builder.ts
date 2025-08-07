@@ -134,7 +134,11 @@ export class ColumnBuilder {
       // Array handling - distinguish between ranges and defaults
       else if (Array.isArray(arg)) {
         // Range array: [min, max] - exactly 2 numbers
-        if (arg.length === 2 && typeof arg[0] === 'number' && typeof arg[1] === 'number') {
+        if (
+          arg.length === 2 &&
+          typeof arg[0] === 'number' &&
+          typeof arg[1] === 'number'
+        ) {
           options.min = Math.min(arg[0], arg[1])
           options.max = Math.max(arg[0], arg[1])
         }

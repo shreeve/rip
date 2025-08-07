@@ -279,10 +279,13 @@ async function showStatus(asJson = false): Promise<boolean> {
 
         // Get process details
         try {
-          const psProc = spawn(['ps', '-p', pid, '-o', 'pid,ppid,etime,rss,args'], {
-            stdout: 'pipe',
-            stderr: 'pipe',
-          })
+          const psProc = spawn(
+            ['ps', '-p', pid, '-o', 'pid,ppid,etime,rss,args'],
+            {
+              stdout: 'pipe',
+              stderr: 'pipe',
+            },
+          )
           const psOutput = await new Response(psProc.stdout).text()
           const psLines = psOutput.trim().split('\n')
 
@@ -309,9 +312,12 @@ async function showStatus(asJson = false): Promise<boolean> {
 
               // Test if port is actually listening
               try {
-                const response = await fetch(`http://localhost:${port}/health`, {
-                  signal: AbortSignal.timeout(2000)
-                })
+                const response = await fetch(
+                  `http://localhost:${port}/health`,
+                  {
+                    signal: AbortSignal.timeout(2000),
+                  },
+                )
                 procInfo.health = response.ok ? 'HEALTHY' : 'UNHEALTHY'
               } catch {
                 procInfo.health = 'NO_RESPONSE'
@@ -321,12 +327,21 @@ async function showStatus(asJson = false): Promise<boolean> {
             processes.push(procInfo)
 
             if (!asJson) {
-              console.log(`   • PID: ${procPid} | Parent: ${ppid} | Runtime: ${etime} | Memory: ${memoryMB}MB`)
+              console.log(
+                `   • PID: ${procPid} | Parent: ${ppid} | Runtime: ${etime} | Memory: ${memoryMB}MB`,
+              )
               if (procInfo.port) {
-                const healthText = procInfo.health === 'HEALTHY' ? '🟢 HEALTHY' : procInfo.health === 'UNHEALTHY' ? '🟡 UNHEALTHY' : '🔴 NO RESPONSE'
+                const healthText =
+                  procInfo.health === 'HEALTHY'
+                    ? '🟢 HEALTHY'
+                    : procInfo.health === 'UNHEALTHY'
+                      ? '🟡 UNHEALTHY'
+                      : '🔴 NO RESPONSE'
                 console.log(`     Port: ${procInfo.port} | ${healthText}`)
               } else {
-                console.log(`     Command: ${command.length > 80 ? command.substring(0, 80) + '...' : command}`)
+                console.log(
+                  `     Command: ${command.length > 80 ? command.substring(0, 80) + '...' : command}`,
+                )
               }
             }
           }
@@ -338,24 +353,45 @@ async function showStatus(asJson = false): Promise<boolean> {
       }
 
       // Check for common ports
-      const portStatuses: Array<{ port: number; protocol: 'http' | 'https'; status: 'ACTIVE' | 'INACTIVE'; httpStatus?: number }> = []
+      const portStatuses: Array<{
+        port: number
+        protocol: 'http' | 'https'
+        status: 'ACTIVE' | 'INACTIVE'
+        httpStatus?: number
+      }> = []
       if (!asJson) console.log('🌐 Port Status:')
       const commonPorts = [3000, 3001, 3002, 3443, 8080, 8443]
 
       for (const port of commonPorts) {
         try {
           const response = await fetch(`http://localhost:${port}/health`, {
-            signal: AbortSignal.timeout(1000)
+            signal: AbortSignal.timeout(1000),
           })
-          if (!asJson) console.log(`   • Port ${port}: 🟢 ACTIVE (HTTP ${response.status})`)
-          portStatuses.push({ port, protocol: 'http', status: 'ACTIVE', httpStatus: response.status })
+          if (!asJson)
+            console.log(
+              `   • Port ${port}: 🟢 ACTIVE (HTTP ${response.status})`,
+            )
+          portStatuses.push({
+            port,
+            protocol: 'http',
+            status: 'ACTIVE',
+            httpStatus: response.status,
+          })
         } catch {
           try {
             const response = await fetch(`https://localhost:${port}/health`, {
-              signal: AbortSignal.timeout(1000)
+              signal: AbortSignal.timeout(1000),
             })
-            if (!asJson) console.log(`   • Port ${port}: 🟢 ACTIVE (HTTPS ${response.status})`)
-            portStatuses.push({ port, protocol: 'https', status: 'ACTIVE', httpStatus: response.status })
+            if (!asJson)
+              console.log(
+                `   • Port ${port}: 🟢 ACTIVE (HTTPS ${response.status})`,
+              )
+            portStatuses.push({
+              port,
+              protocol: 'https',
+              status: 'ACTIVE',
+              httpStatus: response.status,
+            })
           } catch {
             // Port not responding - don't show anything for inactive ports
             portStatuses.push({ port, protocol: 'http', status: 'INACTIVE' })
@@ -368,7 +404,6 @@ async function showStatus(asJson = false): Promise<boolean> {
         console.log(JSON.stringify(result, null, 2))
       }
       return true
-
     } else {
       if (asJson) {
         console.log(JSON.stringify({ running: false }))
@@ -378,7 +413,6 @@ async function showStatus(asJson = false): Promise<boolean> {
       }
       return false
     }
-
   } catch (error) {
     if (asJson) {
       console.log(JSON.stringify({ running: false, error: String(error) }))
@@ -778,23 +812,34 @@ async function start(config: Config) {
   }
 
   // Check for any valid entry point (POLS: be permissive, let worker handle discovery)
-  const possibleEntryPoints = ['index.rip', 'app.rip', 'server.rip', 'main.rip', 'index.ts']
-  const hasValidEntryPoint = possibleEntryPoints.some(file => existsSync(join(appDir, file)))
+  const possibleEntryPoints = [
+    'index.rip',
+    'app.rip',
+    'server.rip',
+    'main.rip',
+    'index.ts',
+  ]
+  const hasValidEntryPoint = possibleEntryPoints.some(file =>
+    existsSync(join(appDir, file)),
+  )
 
   if (!hasValidEntryPoint) {
     console.error(`❌ No entry point found in: ${appDir}`)
     console.error(`   Looking for: ${possibleEntryPoints.join(', ')}`)
 
     // Check if we're in a monorepo root and suggest better usage
-    const isMonorepoRoot = existsSync(join(appDir, 'packages')) ||
-                          existsSync(join(appDir, 'examples')) ||
-                          existsSync(join(appDir, 'apps'))
+    const isMonorepoRoot =
+      existsSync(join(appDir, 'packages')) ||
+      existsSync(join(appDir, 'examples')) ||
+      existsSync(join(appDir, 'apps'))
 
     if (isMonorepoRoot) {
       console.error(``)
       console.error(`💡 Looks like you're in a monorepo root. Try:`)
       console.error(`   bun server apps/your-app     # From monorepo root`)
-      console.error(`   cd apps/your-app && rip-server  # Navigate to app first`)
+      console.error(
+        `   cd apps/your-app && rip-server  # Navigate to app first`,
+      )
     }
 
     process.exit(1)
@@ -930,23 +975,23 @@ ${endpoints.join('\n')}
   // Start server
   const serverArgs = ['bun', join(SCRIPT_DIR, 'server.ts'), '0']
 
-        // Configure ports based on protocol
-      if (useHTTP && useHTTPS) {
-        // Both protocols
-        serverArgs.push(httpPort.toString(), workers.toString())
-        if (actualCertPath && actualKeyPath) {
-          serverArgs.push(httpsPort.toString(), actualCertPath, actualKeyPath)
-        }
-      } else if (useHTTPS) {
-        // HTTPS only - use HTTPS port as primary
-        serverArgs.push(httpsPort.toString(), workers.toString())
-        if (actualCertPath && actualKeyPath) {
-          serverArgs.push(httpsPort.toString(), actualCertPath, actualKeyPath)
-        }
-      } else {
-        // HTTP only
-        serverArgs.push(httpPort.toString(), workers.toString())
-      }
+  // Configure ports based on protocol
+  if (useHTTP && useHTTPS) {
+    // Both protocols
+    serverArgs.push(httpPort.toString(), workers.toString())
+    if (actualCertPath && actualKeyPath) {
+      serverArgs.push(httpsPort.toString(), actualCertPath, actualKeyPath)
+    }
+  } else if (useHTTPS) {
+    // HTTPS only - use HTTPS port as primary
+    serverArgs.push(httpsPort.toString(), workers.toString())
+    if (actualCertPath && actualKeyPath) {
+      serverArgs.push(httpsPort.toString(), actualCertPath, actualKeyPath)
+    }
+  } else {
+    // HTTP only
+    serverArgs.push(httpPort.toString(), workers.toString())
+  }
 
   const server = spawn(serverArgs, {
     stdout: 'inherit',
@@ -992,7 +1037,9 @@ async function deployApp(config: Config, args: string[]): Promise<void> {
 
   // Parse deploy arguments: rip-server deploy <name> <directory> [--port <port>] [--workers <workers>]
   if (args.length < 2) {
-    console.error('❌ Usage: rip-server deploy <name> <directory> [--port <port>] [--workers <workers>]')
+    console.error(
+      '❌ Usage: rip-server deploy <name> <directory> [--port <port>] [--workers <workers>]',
+    )
     process.exit(1)
   }
 
@@ -1003,7 +1050,7 @@ async function deployApp(config: Config, args: string[]): Promise<void> {
     port: 3001,
     workers: 2,
     mode: 'dev',
-    protocol: 'http'
+    protocol: 'http',
   }
 
   // Parse additional options
@@ -1033,7 +1080,7 @@ async function deployApp(config: Config, args: string[]): Promise<void> {
     const response = await fetch(`${platformUrl}/api/deploy`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(deployConfig)
+      body: JSON.stringify(deployConfig),
     })
 
     if (!response.ok) {
@@ -1045,7 +1092,10 @@ async function deployApp(config: Config, args: string[]): Promise<void> {
     console.log(`✅ App '${name}' deployed successfully`)
     console.log(`🌐 Available at: http://localhost:${deployConfig.port}`)
   } catch (error: any) {
-    if (error.cause?.code === 'ECONNREFUSED' || error.message.includes('ECONNREFUSED')) {
+    if (
+      error.cause?.code === 'ECONNREFUSED' ||
+      error.message.includes('ECONNREFUSED')
+    ) {
       console.error('❌ Platform not running. Start with: rip-server platform')
     } else {
       console.error(`❌ Failed to deploy app '${name}': ${error.message}`)
@@ -1068,7 +1118,7 @@ async function undeployApp(args: string[]): Promise<void> {
     console.log(`🛑 Undeploying app '${name}'...`)
 
     const response = await fetch(`${platformUrl}/api/undeploy/${name}`, {
-      method: 'DELETE'
+      method: 'DELETE',
     })
 
     if (!response.ok) {
@@ -1078,7 +1128,10 @@ async function undeployApp(args: string[]): Promise<void> {
 
     console.log(`✅ App '${name}' undeployed successfully`)
   } catch (error: any) {
-    if (error.cause?.code === 'ECONNREFUSED' || error.message.includes('ECONNREFUSED')) {
+    if (
+      error.cause?.code === 'ECONNREFUSED' ||
+      error.message.includes('ECONNREFUSED')
+    ) {
       console.error('❌ Platform not running. Start with: rip-server platform')
     } else {
       console.error(`❌ Failed to undeploy app '${name}': ${error.message}`)
@@ -1103,8 +1156,12 @@ async function listPlatformApps(): Promise<void> {
     const data = await response.json()
 
     console.log('🚀 Rip Platform Status')
-    console.log(`📊 Total Apps: ${data.totalApps || 0} | Running: ${data.runningApps || 0} | Workers: ${data.totalWorkers || 0}`)
-    console.log(`⏱️  Platform Uptime: ${Math.round((data.uptime || 0) / 1000 / 60)} minutes`)
+    console.log(
+      `📊 Total Apps: ${data.totalApps || 0} | Running: ${data.runningApps || 0} | Workers: ${data.totalWorkers || 0}`,
+    )
+    console.log(
+      `⏱️  Platform Uptime: ${Math.round((data.uptime || 0) / 1000 / 60)} minutes`,
+    )
     console.log('')
 
     if (!data.apps || data.apps.length === 0) {
@@ -1115,17 +1172,24 @@ async function listPlatformApps(): Promise<void> {
 
     console.log('📱 Deployed Apps:')
     data.apps.forEach((app: any) => {
-      const statusEmoji = {
-        'running': '🟢',
-        'starting': '🟡',
-        'stopping': '🟠',
-        'stopped': '⚫',
-        'error': '🔴'
-      }[app.status] || '⚪'
+      const statusEmoji =
+        {
+          running: '🟢',
+          starting: '🟡',
+          stopping: '🟠',
+          stopped: '⚫',
+          error: '🔴',
+        }[app.status] || '⚪'
 
-      const runtime = app.startedAt ? Math.round((Date.now() - new Date(app.startedAt).getTime()) / 1000 / 60) : 0
+      const runtime = app.startedAt
+        ? Math.round(
+            (Date.now() - new Date(app.startedAt).getTime()) / 1000 / 60,
+          )
+        : 0
 
-      console.log(`   ${statusEmoji} ${app.name.padEnd(15)} :${app.port.toString().padEnd(5)} ${app.workers}w ${app.mode.padEnd(4)} ${runtime}m`)
+      console.log(
+        `   ${statusEmoji} ${app.name.padEnd(15)} :${app.port.toString().padEnd(5)} ${app.workers}w ${app.mode.padEnd(4)} ${runtime}m`,
+      )
 
       if (app.error) {
         console.log(`      ❌ ${app.error}`)
@@ -1135,7 +1199,10 @@ async function listPlatformApps(): Promise<void> {
     console.log('')
     console.log('🌐 Platform Dashboard: http://localhost:3000/platform')
   } catch (error: any) {
-    if (error.cause?.code === 'ECONNREFUSED' || error.message.includes('ECONNREFUSED')) {
+    if (
+      error.cause?.code === 'ECONNREFUSED' ||
+      error.message.includes('ECONNREFUSED')
+    ) {
       console.error('❌ Platform not running. Start with: rip-server platform')
     } else {
       console.error(`❌ Failed to get platform status: ${error.message}`)
@@ -1166,7 +1233,7 @@ async function scalePlatformApp(args: string[]): Promise<void> {
     const response = await fetch(`${platformUrl}/api/scale/${name}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ workers })
+      body: JSON.stringify({ workers }),
     })
 
     if (!response.ok) {
@@ -1176,7 +1243,10 @@ async function scalePlatformApp(args: string[]): Promise<void> {
 
     console.log(`✅ App '${name}' scaled to ${workers} workers`)
   } catch (error: any) {
-    if (error.cause?.code === 'ECONNREFUSED' || error.message.includes('ECONNREFUSED')) {
+    if (
+      error.cause?.code === 'ECONNREFUSED' ||
+      error.message.includes('ECONNREFUSED')
+    ) {
       console.error('❌ Platform not running. Start with: rip-server platform')
     } else {
       console.error(`❌ Failed to scale app '${name}': ${error.message}`)
@@ -1199,7 +1269,7 @@ async function restartPlatformApp(args: string[]): Promise<void> {
     console.log(`🔄 Restarting app '${name}'...`)
 
     const response = await fetch(`${platformUrl}/api/restart/${name}`, {
-      method: 'POST'
+      method: 'POST',
     })
 
     if (!response.ok) {
@@ -1209,7 +1279,10 @@ async function restartPlatformApp(args: string[]): Promise<void> {
 
     console.log(`✅ App '${name}' restarted successfully`)
   } catch (error: any) {
-    if (error.cause?.code === 'ECONNREFUSED' || error.message.includes('ECONNREFUSED')) {
+    if (
+      error.cause?.code === 'ECONNREFUSED' ||
+      error.message.includes('ECONNREFUSED')
+    ) {
       console.error('❌ Platform not running. Start with: rip-server platform')
     } else {
       console.error(`❌ Failed to restart app '${name}': ${error.message}`)

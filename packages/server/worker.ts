@@ -47,12 +47,12 @@ let requestInProgress = false
 
 const socketPath = `/tmp/rip_worker_${workerId}.sock`
 
-  // Clean up any existing socket file
-  try {
-    await Bun.spawn(['rm', '-f', socketPath]).exited
-  } catch (_) {
-    // Socket didn't exist, that's fine
-  }
+// Clean up any existing socket file
+try {
+  await Bun.spawn(['rm', '-f', socketPath]).exited
+} catch (_) {
+  // Socket didn't exist, that's fine
+}
 
 /**
  * Load the user's Rip application
