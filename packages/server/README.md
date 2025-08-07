@@ -6,12 +6,27 @@
 
 **🔥 Ruby Analogy**: This layer is analogous to **nginx + unicorn in the Ruby ecosystem** - it's the production server infrastructure that handles HTTP requests, manages worker processes, provides load balancing, and ensures fault tolerance. Just as nginx + unicorn gives you production-grade Ruby deployment, `@rip/server` gives you production-grade Rip deployment.
 
-A production-ready replacement for nginx + unicorn + ruby that combines:
-- 🔥 **Hot Reload Development** - Instant .rip file changes
-- ⚡ **Multi-Process Production** - Unicorn-style architecture
-- 🛡️ **Fault Tolerance** - Auto-restart and failover
-- 🌍 **Universal Deployment** - Same code dev → production
-- 📊 **Load Balancing** - Round-robin with Unix sockets
+## 🤔 Why Choose rip-server?
+
+**For developers tired of complex deployment stacks** - rip-server replaces entire toolchains:
+
+**❌ Traditional Stack:**
+```
+nginx + unicorn + ruby + systemd + complex configs
+```
+
+**✅ rip-server:**
+```bash
+rip-server apps/my-app        # That's it. Production ready.
+```
+
+**🔥 Key Benefits:**
+- 🎯 **Point-and-run any app** - No configuration, just works
+- ⚡ **Same system dev→prod** - No deployment surprises
+- 🔄 **Smart restart behavior** - Always does what you expect
+- 📊 **Built-in monitoring** - Status, health checks, process info
+- 🔒 **Trivial HTTPS** - One command for trusted certificates
+- 🛡️ **Production proven** - Multi-process, fault-tolerant architecture
 
 ## 🏗️ Architecture
 
@@ -35,6 +50,19 @@ A production-ready replacement for nginx + unicorn + ruby that combines:
 5. **🛡️ Fault Tolerance**: Individual worker failures don't affect system
 6. **📊 Scalability**: Add workers = add capacity
 7. **🌍 Universal**: One system for all environments
+
+## ⚡ Getting Started in 30 Seconds
+
+```bash
+# 1. Create a simple app
+mkdir my-app && cd my-app
+echo "export default { fetch: () => new Response('Hello World!') }" > index.ts
+
+# 2. Run it
+rip-server                      # Serves on http://localhost:3000
+
+# 3. That's it! 🎉
+```
 
 ## 🚀 Quick Start
 
@@ -63,10 +91,10 @@ rip-server prod https w:10          # Production HTTPS, 10 workers
 rip-server ./api http+https         # Both protocols for API
 rip-server https:ca 8443 w:5        # CA cert on port 8443
 
-# Smart Management Commands
-rip-server start apps/my-app        # Start server (if not already running)
-rip-server stop                     # Stop server (if running)
-rip-server test                     # Run test suite
+# Smart Lifecycle Commands
+rip-server apps/my-app              # Start/restart server (smart default)
+rip-server status                   # Show detailed server status
+rip-server stop                     # Stop server (explicit)
 rip-server help                     # Show help
 
 # Certificate Authority commands
@@ -105,50 +133,59 @@ rip-server ca:clean                 # Clean old certificates
 
 **Perfect for monitoring, debugging, and performance analysis!** 🎯
 
-## 🎛️ Smart Start/Stop Commands
+## 🎛️ Smart Lifecycle Management
 
-**Idempotent server management** - safe to run multiple times without errors:
+**Following the Principle of Least Surprise** - commands do exactly what you expect:
 
-### **🚀 Smart `start` Command**
+### **🚀 Smart Default Behavior**
 ```bash
-# Always safe to run - won't double-start
-rip-server start apps/my-app
+# Default: Start or restart (what you want 90% of the time)
+rip-server                    # Start/restart with defaults
+rip-server 8080               # Start/restart on port 8080
+rip-server https w:5          # Start/restart with HTTPS and 5 workers
 
-# If not running → Starts the server
-✅ Starting rip-server...
+# If not running → Starts fresh
+🚀 Starting rip-server...
 
-# If already running → Shows friendly message
-✅ rip-server is already running
+# If already running → Restarts gracefully
+🔄 rip-server is already running, restarting...
 ```
 
-### **🛑 Smart `stop` Command**
+### **🔍 Explicit Status Command**
 ```bash
-# Always safe to run - won't error if already stopped
+rip-server status
+```
+```
+🔍 rip-server Status
+
+✅ Status: RUNNING
+
+📋 Active Processes:
+   • PID: 12345 | Parent: 1234 | Runtime: 2:30:15 | Memory: 45MB
+     Port: 3000 | Command: bun rip-server.ts
+     🟢 Health check: HEALTHY (200)
+
+🌐 Port Status:
+   • Port 3000: 🟢 ACTIVE (HTTP 200)
+   • Port 3443: 🟢 ACTIVE (HTTPS 200)
+```
+
+### **🛑 Explicit Stop Command**
+```bash
 rip-server stop
 
-# If running → Stops the server gracefully
+# If running → Stops gracefully
 🛑 Stopping rip-server...
-✅ All processes stopped
 
-# If already stopped → Shows friendly message
+# If already stopped → Friendly message
 ✅ rip-server is already stopped
 ```
 
-### **🔍 Check Status**
-```bash
-# Quick status check
-ps aux | grep rip-server | grep -v grep
-
-# Or use pgrep
-pgrep -f rip-server
-```
-
-### **💡 Benefits**
-- **Idempotent**: Safe to run in scripts and automation
-- **Clear Feedback**: Always tells you what's happening
-- **No External Dependencies**: Built right into rip-server
-- **Conventional**: Standard start/stop terminology
-- **Automation Friendly**: Perfect for deployment scripts
+### **💡 Why This Design?**
+- **Intuitive**: Default behavior is "make it work"
+- **Explicit**: When you want status/stop, be explicit
+- **Safe**: All commands are idempotent and automation-friendly
+- **Predictable**: No surprises, follows Principle of Least Surprise
 
 ## 🎯 Server/App Separation Architecture
 
@@ -172,24 +209,27 @@ rip-server ../other-project 5000    # Any Rip app anywhere
 
 ### 🌟 What This Enables
 ```bash
-# Development workflow with smart commands
-rip-server start apps/my-app        # Smart start - won't double-start
+# Development workflow with smart defaults
+rip-server apps/my-app              # Start/restart - always works
 # Edit files in apps/my-app/ → changes appear instantly
 # No build steps, no server restarts needed!
 
 # Production deployment
-rip-server start prod apps/my-app   # Smart start in production mode
+rip-server prod apps/my-app         # Start/restart in production mode
 
 # Safe automation (perfect for scripts)
 rip-server stop                     # Always safe to stop
-rip-server start apps/api           # Always safe to start
-rip-server start apps/api           # Run again? No problem!
+rip-server apps/api                 # Always safe to start/restart
+rip-server apps/api                 # Run again? Restarts gracefully!
 
 # Multi-app development
-rip-server start apps/frontend 3000 # Smart start frontend
-rip-server start apps/api 8080      # Smart start API
-rip-server start apps/admin 4000    # Smart start admin
+rip-server apps/frontend 3000       # Start/restart frontend
+rip-server apps/api 8080            # Start/restart API
+rip-server apps/admin 4000          # Start/restart admin
 # All running simultaneously!
+
+# Check what's running
+rip-server status                   # Comprehensive status of all servers
 ```
 
 ### 🎉 The Magic in Action
