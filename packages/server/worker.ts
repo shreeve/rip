@@ -115,17 +115,8 @@ const loadRipApplication = async () => {
  */
 const main = async () => {
   // Shared timestamp function
-  const getTimestamp = () => {
-    const now = new Date()
-    return `${
-      now.toISOString().slice(0, 23).replace('T', ' ') +
-      (now.getTimezoneOffset() <= 0 ? '+' : '-') +
-      String(Math.abs(Math.floor(now.getTimezoneOffset() / 60))).padStart(
-        2,
-        '0',
-      )
-    }:${String(Math.abs(now.getTimezoneOffset() % 60)).padStart(2, '0')}`
-  }
+  const { formatTimestamp: formatTs } = await import('./time')
+  const getTimestamp = () => formatTs()
 
   // Load the user's Rip application
   const ripApp = await loadRipApplication()

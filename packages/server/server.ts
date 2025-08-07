@@ -520,15 +520,9 @@ if (httpsEnabled && cert && key) {
   servers.push(httpServer)
 }
 
+import { formatTimestamp as formatTs } from './time'
 // Add proper server startup logging (real timezone)
-const getTimestamp = () => {
-  const now = new Date()
-  const base = now.toISOString().slice(0, 23).replace('T', ' ')
-  const sign = now.getTimezoneOffset() <= 0 ? '+' : '-'
-  const hours = String(Math.abs(Math.floor(now.getTimezoneOffset() / 60))).padStart(2, '0')
-  const minutes = String(Math.abs(now.getTimezoneOffset() % 60)).padStart(2, '0')
-  return `${base}${sign}${hours}:${minutes}`
-}
+const getTimestamp = () => formatTs()
 
 // Announce when server is actually ready (after port binds)
 setTimeout(() => {
