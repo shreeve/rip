@@ -244,7 +244,7 @@ async function isRunning(): Promise<boolean> {
 }
 
 // Comprehensive status check
-async function showStatus(asJson = false) {
+async function showStatus(asJson = false): Promise<boolean> {
   if (!asJson) console.log('🔍 Rip Server Status\n')
 
   try {
@@ -272,6 +272,7 @@ async function showStatus(asJson = false) {
       const lines = output.trim().split('\n')
       console.log('📋 Active Processes:')
 
+      if (!asJson) console.log('📋 Active Processes:')
       for (const line of lines) {
         const [pid, ...cmdParts] = line.split(' ')
         const cmd = cmdParts.join(' ')
@@ -366,6 +367,7 @@ async function showStatus(asJson = false) {
         const result = { running: true, processes, ports: portStatuses }
         console.log(JSON.stringify(result, null, 2))
       }
+      return true
 
     } else {
       if (asJson) {
@@ -374,11 +376,17 @@ async function showStatus(asJson = false) {
         console.log('❌ Status: Not Running')
         console.log('\n💡 To start: bun server [options]')
       }
+      return false
     }
 
   } catch (error) {
-    console.log('❌ Status: ERROR checking processes')
-    console.error('Error:', error)
+    if (asJson) {
+      console.log(JSON.stringify({ running: false, error: String(error) }))
+    } else {
+      console.log('❌ Status: ERROR checking processes')
+      console.error('Error:', error)
+    }
+    return false
   }
 }
 
@@ -1234,7 +1242,7 @@ async function main() {
         ...config,
       }
       await start(finalConfig)
-      break
+      process.exit(0)
     }
 
     case 'stop': {
@@ -1242,15 +1250,16 @@ async function main() {
       if (running) {
         console.log('🛑 Stopping rip-server...')
         await killAll()
+        process.exit(0)
       } else {
         console.log('✅ rip-server is already stopped')
+        process.exit(0)
       }
-      break
     }
 
     case 'status': {
-      await showStatus(!!config.json)
-      break
+      const ok = await showStatus(!!config.json)
+      process.exit(ok ? 0 : 3)
     }
 
     case 'test': {
@@ -1431,7 +1440,7 @@ Configuration files:
       }
 
       await start(finalConfig)
-      break
+      process.exit(0)
     }
 
     default: {
@@ -1443,10 +1452,10 @@ Configuration files:
         ...config,
       }
       await start(finalStartConfig)
+      process.exit(0)
     }
   }
 }
 
 // Run
 main().catch(console.error)
-
