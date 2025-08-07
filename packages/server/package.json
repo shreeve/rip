@@ -9,7 +9,6 @@
     "start": "./rip-server.ts prod",
     "stop": "./rip-server.ts stop",
     "test": "./rip-server.ts test",
-    "server": "bun server.ts",
     "manager": "bun manager.ts",
     "worker": "bun worker.ts",
     "health": "curl -s http://localhost:3000/health | jq .",

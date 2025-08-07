@@ -719,12 +719,13 @@ async function start(config: Config) {
     process.exit(1)
   }
 
-  // Check for index.ts or index.rip
-  const hasIndex =
-    existsSync(join(appDir, 'index.ts')) ||
-    existsSync(join(appDir, 'index.rip'))
-  if (!hasIndex) {
-    console.error(`❌ No index.ts or index.rip found in: ${appDir}`)
+  // Check for any valid entry point (POLS: be permissive, let worker handle discovery)
+  const possibleEntryPoints = ['index.rip', 'app.rip', 'server.rip', 'main.rip', 'index.ts']
+  const hasValidEntryPoint = possibleEntryPoints.some(file => existsSync(join(appDir, file)))
+
+  if (!hasValidEntryPoint) {
+    console.error(`❌ No entry point found in: ${appDir}`)
+    console.error(`   Looking for: ${possibleEntryPoints.join(', ')}`)
     process.exit(1)
   }
 
