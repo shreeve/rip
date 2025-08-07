@@ -26,7 +26,7 @@
 * bunfig.toml: `[rip-server]` section
 * Command line arguments override file configs
 
-**🔒 Revolutionary HTTPS Support:**
+**🔒 HTTPS Support:**
 * **Smart Mode** (`https`) - Automatically uses best certificate option
 * **Quick Mode** (`https:quick`) - Instant self-signed certificates
 * **CA Mode** (`https:ca`) - Professional CA-signed certificates
@@ -55,7 +55,7 @@
 * Old positional argument syntax deprecated
 * Default is now HTTP-only (use `https` for HTTPS)
 
-### v2.0.0 - August 3, 2025 - 🚀 **API-Rip: HTTPS-by-Default Revolution**
+### v2.0.0 - August 3, 2025 - 🚀 **API-Rip: HTTPS-by-Default**
 
 **🔒 HTTPS-by-Default Architecture:**
 * HTTPS is now the default for all development and production

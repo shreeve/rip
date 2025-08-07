@@ -82,4 +82,4 @@ This would enable our dream syntax:
   ]
 ```
 
-This is a game-changer for DSLs in Rip!
+This is a significant improvement for DSLs in Rip.

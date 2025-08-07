@@ -1,5 +1,5 @@
 # Advanced API Example
-# Shows the power of the revolutionary server with a full API
+# Shows the power of the Rip server with a full API
 
 import { Hono } from 'hono'
 
@@ -19,7 +19,7 @@ app.use '*', (c, next) ->
 # API Routes
 app.get '/', (c) ->
   c.json
-    message: 'Revolutionary Rip API Server'
+    message: 'Rip API Server'
     version: '2.0.0'
     worker: process.pid
     endpoints: [

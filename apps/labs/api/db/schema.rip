@@ -1,4 +1,4 @@
-# 🔥 Revolutionary Labs Schema using @rip/schema + @rip/data
+# 🔥 Labs Schema using @rip/schema + @rip/data
 # Perfect consistency with range validation and DuckDB power!
 
 import { schema } from '@rip/schema'

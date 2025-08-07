@@ -1,7 +1,7 @@
 /**
  * 🌐 Rip Platform Controller - Dynamic Application Management
  *
- * Revolutionary dynamic application platform that allows deploying, scaling,
+ * Dynamic application platform that allows deploying, scaling,
  * and managing multiple Rip applications from a single server instance.
  *
  * Think: Heroku/Railway but running locally with native process performance.

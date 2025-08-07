@@ -1,5 +1,5 @@
 # Simple RIP Application Example
-# This demonstrates the revolutionary server with a basic Rip app
+# This demonstrates the Rip server with a basic Rip app
 
 import { Hono } from 'hono'
 
@@ -7,12 +7,12 @@ app = new Hono
 
 # Basic route
 app.get '/', (c) ->
-  c.text 'Hello from Revolutionary Rip Server! 🚀⚡'
+  c.text 'Hello from the Rip Server 🚀'
 
 # Dynamic route with worker info
 app.get '/info', (c) ->
   c.json
-    message: 'Revolutionary Rip Application Server'
+    message: 'Rip Application Server'
     worker: process.env.WORKER_ID || 'unknown'
     requests: process.env.REQUESTS_HANDLED || 0
     uptime: process.uptime()

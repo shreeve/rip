@@ -1,12 +1,12 @@
-# 🔥 Revolutionary Seed Script - DuckDB + @rip/data Power!
+# 🔥 Seed Script - DuckDB + @rip/data
 # Perfect data seeding for the future of web development
 
 import { RipDataClient } from '@rip/data'
 import { faker } from '@faker-js/faker'
 
-console.log '🌱 Seeding Revolutionary Labs Database...'
+console.log '🌱 Seeding Labs Database...'
 
-# Connect to our revolutionary data server
+# Connect to the data server
 dataClient = new RipDataClient 'http://localhost:8306'
 
 # Create test users with perfect data
@@ -115,7 +115,7 @@ console.log '\n🔑 Test Credentials:'
 console.log 'Email: test@example.com'
 console.log 'Use auth code endpoint to get login code'
 
-console.log '\n🔥 Revolutionary DuckDB + Rip Stack Ready!'
+console.log '\n🔥 DuckDB + Rip stack ready.'
 console.log '🚀 API: http://localhost:8305'
 console.log '📊 Data Server: http://localhost:8306'
 console.log '💻 Client: http://localhost:8205'

@@ -1,6 +1,6 @@
-# 🔥 Revolutionary Labs API - The Future is Here!
+# Labs API
 
-**The most advanced web application API stack ever created**
+A modern, productive web application API stack.
 
 This is a complete reimagining of web application architecture using:
 - **@rip/data** - DuckDB as both transactional AND analytical store
@@ -8,11 +8,11 @@ This is a complete reimagining of web application architecture using:
 - **@rip/api** - Context-free endpoints with intelligent `read()` function
 - **@rip/server** - Multi-process production server with hot reload
 
-## 🚀 The Revolutionary Stack
+## 🚀 The Stack
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  🎯 REVOLUTIONARY ARCHITECTURE                              │
+│  🎯 Architecture                                             │
 ├─────────────────────────────────────────────────────────────┤
 │  React Client (8205) ──→ Rip API (8305) ──→ Data Server    │
 │                              │                (8306)        │
@@ -35,7 +35,7 @@ This is a complete reimagining of web application architecture using:
 - **Intelligent validation** - `read()` function with range constraints
 - **Larry Wall's Principle** - Common things easy, rare things possible
 
-### **3. Revolutionary Schema**
+### **3. Schema**
 ```rip
 @string 'email!', [5, 255], unique: true    # Perfect validation
 @integer 'age', [18, 120]                   # Clear constraints
@@ -48,7 +48,7 @@ This is a complete reimagining of web application architecture using:
 # From monorepo root
 bun install
 
-# Start the API server  
+# Start the API server
 bun server apps/labs/api
 
 # Or run directly (from root)
@@ -60,7 +60,7 @@ curl http://localhost:3000/ping
 
 ## 🔌 Connecting to the Data Server
 
-The revolutionary `rip-data-server` supports multiple connection methods:
+The `rip-data-server` supports multiple connection methods:
 
 - **HTTP API**: `http://localhost:8306` - REST endpoints
 - **WebSocket**: `ws://localhost:8307` - Real-time streaming
@@ -90,7 +90,7 @@ The revolutionary `rip-data-server` supports multiple connection methods:
 - `GET /orders` - User's order history
 - `GET /results` - User's lab results
 
-### **🔥 Revolutionary Analytics**
+### **🔥 Analytics**
 - `GET /analytics/dashboard` - Real-time analytics dashboard
 
 ## 🎯 Perfect Validation Examples
@@ -110,7 +110,7 @@ testIds = read 'testIds', 'array'                 # Array of test IDs
 payment = read 'payment', 'string', [3, 20], 'stripe'  # Payment method with default
 ```
 
-## 🔥 Revolutionary Features
+## 🔥 Features
 
 ### **Real-Time Analytics**
 ```rip
@@ -156,7 +156,7 @@ React → Express → PostgreSQL → ETL → Data Warehouse → BI Tools
 Complex  Verbose   OLTP only   Slow    Expensive    Delayed
 ```
 
-### **Revolutionary Rip Stack**
+### **Rip Stack**
 ```
 React → Rip API → DuckDB (OLTP + OLAP)
   ↓       ↓          ↓
@@ -176,21 +176,21 @@ After seeding:
 - **100x cleaner** code with perfect validation
 - **Real-time insights** on live transactional data
 
-## 🚀 The Future of Web Development
+## 🚀 Looking Ahead
 
-This isn't just an API - it's a **paradigm shift**:
+This API aims to provide a simpler approach:
 
 1. **Single Database** for everything (OLTP + OLAP)
 2. **Context-Free APIs** for maximum developer happiness
 3. **Perfect Validation** with range constraints
 4. **Real-Time Analytics** without complexity
-5. **Revolutionary Performance** with DuckDB power
+5. **Performance** with DuckDB power
 
-**Welcome to the future of web application development!** 🔥✨
+Thanks for trying the Labs API.
 
 ## 🔗 Related Packages
 
-- [`@rip/data`](../../packages/data) - Revolutionary DuckDB data platform
+- [`@rip/data`](../../packages/data) - DuckDB data platform
 - [`@rip/schema`](../../packages/schema) - Perfect database schema DSL
 - [`@rip/api`](../../packages/api) - Context-free API helpers
 - [`@rip/server`](../../packages/server) - Production-ready server

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 /**
- * @rip/data Example - Revolutionary Data Platform Demo
+ * @rip/data Example - Data Platform Demo
  *
  * This example demonstrates:
  * - Starting a RipData server
@@ -14,7 +14,7 @@
 import { RipDataServer, RipDataClient } from './index'
 
 async function main() {
-  console.log('🔥 Starting @rip/data Revolutionary Demo...\n')
+  console.log('🔥 Starting @rip/data demo...\n')
 
   // 1. Start the RipData server
   console.log('📡 Starting RipData Server...')

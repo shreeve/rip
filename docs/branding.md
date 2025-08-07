@@ -38,7 +38,7 @@ Lang Parse Runtime
 - **Main Symbol**: ⟨R⟩ in bold, modern sans-serif
 - **Angle Brackets**: Slightly wider than normal, suggesting embrace/inclusion
 - **Typography**: Clean, technical font (like SF Pro or Inter)
-- **Color**: Vibrant red (#FF4444) for energy and revolution
+- **Color**: Vibrant red (#FF4444) for energy and momentum
 
 ### Icon Variations
 1. **Full Logo**: ⟨R⟩ with "Rip" wordmark
@@ -101,7 +101,7 @@ To create the actual logo files:
 - **Fallback**: system-ui, -apple-system, BlinkMacSystemFont, sans-serif
 
 ## Brand Colors
-- **Primary Red**: #FF4444 (energy, revolution)
+- **Primary Red**: #FF4444 (energy, momentum)
 - **Tech Blue**: #4A90E2 (trust, technology)
 - **Success Green**: #7ED321 (growth, compatibility)
 - **Warning Orange**: #F5A623 (attention, innovation)

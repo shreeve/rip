@@ -1,10 +1,10 @@
-# @rip/data - Revolutionary Data Platform
+# @rip/data - Data Platform
 
 > **Transform your web application with DuckDB as both transactional AND analytical store**
 
-## 🔥 The Major Shift
+## 🔥 The Approach
 
-`@rip/data` represents a **paradigm shift** in web application architecture. Instead of the traditional pattern:
+`@rip/data` offers a simpler approach to web application data architecture. Instead of the traditional pattern:
 
 ```
 App → PostgreSQL (transactional) → ETL → Data Warehouse (analytical) → BI Tools
@@ -427,7 +427,7 @@ Traditional web applications are **data-poor** because analytics are **hard**. Y
 
 ---
 
-**Ready to revolutionize your data architecture?**
+**Ready to simplify your data architecture?**
 
 ```bash
 bun add @rip/data
