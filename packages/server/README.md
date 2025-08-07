@@ -67,11 +67,9 @@ rip-server                      # Serves on http://localhost:3000
 ## 🚀 Quick Start
 
 ```bash
-# Install globally
-bun link @rip/server
-
-# Or link manually
-sudo ln -sf $(pwd)/packages/server/rip-server.ts /usr/local/bin/rip-server
+# Install globally (recommended)
+ln -sf $(pwd)/packages/server/rip-server.ts ~/bin/rip-server
+chmod +x ~/bin/rip-server
 
 # Flexible argument syntax - provide options in ANY order!
 rip-server                          # HTTP only (default)
@@ -409,6 +407,30 @@ cp new-private.key /etc/ssl/private/yourdomain.key
 rip-server stop  # Graceful shutdown
 rip-server prod https /etc/ssl/certs/yourdomain.pem /etc/ssl/private/yourdomain.key
 ```
+
+## 🎯 **Two Ways to Run Rip Server**
+
+### **From Monorepo Root: `bun server` (Recommended for Teams)**
+```bash
+# From the Rip monorepo root directory:
+bun server apps/labs/api        # Clean, consistent
+bun server examples/blog        # Works from any monorepo directory
+bun server status               # Check status
+bun server stop                 # Stop server
+```
+
+### **From Anywhere: `rip-server` (Universal)**
+```bash
+# After global installation, from any directory:
+cd apps/labs/api && rip-server  # POLS: finds index.rip automatically
+rip-server apps/labs/api        # Explicit path
+rip-server status               # Check status
+rip-server stop                 # Stop server
+```
+
+### **When to Use Which:**
+- **Use `bun server`**: Team workflows, documentation, scripts (from monorepo root)
+- **Use `rip-server`**: Individual productivity, quick iteration, CI/CD, standalone projects
 
 ## 🎯 Production Deployment
 
