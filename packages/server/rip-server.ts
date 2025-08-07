@@ -11,6 +11,7 @@ import { existsSync, mkdirSync, statSync } from 'fs'
 import { homedir } from 'os'
 import { join, resolve } from 'path'
 import { spawn } from 'bun'
+import { RipPlatform, type AppConfig } from './platform-controller'
 
 // Set process title for better visibility in ps/top
 process.title = 'rip-server'
@@ -65,6 +66,13 @@ function parseArgs(args: string[]): Config {
     'ca:info',
     'ca:list',
     'ca:clean',
+    // Platform commands
+    'platform',
+    'deploy',
+    'undeploy',
+    'list',
+    'scale',
+    'restart',
   ]
 
   // First, check for command
@@ -911,6 +919,182 @@ ${endpoints.join('\n')}
   await new Promise(() => {})
 }
 
+// Platform command implementations
+let platformInstance: RipPlatform | null = null
+
+async function startPlatform(config: Config): Promise<void> {
+  const port = config.httpPort || 3000
+  
+  console.log('🌐 Starting RIP Platform Controller...')
+  platformInstance = new RipPlatform(port)
+  await platformInstance.start()
+  
+  // Keep the platform running
+  await new Promise(() => {})
+}
+
+async function deployApp(config: Config, args: string[]): Promise<void> {
+  // For deploy commands, we use the API instead of the instance
+  const platformUrl = 'http://localhost:3000'
+
+  // Parse deploy arguments: rip-server deploy <name> <directory> [--port <port>] [--workers <workers>]
+  if (args.length < 2) {
+    console.error('❌ Usage: rip-server deploy <name> <directory> [--port <port>] [--workers <workers>]')
+    process.exit(1)
+  }
+
+  const [name, directory] = args
+  const deployConfig: Partial<AppConfig> & { name: string, directory: string } = {
+    name,
+    directory: resolve(directory)
+  }
+
+  // Parse additional options
+  for (let i = 2; i < args.length; i += 2) {
+    const flag = args[i]
+    const value = args[i + 1]
+
+    switch (flag) {
+      case '--port':
+        deployConfig.port = parseInt(value)
+        break
+      case '--workers':
+        deployConfig.workers = parseInt(value)
+        break
+      case '--mode':
+        deployConfig.mode = value as 'dev' | 'prod'
+        break
+      case '--protocol':
+        deployConfig.protocol = value as 'http' | 'https' | 'http+https'
+        break
+    }
+  }
+
+  try {
+    const app = await platformInstance.deployApp(deployConfig)
+    console.log(`✅ App '${name}' deployed successfully`)
+    console.log(`🌐 Available at: http://localhost:${app.config.port}`)
+  } catch (error) {
+    console.error(`❌ Failed to deploy app '${name}': ${error.message}`)
+    process.exit(1)
+  }
+}
+
+async function undeployApp(args: string[]): Promise<void> {
+  if (!platformInstance) {
+    console.error('❌ Platform not running. Start with: rip-server platform')
+    process.exit(1)
+  }
+
+  if (args.length < 1) {
+    console.error('❌ Usage: rip-server undeploy <name>')
+    process.exit(1)
+  }
+
+  const [name] = args
+
+  try {
+    await platformInstance.undeployApp(name)
+    console.log(`✅ App '${name}' undeployed successfully`)
+  } catch (error) {
+    console.error(`❌ Failed to undeploy app '${name}': ${error.message}`)
+    process.exit(1)
+  }
+}
+
+async function listPlatformApps(): Promise<void> {
+  if (!platformInstance) {
+    console.error('❌ Platform not running. Start with: rip-server platform')
+    process.exit(1)
+  }
+
+  const apps = platformInstance.listApps()
+  const stats = platformInstance.getStats()
+
+  console.log('🚀 RIP Platform Status')
+  console.log(`📊 Total Apps: ${stats.totalApps} | Running: ${stats.runningApps} | Workers: ${stats.totalWorkers}`)
+  console.log(`⏱️  Platform Uptime: ${Math.round(stats.uptime / 1000 / 60)} minutes`)
+  console.log('')
+
+  if (apps.length === 0) {
+    console.log('📱 No apps deployed')
+    console.log('💡 Deploy an app with: rip-server deploy <name> <directory>')
+    return
+  }
+
+  console.log('📱 Deployed Apps:')
+  apps.forEach(app => {
+    const statusEmoji = {
+      'running': '🟢',
+      'starting': '🟡',
+      'stopping': '🟠',
+      'stopped': '⚫',
+      'error': '🔴'
+    }[app.status] || '⚪'
+
+    const runtime = Math.round((Date.now() - app.startedAt.getTime()) / 1000 / 60)
+    
+    console.log(`   ${statusEmoji} ${app.config.name.padEnd(15)} :${app.config.port.toString().padEnd(5)} ${app.config.workers}w ${app.config.mode.padEnd(4)} ${runtime}m`)
+    
+    if (app.error) {
+      console.log(`      ❌ ${app.error}`)
+    }
+  })
+
+  console.log('')
+  console.log('🌐 Platform Dashboard: http://localhost:3000/platform')
+}
+
+async function scalePlatformApp(args: string[]): Promise<void> {
+  if (!platformInstance) {
+    console.error('❌ Platform not running. Start with: rip-server platform')
+    process.exit(1)
+  }
+
+  if (args.length < 2) {
+    console.error('❌ Usage: rip-server scale <name> <workers>')
+    process.exit(1)
+  }
+
+  const [name, workersStr] = args
+  const workers = parseInt(workersStr)
+
+  if (isNaN(workers) || workers < 1) {
+    console.error('❌ Workers must be a positive number')
+    process.exit(1)
+  }
+
+  try {
+    await platformInstance.scaleApp(name, workers)
+    console.log(`✅ App '${name}' scaled to ${workers} workers`)
+  } catch (error) {
+    console.error(`❌ Failed to scale app '${name}': ${error.message}`)
+    process.exit(1)
+  }
+}
+
+async function restartPlatformApp(args: string[]): Promise<void> {
+  if (!platformInstance) {
+    console.error('❌ Platform not running. Start with: rip-server platform')
+    process.exit(1)
+  }
+
+  if (args.length < 1) {
+    console.error('❌ Usage: rip-server restart <name>')
+    process.exit(1)
+  }
+
+  const [name] = args
+
+  try {
+    await platformInstance.restartApp(name)
+    console.log(`✅ App '${name}' restarted successfully`)
+  } catch (error) {
+    console.error(`❌ Failed to restart app '${name}': ${error.message}`)
+    process.exit(1)
+  }
+}
+
 // Main
 async function main() {
   const args = process.argv.slice(2)
@@ -993,6 +1177,37 @@ async function main() {
       await cleanCerts()
       break
 
+    // Platform commands
+    case 'platform': {
+      await startPlatform(config)
+      break
+    }
+
+    case 'deploy': {
+      await deployApp(config, args)
+      break
+    }
+
+    case 'undeploy': {
+      await undeployApp(args)
+      break
+    }
+
+    case 'list': {
+      await listPlatformApps()
+      break
+    }
+
+    case 'scale': {
+      await scalePlatformApp(args)
+      break
+    }
+
+    case 'restart': {
+      await restartPlatformApp(args)
+      break
+    }
+
     case 'help':
     case '-h':
     case '--help':
@@ -1018,6 +1233,14 @@ Commands:
   test      Run test suite
   help      Show this help
 
+Platform Commands (Dynamic Multi-App Management):
+  platform  Start the RIP Platform Controller
+  deploy    Deploy an app to the platform
+  undeploy  Remove an app from the platform
+  list      List all deployed apps
+  scale     Scale an app's worker count
+  restart   Restart a deployed app
+
 Certificate Authority Commands:
   ca:init   Initialize Certificate Authority
   ca:trust  Trust CA in system (macOS)
@@ -1040,7 +1263,7 @@ Protocol Options:
   https:ca            HTTPS with CA-signed cert
   http+https          Both HTTP and HTTPS
 
-Examples:
+Single App Examples:
   bun server apps/my-app            # Start/restart app (recommended)
   bun server apps/api https         # Start/restart with HTTPS
   bun server apps/blog 8080         # Start/restart on custom port
@@ -1051,6 +1274,15 @@ Examples:
   rip-server https                  # Start/restart with HTTPS
   rip-server https:quick            # Start/restart with self-signed cert
   rip-server ./api prod             # Start/restart production mode
+
+Platform Examples (Multi-App Management):
+  rip-server platform               # Start the platform controller
+  rip-server deploy blog apps/blog --port 3001 --workers 3
+  rip-server deploy api apps/api --port 8080 --workers 5
+  rip-server list                   # Show all deployed apps
+  rip-server scale api 10           # Scale API to 10 workers
+  rip-server restart blog           # Restart blog app
+  rip-server undeploy api           # Remove API app
   rip-server w:5 r:50               # Start/restart with 5 workers, 50 requests
   rip-server stop                   # Stop server
 
