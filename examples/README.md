@@ -38,16 +38,41 @@
 
 ## Running Examples
 
+### **🎯 Single App Mode**
 ```bash
-# Install all dependencies (from project root)
+# Install all dependencies (from project root)  
 bun install
 
-# Run with bun server
+# Run with bun server (recommended)
 bun server ./examples/blog
 
 # Or run directly
 cd examples/blog && bun index.rip
 ```
+
+### **🌐 Platform Mode (NEW!) - Run Multiple Examples**
+```bash
+# Start the RIP Platform Controller
+rip-server platform
+
+# Deploy multiple examples at once!
+rip-server deploy blog examples/blog --port 3001 --workers 2
+rip-server deploy legal examples/legal --port 3002 --workers 3  
+rip-server deploy users examples/users --port 3003 --workers 1
+
+# Visit the platform dashboard
+open http://localhost:3000/platform
+
+# Scale examples in real-time
+rip-server scale blog 5          # Scale blog to 5 workers
+rip-server list                  # Show all running examples
+```
+
+**🎛️ Platform Benefits:**
+- **📊 Unified dashboard**: Monitor all examples from one interface
+- **⚡ Real-time scaling**: Add/remove workers without restarts
+- **🔧 Hot deployments**: Update examples without downtime
+- **📈 Performance comparison**: See which patterns perform best
 
 ## Example Features
 
