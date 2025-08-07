@@ -492,8 +492,8 @@ const handleHttpRedirect = (req: Request) => {
  */
 const servers: any[] = []
 
-// Basic readiness gating: wait briefly for a worker to be reachable to reduce initial 503s
-await waitForAnyWorkerReady(workerSocketPaths)
+// Skip worker readiness check to avoid hangs - workers will be ready when they're ready
+// await waitForAnyWorkerReady(workerSocketPaths)
 
 if (httpsEnabled && cert && key) {
   // HTTPS mode: Primary HTTPS server + HTTP redirect server
