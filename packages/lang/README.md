@@ -539,6 +539,58 @@ While the current `/coffeescript` directory serves as our working implementation
 
 **🚧 Under Construction** - Package structure created, implementation in progress.
 
+## Running .rip Scripts Directly from the Shell
+
+This setup allows you to execute `.rip` files directly by name, without needing to type `bun` or any other command prefix. Just type the script name and it runs!
+
+### Setup
+
+Add these two components to your shell configuration (e.g., `~/.zshrc`):
+
+1. **Set the path to the rip-bun transpiler:**
+   ```bash
+   export RIP_BUN_TRANSPILER="/Users/shreeve/Data/Code/rip/packages/bun/rip-bun.ts"
+   ```
+
+2. **Add a command_not_found_handler for zsh:**
+   ```bash
+   command_not_found_handler() {
+     [[ -f "./$1.rip" ]] && exec /usr/bin/env bun --preload="${RIP_BUN_TRANSPILER}" "./$1.rip" "${@:2}"
+     print -u2 "zsh: command not found: $1"
+     return 127
+   }
+   ```
+
+### How It Works
+
+When you type a command that doesn't exist in your PATH, zsh checks if a `.rip` file with that name exists in the current directory. If it does, it automatically executes it using bun with the rip transpiler preloaded.
+
+### Example
+
+Given a directory structure like this:
+```
+./
+├── food.rip
+├── index.rip
+├── package.json
+└── README.md
+```
+
+With `food.rip` containing:
+```javascript
+for food in ['toast', 'cheese', 'jelly']
+  console.log "#{food} is yummy!"
+```
+
+Simply type `food.rip` in your terminal and see:
+```
+toast is yummy!
+cheese is yummy!
+jelly is yummy!
+```
+
+No need for `bun food.rip` or `./food.rip` - just the filename itself works as a command! This makes development with rip files feel as natural as using any built-in shell command.
+
 ## 🤝 Contributing
 
 This is the future of RIP - contributions that push the language forward are welcome!
