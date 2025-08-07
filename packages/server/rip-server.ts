@@ -924,11 +924,11 @@ let platformInstance: RipPlatform | null = null
 
 async function startPlatform(config: Config): Promise<void> {
   const port = config.httpPort || 3000
-  
+
   console.log('🌐 Starting RIP Platform Controller...')
   platformInstance = new RipPlatform(port)
   await platformInstance.start()
-  
+
   // Keep the platform running
   await new Promise(() => {})
 }
@@ -1033,9 +1033,9 @@ async function listPlatformApps(): Promise<void> {
     }[app.status] || '⚪'
 
     const runtime = Math.round((Date.now() - app.startedAt.getTime()) / 1000 / 60)
-    
+
     console.log(`   ${statusEmoji} ${app.config.name.padEnd(15)} :${app.config.port.toString().padEnd(5)} ${app.config.workers}w ${app.config.mode.padEnd(4)} ${runtime}m`)
-    
+
     if (app.error) {
       console.log(`      ❌ ${app.error}`)
     }

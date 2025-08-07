@@ -1,11 +1,11 @@
 /**
  * 🌐 RIP Platform Controller - Dynamic Application Management
- * 
+ *
  * Revolutionary dynamic application platform that allows deploying, scaling,
  * and managing multiple Rip applications from a single server instance.
- * 
+ *
  * Think: Heroku/Railway but running locally with native process performance.
- * 
+ *
  * Key Features:
  * - Dynamic app deployment/undeployment
  * - Real-time scaling (add/remove workers)
@@ -73,7 +73,7 @@ export class RipPlatform {
     console.log(`📊 Platform Dashboard: http://localhost:${this.platformPort}/platform`)
     console.log(`🔧 Management API: http://localhost:${this.platformPort}/api`)
     console.log('✨ Ready to deploy apps dynamically!')
-    
+
     // Start the platform management server
     await this.startPlatformServer()
   }
@@ -96,7 +96,7 @@ export class RipPlatform {
 
     // Check for valid entry points
     const possibleEntryPoints = ['index.rip', 'app.rip', 'server.rip', 'main.rip', 'index.ts']
-    const hasValidEntryPoint = possibleEntryPoints.some(file => 
+    const hasValidEntryPoint = possibleEntryPoints.some(file =>
       existsSync(join(config.directory, file))
     )
 
@@ -106,7 +106,7 @@ export class RipPlatform {
 
     // Auto-assign port if not specified
     const port = config.port || this.findAvailablePort()
-    
+
     // Create full app config with defaults
     const fullConfig: AppConfig = {
       name: appName,
@@ -139,7 +139,7 @@ export class RipPlatform {
     try {
       // Start the app processes
       await this.startAppProcesses(appInstance)
-      
+
       console.log(`🚀 App '${appName}' deployed successfully on port ${port}`)
       return appInstance
     } catch (error) {
@@ -163,16 +163,16 @@ export class RipPlatform {
     }
 
     console.log(`🛑 Undeploying app '${appName}'...`)
-    
+
     app.status = 'stopping'
-    
+
     try {
       // Stop processes gracefully
       if (app.manager) {
         app.manager.kill('SIGTERM')
         await app.manager.exited
       }
-      
+
       if (app.server) {
         app.server.kill('SIGTERM')
         await app.server.exited
@@ -186,7 +186,7 @@ export class RipPlatform {
 
       // Remove from apps map
       this.apps.delete(appName)
-      
+
       console.log(`✅ App '${appName}' undeployed successfully`)
     } catch (error) {
       app.status = 'error'
@@ -216,7 +216,7 @@ export class RipPlatform {
     try {
       // Restart the app with new worker count
       await this.restartApp(appName)
-      
+
       console.log(`✅ App '${appName}' scaled from ${oldWorkers} to ${workers} workers`)
     } catch (error) {
       // Revert on failure
@@ -235,7 +235,7 @@ export class RipPlatform {
     }
 
     console.log(`🔄 Restarting app '${appName}'...`)
-    
+
     app.status = 'starting'
 
     // Stop existing processes
@@ -243,7 +243,7 @@ export class RipPlatform {
       app.manager.kill('SIGTERM')
       await app.manager.exited
     }
-    
+
     if (app.server) {
       app.server.kill('SIGTERM')
       await app.server.exited
@@ -251,7 +251,7 @@ export class RipPlatform {
 
     // Start fresh processes
     await this.startAppProcesses(app)
-    
+
     console.log(`✅ App '${appName}' restarted successfully`)
   }
 
@@ -400,12 +400,12 @@ export class RipPlatform {
       port: this.platformPort,
       fetch: async (req) => {
         const url = new URL(req.url)
-        
+
         // API endpoints
         if (url.pathname.startsWith('/api')) {
           return this.handleAPIRequest(req)
         }
-        
+
         // Dashboard
         if (url.pathname.startsWith('/platform')) {
           return this.handleDashboardRequest(req)
@@ -564,7 +564,7 @@ export class RipPlatform {
                     <div class="app-name">📱 ${app.config.name}</div>
                     <div class="app-status status-${app.status}">${app.status.toUpperCase()}</div>
                 </div>
-                
+
                 <div class="app-details">
                     <div class="detail">
                         <div class="detail-label">Port</div>
