@@ -74,13 +74,14 @@ Matz's **Principle of Least Surprise (POLS)** is deeply woven into Rip's DNA. Ev
 - **Consistent patterns**: Learn once, use everywhere
 - **Elegant progression**: Simple things are simple, complex things are possible
 
-**🌐 Revolutionary Platform Mode**:
+**🌐 Revolutionary Platform Mode** *(FULLY WORKING!)*:
 ```bash
 # Transform any machine into a dynamic application platform
 rip-server platform              # Start platform controller
-rip-server deploy api apps/api   # Deploy apps dynamically
-rip-server scale api 10          # Real-time scaling
-rip-server list                  # Visual dashboard at :3000/platform
+rip-server deploy api apps/labs/api --port 3001 --workers 2
+rip-server scale api 10          # Real-time scaling  
+rip-server list                  # Show all deployed apps
+# Visit dashboard: http://localhost:3000/platform
 ```
 
 **💡 The Goal**: When you use Rip, it should feel like the computer is reading your mind. The syntax and behavior should match your mental model so perfectly that the tool disappears and you can focus purely on solving problems.
