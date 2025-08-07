@@ -232,12 +232,11 @@ async function loadFileConfig(appDir: string): Promise<Partial<Config>> {
 // Helper to check if rip-server is running
 async function isRunning(): Promise<boolean> {
   try {
-    const proc = spawn(['pgrep', '-f', 'rip-server'], {
-      stdout: 'pipe',
-      stderr: 'pipe',
+    // Use a simple port check instead of pgrep to avoid zombie processes
+    const response = await fetch('http://localhost:3000/health', {
+      signal: AbortSignal.timeout(1000)
     })
-    const code = await proc.exited
-    return code === 0
+    return response.ok
   } catch {
     return false
   }
@@ -428,26 +427,19 @@ async function showStatus(asJson = false): Promise<boolean> {
 async function killAll() {
   console.log('🛑 Stopping all rip-server processes...')
 
-  // Kill the main rip-server process
-  const proc1 = spawn(['pkill', '-f', 'rip-server'], {
-    stdout: 'pipe',
-    stderr: 'pipe',
-  })
-  await proc1.exited
-
-  // Also kill any lingering server components
-  const proc2 = spawn(['pkill', '-f', 'server/(manager|worker|server).ts'], {
-    stdout: 'pipe',
-    stderr: 'pipe',
-  })
-  await proc2.exited
-
-  // Clean up Unix socket files
-  const proc3 = spawn(['sh', '-c', 'rm -f /tmp/rip_worker_*.sock'], {
-    stdout: 'pipe',
-    stderr: 'pipe',
-  })
-  await proc3.exited
+  try {
+    // Use more aggressive killing to avoid zombie processes
+    await Bun.spawn(['pkill', '-9', '-f', 'rip-server']).exited
+    await Bun.spawn(['pkill', '-9', '-f', 'server/(manager|worker|server).ts']).exited
+    
+    // Clean up Unix socket files
+    await Bun.spawn(['sh', '-c', 'rm -f /tmp/rip_worker_*.sock']).exited
+    
+    // Small delay to let processes actually die
+    await new Promise(resolve => setTimeout(resolve, 500))
+  } catch (error) {
+    // Ignore errors - processes might already be dead
+  }
 
   console.log('✅ All processes stopped')
 }
@@ -792,6 +784,7 @@ async function cleanCerts(): Promise<void> {
 
 // Start command
 async function start(config: Config) {
+  console.log('📋 Debug: start() function entered')
   const {
     mode = defaults.mode,
     appDir = defaults.appDir,
@@ -805,11 +798,13 @@ async function start(config: Config) {
     httpsMode = defaults.httpsMode,
   } = config
 
+  console.log('📋 Debug: Config destructured, checking app directory...')
   // Verify app directory exists
   if (!existsSync(appDir)) {
     console.error(`❌ App directory not found: ${appDir}`)
     process.exit(1)
   }
+  console.log('📋 Debug: App directory verified')
 
   // Check for any valid entry point (POLS: be permissive, let worker handle discovery)
   const possibleEntryPoints = [
@@ -946,6 +941,7 @@ ${endpoints.join('\n')}
 🛑 Press Ctrl-C to stop
 `)
 
+  console.log('📋 Debug: Starting manager process...')
   // Start manager
   const manager = spawn(
     [
@@ -962,6 +958,7 @@ ${endpoints.join('\n')}
       stdin: 'inherit',
     },
   )
+  console.log('📋 Debug: Manager process spawned')
 
   // Monitor manager
   manager.exited.then(code => {
@@ -969,8 +966,10 @@ ${endpoints.join('\n')}
     process.exit(1)
   })
 
+  console.log('📋 Debug: Waiting for workers to start...')
   // Wait for workers to start
   await new Promise(resolve => setTimeout(resolve, 300))
+  console.log('📋 Debug: Worker wait completed, starting server...')
 
   // Start server
   const serverArgs = ['bun', join(SCRIPT_DIR, 'server.ts'), '0']
@@ -993,11 +992,13 @@ ${endpoints.join('\n')}
     serverArgs.push(httpPort.toString(), workers.toString())
   }
 
+  console.log('📋 Debug: Spawning server process...')
   const server = spawn(serverArgs, {
     stdout: 'inherit',
     stderr: 'inherit',
     stdin: 'inherit',
   })
+  console.log('📋 Debug: Server process spawned')
 
   // Monitor server
   server.exited.then(code => {
@@ -1014,6 +1015,7 @@ ${endpoints.join('\n')}
     process.exit(0)
   })
 
+  console.log('📋 Debug: Entering main server loop...')
   // Keep running (always foreground)
   await new Promise(() => {})
 }
@@ -1077,7 +1079,7 @@ async function deployApp(config: Config, args: string[]): Promise<void> {
   try {
     console.log(`🚀 Deploying app '${name}' from ${directory}...`)
 
-    const response = await fetch(`${platformUrl}/api/deploy`, {
+    const response = await fetch(`${platformUrl}/api/apps`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(deployConfig),
@@ -1309,15 +1311,18 @@ async function main() {
         await new Promise(resolve => setTimeout(resolve, 1000))
       }
 
-      console.log('🚀 Starting rip-server...')
-      // Load file config and start
-      const fileConfig = await loadFileConfig(config.appDir || defaults.appDir)
-      const finalConfig = {
-        ...defaults,
-        ...fileConfig,
-        ...config,
-      }
-      await start(finalConfig)
+        console.log('🚀 Starting rip-server...')
+  console.log('📋 Debug: Loading file config...')
+  // Load file config and start
+  const fileConfig = await loadFileConfig(config.appDir || defaults.appDir)
+  console.log('📋 Debug: Merging configs...')
+  const finalConfig = {
+    ...defaults,
+    ...fileConfig,
+    ...config,
+  }
+  console.log('📋 Debug: Calling start() function...')
+  await start(finalConfig)
       return
     }
 
@@ -1381,12 +1386,12 @@ async function main() {
     }
 
     case 'deploy': {
-      await deployApp(config, args)
+      await deployApp(config, args.slice(1))
       break
     }
 
     case 'undeploy': {
-      await undeployApp(args)
+      await undeployApp(args.slice(1))
       break
     }
 
@@ -1396,12 +1401,12 @@ async function main() {
     }
 
     case 'scale': {
-      await scalePlatformApp(args)
+      await scalePlatformApp(args.slice(1))
       break
     }
 
     case 'restart': {
-      await restartPlatformApp(args)
+      await restartPlatformApp(args.slice(1))
       break
     }
 
