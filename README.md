@@ -77,7 +77,7 @@ Matz's **Principle of Least Surprise (POLS)** is deeply woven into Rip's DNA. Ev
 **🌐 Revolutionary Platform Mode**:
 ```bash
 # Transform any machine into a dynamic application platform
-rip-server platform              # Start platform controller  
+rip-server platform              # Start platform controller
 rip-server deploy api apps/api   # Deploy apps dynamically
 rip-server scale api 10          # Real-time scaling
 rip-server list                  # Visual dashboard at :3000/platform

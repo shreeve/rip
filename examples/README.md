@@ -40,7 +40,7 @@
 
 ### **🎯 Single App Mode**
 ```bash
-# Install all dependencies (from project root)  
+# Install all dependencies (from project root)
 bun install
 
 # Run with bun server (recommended)
@@ -57,7 +57,7 @@ rip-server platform
 
 # Deploy multiple examples at once!
 rip-server deploy blog examples/blog --port 3001 --workers 2
-rip-server deploy legal examples/legal --port 3002 --workers 3  
+rip-server deploy legal examples/legal --port 3002 --workers 3
 rip-server deploy users examples/users --port 3003 --workers 1
 
 # Visit the platform dashboard

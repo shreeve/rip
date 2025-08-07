@@ -197,7 +197,7 @@ rip-server prod                     # Production mode
 # 1. Check what's running
 bun server status
 
-# 2. Start your app  
+# 2. Start your app
 bun server apps/labs/api
 
 # 3. Test it
