@@ -46,6 +46,7 @@ interface Config {
   requests?: number
   protocol?: 'http' | 'https' | 'http+https'
   httpsMode?: 'smart' | 'quick' | 'ca'
+  json?: boolean
 }
 
 function parseArgs(args: string[]): Config {
@@ -120,6 +121,11 @@ function parseArgs(args: string[]): Config {
 
   // Process remaining arguments
   for (const arg of otherArgs) {
+    // JSON output flag
+    if (arg === '--json' || arg === '-j') {
+      config.json = true
+      continue
+    }
     // Worker count: w:5
     if (arg.match(/^w:\d+$/)) {
       config.workers = Number.parseInt(arg.substring(2))
@@ -238,8 +244,8 @@ async function isRunning(): Promise<boolean> {
 }
 
 // Comprehensive status check
-async function showStatus() {
-  console.log('🔍 Rip Server Status\n')
+async function showStatus(asJson = false) {
+  if (!asJson) console.log('🔍 Rip Server Status\n')
 
   try {
     // Check if any rip-server processes are running
@@ -251,7 +257,17 @@ async function showStatus() {
     const code = await proc.exited
 
     if (code === 0 && output.trim()) {
-      console.log('✅ Status: Running\n')
+      const processes: Array<{
+        pid: number
+        ppid?: number
+        runtime?: string
+        memoryMB?: number
+        command: string
+        port?: number
+        health?: 'HEALTHY' | 'UNHEALTHY' | 'NO_RESPONSE'
+      }> = []
+
+      if (!asJson) console.log('✅ Status: Running\n')
 
       const lines = output.trim().split('\n')
       console.log('📋 Active Processes:')
@@ -275,39 +291,54 @@ async function showStatus() {
             const [procPid, ppid, etime, rss, ...args] = parts
             const command = args.join(' ')
 
-            console.log(`   • PID: ${procPid} | Parent: ${ppid} | Runtime: ${etime} | Memory: ${Math.round(parseInt(rss) / 1024)}MB`)
+            const memoryMB = Math.round(parseInt(rss) / 1024)
+            const procInfo: any = {
+              pid: Number(procPid),
+              ppid: Number(ppid),
+              runtime: etime,
+              memoryMB,
+              command,
+            }
 
             // Extract port information from command line
             const portMatch = command.match(/(\d{4,5})/)
             if (portMatch) {
-              const port = portMatch[1]
-              console.log(`     Port: ${port} | Command: ${command.length > 80 ? command.substring(0, 80) + '...' : command}`)
+              const port = Number(portMatch[1])
+              procInfo.port = port
 
               // Test if port is actually listening
               try {
                 const response = await fetch(`http://localhost:${port}/health`, {
                   signal: AbortSignal.timeout(2000)
                 })
-                if (response.ok) {
-                  console.log(`     🟢 Health check: HEALTHY (${response.status})`)
-                } else {
-                  console.log(`     🟡 Health check: UNHEALTHY (${response.status})`)
-                }
+                procInfo.health = response.ok ? 'HEALTHY' : 'UNHEALTHY'
               } catch {
-                console.log(`     🔴 Health check: NO RESPONSE`)
+                procInfo.health = 'NO_RESPONSE'
               }
-            } else {
-              console.log(`     Command: ${command.length > 80 ? command.substring(0, 80) + '...' : command}`)
+            }
+
+            processes.push(procInfo)
+
+            if (!asJson) {
+              console.log(`   • PID: ${procPid} | Parent: ${ppid} | Runtime: ${etime} | Memory: ${memoryMB}MB`)
+              if (procInfo.port) {
+                const healthText = procInfo.health === 'HEALTHY' ? '🟢 HEALTHY' : procInfo.health === 'UNHEALTHY' ? '🟡 UNHEALTHY' : '🔴 NO RESPONSE'
+                console.log(`     Port: ${procInfo.port} | ${healthText}`)
+              } else {
+                console.log(`     Command: ${command.length > 80 ? command.substring(0, 80) + '...' : command}`)
+              }
             }
           }
         } catch {
-          console.log(`   • PID: ${pid} | Command: ${cmd}`)
+          if (!asJson) console.log(`   • PID: ${pid} | Command: ${cmd}`)
+          processes.push({ pid: Number(pid), command: cmd })
         }
-        console.log('')
+        if (!asJson) console.log('')
       }
 
       // Check for common ports
-      console.log('🌐 Port Status:')
+      const portStatuses: Array<{ port: number; protocol: 'http' | 'https'; status: 'ACTIVE' | 'INACTIVE'; httpStatus?: number }> = []
+      if (!asJson) console.log('🌐 Port Status:')
       const commonPorts = [3000, 3001, 3002, 3443, 8080, 8443]
 
       for (const port of commonPorts) {
@@ -315,22 +346,34 @@ async function showStatus() {
           const response = await fetch(`http://localhost:${port}/health`, {
             signal: AbortSignal.timeout(1000)
           })
-          console.log(`   • Port ${port}: 🟢 ACTIVE (HTTP ${response.status})`)
+          if (!asJson) console.log(`   • Port ${port}: 🟢 ACTIVE (HTTP ${response.status})`)
+          portStatuses.push({ port, protocol: 'http', status: 'ACTIVE', httpStatus: response.status })
         } catch {
           try {
             const response = await fetch(`https://localhost:${port}/health`, {
               signal: AbortSignal.timeout(1000)
             })
-            console.log(`   • Port ${port}: 🟢 ACTIVE (HTTPS ${response.status})`)
+            if (!asJson) console.log(`   • Port ${port}: 🟢 ACTIVE (HTTPS ${response.status})`)
+            portStatuses.push({ port, protocol: 'https', status: 'ACTIVE', httpStatus: response.status })
           } catch {
             // Port not responding - don't show anything for inactive ports
+            portStatuses.push({ port, protocol: 'http', status: 'INACTIVE' })
           }
         }
       }
 
+      if (asJson) {
+        const result = { running: true, processes, ports: portStatuses }
+        console.log(JSON.stringify(result, null, 2))
+      }
+
     } else {
-      console.log('❌ Status: Not Running')
-      console.log('\n💡 To start: bun server [options]')
+      if (asJson) {
+        console.log(JSON.stringify({ running: false }))
+      } else {
+        console.log('❌ Status: Not Running')
+        console.log('\n💡 To start: bun server [options]')
+      }
     }
 
   } catch (error) {
@@ -1206,7 +1249,7 @@ async function main() {
     }
 
     case 'status': {
-      await showStatus()
+      await showStatus(!!config.json)
       break
     }
 
@@ -1406,3 +1449,4 @@ Configuration files:
 
 // Run
 main().catch(console.error)
+
