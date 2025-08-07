@@ -90,29 +90,6 @@ rip-server list                  # Show all deployed apps
 
 **Rip demonstrates rapid language development** - major features can go from concept to production in hours, not years:
 
-### 🔥 Recent Update: Ruby-Style Regex Indexing
-
-**January 27, 2025** - Implemented complete Ruby-style `variable[/regex/]` syntax:
-
-- **⚡ Full Compiler Pipeline**: Grammar → Parser → AST → Code Generation
-- **🧪 Comprehensive Testing**: 11 test cases, zero regressions on 1473 legacy tests
-- **🚀 Instant Production**: Same-day deployment in live applications
-- **📚 Complete Documentation**: Change 005 with timestamp and technical details
-
-```coffeescript
-# This syntax was invented and deployed in ONE SESSION:
-phone = "1234567890"
-areaCode = phone[/^(\d{3})(\d{3})(\d{4})$/, 1]  # Returns "123"
-exchange = phone[/^(\d{3})(\d{3})(\d{4})$/, 2]  # Returns "456"
-
-# Chaining works naturally
-word = text[/(\w+)/].toUpperCase()              # Extract and transform
-
-# Global _ variable automatically set
-phone[/^(\d{3})(\d{3})(\d{4})$/]               # Sets _[0], _[1], _[2], _[3]
-console.log "Area code: #{_[1]}"               # Access later
-```
-
 ### 🎯 What This Enables
 
 **Traditional Language Development**: Years from idea to production
