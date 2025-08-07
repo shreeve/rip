@@ -231,7 +231,7 @@ async function isRunning(): Promise<boolean> {
 
 // Comprehensive status check
 async function showStatus() {
-  console.log('🔍 rip-server Status\n')
+  console.log('🔍 Rip Server Status\n')
 
   try {
     // Check if any rip-server processes are running
@@ -243,7 +243,7 @@ async function showStatus() {
     const code = await proc.exited
 
     if (code === 0 && output.trim()) {
-      console.log('✅ Status: RUNNING\n')
+      console.log('✅ Status: Running\n')
 
       const lines = output.trim().split('\n')
       console.log('📋 Active Processes:')
@@ -321,8 +321,8 @@ async function showStatus() {
       }
 
     } else {
-      console.log('❌ Status: NOT RUNNING')
-      console.log('\n💡 To start: rip-server [options]')
+      console.log('❌ Status: Not Running')
+      console.log('\n💡 To start: bun server [options]')
     }
 
   } catch (error) {
