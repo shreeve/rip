@@ -90,21 +90,24 @@ async function waitForAnyWorkerReady(
     for (const p of paths) {
       if (await isWorkerReady(p)) {
         if (announced) {
-          const ts = new Date().toISOString().replace('T', ' ').replace('Z', '-06:00')
-          console.log(`[${ts}              ] Worker ready detected on ${p}`)
+          const ts = new Date()
+          const t = `${ts.toISOString().slice(0, 23).replace('T', ' ')}${ts.getTimezoneOffset() <= 0 ? '+' : '-'}${String(Math.abs(Math.floor(ts.getTimezoneOffset() / 60))).padStart(2, '0')}:${String(Math.abs(ts.getTimezoneOffset() % 60)).padStart(2, '0')}`
+          console.log(`[${t}              ] Worker ready detected on ${p}`)
         }
         return true
       }
     }
     if (!announced) {
-      const ts = new Date().toISOString().replace('T', ' ').replace('Z', '-06:00')
-      console.log(`[${ts}              ] Waiting for worker readiness (up to ${maxWaitMs}ms)...`)
+      const ts = new Date()
+      const t = `${ts.toISOString().slice(0, 23).replace('T', ' ')}${ts.getTimezoneOffset() <= 0 ? '+' : '-'}${String(Math.abs(Math.floor(ts.getTimezoneOffset() / 60))).padStart(2, '0')}:${String(Math.abs(ts.getTimezoneOffset() % 60)).padStart(2, '0')}`
+      console.log(`[${t}              ] Waiting for worker readiness (up to ${maxWaitMs}ms)...`)
       announced = true
     }
     await new Promise(r => setTimeout(r, intervalMs))
   }
-  const ts = new Date().toISOString().replace('T', ' ').replace('Z', '-06:00')
-  console.warn(`[${ts}              ] No workers ready after ${maxWaitMs}ms; starting front-end anyway`)
+  const ts = new Date()
+  const t = `${ts.toISOString().slice(0, 23).replace('T', ' ')}${ts.getTimezoneOffset() <= 0 ? '+' : '-'}${String(Math.abs(Math.floor(ts.getTimezoneOffset() / 60))).padStart(2, '0')}:${String(Math.abs(ts.getTimezoneOffset() % 60)).padStart(2, '0')}`
+  console.warn(`[${t}              ] No workers ready after ${maxWaitMs}ms; starting front-end anyway`)
   return false
 }
 
@@ -517,9 +520,15 @@ if (httpsEnabled && cert && key) {
   servers.push(httpServer)
 }
 
-// Add proper server startup logging
-const getTimestamp = () =>
-  new Date().toISOString().replace('T', ' ').replace('Z', '-06:00')
+// Add proper server startup logging (real timezone)
+const getTimestamp = () => {
+  const now = new Date()
+  const base = now.toISOString().slice(0, 23).replace('T', ' ')
+  const sign = now.getTimezoneOffset() <= 0 ? '+' : '-'
+  const hours = String(Math.abs(Math.floor(now.getTimezoneOffset() / 60))).padStart(2, '0')
+  const minutes = String(Math.abs(now.getTimezoneOffset() % 60)).padStart(2, '0')
+  return `${base}${sign}${hours}:${minutes}`
+}
 
 // Announce when server is actually ready (after port binds)
 setTimeout(() => {
