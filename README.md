@@ -79,7 +79,7 @@ Matz's **Principle of Least Surprise (POLS)** is deeply woven into Rip's DNA. Ev
 # Transform any machine into a dynamic application platform
 rip-server platform              # Start platform controller
 rip-server deploy api apps/labs/api --port 3001 --workers 2
-rip-server scale api 10          # Real-time scaling  
+rip-server scale api 10          # Real-time scaling
 rip-server list                  # Show all deployed apps
 # Visit dashboard: http://localhost:3000/platform
 ```
