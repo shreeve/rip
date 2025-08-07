@@ -471,10 +471,10 @@ if (httpsEnabled && cert && key) {
 const getTimestamp = () =>
   new Date().toISOString().replace('T', ' ').replace('Z', '-06:00')
 
-// Announce when server is actually ready
+// Announce when server is actually ready (after port binds)
 setTimeout(() => {
   console.log(`[${getTimestamp()}              ] S${serverNum} ready`)
-}, 50)
+}, 100)
 
 /**
  * Graceful shutdown

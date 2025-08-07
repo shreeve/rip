@@ -35,6 +35,8 @@ interface Worker {
   id: number
   restartCount: number
   socketPath: string
+  startedAt: number
+  backoffMs: number
 }
 
 const workers: Worker[] = []
@@ -74,11 +76,14 @@ const spawnWorker = async (workerId: number): Promise<Worker> => {
     },
   )
 
+  const previous = workers[workerId]
   const worker: Worker = {
     process: workerProcess,
     id: workerId,
-    restartCount: (workers[workerId]?.restartCount || 0) + 1,
+    restartCount: (previous?.restartCount || 0) + 1,
     socketPath,
+    startedAt: Date.now(),
+    backoffMs: previous?.backoffMs || 0,
   }
 
   // Handle worker exit (Bun.spawn API)
@@ -89,11 +94,30 @@ const spawnWorker = async (workerId: number): Promise<Worker> => {
         `[${getTimestamp()}              ] W${workerId + 1} exited (code ${exitCode}) - respawning...`,
       )
 
-      // Staggered restart delays to prevent all workers being down simultaneously
-      const restartDelay = 100 + workerId * 50 // 100ms, 150ms, 200ms delays
+      // Exponential backoff on rapid restarts
+      const uptimeMs = Date.now() - worker.startedAt
+      let nextBackoff = worker.backoffMs || 0
+      if (uptimeMs < 2000) {
+        // Crashed quickly → increase backoff (250ms → 500ms → 1s → 2s → 4s; capped at 5s)
+        nextBackoff = Math.min(nextBackoff > 0 ? nextBackoff * 2 : 250, 5000)
+      } else {
+        // Ran stably → reset backoff
+        nextBackoff = 0
+      }
+
+      // Staggered base delay so not all workers restart together
+      const baseDelay = 100 + workerId * 50 // 100ms, 150ms, 200ms
+      const restartDelay = baseDelay + nextBackoff
+      if (nextBackoff > 0) {
+        console.log(
+          `[${getTimestamp()}              ] M${managerNum} backoff for W${workerId + 1}: ${nextBackoff}ms (uptime ${uptimeMs}ms)`,
+        )
+      }
       setTimeout(() => {
         if (!isShuttingDown) {
           spawnWorker(workerId).then(newWorker => {
+            // Carry forward computed backoff
+            newWorker.backoffMs = nextBackoff
             workers[workerId] = newWorker
           })
         }
