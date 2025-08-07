@@ -1,4 +1,22 @@
 
+==[ Cool fodder projects ]==
+
+* read method from helpers.rb
+* schemazing.rb from latest sinatra app
+* DuckDB behind a server allow multiheaded access
+* Check out the 'def fmt()' method from src/labs/scripts/...
+
+* sinatra api layer -> rip-api
+* rip transpiler for bun -> rip-bun
+* add comptime -> rip->lang
+* add lalr(1) -> rip-parser
+* nginx/unicorn -> rip-server
+
+==
+
+Review the packages/rip-server/README.md file deeply and think about it's structure, the intended reader (a github developer who is evaluating if they should use rip-server for their project) and then read through the code in that directory and make whatever changes you think are necessary to the README.md file in that directory. If the document is already really solid, then don't make any changes. If it could be improved and still kept easy to read and understand and sufficiently informative, then make all needed changes.
+
+==
 
 cd apps/labs/api && sleep 3 && curl -X POST http://localhost:8306/api/execute -H "Content-Type: application/json" -d '{"sql": "SHOW TABLES"}'
 

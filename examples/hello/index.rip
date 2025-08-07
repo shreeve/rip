@@ -29,7 +29,7 @@ app.get '/work/:seconds', (c) ->
   # Simulate work
   start = Date.now()
   while Date.now() - start < seconds * 1000
-    # Busy wait
+    continue  # Busy wait
 
   c.json
     message: "Worked for #{seconds} seconds"

@@ -6,7 +6,6 @@
   "private": true,
   "scripts": {
     "dev": "../../../packages/server/rip-server.ts . 8305",
-    "data:start": "bun start-data-server.ts",
     "db:push": "rip-schema db:push",
     "db:seed": "bun db/seed.rip"
   },
