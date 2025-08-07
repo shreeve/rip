@@ -63,8 +63,9 @@ rip-server prod https w:10          # Production HTTPS, 10 workers
 rip-server ./api http+https         # Both protocols for API
 rip-server https:ca 8443 w:5        # CA cert on port 8443
 
-# Management commands
-rip-server stop                     # Stop all processes
+# Smart Management Commands
+rip-server start apps/my-app        # Start server (if not already running)
+rip-server stop                     # Stop server (if running)
 rip-server test                     # Run test suite
 rip-server help                     # Show help
 
@@ -104,7 +105,50 @@ rip-server ca:clean                 # Clean old certificates
 
 **Perfect for monitoring, debugging, and performance analysis!** 🎯
 
+## 🎛️ Smart Start/Stop Commands
 
+**Idempotent server management** - safe to run multiple times without errors:
+
+### **🚀 Smart `start` Command**
+```bash
+# Always safe to run - won't double-start
+rip-server start apps/my-app
+
+# If not running → Starts the server
+✅ Starting rip-server...
+
+# If already running → Shows friendly message
+✅ rip-server is already running
+```
+
+### **🛑 Smart `stop` Command**
+```bash
+# Always safe to run - won't error if already stopped
+rip-server stop
+
+# If running → Stops the server gracefully
+🛑 Stopping rip-server...
+✅ All processes stopped
+
+# If already stopped → Shows friendly message
+✅ rip-server is already stopped
+```
+
+### **🔍 Check Status**
+```bash
+# Quick status check
+ps aux | grep rip-server | grep -v grep
+
+# Or use pgrep
+pgrep -f rip-server
+```
+
+### **💡 Benefits**
+- **Idempotent**: Safe to run in scripts and automation
+- **Clear Feedback**: Always tells you what's happening
+- **No External Dependencies**: Built right into rip-server
+- **Conventional**: Standard start/stop terminology
+- **Automation Friendly**: Perfect for deployment scripts
 
 ## 🎯 Server/App Separation Architecture
 
@@ -128,18 +172,23 @@ rip-server ../other-project 5000    # Any Rip app anywhere
 
 ### 🌟 What This Enables
 ```bash
-# Development workflow
-rip-server apps/my-app              # Start development
+# Development workflow with smart commands
+rip-server start apps/my-app        # Smart start - won't double-start
 # Edit files in apps/my-app/ → changes appear instantly
 # No build steps, no server restarts needed!
 
 # Production deployment
-rip-server prod apps/my-app         # Same app, production mode
+rip-server start prod apps/my-app   # Smart start in production mode
+
+# Safe automation (perfect for scripts)
+rip-server stop                     # Always safe to stop
+rip-server start apps/api           # Always safe to start
+rip-server start apps/api           # Run again? No problem!
 
 # Multi-app development
-rip-server apps/frontend 3000 &     # Frontend server
-rip-server apps/api 8080 &          # API server
-rip-server apps/admin 4000 &        # Admin server
+rip-server start apps/frontend 3000 # Smart start frontend
+rip-server start apps/api 8080      # Smart start API
+rip-server start apps/admin 4000    # Smart start admin
 # All running simultaneously!
 ```
 

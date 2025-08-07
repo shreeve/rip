@@ -214,6 +214,20 @@ async function loadFileConfig(appDir: string): Promise<Partial<Config>> {
   return config
 }
 
+// Helper to check if rip-server is running
+async function isRunning(): Promise<boolean> {
+  try {
+    const proc = spawn(['pgrep', '-f', 'rip-server'], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    const code = await proc.exited
+    return code === 0
+  } catch {
+    return false
+  }
+}
+
 // Helper to kill all rip processes
 async function killAll() {
   console.log('🛑 Stopping all rip-server processes...')
@@ -789,9 +803,34 @@ async function main() {
   const command = config.command || (args.length === 0 ? 'dev' : 'start')
 
   switch (command) {
-    case 'stop':
-      await killAll()
+    case 'start': {
+      const running = await isRunning()
+      if (running) {
+        console.log('✅ rip-server is already running')
+      } else {
+        console.log('🚀 Starting rip-server...')
+        // Load file config and start
+        const fileConfig = await loadFileConfig(config.appDir || defaults.appDir)
+        const finalConfig = {
+          ...defaults,
+          ...fileConfig,
+          ...config,
+        }
+        await start(finalConfig)
+      }
       break
+    }
+
+    case 'stop': {
+      const running = await isRunning()
+      if (running) {
+        console.log('🛑 Stopping rip-server...')
+        await killAll()
+      } else {
+        console.log('✅ rip-server is already stopped')
+      }
+      break
+    }
 
     case 'test': {
       console.log('🧪 Running tests...')
@@ -840,7 +879,8 @@ Usage:
 Commands:
   dev       Development mode (default)
   prod      Production mode
-  stop      Stop all processes
+  start     Start server (if not already running)
+  stop      Stop server (if running)
   test      Run test suite
   help      Show this help
 
