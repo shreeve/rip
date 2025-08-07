@@ -11,7 +11,7 @@
  * - S3 data lake integration
  */
 
-import { RipDataServer, RipDataClient } from './index'
+import { RipDataClient, RipDataServer } from './index'
 
 async function main() {
   console.log('🔥 Starting @rip/data demo...\n')

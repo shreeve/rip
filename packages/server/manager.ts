@@ -31,7 +31,7 @@ const appDirectory = process.argv[5] || process.cwd()
 
 // Worker tracking
 interface Worker {
-  process: any
+  process: any // Bun.Subprocess type
   id: number
   restartCount: number
   socketPath: string

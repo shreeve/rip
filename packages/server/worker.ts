@@ -167,7 +167,7 @@ const main = async () => {
         }, WORKER_TIMEOUT)
 
         // Call the user's application
-        let response
+        let response: Response
 
         if (typeof ripApp === 'function') {
           // Direct function export

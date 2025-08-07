@@ -15,9 +15,9 @@
  * - Web dashboard for visual management
  */
 
-import { spawn, type Subprocess } from 'bun'
 import { existsSync } from 'fs'
 import { join } from 'path'
+import { type Subprocess, spawn } from 'bun'
 
 // Types
 export interface AppConfig {

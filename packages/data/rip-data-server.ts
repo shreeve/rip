@@ -1,6 +1,6 @@
-import { Database, Connection } from 'duckdb'
-import { WebSocketServer, WebSocket } from 'ws'
-import { Server } from 'bun'
+import type { Server } from 'bun'
+import { type Connection, Database } from 'duckdb'
+import { WebSocket, WebSocketServer } from 'ws'
 
 export interface RipDataConfig {
   dbPath?: string

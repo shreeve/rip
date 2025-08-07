@@ -11,7 +11,7 @@ import { existsSync, mkdirSync, statSync } from 'fs'
 import { homedir } from 'os'
 import { join, resolve } from 'path'
 import { spawn } from 'bun'
-import { RipPlatform, type AppConfig } from './platform-controller'
+import { type AppConfig, RipPlatform } from './platform-controller'
 
 // Set process title for better visibility in ps/top
 process.title = 'rip-server'
@@ -295,7 +295,7 @@ async function showStatus(asJson = false): Promise<boolean> {
             const [procPid, ppid, etime, rss, ...args] = parts
             const command = args.join(' ')
 
-            const memoryMB = Math.round(parseInt(rss) / 1024)
+            const memoryMB = Math.round(Number.parseInt(rss) / 1024)
             const procInfo: any = {
               pid: Number(procPid),
               ppid: Number(ppid),
@@ -1060,10 +1060,10 @@ async function deployApp(config: Config, args: string[]): Promise<void> {
 
     switch (flag) {
       case '--port':
-        deployConfig.port = parseInt(value)
+        deployConfig.port = Number.parseInt(value)
         break
       case '--workers':
-        deployConfig.workers = parseInt(value)
+        deployConfig.workers = Number.parseInt(value)
         break
       case '--mode':
         deployConfig.mode = value
@@ -1220,7 +1220,7 @@ async function scalePlatformApp(args: string[]): Promise<void> {
   }
 
   const [name, workersStr] = args
-  const workers = parseInt(workersStr)
+  const workers = Number.parseInt(workersStr)
 
   if (isNaN(workers) || workers < 1) {
     console.error('❌ Workers must be a positive number')
