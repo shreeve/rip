@@ -612,6 +612,14 @@ rip-server stop                 # Stop server
 - **Use `bun server`**: Team workflows, documentation, scripts (from monorepo root)
 - **Use `rip-server`**: Individual productivity, quick iteration, CI/CD, standalone projects
 
+### **Configuration Precedence**
+`rip-server` reads configuration from multiple places. Precedence (highest wins):
+- **CLI flags/args** (e.g., `w:5`, `r:100`, `https:ca`, ports, paths)
+- **package.json** `{"rip-server": { ... }}` in the app directory
+- **bunfig.toml** `[rip-server]` section in the app directory
+
+If a key is defined in multiple places, the value from the higher-precedence source is used.
+
 ## 🎯 Production Deployment
 
 This replaces entire web server stacks:
