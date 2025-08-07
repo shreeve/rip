@@ -38,18 +38,21 @@ const maxRequests = Math.max(
 
 const appDirectory = process.argv[4] ?? process.cwd()
 
+// Worker timeout protection (30 seconds per request)
+const WORKER_TIMEOUT = 30000
+
 let requestsHandled = 0
 let isShuttingDown = false
 let requestInProgress = false
 
 const socketPath = `/tmp/rip_worker_${workerId}.sock`
 
-// Clean up any existing socket file
-try {
-  await Bun.unlink(socketPath)
-} catch (_) {
-  // Socket didn't exist, that's fine
-}
+  // Clean up any existing socket file
+  try {
+    await Bun.spawn(['rm', '-f', socketPath]).exited
+  } catch (_) {
+    // Socket didn't exist, that's fine
+  }
 
 /**
  * Load the user's Rip application
@@ -72,6 +75,8 @@ const loadRipApplication = async () => {
       } catch (error) {
         // Only log actual errors, not "file not found" which is expected
         if (!error.message.includes('Cannot find module')) {
+          const { formatTimestamp: formatTs } = await import('./time')
+          const getTimestamp = () => formatTs()
           console.error(`Failed to import ${file}:`, error)
         }
       }
@@ -90,6 +95,8 @@ const loadRipApplication = async () => {
       },
     }
   } catch (error) {
+    const { formatTimestamp: formatTs } = await import('./time')
+    const getTimestamp = () => formatTs()
     console.error(
       `[${getTimestamp()}              ] ❌ W${workerNum} app load error:`,
       error,
@@ -148,7 +155,17 @@ const main = async () => {
       requestInProgress = true
       requestsHandled++
 
+      // Set up request timeout protection
+      let timeoutId: NodeJS.Timeout | undefined
+
       try {
+        timeoutId = setTimeout(() => {
+          console.error(
+            `[${getTimestamp()}              ] ⏰ W${workerNum} request timeout (${WORKER_TIMEOUT}ms) - force completing`,
+          )
+          requestInProgress = false
+        }, WORKER_TIMEOUT)
+
         // Call the user's application
         let response
 
@@ -184,8 +201,12 @@ const main = async () => {
           }, 0)
         }
 
+        // Clear timeout on successful completion
+        if (timeoutId) clearTimeout(timeoutId)
         return response
       } catch (error) {
+        // Clear timeout on error
+        if (timeoutId) clearTimeout(timeoutId)
         console.error(
           `[${getTimestamp()}              ] ❌ W${workerNum} request error:`,
           error,

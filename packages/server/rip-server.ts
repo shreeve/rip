@@ -409,10 +409,9 @@ async function killAll() {
   await proc2.exited
 
   // Clean up Unix socket files
-  const proc3 = spawn(['rm', '-f', '/tmp/rip_worker_*.sock'], {
+  const proc3 = spawn(['sh', '-c', 'rm -f /tmp/rip_worker_*.sock'], {
     stdout: 'pipe',
     stderr: 'pipe',
-    shell: true, // Need shell to expand the wildcard
   })
   await proc3.exited
 
@@ -931,19 +930,23 @@ ${endpoints.join('\n')}
   // Start server
   const serverArgs = ['bun', join(SCRIPT_DIR, 'server.ts'), '0']
 
-  // Configure ports based on protocol
-  if (useHTTP && useHTTPS) {
-    // Both protocols
-    serverArgs.push(httpPort.toString(), workers.toString())
-    serverArgs.push(httpsPort.toString(), actualCertPath, actualKeyPath)
-  } else if (useHTTPS) {
-    // HTTPS only - use HTTPS port as primary
-    serverArgs.push(httpsPort.toString(), workers.toString())
-    serverArgs.push(httpsPort.toString(), actualCertPath, actualKeyPath)
-  } else {
-    // HTTP only
-    serverArgs.push(httpPort.toString(), workers.toString())
-  }
+        // Configure ports based on protocol
+      if (useHTTP && useHTTPS) {
+        // Both protocols
+        serverArgs.push(httpPort.toString(), workers.toString())
+        if (actualCertPath && actualKeyPath) {
+          serverArgs.push(httpsPort.toString(), actualCertPath, actualKeyPath)
+        }
+      } else if (useHTTPS) {
+        // HTTPS only - use HTTPS port as primary
+        serverArgs.push(httpsPort.toString(), workers.toString())
+        if (actualCertPath && actualKeyPath) {
+          serverArgs.push(httpsPort.toString(), actualCertPath, actualKeyPath)
+        }
+      } else {
+        // HTTP only
+        serverArgs.push(httpPort.toString(), workers.toString())
+      }
 
   const server = spawn(serverArgs, {
     stdout: 'inherit',
@@ -1242,7 +1245,7 @@ async function main() {
         ...config,
       }
       await start(finalConfig)
-      process.exit(0)
+      return
     }
 
     case 'stop': {
@@ -1250,10 +1253,10 @@ async function main() {
       if (running) {
         console.log('🛑 Stopping rip-server...')
         await killAll()
-        process.exit(0)
+        return
       } else {
         console.log('✅ rip-server is already stopped')
-        process.exit(0)
+        return
       }
     }
 
@@ -1440,7 +1443,7 @@ Configuration files:
       }
 
       await start(finalConfig)
-      process.exit(0)
+      return
     }
 
     default: {
@@ -1452,7 +1455,7 @@ Configuration files:
         ...config,
       }
       await start(finalStartConfig)
-      process.exit(0)
+      return
     }
   }
 }
