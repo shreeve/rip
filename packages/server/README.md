@@ -149,9 +149,9 @@ bun server apps/labs/api             # Start labs API
 bun server examples/blog             # Start blog example
 bun server examples/legal            # Start legal example
 
-# From app directory (POLS magic)
-cd apps/labs/api && rip-server       # Auto-finds index.rip
-cd examples/blog && rip-server       # Auto-finds index.rip
+# From monorepo root (recommended)
+rip-server apps/labs/api             # Auto-finds index.rip
+rip-server examples/blog             # Auto-finds index.rip
 ```
 
 ### **🔄 3. Restart Server (Smart Behavior)**
@@ -583,8 +583,8 @@ bun server stop                 # Stop server
 
 ### **From Anywhere: `rip-server` (Universal)**
 ```bash
-# After global installation, from any directory:
-cd apps/labs/api && rip-server  # POLS: finds index.rip automatically
+# After global installation:
+rip-server apps/labs/api        # POLS: finds index.rip automatically
 rip-server apps/labs/api        # Explicit path
 rip-server status               # Check status
 rip-server stop                 # Stop server

@@ -17,17 +17,17 @@ This is a Rip-based implementation that mimics the BHVR Labs server API, allowin
 ## Quick Start
 
 ```bash
-# Install dependencies
+# From monorepo root
 bun install
 
-# Push database schema
+# Database setup (run these from the app directory)
+cd apps/labs/server
 bun db:push
-
-# Seed test data
 bun db:seed
+cd ../../..
 
-# Start server on port 8305
-bun dev
+# Start server (from monorepo root)
+bun server apps/labs/server
 ```
 
 ## API Endpoints

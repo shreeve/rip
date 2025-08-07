@@ -46,8 +46,8 @@ bun install
 # Run with bun server (recommended)
 bun server ./examples/blog
 
-# Or run directly
-cd examples/blog && bun index.rip
+# Or run directly (from monorepo root)
+bun examples/blog/index.rip
 ```
 
 ### **🌐 Platform Mode (FULLY WORKING!) - Run Multiple Examples**

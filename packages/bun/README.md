@@ -15,19 +15,32 @@
 
 ### 1. Configure in `bunfig.toml`
 
-```toml
-# For monorepo root
-preload = ["./packages/bun/rip-bun.ts"]
+**Monorepo Root Architecture** - Single configuration for entire project:
 
-# For individual projects
-preload = ["../../packages/bun/rip-bun.ts"]
+```toml
+# Root bunfig.toml (recommended)
+preload = ["./packages/bun/rip-bun.ts"]
 ```
+
+**Note**: With our clean monorepo architecture, you only need ONE `bunfig.toml` file at the root. All apps and examples run from the monorepo root using relative paths.
 
 ### 2. Import `.rip` files directly
 
 ```javascript
 import app from './app.rip'
 import { schema } from './schema.rip'
+```
+
+### 3. Run your apps
+
+```bash
+# From monorepo root (recommended architecture)
+bun examples/hello/index.rip
+bun apps/labs/api/index.rip
+
+# Or with the platform controller
+bun server examples/hello
+rip-server platform
 ```
 
 ## 🏗️ Architecture

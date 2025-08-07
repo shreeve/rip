@@ -45,17 +45,17 @@ This is a complete reimagining of web application architecture using:
 ## 🚀 Quick Start
 
 ```bash
-# 1. Start the revolutionary data server
-bun run data:start
+# From monorepo root
+bun install
 
-# 2. Push database schema
-bun run db:push
+# Start the API server  
+bun server apps/labs/api
 
-# 3. Seed with test data
-bun run db:seed
+# Or run directly (from root)
+bun apps/labs/api/index.rip
 
-# 4. Start the API server
-bun run dev
+# Test the endpoints
+curl http://localhost:3000/ping
 ```
 
 ## 🔌 Connecting to the Data Server
