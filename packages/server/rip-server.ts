@@ -925,7 +925,7 @@ let platformInstance: RipPlatform | null = null
 async function startPlatform(config: Config): Promise<void> {
   const port = config.httpPort || 3000
 
-  console.log('🌐 Starting RIP Platform Controller...')
+  console.log('🌐 Starting Rip Platform Controller...')
   platformInstance = new RipPlatform(port)
   await platformInstance.start()
 
@@ -975,7 +975,7 @@ async function deployApp(config: Config, args: string[]): Promise<void> {
 
   try {
     console.log(`🚀 Deploying app '${name}' from ${directory}...`)
-    
+
     const response = await fetch(`${platformUrl}/api/deploy`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1012,7 +1012,7 @@ async function undeployApp(args: string[]): Promise<void> {
 
   try {
     console.log(`🛑 Undeploying app '${name}'...`)
-    
+
     const response = await fetch(`${platformUrl}/api/undeploy/${name}`, {
       method: 'DELETE'
     })
@@ -1038,7 +1038,7 @@ async function listPlatformApps(): Promise<void> {
 
   try {
     console.log('📋 Fetching platform status...')
-    
+
     const response = await fetch(`${platformUrl}/api/stats`)
 
     if (!response.ok) {
@@ -1048,7 +1048,7 @@ async function listPlatformApps(): Promise<void> {
 
     const data = await response.json()
 
-    console.log('🚀 RIP Platform Status')
+    console.log('🚀 Rip Platform Status')
     console.log(`📊 Total Apps: ${data.totalApps || 0} | Running: ${data.runningApps || 0} | Workers: ${data.totalWorkers || 0}`)
     console.log(`⏱️  Platform Uptime: ${Math.round((data.uptime || 0) / 1000 / 60)} minutes`)
     console.log('')
@@ -1108,7 +1108,7 @@ async function scalePlatformApp(args: string[]): Promise<void> {
 
   try {
     console.log(`⚡ Scaling app '${name}' to ${workers} workers...`)
-    
+
     const response = await fetch(`${platformUrl}/api/scale/${name}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -1143,7 +1143,7 @@ async function restartPlatformApp(args: string[]): Promise<void> {
 
   try {
     console.log(`🔄 Restarting app '${name}'...`)
-    
+
     const response = await fetch(`${platformUrl}/api/restart/${name}`, {
       method: 'POST'
     })
@@ -1303,7 +1303,7 @@ Commands:
   help      Show this help
 
 Platform Commands (Dynamic Multi-App Management):
-  platform  Start the RIP Platform Controller
+  platform  Start the Rip Platform Controller
   deploy    Deploy an app to the platform
   undeploy  Remove an app from the platform
   list      List all deployed apps
@@ -1347,8 +1347,8 @@ Single App Examples:
 Platform Examples (Multi-App Management):
   # Terminal 1: Start platform
   rip-server platform               # Start the platform controller
-  
-  # Terminal 2: Deploy and manage apps  
+
+  # Terminal 2: Deploy and manage apps
   rip-server deploy blog examples/blog --port 3001 --workers 3
   rip-server deploy api apps/labs/api --port 3002 --workers 5
   rip-server list                   # Show all deployed apps

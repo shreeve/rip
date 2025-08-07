@@ -7,12 +7,12 @@ app = new Hono
 
 # Basic route
 app.get '/', (c) ->
-  c.text 'Hello from Revolutionary RIP Server! 🚀⚡'
+  c.text 'Hello from Revolutionary Rip Server! 🚀⚡'
 
 # Dynamic route with worker info
 app.get '/info', (c) ->
   c.json
-    message: 'Revolutionary RIP Application Server'
+    message: 'Revolutionary Rip Application Server'
     worker: process.env.WORKER_ID || 'unknown'
     requests: process.env.REQUESTS_HANDLED || 0
     uptime: process.uptime()

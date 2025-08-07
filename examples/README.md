@@ -52,7 +52,7 @@ cd examples/blog && bun index.rip
 
 ### **🌐 Platform Mode (FULLY WORKING!) - Run Multiple Examples**
 ```bash
-# Start the RIP Platform Controller
+# Start the Rip Platform Controller
 rip-server platform
 
 # Deploy multiple examples at once!
