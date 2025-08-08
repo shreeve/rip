@@ -35,7 +35,7 @@ export interface PlatformStats {
 
 /**
  * Revolutionary Multi-App Platform Controller
- * 
+ *
  * Manages concurrent applications with full multi-process architecture,
  * dynamic scaling, hot reload, and production-grade fault tolerance.
  */
