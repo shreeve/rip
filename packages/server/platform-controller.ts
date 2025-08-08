@@ -69,7 +69,7 @@ export class RipPlatform {
   /**
    * Deploy a new application with multi-process support
    */
-  async deployApp(name: string, directory: string, workers: number = 3): Promise<AppConfig> {
+  async deployApp(name: string, directory: string, workers: number = 3, desiredPort?: number): Promise<AppConfig> {
     // Validate app doesn't already exist
     if (this.apps.has(name)) {
       throw new Error(`App '${name}' is already deployed`);
@@ -83,11 +83,9 @@ export class RipPlatform {
       throw new Error(`No index.rip found in ${directory}`);
     }
 
-    // Find available port
-    let port = 3001;
-    while (this.usedPorts.has(port)) {
-      port++;
-    }
+    // Find/select port
+    let port = desiredPort && desiredPort >= 1024 ? desiredPort : 3001;
+    while (this.usedPorts.has(port)) port++;
     this.usedPorts.add(port);
 
     // Create app config

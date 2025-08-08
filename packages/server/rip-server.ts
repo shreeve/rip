@@ -444,8 +444,8 @@ async function handlePlatformAPI(req: Request, url: URL): Promise<Response> {
 
     // POST /api/apps - Deploy app
     if (url.pathname === '/api/apps' && req.method === 'POST') {
-      const body = await req.json() as { name: string; directory: string };
-      const app = await platformInstance.deployApp(body.name, body.directory);
+      const body = await req.json() as { name: string; directory: string; workers?: number; port?: number };
+      const app = await platformInstance.deployApp(body.name, body.directory, body.workers ?? 3, body.port);
       return new Response(JSON.stringify(app, null, 2), {
         headers: { 'Content-Type': 'application/json' }
       });
@@ -1210,6 +1210,7 @@ async function handleDeploy(config: Config, remainingArgs: string[]): Promise<vo
   // Apply flexible config options
   const deployData: any = { name, directory };
   if (config.workers) deployData.workers = config.workers;
+  if (config.httpPort) deployData.port = config.httpPort;
 
   try {
     const response = await fetch('http://localhost:3000/api/apps', {
@@ -1219,7 +1220,7 @@ async function handleDeploy(config: Config, remainingArgs: string[]): Promise<vo
     });
 
     if (response.ok) {
-      const app = await response.json();
+       const app = await response.json();
       console.log(`✅ App '${name}' deployed successfully`);
       console.log(`📁 Directory: ${app.directory}`);
       console.log(`🌐 Port: ${app.port}`);
