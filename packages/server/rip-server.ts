@@ -665,36 +665,36 @@ function showHelp(): void {
   console.log(`🚀 Rip Application Server
 
 Usage:
-  bun server help               # Show this help
-  bun server status             # Show server status
-  bun server stop               # Stop server
-  bun server [app-path]         # Start server with app
+  bun server help                        # Show this help
+  bun server status                      # Show server status
+  bun server stop                        # Stop server
+  bun server [app-path]                  # Start server with app
 
 Platform Mode (Dynamic Multi-App Management):
-  bun server platform           # Start platform controller
-  bun server deploy <name> <path>   # Deploy app to platform
-  bun server undeploy <name>    # Remove app from platform
-  bun server list               # List deployed apps
-  bun server start <name>       # Start a deployed app
-  bun server scale <name> <workers>  # Scale app workers
-  bun server restart <name>     # Restart an app
-  bun server apps               # Show running apps
+  bun server platform                    # Start platform controller
+  bun server deploy <name> <path>        # Deploy app to platform
+  bun server undeploy <name>             # Remove app from platform
+  bun server list                        # List deployed apps
+  bun server start <name>                # Start a deployed app
+  bun server scale <name> <workers>      # Scale app workers
+  bun server restart <name>              # Restart an app
+  bun server apps                        # Show running apps
 
 HTTPS/CA Management:
-  bun server ca:init            # Initialize Certificate Authority
-  bun server ca:trust           # Trust CA in system keychain (macOS)
-  bun server ca:export          # Export CA certificate for manual import
-  bun server ca:info            # Show CA certificate information
-  bun server ca:list            # List generated certificates
-  bun server ca:clean           # Clean old certificates
+  bun server ca:init                     # Initialize Certificate Authority
+  bun server ca:trust                    # Trust CA in system keychain (macOS)
+  bun server ca:export                   # Export CA certificate for manual import
+  bun server ca:info                     # Show CA certificate information
+  bun server ca:list                     # List generated certificates
+  bun server ca:clean                    # Clean old certificates
 
 Examples:
-  bun server apps/labs/api      # Start labs API directly
-  bun server platform          # Start platform controller
+  bun server apps/labs/api                  # Start labs API directly
+  bun server platform                       # Start platform controller
   bun server deploy labs-api apps/labs/api  # Deploy to platform
-  bun server start labs-api    # Start deployed app
-  bun server ca:init            # Set up development CA
-  bun server ca:trust           # Trust CA (no more browser warnings!)
+  bun server start labs-api                 # Start deployed app
+  bun server ca:init                        # Set up development CA
+  bun server ca:trust                       # Trust CA (no more browser warnings!)
 
 Flexible Arguments (ANY order):
   bun server w:5 8080 apps/labs/api         # 5 workers, port 8080, directory
@@ -1170,7 +1170,7 @@ async function handleDeploy(config: Config, remainingArgs: string[]): Promise<vo
   // Extract name and directory from remaining args or config
   let name = remainingArgs[0];
   let directory: string | undefined;
-  
+
   // Find the directory from remaining args (skip w: and r: arguments)
   for (const arg of remainingArgs.slice(1)) {
     if (!arg.startsWith('w:') && !arg.startsWith('r:') && (arg.includes('/') || existsSync(arg))) {
@@ -1178,7 +1178,7 @@ async function handleDeploy(config: Config, remainingArgs: string[]): Promise<vo
       break;
     }
   }
-  
+
   // Fallback to config appDir
   if (!directory && config.appDir && config.appDir !== process.cwd()) {
     directory = config.appDir;
