@@ -38,7 +38,23 @@ interface Config {
 }
 
 // ===== FLEXIBLE ARGUMENT PARSING =====
-
+/**
+ * Revolutionary flexible argument parser - arguments can be provided in ANY order!
+ *
+ * Examples:
+ *   bun server w:5 8080 apps/labs/api         # Workers, port, directory
+ *   bun server apps/labs/api prod w:10        # Directory, mode, workers
+ *   bun server deploy test-app w:3 examples/hello  # Deploy with flexible args
+ *
+ * Smart Detection:
+ *   - w:5, r:100          → Worker/request counts
+ *   - 8080, 3443          → Port numbers
+ *   - apps/labs/api       → Directory paths
+ *   - dev, prod           → Modes
+ *   - https:ca, https:quick → HTTPS modes
+ *   - cert.pem, key.pem   → Certificate files
+ *   - --json, -h          → Flags
+ */
 function parseArgs(args: string[]): Config {
   const config: Config = {};
   const commands = [

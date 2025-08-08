@@ -42,6 +42,7 @@ This foundational principle guides every API design decision in Rip:
 - **Regex matching**: `val =~ /pattern/` - elegant and intuitive
 - **Function calls**: `read 'email', 'email'` - clean and simple
 - **Object returns**: `{ success: true, data }` - natural and concise
+- **Flexible server args**: `bun server w:5 8080 apps/my-app` - any order works
 
 **🎯 Rare Things Possible** *(10% of use cases)*:
 - **One-sided ranges**: `min: 0` or `max: 100` - explicit when needed

@@ -48,6 +48,11 @@ bun server ./examples/blog
 
 # Or run directly (from monorepo root)
 bun examples/blog/index.rip
+
+# Flexible arguments (ANY order):
+bun server w:5 8080 examples/blog  # 5 workers, port 8080
+bun server examples/legal prod w:3 # Production mode, 3 workers
+bun server 3001 dev examples/hello # Port 3001, dev mode
 ```
 
 ### **🌐 Platform Mode (FULLY WORKING!) - Run Multiple Examples**
