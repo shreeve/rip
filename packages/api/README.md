@@ -6,7 +6,7 @@
 
 `@rip/api` is the **API development toolkit** for the Rip language ecosystem. It provides elegant, battle-tested utilities that transform verbose, error-prone API development into clean, readable, and maintainable code.
 
-**🔥 Ruby Analogy**: This layer is analogous to **Ruby's Sinatra or Rails application layer** - it's where your business logic lives, where you handle requests, validate data, and craft responses. Just as Sinatra gives you elegant routing and request handling, `@rip/api` gives you elegant validation and data processing.
+**🔥 Ruby Analogy**: This layer is analogous to **Ruby's Sinatra or Rails application layer** — it's where your business logic lives, where you handle requests, validate data, and craft responses. Just as Sinatra/Rails provide expressive, developer-happy APIs, `@rip/api` adds Sinatra-like/Rails-like enhancements to your Rip app: context-free routing helpers, powerful validation via `read()`, and clean return-style handlers.
 
 **Core Philosophy**: API development should be **intuitive, safe, and beautiful**. Every function in this toolkit eliminates boilerplate, prevents common errors, and makes your intent crystal clear.
 
@@ -117,7 +117,7 @@ app.post '/signup', ->
   # OR: json success: true, email, phone  # Smart json helper
 ```
 
-## 🔥 The `@rip/api` Toolkit
+## 🔥 The `@rip/api` Toolkit (Sinatra/Rails-style)
 
 The crown jewel of `@rip/api` is the **`read()` function** - a validation and parsing powerhouse that eliminates 90% of API boilerplate.
 
@@ -173,7 +173,7 @@ read(context, key, validator, fallback)
 - **`req`**: Request-only access - like `req.method`
 - **`env`**: Full context access (when needed) - like `env.status(201)`
 
-### Basic Usage Examples
+### Basic Usage Examples (Sinatra-style elegance)
 
 ```rip
 import { read, withHelpers } from '@rip/api'

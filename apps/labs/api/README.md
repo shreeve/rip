@@ -5,7 +5,7 @@ A modern, productive web application API stack.
 This is a complete reimagining of web application architecture using:
 - **@rip/data** - DuckDB as both transactional AND analytical store
 - **@rip/schema** - Elegant database schema with perfect range validation
-- **@rip/api** - Context-free endpoints with intelligent `read()` function
+- **@rip/api** - Sinatra/Rails-like helpers: context-free endpoints with intelligent `read()`
 - **@rip/server** - Multi-process production server with hot reload
 
 ## 🚀 The Stack

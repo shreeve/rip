@@ -109,6 +109,9 @@ Decoupled server/app architecture. One server runtime runs any Rip application w
 ### **[@rip/schema](packages/schema/)**
 ActiveRecord-inspired database DSL for elegant schema definitions with Drizzle ORM.
 
+### **[@rip/api](packages/api/)**
+Sinatra/Rails-like API enhancements for your app code: context-free endpoints with `withHelpers`, elegant validation via `read()`, and clean return-style handlers. Brings Ruby-style ergonomics to Rip/Hono routes.
+
 ### **[@rip/bun](packages/bun/)**
 Seamless transpilation plugin enabling `.rip` files to run directly in Bun.
 
