@@ -230,6 +230,13 @@ export class RipPlatform {
   }
 
   /**
+   * Get a specific app
+   */
+  getApp(name: string): App | undefined {
+    return this.apps.get(name);
+  }
+
+  /**
    * Scale an app (change number of workers)
    */
   async scaleApp(name: string, workers: number): Promise<void> {

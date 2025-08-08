@@ -229,6 +229,58 @@ async function handlePlatformAPI(req: Request, url: URL): Promise<Response> {
       });
     }
 
+    // POST /api/apps/:name/scale - Scale app
+    const scaleMatch = url.pathname.match(/^\/api\/apps\/([^\/]+)\/scale$/);
+    if (scaleMatch && req.method === 'POST') {
+      const name = scaleMatch[1];
+      const body = await req.json() as { workers: number };
+      
+      const app = platformInstance.getApp(name);
+      if (!app) {
+        return new Response('{"error":"App not found"}', {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      const previousWorkers = app.workers;
+      await platformInstance.scaleApp(name, body.workers);
+      
+      return new Response(JSON.stringify({
+        status: 'scaled',
+        previousWorkers,
+        currentWorkers: body.workers
+      }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    // POST /api/apps/:name/restart - Restart app
+    const restartMatch = url.pathname.match(/^\/api\/apps\/([^\/]+)\/restart$/);
+    if (restartMatch && req.method === 'POST') {
+      const name = restartMatch[1];
+      
+      const app = platformInstance.getApp(name);
+      if (!app) {
+        return new Response('{"error":"App not found"}', {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      // Restart by stopping and starting
+      if (app.status === 'running') {
+        await platformInstance.stopApp(name);
+        await platformInstance.startApp(name);
+      } else {
+        await platformInstance.startApp(name);
+      }
+      
+      return new Response('{"status":"restarted"}', {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
     return new Response('{"error":"API endpoint not found"}', {
       status: 404,
       headers: { 'Content-Type': 'application/json' }
@@ -446,6 +498,14 @@ async function main(): Promise<void> {
       await handleStartApp(args[1]);
       break;
 
+    case 'scale':
+      await handleScale(args[1], args[2]);
+      break;
+
+    case 'restart':
+      await handleRestartApp(args[1]);
+      break;
+
     default:
       // Treat anything else as an app path
       const appPath = command.startsWith('./') || command.startsWith('/') || command.includes('/')
@@ -566,6 +626,66 @@ async function handleStartApp(name?: string): Promise<void> {
     } else {
       const error = await response.json();
       console.error(`❌ Start failed: ${error.error}`);
+      process.exit(1);
+    }
+  } catch (error) {
+    console.error('❌ Platform not running. Start it with: bun server platform');
+    process.exit(1);
+  }
+}
+
+async function handleScale(name?: string, workersStr?: string): Promise<void> {
+  if (!name || !workersStr) {
+    console.error('❌ Usage: bun server scale <name> <workers>');
+    console.error('   Example: bun server scale labs-api 5');
+    process.exit(1);
+  }
+
+  const workers = parseInt(workersStr);
+  if (isNaN(workers) || workers < 1 || workers > 20) {
+    console.error('❌ Worker count must be a number between 1 and 20');
+    process.exit(1);
+  }
+
+  try {
+    const response = await fetch(`http://localhost:3000/api/apps/${name}/scale`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workers }),
+    });
+
+    if (response.ok) {
+      const result = await response.json();
+      console.log(`🚀 App '${name}' scaled to ${workers} workers`);
+      console.log(`📊 Previous: ${result.previousWorkers} → Current: ${result.currentWorkers} workers`);
+    } else {
+      const error = await response.json();
+      console.error(`❌ Scale failed: ${error.error}`);
+      process.exit(1);
+    }
+  } catch (error) {
+    console.error('❌ Platform not running. Start it with: bun server platform');
+    process.exit(1);
+  }
+}
+
+async function handleRestartApp(name?: string): Promise<void> {
+  if (!name) {
+    console.error('❌ Usage: bun server restart <name>');
+    console.error('   Example: bun server restart labs-api');
+    process.exit(1);
+  }
+
+  try {
+    const response = await fetch(`http://localhost:3000/api/apps/${name}/restart`, {
+      method: 'POST',
+    });
+
+    if (response.ok) {
+      console.log(`🔄 App '${name}' restarted successfully`);
+    } else {
+      const error = await response.json();
+      console.error(`❌ Restart failed: ${error.error}`);
       process.exit(1);
     }
   } catch (error) {
