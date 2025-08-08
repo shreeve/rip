@@ -1220,10 +1220,23 @@ async function handleDeploy(config: Config, remainingArgs: string[]): Promise<vo
     });
 
     if (response.ok) {
-       const app = await response.json();
+      const app = await response.json();
       console.log(`✅ App '${name}' deployed successfully`);
       console.log(`📁 Directory: ${app.directory}`);
       console.log(`🌐 Port: ${app.port}`);
+
+      // Auto-start the app after deploy
+      try {
+        const startResp = await fetch(`http://localhost:3000/api/apps/${name}/start`, { method: 'POST' });
+        if (startResp.ok) {
+          console.log(`🚀 App '${name}' started`);
+          console.log(`🌐 Available at: http://localhost:${app.port}`);
+        } else {
+          console.warn(`⚠️  App '${name}' deployed but failed to start. Use: bun server start ${name}`);
+        }
+      } catch (_) {
+        console.warn(`⚠️  App '${name}' deployed but failed to start. Use: bun server start ${name}`);
+      }
     } else {
       const error = await response.json();
       console.error(`❌ Deploy failed: ${error.error}`);
