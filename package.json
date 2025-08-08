@@ -5,12 +5,12 @@
   "description": "Rip - A multilanguage universal runtime",
   "workspaces": ["packages/*", "examples/*", "apps/*/api", "apps/*/app"],
   "scripts": {
-    "server": "bun packages/server/rip-server.ts",
+    "server": "bun packages/server/rip-server-wrapper.ts",
     "lint": "biome check .",
     "format": "biome format . --write",
     "clean": "rm -rf node_modules packages/*/node_modules examples/*/node_modules apps/*/client/node_modules apps/*/server/node_modules"
   },
   "devDependencies": {
-    "@biomejs/biome": "^1.5.3"
+    "@biomejs/biome": "^1.9.4"
   }
 }
