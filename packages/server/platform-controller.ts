@@ -7,12 +7,15 @@
 
 import { existsSync } from 'fs';
 import { join, resolve } from 'path';
+import { RipManager } from './manager';
+import { RipServer } from './server';
 
 // Types
 export interface AppConfig {
   name: string;
   directory: string;
   port: number;
+  workers: number;
   status: 'deployed' | 'running' | 'stopped' | 'error';
   startedAt?: Date;
   error?: string;
@@ -33,12 +36,13 @@ export class RipPlatform {
   private usedPorts = new Set<number>();
   private startTime = new Date();
   private platformPort: number;
-  private currentApp: AppConfig | null = null;
-  private currentServer: any = null;
+  private manager: RipManager;
+  private servers = new Map<string, RipServer>(); // appName -> server
 
   constructor(platformPort = 3000) {
     this.platformPort = platformPort;
     this.usedPorts.add(platformPort);
+    this.manager = new RipManager();
   }
 
   /**
@@ -55,9 +59,9 @@ export class RipPlatform {
   }
 
   /**
-   * Deploy a new application (simplified - just register it)
+   * Deploy a new application with multi-process support
    */
-  async deployApp(name: string, directory: string): Promise<AppConfig> {
+  async deployApp(name: string, directory: string, workers: number = 3): Promise<AppConfig> {
     // Validate app doesn't already exist
     if (this.apps.has(name)) {
       throw new Error(`App '${name}' is already deployed`);
@@ -83,12 +87,13 @@ export class RipPlatform {
       name,
       directory: absolutePath,
       port,
+      workers,
       status: 'deployed',
       startedAt: new Date()
     };
 
     this.apps.set(name, config);
-    console.log(`✅ App '${name}' deployed (will run on port ${port})`);
+    console.log(`✅ App '${name}' deployed with ${workers} workers (will run on port ${port})`);
     
     return config;
   }
@@ -102,10 +107,8 @@ export class RipPlatform {
       throw new Error(`App '${name}' not found`);
     }
 
-    // Stop if currently running
-    if (this.currentApp?.name === name) {
-      await this.stopCurrentApp();
-    }
+    // Stop the app if running
+    await this.stopApp(name);
 
     // Remove from registry
     this.usedPorts.delete(app.port);
@@ -114,7 +117,7 @@ export class RipPlatform {
   }
 
   /**
-   * Start a specific app (simplified - single app at a time for now)
+   * Start a specific app with full multi-process architecture
    */
   async startApp(name: string): Promise<void> {
     const app = this.apps.get(name);
@@ -122,27 +125,28 @@ export class RipPlatform {
       throw new Error(`App '${name}' not found`);
     }
 
-    // Stop current app if running
-    if (this.currentApp) {
-      await this.stopCurrentApp();
+    if (app.status === 'running') {
+      console.log(`⚠️ App '${name}' is already running`);
+      return;
     }
 
-    // Load and start the app
-    console.log(`🚀 Starting app '${name}'...`);
-    console.log(`📁 Loading: ${app.directory}/index.rip`);
-
     try {
-      const indexPath = join(app.directory, 'index.rip');
-      let ripApp = await import(indexPath);
-      ripApp = ripApp.default || ripApp;
+      console.log(`🚀 Starting app '${name}' with ${app.workers} workers on port ${app.port}...`);
+
+      // Start workers via manager
+      await this.manager.startApp(name, app.directory, app.workers);
+
+      // Start HTTP server for load balancing
+      const server = new RipServer(app.port, name, app.workers);
+      await server.start();
+      this.servers.set(name, server);
 
       // Update app status
       app.status = 'running';
       app.startedAt = new Date();
-      this.currentApp = app;
 
       console.log(`✅ App '${name}' started successfully`);
-      return ripApp;
+      console.log(`🌐 Available at: http://localhost:${app.port}`);
     } catch (error) {
       app.status = 'error';
       app.error = error instanceof Error ? error.message : String(error);
@@ -152,14 +156,39 @@ export class RipPlatform {
   }
 
   /**
-   * Stop the currently running app
+   * Stop a specific app
    */
-  async stopCurrentApp(): Promise<void> {
-    if (this.currentApp) {
-      console.log(`🛑 Stopping app '${this.currentApp.name}'...`);
-      this.currentApp.status = 'stopped';
-      this.currentApp = null;
-      console.log('✅ App stopped');
+  async stopApp(name: string): Promise<void> {
+    const app = this.apps.get(name);
+    if (!app) {
+      throw new Error(`App '${name}' not found`);
+    }
+
+    if (app.status !== 'running') {
+      console.log(`⚠️ App '${name}' is not running`);
+      return;
+    }
+
+    try {
+      console.log(`🛑 Stopping app '${name}'...`);
+
+      // Stop HTTP server
+      const server = this.servers.get(name);
+      if (server) {
+        await server.stop();
+        this.servers.delete(name);
+      }
+
+      // Stop workers via manager
+      await this.manager.stopApp(name);
+
+      // Update app status
+      app.status = 'stopped';
+
+      console.log(`✅ App '${name}' stopped`);
+    } catch (error) {
+      console.error(`❌ Failed to stop app '${name}':`, error);
+      throw error;
     }
   }
 
@@ -185,10 +214,32 @@ export class RipPlatform {
   }
 
   /**
-   * Get the currently running app
+   * Get all running apps
    */
-  getCurrentApp(): AppConfig | null {
-    return this.currentApp;
+  getRunningApps(): AppConfig[] {
+    return Array.from(this.apps.values()).filter(app => app.status === 'running');
+  }
+
+  /**
+   * Scale an app (change number of workers)
+   */
+  async scaleApp(name: string, workers: number): Promise<void> {
+    const app = this.apps.get(name);
+    if (!app) {
+      throw new Error(`App '${name}' not found`);
+    }
+
+    if (app.status === 'running') {
+      // Restart with new worker count
+      await this.stopApp(name);
+      app.workers = workers;
+      await this.startApp(name);
+    } else {
+      // Just update the config
+      app.workers = workers;
+    }
+
+    console.log(`✅ App '${name}' scaled to ${workers} workers`);
   }
 
   /**

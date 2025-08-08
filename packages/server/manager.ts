@@ -1,274 +1,287 @@
-/// <reference types="bun-types" />
-
 /**
- * 🚀 Rip Manager - Process Manager + Hot Reload
- *
- * This is where the MAGIC happens! Combines:
- * - Multi-process worker management (like Unicorn)
- * - File watching for hot reload (like our rip-server.js)
- * - Graceful worker restarts (production-safe)
- * - Emergency production hot-fixes
- *
- * Usage: bun manager.ts [numWorkers] [maxRequestsPerWorker]
+ * 🚀 Rip Manager - Multi-Process Manager for Platform Apps
+ * 
+ * Manages worker processes for deployed platform applications.
+ * Integrates with our Platform Controller for dynamic app management.
  */
 
-import { watch } from 'fs'
-import { join } from 'path'
-
-// Using Bun.spawn instead of Node.js child_process
-
-// Configuration
-const managerId = Number.parseInt(process.argv[2] ?? '0')
-const managerNum = managerId + 1 // Human-friendly manager number (1-indexed)
-
-// Set process title for better visibility
-process.title = `rip-manager-${managerNum}`
-const numWorkers = Number.parseInt(process.argv[3]) || 3
-const maxRequestsPerWorker =
-  Number.parseInt(process.argv[4]) ||
-  (process.env.NODE_ENV === 'production' ? 1000 : 10)
-const appDirectory = process.argv[5] || process.cwd()
+import { watch } from 'fs';
+import { join, resolve } from 'path';
+import { existsSync } from 'fs';
 
 // Worker tracking
 interface Worker {
-  process: any // Bun.Subprocess type
-  id: number
-  restartCount: number
-  socketPath: string
-  startedAt: number
-  backoffMs: number
+  process: any; // Bun.Subprocess type
+  id: number;
+  restartCount: number;
+  socketPath: string;
+  startedAt: number;
+  backoffMs: number;
+  appName: string;
 }
 
-const workers: Worker[] = []
-let isShuttingDown = false
-let fileWatchingEnabled = true
+export class RipManager {
+  private workers: Map<string, Worker[]> = new Map(); // appName -> workers
+  private isShuttingDown = false;
+  private fileWatchingEnabled = true;
+  private watchers: Map<string, any> = new Map(); // appName -> file watcher
 
-/**
- * Spawn a single worker process
- */
-const spawnWorker = async (workerId: number): Promise<Worker> => {
-  const socketPath = `/tmp/rip_worker_${workerId}.sock`
-
-  // Start worker silently
-
-  // Clean up any existing socket
-  try {
-    await Bun.unlink(socketPath)
-  } catch (_) {
-    // Socket didn't exist, that's fine
+  constructor() {
+    this.setupGracefulShutdown();
   }
 
-  // Use Bun's subprocess API with explicit stdio configuration
-  const workerProcess = Bun.spawn(
-    [
-      'bun',
-      join(__dirname, 'worker.ts'),
-      workerId.toString(),
-      maxRequestsPerWorker.toString(),
-      appDirectory,
-    ],
-    {
-      stdout: 'inherit',
-      stderr: 'inherit',
-      stdin: 'inherit',
-      cwd: appDirectory,
-      env: process.env,
-    },
-  )
+  /**
+   * Start workers for a specific app
+   */
+  async startApp(appName: string, appDirectory: string, numWorkers: number = 3, maxRequestsPerWorker: number = 100): Promise<void> {
+    console.log(`🚀 [Manager] Starting ${numWorkers} workers for app '${appName}'`);
+    
+    // Resolve absolute path
+    const absolutePath = resolve(appDirectory);
+    
+    if (!existsSync(absolutePath)) {
+      throw new Error(`App directory not found: ${appDirectory}`);
+    }
 
-  const previous = workers[workerId]
-  const worker: Worker = {
-    process: workerProcess,
-    id: workerId,
-    restartCount: (previous?.restartCount || 0) + 1,
-    socketPath,
-    startedAt: Date.now(),
-    backoffMs: previous?.backoffMs || 0,
+    // Stop existing workers if any
+    await this.stopApp(appName);
+
+    // Create worker array for this app
+    this.workers.set(appName, []);
+    
+    // Start workers
+    const workers: Worker[] = [];
+    for (let i = 0; i < numWorkers; i++) {
+      const worker = await this.spawnWorker(appName, i, maxRequestsPerWorker, absolutePath);
+      workers.push(worker);
+    }
+    
+    this.workers.set(appName, workers);
+    
+    // Setup file watching for hot reload
+    if (this.fileWatchingEnabled) {
+      this.setupFileWatching(appName, absolutePath);
+    }
+    
+    console.log(`✅ [Manager] App '${appName}' started with ${numWorkers} workers`);
   }
 
-  // Handle worker exit (Bun.spawn API)
-  workerProcess.exited.then(({ code }) => {
-    if (!isShuttingDown) {
-      const exitCode = code !== undefined ? code : 0
-      console.log(
-        `[${getTimestamp()}              ] W${workerId + 1} exited (code ${exitCode}) - respawning...`,
-      )
+  /**
+   * Stop workers for a specific app
+   */
+  async stopApp(appName: string): Promise<void> {
+    const workers = this.workers.get(appName);
+    if (!workers || workers.length === 0) {
+      return;
+    }
 
-      // Exponential backoff on rapid restarts
-      const uptimeMs = Date.now() - worker.startedAt
-      let nextBackoff = worker.backoffMs || 0
-      if (uptimeMs < 2000) {
-        // Crashed quickly → increase backoff (250ms → 500ms → 1s → 2s → 4s; capped at 5s)
-        nextBackoff = Math.min(nextBackoff > 0 ? nextBackoff * 2 : 250, 5000)
-      } else {
-        // Ran stably → reset backoff
-        nextBackoff = 0
-      }
+    console.log(`🛑 [Manager] Stopping workers for app '${appName}'`);
 
-      // Staggered base delay so not all workers restart together
-      const baseDelay = 100 + workerId * 50 // 100ms, 150ms, 200ms
-      const restartDelay = baseDelay + nextBackoff
-      if (nextBackoff > 0) {
-        console.log(
-          `[${getTimestamp()}              ] M${managerNum} backoff for W${workerId + 1}: ${nextBackoff}ms (uptime ${uptimeMs}ms)`,
-        )
-      }
-      setTimeout(() => {
-        if (!isShuttingDown) {
-          spawnWorker(workerId).then(newWorker => {
-            // Carry forward computed backoff
-            newWorker.backoffMs = nextBackoff
-            workers[workerId] = newWorker
-          })
+    // Stop file watching
+    const watcher = this.watchers.get(appName);
+    if (watcher) {
+      watcher.close();
+      this.watchers.delete(appName);
+    }
+
+    // Terminate workers
+    for (const worker of workers) {
+      try {
+        worker.process.kill();
+        await worker.process.exited;
+        
+        // Clean up socket
+        try {
+          await Bun.spawn(['rm', '-f', worker.socketPath]).exited;
+        } catch (_) {
+          // Socket cleanup failed, continue
         }
-      }, restartDelay)
-    }
-  })
-
-  return worker
-}
-
-/**
- * Gracefully restart a specific worker
- */
-const gracefulRestartWorker = async (workerId: number) => {
-  const worker = workers[workerId]
-  if (!worker) return
-
-  console.log(
-    `[${getTimestamp()}              ] M${managerNum} graceful restart W${workerId + 1}...`,
-  )
-
-  // Send SIGTERM for graceful shutdown (Bun.spawn API)
-  worker.process.kill('SIGTERM')
-
-  // Wait for exit, then spawn will handle restart automatically
-  // The worker will finish current requests before shutting down
-}
-
-/**
- * Gracefully restart all workers (rolling restart)
- */
-import { formatTimestamp as formatTs } from './time'
-// Shared timestamp function
-const getTimestamp = () => formatTs()
-
-const gracefulRestartAllWorkers = async (reason: string) => {
-  console.log(
-    `[${getTimestamp()}              ] M${managerNum} ${reason} - restarting all workers`,
-  )
-
-  // Restart workers one by one to maintain availability
-  for (let i = 0; i < workers.length; i++) {
-    if (!isShuttingDown) {
-      await gracefulRestartWorker(i)
-
-      // Small delay between restarts to ensure availability
-      await new Promise(resolve => setTimeout(resolve, 500))
-    }
-  }
-
-  console.log(
-    `[${getTimestamp()}              ] M${managerNum} all workers restarted`,
-  )
-}
-
-/**
- * Initialize all workers
- */
-const initializeWorkers = async () => {
-  for (let i = 0; i < numWorkers; i++) {
-    const worker = await spawnWorker(i)
-    workers[i] = worker
-
-    // Small delay between worker starts
-    await new Promise(resolve => setTimeout(resolve, 200))
-  }
-}
-
-/**
- * File watcher for hot reload
- */
-const setupFileWatcher = () => {
-  if (!fileWatchingEnabled) return
-
-  const watcher = watch(
-    appDirectory,
-    { recursive: true },
-    (eventType, filename) => {
-      if (filename?.endsWith('.rip') && eventType === 'change') {
-        console.log(
-          `[${getTimestamp()}              ] M${managerNum} file changed: ${filename}`,
-        )
-
-        // Graceful rolling restart of all workers
-        gracefulRestartAllWorkers(`File change: ${filename}`)
+      } catch (error) {
+        console.error(`❌ [Manager] Error stopping worker ${worker.id}:`, error);
       }
-    },
-  )
+    }
 
-  // Handle cleanup
-  process.on('SIGINT', () => {
-    watcher.close()
-  })
-
-  process.on('SIGTERM', () => {
-    watcher.close()
-  })
-}
-
-/**
- * Handle graceful shutdown
- */
-const setupGracefulShutdown = () => {
-  const shutdown = (_signal: string) => {
-    isShuttingDown = true
-    fileWatchingEnabled = false
-
-    // Send SIGTERM to all workers quietly
-    workers.forEach((worker, _id) => {
-      if (worker?.process) {
-        worker.process.kill('SIGTERM')
-      }
-    })
-
-    // Force exit after timeout
-    setTimeout(() => {
-      console.log(
-        `[${getTimestamp()}              ] M${managerNum} force exit after timeout`,
-      )
-      process.exit(1)
-    }, 10000)
-
-    // Wait for all workers to exit (or timeout)
-    setTimeout(() => {
-      process.exit(0)
-    }, 2000)
+    this.workers.delete(appName);
+    console.log(`✅ [Manager] App '${appName}' stopped`);
   }
 
-  process.on('SIGINT', () => shutdown('SIGINT'))
-  process.on('SIGTERM', () => shutdown('SIGTERM'))
+  /**
+   * Get status of all managed apps
+   */
+  getStatus(): { [appName: string]: { workers: number; status: string } } {
+    const status: { [appName: string]: { workers: number; status: string } } = {};
+    
+    for (const [appName, workers] of this.workers) {
+      const activeWorkers = workers.filter(w => !w.process.killed).length;
+      status[appName] = {
+        workers: activeWorkers,
+        status: activeWorkers > 0 ? 'running' : 'stopped'
+      };
+    }
+    
+    return status;
+  }
+
+  /**
+   * Spawn a single worker process
+   */
+  private async spawnWorker(appName: string, workerId: number, maxRequestsPerWorker: number, appDirectory: string): Promise<Worker> {
+    const socketPath = `/tmp/rip_worker_${appName}_${workerId}.sock`;
+
+    // Clean up any existing socket
+    try {
+      await Bun.spawn(['rm', '-f', socketPath]).exited;
+    } catch (_) {
+      // Socket didn't exist, that's fine
+    }
+
+    // Spawn worker process
+    const workerProcess = Bun.spawn(
+      [
+        'bun',
+        '--preload', './packages/bun/rip-bun.ts', // Ensure Rip transpiler is loaded
+        join(__dirname, 'worker.ts'),
+        workerId.toString(),
+        maxRequestsPerWorker.toString(),
+        appDirectory,
+        appName
+      ],
+      {
+        stdout: 'pipe', // Capture output for logging
+        stderr: 'pipe',
+        stdin: 'ignore',
+        cwd: process.cwd(), // Keep in monorepo root for proper path resolution
+        env: {
+          ...process.env,
+          WORKER_ID: workerId.toString(),
+          APP_NAME: appName,
+          SOCKET_PATH: socketPath
+        },
+      }
+    );
+
+    const worker: Worker = {
+      process: workerProcess,
+      id: workerId,
+      restartCount: 0,
+      socketPath,
+      startedAt: Date.now(),
+      backoffMs: 1000, // Start with 1 second backoff
+      appName
+    };
+
+    // Monitor worker process
+    this.monitorWorker(worker);
+
+    return worker;
+  }
+
+  /**
+   * Monitor worker process for crashes and restarts
+   */
+  private monitorWorker(worker: Worker): void {
+    worker.process.exited.then(async (exitCode: number) => {
+      if (this.isShuttingDown) return;
+
+      const workers = this.workers.get(worker.appName);
+      if (!workers) return;
+
+      console.log(`⚠️ [Manager] Worker ${worker.id} for app '${worker.appName}' exited with code ${exitCode}`);
+
+      // Implement exponential backoff for restarts
+      worker.restartCount++;
+      worker.backoffMs = Math.min(worker.backoffMs * 2, 30000); // Cap at 30 seconds
+
+      if (worker.restartCount > 10) {
+        console.error(`❌ [Manager] Worker ${worker.id} for app '${worker.appName}' has crashed too many times, not restarting`);
+        return;
+      }
+
+      // Wait for backoff period
+      setTimeout(async () => {
+        try {
+          console.log(`🔄 [Manager] Restarting worker ${worker.id} for app '${worker.appName}' (attempt ${worker.restartCount})`);
+          
+          // Find the worker in the array and replace it
+          const workerIndex = workers.findIndex(w => w.id === worker.id);
+          if (workerIndex >= 0) {
+            const newWorker = await this.spawnWorker(
+              worker.appName, 
+              worker.id, 
+              100, // Default max requests
+              process.cwd() // Will be updated with proper app directory
+            );
+            workers[workerIndex] = newWorker;
+          }
+        } catch (error) {
+          console.error(`❌ [Manager] Failed to restart worker ${worker.id}:`, error);
+        }
+      }, worker.backoffMs);
+    });
+  }
+
+  /**
+   * Setup file watching for hot reload
+   */
+  private setupFileWatching(appName: string, appDirectory: string): void {
+    try {
+      const watcher = watch(appDirectory, { recursive: true }, (eventType, filename) => {
+        if (!filename || !filename.endsWith('.rip')) return;
+        
+        console.log(`🔥 [Manager] Hot reload triggered for app '${appName}': ${filename}`);
+        this.restartAppWorkers(appName);
+      });
+      
+      this.watchers.set(appName, watcher);
+    } catch (error) {
+      console.error(`❌ [Manager] Failed to setup file watching for app '${appName}':`, error);
+    }
+  }
+
+  /**
+   * Restart all workers for an app (hot reload)
+   */
+  private async restartAppWorkers(appName: string): Promise<void> {
+    const workers = this.workers.get(appName);
+    if (!workers) return;
+
+    console.log(`🔄 [Manager] Hot reloading workers for app '${appName}'`);
+    
+    // Graceful restart - restart workers one by one
+    for (const worker of workers) {
+      try {
+        worker.process.kill('SIGTERM');
+        await worker.process.exited;
+        
+        // Worker will be automatically restarted by monitorWorker
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second between restarts
+      } catch (error) {
+        console.error(`❌ [Manager] Error during hot reload of worker ${worker.id}:`, error);
+      }
+    }
+  }
+
+  /**
+   * Setup graceful shutdown
+   */
+  private setupGracefulShutdown(): void {
+    const shutdown = async () => {
+      if (this.isShuttingDown) return;
+      this.isShuttingDown = true;
+      
+      console.log('🛑 [Manager] Graceful shutdown initiated...');
+      
+      // Stop all apps
+      const appNames = Array.from(this.workers.keys());
+      for (const appName of appNames) {
+        await this.stopApp(appName);
+      }
+      
+      console.log('✅ [Manager] Shutdown complete');
+      process.exit(0);
+    };
+
+    process.on('SIGTERM', shutdown);
+    process.on('SIGINT', shutdown);
+  }
 }
-
-/**
- * Main initialization
- */
-const main = async () => {
-  console.log(
-    `[${getTimestamp()}              ] M${managerNum} ready (${numWorkers} workers, ${maxRequestsPerWorker} requests each)`,
-  )
-
-  // Setup graceful shutdown first
-  setupGracefulShutdown()
-
-  // Initialize workers
-  await initializeWorkers()
-
-  // Setup file watching for hot reload
-  setupFileWatcher()
-
-  // Hot reload is active (shown in endpoint summary)
-}
-
-// Fire it up!
-main().catch(console.error)
