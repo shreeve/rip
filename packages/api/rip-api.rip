@@ -75,8 +75,6 @@ parseJsonSafely = (body) -> try JSON.parse(body) catch error then {}
 parseJsonOrNull = (v) ->
   if typeof v == 'string'
     try JSON.parse(v) catch error then null
-  else if v? and typeof v == 'object'
-    v
   else
     null
 
