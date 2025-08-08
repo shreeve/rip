@@ -21,7 +21,7 @@ export class RipServer {
     this.port = port;
     this.appName = appName;
     this.numWorkers = numWorkers;
-    
+
     // Generate worker socket paths
     this.workerSocketPaths = Array.from(
       { length: numWorkers },
@@ -64,7 +64,7 @@ export class RipServer {
    */
   private async handleRequest(req: Request): Promise<Response> {
     const url = new URL(req.url);
-    
+
     // Health check endpoint
     if (url.pathname === '/health') {
       return new Response(JSON.stringify({
@@ -105,35 +105,35 @@ export class RipServer {
     for (let attempt = 0; attempt < this.numWorkers; attempt++) {
       const socketPath = this.workerSocketPaths[this.currentWorker];
       const stats = this.workerStats.get(socketPath)!;
-      
+
       try {
         // Forward request to worker via Unix socket
         const response = await this.forwardToWorker(req, socketPath);
-        
+
         // Update stats
         stats.requests++;
-        
+
         // Move to next worker for next request
         this.currentWorker = (this.currentWorker + 1) % this.numWorkers;
-        
+
         // Add server headers
         const headers = new Headers(response.headers);
         headers.set('X-Rip-Worker', this.currentWorker.toString());
         headers.set('X-Rip-App', this.appName);
         headers.set('X-Response-Time', `${Date.now() - startTime}ms`);
-        
+
         return new Response(response.body, {
           status: response.status,
           statusText: response.statusText,
           headers
         });
-        
+
       } catch (error) {
         console.warn(`⚠️ [Server] Worker ${this.currentWorker} failed, trying next worker:`, error);
-        
+
         // Update error stats
         stats.errors++;
-        
+
         // Try next worker
         this.currentWorker = (this.currentWorker + 1) % this.numWorkers;
       }
@@ -144,30 +144,17 @@ export class RipServer {
     return new Response('All workers unavailable', { status: 503 });
   }
 
-  /**
+      /**
    * Forward request to a specific worker via Unix socket
    */
   private async forwardToWorker(req: Request, socketPath: string): Promise<Response> {
-    try {
-      // For now, let's use a simple approach - connect via TCP to the worker
-      // This is a temporary solution until we implement proper Unix socket forwarding
-      
-      // Create a new request to send to the worker
-      const url = new URL(req.url);
-      url.protocol = 'http:';
-      url.hostname = 'localhost';
-      url.port = '8000'; // Temporary - we'll fix this with proper Unix socket support
-      
-      const response = await fetch(url.toString(), {
-        method: req.method,
-        headers: req.headers,
-        body: req.body,
-      });
-
-      return response;
-    } catch (error) {
-      throw new Error(`Failed to connect to worker: ${error}`);
-    }
+    // Use Bun's native Unix socket support in fetch!
+    return await fetch(req.url, {
+      method: req.method,
+      headers: req.headers,
+      body: req.body,
+      unix: socketPath, // This is all we need!
+    });
   }
 
   /**
