@@ -70,8 +70,15 @@ parseIds = (val) ->
   catch error
     null
 
-# JSON parsing helper
+# JSON parsing helpers
 parseJsonSafely = (body) -> try JSON.parse(body) catch error then {}
+parseJsonOrNull = (v) ->
+  if typeof v == 'string'
+    try JSON.parse(v) catch error then null
+  else if v? and typeof v == 'object'
+    v
+  else
+    null
 
 # Date parsing helpers
 parseDate = (val) -> try date = new Date(val); if isNaN(date.getTime()) then null else date.toISOString().split('T')[0] catch error then null
@@ -196,10 +203,10 @@ export read = (keyOrContext, key = null, tag = null, miss = null) ->
     when 'time12'     then val[/^(1[0-2]|0?[1-9]):([0-5][0-9])\s?(am|pm)$/i]?.toLowerCase()
     when 'currency'   then (val =~ /^\$?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)$/) and parseFloat(_[1]?.replace(/,/g, ''))
     when 'slug'       then (val =~ /^([a-z0-9]+(?:-[a-z0-9]+)*)$/) and _[1]
-    when 'bool'       then val = bool(val); val = null unless val?
-    when 'array'      then val = if Array.isArray(data[key]) then data[key] else null
-    when 'hash'       then val = if typeof data[key] == 'object' and data[key]? then data[key] else null
-    when 'json'       then val = if typeof val == 'string' then try JSON.parse(val) catch error then null else if val? and typeof val == 'object' then val else null
+    when 'bool'       then bool(val)
+    when 'array'      then (Array.isArray(val) and val) or null
+    when 'hash'       then ((val? and typeof val == 'object') and val) or null
+    when 'json'       then parseJsonOrNull(val)
     when 'ids'        then parseIds(val)
     else
       if Array.isArray(originalTag)
