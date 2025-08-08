@@ -48,6 +48,28 @@ falsy = (val) -> val in [false, 'false', '0', 0, 'no', 'off', 'n']
 bool = (val) -> return true if truthy(val); return false if falsy(val); null
 isBlank = (val) -> not val? or val == '' or (typeof val == 'string' and val.trim() == '')
 
+# IDs parsing helper
+# Accepts space- and comma-separated positive integers (no leading zeros),
+# returns sorted unique list or null on invalid input
+parseIds = (val) ->
+  return null unless val?
+  cleaned = String(val).replace(/[, ]+/g, ' ').trim()
+  return null unless cleaned
+  try
+    parts = cleaned.split(' ')
+    nums = []
+    for part in parts
+      # Validate each id (1.. up to 20 digits total)
+      tmp = (part[/^([1-9]\d{0,19})$/] and parseInt(_[1]))
+      throw new Error("Invalid ID: #{part}") unless tmp
+      nums.push tmp
+    # De-dupe and sort
+    unique = Array.from(new Set(nums)).sort((a, b) -> a - b)
+    return null if unique.length == 0
+    unique
+  catch error
+    null
+
 # JSON parsing helper
 parseJsonSafely = (body) -> try JSON.parse(body) catch error then {}
 
@@ -134,7 +156,7 @@ export read = (keyOrContext, key = null, tag = null, miss = null) ->
     val = String(val or '')
 
   # Early returns for simple cases (Ruby-style)
-  if tag == 'id'    and val[/^([1-9]\d{0,19})$/]  then return parseInt(_[1])
+  if tag == 'id'    and val[/^([1-9]\d{0,19})$/]   then return parseInt(_[1])
   if tag == 'whole' and val[/^(0|[1-9]\d{0,19})$/] then return parseInt(_[1])
 
   # Process remaining tags with switch expression
@@ -174,11 +196,11 @@ export read = (keyOrContext, key = null, tag = null, miss = null) ->
     when 'time12'     then val[/^(1[0-2]|0?[1-9]):([0-5][0-9])\s?(am|pm)$/i]?.toLowerCase()
     when 'currency'   then (val =~ /^\$?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)$/) and parseFloat(_[1]?.replace(/,/g, ''))
     when 'slug'       then (val =~ /^([a-z0-9]+(?:-[a-z0-9]+)*)$/) and _[1]
-    # when 'bool'       then val = bool(val); val = null unless val?
-    # when 'array'      then val = if Array.isArray(data[key]) then data[key] else null
-    # when 'hash'       then val = if typeof data[key] == 'object' and data[key]? then data[key] else null
-    # when 'json'       then val = if typeof val == 'string' then try JSON.parse(val) catch error then null else if val? and typeof val == 'object' then val else null
-    # when 'ids'        then val = if val and val.trim() then try cleanVal = val.replace(/[, ]+/g, ' ').trim(); idList = cleanVal.split(' '); validIds = []; for id in idList temp = (id[/^([1-9]\d{0,19})$/] and parseInt(_[1])); if temp then validIds.push(temp) else throw new Error("Invalid ID: #{id}"); result = validIds.filter((id, index, arr) -> arr.indexOf(id) == index).sort((a, b) -> a - b); if result.length == 0 then null else result catch error then null
+    when 'bool'       then val = bool(val); val = null unless val?
+    when 'array'      then val = if Array.isArray(data[key]) then data[key] else null
+    when 'hash'       then val = if typeof data[key] == 'object' and data[key]? then data[key] else null
+    when 'json'       then val = if typeof val == 'string' then try JSON.parse(val) catch error then null else if val? and typeof val == 'object' then val else null
+    when 'ids'        then parseIds(val)
     else
       if Array.isArray(originalTag)
         val = if originalTag.includes(val) then val else null
