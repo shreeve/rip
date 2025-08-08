@@ -45,5 +45,8 @@
     "@babel/core": "~7.17.9",
     "@babel/preset-env": "~7.16.11",
     "babel-preset-minify": "~0.5.1"
+  },
+  "dependencies": {
+    "underscore": "^1.13.7"
   }
 }
