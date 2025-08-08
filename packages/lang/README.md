@@ -272,7 +272,7 @@ This pattern leverages the existing `=~` operator with CoffeeScript's expression
 
 **🔥 Advanced Pattern Analysis: Four Elegant Approaches**
 
-Through real-world usage in validation libraries (see `packages/api/helpers.rip`), four distinct `=~` patterns have emerged, each with specific strengths:
+Through real-world usage in validation libraries (see `@rip/api`), four distinct `=~` patterns have emerged, each with specific strengths:
 
 **Pattern 1: Basic Match Assignment**
 ```coffeescript
@@ -310,7 +310,7 @@ val = ("#{_[1]}#{_[2]}#{_[3]}" if val =~ /^(\d{3})-(\d{3})-(\d{4})$/)
 - **Use when**: Simple conditional transformations, validation with formatting
 - **Best for**: State codes, ZIP codes, SSN formatting, simple text transformations
 
-**📊 Performance Comparison (from helpers.rip analysis)**
+**📊 Performance Comparison (from @rip/api analysis)**
 
 | Pattern | Characters | Readability | Best Use Case |
 |---------|------------|-------------|---------------|
@@ -341,9 +341,9 @@ val = (if val =~ /^(\d{5})/ then _[1] else null)  # Traditional
 val = (_[1] if val =~ /^(\d{5})/)                 # Postfix (recommended)
 ```
 
-**✨ Real-World Impact: helpers.rip Showcase**
+**✨ Real-World Impact: @rip/api Showcase**
 
-The `packages/api/helpers.rip` file demonstrates all patterns in production:
+`@rip/api` demonstrates all patterns in production:
 - **20+ validation types** using `=~` patterns
 - **75% code reduction** compared to traditional JavaScript regex
 - **Crystal-clear intent** - each validation reads like English

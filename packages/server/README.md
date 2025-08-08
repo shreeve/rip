@@ -342,7 +342,7 @@ When you send a request like:
 
 **The server:**
 1. 🔍 **Discovers** your app in the specified directory
-2. 🔥 **Loads** your `helpers.rip` with Ruby-style regex syntax
+2. 🔥 **Loads** your `@rip/api` helpers with Ruby-style regex syntax
 3. 📡 **Routes** the request through your app's middleware
 4. ✨ **Processes** using your custom validators and business logic
 5. 📊 **Logs** the entire request flow beautifully

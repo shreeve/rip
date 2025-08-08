@@ -17,7 +17,7 @@
 - **Type Safe** - Leverages Rip's elegant syntax for bulletproof validation
 - **Performance First** - Optimized patterns that scale to production
 
-> **Note:** `helpers.rip` is the only required file for most projects. All core validation, parsing, and helper logic lives here. Future extensions may add more files, but helpers.rip is the heart of @rip/api.
+> **Note:** `@rip/api` is a single-file helper today. All core validation, parsing, and helper logic lives in the package entry (currently `rip-api.rip`). Future extensions may add more files, but `@rip/api` is the heart of the toolkit.
 
 ## 🎯 Consistency with @rip/schema
 
@@ -117,7 +117,7 @@ app.post '/signup', ->
   # OR: json success: true, email, phone  # Smart json helper
 ```
 
-## 🔥 The `helpers.rip` Toolkit
+## 🔥 The `@rip/api` Toolkit
 
 The crown jewel of `@rip/api` is the **`read()` function** - a validation and parsing powerhouse that eliminates 90% of API boilerplate.
 
@@ -300,7 +300,7 @@ app.post '/api/users', ->
 
 ### The 37 Built-in Validators
 
-`helpers.rip` includes validators for every common API need:
+`@rip/api` includes validators for every common API need:
 
 #### **Basic Types**
 ```rip
@@ -635,7 +635,7 @@ email = read 'email', 'email!'  # One line does it all
 
 ## 🎯 Roadmap
 
-**Phase 1** (Current): `helpers.rip` - Request validation & parsing
+**Phase 1** (Current): `@rip/api` helpers - Request validation & parsing
 **Phase 2**: `middleware.rip` - Common middleware patterns
 **Phase 3**: `responses.rip` - Structured response helpers
 **Phase 4**: `validation.rip` - Advanced validation utilities
@@ -693,6 +693,6 @@ when 'id' then return parseInt(_[1]) if val =~ /^([1-9]\d{0,19})$/
 **Guidance:**
 - Use the direct return/postfix if style for most one-liner validators—it's the most readable and idiomatic.
 - Use the semicolon or inline if style if you need to do more with the value after validation.
-- All styles are supported in helpers.rip; choose the one that best fits your intent and code clarity.
+- All styles are supported in `@rip/api`; choose the one that best fits your intent and code clarity.
 
-**See `helpers.rip` for real-world usage and more examples.**
+**See `@rip/api` for real-world usage and more examples.**
