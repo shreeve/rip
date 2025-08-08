@@ -135,7 +135,7 @@ export read = (keyOrContext, key = null, tag = null, miss = null) ->
 
   # Early returns for simple cases (Ruby-style)
   if tag == 'id'    and val[/^([1-9]\d{0,19})$/]  then return parseInt(_[1])
-  if tag == 'whole' and val[/^(0|[1-9]\d{,19})$/] then return parseInt(_[1])
+  if tag == 'whole' and val[/^(0|[1-9]\d{0,19})$/] then return parseInt(_[1])
 
   # Process remaining tags with switch expression
   #
