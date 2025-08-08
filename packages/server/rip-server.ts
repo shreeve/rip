@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from 'fs';
+import { existsSync, mkdirSync, statSync } from 'fs';
 import { join, resolve } from 'path';
 import { homedir } from 'os';
 import { spawn } from 'bun';
@@ -8,6 +8,226 @@ import { RipPlatform, type AppConfig } from './platform-controller';
 const RIP_CONFIG_DIR = join(homedir(), '.rip-server');
 const CA_DIR = join(RIP_CONFIG_DIR, 'ca');
 const CERTS_DIR = join(RIP_CONFIG_DIR, 'certs');
+
+// Configuration defaults
+const defaults = {
+  mode: 'dev',
+  httpPort: 3000,
+  httpsPort: 3443,
+  workers: 3,
+  requests: 100,
+  appDir: process.cwd(),
+  protocol: 'http' as 'http' | 'https' | 'http+https',
+  httpsMode: 'smart' as 'smart' | 'quick' | 'ca',
+};
+
+// Flexible argument parsing interface
+interface Config {
+  command?: string;
+  mode?: string;
+  appDir?: string;
+  httpPort?: number;
+  httpsPort?: number;
+  certPath?: string;
+  keyPath?: string;
+  workers?: number;
+  requests?: number;
+  protocol?: 'http' | 'https' | 'http+https';
+  httpsMode?: 'smart' | 'quick' | 'ca';
+  json?: boolean;
+}
+
+// ===== FLEXIBLE ARGUMENT PARSING =====
+
+function parseArgs(args: string[]): Config {
+  const config: Config = {};
+  const commands = [
+    'dev',
+    'prod',
+    'start',
+    'stop',
+    'status',
+    'test',
+    'help',
+    '-h',
+    '--help',
+    'ca:init',
+    'ca:trust',
+    'ca:export',
+    'ca:info',
+    'ca:list',
+    'ca:clean',
+    // Platform commands
+    'platform',
+    'deploy',
+    'undeploy',
+    'list',
+    'scale',
+    'restart',
+  ];
+
+  // Handle help flags first (before modifying args)
+  if (args.includes('--help') || args.includes('-h')) {
+    config.command = 'help';
+    return config;
+  }
+
+  // Copy args to avoid modifying the original
+  let remainingArgs = [...args];
+
+  // First, check for command
+  if (remainingArgs.length > 0 && commands.includes(remainingArgs[0])) {
+    config.command = remainingArgs[0];
+    remainingArgs = remainingArgs.slice(1);
+  }
+
+  // Separate cert/key files from other args
+  const certFiles: string[] = [];
+  const otherArgs: string[] = [];
+
+  for (const arg of remainingArgs) {
+    // Check for cert/key files
+    if (
+      arg.endsWith('.pem') ||
+      arg.endsWith('.crt') ||
+      arg.endsWith('.key') ||
+      arg.endsWith('.cert')
+    ) {
+      if (existsSync(arg)) {
+        certFiles.push(arg);
+      }
+    } else {
+      otherArgs.push(arg);
+    }
+  }
+
+  // Process cert files (need exactly 2)
+  if (certFiles.length === 2) {
+    // Try to identify which is cert and which is key
+    const [file1, file2] = certFiles;
+    if (file1.includes('key') || file2.includes('cert')) {
+      config.keyPath = file1;
+      config.certPath = file2;
+    } else if (file2.includes('key') || file1.includes('cert')) {
+      config.certPath = file1;
+      config.keyPath = file2;
+    } else {
+      // Default assumption: first is cert, second is key
+      config.certPath = file1;
+      config.keyPath = file2;
+    }
+  }
+
+  // Process remaining arguments
+  for (const arg of otherArgs) {
+    // JSON output flag
+    if (arg === '--json' || arg === '-j') {
+      config.json = true;
+      continue;
+    }
+
+    // Worker count: w:5
+    if (arg.match(/^w:\d+$/)) {
+      config.workers = Number.parseInt(arg.substring(2));
+      continue;
+    }
+
+    // Request count: r:100
+    if (arg.match(/^r:\d+$/)) {
+      config.requests = Number.parseInt(arg.substring(2));
+      continue;
+    }
+
+    // Port number (1-65535)
+    const port = Number.parseInt(arg);
+    if (!Number.isNaN(port) && port >= 1 && port <= 65535) {
+      // If HTTPS is configured, this is HTTPS port, otherwise HTTP
+      if (config.certPath && config.keyPath) {
+        config.httpsPort = port;
+      } else {
+        config.httpPort = port;
+      }
+      continue;
+    }
+
+    // Directory path
+    if (arg.startsWith('/') || arg.startsWith('./') || arg.startsWith('../')) {
+      const resolved = resolve(arg);
+      if (existsSync(resolved)) {
+        config.appDir = resolved;
+        continue;
+      }
+    }
+
+    // Check if it's an existing directory
+    const resolved = resolve(arg);
+    if (existsSync(resolved) && statSync(resolved).isDirectory()) {
+      config.appDir = resolved;
+      continue;
+    }
+
+    // Mode (dev/prod)
+    if (arg === 'dev' || arg === 'prod') {
+      config.mode = arg;
+      continue;
+    }
+
+    // Protocol specifiers
+    if (arg === 'http' || arg === 'https' || arg === 'http+https') {
+      config.protocol = arg;
+      continue;
+    }
+
+    // HTTPS mode specifiers
+    if (arg === 'https:quick' || arg === 'https:ca' || arg === 'https:smart') {
+      config.protocol = 'https';
+      config.httpsMode = arg.split(':')[1] as 'quick' | 'ca' | 'smart';
+    }
+  }
+
+  return config;
+}
+
+// Load configuration from files
+async function loadFileConfig(appDir: string): Promise<Partial<Config>> {
+  const config: Partial<Config> = {};
+
+  // Try package.json
+  const packagePath = join(appDir, 'package.json');
+  if (existsSync(packagePath)) {
+    try {
+      const pkg = await Bun.file(packagePath).json();
+      if (pkg['rip-server']) {
+        Object.assign(config, pkg['rip-server']);
+      }
+    } catch {}
+  }
+
+  // Try bunfig.toml
+  const bunfigPath = join(appDir, 'bunfig.toml');
+  if (existsSync(bunfigPath)) {
+    try {
+      const bunfig = await Bun.file(bunfigPath).text();
+      // Simple extraction for rip-server section
+      const match = bunfig.match(/\[rip-server\]([\s\S]*?)(?:\n\[|$)/);
+      if (match) {
+        const section = match[1];
+        // Extract simple key = value pairs
+        const workers = section.match(/workers\s*=\s*(\d+)/);
+        const requests = section.match(/requests\s*=\s*(\d+)/);
+        const httpPort = section.match(/httpPort\s*=\s*(\d+)/);
+        const httpsPort = section.match(/httpsPort\s*=\s*(\d+)/);
+
+        if (workers) config.workers = Number.parseInt(workers[1]);
+        if (requests) config.requests = Number.parseInt(requests[1]);
+        if (httpPort) config.httpPort = Number.parseInt(httpPort[1]);
+        if (httpsPort) config.httpsPort = Number.parseInt(httpsPort[1]);
+      }
+    } catch {}
+  }
+
+  return config;
+}
 
 async function isRunning(): Promise<boolean> {
   try {
@@ -47,9 +267,20 @@ async function stopServer(): Promise<void> {
   }
 }
 
-async function startServer(appPath: string): Promise<void> {
+async function startServer(appPath: string, config?: Config): Promise<void> {
   console.log('🚀 Starting Rip Server...');
   console.log(`📁 App: ${appPath}`);
+
+  // Show flexible config if provided
+  if (config?.workers && config.workers !== defaults.workers) {
+    console.log(`👥 Workers: ${config.workers}`);
+  }
+  if (config?.httpPort && config.httpPort !== defaults.httpPort) {
+    console.log(`🌐 Port: ${config.httpPort}`);
+  }
+  if (config?.mode) {
+    console.log(`⚙️  Mode: ${config.mode}`);
+  }
 
   // Resolve to absolute path from current working directory
   const absoluteAppPath = resolve(appPath);
@@ -463,7 +694,14 @@ Examples:
   bun server deploy labs-api apps/labs/api  # Deploy to platform
   bun server start labs-api    # Start deployed app
   bun server ca:init            # Set up development CA
-  bun server ca:trust           # Trust CA (no more browser warnings!)`);
+  bun server ca:trust           # Trust CA (no more browser warnings!)
+
+Flexible Arguments (ANY order):
+  bun server w:5 8080 apps/labs/api         # 5 workers, port 8080, directory
+  bun server apps/labs/api prod w:10        # Directory, prod mode, 10 workers
+  bun server deploy labs-api w:3 apps/labs/api  # Deploy with 3 workers
+  bun server 3001 dev examples/hello       # Port, mode, directory
+  bun server w:8 r:500 prod apps/labs/api  # Workers, requests, mode, directory`);
 }
 
 // ===== HTTPS/CA UTILITY FUNCTIONS =====
@@ -810,9 +1048,33 @@ async function cleanCerts(): Promise<void> {
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
-  const command = args[0] || 'help';
 
-  switch (command) {
+  // Use flexible argument parsing
+  const config = parseArgs(args);
+
+  // Determine the command
+  let finalCommand = config.command;
+
+  // If no explicit command but we have arguments, check if we should start a server
+  if (!finalCommand) {
+    if (args.length === 0) {
+      finalCommand = 'help';
+    } else if (config.appDir || args.some(arg => arg.includes('/') || existsSync(arg))) {
+      // We have a directory specified, so start the server
+      finalCommand = 'start';
+      // If appDir not set, try to find it from args
+      if (!config.appDir) {
+        const dirArg = args.find(arg => arg.includes('/') || existsSync(arg));
+        if (dirArg) {
+          config.appDir = resolve(dirArg);
+        }
+      }
+    } else {
+      finalCommand = 'help';
+    }
+  }
+
+  switch (finalCommand) {
     case 'help':
       showHelp();
       break;
@@ -831,7 +1093,7 @@ async function main(): Promise<void> {
       break;
 
     case 'deploy':
-      await handleDeploy(args[1], args[2]);
+      await handleDeploy(config, args.slice(1));
       break;
 
     case 'undeploy':
@@ -844,7 +1106,15 @@ async function main(): Promise<void> {
       break;
 
     case 'start':
-      await handleStartApp(args[1]);
+      // Handle both platform start and direct server start
+      if (args.length > 0 && args[0] && !args[0].includes('/') && !existsSync(args[0]) && !args[0].startsWith('w:') && !args[0].startsWith('r:')) {
+        // Platform app start (e.g., "start labs-api")
+        await handleStartApp(args[0]);
+      } else {
+        // Direct server start with flexible args
+        const appPath = config.appDir || process.cwd();
+        await startServer(appPath, config);
+      }
       break;
 
     case 'scale':
@@ -881,28 +1151,55 @@ async function main(): Promise<void> {
       break;
 
     default:
-      // Treat anything else as an app path
-      const appPath = command.startsWith('./') || command.startsWith('/') || command.includes('/')
-        ? command
-        : process.cwd();
-      await startServer(appPath);
+      // Treat anything else as an app path or use flexible config
+      let appPath: string;
+      if (config.appDir) {
+        appPath = config.appDir;
+      } else {
+        appPath = finalCommand.startsWith('./') || finalCommand.startsWith('/') || finalCommand.includes('/')
+          ? finalCommand
+          : process.cwd();
+      }
+      await startServer(appPath, config);
       break;
   }
 }
 
 // Platform command handlers
-async function handleDeploy(name?: string, directory?: string): Promise<void> {
+async function handleDeploy(config: Config, remainingArgs: string[]): Promise<void> {
+  // Extract name and directory from remaining args or config
+  let name = remainingArgs[0];
+  let directory: string | undefined;
+  
+  // Find the directory from remaining args (skip w: and r: arguments)
+  for (const arg of remainingArgs.slice(1)) {
+    if (!arg.startsWith('w:') && !arg.startsWith('r:') && (arg.includes('/') || existsSync(arg))) {
+      directory = arg;
+      break;
+    }
+  }
+  
+  // Fallback to config appDir
+  if (!directory && config.appDir && config.appDir !== process.cwd()) {
+    directory = config.appDir;
+  }
+
   if (!name || !directory) {
     console.error('❌ Usage: bun server deploy <name> <directory>');
     console.error('   Example: bun server deploy labs-api apps/labs/api');
+    console.error('   Flexible: bun server deploy labs-api w:5 apps/labs/api');
     process.exit(1);
   }
+
+  // Apply flexible config options
+  const deployData: any = { name, directory };
+  if (config.workers) deployData.workers = config.workers;
 
   try {
     const response = await fetch('http://localhost:3000/api/apps', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, directory })
+      body: JSON.stringify(deployData)
     });
 
     if (response.ok) {
