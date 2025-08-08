@@ -234,7 +234,7 @@ async function handlePlatformAPI(req: Request, url: URL): Promise<Response> {
     if (scaleMatch && req.method === 'POST') {
       const name = scaleMatch[1];
       const body = await req.json() as { workers: number };
-      
+
       const app = platformInstance.getApp(name);
       if (!app) {
         return new Response('{"error":"App not found"}', {
@@ -245,7 +245,7 @@ async function handlePlatformAPI(req: Request, url: URL): Promise<Response> {
 
       const previousWorkers = app.workers;
       await platformInstance.scaleApp(name, body.workers);
-      
+
       return new Response(JSON.stringify({
         status: 'scaled',
         previousWorkers,
@@ -259,7 +259,7 @@ async function handlePlatformAPI(req: Request, url: URL): Promise<Response> {
     const restartMatch = url.pathname.match(/^\/api\/apps\/([^\/]+)\/restart$/);
     if (restartMatch && req.method === 'POST') {
       const name = restartMatch[1];
-      
+
       const app = platformInstance.getApp(name);
       if (!app) {
         return new Response('{"error":"App not found"}', {
@@ -275,7 +275,7 @@ async function handlePlatformAPI(req: Request, url: URL): Promise<Response> {
       } else {
         await platformInstance.startApp(name);
       }
-      
+
       return new Response('{"status":"restarted"}', {
         headers: { 'Content-Type': 'application/json' }
       });

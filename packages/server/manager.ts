@@ -22,9 +22,11 @@ interface Worker {
 
 export class RipManager {
   private workers: Map<string, Worker[]> = new Map(); // appName -> workers
+  private appDirectories: Map<string, string> = new Map(); // appName -> directory
   private isShuttingDown = false;
   private fileWatchingEnabled = true;
   private watchers: Map<string, any> = new Map(); // appName -> file watcher
+  private reloadTimers: Map<string, NodeJS.Timeout> = new Map(); // appName -> debounce timer
 
   constructor() {
     this.setupGracefulShutdown();
@@ -45,6 +47,9 @@ export class RipManager {
 
     // Stop existing workers if any
     await this.stopApp(appName);
+
+    // Store app directory for hot reload restarts
+    this.appDirectories.set(appName, absolutePath);
 
     // Create worker array for this app
     this.workers.set(appName, []);
@@ -83,6 +88,13 @@ export class RipManager {
       watcher.close();
       this.watchers.delete(appName);
     }
+    
+    // Clear any pending reload timers
+    const timer = this.reloadTimers.get(appName);
+    if (timer) {
+      clearTimeout(timer);
+      this.reloadTimers.delete(appName);
+    }
 
     // Terminate workers
     for (const worker of workers) {
@@ -102,6 +114,7 @@ export class RipManager {
     }
 
     this.workers.delete(appName);
+    this.appDirectories.delete(appName);
     console.log(`✅ [Manager] App '${appName}' stopped`);
   }
 
@@ -205,11 +218,13 @@ export class RipManager {
           // Find the worker in the array and replace it
           const workerIndex = workers.findIndex(w => w.id === worker.id);
           if (workerIndex >= 0) {
+            // Get the app directory from the appDirectories map
+            const appDirectory = this.appDirectories.get(worker.appName) || worker.appName;
             const newWorker = await this.spawnWorker(
               worker.appName, 
               worker.id, 
               100, // Default max requests
-              process.cwd() // Will be updated with proper app directory
+              appDirectory // Use the correct app directory
             );
             workers[workerIndex] = newWorker;
           }
@@ -228,11 +243,25 @@ export class RipManager {
       const watcher = watch(appDirectory, { recursive: true }, (eventType, filename) => {
         if (!filename || !filename.endsWith('.rip')) return;
         
-        console.log(`🔥 [Manager] Hot reload triggered for app '${appName}': ${filename}`);
-        this.restartAppWorkers(appName);
+        console.log(`🔥 [Manager] File change detected for app '${appName}': ${filename}`);
+        
+        // Debounce rapid file changes (e.g., editor saves)
+        const existingTimer = this.reloadTimers.get(appName);
+        if (existingTimer) {
+          clearTimeout(existingTimer);
+        }
+        
+        const timer = setTimeout(() => {
+          console.log(`🔄 [Manager] Hot reload triggered for app '${appName}' after debounce`);
+          this.restartAppWorkers(appName);
+          this.reloadTimers.delete(appName);
+        }, 500); // 500ms debounce
+        
+        this.reloadTimers.set(appName, timer);
       });
       
       this.watchers.set(appName, watcher);
+      console.log(`👁️ [Manager] File watching enabled for app '${appName}' in ${appDirectory}`);
     } catch (error) {
       console.error(`❌ [Manager] Failed to setup file watching for app '${appName}':`, error);
     }
@@ -247,18 +276,33 @@ export class RipManager {
 
     console.log(`🔄 [Manager] Hot reloading workers for app '${appName}'`);
     
-    // Graceful restart - restart workers one by one
-    for (const worker of workers) {
+    // Graceful restart - restart workers one by one to avoid race conditions
+    for (let i = 0; i < workers.length; i++) {
+      const worker = workers[i];
       try {
+        console.log(`🔄 [Manager] Hot reloading worker ${worker.id} for app '${appName}'`);
+        
+        // Kill the worker gracefully
         worker.process.kill('SIGTERM');
-        await worker.process.exited;
+        
+        // Wait for it to exit
+        try {
+          await worker.process.exited;
+        } catch (_) {
+          // Process might have already exited
+        }
         
         // Worker will be automatically restarted by monitorWorker
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second between restarts
+        // Wait a bit longer between restarts to avoid overwhelming the system
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        console.log(`✅ [Manager] Worker ${worker.id} hot reload triggered`);
       } catch (error) {
         console.error(`❌ [Manager] Error during hot reload of worker ${worker.id}:`, error);
       }
     }
+    
+    console.log(`✅ [Manager] Hot reload completed for app '${appName}'`);
   }
 
   /**
