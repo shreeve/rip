@@ -30,12 +30,20 @@ app.get '/info', (c) ->
     runtime: 'Bun'
     worker: process.pid
 
-# Lawfirms routes (temporarily inline until we figure out imports)
+# Lawfirms API with validation
 import { z } from 'zod'
 import { zValidator } from '@hono/zod-validator'
 import { faker } from '@faker-js/faker'
-import { db, lawfirmsTable } from './db/schema.ts'
-import { eq } from 'drizzle-orm'
+import { drizzle } from 'drizzle-orm/bun-sqlite'
+import { Database } from 'bun:sqlite'
+import { sql, eq } from 'drizzle-orm'
+
+# Import schema
+import schema from './db/schema.rip'
+
+# Create database connection
+sqlite = new Database './db/data.duckdb'
+db = drizzle sqlite, { schema }
 
 # Create a sub-app for lawfirms
 lawfirmsApp = new Hono
@@ -52,8 +60,14 @@ lawfirmSchema = z.object
 
 # GET all law firms
 lawfirmsApp.get '/', (c) ->
-  firms = db.select().from(lawfirmsTable).all!
-  c.json firms
+  try
+    firms = db.select().from(schema.lawfirms).all!
+    c.json
+      firms: firms
+      count: firms.length
+      message: 'Law firms retrieved successfully'
+  catch error
+    c.json { error: 'Failed to retrieve law firms', details: error.message }, 500
 
 # POST - Generate random law firm with faker
 lawfirmsApp.post '/generate', (c) ->
@@ -66,8 +80,11 @@ lawfirmsApp.post '/generate', (c) ->
     state: faker.location.state({ abbreviated: true })
     zip: faker.location.zipCode()
 
-  result = db.insert(lawfirmsTable).values(firmData).returning().get!
-  c.json result, 201
+  try
+    result = db.insert(schema.lawfirms).values(firmData).returning().get!
+    c.json result, 201
+  catch error
+    c.json { error: 'Failed to create law firm', details: error.message }, 500
 
 # Mount the lawfirms routes
 app.route '/api/lawfirms', lawfirmsApp

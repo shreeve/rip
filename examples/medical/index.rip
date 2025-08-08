@@ -1,0 +1,149 @@
+# 🏥 Medical API Example
+# Comprehensive medical system API with enterprise-grade schema
+
+import { Hono } from 'hono'
+import { drizzle } from 'drizzle-orm/bun-sqlite'
+import { Database } from 'bun:sqlite'
+import { sql } from 'drizzle-orm'
+import { faker } from '@faker-js/faker'
+
+# Import schema
+import schema from './db/schema.rip'
+
+# Create database connection
+sqlite = new Database './db/data.duckdb'
+db = drizzle sqlite, { schema }
+
+# Create Hono app
+app = new Hono
+
+# Basic info route
+app.get '/', (c) ->
+  c.json
+    name: 'Medical API'
+    version: '1.0.0'
+    description: 'Enterprise medical system with comprehensive schema'
+    endpoints: [
+      'GET /api/patients'
+      'POST /api/patients/generate'
+      'GET /api/appointments'
+      'POST /api/appointments/generate'
+      'GET /api/users'
+      'POST /api/users/generate'
+      'GET /api/stats'
+    ]
+
+# Health check route
+app.get '/health', (c) ->
+  c.json
+    status: 'healthy'
+    timestamp: new Date().toISOString()
+    service: 'medical-api'
+
+# Patients API
+patientsApp = new Hono
+app.route '/api/patients', patientsApp
+
+# Get all patients
+patientsApp.get '/', (c) ->
+  try
+    patients = db.select().from(schema.patients).limit(50).all!
+    c.json
+      patients: patients
+      count: patients.length
+      message: 'Patients retrieved successfully'
+  catch error
+    c.json { error: 'Failed to retrieve patients', details: error.message }, 500
+
+# Generate random patient
+patientsApp.post '/generate', (c) ->
+  try
+    patientData =
+      FirstName: faker.person.firstName()
+      LastName: faker.person.lastName()
+      ProviderNum: faker.number.int({ min: 1, max: 100 })
+      ClinicNum: faker.number.int({ min: 1, max: 10 })
+
+    result = db.insert(schema.patients).values(patientData).returning().get!
+    c.json result, 201
+  catch error
+    c.json { error: 'Failed to create patient', details: error.message }, 500
+
+# Appointments API
+appointmentsApp = new Hono
+app.route '/api/appointments', appointmentsApp
+
+# Get all appointments
+appointmentsApp.get '/', (c) ->
+  try
+    appointments = db.select().from(schema.appointments).limit(50).all!
+    c.json
+      appointments: appointments
+      count: appointments.length
+      message: 'Appointments retrieved successfully'
+  catch error
+    c.json { error: 'Failed to retrieve appointments', details: error.message }, 500
+
+# Generate random appointment
+appointmentsApp.post '/generate', (c) ->
+  try
+    appointmentData =
+      PatNum: faker.number.int({ min: 1, max: 1000 })
+      DateTimeLastActive: faker.date.recent().toISOString()
+      AdjDate: faker.date.future().toISOString().split('T')[0]
+      AdjAmt: faker.number.float({ min: 50, max: 500, fractionDigits: 2 })
+      AdjNote: faker.lorem.sentence()
+      SecDateTEdit: faker.date.recent().toISOString()
+      RteNasCan: faker.datatype.boolean()
+      StartTime: faker.date.recent().toTimeString()
+
+    result = db.insert(schema.appointments).values(appointmentData).returning().get!
+    c.json result, 201
+  catch error
+    c.json { error: 'Failed to create appointment', details: error.message }, 500
+
+# Users API
+usersApp = new Hono
+app.route '/api/users', usersApp
+
+# Get all users
+usersApp.get '/', (c) ->
+  try
+    users = db.select().from(schema.users).limit(50).all!
+    c.json
+      users: users
+      count: users.length
+      message: 'Users retrieved successfully'
+  catch error
+    c.json { error: 'Failed to retrieve users', details: error.message }, 500
+
+# Generate random user
+usersApp.post '/generate', (c) ->
+  try
+    userData =
+      Username: faker.internet.userName()
+      Email: faker.internet.email()
+      PasswordHash: faker.string.alphanumeric(64)
+
+    result = db.insert(schema.users).values(userData).returning().get!
+    c.json result, 201
+  catch error
+    c.json { error: 'Failed to create user', details: error.message }, 500
+
+# Stats endpoint
+app.get '/api/stats', (c) ->
+  try
+    stats =
+      worker_pid: process.pid
+      uptime: process.uptime()
+      memory: process.memoryUsage()
+      timestamp: new Date().toISOString()
+      database: 'DuckDB'
+      schema_tables: Object.keys(schema).length
+
+    c.json stats
+  catch error
+    c.json { error: 'Failed to retrieve stats', details: error.message }, 500
+
+# Export for rip-server
+export default app

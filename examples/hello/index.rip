@@ -5,9 +5,26 @@ import { Hono } from 'hono'
 
 app = new Hono
 
-# Basic route
+# Basic info route
 app.get '/', (c) ->
-  c.text 'Hello from the Rip Server 🚀'
+  c.json
+    name: 'Hello API'
+    version: '1.0.0'
+    description: 'Simple Hello World example with worker info'
+    endpoints: [
+      'GET /health'
+      'GET /info'
+      'GET /ping'
+      'GET /work/:seconds'
+      'GET /stats'
+    ]
+
+# Health check route
+app.get '/health', (c) ->
+  c.json
+    status: 'healthy'
+    timestamp: new Date().toISOString()
+    service: 'hello-api'
 
 # Dynamic route with worker info
 app.get '/info', (c) ->
@@ -24,17 +41,39 @@ app.get '/ping', (c) ->
 
 # Simulate some work
 app.get '/work/:seconds', (c) ->
-  seconds = parseInt(c.req.param('seconds')) || 1
+  try
+    seconds = parseInt(c.req.param('seconds')) || 1
+    
+    # Validate input
+    if seconds < 1 or seconds > 10
+      return c.json { error: 'Seconds must be between 1 and 10' }, 400
 
-  # Simulate work
-  start = Date.now()
-  while Date.now() - start < seconds * 1000
-    continue  # Busy wait
+    # Simulate work
+    start = Date.now()
+    while Date.now() - start < seconds * 1000
+      continue  # Busy wait
 
-  c.json
-    message: "Worked for #{seconds} seconds"
-    worker: process.env.WORKER_ID || 'unknown'
-    duration: Date.now() - start
+    c.json
+      message: "Worked for #{seconds} seconds"
+      worker: process.env.WORKER_ID || 'unknown'
+      duration: Date.now() - start
+  catch error
+    c.json { error: 'Failed to process work request', details: error.message }, 500
+
+# Stats endpoint
+app.get '/stats', (c) ->
+  try
+    stats =
+      worker_pid: process.pid
+      uptime: process.uptime()
+      memory: process.memoryUsage()
+      timestamp: new Date().toISOString()
+      worker_id: process.env.WORKER_ID || 'unknown'
+      requests_handled: process.env.REQUESTS_HANDLED || 0
+
+    c.json stats
+  catch error
+    c.json { error: 'Failed to retrieve stats', details: error.message }, 500
 
 # Export the app for the worker to use
 export default app

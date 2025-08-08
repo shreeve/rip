@@ -1,10 +1,17 @@
 {
   "name": "medical-example",
   "version": "1.0.0",
-  "description": "Medical system schema example",
+  "description": "Medical system API with comprehensive enterprise schema",
   "type": "module",
   "private": true,
   "dependencies": {
-    "@rip/schema": "workspace:*"
+    "@rip/schema": "workspace:*",
+    "hono": "^3.11.7",
+    "drizzle-orm": "^0.29.1",
+    "@faker-js/faker": "^8.3.1"
+  },
+  "rip-server": {
+    "workers": 3,
+    "port": 3002
   }
 }

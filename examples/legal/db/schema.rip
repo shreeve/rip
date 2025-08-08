@@ -1,21 +1,76 @@
+# Rip Schema Example - Legal System
+# Law firm management with business entities
 import { schema as Schema } from '@rip/schema'
 
 export default Schema ->
+
+  # Law firms table
   @table 'lawfirms', ->
-    @string   'name!', 100
-    @string   'address', 100
-    @string   'city', 50
+    @string   'name!', 200
+    @email    'email'
+    @string   'phone', 20
+    @string   'address', 255
+    @string   'city', 100
     @string   'state', 2
     @string   'zip', 10
-    @string   'phone', 20
-    @email    'email!'
-    @string   'website'
-    @text     'notes'
-    @boolean  'active', true
-    @decimal  'hourly_rate', 10, 2
-    @integer  'employee_count'
     @timestamps()
 
     @index    'name'
-    @index    ['state', 'city']
-    @index    'active'
+    @index    'email', unique: true
+    @index    ['city', 'state']
+
+  # Lawyers/attorneys table
+  @table 'lawyers', ->
+    @bigint   'firm_id!'
+    @string   'first_name!', 50
+    @string   'last_name!', 50
+    @email    'email!'
+    @string   'phone', 20
+    @string   'bar_number', 50
+    @string   'specialization', 100
+    @boolean  'active', true
+    @timestamps()
+
+    @index    'firm_id'
+    @index    'email', unique: true
+    @index    'bar_number', unique: true
+    @index    ['last_name', 'first_name']
+
+  # Clients table
+  @table 'clients', ->
+    @bigint   'firm_id!'
+    @string   'first_name!', 50
+    @string   'last_name!', 50
+    @email    'email!'
+    @string   'phone', 20
+    @string   'address', 255
+    @string   'city', 100
+    @string   'state', 2
+    @string   'zip', 10
+    @text     'notes'
+    @timestamps()
+
+    @index    'firm_id'
+    @index    'email'
+    @index    ['last_name', 'first_name']
+
+  # Cases table
+  @table 'cases', ->
+    @bigint   'firm_id!'
+    @bigint   'client_id!'
+    @bigint   'lawyer_id!'
+    @string   'case_number!', 50
+    @string   'title!', 200
+    @text     'description'
+    @string   'case_type!', 50
+    @string   'status!', 20, ['open']
+    @date     'date_opened!'
+    @date     'date_closed'
+    @decimal  'billing_rate', 10, 2
+    @timestamps()
+
+    @index    'firm_id'
+    @index    'client_id'
+    @index    'lawyer_id'
+    @index    'case_number', unique: true
+    @index    ['status', 'date_opened']

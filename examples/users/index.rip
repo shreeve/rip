@@ -19,79 +19,114 @@ app.use '*', (c, next) ->
 # API Routes
 app.get '/', (c) ->
   c.json
-    message: 'Rip API Server'
+    name: 'Users API'
     version: '2.0.0'
+    description: 'In-memory user management API showcasing multi-worker features'
     worker: process.pid
     endpoints: [
-      'GET /'
+      'GET /health'
       'GET /users'
       'POST /users'
       'GET /users/:id'
       'PUT /users/:id'
       'DELETE /users/:id'
+      'GET /stats'
     ]
+
+# Health check route
+app.get '/health', (c) ->
+  c.json
+    status: 'healthy'
+    timestamp: new Date().toISOString()
+    service: 'users-api'
 
 # Get all users
 app.get '/users', (c) ->
-  c.json
-    users: users
-    count: users.length
-    worker: process.pid
+  try
+    c.json
+      users: users
+      count: users.length
+      worker: process.pid
+      message: 'Users retrieved successfully'
+  catch error
+    c.json { error: 'Failed to retrieve users', details: error.message }, 500
 
 # Get single user
 app.get '/users/:id', (c) ->
-  id = parseInt(c.req.param('id'))
-  user = users.find (u) -> u.id == id
+  try
+    id = parseInt(c.req.param('id'))
+    user = users.find (u) -> u.id == id
 
-  if user
-    c.json user
-  else
-    c.json { error: 'User not found' }, 404
+    if user
+      c.json user
+    else
+      c.json { error: 'User not found' }, 404
+  catch error
+    c.json { error: 'Failed to retrieve user', details: error.message }, 500
 
 # Create user
 app.post '/users', async (c) ->
-  body = await c.req.json()
+  try
+    body = await c.req.json()
 
-  user =
-    id: users.length + 1
-    name: body.name
-    email: body.email
+    # Basic validation
+    if not body.name or not body.email
+      return c.json { error: 'Name and email are required' }, 400
 
-  users.push user
+    user =
+      id: users.length + 1
+      name: body.name
+      email: body.email
 
-  c.json user, 201
+    users.push user
+
+    c.json user, 201
+  catch error
+    c.json { error: 'Failed to create user', details: error.message }, 500
 
 # Update user
 app.put '/users/:id', async (c) ->
-  id = parseInt(c.req.param('id'))
-  body = await c.req.json()
+  try
+    id = parseInt(c.req.param('id'))
+    body = await c.req.json()
 
-  userIndex = users.findIndex (u) -> u.id == id
+    userIndex = users.findIndex (u) -> u.id == id
 
-  if userIndex != -1
-    users[userIndex] = { ...users[userIndex], ...body }
-    c.json users[userIndex]
-  else
-    c.json { error: 'User not found' }, 404
+    if userIndex != -1
+      users[userIndex] = { ...users[userIndex], ...body }
+      c.json users[userIndex]
+    else
+      c.json { error: 'User not found' }, 404
+  catch error
+    c.json { error: 'Failed to update user', details: error.message }, 500
 
 # Delete user
 app.delete '/users/:id', (c) ->
-  id = parseInt(c.req.param('id'))
-  userIndex = users.findIndex (u) -> u.id == id
+  try
+    id = parseInt(c.req.param('id'))
+    userIndex = users.findIndex (u) -> u.id == id
 
-  if userIndex != -1
-    deletedUser = users.splice(userIndex, 1)[0]
-    c.json { deleted: deletedUser }
-  else
-    c.json { error: 'User not found' }, 404
+    if userIndex != -1
+      deletedUser = users.splice(userIndex, 1)[0]
+      c.json { deleted: deletedUser, message: 'User deleted successfully' }
+    else
+      c.json { error: 'User not found' }, 404
+  catch error
+    c.json { error: 'Failed to delete user', details: error.message }, 500
 
 # Stats endpoint
 app.get '/stats', (c) ->
-  c.json
-    worker_pid: process.pid
-    uptime: process.uptime()
-    memory: process.memoryUsage()
-    users_count: users.length
-    timestamp: new Date().toISOString()
+  try
+    stats =
+      worker_pid: process.pid
+      uptime: process.uptime()
+      memory: process.memoryUsage()
+      users_count: users.length
+      timestamp: new Date().toISOString()
+      storage: 'in-memory'
+
+    c.json stats
+  catch error
+    c.json { error: 'Failed to retrieve stats', details: error.message }, 500
 
 export default app

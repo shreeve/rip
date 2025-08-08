@@ -1,7 +1,7 @@
 {
   "name": "legal-example",
   "version": "1.0.0",
-  "description": "Legal API Example",
+  "description": "Law firm management API with CRUD operations and validation",
   "type": "module",
   "private": true,
   "dependencies": {
@@ -17,7 +17,7 @@
   },
   "rip-server": {
     "workers": 4,
-    "port": 3000,
+    "port": 3004,
     "requests": 20
   }
 }
