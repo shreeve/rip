@@ -4,7 +4,7 @@
     "": {
       "name": "rip",
       "devDependencies": {
-        "@biomejs/biome": "^1.5.3",
+        "@biomejs/biome": "^1.9.4",
       },
     },
     "apps/labs/api": {
@@ -58,7 +58,10 @@
       "name": "medical-example",
       "version": "1.0.0",
       "dependencies": {
+        "@faker-js/faker": "^8.3.1",
         "@rip/schema": "workspace:*",
+        "drizzle-orm": "^0.29.1",
+        "hono": "^3.11.7",
       },
     },
     "examples/users": {
@@ -489,6 +492,8 @@
     "make-fetch-happen/https-proxy-agent": ["https-proxy-agent@5.0.1", "", { "dependencies": { "agent-base": "6", "debug": "4" } }, "sha512-dFcAjpTQFgoLMzC2VwU+C/CbS7uRL0lWmxDITmqm7C+7F0Odmj6s9l6alZc6AELXhrnggM2CeWSXHGOdX2YtwA=="],
 
     "make-fetch-happen/minipass": ["minipass@3.3.6", "", { "dependencies": { "yallist": "^4.0.0" } }, "sha512-DxiNidxSEK+tHG6zOIklvNOwm3hvCrbUrdtzY74U6HKTJxvIDfOUL5W5P2Ghd3DTkhhKPYGqeNUIh5qcM4YBfw=="],
+
+    "medical-example/hono": ["hono@3.12.12", "", {}, "sha512-5IAMJOXfpA5nT+K0MNjClchzz0IhBHs2Szl7WFAhrFOsbtQsYmNynFyJRg/a3IPsmCfxcrf8txUGiNShXpK5Rg=="],
 
     "minipass-collect/minipass": ["minipass@3.3.6", "", { "dependencies": { "yallist": "^4.0.0" } }, "sha512-DxiNidxSEK+tHG6zOIklvNOwm3hvCrbUrdtzY74U6HKTJxvIDfOUL5W5P2Ghd3DTkhhKPYGqeNUIh5qcM4YBfw=="],
 

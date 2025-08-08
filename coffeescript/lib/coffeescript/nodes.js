@@ -2197,8 +2197,10 @@
           } else if (prop instanceof RegexIndex) {
             // Handle regex indexing: obj[/regex/] -> (_ = obj.match(/regex/)) && _[0]
             // Or with capture group: obj[/regex/, 1] -> (_ = obj.match(/regex/)) && _[1]
+            // FIXED: Now sets _ variable globally like =~ operator does
             regexCode = prop.regex.compileToFragments(o, LEVEL_PAREN);
             indexStr = prop.captureIndex ? (captureCode = prop.captureIndex.compileToFragments(o, LEVEL_PAREN), `[${fragmentsToText(captureCode)}]`) : "[0]";
+            // Use sequence expression like =~ operator to ensure _ is set globally  
             fragments = [this.makeCode("(_ = "), ...fragments, this.makeCode(".match("), ...regexCode, this.makeCode(`)) && _${indexStr}`)];
           } else {
             fragments.push(...(prop.compileToFragments(o)));

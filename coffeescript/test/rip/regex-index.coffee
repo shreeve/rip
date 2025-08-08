@@ -1,6 +1,13 @@
 # Regex Index Tests - Rip Language Enhancement
 # ---------------------------------------------
-# Tests for the Ruby-style variable[/regex/] syntax
+# Tests for the elegant str[/regex/] syntax that provides:
+# - Automatic _ variable assignment for capture groups
+# - Safe null handling when no match found
+# - Clean, readable regex operations without .match() boilerplate
+#
+# Examples:
+#   email[/@(.+)$/] and _[1]  # Gets domain, sets _ globally
+#   phone[/^\d{10}$/]         # Returns match or null
 
 test "regex index basic functionality", ->
   name = "Jonathan"
@@ -18,6 +25,9 @@ test "regex index returns null for no match", ->
   eq result, null
 
 test "regex index compilation", ->
+  # Verifies the str[/regex/] syntax compiles to safe JavaScript that:
+  # - Sets _ variable globally for subsequent capture group access
+  # - Returns the match result or undefined (never throws on null)
   eq "(_ = str.match(/foo/)) && _[0];", CoffeeScript.compile("str[/foo/]", bare: yes).trim()
 
 test "regex index with flags", ->

@@ -1,6 +1,6 @@
-# AI Context - Rip Language Ecosystem
+# Rip Language Architecture
 
-This document provides comprehensive context for AI assistants working on the Rip language project. Read this to get fully up to speed on the current state and architecture.
+This document provides comprehensive technical documentation for developers working on the Rip language project. It covers the internal architecture, implementation details, development workflow, and technical insights.
 
 ## 🎯 Project Overview
 
@@ -8,7 +8,7 @@ This document provides comprehensive context for AI assistants working on the Ri
 
 ### Key Value Propositions
 - **Clean Async Syntax**: `fetch!` instead of `await fetch()`
-- **LEGENDARY Regex Matching**: `val =~ /regex/` with automatic `_` assignment
+- **LEGENDARY Regex Matching**: `val =~ /regex/` and `str[/regex/]` with automatic `_` assignment
 - **Elegant Conditional Patterns**: `(val =~ /regex/; if _ then transform else fallback)`
 - **Modern Web Stack**: Bun + Hono + Drizzle ORM integration
 - **Type-Safe Database**: Custom DSL for schema definition
@@ -150,6 +150,28 @@ val =~ /^([A-Z]{2})$/
 code = _?[1]?.toUpperCase()
 ```
 
+### The `str[/regex/]` Ruby-Style Indexing Enhancement
+**Problem**: While `=~` was great for setting `_`, sometimes you just want the match result directly.
+
+**Solution**: Added Ruby-style regex indexing with bracket notation:
+- **Parser**: Extended `RegexIndex` handling in `/coffeescript/src/nodes.coffee`
+- **Compiler**: Generates `(_ = str.match(/regex/)) && _[0]` for safe global `_` assignment
+- **Safety**: Handles null matches gracefully, never throws errors
+
+**Result**: Even more elegant regex syntax for common cases:
+```coffeescript
+# Get full match directly
+email = "user@domain.com"
+normalized = email[/^.+@.+$/]?.toLowerCase()  # Safe and clean
+
+# Access capture groups via global _
+domain = email[/@(.+)$/] and _[1]             # "domain.com"
+username = email[/^([^@]+)/]                  # "user"
+
+# Perfect for validation pipelines
+phone[/^\d{10}$/] and formatPhone(_[0])       # Chain operations
+```
+
 ### The Semicolon Pattern for Conditional Regex
 **Problem**: Even with `=~`, regex validation often required conditional logic for transformations.
 
@@ -243,6 +265,7 @@ bun -e "const app = await import('./index.rip'); console.log(typeof app.default)
 ### ✅ Working Features
 - `!` suffix automatic async detection
 - `=~` regex matching with automatic `_` assignment
+- `str[/regex/]` Ruby-style regex indexing with global `_` assignment
 - Semicolon pattern for conditional regex transformations
 - Full web server with Hono framework
 - Database schema DSL with SQLite
@@ -263,7 +286,7 @@ bun -e "const app = await import('./index.rip'); console.log(typeof app.default)
 - Custom operators
 - Range syntax improvements (e.g., `3..18`, `18..`)
 
-## 💡 Key Insights for AI Assistants
+## 💡 Key Development Insights
 
 1. **Always use `rip-bun.ts`** for transpilation, never CoffeeScript register directly
 2. **Absolute paths** may be needed in `bunfig.toml` for worker processes

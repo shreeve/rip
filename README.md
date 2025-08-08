@@ -39,7 +39,7 @@ This foundational principle guides every API design decision in Rip:
 
 **✅ Common Things Easy** *(90% of use cases)*:
 - **Range validation**: `[min, max]` - shortest, clearest syntax
-- **Regex matching**: `val =~ /pattern/` - elegant and intuitive
+- **Regex matching**: `val =~ /pattern/` and `str[/regex/]` - elegant and intuitive
 - **Function calls**: `read 'email', 'email'` - clean and simple
 - **Object returns**: `{ success: true, data }` - natural and concise
 - **Flexible server args**: `bun server w:5 8080 apps/my-app` - any order works
@@ -139,11 +139,18 @@ result = processData(data)!
 state =~ /^([A-Z]{2})$/     # Match and auto-assign to _
 code = _?[1]?.toUpperCase() # Access match groups elegantly
 
-# 🔥 NEW: Ruby-style regex indexing (Change 005)
+# 🔥 NEW: Ruby-style regex indexing - Makes regex operations joyful!
+email = "user@example.com"
+domain = email[/@(.+)$/] and _[1]        # "example.com" - sets _ globally
+username = email[/^([^@]+)/]             # "user" - clean and readable
+
+# Perfect for validation and parsing
 phone = "1234567890"
-areaCode = phone[/^(\d{3})(\d{3})(\d{4})$/, 1]  # "123"
-initial = name[/[A-Z]/]                         # "J" from "Jonathan"
-word = text[/(\w+)/].toUpperCase()              # Extract and transform
+formatted = phone[/^(\d{3})(\d{3})(\d{4})$/] and "#{_[1]}-#{_[2]}-#{_[3]}"
+
+# Elegant null handling - no crashes, no boilerplate
+initial = name[/[A-Z]/]                  # Returns match or null
+result = text[/\d+/]?.toUpperCase()      # Safe chaining
 
 # Elegant conditional transformations with semicolon pattern
 code = (state =~ /^([A-Z]{2})$/; if _ then _[1].toUpperCase() else null)

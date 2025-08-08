@@ -1494,12 +1494,20 @@ exports.Value = class Value extends Base
       else if prop instanceof RegexIndex
         # Handle regex indexing: obj[/regex/] -> (_ = obj.match(/regex/)) && _[0]
         # Or with capture group: obj[/regex/, 1] -> (_ = obj.match(/regex/)) && _[1]
+        #
+        # This provides elegant syntax for regex matching with automatic _ variable assignment:
+        #   email[/@(.+)$/] and _[1]  # Gets domain part, sets _ globally
+        #   phone[/^\d{10}$/]         # Returns full match or null
+        #
+        # The compiled JavaScript safely handles null matches and sets _ globally for
+        # compatibility with the =~ operator and subsequent capture group access.
         regexCode = prop.regex.compileToFragments(o, LEVEL_PAREN)
         indexStr = if prop.captureIndex
           captureCode = prop.captureIndex.compileToFragments(o, LEVEL_PAREN)
           "[#{fragmentsToText(captureCode)}]"
         else
           "[0]"
+        # Compile to safe sequence expression that sets _ globally and handles null matches
         fragments = [@makeCode("(_ = "), fragments..., @makeCode(".match("), regexCode..., @makeCode(")) && _#{indexStr}")]
       else
         fragments.push (prop.compileToFragments o)...
