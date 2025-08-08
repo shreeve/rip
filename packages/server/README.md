@@ -6,18 +6,18 @@
 
 **🔥 Ruby Analogy**: This layer is analogous to **nginx + unicorn in the Ruby ecosystem** - it's the production server infrastructure that handles HTTP requests, manages worker processes, provides load balancing, and ensures fault tolerance. Just as nginx + unicorn gives you production-grade Ruby deployment, `@rip/server` gives you production-grade Rip deployment.
 
-## 🤔 Why Choose rip-server?
+## 🤔 Why Choose Rip Server?
 
-**For developers tired of complex deployment stacks** - rip-server replaces entire toolchains:
+**For developers tired of complex deployment stacks** - Rip server replaces entire toolchains:
 
 **❌ Traditional Stack:**
 ```
 nginx + unicorn + ruby + systemd + complex configs
 ```
 
-**✅ rip-server:**
+**✅ Rip Server:**
 ```bash
-rip-server apps/my-app        # That's it. Production ready.
+bun server apps/my-app        # That's it. Production ready.
 ```
 
 **🔥 Key Benefits:**
@@ -56,10 +56,10 @@ rip-server apps/my-app        # That's it. Production ready.
 ```bash
 # 1. Create a simple app
 mkdir my-app && cd my-app
-echo "export default { fetch: () => new Response('Hello World!') }" > index.ts
+echo "export default { fetch: () => new Response('Hello World!') }" > index.rip
 
-# 2. Run it
-rip-server                      # Serves on http://localhost:3000
+# 2. Run it (from monorepo root)
+bun server my-app               # Serves on http://localhost:3000
 
 # 3. That's it! 🎉
 ```
@@ -67,41 +67,40 @@ rip-server                      # Serves on http://localhost:3000
 ## 🚀 Quick Start
 
 ```bash
-# Install globally (recommended)
-ln -sf $(pwd)/packages/server/rip-server.ts ~/bin/rip-server
-chmod +x ~/bin/rip-server
+# Run from monorepo root (recommended)
+cd /path/to/rip
 
 # Flexible argument syntax - provide options in ANY order!
-rip-server                          # HTTP only (default)
-rip-server https                    # HTTPS with smart certificates
-rip-server https:quick              # HTTPS with quick self-signed cert
-rip-server https:ca                 # HTTPS with CA-signed cert
-rip-server http+https               # Both HTTP and HTTPS
-rip-server 8080                     # Custom HTTP port
-rip-server https 8443               # Custom HTTPS port
-rip-server prod                     # Production mode
-rip-server ./api                    # Specific app directory
-rip-server w:5 r:100                # 5 workers, 100 requests each
-rip-server cert.pem key.pem         # HTTPS with your certificates
+bun server                          # HTTP only (default)
+bun server https                    # HTTPS with smart certificates
+bun server https:quick              # HTTPS with quick self-signed cert
+bun server https:ca                 # HTTPS with CA-signed cert
+bun server http+https               # Both HTTP and HTTPS
+bun server 8080                     # Custom HTTP port
+bun server https 8443               # Custom HTTPS port
+bun server prod                     # Production mode
+bun server ./api                    # Specific app directory
+bun server w:5 r:100                # 5 workers, 100 requests each
+bun server cert.pem key.pem         # HTTPS with your certificates
 
 # Mix and match in any order!
-rip-server prod https w:10          # Production HTTPS, 10 workers
-rip-server ./api http+https         # Both protocols for API
-rip-server https:ca 8443 w:5        # CA cert on port 8443
+bun server prod https w:10          # Production HTTPS, 10 workers
+bun server ./api http+https         # Both protocols for API
+bun server https:ca 8443 w:5        # CA cert on port 8443
 
 # Smart Lifecycle Commands
-rip-server apps/my-app              # Start/restart server (smart default)
-rip-server status                   # Show detailed server status
-rip-server stop                     # Stop server (explicit)
-rip-server help                     # Show help
+bun server apps/my-app              # Start/restart server (smart default)
+bun server status                   # Show detailed server status
+bun server stop                     # Stop server (explicit)
+bun server help                     # Show help
 
 # Certificate Authority commands
-rip-server ca:init                  # Initialize CA (one-time setup)
-rip-server ca:trust                 # Trust CA in system (macOS)
-rip-server ca:export                # Export CA certificate
-rip-server ca:info                  # Show CA information
-rip-server ca:list                  # List generated certificates
-rip-server ca:clean                 # Clean old certificates
+bun server ca:init                  # Initialize CA (one-time setup)
+bun server ca:trust                 # Trust CA in system (macOS)
+bun server ca:export                # Export CA certificate
+bun server ca:info                  # Show CA information
+bun server ca:list                  # List generated certificates
+bun server ca:clean                 # Clean old certificates
 
 # Configuration files (optional)
 # package.json: { "rip-server": { "workers": 5, "requests": 100 } }
@@ -139,7 +138,7 @@ rip-server ca:clean                 # Clean old certificates
 ```bash
 bun server status                    # Check if anything is running
 # OR
-rip-server status                    # Same thing, direct command
+bun server status                    # Same thing, direct command
 ```
 
 ### **🚀 2. Start Server with App**
@@ -150,15 +149,15 @@ bun server examples/blog             # Start blog example
 bun server examples/legal            # Start legal example
 
 # From monorepo root (recommended)
-rip-server apps/labs/api             # Auto-finds index.rip
-rip-server examples/blog             # Auto-finds index.rip
+bun server apps/labs/api             # Auto-finds index.rip
+bun server examples/blog             # Auto-finds index.rip
 ```
 
 ### **🔄 3. Restart Server (Smart Behavior)**
 ```bash
 # If server is already running, this restarts it
 bun server apps/labs/api             # Smart restart
-rip-server apps/labs/api             # Same thing
+bun server apps/labs/api             # Same thing
 ```
 
 ### **📡 4. Test Your Running App**
@@ -180,16 +179,16 @@ bun server status                    # Detailed status with PID, memory, runtime
 ### **🛑 6. Stop Server**
 ```bash
 bun server stop                     # Graceful shutdown
-rip-server stop                     # Same thing, direct
+bun server stop                     # Same thing, direct
 ```
 
 ### **⚡ 7. Advanced Options**
 ```bash
 # Custom ports and workers
 bun server apps/labs/api 8080       # Custom port
-rip-server w:5 r:100                # 5 workers, 100 requests each
-rip-server https                    # HTTPS with auto-cert
-rip-server prod                     # Production mode
+bun server w:5 r:100                # 5 workers, 100 requests each
+bun server https                    # HTTPS with auto-cert
+bun server prod                     # Production mode
 ```
 
 ### **🎯 Typical Workflow:**
@@ -221,29 +220,29 @@ bun server stop
 ### **🚀 Smart Default Behavior**
 ```bash
 # Default: Start or restart (what you want 90% of the time)
-rip-server                    # Start/restart with defaults
-rip-server 8080               # Start/restart on port 8080
-rip-server https w:5          # Start/restart with HTTPS and 5 workers
+bun server                    # Start/restart with defaults
+bun server 8080               # Start/restart on port 8080
+bun server https w:5          # Start/restart with HTTPS and 5 workers
 
 # If not running → Starts fresh
-🚀 Starting rip-server...
+🚀 Starting bun server...
 
 # If already running → Restarts gracefully
-🔄 rip-server is already running, restarting...
+🔄 bun server is already running, restarting...
 ```
 
 ### **🔍 Explicit Status Command**
 ```bash
-rip-server status
+bun server status
 ```
 ```
-🔍 rip-server Status
+🔍 bun server Status
 
 ✅ Status: RUNNING
 
 📋 Active Processes:
    • PID: 12345 | Parent: 1234 | Runtime: 2:30:15 | Memory: 45MB
-     Port: 3000 | Command: bun rip-server.ts
+     Port: 3000 | Command: bun bun server.ts
      🟢 Health check: HEALTHY (200)
 
 🌐 Port Status:
@@ -253,13 +252,13 @@ rip-server status
 
 ### **🛑 Explicit Stop Command**
 ```bash
-rip-server stop
+bun server stop
 
 # If running → Stops gracefully
-🛑 Stopping rip-server...
+🛑 Stopping bun server...
 
 # If already stopped → Friendly message
-✅ rip-server is already stopped
+✅ bun server is already stopped
 ```
 
 ### **💡 Why This Design?**
@@ -273,7 +272,7 @@ rip-server stop
 Use `--json` (or `-j`) to get structured status output that's easy to parse in scripts:
 
 ```bash
-rip-server status --json
+bun server status --json
 # {
 #   "running": true,
 #   "processes": [{ "pid": 12345, "port": 3000, "health": "HEALTHY", ... }],
@@ -293,10 +292,10 @@ Exit codes for automation:
 ### 📱 Point-and-Run Any App
 ```bash
 # One server, infinite apps
-rip-server apps/blog 3000           # Blog on port 3000
-rip-server apps/api 8080            # API on port 8080
-rip-server apps/ecommerce 4000      # E-commerce on port 4000
-rip-server ../other-project 5000    # Any Rip app anywhere
+bun server apps/blog 3000           # Blog on port 3000
+bun server apps/api 8080            # API on port 8080
+bun server apps/ecommerce 4000      # E-commerce on port 4000
+bun server ../other-project 5000    # Any Rip app anywhere
 ```
 
 ### 🔥 Live Development Experience
@@ -309,26 +308,26 @@ rip-server ../other-project 5000    # Any Rip app anywhere
 ### 🌟 What This Enables
 ```bash
 # Development workflow with smart defaults
-rip-server apps/my-app              # Start/restart - always works
+bun server apps/my-app              # Start/restart - always works
 # Edit files in apps/my-app/ → changes appear instantly
 # No build steps, no server restarts needed!
 
 # Production deployment
-rip-server prod apps/my-app         # Start/restart in production mode
+bun server prod apps/my-app         # Start/restart in production mode
 
 # Safe automation (perfect for scripts)
-rip-server stop                     # Always safe to stop
-rip-server apps/api                 # Always safe to start/restart
-rip-server apps/api                 # Run again? Restarts gracefully!
+bun server stop                     # Always safe to stop
+bun server apps/api                 # Always safe to start/restart
+bun server apps/api                 # Run again? Restarts gracefully!
 
 # Multi-app development
-rip-server apps/frontend 3000       # Start/restart frontend
-rip-server apps/api 8080            # Start/restart API
-rip-server apps/admin 4000          # Start/restart admin
+bun server apps/frontend 3000       # Start/restart frontend
+bun server apps/api 8080            # Start/restart API
+bun server apps/admin 4000          # Start/restart admin
 # All running simultaneously!
 
 # Check what's running
-rip-server status                   # Comprehensive status of all servers
+bun server status                   # Comprehensive status of all servers
 ```
 
 ### 🎉 The Magic in Action
@@ -368,28 +367,28 @@ When you send a request like:
 
 ### Smart Certificate Management
 
-**rip-server** offers multiple HTTPS options to match your needs:
+**bun server** offers multiple HTTPS options to match your needs:
 
 1. **Smart Mode** (`https`) - Automatically selects the best option:
    ```bash
-   rip-server https              # Uses CA if available, creates if not
+   bun server https              # Uses CA if available, creates if not
    ```
 
 2. **Quick Self-Signed** (`https:quick`) - For quick testing:
    ```bash
-   rip-server https:quick        # Browser warnings, but works immediately
+   bun server https:quick        # Browser warnings, but works immediately
    ```
 
 3. **CA-Signed Certificates** (`https:ca`) - Professional development:
    ```bash
-   rip-server ca:init           # One-time CA setup
-   rip-server ca:trust          # Trust in system (no more warnings!)
-   rip-server https:ca          # Use CA-signed certificates
+   bun server ca:init           # One-time CA setup
+   bun server ca:trust          # Trust in system (no more warnings!)
+   bun server https:ca          # Use CA-signed certificates
    ```
 
 4. **Your Own Certificates** - For any environment:
    ```bash
-   rip-server cert.pem key.pem  # Use your Let's Encrypt or other certs
+   bun server cert.pem key.pem  # Use your Let's Encrypt or other certs
    ```
 
 ### Certificate Authority Benefits
@@ -405,8 +404,8 @@ After running `ca:init` and `ca:trust` once:
 
 Need HTTP and HTTPS together?
 ```bash
-rip-server http+https         # Both on default ports (3000 & 3443)
-rip-server http+https 8080 8443  # Custom ports for both
+bun server http+https         # Both on default ports (3000 & 3443)
+bun server http+https 8080 8443  # Custom ports for both
 ```
 
 ### Using Your Own SSL Certificates
@@ -417,15 +416,15 @@ rip-server http+https 8080 8443  # Custom ports for both
 
 ```bash
 # Using your existing certificates (arguments in ANY order!)
-rip-server prod https /path/to/cert.pem /path/to/key.pem
-rip-server cert.pem key.pem prod https w:10
-rip-server /etc/ssl/cert.pem /etc/ssl/key.pem
+bun server prod https /path/to/cert.pem /path/to/key.pem
+bun server cert.pem key.pem prod https w:10
+bun server /etc/ssl/cert.pem /etc/ssl/key.pem
 
 # Let's Encrypt example
-rip-server prod https /etc/letsencrypt/live/yourdomain.com/fullchain.pem /etc/letsencrypt/live/yourdomain.com/privkey.pem
+bun server prod https /etc/letsencrypt/live/yourdomain.com/fullchain.pem /etc/letsencrypt/live/yourdomain.com/privkey.pem
 
 # Custom SSL directory
-rip-server prod https /opt/ssl/yourdomain.com/certificate.pem /opt/ssl/yourdomain.com/private.key
+bun server prod https /opt/ssl/yourdomain.com/certificate.pem /opt/ssl/yourdomain.com/private.key
 ```
 
 #### Configuration File Method
@@ -446,19 +445,19 @@ rip-server prod https /opt/ssl/yourdomain.com/certificate.pem /opt/ssl/yourdomai
 
 Then just run:
 ```bash
-rip-server prod
+bun server prod
 ```
 
 #### Symlink Method
 
 ```bash
 # Create standard location for certificates
-mkdir -p ~/.rip-server/certs
-ln -s /etc/letsencrypt/live/yourdomain.com/fullchain.pem ~/.rip-server/certs/server.crt
-ln -s /etc/letsencrypt/live/yourdomain.com/privkey.pem ~/.rip-server/certs/server.key
+mkdir -p ~/.bun server/certs
+ln -s /etc/letsencrypt/live/yourdomain.com/fullchain.pem ~/.bun server/certs/server.crt
+ln -s /etc/letsencrypt/live/yourdomain.com/privkey.pem ~/.bun server/certs/server.key
 
 # Then run normally
-rip-server prod https
+bun server prod https
 ```
 
 #### Docker/Container Usage
@@ -477,7 +476,7 @@ COPY . /app
 WORKDIR /app
 
 # Start with certificates
-CMD ["rip-server", "prod", "https", "/app/ssl/certificate.pem", "/app/ssl/private.key"]
+CMD ["bun server", "prod", "https", "/app/ssl/certificate.pem", "/app/ssl/private.key"]
 ```
 
 #### Security Best Practices
@@ -505,8 +504,8 @@ cp new-certificate.pem /etc/ssl/certs/yourdomain.pem
 cp new-private.key /etc/ssl/private/yourdomain.key
 
 # 2. Graceful restart
-rip-server stop  # Graceful shutdown
-rip-server prod https /etc/ssl/certs/yourdomain.pem /etc/ssl/private/yourdomain.key
+bun server stop  # Graceful shutdown
+bun server prod https /etc/ssl/certs/yourdomain.pem /etc/ssl/private/yourdomain.key
 ```
 
 ## 🌐 **Platform Controller**
@@ -521,7 +520,7 @@ Transform any machine into a **Heroku-like platform** with the Rip Platform Cont
 
 ```bash
 # Start the platform (like starting Heroku locally)
-rip-server platform
+bun server platform
 
 🌐 Rip Platform running on :3000
 📊 Dashboard: http://localhost:3000/platform
@@ -532,37 +531,37 @@ rip-server platform
 
 ```bash
 # First, start the platform in one terminal
-rip-server platform
+bun server platform
 
 # Then, in another terminal, deploy apps dynamically
-rip-server deploy blog examples/blog --port 3001 --workers 3
-rip-server deploy api apps/labs/api --port 3002 --workers 5
-rip-server deploy legal examples/legal --port 3003 --workers 2
+bun server deploy blog examples/blog --port 3001 --workers 3
+bun server deploy api apps/labs/api --port 3002 --workers 5
+bun server deploy legal examples/legal --port 3003 --workers 2
 
 # Scale in real-time
-rip-server scale api 10        # Scale API to 10 workers
-rip-server scale blog 1        # Scale blog to 1 worker
+bun server scale api 10        # Scale API to 10 workers
+bun server scale blog 1        # Scale blog to 1 worker
 
 # Management commands
-rip-server list                # Show all deployed apps
-rip-server restart api         # Restart just the API app
-rip-server undeploy blog       # Remove blog app completely
+bun server list                # Show all deployed apps
+bun server restart api         # Restart just the API app
+bun server undeploy blog       # Remove blog app completely
 ```
 
 ### **🎯 Complete Platform Workflow:**
 
 ```bash
 # Terminal 1: Start the platform
-rip-server platform
+bun server platform
 # 🌐 Rip Platform running on :3000
 # 📊 Dashboard: http://localhost:3000/platform
 
 # Terminal 2: Deploy and manage apps
-rip-server deploy api apps/labs/api --port 3001 --workers 2
-rip-server list                # See all deployed apps
-rip-server scale api 5         # Scale to 5 workers
-rip-server restart api         # Restart the app
-rip-server undeploy api        # Remove the app
+bun server deploy api apps/labs/api --port 3001 --workers 2
+bun server list                # See all deployed apps
+bun server scale api 5         # Scale to 5 workers
+bun server restart api         # Restart the app
+bun server undeploy api        # Remove the app
 ```
 
 ### **🎛️ Visual Management Dashboard:**
@@ -599,21 +598,21 @@ bun server status               # Check status
 bun server stop                 # Stop server
 ```
 
-### **From Anywhere: `rip-server` (Universal)**
+### **From Anywhere: `bun server` (Universal)**
 ```bash
 # After global installation:
-rip-server apps/labs/api        # POLS: finds index.rip automatically
-rip-server apps/labs/api        # Explicit path
-rip-server status               # Check status
-rip-server stop                 # Stop server
+bun server apps/labs/api        # POLS: finds index.rip automatically
+bun server apps/labs/api        # Explicit path
+bun server status               # Check status
+bun server stop                 # Stop server
 ```
 
 ### **When to Use Which:**
 - **Use `bun server`**: Team workflows, documentation, scripts (from monorepo root)
-- **Use `rip-server`**: Individual productivity, quick iteration, CI/CD, standalone projects
+- **Use `bun server`**: Individual productivity, quick iteration, CI/CD, standalone projects
 
 ### **Configuration Precedence**
-`rip-server` reads configuration from multiple places. Precedence (highest wins):
+`bun server` reads configuration from multiple places. Precedence (highest wins):
 - **CLI flags/args** (e.g., `w:5`, `r:100`, `https:ca`, ports, paths)
 - **package.json** `{"rip-server": { ... }}` in the app directory
 - **bunfig.toml** `[rip-server]` section in the app directory
@@ -631,7 +630,7 @@ nginx → unicorn → ruby app
 
 **After:**
 ```
-rip-server (server → manager → workers)
+bun server (server → manager → workers)
 ```
 
 Benefits:
@@ -656,7 +655,7 @@ MIT
 
 ## Contributing
 
-rip-server is part of the Rip ecosystem. Contributions welcome!
+bun server is part of the Rip ecosystem. Contributions welcome!
 
 ---
 

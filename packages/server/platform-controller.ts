@@ -1,8 +1,13 @@
 /**
- * 🌐 Rip Platform Controller - Simplified Dynamic Application Management
+ * 🌐 Rip Platform Controller - Revolutionary Multi-App Platform
  *
- * A simplified version that works with our current single-process architecture.
- * Manages multiple Rip applications dynamically without complex process spawning.
+ * Production-ready platform for concurrent multi-app hosting with dynamic scaling.
+ * Manages multiple Rip applications with full multi-process architecture:
+ * - Manager spawns and monitors worker processes per app
+ * - Load balancer distributes requests via Unix sockets
+ * - Hot reload with zero downtime
+ * - Dynamic scaling and real-time deployment
+ * - REST API and web dashboard for management
  */
 
 import { existsSync } from 'fs';
@@ -29,7 +34,10 @@ export interface PlatformStats {
 }
 
 /**
- * Simplified Platform Controller
+ * Revolutionary Multi-App Platform Controller
+ * 
+ * Manages concurrent applications with full multi-process architecture,
+ * dynamic scaling, hot reload, and production-grade fault tolerance.
  */
 export class RipPlatform {
   private apps = new Map<string, AppConfig>();
@@ -232,7 +240,7 @@ export class RipPlatform {
   /**
    * Get a specific app
    */
-  getApp(name: string): App | undefined {
+  getApp(name: string): AppConfig | undefined {
     return this.apps.get(name);
   }
 

@@ -1,5 +1,40 @@
 ## Changelog
 
+### v4.0.0 - August 8, 2025 - 🎯 **Flexible Arguments & Revolutionary Platform**
+
+**🚀 Revolutionary Multi-App Platform:**
+* Complete concurrent multi-app hosting on different ports
+* Dynamic scaling with `bun server scale <app> <workers>`
+* Real-time deployment with `bun server deploy <name> <directory>`
+* Production-ready hot reload with zero downtime
+* Native Unix socket load balancing with Bun's `fetch({ unix })`
+* Comprehensive platform dashboard and REST API
+
+**🎯 Flexible Argument Parsing:**
+* Arguments can be provided in ANY order!
+* Smart detection: `w:5` (workers), `8080` (port), `apps/labs/api` (directory)
+* Configuration file support: package.json and bunfig.toml
+* Certificate auto-detection: `.pem`, `.crt`, `.key` files
+* Mode detection: `dev`, `prod`, `https:ca`, `https:quick`
+
+**🔒 Complete HTTPS/CA Integration:**
+* Full Certificate Authority management with `ca:init`, `ca:trust`, `ca:export`
+* macOS keychain integration for trusted development certificates
+* Self-signed and CA-signed certificate generation
+* Professional 3072-bit RSA keys with 2-year validity
+
+**🔥 Production-Grade Hot Reload:**
+* Graceful sequential worker restarts (2-second intervals)
+* 500ms debounce timer to prevent rapid restart cycles
+* File watching with proper cleanup and error handling
+* Zero-downtime updates in development and production
+
+**🏗️ Multi-Process Architecture:**
+* Manager → Workers → Load Balancer pipeline
+* Process isolation with fault tolerance
+* Exponential backoff for worker crash recovery
+* Health monitoring and statistics per worker
+
 ### v3.0.1 - August 3, 2025 - 🛑 **Enhanced Stop Command**
 
 **🛑 Improved Process Management:**

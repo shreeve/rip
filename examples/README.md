@@ -58,19 +58,19 @@ bun server 3001 dev examples/hello # Port 3001, dev mode
 ### **🌐 Platform Mode (FULLY WORKING!) - Run Multiple Examples**
 ```bash
 # Start the Rip Platform Controller
-rip-server platform
+bun server platform
 
 # Deploy multiple examples at once!
-rip-server deploy blog examples/blog --port 3001 --workers 2
-rip-server deploy legal examples/legal --port 3002 --workers 3
-rip-server deploy users examples/users --port 3003 --workers 1
+bun server deploy blog examples/blog --port 3001 --workers 2
+bun server deploy legal examples/legal --port 3002 --workers 3
+bun server deploy users examples/users --port 3003 --workers 1
 
 # Visit the platform dashboard
 open http://localhost:3000/platform
 
 # Scale examples in real-time
-rip-server scale blog 5          # Scale blog to 5 workers
-rip-server list                  # Show all running examples
+bun server scale blog 5          # Scale blog to 5 workers
+bun server list                  # Show all running examples
 ```
 
 **🎛️ Platform Benefits:**

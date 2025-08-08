@@ -61,9 +61,9 @@ This foundational principle guides every API design decision in Rip:
 Matz's **Principle of Least Surprise (POLS)** is deeply woven into Rip's DNA. Every interface should behave exactly as developers naturally expect:
 
 **✅ Intuitive Defaults**:
-- `rip-server` → Start/restart (what you want most of the time)
-- `rip-server status` → Show status (explicit intent, explicit result)
-- `rip-server stop` → Stop server (clear action, predictable outcome)
+- `bun server` → Start/restart (what you want most of the time)
+- `bun server status` → Show status (explicit intent, explicit result)
+- `bun server stop` → Stop server (clear action, predictable outcome)
 
 **✅ Natural Language Flow**:
 - `read 'email', 'email'` → Reads like English, works like you'd expect
@@ -78,10 +78,10 @@ Matz's **Principle of Least Surprise (POLS)** is deeply woven into Rip's DNA. Ev
 **🌐 Platform Mode** (fully working):
 ```bash
 # Transform any machine into a dynamic application platform
-rip-server platform              # Start platform controller
-rip-server deploy api apps/labs/api --port 3001 --workers 2
-rip-server scale api 10          # Real-time scaling
-rip-server list                  # Show all deployed apps
+bun server platform              # Start platform controller
+bun server deploy api apps/labs/api --port 3001 --workers 2
+bun server scale api 10          # Real-time scaling
+bun server list                  # Show all deployed apps
 # Visit dashboard: http://localhost:3000/platform
 ```
 
