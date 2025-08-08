@@ -1,6 +1,13 @@
-import { existsSync } from 'fs';
+import { existsSync, mkdirSync } from 'fs';
 import { join, resolve } from 'path';
+import { homedir } from 'os';
+import { spawn } from 'bun';
 import { RipPlatform, type AppConfig } from './platform-controller';
+
+// HTTPS/CA Configuration
+const RIP_CONFIG_DIR = join(homedir(), '.rip-server');
+const CA_DIR = join(RIP_CONFIG_DIR, 'ca');
+const CERTS_DIR = join(RIP_CONFIG_DIR, 'certs');
 
 async function isRunning(): Promise<boolean> {
   try {
@@ -145,24 +152,12 @@ async function startPlatform(): Promise<void> {
         return new Response('Platform shutting down...');
       }
 
-      // Forward to current app if any
-      if (platformInstance?.getCurrentApp()) {
-        const currentApp = platformInstance.getCurrentApp();
-        try {
-          // Load the current app and forward request
-          const indexPath = join(currentApp!.directory, 'index.rip');
-          let ripApp = await import(indexPath);
-          ripApp = ripApp.default || ripApp;
-
-          if (typeof ripApp === 'function') {
-            return await ripApp(req);
-          } else if (ripApp && typeof ripApp.fetch === 'function') {
-            return await ripApp.fetch(req);
-          }
-        } catch (error) {
-          console.error('❌ App request error:', error);
-          return new Response('App Error', { status: 500 });
-        }
+      // If no specific route matches, redirect to platform dashboard
+      if (url.pathname === '/') {
+        return new Response(null, {
+          status: 302,
+          headers: { Location: '/platform' }
+        });
       }
 
       return new Response('Platform Controller - No app running', { status: 404 });
@@ -450,14 +445,368 @@ Platform Mode (Dynamic Multi-App Management):
   bun server undeploy <name>    # Remove app from platform
   bun server list               # List deployed apps
   bun server start <name>       # Start a deployed app
+  bun server scale <name> <workers>  # Scale app workers
+  bun server restart <name>     # Restart an app
   bun server apps               # Show running apps
+
+HTTPS/CA Management:
+  bun server ca:init            # Initialize Certificate Authority
+  bun server ca:trust           # Trust CA in system keychain (macOS)
+  bun server ca:export          # Export CA certificate for manual import
+  bun server ca:info            # Show CA certificate information
+  bun server ca:list            # List generated certificates
+  bun server ca:clean           # Clean old certificates
 
 Examples:
   bun server apps/labs/api      # Start labs API directly
   bun server platform          # Start platform controller
   bun server deploy labs-api apps/labs/api  # Deploy to platform
-  bun server start labs-api    # Start deployed app`);
+  bun server start labs-api    # Start deployed app
+  bun server ca:init            # Set up development CA
+  bun server ca:trust           # Trust CA (no more browser warnings!)`);
 }
+
+// ===== HTTPS/CA UTILITY FUNCTIONS =====
+
+// Ensure directories exist
+function ensureDirectories() {
+  if (!existsSync(RIP_CONFIG_DIR)) {
+    mkdirSync(RIP_CONFIG_DIR, { recursive: true });
+  }
+  if (!existsSync(CA_DIR)) {
+    mkdirSync(CA_DIR, { recursive: true });
+  }
+  if (!existsSync(CERTS_DIR)) {
+    mkdirSync(CERTS_DIR, { recursive: true });
+  }
+}
+
+// Check if CA exists
+function hasCA(): boolean {
+  return (
+    existsSync(join(CA_DIR, 'root.crt')) && existsSync(join(CA_DIR, 'root.key'))
+  );
+}
+
+// Initialize CA
+async function initCA(): Promise<void> {
+  ensureDirectories();
+
+  console.log('🔐 Initializing Certificate Authority...');
+
+  const rootKey = join(CA_DIR, 'root.key');
+  const rootCrt = join(CA_DIR, 'root.crt');
+
+  // Generate Root CA key
+  const keyProc = spawn(['openssl', 'genrsa', '-out', rootKey, '3072'], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+
+  await keyProc.exited;
+
+  // Generate Root CA certificate
+  const certProc = spawn(
+    [
+      'openssl',
+      'req',
+      '-x509',
+      '-nodes',
+      '-sha256',
+      '-new',
+      '-key',
+      rootKey,
+      '-out',
+      rootCrt,
+      '-days',
+      '731',
+      '-subj',
+      '/CN=Rip Server Development CA',
+      '-addext',
+      'keyUsage = critical, keyCertSign',
+      '-addext',
+      'basicConstraints = critical, CA:TRUE, pathlen:0',
+      '-addext',
+      'subjectKeyIdentifier = hash',
+    ],
+    {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    },
+  );
+
+  await certProc.exited;
+
+  console.log('✅ CA initialized at ~/.rip-server/ca/');
+}
+
+// Generate CA-signed certificate
+async function generateCACert(
+  domain = 'localhost',
+): Promise<{ cert: string; key: string }> {
+  ensureDirectories();
+
+  if (!hasCA()) {
+    await initCA();
+  }
+
+  const certKey = join(CERTS_DIR, `${domain}.key`);
+  const certCsr = join(CERTS_DIR, `${domain}.csr`);
+  const certCrt = join(CERTS_DIR, `${domain}.crt`);
+
+  // Check if cert already exists
+  if (existsSync(certCrt) && existsSync(certKey)) {
+    return {
+      cert: await Bun.file(certCrt).text(),
+      key: await Bun.file(certKey).text(),
+    };
+  }
+
+  console.log(`🔐 Generating certificate for ${domain}...`);
+
+  // Get local IP
+  const getLocalIP = async (): Promise<string> => {
+    if (process.platform === 'darwin') {
+      const proc = spawn(['ipconfig', 'getifaddr', 'en0'], { stdout: 'pipe' });
+      const output = await new Response(proc.stdout).text();
+      return output.trim() || '127.0.0.1';
+    }
+    return '127.0.0.1';
+  };
+
+  const localIP = await getLocalIP();
+
+  // Generate site key
+  const keyProc = spawn(['openssl', 'genrsa', '-out', certKey, '2048'], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+
+  await keyProc.exited;
+
+  // Generate CSR
+  const csrProc = spawn(
+    [
+      'openssl',
+      'req',
+      '-sha256',
+      '-new',
+      '-key',
+      certKey,
+      '-out',
+      certCsr,
+      '-subj',
+      `/CN=${domain}`,
+    ],
+    {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    },
+  );
+
+  await csrProc.exited;
+
+  // Sign the certificate
+  const signProc = spawn(
+    [
+      'openssl',
+      'x509',
+      '-req',
+      '-sha256',
+      '-in',
+      certCsr,
+      '-out',
+      certCrt,
+      '-days',
+      '731',
+      '-CAkey',
+      join(CA_DIR, 'root.key'),
+      '-CA',
+      join(CA_DIR, 'root.crt'),
+      '-CAcreateserial',
+      '-extfile',
+      '/dev/stdin',
+    ],
+    {
+      stdout: 'pipe',
+      stderr: 'pipe',
+      stdin: Bun.spawn(
+        [
+          'echo',
+          `subjectAltName = DNS:${domain},DNS:*.${domain},DNS:localhost,IP:127.0.0.1,IP:${localIP}
+keyUsage = critical, digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth
+basicConstraints = CA:FALSE
+authorityKeyIdentifier = keyid:always
+subjectKeyIdentifier = hash`,
+        ],
+        { stdout: 'pipe' },
+      ).stdout,
+    },
+  );
+
+  await signProc.exited;
+
+  // Clean up CSR
+  await Bun.spawn(['rm', '-f', certCsr]).exited;
+
+  return {
+    cert: await Bun.file(certCrt).text(),
+    key: await Bun.file(certKey).text(),
+  };
+}
+
+// Generate self-signed certificate
+async function generateSelfSignedCert(): Promise<{
+  cert: string;
+  key: string;
+}> {
+  console.log('🔐 Generating self-signed certificate...');
+
+  // Use openssl to generate a self-signed cert
+  const proc = spawn(
+    [
+      'openssl',
+      'req',
+      '-x509',
+      '-newkey',
+      'rsa:2048',
+      '-keyout',
+      '/tmp/rip-key.pem',
+      '-out',
+      '/tmp/rip-cert.pem',
+      '-days',
+      '365',
+      '-nodes',
+      '-subj',
+      '/CN=localhost',
+    ],
+    {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    },
+  );
+
+  await proc.exited;
+
+  const cert = await Bun.file('/tmp/rip-cert.pem').text();
+  const key = await Bun.file('/tmp/rip-key.pem').text();
+
+  return { cert, key };
+}
+
+// Trust CA on system
+async function trustCA(): Promise<void> {
+  if (!hasCA()) {
+    console.error('❌ No CA found. Run "bun server ca:init" first.');
+    return;
+  }
+
+  const rootCrt = join(CA_DIR, 'root.crt');
+
+  if (process.platform === 'darwin') {
+    console.log('🔐 Adding CA to macOS keychain...');
+    const proc = spawn(
+      [
+        'sudo',
+        'security',
+        'add-trusted-cert',
+        '-d',
+        '-r',
+        'trustRoot',
+        '-k',
+        '/Library/Keychains/System.keychain',
+        rootCrt,
+      ],
+      {
+        stdout: 'inherit',
+        stderr: 'inherit',
+        stdin: 'inherit',
+      },
+    );
+
+    const code = await proc.exited;
+    if (code === 0) {
+      console.log('✅ CA trusted in system keychain');
+    } else {
+      console.error('❌ Failed to trust CA');
+    }
+  } else {
+    console.log('ℹ️  Manual trust required for your OS');
+    console.log(`   CA certificate: ${rootCrt}`);
+  }
+}
+
+// Export CA certificate
+async function exportCA(): Promise<void> {
+  if (!hasCA()) {
+    console.error('❌ No CA found. Run "bun server ca:init" first.');
+    return;
+  }
+
+  const rootCrt = join(CA_DIR, 'root.crt');
+  const exportPath = join(process.cwd(), 'rip-server-ca.crt');
+
+  await Bun.write(exportPath, Bun.file(rootCrt));
+  console.log(`✅ CA certificate exported to: ${exportPath}`);
+  console.log('   Import this certificate to your browser as a trusted root CA');
+}
+
+// Show CA info
+async function showCAInfo(): Promise<void> {
+  if (!hasCA()) {
+    console.log('❌ No CA found. Run "bun server ca:init" to create one.');
+    return;
+  }
+
+  const rootCrt = join(CA_DIR, 'root.crt');
+
+  console.log('🔐 Certificate Authority Information:');
+  console.log(`   Location: ${CA_DIR}`);
+  console.log(`   Certificate: ${rootCrt}`);
+
+  const proc = spawn(
+    ['openssl', 'x509', '-in', rootCrt, '-noout', '-subject', '-dates'],
+    {
+      stdout: 'inherit',
+      stderr: 'inherit',
+    },
+  );
+
+  await proc.exited;
+}
+
+// List generated certificates
+async function listCerts(): Promise<void> {
+  ensureDirectories();
+
+  console.log('📜 Generated Certificates:');
+  console.log(`   Directory: ${CERTS_DIR}`);
+
+  const proc = spawn(['ls', '-la', CERTS_DIR], {
+    stdout: 'inherit',
+    stderr: 'inherit',
+  });
+
+  await proc.exited;
+}
+
+// Clean old certificates
+async function cleanCerts(): Promise<void> {
+  console.log('🧹 Cleaning certificates...');
+
+  const proc = spawn(['rm', '-rf', CERTS_DIR], {
+    stdout: 'inherit',
+    stderr: 'inherit',
+  });
+
+  await proc.exited;
+
+  mkdirSync(CERTS_DIR, { recursive: true });
+  console.log('✅ Certificates cleaned');
+}
+
+// ===== MAIN FUNCTION =====
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -504,6 +853,31 @@ async function main(): Promise<void> {
 
     case 'restart':
       await handleRestartApp(args[1]);
+      break;
+
+    // CA management commands
+    case 'ca:init':
+      await initCA();
+      break;
+
+    case 'ca:trust':
+      await trustCA();
+      break;
+
+    case 'ca:export':
+      await exportCA();
+      break;
+
+    case 'ca:info':
+      await showCAInfo();
+      break;
+
+    case 'ca:list':
+      await listCerts();
+      break;
+
+    case 'ca:clean':
+      await cleanCerts();
       break;
 
     default:
