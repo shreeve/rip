@@ -70,8 +70,7 @@ parseIds = (val) ->
   catch error
     null
 
-# JSON parsing helper
-parseJsonSafely = (body) -> try JSON.parse(body) catch error then {}
+# (removed) parseJsonSafely - no longer used
 
 # Date parsing helpers
 parseDate = (val) -> try date = new Date(val); if isNaN(date.getTime()) then null else date.toISOString().split('T')[0] catch error then null
