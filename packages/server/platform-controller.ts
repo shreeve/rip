@@ -1,6 +1,6 @@
 /**
  * 🌐 Rip Platform Controller - Simplified Dynamic Application Management
- * 
+ *
  * A simplified version that works with our current single-process architecture.
  * Manages multiple Rip applications dynamically without complex process spawning.
  */
@@ -70,7 +70,7 @@ export class RipPlatform {
     // Validate app directory exists
     const absolutePath = resolve(directory);
     const indexPath = join(absolutePath, 'index.rip');
-    
+
     if (!existsSync(indexPath)) {
       throw new Error(`No index.rip found in ${directory}`);
     }
@@ -94,7 +94,7 @@ export class RipPlatform {
 
     this.apps.set(name, config);
     console.log(`✅ App '${name}' deployed with ${workers} workers (will run on port ${port})`);
-    
+
     return config;
   }
 
@@ -117,7 +117,7 @@ export class RipPlatform {
   }
 
   /**
-   * Start a specific app with full multi-process architecture
+   * Start a specific app with full multi-process architecture (concurrent support)
    */
   async startApp(name: string): Promise<void> {
     const app = this.apps.get(name);
@@ -126,7 +126,7 @@ export class RipPlatform {
     }
 
     if (app.status === 'running') {
-      console.log(`⚠️ App '${name}' is already running`);
+      console.log(`⚠️ App '${name}' is already running on port ${app.port}`);
       return;
     }
 
@@ -136,7 +136,7 @@ export class RipPlatform {
       // Start workers via manager
       await this.manager.startApp(name, app.directory, app.workers);
 
-      // Start HTTP server for load balancing
+      // Start HTTP server for load balancing on app's dedicated port
       const server = new RipServer(app.port, name, app.workers);
       await server.start();
       this.servers.set(name, server);
@@ -147,6 +147,15 @@ export class RipPlatform {
 
       console.log(`✅ App '${name}' started successfully`);
       console.log(`🌐 Available at: http://localhost:${app.port}`);
+
+      // Show running apps summary
+      const runningApps = this.getRunningApps();
+      if (runningApps.length > 1) {
+        console.log(`📊 Total running apps: ${runningApps.length}`);
+        runningApps.forEach(runningApp => {
+          console.log(`   • ${runningApp.name}: http://localhost:${runningApp.port} (${runningApp.workers} workers)`);
+        });
+      }
     } catch (error) {
       app.status = 'error';
       app.error = error instanceof Error ? error.message : String(error);
@@ -204,7 +213,7 @@ export class RipPlatform {
    */
   getStats(): PlatformStats {
     const runningApps = Array.from(this.apps.values()).filter(app => app.status === 'running').length;
-    
+
     return {
       totalApps: this.apps.size,
       runningApps,
