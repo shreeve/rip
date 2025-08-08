@@ -42,11 +42,15 @@ toName = (val, type = 'name') ->
   else
     cleaned
 
-# Boolean helpers
-truthy = (val) -> val in [true, 'true', '1', 1, 'yes', 'on', 'y']
-falsy = (val) -> val in [false, 'false', '0', 0, 'no', 'off', 'n']
-bool = (val) -> return true if truthy(val); return false if falsy(val); null
-isBlank = (val) -> not val? or val == '' or (typeof val == 'string' and val.trim() == '')
+# Boolean helpers (succinct + readable)
+lower = (v) -> if typeof v == 'string' then v.trim().toLowerCase() else null
+TRUTHY = ['true', '1', 'yes', 'on', 'y']
+FALSY  = ['false', '0', 'no', 'off', 'n']
+
+truthy  = (val) -> (val is true) or (lower(val) in TRUTHY)
+falsy   = (val) -> (val is false) or (lower(val) in FALSY)
+bool    = (val) -> if truthy(val) then true else if falsy(val) then false else null
+isBlank = (val) -> not val? or (typeof val is 'string' and val.trim() is '')
 
 # IDs parsing helper
 # Accepts space- and comma-separated positive integers (no leading zeros),
