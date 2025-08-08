@@ -7,21 +7,21 @@
 ## Available Examples
 
 ### 🏥 Medical (`/medical`)
-- Comprehensive medical/enterprise system schema
-- Demonstrates ALL column types and patterns
-- Complex relationships and indexes
-- Best for: Learning advanced schema features
+- Comprehensive medical/enterprise system API
+- **Real-world production schema** (1,192+ lines, 80+ tables)
+- Actual healthcare practice data models
+- Best for: Learning enterprise database architectures
 
 ### 📝 Blog (`/blog`)
 - Full blog API with posts, users, comments
-- Real database integration (SQLite + Drizzle)
+- Real database integration (DuckDB + Drizzle)
 - RESTful endpoints with Faker.js
 - Best for: Building content-based applications
 
 ### ⚖️ Legal (`/legal`)
 - Law firm management API
 - CRUD operations with validation
-- Zod schema validation
+- DuckDB + Drizzle + Zod integration
 - Best for: Business applications
 
 ### 👥 Users (`/users`)
@@ -32,8 +32,8 @@
 
 ### 👋 Hello (`/hello`)
 - Minimal "Hello World" example
-- Basic routing and worker info
-- Simulated work endpoints
+- Worker info and performance testing
+- Input validation and error handling
 - Best for: Getting started
 
 ## Running Examples
@@ -62,8 +62,9 @@ bun server platform
 
 # Deploy multiple examples at once!
 bun server deploy blog examples/blog --port 3001 --workers 2
-bun server deploy legal examples/legal --port 3002 --workers 3
-bun server deploy users examples/users --port 3003 --workers 1
+bun server deploy medical examples/medical --port 3002 --workers 3
+bun server deploy users examples/users --port 3003 --workers 2
+bun server deploy legal examples/legal --port 3004 --workers 4
 
 # Visit the platform dashboard
 open http://localhost:3000/platform
@@ -88,10 +89,10 @@ Each example demonstrates:
 - ✅ Hot reload support
 
 Database examples (blog, legal, medical) also show:
-- ✅ SQLite integration
+- ✅ DuckDB integration
 - ✅ Drizzle ORM usage
-- ✅ Schema validation
-- ✅ Data generation
+- ✅ @rip/schema validation
+- ✅ Faker.js data generation
 
 ## License
 

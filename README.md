@@ -115,11 +115,11 @@ Seamless transpilation plugin enabling `.rip` files to run directly in Bun.
 ## 🚀 Examples
 
 Explore working examples in the [`/examples`](examples/) directory:
+- **[hello](examples/hello/)** - Minimal hello world with worker info
 - **[blog](examples/blog/)** - Full blog API with posts, users, and comments
+- **[medical](examples/medical/)** - Enterprise medical system API
+- **[users](examples/users/)** - In-memory user management API
 - **[legal](examples/legal/)** - Law firm management system
-- **[medical](examples/medical/)** - Complex medical schema showcase
-- **[users](examples/users/)** - Simple user management API
-- **[hello](examples/hello/)** - Minimal hello world
 
 ## The Rip Language
 
