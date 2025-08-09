@@ -167,8 +167,10 @@ export class RipServer {
    * Forward request to a specific worker via Unix socket
    */
   private async forwardToWorker(req: Request, socketPath: string): Promise<Response> {
-    // Use Bun's native Unix socket support in fetch!
-    return await fetch(req.url, {
+    // Rebuild URL for unix socket forwarding (scheme/host don't matter)
+    const inUrl = new URL(req.url);
+    const forwardUrl = `http://localhost${inUrl.pathname}${inUrl.search}`;
+    return await fetch(forwardUrl, {
       method: req.method,
       headers: req.headers,
       body: req.body,
