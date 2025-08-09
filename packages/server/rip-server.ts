@@ -342,11 +342,11 @@ async function showStatus(): Promise<void> {
       })),
     };
     console.log(JSON.stringify(payload, null, 2));
-    process.exitCode = payload.status === 'stopped' ? 1 : 0;
+    process.exitCode = payload.status === 'stopped' ? 3 : 0;
   } else {
     if (!results.length) {
       console.log('❌ No running Rip servers found');
-      process.exitCode = 1;
+      process.exitCode = 3;
       return;
     }
     console.log('🔍 Rip Server Status');
