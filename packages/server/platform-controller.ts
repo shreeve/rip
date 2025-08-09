@@ -20,6 +20,10 @@ export interface AppConfig {
   name: string;
   directory: string;
   port: number;
+  protocol?: 'http' | 'https' | 'http+https';
+  httpsPort?: number;
+  httpsCert?: string;
+  httpsKey?: string;
   workers: number;
   status: 'deployed' | 'running' | 'stopped' | 'error';
   startedAt?: Date;
@@ -69,7 +73,16 @@ export class RipPlatform {
   /**
    * Deploy a new application with multi-process support
    */
-  async deployApp(name: string, directory: string, workers: number = 3, desiredPort?: number): Promise<AppConfig> {
+  async deployApp(
+    name: string,
+    directory: string,
+    workers: number = 3,
+    desiredPort?: number,
+    protocol?: 'http' | 'https' | 'http+https',
+    httpsPort?: number,
+    httpsCert?: string,
+    httpsKey?: string,
+  ): Promise<AppConfig> {
     // Validate app doesn't already exist
     if (this.apps.has(name)) {
       throw new Error(`App '${name}' is already deployed`);
@@ -83,16 +96,28 @@ export class RipPlatform {
       throw new Error(`No index.rip found in ${directory}`);
     }
 
-    // Find/select port
+    // Find/select HTTP port
     let port = desiredPort && desiredPort >= 1024 ? desiredPort : 3001;
     while (this.usedPorts.has(port)) port++;
     this.usedPorts.add(port);
+
+    // Reserve HTTPS port if provided
+    let finalHttpsPort: number | undefined = undefined;
+    if (protocol === 'https' || protocol === 'http+https') {
+      finalHttpsPort = httpsPort && httpsPort >= 1024 ? httpsPort : 3443;
+      while (this.usedPorts.has(finalHttpsPort)) finalHttpsPort++;
+      this.usedPorts.add(finalHttpsPort);
+    }
 
     // Create app config
     const config: AppConfig = {
       name,
       directory: absolutePath,
       port,
+      protocol,
+      httpsPort: finalHttpsPort,
+      httpsCert,
+      httpsKey,
       workers,
       status: 'deployed',
       startedAt: new Date()
@@ -143,7 +168,10 @@ export class RipPlatform {
       await this.manager.startApp(name, app.directory, app.workers);
 
       // Start HTTP/HTTPS server for load balancing on app's dedicated port
-      const server = new RipServer(app.port, name, app.workers);
+      const httpsConfig = (app.protocol === 'https' || app.protocol === 'http+https') && app.httpsPort && app.httpsCert && app.httpsKey
+        ? { httpsPort: app.httpsPort, cert: app.httpsCert, key: app.httpsKey }
+        : undefined;
+      const server = new RipServer(app.port, name, app.workers, httpsConfig);
       await server.start();
       this.servers.set(name, server);
 

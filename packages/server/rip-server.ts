@@ -444,8 +444,8 @@ async function handlePlatformAPI(req: Request, url: URL): Promise<Response> {
 
     // POST /api/apps - Deploy app
     if (url.pathname === '/api/apps' && req.method === 'POST') {
-      const body = await req.json() as { name: string; directory: string; workers?: number; port?: number };
-      const app = await platformInstance.deployApp(body.name, body.directory, body.workers ?? 3, body.port);
+      const body = await req.json() as { name: string; directory: string; workers?: number; port?: number; protocol?: 'http'|'https'|'http+https'; httpsPort?: number; cert?: string; key?: string };
+      const app = await platformInstance.deployApp(body.name, body.directory, body.workers ?? 3, body.port, body.protocol, body.httpsPort, body.cert, body.key);
       return new Response(JSON.stringify(app, null, 2), {
         headers: { 'Content-Type': 'application/json' }
       });
@@ -1211,6 +1211,12 @@ async function handleDeploy(config: Config, remainingArgs: string[]): Promise<vo
   const deployData: any = { name, directory };
   if (config.workers) deployData.workers = config.workers;
   if (config.httpPort) deployData.port = config.httpPort;
+  if (config.protocol) deployData.protocol = config.protocol;
+  if (config.httpsPort) deployData.httpsPort = config.httpsPort;
+  if (config.certPath && config.keyPath) {
+    deployData.cert = await Bun.file(config.certPath).text().catch(() => undefined);
+    deployData.key = await Bun.file(config.keyPath).text().catch(() => undefined);
+  }
 
   try {
     const response = await fetch('http://localhost:3000/api/apps', {
