@@ -18,12 +18,14 @@ export class RipServer {
   private server: any = null;
   private httpsServer: any = null;
   private httpsConfig?: { httpsPort: number; cert: string; key: string };
+  private useJsonLogs: boolean;
 
   constructor(port: number, appName: string, numWorkers: number, httpsConfig?: { httpsPort: number; cert: string; key: string }) {
     this.port = port ?? null;
     this.appName = appName;
     this.numWorkers = numWorkers;
     this.httpsConfig = httpsConfig;
+    this.useJsonLogs = (process.env.RIP_LOG_JSON || '') === '1';
 
     // Generate worker socket paths
     this.workerSocketPaths = Array.from(
@@ -188,6 +190,23 @@ export class RipServer {
    * Pretty console logger with fixed-width timestamp and two duration slots
    */
   private logRequest(req: Request, res: Response, totalMs: number, workerMs: number): void {
+    if (this.useJsonLogs) {
+      const url = new URL(req.url);
+      const len = res.headers.get('content-length');
+      const type = (res.headers.get('content-type') || '').split(';')[0] || undefined;
+      console.log(JSON.stringify({
+        t: new Date().toISOString(),
+        app: this.appName,
+        method: (req as any).method || 'GET',
+        path: url.pathname,
+        status: res.status,
+        totalMs,
+        workerMs,
+        type,
+        length: len ? Number(len) : undefined,
+      }));
+      return;
+    }
     const now = new Date();
     const pad = (n: number, w = 2) => String(n).padStart(w, '0');
     const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}.${String(now.getMilliseconds()).padStart(3, '0')}`;

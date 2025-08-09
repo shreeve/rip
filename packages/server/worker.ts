@@ -93,6 +93,7 @@ async function handleRequest(req: Request): Promise<Response> {
 
   requestInProgress = true;
   let timeoutId: Timer;
+  const start = Date.now();
 
   try {
     // Set up request timeout
@@ -125,6 +126,37 @@ async function handleRequest(req: Request): Promise<Response> {
       setTimeout(() => process.exit(0), 100);
     }
     
+    // Simple per-worker console log (JSON if requested)
+    const totalMs = Date.now() - start;
+    const url = new URL(req.url);
+    const useJson = (process.env.RIP_LOG_JSON || '') === '1';
+    if (useJson) {
+      const len = response.headers.get('content-length');
+      const type = (response.headers.get('content-type') || '').split(';')[0] || undefined;
+      console.log(JSON.stringify({
+        t: new Date().toISOString(),
+        role: 'worker',
+        app: appName,
+        worker: workerNum,
+        method: (req as any).method || 'GET',
+        path: url.pathname,
+        status: response.status,
+        totalMs,
+        type,
+        length: len ? Number(len) : undefined,
+      }));
+    } else {
+      const pad = (n: number, w = 2) => String(n).padStart(w, '0');
+      const now = new Date();
+      const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}.${String(now.getMilliseconds()).padStart(3, '0')}`;
+      const tzMin = now.getTimezoneOffset();
+      const tzSign = tzMin <= 0 ? '+' : '-';
+      const tzAbs = Math.abs(tzMin);
+      const tzStr = `${tzSign}${String(Math.floor(tzAbs / 60)).padStart(2, '0')}${String(tzAbs % 60).padStart(2, '0')}`;
+      const fmt = (ms: number) => (ms < 1000 ? `${(ms < 100 ? (ms < 10 ? ms.toFixed(1) : Math.round(ms).toString()) : Math.round(ms).toString()).padStart(3,' ')}m` + 's' : `${(ms/1000 < 100 ? (ms/1000).toFixed(1) : Math.round(ms/1000).toString()).padStart(3,' ')} ` + 's');
+      console.log(`[${ts} ${tzStr} ${fmt(totalMs)}   ] W${workerNum} ${(req as any).method || 'GET'} ${url.pathname} → ${response.status}`);
+    }
+
     return response;
     
   } catch (error) {
