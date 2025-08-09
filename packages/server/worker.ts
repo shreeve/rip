@@ -13,6 +13,8 @@
 
 // Make this a module to allow top-level await
 export {};
+import { existsSync } from 'fs';
+import { join } from 'path';
 
 // Configuration
 const workerId = Number.parseInt(process.argv[2] ?? '0');
@@ -57,10 +59,19 @@ try {
 let ripApp: any = null;
 
 async function loadRipApp(): Promise<void> {
-  // Use absolute path for imports
-  const indexPath = `${appDirectory}/index.rip`.startsWith('/')
-    ? `${appDirectory}/index.rip`
-    : `${process.cwd()}/${appDirectory}/index.rip`;
+  // Discover entry point (multiple candidates for POLS)
+  const candidates = [
+    'index.rip', 'app.rip', 'server.rip', 'main.rip',
+    'index.ts', // allow TS entry if user prefers
+  ];
+  let entryPath: string | null = null;
+  for (const file of candidates) {
+    const abs = appDirectory.startsWith('/')
+      ? join(appDirectory, file)
+      : join(process.cwd(), appDirectory, file);
+    if (existsSync(abs)) { entryPath = abs; break; }
+  }
+  const indexPath = entryPath || (appDirectory.startsWith('/') ? join(appDirectory, 'index.rip') : join(process.cwd(), appDirectory, 'index.rip'));
 
   try {
     console.log(`📁 [Worker ${workerNum}] Loading Rip app from ${indexPath}`);
