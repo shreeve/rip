@@ -473,14 +473,14 @@ async function startServer(appPath: string, config?: Config): Promise<void> {
 // Global platform instance
 let platformInstance: RipPlatform | null = null;
 
-async function startPlatform(): Promise<void> {
+async function startPlatform(port = 3000): Promise<void> {
   console.log('🚀 Starting Rip Platform Controller...');
 
-  platformInstance = new RipPlatform(3000);
+  platformInstance = new RipPlatform(port);
 
   // Create platform server with API and dashboard
   const server = Bun.serve({
-    port: 3000,
+    port,
     async fetch(req) {
       const url = new URL(req.url);
 
@@ -521,9 +521,9 @@ async function startPlatform(): Promise<void> {
     }
   });
 
-  console.log('✅ Platform Controller running at http://localhost:3000');
-  console.log('📊 Dashboard: http://localhost:3000/platform');
-  console.log('🔧 API: http://localhost:3000/api');
+  console.log(`✅ Platform Controller running at http://localhost:${port}`);
+  console.log(`📊 Dashboard: http://localhost:${port}/platform`);
+  console.log(`🔧 API: http://localhost:${port}/api`);
   console.log('🎯 Press Ctrl+C to stop');
 }
 
@@ -1230,9 +1230,13 @@ async function main(): Promise<void> {
       break;
 
     // Platform commands
-    case 'platform':
-      await startPlatform();
+    case 'platform': {
+      // allow optional port e.g. `bun server platform 3100`
+      const portArg = args.find(a => /^\d+$/.test(a));
+      const p = portArg ? Number.parseInt(portArg) : 3000;
+      await startPlatform(p);
       break;
+    }
 
     case 'deploy':
       await handleDeploy(config, args.slice(1));
