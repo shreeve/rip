@@ -386,7 +386,7 @@ async function startServer(appPath: string, config?: Config): Promise<void> {
   const workers = config?.workers ?? defaults.workers;
   const requests = config?.requests ?? defaults.requests;
   const protocol = config?.protocol ?? 'http';
-  const httpPort = config?.httpPort ?? defaults.httpPort;
+  let httpPort = config?.httpPort ?? defaults.httpPort;
   const httpsPort = config?.httpsPort ?? defaults.httpsPort;
   const jsonLogging = !!config?.jsonLogging;
 
@@ -431,6 +431,20 @@ async function startServer(appPath: string, config?: Config): Promise<void> {
       httpsConfig = { httpsPort, cert: certText, key: keyText };
     } else {
       console.warn('⚠️  HTTPS requested but certificate material missing; continuing without HTTPS');
+    }
+  }
+
+  // Avoid trivial HTTP port conflicts by probing /health and bumping port
+  if (protocol !== 'https') {
+    for (let i = 0; i < 20; i++) {
+      let ok = false;
+      try {
+        const res = await fetch(`http://localhost:${httpPort}/health`, { signal: AbortSignal.timeout(300) });
+        ok = res.ok;
+      } catch {}
+      if (!ok) break;
+      console.warn(`⚠️  Port ${httpPort} appears in use; trying ${httpPort + 1}`);
+      httpPort++;
     }
   }
 
