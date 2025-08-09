@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, statSync } from 'fs';
+import { existsSync, mkdirSync, statSync, writeFileSync, readFileSync, readdirSync, unlinkSync } from 'fs';
 import { join, resolve } from 'path';
 import { homedir } from 'os';
 import { spawn } from 'bun';
@@ -10,6 +10,7 @@ import { RipServer } from './server';
 const RIP_CONFIG_DIR = join(homedir(), '.rip-server');
 const CA_DIR = join(RIP_CONFIG_DIR, 'ca');
 const CERTS_DIR = join(RIP_CONFIG_DIR, 'certs');
+const RUN_DIR = join(RIP_CONFIG_DIR, 'run');
 
 // Configuration defaults
 const defaults = {
@@ -256,8 +257,25 @@ async function loadFileConfig(appDir: string): Promise<Partial<Config>> {
 
 async function isRunning(): Promise<boolean> {
   try {
+    // Check any direct-mode pid files and probe ports
+    if (existsSync(RUN_DIR)) {
+      const files = readdirSync(RUN_DIR).filter(f => f.startsWith('direct-') && f.endsWith('.pid'));
+      for (const f of files) {
+        try {
+          const meta = JSON.parse(readFileSync(join(RUN_DIR, f), 'utf8')) as any;
+          const probes: string[] = [];
+          if (meta.httpPort) probes.push(`http://localhost:${meta.httpPort}/health`);
+          if (meta.httpsPort) probes.push(`https://localhost:${meta.httpsPort}/health`);
+          for (const u of probes) {
+            const res = await fetch(u, { signal: AbortSignal.timeout(600), redirect: 'manual' as any }).catch(() => null);
+            if (res && res.ok) return true;
+          }
+        } catch {}
+      }
+    }
+    // Fallback to platform default
     const response = await fetch('http://localhost:3000/health', {
-      signal: AbortSignal.timeout(1000)
+      signal: AbortSignal.timeout(800)
     });
     return response.ok;
   } catch {
@@ -266,33 +284,97 @@ async function isRunning(): Promise<boolean> {
 }
 
 async function showStatus(): Promise<void> {
-  console.log('🔍 Rip Server Status');
+  ensureDirectories();
+  const json = process.argv.includes('--json') || process.argv.includes('-j');
+  const results: any[] = [];
+  if (existsSync(RUN_DIR)) {
+    const files = readdirSync(RUN_DIR).filter(f => f.startsWith('direct-') && f.endsWith('.pid'));
+    for (const f of files) {
+      try {
+        const meta = JSON.parse(readFileSync(join(RUN_DIR, f), 'utf8')) as any;
+        const probes: { url: string; ok: boolean }[] = [];
+        if (meta.httpPort) {
+          const url = `http://localhost:${meta.httpPort}/health`;
+          const res = await fetch(url).catch(() => null);
+          probes.push({ url, ok: !!res?.ok });
+        }
+        if (meta.httpsPort) {
+          const url = `https://localhost:${meta.httpsPort}/health`;
+          const res = await fetch(url).catch(() => null);
+          probes.push({ url, ok: !!res?.ok });
+        }
+        results.push({ mode: 'direct', ...meta, probes });
+      } catch {}
+    }
+  }
 
-  const running = await isRunning();
+  // Platform probe
+  try {
+    const res = await fetch('http://localhost:3000/health');
+    if (res.ok) {
+      const text = await res.text();
+      let mode: string | undefined;
+      try { const j = JSON.parse(text); mode = j.mode; } catch {}
+      if (mode === 'platform') {
+        results.push({ mode: 'platform', port: 3000, ok: true });
+      } else {
+        results.push({ mode: 'unknown', port: 3000, ok: true });
+      }
+    }
+  } catch {}
 
-  if (running) {
-    console.log('✅ Status: RUNNING');
-    console.log('🌐 URL: http://localhost:3000');
+  if (json) {
+    console.log(JSON.stringify({ status: results.length ? 'running' : 'stopped', processes: results }, null, 2));
   } else {
-    console.log('❌ Status: NOT RUNNING');
+    if (!results.length) {
+      console.log('❌ No running Rip servers found');
+      process.exitCode = 1;
+      return;
+    }
+    console.log('🔍 Rip Server Status');
+    for (const p of results) {
+      if (p.mode === 'direct') {
+        console.log(`✅ direct:${p.app} pid=${p.pid} workers=${p.workers} reqs=${p.requests}`);
+        for (const pr of p.probes) {
+          console.log(`   ${pr.ok ? '🌐' : '⚠️ '} ${pr.url}`);
+        }
+      } else if (p.mode === 'platform') {
+        console.log(`✅ platform: http://localhost:${p.port}`);
+      }
+    }
   }
 }
 
 async function stopServer(): Promise<void> {
-  console.log('🛑 Stopping Rip Server...');
-
+  ensureDirectories();
+  console.log('🛑 Stopping Rip Server(s)...');
+  let stopped = 0;
+  // Direct mode stops
+  if (existsSync(RUN_DIR)) {
+    const files = readdirSync(RUN_DIR).filter(f => f.startsWith('direct-') && f.endsWith('.pid'));
+    for (const f of files) {
+      try {
+        const meta = JSON.parse(readFileSync(join(RUN_DIR, f), 'utf8')) as any;
+        try { process.kill(meta.pid, 'SIGTERM'); stopped++; } catch {}
+        try { unlinkSync(join(RUN_DIR, f)); } catch {}
+      } catch {}
+    }
+  }
+  // Platform stop via API
   try {
-    await fetch('http://localhost:3000/shutdown', {
-      method: 'POST',
-      signal: AbortSignal.timeout(2000)
-    });
-    console.log('✅ Server stopped');
-  } catch {
-    console.log('⚠️  Server was not running');
+    const res = await fetch('http://localhost:3000/shutdown', { method: 'POST', signal: AbortSignal.timeout(1500) });
+    if (res.ok) stopped++;
+  } catch {}
+  if (stopped === 0) {
+    console.log('⚠️  No running servers found');
+    process.exitCode = 1;
+  } else {
+    console.log(`✅ Stopped ${stopped} server${stopped > 1 ? 's' : ''}`);
   }
 }
 
 async function startServer(appPath: string, config?: Config): Promise<void> {
+  ensureDirectories();
   const absoluteAppPath = resolve(appPath);
   const indexPath = join(absoluteAppPath, 'index.rip');
   if (!existsSync(indexPath)) {
@@ -367,6 +449,10 @@ async function startServer(appPath: string, config?: Config): Promise<void> {
   if (httpsConfig) endpoints.push(`https://localhost:${httpsConfig.httpsPort}`);
   console.log(`✅ Running: ${endpoints.join('  ')}`);
 
+  // Write pid file for status/stop
+  const pidFile = join(RUN_DIR, `direct-${appName}.pid`);
+  writeFileSync(pidFile, JSON.stringify({ pid: process.pid, app: appName, httpPort: lbHttpPort, httpsPort: httpsConfig?.httpsPort, workers, requests, startedAt: Date.now() }));
+
   // Graceful shutdown
   const shutdown = async () => {
     try {
@@ -374,6 +460,9 @@ async function startServer(appPath: string, config?: Config): Promise<void> {
     } catch {}
     try {
       await manager.stopApp(appName);
+    } catch {}
+    try {
+      unlinkSync(pidFile);
     } catch {}
     process.exit(0);
   };
@@ -766,6 +855,9 @@ function ensureDirectories() {
   }
   if (!existsSync(CERTS_DIR)) {
     mkdirSync(CERTS_DIR, { recursive: true });
+  }
+  if (!existsSync(RUN_DIR)) {
+    mkdirSync(RUN_DIR, { recursive: true });
   }
 }
 
