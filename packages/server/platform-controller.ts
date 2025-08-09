@@ -28,6 +28,7 @@ export interface AppConfig {
   status: 'deployed' | 'running' | 'stopped' | 'error';
   startedAt?: Date;
   error?: string;
+  jsonLogging?: boolean;
 }
 
 export interface PlatformStats {
@@ -82,6 +83,7 @@ export class RipPlatform {
     httpsPort?: number,
     httpsCert?: string,
     httpsKey?: string,
+    jsonLogging?: boolean,
   ): Promise<AppConfig> {
     // Validate app doesn't already exist
     if (this.apps.has(name)) {
@@ -120,7 +122,8 @@ export class RipPlatform {
       httpsKey,
       workers,
       status: 'deployed',
-      startedAt: new Date()
+      startedAt: new Date(),
+      jsonLogging,
     };
 
     this.apps.set(name, config);
@@ -172,7 +175,7 @@ export class RipPlatform {
         ? { httpsPort: app.httpsPort, cert: app.httpsCert, key: app.httpsKey }
         : undefined;
       const httpPort = app.protocol === 'https' ? null : app.port;
-      const server = new RipServer(httpPort as any, name, app.workers, httpsConfig);
+      const server = new RipServer(httpPort as any, name, app.workers, httpsConfig, !!app.jsonLogging);
       await server.start();
       this.servers.set(name, server);
 

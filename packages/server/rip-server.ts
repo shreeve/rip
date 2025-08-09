@@ -35,6 +35,7 @@ interface Config {
   protocol?: 'http' | 'https' | 'http+https';
   httpsMode?: 'smart' | 'quick' | 'ca';
   json?: boolean;
+  jsonLogging?: boolean;
 }
 
 // ===== FLEXIBLE ARGUMENT PARSING =====
@@ -139,6 +140,12 @@ function parseArgs(args: string[]): Config {
     // JSON output flag
     if (arg === '--json' || arg === '-j') {
       config.json = true;
+      continue;
+    }
+
+    // JSON logging flag
+    if (arg === '--json-logging') {
+      config.jsonLogging = true;
       continue;
     }
 
@@ -444,7 +451,7 @@ async function handlePlatformAPI(req: Request, url: URL): Promise<Response> {
 
     // POST /api/apps - Deploy app
     if (url.pathname === '/api/apps' && req.method === 'POST') {
-      const body = await req.json() as { name: string; directory: string; workers?: number; port?: number; protocol?: 'http'|'https'|'http+https'; httpsPort?: number; cert?: string; key?: string };
+      const body = await req.json() as { name: string; directory: string; workers?: number; port?: number; protocol?: 'http'|'https'|'http+https'; httpsPort?: number; cert?: string; key?: string; jsonLogging?: boolean };
       const app = await platformInstance.deployApp(
         body.name,
         body.directory,
@@ -454,6 +461,7 @@ async function handlePlatformAPI(req: Request, url: URL): Promise<Response> {
         body.httpsPort,
         body.cert,
         body.key,
+        body.jsonLogging,
       );
       // Auto-start app after deploy
       try { await platformInstance.startApp(body.name); } catch {}
@@ -1228,6 +1236,7 @@ async function handleDeploy(config: Config, remainingArgs: string[]): Promise<vo
     deployData.cert = await Bun.file(config.certPath).text().catch(() => undefined);
     deployData.key = await Bun.file(config.keyPath).text().catch(() => undefined);
   }
+  if (config.jsonLogging) deployData.jsonLogging = true;
 
   try {
     const response = await fetch('http://localhost:3000/api/apps', {

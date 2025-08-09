@@ -20,12 +20,12 @@ export class RipServer {
   private httpsConfig?: { httpsPort: number; cert: string; key: string };
   private useJsonLogs: boolean;
 
-  constructor(port: number, appName: string, numWorkers: number, httpsConfig?: { httpsPort: number; cert: string; key: string }) {
+  constructor(port: number, appName: string, numWorkers: number, httpsConfig?: { httpsPort: number; cert: string; key: string }, jsonLogging: boolean = false) {
     this.port = port ?? null;
     this.appName = appName;
     this.numWorkers = numWorkers;
     this.httpsConfig = httpsConfig;
-    this.useJsonLogs = (process.env.RIP_LOG_JSON || '') === '1';
+    this.useJsonLogs = jsonLogging;
 
     // Generate worker socket paths
     this.workerSocketPaths = Array.from(

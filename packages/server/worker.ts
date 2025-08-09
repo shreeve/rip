@@ -58,22 +58,22 @@ let ripApp: any = null;
 
 async function loadRipApp(): Promise<void> {
   // Use absolute path for imports
-  const indexPath = `${appDirectory}/index.rip`.startsWith('/') 
+  const indexPath = `${appDirectory}/index.rip`.startsWith('/')
     ? `${appDirectory}/index.rip`
     : `${process.cwd()}/${appDirectory}/index.rip`;
-  
+
   try {
     console.log(`📁 [Worker ${workerNum}] Loading Rip app from ${indexPath}`);
-    
+
     // Dynamic import to load the .rip application
     // The Rip transpiler should already be loaded via --preload
     const module = await import(indexPath);
     ripApp = module.default || module;
-    
+
     if (!ripApp) {
       throw new Error('No default export found in Rip app');
     }
-    
+
     console.log(`✅ [Worker ${workerNum}] Loaded Rip app successfully`);
   } catch (error) {
     console.error(`❌ [Worker ${workerNum}] Failed to load Rip app:`, error);
@@ -116,20 +116,20 @@ async function handleRequest(req: Request): Promise<Response> {
 
     // Race between request and timeout
     const response = await Promise.race([requestPromise, timeoutPromise]);
-    
+
     clearTimeout(timeoutId);
     requestsHandled++;
-    
+
     // Check if we should shutdown after this request
     if (requestsHandled >= maxRequests) {
       console.log(`🔄 [Worker ${workerNum}] Reached max requests (${maxRequests}), shutting down for restart`);
       setTimeout(() => process.exit(0), 100);
     }
-    
+
     // Simple per-worker console log (JSON if requested)
     const totalMs = Date.now() - start;
     const url = new URL(req.url);
-    const useJson = (process.env.RIP_LOG_JSON || '') === '1';
+    const useJson = false; // Worker logs always follow server option; platform focuses server logs
     if (useJson) {
       const len = response.headers.get('content-length');
       const type = (response.headers.get('content-type') || '').split(';')[0] || undefined;
@@ -158,7 +158,7 @@ async function handleRequest(req: Request): Promise<Response> {
     }
 
     return response;
-    
+
   } catch (error) {
     clearTimeout(timeoutId!);
     console.error(`❌ [Worker ${workerNum}] Request error:`, error);
@@ -198,30 +198,30 @@ async function startWorker(): Promise<void> {
   const shutdown = async () => {
     if (isShuttingDown) return;
     isShuttingDown = true;
-    
+
     console.log(`🛑 [Worker ${workerNum}] Graceful shutdown initiated...`);
-    
+
     // Wait for current request to finish
     while (requestInProgress) {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-    
+
     server.stop();
-    
+
     // Clean up socket
     try {
       await Bun.spawn(['rm', '-f', socketPath]).exited;
     } catch (_) {
       // Socket cleanup failed, continue
     }
-    
+
     console.log(`✅ [Worker ${workerNum}] Shutdown complete`);
     process.exit(0);
   };
 
   process.on('SIGTERM', shutdown);
   process.on('SIGINT', shutdown);
-  
+
   // Handle uncaught errors
   process.on('uncaughtException', (error) => {
     console.error(`💥 [Worker ${workerNum}] Uncaught exception:`, error);
