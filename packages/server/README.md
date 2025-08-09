@@ -130,6 +130,19 @@ bun server ca:clean                 # Clean old certificates
 
 **Perfect for monitoring, debugging, and performance analysis!** 🎯
 
+### Logging modes
+
+- Pretty fixed-width screen logs by default
+- JSON mode with `--json-logging` (ideal for log collectors)
+
+### Response headers
+
+Every proxied response includes:
+
+- `X-Rip-Worker`: worker index handling the request
+- `X-Rip-App`: application name
+- `X-Response-Time`: total server time in ms
+
 ## 🎯 **Complete Server Management Demo**
 
 **Step-by-step practical workflow** - everything you need to know:
@@ -191,6 +204,7 @@ bun server apps/labs/api 8080       # Custom port
 bun server w:5 r:100                # 5 workers, 100 requests each
 bun server https                    # HTTPS with auto-cert
 bun server prod                     # Production mode
+bun server --json-logging           # Structured JSON logs
 ```
 
 ### **🎯 Typical Workflow:**
@@ -302,6 +316,8 @@ bun server apps/ecommerce 4000      # E-commerce on port 4000
 bun server ../other-project 5000    # Any Rip app anywhere
 ```
 
+Accepted entry points (POLS): `index.rip`, `app.rip`, `server.rip`, `main.rip`, or `index.ts`.
+
 ### 🔥 Live Development Experience
 - **🎯 Zero Coupling**: Server runtime ↔ App logic completely independent
 - **⚡ Instant Switching**: Point server at different apps without restart
@@ -366,6 +382,8 @@ When you send a request like:
 - **🎯 Rip Language** - Full .rip transpilation support
 - **🌍 Universal** - Same code in development and production
 - **🛡️ Perfect Isolation** - No shared state between requests within workers
+ - **♻️ Rolling Restarts** - `r:N` caps requests per worker with staggered restarts
+ - **🧠 Smart Port Handling** - Direct mode auto-bumps HTTP port if in use
 
 ## 🔒 HTTPS Support
 
