@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, statSync } from 'fs';
 import { join, resolve } from 'path';
 import { homedir } from 'os';
 import { spawn } from 'bun';
-import { RipPlatform, type AppConfig } from './platform-controller';
+import { RipPlatform, type AppConfig } from './platform';
 
 // HTTPS/CA Configuration
 const RIP_CONFIG_DIR = join(homedir(), '.rip-server');
