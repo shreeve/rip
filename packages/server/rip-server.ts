@@ -900,8 +900,8 @@ function showHelp(): void {
 
 Usage:
   bun server help                        # Show this help
-  bun server status                      # Show server status
-  bun server stop [--force]              # Stop server(s); --force frees ports if needed
+  bun server status [--json]             # Show server status (machine-readable with --json)
+  bun server stop [target] [--force]     # Stop server(s); optional target (app, platform[:port], or port); --force frees ports
   bun server [app-path]                  # Start server with app
 
 Platform Mode (Dynamic Multi-App Management):
@@ -925,10 +925,16 @@ HTTPS/CA Management:
 
 Examples:
   bun server apps/labs/api                  # Start labs API directly
+  bun server status --json                  # Status in JSON with exit code
+  bun server stop api                       # Stop a specific direct-mode app
+  bun server stop platform:3100             # Stop platform on port 3100
+  bun server stop 3000 --force              # Free a stuck HTTP port
   bun server platform                       # Start platform controller
   bun server deploy labs-api apps/labs/api  # Deploy to platform
   bun server start labs-api                 # Start deployed app
   bun server ca:init                        # Set up development CA
+  bun server https:quick apps/labs/api      # Direct mode with quick HTTPS
+  bun server http+https w:4                 # Serve both protocols with 4 workers
   bun server ca:trust                       # Trust CA (no more browser warnings!)
 
 Flexible Arguments (ANY order):
