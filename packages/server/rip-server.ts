@@ -631,10 +631,33 @@ async function handlePlatformAPI(req: Request, url: URL): Promise<Response> {
   }
 
   try {
-    // GET /api/apps - List apps
+    // GET /api/apps - List apps (with port health hints)
     if (url.pathname === '/api/apps' && req.method === 'GET') {
       const apps = platformInstance.listApps();
-      return new Response(JSON.stringify(apps, null, 2), {
+      const withHealth = await Promise.all(apps.map(async (app) => {
+        let httpOk: boolean | null = null;
+        let httpsOk: boolean | null = null;
+        // HTTP health probe
+        if (app.protocol !== 'https' && app.port) {
+          try {
+            const res = await fetch(`http://localhost:${app.port}/health`, { signal: AbortSignal.timeout(400) });
+            httpOk = !!res.ok;
+          } catch {
+            httpOk = false;
+          }
+        }
+        // HTTPS health probe (best effort; may be null if self-signed)
+        if ((app.protocol === 'https' || app.protocol === 'http+https') && app.httpsPort) {
+          try {
+            const res = await fetch(`https://localhost:${app.httpsPort}/health`, { signal: AbortSignal.timeout(400) });
+            httpsOk = !!res.ok;
+          } catch {
+            httpsOk = false;
+          }
+        }
+        return { ...app, httpOk, httpsOk } as any;
+      }));
+      return new Response(JSON.stringify(withHealth, null, 2), {
         headers: { 'Content-Type': 'application/json' }
       });
     }
@@ -814,7 +837,7 @@ function getPlatformDashboard(): string {
           <div class="app \${app.status}">
             <h4>\${app.name}</h4>
             <p><strong>Directory:</strong> \${app.directory}</p>
-            <p><strong>Ports:</strong> http:\${app.port}\${app.httpsPort ? ", https:" + app.httpsPort : ''} | <strong>Status:</strong> \${app.status}</p>
+            <p><strong>Ports:</strong> http:\${app.port} \${app.httpOk === true ? '🟢' : app.httpOk === false ? '🔴' : ''}\${app.httpsPort ? (", https:" + app.httpsPort + ' ' + (app.httpsOk === true ? '🟢' : app.httpsOk === false ? '🔴' : '')) : ''} | <strong>Status:</strong> \${app.status}</p>
             \${app.startedAt ? \`<p><strong>Started:</strong> \${new Date(app.startedAt).toLocaleString()}</p>\` : ''}
             <button class="start" onclick="startApp('\${app.name}')">Start</button>
             <button class="stop" onclick="undeployApp('\${app.name}')">Undeploy</button>
