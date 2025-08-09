@@ -109,7 +109,7 @@ export class RipServer {
       });
     }
 
-    // Load balance to workers
+    // Load balance to workers (includes logging)
     return await this.loadBalanceRequest(req);
   }
 
@@ -127,7 +127,9 @@ export class RipServer {
 
       try {
         // Forward request to worker via Unix socket
+        const workerStart = Date.now();
         const response = await this.forwardToWorker(req, socketPath);
+        const workerMs = Date.now() - workerStart;
 
         // Update stats
         stats.requests++;
@@ -141,11 +143,15 @@ export class RipServer {
         headers.set('X-Rip-App', this.appName);
         headers.set('X-Response-Time', `${Date.now() - startTime}ms`);
 
-        return new Response(response.body, {
+        const outResp = new Response(response.body, {
           status: response.status,
           statusText: response.statusText,
           headers
         });
+
+        // Structured, aligned console logging (screen mode)
+        this.logRequest(req, outResp, Date.now() - startTime, workerMs);
+        return outResp;
 
       } catch (error) {
         console.warn(`⚠️ [Server] Worker ${this.currentWorker} failed, trying next worker:`, error);
@@ -176,6 +182,41 @@ export class RipServer {
       body: req.body,
       unix: socketPath, // This is all we need!
     });
+  }
+
+  /**
+   * Pretty console logger with fixed-width timestamp and two duration slots
+   */
+  private logRequest(req: Request, res: Response, totalMs: number, workerMs: number): void {
+    const now = new Date();
+    const pad = (n: number, w = 2) => String(n).padStart(w, '0');
+    const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}.${String(now.getMilliseconds()).padStart(3, '0')}`;
+    const tzMin = now.getTimezoneOffset();
+    const tzSign = tzMin <= 0 ? '+' : '-';
+    const tzAbs = Math.abs(tzMin);
+    const tzStr = `${tzSign}${String(Math.floor(tzAbs / 60)).padStart(2, '0')}${String(tzAbs % 60).padStart(2, '0')}`;
+
+    const fmtDur = (ms: number): string => {
+      // 3-char mantissa + 1-char scale + 1-char unit
+      if (ms < 1000) {
+        const mant = ms < 100 ? (ms < 10 ? ms.toFixed(1) : Math.round(ms).toString()) : Math.round(ms).toString();
+        return `${mant.padStart(3, ' ')}m` + 's';
+      }
+      const s = ms / 1000;
+      const mant = s < 100 ? s.toFixed(1) : Math.round(s).toString();
+      return `${mant.padStart(3, ' ')} ` + 's';
+    };
+
+    const d1 = fmtDur(totalMs);
+    const d2 = fmtDur(workerMs);
+    const method = (req as any).method || 'GET';
+    const url = new URL(req.url);
+    const path = url.pathname;
+    const status = res.status;
+    const len = res.headers.get('content-length') || '';
+    const type = (res.headers.get('content-type') || '').split(';')[0] || '';
+
+    console.log(`[${ts} ${tzStr} ${d1} ${d2}] ${method} ${path} → ${status} ${type} ${len}`);
   }
 
   /**
