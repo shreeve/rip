@@ -552,6 +552,24 @@ bun server restart api         # Restart just the API app
 bun server undeploy blog       # Remove blog app completely
 ```
 
+#### 🔒 TLS on Deploy (Auto-Generation)
+
+If you deploy with `protocol` set to `https` or `http+https` and you don't provide certs, the platform will auto-generate them for you based on the mode you specify:
+
+```bash
+# Smart (default): use CA if available, otherwise quick self-signed
+bun server deploy api apps/labs/api http+https
+
+# Quick self-signed
+bun server deploy api apps/labs/api https:quick
+
+# CA-signed (after ca:init & ca:trust)
+bun server deploy api apps/labs/api https:ca
+
+# Provide your own certs
+bun server deploy api apps/labs/api https /path/to/cert.pem /path/to/key.pem
+```
+
 ### **🎯 Complete Platform Workflow:**
 
 ```bash
@@ -575,6 +593,7 @@ bun server undeploy api        # Remove the app
 - **📈 Performance monitoring**: Response times, throughput
 - **🔧 Hot deployments**: Deploy new versions without downtime
 - **📱 Mobile-friendly**: Manage from anywhere
+- **🌐 Port health badges**: Per-port status shown as 🟢/🔴 for HTTP/HTTPS
 
 ### **🔧 REST API for Automation:**
 
