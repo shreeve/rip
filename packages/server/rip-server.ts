@@ -345,7 +345,7 @@ async function showStatus(): Promise<void> {
   }
 }
 
-async function stopServer(force = false): Promise<void> {
+async function stopServer(force = false, target?: string): Promise<void> {
   ensureDirectories();
   console.log('🛑 Stopping Rip Server(s)...');
   let stopped = 0;
@@ -355,6 +355,7 @@ async function stopServer(force = false): Promise<void> {
     for (const f of files) {
       try {
         const meta = JSON.parse(readFileSync(join(RUN_DIR, f), 'utf8')) as any;
+        if (target && target !== meta.app) continue;
         try { process.kill(meta.pid, 'SIGTERM'); stopped++; } catch {}
         try { unlinkSync(join(RUN_DIR, f)); } catch {}
       } catch {}
@@ -362,8 +363,27 @@ async function stopServer(force = false): Promise<void> {
   }
   // Platform stop via API
   try {
-    const res = await fetch('http://localhost:3000/shutdown', { method: 'POST', signal: AbortSignal.timeout(1500) });
-    if (res.ok) stopped++;
+    // If target specifies platform, stop only that port; otherwise all platform pidfiles
+    const platformPidfiles = existsSync(RUN_DIR)
+      ? readdirSync(RUN_DIR).filter(f => f.startsWith('platform-') && f.endsWith('.pid'))
+      : [];
+    for (const f of platformPidfiles) {
+      try {
+        const meta = JSON.parse(readFileSync(join(RUN_DIR, f), 'utf8')) as any;
+        const matchesTarget = !target
+          || target === 'platform'
+          || target === `platform:${meta.port}`
+          || target === String(meta.port);
+        if (!matchesTarget) continue;
+        const res = await fetch(`http://localhost:${meta.port}/shutdown`, { method: 'POST', signal: AbortSignal.timeout(1500) }).catch(() => null);
+        if (res?.ok) {
+          stopped++;
+        } else if (force) {
+          try { process.kill(meta.pid, 'SIGTERM'); stopped++; } catch {}
+        }
+        try { unlinkSync(join(RUN_DIR, f)); } catch {}
+      } catch {}
+    }
   } catch {}
   // Force mode: attempt to free common ports if still in use
   if (stopped === 0 && force) {
@@ -377,8 +397,15 @@ async function stopServer(force = false): Promise<void> {
         }
       } catch {}
     };
-    await killOnPort(3000);
-    await killOnPort(3443);
+    // Common ports; if target is numeric, prefer that
+    const ports: number[] = [];
+    if (target && /^\d+$/.test(target)) ports.push(Number(target));
+    ports.push(3000, 3443);
+    const seen = new Set<number>();
+    for (const p of ports) {
+      if (seen.has(p)) continue; seen.add(p);
+      await killOnPort(p);
+    }
   }
   if (stopped === 0) {
     console.log('⚠️  No running servers found');
@@ -1263,9 +1290,12 @@ async function main(): Promise<void> {
       await showStatus();
       break;
 
-    case 'stop':
-      await stopServer(args.includes('--force'));
+    case 'stop': {
+      const force = args.includes('--force');
+      const target = args.find(a => a !== 'stop' && a !== '--force');
+      await stopServer(force, target);
       break;
+    }
 
     // Platform commands
     case 'platform': {
