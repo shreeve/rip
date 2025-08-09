@@ -345,7 +345,7 @@ async function showStatus(): Promise<void> {
   }
 }
 
-async function stopServer(): Promise<void> {
+async function stopServer(force = false): Promise<void> {
   ensureDirectories();
   console.log('🛑 Stopping Rip Server(s)...');
   let stopped = 0;
@@ -365,6 +365,21 @@ async function stopServer(): Promise<void> {
     const res = await fetch('http://localhost:3000/shutdown', { method: 'POST', signal: AbortSignal.timeout(1500) });
     if (res.ok) stopped++;
   } catch {}
+  // Force mode: attempt to free common ports if still in use
+  if (stopped === 0 && force) {
+    const killOnPort = async (port: number) => {
+      try {
+        const p = Bun.spawn(['lsof', '-ti', `tcp:${port}`], { stdout: 'pipe', stderr: 'ignore' });
+        const out = await new Response(p.stdout).text();
+        const pids = out.split(/\s+/).filter(Boolean);
+        for (const pid of pids) {
+          try { process.kill(Number(pid), 'SIGTERM'); stopped++; } catch {}
+        }
+      } catch {}
+    };
+    await killOnPort(3000);
+    await killOnPort(3443);
+  }
   if (stopped === 0) {
     console.log('⚠️  No running servers found');
     process.exitCode = 1;
@@ -733,7 +748,7 @@ function getPlatformDashboard(): string {
           <div class="app \${app.status}">
             <h4>\${app.name}</h4>
             <p><strong>Directory:</strong> \${app.directory}</p>
-            <p><strong>Port:</strong> \${app.port} | <strong>Status:</strong> \${app.status}</p>
+            <p><strong>Ports:</strong> http:\${app.port}\${app.httpsPort ? ", https:" + app.httpsPort : ''} | <strong>Status:</strong> \${app.status}</p>
             \${app.startedAt ? \`<p><strong>Started:</strong> \${new Date(app.startedAt).toLocaleString()}</p>\` : ''}
             <button class="start" onclick="startApp('\${app.name}')">Start</button>
             <button class="stop" onclick="undeployApp('\${app.name}')">Undeploy</button>
@@ -1240,7 +1255,7 @@ async function main(): Promise<void> {
       break;
 
     case 'stop':
-      await stopServer();
+      await stopServer(args.includes('--force'));
       break;
 
     // Platform commands
