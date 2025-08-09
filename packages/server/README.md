@@ -178,8 +178,10 @@ bun server status                    # Detailed status with PID, memory, runtime
 
 ### **🛑 6. Stop Server**
 ```bash
-bun server stop                     # Graceful shutdown
-bun server stop                     # Same thing, direct
+bun server stop                       # Graceful shutdown
+bun server stop api                   # Target a specific direct-mode app
+bun server stop platform:3100         # Stop a specific platform instance
+bun server stop 3000 --force          # Free a stuck HTTP port (macOS)
 ```
 
 ### **⚡ 7. Advanced Options**
@@ -274,15 +276,17 @@ Use `--json` (or `-j`) to get structured status output that's easy to parse in s
 ```bash
 bun server status --json
 # {
-#   "running": true,
-#   "processes": [{ "pid": 12345, "port": 3000, "health": "HEALTHY", ... }],
-#   "ports": [{ "port": 3000, "protocol": "http", "status": "ACTIVE" }]
+#   "status": "running",
+#   "processes": [
+#     { "mode": "platform", "port": 3000, "ok": true },
+#     { "mode": "direct", "app": "api", "pid": 12345, "httpPort": 3000, "httpsPort": 3443, "workers": 2, "requests": 100, "ok": true }
+#   ]
 # }
 ```
 
 Exit codes for automation:
-- `status`: exits `0` when running; exits `3` when not running
-- `stop`: always exits `0` (whether it stopped something or was already stopped)
+- `status`: exits `0` when running/degraded; exits `3` when stopped
+- `stop`: exits `0` if successful; `1` only when nothing was found to stop and not forced
 - `start/dev/prod`: exit `0` upon successful launch
 
 ## 🎯 Server/App Separation Architecture
