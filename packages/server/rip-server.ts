@@ -3,6 +3,8 @@ import { join, resolve } from 'path';
 import { homedir } from 'os';
 import { spawn } from 'bun';
 import { RipPlatform, type AppConfig } from './platform';
+import { RipManager } from './manager';
+import { RipServer } from './server';
 
 // HTTPS/CA Configuration
 const RIP_CONFIG_DIR = join(homedir(), '.rip-server');
@@ -291,80 +293,92 @@ async function stopServer(): Promise<void> {
 }
 
 async function startServer(appPath: string, config?: Config): Promise<void> {
-  console.log('🚀 Starting Rip Server...');
-  console.log(`📁 App: ${appPath}`);
-
-  // Show flexible config if provided
-  if (config?.workers && config.workers !== defaults.workers) {
-    console.log(`👥 Workers: ${config.workers}`);
-  }
-  if (config?.httpPort && config.httpPort !== defaults.httpPort) {
-    console.log(`🌐 Port: ${config.httpPort}`);
-  }
-  if (config?.mode) {
-    console.log(`⚙️  Mode: ${config.mode}`);
-  }
-
-  // Resolve to absolute path from current working directory
   const absoluteAppPath = resolve(appPath);
   const indexPath = join(absoluteAppPath, 'index.rip');
-
   if (!existsSync(indexPath)) {
     console.error(`❌ No index.rip found in ${appPath}`);
     process.exit(1);
   }
 
-  let ripApp: any;
+  const appName = absoluteAppPath.split('/').filter(Boolean).slice(-1)[0] || 'app';
+  const workers = config?.workers ?? defaults.workers;
+  const requests = config?.requests ?? defaults.requests;
+  const protocol = config?.protocol ?? 'http';
+  const httpPort = config?.httpPort ?? defaults.httpPort;
+  const httpsPort = config?.httpsPort ?? defaults.httpsPort;
+  const jsonLogging = !!config?.jsonLogging;
 
-  try {
-    console.log(`📁 Loading: ${indexPath}`);
-    ripApp = await import(indexPath);
-    ripApp = ripApp.default || ripApp;
-    console.log('✅ Rip app loaded');
-  } catch (error) {
-    console.error('❌ Failed to load Rip app:', error);
-    process.exit(1);
-  }
+  console.log(`📁 App: ${absoluteAppPath}`);
+  console.log(`👥 Workers: ${workers}  🔁 Requests/worker: ${requests}`);
+  console.log(`🌐 Protocol: ${protocol}  HTTP:${protocol !== 'https' ? httpPort : '-'}  HTTPS:${protocol !== 'http' ? httpsPort : '-'}`);
 
-  // Create simple HTTP server
-  const server = Bun.serve({
-    port: 3000,
-    async fetch(req) {
-      const url = new URL(req.url);
+  // Resolve TLS material for direct mode if needed
+  let httpsConfig: { httpsPort: number; cert: string; key: string } | undefined;
+  if (protocol === 'https' || protocol === 'http+https') {
+    let certText: string | undefined;
+    let keyText: string | undefined;
 
-      if (url.pathname === '/health') {
-        return new Response('{"status":"ok"}', {
-          headers: { 'Content-Type': 'application/json' }
-        });
-      }
-
-      if (url.pathname === '/ping') {
-        return new Response('pong');
-      }
-
-      if (url.pathname === '/shutdown' && req.method === 'POST') {
-        setTimeout(() => process.exit(0), 100);
-        return new Response('Shutting down...');
-      }
-
-      // Forward to Rip app
+    if (config?.certPath && config?.keyPath && existsSync(config.certPath) && existsSync(config.keyPath)) {
       try {
-        if (typeof ripApp === 'function') {
-          return await ripApp(req);
-        } else if (ripApp && typeof ripApp.fetch === 'function') {
-          return await ripApp.fetch(req);
+        certText = await Bun.file(config.certPath).text();
+        keyText = await Bun.file(config.keyPath).text();
+      } catch {}
+    }
+
+    if (!certText || !keyText) {
+      const mode = config?.httpsMode ?? 'smart';
+      if (mode === 'quick') {
+        const { cert, key } = await generateSelfSignedCert();
+        certText = cert; keyText = key;
+      } else if (mode === 'ca') {
+        const { cert, key } = await generateCACert('localhost');
+        certText = cert; keyText = key;
+      } else {
+        // smart: prefer CA if exists, else quick
+        if (hasCA()) {
+          const { cert, key } = await generateCACert('localhost');
+          certText = cert; keyText = key;
         } else {
-          return new Response('Invalid Rip app', { status: 500 });
+          const { cert, key } = await generateSelfSignedCert();
+          certText = cert; keyText = key;
         }
-      } catch (error) {
-        console.error('❌ Request error:', error);
-        return new Response('Server Error', { status: 500 });
       }
     }
-  });
 
-  console.log('✅ Server running at http://localhost:3000');
-  console.log('🎯 Press Ctrl+C to stop');
+    if (certText && keyText) {
+      httpsConfig = { httpsPort, cert: certText, key: keyText };
+    } else {
+      console.warn('⚠️  HTTPS requested but certificate material missing; continuing without HTTPS');
+    }
+  }
+
+  // Start manager and workers
+  const manager = new RipManager();
+  await manager.startApp(appName, absoluteAppPath, workers, requests, jsonLogging);
+
+  // Start load balancer server
+  const lbHttpPort = protocol === 'https' ? null : httpPort;
+  const server = new RipServer(lbHttpPort as any, appName, workers, httpsConfig, jsonLogging);
+  await server.start();
+
+  // Print endpoint summary
+  const endpoints: string[] = [];
+  if (lbHttpPort) endpoints.push(`http://localhost:${lbHttpPort}`);
+  if (httpsConfig) endpoints.push(`https://localhost:${httpsConfig.httpsPort}`);
+  console.log(`✅ Running: ${endpoints.join('  ')}`);
+
+  // Graceful shutdown
+  const shutdown = async () => {
+    try {
+      await server.stop();
+    } catch {}
+    try {
+      await manager.stopApp(appName);
+    } catch {}
+    process.exit(0);
+  };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 }
 
 // Global platform instance
@@ -451,7 +465,7 @@ async function handlePlatformAPI(req: Request, url: URL): Promise<Response> {
 
     // POST /api/apps - Deploy app
     if (url.pathname === '/api/apps' && req.method === 'POST') {
-      const body = await req.json() as { name: string; directory: string; workers?: number; port?: number; protocol?: 'http'|'https'|'http+https'; httpsPort?: number; cert?: string; key?: string; jsonLogging?: boolean };
+      const body = await req.json() as { name: string; directory: string; workers?: number; port?: number; protocol?: 'http'|'https'|'http+https'; httpsPort?: number; cert?: string; key?: string; jsonLogging?: boolean; requests?: number };
       const app = await platformInstance.deployApp(
         body.name,
         body.directory,
@@ -462,6 +476,7 @@ async function handlePlatformAPI(req: Request, url: URL): Promise<Response> {
         body.cert,
         body.key,
         body.jsonLogging,
+        body.requests,
       );
       // Auto-start app after deploy
       try { await platformInstance.startApp(body.name); } catch {}

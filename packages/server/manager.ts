@@ -23,6 +23,8 @@ interface Worker {
 export class RipManager {
   private workers: Map<string, Worker[]> = new Map(); // appName -> workers
   private appDirectories: Map<string, string> = new Map(); // appName -> directory
+  private appMaxRequests: Map<string, number> = new Map(); // appName -> maxRequestsPerWorker
+  private appJsonLogging: Map<string, boolean> = new Map(); // appName -> json logging flag
   private isShuttingDown = false;
   private fileWatchingEnabled = true;
   private watchers: Map<string, any> = new Map(); // appName -> file watcher
@@ -35,7 +37,7 @@ export class RipManager {
   /**
    * Start workers for a specific app
    */
-  async startApp(appName: string, appDirectory: string, numWorkers: number = 3, maxRequestsPerWorker: number = 100): Promise<void> {
+  async startApp(appName: string, appDirectory: string, numWorkers: number = 3, maxRequestsPerWorker: number = 100, jsonLogging: boolean = false): Promise<void> {
     console.log(`🚀 [Manager] Starting ${numWorkers} workers for app '${appName}'`);
     
     // Resolve absolute path
@@ -50,6 +52,8 @@ export class RipManager {
 
     // Store app directory for hot reload restarts
     this.appDirectories.set(appName, absolutePath);
+    this.appMaxRequests.set(appName, maxRequestsPerWorker);
+    this.appJsonLogging.set(appName, jsonLogging);
 
     // Create worker array for this app
     this.workers.set(appName, []);
@@ -57,7 +61,7 @@ export class RipManager {
     // Start workers
     const workers: Worker[] = [];
     for (let i = 0; i < numWorkers; i++) {
-      const worker = await this.spawnWorker(appName, i, maxRequestsPerWorker, absolutePath);
+      const worker = await this.spawnWorker(appName, i, maxRequestsPerWorker, absolutePath, jsonLogging);
       workers.push(worker);
     }
     
@@ -138,7 +142,7 @@ export class RipManager {
   /**
    * Spawn a single worker process
    */
-  private async spawnWorker(appName: string, workerId: number, maxRequestsPerWorker: number, appDirectory: string): Promise<Worker> {
+  private async spawnWorker(appName: string, workerId: number, maxRequestsPerWorker: number, appDirectory: string, jsonLogging: boolean): Promise<Worker> {
     const socketPath = `/tmp/rip_worker_${appName}_${workerId}.sock`;
 
     // Clean up any existing socket
@@ -168,7 +172,8 @@ export class RipManager {
           ...process.env,
           WORKER_ID: workerId.toString(),
           APP_NAME: appName,
-          SOCKET_PATH: socketPath
+        SOCKET_PATH: socketPath,
+        RIP_LOG_JSON: jsonLogging ? '1' : '0'
         },
       }
     );
@@ -196,7 +201,7 @@ export class RipManager {
     worker.process.exited.then(async (exitCode: number) => {
       if (this.isShuttingDown) return;
 
-      const workers = this.workers.get(worker.appName);
+          const workers = this.workers.get(worker.appName);
       if (!workers) return;
 
       console.log(`⚠️ [Manager] Worker ${worker.id} for app '${worker.appName}' exited with code ${exitCode}`);
@@ -220,11 +225,14 @@ export class RipManager {
           if (workerIndex >= 0) {
             // Get the app directory from the appDirectories map
             const appDirectory = this.appDirectories.get(worker.appName) || worker.appName;
+            const maxReq = this.appMaxRequests.get(worker.appName) ?? 100;
+            const json = this.appJsonLogging.get(worker.appName) ?? false;
             const newWorker = await this.spawnWorker(
               worker.appName, 
               worker.id, 
-              100, // Default max requests
-              appDirectory // Use the correct app directory
+              maxReq,
+              appDirectory,
+              json
             );
             workers[workerIndex] = newWorker;
           }

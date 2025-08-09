@@ -25,6 +25,7 @@ export interface AppConfig {
   httpsCert?: string;
   httpsKey?: string;
   workers: number;
+  requests?: number;
   status: 'deployed' | 'running' | 'stopped' | 'error';
   startedAt?: Date;
   error?: string;
@@ -84,6 +85,7 @@ export class RipPlatform {
     httpsCert?: string,
     httpsKey?: string,
     jsonLogging?: boolean,
+    requests?: number,
   ): Promise<AppConfig> {
     // Validate app doesn't already exist
     if (this.apps.has(name)) {
@@ -121,6 +123,7 @@ export class RipPlatform {
       httpsCert,
       httpsKey,
       workers,
+      requests,
       status: 'deployed',
       startedAt: new Date(),
       jsonLogging,
@@ -168,7 +171,7 @@ export class RipPlatform {
       console.log(`🚀 Starting app '${name}' with ${app.workers} workers on port ${app.port}...`);
 
       // Start workers via manager
-      await this.manager.startApp(name, app.directory, app.workers);
+      await this.manager.startApp(name, app.directory, app.workers, app.requests ?? 100, !!app.jsonLogging);
 
       // Start HTTP/HTTPS server for load balancing on app's dedicated port
       const httpsConfig = (app.protocol === 'https' || app.protocol === 'http+https') && app.httpsPort && app.httpsCert && app.httpsKey
