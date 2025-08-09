@@ -455,6 +455,8 @@ async function handlePlatformAPI(req: Request, url: URL): Promise<Response> {
         body.cert,
         body.key,
       );
+      // Auto-start app after deploy
+      try { await platformInstance.startApp(body.name); } catch {}
       return new Response(JSON.stringify(app, null, 2), {
         headers: { 'Content-Type': 'application/json' }
       });
