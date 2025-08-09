@@ -8,7 +8,7 @@
 import { join } from 'path';
 
 export class RipServer {
-  private port: number;
+  private port: number | null;
   private appName: string;
   private numWorkers: number;
   private workerSocketPaths: string[] = [];
@@ -16,11 +16,14 @@ export class RipServer {
   private totalRequests = 0;
   private workerStats = new Map<string, { requests: number; errors: number }>();
   private server: any = null;
+  private httpsServer: any = null;
+  private httpsConfig?: { httpsPort: number; cert: string; key: string };
 
-  constructor(port: number, appName: string, numWorkers: number) {
-    this.port = port;
+  constructor(port: number, appName: string, numWorkers: number, httpsConfig?: { httpsPort: number; cert: string; key: string }) {
+    this.port = port ?? null;
     this.appName = appName;
     this.numWorkers = numWorkers;
+    this.httpsConfig = httpsConfig;
 
     // Generate worker socket paths
     this.workerSocketPaths = Array.from(
@@ -38,15 +41,27 @@ export class RipServer {
    * Start the HTTP server
    */
   async start(): Promise<void> {
-    console.log(`🚀 [Server] Starting HTTP server for app '${this.appName}' on port ${this.port}`);
     console.log(`🔗 [Server] Load balancing across ${this.numWorkers} workers`);
 
-    this.server = Bun.serve({
-      port: this.port,
-      fetch: this.handleRequest.bind(this),
-    });
+    if (this.port) {
+      console.log(`🚀 [Server] Starting HTTP server for app '${this.appName}' on port ${this.port}`);
+      this.server = Bun.serve({
+        port: this.port,
+        fetch: this.handleRequest.bind(this),
+      });
+      console.log(`✅ [Server] HTTP server running at http://localhost:${this.port}`);
+    }
 
-    console.log(`✅ [Server] HTTP server running at http://localhost:${this.port}`);
+    if (this.httpsConfig) {
+      const { httpsPort, cert, key } = this.httpsConfig;
+      console.log(`🚀 [Server] Starting HTTPS server for app '${this.appName}' on port ${httpsPort}`);
+      this.httpsServer = Bun.serve({
+        port: httpsPort,
+        tls: { cert, key },
+        fetch: this.handleRequest.bind(this),
+      });
+      console.log(`✅ [Server] HTTPS server running at https://localhost:${httpsPort}`);
+    }
   }
 
   /**
@@ -56,6 +71,10 @@ export class RipServer {
     if (this.server) {
       this.server.stop();
       console.log(`✅ [Server] HTTP server for app '${this.appName}' stopped`);
+    }
+    if (this.httpsServer) {
+      this.httpsServer.stop();
+      console.log(`✅ [Server] HTTPS server for app '${this.appName}' stopped`);
     }
   }
 

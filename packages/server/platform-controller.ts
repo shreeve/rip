@@ -142,7 +142,7 @@ export class RipPlatform {
       // Start workers via manager
       await this.manager.startApp(name, app.directory, app.workers);
 
-      // Start HTTP server for load balancing on app's dedicated port
+      // Start HTTP/HTTPS server for load balancing on app's dedicated port
       const server = new RipServer(app.port, name, app.workers);
       await server.start();
       this.servers.set(name, server);
