@@ -171,7 +171,8 @@ export class RipPlatform {
       const httpsConfig = (app.protocol === 'https' || app.protocol === 'http+https') && app.httpsPort && app.httpsCert && app.httpsKey
         ? { httpsPort: app.httpsPort, cert: app.httpsCert, key: app.httpsKey }
         : undefined;
-      const server = new RipServer(app.port, name, app.workers, httpsConfig);
+      const httpPort = app.protocol === 'https' ? null : app.port;
+      const server = new RipServer(httpPort as any, name, app.workers, httpsConfig);
       await server.start();
       this.servers.set(name, server);
 

@@ -445,7 +445,16 @@ async function handlePlatformAPI(req: Request, url: URL): Promise<Response> {
     // POST /api/apps - Deploy app
     if (url.pathname === '/api/apps' && req.method === 'POST') {
       const body = await req.json() as { name: string; directory: string; workers?: number; port?: number; protocol?: 'http'|'https'|'http+https'; httpsPort?: number; cert?: string; key?: string };
-      const app = await platformInstance.deployApp(body.name, body.directory, body.workers ?? 3, body.port, body.protocol, body.httpsPort, body.cert, body.key);
+      const app = await platformInstance.deployApp(
+        body.name,
+        body.directory,
+        body.workers ?? 3,
+        body.port,
+        body.protocol,
+        body.httpsPort,
+        body.cert,
+        body.key,
+      );
       return new Response(JSON.stringify(app, null, 2), {
         headers: { 'Content-Type': 'application/json' }
       });
