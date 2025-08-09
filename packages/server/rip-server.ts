@@ -1348,6 +1348,31 @@ async function handleDeploy(config: Config, remainingArgs: string[]): Promise<vo
     deployData.key = await Bun.file(config.keyPath).text().catch(() => undefined);
   }
   if (config.jsonLogging) deployData.jsonLogging = true;
+  if (config.requests) deployData.requests = config.requests;
+
+  // If https is requested but no cert/key provided, generate them here
+  if ((config.protocol === 'https' || config.protocol === 'http+https') && (!deployData.cert || !deployData.key)) {
+    const mode = config.httpsMode ?? 'smart';
+    try {
+      if (mode === 'quick') {
+        const { cert, key } = await generateSelfSignedCert();
+        deployData.cert = cert; deployData.key = key;
+      } else if (mode === 'ca') {
+        const { cert, key } = await generateCACert('localhost');
+        deployData.cert = cert; deployData.key = key;
+      } else {
+        if (hasCA()) {
+          const { cert, key } = await generateCACert('localhost');
+          deployData.cert = cert; deployData.key = key;
+        } else {
+          const { cert, key } = await generateSelfSignedCert();
+          deployData.cert = cert; deployData.key = key;
+        }
+      }
+    } catch (e) {
+      console.warn('⚠️  Failed to auto-generate HTTPS certs for deploy; proceeding without HTTPS material');
+    }
+  }
 
   try {
     const response = await fetch('http://localhost:3000/api/apps', {
@@ -1429,7 +1454,8 @@ async function handleListApps(): Promise<void> {
       apps.forEach((app: AppConfig) => {
         console.log(`   🚀 ${app.name}`);
         console.log(`      📁 Directory: ${app.directory}`);
-        console.log(`      🌐 Port: ${app.port}`);
+        const httpsInfo = app.httpsPort ? `, https:${app.httpsPort}` : '';
+        console.log(`      🌐 Port: http:${app.port}${httpsInfo}`);
         console.log(`      📊 Status: ${app.status}`);
         if (app.startedAt) {
           console.log(`      ⏰ Started: ${new Date(app.startedAt).toLocaleString()}`);
