@@ -308,17 +308,17 @@ async function showStatus(): Promise<void> {
     }
   }
 
-  // Platform probe
+  // Platform probe(s) from pid files (supports custom ports)
   try {
-    const res = await fetch('http://localhost:3000/health');
-    if (res.ok) {
-      const text = await res.text();
-      let mode: string | undefined;
-      try { const j = JSON.parse(text); mode = j.mode; } catch {}
-      if (mode === 'platform') {
-        results.push({ mode: 'platform', port: 3000, ok: true });
-      } else {
-        results.push({ mode: 'unknown', port: 3000, ok: true });
+    if (existsSync(RUN_DIR)) {
+      const pids = readdirSync(RUN_DIR).filter(f => f.startsWith('platform-') && f.endsWith('.pid'));
+      for (const f of pids) {
+        try {
+          const meta = JSON.parse(readFileSync(join(RUN_DIR, f), 'utf8')) as any;
+          const url = `http://localhost:${meta.port}/health`;
+          const res = await fetch(url).catch(() => null);
+          results.push({ mode: 'platform', port: meta.port, ok: !!res?.ok });
+        } catch {}
       }
     }
   } catch {}
@@ -534,6 +534,7 @@ async function startPlatform(port = 3000): Promise<void> {
 
       // Shutdown endpoint
       if (url.pathname === '/shutdown' && req.method === 'POST') {
+        try { unlinkSync(join(RUN_DIR, `platform-${port}.pid`)); } catch {}
         setTimeout(() => process.exit(0), 100);
         return new Response('Platform shutting down...');
       }
@@ -554,6 +555,13 @@ async function startPlatform(port = 3000): Promise<void> {
   console.log(`📊 Dashboard: http://localhost:${port}/platform`);
   console.log(`🔧 API: http://localhost:${port}/api`);
   console.log('🎯 Press Ctrl+C to stop');
+
+  // Write pid file for platform
+  ensureDirectories();
+  try {
+    const pidFile = join(RUN_DIR, `platform-${port}.pid`);
+    writeFileSync(pidFile, JSON.stringify({ pid: process.pid, port, startedAt: Date.now() }));
+  } catch {}
 }
 
 async function handlePlatformAPI(req: Request, url: URL): Promise<Response> {
@@ -835,11 +843,12 @@ function showHelp(): void {
 Usage:
   bun server help                        # Show this help
   bun server status                      # Show server status
-  bun server stop                        # Stop server
+  bun server stop [--force]              # Stop server(s); --force frees ports if needed
   bun server [app-path]                  # Start server with app
 
 Platform Mode (Dynamic Multi-App Management):
   bun server platform                    # Start platform controller
+  bun server platform [port]             # Start platform on custom port
   bun server deploy <name> <path>        # Deploy app to platform
   bun server undeploy <name>             # Remove app from platform
   bun server list                        # List deployed apps
