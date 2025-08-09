@@ -324,7 +324,25 @@ async function showStatus(): Promise<void> {
   } catch {}
 
   if (json) {
-    console.log(JSON.stringify({ status: results.length ? 'running' : 'stopped', processes: results }, null, 2));
+    const anyOk = results.some(r => r.ok !== false);
+    const payload = {
+      status: results.length ? (anyOk ? 'running' : 'degraded') : 'stopped',
+      processes: results.map(r => ({
+        mode: r.mode,
+        app: r.app,
+        pid: r.pid,
+        port: r.port,
+        httpPort: r.httpPort,
+        httpsPort: r.httpsPort,
+        workers: r.workers,
+        requests: r.requests,
+        startedAt: r.startedAt,
+        ok: r.ok,
+        probes: r.probes,
+      })),
+    };
+    console.log(JSON.stringify(payload, null, 2));
+    process.exitCode = payload.status === 'stopped' ? 1 : 0;
   } else {
     if (!results.length) {
       console.log('❌ No running Rip servers found');
@@ -397,6 +415,17 @@ async function stopServer(force = false, target?: string): Promise<void> {
         }
       } catch {}
     };
+    const killByTitle = async (titleMatch: string) => {
+      try {
+        // macOS: ps -A -o pid,comm | grep <title>
+        const proc = Bun.spawn(['bash', '-lc', `ps -A -o pid,command | grep "${titleMatch}" | grep -v grep | awk '{print $1}'`], { stdout: 'pipe', stderr: 'ignore' });
+        const out = await new Response(proc.stdout).text();
+        const pids = out.split(/\s+/).filter(Boolean);
+        for (const pid of pids) {
+          try { process.kill(Number(pid), 'SIGTERM'); stopped++; } catch {}
+        }
+      } catch {}
+    };
     // Common ports; if target is numeric, prefer that
     const ports: number[] = [];
     if (target && /^\d+$/.test(target)) ports.push(Number(target));
@@ -406,6 +435,8 @@ async function stopServer(force = false, target?: string): Promise<void> {
       if (seen.has(p)) continue; seen.add(p);
       await killOnPort(p);
     }
+    await killByTitle('rip-worker-');
+    await killByTitle('rip-server');
   }
   if (stopped === 0) {
     console.log('⚠️  No running servers found');
