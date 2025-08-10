@@ -198,7 +198,13 @@ async function startWorker(): Promise<void> {
         return new Response('Worker busy', { status: 503 });
       }
 
-      return await handleRequest(req);
+      const res = await handleRequest(req);
+      // Disable browser/proxy caching by default to avoid old responses after reload
+      const headers = new Headers(res.headers);
+      headers.set('Cache-Control', 'no-store');
+      headers.set('Pragma', 'no-cache');
+      headers.set('Expires', '0');
+      return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
     },
   });
 

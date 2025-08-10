@@ -282,35 +282,20 @@ export class RipManager {
     const workers = this.workers.get(appName);
     if (!workers) return;
 
-    console.log(`🔄 [Manager] Hot reloading workers for app '${appName}'`);
-    
-    // Graceful restart - restart workers one by one to avoid race conditions
-    for (let i = 0; i < workers.length; i++) {
-      const worker = workers[i];
+    console.log(`🔄 [Manager] Hot reloading ALL workers for app '${appName}' (immediate cutover)`);
+
+    // Kill all workers quickly to ensure no stale responses
+    await Promise.all(workers.map(async (worker) => {
       try {
-        console.log(`🔄 [Manager] Hot reloading worker ${worker.id} for app '${appName}'`);
-        
-        // Kill the worker gracefully
         worker.process.kill('SIGTERM');
-        
-        // Wait for it to exit
-        try {
-          await worker.process.exited;
-        } catch (_) {
-          // Process might have already exited
-        }
-        
-        // Worker will be automatically restarted by monitorWorker
-        // Wait a bit longer between restarts to avoid overwhelming the system
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        console.log(`✅ [Manager] Worker ${worker.id} hot reload triggered`);
+        try { await worker.process.exited; } catch {}
       } catch (error) {
-        console.error(`❌ [Manager] Error during hot reload of worker ${worker.id}:`, error);
+        console.error(`❌ [Manager] Error stopping worker ${worker.id}:`, error);
       }
-    }
-    
-    console.log(`✅ [Manager] Hot reload completed for app '${appName}'`);
+    }));
+
+    // monitorWorker will automatically respawn each with same id
+    console.log(`✅ [Manager] All workers terminated; new workers will start immediately`);
   }
 
   /**
