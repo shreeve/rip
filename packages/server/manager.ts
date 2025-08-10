@@ -1,6 +1,6 @@
 /**
  * 🚀 Rip Manager - Multi-Process Manager for Platform Apps
- * 
+ *
  * Manages worker processes for deployed platform applications.
  * Integrates with our Platform Controller for dynamic app management.
  */
@@ -39,10 +39,10 @@ export class RipManager {
    */
   async startApp(appName: string, appDirectory: string, numWorkers: number = 3, maxRequestsPerWorker: number = 100, jsonLogging: boolean = false): Promise<void> {
     console.log(`🚀 [Manager] Starting ${numWorkers} workers for app '${appName}'`);
-    
+
     // Resolve absolute path
     const absolutePath = resolve(appDirectory);
-    
+
     if (!existsSync(absolutePath)) {
       throw new Error(`App directory not found: ${appDirectory}`);
     }
@@ -57,21 +57,21 @@ export class RipManager {
 
     // Create worker array for this app
     this.workers.set(appName, []);
-    
+
     // Start workers
     const workers: Worker[] = [];
     for (let i = 0; i < numWorkers; i++) {
       const worker = await this.spawnWorker(appName, i, maxRequestsPerWorker, absolutePath, jsonLogging);
       workers.push(worker);
     }
-    
+
     this.workers.set(appName, workers);
-    
+
     // Setup file watching for hot reload
     if (this.fileWatchingEnabled) {
       this.setupFileWatching(appName, absolutePath);
     }
-    
+
     console.log(`✅ [Manager] App '${appName}' started with ${numWorkers} workers`);
   }
 
@@ -92,7 +92,7 @@ export class RipManager {
       watcher.close();
       this.watchers.delete(appName);
     }
-    
+
     // Clear any pending reload timers
     const timer = this.reloadTimers.get(appName);
     if (timer) {
@@ -105,7 +105,7 @@ export class RipManager {
       try {
         worker.process.kill();
         await worker.process.exited;
-        
+
         // Clean up socket
         try {
           await Bun.spawn(['rm', '-f', worker.socketPath]).exited;
@@ -127,7 +127,7 @@ export class RipManager {
    */
   getStatus(): { [appName: string]: { workers: number; status: string } } {
     const status: { [appName: string]: { workers: number; status: string } } = {};
-    
+
     for (const [appName, workers] of this.workers) {
       const activeWorkers = workers.filter(w => !w.process.killed).length;
       status[appName] = {
@@ -135,7 +135,7 @@ export class RipManager {
         status: activeWorkers > 0 ? 'running' : 'stopped'
       };
     }
-    
+
     return status;
   }
 
@@ -219,7 +219,7 @@ export class RipManager {
       setTimeout(async () => {
         try {
           console.log(`🔄 [Manager] Restarting worker ${worker.id} for app '${worker.appName}' (attempt ${worker.restartCount})`);
-          
+
           // Find the worker in the array and replace it
           const workerIndex = workers.findIndex(w => w.id === worker.id);
           if (workerIndex >= 0) {
@@ -228,8 +228,8 @@ export class RipManager {
             const maxReq = this.appMaxRequests.get(worker.appName) ?? 100;
             const json = this.appJsonLogging.get(worker.appName) ?? false;
             const newWorker = await this.spawnWorker(
-              worker.appName, 
-              worker.id, 
+              worker.appName,
+              worker.id,
               maxReq,
               appDirectory,
               json
@@ -250,24 +250,24 @@ export class RipManager {
     try {
       const watcher = watch(appDirectory, { recursive: true }, (eventType, filename) => {
         if (!filename || !filename.endsWith('.rip')) return;
-        
+
         console.log(`🔥 [Manager] File change detected for app '${appName}': ${filename}`);
-        
+
         // Debounce rapid file changes (e.g., editor saves)
         const existingTimer = this.reloadTimers.get(appName);
         if (existingTimer) {
           clearTimeout(existingTimer);
         }
-        
+
         const timer = setTimeout(() => {
           console.log(`🔄 [Manager] Hot reload triggered for app '${appName}' after debounce`);
           this.restartAppWorkers(appName);
           this.reloadTimers.delete(appName);
         }, 500); // 500ms debounce
-        
+
         this.reloadTimers.set(appName, timer);
       });
-      
+
       this.watchers.set(appName, watcher);
       console.log(`👁️ [Manager] File watching enabled for app '${appName}' in ${appDirectory}`);
     } catch (error) {
@@ -305,15 +305,15 @@ export class RipManager {
     const shutdown = async () => {
       if (this.isShuttingDown) return;
       this.isShuttingDown = true;
-      
+
       console.log('🛑 [Manager] Graceful shutdown initiated...');
-      
+
       // Stop all apps
       const appNames = Array.from(this.workers.keys());
       for (const appName of appNames) {
         await this.stopApp(appName);
       }
-      
+
       console.log('✅ [Manager] Shutdown complete');
       process.exit(0);
     };
