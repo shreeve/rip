@@ -118,5 +118,3 @@
 3) Optional static + gzip/brotli; basic rate‑limit/body size/timeouts presets
 4) HTTP/2 (ALPN) support
 5) Optional NCSA access log format + rotation
-
-
