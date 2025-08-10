@@ -7,7 +7,7 @@ app = withHelpers app
 # 🎯 Sinatra Style Examples - Test Hot Reload!
 
 # Simple ping endpoint
-get '/ping', -> 'pong - HOT RELOAD WORKING PERFECTLY PEOPLE! 🚀🎉'
+get '/ping', -> 'pong - BLUE-GREEN SWAP LIVE! ✅'
 
 # Hello with parameter
 get '/hello', ->
