@@ -9,8 +9,14 @@
 import { spawn } from 'bun';
 
 const hasPreload = process.argv.some(arg => arg.includes('rip-bun.ts'));
-const [maybeTarget, ...rest] = process.argv.slice(2);
-const target = maybeTarget || './packages/server/rip-server.ts';
+const argv = process.argv.slice(2);
+// If the first arg looks like a script path (*.ts/*.js) treat it as target, else default to rip-server.ts
+let target = './packages/server/rip-server.ts';
+let rest = argv;
+if (argv[0] && /\.(ts|js|rip)$/i.test(argv[0])) {
+  target = argv[0];
+  rest = argv.slice(1);
+}
 
 if (!hasPreload) {
   console.log('🔄 Restarting with Rip transpiler...');
