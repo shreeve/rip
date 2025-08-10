@@ -57,6 +57,7 @@ try {
  * Load the user's Rip application
  */
 let ripApp: any = null;
+let appReady = false;
 
 async function loadRipApp(): Promise<void> {
   // Discover entry point (multiple candidates for POLS)
@@ -86,6 +87,7 @@ async function loadRipApp(): Promise<void> {
     }
 
     console.log(`✅ [Worker ${workerNum}] Loaded Rip app successfully`);
+    appReady = true;
   } catch (error) {
     console.error(`❌ [Worker ${workerNum}] Failed to load Rip app:`, error);
     console.error(`   Path: ${indexPath}`);
@@ -190,6 +192,10 @@ async function startWorker(): Promise<void> {
   const server = Bun.serve({
     unix: socketPath,
     async fetch(req: Request): Promise<Response> {
+      const url = new URL(req.url);
+      if (url.pathname === '/__ready') {
+        return new Response(appReady ? 'ok' : 'not-ready');
+      }
       if (isShuttingDown) {
         return new Response('Worker shutting down', { status: 503 });
       }

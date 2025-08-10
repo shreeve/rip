@@ -18,6 +18,7 @@ interface Worker {
   startedAt: number;
   backoffMs: number;
   appName: string;
+  generation: 'blue' | 'green';
 }
 
 export class RipManager {
@@ -142,8 +143,10 @@ export class RipManager {
   /**
    * Spawn a single worker process
    */
-  private async spawnWorker(appName: string, workerId: number, maxRequestsPerWorker: number, appDirectory: string, jsonLogging: boolean): Promise<Worker> {
-    const socketPath = `/tmp/rip_worker_${appName}_${workerId}.sock`;
+  private async spawnWorker(appName: string, workerId: number, maxRequestsPerWorker: number, appDirectory: string, jsonLogging: boolean, generation: 'blue' | 'green' = 'blue'): Promise<Worker> {
+    const socketPath = generation === 'blue'
+      ? `/tmp/rip_worker_${appName}_${workerId}.sock`
+      : `/tmp/rip_worker_${appName}_${workerId}_g.sock`;
 
     // Clean up any existing socket
     try {
@@ -185,7 +188,8 @@ export class RipManager {
       socketPath,
       startedAt: Date.now(),
       backoffMs: 1000, // Start with 1 second backoff
-      appName
+      appName,
+      generation
     };
 
     // Monitor worker process
@@ -232,7 +236,8 @@ export class RipManager {
               worker.id,
               maxReq,
               appDirectory,
-              json
+              json,
+              worker.generation
             );
             workers[workerIndex] = newWorker;
           }
@@ -279,23 +284,49 @@ export class RipManager {
    * Restart all workers for an app (hot reload)
    */
   private async restartAppWorkers(appName: string): Promise<void> {
-    const workers = this.workers.get(appName);
-    if (!workers) return;
+    const blue = this.workers.get(appName);
+    if (!blue || blue.length === 0) return;
 
-    console.log(`🔄 [Manager] Hot reloading ALL workers for app '${appName}' (immediate cutover)`);
+    console.log(`🔄 [Manager] Blue-Green: warming GREEN generation for app '${appName}'`);
 
-    // Kill all workers quickly to ensure no stale responses
-    await Promise.all(workers.map(async (worker) => {
-      try {
-        worker.process.kill('SIGTERM');
-        try { await worker.process.exited; } catch {}
-      } catch (error) {
-        console.error(`❌ [Manager] Error stopping worker ${worker.id}:`, error);
+    // Spawn green generation
+    const maxReq = this.appMaxRequests.get(appName) ?? 100;
+    const json = this.appJsonLogging.get(appName) ?? false;
+    const dir = this.appDirectories.get(appName) || appName;
+    const green: Worker[] = [];
+    for (let i = 0; i < blue.length; i++) {
+      const w = await this.spawnWorker(appName, i, maxReq, dir, json, 'green');
+      green.push(w);
+    }
+    this.workers.set(appName, green);
+
+    // Wait for readiness of green workers
+    const deadline = Date.now() + 10000;
+    const ready = new Set<number>();
+    while (Date.now() < deadline && ready.size < green.length) {
+      for (const w of green) {
+        if (ready.has(w.id)) continue;
+        try {
+          const res = await fetch('http://localhost/__ready', { unix: w.socketPath, signal: AbortSignal.timeout(300) });
+          if (res.ok) ready.add(w.id);
+        } catch {}
       }
-    }));
+      if (ready.size < green.length) await new Promise(r => setTimeout(r, 200));
+    }
+    if (ready.size < green.length) {
+      console.error(`❌ [Manager] Green generation not ready; aborting reload`);
+      // Stop green and keep blue
+      for (const w of green) { try { w.process.kill('SIGTERM'); await w.process.exited; } catch {} }
+      this.workers.set(appName, blue);
+      return;
+    }
 
-    // monitorWorker will automatically respawn each with same id
-    console.log(`✅ [Manager] All workers terminated; new workers will start immediately`);
+    console.log(`✅ [Manager] GREEN generation ready; draining BLUE`);
+    // Drain blue: stop blue workers
+    for (const w of blue) {
+      try { w.process.kill('SIGTERM'); await w.process.exited; } catch {}
+    }
+    console.log(`✅ [Manager] Swap complete`);
   }
 
   /**

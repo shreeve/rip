@@ -11,7 +11,9 @@ export class RipServer {
   private port: number | null;
   private appName: string;
   private numWorkers: number;
-  private workerSocketPaths: string[] = [];
+  private workerSocketPathsBlue: string[] = [];
+  private workerSocketPathsGreen: string[] = [];
+  private activeGeneration: 'blue' | 'green' = 'blue';
   private currentWorker = 0;
   private totalRequests = 0;
   private workerStats = new Map<string, { requests: number; errors: number }>();
@@ -28,13 +30,17 @@ export class RipServer {
     this.useJsonLogs = jsonLogging;
 
     // Generate worker socket paths
-    this.workerSocketPaths = Array.from(
+    this.workerSocketPathsBlue = Array.from(
       { length: numWorkers },
       (_, i) => `/tmp/rip_worker_${appName}_${i}.sock`
     );
+    this.workerSocketPathsGreen = Array.from(
+      { length: numWorkers },
+      (_, i) => `/tmp/rip_worker_${appName}_${i}_g.sock`
+    );
 
     // Initialize worker stats
-    this.workerSocketPaths.forEach(path => {
+    this.workerSocketPathsBlue.forEach(path => {
       this.workerStats.set(path, { requests: 0, errors: 0 });
     });
   }
@@ -86,6 +92,18 @@ export class RipServer {
   private async handleRequest(req: Request): Promise<Response> {
     const url = new URL(req.url);
 
+    // Blue-green: opportunistically swap to green if ready
+    if (this.activeGeneration === 'blue' && this.workerSocketPathsGreen.length === this.numWorkers) {
+      try {
+        // Quick probe of one green worker
+        const probeSock = this.workerSocketPathsGreen[0];
+        const probe = await fetch('http://localhost/__ready', { unix: probeSock, signal: AbortSignal.timeout(80) }).catch(() => null);
+        if (probe && probe.ok) {
+          await this.swapToGreen(2000).catch(() => {});
+        }
+      } catch {}
+    }
+
     // Health check endpoint
     if (url.pathname === '/health') {
       return new Response(JSON.stringify({
@@ -123,8 +141,9 @@ export class RipServer {
     this.totalRequests++;
 
     // Try each worker in round-robin fashion with failover
+    const paths = this.activeGeneration === 'blue' ? this.workerSocketPathsBlue : this.workerSocketPathsGreen;
     for (let attempt = 0; attempt < this.numWorkers; attempt++) {
-      const socketPath = this.workerSocketPaths[this.currentWorker];
+      const socketPath = paths[this.currentWorker];
       const stats = this.workerStats.get(socketPath)!;
 
       try {
@@ -169,6 +188,29 @@ export class RipServer {
     // All workers failed
     console.error(`❌ [Server] All workers failed for app '${this.appName}'`);
     return new Response('All workers unavailable', { status: 503 });
+  }
+
+  /**
+   * Blue-green: warm green workers, then atomically swap active generation
+   */
+  async swapToGreen(readinessTimeoutMs = 10000): Promise<void> {
+    // Probe readiness endpoint for all green workers
+    const deadline = Date.now() + readinessTimeoutMs;
+    const ready = new Set<string>();
+    while (Date.now() < deadline && ready.size < this.workerSocketPathsGreen.length) {
+      for (const sock of this.workerSocketPathsGreen) {
+        if (ready.has(sock)) continue;
+        try {
+          const res = await fetch('http://localhost/__ready', { unix: sock, signal: AbortSignal.timeout(300) });
+          if (res.ok) ready.add(sock);
+        } catch {}
+      }
+      if (ready.size < this.workerSocketPathsGreen.length) await new Promise(r => setTimeout(r, 200));
+    }
+    if (ready.size < this.workerSocketPathsGreen.length) throw new Error('Green generation not ready in time');
+    // Atomically swap
+    this.activeGeneration = 'green';
+    this.currentWorker = 0;
   }
 
       /**
