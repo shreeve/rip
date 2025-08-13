@@ -6,6 +6,7 @@
  */
 
 import { join } from 'path';
+import { scale } from './time';
 
 export class RipServer {
   private port: number | null;
@@ -124,7 +125,7 @@ export class RipServer {
         // Forward request to worker via Unix socket
         const workerStart = performance.now();
         const response = await this.forwardToWorker(req, socketPath);
-        const workerMs = performance.now() - workerStart;
+        const workerTime = performance.now() - workerStart;
 
         // Update stats
         stats.requests++;
@@ -136,8 +137,8 @@ export class RipServer {
         const headers = new Headers(response.headers);
         headers.set('X-Rip-Worker', this.currentWorker.toString());
         headers.set('X-Rip-App', this.appName);
-        const totalMs = performance.now() - startTime;
-        headers.set('X-Response-Time', `${Math.round(totalMs)}ms`);
+        const totalTime = performance.now() - startTime;
+        headers.set('X-Response-Time', `${Math.round(totalTime)}ms`);
 
         const outResp = new Response(response.body, {
           status: response.status,
@@ -146,7 +147,8 @@ export class RipServer {
         });
 
         // Structured, aligned console logging (screen mode)
-        this.logRequest(req, outResp, totalMs, workerMs);
+        // Convert milliseconds to seconds for precise scaling
+        this.logRequest(req, outResp, totalTime / 1000, workerTime / 1000);
         return outResp;
 
       } catch (error) {
@@ -176,14 +178,14 @@ export class RipServer {
       method: req.method,
       headers: req.headers,
       body: req.body,
-      unix: socketPath, // This is all we need!
+      unix: socketPath,
     });
   }
 
   /**
    * Pretty console logger with fixed-width timestamp and two duration slots
    */
-  private logRequest(req: Request, res: Response, totalMs: number, workerMs: number): void {
+  private logRequest(req: Request, res: Response, totalSeconds: number, workerSeconds: number): void {
     if (this.useJsonLogs) {
       const url = new URL(req.url);
       const len = res.headers.get('content-length');
@@ -194,8 +196,8 @@ export class RipServer {
         method: (req as any).method || 'GET',
         path: url.pathname,
         status: res.status,
-        totalMs,
-        workerMs,
+        totalSeconds,
+        workerSeconds,
         type,
         length: len ? Number(len) : undefined,
       }));
@@ -209,19 +211,8 @@ export class RipServer {
     const tzAbs = Math.abs(tzMin);
     const tzStr = `${tzSign}${String(Math.floor(tzAbs / 60)).padStart(2, '0')}${String(tzAbs % 60).padStart(2, '0')}`;
 
-    const fmtDur = (ms: number): string => {
-      // 3-char mantissa + 1-char scale + 1-char unit
-      if (ms < 1000) {
-        const mant = ms < 100 ? (ms < 10 ? ms.toFixed(1) : Math.round(ms).toString()) : Math.round(ms).toString();
-        return `${mant.padStart(3, ' ')}m` + 's';
-      }
-      const s = ms / 1000;
-      const mant = s < 100 ? s.toFixed(1) : Math.round(s).toString();
-      return `${mant.padStart(3, ' ')} ` + 's';
-    };
-
-    const d1 = fmtDur(totalMs);
-    const d2 = fmtDur(workerMs);
+    const d1 = scale(totalSeconds, 's');
+    const d2 = scale(workerSeconds, 's');
     const method = (req as any).method || 'GET';
     const url = new URL(req.url);
     const path = url.pathname;

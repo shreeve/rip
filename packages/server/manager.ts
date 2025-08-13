@@ -8,6 +8,7 @@
 import { watch } from 'fs';
 import { join, resolve } from 'path';
 import { existsSync } from 'fs';
+import { scale } from './time';
 
 // Worker tracking
 interface Worker {
@@ -323,17 +324,7 @@ export class RipManager {
     const tzAbs = Math.abs(tzMin);
     const tzStr = `${tzSign}${String(Math.floor(tzAbs / 60)).padStart(2, '0')}${String(tzAbs % 60).padStart(2, '0')}`;
 
-    const fmtDur = (ms: number): string => {
-      if (ms < 1000) {
-        const mant = ms < 100 ? (ms < 10 ? ms.toFixed(1) : Math.round(ms).toString()) : Math.round(ms).toString();
-        return `${mant.padStart(3, ' ')}m` + 's';
-      }
-      const s = ms / 1000;
-      const mant = s < 100 ? s.toFixed(1) : Math.round(s).toString();
-      return `${mant.padStart(3, ' ')} ` + 's';
-    };
-
-    const duration = fmtDur(totalMs);
+    const duration = scale(totalMs / 1000, 's');
     console.log(`[${ts} ${tzStr} ${duration} ${duration}] 🔥 Hot reload → ${workerCount} workers restarted`);
   }
 
