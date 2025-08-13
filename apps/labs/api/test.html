@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔥 Rip Labs API HTTPS Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 30px;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+        }
+        .endpoint {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            margin: 15px 0;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .endpoint h3 {
+            margin: 0 0 10px 0;
+            color: #ffeb3b;
+        }
+        .url {
+            font-family: 'Monaco', 'Menlo', monospace;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            word-break: break-all;
+            font-size: 14px;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 5px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        .result {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 10px;
+            white-space: pre-wrap;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 13px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .status {
+            text-align: center;
+            padding: 20px;
+            font-size: 1.2em;
+        }
+        .success {
+            color: #4CAF50;
+        }
+        .error {
+            color: #f44336;
+        }
+        .info {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .test-all {
+            text-align: center;
+            margin: 20px 0;
+        }
+        .test-all button {
+            background: #ff9800;
+            font-size: 18px;
+            padding: 15px 30px;
+        }
+        .test-all button:hover {
+            background: #f57c00;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔥 Rip Labs API HTTPS Test</h1>
+
+        <div class="info">
+            <h3>🔒 HTTPS Server Status</h3>
+            <p><strong>Server URL:</strong> <code>https://localhost:3443</code></p>
+            <p><strong>Certificate:</strong> CA-signed (no browser warnings!)</p>
+            <p><strong>Architecture:</strong> Multi-worker with hot reload</p>
+            <p><strong>Status:</strong> <span id="connection-status">Testing...</span></p>
+        </div>
+
+        <div class="test-all">
+            <button onclick="testAllEndpoints()">🚀 Test All Endpoints</button>
+        </div>
+
+        <div class="endpoint">
+            <h3>🏓 Ping Endpoint</h3>
+            <div class="url">GET /ping</div>
+            <button onclick="testEndpoint('/ping', 'ping-result')">Test Ping</button>
+            <div id="ping-result" class="result" style="display: none;"></div>
+        </div>
+
+        <div class="endpoint">
+            <h3>👋 Hello Endpoint</h3>
+            <div class="url">GET /hello?name=Browser</div>
+            <button onclick="testEndpoint('/hello?name=Browser', 'hello-result')">Test Hello</button>
+            <div id="hello-result" class="result" style="display: none;"></div>
+        </div>
+
+        <div class="endpoint">
+            <h3>🧮 Calculator Endpoint</h3>
+            <div class="url">GET /calc?a=25&b=5&op=mul</div>
+            <button onclick="testEndpoint('/calc?a=25&b=5&op=mul', 'calc-result')">Test Calculator</button>
+            <div id="calc-result" class="result" style="display: none;"></div>
+        </div>
+
+        <div class="endpoint">
+            <h3>📧 Email Validation</h3>
+            <div class="url">GET /email?email=test@example.com</div>
+            <button onclick="testEndpoint('/email?email=test@example.com', 'email-result')">Test Email</button>
+            <div id="email-result" class="result" style="display: none;"></div>
+        </div>
+
+        <div class="endpoint">
+            <h3>👤 User Mock</h3>
+            <div class="url">GET /user</div>
+            <button onclick="testEndpoint('/user', 'user-result')">Test User</button>
+            <div id="user-result" class="result" style="display: none;"></div>
+        </div>
+
+        <div class="endpoint">
+            <h3>📱 Phone Formatting</h3>
+            <div class="url">GET /format-phone?phone=1234567890</div>
+            <button onclick="testEndpoint('/format-phone?phone=1234567890', 'phone-result')">Test Phone</button>
+            <div id="phone-result" class="result" style="display: none;"></div>
+        </div>
+
+        <div class="endpoint">
+            <h3>🆔 Username Validation</h3>
+            <div class="url">GET /username?username=developer123</div>
+            <button onclick="testEndpoint('/username?username=developer123', 'username-result')">Test Username</button>
+            <div id="username-result" class="result" style="display: none;"></div>
+        </div>
+
+        <div class="endpoint">
+            <h3>👶 Age Check</h3>
+            <div class="url">GET /age-check?age=25</div>
+            <button onclick="testEndpoint('/age-check?age=25', 'age-result')">Test Age Check</button>
+            <div id="age-result" class="result" style="display: none;"></div>
+        </div>
+    </div>
+
+    <script>
+        // Test initial connection
+        testConnection();
+
+        async function testConnection() {
+            const statusEl = document.getElementById('connection-status');
+            try {
+                const response = await fetch('/ping');
+                if (response.ok) {
+                    statusEl.innerHTML = '<span class="success">✅ Connected & Working!</span>';
+                } else {
+                    statusEl.innerHTML = '<span class="error">⚠️ Server Error</span>';
+                }
+            } catch (error) {
+                statusEl.innerHTML = '<span class="error">❌ Connection Failed</span>';
+            }
+        }
+
+        async function testEndpoint(path, resultId) {
+            const resultDiv = document.getElementById(resultId);
+            resultDiv.style.display = 'block';
+            resultDiv.textContent = 'Loading...';
+
+            try {
+                const startTime = Date.now();
+                const response = await fetch(path);
+                const endTime = Date.now();
+                const text = await response.text();
+
+                let result;
+                try {
+                    // Try to parse as JSON for pretty printing
+                    const json = JSON.parse(text);
+                    result = JSON.stringify(json, null, 2);
+                } catch {
+                    // If not JSON, display as plain text
+                    result = text;
+                }
+
+                const timing = endTime - startTime;
+                resultDiv.textContent = `Status: ${response.status} ${response.statusText} (${timing}ms)\n\n${result}`;
+            } catch (error) {
+                resultDiv.textContent = `Error: ${error.message}`;
+            }
+        }
+
+        async function testAllEndpoints() {
+            const endpoints = [
+                ['/ping', 'ping-result'],
+                ['/hello?name=Browser', 'hello-result'],
+                ['/calc?a=25&b=5&op=mul', 'calc-result'],
+                ['/email?email=test@example.com', 'email-result'],
+                ['/user', 'user-result'],
+                ['/format-phone?phone=1234567890', 'phone-result'],
+                ['/username?username=developer123', 'username-result'],
+                ['/age-check?age=25', 'age-result']
+            ];
+
+            for (const [path, resultId] of endpoints) {
+                await testEndpoint(path, resultId);
+                // Small delay to avoid overwhelming the server
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+        }
+    </script>
+</body>
+</html>

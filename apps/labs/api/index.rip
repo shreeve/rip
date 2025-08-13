@@ -6,13 +6,13 @@ app = withHelpers app
 
 # 🎯 Sinatra Style Examples - Test Hot Reload!
 
-# Simple ping endpoint
-get '/ping', -> 'pong - BLUE-GREEN SWAP LIVE! ✅'
+# Simple ping endpoint - Unicorn Style!
+get '/ping', -> 'pong - PRECISE TIMING! ⏱️✅'
 
 # Hello with parameter
 get '/hello', ->
   name = read('name', 'string') or 'World'
-  "Hello, #{name}! 👋"
+  "Hello, ... #{name}! 👋"
 
 # Email validation demo
 get '/email', ->
@@ -90,5 +90,103 @@ post '/create-user', ->
       error: 'Missing required fields: name, email, age'
       received: { name, email, age }
     }
+
+# 🔒 HTTPS Test Page with Interactive Testing
+app.get '/test', (c) ->
+  html = '''<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>🔥 Rip HTTPS Test</title><style>
+body{font-family:system-ui;max-width:800px;margin:0 auto;padding:20px;background:#1a1a2e;color:white;}
+.endpoint{background:#16213e;padding:20px;margin:15px 0;border-radius:8px;border:1px solid #333;}
+.endpoint h3{margin:0 0 10px 0;color:#ffeb3b;}
+button{background:#4CAF50;color:white;border:none;padding:10px 20px;border-radius:5px;cursor:pointer;margin:5px;}
+button:hover{background:#45a049;}
+.result{background:#0f0f23;padding:15px;margin-top:10px;border-radius:5px;white-space:pre-wrap;font-family:monospace;font-size:13px;display:none;}
+.status{text-align:center;padding:20px;font-size:1.2em;}
+.success{color:#4CAF50;} .error{color:#f44336;}
+.url{font-family:monospace;background:#000;padding:8px;border-radius:4px;margin:8px 0;font-size:14px;}
+</style></head><body>
+<h1>🔥 Rip Labs API HTTPS Test</h1>
+<div class="status" id="status">🔒 Testing connection...</div>
+
+<div class="endpoint">
+<h3>🏓 Ping Test</h3>
+<div class="url">GET /ping</div>
+<button onclick="test('/ping','ping-result')">Test Ping</button>
+<div id="ping-result" class="result"></div>
+</div>
+
+<div class="endpoint">
+<h3>👋 Hello Test</h3>
+<div class="url">GET /hello?name=Browser</div>
+<button onclick="test('/hello?name=Browser','hello-result')">Test Hello</button>
+<div id="hello-result" class="result"></div>
+</div>
+
+<div class="endpoint">
+<h3>🧮 Calculator Test</h3>
+<div class="url">GET /calc?a=15&b=3&op=div</div>
+<button onclick="test('/calc?a=15&b=3&op=div','calc-result')">Test Calculator</button>
+<div id="calc-result" class="result"></div>
+</div>
+
+<div class="endpoint">
+<h3>📧 Email Validation</h3>
+<div class="url">GET /email?email=dev@rip-lang.org</div>
+<button onclick="test('/email?email=dev@rip-lang.org','email-result')">Test Email</button>
+<div id="email-result" class="result"></div>
+</div>
+
+<div class="endpoint">
+<h3>👤 User Mock</h3>
+<div class="url">GET /user</div>
+<button onclick="test('/user','user-result')">Test User</button>
+<div id="user-result" class="result"></div>
+</div>
+
+<div class="endpoint">
+<h3>🚀 Test All Endpoints</h3>
+<button onclick="testAll()" style="background:#ff9800;font-size:16px;padding:15px 30px;">Run All Tests</button>
+</div>
+
+<script>
+fetch('/ping').then(r => r.ok ?
+  document.getElementById('status').innerHTML = '✅ <span class="success">HTTPS Working Perfectly!</span>' :
+  document.getElementById('status').innerHTML = '❌ <span class="error">Server Error</span>'
+).catch(() => document.getElementById('status').innerHTML = '❌ <span class="error">Connection Failed</span>');
+
+async function test(path, resultId) {
+  const div = document.getElementById(resultId);
+  div.style.display = 'block';
+  div.textContent = 'Loading...';
+  try {
+    const start = Date.now();
+    const response = await fetch(path);
+    const time = Date.now() - start;
+    const text = await response.text();
+    let result = text;
+    try { result = JSON.stringify(JSON.parse(text), null, 2); } catch {}
+    div.textContent = `Status: ${response.status} ${response.statusText} (${time}ms)\\n\\n${result}`;
+  } catch (error) {
+    div.textContent = `Error: ${error.message}`;
+  }
+}
+
+async function testAll() {
+  const tests = [
+    ['/ping', 'ping-result'],
+    ['/hello?name=Browser', 'hello-result'],
+    ['/calc?a=15&b=3&op=div', 'calc-result'],
+    ['/email?email=dev@rip-lang.org', 'email-result'],
+    ['/user', 'user-result']
+  ];
+  for (const [path, resultId] of tests) {
+    await test(path, resultId);
+    await new Promise(r => setTimeout(r, 200));
+  }
+}
+</script></body></html>'''
+  new Response(html, {
+    headers: { 'Content-Type': 'text/html; charset=UTF-8' }
+  })
 
 export default app

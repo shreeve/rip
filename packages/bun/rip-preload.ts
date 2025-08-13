@@ -19,7 +19,7 @@ if (argv[0] && /\.(ts|js|rip)$/i.test(argv[0])) {
 }
 
 if (!hasPreload) {
-  console.log('🔄 Restarting with Rip transpiler...');
+  // Silent transpiler restart
   const result = spawn([
     'bun',
     '--preload', './packages/bun/rip-bun.ts',

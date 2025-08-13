@@ -44,7 +44,7 @@ let requestsHandled = 0;
 let isShuttingDown = false;
 let requestInProgress = false;
 
-const socketPath = `/tmp/rip_worker_${appName}_${workerId}.sock`;
+const socketPath = process.env.SOCKET_PATH || `/tmp/rip_worker_${appName}_${workerId}.sock`;
 
 // Clean up any existing socket file
 try {
@@ -214,15 +214,14 @@ async function startWorker(): Promise<void> {
     },
   });
 
-  console.log(`🚀 [Worker ${workerNum}] Started for app '${appName}' on socket ${socketPath}`);
-  console.log(`📊 [Worker ${workerNum}] Max requests: ${maxRequests}`);
+  console.log(`🚀 [Worker ${workerNum}] Started for app '${appName}' (socket: ${socketPath}, max requests: ${maxRequests})`);
 
   // Graceful shutdown handling
   const shutdown = async () => {
     if (isShuttingDown) return;
     isShuttingDown = true;
 
-    console.log(`🛑 [Worker ${workerNum}] Graceful shutdown initiated...`);
+    // Graceful shutdown in progress
 
     // Wait for current request to finish
     while (requestInProgress) {
@@ -238,7 +237,7 @@ async function startWorker(): Promise<void> {
       // Socket cleanup failed, continue
     }
 
-    console.log(`✅ [Worker ${workerNum}] Shutdown complete`);
+    // Shutdown complete
     process.exit(0);
   };
 

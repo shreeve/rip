@@ -463,9 +463,7 @@ async function startServer(appPath: string, config?: Config): Promise<void> {
   const httpsPort = config?.httpsPort ?? defaults.httpsPort;
   const jsonLogging = !!config?.jsonLogging;
 
-  console.log(`📁 App: ${absoluteAppPath}`);
-  console.log(`👥 Workers: ${workers}  🔁 Requests/worker: ${requests}`);
-  console.log(`🌐 Protocol: ${protocol}  HTTP:${protocol !== 'https' ? httpPort : '-'}  HTTPS:${protocol !== 'http' ? httpsPort : '-'}`);
+  // Clean startup - details available in verbose mode if needed
 
   // Resolve TLS material for direct mode if needed
   let httpsConfig: { httpsPort: number; cert: string; key: string } | undefined;
@@ -534,7 +532,7 @@ async function startServer(appPath: string, config?: Config): Promise<void> {
   const endpoints: string[] = [];
   if (lbHttpPort) endpoints.push(`http://localhost:${lbHttpPort}`);
   if (httpsConfig) endpoints.push(`https://localhost:${httpsConfig.httpsPort}`);
-  console.log(`✅ Running: ${endpoints.join('  ')}`);
+  // Server started - URL already shown by server.start()
 
   // Write pid file for status/stop
   const pidFile = join(RUN_DIR, `direct-${appName}.pid`);

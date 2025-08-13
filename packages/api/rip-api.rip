@@ -89,7 +89,7 @@ smartRoute = (handler) ->
   (c) ->
     _currentContext = c
 
-        # Extract and prepare data just like the middleware does
+    # Extract and prepare data just like the middleware does
     data = await c.req.query() or {}
     if c.req.method in ['POST', 'PUT', 'PATCH']
       try
@@ -105,11 +105,11 @@ smartRoute = (handler) ->
     try
       result = await handler()  # Call handler without context - pure Sinatra style
       if typeof result == 'string'
-        return c.text(result)
+        return new Response(result, { headers: { 'Content-Type': 'text/plain; charset=UTF-8' } })
       else if typeof result == 'object' && result != null
         return c.json(result)
       else if typeof result == 'number' || typeof result == 'boolean'
-        return c.text(result.toString())
+        return new Response(result.toString(), { headers: { 'Content-Type': 'text/plain; charset=UTF-8' } })
       return result
     finally
       _currentContext = null

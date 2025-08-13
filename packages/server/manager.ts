@@ -18,7 +18,6 @@ interface Worker {
   startedAt: number;
   backoffMs: number;
   appName: string;
-  generation: 'blue' | 'green';
 }
 
 export class RipManager {
@@ -30,6 +29,7 @@ export class RipManager {
   private fileWatchingEnabled = true;
   private watchers: Map<string, any> = new Map(); // appName -> file watcher
   private reloadTimers: Map<string, NodeJS.Timeout> = new Map(); // appName -> debounce timer
+  private hotReloading: Set<string> = new Set(); // Track apps currently hot reloading
 
   constructor() {
     this.setupGracefulShutdown();
@@ -39,7 +39,7 @@ export class RipManager {
    * Start workers for a specific app
    */
   async startApp(appName: string, appDirectory: string, numWorkers: number = 3, maxRequestsPerWorker: number = 100, jsonLogging: boolean = false): Promise<void> {
-    console.log(`🚀 [Manager] Starting ${numWorkers} workers for app '${appName}'`);
+    // Simplified startup logging
 
     // Resolve absolute path
     const absolutePath = resolve(appDirectory);
@@ -72,8 +72,6 @@ export class RipManager {
     if (this.fileWatchingEnabled) {
       this.setupFileWatching(appName, absolutePath);
     }
-
-    console.log(`✅ [Manager] App '${appName}' started with ${numWorkers} workers`);
   }
 
   /**
@@ -85,7 +83,7 @@ export class RipManager {
       return;
     }
 
-    console.log(`🛑 [Manager] Stopping workers for app '${appName}'`);
+    // Stopping workers silently
 
     // Stop file watching
     const watcher = this.watchers.get(appName);
@@ -120,7 +118,6 @@ export class RipManager {
 
     this.workers.delete(appName);
     this.appDirectories.delete(appName);
-    console.log(`✅ [Manager] App '${appName}' stopped`);
   }
 
   /**
@@ -143,10 +140,8 @@ export class RipManager {
   /**
    * Spawn a single worker process
    */
-  private async spawnWorker(appName: string, workerId: number, maxRequestsPerWorker: number, appDirectory: string, jsonLogging: boolean, generation: 'blue' | 'green' = 'blue'): Promise<Worker> {
-    const socketPath = generation === 'blue'
-      ? `/tmp/rip_worker_${appName}_${workerId}.sock`
-      : `/tmp/rip_worker_${appName}_${workerId}_g.sock`;
+  private async spawnWorker(appName: string, workerId: number, maxRequestsPerWorker: number, appDirectory: string, jsonLogging: boolean): Promise<Worker> {
+    const socketPath = `/tmp/rip_worker_${appName}_${workerId}.sock`;
 
     // Clean up any existing socket
     try {
@@ -188,8 +183,7 @@ export class RipManager {
       socketPath,
       startedAt: Date.now(),
       backoffMs: 1000, // Start with 1 second backoff
-      appName,
-      generation
+      appName
     };
 
     // Monitor worker process
@@ -203,7 +197,7 @@ export class RipManager {
    */
   private monitorWorker(worker: Worker): void {
     worker.process.exited.then(async (exitCode: number) => {
-      if (this.isShuttingDown) return;
+      if (this.isShuttingDown || this.hotReloading.has(worker.appName)) return;
 
           const workers = this.workers.get(worker.appName);
       if (!workers) return;
@@ -236,8 +230,7 @@ export class RipManager {
               worker.id,
               maxReq,
               appDirectory,
-              json,
-              worker.generation
+              json
             );
             workers[workerIndex] = newWorker;
           }
@@ -265,7 +258,7 @@ export class RipManager {
         }
 
         const timer = setTimeout(() => {
-          console.log(`🔄 [Manager] Hot reload triggered for app '${appName}' after debounce`);
+          console.log(`🔄 [Manager] Hot reload triggered for app '${appName}' (file: ${filename})`);
           this.restartAppWorkers(appName);
           this.reloadTimers.delete(appName);
         }, 500); // 500ms debounce
@@ -274,59 +267,62 @@ export class RipManager {
       });
 
       this.watchers.set(appName, watcher);
-      console.log(`👁️ [Manager] File watching enabled for app '${appName}' in ${appDirectory}`);
     } catch (error) {
       console.error(`❌ [Manager] Failed to setup file watching for app '${appName}':`, error);
     }
   }
 
   /**
-   * Restart all workers for an app (hot reload)
+   * Restart all workers for an app (hot reload) - Simple Unicorn style
    */
   private async restartAppWorkers(appName: string): Promise<void> {
-    const blue = this.workers.get(appName);
-    if (!blue || blue.length === 0) return;
+    const workers = this.workers.get(appName);
+    if (!workers || workers.length === 0) return;
 
-    console.log(`🔄 [Manager] Blue-Green: warming GREEN generation for app '${appName}'`);
+    // Mark app as hot reloading to prevent individual worker restarts
+    this.hotReloading.add(appName);
 
-    // Spawn green generation
+    console.log(`🔄 [Manager] Restarting workers for app '${appName}'`);
+    for (const worker of workers) {
+      try {
+        worker.process.kill('SIGTERM');
+        await worker.process.exited;
+
+        // Clean up socket
+        try {
+          await Bun.spawn(['rm', '-f', worker.socketPath]).exited;
+        } catch (_) {
+          // Socket cleanup failed, continue
+        }
+      } catch (error) {
+        console.error(`❌ [Manager] Error stopping worker ${worker.id}:`, error);
+      }
+    }
+
+    // Brief pause for cleanup
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    // Start fresh workers
     const maxReq = this.appMaxRequests.get(appName) ?? 100;
     const json = this.appJsonLogging.get(appName) ?? false;
     const dir = this.appDirectories.get(appName) || appName;
-    const green: Worker[] = [];
-    for (let i = 0; i < blue.length; i++) {
-      const w = await this.spawnWorker(appName, i, maxReq, dir, json, 'green');
-      green.push(w);
-    }
-    this.workers.set(appName, green);
+        const newWorkers: Worker[] = [];
 
-    // Wait for readiness of green workers
-    const deadline = Date.now() + 10000;
-    const ready = new Set<number>();
-    while (Date.now() < deadline && ready.size < green.length) {
-      for (const w of green) {
-        if (ready.has(w.id)) continue;
-        try {
-          const res = await fetch('http://localhost/__ready', { unix: w.socketPath, signal: AbortSignal.timeout(300) });
-          if (res.ok) ready.add(w.id);
-        } catch {}
+    for (let i = 0; i < workers.length; i++) {
+      try {
+        const newWorker = await this.spawnWorker(appName, i, maxReq, dir, json);
+        newWorkers.push(newWorker);
+      } catch (error) {
+        console.error(`❌ [Manager] Failed to start worker ${i} for app '${appName}':`, error);
       }
-      if (ready.size < green.length) await new Promise(r => setTimeout(r, 200));
-    }
-    if (ready.size < green.length) {
-      console.error(`❌ [Manager] Green generation not ready; aborting reload`);
-      // Stop green and keep blue
-      for (const w of green) { try { w.process.kill('SIGTERM'); await w.process.exited; } catch {} }
-      this.workers.set(appName, blue);
-      return;
     }
 
-    console.log(`✅ [Manager] GREEN generation ready; draining BLUE`);
-    // Drain blue: stop blue workers
-    for (const w of blue) {
-      try { w.process.kill('SIGTERM'); await w.process.exited; } catch {}
-    }
-    console.log(`✅ [Manager] Swap complete`);
+    this.workers.set(appName, newWorkers);
+
+    // Clear hot reload flag - individual worker monitoring can resume
+    this.hotReloading.delete(appName);
+
+    console.log(`✅ [Manager] ${newWorkers.length} workers ready`);
   }
 
   /**
@@ -337,15 +333,11 @@ export class RipManager {
       if (this.isShuttingDown) return;
       this.isShuttingDown = true;
 
-      console.log('🛑 [Manager] Graceful shutdown initiated...');
-
       // Stop all apps
       const appNames = Array.from(this.workers.keys());
       for (const appName of appNames) {
         await this.stopApp(appName);
       }
-
-      console.log('✅ [Manager] Shutdown complete');
       process.exit(0);
     };
 

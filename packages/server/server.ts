@@ -11,9 +11,7 @@ export class RipServer {
   private port: number | null;
   private appName: string;
   private numWorkers: number;
-  private workerSocketPathsBlue: string[] = [];
-  private workerSocketPathsGreen: string[] = [];
-  private activeGeneration: 'blue' | 'green' = 'blue';
+  private workerSocketPaths: string[] = [];
   private currentWorker = 0;
   private totalRequests = 0;
   private workerStats = new Map<string, { requests: number; errors: number }>();
@@ -30,17 +28,13 @@ export class RipServer {
     this.useJsonLogs = jsonLogging;
 
     // Generate worker socket paths
-    this.workerSocketPathsBlue = Array.from(
+    this.workerSocketPaths = Array.from(
       { length: numWorkers },
       (_, i) => `/tmp/rip_worker_${appName}_${i}.sock`
     );
-    this.workerSocketPathsGreen = Array.from(
-      { length: numWorkers },
-      (_, i) => `/tmp/rip_worker_${appName}_${i}_g.sock`
-    );
 
     // Initialize worker stats
-    this.workerSocketPathsBlue.forEach(path => {
+    this.workerSocketPaths.forEach(path => {
       this.workerStats.set(path, { requests: 0, errors: 0 });
     });
   }
@@ -49,26 +43,21 @@ export class RipServer {
    * Start the HTTP server
    */
   async start(): Promise<void> {
-    console.log(`🔗 [Server] Load balancing across ${this.numWorkers} workers`);
-
     if (this.port) {
-      console.log(`🚀 [Server] Starting HTTP server for app '${this.appName}' on port ${this.port}`);
       this.server = Bun.serve({
         port: this.port,
         fetch: this.handleRequest.bind(this),
       });
-      console.log(`✅ [Server] HTTP server running at http://localhost:${this.port}`);
     }
 
     if (this.httpsConfig) {
       const { httpsPort, cert, key } = this.httpsConfig;
-      console.log(`🚀 [Server] Starting HTTPS server for app '${this.appName}' on port ${httpsPort}`);
       this.httpsServer = Bun.serve({
         port: httpsPort,
         tls: { cert, key },
         fetch: this.handleRequest.bind(this),
       });
-      console.log(`✅ [Server] HTTPS server running at https://localhost:${httpsPort}`);
+      console.log(`✅ https://localhost:${httpsPort}`);
     }
   }
 
@@ -78,11 +67,9 @@ export class RipServer {
   async stop(): Promise<void> {
     if (this.server) {
       this.server.stop();
-      console.log(`✅ [Server] HTTP server for app '${this.appName}' stopped`);
     }
     if (this.httpsServer) {
       this.httpsServer.stop();
-      console.log(`✅ [Server] HTTPS server for app '${this.appName}' stopped`);
     }
   }
 
@@ -91,18 +78,6 @@ export class RipServer {
    */
   private async handleRequest(req: Request): Promise<Response> {
     const url = new URL(req.url);
-
-    // Blue-green: opportunistically swap to green if ready
-    if (this.activeGeneration === 'blue' && this.workerSocketPathsGreen.length === this.numWorkers) {
-      try {
-        // Quick probe of one green worker
-        const probeSock = this.workerSocketPathsGreen[0];
-        const probe = await fetch('http://localhost/__ready', { unix: probeSock, signal: AbortSignal.timeout(80) }).catch(() => null);
-        if (probe && probe.ok) {
-          await this.swapToGreen(2000).catch(() => {});
-        }
-      } catch {}
-    }
 
     // Health check endpoint
     if (url.pathname === '/health') {
@@ -137,20 +112,19 @@ export class RipServer {
    * Load balance request across workers with failover
    */
   private async loadBalanceRequest(req: Request): Promise<Response> {
-    const startTime = Date.now();
+    const startTime = performance.now();
     this.totalRequests++;
 
     // Try each worker in round-robin fashion with failover
-    const paths = this.activeGeneration === 'blue' ? this.workerSocketPathsBlue : this.workerSocketPathsGreen;
     for (let attempt = 0; attempt < this.numWorkers; attempt++) {
-      const socketPath = paths[this.currentWorker];
+      const socketPath = this.workerSocketPaths[this.currentWorker];
       const stats = this.workerStats.get(socketPath)!;
 
       try {
         // Forward request to worker via Unix socket
-        const workerStart = Date.now();
+        const workerStart = performance.now();
         const response = await this.forwardToWorker(req, socketPath);
-        const workerMs = Date.now() - workerStart;
+        const workerMs = performance.now() - workerStart;
 
         // Update stats
         stats.requests++;
@@ -162,7 +136,8 @@ export class RipServer {
         const headers = new Headers(response.headers);
         headers.set('X-Rip-Worker', this.currentWorker.toString());
         headers.set('X-Rip-App', this.appName);
-        headers.set('X-Response-Time', `${Date.now() - startTime}ms`);
+        const totalMs = performance.now() - startTime;
+        headers.set('X-Response-Time', `${Math.round(totalMs)}ms`);
 
         const outResp = new Response(response.body, {
           status: response.status,
@@ -171,7 +146,7 @@ export class RipServer {
         });
 
         // Structured, aligned console logging (screen mode)
-        this.logRequest(req, outResp, Date.now() - startTime, workerMs);
+        this.logRequest(req, outResp, totalMs, workerMs);
         return outResp;
 
       } catch (error) {
@@ -191,29 +166,6 @@ export class RipServer {
   }
 
   /**
-   * Blue-green: warm green workers, then atomically swap active generation
-   */
-  async swapToGreen(readinessTimeoutMs = 10000): Promise<void> {
-    // Probe readiness endpoint for all green workers
-    const deadline = Date.now() + readinessTimeoutMs;
-    const ready = new Set<string>();
-    while (Date.now() < deadline && ready.size < this.workerSocketPathsGreen.length) {
-      for (const sock of this.workerSocketPathsGreen) {
-        if (ready.has(sock)) continue;
-        try {
-          const res = await fetch('http://localhost/__ready', { unix: sock, signal: AbortSignal.timeout(300) });
-          if (res.ok) ready.add(sock);
-        } catch {}
-      }
-      if (ready.size < this.workerSocketPathsGreen.length) await new Promise(r => setTimeout(r, 200));
-    }
-    if (ready.size < this.workerSocketPathsGreen.length) throw new Error('Green generation not ready in time');
-    // Atomically swap
-    this.activeGeneration = 'green';
-    this.currentWorker = 0;
-  }
-
-      /**
    * Forward request to a specific worker via Unix socket
    */
   private async forwardToWorker(req: Request, socketPath: string): Promise<Response> {

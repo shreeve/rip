@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rip Labs API HTTPS Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 30px;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+        }
+        .endpoint {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            margin: 15px 0;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .endpoint h3 {
+            margin: 0 0 10px 0;
+            color: #ffeb3b;
+        }
+        .url {
+            font-family: 'Monaco', 'Menlo', monospace;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            word-break: break-all;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 5px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        .result {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 10px;
+            white-space: pre-wrap;
+            font-family: 'Monaco', 'Menlo', monospace;
+        }
+        .status {
+            text-align: center;
+            padding: 20px;
+            font-size: 1.2em;
+        }
+        .success {
+            color: #4CAF50;
+        }
+        .error {
+            color: #f44336;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔥 Rip Labs API HTTPS Test</h1>
+        <div class="status" id="status">
+            🔒 Testing HTTPS connection to Rip server with CA-signed certificates...
+        </div>
+
+        <div class="endpoint">
+            <h3>🏓 Ping Endpoint</h3>
+            <div class="url">GET https://localhost:3443/ping</div>
+            <button onclick="testEndpoint('/ping', 'ping-result')">Test Ping</button>
+            <div id="ping-result" class="result" style="display: none;"></div>
+        </div>
+
+        <div class="endpoint">
+            <h3>👋 Hello Endpoint</h3>
+            <div class="url">GET https://localhost:3443/hello?name=Browser</div>
+            <button onclick="testEndpoint('/hello?name=Browser', 'hello-result')">Test Hello</button>
+            <div id="hello-result" class="result" style="display: none;"></div>
+        </div>
+
+        <div class="endpoint">
+            <h3>🧮 Calculator Endpoint</h3>
+            <div class="url">GET https://localhost:3443/calc?a=25&b=5&op=mul</div>
+            <button onclick="testEndpoint('/calc?a=25&b=5&op=mul', 'calc-result')">Test Calculator</button>
+            <div id="calc-result" class="result" style="display: none;"></div>
+        </div>
+
+        <div class="endpoint">
+            <h3>📧 Email Validation</h3>
+            <div class="url">GET https://localhost:3443/email?email=test@example.com</div>
+            <button onclick="testEndpoint('/email?email=test@example.com', 'email-result')">Test Email</button>
+            <div id="email-result" class="result" style="display: none;"></div>
+        </div>
+
+        <div class="endpoint">
+            <h3>👤 User Mock</h3>
+            <div class="url">GET https://localhost:3443/user</div>
+            <button onclick="testEndpoint('/user', 'user-result')">Test User</button>
+            <div id="user-result" class="result" style="display: none;"></div>
+        </div>
+
+        <div class="endpoint">
+            <h3>📱 Phone Formatting</h3>
+            <div class="url">GET https://localhost:3443/format-phone?phone=1234567890</div>
+            <button onclick="testEndpoint('/format-phone?phone=1234567890', 'phone-result')">Test Phone</button>
+            <div id="phone-result" class="result" style="display: none;"></div>
+        </div>
+
+        <div class="endpoint">
+            <h3>🆔 Username Validation</h3>
+            <div class="url">GET https://localhost:3443/username?username=developer123</div>
+            <button onclick="testEndpoint('/username?username=developer123', 'username-result')">Test Username</button>
+            <div id="username-result" class="result" style="display: none;"></div>
+        </div>
+    </div>
+
+    <script>
+        // Test initial connection
+        testConnection();
+
+        async function testConnection() {
+            try {
+                const response = await fetch('https://localhost:3443/ping');
+                if (response.ok) {
+                    document.getElementById('status').innerHTML = '✅ <span class="success">HTTPS connection successful! CA-signed certificates are working.</span>';
+                } else {
+                    document.getElementById('status').innerHTML = '⚠️ <span class="error">Server responded but with error status.</span>';
+                }
+            } catch (error) {
+                document.getElementById('status').innerHTML = `❌ <span class="error">Connection failed: ${error.message}</span>`;
+            }
+        }
+
+        async function testEndpoint(path, resultId) {
+            const resultDiv = document.getElementById(resultId);
+            resultDiv.style.display = 'block';
+            resultDiv.textContent = 'Loading...';
+
+            try {
+                const response = await fetch(`https://localhost:3443${path}`);
+                const text = await response.text();
+
+                let result;
+                try {
+                    // Try to parse as JSON for pretty printing
+                    const json = JSON.parse(text);
+                    result = JSON.stringify(json, null, 2);
+                } catch {
+                    // If not JSON, display as plain text
+                    result = text;
+                }
+
+                resultDiv.textContent = `Status: ${response.status}\n\n${result}`;
+            } catch (error) {
+                resultDiv.textContent = `Error: ${error.message}`;
+            }
+        }
+    </script>
+</body>
+</html>
