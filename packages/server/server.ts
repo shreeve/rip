@@ -12,10 +12,8 @@ export class RipServer {
   private port: number | null;
   private appName: string;
   private numWorkers: number;
-  private workerSocketPaths: string[] = [];
-  private currentWorker = 0;
+  private sharedSocketPath: string; // Single shared socket path
   private totalRequests = 0;
-  private workerStats = new Map<string, { requests: number; errors: number }>();
   private server: any = null;
   private httpsServer: any = null;
   private httpsConfig?: { httpsPort: number; cert: string; key: string };
@@ -28,16 +26,8 @@ export class RipServer {
     this.httpsConfig = httpsConfig;
     this.useJsonLogs = jsonLogging;
 
-    // Generate worker socket paths
-    this.workerSocketPaths = Array.from(
-      { length: numWorkers },
-      (_, i) => `/tmp/rip_worker_${appName}_${i}.sock`
-    );
-
-    // Initialize worker stats
-    this.workerSocketPaths.forEach(path => {
-      this.workerStats.set(path, { requests: 0, errors: 0 });
-    });
+    // Single shared socket path (nginx + unicorn pattern)
+    this.sharedSocketPath = `/tmp/rip_shared_${appName}.sock`;
   }
 
   /**
@@ -87,7 +77,7 @@ export class RipServer {
         app: this.appName,
         workers: this.numWorkers,
         totalRequests: this.totalRequests,
-        workerStats: Object.fromEntries(this.workerStats)
+        architecture: 'shared-socket'
       }), {
         headers: { 'Content-Type': 'application/json' }
       });
@@ -99,72 +89,51 @@ export class RipServer {
         app: this.appName,
         totalRequests: this.totalRequests,
         workers: this.numWorkers,
-        workerStats: Object.fromEntries(this.workerStats)
+        architecture: 'shared-socket'
       }), {
         headers: { 'Content-Type': 'application/json' }
       });
     }
 
-    // Load balance to workers (includes logging)
-    return await this.loadBalanceRequest(req);
+    // Forward to shared socket (kernel handles load balancing)
+    return await this.forwardToSharedSocket(req);
   }
 
   /**
-   * Load balance request across workers with failover
+   * Forward request to shared socket (nginx + unicorn pattern)
    */
-  private async loadBalanceRequest(req: Request): Promise<Response> {
+  private async forwardToSharedSocket(req: Request): Promise<Response> {
     const startTime = performance.now();
     this.totalRequests++;
 
-    // Try each worker in round-robin fashion with failover
-    for (let attempt = 0; attempt < this.numWorkers; attempt++) {
-      const socketPath = this.workerSocketPaths[this.currentWorker];
-      const stats = this.workerStats.get(socketPath)!;
+    try {
+      // Forward request to shared socket - kernel picks available worker
+      const workerStart = performance.now();
+      const response = await this.forwardToWorker(req, this.sharedSocketPath);
+      const workerTime = performance.now() - workerStart;
 
-      try {
-        // Forward request to worker via Unix socket
-        const workerStart = performance.now();
-        const response = await this.forwardToWorker(req, socketPath);
-        const workerTime = performance.now() - workerStart;
+      // Add server headers
+      const headers = new Headers(response.headers);
+      headers.set('X-Rip-App', this.appName);
+      headers.set('X-Rip-Architecture', 'shared-socket');
+      const totalTime = performance.now() - startTime;
+      headers.set('X-Response-Time', `${Math.round(totalTime)}ms`);
 
-        // Update stats
-        stats.requests++;
+      const outResp = new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers
+      });
 
-        // Move to next worker for next request
-        this.currentWorker = (this.currentWorker + 1) % this.numWorkers;
+      // Structured, aligned console logging (screen mode)
+      // Convert milliseconds to seconds for precise scaling
+      this.logRequest(req, outResp, totalTime / 1000, workerTime / 1000);
+      return outResp;
 
-        // Add server headers
-        const headers = new Headers(response.headers);
-        headers.set('X-Rip-Worker', this.currentWorker.toString());
-        headers.set('X-Rip-App', this.appName);
-        const totalTime = performance.now() - startTime;
-        headers.set('X-Response-Time', `${Math.round(totalTime)}ms`);
-
-        const outResp = new Response(response.body, {
-          status: response.status,
-          statusText: response.statusText,
-          headers
-        });
-
-        // Structured, aligned console logging (screen mode)
-        // Convert milliseconds to seconds for precise scaling
-        this.logRequest(req, outResp, totalTime / 1000, workerTime / 1000);
-        return outResp;
-
-      } catch (error) {
-        console.warn(`⚠️ [Server] Worker ${this.currentWorker} failed, trying next worker:`, error);
-
-        // Update error stats
-        stats.errors++;
-
-        // Try next worker
-        this.currentWorker = (this.currentWorker + 1) % this.numWorkers;
-      }
+    } catch (error) {
+      console.error(`❌ [Server] Shared socket failed for app '${this.appName}':`, error);
+      return new Response('Service unavailable', { status: 503 });
     }
-
-    // All workers failed
-    console.error(`❌ [Server] All workers failed for app '${this.appName}'`);
-    return new Response('All workers unavailable', { status: 503 });
   }
 
   /**

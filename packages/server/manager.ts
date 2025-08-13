@@ -105,16 +105,17 @@ export class RipManager {
       try {
         worker.process.kill();
         await worker.process.exited;
-
-        // Clean up socket
-        try {
-          await Bun.spawn(['rm', '-f', worker.socketPath]).exited;
-        } catch (_) {
-          // Socket cleanup failed, continue
-        }
       } catch (error) {
         console.error(`❌ [Manager] Error stopping worker ${worker.id}:`, error);
       }
+    }
+
+    // Clean up shared socket (only once per app)
+    const sharedSocketPath = `/tmp/rip_shared_${appName}.sock`;
+    try {
+      await Bun.spawn(['rm', '-f', sharedSocketPath]).exited;
+    } catch (_) {
+      // Socket cleanup failed, continue
     }
 
     this.workers.delete(appName);
@@ -127,13 +128,16 @@ export class RipManager {
    * Spawn a single worker process
    */
   private async spawnWorker(appName: string, workerId: number, maxRequestsPerWorker: number, appDirectory: string, jsonLogging: boolean): Promise<Worker> {
-    const socketPath = `/tmp/rip_worker_${appName}_${workerId}.sock`;
+    // All workers share the same socket (nginx + unicorn pattern)
+    const socketPath = `/tmp/rip_shared_${appName}.sock`;
 
-    // Clean up any existing socket
-    try {
-      await Bun.spawn(['rm', '-f', socketPath]).exited;
-    } catch (_) {
-      // Socket didn't exist, that's fine
+    // Only clean up shared socket if this is the first worker (workerId === 0)
+    if (workerId === 0) {
+      try {
+        await Bun.spawn(['rm', '-f', socketPath]).exited;
+      } catch (_) {
+        // Socket didn't exist, that's fine
+      }
     }
 
     // Spawn worker process
@@ -272,16 +276,17 @@ export class RipManager {
       try {
         worker.process.kill('SIGTERM');
         await worker.process.exited;
-
-        // Clean up socket
-        try {
-          await Bun.spawn(['rm', '-f', worker.socketPath]).exited;
-        } catch (_) {
-          // Socket cleanup failed, continue
-        }
       } catch (error) {
         console.error(`❌ [Manager] Error stopping worker ${worker.id}:`, error);
       }
+    }
+
+    // Clean up shared socket (only once)
+    const sharedSocketPath = `/tmp/rip_shared_${appName}.sock`;
+    try {
+      await Bun.spawn(['rm', '-f', sharedSocketPath]).exited;
+    } catch (_) {
+      // Socket cleanup failed, continue
     }
 
     // Brief pause for cleanup

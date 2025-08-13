@@ -24,7 +24,7 @@ const workerNum = workerId + 1; // Human-friendly worker number (1-indexed)
 const appName = process.argv[5] || 'unknown';
 process.title = `rip-worker-${appName}-${workerNum}`;
 
-const baseMaxRequests = Number.parseInt(process.argv[3] ?? '100');
+const baseMaxRequests = Number.parseInt(process.argv[3] ?? '10000'); // Much higher for load testing
 const appDirectory = process.argv[4] ?? process.cwd();
 
 const maxRequests = baseMaxRequests;
@@ -36,14 +36,10 @@ let requestsHandled = 0;
 let isShuttingDown = false;
 let requestInProgress = false;
 
-const socketPath = process.env.SOCKET_PATH || `/tmp/rip_worker_${appName}_${workerId}.sock`;
+// All workers listen on the same shared socket (nginx + unicorn pattern)
+const socketPath = process.env.SOCKET_PATH || `/tmp/rip_shared_${appName}.sock`;
 
-// Clean up any existing socket file
-try {
-  await Bun.spawn(['rm', '-f', socketPath]).exited;
-} catch (_) {
-  // Socket didn't exist, that's fine
-}
+// Note: Socket cleanup is handled by the manager, not individual workers
 
 /**
  * Load the user's Rip application
@@ -162,9 +158,7 @@ async function startWorker(): Promise<void> {
         return new Response('Worker shutting down', { status: 503 });
       }
 
-      if (requestInProgress) {
-        return new Response('Worker busy', { status: 503 });
-      }
+      // Note: No "busy" check - kernel handles load balancing to available workers
 
       const res = await handleRequest(req);
       // Disable browser/proxy caching by default to avoid old responses after reload
@@ -192,13 +186,7 @@ async function startWorker(): Promise<void> {
 
     server.stop();
 
-    // Clean up socket
-    try {
-      await Bun.spawn(['rm', '-f', socketPath]).exited;
-    } catch (_) {
-      // Socket cleanup failed, continue
-    }
-
+    // Note: Shared socket cleanup is handled by the manager
     // Shutdown complete
     process.exit(0);
   };
