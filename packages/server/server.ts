@@ -217,8 +217,10 @@ export class RipServer {
     const url = new URL(req.url);
     const path = url.pathname;
     const status = res.status;
-    const len = res.headers.get('content-length') || '';
-    const type = (res.headers.get('content-type') || '').split(';')[0] || '';
+    const lenHeader = res.headers.get('content-length') || '';
+    const len = lenHeader ? `${lenHeader}B` : '';
+    const contentType = (res.headers.get('content-type') || '').split(';')[0] || '';
+    const type = contentType.includes('/') ? contentType.split('/')[1] : contentType;
 
     console.log(`[${ts} ${tzStr} ${d1} ${d2}] ${method} ${path} → ${status} ${type} ${len}`);
   }
