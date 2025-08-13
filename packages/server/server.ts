@@ -232,16 +232,4 @@ export class RipServer {
     console.log(`[${ts} ${tzStr} ${d1} ${d2}] ${method} ${path} → ${status} ${type} ${len}`);
   }
 
-  /**
-   * Get server statistics
-   */
-  getStats(): any {
-    return {
-      app: this.appName,
-      port: this.port,
-      workers: this.numWorkers,
-      totalRequests: this.totalRequests,
-      workerStats: Object.fromEntries(this.workerStats)
-    };
-  }
 }

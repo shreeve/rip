@@ -120,22 +120,7 @@ export class RipManager {
     this.appDirectories.delete(appName);
   }
 
-  /**
-   * Get status of all managed apps
-   */
-  getStatus(): { [appName: string]: { workers: number; status: string } } {
-    const status: { [appName: string]: { workers: number; status: string } } = {};
-
-    for (const [appName, workers] of this.workers) {
-      const activeWorkers = workers.filter(w => !w.process.killed).length;
-      status[appName] = {
-        workers: activeWorkers,
-        status: activeWorkers > 0 ? 'running' : 'stopped'
-      };
-    }
-
-    return status;
-  }
+  // getStatus() removed - was never called
 
   /**
    * Spawn a single worker process
@@ -249,8 +234,6 @@ export class RipManager {
       const watcher = watch(appDirectory, { recursive: true }, (eventType, filename) => {
         if (!filename || !filename.endsWith('.rip')) return;
 
-        console.log(`🔥 [Manager] File change detected for app '${appName}': ${filename}`);
-
         // Debounce rapid file changes (e.g., editor saves)
         const existingTimer = this.reloadTimers.get(appName);
         if (existingTimer) {
@@ -258,7 +241,6 @@ export class RipManager {
         }
 
         const timer = setTimeout(() => {
-          console.log(`🔄 [Manager] Hot reload triggered for app '${appName}' (file: ${filename})`);
           this.restartAppWorkers(appName);
           this.reloadTimers.delete(appName);
         }, 500); // 500ms debounce
@@ -279,10 +261,12 @@ export class RipManager {
     const workers = this.workers.get(appName);
     if (!workers || workers.length === 0) return;
 
+    const startTime = performance.now();
+
     // Mark app as hot reloading to prevent individual worker restarts
     this.hotReloading.add(appName);
 
-    console.log(`🔄 [Manager] Restarting workers for app '${appName}'`);
+    // Stop all workers
     for (const worker of workers) {
       try {
         worker.process.kill('SIGTERM');
@@ -306,7 +290,7 @@ export class RipManager {
     const maxReq = this.appMaxRequests.get(appName) ?? 100;
     const json = this.appJsonLogging.get(appName) ?? false;
     const dir = this.appDirectories.get(appName) || appName;
-        const newWorkers: Worker[] = [];
+    const newWorkers: Worker[] = [];
 
     for (let i = 0; i < workers.length; i++) {
       try {
@@ -322,7 +306,35 @@ export class RipManager {
     // Clear hot reload flag - individual worker monitoring can resume
     this.hotReloading.delete(appName);
 
-    console.log(`✅ [Manager] ${newWorkers.length} workers ready`);
+    // Log in same format as request logs
+    const totalMs = performance.now() - startTime;
+    this.logHotReload(totalMs, newWorkers.length);
+  }
+
+  /**
+   * Log hot reload in same format as request logs
+   */
+  private logHotReload(totalMs: number, workerCount: number): void {
+    const now = new Date();
+    const pad = (n: number, w = 2) => String(n).padStart(w, '0');
+    const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}.${String(now.getMilliseconds()).padStart(3, '0')}`;
+    const tzMin = now.getTimezoneOffset();
+    const tzSign = tzMin <= 0 ? '+' : '-';
+    const tzAbs = Math.abs(tzMin);
+    const tzStr = `${tzSign}${String(Math.floor(tzAbs / 60)).padStart(2, '0')}${String(tzAbs % 60).padStart(2, '0')}`;
+
+    const fmtDur = (ms: number): string => {
+      if (ms < 1000) {
+        const mant = ms < 100 ? (ms < 10 ? ms.toFixed(1) : Math.round(ms).toString()) : Math.round(ms).toString();
+        return `${mant.padStart(3, ' ')}m` + 's';
+      }
+      const s = ms / 1000;
+      const mant = s < 100 ? s.toFixed(1) : Math.round(s).toString();
+      return `${mant.padStart(3, ' ')} ` + 's';
+    };
+
+    const duration = fmtDur(totalMs);
+    console.log(`[${ts} ${tzStr} ${duration} ${duration}] 🔥 Hot reload → ${workerCount} workers restarted`);
   }
 
   /**

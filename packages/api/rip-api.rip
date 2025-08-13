@@ -103,16 +103,46 @@ smartRoute = (handler) ->
     c._ripData = data
 
     try
-      result = await handler()  # Call handler without context - pure Sinatra style
-      if typeof result == 'string'
-        return new Response(result, { headers: { 'Content-Type': 'text/plain; charset=UTF-8' } })
-      else if typeof result == 'object' && result != null
-        return c.json(result)
-      else if typeof result == 'number' || typeof result == 'boolean'
-        return new Response(result.toString(), { headers: { 'Content-Type': 'text/plain; charset=UTF-8' } })
-      return result
-    finally
-      _currentContext = null
+      result = await handler()   # your pure Sinatra-style handler
+
+      # 1) If it's already a Response, return it untouched
+      if result instanceof Response
+        return result
+
+      # 2) Strings → choose html/plain safely
+      if typeof result is 'string'
+        first = result.split('\n', 1)[0]
+        isHTML = /^\s*<!doctype\s+html/i.test(first) or /^\s*<html\b/i.test(first)
+        type   = if isHTML then 'text/html; charset=UTF-8' else 'text/plain; charset=UTF-8'
+        return new Response(result, { headers: { 'Content-Type': type, 'X-Content-Type-Options': 'nosniff' } })
+
+      # 3) Numbers / booleans → plain text
+      if typeof result in ['number', 'boolean']
+        return new Response(String(result), { headers: { 'Content-Type': 'text/plain; charset=UTF-8', 'X-Content-Type-Options': 'nosniff' } })
+
+      # 4) Binary payloads
+      if result instanceof Uint8Array or result instanceof ArrayBuffer or result instanceof DataView
+        body = if result instanceof ArrayBuffer then new Uint8Array(result) else result
+        return new Response(body)  # caller can set headers upstream if needed
+
+      if typeof Blob isnt 'undefined' and result instanceof Blob
+        return new Response(result)  # Blob carries its own type if set
+
+      # 5) Streams
+      if typeof ReadableStream isnt 'undefined' and result instanceof ReadableStream
+        return new Response(result)
+
+      # 6) Plain objects → JSON (only if that’s your contract)
+      if result? and typeof result is 'object'
+        # If you actually meant to use a framework context, replace `c.json(result)` with:
+        return new Response(JSON.stringify(result),
+          headers:
+            'Content-Type': 'application/json; charset=UTF-8'
+            'X-Content-Type-Options': 'nosniff'
+        )
+
+      # Fallback: let fetch handle it (e.g., undefined/null)
+      return new Response(String(result), { headers: { 'Content-Type': 'text/plain; charset=UTF-8', 'X-Content-Type-Options': 'nosniff' } })
 
 methods = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head']
 

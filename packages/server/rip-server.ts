@@ -2,7 +2,6 @@ import { existsSync, mkdirSync, statSync, writeFileSync, readFileSync, readdirSy
 import { join, resolve } from 'path';
 import { homedir } from 'os';
 import { spawn } from 'bun';
-import { RipPlatform, type AppConfig } from './platform';
 import { RipManager } from './manager';
 import { RipServer } from './server';
 
@@ -555,13 +554,43 @@ async function startServer(appPath: string, config?: Config): Promise<void> {
   process.on('SIGTERM', shutdown);
 }
 
-// Global platform instance
-let platformInstance: RipPlatform | null = null;
+// Platform state - simple and direct
+const platformApps = new Map<string, AppConfig>();
+const platformServers = new Map<string, any>(); // appName -> RipServer
+const platformUsedPorts = new Set<number>();
+const platformStartTime = new Date();
+let platformManager: RipManager | null = null;
+
+// Platform types inline
+interface AppConfig {
+  name: string;
+  directory: string;
+  port: number;
+  protocol?: 'http' | 'https' | 'http+https';
+  httpsPort?: number;
+  httpsCert?: string;
+  httpsKey?: string;
+  workers: number;
+  requests?: number;
+  status: 'deployed' | 'running' | 'stopped' | 'error';
+  startedAt?: Date;
+  error?: string;
+  jsonLogging?: boolean;
+}
+
+interface PlatformStats {
+  totalApps: number;
+  runningApps: number;
+  uptime: number;
+  memoryUsage: NodeJS.MemoryUsage;
+}
 
 async function startPlatform(port = 3000): Promise<void> {
   console.log('🚀 Starting Rip Platform Controller...');
 
-  platformInstance = new RipPlatform(port);
+  // Initialize platform state
+  platformUsedPorts.add(port);
+  platformManager = new RipManager();
 
   // Create platform server with API and dashboard
   const server = Bun.serve({
@@ -621,7 +650,7 @@ async function startPlatform(port = 3000): Promise<void> {
 }
 
 async function handlePlatformAPI(req: Request, url: URL): Promise<Response> {
-  if (!platformInstance) {
+  if (!platformManager) {
     return new Response('{"error":"Platform not initialized"}', {
       status: 500,
       headers: { 'Content-Type': 'application/json' }
@@ -631,7 +660,7 @@ async function handlePlatformAPI(req: Request, url: URL): Promise<Response> {
   try {
     // GET /api/apps - List apps (with port health hints)
     if (url.pathname === '/api/apps' && req.method === 'GET') {
-      const apps = platformInstance.listApps();
+      const apps = Array.from(platformApps.values());
       const withHealth = await Promise.all(apps.map(async (app) => {
         let httpOk: boolean | null = null;
         let httpsOk: boolean | null = null;
@@ -662,7 +691,13 @@ async function handlePlatformAPI(req: Request, url: URL): Promise<Response> {
 
     // GET /api/stats - Platform stats
     if (url.pathname === '/api/stats' && req.method === 'GET') {
-      const stats = platformInstance.getStats();
+      const runningApps = Array.from(platformApps.values()).filter(app => app.status === 'running').length;
+      const stats: PlatformStats = {
+        totalApps: platformApps.size,
+        runningApps,
+        uptime: Date.now() - platformStartTime.getTime(),
+        memoryUsage: process.memoryUsage()
+      };
       return new Response(JSON.stringify(stats, null, 2), {
         headers: { 'Content-Type': 'application/json' }
       });
@@ -671,7 +706,7 @@ async function handlePlatformAPI(req: Request, url: URL): Promise<Response> {
     // POST /api/apps - Deploy app
     if (url.pathname === '/api/apps' && req.method === 'POST') {
       const body = await req.json() as { name: string; directory: string; workers?: number; port?: number; protocol?: 'http'|'https'|'http+https'; httpsPort?: number; cert?: string; key?: string; jsonLogging?: boolean; requests?: number };
-      const app = await platformInstance.deployApp(
+      const app = await deployApp(
         body.name,
         body.directory,
         body.workers ?? 3,
@@ -684,7 +719,7 @@ async function handlePlatformAPI(req: Request, url: URL): Promise<Response> {
         body.requests,
       );
       // Auto-start app after deploy
-      try { await platformInstance.startApp(body.name); } catch {}
+      try { await startApp(body.name); } catch {}
       return new Response(JSON.stringify(app, null, 2), {
         headers: { 'Content-Type': 'application/json' }
       });
@@ -694,7 +729,8 @@ async function handlePlatformAPI(req: Request, url: URL): Promise<Response> {
     const undeployMatch = url.pathname.match(/^\/api\/apps\/([^\/]+)$/);
     if (undeployMatch && req.method === 'DELETE') {
       const name = undeployMatch[1];
-      await platformInstance.undeployApp(name);
+      await stopApp(name);
+      platformApps.delete(name);
       return new Response('{"status":"undeployed"}', {
         headers: { 'Content-Type': 'application/json' }
       });
@@ -704,7 +740,7 @@ async function handlePlatformAPI(req: Request, url: URL): Promise<Response> {
     const startMatch = url.pathname.match(/^\/api\/apps\/([^\/]+)\/start$/);
     if (startMatch && req.method === 'POST') {
       const name = startMatch[1];
-      await platformInstance.startApp(name);
+      await startApp(name);
       return new Response('{"status":"started"}', {
         headers: { 'Content-Type': 'application/json' }
       });
@@ -716,7 +752,7 @@ async function handlePlatformAPI(req: Request, url: URL): Promise<Response> {
       const name = scaleMatch[1];
       const body = await req.json() as { workers: number };
 
-      const app = platformInstance.getApp(name);
+      const app = platformApps.get(name);
       if (!app) {
         return new Response('{"error":"App not found"}', {
           status: 404,
@@ -725,7 +761,9 @@ async function handlePlatformAPI(req: Request, url: URL): Promise<Response> {
       }
 
       const previousWorkers = app.workers;
-      await platformInstance.scaleApp(name, body.workers);
+      await stopApp(name);
+      app.workers = body.workers;
+      await startApp(name);
 
       return new Response(JSON.stringify({
         status: 'scaled',
@@ -741,7 +779,7 @@ async function handlePlatformAPI(req: Request, url: URL): Promise<Response> {
     if (restartMatch && req.method === 'POST') {
       const name = restartMatch[1];
 
-      const app = platformInstance.getApp(name);
+      const app = platformApps.get(name);
       if (!app) {
         return new Response('{"error":"App not found"}', {
           status: 404,
@@ -751,10 +789,10 @@ async function handlePlatformAPI(req: Request, url: URL): Promise<Response> {
 
       // Restart by stopping and starting
       if (app.status === 'running') {
-        await platformInstance.stopApp(name);
-        await platformInstance.startApp(name);
+        await stopApp(name);
+        await startApp(name);
       } else {
-        await platformInstance.startApp(name);
+        await startApp(name);
       }
 
       return new Response('{"status":"restarted"}', {
@@ -1309,6 +1347,154 @@ async function cleanCerts(): Promise<void> {
   console.log('✅ Certificates cleaned');
 }
 
+// ===== PLATFORM FUNCTIONS =====
+
+/**
+ * Deploy a new application - inline platform logic
+ */
+async function deployApp(
+  name: string,
+  directory: string,
+  workers: number = 3,
+  desiredPort?: number,
+  protocol?: 'http' | 'https' | 'http+https',
+  httpsPort?: number,
+  httpsCert?: string,
+  httpsKey?: string,
+  jsonLogging?: boolean,
+  requests?: number,
+): Promise<AppConfig> {
+  // Validate app doesn't already exist
+  if (platformApps.has(name)) {
+    throw new Error(`App '${name}' is already deployed`);
+  }
+
+  // Validate app directory exists
+  const absolutePath = resolve(directory);
+  const indexPath = join(absolutePath, 'index.rip');
+
+  if (!existsSync(indexPath)) {
+    throw new Error(`No index.rip found in ${directory}`);
+  }
+
+  // Find/select HTTP port
+  let port = desiredPort && desiredPort >= 1024 ? desiredPort : 3001;
+  while (platformUsedPorts.has(port)) port++;
+  platformUsedPorts.add(port);
+
+  // Reserve HTTPS port if provided
+  let finalHttpsPort: number | undefined = undefined;
+  if (protocol === 'https' || protocol === 'http+https') {
+    finalHttpsPort = httpsPort && httpsPort >= 1024 ? httpsPort : 3443;
+    while (platformUsedPorts.has(finalHttpsPort)) finalHttpsPort++;
+    platformUsedPorts.add(finalHttpsPort);
+  }
+
+  // Create app config
+  const config: AppConfig = {
+    name,
+    directory: absolutePath,
+    port,
+    protocol,
+    httpsPort: finalHttpsPort,
+    httpsCert,
+    httpsKey,
+    workers,
+    requests,
+    status: 'deployed',
+    startedAt: new Date(),
+    jsonLogging,
+  };
+
+  platformApps.set(name, config);
+  console.log(`✅ App '${name}' deployed with ${workers} workers (will run on port ${port})`);
+
+  return config;
+}
+
+/**
+ * Start a specific app
+ */
+async function startApp(name: string): Promise<void> {
+  const app = platformApps.get(name);
+  if (!app) {
+    throw new Error(`App '${name}' not found`);
+  }
+
+  if (app.status === 'running') {
+    console.log(`⚠️ App '${name}' is already running on port ${app.port}`);
+    return;
+  }
+
+  try {
+    console.log(`🚀 Starting app '${name}' with ${app.workers} workers on port ${app.port}...`);
+
+    // Start workers via manager
+    if (!platformManager) throw new Error('Platform manager not initialized');
+    await platformManager.startApp(name, app.directory, app.workers, app.requests ?? 100, !!app.jsonLogging);
+
+    // Start HTTP/HTTPS server for load balancing on app's dedicated port
+    const httpsConfig = (app.protocol === 'https' || app.protocol === 'http+https') && app.httpsPort && app.httpsCert && app.httpsKey
+      ? { httpsPort: app.httpsPort, cert: app.httpsCert, key: app.httpsKey }
+      : undefined;
+    const httpPort = app.protocol === 'https' ? null : app.port;
+    const server = new RipServer(httpPort as any, name, app.workers, httpsConfig, !!app.jsonLogging);
+    await server.start();
+    platformServers.set(name, server);
+
+    // Update app status
+    app.status = 'running';
+    app.startedAt = new Date();
+
+    console.log(`✅ App '${name}' started successfully`);
+    console.log(`🌐 Available at: http://localhost:${app.port}`);
+  } catch (error) {
+    app.status = 'error';
+    app.error = error instanceof Error ? error.message : String(error);
+    console.error(`❌ Failed to start app '${name}':`, error);
+    throw error;
+  }
+}
+
+/**
+ * Stop a specific app
+ */
+async function stopApp(name: string): Promise<void> {
+  const app = platformApps.get(name);
+  if (!app) {
+    throw new Error(`App '${name}' not found`);
+  }
+
+  if (app.status !== 'running') {
+    console.log(`⚠️ App '${name}' is not running`);
+    return;
+  }
+
+  try {
+    console.log(`🛑 Stopping app '${name}'...`);
+
+    // Stop HTTP server
+    const server = platformServers.get(name);
+    if (server) {
+      await server.stop();
+      platformServers.delete(name);
+    }
+
+    // Stop workers via manager
+    if (platformManager) {
+      await platformManager.stopApp(name);
+    }
+
+    // Update app status
+    app.status = 'stopped';
+
+    console.log(`✅ App '${name}' stopped`);
+  } catch (error) {
+    console.error(`❌ Failed to stop app '${name}':`, error);
+    throw error;
+  }
+}
+
 // ===== MAIN FUNCTION =====
 
 async function main(): Promise<void> {
@@ -1364,24 +1550,58 @@ async function main(): Promise<void> {
       break;
     }
 
-    case 'deploy':
-      await handleDeploy(config, args.slice(1));
+    case 'deploy': {
+      // Direct deploy - extract name and directory from args
+      const name = args[1];
+      let directory: string | undefined;
+      for (const arg of args.slice(2)) {
+        if (!arg.startsWith('w:') && !arg.startsWith('r:') && (arg.includes('/') || existsSync(arg))) {
+          directory = arg;
+          break;
+        }
+      }
+      directory = directory || config.appDir;
+      if (!name || !directory) {
+        console.error('❌ Usage: bun server deploy <name> <directory>');
+        process.exit(1);
+      }
+      const app = await deployApp(name, directory, config.workers, config.httpPort, config.protocol, config.httpsPort, config.certPath, config.keyPath, config.jsonLogging, config.requests);
+      await startApp(name);
+      console.log(`🌐 Available at: http://localhost:${app.port}`);
       break;
+    }
 
-    case 'undeploy':
-      await handleUndeploy(args[1]);
+    case 'undeploy': {
+      const name = args[1];
+      if (!name) {
+        console.error('❌ Usage: bun server undeploy <name>');
+        process.exit(1);
+      }
+      await stopApp(name);
+      platformApps.delete(name);
+      console.log(`✅ App '${name}' undeployed`);
       break;
+    }
 
     case 'list':
-    case 'apps':
-      await handleListApps();
+    case 'apps': {
+      const apps = Array.from(platformApps.values());
+      console.log('📱 Deployed Applications:');
+      if (apps.length === 0) {
+        console.log('   No apps deployed yet');
+      } else {
+        apps.forEach(app => {
+          console.log(`   🚀 ${app.name} - ${app.status} (port ${app.port})`);
+        });
+      }
       break;
+    }
 
     case 'start':
       // Handle both platform start and direct server start
       if (args.length > 0 && args[0] && !args[0].includes('/') && !existsSync(args[0]) && !args[0].startsWith('w:') && !args[0].startsWith('r:')) {
         // Platform app start (e.g., "start labs-api")
-        await handleStartApp(args[0]);
+        await startApp(args[0]);
       } else {
         // Direct server start with flexible args
         const appPath = config.appDir || process.cwd();
@@ -1389,13 +1609,39 @@ async function main(): Promise<void> {
       }
       break;
 
-    case 'scale':
-      await handleScale(args[1], args[2]);
+    case 'scale': {
+      const name = args[1];
+      const workersStr = args[2];
+      if (!name || !workersStr) {
+        console.error('❌ Usage: bun server scale <name> <workers>');
+        process.exit(1);
+      }
+      const workers = parseInt(workersStr);
+      if (isNaN(workers) || workers < 1 || workers > 20) {
+        console.error('❌ Worker count must be between 1 and 20');
+        process.exit(1);
+      }
+      await stopApp(name);
+      const app = platformApps.get(name);
+      if (app) {
+        app.workers = workers;
+        await startApp(name);
+        console.log(`🚀 App '${name}' scaled to ${workers} workers`);
+      }
       break;
+    }
 
-    case 'restart':
-      await handleRestartApp(args[1]);
+    case 'restart': {
+      const name = args[1];
+      if (!name) {
+        console.error('❌ Usage: bun server restart <name>');
+        process.exit(1);
+      }
+      await stopApp(name);
+      await startApp(name);
+      console.log(`🔄 App '${name}' restarted`);
       break;
+    }
 
     // CA management commands
     case 'ca:init':
@@ -1437,252 +1683,6 @@ async function main(): Promise<void> {
   }
 }
 
-// Platform command handlers
-async function handleDeploy(config: Config, remainingArgs: string[]): Promise<void> {
-  // Extract name and directory from remaining args or config
-  let name = remainingArgs[0];
-  let directory: string | undefined;
-
-  // Find the directory from remaining args (skip w: and r: arguments)
-  for (const arg of remainingArgs.slice(1)) {
-    if (!arg.startsWith('w:') && !arg.startsWith('r:') && (arg.includes('/') || existsSync(arg))) {
-      directory = arg;
-      break;
-    }
-  }
-
-  // Fallback to config appDir
-  if (!directory && config.appDir && config.appDir !== process.cwd()) {
-    directory = config.appDir;
-  }
-
-  if (!name || !directory) {
-    console.error('❌ Usage: bun server deploy <name> <directory>');
-    console.error('   Example: bun server deploy labs-api apps/labs/api');
-    console.error('   Flexible: bun server deploy labs-api w:5 apps/labs/api');
-    process.exit(1);
-  }
-
-  // Apply flexible config options
-  const deployData: any = { name, directory };
-  if (config.workers) deployData.workers = config.workers;
-  if (config.httpPort) deployData.port = config.httpPort;
-  if (config.protocol) deployData.protocol = config.protocol;
-  if (config.httpsPort) deployData.httpsPort = config.httpsPort;
-  if (config.certPath && config.keyPath) {
-    deployData.cert = await Bun.file(config.certPath).text().catch(() => undefined);
-    deployData.key = await Bun.file(config.keyPath).text().catch(() => undefined);
-  }
-  if (config.jsonLogging) deployData.jsonLogging = true;
-  if (config.requests) deployData.requests = config.requests;
-
-  // If https is requested but no cert/key provided, generate them here
-  if ((config.protocol === 'https' || config.protocol === 'http+https') && (!deployData.cert || !deployData.key)) {
-    const mode = config.httpsMode ?? 'smart';
-    try {
-      if (mode === 'quick') {
-        const { cert, key } = await generateSelfSignedCert();
-        deployData.cert = cert; deployData.key = key;
-      } else if (mode === 'ca') {
-        const { cert, key } = await generateCACert('localhost');
-        deployData.cert = cert; deployData.key = key;
-      } else {
-        if (hasCA()) {
-          const { cert, key } = await generateCACert('localhost');
-          deployData.cert = cert; deployData.key = key;
-        } else {
-          const { cert, key } = await generateSelfSignedCert();
-          deployData.cert = cert; deployData.key = key;
-        }
-      }
-    } catch (e) {
-      console.warn('⚠️  Failed to auto-generate HTTPS certs for deploy; proceeding without HTTPS material');
-    }
-  }
-
-  try {
-    const response = await fetch('http://localhost:3000/api/apps', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(deployData)
-    });
-
-    if (response.ok) {
-      const app = await response.json();
-      console.log(`✅ App '${name}' deployed successfully`);
-      console.log(`📁 Directory: ${app.directory}`);
-      console.log(`🌐 Port: ${app.port}`);
-
-      // Auto-start the app after deploy
-      try {
-        const startResp = await fetch(`http://localhost:3000/api/apps/${name}/start`, { method: 'POST' });
-        if (startResp.ok) {
-          console.log(`🚀 App '${name}' started`);
-          console.log(`🌐 Available at: http://localhost:${app.port}`);
-        } else {
-          console.warn(`⚠️  App '${name}' deployed but failed to start. Use: bun server start ${name}`);
-        }
-      } catch (_) {
-        console.warn(`⚠️  App '${name}' deployed but failed to start. Use: bun server start ${name}`);
-      }
-    } else {
-      const error = await response.json();
-      console.error(`❌ Deploy failed: ${error.error}`);
-      process.exit(1);
-    }
-  } catch (error) {
-    console.error('❌ Platform not running. Start it with: bun server platform');
-    process.exit(1);
-  }
-}
-
-async function handleUndeploy(name?: string): Promise<void> {
-  if (!name) {
-    console.error('❌ Usage: bun server undeploy <name>');
-    console.error('   Example: bun server undeploy labs-api');
-    process.exit(1);
-  }
-
-  try {
-    const response = await fetch(`http://localhost:3000/api/apps/${name}`, {
-      method: 'DELETE'
-    });
-
-    if (response.ok) {
-      console.log(`✅ App '${name}' undeployed successfully`);
-    } else {
-      const error = await response.json();
-      console.error(`❌ Undeploy failed: ${error.error}`);
-      process.exit(1);
-    }
-  } catch (error) {
-    console.error('❌ Platform not running. Start it with: bun server platform');
-    process.exit(1);
-  }
-}
-
-async function handleListApps(): Promise<void> {
-  try {
-    const response = await fetch('http://localhost:3000/api/apps');
-
-    if (response.ok) {
-      const apps = await response.json();
-
-      console.log('📱 Deployed Applications:');
-      console.log('');
-
-      if (apps.length === 0) {
-        console.log('   No apps deployed yet');
-        console.log('   Deploy your first app: bun server deploy <name> <path>');
-        return;
-      }
-
-      apps.forEach((app: AppConfig) => {
-        console.log(`   🚀 ${app.name}`);
-        console.log(`      📁 Directory: ${app.directory}`);
-        const httpsInfo = app.httpsPort ? `, https:${app.httpsPort}` : '';
-        console.log(`      🌐 Port: http:${app.port}${httpsInfo}`);
-        console.log(`      📊 Status: ${app.status}`);
-        if (app.startedAt) {
-          console.log(`      ⏰ Started: ${new Date(app.startedAt).toLocaleString()}`);
-        }
-        console.log('');
-      });
-    } else {
-      console.error('❌ Failed to fetch apps');
-      process.exit(1);
-    }
-  } catch (error) {
-    console.error('❌ Platform not running. Start it with: bun server platform');
-    process.exit(1);
-  }
-}
-
-async function handleStartApp(name?: string): Promise<void> {
-  if (!name) {
-    console.error('❌ Usage: bun server start <name>');
-    console.error('   Example: bun server start labs-api');
-    process.exit(1);
-  }
-
-  try {
-    const response = await fetch(`http://localhost:3000/api/apps/${name}/start`, {
-      method: 'POST'
-    });
-
-    if (response.ok) {
-      console.log(`✅ App '${name}' started successfully`);
-      console.log('🌐 Available at: http://localhost:3000');
-    } else {
-      const error = await response.json();
-      console.error(`❌ Start failed: ${error.error}`);
-      process.exit(1);
-    }
-  } catch (error) {
-    console.error('❌ Platform not running. Start it with: bun server platform');
-    process.exit(1);
-  }
-}
-
-async function handleScale(name?: string, workersStr?: string): Promise<void> {
-  if (!name || !workersStr) {
-    console.error('❌ Usage: bun server scale <name> <workers>');
-    console.error('   Example: bun server scale labs-api 5');
-    process.exit(1);
-  }
-
-  const workers = parseInt(workersStr);
-  if (isNaN(workers) || workers < 1 || workers > 20) {
-    console.error('❌ Worker count must be a number between 1 and 20');
-    process.exit(1);
-  }
-
-  try {
-    const response = await fetch(`http://localhost:3000/api/apps/${name}/scale`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ workers }),
-    });
-
-    if (response.ok) {
-      const result = await response.json();
-      console.log(`🚀 App '${name}' scaled to ${workers} workers`);
-      console.log(`📊 Previous: ${result.previousWorkers} → Current: ${result.currentWorkers} workers`);
-    } else {
-      const error = await response.json();
-      console.error(`❌ Scale failed: ${error.error}`);
-      process.exit(1);
-    }
-  } catch (error) {
-    console.error('❌ Platform not running. Start it with: bun server platform');
-    process.exit(1);
-  }
-}
-
-async function handleRestartApp(name?: string): Promise<void> {
-  if (!name) {
-    console.error('❌ Usage: bun server restart <name>');
-    console.error('   Example: bun server restart labs-api');
-    process.exit(1);
-  }
-
-  try {
-    const response = await fetch(`http://localhost:3000/api/apps/${name}/restart`, {
-      method: 'POST',
-    });
-
-    if (response.ok) {
-      console.log(`🔄 App '${name}' restarted successfully`);
-    } else {
-      const error = await response.json();
-      console.error(`❌ Restart failed: ${error.error}`);
-      process.exit(1);
-    }
-  } catch (error) {
-    console.error('❌ Platform not running. Start it with: bun server platform');
-    process.exit(1);
-  }
-}
 
 if (import.meta.main) {
   main().catch(error => {

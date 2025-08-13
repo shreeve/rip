@@ -1,18 +1,15 @@
 import { Hono } from 'hono'
 import { read, withHelpers } from '@rip/api'
 
-app = new Hono
-app = withHelpers app
-
 # 🎯 Sinatra Style Examples - Test Hot Reload!
 
 # Simple ping endpoint - Unicorn Style!
-get '/ping', -> 'pong - PRECISE TIMING! ⏱️✅'
+get '/ping', -> 'pong'
 
 # Hello with parameter
 get '/hello', ->
   name = read('name', 'string') or 'World'
-  "Hello, ... #{name}! 👋"
+  "Hello, #{name}! 👋"
 
 # Email validation demo
 get '/email', ->
@@ -92,8 +89,8 @@ post '/create-user', ->
     }
 
 # 🔒 HTTPS Test Page with Interactive Testing
-app.get '/test', (c) ->
-  html = '''<!DOCTYPE html>
+get '/test', ->
+  '''<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>🔥 Rip HTTPS Test</title><style>
 body{font-family:system-ui;max-width:800px;margin:0 auto;padding:20px;background:#1a1a2e;color:white;}
 .endpoint{background:#16213e;padding:20px;margin:15px 0;border-radius:8px;border:1px solid #333;}
@@ -185,8 +182,6 @@ async function testAll() {
   }
 }
 </script></body></html>'''
-  new Response(html, {
-    headers: { 'Content-Type': 'text/html; charset=UTF-8' }
-  })
 
-export default app
+# Create app and apply helpers (this processes the queued routes)
+export default withHelpers new Hono
