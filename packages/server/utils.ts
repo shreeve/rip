@@ -34,6 +34,13 @@ export function scale(show: number, unit: string, base = 1000): string {
     slot -= 1
   }
 
+  // Handle floating point precision issues near boundaries
+  // If we're very close to the next scale boundary, round up
+  if (show >= baseNum * 0.9995) {
+    show /= baseNum
+    slot -= 1
+  }
+
   // Check bounds and format with smart alignment
   if (slot >= 0 && slot <= 6) {
     let nums: string
@@ -79,6 +86,13 @@ export function scale_two_decimals(
 
   // Scale up for large numbers
   while (show >= baseNum) {
+    show /= baseNum
+    slot -= 1
+  }
+
+  // Handle floating point precision issues near boundaries
+  // If we're very close to the next scale boundary, round up
+  if (show >= baseNum * 0.9995) {
     show /= baseNum
     slot -= 1
   }
