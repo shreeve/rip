@@ -189,6 +189,7 @@ async function startWorker(): Promise<void> {
       headers.set('Cache-Control', 'no-store')
       headers.set('Pragma', 'no-cache')
       headers.set('Expires', '0')
+      headers.set('Connection', 'close')
       headers.set('X-Worker-Id', workerNum.toString())
       return new Response(res.body, {
         status: res.status,
