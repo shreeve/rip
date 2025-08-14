@@ -159,7 +159,7 @@ button:hover{background:#45a049;}
 <div class="endpoint">
 <h3>📱 Phone Format</h3>
 <div class="params">
-  <label>phone:</label><input type="tel" id="phone-input" value="1234567890" placeholder="1234567890">
+  <label>phone:</label><input type="tel" id="phone-input" value="2345678901, x101" placeholder="2345678901, x101">
   <button onclick="testPhone()">Test</button>
 </div>
 <div id="phone-result" class="result"></div>
