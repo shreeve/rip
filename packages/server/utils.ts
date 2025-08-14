@@ -28,8 +28,15 @@ export function scale(show: number, unit: string, base = 1000): string {
     slot += 1
   }
 
-  // Scale up for large numbers, with boundary handling for precision
-  while (show >= baseNum || (show >= baseNum * 0.9995 && slot > 0)) {
+  // Scale up for large numbers
+  while (show >= baseNum) {
+    show /= baseNum
+    slot -= 1
+  }
+
+  // Handle floating point precision issues near boundaries
+  // If we're very close to the next scale boundary, round up
+  if (show >= baseNum * 0.9995) {
     show /= baseNum
     slot -= 1
   }
@@ -38,11 +45,14 @@ export function scale(show: number, unit: string, base = 1000): string {
   if (slot >= 0 && slot <= 6) {
     let nums: string
 
-    if (show >= 100) { // 123 -> "123"
+    if (show >= 100) {
+      // 123 -> "123"
       nums = Math.round(show).toString()
-    } else if (show >= 10) { // 12.3 -> " 12" (pad to align)
+    } else if (show >= 10) {
+      // 12.3 -> " 12" (pad to align)
       nums = ' ' + Math.round(show).toString()
-    } else { // 1.23 -> "1.2" (one decimal place)
+    } else {
+      // 1.23 -> "1.2" (one decimal place)
       nums = show.toFixed(1)
     }
 
@@ -74,8 +84,15 @@ export function scale_two_decimals(
     slot += 1
   }
 
-  // Scale up for large numbers, with boundary handling for precision
-  while (show >= baseNum || (show >= baseNum * 0.9995 && slot > 0)) {
+  // Scale up for large numbers
+  while (show >= baseNum) {
+    show /= baseNum
+    slot -= 1
+  }
+
+  // Handle floating point precision issues near boundaries
+  // If we're very close to the next scale boundary, round up
+  if (show >= baseNum * 0.9995) {
     show /= baseNum
     slot -= 1
   }
