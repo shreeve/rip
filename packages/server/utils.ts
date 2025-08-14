@@ -34,6 +34,12 @@ export function scale(show: number, unit: string, base = 1000): string {
     slot -= 1
   }
 
+  // Handle too-wide numbers
+  if (show >= 999.5) {
+    show /= baseNum
+    slot -= 1
+  }
+
   // Check bounds and format with smart alignment
   if (slot >= 0 && slot <= 6) {
     let nums: string
