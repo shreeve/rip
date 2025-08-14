@@ -76,7 +76,7 @@ export class RipManager {
 
     this.workers.set(appName, workers);
 
-    console.log(`🚀 [Manager] Started ${numWorkers} workers for app '${appName}' (connections per worker: ${process.env.WORKER_CONNECTIONS || '1024'})`);
+    console.log(`🚀 Started ${numWorkers} workers for '${appName}' (${maxRequestsPerWorker} req/worker)`);
 
     // Setup file watching for hot reload
     if (this.fileWatchingEnabled) {
@@ -376,6 +376,6 @@ export class RipManager {
   setConnectionLimits(workerConnections: number = 1024, backlog: number = 511): void {
     process.env.WORKER_CONNECTIONS = workerConnections.toString();
     process.env.CONNECTION_BACKLOG = backlog.toString();
-    console.log(`⚙️  [Manager] Connection limits: worker_connections=${workerConnections}, backlog=${backlog}`);
+    // Connection limits are no longer used in sequential processing model
   }
 }

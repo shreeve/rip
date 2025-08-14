@@ -78,8 +78,6 @@ async function loadRipApp(): Promise<void> {
   const indexPath = entryPath || (appDirectory.startsWith('/') ? join(appDirectory, 'index.rip') : join(process.cwd(), appDirectory, 'index.rip'));
 
   try {
-    console.log(`📁 [Worker ${workerNum}] Loading Rip app from ${indexPath}`);
-
     // Dynamic import to load the .rip application
     // The Rip transpiler should already be loaded via --preload
     const module = await import(indexPath);
@@ -89,7 +87,6 @@ async function loadRipApp(): Promise<void> {
       throw new Error('No default export found in Rip app');
     }
 
-    console.log(`✅ [Worker ${workerNum}] Loaded Rip app successfully`);
     appReady = true;
   } catch (error) {
     console.error(`❌ [Worker ${workerNum}] Failed to load Rip app:`, error);
@@ -197,7 +194,7 @@ async function startWorker(): Promise<void> {
     },
   });
 
-  console.log(`🚀 [Worker ${workerNum}] Started for app '${appName}' (socket: ${socketPath}, max requests: ${maxRequests}, sequential processing)`);
+  // Worker ready - manager will show summary
 
   // Graceful shutdown handling
   const shutdown = async () => {
