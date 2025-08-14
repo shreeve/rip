@@ -18,6 +18,7 @@ export class RipServer {
   private httpsServer: any = null;
   private httpsConfig?: { httpsPort: number; cert: string; key: string };
   private useJsonLogs: boolean;
+  private startTime: number = performance.now();
 
   constructor(port: number, appName: string, numWorkers: number, httpsConfig?: { httpsPort: number; cert: string; key: string }, jsonLogging: boolean = false) {
     this.port = port ?? null;
@@ -70,28 +71,35 @@ export class RipServer {
   private async handleRequest(req: Request): Promise<Response> {
     const url = new URL(req.url);
 
-    // Health check endpoint
-    if (url.pathname === '/health') {
-      return new Response(JSON.stringify({
-        status: 'ok',
-        app: this.appName,
-        workers: this.numWorkers,
-        totalRequests: this.totalRequests,
-        architecture: 'shared-socket'
-      }), {
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
+    // Status endpoint (replaces /health and /metrics)
+    if (url.pathname === '/status') {
+      const uptime = Math.floor((performance.now() - this.startTime) / 1000);
+      const avgRequestsPerWorker = this.numWorkers > 0 ? Math.floor(this.totalRequests / this.numWorkers) : 0;
 
-    // Metrics endpoint
-    if (url.pathname === '/metrics') {
       return new Response(JSON.stringify({
+        status: 'healthy',
         app: this.appName,
-        totalRequests: this.totalRequests,
-        workers: this.numWorkers,
-        architecture: 'shared-socket'
+        architecture: 'shared-socket',
+        workers: {
+          count: this.numWorkers,
+          maxConnections: process.env.WORKER_CONNECTIONS || '1024',
+          totalRequests: this.totalRequests,
+          avgRequestsPerWorker
+        },
+        server: {
+          uptime: `${uptime}s`,
+          protocol: this.httpsConfig ? (this.port ? 'http+https' : 'https') : 'http',
+          ports: {
+            ...(this.port && { http: this.port }),
+            ...(this.httpsConfig && { https: this.httpsConfig.httpsPort })
+          }
+        },
+        timestamp: new Date().toISOString()
       }), {
-        headers: { 'Content-Type': 'application/json' }
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache'
+        }
       });
     }
 

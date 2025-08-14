@@ -11,8 +11,7 @@
     "test": "./rip-server.ts test",
     "manager": "bun manager.ts",
     "worker": "bun worker.ts",
-    "health": "curl -s http://localhost:3000/health | jq .",
-    "metrics": "curl -s http://localhost:3000/metrics",
+    "status": "curl -s http://localhost:3000/status | jq .",
     "load-test": "wrk -t4 -c10 -d10s http://localhost:3000",
     "stress-test": "wrk -t12 -c100 -d60s http://localhost:3000"
   },

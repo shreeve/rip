@@ -285,8 +285,8 @@ async function isRunning(): Promise<boolean> {
         try {
           const meta = JSON.parse(readFileSync(join(RUN_DIR, f), 'utf8')) as any;
           const probes: string[] = [];
-          if (meta.httpPort) probes.push(`http://localhost:${meta.httpPort}/health`);
-          if (meta.httpsPort) probes.push(`https://localhost:${meta.httpsPort}/health`);
+          if (meta.httpPort) probes.push(`http://localhost:${meta.httpPort}/status`);
+          if (meta.httpsPort) probes.push(`https://localhost:${meta.httpsPort}/status`);
           for (const u of probes) {
             const res = await fetch(u, { signal: AbortSignal.timeout(600), redirect: 'manual' as any }).catch(() => null);
             if (res && res.ok) return true;
@@ -295,7 +295,7 @@ async function isRunning(): Promise<boolean> {
       }
     }
     // Fallback to platform default
-    const response = await fetch('http://localhost:3000/health', {
+    const response = await fetch('http://localhost:3000/status', {
       signal: AbortSignal.timeout(800)
     });
     return response.ok;
@@ -315,12 +315,12 @@ async function showStatus(): Promise<void> {
         const meta = JSON.parse(readFileSync(join(RUN_DIR, f), 'utf8')) as any;
         const probes: { url: string; ok: boolean }[] = [];
         if (meta.httpPort) {
-          const url = `http://localhost:${meta.httpPort}/health`;
+          const url = `http://localhost:${meta.httpPort}/status`;
           const res = await fetch(url).catch(() => null);
           probes.push({ url, ok: !!res?.ok });
         }
         if (meta.httpsPort) {
-          const url = `https://localhost:${meta.httpsPort}/health`;
+          const url = `https://localhost:${meta.httpsPort}/status`;
           const res = await fetch(url).catch(() => null);
           probes.push({ url, ok: !!res?.ok });
         }
@@ -336,7 +336,7 @@ async function showStatus(): Promise<void> {
       for (const f of pids) {
         try {
           const meta = JSON.parse(readFileSync(join(RUN_DIR, f), 'utf8')) as any;
-          const url = `http://localhost:${meta.port}/health`;
+          const url = `http://localhost:${meta.port}/status`;
           const res = await fetch(url).catch(() => null);
           results.push({ mode: 'platform', port: meta.port, ok: !!res?.ok });
         } catch {}
@@ -531,7 +531,7 @@ async function startServer(appPath: string, config?: Config): Promise<void> {
     for (let i = 0; i < 20; i++) {
       let ok = false;
       try {
-        const res = await fetch(`http://localhost:${httpPort}/health`, { signal: AbortSignal.timeout(300) });
+        const res = await fetch(`http://localhost:${httpPort}/status`, { signal: AbortSignal.timeout(300) });
         ok = res.ok;
       } catch {}
       if (!ok) break;
@@ -626,9 +626,9 @@ async function startPlatform(port = 3000): Promise<void> {
     async fetch(req) {
       const url = new URL(req.url);
 
-      // Health check
-      if (url.pathname === '/health') {
-        return new Response('{"status":"ok","mode":"platform"}', {
+      // Status check
+      if (url.pathname === '/status') {
+        return new Response('{"status":"healthy","mode":"platform"}', {
           headers: { 'Content-Type': 'application/json' }
         });
       }
@@ -695,7 +695,7 @@ async function handlePlatformAPI(req: Request, url: URL): Promise<Response> {
         // HTTP health probe
         if (app.protocol !== 'https' && app.port) {
           try {
-            const res = await fetch(`http://localhost:${app.port}/health`, { signal: AbortSignal.timeout(400) });
+            const res = await fetch(`http://localhost:${app.port}/status`, { signal: AbortSignal.timeout(400) });
             httpOk = !!res.ok;
           } catch {
             httpOk = false;
@@ -704,7 +704,7 @@ async function handlePlatformAPI(req: Request, url: URL): Promise<Response> {
         // HTTPS health probe (best effort; may be null if self-signed)
         if ((app.protocol === 'https' || app.protocol === 'http+https') && app.httpsPort) {
           try {
-            const res = await fetch(`https://localhost:${app.httpsPort}/health`, { signal: AbortSignal.timeout(400) });
+            const res = await fetch(`https://localhost:${app.httpsPort}/status`, { signal: AbortSignal.timeout(400) });
             httpsOk = !!res.ok;
           } catch {
             httpsOk = false;

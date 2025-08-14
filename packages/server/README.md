@@ -24,7 +24,7 @@ bun server apps/my-app        # That's it. Production ready.
 - 🎯 **Point-and-run any app** - No configuration, just works
 - ⚡ **Same system dev→prod** - No deployment surprises
 - 🔄 **Smart restart behavior** - Always does what you expect
-- 📊 **Built-in monitoring** - Status, health checks, process info
+- 📊 **Built-in monitoring** - Comprehensive status endpoint with metrics
 - 🔒 **Trivial HTTPS** - One command for trusted certificates
 - 🛡️ **Production proven** - Multi-process, fault-tolerant architecture
 
@@ -115,14 +115,14 @@ bun server ca:clean                 # Clean old certificates
 
 ```
 [2025-08-03 14:30:15.123-08:00] W1.5 GET / → 200 plain 26b 3ms
-[2025-08-03 14:30:15.456-08:00] W2.3 GET /health → 200 plain 7b 1ms
+[2025-08-03 14:30:15.456-08:00] W2.3 GET /status → 200 json 248b 1ms
 [2025-08-03 14:30:15.789-08:00] W3.1 GET /info → 200 json 248b 12ms
 ```
 
 **📊 What Each Field Shows:**
 - `[2025-08-03 14:30:15.123-08:00]` - Full timestamp with timezone
 - `W1.5` - Worker 1, Request #5 (human-friendly 1-indexed)
-- `GET /health` - HTTP method + path
+- `GET /status` - HTTP method + path
 - `→ 200` - Response status code
 - `plain` - Content type (shortened)
 - `7b` - Response size in bytes
@@ -176,8 +176,7 @@ bun server apps/labs/api             # Same thing
 ### **📡 4. Test Your Running App**
 ```bash
 curl http://localhost:3000/ping      # Test endpoint
-curl http://localhost:3000/health    # Health check
-curl http://localhost:3000/metrics   # Performance metrics
+curl http://localhost:3000/status     # Server status & metrics
 ```
 
 ### **🔍 5. Monitor Server**

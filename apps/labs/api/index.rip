@@ -1,153 +1,142 @@
 import { Hono } from 'hono'
 import { read, withHelpers } from '@rip/api'
 
-# 🎯 Sinatra Style Examples - Test Hot Reload!
-
-# Simple ping endpoint - Unicorn Style!
+# Simple ping - the classic
 get '/ping', -> 'pong'
 
-# Hello with parameter
-get '/hello', ->
-  name = read('name', 'string') or 'World'
-  "Hello, #{name}! 👋"
+# Parameterized greeting
+get '/hello', -> "Hello, #{read('name', 'string') or 'World'}! 👋"
 
-# Email validation demo
+# Email validation with ternary
 get '/email', ->
-  email = read('email', 'email')
+  email = read 'email', 'email'
+
   if email
-    { valid: true, email: email, message: "#{email} looks good!" }
+    { valid: true, email, message: "#{email} looks good!" }
   else
     { valid: false, message: 'Please provide a valid email (e.g., ?email=test@example.com)' }
 
-# Calculator demo
+# Calculator with pattern matching
 get '/calc', ->
-  a = read('a', 'decimal') or 0
-  b = read('b', 'decimal') or 0
-  op = read('op', 'string') or 'add'
+  a  = read 'a' , 'decimal'
+  b  = read 'b' , 'decimal'
+  op = read 'op', 'string' or 'add'
 
   result = switch op
     when 'add' then a + b
     when 'sub' then a - b
     when 'mul' then a * b
-    when 'div'
-      if b != 0
-        a / b
-      else
-        'Cannot divide by zero!'
+    when 'div' then b isnt 0 and a / b or 'Cannot divide by zero!'
     else 'Unknown operation'
 
-  { a: a, b: b, operation: op, result: result }
+  { a, b, operation: op, result }
 
-# User mock with timestamp
-get '/user', ->
-  { name: 'larry', role: 'admin', timestamp: Date.now() }
+# Mock user data
+get '/user', -> { name: 'larry', role: 'admin', timestamp: Date.now() }
 
-# Phone number formatting demo
+# Phone formatting with Rip regex features
 get '/format-phone', ->
-  phone = read('phone', 'string')
-  if phone
-    formatted = phone.replace(/\D/g, '').replace(/(\d{3})(\d{3})(\d{4})/, '($1) $2-$3')
-    { original: phone, formatted: formatted }
-  else
-    { error: 'Please provide a phone number (e.g., ?phone=1234567890)' }
+  phone = read 'phone', 'string'
+  phone and {
+    original: phone
+    formatted: phone[/\d/g]?.replace(/(\d{3})(\d{3})(\d{4})/, '($1) $2-$3') or phone
+  } or { error: 'Please provide a phone number (e.g., ?phone=1234567890)' }
 
-# Age validation demo
+# Age categorization
 get '/age-check', ->
-  age = read('age', 'whole')
-  if age
-    status = if age >= 21 then 'adult' else if age >= 13 then 'teen' else 'child'
-    { age: age, status: status, canVote: age >= 18, canDrink: age >= 21 }
-  else
-    { error: 'Please provide your age (e.g., ?age=25)' }
+  age = read 'age', 'whole'
+  age and {
+    age
+    status: age >= 21 and 'adult' or age >= 13 and 'teen' or 'child'
+    canVote: age >= 18
+    canDrink: age >= 21
+  } or { error: 'Please provide your age (e.g., ?age=25)' }
 
-# Username validation
+# Username validation with Rip regex matching
 get '/username', ->
-  username = read('username', 'string')
-  if username
-    isValid = username.length >= 3 and /^[a-zA-Z0-9_]+$/.test(username)
-    { username: username, valid: isValid, length: username.length }
-  else
-    { error: 'Please provide a username (e.g., ?username=john_doe)' }
+  username = read 'username', 'string'
+  username and {
+    username
+    valid: username.length >= 3 and !!(username =~ /^[a-zA-Z0-9_]+$/)
+    length: username.length
+  } or { error: 'Please provide a username (e.g., ?username=john_doe)' }
 
-# Profile creation demo
+# User creation endpoint
 post '/create-user', ->
-  name = read('name', 'string')
-  email = read('email', 'email')
-  age = read('age', 'whole')
+  name  = read 'name', 'string'
+  email = read 'name', 'email'
+  age   = read 'name', 'whole'
 
-  if name and email and age
-    {
-      success: true
-      user: { id: Math.floor(Math.random() * 1000), name, email, age }
-      message: 'User created successfully!'
-    }
-  else
-    {
-      success: false
-      error: 'Missing required fields: name, email, age'
-      received: { name, email, age }
-    }
+  (name and email and age) and {
+    success: true
+    user: { id: Math.floor(Math.random() * 1000), name, email, age }
+    message: 'User created successfully!'
+  } or {
+    success: false
+    error: 'Missing required fields: name, email, age'
+    received: { name, email, age }
+  }
 
-# 🔒 HTTPS Test Page with Interactive Testing
-get '/test', ->
-  '''<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>🔥 Rip HTTPS Test</title><style>
-body{font-family:system-ui;max-width:800px;margin:0 auto;padding:20px;background:#1a1a2e;color:white;}
-.endpoint{background:#16213e;padding:20px;margin:15px 0;border-radius:8px;border:1px solid #333;}
-.endpoint h3{margin:0 0 10px 0;color:#ffeb3b;}
-button{background:#4CAF50;color:white;border:none;padding:10px 20px;border-radius:5px;cursor:pointer;margin:5px;}
+# Interactive test page
+get '/test', -> """<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>🔥 Rip Labs API Test</title><style>
+body{font-family:system-ui;max-width:900px;margin:0 auto;padding:20px;background:#1a1a2e;color:white;}
+.endpoint{background:#16213e;padding:15px;margin:10px 0;border-radius:6px;border:1px solid #333;}
+.endpoint h3{margin:0 0 8px 0;color:#ffeb3b;font-size:1.1em;}
+button{background:#4CAF50;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;margin:4px;}
 button:hover{background:#45a049;}
-.result{background:#0f0f23;padding:15px;margin-top:10px;border-radius:5px;white-space:pre-wrap;font-family:monospace;font-size:13px;display:none;}
-.status{text-align:center;padding:20px;font-size:1.2em;}
+.result{background:#0f0f23;padding:12px;margin-top:8px;border-radius:4px;white-space:pre-wrap;font-family:monospace;font-size:12px;display:none;}
+.status{text-align:center;padding:15px;font-size:1.2em;}
 .success{color:#4CAF50;} .error{color:#f44336;}
-.url{font-family:monospace;background:#000;padding:8px;border-radius:4px;margin:8px 0;font-size:14px;}
+.url{font-family:monospace;background:#000;padding:6px;border-radius:3px;margin:6px 0;font-size:13px;}
 </style></head><body>
-<h1>🔥 Rip Labs API HTTPS Test</h1>
+<h1>🔥 Rip Labs API Test Suite</h1>
 <div class="status" id="status">🔒 Testing connection...</div>
 
 <div class="endpoint">
-<h3>🏓 Ping Test</h3>
-<div class="url">GET /ping</div>
-<button onclick="test('/ping','ping-result')">Test Ping</button>
+<h3>🏓 Ping</h3><div class="url">GET /ping</div>
+<button onclick="test('/ping','ping-result')">Test</button>
 <div id="ping-result" class="result"></div>
 </div>
 
 <div class="endpoint">
-<h3>👋 Hello Test</h3>
-<div class="url">GET /hello?name=Browser</div>
-<button onclick="test('/hello?name=Browser','hello-result')">Test Hello</button>
+<h3>👋 Hello</h3><div class="url">GET /hello?name=Rip</div>
+<button onclick="test('/hello?name=Rip','hello-result')">Test</button>
 <div id="hello-result" class="result"></div>
 </div>
 
 <div class="endpoint">
-<h3>🧮 Calculator Test</h3>
-<div class="url">GET /calc?a=15&b=3&op=div</div>
-<button onclick="test('/calc?a=15&b=3&op=div','calc-result')">Test Calculator</button>
+<h3>🧮 Calculator</h3><div class="url">GET /calc?a=15&b=3&op=div</div>
+<button onclick="test('/calc?a=15&b=3&op=div','calc-result')">Test</button>
 <div id="calc-result" class="result"></div>
 </div>
 
 <div class="endpoint">
-<h3>📧 Email Validation</h3>
-<div class="url">GET /email?email=dev@rip-lang.org</div>
-<button onclick="test('/email?email=dev@rip-lang.org','email-result')">Test Email</button>
+<h3>📧 Email</h3><div class="url">GET /email?email=dev@rip-lang.org</div>
+<button onclick="test('/email?email=dev@rip-lang.org','email-result')">Test</button>
 <div id="email-result" class="result"></div>
 </div>
 
 <div class="endpoint">
-<h3>👤 User Mock</h3>
-<div class="url">GET /user</div>
-<button onclick="test('/user','user-result')">Test User</button>
+<h3>👤 User</h3><div class="url">GET /user</div>
+<button onclick="test('/user','user-result')">Test</button>
 <div id="user-result" class="result"></div>
 </div>
 
 <div class="endpoint">
-<h3>🚀 Test All Endpoints</h3>
-<button onclick="testAll()" style="background:#ff9800;font-size:16px;padding:15px 30px;">Run All Tests</button>
+<h3>📊 Server Status</h3><div class="url">GET /status</div>
+<button onclick="test('/status','status-result')">Test</button>
+<div id="status-result" class="result"></div>
+</div>
+
+<div class="endpoint">
+<h3>🚀 Run All Tests</h3>
+<button onclick="testAll()" style="background:#ff9800;font-size:14px;padding:12px 24px;">Run All</button>
 </div>
 
 <script>
 fetch('/ping').then(r => r.ok ?
-  document.getElementById('status').innerHTML = '✅ <span class="success">HTTPS Working Perfectly!</span>' :
+  document.getElementById('status').innerHTML = '✅ <span class="success">Server Online!</span>' :
   document.getElementById('status').innerHTML = '❌ <span class="error">Server Error</span>'
 ).catch(() => document.getElementById('status').innerHTML = '❌ <span class="error">Connection Failed</span>');
 
@@ -162,7 +151,7 @@ async function test(path, resultId) {
     const text = await response.text();
     let result = text;
     try { result = JSON.stringify(JSON.parse(text), null, 2); } catch {}
-    div.textContent = `Status: ${response.status} ${response.statusText} (${time}ms)\\n\\n${result}`;
+    div.textContent = `${response.status} ${response.statusText} (${time}ms)\\n\\n${result}`;
   } catch (error) {
     div.textContent = `Error: ${error.message}`;
   }
@@ -171,17 +160,18 @@ async function test(path, resultId) {
 async function testAll() {
   const tests = [
     ['/ping', 'ping-result'],
-    ['/hello?name=Browser', 'hello-result'],
+    ['/hello?name=Rip', 'hello-result'],
     ['/calc?a=15&b=3&op=div', 'calc-result'],
     ['/email?email=dev@rip-lang.org', 'email-result'],
-    ['/user', 'user-result']
+    ['/user', 'user-result'],
+    ['/status', 'status-result']
   ];
   for (const [path, resultId] of tests) {
     await test(path, resultId);
-    await new Promise(r => setTimeout(r, 200));
+    await new Promise(r => setTimeout(r, 150));
   }
 }
-</script></body></html>'''
+</script></body></html>"""
 
 # Create app and apply helpers (this processes the queued routes)
 export default withHelpers new Hono
