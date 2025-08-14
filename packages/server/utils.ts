@@ -38,14 +38,11 @@ export function scale(show: number, unit: string, base = 1000): string {
   if (slot >= 0 && slot <= 6) {
     let nums: string
 
-    if (show >= 100) {
-      // 123 -> "123"
+    if (show >= 100) { // 123 -> "123"
       nums = Math.round(show).toString()
-    } else if (show >= 10) {
-      // 12.3 -> " 12" (pad to align)
+    } else if (show >= 10) { // 12.3 -> " 12" (pad to align)
       nums = ' ' + Math.round(show).toString()
-    } else {
-      // 1.23 -> "1.2" (one decimal place)
+    } else { // 1.23 -> "1.2" (one decimal place)
       nums = show.toFixed(1)
     }
 
