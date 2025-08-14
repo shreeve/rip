@@ -161,8 +161,8 @@ export class RipManager {
         appName
       ],
       {
-        stdout: 'pipe', // Capture output for logging
-        stderr: 'pipe',
+        stdout: 'inherit', // Let worker output go to main terminal
+        stderr: 'inherit', // Let worker errors go to main terminal
         stdin: 'ignore',
         cwd: process.cwd(), // Keep in monorepo root for proper path resolution
         env: {
