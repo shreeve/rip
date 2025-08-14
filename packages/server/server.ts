@@ -46,6 +46,7 @@ export class RipServer {
         port: this.port,
         fetch: this.handleRequest.bind(this),
       })
+      console.log(`✅ http://localhost:${this.port}`)
     }
 
     if (this.httpsConfig) {
