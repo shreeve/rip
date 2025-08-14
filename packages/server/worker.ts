@@ -33,14 +33,10 @@ const maxRequests = baseMaxRequests;
 // Worker timeout protection (30 seconds per request)
 const WORKER_TIMEOUT = 30000;
 
-// Nginx-style connection limits
-const MAX_CONCURRENT_CONNECTIONS = parseEnvInt('WORKER_CONNECTIONS', 1024); // nginx worker_connections
-const CONNECTION_BACKLOG = parseEnvInt('CONNECTION_BACKLOG', 511); // nginx listen backlog
-
+// Worker state tracking
 let requestsHandled = 0;
 let isShuttingDown = false;
 let requestInProgress = false;
-let activeConnections = 0; // Track concurrent connections
 const startTime = performance.now(); // Track worker lifetime
 
 /**
@@ -179,36 +175,29 @@ async function startWorker(): Promise<void> {
         return new Response('Worker shutting down', { status: 503 });
       }
 
-      // Nginx-style connection limiting
-      if (activeConnections >= MAX_CONCURRENT_CONNECTIONS) {
-        return new Response('Service temporarily unavailable - connection limit reached', {
+      // Sequential processing - reject if worker is busy
+      if (requestInProgress) {
+        return new Response('Worker busy - try another worker', {
           status: 503,
           headers: {
-            'Retry-After': '1',
+            'Retry-After': '0.1',
             'Connection': 'close'
           }
         });
       }
 
-      // Track active connections
-      activeConnections++;
-      try {
-        const res = await handleRequest(req);
-        // Disable browser/proxy caching by default to avoid old responses after reload
-        const headers = new Headers(res.headers);
-        headers.set('Cache-Control', 'no-store');
-        headers.set('Pragma', 'no-cache');
-        headers.set('Expires', '0');
-        // Note: Each worker only knows its own connection count, not system-wide
-        headers.set('X-Worker-Id', workerNum.toString());
-        return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
-      } finally {
-        activeConnections--;
-      }
+      const res = await handleRequest(req);
+      // Disable browser/proxy caching by default to avoid old responses after reload
+      const headers = new Headers(res.headers);
+      headers.set('Cache-Control', 'no-store');
+      headers.set('Pragma', 'no-cache');
+      headers.set('Expires', '0');
+      headers.set('X-Worker-Id', workerNum.toString());
+      return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
     },
   });
 
-  console.log(`🚀 [Worker ${workerNum}] Started for app '${appName}' (socket: ${socketPath}, max requests: ${maxRequests}, max connections: ${MAX_CONCURRENT_CONNECTIONS})`);
+  console.log(`🚀 [Worker ${workerNum}] Started for app '${appName}' (socket: ${socketPath}, max requests: ${maxRequests}, sequential processing)`);
 
   // Graceful shutdown handling
   const shutdown = async () => {
