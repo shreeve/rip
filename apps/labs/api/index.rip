@@ -77,7 +77,7 @@ post '/create-user', ->
     received: { name, email, age }
   }
 
-# Interactive test page
+# Interactive test page with editable parameters
 get '/test', -> """<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>🔥 Rip Labs API Test</title><style>
 body{font-family:system-ui;max-width:900px;margin:0 auto;padding:20px;background:#1a1a2e;color:white;}
@@ -89,6 +89,10 @@ button:hover{background:#45a049;}
 .status{text-align:center;padding:15px;font-size:1.2em;}
 .success{color:#4CAF50;} .error{color:#f44336;}
 .url{font-family:monospace;background:#000;padding:6px;border-radius:3px;margin:6px 0;font-size:13px;}
+.params{margin:8px 0;display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
+.params label{font-size:13px;color:#ccc;}
+.params input{background:#0f0f23;color:white;border:1px solid #555;padding:4px 8px;border-radius:3px;font-size:13px;min-width:80px;}
+.params input:focus{border-color:#4CAF50;outline:none;}
 </style></head><body>
 <h1>🔥 Rip Labs API Test Suite</h1>
 <div class="status" id="status">🔒 Testing connection...</div>
@@ -100,25 +104,68 @@ button:hover{background:#45a049;}
 </div>
 
 <div class="endpoint">
-<h3>👋 Hello</h3><div class="url">GET /hello?name=Rip</div>
-<button onclick="test('/hello?name=Rip','hello-result')">Test</button>
+<h3>👋 Hello</h3>
+<div class="params">
+  <label>name:</label><input type="text" id="hello-name" value="Rip" placeholder="World">
+  <button onclick="testHello()">Test</button>
+</div>
 <div id="hello-result" class="result"></div>
 </div>
 
 <div class="endpoint">
-<h3>🧮 Calculator</h3><div class="url">GET /calc?a=15&b=3&op=div</div>
-<button onclick="test('/calc?a=15&b=3&op=div','calc-result')">Test</button>
+<h3>🧮 Calculator</h3>
+<div class="params">
+  <label>a:</label><input type="number" id="calc-a" value="15" step="0.1">
+  <label>b:</label><input type="number" id="calc-b" value="3" step="0.1">
+  <label>op:</label><select id="calc-op" style="background:#0f0f23;color:white;border:1px solid #555;padding:4px;border-radius:3px;">
+    <option value="add">add</option>
+    <option value="sub">sub</option>
+    <option value="mul">mul</option>
+    <option value="div" selected>div</option>
+  </select>
+  <button onclick="testCalc()">Test</button>
+</div>
 <div id="calc-result" class="result"></div>
 </div>
 
 <div class="endpoint">
-<h3>📧 Email</h3><div class="url">GET /email?email=dev@rip-lang.org</div>
-<button onclick="test('/email?email=dev@rip-lang.org','email-result')">Test</button>
+<h3>📧 Email Validation</h3>
+<div class="params">
+  <label>email:</label><input type="email" id="email-input" value="dev@rip-lang.org" placeholder="test@example.com" style="min-width:200px;">
+  <button onclick="testEmail()">Test</button>
+</div>
 <div id="email-result" class="result"></div>
 </div>
 
 <div class="endpoint">
-<h3>👤 User</h3><div class="url">GET /user</div>
+<h3>🔢 Age Check</h3>
+<div class="params">
+  <label>age:</label><input type="number" id="age-input" value="25" min="1" max="120">
+  <button onclick="testAge()">Test</button>
+</div>
+<div id="age-result" class="result"></div>
+</div>
+
+<div class="endpoint">
+<h3>👤 Username Validation</h3>
+<div class="params">
+  <label>username:</label><input type="text" id="username-input" value="rip_dev" placeholder="john_doe">
+  <button onclick="testUsername()">Test</button>
+</div>
+<div id="username-result" class="result"></div>
+</div>
+
+<div class="endpoint">
+<h3>📱 Phone Format</h3>
+<div class="params">
+  <label>phone:</label><input type="tel" id="phone-input" value="1234567890" placeholder="1234567890">
+  <button onclick="testPhone()">Test</button>
+</div>
+<div id="phone-result" class="result"></div>
+</div>
+
+<div class="endpoint">
+<h3>👤 User Mock</h3><div class="url">GET /user</div>
 <button onclick="test('/user','user-result')">Test</button>
 <div id="user-result" class="result"></div>
 </div>
@@ -157,17 +204,58 @@ async function test(path, resultId) {
   }
 }
 
+function testHello() {
+  const name = document.getElementById('hello-name').value;
+  const path = name ? `/hello?name=${encodeURIComponent(name)}` : '/hello';
+  test(path, 'hello-result');
+}
+
+function testCalc() {
+  const a = document.getElementById('calc-a').value;
+  const b = document.getElementById('calc-b').value;
+  const op = document.getElementById('calc-op').value;
+  const path = `/calc?a=${a}&b=${b}&op=${op}`;
+  test(path, 'calc-result');
+}
+
+function testEmail() {
+  const email = document.getElementById('email-input').value;
+  const path = email ? `/email?email=${encodeURIComponent(email)}` : '/email';
+  test(path, 'email-result');
+}
+
+function testAge() {
+  const age = document.getElementById('age-input').value;
+  const path = age ? `/age-check?age=${age}` : '/age-check';
+  test(path, 'age-result');
+}
+
+function testUsername() {
+  const username = document.getElementById('username-input').value;
+  const path = username ? `/username?username=${encodeURIComponent(username)}` : '/username';
+  test(path, 'username-result');
+}
+
+function testPhone() {
+  const phone = document.getElementById('phone-input').value;
+  const path = phone ? `/format-phone?phone=${encodeURIComponent(phone)}` : '/format-phone';
+  test(path, 'phone-result');
+}
+
 async function testAll() {
   const tests = [
-    ['/ping', 'ping-result'],
-    ['/hello?name=Rip', 'hello-result'],
-    ['/calc?a=15&b=3&op=div', 'calc-result'],
-    ['/email?email=dev@rip-lang.org', 'email-result'],
-    ['/user', 'user-result'],
-    ['/status', 'status-result']
+    () => test('/ping', 'ping-result'),
+    testHello,
+    testCalc,
+    testEmail,
+    testAge,
+    testUsername,
+    testPhone,
+    () => test('/user', 'user-result'),
+    () => test('/status', 'status-result')
   ];
-  for (const [path, resultId] of tests) {
-    await test(path, resultId);
+  for (const testFn of tests) {
+    testFn();
     await new Promise(r => setTimeout(r, 150));
   }
 }
