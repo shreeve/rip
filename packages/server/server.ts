@@ -6,7 +6,7 @@
  */
 
 import { join } from 'path';
-import { scale } from './time';
+import { formatTimestamp, getSharedSocketPath, scale } from './utils';
 
 export class RipServer {
   private port: number | null;
@@ -27,7 +27,7 @@ export class RipServer {
     this.useJsonLogs = jsonLogging;
 
     // Single shared socket path (nginx + unicorn pattern)
-    this.sharedSocketPath = `/tmp/rip_shared_${appName}.sock`;
+    this.sharedSocketPath = getSharedSocketPath(appName);
   }
 
   /**
@@ -172,13 +172,7 @@ export class RipServer {
       }));
       return;
     }
-    const now = new Date();
-    const pad = (n: number, w = 2) => String(n).padStart(w, '0');
-    const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}.${String(now.getMilliseconds()).padStart(3, '0')}`;
-    const tzMin = now.getTimezoneOffset();
-    const tzSign = tzMin <= 0 ? '+' : '-';
-    const tzAbs = Math.abs(tzMin);
-    const tzStr = `${tzSign}${String(Math.floor(tzAbs / 60)).padStart(2, '0')}${String(tzAbs % 60).padStart(2, '0')}`;
+    const { timestamp, timezone } = formatTimestamp();
 
     const d1 = scale(totalSeconds, 's');
     const d2 = scale(workerSeconds, 's');
@@ -191,7 +185,7 @@ export class RipServer {
     const contentType = (res.headers.get('content-type') || '').split(';')[0] || '';
     const type = contentType.includes('/') ? contentType.split('/')[1] : contentType;
 
-    console.log(`[${ts} ${tzStr} ${d1} ${d2}] ${method} ${path} → ${status} ${type} ${len}`);
+    console.log(`[${timestamp} ${timezone} ${d1} ${d2}] ${method} ${path} → ${status} ${type} ${len}`);
   }
 
 }

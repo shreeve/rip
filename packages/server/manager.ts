@@ -8,7 +8,7 @@
 import { watch } from 'fs';
 import { join, resolve } from 'path';
 import { existsSync } from 'fs';
-import { scale } from './time';
+import { getSharedSocketPath, logWithDurations, scale } from './utils';
 
 // Worker tracking
 interface Worker {
@@ -120,7 +120,7 @@ export class RipManager {
     }
 
     // Clean up shared socket (only once per app)
-    const sharedSocketPath = `/tmp/rip_shared_${appName}.sock`;
+    const sharedSocketPath = getSharedSocketPath(appName);
     try {
       await Bun.spawn(['rm', '-f', sharedSocketPath]).exited;
     } catch (_) {
@@ -138,7 +138,7 @@ export class RipManager {
    */
   private async spawnWorker(appName: string, workerId: number, maxRequestsPerWorker: number, appDirectory: string, jsonLogging: boolean): Promise<Worker> {
     // All workers share the same socket (nginx + unicorn pattern)
-    const socketPath = `/tmp/rip_shared_${appName}.sock`;
+    const socketPath = getSharedSocketPath(appName);
 
     // Only clean up shared socket if this is the first worker (workerId === 0)
     if (workerId === 0) {
@@ -291,7 +291,7 @@ export class RipManager {
     }
 
     // Clean up shared socket (only once)
-    const sharedSocketPath = `/tmp/rip_shared_${appName}.sock`;
+    const sharedSocketPath = getSharedSocketPath(appName);
     try {
       await Bun.spawn(['rm', '-f', sharedSocketPath]).exited;
     } catch (_) {
@@ -330,16 +330,8 @@ export class RipManager {
    * Log hot reload in same format as request logs
    */
   private logHotReload(totalMs: number, workerCount: number): void {
-    const now = new Date();
-    const pad = (n: number, w = 2) => String(n).padStart(w, '0');
-    const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}.${String(now.getMilliseconds()).padStart(3, '0')}`;
-    const tzMin = now.getTimezoneOffset();
-    const tzSign = tzMin <= 0 ? '+' : '-';
-    const tzAbs = Math.abs(tzMin);
-    const tzStr = `${tzSign}${String(Math.floor(tzAbs / 60)).padStart(2, '0')}${String(tzAbs % 60).padStart(2, '0')}`;
-
-    const duration = scale(totalMs / 1000, 's');
-    console.log(`[${ts} ${tzStr} ${duration} ${duration}] 🔥 Hot reload → ${workerCount} workers restarted`);
+    const durationSeconds = totalMs / 1000;
+    logWithDurations(`🔥 Hot reload → ${workerCount} workers restarted`, durationSeconds);
   }
 
   /**

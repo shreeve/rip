@@ -15,7 +15,7 @@
 export {};
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { scale } from './time';
+import { formatTimestamp, getSharedSocketPath, parseEnvInt, scale } from './utils';
 
 // Configuration
 const workerId = Number.parseInt(process.argv[2] ?? '0');
@@ -34,8 +34,8 @@ const maxRequests = baseMaxRequests;
 const WORKER_TIMEOUT = 30000;
 
 // Nginx-style connection limits
-const MAX_CONCURRENT_CONNECTIONS = Number.parseInt(process.env.WORKER_CONNECTIONS ?? '1024'); // nginx worker_connections
-const CONNECTION_BACKLOG = Number.parseInt(process.env.CONNECTION_BACKLOG ?? '511'); // nginx listen backlog
+const MAX_CONCURRENT_CONNECTIONS = parseEnvInt('WORKER_CONNECTIONS', 1024); // nginx worker_connections
+const CONNECTION_BACKLOG = parseEnvInt('CONNECTION_BACKLOG', 511); // nginx listen backlog
 
 let requestsHandled = 0;
 let isShuttingDown = false;
@@ -47,23 +47,16 @@ const startTime = performance.now(); // Track worker lifetime
  * Log worker exit with standardized format
  */
 function logWorkerExit(reason: string, details: string): void {
-  const now = new Date();
-  const pad = (n: number, w = 2) => String(n).padStart(w, '0');
-  const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}.${String(now.getMilliseconds()).padStart(3, '0')}`;
-  const tzMin = now.getTimezoneOffset();
-  const tzSign = tzMin <= 0 ? '+' : '-';
-  const tzAbs = Math.abs(tzMin);
-  const tzStr = `${tzSign}${String(Math.floor(tzAbs / 60)).padStart(2, '0')}${String(tzAbs % 60).padStart(2, '0')}`;
-  
+  const { timestamp, timezone } = formatTimestamp();
   const uptimeSeconds = (performance.now() - startTime) / 1000;
   const uptimeFormatted = scale(uptimeSeconds, 's');
   const requestsFormatted = scale(requestsHandled, 'r');
-  
-  console.log(`[${ts} ${tzStr} ${uptimeFormatted} ${requestsFormatted}] 🔄 Worker ${workerNum} exit → ${reason} (${details})`);
+
+  console.log(`[${timestamp} ${timezone} ${uptimeFormatted} ${requestsFormatted}] 🔄 Worker ${workerNum} exit → ${reason} (${details})`);
 }
 
 // All workers listen on the same shared socket (nginx + unicorn pattern)
-const socketPath = process.env.SOCKET_PATH || `/tmp/rip_shared_${appName}.sock`;
+const socketPath = process.env.SOCKET_PATH || getSharedSocketPath(appName);
 
 // Note: Socket cleanup is handled by the manager, not individual workers
 
