@@ -137,10 +137,7 @@ async function handleRequest(req: Request): Promise<Response> {
 
     // Check if we should shutdown after this request
     if (requestsHandled >= maxRequests) {
-      logWorkerExit(
-        'max_requests_reached',
-        `Reached max requests (${maxRequests})`,
-      )
+      // Worker cycling is normal - no need to log
       setTimeout(() => process.exit(0), 100)
     }
 

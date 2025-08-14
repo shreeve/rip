@@ -25,7 +25,7 @@ const defaults = {
   httpPort: 3000,
   httpsPort: 3443,
   workers: 3,
-  requests: 100,
+  requests: 1000,
   appDir: process.cwd(),
   protocol: 'http' as 'http' | 'https' | 'http+https',
   httpsMode: 'smart' as 'smart' | 'quick' | 'ca',
@@ -1574,7 +1574,7 @@ async function startApp(name: string): Promise<void> {
       name,
       app.directory,
       app.workers,
-      app.requests ?? 100,
+      app.requests ?? 1000,
       !!app.jsonLogging,
     )
 

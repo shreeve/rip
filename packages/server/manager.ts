@@ -43,7 +43,7 @@ export class RipManager {
     appName: string,
     appDirectory: string,
     numWorkers = 3,
-    maxRequestsPerWorker = 100,
+    maxRequestsPerWorker = 1000,
     jsonLogging = false,
   ): Promise<void> {
     // Auto-detect optimal worker count (nginx worker_processes auto)
