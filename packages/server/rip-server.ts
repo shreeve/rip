@@ -160,7 +160,6 @@ function parseArgs(args: string[]): Config {
       continue;
     }
 
-    // Note: wc: and cb: options removed - not used in sequential processing model
 
     // Request count: r:100
     if (arg.match(/^r:\d+$/)) {
@@ -526,7 +525,6 @@ async function startServer(appPath: string, config?: Config): Promise<void> {
   // Start manager and workers
   const manager = new RipManager();
 
-  // Note: connection limits removed - not used in sequential processing model
 
   await manager.startApp(appName, absoluteAppPath, workers, requests, jsonLogging);
 
