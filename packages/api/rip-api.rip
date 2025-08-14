@@ -8,22 +8,50 @@
 # This mixed approach ensures robust validation while showcasing Rip's
 # expressive regex capabilities.
 
+# Enhanced blank check with Rip features
+# Handles null, undefined, empty strings, whitespace-only strings, empty arrays, and empty objects
+isBlank = (obj) ->
+  return true unless obj?
+  return true if obj is ""
+  return true if typeof obj is 'string' and obj =~ /^\s*$/
+  return true if obj.length? and obj.length is 0
+  return true if typeof obj is 'object' and Object.keys(obj).length is 0
+  false
+
 # Email regex (simplified version)
 emailRegex = /^[^\s@]+@[^-\s@]+\.[^\s@]+$/
 
-# Phone formatting helper
-toPhone = (val) ->
-  return null unless val
-  digits = val.replace(/\D/g, '')
-  return null if digits.length < 10
-  # 10-digit format: 1234567890 -> 123-456-7890
-  if digits.length == 10
-    digits =~ /^(\d{3})(\d{3})(\d{4})$/ and "#{_[1]}-#{_[2]}-#{_[3]}"
-  # 11-digit with country code: 11234567890 -> 123-456-7890
-  else if digits.length == 11
-    digits =~ /^1(\d{3})(\d{3})(\d{4})$/ and "#{_[1]}-#{_[2]}-#{_[3]}"
+# Advanced phone formatting
+toPhone = (str) ->
+  return "" if isBlank(str)
+
+  # prepare to parse - squeeze spaces and strip
+  num = str.toString().replace(/\s+/g, ' ').trim()
+
+  # pluck off extension, tries several variants
+  [num, ext] = num.split(/\s*(?:, ?)?(?:ext?\.?|x|#|:|,)\s*/i, 2)
+  ext = ext.replace(/\D+/g, "") if ext
+
+  # allow international numbers (without formatting)
+  if num =~ /^\+([-+#*.,\d ]+)$/
+    etc = _[1].replace(/[^#*,\d]+/g, "")
+    if etc.replace(/\D+/g, "").length >= 6 # minimum digits
+      if etc =~ /^1(\d{10})$/
+        [num, ext] = [_[1], ""]
+      else
+        return "+#{etc}"
+
+  # adjust base number, allow only domestic phones
+  num = num.replace(/^[^2-9]*/, "").replace(/\D+/g, "")
+
+  # assemble final number
+  if num =~ /^([2-9][0-8][0-9])([2-9]\d\d)(\d{4})$/
+    num = "(#{_[1]}) #{_[2]}-#{_[3]}"
+    num += ", ext. #{ext}" if ext
   else
-    null
+    num = null
+
+  num
 
 # Name formatting helper
 # Capitalizes first letter of each word for names, basic formatting for addresses
@@ -155,6 +183,8 @@ for method in methods
         _routeQueue.push { method, path, handler }
     configurable: true
 
+export { isBlank, toPhone }
+
 export withHelpers = (app) ->
   _currentApp = app
 
@@ -186,7 +216,7 @@ export read = (keyOrContext, key = null, tag = null, miss = null) ->
   else
     val = String(val or '')
 
-  # Early returns for simple cases (Ruby-style)
+  # Early returns for simple cases
   if tag == 'id'    and val[/^([1-9]\d{0,19})$/]   then return parseInt(_[1])
   if tag == 'whole' and val[/^(0|[1-9]\d{0,19})$/] then return parseInt(_[1])
 

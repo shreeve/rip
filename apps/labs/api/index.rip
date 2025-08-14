@@ -34,12 +34,13 @@ get '/calc', ->
 # Mock user data
 get '/user', -> { name: 'larry', role: 'admin', timestamp: Date.now() }
 
-# Phone formatting with Rip regex features
 get '/format-phone', ->
-  phone = read 'phone', 'string'
+  prior = read 'phone', 'string' # Raw input
+  phone = read 'phone', 'phone'  # Processed version
+
   phone and {
-    original: phone
-    formatted: phone[/\d/g]?.replace(/(\d{3})(\d{3})(\d{4})/, '($1) $2-$3') or phone
+    original: prior
+    formatted: phone
   } or { error: 'Please provide a phone number (e.g., ?phone=1234567890)' }
 
 # Age categorization
