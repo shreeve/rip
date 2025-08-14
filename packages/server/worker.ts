@@ -15,6 +15,7 @@
 export {};
 import { existsSync } from 'fs';
 import { join } from 'path';
+import { scale } from './time';
 
 // Configuration
 const workerId = Number.parseInt(process.argv[2] ?? '0');
@@ -32,9 +33,34 @@ const maxRequests = baseMaxRequests;
 // Worker timeout protection (30 seconds per request)
 const WORKER_TIMEOUT = 30000;
 
+// Nginx-style connection limits
+const MAX_CONCURRENT_CONNECTIONS = Number.parseInt(process.env.WORKER_CONNECTIONS ?? '1024'); // nginx worker_connections
+const CONNECTION_BACKLOG = Number.parseInt(process.env.CONNECTION_BACKLOG ?? '511'); // nginx listen backlog
+
 let requestsHandled = 0;
 let isShuttingDown = false;
 let requestInProgress = false;
+let activeConnections = 0; // Track concurrent connections
+const startTime = performance.now(); // Track worker lifetime
+
+/**
+ * Log worker exit with standardized format
+ */
+function logWorkerExit(reason: string, details: string): void {
+  const now = new Date();
+  const pad = (n: number, w = 2) => String(n).padStart(w, '0');
+  const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}.${String(now.getMilliseconds()).padStart(3, '0')}`;
+  const tzMin = now.getTimezoneOffset();
+  const tzSign = tzMin <= 0 ? '+' : '-';
+  const tzAbs = Math.abs(tzMin);
+  const tzStr = `${tzSign}${String(Math.floor(tzAbs / 60)).padStart(2, '0')}${String(tzAbs % 60).padStart(2, '0')}`;
+  
+  const uptimeSeconds = (performance.now() - startTime) / 1000;
+  const uptimeFormatted = scale(uptimeSeconds, 's');
+  const requestsFormatted = scale(requestsHandled, 'r');
+  
+  console.log(`[${ts} ${tzStr} ${uptimeFormatted} ${requestsFormatted}] 🔄 Worker ${workerNum} exit → ${reason} (${details})`);
+}
 
 // All workers listen on the same shared socket (nginx + unicorn pattern)
 const socketPath = process.env.SOCKET_PATH || `/tmp/rip_shared_${appName}.sock`;
@@ -93,7 +119,7 @@ async function handleRequest(req: Request): Promise<Response> {
   }
 
   requestInProgress = true;
-  let timeoutId: Timer;
+  let timeoutId: Timer | undefined;
   const start = Date.now();
 
   try {
@@ -118,12 +144,12 @@ async function handleRequest(req: Request): Promise<Response> {
     // Race between request and timeout
     const response = await Promise.race([requestPromise, timeoutPromise]);
 
-    clearTimeout(timeoutId);
+    if (timeoutId) clearTimeout(timeoutId);
     requestsHandled++;
 
     // Check if we should shutdown after this request
     if (requestsHandled >= maxRequests) {
-      console.log(`🔄 [Worker ${workerNum}] Reached max requests (${maxRequests}), shutting down for restart`);
+      logWorkerExit('max_requests_reached', `Reached max requests (${maxRequests})`);
       setTimeout(() => process.exit(0), 100);
     }
 
@@ -131,7 +157,7 @@ async function handleRequest(req: Request): Promise<Response> {
     return response;
 
   } catch (error) {
-    clearTimeout(timeoutId!);
+    if (timeoutId) clearTimeout(timeoutId);
     console.error(`❌ [Worker ${workerNum}] Request error:`, error);
     return new Response('Internal Server Error', { status: 500 });
   } finally {
@@ -146,9 +172,11 @@ async function startWorker(): Promise<void> {
   // Load the Rip application first
   await loadRipApp();
 
-  // Create Unix socket server
+  // Create Unix socket server with nginx-style limits
   const server = Bun.serve({
     unix: socketPath,
+    // Nginx-style connection limits
+    maxRequestBodySize: 100 * 1024 * 1024, // 100MB max request body
     async fetch(req: Request): Promise<Response> {
       const url = new URL(req.url);
       if (url.pathname === '/__ready') {
@@ -158,37 +186,55 @@ async function startWorker(): Promise<void> {
         return new Response('Worker shutting down', { status: 503 });
       }
 
-      // Note: No "busy" check - kernel handles load balancing to available workers
+      // Nginx-style connection limiting
+      if (activeConnections >= MAX_CONCURRENT_CONNECTIONS) {
+        return new Response('Service temporarily unavailable - connection limit reached', {
+          status: 503,
+          headers: {
+            'Retry-After': '1',
+            'Connection': 'close'
+          }
+        });
+      }
 
-      const res = await handleRequest(req);
-      // Disable browser/proxy caching by default to avoid old responses after reload
-      const headers = new Headers(res.headers);
-      headers.set('Cache-Control', 'no-store');
-      headers.set('Pragma', 'no-cache');
-      headers.set('Expires', '0');
-      return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+      // Track active connections
+      activeConnections++;
+      try {
+        const res = await handleRequest(req);
+        // Disable browser/proxy caching by default to avoid old responses after reload
+        const headers = new Headers(res.headers);
+        headers.set('Cache-Control', 'no-store');
+        headers.set('Pragma', 'no-cache');
+        headers.set('Expires', '0');
+        // Note: Each worker only knows its own connection count, not system-wide
+        headers.set('X-Worker-Id', workerNum.toString());
+        return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+      } finally {
+        activeConnections--;
+      }
     },
   });
 
-  console.log(`🚀 [Worker ${workerNum}] Started for app '${appName}' (socket: ${socketPath}, max requests: ${maxRequests})`);
+  console.log(`🚀 [Worker ${workerNum}] Started for app '${appName}' (socket: ${socketPath}, max requests: ${maxRequests}, max connections: ${MAX_CONCURRENT_CONNECTIONS})`);
 
   // Graceful shutdown handling
   const shutdown = async () => {
     if (isShuttingDown) return;
     isShuttingDown = true;
 
-    // Graceful shutdown in progress
+      // Graceful shutdown in progress
+  logWorkerExit('graceful_shutdown', 'Received shutdown signal');
 
-    // Wait for current request to finish
-    while (requestInProgress) {
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
+  // Wait for current request to finish
+  while (requestInProgress) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
 
-    server.stop();
+  server.stop();
 
-    // Note: Shared socket cleanup is handled by the manager
-    // Shutdown complete
-    process.exit(0);
+  // Note: Shared socket cleanup is handled by the manager
+  // Shutdown complete
+  process.exit(0);
   };
 
   process.on('SIGTERM', shutdown);
@@ -196,12 +242,12 @@ async function startWorker(): Promise<void> {
 
   // Handle uncaught errors
   process.on('uncaughtException', (error) => {
-    console.error(`💥 [Worker ${workerNum}] Uncaught exception:`, error);
+    logWorkerExit('uncaught_exception', `Uncaught exception: ${error.message}`);
     shutdown();
   });
 
   process.on('unhandledRejection', (reason) => {
-    console.error(`💥 [Worker ${workerNum}] Unhandled rejection:`, reason);
+    logWorkerExit('unhandled_rejection', `Unhandled rejection: ${reason}`);
     shutdown();
   });
 }

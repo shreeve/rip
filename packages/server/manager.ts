@@ -40,6 +40,13 @@ export class RipManager {
    * Start workers for a specific app
    */
   async startApp(appName: string, appDirectory: string, numWorkers: number = 3, maxRequestsPerWorker: number = 100, jsonLogging: boolean = false): Promise<void> {
+    // Auto-detect optimal worker count (nginx worker_processes auto)
+    const optimalWorkers = this.getOptimalWorkerCount(numWorkers);
+    if (optimalWorkers !== numWorkers) {
+      console.log(`📊 [Manager] Auto-scaling workers: ${numWorkers} → ${optimalWorkers} (based on CPU cores)`);
+      numWorkers = optimalWorkers;
+    }
+
     // Simplified startup logging
 
     // Resolve absolute path
@@ -68,6 +75,8 @@ export class RipManager {
     }
 
     this.workers.set(appName, workers);
+
+    console.log(`🚀 [Manager] Started ${numWorkers} workers for app '${appName}' (connections per worker: ${process.env.WORKER_CONNECTIONS || '1024'})`);
 
     // Setup file watching for hot reload
     if (this.fileWatchingEnabled) {
@@ -351,5 +360,30 @@ export class RipManager {
 
     process.on('SIGTERM', shutdown);
     process.on('SIGINT', shutdown);
+  }
+
+  /**
+   * Get optimal worker count based on CPU cores (nginx worker_processes auto)
+   */
+    private getOptimalWorkerCount(requestedWorkers: number): number {
+    const cpuCores = require('os').cpus().length;
+
+    // Auto mode (w:auto sets requestedWorkers = 0)
+    if (requestedWorkers === 0) {
+      // Auto-detect: 1 worker per CPU core for I/O bound workloads
+      return Math.max(1, cpuCores);
+    }
+
+    // User explicitly set a number, respect it
+    return requestedWorkers;
+  }
+
+  /**
+   * Set nginx-style connection limits via environment variables
+   */
+  setConnectionLimits(workerConnections: number = 1024, backlog: number = 511): void {
+    process.env.WORKER_CONNECTIONS = workerConnections.toString();
+    process.env.CONNECTION_BACKLOG = backlog.toString();
+    console.log(`⚙️  [Manager] Connection limits: worker_connections=${workerConnections}, backlog=${backlog}`);
   }
 }
