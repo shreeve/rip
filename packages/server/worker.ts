@@ -208,9 +208,6 @@ async function startWorker(): Promise<void> {
     if (isShuttingDown) return
     isShuttingDown = true
 
-    // Graceful shutdown in progress
-    logWorkerExit('graceful_shutdown', 'Received shutdown signal')
-
     // Wait for current request to finish
     while (requestInProgress) {
       await new Promise(resolve => setTimeout(resolve, 100))
