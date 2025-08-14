@@ -370,12 +370,4 @@ export class RipManager {
     return requestedWorkers;
   }
 
-  /**
-   * Set nginx-style connection limits via environment variables
-   */
-  setConnectionLimits(workerConnections: number = 1024, backlog: number = 511): void {
-    process.env.WORKER_CONNECTIONS = workerConnections.toString();
-    process.env.CONNECTION_BACKLOG = backlog.toString();
-    // Connection limits are no longer used in sequential processing model
-  }
 }

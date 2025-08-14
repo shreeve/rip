@@ -21,9 +21,6 @@ const defaults = {
   appDir: process.cwd(),
   protocol: 'http' as 'http' | 'https' | 'http+https',
   httpsMode: 'smart' as 'smart' | 'quick' | 'ca',
-  // Nginx-style connection limits
-  workerConnections: 1024, // nginx worker_connections
-  connectionBacklog: 511,  // nginx listen backlog
 };
 
 // Flexible argument parsing interface
@@ -41,9 +38,6 @@ interface Config {
   httpsMode?: 'smart' | 'quick' | 'ca';
   json?: boolean;
   jsonLogging?: boolean;
-  // Nginx-style connection limits
-  workerConnections?: number;
-  connectionBacklog?: number;
 }
 
 // ===== FLEXIBLE ARGUMENT PARSING =====
@@ -54,12 +48,11 @@ interface Config {
  *   bun server w:5 8080 apps/labs/api         # Workers, port, directory
  *   bun server apps/labs/api prod w:10        # Directory, mode, workers
  *   bun server deploy test-app w:3 examples/hello  # Deploy with flexible args
- *   bun server w:auto wc:2048 apps/labs/api   # Auto workers, 2048 connections per worker
- *   bun server wc:512 cb:1024 apps/labs/api   # Custom connection limits
+ *   bun server w:auto apps/labs/api           # Auto workers
  *
  * Smart Detection:
  *   - w:5, w:auto, r:100  → Worker/request counts
- *   - wc:1024, cb:511     → Connection limits (nginx-style)
+
  *   - 8080, 3443          → Port numbers
  *   - apps/labs/api       → Directory paths
  *   - dev, prod           → Modes
@@ -167,17 +160,7 @@ function parseArgs(args: string[]): Config {
       continue;
     }
 
-    // Worker connections: wc:1024 (nginx worker_connections)
-    if (arg.match(/^wc:\d+$/)) {
-      config.workerConnections = Number.parseInt(arg.substring(3));
-      continue;
-    }
-
-    // Connection backlog: cb:511 (nginx listen backlog)
-    if (arg.match(/^cb:\d+$/)) {
-      config.connectionBacklog = Number.parseInt(arg.substring(3));
-      continue;
-    }
+    // Note: wc: and cb: options removed - not used in sequential processing model
 
     // Request count: r:100
     if (arg.match(/^r:\d+$/)) {
@@ -543,10 +526,7 @@ async function startServer(appPath: string, config?: Config): Promise<void> {
   // Start manager and workers
   const manager = new RipManager();
 
-  // Set nginx-style connection limits
-  const workerConnections = config?.workerConnections ?? defaults.workerConnections;
-  const connectionBacklog = config?.connectionBacklog ?? defaults.connectionBacklog;
-  manager.setConnectionLimits(workerConnections, connectionBacklog);
+  // Note: connection limits removed - not used in sequential processing model
 
   await manager.startApp(appName, absoluteAppPath, workers, requests, jsonLogging);
 
@@ -1030,8 +1010,7 @@ Flexible Arguments (ANY order):
   bun server deploy labs-api w:3 apps/labs/api  # Deploy with 3 workers
   bun server 3001 dev examples/hello       # Port, mode, directory
   bun server w:8 r:500 prod apps/labs/api  # Workers, requests, mode, directory
-  bun server w:auto wc:2048 apps/labs/api  # Auto workers, 2048 connections per worker
-  bun server wc:512 cb:1024 apps/labs/api  # Custom connection limits`);
+  bun server w:auto apps/labs/api          # Auto workers`);
 }
 
 // ===== HTTPS/CA UTILITY FUNCTIONS =====

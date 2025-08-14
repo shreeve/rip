@@ -82,7 +82,6 @@ export class RipServer {
         architecture: 'shared-socket',
         workers: {
           count: this.numWorkers,
-          maxConnections: process.env.WORKER_CONNECTIONS || '1024',
           totalRequests: this.totalRequests,
           avgRequestsPerWorker
         },
