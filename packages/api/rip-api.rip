@@ -133,23 +133,24 @@ export getValidator      = (name)     -> validators[name]
 # read() — registry-driven, Sinatra-style ergonomics
 # -----------------------------------------------------------------------------
 export read = (keyOrTag = null, tagOrMiss = null, missOrNil = null) ->
-  c = _current
-  throw new Error 'read() called without context – add withHelpers' unless c?
-  data = c._ripData or {}
+  store = requestContext.getStore()
+  throw new Error 'read() called outside request context — did you add withHelpers?' unless store?
 
-  # Resolve params: read(key, tag?, miss?)   OR   read() for whole body
+  data = store.data or {}
+
+  # resolve params
   key  = null
   tag  = null
   miss = null
 
   if keyOrTag? and tagOrMiss? or missOrNil? isnt null
-    key = keyOrTag
-    tag = tagOrMiss
+    key  = keyOrTag
+    tag  = tagOrMiss
     miss = missOrNil
   else
     # read() -> whole payload
-    key = null
-    tag = keyOrTag
+    key  = null
+    tag  = keyOrTag
     miss = tagOrMiss
 
   raw = if key? then data[key] else data
