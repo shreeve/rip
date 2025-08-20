@@ -35,7 +35,7 @@ test "=~ operator with /m flag allows multiline explicitly", ->
   # When /m flag is used, multiline should be allowed
   multiline = "line1\\nline2"
   result = multiline =~ /^line1.*line2$/m
-  
+
   # Should match successfully (not null)
   ok result, "Multiline regex with /m flag should match"
   eq result[0], "line1\\nline2"
@@ -64,7 +64,7 @@ test "regex indexing with /m flag allows multiline explicitly", ->
   # When /m flag is used, multiline should be allowed
   multiline = "line1\\nline2"
   result = multiline[/^line1.*line2$/m]
-  
+
   # Should match successfully (not null)
   ok result, "Multiline regex indexing with /m flag should match"
   eq result, "line1\\nline2"
@@ -74,11 +74,11 @@ test "security works with capture groups", ->
   # Test that security works with complex patterns
   malicious = "user@domain.com\\n<script>"
   valid = "user@domain.com"
-  
+
   # Malicious should be blocked (returns null) - test just the blocking
   eq (malicious =~ /^[a-z@.]+$/), null  # Simple pattern that should block newlines
   eq malicious[/^[a-z@.]+$/], null      # Same with indexing
-  
+
   # Valid should work
   result = valid =~ /@(.+)$/
   ok result, "Valid email should match"
@@ -108,17 +108,17 @@ test "security enhancement preserves clean JavaScript output", ->
 
 test "real-world validation scenarios", ->
   # Test common validation patterns that should be secure
-  
+
   # Email validation - block injection (use =~ instead of .match for security)
   eq ("user@domain.com\\n<script>" =~ /^[a-z@.]+$/), null  # Simplified pattern to avoid $ issues
   result = "user@domain.com"[/^([^@]+)@([^@]+)$/]
   ok result, "Valid email should match"
   eq _[1], "user"
-  
-  # Username validation - block injection  
+
+  # Username validation - block injection
   eq "admin\\nmalicious"[/^[a-zA-Z0-9_-]{3,20}$/], null
   eq "validuser"[/^[a-zA-Z0-9_-]{3,20}$/], "validuser"
-  
+
   # IP validation - block injection
   eq "192.168.1.1\\nmalicious"[/^(?:\d{1,3}\.){3}\d{1,3}$/], null
   eq "192.168.1.1"[/^(?:\d{1,3}\.){3}\d{1,3}$/], "192.168.1.1"
