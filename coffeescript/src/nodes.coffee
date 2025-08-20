@@ -4923,7 +4923,7 @@ exports.Op = class Op extends Base
     new Call(mod, [@first, @second]).compileToFragments o
 
   compileMatch: (o) ->
-    # RIP: Enhanced regex matching with universal type coercion
+    # Rip: Enhanced regex matching with universal type coercion
     # Use compileMatchHelper utility function that handles all value types safely
     matchHelperRef = new Value new Literal utility 'compileMatchHelper', o
     matchHelperCall = new Call matchHelperRef, [@first, @second]
@@ -5856,7 +5856,7 @@ UTILITIES =
   slice  : -> '[].slice'
   splice : -> '[].splice'
 
-  # RIP: Enhanced regex matching with universal type coercion
+  # Rip: Enhanced regex matching with universal type coercion
   toSearchable: -> '''
     function(v) {
       if (typeof v === 'string') return v;

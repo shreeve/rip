@@ -1,5 +1,5 @@
 /**
- * RIP Language Parser
+ * Rip Language Parser
  *
  * Parses tokens into an Abstract Syntax Tree (AST).
  * Future clean implementation - currently under construction.
@@ -43,14 +43,14 @@ export class Parser {
   }
 
   parse(): ASTNode[] {
-    // TODO: Implement RIP parser with support for:
+    // TODO: Implement Rip parser with support for:
     // - Async bang syntax (fetch!)
     // - Regex match operator (val =~ /regex/)
     // - Clean function syntax ((x) -> x * 2)
     // - All CoffeeScript-inspired features
 
     throw new Error(
-      'RIP parser not yet implemented - building the 747 mid-flight!',
+      'Rip parser not yet implemented - building the 747 mid-flight!',
     )
   }
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 
 /**
- * RIP Language CLI
+ * Rip Language CLI
  *
- * The future clean RIP compiler command-line interface.
+ * The future clean Rip compiler command-line interface.
  * Currently under construction as we "build the 747 mid-flight".
  */
 
@@ -13,7 +13,7 @@ import { VERSION, compile } from './index.ts'
 
 function showHelp() {
   console.log(`
-RIP Language Compiler v${VERSION}
+Rip Language Compiler v${VERSION}
 
 Usage:
   rip [options] [files...]
@@ -31,18 +31,18 @@ Options:
   -v, --version        Show version number
 
 Examples:
-  rip app.rip                    # Run RIP file directly
+  rip app.rip                    # Run Rip file directly
   rip -c src/app.rip             # Compile to JavaScript
   rip -c -o dist/ src/*.rip      # Compile multiple files
-  rip -e "console.log 'Hello!'"  # Evaluate RIP code
+  rip -e "console.log 'Hello!'"  # Evaluate Rip code
 
-Note: This is the future clean RIP implementation.
+Note: This is the future clean Rip implementation.
 Currently using CoffeeScript-based implementation in /coffeescript.
 `)
 }
 
 function showVersion() {
-  console.log(`RIP Language v${VERSION}`)
+  console.log(`Rip Language v${VERSION}`)
   console.log('Clean implementation (under construction)')
 }
 
@@ -73,14 +73,14 @@ async function main() {
   }
 
   // For now, show a message that this is under construction
-  console.log('🚧 RIP Clean Compiler - Under Construction')
+  console.log('🚧 Rip Clean Compiler - Under Construction')
   console.log('')
   console.log(
-    'This is the future home of the clean RIP language implementation.',
+    'This is the future home of the clean Rip language implementation.',
   )
   console.log('Currently using the CoffeeScript-based implementation.')
   console.log('')
-  console.log('To use RIP now, try:')
+  console.log('To use Rip now, try:')
   console.log('  ./coffeescript/bin/coffee your-file.rip')
   console.log('  bun your-file.rip  (with rip-bun plugin)')
   console.log('')

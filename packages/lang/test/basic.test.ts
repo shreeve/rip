@@ -1,14 +1,14 @@
 /**
- * Basic tests for RIP Language implementation
+ * Basic tests for Rip Language implementation
  *
- * Tests for the future clean RIP compiler.
+ * Tests for the future clean Rip compiler.
  * Currently placeholders - building the 747 mid-flight!
  */
 
 import { describe, expect, it } from 'bun:test'
 import { FEATURES, VERSION, compile, parse } from '../index.ts'
 
-describe('RIP Language', () => {
+describe('Rip Language', () => {
   it('should have correct version', () => {
     expect(VERSION).toBe('0.1.0')
   })
@@ -30,14 +30,14 @@ describe('RIP Language', () => {
 
 // Future test cases for when implementation is complete:
 
-describe.skip('RIP Async Syntax (Future)', () => {
+describe.skip('Rip Async Syntax (Future)', () => {
   it('should compile ! suffix to async/await', () => {
     const result = compile('data = fetch(url)!')
     expect(result.js).toContain('await fetch(url)')
   })
 })
 
-describe.skip('RIP Regex Syntax (Future)', () => {
+describe.skip('Rip Regex Syntax (Future)', () => {
   it('should compile =~ to enable _ variable access', () => {
     const result = compile('val =~ /test/; _[0]')
     expect(result.js).toContain('_[0]')
@@ -49,7 +49,7 @@ describe.skip('RIP Regex Syntax (Future)', () => {
   })
 })
 
-describe.skip('RIP Function Syntax (Future)', () => {
+describe.skip('Rip Function Syntax (Future)', () => {
   it('should compile clean function syntax', () => {
     const result = compile('greet = (name) -> "Hello, #{name}!"')
     expect(result.js).toContain('function')

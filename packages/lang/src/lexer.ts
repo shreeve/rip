@@ -1,7 +1,7 @@
 /**
- * RIP Language Lexer
+ * Rip Language Lexer
  *
- * Tokenizes RIP source code into a stream of tokens.
+ * Tokenizes Rip source code into a stream of tokens.
  * Future clean implementation - currently under construction.
  */
 
@@ -52,14 +52,14 @@ export class Lexer {
   }
 
   tokenize(): Token[] {
-    // TODO: Implement RIP lexer with support for:
+    // TODO: Implement Rip lexer with support for:
     // - Async bang syntax (!)
     // - Regex match operator (=~)
     // - Clean function syntax
     // - All CoffeeScript-inspired features
 
     throw new Error(
-      'RIP lexer not yet implemented - building the 747 mid-flight!',
+      'Rip lexer not yet implemented - building the 747 mid-flight!',
     )
   }
 

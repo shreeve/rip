@@ -1,7 +1,7 @@
 /**
- * RIP Language Code Generator
+ * Rip Language Code Generator
  *
- * Generates JavaScript code from RIP AST.
+ * Generates JavaScript code from Rip AST.
  * Future clean implementation - currently under construction.
  */
 
@@ -21,7 +21,7 @@ export class CodeGenerator {
   }
 
   generate(ast: ASTNode[]): CompileResult {
-    // TODO: Implement RIP code generation with support for:
+    // TODO: Implement Rip code generation with support for:
     // - Async functions (automatic async/await handling)
     // - Regex match operator (val =~ /regex/ sets _ variable for capture groups like _[1])
     // - Clean function syntax
@@ -29,7 +29,7 @@ export class CodeGenerator {
     // - All modern JavaScript features
 
     throw new Error(
-      'RIP code generator not yet implemented - building the 747 mid-flight!',
+      'Rip code generator not yet implemented - building the 747 mid-flight!',
     )
   }
 

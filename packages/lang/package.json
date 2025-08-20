@@ -1,7 +1,7 @@
 {
   "name": "@rip/lang",
   "version": "0.1.0",
-  "description": "Clean RIP language implementation - the future of RIP syntax and compilation",
+  "description": "Clean Rip language implementation - the future of Rip syntax and compilation",
   "type": "module",
   "main": "index.ts",
   "exports": {

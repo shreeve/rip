@@ -1,4 +1,4 @@
-# Enhanced =~ Operator Tests - RIP Language Enhancement
+# Enhanced =~ Operator Tests - Rip Language Enhancement
 # ----------------------------------------------------
 # Tests for the enhanced =~ operator that safely handles all value types
 # using the toSearchable() coercion function and ripMatch() runtime.

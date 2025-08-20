@@ -1,10 +1,10 @@
 # @rip/lang
 
-**The future clean implementation of the RIP language**
+**The future clean implementation of the Rip language**
 
-## 🎯 What is RIP?
+## 🎯 What is Rip?
 
-**RIP** is a modern programming language that transpiles to JavaScript, built on top of CoffeeScript with significant enhancements for web development. RIP maintains the elegance and expressiveness of CoffeeScript while adding powerful features for modern async programming and pattern matching.
+**Rip** is a modern programming language that transpiles to JavaScript, built on top of CoffeeScript with significant enhancements for web development. Rip maintains the elegance and expressiveness of CoffeeScript while adding powerful features for modern async programming and pattern matching.
 
 ### Core Philosophy
 - **Clean Syntax**: Minimal, readable code that expresses intent clearly
@@ -31,11 +31,11 @@ userName = user?.profile?.name ? 'Anonymous'
 
 ## 🚀 Vision
 
-This package will contain the clean, purpose-built RIP language compiler - a ground-up implementation designed specifically for modern web development.
+This package will contain the clean, purpose-built Rip language compiler - a ground-up implementation designed specifically for modern web development.
 
 ## 📋 Evolution from CoffeeScript
 
-RIP started as CoffeeScript but evolved with targeted enhancements for modern web development. Here's our journey:
+Rip started as CoffeeScript but evolved with targeted enhancements for modern web development. Here's our journey:
 
 ### Change 001 - Default Bare Compilation
 **Timestamp**: 2025-08-01 20:11:35 -0600
@@ -59,10 +59,10 @@ This approach created several problems in modern development:
 - **Top-Level Await Issues**: Modern `await` at module level was impossible
 
 **The Solution**: Bare Compilation by Default
-We changed RIP's default compilation behavior to generate clean, unwrapped JavaScript that integrates seamlessly with modern tooling:
+We changed Rip's default compilation behavior to generate clean, unwrapped JavaScript that integrates seamlessly with modern tooling:
 
 ```javascript
-// RIP output (bare by default)
+// Rip output (bare by default)
 var myVariable = "hello";
 console.log(myVariable);
 ```
@@ -97,7 +97,7 @@ export var getData = function() {
 }).call(this);
 ```
 
-This foundational change sets the stage for RIP to be a first-class citizen in the modern JavaScript ecosystem.
+This foundational change sets the stage for Rip to be a first-class citizen in the modern JavaScript ecosystem.
 
 ### Change 002 - Async Bang Syntax (!)
 **Timestamp**: 2025-08-01 23:22:46 -0600
@@ -126,7 +126,7 @@ Key pain points:
 We introduced the `!` suffix operator that serves as a more concise `await` while automatically promoting functions to `async`:
 
 ```coffeescript
-# RIP async syntax
+# Rip async syntax
 getData = ->
   url = getUrl()!
   response = fetch(url)!
@@ -152,7 +152,7 @@ The compiler performs automatic async propagation - any function containing a `!
 
 **Real-World Comparison**:
 ```coffeescript
-# RIP - clean and focused
+# Rip - clean and focused
 handleSubmit = (form) ->
   data = validateForm(form)!
   response = api.submit(data)!
@@ -202,7 +202,7 @@ Common issues:
 We adopted Ruby's elegant `=~` operator with automatic result assignment to a special `_` variable:
 
 ```coffeescript
-# RIP regex matching
+# Rip regex matching
 validateEmail = (input) ->
   input =~ /^([a-zA-Z0-9._%+-]+)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})$/
   if _ then { user: _[1], domain: _[2] } else null
@@ -418,7 +418,7 @@ This change eliminates style debates and ensures consistent code output. Teams c
 - ✅ Simple transformation cases work correctly
 - ✅ No performance impact on compilation speed
 
-This enhancement demonstrates RIP's philosophy of **developer-friendly language design** - providing flexibility while ensuring consistent, clean output.
+This enhancement demonstrates Rip's philosophy of **developer-friendly language design** - providing flexibility while ensuring consistent, clean output.
 
 ### Change 005 - Ruby-Style Regex Indexing Syntax
 **Timestamp**: 2025-01-27 15:45:00 -0700
@@ -444,7 +444,7 @@ Common issues:
 We implemented Ruby's elegant `variable[/regex/]` syntax that combines matching and extraction in a single operation:
 
 ```coffeescript
-# RIP - clean and intuitive
+# Rip - clean and intuitive
 phone = "1234567890"
 areaCode = phone[/^(\d{3})(\d{3})(\d{4})$/, 1]  # "123"
 exchange = phone[/^(\d{3})(\d{3})(\d{4})$/, 2]  # "456"
@@ -501,14 +501,14 @@ This change makes regex operations significantly more readable and reduces boile
 - ✅ Division vs regex disambiguation works correctly
 - ✅ Global `_` variable assignment verified
 
-This enhancement brings Ruby's most elegant regex feature to RIP, making pattern matching operations more intuitive and maintainable.
+This enhancement brings Ruby's most elegant regex feature to Rip, making pattern matching operations more intuitive and maintainable.
 
 ## 🏗️ "Building the 747 Mid-Flight"
 
 While the current `/coffeescript` directory serves as our working implementation (modified CoffeeScript), this package represents the future:
 
-- **Current State**: `/coffeescript` - Modified CoffeeScript fork with RIP enhancements
-- **Future State**: `/packages/lang` - Clean, purpose-built RIP language implementation
+- **Current State**: `/coffeescript` - Modified CoffeeScript fork with Rip enhancements
+- **Future State**: `/packages/lang` - Clean, purpose-built Rip language implementation
 
 ## 🎯 Key Features (Planned)
 
@@ -593,7 +593,7 @@ No need for `bun food.rip` or `./food.rip` - just the filename itself works as a
 
 ## 🤝 Contributing
 
-This is the future of RIP - contributions that push the language forward are welcome!
+This is the future of Rip - contributions that push the language forward are welcome!
 
 ---
 
