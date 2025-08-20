@@ -95,3 +95,146 @@ export default app
 ==
 
 bun x biome check --write --unsafe bun/
+
+==
+
+- Nginx runs multiple worker processes, each doing nonblocking accept; it can enable reuseport and a large listen backlog to spread accepts evenly and avoid thundering herds.
+
+- It terminates client connections and handles HTTP keepalive/timeouts; requests are buffered and queued inside nginx, not at the app.
+
+- It proxies to an upstream pool (TCP or unix sockets), keeps per-upstream keepalive connection pools, and load-balances (round-robin by default, also least_conn, hash).
+
+- It retries another upstream on certain failures (connect/read timeouts, 5xx, etc.) via proxy_next_upstream and caps attempts with proxy_next_upstream_tries, so transient backend failures rarely surface to clients.
+
+- With the upstream queue directive, nginx can queue requests when all upstream connections are busy instead of immediately returning errors; if the queue times out, nginx returns an error (commonly 504).
+
+- Typical errors:
+  - 502/504: connect/read/write/timeout or exhausted retries
+  - 503: generally when no upstreams are available/marked down or queue overflow
+
+- Unicorn pairing: unicorn workers are single-inflight per process. Nginx connects to a shared unix socket exposed by the unicorn master; the kernel distributes accepts across forked workers. Many configs disable upstream keepalive to unicorn or keep it small; nginx still maintains client keepalive.
+
+- Minimal nginx-style config example (RR across multiple Bun/unicorn workers over unix sockets, retries, queue, and client keepalive):
+```nginx
+worker_processes auto;
+events { worker_connections 65535; }
+
+http {
+  upstream app {
+    server unix:/run/app/app.1.sock max_fails=3 fail_timeout=5s;
+    server unix:/run/app/app.2.sock max_fails=3 fail_timeout=5s;
+    # ...
+    keepalive 128;                # upstream connection pool
+    queue 1024 timeout=5s;        # queue when all upstream conns are busy
+  }
+
+  server {
+    listen 8080 reuseport backlog=16384;
+    keepalive_requests 100000;
+    keepalive_timeout 5s;
+
+    location / {
+      proxy_http_version 1.1;
+      proxy_set_header Connection "";
+      proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+      proxy_next_upstream_tries 3;
+      proxy_connect_timeout 1s;
+      proxy_read_timeout 5s;
+      proxy_pass http://app;
+    }
+  }
+}
+```
+
+- To mimic nginx+unicorn semantics in your Bun LB:
+  - Keep workers single-inflight (as you do).
+  - Add an LB-side queue with a timeout and retry the next worker on connection error or 5xx; only return 5xx when the queue times out or retries are exhausted.
+  - Maintain per-worker socket pools and health (quarantine on failures), with short connect/read timeouts.
+
+==
+
+ONE-SHOT: Implement server2 per attached docs/server2.md
+
+Goal:
+- Build a clean-room Bun-based HTTP LB + worker manager for Rip apps, per docs/server2.md.
+- Put all code in packages/server2.
+- Add root script: "server2": "bun packages/server2/rip-server.ts".
+- Must run with: bun server2 <app-path> [flags]
+
+Key requirements (from server2.md):
+- Sockets
+  - Per-worker data-plane sockets: /tmp/rip_<variant>_<app>.<id>.sock
+  - Control plane Unix socket (LB-owned): /tmp/rip_<variant>_<app>.ctl.sock
+
+- Registration/lifecycle (worker self-registers)
+  - Worker registers only after it is actually ready:
+    { op: "register", app, workerId, pid, socket, version? } → { ok: true }
+  - Worker deregisters on clean shutdown:
+    { op: "deregister", app, workerId } → { ok: true }
+  - LB builds in-memory pool from these messages; no per-request directory scanning.
+
+- Worker (single-inflight; Bun.serve on per-worker socket)
+  - On each request (module mode), resolve handler via packages/api reloader:
+    const handler = await createReloader({entryPath}).getHandler()
+  - Atomic swap; no 404s; keep old handler until new is ready.
+  - HTTP: keepalive; idleTimeout ≈ 5–10s; maxRequestBodySize 100MB.
+  - Graceful exit on SIGTERM/SIGINT or after maxRequests.
+
+- Load Balancer (Bun.serve TCP)
+  - Pool routing from registrations; round-robin; skip inflight>0.
+  - Single-inflight map: socket → 0|1.
+  - Keepalive to workers.
+  - Queue/backpressure: bounded FIFO with max_size, timeout_ms; 503 when full; 504 on queue timeout.
+  - Failures: on connect/read error, drop socket from pool immediately (no default quarantine).
+  - Retry budget: at most one retry per request (busy/connect).
+  - Endpoints:
+    - GET /status → { status: "healthy|degraded", app, workers, ports, uptime }
+  - Health: healthy once ≥1 worker is registered.
+  - Strip internal headers on egress: Rip-Worker-Busy, Rip-Worker-Id.
+  - Logging: access log ON by default (human), --json/--json-logging optional.
+
+- Manager
+  - Spawns N workers; sets env (WORKER_ID, APP_NAME, SOCKET_PATH, RIP_VARIANT); cleans per-worker sockets.
+  - Monitors exits; restarts with backoff; no registration (workers self-register).
+  - Admin rolling restarts (no watchers, no socket-touching):
+    bun server2 restart <app>
+    Sequence per worker: wait drain (single-inflight) → terminate → spawn → worker self-registers.
+
+- Module reloads (API layer)
+  - Handled entirely in packages/api reloader with cache-busted imports (?v=<mtime>) and reset of API globals; atomic handler swap; no 404s.
+  - Deep graph changes may require process reloads.
+
+- CLI & Flags
+  - bun server2 <app-path> [flags]
+  - Workers: w:<N|auto>; maxRequests: r:<N>
+  - Ports/protocol: http<:port>, https<:port> (defaults to 3080 and 3443, with smart default increments if busy)
+  - Logging: --json, --json-logging, --no-access-log
+  - Variant/sockets: --variant=<name>, --socket-prefix=<prefix>
+  - LB tuning: --max-queue, --queue-timeout-ms, --connect-timeout-ms, --read-timeout-ms
+  - Hot reload: --hot-reload=<none|process|module> (dev default module; prod default none or process)
+
+- Files to create (packages/server2)
+  - utils.ts (copy needed helpers: scale, timestamp/log formatting, header stripping, queue helpers, timeout/abort, flag/env parsing)
+  - worker.ts
+  - server.ts
+  - manager.ts
+  - rip-server.ts (CLI)
+
+Constraints:
+- Bun-only runtime; do not modify packages/server/*.
+- Use existing .rip plugin behavior (supports query cache-busters).
+- No filesystem watchers; no per-request directory scans.
+- No default quarantine; optional future note only.
+
+Acceptance:
+- Compiles and lints.
+- Root package.json includes: "server2": "bun packages/server2/rip-server.ts".
+- Smoke: curl -sf http://localhost:PORT/status
+- Load: wrk -t8 -c512 -d15s --latency http://127.0.0.1:PORT/ping
+- Behaviors: single-inflight per worker; pool-based routing; bounded queue; drop-on-first-failure; admin rolling restart; module reloads have no 404 window.
+
+Deliverables:
+- All new files under packages/server2.
+- Minimal, documented code; fast path tight; logs per spec.
+
+==
