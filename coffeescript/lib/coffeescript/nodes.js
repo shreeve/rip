@@ -2161,7 +2161,7 @@
       // operators `?.` interspersed. Then we have to take care not to accidentally
       // evaluate anything twice when building the soak chain.
       compileNode(o) {
-        var captureCode, fragments, i, indexStr, isAsyncCall, isBeingCalled, j, lastProp, len1, prop, propName, props, ref1, ref2, regexCode;
+        var captureCode, fragments, i, indexStr, isAsyncCall, isBeingCalled, j, lastProp, len1, matchHelperRef, prop, propName, props, ref1, ref2, regexCode;
         this.base.front = this.front;
         props = this.properties;
         // rip: Check if last property ends with ! (async call operator)
@@ -2195,19 +2195,20 @@
               fragments.push(this.makeCode(`.${propName}()`));
             }
           } else if (prop instanceof RegexIndex) {
-            // Handle regex indexing: obj[/regex/] -> (_ = obj.match(/regex/)) && _[0]
-            // Or with capture group: obj[/regex/, 1] -> (_ = obj.match(/regex/)) && _[1]
+            // Handle regex indexing: obj[/regex/] -> compileMatchHelper(obj, /regex/) && _[0]
+            // Or with capture group: obj[/regex/, 1] -> compileMatchHelper(obj, /regex/) && _[1]
 
             // This provides elegant syntax for regex matching with automatic _ variable assignment:
             //   email[/@(.+)$/] and _[1]  # Gets domain part, sets _ globally
             //   phone[/^\d{10}$/]         # Returns full match or null
 
-            // The compiled JavaScript safely handles null matches and sets _ globally for
-            // compatibility with the =~ operator and subsequent capture group access.
+            // Uses compileMatchHelper for universal type coercion - safely handles null, numbers, symbols, etc.
+            // Compatible with the =~ operator and subsequent capture group access.
+            matchHelperRef = utility('compileMatchHelper', o);
             regexCode = prop.regex.compileToFragments(o, LEVEL_PAREN);
             indexStr = prop.captureIndex ? (captureCode = prop.captureIndex.compileToFragments(o, LEVEL_PAREN), `[${fragmentsToText(captureCode)}]`) : "[0]";
-            // Compile to safe sequence expression that sets _ globally and handles null matches
-            fragments = [this.makeCode("(_ = "), ...fragments, this.makeCode(".match("), ...regexCode, this.makeCode(`)) && _${indexStr}`)];
+            // Compile to safe helper call that sets _ globally and handles all value types
+            fragments = [this.makeCode(`${matchHelperRef}(`), ...fragments, this.makeCode(", "), ...regexCode, this.makeCode(`) && _${indexStr}`)];
           } else {
             fragments.push(...(prop.compileToFragments(o)));
           }

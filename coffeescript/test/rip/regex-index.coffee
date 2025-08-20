@@ -26,9 +26,11 @@ test "regex index returns null for no match", ->
 
 test "regex index compilation", ->
   # Verifies the str[/regex/] syntax compiles to safe JavaScript that:
+  # - Uses compileMatchHelper for universal type coercion (handles null, numbers, symbols, etc.)
   # - Sets _ variable globally for subsequent capture group access
-  # - Returns the match result or undefined (never throws on null)
-  eq "(_ = str.match(/foo/)) && _[0];", CoffeeScript.compile("str[/foo/]", bare: yes).trim()
+  # - Returns the match result or undefined (never throws on any input type)
+  compiled = CoffeeScript.compile("str[/foo/]", bare: yes).trim()
+  ok compiled.includes("compileMatchHelper(str, /foo/) && _[0]"), "Should use compileMatchHelper for safe type coercion"
 
 test "regex index with flags", ->
   text = "Hello"
@@ -70,3 +72,63 @@ test "regex index with no capture groups but with index", ->
   text = "hello"
   result = text[/\w+/, 0]  # Should still work, accessing [0]
   eq result, "hello"
+
+# Type Safety Tests - Enhanced regex indexing with universal type coercion
+# These tests verify that str[/regex/] syntax safely handles ALL data types
+# using the same compileMatchHelper infrastructure as the =~ operator
+
+test "regex index handles null safely", ->
+  input = null
+  result = input[/hello/]
+  eq result, null
+
+test "regex index handles undefined safely", ->
+  input = undefined
+  result = input[/hello/]
+  eq result, null
+
+test "regex index handles numbers", ->
+  input = 12345
+  result = input[/(\d{3})/]
+  eq result, "123"
+  eq _[1], "123"
+
+test "regex index handles booleans", ->
+  input = true
+  result = input[/true/]
+  eq result, "true"
+
+test "regex index handles arrays (CSV join)", ->
+  input = [1, 2, 3]
+  result = input[/2/]
+  eq result, "2"
+
+test "regex index handles objects with toString", ->
+  input = { toString: -> "custom" }
+  result = input[/custom/]
+  eq result, "custom"
+
+test "regex index handles plain objects safely", ->
+  input = { foo: "bar" }
+  result = input[/object/i]
+  eq result, null
+
+test "regex index handles symbols with description", ->
+  input = Symbol("test")
+  result = input[/test/]
+  eq result, "test"
+
+test "regex index handles symbols without description", ->
+  input = Symbol()
+  result = input[/symbol/]
+  eq result, null
+
+test "regex index with capture groups on various types", ->
+  # Test that capture group indexing works with type coercion
+  num = 12345
+  area = num[/(\d{3})/, 1]
+  eq area, "123"
+
+  bool = false
+  match = bool[/(false)/, 1]
+  eq match, "false"
