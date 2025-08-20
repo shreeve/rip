@@ -49,19 +49,19 @@ async function getHandler(): Promise<(req: Request) => Promise<Response> | Respo
 
 async function selfRegister(): Promise<void> {
   try {
-    const payload = { op: 'register', app: appNameArg, workerId, pid: process.pid, socket: socketPath }
+    const payload = { op: 'join', app: appNameArg, workerId, pid: process.pid, socket: socketPath }
     const body = JSON.stringify(payload)
     const ctl = getControlSocketPath(socketPrefix)
-    await fetch('http://localhost/register', { method: 'POST', body, headers: { 'content-type': 'application/json' }, unix: ctl })
+    await fetch('http://localhost/worker', { method: 'POST', body, headers: { 'content-type': 'application/json' }, unix: ctl })
   } catch {}
 }
 
 async function selfDeregister(): Promise<void> {
   try {
-    const payload = { op: 'deregister', app: appNameArg, workerId }
+    const payload = { op: 'quit', app: appNameArg, workerId }
     const body = JSON.stringify(payload)
     const ctl = getControlSocketPath(socketPrefix)
-    await fetch('http://localhost/deregister', { method: 'POST', body, headers: { 'content-type': 'application/json' }, unix: ctl })
+    await fetch('http://localhost/worker', { method: 'POST', body, headers: { 'content-type': 'application/json' }, unix: ctl })
   } catch {}
 }
 

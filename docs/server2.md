@@ -67,8 +67,9 @@ Acceptance (smoke):
 
 #### Control plane & registration (worker self-registers)
 - Control socket: `/tmp/rip_<variant>_<app>.ctl.sock` (owned by LB).
-- Worker self-registers only when actually ready: `{ op: "register", app, workerId, pid, socket, version? }` → `{ ok: true }`.
-- Worker deregisters on clean shutdown: `{ op: "deregister", app, workerId }`.
+- Single endpoint: `POST /worker` handles both operations via payload.
+- Worker self-registers only when actually ready: `{ op: "join", app, workerId, pid, socket, version? }` → `{ ok: true }`.
+- Worker deregisters on clean shutdown: `{ op: "quit", app, workerId }` → `{ ok: true }`.
 - LB maintains an in‑memory pool from these messages; no per‑request directory scans.
 
 #### Admin operations (process reloads)

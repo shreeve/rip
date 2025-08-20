@@ -140,23 +140,17 @@ export class LBServer {
 
   private async controlFetch(req: Request): Promise<Response> {
     const url = new URL(req.url)
-    if (req.method === 'POST' && url.pathname === '/register') {
+    if (req.method === 'POST' && url.pathname === '/worker') {
       try {
         const j = await req.json()
-        if (j && j.op === 'register' && typeof j.socket === 'string' && typeof j.workerId === 'number') {
+        if (j && j.op === 'join' && typeof j.socket === 'string' && typeof j.workerId === 'number') {
           const version = typeof j.version === 'number' ? j.version : null
           const exists = this.sockets.find(x => x.socket === j.socket)
           if (!exists) this.sockets.push({ socket: j.socket, inflight: 0, version, workerId: j.workerId })
           if (version !== null) this.newestVersion = this.newestVersion === null ? version : Math.max(this.newestVersion, version)
           return new Response(JSON.stringify({ ok: true }), { headers: { 'content-type': 'application/json' } })
         }
-      } catch {}
-      return new Response(JSON.stringify({ ok: false }), { status: 400, headers: { 'content-type': 'application/json' } })
-    }
-    if (req.method === 'POST' && url.pathname === '/deregister') {
-      try {
-        const j = await req.json()
-        if (j && j.op === 'deregister' && typeof j.workerId === 'number') {
+        if (j && j.op === 'quit' && typeof j.workerId === 'number') {
           this.sockets = this.sockets.filter(x => x.workerId !== j.workerId)
           return new Response(JSON.stringify({ ok: true }), { headers: { 'content-type': 'application/json' } })
         }
