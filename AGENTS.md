@@ -87,6 +87,44 @@ bun run lint
 - CLI commands: `rip` (lowercase)
 - Package names: `@rip/package-name`
 
+## Naming Convention Guidelines
+
+**When to use `RIP` (all uppercase):**
+- Environment variables: `RIP_VARIANT`, `RIP_LOG_JSON`, `RIP_HOT_RELOAD`
+- Configuration constants in code that represent environment variables
+- Titles that are already capitalized: "RIP LANGUAGE FEATURES"
+
+**When to use `Rip` (title case):**
+- Language and platform references: "Rip language", "Rip compiler", "Rip syntax"
+- Documentation headings: "## Rip Language Features"
+- User-facing descriptions: "This is a Rip application"
+- Comments describing the language: "# Rip: Enhanced regex matching"
+
+**When to use `rip` (lowercase):**
+- Command line utilities: `rip compile`, `rip build`
+- File extensions: `.rip` files
+- Package names: `@rip/lang`, `rip-server`
+- Directory names: `/rip-projects/`
+- Variable names in code: `ripCompiler`, `ripConfig`
+- URLs and identifiers: `https://github.com/shreeve/rip`
+
+**Examples in context:**
+```bash
+# CLI usage (lowercase)
+rip compile app.rip
+bun your-app.rip
+
+# Environment variables (uppercase)
+export RIP_VARIANT=server1
+export RIP_HOT_RELOAD=module
+
+# Documentation (title case)
+"The Rip language provides elegant syntax..."
+"Rip's regex matching is bulletproof..."
+```
+
+This consistent naming follows established patterns from other languages like CoffeeScript, TypeScript, and JavaScript.
+
 ## Testing Instructions
 
 **Test Framework:**
