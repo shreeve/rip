@@ -119,6 +119,14 @@ export function getSharedSocketPath(appName: string): string {
 }
 
 /**
+ * Generate per-worker socket path for app
+ * Use unique sockets to avoid AF_UNIX single-listener contention and improve load distribution
+ */
+export function getWorkerSocketPath(appName: string, workerId: number): string {
+  return `/tmp/rip_${appName}.${workerId}.sock`
+}
+
+/**
  * Parse environment variable as integer with default
  * Used for connection limits and other numeric config
  */

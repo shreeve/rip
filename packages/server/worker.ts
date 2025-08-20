@@ -43,7 +43,7 @@ function logWorkerExit(reason: string, details: string): void {
   )
 }
 
-// All workers listen on the same shared socket (nginx + unicorn pattern)
+// Each worker listens on its own socket for better concurrency
 const socketPath = process.env.SOCKET_PATH || getSharedSocketPath(appName)
 
 // Note: Socket cleanup is handled by the manager, not individual workers
@@ -163,9 +163,11 @@ async function startWorker(): Promise<void> {
     unix: socketPath,
     // Nginx-style connection limits
     maxRequestBodySize: 100 * 1024 * 1024, // 100MB max request body
+    // Shorter keep-alive to avoid FD hoarding under load tests
+    idleTimeout: 5,
     async fetch(req: Request): Promise<Response> {
       const url = new URL(req.url)
-      if (url.pathname === '/__ready') {
+      if (url.pathname === '/ready') {
         return new Response(appReady ? 'ok' : 'not-ready')
       }
       if (isShuttingDown) {
@@ -179,6 +181,7 @@ async function startWorker(): Promise<void> {
           headers: {
             'Retry-After': '0.1',
             Connection: 'close',
+            'X-Worker-Busy': '1',
           },
         })
       }
@@ -189,7 +192,6 @@ async function startWorker(): Promise<void> {
       headers.set('Cache-Control', 'no-store')
       headers.set('Pragma', 'no-cache')
       headers.set('Expires', '0')
-      headers.set('Connection', 'close')
       headers.set('X-Worker-Id', workerNum.toString())
       return new Response(res.body, {
         status: res.status,
