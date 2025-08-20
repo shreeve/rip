@@ -2195,8 +2195,8 @@
               fragments.push(this.makeCode(`.${propName}()`));
             }
           } else if (prop instanceof RegexIndex) {
-            // Handle regex indexing: obj[/regex/] -> compileMatchHelper(obj, /regex/) && _[0]
-            // Or with capture group: obj[/regex/, 1] -> compileMatchHelper(obj, /regex/) && _[1]
+            // Handle regex indexing: obj[/regex/] -> (_ = toSearchable(obj).match(/regex/)) && _[0]
+            // Or with capture group: obj[/regex/, 1] -> (_ = toSearchable(obj).match(/regex/)) && _[1]
 
             // This provides elegant syntax for regex matching with automatic _ variable assignment:
             //   email[/@(.+)$/] and _[1]  # Gets domain part, sets _ globally
@@ -8866,11 +8866,6 @@
   }
   return '';
 }`;
-    },
-    compileMatchHelper: function(o) {
-      var toSearchableRef;
-      toSearchableRef = utility('toSearchable', o);
-      return `function(left, regex) { var s = ${toSearchableRef}(left); var m = regex.exec(s); if (m) { var arr = Array.from(m); arr.index = m.index; arr.input = m.input; if (m.groups) arr.groups = Object.assign({}, m.groups); _ = arr; return arr; } else { _ = null; return null; } }`;
     }
   };
 

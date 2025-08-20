@@ -166,7 +166,7 @@ Follow conventional commits format:
 ```
 feat: add universal type coercion to regex indexing
 fix: handle null values in async bang syntax
-refactor: simplify compileMatchHelper implementation
+refactor: generate clean toSearchable().match() for regex operations
 docs: update ARCHITECTURE.md with new features
 ```
 
