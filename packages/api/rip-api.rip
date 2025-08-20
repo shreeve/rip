@@ -49,11 +49,11 @@ export withHelpers = (c, next) ->
 # Validator registry (uses =~; assumes runtime sets '_' captures)
 # -----------------------------------------------------------------------------
 export validators =
-  # Numbers & money
-  id:        (v) -> (match = v[/^([1-9]\d{0,19})$/, 1]) and parseInt(match)
-  whole:     (v) -> (match = v[/^(0|[1-9]\d{0,19})$/, 1]) and parseInt(match)
-  decimal:   (v) -> (match = v[/^([-+]?\d+(?:\.\d*)?|\.\d+)$/, 1]) and parseFloat(match)
-  money:     (v) -> (match = v[/^([-+]?\d+(?:\.\d*)?|\.\d+)$/, 1]) and Math.round(parseFloat(match) * 100)
+    # Numbers & money
+  id:        (v) -> v[/^([1-9]\d{0,19})$/]            and parseInt(_[1])
+  whole:     (v) -> v[/^(0|[1-9]\d{0,19})$/]          and parseInt(_[1])
+  decimal:   (v) -> v[/^([-+]?\d+(?:\.\d*)?|\.\d+)$/] and parseFloat(_[1])
+  money:     (v) -> v[/^([-+]?\d+(?:\.\d*)?|\.\d+)$/] and Math.round(parseFloat(_[1]) * 100)
 
   # Strings & formatting
   string:    (v) -> v.replace(/\s\s+/g, ' ')
@@ -64,9 +64,9 @@ export validators =
   address:   (v) -> v.replace(/\s+/g, ' ').trim()
 
   # Time & date (stubs; replace with your real parsers)
-  time:      (v) -> (v =~ /^([01]?\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/) and _[0]
-  date:      (v) -> (v =~ /^\d{4}-\d{2}-\d{2}$/) and _[0]
-  dateutc:   (v) -> (v =~ /^\d{4}-\d{2}-\d{2}Z?$/) and _[0]
+  time:      (v) -> v[/^([01]?\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/] and _[0]
+  date:      (v) -> v[/^\d{4}-\d{2}-\d{2}$/]                    and _[0]
+  dateutc:   (v) -> v[/^\d{4}-\d{2}-\d{2}Z?$/]                 and _[0]
 
   # Booleans
   truthy:    (v) -> (v =~ /^(true|t|1|yes|y|on)$/i) and true
@@ -74,12 +74,12 @@ export validators =
   bool:      (v) -> (v =~ /^(true|t|1|yes|y|on|false|f|0|no|n|off)$/i) and (v =~ /^(true|t|1|yes|y|on)$/i)
 
   # Contact, geo, identity
-  email:     (v) -> (v =~ /^([a-zA-Z0-9._%+-]+)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})$/) and _[0]
-  state:     (v) -> (match = v[/^([a-z][a-z])$/i, 1]) and match.toUpperCase()
-  zip:       (v) -> v[/^(\d{5})/, 1]
-  zipplus4:  (v) -> (v =~ /^(\d{5})-?(\d{4})$/)             and "#{_[1]}-#{_[2]}"
-  ssn:       (v) -> (v =~ /^(\d{3})-?(\d{2})-?(\d{4})$/)    and "#{_[1]}#{_[2]}#{_[3]}"
-  sex:       (v) -> (v =~ /^(m|male|f|female|o|other)$/i)   and _[1][0].toLowerCase()
+  email:     (v) -> v[/^([a-zA-Z0-9._%+-]+)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})$/] and _[0]
+  state:     (v) -> v[/^([a-z][a-z])$/i]                and _[1].toUpperCase()
+  zip:       (v) -> v[/^(\d{5})/]                       and _[1]
+  zipplus4:  (v) -> v[/^(\d{5})-?(\d{4})$/]             and "#{_[1]}-#{_[2]}"
+  ssn:       (v) -> v[/^(\d{3})-?(\d{2})-?(\d{4})$/]    and "#{_[1]}#{_[2]}#{_[3]}"
+  sex:       (v) -> v[/^(m|male|f|female|o|other)$/i]   and _[1][0].toLowerCase()
 
   # Phone (US simple; replace with your formatter)
   phone:     (v) ->
@@ -91,18 +91,18 @@ export validators =
     null
 
   # Web & technical
-  url:       (v) -> (v =~ /^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w\.-]*)*\/?$/) and _[0]
-  username:  (v) -> (match = v[/^([a-zA-Z0-9_-]{3,20})$/, 1]) and match.toLowerCase()
-  color:     (v) -> (match = v[/^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, 1]) and "##{match.toLowerCase()}"
-  ip:        (v) -> (v =~ /^(\d{1,3}\.){3}\d{1,3}$/)        and _[0]
-  mac:       (v) -> (v =~ /^([0-9a-fA-F]{2})(?:[:-]?)([0-9a-fA-F]{2})(?:[:-]?)([0-9a-fA-F]{2})(?:[:-]?)([0-9a-fA-F]{2})(?:[:-]?)([0-9a-fA-F]{2})(?:[:-]?)([0-9a-fA-F]{2})$/) and "#{_[1]}:#{_[2]}:#{_[3]}:#{_[4]}:#{_[5]}:#{_[6]}".toLowerCase()
-  semver:    (v) -> (v =~ /^(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*))?(?:\+([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*))?$/) and _[0]
-  uuid:      (v) -> (v =~ /^([0-9a-f]{8})-?([0-9a-f]{4})-?([0-9a-f]{4})-?([0-9a-f]{4})-?([0-9a-f]{12})$/i) and "#{_[1]}-#{_[2]}-#{_[3]}-#{_[4]}-#{_[5]}".toLowerCase()
+  url:       (v) -> v[/^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w\.-]*)*\/?$/] and _[0]
+  username:  (v) -> v[/^([a-zA-Z0-9_-]{3,20})$/]        and _[1].toLowerCase()
+  color:     (v) -> v[/^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/] and "##{_[1].toLowerCase()}"
+  ip:        (v) -> v[/^(\d{1,3}\.){3}\d{1,3}$/]        and _[0]
+  mac:       (v) -> v[/^([0-9a-fA-F]{2})(?:[:-]?)([0-9a-fA-F]{2})(?:[:-]?)([0-9a-fA-F]{2})(?:[:-]?)([0-9a-fA-F]{2})(?:[:-]?)([0-9a-fA-F]{2})(?:[:-]?)([0-9a-fA-F]{2})$/] and "#{_[1]}:#{_[2]}:#{_[3]}:#{_[4]}:#{_[5]}:#{_[6]}".toLowerCase()
+  semver:    (v) -> v[/^(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*))?(?:\+([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*))?$/] and _[0]
+  uuid:      (v) -> v[/^([0-9a-f]{8})-?([0-9a-f]{4})-?([0-9a-f]{4})-?([0-9a-f]{4})-?([0-9a-f]{12})$/i] and "#{_[1]}-#{_[2]}-#{_[3]}-#{_[4]}-#{_[5]}".toLowerCase()
 
   # Time formats & currency (alt)
-  time24:    (v) -> (v =~ /^([01]?[0-9]|2[0-3]):([0-5][0-9])(?::([0-5][0-9]))?$/) and _[0]
-  time12:    (v) -> (v =~ /^(1[0-2]|0?[1-9]):([0-5][0-9])\s?(am|pm)$/i)            and _[0].toLowerCase()
-  currency:  (v) -> (v =~ /^\$?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)$/)                 and parseFloat(_[1].replace(/,/g,''))
+  time24:    (v) -> v[/^([01]?[0-9]|2[0-3]):([0-5][0-9])(?::([0-5][0-9]))?$/] and _[0]
+  time12:    (v) -> v[/^(1[0-2]|0?[1-9]):([0-5][0-9])\s?(am|pm)$/i]            and _[0].toLowerCase()
+  currency:  (v) -> v[/^\$?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)$/]                 and parseFloat(_[1].replace(/,/g,''))
 
   # Collections & structured
   array:     (v) -> (Array.isArray(v) and v) or null
@@ -113,16 +113,15 @@ export validators =
     else if typeof v == 'object' then v else null
 
   # Slugs & ids list
-  slug:      (v) -> v[/^([a-z0-9]+(?:-[a-z0-9]+)*)$/, 1]
+  slug:      (v) -> v[/^([a-z0-9]+(?:-[a-z0-9]+)*)$/] and _[1]
   ids:       (v) ->
     cleaned = v.replace(/[, ]+/g, ' ').trim()
     return null unless cleaned
     try
       nums = []
       for part in cleaned.split(' ')
-        match = part[/^([1-9]\d{0,19})$/, 1]
-        return null unless match
-        nums.push parseInt(match)
+        return null unless part[/^([1-9]\d{0,19})$/]
+        nums.push parseInt(_[1])
       Array.from(new Set(nums)).sort((a,b) -> a-b)
     catch then null
 
