@@ -140,3 +140,4 @@ export class Manager {
     process.exit(0)
   }
 }
+
