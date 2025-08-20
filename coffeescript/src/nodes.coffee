@@ -1499,17 +1499,23 @@ exports.Value = class Value extends Base
         #   email[/@(.+)$/] and _[1]  # Gets domain part, sets _ globally
         #   phone[/^\d{10}$/]         # Returns full match or null
         #
-        # Uses compileMatchHelper for universal type coercion - safely handles null, numbers, symbols, etc.
-        # Compatible with the =~ operator and subsequent capture group access.
-        matchHelperRef = utility 'compileMatchHelper', o
+        # Uses toSearchable for universal type coercion - safely handles null, numbers, symbols, etc.
+        # Generate: (_ = toSearchable(obj).match(regex)) && _[index]
+        toSearchableRef = utility 'toSearchable', o
         regexCode = prop.regex.compileToFragments(o, LEVEL_PAREN)
         indexStr = if prop.captureIndex
           captureCode = prop.captureIndex.compileToFragments(o, LEVEL_PAREN)
           "[#{fragmentsToText(captureCode)}]"
         else
           "[0]"
-        # Compile to safe helper call that sets _ globally and handles all value types
-        fragments = [@makeCode("#{matchHelperRef}("), fragments..., @makeCode(", "), regexCode..., @makeCode(") && _#{indexStr}")]
+        # Generate clean JavaScript: (_ = toSearchable(obj).match(regex)) && _[index]
+        fragments = [
+          @makeCode("(_ = #{toSearchableRef}("),
+          fragments...,
+          @makeCode(").match("),
+          regexCode...,
+          @makeCode(")) && _#{indexStr}")
+        ]
       else
         fragments.push (prop.compileToFragments o)...
 
@@ -4925,10 +4931,17 @@ exports.Op = class Op extends Base
 
   compileMatch: (o) ->
     # Rip: Enhanced regex matching with universal type coercion
-    # Use compileMatchHelper utility function that handles all value types safely
-    matchHelperRef = new Value new Literal utility 'compileMatchHelper', o
-    matchHelperCall = new Call matchHelperRef, [@first, @second]
-    matchHelperCall.compileToFragments o
+    # Generate: (_ = toSearchable(left).match(regex))
+    toSearchableRef = utility 'toSearchable', o
+    leftFragments = @first.compileToFragments o, LEVEL_PAREN
+    regexFragments = @second.compileToFragments o, LEVEL_PAREN
+    [
+      @makeCode("(_ = #{toSearchableRef}("),
+      leftFragments...,
+      @makeCode(").match("),
+      regexFragments...,
+      @makeCode("))")
+    ]
 
   toString: (idt) ->
     super idt, @constructor.name + ' ' + @operator

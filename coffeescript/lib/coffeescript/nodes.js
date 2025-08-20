@@ -2161,7 +2161,7 @@
       // operators `?.` interspersed. Then we have to take care not to accidentally
       // evaluate anything twice when building the soak chain.
       compileNode(o) {
-        var captureCode, fragments, i, indexStr, isAsyncCall, isBeingCalled, j, lastProp, len1, matchHelperRef, prop, propName, props, ref1, ref2, regexCode;
+        var captureCode, fragments, i, indexStr, isAsyncCall, isBeingCalled, j, lastProp, len1, prop, propName, props, ref1, ref2, regexCode, toSearchableRef;
         this.base.front = this.front;
         props = this.properties;
         // rip: Check if last property ends with ! (async call operator)
@@ -2202,13 +2202,13 @@
             //   email[/@(.+)$/] and _[1]  # Gets domain part, sets _ globally
             //   phone[/^\d{10}$/]         # Returns full match or null
 
-            // Uses compileMatchHelper for universal type coercion - safely handles null, numbers, symbols, etc.
-            // Compatible with the =~ operator and subsequent capture group access.
-            matchHelperRef = utility('compileMatchHelper', o);
+            // Uses toSearchable for universal type coercion - safely handles null, numbers, symbols, etc.
+            // Generate: (_ = toSearchable(obj).match(regex)) && _[index]
+            toSearchableRef = utility('toSearchable', o);
             regexCode = prop.regex.compileToFragments(o, LEVEL_PAREN);
             indexStr = prop.captureIndex ? (captureCode = prop.captureIndex.compileToFragments(o, LEVEL_PAREN), `[${fragmentsToText(captureCode)}]`) : "[0]";
-            // Compile to safe helper call that sets _ globally and handles all value types
-            fragments = [this.makeCode(`${matchHelperRef}(`), ...fragments, this.makeCode(", "), ...regexCode, this.makeCode(`) && _${indexStr}`)];
+            // Generate clean JavaScript: (_ = toSearchable(obj).match(regex)) && _[index]
+            fragments = [this.makeCode(`(_ = ${toSearchableRef}(`), ...fragments, this.makeCode(").match("), ...regexCode, this.makeCode(`)) && _${indexStr}`)];
           } else {
             fragments.push(...(prop.compileToFragments(o)));
           }
@@ -7302,12 +7302,13 @@
       }
 
       compileMatch(o) {
-        var matchHelperCall, matchHelperRef;
+        var leftFragments, regexFragments, toSearchableRef;
         // Rip: Enhanced regex matching with universal type coercion
-        // Use compileMatchHelper utility function that handles all value types safely
-        matchHelperRef = new Value(new Literal(utility('compileMatchHelper', o)));
-        matchHelperCall = new Call(matchHelperRef, [this.first, this.second]);
-        return matchHelperCall.compileToFragments(o);
+        // Generate: (_ = toSearchable(left).match(regex))
+        toSearchableRef = utility('toSearchable', o);
+        leftFragments = this.first.compileToFragments(o, LEVEL_PAREN);
+        regexFragments = this.second.compileToFragments(o, LEVEL_PAREN);
+        return [this.makeCode(`(_ = ${toSearchableRef}(`), ...leftFragments, this.makeCode(").match("), ...regexFragments, this.makeCode("))")];
       }
 
       toString(idt) {

@@ -85,11 +85,11 @@ test "enhanced =~ backward compatibility with existing patterns", ->
   eq state, "CA"
   eq _[1], "california"
 
-test "enhanced =~ compilation generates compileMatchHelper call", ->
-  # Verify the compiled JavaScript uses our new runtime function
+test "enhanced =~ compilation generates clean toSearchable call", ->
+  # Verify the compiled JavaScript uses clean toSearchable().match() syntax
   compiled = CoffeeScript.compile("val =~ /test/", bare: yes)
-  ok compiled.includes("compileMatchHelper"), "Should generate compileMatchHelper call"
-  ok not compiled.includes(".match("), "Should not use old .match() syntax"
+  ok compiled.includes("toSearchable(val).match(/test/)"), "Should generate clean toSearchable().match() call"
+  ok not compiled.includes("compileMatchHelper"), "Should not use old compileMatchHelper syntax"
 
 test "enhanced =~ with complex regex patterns", ->
   # Phone number validation

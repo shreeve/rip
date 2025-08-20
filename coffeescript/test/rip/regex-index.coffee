@@ -25,12 +25,13 @@ test "regex index returns null for no match", ->
   eq result, null
 
 test "regex index compilation", ->
-  # Verifies the str[/regex/] syntax compiles to safe JavaScript that:
-  # - Uses compileMatchHelper for universal type coercion (handles null, numbers, symbols, etc.)
+  # Verifies the str[/regex/] syntax compiles to clean, safe JavaScript that:
+  # - Uses toSearchable() for universal type coercion (handles null, numbers, symbols, etc.)
+  # - Uses vanilla .match() after safe conversion
   # - Sets _ variable globally for subsequent capture group access
   # - Returns the match result or undefined (never throws on any input type)
   compiled = CoffeeScript.compile("str[/foo/]", bare: yes).trim()
-  ok compiled.includes("compileMatchHelper(str, /foo/) && _[0]"), "Should use compileMatchHelper for safe type coercion"
+  ok compiled.includes("(_ = toSearchable(str).match(/foo/)) && _[0]"), "Should use clean toSearchable().match() for safe type coercion"
 
 test "regex index with flags", ->
   text = "Hello"
