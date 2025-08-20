@@ -20,7 +20,6 @@ import { requestContext } from './context'
 _app       = null            # real Hono app (built on demand)
 _routes    = []              # queued routes & middleware (preserve declaration order)
 _prefix    = ''              # current group/prefix
-_current   = null            # per-request context for read()
 
 # -----------------------------------------------------------------------------
 # withHelpers middleware (attaches per-request context for read())
@@ -49,7 +48,7 @@ export withHelpers = (c, next) ->
 # -----------------------------------------------------------------------------
 # Validator registry (uses =~; assumes runtime sets '_' captures)
 # -----------------------------------------------------------------------------
-validators =
+export validators =
   # Numbers & money
   id:        (v) -> (v =~ /^([1-9]\d{0,19})$/)            and parseInt(_[1])
   whole:     (v) -> (v =~ /^(0|[1-9]\d{0,19})$/)          and parseInt(_[1])
@@ -177,7 +176,7 @@ export read = (keyOrTag = null, tagOrMiss = null, missOrNil = null) ->
 
   # 3) Regex
   else if tag instanceof RegExp
-    v = (String(v) =~ tag) and _[0] or null
+    v = (v =~ tag) and _[0] or null
 
   # 4) Range / constraints
   else if typeof tag is 'object' and (tag?.start? or tag?.end?)
@@ -185,7 +184,7 @@ export read = (keyOrTag = null, tagOrMiss = null, missOrNil = null) ->
     v = if not isNaN(n) and (not tag.start? or n >= tag.start) and (not tag.end? or n <= tag.end) then n else null
   else if typeof tag is 'object' and (tag?.min? or tag?.max?)
     # number or string length
-    if typeof v is 'number' or (String(v) =~ /^[-+]?\d+$/)
+    if typeof v is 'number' or (v =~ /^[-+]?\d+$/)
       n = (typeof v is 'number') and v or parseInt(String(v))
       ok = not isNaN(n)
       ok = false if tag.min? and n < tag.min
@@ -226,7 +225,8 @@ smart = (fn) ->
         return new Response(String(result), { headers: { 'Content-Type': 'text/plain; charset=UTF-8' } })
       return result
     catch err
-      return new Response(err?.message or 'Internal Server Error', { status: 500, headers: { 'Content-Type': 'text/plain; charset=UTF-8' } })
+      return new Response(err?.message or 'Internal Server Error',
+        { status: 500, headers: { 'Content-Type': 'text/plain; charset=UTF-8' } })
 
 # -----------------------------------------------------------------------------
 # DSL: get/post/... , use, prefix/group, startHandler, start
@@ -351,7 +351,3 @@ export createReloader = (opts) ->
       lastCheck = 0  # force check soon
 
   { getHandler }
-
-# -----------------------------------------------------------------------------
-# End of @rip/api
-# -----------------------------------------------------------------------------
