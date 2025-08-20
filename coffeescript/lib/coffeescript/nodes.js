@@ -7302,7 +7302,7 @@
 
       compileMatch(o) {
         var matchHelperCall, matchHelperRef;
-        // RIP: Enhanced regex matching with universal type coercion
+        // Rip: Enhanced regex matching with universal type coercion
         // Use compileMatchHelper utility function that handles all value types safely
         matchHelperRef = new Value(new Literal(utility('compileMatchHelper', o)));
         matchHelperCall = new Call(matchHelperRef, [this.first, this.second]);
@@ -8843,7 +8843,7 @@
     splice: function() {
       return '[].splice';
     },
-    // RIP: Enhanced regex matching with universal type coercion
+    // Rip: Enhanced regex matching with universal type coercion
     toSearchable: function() {
       return `function(v) {
   if (typeof v === 'string') return v;
