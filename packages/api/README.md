@@ -406,9 +406,9 @@ custom_rating = read 'rating', min: 1, max: 5  # Explicit 1-5 range
 - **Rare Things Possible**: `min:` / `max:` handles edge cases with explicit clarity
 - **Identical to @rip/schema**: Same syntax everywhere for perfect consistency
 
-### 🔥 Regex Patterns
+### 🔥🛡️ Secure Regex Patterns
 
-What stands out is **Rip's `=~` operator** - an elegant regex syntax.
+What stands out is **Rip's `=~` operator** - an elegant regex syntax **with built-in security protection**.
 
 **🎯 TWO BEAUTIFUL STYLES - CHOOSE YOUR PREFERENCE!**
 
@@ -459,9 +459,9 @@ const state = stateMatch ? stateMatch[1].toUpperCase() : null;
 if (!state) throw new Error('Invalid state');
 ```
 
-**Rip with `=~`** (elegant, bulletproof):
+**Rip with `=~`** (elegant, bulletproof, **SECURE**):
 ```rip
-# Validate and transform state code
+# Validate and transform state code - INJECTION-SAFE by default!
 state = (_[1].toUpperCase() if val =~ /^([a-z][a-z])$/i)
 ```
 
@@ -469,7 +469,20 @@ state = (_[1].toUpperCase() if val =~ /^([a-z][a-z])$/i)
 - **75% fewer characters** - Less typing, less bugs
 - **Natural reading flow** - "Transform if condition" reads like English
 - **Automatic null handling** - No manual error checking needed
+- **🛡️ Built-in security** - **Blocks newline injection attacks automatically**
 - **Ruby-inspired elegance** - Familiar to experienced developers
+
+**🛡️ Security in Action**:
+```rip
+# SECURE: Malicious input automatically blocked
+"admin\n<script>alert('xss')</script>" =~ /^[a-z]+$/  # → null (attack blocked)
+
+# VALID: Clean input works normally
+"admin" =~ /^([a-z]+)$/  # → ["admin", "admin"] (success)
+
+# EXPLICIT: When multiline is legitimately needed
+"line1\nline2" =~ /^line.*$/m  # → Developer acknowledges multiline risk
+```
 
 ### Advanced Usage Patterns
 

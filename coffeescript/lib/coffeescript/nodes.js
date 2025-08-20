@@ -2161,7 +2161,7 @@
       // operators `?.` interspersed. Then we have to take care not to accidentally
       // evaluate anything twice when building the soak chain.
       compileNode(o) {
-        var captureCode, fragments, i, indexStr, isAsyncCall, isBeingCalled, j, lastProp, len1, prop, propName, props, ref1, ref2, regexCode, toSearchableRef;
+        var base1, captureCode, fragments, hasMultilineFlag, i, indexStr, isAsyncCall, isBeingCalled, j, lastProp, len1, multilineParam, prop, propName, props, ref1, ref2, ref3, regexCode, toSearchableRef;
         this.base.front = this.front;
         props = this.properties;
         // rip: Check if last property ends with ! (async call operator)
@@ -2202,13 +2202,16 @@
             //   email[/@(.+)$/] and _[1]  # Gets domain part, sets _ globally
             //   phone[/^\d{10}$/]         # Returns full match or null
 
-            // Uses toSearchable for universal type coercion - safely handles null, numbers, symbols, etc.
-            // Generate: (_ = toSearchable(obj).match(regex)) && _[index]
+            // Uses toSearchable for universal type coercion and security - safely handles null, numbers, symbols, etc.
+            // Generate: (_ = toSearchable(obj).match(regex)) && _[index] or (_ = toSearchable(obj, true).match(regex)) && _[index] for multiline
             toSearchableRef = utility('toSearchable', o);
             regexCode = prop.regex.compileToFragments(o, LEVEL_PAREN);
             indexStr = prop.captureIndex ? (captureCode = prop.captureIndex.compileToFragments(o, LEVEL_PAREN), `[${fragmentsToText(captureCode)}]`) : "[0]";
+            // Conditional second parameter for multiline regex
+            hasMultilineFlag = (typeof (base1 = prop.regex).toString === "function" ? base1.toString().includes('/m') : void 0) || ((ref3 = prop.regex.value) != null ? typeof ref3.toString === "function" ? ref3.toString().includes('m') : void 0 : void 0);
+            multilineParam = hasMultilineFlag ? ", true" : "";
             // Generate clean JavaScript: (_ = toSearchable(obj).match(regex)) && _[index]
-            fragments = [this.makeCode(`(_ = ${toSearchableRef}(`), ...fragments, this.makeCode(").match("), ...regexCode, this.makeCode(`)) && _${indexStr}`)];
+            fragments = [this.makeCode(`(_ = ${toSearchableRef}(`), ...fragments, this.makeCode(`${multilineParam}).match(`), ...regexCode, this.makeCode(`)) && _${indexStr}`)];
           } else {
             fragments.push(...(prop.compileToFragments(o)));
           }
@@ -7302,13 +7305,14 @@
       }
 
       compileMatch(o) {
-        var leftFragments, regexFragments, toSearchableRef;
-        // Rip: Enhanced regex matching with universal type coercion
-        // Generate: (_ = toSearchable(left).match(regex))
+        var base1, hasMultilineFlag, leftFragments, multilineParam, ref1, regexFragments, toSearchableRef;
         toSearchableRef = utility('toSearchable', o);
         leftFragments = this.first.compileToFragments(o, LEVEL_PAREN);
         regexFragments = this.second.compileToFragments(o, LEVEL_PAREN);
-        return [this.makeCode(`(_ = ${toSearchableRef}(`), ...leftFragments, this.makeCode(").match("), ...regexFragments, this.makeCode("))")];
+        // Conditional second parameter for multiline regex (true allows newlines)
+        hasMultilineFlag = (typeof (base1 = this.second).toString === "function" ? base1.toString().includes('/m') : void 0) || ((ref1 = this.second.value) != null ? typeof ref1.toString === "function" ? ref1.toString().includes('m') : void 0 : void 0);
+        multilineParam = hasMultilineFlag ? ", true" : "";
+        return [this.makeCode(`(_ = ${toSearchableRef}(`), ...leftFragments, this.makeCode(`${multilineParam}).match(`), ...regexFragments, this.makeCode("))")];
       }
 
       toString(idt) {
@@ -8845,10 +8849,15 @@
     splice: function() {
       return '[].splice';
     },
-    // Rip: Enhanced regex matching with universal type coercion
+    // Rip: Enhanced regex matching with universal type coercion and security
+    // Security: By default, reject strings with newlines to prevent injection attacks
+    // (mimics Ruby's \A and \z behavior). Use allowNewlines=true for explicit multiline.
     toSearchable: function() {
-      return `function(v) {
-  if (typeof v === 'string') return v;
+      return `function(v, allowNewlines) {
+  if (typeof v === 'string') {
+    if (!allowNewlines && (v.includes('\\n') || v.includes('\\r'))) return null;
+    return v;
+  }
   if (v == null) return '';
   if (typeof v === 'number' || typeof v === 'bigint' || typeof v === 'boolean') {
     return String(v);

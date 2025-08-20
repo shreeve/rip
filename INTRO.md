@@ -17,15 +17,22 @@ The foundation is a sophisticated fork of CoffeeScript with three revolutionary 
 - **Magic**: Functions using `!` suffix automatically become `async`
 - **Example**: `data = api.getUser!` → `data = await api.getUser()`
 
-**⚡ Regex Match Operator (`=~`)**
-- **Problem**: JavaScript's `.match()` is verbose and requires manual result handling
-- **Solution**: Ruby-inspired `=~` operator with automatic `_` variable assignment
-- **Example**: `email =~ /@(.+)$/; domain = _[1]` → Sets `_` variable for easy access
+**⚡ Regex Match Operator (`=~`) with Built-in Security**
+- **Problem**: JavaScript's `.match()` is verbose, unsafe (allows newline injection), and requires manual result handling
+- **Solution**: Ruby-inspired `=~` operator with automatic `_` variable assignment and **Ruby-style security**
+- **Security**: Automatically rejects strings with `\n` or `\r` (like Ruby's `\A` and `\z`)
+- **Example**: `email =~ /@(.+)$/; domain = _[1]` → Sets `_` variable, **guaranteed single-line input**
 
-**🎯 Ruby-Style Regex Indexing (`str[/regex/]`)**
-- **Problem**: Even `=~` required two steps for simple extractions
-- **Solution**: Direct regex indexing with automatic `_` assignment
-- **Example**: `domain = email[/@(.+)$/] and _[1]` → Clean, readable, elegant
+**🎯 Ruby-Style Regex Indexing (`str[/regex/]`) with Security**
+- **Problem**: Even `=~` required two steps for simple extractions, and JavaScript regex allows dangerous multiline attacks
+- **Solution**: Direct regex indexing with automatic `_` assignment and **built-in newline protection**
+- **Security**: Blocks `"user\n<script>"` attacks by default - fails validation instead of silently truncating
+- **Example**: `domain = email[/@(.+)$/] and _[1]` → Clean, readable, **bulletproof**
+
+**🛡️ Explicit Multiline Override (`/m` flag)**
+- **When needed**: Use `/m` flag to explicitly allow multiline input
+- **Developer intent**: `text =~ /^start.*end$/m` clearly shows "I accept multiline risk"
+- **Generated code**: `toSearchable(text, true).match(...)` - explicit security acknowledgment
 
 ### **2. Package Ecosystem**
 

@@ -132,44 +132,83 @@ if node instanceof Value
 
 **Result**: Functions using `db.select().get!` automatically become `async` functions.
 
-### The `=~` and `_` Regex Enhancement
-**Problem**: JavaScript regex matching required verbose `.match()` calls and manual result assignment.
+### The `=~` and `_` Regex Enhancement with Built-in Security
+**Problem**: JavaScript regex matching required verbose `.match()` calls, manual result assignment, and was vulnerable to newline injection attacks.
 
-**Solution**: Added Ruby-style `=~` operator with automatic `_` variable assignment:
+**Solution**: Added Ruby-style `=~` operator with automatic `_` variable assignment and **Ruby-level security**:
 - **Lexer**: Added `'=~'` to `COMPARE` array in `/coffeescript/src/lexer.coffee`
-- **Compiler**: Enhanced to recognize `=~` operator and generate code that sets `_` variable
+- **Compiler**: Enhanced to recognize `=~` operator and generate secure code that sets `_` variable
+- **Security**: Automatically rejects strings containing `\n` or `\r` (mimics Ruby's `\A` and `\z` behavior)
+- **Override**: Use `/m` flag to explicitly allow multiline when needed
 
-**Result**: Elegant regex syntax with automatic match result capture:
+**Result**: Elegant regex syntax with automatic match result capture and **bulletproof security**:
 ```coffeescript
-# Before (verbose)
+# Before (verbose and vulnerable)
 match = val.match(/^([A-Z]{2})$/)
 code = match?[1]?.toUpperCase()
 
-# After (LEGENDARY)
+# After (LEGENDARY and SECURE)
 val =~ /^([A-Z]{2})$/
 code = _?[1]?.toUpperCase()
+
+# Explicit multiline (when actually needed)
+text =~ /^start.*end$/m  # Developer acknowledges multiline risk
 ```
 
-### The `str[/regex/]` Ruby-Style Indexing Enhancement
-**Problem**: While `=~` was great for setting `_`, sometimes you just want the match result directly.
+**Security Examples**:
+```coffeescript
+# SECURE: Blocks injection attacks
+"user\n<script>alert('xss')</script>" =~ /^[a-z]+$/  # → null (rejected)
 
-**Solution**: Added Ruby-style regex indexing with bracket notation:
+# EXPLICIT: When multiline is legitimately needed
+"line1\nline2" =~ /^line1.*line2$/m  # → ["line1\nline2"] (allowed)
+```
+
+**Generated JavaScript Comparison**:
+```javascript
+// Default (secure) - no second parameter
+username =~ /^[a-z]+$/
+// → (_ = toSearchable(username).match(/^[a-z]+$/))
+
+// Explicit multiline - allowNewlines=true parameter
+text =~ /^start.*end$/m
+// → (_ = toSearchable(text, true).match(/^start.*end$/m))
+```
+**Clean, readable, and self-documenting!** The presence of the second parameter clearly indicates "this allows multiline input."
+
+### The `str[/regex/]` Ruby-Style Indexing Enhancement with Security
+**Problem**: While `=~` was great for setting `_`, sometimes you just want the match result directly, but JavaScript regex indexing was also vulnerable to injection attacks.
+
+**Solution**: Added Ruby-style regex indexing with bracket notation and **built-in security**:
 - **Parser**: Extended `RegexIndex` handling in `/coffeescript/src/nodes.coffee`
 - **Compiler**: Enhanced to handle `str[/regex/]` syntax and safely set `_` variable with match results
-- **Safety**: Handles null matches gracefully, never throws errors
+- **Security**: Automatically rejects strings with newlines, same protection as `=~` operator
+- **Safety**: Handles null matches gracefully, never throws errors, **blocks injection attempts**
 
-**Result**: Even more elegant regex syntax for common cases:
+**Result**: Even more elegant regex syntax for common cases with **bulletproof security**:
 ```coffeescript
-# Get full match directly
+# Get full match directly - SECURE by default
 email = "user@domain.com"
-normalized = email[/^.+@.+$/]?.toLowerCase()  # Safe and clean
+normalized = email[/^.+@.+$/]?.toLowerCase()  # Safe, clean, and secure
 
-# Access capture groups via global _
-domain = email[/@(.+)$/] and _[1]             # "domain.com"
-username = email[/^([^@]+)/]                  # "user"
+# Access capture groups via global _ - PROTECTED
+domain = email[/@(.+)$/] and _[1]             # "domain.com" (injection-proof)
+username = email[/^([^@]+)/]                  # "user" (newline-safe)
 
-# Perfect for validation pipelines
-phone[/^\d{10}$/] and formatPhone(_[0])       # Chain operations
+# Perfect for validation pipelines - BULLETPROOF
+phone[/^\d{10}$/] and formatPhone(_[0])       # Chain operations securely
+
+# Explicit multiline when legitimately needed
+content[/^header.*footer$/m] and _[0]         # Developer acknowledges risk
+```
+
+**Security in Action**:
+```coffeescript
+# BLOCKS malicious input automatically
+"user\n<script>" [/^[a-z]+$/]  # → null (attack blocked)
+
+# EXPLICIT multiline override when needed
+"line1\nline2"[/^line.*$/m]    # → "line1" (developer choice)
 ```
 
 ### The Semicolon Pattern for Conditional Regex

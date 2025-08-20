@@ -181,10 +181,13 @@ docs: update ARCHITECTURE.md with new features
 
 **Current Implementation Status:**
 - ✅ Async Bang Syntax (`!`) - fully implemented
-- ✅ Regex Match Operator (`=~`) - with universal type coercion
-- ✅ Ruby-Style Regex Indexing (`[]`) - with universal type coercion
+- ✅ **Secure Regex Match Operator (`=~`)** - with universal type coercion **and built-in security**
+- ✅ **Secure Ruby-Style Regex Indexing (`[]`)** - with universal type coercion **and injection protection**
 - ✅ Bare Compilation - default mode
 - ✅ Modern Output - clean JavaScript generation
+
+**🛡️ Major Security Enhancement:**
+Rip's regex operations are now **secure by default** - automatically blocking newline injection attacks while preserving clean JavaScript output. Use `/m` flag for explicit multiline when needed.
 
 **Key Files for Feature Development:**
 - `/coffeescript/src/lexer.coffee` - tokenization

@@ -1499,8 +1499,8 @@ exports.Value = class Value extends Base
         #   email[/@(.+)$/] and _[1]  # Gets domain part, sets _ globally
         #   phone[/^\d{10}$/]         # Returns full match or null
         #
-        # Uses toSearchable for universal type coercion - safely handles null, numbers, symbols, etc.
-        # Generate: (_ = toSearchable(obj).match(regex)) && _[index]
+        # Uses toSearchable for universal type coercion and security - safely handles null, numbers, symbols, etc.
+        # Generate: (_ = toSearchable(obj).match(regex)) && _[index] or (_ = toSearchable(obj, true).match(regex)) && _[index] for multiline
         toSearchableRef = utility 'toSearchable', o
         regexCode = prop.regex.compileToFragments(o, LEVEL_PAREN)
         indexStr = if prop.captureIndex
@@ -1508,11 +1508,16 @@ exports.Value = class Value extends Base
           "[#{fragmentsToText(captureCode)}]"
         else
           "[0]"
+
+        # Conditional second parameter for multiline regex
+        hasMultilineFlag = prop.regex.toString?().includes('/m') or prop.regex.value?.toString?().includes('m')
+        multilineParam = if hasMultilineFlag then ", true" else ""
+
         # Generate clean JavaScript: (_ = toSearchable(obj).match(regex)) && _[index]
         fragments = [
           @makeCode("(_ = #{toSearchableRef}("),
           fragments...,
-          @makeCode(").match("),
+          @makeCode("#{multilineParam}).match("),
           regexCode...,
           @makeCode(")) && _#{indexStr}")
         ]
@@ -4930,15 +4935,18 @@ exports.Op = class Op extends Base
     new Call(mod, [@first, @second]).compileToFragments o
 
   compileMatch: (o) ->
-    # Rip: Enhanced regex matching with universal type coercion
-    # Generate: (_ = toSearchable(left).match(regex))
     toSearchableRef = utility 'toSearchable', o
     leftFragments = @first.compileToFragments o, LEVEL_PAREN
     regexFragments = @second.compileToFragments o, LEVEL_PAREN
+
+    # Conditional second parameter for multiline regex (true allows newlines)
+    hasMultilineFlag = @second.toString?().includes('/m') or @second.value?.toString?().includes('m')
+    multilineParam = if hasMultilineFlag then ", true" else ""
+
     [
       @makeCode("(_ = #{toSearchableRef}("),
       leftFragments...,
-      @makeCode(").match("),
+      @makeCode("#{multilineParam}).match("),
       regexFragments...,
       @makeCode("))")
     ]
@@ -5870,10 +5878,15 @@ UTILITIES =
   slice  : -> '[].slice'
   splice : -> '[].splice'
 
-  # Rip: Enhanced regex matching with universal type coercion
+  # Rip: Enhanced regex matching with universal type coercion and security
+  # Security: By default, reject strings with newlines to prevent injection attacks
+  # (mimics Ruby's \A and \z behavior). Use allowNewlines=true for explicit multiline.
   toSearchable: -> '''
-    function(v) {
-      if (typeof v === 'string') return v;
+    function(v, allowNewlines) {
+      if (typeof v === 'string') {
+        if (!allowNewlines && (v.includes('\\n') || v.includes('\\r'))) return null;
+        return v;
+      }
       if (v == null) return '';
       if (typeof v === 'number' || typeof v === 'bigint' || typeof v === 'boolean') {
         return String(v);
