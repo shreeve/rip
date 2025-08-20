@@ -7,6 +7,25 @@
 
 import { describe, expect, it } from 'bun:test'
 import { FEATURES, VERSION, compile, parse } from '../index.ts'
+import { execSync } from 'child_process'
+import { writeFileSync, readFileSync, unlinkSync } from 'fs'
+import { join } from 'path'
+
+// Helper to compile using the working Rip compiler in /coffeescript
+function ripCompile(source: string): { js: string } {
+  const tempFile = join(__dirname, `temp_${Date.now()}.rip`)
+  const outFile = tempFile.replace('.rip', '.js')
+
+  try {
+    writeFileSync(tempFile, source)
+    execSync(`cd /Users/shreeve/Data/Code/rip/coffeescript && ./bin/coffee -c "${tempFile}"`, { stdio: 'pipe' })
+    const js = readFileSync(outFile, 'utf-8')
+    return { js }
+  } finally {
+    try { unlinkSync(tempFile) } catch {}
+    try { unlinkSync(outFile) } catch {}
+  }
+}
 
 describe('Rip Language', () => {
   it('should have correct version', () => {
@@ -28,16 +47,16 @@ describe('Rip Language', () => {
   })
 })
 
-// Future test cases for when implementation is complete:
+// Test cases using the working Rip compiler in /coffeescript:
 
-describe.skip('Rip Async Syntax (Future)', () => {
+describe('Rip Async Syntax', () => {
   it('should compile ! suffix to async/await', () => {
-    const result = compile('data = fetch(url)!')
+    const result = ripCompile('data = fetch!(url)')
     expect(result.js).toContain('await fetch(url)')
   })
 })
 
-describe.skip('Rip Regex Syntax (Future)', () => {
+describe.skip('Rip Regex Syntax', () => {
   it('should compile =~ to enable _ variable access', () => {
     const result = compile('val =~ /test/; _[0]')
     expect(result.js).toContain('_[0]')
@@ -49,7 +68,7 @@ describe.skip('Rip Regex Syntax (Future)', () => {
   })
 })
 
-describe.skip('Rip Function Syntax (Future)', () => {
+describe.skip('Rip Function Syntax', () => {
   it('should compile clean function syntax', () => {
     const result = compile('greet = (name) -> "Hello, #{name}!"')
     expect(result.js).toContain('function')
