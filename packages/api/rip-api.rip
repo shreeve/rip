@@ -12,6 +12,7 @@
 # - Smart wrapper lets handlers "just return" strings/objects/Response.
 
 import { Hono } from 'hono'
+import { requestContext } from './context'
 
 # -----------------------------------------------------------------------------
 # Module-scoped state (per worker / per module instance)
@@ -24,25 +25,26 @@ _current   = null            # per-request context for read()
 # -----------------------------------------------------------------------------
 # withHelpers middleware (attaches per-request context for read())
 # -----------------------------------------------------------------------------
-export withHelpers = async (c, next) ->
-  # Basic parsed data (JSON/form/query); adjust to your needs
+export withHelpers = (c, next) ->
   data = {}
   try
     ct = c.req.header('content-type') or ''
     if c.req.method in ['POST','PUT','PATCH']
-      if /json/i.test(ct) then data = await c.req.json()
-      else if /x-www-form-urlencoded|form-data/i.test(ct) then data = await c.req.parseBody()
-  catch _ then data = {}
+      if /json/i.test(ct)
+        data = await c.req.json()
+      else if /x-www-form-urlencoded|form-data/i.test(ct)
+        data = await c.req.parseBody()
+  catch
+    data = {}
+
   # Merge query last for simple overrides via ?a=1
   q = Object.fromEntries(new URL(c.req.url).searchParams.entries())
-  c._ripData = { ...data, ...q }
-  # Expose context for read()
-  old = _current
-  _current = c
-  try
-    await next()
-  finally
-    _current = old
+  merged = { ...data, ...q }
+
+  # Run the rest of the pipeline inside this request's ALS scope
+  await new Promise (resolve, reject) ->
+    requestContext.run { hono: c, data: merged }, ->
+      Promise.resolve(next()).then(resolve, reject)
 
 # -----------------------------------------------------------------------------
 # Validator registry (uses =~; assumes runtime sets '_' captures)
