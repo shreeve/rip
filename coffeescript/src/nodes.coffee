@@ -4923,23 +4923,11 @@ exports.Op = class Op extends Base
     new Call(mod, [@first, @second]).compileToFragments o
 
   compileMatch: (o) ->
-    # Create the match call: val.match(/regex/)
-    matchMethod = new Access new PropertyName 'match'
-    matchValue = new Value @first, [matchMethod]
-    matchCall = new Call matchValue, [@second]
-
-    # Create _ identifier - THE MOST ELEGANT CHOICE!
-    underscore = new IdentifierLiteral '_'
-
-    # Create assignment: _ = matchCall
-    assignment = new Assign underscore, matchCall
-
-    # Create reference to _ for return value
-    underscoreRef = new IdentifierLiteral '_'
-
-    # Create sequence: (_ = val.match(/regex/), _)
-    sequence = new Block [assignment, underscoreRef]
-    new Parens(sequence).compileToFragments o
+    # RIP: Enhanced regex matching with universal type coercion
+    # Use compileMatchHelper utility function that handles all value types safely
+    matchHelperRef = new Value new Literal utility 'compileMatchHelper', o
+    matchHelperCall = new Call matchHelperRef, [@first, @second]
+    matchHelperCall.compileToFragments o
 
   toString: (idt) ->
     super idt, @constructor.name + ' ' + @operator
@@ -5867,6 +5855,47 @@ UTILITIES =
   indexOf: -> '[].indexOf'
   slice  : -> '[].slice'
   splice : -> '[].splice'
+
+  # RIP: Enhanced regex matching with universal type coercion
+  toSearchable: -> '''
+    function(v) {
+      if (typeof v === 'string') return v;
+      if (v == null) return '';
+      if (typeof v === 'number' || typeof v === 'bigint' || typeof v === 'boolean') {
+        return String(v);
+      }
+      if (typeof v === 'symbol') return v.description || '';
+      if (v instanceof Uint8Array) return new TextDecoder().decode(v);
+      if (v instanceof ArrayBuffer) return new TextDecoder().decode(new Uint8Array(v));
+      if (Array.isArray(v)) return v.join(',');
+      if (typeof v.toString === 'function' && v.toString !== Object.prototype.toString) {
+        try {
+          return v.toString();
+        } catch (e) {
+          return '';
+        }
+      }
+      return '';
+    }
+    '''
+
+  compileMatchHelper: (o) ->
+    toSearchableRef = utility 'toSearchable', o
+    "function(left, regex) {
+      var s = #{toSearchableRef}(left);
+      var m = regex.exec(s);
+      if (m) {
+        var arr = Array.from(m);
+        arr.index = m.index;
+        arr.input = m.input;
+        if (m.groups) arr.groups = Object.assign({}, m.groups);
+        _ = arr;
+        return arr;
+      } else {
+        _ = null;
+        return null;
+      }
+    }"
 
 # Levels indicate a node's position in the AST. Useful for knowing if
 # parens are necessary or superfluous.

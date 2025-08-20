@@ -2197,10 +2197,16 @@
           } else if (prop instanceof RegexIndex) {
             // Handle regex indexing: obj[/regex/] -> (_ = obj.match(/regex/)) && _[0]
             // Or with capture group: obj[/regex/, 1] -> (_ = obj.match(/regex/)) && _[1]
-            // FIXED: Now sets _ variable globally like =~ operator does
+
+            // This provides elegant syntax for regex matching with automatic _ variable assignment:
+            //   email[/@(.+)$/] and _[1]  # Gets domain part, sets _ globally
+            //   phone[/^\d{10}$/]         # Returns full match or null
+
+            // The compiled JavaScript safely handles null matches and sets _ globally for
+            // compatibility with the =~ operator and subsequent capture group access.
             regexCode = prop.regex.compileToFragments(o, LEVEL_PAREN);
             indexStr = prop.captureIndex ? (captureCode = prop.captureIndex.compileToFragments(o, LEVEL_PAREN), `[${fragmentsToText(captureCode)}]`) : "[0]";
-            // Use sequence expression like =~ operator to ensure _ is set globally  
+            // Compile to safe sequence expression that sets _ globally and handles null matches
             fragments = [this.makeCode("(_ = "), ...fragments, this.makeCode(".match("), ...regexCode, this.makeCode(`)) && _${indexStr}`)];
           } else {
             fragments.push(...(prop.compileToFragments(o)));
@@ -7295,20 +7301,12 @@
       }
 
       compileMatch(o) {
-        var assignment, matchCall, matchMethod, matchValue, sequence, underscore, underscoreRef;
-        // Create the match call: val.match(/regex/)
-        matchMethod = new Access(new PropertyName('match'));
-        matchValue = new Value(this.first, [matchMethod]);
-        matchCall = new Call(matchValue, [this.second]);
-        // Create _ identifier - THE MOST ELEGANT CHOICE!
-        underscore = new IdentifierLiteral('_');
-        // Create assignment: _ = matchCall
-        assignment = new Assign(underscore, matchCall);
-        // Create reference to _ for return value
-        underscoreRef = new IdentifierLiteral('_');
-        // Create sequence: (_ = val.match(/regex/), _)
-        sequence = new Block([assignment, underscoreRef]);
-        return new Parens(sequence).compileToFragments(o);
+        var matchHelperCall, matchHelperRef;
+        // RIP: Enhanced regex matching with universal type coercion
+        // Use compileMatchHelper utility function that handles all value types safely
+        matchHelperRef = new Value(new Literal(utility('compileMatchHelper', o)));
+        matchHelperCall = new Call(matchHelperRef, [this.first, this.second]);
+        return matchHelperCall.compileToFragments(o);
       }
 
       toString(idt) {
@@ -8844,6 +8842,33 @@
     },
     splice: function() {
       return '[].splice';
+    },
+    // RIP: Enhanced regex matching with universal type coercion
+    toSearchable: function() {
+      return `function(v) {
+  if (typeof v === 'string') return v;
+  if (v == null) return '';
+  if (typeof v === 'number' || typeof v === 'bigint' || typeof v === 'boolean') {
+    return String(v);
+  }
+  if (typeof v === 'symbol') return v.description || '';
+  if (v instanceof Uint8Array) return new TextDecoder().decode(v);
+  if (v instanceof ArrayBuffer) return new TextDecoder().decode(new Uint8Array(v));
+  if (Array.isArray(v)) return v.join(',');
+  if (typeof v.toString === 'function' && v.toString !== Object.prototype.toString) {
+    try {
+      return v.toString();
+    } catch (e) {
+      return '';
+    }
+  }
+  return '';
+}`;
+    },
+    compileMatchHelper: function(o) {
+      var toSearchableRef;
+      toSearchableRef = utility('toSearchable', o);
+      return `function(left, regex) { var s = ${toSearchableRef}(left); var m = regex.exec(s); if (m) { var arr = Array.from(m); arr.index = m.index; arr.input = m.input; if (m.groups) arr.groups = Object.assign({}, m.groups); _ = arr; return arr; } else { _ = null; return null; } }`;
     }
   };
 

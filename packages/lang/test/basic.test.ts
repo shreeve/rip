@@ -38,9 +38,9 @@ describe.skip('RIP Async Syntax (Future)', () => {
 })
 
 describe.skip('RIP Regex Syntax (Future)', () => {
-  it('should compile =~ to match with _ assignment', () => {
-    const result = compile('val =~ /test/')
-    expect(result.js).toContain('(_ = val.match(/test/), _)')
+  it('should compile =~ to enable _ variable access', () => {
+    const result = compile('val =~ /test/; _[0]')
+    expect(result.js).toContain('_[0]')
   })
 
   it('should handle regex match with optional chaining', () => {

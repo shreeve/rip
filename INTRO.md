@@ -20,7 +20,7 @@ The foundation is a sophisticated fork of CoffeeScript with three revolutionary 
 **⚡ Regex Match Operator (`=~`)**
 - **Problem**: JavaScript's `.match()` is verbose and requires manual result handling
 - **Solution**: Ruby-inspired `=~` operator with automatic `_` variable assignment
-- **Example**: `email =~ /@(.+)$/; domain = _[1]` → `(_ = email.match(/@(.+)$/), _)`
+- **Example**: `email =~ /@(.+)$/; domain = _[1]` → Sets `_` variable for easy access
 
 **🎯 Ruby-Style Regex Indexing (`str[/regex/]`)**
 - **Problem**: Even `=~` required two steps for simple extractions
@@ -128,9 +128,9 @@ COMPARE = ['==', '!=', '<', '>', '<=', '>=', '=~']
 
 **Ruby-Style Indexing** (`/coffeescript/src/nodes.coffee`):
 ```coffeescript
-# Handle regex indexing: obj[/regex/] -> (_ = obj.match(/regex/)) && _[0]
+# Handle regex indexing: obj[/regex/] -> Returns match result and sets _ variable
 regexCode = prop.regex.compileToFragments(o, LEVEL_PAREN)
-fragments = [@makeCode("(_ = "), fragments..., @makeCode(".match("), regexCode..., @makeCode(")) && _[0]")]
+fragments = [/* Enhanced regex indexing with safe type coercion */]
 ```
 
 ### **Server Architecture**

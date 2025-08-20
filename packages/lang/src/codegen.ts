@@ -23,7 +23,7 @@ export class CodeGenerator {
   generate(ast: ASTNode[]): CompileResult {
     // TODO: Implement RIP code generation with support for:
     // - Async functions (automatic async/await handling)
-    // - Regex match operator (=~ compiles to (_ = val.match(/regex/), _))
+    // - Regex match operator (val =~ /regex/ sets _ variable for capture groups like _[1])
     // - Clean function syntax
     // - Source map generation
     // - All modern JavaScript features

@@ -137,7 +137,7 @@ if node instanceof Value
 
 **Solution**: Added Ruby-style `=~` operator with automatic `_` variable assignment:
 - **Lexer**: Added `'=~'` to `COMPARE` array in `/coffeescript/src/lexer.coffee`
-- **Nodes**: Added `compileMatch` method in `/coffeescript/src/nodes.coffee` that generates `(_ = val.match(/regex/), _)`
+- **Compiler**: Enhanced to recognize `=~` operator and generate code that sets `_` variable
 
 **Result**: Elegant regex syntax with automatic match result capture:
 ```coffeescript
@@ -155,7 +155,7 @@ code = _?[1]?.toUpperCase()
 
 **Solution**: Added Ruby-style regex indexing with bracket notation:
 - **Parser**: Extended `RegexIndex` handling in `/coffeescript/src/nodes.coffee`
-- **Compiler**: Generates `(_ = str.match(/regex/)) && _[0]` for safe global `_` assignment
+- **Compiler**: Enhanced to handle `str[/regex/]` syntax and safely set `_` variable with match results
 - **Safety**: Handles null matches gracefully, never throws errors
 
 **Result**: Even more elegant regex syntax for common cases:

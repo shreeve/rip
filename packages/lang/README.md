@@ -213,8 +213,8 @@ This feature required careful integration with CoffeeScript's existing infrastru
 
 1. **Lexer Enhancement**: Added `=~` to the `COMPARE` token array alongside `==`, `!=`, etc.
 2. **Operator Precedence**: Positioned `=~` at the same level as other comparison operators
-3. **AST Node Generation**: Created `compileMatch` method in the `Op` class
-4. **JavaScript Generation**: Compiles to `(_ = val.match(/regex/), _)` - assigns and returns match result
+3. **Parser Enhancement**: Extended to recognize `=~` as a regex match operator
+4. **Code Generation**: Generates JavaScript that safely handles all value types and sets `_` variable
 5. **Global Variable**: The `_` variable automatically holds the last regex match result
 
 **Key Design Decisions**:
