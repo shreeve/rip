@@ -1,312 +1,354 @@
-# Rip Server Helpers - Enhanced Request Data Reading & Validation
+# @rip/api — cohesive single-file core (DSL + read + validators + reloader)
+# -----------------------------------------------------------------------------
+# Public exports:
+#   DSL: get, post, put, patch, del, any, use, prefix, group, startHandler, start
+#   API: withHelpers, read, registerValidator, getValidator, validators
+#   Dev: createReloader, resetGlobals
 #
-# Features elegant regex validation using Rip's str[/regex/] syntax:
-# - Simple matches: val[/regex/] returns full match or null
-# - Capture groups: (val =~ /regex/) and _[1] for reliable access
-# - Automatic type conversion and formatting for common data types
-#
-# This mixed approach ensures robust validation while showcasing Rip's
-# expressive regex capabilities.
+# Design notes:
+# - DSL is module-scoped per worker: no global leakage across workers.
+# - read() is synchronous when used with withHelpers (Sinatra vibe).
+# - Validators rely on Rip's =~ coercion (no local String(...) needed).
+# - Smart wrapper lets handlers "just return" strings/objects/Response.
 
-# Enhanced blank check with Rip features
-# Handles null, undefined, empty strings, whitespace-only strings, empty arrays, and empty objects
-isBlank = (obj) ->
-  return true unless obj?
-  return true if obj is ""
-  return true if typeof obj is 'string' and obj =~ /^\s*$/
-  return true if obj.length? and obj.length is 0
-  return true if typeof obj is 'object' and Object.keys(obj).length is 0
-  false
+import { Hono } from 'hono'
 
-# Email regex (simplified version)
-emailRegex = /^[^\s@]+@[^-\s@]+\.[^\s@]+$/
+# -----------------------------------------------------------------------------
+# Module-scoped state (per worker / per module instance)
+# -----------------------------------------------------------------------------
+_app       = null            # real Hono app (built on demand)
+_routes    = []              # queued routes & middleware (preserve declaration order)
+_prefix    = ''              # current group/prefix
+_current   = null            # per-request context for read()
 
-# Advanced phone formatting
-toPhone = (str) ->
-  return "" if isBlank(str)
-
-  # prepare to parse - squeeze spaces and strip
-  num = str.toString().replace(/\s+/g, ' ').trim()
-
-  # pluck off extension, tries several variants
-  [num, ext] = num.split(/\s*(?:, ?)?(?:ext?\.?|x|#|:|,)\s*/i, 2)
-  ext = ext.replace(/\D+/g, "") if ext
-
-  # allow international numbers (without formatting)
-  if num =~ /^\+([-+#*.,\d ]+)$/
-    etc = _[1].replace(/[^#*,\d]+/g, "")
-    if etc.replace(/\D+/g, "").length >= 6 # minimum digits
-      if etc =~ /^1(\d{10})$/
-        [num, ext] = [_[1], ""]
-      else
-        return "+#{etc}"
-
-  # adjust base number, allow only domestic phones
-  num = num.replace(/^[^2-9]*/, "").replace(/\D+/g, "")
-
-  # assemble final number
-  if num =~ /^([2-9][0-8][0-9])([2-9]\d\d)(\d{4})$/
-    num = "(#{_[1]}) #{_[2]}-#{_[3]}"
-    num += ", ext. #{ext}" if ext
-  else
-    num = null
-
-  num
-
-# Name formatting helper
-# Capitalizes first letter of each word for names, basic formatting for addresses
-toName = (val, type = 'name') ->
-  return null unless val
-  cleaned = val.trim().replace(/\s+/g, ' ')
-  return null if cleaned.length == 0
-  if type == 'name'
-    # Capitalize first letter of each word
-    words = cleaned.split(' ')
-    capitalizedWords = words.map (word) -> word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
-    capitalizedWords.join(' ')
-  else if type == 'address'
-    # Basic address formatting
-    cleaned
-  else
-    cleaned
-
-# Boolean helpers (succinct + readable)
-lower = (v) -> if typeof v == 'string' then v.trim().toLowerCase() else null
-TRUTHY = ['true', '1', 'yes', 'on', 'y']
-FALSY  = ['false', '0', 'no', 'off', 'n']
-
-truthy  = (val) -> (val is true) or (lower(val) in TRUTHY)
-falsy   = (val) -> (val is false) or (lower(val) in FALSY)
-bool    = (val) -> if truthy(val) then true else if falsy(val) then false else null
-isBlank = (val) -> not val? or (typeof val is 'string' and val.trim() is '')
-
-# IDs parsing helper
-# Accepts space- and comma-separated positive integers (no leading zeros),
-# returns sorted unique list or null on invalid input
-parseIds = (val) ->
-  return null unless val?
-  cleaned = String(val).replace(/[, ]+/g, ' ').trim()
-  return null unless cleaned
+# -----------------------------------------------------------------------------
+# withHelpers middleware (attaches per-request context for read())
+# -----------------------------------------------------------------------------
+export withHelpers = async (c, next) ->
+  # Basic parsed data (JSON/form/query); adjust to your needs
+  data = {}
   try
-    parts = cleaned.split(' ')
-    nums = []
-    for part in parts
-      # Validate each id (1.. up to 20 digits total)
-      tmp = (part[/^([1-9]\d{0,19})$/] and parseInt(_[1]))
-      throw new Error("Invalid ID: #{part}") unless tmp
-      nums.push tmp
-    # De-dupe and sort
-    unique = Array.from(new Set(nums)).sort((a, b) -> a - b)
-    return null if unique.length == 0
-    unique
-  catch error
+    ct = c.req.header('content-type') or ''
+    if c.req.method in ['POST','PUT','PATCH']
+      if /json/i.test(ct) then data = await c.req.json()
+      else if /x-www-form-urlencoded|form-data/i.test(ct) then data = await c.req.parseBody()
+  catch _ then data = {}
+  # Merge query last for simple overrides via ?a=1
+  q = Object.fromEntries(new URL(c.req.url).searchParams.entries())
+  c._ripData = { ...data, ...q }
+  # Expose context for read()
+  old = _current
+  _current = c
+  try
+    await next()
+  finally
+    _current = old
+
+# -----------------------------------------------------------------------------
+# Validator registry (uses =~; assumes runtime sets '_' captures)
+# -----------------------------------------------------------------------------
+validators =
+  # Numbers & money
+  id:        (v) -> (v =~ /^([1-9]\d{0,19})$/)            and parseInt(_[1])
+  whole:     (v) -> (v =~ /^(0|[1-9]\d{0,19})$/)          and parseInt(_[1])
+  decimal:   (v) -> (v =~ /^([-+]?\d+(?:\.\d*)?|\.\d+)$/) and parseFloat(_[1])
+  money:     (v) -> (v =~ /^([-+]?\d+(?:\.\d*)?|\.\d+)$/) and Math.round(parseFloat(_[1]) * 100)
+
+  # Strings & formatting
+  string:    (v) -> v.replace(/\s\s+/g, ' ')
+  text:      (v) -> v.replace(/  +/g, ' ')
+
+  # Name/address (plug your own formatters here)
+  name:      (v) -> v.replace(/\s+/g, ' ').trim()
+  address:   (v) -> v.replace(/\s+/g, ' ').trim()
+
+  # Time & date (stubs; replace with your real parsers)
+  time:      (v) -> (v =~ /^([01]?\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/) and _[0]
+  date:      (v) -> (v =~ /^\d{4}-\d{2}-\d{2}$/) and _[0]
+  dateutc:   (v) -> (v =~ /^\d{4}-\d{2}-\d{2}Z?$/) and _[0]
+
+  # Booleans
+  truthy:    (v) -> (v =~ /^(true|t|1|yes|y|on)$/i) and true
+  falsy:     (v) -> (v =~ /^(false|f|0|no|n|off)$/i) and true
+  bool:      (v) -> (v =~ /^(true|t|1|yes|y|on|false|f|0|no|n|off)$/i) and /^(true|t|1|yes|y|on)$/i.test(v)
+
+  # Contact, geo, identity
+  email:     (v) -> (v =~ /^([a-zA-Z0-9._%+-]+)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})$/) and _[0]
+  state:     (v) -> (v =~ /^([a-z][a-z])$/i)                and _[1].toUpperCase()
+  zip:       (v) -> (v =~ /^(\d{5})/)                       and _[1]
+  zipplus4:  (v) -> (v =~ /^(\d{5})-?(\d{4})$/)             and "#{_[1]}-#{_[2]}"
+  ssn:       (v) -> (v =~ /^(\d{3})-?(\d{2})-?(\d{4})$/)    and "#{_[1]}#{_[2]}#{_[3]}"
+  sex:       (v) -> (v =~ /^(m|male|f|female|o|other)$/i)   and _[1][0].toLowerCase()
+
+  # Phone (US simple; replace with your formatter)
+  phone:     (v) ->
+    if (v =~ /^\+?\d[\d\s\-().]+$/)
+      digits = v.replace(/\D+/g,'')
+      if digits.length == 11 and digits[0] == '1' then digits = digits.slice(1)
+      if digits.length == 10 then return "(#{digits.slice(0,3)}) #{digits.slice(3,6)}-#{digits.slice(6)}"
+      return "+#{digits}"
     null
 
-# Date parsing helpers
-parseDate = (val) -> try date = new Date(val); if isNaN(date.getTime()) then null else date.toISOString().split('T')[0] catch error then null
-parseDateTime = (val) -> try date = new Date(val); if isNaN(date.getTime()) then null else date catch error then null
-parseDateUTC = (val) -> try date = new Date(val); if isNaN(date.getTime()) then null else date.toISOString() catch error then null
+  # Web & technical
+  url:       (v) -> (v =~ /^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w\.-]*)*\/?$/) and _[0]
+  username:  (v) -> (v =~ /^([a-zA-Z0-9_-]{3,20})$/)        and _[1].toLowerCase()
+  color:     (v) -> (v =~ /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/) and "##{_[1].toLowerCase()}"
+  ip:        (v) -> (v =~ /^(\d{1,3}\.){3}\d{1,3}$/)        and _[0]
+  mac:       (v) -> (v =~ /^([0-9a-fA-F]{2})(?:[:-]?)([0-9a-fA-F]{2})(?:[:-]?)([0-9a-fA-F]{2})(?:[:-]?)([0-9a-fA-F]{2})(?:[:-]?)([0-9a-fA-F]{2})(?:[:-]?)([0-9a-fA-F]{2})$/) and "#{_[1]}:#{_[2]}:#{_[3]}:#{_[4]}:#{_[5]}:#{_[6]}".toLowerCase()
+  semver:    (v) -> (v =~ /^(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*))?(?:\+([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*))?$/) and _[0]
+  uuid:      (v) -> (v =~ /^([0-9a-f]{8})-?([0-9a-f]{4})-?([0-9a-f]{4})-?([0-9a-f]{4})-?([0-9a-f]{12})$/i) and "#{_[1]}-#{_[2]}-#{_[3]}-#{_[4]}-#{_[5]}".toLowerCase()
 
-import { requestContext } from './context.ts'
+  # Time formats & currency (alt)
+  time24:    (v) -> (v =~ /^([01]?[0-9]|2[0-3]):([0-5][0-9])(?::([0-5][0-9]))?$/) and _[0]
+  time12:    (v) -> (v =~ /^(1[0-2]|0?[1-9]):([0-5][0-9])\s?(am|pm)$/i)            and _[0].toLowerCase()
+  currency:  (v) -> (v =~ /^\$?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)$/)                 and parseFloat(_[1].replace(/,/g,''))
 
-_routeQueue = []
-_currentApp = null
-_currentContext = null
+  # Collections & structured
+  array:     (v) -> (Array.isArray(v) and v) or null
+  hash:      (v) -> ((v? and typeof v == 'object') and v) or null
+  json:      (v) ->
+    if typeof v == 'string'
+      try JSON.parse(v) catch then null
+    else if typeof v == 'object' then v else null
 
-smartRoute = (handler) ->
-  (c) ->
-    _currentContext = c
-
-    # Extract and prepare data just like the middleware does
-    data = await c.req.query() or {}
-    if c.req.method in ['POST', 'PUT', 'PATCH']
-      try
-        body = await c.req.json()
-        for own k, v of body
-          data[k] = v
-      catch error
-        null
-
-    # Store data on the context for read function
-    c._ripData = data
-
+  # Slugs & ids list
+  slug:      (v) -> (v =~ /^([a-z0-9]+(?:-[a-z0-9]+)*)$/) and _[1]
+  ids:       (v) ->
+    cleaned = v.replace(/[, ]+/g, ' ').trim()
+    return null unless cleaned
     try
-      result = await handler()   # your pure Sinatra-style handler
+      nums = []
+      for part in cleaned.split(' ')
+        return null unless (part =~ /^([1-9]\d{0,19})$/)
+        nums.push parseInt(_[1])
+      Array.from(new Set(nums)).sort((a,b) -> a-b)
+    catch then null
 
-      # 1) If it's already a Response, return it untouched
-      if result instanceof Response
-        return result
+export registerValidator = (name, fn) -> validators[name] = fn
+export getValidator      = (name)     -> validators[name]
 
-      # 2) Strings → choose html/plain safely
-      if typeof result is 'string'
-        first = result.split('\n', 1)[0]
-        isHTML = /^\s*<!doctype\s+html/i.test(first) or /^\s*<html\b/i.test(first)
-        type   = if isHTML then 'text/html; charset=UTF-8' else 'text/plain; charset=UTF-8'
-        return new Response(result, { headers: { 'Content-Type': type, 'X-Content-Type-Options': 'nosniff' } })
-
-      # 3) Numbers / booleans → plain text
-      if typeof result in ['number', 'boolean']
-        return new Response(String(result), { headers: { 'Content-Type': 'text/plain; charset=UTF-8', 'X-Content-Type-Options': 'nosniff' } })
-
-      # 4) Binary payloads
-      if result instanceof Uint8Array or result instanceof ArrayBuffer or result instanceof DataView
-        body = if result instanceof ArrayBuffer then new Uint8Array(result) else result
-        return new Response(body)  # caller can set headers upstream if needed
-
-      if typeof Blob isnt 'undefined' and result instanceof Blob
-        return new Response(result)  # Blob carries its own type if set
-
-      # 5) Streams
-      if typeof ReadableStream isnt 'undefined' and result instanceof ReadableStream
-        return new Response(result)
-
-      # 6) Plain objects → JSON (only if that’s your contract)
-      if result? and typeof result is 'object'
-        # If you actually meant to use a framework context, replace `c.json(result)` with:
-        return new Response(JSON.stringify(result),
-          headers:
-            'Content-Type': 'application/json; charset=UTF-8'
-            'X-Content-Type-Options': 'nosniff'
-        )
-
-      # Fallback: let fetch handle it (e.g., undefined/null)
-      return new Response(String(result), { headers: { 'Content-Type': 'text/plain; charset=UTF-8', 'X-Content-Type-Options': 'nosniff' } })
-
-methods = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head']
-
-for method in methods
-  Object.defineProperty global, method,
-    value: do (method=method) -> (path, handler) ->
-      if _currentApp?
-        _currentApp[method](path, smartRoute(handler))
-      else
-        _routeQueue.push { method, path, handler }
-    configurable: true
-
-export { isBlank, toPhone }
-
-export withHelpers = (app) ->
-  _currentApp = app
-
-  for route in _routeQueue
-    _currentApp[route.method](route.path, smartRoute(route.handler))
-
-  _routeQueue = []
-
-  return app
-
-export read = (keyOrContext, key = null, tag = null, miss = null) ->
-  # Pure Sinatra style - always use the current smartRoute context
-  c = _currentContext
-  throw new Error('read() called without context') unless c
-
+# -----------------------------------------------------------------------------
+# read() — registry-driven, Sinatra-style ergonomics
+# -----------------------------------------------------------------------------
+export read = (keyOrTag = null, tagOrMiss = null, missOrNil = null) ->
+  c = _current
+  throw new Error 'read() called without context – add withHelpers' unless c?
   data = c._ripData or {}
-  [key, tag, miss] = [keyOrContext, key, tag] unless key and tag and miss is not undefined
-  val = if key then data[key] else data
-  return val unless key and tag
-  originalTag = tag
-  bam = false
-  if typeof tag == 'string' and tag.endsWith('!')
-    tag = tag.slice(0, -1)
-    bam = true
-  if Array.isArray(val)
-    val = if tag == 'array' then val else val.join(',')
-  else if typeof val == 'object' and val?
-    val = if tag == 'hash' then val else String(val)
+
+  # Resolve params: read(key, tag?, miss?)   OR   read() for whole body
+  key  = null
+  tag  = null
+  miss = null
+
+  if keyOrTag? and tagOrMiss? or missOrNil? isnt null
+    key = keyOrTag
+    tag = tagOrMiss
+    miss = missOrNil
   else
-    val = String(val or '')
+    # read() -> whole payload
+    key = null
+    tag = keyOrTag
+    miss = tagOrMiss
 
-  # Early returns for simple cases
-  if tag == 'id'    and val[/^([1-9]\d{0,19})$/]   then return parseInt(_[1])
-  if tag == 'whole' and val[/^(0|[1-9]\d{0,19})$/] then return parseInt(_[1])
+  raw = if key? then data[key] else data
 
-  # Process remaining tags with switch expression
-  #
-  # Regex validation patterns showcase Rip's elegant str[/regex/] syntax:
-  # - val[/regex/]?.method()     for simple full-match validation
-  # - (val =~ /regex/) and _[n]  for capture group access
-  #
-  val = switch tag
-    when 'decimal'    then val[/^([-+]?\d+(?:\.\d*)?|\.\d+)$/] and parseFloat(_[1].replace(/\.$/, ''))
-    when 'money'      then val[/^([-+]?\d+(?:\.\d*)?|\.\d+)$/] and Math.round(parseFloat(_[1].replace(/\.$/, '')) * 100) / 100
-    when 'string'     then val.replace(/\s\s+/g, ' ')
-    when 'text'       then val.replace(/  +/g, ' ')
-    when 'name'       then toName(val, 'name')
-    when 'phone'      then toPhone(val)
-    when 'address'    then toName(val, 'address')
-    when 'time'       then parseDateTime(val)
-    when 'date'       then parseDate(val)
-    when 'dateutc'    then parseDateUTC(val)
-    when 'truthy'     then truthy(val)
-    when 'falsy'      then falsy(val)
-    when 'email'      then val[/^([a-zA-Z0-9._%+-]+)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})$/]?.toLowerCase()
-    when 'state'      then (val =~ /^([a-z][a-z])$/i) and _[1]?.toUpperCase()
-    when 'zip'        then val[/^\d{5}/]
-    when 'zipplus4'   then (val =~ /^(\d{5})-?(\d{4})$/) and "#{_[1]}-#{_[2]}"
-    when 'ssn'        then (val =~ /^(\d{3})-?(\d{2})-?(\d{4})$/) and "#{_[1]}#{_[2]}#{_[3]}"
-    when 'sex'        then (val =~ /^(m|male|f|female|o|other)$/i) and _[1]?[0]?.toUpperCase()
-    when 'creditcard' then (val =~ /^(\d{4})-?(\d{4})-?(\d{4})-?(\d{4})$/) and "#{_[1]}-#{_[2]}-#{_[3]}-#{_[4]}"
-    when 'url'        then val[/^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$/]
-    when 'username'   then (val =~ /^([a-zA-Z0-9_-]{3,20})$/) and _[1]?.toLowerCase()
-    when 'color'      then (val =~ /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/) and "##{_[1]?.toLowerCase()}"
-    when 'ip'         then (val =~ /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/) and (if _[1..4]?.every((n) -> parseInt(n) <= 255) then _[0])
-    when 'mac'        then (val =~ /^([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})[:-]?([0-9a-fA-F]{2})$/) and "#{_[1]}:#{_[2]}:#{_[3]}:#{_[4]}:#{_[5]}:#{_[6]}".toLowerCase()
-    when 'semver'     then val[/^(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*))?$/]
-    when 'uuid'       then (val =~ /^([0-9a-f]{8})-?([0-9a-f]{4})-?([0-9a-f]{4})-?([0-9a-f]{4})-?([0-9a-f]{12})$/i) and "#{_[1]}-#{_[2]}-#{_[3]}-#{_[4]}-#{_[5]}".toLowerCase()
-    when 'time24'     then val[/^([01]?[0-9]|2[0-3]):([0-5][0-9])(?::([0-5][0-9]))?$/]
-    when 'time12'     then val[/^(1[0-2]|0?[1-9]):([0-5][0-9])\s?(am|pm)$/i]?.toLowerCase()
-    when 'currency'   then (val =~ /^\$?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)$/) and parseFloat(_[1]?.replace(/,/g, ''))
-    when 'slug'       then (val =~ /^([a-z0-9]+(?:-[a-z0-9]+)*)$/) and _[1]
-    when 'bool'       then bool(val)
-    when 'array'      then (Array.isArray(val) and val) or null
-    when 'hash'       then ((val? and typeof val == 'object') and val) or null
-    when 'json'       then (typeof val == 'string' and try JSON.parse(val) catch error then null) or null
-    when 'ids'        then parseIds(val)
+  # No tag? return as-is (useful for echo endpoints)
+  return raw unless tag?
+
+  # Required suffix "!"
+  required = false
+  if typeof tag is 'string' and tag.endsWith('!')
+    required = true
+    tag = tag.slice(0, -1)
+
+  v = raw
+
+  # 1) Named validator
+  if typeof tag is 'string'
+    fn = getValidator(tag)
+    v = if fn then fn(v) else null
+
+  # 2) Enumerations
+  else if Array.isArray(tag)
+    v = if tag.includes(String(v)) then String(v) else null
+
+  # 3) Regex
+  else if tag instanceof RegExp
+    v = (String(v) =~ tag) and _[0] or null
+
+  # 4) Range / constraints
+  else if typeof tag is 'object' and (tag?.start? or tag?.end?)
+    n = parseInt(v)
+    v = if not isNaN(n) and (not tag.start? or n >= tag.start) and (not tag.end? or n <= tag.end) then n else null
+  else if typeof tag is 'object' and (tag?.min? or tag?.max?)
+    # number or string length
+    if typeof v is 'number' or (String(v) =~ /^[-+]?\d+$/)
+      n = (typeof v is 'number') and v or parseInt(String(v))
+      ok = not isNaN(n)
+      ok = false if tag.min? and n < tag.min
+      ok = false if tag.max? and n > tag.max
+      v = ok and n or null
     else
-      if Array.isArray(originalTag)
-        val = if originalTag.includes(val) then val else null
-        if val == null and typeof miss == 'function' then miss()
-      else if originalTag instanceof RegExp
-        val = if originalTag.test(val) then val else null
-        if val == null and typeof miss == 'function' then miss()
-      else if typeof originalTag == 'object' and originalTag?.start? and originalTag?.end?
-        numVal = parseInt(val)
-        val = if !isNaN(numVal) and numVal >= originalTag.start and numVal <= originalTag.end then numVal else null
-      else if Array.isArray(originalTag) and originalTag.length == 2 and typeof originalTag[0] == 'number' and typeof originalTag[1] == 'number'
-        start = Math.min(originalTag[0], originalTag[1])
-        end = Math.max(originalTag[0], originalTag[1])
-        if tag in ['id', 'whole', 'decimal', 'money'] or (typeof val == 'number')
-          numVal = parseInt(val)
-          val = if !isNaN(numVal) and numVal >= start and numVal <= end then numVal else null
-        else if typeof val == 'string'
-          strLen = val.length
-          val = if strLen >= start and strLen <= end then val else null
-        else
-          val = null
-      else if typeof originalTag == 'object' and (originalTag?.min? or originalTag?.max?)
-        minVal = originalTag.min
-        maxVal = originalTag.max
-        if tag in ['id', 'whole', 'decimal', 'money'] or (typeof val == 'number')
-          numVal = parseInt(val)
-          if !isNaN(numVal)
-            valid = true
-            valid = false if minVal? and numVal < minVal
-            valid = false if maxVal? and numVal > maxVal
-            val = if valid then numVal else null
-          else
-            val = null
-        else if typeof val == 'string'
-          strLen = val.length
-          valid = true
-          valid = false if minVal? and strLen < minVal
-          valid = false if maxVal? and strLen > maxVal
-          val = if valid then val else null
-        else
-          val = null
+      s = String(v or '')
+      ok = true
+      ok = false if tag.min? and s.length < tag.min
+      ok = false if tag.max? and s.length > tag.max
+      v = ok and s or null
 
-  if isBlank(val)
-    if bam
-      throw new Error("Missing required field: #{key}")
+  # Required / optional behavior
+  isBlank = (x) -> x is null or x is undefined or (typeof x is 'string' and x.trim() is '')
+  if isBlank(v)
+    if required
+      return miss?() if typeof miss is 'function'
+      throw new Error "Missing required field: #{key}"
     else
-      val = if typeof miss == 'function' then miss() else miss
-  val
+      return (miss?() if typeof miss is 'function') or miss or null
+
+  v
+
+# -----------------------------------------------------------------------------
+# Smart wrapper: handlers can "just return" string/object/Response
+# -----------------------------------------------------------------------------
+smart = (fn) ->
+  (c) ->
+    try
+      result = await fn()
+      if typeof result is 'string'
+        type = /html/i.test(result.split('\n')[0]) ? 'html' : 'plain'
+        return new Response(result, { headers: { 'Content-Type': "text/#{type}; charset=UTF-8" } })
+      else if result? and typeof result is 'object'
+        if result instanceof Response then return result
+        return c.json(result)
+      else if typeof result in ['number','boolean']
+        return new Response(String(result), { headers: { 'Content-Type': 'text/plain; charset=UTF-8' } })
+      return result
+    catch err
+      return new Response(err?.message or 'Internal Server Error', { status: 500, headers: { 'Content-Type': 'text/plain; charset=UTF-8' } })
+
+# -----------------------------------------------------------------------------
+# DSL: get/post/... , use, prefix/group, startHandler, start
+# -----------------------------------------------------------------------------
+ensureApp = ->
+  return _app if _app?
+  _app = new Hono()
+  _app.use(withHelpers)
+  _app
+
+addRoute = (method, path, handler) ->
+  full = "#{_prefix}#{path}"
+  _routes.push { method, path: full, handler: smart(handler) }
+
+export get    = (path, fn) -> addRoute 'get',    path, fn
+export post   = (path, fn) -> addRoute 'post',   path, fn
+export put    = (path, fn) -> addRoute 'put',    path, fn
+export patch  = (path, fn) -> addRoute 'patch',  path, fn
+export del    = (path, fn) -> addRoute 'delete', path, fn
+export any    = (path, fn) -> for m in ['get','post','put','patch','delete','options'] then addRoute m, path, fn
+
+export use    = (mw) -> _routes.push { use: true, mw }
+
+export prefix = (base, fn) ->
+  old = _prefix
+  try
+    _prefix = "#{_prefix}#{base}"
+    fn?()
+  finally
+    _prefix = old
+
+export group = prefix
+
+# Build app & return fetch handler (no listener)
+export startHandler = ->
+  app = ensureApp()
+  # apply middlewares first
+  for r in _routes when r.use then app.use(r.mw)
+  # then routes in order
+  for r in _routes when not r.use then app[r.method](r.path, r.handler)
+  app.fetch
+
+# Start a listener (dev/simple mode). In prod, your Manager/LB would wrap this.
+export start = async (opts = {}) ->
+  fetch = startHandler()
+  host  = opts.host or '0.0.0.0'
+  port  = opts.port or 8080
+  server = Bun.serve
+    hostname: host
+    port: port
+    fetch: fetch
+  console.log "rip listening on http://#{host}:#{port}"
+  server
+
+# -----------------------------------------------------------------------------
+# Dev hot-reloader (module) — for --hot-reload=module
+# -----------------------------------------------------------------------------
+export resetGlobals = ->
+  _app = null
+  _routes = []
+  _prefix = ''
+  return
+
+export createReloader = (opts) ->
+  { statSync, watch } = await import('node:fs')
+  entry = (opts?.entryPath) or opts
+  debounceMs = opts?.debounceMs or 75
+  maxReloadsBeforeHint = opts?.maxReloadsBeforeHint or 200
+
+  currentHandler = null
+  currentMtime   = 0
+  loading        = null
+  lastCheck      = 0
+  reloads        = 0
+
+  load = (mt = null) ->
+    return loading if loading
+    loading = (async ->
+      try
+        mt = mt or (try statSync(entry).mtimeMs catch then 0)
+        mod = await import("#{entry}?v=#{mt}")
+        fresh = mod.default or mod
+
+        # Accept default export as function returning handler OR handler-like with fetch()
+        newHandler = null
+        if typeof fresh is 'function'
+          maybe = await fresh()
+          newHandler = if typeof maybe is 'function' then maybe else if maybe?.fetch? then maybe.fetch.bind(maybe) else null
+        else if fresh?.fetch?
+          newHandler = fresh.fetch.bind(fresh)
+
+        if newHandler
+          resetGlobals()
+          currentHandler = newHandler
+          currentMtime   = mt
+          reloads++
+          if reloads % maxReloadsBeforeHint == 0
+            console.warn "[hot-reload] many reloads; consider restarting dev worker to reclaim module cache"
+        else
+          console.warn "[hot-reload] module did not export a handler"
+      catch err
+        console.error "[hot-reload] failed:", err
+      finally
+        loading = null
+      currentHandler
+    )()
+    loading
+
+  getHandler = ->
+    now = Date.now()
+    if not currentHandler
+      await load()
+    else if now - lastCheck >= debounceMs
+      lastCheck = now
+      mt = try statSync(entry).mtimeMs catch then 0
+      if mt > currentMtime
+        await load(mt)
+    currentHandler
+
+  if opts?.watchDir?
+    watch opts.watchDir, { recursive: true }, (evt, file) ->
+      lastCheck = 0  # force check soon
+
+  { getHandler }
+
+# -----------------------------------------------------------------------------
+# End of @rip/api
+# -----------------------------------------------------------------------------
