@@ -49,7 +49,7 @@ export withHelpers = (c, next) ->
       Promise.resolve(next()).then(resolve, reject)
 
 # Advanced phone formatting
-toPhone = (str) ->
+export toPhone = (str) ->
   return "" if isBlank(str)
 
   # prepare to parse - squeeze spaces and strip
