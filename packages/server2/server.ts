@@ -173,56 +173,6 @@ export class LBServer {
     return new Response(res.body, { status: res.status, statusText: res.statusText, headers })
   }
 
-  private async forward(req: Request): Promise<Response> {
-    const start = performance.now()
-    let res: Response | null = null
-    let workerSeconds = 0
-
-    // Simple worker selection: try first available, then retry once on busy
-    const socket = this.getNextAvailableSocket()
-    if (!socket) return new Response('No workers available', { status: 503, headers: { 'Retry-After': '1' } })
-
-    try {
-      socket.inflight = 1
-      const t0 = performance.now()
-      res = await this.forwardOnce(req, socket.socket)
-      workerSeconds = (performance.now() - t0) / 1000
-
-      // Handle worker busy race condition: try one more worker
-      if (res.status === 503 && res.headers.get('Rip-Worker-Busy') === '1') {
-        const retrySocket = this.getNextAvailableSocket()
-        if (retrySocket && retrySocket !== socket) {
-          this.releaseWorker(socket)  // Release first socket back to available pool
-          retrySocket.inflight = 1
-          const t1 = performance.now()
-          res = await this.forwardOnce(req, retrySocket.socket)
-          workerSeconds = (performance.now() - t1) / 1000
-          const headers = stripInternalHeaders(res.headers)
-          if (this.flags.jsonLogging) logAccessJson(this.flags.appName, req, res, (performance.now() - start) / 1000, workerSeconds)
-          else if (this.flags.accessLog) logAccessHuman(this.flags.appName, req, res, (performance.now() - start) / 1000, workerSeconds)
-          this.releaseWorker(retrySocket)
-          return new Response(res.body, { status: res.status, statusText: res.statusText, headers })
-        }
-      }
-    } catch {
-      // Drop socket on failure - worker likely died
-      this.sockets = this.sockets.filter(x => x.socket !== socket.socket)
-      // Also remove from available workers stack to prevent race condition
-      this.availableWorkers = this.availableWorkers.filter(x => x.socket !== socket.socket)
-      res = null
-      // Don't release dead worker back to pool
-      return new Response('Service unavailable', { status: 503, headers: { 'Retry-After': '1' } })
-    } finally {
-      this.releaseWorker(socket)
-    }
-    if (!res) return new Response('Service unavailable', { status: 503, headers: { 'Retry-After': '1' } })
-
-    const headers = stripInternalHeaders(res.headers)
-    if (this.flags.jsonLogging) logAccessJson(this.flags.appName, req, res, (performance.now() - start) / 1000, workerSeconds)
-    else if (this.flags.accessLog) logAccessHuman(this.flags.appName, req, res, (performance.now() - start) / 1000, workerSeconds)
-    return new Response(res.body, { status: res.status, statusText: res.statusText, headers })
-  }
-
   private async forwardOnce(req: Request, socketPath: string): Promise<Response> {
     const inUrl = new URL(req.url)
     const forwardUrl = `http://localhost${inUrl.pathname}${inUrl.search}`
