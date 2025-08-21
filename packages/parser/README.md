@@ -1,4 +1,4 @@
-<img src="/docs/rip-icon-512wa.png" style="width:50px" /> <br>
+<img src="/logo.png" style="width:50px" /> <br>
 
 # Rip Parser - SLR(1) Parser Generator
 
