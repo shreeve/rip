@@ -71,7 +71,8 @@ export class LBServer {
       if (availableSocket) {
         this.inflightTotal++
         try {
-          return await this.forward(req)
+          // Use the selected worker directly, don't call forward() again!
+          return await this.forwardToWorker(req, availableSocket)
         } finally {
           this.inflightTotal--
           // Event-driven: drain queue immediately when capacity frees up
@@ -123,6 +124,55 @@ export class LBServer {
     }
   }
 
+  private async forwardToWorker(req: Request, socket: UpstreamState): Promise<Response> {
+    const start = performance.now()
+    let res: Response | null = null
+    let workerSeconds = 0
+    let workerReleased = false
+
+    try {
+      socket.inflight = 1
+      const t0 = performance.now()
+      res = await this.forwardOnce(req, socket.socket)
+      workerSeconds = (performance.now() - t0) / 1000
+
+      // Handle worker busy race condition: try one more worker
+      if (res.status === 503 && res.headers.get('Rip-Worker-Busy') === '1') {
+        const retrySocket = this.getNextAvailableSocket()
+        if (retrySocket && retrySocket !== socket) {
+          this.releaseWorker(socket)  // Release first socket back to available pool
+          workerReleased = true
+          retrySocket.inflight = 1
+          const t1 = performance.now()
+          res = await this.forwardOnce(req, retrySocket.socket)
+          workerSeconds = (performance.now() - t1) / 1000
+          const headers = stripInternalHeaders(res.headers)
+          if (this.flags.jsonLogging) logAccessJson(this.flags.appName, req, res, (performance.now() - start) / 1000, workerSeconds)
+          else if (this.flags.accessLog) logAccessHuman(this.flags.appName, req, res, (performance.now() - start) / 1000, workerSeconds)
+          this.releaseWorker(retrySocket)
+          return new Response(res.body, { status: res.status, statusText: res.statusText, headers })
+        }
+      }
+    } catch {
+      // Drop socket on failure - worker likely died
+      this.sockets = this.sockets.filter(x => x.socket !== socket.socket)
+      // Also remove from available workers stack to prevent race condition
+      this.availableWorkers = this.availableWorkers.filter(x => x.socket !== socket.socket)
+      workerReleased = true  // Don't release dead worker
+      return new Response('Service unavailable', { status: 503, headers: { 'Retry-After': '1' } })
+    } finally {
+      if (!workerReleased) {
+        this.releaseWorker(socket)
+      }
+    }
+    if (!res) return new Response('Service unavailable', { status: 503, headers: { 'Retry-After': '1' } })
+
+    const headers = stripInternalHeaders(res.headers)
+    if (this.flags.jsonLogging) logAccessJson(this.flags.appName, req, res, (performance.now() - start) / 1000, workerSeconds)
+    else if (this.flags.accessLog) logAccessHuman(this.flags.appName, req, res, (performance.now() - start) / 1000, workerSeconds)
+    return new Response(res.body, { status: res.status, statusText: res.statusText, headers })
+  }
+
   private async forward(req: Request): Promise<Response> {
     const start = performance.now()
     let res: Response | null = null
@@ -157,7 +207,11 @@ export class LBServer {
     } catch {
       // Drop socket on failure - worker likely died
       this.sockets = this.sockets.filter(x => x.socket !== socket.socket)
+      // Also remove from available workers stack to prevent race condition
+      this.availableWorkers = this.availableWorkers.filter(x => x.socket !== socket.socket)
       res = null
+      // Don't release dead worker back to pool
+      return new Response('Service unavailable', { status: 503, headers: { 'Retry-After': '1' } })
     } finally {
       this.releaseWorker(socket)
     }
@@ -198,8 +252,14 @@ export class LBServer {
         continue
       }
       this.inflightTotal++
+      // Get worker for queued request
+      const worker = this.getNextAvailableSocket()
+      if (!worker) {
+        this.inflightTotal--
+        break  // No workers available, stop draining
+      }
       // Fixed: Proper async handling with event-driven draining
-      this.forward(job.req)
+      this.forwardToWorker(job.req, worker)
         .then(r => job.resolve(r))
         .catch(e => job.resolve(e instanceof Response ? e : new Response('Internal error', { status: 500 })))
         .finally(() => {
