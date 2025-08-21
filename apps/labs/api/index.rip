@@ -1,5 +1,4 @@
-import { Hono } from 'hono'
-import { read, withHelpers, get, post, put, patch, del, start } from '@rip/api'
+import { read, get, post, put, patch, del, startHandler } from '@rip/api'
 
 # Simple ping - the classic
 get '/ping', -> 'pong'
@@ -262,5 +261,5 @@ async function testAll() {
 }
 </script></body></html>"""
 
-# Create app and apply helpers (this processes the queued routes)
-export default withHelpers new Hono
+# Build and export a handler from queued routes (hot-reload friendly)
+export default -> startHandler()
