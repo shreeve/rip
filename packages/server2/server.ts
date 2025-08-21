@@ -4,7 +4,7 @@
  * Features:
  * - LIFO worker selection for optimal cache locality and resource efficiency
  * - Event-driven queue draining (no polling)
- * - Unix socket communication with connection pooling
+ * - Unix socket communication for maximum performance
  * - Single-inflight isolation per worker
  * - Graceful worker cycling with maxReloads support
  */
@@ -12,7 +12,6 @@
 import { INTERNAL_HEADERS, logAccessHuman, logAccessJson, nowMs, ParsedFlags, stripInternalHeaders, getControlSocketPath } from './utils'
 
 type UpstreamState = { socket: string; inflight: number; version: number | null; workerId: number }
-type PooledConnection = { socketPath: string; connection: any; lastUsed: number; inUse: boolean }
 
 export class LBServer {
   private flags: ParsedFlags
@@ -23,7 +22,6 @@ export class LBServer {
   private availableWorkers: UpstreamState[] = []  // LIFO stack for O(1) worker selection
   private inflightTotal = 0
   private queue: { req: Request; resolve: (r: Response) => void; reject: (e: any) => void; enqueuedAt: number }[] = []
-  private connectionPool: Map<string, PooledConnection> = new Map()
   private startedAt = nowMs()
   private newestVersion: number | null = null
 
@@ -39,19 +37,6 @@ export class LBServer {
       // TLS quick/ca not implemented in this single-shot scope
     }
     this.startControl()
-
-    // Clean up stale connections every 30 seconds
-    setInterval(() => this.cleanupConnections(), 30000).unref()
-  }
-
-  private cleanupConnections(): void {
-    const now = nowMs()
-    const maxIdleMs = 30000 // 30 seconds
-    for (const [socketPath, conn] of this.connectionPool.entries()) {
-      if (!conn.inUse && (now - conn.lastUsed) > maxIdleMs) {
-        this.connectionPool.delete(socketPath)
-      }
-    }
   }
 
   stop(): void {
@@ -89,13 +74,6 @@ export class LBServer {
     const healthy = this.sockets.length > 0
     const body = JSON.stringify({ status: healthy ? 'healthy' : 'degraded', app: this.flags.appName, workers: this.sockets.length, ports: { http: this.flags.httpPort ?? undefined }, uptime })
     return new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': 'no-cache' } })
-  }
-
-
-
-  private getCandidateSockets(): UpstreamState[] {
-    if (this.newestVersion === null) return this.sockets
-    return this.sockets.filter(s => (s.version ?? this.newestVersion) === this.newestVersion)
   }
 
   private getNextAvailableSocket(): UpstreamState | null {
