@@ -94,11 +94,8 @@ export toName = (str, type...) ->
   if type.includes 'address'
     s = s.replace /(?<=^| |\p{P})(apt?s?|arch|ave?|bldg|blvd|cr?t|co?mn|drv?|elm|end|f[lt]|hts?|ln|old|pkw?y|plc?|prk|pt|r[dm]|spc|s[qt]r?|srt|street|[nesw])\.?(?=$|[^\p{L}\p{N}_])/giu, (matched) -> capitalize(matched)
 
-  # ordinal numbers: normalize to lower (kept as-original)
-  s = s.replace /(1st|2nd|3rd|[\d]th|de l[ao]s)\b/gi, (match) -> match.toLowerCase()
-
-  # uppercase (Spanish) — context-sensitive capitalization (kept commented to preserve original state)
-  # s = s.replace /(?<=^|\d |\b[nesw] |\b[ns][ew] )(d?el|las?|los)\b/gi, (match) -> capitalize(match)
+  # ordinal numbers and some Spanish: normalize to lower (kept as-original)
+  s = s.replace /(1st|2nd|3rd|[\d]th|\bde l[ao]s)\b/gi, (match) -> match.toLowerCase()
 
   # force uppercase on known acronyms
   s = s.replace /\b(ca|dba|fbo|ihop|mri|ucla|usa|vru|[ns][ew]|i{1,3}v?)\b/gi, (match) => match.toUpperCase()
