@@ -2,7 +2,7 @@
  * Rip Manager (server2 variant): spawns and supervises worker processes.
  *
  * Features:
- * - Shared-socket model: kernel balances accepts across workers
+ * - Per-worker sockets with LB dispatch
  * - Exponential backoff restart logic with attempt limits
  * - Rolling restart support for graceful deployments
  * - Passes maxReloads parameter to workers for memory management
@@ -10,7 +10,7 @@
  */
 
 import { join } from 'path'
-import { getAppSocketPath, nowMs, ParsedFlags } from './utils'
+import { getWorkerSocketPath, nowMs, ParsedFlags } from './utils'
 
 interface TrackedWorker {
   id: number
@@ -25,6 +25,8 @@ export class Manager {
   private flags: ParsedFlags
   private workers: TrackedWorker[] = []
   private shuttingDown = false
+  private lastCheck = 0
+  private currentMtime = 0
 
   constructor(flags: ParsedFlags) {
     this.flags = flags
@@ -39,6 +41,21 @@ export class Manager {
       const w = await this.spawnWorker(i)
       this.workers.push(w)
     }
+    if (this.flags.hotReload === 'process') {
+      // lightweight mtime poller for entry file
+      this.currentMtime = this.getEntryMtime()
+      const interval = setInterval(() => {
+        if (this.shuttingDown) { clearInterval(interval); return }
+        const now = Date.now()
+        if (now - this.lastCheck < 100) return
+        this.lastCheck = now
+        const mt = this.getEntryMtime()
+        if (mt > this.currentMtime) {
+          this.currentMtime = mt
+          void this.rollingRestart()
+        }
+      }, 50)
+    }
   }
 
   async stop(): Promise<void> {
@@ -48,18 +65,11 @@ export class Manager {
       try { await Bun.spawn(['rm', '-f', w.socketPath]).exited } catch {}
     }
     this.workers = []
-
-    // Also clean up shared app socket if present
-    try { await Bun.spawn(['rm', '-f', getAppSocketPath(this.flags.socketPrefix)]).exited } catch {}
   }
 
   private async spawnWorker(workerId: number): Promise<TrackedWorker> {
-    // Use a single shared Unix socket for the entire app (kernel-level balancing)
-    const appSocketPath = getAppSocketPath(this.flags.socketPrefix)
-    // Only unlink once (by worker 0) to avoid races
-    if (workerId === 0) {
-      try { await Bun.spawn(['rm', '-f', appSocketPath]).exited } catch {}
-    }
+    const socketPath = getWorkerSocketPath(this.flags.socketPrefix, workerId)
+    try { await Bun.spawn(['rm', '-f', socketPath]).exited } catch {}
 
     const proc = Bun.spawn([
       'bun',
@@ -80,14 +90,14 @@ export class Manager {
         ...process.env,
         WORKER_ID: String(workerId),
         APP_NAME: this.flags.appName,
-        SOCKET_PATH: appSocketPath,
+        SOCKET_PATH: socketPath,
         RIP_VARIANT: this.flags.variant,
         RIP_LOG_JSON: this.flags.jsonLogging ? '1' : '0',
         RIP_HOT_RELOAD: this.flags.hotReload,
       },
     })
 
-    const tracked: TrackedWorker = { id: workerId, process: proc, socketPath: appSocketPath, restartCount: 0, backoffMs: 1000, startedAt: nowMs() }
+    const tracked: TrackedWorker = { id: workerId, process: proc, socketPath, restartCount: 0, backoffMs: 1000, startedAt: nowMs() }
     void this.monitor(tracked)
     return tracked
   }
@@ -117,5 +127,9 @@ export class Manager {
     this.shuttingDown = true
     await this.stop()
     process.exit(0)
+  }
+
+  private getEntryMtime(): number {
+    try { return require('fs').statSync(this.flags.appEntry).mtimeMs } catch { return 0 }
   }
 }

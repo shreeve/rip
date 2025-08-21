@@ -22,6 +22,10 @@ export interface ParsedFlags {
   accessLog: boolean
   variant: string
   socketPrefix: string
+  maxQueue: number
+  queueTimeoutMs: number
+  connectTimeoutMs: number
+  readTimeoutMs: number
   hotReload: HotReloadMode
 }
 
@@ -79,6 +83,11 @@ export function parseFlags(argv: string[]): ParsedFlags {
   const jsonLogging = has('--json') || has('--json-logging')
   const accessLog = !has('--no-access-log')
 
+  const maxQueue = coerceInt(getKV('--max-queue='), coerceInt(process.env.RIP_MAX_QUEUE, 8192))
+  const queueTimeoutMs = coerceInt(getKV('--queue-timeout-ms='), coerceInt(process.env.RIP_QUEUE_TIMEOUT_MS, 2000))
+  const connectTimeoutMs = coerceInt(getKV('--connect-timeout-ms='), coerceInt(process.env.RIP_CONNECT_TIMEOUT_MS, 200))
+  const readTimeoutMs = coerceInt(getKV('--read-timeout-ms='), coerceInt(process.env.RIP_READ_TIMEOUT_MS, 5000))
+
   const hotFlag = getKV('--hot-reload=') || process.env.RIP_HOT_RELOAD
   let hotReload: HotReloadMode = 'none'
   if (hotFlag === 'none' || hotFlag === 'process' || hotFlag === 'module') hotReload = hotFlag
@@ -99,6 +108,10 @@ export function parseFlags(argv: string[]): ParsedFlags {
     accessLog,
     variant,
     socketPrefix,
+    maxQueue,
+    queueTimeoutMs,
+    connectTimeoutMs,
+    readTimeoutMs,
     hotReload,
   }
 }
@@ -138,9 +151,23 @@ export function resolveAppEntry(appPathInput: string): { baseDir: string; entryP
   return { baseDir, entryPath, appName }
 }
 
-// Shared Unix socket path for an entire app (all workers bind to the same socket)
-export function getAppSocketPath(socketPrefix: string): string {
-  return `/tmp/${socketPrefix}.sock`
+export function getWorkerSocketPath(socketPrefix: string, workerId: number): string {
+  return `/tmp/${socketPrefix}.${workerId}.sock`
+}
+
+export function getControlSocketPath(socketPrefix: string): string {
+  return `/tmp/${socketPrefix}.ctl.sock`
+}
+
+export const INTERNAL_HEADERS = new Set(['rip-worker-busy', 'rip-worker-id'])
+
+export function stripInternalHeaders(h: Headers): Headers {
+  const out = new Headers()
+  for (const [k, v] of h.entries()) {
+    if (INTERNAL_HEADERS.has(k.toLowerCase())) continue
+    out.append(k, v)
+  }
+  return out
 }
 
 export function nowMs(): number {

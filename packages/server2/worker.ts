@@ -1,5 +1,5 @@
 /**
- * Rip Worker (server2 variant): single-inflight Unix socket worker (shared app socket).
+ * Rip Worker (server2 variant): single-inflight Unix socket worker (per-worker socket).
  *
  * Features:
  * - Single-inflight request isolation
@@ -9,13 +9,16 @@
  * - High-performance: no blocking filesystem calls on request hot path
  */
 
+import { getControlSocketPath } from './utils'
+
 const workerId = Number.parseInt(process.argv[2] ?? '0')
 const maxRequests = Number.parseInt(process.argv[3] ?? '10000')
 const maxReloads = Number.parseInt(process.argv[4] ?? '10')
 const appEntry = process.argv[5]
 
-const socketPath = process.env.SOCKET_PATH as string  // Shared app socket for all workers
+const socketPath = process.env.SOCKET_PATH as string  // Per-worker Unix socket path
 const hotReloadMode = (process.env.RIP_HOT_RELOAD as 'none' | 'process' | 'module') || 'none'
+const socketPrefix = process.env.SOCKET_PREFIX as string
 
 let appReady = false
 let inflight = false
@@ -111,6 +114,24 @@ async function getHandler(): Promise<(req: Request) => Promise<Response> | Respo
   }
 }
 
+async function selfJoin(): Promise<void> {
+  try {
+    const payload = { op: 'join', workerId, pid: process.pid, socket: socketPath }
+    const body = JSON.stringify(payload)
+    const ctl = getControlSocketPath(socketPrefix)
+    await fetch('http://localhost/worker', { method: 'POST', body, headers: { 'content-type': 'application/json' }, unix: ctl })
+  } catch {}
+}
+
+async function selfQuit(): Promise<void> {
+  try {
+    const payload = { op: 'quit', workerId }
+    const body = JSON.stringify(payload)
+    const ctl = getControlSocketPath(socketPrefix)
+    await fetch('http://localhost/worker', { method: 'POST', body, headers: { 'content-type': 'application/json' }, unix: ctl })
+  } catch {}
+}
+
 async function start(): Promise<void> {
   // Preload handler once to ensure first requests are handled cleanly
   try {
@@ -124,7 +145,7 @@ async function start(): Promise<void> {
     async fetch(req: Request): Promise<Response> {
       const url = new URL(req.url)
       if (url.pathname === '/ready') return new Response(appReady ? 'ok' : 'not-ready')
-      if (inflight) return new Response('busy', { status: 503 })
+      if (inflight) return new Response('busy', { status: 503, headers: { 'Rip-Worker-Busy': '1', 'Retry-After': '0', 'Rip-Worker-Id': String(workerId) } })
       const handlerFn = await getHandler()
       appReady = typeof handlerFn === 'function'
       inflight = true
@@ -144,10 +165,12 @@ async function start(): Promise<void> {
     },
   })
 
+  await selfJoin()
 
   const shutdown = async () => {
     while (inflight) await new Promise(r => setTimeout(r, 10))
     try { server.stop() } catch {}
+    await selfQuit()
     process.exit(0)
   }
   process.on('SIGTERM', shutdown)
