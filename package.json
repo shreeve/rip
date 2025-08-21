@@ -5,9 +5,7 @@
   "description": "Rip - A multilanguage universal runtime",
   "workspaces": ["packages/*", "examples/*", "apps/*/api", "apps/*/app"],
   "scripts": {
-    "server": "bun packages/bun/rip-preload.ts",
-    "server1": "bun packages/server1/rip-server.ts",
-    "server2": "bun packages/server2/rip-server.ts",
+    "server": "bun packages/server/rip-server.ts",
     "lint": "biome check .",
     "format": "biome format . --write",
     "clean": "rm -rf node_modules packages/*/node_modules examples/*/node_modules apps/*/client/node_modules apps/*/server/node_modules"
