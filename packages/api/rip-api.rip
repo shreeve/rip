@@ -17,12 +17,11 @@ import { requestContext } from './context'
 # -----------------------------------------------------------------------------
 # Module-scoped state (per worker / per module instance)
 # -----------------------------------------------------------------------------
-# Regex match capture holder for Rip's =~ (must be declared in module scope)
-_ = null
 
-_app       = null            # real Hono app (built on demand)
-_routes    = []              # queued routes & middleware (preserve declaration order)
-_prefix    = ''              # current group/prefix
+_app       = null # real Hono app (built on demand)
+_          = null # match capture holder for Rip's =~
+_routes    = []   # queued routes & middleware (preserve declaration order)
+_prefix    = ''   # current group/prefix
 
 # -----------------------------------------------------------------------------
 # withHelpers middleware (attaches per-request context for read())
@@ -219,8 +218,10 @@ smart = (fn) ->
     try
       result = await fn()
       if typeof result is 'string'
-        type = (result.split('\n')[0] =~ /html/i) ? 'html' : 'plain'
-        return new Response(result, { headers: { 'Content-Type': "text/#{type}; charset=UTF-8" } })
+        first = result.split('\n')[0]
+        ctype = 'plain'
+        if first =~ /html/i then ctype = 'html'
+        return new Response(result, { headers: { 'Content-Type': "text/#{ctype}; charset=UTF-8" } })
       else if result? and typeof result is 'object'
         if result instanceof Response then return result
         return c.json(result)
