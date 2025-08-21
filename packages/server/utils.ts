@@ -1,5 +1,5 @@
 /**
- * Shared utilities for Rip Server v2 (server2 variant)
+ * Shared utilities for Rip Server (per-worker sockets)
  */
 
 import { existsSync, statSync } from 'fs'
@@ -18,7 +18,6 @@ export interface ParsedFlags {
   httpPort: number
   jsonLogging: boolean
   accessLog: boolean
-  variant: string
   socketPrefix: string
   maxQueue: number
   queueTimeoutMs: number
@@ -47,7 +46,7 @@ export function parseWorkersToken(token: string | undefined, def: number): numbe
 
 export function parseFlags(argv: string[]): ParsedFlags {
   if (!argv[2]) {
-    console.error('Usage: bun packages/server2/rip-server.ts <app-path> [flags]')
+    console.error('Usage: bun packages/server/rip-server.ts <app-path> [flags]')
     process.exit(2)
   }
 
@@ -68,9 +67,8 @@ export function parseFlags(argv: string[]): ParsedFlags {
   const defaultPort = coerceInt(process.env.PORT, 5002)
   const httpPort = coerceInt(getKV('http:'), defaultPort)
 
-  const variant = getKV('--variant=') || process.env.RIP_VARIANT || inferVariantFromArgv() || 'server2'
   const socketPrefixOverride = getKV('--socket-prefix=')
-  const socketPrefix = socketPrefixOverride || `rip_${variant}_${appName}`
+  const socketPrefix = socketPrefixOverride || `rip_${appName}`
 
   const workers = parseWorkersToken((getKV('w:') || undefined) as string | undefined, Math.max(1, require('os').cpus().length))
   const maxRequestsPerWorker = coerceInt(getKV('r:'), 10000)
@@ -100,7 +98,6 @@ export function parseFlags(argv: string[]): ParsedFlags {
     httpPort,
     jsonLogging,
     accessLog,
-    variant,
     socketPrefix,
     maxQueue,
     queueTimeoutMs,
@@ -108,15 +105,6 @@ export function parseFlags(argv: string[]): ParsedFlags {
     readTimeoutMs,
     hotReload,
   }
-}
-
-function inferVariantFromArgv(): string | null {
-  const invoked = (process.argv[1] || '').toLowerCase()
-  const base = basename(invoked)
-  if (base.includes('server2')) return 'server2'
-  if (base.includes('server1')) return 'server1'
-  if (base.includes('server')) return 'server'
-  return null
 }
 
 export function resolveAppEntry(appPathInput: string): { baseDir: string; entryPath: string; appName: string } {

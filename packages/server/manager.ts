@@ -1,5 +1,5 @@
 /**
- * Rip Manager (server2 variant): spawns and supervises worker processes.
+ * Rip Manager: spawns and supervises worker processes (per-worker sockets).
  *
  * Features:
  * - Per-worker sockets with LB dispatch
@@ -96,7 +96,6 @@ export class Manager {
         WORKER_ID: String(workerId),
         SOCKET_PATH: socketPath,
         SOCKET_PREFIX: this.flags.socketPrefix,
-        RIP_VARIANT: this.flags.variant,
         RIP_LOG_JSON: this.flags.jsonLogging ? '1' : '0',
         RIP_HOT_RELOAD: this.flags.hotReload,
       },

@@ -1,5 +1,5 @@
 /**
- * Rip Worker (server2 variant): single-inflight Unix socket worker (per-worker socket).
+ * Rip Worker: single-inflight Unix socket worker (per-worker socket).
  *
  * Features:
  * - Single-inflight request isolation

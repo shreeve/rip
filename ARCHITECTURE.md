@@ -22,7 +22,7 @@ This document provides comprehensive technical documentation for developers work
 rip/
 ├── packages/           # Core packages
 │   ├── server/        # rip-server (multi-process web server)
-│   ├── server2/       # rip-server2 (next-gen LIFO load balancer)
+│   ├── server/        # rip-server (per-worker sockets, next-gen LB)
 │   ├── schema/        # rip-schema (database DSL)
 │   ├── bun/           # rip-bun (Bun transpiler plugin)
 │   └── parser/        # rip-parser (SLR(1) parser)
@@ -71,7 +71,8 @@ Bun.plugin({
 - **Features**: Hot reload, load balancing, Unix sockets, HTTPS support
 - **Usage**: `rip-server [directory] [port]`
 
-#### 4. Next-Gen Web Server (`/packages/server2`)
+#### 4. Unified Web Server (`/packages/server`)
+- nginx+unicorn+Sinatra–inspired: in‑process LB with per‑worker sockets and ergonomic app assembly
 - **Architecture**: High-performance LIFO load balancer with optimized worker management
 - **Key features**:
   - **LIFO worker selection** - Prioritizes recently-used workers for better cache locality
@@ -87,7 +88,7 @@ Bun.plugin({
   - `worker.ts` - Single-inflight workers with mtime-based hot reload
   - `server.ts` - LIFO load balancer with efficient forwarding
   - `utils.ts` - Shared utilities and configuration parsing
-- **Usage**: `bun server2 <app-path> w:<N> --max-reloads=<N>`
+- **Usage**: `bun server <app-path> w:<N> --max-reloads=<N>`
 
 #### 5. Database Schema DSL (`/packages/schema`)
 - **Purpose**: ActiveRecord-inspired DSL for defining database schemas

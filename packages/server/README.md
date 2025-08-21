@@ -1,4 +1,4 @@
-# Rip Server2 - Per-Worker Socket Application Server
+# Rip Server - Per-Worker Socket Application Server
 
 High-performance HTTP entry that dispatches to per-worker Unix sockets. The LB selects idle workers (LIFO), preserving single-inflight isolation without relying on kernel accept distribution.
 
@@ -34,12 +34,12 @@ HTTP Request → HTTP Entry (LB) → Select idle worker → Unix Socket (worker.
 
 ### Basic Usage
 ```bash
-bun server2 <app-path> w:4 http:5002
+bun server <app-path> w:4 http:5002
 ```
 
 ### Advanced Configuration
 ```bash
-bun server2 apps/my-app \
+bun server apps/my-app \
   w:8 \
   --max-reloads=20 \
   --hot-reload=module \
@@ -116,7 +116,7 @@ curl http://localhost:5002/server
 ## 📁 File Structure
 
 ```
-packages/server2/
+packages/server/
 ├── rip-server.ts    # CLI entry point
 ├── server.ts        # HTTP entry + per-worker load balancer
 ├── manager.ts       # Process supervisor + process hot reload

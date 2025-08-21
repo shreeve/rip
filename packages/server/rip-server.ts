@@ -1,5 +1,5 @@
 /**
- * Rip Server2 CLI: parse flags, start Manager + LB.
+ * Rip Server CLI: parse flags, start Manager + LB.
  */
 
 import { parseFlags } from './utils'
@@ -13,7 +13,7 @@ async function main(): Promise<void> {
       const script = __filename
       await Bun.spawn(['pkill', '-f', script]).exited
     } catch {}
-    console.log('rip-server2: stop requested')
+    console.log('rip-server: stop requested')
     return
   }
   const flags = parseFlags(process.argv)
@@ -21,7 +21,7 @@ async function main(): Promise<void> {
   lb.start()
   const mgr = new Manager(flags)
   await mgr.start()
-  console.log(`rip-server2: app=${flags.appName} http=${flags.httpPort ?? '-'} workers=${flags.workers}`)
+  console.log(`rip-server: app=${flags.appName} http=${flags.httpPort} workers=${flags.workers}`)
 }
 
 main().catch(err => {

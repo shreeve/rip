@@ -90,7 +90,7 @@ bun run lint
 ## Naming Convention Guidelines
 
 **When to use `RIP` (all uppercase):**
-- Environment variables: `RIP_VARIANT`, `RIP_LOG_JSON`, `RIP_HOT_RELOAD`
+- Environment variables: `RIP_LOG_JSON`, `RIP_HOT_RELOAD`
 - Configuration constants in code that represent environment variables
 - Titles that are already capitalized: "RIP LANGUAGE FEATURES"
 
@@ -115,7 +115,6 @@ rip compile app.rip
 bun your-app.rip
 
 # Environment variables (uppercase)
-export RIP_VARIANT=server1
 export RIP_HOT_RELOAD=module
 
 # Documentation (title case)
@@ -217,7 +216,6 @@ Rip's regex operations are now **secure by default** - automatically blocking ne
 ## Environment Variables
 
 **Rip-Specific Variables:**
-- `RIP_VARIANT` - Server variant selection
 - `RIP_LOG_JSON` - JSON logging mode
 - `RIP_HOT_RELOAD` - Hot reload configuration
 - `RIP_BUN_TRANSPILER` - Path to Bun transpiler
