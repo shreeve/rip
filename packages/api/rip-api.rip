@@ -51,6 +51,15 @@ export withHelpers = (c, next) ->
 # helper (Unicode-safe: JS's toUpperCase/toLowerCase handle Unicode)
 capitalize = (str) -> str.charAt(0).toUpperCase() + str.slice(1).toLowerCase()
 
+# Ruby-like blank? function
+export isBlank = (obj) ->
+  return true unless obj?                                   # nil / undefined
+  return true if typeof obj is 'boolean' and obj is false   # false is blank
+  return true if typeof obj is 'string' and /^\s*$/.test obj  # "" or whitespace-only
+  return true if Array.isArray(obj) and obj.length is 0     # []
+  return true if typeof obj is 'object' and Object.keys(obj).length is 0  # {}
+  false
+
 # Advanced name (or address) formatting
 export toName = (str, type...) ->
   s = String(str)
