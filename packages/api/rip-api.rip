@@ -267,7 +267,7 @@ export startHandler = ->
   for r in _routes when r.use then app.use(r.mw)
   # then routes in order
   for r in _routes when not r.use then app[r.method](r.path, r.handler)
-  app.fetch
+  app.fetch.bind(app)
 
 # Start a listener (dev/simple mode). In prod, your Manager/LB would wrap this.
 export start = async (opts = {}) ->
