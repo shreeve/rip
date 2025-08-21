@@ -8,6 +8,15 @@ import { LBServer } from './server'
 
 async function main(): Promise<void> {
   const flags = parseFlags(process.argv)
+  if (process.argv.includes('--stop')) {
+    try {
+      // Best-effort: find and kill matching processes by script path
+      const script = __filename
+      await Bun.spawn(['pkill', '-f', script]).exited
+    } catch {}
+    console.log('rip-server2: stop requested')
+    return
+  }
   const lb = new LBServer(flags)
   lb.start()
   const mgr = new Manager(flags)

@@ -101,6 +101,7 @@ export class LBServer {
           res = await this.forwardOnce(req, retry.socket)
           workerSeconds = (performance.now() - t1) / 1000
           const headers = stripInternalHeaders(res.headers)
+          headers.delete('date')
           if (this.flags.jsonLogging) logAccessJson(this.flags.appName, req, res, (performance.now() - start) / 1000, workerSeconds)
           else if (this.flags.accessLog) logAccessHuman(this.flags.appName, req, res, (performance.now() - start) / 1000, workerSeconds)
           this.releaseWorker(retry)
@@ -117,6 +118,7 @@ export class LBServer {
     }
     if (!res) return new Response('Service unavailable', { status: 503, headers: { 'Retry-After': '1' } })
     const headers = stripInternalHeaders(res.headers)
+    headers.delete('date')
     if (this.flags.jsonLogging) logAccessJson(this.flags.appName, req, res, (performance.now() - start) / 1000, workerSeconds)
     else if (this.flags.accessLog) logAccessHuman(this.flags.appName, req, res, (performance.now() - start) / 1000, workerSeconds)
     return new Response(res.body, { status: res.status, statusText: res.statusText, headers })

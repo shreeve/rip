@@ -80,7 +80,6 @@ export class Manager {
       this.flags.maxRequestsPerWorker.toString(),
       this.flags.maxReloadsPerWorker.toString(),
       this.flags.appEntry,
-      this.flags.appName,
     ], {
       stdout: 'inherit',
       stderr: 'inherit',
@@ -89,8 +88,8 @@ export class Manager {
       env: {
         ...process.env,
         WORKER_ID: String(workerId),
-        APP_NAME: this.flags.appName,
         SOCKET_PATH: socketPath,
+        SOCKET_PREFIX: this.flags.socketPrefix,
         RIP_VARIANT: this.flags.variant,
         RIP_LOG_JSON: this.flags.jsonLogging ? '1' : '0',
         RIP_HOT_RELOAD: this.flags.hotReload,
