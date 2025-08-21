@@ -56,9 +56,10 @@ Acceptance (smoke):
 ### Worker (packages/server2/worker.ts)
 - Per-worker Unix socket path: `/tmp/rip_<variant>_<app>.<id>.sock`.
 - Single-inflight policy and internal busy signal unchanged.
-- HTTP: keepalive, short idleTimeout (5–10s), 100MB body limit.
-- Module mode: before taking the inflight slot, call `await reloader.getHandler()` (API-layer) → atomic swap, no 404s.
-- Lifecycle: graceful exit on signals or after `maxRequests`.
+- HTTP: 100MB body limit, efficient Unix socket communication.
+- Module mode: mtime-based file watching with handler caching; `await reloader.getHandler()` per request → atomic swap, no 404s.
+- Hot reload management: tracks reload count; graceful exit after `maxReloads` (default 10) to prevent module cache bloat.
+- Lifecycle: graceful exit on signals, after `maxRequests` (default 10000), or after `maxReloads` hot reloads.
 
 ### Manager (packages/server2/manager.ts)
 - Spawns N workers; sets env; cleans per-worker sockets.
@@ -79,10 +80,10 @@ Acceptance (smoke):
 - Bind HTTP(S) using Bun.serve.
 - Forwarding
   - Destination set populated by worker self-registrations (no per-request directory scans).
-  - Selection: round-robin; skip sockets with inflight>0.
+  - Selection: **LIFO (Last In, First Out)** for optimal cache locality and resource efficiency; maintains stack of available workers for O(1) selection.
   - Single-inflight at LB: map `socket -> inflight(0|1)`; only dispatch when free.
-  - Keepalive on LB↔worker connections.
-  - Upstream pool knobs: configurable max concurrent connections per socket (default 1) and max idle keepalive per socket (default 8).
+  - Worker reuse strategy: prioritizes recently-used (warm) workers over idle workers to maximize CPU cache hits and minimize resource usage.
+  - Keepalive on LB↔worker connections with automatic cleanup of stale connections.
   - Version routing (process mode): if workers register with a version, the LB routes only to the newest version observed for the app; older versions stop receiving new requests.
 - Queue/Backpressure
   - Bounded FIFO queue with `max_size` and `timeout_ms`.
@@ -118,7 +119,7 @@ Acceptance (smoke):
   - Platform mode: controller for deploy/start/scale; HTTP API + dashboard.
   - CA management: dev CA init/trust/export/list/clean; quick/self-signed.
 - Flags (order-agnostic parser)
-  - `w:<N|auto>` workers; `r:<N>` maxRequests per worker (cycling).
+  - `w:<N|auto>` workers; `r:<N>` maxRequests per worker (cycling); `--max-reloads=<N>` maxReloads per worker (default 10).
   - Ports: HTTP/HTTPS; protocol: `http|https|http+https`.
   - HTTPS mode: `https:quick|https:ca|https:smart`.
   - JSON: `--json`, `--json-logging`.
@@ -138,8 +139,9 @@ Acceptance (smoke):
 - Modes: `--hot-reload=<none|process|module>` (env: `RIP_HOT_RELOAD`)
   - `none`: no automatic reloads.
   - `process`: explicit admin-triggered rolling restarts; readiness-gated; preferred for prod w>1.
-  - `module`: API-layer reloader (`getHandler()` per request) with cache-busted imports; no file watchers; best for dev (w:1 ideal).
+  - `module`: mtime-based file watching with handler caching and cache-busted imports; workers auto-cycle after `maxReloads` to prevent memory bloat; best for dev (w:1 ideal).
   - Defaults: dev = `module`; prod = `none` or `process`.
+- Hot reload lifecycle: workers track reload count and gracefully exit after `maxReloads` (default 10) to ensure clean memory management.
 
 ### Bun plugin support (.rip)
 - Loader must support cache-busting queries: filter `/\.rip(\?.*)?$/`; read via `path.split('?')[0]`.
@@ -159,6 +161,7 @@ Acceptance (smoke):
 
 ### Performance Targets (default localhost guidance)
 - `/ping` (app endpoint): ≥ 20k RPS with reasonable busy rate depending on queue settings; p50 ≤ 10ms when not queued.
+- LIFO worker selection provides optimal cache locality and resource efficiency for sustained high throughput.
 
 ### OS & Runtime Tuning (docs)
 - `ulimit -n` ≥ 65536.

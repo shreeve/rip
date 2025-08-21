@@ -22,6 +22,7 @@ This document provides comprehensive technical documentation for developers work
 rip/
 ├── packages/           # Core packages
 │   ├── server/        # rip-server (multi-process web server)
+│   ├── server2/       # rip-server2 (next-gen LIFO load balancer)
 │   ├── schema/        # rip-schema (database DSL)
 │   ├── bun/           # rip-bun (Bun transpiler plugin)
 │   └── parser/        # rip-parser (SLR(1) parser)
@@ -70,7 +71,23 @@ Bun.plugin({
 - **Features**: Hot reload, load balancing, Unix sockets, HTTPS support
 - **Usage**: `rip-server [directory] [port]`
 
-#### 4. Database Schema DSL (`/packages/schema`)
+#### 4. Next-Gen Web Server (`/packages/server2`)
+- **Architecture**: Clean-room LIFO load balancer with advanced performance optimizations
+- **Key innovations**:
+  - **LIFO worker selection** - Optimal cache locality and resource efficiency
+  - **Event-driven queue draining** - No polling overhead, reactive to load changes
+  - **maxReloads cycling** - Prevents module cache bloat during hot reloads
+  - **Join/quit worker operations** - Clean, consistent control socket API
+- **Performance targets**: 20K+ RPS with seamless hot reloading
+- **Key files**:
+  - `rip-server.ts` - Enhanced CLI with maxReloads parameter
+  - `manager.ts` - Process supervisor with reload count management
+  - `worker.ts` - mtime-based hot reload with handler caching
+  - `server.ts` - LIFO load balancer with connection pooling
+  - `utils.ts` - Shared utilities and flag parsing
+- **Usage**: `bun server2 <app-path> w:<N> --max-reloads=<N>`
+
+#### 5. Database Schema DSL (`/packages/schema`)
 - **Purpose**: ActiveRecord-inspired DSL for defining database schemas
 - **Syntax**: CoffeeScript-based, compiles to Drizzle ORM
 - **CLI**: `rip-schema db:push`, `rip-schema db:drop`

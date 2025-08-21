@@ -14,6 +14,7 @@ export interface ParsedFlags {
   appName: string
   workers: number
   maxRequestsPerWorker: number
+  maxReloadsPerWorker: number
   httpPort: number | null
   httpsPort: number | null
   protocol: 'http' | 'https' | 'http+https'
@@ -81,6 +82,7 @@ export function parseFlags(argv: string[]): ParsedFlags {
 
   const workers = parseWorkersToken((getKV('w:') || undefined) as string | undefined, Math.max(1, require('os').cpus().length))
   const maxRequestsPerWorker = coerceInt(getKV('r:'), 10000)
+  const maxReloadsPerWorker = coerceInt(getKV('--max-reloads='), coerceInt(process.env.RIP_MAX_RELOADS, 10))
 
   const jsonLogging = has('--json') || has('--json-logging')
   const accessLog = !has('--no-access-log')
@@ -106,6 +108,7 @@ export function parseFlags(argv: string[]): ParsedFlags {
     appName,
     workers,
     maxRequestsPerWorker,
+    maxReloadsPerWorker,
     httpPort,
     httpsPort,
     protocol,

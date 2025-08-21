@@ -1,6 +1,12 @@
 /**
  * Rip Manager (server2 variant): spawns and supervises worker processes.
- * Workers self-register to LB control socket; no directory scans.
+ * 
+ * Features:
+ * - Workers self-register to LB control socket (no directory scans)
+ * - Exponential backoff restart logic with attempt limits
+ * - Rolling restart support for graceful deployments
+ * - Passes maxReloads parameter to workers for memory management
+ * - Clean socket management and process supervision
  */
 
 import { join } from 'path'
@@ -55,6 +61,7 @@ export class Manager {
       join(__dirname, 'worker.ts'),
       workerId.toString(),
       this.flags.maxRequestsPerWorker.toString(),
+      this.flags.maxReloadsPerWorker.toString(),
       this.flags.appBaseDir,
       this.flags.appEntry,
       this.flags.appName,
