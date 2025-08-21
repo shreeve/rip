@@ -97,7 +97,7 @@ export toName = (str, type...) ->
   # ordinal numbers and some Spanish: normalize to lower (kept as-original)
   s = s.replace /(1st|2nd|3rd|[\d]th|\bde l[ao]s)\b/gi, (match) -> match.toLowerCase()
 
-  # force uppercase on known acronyms
+  # force uppercase on known acronyms (and partial Roman numeral support)
   s = s.replace /\b(ca|dba|fbo|ihop|mri|ucla|usa|vru|[ns][ew]|i{1,3}v?)\b/gi, (match) => match.toUpperCase()
 
   # # roman numerals (FIXME: Is this a little too greedy?)
