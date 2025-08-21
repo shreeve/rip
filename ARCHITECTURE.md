@@ -78,6 +78,8 @@ Bun.plugin({
   - **Event-driven queue draining** - Reactive processing without polling overhead
   - **Worker cycling** - Prevents memory bloat with configurable reload limits
   - **Clean control interface** - Simple join/quit operations via Unix socket
+  - **Per-worker Unix sockets** - Userland LB selects idle workers; one-inflight-per-worker preserved
+  - **Hot-reload modes** - `none` | `process` | `module`; recommend `process` for multi-file apps
 - **Performance targets**: 20K+ RPS with seamless hot reloading
 - **Key files**:
   - `rip-server.ts` - CLI with worker lifecycle management
