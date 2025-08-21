@@ -48,18 +48,6 @@ export withHelpers = (c, next) ->
     requestContext.run { hono: c, data: merged }, ->
       Promise.resolve(next()).then(resolve, reject)
 
-# -----------------------------------------------------------------------------
-# String helper: non-enumerable String::sub(pat, rep, ...)
-# -----------------------------------------------------------------------------
-unless String::sub?
-  Object.defineProperty String::, 'sub',
-    value: (ary...) ->
-      s = String(@)
-      for i in [0...ary.length] by 2 then s = s.replace ary[i], ary[i+1] ? ''
-      s
-    writable: yes
-    configurable: yes
-    enumerable: no
 
 # Advanced phone formatting
 export toPhone = (str) ->
