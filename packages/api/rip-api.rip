@@ -335,8 +335,8 @@ export createReloader = (opts) ->
           if reloads % maxReloadsBeforeHint == 0
             console.warn "[hot-reload] many reloads; consider restarting dev worker to reclaim module cache"
         else
-          # Fallback: no explicit export; assemble from queued DSL routes implicitly
-          resetGlobals()
+          # Fallback: no explicit export; assemble from already-queued DSL routes
+          # Do NOT reset globals here; the module top-level just ran and queued routes
           currentHandler = startHandler()
           currentMtime   = mt
       catch err
