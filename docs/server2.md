@@ -57,7 +57,7 @@ Acceptance (smoke):
 - Per-worker Unix socket path: `/tmp/rip_<variant>_<app>.<id>.sock`.
 - Single-inflight policy and internal busy signal unchanged.
 - HTTP: 100MB body limit, efficient Unix socket communication.
-- Module mode: mtime-based file watching with handler caching; `await reloader.getHandler()` per request → atomic swap, no 404s.
+- Module mode: rate-limited mtime-based file watching (100ms intervals) with handler caching; `await reloader.getHandler()` per request → atomic swap, no 404s, no filesystem bottlenecks.
 - Hot reload management: tracks reload count; graceful exit after `maxReloads` (default 10) to prevent module cache bloat.
 - Lifecycle: graceful exit on signals, after `maxRequests` (default 10000), or after `maxReloads` hot reloads.
 
@@ -139,7 +139,7 @@ Acceptance (smoke):
 - Modes: `--hot-reload=<none|process|module>` (env: `RIP_HOT_RELOAD`)
   - `none`: no automatic reloads.
   - `process`: explicit admin-triggered rolling restarts; readiness-gated; preferred for prod w>1.
-  - `module`: mtime-based file watching with handler caching and cache-busted imports; workers auto-cycle after `maxReloads` to prevent memory bloat; best for dev (w:1 ideal).
+  - `module`: rate-limited mtime-based file watching (100ms intervals) with handler caching and cache-busted imports; workers auto-cycle after `maxReloads` to prevent memory bloat; best for dev (w:1 ideal).
   - Defaults: dev = `module`; prod = `none` or `process`.
 - Hot reload lifecycle: workers track reload count and gracefully exit after `maxReloads` (default 10) to ensure clean memory management.
 

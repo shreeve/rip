@@ -82,7 +82,7 @@ Bun.plugin({
 - **Key files**:
   - `rip-server.ts` - Enhanced CLI with maxReloads parameter
   - `manager.ts` - Process supervisor with reload count management
-  - `worker.ts` - mtime-based hot reload with handler caching
+  - `worker.ts` - rate-limited mtime-based hot reload (100ms intervals) with handler caching
   - `server.ts` - LIFO load balancer with connection pooling
   - `utils.ts` - Shared utilities and flag parsing
 - **Usage**: `bun server2 <app-path> w:<N> --max-reloads=<N>`

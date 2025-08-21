@@ -3,10 +3,11 @@
  *
  * Features:
  * - Single-inflight request isolation
- * - mtime-based hot module reloading with handler caching
+ * - Rate-limited mtime-based hot module reloading (100ms intervals) with handler caching
  * - Graceful cycling after maxReloads to prevent memory bloat
  * - Self-registration via join/quit operations on control socket
  * - Automatic exit after maxRequests for clean lifecycle management
+ * - High-performance: no blocking filesystem calls on request hot path
  */
 
 import { getControlSocketPath } from './utils'
@@ -29,9 +30,19 @@ let reloader: any = null
 let lastMtime = 0
 let cachedHandler: any = null
 let hotReloadCount = 0
+let lastCheckTime = 0
+const CHECK_INTERVAL_MS = 100  // Only check for changes every 100ms
 
 async function checkForChanges(): Promise<boolean> {
   if (hotReloadMode !== 'module') return false
+
+  // Rate limit: only check filesystem every 100ms to avoid performance impact
+  const now = Date.now()
+  if (now - lastCheckTime < CHECK_INTERVAL_MS) {
+    return false
+  }
+  lastCheckTime = now
+
   try {
     const fs = require('fs')
     const stats = fs.statSync(appEntry)
