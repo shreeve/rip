@@ -54,58 +54,29 @@ Acceptance (smoke):
   - Entry = the specified file only (no fallback probing)
 
 ### Worker (packages/server2/worker.ts)
-- Per-worker Unix socket path: `/tmp/rip_<variant>_<app>.<id>.sock`.
-- Single-inflight policy and internal busy signal unchanged.
+- Shared Unix socket for all workers of an app.
+- Single-inflight policy; 503 on concurrent arrivals.
 - HTTP: 100MB body limit, efficient Unix socket communication.
 - Module mode: rate-limited mtime-based file watching (100ms intervals) with handler caching; `await reloader.getHandler()` per request → atomic swap, no 404s, no filesystem bottlenecks.
 - Hot reload management: tracks reload count; graceful exit after `maxReloads` (default 10) to prevent module cache bloat.
 - Lifecycle: graceful exit on signals, after `maxRequests` (default 10000), or after `maxReloads` hot reloads.
 
 ### Manager (packages/server2/manager.ts)
-- Spawns N workers; sets env; cleans per-worker sockets.
+- Spawns N workers; sets env; cleans the shared app socket (worker 0 unlinks).
 - Monitor & restart with exponential backoff; cap attempts. On exit, respawn.
-- Rolling process reloads on explicit admin command (no file watchers, no socket touching).
+- Rolling process reloads on explicit admin command (no file watchers).
 
-#### Control plane & registration (worker self-registers)
-- Control socket: `/tmp/rip_<variant>_<app>.ctl.sock` (owned by LB).
-- Single endpoint: `POST /worker` handles both operations via payload.
-- Worker self-registers only when actually ready: `{ op: "join", app, workerId, pid, socket, version? }` → `{ ok: true }`.
-- Worker deregisters on clean shutdown: `{ op: "quit", app, workerId }` → `{ ok: true }`.
-- LB maintains an in‑memory pool from these messages; no per‑request directory scans.
+#### Control plane
+- Not used in shared-socket mode.
 
 #### Admin operations (process reloads)
 - Triggered via Manager CLI/admin (e.g., `bun server2 restart <app>`; not via LB). Rolling sequence per worker: wait drain (single‑inflight) → terminate → spawn → worker self-registers.
 
-### Load Balancer (packages/server2/server.ts)
+### Server (packages/server2/server.ts)
 - Bind HTTP(S) using Bun.serve.
-- Forwarding
-  - Destination set populated by worker self-registrations (no per-request directory scans).
-  - Selection: **LIFO (Last In, First Out)** for optimal cache locality and resource efficiency; maintains stack of available workers for O(1) selection.
-  - Single-inflight at LB: map `socket -> inflight(0|1)`; only dispatch when free.
-  - Worker reuse strategy: prioritizes recently-used (warm) workers over idle workers to maximize CPU cache hits and minimize resource usage.
-  - Keepalive on LB↔worker connections with automatic cleanup of stale connections.
-  - Version routing (process mode): if workers register with a version, the LB routes only to the newest version observed for the app; older versions stop receiving new requests.
-- Queue/Backpressure
-  - Bounded FIFO queue with `max_size` and `timeout_ms`.
-  - When no socket available: enqueue or return 503 if queue full; 504 if queue wait exceeds timeout.
-- Retries & Quarantine
-  - On worker-busy 503 (`Rip-Worker-Busy: 1`): try next socket once (race-safety; LB already avoids busy sockets).
-  - On connect/read error: drop the socket from the pool immediately (no default quarantine). Rely on worker exit + manager respawn + re‑registration. A tiny quarantine (500–1000ms) is optional future hardening.
-  - Retry budget: at most one retry per request (per-worker-once overall).
-  - Active health checks (optional/future): periodic probes; open circuit after K failures for T ms.
-- Timeouts
-  - Connect timeout (AbortSignal) default 200ms.
-  - Read timeout guard default 5000ms (504 on expiry).
-- Endpoints
-  - `GET /status`: `{ status: "healthy|degraded", app, workers, ports, uptime }` (cache Response).
-  - All others: forwarded to workers. LB is healthy once ≥1 worker is registered.
-- Headers on egress
-  - None by default (strip internal headers). Optional debug-only: `Rip-App`, `Rip-Response-Time` (ms).
-  - Strip list (internal): `Rip-Worker-Busy`, `Rip-Worker-Id`.
-  - Standard headers (e.g., `Retry-After`) keep their standard names and are preserved on LB responses.
-- Logging
-  - Access log ON by default (human format). Disable explicitly with `--no-access-log`.
-  - JSON logging optional via `--json-logging`.
+- Forward every request to the app’s shared Unix socket via `fetch(..., { unix })`.
+- Endpoints: `/status` and `/server`.
+- Logging: human/JSON access logs (optional).
 
 ### File layout & responsibilities
 - packages/server2/server.ts: LB only (HTTP[S], pool routing, queue/backpressure, strip internal headers, `/status`).
