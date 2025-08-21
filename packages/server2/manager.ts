@@ -62,7 +62,6 @@ export class Manager {
       workerId.toString(),
       this.flags.maxRequestsPerWorker.toString(),
       this.flags.maxReloadsPerWorker.toString(),
-      this.flags.appBaseDir,
       this.flags.appEntry,
       this.flags.appName,
     ], {

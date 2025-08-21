@@ -26,10 +26,6 @@ export interface ParsedFlags {
   queueTimeoutMs: number
   connectTimeoutMs: number
   readTimeoutMs: number
-  lbReplicas: number
-  lbPolicy: 'rr' | 'lc'
-  upstreamMaxIdle: number
-  upstreamMaxConnsPerSocket: number
   hotReload: HotReloadMode
 }
 
@@ -91,10 +87,6 @@ export function parseFlags(argv: string[]): ParsedFlags {
   const queueTimeoutMs = coerceInt(getKV('--queue-timeout-ms='), coerceInt(process.env.RIP_QUEUE_TIMEOUT_MS, 2000))
   const connectTimeoutMs = coerceInt(getKV('--connect-timeout-ms='), coerceInt(process.env.RIP_CONNECT_TIMEOUT_MS, 200))
   const readTimeoutMs = coerceInt(getKV('--read-timeout-ms='), coerceInt(process.env.RIP_READ_TIMEOUT_MS, 5000))
-  const lbReplicas = coerceInt(getKV('--lb-replicas='), 1)
-  const lbPolicy = (getKV('--lb-policy=') as 'rr' | 'lc') || 'rr'
-  const upstreamMaxIdle = coerceInt(getKV('--upstream-max-idle='), 8)
-  const upstreamMaxConnsPerSocket = coerceInt(getKV('--upstream-max-conns-per-socket='), 1)
 
   const hotFlag = getKV('--hot-reload=') || process.env.RIP_HOT_RELOAD
   let hotReload: HotReloadMode = 'none'
@@ -120,10 +112,6 @@ export function parseFlags(argv: string[]): ParsedFlags {
     queueTimeoutMs,
     connectTimeoutMs,
     readTimeoutMs,
-    lbReplicas,
-    lbPolicy,
-    upstreamMaxIdle,
-    upstreamMaxConnsPerSocket,
     hotReload,
   }
 }
@@ -180,21 +168,6 @@ export function stripInternalHeaders(h: Headers): Headers {
     out.append(k, v)
   }
   return out
-}
-
-export function createAbortAfter(ms: number): { signal: AbortSignal; cancel: () => void } {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), ms)
-  const cancel = () => clearTimeout(timer)
-  return { signal: controller.signal, cancel }
-}
-
-export function fileMtimeMs(path: string): number {
-  try {
-    return statSync(path).mtimeMs
-  } catch {
-    return 0
-  }
 }
 
 export function nowMs(): number {
