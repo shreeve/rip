@@ -17,6 +17,9 @@ import { requestContext } from './context'
 # -----------------------------------------------------------------------------
 # Module-scoped state (per worker / per module instance)
 # -----------------------------------------------------------------------------
+# Regex match capture holder for Rip's =~ (must be declared in module scope)
+_ = null
+
 _app       = null            # real Hono app (built on demand)
 _routes    = []              # queued routes & middleware (preserve declaration order)
 _prefix    = ''              # current group/prefix
