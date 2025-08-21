@@ -79,14 +79,14 @@ export toName = (str, type...) ->
   # force camel-case on known abbreviations (Dr, Us, Esq, Inc, etc.)
   s = s.replace /\b([djs]r|us|acct|[ai]nn?|apps|ed|erb|elk|esq|grp|in[cj]|of[cf]|st|up)\.?(?=\W|$)/gi, (match) -> capitalize(match)
 
-  # articles, conjunctions, and prepositions: capitalize at start/after digit, else lower (kept as-original; lookbehind OK)
+  # articles, conjunctions, and prepositions: capitalize at start/after digit, else lower
   s = s.replace /(^|(?<=\d ))?\b(and|at|as|of|then?|in|on|or|for|to|by|de l[ao]s?|del?|(el-)|el|las)($)?\b/ig, (m, p1, p2, p3, p4, offset) ->
     if offset is 0 or p1? or p3? or p4? then capitalize(p2) else p2.toLowerCase()
 
-  # mixed case (Irish): Mc, Mac, D’, O’, L’ (kept as-original)
+  # mixed case (Irish): Mc, Mac, D’, O’, L’
   s = s.replace /\b(mc|mac(?=d[ao][a-k,m-z][a-z]|[fgmpw])|[dol]')([a-z])/gi, (m, p1, p2) -> capitalize(p1) + capitalize(p2)
 
-  # capitalize selected tokens when type is 'name' (kept as-original)
+  # capitalize selected tokens when type is 'name'
   if type.includes 'name'
     s = s.replace /\b(ahn|an[gh]|al|art[sz]?|ash|e[dnv]|echt|elms|emms|eng|epps|essl|i[mp]|mrs?|ms|ng|ock|o[hm]|ohrt|ong|orr|ohrt|ost|ott|oz|sng|tsz|u[br]|ung)\b/gi, (match) -> capitalize(match)
 
@@ -94,16 +94,13 @@ export toName = (str, type...) ->
   if type.includes 'address'
     s = s.replace /(?<=^| |\p{P})(apt?s?|arch|ave?|bldg|blvd|cr?t|co?mn|drv?|elm|end|f[lt]|hts?|ln|old|pkw?y|plc?|prk|pt|r[dm]|spc|s[qt]r?|srt|street|[nesw])\.?(?=$|[^\p{L}\p{N}_])/giu, (matched) -> capitalize(matched)
 
-  # ordinal numbers and some Spanish: normalize to lower (kept as-original)
+  # ordinal numbers and some Spanish: normalize to lower
   s = s.replace /(1st|2nd|3rd|[\d]th|\bde l[ao]s)\b/gi, (match) -> match.toLowerCase()
 
   # force uppercase on known acronyms (and partial Roman numeral support)
   s = s.replace /\b(ca|dba|fbo|ihop|mri|ucla|usa|vru|[ns][ew]|i{1,3}v?)\b/gi, (match) => match.toUpperCase()
 
-  # # roman numerals (FIXME: Is this a little too greedy?)
-  # s = s.replace /\b[ivxlcdm]+\b/gi, (m) -> m.toUpperCase()
-
-  # domain names, email → lower (kept as-original)
+  # domain names, email → lower
   s = s.replace /\b([-@.\w]+\.(?:com|net|io|org))\b/gi, (match) -> match.toLowerCase()
 
   # ensure "Lee's Ferry" is not "Lee'S Ferry" (Unicode letter before the apostrophe)
