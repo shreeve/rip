@@ -2204,6 +2204,8 @@
 
             // Uses toSearchable for universal type coercion and security - safely handles null, numbers, symbols, etc.
             // Generate: (_ = toSearchable(obj).match(regex)) && _[index] or (_ = toSearchable(obj, true).match(regex)) && _[index] for multiline
+            // Ensure '_' is declared in the current scope so strict mode doesn't throw ReferenceError
+            o.scope.find('_');
             toSearchableRef = utility('toSearchable', o);
             regexCode = prop.regex.compileToFragments(o, LEVEL_PAREN);
             indexStr = prop.captureIndex ? (captureCode = prop.captureIndex.compileToFragments(o, LEVEL_PAREN), `[${fragmentsToText(captureCode)}]`) : "[0]";
@@ -7306,6 +7308,8 @@
 
       compileMatch(o) {
         var base1, hasMultilineFlag, leftFragments, multilineParam, ref1, regexFragments, toSearchableRef;
+        // Ensure '_' is declared in the current scope so strict mode doesn't throw ReferenceError
+        o.scope.find('_');
         toSearchableRef = utility('toSearchable', o);
         leftFragments = this.first.compileToFragments(o, LEVEL_PAREN);
         regexFragments = this.second.compileToFragments(o, LEVEL_PAREN);

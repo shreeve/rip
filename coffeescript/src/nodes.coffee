@@ -1501,6 +1501,8 @@ exports.Value = class Value extends Base
         #
         # Uses toSearchable for universal type coercion and security - safely handles null, numbers, symbols, etc.
         # Generate: (_ = toSearchable(obj).match(regex)) && _[index] or (_ = toSearchable(obj, true).match(regex)) && _[index] for multiline
+        # Ensure '_' is declared in the current scope so strict mode doesn't throw ReferenceError
+        o.scope.find '_'
         toSearchableRef = utility 'toSearchable', o
         regexCode = prop.regex.compileToFragments(o, LEVEL_PAREN)
         indexStr = if prop.captureIndex
@@ -4935,6 +4937,8 @@ exports.Op = class Op extends Base
     new Call(mod, [@first, @second]).compileToFragments o
 
   compileMatch: (o) ->
+    # Ensure '_' is declared in the current scope so strict mode doesn't throw ReferenceError
+    o.scope.find '_'
     toSearchableRef = utility 'toSearchable', o
     leftFragments = @first.compileToFragments o, LEVEL_PAREN
     regexFragments = @second.compileToFragments o, LEVEL_PAREN
