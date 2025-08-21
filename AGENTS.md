@@ -19,7 +19,7 @@
 ## Development Environment Setup
 
 **Prerequisites:**
-- Bun runtime (preferred) or Node.js
+- Bun runtime (preferred)
 - Git for version control
 
 **Setup Commands:**
@@ -28,12 +28,12 @@
 git clone <repo-url>
 cd rip
 
-# Build the Rip compiler
+# Build the Rip compiler (CoffeeScript fork)
 cd coffeescript
 cake build
 
 # Verify installation
-./bin/coffee --version  # Should show "Rip version 0.1.0"
+./bin/coffee --version
 ```
 
 ## Build and Test Commands
@@ -56,12 +56,19 @@ npm test
 ./bin/coffee -c -o output/ source/
 ```
 
-**Package Development:**
+**Package Development (Server):**
 ```bash
-# Individual packages use Bun
-cd packages/server
-bun test
-bun run lint
+# Run unified server (per-worker sockets)
+bun server apps/labs/api http:5002 w:4 --hot-reload=process
+
+# Stop prior instances (best-effort)
+bun packages/server/rip-server.ts --stop
+```
+
+**API Utilities:**
+```bash
+# Run toName tests (uses Bun + rip plugin)
+bun packages/api/test-toName.rip
 ```
 
 ## Code Style Guidelines
@@ -206,7 +213,7 @@ Rip's regex operations are now **secure by default** - automatically blocking ne
 - `@rip/bun` - Bun integration
 - `@rip/data` - Database utilities
 - `@rip/schema` - Schema validation
-- `@rip/server*` - Server implementations
+- `@rip/server` - Unified per-worker socket HTTP server
 
 **Package Development:**
 - Each package has its own `package.json` and dependencies
@@ -218,7 +225,6 @@ Rip's regex operations are now **secure by default** - automatically blocking ne
 **Rip-Specific Variables:**
 - `RIP_LOG_JSON` - JSON logging mode
 - `RIP_HOT_RELOAD` - Hot reload configuration
-- `RIP_BUN_TRANSPILER` - Path to Bun transpiler
 
 ## Known Issues and Limitations
 
@@ -240,6 +246,12 @@ Rip's regex operations are now **secure by default** - automatically blocking ne
 - When working on regex features, test with all JavaScript data types
 - Preserve the elegant, readable nature of the language
 - Generated JavaScript should be clean and performant
+
+## Quick Links
+
+- Architecture: ARCHITECTURE.md
+- Branding: BRANDING.md
+- Unified Server: packages/server/
 
 **Code Review Checklist:**
 - [ ] All tests pass (legacy + Rip features)
