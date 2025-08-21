@@ -58,11 +58,13 @@ bun server2 apps/my-app \
 - `--read-timeout-ms=<N>` - Upstream read timeout
 - `--json-logging` - Enable JSON access logs
 - `--no-access-log` - Disable access logging
+ - `http:<port>` - HTTP port (default from PORT env or 5002)
 
 ### Environment Variables
 
 - `RIP_HOT_RELOAD` - Hot reload mode
 - `RIP_MAX_RELOADS` - Max reloads per worker
+ - `PORT` - Default HTTP port (overridden by `http:<port>`)
 
 ## 🔄 Hot Reload Modes
 

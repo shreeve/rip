@@ -15,9 +15,7 @@ export interface ParsedFlags {
   workers: number
   maxRequestsPerWorker: number
   maxReloadsPerWorker: number
-  httpPort: number | null
-  httpsPort: number | null
-  protocol: 'http' | 'https' | 'http+https'
+  httpPort: number
   jsonLogging: boolean
   accessLog: boolean
   variant: string
@@ -68,9 +66,7 @@ export function parseFlags(argv: string[]): ParsedFlags {
   const { baseDir, entryPath, appName } = resolveAppEntry(appPathInput)
 
   const defaultPort = coerceInt(process.env.PORT, 5002)
-  const protocol = (getKV('protocol:') as ParsedFlags['protocol']) || ('http' as const)
-  const httpPort = protocol === 'https' ? null : coerceInt(getKV('http:'), defaultPort)
-  const httpsPort = protocol === 'http' ? null : coerceInt(getKV('https:'), 5443)
+  const httpPort = coerceInt(getKV('http:'), defaultPort)
 
   const variant = getKV('--variant=') || process.env.RIP_VARIANT || inferVariantFromArgv() || 'server2'
   const socketPrefixOverride = getKV('--socket-prefix=')
@@ -102,8 +98,6 @@ export function parseFlags(argv: string[]): ParsedFlags {
     maxRequestsPerWorker,
     maxReloadsPerWorker,
     httpPort,
-    httpsPort,
-    protocol,
     jsonLogging,
     accessLog,
     variant,
