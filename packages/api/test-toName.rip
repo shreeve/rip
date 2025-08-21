@@ -1,0 +1,195 @@
+# ==============================================================================
+# Minimal test harness (your style)
+# ==============================================================================
+
+_passes   = 0
+_failures = 0
+_total    = 0
+_         = undefined # “previous value” convenience, like your example
+
+deepEqual = (a, b) ->
+  return true if a is b
+  return false if typeof a isnt typeof b
+  if Array.isArray(a) and Array.isArray(b)
+    return false unless a.length is b.length
+    for i in [0...a.length]
+      return false unless deepEqual(a[i], b[i])
+    return true
+  if a? and b? and typeof a is 'object'
+    ka = Object.keys(a).sort()
+    kb = Object.keys(b).sort()
+    return false unless deepEqual(ka, kb)
+    for k in ka
+      return false unless deepEqual(a[k], b[k])
+    return true
+  false
+
+eq = (actual, expected, msg = "") ->
+  _ = actual
+  _total += 1
+  ok = if typeof expected is 'object' or Array.isArray(expected)
+    deepEqual(actual, expected)
+  else
+    actual is expected
+  if ok
+    _passes += 1
+  else
+    _failures += 1
+    console.error "✗ FAIL #{if msg then '('+msg+')' else ''}\n   expected: #{JSON.stringify(expected)}\n   actual:   #{JSON.stringify(actual)}"
+    throw new Error("Test failed")
+
+test = (label, fn) ->
+  try
+    fn()
+    console.log "✓ #{label}"
+  catch err
+    console.error "✗ #{label}"
+    throw err
+
+atEnd = ->
+  console.log "\nResults: #{_passes}/#{_total} passing, #{_failures} failing"
+  process.exit(if _failures then 1 else 0)
+
+# ==============================================================================
+# SUT import (ESM) — import toName from the local API module
+# ==============================================================================
+
+import { toName } from './rip-api.rip'
+
+# ==============================================================================
+# Helpers
+# ==============================================================================
+
+o = (input, expected, types = []) ->
+  result = toName input, types...
+  eq result, expected, "input=#{JSON.stringify(input)} types=#{JSON.stringify(types)}"
+  result
+
+# ==============================================================================
+# Tests
+# ==============================================================================
+
+# General normalization: lower → collapse spaces → trim → title-case first letter of words (Unicode-aware)
+test "general case: spacing, trimming, title-casing", ->
+  o "  hello    world  ", "Hello World"
+  o "éMILE   zola", "Émile Zola"
+  o "  multiple\nlines\there  ", "Multiple Lines Here"
+
+# Smart quotes normalization
+test "smart quotes: backticks/curly to straight", ->
+  o "“O’Reilly” ‘Media’ `Code`", "\"O'Reilly\" 'Media' 'Code'"
+
+# Initials collapsing: “j. d.” → “JD”
+test "initials collapsed", ->
+  o "j. d. salinger", "JD Salinger"
+  o "a.b  cooper", "AB Cooper"
+  o "m.   t. anderson", "MT Anderson"
+
+# Apparent acronyms: consonant clusters uppercased
+test "apparent acronyms uppercased", ->
+  o "The my grp trg plan", "The My Grp TRG Plan"
+  o "mix of words and bld", "Mix of Words and BLD"
+
+# Camel-case on known abbreviations
+test "known abbreviations camel-cased", ->
+  o "dr seuss, esq", "Dr Seuss, Esq"
+  o "us steel inc", "Us Steel Inc"
+  o "ann taylor acct", "Ann Taylor Acct"
+  o "st joseph grp", "St Joseph Grp"
+
+# Articles/prepositions rule: capitalize at start/after digit, else lower
+test "articles/prepositions capitalization by position", ->
+  o "the lord of the rings", "The Lord of the Rings"
+  o "exit 5 on the road", "Exit 5 on the Road"
+  o "3 the kings", "3 the Kings"
+  o "war and peace", "War and Peace"
+  o "de los santos", "de los Santos"
+  o "el-grande las casas", "El-Grande las Casas"
+
+# Irish mixed-case: Mc/Mac/D’/O’/L’
+test "Irish mixed-case prefixes", ->
+  o "mcdonald", "McDonald"
+  o "macdougall", "MacDougall"
+  o "o'brien", "O'Brien"
+  o "d'angelo", "D'Angelo"
+  o "l'enfant", "L'Enfant"
+  # Mac context guard (Mac followed by allowed next)
+  o "macfarlane", "MacFarlane"
+
+# Name-only capitalization tokens (triggered when types include 'name')
+test "name-only tokens capitalize when type=name", ->
+  o "ms ng tsz uo", "Ms Ng Tsz Uo", ['name']
+  o "ms ng tsz uo", "Ms Ng Tsz Uo", ['name', 'address']
+  # Without 'name', should stay as default casing (title-based)
+  o "ms ng tsz uo", "MS NG TSZ Uo"
+
+# Address-only road features (with Unicode punctuation boundaries)
+test "address road features title-cased for addresses only", ->
+  o "123 elm st.", "123 Elm St", ['address']
+  o "unit a, bldg c drv", "Unit A, Bldg C Drv", ['address']
+  o "45-old pkwy w", "45-Old Pkwy W", ['address']
+  o "apt 3a # 7 ave", "Apt 3A #7 Ave", ['address']
+  o "«pt» ln", "«Pt» Ln", ['address']  # Unicode punct boundary
+  # Without 'address' type, leave general casing rules only
+  o "123 elm st.", "123 ELM St"
+
+# Ordinal numbers lowered
+test "ordinals to lower-case", ->
+  o "1ST 2ND 3RD 4TH de los", "1st 2nd 3rd 4th de los"
+  o "21St street", "21st Street"
+
+# Force-uppercase acronyms and roman numerals
+test "force uppercase acronyms and roman numerals", ->
+  o "mri at ucla usa vru", "MRI at UCLA USA VRU"
+  o "ca dba fbo ihop", "CA DBA FBO IHOP"
+  # FIXME: Roman numerals can conflict with a lot of strings -> o "ii iv v vi", "II IV V VI"
+  o "north by ne then sw", "North by NE then SW"  # NE/SW preserved uppercase
+
+# Domain names/email lowercased
+test "domains lowered", ->
+  o "Contact: John@Example.COM or visit EXAMPLE.NET", "Contact: john@example.com or Visit example.net"
+  o "site io: Foo.IO", "Site Io: foo.io"
+
+# Apostrophe case: Lee's Ferry, not Lee'S Ferry (Unicode-aware)
+test "apostrophe S fix", ->
+  o "Lee'S Ferry", "Lee's Ferry"
+  o "D’Arcy’S Park", "D'Arcy's Park"
+
+# Number-sign spacing collapse
+test "number sign spacing collapsed", ->
+  o "Suite # 12", "Suite #12"
+
+# Trailing punctuation removal
+test "trailing punctuation removal", ->
+  o "Hello St.", "Hello St"
+  o "Hello, world,,", "Hello, World"
+  o "Address #", "Address"
+
+# PO Box normalization
+test "PO Box normalization", ->
+  o "P O Box 42", "PO Box 42"
+  o "P.O. Box 42", "PO Box 42"
+  o "p o box 42", "PO Box 42"
+
+# Unicode capitalization at word starts
+test "Unicode word starts are capitalized", ->
+  o "абра кадабра", "Абра Кадабра"
+  o "çınar ağacı", "Çınar Ağacı"
+  o "mañana será otro día", "Mañana Será Otro Día"
+
+# Mixed stress test: many rules at once
+test "mixed stress: multiple rules interplay", ->
+  input    = "  mcdonald & sons, ucla grp  —  apt  # 5  "
+  expected = "McDonald & Sons, UCLA Grp — Apt #5"
+  o input, expected, ['address']
+
+# Edge: empty string, whitespace, nullish-coalesce behavior out of scope (function expects stringable)
+test "edge: empty & whitespace only", ->
+  o "", ""
+  o "   ", ""
+
+# ==============================================================================
+# Done
+# ==============================================================================
+
+atEnd()
