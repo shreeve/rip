@@ -18,8 +18,8 @@ import { requestContext } from './context'
 # Module-scoped state (per worker / per module instance)
 # -----------------------------------------------------------------------------
 
-_app       = null # real Hono app (built on demand)
 _          = null # match capture holder for Rip's =~
+_app       = null # real Hono app (built on demand)
 _routes    = []   # queued routes & middleware (preserve declaration order)
 _prefix    = ''   # current group/prefix
 
@@ -219,8 +219,7 @@ smart = (fn) ->
       result = await fn()
       if typeof result is 'string'
         first = result.split('\n')[0]
-        ctype = 'plain'
-        if first =~ /html/i then ctype = 'html'
+        ctype = if first =~ /html/i then 'html' else 'plain'
         return new Response(result, { headers: { 'Content-Type': "text/#{ctype}; charset=UTF-8" } })
       else if result? and typeof result is 'object'
         if result instanceof Response then return result
