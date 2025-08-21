@@ -111,7 +111,12 @@ async function getHandler(): Promise<(req: Request) => Promise<Response> | Respo
 }
 
 async function start(): Promise<void> {
-  // Start server immediately so the shared socket exists; handler can be lazily resolved
+  // Preload handler once to ensure first requests are handled cleanly
+  try {
+    const initial = await getHandler()
+    appReady = typeof initial === 'function'
+  } catch {}
+
   const server = Bun.serve({
     unix: socketPath,
     maxRequestBodySize: 100 * 1024 * 1024,
