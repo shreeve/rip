@@ -41,7 +41,13 @@ export class LBServer {
     if (url.pathname === '/server') return new Response('ok', { headers: { 'content-type': 'text/plain' } })
 
     const start = performance.now()
-    const res = await this.forwardOnce(req, this.appSocketPath)
+    let res: Response
+    try {
+      res = await this.forwardOnce(req, this.appSocketPath)
+    } catch {
+      // Return a clean 503 if unix forwarding fails
+      res = new Response('Service unavailable', { status: 503 })
+    }
     const totalSeconds = (performance.now() - start) / 1000
 
     if (this.flags.jsonLogging) logAccessJson(this.flags.appName, req, res, totalSeconds, totalSeconds)

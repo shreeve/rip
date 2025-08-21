@@ -111,9 +111,7 @@ async function getHandler(): Promise<(req: Request) => Promise<Response> | Respo
 }
 
 async function start(): Promise<void> {
-  const initial = await getHandler()
-  appReady = typeof initial === 'function'
-
+  // Start server immediately so the shared socket exists; handler can be lazily resolved
   const server = Bun.serve({
     unix: socketPath,
     maxRequestBodySize: 100 * 1024 * 1024,
@@ -122,6 +120,7 @@ async function start(): Promise<void> {
       if (url.pathname === '/ready') return new Response(appReady ? 'ok' : 'not-ready')
       if (inflight) return new Response('busy', { status: 503 })
       const handlerFn = await getHandler()
+      appReady = typeof handlerFn === 'function'
       inflight = true
       try {
         if (typeof handlerFn !== 'function') return new Response('not ready', { status: 503 })
