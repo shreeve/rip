@@ -335,7 +335,10 @@ export createReloader = (opts) ->
           if reloads % maxReloadsBeforeHint == 0
             console.warn "[hot-reload] many reloads; consider restarting dev worker to reclaim module cache"
         else
-          console.warn "[hot-reload] module did not export a handler"
+          # Fallback: no explicit export; assemble from queued DSL routes implicitly
+          resetGlobals()
+          currentHandler = startHandler()
+          currentMtime   = mt
       catch err
         console.error "[hot-reload] failed:", err
       finally
