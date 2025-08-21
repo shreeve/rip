@@ -99,6 +99,10 @@ curl http://localhost:5002/server
 - Internal busy signaling via `Rip-Worker-Busy` header
 - Control socket for workers to join/quit
 
+### Hot Reload Roadmap
+- Current: process-mode uses a simple entry mtime poll (debounced ~100ms) to trigger rolling restarts; module-mode is dev-only and serves the last good handler during reload.
+- Planned: move change detection into the Manager with a single recursive watcher per app (ignore temp files, debounce/coalesce 150–300ms) to eliminate per-worker watchers entirely. Manager will trigger one rollingRestart per change batch for clean, deterministic reloads under load.
+
 ### Worker Lifecycle Management
 - Graceful shutdown with inflight request completion
 - Automatic cycling based on request count or reload count

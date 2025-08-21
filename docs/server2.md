@@ -55,6 +55,9 @@ Workers self‑register with the LB over a control socket (`/tmp/<prefix>.ctl.so
 - `--hot-reload=process`
   - Manager‑level: polls entry file mtime (debounced ~100ms) and triggers `rollingRestart()`; workers drain gracefully
 
+### Hot Reload Roadmap
+- Planned: replace mtime polling with a single Manager-side recursive watcher per app (ignore temp files, debounce 150–300ms) to coalesce edits and trigger one rolling restart batch. This avoids N× worker watchers and keeps the hot path minimal.
+
 ## CLI
 Run:
 ```bash
