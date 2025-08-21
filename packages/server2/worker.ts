@@ -124,7 +124,9 @@ async function start(): Promise<void> {
       inflight = true
       try {
         if (typeof handlerFn !== 'function') return new Response('not ready', { status: 503 })
-        const res = await handlerFn(req)
+        let res: any = await handlerFn(req)
+        // Some loaders may return a callable handler on first call; invoke once more if so
+        if (typeof res === 'function') res = await res(req)
         return res instanceof Response ? res : new Response(String(res))
       } catch {
         return new Response('error', { status: 500 })
