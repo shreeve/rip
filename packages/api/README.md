@@ -709,3 +709,14 @@ when 'id' then return parseInt(_[1]) if val =~ /^([1-9]\d{0,19})$/
 - All styles are supported in `@rip/api`; choose the one that best fits your intent and code clarity.
 
 **See `@rip/api` for real-world usage and more examples.**
+
+## Handler resolution (explicit vs implicit)
+
+When your module is loaded, `@rip/api` resolves your handler in one of two ways:
+
+- Explicit app export: If the module exports an object with a `fetch` method (e.g., a Hono app), we use `app.fetch.bind(app)` and reset any queued DSL routes.
+- Implicit assembly: If no `fetch` export is found, we build the app from the routes you declared with the DSL (`get`, `post`, `use`, etc.) via `startHandler()`.
+
+Notes:
+- Do not mix both styles in the same module. If you export an app with `fetch`, any DSL routes queued in that module are ignored (by design) to keep behavior deterministic.
+- Hot reload: The reloader checks the entry file’s mtime (debounced ~100ms). For deep dependency changes, prefer `--hot-reload=process` or restart workers periodically.

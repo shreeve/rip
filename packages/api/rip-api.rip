@@ -13,6 +13,7 @@
 
 import { Hono } from 'hono'
 import { requestContext } from './context'
+import { statSync, watch } from 'node:fs'
 
 # -----------------------------------------------------------------------------
 # Module-scoped state (per worker / per module instance)
@@ -32,9 +33,9 @@ export withHelpers = (c, next) ->
     ct = c.req.header('content-type') or ''
     if c.req.method in ['POST','PUT','PATCH']
       if ct =~ /json/i
-        data = await c.req.json()
+        data = c.req.json!
       else if ct =~ /x-www-form-urlencoded|form-data/i
-        data = await c.req.parseBody()
+        data = c.req.parseBody!
   catch
     data = {}
 
@@ -216,7 +217,7 @@ export read = (keyOrTag = null, tagOrMiss = null, missOrNil = null) ->
 smart = (fn) ->
   (c) ->
     try
-      result = await fn()
+      result = fn!
       if typeof result is 'string'
         first = result.split('\n')[0]
         type = if first =~ /html/i then 'html' else 'plain'
@@ -279,7 +280,7 @@ export App = (fn) ->
   startHandler()
 
 # Start a listener (dev/simple mode). In prod, your Manager/LB would wrap this.
-export start = async (opts = {}) ->
+export start = (opts = {}) ->
   fetch = startHandler()
   host  = opts.host or '0.0.0.0'
   port  = opts.port or 8080
@@ -300,9 +301,8 @@ export resetGlobals = ->
   return
 
 export createReloader = (opts) ->
-  { statSync, watch } = await import('node:fs')
   entry = (opts?.entryPath) or opts
-  debounceMs = opts?.debounceMs or 75
+  debounceMs = opts?.debounceMs or 100
   maxReloadsBeforeHint = opts?.maxReloadsBeforeHint or 200
 
   currentHandler = null
@@ -312,40 +312,25 @@ export createReloader = (opts) ->
   reloads        = 0
 
   load = (mt = null) ->
-    return loading if loading
-    loading = (async ->
+    loading or= do ->
       try
-        mt = mt or (try statSync(entry).mtimeMs catch then 0)
+        mt  = mt or (try statSync(entry).mtimeMs catch then 0)
         mod = await import("#{entry}?v=#{mt}")
         fresh = mod.default or mod
 
-        # Accept default export as function returning handler OR handler-like with fetch()
-        newHandler = null
-        if typeof fresh is 'function'
-          maybe = await fresh()
-          newHandler = if typeof maybe is 'function' then maybe else if maybe?.fetch? then maybe.fetch.bind(maybe) else null
-        else if fresh?.fetch?
-          newHandler = fresh.fetch.bind(fresh)
-
-        if newHandler
+        # Normalize to a single callable handler
+        if fresh?.fetch?
+          # Explicit app export: bind fetch and clear any queued DSL routes
           resetGlobals()
-          currentHandler = newHandler
-          currentMtime   = mt
-          reloads++
-          if reloads % maxReloadsBeforeHint == 0
-            console.warn "[hot-reload] many reloads; consider restarting dev worker to reclaim module cache"
+          currentHandler = fresh.fetch.bind(fresh)
         else
-          # Fallback: no explicit export; assemble from already-queued DSL routes
-          # Do NOT reset globals here; the module top-level just ran and queued routes
+          # Implicit assembly: build from queued DSL routes
           currentHandler = startHandler()
-          currentMtime   = mt
-      catch err
-        console.error "[hot-reload] failed:", err
+        currentMtime = mt
       finally
         loading = null
       currentHandler
-    )()
-    loading
+
 
   getHandler = ->
     now = Date.now()

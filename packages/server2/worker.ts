@@ -95,7 +95,8 @@ async function getHandler(): Promise<(req: Request) => Promise<Response> | Respo
     const h = await reloader.getHandler()
     cachedHandler = h
     return h
-  } catch (e) {
+  } catch {
+
     // Fallback: direct import of app entry
     try {
       const bustQuery = hotReloadMode === 'module' ? `?bust=${Date.now()}` : ''
