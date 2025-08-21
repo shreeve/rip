@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { read, withHelpers } from '@rip/api'
+import { read, withHelpers, get, post, put, patch, del, start } from '@rip/api'
 
 # Simple ping - the classic
 get '/ping', -> 'pong'
