@@ -1,26 +1,21 @@
 /**
- * Rip Worker (server2 variant): single-inflight Unix socket worker with self-registration.
+ * Rip Worker (server2 variant): single-inflight Unix socket worker (shared app socket).
  *
  * Features:
  * - Single-inflight request isolation
  * - Rate-limited mtime-based hot module reloading (100ms intervals) with handler caching
  * - Graceful cycling after maxReloads to prevent memory bloat
- * - Self-registration via join/quit operations on control socket
  * - Automatic exit after maxRequests for clean lifecycle management
  * - High-performance: no blocking filesystem calls on request hot path
  */
-
-import { getControlSocketPath } from './utils'
 
 const workerId = Number.parseInt(process.argv[2] ?? '0')
 const maxRequests = Number.parseInt(process.argv[3] ?? '10000')
 const maxReloads = Number.parseInt(process.argv[4] ?? '10')
 const appEntry = process.argv[5]
-const appNameArg = process.argv[6]
 
-const socketPath = process.env.SOCKET_PATH as string
+const socketPath = process.env.SOCKET_PATH as string  // Shared app socket for all workers
 const hotReloadMode = (process.env.RIP_HOT_RELOAD as 'none' | 'process' | 'module') || 'none'
-const socketPrefix = process.env.SOCKET_PREFIX as string
 
 let appReady = false
 let inflight = false
@@ -115,24 +110,6 @@ async function getHandler(): Promise<(req: Request) => Promise<Response> | Respo
   }
 }
 
-async function selfRegister(): Promise<void> {
-  try {
-    const payload = { op: 'join', app: appNameArg, workerId, pid: process.pid, socket: socketPath }
-    const body = JSON.stringify(payload)
-    const ctl = getControlSocketPath(socketPrefix)
-    await fetch('http://localhost/worker', { method: 'POST', body, headers: { 'content-type': 'application/json' }, unix: ctl })
-  } catch {}
-}
-
-async function selfDeregister(): Promise<void> {
-  try {
-    const payload = { op: 'quit', app: appNameArg, workerId }
-    const body = JSON.stringify(payload)
-    const ctl = getControlSocketPath(socketPrefix)
-    await fetch('http://localhost/worker', { method: 'POST', body, headers: { 'content-type': 'application/json' }, unix: ctl })
-  } catch {}
-}
-
 async function start(): Promise<void> {
   const initial = await getHandler()
   appReady = typeof initial === 'function'
@@ -143,7 +120,7 @@ async function start(): Promise<void> {
     async fetch(req: Request): Promise<Response> {
       const url = new URL(req.url)
       if (url.pathname === '/ready') return new Response(appReady ? 'ok' : 'not-ready')
-      if (inflight) return new Response('busy', { status: 503, headers: { 'Rip-Worker-Busy': '1', 'Retry-After': '0', 'Rip-Worker-Id': String(workerId) } })
+      if (inflight) return new Response('busy', { status: 503 })
       const handlerFn = await getHandler()
       inflight = true
       try {
@@ -160,12 +137,10 @@ async function start(): Promise<void> {
     },
   })
 
-  await selfRegister()
 
   const shutdown = async () => {
     while (inflight) await new Promise(r => setTimeout(r, 10))
     try { server.stop() } catch {}
-    await selfDeregister()
     process.exit(0)
   }
   process.on('SIGTERM', shutdown)

@@ -1,31 +1,25 @@
-# Rip Server2 - High-Performance Load Balancer
+# Rip Server2 - Shared-Socket Application Server
 
-A clean-room implementation of a high-performance HTTP load balancer with advanced worker management, built specifically for Rip applications.
+High-performance HTTP entry that forwards to a single shared Unix socket per app. The kernel balances accepts across workers, each handling a single request at a time for clean isolation.
 
 ## 🚀 Key Features
 
-- **LIFO Worker Selection**: Prioritizes recently-used workers for optimal cache locality
-- **Event-Driven Queue Management**: Reactive processing without polling overhead
-- **Smart Worker Cycling**: Prevents memory bloat with configurable reload limits
+- **Shared Unix Socket**: One socket per app; kernel balances connections to idle workers
 - **Single-Inflight Isolation**: One request per worker for clean resource management
-- **Hot Reload Support**: Three modes (none/process/module) with seamless transitions
+- **Hot Reload Support**: Three modes (none/process/module)
 - **Unix Socket Communication**: High-performance inter-process communication
-- **Clean Control Interface**: Simple join/quit operations for worker registration
 
 ## 📊 Performance
 
-- **Target**: 20K+ RPS for application endpoints
-- **Direct LB**: 30K+ RPS for `/server` health checks
-- **Queue**: 8192 capacity with 2s timeout
-- **Timeouts**: 200ms connect, 5s read
-- **Worker Cycling**: Configurable via `--max-reloads` (default: 10)
+- **Direct LB**: `/server` shows raw entry overhead
+- **Application Endpoints**: `/ping` throughput scales with number of workers
 
 ## 🏗️ Architecture
 
 ### Components
 
 1. **Manager** (`manager.ts`): Process supervisor that spawns and monitors workers
-2. **Load Balancer** (`server.ts`): HTTP server with LIFO worker selection and queue management
+2. **Server** (`server.ts`): HTTP entry that forwards to the shared socket
 3. **Worker** (`worker.ts`): Single-inflight request handlers with hot reload support
 4. **CLI** (`rip-server.ts`): Command-line interface and configuration parsing
 5. **Utils** (`utils.ts`): Shared utilities and flag parsing
@@ -33,9 +27,7 @@ A clean-room implementation of a high-performance HTTP load balancer with advanc
 ### Process Flow
 
 ```
-HTTP Request → Load Balancer → LIFO Worker Selection → Unix Socket → Worker Process
-                     ↓
-              Queue (if busy) → Event-driven draining → Worker becomes available
+HTTP Request → HTTP Entry → Unix Socket (shared) → Kernel accept → Worker Process
 ```
 
 ## 🔧 Usage
@@ -50,7 +42,6 @@ bun server2 <app-path> w:4 http:5002
 bun server2 apps/my-app \
   w:8 \
   --max-reloads=20 \
-  --max-queue=16384 \
   --hot-reload=module \
   --json-logging
 ```
@@ -61,10 +52,7 @@ bun server2 apps/my-app \
 - `r:<N>` - Max requests per worker before cycling (default: 10000)
 - `--max-reloads=<N>` - Max hot reloads per worker before cycling (default: 10)
 - `--hot-reload=<mode>` - Hot reload mode: none/process/module (default: module in dev)
-- `--max-queue=<N>` - Queue capacity (default: 8192)
-- `--queue-timeout-ms=<N>` - Queue timeout (default: 2000)
-- `--connect-timeout-ms=<N>` - Connect timeout (default: 200)
-- `--read-timeout-ms=<N>` - Read timeout (default: 5000)
+- (No userland queue in shared-socket mode)
 - `--json-logging` - Enable JSON access logs
 - `--no-access-log` - Disable access logging
 
@@ -72,10 +60,6 @@ bun server2 apps/my-app \
 
 - `RIP_HOT_RELOAD` - Hot reload mode
 - `RIP_MAX_RELOADS` - Max reloads per worker
-- `RIP_MAX_QUEUE` - Queue capacity
-- `RIP_QUEUE_TIMEOUT_MS` - Queue timeout
-- `RIP_CONNECT_TIMEOUT_MS` - Connect timeout
-- `RIP_READ_TIMEOUT_MS` - Read timeout
 
 ## 🔄 Hot Reload Modes
 
@@ -113,7 +97,7 @@ Response:
 }
 ```
 
-### Load Balancer Health Check
+### Entry Health Check
 ```bash
 curl http://localhost:5002/server
 # Response: "ok"
@@ -137,36 +121,24 @@ wrk -t8 -c512 -d15s --latency http://127.0.0.1:5002/server
 
 ## 🔍 Implementation Details
 
-### LIFO Worker Selection
-- Maintains a stack of available workers
-- `pop()` for selection (most recently used)
-- `push()` for release (back to top of stack)
-- O(1) operations with optimal cache locality
-
-### Event-Driven Queue Draining
-- No polling loops or timers
-- Uses `setImmediate()` for reactive processing
-- Triggered when workers become available
-- Prevents CPU waste and improves responsiveness
+### Shared-Socket Accept
+- Kernel chooses an idle worker blocked in accept
+- No userland queue/selection on hot path
 
 ### Worker Lifecycle Management
-- Self-registration via control socket
 - Graceful shutdown with inflight request completion
 - Automatic cycling based on request count or reload count
 - Exponential backoff for restart attempts
 
 ### Error Handling
-- 503: Server busy (queue full) or worker busy
-- 504: Queue timeout or upstream read timeout
-- Automatic worker removal on connection failures
-- Retry logic with single-attempt limit
+- 503: Worker busy (single-inflight guard) or entry error
 
 ## 📁 File Structure
 
 ```
 packages/server2/
 ├── rip-server.ts    # CLI entry point
-├── server.ts        # Load balancer implementation
+├── server.ts        # HTTP entry → shared socket forwarder
 ├── manager.ts       # Process supervisor
 ├── worker.ts        # Worker process implementation
 ├── utils.ts         # Shared utilities
@@ -175,7 +147,7 @@ packages/server2/
 
 ## 🎯 Design Principles
 
-1. **Performance First**: LIFO selection and event-driven processing for maximum throughput
+1. **Performance First**: Minimal hot path, leverage kernel accept balancing
 2. **Clean Architecture**: Clear separation of concerns between components
 3. **Operational Simplicity**: Minimal configuration with sensible defaults
 4. **Graceful Degradation**: Predictable behavior under load and failure conditions
