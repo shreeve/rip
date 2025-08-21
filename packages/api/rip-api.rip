@@ -219,8 +219,8 @@ smart = (fn) ->
       result = await fn()
       if typeof result is 'string'
         first = result.split('\n')[0]
-        ctype = if first =~ /html/i then 'html' else 'plain'
-        return new Response(result, { headers: { 'Content-Type': "text/#{ctype}; charset=UTF-8" } })
+        type = if first =~ /html/i then 'html' else 'plain'
+        return new Response(result, { headers: { 'Content-Type': "text/#{type}; charset=UTF-8" } })
       else if result? and typeof result is 'object'
         if result instanceof Response then return result
         return c.json(result)
