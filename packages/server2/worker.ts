@@ -64,7 +64,7 @@ async function getHandler(): Promise<(req: Request) => Promise<Response> | Respo
   if (hasChanged) {
     hotReloadCount++
     console.log(`[worker ${workerId}] File changed, reloading... (${hotReloadCount}/${maxReloads})`)
-    cachedHandler = null
+    // Keep serving with the last known-good handler while we rebuild
     reloader = null
 
     // Graceful exit after maxReloads to prevent module cache bloat
@@ -96,9 +96,13 @@ async function getHandler(): Promise<(req: Request) => Promise<Response> | Respo
   }
   try {
     const h = await reloader.getHandler()
-    cachedHandler = h
-    return h
-  } catch {
+    if (typeof h !== 'function') {
+      if (process.env.RIP_DEBUG) console.error(`[worker ${workerId}] reloader.getHandler() returned`, typeof h)
+    }
+    cachedHandler = h || cachedHandler
+    return cachedHandler || h
+  } catch (e) {
+    if (process.env.RIP_DEBUG) console.error(`[worker ${workerId}] reloader.getHandler() threw:`, e)
 
     // Fallback: direct import of app entry
     try {
@@ -106,10 +110,11 @@ async function getHandler(): Promise<(req: Request) => Promise<Response> | Respo
       const mod = await import(appEntry + bustQuery)
       const fresh = (mod as any).default || (mod as any)
       const h = typeof fresh === 'function' ? fresh : (fresh && typeof fresh.fetch === 'function' ? fresh.fetch.bind(fresh) : null)
-      cachedHandler = h || (async () => new Response('not ready', { status: 503 }))
-      return cachedHandler
-    } catch {
-      return async () => new Response('not ready', { status: 503 })
+      cachedHandler = h || cachedHandler
+      return cachedHandler || (async () => new Response('not ready', { status: 503 }))
+    } catch (e2) {
+      if (process.env.RIP_DEBUG) console.error(`[worker ${workerId}] fallback import failed:`, e2)
+      return cachedHandler || (async () => new Response('not ready', { status: 503 }))
     }
   }
 }

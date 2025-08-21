@@ -27,6 +27,8 @@ export class Manager {
   private shuttingDown = false
   private lastCheck = 0
   private currentMtime = 0
+  private isRolling = false
+  private lastRollAt = 0
 
   constructor(flags: ParsedFlags) {
     this.flags = flags
@@ -51,8 +53,12 @@ export class Manager {
         this.lastCheck = now
         const mt = this.getEntryMtime()
         if (mt > this.currentMtime) {
+          // Prevent overlapping rollings; simple cooldown to avoid thrash
+          if (this.isRolling || (now - this.lastRollAt) < 200) return
           this.currentMtime = mt
-          void this.rollingRestart()
+          this.isRolling = true
+          this.lastRollAt = now
+          void this.rollingRestart().finally(() => { this.isRolling = false })
         }
       }, 50)
     }

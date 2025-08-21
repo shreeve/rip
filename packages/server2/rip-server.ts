@@ -7,7 +7,6 @@ import { Manager } from './manager'
 import { LBServer } from './server'
 
 async function main(): Promise<void> {
-  const flags = parseFlags(process.argv)
   if (process.argv.includes('--stop')) {
     try {
       // Best-effort: find and kill matching processes by script path
@@ -17,6 +16,7 @@ async function main(): Promise<void> {
     console.log('rip-server2: stop requested')
     return
   }
+  const flags = parseFlags(process.argv)
   const lb = new LBServer(flags)
   lb.start()
   const mgr = new Manager(flags)
