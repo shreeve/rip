@@ -5,7 +5,7 @@ A clean-room implementation of a high-performance HTTP load balancer with advanc
 ## 🚀 Key Features
 
 - **LIFO Worker Selection**: Prioritizes recently-used workers for optimal cache locality
-- **Event-Driven Queue Management**: Reactive processing without polling overhead  
+- **Event-Driven Queue Management**: Reactive processing without polling overhead
 - **Smart Worker Cycling**: Prevents memory bloat with configurable reload limits
 - **Single-Inflight Isolation**: One request per worker for clean resource management
 - **Hot Reload Support**: Three modes (none/process/module) with seamless transitions
@@ -106,7 +106,7 @@ Response:
 ```json
 {
   "status": "healthy",
-  "app": "my-app", 
+  "app": "my-app",
   "workers": 4,
   "ports": { "http": 5002 },
   "uptime": 3600
@@ -131,7 +131,7 @@ curl -sf http://localhost:5002/status
 # Application endpoint
 wrk -t8 -c512 -d15s --latency http://127.0.0.1:5002/ping
 
-# Direct LB endpoint  
+# Direct LB endpoint
 wrk -t8 -c512 -d15s --latency http://127.0.0.1:5002/server
 ```
 
