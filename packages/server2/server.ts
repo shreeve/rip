@@ -48,12 +48,16 @@ export class LBServer {
       // Return a clean 503 if unix forwarding fails
       res = new Response('Service unavailable', { status: 503 })
     }
+    // Normalize headers: ensure only one Date header is sent by the LB layer
+    const headers = new Headers(res.headers)
+    headers.delete('date')
+    const out = new Response(res.body, { status: res.status, statusText: res.statusText, headers })
     const totalSeconds = (performance.now() - start) / 1000
 
-    if (this.flags.jsonLogging) logAccessJson(this.flags.appName, req, res, totalSeconds, totalSeconds)
-    else if (this.flags.accessLog) logAccessHuman(this.flags.appName, req, res, totalSeconds, totalSeconds)
+    if (this.flags.jsonLogging) logAccessJson(this.flags.appName, req, out, totalSeconds, totalSeconds)
+    else if (this.flags.accessLog) logAccessHuman(this.flags.appName, req, out, totalSeconds, totalSeconds)
 
-    return res
+    return out
   }
 
   private async forwardOnce(req: Request, socketPath: string): Promise<Response> {
