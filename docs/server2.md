@@ -131,9 +131,7 @@ Acceptance (smoke):
   - `RIP_CONNECT_TIMEOUT_MS` (default 200)
   - `RIP_READ_TIMEOUT_MS` (default 5000)
   - Flags (no prefix): `--max-queue`, `--queue-timeout-ms`, `--connect-timeout-ms`, `--read-timeout-ms`.
-  - LB replicas: `--lb-replicas=<N>` (enables reusePort), LB policy: `--lb-policy=rr|lc`.
-  - Upstream pool: `--upstream-max-idle=<N>` (default 8), `--upstream-max-conns-per-socket=<N>` (default 1).
-  - Variant env: `RIP_VARIANT` to set variant when flags are omitted.
+    - Variant env: `RIP_VARIANT` to set variant when flags are omitted.
 
 ### Dev/Prod Behavior & Hot Reload
 - Modes: `--hot-reload=<none|process|module>` (env: `RIP_HOT_RELOAD`)

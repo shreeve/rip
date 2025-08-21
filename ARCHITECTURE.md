@@ -72,19 +72,19 @@ Bun.plugin({
 - **Usage**: `rip-server [directory] [port]`
 
 #### 4. Next-Gen Web Server (`/packages/server2`)
-- **Architecture**: Clean-room LIFO load balancer with advanced performance optimizations
-- **Key innovations**:
-  - **LIFO worker selection** - Optimal cache locality and resource efficiency
-  - **Event-driven queue draining** - No polling overhead, reactive to load changes
-  - **maxReloads cycling** - Prevents module cache bloat during hot reloads
-  - **Join/quit worker operations** - Clean, consistent control socket API
+- **Architecture**: High-performance LIFO load balancer with optimized worker management
+- **Key features**:
+  - **LIFO worker selection** - Prioritizes recently-used workers for better cache locality
+  - **Event-driven queue draining** - Reactive processing without polling overhead
+  - **Worker cycling** - Prevents memory bloat with configurable reload limits
+  - **Clean control interface** - Simple join/quit operations via Unix socket
 - **Performance targets**: 20K+ RPS with seamless hot reloading
 - **Key files**:
-  - `rip-server.ts` - Enhanced CLI with maxReloads parameter
-  - `manager.ts` - Process supervisor with reload count management
-  - `worker.ts` - rate-limited mtime-based hot reload (100ms intervals) with handler caching
-  - `server.ts` - LIFO load balancer with connection pooling
-  - `utils.ts` - Shared utilities and flag parsing
+  - `rip-server.ts` - CLI with worker lifecycle management
+  - `manager.ts` - Process supervisor with restart logic
+  - `worker.ts` - Single-inflight workers with mtime-based hot reload
+  - `server.ts` - LIFO load balancer with efficient forwarding
+  - `utils.ts` - Shared utilities and configuration parsing
 - **Usage**: `bun server2 <app-path> w:<N> --max-reloads=<N>`
 
 #### 5. Database Schema DSL (`/packages/schema`)
