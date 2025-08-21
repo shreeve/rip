@@ -1,195 +1,114 @@
-<!--
-ONE-SHOT IMPLEMENTATION INSTRUCTIONS
+# Server2 (Per-Worker Socket Application Server)
 
-You are an AI code generator. Using the specification below, implement a brand-new server in this repository.
+Server2 is a multi-process HTTP application server for Rip apps that uses one Unix socket per worker and a lightweight in-process load balancer (LB). It preserves strict one‑inflight‑per‑worker isolation while delivering high throughput.
 
-Deliverables:
-- Create all code in packages/server2:
-  - packages/server2/{rip-server.ts, server.ts, manager.ts, worker.ts, utils.ts}
-- Add a root script in package.json:
-  - "server2": "bun packages/server2/rip-server.ts"
+## Architecture Overview
 
-Constraints:
-- Bun-only runtime. Do NOT modify packages/server/*.
-- Follow the spec exactly; no directory scans on the request path; workers self-register.
+- Manager (`packages/server2/manager.ts`)
+  - Spawns N workers
+  - Unlinks per‑worker sockets on spawn/stop
+  - Monitors and restarts crashed workers with exponential backoff
+  - Optional process hot‑reload: polls entry file mtime (debounced ~100ms) and triggers rolling restarts
 
-Acceptance (smoke):
-- bun server2 <app-path> protocol:http http:<PORT> w:<N>
-- curl -sf http://localhost:<PORT>/status
-- wrk -t8 -c512 -d15s --latency http://127.0.0.1:<PORT>/ping
--->
+- LB Server (`packages/server2/server.ts`)
+  - Public HTTP entrypoint
+  - Control socket listener for worker join/quit
+  - Tracks per‑worker sockets, LIFO idle stack, and a bounded request queue
+  - Forwards requests directly to selected worker socket with connect/read timeouts
+  - Normalizes headers (strips internal LB headers and removes Date)
 
-## Rip Server – Clean-Room Spec (v0.2 – server2)
+- Worker (`packages/server2/worker.ts`)
+  - Listens on its per‑worker Unix socket
+  - Single‑inflight handler; returns 503 with `Rip-Worker-Busy: 1` when busy
+  - Joins/quits the LB via control socket on startup/shutdown
+  - Module hot‑reload: 100ms mtime check, handler cache, optional graceful cycling after max reloads
 
-### Purpose
-- Bun-based replacement for nginx+unicorn-style serving for Rip apps.
-- Preserve single-inflight isolation per worker; maximize throughput with per-worker fan-out and keepalive.
-
-### Goals
-- Serve Rip apps via multi-process workers behind an in-process HTTP load balancer.
-- Isolation: exactly one request in-flight per worker process.
-- High throughput with low overhead: per-worker sockets, keepalive, minimal allocations.
-- Simple operability: CLI flags/env; clear health/status; predictable failure modes.
-
-### Non-Goals
-- No auth/multi-tenant routing.
-- No persistence or schema changes.
-- No exotic balancing beyond RR/optional least-connections.
-
-### Architecture
-- Components:
-  - Manager: spawns, restarts worker processes; orchestrates rolling process reloads (no file watchers).
-  - Worker: Bun.serve on per-worker Unix socket; single-inflight; resolves the app handler from the API-layer reloader.
-  - LB Server: Bun.serve HTTP(S); forwards to workers with in-memory pool (explicit registration) + queue/timeouts.
-- Processes: 1 LB per app by default; optionally multiple LB replicas (future) for TCP; control via local Unix socket.
-
-### Application entry resolution
-- Invocation form: `bun server <app-path> [flags]`
-- If `<app-path>` is a directory:
-  - Base app directory = `<app-path>`
-  - Entry probing order (first match wins): `index.rip`, then `index.ts`
-  - If neither exists: fail with a clear error
-- If `<app-path>` is a file (e.g., `apps/labs/api/main.rip`):
-  - Base app directory = directory of the file
-  - Entry = the specified file only (no fallback probing)
-
-### Worker (packages/server2/worker.ts)
-- Shared Unix socket for all workers of an app.
-- Single-inflight policy; 503 on concurrent arrivals.
-- HTTP: 100MB body limit, efficient Unix socket communication.
-- Module mode: rate-limited mtime-based file watching (100ms intervals) with handler caching; `await reloader.getHandler()` per request → atomic swap, no 404s, no filesystem bottlenecks.
-- Hot reload management: tracks reload count; graceful exit after `maxReloads` (default 10) to prevent module cache bloat.
-- Lifecycle: graceful exit on signals, after `maxRequests` (default 10000), or after `maxReloads` hot reloads.
-
-### Manager (packages/server2/manager.ts)
-- Spawns N workers; sets env; cleans the shared app socket (worker 0 unlinks).
-- Monitor & restart with exponential backoff; cap attempts. On exit, respawn.
-- Rolling process reloads on explicit admin command (no file watchers).
-
-#### Control plane
-- Not used in shared-socket mode.
-
-#### Admin operations (process reloads)
-- Triggered via Manager CLI/admin (e.g., `bun server2 restart <app>`; not via LB). Rolling sequence per worker: wait drain (single‑inflight) → terminate → spawn → worker self-registers.
-
-### Server (packages/server2/server.ts)
-- Bind HTTP(S) using Bun.serve.
-- Forward every request to the app’s shared Unix socket via `fetch(..., { unix })`.
-- Endpoints: `/status` and `/server`.
-- Logging: human/JSON access logs (optional).
-
-### File layout & responsibilities
-- packages/server2/server.ts: LB only (HTTP[S], pool routing, queue/backpressure, strip internal headers, `/status`).
-- packages/server2/manager.ts: process supervisor (spawn/restart; admin ops). Workers self-register/deregister.
-- packages/server2/worker.ts: per-worker server with single‑inflight; uses API reloader.
-- packages/server2/utils.ts: shared helpers (copy `scale`, timestamp/log helpers, header stripping, timeouts, queue helpers, flag/env parsing).
-
-### CLI & Config (packages/server2/rip-server.ts)
-- Commands
-  - Direct mode: start app under LB+workers on a port; simple status/stop.
-  - Platform mode: controller for deploy/start/scale; HTTP API + dashboard.
-  - CA management: dev CA init/trust/export/list/clean; quick/self-signed.
-- Flags (order-agnostic parser)
-  - `w:<N|auto>` workers; `r:<N>` maxRequests per worker (cycling); `--max-reloads=<N>` maxReloads per worker (default 10).
-  - Ports: HTTP/HTTPS; protocol: `http|https|http+https`.
-  - HTTPS mode: `https:quick|https:ca|https:smart`.
-  - JSON: `--json`, `--json-logging`.
-  - Access log: `--no-access-log` to disable (on by default).
-  - Variant & sockets: `--variant=<name>` (default inferred), `--socket-prefix=<prefix>` to override `/tmp/rip_<variant>_<app>`.
-- LB Tuning via env/flags
-  - `RIP_MAX_QUEUE` (default 8192)
-  - `RIP_QUEUE_TIMEOUT_MS` (default 2000)
-  - `RIP_CONNECT_TIMEOUT_MS` (default 200)
-  - `RIP_READ_TIMEOUT_MS` (default 5000)
-  - Flags (no prefix): `--max-queue`, `--queue-timeout-ms`, `--connect-timeout-ms`, `--read-timeout-ms`.
-    - Variant env: `RIP_VARIANT` to set variant when flags are omitted.
-
-### Dev/Prod Behavior & Hot Reload
-- Modes: `--hot-reload=<none|process|module>` (env: `RIP_HOT_RELOAD`)
-  - `none`: no automatic reloads.
-  - `process`: explicit admin-triggered rolling restarts; readiness-gated; preferred for prod w>1.
-  - `module`: rate-limited mtime-based file watching (100ms intervals) with handler caching and cache-busted imports; workers auto-cycle after `maxReloads` to prevent memory bloat; best for dev (w:1 ideal).
-  - Defaults: dev = `module`; prod = `none` or `process`.
-- Hot reload lifecycle: workers track reload count and gracefully exit after `maxReloads` (default 10) to ensure clean memory management.
-
-### Bun plugin support (.rip)
-- Loader must support cache-busting queries: filter `/\.rip(\?.*)?$/`; read via `path.split('?')[0]`.
-
-### TLS/HTTPS & CA (packages/server2/rip-server.ts)
-- Quick self-signed and CA-signed localhost certs.
-- macOS trust flow for dev CA; export cert.
- - Cert reloads: document behavior. If cert/key files change at runtime, reload on next LB restart; live reload may be added later behind a flag.
-
-### Platform Controller (packages/server2/rip-server.ts)
-- API: list/deploy/undeploy/start/scale/restart apps; simple stats.
-- Dashboard: static HTML page; periodic fetch of APIs.
-
-### Compatibility constraints
-- Preserve existing platform controller APIs and CLI UX.
-- Preserve TLS/CA flows and commands (init/trust/export/list/clean).
-
-### Performance Targets (default localhost guidance)
-- `/ping` (app endpoint): ≥ 20k RPS with reasonable busy rate depending on queue settings; p50 ≤ 10ms when not queued.
-- LIFO worker selection provides optimal cache locality and resource efficiency for sustained high throughput.
-
-### OS & Runtime Tuning (docs)
-- `ulimit -n` ≥ 65536.
-- Keep short `idleTimeout` on worker/LB (5–10s); enable keepalive.
-- Use `reusePort` when running multiple LB replicas.
- - Backlog: ensure high listen backlog; on macOS, consider `kern.ipc.somaxconn` if running separate TCP listeners.
-
-### Observability
-- Logs: JSON optional (time, app, method, path, status, durations, length).
-  - JSON fields (recommended): `t` (ISO time), `app`, `method`, `path`, `status`, `totalSeconds`, `workerSeconds`, `length`, and optional `workerId` (debug-only).
-- Status: `/status` on LB.
-- Counters (in-code + status exposure in future): queue depth, retries, dropped sockets, inflight per socket, 5xx counts.
-
-### Failure Modes & Responses
-- 503: no free sockets and queue full; worker busy immediate response.
-- 504: queue wait exceeded; upstream read timeout.
-- Dropped sockets are re-added automatically when replacement workers self-register.
-
-### Testing & Benchmarks
-- Smoke
-  - `curl -sf http://localhost:PORT/status`
-- wrk example
+## Process Flow
 ```
-wrk -t8 -c512 -d15s --latency http://127.0.0.1:PORT/ping
+HTTP → LB (server.ts) → Select idle worker (LIFO) → Forward to worker.N.sock → Worker handles (single inflight)
 ```
-- Success: meets targets; acceptable busy rate on `/ping` per queue policy.
 
-### Acceptance Criteria
-- Compiles under Bun; no lints.
-- All CLI commands work as documented.
-- Workers single-inflight enforced; LB never dispatches to a busy socket.
-- Queue & timeouts respected; predictable 503/504 behavior.
-- Performance targets met on localhost with recommended settings.
-- LB health reflects registered workers (healthy once ≥1 registered); no /ready dependency.
+Workers self‑register with the LB over a control socket (`/tmp/<prefix>.ctl.sock`) using join/quit operations.
 
-### Nice-to-have (Future)
-- Optional least-connections policy.
-- Multiple LB replicas with `reusePort`.
-- Structured metrics endpoint.
+## Endpoints
+- `GET /server` → "ok" (LB health)
+- `GET /status` → JSON `{ status, app, workers, ports, uptime }`
+- Application paths (e.g., `/ping`) → forwarded to selected worker
 
-### Single-shot scope and options
-- Core (must implement now)
-  - Single-inflight workers; per-worker AF_UNIX sockets.
-  - LB: round-robin with pre-dispatch inflight check (do not send to busy sockets).
-  - Bounded FIFO queue with timeout (503 when full, 504 on timeout).
-  - Retries on busy/connect; drop sockets from pool on failure (no default quarantine).
-  - Keepalive LB↔worker; short idleTimeouts.
-  - Endpoints: `/status` (LB only).
-  - Logging: access log ON by default; `--no-access-log` disables. `--json-logging` optional.
-  - CLI/env: `--max-queue`, `--queue-timeout-ms`, `--connect-timeout-ms`, `--read-timeout-ms`; `RIP_*` env equivalents.
-  - Hot reload flag: `--hot-reload` / `--no-hot-reload` (ON in dev, OFF in prod by default).
+## Control Plane
+- Control socket path: `/tmp/<socketPrefix>.ctl.sock`
+- Worker join payload: `{ op: 'join', workerId, pid, socket, version? }`
+- Worker quit payload: `{ op: 'quit', workerId }`
 
-- Optional (default OFF; may be implemented later or gated by flags)
-  - LB replicas with `reusePort` (`--lb-replicas=<N>`), policy `--lb-policy=rr|lc`.
-  - Active health checks with circuit breaker (K failures → open for T ms).
-  - Upstream pool knobs: `--upstream-max-idle=<N>` (default 8), `--upstream-max-conns-per-socket=<N>` (default 1; LB enforces single-inflight regardless).
-  - Structured metrics endpoint.
+## Load Balancer Behavior
+- LIFO idle selection (warm workers preferenced)
+- Single‑inflight per worker; workers signal busy via `Rip-Worker-Busy: 1`
+- Bounded queue: LB queues requests up to `--max-queue`; queued requests 504 after `--queue-timeout-ms`
+- Timeouts: per‑forward connect (`--connect-timeout-ms`) and read (`--read-timeout-ms`)
+- Header normalization: strips internal headers and removes Date so the LB emits a single Date header
 
-- Implementation notes (internal behavior)
-  - Internal headers used only between LB and workers must be stripped from client responses: `Rip-Worker-Busy`, `Rip-Worker-Id`.
-  - Worker busy handling: worker maintains a busy flag and returns 503 with `Rip-Worker-Busy: 1` if a race allows a second concurrent arrival; LB primarily avoids busy by pre-check and only retries on that internal busy signal.
-  - Routing pool is sourced from worker self-registrations over the control socket; no directory scanning.
+## Hot Reload Modes
+- `--hot-reload=none` (default in prod)
+  - No automatic reloads (maximum performance)
+- `--hot-reload=module`
+  - Worker‑level: 100ms mtime check, handler cache, optional graceful worker cycling after `--max-reloads`
+- `--hot-reload=process`
+  - Manager‑level: polls entry file mtime (debounced ~100ms) and triggers `rollingRestart()`; workers drain gracefully
+
+## CLI
+Run:
+```bash
+bun packages/server2/rip-server.ts <app-path> http:<port> w:<workers> [flags]
+```
+
+Flags:
+- `w:<N|auto>`: number of workers (default: CPU cores)
+- `r:<N>`: max requests per worker before cycling (default: 10000)
+- `--max-reloads=<N>`: max module hot‑reloads per worker before cycling (default: 10)
+- `--hot-reload=<none|process|module>`: hot‑reload mode
+- `--max-queue=<N>`: LB queue depth (default via env `RIP_MAX_QUEUE` or internal default)
+- `--queue-timeout-ms=<N>`: LB queue timeout for enqueued requests
+- `--connect-timeout-ms=<N>`: upstream connect timeout to worker sockets
+- `--read-timeout-ms=<N>`: upstream read timeout after connect
+- `--json-logging`: emit JSON access logs
+- `--no-access-log`: disable human access logging
+- `--variant=<name>`: variant label used in socket prefix
+- Utility: `--stop` best‑effort stop of prior server2 processes (pkill by script path) and exit
+
+Env overrides:
+- `RIP_HOT_RELOAD`, `RIP_MAX_RELOADS`
+- `RIP_MAX_QUEUE`, `RIP_QUEUE_TIMEOUT_MS`, `RIP_CONNECT_TIMEOUT_MS`, `RIP_READ_TIMEOUT_MS`
+
+## Internal Headers
+- Worker busy signaling: `Rip-Worker-Busy: 1`
+- LB strips (case‑insensitive) before responding to clients:
+  - `rip-worker-busy`, `rip-worker-id`, and `date`
+
+## Performance Notes
+- Keep client concurrency (`-c`) close to worker count (`w`) for best success with strict isolation
+- For peak RPS on simple endpoints, scale workers toward or slightly above core count and benchmark
+- Disable access logs for perf runs; use JSON logs if needed
+
+## File Map
+```
+packages/server2/
+├── manager.ts       # Spawns workers, monitors, optional process hot‑reload poller
+├── server.ts        # HTTP entry, control socket, LIFO selection, bounded queue, timeouts
+├── worker.ts        # Per‑worker Unix socket, join/quit, single inflight, module hot‑reload
+├── utils.ts         # Flag parsing, socket path helpers, logging, header utilities
+├── rip-server.ts    # CLI wrapper (supports --stop)
+└── README.md        # Quickstart and usage
+```
+
+## Guarantees & Tradeoffs
+- Guarantees: single inflight per worker, graceful drain on restarts, deterministic dispatch via LB
+- Tradeoffs: LB queue can add minimal latency under bursts; strict isolation means clients should avoid overdriving concurrency beyond worker count
+
+---
+
+## HTTPS/TLS/CA (Future‑Goal Notes)
+- Quick self‑signed and CA‑signed localhost certs
+- macOS trust flow for dev CA; export cert
+- Cert reloads: on file change, reload on next LB restart; live reload may be added later behind a flag
+- HTTPS modes (future flags): `https:quick|https:ca|https:smart`
+- When implemented, CLI will accept `protocol:http|https|http+https` and manage both listeners
