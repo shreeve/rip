@@ -1,4 +1,4 @@
-import { read, get, post, put, patch, del, startHandler } from '@rip/api'
+import { read, get, post, put, patch, del, App } from '@rip/api'
 
 # Simple ping - the classic
 get '/ping', -> 'pong'
@@ -262,4 +262,5 @@ async function testAll() {
 </script></body></html>"""
 
 # Build and export a handler from queued routes (hot-reload friendly)
-export default -> startHandler()
+export default App ->
+  # routes already defined above are executed within this block context

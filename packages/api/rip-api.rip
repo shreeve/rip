@@ -272,6 +272,12 @@ export startHandler = ->
   for r in _routes when not r.use then app[r.method](r.path, r.handler)
   app.fetch.bind(app)
 
+# Convenience wrapper: define routes in a block and get a handler
+export App = (fn) ->
+  resetGlobals()
+  fn?()
+  startHandler()
+
 # Start a listener (dev/simple mode). In prod, your Manager/LB would wrap this.
 export start = async (opts = {}) ->
   fetch = startHandler()
