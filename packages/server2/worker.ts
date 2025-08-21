@@ -1,6 +1,6 @@
 /**
  * Rip Worker (server2 variant): single-inflight Unix socket worker with self-registration.
- * 
+ *
  * Features:
  * - Single-inflight request isolation
  * - mtime-based hot module reloading with handler caching

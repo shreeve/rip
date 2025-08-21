@@ -1,6 +1,6 @@
 /**
  * Rip LB Server (server2 variant): HTTP(S) entry + in-process load balancer with control socket.
- * 
+ *
  * Features:
  * - LIFO worker selection for optimal cache locality and resource efficiency
  * - Event-driven queue draining (no polling)
@@ -63,15 +63,20 @@ export class LBServer {
   private async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url)
     if (url.pathname === '/status') return this.status()
+    if (url.pathname === '/server') return new Response('ok', { headers: { 'content-type': 'text/plain' } })
 
-    if (this.inflightTotal < Math.max(1, this.sockets.length) && this.hasAvailableSocket()) {
-      this.inflightTotal++
-      try {
-        return await this.forward(req)
-      } finally {
-        this.inflightTotal--
-        // Event-driven: drain queue immediately when capacity frees up
-        setImmediate(() => this.drainQueue())
+    // Fast path: try to get available worker directly (no double scanning)
+    if (this.inflightTotal < Math.max(1, this.sockets.length)) {
+      const availableSocket = this.getNextAvailableSocket()
+      if (availableSocket) {
+        this.inflightTotal++
+        try {
+          return await this.forward(req)
+        } finally {
+          this.inflightTotal--
+          // Event-driven: drain queue immediately when capacity frees up
+          setImmediate(() => this.drainQueue())
+        }
       }
     }
     if (this.queue.length >= this.flags.maxQueue) return new Response('Server busy', { status: 503, headers: { 'Retry-After': '1' } })
@@ -85,11 +90,7 @@ export class LBServer {
     return new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': 'no-cache' } })
   }
 
-  private hasAvailableSocket(): boolean {
-    const candidates = this.getCandidateSockets()
-    for (const s of candidates) if (s.inflight === 0) return true
-    return false
-  }
+
 
   private getCandidateSockets(): UpstreamState[] {
     if (this.newestVersion === null) return this.sockets
@@ -189,7 +190,7 @@ export class LBServer {
   }
 
   private drainQueue(): void {
-    while (this.inflightTotal < Math.max(1, this.sockets.length) && this.hasAvailableSocket()) {
+    while (this.inflightTotal < Math.max(1, this.sockets.length) && this.availableWorkers.length > 0) {
       const job = this.queue.shift()
       if (!job) break
       if (nowMs() - job.enqueuedAt > this.flags.queueTimeoutMs) {

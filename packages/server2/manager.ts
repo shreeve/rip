@@ -1,6 +1,6 @@
 /**
  * Rip Manager (server2 variant): spawns and supervises worker processes.
- * 
+ *
  * Features:
  * - Workers self-register to LB control socket (no directory scans)
  * - Exponential backoff restart logic with attempt limits
