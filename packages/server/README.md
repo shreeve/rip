@@ -192,7 +192,7 @@ Why `/server` ≫ app routes: it bypasses Unix socket forwarding, framework rout
 8. Server strips internal headers, optional access logging
 9. Release worker, decrement `inflightTotal`, `drainQueue()`
 
-### Process reload trace (hot-reload=process)
+### Process reload trace (reload=process)
 
 - Change detection (Manager)
   - Poll entry mtime (debounced ~100ms, 50ms timer, 200ms cooldown)

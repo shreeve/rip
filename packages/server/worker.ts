@@ -62,7 +62,7 @@ async function checkForChanges(): Promise<boolean> {
 }
 
 async function getHandler(): Promise<(req: Request) => Promise<Response> | Response> {
-  // Simple mtime-based hot reload for module mode
+  // Simple mtime-based reload for module mode
   const hasChanged = await checkForChanges()
   if (hasChanged) {
     hotReloadCount++
