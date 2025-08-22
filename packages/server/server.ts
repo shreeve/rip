@@ -24,14 +24,20 @@ export class Server {
 
   start(): void {
     if (this.flags.httpPort !== null) {
-      this.server = Bun.serve({ port: this.flags.httpPort, idleTimeout: 8, fetch: this.fetch.bind(this) })
-      try {
-        if (this.flags.httpPort === 0 && this.server && typeof this.server.port === 'number') {
-          // Capture OS-assigned port when 0 was provided
+      // If port is 0 (auto), walk from 5000 upward to find a free port
+      const desired = this.flags.httpPort === 0 ? 5000 : this.flags.httpPort
+      let port = desired
+      while (true) {
+        try {
+          this.server = Bun.serve({ port, idleTimeout: 8, fetch: this.fetch.bind(this) })
           // @ts-ignore
           this.flags.httpPort = this.server.port
+          break
+        } catch (e: any) {
+          if (e && e.code === 'EADDRINUSE') { port++; continue }
+          throw e
         }
-      } catch {}
+      }
     }
     this.startControl()
   }

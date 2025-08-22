@@ -86,8 +86,11 @@ export function parseFlags(argv: string[]): ParsedFlags {
   const appPathInput = argv[2]
   const { baseDir, entryPath, appName } = resolveAppEntry(appPathInput)
 
-  const defaultPort = coerceInt(process.env.PORT, 5002)
-  const httpPort = coerceInt(getKV('http:'), defaultPort)
+  // If no explicit http: token and no PORT env, set to 0 (auto-select later)
+  const httpToken = getKV('http:')
+  let httpPort = 0
+  if (httpToken !== undefined) httpPort = coerceInt(httpToken, 0)
+  else if (process.env.PORT) httpPort = coerceInt(process.env.PORT, 0)
 
   const socketPrefixOverride = getKV('--socket-prefix=')
   const socketPrefix = socketPrefixOverride || `rip_${appName}`
