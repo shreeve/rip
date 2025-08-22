@@ -13,3 +13,6 @@ tmp/
 # Node modules
 node_modules/
 *.duckdb*
+
+*.crt
+*.key
