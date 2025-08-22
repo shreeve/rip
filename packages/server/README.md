@@ -57,7 +57,7 @@ bun server apps/my-app \
   - Force HTTP-only (no TLS, no redirect): `bun server http apps/labs/api`
   - Force HTTP-only on specific port: `bun server http:5002 apps/labs/api`
   - Provide cert/key: `bun server --cert=/full/path/app.pem --key=/full/path/app.key apps/labs/api`
-  - Use mkcert (stores under ~/.rip/certs): `bun server --use-mkcert apps/labs/api`
+  - Auto TLS (mkcert → self-signed): `bun server --auto-tls apps/labs/api`
 
 - Tuning workers/limits/logging
   - `bun server apps/labs/api w:auto r:20000,900s,10r --json-logging --queue-timeout-ms=2000 --max-queue=8192`
@@ -90,7 +90,7 @@ bun server apps/my-app \
  - `http[:<port>]` - HTTP-only listener (else HTTPS-first)
  - `--https-port=<port>` or bare `<port>` - HTTPS port select
  - `--cert=<path>` `--key=<path>` - TLS material (PEM)
- - `--use-mkcert` - use mkcert and cache under `~/.rip/certs`
+ - `--auto-tls` - try mkcert, else self-signed, cache under `~/.rip/certs`
  - `--hsts` - add Strict-Transport-Security when HTTPS active
 
 ### Environment Variables

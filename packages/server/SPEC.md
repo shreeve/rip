@@ -105,7 +105,7 @@ bun server stop
   - `https:<PORT>`: enable HTTPS listener on port (mirrors `http:<PORT>` style)
   - `--https-port=<PORT>`: explicit flag (alternative to bare `<PORT>`)
   - `--cert=<PATH>` / `--key=<PATH>`: TLS material (full paths). `--cert` may be a fullchain.
-  - `--use-mkcert`: use mkcert and cache under `~/.rip/certs/` (fallback to self‑signed)
+  - `--auto-tls`: try mkcert and cache under `~/.rip/certs/`; fallback to self‑signed
 - Redirect & HSTS:
   - `--redirect-http` (default on): bind 80 and 301 to HTTPS
   - Location includes port when HTTPS port ≠ 443 (e.g., `https://host:5700/path`)

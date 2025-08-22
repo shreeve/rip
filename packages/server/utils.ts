@@ -28,7 +28,7 @@ export interface ParsedFlags {
   httpsPort: number | null
   certPath?: string
   keyPath?: string
-  useMkcert: boolean
+  autoTls: boolean
   hsts: boolean
   redirectHttp: boolean
 }
@@ -200,7 +200,7 @@ export function parseFlags(argv: string[]): ParsedFlags {
   })()
   const certPath = getKV('--cert=') || undefined
   const keyPath = getKV('--key=') || undefined
-  const useMkcert = has('--use-mkcert')
+  const autoTls = has('--auto-tls') || has('--use-mkcert')
   const hsts = has('--hsts')
   const redirectHttp = !has('--no-redirect-http')
 
@@ -225,7 +225,7 @@ export function parseFlags(argv: string[]): ParsedFlags {
     httpsPort,
     certPath,
     keyPath,
-    useMkcert,
+    autoTls,
     hsts,
     redirectHttp,
   }

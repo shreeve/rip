@@ -279,7 +279,7 @@ export class Server {
     }
 
     // mkcert path under ~/.rip/certs
-    if (this.flags.useMkcert) {
+    if (this.flags.autoTls) {
       const dir = join(homedir(), '.rip', 'certs')
       try { mkdirSync(dir, { recursive: true }) } catch {}
       const certPath = join(dir, 'localhost.pem')
