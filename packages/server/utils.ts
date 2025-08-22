@@ -25,6 +25,11 @@ export interface ParsedFlags {
   connectTimeoutMs: number
   readTimeoutMs: number
   reload: ReloadMode
+  httpsPort: number | null
+  certPath?: string
+  keyPath?: string
+  hsts: boolean
+  redirectHttp: boolean
 }
 
 export function isDev(): boolean {
@@ -114,11 +119,49 @@ export function parseFlags(argv: string[]): ParsedFlags {
 
   const { baseDir, entryPath, appName } = resolveAppEntry(appPathInput)
 
-  // If no explicit http: token and no PORT env, set to 0 (auto-select later)
-  const httpToken = getKV('http:')
+  // Listener intent parsing (HTTPS is default)
+  const tokens = Array.from(rawFlags)
+  let bareIntPort: number | null = null
+  let hasHttpsKeyword = false
+  let httpsPortToken: number | null = null
+  let hasHttpKeyword = false
+  let httpPortToken: number | null = null
+  let httpsTokenCount = 0
+
+  for (const t of tokens) {
+    if (/^\d+$/.test(t)) { bareIntPort = Number.parseInt(t); httpsTokenCount++; continue }
+    if (t === 'https') { hasHttpsKeyword = true; httpsTokenCount++; continue }
+    if (t.startsWith('https:')) { httpsPortToken = coerceInt(t.slice('https:'.length), 0); httpsTokenCount++; continue }
+    if (t === 'http') { hasHttpKeyword = true; continue }
+    if (t.startsWith('http:')) { httpPortToken = coerceInt(t.slice('http:'.length), 0); continue }
+  }
+
+  let httpsIntent = bareIntPort !== null || hasHttpsKeyword || httpsPortToken !== null
+  const httpIntent = hasHttpKeyword || httpPortToken !== null
+  if (!httpsIntent && !httpIntent) httpsIntent = true
+  if (httpsIntent && httpIntent) {
+    console.error('Conflicting listener intents: both HTTP and HTTPS specified. Choose one.')
+    process.exit(2)
+  }
+  if (httpsTokenCount > 1) {
+    console.error('Conflicting HTTPS tokens: specify at most one HTTPS port/int token.')
+    process.exit(2)
+  }
+
+  // Resolve ports
   let httpPort = 0
-  if (httpToken !== undefined) httpPort = coerceInt(httpToken, 0)
-  else if (process.env.PORT) httpPort = coerceInt(process.env.PORT, 0)
+  if (httpIntent) {
+    httpPort = httpPortToken ?? 0
+  } else {
+    // HTTPS default; keep httpPort for redirect decisions inside server (handled later)
+    httpPort = 0
+  }
+
+  // Resolve httpsPort for flags (even pre-TLS). Use existing httpsPort var below.
+  let httpsPortDerived: number | null = null
+  if (!httpIntent) {
+    httpsPortDerived = (bareIntPort ?? httpsPortToken ?? 0)
+  }
 
   const socketPrefixOverride = getKV('--socket-prefix=')
   const socketPrefix = socketPrefixOverride || `rip_${appName}`
@@ -148,6 +191,17 @@ export function parseFlags(argv: string[]): ParsedFlags {
   if (reloadFlag === 'none' || reloadFlag === 'process' || reloadFlag === 'module') reload = reloadFlag
   else reload = 'process'
 
+  // TLS / HTTPS flags (initial wiring; paths only)
+  const httpsPort = (() => {
+    const kv = getKV('--https-port=')
+    if (kv !== undefined) return coerceInt(kv, 443)
+    return httpsPortDerived
+  })()
+  const certPath = getKV('--cert=') || undefined
+  const keyPath = getKV('--key=') || undefined
+  const hsts = has('--hsts')
+  const redirectHttp = !has('--no-redirect-http')
+
   return {
     appPath: resolve(appPathInput),
     appBaseDir: baseDir,
@@ -166,6 +220,11 @@ export function parseFlags(argv: string[]): ParsedFlags {
     connectTimeoutMs,
     readTimeoutMs,
     reload,
+    httpsPort,
+    certPath,
+    keyPath,
+    hsts,
+    redirectHttp,
   }
 }
 

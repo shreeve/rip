@@ -23,20 +23,42 @@ export class Server {
   }
 
   start(): void {
-    if (this.flags.httpPort !== null) {
-      // If port is 0 (auto), walk from 5000 upward to find a free port
-      const desired = this.flags.httpPort === 0 ? 5000 : this.flags.httpPort
-      let port = desired
+    // Listener selection
+    const httpOnly = this.flags.httpPort !== 0 && this.flags.httpPort !== null
+
+    const startOnPort = (p: number, fetchFn: (req: Request) => Promise<Response>) => {
+      let port = p
       while (true) {
         try {
-          this.server = Bun.serve({ port, idleTimeout: 8, fetch: this.fetch.bind(this) })
-          this.flags.httpPort = this.server.port
-          break
+          const s = Bun.serve({ port, idleTimeout: 8, fetch: fetchFn })
+          return s
         } catch (e: any) {
           if (e && e.code === 'EADDRINUSE') { port++; continue }
           throw e
         }
       }
+    }
+
+    if (httpOnly) {
+      const desired = this.flags.httpPort === 0 ? 5000 : this.flags.httpPort!
+      this.server = startOnPort(desired, this.fetch.bind(this))
+      this.flags.httpPort = this.server.port
+    } else {
+      const desired = 5000
+      this.httpsServer = startOnPort(desired, this.fetch.bind(this))
+      const httpsPort = this.httpsServer.port
+      if (this.flags.redirectHttp) {
+        try {
+          this.server = Bun.serve({ port: 80, idleTimeout: 8, fetch: (req: Request) => {
+            const url = new URL(req.url)
+            const loc = `https://${url.hostname}:${httpsPort}${url.pathname}${url.search}`
+            return new Response(null, { status: 301, headers: { Location: loc } })
+          } })
+        } catch {
+          console.warn('Warn: could not bind port 80 for HTTP→HTTPS redirect')
+        }
+      }
+      this.flags.httpPort = this.server ? this.server.port : 0
     }
     this.startControl()
   }
