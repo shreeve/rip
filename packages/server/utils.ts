@@ -49,21 +49,30 @@ export function parseWorkersToken(token: string | undefined, def: number): numbe
   return Number.isFinite(n) && n > 0 ? n : def
 }
 
-function parseRestartPolicyToken(token: string | undefined, defRequests: number, defSeconds: number): { maxRequests: number; maxSeconds: number } {
-  if (!token) return { maxRequests: defRequests, maxSeconds: defSeconds }
+function parseRestartPolicyToken(
+  token: string | undefined,
+  defRequests: number,
+  defSeconds: number,
+  defReloads: number,
+): { maxRequests: number; maxSeconds: number; maxReloads: number } {
+  if (!token) return { maxRequests: defRequests, maxSeconds: defSeconds, maxReloads: defReloads }
   let maxRequests = defRequests
   let maxSeconds = defSeconds
+  let maxReloads = defReloads
 
   for (const part of token.split(',').map(s => s.trim()).filter(Boolean)) {
     if (part.endsWith('s')) {
       const secs = Number.parseInt(part.slice(0, -1))
       if (Number.isFinite(secs) && secs >= 0) maxSeconds = secs
+    } else if (part.endsWith('r')) {
+      const rls = Number.parseInt(part.slice(0, -1))
+      if (Number.isFinite(rls) && rls >= 0) maxReloads = rls
     } else {
       const n = Number.parseInt(part)
       if (Number.isFinite(n) && n > 0) maxRequests = n
     }
   }
-  return { maxRequests, maxSeconds }
+  return { maxRequests, maxSeconds, maxReloads }
 }
 
 export function parseFlags(argv: string[]): ParsedFlags {
@@ -116,10 +125,15 @@ export function parseFlags(argv: string[]): ParsedFlags {
 
   const cores = require('os').cpus().length
   const workers = parseWorkersToken((getKV('w:') || undefined) as string | undefined, Math.max(1, Math.floor(cores / 2)))
-  const restartPolicy = parseRestartPolicyToken(getKV('r:'), coerceInt(process.env.RIP_MAX_REQUESTS, 10000), coerceInt(process.env.RIP_MAX_SECONDS, 3600))
+  const restartPolicy = parseRestartPolicyToken(
+    getKV('r:'),
+    coerceInt(process.env.RIP_MAX_REQUESTS, 10000),
+    coerceInt(process.env.RIP_MAX_SECONDS, 3600),
+    coerceInt(process.env.RIP_MAX_RELOADS, 10),
+  )
   const maxRequestsPerWorker = restartPolicy.maxRequests
   const maxSecondsPerWorker = restartPolicy.maxSeconds
-  const maxReloadsPerWorker = coerceInt(getKV('--max-reloads='), coerceInt(process.env.RIP_MAX_RELOADS, 10))
+  const maxReloadsPerWorker = restartPolicy.maxReloads
 
   const jsonLogging = has('--json') || has('--json-logging')
   const accessLog = !has('--no-access-log')

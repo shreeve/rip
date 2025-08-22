@@ -62,7 +62,9 @@ Provide a simple, HTTPS‑first server so every app is reachable at a clean URL 
 
 ### Current (already supported by `parseFlags()`)
 - Usage: `bun server [flags] <app-path>` (app path is position‑independent)
-- App path detection: first token that looks like a path (contains `/`, starts with `.`, absolute, or ends with `.rip`/`.ts`) and exists; resolves via `resolveAppEntry()`
+- App path:
+  - First token that looks like a path (contains `/`, starts with `.`, absolute, or ends with `.rip`/`.ts`) and exists; resolves via `resolveAppEntry()`
+  - Default: none, error if not supplied
 - HTTP port:
   - `http:<PORT>`: set HTTP listener port
   - Default: (when `PORT` unset), server probes from `5000` upward to first free port and prints a clickable URL
@@ -70,14 +72,16 @@ Provide a simple, HTTPS‑first server so every app is reachable at a clean URL 
   - `w:<N>` | `w:auto` | `w:half` | `w:2x` | `w:3x`
   - Default: `w:half`
 - Restart policy:
-  - `r:<REQUESTS>[,<SECONDS>s]` (whichever occurs first)
-  - Default: `r:10000,3600s`
+  - `r:<REQUESTS>[,<SECONDS>s][,<RELOADS>r]` (whichever occurs first)
+  - Examples: `r:50000`, `r:3600s`, `r:20000,1800s`, `r:50000,3600s,10r`
+  - Note: `<RELOADS>r` applies only when `--hot-reload=module`
+  - Default: `r:10000,3600s,10r`
 - Queue/Timeouts:
   - `--max-queue=<N>`
   - `--queue-timeout-ms=<N>`
   - `--connect-timeout-ms=<N>`
   - `--read-timeout-ms=<N>`
-  - `--max-reloads=<N>`: module reloads before cycling (module mode only)
+  - (deprecated) `--max-reloads=<N>`: use `r:...,<N>r` instead
 - Hot reload:
   - `--hot-reload=none|process|module` (default: `process`)
 - Logging:
