@@ -154,9 +154,11 @@ export class Manager {
     // Wait for readiness in parallel (best-effort)
     await Promise.all(pairs.map(p => this.waitWorkerReady(p.replacement.socketPath, 3000)))
 
-    // Now retire the old workers: send SIGTERM to all, wait exits in parallel, then prune
-    for (const { old } of pairs) this.retiringIds.add(old.id)
-    for (const { old } of pairs) { try { old.process.kill() } catch {} }
+    // Now retire the old workers: mark retiring and send SIGTERM (single pass), wait exits in parallel, then prune
+    for (const { old } of pairs) {
+      this.retiringIds.add(old.id)
+      try { old.process.kill() } catch {}
+    }
     await Promise.all(pairs.map(({ old }) => old.process.exited.catch(() => {})))
     const retiring = new Set(pairs.map(p => p.old.id))
     this.workers = this.workers.filter(w => !retiring.has(w.id))
