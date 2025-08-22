@@ -5,7 +5,7 @@
 import { existsSync, statSync } from 'fs'
 import { basename, dirname, isAbsolute, join, resolve } from 'path'
 
-export type HotReloadMode = 'none' | 'process' | 'module'
+export type ReloadMode = 'none' | 'process' | 'module'
 
 export interface ParsedFlags {
   appPath: string
@@ -24,7 +24,7 @@ export interface ParsedFlags {
   queueTimeoutMs: number
   connectTimeoutMs: number
   readTimeoutMs: number
-  hotReload: HotReloadMode
+  reload: ReloadMode
 }
 
 export function isDev(): boolean {
@@ -143,10 +143,10 @@ export function parseFlags(argv: string[]): ParsedFlags {
   const connectTimeoutMs = coerceInt(getKV('--connect-timeout-ms='), coerceInt(process.env.RIP_CONNECT_TIMEOUT_MS, 200))
   const readTimeoutMs = coerceInt(getKV('--read-timeout-ms='), coerceInt(process.env.RIP_READ_TIMEOUT_MS, 5000))
 
-  const hotFlag = getKV('--hot-reload=') || process.env.RIP_HOT_RELOAD
-  let hotReload: HotReloadMode = 'none'
-  if (hotFlag === 'none' || hotFlag === 'process' || hotFlag === 'module') hotReload = hotFlag
-  else hotReload = 'process'
+  const reloadFlag = getKV('--reload=') || process.env.RIP_RELOAD
+  let reload: ReloadMode = 'none'
+  if (reloadFlag === 'none' || reloadFlag === 'process' || reloadFlag === 'module') reload = reloadFlag
+  else reload = 'process'
 
   return {
     appPath: resolve(appPathInput),
@@ -165,7 +165,7 @@ export function parseFlags(argv: string[]): ParsedFlags {
     queueTimeoutMs,
     connectTimeoutMs,
     readTimeoutMs,
-    hotReload,
+    reload,
   }
 }
 

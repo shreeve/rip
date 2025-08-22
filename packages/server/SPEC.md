@@ -81,9 +81,8 @@ Provide a simple, HTTPS‑first server so every app is reachable at a clean URL 
   - `--queue-timeout-ms=<N>`
   - `--connect-timeout-ms=<N>`
   - `--read-timeout-ms=<N>`
-  - (deprecated) `--max-reloads=<N>`: use `r:...,<N>r` instead
-- Hot reload:
-  - `--hot-reload=none|process|module` (default: `process`)
+- Reload mode:
+  - `--reload=none|process|module` (default: `process`)
 - Logging:
   - `--json` or `--json-logging`: enable structured logs (default off)
   - Human access logs on by default; disable with `--no-access-log`

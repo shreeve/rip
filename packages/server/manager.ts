@@ -49,7 +49,7 @@ export class Manager {
       const w = await this.spawnWorker(this.currentVersion)
       this.workers.push(w)
     }
-    if (this.flags.hotReload === 'process') {
+    if (this.flags.reload === 'process') {
       // lightweight mtime poller for entry file
       this.currentMtime = this.getEntryMtime()
       const interval = setInterval(() => {
@@ -105,7 +105,7 @@ export class Manager {
         SOCKET_PATH: socketPath,
         SOCKET_PREFIX: this.flags.socketPrefix,
         RIP_LOG_JSON: this.flags.jsonLogging ? '1' : '0',
-        RIP_HOT_RELOAD: this.flags.hotReload,
+        RIP_RELOAD: this.flags.reload,
         RIP_VERSION: String(version ?? this.currentVersion),
       },
     })

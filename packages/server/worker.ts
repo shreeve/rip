@@ -18,7 +18,7 @@ const maxSeconds = Number.parseInt(process.argv[5] ?? '0')
 const appEntry = process.argv[6]
 
 const socketPath = process.env.SOCKET_PATH as string  // Per-worker Unix socket path
-const hotReloadMode = (process.env.RIP_HOT_RELOAD as 'none' | 'process' | 'module') || 'none'
+const hotReloadMode = (process.env.RIP_RELOAD as 'none' | 'process' | 'module') || 'none'
 const socketPrefix = process.env.SOCKET_PREFIX as string
 const version = Number.parseInt(process.env.RIP_VERSION || '1')
 
