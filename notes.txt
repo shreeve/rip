@@ -259,10 +259,6 @@ Please scan the packages/server2 code again... I want to see if we can do as MUC
 
 Should we implement a 'restart' command like 'stop' for the server that basically does a stop first and then runs? so we don't have to call it twice???
 
-==
-
-bun /Users/shreeve/Data/Code/rip/packages/server2/rip-server.ts --stop || true; port=6063; app=/Users/shreeve/Data/Code/rip/apps/labs/api; log=/tmp/server2-hr-wrk2-$port.log; cp -f $app/index.rip $app/index.rip.orig; nohup bun /Users/shreeve/Data/Code/rip/packages/server2/rip-server.ts $app http:$port w:24 --no-access-log --hot-reload=process > $log 2>&1 & spid=$!; for i in $(seq 1 120); do curl -sf http://127.0.0.1:$port/status | grep -q '"workers"\s*:\s*24' && break; sleep 0.2; done; echo '--- start wrk 10s with live edits (cooldown enabled) ---'; ( sleep 1; for i in 1 2 3 4 5; do perl -0777 -pe "s/get '\/ping'.*?\n/get '\/ping', -> 'pong-live2-$i'\n/s" -i $app/index.rip; sleep 2; done ) & wrk -t2 -c24 -d10s http://127.0.0.1:6063/ping | cat; sleep 1; echo '--- restore file ---'; mv -f $app/index.rip.orig $app/index.rip; sleep 1; echo '--- final /ping ---'; curl -is http://127.0.0.1:$port/ping | cat; echo; echo '--- recent log ---'; tail -n 240 $log | sed -e 's/\x1b\[[0-9;]*m//g' | cat; kill $spid; wait $spid 2>/dev/null || true
-
 ==[ We can tell Cursor to create files like this in .cursor/rules/* and it'll do it's best to honor these files! ]==
 
 use-hono-over-express.mdc: Prefer Hono for HTTP; don’t introduce Express/Koa.
