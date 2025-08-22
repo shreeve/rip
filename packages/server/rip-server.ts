@@ -18,8 +18,8 @@ async function main(): Promise<void> {
     return
   }
   const flags = parseFlags(process.argv)
-  const lb = new Server(flags)
-  await lb.start()
+  const svr = new Server(flags)
+  await svr.start()
   const mgr = new Manager(flags)
   await mgr.start()
   const http = flags.httpPort ?? 0
