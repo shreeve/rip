@@ -29,6 +29,13 @@ export class Manager {
   private currentMtime = 0
   private isRolling = false
   private lastRollAt = 0
+  
+  // Allocate unique ids when temporarily over-provisioning during rolling restarts
+  private getNextWorkerId(): number {
+    let maxId = -1
+    for (const w of this.workers) maxId = Math.max(maxId, w.id)
+    return maxId + 1
+  }
 
   constructor(flags: ParsedFlags) {
     this.flags = flags
@@ -117,12 +124,39 @@ export class Manager {
     if (idx >= 0) this.workers[idx] = await this.spawnWorker(w.id)
   }
 
+  // Wait for a worker's unix socket to respond ready
+  private async waitWorkerReady(socketPath: string, timeoutMs = 5000): Promise<boolean> {
+    const start = Date.now()
+    while (Date.now() - start < timeoutMs) {
+      try {
+        const res = await fetch('http://localhost/ready', { unix: socketPath, method: 'GET' })
+        if (res.ok) {
+          const txt = await res.text()
+          if (txt === 'ok') return true
+        }
+      } catch {}
+      await new Promise(r => setTimeout(r, 30))
+    }
+    return false
+  }
+
   async rollingRestart(): Promise<void> {
-    for (const w of [...this.workers]) {
-      try { w.process.kill() } catch {}
-      try { await w.process.exited } catch {}
-      const idx = this.workers.findIndex(x => x.id === w.id)
-      if (idx >= 0) this.workers[idx] = await this.spawnWorker(w.id)
+    // Spawn-before-kill to avoid capacity gaps
+    for (const oldWorker of [...this.workers]) {
+      const newId = this.getNextWorkerId()
+      const replacement = await this.spawnWorker(newId)
+      // Wait briefly for readiness; proceed regardless after timeout to avoid stalls
+      await this.waitWorkerReady(replacement.socketPath, 3000)
+
+      // Swap in the replacement, then retire the old worker
+      const idx = this.workers.findIndex(x => x.id === oldWorker.id)
+      if (idx >= 0) this.workers.splice(idx, 0, replacement)
+
+      try { oldWorker.process.kill() } catch {}
+      try { await oldWorker.process.exited } catch {}
+      // Remove the old entry if still present; keep the replacement
+      const oldIdx = this.workers.findIndex(x => x.id === oldWorker.id)
+      if (oldIdx >= 0) this.workers.splice(oldIdx, 1)
     }
   }
 
