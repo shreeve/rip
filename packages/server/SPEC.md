@@ -1,0 +1,128 @@
+# Rip Server HTTPS Gateway (Host-based) – SPEC
+
+## Purpose
+Provide a simple, HTTPS‑first gateway so every app is reachable at a clean URL (Host‑based), with a single listener (443) and automatic HTTP→HTTPS redirect (80). Eliminate per‑app ports in day‑to‑day use.
+
+## Goals
+- Always‑on HTTPS in dev/staging/prod; HTTP only serves redirects (80→443).
+- Route by Host header (e.g., https://labs.ripdev.io) to an app; no port management.
+- Keep per‑worker Unix sockets and one‑inflight‑per‑worker isolation.
+- Simple host registry and CLI/API to add/remove host→app mappings.
+- Dev‑friendly certs (mkcert or step‑ca); staging/prod via Let’s Encrypt (DNS‑01).
+- Preserve existing logging/access patterns; add minimal security presets.
+
+## Non‑Goals (initial)
+- No full ACME automation on day 1 (staging/prod DNS‑01 can be a follow‑up).
+- No multi‑tenant platform dashboard (future). CLI/API only for registry.
+- No blue‑green orchestration (rolling restarts suffice).
+
+## Assumptions
+- Domain: ripdev.io (owned). For dev: wildcard DNS may map to loopback (127.0.0.1/::1).
+- Developers obtain trusted certs either per‑host (mkcert) or via a community dev CA (step‑ca).
+- Mobile testing requires mapping hostnames to a LAN IP and trusting the dev CA on the device.
+
+## High‑level Architecture
+- Gateway/LB: single Bun.serve on 443 (TLS) and 80 (redirect only). Routes by Host to app workers.
+- Manager: spawns workers; informs gateway which hostnames map to which app (join/quit host registry).
+- Worker: unchanged core; per‑worker Unix sockets; hotReload modes (none|process|module) preserved.
+
+## Routing
+- Incoming request → parse Host (SNI + Host header)
+- Lookup host→app in registry; if not found: 404 (or configurable 502).
+- Forward to selected app’s per‑worker socket using existing LB logic (retry on `Rip-Worker-Busy`).
+- Strip internal headers on response; normalize date header as today.
+
+## TLS & Certificates
+- Dev:
+  - Option A: mkcert per developer
+    - mkcert app.ripdev.io (or wildcard on their machine)
+    - Configure LB with cert/key paths via flags or env
+  - Option B: step‑ca (community dev CA)
+    - Developers trust CA root locally
+    - Issue per‑host certs via ACME/CSR; private keys stay on dev machines
+- Staging/Prod:
+  - Let’s Encrypt DNS‑01 wildcard certs (e.g., *.stg.ripdev.io, *.ripdev.io)
+  - Store PEMs securely; hot‑reload certificates with zero downtime
+
+## HTTP → HTTPS
+- 80 listens, responds 301 Location: https://host/path?query
+- Optional exceptions: ACME challenges; otherwise redirect all.
+
+## Configuration & Flags
+- Flags/env (via `parseFlags()` in `utils.ts`):
+  - `--https-port=<n>` (default: 443; null disables)
+  - `--http-port=<n>` (default: 80; null disables)
+  - `--cert=<path.pem>` `--key=<path.pem>` (PEM strings also accepted via env)
+  - `--hsts` (default: off in dev; on in staging/prod)
+  - Timeouts/body: `--connect-timeout-ms`, `--read-timeout-ms`, `--max-request-body`
+  - Logging: `--json-logging`
+  - Hot reload: `--hot-reload=none|process|module`
+- Host registry persistence (initially in‑memory; optional JSON file for dev convenience)
+
+## Host Registry & CLI/API
+- Registry shape: `{ host: string, appPath: string, createdAt, updatedAt }`
+- Control operations (via control socket/API):
+  - `host:add { host, appPath }`
+  - `host:remove { host }`
+  - `host:list`
+- CLI UX (examples):
+  - `bun server host add labs.ripdev.io apps/labs/api`
+  - `bun server host remove labs.ripdev.io`
+  - `bun server host list`
+- Manager integrates with registry so worker lifecycle aligns with host mappings (spawn on add; stop on remove).
+
+## Logging & Metrics
+- Keep existing human logs and JSON logs. Include host name and app name in records.
+- `/status` returns gateway health and per‑host mapping counts (no secrets).
+
+## Security Defaults
+- HTTPS‑only by default; HTTP only for redirects.
+- `Cache-Control: no-store` by default on worker responses.
+- Optional HSTS flag (`off` in dev; `on` in staging/prod).
+- Body size/timeouts sane defaults; rate‑limit is future work.
+
+## Backward Compatibility & Migration
+- Existing single‑app mode (hostless) remains via a default host mapping if desired (e.g., when Host not found and one app configured).
+- Port‑based workflows still possible by bypassing the gateway for advanced users (not the default path).
+
+## Milestones
+1) HTTPS Core
+- Add TLS flags; serve on 443 with provided cert/key
+- 80→301 redirect; preserve existing LB
+
+2) Host Routing + Registry
+- In‑memory registry; Host lookup → app
+- CLI/API for host add/remove/list
+- Manager spawns/stops workers based on host mappings
+
+3) Dev Cert UX
+- Document mkcert quickstart
+- Optional: integrate step‑ca instructions; helper commands to print cert info
+
+4) Polish & Presets
+- HSTS flag; timeouts/body presets
+- Logs include host/app
+- Minimal persistence for registry in dev (JSON file)
+
+5) Staging/Prod TLS (Follow‑up)
+- DNS‑01 automation scripts (certbot/acme.sh) for wildcards
+- Hot reload certs; optional HTTP/2
+
+## Acceptance Criteria
+- Can browse https://labs.ripdev.io (dev) with trusted HTTPS and no browser warnings
+- HTTP on 80 redirects to HTTPS
+- Adding a host via CLI immediately serves that app (no port juggling)
+- WebSockets work end‑to‑end
+- JSON logs include host and durations
+- Removing a host stops routing; 404 thereafter
+
+## Open Questions
+- Registry persistence scope (ephemeral vs. simple file vs. proper store)
+- Default behavior when Host not found (404 vs. default app)
+- ACME automation ownership (server vs. ops scripts)
+
+## References Pulled From LEGACY.md
+- TLS example (Bun.serve tls: {cert, key})
+- CA folder conventions (RIP_CONFIG_DIR/ca|certs|run)
+- HTTPS modes (quick|ca|smart) – simplified to HTTPS‑only + cert flags
+- Security presets (HSTS toggle; no‑store; timeouts)
