@@ -49,10 +49,9 @@ export class Server {
       this.server = startOnPort(desired, this.fetch.bind(this))
       this.flags.httpPort = this.server.port
     } else {
-      const desired = 5000
       const tls = await this.loadTlsMaterial()
-      this.httpsServer = (() => {
-        let port = desired
+      const startOnTlsPort = (p: number) => {
+        let port = p
         while (true) {
           try {
             const s = Bun.serve({ port, idleTimeout: 8, tls, fetch: this.fetch.bind(this) })
@@ -62,7 +61,21 @@ export class Server {
             throw e
           }
         }
-      })()
+      }
+      // Default: try 443 first, then probe from 5000+
+      if (!this.flags.httpsPort || this.flags.httpsPort === 0) {
+        try {
+          this.httpsServer = Bun.serve({ port: 443, idleTimeout: 8, tls, fetch: this.fetch.bind(this) })
+        } catch (e: any) {
+          if (e && (e.code === 'EADDRINUSE' || e.code === 'EACCES')) {
+            this.httpsServer = startOnTlsPort(5000)
+          } else {
+            throw e
+          }
+        }
+      } else {
+        this.httpsServer = startOnTlsPort(this.flags.httpsPort)
+      }
       const httpsPort = this.httpsServer.port
       this.flags.httpsPort = httpsPort
       this.httpsActive = true

@@ -51,8 +51,8 @@ bun server apps/my-app \
 - Basic dev (defaults)
   - `bun server apps/labs/api`
 
--- HTTPS defaults and options
-  - HTTPS default (auto-port + 80→301): `bun server apps/labs/api`
+- HTTPS defaults and options
+  - HTTPS default (try 443, else auto-port 5000+; 80→301): `bun server apps/labs/api`
   - HTTPS on a specific port (bare int): `bun server 5700 apps/labs/api`
   - Force HTTP-only (no TLS, no redirect): `bun server http apps/labs/api`
   - Force HTTP-only on specific port: `bun server http:5002 apps/labs/api`
@@ -65,7 +65,7 @@ bun server apps/my-app \
 - Override reload mode
   - `bun server apps/labs/api --reload=module`
 
--- Explicit redirect toggle
+- Explicit redirect toggle
   - `bun server apps/labs/api --no-redirect-http`
 
 - Host registry (subcommands)
