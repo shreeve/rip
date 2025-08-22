@@ -1,232 +1,44 @@
 /**
- * 🌐 Rip Server - HTTP Server and Load Balancer
+ * Legacy server.ts (GUTTED): preserved HTTPS/TLS snippets for migration.
  *
- * High-performance HTTP server that load balances requests across Rip workers.
- * Features intelligent 503 failover for perfect sequential processing.
+ * This file is intentionally non-functional and kept only to retain small
+ * pieces we still want to port into the new per-worker LB server
+ * in `packages/server/server.ts`.
+ *
+ * References for cert generation and CA usage:
+ * - HTTPS-SETUP.md
+ * - CURL-HTTPS-GUIDE.md
  */
 
-import { join } from 'path'
-import { formatTimestamp, getSharedSocketPath, scale } from './utils'
+/**
+ * HTTPS/TLS snippet preserved from legacy for porting:
+ *
+ * Example (Bun HTTPS server):
+ *
+ *   const httpsServer = Bun.serve({
+ *     port: httpsPort,
+ *     tls: { cert, key },
+ *     fetch: handleRequest,
+ *   })
+ *
+ * Where:
+ * - httpsPort: number
+ * - cert: string (PEM)
+ * - key: string (PEM)
+ *
+ * Legacy code lines for reference:
+ *
+ *   const { httpsPort, cert, key } = this.httpsConfig
+ *   this.httpsServer = Bun.serve({
+ *     port: httpsPort,
+ *     tls: { cert, key },
+ *     fetch: this.handleRequest.bind(this),
+ *   })
+ *
+ * Porting guidance:
+ * - Add optional HTTPS listener alongside HTTP in the new LB (`LBServer`).
+ * - Reuse the same fetch handler used by HTTP so both endpoints share logic.
+ * - Extend flags to include httpsPort, cert path, key path (and optionally CA).
+ */
 
-export class RipServer {
-  private port: number | null
-  private appName: string
-  private numWorkers: number
-  private sharedSocketPath: string // Single shared socket path
-  private totalRequests = 0
-  private server: any = null
-  private httpsServer: any = null
-  private httpsConfig?: { httpsPort: number; cert: string; key: string }
-  private useJsonLogs: boolean
-  private startTime: number = performance.now()
-
-  constructor(
-    port: number,
-    appName: string,
-    numWorkers: number,
-    httpsConfig?: { httpsPort: number; cert: string; key: string },
-    jsonLogging = false,
-  ) {
-    this.port = port ?? null
-    this.appName = appName
-    this.numWorkers = numWorkers
-    this.httpsConfig = httpsConfig
-    this.useJsonLogs = jsonLogging
-
-    // Single shared socket path (nginx + unicorn pattern)
-    this.sharedSocketPath = getSharedSocketPath(appName)
-  }
-
-  /**
-   * Start the HTTP server
-   */
-  async start(): Promise<void> {
-    if (this.port) {
-      this.server = Bun.serve({
-        port: this.port,
-        fetch: this.handleRequest.bind(this),
-      })
-      console.log(`✅ http://localhost:${this.port}`)
-    }
-
-    if (this.httpsConfig) {
-      const { httpsPort, cert, key } = this.httpsConfig
-      this.httpsServer = Bun.serve({
-        port: httpsPort,
-        tls: { cert, key },
-        fetch: this.handleRequest.bind(this),
-      })
-      console.log(`✅ https://localhost:${httpsPort}`)
-    }
-  }
-
-  /**
-   * Stop the HTTP server
-   */
-  async stop(): Promise<void> {
-    if (this.server) {
-      this.server.stop()
-    }
-    if (this.httpsServer) {
-      this.httpsServer.stop()
-    }
-  }
-
-  /**
-   * Handle incoming HTTP request with load balancing
-   */
-  private async handleRequest(req: Request): Promise<Response> {
-    const url = new URL(req.url)
-
-    // Status endpoint (replaces /health and /metrics)
-    if (url.pathname === '/status') {
-      const uptime = Math.floor((performance.now() - this.startTime) / 1000)
-      const avgRequestsPerWorker =
-        this.numWorkers > 0
-          ? Math.floor(this.totalRequests / this.numWorkers)
-          : 0
-
-      return new Response(
-        JSON.stringify({
-          status: 'healthy',
-          app: this.appName,
-          architecture: 'shared-socket',
-          workers: {
-            count: this.numWorkers,
-            totalRequests: this.totalRequests,
-            avgRequestsPerWorker,
-          },
-          server: {
-            uptime: `${uptime}s`,
-            protocol: this.httpsConfig
-              ? this.port
-                ? 'http+https'
-                : 'https'
-              : 'http',
-            ports: {
-              ...(this.port && { http: this.port }),
-              ...(this.httpsConfig && { https: this.httpsConfig.httpsPort }),
-            },
-          },
-          timestamp: new Date().toISOString(),
-        }),
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'Cache-Control': 'no-cache',
-          },
-        },
-      )
-    }
-
-    // Forward to shared socket (kernel handles load balancing)
-    return await this.forwardToSharedSocket(req)
-  }
-
-  /**
-   * Forward request to shared socket (nginx + unicorn pattern)
-   */
-  private async forwardToSharedSocket(req: Request): Promise<Response> {
-    const startTime = performance.now()
-    this.totalRequests++
-
-    try {
-      // Forward request to shared socket - kernel picks available worker
-      const workerStart = performance.now()
-      const response = await this.forwardToWorker(req, this.sharedSocketPath)
-      const workerTime = performance.now() - workerStart
-
-      // Add server headers
-      const headers = new Headers(response.headers)
-      headers.set('X-Rip-App', this.appName)
-      headers.set('X-Rip-Architecture', 'shared-socket')
-      const totalTime = performance.now() - startTime
-      headers.set('X-Response-Time', `${Math.round(totalTime)}ms`)
-
-      const outResp = new Response(response.body, {
-        status: response.status,
-        statusText: response.statusText,
-        headers,
-      })
-
-      // Structured, aligned console logging (screen mode)
-      // Convert milliseconds to seconds for precise scaling
-      this.logRequest(req, outResp, totalTime / 1000, workerTime / 1000)
-      return outResp
-    } catch (error) {
-      console.error(
-        `❌ [Server] Shared socket failed for app '${this.appName}':`,
-        error,
-      )
-      return new Response('Service unavailable', { status: 503 })
-    }
-  }
-
-  /**
-   * Forward request to a specific worker via Unix socket
-   */
-  private async forwardToWorker(
-    req: Request,
-    socketPath: string,
-  ): Promise<Response> {
-    // Rebuild URL for unix socket forwarding (scheme/host don't matter)
-    const inUrl = new URL(req.url)
-    const forwardUrl = `http://localhost${inUrl.pathname}${inUrl.search}`
-    return await fetch(forwardUrl, {
-      method: req.method,
-      headers: req.headers,
-      body: req.body,
-      unix: socketPath,
-    })
-  }
-
-  /**
-   * Pretty console logger with fixed-width timestamp and two duration slots
-   */
-  private logRequest(
-    req: Request,
-    res: Response,
-    totalSeconds: number,
-    workerSeconds: number,
-  ): void {
-    if (this.useJsonLogs) {
-      const url = new URL(req.url)
-      const len = res.headers.get('content-length')
-      const type =
-        (res.headers.get('content-type') || '').split(';')[0] || undefined
-      console.log(
-        JSON.stringify({
-          t: new Date().toISOString(),
-          app: this.appName,
-          method: (req as any).method || 'GET',
-          path: url.pathname,
-          status: res.status,
-          totalSeconds,
-          workerSeconds,
-          type,
-          length: len ? Number(len) : undefined,
-        }),
-      )
-      return
-    }
-    const { timestamp, timezone } = formatTimestamp()
-
-    const d1 = scale(totalSeconds, 's')
-    const d2 = scale(workerSeconds, 's')
-    const method = (req as any).method || 'GET'
-    const url = new URL(req.url)
-    const path = url.pathname
-    const status = res.status
-    const lenHeader = res.headers.get('content-length') || ''
-    const len = lenHeader ? `${lenHeader}B` : ''
-    const contentType =
-      (res.headers.get('content-type') || '').split(';')[0] || ''
-    const type = contentType.includes('/')
-      ? contentType.split('/')[1]
-      : contentType
-
-    console.log(
-      `[${timestamp} ${timezone} ${d1} ${d2}] ${method} ${path} → ${status} ${type} ${len}`,
-    )
-  }
-}
+export {}
