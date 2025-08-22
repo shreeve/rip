@@ -167,6 +167,39 @@ export function formatTimestamp(): { timestamp: string; timezone: string } {
   return { timestamp, timezone }
 }
 
+export function scale(value: number, unit: string, pad: boolean = true): string {
+  if (value > 0 && Number.isFinite(value)) {
+    const span = ['T', 'G', 'M', 'k', pad ? ' ' : '', 'm', 'µ', 'n', 'p'] as const
+    const base = 4, min = 0, max = span.length - 1
+    let   slot = base // index of base unit
+
+    // Target display range for best 3-char digits: '0.1', '1.1', ' 11', '111'
+    while (value <    0.05 && slot <= max) { value *= 1000; slot++ }
+    while (value >= 999.5  && slot >= min) { value /= 1000; slot-- }
+
+    // Handle overflow or underflow
+    if (slot >= min && slot <= max) {
+
+      // Use tenths-rounded proxy to determine formatting
+      const tens = Math.round(value * 10) / 10
+
+      let nums: string
+      if      (tens >= 99.5) nums = Math.round(value).toString()
+      else if (tens >= 10  ) nums = Math.round(value).toString()
+      else                   nums = tens.toFixed(1)
+      if (pad) nums = nums.padStart(3, ' ')
+      return `${nums}${span[slot]}${unit}`
+    }
+  }
+
+  // edge cases
+  if (value == 0) {
+    return `${pad ? '  0 ' : '0'}${unit}`
+  } else {
+    return `???${pad ? ' ' : ''}${unit}`
+  }
+}
+
 export function logAccessJson(app: string, req: Request, res: Response, totalSeconds: number, workerSeconds: number): void {
   const url = new URL(req.url)
   const len = res.headers.get('content-length')
