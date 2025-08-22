@@ -21,7 +21,9 @@ async function main(): Promise<void> {
   lb.start()
   const mgr = new Manager(flags)
   await mgr.start()
-  console.log(`rip-server: app=${flags.appName} http=${flags.httpPort} workers=${flags.workers}`)
+  const port = flags.httpPort ?? 0
+  const url = `http://localhost:${port}/server`
+  console.log(`rip-server: app=${flags.appName} http=${port} workers=${flags.workers} url=${url}`)
 }
 
 main().catch(err => {
