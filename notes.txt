@@ -262,3 +262,16 @@ Should we implement a 'restart' command like 'stop' for the server that basicall
 ==
 
 bun /Users/shreeve/Data/Code/rip/packages/server2/rip-server.ts --stop || true; port=6063; app=/Users/shreeve/Data/Code/rip/apps/labs/api; log=/tmp/server2-hr-wrk2-$port.log; cp -f $app/index.rip $app/index.rip.orig; nohup bun /Users/shreeve/Data/Code/rip/packages/server2/rip-server.ts $app http:$port w:24 --no-access-log --hot-reload=process > $log 2>&1 & spid=$!; for i in $(seq 1 120); do curl -sf http://127.0.0.1:$port/status | grep -q '"workers"\s*:\s*24' && break; sleep 0.2; done; echo '--- start wrk 10s with live edits (cooldown enabled) ---'; ( sleep 1; for i in 1 2 3 4 5; do perl -0777 -pe "s/get '\/ping'.*?\n/get '\/ping', -> 'pong-live2-$i'\n/s" -i $app/index.rip; sleep 2; done ) & wrk -t2 -c24 -d10s http://127.0.0.1:6063/ping | cat; sleep 1; echo '--- restore file ---'; mv -f $app/index.rip.orig $app/index.rip; sleep 1; echo '--- final /ping ---'; curl -is http://127.0.0.1:$port/ping | cat; echo; echo '--- recent log ---'; tail -n 240 $log | sed -e 's/\x1b\[[0-9;]*m//g' | cat; kill $spid; wait $spid 2>/dev/null || true
+
+==
+
+use-hono-over-express.mdc: Prefer Hono for HTTP; don’t introduce Express/Koa.
+bun-test-and-tooling.mdc: Use bun test; avoid Jest/Vitest; use Bun.$ over execa; Bun.file over fs for reads.
+monorepo-workspaces.mdc: Run scripts from repo root; reference packages via packages/<name>; avoid per-package npm scripts unless necessary.
+server-architecture-guardrails.mdc: Per-worker sockets + control socket; avoid shared-socket patterns; one-inflight-per-worker; keep LB retry on 503 with Rip-Worker-Busy.
+logging-standards.mdc: Use JSON logs with --json-logging in automation; otherwise fixed-width; keep /status minimal; strip Date header when proxying.
+env-and-config.mdc: Use RIP_* env vars; parse with coerceInt; prefer parseFlags() pattern; keep hotReload values: none|process|module.
+typescript-stance.mdc: Strong types for public APIs; no any in shared utilities; avoid ambient deps.
+security-basics.mdc: Default Cache-Control: no-store for worker responses; plan for HTTP→HTTPS redirect flag and HSTS (do not implement silently).
+import-style-and-paths.mdc: Use absolute imports within packages when configured; keep import order (std, third-party, internal); avoid deep relative traversal.
+commit-and-pr-guidelines.mdc: Conventional commits; run bun test + biome before PR; keep changesatomic.
