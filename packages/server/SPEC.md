@@ -61,35 +61,39 @@ Provide a simple, HTTPS‑first server so every app is reachable at a clean URL 
 ## CLI Overview (Current vs Proposed)
 
 ### Current (already supported by `parseFlags()`)
-- Values (order‑independent unless noted):
-  - `<app-path>`: positional today (argv[2]); resolves via `resolveAppEntry()`
-  - `http:<PORT>`: override HTTP port (currently used for entry listener)
-  - `w:<N>` / `w:auto`: workers count (number or `auto` = CPU cores)
-  - `r:<N>`: max requests per worker
-  - Queue/Timeouts:
-    - `--max-queue=<N>`
-    - `--queue-timeout-ms=<N>`
-    - `--connect-timeout-ms=<N>`
-    - `--read-timeout-ms=<N>`
-    - `--max-reloads=<N>`: max module reloads before cycling
-  - Hot reload:
-    - `--hot-reload=none|process|module` (default: `process` in dev, `none` in prod)
-  - Misc:
-    - `--socket-prefix=<name>`: override socket naming prefix
-    - `--json` or `--json-logging`: enable structured logs
-    - `--no-access-log`: disable human access logs
-  - Control:
-    - `--stop`: best‑effort stop of running server processes
+- Usage: `bun server [flags] <app-path>` (app path is position‑independent)
+- App path detection: first token that looks like a path (contains `/`, starts with `.`, absolute, or ends with `.rip`/`.ts`) and exists; resolves via `resolveAppEntry()`
+- HTTP port:
+  - `http:<PORT>`: set HTTP listener port
+  - If not provided (and `PORT` unset), server probes from `5000` upward to first free port and prints a clickable URL
+- Workers:
+  - `w:<N>` | `w:auto` | `w:half` | `w:2x` | `w:3x`
+  - Default: `w:half`
+- Restart policy:
+  - `r:<REQUESTS>[,<SECONDS>s]` (whichever occurs first)
+  - Default: `r:10000,3600s`
+- Queue/Timeouts:
+  - `--max-queue=<N>`
+  - `--queue-timeout-ms=<N>`
+  - `--connect-timeout-ms=<N>`
+  - `--read-timeout-ms=<N>`
+  - `--max-reloads=<N>`: module reloads before cycling (module mode only)
+- Hot reload:
+  - `--hot-reload=none|process|module` (default: `process`)
+- Logging:
+  - `--json` or `--json-logging`: enable structured logs (default off)
+  - Human access logs on by default; disable with `--no-access-log`
+- Misc:
+  - `--socket-prefix=<name>`: override per‑worker socket naming prefix
+- Control subcommands:
+  - `stop`: best‑effort stop of running server processes (position‑independent)
 
-Examples (current style):
+Examples:
 ```bash
-bun server apps/labs/api http:5002 w:auto r:10000 --json-logging --queue-timeout-ms=2000
-```
-
-Examples (order‑independent app path):
-```bash
+bun server apps/labs/api http:5002 w:auto r:20000 --json-logging --queue-timeout-ms=2000
 bun server http:5002 w:auto apps/labs/api
-bun server w:6 apps/labs/api r:20000
+bun server w:6 apps/labs/api r:20000,900s
+bun server stop
 ```
 ### Proposed additions (this SPEC)
 - HTTPS + TLS:
@@ -109,7 +113,7 @@ bun server w:6 apps/labs/api r:20000
   - `remove <host>`
   - `list`
 - Control (subcommands):
-  - `stop`: best‑effort stop of running server processes (back‑compat `--stop` remains)
+  - `stop`: best‑effort stop of running server processes
 - Limits:
   - `--max-request-body=<N>`: override worker `maxRequestBodySize` (default 100MB)
 
