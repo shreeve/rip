@@ -6,7 +6,7 @@ High-performance HTTP entry that dispatches to per-worker Unix sockets. The serv
 
 - **Per-Worker Unix Sockets**: One socket per worker; the server selects idle workers
 - **Single-Inflight Isolation**: One request per worker for clean resource management
-- **Hot Reload Support**: none, process (rolling restart on entry mtime), module (in-worker)
+- **Reload Support**: none, process (rolling restart on entry mtime), module (in-worker)
 - **Unix Socket Communication**: High-performance inter-process communication
 
 ## 📊 Performance
@@ -20,7 +20,7 @@ High-performance HTTP entry that dispatches to per-worker Unix sockets. The serv
 
 1. **Manager** (`manager.ts`): Process supervisor that spawns and monitors workers
 2. **Server** (`server.ts`): HTTP entry + per-worker selector (control socket)
-3. **Worker** (`worker.ts`): Single-inflight request handlers with hot reload support (join/quit)
+3. **Worker** (`worker.ts`): Single-inflight request handlers with reload support (join/quit)
 4. **CLI** (`rip-server.ts`): Command-line interface and configuration parsing
 5. **Utils** (`utils.ts`): Shared utilities and flag parsing
 
@@ -41,8 +41,8 @@ bun server <app-path> w:4 http:5002
 ```bash
 bun server apps/my-app \
   w:8 \
-  --max-reloads=20 \
-  --hot-reload=module \
+  r:20000,1800s,20r \
+  --reload=module \
   --json-logging
 ```
 
@@ -67,10 +67,10 @@ bun server apps/my-app \
   - `bun server --cert=./certs/app.pem --key=./certs/app.key apps/labs/api`
 
 - Tuning workers/limits/logging
-  - `bun server apps/labs/api w:auto r:20000 --json-logging --queue-timeout-ms=2000 --max-queue=8192`
+  - `bun server apps/labs/api w:auto r:20000,900s,10r --json-logging --queue-timeout-ms=2000 --max-queue=8192`
 
-- Override hot reload mode
-  - `bun server apps/labs/api --hot-reload=module`
+- Override reload mode
+  - `bun server apps/labs/api --reload=module`
 
 - Explicit redirect toggle
   - `bun server apps/labs/api --no-redirect-http`
@@ -85,10 +85,9 @@ bun server apps/my-app \
 
 ### CLI Flags
 
-- `w:<N|auto>` - Number of workers (default: CPU count)
-- `r:<N>` - Max requests per worker before cycling (default: 10000)
-- `--max-reloads=<N>` - Max hot reloads per worker before cycling (default: 10)
-- `--hot-reload=<mode>` - Hot reload: `none` | `process` | `module`
+- `w:<N|auto>` - Number of workers (default: half cores)
+- `r:<N>[,<seconds>s][,<reloads>r]` - Restart policy (requests, seconds, reloads)
+- `--reload=<mode>` - Reload: `none` | `process` | `module`
 - `--max-queue=<N>` - Max server queue depth (default via env RIP_MAX_QUEUE)
 - `--queue-timeout-ms=<N>` - Max time queued before 504
 - `--connect-timeout-ms=<N>` - Upstream connect timeout
@@ -99,11 +98,11 @@ bun server apps/my-app \
 
 ### Environment Variables
 
-- `RIP_HOT_RELOAD` - Hot reload mode
+- `RIP_RELOAD` - Reload mode
 - `RIP_MAX_RELOADS` - Max reloads per worker
  - `PORT` - Default HTTP port (overridden by `http:<port>`)
 
-## 🔄 Hot Reload Modes
+## 🔄 Reload Modes
 
 ### Module Mode (Development)
 - Worker-level mtime checking (100ms intervals)
@@ -138,7 +137,7 @@ curl http://localhost:5002/server
 - Internal busy signaling via `Rip-Worker-Busy` header
 - Control socket for workers to join/quit
 
-### Hot Reload Roadmap
+### Reload Roadmap
 - Current: process-mode uses a simple entry mtime poll (debounced ~100ms) to trigger rolling restarts; module-mode is dev-only and serves the last good handler during reload.
 - Planned: move change detection into the Manager with a single recursive watcher per app (ignore temp files, debounce/coalesce 150–300ms) to eliminate per-worker watchers entirely. Manager will trigger one rollingRestart per change batch for clean, deterministic reloads under load.
 
@@ -156,7 +155,7 @@ curl http://localhost:5002/server
 packages/server/
 ├── rip-server.ts    # CLI entry point
 ├── server.ts        # HTTP entry + per-worker selector
-├── manager.ts       # Process supervisor + process hot reload
+├── manager.ts       # Process supervisor + process reload
 ├── worker.ts        # Worker process (join/quit)
 ├── utils.ts         # Shared utilities
 └── README.md        # This file
