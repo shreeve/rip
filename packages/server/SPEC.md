@@ -67,7 +67,7 @@ Provide a simple, HTTPS‑first server so every app is reachable at a clean URL 
   - Default: none, error if not supplied
 - HTTP port:
   - `http:<PORT>`: set HTTP listener port
-  - Default: when `PORT` unset, probes from port `5000` upward to first free port and prints a clickable URL
+  - Default: when `PORT` unset, try `80` first; on failure, probe from `5000` upward to first free port and print a clickable URL
 - Workers:
   - `w:<N>` | `w:auto` | `w:half` | `w:2x` | `w:3x`
   - Default: `w:half`

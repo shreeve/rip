@@ -54,7 +54,7 @@ bun server apps/my-app \
 - HTTPS defaults and options
   - HTTPS default (try 443, else auto-port 5000+; 80→301): `bun server apps/labs/api`
   - HTTPS on a specific port (bare int): `bun server 5700 apps/labs/api`
-  - Force HTTP-only (no TLS, no redirect): `bun server http apps/labs/api`
+  - Force HTTP-only (no TLS, no redirect): `bun server http apps/labs/api` (tries 80, else 5000+)
   - Force HTTP-only on specific port: `bun server http:5002 apps/labs/api`
   - Provide cert/key: `bun server --cert=/full/path/app.pem --key=/full/path/app.key apps/labs/api`
   - Auto TLS (mkcert → self-signed): `bun server --auto-tls apps/labs/api`

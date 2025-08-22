@@ -45,8 +45,20 @@ export class Server {
     }
 
     if (httpOnly) {
-      const desired = this.flags.httpPort === 0 ? 5000 : this.flags.httpPort!
-      this.server = startOnPort(desired, this.fetch.bind(this))
+      if (this.flags.httpPort === 0) {
+        // Try privileged/default HTTP port 80 first, then probe from 5000+
+        try {
+          this.server = Bun.serve({ port: 80, idleTimeout: 8, fetch: this.fetch.bind(this) })
+        } catch (e: any) {
+          if (e && (e.code === 'EADDRINUSE' || e.code === 'EACCES')) {
+            this.server = startOnPort(5000, this.fetch.bind(this))
+          } else {
+            throw e
+          }
+        }
+      } else {
+        this.server = startOnPort(this.flags.httpPort!, this.fetch.bind(this))
+      }
       this.flags.httpPort = this.server.port
     } else {
       const tls = await this.loadTlsMaterial()
