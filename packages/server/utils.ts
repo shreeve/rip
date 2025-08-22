@@ -70,8 +70,11 @@ export function parseFlags(argv: string[]): ParsedFlags {
   const rawFlags = new Set<string>()
   let appPathInput: string | undefined
 
-  // Identify the app path by probing tokens that look like paths
+  // Minimal heuristic: only consider tokens that "look like a path"
+  // (has "/" or starts with "." or is absolute or ends with .rip/.ts), then validate.
   const tryResolveApp = (tok: string): string | undefined => {
+    const looksLikePath = tok.includes('/') || tok.startsWith('.') || isAbsolute(tok) || tok.endsWith('.rip') || tok.endsWith('.ts')
+    if (!looksLikePath) return undefined
     try {
       const abs = isAbsolute(tok) ? tok : resolve(process.cwd(), tok)
       if (!existsSync(abs)) return undefined
@@ -82,7 +85,6 @@ export function parseFlags(argv: string[]): ParsedFlags {
         return (existsSync(one) || existsSync(two)) ? tok : undefined
       }
       if (st.isFile()) {
-        // Allow direct file entry (.rip or .ts)
         const lower = abs.toLowerCase()
         return (lower.endsWith('.rip') || lower.endsWith('.ts')) ? tok : undefined
       }
