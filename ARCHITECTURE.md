@@ -24,7 +24,7 @@ This document provides comprehensive technical documentation for developers work
 rip/
 ├── packages/           # Core packages
 │   ├── server/        # rip-server (multi-process web server)
-│   ├── server/        # rip-server (per-worker sockets, next-gen LB)
+│   ├── server/        # rip-server (per-worker sockets)
 │   ├── schema/        # rip-schema (database DSL)
 │   ├── bun/           # rip-bun (Bun transpiler plugin)
 │   └── parser/        # rip-parser (SLR(1) parser)
@@ -74,21 +74,21 @@ Bun.plugin({
 - **Usage**: `rip-server [directory] [port]`
 
 #### 4. Unified Web Server (`/packages/server`)
-- nginx+unicorn+Sinatra–inspired: in‑process LB with per‑worker sockets and ergonomic app assembly
-- **Architecture**: High-performance LIFO load balancer with optimized worker management
+- nginx+unicorn+Sinatra–inspired: in‑process server with per‑worker sockets and ergonomic app assembly
+- **Architecture**: High-performance LIFO worker selection with optimized process management
 - **Key features**:
   - **LIFO worker selection** - Prioritizes recently-used workers for better cache locality
   - **Event-driven queue draining** - Reactive processing without polling overhead
   - **Worker cycling** - Prevents memory bloat with configurable reload limits
   - **Clean control interface** - Simple join/quit operations via Unix socket
-  - **Per-worker Unix sockets** - Userland LB selects idle workers; one-inflight-per-worker preserved
+  - **Per-worker Unix sockets** - Userland server selects idle workers; one-inflight-per-worker preserved
   - **Hot-reload modes** - `none` | `process` | `module`; recommend `process` for multi-file apps
 - **Performance targets**: 20K+ RPS with seamless hot reloading
 - **Key files**:
   - `rip-server.ts` - CLI with worker lifecycle management
   - `manager.ts` - Process supervisor with restart logic
   - `worker.ts` - Single-inflight workers with mtime-based hot reload
-  - `server.ts` - LIFO load balancer with efficient forwarding
+  - `server.ts` - LIFO worker selector with efficient forwarding
   - `utils.ts` - Shared utilities and configuration parsing
 - **Usage**: `bun server <app-path> w:<N> --max-reloads=<N>`
 

@@ -1,17 +1,17 @@
 # Rip Server - Per-Worker Socket Application Server
 
-High-performance HTTP entry that dispatches to per-worker Unix sockets. The LB selects idle workers (LIFO), preserving single-inflight isolation without relying on kernel accept distribution.
+High-performance HTTP entry that dispatches to per-worker Unix sockets. The server selects idle workers (LIFO), preserving single-inflight isolation without relying on kernel accept distribution.
 
 ## 🚀 Key Features
 
-- **Per-Worker Unix Sockets**: One socket per worker; LB selects idle workers
+- **Per-Worker Unix Sockets**: One socket per worker; the server selects idle workers
 - **Single-Inflight Isolation**: One request per worker for clean resource management
 - **Hot Reload Support**: none, process (rolling restart on entry mtime), module (in-worker)
 - **Unix Socket Communication**: High-performance inter-process communication
 
 ## 📊 Performance
 
-- **Direct LB**: `/server` shows raw entry overhead
+- **Direct server**: `/server` shows raw entry overhead
 - **Application Endpoints**: `/ping` throughput scales with number of workers
 
 ## 🏗️ Architecture
@@ -19,7 +19,7 @@ High-performance HTTP entry that dispatches to per-worker Unix sockets. The LB s
 ### Components
 
 1. **Manager** (`manager.ts`): Process supervisor that spawns and monitors workers
-2. **Server** (`server.ts`): HTTP entry + per-worker load balancer (control socket)
+2. **Server** (`server.ts`): HTTP entry + per-worker selector (control socket)
 3. **Worker** (`worker.ts`): Single-inflight request handlers with hot reload support (join/quit)
 4. **CLI** (`rip-server.ts`): Command-line interface and configuration parsing
 5. **Utils** (`utils.ts`): Shared utilities and flag parsing
@@ -27,7 +27,7 @@ High-performance HTTP entry that dispatches to per-worker Unix sockets. The LB s
 ### Process Flow
 
 ```
-HTTP Request → HTTP Entry (LB) → Select idle worker → Unix Socket (worker.N.sock) → Worker Process
+HTTP Request → HTTP entry (server) → Select idle worker → Unix socket (worker.N.sock) → Worker process
 ```
 
 ## 🔧 Usage
@@ -52,7 +52,7 @@ bun server apps/my-app \
 - `r:<N>` - Max requests per worker before cycling (default: 10000)
 - `--max-reloads=<N>` - Max hot reloads per worker before cycling (default: 10)
 - `--hot-reload=<mode>` - Hot reload: `none` | `process` | `module`
-- `--max-queue=<N>` - Max LB queue depth (default via env RIP_MAX_QUEUE)
+- `--max-queue=<N>` - Max server queue depth (default via env RIP_MAX_QUEUE)
 - `--queue-timeout-ms=<N>` - Max time queued before 504
 - `--connect-timeout-ms=<N>` - Upstream connect timeout
 - `--read-timeout-ms=<N>` - Upstream read timeout
@@ -96,7 +96,7 @@ curl http://localhost:5002/server
 
 ## 🔍 Implementation Details
 
-### LB Selection
+### Server selection
 - LIFO worker selection for warm cache reuse
 - Internal busy signaling via `Rip-Worker-Busy` header
 - Control socket for workers to join/quit
@@ -118,7 +118,7 @@ curl http://localhost:5002/server
 ```
 packages/server/
 ├── rip-server.ts    # CLI entry point
-├── server.ts        # HTTP entry + per-worker load balancer
+├── server.ts        # HTTP entry + per-worker selector
 ├── manager.ts       # Process supervisor + process hot reload
 ├── worker.ts        # Worker process (join/quit)
 ├── utils.ts         # Shared utilities

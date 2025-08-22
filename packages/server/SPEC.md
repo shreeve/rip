@@ -1,7 +1,7 @@
-# Rip Server HTTPS Gateway (Host-based) – SPEC
+# Rip Server HTTPS (Host-based) – SPEC
 
 ## Purpose
-Provide a simple, HTTPS‑first gateway so every app is reachable at a clean URL (Host‑based), with a single listener (443) and automatic HTTP→HTTPS redirect (80). Eliminate per‑app ports in day‑to‑day use.
+Provide a simple, HTTPS‑first server so every app is reachable at a clean URL (Host‑based), with a single listener (443) and automatic HTTP→HTTPS redirect (80). Eliminate per‑app ports in day‑to‑day use.
 
 ## Goals
 - Always‑on HTTPS in dev/staging/prod; HTTP only serves redirects (80→443).
@@ -22,14 +22,14 @@ Provide a simple, HTTPS‑first gateway so every app is reachable at a clean URL
 - Mobile testing requires mapping hostnames to a LAN IP and trusting the dev CA on the device.
 
 ## High‑level Architecture
-- Gateway/LB: single Bun.serve on 443 (TLS) and 80 (redirect only). Routes by Host to app workers.
+- Server: single Bun.serve on 443 (TLS) and 80 (redirect only). Routes by Host to app workers.
 - Manager: spawns workers; informs gateway which hostnames map to which app (join/quit host registry).
 - Worker: unchanged core; per‑worker Unix sockets; hotReload modes (none|process|module) preserved.
 
 ## Routing
 - Incoming request → parse Host (SNI + Host header)
 - Lookup host→app in registry; if not found: 404 (or configurable 502).
-- Forward to selected app’s per‑worker socket using existing LB logic (retry on `Rip-Worker-Busy`).
+- Forward to selected app’s per‑worker socket using existing selection logic (retry on `Rip-Worker-Busy`).
 - Strip internal headers on response; normalize date header as today.
 
 ## TLS & Certificates
@@ -73,7 +73,7 @@ Provide a simple, HTTPS‑first gateway so every app is reachable at a clean URL
 
 ## Logging & Metrics
 - Keep existing human logs and JSON logs. Include host name and app name in records.
-- `/status` returns gateway health and per‑host mapping counts (no secrets).
+- `/status` returns server health and per‑host mapping counts (no secrets).
 
 ## Security Defaults
 - HTTPS‑only by default; HTTP only for redirects.
@@ -83,12 +83,12 @@ Provide a simple, HTTPS‑first gateway so every app is reachable at a clean URL
 
 ## Backward Compatibility & Migration
 - Existing single‑app mode (hostless) remains via a default host mapping if desired (e.g., when Host not found and one app configured).
-- Port‑based workflows still possible by bypassing the gateway for advanced users (not the default path).
+- Port‑based workflows still possible by bypassing the server for advanced users (not the default path).
 
 ## Milestones
 1) HTTPS Core
 - Add TLS flags; serve on 443 with provided cert/key
-- 80→301 redirect; preserve existing LB
+- 80→301 redirect; preserve existing selection logic
 
 2) Host Routing + Registry
 - In‑memory registry; Host lookup → app
