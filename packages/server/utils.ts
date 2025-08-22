@@ -91,7 +91,7 @@ export function parseFlags(argv: string[]): ParsedFlags {
   }
 
   if (!appPathInput) {
-    console.error('Usage: bun server <app-path> [flags]')
+    console.error('Usage: bun server [flags] <app-path>')
     process.exit(2)
   }
 
