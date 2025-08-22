@@ -6,7 +6,7 @@ import { INTERNAL_HEADERS, logAccessHuman, logAccessJson, nowMs, ParsedFlags, st
 
 type UpstreamState = { socket: string; inflight: number; version: number | null; workerId: number }
 
-export class LBServer {
+export class Server {
   private flags: ParsedFlags
   private server: any | null = null
   private httpsServer: any | null = null

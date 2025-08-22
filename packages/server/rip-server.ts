@@ -4,7 +4,7 @@
 
 import { parseFlags } from './utils'
 import { Manager } from './manager'
-import { LBServer } from './server'
+import { Server } from './server'
 
 async function main(): Promise<void> {
   if (process.argv.includes('--stop')) {
@@ -17,7 +17,7 @@ async function main(): Promise<void> {
     return
   }
   const flags = parseFlags(process.argv)
-  const lb = new LBServer(flags)
+  const lb = new Server(flags)
   lb.start()
   const mgr = new Manager(flags)
   await mgr.start()
