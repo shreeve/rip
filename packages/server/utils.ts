@@ -68,7 +68,43 @@ function parseRestartPolicyToken(token: string | undefined, defRequests: number,
 
 export function parseFlags(argv: string[]): ParsedFlags {
   const rawFlags = new Set<string>()
-  for (let i = 3; i < argv.length; i++) rawFlags.add(argv[i])
+  let appPathInput: string | undefined
+
+  // Identify the app path by probing tokens that look like paths
+  const tryResolveApp = (tok: string): string | undefined => {
+    try {
+      const abs = isAbsolute(tok) ? tok : resolve(process.cwd(), tok)
+      if (!existsSync(abs)) return undefined
+      const st = statSync(abs)
+      if (st.isDirectory()) {
+        const one = join(abs, 'index.rip')
+        const two = join(abs, 'index.ts')
+        return (existsSync(one) || existsSync(two)) ? tok : undefined
+      }
+      if (st.isFile()) {
+        // Allow direct file entry (.rip or .ts)
+        const lower = abs.toLowerCase()
+        return (lower.endsWith('.rip') || lower.endsWith('.ts')) ? tok : undefined
+      }
+      return undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  for (let i = 2; i < argv.length; i++) {
+    const tok = argv[i]
+    if (!appPathInput) {
+      const maybe = tryResolveApp(tok)
+      if (maybe) { appPathInput = maybe; continue }
+    }
+    rawFlags.add(tok)
+  }
+
+  if (!appPathInput) {
+    console.error('Usage: bun packages/server/rip-server.ts <app-path> [flags]')
+    process.exit(2)
+  }
 
   const getKV = (prefix: string): string | undefined => {
     for (const f of rawFlags) {
@@ -78,7 +114,6 @@ export function parseFlags(argv: string[]): ParsedFlags {
   }
   const has = (name: string): boolean => rawFlags.has(name)
 
-  const appPathInput = argv[2] || process.cwd()
   const { baseDir, entryPath, appName } = resolveAppEntry(appPathInput)
 
   // If no explicit http: token and no PORT env, set to 0 (auto-select later)
