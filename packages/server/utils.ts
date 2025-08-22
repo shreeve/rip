@@ -177,7 +177,7 @@ export function scale(value: number, unit: string, pad: boolean = true): string 
     while (value <    0.05 && slot <= max) { value *= 1000; slot++ }
     while (value >= 999.5  && slot >= min) { value /= 1000; slot-- }
 
-    // Handle overflow or underflow
+    // When number is in range, format it
     if (slot >= min && slot <= max) {
 
       // Use tenths-rounded proxy to determine formatting
@@ -192,7 +192,7 @@ export function scale(value: number, unit: string, pad: boolean = true): string 
     }
   }
 
-  // edge cases
+  // Handle edge cases
   if (value == 0) {
     return `${pad ? '  0 ' : '0'}${unit}`
   } else {
