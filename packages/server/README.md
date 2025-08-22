@@ -162,6 +162,58 @@ packages/server/
 └── README.md        # This file
 ```
 
+## 🔬 Request Path Tracing (/server vs app routes)
+
+### Direct entry: GET /server (fast path)
+
+1. `Server.fetch(req)`
+2. Path check `if (url.pathname === '/server')`
+3. Return `new Response('ok', text/plain)`
+
+- No worker dispatch
+- No Unix socket IPC
+- No framework/ALS
+- Minimal logging (only if enabled at entry)
+
+Why `/server` ≫ app routes: it bypasses Unix socket forwarding, framework routing, ALS setup, and reload checks—returning immediately from the entry process.
+
+### Application route: e.g., GET /ping
+
+1. `Server.fetch(req)`
+2. Select idle worker (`getNextAvailableSocket`), increment `inflightTotal`
+3. `forwardToWorker(req, socket)` → `forwardOnce()` → `fetch(..., unix: socketPath)`
+4. Worker `Bun.serve({ unix }).fetch(req)`
+5. `getHandler()` (uses cached handler; in module reload mode may do a rate‑limited fs.stat)
+6. `@rip/api` pipeline:
+   - `withHelpers` middleware parses body only for POST/PUT/PATCH (JSON or form)
+   - Merge query params
+   - Wrap handler in `AsyncLocalStorage` via `requestContext.run({ hono, data })`
+   - Route handler (e.g., `get '/ping'`) via `smart()` returns Response
+7. Worker returns Response to server
+8. Server strips internal headers, optional access logging
+9. Release worker, decrement `inflightTotal`, `drainQueue()`
+
+### Process reload trace (hot-reload=process)
+
+- Change detection (Manager)
+  - Poll entry mtime (debounced ~100ms, 50ms timer, 200ms cooldown)
+  - On change, trigger `rollingRestart()`
+
+- Rolling restart (per worker)
+  1. Send SIGTERM to current worker
+  2. Worker waits for `inflight=false`, stops its Bun.serve, POSTs `quit` to control socket, exits
+  3. Manager immediately `spawnWorker()` with fresh env and per‑worker socket
+  4. New worker starts, preloads handler, POSTs `join`
+
+- Server during roll
+  - Continues serving with N−1 workers briefly
+  - Control socket updates `sockets`/`availableWorkers` on quit/join
+  - If a socket dies mid‑forward, server removes it and either retries/queues or 503s if capacity exhausted
+
+- What process mode avoids
+  - No per‑request fs checks in workers (module reload logic skipped)
+  - Centralized change detection → deterministic, low‑overhead reloads under load
+
 ---
 
 Built with ❤️ for high-performance Rip applications.
