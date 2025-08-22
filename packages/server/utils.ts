@@ -179,7 +179,7 @@ export function parseFlags(argv: string[]): ParsedFlags {
   const maxSecondsPerWorker = restartPolicy.maxSeconds
   const maxReloadsPerWorker = restartPolicy.maxReloads
 
-  const jsonLogging = has('--json') || has('--json-logging')
+  const jsonLogging = has('--json-logging')
   const accessLog = !has('--no-access-log')
 
   const maxQueue = coerceInt(getKV('--max-queue='), coerceInt(process.env.RIP_MAX_QUEUE, 8192))

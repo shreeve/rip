@@ -85,7 +85,7 @@ Provide a simple, HTTPS‑first server so every app is reachable at a clean URL 
   - `--reload=none|process|module`
   - Default: `process`
 - Logging:
-  - `--json` or `--json-logging`: enable structured logs (default off)
+  - `--json-logging`: enable structured logs (default off)
   - Default: human access logs on, disable with `--no-access-log`
 - Socket prefix:
   - `--socket-prefix=<name>`: override per‑worker socket naming prefix

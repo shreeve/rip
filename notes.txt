@@ -191,7 +191,7 @@ Key requirements (from server2.md):
     - GET /status → { status: "healthy|degraded", app, workers, ports, uptime }
   - Health: healthy once ≥1 worker is registered.
   - Strip internal headers on egress: Rip-Worker-Busy, Rip-Worker-Id.
-  - Logging: access log ON by default (human), --json/--json-logging optional.
+  - Logging: access log ON by default (human), --json-logging optional.
 
 - Manager
   - Spawns N workers; sets env (WORKER_ID, APP_NAME, SOCKET_PATH, RIP_VARIANT); cleans per-worker sockets.
@@ -208,7 +208,7 @@ Key requirements (from server2.md):
   - bun server2 <app-path> [flags]
   - Workers: w:<N|auto>; maxRequests: r:<N>
   - Ports/protocol: http<:port>, https<:port> (defaults to 3080 and 3443, with smart default increments if busy)
-  - Logging: --json, --json-logging, --no-access-log
+  - Logging: --json-logging, --no-access-log
   - Variant/sockets: --variant=<name>, --socket-prefix=<prefix>
   - LB tuning: --max-queue, --queue-timeout-ms, --connect-timeout-ms, --read-timeout-ms
   - Hot reload: --hot-reload=<none|process|module> (dev default module; prod default none or process)
