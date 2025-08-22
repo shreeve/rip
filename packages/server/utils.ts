@@ -68,7 +68,35 @@ function parseRestartPolicyToken(token: string | undefined, defRequests: number,
 
 export function parseFlags(argv: string[]): ParsedFlags {
   const rawFlags = new Set<string>()
-  for (let i = 3; i < argv.length; i++) rawFlags.add(argv[i])
+  let appPathInput: string | undefined
+
+  const isFlagToken = (t: string): boolean => {
+    return (
+      t.startsWith('w:') ||
+      t.startsWith('r:') ||
+      t.startsWith('http:') ||
+      t.startsWith('--socket-prefix=') ||
+      t.startsWith('--max-reloads=') ||
+      t.startsWith('--max-queue=') ||
+      t.startsWith('--queue-timeout-ms=') ||
+      t.startsWith('--connect-timeout-ms=') ||
+      t.startsWith('--read-timeout-ms=') ||
+      t.startsWith('--hot-reload=') ||
+      t === '--json' || t === '--json-logging' || t === '--no-access-log'
+    )
+  }
+
+  // Scan argv starting after script for first non-flag token as app path
+  for (let i = 2; i < argv.length; i++) {
+    const tok = argv[i]
+    if (!appPathInput && !isFlagToken(tok)) { appPathInput = tok; continue }
+    rawFlags.add(tok)
+  }
+
+  if (!appPathInput) {
+    console.error('Usage: bun packages/server/rip-server.ts <app-path> [flags]')
+    process.exit(2)
+  }
 
   const getKV = (prefix: string): string | undefined => {
     for (const f of rawFlags) {
@@ -78,7 +106,6 @@ export function parseFlags(argv: string[]): ParsedFlags {
   }
   const has = (name: string): boolean => rawFlags.has(name)
 
-  const appPathInput = argv[2] || process.cwd()
   const { baseDir, entryPath, appName } = resolveAppEntry(appPathInput)
 
   // If no explicit http: token and no PORT env, set to 0 (auto-select later)
