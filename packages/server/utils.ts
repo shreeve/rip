@@ -44,6 +44,10 @@ export function parseWorkersToken(token: string | undefined, def: number): numbe
     const cores = require('os').cpus().length
     return Math.max(1, Math.floor(cores / 2))
   }
+  if (token === '2x') {
+    const cores = require('os').cpus().length
+    return Math.max(1, cores * 2)
+  }
   const n = Number.parseInt(token)
   return Number.isFinite(n) && n > 0 ? n : def
 }
