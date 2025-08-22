@@ -23,7 +23,7 @@ Provide a simple, HTTPS‑first server so every app is reachable at a clean URL 
 
 ## High‑level Architecture
 - Server: single Bun.serve on 443 (TLS) and 80 (redirect only). Routes by Host to app workers.
-- Manager: spawns workers; informs gateway which hostnames map to which app (join/quit host registry).
+- Manager: spawns workers; informs server which hostnames map to which app (join/quit host registry).
 - Worker: unchanged core; per‑worker Unix sockets; hotReload modes (none|process|module) preserved.
 
 ## Routing
@@ -36,7 +36,7 @@ Provide a simple, HTTPS‑first server so every app is reachable at a clean URL 
 - Dev:
   - Option A: mkcert per developer
     - mkcert app.ripdev.io (or wildcard on their machine)
-    - Configure LB with cert/key paths via flags or env
+    - Configure server with cert/key paths via flags or env
   - Option B: step‑ca (community dev CA)
     - Developers trust CA root locally
     - Issue per‑host certs via ACME/CSR; private keys stay on dev machines
@@ -80,7 +80,8 @@ Provide a simple, HTTPS‑first server so every app is reachable at a clean URL 
   - Misc:
     - `--socket-prefix=<name>`: override socket naming prefix
   - Control:
-    - `--stop`: best‑effort stop of running server processes
+    - `stop` (preferred): best‑effort stop of running server processes
+    - `--stop` (back‑compat): same behavior
 
 Examples (current style):
 ```bash
