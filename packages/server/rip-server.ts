@@ -7,8 +7,8 @@ import { Manager } from './manager'
 import { Server } from './server'
 
 async function main(): Promise<void> {
-  // Subcommand support: `bun server stop` (also keep legacy --stop)
-  if (process.argv[2] === 'stop' || process.argv.includes('--stop')) {
+  // Subcommand: `bun server stop`
+  if (process.argv[2] === 'stop') {
     try {
       // Best-effort: find and kill matching processes by script path
       const script = __filename
