@@ -95,8 +95,9 @@ export function parseFlags(argv: string[]): ParsedFlags {
   const socketPrefixOverride = getKV('--socket-prefix=')
   const socketPrefix = socketPrefixOverride || `rip_${appName}`
 
-  const workers = parseWorkersToken((getKV('w:') || undefined) as string | undefined, Math.max(1, require('os').cpus().length))
-  const restartPolicy = parseRestartPolicyToken(getKV('r:'), coerceInt(process.env.RIP_MAX_REQUESTS, 10000), coerceInt(process.env.RIP_MAX_SECONDS, 0))
+  const cores = require('os').cpus().length
+  const workers = parseWorkersToken((getKV('w:') || undefined) as string | undefined, Math.max(1, Math.floor(cores / 2)))
+  const restartPolicy = parseRestartPolicyToken(getKV('r:'), coerceInt(process.env.RIP_MAX_REQUESTS, 10000), coerceInt(process.env.RIP_MAX_SECONDS, 3600))
   const maxRequestsPerWorker = restartPolicy.maxRequests
   const maxSecondsPerWorker = restartPolicy.maxSeconds
   const maxReloadsPerWorker = coerceInt(getKV('--max-reloads='), coerceInt(process.env.RIP_MAX_RELOADS, 10))
@@ -112,7 +113,7 @@ export function parseFlags(argv: string[]): ParsedFlags {
   const hotFlag = getKV('--hot-reload=') || process.env.RIP_HOT_RELOAD
   let hotReload: HotReloadMode = 'none'
   if (hotFlag === 'none' || hotFlag === 'process' || hotFlag === 'module') hotReload = hotFlag
-  else hotReload = isDev() ? 'process' : 'none'
+  else hotReload = 'process'
 
   return {
     appPath: resolve(appPathInput),
