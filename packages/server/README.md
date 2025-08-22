@@ -46,6 +46,43 @@ bun server apps/my-app \
   --json-logging
 ```
 
+### CLI Examples
+
+- Basic dev (defaults)
+  - `bun server apps/labs/api`
+
+- Set HTTPS port (bare int)
+  - `bun server 5700 apps/labs/api`
+
+- Set HTTPS port (value form)
+  - `bun server https:5700 apps/labs/api`
+
+- Set HTTPS port (flag form)
+  - `bun server --https-port=5700 apps/labs/api`
+
+- Provide cert/key (value forms)
+  - `bun server cert:./certs/app.pem key:./certs/app.key apps/labs/api`
+
+- Provide cert/key (flags)
+  - `bun server --cert=./certs/app.pem --key=./certs/app.key apps/labs/api`
+
+- Tuning workers/limits/logging
+  - `bun server apps/labs/api w:auto r:20000 --json-logging --queue-timeout-ms=2000 --max-queue=8192`
+
+- Override hot reload mode
+  - `bun server apps/labs/api --hot-reload=module`
+
+- Explicit redirect toggle
+  - `bun server apps/labs/api --no-redirect-http`
+
+- Host registry (subcommands)
+  - `bun server add labs.ripdev.io apps/labs/api`
+  - `bun server remove labs.ripdev.io`
+  - `bun server list`
+
+- Stop running server
+  - `bun server stop`
+
 ### CLI Flags
 
 - `w:<N|auto>` - Number of workers (default: CPU count)
