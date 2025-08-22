@@ -59,6 +59,55 @@ Provide a simple, HTTPS‑first server so every app is reachable at a clean URL 
   - Hot reload: `--hot-reload=none|process|module`
 - Host registry persistence (initially in‑memory; optional JSON file for dev convenience)
 
+## CLI Overview (Current vs Proposed)
+
+### Current (already supported by `parseFlags()`)
+- Positional:
+  - `<app-path>`: absolute or relative; resolves to entry via `resolveAppEntry()`
+- Order‑independent tokens:
+  - `http:<PORT>`: override HTTP port (currently used for entry listener)
+  - `w:<N>` / `w:auto`: workers count (number or `auto` = CPU cores)
+  - `r:<N>`: max requests per worker
+  - `--max-reloads=<N>`: max module reloads before cycling
+  - `--json` or `--json-logging`: enable structured logs
+  - `--no-access-log`: disable human access logs
+  - Queue/Timeouts:
+    - `--max-queue=<N>`
+    - `--queue-timeout-ms=<N>`
+    - `--connect-timeout-ms=<N>`
+    - `--read-timeout-ms=<N>`
+  - Hot reload:
+    - `--hot-reload=none|process|module` (default: `module` in dev, `none` in prod)
+  - Misc:
+    - `--socket-prefix=<name>`: override socket naming prefix
+  - Control:
+    - `--stop`: best‑effort stop of running server processes
+
+Examples (current style):
+```bash
+bun server apps/labs/api http:5002 w:auto r:10000 --json-logging --queue-timeout-ms=2000
+```
+
+### Proposed additions (this SPEC)
+- HTTPS + TLS:
+  - `https:<PORT>`: enable HTTPS listener on port (mirrors `http:<PORT>` style)
+  - `--https-port=<PORT>`: explicit flag (alternative to token)
+  - `cert:<PATH>` / `key:<PATH>`: token form for TLS material
+  - `--cert=<PATH>` / `--key=<PATH>`: flag form for TLS material
+- Redirect & HSTS:
+  - `--redirect-http` (default on): enable 80→301 to HTTPS
+  - `--no-redirect-http`: disable redirect
+  - `--hsts`: send HSTS header (default off in dev; on in staging/prod)
+  - `--no-hsts`: disable HSTS
+- Host registry (subcommands; separate from worker join/quit):
+  - `host add <host> <app-path>`
+  - `host remove <host>`
+  - `host list`
+
+Notes:
+- Maintain order‑independent, orthogonal tokens. Where practical, prefer `token:value` forms (`http:`, `https:`, `cert:`, `key:`) with equivalent `--flag=value` alternatives.
+- V1 registry can be in‑memory only; persistence can follow.
+
 ## Host Registry & CLI/API
 - Registry shape: `{ host: string, appPath: string, createdAt, updatedAt }`
 - Control operations (via control socket/API):
