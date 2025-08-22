@@ -61,17 +61,16 @@ Provide a simple, HTTPS‑first server so every app is reachable at a clean URL 
 ## CLI Overview (Current vs Proposed)
 
 ### Current (already supported by `parseFlags()`)
-- Order‑independent values:
-  - `<app-path>`: an existing directory/file, resolves via `resolveAppEntry()`
+- Values (order‑independent unless noted):
+  - `<app-path>`: positional today (argv[2]); resolves via `resolveAppEntry()`
   - `http:<PORT>`: override HTTP port (currently used for entry listener)
   - `w:<N>` / `w:auto`: workers count (number or `auto` = CPU cores)
   - `r:<N>`: max requests per worker
-  - Queue/Timeouts/Limits:
+  - Queue/Timeouts:
     - `--max-queue=<N>`
     - `--queue-timeout-ms=<N>`
     - `--connect-timeout-ms=<N>`
     - `--read-timeout-ms=<N>`
-    - `--max-request-body=<N>`
     - `--max-reloads=<N>`: max module reloads before cycling
   - Hot reload:
     - `--hot-reload=none|process|module` (default: `process` in dev, `none` in prod)
@@ -80,7 +79,7 @@ Provide a simple, HTTPS‑first server so every app is reachable at a clean URL 
     - `--json` or `--json-logging`: enable structured logs
     - `--no-access-log`: disable human access logs
   - Control:
-    - `stop` / `--stop`: best‑effort stop of running server processes
+    - `--stop`: best‑effort stop of running server processes
 
 Examples (current style):
 ```bash
@@ -109,6 +108,10 @@ bun server w:6 apps/labs/api r:20000
   - `add <host> <app-path>`
   - `remove <host>`
   - `list`
+- Control (subcommands):
+  - `stop`: best‑effort stop of running server processes (back‑compat `--stop` remains)
+- Limits:
+  - `--max-request-body=<N>`: override worker `maxRequestBodySize` (default 100MB)
 
 Notes:
 - Maintain order‑independent, orthogonal values. Where practical, prefer `key:value` forms (`http:`, `https:`, `cert:`, `key:`) with equivalent `--flag=value` alternatives.
@@ -159,10 +162,6 @@ Notes:
 - Logs include host/app
 - Minimal persistence for registry in dev (JSON file)
 
-5) Staging/Prod TLS (Follow‑up)
-- DNS‑01 automation scripts (certbot/acme.sh) for wildcards
-- Hot reload certs; optional HTTP/2
-
 ## Acceptance Criteria
 - Can browse https://labs.ripdev.io (dev) with trusted HTTPS and no browser warnings
 - HTTP on 80 redirects to HTTPS
@@ -179,5 +178,4 @@ Notes:
 ## References Pulled From LEGACY.md
 - TLS example (Bun.serve tls: {cert, key})
 - CA folder conventions (RIP_CONFIG_DIR/ca|certs|run)
-- HTTPS modes (quick|ca|smart) – simplified to HTTPS‑only + cert flags
 - Security presets (HSTS toggle; no‑store; timeouts)
