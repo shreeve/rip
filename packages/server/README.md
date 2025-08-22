@@ -51,20 +51,13 @@ bun server apps/my-app \
 - Basic dev (defaults)
   - `bun server apps/labs/api`
 
-- Set HTTPS port (bare int)
-  - `bun server 5700 apps/labs/api`
-
-- Set HTTPS port (value form)
-  - `bun server https:5700 apps/labs/api`
-
-- Set HTTPS port (flag form)
-  - `bun server --https-port=5700 apps/labs/api`
-
-- Provide cert/key (value forms)
-  - `bun server cert:./certs/app.pem key:./certs/app.key apps/labs/api`
-
-- Provide cert/key (flags)
-  - `bun server --cert=./certs/app.pem --key=./certs/app.key apps/labs/api`
+-- HTTPS defaults and options
+  - HTTPS default (auto-port + 80→301): `bun server apps/labs/api`
+  - HTTPS on a specific port (bare int): `bun server 5700 apps/labs/api`
+  - Force HTTP-only (no TLS, no redirect): `bun server http apps/labs/api`
+  - Force HTTP-only on specific port: `bun server http:5002 apps/labs/api`
+  - Provide cert/key: `bun server --cert=/full/path/app.pem --key=/full/path/app.key apps/labs/api`
+  - Use mkcert (stores under ~/.rip/certs): `bun server --use-mkcert apps/labs/api`
 
 - Tuning workers/limits/logging
   - `bun server apps/labs/api w:auto r:20000,900s,10r --json-logging --queue-timeout-ms=2000 --max-queue=8192`
@@ -72,7 +65,7 @@ bun server apps/my-app \
 - Override reload mode
   - `bun server apps/labs/api --reload=module`
 
-- Explicit redirect toggle
+-- Explicit redirect toggle
   - `bun server apps/labs/api --no-redirect-http`
 
 - Host registry (subcommands)
@@ -94,7 +87,11 @@ bun server apps/my-app \
 - `--read-timeout-ms=<N>` - Upstream read timeout
 - `--json-logging` - Enable JSON access logs
 - `--no-access-log` - Disable access logging
- - `http:<port>` - HTTP port (default from PORT env or 5002)
+ - `http[:<port>]` - HTTP-only listener (else HTTPS-first)
+ - `--https-port=<port>` or bare `<port>` - HTTPS port select
+ - `--cert=<path>` `--key=<path>` - TLS material (PEM)
+ - `--use-mkcert` - use mkcert and cache under `~/.rip/certs`
+ - `--hsts` - add Strict-Transport-Security when HTTPS active
 
 ### Environment Variables
 

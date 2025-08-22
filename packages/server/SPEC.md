@@ -103,15 +103,15 @@ bun server stop
 ### Proposed additions (this SPEC)
 - HTTPS + TLS:
   - `https:<PORT>`: enable HTTPS listener on port (mirrors `http:<PORT>` style)
-  - `--https-port=<PORT>`: explicit flag (alternative to value form)
-  - `cert:<PATH>` / `key:<PATH>`: short value forms for TLS material
-  - `--cert=<PATH>` / `--key=<PATH>`: flag forms for TLS material
+  - `--https-port=<PORT>`: explicit flag (alternative to bare `<PORT>`)
+  - `--cert=<PATH>` / `--key=<PATH>`: TLS material (full paths). `--cert` may be a fullchain.
+  - `--use-mkcert`: use mkcert and cache under `~/.rip/certs/` (fallback to self‑signed)
 - Redirect & HSTS:
   - `--redirect-http` (default on): bind 80 and 301 to HTTPS
   - Location includes port when HTTPS port ≠ 443 (e.g., `https://host:5700/path`)
   - If binding 80 fails (privileges/port in use), warn and continue without redirect
   - `--no-redirect-http`: disable redirect
-  - `--hsts`: send HSTS header (default off in dev; on in staging/prod)
+  - `--hsts`: send HSTS header when HTTPS active (off by default)
   - `--no-hsts`: disable HSTS
 - Host registry (subcommands; separate from worker join/quit):
   - `add <host> <app-path>`
@@ -125,6 +125,10 @@ bun server stop
 Notes:
 - Maintain order‑independent, orthogonal values. Where practical, prefer `key:value` forms (`http:`, `https:`, `cert:`, `key:`) with equivalent `--flag=value` alternatives.
 - V1 registry can be in‑memory only; persistence can follow.
+
+Future:
+- ACME/Let’s Encrypt automation
+- Mutual TLS (`--mtls-ca=...`)
 
 ## Host Registry & CLI/API
 - Registry shape: `{ host: string, appPath: string, createdAt, updatedAt }`

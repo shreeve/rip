@@ -3,6 +3,10 @@
  */
 
 import { INTERNAL_HEADERS, logAccessHuman, logAccessJson, nowMs, ParsedFlags, stripInternalHeaders, getControlSocketPath } from './utils'
+import { readFileSync, existsSync, mkdirSync } from 'fs'
+import { join } from 'path'
+import { homedir } from 'os'
+import { X509Certificate } from 'crypto'
 
 type UpstreamState = { socket: string; inflight: number; version: number | null; workerId: number }
 
@@ -17,12 +21,13 @@ export class Server {
   private queue: { req: Request; resolve: (r: Response) => void; reject: (e: any) => void; enqueuedAt: number }[] = []
   private startedAt = nowMs()
   private newestVersion: number | null = null
+  private httpsActive = false
 
   constructor(flags: ParsedFlags) {
     this.flags = flags
   }
 
-  start(): void {
+  async start(): Promise<void> {
     // Listener selection
     const httpOnly = this.flags.httpPort !== 0 && this.flags.httpPort !== null
 
@@ -45,8 +50,22 @@ export class Server {
       this.flags.httpPort = this.server.port
     } else {
       const desired = 5000
-      this.httpsServer = startOnPort(desired, this.fetch.bind(this))
+      const tls = await this.loadTlsMaterial()
+      this.httpsServer = (() => {
+        let port = desired
+        while (true) {
+          try {
+            const s = Bun.serve({ port, idleTimeout: 8, tls, fetch: this.fetch.bind(this) })
+            return s
+          } catch (e: any) {
+            if (e && e.code === 'EADDRINUSE') { port++; continue }
+            throw e
+          }
+        }
+      })()
       const httpsPort = this.httpsServer.port
+      this.flags.httpsPort = httpsPort
+      this.httpsActive = true
       if (this.flags.redirectHttp) {
         try {
           this.server = Bun.serve({ port: 80, idleTimeout: 8, fetch: (req: Request) => {
@@ -72,7 +91,11 @@ export class Server {
   private async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url)
     if (url.pathname === '/status') return this.status()
-    if (url.pathname === '/server') return new Response('ok', { headers: { 'content-type': 'text/plain' } })
+    if (url.pathname === '/server') {
+      const headers = new Headers({ 'content-type': 'text/plain' })
+      this.maybeAddSecurityHeaders(headers)
+      return new Response('ok', { headers })
+    }
 
     // Fast path: try to get available worker directly
     if (this.inflightTotal < Math.max(1, this.sockets.length)) {
@@ -94,8 +117,10 @@ export class Server {
   private status(): Response {
     const uptime = Math.floor((nowMs() - this.startedAt) / 1000)
     const healthy = this.sockets.length > 0
-    const body = JSON.stringify({ status: healthy ? 'healthy' : 'degraded', app: this.flags.appName, workers: this.sockets.length, ports: { http: this.flags.httpPort ?? undefined }, uptime })
-    return new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': 'no-cache' } })
+    const body = JSON.stringify({ status: healthy ? 'healthy' : 'degraded', app: this.flags.appName, workers: this.sockets.length, ports: { http: this.flags.httpPort ?? undefined, https: this.flags.httpsPort ?? undefined }, uptime })
+    const headers = new Headers({ 'content-type': 'application/json', 'cache-control': 'no-cache' })
+    this.maybeAddSecurityHeaders(headers)
+    return new Response(body, { headers })
   }
 
   private getNextAvailableSocket(): UpstreamState | null {
@@ -153,6 +178,7 @@ export class Server {
     if (!res) return new Response('Service unavailable', { status: 503, headers: { 'Retry-After': '1' } })
     const headers = stripInternalHeaders(res.headers)
     headers.delete('date')
+    this.maybeAddSecurityHeaders(headers)
     if (this.flags.jsonLogging) logAccessJson(this.flags.appName, req, res, (performance.now() - start) / 1000, workerSeconds)
     else if (this.flags.accessLog) logAccessHuman(this.flags.appName, req, res, (performance.now() - start) / 1000, workerSeconds)
     return new Response(res.body, { status: res.status, statusText: res.statusText, headers })
@@ -230,5 +256,86 @@ export class Server {
       return new Response(JSON.stringify({ ok: false }), { status: 400, headers: { 'content-type': 'application/json' } })
     }
     return new Response('not-found', { status: 404 })
+  }
+
+  private maybeAddSecurityHeaders(headers: Headers): void {
+    if (this.httpsActive && this.flags.hsts) {
+      if (!headers.has('strict-transport-security')) headers.set('strict-transport-security', 'max-age=31536000; includeSubDomains')
+    }
+  }
+
+  private async loadTlsMaterial(): Promise<{ cert: string; key: string }> {
+    // Explicit cert/key paths
+    if (this.flags.certPath && this.flags.keyPath) {
+      try {
+        const cert = readFileSync(this.flags.certPath, 'utf8')
+        const key = readFileSync(this.flags.keyPath, 'utf8')
+        this.printCertSummary(cert)
+        return { cert, key }
+      } catch (e) {
+        console.error('Failed to read TLS cert/key from provided paths. Use http or fix paths.')
+        process.exit(2)
+      }
+    }
+
+    // mkcert path under ~/.rip/certs
+    if (this.flags.useMkcert) {
+      const dir = join(homedir(), '.rip', 'certs')
+      try { mkdirSync(dir, { recursive: true }) } catch {}
+      const certPath = join(dir, 'localhost.pem')
+      const keyPath = join(dir, 'localhost-key.pem')
+      if (!existsSync(certPath) || !existsSync(keyPath)) {
+        try {
+          const gen = Bun.spawn(['mkcert', '-install'])
+          try { await gen.exited } catch {}
+          const p = Bun.spawn(['mkcert', '-key-file', keyPath, '-cert-file', certPath, 'localhost', '127.0.0.1', '::1'])
+          await p.exited
+        } catch {
+          // fall through to self-signed
+        }
+      }
+      if (existsSync(certPath) && existsSync(keyPath)) {
+        const cert = readFileSync(certPath, 'utf8')
+        const key = readFileSync(keyPath, 'utf8')
+        this.printCertSummary(cert)
+        return { cert, key }
+      }
+    }
+
+    // Self-signed via openssl
+    {
+      const dir = join(homedir(), '.rip', 'certs')
+      try { mkdirSync(dir, { recursive: true }) } catch {}
+      const certPath = join(dir, 'selfsigned-localhost.pem')
+      const keyPath = join(dir, 'selfsigned-localhost-key.pem')
+      if (!existsSync(certPath) || !existsSync(keyPath)) {
+        try {
+          const p = Bun.spawn(['openssl', 'req', '-x509', '-nodes', '-newkey', 'rsa:2048', '-keyout', keyPath, '-out', certPath, '-subj', '/CN=localhost', '-days', '1'])
+          await p.exited
+        } catch {
+          console.error('TLS required but could not provision a certificate (mkcert/openssl missing). Use http or provide --cert/--key.')
+          process.exit(2)
+        }
+      }
+      try {
+        const cert = readFileSync(certPath, 'utf8')
+        const key = readFileSync(keyPath, 'utf8')
+        this.printCertSummary(cert)
+        return { cert, key }
+      } catch {
+        console.error('Failed to read generated self-signed cert/key from ~/.rip/certs')
+        process.exit(2)
+      }
+    }
+  }
+
+  private printCertSummary(certPem: string): void {
+    try {
+      const x = new X509Certificate(certPem)
+      const subject = x.subject.split(/,/)[0]?.trim() || x.subject
+      const issuer = x.issuer.split(/,/)[0]?.trim() || x.issuer
+      const exp = new Date(x.validTo)
+      console.log(`rip-server: tls cert ${subject} issued by ${issuer} expires ${exp.toISOString()}`)
+    } catch {}
   }
 }

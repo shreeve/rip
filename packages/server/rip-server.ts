@@ -19,12 +19,13 @@ async function main(): Promise<void> {
   }
   const flags = parseFlags(process.argv)
   const lb = new Server(flags)
-  lb.start()
+  await lb.start()
   const mgr = new Manager(flags)
   await mgr.start()
-  const port = flags.httpPort ?? 0
-  const url = `http://localhost:${port}/server`
-  console.log(`rip-server: app=${flags.appName} http=${port} workers=${flags.workers} url=${url}`)
+  const http = flags.httpPort ?? 0
+  const https = flags.httpsPort ?? 0
+  const url = https ? `https://localhost:${https}/server` : `http://localhost:${http}/server`
+  console.log(`rip-server: app=${flags.appName} workers=${flags.workers} url=${url}`)
 }
 
 main().catch(err => {
