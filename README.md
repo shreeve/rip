@@ -266,6 +266,10 @@ MIT
 
 Contributions welcome! Please follow the 4 C's principles.
 
+### Docs
+- See [ARCHITECTURE.md](ARCHITECTURE.md) for a deep technical overview.
+- See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, testing, and PR guidance.
+
 ---
 
 Built with ❤️ for the Bun community
