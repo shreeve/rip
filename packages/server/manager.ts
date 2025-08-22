@@ -92,8 +92,8 @@ export class Manager {
       workerId.toString(),
       this.flags.maxRequestsPerWorker.toString(),
       this.flags.maxReloadsPerWorker.toString(),
+      this.flags.maxSecondsPerWorker.toString(),
       this.flags.appEntry,
-      String(this.flags.maxSecondsPerWorker || 0),
     ], {
       stdout: 'inherit',
       stderr: 'inherit',

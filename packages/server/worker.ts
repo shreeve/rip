@@ -14,8 +14,8 @@ import { getControlSocketPath } from './utils'
 const workerId = Number.parseInt(process.argv[2] ?? '0')
 const maxRequests = Number.parseInt(process.argv[3] ?? '10000')
 const maxReloads = Number.parseInt(process.argv[4] ?? '10')
-const appEntry = process.argv[5]
-const maxSeconds = Number.parseInt(process.argv[6] ?? '0')
+const maxSeconds = Number.parseInt(process.argv[5] ?? '0')
+const appEntry = process.argv[6]
 
 const socketPath = process.env.SOCKET_PATH as string  // Per-worker Unix socket path
 const hotReloadMode = (process.env.RIP_HOT_RELOAD as 'none' | 'process' | 'module') || 'none'
