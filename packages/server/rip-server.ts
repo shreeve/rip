@@ -7,8 +7,8 @@ import { Manager } from './manager'
 import { Server } from './server'
 
 async function main(): Promise<void> {
-  // Subcommand: `bun server stop`
-  if (process.argv[2] === 'stop') {
+  // Subcommand: `bun server stop` (position‑independent)
+  if (process.argv.includes('stop')) {
     try {
       // Best-effort: find and kill matching processes by script path
       const script = __filename
