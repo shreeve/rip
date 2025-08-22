@@ -85,7 +85,7 @@ export function parseFlags(argv: string[]): ParsedFlags {
   const hotFlag = getKV('--hot-reload=') || process.env.RIP_HOT_RELOAD
   let hotReload: HotReloadMode = 'none'
   if (hotFlag === 'none' || hotFlag === 'process' || hotFlag === 'module') hotReload = hotFlag
-  else hotReload = isDev() ? 'module' : 'none'
+  else hotReload = isDev() ? 'process' : 'none'
 
   return {
     appPath: resolve(appPathInput),

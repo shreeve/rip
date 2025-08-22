@@ -51,34 +51,32 @@ Provide a simple, HTTPS‑first server so every app is reachable at a clean URL 
 ## Configuration & Flags
 - Flags/env (via `parseFlags()` in `utils.ts`):
   - `--https-port=<n>` (default: 443; null disables)
-  - `--http-port=<n>` (default: 80; null disables)
+  - Bare integer token (e.g., `5700`) sets HTTPS port (no other meaning)
+  - Precedence: first HTTPS port token wins (bare int, `https:<PORT>`, or `--https-port=<PORT>`)
+  - If none provided: try `443`; on bind failure, fall back to `3443` with a warning
   - `--cert=<path.pem>` `--key=<path.pem>` (PEM strings also accepted via env)
   - `--hsts` (default: off in dev; on in staging/prod)
-  - Timeouts/body: `--connect-timeout-ms`, `--read-timeout-ms`, `--max-request-body`
-  - Logging: `--json-logging`
-  - Hot reload: `--hot-reload=none|process|module`
 - Host registry persistence (initially in‑memory; optional JSON file for dev convenience)
 
 ## CLI Overview (Current vs Proposed)
 
 ### Current (already supported by `parseFlags()`)
-- App path (today positional, proposed tokenized too):
-  - Positional (back‑compat): `<app-path>` resolves via `resolveAppEntry()`
-  - Proposed token: `app:<PATH>` or `--app=<PATH>` (order‑independent)
-- Order‑independent tokens:
+- Order‑independent values:
+  - `<app-path>`: an existing directory/file, resolves via `resolveAppEntry()`
   - `http:<PORT>`: override HTTP port (currently used for entry listener)
   - `w:<N>` / `w:auto`: workers count (number or `auto` = CPU cores)
   - `r:<N>`: max requests per worker
   - `--max-reloads=<N>`: max module reloads before cycling
   - `--json` or `--json-logging`: enable structured logs
   - `--no-access-log`: disable human access logs
-  - Queue/Timeouts:
+  - Queue/Timeouts/Limits:
     - `--max-queue=<N>`
     - `--queue-timeout-ms=<N>`
     - `--connect-timeout-ms=<N>`
     - `--read-timeout-ms=<N>`
+    - `--max-request-body=<N>`
   - Hot reload:
-    - `--hot-reload=none|process|module` (default: `module` in dev, `none` in prod)
+    - `--hot-reload=none|process|module` (default: `process` in dev, `none` in prod)
   - Misc:
     - `--socket-prefix=<name>`: override socket naming prefix
   - Control:
@@ -89,41 +87,43 @@ Examples (current style):
 bun server apps/labs/api http:5002 w:auto r:10000 --json-logging --queue-timeout-ms=2000
 ```
 
-Examples (tokenized app path):
+Examples (order‑independent app path):
 ```bash
-bun server app:apps/labs/api http:5002 w:auto
+bun server http:5002 w:auto apps/labs/api
+bun server w:6 apps/labs/api r:20000
 ```
-
 ### Proposed additions (this SPEC)
 - HTTPS + TLS:
   - `https:<PORT>`: enable HTTPS listener on port (mirrors `http:<PORT>` style)
-  - `--https-port=<PORT>`: explicit flag (alternative to token)
-  - `cert:<PATH>` / `key:<PATH>`: token form for TLS material
-  - `--cert=<PATH>` / `--key=<PATH>`: flag form for TLS material
+  - `--https-port=<PORT>`: explicit flag (alternative to value form)
+  - `cert:<PATH>` / `key:<PATH>`: short value forms for TLS material
+  - `--cert=<PATH>` / `--key=<PATH>`: flag forms for TLS material
 - Redirect & HSTS:
-  - `--redirect-http` (default on): enable 80→301 to HTTPS
+  - `--redirect-http` (default on): bind 80 and 301 to HTTPS
+  - Location includes port when HTTPS port ≠ 443 (e.g., `https://host:5700/path`)
+  - If binding 80 fails (privileges/port in use), warn and continue without redirect
   - `--no-redirect-http`: disable redirect
   - `--hsts`: send HSTS header (default off in dev; on in staging/prod)
   - `--no-hsts`: disable HSTS
 - Host registry (subcommands; separate from worker join/quit):
-  - `host add <host> <app-path>`
-  - `host remove <host>`
-  - `host list`
+  - `add <host> <app-path>`
+  - `remove <host>`
+  - `list`
 
 Notes:
-- Maintain order‑independent, orthogonal tokens. Where practical, prefer `token:value` forms (`http:`, `https:`, `cert:`, `key:`) with equivalent `--flag=value` alternatives.
+- Maintain order‑independent, orthogonal values. Where practical, prefer `key:value` forms (`http:`, `https:`, `cert:`, `key:`) with equivalent `--flag=value` alternatives.
 - V1 registry can be in‑memory only; persistence can follow.
 
 ## Host Registry & CLI/API
 - Registry shape: `{ host: string, appPath: string, createdAt, updatedAt }`
 - Control operations (via control socket/API):
-  - `host:add { host, appPath }`
-  - `host:remove { host }`
-  - `host:list`
+  - `add { host, appPath }`
+  - `remove { host }`
+  - `list`
 - CLI UX (examples):
-  - `bun server host add labs.ripdev.io apps/labs/api`
-  - `bun server host remove labs.ripdev.io`
-  - `bun server host list`
+  - `bun server add labs.ripdev.io apps/labs/api`
+  - `bun server remove labs.ripdev.io`
+  - `bun server list`
 - Manager integrates with registry so worker lifecycle aligns with host mappings (spawn on add; stop on remove).
 
 ## Logging & Metrics
