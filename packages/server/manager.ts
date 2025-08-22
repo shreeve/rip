@@ -29,13 +29,8 @@ export class Manager {
   private currentMtime = 0
   private isRolling = false
   private lastRollAt = 0
-
-  // Allocate unique ids when temporarily over-provisioning during rolling restarts
-  private getNextWorkerId(): number {
-    let maxId = -1
-    for (const w of this.workers) maxId = Math.max(maxId, w.id)
-    return maxId + 1
-  }
+  // Monotonic id for new workers created during rolling restarts
+  private nextWorkerId = -1
 
   constructor(flags: ParsedFlags) {
     this.flags = flags
@@ -50,6 +45,8 @@ export class Manager {
       const w = await this.spawnWorker(i)
       this.workers.push(w)
     }
+    // Initialize nextWorkerId to the highest assigned id so far
+    this.nextWorkerId = Math.max(this.nextWorkerId, this.flags.workers - 1)
     if (this.flags.hotReload === 'process') {
       // lightweight mtime poller for entry file
       this.currentMtime = this.getEntryMtime()
@@ -143,7 +140,7 @@ export class Manager {
   async rollingRestart(): Promise<void> {
     // Spawn-before-kill to avoid capacity gaps
     for (const oldWorker of [...this.workers]) {
-      const newId = this.getNextWorkerId()
+      const newId = ++this.nextWorkerId
       const replacement = await this.spawnWorker(newId)
       // Wait briefly for readiness; proceed regardless after timeout to avoid stalls
       await this.waitWorkerReady(replacement.socketPath, 3000)
