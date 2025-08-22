@@ -1,3 +1,5 @@
+<img src="/logo.png" style="width:50px" />
+
 # Rip Language Architecture
 
 This document provides comprehensive technical documentation for developers working on the Rip language project. It covers the internal architecture, implementation details, development workflow, and technical insights.

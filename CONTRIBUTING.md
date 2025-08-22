@@ -1,3 +1,5 @@
+<img src="/logo.png" style="width:50px" />
+
 # Contributing to Rip
 
 Thank you for your interest in contributing! This guide summarizes environment setup, development workflows, code style, testing, and PR guidelines.
