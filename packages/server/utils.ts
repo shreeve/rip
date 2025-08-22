@@ -67,11 +67,6 @@ function parseRestartPolicyToken(token: string | undefined, defRequests: number,
 }
 
 export function parseFlags(argv: string[]): ParsedFlags {
-  if (!argv[2]) {
-    console.error('Usage: bun packages/server/rip-server.ts <app-path> [flags]')
-    process.exit(2)
-  }
-
   const rawFlags = new Set<string>()
   for (let i = 3; i < argv.length; i++) rawFlags.add(argv[i])
 
@@ -83,7 +78,7 @@ export function parseFlags(argv: string[]): ParsedFlags {
   }
   const has = (name: string): boolean => rawFlags.has(name)
 
-  const appPathInput = argv[2]
+  const appPathInput = argv[2] || process.cwd()
   const { baseDir, entryPath, appName } = resolveAppEntry(appPathInput)
 
   // If no explicit http: token and no PORT env, set to 0 (auto-select later)
