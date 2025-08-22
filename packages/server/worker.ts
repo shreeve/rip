@@ -19,6 +19,7 @@ const appEntry = process.argv[5]
 const socketPath = process.env.SOCKET_PATH as string  // Per-worker Unix socket path
 const hotReloadMode = (process.env.RIP_HOT_RELOAD as 'none' | 'process' | 'module') || 'none'
 const socketPrefix = process.env.SOCKET_PREFIX as string
+const version = Number.parseInt(process.env.RIP_VERSION || '1')
 
 let appReady = false
 let inflight = false
@@ -121,7 +122,7 @@ async function getHandler(): Promise<(req: Request) => Promise<Response> | Respo
 
 async function selfJoin(): Promise<void> {
   try {
-    const payload = { op: 'join', workerId, pid: process.pid, socket: socketPath }
+    const payload = { op: 'join', workerId, pid: process.pid, socket: socketPath, version }
     const body = JSON.stringify(payload)
     const ctl = getControlSocketPath(socketPrefix)
     await fetch('http://localhost/worker', { method: 'POST', body, headers: { 'content-type': 'application/json' }, unix: ctl })

@@ -33,6 +33,8 @@ export class Manager {
   private nextWorkerId = -1
   // Worker ids being intentionally retired (avoid monitor() respawn race)
   private retiringIds: Set<number> = new Set()
+  // Version epoch for zero-overlap routing; incremented on rolling restart
+  private currentVersion = 1
 
   constructor(flags: ParsedFlags) {
     this.flags = flags
@@ -44,7 +46,7 @@ export class Manager {
     await this.stop()
     this.workers = []
     for (let i = 0; i < this.flags.workers; i++) {
-      const w = await this.spawnWorker()
+      const w = await this.spawnWorker(this.currentVersion)
       this.workers.push(w)
     }
     if (this.flags.hotReload === 'process') {
@@ -77,7 +79,7 @@ export class Manager {
     this.workers = []
   }
 
-  private async spawnWorker(): Promise<TrackedWorker> {
+  private async spawnWorker(version?: number): Promise<TrackedWorker> {
     const workerId = ++this.nextWorkerId
     const socketPath = getWorkerSocketPath(this.flags.socketPrefix, workerId)
     try { await Bun.spawn(['rm', '-f', socketPath]).exited } catch {}
@@ -103,6 +105,7 @@ export class Manager {
         SOCKET_PREFIX: this.flags.socketPrefix,
         RIP_LOG_JSON: this.flags.jsonLogging ? '1' : '0',
         RIP_HOT_RELOAD: this.flags.hotReload,
+        RIP_VERSION: String(version ?? this.currentVersion),
       },
     })
 
@@ -144,8 +147,11 @@ export class Manager {
     const olds = [...this.workers]
     const pairs: { old: TrackedWorker; replacement: TrackedWorker }[] = []
 
+    // Bump version epoch for this rollout
+    this.currentVersion++
+
     for (const oldWorker of olds) {
-      const replacement = await this.spawnWorker()
+      const replacement = await this.spawnWorker(this.currentVersion)
       // Track replacement in our list immediately
       this.workers.push(replacement)
       pairs.push({ old: oldWorker, replacement })
