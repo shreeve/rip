@@ -200,7 +200,7 @@ export function parseFlags(argv: string[]): ParsedFlags {
   })()
   const certPath = getKV('--cert=') || undefined
   const keyPath = getKV('--key=') || undefined
-  const autoTls = has('--auto-tls') || has('--use-mkcert')
+  const autoTls = has('--auto-tls')
   const hsts = has('--hsts')
   const redirectHttp = !has('--no-redirect-http')
 
