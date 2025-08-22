@@ -15,6 +15,7 @@ const workerId = Number.parseInt(process.argv[2] ?? '0')
 const maxRequests = Number.parseInt(process.argv[3] ?? '10000')
 const maxReloads = Number.parseInt(process.argv[4] ?? '10')
 const appEntry = process.argv[5]
+const maxSeconds = Number.parseInt(process.argv[6] ?? '0')
 
 const socketPath = process.env.SOCKET_PATH as string  // Per-worker Unix socket path
 const hotReloadMode = (process.env.RIP_HOT_RELOAD as 'none' | 'process' | 'module') || 'none'
@@ -24,6 +25,7 @@ const version = Number.parseInt(process.env.RIP_VERSION || '1')
 let appReady = false
 let inflight = false
 let handled = 0
+const startedAtMs = Date.now()
 let reloader: any = null
 let lastMtime = 0
 let cachedHandler: any = null
@@ -166,7 +168,9 @@ async function start(): Promise<void> {
       } finally {
         inflight = false
         handled++
-        if (handled >= maxRequests) setTimeout(() => process.exit(0), 10)
+        const exceededReqs = handled >= maxRequests
+        const exceededTime = maxSeconds > 0 && (Date.now() - startedAtMs) / 1000 >= maxSeconds
+        if (exceededReqs || exceededTime) setTimeout(() => process.exit(0), 10)
       }
     },
   })

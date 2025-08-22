@@ -14,6 +14,7 @@ export interface ParsedFlags {
   appName: string
   workers: number
   maxRequestsPerWorker: number
+  maxSecondsPerWorker: number
   maxReloadsPerWorker: number
   httpPort: number
   jsonLogging: boolean
@@ -48,6 +49,23 @@ export function parseWorkersToken(token: string | undefined, def: number): numbe
   return Number.isFinite(n) && n > 0 ? n : def
 }
 
+function parseRestartPolicyToken(token: string | undefined, defRequests: number, defSeconds: number): { maxRequests: number; maxSeconds: number } {
+  if (!token) return { maxRequests: defRequests, maxSeconds: defSeconds }
+  let maxRequests = defRequests
+  let maxSeconds = defSeconds
+
+  for (const part of token.split(',').map(s => s.trim()).filter(Boolean)) {
+    if (part.endsWith('s')) {
+      const secs = Number.parseInt(part.slice(0, -1))
+      if (Number.isFinite(secs) && secs >= 0) maxSeconds = secs
+    } else {
+      const n = Number.parseInt(part)
+      if (Number.isFinite(n) && n > 0) maxRequests = n
+    }
+  }
+  return { maxRequests, maxSeconds }
+}
+
 export function parseFlags(argv: string[]): ParsedFlags {
   if (!argv[2]) {
     console.error('Usage: bun packages/server/rip-server.ts <app-path> [flags]')
@@ -75,7 +93,9 @@ export function parseFlags(argv: string[]): ParsedFlags {
   const socketPrefix = socketPrefixOverride || `rip_${appName}`
 
   const workers = parseWorkersToken((getKV('w:') || undefined) as string | undefined, Math.max(1, require('os').cpus().length))
-  const maxRequestsPerWorker = coerceInt(getKV('r:'), 10000)
+  const restartPolicy = parseRestartPolicyToken(getKV('r:'), coerceInt(process.env.RIP_MAX_REQUESTS, 10000), coerceInt(process.env.RIP_MAX_SECONDS, 0))
+  const maxRequestsPerWorker = restartPolicy.maxRequests
+  const maxSecondsPerWorker = restartPolicy.maxSeconds
   const maxReloadsPerWorker = coerceInt(getKV('--max-reloads='), coerceInt(process.env.RIP_MAX_RELOADS, 10))
 
   const jsonLogging = has('--json') || has('--json-logging')
@@ -98,6 +118,7 @@ export function parseFlags(argv: string[]): ParsedFlags {
     appName,
     workers,
     maxRequestsPerWorker,
+    maxSecondsPerWorker,
     maxReloadsPerWorker,
     httpPort,
     jsonLogging,
