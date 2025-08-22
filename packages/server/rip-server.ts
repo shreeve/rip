@@ -1,5 +1,5 @@
 /**
- * Rip Server CLI: parse flags, start Manager + LB.
+ * Rip Server CLI: parse flags, start Server + Manager.
  */
 
 import { parseFlags } from './utils'

@@ -2,7 +2,7 @@
  * Rip Manager: spawns and supervises worker processes (per-worker sockets).
  *
  * Features:
- * - Per-worker sockets with LB dispatch
+ * - Per-worker sockets with Server dispatch
  * - Exponential backoff restart logic with attempt limits
  * - Rolling restart support for graceful deployments
  * - Passes maxReloads parameter to workers for memory management

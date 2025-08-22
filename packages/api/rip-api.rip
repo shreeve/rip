@@ -374,7 +374,7 @@ export App = (fn) ->
   fn?()
   startHandler()
 
-# Start a listener (dev/simple mode). In prod, your Manager/LB would wrap this.
+# Start a listener (dev/simple mode). In prod, your Manager/Server would wrap this.
 export start = (opts = {}) ->
   fetch = startHandler()
   host  = opts.host or '0.0.0.0'

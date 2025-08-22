@@ -1,5 +1,5 @@
 /**
- * Rip LB Server: HTTP entry + per-worker socket load balancer with control socket.
+ * Rip Server: HTTP entry with per‑worker sockets and a control socket.
  */
 
 import { INTERNAL_HEADERS, logAccessHuman, logAccessJson, nowMs, ParsedFlags, stripInternalHeaders, getControlSocketPath } from './utils'
