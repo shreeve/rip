@@ -29,7 +29,7 @@ export class Manager {
   private currentMtime = 0
   private isRolling = false
   private lastRollAt = 0
-  // Monotonic id for new workers created during rolling restarts
+  // Monotonic id for all workers; incremented on every spawn
   private nextWorkerId = -1
 
   constructor(flags: ParsedFlags) {
@@ -42,11 +42,9 @@ export class Manager {
     await this.stop()
     this.workers = []
     for (let i = 0; i < this.flags.workers; i++) {
-      const w = await this.spawnWorker(i)
+      const w = await this.spawnWorker()
       this.workers.push(w)
     }
-    // Initialize nextWorkerId to the highest assigned id so far
-    this.nextWorkerId = Math.max(this.nextWorkerId, this.flags.workers - 1)
     if (this.flags.hotReload === 'process') {
       // lightweight mtime poller for entry file
       this.currentMtime = this.getEntryMtime()
@@ -77,7 +75,8 @@ export class Manager {
     this.workers = []
   }
 
-  private async spawnWorker(workerId: number): Promise<TrackedWorker> {
+  private async spawnWorker(): Promise<TrackedWorker> {
+    const workerId = ++this.nextWorkerId
     const socketPath = getWorkerSocketPath(this.flags.socketPrefix, workerId)
     try { await Bun.spawn(['rm', '-f', socketPath]).exited } catch {}
 
@@ -118,7 +117,7 @@ export class Manager {
     if (w.restartCount > 10) return
     await new Promise(r => setTimeout(r, w.backoffMs))
     const idx = this.workers.findIndex(x => x.id === w.id)
-    if (idx >= 0) this.workers[idx] = await this.spawnWorker(w.id)
+    if (idx >= 0) this.workers[idx] = await this.spawnWorker()
   }
 
   // Wait for a worker's unix socket to respond ready
@@ -143,8 +142,7 @@ export class Manager {
     const pairs: { old: TrackedWorker; replacement: TrackedWorker }[] = []
 
     for (const oldWorker of olds) {
-      const newId = ++this.nextWorkerId
-      const replacement = await this.spawnWorker(newId)
+      const replacement = await this.spawnWorker()
       // Track replacement in our list immediately
       this.workers.push(replacement)
       pairs.push({ old: oldWorker, replacement })
