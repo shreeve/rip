@@ -138,22 +138,27 @@ export class Manager {
   }
 
   async rollingRestart(): Promise<void> {
-    // Spawn-before-kill to avoid capacity gaps
-    for (const oldWorker of [...this.workers]) {
+    // Spawn all replacements first, then await readiness in parallel, then retire olds
+    const olds = [...this.workers]
+    const pairs: { old: TrackedWorker; replacement: TrackedWorker }[] = []
+
+    for (const oldWorker of olds) {
       const newId = ++this.nextWorkerId
       const replacement = await this.spawnWorker(newId)
-      // Wait briefly for readiness; proceed regardless after timeout to avoid stalls
-      await this.waitWorkerReady(replacement.socketPath, 3000)
+      // Track replacement in our list immediately
+      this.workers.push(replacement)
+      pairs.push({ old: oldWorker, replacement })
+    }
 
-      // Swap in the replacement, then retire the old worker
-      const idx = this.workers.findIndex(x => x.id === oldWorker.id)
-      if (idx >= 0) this.workers.splice(idx, 0, replacement)
+    // Wait for readiness in parallel (best-effort)
+    await Promise.all(pairs.map(p => this.waitWorkerReady(p.replacement.socketPath, 3000)))
 
-      try { oldWorker.process.kill() } catch {}
-      try { await oldWorker.process.exited } catch {}
-      // Remove the old entry if still present; keep the replacement
-      const oldIdx = this.workers.findIndex(x => x.id === oldWorker.id)
-      if (oldIdx >= 0) this.workers.splice(oldIdx, 1)
+    // Now retire the old workers
+    for (const { old } of pairs) {
+      try { old.process.kill() } catch {}
+      try { await old.process.exited } catch {}
+      const idx = this.workers.findIndex(x => x.id === old.id)
+      if (idx >= 0) this.workers.splice(idx, 1)
     }
   }
 
