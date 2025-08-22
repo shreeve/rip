@@ -2,8 +2,6 @@
 
 This file preserves non-obvious, still-useful ideas from legacy docs.
 
-Use it as a checklist of concepts to consider porting into the new `packages/server` implementation.
-
 ## HTTPS and Certificate Authority (CA)
 - Dev CA layout under `~/.rip-server/`:
   - `ca/` (root CA: `root.crt`, `root.key`)
@@ -26,26 +24,15 @@ Use it as a checklist of concepts to consider porting into the new `packages/ser
 - curl note for dev:
   - curl uses its own CA store; for dev either use `-k` or `--cacert <exported-ca.crt>`
 
-## Deployment strategy idea
-- Blue–green swap: pre-spawn new generation, readiness probe, atomic balancer swap, drain old generation
-
 ## CLI Ergonomics (optional future polish)
 - HTTPS modes and tokens:
   - `http`, `https`, `http+https`; `https:quick`, `https:ca`
 - Auto port probing/bump for HTTP/HTTPS (avoid collisions in dev)
 
-
-
 ## Security/HTTP Hardening Ideas (roadmap)
 - Optional HTTP→HTTPS redirect flag; HSTS toggle for dev; body size/timeouts presets
 - Future: HTTP/2 (ALPN), OCSP stapling; basic rate-limit; static file helper with gzip/brotli + caching controls
 - Optional NCSA access log format + rotation (ops-friendly)
-
-
-
----
-
-## Legacy TS Snippets (for reference)
 
 ### HTTPS/TLS serve
 ```ts
