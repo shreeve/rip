@@ -62,8 +62,9 @@ Provide a simple, HTTPS‑first server so every app is reachable at a clean URL 
 ## CLI Overview (Current vs Proposed)
 
 ### Current (already supported by `parseFlags()`)
-- Positional:
-  - `<app-path>`: absolute or relative; resolves to entry via `resolveAppEntry()`
+- App path (today positional, proposed tokenized too):
+  - Positional (back‑compat): `<app-path>` resolves via `resolveAppEntry()`
+  - Proposed token: `app:<PATH>` or `--app=<PATH>` (order‑independent)
 - Order‑independent tokens:
   - `http:<PORT>`: override HTTP port (currently used for entry listener)
   - `w:<N>` / `w:auto`: workers count (number or `auto` = CPU cores)
@@ -86,6 +87,11 @@ Provide a simple, HTTPS‑first server so every app is reachable at a clean URL 
 Examples (current style):
 ```bash
 bun server apps/labs/api http:5002 w:auto r:10000 --json-logging --queue-timeout-ms=2000
+```
+
+Examples (tokenized app path):
+```bash
+bun server app:apps/labs/api http:5002 w:auto
 ```
 
 ### Proposed additions (this SPEC)
