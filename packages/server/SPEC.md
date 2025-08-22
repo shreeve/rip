@@ -67,14 +67,14 @@ Provide a simple, HTTPS‑first server so every app is reachable at a clean URL 
   - Default: none, error if not supplied
 - HTTP port:
   - `http:<PORT>`: set HTTP listener port
-  - Default: (when `PORT` unset), server probes from `5000` upward to first free port and prints a clickable URL
+  - Default: when `PORT` unset, probes from port `5000` upward to first free port and prints a clickable URL
 - Workers:
   - `w:<N>` | `w:auto` | `w:half` | `w:2x` | `w:3x`
   - Default: `w:half`
 - Restart policy:
   - `r:<REQUESTS>[,<SECONDS>s][,<RELOADS>r]` (whichever occurs first)
   - Examples: `r:50000`, `r:3600s`, `r:20000,1800s`, `r:50000,3600s,10r`
-  - Note: `<RELOADS>r` applies only when `--hot-reload=module`
+  - Note: `<RELOADS>r` applies only when `--reload=module`
   - Default: `r:10000,3600s,10r`
 - Queue/Timeouts:
   - `--max-queue=<N>`
@@ -82,14 +82,16 @@ Provide a simple, HTTPS‑first server so every app is reachable at a clean URL 
   - `--connect-timeout-ms=<N>`
   - `--read-timeout-ms=<N>`
 - Reload mode:
-  - `--reload=none|process|module` (default: `process`)
+  - `--reload=none|process|module`
+  - Default: `process`
 - Logging:
   - `--json` or `--json-logging`: enable structured logs (default off)
-  - Human access logs on by default; disable with `--no-access-log`
-- Misc:
+  - Default: human access logs on, disable with `--no-access-log`
+- Socket prefix:
   - `--socket-prefix=<name>`: override per‑worker socket naming prefix
-- Control subcommands:
-  - `stop`: best‑effort stop of running server processes (position‑independent)
+  - Default: `rip_<app-name>` (derived from the resolved app directory name)
+- Subcommands:
+  - `stop`: best‑effort stop of running server processes
 
 Examples:
 ```bash
