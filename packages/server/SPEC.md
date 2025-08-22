@@ -65,7 +65,7 @@ Provide a simple, HTTPS‑first server so every app is reachable at a clean URL 
 - App path detection: first token that looks like a path (contains `/`, starts with `.`, absolute, or ends with `.rip`/`.ts`) and exists; resolves via `resolveAppEntry()`
 - HTTP port:
   - `http:<PORT>`: set HTTP listener port
-  - If not provided (and `PORT` unset), server probes from `5000` upward to first free port and prints a clickable URL
+  - Default: (when `PORT` unset), server probes from `5000` upward to first free port and prints a clickable URL
 - Workers:
   - `w:<N>` | `w:auto` | `w:half` | `w:2x` | `w:3x`
   - Default: `w:half`
