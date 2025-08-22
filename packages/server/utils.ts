@@ -77,21 +77,8 @@ export function parseFlags(argv: string[]): ParsedFlags {
     if (!looksLikePath) return undefined
     try {
       const abs = isAbsolute(tok) ? tok : resolve(process.cwd(), tok)
-      if (!existsSync(abs)) return undefined
-      const st = statSync(abs)
-      if (st.isDirectory()) {
-        const one = join(abs, 'index.rip')
-        const two = join(abs, 'index.ts')
-        return (existsSync(one) || existsSync(two)) ? tok : undefined
-      }
-      if (st.isFile()) {
-        const lower = abs.toLowerCase()
-        return (lower.endsWith('.rip') || lower.endsWith('.ts')) ? tok : undefined
-      }
-      return undefined
-    } catch {
-      return undefined
-    }
+      return existsSync(abs) ? tok : undefined
+    } catch { return undefined }
   }
 
   for (let i = 2; i < argv.length; i++) {
@@ -104,7 +91,7 @@ export function parseFlags(argv: string[]): ParsedFlags {
   }
 
   if (!appPathInput) {
-    console.error('Usage: bun packages/server/rip-server.ts <app-path> [flags]')
+    console.error('Usage: bun server <app-path> [flags]')
     process.exit(2)
   }
 
