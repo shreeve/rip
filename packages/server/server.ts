@@ -30,7 +30,6 @@ export class Server {
       while (true) {
         try {
           this.server = Bun.serve({ port, idleTimeout: 8, fetch: this.fetch.bind(this) })
-          // @ts-ignore
           this.flags.httpPort = this.server.port
           break
         } catch (e: any) {
