@@ -29,7 +29,7 @@ export class Manager {
   private currentMtime = 0
   private isRolling = false
   private lastRollAt = 0
-  
+
   // Allocate unique ids when temporarily over-provisioning during rolling restarts
   private getNextWorkerId(): number {
     let maxId = -1
