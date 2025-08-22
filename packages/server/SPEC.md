@@ -66,22 +66,21 @@ Provide a simple, HTTPS‑first server so every app is reachable at a clean URL 
   - `http:<PORT>`: override HTTP port (currently used for entry listener)
   - `w:<N>` / `w:auto`: workers count (number or `auto` = CPU cores)
   - `r:<N>`: max requests per worker
-  - `--max-reloads=<N>`: max module reloads before cycling
-  - `--json` or `--json-logging`: enable structured logs
-  - `--no-access-log`: disable human access logs
   - Queue/Timeouts/Limits:
     - `--max-queue=<N>`
     - `--queue-timeout-ms=<N>`
     - `--connect-timeout-ms=<N>`
     - `--read-timeout-ms=<N>`
     - `--max-request-body=<N>`
+    - `--max-reloads=<N>`: max module reloads before cycling
   - Hot reload:
     - `--hot-reload=none|process|module` (default: `process` in dev, `none` in prod)
   - Misc:
     - `--socket-prefix=<name>`: override socket naming prefix
+    - `--json` or `--json-logging`: enable structured logs
+    - `--no-access-log`: disable human access logs
   - Control:
-    - `stop` (preferred): best‑effort stop of running server processes
-    - `--stop` (back‑compat): same behavior
+    - `stop` / `--stop`: best‑effort stop of running server processes
 
 Examples (current style):
 ```bash
