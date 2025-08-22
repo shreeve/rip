@@ -31,6 +31,8 @@ export class Manager {
   private lastRollAt = 0
   // Monotonic id for all workers; incremented on every spawn
   private nextWorkerId = -1
+  // Worker ids being intentionally retired (avoid monitor() respawn race)
+  private retiringIds: Set<number> = new Set()
 
   constructor(flags: ParsedFlags) {
     this.flags = flags
@@ -112,6 +114,7 @@ export class Manager {
   private async monitor(w: TrackedWorker): Promise<void> {
     await w.process.exited
     if (this.shuttingDown) return
+    if (this.retiringIds.has(w.id)) return
     w.restartCount++
     w.backoffMs = Math.min(w.backoffMs * 2, 30000)
     if (w.restartCount > 10) return
@@ -151,13 +154,13 @@ export class Manager {
     // Wait for readiness in parallel (best-effort)
     await Promise.all(pairs.map(p => this.waitWorkerReady(p.replacement.socketPath, 3000)))
 
-    // Now retire the old workers
-    for (const { old } of pairs) {
-      try { old.process.kill() } catch {}
-      try { await old.process.exited } catch {}
-      const idx = this.workers.findIndex(x => x.id === old.id)
-      if (idx >= 0) this.workers.splice(idx, 1)
-    }
+    // Now retire the old workers: send SIGTERM to all, wait exits in parallel, then prune
+    for (const { old } of pairs) this.retiringIds.add(old.id)
+    for (const { old } of pairs) { try { old.process.kill() } catch {} }
+    await Promise.all(pairs.map(({ old }) => old.process.exited.catch(() => {})))
+    const retiring = new Set(pairs.map(p => p.old.id))
+    this.workers = this.workers.filter(w => !retiring.has(w.id))
+    for (const id of retiring) this.retiringIds.delete(id)
   }
 
   async shutdown(): Promise<void> {
