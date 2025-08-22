@@ -167,33 +167,6 @@ export function formatTimestamp(): { timestamp: string; timezone: string } {
   return { timestamp, timezone }
 }
 
-export function scale(value: number, unit: string, base = 1000): string {
-  const baseNum = Number(base)
-  const span = ['G', 'M', 'K', ' ', 'm', 'µ', 'n']
-  let slot = 3
-  if (value === 0) return `  0 ${unit}`
-  while (value > 0 && value < 1.0) {
-    value *= baseNum
-    slot += 1
-  }
-  while (value >= baseNum) {
-    value /= baseNum
-    slot -= 1
-  }
-  if (value >= 999.5) {
-    value /= baseNum
-    slot -= 1
-  }
-  if (slot >= 0 && slot <= 6) {
-    let nums: string
-    if (value >= 99.5) nums = Math.round(value).toString()
-    else if (value >= 9.5) nums = ' ' + Math.round(value).toString()
-    else nums = value.toFixed(1)
-    return `${nums}${span[slot]}${unit}`
-  }
-  return `??? ${unit}`
-}
-
 export function logAccessJson(app: string, req: Request, res: Response, totalSeconds: number, workerSeconds: number): void {
   const url = new URL(req.url)
   const len = res.headers.get('content-length')
