@@ -268,22 +268,12 @@ class Program {
         while (ti < tIdx.length && toks[tIdx[ti] + 2] <= pcEnd) ti++;
       }
 
-      // chunk end at ';' or next command word
-      let chunkEndByte = end;
-      for (let k = ti; k < tIdx.length; k++) {
-        const kind = toks[tIdx[k]] & 0xFFFF;
-        if (kind === K.Semi) { chunkEndByte = toks[tIdx[k] + 1]; break; }
-        if (kind === K.Ident) {
-          const s = toks[tIdx[k] + 1], e = toks[tIdx[k] + 2];
-          const w = this._slice(s, e).toUpperCase();
-          if (w === "H" || w === "HAL" || w === "HALT" || w === "HANG" || CMD_MAP[w]) {
-            let back = k - 1;
-            while (back >= ti && (toks[tIdx[back]] & 0xFFFF) === K.Space) back--;
-            chunkEndByte = back >= ti ? toks[tIdx[back] + 2] : s;
-            break;
-          }
-        }
-      }
+      // Use the robust byte-scanner to locate the real end of this command,
+      // respecting commas, strings, parentheses, and top-level semantics.
+      const chunkEndByte = this._findCommandChunkEnd(
+        (ti < tIdx.length) ? toks[tIdx[ti] + 1] : (toks[cs + 2]),
+        end
+      );
 
       let canonical = CMD_MAP[cmdWord] || null;
       const ambiguousH = (cmdWord === "H" || cmdWord === "HAL" || cmdWord === "HALT" || cmdWord === "HANG");
