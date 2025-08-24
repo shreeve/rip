@@ -60,7 +60,6 @@ bun server http apps/labs/api      # 'http' is a mode
 
 # With @: These are ALWAYS aliases
 bun server apps/labs/api@demo      # @ = declaring alias
-bun server remove@demo              # @ = identifying by alias (future)
 ```
 
 #### **No Ambiguity, No Collisions**
@@ -77,9 +76,10 @@ This design eliminates entire classes of problems:
 # @ after path = ASSIGN aliases to app
 apps/labs/api@labs,test,demo
 
-# @ after command = USE alias to identify app (future multi-app)
-remove@demo     # Remove app that has 'demo' alias
-status@labs     # Get status of app with 'labs' alias
+# Future: @ after command = USE alias to identify app (multi-app support)
+# remove@demo   # Remove app that has 'demo' alias
+# stop@demo     # Stop app that has 'demo' alias  
+# status@labs   # Get status of app with 'labs' alias
 ```
 
 #### **Real-World Usage**
@@ -135,7 +135,8 @@ bun server apps/my-app \
   - `bun server apps/labs/api --no-redirect-http`
 
 - Host aliases (@ syntax)
-  - `bun server apps/labs/api@labs` - run as labs.local only
+  - `bun server apps/labs/api` - default: api.local
+  - `bun server apps/labs/api@labs` - explicit: labs.local only
   - `bun server apps/labs/api@labs,test,demo` - multiple aliases
   - `bun server list` - show registered hosts
 
@@ -333,17 +334,12 @@ This behavior is consistent across all applications on macOS (not Bun-specific) 
 
 ### Automatic mDNS Advertisement for `.local` Domains
 
-When you add a `.local` host to the registry, rip-server **automatically** advertises it via Bonjour/mDNS, making it instantly accessible from any device on your LAN - especially iPhones and iPads!
+When you declare `.local` aliases with the `@` syntax, rip-server **automatically** advertises them via Bonjour/mDNS, making them instantly accessible from any device on your LAN - especially iPhones and iPads!
 
 **The Magic:**
 ```bash
-# Start your server
-bun server http apps/labs/api
-
-# Add custom .local domains
-bun server add api.local
-bun server add cheese.local
-bun server add demo.local
+# Start your server with custom aliases
+bun server http apps/labs/api@api,cheese,demo
 
 # Your iPhone can now access:
 # http://api.local
@@ -365,9 +361,9 @@ bun server add demo.local
 
 ### How It Works
 
-1. When you `bun server add api.local`, the server:
-   - Adds it to the host registry for routing
-   - Spawns a `dns-sd` process to advertise via mDNS
+1. When you start with aliases (`apps/labs/api@api,cheese`), the server:
+   - Adds them to the host registry for routing
+   - Spawns `dns-sd` processes to advertise via mDNS
    - Automatically detects your LAN IP
 
 2. Your iPhone/iPad discovers these domains via Bonjour (built into iOS)
@@ -378,20 +374,20 @@ bun server add demo.local
 
 **Testing responsive design:**
 ```bash
-bun server add mobile.local
+bun server apps/labs/api@mobile
 # Visit http://mobile.local on your phone - instant feedback!
 ```
 
 **Client demos:**
 ```bash
-bun server add demo.local
+bun server apps/labs/api@demo,staging
 # "Check out demo.local on your phone" - professional and clean
 ```
 
 **Team collaboration:**
 ```bash
-bun server add review.local
-# Everyone on WiFi can access http://review.local
+bun server apps/labs/api@review,team,dev
+# Everyone on WiFi can access any of these .local domains
 ```
 
 This transforms rip-server from a great local dev server into a **mobile testing powerhouse**! 🚀
