@@ -8,7 +8,9 @@
     "server": "bun packages/server/rip-server.ts",
     "lint": "biome check .",
     "format": "biome format . --write",
-    "clean": "rm -rf node_modules packages/*/node_modules examples/*/node_modules apps/*/client/node_modules apps/*/server/node_modules"
+    "clean": "rm -rf node_modules packages/*/node_modules examples/*/node_modules apps/*/client/node_modules apps/*/server/node_modules",
+    "bumps:help": "bun run --cwd=packages/bumps bumps -- --help",
+    "bumps:bench": "bun run --cwd=packages/bumps bumps bench"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4"
