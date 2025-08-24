@@ -165,4 +165,31 @@ We now have first-class *.local support and a professional `rip.local` dashboard
 
 This is a step-change in developer ergonomics and demo readiness. Further polish will focus on dual-protocol edge cases and richer dashboard metrics.
 
+---
+
+## Benchmarks (quick smoke tests)
+
+Commands used:
+
+```bash
+# Start (HTTP-only) with 2x workers, large restart budget, no access logs
+bun server --no-access-logs apps/labs/api http:5700 r:50000 w:2x
+
+# wrk against entry fast-path
+wrk -t4 -c200 -d10s http://localhost:5700/server
+
+# wrk against app route
+wrk -t4 -c200 -d10s http://localhost:5700/ping
+```
+
+Observed on this machine (development environment):
+
+- `/server` (entry fast-path): ~120K+ requests/sec
+- `/ping` (app route via worker): ~20K+ requests/sec
+
+Notes:
+- `/server` exercises only the entry process; `/ping` routes through a worker via Unix socket
+- Disable access logs for clean numbers; leave TLS off for HTTP-only benchmarking
+- Actual throughput will vary by hardware and flags (`w`, `r`, etc.)
+
 
