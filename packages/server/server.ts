@@ -10,6 +10,21 @@ import { X509Certificate } from 'crypto'
 
 type UpstreamState = { socket: string; inflight: number; version: number | null; workerId: number }
 
+// Helper function to read dashboard HTML from disk
+function getDashboardHTML(): string {
+  try {
+    // Read from the dashboard.html file in the same directory as this script
+    return readFileSync(join(__dirname, 'dashboard.html'), 'utf8')
+  } catch (error) {
+    // Fallback minimal HTML if file doesn't exist
+    console.warn('Dashboard HTML file not found, using fallback')
+    return `<!DOCTYPE html>
+<html><head><title>Rip Server Dashboard</title></head>
+<body><h1>Rip Server Dashboard</h1><p>Dashboard file not found</p></body>
+</html>`
+  }
+}
+
 export class Server {
   private flags: ParsedFlags
   private server: any | null = null
@@ -30,6 +45,8 @@ export class Server {
     // Seed localhost defaults for dev
     this.hostRegistry.add('localhost')
     this.hostRegistry.add('127.0.0.1')
+    // Always add rip.local for dashboard access
+    this.hostRegistry.add('rip.local')
     // Add all app aliases from @ syntax (or default app name)
     for (const alias of flags.appAliases) {
       // Auto-append .local if no dots
@@ -135,6 +152,17 @@ export class Server {
 
   private async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url)
+
+    // Dashboard for rip.local or root path
+    const host = url.hostname.toLowerCase()
+    if (host === 'rip.local' && (url.pathname === '/' || url.pathname === '')) {
+      const headers = new Headers({
+        'content-type': 'text/html; charset=utf-8',
+      })
+      this.maybeAddSecurityHeaders(headers)
+      return new Response(getDashboardHTML(), { headers })
+    }
+
     if (url.pathname === '/status') return this.status()
     if (url.pathname === '/server') {
       const headers = new Headers({ 'content-type': 'text/plain' })
@@ -143,7 +171,6 @@ export class Server {
     }
 
     // Host-based routing guard (v1: single-app with allowlist)
-    const host = url.hostname.toLowerCase()
     if (this.hostRegistry.size > 0 && !this.hostRegistry.has(host)) {
       return new Response('Host not found', { status: 404 })
     }
@@ -312,7 +339,7 @@ export class Server {
       } catch {}
       return new Response(JSON.stringify({ ok: false }), { status: 400, headers: { 'content-type': 'application/json' } })
     }
-        if (url.pathname === '/registry' && req.method === 'GET') {
+    if (url.pathname === '/registry' && req.method === 'GET') {
       return new Response(JSON.stringify({ ok: true, hosts: Array.from(this.hostRegistry.values()) }), { headers: { 'content-type': 'application/json' } })
     }
     return new Response('not-found', { status: 404 })
