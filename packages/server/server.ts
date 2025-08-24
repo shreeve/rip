@@ -74,12 +74,12 @@ export class Server {
 
     if (httpOnly) {
       if (this.flags.httpPort === 0) {
-        // Try privileged/default HTTP port 80 first, then probe from 5000+
+        // Try privileged/default HTTP port 80 first, then probe from 5700+
         try {
           this.server = Bun.serve({ port: 80, idleTimeout: 8, fetch: this.fetch.bind(this) })
         } catch (e: any) {
           if (e && (e.code === 'EADDRINUSE' || e.code === 'EACCES')) {
-            this.server = startOnPort(5000, this.fetch.bind(this))
+            this.server = startOnPort(5700, this.fetch.bind(this))
           } else {
             throw e
           }
@@ -102,13 +102,13 @@ export class Server {
           }
         }
       }
-      // Default: try 443 first, then probe from 5000+
+      // Default: try 443 first, then probe from 5700+
       if (!this.flags.httpsPort || this.flags.httpsPort === 0) {
         try {
           this.httpsServer = Bun.serve({ port: 443, idleTimeout: 8, tls, fetch: this.fetch.bind(this) })
         } catch (e: any) {
           if (e && (e.code === 'EADDRINUSE' || e.code === 'EACCES')) {
-            this.httpsServer = startOnTlsPort(5000)
+            this.httpsServer = startOnTlsPort(5700)
           } else {
             throw e
           }
