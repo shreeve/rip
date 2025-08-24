@@ -15,33 +15,23 @@ Delivery is sequenced into phases; each phase has outcomes, effort, and **checkl
 
 ## Phase Map (Top-Level)
 
+> **How to read the Effort column**:  
+> • Bars are normalized to the **global minimum** (left edge) and **global maximum** (right edge) effort across all phases.  
+> • The colored segment shows each phase’s **min→max range**; **labels** under the bar show `min-max (avg)`.  
+> • Gradient runs **yellow → orange → red** to suggest rising effort from left to right.
+
 | Phase | Title | Outcome | Effort | Primary Risk |
 |------:|-------|---------|:-------|--------------|
 | 0 | **Parser/Foundation** | Zig lexer + JS parser, lossless AST, formatter | **Done/ongoing** | Low |
-| 1 | **Language Core** | Evaluator for expressions & ~12 core commands | <img src="./assets/effort-phase-1.svg" alt="effort 6–10 avg 8.0" width="220" height="56" /> | Semantics gaps |
-| 2 | **Globals Engine** | Durable key-value tree with M collation, journaling, crash recovery | <img src="./assets/effort-phase-2.svg" alt="effort 10–16 avg 13.0" width="220" height="56" /> | Data integrity |
-| 3 | **Concurrency & Locks** | Process model, `JOB`, `LOCK`, timeouts, deadlock handling | <img src="./assets/effort-phase-3.svg" alt="effort 6–10 avg 8.0" width="220" height="56" /> | Races & deadlocks |
-| 4 | **Devices / I/O** | Terminal, files, `$I`, `READ/WRITE/OPEN/USE/CLOSE` | <img src="./assets/effort-phase-4.svg" alt="effort 5–8 avg 6.5" width="220" height="56" /> | OS quirks |
-| 5 | **Tooling (CLI/LSP)** | `bumps` CLI, LSP server, linter, code actions | <img src="./assets/effort-phase-5.svg" alt="effort 6–9 avg 7.5" width="220" height="56" /> | Editor parity |
-| 6 | **Operations** | Backups, journaling ops, replication (async), metrics/logs | <img src="./assets/effort-phase-6.svg" alt="effort 8–12 avg 10.0" width="220" height="56" /> | Recovery paths |
-| 7 | **Security & Compliance** | TLS, at-rest encryption, audits, HIPAA alignment | <img src="./assets/effort-phase-7.svg" alt="effort 5–9 avg 7.0" width="220" height="56" /> | Threat model gaps |
-| 8 | **Interoperability** | HL7 v2 toolkit; optional FHIR facade | <img src="./assets/effort-phase-8.svg" alt="effort 4–7 avg 5.5" width="220" height="56" /> | Data correctness |
-| 9 | **Conformance & Perf** | Standard coverage, test suites, perf gates | <img src="./assets/effort-phase-9.svg" alt="effort 6–10 avg 8.0" width="220" height="56" /> | Legacy edge cases |
-
-> **How to read the bar**: **range** text is centered **above** the bar; the **average** is centered **below**. Bar **width** shows the min–max range (normalized to the largest max = 16 PM) and the **center color** indicates relative average effort (green → red).
-------:|-------|---------|-------------:|----:|--------------|:--------------|
-| 0 | **Parser/Foundation** | Zig lexer + JS parser, lossless AST, formatter | **Done/ongoing** | _n/a_ | Low | |
-| 1 | **Language Core** | Evaluator for expressions & ~12 core commands | 6–10 | 8.0 | Semantics gaps | <img src="./assets/effort-phase-1.svg" alt="effort bar 6–10" width="220" height="12" /> |
-| 2 | **Globals Engine** | Durable key-value tree with M collation, journaling, crash recovery | 10–16 | 13.0 | Data integrity | <img src="./assets/effort-phase-2.svg" alt="effort bar 10–16" width="220" height="12" /> |
-| 3 | **Concurrency & Locks** | Process model, `JOB`, `LOCK`, timeouts, deadlock handling | 6–10 | 8.0 | Races & deadlocks | <img src="./assets/effort-phase-3.svg" alt="effort bar 6–10" width="220" height="12" /> |
-| 4 | **Devices / I/O** | Terminal, files, `$I`, `READ/WRITE/OPEN/USE/CLOSE` | 5–8 | 6.5 | OS quirks | <img src="./assets/effort-phase-4.svg" alt="effort bar 5–8" width="220" height="12" /> |
-| 5 | **Tooling (CLI/LSP)** | `bumps` CLI, LSP server, linter, code actions | 6–9 | 7.5 | Editor parity | <img src="./assets/effort-phase-5.svg" alt="effort bar 6–9" width="220" height="12" /> |
-| 6 | **Operations** | Backups, journaling ops, replication (async), metrics/logs | 8–12 | 10.0 | Recovery paths | <img src="./assets/effort-phase-6.svg" alt="effort bar 8–12" width="220" height="12" /> |
-| 7 | **Security & Compliance** | TLS, at-rest encryption, audits, HIPAA alignment | 5–9 | 7.0 | Threat model gaps | <img src="./assets/effort-phase-7.svg" alt="effort bar 5–9" width="220" height="12" /> |
-| 8 | **Interoperability** | HL7 v2 toolkit; optional FHIR facade | 4–7 | 5.5 | Data correctness | <img src="./assets/effort-phase-8.svg" alt="effort bar 4–7" width="220" height="12" /> |
-| 9 | **Conformance & Perf** | Standard coverage, test suites, perf gates | 6–10 | 8.0 | Legacy edge cases | <img src="./assets/effort-phase-9.svg" alt="effort bar 6–10" width="220" height="12" /> |
-
-> **How to read the bar**: bar **width** shows the min–max range (normalized to the largest max = 16 PM). The bar’s **center color** shows the task’s average effort relative to all tasks (greener = easier, redder = harder).
+| 1 | **Language Core** | Evaluator for expressions & ~12 core commands | <img src="./assets/effort-phase-1.svg" alt="effort 6–10 (8.0)" width="220" height="62" /> | Semantics gaps |
+| 2 | **Globals Engine** | Durable key-value tree with M collation, journaling, crash recovery | <img src="./assets/effort-phase-2.svg" alt="effort 10–16 (13.0)" width="220" height="62" /> | Data integrity |
+| 3 | **Concurrency & Locks** | Process model, `JOB`, `LOCK`, timeouts, deadlock handling | <img src="./assets/effort-phase-3.svg" alt="effort 6–10 (8.0)" width="220" height="62" /> | Races & deadlocks |
+| 4 | **Devices / I/O** | Terminal, files, `$I`, `READ/WRITE/OPEN/USE/CLOSE` | <img src="./assets/effort-phase-4.svg" alt="effort 5–8 (6.5)" width="220" height="62" /> | OS quirks |
+| 5 | **Tooling (CLI/LSP)** | `bumps` CLI, LSP server, linter, code actions | <img src="./assets/effort-phase-5.svg" alt="effort 6–9 (7.5)" width="220" height="62" /> | Editor parity |
+| 6 | **Operations** | Backups, journaling ops, replication (async), metrics/logs | <img src="./assets/effort-phase-6.svg" alt="effort 8–12 (10.0)" width="220" height="62" /> | Recovery paths |
+| 7 | **Security & Compliance** | TLS, at-rest encryption, audits, HIPAA alignment | <img src="./assets/effort-phase-7.svg" alt="effort 5–9 (7.0)" width="220" height="62" /> | Threat model gaps |
+| 8 | **Interoperability** | HL7 v2 toolkit; optional FHIR facade | <img src="./assets/effort-phase-8.svg" alt="effort 4–7 (5.5)" width="220" height="62" /> | Data correctness |
+| 9 | **Conformance & Perf** | Standard coverage, test suites, perf gates | <img src="./assets/effort-phase-9.svg" alt="effort 6–10 (8.0)" width="220" height="62" /> | Legacy edge cases |
 
 ---
 
