@@ -105,5 +105,3 @@ bun server stop
 - Registry persistence and admin API aligned with alias model
 - ACME/Let’s Encrypt automation
 - Hardening: rate-limiting, DoS protection, audit logging
-
-
