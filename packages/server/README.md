@@ -78,7 +78,7 @@ apps/labs/api@labs,test,demo
 
 # Future: @ after command = USE alias to identify app (multi-app support)
 # remove@demo   # Remove app that has 'demo' alias
-# stop@demo     # Stop app that has 'demo' alias  
+# stop@demo     # Stop app that has 'demo' alias
 # status@labs   # Get status of app with 'labs' alias
 ```
 
