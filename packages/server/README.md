@@ -443,7 +443,7 @@ bun server apps/labs/api@labs
 # Dashboard automatically available at:
 # https://rip.local (desktop, mobile, any device on network)
 
-# Your API available at:  
+# Your API available at:
 # https://labs.local
 ```
 
@@ -459,11 +459,11 @@ The dashboard handles all server states gracefully:
 
 **🟢 Healthy State:**
 - Green status with checkmark
-- Live uptime ticking every second  
+- Live uptime ticking every second
 - Smooth countdown arc animation
 - All workers active and responding
 
-**🟡 Degraded State:**  
+**🟡 Degraded State:**
 - Yellow status with warning
 - Zero workers but server responsive
 - Continues showing uptime and updates
@@ -478,7 +478,7 @@ The dashboard handles all server states gracefully:
 ### 🚀 Technical Excellence
 
 - **File-based Architecture**: Dashboard HTML served from disk, not embedded
-- **Connection-aware**: Smart error handling with proper state transitions  
+- **Connection-aware**: Smart error handling with proper state transitions
 - **Performance Optimized**: Hardware-accelerated animations, minimal DOM updates
 - **Cross-platform**: Works on all browsers and devices
 - **Zero Dependencies**: Pure HTML + Tailwind CSS + Alpine.js from CDN
