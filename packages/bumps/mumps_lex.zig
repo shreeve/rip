@@ -46,8 +46,8 @@ fn classify(b: u8) TokenKind {
     };
 }
 
-fn read_ident(src: []const u8, i0: usize) usize {
-    var i = i0 + 1;
+fn read_ident(src: []const u8, idx0: usize) usize {
+    var i = idx0 + 1;
     while (i < src.len) {
         const k = classify(src[i]);
         if (k == .Ident or k == .Number) i += 1 else break;
@@ -55,8 +55,8 @@ fn read_ident(src: []const u8, i0: usize) usize {
     return i;
 }
 
-fn read_number(src: []const u8, i0: usize) usize {
-    var i = i0;
+fn read_number(src: []const u8, idx0: usize) usize {
+    var i = idx0;
     if (src[i] == '.') i += 1;
     while (i < src.len and src[i] >= '0' and src[i] <= '9') : (i += 1) {}
     if (i < src.len and src[i] == '.') {
@@ -66,8 +66,8 @@ fn read_number(src: []const u8, i0: usize) usize {
     return i;
 }
 
-fn read_string(src: []const u8, i0: usize) usize {
-    var i = i0 + 1;
+fn read_string(src: []const u8, idx0: usize) usize {
+    var i = idx0 + 1;
     while (i < src.len) : (i += 1) {
         if (src[i] == '"') {
             if (i + 1 < src.len and src[i + 1] == '"') { // doubled quote
