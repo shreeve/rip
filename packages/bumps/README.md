@@ -59,6 +59,75 @@ bun run bumps --help
 
 > Note: The runtime is in active development. APIs and artifacts are likely to change.
 
+## How to use / compile / test
+
+1) Build the Zig lexer library (optional, recommended for speed)
+
+```bash
+# macOS
+zig build-lib -OReleaseFast -dynamic mumps_lex.zig -femit-bin=libmumps_lex.dylib
+
+# Linux
+zig build-lib -OReleaseFast -dynamic mumps_lex.zig -femit-bin=libmumps_lex.so
+```
+
+Place the resulting library where your process can load it, either:
+- next to `packages/bumps/zig-lex.js` (default loader looks for `./libmumps_lex.*`), or
+- set an absolute path via `ZIG_MUMPS_LEX_PATH`.
+
+Examples:
+
+```bash
+# macOS: point to an absolute path
+ZIG_MUMPS_LEX_PATH=/abs/path/libmumps_lex.dylib \
+  bun run packages/bumps/example-zig-lex.js
+
+# Linux: point to an absolute path
+ZIG_MUMPS_LEX_PATH=/abs/path/libmumps_lex.so \
+  bun run packages/bumps/example-zig-lex.js
+
+# Or place the lib alongside where you run the script and just run:
+bun run packages/bumps/example-zig-lex.js
+```
+
+2) Run the demo (falls back to pure JS if Zig lexer isn’t found)
+
+```bash
+bun run packages/bumps/example-zig-lex.js
+```
+
+This tries the Zig‑token path (`parseMumpsWithTokens`) if the dylib/so is loaded via `zig-lex.js`, otherwise it uses pure JS (`parseMumps`). It outputs a formatted version of the sample with:
+- abbreviations enabled (`S`, `W`, `I`, ...)
+- `SET` equals aligned
+- comments padded to column 50
+
+3) Parse your own file (minimal script)
+
+Create a small script (for example `demo-parse.js`) like this and run `bun run demo-parse.js path/to/your.m`:
+
+```js
+import { parseMumps, parseMumpsWithTokens } from "./mumps-parser-pro.js";
+import { zigLex } from "./zig-lex.js";
+
+const path = process.argv[2];
+const text = await Bun.file(path).text();
+const buf = new TextEncoder().encode(text);
+const toks = zigLex(buf);
+const ast = toks ? parseMumpsWithTokens(buf, toks) : parseMumps(buf);
+
+console.log(
+  ast.format({
+    abbreviateCommands: true,
+    alignSetEquals: true,
+    commentColumn: 50,
+    betweenCommands: "  ",
+    spaceAfterCommand: " ",
+  })
+);
+```
+
+Tip: to time runs on your machine, prefix commands with `time`.
+
 ## Community
 
 Feedback from mumpsters and folks who appreciate M’s unique strengths is very welcome. Open issues with examples, edge cases, or historical behaviors you want preserved.
