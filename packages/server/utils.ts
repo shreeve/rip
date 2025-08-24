@@ -134,7 +134,7 @@ export function parseFlags(argv: string[]): ParsedFlags {
   const has = (name: string): boolean => rawFlags.has(name)
 
   const { baseDir, entryPath, appName } = resolveAppEntry(appPathInput)
-  
+
   // If no explicit aliases, use app name as default
   if (appAliases.length === 0) {
     appAliases = [appName]
