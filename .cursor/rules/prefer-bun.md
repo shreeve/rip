@@ -9,6 +9,7 @@ This repository standardizes on the Bun runtime and toolchain. Unless a package 
 - **Shebangs**: For executable scripts, use `#!/usr/bin/env bun`.
 - **Node-only exceptions**: If a subpackage truly requires Node or another engine, document it in that package's `README.md` and its `package.json` scripts. Otherwise, default to Bun.
 - **Tone**: Be humble & honest - NEVER overstate what you got done or what actually works in commits, PRs or in messages to the user.
+- **Stopping rip-server**: Simply use `bun server stop` to kill the rip-server
 
 Notes:
 - We already track `bun.lock` at the repo root. Keep it as the source of truth when possible. Subpackages may maintain their own lockfile only when necessary and documented.
