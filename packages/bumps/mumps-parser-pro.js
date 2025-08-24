@@ -755,14 +755,16 @@ export function formatMumps(ast, opts = {}) {
     // trailing comment
     if (line.comment) {
       const commentText = sl(line.comment.start, line.comment.end);
-      if (commentCol !== null) {
+      const hasCodeOnLine = (line.label || (line.commands && line.commands.length > 0));
+      if (commentCol !== null && hasCodeOnLine) {
         if (currentCol + 1 < commentCol) {
           out += " ".repeat(commentCol - currentCol - 1);
         } else {
           out += " ";
         }
       } else {
-        out += " ";
+        // either no comment column configured, or it's a pure comment line
+        if (hasCodeOnLine) out += " ";
       }
       out += commentText;
     }
