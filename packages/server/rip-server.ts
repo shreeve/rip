@@ -19,68 +19,46 @@ async function main(): Promise<void> {
     console.log('rip-server: stop requested')
     return
   }
-  // Registry subcommands: list | add <host> | remove <host>
-  {
-    const argv = process.argv
-    const idxAdd = argv.indexOf('add')
-    const idxRemove = argv.indexOf('remove')
-    const isList = argv.includes('list')
-    if (isList || idxAdd >= 0 || idxRemove >= 0) {
-      const getKV = (prefix: string): string | undefined => {
-        for (const tok of argv) if (tok.startsWith(prefix)) return tok.slice(prefix.length)
-        return undefined
-      }
-      const findAppPathToken = (): string | undefined => {
-        for (let i = 2; i < argv.length; i++) {
-          const tok = argv[i]
-          const looksLikePath = tok.includes('/') || tok.startsWith('.') || tok.endsWith('.rip') || tok.endsWith('.ts')
-          try {
-            if (looksLikePath && require('fs').existsSync(require('path').isAbsolute(tok) ? tok : require('path').resolve(process.cwd(), tok))) return tok
-          } catch {}
-        }
-        return undefined
-      }
-      const computeSocketPrefix = (): string => {
-        const override = getKV('--socket-prefix=')
-        if (override) return override
-        const appTok = findAppPathToken()
-        if (appTok) {
-          try { const { appName } = resolveAppEntry(appTok); return `rip_${appName}` } catch {}
-        }
-        return 'rip_server'
-      }
-      const controlUnix = getControlSocketPath(computeSocketPrefix())
-      const registryPath = 'http://localhost/registry'
-      try {
-        if (isList) {
-          const res = await fetch(registryPath, { unix: controlUnix, method: 'GET' })
-          if (!res.ok) throw new Error(`list failed: ${res.status}`)
-          const j = await res.json()
-          const hosts: string[] = Array.isArray(j?.hosts) ? j.hosts : []
-          console.log(hosts.length ? hosts.join('\n') : '(no hosts)')
-          return
-        }
-        if (idxAdd >= 0) {
-          const host = argv[idxAdd + 1]
-          if (!host) { console.error('Usage: bun server add <host> [--socket-prefix=...]'); process.exit(2) }
-          const res = await fetch(registryPath, { unix: controlUnix, method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ host }) })
-          if (!res.ok) throw new Error(`add failed: ${res.status}`)
-          console.log(`added: ${host}`)
-          return
-        }
-        if (idxRemove >= 0) {
-          const host = argv[idxRemove + 1]
-          if (!host) { console.error('Usage: bun server remove <host> [--socket-prefix=...]'); process.exit(2) }
-          const res = await fetch(registryPath, { unix: controlUnix, method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ host }) })
-          if (!res.ok) throw new Error(`remove failed: ${res.status}`)
-          console.log(`removed: ${host}`)
-          return
-        }
-      } catch (e: any) {
-        console.error(`registry command failed: ${e?.message || e}`)
-        process.exit(1)
-      }
+    // List subcommand: `bun server list` (position‑independent)
+  if (process.argv.includes('list')) {
+    const getKV = (prefix: string): string | undefined => {
+      for (const tok of process.argv) if (tok.startsWith(prefix)) return tok.slice(prefix.length)
+      return undefined
     }
+    const findAppPathToken = (): string | undefined => {
+      for (let i = 2; i < process.argv.length; i++) {
+        const tok = process.argv[i]
+        // Check for @ syntax and extract just the path part
+        const pathPart = tok.includes('@') ? tok.split('@')[0] : tok
+        const looksLikePath = pathPart.includes('/') || pathPart.startsWith('.') || pathPart.endsWith('.rip') || pathPart.endsWith('.ts')
+        try {
+          if (looksLikePath && require('fs').existsSync(require('path').isAbsolute(pathPart) ? pathPart : require('path').resolve(process.cwd(), pathPart))) return pathPart
+        } catch {}
+      }
+      return undefined
+    }
+    const computeSocketPrefix = (): string => {
+      const override = getKV('--socket-prefix=')
+      if (override) return override
+      const appTok = findAppPathToken()
+      if (appTok) {
+        try { const { appName } = resolveAppEntry(appTok); return `rip_${appName}` } catch {}
+      }
+      return 'rip_server'
+    }
+    const controlUnix = getControlSocketPath(computeSocketPrefix())
+    const registryPath = 'http://localhost/registry'
+    try {
+      const res = await fetch(registryPath, { unix: controlUnix, method: 'GET' })
+      if (!res.ok) throw new Error(`list failed: ${res.status}`)
+      const j = await res.json()
+      const hosts: string[] = Array.isArray(j?.hosts) ? j.hosts : []
+      console.log(hosts.length ? hosts.join('\n') : '(no hosts)')
+    } catch (e: any) {
+      console.error(`list command failed: ${e?.message || e}`)
+      process.exit(1)
+    }
+    return
   }
   const flags = parseFlags(process.argv)
   const svr = new Server(flags)

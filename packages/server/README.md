@@ -30,6 +30,72 @@ High-performance HTTP entry that dispatches to per-worker Unix sockets. The serv
 HTTP Request → HTTP entry (server) → Select idle worker → Unix socket (worker.N.sock) → Worker process
 ```
 
+## 🏷️ The @ Alias System
+
+### Universal Alias Operator
+
+The `@` symbol is the universal operator for all alias operations in rip-server, creating a clean separation between command syntax and user-defined names.
+
+#### **Declaring Aliases (path@aliases)**
+```bash
+# Default: app name becomes the alias
+bun server apps/labs/api              # → api.local
+
+# Explicit: @ defines exact aliases (replaces default)
+bun server apps/labs/api@labs         # → ONLY labs.local (no api.local)
+bun server apps/labs/api@labs,test    # → labs.local + test.local
+bun server apps/labs/api@api,labs     # → api.local + labs.local (must include 'api' explicitly)
+```
+
+#### **Why @ is Brilliant POLS**
+
+The `@` symbol creates perfect clarity - you ALWAYS know what's what:
+
+```bash
+# Without @: These are commands/paths/modes
+bun server stop                    # 'stop' is a command
+bun server list                    # 'list' is a command
+bun server apps/labs/api           # path to app
+bun server http apps/labs/api      # 'http' is a mode
+
+# With @: These are ALWAYS aliases
+bun server apps/labs/api@demo      # @ = declaring alias
+bun server remove@demo              # @ = identifying by alias (future)
+```
+
+#### **No Ambiguity, No Collisions**
+
+This design eliminates entire classes of problems:
+- **No naming conflicts**: You can have an alias called "stop" or "list" - `@stop` is clearly different from the command `stop`
+- **Visual clarity**: The @ makes aliases jump out in commands
+- **Future-proof**: New CLI features won't break existing aliases
+- **Consistent mental model**: See @? It's about aliases. No @? It's a command or path.
+
+#### **The Symmetry**
+
+```bash
+# @ after path = ASSIGN aliases to app
+apps/labs/api@labs,test,demo
+
+# @ after command = USE alias to identify app (future multi-app)
+remove@demo     # Remove app that has 'demo' alias
+status@labs     # Get status of app with 'labs' alias
+```
+
+#### **Real-World Usage**
+
+```bash
+# Multiple API servers without collision
+bun server apps/labs/api@labs         # Terminal 1: labs.local
+bun server apps/homework/api@homework # Terminal 2: homework.local
+bun server apps/work/api@work         # Terminal 3: work.local
+
+# All three can run simultaneously, each with their own 'api' codebase
+# but exposed on different .local domains for testing
+```
+
+This alias system enables clean, collision-free multi-app development with the clearest possible syntax.
+
 ## 🔧 Usage
 
 ### Basic Usage
@@ -68,10 +134,10 @@ bun server apps/my-app \
 - Explicit redirect toggle
   - `bun server apps/labs/api --no-redirect-http`
 
-- Host registry (subcommands)
-  - `bun server add labs.ripdev.io apps/labs/api`
-  - `bun server remove labs.ripdev.io`
-  - `bun server list`
+- Host aliases (@ syntax)
+  - `bun server apps/labs/api@labs` - run as labs.local only
+  - `bun server apps/labs/api@labs,test,demo` - multiple aliases
+  - `bun server list` - show registered hosts
 
 - Stop running server
   - `bun server stop`

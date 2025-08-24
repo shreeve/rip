@@ -12,6 +12,7 @@ export interface ParsedFlags {
   appBaseDir: string
   appEntry: string
   appName: string
+  appAliases: string[]
   workers: number
   maxRequestsPerWorker: number
   maxSecondsPerWorker: number
@@ -96,9 +97,22 @@ export function parseFlags(argv: string[]): ParsedFlags {
     } catch { return undefined }
   }
 
+  // Check for @ syntax in argv before processing
+  let appAliases: string[] = []
   for (let i = 2; i < argv.length; i++) {
     const tok = argv[i]
     if (!appPathInput) {
+      // Check if token contains @ for aliases
+      if (tok.includes('@')) {
+        const [pathPart, aliasesPart] = tok.split('@')
+        const maybe = tryResolveApp(pathPart)
+        if (maybe) {
+          appPathInput = maybe
+          // Parse comma-separated aliases
+          appAliases = aliasesPart.split(',').map(a => a.trim()).filter(a => a)
+          continue
+        }
+      }
       const maybe = tryResolveApp(tok)
       if (maybe) { appPathInput = maybe; continue }
     }
@@ -107,6 +121,7 @@ export function parseFlags(argv: string[]): ParsedFlags {
 
   if (!appPathInput) {
     console.error('Usage: bun server [flags] <app-path>')
+    console.error('       bun server [flags] <app-path>@<alias1>,<alias2>,...')
     process.exit(2)
   }
 
@@ -119,6 +134,11 @@ export function parseFlags(argv: string[]): ParsedFlags {
   const has = (name: string): boolean => rawFlags.has(name)
 
   const { baseDir, entryPath, appName } = resolveAppEntry(appPathInput)
+  
+  // If no explicit aliases, use app name as default
+  if (appAliases.length === 0) {
+    appAliases = [appName]
+  }
 
   // Listener intent parsing (HTTPS is default)
   const tokens = Array.from(rawFlags)
@@ -209,6 +229,7 @@ export function parseFlags(argv: string[]): ParsedFlags {
     appBaseDir: baseDir,
     appEntry: entryPath,
     appName,
+    appAliases,
     workers,
     maxRequestsPerWorker,
     maxSecondsPerWorker,

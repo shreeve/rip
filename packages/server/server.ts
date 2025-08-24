@@ -30,9 +30,12 @@ export class Server {
     // Seed localhost defaults for dev
     this.hostRegistry.add('localhost')
     this.hostRegistry.add('127.0.0.1')
-    // Auto-add {appname}.local for mobile testing (POLS)
-    const appLocal = `${flags.appName}.local`
-    this.hostRegistry.add(appLocal)
+    // Add all app aliases from @ syntax (or default app name)
+    for (const alias of flags.appAliases) {
+      // Auto-append .local if no dots
+      const host = alias.includes('.') ? alias : `${alias}.local`
+      this.hostRegistry.add(host)
+    }
   }
 
   async start(): Promise<void> {
@@ -278,9 +281,11 @@ export class Server {
     try { require('fs').unlinkSync(ctlPath) } catch {}
     this.control = Bun.serve({ unix: ctlPath, fetch: this.controlFetch.bind(this) })
 
-    // Auto-advertise {appname}.local via mDNS (POLS)
-    const appLocal = `${this.flags.appName}.local`
-    await this.startMdnsAdvertisement(appLocal)
+    // Auto-advertise all aliases via mDNS
+    for (const alias of this.flags.appAliases) {
+      const host = alias.includes('.') ? alias : `${alias}.local`
+      await this.startMdnsAdvertisement(host)
+    }
   }
 
   private async controlFetch(req: Request): Promise<Response> {
@@ -307,43 +312,8 @@ export class Server {
       } catch {}
       return new Response(JSON.stringify({ ok: false }), { status: 400, headers: { 'content-type': 'application/json' } })
     }
-    if (url.pathname === '/registry') {
-      if (req.method === 'GET') {
-        return new Response(JSON.stringify({ ok: true, hosts: Array.from(this.hostRegistry.values()) }), { headers: { 'content-type': 'application/json' } })
-      }
-      if (req.method === 'POST') {
-        try {
-          const j = await req.json()
-          let host = typeof j?.host === 'string' ? j.host.trim().toLowerCase() : ''
-          if (!host) return new Response(JSON.stringify({ ok: false, error: 'host required' }), { status: 400, headers: { 'content-type': 'application/json' } })
-
-          // POLS: Auto-append .local if no domain extension
-          if (!host.includes('.')) {
-            host = `${host}.local`
-          }
-
-          this.hostRegistry.add(host)
-          // Start mDNS advertisement for .local hosts
-          await this.startMdnsAdvertisement(host)
-          return new Response(JSON.stringify({ ok: true, hosts: Array.from(this.hostRegistry.values()) }), { headers: { 'content-type': 'application/json' } })
-        } catch {
-          return new Response(JSON.stringify({ ok: false }), { status: 400, headers: { 'content-type': 'application/json' } })
-        }
-      }
-      if (req.method === 'DELETE') {
-        try {
-          const j = await req.json()
-          const host = typeof j?.host === 'string' ? j.host.trim().toLowerCase() : ''
-          if (!host) return new Response(JSON.stringify({ ok: false, error: 'host required' }), { status: 400, headers: { 'content-type': 'application/json' } })
-          this.hostRegistry.delete(host)
-          // Stop mDNS advertisement for .local hosts
-          await this.stopMdnsAdvertisement(host)
-          return new Response(JSON.stringify({ ok: true, hosts: Array.from(this.hostRegistry.values()) }), { headers: { 'content-type': 'application/json' } })
-        } catch {
-          return new Response(JSON.stringify({ ok: false }), { status: 400, headers: { 'content-type': 'application/json' } })
-        }
-      }
-      return new Response('not-allowed', { status: 405 })
+        if (url.pathname === '/registry' && req.method === 'GET') {
+      return new Response(JSON.stringify({ ok: true, hosts: Array.from(this.hostRegistry.values()) }), { headers: { 'content-type': 'application/json' } })
     }
     return new Response('not-found', { status: 404 })
   }
