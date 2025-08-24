@@ -308,6 +308,9 @@ export class Server {
     try { require('fs').unlinkSync(ctlPath) } catch {}
     this.control = Bun.serve({ unix: ctlPath, fetch: this.controlFetch.bind(this) })
 
+    // Auto-advertise rip.local dashboard
+    await this.startMdnsAdvertisement('rip.local')
+
     // Auto-advertise all aliases via mDNS
     for (const alias of this.flags.appAliases) {
       const host = alias.includes('.') ? alias : `${alias}.local`
