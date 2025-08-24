@@ -20,7 +20,7 @@ Enhanced the `rip-server` with HTTPS/TLS support and host-based routing, followi
 - **Subcommands**: `stop`, `list`, `add <host>`, `remove <host>`
 
 ### 2. HTTPS/TLS Implementation
-- **Port selection**: Try 443, fallback to 5000+ on EACCES/EADDRINUSE
+- **Port selection**: Try 443, fallback to 5700+ on EACCES/EADDRINUSE
 - **Certificate precedence**: Explicit paths → mkcert → self-signed
 - **Auto-TLS**: `--auto-tls` uses mkcert with ~/.rip/certs/ cache
 - **HTTP redirect**: Port 80 → 301 to HTTPS (best-effort)
@@ -104,7 +104,7 @@ packages/server/
 - Parallelized SIGTERM and exit waiting
 
 ### HTTPS/TLS Implementation
-- Implemented port probing (443 then 5000+ for HTTPS, 80 then 5000+ for HTTP)
+- Implemented port probing (443 then 5700+ for HTTPS, 80 then 5700+ for HTTP)
 - Added certificate loading hierarchy
 - Implemented `--auto-tls` with mkcert integration
 - Added self-signed fallback

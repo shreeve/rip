@@ -103,7 +103,7 @@ bun server stop
 ### Proposed additions (this SPEC)
 - HTTPS + TLS:
   - `https:<PORT>`: enable HTTPS listener on port (mirrors `http:<PORT>` style)
-  - `--https-port=<PORT>`: explicit flag (alternative to bare `<PORT>`). Default tries 443, then probes from 5000+.
+  - `--https-port=<PORT>`: explicit flag (alternative to bare `<PORT>`). Default tries 443, then probes from 5700+.
   - `--cert=<PATH>` / `--key=<PATH>`: TLS material (full paths). `--cert` may be a fullchain.
   - `--auto-tls`: try mkcert and cache under `~/.rip/certs/`; fallback to self‑signed
 - Redirect & HSTS:

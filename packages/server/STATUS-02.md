@@ -18,7 +18,7 @@ This session focused on simplifying the CLI around the Principle of Least Surpri
 - Position-independent arguments preserved (`w:`, `r:`, flags)
 
 ### 2) HTTP-only Mode Bug Fix
-- Corrected logic so `bun server http apps/labs/api` truly starts HTTP on 80 (or falls back to 5000+). URL logging now correctly shows `http://localhost:<port>` in HTTP-only mode.
+- Corrected logic so `bun server http apps/labs/api` truly starts HTTP on 80 (or falls back to 5700+). URL logging now correctly shows `http://localhost:<port>` in HTTP-only mode.
 
 ### 3) Automatic mDNS Advertising for `.local`
 - When aliases ending in `.local` are declared, the server auto-spawns `dns-sd -P` advertisements
@@ -89,7 +89,7 @@ bun server stop                         # stop server and mDNS ads
 
 ## Example Commands Used This Session
 ```bash
-# HTTP-only, fallback to 5000+
+# HTTP-only, fallback to 5700+
 bun server http apps/labs/api
 
 # With aliases for mDNS

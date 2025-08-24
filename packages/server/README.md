@@ -118,9 +118,9 @@ bun server apps/my-app \
   - `bun server apps/labs/api`
 
 - HTTPS defaults and options
-  - HTTPS default (try 443, else auto-port 5000+; 80→301): `bun server apps/labs/api`
+  - HTTPS default (try 443, else auto-port 5700+; 80→301): `bun server apps/labs/api`
   - HTTPS on a specific port (bare int): `bun server 5700 apps/labs/api`
-  - Force HTTP-only (no TLS, no redirect): `bun server http apps/labs/api` (tries 80, else 5000+)
+  - Force HTTP-only (no TLS, no redirect): `bun server http apps/labs/api` (tries 80, else 5700+)
   - Force HTTP-only on specific port: `bun server http:5002 apps/labs/api`
   - Provide cert/key: `bun server --cert=/full/path/app.pem --key=/full/path/app.key apps/labs/api`
   - Auto TLS (mkcert → self-signed): `bun server --auto-tls apps/labs/api`
@@ -314,16 +314,16 @@ bun server apps/api                 # Binds to 0.0.0.0:443 (HTTPS)
 |----------|--------------|-----|
 | 📱 **Mobile testing** | `0.0.0.0` on port 80/443 | iPhone can access via `hostname.local` |
 | 🎯 **Team demos** | `0.0.0.0` on any port | Share with colleagues on same network |
-| 💻 **Solo development** | Port 5000+ | Secure by default, still convenient |
+| 💻 **Solo development** | Port 5700+ | Secure by default, still convenient |
 | ☕ **Coffee shop coding** | `sudo` + `127.0.0.1` | Maximum security on untrusted networks |
 
 **Quick reference - Your three options:**
 1. **Convenience path** (`0.0.0.0`) - No sudo but LAN-exposed 🌐
 2. **Secure path** (`127.0.0.1`) - Needs sudo but localhost-only 🔒
-3. **Best of both** (ports 5000+) - No sudo AND can be localhost-only ✨
+3. **Best of both** (ports 5700+) - No sudo AND can be localhost-only ✨
 
 **Safer alternatives:**
-- Use high ports (5000+): `bun server http:5001 apps/api` - can bind to localhost only
+- Use high ports (5700+): `bun server http:5700 apps/api` - can bind to localhost only
 - Use sudo if you need port 80/443 with localhost-only access
 - Enable macOS firewall or configure `pf` rules to block external access
 - Only use low ports on trusted, isolated networks
