@@ -459,6 +459,7 @@ export class Server {
     }
 
     const port = this.flags.httpsPort ?? this.flags.httpPort ?? 80
+    const protocol = this.flags.httpsPort ? 'https' : 'http'
     const serviceName = host.replace('.local', '')
 
     try {
@@ -477,7 +478,8 @@ export class Server {
       })
 
       this.mdnsProcesses.set(host, proc)
-      console.log(`rip-server: advertising ${host} → ${lanIP}:${port} via mDNS`)
+      // Show clickable URL for easy access
+      console.log(`rip-server: ${protocol}://${host}:${port}`)
     } catch (e: any) {
       console.error(`rip-server: failed to advertise ${host} via mDNS:`, e.message)
     }
