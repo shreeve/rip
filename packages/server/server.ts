@@ -22,9 +22,13 @@ export class Server {
   private startedAt = nowMs()
   private newestVersion: number | null = null
   private httpsActive = false
+  private hostRegistry: Set<string> = new Set()
 
   constructor(flags: ParsedFlags) {
     this.flags = flags
+    // Seed localhost defaults for dev
+    this.hostRegistry.add('localhost')
+    this.hostRegistry.add('127.0.0.1')
   }
 
   async start(): Promise<void> {
@@ -104,7 +108,7 @@ export class Server {
       }
       this.flags.httpPort = this.server ? this.server.port : 0
     }
-    this.startControl()
+    await this.startControl()
   }
 
   stop(): void {
@@ -120,6 +124,12 @@ export class Server {
       const headers = new Headers({ 'content-type': 'text/plain' })
       this.maybeAddSecurityHeaders(headers)
       return new Response('ok', { headers })
+    }
+
+    // Host-based routing guard (v1: single-app with allowlist)
+    const host = url.hostname.toLowerCase()
+    if (this.hostRegistry.size > 0 && !this.hostRegistry.has(host)) {
+      return new Response('Host not found', { status: 404 })
     }
 
     // Fast path: try to get available worker directly
@@ -142,7 +152,7 @@ export class Server {
   private status(): Response {
     const uptime = Math.floor((nowMs() - this.startedAt) / 1000)
     const healthy = this.sockets.length > 0
-    const body = JSON.stringify({ status: healthy ? 'healthy' : 'degraded', app: this.flags.appName, workers: this.sockets.length, ports: { http: this.flags.httpPort ?? undefined, https: this.flags.httpsPort ?? undefined }, uptime })
+    const body = JSON.stringify({ status: healthy ? 'healthy' : 'degraded', app: this.flags.appName, workers: this.sockets.length, ports: { http: this.flags.httpPort ?? undefined, https: this.flags.httpsPort ?? undefined }, uptime, hosts: Array.from(this.hostRegistry.values()) })
     const headers = new Headers({ 'content-type': 'application/json', 'cache-control': 'no-cache' })
     this.maybeAddSecurityHeaders(headers)
     return new Response(body, { headers })
@@ -250,7 +260,7 @@ export class Server {
     }
   }
 
-  private startControl(): void {
+  private async startControl(): Promise<void> {
     const ctlPath = getControlSocketPath(this.flags.socketPrefix)
     try { require('fs').unlinkSync(ctlPath) } catch {}
     this.control = Bun.serve({ unix: ctlPath, fetch: this.controlFetch.bind(this) })
@@ -279,6 +289,44 @@ export class Server {
         }
       } catch {}
       return new Response(JSON.stringify({ ok: false }), { status: 400, headers: { 'content-type': 'application/json' } })
+    }
+    if (url.pathname === '/registry') {
+      if (req.method === 'GET') {
+        return new Response(JSON.stringify({ ok: true, hosts: Array.from(this.hostRegistry.values()) }), { headers: { 'content-type': 'application/json' } })
+      }
+      if (req.method === 'POST') {
+        try {
+          const j = await req.json()
+          let host = typeof j?.host === 'string' ? j.host.trim().toLowerCase() : ''
+          if (!host) return new Response(JSON.stringify({ ok: false, error: 'host required' }), { status: 400, headers: { 'content-type': 'application/json' } })
+
+          // POLS: Auto-append .local if no domain extension
+          if (!host.includes('.')) {
+            host = `${host}.local`
+          }
+
+          this.hostRegistry.add(host)
+          // Start mDNS advertisement for .local hosts
+          await this.startMdnsAdvertisement(host)
+          return new Response(JSON.stringify({ ok: true, hosts: Array.from(this.hostRegistry.values()) }), { headers: { 'content-type': 'application/json' } })
+        } catch {
+          return new Response(JSON.stringify({ ok: false }), { status: 400, headers: { 'content-type': 'application/json' } })
+        }
+      }
+      if (req.method === 'DELETE') {
+        try {
+          const j = await req.json()
+          const host = typeof j?.host === 'string' ? j.host.trim().toLowerCase() : ''
+          if (!host) return new Response(JSON.stringify({ ok: false, error: 'host required' }), { status: 400, headers: { 'content-type': 'application/json' } })
+          this.hostRegistry.delete(host)
+          // Stop mDNS advertisement for .local hosts
+          await this.stopMdnsAdvertisement(host)
+          return new Response(JSON.stringify({ ok: true, hosts: Array.from(this.hostRegistry.values()) }), { headers: { 'content-type': 'application/json' } })
+        } catch {
+          return new Response(JSON.stringify({ ok: false }), { status: 400, headers: { 'content-type': 'application/json' } })
+        }
+      }
+      return new Response('not-allowed', { status: 405 })
     }
     return new Response('not-found', { status: 404 })
   }
