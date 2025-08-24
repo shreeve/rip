@@ -59,11 +59,13 @@
         <div class="flex items-center justify-between">
           <div>
             <p class="text-sm font-medium text-gray-600">Server Status</p>
-            <p class="text-2xl font-bold" x-text="status.status || 'loading...'" :class="status.status === 'healthy' ? 'text-green-600' : 'text-yellow-600'">-</p>
+            <p class="text-2xl font-bold" x-text="!connected ? 'OFFLINE' : (status.status || 'loading...')"
+               :class="!connected ? 'text-red-600' : (status.status === 'healthy' ? 'text-green-600' : 'text-yellow-600')">-</p>
           </div>
-          <div class="p-3 rounded-full" :class="status.status === 'healthy' ? 'bg-green-100' : 'bg-yellow-100'">
-            <svg class="w-6 h-6" :class="status.status === 'healthy' ? 'text-green-600' : 'text-yellow-600'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+          <div class="p-3 rounded-full" :class="!connected ? 'bg-red-100' : (status.status === 'healthy' ? 'bg-green-100' : 'bg-yellow-100')">
+            <svg class="w-6 h-6" :class="!connected ? 'text-red-600' : (status.status === 'healthy' ? 'text-green-600' : 'text-yellow-600')" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    :d="!connected ? 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.732 15.5c-.77.833.192 2.5 1.732 2.5z' : 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z'"></path>
             </svg>
           </div>
         </div>
@@ -113,12 +115,16 @@
                 stroke-linecap="round"
                 stroke-dasharray="87.96"
                 stroke-dashoffset="87.96"
-                class="countdown-arc"
+                :class="connected ? 'countdown-arc' : 'countdown-arc countdown-arc-paused'"
               />
             </svg>
                                     <style>
               .countdown-arc {
                 animation: countdown-progress 10s linear infinite;
+              }
+              .countdown-arc-paused {
+                animation-play-state: paused;
+                opacity: 0.3;
               }
 
               @keyframes countdown-progress {
@@ -307,6 +313,7 @@
       return {
         status: {},
         loading: false,
+        connected: true,
         serverUptime: 0,
         uptimeStartTime: Date.now(),
 
@@ -332,16 +339,28 @@
         async silentRefresh() {
           try {
             await this.fetchStatus()
+            this.connected = true
           } catch (error) {
-            // Fail silently for background refreshes
+            // Mark as disconnected and update status
+            this.connected = false
+            this.status = {
+              status: 'offline',
+              app: this.status.app || 'unknown',
+              workers: 0,
+              uptime: 0,
+              hosts: this.status.hosts || []
+            }
             console.debug('Background refresh failed:', error)
           }
         },
 
         // Update live uptime counter
         updateLiveUptime() {
-          const elapsedSeconds = Math.floor((Date.now() - this.uptimeStartTime) / 1000)
-          this.serverUptime = (this.status.uptime || 0) + elapsedSeconds
+          // Only update uptime if connected
+          if (this.connected) {
+            const elapsedSeconds = Math.floor((Date.now() - this.uptimeStartTime) / 1000)
+            this.serverUptime = (this.status.uptime || 0) + elapsedSeconds
+          }
         },
 
         // Shared fetch logic
@@ -349,6 +368,7 @@
           const response = await fetch('/status')
           if (response.ok) {
             this.status = await response.json()
+            this.connected = true
             // Sync our local uptime tracking with server uptime
             this.serverUptime = this.status.uptime || 0
             this.uptimeStartTime = Date.now()
