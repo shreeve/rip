@@ -692,22 +692,6 @@ export function formatMumps(ast, opts = {}) {
       }
     }
 
-    // compute alignment for SET equals (per line)
-    let setEqCol = 0;
-    if (alignSet) {
-      for (const c of line.commands) {
-        if (c.cmd === "SET" || c.cmd === "S") {
-          for (const it of c.args?.items ?? []) {
-            if (it.kind === NodeKind.Assign) {
-              const leftTxt = sl(it.left._start, it.left._end);
-              setEqCol = Math.max(setEqCol, currentCol + c.cmd.length + afterCmd.length + leftTxt.length);
-            }
-          }
-        }
-      }
-      if (setEqCol) setEqCol += 1; // space before '='
-    }
-
     // commands
     for (let i = 0; i < line.commands.length; i++) {
       const c = line.commands[i];
@@ -725,12 +709,24 @@ export function formatMumps(ast, opts = {}) {
       if (c.args && c.args.items.length) {
         out += afterCmd; currentCol += afterCmd.length;
 
+        // If this is a SET command and alignSet==true, align '=' within this command only.
+        let maxLeftLen = 0;
+        const isSet = alignSet && (cname === "S" || c.cmd === "SET");
+        if (isSet) {
+          for (const it of c.args.items) {
+            if (it.kind === NodeKind.Assign) {
+              const leftTxt = sl(it.left._start, it.left._end);
+              if (leftTxt.length > maxLeftLen) maxLeftLen = leftTxt.length;
+            }
+          }
+        }
+
         const pieces = [];
         for (const arg of c.args.items) {
-          if ((cname === "S" || c.cmd === "SET") && alignSet && arg.kind === NodeKind.Assign) {
+          if (isSet && arg.kind === NodeKind.Assign) {
             const leftTxt = sl(arg.left._start, arg.left._end);
-            const beforeEqCols = currentCol + leftTxt.length;
-            const pad = setEqCol > 0 ? Math.max(0, setEqCol - beforeEqCols) : 0;
+            const pad = Math.max(0, maxLeftLen - leftTxt.length);
+            // Style: pad BEFORE '=' only; keep '=' tight (A··=1) like classic M style.
             pieces.push(leftTxt + " ".repeat(pad) + "=" + sl(arg.right._start, arg.right._end));
             continue;
           }
@@ -739,12 +735,14 @@ export function formatMumps(ast, opts = {}) {
             case NodeKind.WriteTab: pieces.push("?" + sl(arg.expr._start, arg.expr._end)); break;
             case NodeKind.Pattern: pieces.push(sl(arg._start, arg._end)); break;
             case NodeKind.Assign:
+              // Non-SET assignments: leave compact
               pieces.push(sl(arg.left._start, arg.left._end) + "=" + sl(arg.right._start, arg.right._end));
               break;
             default:
               pieces.push(sl(arg._start, arg._end));
           }
         }
+
         const joined = pieces.join(",");
         out += joined; currentCol += joined.length;
       }
