@@ -5,7 +5,6 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "../../../packages/server/rip-server.ts . 8305",
     "db:push": "rip-schema db:push",
     "db:seed": "bun db/seed.rip"
   },
@@ -19,9 +18,5 @@
   },
   "devDependencies": {
     "@types/bun": "^1.0.0"
-  },
-  "rip-server": {
-    "port": 8305,
-    "workers": 1
   }
 }
