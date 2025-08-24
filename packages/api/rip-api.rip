@@ -153,7 +153,7 @@ export toPhone = (str) ->
 # Validator registry (uses =~; assumes runtime sets '_' captures)
 # -----------------------------------------------------------------------------
 export validators =
-    # Numbers & money
+  # Numbers & money
   id:        (v) -> v[/^([1-9]\d{0,19})$/]            and parseInt(_[1])
   whole:     (v) -> v[/^(0|[1-9]\d{0,19})$/]          and parseInt(_[1])
   decimal:   (v) -> v[/^([-+]?\d+(?:\.\d*)?|\.\d+)$/] and parseFloat(_[1])
