@@ -1,7 +1,7 @@
 // mumps-parser-pro.js (consolidated, modernized)
 // Pure JS, Bun-friendly. High-performance M (MUMPS) line-first scanner+parser.
 // Includes: char-based parser, token-driven top-level (from Zig lexer),
-// pattern-literal parsing, string interning, && a configurable formatter.
+// pattern-literal parsing, string interning, and a configurable formatter.
 //
 // Public API:
 //   - parseMumps(input)                      // char-scanner path
@@ -154,7 +154,7 @@ class Program {
   }
 
   /** Token-stream (Zig) path for top-level structure.
-   * Builds line boundaries && also caches a token index range per line
+   * Builds line boundaries and also caches a token index range per line
    * so later per-line parsing is O(tokens_in_line), not O(total_tokens).
    */
   parseProgramFromTokens(toks /* Uint32Array */) {
@@ -293,7 +293,7 @@ class Program {
       });
       commands.push(cmdNode);
 
-      // move ti to just after chunkEndByte || to ';'
+      // move ti to just after chunkEndByte or to ';'
       while (ti < t1 && tokEnd() <= chunkEndByte) ti += 3;
       skipSpaces();
       if (ti < t1 && (toks[ti] & 0xFFFF) === K.Semi) {
@@ -372,7 +372,7 @@ class Program {
 
   /**
    * Scan forward to find the end of the current command "chunk".
-   * Respects strings ("" doubling), parentheses depth, && treats the next
+   * Respects strings ("" doubling), parentheses depth, and treats the next
    * top-level ';' as a comment starter. At depth==0, a run of spaces followed
    * by an identifier that is a valid command mnemonic will terminate the chunk.
    */
@@ -698,9 +698,9 @@ class Program {
  *
  * Behavior & notes
  * - Whitespace outside strings/patterns is not significant in M; all styles produced here are valid MUMPS.
- * - A single space is always emitted between a command mnemonic && its first argument (e.g., `S A=1`).
+ * - A single space is always emitted between a command mnemonic and its first argument (e.g., `S A=1`).
  * - Inline comment alignment (via `commentColumn`) only applies when a line contains code; pure comment lines are not padded.
- * - `alignSetEquals` aligns only within the current SET command (not across the whole line || file).
+ * - `alignSetEquals` aligns only within the current SET command (not across the whole line or file).
  *
  * Parameters
  * - ast: { buffer: Uint8Array, program: Program, symbols?: Interner }
@@ -711,7 +711,7 @@ class Program {
  * - uppercaseCommands?: boolean             // default: true
  * - commentColumn?: number                  // when set, right-pads to this column before an inline ';' comment
  * - betweenCommands?: string                // default: "  " (spacing between multiple commands on a line)
- * - spaceAfterCommand?: string              // default: " "  (spacing between command && its arguments)
+ * - spaceAfterCommand?: string              // default: " "  (spacing between command and its arguments)
  *
  * Optional formatting controls (opt-in; compact output remains default)
  * - alignSetEquals?: boolean                // default: false; align '=' within a single SET command
@@ -758,7 +758,7 @@ export function formatMumps(ast, opts = {}) {
       }
     }
 
-    // ── Commands (0 || more)
+    // ── Commands (0 or more)
     for (let i = 0; i < (line.commands?.length ?? 0); i++) {
       const c = line.commands[i];
 
@@ -810,7 +810,7 @@ export function formatMumps(ast, opts = {}) {
             continue;
           }
 
-          // WRITE mnemonics && defaults
+          // WRITE mnemonics and defaults
           switch (arg.kind) {
             case NodeKind.WriteNL:
               pieces.push("!");
