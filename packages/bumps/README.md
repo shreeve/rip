@@ -65,4 +65,14 @@ Feedback from mumpsters and folks who appreciate M’s unique strengths is very 
 
 ---
 
+## Building (macOS/Linux)
+
+```bash
+# macOS dylib
+zig build-lib -OReleaseFast -dynamic mumps_lex.zig -femit-bin=libmumps_lex.dylib
+
+# Linux .so
+zig build-lib -OReleaseFast -dynamic mumps_lex.zig -femit-bin=libmumps_lex.so
+```
+
 <div align="center">Built with ❤️ for the Bun community</div>
