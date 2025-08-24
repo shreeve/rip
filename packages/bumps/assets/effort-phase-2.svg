@@ -1,15 +1,18 @@
-<svg width="220" height="56" viewBox="0 0 220 56" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="effort 10-16 (13.0)">
+<svg width="220" height="62" viewBox="0 0 220 62" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="effort 10-16 (13.0)">
   <defs>
-    <linearGradient id="bar" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#ffffff"/>
-      <stop offset="50%" stop-color="#be7ebe"/>
-      <stop offset="100%" stop-color="#ffffff"/>
+    <!-- Low (yellow) -> mid (orange) -> high (red) -->
+    <linearGradient id="bar_lr" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#facc15"/>
+      <stop offset="50%" stop-color="#fb923c"/>
+      <stop offset="100%" stop-color="#ef4444"/>
     </linearGradient>
   </defs>
   <!-- Track -->
-  <rect x="0.5" y="16.0" width="219" height="24" rx="6" fill="#f7fafc" stroke="#e2e8f0"/>
-  <!-- Effort gradient bar -->
-  <rect x="110.0" y="16.0" width="110.0" height="24" rx="6" fill="url(#bar)"/>
+  <rect x="0.5" y="16.0" width="219" height="24" rx="8" fill="#f8fafc" stroke="#e5e7eb"/>
+  <!-- Range bar -->
+  <rect x="110.0" y="16.0" width="110.0" height="24" rx="8" fill="url(#bar_lr)" opacity="0.92"/>
   <!-- Combined label under bar -->
-  <text x="110.0" y="46" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial" font-size="11" fill="#334155">10-16 (13.0)</text>
+  <text x="110.0" y="54.0" text-anchor="middle"
+        font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial"
+        font-size="12" fill="#334155">10-16 (13.0)</text>
 </svg>
