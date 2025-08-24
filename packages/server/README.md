@@ -210,6 +210,34 @@ Why `/server` ≫ app routes: it bypasses Unix socket forwarding, framework rout
   - No per‑request fs checks in workers (module reload logic skipped)
   - Centralized change detection → deterministic, low‑overhead reloads under load
 
+## 🍎 Platform Notes
+
+### macOS Privileged Port Binding (Mojave 10.14+)
+
+Starting with macOS Mojave (10.14, 2018), Apple relaxed the traditional Unix restriction that required root privileges to bind to ports below 1024. This change allows developers to run web servers on standard ports (80, 443) without `sudo`, but with specific conditions:
+
+**✅ Works without root:**
+- Binding to `0.0.0.0` (all interfaces) - e.g., `bun server http apps/api` successfully binds to port 80
+- Omitting hostname (defaults to all interfaces in most tools including Bun)
+- Empty string `''` hostname (treated as `0.0.0.0`)
+
+**❌ Still requires root:**
+- Binding to `127.0.0.1` (localhost specifically)
+- Binding to any specific IP address (e.g., `10.0.0.155`)
+- Binding to `::1` (IPv6 localhost)
+
+**Practical impact for rip-server:**
+```bash
+# These work on macOS without sudo:
+bun server http apps/api           # Binds to 0.0.0.0:80
+bun server apps/api                 # Binds to 0.0.0.0:443 (HTTPS)
+
+# These would fail without sudo (if explicitly configured):
+# Binding specifically to 127.0.0.1:80 or 127.0.0.1:443
+```
+
+This behavior is consistent across all applications on macOS (not Bun-specific) and represents Apple's balance between developer convenience and security. The restriction remains for specific interface binding to prevent potential security issues with local traffic interception.
+
 ---
 
 Built with ❤️ for high-performance Rip applications.
