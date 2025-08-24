@@ -302,7 +302,7 @@
           </p>
         </div>
         <div class="flex items-center space-x-4">
-          <span class="text-xs text-gray-500" x-text="'Last updated: ' + new Date().toLocaleTimeString()">-</span>
+          <span class="text-xs text-gray-500" x-text="'Updated ' + lastUpdated.toLocaleTimeString()">-</span>
         </div>
       </div>
     </div>
@@ -316,6 +316,7 @@
         connected: true,
         serverUptime: 0,
         uptimeStartTime: Date.now(),
+        lastUpdated: new Date(),
 
         async init() {
           await this.refreshData()
@@ -372,6 +373,8 @@
             // Sync our local uptime tracking with server uptime
             this.serverUptime = this.status.uptime || 0
             this.uptimeStartTime = Date.now()
+            // Update timestamp when data is successfully refreshed
+            this.lastUpdated = new Date()
           } else {
             console.error('Failed to fetch status:', response.status)
             throw new Error(`HTTP ${response.status}`)
