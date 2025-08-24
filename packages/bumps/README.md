@@ -131,6 +131,56 @@ console.log(
 
 Tip: to benchmark parsing speed on your machine, prefix the run with `time`.
 
+## bumps CLI
+
+A tiny executable lives at `packages/bumps/bin/bumps.mjs`.
+
+Quick usage from the repo:
+
+```bash
+# show help
+packages/bumps/bin/bumps.mjs --help
+
+# or via workspace script
+bun -w packages/bumps run bumps --help
+```
+
+Commands:
+- `format [files]` – format to stdout (use `-w` to write in-place)
+- `parse <file>` – print a compact AST timing/summary (JSON)
+- `tokens <file>` – print Zig tokens with slices (requires Zig dylib/.so)
+- `bench [files]` – time lex / parse / format
+
+Examples:
+
+```bash
+# format to stdout
+packages/bumps/bin/bumps.mjs format sample.m
+
+# write back with abbreviations and column 60
+packages/bumps/bin/bumps.mjs format -w --abbr --col=60 sample.m
+
+# AST summary
+packages/bumps/bin/bumps.mjs parse sample.m
+
+# tokens (needs libmumps_lex.* present or ZIG_MUMPS_LEX_PATH set)
+packages/bumps/bin/bumps.mjs tokens sample.m
+
+# simple bench
+packages/bumps/bin/bumps.mjs bench sample.m
+```
+
+Zig lexer control:
+- `--zig=auto|on|off` (default `auto`). When `auto`, the CLI tries the Zig lexer if `libmumps_lex.*` is near the script or `ZIG_MUMPS_LEX_PATH` points to it; otherwise it falls back to pure JS.
+
+Global use (optional):
+
+```bash
+bun link ./packages/bumps
+bumps --help
+# later: bun unlink bumps
+```
+
 ## Community
 
 Feedback from mumpsters and folks who appreciate M’s unique strengths is very welcome. Open issues with examples, edge cases, or historical behaviors you want preserved.
