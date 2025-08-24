@@ -2,7 +2,11 @@
   "name": "bumps",
   "version": "1.0.0",
   "private": true,
+  "bin": {
+    "bumps": "./bin/bumps.mjs"
+  },
   "scripts": {
+    "bumps": "bun ./bin/bumps.mjs",
     "demo": "bun run demo-parse.js sample.m",
     "demo:file": "bun run demo-parse.js",
     "build-zig-macos": "zig build-lib -OReleaseFast -dynamic mumps_lex.zig -femit-bin=libmumps_lex.dylib",
