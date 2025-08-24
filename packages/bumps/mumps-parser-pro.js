@@ -656,62 +656,100 @@ class Program {
   }
 }
 
-/** Formatter ***************************************************************
- * Options:
- *  - abbreviateCommands?: boolean
- *  - uppercaseCommands?: boolean (default true)
- *  - commentColumn?: number
- *  - alignSetEquals?: boolean
- *  - betweenCommands?: string (default "  ")
- *  - spaceAfterCommand?: string (default " ")
- *  - tight?: boolean (compat)
+/** Formatter
+ * Renders a parsed M (MUMPS) program back to text.
+ * Compact style by default; optional alignment/spacing knobs are opt-in.
+ *
+ * Behavior & notes
+ * - Whitespace outside strings/patterns is not significant in M; all styles produced here are valid MUMPS.
+ * - A single space is always emitted between a command mnemonic and its first argument (e.g., `S A=1`).
+ * - Inline comment alignment (via `commentColumn`) only applies when a line contains code; pure comment lines are not padded.
+ * - `alignSetEquals` aligns only within the current SET command (not across the whole line or file).
+ *
+ * Parameters
+ * - ast: { buffer: Uint8Array, program: Program, symbols?: Interner }
+ * - opts?: object
+ *
+ * Options (with defaults)
+ * - abbreviateCommands?: boolean            // default: false; e.g., SET→S, WRITE→W
+ * - uppercaseCommands?: boolean             // default: true
+ * - commentColumn?: number                  // when set, right-pads to this column before an inline ';' comment
+ * - betweenCommands?: string                // default: "  " (spacing between multiple commands on a line)
+ * - spaceAfterCommand?: string              // default: " "  (spacing between command and its arguments)
+ *
+ * Optional formatting controls (opt-in; compact output remains default)
+ * - alignSetEquals?: boolean                // default: false; align '=' within a single SET command
+ * - alignSetMode?: "beforeEq" | "padLhs"    // default: "beforeEq"
+ *      "beforeEq": pads before '=' (A··=1, B(10)·=2)
+ *      "padLhs":   pads before the LHS so '=' stays tight (···A=1, ·B(10)=2)
+ * - commaGap?: number                       // default: 1; spaces after commas when joining arguments
+ *
+ * Compatibility
+ * - tight?: boolean                         // ignored (legacy compatibility knob)
+ *
+ * Requires: NodeKind, CMD_ABBR in the same module.
  */
 export function formatMumps(ast, opts = {}) {
   const { buffer, program } = ast;
   const td = new TextDecoder();
   const sl = (s, e) => td.decode(buffer.subarray(s, e));
 
-  const betweenCmds = opts.betweenCommands ?? "  ";
-  const afterCmd = opts.spaceAfterCommand ?? " ";
-  const upper = opts.uppercaseCommands !== false;
-  const abbr = !!opts.abbreviateCommands;
-  const commentCol = typeof opts.commentColumn === "number" ? Math.max(1, opts.commentColumn|0) : null;
-  const alignSet = !!opts.alignSetEquals;
+  // Options (compact defaults)
+  const betweenCmds = opts.betweenCommands ?? "  ";       // spacing between commands
+  const afterCmd = opts.spaceAfterCommand ?? " ";         // space after command before args
+  const upper = opts.uppercaseCommands !== false;         // default TRUE
+  const abbr = !!opts.abbreviateCommands;                 // e.g., SET->S
+  const commentCol = typeof opts.commentColumn === "number" ? Math.max(1, opts.commentColumn | 0) : null;
+
+  // Optional alignment/spacing features (opt-in)
+  const alignSet = !!opts.alignSetEquals;                 // align '=' within a SET command
+  const alignSetMode = opts.alignSetMode === "padLhs" ? "padLhs" : "beforeEq";
+  // spaces after commas inside argument lists (default 1)
+  const commaGap = Number.isInteger(opts.commaGap) ? Math.max(0, opts.commaGap) : 1;
 
   let out = "";
+
   for (const line of program.lines) {
     let currentCol = 0;
 
-    // label
+    // ── Label (if present)
     if (line.label) {
       const lab = sl(line.label.start, line.label.end);
       out += lab;
       currentCol += lab.length;
-      if (line.commands.length) {
-        out += betweenCmds; currentCol += betweenCmds.length;
+      if (line.commands?.length) {
+        out += betweenCmds;
+        currentCol += betweenCmds.length;
       }
     }
 
-    // commands
-    for (let i = 0; i < line.commands.length; i++) {
+    // ── Commands (0 or more)
+    for (let i = 0; i < (line.commands?.length ?? 0); i++) {
       const c = line.commands[i];
+
+      // Command name (abbrev/upper)
       let cname = c.cmd;
       if (abbr && CMD_ABBR[cname]) cname = CMD_ABBR[cname];
       if (upper) cname = cname.toUpperCase();
 
-      out += cname; currentCol += cname.length;
+      out += cname;
+      currentCol += cname.length;
 
+      // Postconditional
       if (c.postcond) {
         const txt = ":" + sl(c.postcond._start, c.postcond._end);
-        out += txt; currentCol += txt.length;
+        out += txt;
+        currentCol += txt.length;
       }
 
+      // Arguments
       if (c.args && c.args.items.length) {
-        out += afterCmd; currentCol += afterCmd.length;
+        out += afterCmd;
+        currentCol += afterCmd.length;
 
-        // If this is a SET command and alignSet==true, align '=' within this command only.
-        let maxLeftLen = 0;
+        // For SET: compute in-command alignment target only if requested
         const isSet = alignSet && (cname === "S" || c.cmd === "SET");
+        let maxLeftLen = 0;
         if (isSet) {
           for (const it of c.args.items) {
             if (it.kind === NodeKind.Assign) {
@@ -725,17 +763,31 @@ export function formatMumps(ast, opts = {}) {
         for (const arg of c.args.items) {
           if (isSet && arg.kind === NodeKind.Assign) {
             const leftTxt = sl(arg.left._start, arg.left._end);
+            const rhsTxt = sl(arg.right._start, arg.right._end);
             const pad = Math.max(0, maxLeftLen - leftTxt.length);
-            // Style: pad BEFORE '=' only; keep '=' tight (A··=1) like classic M style.
-            pieces.push(leftTxt + " ".repeat(pad) + "=" + sl(arg.right._start, arg.right._end));
+            if (alignSetMode === "beforeEq") {
+              // "A··=1" (spaces before '='), classic lined-up equals
+              pieces.push(leftTxt + " ".repeat(pad) + "=" + rhsTxt);
+            } else {
+              // "···A=1" (pad before LHS so '=' stays tight)
+              pieces.push(" ".repeat(pad) + leftTxt + "=" + rhsTxt);
+            }
             continue;
           }
+
+          // WRITE mnemonics and defaults
           switch (arg.kind) {
-            case NodeKind.WriteNL: pieces.push("!"); break;
-            case NodeKind.WriteTab: pieces.push("?" + sl(arg.expr._start, arg.expr._end)); break;
-            case NodeKind.Pattern: pieces.push(sl(arg._start, arg._end)); break;
+            case NodeKind.WriteNL:
+              pieces.push("!");
+              break;
+            case NodeKind.WriteTab:
+              pieces.push("?" + sl(arg.expr._start, arg.expr._end));
+              break;
+            case NodeKind.Pattern:
+              pieces.push(sl(arg._start, arg._end));
+              break;
             case NodeKind.Assign:
-              // Non-SET assignments: leave compact
+              // Non-SET assignments remain compact
               pieces.push(sl(arg.left._start, arg.left._end) + "=" + sl(arg.right._start, arg.right._end));
               break;
             default:
@@ -743,33 +795,43 @@ export function formatMumps(ast, opts = {}) {
           }
         }
 
-        const joined = pieces.join(",");
-        out += joined; currentCol += joined.length;
+        // Join args with configurable spaces after commas
+        const joined = pieces.join("," + " ".repeat(commaGap));
+        out += joined;
+        currentCol += joined.length;
       }
 
+      // Between commands on the same line
       if (i + 1 < line.commands.length) {
-        out += betweenCmds; currentCol += betweenCmds.length;
+        out += betweenCmds;
+        currentCol += betweenCmds.length;
       }
     }
 
-    // trailing comment
+    // ── Trailing comment
     if (line.comment) {
       const commentText = sl(line.comment.start, line.comment.end);
-      const hasCodeOnLine = (line.label || (line.commands && line.commands.length > 0));
-      if (commentCol !== null && hasCodeOnLine) {
-        if (currentCol + 1 < commentCol) {
-          out += " ".repeat(commentCol - currentCol - 1);
+      const hasCode = !!line.label || (line.commands && line.commands.length > 0);
+
+      if (hasCode) {
+        if (commentCol !== null) {
+          // Align to column only if there is code on the line
+          if (currentCol + 1 < commentCol) {
+            out += " ".repeat(commentCol - currentCol - 1);
+          } else {
+            out += " ";
+          }
         } else {
+          // No alignment requested — just a single space separator
           out += " ";
         }
-      } else {
-        // either no comment column configured, or it's a pure comment line
-        if (hasCodeOnLine) out += " ";
       }
+      // For pure comment-only lines, emit as-is (no padding)
       out += commentText;
     }
 
     out += "\n";
   }
+
   return out;
 }
