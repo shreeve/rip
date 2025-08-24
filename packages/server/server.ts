@@ -33,7 +33,7 @@ export class Server {
 
   async start(): Promise<void> {
     // Listener selection
-    const httpOnly = this.flags.httpPort !== 0 && this.flags.httpPort !== null
+    const httpOnly = this.flags.httpsPort === null
 
     const startOnPort = (p: number, fetchFn: (req: Request) => Promise<Response>) => {
       let port = p

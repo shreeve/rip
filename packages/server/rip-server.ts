@@ -82,12 +82,34 @@ async function main(): Promise<void> {
   }
   const flags = parseFlags(process.argv)
   const svr = new Server(flags)
-  await svr.start()
   const mgr = new Manager(flags)
+
+  // Cleanup handler for crashes and signals
+  const cleanup = async () => {
+    console.log('rip-server: shutting down...')
+    svr.stop()
+    await mgr.stop()
+    process.exit(0)
+  }
+
+  // Handle various termination scenarios
+  process.on('SIGTERM', cleanup)
+  process.on('SIGINT', cleanup)
+  process.on('uncaughtException', (err) => {
+    console.error('rip-server: uncaught exception:', err)
+    cleanup()
+  })
+  process.on('unhandledRejection', (err) => {
+    console.error('rip-server: unhandled rejection:', err)
+    cleanup()
+  })
+
+  await svr.start()
   await mgr.start()
-  const http = flags.httpPort ?? 0
-  const https = flags.httpsPort ?? 0
-  const url = https ? `https://localhost:${https}/server` : `http://localhost:${http}/server`
+  const httpOnly = flags.httpsPort === null
+  const url = httpOnly
+    ? `http://localhost:${flags.httpPort}/server`
+    : `https://localhost:${flags.httpsPort}/server`
   console.log(`rip-server: app=${flags.appName} workers=${flags.workers} url=${url}`)
 }
 
