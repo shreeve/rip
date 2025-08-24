@@ -778,12 +778,12 @@ export function formatMumps(ast, opts = {}) {
       }
 
       // Arguments
-      if (c.args and c.args.items.length) {
+      if (c.args && c.args.items.length) {
         out += afterCmd;
         currentCol += afterCmd.length;
 
         // For SET: compute in-command alignment target only if requested
-        const isSet = alignSet and (cname === "S" || c.cmd === "SET");
+        const isSet = alignSet && (cname === "S" || c.cmd === "SET");
         let maxLeftLen = 0;
         if (isSet) {
           for (const it of c.args.items) {
