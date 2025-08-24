@@ -236,7 +236,99 @@ bun server apps/api                 # Binds to 0.0.0.0:443 (HTTPS)
 # Binding specifically to 127.0.0.1:80 or 127.0.0.1:443
 ```
 
-This behavior is consistent across all applications on macOS (not Bun-specific) and represents Apple's balance between developer convenience and security. The restriction remains for specific interface binding to prevent potential security issues with local traffic interception.
+**⚠️ Security Warning:** When binding to ports 80/443 without root on macOS, your service is **exposed to your entire local network** (LAN). This means any device on your WiFi/network can access your development server. This is particularly risky on:
+- Shared networks (coffee shops, co-working spaces)
+- Corporate networks
+- Home networks with untrusted devices
+
+**When to use each approach:**
+
+| Use Case | Best Approach | Why |
+|----------|--------------|-----|
+| 📱 **Mobile testing** | `0.0.0.0` on port 80/443 | iPhone can access via `hostname.local` |
+| 🎯 **Team demos** | `0.0.0.0` on any port | Share with colleagues on same network |
+| 💻 **Solo development** | Port 5000+ | Secure by default, still convenient |
+| ☕ **Coffee shop coding** | `sudo` + `127.0.0.1` | Maximum security on untrusted networks |
+
+**Quick reference - Your three options:**
+1. **Convenience path** (`0.0.0.0`) - No sudo but LAN-exposed 🌐
+2. **Secure path** (`127.0.0.1`) - Needs sudo but localhost-only 🔒
+3. **Best of both** (ports 5000+) - No sudo AND can be localhost-only ✨
+
+**Safer alternatives:**
+- Use high ports (5000+): `bun server http:5001 apps/api` - can bind to localhost only
+- Use sudo if you need port 80/443 with localhost-only access
+- Enable macOS firewall or configure `pf` rules to block external access
+- Only use low ports on trusted, isolated networks
+
+This behavior is consistent across all applications on macOS (not Bun-specific) and represents Apple's trade-off between developer convenience and security.
+
+## 📱 Mobile Development Game-Changer
+
+### Automatic mDNS Advertisement for `.local` Domains
+
+When you add a `.local` host to the registry, rip-server **automatically** advertises it via Bonjour/mDNS, making it instantly accessible from any device on your LAN - especially iPhones and iPads!
+
+**The Magic:**
+```bash
+# Start your server
+bun server http apps/labs/api
+
+# Add custom .local domains
+bun server add api.local
+bun server add cheese.local
+bun server add demo.local
+
+# Your iPhone can now access:
+# http://api.local
+# http://cheese.local
+# http://demo.local
+```
+
+**No more:**
+- ❌ "What's your IP address?"
+- ❌ "What port are you running on?"
+- ❌ Typing `192.168.x.x:8080` on phone keyboards
+- ❌ IP addresses changing with DHCP
+
+**Instead:**
+- ✅ Clean, memorable URLs
+- ✅ Works instantly on all Apple devices
+- ✅ Zero configuration on the phone
+- ✅ Multiple apps with different domains
+
+### How It Works
+
+1. When you `bun server add api.local`, the server:
+   - Adds it to the host registry for routing
+   - Spawns a `dns-sd` process to advertise via mDNS
+   - Automatically detects your LAN IP
+
+2. Your iPhone/iPad discovers these domains via Bonjour (built into iOS)
+
+3. Clean URLs work immediately - no ports, no IPs!
+
+### Real-World Usage
+
+**Testing responsive design:**
+```bash
+bun server add mobile.local
+# Visit http://mobile.local on your phone - instant feedback!
+```
+
+**Client demos:**
+```bash
+bun server add demo.local
+# "Check out demo.local on your phone" - professional and clean
+```
+
+**Team collaboration:**
+```bash
+bun server add review.local
+# Everyone on WiFi can access http://review.local
+```
+
+This transforms rip-server from a great local dev server into a **mobile testing powerhouse**! 🚀
 
 ---
 

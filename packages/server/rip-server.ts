@@ -13,6 +13,8 @@ async function main(): Promise<void> {
       // Best-effort: find and kill matching processes by script path
       const script = __filename
       await Bun.spawn(['pkill', '-f', script]).exited
+      // Also clean up any orphaned dns-sd processes from rip-server
+      await Bun.spawn(['pkill', '-f', 'dns-sd -P.*_http._tcp']).exited
     } catch {}
     console.log('rip-server: stop requested')
     return

@@ -23,12 +23,16 @@ export class Server {
   private newestVersion: number | null = null
   private httpsActive = false
   private hostRegistry: Set<string> = new Set()
+  private mdnsProcesses: Map<string, any> = new Map() // host -> subprocess
 
   constructor(flags: ParsedFlags) {
     this.flags = flags
     // Seed localhost defaults for dev
     this.hostRegistry.add('localhost')
     this.hostRegistry.add('127.0.0.1')
+    // Auto-add {appname}.local for mobile testing (POLS)
+    const appLocal = `${flags.appName}.local`
+    this.hostRegistry.add(appLocal)
   }
 
   async start(): Promise<void> {
@@ -115,6 +119,15 @@ export class Server {
     try { this.server?.stop() } catch {}
     try { this.httpsServer?.stop() } catch {}
     try { this.control?.stop() } catch {}
+
+    // Clean up all mDNS advertisements
+    for (const [host, proc] of this.mdnsProcesses) {
+      try {
+        proc.kill()
+        console.log(`rip-server: stopped advertising ${host} via mDNS`)
+      } catch {}
+    }
+    this.mdnsProcesses.clear()
   }
 
   private async fetch(req: Request): Promise<Response> {
@@ -264,6 +277,10 @@ export class Server {
     const ctlPath = getControlSocketPath(this.flags.socketPrefix)
     try { require('fs').unlinkSync(ctlPath) } catch {}
     this.control = Bun.serve({ unix: ctlPath, fetch: this.controlFetch.bind(this) })
+
+    // Auto-advertise {appname}.local via mDNS (POLS)
+    const appLocal = `${this.flags.appName}.local`
+    await this.startMdnsAdvertisement(appLocal)
   }
 
   private async controlFetch(req: Request): Promise<Response> {
@@ -410,5 +427,70 @@ export class Server {
       const exp = new Date(x.validTo)
       console.log(`rip-server: tls cert ${subject} issued by ${issuer} expires ${exp.toISOString()}`)
     } catch {}
+  }
+
+  private getLanIP(): string | null {
+    try {
+      const output = Bun.spawnSync(['ifconfig'], { stdout: 'pipe' }).stdout.toString()
+      const matches = output.match(/inet\s+(\d+\.\d+\.\d+\.\d+)/g)
+      if (matches) {
+        for (const match of matches) {
+          const ip = match.split(/\s+/)[1]
+          if (ip && ip !== '127.0.0.1' && !ip.startsWith('169.254.')) {
+            return ip
+          }
+        }
+      }
+    } catch {}
+    return null
+  }
+
+  private async startMdnsAdvertisement(host: string): Promise<void> {
+    // Only advertise .local hosts
+    if (!host.endsWith('.local')) return
+
+    // Don't re-advertise if already running
+    if (this.mdnsProcesses.has(host)) return
+
+    const lanIP = this.getLanIP()
+    if (!lanIP) {
+      console.log(`rip-server: unable to detect LAN IP for mDNS advertisement of ${host}`)
+      return
+    }
+
+    const port = this.flags.httpsPort ?? this.flags.httpPort ?? 80
+    const serviceName = host.replace('.local', '')
+
+    try {
+      // Spawn dns-sd in background to advertise this hostname
+      const proc = Bun.spawn([
+        'dns-sd', '-P',
+        serviceName,           // Service name
+        '_http._tcp',          // Service type
+        'local',               // Domain
+        String(port),          // Port
+        host,                  // Hostname
+        lanIP                  // IP address
+      ], {
+        stdout: 'ignore',
+        stderr: 'ignore'
+      })
+
+      this.mdnsProcesses.set(host, proc)
+      console.log(`rip-server: advertising ${host} → ${lanIP}:${port} via mDNS`)
+    } catch (e: any) {
+      console.error(`rip-server: failed to advertise ${host} via mDNS:`, e.message)
+    }
+  }
+
+  private async stopMdnsAdvertisement(host: string): Promise<void> {
+    const proc = this.mdnsProcesses.get(host)
+    if (proc) {
+      try {
+        proc.kill()
+        this.mdnsProcesses.delete(host)
+        console.log(`rip-server: stopped advertising ${host} via mDNS`)
+      } catch {}
+    }
   }
 }

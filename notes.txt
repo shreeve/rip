@@ -271,3 +271,33 @@ typescript-stance.mdc: Strong types for public APIs; no any in shared utilities;
 security-basics.mdc: Default Cache-Control: no-store for worker responses; plan for HTTP→HTTPS redirect flag and HSTS (do not implement silently).
 import-style-and-paths.mdc: Use absolute imports within packages when configured; keep import order (std, third-party, internal); avoid deep relative traversal.
 commit-and-pr-guidelines.mdc: Conventional commits; run bun test + biome before PR; keep changesatomic.
+
+==
+
+=== THE COMPLETE SOLUTION: Multiple .local names + Host routing ===
+
+STEP 1: Advertise multiple names (in background):
+-------------------------------------------------
+dns-sd -P 'api' _http._tcp local 80 api.local 10.0.0.155 &
+dns-sd -P 'web' _http._tcp local 80 web.local 10.0.0.155 &
+dns-sd -P 'admin' _http._tcp local 80 admin.local 10.0.0.155 &
+
+STEP 2: Add to rip-server host registry:
+----------------------------------------
+bun server add api.local
+bun server add web.local
+bun server add admin.local
+
+STEP 3: Your server routes by Host header:
+------------------------------------------
+Request to api.local → Host: api.local → routes to API app
+Request to web.local → Host: web.local → routes to Web app
+
+=== IPHONE ACCESS ===
+http://api.local    → Your API
+http://web.local    → Your Web app
+http://admin.local  → Your Admin panel
+
+🚀 NO PORTS! NO PATHS! JUST CLEAN URLS!
+
+==
