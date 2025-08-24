@@ -25,14 +25,14 @@
       <div class="flex items-center justify-between">
         <div class="flex items-center space-x-4">
           <div class="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-[0_15px_30px_-8px_rgba(0,0,0,0.2)] border border-gray-100 transition-all duration-300 ease-in-out hover:scale-110 hover:shadow-[0_25px_50px_-12px_rgba(0,0,0,0.45)] cursor-pointer">
-            <svg width="220" height="220" viewBox="0 0 220 220" fill="none" xmlns="http://www.w3.org/2000/svg" class="w-10 h-10">
+            <svg width="220" height="220" viewBox="0 0 220 220" fill="none" xmlns="http://www.w3.org/2000/svg" class="w-9 h-9">
               <path d="M55.6822 169.86L41.8222 175.88L1.64219 109.8L41.8222 43.72L55.6822 49.74L19.1422 109.8L55.6822 169.86ZM164.318 169.86L200.858 109.8L164.318 49.74L178.178 43.72L218.358 109.8L178.178 175.88L164.318 169.86Z" fill="black"/>
               <path d="M69.8047 163V61.1818H113.754C121.31 61.1818 127.923 62.5573 133.59 65.3082C139.258 68.0592 143.666 72.0199 146.815 77.1903C149.963 82.3608 151.538 88.5587 151.538 95.7841C151.538 103.076 149.914 109.224 146.665 114.229C143.451 119.233 138.926 123.012 133.093 125.564C127.293 128.116 120.515 129.392 112.759 129.392H86.5092V107.915H107.191C110.439 107.915 113.207 107.517 115.494 106.722C117.814 105.893 119.587 104.584 120.813 102.794C122.073 101.004 122.702 98.6676 122.702 95.7841C122.702 92.8674 122.073 90.4976 120.813 88.6747C119.587 86.8187 117.814 85.4598 115.494 84.598C113.207 83.7031 110.439 83.2557 107.191 83.2557H97.4467V163H69.8047ZM129.464 116.267L154.918 163H124.89L100.032 116.267H129.464Z" fill="#BB0000"/>
             </svg>
           </div>
           <div>
             <h1 class="text-2xl font-bold text-gray-900">Rip Server</h1>
-            <p class="text-sm text-gray-600">Multi-worker application platform</p>
+            <p class="text-sm text-gray-600">Multi-worker runtime</p>
           </div>
         </div>
         <div class="flex items-center space-x-2">
@@ -269,11 +269,11 @@
       </div>
       <div class="p-6">
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <button @click="refreshData()" :disabled="loading" class="flex items-center justify-center px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50">
+          <button @click="refreshData()" :disabled="loading" class="flex items-center justify-center px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50" style="transition: opacity 0.3s ease;">
             <svg class="w-5 h-5 mr-2" :class="{'animate-spin': loading}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
             </svg>
-            Refresh Data
+            <span x-text="loading ? 'Refreshing...' : 'Refresh Data'"></span>
           </button>
           <a href="/server" target="_blank" class="flex items-center justify-center px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
             <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -340,7 +340,7 @@
         async silentRefresh() {
           try {
             await this.fetchStatus()
-            this.connected = true
+            // this.connected is already set in fetchStatus() on success
           } catch (error) {
             // Mark as disconnected and update status
             this.connected = false
