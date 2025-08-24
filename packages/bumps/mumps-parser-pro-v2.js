@@ -1,0 +1,480 @@
+// mumps-parser-pro.js
+"use strict";
+
+/** Public API ***************************************************************/
+export function parseMumps(input /* string|Uint8Array */) {
+  const buf = toBytes(input);
+  const P = new Program(buf);
+  const program = P.parseProgram();
+  return makeAstResult(buf, program, P);
+}
+
+/** NEW: parse using tokens from Zig lexer (Uint32Array: [kind,start,end] * n) */
+export function parseMumpsWithTokens(buffer /* Uint8Array */, toks /* Uint32Array */) {
+  const buf = toBytes(buffer);
+  const P = new Program(buf);
+  const program = P.parseProgramFromTokens(toks);
+  return makeAstResult(buf, program, P);
+}
+
+/** helper to package result identically */
+function makeAstResult(buf, program, P) {
+  return {
+    kind: NodeKind.Program,
+    buffer: buf,
+    program,
+    lines: program.lines,
+    nodes: P.nodes,
+    symbols: P.intern,
+    format: (opts) => formatMumps({ buffer: buf, program, symbols: P.intern }, opts),
+  };
+}
+
+/** Node kinds ***************************************************************/
+export const NodeKind = Object.freeze({
+  Program: 1, Line: 2, Command: 3, ArgList: 4, Assign: 5,
+  ExprBinary: 6, ExprUnary: 7, Number: 8, String: 9,
+  Local: 10, Global: 11, Subscript: 12, Indirect: 13,
+  Dollar: 14, DblDollar: 15, Paren: 16,
+  WriteNL: 17, WriteTab: 18, Comment: 19,
+  Pattern: 20
+});
+
+/** Utilities ****************************************************************/
+function toBytes(x) { return x instanceof Uint8Array ? x : new TextEncoder().encode(String(x)); }
+const C = {
+  NL:10, CR:13, SP:32, TAB:9, QUOTE:34, SEMI:59, LP:40, RP:41, COMMA:44,
+  CARET:94, DOLLAR:36, AT:64, COLON:58, PLUS:43, MINUS:45, STAR:42,
+  SLASH:47, BSLASH:92, HASH:35, UND:95, AMP:38, BANG:33, TICK:39,
+  LT:60, GT:62, EQ:61, QMARK:63, LBR:91, RBR:93, PERC:37, DOT:46
+};
+const isSpace = b => b === C.SP || b === C.TAB;
+const isDigit = b => b >= 48 && b <= 57;
+const isAlpha = b => (b >= 65 && b <= 90) || (b >= 97 && b <= 122);
+const isIdentStart = b => isAlpha(b) || b === C.PERC;
+const isIdentPart  = b => isAlpha(b) || isDigit(b) || b === C.PERC;
+
+/** Commands *****************************************************************/
+const CMD = Object.freeze({
+  BREAK:"BREAK", CLOSE:"CLOSE", DO:"DO", ELSE:"ELSE", FOR:"FOR", GOTO:"GOTO",
+  HALT:"HALT", HANG:"HANG", IF:"IF", JOB:"JOB", KILL:"KILL", LOCK:"LOCK",
+  MERGE:"MERGE", NEW:"NEW", OPEN:"OPEN", QUIT:"QUIT", READ:"READ", SET:"SET",
+  USE:"USE", VIEW:"VIEW", WRITE:"WRITE", XECUTE:"XECUTE"
+});
+const CMD_MAP = (() => {
+  const m = Object.create(null), add = (k,v)=>m[k]=v;
+  for (const k of Object.keys(CMD)) add(k,k);
+  add("B",CMD.BREAK); add("C",CMD.CLOSE); add("D",CMD.DO); add("E",CMD.ELSE);
+  add("F",CMD.FOR); add("G",CMD.GOTO); add("I",CMD.IF); add("J",CMD.JOB);
+  add("K",CMD.KILL); add("L",CMD.LOCK); add("M",CMD.MERGE); add("N",CMD.NEW);
+  add("O",CMD.OPEN); add("Q",CMD.QUIT); add("R",CMD.READ); add("S",CMD.SET);
+  add("U",CMD.USE); add("V",CMD.VIEW); add("W",CMD.WRITE); add("X",CMD.XECUTE);
+  return m;
+})();
+
+/** NEW: command abbreviations (formatter) */
+const CMD_ABBR = Object.freeze({
+  BREAK:"B", CLOSE:"C", DO:"D", ELSE:"E", FOR:"F", GOTO:"G",
+  HALT:"H", HANG:"H", IF:"I", JOB:"J", KILL:"K", LOCK:"L",
+  MERGE:"M", NEW:"N", OPEN:"O", QUIT:"Q", READ:"R", SET:"S",
+  USE:"U", VIEW:"V", WRITE:"W", XECUTE:"X"
+});
+
+/** String Interner **********************************************************/
+class Interner {
+  constructor(buf) { this.buf = buf; this.map = new Map(); this.syms = [""]; this.dec = new TextDecoder(); }
+  intern(start, end) {
+    const key = (end - start) + ":" + start;
+    let id = this.map.get(key);
+    if (id !== undefined) return id;
+    const s = this.dec.decode(this.buf.subarray(start, end));
+    id = this.syms.length;
+    this.syms.push(s);
+    this.map.set(key, id);
+    return id;
+  }
+  get(id) { return this.syms[id] || ""; }
+}
+
+/** Parser *******************************************************************/
+class Program {
+  constructor(buf) {
+    this.b = buf; this.n = buf.length;
+    this.nodes = [];
+    this.lines = [];
+    this.intern = new Interner(buf);
+    this._indexLines();
+    this.td = new TextDecoder();
+  }
+
+  /** existing char-scanner path */
+  parseProgram() {
+    const program = this._node(NodeKind.Program, { lines: [] });
+    for (let k = 0; k < this.lines.length; k++) {
+      const { start, end, indent } = this.lines[k];
+      const lineNode = this._parseLine(start, end, indent);
+      program.lines.push(lineNode);
+    }
+    return program;
+  }
+
+  /** NEW: token-stream path (top-level structure from tokens; expressions reuse char parser) */
+  parseProgramFromTokens(toks) {
+    // Build line slices from tokens: locate Newline tokens and compute [start,end,indent]
+    // Token layout: Uint32Array triples: kind,start,end
+    const K = TokenKind; // mirrors Zig enum below
+    const lines = [];
+    let byteStart = 0;
+    for (let i = 0; i < toks.length; i += 3) {
+      const kind = toks[i] & 0xFFFF; // kind stored in lower 16 bits
+      if (kind === K.Newline) {
+        const end = toks[i + 1]; // start offset of '\n'
+        const indent = this._leadingIndent(byteStart, end);
+        lines.push({ start: byteStart, end, indent });
+        // next line begins after this token's end
+        byteStart = toks[i + 2];
+      }
+    }
+    if (byteStart < this.n) {
+      const end = this.n;
+      const indent = this._leadingIndent(byteStart, end);
+      lines.push({ start: byteStart, end, indent });
+    }
+
+    const program = this._node(NodeKind.Program, { lines: [] });
+    for (const L of lines) {
+      program.lines.push(this._parseLineWithTokens(L, toks));
+    }
+    return program;
+  }
+
+  /** --- shared helpers (unchanged) --- */
+  _indexLines() {
+    const b = this.b, n = this.n;
+    let i = 0, lineStart = 0;
+    for (; i < n; i++) {
+      if (b[i] === C.NL) {
+        let end = i; if (end > lineStart && b[end - 1] === C.CR) end--;
+        const indent = this._leadingIndent(lineStart, end);
+        this.lines.push({ start: lineStart, end, indent });
+        lineStart = i + 1;
+      }
+    }
+    if (lineStart < n) {
+      let end = n; if (end > lineStart && b[end - 1] === C.CR) end--;
+      const indent = this._leadingIndent(lineStart, end);
+      this.lines.push({ start: lineStart, end, indent });
+    }
+  }
+  _leadingIndent(s, e) {
+    const b = this.b; let i = s, col = 0;
+    for (; i < e; i++) { const ch = b[i]; if (ch === C.SP || ch === C.TAB) col++; else break; }
+    return col;
+  }
+  _slice(s,e){ return new TextDecoder().decode(this.b.subarray(s,e)); }
+  _node(kind, fields) { const n = Object.assign({ kind }, fields); this.nodes.push(n); return n; }
+
+  /** NEW: parse a single line using token slices */
+  _parseLineWithTokens(line, toks) {
+    const { start, end, indent } = line;
+    const K = TokenKind;
+    // collect token indices for this byte span
+    const tIdx = [];
+    for (let i = 0; i < toks.length; i += 3) {
+      const s = toks[i + 1], e = toks[i + 2];
+      if (e <= start) continue;
+      if (s >= end) break;
+      tIdx.push(i);
+    }
+    // helper to skip spaces
+    let ti = 0;
+    const nextNonSpace = () => {
+      while (ti < tIdx.length) {
+        const k = toks[tIdx[ti]] & 0xFFFF;
+        if (k === K.Space) { ti++; continue; }
+        return tIdx[ti];
+      }
+      return -1;
+    };
+
+    // full-line comment?
+    const first = nextNonSpace();
+    if (first === -1) return this._node(NodeKind.Line, { start, end, indent, label: null, commands: [], comment: null });
+    if ((toks[first] & 0xFFFF) === K.Semi) {
+      const comment = this._node(NodeKind.Comment, { start: toks[first + 1], end });
+      return this._node(NodeKind.Line, { start, end, indent, label: null, commands: [], comment });
+    }
+
+    // optional label at col 0: starts with Ident and followed by Space
+    let label = null;
+    if (indent === 0 && (toks[first] & 0xFFFF) === K.Ident) {
+      const nameStart = toks[first + 1], nameEnd = toks[first + 2];
+      const sym = this.intern.intern(nameStart, nameEnd);
+      ti++; // consume ident
+      // consume at least one space to treat as label
+      let spaced = false;
+      while (ti < tIdx.length && (toks[tIdx[ti]] & 0xFFFF) === K.Space) { spaced = true; ti++; }
+      if (spaced) label = { start: nameStart, end: nameEnd, sym };
+      else ti = 0; // rewind—wasn't a label; let the char parser handle nuances
+    }
+
+    const commands = [];
+    let comment = null;
+
+    // For command chunks, we’ll reuse the existing byte-based routines by
+    // computing chunk byte ranges from tokens (top-level until ';' or next command word).
+    const cmdStartTI = () => {
+      const idx = nextNonSpace();
+      if (idx === -1) return -1;
+      if ((toks[idx] & 0xFFFF) !== K.Ident) return -1;
+      return idx;
+    };
+
+    while (true) {
+      const cs = cmdStartTI();
+      if (cs === -1) break;
+      // read command word (letters only)
+      const cmdWord = this._slice(toks[cs + 1], toks[cs + 2]).toUpperCase();
+      ti++; // consume cmd ident
+      // postconditional?
+      let postcond = null;
+      // skip space
+      while (ti < tIdx.length && (toks[tIdx[ti]] & 0xFFFF) === K.Space) ti++;
+      if (ti < tIdx.length && (toks[tIdx[ti]] & 0xFFFF) === K.Colon) {
+        const pcStart = toks[tIdx[ti] + 2]; // after :
+        ti++; // skip ':'
+        // PC ends at next Space or ';' at top level; easiest is to delegate to char scanner util
+        const pcEnd = this._scanExprUntilSpaceOrComment(pcStart, end);
+        postcond = this._parseExprRange(pcStart, pcEnd);
+        // advance token index to the token that contains/ends at pcEnd
+        while (ti < tIdx.length && toks[tIdx[ti] + 2] <= pcEnd) ti++;
+      }
+
+      // find end of this command chunk:
+      let chunkEndByte = end;
+      // stop at first top-level ';' or at next command identifier
+      for (let k = ti; k < tIdx.length; k++) {
+        const kind = toks[tIdx[k]] & 0xFFFF;
+        if (kind === K.Semi) { chunkEndByte = toks[tIdx[k] + 1]; break; }
+        if (kind === K.Ident) {
+          // peek the word; if it’s a command, we end before its leading spaces
+          const s = toks[tIdx[k] + 1], e = toks[tIdx[k] + 2];
+          const w = this._slice(s, e).toUpperCase();
+          if (w === "H" || w === "HAL" || w === "HALT" || w === "HANG" || CMD_MAP[w]) {
+            // walk back over preceding spaces to make a neat boundary
+            let back = k - 1;
+            while (back >= ti && (toks[tIdx[back]] & 0xFFFF) === K.Space) back--;
+            chunkEndByte = back >= ti ? toks[tIdx[back] + 2] : s;
+            break;
+          }
+        }
+      }
+
+      // normalize command name (H/HALT/HANG disambiguation deferred to args)
+      let canonical = CMD_MAP[cmdWord] || null;
+      const ambiguousH = (cmdWord === "H" || cmdWord === "HAL" || cmdWord === "HALT" || cmdWord === "HANG");
+      const args = this._parseArgsForCommand(cmdWord, canonical, toks[tIdx[ti]] ? toks[tIdx[ti] + 1] : toks[cs + 2], chunkEndByte);
+      if (!canonical) canonical = ambiguousH ? (args.items.length > 0 ? CMD.HANG : CMD.HALT) : cmdWord;
+
+      const cmdNode = this._node(NodeKind.Command, {
+        cmd: canonical, cmdStart: toks[cs + 1], cmdEnd: toks[cs + 2], postcond, args
+      });
+      commands.push(cmdNode);
+
+      // advance ti to tokens at/after chunkEndByte
+      while (ti < tIdx.length && toks[tIdx[ti] + 2] <= chunkEndByte) ti++;
+      // trailing comment?
+      if (ti < tIdx.length && (toks[tIdx[ti]] & 0xFFFF) === K.Semi) {
+        comment = this._node(NodeKind.Comment, { start: toks[tIdx[ti] + 1], end });
+        break;
+      }
+      // loop to next command
+    }
+    return this._node(NodeKind.Line, { start, end, indent, label, commands, comment });
+  }
+
+  /** Char-path line parser (unchanged) */
+  _parseLine(start, end, indent) {
+    const b = this.b; let i = start;
+    while (i < end && isSpace(b[i])) i++;
+    if (i < end && b[i] === C.SEMI) {
+      const comment = this._node(NodeKind.Comment, { start: i, end });
+      return this._node(NodeKind.Line, { start, end, indent, label: null, commands: [], comment });
+    }
+    let label = null;
+    if (indent === 0 && i < end && isAlpha(b[i])) {
+      const nameStart = i; i++;
+      while (i < end && isIdentPart(b[i])) i++;
+      let j = i; while (j < end && isSpace(b[j])) j++;
+      label = { start: nameStart, end: i, sym: this.intern.intern(nameStart, i) };
+      i = j;
+    }
+    const commands = []; let comment = null;
+    while (i < end) {
+      if (this.b[i] === C.SEMI) { comment = this._node(NodeKind.Comment, { start: i, end }); break; }
+      while (i < end && isSpace(this.b[i])) i++;
+      if (i >= end) break;
+      if (!isAlpha(this.b[i])) { comment = this._node(NodeKind.Comment, { start: i, end }); break; }
+      const cmdStart = i; i++;
+      while (i < end && isAlpha(this.b[i])) i++;
+      const cmdWord = this._slice(cmdStart, i).toUpperCase();
+      let canonical = CMD_MAP[cmdWord] || null;
+      const ambiguousH = (cmdWord === "H" || cmdWord === "HAL" || cmdWord === "HALT" || cmdWord === "HANG");
+
+      while (i < end && isSpace(this.b[i])) i++;
+      let postcond = null;
+      if (i < end && this.b[i] === C.COLON) {
+        i++; while (i < end && isSpace(this.b[i])) i++;
+        const pcStart = i, pcEnd = this._scanExprUntilSpaceOrComment(i, end);
+        postcond = this._parseExprRange(pcStart, pcEnd);
+        i = pcEnd;
+      }
+
+      const chunkEnd = this._findCommandChunkEnd(i, end);
+      const args = this._parseArgsForCommand(cmdWord, canonical, i, chunkEnd);
+      if (!canonical) canonical = ambiguousH ? (args.items.length > 0 ? CMD.HANG : CMD.HALT) : cmdWord;
+
+      const cmdNode = this._node(NodeKind.Command, {
+        cmd: canonical, cmdStart, cmdEnd: i, postcond, args
+      });
+      commands.push(cmdNode);
+      i = chunkEnd; while (i < end && isSpace(this.b[i])) i++;
+    }
+    return this._node(NodeKind.Line, { start, end, indent, label, commands, comment });
+  }
+
+  /* === everything below is unchanged from the previous "pro" drop:
+       _findCommandChunkEnd, _scanExprUntilSpaceOrComment, _parseArgsForCommand,
+       _parseExpr, _parsePattern, _parsePrefix, _parseParenExpr, _readString,
+       _readNumber, _readIdent, _readLocalOrSubscript, _readGlobal, _parseSubscripts,
+       _readDollar, _readDblDollar, _parseLValue, _readBinaryOp
+     === (omitted here for brevity — keep your existing definitions) */
+}
+
+/** NEW: TokenKind enum to mirror Zig's (keep values in sync) */
+const TokenKind = Object.freeze({
+  Ident:1, Number:2, String:3, Space:4, Newline:5, Semi:6, LParen:7, RParen:8, Comma:9,
+  Caret:10, Dollar:11, At:12, Colon:13, Plus:14, Minus:15, Star:16, Slash:17, BSlash:18,
+  Hash:19, Und:20, Amp:21, Bang:22, Tick:23, Lt:24, Gt:25, Eq:26, QMark:27, LBr:28, RBr:29, Dot:30, Other:31
+});
+
+/** Formatter ****************************************************************
+ * Options:
+ *  - abbreviateCommands?: boolean
+ *  - uppercaseCommands?: boolean (default true)
+ *  - commentColumn?: number
+ *  - alignSetEquals?: boolean
+ *  - betweenCommands?: string (default "  ")
+ *  - spaceAfterCommand?: string (default " ")
+ *  - tight?: boolean (kept for compat)
+ */
+export function formatMumps(ast, opts = {}) {
+  const { buffer, program } = ast;
+  const td = new TextDecoder();
+  const sl = (s, e) => td.decode(buffer.subarray(s, e));
+
+  const betweenCmds = opts.betweenCommands ?? "  ";
+  const afterCmd = opts.spaceAfterCommand ?? " ";
+  const upper = opts.uppercaseCommands !== false;
+  const abbr = !!opts.abbreviateCommands;
+  const commentCol = typeof opts.commentColumn === "number" ? Math.max(1, opts.commentColumn|0) : null;
+  const alignSet = !!opts.alignSetEquals;
+
+  let out = "";
+  for (const line of program.lines) {
+    let currentCol = 0;
+
+    // label
+    if (line.label) {
+      const lab = sl(line.label.start, line.label.end);
+      out += lab;
+      currentCol += lab.length;
+      if (line.commands.length) {
+        out += betweenCmds; currentCol += betweenCmds.length;
+      }
+    }
+
+    // compute alignment for SET equals (per line)
+    let setEqCol = 0;
+    if (alignSet) {
+      for (const c of line.commands) {
+        if (c.cmd === "SET" || c.cmd === "S") {
+          for (const it of c.args?.items ?? []) {
+            if (it.kind === NodeKind.Assign) {
+              const leftTxt = sl(it.left._start, it.left._end);
+              setEqCol = Math.max(setEqCol, currentCol + (upper ? 0 : 0) + (abbr ? 0 : 0) + c.cmd.length + afterCmd.length + leftTxt.length);
+            }
+          }
+        }
+      }
+      if (setEqCol) setEqCol += 1; // space before '='
+    }
+
+    // commands
+    for (let i = 0; i < line.commands.length; i++) {
+      const c = line.commands[i];
+      let cname = c.cmd;
+      if (abbr && CMD_ABBR[cname]) cname = CMD_ABBR[cname];
+      if (upper) cname = cname.toUpperCase();
+
+      out += cname; currentCol += cname.length;
+
+      if (c.postcond) {
+        const txt = ":" + sl(c.postcond._start, c.postcond._end);
+        out += txt; currentCol += txt.length;
+      }
+
+      if (c.args && c.args.items.length) {
+        out += afterCmd; currentCol += afterCmd.length;
+
+        const pieces = [];
+        for (const arg of c.args.items) {
+          if (cname === "S" || c.cmd === "SET") {
+            if (alignSet && arg.kind === NodeKind.Assign) {
+              const leftTxt = sl(arg.left._start, arg.left._end);
+              const beforeEqCols = currentCol + leftTxt.length;
+              const pad = setEqCol > 0 ? Math.max(0, setEqCol - beforeEqCols) : 0;
+              pieces.push(leftTxt + " ".repeat(pad) + "=" + sl(arg.right._start, arg.right._end));
+              continue;
+            }
+          }
+          // WRITE mnemonics and default
+          switch (arg.kind) {
+            case NodeKind.WriteNL: pieces.push("!"); break;
+            case NodeKind.WriteTab: pieces.push("?" + sl(arg.expr._start, arg.expr._end)); break;
+            case NodeKind.Pattern: pieces.push(sl(arg._start, arg._end)); break;
+            case NodeKind.Assign:
+              pieces.push(sl(arg.left._start, arg.left._end) + "=" + sl(arg.right._start, arg.right._end));
+              break;
+            default:
+              pieces.push(sl(arg._start, arg._end));
+          }
+        }
+        const joined = pieces.join(",");
+        out += joined; currentCol += joined.length;
+      }
+
+      if (i + 1 < line.commands.length) {
+        out += betweenCmds; currentCol += betweenCmds.length;
+      }
+    }
+
+    // trailing comment
+    if (line.comment) {
+      const commentText = sl(line.comment.start, line.comment.end);
+      if (commentCol !== null) {
+        if (currentCol + 1 < commentCol) {
+          out += " ".repeat(commentCol - currentCol - 1);
+        } else {
+          out += " ";
+        }
+      } else {
+        out += " ";
+      }
+      out += commentText;
+    }
+
+    out += "\n";
+  }
+  return out;
+}

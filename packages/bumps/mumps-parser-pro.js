@@ -1,4 +1,21 @@
-// mumps-parser-pro.js
+// mumps-parser-pro.js (consolidated)
+// Pure JS, Bun-friendly. High-performance M (MUMPS) line-first scanner+parser.
+// Includes: char-based parser, token-driven top-level parsing (from Zig lexer),
+// pattern-literal parsing, interning, and a flexible formatter.
+//
+// Exports:
+//   - parseMumps(input)                      // char-scanner path
+//   - parseMumpsWithTokens(buffer, toks)     // token-driven top-level path
+//   - formatMumps(ast, opts)
+//   - NodeKind, TokenKind
+//   - text(buffer, start, end)
+//
+// Notes:
+// - Input is best as Uint8Array; strings are encoded once.
+// - Expressions follow M left-to-right evaluation (no precedence).
+// - Commands normalized; single-letter abbreviations handled. 'H' resolved via args.
+// - Pattern operator (?) parsed into NodeKind.Pattern mini-AST while preserving spans.
+
 "use strict";
 
 /** Public API ***************************************************************/
@@ -9,15 +26,22 @@ export function parseMumps(input /* string|Uint8Array */) {
   return makeAstResult(buf, program, P);
 }
 
-/** NEW: parse using tokens from Zig lexer (Uint32Array: [kind,start,end] * n) */
-export function parseMumpsWithTokens(buffer /* Uint8Array */, toks /* Uint32Array */) {
+/** Parse using tokens from a Zig lexer
+ * toks: Uint32Array of length n*3 with triplets [kind,start,end]
+ * kind values mirror TokenKind below.
+ */
+export function parseMumpsWithTokens(buffer /* Uint8Array|string */, toks /* Uint32Array */) {
   const buf = toBytes(buffer);
   const P = new Program(buf);
   const program = P.parseProgramFromTokens(toks);
   return makeAstResult(buf, program, P);
 }
 
-/** helper to package result identically */
+/** Export a safe slice → string helper */
+export function text(buf, start, end) {
+  return new TextDecoder().decode(buf.subarray(start, end));
+}
+
 function makeAstResult(buf, program, P) {
   return {
     kind: NodeKind.Program,
@@ -38,6 +62,13 @@ export const NodeKind = Object.freeze({
   Dollar: 14, DblDollar: 15, Paren: 16,
   WriteNL: 17, WriteTab: 18, Comment: 19,
   Pattern: 20
+});
+
+/** Token kinds (to mirror the Zig lexer) ************************************/
+export const TokenKind = Object.freeze({
+  Ident:1, Number:2, String:3, Space:4, Newline:5, Semi:6, LParen:7, RParen:8, Comma:9,
+  Caret:10, Dollar:11, At:12, Colon:13, Plus:14, Minus:15, Star:16, Slash:17, BSlash:18,
+  Hash:19, Und:20, Amp:21, Bang:22, Tick:23, Lt:24, Gt:25, Eq:26, QMark:27, LBr:28, RBr:29, Dot:30, Other:31
 });
 
 /** Utilities ****************************************************************/
@@ -61,9 +92,11 @@ const CMD = Object.freeze({
   MERGE:"MERGE", NEW:"NEW", OPEN:"OPEN", QUIT:"QUIT", READ:"READ", SET:"SET",
   USE:"USE", VIEW:"VIEW", WRITE:"WRITE", XECUTE:"XECUTE"
 });
+
 const CMD_MAP = (() => {
   const m = Object.create(null), add = (k,v)=>m[k]=v;
   for (const k of Object.keys(CMD)) add(k,k);
+  // single-letter abbreviations
   add("B",CMD.BREAK); add("C",CMD.CLOSE); add("D",CMD.DO); add("E",CMD.ELSE);
   add("F",CMD.FOR); add("G",CMD.GOTO); add("I",CMD.IF); add("J",CMD.JOB);
   add("K",CMD.KILL); add("L",CMD.LOCK); add("M",CMD.MERGE); add("N",CMD.NEW);
@@ -72,7 +105,7 @@ const CMD_MAP = (() => {
   return m;
 })();
 
-/** NEW: command abbreviations (formatter) */
+/** Abbreviation table for formatter *****************************************/
 const CMD_ABBR = Object.freeze({
   BREAK:"B", CLOSE:"C", DO:"D", ELSE:"E", FOR:"F", GOTO:"G",
   HALT:"H", HANG:"H", IF:"I", JOB:"J", KILL:"K", LOCK:"L",
@@ -84,6 +117,7 @@ const CMD_ABBR = Object.freeze({
 class Interner {
   constructor(buf) { this.buf = buf; this.map = new Map(); this.syms = [""]; this.dec = new TextDecoder(); }
   intern(start, end) {
+    // Cheap uniqueness key that avoids slicing: length:start
     const key = (end - start) + ":" + start;
     let id = this.map.get(key);
     if (id !== undefined) return id;
@@ -103,11 +137,11 @@ class Program {
     this.nodes = [];
     this.lines = [];
     this.intern = new Interner(buf);
-    this._indexLines();
+    this._indexLines(); // for char-based path
     this.td = new TextDecoder();
   }
 
-  /** existing char-scanner path */
+  /** Char-scanner path */
   parseProgram() {
     const program = this._node(NodeKind.Program, { lines: [] });
     for (let k = 0; k < this.lines.length; k++) {
@@ -118,20 +152,17 @@ class Program {
     return program;
   }
 
-  /** NEW: token-stream path (top-level structure from tokens; expressions reuse char parser) */
-  parseProgramFromTokens(toks) {
-    // Build line slices from tokens: locate Newline tokens and compute [start,end,indent]
-    // Token layout: Uint32Array triples: kind,start,end
-    const K = TokenKind; // mirrors Zig enum below
+  /** Token-stream (Zig) path for top-level structure */
+  parseProgramFromTokens(toks /* Uint32Array */) {
+    const K = TokenKind;
     const lines = [];
     let byteStart = 0;
     for (let i = 0; i < toks.length; i += 3) {
-      const kind = toks[i] & 0xFFFF; // kind stored in lower 16 bits
+      const kind = toks[i] & 0xFFFF;
       if (kind === K.Newline) {
-        const end = toks[i + 1]; // start offset of '\n'
+        const end = toks[i + 1];
         const indent = this._leadingIndent(byteStart, end);
         lines.push({ start: byteStart, end, indent });
-        // next line begins after this token's end
         byteStart = toks[i + 2];
       }
     }
@@ -142,13 +173,11 @@ class Program {
     }
 
     const program = this._node(NodeKind.Program, { lines: [] });
-    for (const L of lines) {
-      program.lines.push(this._parseLineWithTokens(L, toks));
-    }
+    for (const L of lines) program.lines.push(this._parseLineWithTokens(L, toks));
     return program;
   }
 
-  /** --- shared helpers (unchanged) --- */
+  /** Line-indexing for char path */
   _indexLines() {
     const b = this.b, n = this.n;
     let i = 0, lineStart = 0;
@@ -171,14 +200,13 @@ class Program {
     for (; i < e; i++) { const ch = b[i]; if (ch === C.SP || ch === C.TAB) col++; else break; }
     return col;
   }
-  _slice(s,e){ return new TextDecoder().decode(this.b.subarray(s,e)); }
+  _slice(s,e){ return this.td.decode(this.b.subarray(s,e)); }
   _node(kind, fields) { const n = Object.assign({ kind }, fields); this.nodes.push(n); return n; }
 
-  /** NEW: parse a single line using token slices */
+  /** Token-path line parse (top-level), delgating expressions to char parser */
   _parseLineWithTokens(line, toks) {
     const { start, end, indent } = line;
     const K = TokenKind;
-    // collect token indices for this byte span
     const tIdx = [];
     for (let i = 0; i < toks.length; i += 3) {
       const s = toks[i + 1], e = toks[i + 2];
@@ -186,7 +214,6 @@ class Program {
       if (s >= end) break;
       tIdx.push(i);
     }
-    // helper to skip spaces
     let ti = 0;
     const nextNonSpace = () => {
       while (ti < tIdx.length) {
@@ -197,7 +224,6 @@ class Program {
       return -1;
     };
 
-    // full-line comment?
     const first = nextNonSpace();
     if (first === -1) return this._node(NodeKind.Line, { start, end, indent, label: null, commands: [], comment: null });
     if ((toks[first] & 0xFFFF) === K.Semi) {
@@ -205,24 +231,19 @@ class Program {
       return this._node(NodeKind.Line, { start, end, indent, label: null, commands: [], comment });
     }
 
-    // optional label at col 0: starts with Ident and followed by Space
+    // label?
     let label = null;
     if (indent === 0 && (toks[first] & 0xFFFF) === K.Ident) {
       const nameStart = toks[first + 1], nameEnd = toks[first + 2];
       const sym = this.intern.intern(nameStart, nameEnd);
-      ti++; // consume ident
-      // consume at least one space to treat as label
+      ti++;
       let spaced = false;
       while (ti < tIdx.length && (toks[tIdx[ti]] & 0xFFFF) === K.Space) { spaced = true; ti++; }
       if (spaced) label = { start: nameStart, end: nameEnd, sym };
-      else ti = 0; // rewind—wasn't a label; let the char parser handle nuances
+      else ti = 0; // not a label; let char parser handle
     }
 
-    const commands = [];
-    let comment = null;
-
-    // For command chunks, we’ll reuse the existing byte-based routines by
-    // computing chunk byte ranges from tokens (top-level until ';' or next command word).
+    const commands = []; let comment = null;
     const cmdStartTI = () => {
       const idx = nextNonSpace();
       if (idx === -1) return -1;
@@ -233,35 +254,29 @@ class Program {
     while (true) {
       const cs = cmdStartTI();
       if (cs === -1) break;
-      // read command word (letters only)
       const cmdWord = this._slice(toks[cs + 1], toks[cs + 2]).toUpperCase();
-      ti++; // consume cmd ident
-      // postconditional?
-      let postcond = null;
-      // skip space
+      ti++;
+
+      // postcond
       while (ti < tIdx.length && (toks[tIdx[ti]] & 0xFFFF) === K.Space) ti++;
+      let postcond = null;
       if (ti < tIdx.length && (toks[tIdx[ti]] & 0xFFFF) === K.Colon) {
-        const pcStart = toks[tIdx[ti] + 2]; // after :
-        ti++; // skip ':'
-        // PC ends at next Space or ';' at top level; easiest is to delegate to char scanner util
+        const pcStart = toks[tIdx[ti] + 2];
+        ti++;
         const pcEnd = this._scanExprUntilSpaceOrComment(pcStart, end);
         postcond = this._parseExprRange(pcStart, pcEnd);
-        // advance token index to the token that contains/ends at pcEnd
         while (ti < tIdx.length && toks[tIdx[ti] + 2] <= pcEnd) ti++;
       }
 
-      // find end of this command chunk:
+      // chunk end at ';' or next command word
       let chunkEndByte = end;
-      // stop at first top-level ';' or at next command identifier
       for (let k = ti; k < tIdx.length; k++) {
         const kind = toks[tIdx[k]] & 0xFFFF;
         if (kind === K.Semi) { chunkEndByte = toks[tIdx[k] + 1]; break; }
         if (kind === K.Ident) {
-          // peek the word; if it’s a command, we end before its leading spaces
           const s = toks[tIdx[k] + 1], e = toks[tIdx[k] + 2];
           const w = this._slice(s, e).toUpperCase();
           if (w === "H" || w === "HAL" || w === "HALT" || w === "HANG" || CMD_MAP[w]) {
-            // walk back over preceding spaces to make a neat boundary
             let back = k - 1;
             while (back >= ti && (toks[tIdx[back]] & 0xFFFF) === K.Space) back--;
             chunkEndByte = back >= ti ? toks[tIdx[back] + 2] : s;
@@ -270,10 +285,10 @@ class Program {
         }
       }
 
-      // normalize command name (H/HALT/HANG disambiguation deferred to args)
       let canonical = CMD_MAP[cmdWord] || null;
       const ambiguousH = (cmdWord === "H" || cmdWord === "HAL" || cmdWord === "HALT" || cmdWord === "HANG");
-      const args = this._parseArgsForCommand(cmdWord, canonical, toks[tIdx[ti]] ? toks[tIdx[ti] + 1] : toks[cs + 2], chunkEndByte);
+      const argsStart = (ti < tIdx.length) ? toks[tIdx[ti] + 1] : toks[cs + 2];
+      const args = this._parseArgsForCommand(cmdWord, canonical, argsStart, chunkEndByte);
       if (!canonical) canonical = ambiguousH ? (args.items.length > 0 ? CMD.HANG : CMD.HALT) : cmdWord;
 
       const cmdNode = this._node(NodeKind.Command, {
@@ -281,19 +296,16 @@ class Program {
       });
       commands.push(cmdNode);
 
-      // advance ti to tokens at/after chunkEndByte
       while (ti < tIdx.length && toks[tIdx[ti] + 2] <= chunkEndByte) ti++;
-      // trailing comment?
       if (ti < tIdx.length && (toks[tIdx[ti]] & 0xFFFF) === K.Semi) {
         comment = this._node(NodeKind.Comment, { start: toks[tIdx[ti] + 1], end });
         break;
       }
-      // loop to next command
     }
     return this._node(NodeKind.Line, { start, end, indent, label, commands, comment });
   }
 
-  /** Char-path line parser (unchanged) */
+  /** Char-path line parser */
   _parseLine(start, end, indent) {
     const b = this.b; let i = start;
     while (i < end && isSpace(b[i])) i++;
@@ -311,54 +323,350 @@ class Program {
     }
     const commands = []; let comment = null;
     while (i < end) {
-      if (this.b[i] === C.SEMI) { comment = this._node(NodeKind.Comment, { start: i, end }); break; }
-      while (i < end && isSpace(this.b[i])) i++;
+      if (b[i] === C.SEMI) { comment = this._node(NodeKind.Comment, { start: i, end }); break; }
+      while (i < end && isSpace(b[i])) i++;
       if (i >= end) break;
-      if (!isAlpha(this.b[i])) { comment = this._node(NodeKind.Comment, { start: i, end }); break; }
+      if (!isAlpha(b[i])) { comment = this._node(NodeKind.Comment, { start: i, end }); break; }
       const cmdStart = i; i++;
-      while (i < end && isAlpha(this.b[i])) i++;
+      while (i < end && isAlpha(b[i])) i++;
       const cmdWord = this._slice(cmdStart, i).toUpperCase();
       let canonical = CMD_MAP[cmdWord] || null;
       const ambiguousH = (cmdWord === "H" || cmdWord === "HAL" || cmdWord === "HALT" || cmdWord === "HANG");
-
-      while (i < end && isSpace(this.b[i])) i++;
+      while (i < end && isSpace(b[i])) i++;
       let postcond = null;
-      if (i < end && this.b[i] === C.COLON) {
-        i++; while (i < end && isSpace(this.b[i])) i++;
+      if (i < end && b[i] === C.COLON) {
+        i++; while (i < end && isSpace(b[i])) i++;
         const pcStart = i, pcEnd = this._scanExprUntilSpaceOrComment(i, end);
         postcond = this._parseExprRange(pcStart, pcEnd);
         i = pcEnd;
       }
-
       const chunkEnd = this._findCommandChunkEnd(i, end);
       const args = this._parseArgsForCommand(cmdWord, canonical, i, chunkEnd);
       if (!canonical) canonical = ambiguousH ? (args.items.length > 0 ? CMD.HANG : CMD.HALT) : cmdWord;
-
       const cmdNode = this._node(NodeKind.Command, {
         cmd: canonical, cmdStart, cmdEnd: i, postcond, args
       });
       commands.push(cmdNode);
-      i = chunkEnd; while (i < end && isSpace(this.b[i])) i++;
+      i = chunkEnd; while (i < end && isSpace(b[i])) i++;
     }
     return this._node(NodeKind.Line, { start, end, indent, label, commands, comment });
   }
 
-  /* === everything below is unchanged from the previous "pro" drop:
-       _findCommandChunkEnd, _scanExprUntilSpaceOrComment, _parseArgsForCommand,
-       _parseExpr, _parsePattern, _parsePrefix, _parseParenExpr, _readString,
-       _readNumber, _readIdent, _readLocalOrSubscript, _readGlobal, _parseSubscripts,
-       _readDollar, _readDblDollar, _parseLValue, _readBinaryOp
-     === (omitted here for brevity — keep your existing definitions) */
+  _findCommandChunkEnd(i, end) {
+    const b = this.b; let depth = 0, inStr = false;
+    for (let p = i; p < end; p++) {
+      const ch = b[p];
+      if (inStr) {
+        if (ch === C.QUOTE) { if (p + 1 < end && b[p + 1] === C.QUOTE) { p++; continue; } inStr = false; }
+        continue;
+      }
+      if (ch === C.QUOTE) { inStr = true; continue; }
+      if (ch === C.LP) { depth++; continue; }
+      if (ch === C.RP) { if (depth > 0) depth--; continue; }
+      if (depth === 0) {
+        if (ch === C.SEMI) return p;
+        if (isSpace(ch)) {
+          let q = p; while (q < end && isSpace(b[q])) q++;
+          if (q < end && isAlpha(b[q])) {
+            let r = q + 1; while (r < end && isAlpha(b[r])) r++;
+            const w = this._slice(q, r).toUpperCase();
+            if (w === "H" || w === "HAL" || w === "HALT" || w === "HANG" || CMD_MAP[w]) return p;
+          }
+        }
+      }
+    }
+    return end;
+  }
+
+  _scanExprUntilSpaceOrComment(i, end) {
+    const b = this.b; let depth = 0, inStr = false;
+    for (let p = i; p < end; p++) {
+      const ch = b[p];
+      if (inStr) { if (ch === C.QUOTE) { if (p + 1 < end && b[p + 1] === C.QUOTE) { p++; continue; } inStr = false; } continue; }
+      if (ch === C.QUOTE) { inStr = true; continue; }
+      if (ch === C.LP) { depth++; continue; }
+      if (ch === C.RP) { if (depth > 0) depth--; continue; }
+      if (depth === 0) { if (ch === C.SEMI || isSpace(ch)) return p; }
+    }
+    return end;
+  }
+
+  _parseArgsForCommand(cmdWord, canonical, s, e) {
+    const items = []; let i = s;
+    while (i < e && isSpace(this.b[i])) i++;
+    if (i >= e) return this._node(NodeKind.ArgList, { items });
+
+    const cmdUp = (canonical || cmdWord.toUpperCase());
+
+    if (cmdUp === CMD.SET) {
+      while (i < e) {
+        while (i < e && isSpace(this.b[i])) i++;
+        if (i >= e) break;
+        const lval = this._parseLValue(i, e); i = lval._end;
+        while (i < e && isSpace(this.b[i])) i++;
+        if (i < e && this.b[i] === C.EQ) {
+          i++; while (i < e && isSpace(this.b[i])) i++;
+          const rhs = this._parseExpr(i, e, true); i = rhs._end;
+          items.push(this._node(NodeKind.Assign, { left: lval, right: rhs }));
+        } else {
+          const expr = this._parseExpr(lval._start, i, true); i = expr._end;
+          items.push(expr);
+        }
+        while (i < e && isSpace(this.b[i])) i++;
+        if (i < e && this.b[i] === C.COMMA) { i++; continue; }
+        break;
+      }
+      return this._node(NodeKind.ArgList, { items });
+    }
+
+    if (cmdUp === CMD.WRITE) {
+      while (i < e) {
+        while (i < e && isSpace(this.b[i])) i++;
+        if (i >= e) break;
+        const ch = this.b[i];
+        if (ch === C.BANG) { items.push(this._node(NodeKind.WriteNL, { pos: i, _start: i, _end: i + 1 })); i++; }
+        else if (ch === C.QMARK) { i++; while (i < e && isSpace(this.b[i])) i++; const tab = this._parseExpr(i, e, true); i = tab._end; items.push(this._node(NodeKind.WriteTab, { expr: tab })); }
+        else { const expr = this._parseExpr(i, e, true); i = expr._end; items.push(expr); }
+        while (i < e && isSpace(this.b[i])) i++;
+        if (i < e && this.b[i] === C.COMMA) { i++; continue; }
+        break;
+      }
+      return this._node(NodeKind.ArgList, { items });
+    }
+
+    while (i < e) {
+      while (i < e && isSpace(this.b[i])) i++;
+      if (i >= e) break;
+      const expr = this._parseExpr(i, e, true); i = expr._end; items.push(expr);
+      while (i < e && isSpace(this.b[i])) i++;
+      if (i < e && this.b[i] === C.COMMA) { i++; continue; }
+      break;
+    }
+    return this._node(NodeKind.ArgList, { items });
+  }
+
+  _parseExpr(i, e, stopAtComma) {
+    let left = this._parsePrefix(i, e); i = left._end;
+    while (i < e) {
+      let save = i; while (i < e && isSpace(this.b[i])) i++;
+      if (i >= e) break;
+      if (stopAtComma && this.b[i] === C.COMMA) break;
+
+      const op = this._readBinaryOp(i, e);
+      if (!op) { i = save; break; }
+      i += op.len;
+      while (i < e && isSpace(this.b[i])) i++;
+
+      if (op.kind === "?") { // pattern operator
+        const pat = this._parsePattern(i, e, stopAtComma);
+        i = pat._end;
+        const bin = this._node(NodeKind.ExprBinary, { op: "?", left, right: pat });
+        bin._start = left._start; bin._end = i;
+        left.kind = bin.kind; left.op = bin.op; left.left = bin.left; left.right = bin.right;
+        left._start = bin._start; left._end = bin._end;
+        continue;
+      }
+
+      const rhs = this._parsePrefix(i, e);
+      i = rhs._end;
+      const bin = this._node(NodeKind.ExprBinary, { op: op.kind, left, right: rhs });
+      bin._start = left._start; bin._end = i;
+
+      left.kind = bin.kind; left.op = bin.op; left.left = bin.left; left.right = bin.right;
+      left._start = bin._start; left._end = bin._end;
+    }
+    return left;
+  }
+  _parseExprRange(s,e){ return this._parseExpr(s,e,false); }
+
+  /** Pattern parser (lossless, structured) */
+  _parsePattern(i, e, stopAtComma) {
+    const items = []; const b = this.b;
+    let p = i;
+
+    const readInt = (q) => { let r = q; while (r < e && isDigit(b[r])) r++; return (r > q) ? { ok:true, end:r, n:parseInt(this._slice(q,r),10)} : {ok:false,end:q}; };
+
+    while (p < e) {
+      while (p < e && isSpace(b[p])) p++;
+      if (p >= e) break;
+      if (stopAtComma && b[p] === C.COMMA) break;
+
+      // Count: INT [ '.' INT ]
+      let min=null,max=null;
+      const ci = readInt(p);
+      if (ci.ok) {
+        min = ci.n; p = ci.end;
+        if (p < e && b[p] === C.DOT) {
+          p++;
+          const cj = readInt(p);
+          if (cj.ok) { max = cj.n; p = cj.end; } else { max = null; }
+        }
+      }
+
+      while (p < e && isSpace(b[p])) p++;
+      if (p >= e) break;
+      if (stopAtComma && b[p] === C.COMMA) break;
+
+      if (b[p] === C.QUOTE) {
+        const strNode = this._readString(p, e);
+        items.push({ type:"lit", start: strNode._start, end: strNode._end, min, max });
+        p = strNode._end;
+      } else if (b[p] === C.DOT) {
+        items.push({ type:"class", classStart:p, classEnd:p+1, min, max });
+        p++;
+      } else if (isAlpha(b[p])) {
+        let s0 = p; p++;
+        while (p < e && isAlpha(b[p])) p++;
+        items.push({ type:"class", classStart:s0, classEnd:p, min, max });
+      } else {
+        break;
+      }
+    }
+
+    const node = this._node(NodeKind.Pattern, { items });
+    node._start = i; node._end = p;
+    return node;
+  }
+
+  _parsePrefix(i, e) {
+    const b = this.b; let ch = b[i];
+    if (ch === C.TICK) { const expr = this._parsePrefix(i+1, e); const n = this._node(NodeKind.ExprUnary, { op:"'", expr }); n._start=i; n._end=expr._end; return n; }
+    if (ch === C.PLUS || ch === C.MINUS) { const expr = this._parsePrefix(i+1, e); const n = this._node(NodeKind.ExprUnary, { op:String.fromCharCode(ch), expr }); n._start=i; n._end=expr._end; return n; }
+    if (ch === C.AT) { const expr = this._parsePrefix(i+1, e); const n=this._node(NodeKind.Indirect,{expr}); n._start=i; n._end=expr._end; return n; }
+    if (ch === C.LP) return this._parseParenExpr(i,e);
+    if (ch === C.QUOTE) return this._readString(i,e);
+    if (ch === C.DOLLAR) { if (i+1<e && b[i+1]===C.DOLLAR) return this._readDblDollar(i,e); else return this._readDollar(i,e); }
+    if (ch === C.CARET) return this._readGlobal(i,e);
+    if (isDigit(ch) || ch === C.DOT) return this._readNumber(i,e);
+    if (isIdentStart(ch)) return this._readLocalOrSubscript(i,e);
+    const dummy = this._node(NodeKind.String, { start:i, end:i }); dummy._start=i; dummy._end=i; return dummy;
+  }
+
+  _parseParenExpr(i, e) {
+    let p = i+1, depth=1, inStr=false;
+    for (; p<e; p++) {
+      const ch = this.b[p];
+      if (inStr) { if (ch===C.QUOTE){ if (p+1<e && this.b[p+1]===C.QUOTE){p++;continue;} inStr=false;} continue; }
+      if (ch===C.QUOTE){ inStr=true; continue; }
+      if (ch===C.LP) { depth++; continue; }
+      if (ch===C.RP) { depth--; if (depth===0) break; }
+    }
+    const inner = this._parseExpr(i+1, p, false);
+    const node = this._node(NodeKind.Paren, { expr: inner });
+    node._start = i; node._end = (p<e && this.b[p]===C.RP) ? p+1 : p; return node;
+  }
+
+  _readString(i,e){
+    let p=i+1;
+    for (; p<e; p++){
+      const ch=this.b[p];
+      if (ch===C.QUOTE){ if (p+1<e && this.b[p+1]===C.QUOTE){p++;continue;} p++; break; }
+    }
+    const node=this._node(NodeKind.String,{start:i,end:p}); node._start=i; node._end=p; return node;
+  }
+
+  _readNumber(i,e){
+    let p=i, sawDot = (this.b[p]===C.DOT); if (sawDot) p++;
+    while (p<e && isDigit(this.b[p])) p++;
+    if (!sawDot && p<e && this.b[p]===C.DOT){ sawDot=true; p++; while (p<e && isDigit(this.b[p])) p++; }
+    const node=this._node(NodeKind.Number,{start:i,end:p}); node._start=i; node._end=p; return node;
+  }
+
+  _readIdent(i,e){ let p=i+1; while (p<e && isIdentPart(this.b[p])) p++; return {start:i,end:p}; }
+
+  _readLocalOrSubscript(i,e){
+    const id=this._readIdent(i,e); let p=id.end;
+    const sym = this.intern.intern(id.start, id.end);
+    let base=this._node(NodeKind.Local,{ nameStart:id.start, nameEnd:id.end, sym });
+    base._start=id.start; base._end=id.end;
+    while (p<e && isSpace(this.b[p])) p++;
+    if (p<e && this.b[p]===C.LP){
+      const args=this._parseSubscripts(p,e); p=args._end;
+      const sub=this._node(NodeKind.Subscript,{ target:base, args:args.items }); sub._start=base._start; sub._end=p; return sub;
+    }
+    return base;
+  }
+
+  _readGlobal(i,e){
+    let p=i+1, name=null, sym=null;
+    if (p<e && isIdentStart(this.b[p])){ const id=this._readIdent(p,e); name=id; sym=this.intern.intern(id.start,id.end); p=id.end; }
+    while (p<e && isSpace(this.b[p])) p++;
+    let node=this._node(NodeKind.Global,{ name, sym, start:i, end:i });
+    if (p<e && this.b[p]===C.LP){
+      const subs=this._parseSubscripts(p,e); node=this._node(NodeKind.Global,{name,sym,subs:subs.items,start:i,end:subs._end}); node._start=i; node._end=subs._end; return node;
+    }
+    node._start=i; node._end=p; return node;
+  }
+
+  _parseSubscripts(i,e){
+    let p=i+1, items=[], depth=1, inStr=false, start=p;
+    const flush=(s,t)=>{ if (s<t) items.push(this._parseExpr(s,t,false)); };
+    for (; p<e; p++){
+      const ch=this.b[p];
+      if (inStr){ if (ch===C.QUOTE){ if (p+1<e && this.b[p+1]===C.QUOTE){p++;continue;} inStr=false;} continue; }
+      if (ch===C.QUOTE){ inStr=true; continue; }
+      if (ch===C.LP){ depth++; continue; }
+      if (ch===C.RP){ depth--; if (depth===0){ flush(start,p); p++; break; } continue; }
+      if (depth===1 && ch===C.COMMA){ flush(start,p); start=p+1; }
+    }
+    const node=this._node(NodeKind.ArgList,{ items }); node._start=i; node._end=p; return node;
+  }
+
+  _readDollar(i,e){
+    let p=i+1; if (!(p<e && isAlpha(this.b[p]))){ const s=this._node(NodeKind.String,{start:i,end:i+1}); s._start=i; s._end=i+1; return s; }
+    const id=this._readIdent(p,e); p=id.end; while (p<e && isSpace(this.b[p])) p++;
+    let args=null; if (p<e && this.b[p]===C.LP){ args=this._parseSubscripts(p,e); p=args._end; }
+    const node=this._node(NodeKind.Dollar,{ nameStart:id.start, nameEnd:id.end, sym:this.intern.intern(id.start,id.end), args: args?args.items:null });
+    node._start=i; node._end=p; return node;
+  }
+
+  _readDblDollar(i,e){
+    let p=i+2; if (!(p<e && isAlpha(this.b[p]))){ const s=this._node(NodeKind.String,{start:i,end:i+2}); s._start=i; s._end=i+2; return s; }
+    const lab=this._readIdent(p,e); p=lab.end; let caret=null;
+    if (p<e && this.b[p]===C.CARET){ p++; if (p<e && isAlpha(this.b[p])){ const rt=this._readIdent(p,e); caret=rt; p=rt.end; } }
+    while (p<e && isSpace(this.b[p])) p++;
+    let args=null; if (p<e && this.b[p]===C.LP){ args=this._parseSubscripts(p,e); p=args._end; }
+    const node=this._node(NodeKind.DblDollar,{ label:lab, routine:caret, args: args?args.items:null });
+    node._start=i; node._end=p; return node;
+  }
+
+  _parseLValue(i,e){
+    const ch=this.b[i];
+    if (ch===C.CARET) return this._readGlobal(i,e);
+    if (isIdentStart(ch)) return this._readLocalOrSubscript(i,e);
+    if (ch===C.AT){ const tgt=this._parsePrefix(i+1,e); const n=this._node(NodeKind.Indirect,{expr:tgt}); n._start=i; n._end=tgt._end; return n; }
+    return this._parsePrefix(i,e);
+  }
+
+  _readBinaryOp(i,e){
+    const b=this.b, a=b[i], a2=i+1<e?b[i+1]:0;
+    if (a===C.STAR && a2===C.STAR) return {kind:"**",len:2};
+    if (a===C.LT && a2===C.EQ) return {kind:"<=",len:2};
+    if (a===C.GT && a2===C.EQ) return {kind:">=",len:2};
+    if (a===C.TICK && (a2===C.EQ || a2===C.LT || a2===C.GT || a2===C.LBR || a2===C.RBR || a2===C.QMARK)) return {kind:"'"+String.fromCharCode(a2),len:2};
+    if (a===C.RBR && a2===C.RBR) return {kind:"]]",len:2};
+    switch (a){
+      case C.STAR: return {kind:"*",len:1};
+      case C.SLASH: return {kind:"/",len:1};
+      case C.BSLASH: return {kind:"\\",len:1};
+      case C.HASH: return {kind:"#",len:1};
+      case C.PLUS: return {kind:"+",len:1};
+      case C.MINUS: return {kind:"-",len:1};
+      case C.UND: return {kind:"_",len:1};
+      case C.AMP: return {kind:"&",len:1};
+      case C.BANG: return {kind:"!",len:1};
+      case C.LT: return {kind:"<",len:1};
+      case C.GT: return {kind:">",len:1};
+      case C.EQ: return {kind:"=",len:1};
+      case C.LBR: return {kind:"[",len:1};
+      case C.RBR: return {kind:"]",len:1};
+      case C.QMARK: return {kind:"?",len:1};
+    }
+    return null;
+  }
 }
 
-/** NEW: TokenKind enum to mirror Zig's (keep values in sync) */
-const TokenKind = Object.freeze({
-  Ident:1, Number:2, String:3, Space:4, Newline:5, Semi:6, LParen:7, RParen:8, Comma:9,
-  Caret:10, Dollar:11, At:12, Colon:13, Plus:14, Minus:15, Star:16, Slash:17, BSlash:18,
-  Hash:19, Und:20, Amp:21, Bang:22, Tick:23, Lt:24, Gt:25, Eq:26, QMark:27, LBr:28, RBr:29, Dot:30, Other:31
-});
-
-/** Formatter ****************************************************************
+/** Formatter ***************************************************************
  * Options:
  *  - abbreviateCommands?: boolean
  *  - uppercaseCommands?: boolean (default true)
@@ -366,7 +674,7 @@ const TokenKind = Object.freeze({
  *  - alignSetEquals?: boolean
  *  - betweenCommands?: string (default "  ")
  *  - spaceAfterCommand?: string (default " ")
- *  - tight?: boolean (kept for compat)
+ *  - tight?: boolean (compat)
  */
 export function formatMumps(ast, opts = {}) {
   const { buffer, program } = ast;
@@ -402,7 +710,7 @@ export function formatMumps(ast, opts = {}) {
           for (const it of c.args?.items ?? []) {
             if (it.kind === NodeKind.Assign) {
               const leftTxt = sl(it.left._start, it.left._end);
-              setEqCol = Math.max(setEqCol, currentCol + (upper ? 0 : 0) + (abbr ? 0 : 0) + c.cmd.length + afterCmd.length + leftTxt.length);
+              setEqCol = Math.max(setEqCol, currentCol + c.cmd.length + afterCmd.length + leftTxt.length);
             }
           }
         }
@@ -429,16 +737,13 @@ export function formatMumps(ast, opts = {}) {
 
         const pieces = [];
         for (const arg of c.args.items) {
-          if (cname === "S" || c.cmd === "SET") {
-            if (alignSet && arg.kind === NodeKind.Assign) {
-              const leftTxt = sl(arg.left._start, arg.left._end);
-              const beforeEqCols = currentCol + leftTxt.length;
-              const pad = setEqCol > 0 ? Math.max(0, setEqCol - beforeEqCols) : 0;
-              pieces.push(leftTxt + " ".repeat(pad) + "=" + sl(arg.right._start, arg.right._end));
-              continue;
-            }
+          if ((cname === "S" || c.cmd === "SET") && alignSet && arg.kind === NodeKind.Assign) {
+            const leftTxt = sl(arg.left._start, arg.left._end);
+            const beforeEqCols = currentCol + leftTxt.length;
+            const pad = setEqCol > 0 ? Math.max(0, setEqCol - beforeEqCols) : 0;
+            pieces.push(leftTxt + " ".repeat(pad) + "=" + sl(arg.right._start, arg.right._end));
+            continue;
           }
-          // WRITE mnemonics and default
           switch (arg.kind) {
             case NodeKind.WriteNL: pieces.push("!"); break;
             case NodeKind.WriteTab: pieces.push("?" + sl(arg.expr._start, arg.expr._end)); break;
