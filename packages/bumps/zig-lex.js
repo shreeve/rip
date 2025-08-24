@@ -1,4 +1,15 @@
 // zig-lex.js
+// Bun FFI shim for the Zig lexer (mumps_lex.zig).
+// Provides: tryLoadZigLexer(), zigLex(Uint8Array) -> Uint32Array|null, TokenKind.
+//
+// Build the Zig lib:
+//   zig build-lib -OReleaseFast -dynamic mumps_lex.zig -femit-bin=libmumps_lex.dylib   // macOS
+//   zig build-lib -OReleaseFast -dynamic mumps_lex.zig -femit-bin=libmumps_lex.so      // Linux
+//
+// Usage:
+//   import { zigLex } from "./zig-lex.js";
+//   const toks = zigLex(buf); // Uint32Array of [kind,start,end] triples, or null if lib not loaded
+
 import { dlopen, FFIType, ptr } from "bun:ffi";
 
 export const TokenKind = {
@@ -7,16 +18,22 @@ export const TokenKind = {
   Hash:19, Und:20, Amp:21, Bang:22, Tick:23, Lt:24, Gt:25, Eq:26, QMark:27, LBr:28, RBr:29, Dot:30, Other:31
 };
 
-const libname = process.platform === "darwin" ? "./libmumps_lex.dylib" : "./libmumps_lex.so";
+function defaultLibName() {
+  if (process.platform === "darwin") return "./libmumps_lex.dylib";
+  if (process.platform === "linux") return "./libmumps_lex.so";
+  // Windows not supported in this example
+  return "./libmumps_lex.so";
+}
 
-export function tryLoadZigLexer() {
+export function tryLoadZigLexer(customPath) {
+  const libpath = customPath || process.env.ZIG_MUMPS_LEX_PATH || defaultLibName();
   try {
-    const lib = dlopen(libname, {
+    const lib = dlopen(libpath, {
       lex_count: { args: [FFIType.ptr, FFIType.u32], returns: FFIType.u32 },
       lex_fill:  { args: [FFIType.ptr, FFIType.u32, FFIType.ptr, FFIType.u32], returns: FFIType.u32 },
     });
     return lib;
-  } catch (_) {
+  } catch (err) {
     return null;
   }
 }
@@ -32,14 +49,3 @@ export function zigLex(buf /* Uint8Array */) {
   if (wrote !== n) throw new Error("zig lex fill mismatch");
   return toks;
 }
-
-/** Example:
-import { zigLex } from "./zig-lex.js";
-import { parseMumpsWithTokens } from "./mumps-parser-pro.js";
-
-const src = Bun.file("example.m").arrayBuffer();
-const buf = new Uint8Array(await src);
-const toks = zigLex(buf); // may be null if dylib not present
-const ast = toks ? parseMumpsWithTokens(buf, toks) : parseMumps(buf);
-console.log(ast.format({ abbreviateCommands: true, alignSetEquals: true, commentColumn: 40 }));
-*/
