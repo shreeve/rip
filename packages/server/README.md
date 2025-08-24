@@ -392,6 +392,99 @@ bun server apps/labs/api@review,team,dev
 
 This transforms rip-server from a great local dev server into a **mobile testing powerhouse**! 🚀
 
+## 📊 Professional Server Dashboard
+
+### Real-Time Monitoring at `rip.local`
+
+Rip server includes a **beautiful, professional dashboard** that provides real-time insights into your server's health and performance. The dashboard is automatically available at `https://rip.local` and is fully mobile-ready.
+
+### ✨ Dashboard Features
+
+**🎯 Live Server Monitoring:**
+- **Server Status**: Real-time healthy/degraded/offline detection with visual indicators
+- **Active Workers**: Current worker count with automatic updates
+- **Live Uptime**: Counts up every second with server synchronization
+- **Hosts Registry**: All registered `.local` domains and aliases
+
+**🎨 Beautiful Visual Design:**
+- **Professional Rip Logo**: Authentic brand logo with smooth hover animations
+- **Responsive Design**: Works perfectly on desktop, tablet, and mobile
+- **Modern UI**: Clean, backdrop-blur cards with subtle gradients
+- **Status Colors**: Green (healthy), yellow (degraded), red (offline)
+
+**⚡ Advanced Features:**
+- **Offline Detection**: Automatically detects when server goes down
+- **Connection State Tracking**: Shows "OFFLINE" when server unreachable
+- **Live Countdown Arc**: Beautiful CSS-animated progress indicator showing next refresh
+- **Smart Uptime**: Stops counting when disconnected (no fake ticking!)
+- **Silent Background Updates**: Refreshes data every 10 seconds without flickering
+
+### 🎭 Visual Elements
+
+**Countdown Arc Animation:**
+- Smooth 10-second clockwise rotation around uptime icon
+- Gradient color progression: dark purple → light purple → invisible
+- Hardware-accelerated CSS animation (buttery smooth 60fps)
+- Pauses and fades when server offline
+
+**Interactive Logo:**
+- Authentic Rip logo with black `< >` brackets and red "R"
+- Scales 110% on hover with enhanced shadow
+- Circular white background with professional depth
+
+### 📱 Mobile Access
+
+The dashboard leverages the same mDNS magic as your apps:
+
+```bash
+# Start your server
+bun server apps/labs/api@labs
+
+# Dashboard automatically available at:
+# https://rip.local (desktop, mobile, any device on network)
+
+# Your API available at:  
+# https://labs.local
+```
+
+**Perfect for:**
+- 📊 **Real-time monitoring** during development
+- 📱 **Mobile testing** - check server health on iPhone
+- 🎯 **Team demos** - professional dashboard for presentations
+- 🔍 **Debugging** - see worker counts and connection status instantly
+
+### 🛡️ Bulletproof State Management
+
+The dashboard handles all server states gracefully:
+
+**🟢 Healthy State:**
+- Green status with checkmark
+- Live uptime ticking every second  
+- Smooth countdown arc animation
+- All workers active and responding
+
+**🟡 Degraded State:**  
+- Yellow status with warning
+- Zero workers but server responsive
+- Continues showing uptime and updates
+- Clear visual indication of issues
+
+**🔴 Offline State:**
+- Red "OFFLINE" status with alert icon
+- Uptime counter stops (no fake counting!)
+- Countdown arc pauses and fades
+- Clear indication server is unreachable
+
+### 🚀 Technical Excellence
+
+- **File-based Architecture**: Dashboard HTML served from disk, not embedded
+- **Connection-aware**: Smart error handling with proper state transitions  
+- **Performance Optimized**: Hardware-accelerated animations, minimal DOM updates
+- **Cross-platform**: Works on all browsers and devices
+- **Zero Dependencies**: Pure HTML + Tailwind CSS + Alpine.js from CDN
+
+The dashboard transforms server monitoring from a technical chore into a **beautiful, professional experience**! 🎨
+
 ---
 
 Built with ❤️ for high-performance Rip applications.
