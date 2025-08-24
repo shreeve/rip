@@ -23,7 +23,6 @@ try {
   // no zig lex available — that's fine
 }
 
-const enc = new TextEncoder();
 const dec = new TextDecoder();
 
 function usage() {
