@@ -58,8 +58,9 @@ console.log(`mode: ${mode}, lines: ${ast.program.lines.length}, nodes: ${ast.nod
 // print formatted output
 const pretty = formatMumps(ast, {
   abbreviateCommands: true,
-  alignSetEquals: true,
-  commentColumn: 48
+  commentColumn: 48,
+  commaGap: 0,
+  // alignSetEquals: true,
 });
 console.log("----- formatted -----");
 console.log(pretty);
