@@ -19,6 +19,9 @@
 
 "use strict";
 
+// Shared decoder to reduce allocations
+const DEC = new TextDecoder();
+
 /** Public API ****************************************************************/
 export function parseMumps(input /* string|Uint8Array */) {
   const buf = toBytes(input);
@@ -40,7 +43,7 @@ export function parseMumpsWithTokens(buffer /* Uint8Array|string */, toks /* Uin
 
 /** Export a safe slice → string helper */
 export function text(buf, start, end) {
-  return new TextDecoder().decode(buf.subarray(start, end));
+  return DEC.decode(buf.subarray(start, end));
 }
 
 function makeAstResult(buf, program, P) {
@@ -116,13 +119,13 @@ const CMD_ABBR = Object.freeze({
 
 /** String Interner ***********************************************************/
 class Interner {
-  constructor(buf) { this.buf = buf; this.map = new Map(); this.syms = [""]; this.dec = new TextDecoder(); }
+  constructor(buf) { this.buf = buf; this.map = new Map(); this.syms = [""]; }
   intern(start, end) {
     // Cheap uniqueness key that avoids slicing: length:start
     const key = (end - start) + ":" + start;
     let id = this.map.get(key);
     if (id !== undefined) return id;
-    const s = this.dec.decode(this.buf.subarray(start, end));
+    const s = DEC.decode(this.buf.subarray(start, end));
     id = this.syms.length;
     this.syms.push(s);
     this.map.set(key, id);
@@ -139,7 +142,7 @@ class Program {
     this.lines = []; // [{start,end,indent, t0?, t1?}]
     this.intern = new Interner(buf);
     this._indexLines(); // for char-based path
-    this.td = new TextDecoder();
+    
   }
 
   /** Char-scanner path */
@@ -210,7 +213,7 @@ class Program {
     for (; i < e; i++) { const ch = b[i]; if (ch === C.SP || ch === C.TAB) col++; else break; }
     return col;
   }
-  _slice(s,e){ return this.td.decode(this.b.subarray(s,e)); }
+  _slice(s,e){ return DEC.decode(this.b.subarray(s,e)); }
   _node(kind, fields) { const n = Object.assign({ kind }, fields); this.nodes.push(n); return n; }
 
   /** Token-path line parser; delegates chunk ends to byte scanner for safety. */
@@ -220,7 +223,6 @@ class Program {
 
     // local iter over tokens in [t0,t1)
     let ti = t0;
-    const peek = () => (ti < t1 ? toks[ti] & 0xFFFF : -1);
     const tokStart = () => toks[ti + 1];
     const tokEnd   = () => toks[ti + 2];
     const skipSpaces = () => { while (ti < t1 && (toks[ti] & 0xFFFF) === K.Space) ti += 3; };
@@ -647,9 +649,9 @@ class Program {
 
   _readDblDollar(i,e){
     // recovery note: if '$$' is not followed by an identifier, keep literal span
-    let p=i+2; if (!(p<e && isAlpha(this.b[p]))){ const s=this._node(NodeKind.String,{start:i,end:i+2}); s._start=i; s._end=i+2; return s; }
+    let p=i+2; if (!(p<e && isIdentStart(this.b[p]))){ const s=this._node(NodeKind.String,{start:i,end:i+2}); s._start=i; s._end=i+2; return s; }
     const lab=this._readIdent(p,e); p=lab.end; let caret=null;
-    if (p<e && this.b[p]===C.CARET){ p++; if (p<e && isAlpha(this.b[p])){ const rt=this._readIdent(p,e); caret=rt; p=rt.end; } }
+    if (p<e && this.b[p]===C.CARET){ p++; if (p<e && isIdentStart(this.b[p])){ const rt=this._readIdent(p,e); caret=rt; p=rt.end; } }
     while (p<e && isSpace(this.b[p])) p++;
     let args=null; if (p<e && this.b[p]===C.LP){ args=this._parseSubscripts(p,e); p=args._end; }
     const node=this._node(NodeKind.DblDollar,{ label:lab, routine:caret, args: args?args.items:null });
@@ -727,8 +729,7 @@ class Program {
  */
 export function formatMumps(ast, opts = {}) {
   const { buffer, program } = ast;
-  const td = new TextDecoder();
-  const sl = (s, e) => td.decode(buffer.subarray(s, e));
+  const sl = (s, e) => DEC.decode(buffer.subarray(s, e));
 
   // Options (compact defaults)
   const betweenCmds = opts.betweenCommands ?? "  ";       // spacing between commands
