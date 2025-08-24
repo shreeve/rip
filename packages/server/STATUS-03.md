@@ -176,10 +176,10 @@ Commands used:
 bun server --no-access-logs apps/labs/api http:5700 r:50000 w:2x
 
 # wrk against entry fast-path
-wrk -t4 -c200 -d10s http://localhost:5700/server
+wrk -t16 -c16 -d10s http://127.0.0.1:5700/server
 
 # wrk against app route
-wrk -t4 -c200 -d10s http://localhost:5700/ping
+wrk -t16 -c16 -d10s http://127.0.0.1:5700/ping
 ```
 
 Observed on this machine (development environment):
@@ -191,5 +191,3 @@ Notes:
 - `/server` exercises only the entry process; `/ping` routes through a worker via Unix socket
 - Disable access logs for clean numbers; leave TLS off for HTTP-only benchmarking
 - Actual throughput will vary by hardware and flags (`w`, `r`, etc.)
-
-
