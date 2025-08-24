@@ -1,4 +1,4 @@
-<div align="center"><img src="/logo.png" style="width:60px" alt="BUMPS Logo" /></div>
+<img src="/logo.png" style="width:50px" />
 
 # BUMPS — A modern, Bun‑powered MUMPS (M) runtime
 
@@ -66,5 +66,3 @@ Feedback from mumpsters and folks who appreciate M’s unique strengths is very 
 ---
 
 <div align="center">Built with ❤️ for the Bun community</div>
-
-
