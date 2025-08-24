@@ -61,7 +61,7 @@ bun run bumps --help
 
 ## How to use / compile / test
 
-1) Build the Zig lexer library (optional, recommended for speed)
+1) **Build the Zig lexer library** (optional, but recommended for speed):
 
 ```bash
 # macOS
@@ -72,38 +72,41 @@ zig build-lib -OReleaseFast -dynamic mumps_lex.zig -femit-bin=libmumps_lex.so
 ```
 
 Place the resulting library where your process can load it, either:
-- next to `packages/bumps/zig-lex.js` (default loader looks for `./libmumps_lex.*`), or
-- set an absolute path via `ZIG_MUMPS_LEX_PATH`.
+- in the same directory as `zig-lex.js` (the loader looks for `./libmumps_lex.*` by default), or
+- by setting an absolute path via the environment variable `ZIG_MUMPS_LEX_PATH`.
 
 Examples:
 
 ```bash
 # macOS: point to an absolute path
 ZIG_MUMPS_LEX_PATH=/abs/path/libmumps_lex.dylib \
-  bun run packages/bumps/example-zig-lex.js
+  bun run demo-parse.js sample.m
 
 # Linux: point to an absolute path
 ZIG_MUMPS_LEX_PATH=/abs/path/libmumps_lex.so \
-  bun run packages/bumps/example-zig-lex.js
+  bun run demo-parse.js sample.m
 
-# Or place the lib alongside where you run the script and just run:
-bun run packages/bumps/example-zig-lex.js
+# Or simply place the built lib next to zig-lex.js and run:
+bun run demo-parse.js sample.m
 ```
 
-2) Run the demo (falls back to pure JS if Zig lexer isn’t found)
+2) **Run the demo** (falls back to pure JS if the Zig lexer isn’t found):
 
 ```bash
-bun run packages/bumps/example-zig-lex.js
+bun run demo-parse.js sample.m
 ```
 
-This tries the Zig‑token path (`parseMumpsWithTokens`) if the dylib/so is loaded via `zig-lex.js`, otherwise it uses pure JS (`parseMumps`). It outputs a formatted version of the sample with:
-- abbreviations enabled (`S`, `W`, `I`, ...)
-- `SET` equals aligned
-- comments padded to column 50
+This will:
+- Try the Zig-token path (`parseMumpsWithTokens`) if the dylib/so is found via `zig-lex.js`.
+- Otherwise fall back to pure JS parsing (`parseMumps`).
+- Print parse/lex timings and a formatted output of the sample, with:
+  - command abbreviations (`S`, `W`, `I`, …),
+  - `SET` equals aligned,
+  - comments padded to column 48.
 
-3) Parse your own file (minimal script)
+3) **Parse your own file** (minimal script):
 
-Create a small script (for example `demo-parse.js`) like this and run `bun run demo-parse.js path/to/your.m`:
+Create a script called `demo-parse.js` like this, then run `bun run demo-parse.js path/to/your.m`:
 
 ```js
 import { parseMumps, parseMumpsWithTokens } from "./mumps-parser-pro.js";
@@ -119,14 +122,14 @@ console.log(
   ast.format({
     abbreviateCommands: true,
     alignSetEquals: true,
-    commentColumn: 50,
+    commentColumn: 48,
     betweenCommands: "  ",
     spaceAfterCommand: " ",
   })
 );
 ```
 
-Tip: to time runs on your machine, prefix commands with `time`.
+Tip: to benchmark parsing speed on your machine, prefix the run with `time`.
 
 ## Community
 
