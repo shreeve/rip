@@ -129,6 +129,27 @@ exports.bnf =
     o 'postcond opt_cs MERGE merge_list','$$ = yy.node("Cmd", {pc: $1, op: "MERGE", args: $4})'
     o 'MERGE merge_list',        '$$ = yy.node("Cmd", {pc: null, op: "MERGE",args: $2})'
 
+    # Device-style commands: allow simple exprlist OR colon params per device
+    o 'postcond opt_cs OPEN CS exprlist', '$$ = yy.node("Cmd", {pc: $1, op: "OPEN", args: $5})'
+    o 'OPEN CS exprlist',                 '$$ = yy.node("Cmd", {pc: null, op: "OPEN", args: $3})'
+    o 'postcond opt_cs OPEN dev_args',    '$$ = yy.node("Cmd", {pc: $1, op: "OPEN", args: $4})'
+    o 'OPEN dev_args',                    '$$ = yy.node("Cmd", {pc: null, op: "OPEN", args: $2})'
+
+    o 'postcond opt_cs USE CS exprlist',  '$$ = yy.node("Cmd", {pc: $1, op: "USE",  args: $5})'
+    o 'USE CS exprlist',                  '$$ = yy.node("Cmd", {pc: null, op: "USE",  args: $3})'
+    o 'postcond opt_cs USE dev_args',     '$$ = yy.node("Cmd", {pc: $1, op: "USE",  args: $4})'
+    o 'USE dev_args',                     '$$ = yy.node("Cmd", {pc: null, op: "USE",  args: $2})'
+
+    o 'postcond opt_cs VIEW CS exprlist', '$$ = yy.node("Cmd", {pc: $1, op: "VIEW", args: $5})'
+    o 'VIEW CS exprlist',                 '$$ = yy.node("Cmd", {pc: null, op: "VIEW", args: $3})'
+    o 'postcond opt_cs VIEW dev_args',    '$$ = yy.node("Cmd", {pc: $1, op: "VIEW", args: $4})'
+    o 'VIEW dev_args',                    '$$ = yy.node("Cmd", {pc: null, op: "VIEW", args: $2})'
+
+    o 'postcond opt_cs CLOSE CS exprlist','$$ = yy.node("Cmd", {pc: $1, op: "CLOSE",args: $5})'
+    o 'CLOSE CS exprlist',                '$$ = yy.node("Cmd", {pc: null, op: "CLOSE",args: $3})'
+    o 'postcond opt_cs CLOSE dev_args',   '$$ = yy.node("Cmd", {pc: $1, op: "CLOSE",args: $4})'
+    o 'CLOSE dev_args',                   '$$ = yy.node("Cmd", {pc: null, op: "CLOSE",args: $2})'
+
     # FOR header (inline form)
     o 'postcond opt_cs FOR for_header', '$$ = yy.node("For", {pc: $1, specs: $4})'
     o 'FOR for_header',                 '$$ = yy.node("For", {pc: null, specs: $2})'
@@ -142,6 +163,23 @@ exports.bnf =
 
   postcond: [ o 'COLON expr', '$$ = $2' ]
   opt_cs: [ o 'CS', '$$ = null', o '', '$$ = null' ]
+
+  # Device args: requires at least one colon after the first expr to disambiguate from generic exprlist
+  dev_args: [
+    o 'CS expr COLON expr dev_params more_devs', '$$ = yy.node("ArgsDEVICE", {specs: [ {device: $2, params: [$4].concat($5)} ].concat($6) })'
+  ]
+  dev_params: [
+    o 'COLON expr dev_params', '$$ = [$2].concat($3)'
+    o '', '$$ = []'
+  ]
+  more_devs: [
+    o 'COMMA expr opt_params more_devs', '$$ = [ {device: $2, params: $3} ].concat($4)'
+    o '', '$$ = []'
+  ]
+  opt_params: [
+    o 'COLON expr dev_params', '$$ = [$2].concat($3)'
+    o '', '$$ = []'
+  ]
 
   for_header: [
     o 'CS for_specs', '$$ = $2'
