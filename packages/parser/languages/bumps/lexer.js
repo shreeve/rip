@@ -107,6 +107,26 @@ export class BumpsLexer {
           out.push(['CARET', '^', this.loc(li, pos, li, pos + 1)]);
           pos += 1; line = line.slice(1); afterCmdSep = false; continue;
         }
+        // relations and pattern: ], [, ]], '?xxx'
+        if ((mm = line.match(/^\]\]/))) {
+          out.push(['SORTAFTER', ']]', this.loc(li, pos, li, pos + 2)]);
+          pos += 2; line = line.slice(2); continue;
+        }
+        if ((mm = line.match(/^\]/))) {
+          out.push(['FOLLOWS', ']', this.loc(li, pos, li, pos + 1)]);
+          pos += 1; line = line.slice(1); continue;
+        }
+        if ((mm = line.match(/^\[/))) {
+          out.push(['CONTAINS', '[', this.loc(li, pos, li, pos + 1)]);
+          pos += 1; line = line.slice(1); continue;
+        }
+        if ((mm = line.match(/^\?[^\s,\)]+/))) {
+          const s = mm[0];
+          // Emit PMATCH then PATTERN
+          out.push(['PMATCH', '?', this.loc(li, pos, li, pos + 1)]);
+          out.push(['PATTERN', s.slice(1), this.loc(li, pos + 1, li, pos + s.length)]);
+          pos += s.length; line = line.slice(s.length); continue;
+        }
         if ((mm = line.match(/^@/))) {
           out.push(['AT', '@', this.loc(li, pos, li, pos + 1)]);
           pos += 1; line = line.slice(1); afterCmdSep = false; continue;
