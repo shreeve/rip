@@ -101,42 +101,43 @@ exports.bnf =
 
   cmd: [
     # GOTO
-    o 'postcond GOTO goto_list', '$$ = yy.node("Cmd", {pc: $1, op: "GOTO", args: $3})'
+    o 'postcond opt_cs GOTO goto_list', '$$ = yy.node("Cmd", {pc: $1, op: "GOTO", args: $4})'
     o 'GOTO goto_list',          '$$ = yy.node("Cmd", {pc: null, op: "GOTO", args: $2})'
     # Command-specific forms
-    o 'postcond SET set_list',   '$$ = yy.node("Cmd", {pc: $1, op: "SET",   args: $3})'
+    o 'postcond opt_cs SET set_list',   '$$ = yy.node("Cmd", {pc: $1, op: "SET",   args: $4})'
     o 'SET set_list',            '$$ = yy.node("Cmd", {pc: null, op: "SET",  args: $2})'
-    o 'postcond WRITE write_list','$$ = yy.node("Cmd", {pc: $1, op: "WRITE", args: $3})'
+    o 'postcond opt_cs WRITE write_list','$$ = yy.node("Cmd", {pc: $1, op: "WRITE", args: $4})'
     o 'WRITE write_list',        '$$ = yy.node("Cmd", {pc: null, op: "WRITE",args: $2})'
-    o 'postcond READ read_list', '$$ = yy.node("Cmd", {pc: $1, op: "READ",  args: $3})'
+    o 'postcond opt_cs READ read_list', '$$ = yy.node("Cmd", {pc: $1, op: "READ",  args: $4})'
     o 'READ read_list',          '$$ = yy.node("Cmd", {pc: null, op: "READ", args: $2})'
-    o 'postcond NEW new_list',   '$$ = yy.node("Cmd", {pc: $1, op: "NEW",   args: $3})'
+    o 'postcond opt_cs NEW new_list',   '$$ = yy.node("Cmd", {pc: $1, op: "NEW",   args: $4})'
     o 'NEW new_list',            '$$ = yy.node("Cmd", {pc: null, op: "NEW",  args: $2})'
-    o 'postcond KILL kill_list', '$$ = yy.node("Cmd", {pc: $1, op: "KILL",  args: $3})'
+    o 'postcond opt_cs KILL kill_list', '$$ = yy.node("Cmd", {pc: $1, op: "KILL",  args: $4})'
     o 'KILL kill_list',          '$$ = yy.node("Cmd", {pc: null, op: "KILL", args: $2})'
-    o 'postcond DO do_list',     '$$ = yy.node("Cmd", {pc: $1, op: "DO",    args: $3})'
+    o 'postcond opt_cs DO do_list',     '$$ = yy.node("Cmd", {pc: $1, op: "DO",    args: $4})'
     o 'DO do_list',              '$$ = yy.node("Cmd", {pc: null, op: "DO",   args: $2})'
 
     # IF/ELSE (blocks can be assembled later by depth from Line.depth)
-    o 'postcond IF CS expr',     '$$ = yy.node("If", {pc: $1, cond: $4})'
+    o 'postcond opt_cs IF CS expr',     '$$ = yy.node("If", {pc: $1, cond: $5})'
     o 'IF CS expr',              '$$ = yy.node("If", {pc: null, cond: $3})'
-    o 'postcond ELSE',           '$$ = yy.node("Else", {pc: $1})'
+    o 'postcond opt_cs ELSE',           '$$ = yy.node("Else", {pc: $1})'
     o 'ELSE',                    '$$ = yy.node("Else", {pc: null})'
 
     # LOCK / MERGE with postconditions
-    o 'postcond LOCK lock_list', '$$ = yy.node("Cmd", {pc: $1, op: "LOCK",  args: $3})'
+    o 'postcond opt_cs LOCK lock_list', '$$ = yy.node("Cmd", {pc: $1, op: "LOCK",  args: $4})'
     o 'LOCK lock_list',          '$$ = yy.node("Cmd", {pc: null, op: "LOCK", args: $2})'
-    o 'postcond MERGE merge_list','$$ = yy.node("Cmd", {pc: $1, op: "MERGE", args: $3})'
+    o 'postcond opt_cs MERGE merge_list','$$ = yy.node("Cmd", {pc: $1, op: "MERGE", args: $4})'
     o 'MERGE merge_list',        '$$ = yy.node("Cmd", {pc: null, op: "MERGE",args: $2})'
 
     # Generic fallback: other commands with expression arglists
-    o 'postcond cmd_word CS exprlist', '$$ = yy.node("Cmd", {pc: $1, op: $2, args: $4})'
+    o 'postcond opt_cs cmd_word CS exprlist', '$$ = yy.node("Cmd", {pc: $1, op: $3, args: $5})'
     o 'cmd_word CS exprlist',          '$$ = yy.node("Cmd", {pc: null, op: $1, args: $3})'
-    o 'postcond cmd_word',             '$$ = yy.node("Cmd", {pc: $1, op: $2, args: []})'
+    o 'postcond opt_cs cmd_word',             '$$ = yy.node("Cmd", {pc: $1, op: $3, args: []})'
     o 'cmd_word',                      '$$ = yy.node("Cmd", {pc: null, op: $1, args: []})'
   ]
 
   postcond: [ o 'COLON expr', '$$ = $2' ]
+  opt_cs: [ o 'CS', '$$ = null', o '', '$$ = null' ]
 
   cmd_word: [
     o 'BREAK', '$$ = yytext'

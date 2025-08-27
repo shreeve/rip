@@ -6,7 +6,7 @@ require('../../../../../coffeescript/register.js');
 
 (async () => {
   const { BumpsLexer } = await import('../lexer.js');
-  const src = 'GOTO L1^R, ^R2, L3+2^R3\n';
+  const src = 'TSTART\nTCOMMIT\nTROLLBACK\nTRESTART\n';
   const lex = new BumpsLexer();
   const toks = lex.tokenize(src);
   const p = parserMod.parser;
@@ -17,10 +17,9 @@ require('../../../../../coffeescript/register.js');
     showPosition(){ return ''; }
   };
   const ast = parserMod.parse(src);
-  const targets = ast.lines[0].cmds[0].args;
-  assert.equal(targets.length, 3);
-  assert.equal(targets[0].label, 'L1');
-  assert.equal(targets[1].routine, 'R2');
-  assert.equal(targets[2].offset, 2);
+  const ops = ast.lines.map(l=>l.cmds[0].op);
+  assert.deepEqual(ops, ['TSTART','TCOMMIT','TROLLBACK','TRESTART']);
   console.log('PASS');
 })().catch(e => { console.error('FAIL', e); process.exit(1); });
+
+
