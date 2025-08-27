@@ -6,7 +6,7 @@ require('../../../../../coffeescript/register.js');
 
 (async () => {
   const { BumpsLexer } = await import('../lexer.js');
-  const src = 'SET X=1 Zfoo 2,3 WRITE "A"\n';
+  const src = 'BREAK\nCLOSE\n';
   const lex = new BumpsLexer();
   const toks = lex.tokenize(src);
   const p = parserMod.parser;
@@ -17,9 +17,7 @@ require('../../../../../coffeescript/register.js');
     showPosition(){ return ''; }
   };
   const ast = parserMod.parse(src);
-  const ops = ast.lines[0].cmds.map(c=>c.op);
-  assert.deepEqual(ops, ['SET','Zfoo','WRITE']);
-  const z = ast.lines[0].cmds[1];
-  assert.equal(z.args.length, 2);
+  const ops = ast.lines.map(l=>l.cmds[0].op);
+  assert.deepEqual(ops, ['BREAK','CLOSE']);
   console.log('PASS');
 })().catch(e => { console.error('FAIL', e); process.exit(1); });
