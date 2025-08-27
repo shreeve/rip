@@ -129,6 +129,10 @@ exports.bnf =
     o 'postcond opt_cs MERGE merge_list','$$ = yy.node("Cmd", {pc: $1, op: "MERGE", args: $4})'
     o 'MERGE merge_list',        '$$ = yy.node("Cmd", {pc: null, op: "MERGE",args: $2})'
 
+    # FOR header (inline form)
+    o 'postcond opt_cs FOR for_header', '$$ = yy.node("For", Object.assign({pc: $1}, $4))'
+    o 'FOR for_header',                 '$$ = yy.node("For", Object.assign({pc: null}, $2))'
+
     # Generic fallback: other commands with expression arglists
     o 'postcond opt_cs cmd_word CS exprlist', '$$ = yy.node("Cmd", {pc: $1, op: $3, args: $5})'
     o 'cmd_word CS exprlist',          '$$ = yy.node("Cmd", {pc: null, op: $1, args: $3})'
@@ -139,12 +143,15 @@ exports.bnf =
   postcond: [ o 'COLON expr', '$$ = $2' ]
   opt_cs: [ o 'CS', '$$ = null', o '', '$$ = null' ]
 
+  for_header: [
+    o 'CS NAME EQ expr COLON expr COLON expr', '$$ = {var: $2, from: $4, step: $6, to: $8}'
+  ]
+
   cmd_word: [
     o 'BREAK', '$$ = yytext'
     o 'CLOSE', '$$ = yytext'
     o 'DO', '$$ = yytext'
     o 'ELSE', '$$ = yytext'
-    o 'FOR', '$$ = yytext'
     o 'GOTO', '$$ = yytext'
     o 'HALT', '$$ = yytext'
     o 'HANG', '$$ = yytext'
