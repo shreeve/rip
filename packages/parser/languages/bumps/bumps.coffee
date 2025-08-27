@@ -32,7 +32,7 @@ exports.operators = [
 # Keep token list in sync with lexer below
 exports.tokens = [
   'NEWLINE', 'DOTS', 'LABEL', 'CS'
-  'LPAREN','RPAREN','COMMA','COLON','SEMI','CARET','AT','EQUAL'
+  'LPAREN','RPAREN','COMMA','COLON','SEMI','CARET','AT'
   'STRING','NUMBER','NAME','PATTERN'
   'DOLFN','DOLSPECVAR','ZDOLFN','ZCOMMAND'
   # Commands
@@ -139,6 +139,8 @@ exports.bnf =
   ]
 
   # ---- argument patterns ----
+  # After a command token, arguments start in EXPR mode and are preceded by CS.
+  # Each list below omits the command token; it only consumes the CS and the args.
   cmd_args: [
     o 'set_list', '$$ = $1'
     o 'kill_list', '$$ = $1'
@@ -146,36 +148,31 @@ exports.bnf =
     o 'do_list', '$$ = $1'
     o 'write_list', '$$ = $1'
     o 'read_list', '$$ = $1'
-    o 'exprlist', '$$ = $1'
-    o '', '$$ = []'
+    o 'CS exprlist', '$$ = $2'
   ]
 
-  set_list: [ o 'SET CS set_items', '$$ = yy.node("ArgsSET", {items: $3})' ]
+  set_list: [ o 'CS set_items', '$$ = yy.node("ArgsSET", {items: $2})' ]
   set_items: [
     o 'set_item', '$$ = [$1]'
     o 'set_items COMMA set_item', '$1.push($3); $$ = $1'
   ]
-  set_item: [ o 'lvalue EQUAL expr', '$$ = yy.node("Set", {lhs: $1, rhs: $3})' ]
+  set_item: [ o 'lvalue EQ expr', '$$ = yy.node("Set", {lhs: $1, rhs: $3})' ]
 
   kill_list: [
-    o 'KILL', '$$ = yy.node("ArgsKILL", {items: []})'
-    o 'KILL CS kill_items', '$$ = yy.node("ArgsKILL", {items: $3})'
+    o 'CS kill_items', '$$ = yy.node("ArgsKILL", {items: $2})'
   ]
   kill_items: [
     o 'lvalue', '$$ = [$1]'
     o 'kill_items COMMA lvalue', '$1.push($3); $$ = $1'
   ]
 
-  new_list: [ o 'NEW CS name_list', '$$ = yy.node("ArgsNEW", {names: $3})' ]
+  new_list: [ o 'CS name_list', '$$ = yy.node("ArgsNEW", {names: $2})' ]
   name_list: [
     o 'NAME', '$$ = [$1]'
     o 'name_list COMMA NAME', '$1.push($3); $$ = $1'
   ]
 
-  do_list: [
-    o 'DO', '$$ = yy.node("ArgsDO", {targets: []})'
-    o 'DO CS entryref_list', '$$ = yy.node("ArgsDO", {targets: $3})'
-  ]
+  do_list: [ o 'CS entryref_list', '$$ = yy.node("ArgsDO", {targets: $2})' ]
   entryref_list: [
     o 'entryref', '$$ = [$1]'
     o 'entryref_list COMMA entryref', '$1.push($3); $$ = $1'
@@ -187,13 +184,13 @@ exports.bnf =
     o 'CARET NAME', '$$ = yy.node("EntryRef", {label: null, routine: $2, offset: null, args: []})'
   ]
 
-  write_list: [ o 'WRITE CS witems', '$$ = yy.node("ArgsWRITE", {items: $3})' ]
+  write_list: [ o 'CS witems', '$$ = yy.node("ArgsWRITE", {items: $2})' ]
   witems: [
     o 'expr', '$$ = [$1]'
     o 'witems COMMA expr', '$1.push($3); $$ = $1'
   ]
 
-  read_list: [ o 'READ CS ritems', '$$ = yy.node("ArgsREAD", {items: $3})' ]
+  read_list: [ o 'CS ritems', '$$ = yy.node("ArgsREAD", {items: $2})' ]
   ritems: [
     o 'ritem', '$$ = [$1]'
     o 'ritems COMMA ritem', '$1.push($3); $$ = $1'
