@@ -30,7 +30,7 @@ function parsePattern(input) {
     if (ch==='"') { const str=readString(); return applyCount({type:'String',value:str},count); }
     if (ch==='(') { next(); const items=[]; while(!eof() && peek()!==')'){ if(peek()===','){ next(); continue; } const a=parseAtom(); if(a) items.push(a); else break; } if(peek()===')') next(); return applyCount({type:'Group',items},count); }
     if (/^[A-Za-z]$/.test(ch)) {
-      const CLASS_CANON = { A: 'ALPHA', N: 'NUM', L: 'LOWER', U: 'UPPER' };
+      const CLASS_CANON = { A: 'ALPHA', N: 'NUM', L: 'LOWER', U: 'UPPER', P: 'PUNCT', B: 'BLANK', S: 'SPACE', C: 'CONTROL' };
       // Read a contiguous class set like AN, AL, NU, etc.
       let names = '';
       while(!eof() && /^[A-Za-z]$/.test(peek())) names += next();
