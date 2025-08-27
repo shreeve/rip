@@ -1,6 +1,6 @@
 # bumps.coffee — SLR(1) grammar for M (MUMPS) targeting your Jison/Bison‑style parser (Rip parser)
 #
-# Notes
+# Notes:
 # - Mirrors CoffeeScript’s `grammar.coffee` structure (small `o()` helper, `exports.bnf`, `exports.operators`, `exports.lex`).
 # - Assumes a stateful lexer with CMD/EXPR modes so keywords aren’t reserved and command spacing is honored.
 # - Keeps M’s uniform, left‑to‑right precedence by putting all binary ops in the same `%left` tier; unary handled with higher precedence.
