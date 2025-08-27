@@ -188,6 +188,7 @@ exports.bnf =
     o 'set_items COMMA set_item', '$1.push($3); $$ = $1'
   ]
   set_item: [
+    o 'NAME LPAREN exprlist RPAREN EQ expr', '$$ = yy.node("Set", {lhs: yy.node("Var", {global: false, name: $1, subs: $3}), rhs: $6})'
     o 'lvalue EQ expr', '$$ = yy.node("Set", {lhs: $1, rhs: $3})'
   ]
 
@@ -293,13 +294,15 @@ exports.bnf =
   primary: [
     o 'NUMBER', '$$ = yy.node("Number", {value: +yytext})'
     o 'STRING', '$$ = yy.node("String", {value: yytext})'
+    o 'NAME', '$$ = yy.node("Var", {global: false, name: $1, subs: []})'
     o 'varref', '$$ = $1'
     o 'LPAREN expr RPAREN', '$$ = $2'
     o 'dolfn_call', '$$ = $1'
   ]
 
   varref: [
-    o 'opt_global NAME opt_subs', '$$ = yy.node("Var", {global: $1, name: $2, subs: $3})'
+    o 'opt_global NAME', '$$ = yy.node("Var", {global: $1, name: $2, subs: []})'
+    o 'opt_global NAME LPAREN exprlist RPAREN', '$$ = yy.node("Var", {global: $1, name: $2, subs: $4})'
     o 'AT NAME', '$$ = yy.node("Indirect", {kind: "name", target: $2})'
     o 'AT LPAREN expr RPAREN', '$$ = yy.node("Indirect", {kind: "expr", target: $3})'
   ]
@@ -323,6 +326,7 @@ exports.bnf =
 
   lvalue: [
     o 'varref', '$$ = $1'
+    o 'NAME', '$$ = yy.node("Var", {global: false, name: $1, subs: []})'
   ]
 
 # -------------------------- node factory --------------------------
