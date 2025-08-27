@@ -23,5 +23,3 @@ require('../../../../../coffeescript/register.js');
   assert.deepEqual(cmd.specs.map(s=>s.name), ['I','J']);
   console.log('PASS');
 })().catch(e => { console.error('FAIL', e); process.exit(1); });
-
-
