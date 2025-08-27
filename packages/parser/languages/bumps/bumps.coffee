@@ -334,10 +334,17 @@ exports.bnf =
   # MERGE
   merge_list: [ o 'CS merge_items', '$$ = $2' ]
   merge_items: [
-    o 'merge_item', '$$ = [$1]'
-    o 'merge_items COMMA merge_item', '$1.push($3); $$ = $1'
+    o 'merge_item', '$$ = Array.isArray($1) ? $1 : [$1]'
+    o 'merge_items COMMA merge_item', 'if (Array.isArray($3)) { Array.prototype.push.apply($1, $3); } else { $1.push($3); } $$ = $1'
   ]
-  merge_item: [ o 'lvalue EQ lvalue', '$$ = yy.node("Merge", {target: $1, source: $3})' ]
+  merge_item: [
+    o 'lvalue EQ lvalue', '$$ = yy.node("Merge", {target: $1, source: $3})'
+    o 'LPAREN lvalue_list RPAREN EQ lvalue', '$$ = $2.map(t => yy.node("Merge", {target: t, source: $5}))'
+  ]
+  lvalue_list: [
+    o 'lvalue', '$$ = [$1]'
+    o 'lvalue_list COMMA lvalue', '$1.push($3); $$ = $1'
+  ]
 
   # GOTO targets reuse entryref
   goto_list: [ o 'CS entryref_list', '$$ = $2' ]
