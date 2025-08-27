@@ -196,6 +196,7 @@ exports.bnf =
 
   for_spec: [
     o 'NAME EQ expr COLON expr COLON expr', '$$ = {name: $1, from: $3, step: $5, to: $7}'
+    o 'NAME EQ expr COLON expr', '$$ = {name: $1, from: $3, step: yy.node("Number", {value: 1}), to: $5}'
   ]
 
   cmd_word: [
