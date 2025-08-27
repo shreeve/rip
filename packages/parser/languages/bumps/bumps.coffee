@@ -265,13 +265,14 @@ exports.bnf =
     o 'CS LPAREN new_items RPAREN', '$$ = yy.node("ArgsNEW", {names: $3})'
   ]
   new_items: [
-    o 'new_item', '$$ = [$1]'
-    o 'new_items COMMA new_item', '$1.push($3); $$ = $1'
+    o 'new_item', '$$ = Array.isArray($1) ? $1 : [$1]'
+    o 'new_items COMMA new_item', 'if (Array.isArray($3)) { Array.prototype.push.apply($1, $3); } else { $1.push($3); } $$ = $1'
   ]
   new_item: [
     o 'NAME', '$$ = $1'
     o 'AT NAME', '$$ = yy.node("Indirect", {kind: "name", target: $2})'
     o 'AT LPAREN expr RPAREN', '$$ = yy.node("Indirect", {kind: "expr", target: $3})'
+    o 'LPAREN new_items RPAREN', '$$ = $2'
   ]
 
   do_list: [ o 'CS entryref_list', '$$ = yy.node("ArgsDO", {targets: $2})' ]
