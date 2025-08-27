@@ -70,6 +70,14 @@ const ok = parser.parse(source);
 
 If you compile the Jison-style `exports.lex` into a lexer with jison-lex, bind its instance as `parser.lexer`.
 
+### Performance and trade-offs
+
+- Performance: LR parsing is linear in input size with small constant factors (table lookups). Solar emits compact tables and straight-line code; generation time is irrelevant at runtime.
+- Maintainability: the grammar is declarative and readable; precedence/associativity are explicit. Evolution is mostly editing productions, not control flow.
+- Pros vs hand-rolled: clearer spec, deterministic performance (no backtracking), easier refactors, and shared toolchain with CoffeeScript.
+- Cons/notes: push context sensitivity (command position, abbreviations, dot-indentation, postconditions) into the lexer/rewriter; polish error messages; incremental/streaming parsing would require extra work.
+- Net: fast enough and easy to work with. With context handled in the lexer/rewriter, the SLR(1) parser remains both performant and maintainable for M.
+
 ### Important consistency note (assignment token)
 
 The grammar currently uses `EQUAL` for `set_item` (`lvalue EQUAL expr`), but the lexer returns `EQ` for `=`. Pick one of these approaches before generating the parser:
