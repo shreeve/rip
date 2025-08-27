@@ -1,4 +1,4 @@
-<div align="center"><img src="/logo.png" style="width:200px" alt="Rip Logo" /><br></div>
+<div align="center"><img src="/assets/logo.png" style="width:200px" alt="Rip Logo" /><br></div>
 
 # Rip
 

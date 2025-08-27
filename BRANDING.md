@@ -1,4 +1,4 @@
-<img src="/logo.png" style="width:50px" />
+<img src="/assets/logo.png" style="width:50px" />
 
 # Rip Brand
 
