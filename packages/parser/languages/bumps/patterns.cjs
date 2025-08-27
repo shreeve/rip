@@ -6,7 +6,21 @@ function parsePattern(input) {
   function next() { return s[i++]; }
   function isDigit(ch) { return ch >= '0' && ch <= '9'; }
   function readNumber() { let start = i; while (!eof() && isDigit(peek())) i++; return Number(s.slice(start, i)); }
-  function readString() { let v=''; next(); while(!eof()){ const ch=next(); if(ch==='"') break; if(ch==='\\'&&!eof()) v+=next(); else v+=ch;} return v; }
+  function readString() {
+    let v='';
+    next(); // consume opening quote
+    while(!eof()){
+      const ch = next();
+      if (ch==='"') {
+        // M doubles quotes inside strings to escape a literal quote
+        if (!eof() && peek()==='"') { next(); v+='"'; continue; }
+        break;
+      }
+      if (ch==='\\' && !eof()) { v += next(); }
+      else { v += ch; }
+    }
+    return v;
+  }
   function parseCount(){ if(!isDigit(peek())) return null; const min=readNumber(); if(peek()==='.') { next(); const max=readNumber(); return {min,max}; } return {min,max:min}; }
   function applyCount(node,count){ if(!count) return node; return {...node, min:count.min, max:count.max}; }
   function parseAtom(){
