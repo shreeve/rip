@@ -261,12 +261,17 @@ exports.bnf =
   ]
 
   new_list: [
-    o 'CS name_list', '$$ = yy.node("ArgsNEW", {names: $2})'
-    o 'CS LPAREN name_list RPAREN', '$$ = yy.node("ArgsNEW", {names: $3})'
+    o 'CS new_items', '$$ = yy.node("ArgsNEW", {names: $2})'
+    o 'CS LPAREN new_items RPAREN', '$$ = yy.node("ArgsNEW", {names: $3})'
   ]
-  name_list: [
-    o 'NAME', '$$ = [$1]'
-    o 'name_list COMMA NAME', '$1.push($3); $$ = $1'
+  new_items: [
+    o 'new_item', '$$ = [$1]'
+    o 'new_items COMMA new_item', '$1.push($3); $$ = $1'
+  ]
+  new_item: [
+    o 'NAME', '$$ = $1'
+    o 'AT NAME', '$$ = yy.node("Indirect", {kind: "name", target: $2})'
+    o 'AT LPAREN expr RPAREN', '$$ = yy.node("Indirect", {kind: "expr", target: $3})'
   ]
 
   do_list: [ o 'CS entryref_list', '$$ = yy.node("ArgsDO", {targets: $2})' ]
