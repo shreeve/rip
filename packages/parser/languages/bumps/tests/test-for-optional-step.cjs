@@ -26,5 +26,3 @@ require('../../../../../coffeescript/register.js');
   assert.equal(spec.step.value, 1);
   console.log('PASS');
 })().catch(e => { console.error('FAIL', e); process.exit(1); });
-
-
