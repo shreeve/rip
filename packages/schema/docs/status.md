@@ -1,4 +1,4 @@
-<img src="/logo.png" style="width:50px" /> <br>
+<img src="/assets/logo.png" style="width:50px" /> <br>
 
 # Rip Schema - Development Roadmap
 
