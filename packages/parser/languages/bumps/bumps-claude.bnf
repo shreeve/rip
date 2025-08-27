@@ -1,0 +1,892 @@
+/* Complete VistA-Compatible MUMPS Grammar for Jison */
+
+%lex
+%%
+
+/* Whitespace - preserve dots and spaces for indentation */
+[ \t]+                      return 'SPACES'
+";"[^\r\n]*                 return 'COMMENT'
+
+/* Keywords - Full Commands */
+"BREAK"                     return 'BREAK'
+"CLOSE"                     return 'CLOSE'
+"DO"                        return 'DO'
+"ELSE"                      return 'ELSE'
+"FOR"                       return 'FOR'
+"GOTO"                      return 'GOTO'
+"HALT"                      return 'HALT'
+"HANG"                      return 'HANG'
+"IF"                        return 'IF'
+"JOB"                       return 'JOB'
+"KILL"                      return 'KILL'
+"LOCK"                      return 'LOCK'
+"MERGE"                     return 'MERGE'
+"NEW"                       return 'NEW'
+"OPEN"                      return 'OPEN'
+"QUIT"                      return 'QUIT'
+"READ"                      return 'READ'
+"SET"                       return 'SET'
+"TCOMMIT"                   return 'TCOMMIT'
+"TRESTART"                  return 'TRESTART'
+"TROLLBACK"                 return 'TROLLBACK'
+"TSTART"                    return 'TSTART'
+"USE"                       return 'USE'
+"VIEW"                      return 'VIEW'
+"WRITE"                     return 'WRITE'
+"XECUTE"                    return 'XECUTE'
+
+/* Keywords - Abbreviated Commands (VistA style) */
+"B"(?![A-Za-z0-9])          return 'BREAK'
+"C"(?![A-Za-z0-9])          return 'CLOSE'
+"D"(?![A-Za-z0-9])          return 'DO'
+"E"(?![A-Za-z0-9])          return 'ELSE'
+"F"(?![A-Za-z0-9])          return 'FOR'
+"G"(?![A-Za-z0-9])          return 'GOTO'
+"H"(?![A-Za-z0-9])          return 'HALT'
+"I"(?![A-Za-z0-9])          return 'IF'
+"J"(?![A-Za-z0-9])          return 'JOB'
+"K"(?![A-Za-z0-9])          return 'KILL'
+"L"(?![A-Za-z0-9])          return 'LOCK'
+"M"(?![A-Za-z0-9])          return 'MERGE'
+"N"(?![A-Za-z0-9])          return 'NEW'
+"O"(?![A-Za-z0-9])          return 'OPEN'
+"Q"(?![A-Za-z0-9])          return 'QUIT'
+"R"(?![A-Za-z0-9])          return 'READ'
+"S"(?![A-Za-z0-9])          return 'SET'
+"TC"(?![A-Za-z0-9])         return 'TCOMMIT'
+"TRE"(?![A-Za-z0-9])        return 'TRESTART'
+"TRO"(?![A-Za-z0-9])        return 'TROLLBACK'
+"TS"(?![A-Za-z0-9])         return 'TSTART'
+"U"(?![A-Za-z0-9])          return 'USE'
+"V"(?![A-Za-z0-9])          return 'VIEW'
+"W"(?![A-Za-z0-9])          return 'WRITE'
+"X"(?![A-Za-z0-9])          return 'XECUTE'
+
+/* VistA Intrinsic Functions - Complete Set */
+"\$ASCII"                   return 'F_ASCII'
+"\$CHAR"                    return 'F_CHAR'
+"\$DATA"                    return 'F_DATA'
+"\$ECODE"                   return 'F_ECODE'
+"\$ESTACK"                  return 'F_ESTACK'
+"\$ETRAP"                   return 'F_ETRAP'
+"\$EXTRACT"                 return 'F_EXTRACT'
+"\$FIND"                    return 'F_FIND'
+"\$FNUMBER"                 return 'F_FNUMBER'
+"\$GET"                     return 'F_GET'
+"\$HOROLOG"                 return 'F_HOROLOG'
+"\$IO"                      return 'F_IO'
+"\$JOB"                     return 'F_JOB'
+"\$JUSTIFY"                 return 'F_JUSTIFY'
+"\$LENGTH"                  return 'F_LENGTH'
+"\$NAME"                    return 'F_NAME'
+"\$NEXT"                    return 'F_NEXT'
+"\$ORDER"                   return 'F_ORDER'
+"\$PIECE"                   return 'F_PIECE'
+"\$PRINCIPAL"               return 'F_PRINCIPAL'
+"\$QLENGTH"                 return 'F_QLENGTH'
+"\$QSUBSCRIPT"              return 'F_QSUBSCRIPT'
+"\$QUERY"                   return 'F_QUERY'
+"\$QUIT"                    return 'F_QUIT'
+"\$RANDOM"                  return 'F_RANDOM'
+"\$REVERSE"                 return 'F_REVERSE'
+"\$SELECT"                  return 'F_SELECT'
+"\$STACK"                   return 'F_STACK'
+"\$STORAGE"                 return 'F_STORAGE'
+"\$TEST"                    return 'F_TEST'
+"\$TEXT"                    return 'F_TEXT'
+"\$TLEVEL"                  return 'F_TLEVEL'
+"\$TRANSLATE"               return 'F_TRANSLATE'
+"\$VIEW"                    return 'F_VIEW'
+"\$X"                       return 'F_X'
+"\$Y"                       return 'F_Y'
+"\$ZDATE"                   return 'F_ZDATE'
+"\$ZVERSION"                return 'F_ZVERSION'
+
+/* VistA Abbreviated Functions */
+"\$A"(?![A-Za-z0-9])        return 'F_ASCII'
+"\$C"(?![A-Za-z0-9])        return 'F_CHAR'
+"\$D"(?![A-Za-z0-9])        return 'F_DATA'
+"\$E"(?![A-Za-z0-9])        return 'F_EXTRACT'
+"\$F"(?![A-Za-z0-9])        return 'F_FIND'
+"\$G"(?![A-Za-z0-9])        return 'F_GET'
+"\$H"(?![A-Za-z0-9])        return 'F_HOROLOG'
+"\$J"(?![A-Za-z0-9])        return 'F_JUSTIFY'
+"\$L"(?![A-Za-z0-9])        return 'F_LENGTH'
+"\$NA"(?![A-Za-z0-9])       return 'F_NAME'
+"\$O"(?![A-Za-z0-9])        return 'F_ORDER'
+"\$P"(?![A-Za-z0-9])        return 'F_PIECE'
+"\$Q"(?![A-Za-z0-9])        return 'F_QUERY'
+"\$R"(?![A-Za-z0-9])        return 'F_RANDOM'
+"\$RE"(?![A-Za-z0-9])       return 'F_REVERSE'
+"\$S"(?![A-Za-z0-9])        return 'F_SELECT'
+"\$T"(?![A-Za-z0-9])        return 'F_TEXT'
+"\$TR"(?![A-Za-z0-9])       return 'F_TRANSLATE'
+"\$V"(?![A-Za-z0-9])        return 'F_VIEW'
+
+/* Dot prefix for indentation */
+"\."                        return 'DOT'
+
+/* Operators */
+"="                         return 'ASSIGN'
+"+"                         return 'PLUS'
+"-"                         return 'MINUS'
+"*"                         return 'MULT'
+"/"                         return 'DIV'
+"\\"                        return 'INTDIV'
+"#"                         return 'MOD'
+"**"                        return 'POWER'
+"_"                         return 'CONCAT'
+
+/* Comparison Operators - MUMPS Style */
+"="                         return 'EQ'
+"'="                        return 'NE'
+"<"                         return 'LT'
+"'<"                        return 'NLT'
+">"                         return 'GT'
+"'>"                        return 'NGT'
+"]"                         return 'CONTAINS'
+"']"                        return 'NCONTAINS'
+"["                         return 'FOLLOWS'
+"'["                        return 'NFOLLOWS'
+"?[0-9]*"                   return 'PATTERN'
+"'?[0-9]*"                  return 'NPATTERN'
+
+/* Logical Operators */
+"&"                         return 'AND'
+"!"                         return 'OR'
+"'"                         return 'NOT'
+
+/* Delimiters */
+"("                         return 'LPAREN'
+")"                         return 'RPAREN'
+","                         return 'COMMA'
+":"                         return 'COLON'
+"@"                         return 'AT'
+"^"                         return 'CARET'
+
+/* Literals */
+\"([^"\\]|\\.)*\"           return 'STRING'
+[0-9]+(\.[0-9]*)?([eE][+-]?[0-9]+)?  return 'NUMBER'
+
+/* Pattern Atoms - VistA Style */
+[0-9]*"A"                   return 'PATTERN_ALPHA'
+[0-9]*"C"                   return 'PATTERN_CONTROL'
+[0-9]*"E"                   return 'PATTERN_ANY'
+[0-9]*"L"                   return 'PATTERN_LOWER'
+[0-9]*"N"                   return 'PATTERN_NUMERIC'
+[0-9]*"P"                   return 'PATTERN_PUNCT'
+[0-9]*"U"                   return 'PATTERN_UPPER'
+\"([^"\\]|\\.)*\"           return 'PATTERN_LITERAL'
+"."                         return 'PATTERN_ANY_CHAR'
+
+/* Variables and Labels */
+"%"?[a-zA-Z][a-zA-Z0-9]*    return 'IDENTIFIER'
+[a-zA-Z][a-zA-Z0-9]*        return 'LABEL'
+
+/* Line terminators */
+[\r\n]+                     return 'EOL'
+
+/* End of file */
+<<EOF>>                     return 'EOF'
+
+/lex
+
+/* Operator Precedence (lowest to highest) */
+%left OR
+%left AND
+%left EQ NE LT NLT GT NGT CONTAINS NCONTAINS FOLLOWS NFOLLOWS PATTERN NPATTERN
+%left CONCAT
+%left PLUS MINUS
+%left MULT DIV INTDIV MOD
+%right POWER
+%right NOT UMINUS UPLUS
+%left DOT LPAREN CARET
+
+%start routine
+
+%%
+
+/* Top Level */
+routine
+    : lines EOF
+        { return { type: 'routine', lines: $1 }; }
+    ;
+
+lines
+    : lines line
+        { $$ = $1; $$.push($2); }
+    | line
+        { $$ = [$1]; }
+    ;
+
+line
+    : label_opt indentation_opt commands comment_opt EOL
+        { $$ = { type: 'line', label: $1, indentation: $2, commands: $3, comment: $4 }; }
+    | label_opt indentation_opt comment_opt EOL
+        { $$ = { type: 'line', label: $1, indentation: $2, commands: [], comment: $3 }; }
+    | EOL
+        { $$ = { type: 'line', label: null, indentation: 0, commands: [], comment: null }; }
+    ;
+
+label_opt
+    : LABEL
+        { $$ = { type: 'label', name: $1 }; }
+    | /* empty */
+        { $$ = null; }
+    ;
+
+/* VistA Dot Indentation Support */
+indentation_opt
+    : indentation_opt DOT
+        { $$ = ($1 || 0) + 1; }
+    | SPACES
+        { $$ = 0; }
+    | /* empty */
+        { $$ = 0; }
+    ;
+
+comment_opt
+    : COMMENT
+        { $$ = { type: 'comment', text: $1.substring(1) }; }
+    | /* empty */
+        { $$ = null; }
+    ;
+
+/* Commands */
+commands
+    : commands command_sep command
+        { $$ = $1; $$.push($3); }
+    | command
+        { $$ = [$1]; }
+    ;
+
+command_sep
+    : SPACES
+    | /* empty */
+    ;
+
+command
+    : SET set_args postcond_opt
+        { $$ = { type: 'set', args: $2, postcond: $3 }; }
+    | WRITE write_args postcond_opt
+        { $$ = { type: 'write', args: $2, postcond: $3 }; }
+    | IF if_condition do_clause_opt else_clause_opt postcond_opt
+        { $$ = { type: 'if', condition: $2, then: $3, else: $4, postcond: $5 }; }
+    | FOR for_spec do_clause_opt postcond_opt
+        { $$ = { type: 'for', spec: $2, action: $3, postcond: $4 }; }
+    | DO do_args postcond_opt
+        { $$ = { type: 'do', args: $2, postcond: $3 }; }
+    | GOTO goto_args postcond_opt
+        { $$ = { type: 'goto', args: $2, postcond: $3 }; }
+    | KILL kill_args postcond_opt
+        { $$ = { type: 'kill', args: $2, postcond: $3 }; }
+    | NEW new_args postcond_opt
+        { $$ = { type: 'new', args: $2, postcond: $3 }; }
+    | QUIT quit_args_opt postcond_opt
+        { $$ = { type: 'quit', args: $2, postcond: $3 }; }
+    | HALT postcond_opt
+        { $$ = { type: 'halt', postcond: $2 }; }
+    | HANG expression postcond_opt
+        { $$ = { type: 'hang', time: $2, postcond: $3 }; }
+    | READ read_args postcond_opt
+        { $$ = { type: 'read', args: $2, postcond: $3 }; }
+    | OPEN open_args postcond_opt
+        { $$ = { type: 'open', args: $2, postcond: $3 }; }
+    | USE use_args postcond_opt
+        { $$ = { type: 'use', args: $2, postcond: $3 }; }
+    | CLOSE close_args postcond_opt
+        { $$ = { type: 'close', args: $2, postcond: $3 }; }
+    | VIEW view_args postcond_opt
+        { $$ = { type: 'view', args: $2, postcond: $3 }; }
+    | XECUTE expression postcond_opt
+        { $$ = { type: 'xecute', code: $2, postcond: $3 }; }
+    | LOCK lock_args postcond_opt
+        { $$ = { type: 'lock', args: $2, postcond: $3 }; }
+    | JOB job_args postcond_opt
+        { $$ = { type: 'job', args: $2, postcond: $3 }; }
+    | MERGE merge_args postcond_opt
+        { $$ = { type: 'merge', args: $2, postcond: $3 }; }
+    | BREAK postcond_opt
+        { $$ = { type: 'break', postcond: $2 }; }
+    | TSTART tstart_args_opt postcond_opt
+        { $$ = { type: 'tstart', args: $2, postcond: $3 }; }
+    | TCOMMIT postcond_opt
+        { $$ = { type: 'tcommit', postcond: $2 }; }
+    | TROLLBACK postcond_opt
+        { $$ = { type: 'trollback', postcond: $2 }; }
+    | TRESTART postcond_opt
+        { $$ = { type: 'trestart', postcond: $2 }; }
+    ;
+
+postcond_opt
+    : COLON expression
+        { $$ = $2; }
+    | /* empty */
+        { $$ = null; }
+    ;
+
+/* SET Command - Enhanced for VistA */
+set_args
+    : set_list
+        { $$ = $1; }
+    ;
+
+set_list
+    : set_list COMMA set_item
+        { $$ = $1; $$.push($3); }
+    | set_item
+        { $$ = [$1]; }
+    ;
+
+set_item
+    : lvn ASSIGN expression
+        { $$ = { type: 'assignment', target: $1, value: $3 }; }
+    | LPAREN set_list RPAREN ASSIGN expression
+        { $$ = { type: 'multi_assignment', targets: $2, value: $5 }; }
+    | AT expression ASSIGN expression
+        { $$ = { type: 'indirect_assignment', target: $2, value: $4 }; }
+    ;
+
+/* WRITE Command - Enhanced */
+write_args
+    : write_list
+        { $$ = $1; }
+    ;
+
+write_list
+    : write_list COMMA write_item
+        { $$ = $1; $$.push($3); }
+    | write_item
+        { $$ = [$1]; }
+    ;
+
+write_item
+    : expression
+        { $$ = { type: 'write_expr', expr: $1 }; }
+    | "*" expression
+        { $$ = { type: 'write_format', format: $2 }; }
+    | "?" expression
+        { $$ = { type: 'write_tab', position: $2 }; }
+    | "!"
+        { $$ = { type: 'write_newline' }; }
+    ;
+
+/* IF Command - Enhanced for VistA */
+if_condition
+    : expression
+        { $$ = $1; }
+    ;
+
+else_clause_opt
+    : ELSE do_clause_opt
+        { $$ = $2; }
+    | /* empty */
+        { $$ = null; }
+    ;
+
+do_clause_opt
+    : do_args
+        { $$ = $1; }
+    | /* empty */
+        { $$ = null; }
+    ;
+
+/* FOR Command - Enhanced VistA Style */
+for_spec
+    : IDENTIFIER ASSIGN for_range_list
+        { $$ = { type: 'for_range', var: $1, ranges: $3 }; }
+    | for_condition
+        { $$ = { type: 'for_condition', condition: $1 }; }
+    ;
+
+for_range_list
+    : for_range_list COMMA for_range
+        { $$ = $1; $$.push($3); }
+    | for_range
+        { $$ = [$1]; }
+    ;
+
+for_range
+    : expression COLON expression COLON expression
+        { $$ = { type: 'range', start: $1, increment: $3, end: $5 }; }
+    | expression COLON expression
+        { $$ = { type: 'range', start: $1, increment: $3, end: null }; }
+    | expression
+        { $$ = { type: 'range', start: $1, increment: null, end: null }; }
+    ;
+
+for_condition
+    : expression
+        { $$ = $1; }
+    ;
+
+/* Enhanced I/O Commands */
+open_args
+    : expression_list
+        { $$ = $1; }
+    ;
+
+use_args
+    : expression_list
+        { $$ = $1; }
+    ;
+
+close_args
+    : expression_list
+        { $$ = $1; }
+    ;
+
+view_args
+    : expression_list
+        { $$ = $1; }
+    ;
+
+lock_args
+    : lock_list
+        { $$ = $1; }
+    | /* empty */
+        { $$ = []; }
+    ;
+
+lock_list
+    : lock_list COMMA lock_item
+        { $$ = $1; $$.push($3); }
+    | lock_item
+        { $$ = [$1]; }
+    ;
+
+lock_item
+    : lvn
+        { $$ = { type: 'lock_var', var: $1 }; }
+    | PLUS lvn
+        { $$ = { type: 'lock_increment', var: $2 }; }
+    | MINUS lvn
+        { $$ = { type: 'lock_decrement', var: $2 }; }
+    ;
+
+job_args
+    : routine_ref COLON LPAREN job_params RPAREN
+        { $$ = { routine: $1, params: $4 }; }
+    | routine_ref
+        { $$ = { routine: $1, params: [] }; }
+    ;
+
+job_params
+    : expression_list
+        { $$ = $1; }
+    | /* empty */
+        { $$ = []; }
+    ;
+
+merge_args
+    : lvn ASSIGN lvn
+        { $$ = { target: $1, source: $3 }; }
+    ;
+
+tstart_args_opt
+    : LPAREN expression_list RPAREN
+        { $$ = $2; }
+    | /* empty */
+        { $$ = []; }
+    ;
+
+/* Other Commands */
+do_args
+    : do_list
+        { $$ = $1; }
+    | /* empty */
+        { $$ = []; }
+    ;
+
+do_list
+    : do_list COMMA do_item
+        { $$ = $1; $$.push($3); }
+    | do_item
+        { $$ = [$1]; }
+    ;
+
+do_item
+    : routine_ref
+        { $$ = $1; }
+    | CARET routine_ref
+        { $$ = { type: 'external_call', routine: $2 }; }
+    | AT expression
+        { $$ = { type: 'indirect_call', expr: $2 }; }
+    ;
+
+goto_args
+    : routine_ref
+        { $$ = $1; }
+    | AT expression
+        { $$ = { type: 'indirect_goto', expr: $2 }; }
+    ;
+
+kill_args
+    : kill_list
+        { $$ = $1; }
+    | /* empty */
+        { $$ = []; }
+    ;
+
+kill_list
+    : kill_list COMMA kill_item
+        { $$ = $1; $$.push($3); }
+    | kill_item
+        { $$ = [$1]; }
+    ;
+
+kill_item
+    : lvn
+        { $$ = $1; }
+    | LPAREN kill_list RPAREN
+        { $$ = { type: 'exclusive_kill', vars: $2 }; }
+    ;
+
+new_args
+    : new_list
+        { $$ = $1; }
+    | /* empty */
+        { $$ = []; }
+    ;
+
+new_list
+    : new_list COMMA new_item
+        { $$ = $1; $$.push($3); }
+    | new_item
+        { $$ = [$1]; }
+    ;
+
+new_item
+    : lvn
+        { $$ = $1; }
+    | LPAREN new_list RPAREN
+        { $$ = { type: 'exclusive_new', vars: $2 }; }
+    ;
+
+quit_args_opt
+    : expression
+        { $$ = $1; }
+    | /* empty */
+        { $$ = null; }
+    ;
+
+read_args
+    : read_list
+        { $$ = $1; }
+    ;
+
+read_list
+    : read_list COMMA read_item
+        { $$ = $1; $$.push($3); }
+    | read_item
+        { $$ = [$1]; }
+    ;
+
+read_item
+    : lvn
+        { $$ = { type: 'read_var', target: $1 }; }
+    | STRING
+        { $$ = { type: 'read_prompt', prompt: $1 }; }
+    | lvn COLON expression
+        { $$ = { type: 'read_timeout', target: $1, timeout: $3 }; }
+    | "*" lvn
+        { $$ = { type: 'read_char', target: $2 }; }
+    | "?" expression
+        { $$ = { type: 'read_format', format: $2 }; }
+    ;
+
+/* Enhanced Expressions with VistA Features */
+expression
+    : expression PLUS expression
+        { $$ = { type: 'binary_op', op: '+', left: $1, right: $3 }; }
+    | expression MINUS expression
+        { $$ = { type: 'binary_op', op: '-', left: $1, right: $3 }; }
+    | expression MULT expression
+        { $$ = { type: 'binary_op', op: '*', left: $1, right: $3 }; }
+    | expression DIV expression
+        { $$ = { type: 'binary_op', op: '/', left: $1, right: $3 }; }
+    | expression INTDIV expression
+        { $$ = { type: 'binary_op', op: '\\', left: $1, right: $3 }; }
+    | expression MOD expression
+        { $$ = { type: 'binary_op', op: '#', left: $1, right: $3 }; }
+    | expression POWER expression
+        { $$ = { type: 'binary_op', op: '**', left: $1, right: $3 }; }
+    | expression CONCAT expression
+        { $$ = { type: 'binary_op', op: '_', left: $1, right: $3 }; }
+    | expression EQ expression
+        { $$ = { type: 'binary_op', op: '=', left: $1, right: $3 }; }
+    | expression NE expression
+        { $$ = { type: 'binary_op', op: '\'=', left: $1, right: $3 }; }
+    | expression LT expression
+        { $$ = { type: 'binary_op', op: '<', left: $1, right: $3 }; }
+    | expression NLT expression
+        { $$ = { type: 'binary_op', op: '\'<', left: $1, right: $3 }; }
+    | expression GT expression
+        { $$ = { type: 'binary_op', op: '>', left: $1, right: $3 }; }
+    | expression NGT expression
+        { $$ = { type: 'binary_op', op: '\'>', left: $1, right: $3 }; }
+    | expression CONTAINS expression
+        { $$ = { type: 'binary_op', op: ']', left: $1, right: $3 }; }
+    | expression NCONTAINS expression
+        { $$ = { type: 'binary_op', op: '\']', left: $1, right: $3 }; }
+    | expression FOLLOWS expression
+        { $$ = { type: 'binary_op', op: '[', left: $1, right: $3 }; }
+    | expression NFOLLOWS expression
+        { $$ = { type: 'binary_op', op: '\'[', left: $1, right: $3 }; }
+    | expression PATTERN pattern_expr
+        { $$ = { type: 'binary_op', op: '?', left: $1, right: $3 }; }
+    | expression NPATTERN pattern_expr
+        { $$ = { type: 'binary_op', op: '\'?', left: $1, right: $3 }; }
+    | expression AND expression
+        { $$ = { type: 'binary_op', op: '&', left: $1, right: $3 }; }
+    | expression OR expression
+        { $$ = { type: 'binary_op', op: '!', left: $1, right: $3 }; }
+    | NOT expression
+        { $$ = { type: 'unary_op', op: '\'', operand: $2 }; }
+    | PLUS expression %prec UPLUS
+        { $$ = { type: 'unary_op', op: '+', operand: $2 }; }
+    | MINUS expression %prec UMINUS
+        { $$ = { type: 'unary_op', op: '-', operand: $2 }; }
+    | LPAREN expression RPAREN
+        { $$ = $2; }
+    | lvn
+        { $$ = $1; }
+    | function_call
+        { $$ = $1; }
+    | NUMBER
+        { $$ = { type: 'number', value: Number($1) }; }
+    | STRING
+        { $$ = { type: 'string', value: $1.slice(1, -1) }; }
+    | AT expression
+        { $$ = { type: 'indirection', expr: $2 }; }
+    ;
+
+/* VistA Pattern Matching */
+pattern_expr
+    : pattern_atoms
+        { $$ = { type: 'pattern', atoms: $1 }; }
+    ;
+
+pattern_atoms
+    : pattern_atoms pattern_atom
+        { $$ = $1; $$.push($2); }
+    | pattern_atom
+        { $$ = [$1]; }
+    ;
+
+pattern_atom
+    : PATTERN_ALPHA
+        { $$ = { type: 'pattern_alpha', count: $1.replace('A', '') || '1' }; }
+    | PATTERN_CONTROL
+        { $$ = { type: 'pattern_control', count: $1.replace('C', '') || '1' }; }
+    | PATTERN_ANY
+        { $$ = { type: 'pattern_any', count: $1.replace('E', '') || '1' }; }
+    | PATTERN_LOWER
+        { $$ = { type: 'pattern_lower', count: $1.replace('L', '') || '1' }; }
+    | PATTERN_NUMERIC
+        { $$ = { type: 'pattern_numeric', count: $1.replace('N', '') || '1' }; }
+    | PATTERN_PUNCT
+        { $$ = { type: 'pattern_punct', count: $1.replace('P', '') || '1' }; }
+    | PATTERN_UPPER
+        { $$ = { type: 'pattern_upper', count: $1.replace('U', '') || '1' }; }
+    | PATTERN_LITERAL
+        { $$ = { type: 'pattern_literal', value: $1.slice(1, -1) }; }
+    | PATTERN_ANY_CHAR
+        { $$ = { type: 'pattern_any_char' }; }
+    | LPAREN pattern_atoms RPAREN
+        { $ = { type: 'pattern_group', atoms: $2 }; }
+    ;
+
+expression_list
+    : expression_list COMMA expression
+        { $ = $1; $.push($3); }
+    | expression
+        { $ = [$1]; }
+    ;
+
+variable_list
+    : variable_list COMMA lvn
+        { $ = $1; $.push($3); }
+    | lvn
+        { $ = [$1]; }
+    ;
+
+/* Enhanced Variable References with Naked References */
+lvn
+    : IDENTIFIER subscript_opt
+        { $ = { type: 'local_var', name: $1, subscripts: $2 }; }
+    | CARET global_ref
+        { $ = { type: 'global_var', ref: $2 }; }
+    | CARET subscript_opt
+        { $ = { type: 'naked_ref', subscripts: $2 }; }
+    | AT expression
+        { $ = { type: 'indirection', expr: $2 }; }
+    ;
+
+global_ref
+    : IDENTIFIER subscript_opt
+        { $ = { name: $1, subscripts: $2, routine: null }; }
+    | IDENTIFIER LPAREN routine_name RPAREN subscript_opt
+        { $ = { name: $1, subscripts: $5, routine: $3 }; }
+    | LPAREN routine_name RPAREN IDENTIFIER subscript_opt
+        { $ = { name: $4, subscripts: $5, routine: $2 }; }
+    ;
+
+routine_name
+    : STRING
+        { $ = { type: 'routine_string', value: $1.slice(1, -1) }; }
+    | IDENTIFIER
+        { $ = { type: 'routine_id', name: $1 }; }
+    | AT expression
+        { $ = { type: 'routine_indirect', expr: $2 }; }
+    ;
+
+subscript_opt
+    : LPAREN subscript_list RPAREN
+        { $ = $2; }
+    | /* empty */
+        { $ = []; }
+    ;
+
+subscript_list
+    : subscript_list COMMA expression
+        { $ = $1; $.push($3); }
+    | expression
+        { $ = [$1]; }
+    ;
+
+/* Complete VistA Function Set */
+function_call
+    : F_ASCII LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$ASCII', args: $3 }; }
+    | F_CHAR LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$CHAR', args: $3 }; }
+    | F_DATA LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$DATA', args: $3 }; }
+    | F_ECODE LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$ECODE', args: $3 }; }
+    | F_ESTACK LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$ESTACK', args: $3 }; }
+    | F_ETRAP LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$ETRAP', args: $3 }; }
+    | F_EXTRACT LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$EXTRACT', args: $3 }; }
+    | F_FIND LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$FIND', args: $3 }; }
+    | F_FNUMBER LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$FNUMBER', args: $3 }; }
+    | F_GET LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$GET', args: $3 }; }
+    | F_HOROLOG LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$HOROLOG', args: $3 }; }
+    | F_IO LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$IO', args: $3 }; }
+    | F_JOB LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$JOB', args: $3 }; }
+    | F_JUSTIFY LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$JUSTIFY', args: $3 }; }
+    | F_LENGTH LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$LENGTH', args: $3 }; }
+    | F_NAME LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$NAME', args: $3 }; }
+    | F_NEXT LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$NEXT', args: $3 }; }
+    | F_ORDER LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$ORDER', args: $3 }; }
+    | F_PIECE LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$PIECE', args: $3 }; }
+    | F_PRINCIPAL LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$PRINCIPAL', args: $3 }; }
+    | F_QLENGTH LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$QLENGTH', args: $3 }; }
+    | F_QSUBSCRIPT LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$QSUBSCRIPT', args: $3 }; }
+    | F_QUERY LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$QUERY', args: $3 }; }
+    | F_QUIT LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$QUIT', args: $3 }; }
+    | F_RANDOM LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$RANDOM', args: $3 }; }
+    | F_REVERSE LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$REVERSE', args: $3 }; }
+    | F_SELECT LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$SELECT', args: $3 }; }
+    | F_STACK LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$STACK', args: $3 }; }
+    | F_STORAGE LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$STORAGE', args: $3 }; }
+    | F_TEST LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$TEST', args: $3 }; }
+    | F_TEXT LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$TEXT', args: $3 }; }
+    | F_TLEVEL LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$TLEVEL', args: $3 }; }
+    | F_TRANSLATE LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$TRANSLATE', args: $3 }; }
+    | F_VIEW LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$VIEW', args: $3 }; }
+    | F_X LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$X', args: $3 }; }
+    | F_Y LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$Y', args: $3 }; }
+    | F_ZDATE LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$ZDATE', args: $3 }; }
+    | F_ZVERSION LPAREN expression_list RPAREN
+        { $ = { type: 'function', name: '$ZVERSION', args: $3 }; }
+    | intrinsic_variable
+        { $ = $1; }
+    ;
+
+/* VistA Intrinsic Variables (no parentheses) */
+intrinsic_variable
+    : F_HOROLOG
+        { $ = { type: 'intrinsic_var', name: '$HOROLOG' }; }
+    | F_IO
+        { $ = { type: 'intrinsic_var', name: '$IO' }; }
+    | F_JOB
+        { $ = { type: 'intrinsic_var', name: '$JOB' }; }
+    | F_PRINCIPAL
+        { $ = { type: 'intrinsic_var', name: '$PRINCIPAL' }; }
+    | F_QUIT
+        { $ = { type: 'intrinsic_var', name: '$QUIT' }; }
+    | F_STORAGE
+        { $ = { type: 'intrinsic_var', name: '$STORAGE' }; }
+    | F_TEST
+        { $ = { type: 'intrinsic_var', name: '$TEST' }; }
+    | F_TLEVEL
+        { $ = { type: 'intrinsic_var', name: '$TLEVEL' }; }
+    | F_X
+        { $ = { type: 'intrinsic_var', name: '$X' }; }
+    | F_Y
+        { $ = { type: 'intrinsic_var', name: '$Y' }; }
+    | F_ZVERSION
+        { $ = { type: 'intrinsic_var', name: '$ZVERSION' }; }
+    ;
+
+/* Enhanced Routine References for VistA */
+routine_ref
+    : IDENTIFIER
+        { $ = { type: 'routine', name: $1, offset: null, params: null, routine: null }; }
+    | IDENTIFIER PLUS expression
+        { $ = { type: 'routine', name: $1, offset: $3, params: null, routine: null }; }
+    | IDENTIFIER CARET IDENTIFIER
+        { $ = { type: 'routine', name: $1, offset: null, params: null, routine: $3 }; }
+    | IDENTIFIER PLUS expression CARET IDENTIFIER
+        { $ = { type: 'routine', name: $1, offset: $3, params: null, routine: $5 }; }
+    | IDENTIFIER LPAREN expression_list RPAREN
+        { $ = { type: 'routine', name: $1, offset: null, params: $3, routine: null }; }
+    | IDENTIFIER PLUS expression LPAREN expression_list RPAREN
+        { $ = { type: 'routine', name: $1, offset: $3, params: $5, routine: null }; }
+    | IDENTIFIER CARET IDENTIFIER LPAREN expression_list RPAREN
+        { $ = { type: 'routine', name: $1, offset: null, params: $5, routine: $3 }; }
+    | IDENTIFIER PLUS expression CARET IDENTIFIER LPAREN expression_list RPAREN
+        { $ = { type: 'routine', name: $1, offset: $3, params: $7, routine: $5 }; }
+    | CARET IDENTIFIER
+        { $ = { type: 'routine', name: null, offset: null, params: null, routine: $2 }; }
+    | CARET IDENTIFIER LPAREN expression_list RPAREN
+        { $ = { type: 'routine', name: null, offset: null, params: $4, routine: $2 }; }
+    | AT expression
+        { $ = { type: 'routine_indirect', expr: $2 }; }
+    ;
+
+%%
