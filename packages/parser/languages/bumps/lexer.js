@@ -73,6 +73,12 @@ export class BumpsLexer {
       // Arguments / rest of line
       while (line && line.length > 0) {
         let mm;
+        // comment to end of line
+        if ((mm = line.match(/^;[^\n]*/))) {
+          const c = mm[0];
+          out.push(['COMMENT', c, this.loc(li, pos, li, pos + c.length)]);
+          pos += c.length; line = ''; continue;
+        }
         if ((mm = line.match(/^\(/))) {
           out.push(['LPAREN', '(', this.loc(li, pos, li, pos + 1)]);
           pos += 1; line = line.slice(1); continue;
