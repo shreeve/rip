@@ -31,5 +31,3 @@ const { attachBlocks } = require('../blocks.coffee');
   assert.equal(items[2].lhs.type, 'Indirect');
   console.log('PASS');
 })().catch(e => { console.error('FAIL', e); process.exit(1); });
-
-

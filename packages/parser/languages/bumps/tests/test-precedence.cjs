@@ -28,5 +28,3 @@ const { attachBlocks } = require('../blocks.coffee');
   assert.equal(set.args.items.length, 4);
   console.log('PASS');
 })().catch(e => { console.error('FAIL', e); process.exit(1); });
-
-

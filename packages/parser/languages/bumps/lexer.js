@@ -67,7 +67,7 @@ export class BumpsLexer {
         out.push(['CS', ws, this.loc(li, pos, li, pos + ws.length)]);
         pos += ws.length;
         line = line.slice(ws.length);
-        afterCmdSep = true;
+        afterCmdSep = false; // entering expr args after a command, not chaining yet
         afterCommand = false;
       }
       // Arguments / rest of line
@@ -101,6 +101,7 @@ export class BumpsLexer {
           // optional space after comma should not be treated as command separator
           const msp = line.match(/^[ \t]+/);
           if (msp) { pos += msp[0].length; line = line.slice(msp[0].length); }
+          afterCmdSep = false;
           continue;
         }
         if ((mm = line.match(/^=/))) {
@@ -251,16 +252,18 @@ export class BumpsLexer {
           pos += 1; line = line.slice(1); continue;
         }
         if ((mm = line.match(/^[ \t]+/))) {
-          // Lookahead: if next token is a command, emit CS to separate commands
+          // Lookahead: if next token is a command and not an lvalue/expr (e.g. NAME followed by '=')
           const ws = mm[0];
           const after = line.slice(ws.length);
           const mWord = after.match(/^[A-Za-z%][A-Za-z0-9]*/);
           if (afterCommand) {
             out.push(['CS', ws, this.loc(li, pos, li, pos + ws.length)]);
-            pos += ws.length; line = after; afterCmdSep = true; afterCommand = false; continue;
+            pos += ws.length; line = after; afterCmdSep = false; afterCommand = false; continue;
           } else if (mWord) {
             const nextCmd = this.commandToken(mWord[0]);
-            if (nextCmd) {
+            const nextChar = after.charAt(mWord[0].length) || '';
+            // Only treat as command boundary if the next char isn't '=' or '(' or ':' (likely an lvalue)
+            if (nextCmd && (nextChar === '' || nextChar === ' ' || nextChar === '\t' || nextChar === '\r' || nextChar === '\n' || nextChar === ';')) {
               out.push(['CS', ws, this.loc(li, pos, li, pos + ws.length)]);
               pos += ws.length; line = after; afterCmdSep = true; continue;
             }
@@ -289,6 +292,22 @@ export class BumpsLexer {
     if (w === 'else' || w === 'e') return 'ELSE';
     if (w === 'lock' || w === 'l') return 'LOCK';
     if (w === 'merge' || w === 'm') return 'MERGE';
+    if (w === 'break' || w === 'b') return 'BREAK';
+    if (w === 'close' || w === 'c') return 'CLOSE';
+    if (w === 'for' || w === 'f') return 'FOR';
+    if (w === 'halt') return 'HALT';
+    if (w === 'hang') return 'HANG';
+    if (w === 'job' || w === 'j') return 'JOB';
+    if (w === 'open' || w === 'o') return 'OPEN';
+    if (w === 'quit' || w === 'q') return 'QUIT';
+    if (w === 'use' || w === 'u') return 'USE';
+    if (w === 'view' || w === 'v') return 'VIEW';
+    if (w === 'xecute' || w === 'x') return 'XECUTE';
+    if (w === 'tstart') return 'TSTART';
+    if (w === 'tcommit') return 'TCOMMIT';
+    if (w === 'trollback') return 'TROLLBACK';
+    if (w === 'trestart') return 'TRESTART';
+    if (/^z[a-z][a-z0-9]*$/.test(w)) return 'ZCOMMAND';
     return null;
   }
 

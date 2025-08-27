@@ -28,5 +28,3 @@ const { attachBlocks } = require('../blocks.coffee');
   assert.deepEqual(line.cmds.map(c=>c.op), ['SET','WRITE','READ','DO']);
   console.log('PASS');
 })().catch(e => { console.error('FAIL', e); process.exit(1); });
-
-

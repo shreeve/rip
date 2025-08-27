@@ -70,7 +70,7 @@ exports.bnf =
   ]
 
   opt_label: [
-    o 'LABEL opt_formals', '$$ = yy.node("Label", {name: yytext, formals: $2})'
+    o 'LABEL opt_formals', '$$ = yy.node("Label", {name: $1, formals: $2})'
     o '', '$$ = null'
   ]
 
@@ -187,8 +187,8 @@ exports.bnf =
     o 'set_items COMMA set_item', '$1.push($3); $$ = $1'
   ]
   set_item: [
+    o 'NAME LPAREN exprlist RPAREN EQ expr', '$$ = yy.node("Set", {lhs: yy.node("Var", {global: false, name: $1, subs: $3}), rhs: $6})'
     o 'lvalue EQ expr', '$$ = yy.node("Set", {lhs: $1, rhs: $3})'
-    o 'NAME EQ expr', '$$ = yy.node("Set", {lhs: yy.node("Var", {global: false, name: $1, subs: []}), rhs: $3})'
   ]
 
   kill_list: [
