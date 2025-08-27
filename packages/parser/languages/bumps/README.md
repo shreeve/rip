@@ -72,7 +72,19 @@ If you compile the Jison-style `exports.lex` into a lexer with jison-lex, bind i
 
 ### Runner
 
-- Runner can optionally print tokens (set `BUMPS_DEBUG=1`).
+- Runner can optionally print debug info by setting `BUMPS_DEBUG=1`.
+
+Examples:
+
+```bash
+# Print tokens and AST JSON for the default sample
+BUMPS_DEBUG=1 node packages/parser/languages/bumps/run-bumps.cjs
+
+# Or for a specific file
+BUMPS_DEBUG=1 node packages/parser/languages/bumps/run-bumps.cjs path/to/file.b
+```
+
+When enabled, the runner prints the token stream (as `[tag, value]` pairs) and the parsed AST JSON. This is useful for verifying lexer output and grammar reductions while iterating.
 
 ### Performance and trade-offs
 
