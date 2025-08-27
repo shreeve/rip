@@ -256,8 +256,12 @@ exports.bnf =
     o 'CS LPAREN kill_items RPAREN', '$$ = yy.node("ArgsKILL", {items: $3})'
   ]
   kill_items: [
-    o 'lvalue', '$$ = [$1]'
-    o 'kill_items COMMA lvalue', '$1.push($3); $$ = $1'
+    o 'kill_item', '$$ = Array.isArray($1) ? $1 : [$1]'
+    o 'kill_items COMMA kill_item', 'if (Array.isArray($3)) { Array.prototype.push.apply($1, $3); } else { $1.push($3); } $$ = $1'
+  ]
+  kill_item: [
+    o 'lvalue', '$$ = $1'
+    o 'LPAREN kill_items RPAREN', '$$ = $2'
   ]
 
   new_list: [
