@@ -396,6 +396,7 @@ exports.bnf =
   ]
 
   lvalue: [
+    o 'NAME LPAREN exprlist RPAREN', '$$ = yy.node("Var", {global: false, name: $1, subs: $3})'
     o 'varref', '$$ = $1'
     o 'NAME', '$$ = yy.node("Var", {global: false, name: $1, subs: []})'
   ]
