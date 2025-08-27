@@ -625,8 +625,8 @@ class Generator
       parseTable: #{tableCode.moduleCode},
       defaultActions: #{JSON.stringify(@defaultActions).replace /"([0-9]+)":/g, "$1:"},
       performAction: #{@performAction},
-      parseError: function #{@parseError},
-      parse: function #{@parse}
+      parseError: #{@parseError},
+      parse: #{@parse}
     }"""
 
     {commonCode: tableCode.commonCode, moduleCode}
