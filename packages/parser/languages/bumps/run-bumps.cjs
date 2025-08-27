@@ -11,7 +11,7 @@ function readSource(argv) {
     const p = path.resolve(argv[2]);
     return fs.readFileSync(p, 'utf8');
   }
-  return 'SET X=1\nWRITE "OK"';
+  return 'SET X=1,Y=2\nWRITE "A", 1, X\nREAD X:5\nDO ^ROUT\n';
 }
 
 class Adapter {

@@ -100,10 +100,25 @@ exports.bnf =
   ]
 
   cmd: [
-    o 'postcond cmd_word cmd_args', '$$ = yy.node("Cmd", {pc: $1, op: $2, args: $3})'
-    o 'postcond cmd_word', '$$ = yy.node("Cmd", {pc: $1, op: $2, args: []})'
-    o 'cmd_word cmd_args', '$$ = yy.node("Cmd", {pc: null, op: $1, args: $2})'
-    o 'cmd_word', '$$ = yy.node("Cmd", {pc: null, op: $1, args: []})'
+    # Command-specific forms
+    o 'postcond SET set_list',   '$$ = yy.node("Cmd", {pc: $1, op: "SET",   args: $3})'
+    o 'SET set_list',            '$$ = yy.node("Cmd", {pc: null, op: "SET",  args: $2})'
+    o 'postcond WRITE write_list','$$ = yy.node("Cmd", {pc: $1, op: "WRITE", args: $3})'
+    o 'WRITE write_list',        '$$ = yy.node("Cmd", {pc: null, op: "WRITE",args: $2})'
+    o 'postcond READ read_list', '$$ = yy.node("Cmd", {pc: $1, op: "READ",  args: $3})'
+    o 'READ read_list',          '$$ = yy.node("Cmd", {pc: null, op: "READ", args: $2})'
+    o 'postcond NEW new_list',   '$$ = yy.node("Cmd", {pc: $1, op: "NEW",   args: $3})'
+    o 'NEW new_list',            '$$ = yy.node("Cmd", {pc: null, op: "NEW",  args: $2})'
+    o 'postcond KILL kill_list', '$$ = yy.node("Cmd", {pc: $1, op: "KILL",  args: $3})'
+    o 'KILL kill_list',          '$$ = yy.node("Cmd", {pc: null, op: "KILL", args: $2})'
+    o 'postcond DO do_list',     '$$ = yy.node("Cmd", {pc: $1, op: "DO",    args: $3})'
+    o 'DO do_list',              '$$ = yy.node("Cmd", {pc: null, op: "DO",   args: $2})'
+
+    # Generic fallback: other commands with expression arglists
+    o 'postcond cmd_word CS exprlist', '$$ = yy.node("Cmd", {pc: $1, op: $2, args: $4})'
+    o 'cmd_word CS exprlist',          '$$ = yy.node("Cmd", {pc: null, op: $1, args: $3})'
+    o 'postcond cmd_word',             '$$ = yy.node("Cmd", {pc: $1, op: $2, args: []})'
+    o 'cmd_word',                      '$$ = yy.node("Cmd", {pc: null, op: $1, args: []})'
   ]
 
   postcond: [ o 'COLON expr', '$$ = $2' ]
@@ -156,7 +171,10 @@ exports.bnf =
     o 'set_item', '$$ = [$1]'
     o 'set_items COMMA set_item', '$1.push($3); $$ = $1'
   ]
-  set_item: [ o 'lvalue EQ expr', '$$ = yy.node("Set", {lhs: $1, rhs: $3})' ]
+  set_item: [
+    o 'lvalue EQ expr', '$$ = yy.node("Set", {lhs: $1, rhs: $3})'
+    o 'NAME EQ expr', '$$ = yy.node("Set", {lhs: yy.node("Var", {global: false, name: $1, subs: []}), rhs: $3})'
+  ]
 
   kill_list: [
     o 'CS kill_items', '$$ = yy.node("ArgsKILL", {items: $2})'
@@ -234,6 +252,7 @@ exports.bnf =
   primary: [
     o 'NUMBER', '$$ = yy.node("Number", {value: +yytext})'
     o 'STRING', '$$ = yy.node("String", {value: yytext})'
+    o 'NAME', '$$ = yy.node("Var", {global: false, name: $1, subs: []})'
     o 'varref', '$$ = $1'
     o 'LPAREN expr RPAREN', '$$ = $2'
     o 'dolfn_call', '$$ = $1'
@@ -259,7 +278,10 @@ exports.bnf =
     o 'ZDOLFN LPAREN exprlist RPAREN', '$$ = yy.node("DollarFn", {name: $1, zext: true, args: $3})'
   ]
 
-  lvalue: [ o 'varref', '$$ = $1' ]
+  lvalue: [
+    o 'varref', '$$ = $1'
+    o 'NAME', '$$ = yy.node("Var", {global: false, name: $1, subs: []})'
+  ]
 
 # -------------------------- node factory --------------------------
 # At runtime, provide yy.node via the runner; no moduleInclude injection here.

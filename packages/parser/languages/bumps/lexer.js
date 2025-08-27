@@ -30,6 +30,7 @@ export class BumpsLexer {
     for (let li = 0; li < lines.length; li++) {
       let line = lines[li];
       let pos = 0;
+      let afterCommand = false;
       // DOTS at start
       const mDots = line.match(/^\.+/);
       if (mDots) {
@@ -43,14 +44,18 @@ export class BumpsLexer {
       if (m) {
         const word = m[0];
         const cmd = this.commandToken(word);
-        if (cmd) out.push([cmd, word, this.loc(li, pos, li, pos + word.length)]);
-        else out.push(['LABEL', word, this.loc(li, pos, li, pos + word.length)]);
+        if (cmd) {
+          out.push([cmd, word, this.loc(li, pos, li, pos + word.length)]);
+          afterCommand = true;
+        } else {
+          out.push(['LABEL', word, this.loc(li, pos, li, pos + word.length)]);
+        }
         pos += word.length;
         line = line.slice(word.length);
       }
-      // CS after any command or label spacing
+      // optional spacing after command
       let mws = line.match(/^[ \t]+/);
-      if (mws) {
+      if (mws && afterCommand) {
         const ws = mws[0];
         out.push(['CS', ws, this.loc(li, pos, li, pos + ws.length)]);
         pos += ws.length;
@@ -59,60 +64,55 @@ export class BumpsLexer {
       // Arguments / rest of line
       while (line && line.length > 0) {
         let mm;
+        if ((mm = line.match(/^\(/))) {
+          out.push(['LPAREN', '(', this.loc(li, pos, li, pos + 1)]);
+          pos += 1; line = line.slice(1); continue;
+        }
+        if ((mm = line.match(/^\)/))) {
+          out.push(['RPAREN', ')', this.loc(li, pos, li, pos + 1)]);
+          pos += 1; line = line.slice(1); continue;
+        }
+        if ((mm = line.match(/^:/))) {
+          out.push(['COLON', ':', this.loc(li, pos, li, pos + 1)]);
+          pos += 1; line = line.slice(1); continue;
+        }
         if ((mm = line.match(/^"(?:[^"\\]|\\.)*"/))) {
           const s = mm[0];
           out.push(['STRING', s, this.loc(li, pos, li, pos + s.length)]);
-          pos += s.length;
-          line = line.slice(s.length);
-          continue;
+          pos += s.length; line = line.slice(s.length); continue;
         }
         if ((mm = line.match(/^[0-9]+(?:\.[0-9]+)?/))) {
           const n = mm[0];
           out.push(['NUMBER', n, this.loc(li, pos, li, pos + n.length)]);
-          pos += n.length;
-          line = line.slice(n.length);
-          continue;
+          pos += n.length; line = line.slice(n.length); continue;
         }
         if ((mm = line.match(/^,/))) {
           out.push(['COMMA', ',', this.loc(li, pos, li, pos + 1)]);
-          pos += 1;
-          line = line.slice(1);
-          continue;
+        	  pos += 1; line = line.slice(1); continue;
         }
         if ((mm = line.match(/^=/))) {
           out.push(['EQ', '=', this.loc(li, pos, li, pos + 1)]);
-          pos += 1;
-          line = line.slice(1);
-          continue;
+          pos += 1; line = line.slice(1); continue;
         }
         if ((mm = line.match(/^\^/))) {
           out.push(['CARET', '^', this.loc(li, pos, li, pos + 1)]);
-          pos += 1;
-          line = line.slice(1);
-          continue;
+          pos += 1; line = line.slice(1); continue;
         }
         if ((mm = line.match(/^@/))) {
           out.push(['AT', '@', this.loc(li, pos, li, pos + 1)]);
-          pos += 1;
-          line = line.slice(1);
-          continue;
+          pos += 1; line = line.slice(1); continue;
         }
         if ((mm = line.match(/^[A-Za-z%][A-Za-z0-9]*/))) {
           const name = mm[0];
           out.push(['NAME', name, this.loc(li, pos, li, pos + name.length)]);
-          pos += name.length;
-          line = line.slice(name.length);
-          continue;
+          pos += name.length; line = line.slice(name.length); continue;
         }
         if ((mm = line.match(/^[ \t]+/))) {
-          pos += mm[0].length;
-          line = line.slice(mm[0].length);
-          continue;
+          pos += mm[0].length; line = line.slice(mm[0].length); continue;
         }
         // Fallback: consume one char to avoid infinite loop
         out.push(['UNKNOWN', line[0], this.loc(li, pos, li, pos + 1)]);
-        pos += 1;
-        line = line.slice(1);
+        pos += 1; line = line.slice(1);
       }
       out.push(['NEWLINE', '\n', this.loc(li, pos, li, pos)]);
     }
