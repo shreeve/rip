@@ -97,7 +97,11 @@ export class BumpsLexer {
         }
         if ((mm = line.match(/^,/))) {
           out.push(['COMMA', ',', this.loc(li, pos, li, pos + 1)]);
-          pos += 1; line = line.slice(1); continue;
+          pos += 1; line = line.slice(1);
+          // optional space after comma should not be treated as command separator
+          const msp = line.match(/^[ \t]+/);
+          if (msp) { pos += msp[0].length; line = line.slice(msp[0].length); }
+          continue;
         }
         if ((mm = line.match(/^=/))) {
           out.push(['EQ', '=', this.loc(li, pos, li, pos + 1)]);
