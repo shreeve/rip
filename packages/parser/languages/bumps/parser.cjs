@@ -354,11 +354,7 @@ break;
       }
     }
 };
-function() {
-      return this.node != null ? this.node : this.node = function(type, props) {
-        return Object.assign({type}, props || {});
-      };
-    }
+
 function Parser () { this.yy = {}; }
 Parser.prototype = parser;
 parser.Parser = Parser;

@@ -262,10 +262,7 @@ exports.bnf =
   lvalue: [ o 'varref', '$$ = $1' ]
 
 # -------------------------- node factory --------------------------
-# You already use helper factories in Rip; this adds a default if yy.node isn’t provided.
-if !exports.moduleInclude?
-  exports.moduleInclude = ->
-    @node ?= (type, props) -> Object.assign {type}, (props or {})
+# At runtime, provide yy.node via the runner; no moduleInclude injection here.
 
 # -------------------------- lexer --------------------------
 # Jison lex spec (CoffeeScript object form). Two primary modes: INITIAL (line start), CMD, EXPR.

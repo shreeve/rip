@@ -2,18 +2,9 @@
 
 const fs = require('fs');
 const path = require('path');
-const parser = require('./parser.cjs');
-let BumpsLexer, BumpsRewriter;
-try {
-  ({ BumpsLexer } = require('./lexer.js'));
-} catch (e) {
-  ({ BumpsLexer } = require('./lexer.coffee'));
-}
-try {
-  ({ BumpsRewriter } = require('./rewriter.coffee'));
-} catch (e) {
-  BumpsRewriter = class { rewrite(tokens){ return tokens; } };
-}
+const parserMod = require('./parser.cjs');
+let BumpsLexer;
+class BumpsRewriter { rewrite(tokens){ return tokens; } }
 
 function readSource(argv) {
   if (argv.length > 2) {
@@ -54,25 +45,30 @@ class Adapter {
 }
 
 function main() {
+  // Lazy import ESM lexer
+  const loadLexer = () => import('./lexer.js').then(m => m.BumpsLexer);
+
+  loadLexer().then((Ctor) => {
+    BumpsLexer = Ctor;
   const src = readSource(process.argv);
   const lex = new BumpsLexer();
   const toks = lex.tokenize(src);
   const rewritten = new BumpsRewriter().rewrite(toks);
 
-  parser.tokens = rewritten;
-  parser.yy = parser.yy || {};
-  parser.yy.node = parser.yy.node || ((type, props) => ({ type, ...(props || {}) }));
-  parser.lexer = new Adapter(parser.tokens);
+  const p = parserMod.parser;
+  p.tokens = rewritten;
+  p.yy = p.yy || {};
+  p.yy.node = p.yy.node || ((type, props) => ({ type, ...(props || {}) }));
+  p.lexer = new Adapter(p.tokens);
 
   try {
-    const ok = parser.parse(src);
+    const ok = parserMod.parse(src);
     console.log(ok === true ? 'accepted' : 'ok');
   } catch (e) {
     console.error('Parse error:', e.message);
     process.exit(1);
   }
+  }).catch((e) => { console.error('Failed to load lexer:', e.message); process.exit(1); });
 }
 
 if (require.main === module) main();
-
-
