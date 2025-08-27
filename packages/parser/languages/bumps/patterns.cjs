@@ -30,12 +30,17 @@ function parsePattern(input) {
     if (ch==='"') { const str=readString(); return applyCount({type:'String',value:str},count); }
     if (ch==='(') { next(); const items=[]; while(!eof() && peek()!==')'){ if(peek()===','){ next(); continue; } const a=parseAtom(); if(a) items.push(a); else break; } if(peek()===')') next(); return applyCount({type:'Group',items},count); }
     if (/^[A-Za-z]$/.test(ch)) {
+      const CLASS_CANON = { A: 'ALPHA', N: 'NUM', L: 'LOWER', U: 'UPPER' };
       // Read a contiguous class set like AN, AL, NU, etc.
       let names = '';
       while(!eof() && /^[A-Za-z]$/.test(peek())) names += next();
       names = names.toUpperCase();
-      if (names.length === 1) return applyCount({type:'Class', name: names}, count);
-      return applyCount({type:'ClassSet', names: names.split('')}, count);
+      if (names.length === 1) {
+        const nm = names;
+        return applyCount({type:'Class', name: nm, canonical: CLASS_CANON[nm] || nm}, count);
+      }
+      const arr = names.split('');
+      return applyCount({type:'ClassSet', names: arr, canonicals: arr.map(n=>CLASS_CANON[n]||n)}, count);
     }
     next(); return applyCount({type:'Char',value:ch},count); }
   function parseSeq(){ const items=[]; while(!eof()){ const a=parseAtom(); if(a) items.push(a); else break; } return {type:'PatternSeq', items}; }
