@@ -266,7 +266,7 @@ case 146:
 this.$ = yy.node("Rel", {op: "NSORTAFTER", lhs: $$[$0-2], rhs: $$[$0]})
 break;
 case 147:
-this.$ = yy.node("PatternMatch", {lhs: $$[$0-2], pat: yytext})
+this.$ = yy.node("PatternMatch", {lhs: $$[$0-2], pat: (yy.parsePattern ? yy.parsePattern($$[$0]) : $$[$0])})
 break;
 case 148:
 this.$ = yy.node("UnOp", {op: "NOT", expr: $$[$0-2]})

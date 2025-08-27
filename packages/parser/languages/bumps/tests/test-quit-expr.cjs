@@ -23,5 +23,3 @@ require('../../../../../coffeescript/register.js');
   assert.equal(ast.lines[0].cmds[0].args.length, 1);
   console.log('PASS');
 })().catch(e => { console.error('FAIL', e); process.exit(1); });
-
-
