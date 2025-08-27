@@ -107,11 +107,76 @@ export class BumpsLexer {
           out.push(['EQ', '=', this.loc(li, pos, li, pos + 1)]);
           pos += 1; line = line.slice(1); afterCmdSep = false; continue;
         }
+        // arithmetic and logical operators
+        if ((mm = line.match(/^\*\*/))) {
+          out.push(['EXP', '**', this.loc(li, pos, li, pos + 2)]);
+          pos += 2; line = line.slice(2); continue;
+        }
+        if ((mm = line.match(/^\*/))) {
+          out.push(['MUL', '*', this.loc(li, pos, li, pos + 1)]);
+          pos += 1; line = line.slice(1); continue;
+        }
+        if ((mm = line.match(/^\\/))) {
+          out.push(['IDIV', '\\', this.loc(li, pos, li, pos + 1)]);
+          pos += 1; line = line.slice(1); continue;
+        }
+        if ((mm = line.match(/^#/))) {
+          out.push(['MOD', '#', this.loc(li, pos, li, pos + 1)]);
+          pos += 1; line = line.slice(1); continue;
+        }
+        if ((mm = line.match(/^\//))) {
+          out.push(['DIV', '/', this.loc(li, pos, li, pos + 1)]);
+          pos += 1; line = line.slice(1); continue;
+        }
+        if ((mm = line.match(/^&/))) {
+          out.push(['AND', '&', this.loc(li, pos, li, pos + 1)]);
+          pos += 1; line = line.slice(1); continue;
+        }
+        if ((mm = line.match(/^!/))) {
+          out.push(['OR', '!', this.loc(li, pos, li, pos + 1)]);
+          pos += 1; line = line.slice(1); continue;
+        }
+        if ((mm = line.match(/^_/))) {
+          out.push(['CONCAT', '_', this.loc(li, pos, li, pos + 1)]);
+          pos += 1; line = line.slice(1); continue;
+        }
+        if ((mm = line.match(/^>=/))) {
+          out.push(['GE', '>=', this.loc(li, pos, li, pos + 2)]);
+          pos += 2; line = line.slice(2); continue;
+        }
+        if ((mm = line.match(/^<=/))) {
+          out.push(['LE', '<=', this.loc(li, pos, li, pos + 2)]);
+          pos += 2; line = line.slice(2); continue;
+        }
+        if ((mm = line.match(/^>/))) {
+          out.push(['GT', '>', this.loc(li, pos, li, pos + 1)]);
+          pos += 1; line = line.slice(1); continue;
+        }
+        if ((mm = line.match(/^</))) {
+          out.push(['LT', '<', this.loc(li, pos, li, pos + 1)]);
+          pos += 1; line = line.slice(1); continue;
+        }
+        if ((mm = line.match(/^'=/))) {
+          out.push(['NE', "'=", this.loc(li, pos, li, pos + 2)]);
+          pos += 2; line = line.slice(2); continue;
+        }
         if ((mm = line.match(/^\^/))) {
           out.push(['CARET', '^', this.loc(li, pos, li, pos + 1)]);
           pos += 1; line = line.slice(1); afterCmdSep = false; continue;
         }
-        // relations and pattern: ], [, ]], '?xxx'
+        // relations and pattern: negated first, then normal: ']]  '], ' [  then ] , [ , ]], '?xxx'
+        if ((mm = line.match(/^'\]\]/))) {
+          out.push(['NSORTAFTER', "']]", this.loc(li, pos, li, pos + 3)]);
+          pos += 3; line = line.slice(3); continue;
+        }
+        if ((mm = line.match(/^'\]/))) {
+          out.push(['NFOLLOWS', "']", this.loc(li, pos, li, pos + 2)]);
+          pos += 2; line = line.slice(2); continue;
+        }
+        if ((mm = line.match(/^'\[/))) {
+          out.push(['NCONTAINS', "'[", this.loc(li, pos, li, pos + 2)]);
+          pos += 2; line = line.slice(2); continue;
+        }
         if ((mm = line.match(/^\]\]/))) {
           out.push(['SORTAFTER', ']]', this.loc(li, pos, li, pos + 2)]);
           pos += 2; line = line.slice(2); continue;
@@ -124,16 +189,37 @@ export class BumpsLexer {
           out.push(['CONTAINS', '[', this.loc(li, pos, li, pos + 1)]);
           pos += 1; line = line.slice(1); continue;
         }
-        if ((mm = line.match(/^\?[^\s,\)]+/))) {
-          const s = mm[0];
-          // Emit PMATCH then PATTERN
-          out.push(['PMATCH', '?', this.loc(li, pos, li, pos + 1)]);
-          out.push(['PATTERN', s.slice(1), this.loc(li, pos + 1, li, pos + s.length)]);
-          pos += s.length; line = line.slice(s.length); continue;
+        if ((mm = line.match(/^\?/))) {
+          // PMATCH then PATTERN or empty pattern (let parser handle)
+          // If followed immediately by non-space sequence, split into PMATCH and PATTERN
+          const rest = line.slice(1);
+          const mp = rest.match(/^[^\s,\)]+/);
+          if (mp) {
+            const s = mp[0];
+            out.push(['PMATCH', '?', this.loc(li, pos, li, pos + 1)]);
+            out.push(['PATTERN', s, this.loc(li, pos + 1, li, pos + 1 + s.length)]);
+            pos += 1 + s.length; line = line.slice(1 + s.length); continue;
+          } else {
+            out.push(['PMATCH', '?', this.loc(li, pos, li, pos + 1)]);
+            pos += 1; line = line.slice(1); continue;
+          }
         }
         if ((mm = line.match(/^@/))) {
           out.push(['AT', '@', this.loc(li, pos, li, pos + 1)]);
           pos += 1; line = line.slice(1); afterCmdSep = false; continue;
+        }
+        // $-functions and $Z- functions
+        if ((mm = line.match(/^\$(?:z|Z)[A-Za-z][A-Za-z0-9]*/))) {
+          const t = mm[0];
+          const name = t.slice(2).toUpperCase();
+          out.push(['ZDOLFN', name, this.loc(li, pos, li, pos + t.length)]);
+          pos += t.length; line = line.slice(t.length); continue;
+        }
+        if ((mm = line.match(/^\$[A-Za-z][A-Za-z0-9]*/))) {
+          const t = mm[0];
+          const name = t.slice(1).toUpperCase();
+          out.push(['DOLFN', name, this.loc(li, pos, li, pos + t.length)]);
+          pos += t.length; line = line.slice(t.length); continue;
         }
         if ((mm = line.match(/^[A-Za-z%][A-Za-z0-9]*/))) {
           const name = mm[0];
@@ -154,6 +240,15 @@ export class BumpsLexer {
         if ((mm = line.match(/^\+/))) {
           out.push(['PLUS', '+', this.loc(li, pos, li, pos + 1)]);
           pos += 1; line = line.slice(1); afterCmdSep = false; continue;
+        }
+        if ((mm = line.match(/^-+/))) {
+          // one minus at a time as MINUS
+          out.push(['MINUS', '-', this.loc(li, pos, li, pos + 1)]);
+          pos += 1; line = line.slice(1); afterCmdSep = false; continue;
+        }
+        if ((mm = line.match(/^'/))) {
+          out.push(['NOT', "'", this.loc(li, pos, li, pos + 1)]);
+          pos += 1; line = line.slice(1); continue;
         }
         if ((mm = line.match(/^[ \t]+/))) {
           // Lookahead: if next token is a command, emit CS to separate commands

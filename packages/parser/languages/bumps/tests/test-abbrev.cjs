@@ -7,7 +7,7 @@ const { attachBlocks } = require('../blocks.coffee');
 
 (async () => {
   const { BumpsLexer } = await import('../lexer.js');
-  const src = 'DO ^R(1,2), L^R\n';
+  const src = 's x=1 w "A" r x:1 d ^r\n';
   const lex = new BumpsLexer();
   const toks = lex.tokenize(src);
   const p = parserMod.parser;
@@ -23,10 +23,10 @@ const { attachBlocks } = require('../blocks.coffee');
   let ast = parserMod.parse(src);
   if (ast && ast.type === 'Program') ast = attachBlocks(ast);
   assert.equal(ast.type, 'Program');
-  const [line] = ast.lines;
-  assert.equal(line.cmds[0].op, 'DO');
-  assert.equal(line.cmds[0].args.targets.length, 2);
-  assert.equal(line.cmds[0].args.targets[0].args.length, 2);
-  assert.equal(line.cmds[0].args.targets[1].label, 'L');
+  const line = ast.lines[0];
+  assert.equal(line.cmds.length, 4);
+  assert.deepEqual(line.cmds.map(c=>c.op), ['SET','WRITE','READ','DO']);
   console.log('PASS');
-})();
+})().catch(e => { console.error('FAIL', e); process.exit(1); });
+
+

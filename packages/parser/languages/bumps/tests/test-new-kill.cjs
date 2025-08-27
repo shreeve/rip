@@ -30,5 +30,3 @@ const { attachBlocks } = require('../blocks.coffee');
   assert.equal(l2.cmds[0].args.items.length, 2);
   console.log('PASS');
 })().catch(e => { console.error('FAIL', e); process.exit(1); });
-
-
