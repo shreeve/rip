@@ -7,6 +7,7 @@ let BumpsLexer;
 // Enable requiring CoffeeScript modules
 require('../../../../coffeescript/register.js');
 const { BumpsRewriter } = require('./rewriter.coffee');
+const { attachBlocks } = require('./blocks.coffee');
 
 function readSource(argv) {
   if (argv.length > 2) {
@@ -64,11 +65,13 @@ function main() {
   p.lexer = new Adapter(p.tokens);
 
   try {
-    const ok = parserMod.parse(src);
-    console.log(ok === true ? 'accepted' : 'ok');
+    const ast = parserMod.parse(src);
+    if (ast && ast.type === 'Program') attachBlocks(ast);
+    console.log(ast === true ? 'accepted' : 'ok');
     // Optional: print a simple JSON of tokens for debugging
     if (process.env.BUMPS_DEBUG) {
       console.log(JSON.stringify(rewritten.map(([t,v])=>[t,v]), null, 2));
+      console.log(JSON.stringify(ast, null, 2));
     }
   } catch (e) {
     console.error('Parse error:', e.message);
@@ -78,3 +81,39 @@ function main() {
 }
 
 if (require.main === module) main();
+
+// Attach IF/ELSE blocks using Line.depth
+function attachBlocks(program) {
+  if (!program || program.type !== 'Program' || !Array.isArray(program.lines)) return;
+  const lines = program.lines;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line || !Array.isArray(line.cmds) || line.cmds.length === 0) continue;
+    const cmd = line.cmds[0];
+    if (cmd && cmd.type === 'If') {
+      const baseDepth = line.depth || 0;
+      // then-block: lines strictly deeper than baseDepth until depth <= baseDepth or ELSE at same depth
+      const thenLines = [];
+      let j = i + 1;
+      // collect then lines
+      while (j < lines.length && (lines[j].depth || 0) > baseDepth) {
+        thenLines.push(lines[j]);
+        j++;
+      }
+      // else-case at same depth
+      const elseLines = [];
+      if (j < lines.length) {
+        const maybeElse = lines[j];
+        if (maybeElse.depth === baseDepth && maybeElse.cmds && maybeElse.cmds[0] && maybeElse.cmds[0].type === 'Else') {
+          j++;
+          while (j < lines.length && (lines[j].depth || 0) > baseDepth) {
+            elseLines.push(lines[j]);
+            j++;
+          }
+        }
+      }
+      cmd.then = thenLines;
+      if (elseLines.length) cmd.else = elseLines;
+    }
+  }
+}
