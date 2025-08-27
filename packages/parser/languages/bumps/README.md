@@ -70,6 +70,10 @@ const ok = parser.parse(source);
 
 If you compile the Jison-style `exports.lex` into a lexer with jison-lex, bind its instance as `parser.lexer`.
 
+### Runner
+
+- Runner can optionally print tokens (set `BUMPS_DEBUG=1`).
+
 ### Performance and trade-offs
 
 - Performance: LR parsing is linear in input size with small constant factors (table lookups). Solar emits compact tables and straight-line code; generation time is irrelevant at runtime.
