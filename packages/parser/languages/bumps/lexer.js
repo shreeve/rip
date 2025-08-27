@@ -30,7 +30,8 @@ export class BumpsLexer {
     for (let li = 0; li < lines.length; li++) {
       let line = lines[li];
       let pos = 0;
-      let afterCommand = false;
+      let afterCommand = false;      // true right after emitting a command at line start or chained
+      let afterCmdSep = false;       // true right after emitting CS between commands
       // DOTS at start
       const mDots = line.match(/^\.+/);
       if (mDots) {
@@ -66,6 +67,8 @@ export class BumpsLexer {
         out.push(['CS', ws, this.loc(li, pos, li, pos + ws.length)]);
         pos += ws.length;
         line = line.slice(ws.length);
+        afterCmdSep = true;
+        afterCommand = false;
       }
       // Arguments / rest of line
       while (line && line.length > 0) {
@@ -85,12 +88,12 @@ export class BumpsLexer {
         if ((mm = line.match(/^"(?:[^"\\]|\\.)*"/))) {
           const s = mm[0];
           out.push(['STRING', s, this.loc(li, pos, li, pos + s.length)]);
-          pos += s.length; line = line.slice(s.length); continue;
+          pos += s.length; line = line.slice(s.length); afterCmdSep = false; afterCommand = false; continue;
         }
         if ((mm = line.match(/^[0-9]+(?:\.[0-9]+)?/))) {
           const n = mm[0];
           out.push(['NUMBER', n, this.loc(li, pos, li, pos + n.length)]);
-          pos += n.length; line = line.slice(n.length); continue;
+          pos += n.length; line = line.slice(n.length); afterCmdSep = false; continue;
         }
         if ((mm = line.match(/^,/))) {
           out.push(['COMMA', ',', this.loc(li, pos, li, pos + 1)]);
@@ -98,23 +101,47 @@ export class BumpsLexer {
         }
         if ((mm = line.match(/^=/))) {
           out.push(['EQ', '=', this.loc(li, pos, li, pos + 1)]);
-          pos += 1; line = line.slice(1); continue;
+          pos += 1; line = line.slice(1); afterCmdSep = false; continue;
         }
         if ((mm = line.match(/^\^/))) {
           out.push(['CARET', '^', this.loc(li, pos, li, pos + 1)]);
-          pos += 1; line = line.slice(1); continue;
+          pos += 1; line = line.slice(1); afterCmdSep = false; continue;
         }
         if ((mm = line.match(/^@/))) {
           out.push(['AT', '@', this.loc(li, pos, li, pos + 1)]);
-          pos += 1; line = line.slice(1); continue;
+          pos += 1; line = line.slice(1); afterCmdSep = false; continue;
         }
         if ((mm = line.match(/^[A-Za-z%][A-Za-z0-9]*/))) {
           const name = mm[0];
+          // If we just emitted CS after a command, allow command chaining
+          if (afterCmdSep) {
+            const chained = this.commandToken(name);
+            if (chained) {
+              out.push([chained, name, this.loc(li, pos, li, pos + name.length)]);
+              afterCommand = true;
+              afterCmdSep = false;
+              pos += name.length; line = line.slice(name.length); continue;
+            }
+          }
           out.push(['NAME', name, this.loc(li, pos, li, pos + name.length)]);
-          pos += name.length; line = line.slice(name.length); continue;
+          pos += name.length; line = line.slice(name.length); afterCommand = false; afterCmdSep = false; continue;
         }
         if ((mm = line.match(/^[ \t]+/))) {
-          pos += mm[0].length; line = line.slice(mm[0].length); continue;
+          // Lookahead: if next token is a command, emit CS to separate commands
+          const ws = mm[0];
+          const after = line.slice(ws.length);
+          const mWord = after.match(/^[A-Za-z%][A-Za-z0-9]*/);
+          if (afterCommand) {
+            out.push(['CS', ws, this.loc(li, pos, li, pos + ws.length)]);
+            pos += ws.length; line = after; afterCmdSep = true; afterCommand = false; continue;
+          } else if (mWord) {
+            const nextCmd = this.commandToken(mWord[0]);
+            if (nextCmd) {
+              out.push(['CS', ws, this.loc(li, pos, li, pos + ws.length)]);
+              pos += ws.length; line = after; afterCmdSep = true; continue;
+            }
+          }
+          pos += ws.length; line = after; continue;
         }
         // Fallback: consume one char to avoid infinite loop
         out.push(['UNKNOWN', line[0], this.loc(li, pos, li, pos + 1)]);
