@@ -4,7 +4,24 @@ const fs = require('fs');
 const path = require('path');
 const parserMod = require('./parser.cjs');
 let BumpsLexer;
-class BumpsRewriter { rewrite(tokens){ return tokens; } }
+class BumpsRewriter { rewrite(tokens){
+  // inline minimal rewriter: convert DOTS depth to INDENT/OUTDENT tokens
+  const out=[]; const stack=[0];
+  for (let i=0;i<tokens.length;i++){
+    const [tag,val,loc]=tokens[i];
+    if (tag==='DOTS'){
+      const depth = typeof val==='string'? val.length : +val;
+      let j=i+1; if (tokens[j] && tokens[j][0]==='CS') j++;
+      const prev = stack[stack.length-1];
+      if (depth>prev){ out.push(['INDENT', depth, loc]); stack.push(depth); }
+      else if (depth<prev){ while (stack.length>0 && stack[stack.length-1]>depth){ stack.pop(); out.push(['OUTDENT', depth, loc]); } }
+      i=j-1; continue;
+    }
+    out.push([tag,val,loc]);
+  }
+  while (stack.length>1){ stack.pop(); out.push(['OUTDENT', 0, tokens[tokens.length-1]? tokens[tokens.length-1][2]:{}]); }
+  return out;
+} }
 
 function readSource(argv) {
   if (argv.length > 2) {
@@ -64,6 +81,10 @@ function main() {
   try {
     const ok = parserMod.parse(src);
     console.log(ok === true ? 'accepted' : 'ok');
+    // Optional: print a simple JSON of tokens for debugging
+    if (process.env.BUMPS_DEBUG) {
+      console.log(JSON.stringify(rewritten.map(([t,v])=>[t,v]), null, 2));
+    }
   } catch (e) {
     console.error('Parse error:', e.message);
     process.exit(1);

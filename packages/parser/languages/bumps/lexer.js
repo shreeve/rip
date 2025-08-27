@@ -38,6 +38,12 @@ export class BumpsLexer {
         out.push(['DOTS', dots, this.loc(li, pos, li, pos + dots.length)]);
         pos += dots.length;
         line = line.slice(dots.length);
+        // Trim spaces after dot-indentation before reading command
+        const mwsAfterDots = line.match(/^[ \t]+/);
+        if (mwsAfterDots) {
+          pos += mwsAfterDots[0].length;
+          line = line.slice(mwsAfterDots[0].length);
+        }
       }
       // LABEL or COMMAND at start
       let m = line.match(/^[A-Za-z%][A-Za-z0-9]*/);
@@ -88,7 +94,7 @@ export class BumpsLexer {
         }
         if ((mm = line.match(/^,/))) {
           out.push(['COMMA', ',', this.loc(li, pos, li, pos + 1)]);
-        	  pos += 1; line = line.slice(1); continue;
+          pos += 1; line = line.slice(1); continue;
         }
         if ((mm = line.match(/^=/))) {
           out.push(['EQ', '=', this.loc(li, pos, li, pos + 1)]);
@@ -127,6 +133,10 @@ export class BumpsLexer {
     if (w === 'do' || w === 'd') return 'DO';
     if (w === 'kill' || w === 'k') return 'KILL';
     if (w === 'new' || w === 'n') return 'NEW';
+    if (w === 'if' || w === 'i') return 'IF';
+    if (w === 'else' || w === 'e') return 'ELSE';
+    if (w === 'lock' || w === 'l') return 'LOCK';
+    if (w === 'merge' || w === 'm') return 'MERGE';
     return null;
   }
 

@@ -114,6 +114,18 @@ exports.bnf =
     o 'postcond DO do_list',     '$$ = yy.node("Cmd", {pc: $1, op: "DO",    args: $3})'
     o 'DO do_list',              '$$ = yy.node("Cmd", {pc: null, op: "DO",   args: $2})'
 
+    # IF/ELSE (blocks can be assembled later by depth from Line.depth)
+    o 'postcond IF CS expr',     '$$ = yy.node("If", {pc: $1, cond: $4})'
+    o 'IF CS expr',              '$$ = yy.node("If", {pc: null, cond: $3})'
+    o 'postcond ELSE',           '$$ = yy.node("Else", {pc: $1})'
+    o 'ELSE',                    '$$ = yy.node("Else", {pc: null})'
+
+    # LOCK / MERGE with postconditions
+    o 'postcond LOCK lock_list', '$$ = yy.node("Cmd", {pc: $1, op: "LOCK",  args: $3})'
+    o 'LOCK lock_list',          '$$ = yy.node("Cmd", {pc: null, op: "LOCK", args: $2})'
+    o 'postcond MERGE merge_list','$$ = yy.node("Cmd", {pc: $1, op: "MERGE", args: $3})'
+    o 'MERGE merge_list',        '$$ = yy.node("Cmd", {pc: null, op: "MERGE",args: $2})'
+
     # Generic fallback: other commands with expression arglists
     o 'postcond cmd_word CS exprlist', '$$ = yy.node("Cmd", {pc: $1, op: $2, args: $4})'
     o 'cmd_word CS exprlist',          '$$ = yy.node("Cmd", {pc: null, op: $1, args: $3})'
@@ -196,10 +208,14 @@ exports.bnf =
     o 'entryref_list COMMA entryref', '$1.push($3); $$ = $1'
   ]
   entryref: [
-    o 'NAME', '$$ = yy.node("EntryRef", {label: $1, routine: null, offset: null, args: []})'
-    o 'NAME CARET NAME', '$$ = yy.node("EntryRef", {label: $1, routine: $3, offset: null, args: []})'
-    o 'NAME PLUS NUMBER CARET NAME', '$$ = yy.node("EntryRef", {label: $1, routine: $5, offset: +$3, args: []})'
-    o 'CARET NAME', '$$ = yy.node("EntryRef", {label: null, routine: $2, offset: null, args: []})'
+    o 'NAME opt_entryargs', '$$ = yy.node("EntryRef", {label: $1, routine: null, offset: null, args: $2})'
+    o 'NAME CARET NAME opt_entryargs', '$$ = yy.node("EntryRef", {label: $1, routine: $3, offset: null, args: $4})'
+    o 'NAME PLUS NUMBER CARET NAME opt_entryargs', '$$ = yy.node("EntryRef", {label: $1, routine: $5, offset: +$3, args: $6})'
+    o 'CARET NAME opt_entryargs', '$$ = yy.node("EntryRef", {label: null, routine: $2, offset: null, args: $3})'
+  ]
+  opt_entryargs: [
+    o 'LPAREN exprlist RPAREN', '$$ = $2'
+    o '', '$$ = []'
   ]
 
   write_list: [ o 'CS witems', '$$ = yy.node("ArgsWRITE", {items: $2})' ]
@@ -217,6 +233,25 @@ exports.bnf =
     o 'lvalue', '$$ = yy.node("ReadItem", {lhs: $1, timeout: null})'
     o 'lvalue COLON expr', '$$ = yy.node("ReadItem", {lhs: $1, timeout: $3})'
   ]
+
+  # LOCK
+  lock_list: [ o 'CS lock_items', '$$ = $2' ]
+  lock_items: [
+    o 'lock_item', '$$ = [$1]'
+    o 'lock_items COMMA lock_item', '$1.push($3); $$ = $1'
+  ]
+  lock_item: [
+    o 'lvalue', '$$ = yy.node("LockItem", {res: $1, timeout: null})'
+    o 'lvalue COLON expr', '$$ = yy.node("LockItem", {res: $1, timeout: $3})'
+  ]
+
+  # MERGE
+  merge_list: [ o 'CS merge_items', '$$ = $2' ]
+  merge_items: [
+    o 'merge_item', '$$ = [$1]'
+    o 'merge_items COMMA merge_item', '$1.push($3); $$ = $1'
+  ]
+  merge_item: [ o 'lvalue EQ lvalue', '$$ = yy.node("Merge", {target: $1, source: $3})' ]
 
   # ---- expressions ----
   expr: [
