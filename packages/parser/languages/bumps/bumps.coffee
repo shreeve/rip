@@ -253,13 +253,17 @@ exports.bnf =
 
   kill_list: [
     o 'CS kill_items', '$$ = yy.node("ArgsKILL", {items: $2})'
+    o 'CS LPAREN kill_items RPAREN', '$$ = yy.node("ArgsKILL", {items: $3})'
   ]
   kill_items: [
     o 'lvalue', '$$ = [$1]'
     o 'kill_items COMMA lvalue', '$1.push($3); $$ = $1'
   ]
 
-  new_list: [ o 'CS name_list', '$$ = yy.node("ArgsNEW", {names: $2})' ]
+  new_list: [
+    o 'CS name_list', '$$ = yy.node("ArgsNEW", {names: $2})'
+    o 'CS LPAREN name_list RPAREN', '$$ = yy.node("ArgsNEW", {names: $3})'
+  ]
   name_list: [
     o 'NAME', '$$ = [$1]'
     o 'name_list COMMA NAME', '$1.push($3); $$ = $1'
