@@ -21,5 +21,3 @@ require('../../../../../coffeescript/register.js');
   assert.deepEqual(ops, ['TSTART','TCOMMIT','TROLLBACK','TRESTART']);
   console.log('PASS');
 })().catch(e => { console.error('FAIL', e); process.exit(1); });
-
-

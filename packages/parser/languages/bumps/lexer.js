@@ -225,7 +225,9 @@ export class BumpsLexer {
         if ((mm = line.match(/^\$[A-Za-z][A-Za-z0-9]*/))) {
           const t = mm[0];
           const name = t.slice(1).toUpperCase();
-          out.push(['DOLFN', name, this.loc(li, pos, li, pos + t.length)]);
+          const next = line.charAt(t.length) || '';
+          const tag = next === '(' ? 'DOLFN' : 'DOLSPECVAR';
+          out.push([tag, name, this.loc(li, pos, li, pos + t.length)]);
           pos += t.length; line = line.slice(t.length); continue;
         }
         if ((mm = line.match(/^[A-Za-z%][A-Za-z0-9]*/))) {

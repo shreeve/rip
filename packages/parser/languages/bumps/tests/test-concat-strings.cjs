@@ -21,5 +21,3 @@ require('../../../../../coffeescript/register.js');
   assert.equal(item.lhs.name, 'X');
   console.log('PASS');
 })().catch(e => { console.error('FAIL', e); process.exit(1); });
-
-

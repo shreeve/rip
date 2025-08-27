@@ -24,5 +24,3 @@ require('../../../../../coffeescript/register.js');
   assert.equal(readIt.timeout.value, 2);
   console.log('PASS');
 })().catch(e => { console.error('FAIL', e); process.exit(1); });
-
-
