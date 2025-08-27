@@ -373,8 +373,7 @@ exports.bnf =
   ]
 
   varref: [
-    o 'opt_global NAME', '$$ = yy.node("Var", {global: $1, name: $2, subs: []})'
-    o 'opt_global NAME LPAREN exprlist RPAREN', '$$ = yy.node("Var", {global: $1, name: $2, subs: $4})'
+    o 'opt_global NAME opt_subs', '$$ = yy.node("Var", {global: $1, name: $2, subs: $3})'
     o 'AT NAME', '$$ = yy.node("Indirect", {kind: "name", target: $2})'
     o 'AT LPAREN expr RPAREN', '$$ = yy.node("Indirect", {kind: "expr", target: $3})'
   ]
