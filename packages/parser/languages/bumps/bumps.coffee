@@ -154,6 +154,10 @@ exports.bnf =
     o 'postcond opt_cs FOR for_header', '$$ = yy.node("For", {pc: $1, specs: $4})'
     o 'FOR for_header',                 '$$ = yy.node("For", {pc: null, specs: $2})'
 
+    # JOB variants: entryrefs with optional colon params after each target
+    o 'postcond opt_cs JOB job_list', '$$ = yy.node("Cmd", {pc: $1, op: "JOB", args: $4})'
+    o 'JOB job_list',                 '$$ = yy.node("Cmd", {pc: null, op: "JOB", args: $2})'
+
     # Generic fallback: other commands with expression arglists
     o 'postcond opt_cs cmd_word CS exprlist', '$$ = yy.node("Cmd", {pc: $1, op: $3, args: $5})'
     o 'cmd_word CS exprlist',          '$$ = yy.node("Cmd", {pc: null, op: $1, args: $3})'
@@ -269,12 +273,21 @@ exports.bnf =
     o 'NAME opt_entryargs', '$$ = yy.node("EntryRef", {label: $1, routine: null, offset: null, args: $2})'
     o 'NAME CARET NAME opt_entryargs', '$$ = yy.node("EntryRef", {label: $1, routine: $3, offset: null, args: $4})'
     o 'NAME PLUS NUMBER CARET NAME opt_entryargs', '$$ = yy.node("EntryRef", {label: $1, routine: $5, offset: +$3, args: $6})'
+    o 'NAME MINUS NUMBER CARET NAME opt_entryargs', '$$ = yy.node("EntryRef", {label: $1, routine: $5, offset: -$3, args: $6})'
     o 'CARET NAME opt_entryargs', '$$ = yy.node("EntryRef", {label: null, routine: $2, offset: null, args: $3})'
   ]
   opt_entryargs: [
     o 'LPAREN exprlist RPAREN', '$$ = $2'
     o '', '$$ = []'
   ]
+
+  # JOB args
+  job_list: [ o 'CS job_items', '$$ = $2' ]
+  job_items: [
+    o 'job_item', '$$ = [$1]'
+    o 'job_items COMMA job_item', '$1.push($3); $$ = $1'
+  ]
+  job_item: [ o 'entryref opt_params', '$$ = yy.node("JobTarget", {target: $1, params: $2})' ]
 
   write_list: [ o 'CS witems', '$$ = yy.node("ArgsWRITE", {items: $2})' ]
   witems: [
