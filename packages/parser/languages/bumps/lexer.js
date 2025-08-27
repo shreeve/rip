@@ -197,19 +197,24 @@ export class BumpsLexer {
           pos += 1; line = line.slice(1); continue;
         }
         if ((mm = line.match(/^\?/))) {
-          // PMATCH then PATTERN or empty pattern (let parser handle)
-          // If followed immediately by non-space sequence, split into PMATCH and PATTERN
+          // PMATCH then a balanced PATTERN until whitespace or comment at depth 0
           const rest = line.slice(1);
-          const mp = rest.match(/^[^\s,\)]+/);
-          if (mp) {
-            const s = mp[0];
-            out.push(['PMATCH', '?', this.loc(li, pos, li, pos + 1)]);
-            out.push(['PATTERN', s, this.loc(li, pos + 1, li, pos + 1 + s.length)]);
-            pos += 1 + s.length; line = line.slice(1 + s.length); continue;
-          } else {
-            out.push(['PMATCH', '?', this.loc(li, pos, li, pos + 1)]);
-            pos += 1; line = line.slice(1); continue;
+          let i = 0; let depth = 0;
+          while (i < rest.length) {
+            const ch = rest[i];
+            if (ch === '(') { depth++; i++; continue; }
+            if (ch === ')') {
+              if (depth === 0) break; depth--; i++; continue;
+            }
+            if (depth === 0 && (ch === ' ' || ch === '\t' || ch === '\r' || ch === '\n' || ch === ';')) break;
+            i++;
           }
+          const s = rest.slice(0, i);
+          out.push(['PMATCH', '?', this.loc(li, pos, li, pos + 1)]);
+          if (s.length > 0) {
+            out.push(['PATTERN', s, this.loc(li, pos + 1, li, pos + 1 + s.length)]);
+          }
+          pos += 1 + s.length; line = line.slice(1 + s.length); continue;
         }
         if ((mm = line.match(/^@/))) {
           out.push(['AT', '@', this.loc(li, pos, li, pos + 1)]);
