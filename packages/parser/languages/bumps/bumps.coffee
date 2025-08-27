@@ -130,8 +130,8 @@ exports.bnf =
     o 'MERGE merge_list',        '$$ = yy.node("Cmd", {pc: null, op: "MERGE",args: $2})'
 
     # FOR header (inline form)
-    o 'postcond opt_cs FOR for_header', '$$ = yy.node("For", Object.assign({pc: $1}, $4))'
-    o 'FOR for_header',                 '$$ = yy.node("For", Object.assign({pc: null}, $2))'
+    o 'postcond opt_cs FOR for_header', '$$ = yy.node("For", {pc: $1, specs: $4})'
+    o 'FOR for_header',                 '$$ = yy.node("For", {pc: null, specs: $2})'
 
     # Generic fallback: other commands with expression arglists
     o 'postcond opt_cs cmd_word CS exprlist', '$$ = yy.node("Cmd", {pc: $1, op: $3, args: $5})'
@@ -144,7 +144,16 @@ exports.bnf =
   opt_cs: [ o 'CS', '$$ = null', o '', '$$ = null' ]
 
   for_header: [
-    o 'CS NAME EQ expr COLON expr COLON expr', '$$ = {var: $2, from: $4, step: $6, to: $8}'
+    o 'CS for_specs', '$$ = $2'
+  ]
+
+  for_specs: [
+    o 'for_spec', '$$ = [$1]'
+    o 'for_specs COMMA for_spec', '$1.push($3); $$ = $1'
+  ]
+
+  for_spec: [
+    o 'NAME EQ expr COLON expr COLON expr', '$$ = {name: $1, from: $3, step: $5, to: $7}'
   ]
 
   cmd_word: [

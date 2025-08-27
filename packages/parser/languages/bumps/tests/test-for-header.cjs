@@ -19,8 +19,7 @@ require('../../../../../coffeescript/register.js');
   const ast = parserMod.parse(src);
   const cmd = ast.lines[0].cmds[0];
   assert.equal(cmd.type, 'For');
-  assert.equal(cmd.var, 'I');
+  assert.equal(cmd.specs.length, 1);
+  assert.equal(cmd.specs[0].name, 'I');
   console.log('PASS');
 })().catch(e => { console.error('FAIL', e); process.exit(1); });
-
-
