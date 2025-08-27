@@ -100,6 +100,9 @@ exports.bnf =
   ]
 
   cmd: [
+    # GOTO
+    o 'postcond GOTO goto_list', '$$ = yy.node("Cmd", {pc: $1, op: "GOTO", args: $3})'
+    o 'GOTO goto_list',          '$$ = yy.node("Cmd", {pc: null, op: "GOTO", args: $2})'
     # Command-specific forms
     o 'postcond SET set_list',   '$$ = yy.node("Cmd", {pc: $1, op: "SET",   args: $3})'
     o 'SET set_list',            '$$ = yy.node("Cmd", {pc: null, op: "SET",  args: $2})'
@@ -252,6 +255,9 @@ exports.bnf =
     o 'merge_items COMMA merge_item', '$1.push($3); $$ = $1'
   ]
   merge_item: [ o 'lvalue EQ lvalue', '$$ = yy.node("Merge", {target: $1, source: $3})' ]
+
+  # GOTO targets reuse entryref
+  goto_list: [ o 'CS entryref_list', '$$ = $2' ]
 
   # ---- expressions ----
   expr: [

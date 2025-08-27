@@ -126,6 +126,11 @@ export class BumpsLexer {
           out.push(['NAME', name, this.loc(li, pos, li, pos + name.length)]);
           pos += name.length; line = line.slice(name.length); afterCommand = false; afterCmdSep = false; continue;
         }
+        // PLUS offset in entryref: treat as PLUS token
+        if ((mm = line.match(/^\+/))) {
+          out.push(['PLUS', '+', this.loc(li, pos, li, pos + 1)]);
+          pos += 1; line = line.slice(1); afterCmdSep = false; continue;
+        }
         if ((mm = line.match(/^[ \t]+/))) {
           // Lookahead: if next token is a command, emit CS to separate commands
           const ws = mm[0];
@@ -160,6 +165,7 @@ export class BumpsLexer {
     if (w === 'do' || w === 'd') return 'DO';
     if (w === 'kill' || w === 'k') return 'KILL';
     if (w === 'new' || w === 'n') return 'NEW';
+    if (w === 'goto' || w === 'g') return 'GOTO';
     if (w === 'if' || w === 'i') return 'IF';
     if (w === 'else' || w === 'e') return 'ELSE';
     if (w === 'lock' || w === 'l') return 'LOCK';
