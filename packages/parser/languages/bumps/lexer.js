@@ -167,6 +167,11 @@ export class BumpsLexer {
           out.push(['NE', "'=", this.loc(li, pos, li, pos + 2)]);
           pos += 2; line = line.slice(2); continue;
         }
+        if ((mm = line.match(/^\^\$SYSTEM\b/))) { const t=mm[0]; out.push(['SSV_SYSTEM', t, this.loc(li,pos,li,pos+t.length)]); pos+=t.length; line=line.slice(t.length); continue; }
+        if ((mm = line.match(/^\^\$JOB\b/))) { const t=mm[0]; out.push(['SSV_JOB', t, this.loc(li,pos,li,pos+t.length)]); pos+=t.length; line=line.slice(t.length); continue; }
+        if ((mm = line.match(/^\^\$GLOBAL\b/))) { const t=mm[0]; out.push(['SSV_GLOBAL', t, this.loc(li,pos,li,pos+t.length)]); pos+=t.length; line=line.slice(t.length); continue; }
+        if ((mm = line.match(/^\^\$LOCK\b/))) { const t=mm[0]; out.push(['SSV_LOCK', t, this.loc(li,pos,li,pos+t.length)]); pos+=t.length; line=line.slice(t.length); continue; }
+        if ((mm = line.match(/^\^\$ROUTINE\b/))) { const t=mm[0]; out.push(['SSV_ROUTINE', t, this.loc(li,pos,li,pos+t.length)]); pos+=t.length; line=line.slice(t.length); continue; }
         if ((mm = line.match(/^\^/))) {
           out.push(['CARET', '^', this.loc(li, pos, li, pos + 1)]);
           pos += 1; line = line.slice(1); afterCmdSep = false; continue;
