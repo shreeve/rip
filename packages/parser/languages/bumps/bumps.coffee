@@ -64,7 +64,6 @@ exports.tokens = [
   'WBANG','WTAB','WPOUND','WSTAR','WSLASH'
 ]
 
-
 # ---------------------------------- intrinsics ----------------------------------
 # Known M $FUNCTION names (and selected $spec variables) extracted from bumps-claude.bnf.
 # Used for tooling/hints; parsing still accepts any $name and normalizes to uppercase.
@@ -78,11 +77,13 @@ exports.intrinsics = [
   'QUIT'      , 'R'         , 'RANDOM'    , 'RE'        , 'REVERSE'   , 'S'         ,
   'SELECT'    , 'STACK'     , 'STORAGE'   , 'T'         , 'TEST'      , 'TEXT'      ,
   'TLEVEL'    , 'TR'        , 'TRANSLATE' , 'V'         , 'VIEW'      , 'X'         ,
-  'Y'         , 'ZDATE'     , 'ZVERSION'  
+  'Y'         , 'ZDATE'     , 'ZVERSION'
 ]
 
 # Helper: check if a $FUNCTION name is recognized (uppercase, without '$')
+# NOTE: Currently, this is only used for tooling/hints. Add to restrict fn names.
 exports.isKnownIntrinsic = (name) -> name in exports.intrinsics
+
 exports.bnf =
 
   # ---- program structure ----
