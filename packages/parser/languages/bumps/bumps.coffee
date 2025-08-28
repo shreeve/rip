@@ -165,6 +165,38 @@ exports.bnf =
     o 'NEW postcond CS name_list' , '$$ = yy.node("Cmd", {pc: $2, op: "NEW",   args: $4})'
     o 'NEW CS name_list'          , '$$ = yy.node("Cmd", {pc: null, op: "NEW", args: $3})'
 
+    # OPEN
+    o 'OPEN postcond CS exprlist' , '$$ = yy.node("Cmd", {pc: $2, op: "OPEN", args: $4})'
+    o 'OPEN CS exprlist'          , '$$ = yy.node("Cmd", {pc: null, op: "OPEN", args: $3})'
+
+    # USE
+    o 'USE postcond CS exprlist'  , '$$ = yy.node("Cmd", {pc: $2, op: "USE",  args: $4})'
+    o 'USE CS exprlist'           , '$$ = yy.node("Cmd", {pc: null, op: "USE", args: $3})'
+
+    # VIEW
+    o 'VIEW postcond CS exprlist' , '$$ = yy.node("Cmd", {pc: $2, op: "VIEW", args: $4})'
+    o 'VIEW CS exprlist'          , '$$ = yy.node("Cmd", {pc: null, op: "VIEW", args: $3})'
+
+    # CLOSE
+    o 'CLOSE postcond CS exprlist' , '$$ = yy.node("Cmd", {pc: $2, op: "CLOSE", args: $4})'
+    o 'CLOSE CS exprlist'          , '$$ = yy.node("Cmd", {pc: null, op: "CLOSE", args: $3})'
+
+    # FOR (minimal form: FOR var=from:to[:step] DO ... | FOR expr )
+    # We keep it permissive: accept a list of expressions for iteration specs; details left to semantic pass.
+    o 'FOR postcond CS exprlist'  , '$$ = yy.node("Cmd", {pc: $2, op: "FOR",  args: $4})'
+    o 'FOR CS exprlist'           , '$$ = yy.node("Cmd", {pc: null, op: "FOR", args: $3})'
+    # Also allow a bare FOR (used as DO-loop starter) with no exprs; semantics handled later.
+    o 'FOR'                       , '$$ = yy.node("Cmd", {pc: null, op: "FOR", args: []})'
+
+    # JOB (standard: JOB entryref[:timeout][:priority],args... ; make it permissive as exprlist)
+    o 'JOB postcond CS exprlist'  , '$$ = yy.node("Cmd", {pc: $2, op: "JOB",  args: $4})'
+    o 'JOB CS exprlist'           , '$$ = yy.node("Cmd", {pc: null, op: "JOB", args: $3})'
+
+    # Z-commands (any vendor command starting with Z...; accept optional exprlist)
+    o 'ZCOMMAND postcond CS exprlist' , '$$ = yy.node("Cmd", {pc: $2, op: $1, args: $4})'
+    o 'ZCOMMAND CS exprlist'          , '$$ = yy.node("Cmd", {pc: null, op: $1, args: $3})'
+    o 'ZCOMMAND'                      , '$$ = yy.node("Cmd", {pc: null, op: $1, args: []})'
+
     # KILL
     o 'KILL postcond CS kill_items' , '$$ = yy.node("Cmd", {pc: $2, op: "KILL",  args: $4})'
     o 'KILL CS kill_items'          , '$$ = yy.node("Cmd", {pc: null, op: "KILL", args: $3})'
