@@ -128,8 +128,8 @@ exports.bnf =
     o 'SET set_list',            '$$ = yy.node("Cmd", {pc: null, op: "SET",  args: $2})'
 
     # WRITE
-    o 'postcond WRITE write_list','$$ = yy.node("Cmd", {pc: $1, op: "WRITE", args: $3})'
-    o 'WRITE write_list',        '$$ = yy.node("Cmd", {pc: null, op: "WRITE",args: $2})'
+    o 'postcond WRITE write_list', '$$ = yy.node("Cmd", {pc: $1, op: "WRITE", args: $3})'
+    o 'WRITE write_list',         '$$ = yy.node("Cmd", {pc: null, op: "WRITE", args: $2})'
 
     # READ
     o 'postcond READ read_list', '$$ = yy.node("Cmd", {pc: $1, op: "READ",  args: $3})'
@@ -154,8 +154,8 @@ exports.bnf =
     # LOCK / MERGE
     o 'postcond LOCK lock_list', '$$ = yy.node("Cmd", {pc: $1, op: "LOCK",  args: $3})'
     o 'LOCK lock_list',          '$$ = yy.node("Cmd", {pc: null, op: "LOCK", args: $2})'
-    o 'postcond MERGE merge_list','$$ = yy.node("Cmd", {pc: $1, op: "MERGE", args: $3})'
-    o 'MERGE merge_list',        '$$ = yy.node("Cmd", {pc: null, op: "MERGE",args: $2})'
+    o 'postcond MERGE merge_list', '$$ = yy.node("Cmd", {pc: $1, op: "MERGE", args: $3})'
+    o 'MERGE merge_list',         '$$ = yy.node("Cmd", {pc: null, op: "MERGE", args: $2})'
 
     # HALT, BREAK, QUIT (no-arg capable)
     o 'postcond HALT',           '$$ = yy.node("Cmd", {pc: $1, op: "HALT", args: []})'
@@ -232,10 +232,10 @@ exports.bnf =
   ]
   witem: [
     o 'WTAB expr',   '$$ = yy.node("WTab", {expr: $2})'
-    o 'WBANG',       '$$ = yy.node("WNL",  {})'
-    o 'WPOUND',      '$$ = yy.node("WFF",  {})'
+    o 'WBANG',       '$$ = yy.node("WNL", {})'
+    o 'WPOUND',      '$$ = yy.node("WFF", {})'
     o 'WSTAR expr',  '$$ = yy.node("WAscii", {expr: $2})'
-    o 'WSLASH expr', '$$ = yy.node("WFormat",{expr: $2})'
+    o 'WSLASH expr', '$$ = yy.node("WFormat", {expr: $2})'
     o 'expr',        '$$ = yy.node("WExpr", {expr: $1})'
   ]
 
@@ -368,7 +368,7 @@ exports.bnf =
   pat_repeatable: [
     o 'P_CODE',                '$$ = yy.node("PCode", {code: $1})'
     o 'STRING',                '$$ = yy.node("PLit",  {value: yytext})'
-    o 'LPAREN pat_alt RPAREN', '$$ = yy.node("PGroup",{alts: $2})'
+    o 'LPAREN pat_alt RPAREN', '$$ = yy.node("PGroup", {alts: $2})'
   ]
 
   pat_atom: [
