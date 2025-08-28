@@ -51,7 +51,7 @@ Matz's **Principle of Least Surprise (POLS)** is deeply woven into Rip's DNA. Ev
 **✅ Happy Developer Experience**:
 - **No surprises**: Commands do exactly what they say
 - **Consistent patterns**: Learn once, use everywhere
-- **Elegant progression**: Simple things are simple, complex things are possible
+- **Happiness first**: Thoughtful defaults and APIs that feel natural to use
 
 ## 🎯 The Steve Jobs Principle
 
