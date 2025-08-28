@@ -55,7 +55,7 @@ Matz's **Principle of Least Surprise (POLS)** is deeply woven into Rip's DNA. Ev
 
 ## 🎯 The Steve Jobs Principle
 
-> "Steve Jobs' genius is editorial, not generative": Jobs' distinctive strength was ruthless editing — curating, simplifying, and polishing existing ideas into coherent, delightful products.
+> "Steve Jobs' genius was editorial, not generative": Jobs' distinctive strength was ruthless editing — curating, simplifying, and polishing existing ideas into coherent, delightful products.
 > **— Widely observed perspective on Steve Jobs' product philosophy**
 
 Jobs' editorial lens guides Rip to favor subtraction over addition and cohesion over configuration:
