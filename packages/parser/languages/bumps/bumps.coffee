@@ -18,10 +18,10 @@ o = (pattern, action = '', opts = undefined) ->
 exports.startSymbol = 'program'
 
 exports.operators = [
-  ['right', 'UPLUS', 'UMINUS', 'NOT'] # unary binds tighter
   ['left',  'OR','AND','CONCAT','GT','LT','GE','LE','EQ','NE',
             'CONTAINS','NCONTAINS','FOLLOWS','NFOLLOWS','SORTAFTER','NSORTAFTER',
             'PLUS','MINUS','MUL','DIV','IDIV','MOD','EXP','PMATCH']
+  ['right', 'UPLUS', 'UMINUS', 'NOT'] # unary binds tighter
 ]
 
 # Keep token list in sync with lexer below
@@ -406,8 +406,6 @@ exports.bnf =
     o 'DOLSPECVAR', '$$ = yy.node("DollarVar", {name: $1})'
     o 'ZDOLFN LPAREN exprlist RPAREN', '$$ = yy.node("DollarFn", {name: $1, zext: true, args: $3})'
   ]
-
-  # ssv_ref removed
 
   lvalue: [
     o 'NAME LPAREN exprlist RPAREN', '$$ = yy.node("Var", {global: false, name: $1, subs: $3})'
