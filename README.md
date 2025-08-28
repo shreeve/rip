@@ -87,6 +87,29 @@ bun server list                  # Show all deployed apps
 
 **💡 The Goal**: When you use Rip, it should feel like the computer is reading your mind. The syntax and behavior should match your mental model so perfectly that the tool disappears and you can focus purely on solving problems.
 
+## 🎯 The Steve Jobs Principle
+
+> "Steve Jobs' genius is editorial, not generative": Jobs' distinctive strength was ruthless editing — curating, simplifying, and polishing existing ideas into coherent, delightful products.
+> **— Widely observed perspective on Steve Jobs' product philosophy**
+
+Jobs' editorial lens guides Rip to favor subtraction over addition and cohesion over configuration:
+
+**✅ Say No More**:
+- Relentlessly cut non-essential features; only primitives that earn their keep remain
+- Prefer fewer, stronger concepts that compose well over many special cases
+
+**✅ Cohesion Over Configuration**:
+- Convention-first APIs with sensible defaults; configuration only when it truly adds value
+- One mental model across packages so everything feels like it belongs together
+
+**✅ Fit-and-Finish**:
+- Small details matter: names, error messages, defaults, edge-case behavior
+- Aim for "it just feels right" across CLI, language, and server ergonomics
+
+**✅ Compose, Don’t Accrete**:
+- Integrate and refine proven ideas; avoid inventing gratuitous novelty
+- Build elegance by editing, sequencing, and composing capabilities cleanly
+
 ## 🌟 Live Language Innovation
 
 **Rip demonstrates rapid language development** - major features can go from concept to production in hours, not years:
