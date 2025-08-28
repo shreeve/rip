@@ -16,10 +16,8 @@
 # - Extended references ^|"env-expr"|GLOBAL(...), plus naked extended ^|env|(…)
 # - Naked global syntax ^(subs) yields NakedRef nodes (resolved later)
 # - Tiny sample corpus included in exports.samples
-# - Keeps lexer modes (INITIAL/CMD/EXPR/PAT/WEXPR)
 # - Supports WRITE adorners (! ? # * /) with WEXPR gating
 # - Supports pattern subgrammar and extended/naked global references
-# - Aligns productions for readability
 
 # -------------------------- helper --------------------------
 o = (pattern, action = '', opts = undefined) ->
