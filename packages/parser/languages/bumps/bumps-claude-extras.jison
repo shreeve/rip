@@ -1,3 +1,15 @@
+
+OPEN
+USE
+VIEW
+CLOSE
+
+FOR
+JOB
+Z-commands
+
+
+
 # MUMPS Grammar Extensions - Features Missing from Your Current Grammar
 # These are additions to integrate with your existing bumps.coffee grammar
 
