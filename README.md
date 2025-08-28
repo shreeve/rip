@@ -53,28 +53,6 @@ Matz's **Principle of Least Surprise (POLS)** is deeply woven into Rip's DNA. Ev
 - **Consistent patterns**: Learn once, use everywhere
 - **Elegant progression**: Simple things are simple, complex things are possible
 
-## 🎯 The Larry Wall Principle
-
-> *"Common things should be easy, rare things should be possible"*
-> **— Larry Wall, creator of Perl** *(Personal conversation, Open Source Conference, San Diego, 2002)*
-
-This foundational principle guides every API design decision in Rip:
-
-**✅ Common Things Easy** *(90% of use cases)*:
-- **Range validation**: `[min, max]` - shortest, clearest syntax
-- **Regex matching**: `val =~ /pattern/` and `str[/regex/]` - elegant and intuitive
-- **Function calls**: `read 'email', 'email'` - clean and simple
-- **Object returns**: `{ success: true, data }` - natural and concise
-- **Flexible server args**: `bun server w:5 8080 apps/my-app` - any order works
-
-**🎯 Rare Things Possible** *(10% of use cases)*:
-- **One-sided ranges**: `min: 0` or `max: 100` - explicit when needed
-- **Complex patterns**: `min: 1, max: 5, default: 3` - powerful when required
-- **Advanced regex**: Full CoffeeScript regex features available
-- **Custom validation**: Extensible patterns for edge cases
-
-**💫 Perfect Balance**: Learn the common patterns first (covers 90% of needs), discover advanced features as you grow. No feature bloat, no cognitive overload, just elegant progression from simple to sophisticated.
-
 ## 🎯 The Steve Jobs Principle
 
 > "Steve Jobs' genius is editorial, not generative": Jobs' distinctive strength was ruthless editing — curating, simplifying, and polishing existing ideas into coherent, delightful products.
@@ -98,15 +76,27 @@ Jobs' editorial lens guides Rip to favor subtraction over addition and cohesion 
 - Integrate and refine proven ideas; avoid inventing gratuitous novelty
 - Build elegance by editing, sequencing, and composing capabilities cleanly
 
-**🌐 Platform Mode** (fully working):
-```bash
-# Transform any machine into a dynamic application platform
-bun server platform              # Start platform controller
-bun server deploy api apps/labs/api --port 3001 --workers 2
-bun server scale api 10          # Real-time scaling
-bun server list                  # Show all deployed apps
-# Visit dashboard: http://localhost:3000/platform
-```
+## 🎯 The Larry Wall Principle
+
+> *"Common things should be easy, rare things should be possible"*
+> **— Larry Wall, creator of Perl** *(Personal conversation, Open Source Conference, San Diego, 2002)*
+
+This foundational principle guides every API design decision in Rip:
+
+**✅ Common Things Easy** *(90% of use cases)*:
+- **Range validation**: `[min, max]` - shortest, clearest syntax
+- **Regex matching**: `val =~ /pattern/` and `str[/regex/]` - elegant and intuitive
+- **Function calls**: `read 'email', 'email'` - clean and simple
+- **Object returns**: `{ success: true, data }` - natural and concise
+- **Flexible server args**: `bun server w:5 8080 apps/my-app` - any order works
+
+**🎯 Rare Things Possible** *(10% of use cases)*:
+- **One-sided ranges**: `min: 0` or `max: 100` - explicit when needed
+- **Complex patterns**: `min: 1, max: 5, default: 3` - powerful when required
+- **Advanced regex**: Full CoffeeScript regex features available
+- **Custom validation**: Extensible patterns for edge cases
+
+**💫 Perfect Balance**: Learn the common patterns first (covers 90% of needs), discover advanced features as you grow. No feature bloat, no cognitive overload, just elegant progression from simple to sophisticated.
 
 **💡 The Goal**: When you use Rip, it should feel like the computer is reading your mind. The syntax and behavior should match your mental model so perfectly that the tool disappears and you can focus purely on solving problems.
 
@@ -209,6 +199,16 @@ bun server apps/api https:ca        # Secure HTTPS with CA-signed certs
 
 # Both protocols simultaneously
 bun server apps/api http+https      # HTTP on 3000, HTTPS on 3443
+```
+
+**🌐 Platform Mode** (fully working):
+```bash
+# Transform any machine into a dynamic application platform
+bun server platform              # Start platform controller
+bun server deploy api apps/labs/api --port 3001 --workers 2
+bun server scale api 10          # Real-time scaling
+bun server list                  # Show all deployed apps
+# Visit dashboard: http://localhost:3000/platform
 ```
 
 ### 🔥 Live Development Experience
