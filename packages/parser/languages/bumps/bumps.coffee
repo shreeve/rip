@@ -70,117 +70,117 @@ exports.bnf =
 
   # ---- program structure ----
   program: [
-    o '',                   'return yy.node("Program", {lines: []})'
-    o 'lines',              'return yy.node("Program", {lines: $1})'
+    o ''      , 'return yy.node("Program", {lines: []})'
+    o 'lines' , 'return yy.node("Program", {lines: $1})'
   ]
 
   lines: [
-    o 'line',                          '$$ = [$1]'
-    o 'lines NEWLINE line',            '$1.push($3); $$ = $1'
-    o 'lines NEWLINE',                 '$$ = $1'
+    o 'line'               , '$$ = [$1]'
+    o 'lines NEWLINE line' , '$1.push($3); $$ = $1'
+    o 'lines NEWLINE'      , '$$ = $1'
   ]
 
   line: [
-    o 'line_hdr opt_cmds opt_comment', '$$ = Object.assign($1, {cmds: $2, comment: $3 || null})'
-    o 'line_hdr opt_comment',          '$$ = Object.assign($1, {cmds: [], comment: $2 || null})'
+    o 'line_hdr opt_cmds opt_comment' , '$$ = Object.assign($1, {cmds: $2, comment: $3 || null})'
+    o 'line_hdr opt_comment'          , '$$ = Object.assign($1, {cmds: [], comment: $2 || null})'
   ]
 
   line_hdr: [
-    o 'opt_dots opt_label',            '$$ = yy.node("Line", {depth: $1, label: $2})'
-    o 'opt_dots',                      '$$ = yy.node("Line", {depth: $1, label: null})'
+    o 'opt_dots opt_label' , '$$ = yy.node("Line", {depth: $1, label: $2})'
+    o 'opt_dots'           , '$$ = yy.node("Line", {depth: $1, label: null})'
   ]
 
   opt_dots: [
-    o 'DOTS', '$$ = yy.depth | 0'
-    o '',     '$$ = 0'
+    o 'DOTS' , '$$ = yy.depth | 0'
+    o ''     , '$$ = 0'
   ]
 
   opt_label: [
-    o 'LABEL opt_formals',             '$$ = yy.node("Label", {name: $1, formals: $2})'
-    o '',                              '$$ = null'
+    o 'LABEL opt_formals' , '$$ = yy.node("Label", {name: $1, formals: $2})'
+    o ''                  , '$$ = null'
   ]
 
   opt_formals: [
-    o 'LPAREN formals RPAREN',         '$$ = $2'
-    o '',                              '$$ = []'
+    o 'LPAREN formals RPAREN' , '$$ = $2'
+    o ''                      , '$$ = []'
   ]
 
   formals: [
-    o 'NAME',                          '$$ = [ yy.node("Formal", {name: $1}) ]'
-    o 'formals COMMA NAME',            '$1.push(yy.node("Formal", {name: $3})); $$ = $1'
+    o 'NAME'               , '$$ = [ yy.node("Formal", {name: $1}) ]'
+    o 'formals COMMA NAME' , '$1.push(yy.node("Formal", {name: $3})); $$ = $1'
   ]
 
   opt_comment: [
-    o 'COMMENT',                       '$$ = yytext'
-    o '',                              '$$ = null'
+    o 'COMMENT' , '$$ = yytext'
+    o ''        , '$$ = null'
   ]
 
   opt_cmds: [
-    o 'cmds',                          '$$ = $1'
-    o '',                              '$$ = []'
+    o 'cmds' , '$$ = $1'
+    o ''     , '$$ = []'
   ]
 
   cmds: [
-    o 'cmd',                           '$$ = [$1]'
-    o 'cmds CS cmd',                   '$1.push($3); $$ = $1'
+    o 'cmd'         , '$$ = [$1]'
+    o 'cmds CS cmd' , '$1.push($3); $$ = $1'
   ]
 
   # ---- commands ----
   cmd: [
     # GOTO
-    o 'GOTO postcond CS goto_list'    , '$$ = yy.node("Cmd", {pc: $2, op: "GOTO", args: $4})'
-    o 'GOTO CS goto_list'             , '$$ = yy.node("Cmd", {pc: null, op: "GOTO", args: $3})'
+    o 'GOTO postcond CS goto_list' , '$$ = yy.node("Cmd", {pc: $2, op: "GOTO", args: $4})'
+    o 'GOTO CS goto_list'          , '$$ = yy.node("Cmd", {pc: null, op: "GOTO", args: $3})'
 
     # SET (must have args)
-    o 'SET postcond CS set_list'      , '$$ = yy.node("Cmd", {pc: $2, op: "SET",   args: $4})'
-    o 'SET CS set_list'               , '$$ = yy.node("Cmd", {pc: null, op: "SET", args: $3})'
+    o 'SET postcond CS set_list' , '$$ = yy.node("Cmd", {pc: $2, op: "SET",   args: $4})'
+    o 'SET CS set_list'          , '$$ = yy.node("Cmd", {pc: null, op: "SET", args: $3})'
 
     # WRITE
-    o 'WRITE postcond CS write_list'  , '$$ = yy.node("Cmd", {pc: $2, op: "WRITE", args: $4})'
-    o 'WRITE CS write_list'           , '$$ = yy.node("Cmd", {pc: null, op: "WRITE",args: $3})'
+    o 'WRITE postcond CS write_list' , '$$ = yy.node("Cmd", {pc: $2, op: "WRITE", args: $4})'
+    o 'WRITE CS write_list'          , '$$ = yy.node("Cmd", {pc: null, op: "WRITE",args: $3})'
 
     # READ
-    o 'READ postcond CS read_list'    , '$$ = yy.node("Cmd", {pc: $2, op: "READ",  args: $4})'
-    o 'READ CS read_list'             , '$$ = yy.node("Cmd", {pc: null, op: "READ", args: $3})'
+    o 'READ postcond CS read_list' , '$$ = yy.node("Cmd", {pc: $2, op: "READ",  args: $4})'
+    o 'READ CS read_list'          , '$$ = yy.node("Cmd", {pc: null, op: "READ", args: $3})'
 
     # NEW
-    o 'NEW postcond CS name_list'     , '$$ = yy.node("Cmd", {pc: $2, op: "NEW",   args: $4})'
-    o 'NEW CS name_list'              , '$$ = yy.node("Cmd", {pc: null, op: "NEW", args: $3})'
+    o 'NEW postcond CS name_list' , '$$ = yy.node("Cmd", {pc: $2, op: "NEW",   args: $4})'
+    o 'NEW CS name_list'          , '$$ = yy.node("Cmd", {pc: null, op: "NEW", args: $3})'
 
     # KILL
-    o 'KILL postcond CS kill_items'   , '$$ = yy.node("Cmd", {pc: $2, op: "KILL",  args: $4})'
-    o 'KILL CS kill_items'            , '$$ = yy.node("Cmd", {pc: null, op: "KILL", args: $3})'
+    o 'KILL postcond CS kill_items' , '$$ = yy.node("Cmd", {pc: $2, op: "KILL",  args: $4})'
+    o 'KILL CS kill_items'          , '$$ = yy.node("Cmd", {pc: null, op: "KILL", args: $3})'
 
     # DO
-    o 'DO postcond CS entryref_list'  , '$$ = yy.node("Cmd", {pc: $2, op: "DO",    args: $4})'
-    o 'DO CS entryref_list'           , '$$ = yy.node("Cmd", {pc: null, op: "DO",  args: $3})'
+    o 'DO postcond CS entryref_list' , '$$ = yy.node("Cmd", {pc: $2, op: "DO",    args: $4})'
+    o 'DO CS entryref_list'          , '$$ = yy.node("Cmd", {pc: null, op: "DO",  args: $3})'
 
     # IF (expr required)
-    o 'IF postcond CS expr'           , '$$ = yy.node("If", {pc: $2, cond: $4})'
-    o 'IF CS expr'                    , '$$ = yy.node("If", {pc: null, cond: $3})'
+    o 'IF postcond CS expr' , '$$ = yy.node("If", {pc: $2, cond: $4})'
+    o 'IF CS expr'          , '$$ = yy.node("If", {pc: null, cond: $3})'
 
     # ELSE (argless)
-    o 'ELSE'                          , '$$ = yy.node("Else", {pc: null})'
+    o 'ELSE' , '$$ = yy.node("Else", {pc: null})'
 
     # LOCK / MERGE
-    o 'LOCK postcond CS lock_items'   , '$$ = yy.node("Cmd", {pc: $2, op: "LOCK",  args: $4})'
-    o 'LOCK CS lock_items'            , '$$ = yy.node("Cmd", {pc: null, op: "LOCK", args: $3})'
+    o 'LOCK postcond CS lock_items' , '$$ = yy.node("Cmd", {pc: $2, op: "LOCK",  args: $4})'
+    o 'LOCK CS lock_items'          , '$$ = yy.node("Cmd", {pc: null, op: "LOCK", args: $3})'
 
     o 'MERGE postcond CS merge_items' , '$$ = yy.node("Cmd", {pc: $2, op: "MERGE", args: $4})'
     o 'MERGE CS merge_items'          , '$$ = yy.node("Cmd", {pc: null, op: "MERGE",args: $3})'
 
     # HALT / BREAK (argless)
-    o 'HALT postcond'                 , '$$ = yy.node("Cmd", {pc: $2, op: "HALT", args: []})'
-    o 'HALT'                          , '$$ = yy.node("Cmd", {pc: null, op: "HALT", args: []})'
+    o 'HALT postcond' , '$$ = yy.node("Cmd", {pc: $2, op: "HALT", args: []})'
+    o 'HALT'          , '$$ = yy.node("Cmd", {pc: null, op: "HALT", args: []})'
 
-    o 'BREAK postcond'                , '$$ = yy.node("Cmd", {pc: $2, op: "BREAK", args: []})'
-    o 'BREAK'                         , '$$ = yy.node("Cmd", {pc: null, op: "BREAK", args: []})'
+    o 'BREAK postcond' , '$$ = yy.node("Cmd", {pc: $2, op: "BREAK", args: []})'
+    o 'BREAK'          , '$$ = yy.node("Cmd", {pc: null, op: "BREAK", args: []})'
 
     # QUIT (optional expr)
-    o 'QUIT postcond CS expr'         , '$$ = yy.node("Cmd", {pc: $2, op: "QUIT", args: [$4]})'
-    o 'QUIT CS expr'                  , '$$ = yy.node("Cmd", {pc: null, op: "QUIT", args: [$3]})'
-    o 'QUIT postcond'                 , '$$ = yy.node("Cmd", {pc: $2, op: "QUIT", args: []})'
-    o 'QUIT'                          , '$$ = yy.node("Cmd", {pc: null, op: "QUIT", args: []})'
+    o 'QUIT postcond CS expr' , '$$ = yy.node("Cmd", {pc: $2, op: "QUIT", args: [$4]})'
+    o 'QUIT CS expr'          , '$$ = yy.node("Cmd", {pc: null, op: "QUIT", args: [$3]})'
+    o 'QUIT postcond'         , '$$ = yy.node("Cmd", {pc: $2, op: "QUIT", args: []})'
+    o 'QUIT'                  , '$$ = yy.node("Cmd", {pc: null, op: "QUIT", args: []})'
   ]
 
   postcond: [ o 'COLON expr', '$$ = $2' ]
@@ -188,90 +188,90 @@ exports.bnf =
   # ---- argument lists ----
   set_list: [ o 'set_items', '$$ = yy.node("ArgsSET", {items: $1})' ]
   set_items: [
-    o 'set_item',                 '$$ = [$1]'
-    o 'set_items COMMA set_item', '$1.push($3); $$ = $1'
+    o 'set_item'                 , '$$ = [$1]'
+    o 'set_items COMMA set_item' , '$1.push($3); $$ = $1'
   ]
   set_item: [
-    o 'NAME LPAREN exprlist RPAREN EQ expr', '$$ = yy.node("Set", {lhs: yy.node("Var", {global: false, name: $1, subs: $3}), rhs: $6})'
-    o 'set_target EQ expr',                  '$$ = yy.node("Set", {lhs: $1, rhs: $3})'
+    o 'NAME LPAREN exprlist RPAREN EQ expr' , '$$ = yy.node("Set", {lhs: yy.node("Var", {global: false, name: $1, subs: $3}), rhs: $6})'
+    o 'set_target EQ expr'                  , '$$ = yy.node("Set", {lhs: $1, rhs: $3})'
   ]
 
   set_target: [
-    o 'varref',          '$$ = $1'
-    o 'dolspecial_lhs',  '$$ = $1'
-    o 'piece_lhs',       '$$ = $1'
-    o 'extract_lhs',     '$$ = $1'
+    o 'varref'         , '$$ = $1'
+    o 'dolspecial_lhs' , '$$ = $1'
+    o 'piece_lhs'      , '$$ = $1'
+    o 'extract_lhs'    , '$$ = $1'
   ]
 
   # KILL
   kill_items: [
-    o 'lvalue',                    '$$ = [$1]'
-    o 'kill_items COMMA lvalue',   '$1.push($3); $$ = $1'
+    o 'lvalue'                  , '$$ = [$1]'
+    o 'kill_items COMMA lvalue' , '$1.push($3); $$ = $1'
   ]
 
   # NEW
   name_list: [
-    o 'NAME',                      '$$ = [$1]'
-    o 'name_list COMMA NAME',      '$1.push($3); $$ = $1'
+    o 'NAME'                 , '$$ = [$1]'
+    o 'name_list COMMA NAME' , '$1.push($3); $$ = $1'
   ]
 
   # DO / GOTO share entryref_list
   entryref_list: [
-    o 'entryref',                         '$$ = [$1]'
-    o 'entryref_list COMMA entryref',     '$1.push($3); $$ = $1'
+    o 'entryref'                     , '$$ = [$1]'
+    o 'entryref_list COMMA entryref' , '$1.push($3); $$ = $1'
   ]
   entryref: [
-    o 'NAME opt_entryargs',                         '$$ = yy.node("EntryRef", {label: $1, routine: null, offset: null, args: $2})'
-    o 'NAME CARET NAME opt_entryargs',              '$$ = yy.node("EntryRef", {label: $1, routine: $3,  offset: null, args: $4})'
-    o 'NAME PLUS NUMBER CARET NAME opt_entryargs',  '$$ = yy.node("EntryRef", {label: $1, routine: $5,  offset: +$3, args: $6})'
-    o 'NAME MINUS NUMBER CARET NAME opt_entryargs', '$$ = yy.node("EntryRef", {label: $1, routine: $5,  offset: -$3, args: $6})'
-    o 'CARET NAME opt_entryargs',                   '$$ = yy.node("EntryRef", {label: null, routine: $2, offset: null, args: $3})'
+    o 'NAME opt_entryargs'                         , '$$ = yy.node("EntryRef", {label: $1, routine: null, offset: null, args: $2})'
+    o 'NAME CARET NAME opt_entryargs'              , '$$ = yy.node("EntryRef", {label: $1, routine: $3,  offset: null, args: $4})'
+    o 'NAME PLUS NUMBER CARET NAME opt_entryargs'  , '$$ = yy.node("EntryRef", {label: $1, routine: $5,  offset: +$3, args: $6})'
+    o 'NAME MINUS NUMBER CARET NAME opt_entryargs' , '$$ = yy.node("EntryRef", {label: $1, routine: $5,  offset: -$3, args: $6})'
+    o 'CARET NAME opt_entryargs'                   , '$$ = yy.node("EntryRef", {label: null, routine: $2, offset: null, args: $3})'
   ]
   opt_entryargs: [
-    o 'LPAREN exprlist RPAREN', '$$ = $2'
-    o '',                       '$$ = []'
+    o 'LPAREN exprlist RPAREN' , '$$ = $2'
+    o ''                       , '$$ = []'
   ]
 
   # WRITE
   write_list: [ o 'witems', '$$ = yy.node("ArgsWRITE", {items: $1})' ]
   witems: [
-    o 'witem',                    '$$ = [$1]'
-    o 'witems COMMA witem',       '$1.push($3); $$ = $1'
+    o 'witem'              , '$$ = [$1]'
+    o 'witems COMMA witem' , '$1.push($3); $$ = $1'
   ]
   witem: [
-    o 'WTAB expr',                '$$ = yy.node("WTab",    {expr: $2})'
-    o 'WBANG',                    '$$ = yy.node("WNL",     {})'
-    o 'WPOUND',                   '$$ = yy.node("WFF",     {})'
-    o 'WSTAR expr',               '$$ = yy.node("WAscii",  {expr: $2})'
-    o 'WSLASH expr',              '$$ = yy.node("WFormat", {expr: $2})'
-    o 'expr',                     '$$ = yy.node("WExpr",   {expr: $1})'
+    o 'WTAB expr'   , '$$ = yy.node("WTab",    {expr: $2})'
+    o 'WBANG'       , '$$ = yy.node("WNL",     {})'
+    o 'WPOUND'      , '$$ = yy.node("WFF",     {})'
+    o 'WSTAR expr'  , '$$ = yy.node("WAscii",  {expr: $2})'
+    o 'WSLASH expr' , '$$ = yy.node("WFormat", {expr: $2})'
+    o 'expr'        , '$$ = yy.node("WExpr",   {expr: $1})'
   ]
 
   # READ
   read_list: [ o 'ritems', '$$ = yy.node("ArgsREAD", {items: $1})' ]
   ritems: [
-    o 'ritem',                    '$$ = [$1]'
-    o 'ritems COMMA ritem',       '$1.push($3); $$ = $1'
+    o 'ritem'              , '$$ = [$1]'
+    o 'ritems COMMA ritem' , '$1.push($3); $$ = $1'
   ]
   ritem: [
-    o 'lvalue',                   '$$ = yy.node("ReadItem", {lhs: $1, timeout: null})'
-    o 'lvalue COLON expr',        '$$ = yy.node("ReadItem", {lhs: $1, timeout: $3})'
+    o 'lvalue'            , '$$ = yy.node("ReadItem", {lhs: $1, timeout: null})'
+    o 'lvalue COLON expr' , '$$ = yy.node("ReadItem", {lhs: $1, timeout: $3})'
   ]
 
   # LOCK
   lock_items: [
-    o 'lock_item',                  '$$ = [$1]'
-    o 'lock_items COMMA lock_item', '$1.push($3); $$ = $1'
+    o 'lock_item'                  , '$$ = [$1]'
+    o 'lock_items COMMA lock_item' , '$1.push($3); $$ = $1'
   ]
   lock_item: [
-    o 'lvalue',                   '$$ = yy.node("LockItem", {res: $1, timeout: null})'
-    o 'lvalue COLON expr',        '$$ = yy.node("LockItem", {res: $1, timeout: $3})'
+    o 'lvalue'            , '$$ = yy.node("LockItem", {res: $1, timeout: null})'
+    o 'lvalue COLON expr' , '$$ = yy.node("LockItem", {res: $1, timeout: $3})'
   ]
 
   # MERGE
   merge_items: [
-    o 'merge_item',               '$$ = [$1]'
-    o 'merge_items COMMA merge_item', '$1.push($3); $$ = $1'
+    o 'merge_item'                   , '$$ = [$1]'
+    o 'merge_items COMMA merge_item' , '$1.push($3); $$ = $1'
   ]
   merge_item: [ o 'lvalue EQ lvalue', '$$ = yy.node("Merge", {target: $1, source: $3})' ]
 
@@ -280,84 +280,84 @@ exports.bnf =
 
   # ---- expressions ----
   expr: [
-    o 'primary',                   '$$ = $1'
+    o 'primary' , '$$ = $1'
 
     # binary ops
-    o 'expr PLUS expr',            '$$ = yy.node("BinOp", {op:"PLUS",    lhs:$1, rhs:$3})'
-    o 'expr MINUS expr',           '$$ = yy.node("BinOp", {op:"MINUS",   lhs:$1, rhs:$3})'
-    o 'expr MUL expr',             '$$ = yy.node("BinOp", {op:"MUL",     lhs:$1, rhs:$3})'
-    o 'expr EXP expr',             '$$ = yy.node("BinOp", {op:"EXP",     lhs:$1, rhs:$3})'
-    o 'expr DIV expr',             '$$ = yy.node("BinOp", {op:"DIV",     lhs:$1, rhs:$3})'
-    o 'expr IDIV expr',            '$$ = yy.node("BinOp", {op:"IDIV",    lhs:$1, rhs:$3})'
-    o 'expr MOD expr',             '$$ = yy.node("BinOp", {op:"MOD",     lhs:$1, rhs:$3})'
-    o 'expr AND expr',             '$$ = yy.node("BinOp", {op:"AND",     lhs:$1, rhs:$3})'
-    o 'expr OR expr',              '$$ = yy.node("BinOp", {op:"OR",      lhs:$1, rhs:$3})'
-    o 'expr CONCAT expr',          '$$ = yy.node("BinOp", {op:"CONCAT",  lhs:$1, rhs:$3})'
+    o 'expr PLUS expr'   , '$$ = yy.node("BinOp", {op:"PLUS",    lhs:$1, rhs:$3})'
+    o 'expr MINUS expr'  , '$$ = yy.node("BinOp", {op:"MINUS",   lhs:$1, rhs:$3})'
+    o 'expr MUL expr'    , '$$ = yy.node("BinOp", {op:"MUL",     lhs:$1, rhs:$3})'
+    o 'expr EXP expr'    , '$$ = yy.node("BinOp", {op:"EXP",     lhs:$1, rhs:$3})'
+    o 'expr DIV expr'    , '$$ = yy.node("BinOp", {op:"DIV",     lhs:$1, rhs:$3})'
+    o 'expr IDIV expr'   , '$$ = yy.node("BinOp", {op:"IDIV",    lhs:$1, rhs:$3})'
+    o 'expr MOD expr'    , '$$ = yy.node("BinOp", {op:"MOD",     lhs:$1, rhs:$3})'
+    o 'expr AND expr'    , '$$ = yy.node("BinOp", {op:"AND",     lhs:$1, rhs:$3})'
+    o 'expr OR expr'     , '$$ = yy.node("BinOp", {op:"OR",      lhs:$1, rhs:$3})'
+    o 'expr CONCAT expr' , '$$ = yy.node("BinOp", {op:"CONCAT",  lhs:$1, rhs:$3})'
 
     # relations
-    o 'expr GT expr',              '$$ = yy.node("Rel",   {op:"GT",         lhs:$1, rhs:$3})'
-    o 'expr LT expr',              '$$ = yy.node("Rel",   {op:"LT",         lhs:$1, rhs:$3})'
-    o 'expr GE expr',              '$$ = yy.node("Rel",   {op:"GE",         lhs:$1, rhs:$3})'
-    o 'expr LE expr',              '$$ = yy.node("Rel",   {op:"LE",         lhs:$1, rhs:$3})'
-    o 'expr EQ expr',              '$$ = yy.node("Rel",   {op:"EQ",         lhs:$1, rhs:$3})'
-    o 'expr NE expr',              '$$ = yy.node("Rel",   {op:"NE",         lhs:$1, rhs:$3})'
-    o 'expr CONTAINS expr',        '$$ = yy.node("Rel",   {op:"CONTAINS",   lhs:$1, rhs:$3})'
-    o 'expr NCONTAINS expr',       '$$ = yy.node("Rel",   {op:"NCONTAINS",  lhs:$1, rhs:$3})'
-    o 'expr FOLLOWS expr',         '$$ = yy.node("Rel",   {op:"FOLLOWS",    lhs:$1, rhs:$3})'
-    o 'expr NFOLLOWS expr',        '$$ = yy.node("Rel",   {op:"NFOLLOWS",   lhs:$1, rhs:$3})'
-    o 'expr SORTAFTER expr',       '$$ = yy.node("Rel",   {op:"SORTAFTER",  lhs:$1, rhs:$3})'
-    o 'expr NSORTAFTER expr',      '$$ = yy.node("Rel",   {op:"NSORTAFTER", lhs:$1, rhs:$3})'
+    o 'expr GT expr'         , '$$ = yy.node("Rel",   {op:"GT",         lhs:$1, rhs:$3})'
+    o 'expr LT expr'         , '$$ = yy.node("Rel",   {op:"LT",         lhs:$1, rhs:$3})'
+    o 'expr GE expr'         , '$$ = yy.node("Rel",   {op:"GE",         lhs:$1, rhs:$3})'
+    o 'expr LE expr'         , '$$ = yy.node("Rel",   {op:"LE",         lhs:$1, rhs:$3})'
+    o 'expr EQ expr'         , '$$ = yy.node("Rel",   {op:"EQ",         lhs:$1, rhs:$3})'
+    o 'expr NE expr'         , '$$ = yy.node("Rel",   {op:"NE",         lhs:$1, rhs:$3})'
+    o 'expr CONTAINS expr'   , '$$ = yy.node("Rel",   {op:"CONTAINS",   lhs:$1, rhs:$3})'
+    o 'expr NCONTAINS expr'  , '$$ = yy.node("Rel",   {op:"NCONTAINS",  lhs:$1, rhs:$3})'
+    o 'expr FOLLOWS expr'    , '$$ = yy.node("Rel",   {op:"FOLLOWS",    lhs:$1, rhs:$3})'
+    o 'expr NFOLLOWS expr'   , '$$ = yy.node("Rel",   {op:"NFOLLOWS",   lhs:$1, rhs:$3})'
+    o 'expr SORTAFTER expr'  , '$$ = yy.node("Rel",   {op:"SORTAFTER",  lhs:$1, rhs:$3})'
+    o 'expr NSORTAFTER expr' , '$$ = yy.node("Rel",   {op:"NSORTAFTER", lhs:$1, rhs:$3})'
 
     # pattern match (positive and negative operator forms)
-    o 'expr PMATCH pattern',       '$$ = yy.node("PatternMatch", {op:"PMATCH",  lhs:$1, pat:$3})'
-    o 'expr NOT PMATCH pattern',   '$$ = yy.node("PatternMatch", {op:"NPMATCH", lhs:$1, pat:$4})'
+    o 'expr PMATCH pattern'     , '$$ = yy.node("PatternMatch", {op:"PMATCH",  lhs:$1, pat:$3})'
+    o 'expr NOT PMATCH pattern' , '$$ = yy.node("PatternMatch", {op:"NPMATCH", lhs:$1, pat:$4})'
 
     # unary
-    o 'NOT expr %prec NOT',        '$$ = yy.node("UnOp", {op:"NOT",    expr:$2})'
-    o 'PLUS expr %prec UPLUS',     '$$ = yy.node("UnOp", {op:"UPLUS",  expr:$2})'
-    o 'MINUS expr %prec UMINUS',   '$$ = yy.node("UnOp", {op:"UMINUS", expr:$2})'
+    o 'NOT expr %prec NOT'      , '$$ = yy.node("UnOp", {op:"NOT",    expr:$2})'
+    o 'PLUS expr %prec UPLUS'   , '$$ = yy.node("UnOp", {op:"UPLUS",  expr:$2})'
+    o 'MINUS expr %prec UMINUS' , '$$ = yy.node("UnOp", {op:"UMINUS", expr:$2})'
   ]
 
   primary: [
-    o 'NUMBER',                    '$$ = yy.node("Number", {value: +yytext})'
-    o 'STRING',                    '$$ = yy.node("String", {value: yytext})'
-    o 'varref',                    '$$ = $1'
-    o 'LPAREN expr RPAREN',        '$$ = $2'
-    o 'dolfn_call',                '$$ = $1'
+    o 'NUMBER'             , '$$ = yy.node("Number", {value: +yytext})'
+    o 'STRING'             , '$$ = yy.node("String", {value: yytext})'
+    o 'varref'             , '$$ = $1'
+    o 'LPAREN expr RPAREN' , '$$ = $2'
+    o 'dolfn_call'         , '$$ = $1'
   ]
 
   # unified variable references
   varref: [
-    o 'opt_global NAME opt_subs',                    '$$ = yy.node("Var", {global: $1, name: $2, subs: $3})'
+    o 'opt_global NAME opt_subs' , '$$ = yy.node("Var", {global: $1, name: $2, subs: $3})'
 
     # Naked global reference: ^(subscripts) or ^|"env-expr"|(...)
-    o 'CARET LPAREN exprlist RPAREN',                '$$ = yy.node("NakedRef", {env: null, subs: $3})'
-    o 'CARET VBAR expr VBAR LPAREN exprlist RPAREN', '$$ = yy.node("NakedRef", {env: $3, subs: $6})'
+    o 'CARET LPAREN exprlist RPAREN'                , '$$ = yy.node("NakedRef", {env: null, subs: $3})'
+    o 'CARET VBAR expr VBAR LPAREN exprlist RPAREN' , '$$ = yy.node("NakedRef", {env: $3, subs: $6})'
 
     # Extended reference: ^|"env-expr"|NAME(opt_subs)
-    o 'CARET VBAR expr VBAR NAME opt_subs',          '$$ = yy.node("Var", {global:true, env:$3, name:$5, subs:$6})'
+    o 'CARET VBAR expr VBAR NAME opt_subs' , '$$ = yy.node("Var", {global:true, env:$3, name:$5, subs:$6})'
 
     # Indirection
-    o 'AT NAME',                                     '$$ = yy.node("Indirect", {kind: "name", target: $2})'
-    o 'AT LPAREN expr RPAREN',                       '$$ = yy.node("Indirect", {kind: "expr", target: $3})'
+    o 'AT NAME'               , '$$ = yy.node("Indirect", {kind: "name", target: $2})'
+    o 'AT LPAREN expr RPAREN' , '$$ = yy.node("Indirect", {kind: "expr", target: $3})'
   ]
 
   opt_subs: [
-    o 'LPAREN exprlist RPAREN', '$$ = $2'
-    o '',                       '$$ = []'
+    o 'LPAREN exprlist RPAREN' , '$$ = $2'
+    o ''                       , '$$ = []'
   ]
 
   opt_global: [ o 'CARET', '$$ = true', o '', '$$ = false' ]
 
   exprlist: [
-    o 'expr',                    '$$ = [$1]'
-    o 'exprlist COMMA expr',     '$1.push($3); $$ = $1'
+    o 'expr'                , '$$ = [$1]'
+    o 'exprlist COMMA expr' , '$1.push($3); $$ = $1'
   ]
 
   dolfn_call: [
-    o 'DOLFN LPAREN exprlist RPAREN',  '$$ = yy.node("DollarFn", {name: $1, args: $3})'
-    o 'DOLSPECVAR',                    '$$ = yy.node("DollarVar", {name: $1})'
-    o 'ZDOLFN LPAREN exprlist RPAREN', '$$ = yy.node("DollarFn", {name: $1, zext: true, args: $3})'
+    o 'DOLFN LPAREN exprlist RPAREN'  , '$$ = yy.node("DollarFn", {name: $1, args: $3})'
+    o 'DOLSPECVAR'                    , '$$ = yy.node("DollarVar", {name: $1})'
+    o 'ZDOLFN LPAREN exprlist RPAREN' , '$$ = yy.node("DollarFn", {name: $1, zext: true, args: $3})'
   ]
 
   # lvalue for non-SET LHS
@@ -367,25 +367,25 @@ exports.bnf =
   pattern: [ o 'pat_seq', '$$ = yy.node("Pattern", {atoms: $1})' ]
 
   pat_seq: [
-    o 'pat_seq pat_atom', '$1.push($2); $$ = $1'
-    o 'pat_atom',         '$$ = [$1]'
+    o 'pat_seq pat_atom' , '$1.push($2); $$ = $1'
+    o 'pat_atom'         , '$$ = [$1]'
   ]
 
   pat_repeatable: [
-    o 'P_CODE',                '$$ = yy.node("PCode", {code: $1})'
-    o 'STRING',                '$$ = yy.node("PLit",  {value: yytext})'
-    o 'LPAREN pat_alt RPAREN', '$$ = yy.node("PGroup",{alts: $2})'
+    o 'P_CODE'                , '$$ = yy.node("PCode", {code: $1})'
+    o 'STRING'                , '$$ = yy.node("PLit",  {value: yytext})'
+    o 'LPAREN pat_alt RPAREN' , '$$ = yy.node("PGroup",{alts: $2})'
   ]
 
   pat_atom: [
-    o 'P_NUM P_DOT P_NUM pat_repeatable', '$$ = yy.node("PRange", {min:+$1, max:+$3, what:$4})'
-    o 'P_NUM pat_repeatable',             '$$ = yy.node("PCount", {count:+$1, what:$2})'
-    o 'pat_repeatable',                   '$$ = $1'
+    o 'P_NUM P_DOT P_NUM pat_repeatable' , '$$ = yy.node("PRange", {min:+$1, max:+$3, what:$4})'
+    o 'P_NUM pat_repeatable'             , '$$ = yy.node("PCount", {count:+$1, what:$2})'
+    o 'pat_repeatable'                   , '$$ = $1'
   ]
 
   pat_alt: [
-    o 'pat_alt COMMA pat_seq', '$1.push($3); $$ = $1'
-    o 'pat_seq',               '$$ = [$1]'
+    o 'pat_alt COMMA pat_seq' , '$1.push($3); $$ = $1'
+    o 'pat_seq'               , '$$ = [$1]'
   ]
 
   # ---- SET-only LHS helpers (simplified placeholders) ----
