@@ -4,7 +4,7 @@
 
 **A multilanguage universal runtime**
 
-A universal parser platform that enables elegant programming across multiple languages. Built as a monorepo with interchangeable components that can be mixed, matched, and shared across the development ecosystem.
+A universal runtime that enables elegant programming across multiple languages. Built as a monorepo with interchangeable components that can be mixed, matched, and shared across the development ecosystem.
 
 ## 🎯 Design Philosophy: The 4 C's
 
