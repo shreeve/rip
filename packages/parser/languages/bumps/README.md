@@ -117,3 +117,52 @@ The grammar currently uses `EQUAL` for `set_item` (`lvalue EQUAL expr`), but the
 ### Inception bonus
 
 The BUMPS grammar is authored in CoffeeScript/Rip and compiled by Solar—the same pipeline used to generate CoffeeScript’s own parser here—parsing a grammar that itself documents the lexer and parser for M. Layers on layers. 🎯
+
+### Argumentless commands (standard M)
+```
+
+These have an argumentless form in the ANSI/X11/ISO sense (and in YottaDB/GT.M). I’m citing YottaDB because it documents the exact forms clearly:
+
+BREAK — may be used with no argument; when followed by another command on the same line, at least two spaces must follow BREAK.
+YottaDB Documentation
+
+DO — has a no-argument form that transfers control to the next dot-indented line; also requires the two-spaces rule when followed by another command.
+YottaDB Documentation
+
+ELSE — has no arguments by design (it’s just ELSE plus the rest-of-line scope). (Same page’s command list; ELSE is the no-args branch of IF.)
+YottaDB Documentation
+
+FOR — the lvn=expr[:…] part is optional, so plain FOR is legal and controls the rest-of-line scope. Note: FOR is a conditional command and does not take a command postconditional.
+YottaDB Documentation
+
+HALT — no argument (only an optional postconditional).
+YottaDB Documentation
+
+IF — the truth-valued expression list is optional; IF alone tests $TEST. Note: IF is conditional and does not allow a command postconditional.
+YottaDB Documentation
+
+KILL — the argument list is optional; KILL alone is valid (kills locals per implementation rules).
+YottaDB Documentation
+
+LOCK — the argument list is optional; argumentless LOCK is valid (commonly used to release all locks). InterSystems docs state the “release all locks” behavior explicitly.
+YottaDB Documentation
+InterSystems Documentation
+
+NEW — the variable list is optional; NEW alone is valid (new all locals per scope rules).
+YottaDB Documentation
+
+QUIT — optional argument; QUIT alone is valid. (YottaDB notes “commands without arguments such as QUIT…”, InterSystems QUIT page shows both forms.)
+YottaDB Documentation
+InterSystems Documentation
+
+TCOMMIT — no argument.
+YottaDB Documentation
+
+TROLLBACK — optional integer argument; argumentless form is valid.
+YottaDB Documentation
+
+TSTART — arguments optional; argumentless form is valid.
+YottaDB Documentation
+
+Everything else in the base set requires arguments (e.g., CLOSE, GOTO, HANG, JOB, MERGE, OPEN, READ, SET, USE, VIEW, WRITE, XECUTE).
+```
