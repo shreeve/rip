@@ -116,7 +116,7 @@ exports.bnf =
   ]
 
   opt_dots: [
-    o 'DOTS' , '$$ = yy.depth | 0'
+    o 'DOTS' , '$$ = (typeof yytext === "string" ? yytext.length : (yy.depth|0))'
     o ''     , '$$ = 0'
   ]
 
@@ -152,6 +152,9 @@ exports.bnf =
 
   # ---- commands ----
   cmd: [
+    # Pre-command postcondition (optional CS)
+    o 'postcond CS cmd' , 'var c=$3; if (c&& (c.type==="Cmd"||c.type==="For"||c.type==="If"||c.type==="Else")) c.pc=$1; $$=c;'
+    o 'postcond cmd'    , 'var c=$2; if (c&& (c.type==="Cmd"||c.type==="For"||c.type==="If"||c.type==="Else")) c.pc=$1; $$=c;'
     # GOTO
     o 'GOTO postcond CS goto_list' , '$$ = yy.node("Cmd", {pc: $2, op: "GOTO", args: $4})'
     o 'GOTO CS goto_list'          , '$$ = yy.node("Cmd", {pc: null, op: "GOTO", args: $3})'
@@ -172,32 +175,39 @@ exports.bnf =
     o 'NEW postcond CS name_list' , '$$ = yy.node("Cmd", {pc: $2, op: "NEW",   args: $4})'
     o 'NEW CS name_list'          , '$$ = yy.node("Cmd", {pc: null, op: "NEW", args: $3})'
 
-    # OPEN
-    o 'OPEN postcond CS exprlist' , '$$ = yy.node("Cmd", {pc: $2, op: "OPEN", args: $4})'
-    o 'OPEN CS exprlist'          , '$$ = yy.node("Cmd", {pc: null, op: "OPEN", args: $3})'
+    # OPEN (device params)
+    o 'OPEN postcond CS device_args' , '$$ = yy.node("Cmd", {pc: $2, op: "OPEN", args: $4})'
+    o 'OPEN CS device_args'          , '$$ = yy.node("Cmd", {pc: null, op: "OPEN", args: $3})'
 
-    # USE
-    o 'USE postcond CS exprlist'  , '$$ = yy.node("Cmd", {pc: $2, op: "USE",  args: $4})'
-    o 'USE CS exprlist'           , '$$ = yy.node("Cmd", {pc: null, op: "USE", args: $3})'
+    # USE (device params)
+    o 'USE postcond CS device_args'  , '$$ = yy.node("Cmd", {pc: $2, op: "USE",  args: $4})'
+    o 'USE CS device_args'           , '$$ = yy.node("Cmd", {pc: null, op: "USE", args: $3})'
 
-    # VIEW
-    o 'VIEW postcond CS exprlist' , '$$ = yy.node("Cmd", {pc: $2, op: "VIEW", args: $4})'
-    o 'VIEW CS exprlist'          , '$$ = yy.node("Cmd", {pc: null, op: "VIEW", args: $3})'
+    # VIEW (device params)
+    o 'VIEW postcond CS device_args' , '$$ = yy.node("Cmd", {pc: $2, op: "VIEW", args: $4})'
+    o 'VIEW CS device_args'          , '$$ = yy.node("Cmd", {pc: null, op: "VIEW", args: $3})'
 
-    # CLOSE
-    o 'CLOSE postcond CS exprlist' , '$$ = yy.node("Cmd", {pc: $2, op: "CLOSE", args: $4})'
-    o 'CLOSE CS exprlist'          , '$$ = yy.node("Cmd", {pc: null, op: "CLOSE", args: $3})'
+    # XECUTE (exprlist)
+    o 'XECUTE postcond CS exprlist' , '$$ = yy.node("Cmd", {pc: $2, op: "XECUTE", args: $4})'
+    o 'XECUTE CS exprlist'          , '$$ = yy.node("Cmd", {pc: null, op: "XECUTE", args: $3})'
 
-    # FOR (minimal form: FOR var=from:to[:step] DO ... | FOR expr )
-    # We keep it permissive: accept a list of expressions for iteration specs; details left to semantic pass.
-    o 'FOR postcond CS exprlist'  , '$$ = yy.node("Cmd", {pc: $2, op: "FOR",  args: $4})'
-    o 'FOR CS exprlist'           , '$$ = yy.node("Cmd", {pc: null, op: "FOR", args: $3})'
-    # Also allow a bare FOR (used as DO-loop starter) with no exprs; semantics handled later.
-    o 'FOR'                       , '$$ = yy.node("Cmd", {pc: null, op: "FOR", args: []})'
+    # CLOSE (device params)
+    o 'CLOSE postcond CS device_args' , '$$ = yy.node("Cmd", {pc: $2, op: "CLOSE", args: $4})'
+    o 'CLOSE CS device_args'          , '$$ = yy.node("Cmd", {pc: null, op: "CLOSE", args: $3})'
+    o 'CLOSE postcond'             , '$$ = yy.node("Cmd", {pc: $2, op: "CLOSE", args: []})'
+    o 'CLOSE'                      , '$$ = yy.node("Cmd", {pc: null, op: "CLOSE", args: []})'
 
-    # JOB (standard: JOB entryref[:timeout][:priority],args... ; make it permissive as exprlist)
-    o 'JOB postcond CS exprlist'  , '$$ = yy.node("Cmd", {pc: $2, op: "JOB",  args: $4})'
-    o 'JOB CS exprlist'           , '$$ = yy.node("Cmd", {pc: null, op: "JOB", args: $3})'
+    # FOR
+    o 'FOR postcond CS for_specs' , '$$ = yy.node("For", {pc: $2, specs: $4})'
+    o 'FOR CS for_specs'          , '$$ = yy.node("For", {pc: null, specs: $3})'
+    # Bare FOR (acts as DO-loop starter)
+    o 'FOR'                       , '$$ = yy.node("For", {pc: null, specs: []})'
+
+    # JOB (targets with optional params) and argumentless form
+    o 'JOB postcond CS job_targets' , '$$ = yy.node("Cmd", {pc: $2, op: "JOB",  args: $4})'
+    o 'JOB CS job_targets'          , '$$ = yy.node("Cmd", {pc: null, op: "JOB", args: $3})'
+    o 'JOB postcond'                , '$$ = yy.node("Cmd", {pc: $2, op: "JOB",  args: []})'
+    o 'JOB'                         , '$$ = yy.node("Cmd", {pc: null, op: "JOB", args: []})'
 
     # Z-commands (any vendor command starting with Z...; accept optional exprlist)
     o 'ZCOMMAND postcond CS exprlist' , '$$ = yy.node("Cmd", {pc: $2, op: $1, args: $4})'
@@ -205,12 +215,14 @@ exports.bnf =
     o 'ZCOMMAND'                      , '$$ = yy.node("Cmd", {pc: null, op: $1, args: []})'
 
     # KILL
-    o 'KILL postcond CS kill_items' , '$$ = yy.node("Cmd", {pc: $2, op: "KILL",  args: $4})'
-    o 'KILL CS kill_items'          , '$$ = yy.node("Cmd", {pc: null, op: "KILL", args: $3})'
+    o 'KILL postcond CS kill_items' , '$$ = yy.node("Cmd", {pc: $2, op: "KILL",  args: yy.node("ArgsKILL", {items: $4})})'
+    o 'KILL CS kill_items'          , '$$ = yy.node("Cmd", {pc: null, op: "KILL", args: yy.node("ArgsKILL", {items: $3})})'
+    o 'KILL postcond'               , '$$ = yy.node("Cmd", {pc: $2, op: "KILL",  args: yy.node("ArgsKILL", {items: []})})'
+    o 'KILL'                        , '$$ = yy.node("Cmd", {pc: null, op: "KILL", args: yy.node("ArgsKILL", {items: []})})'
 
     # DO
-    o 'DO postcond CS entryref_list' , '$$ = yy.node("Cmd", {pc: $2, op: "DO",    args: $4})'
-    o 'DO CS entryref_list'          , '$$ = yy.node("Cmd", {pc: null, op: "DO",  args: $3})'
+    o 'DO postcond CS entryref_list' , '$$ = yy.node("Cmd", {pc: $2, op: "DO",    args: yy.node("ArgsENTRY", {targets: $4})})'
+    o 'DO CS entryref_list'          , '$$ = yy.node("Cmd", {pc: null, op: "DO",  args: yy.node("ArgsENTRY", {targets: $3})})'
 
     # IF (expr required)
     o 'IF postcond CS expr' , '$$ = yy.node("If", {pc: $2, cond: $4})'
@@ -238,6 +250,12 @@ exports.bnf =
     o 'QUIT CS expr'          , '$$ = yy.node("Cmd", {pc: null, op: "QUIT", args: [$3]})'
     o 'QUIT postcond'         , '$$ = yy.node("Cmd", {pc: $2, op: "QUIT", args: []})'
     o 'QUIT'                  , '$$ = yy.node("Cmd", {pc: null, op: "QUIT", args: []})'
+
+    # HANG (optional expr)
+    o 'HANG postcond CS expr' , '$$ = yy.node("Cmd", {pc: $2, op: "HANG", args: [$4]})'
+    o 'HANG CS expr'          , '$$ = yy.node("Cmd", {pc: null, op: "HANG", args: [$3]})'
+    o 'HANG postcond'         , '$$ = yy.node("Cmd", {pc: $2, op: "HANG", args: []})'
+    o 'HANG'                  , '$$ = yy.node("Cmd", {pc: null, op: "HANG", args: []})'
   ]
 
   postcond: [ o 'COLON expr', '$$ = $2' ]
@@ -249,7 +267,6 @@ exports.bnf =
     o 'set_items COMMA set_item' , '$1.push($3); $$ = $1'
   ]
   set_item: [
-    o 'NAME LPAREN exprlist RPAREN EQ expr' , '$$ = yy.node("Set", {lhs: yy.node("Var", {global: false, name: $1, subs: $3}), rhs: $6})'
     o 'set_target EQ expr'                  , '$$ = yy.node("Set", {lhs: $1, rhs: $3})'
   ]
 
@@ -258,12 +275,22 @@ exports.bnf =
     o 'dolspecial_lhs' , '$$ = $1'
     o 'piece_lhs'      , '$$ = $1'
     o 'extract_lhs'    , '$$ = $1'
+    # Direct NAME form to ensure simple locals like X, Y(1) parse as LHS without ambiguity
+    o 'NAME opt_subs'  , '$$ = yy.node("Var", {global: false, name: $1, subs: $2})'
   ]
 
   # KILL
   kill_items: [
-    o 'lvalue'                  , '$$ = [$1]'
-    o 'kill_items COMMA lvalue' , '$1.push($3); $$ = $1'
+    o 'lvalue'                               , '$$ = [$1]'
+    o 'LPAREN kill_group_items RPAREN'       , '$$ = $2'
+    o 'kill_items COMMA lvalue'              , '$1.push($3); $$ = $1'
+    o 'kill_items COMMA LPAREN kill_group_items RPAREN' , '$1.push.apply($1,$4); $$ = $1'
+  ]
+  kill_group_items: [
+    o 'lvalue'                                   , '$$ = [$1]'
+    o 'LPAREN kill_group_items RPAREN'           , '$$ = $2'
+    o 'kill_group_items COMMA lvalue'            , '$1.push($3); $$ = $1'
+    o 'kill_group_items COMMA LPAREN kill_group_items RPAREN' , '$1.push.apply($1,$4); $$ = $1'
   ]
 
   # NEW
@@ -327,10 +354,18 @@ exports.bnf =
 
   # MERGE
   merge_items: [
-    o 'merge_item'                   , '$$ = [$1]'
-    o 'merge_items COMMA merge_item' , '$1.push($3); $$ = $1'
+    o 'merge_item'                               , '$$ = Array.isArray($1)?$1:[$1]'
+    o 'merge_items COMMA merge_item'             , 'if(Array.isArray($3)) $1.push.apply($1,$3); else $1.push($3); $$ = $1'
   ]
-  merge_item: [ o 'lvalue EQ lvalue', '$$ = yy.node("Merge", {target: $1, source: $3})' ]
+  merge_item: [
+    o 'lvalue EQ lvalue'                         , '$$ = yy.node("Merge", {target: $1, source: $3})'
+    # Multi-target shorthand: (A,B)=C → [Merge(A=C), Merge(B=C)]
+    o 'LPAREN merge_targets RPAREN EQ lvalue'    , '$$ = $2.map(function(t){ return yy.node("Merge", {target:t, source:$5}); })'
+  ]
+  merge_targets: [
+    o 'lvalue'                      , '$$ = [$1]'
+    o 'merge_targets COMMA lvalue'  , '$1.push($3); $$ = $1'
+  ]
 
   # GOTO targets reuse entryref
   goto_list: [ o 'entryref_list', '$$ = $1' ]
@@ -404,7 +439,10 @@ exports.bnf =
     o ''                       , '$$ = []'
   ]
 
-  opt_global: [ o 'CARET', '$$ = true', o '', '$$ = false' ]
+  opt_global: [
+    o 'CARET' , '$$ = true'
+    o ''      , '$$ = false'
+  ]
 
   exprlist: [
     o 'expr'                , '$$ = [$1]'
@@ -419,6 +457,41 @@ exports.bnf =
 
   # lvalue for non-SET LHS
   lvalue: [ o 'varref', '$$ = $1' ]
+
+  # ---- Device parameter lists ----
+  device_args: [ o 'device_specs', '$$ = yy.node("ArgsDEVICE", {specs: $1})' ]
+  device_specs: [
+    o 'device_spec'                    , '$$ = [$1]'
+    o 'device_specs COMMA device_spec' , '$1.push($3); $$ = $1'
+  ]
+  device_spec: [
+    o 'expr opt_dev_params' , '$$ = yy.node("DeviceSpec", {device: $1, params: $2})'
+  ]
+  opt_dev_params: [
+    o 'COLON expr opt_more_dev_params' , '$$ = [$2].concat($3)'
+    o ''                               , '$$ = []'
+  ]
+  opt_more_dev_params: [
+    o 'COLON expr opt_more_dev_params' , '$$ = [$2].concat($3)'
+    o ''                               , '$$ = []'
+  ]
+
+  # ---- JOB targets with optional params ----
+  job_targets: [
+    o 'job_target'                    , '$$ = [$1]'
+    o 'job_targets COMMA job_target'  , '$1.push($3); $$ = $1'
+  ]
+  job_target: [
+    o 'entryref opt_job_params' , '$$ = yy.node("JobTarget", {target: $1, params: $2})'
+  ]
+  opt_job_params: [
+    o 'COLON expr opt_more_job_params' , '$$ = [$2].concat($3)'
+    o ''                                , '$$ = []'
+  ]
+  opt_more_job_params: [
+    o 'COLON expr opt_more_job_params' , '$$ = [$2].concat($3)'
+    o ''                                , '$$ = []'
+  ]
 
   # ---- Pattern subgrammar ----
   pattern: [ o 'pat_seq', '$$ = yy.node("Pattern", {atoms: $1})' ]
@@ -449,6 +522,19 @@ exports.bnf =
   dolspecial_lhs: [ o 'DOLSPECVAR',                   '$$ = yy.node("DollarVar", {name: $1, writable: true})' ]
   piece_lhs:      [ o 'DOLFN LPAREN exprlist RPAREN', '$$ = yy.node("PieceLHS",   {call: yy.node("DollarFn", {name:$1, args:$3})})' ]
   extract_lhs:    [ o 'DOLFN LPAREN exprlist RPAREN', '$$ = yy.node("ExtractLHS", {call: yy.node("DollarFn", {name:$1, args:$3})})' ]
+
+  # ---- FOR header parsing ----
+  for_specs: [
+    o 'for_spec'                 , '$$ = [$1]'
+    o 'for_specs COMMA for_spec' , '$1.push($3); $$ = $1'
+  ]
+  for_spec: [
+    o 'NAME EQ expr COLON expr opt_for_step' , '$$ = yy.node("ForSpec", {name:$1, from:$3, to:$5, step:$6 || yy.node("Number", {value:1})})'
+  ]
+  opt_for_step: [
+    o 'COLON expr' , '$$ = $2'
+    o ''           , '$$ = null'
+  ]
 
 # -------------------------- lexer --------------------------
 # Five modes: INITIAL (line start), CMD, EXPR, PAT (after '?'), WEXPR (after 'WRITE ')
@@ -604,21 +690,21 @@ exports.lex =
     ['<WEXPR><'                                             , 'yy.wItemStart=false; return "LT";']
     ["<WEXPR>'="                                            , 'yy.wItemStart=false; return "NE";']
     ['<WEXPR>='                                             , 'yy.wItemStart=false; return "EQ";']
-    ["<WEXPR>'\\["                                          , 'yy.wItemStart=false; return "NCONTAINS";']
-    ['<WEXPR>\\['                                           , 'yy.wItemStart=false; return "CONTAINS";']
-    ["<WEXPR>\\]'"                                          , 'yy.wItemStart=false; return "NFOLLOWS";']
-    ['<WEXPR>\\]'                                           , 'yy.wItemStart=false; return "FOLLOWS";']
-    ["<WEXPR>\\]\\]'"                                       , 'yy.wItemStart=false; return "NSORTAFTER";']
-    ['<WEXPR>\\]\\]'                                        , 'yy.wItemStart=false; return "SORTAFTER";']
-    ["<WEXPR>'"                                             , 'yy.wItemStart=false; return "NOT";']
+    ["<WEXPR>'\\["                                        , 'yy.wItemStart=false; return "NCONTAINS";']
+    ['<WEXPR>\\['                                         , 'yy.wItemStart=false; return "CONTAINS";']
+    ["<WEXPR>\\]'"                                        , 'yy.wItemStart=false; return "NFOLLOWS";']
+    ['<WEXPR>\\]'                                         , 'yy.wItemStart=false; return "FOLLOWS";']
+    ["<WEXPR>\\]\\]'"                                     , 'yy.wItemStart=false; return "NSORTAFTER";']
+    ['<WEXPR>\\]\\]'                                      , 'yy.wItemStart=false; return "SORTAFTER";']
+    ["<WEXPR>'"                                           , 'yy.wItemStart=false; return "NOT";']
 
-    ['<WEXPR>\\d+(?:\\.\\d+)?'                              , 'yy.wItemStart=false; return "NUMBER";']
-    ['<WEXPR>\\"(?:\\"\\"|[^\\"])*\\"'                      , 'yy.wItemStart=false; return "STRING";']
-    ['<WEXPR>\\$z[a-z][a-z0-9]*\\b'                         , 'yy.wItemStart=false; yytext = yytext.slice(2).toUpperCase(); return "ZDOLFN";']
+    ['<WEXPR>\\d+(?:\\.\\d+)?'                            , 'yy.wItemStart=false; return "NUMBER";']
+    ['<WEXPR>\\"(?:\\"\\"|[^\\"])*\\"'                     , 'yy.wItemStart=false; return "STRING";']
+    ['<WEXPR>\\$z[a-z][a-z0-9]*\\b'                        , 'yy.wItemStart=false; yytext = yytext.slice(2).toUpperCase(); return "ZDOLFN";']
     # DOLSPECVAR again (device/system gated by options)
     ['<WEXPR>\\$(?:X|Y|ECODE|ETRAP|IO|DEVICE|SYSTEM)\\b'    , 'yy.wItemStart=false; var nm=yytext.slice(1).toUpperCase(); var opts=(yy&&yy.options)||{}; var allow=false; if(nm==="X"||nm==="Y"||nm==="ECODE"||nm==="ETRAP"){allow=true;} else if(nm==="IO"||nm==="DEVICE"){allow=!!opts.allowWritableDeviceVars;} else if(nm==="SYSTEM"){allow=!!opts.allowWritableSystemVar;} yytext=nm; return allow ? "DOLSPECVAR" : "DOLFN";']
-    ['<WEXPR>\\$[a-z][a-z0-9]*\\b'                          , 'yy.wItemStart=false; yytext = yytext.slice(1).toUpperCase(); return "DOLFN";']
-    ['<WEXPR>[A-Za-z%][A-Za-z0-9]*'                         , 'yy.wItemStart=false; return "NAME";']
+    ['<WEXPR>\\$[a-z][a-z0-9]*\\b'                         , 'yy.wItemStart=false; yytext = yytext.slice(1).toUpperCase(); return "DOLFN";']
+    ['<WEXPR>[A-Za-z%][A-Za-z0-9]*'                        , 'yy.wItemStart=false; return "NAME";']
   ]
 
 # -------------------------- samples --------------------------

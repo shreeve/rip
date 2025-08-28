@@ -31,6 +31,8 @@ const { attachBlocks } = require('../blocks.coffee');
   // MERGE
   const l2 = ast.lines[1];
   assert.equal(l2.cmds[0].op, 'MERGE');
+  assert.equal(Array.isArray(l2.cmds[0].args), true);
+  assert.equal(l2.cmds[0].args[0].type, 'Merge');
   // DO
   const l3 = ast.lines[2];
   assert.equal(l3.cmds[0].op, 'DO');
