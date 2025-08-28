@@ -64,6 +64,25 @@ exports.tokens = [
   'WBANG','WTAB','WPOUND','WSTAR','WSLASH'
 ]
 
+
+# ---------------------------------- intrinsics ----------------------------------
+# Known M $FUNCTION names (and selected $spec variables) extracted from bumps-claude.bnf.
+# Used for tooling/hints; parsing still accepts any $name and normalizes to uppercase.
+exports.intrinsics = [
+  'A'         , 'ASCII'     , 'C'         , 'CHAR'      , 'D'         , 'DATA'      ,
+  'E'         , 'ECODE'     , 'ESTACK'    , 'ETRAP'     , 'EXTRACT'   , 'F'         ,
+  'FIND'      , 'FNUMBER'   , 'G'         , 'GET'       , 'H'         , 'HOROLOG'   ,
+  'IO'        , 'J'         , 'JOB'       , 'JUSTIFY'   , 'L'         , 'LENGTH'    ,
+  'NA'        , 'NAME'      , 'NEXT'      , 'O'         , 'ORDER'     , 'P'         ,
+  'PIECE'     , 'PRINCIPAL' , 'Q'         , 'QLENGTH'   , 'QSUBSCRIPT', 'QUERY'     ,
+  'QUIT'      , 'R'         , 'RANDOM'    , 'RE'        , 'REVERSE'   , 'S'         ,
+  'SELECT'    , 'STACK'     , 'STORAGE'   , 'T'         , 'TEST'      , 'TEXT'      ,
+  'TLEVEL'    , 'TR'        , 'TRANSLATE' , 'V'         , 'VIEW'      , 'X'         ,
+  'Y'         , 'ZDATE'     , 'ZVERSION'  
+]
+
+# Helper: check if a $FUNCTION name is recognized (uppercase, without '$')
+exports.isKnownIntrinsic = (name) -> name in exports.intrinsics
 exports.bnf =
 
   # ---- program structure ----
