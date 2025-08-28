@@ -84,6 +84,13 @@ exports.intrinsics = [
 # NOTE: Currently, this is only used for tooling/hints. Add to restrict fn names.
 exports.isKnownIntrinsic = (name) -> name in exports.intrinsics
 
+# ---------------------------------- options ----------------------------------
+# Feature gates for writable system variables in the grammar.
+# Consumers can set parser.yy.options = { allowWritableDeviceVars: true, allowWritableSystemVar: true }
+exports.options =
+  allowWritableDeviceVars: false
+  allowWritableSystemVar: false
+
 exports.bnf =
 
   # ---- program structure ----
@@ -545,8 +552,8 @@ exports.lex =
     ['<EXPR>\\d+(?:\\.\\d+)?'                               , 'return "NUMBER";']
     ['<EXPR>\\"(?:\\"\\"|[^\\"])*\\"'                       , 'return "STRING";']
     ['<EXPR>\\$z[a-z][a-z0-9]*\\b'                          , 'yytext = yytext.slice(2).toUpperCase(); return "ZDOLFN";']
-    # DOLSPECVAR (writable subset: $X, $Y, $ECODE, $ETRAP)
-    ['<EXPR>\\$(?:X|Y|ECODE|ETRAP)\\b'                      , 'yytext = yytext.slice(1).toUpperCase(); return "DOLSPECVAR";']
+    # DOLSPECVAR (writable subset; device/system gated by options)
+    ['<EXPR>\\$(?:X|Y|ECODE|ETRAP|IO|DEVICE|SYSTEM)\\b'     , 'var nm=yytext.slice(1).toUpperCase(); var opts=(yy&&yy.options)||{}; var allow=false; if(nm==="X"||nm==="Y"||nm==="ECODE"||nm==="ETRAP"){allow=true;} else if(nm==="IO"||nm==="DEVICE"){allow=!!opts.allowWritableDeviceVars;} else if(nm==="SYSTEM"){allow=!!opts.allowWritableSystemVar;} yytext=nm; return allow ? "DOLSPECVAR" : "DOLFN";']
     ['<EXPR>\\$[a-z][a-z0-9]*\\b'                           , 'yytext = yytext.slice(1).toUpperCase(); return "DOLFN";']
     ['<EXPR>[A-Za-z%][A-Za-z0-9]*'                          , 'return "NAME";']
 
@@ -608,8 +615,8 @@ exports.lex =
     ['<WEXPR>\\d+(?:\\.\\d+)?'                              , 'yy.wItemStart=false; return "NUMBER";']
     ['<WEXPR>\\"(?:\\"\\"|[^\\"])*\\"'                      , 'yy.wItemStart=false; return "STRING";']
     ['<WEXPR>\\$z[a-z][a-z0-9]*\\b'                         , 'yy.wItemStart=false; yytext = yytext.slice(2).toUpperCase(); return "ZDOLFN";']
-    # DOLSPECVAR again (writable subset)
-    ['<WEXPR>\\$(?:X|Y|ECODE|ETRAP)\\b'                     , 'yy.wItemStart=false; yytext = yytext.slice(1).toUpperCase(); return "DOLSPECVAR";']
+    # DOLSPECVAR again (device/system gated by options)
+    ['<WEXPR>\\$(?:X|Y|ECODE|ETRAP|IO|DEVICE|SYSTEM)\\b'    , 'yy.wItemStart=false; var nm=yytext.slice(1).toUpperCase(); var opts=(yy&&yy.options)||{}; var allow=false; if(nm==="X"||nm==="Y"||nm==="ECODE"||nm==="ETRAP"){allow=true;} else if(nm==="IO"||nm==="DEVICE"){allow=!!opts.allowWritableDeviceVars;} else if(nm==="SYSTEM"){allow=!!opts.allowWritableSystemVar;} yytext=nm; return allow ? "DOLSPECVAR" : "DOLFN";']
     ['<WEXPR>\\$[a-z][a-z0-9]*\\b'                          , 'yy.wItemStart=false; yytext = yytext.slice(1).toUpperCase(); return "DOLFN";']
     ['<WEXPR>[A-Za-z%][A-Za-z0-9]*'                         , 'yy.wItemStart=false; return "NAME";']
   ]
