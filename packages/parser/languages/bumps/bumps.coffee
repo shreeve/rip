@@ -18,15 +18,10 @@ o = (pattern, action = '', opts = undefined) ->
 exports.startSymbol = 'program'
 
 exports.operators = [
-  ['left', 'OR']
-  ['left', 'AND']
-  ['nonassoc', 'GT', 'LT', 'GE', 'LE', 'EQ', 'NE', 'CONTAINS', 'NCONTAINS', 'FOLLOWS', 'NFOLLOWS', 'SORTAFTER', 'NSORTAFTER']
-  ['left', 'PMATCH']
-  ['left', 'CONCAT']
-  ['left', 'PLUS', 'MINUS']
-  ['left', 'MUL', 'DIV', 'IDIV', 'MOD']
-  ['right', 'EXP']
-  ['right', 'UPLUS', 'UMINUS', 'NOT']
+  ['right', 'UPLUS', 'UMINUS', 'NOT'] # unary binds tighter
+  ['left',  'OR','AND','CONCAT','GT','LT','GE','LE','EQ','NE',
+            'CONTAINS','NCONTAINS','FOLLOWS','NFOLLOWS','SORTAFTER','NSORTAFTER',
+            'PLUS','MINUS','MUL','DIV','IDIV','MOD','EXP','PMATCH']
 ]
 
 # Keep token list in sync with lexer below
@@ -35,7 +30,6 @@ exports.tokens = [
   'LPAREN','RPAREN','COMMA','COLON','SEMI','CARET','AT'
   'STRING','NUMBER','NAME','PATTERN'
   'DOLFN','DOLSPECVAR','ZDOLFN','ZCOMMAND'
-  'SSV_SYSTEM','SSV_JOB','SSV_GLOBAL','SSV_LOCK','SSV_ROUTINE'
   # Commands
   'BREAK','CLOSE','DO','ELSE','FOR','GOTO','HALT','HANG','IF','JOB','KILL','LOCK','MERGE','NEW','OPEN','QUIT','READ','SET','USE','VIEW','WRITE','XECUTE'
   'TSTART','TCOMMIT','TROLLBACK','TRESTART'
@@ -385,15 +379,12 @@ exports.bnf =
     o 'NUMBER', '$$ = yy.node("Number", {value: +yytext})'
     o 'STRING', '$$ = yy.node("String", {value: yytext})'
     o 'NAME', '$$ = yy.node("Var", {global: false, name: $1, subs: []})'
-    o 'ssv_ref', '$$ = $1'
     o 'varref', '$$ = $1'
     o 'LPAREN expr RPAREN', '$$ = $2'
     o 'dolfn_call', '$$ = $1'
   ]
 
   varref: [
-    o 'CARET LPAREN expr RPAREN NAME opt_subs', '$$ = yy.node("Var", {global: true, env: $3, name: $5, subs: $6})'
-    o 'CARET LPAREN exprlist RPAREN', '$$ = yy.node("NakedRef", {subs: $3})'
     o 'opt_global NAME opt_subs', '$$ = yy.node("Var", {global: $1, name: $2, subs: $3})'
     o 'AT NAME', '$$ = yy.node("Indirect", {kind: "name", target: $2})'
     o 'AT LPAREN expr RPAREN', '$$ = yy.node("Indirect", {kind: "expr", target: $3})'
@@ -416,13 +407,7 @@ exports.bnf =
     o 'ZDOLFN LPAREN exprlist RPAREN', '$$ = yy.node("DollarFn", {name: $1, zext: true, args: $3})'
   ]
 
-  ssv_ref: [
-    o 'SSV_SYSTEM LPAREN exprlist RPAREN', '$$ = yy.node("SSV", {name: "$SYSTEM", subs: $3})'
-    o 'SSV_JOB LPAREN exprlist RPAREN', '$$ = yy.node("SSV", {name: "$JOB", subs: $3})'
-    o 'SSV_GLOBAL LPAREN exprlist RPAREN', '$$ = yy.node("SSV", {name: "$GLOBAL", subs: $3})'
-    o 'SSV_LOCK LPAREN exprlist RPAREN', '$$ = yy.node("SSV", {name: "$LOCK", subs: $3})'
-    o 'SSV_ROUTINE LPAREN exprlist RPAREN', '$$ = yy.node("SSV", {name: "$ROUTINE", subs: $3})'
-  ]
+  # ssv_ref removed
 
   lvalue: [
     o 'NAME LPAREN exprlist RPAREN', '$$ = yy.node("Var", {global: false, name: $1, subs: $3})'
