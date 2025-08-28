@@ -76,6 +76,29 @@ Jobs' editorial lens guides Rip to favor subtraction over addition and cohesion 
 - Integrate and refine proven ideas; avoid inventing gratuitous novelty
 - Build elegance by editing, sequencing, and composing capabilities cleanly
 
+## 🎯 The Paul Graham Principle
+
+> "Succinctness is power" — the more a language lets you say with fewer conceptual elements, the more powerful it is.
+> **— Paul Graham, “Succinctness is Power” (2002)**
+
+Paul Graham’s lens focuses on leverage: high‑level languages exist to compress meaning. Power correlates with how small (in semantic elements, not just lines) a language makes your programs, and languages feel restrictive when they force longer detours.
+
+**✅ Succinctness = Power**:
+- Favor features that make many different programs shorter and clearer
+- Reduce repeated patterns via expressive primitives and composition
+
+**✅ Elements, Not Lines**:
+- Judge size by semantic elements (AST‑like nodes), not LoC or characters
+- Optimize for lower conceptual load and whole‑program readability
+
+**✅ Abstractions That Pay Rent**:
+- Add constructs that consistently eliminate boilerplate across contexts
+- Avoid clever one‑offs that shrink lines but hurt understanding
+
+**✅ The Taste Test**:
+- Prefer designs that feel fluid to think in; friction signals verbosity
+- Less code often means fewer bugs and faster iteration
+
 ## 🎯 The Larry Wall Principle
 
 > *"Common things should be easy, rare things should be possible"*
