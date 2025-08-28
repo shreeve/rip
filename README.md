@@ -121,6 +121,29 @@ This foundational principle guides every API design decision in Rip:
 
 **💫 Perfect Balance**: Learn the common patterns first (covers 90% of needs), discover advanced features as you grow. No feature bloat, no cognitive overload, just elegant progression from simple to sophisticated.
 
+## 🎯 The Saint-Exupéry Principle
+
+> "Perfection is achieved, not when there is nothing more to add, but when there is nothing left to take away."
+> **— Antoine de Saint‑Exupéry**
+
+True refinement comes through subtraction and simplification. Don’t pile on features and layers; strip away the unnecessary until what remains is clean, clear, and essential.
+
+**✅ Subtraction Reveals the Essential**:
+- Remove redundant code, dead paths, and gratuitous abstractions
+- Collapse layers; prefer direct, legible flows
+
+**✅ Simplicity, Maintainability, Clarity**:
+- Smaller surface area; fewer concepts to learn and remember
+- Easier to test, scale, reason about, and hand off to others
+
+**✅ Resist Feature Creep**:
+- Say no by default; add only when it earns its keep
+- Prefer composition over new flags, modes, or knobs
+
+**✅ Clean Edges, Reliable Core**:
+- Tight interfaces, predictable behavior, fewer bugs
+- The simplest design that fully solves the problem
+
 **💡 The Goal**: When you use Rip, it should feel like the computer is reading your mind. The syntax and behavior should match your mental model so perfectly that the tool disappears and you can focus purely on solving problems.
 
 ## 🌟 Live Language Innovation
