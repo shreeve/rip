@@ -16,6 +16,10 @@
 # - Extended references ^|"env-expr"|GLOBAL(...), plus naked extended ^|env|(…)
 # - Naked global syntax ^(subs) yields NakedRef nodes (resolved later)
 # - Tiny sample corpus included in exports.samples
+# - Keeps lexer modes (INITIAL/CMD/EXPR/PAT/WEXPR)
+# - Supports WRITE adorners (! ? # * /) with WEXPR gating
+# - Supports pattern subgrammar and extended/naked global references
+# - Aligns productions for readability
 
 # -------------------------- helper --------------------------
 o = (pattern, action = '', opts = undefined) ->
@@ -62,249 +66,247 @@ exports.bnf =
 
   # ---- program structure ----
   program: [
-    o '', 'return yy.node("Program", {lines: []})'
-    o 'lines', 'return yy.node("Program", {lines: $1})'
+    o '',                   'return yy.node("Program", {lines: []})'
+    o 'lines',              'return yy.node("Program", {lines: $1})'
   ]
 
   lines: [
-    o 'line', '$$ = [$1]'
+    o 'line',               '$$ = [$1]'
     o 'lines NEWLINE line', '$1.push($3); $$ = $1'
-    o 'lines NEWLINE', '$$ = $1'
+    o 'lines NEWLINE',      '$$ = $1'
   ]
 
   line: [
     o 'line_hdr opt_cmds opt_comment', '$$ = Object.assign($1, {cmds: $2, comment: $3 || null})'
-    o 'line_hdr opt_comment', '$$ = Object.assign($1, {cmds: [], comment: $2 || null})'
+    o 'line_hdr opt_comment',          '$$ = Object.assign($1, {cmds: [], comment: $2 || null})'
   ]
 
   line_hdr: [
     o 'opt_dots opt_label', '$$ = yy.node("Line", {depth: $1, label: $2})'
-    o 'opt_dots', '$$ = yy.node("Line", {depth: $1, label: null})'
+    o 'opt_dots',           '$$ = yy.node("Line", {depth: $1, label: null})'
   ]
 
   opt_dots: [
     o 'DOTS', '$$ = yy.depth | 0'
-    o '', '$$ = 0'
+    o '',     '$$ = 0'
   ]
 
   opt_label: [
     o 'LABEL opt_formals', '$$ = yy.node("Label", {name: $1, formals: $2})'
-    o '', '$$ = null'
+    o '',                  '$$ = null'
   ]
 
   opt_formals: [
     o 'LPAREN formals RPAREN', '$$ = $2'
-    o '', '$$ = []'
+    o '',                      '$$ = []'
   ]
 
   formals: [
-    o 'NAME', '$$ = [ yy.node("Formal", {name: $1}) ]'
+    o 'NAME',               '$$ = [ yy.node("Formal", {name: $1}) ]'
     o 'formals COMMA NAME', '$1.push(yy.node("Formal", {name: $3})); $$ = $1'
   ]
 
   opt_comment: [
     o 'COMMENT', '$$ = yytext'
-    o '', '$$ = null'
+    o '',        '$$ = null'
   ]
 
   opt_cmds: [
     o 'cmds', '$$ = $1'
-    o '', '$$ = []'
+    o '',     '$$ = []'
   ]
 
   cmds: [
-    o 'cmd', '$$ = [$1]'
-    o 'cmds CS cmd', '$1.push($3); $$ = $1'
+    o 'cmd',           '$$ = [$1]'
+    o 'cmds CS cmd',   '$1.push($3); $$ = $1'
   ]
 
-  # ---- commands (subset kept concise; extend as needed) ----
+  # ---- commands ----
   cmd: [
     # GOTO
-    o 'postcond GOTO goto_list', '$$ = yy.node("Cmd", {pc: $1, op: "GOTO", args: $3})'
-    o 'GOTO goto_list',          '$$ = yy.node("Cmd", {pc: null, op: "GOTO", args: $2})'
+    o 'GOTO postcond CS goto_list', '$$ = yy.node("Cmd", {pc: $2, op: "GOTO", args: $4})'
+    o 'GOTO CS goto_list',          '$$ = yy.node("Cmd", {pc: null, op: "GOTO", args: $3})'
 
-    # SET
-    o 'postcond SET set_list',   '$$ = yy.node("Cmd", {pc: $1, op: "SET",   args: $3})'
-    o 'SET set_list',            '$$ = yy.node("Cmd", {pc: null, op: "SET",  args: $2})'
+    # SET (must have args)
+    o 'SET postcond CS set_list',   '$$ = yy.node("Cmd", {pc: $2, op: "SET",   args: $4})'
+    o 'SET CS set_list',            '$$ = yy.node("Cmd", {pc: null, op: "SET", args: $3})'
 
     # WRITE
-    o 'postcond WRITE write_list', '$$ = yy.node("Cmd", {pc: $1, op: "WRITE", args: $3})'
-    o 'WRITE write_list',         '$$ = yy.node("Cmd", {pc: null, op: "WRITE", args: $2})'
+    o 'WRITE postcond CS write_list','$$ = yy.node("Cmd", {pc: $2, op: "WRITE", args: $4})'
+    o 'WRITE CS write_list',         '$$ = yy.node("Cmd", {pc: null, op: "WRITE",args: $3})'
 
     # READ
-    o 'postcond READ read_list', '$$ = yy.node("Cmd", {pc: $1, op: "READ",  args: $3})'
-    o 'READ read_list',          '$$ = yy.node("Cmd", {pc: null, op: "READ", args: $2})'
+    o 'READ postcond CS read_list', '$$ = yy.node("Cmd", {pc: $2, op: "READ",  args: $4})'
+    o 'READ CS read_list',          '$$ = yy.node("Cmd", {pc: null, op: "READ", args: $3})'
 
     # NEW
-    o 'postcond NEW new_list',   '$$ = yy.node("Cmd", {pc: $1, op: "NEW",   args: $3})'
-    o 'NEW new_list',            '$$ = yy.node("Cmd", {pc: null, op: "NEW",  args: $2})'
+    o 'NEW postcond CS name_list',  '$$ = yy.node("Cmd", {pc: $2, op: "NEW",   args: $4})'
+    o 'NEW CS name_list',           '$$ = yy.node("Cmd", {pc: null, op: "NEW", args: $3})'
 
     # KILL
-    o 'postcond KILL kill_list', '$$ = yy.node("Cmd", {pc: $1, op: "KILL",  args: $3})'
-    o 'KILL kill_list',          '$$ = yy.node("Cmd", {pc: null, op: "KILL", args: $2})'
+    o 'KILL postcond CS kill_items','$$ = yy.node("Cmd", {pc: $2, op: "KILL",  args: $4})'
+    o 'KILL CS kill_items',         '$$ = yy.node("Cmd", {pc: null, op: "KILL", args: $3})'
 
     # DO
-    o 'postcond DO do_list',     '$$ = yy.node("Cmd", {pc: $1, op: "DO",    args: $3})'
-    o 'DO do_list',              '$$ = yy.node("Cmd", {pc: null, op: "DO",   args: $2})'
+    o 'DO postcond CS entryref_list', '$$ = yy.node("Cmd", {pc: $2, op: "DO",    args: $4})'
+    o 'DO CS entryref_list',          '$$ = yy.node("Cmd", {pc: null, op: "DO",  args: $3})'
 
-    # IF / ELSE
-    o 'IF CS expr',              '$$ = yy.node("If", {pc: null, cond: $3})'
-    o 'ELSE',                    '$$ = yy.node("Else", {pc: null})'
+    # IF (expr required)
+    o 'IF postcond CS expr',        '$$ = yy.node("If", {pc: $2, cond: $4})'
+    o 'IF CS expr',                 '$$ = yy.node("If", {pc: null, cond: $3})'
+
+    # ELSE (argless)
+    o 'ELSE',                       '$$ = yy.node("Else", {pc: null})'
 
     # LOCK / MERGE
-    o 'postcond LOCK lock_list', '$$ = yy.node("Cmd", {pc: $1, op: "LOCK",  args: $3})'
-    o 'LOCK lock_list',          '$$ = yy.node("Cmd", {pc: null, op: "LOCK", args: $2})'
-    o 'postcond MERGE merge_list', '$$ = yy.node("Cmd", {pc: $1, op: "MERGE", args: $3})'
-    o 'MERGE merge_list',         '$$ = yy.node("Cmd", {pc: null, op: "MERGE", args: $2})'
+    o 'LOCK postcond CS lock_items', '$$ = yy.node("Cmd", {pc: $2, op: "LOCK",  args: $4})'
+    o 'LOCK CS lock_items',          '$$ = yy.node("Cmd", {pc: null, op: "LOCK", args: $3})'
 
-    # HALT, BREAK, QUIT (no-arg capable)
-    o 'postcond HALT',           '$$ = yy.node("Cmd", {pc: $1, op: "HALT", args: []})'
-    o 'HALT',                    '$$ = yy.node("Cmd", {pc: null, op: "HALT", args: []})'
+    o 'MERGE postcond CS merge_items', '$$ = yy.node("Cmd", {pc: $2, op: "MERGE", args: $4})'
+    o 'MERGE CS merge_items',          '$$ = yy.node("Cmd", {pc: null, op: "MERGE",args: $3})'
 
-    o 'postcond BREAK',          '$$ = yy.node("Cmd", {pc: $1, op: "BREAK", args: []})'
-    o 'BREAK',                   '$$ = yy.node("Cmd", {pc: null, op: "BREAK", args: []})'
+    # HALT / BREAK (argless)
+    o 'HALT postcond',              '$$ = yy.node("Cmd", {pc: $2, op: "HALT", args: []})'
+    o 'HALT',                       '$$ = yy.node("Cmd", {pc: null, op: "HALT", args: []})'
 
-    o 'postcond QUIT',           '$$ = yy.node("Cmd", {pc: $1, op: "QUIT", args: []})'
-    o 'QUIT',                    '$$ = yy.node("Cmd", {pc: null, op: "QUIT", args: []})'
-    o 'QUIT CS expr',            '$$ = yy.node("Cmd", {pc: null, op: "QUIT", args: [$3]})'
-    o 'postcond QUIT CS expr',   '$$ = yy.node("Cmd", {pc: $1, op: "QUIT", args: [$4]})'
+    o 'BREAK postcond',             '$$ = yy.node("Cmd", {pc: $2, op: "BREAK", args: []})'
+    o 'BREAK',                      '$$ = yy.node("Cmd", {pc: null, op: "BREAK", args: []})'
+
+    # QUIT (optional expr)
+    o 'QUIT postcond CS expr',      '$$ = yy.node("Cmd", {pc: $2, op: "QUIT", args: [$4]})'
+    o 'QUIT CS expr',               '$$ = yy.node("Cmd", {pc: null, op: "QUIT", args: [$3]})'
+    o 'QUIT postcond',              '$$ = yy.node("Cmd", {pc: $2, op: "QUIT", args: []})'
+    o 'QUIT',                       '$$ = yy.node("Cmd", {pc: null, op: "QUIT", args: []})'
   ]
 
   postcond: [ o 'COLON expr', '$$ = $2' ]
 
   # ---- argument lists ----
-  set_list: [ o 'CS set_items', '$$ = yy.node("ArgsSET", {items: $2})' ]
+  set_list: [ o 'set_items', '$$ = yy.node("ArgsSET", {items: $1})' ]
   set_items: [
-    o 'set_item', '$$ = [$1]'
+    o 'set_item',                 '$$ = [$1]'
     o 'set_items COMMA set_item', '$1.push($3); $$ = $1'
   ]
   set_item: [
     o 'NAME LPAREN exprlist RPAREN EQ expr', '$$ = yy.node("Set", {lhs: yy.node("Var", {global: false, name: $1, subs: $3}), rhs: $6})'
-    o 'set_target EQ expr', '$$ = yy.node("Set", {lhs: $1, rhs: $3})'
+    o 'set_target EQ expr',                   '$$ = yy.node("Set", {lhs: $1, rhs: $3})'
   ]
 
-  # SET-specific LHS (beyond plain varref)
   set_target: [
-    o 'varref', '$$ = $1'
-    o 'dolspecial_lhs', '$$ = $1'
-    o 'piece_lhs', '$$ = $1'
-    o 'extract_lhs', '$$ = $1'
+    o 'varref',          '$$ = $1'
+    o 'dolspecial_lhs',  '$$ = $1'
+    o 'piece_lhs',       '$$ = $1'
+    o 'extract_lhs',     '$$ = $1'
   ]
 
   # KILL
-  kill_list: [ o 'CS kill_items', '$$ = yy.node("ArgsKILL", {items: $2})' ]
   kill_items: [
-    o 'lvalue', '$$ = [$1]'
-    o 'kill_items COMMA lvalue', '$1.push($3); $$ = $1'
+    o 'lvalue',                    '$$ = [$1]'
+    o 'kill_items COMMA lvalue',   '$1.push($3); $$ = $1'
   ]
 
   # NEW
-  new_list: [ o 'CS name_list', '$$ = yy.node("ArgsNEW", {names: $2})' ]
   name_list: [
-    o 'NAME', '$$ = [$1]'
-    o 'name_list COMMA NAME', '$1.push($3); $$ = $1'
+    o 'NAME',                      '$$ = [$1]'
+    o 'name_list COMMA NAME',      '$1.push($3); $$ = $1'
   ]
 
-  # DO
-  do_list: [ o 'CS entryref_list', '$$ = yy.node("ArgsDO", {targets: $2})' ]
+  # DO / GOTO share entryref_list
   entryref_list: [
-    o 'entryref', '$$ = [$1]'
-    o 'entryref_list COMMA entryref', '$1.push($3); $$ = $1'
+    o 'entryref',                         '$$ = [$1]'
+    o 'entryref_list COMMA entryref',     '$1.push($3); $$ = $1'
   ]
   entryref: [
-    o 'NAME opt_entryargs', '$$ = yy.node("EntryRef", {label: $1, routine: null, offset: null, args: $2})'
-    o 'NAME CARET NAME opt_entryargs', '$$ = yy.node("EntryRef", {label: $1, routine: $3, offset: null, args: $4})'
-    o 'NAME PLUS NUMBER CARET NAME opt_entryargs', '$$ = yy.node("EntryRef", {label: $1, routine: $5, offset: +$3, args: $6})'
-    # optional GT.M-style negative offset only if explicitly enabled later (semantic)
-    o 'NAME PLUS MINUS NUMBER CARET NAME opt_entryargs', '$$ = yy.node("EntryRef", {label: $1, routine: $6, offset: -$4, args: $7, ext: "negOffset"})'
-    o 'CARET NAME opt_entryargs', '$$ = yy.node("EntryRef", {label: null, routine: $2, offset: null, args: $3})'
+    o 'NAME opt_entryargs',                         '$$ = yy.node("EntryRef", {label: $1, routine: null, offset: null, args: $2})'
+    o 'NAME CARET NAME opt_entryargs',              '$$ = yy.node("EntryRef", {label: $1, routine: $3,  offset: null, args: $4})'
+    o 'NAME PLUS NUMBER CARET NAME opt_entryargs',  '$$ = yy.node("EntryRef", {label: $1, routine: $5,  offset: +$3, args: $6})'
+    o 'NAME MINUS NUMBER CARET NAME opt_entryargs', '$$ = yy.node("EntryRef", {label: $1, routine: $5,  offset: -$3, args: $6})'
+    o 'CARET NAME opt_entryargs',                   '$$ = yy.node("EntryRef", {label: null, routine: $2, offset: null, args: $3})'
   ]
   opt_entryargs: [
     o 'LPAREN exprlist RPAREN', '$$ = $2'
-    o '', '$$ = []'
+    o '',                       '$$ = []'
   ]
 
   # WRITE
-  write_list: [ o 'CS witems', '$$ = yy.node("ArgsWRITE", {items: $2})' ]
+  write_list: [ o 'witems', '$$ = yy.node("ArgsWRITE", {items: $1})' ]
   witems: [
-    o 'witem', '$$ = [$1]'
-    o 'witems COMMA witem', '$1.push($3); $$ = $1'
+    o 'witem',                    '$$ = [$1]'
+    o 'witems COMMA witem',       '$1.push($3); $$ = $1'
   ]
   witem: [
-    o 'WTAB expr',   '$$ = yy.node("WTab", {expr: $2})'
-    o 'WBANG',       '$$ = yy.node("WNL", {})'
-    o 'WPOUND',      '$$ = yy.node("WFF", {})'
-    o 'WSTAR expr',  '$$ = yy.node("WAscii", {expr: $2})'
-    o 'WSLASH expr', '$$ = yy.node("WFormat", {expr: $2})'
-    o 'expr',        '$$ = yy.node("WExpr", {expr: $1})'
+    o 'WTAB expr',                '$$ = yy.node("WTab",    {expr: $2})'
+    o 'WBANG',                    '$$ = yy.node("WNL",     {})'
+    o 'WPOUND',                   '$$ = yy.node("WFF",     {})'
+    o 'WSTAR expr',               '$$ = yy.node("WAscii",  {expr: $2})'
+    o 'WSLASH expr',              '$$ = yy.node("WFormat", {expr: $2})'
+    o 'expr',                     '$$ = yy.node("WExpr",   {expr: $1})'
   ]
 
   # READ
-  read_list: [ o 'CS ritems', '$$ = yy.node("ArgsREAD", {items: $2})' ]
+  read_list: [ o 'ritems', '$$ = yy.node("ArgsREAD", {items: $1})' ]
   ritems: [
-    o 'ritem', '$$ = [$1]'
-    o 'ritems COMMA ritem', '$1.push($3); $$ = $1'
+    o 'ritem',                    '$$ = [$1]'
+    o 'ritems COMMA ritem',       '$1.push($3); $$ = $1'
   ]
   ritem: [
-    o 'lvalue', '$$ = yy.node("ReadItem", {lhs: $1, timeout: null})'
-    o 'lvalue COLON expr', '$$ = yy.node("ReadItem", {lhs: $1, timeout: $3})'
+    o 'lvalue',                   '$$ = yy.node("ReadItem", {lhs: $1, timeout: null})'
+    o 'lvalue COLON expr',        '$$ = yy.node("ReadItem", {lhs: $1, timeout: $3})'
   ]
 
   # LOCK
-  lock_list: [ o 'CS lock_items', '$$ = $2' ]
   lock_items: [
-    o 'lock_item', '$$ = [$1]'
+    o 'lock_item',                  '$$ = [$1]'
     o 'lock_items COMMA lock_item', '$1.push($3); $$ = $1'
   ]
   lock_item: [
-    o 'lvalue', '$$ = yy.node("LockItem", {res: $1, timeout: null})'
-    o 'lvalue COLON expr', '$$ = yy.node("LockItem", {res: $1, timeout: $3})'
+    o 'lvalue',                   '$$ = yy.node("LockItem", {res: $1, timeout: null})'
+    o 'lvalue COLON expr',        '$$ = yy.node("LockItem", {res: $1, timeout: $3})'
   ]
 
   # MERGE
-  merge_list: [ o 'CS merge_items', '$$ = $2' ]
   merge_items: [
-    o 'merge_item', '$$ = [$1]'
+    o 'merge_item',               '$$ = [$1]'
     o 'merge_items COMMA merge_item', '$1.push($3); $$ = $1'
   ]
   merge_item: [ o 'lvalue EQ lvalue', '$$ = yy.node("Merge", {target: $1, source: $3})' ]
 
   # GOTO targets reuse entryref
-  goto_list: [ o 'CS entryref_list', '$$ = $2' ]
+  goto_list: [ o 'entryref_list', '$$ = $1' ]
 
   # ---- expressions ----
   expr: [
-    o 'primary', '$$ = $1'
+    o 'primary',                   '$$ = $1'
 
     # binary ops
-    o 'expr PLUS expr',    '$$ = yy.node("BinOp", {op:"PLUS",    lhs:$1, rhs:$3})'
-    o 'expr MINUS expr',   '$$ = yy.node("BinOp", {op:"MINUS",   lhs:$1, rhs:$3})'
-    o 'expr MUL expr',     '$$ = yy.node("BinOp", {op:"MUL",     lhs:$1, rhs:$3})'
-    o 'expr EXP expr',     '$$ = yy.node("BinOp", {op:"EXP",     lhs:$1, rhs:$3})'
-    o 'expr DIV expr',     '$$ = yy.node("BinOp", {op:"DIV",     lhs:$1, rhs:$3})'
-    o 'expr IDIV expr',    '$$ = yy.node("BinOp", {op:"IDIV",    lhs:$1, rhs:$3})'
-    o 'expr MOD expr',     '$$ = yy.node("BinOp", {op:"MOD",     lhs:$1, rhs:$3})'
-    o 'expr AND expr',     '$$ = yy.node("BinOp", {op:"AND",     lhs:$1, rhs:$3})'
-    o 'expr OR expr',      '$$ = yy.node("BinOp", {op:"OR",      lhs:$1, rhs:$3})'
-    o 'expr CONCAT expr',  '$$ = yy.node("BinOp", {op:"CONCAT",  lhs:$1, rhs:$3})'
+    o 'expr PLUS expr',            '$$ = yy.node("BinOp", {op:"PLUS",    lhs:$1, rhs:$3})'
+    o 'expr MINUS expr',           '$$ = yy.node("BinOp", {op:"MINUS",   lhs:$1, rhs:$3})'
+    o 'expr MUL expr',             '$$ = yy.node("BinOp", {op:"MUL",     lhs:$1, rhs:$3})'
+    o 'expr EXP expr',             '$$ = yy.node("BinOp", {op:"EXP",     lhs:$1, rhs:$3})'
+    o 'expr DIV expr',             '$$ = yy.node("BinOp", {op:"DIV",     lhs:$1, rhs:$3})'
+    o 'expr IDIV expr',            '$$ = yy.node("BinOp", {op:"IDIV",    lhs:$1, rhs:$3})'
+    o 'expr MOD expr',             '$$ = yy.node("BinOp", {op:"MOD",     lhs:$1, rhs:$3})'
+    o 'expr AND expr',             '$$ = yy.node("BinOp", {op:"AND",     lhs:$1, rhs:$3})'
+    o 'expr OR expr',              '$$ = yy.node("BinOp", {op:"OR",      lhs:$1, rhs:$3})'
+    o 'expr CONCAT expr',          '$$ = yy.node("BinOp", {op:"CONCAT",  lhs:$1, rhs:$3})'
 
     # relations
-    o 'expr GT expr',         '$$ = yy.node("Rel", {op:"GT",         lhs:$1, rhs:$3})'
-    o 'expr LT expr',         '$$ = yy.node("Rel", {op:"LT",         lhs:$1, rhs:$3})'
-    o 'expr GE expr',         '$$ = yy.node("Rel", {op:"GE",         lhs:$1, rhs:$3})'
-    o 'expr LE expr',         '$$ = yy.node("Rel", {op:"LE",         lhs:$1, rhs:$3})'
-    o 'expr EQ expr',         '$$ = yy.node("Rel", {op:"EQ",         lhs:$1, rhs:$3})'
-    o 'expr NE expr',         '$$ = yy.node("Rel", {op:"NE",         lhs:$1, rhs:$3})'
-    o 'expr CONTAINS expr',   '$$ = yy.node("Rel", {op:"CONTAINS",   lhs:$1, rhs:$3})'
-    o 'expr NCONTAINS expr',  '$$ = yy.node("Rel", {op:"NCONTAINS",  lhs:$1, rhs:$3})'
-    o 'expr FOLLOWS expr',    '$$ = yy.node("Rel", {op:"FOLLOWS",    lhs:$1, rhs:$3})'
-    o 'expr NFOLLOWS expr',   '$$ = yy.node("Rel", {op:"NFOLLOWS",   lhs:$1, rhs:$3})'
-    o 'expr SORTAFTER expr',  '$$ = yy.node("Rel", {op:"SORTAFTER",  lhs:$1, rhs:$3})'
-    o 'expr NSORTAFTER expr', '$$ = yy.node("Rel", {op:"NSORTAFTER", lhs:$1, rhs:$3})'
+    o 'expr GT expr',              '$$ = yy.node("Rel",   {op:"GT",         lhs:$1, rhs:$3})'
+    o 'expr LT expr',              '$$ = yy.node("Rel",   {op:"LT",         lhs:$1, rhs:$3})'
+    o 'expr GE expr',              '$$ = yy.node("Rel",   {op:"GE",         lhs:$1, rhs:$3})'
+    o 'expr LE expr',              '$$ = yy.node("Rel",   {op:"LE",         lhs:$1, rhs:$3})'
+    o 'expr EQ expr',              '$$ = yy.node("Rel",   {op:"EQ",         lhs:$1, rhs:$3})'
+    o 'expr NE expr',              '$$ = yy.node("Rel",   {op:"NE",         lhs:$1, rhs:$3})'
+    o 'expr CONTAINS expr',        '$$ = yy.node("Rel",   {op:"CONTAINS",   lhs:$1, rhs:$3})'
+    o 'expr NCONTAINS expr',       '$$ = yy.node("Rel",   {op:"NCONTAINS",  lhs:$1, rhs:$3})'
+    o 'expr FOLLOWS expr',         '$$ = yy.node("Rel",   {op:"FOLLOWS",    lhs:$1, rhs:$3})'
+    o 'expr NFOLLOWS expr',        '$$ = yy.node("Rel",   {op:"NFOLLOWS",   lhs:$1, rhs:$3})'
+    o 'expr SORTAFTER expr',       '$$ = yy.node("Rel",   {op:"SORTAFTER",  lhs:$1, rhs:$3})'
+    o 'expr NSORTAFTER expr',      '$$ = yy.node("Rel",   {op:"NSORTAFTER", lhs:$1, rhs:$3})'
 
     # pattern match (positive and negative operator forms)
-    o 'expr PMATCH pattern',        '$$ = yy.node("PatternMatch", {op:"PMATCH",  lhs:$1, pat:$3})'
-    o 'expr NOT PMATCH pattern',    '$$ = yy.node("PatternMatch", {op:"NPMATCH", lhs:$1, pat:$4})'
+    o 'expr PMATCH pattern',       '$$ = yy.node("PatternMatch", {op:"PMATCH",  lhs:$1, pat:$3})'
+    o 'expr NOT PMATCH pattern',   '$$ = yy.node("PatternMatch", {op:"NPMATCH", lhs:$1, pat:$4})'
 
     # unary
     o 'NOT expr %prec NOT',        '$$ = yy.node("UnOp", {op:"NOT",    expr:$2})'
@@ -313,27 +315,27 @@ exports.bnf =
   ]
 
   primary: [
-    o 'NUMBER', '$$ = yy.node("Number", {value: +yytext})'
-    o 'STRING', '$$ = yy.node("String", {value: yytext})'
-    o 'varref', '$$ = $1'
-    o 'LPAREN expr RPAREN', '$$ = $2'
-    o 'dolfn_call', '$$ = $1'
+    o 'NUMBER',                    '$$ = yy.node("Number", {value: +yytext})'
+    o 'STRING',                    '$$ = yy.node("String", {value: yytext})'
+    o 'varref',                    '$$ = $1'
+    o 'LPAREN expr RPAREN',        '$$ = $2'
+    o 'dolfn_call',                '$$ = $1'
   ]
 
   # unified variable references
   varref: [
-    o 'opt_global NAME opt_subs', '$$ = yy.node("Var", {global: $1, name: $2, subs: $3})'
+    o 'opt_global NAME opt_subs',                 '$$ = yy.node("Var", {global: $1, name: $2, subs: $3})'
 
     # Naked global reference: ^(subscripts) or ^|"env-expr"|(...)
-    o 'CARET LPAREN exprlist RPAREN', '$$ = yy.node("NakedRef", {env: null, subs: $3})'
+    o 'CARET LPAREN exprlist RPAREN',             '$$ = yy.node("NakedRef", {env: null, subs: $3})'
     o 'CARET VBAR expr VBAR LPAREN exprlist RPAREN', '$$ = yy.node("NakedRef", {env: $3, subs: $6})'
 
     # Extended reference: ^|"env-expr"|NAME(opt_subs)
-    o 'CARET VBAR expr VBAR NAME opt_subs', '$$ = yy.node("Var", {global:true, env:$3, name:$5, subs:$6})'
+    o 'CARET VBAR expr VBAR NAME opt_subs',       '$$ = yy.node("Var", {global:true, env:$3, name:$5, subs:$6})'
 
     # Indirection
-    o 'AT NAME', '$$ = yy.node("Indirect", {kind: "name", target: $2})'
-    o 'AT LPAREN expr RPAREN', '$$ = yy.node("Indirect", {kind: "expr", target: $3})'
+    o 'AT NAME',                                  '$$ = yy.node("Indirect", {kind: "name", target: $2})'
+    o 'AT LPAREN expr RPAREN',                    '$$ = yy.node("Indirect", {kind: "expr", target: $3})'
   ]
 
   opt_subs: [
@@ -344,20 +346,20 @@ exports.bnf =
   opt_global: [ o 'CARET', '$$ = true', o '', '$$ = false' ]
 
   exprlist: [
-    o 'expr', '$$ = [$1]'
-    o 'exprlist COMMA expr', '$1.push($3); $$ = $1'
+    o 'expr',                    '$$ = [$1]'
+    o 'exprlist COMMA expr',     '$1.push($3); $$ = $1'
   ]
 
   dolfn_call: [
-    o 'DOLFN LPAREN exprlist RPAREN', '$$ = yy.node("DollarFn", {name: $1, args: $3})'
-    o 'DOLSPECVAR', '$$ = yy.node("DollarVar", {name: $1})'
+    o 'DOLFN LPAREN exprlist RPAREN',  '$$ = yy.node("DollarFn", {name: $1, args: $3})'
+    o 'DOLSPECVAR',                    '$$ = yy.node("DollarVar", {name: $1})'
     o 'ZDOLFN LPAREN exprlist RPAREN', '$$ = yy.node("DollarFn", {name: $1, zext: true, args: $3})'
   ]
 
   # lvalue for non-SET LHS
   lvalue: [ o 'varref', '$$ = $1' ]
 
-  # ---- Pattern subgrammar (refined) ----
+  # ---- Pattern subgrammar ----
   pattern: [ o 'pat_seq', '$$ = yy.node("Pattern", {atoms: $1})' ]
 
   pat_seq: [
@@ -368,7 +370,7 @@ exports.bnf =
   pat_repeatable: [
     o 'P_CODE',                '$$ = yy.node("PCode", {code: $1})'
     o 'STRING',                '$$ = yy.node("PLit",  {value: yytext})'
-    o 'LPAREN pat_alt RPAREN', '$$ = yy.node("PGroup", {alts: $2})'
+    o 'LPAREN pat_alt RPAREN', '$$ = yy.node("PGroup",{alts: $2})'
   ]
 
   pat_atom: [
@@ -382,21 +384,10 @@ exports.bnf =
     o 'pat_seq',               '$$ = [$1]'
   ]
 
-  # ---- SET-only LHS helpers (placeholders) ----
-  dolspecial_lhs: [
-    o 'DOLSPECVAR', '$$ = yy.node("DollarVar", {name: $1, writable: true})'
-  ]
-
-  piece_lhs: [
-    o 'DOLFN LPAREN exprlist RPAREN', '$$ = yy.node("PieceLHS", {call: yy.node("DollarFn", {name:$1, args:$3})})'
-  ]
-
-  extract_lhs: [
-    o 'DOLFN LPAREN exprlist RPAREN', '$$ = yy.node("ExtractLHS", {call: yy.node("DollarFn", {name:$1, args:$3})})'
-  ]
-
-# -------------------------- node factory --------------------------
-# Provide yy.node at runtime via runner
+  # ---- SET-only LHS helpers (simplified placeholders) ----
+  dolspecial_lhs: [ o 'DOLSPECVAR',                   '$$ = yy.node("DollarVar", {name: $1, writable: true})' ]
+  piece_lhs:      [ o 'DOLFN LPAREN exprlist RPAREN', '$$ = yy.node("PieceLHS",   {call: yy.node("DollarFn", {name:$1, args:$3})})' ]
+  extract_lhs:    [ o 'DOLFN LPAREN exprlist RPAREN', '$$ = yy.node("ExtractLHS", {call: yy.node("DollarFn", {name:$1, args:$3})})' ]
 
 # -------------------------- lexer --------------------------
 # Five modes: INITIAL (line start), CMD, EXPR, PAT (after '?'), WEXPR (after 'WRITE ')
@@ -410,156 +401,163 @@ exports.lex =
     WEXPR: 1
   rules: [
     # Newlines
-    ['\\r?\\n+', 'return "NEWLINE";']
+    ['\\r?\\n+', 'return "NEWLINE";'],
 
     # INITIAL (line start)
-    ['<INITIAL>\\.+', 'yy.depth = yytext.length; return "DOTS";']
-    ['<INITIAL>[ \\t]+', '/* ignore */']
-    ['<INITIAL>;[^\\n]*', 'return "COMMENT";']
-    # Label must be followed by two+ spaces or '(' to avoid eating e.g. "SET X=1" as LABEL
-    ['<INITIAL>[A-Za-z%][A-Za-z0-9]*(?=(?:[ \\t]{2,}|\\())', 'this.begin("CMD"); return "LABEL";']
+    ['<INITIAL>\\.+', 'yy.depth = yytext.length; return "DOTS";'],
+    ['<INITIAL>[ \\t]+', '/* ignore */'],
+    ['<INITIAL>;[^\\n]*', 'return "COMMENT";'],
+    # Label must be followed by two+ spaces or '('
+    ['<INITIAL>[A-Za-z%][A-Za-z0-9]*(?=(?:[ \\t]{2,}|\\())', 'this.begin("CMD"); return "LABEL";'],
 
     # CMD: commands and command‑space switch to EXPR or WEXPR
-    ['<CMD>(?:break|b)\\b', 'return "BREAK";']
-    ['<CMD>(?:close|c)\\b', 'return "CLOSE";']
-    ['<CMD>(?:do|d)\\b', 'return "DO";']
-    ['<CMD>(?:else|e)\\b', 'return "ELSE";']
-    ['<CMD>(?:for|f)\\b', 'return "FOR";']
-    ['<CMD>(?:goto|g)\\b', 'return "GOTO";']
-    ['<CMD>(?:halt|h)\\b', 'return "HALT";']
-    ['<CMD>hang\\b', 'return "HANG";']
-    ['<CMD>(?:if|i)\\b', 'return "IF";']
-    ['<CMD>(?:job|j)\\b', 'return "JOB";']
-    ['<CMD>(?:kill|k)\\b', 'return "KILL";']
-    ['<CMD>(?:lock|l)\\b', 'return "LOCK";']
-    ['<CMD>(?:merge|m)\\b', 'return "MERGE";']
-    ['<CMD>(?:new|n)\\b', 'return "NEW";']
-    ['<CMD>(?:open|o)\\b', 'return "OPEN";']
-    ['<CMD>(?:quit|q)\\b', 'return "QUIT";']
-    ['<CMD>(?:read|r)\\b', 'return "READ";']
-    ['<CMD>(?:set|s)\\b', 'return "SET";']
-    ['<CMD>(?:use|u)\\b', 'return "USE";']
-    ['<CMD>(?:view|v)\\b', 'return "VIEW";']
-    ['<CMD>(?:write|w)\\b', 'yy._afterWrite = true; return "WRITE";']
-    ['<CMD>(?:xecute|x)\\b', 'return "XECUTE";']
-    ['<CMD>tstart\\b', 'return "TSTART";']
-    ['<CMD>tcommit\\b', 'return "TCOMMIT";']
-    ['<CMD>trollback\\b', 'return "TROLLBACK";']
-    ['<CMD>trestart\\b', 'return "TRESTART";']
-    ['<CMD>z[a-z][a-z0-9]*\\b', 'yytext = yytext.toUpperCase(); return "ZCOMMAND";']
+    ['<CMD>(?:break|b)\\b', 'return "BREAK";'],
+    ['<CMD>(?:close|c)\\b', 'return "CLOSE";'],
+    ['<CMD>(?:do|d)\\b', 'return "DO";'],
+    ['<CMD>(?:else|e)\\b', 'return "ELSE";'],
+    ['<CMD>(?:for|f)\\b', 'return "FOR";'],
+    ['<CMD>(?:goto|g)\\b', 'return "GOTO";'],
+    ['<CMD>(?:halt|h)\\b', 'return "HALT";'],
+    ['<CMD>hang\\b', 'return "HANG";'],
+    ['<CMD>(?:if|i)\\b', 'return "IF";'],
+    ['<CMD>(?:job|j)\\b', 'return "JOB";'],
+    ['<CMD>(?:kill|k)\\b', 'return "KILL";'],
+    ['<CMD>(?:lock|l)\\b', 'return "LOCK";'],
+    ['<CMD>(?:merge|m)\\b', 'return "MERGE";'],
+    ['<CMD>(?:new|n)\\b', 'return "NEW";'],
+    ['<CMD>(?:open|o)\\b', 'return "OPEN";'],
+    ['<CMD>(?:quit|q)\\b', 'return "QUIT";'],
+    ['<CMD>(?:read|r)\\b', 'return "READ";'],
+    ['<CMD>(?:set|s)\\b', 'return "SET";'],
+    ['<CMD>(?:use|u)\\b', 'return "USE";'],
+    ['<CMD>(?:view|v)\\b', 'return "VIEW";'],
+    ['<CMD>(?:write|w)\\b', 'yy._afterWrite = true; return "WRITE";'],
+    ['<CMD>(?:xecute|x)\\b', 'return "XECUTE";'],
+    ['<CMD>tstart\\b', 'return "TSTART";'],
+    ['<CMD>tcommit\\b', 'return "TCOMMIT";'],
+    ['<CMD>trollback\\b', 'return "TROLLBACK";'],
+    ['<CMD>trestart\\b', 'return "TRESTART";'],
+    ['<CMD>z[a-z][a-z0-9]*\\b', 'yytext = yytext.toUpperCase(); return "ZCOMMAND";'],
 
-    ['<CMD>[ ]+', 'if (yy._afterWrite) { this.begin("WEXPR"); yy._afterWrite=false; yy.wItemStart=true; yy.exprDepth=0; } else { this.begin("EXPR"); yy.exprDepth=0; } return "CS";']
-    ['<CMD>;[^\\n]*', 'return "COMMENT";']
-    ['<CMD>\\r?\\n+', 'this.begin("INITIAL"); return "NEWLINE";']
+    # CMD-level postconditional colon
+    ['<CMD>:', 'yy.inPostcond = true; this.begin("EXPR"); return "COLON";'],
 
-    # EXPR → COMMAND boundary and whitespace/comments
-    ['<EXPR>;[^\\n]*', 'return "COMMENT";']
-    # Depth-aware: only break to CMD on spaces when not inside parens
-    ['<EXPR>[ ]+', 'if ((yy.exprDepth||0)===0) { this.begin("CMD"); return "CS"; } /* ignore intra-expr spaces */']
-    ['<EXPR>\\r?\\n+', 'this.begin("INITIAL"); return "NEWLINE";']
+    # CMD spaces -> EXPR or WEXPR
+    ['<CMD>[ ]+', 'if (yy._afterWrite) { this.begin("WEXPR"); yy._afterWrite=false; yy.wItemStart=true; yy.exprDepth=0; } else { this.begin("EXPR"); yy.exprDepth=0; } return "CS";'],
+    ['<CMD>;[^\\n]*', 'return "COMMENT";'],
+    ['<CMD>\\r?\\n+', 'this.begin("INITIAL"); return "NEWLINE";'],
+
+    # EXPR spacing/comments; depth-aware; route spaces after postcond to args mode
+    ['<EXPR>;[^\\n]*', 'return "COMMENT";'],
+    ['<EXPR>[ ]+', 'if ((yy.exprDepth||0)===0) { if (yy.inPostcond) { if (yy._afterWrite) { this.begin("WEXPR"); yy._afterWrite=false; yy.wItemStart=true; yy.exprDepth=0; yy.inPostcond=false; } else { this.begin("EXPR"); yy.inPostcond=false; yy.exprDepth=0; } return "CS"; } this.begin("CMD"); return "CS"; }'],
+    ['<EXPR>\\r?\\n+', 'this.begin("INITIAL"); return "NEWLINE";'],
 
     # punctuation (EXPR) with depth tracking
-    ['<EXPR>\\(', 'yy.exprDepth=(yy.exprDepth||0)+1; return "LPAREN";']
-    ['<EXPR>\\)', 'if (yy.exprDepth>0) yy.exprDepth--; return "RPAREN";']
-    ['<EXPR>,', 'return "COMMA";']
-    ['<EXPR>:', 'return "COLON";']
-    ['<EXPR>\\^', 'return "CARET";']
-    ['<EXPR>@', 'return "AT";']
-    ['<EXPR>\\|','return "VBAR";']
+    ['<EXPR>\\(', 'yy.exprDepth=(yy.exprDepth||0)+1; return "LPAREN";'],
+    ['<EXPR>\\)', 'if (yy.exprDepth>0) yy.exprDepth--; return "RPAREN";'],
+    ['<EXPR>,', 'return "COMMA";'],
+    ['<EXPR>:', 'return "COLON";'],
+    ['<EXPR>\\^', 'return "CARET";'],
+    ['<EXPR>@', 'return "AT";'],
+    ['<EXPR>\\|', 'return "VBAR";'],
 
     # operators (EXPR)
-    ['<EXPR>\\+','return "PLUS";']
-    ['<EXPR>-','return "MINUS";']
-    ['<EXPR>\\*\\*','return "EXP";']
-    ['<EXPR>\\*','return "MUL";']
-    ['<EXPR>\\\\','return "IDIV";']
-    ['<EXPR>#','return "MOD";']
-    ['<EXPR>/','return "DIV";']
-    ['<EXPR>&','return "AND";']
-    ['<EXPR>!','return "OR";']
-    ['<EXPR>_','return "CONCAT";']
-    ['<EXPR>>=','return "GE";']
-    ['<EXPR><=','return "LE";']
-    ['<EXPR>>','return "GT";']
-    ['<EXPR><','return "LT";']
-    ["<EXPR>'=", 'return "NE";']
-    ['<EXPR>=','return "EQ";']
-    ["<EXPR>'\\[", 'return "NCONTAINS";']
-    ['<EXPR>\\[','return "CONTAINS";']
-    ["<EXPR>\\]'", 'return "NFOLLOWS";']
-    ['<EXPR>\\]','return "FOLLOWS";']
-    ["<EXPR>\\]\\]'", 'return "NSORTAFTER";']
-    ['<EXPR>\\]\\]','return "SORTAFTER";']
-    ['<EXPR>\\?','yy.patDepth=0; this.begin("PAT"); return "PMATCH";']
-    ['<EXPR>\\'+"'", 'return "NOT";']
+    ['<EXPR>\\+', 'return "PLUS";'],
+    ['<EXPR>-', 'return "MINUS";'],
+    ['<EXPR>\\*\\*', 'return "EXP";'],
+    ['<EXPR>\\*', 'return "MUL";'],
+    ['<EXPR>\\\\', 'return "IDIV";'],
+    ['<EXPR>#', 'return "MOD";'],
+    ['<EXPR>/', 'return "DIV";'],
+    ['<EXPR>&', 'return "AND";'],
+    ['<EXPR>!', 'return "OR";'],
+    ['<EXPR>_', 'return "CONCAT";'],
+    ['<EXPR>>=', 'return "GE";'],
+    ['<EXPR><=', 'return "LE";'],
+    ['<EXPR>>', 'return "GT";'],
+    ['<EXPR><', 'return "LT";'],
+    ["<EXPR>'=", 'return "NE";'],
+    ['<EXPR>=', 'return "EQ";'],
+    ["<EXPR>'\\[", 'return "NCONTAINS";'],
+    ['<EXPR>\\[', 'return "CONTAINS";'],
+    ["<EXPR>\\]'", 'return "NFOLLOWS";'],
+    ['<EXPR>\\]', 'return "FOLLOWS";'],
+    ["<EXPR>\\]\\]'", 'return "NSORTAFTER";'],
+    ['<EXPR>\\]\\]', 'return "SORTAFTER";'],
+    ['<EXPR>\\?', 'yy.patDepth=0; this.begin("PAT"); return "PMATCH";'],
+    ["<EXPR>'", 'return "NOT";'],
 
     # atoms (EXPR)
-    ['<EXPR>\\d+(?:\\.\\d+)?', 'return "NUMBER";']
-    ['<EXPR>\\"(?:\\"\\"|[^\\"])*\\"', 'return "STRING";']
-    ['<EXPR>\\$z[a-z][a-z0-9]*\\b', 'yytext = yytext.slice(2).toUpperCase(); return "ZDOLFN";']
-    ['<EXPR>\\$[a-z][a-z0-9]*\\b', 'yytext = yytext.slice(1).toUpperCase(); return "DOLFN";']
-    ['<EXPR>[A-Za-z%][A-Za-z0-9]*', 'return "NAME";']
+    ['<EXPR>\\d+(?:\\.\\d+)?', 'return "NUMBER";'],
+    ['<EXPR>\\"(?:\\"\\"|[^\\"])*\\"', 'return "STRING";'],
+    ['<EXPR>\\$z[a-z][a-z0-9]*\\b', 'yytext = yytext.slice(2).toUpperCase(); return "ZDOLFN";'],
+    # DOLSPECVAR (writable subset: $X, $Y, $ECODE, $ETRAP)
+    ['<EXPR>\\$(?:X|Y|ECODE|ETRAP)\\b', 'yytext = yytext.slice(1).toUpperCase(); return "DOLSPECVAR";'],
+    ['<EXPR>\\$[a-z][a-z0-9]*\\b', 'yytext = yytext.slice(1).toUpperCase(); return "DOLFN";'],
+    ['<EXPR>[A-Za-z%][A-Za-z0-9]*', 'return "NAME";'],
 
     # PAT mode (after '?') — ends on space/comma/newline or on RPAREN when depth==0
-    ['<PAT>\\(', 'yy.patDepth=(yy.patDepth||0)+1; return "LPAREN";']
-    ['<PAT>\\)', 'if ((yy.patDepth||0)>0) { yy.patDepth--; return "RPAREN"; } this.begin("EXPR"); return "RPAREN";']
-    ['<PAT>,', 'if ((yy.patDepth||0)>0) return "COMMA"; this.begin("EXPR"); return "COMMA";']
-    ['<PAT>[ ]+', 'if ((yy.patDepth||0)===0) { this.begin("CMD"); return "CS"; } /* ignore inner spaces */']
-    ['<PAT>\\r?\\n+', 'this.begin("INITIAL"); return "NEWLINE";']
-    ['<PAT>\\d+', 'return "P_NUM";']
-    ['<PAT>\\.', 'return "P_DOT";']
-    ['<PAT>[ACELNPU]', 'yytext = yytext.toUpperCase(); return "P_CODE";']
-    ['<PAT>\\"(?:\\"\\"|[^\\"])*\\"', 'return "STRING";']
+    ['<PAT>\\(', 'yy.patDepth=(yy.patDepth||0)+1; return "LPAREN";'],
+    ['<PAT>\\)', 'if ((yy.patDepth||0)>0) { yy.patDepth--; return "RPAREN"; } this.begin("EXPR"); return "RPAREN";'],
+    ['<PAT>,', 'if ((yy.patDepth||0)>0) return "COMMA"; this.begin("EXPR"); return "COMMA";'],
+    ['<PAT>[ ]+', 'if ((yy.patDepth||0)===0) { this.begin("CMD"); return "CS"; }'],
+    ['<PAT>\\r?\\n+', 'this.begin("INITIAL"); return "NEWLINE";'],
+    ['<PAT>\\d+', 'return "P_NUM";'],
+    ['<PAT>\\.', 'return "P_DOT";'],
+    ['<PAT>[ACELNPU]', 'yytext = yytext.toUpperCase(); return "P_CODE";'],
+    ['<PAT>\\"(?:\\"\\"|[^\\"])*\\"', 'return "STRING";'],
 
     # WEXPR mode (after WRITE CS). Treat adorners specially, otherwise behave like EXPR.
-    ['<WEXPR>;[^\\n]*', 'return "COMMENT";']
-    ['<WEXPR>[ ]+', 'this.begin("CMD"); return "CS";']
-    ['<WEXPR>\\r?\\n+', 'this.begin("INITIAL"); return "NEWLINE";']
+    ['<WEXPR>;[^\\n]*', 'return "COMMENT";'],
+    ['<WEXPR>[ ]+', 'this.begin("CMD"); return "CS";'],
+    ['<WEXPR>\\r?\\n+', 'this.begin("INITIAL"); return "NEWLINE";'],
 
     # depth + item tracking
-    ['<WEXPR>\\(', 'yy.exprDepth=(yy.exprDepth||0)+1; yy.wItemStart=false; return "LPAREN";']
-    ['<WEXPR>\\)', 'if (yy.exprDepth>0) yy.exprDepth--; return "RPAREN";']
-    ['<WEXPR>,',   'yy.wItemStart=true; return "COMMA";']
+    ['<WEXPR>\\(', 'yy.exprDepth=(yy.exprDepth||0)+1; yy.wItemStart=false; return "LPAREN";'],
+    ['<WEXPR>\\)', 'if (yy.exprDepth>0) yy.exprDepth--; return "RPAREN";'],
+    ['<WEXPR>,',   'yy.wItemStart=true; return "COMMA";'],
 
     # adorners only at top-level start of an item
-    ['<WEXPR>\\*',  'if ((yy.exprDepth||0)===0 && yy.wItemStart){ yy.wItemStart=false; return "WSTAR"; } return "MUL";']
-    ['<WEXPR>\\?',  'if ((yy.exprDepth||0)===0 && yy.wItemStart){ yy.wItemStart=false; return "WTAB"; } yy.patDepth=0; this.begin("PAT"); return "PMATCH";']
-    ['<WEXPR>!',    'if ((yy.exprDepth||0)===0 && yy.wItemStart){ yy.wItemStart=false; return "WBANG"; } return "OR";']
-    ['<WEXPR>#',    'if ((yy.exprDepth||0)===0 && yy.wItemStart){ yy.wItemStart=false; return "WPOUND"; } return "MOD";']
-    ['<WEXPR>/',    'if ((yy.exprDepth||0)===0 && yy.wItemStart){ yy.wItemStart=false; return "WSLASH"; } return "DIV";']
+    ['<WEXPR>\\*',  'if ((yy.exprDepth||0)===0 && yy.wItemStart){ yy.wItemStart=false; return "WSTAR"; } return "MUL";'],
+    ['<WEXPR>\\?',  'if ((yy.exprDepth||0)===0 && yy.wItemStart){ yy.wItemStart=false; return "WTAB"; } yy.patDepth=0; this.begin("PAT"); return "PMATCH";'],
+    ['<WEXPR>!',    'if ((yy.exprDepth||0)===0 && yy.wItemStart){ yy.wItemStart=false; return "WBANG"; } return "OR";'],
+    ['<WEXPR>#',    'if ((yy.exprDepth||0)===0 && yy.wItemStart){ yy.wItemStart=false; return "WPOUND"; } return "MOD";'],
+    ['<WEXPR>/',    'if ((yy.exprDepth||0)===0 && yy.wItemStart){ yy.wItemStart=false; return "WSLASH"; } return "DIV";'],
 
     # pass-through tokens with wItemStart housekeeping
-    ['<WEXPR>:', 'yy.wItemStart=false; return "COLON";']
-    ['<WEXPR>\\^', 'yy.wItemStart=false; return "CARET";']
-    ['<WEXPR>@', 'yy.wItemStart=false; return "AT";']
-    ['<WEXPR>\\|', 'yy.wItemStart=false; return "VBAR";']
+    ['<WEXPR>:', 'yy.wItemStart=false; return "COLON";'],
+    ['<WEXPR>\\^', 'yy.wItemStart=false; return "CARET";'],
+    ['<WEXPR>@', 'yy.wItemStart=false; return "AT";'],
+    ['<WEXPR>\\|', 'yy.wItemStart=false; return "VBAR";'],
 
-    ['<WEXPR>\\+','yy.wItemStart=false; return "PLUS";']
-    ['<WEXPR>-','yy.wItemStart=false; return "MINUS";']
-    ['<WEXPR>\\*\\*','yy.wItemStart=false; return "EXP";']
-    ['<WEXPR>\\\\','yy.wItemStart=false; return "IDIV";']
-    ['<WEXPR>/','yy.wItemStart=false; return "DIV";']
-    ['<WEXPR>&','yy.wItemStart=false; return "AND";']
-    ['<WEXPR>_','yy.wItemStart=false; return "CONCAT";']
-    ['<WEXPR>>=','yy.wItemStart=false; return "GE";']
-    ['<WEXPR><=','yy.wItemStart=false; return "LE";']
-    ['<WEXPR>>','yy.wItemStart=false; return "GT";']
-    ['<WEXPR><','yy.wItemStart=false; return "LT";']
-    ["<WEXPR>'=", 'yy.wItemStart=false; return "NE";']
-    ['<WEXPR>=','yy.wItemStart=false; return "EQ";']
-    ["<WEXPR>'\\[", 'yy.wItemStart=false; return "NCONTAINS";']
-    ['<WEXPR>\\[','yy.wItemStart=false; return "CONTAINS";']
-    ["<WEXPR>\\]'", 'yy.wItemStart=false; return "NFOLLOWS";']
-    ['<WEXPR>\\]','yy.wItemStart=false; return "FOLLOWS";']
-    ["<WEXPR>\\]\\]'", 'yy.wItemStart=false; return "NSORTAFTER";']
-    ['<WEXPR>\\]\\]','yy.wItemStart=false; return "SORTAFTER";']
-    ['<WEXPR>\\'+"'", 'yy.wItemStart=false; return "NOT";']
+    ['<WEXPR>\\+', 'yy.wItemStart=false; return "PLUS";'],
+    ['<WEXPR>-',   'yy.wItemStart=false; return "MINUS";'],
+    ['<WEXPR>\\*\\*', 'yy.wItemStart=false; return "EXP";'],
+    ['<WEXPR>\\\\', 'yy.wItemStart=false; return "IDIV";'],
+    ['<WEXPR>/',   'yy.wItemStart=false; return "DIV";'],
+    ['<WEXPR>&',   'yy.wItemStart=false; return "AND";'],
+    ['<WEXPR>_',   'yy.wItemStart=false; return "CONCAT";'],
+    ['<WEXPR>>=',  'yy.wItemStart=false; return "GE";'],
+    ['<WEXPR><=',  'yy.wItemStart=false; return "LE";'],
+    ['<WEXPR>>',   'yy.wItemStart=false; return "GT";'],
+    ['<WEXPR><',   'yy.wItemStart=false; return "LT";'],
+    ["<WEXPR>'=",  'yy.wItemStart=false; return "NE";'],
+    ['<WEXPR>=',   'yy.wItemStart=false; return "EQ";'],
+    ["<WEXPR>'\\[", 'yy.wItemStart=false; return "NCONTAINS";'],
+    ['<WEXPR>\\[', 'yy.wItemStart=false; return "CONTAINS";'],
+    ["<WEXPR>\\]'", 'yy.wItemStart=false; return "NFOLLOWS";'],
+    ['<WEXPR>\\]', 'yy.wItemStart=false; return "FOLLOWS";'],
+    ["<WEXPR>\\]\\]'", 'yy.wItemStart=false; return "NSORTAFTER";'],
+    ['<WEXPR>\\]\\]', 'yy.wItemStart=false; return "SORTAFTER";'],
+    ["<WEXPR>'",   'yy.wItemStart=false; return "NOT";'],
 
-    ['<WEXPR>\\d+(?:\\.\\d+)?', 'yy.wItemStart=false; return "NUMBER";']
-    ['<WEXPR>\\"(?:\\"\\"|[^\\"])*\\"', 'yy.wItemStart=false; return "STRING";']
-    ['<WEXPR>\\$z[a-z][a-z0-9]*\\b', 'yy.wItemStart=false; yytext = yytext.slice(2).toUpperCase(); return "ZDOLFN";']
-    ['<WEXPR>\\$[a-z][a-z0-9]*\\b',  'yy.wItemStart=false; yytext = yytext.slice(1).toUpperCase(); return "DOLFN";']
-    ['<WEXPR>[A-Za-z%][A-Za-z0-9]*', 'yy.wItemStart=false; return "NAME";']
+    ['<WEXPR>\\d+(?:\\.\\d+)?', 'yy.wItemStart=false; return "NUMBER";'],
+    ['<WEXPR>\\"(?:\\"\\"|[^\\"])*\\"', 'yy.wItemStart=false; return "STRING";'],
+    ['<WEXPR>\\$z[a-z][a-z0-9]*\\b', 'yy.wItemStart=false; yytext = yytext.slice(2).toUpperCase(); return "ZDOLFN";'],
+    # DOLSPECVAR again (writable subset)
+    ['<WEXPR>\\$(?:X|Y|ECODE|ETRAP)\\b', 'yy.wItemStart=false; yytext = yytext.slice(1).toUpperCase(); return "DOLSPECVAR";'],
+    ['<WEXPR>\\$[a-z][a-z0-9]*\\b',  'yy.wItemStart=false; yytext = yytext.slice(1).toUpperCase(); return "DOLFN";'],
+    ['<WEXPR>[A-Za-z%][A-Za-z0-9]*', 'yy.wItemStart=false; return "NAME";'],
   ]
 
 # -------------------------- samples --------------------------
