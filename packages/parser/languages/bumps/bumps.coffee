@@ -746,12 +746,12 @@ exports.lex =
 
 exports.samples = '''
 
+  ;; ---- Invalid MUMPS! ----
+  ;SET SET=1  ; label=SET cmd=SET but trailing "=1" is invalid
+
   ; ---- Labels and formals ----
   START(A,B)
   . WRITE "FORMALS:",A,",",B
-
-  ; ---- Basic SET with end-of-line comment ----
-  SET SET=1  ; variable named SET, with trailing comment
 
   ; ---- Command chaining & postcondition ----
   SET A=1  WRITE "X",!  READ B:5
