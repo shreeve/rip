@@ -34,7 +34,7 @@ exports.startSymbol = 'program'
 
 # Operator precedence (low → high) with tighter unary
 exports.operators = [
-  ['left',  'OR','COMMA']  # COMMA acts as OR in MUMPS conditionals
+  ['left',  'OR']
   ['left',  'AND']
   ['left',  'PMATCH']
   ['left',  'GT','LT','GE','LE','EQ','NE']
@@ -297,7 +297,8 @@ exports.bnf =
     o 'DO'                           , '$$ = yy.node("Cmd", {pc: null, op: "DO",  args: yy.node("ArgsENTRY", {targets: []})})'
 
     # IF (expr required, no postcond - that's handled by cmd wrapper)
-    o 'IF CS expr'                  , '$$ = yy.node("If", {pc: null, cond: $3})'
+    # Comma-separated conditions create nested IFs (all must be true)
+    o 'IF CS if_conditions'         , '$$ = yy.node("If", {pc: null, cond: $3})'
 
     # ELSE (argless)
     o 'ELSE'                        , '$$ = yy.node("Else", {pc: null})'
@@ -489,6 +490,12 @@ exports.bnf =
     o 'MINUS entryref'                , '$$ = yy.node("ZBreakItem", {target: $2, action: null, clear: true})'
   ]
 
+  # ---- IF conditions (comma creates nested IFs - all must be true) ----
+  if_conditions: [
+    o 'expr'                        , '$$ = $1'
+    o 'if_conditions COMMA expr'    , '$$ = yy.node("BinOp", {op:"AND", lhs:$1, rhs:$3})'
+  ]
+  
   # ---- expressions ----
   expr: [
     o 'primary' , '$$ = $1'
@@ -503,7 +510,6 @@ exports.bnf =
     o 'expr MOD expr'    , '$$ = yy.node("BinOp", {op:"MOD",     lhs:$1, rhs:$3})'
     o 'expr AND expr'    , '$$ = yy.node("BinOp", {op:"AND",     lhs:$1, rhs:$3})'
     o 'expr OR expr'     , '$$ = yy.node("BinOp", {op:"OR",      lhs:$1, rhs:$3})'
-    o 'expr COMMA expr'  , '$$ = yy.node("BinOp", {op:"OR",      lhs:$1, rhs:$3})'  # Comma acts as OR in conditionals
     o 'expr CONCAT expr' , '$$ = yy.node("BinOp", {op:"CONCAT",  lhs:$1, rhs:$3})'
 
     # relations
@@ -936,11 +942,15 @@ exports.samples = '''
   ; ---- E (Everything) pattern class ----
   IF X?1.E  WRITE "has content"
   IF SSN?3N1"-"2N1"-"4N.E  WRITE "SSN-like"
+
+  ; ---- Comma creates nested IFs (both must be true) ----
+  IF A,B WRITE "Both A and B are true"
+  IF X=1,Y=2 WRITE "Both X=1 and Y=2"
   
-  ; ---- Comma as logical OR in conditionals ----
-  IF A,B WRITE "A or B is true"
-  IF X=1,Y=2 WRITE "Either X=1 or Y=2"
-  IF 'A,B WRITE "Not A or B"
+  ; ---- Boolean operators: ! is OR, & is AND ----
+  IF A!B WRITE "A or B is true"
+  IF A&B WRITE "A and B are true"
+  IF 'A WRITE "Not A"
 
   ; ---- Numeric literal forms (int, frac, leading-dot, trailing-dot, exponent, unary) ----
   SET N1=123,N2=0,N3=.5,N4=10.,N5=3.14,N6=1E3,N7=5.67E-2,N8=-77,N9=+42,N10=-9E+4
