@@ -746,16 +746,7 @@ exports.lex =
 
 exports.samples = '''
   SET SET=1 ; NOTE: Interesting... is "SET" a label or a command???
-  SET A=1   ; NOTE: This one is undeniable
-  IF A=1  WRITE "ok"  ELSE  WRITE "no"
-  SET X=$PIECE(S,":",1,3)
-  WRITE ?10,"hi",!,"bye"
   IF S'?3A.1N  W "bad"
-  IF S?2("ab")  W "ok"
-  IF S?1.3("x",1U)  W "ok"
-  SET X=^|"NS"|G(1)
-  ^("a","b")  SET Y=1
-  ..WRITE "indented"
 
   ; ---- Labels and formals ----
   START(A,B)
