@@ -34,12 +34,24 @@ parsePattern = (input) ->
     v
 
   parseCount = ->
+    # Handle patterns like .E (zero or more)
+    if peek() is '.'
+      next()
+      if isDigit(peek())
+        max = readNumber()
+        return {min: 0, max}
+      # Just a dot means unlimited (0 or more)
+      return {min: 0, max: undefined}
+    
     return null unless isDigit(peek())
     min = readNumber()
     if peek() is '.'
       next()
-      max = readNumber()
-      return {min, max}
+      if isDigit(peek())
+        max = readNumber()
+        return {min, max}
+      # Number followed by dot means N or more (unlimited)
+      return {min, max: undefined}
     {min, max: min}
 
   applyCount = (node, count) -> if not count then node else Object.assign {}, node, {min: count.min, max: count.max}
@@ -61,7 +73,7 @@ parsePattern = (input) ->
       next() if peek() is ')'
       return applyCount {type:'Group', items}, count
     if /^[A-Za-z]$/.test ch
-      CLASS_CANON = { A:'ALPHA', N:'NUM', L:'LOWER', U:'UPPER', P:'PUNCT', B:'BLANK', S:'SPACE', C:'CONTROL', D:'DIGIT', X:'HEXDIGIT', V:'VOWEL', Z:'GRAPH' }
+      CLASS_CANON = { A:'ALPHA', N:'NUM', L:'LOWER', U:'UPPER', P:'PUNCT', B:'BLANK', S:'SPACE', C:'CONTROL', D:'DIGIT', E:'EVERYTHING', X:'HEXDIGIT', V:'VOWEL', Z:'GRAPH' }
       # read contiguous class letters, e.g., AN, ALU, etc.
       names = ''
       while not eof() and /^[A-Za-z]$/.test(peek()) then names += next()
