@@ -495,7 +495,7 @@ exports.bnf =
     o 'expr'                        , '$$ = $1'
     o 'if_conditions COMMA expr'    , '$$ = yy.node("BinOp", {op:"AND", lhs:$1, rhs:$3})'
   ]
-  
+
   # ---- expressions ----
   expr: [
     o 'primary' , '$$ = $1'
@@ -946,7 +946,7 @@ exports.samples = '''
   ; ---- Comma creates nested IFs (both must be true) ----
   IF A,B WRITE "Both A and B are true"
   IF X=1,Y=2 WRITE "Both X=1 and Y=2"
-  
+
   ; ---- Boolean operators: ! is OR, & is AND ----
   IF A!B WRITE "A or B is true"
   IF A&B WRITE "A and B are true"
