@@ -7,8 +7,8 @@ class BumpsLexer
     @tokens = []
     @cursor = 0
     @_afterElse = false
-    @_afterWrite = false
-    @wItemStart = false
+    # WRITE state: 'none' (not in WRITE), 'wait' (after WRITE, before CS), 'head' (item start, adorners OK), 'tail' (item middle, adorners not OK)
+    @writeState = 'none'
     @exprDepth = 0
     @patDepth = 0
     @inPostcond = false
@@ -38,7 +38,6 @@ class BumpsLexer
       pos = 0
       afterCommand = false
       afterCmdSep = false
-      @wItemStart = false
 
       # DOTS at start
       if mDots = line.match /^\.+/
@@ -58,7 +57,7 @@ class BumpsLexer
           out.push [cmd, word, @loc(li, pos, li, pos + word.length)]
           afterCommand = true
           @_afterElse = (cmd is 'ELSE')
-          @_afterWrite = (cmd is 'WRITE')
+          @writeState = if cmd is 'WRITE' then 'wait' else 'none'
         else
           out.push ['LABEL', word, @loc(li, pos, li, pos + word.length)]
         pos += word.length
@@ -76,9 +75,8 @@ class BumpsLexer
             @yy.lints.push { kind:'ELSE_SPACE', line: li+1, column: pos-ws.length, message: 'ELSE should be followed by two or more spaces before next command' }
           afterCmdSep = true
           @_afterElse = false
-        else if @_afterWrite
-          @wItemStart = true
-          @_afterWrite = false
+        else if @writeState is 'wait'
+          @writeState = 'head'
         afterCommand = false
 
       # Arguments / rest of line
@@ -95,14 +93,20 @@ class BumpsLexer
         if mm = line.match /^\(/
           @exprDepth += 1
           out.push ['LPAREN', '(', @loc(li, pos, li, pos + 1)]
-          pos += 1; line = line[1..]; @wItemStart = false; continue
+          pos += 1; line = line[1..]
+          if @writeState in ['head', 'tail']
+            @writeState = 'tail'
+          continue
         if mm = line.match /^\)/
           @exprDepth = Math.max(0, @exprDepth - 1)
           out.push ['RPAREN', ')', @loc(li, pos, li, pos + 1)]
           pos += 1; line = line[1..]; continue
         if mm = line.match /^:/
           out.push ['COLON', ':', @loc(li, pos, li, pos + 1)]
-          pos += 1; line = line[1..]; @wItemStart = false; continue
+          pos += 1; line = line[1..]
+          if @writeState in ['head', 'tail']
+            @writeState = 'tail'
+          continue
         if mm = line.match /^,/
           out.push ['COMMA', ',', @loc(li, pos, li, pos + 1)]
           pos += 1
@@ -111,7 +115,9 @@ class BumpsLexer
           if msp = line.match /^[ \t]+/
             pos += msp[0].length
             line = line[msp[0].length..]
-          @wItemStart = true
+          # Return to head after comma in WRITE mode
+          if @writeState in ['head', 'tail']
+            @writeState = 'head'
           afterCmdSep = false
           continue
 
@@ -119,41 +125,62 @@ class BumpsLexer
         if mm = line.match /^"(?:""|[^\"])*"/
           s = mm[0]
           out.push ['STRING', s, @loc(li, pos, li, pos + s.length)]
-          pos += s.length; line = line[s.length..]; @wItemStart = false; continue
+          pos += s.length; line = line[s.length..]
+          if @writeState is 'head'
+            @writeState = 'tail'
+          continue
 
         # numbers (int/dec/leading-dot with optional exponent)
         if mm = line.match ///^(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?///
           n = mm[0]
           out.push ['NUMBER', n, @loc(li, pos, li, pos + n.length)]
-          pos += n.length; line = line[n.length..]; @wItemStart = false; continue
+          pos += n.length; line = line[n.length..]
+          if @writeState is 'head'
+            @writeState = 'tail'
+          continue
 
         # equality
         if mm = line.match /^=/
           out.push ['EQ', '=', @loc(li, pos, li, pos + 1)]
-          pos += 1; line = line[1..]; @wItemStart = false; continue
+          pos += 1; line = line[1..]
+          if @writeState is 'head'
+            @writeState = 'tail'
+          continue
 
         # arithmetic & logical
         if mm = line.match /^\*\*/
           out.push ['EXP', '**', @loc(li, pos, li, pos + 2)]
           pos += 2; line = line[2..]; continue
         if mm = line.match /^\*/
-          if @wItemStart and @exprDepth is 0 then out.push ['WSTAR', '*', @loc(li, pos, li, pos + 1)] else out.push ['MUL', '*', @loc(li, pos, li, pos + 1)]
-          pos += 1; line = line[1..]; @wItemStart = false; continue
+          if @writeState is 'head' and @exprDepth is 0 then out.push ['WSTAR', '*', @loc(li, pos, li, pos + 1)] else out.push ['MUL', '*', @loc(li, pos, li, pos + 1)]
+          pos += 1; line = line[1..]
+          if @writeState is 'head'
+            @writeState = 'tail'
+          continue
         if mm = line.match /^\\/
           out.push ['IDIV', '\\', @loc(li, pos, li, pos + 1)]
           pos += 1; line = line[1..]; continue
         if mm = line.match /^#/
-          if @wItemStart and @exprDepth is 0 then out.push ['WPOUND', '#', @loc(li, pos, li, pos + 1)] else out.push ['MOD', '#', @loc(li, pos, li, pos + 1)]
-          pos += 1; line = line[1..]; @wItemStart = false; continue
+          if @writeState is 'head' and @exprDepth is 0 then out.push ['WPOUND', '#', @loc(li, pos, li, pos + 1)] else out.push ['MOD', '#', @loc(li, pos, li, pos + 1)]
+          pos += 1; line = line[1..]
+          if @writeState is 'head'
+            @writeState = 'tail'
+          continue
         if mm = line.match /^\//
-          if @wItemStart and @exprDepth is 0 then out.push ['WSLASH', '/', @loc(li, pos, li, pos + 1)] else out.push ['DIV', '/', @loc(li, pos, li, pos + 1)]
-          pos += 1; line = line[1..]; @wItemStart = false; continue
+          if @writeState is 'head' and @exprDepth is 0 then out.push ['WSLASH', '/', @loc(li, pos, li, pos + 1)] else out.push ['DIV', '/', @loc(li, pos, li, pos + 1)]
+          pos += 1; line = line[1..]
+          if @writeState is 'head'
+            @writeState = 'tail'
+          continue
         if mm = line.match /^&/
           out.push ['AND', '&', @loc(li, pos, li, pos + 1)]
           pos += 1; line = line[1..]; continue
         if mm = line.match /^!/
-          if @wItemStart and @exprDepth is 0 then out.push ['WBANG', '!', @loc(li, pos, li, pos + 1)] else out.push ['OR', '!', @loc(li, pos, li, pos + 1)]
-          pos += 1; line = line[1..]; @wItemStart = false; continue
+          if @writeState is 'head' and @exprDepth is 0 then out.push ['WBANG', '!', @loc(li, pos, li, pos + 1)] else out.push ['OR', '!', @loc(li, pos, li, pos + 1)]
+          pos += 1; line = line[1..]
+          if @writeState is 'head'
+            @writeState = 'tail'
+          continue
         if mm = line.match /^_/
           out.push ['CONCAT', '_', @loc(li, pos, li, pos + 1)]
           pos += 1; line = line[1..]; continue
@@ -176,10 +203,16 @@ class BumpsLexer
         # caret and pattern/relations
         if mm = line.match /^\^/
           out.push ['CARET', '^', @loc(li, pos, li, pos + 1)]
-          pos += 1; line = line[1..]; @wItemStart = false; continue
+          pos += 1; line = line[1..]
+          if @writeState is 'head'
+            @writeState = 'tail'
+          continue
         if mm = line.match /^\|/
           out.push ['VBAR', '|', @loc(li, pos, li, pos + 1)]
-          pos += 1; line = line[1..]; @wItemStart = false; continue
+          pos += 1; line = line[1..]
+          if @writeState is 'head'
+            @writeState = 'tail'
+          continue
         if mm = line.match /^'\]\]/
           out.push ['NSORTAFTER', "']]", @loc(li, pos, li, pos + 3)]
           pos += 3; line = line[3..]; continue
@@ -199,9 +232,11 @@ class BumpsLexer
           out.push ['CONTAINS', '[', @loc(li, pos, li, pos + 1)]
           pos += 1; line = line[1..]; continue
         if mm = line.match /^\?/
-          if @wItemStart and @exprDepth is 0
+          if @writeState is 'head' and @exprDepth is 0
             out.push ['WTAB', '?', @loc(li, pos, li, pos + 1)]
-            pos += 1; line = line[1..]; @wItemStart = false; continue
+            pos += 1; line = line[1..]
+            @writeState = 'tail'
+            continue
           # pattern operator: produce PMATCH then PATTERN body until whitespace/comma/newline at depth 0
           rest = line[1..]
           i = 0; depth = 0
@@ -221,7 +256,10 @@ class BumpsLexer
 
         if mm = line.match /^@/
           out.push ['AT', '@', @loc(li, pos, li, pos + 1)]
-          pos += 1; line = line[1..]; @wItemStart = false; continue
+          pos += 1; line = line[1..]
+          if @writeState is 'head'
+            @writeState = 'tail'
+          continue
 
         # $-functions and $Z- functions / variables
         if mm = line.match /^\$(?:z|Z)[A-Za-z][A-Za-z0-9]*/
@@ -254,19 +292,28 @@ class BumpsLexer
               out.push [chained, name, @loc(li, pos, li, pos + name.length)]
               afterCommand = true
               @_afterElse = (chained is 'ELSE')
-              @_afterWrite = (chained is 'WRITE')
+              @writeState = if chained is 'WRITE' then 'wait' else 'none'
               afterCmdSep = false
               pos += name.length; line = line[name.length..]; continue
           out.push ['NAME', name, @loc(li, pos, li, pos + name.length)]
-          pos += name.length; line = line[name.length..]; @wItemStart = false; continue
+          pos += name.length; line = line[name.length..]
+          if @writeState is 'head'
+            @writeState = 'tail'
+          continue
 
         # PLUS/MINUS/NOT
         if mm = line.match /^\+/
           out.push ['PLUS', '+', @loc(li, pos, li, pos + 1)]
-          pos += 1; line = line[1..]; @wItemStart = false; continue
+          pos += 1; line = line[1..]
+          if @writeState is 'head'
+            @writeState = 'tail'
+          continue
         if mm = line.match /^-+/
           out.push ['MINUS', '-', @loc(li, pos, li, pos + 1)]
-          pos += 1; line = line[1..]; @wItemStart = false; continue
+          pos += 1; line = line[1..]
+          if @writeState is 'head'
+            @writeState = 'tail'
+          continue
         if mm = line.match /^'/
           out.push ['NOT', "'", @loc(li, pos, li, pos + 1)]
           pos += 1; line = line[1..]; continue
@@ -283,7 +330,10 @@ class BumpsLexer
             nextChar = after.charAt(mWord[0].length) or ''
             if nextCmd and (nextChar in ['', ' ', '\t', '\r', '\n', ';'])
               out.push ['CS', ws, @loc(li, pos, li, pos + ws.length)]
-              pos += ws.length; line = after; afterCmdSep = true; continue
+              pos += ws.length; line = after; afterCmdSep = true
+              # Reset WRITE mode when switching to a new command
+              @writeState = 'none'
+              continue
           pos += ws.length; line = after; continue
 
         # Fallback: consume one char
@@ -293,8 +343,7 @@ class BumpsLexer
       # newline end
       out.push ['NEWLINE', '\n', @loc(li, pos, li, pos)]
       @_afterElse = false
-      @_afterWrite = false
-      @wItemStart = false
+      @writeState = 'none'
       @exprDepth = 0
       @patDepth = 0
       @inPostcond = false

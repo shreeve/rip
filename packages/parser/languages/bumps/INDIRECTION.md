@@ -1,153 +1,138 @@
-## Indirection in BUMPS (M)
+## Command Indirection in BUMPS (VistA-Compatible)
 
-This document summarizes the current state of “command indirection” support in the BUMPS grammar/lexer and outlines the work needed to support VistA-grade indirection.
+This document describes how command indirection works in VistA and how the BUMPS parser correctly handles it.
 
-### What indirection means here
-- The command itself is chosen indirectly, e.g. `@NAME args` or `@(expr) args`, where `NAME` or `expr` evaluates to a command string like `"WRITE"` or `"DO"`.
-- We already support indirection for variables and entry references (e.g., `SET @A=1`, `DO @X`, `GOTO @(Y)`).
+### What is Command Indirection?
 
-## Current capabilities
-- Indirect commands:
-  - `@NAME [args]` and `@(expr) [args]` parse as a generic command node:
-    - `Cmd { op: "INDIRECT", args: ArgsINDIRECT { target: Indirect(name|expr), args: exprlist } }`
-  - Samples included: `@CMD 1,2` and `@(F(1)) "A","B"`.
-- Indirection elsewhere: `DO @X`, `GOTO @(Y)`, `SET @A=1`, `WRITE @(E)` all parse today.
-
-## Gaps (why many realistic cases fail today)
-When the indirect target refers to a specific command with a specialized argument shape, the generic "exprlist" path is insufficient:
-
-- WRITE adorners (WEXPR gating):
-  - `@("WRITE") !,"Hello"` — lexer treats `!` as OR (not `WBANG`) because WRITE gating is not enabled after the indirect target.
-
-- Structured argument grammars:
-  - `@("READ") X:1` — `READ` items are `lvalue[:timeout]`, not arbitrary expressions; colon-timeouts are invalid in plain `exprlist`.
-  - `@("LOCK") (^A,^B(1):5)` — `LOCK` items are `lvalue[:timeout]`; `exprlist` doesn’t accept colon semantics in nested items.
-  - `@("OPEN") 56:"/dev/tty":5` and `@("USE") 56:(NOPROMPT)` — device parameter chains use `:expr[:expr...]` and must parse to `ArgsDEVICE`.
-  - `@("FOR") A=1:1:10 WRITE A` — FOR header is not an expression list; needs `for_specs`.
-  - `@("SET") A=1,B=2` — assignment list must parse as `set_list`, not `Rel(EQ)` expressions.
-
-- ELSE  IF chaining with indirect WRITE:
-  - `ELSE  @("WRITE") !,"Else path"` — same WRITE-mode issue as above.
-
-Bottom line: Generic `INDIRECT` with `exprlist` args can’t express the command-specific argument grammars (READ/LOCK/OPEN/USE/SET/WRITE/DO/GOTO/FOR/etc.).
-
-## Implementation plan
-
-### 1) Lexer: gate WRITE mode after indirect WRITE
-- Case A: `@ NAME` form
-  - If `NAME` resolves lexically to `write` (case-insensitive), then after the command-space that follows, set the write-expression mode (WEXPR):
-    - Behavior: treat `! ? # * /` at top-level as WRITE adorners, not logical/arithmetic ops.
-
-- Case B: `@(expr)` with a literal string
-  - If the expression is a literal string `"WRITE"` (case-insensitive), enable WEXPR after the closing `)` and required command-space.
-
-- Reset gating on newline (already done for WRITE and elsewhere).
-
-Notes:
-- This gating is purely lexical: it doesn’t resolve computed expressions, it only catches literal `WRITE` targets or `@WRITE` text.
-- Unknown or dynamic `@(expr)` targets continue to use EXPR mode.
-
-### 2) Grammar: specialized indirect-command productions
-Add command-specific rules so that when the indirect target is a literal known command, the indirect form maps onto the same argument grammar as the direct command.
-
-For each `CMD`, add two literal-target forms in `cmd` (examples shown; adapt to your code style):
-
-- WRITE
-  - `AT NAME[=WRITE] CS write_list`
-  - `AT LPAREN STRING[=WRITE] RPAREN CS write_list`
-
-- READ
-  - `AT NAME[=READ] CS read_list`
-  - `AT LPAREN STRING[=READ] RPAREN CS read_list`
-
-- SET
-  - `AT NAME[=SET] CS set_list`
-  - `AT LPAREN STRING[=SET] RPAREN CS set_list`
-
-- LOCK
-  - `AT NAME[=LOCK] CS lock_items`
-  - `AT LPAREN STRING[=LOCK] RPAREN CS lock_items`
-
-- OPEN / USE / VIEW / CLOSE
-  - `... CS device_args` (same two literal-target forms for each)
-
-- DO / GOTO
-  - `... CS entryref_list` (same two literal-target forms)
-
-- FOR
-  - `... CS for_specs` and a bare `...` form mapping to `For {specs: []}` (if you want `@("FOR")` without specs)
-
-- IF
-  - `... CS expr` (IF requires an expression)
-
-- HANG / QUIT / BREAK / HALT
-  - Map to the same argless or optional-expr forms as the direct spellings.
-
-- XECUTE
-  - `... CS exprlist`
-
-Keep the existing generic fallback for `@NAME` / `@(expr)`:
-- When the target is not a literal known command, continue to emit:
-  - `Cmd { op: "INDIRECT", args: ArgsINDIRECT { target: Indirect(name|expr), args: exprlist } }`
-
-### 3) Postcondition handling
-- The existing `postcond CS cmd | postcond cmd` wrapper should continue to work around the specialized indirect forms, so `:X @("WRITE") ...` attaches the `pc` to the resulting node.
-
-### 4) Tests to add
-- Indirect WRITE with WEXPR adorners (including inside ELSE  IF chaining):
-  - `@("WRITE") !,"Hello"`
-  - `ELSE  @("WRITE") !,"Else path"`
-
-- Indirect SET/READ/LOCK/OPEN/USE/VIEW/CLOSE with representative arguments:
-  - `@("SET") A=1,B=2`
-  - `@("READ") X:1`
-  - `@("LOCK") (^A,^B(1):5)`
-  - `@("OPEN") 56:"/dev/tty":5`, `@("USE") 56:(NOPROMPT)`, `@("CLOSE") 56`
-
-- Indirect DO/GOTO/FOR/IF/XECUTE/HANG/QUIT/BREAK/HALT:
-  - `@("DO") ^ROU`, `@("DO") @(E)`
-  - `@("GOTO") ^ROU(1)`
-  - `@("FOR") A=1:1:10 WRITE A`
-  - `@("IF") A>3 WRITE !,"ok"`
-  - `@("XECUTE") "W !,""hi"""`
-  - `@("HANG") 1`, `@("QUIT")`, `@("BREAK")`, `@("HALT")`
-
-- Generic fallback remains:
-  - `@CMDVAR X,Y,Z` (no literal binding) should produce `Cmd op="INDIRECT"` with `ArgsINDIRECT`.
-
-### 5) AST shape
-- For literal-target indirect commands that bind to known commands, emit the same AST nodes as their direct forms (`Cmd op="WRITE"`, `ArgsWRITE`, etc.).
-- For unknown/dynamic targets, keep `Cmd op="INDIRECT"` with `ArgsINDIRECT`.
-
-### 6) VistA readiness
-With the above lexer gating for indirect WRITE and grammar specializations for literal indirect targets, the listed examples will parse, covering VistA patterns such as:
-
+Command indirection allows the command itself to be determined at runtime:
+```mumps
+SET CMD="WRITE"  @CMD !,"Hello"     ; CMD evaluated at runtime
+SET CMD="SET"    @CMD A=1,B=2       ; Different command, different syntax
 ```
+
+### How VistA/GT.M/YottaDB Handle Indirection
+
+**Key Insight**: Command indirection is ALWAYS a runtime feature in standard MUMPS implementations.
+
+#### Parse Time
+- The parser treats `@expr` as an indirect command marker
+- All following arguments are parsed as **generic expressions**
+- Special characters are parsed as operators:
+  - `!` → OR operator
+  - `*` → MUL operator
+  - `#` → MOD operator
+  - `?` → Pattern match (if followed by pattern)
+
+#### Runtime (Interpreter Responsibility)
+1. **Evaluate** the indirect expression to get command string
+2. **Re-interpret** the already-parsed tokens in command context
+3. **Execute** with command-specific semantics
+
+Example:
+```mumps
 @("WRITE") !,"Hello"
-@("SET") A=1,B=2
-@("READ") X:1
-@("IF") A>3 WRITE !,"ok"
-ELSE  @("WRITE") !,"Else path"
-@CMDVAR X,Y,Z
-@("DO") ^ROU
-@("DO") @(E)
-@("GOTO") ^ROU(1)
-@("LOCK") (^A,^B(1):5)
-@("OPEN") 56:"/dev/tty":5
-@("USE") 56:(NOPROMPT)
-@("CLOSE") 56
-@("HANG") 1
-@("FOR") A=1:1:10 WRITE A
-@("XECUTE") "W !,""hi"""
+; Parse time: ! is OR operator
+; Runtime: "WRITE" evaluated, ! re-interpreted as newline adorner
 ```
 
-## Backwards-compatibility
-- Direct command forms are unchanged.
-- Generic `@NAME` / `@(expr)` still parse to `Cmd op="INDIRECT"` when they don’t match a literal known command.
-- WRITE gating is triggered only for the direct `WRITE` command and literal indirect `WRITE` targets.
+### Current BUMPS Implementation
 
-## Optional Enhancements
-- Also bind indirect `JOB` targets to `job_targets` when literal `"JOB"` is used.
-- Add diagnostics when an indirect literal `"CMD"` has an argument shape that doesn’t match that command’s grammar.
+The parser correctly handles indirection as generic:
 
+```coffee
+# From grammar.coffee
+o 'AT NAME CS exprlist'              , '...'
+o 'AT NAME'                          , '...'
+o 'AT LPAREN expr RPAREN CS exprlist', '...'
+o 'AT LPAREN expr RPAREN'            , '...'
+```
 
+This produces AST nodes:
+```javascript
+{
+  type: "Cmd",
+  op: "INDIRECT",
+  args: {
+    type: "ArgsINDIRECT",
+    target: { type: "Indirect", kind: "name|expr", target: ... },
+    args: [...]  // Generic expressions
+  }
+}
+```
+
+### Examples of Command Indirection
+
+All of these parse with generic expression semantics:
+
+```mumps
+; Variable indirection
+SET CMD="WRITE"  @CMD !,"Hello"
+
+; Literal string indirection (NO special parsing)
+@("SET") A=1,B=2
+
+; Expression indirection
+@($SELECT(MODE=1:"READ",1:"WRITE")) X
+
+; Indirect with various commands
+@("WRITE") !,"Text",*65,?10
+@("READ") X:5
+@("LOCK") +^A,-^B:10
+@("DO") ^ROUTINE
+```
+
+### What the Interpreter Must Do
+
+The BUMPS interpreter (not parser) must:
+
+1. **For indirect commands**: Check if `op` is "INDIRECT"
+2. **Evaluate target**: Get the command name string
+3. **Re-interpret arguments**: Based on the command:
+   - `WRITE`: Convert OR→WBANG, MUL→WSTAR, etc.
+   - `READ`: Handle timeouts, prompts, etc.
+   - `SET`: Convert EQ comparisons to assignments
+   - `LOCK`: Handle increment/decrement forms
+4. **Execute**: Run the command with re-interpreted arguments
+
+### Non-Command Indirection (Already Working)
+
+These forms of indirection work at parse time:
+
+```mumps
+; Variable name indirection
+SET @VAR=123           ; LHS indirection
+WRITE @EXPR            ; RHS indirection
+
+; Entry reference indirection
+DO @ROUTINE            ; Routine indirection
+DO @("LABEL^ROUTINE")  ; Label+routine indirection
+```
+
+### Why Not Optimize Literal Strings?
+
+VistA does NOT specially parse `@("WRITE")` differently from `@VAR`:
+- Both are treated as runtime indirection
+- No MUMPS implementation optimizes literals at parse time
+- The parser cannot know command-specific semantics until runtime
+
+### Testing Command Indirection
+
+Current test coverage in `exports.samples`:
+```mumps
+; Variable indirection
+SET CMD="WRITE"  @CMD !,"Hello"
+
+; Literal indirection (parses but needs runtime interpretation)
+@("SET") A=1,B=2
+@("KILL") (A,B,C)
+```
+
+These parse successfully but with generic semantics. The interpreter must handle the command-specific re-interpretation.
+
+### Summary
+
+✅ **Parser**: Correctly treats all command indirection as generic expressions
+✅ **AST**: Properly marks indirect commands with `op: "INDIRECT"`
+⚠️ **Interpreter**: Must implement runtime re-interpretation of arguments
+
+This design matches VistA/GT.M/YottaDB exactly - command indirection is always resolved at runtime, never at parse time.

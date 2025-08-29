@@ -80,13 +80,13 @@ exports.intrinsics = [
   'A'         , 'ASCII'     , 'C'         , 'CHAR'      , 'D'         , 'DATA'      ,
   'E'         , 'ECODE'     , 'ESTACK'    , 'ETRAP'     , 'EXTRACT'   , 'F'         ,
   'FIND'      , 'FNUMBER'   , 'G'         , 'GET'       , 'H'         , 'HOROLOG'   ,
-  'IO'        , 'J'         , 'JOB'       , 'JUSTIFY'   , 'L'         , 'LENGTH'    ,
-  'NA'        , 'NAME'      , 'NEXT'      , 'O'         , 'ORDER'     , 'P'         ,
-  'PIECE'     , 'PRINCIPAL' , 'Q'         , 'QLENGTH'   , 'QSUBSCRIPT', 'QUERY'     ,
-  'QUIT'      , 'R'         , 'RANDOM'    , 'RE'        , 'REVERSE'   , 'S'         ,
-  'SELECT'    , 'STACK'     , 'STORAGE'   , 'T'         , 'TEST'      , 'TEXT'      ,
-  'TLEVEL'    , 'TR'        , 'TRANSLATE' , 'V'         , 'VIEW'      , 'X'         ,
-  'Y'         , 'ZDATE'     , 'ZVERSION'
+  'INCREMENT' , 'IO'        , 'J'         , 'JOB'       , 'JUSTIFY'   , 'L'         ,
+  'LENGTH'    , 'NA'        , 'NAME'      , 'NEXT'      , 'O'         , 'ORDER'     ,
+  'P'         , 'PIECE'     , 'PRINCIPAL' , 'Q'         , 'QLENGTH'   , 'QSUBSCRIPT',
+  'QUERY'     , 'QUIT'      , 'R'         , 'RANDOM'    , 'RE'        , 'REVERSE'   ,
+  'S'         , 'SELECT'    , 'STACK'     , 'STORAGE'   , 'T'         , 'TEST'      ,
+  'TEXT'      , 'TLEVEL'    , 'TR'        , 'TRANSLATE' , 'V'         , 'VIEW'      ,
+  'X'         , 'Y'         , 'ZDATE'     , 'ZETRAP'    , 'ZTRAP'     , 'ZVERSION'
 ]
 
 # Helper: check if a $FUNCTION name is recognized (uppercase, without '$')
@@ -384,6 +384,15 @@ exports.bnf =
   ritem: [
     o 'lvalue'            , '$$ = yy.node("ReadItem", {lhs: $1, timeout: null})'
     o 'lvalue COLON expr' , '$$ = yy.node("ReadItem", {lhs: $1, timeout: $3})'
+    # READ *X - single character read
+    o 'MUL lvalue'        , '$$ = yy.node("ReadChar", {lhs: $2})'
+    o 'MUL lvalue COLON expr' , '$$ = yy.node("ReadChar", {lhs: $2, timeout: $4})'
+    # READ X#5 - fixed length read
+    o 'lvalue MOD expr' , '$$ = yy.node("ReadFixed", {lhs: $1, length: $3})'
+    o 'lvalue MOD expr COLON expr' , '$$ = yy.node("ReadFixed", {lhs: $1, length: $3, timeout: $5})'
+    # READ "Prompt: ",X - prompt with read
+    o 'STRING COMMA lvalue', '$$ = yy.node("ReadPrompt", {prompt: $1, lhs: $3})'
+    o 'STRING COMMA lvalue COLON expr', '$$ = yy.node("ReadPrompt", {prompt: $1, lhs: $3, timeout: $5})'
   ]
 
   # LOCK
@@ -890,6 +899,46 @@ exports.samples = '''
 
   ; ---- Z-commands (vendor) ----
   ZTEST 1,2
+
+  ; ---- READ single character (*X) ----
+  READ *CHAR
+  READ *KEY:10
+
+  ; ---- READ fixed length (X#n) ----
+  READ INPUT#10
+  READ CODE#5:30
+
+  ; ---- READ with prompt string ----
+  READ "Enter name: ",NAME
+  READ "Age: ",AGE:5
+
+  ; ---- Mixed READ variants ----
+  READ X,*Y,Z#3,"Password: ",PWD:10
+
+  ; ---- New intrinsic functions ($INCREMENT, $ZTRAP, $ETRAP) ----
+  SET CNT=$INCREMENT(^COUNTER)
+  SET CNT=$INCREMENT(^COUNTER,5)
+  SET TRAP=$ZTRAP
+  SET ERR=$ETRAP
+  SET $ZTRAP="^ERRORHANDLER"
+  SET $ETRAP="DO ^ERROR"
+
+  ; ---- Other VistA intrinsic functions ----
+  SET TXT=$TEXT(LABEL)
+  SET NXT=$ORDER(^GLOBAL(SUB))
+  SET QRY=$QUERY(^GLOBAL(SUB))
+  WRITE $TEST,$TLEVEL
+  SET REV=$REVERSE("HELLO")
+  SET JUST=$JUSTIFY(123,10)
+
+  ; ---- Transactions with arguments ----
+  TSTART (X,Y):SERIAL
+  TRESTART:$TLEVEL
+
+  ; ---- Command indirection examples ----
+  SET CMD="WRITE"  @CMD !,"Hello"
+  @("SET") A=1,B=2
+  @("KILL") (A,B,C)
 '''
   .split '\n'
   .map (s) -> s.trim()

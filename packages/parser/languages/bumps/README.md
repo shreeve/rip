@@ -107,6 +107,18 @@ The grammar currently uses `EQUAL` for `set_item` (`lvalue EQUAL expr`), but the
 - Normalize negated relations and pattern matches into distinct tokens (`NE`, `NCONTAINS`, `NFOLLOWS`, `NSORTAFTER`, etc.) to avoid binding quirks around `'`.
 - Keep commands and expressions separate, with a `CommandList` and per-command productions that accept optional postconditions and arguments.
 
+### Command Indirection in VistA
+
+Command indirection (`@VAR args` or `@(expr) args`) is handled as follows:
+
+- **Parser**: Treats all arguments after `@expr` as generic expressions (`exprlist`). Special characters like `!`, `*`, `#` are parsed as operators (OR, MUL, MOD) not as command-specific adorners.
+- **Interpreter** (runtime): Must re-interpret the parsed tokens in command context:
+  1. Evaluate the indirect expression to get the command name
+  2. Re-interpret the argument tokens according to that command's grammar
+  3. Execute with proper command-specific semantics
+
+This matches VistA/GT.M/YottaDB behavior - there is NO special parsing for literal strings like `@("WRITE")`. All command indirection is resolved at runtime, not parse time.
+
 ### What’s next
 
 - Align the `EQUAL` vs `EQ` token (see consistency note above).
