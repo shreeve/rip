@@ -5,7 +5,7 @@
 Rip Server runs your app with serious speed and durability. It starts instantly for local work, scales across multiple workers, survives failures, reloads gracefully, and ships with a live dashboard and clean `.local` access for phones on your LAN.
 
 ### Why Rip Server
-- **High performance**: Minimal entry overhead and efficient worker forwarding. On typical hardware, entry health checks hit 100K+ RPS; app routes commonly reach tens of thousands RPS.
+- **High performance**: Minimal server overhead and efficient worker forwarding. On typical hardware, server health checks hit 100K+ RPS; app routes commonly reach tens of thousands RPS.
 - **Resilient by design**: If a worker crashes, the server keeps serving with the remaining workers and the manager brings a fresh one online. Rolling restarts replace workers without dropping in‑flight requests.
 - **HTTPS‑first**: One command brings up TLS (cert/key, mkcert, or self‑signed fallback). Optional HTTP→HTTPS redirect and HSTS.
 - **Instant local access**: Declare aliases like `apps/api@mobile` and get `mobile.local` on your LAN via Bonjour/mDNS. The dashboard lives at `rip.local`.
@@ -38,9 +38,9 @@ What you get immediately:
 
 ## The short version (how it works)
 
-- Rip Server runs an entry process that accepts requests and forwards them to a pool of isolated workers.
-- Each worker handles one request at a time. The entry picks an idle worker (LIFO) to keep caches warm and tail latencies low.
-- If a worker is busy, the entry retries another. If a worker dies, the entry removes it and continues serving; the manager respawns a fresh one.
+- Rip Server runs a server process that accepts requests and forwards them to a pool of isolated workers.
+- Each worker handles one request at a time. The server picks an idle worker (LIFO) to keep caches warm and tail latencies low.
+- If a worker is busy, the server retries another. If a worker dies, the server removes it and continues serving; the manager respawns a fresh one.
 - Rolling restarts spin up new workers first, switch traffic to them, then retire the old ones—so you can redeploy under load without dropping requests.
 
 That’s the resilience headline: one misbehaving worker doesn’t take the system down.
@@ -111,7 +111,7 @@ bun server apps/labs/api@api,labs,mobile       # api.local, labs.local, mobile.l
 
 ## Production‑ready behavior
 
-- **Zero‑downtime rolls**: New workers start first and advertise a higher version. The entry routes only to the latest, then retires old workers.
+- **Zero‑downtime rolls**: New workers start first and advertise a higher version. The server routes only to the latest, then retires old workers.
 - **Crash resilience**: If a worker exits unexpectedly, traffic continues through the rest; the manager respawns a replacement with backoff.
 - **TLS you control**: Bring your own certs, lean on mkcert for dev, or use self‑signed when nothing else is available.
 - **Predictable defaults**: HTTPS‑first, access logs on (human), JSON logs opt‑in.
@@ -151,9 +151,9 @@ On recent macOS versions, binding port 80/443 without sudo is possible when list
 
 **Does it handle WebSockets?** Yes, sockets are forwarded end‑to‑end through workers.
 
-**Why not one giant process?** Small, replaceable workers isolate failures and memory growth, and make rolling updates reliable. The entry process stays lean and predictable.
+**Why not one giant process?** Small, replaceable workers isolate failures and memory growth, and make rolling updates reliable. The server process stays lean and predictable.
 
-**Do I have to learn a framework?** No. Start your app entry (`index.rip` or `index.ts`) and handle requests. Rip Server focuses on running it fast and safely.
+**Do I have to learn a framework?** No. Start your app entrypoint (`index.rip` or `index.ts`) and handle requests. Rip Server focuses on running it fast and safely.
 
 ---
 
