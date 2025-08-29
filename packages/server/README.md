@@ -6,7 +6,7 @@ Rip Server runs your app with serious speed and durability. It starts instantly 
 
 ### Why Rip Server
 - **High performance**: Minimal entry overhead and efficient worker forwarding. On typical hardware, entry health checks hit 100K+ RPS; app routes commonly reach tens of thousands RPS.
-- **Resilient by design**: If a worker crashes, the server keeps serving with the remaining workers and the supervisor brings a fresh one online. Rolling restarts replace workers without dropping in‑flight requests.
+- **Resilient by design**: If a worker crashes, the server keeps serving with the remaining workers and the manager brings a fresh one online. Rolling restarts replace workers without dropping in‑flight requests.
 - **HTTPS‑first**: One command brings up TLS (cert/key, mkcert, or self‑signed fallback). Optional HTTP→HTTPS redirect and HSTS.
 - **Instant local access**: Declare aliases like `apps/api@mobile` and get `mobile.local` on your LAN via Bonjour/mDNS. The dashboard lives at `rip.local`.
 - **Developer‑friendly**: Live dashboard, structured logs, smart defaults, and quick, orthogonal flags for workers, timeouts, and reload modes.
@@ -40,7 +40,7 @@ What you get immediately:
 
 - Rip Server runs an entry process that accepts requests and forwards them to a pool of isolated workers.
 - Each worker handles one request at a time. The entry picks an idle worker (LIFO) to keep caches warm and tail latencies low.
-- If a worker is busy, the entry retries another. If a worker dies, the entry removes it and continues serving; the supervisor respawns a fresh one.
+- If a worker is busy, the entry retries another. If a worker dies, the entry removes it and continues serving; the manager respawns a fresh one.
 - Rolling restarts spin up new workers first, switch traffic to them, then retire the old ones—so you can redeploy under load without dropping requests.
 
 That’s the resilience headline: one misbehaving worker doesn’t take the system down.
@@ -55,7 +55,7 @@ That’s the resilience headline: one misbehaving worker doesn’t take the syst
   - Bounded queue with timeout and back‑pressure
 
 - **Resilience**
-  - Crash containment per worker; supervisor with exponential backoff
+  - Crash containment per worker; manager with exponential backoff
   - Rolling restarts (spawn‑before‑kill), version‑aware routing
   - Resource budgets: max requests / seconds / reloads per worker
 
@@ -112,7 +112,7 @@ bun server apps/labs/api@api,labs,mobile       # api.local, labs.local, mobile.l
 ## Production‑ready behavior
 
 - **Zero‑downtime rolls**: New workers start first and advertise a higher version. The entry routes only to the latest, then retires old workers.
-- **Crash resilience**: If a worker exits unexpectedly, traffic continues through the rest; the supervisor respawns a replacement with backoff.
+- **Crash resilience**: If a worker exits unexpectedly, traffic continues through the rest; the manager respawns a replacement with backoff.
 - **TLS you control**: Bring your own certs, lean on mkcert for dev, or use self‑signed when nothing else is available.
 - **Predictable defaults**: HTTPS‑first, access logs on (human), JSON logs opt‑in.
 - **Back‑pressure**: Bounded queues and request/worker budgets help protect your app under load.
