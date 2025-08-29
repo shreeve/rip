@@ -786,6 +786,7 @@ exports.samples = '''
   ; ---- KILL with nested groups and indirection ----
   KILL (A,B),^G("x"),@(N)
   KILL (^G("") , ^G("A",""), @("X"))
+  KILL @GREF
 
   ; ---- LOCK with mixed timeouts ----
   LOCK A:1,^G(1),B:Z+1
@@ -801,6 +802,7 @@ exports.samples = '''
   DO L1^R1(1,2), ^R2
   DO
   . WRITE "after DO"
+  . IF 1 WRITE "ok"
 
   ; ---- IF/ELSE dot-indented block ----
   IF 1
@@ -834,6 +836,7 @@ exports.samples = '''
   ; ---- Indirect command execution (@NAME / @(expr)) ----
   @CMD 1,2
   @(F(1)) "A","B"
+  DO @ENTRY
 
   ; ---- Dollar functions and $Z- functions / variables ----
   SET P=$PIECE(S,":",1,3)
@@ -845,6 +848,7 @@ exports.samples = '''
   ; ---- SET-only LHS helpers ($PIECE/$EXTRACT assignment) ----
   SET $PIECE(S,":",1,2)=42
   SET $EXTRACT(S,1,2)=42
+  SET X=-$PIECE(S,":",1,3)
 
   ; ---- Pattern matches (class sets, groups, literals) ----
   WRITE X?2AN(1"-")3AL
@@ -859,6 +863,7 @@ exports.samples = '''
   ; ---- Numeric literal forms (int, frac, leading-dot, trailing-dot, exponent, unary) ----
   SET N1=123,N2=0,N3=.5,N4=10.,N5=3.14,N6=1E3,N7=5.67E-2,N8=-77,N9=+42,N10=-9E+4
   WRITE N1,N2,N3,N4,N5,N6,N7,N8,N9,N10
+  IF +'123'=123  WRITE "num"
 
   ; ---- ELSE spacing (lint requires two spaces when chaining) ----
   IF 0 WRITE "no"  ELSE  WRITE "else-single"
