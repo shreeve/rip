@@ -583,7 +583,7 @@ exports.lex =
     WEXPR: 1
   rules: [
     # Newlines
-    ['\\r?\\n+'                                             , 'return "NEWLINE";']
+    ['\\r?\\n+'                                             , 'yy._afterWrite=false; yy.wItemStart=false; yy.inPostcond=false; yy.exprDepth=0; this.begin("INITIAL"); return "NEWLINE";']
 
     # INITIAL (line start)
     ['<INITIAL>\\.+'                                        , 'yy.depth = yytext.length; return "DOTS";']
@@ -627,12 +627,12 @@ exports.lex =
     # CMD spaces -> EXPR or WEXPR
     ['<CMD>[ ]+'                                            , 'if (yy._afterWrite) { this.begin("WEXPR"); yy._afterWrite=false; yy.wItemStart=true; yy.exprDepth=0; } else { this.begin("EXPR"); yy.exprDepth=0; } return "CS";']
     ['<CMD>;[^\\n]*'                                        , 'return "COMMENT";']
-    ['<CMD>\\r?\\n+'                                        , 'this.begin("INITIAL"); return "NEWLINE";']
+    ['<CMD>\\r?\\n+'                                        , 'yy._afterWrite=false; yy.wItemStart=false; yy.inPostcond=false; yy.exprDepth=0; this.begin("INITIAL"); return "NEWLINE";']
 
     # EXPR spacing/comments; depth-aware; route spaces after postcond to args mode
     ['<EXPR>;[^\\n]*'                                       , 'return "COMMENT";']
     ['<EXPR>[ ]+'                                           , 'if ((yy.exprDepth||0)===0) { if (yy.inPostcond) { if (yy._afterWrite) { this.begin("WEXPR"); yy._afterWrite=false; yy.wItemStart=true; yy.exprDepth=0; yy.inPostcond=false; } else { this.begin("EXPR"); yy.inPostcond=false; yy.exprDepth=0; } return "CS"; } this.begin("CMD"); return "CS"; }']
-    ['<EXPR>\\r?\\n+'                                       , 'this.begin("INITIAL"); return "NEWLINE";']
+    ['<EXPR>\\r?\\n+'                                       , 'yy._afterWrite=false; yy.wItemStart=false; yy.inPostcond=false; yy.exprDepth=0; this.begin("INITIAL"); return "NEWLINE";']
 
     # punctuation (EXPR) with depth tracking
     ['<EXPR>\\('                                            , 'yy.exprDepth=(yy.exprDepth||0)+1; return "LPAREN";']
@@ -692,7 +692,7 @@ exports.lex =
     # WEXPR mode (after WRITE CS). Treat adorners specially, otherwise behave like EXPR.
     ['<WEXPR>;[^\\n]*'                                      , 'return "COMMENT";']
     ['<WEXPR>[ ]+'                                          , 'this.begin("CMD"); return "CS";']
-    ['<WEXPR>\\r?\\n+'                                      , 'this.begin("INITIAL"); return "NEWLINE";']
+    ['<WEXPR>\\r?\\n+'                                      , 'yy._afterWrite=false; yy.wItemStart=false; yy.inPostcond=false; yy.exprDepth=0; this.begin("INITIAL"); return "NEWLINE";']
 
     # depth + item tracking
     ['<WEXPR>\\('                                           , 'yy.exprDepth=(yy.exprDepth||0)+1; yy.wItemStart=false; return "LPAREN";']
