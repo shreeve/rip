@@ -2,11 +2,10 @@
 
 const fs = require('fs');
 const path = require('path');
-const parserMod = require('./parser.cjs');
+const parserMod = require('./parser.js');
 let BumpsLexer;
 // Enable requiring CoffeeScript modules
 require('../../../../coffeescript/register.js');
-const { BumpsRewriter } = require('./rewriter.coffee');
 const { attachBlocks } = require('./blocks.coffee');
 
 function readSource(argv) {
@@ -48,18 +47,17 @@ class Adapter {
 }
 
 function main() {
-  // Lazy import ESM lexer
-  const loadLexer = () => import('./lexer.js').then(m => m.BumpsLexer);
+  // Load CoffeeScript lexer
+  const loadLexer = () => Promise.resolve().then(() => require('./lexer.coffee')).then(m => m.BumpsLexer);
 
   loadLexer().then((Ctor) => {
     BumpsLexer = Ctor;
   const src = readSource(process.argv);
   const lex = new BumpsLexer();
   const toks = lex.tokenize(src);
-  const rewritten = new BumpsRewriter().rewrite(toks);
 
   const p = parserMod.parser;
-  p.tokens = rewritten;
+  p.tokens = toks;
   p.yy = p.yy || {};
   p.yy.node = p.yy.node || ((type, props) => ({ type, ...(props || {}) }));
   p.lexer = new Adapter(p.tokens);
@@ -68,9 +66,8 @@ function main() {
     const ast = parserMod.parse(src);
     if (ast && ast.type === 'Program') attachBlocks(ast);
     console.log(ast === true ? 'accepted' : 'ok');
-    // Optional: print a simple JSON of tokens for debugging
     if (process.env.BUMPS_DEBUG) {
-      console.log(JSON.stringify(rewritten.map(([t,v])=>[t,v]), null, 2));
+      console.log(JSON.stringify(toks.map(([t,v])=>[t,v]), null, 2));
       console.log(JSON.stringify(ast, null, 2));
     }
   } catch (e) {
@@ -82,7 +79,6 @@ function main() {
 
 if (require.main === module) main();
 
-// Attach IF/ELSE blocks using Line.depth
 function attachBlocks(program) {
   if (!program || program.type !== 'Program' || !Array.isArray(program.lines)) return;
   const lines = program.lines;
@@ -92,15 +88,12 @@ function attachBlocks(program) {
     const cmd = line.cmds[0];
     if (cmd && cmd.type === 'If') {
       const baseDepth = line.depth || 0;
-      // then-block: lines strictly deeper than baseDepth until depth <= baseDepth or ELSE at same depth
       const thenLines = [];
       let j = i + 1;
-      // collect then lines
       while (j < lines.length && (lines[j].depth || 0) > baseDepth) {
         thenLines.push(lines[j]);
         j++;
       }
-      // else-case at same depth
       const elseLines = [];
       if (j < lines.length) {
         const maybeElse = lines[j];

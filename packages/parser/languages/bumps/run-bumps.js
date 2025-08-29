@@ -4,7 +4,6 @@ const fs = require('fs');
 const path = require('path');
 const parser = require('./parser.js');
 const { BumpsLexer } = require('./lexer.coffee');
-const { BumpsRewriter } = require('./rewriter.coffee');
 
 function readSource(argv) {
   if (argv.length > 2) {
@@ -15,7 +14,6 @@ function readSource(argv) {
 }
 
 function toJisonTokens(tokens) {
-  // Our parser wants tokens via lexer.lex(); keep [[tag, value, loc]] in lexer.
   return tokens;
 }
 
@@ -53,9 +51,8 @@ function main() {
   const src = readSource(process.argv);
   const lex = new BumpsLexer();
   const toks = lex.tokenize(src);
-  const rewritten = new BumpsRewriter().rewrite(toks);
 
-  parser.tokens = toJisonTokens(rewritten);
+  parser.tokens = toJisonTokens(toks);
   parser.yy = parser.yy || {};
   parser.yy.node = parser.yy.node || ((type, props) => ({ type, ...(props || {}) }));
   parser.lexer = new Adapter(parser.tokens);
