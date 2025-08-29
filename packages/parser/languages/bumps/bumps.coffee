@@ -790,6 +790,9 @@ exports.samples = '''
   ; ---- LOCK with mixed timeouts ----
   LOCK A:1,^G(1),B:Z+1
 
+  ; ---- LOCK incremental/decremental forms (+ / -) ----
+  LOCK +^G(1),-^H:5
+
   ; ---- MERGE simple and multi-target shorthand ----
   MERGE A=B
   MERGE (A,^G(1),@H)=@(S+1)
@@ -828,6 +831,10 @@ exports.samples = '''
   XECUTE "W \"HI\""
   XECUTE @X
 
+  ; ---- Indirect command execution (@NAME / @(expr)) ----
+  @CMD 1,2
+  @(F(1)) "A","B"
+
   ; ---- Dollar functions and $Z- functions / variables ----
   SET P=$PIECE(S,":",1,3)
   SET Z=$ZDATE(12345)
@@ -843,12 +850,21 @@ exports.samples = '''
   WRITE X?2AN(1"-")3AL
   IF T?1.2("ok",1U) WRITE "pat"
 
+  ; ---- Pattern classes (extended via parsePattern: D,X,V,Z) ----
+  IF S?1D1X1V1Z WRITE "pat-extended"
+
   ; ---- Negated pattern IF ----
   IF S'?3A.1N  WRITE "bad"
 
   ; ---- Numeric literal forms (int, frac, leading-dot, trailing-dot, exponent, unary) ----
   SET N1=123,N2=0,N3=.5,N4=10.,N5=3.14,N6=1E3,N7=5.67E-2,N8=-77,N9=+42,N10=-9E+4
   WRITE N1,N2,N3,N4,N5,N6,N7,N8,N9,N10
+
+  ; ---- ELSE spacing (lint requires two spaces when chaining) ----
+  IF 0 WRITE "no"  ELSE  WRITE "else-single"
+
+  ; ---- Longer unique command prefixes (wr/read) ----
+  wr "PFX"  re X:1
 
   ; ---- Extended globals and naked references ----
   SET ^|"ENV"|G(1,2)=3
