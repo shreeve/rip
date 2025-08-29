@@ -86,7 +86,7 @@ Bun.plugin({
 - **Performance targets**: 20K+ RPS with seamless hot reloading
 - **Key files**:
   - `rip-server.ts` - CLI with worker lifecycle management
-  - `manager.ts` - Process supervisor with restart logic
+  - `manager.ts` - Process manager with restart logic
   - `worker.ts` - Single-inflight workers with mtime-based hot reload
   - `server.ts` - LIFO worker selector with efficient forwarding
   - `utils.ts` - Shared utilities and configuration parsing
