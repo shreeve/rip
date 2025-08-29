@@ -596,7 +596,7 @@ exports.lex =
     ['<CMD>(?:break|b)\\b'                                  , 'return "BREAK";']
     ['<CMD>(?:close|c)\\b'                                  , 'return "CLOSE";']
     ['<CMD>(?:do|d)\\b'                                     , 'return "DO";']
-    ['<CMD>(?:else|e)\\b'                                   , 'return "ELSE";']
+    ['<CMD>(?:else|e)\\b'                                   , 'yy._afterElse=true; return "ELSE";']
     ['<CMD>(?:for|f)\\b'                                    , 'return "FOR";']
     ['<CMD>(?:goto|g)\\b'                                   , 'return "GOTO";']
     ['<CMD>(?:halt|h)\\b'                                   , 'return "HALT";']
@@ -625,14 +625,14 @@ exports.lex =
     ['<CMD>:'                                               , 'yy.inPostcond = true; this.begin("EXPR"); return "COLON";']
 
     # CMD spaces -> EXPR or WEXPR
-    ['<CMD>[ ]+'                                            , 'if (yy._afterWrite) { this.begin("WEXPR"); yy._afterWrite=false; yy.wItemStart=true; yy.exprDepth=0; } else { this.begin("EXPR"); yy.exprDepth=0; } return "CS";']
+    ['<CMD>[ ]+'                                            , 'if (yy._afterWrite) { this.begin("WEXPR"); yy._afterWrite=false; yy.wItemStart=true; yy.exprDepth=0; } else if (yy._afterElse) { yy._afterElse=false; this.begin("CMD"); return "CS"; } else { this.begin("EXPR"); yy.exprDepth=0; } return "CS";']
     ['<CMD>;[^\\n]*'                                        , 'return "COMMENT";']
-    ['<CMD>\\r?\\n+'                                        , 'yy._afterWrite=false; yy.wItemStart=false; yy.inPostcond=false; yy.exprDepth=0; this.begin("INITIAL"); return "NEWLINE";']
+    ['<CMD>\\r?\\n+'                                        , 'yy._afterWrite=false; yy._afterElse=false; yy.wItemStart=false; yy.inPostcond=false; yy.exprDepth=0; this.begin("INITIAL"); return "NEWLINE";']
 
     # EXPR spacing/comments; depth-aware; route spaces after postcond to args mode
     ['<EXPR>;[^\\n]*'                                       , 'return "COMMENT";']
     ['<EXPR>[ ]+'                                           , 'if ((yy.exprDepth||0)===0) { if (yy.inPostcond) { if (yy._afterWrite) { this.begin("WEXPR"); yy._afterWrite=false; yy.wItemStart=true; yy.exprDepth=0; yy.inPostcond=false; } else { this.begin("EXPR"); yy.inPostcond=false; yy.exprDepth=0; } return "CS"; } this.begin("CMD"); return "CS"; }']
-    ['<EXPR>\\r?\\n+'                                       , 'yy._afterWrite=false; yy.wItemStart=false; yy.inPostcond=false; yy.exprDepth=0; this.begin("INITIAL"); return "NEWLINE";']
+    ['<EXPR>\\r?\\n+'                                       , 'yy._afterWrite=false; yy._afterElse=false; yy.wItemStart=false; yy.inPostcond=false; yy.exprDepth=0; this.begin("INITIAL"); return "NEWLINE";']
 
     # punctuation (EXPR) with depth tracking
     ['<EXPR>\\('                                            , 'yy.exprDepth=(yy.exprDepth||0)+1; return "LPAREN";']
@@ -683,7 +683,7 @@ exports.lex =
     ['<PAT>\\)'                                             , 'if ((yy.patDepth||0)>0) { yy.patDepth--; return "RPAREN"; } this.begin("EXPR"); return "RPAREN";']
     ['<PAT>,'                                               , 'if ((yy.patDepth||0)>0) return "COMMA"; this.begin("EXPR"); return "COMMA";']
     ['<PAT>[ ]+'                                            , 'if ((yy.patDepth||0)===0) { this.begin("CMD"); return "CS"; }']
-    ['<PAT>\\r?\\n+'                                        , 'this.begin("INITIAL"); return "NEWLINE";']
+    ['<PAT>\\r?\\n+'                                        , 'yy._afterElse=false; this.begin("INITIAL"); return "NEWLINE";']
     ['<PAT>\\d+'                                            , 'return "P_NUM";']
     ['<PAT>\\.'                                             , 'return "P_DOT";']
     ['<PAT>[ACELNPU]'                                       , 'yytext = yytext.toUpperCase(); return "P_CODE";']
@@ -692,7 +692,7 @@ exports.lex =
     # WEXPR mode (after WRITE CS). Treat adorners specially, otherwise behave like EXPR.
     ['<WEXPR>;[^\\n]*'                                      , 'return "COMMENT";']
     ['<WEXPR>[ ]+'                                          , 'this.begin("CMD"); return "CS";']
-    ['<WEXPR>\\r?\\n+'                                      , 'yy._afterWrite=false; yy.wItemStart=false; yy.inPostcond=false; yy.exprDepth=0; this.begin("INITIAL"); return "NEWLINE";']
+    ['<WEXPR>\\r?\\n+'                                      , 'yy._afterWrite=false; yy._afterElse=false; yy.wItemStart=false; yy.inPostcond=false; yy.exprDepth=0; this.begin("INITIAL"); return "NEWLINE";']
 
     # depth + item tracking
     ['<WEXPR>\\('                                           , 'yy.exprDepth=(yy.exprDepth||0)+1; yy.wItemStart=false; return "LPAREN";']
@@ -788,6 +788,10 @@ exports.samples = '''
   . WRITE "then"
   ELSE
   . WRITE "else"
+
+  ; ---- ELSE  IF idiom (VistA style) ----
+  IF MODE=1  WRITE "mode1"  ELSE  IF MODE=2  WRITE "mode2"  ELSE  WRITE "other"
+  IF X  WRITE "t"  ELSE  IF 'X  WRITE "f"
 
   ; ---- GOTO with multiple targets and postcondition ----
   :X GOTO L1^R, ^R2, L3+2^R3

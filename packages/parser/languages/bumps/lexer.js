@@ -6,6 +6,7 @@ export class BumpsLexer {
     this.yy = {};
     this.tokens = [];
     this.cursor = 0;
+    this._afterElse = false;
   }
   setInput(input, yy) {
     this.yy = yy || {};
@@ -54,6 +55,7 @@ export class BumpsLexer {
         if (cmd) {
           out.push([cmd, word, this.loc(li, pos, li, pos + word.length)]);
           afterCommand = true;
+          this._afterElse = (cmd === 'ELSE');
         } else {
           out.push(['LABEL', word, this.loc(li, pos, li, pos + word.length)]);
         }
@@ -67,7 +69,14 @@ export class BumpsLexer {
         out.push(['CS', ws, this.loc(li, pos, li, pos + ws.length)]);
         pos += ws.length;
         line = line.slice(ws.length);
-        afterCmdSep = false; // entering expr args after a command, not chaining yet
+        // After ELSE, whitespace separates into a new command (ELSE  IF ...)
+        if (this._afterElse) {
+          afterCmdSep = true;
+          this._afterElse = false;
+        } else {
+          // entering expr args after a non-ELSE command, not chaining yet
+          afterCmdSep = false;
+        }
         afterCommand = false;
       }
       // Arguments / rest of line
@@ -243,6 +252,7 @@ export class BumpsLexer {
             if (chained) {
               out.push([chained, name, this.loc(li, pos, li, pos + name.length)]);
               afterCommand = true;
+              this._afterElse = (chained === 'ELSE');
               afterCmdSep = false;
               pos += name.length; line = line.slice(name.length); continue;
             }
@@ -288,6 +298,8 @@ export class BumpsLexer {
         pos += 1; line = line.slice(1);
       }
       out.push(['NEWLINE', '\n', this.loc(li, pos, li, pos)]);
+      // reset ELSE state each physical line
+      this._afterElse = false;
     }
     return out;
   }
