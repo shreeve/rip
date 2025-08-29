@@ -303,32 +303,33 @@ class BumpsLexer
 
   commandToken: (word) ->
     w = word.toLowerCase()
-    return 'SET' if w is 's' or w[0..2] is 'set'
-    return 'WRITE' if w is 'w' or w[0..1] is 'wr' or w[0..4] is 'write'
-    return 'READ' if w is 'r' or w[0..1] is 're' or w[0..3] is 'read'
-    return 'DO' if w is 'd' or w[0] is 'd'
-    return 'KILL' if w is 'k' or w[0..1] is 'ki' or w[0..3] is 'kill'
-    return 'NEW' if w is 'n' or w[0..1] is 'ne' or w[0..2] is 'new'
-    return 'GOTO' if w is 'g' or w[0..1] is 'go' or w[0..3] is 'goto'
-    return 'IF' if w is 'i' or w[0] is 'i'
-    return 'ELSE' if w is 'e' or w[0..1] is 'el' or w[0..3] is 'else'
-    return 'LOCK' if w is 'l' or w[0..1] is 'lo' or w[0..3] is 'lock'
-    return 'MERGE' if w is 'm' or w[0..1] is 'me' or w[0..4] is 'merge'
-    return 'BREAK' if w is 'b' or w[0..1] is 'br' or w[0..4] is 'break'
-    return 'CLOSE' if w is 'c' or w[0..1] is 'cl' or w[0..3] is 'close'
-    return 'FOR' if w is 'f' or w[0] is 'f'
-    return 'HALT' if w is 'halt'
+    return 'SET' if w in ['s','set']
+    return 'WRITE' if w in ['w','write']
+    return 'READ' if w in ['r','read']
+    return 'DO' if w in ['d','do']
+    return 'KILL' if w in ['k','kill']
+    return 'NEW' if w in ['n','new']
+    return 'GOTO' if w in ['g','goto']
+    return 'IF' if w in ['i','if']
+    return 'ELSE' if w in ['e','else']
+    return 'LOCK' if w in ['l','lock']
+    return 'MERGE' if w in ['m','merge']
+    return 'BREAK' if w in ['b','break']
+    return 'CLOSE' if w in ['c','close']
+    return 'FOR' if w in ['f','for']
+    return 'HALT' if w in ['h','halt']
     return 'HANG' if w is 'hang'
-    return 'JOB' if w is 'j' or w[0..1] is 'jo' or w[0..2] is 'job'
-    return 'OPEN' if w is 'o' or w[0] is 'o'
-    return 'QUIT' if w is 'q' or w[0] is 'q'
-    return 'USE' if w is 'u' or w[0] is 'u'
-    return 'VIEW' if w is 'v' or w[0] is 'v'
-    return 'XECUTE' if w is 'x' or w[0] is 'x'
-    return 'TSTART' if w is 'tstart'
-    return 'TCOMMIT' if w is 'tcommit'
-    return 'TROLLBACK' if w is 'trollback'
-    return 'TRESTART' if w is 'trestart'
+    return 'JOB' if w in ['j','job']
+    return 'OPEN' if w in ['o','open']
+    return 'QUIT' if w in ['q','quit']
+    return 'USE' if w in ['u','use']
+    return 'VIEW' if w in ['v','view']
+    return 'XECUTE' if w in ['x','xecute']
+    # Transaction commands with official multi-letter abbrevs
+    return 'TSTART' if w in ['tstart','ts']
+    return 'TCOMMIT' if w in ['tcommit','tc']
+    return 'TROLLBACK' if w in ['trollback','tro']
+    return 'TRESTART' if w in ['trestart','tre']
     return 'ZCOMMAND' if /^z[a-z][a-z0-9]*$/.test w
     null
 
