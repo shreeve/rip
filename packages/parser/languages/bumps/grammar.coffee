@@ -34,7 +34,7 @@ exports.startSymbol = 'program'
 
 # Operator precedence (low → high) with tighter unary
 exports.operators = [
-  ['left',  'OR']
+  ['left',  'OR','COMMA']  # COMMA acts as OR in MUMPS conditionals
   ['left',  'AND']
   ['left',  'PMATCH']
   ['left',  'GT','LT','GE','LE','EQ','NE']
@@ -503,6 +503,7 @@ exports.bnf =
     o 'expr MOD expr'    , '$$ = yy.node("BinOp", {op:"MOD",     lhs:$1, rhs:$3})'
     o 'expr AND expr'    , '$$ = yy.node("BinOp", {op:"AND",     lhs:$1, rhs:$3})'
     o 'expr OR expr'     , '$$ = yy.node("BinOp", {op:"OR",      lhs:$1, rhs:$3})'
+    o 'expr COMMA expr'  , '$$ = yy.node("BinOp", {op:"OR",      lhs:$1, rhs:$3})'  # Comma acts as OR in conditionals
     o 'expr CONCAT expr' , '$$ = yy.node("BinOp", {op:"CONCAT",  lhs:$1, rhs:$3})'
 
     # relations
@@ -935,6 +936,11 @@ exports.samples = '''
   ; ---- E (Everything) pattern class ----
   IF X?1.E  WRITE "has content"
   IF SSN?3N1"-"2N1"-"4N.E  WRITE "SSN-like"
+  
+  ; ---- Comma as logical OR in conditionals ----
+  IF A,B WRITE "A or B is true"
+  IF X=1,Y=2 WRITE "Either X=1 or Y=2"
+  IF 'A,B WRITE "Not A or B"
 
   ; ---- Numeric literal forms (int, frac, leading-dot, trailing-dot, exponent, unary) ----
   SET N1=123,N2=0,N3=.5,N4=10.,N5=3.14,N6=1E3,N7=5.67E-2,N8=-77,N9=+42,N10=-9E+4
