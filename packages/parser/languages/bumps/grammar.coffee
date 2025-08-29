@@ -522,11 +522,6 @@ exports.bnf =
     # pattern match (positive and negative operator forms)
     o 'expr PMATCH pattern'     , '$$ = yy.node("PatternMatch", {op:"PMATCH",  lhs:$1, pat:$3})'
     o 'expr NOT PMATCH pattern' , '$$ = yy.node("PatternMatch", {op:"NPMATCH", lhs:$1, pat:$4})'
-
-    # unary
-    o 'NOT expr %prec NOT'      , '$$ = yy.node("UnOp", {op:"NOT",    expr:$2})'
-    o 'PLUS expr %prec UPLUS'   , '$$ = yy.node("UnOp", {op:"UPLUS",  expr:$2})'
-    o 'MINUS expr %prec UMINUS' , '$$ = yy.node("UnOp", {op:"UMINUS", expr:$2})'
   ]
 
   primary: [
@@ -535,6 +530,10 @@ exports.bnf =
     o 'varref'             , '$$ = $1'
     o 'LPAREN expr RPAREN' , '$$ = $2'
     o 'dolfn_call'         , '$$ = $1'
+    # unary operators as primary
+    o 'NOT primary'        , '$$ = yy.node("UnOp", {op:"NOT",    expr:$2})'
+    o 'PLUS primary'       , '$$ = yy.node("UnOp", {op:"UPLUS",  expr:$2})'
+    o 'MINUS primary'      , '$$ = yy.node("UnOp", {op:"UMINUS", expr:$2})'
   ]
 
   # unified variable references
