@@ -161,20 +161,29 @@ formatFilename = (filePath, baseDir, maxLen = 50) ->
     relative
 
 # Main scanner
-scan = (targetDir) ->
+scan = (targetDir, opts = {}) ->
   targetDir = path.resolve targetDir
 
   console.log "#{BOLD}Scanning for MUMPS files in: #{targetDir}#{RESET}\n"
 
   # Find all MUMPS files
   files = findMumpsFiles targetDir
-  stats.totalFiles = files.length
+  foundCount = files.length
 
-  if files.length is 0
+  if foundCount is 0
     console.log "#{YELLOW}No MUMPS files found.#{RESET}"
     return
 
-  console.log "Found #{BLUE}#{files.length}#{RESET} MUMPS file(s)\n"
+  console.log "Found #{BLUE}#{foundCount}#{RESET} MUMPS file(s)\n"
+
+  # Optional: limit number of files to process
+  if opts?.maxFiles?
+    maxN = Math.max 0, Math.floor(+opts.maxFiles or 0)
+    if maxN > 0 and maxN < files.length
+      files = files.slice 0, maxN
+
+  # Track number of files we will actually process
+  stats.totalFiles = files.length
 
   # Table header
   header = [
@@ -236,14 +245,17 @@ main = ->
 
   if args.length is 0
     console.log """
-      #{BOLD}BUMPS Scanner - Parse all MUMPS files in a directory${RESET}
+      #{BOLD}BUMPS Scanner - Parse all MUMPS files in a directory#{RESET}
 
       Usage:
-        coffee scanner.coffee <directory>
+        coffee scanner.coffee <directory> [-n N]
+
+      Options:
+        -n N     Stop after processing N files
 
       Example:
         coffee scanner.coffee /usr/local/vista/r
-        coffee scanner.coffee ./test-routines
+        coffee scanner.coffee ./test-routines -n 100
 
       This will:
         - Recursively find all .m files
@@ -253,7 +265,22 @@ main = ->
     """
     process.exit 1
 
-  targetDir = args[0]
+  # Simple flag parsing for -n N
+  targetDir = null
+  maxFiles = null
+  i = 0
+  while i < args.length
+    a = args[i]
+    if a is '-n'
+      i++
+      maxFiles = parseInt(args[i] or '0', 10)
+    else if not targetDir
+      targetDir = a
+    i++
+
+  unless targetDir?
+    console.error "#{RED}Error: Directory not specified#{RESET}"
+    process.exit 1
 
   unless fs.existsSync targetDir
     console.error "#{RED}Error: Directory not found: #{targetDir}#{RESET}"
@@ -263,7 +290,7 @@ main = ->
     console.error "#{RED}Error: Not a directory: #{targetDir}#{RESET}"
     process.exit 1
 
-  scan targetDir
+  scan targetDir, { maxFiles }
 
 # Run if called directly
 main() if require.main is module
