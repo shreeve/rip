@@ -736,27 +736,18 @@ exports.samples = '''
 
 
 # Summary of changes:
-# 1) Add argless DO command and DO with postcondition but no arguments.
 # 2) Add TSTART/TCOMMIT/TROLLBACK/TRESTART command productions (with optional postconditions).
 # 3) Add tiny error-recovery rule to allow skipping to NEWLINE after unexpected token (if not already present).
 # 4) Defensive: ensure WRITE state flag clears when starting a new line in parser wrapper (see driver).
 
+# # 2) Transactions
+# for trcmd in ["TSTART","TCOMMIT","TROLLBACK","TRESTART"]
+#   o "cmd -> #{trcmd} postcond"
+#     , "$$ = yy.node('Cmd', {op:'#{trcmd}', pc:$2, args: yy.node('ArgsNONE', {})})"
+#   o "cmd -> #{trcmd}"
+#     , "$$ = yy.node('Cmd', {op:'#{trcmd}', pc:null, args: yy.node('ArgsNONE', {})})"
 
-# 1) Argless DO (with/without postcondition)
-o 'cmd -> DO postcond'
-  , '$$ = yy.node("Cmd", {op:"DO", pc:$2, args: yy.node("ArgsENTRY", {targets: []})})'
-
-o 'cmd -> DO'
-  , '$$ = yy.node("Cmd", {op:"DO", pc:null, args: yy.node("ArgsENTRY", {targets: []})})'
-
-# 2) Transactions
-for trcmd in ["TSTART","TCOMMIT","TROLLBACK","TRESTART"]
-  o "cmd -> #{trcmd} postcond"
-    , "$$ = yy.node('Cmd', {op:'#{trcmd}', pc:$2, args: yy.node('ArgsNONE', {})})"
-  o "cmd -> #{trcmd}"
-    , "$$ = yy.node('Cmd', {op:'#{trcmd}', pc:null, args: yy.node('ArgsNONE', {})})"
-
-# 3) Simple error recovery: allow a bad token to be skipped until NEWLINE
-#    (only activates if 'bad' nonterminal is referenced; harmless otherwise)
-o 'line -> error NEWLINE'
-  , '$$ = yy.node("LineError", {})'
+# # 3) Simple error recovery: allow a bad token to be skipped until NEWLINE
+# #    (only activates if 'bad' nonterminal is referenced; harmless otherwise)
+# o 'line -> error NEWLINE'
+#   , '$$ = yy.node("LineError", {})'
