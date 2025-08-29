@@ -241,6 +241,12 @@ exports.bnf =
     o 'ZCOMMAND CS exprlist'          , '$$ = yy.node("Cmd", {pc: null, op: $1, args: $3})'
     o 'ZCOMMAND'                      , '$$ = yy.node("Cmd", {pc: null, op: $1, args: []})'
 
+    # Indirect command execution (ELSE IF already chains; here we allow @NAME and @(expr) as a command)
+    o 'AT NAME CS exprlist'              , '$$ = yy.node("Cmd", {pc: null, op: "INDIRECT", args: yy.node("ArgsINDIRECT", {target: yy.node("Indirect", {kind:"name", target:$2}), args:$4})})'
+    o 'AT NAME'                          , '$$ = yy.node("Cmd", {pc: null, op: "INDIRECT", args: yy.node("ArgsINDIRECT", {target: yy.node("Indirect", {kind:"name", target:$2}), args:[]})})'
+    o 'AT LPAREN expr RPAREN CS exprlist', '$$ = yy.node("Cmd", {pc: null, op: "INDIRECT", args: yy.node("ArgsINDIRECT", {target: yy.node("Indirect", {kind:"expr", target:$3}), args:$6})})'
+    o 'AT LPAREN expr RPAREN'            , '$$ = yy.node("Cmd", {pc: null, op: "INDIRECT", args: yy.node("ArgsINDIRECT", {target: yy.node("Indirect", {kind:"expr", target:$3}), args:[]})})'
+
     # KILL
     o 'KILL postcond CS kill_items' , '$$ = yy.node("Cmd", {pc: $2, op: "KILL",  args: yy.node("ArgsKILL", {items: $4})})'
     o 'KILL CS kill_items'          , '$$ = yy.node("Cmd", {pc: null, op: "KILL", args: yy.node("ArgsKILL", {items: $3})})'
@@ -388,6 +394,10 @@ exports.bnf =
   lock_item: [
     o 'lvalue'            , '$$ = yy.node("LockItem", {res: $1, timeout: null})'
     o 'lvalue COLON expr' , '$$ = yy.node("LockItem", {res: $1, timeout: $3})'
+    o 'PLUS lvalue'                 , '$$ = yy.node("LockItem", {res: $2, timeout: null, delta: "inc"})'
+    o 'PLUS lvalue COLON expr'      , '$$ = yy.node("LockItem", {res: $2, timeout: $4,   delta: "inc"})'
+    o 'MINUS lvalue'                , '$$ = yy.node("LockItem", {res: $2, timeout: null, delta: "dec"})'
+    o 'MINUS lvalue COLON expr'     , '$$ = yy.node("LockItem", {res: $2, timeout: $4,   delta: "dec"})'
   ]
 
   # MERGE

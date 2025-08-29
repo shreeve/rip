@@ -71,6 +71,9 @@ class BumpsLexer
         pos += ws.length
         line = line[ws.length..]
         if @_afterElse
+          # Enforce two or more spaces after ELSE for chaining (lint only):
+          if ws.length < 2 and @yy?.lints?
+            @yy.lints.push { kind:'ELSE_SPACE', line: li+1, column: pos-ws.length, message: 'ELSE should be followed by two or more spaces before next command' }
           afterCmdSep = true
           @_afterElse = false
         else if @_afterWrite
@@ -300,28 +303,28 @@ class BumpsLexer
 
   commandToken: (word) ->
     w = word.toLowerCase()
-    return 'SET' if w in ['set','s']
-    return 'WRITE' if w in ['write','w']
-    return 'READ' if w in ['read','r']
-    return 'DO' if w in ['do','d']
-    return 'KILL' if w in ['kill','k']
-    return 'NEW' if w in ['new','n']
-    return 'GOTO' if w in ['goto','g']
-    return 'IF' if w in ['if','i']
-    return 'ELSE' if w in ['else','e']
-    return 'LOCK' if w in ['lock','l']
-    return 'MERGE' if w in ['merge','m']
-    return 'BREAK' if w in ['break','b']
-    return 'CLOSE' if w in ['close','c']
-    return 'FOR' if w in ['for','f']
+    return 'SET' if w is 's' or w[0..2] is 'set'
+    return 'WRITE' if w is 'w' or w[0..1] is 'wr' or w[0..4] is 'write'
+    return 'READ' if w is 'r' or w[0..1] is 're' or w[0..3] is 'read'
+    return 'DO' if w is 'd' or w[0] is 'd'
+    return 'KILL' if w is 'k' or w[0..1] is 'ki' or w[0..3] is 'kill'
+    return 'NEW' if w is 'n' or w[0..1] is 'ne' or w[0..2] is 'new'
+    return 'GOTO' if w is 'g' or w[0..1] is 'go' or w[0..3] is 'goto'
+    return 'IF' if w is 'i' or w[0] is 'i'
+    return 'ELSE' if w is 'e' or w[0..1] is 'el' or w[0..3] is 'else'
+    return 'LOCK' if w is 'l' or w[0..1] is 'lo' or w[0..3] is 'lock'
+    return 'MERGE' if w is 'm' or w[0..1] is 'me' or w[0..4] is 'merge'
+    return 'BREAK' if w is 'b' or w[0..1] is 'br' or w[0..4] is 'break'
+    return 'CLOSE' if w is 'c' or w[0..1] is 'cl' or w[0..3] is 'close'
+    return 'FOR' if w is 'f' or w[0] is 'f'
     return 'HALT' if w is 'halt'
     return 'HANG' if w is 'hang'
-    return 'JOB' if w in ['job','j']
-    return 'OPEN' if w in ['open','o']
-    return 'QUIT' if w in ['quit','q']
-    return 'USE' if w in ['use','u']
-    return 'VIEW' if w in ['view','v']
-    return 'XECUTE' if w in ['xecute','x']
+    return 'JOB' if w is 'j' or w[0..1] is 'jo' or w[0..2] is 'job'
+    return 'OPEN' if w is 'o' or w[0] is 'o'
+    return 'QUIT' if w is 'q' or w[0] is 'q'
+    return 'USE' if w is 'u' or w[0] is 'u'
+    return 'VIEW' if w is 'v' or w[0] is 'v'
+    return 'XECUTE' if w is 'x' or w[0] is 'x'
     return 'TSTART' if w is 'tstart'
     return 'TCOMMIT' if w is 'tcommit'
     return 'TROLLBACK' if w is 'trollback'
