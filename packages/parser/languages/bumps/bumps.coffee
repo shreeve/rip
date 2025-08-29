@@ -756,6 +756,97 @@ exports.samples = '''
   SET X=^|"NS"|G(1)
   ^("a","b")  SET Y=1
   ..WRITE "indented"
+
+  ; ---- Labels and formals ----
+  START(A,B)
+  . WRITE "FORMALS:",A,",",B
+
+  ; ---- Command chaining & postcondition ----
+  SET A=1  WRITE "X",!  READ B:5
+  :A>0 SET C=2  WRITE "pc ok"
+
+  ; ---- WRITE adorners at WEXPR top-level ----
+  WRITE *65, ?5, #, /123
+
+  ; ---- READ with timeouts ----
+  READ X:1,Y
+
+  ; ---- NEW with names, indirection, and grouping ----
+  NEW A,@B,(C,@(D+1))
+
+  ; ---- KILL with nested groups and indirection ----
+  KILL (A,B),^G("x"),@(N)
+  KILL (^G("") , ^G("A",""), @("X"))
+
+  ; ---- LOCK with mixed timeouts ----
+  LOCK A:1,^G(1),B:Z+1
+
+  ; ---- MERGE simple and multi-target shorthand ----
+  MERGE A=B
+  MERGE (A,^G(1),@H)=@(S+1)
+
+  ; ---- DO entryrefs (label^routine, routine-only) and argless DO ----
+  DO L1^R1(1,2), ^R2
+  DO
+  . WRITE "after DO"
+
+  ; ---- IF/ELSE dot-indented block ----
+  IF 1
+  . WRITE "then"
+  ELSE
+  . WRITE "else"
+
+  ; ---- GOTO with multiple targets and postcondition ----
+  :X GOTO L1^R, ^R2, L3+2^R3
+
+  ; ---- HALT / BREAK / QUIT / HANG ----
+  HALT
+  BREAK
+  QUIT 1
+  HANG 2
+
+  ; ---- OPEN / USE / VIEW / CLOSE device params ----
+  OPEN "D":0:1, "E":2
+  USE "D":1
+  VIEW "A","B"
+  CLOSE "D","E"
+
+  ; ---- XECUTE with string and indirection ----
+  XECUTE "W \"HI\""
+  XECUTE @X
+
+  ; ---- Dollar functions and $Z- functions / variables ----
+  SET P=$PIECE(S,":",1,3)
+  SET Z=$ZDATE(12345)
+
+  ; ---- Indirection on LHS (SET target) ----
+  SET @X=1,@(Y+1)=2
+
+  ; ---- SET-only LHS helpers ($PIECE/$EXTRACT assignment) ----
+  SET $PIECE(S,":",1,2)=42
+  SET $EXTRACT(S,1,2)=42
+
+  ; ---- Pattern matches (class sets, groups, literals) ----
+  WRITE X?2AN(1"-")3AL
+  IF T?1.2("ok",1U) WRITE "pat"
+
+  ; ---- Extended globals and naked references ----
+  SET ^|"ENV"|G(1,2)=3
+  ^(1,2)  SET Z=9
+
+  ; ---- Entryref with negative offset ----
+  DO L-1^ROUT(5)
+
+  ; ---- FOR headers (single/multi) with optional step ----
+  FOR I=1:10
+  FOR I=1:1:3,J=0:2:4
+
+  ; ---- JOB variants: entryref + device params ----
+  JOB ^RTN:5:"OPT"
+  JOB LABEL^RTN(1,2):0:1, ^RTN2:5
+
+  ; ---- Z-commands (vendor) ----
+  ZTEST 1,2
 '''
   .split '\n'
   .map (s) -> s.trim()
