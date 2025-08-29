@@ -7,10 +7,10 @@ require('../../../../../coffeescript/register.js');
 (async () => {
   const { BumpsLexer } = require('../lexer.coffee');
   const { parsePattern } = require('../patterns.coffee');
-  
+
   // Test the E (Everything) pattern class
   const samples = [
-    { 
+    {
       src: 'IF X?1E\n',
       desc: 'Single E (exactly one of anything)',
       check(pat) {
@@ -22,7 +22,7 @@ require('../../../../../coffeescript/register.js');
       }
     },
     {
-      src: 'IF X?.E\n', 
+      src: 'IF X?.E\n',
       desc: 'Zero or more of everything',
       check(pat) {
         assert.equal(pat.items[0].type, 'Class');
@@ -69,10 +69,10 @@ require('../../../../../coffeescript/register.js');
       }
     }
   ];
-  
+
   let passed = 0;
   let failed = 0;
-  
+
   for (const sample of samples) {
     const { src, desc, check } = sample;
     const lex = new BumpsLexer();
@@ -84,7 +84,7 @@ require('../../../../../coffeescript/register.js');
       lex(){ if(this.i>=this.all.length) return 1; const [t,v,l]=this.all[this.i++]; this.yytext=String(v??t); this.yyleng=this.yytext.length; this.yylloc=l||{}; this.yylineno=this.yylloc.first_line||0; return t; },
       showPosition(){ return ''; }
     };
-    
+
     try {
       const ast = parserMod.parse(src);
       const ifCmd = ast.lines[0].cmds[0];
@@ -98,7 +98,7 @@ require('../../../../../coffeescript/register.js');
       failed++;
     }
   }
-  
+
   console.log(`\n${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);
 })().catch(e => { console.error('FAIL', e); process.exit(1); });

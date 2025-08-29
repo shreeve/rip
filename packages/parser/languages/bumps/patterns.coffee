@@ -42,7 +42,7 @@ parsePattern = (input) ->
         return {min: 0, max}
       # Just a dot means unlimited (0 or more)
       return {min: 0, max: undefined}
-    
+
     return null unless isDigit(peek())
     min = readNumber()
     if peek() is '.'

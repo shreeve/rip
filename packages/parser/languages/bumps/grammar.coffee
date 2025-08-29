@@ -933,7 +933,7 @@ exports.samples = '''
 
   ; ---- Negated pattern IF ----
   IF S'?3A.1N  WRITE "bad"
-  
+
   ; ---- E (Everything) pattern class ----
   IF X?1.E  WRITE "has content"
   IF SSN?3N1"-"2N1"-"4N.E  WRITE "SSN-like"
