@@ -1,6 +1,9 @@
 # bumps.coffee — SLR(1) grammar for M (MUMPS)
 #
 # Notes:
+# - ELSE semantics (GT.M/VistA): ELSE/E takes effect based on $TEST and **does not support a postconditional**;
+#   its scope is the remainder of the line (can be extended by DO/XECUTE). Source: GT.M PG "Else".
+
 # - Mirrors CoffeeScript’s `grammar.coffee` structure (small `o()` helper, `exports.bnf`, `exports.operators`, `exports.lex`).
 # - Assumes a stateful lexer with CMD/EXPR modes so keywords aren’t reserved and command spacing is honored.
 # - Keeps M’s uniform, left‑to‑right precedence by putting all binary ops in the same `left` tier; unary handled with higher precedence.
@@ -310,6 +313,9 @@ exports.bnf =
     o 'NAME PLUS NUMBER CARET NAME opt_entryargs'  , '$$ = yy.node("EntryRef", {label: $1, routine: $5,  offset: +$3, args: $6})'
     o 'NAME MINUS NUMBER CARET NAME opt_entryargs' , '$$ = yy.node("EntryRef", {label: $1, routine: $5,  offset: -$3, args: $6})'
     o 'CARET NAME opt_entryargs'                   , '$$ = yy.node("EntryRef", {label: null, routine: $2, offset: null, args: $3})'
+  
+    o 'AT NAME opt_entryargs'                      , '$$ = yy.node("EntryRef", {label: null, routine: null, offset: null, args: $3, indirect: yy.node("Indirect", {kind: "name", target: $2})})'
+    o 'AT LPAREN expr RPAREN opt_entryargs'        , '$$ = yy.node("EntryRef", {label: null, routine: null, offset: null, args: $5, indirect: yy.node("Indirect", {kind: "expr", target: $3})})'
   ]
   opt_entryargs: [
     o 'LPAREN exprlist RPAREN' , '$$ = $2'
