@@ -296,12 +296,11 @@ exports.bnf =
     o 'DO postcond'                  , '$$ = yy.node("Cmd", {pc: $2, op: "DO",    args: yy.node("ArgsENTRY", {targets: []})})'
     o 'DO'                           , '$$ = yy.node("Cmd", {pc: null, op: "DO",  args: yy.node("ArgsENTRY", {targets: []})})'
 
-    # IF (expr required)
-    o 'IF postcond CS expr' , '$$ = yy.node("If", {pc: $2, cond: $4})'
-    o 'IF CS expr'          , '$$ = yy.node("If", {pc: null, cond: $3})'
+    # IF (expr required, no postcond - that's handled by cmd wrapper)
+    o 'IF CS expr'                  , '$$ = yy.node("If", {pc: null, cond: $3})'
 
     # ELSE (argless)
-    o 'ELSE' , '$$ = yy.node("Else", {pc: null})'
+    o 'ELSE'                        , '$$ = yy.node("Else", {pc: null})'
 
     # LOCK / MERGE
     o 'LOCK postcond CS lock_items' , '$$ = yy.node("Cmd", {pc: $2, op: "LOCK",  args: $4})'
