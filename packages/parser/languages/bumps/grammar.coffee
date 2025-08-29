@@ -498,8 +498,10 @@ exports.bnf =
   ]
 
   dolfn_call: [
+    o 'DOLFN'                        , '$$ = yy.node("DollarFn", {name: $1, args: []})'
     o 'DOLFN LPAREN exprlist RPAREN'  , '$$ = yy.node("DollarFn", {name: $1, args: $3})'
     o 'DOLSPECVAR'                    , '$$ = yy.node("DollarVar", {name: $1})'
+    o 'ZDOLFN'                       , '$$ = yy.node("DollarFn", {name: $1, zext: true, args: []})'
     o 'ZDOLFN LPAREN exprlist RPAREN' , '$$ = yy.node("DollarFn", {name: $1, zext: true, args: $3})'
   ]
 
