@@ -670,7 +670,7 @@ exports.lex =
     ["<EXPR>'"                                              , 'return "NOT";']
 
     # atoms (EXPR)
-    ['<EXPR>\\d+(?:\\.\\d+)?'                               , 'return "NUMBER";']
+    ['<EXPR>(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?'       , 'return "NUMBER";']
     ['<EXPR>\\"(?:\\"\\"|[^\\"])*\\"'                       , 'return "STRING";']
     ['<EXPR>\\$z[a-z][a-z0-9]*\\b'                          , 'yytext = yytext.slice(2).toUpperCase(); return "ZDOLFN";']
     # DOLSPECVAR (writable subset; device/system gated by options)
@@ -725,21 +725,22 @@ exports.lex =
     ['<WEXPR><'                                             , 'yy.wItemStart=false; return "LT";']
     ["<WEXPR>'="                                            , 'yy.wItemStart=false; return "NE";']
     ['<WEXPR>='                                             , 'yy.wItemStart=false; return "EQ";']
-    ["<WEXPR>'\\["                                        , 'yy.wItemStart=false; return "NCONTAINS";']
-    ['<WEXPR>\\['                                         , 'yy.wItemStart=false; return "CONTAINS";']
-    ["<WEXPR>\\]'"                                        , 'yy.wItemStart=false; return "NFOLLOWS";']
-    ['<WEXPR>\\]'                                         , 'yy.wItemStart=false; return "FOLLOWS";']
-    ["<WEXPR>\\]\\]'"                                     , 'yy.wItemStart=false; return "NSORTAFTER";']
-    ['<WEXPR>\\]\\]'                                      , 'yy.wItemStart=false; return "SORTAFTER";']
-    ["<WEXPR>'"                                           , 'yy.wItemStart=false; return "NOT";']
+    ["<WEXPR>'\\["                                          , 'yy.wItemStart=false; return "NCONTAINS";']
+    ['<WEXPR>\\['                                           , 'yy.wItemStart=false; return "CONTAINS";']
+    ["<WEXPR>\\]'"                                          , 'yy.wItemStart=false; return "NFOLLOWS";']
+    ['<WEXPR>\\]'                                           , 'yy.wItemStart=false; return "FOLLOWS";']
+    ["<WEXPR>\\]\\]'"                                       , 'yy.wItemStart=false; return "NSORTAFTER";']
+    ['<WEXPR>\\]\\]'                                        , 'yy.wItemStart=false; return "SORTAFTER";']
+    ["<WEXPR>'"                                             , 'yy.wItemStart=false; return "NOT";']
 
-    ['<WEXPR>\\d+(?:\\.\\d+)?'                            , 'yy.wItemStart=false; return "NUMBER";']
-    ['<WEXPR>\\"(?:\\"\\"|[^\\"])*\\"'                     , 'yy.wItemStart=false; return "STRING";']
-    ['<WEXPR>\\$z[a-z][a-z0-9]*\\b'                        , 'yy.wItemStart=false; yytext = yytext.slice(2).toUpperCase(); return "ZDOLFN";']
+    ['<WEXPR>(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?'      , 'yy.wItemStart=false; return "NUMBER";']
+    ['<WEXPR>\\"(?:\\"\\"|[^\\"])*\\"'                      , 'yy.wItemStart=false; return "STRING";']
+    ['<WEXPR>\\$z[a-z][a-z0-9]*\\b'                         , 'yy.wItemStart=false; yytext = yytext.slice(2).toUpperCase(); return "ZDOLFN";']
+
     # DOLSPECVAR again (device/system gated by options)
     ['<WEXPR>\\$(?:X|Y|ECODE|ETRAP|IO|DEVICE|SYSTEM)\\b'    , 'yy.wItemStart=false; var nm=yytext.slice(1).toUpperCase(); var opts=(yy&&yy.options)||{}; var allow=false; if(nm==="X"||nm==="Y"||nm==="ECODE"||nm==="ETRAP"){allow=true;} else if(nm==="IO"||nm==="DEVICE"){allow=!!opts.allowWritableDeviceVars;} else if(nm==="SYSTEM"){allow=!!opts.allowWritableSystemVar;} yytext=nm; return allow ? "DOLSPECVAR" : "DOLFN";']
-    ['<WEXPR>\\$[a-z][a-z0-9]*\\b'                         , 'yy.wItemStart=false; yytext = yytext.slice(1).toUpperCase(); return "DOLFN";']
-    ['<WEXPR>[A-Za-z%][A-Za-z0-9]*'                        , 'yy.wItemStart=false; return "NAME";']
+    ['<WEXPR>\\$[a-z][a-z0-9]*\\b'                          , 'yy.wItemStart=false; yytext = yytext.slice(1).toUpperCase(); return "DOLFN";']
+    ['<WEXPR>[A-Za-z%][A-Za-z0-9]*'                         , 'yy.wItemStart=false; return "NAME";']
   ]
 
 # -------------------------- samples --------------------------
