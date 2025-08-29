@@ -111,6 +111,7 @@ exports.bnf =
   line: [
     o 'line_hdr opt_cmds opt_comment' , '$$ = Object.assign($1, {cmds: $2, comment: $3 || null})'
     o 'line_hdr opt_comment'          , '$$ = Object.assign($1, {cmds: [], comment: $2 || null})'
+    o 'error'                          , '$$ = yy.node("LineError", {})'
   ]
 
   line_hdr: [
