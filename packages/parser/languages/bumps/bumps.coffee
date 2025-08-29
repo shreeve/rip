@@ -745,12 +745,13 @@ exports.lex =
 # -------------------------- samples --------------------------
 
 exports.samples = '''
-  SET SET=1 ; NOTE: Interesting... is "SET" a label or a command???
-  IF S'?3A.1N  W "bad"
 
   ; ---- Labels and formals ----
   START(A,B)
   . WRITE "FORMALS:",A,",",B
+
+  ; ---- Basic SET with end-of-line comment ----
+  SET SET=1  ; variable named SET, with trailing comment
 
   ; ---- Command chaining & postcondition ----
   SET A=1  WRITE "X",!  READ B:5
@@ -820,6 +821,9 @@ exports.samples = '''
   ; ---- Pattern matches (class sets, groups, literals) ----
   WRITE X?2AN(1"-")3AL
   IF T?1.2("ok",1U) WRITE "pat"
+
+  ; ---- Negated pattern IF ----
+  IF S'?3A.1N  WRITE "bad"
 
   ; ---- Extended globals and naked references ----
   SET ^|"ENV"|G(1,2)=3
