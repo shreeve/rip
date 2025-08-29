@@ -61,7 +61,7 @@ exports.tokens = [
   'PMATCH'
 
   # Pattern tokens (PAT mode)
-  'P_NUM','P_CODE','P_DOT'
+  'P_NUM','P_CODE','P_DOT','PATTERN'
 
   # WRITE adornments (WEXPR mode)
   'WBANG','WTAB','WPOUND','WSTAR','WSLASH'
@@ -175,8 +175,8 @@ exports.bnf =
     o 'READ CS read_list'          , '$$ = yy.node("Cmd", {pc: null, op: "READ", args: $3})'
 
     # NEW
-    o 'NEW postcond CS name_list' , '$$ = yy.node("Cmd", {pc: $2, op: "NEW",   args: $4})'
-    o 'NEW CS name_list'          , '$$ = yy.node("Cmd", {pc: null, op: "NEW", args: $3})'
+    o 'NEW postcond CS name_list' , '$$ = yy.node("Cmd", {pc: $2, op: "NEW",   args: yy.node("ArgsNEW", {names: $4})})'
+    o 'NEW CS name_list'          , '$$ = yy.node("Cmd", {pc: null, op: "NEW", args: yy.node("ArgsNEW", {names: $3})})'
 
     # OPEN (device params)
     o 'OPEN postcond CS device_args' , '$$ = yy.node("Cmd", {pc: $2, op: "OPEN", args: $4})'
@@ -193,6 +193,23 @@ exports.bnf =
     # XECUTE (exprlist)
     o 'XECUTE postcond CS exprlist' , '$$ = yy.node("Cmd", {pc: $2, op: "XECUTE", args: $4})'
     o 'XECUTE CS exprlist'          , '$$ = yy.node("Cmd", {pc: null, op: "XECUTE", args: $3})'
+
+    # Transactions
+    o 'TSTART postcond CS exprlist' , '$$ = yy.node("Cmd", {pc: $2, op: "TSTART",   args: $4})'
+    o 'TSTART CS exprlist'          , '$$ = yy.node("Cmd", {pc: null, op: "TSTART", args: $3})'
+    o 'TSTART postcond'             , '$$ = yy.node("Cmd", {pc: $2, op: "TSTART",   args: []})'
+    o 'TSTART'                      , '$$ = yy.node("Cmd", {pc: null, op: "TSTART", args: []})'
+
+    o 'TCOMMIT postcond'            , '$$ = yy.node("Cmd", {pc: $2, op: "TCOMMIT", args: []})'
+    o 'TCOMMIT'                     , '$$ = yy.node("Cmd", {pc: null, op: "TCOMMIT", args: []})'
+
+    o 'TROLLBACK postcond'          , '$$ = yy.node("Cmd", {pc: $2, op: "TROLLBACK", args: []})'
+    o 'TROLLBACK'                   , '$$ = yy.node("Cmd", {pc: null, op: "TROLLBACK", args: []})'
+
+    o 'TRESTART postcond CS exprlist' , '$$ = yy.node("Cmd", {pc: $2, op: "TRESTART",   args: $4})'
+    o 'TRESTART CS exprlist'          , '$$ = yy.node("Cmd", {pc: null, op: "TRESTART", args: $3})'
+    o 'TRESTART postcond'             , '$$ = yy.node("Cmd", {pc: $2, op: "TRESTART",   args: []})'
+    o 'TRESTART'                      , '$$ = yy.node("Cmd", {pc: null, op: "TRESTART", args: []})'
 
     # CLOSE (device params)
     o 'CLOSE postcond CS device_args' , '$$ = yy.node("Cmd", {pc: $2, op: "CLOSE", args: $4})'
@@ -301,7 +318,13 @@ exports.bnf =
   # NEW
   name_list: [
     o 'NAME'                 , '$$ = [$1]'
+    o 'AT NAME'              , '$$ = [ yy.node("Indirect", {kind:"name", target:$2}) ]'
+    o 'AT LPAREN expr RPAREN', '$$ = [ yy.node("Indirect", {kind:"expr", target:$3}) ]'
+    o 'LPAREN name_list RPAREN' , '$$ = $2'
     o 'name_list COMMA NAME' , '$1.push($3); $$ = $1'
+    o 'name_list COMMA AT NAME' , '$1.push(yy.node("Indirect", {kind:"name", target:$4})); $$ = $1'
+    o 'name_list COMMA AT LPAREN expr RPAREN' , '$1.push(yy.node("Indirect", {kind:"expr", target:$5})); $$ = $1'
+    o 'name_list COMMA LPAREN name_list RPAREN' , '$1.push.apply($1,$4); $$ = $1'
   ]
 
   # DO / GOTO share entryref_list
@@ -336,7 +359,7 @@ exports.bnf =
     o 'WPOUND'      , '$$ = yy.node("WFF",     {})'
     o 'WSTAR expr'  , '$$ = yy.node("WAscii",  {expr: $2})'
     o 'WSLASH expr' , '$$ = yy.node("WFormat", {expr: $2})'
-    o 'expr'        , '$$ = yy.node("WExpr",   {expr: $1})'
+    o 'expr'        , '$$ = ($1 && $1.type === "PatternMatch") ? $1 : yy.node("WExpr", {expr: $1})'
   ]
 
   # READ
@@ -502,7 +525,10 @@ exports.bnf =
   ]
 
   # ---- Pattern subgrammar ----
-  pattern: [ o 'pat_seq', '$$ = yy.node("Pattern", {atoms: $1})' ]
+  pattern: [
+    o 'pat_seq'  , '$$ = yy.node("Pattern", {atoms: $1})'
+    o 'PATTERN'  , '$$ = (yy.parsePattern ? yy.parsePattern(yytext) : yy.node("PatternRaw", {src: yytext}))'
+  ]
 
   pat_seq: [
     o 'pat_seq pat_atom' , '$1.push($2); $$ = $1'

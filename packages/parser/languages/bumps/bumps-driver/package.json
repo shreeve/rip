@@ -1,0 +1,14 @@
+{
+  "name": "bumps-driver",
+  "version": "0.0.1",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start": "node driver.js samples.m",
+    "parse": "node driver.js"
+  },
+  "dependencies": {
+    "coffeescript": "^2.7.0",
+    "jison": "^0.4.18"
+  }
+}
