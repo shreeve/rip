@@ -836,6 +836,10 @@ exports.samples = '''
   ; ---- Negated pattern IF ----
   IF S'?3A.1N  WRITE "bad"
 
+  ; ---- Numeric literal forms (int, frac, leading-dot, trailing-dot, exponent, unary) ----
+  SET N1=123,N2=0,N3=.5,N4=10.,N5=3.14,N6=1E3,N7=5.67E-2,N8=-77,N9=+42,N10=-9E+4
+  WRITE N1,N2,N3,N4,N5,N6,N7,N8,N9,N10
+
   ; ---- Extended globals and naked references ----
   SET ^|"ENV"|G(1,2)=3
   ^(1,2)  SET Z=9
