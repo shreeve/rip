@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
 const assert = require('assert');
-const parserMod = require('../parser.cjs');
+const parserMod = require('../parser.js');
 require('../../../../../coffeescript/register.js');
 
 (async () => {
-  const { BumpsLexer } = await import('../lexer.js');
-  const { parsePattern } = require('../patterns.cjs');
+  const { BumpsLexer } = require('../lexer.coffee');
+  const { parsePattern } = require('../patterns.coffee');
   const samples = [
     { src: 'IF X?0A\n', expect: (pat)=>{ const a=pat.items[0]; assert.equal(a.min,0); assert.equal(a.max,0); } },
     { src: 'IF X?0.3N\n', expect: (pat)=>{ const a=pat.items[0]; assert.equal(a.min,0); assert.equal(a.max,3); } },

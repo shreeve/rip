@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 const assert = require('assert');
-const parserMod = require('../parser.cjs');
+const parserMod = require('../parser.js');
 require('../../../../../coffeescript/register.js');
 
 (function () {

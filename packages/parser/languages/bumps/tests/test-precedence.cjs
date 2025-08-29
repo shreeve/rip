@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
 const assert = require('assert');
-const parserMod = require('../parser.cjs');
+const parserMod = require('../parser.js');
 require('../../../../../coffeescript/register.js');
 const { attachBlocks } = require('../blocks.coffee');
 
 (async () => {
-  const { BumpsLexer } = await import('../lexer.js');
+  const { BumpsLexer } = require('../lexer.coffee');
   const src = 'SET X=1+2*3, Y=2**3+1, B=1_2_3, C=1&0!1\n';
   const lex = new BumpsLexer();
   const toks = lex.tokenize(src);

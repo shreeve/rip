@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 
 const assert = require('assert');
-const parserMod = require('../parser.cjs');
+const parserMod = require('../parser.js');
 require('../../../../../coffeescript/register.js');
 const { attachBlocks } = require('../blocks.coffee');
 const { BumpsRewriter } = require('../rewriter.coffee');
 
 (async () => {
-  const { BumpsLexer } = await import('../lexer.js');
+  const { BumpsLexer } = require('../lexer.coffee');
   const src = 'IF 1\n. WRITE "OK"\nELSE\n. WRITE "NO"\n';
   const lex = new BumpsLexer();
   const toks = lex.tokenize(src);

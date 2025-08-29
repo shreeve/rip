@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 
 const assert = require('assert');
-const parserMod = require('../parser.cjs');
+const parserMod = require('../parser.js');
 require('../../../../../coffeescript/register.js');
 
 (async () => {
-  const { BumpsLexer } = await import('../lexer.js');
+  const { BumpsLexer } = require('../lexer.coffee');
   const src = 'SET X=1 W X?2AN(1"-")3AL\n';
   const lex = new BumpsLexer();
-  const { parsePattern } = require('../patterns.cjs');
+  const { parsePattern } = require('../patterns.coffee');
   const toks = lex.tokenize(src);
   const p = parserMod.parser;
   p.tokens = toks; p.yy = { node: (t,p)=>({type:t,...(p||{})}), parsePattern };

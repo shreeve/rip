@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
 const assert = require('assert');
-const parserMod = require('../parser.cjs');
+const parserMod = require('../parser.js');
 require('../../../../../coffeescript/register.js');
 
 (async () => {
-  const { BumpsLexer } = await import('../lexer.js');
+  const { BumpsLexer } = require('../lexer.coffee');
   const src = 'SET X=1\nIF X]1\n. WRITE "FOLLOWS"\nIF X?[1N]\n. WRITE "PATTERN"\n';
   const lex = new BumpsLexer();
   const toks = lex.tokenize(src);
