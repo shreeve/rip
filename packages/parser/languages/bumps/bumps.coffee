@@ -32,11 +32,17 @@ o = (pattern, action = '', opts = undefined) ->
 # -------------------------- grammar --------------------------
 exports.startSymbol = 'program'
 
-# Flat binary precedence (left) + tighter unary (right)
+# Operator precedence (low → high) with tighter unary
 exports.operators = [
-  ['left',  'OR','AND','CONCAT','GT','LT','GE','LE','EQ','NE'
-            'CONTAINS','NCONTAINS','FOLLOWS','NFOLLOWS','SORTAFTER','NSORTAFTER'
-            'PLUS','MINUS','MUL','DIV','IDIV','MOD','EXP','PMATCH']
+  ['left',  'OR']
+  ['left',  'AND']
+  ['left',  'PMATCH']
+  ['left',  'GT','LT','GE','LE','EQ','NE']
+  ['left',  'CONTAINS','NCONTAINS','FOLLOWS','NFOLLOWS','SORTAFTER','NSORTAFTER']
+  ['left',  'CONCAT']
+  ['left',  'PLUS','MINUS']
+  ['left',  'MUL','DIV','IDIV','MOD']
+  ['right', 'EXP']
   ['right', 'UPLUS','UMINUS','NOT']
 ]
 
