@@ -760,9 +760,3 @@ exports.samples = '''
   .split '\n'
   .map (s) -> s.trim()
   .filter (s) -> s.length
-
-# # 3) Simple error recovery: allow a bad token to be skipped until NEWLINE
-# #    (only activates if 'bad' nonterminal is referenced; harmless otherwise)
-# o 'line -> error NEWLINE', '$$ = yy.node("LineError", {})'
-
-# # 4) Defensive: ensure WRITE state flag clears when starting a new line in parser wrapper (see driver).
