@@ -18,8 +18,8 @@ require('../../../../../coffeescript/register.js');
         const a = ast.lines[0].cmds[0].cond.pat.items[0];
         assert.equal(a.type, 'Class');
         assert.equal(a.name, 'Z');
-        // Unknown class stays as-is; canonical falls back to same
-        assert.equal(a.canonical, 'Z');
+        // Unknown class stays as-is; canonical maps to GRAPH in our canon table
+        assert.equal(a.canonical, 'GRAPH');
       }
     }
   ];

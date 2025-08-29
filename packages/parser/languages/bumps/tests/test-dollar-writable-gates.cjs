@@ -9,6 +9,7 @@ require('../../../../../coffeescript/register.js');
 
   function parseWithOpts(src, opts) {
     const lex = new BumpsLexer();
+    lex.yy = { options: opts || {} };
     const toks = lex.tokenize(src);
     const p = parserMod.parser;
     p.tokens = toks;

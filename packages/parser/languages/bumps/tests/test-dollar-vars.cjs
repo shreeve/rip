@@ -8,6 +8,7 @@ require('../../../../../coffeescript/register.js');
   const { BumpsLexer } = require('../lexer.coffee');
   const src = 'WRITE $HOROLOG, $JOB, $ZDATE(1)\n';
   const lex = new BumpsLexer();
+  lex.yy = { options: {} };
   const toks = lex.tokenize(src);
   const p = parserMod.parser;
   p.tokens = toks; p.yy = { node: (t,p)=>({type:t,...(p||{})}) };

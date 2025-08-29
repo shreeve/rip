@@ -4,7 +4,6 @@ const assert = require('assert');
 const parserMod = require('../parser.js');
 require('../../../../../coffeescript/register.js');
 const { attachBlocks } = require('../blocks.coffee');
-const { BumpsRewriter } = require('../rewriter.coffee');
 
 (async () => {
   const { BumpsLexer } = require('../lexer.coffee');
