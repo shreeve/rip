@@ -760,20 +760,8 @@ exports.samples = '''
   .map (s) -> s.trim()
   .filter (s) -> s.length
 
-
-# Summary of changes:
-# 2) Add TSTART/TCOMMIT/TROLLBACK/TRESTART command productions (with optional postconditions).
-# 3) Add tiny error-recovery rule to allow skipping to NEWLINE after unexpected token (if not already present).
-# 4) Defensive: ensure WRITE state flag clears when starting a new line in parser wrapper (see driver).
-
-# # 2) Transactions
-# for trcmd in ["TSTART","TCOMMIT","TROLLBACK","TRESTART"]
-#   o "cmd -> #{trcmd} postcond"
-#     , "$$ = yy.node('Cmd', {op:'#{trcmd}', pc:$2, args: yy.node('ArgsNONE', {})})"
-#   o "cmd -> #{trcmd}"
-#     , "$$ = yy.node('Cmd', {op:'#{trcmd}', pc:null, args: yy.node('ArgsNONE', {})})"
-
 # # 3) Simple error recovery: allow a bad token to be skipped until NEWLINE
 # #    (only activates if 'bad' nonterminal is referenced; harmless otherwise)
-# o 'line -> error NEWLINE'
-#   , '$$ = yy.node("LineError", {})'
+# o 'line -> error NEWLINE', '$$ = yy.node("LineError", {})'
+
+# # 4) Defensive: ensure WRITE state flag clears when starting a new line in parser wrapper (see driver).
