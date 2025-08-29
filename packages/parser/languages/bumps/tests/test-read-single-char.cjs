@@ -11,7 +11,7 @@ require('../../../../../coffeescript/register.js');
     'READ *Y:5\n',
     'READ A,*B,C\n'
   ];
-  
+
   for (const src of samples) {
     const lex = new BumpsLexer();
     const toks = lex.tokenize(src);
@@ -25,7 +25,7 @@ require('../../../../../coffeescript/register.js');
     const ast = parserMod.parse(src);
     assert.equal(ast.type, 'Program');
     const items = ast.lines[0].cmds[0].args.items;
-    
+
     if (src.includes('*X')) {
       assert.equal(items[0].type, 'ReadChar');
       assert.equal(items[0].lhs.name, 'X');

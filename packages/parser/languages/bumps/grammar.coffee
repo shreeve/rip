@@ -53,7 +53,8 @@ exports.tokens = [
   'NEWLINE','DOTS','LABEL','CS','COMMENT'
   'LPAREN','RPAREN','COMMA','COLON','CARET','AT','VBAR'
   'STRING','NUMBER','NAME'
-  'DOLFN','DOLSPECVAR','ZDOLFN','ZCOMMAND'
+  'DOLFN','DOLSPECVAR','ZDOLFN'
+  'ZWRITE','ZBREAK','ZKILL','ZSYSTEM','ZETRAP','ZSHOW','ZLOAD','ZSAVE','ZCOMMAND'
 
   # Commands
   'BREAK','CLOSE','DO','ELSE','FOR','GOTO','HALT','HANG','IF','JOB','KILL'
@@ -236,10 +237,46 @@ exports.bnf =
     o 'JOB postcond'                , '$$ = yy.node("Cmd", {pc: $2, op: "JOB",  args: []})'
     o 'JOB'                         , '$$ = yy.node("Cmd", {pc: null, op: "JOB", args: []})'
 
-    # Z-commands (any vendor command starting with Z...; accept optional exprlist)
-    o 'ZCOMMAND postcond CS exprlist' , '$$ = yy.node("Cmd", {pc: $2, op: $1, args: $4})'
-    o 'ZCOMMAND CS exprlist'          , '$$ = yy.node("Cmd", {pc: null, op: $1, args: $3})'
-    o 'ZCOMMAND'                      , '$$ = yy.node("Cmd", {pc: null, op: $1, args: []})'
+    # Specific Z-commands with proper argument structures
+    # ZWRITE - Display variables with their values (GT.M/Caché)
+    o 'ZWRITE postcond CS zwrite_items' , '$$ = yy.node("Cmd", {pc: $2, op: "ZWRITE", args: yy.node("ArgsZWRITE", {items: $4})})'
+    o 'ZWRITE CS zwrite_items'          , '$$ = yy.node("Cmd", {pc: null, op: "ZWRITE", args: yy.node("ArgsZWRITE", {items: $3})})'
+    o 'ZWRITE postcond'                 , '$$ = yy.node("Cmd", {pc: $2, op: "ZWRITE", args: yy.node("ArgsZWRITE", {items: []})})'
+    o 'ZWRITE'                          , '$$ = yy.node("Cmd", {pc: null, op: "ZWRITE", args: yy.node("ArgsZWRITE", {items: []})})'
+
+    # ZBREAK - Set/clear breakpoints at entry references (GT.M)
+    o 'ZBREAK postcond CS zbreak_list' , '$$ = yy.node("Cmd", {pc: $2, op: "ZBREAK", args: yy.node("ArgsZBREAK", {targets: $4})})'
+    o 'ZBREAK CS zbreak_list'          , '$$ = yy.node("Cmd", {pc: null, op: "ZBREAK", args: yy.node("ArgsZBREAK", {targets: $3})})'
+    o 'ZBREAK postcond'                , '$$ = yy.node("Cmd", {pc: $2, op: "ZBREAK", args: yy.node("ArgsZBREAK", {targets: []})})'
+    o 'ZBREAK'                         , '$$ = yy.node("Cmd", {pc: null, op: "ZBREAK", args: yy.node("ArgsZBREAK", {targets: []})})'
+
+    # ZKILL - Kill local variable (but not descendants) (GT.M/Caché)
+    o 'ZKILL postcond CS zkill_items'  , '$$ = yy.node("Cmd", {pc: $2, op: "ZKILL", args: yy.node("ArgsZKILL", {items: $4})})'
+    o 'ZKILL CS zkill_items'           , '$$ = yy.node("Cmd", {pc: null, op: "ZKILL", args: yy.node("ArgsZKILL", {items: $3})})'
+
+    # ZSYSTEM - Execute OS command (GT.M)
+    o 'ZSYSTEM postcond CS expr'       , '$$ = yy.node("Cmd", {pc: $2, op: "ZSYSTEM", args: [$4]})'
+    o 'ZSYSTEM CS expr'                , '$$ = yy.node("Cmd", {pc: null, op: "ZSYSTEM", args: [$3]})'
+    o 'ZSYSTEM'                        , '$$ = yy.node("Cmd", {pc: null, op: "ZSYSTEM", args: []})'
+
+    # ZETRAP - Set error trap (GT.M/Caché)
+    o 'ZETRAP postcond CS expr'        , '$$ = yy.node("Cmd", {pc: $2, op: "ZETRAP", args: [$4]})'
+    o 'ZETRAP CS expr'                 , '$$ = yy.node("Cmd", {pc: null, op: "ZETRAP", args: [$3]})'
+
+    # ZSHOW - Show system information (GT.M)
+    o 'ZSHOW postcond CS expr'         , '$$ = yy.node("Cmd", {pc: $2, op: "ZSHOW", args: [$4]})'
+    o 'ZSHOW CS expr'                  , '$$ = yy.node("Cmd", {pc: null, op: "ZSHOW", args: [$3]})'
+
+    # ZLOAD/ZSAVE - Load/save routines (GT.M)
+    o 'ZLOAD postcond CS expr'         , '$$ = yy.node("Cmd", {pc: $2, op: "ZLOAD", args: [$4]})'
+    o 'ZLOAD CS expr'                  , '$$ = yy.node("Cmd", {pc: null, op: "ZLOAD", args: [$3]})'
+    o 'ZSAVE postcond CS expr'         , '$$ = yy.node("Cmd", {pc: $2, op: "ZSAVE", args: [$4]})'
+    o 'ZSAVE CS expr'                  , '$$ = yy.node("Cmd", {pc: null, op: "ZSAVE", args: [$3]})'
+
+    # Generic Z-commands (fallback for other vendor-specific commands)
+    o 'ZCOMMAND postcond CS exprlist'  , '$$ = yy.node("Cmd", {pc: $2, op: $1, args: $4})'
+    o 'ZCOMMAND CS exprlist'           , '$$ = yy.node("Cmd", {pc: null, op: $1, args: $3})'
+    o 'ZCOMMAND'                       , '$$ = yy.node("Cmd", {pc: null, op: $1, args: []})'
 
     # Indirect command execution (ELSE IF already chains; here we allow @NAME and @(expr) as a command)
     o 'AT NAME CS exprlist'              , '$$ = yy.node("Cmd", {pc: null, op: "INDIRECT", args: yy.node("ArgsINDIRECT", {target: yy.node("Indirect", {kind:"name", target:$2}), args:$4})})'
@@ -426,6 +463,32 @@ exports.bnf =
 
   # GOTO targets reuse entryref
   goto_list: [ o 'entryref_list', '$$ = $1' ]
+
+  # Z-command argument lists
+  # ZWRITE - variable list (similar to KILL but simpler - no exclusive kill)
+  zwrite_items: [
+    o 'lvalue'                       , '$$ = [$1]'
+    o 'zwrite_items COMMA lvalue'   , '$1.push($3); $$ = $1'
+  ]
+
+  # ZKILL - same as ZWRITE (kill variable without descendants)
+  zkill_items: [
+    o 'lvalue'                       , '$$ = [$1]'
+    o 'zkill_items COMMA lvalue'    , '$1.push($3); $$ = $1'
+  ]
+
+  # ZBREAK - entry references with optional action expressions
+  zbreak_list: [
+    o 'zbreak_item'                   , '$$ = [$1]'
+    o 'zbreak_list COMMA zbreak_item' , '$1.push($3); $$ = $1'
+  ]
+  zbreak_item: [
+    # Entry reference with optional action (e.g., ZBREAK LABEL^ROUTINE:"WRITE ""BREAK""")
+    o 'entryref'                      , '$$ = yy.node("ZBreakItem", {target: $1, action: null})'
+    o 'entryref COLON expr'           , '$$ = yy.node("ZBreakItem", {target: $1, action: $3})'
+    # Clear breakpoint with minus prefix
+    o 'MINUS entryref'                , '$$ = yy.node("ZBreakItem", {target: $2, action: null, clear: true})'
+  ]
 
   # ---- expressions ----
   expr: [
@@ -939,6 +1002,20 @@ exports.samples = '''
   SET CMD="WRITE"  @CMD !,"Hello"
   @("SET") A=1,B=2
   @("KILL") (A,B,C)
+
+  ; ---- Z-commands (VistA/GT.M) ----
+  ZWRITE
+  ZWRITE X,Y,^GLOBAL
+  ZWR X,Y(1,2)
+  ZBREAK LABEL^ROUTINE
+  ZBREAK LABEL^ROUTINE:"WRITE ""BREAK"""
+  ZBREAK -LABEL^ROUTINE
+  ZKILL X,Y(1)
+  ZSYSTEM "ls -la"
+  ZETRAP "^ERROR"
+  ZSHOW "V"
+  ZLOAD "ROUTINE"
+  ZSAVE "ROUTINE"
 '''
   .split '\n'
   .map (s) -> s.trim()

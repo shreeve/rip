@@ -379,6 +379,16 @@ class BumpsLexer
     return 'TCOMMIT' if w in ['tcommit','tc']
     return 'TROLLBACK' if w in ['trollback','tro']
     return 'TRESTART' if w in ['trestart','tre']
+    # Specific Z-commands for VistA (GT.M/YottaDB)
+    return 'ZWRITE' if w in ['zwrite','zwr']
+    return 'ZBREAK' if w in ['zbreak','zb']
+    return 'ZKILL' if w in ['zkill','zk']
+    return 'ZSYSTEM' if w in ['zsystem','zsy']
+    return 'ZETRAP' if w in ['zetrap']
+    return 'ZSHOW' if w in ['zshow','zsh']
+    return 'ZLOAD' if w in ['zload','zl']
+    return 'ZSAVE' if w in ['zsave','zs']
+    # Generic Z-command fallback
     return 'ZCOMMAND' if /^z[a-z][a-z0-9]*$/.test w
     null
 
