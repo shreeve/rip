@@ -67,10 +67,7 @@ buildExceptParser = (callback) ->
   for file in files
     try
       source = fs.readFileSync file, 'utf8'
-      # Check if file uses ES modules
-      isESM = source.match(/^(import\s|export\s)/m)
-      # Compile with bare:true for ESM files to avoid IIFE wrapper
-      output = CoffeeScript.compile source, {bare: isESM or no, filename: file}
+      output = CoffeeScript.compile source, {bare: false, filename: file}
       outputFile = "lib/coffeescript/#{path.basename(file, path.extname(file))}.js"
       fs.writeFileSync outputFile, output
       compiled++
