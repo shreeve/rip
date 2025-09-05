@@ -10,5 +10,3 @@ const Repl = require(join(__dirname, '../coffeescript/repl.js'));
 
 export default Repl;
 export const start = Repl.start;
-
-

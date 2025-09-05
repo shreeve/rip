@@ -13,7 +13,7 @@ const potentialPaths = [
 ];
 
 for (const base of potentialPaths) {
-  const target = join(base, 'command.js');
+  const target = join(base, '../lib-esm/command.js');
   const targetCJS = join(base, 'command.cjs');
   if (existsSync(targetCJS)) {
     const mod = await import(pathToFileURL(targetCJS).href);

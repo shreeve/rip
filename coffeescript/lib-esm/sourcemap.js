@@ -9,5 +9,3 @@ const require = createRequire(import.meta.url);
 const SourceMap = require(join(__dirname, '../coffeescript/sourcemap.js'));
 
 export default SourceMap;
-
-
