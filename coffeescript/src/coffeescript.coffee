@@ -190,13 +190,13 @@ export nodes = withPrettyErrors (source, options) ->
   source = lexer.tokenize source, options if typeof source is 'string'
   parser.parse source
 
-# This file used to export these methods; leave stubs that throw warnings
-# instead. These methods have been moved into `index.coffee` to provide
-# separate entrypoints for Node and non-Node environments, so that static
-# analysis tools don’t choke on Node packages when compiling for a non-Node
-# environment.
-export run = () ->
-  throw new Error 'require index.coffee, not this file'
+# Compile and execute a string of CoffeeScript (on the server)
+export run = (code, options = {}) ->
+  # For now, just compile and eval the code
+  # A full implementation would handle __filename, __dirname, require, etc.
+  js = compile code, options
+  eval js
+
 export {run as eval}
 export {run as register}
 
@@ -226,7 +226,10 @@ parser.lexer =
   upcomingInput: -> ''
 
 # Make all the AST nodes visible to the parser.
-Object.assign parser.yy, nodes
+# For ESM compatibility, we need to handle this differently
+parser.yy = {}
+Object.keys(nodes).forEach (key) ->
+  parser.yy[key] = nodes[key]
 
 # Override Jison's default error handling function.
 parser.yy.parseError = (message, {token}) ->

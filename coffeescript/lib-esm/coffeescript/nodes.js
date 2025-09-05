@@ -8697,7 +8697,7 @@ isLocationDataEndGreater = function(a, b) {
 // mergeLocationData(first, second, justLeading: yes).range # [1, 5]
 // mergeLocationData(first, second, justEnding:  yes).range # [4, 10]
 // ```
-exports.mergeLocationData = mergeLocationData = function(locationDataA, locationDataB, {justLeading, justEnding} = {}) {
+mergeLocationData = function(locationDataA, locationDataB, {justLeading, justEnding} = {}) {
   return Object.assign(justEnding ? {
     first_line: locationDataA.first_line,
     first_column: locationDataA.first_column
@@ -8741,7 +8741,7 @@ exports.mergeLocationData = mergeLocationData = function(locationDataA, location
 // mergeAstLocationData(first, second, justLeading: yes).range # [1, 5]
 // mergeAstLocationData(first, second, justEnding:  yes).range # [4, 10]
 // ```
-exports.mergeAstLocationData = mergeAstLocationData = function(nodeA, nodeB, {justLeading, justEnding} = {}) {
+mergeAstLocationData = function(nodeA, nodeB, {justLeading, justEnding} = {}) {
   return {
     loc: {
       start: justEnding ? nodeA.loc.start : isAstLocGreater(nodeA.loc.start, nodeB.loc.start) ? nodeB.loc.start : nodeA.loc.start,
@@ -8754,7 +8754,7 @@ exports.mergeAstLocationData = mergeAstLocationData = function(nodeA, nodeB, {ju
 };
 
 // Convert Jison-style node class location data to Babel-style location data
-exports.jisonLocationDataToAstLocationData = jisonLocationDataToAstLocationData = function({first_line, first_column, last_line_exclusive, last_column_exclusive, range}) {
+jisonLocationDataToAstLocationData = function({first_line, first_column, last_line_exclusive, last_column_exclusive, range}) {
   return {
     loc: {
       start: {

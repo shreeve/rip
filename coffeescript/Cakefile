@@ -125,16 +125,57 @@ export const main = function() {};
         output = transformCJSToESM output, file
 
       outputFile = "lib-esm/coffeescript/#{path.basename(file, path.extname(file))}.js"
+
+      # Fix specific issues in coffeescript.js
+      if path.basename(file, '.coffee') is 'coffeescript'
+        # Fix the nodes iteration to work with ES modules
+        output = output.replace(
+          /for \(own (.*?) in nodes\) \{/g,
+          'for (const $1 in nodes) { if (Object.prototype.hasOwnProperty.call(nodes, $1)) {'
+        )
+
       fs.writeFileSync outputFile, output
       compiled++
     catch error
       console.log "Error compiling #{file} for ESM: #{error.message}"
+
+      # Special handling for coffeescript.coffee
+      if path.basename(file, '.coffee') is 'coffeescript'
+        console.log "Using fallback compilation for coffeescript.js"
+        # Copy and transform the CJS version
+        cjsCode = fs.readFileSync 'lib/coffeescript/coffeescript.js', 'utf8'
+
+        # Build the ESM version manually
+        # Simply transform the existing CJS output
+        esmCode = transformCJSToESM cjsCode, 'coffeescript.coffee'
+
+        # Fix the specific issues with coffeescript.js
+        # 1. Fix the nodes import conflict
+        esmCode = esmCode.replace(/export const nodes = /g, 'export const nodesFn = ')
+        esmCode = esmCode.replace(/export \{nodes\}/g, 'export {nodesFn as nodes}')
+
+        # 2. Fix parser.yy assignment
+        esmCode = esmCode.replace('parser.yy = nodes;', '''
+// Initialize parser.yy and copy all nodes exports
+parser.yy = {};
+Object.keys(nodes).forEach(function(key) {
+  parser.yy[key] = nodes[key];
+});''')
+
+
+        fs.writeFileSync 'lib-esm/coffeescript/coffeescript.js', esmCode
+        compiled++
 
   console.log "Compiled #{compiled} files to lib-esm/coffeescript/"
   callback() if typeof callback is 'function'
 
 # Transform CommonJS output to ESM
 transformCJSToESM = (code, filename) ->
+  # First, remove the IIFE wrapper if present
+  iiffeMatch = code.match(/^\(function\(\) \{([\s\S]*)\}\)\.call\(this\);?\s*$/)
+  if iiffeMatch
+    code = iiffeMatch[1]
+
   # Track what we're exporting
   exports = []
   hasDefaultExport = no

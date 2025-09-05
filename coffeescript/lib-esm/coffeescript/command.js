@@ -281,7 +281,7 @@ compileScript = function(file, input, base = null) {
       compiled = CoffeeScript.compile(task.input, task.options);
       return printLine(JSON.stringify(compiled, null, 2));
     } else if (opts.run) {
-      CoffeeScript.register();
+      // CoffeeScript.register(); // Not available in ESM version
       if (opts.prelude) {
         CoffeeScript.eval(opts.prelude, task.options);
       }
