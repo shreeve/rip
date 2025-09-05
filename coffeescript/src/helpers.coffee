@@ -3,16 +3,16 @@
 # arrays, count characters, that sort of thing.
 
 # Peek at the beginning of a given string to see if it matches a sequence.
-exports.starts = (string, literal, start) ->
+export starts = (string, literal, start) ->
   literal is string.substr start, literal.length
 
 # Peek at the end of a given string to see if it matches a sequence.
-exports.ends = (string, literal, back) ->
+export ends = (string, literal, back) ->
   len = literal.length
   literal is string.substr string.length - len - (back or 0), len
 
 # Repeat a string `n` times.
-exports.repeat = repeat = (str, n) ->
+export repeat = (str, n) ->
   # Use clever algorithm to have O(log(n)) string concatenation operations.
   res = ''
   while n > 0
@@ -22,11 +22,11 @@ exports.repeat = repeat = (str, n) ->
   res
 
 # Trim out all falsy values from an array.
-exports.compact = (array) ->
+export compact = (array) ->
   item for item in array when item
 
 # Count the number of occurrences of a string in a string.
-exports.count = (string, substr) ->
+export count = (string, substr) ->
   num = pos = 0
   return 1/0 unless substr.length
   num++ while pos = 1 + string.indexOf substr, pos
@@ -35,60 +35,71 @@ exports.count = (string, substr) ->
 # Merge objects, returning a fresh copy with attributes from both sides.
 # Used every time `Base#compile` is called, to allow properties in the
 # options hash to propagate down the tree without polluting other branches.
-exports.merge = (options, overrides) ->
+export merge = (options, overrides) ->
   extend (extend {}, options), overrides
 
 # Extend a source object with the properties of another object (shallow copy).
-extend = exports.extend = (object, properties) ->
+export extend = (object, properties) ->
   for key, val of properties
     object[key] = val
   object
 
 # Return a flattened version of an array.
 # Handy for getting a list of `children` from the nodes.
-exports.flatten = flatten = (array) ->
+export flatten = (array) ->
   array.flat(Infinity)
 
 # Delete a key from an object, returning the value. Useful when a node is
 # looking for a particular method in an options hash.
-exports.del = (obj, key) ->
+export del = (obj, key) ->
   val =  obj[key]
   delete obj[key]
   val
 
 # Typical Array::some
-exports.some = Array::some ? (fn) ->
+export some = Array::some ? (fn) ->
   return true for e in this when fn e
   false
 
-
-# Merge two jison-style location data objects together.
-# If `last` is not provided, this will simply return `first`.
-buildLocationData = (first, last) ->
-  if not last
-    first
-  else
-    first_line: first.first_line
-    first_column: first.first_column
-    last_line: last.last_line
-    last_column: last.last_column
-    last_line_exclusive: last.last_line_exclusive
-    last_column_exclusive: last.last_column_exclusive
-    range: [
-      first.range[0]
-      last.range[1]
-    ]
+# Helper function for extracting code from Literate CoffeeScript by stripping
+# out all non-code blocks, producing a string of CoffeeScript code that can
+# be compiled "normally."
+invertLiterate = (code) ->
+  out = []
+  blankLine = /^\s*$/
+  indented = /^[\t ]/
+  listItemStart = /// ^
+    (?:\t?|\ {0,3})       # Up to one tab, or up to three spaces, or neither;
+    (?:
+      [*\-+] |            # followed by `*`, `-` or `+`;
+      \d{1,9}\. |         # or by an integer up to 9 digits long, followed by a period;
+      \d{1,9}\)           # or by an integer up to 9 digits long, followed by a closing parenthesis.
+    )
+    [\ \t]                # followed by a space or a tab.
+  ///
+  insideComment = no
+  for line in code.split('\n')
+    if blankLine.test(line)
+      insideComment = no
+      out.push line
+    else if insideComment or listItemStart.test(line) or not indented.test(line)
+      insideComment = yes
+      out.push "# #{line}"
+    else
+      out.push line
+  out.join '\n'
 
 # Build a list of all comments attached to tokens.
-exports.extractAllCommentTokens = (tokens) ->
+export extractAllCommentTokens = (tokens) ->
   allCommentsObj = {}
   for token in tokens when token.comments
     for comment in token.comments
-      commentKey = comment.locationData.range[0]
+      commentKey = "#{comment.locationData.first_line}-#{comment.locationData.first_column}"
       allCommentsObj[commentKey] = comment
-  sortedKeys = Object.keys(allCommentsObj).sort (a, b) -> a - b
-  for key in sortedKeys
-    allCommentsObj[key]
+  allComments = []
+  for k, comment of allCommentsObj
+    allComments.push comment
+  allComments
 
 # Get a lookup hash for a token based on its location data.
 # Multiple tokens might have the same location hash, but using exclusive
@@ -97,53 +108,41 @@ exports.extractAllCommentTokens = (tokens) ->
 buildLocationHash = (loc) ->
   "#{loc.range[0]}-#{loc.range[1]}"
 
-# Build a dictionary of extra token properties organized by tokens’ locations
+# Build a dictionary of extra token properties organized by tokens' locations
 # used as lookup hashes.
-exports.buildTokenDataDictionary = buildTokenDataDictionary = (tokens) ->
+export buildTokenDataDictionary = (tokens) ->
   tokenData = {}
-  for token in tokens when token.comments
+  for token in tokens when token.comments or token.csx
     tokenHash = buildLocationHash token[2]
     # Multiple tokens might have the same location hash, such as the generated
-    # `JS` tokens added at the start or end of the token stream to hold
-    # comments that start or end a file.
+    # `JS` tokens added at the start/end of CSX fragments.
     tokenData[tokenHash] ?= {}
-    if token.comments # `comments` is always an array.
-      # For “overlapping” tokens, that is tokens with the same location data
-      # and therefore matching `tokenHash`es, merge the comments from both/all
-      # tokens together into one array, even if there are duplicate comments;
-      # they will get sorted out later.
-      (tokenData[tokenHash].comments ?= []).push token.comments...
+    tokenData[tokenHash].comments = token.comments if token.comments
+    tokenData[tokenHash].csx = token.csx if token.csx
   tokenData
 
 # This returns a function which takes an object as a parameter, and if that
 # object is an AST node, updates that object's locationData.
 # The object is returned either way.
-exports.addDataToNode = (parserState, firstLocationData, firstValue, lastLocationData, lastValue, forceUpdateLocation = yes) ->
+export addDataToNode = (parserState, firstLocationData, firstValue, lastLocationData, lastValue, forceUpdateLocation = yes) ->
   (obj) ->
-    # Add location data.
-    locationData = buildLocationData(firstValue?.locationData ? firstLocationData, lastValue?.locationData ? lastLocationData)
-    if obj?.updateLocationDataIfMissing? and firstLocationData?
-      obj.updateLocationDataIfMissing locationData, forceUpdateLocation
-    else
-      obj.locationData = locationData
-
-    # Add comments, building the dictionary of token data if it hasn’t been
-    # built yet.
-    parserState.tokenData ?= buildTokenDataDictionary parserState.parser.tokens
-    if obj.locationData?
-      objHash = buildLocationHash obj.locationData
-      if parserState.tokenData[objHash]?.comments?
-        attachCommentsToNode parserState.tokenData[objHash].comments, obj
+    objHash = buildLocationHash obj.locationData
+    if obj.locationData? and (forceUpdateLocation or not parserState.tokenData[objHash]?)
+      obj.locationData = buildLocationData(firstLocationData, lastLocationData)
+    if parserState.tokenData[objHash]?.comments?
+      attachCommentsToNode parserState.tokenData[objHash].comments, obj
+    if parserState.tokenData[objHash]?.csx?
+      obj.csx = yes
     obj
 
-exports.attachCommentsToNode = attachCommentsToNode = (comments, node) ->
+export attachCommentsToNode = (comments, node) ->
   return if not comments? or comments.length is 0
   node.comments ?= []
   node.comments.push comments...
 
-# Convert jison location data to a string.
+# Convert jison location data to our style.
 # `obj` can be a token, or a locationData.
-exports.locationDataToString = (obj) ->
+export locationDataToString = (obj) ->
   if ("2" of obj) and ("first_line" of obj[2]) then locationData = obj[2]
   else if "first_line" of obj then locationData = obj
 
@@ -153,15 +152,15 @@ exports.locationDataToString = (obj) ->
   else
     "No location data"
 
-# Generate a unique anonymous file name so we can distinguish source map cache
+# Generate a unique anonymous file name so we can distinguish source map
 # entries for any number of anonymous scripts.
-exports.anonymousFileName = do ->
+export anonymousFileName = do ->
   n = 0
-  ->
-    "<anonymous-#{n++}>"
+  -> "<anonymous-#{n++}>"
 
+# A `.coffee.md` compatible version of `basename`, that returns the file sans-extension.
 # A version of `basename` that returns the file sans-extension.
-exports.baseFileName = (file, stripExt = no, useWinPathSep = no) ->
+export baseFileName = (file, stripExt = no, useWinPathSep = no) ->
   pathSep = if useWinPathSep then /\\|\// else /\//
   parts = file.split(pathSep)
   file = parts[parts.length - 1]
@@ -172,14 +171,16 @@ exports.baseFileName = (file, stripExt = no, useWinPathSep = no) ->
   parts.join('.')
 
 # Determine if a filename represents a CoffeeScript file.
-exports.isCoffee = (file) -> /\.coffee$/.test file
+export isCoffee = (file) -> /\.coffee$/.test file
 
+# Determine if a filename represents a Literate CoffeeScript file.
+isLiterate = (file) -> /\.(litcoffee|coffee\.md)$/.test file
 
 # Throws a SyntaxError from a given location.
 # The error's `toString` will return an error message following the "standard"
-# format `<filename>:<line>:<col>: <message>` plus the line with the error and a
+# format <filename>:<line>:<col>: <message> plus the line with the error and a
 # marker showing where the error is.
-exports.throwSyntaxError = (message, location) ->
+export throwSyntaxError = (message, location) ->
   error = new SyntaxError message
   error.location = location
   error.toString = syntaxErrorToString
@@ -193,7 +194,7 @@ exports.throwSyntaxError = (message, location) ->
 
 # Update a compiler SyntaxError with source code information if it didn't have
 # it already.
-exports.updateSyntaxError = (error, code, filename) ->
+export updateSyntaxError = (error, code, filename) ->
   # Avoid screwing up the `stack` property of other errors (i.e. possible bugs).
   if error.toString is syntaxErrorToString
     error.code or= code
@@ -208,11 +209,7 @@ syntaxErrorToString = ->
   last_line ?= first_line
   last_column ?= first_column
 
-  if @filename?.startsWith '<anonymous'
-    filename = '[stdin]'
-  else
-    filename = @filename or '[stdin]'
-
+  filename = @filename or '[stdin]'
   codeLine = @code.split('\n')[first_line]
   start    = first_column
   # Show only the first line on multi-line errors.
@@ -234,7 +231,7 @@ syntaxErrorToString = ->
     #{marker}
   """
 
-exports.nameWhitespaceCharacter = (string) ->
+export nameWhitespaceCharacter = (string) ->
   switch string
     when ' ' then 'space'
     when '\n' then 'newline'
@@ -242,7 +239,7 @@ exports.nameWhitespaceCharacter = (string) ->
     when '\t' then 'tab'
     else string
 
-exports.parseNumber = (string) ->
+export parseNumber = (string) ->
   return NaN unless string?
 
   base = switch string.charAt 1
@@ -256,24 +253,27 @@ exports.parseNumber = (string) ->
   else
     parseFloat string.replace(/_/g, '')
 
-exports.isFunction = (obj) -> Object::toString.call(obj) is '[object Function]'
-exports.isNumber = isNumber = (obj) -> Object::toString.call(obj) is '[object Number]'
-exports.isString = isString = (obj) -> Object::toString.call(obj) is '[object String]'
-exports.isBoolean = isBoolean = (obj) -> obj is yes or obj is no or Object::toString.call(obj) is '[object Boolean]'
-exports.isPlainObject = (obj) -> typeof obj is 'object' and !!obj and not Array.isArray(obj) and not isNumber(obj) and not isString(obj) and not isBoolean(obj)
+export isFunction = (obj) -> Object::toString.call(obj) is '[object Function]'
+export isNumber = (obj) -> Object::toString.call(obj) is '[object Number]'
+export isString = (obj) -> Object::toString.call(obj) is '[object String]'
+export isBoolean = (obj) -> obj is yes or obj is no or Object::toString.call(obj) is '[object Boolean]'
+export isPlainObject = (obj) -> typeof obj is 'object' and !!obj and not Array.isArray(obj) and not isNumber(obj) and not isString(obj) and not isBoolean(obj)
 
-unicodeCodePointToUnicodeEscapes = (codePoint) ->
-  toUnicodeEscape = (val) ->
-    str = val.toString 16
-    "\\u#{repeat '0', 4 - str.length}#{str}"
-  return toUnicodeEscape(codePoint) if codePoint < 0x10000
-  # surrogate pair
-  high = Math.floor((codePoint - 0x10000) / 0x400) + 0xD800
-  low = (codePoint - 0x10000) % 0x400 + 0xDC00
-  "#{toUnicodeEscape(high)}#{toUnicodeEscape(low)}"
+# Private function for location data
+buildLocationData = (first, last) ->
+  first_line:   first.first_line
+  first_column: first.first_column
+  last_line:    last.last_line
+  last_column:  last.last_column
+  last_line_exclusive: last.last_line_exclusive
+  last_column_exclusive: last.last_column_exclusive
+  range: [
+    first.range[0]
+    last.range[1]
+  ]
 
 # Replace `\u{...}` with `\uxxxx[\uxxxx]` in regexes without `u` flag
-exports.replaceUnicodeCodePointEscapes = (str, {flags, error, delimiter = ''} = {}) ->
+export replaceUnicodeCodePointEscapes = (str, {flags, error, delimiter = ''} = {}) ->
   shouldReplace = flags? and 'u' not in flags
   str.replace UNICODE_CODE_POINT_ESCAPE, (match, escapedBackslash, codePointHex, offset) ->
     return escapedBackslash if escapedBackslash
@@ -283,12 +283,24 @@ exports.replaceUnicodeCodePointEscapes = (str, {flags, error, delimiter = ''} = 
       error "unicode code point escapes greater than \\u{10ffff} are not allowed",
         offset: offset + delimiter.length
         length: codePointHex.length + 4
+
     return match unless shouldReplace
 
-    unicodeCodePointToUnicodeEscapes codePointDecimal
+    # Convert surrogate pairs. See:
+    # http://mathiasbynens.be/notes/javascript-encoding#surrogate-pairs
+    if codePointDecimal <= 0xffff
+      toUnicodeEscape codePointDecimal
+    else
+      high = Math.floor((codePointDecimal - 0x10000) / 0x400) + 0xd800
+      low = (codePointDecimal - 0x10000) % 0x400 + 0xdc00
+      "#{toUnicodeEscape high}#{toUnicodeEscape low}"
 
 UNICODE_CODE_POINT_ESCAPE = ///
-  ( \\\\ )        # Make sure the escape isn’t escaped.
+  ( \\\\ )                     # Escaped backslash.
   |
-  \\u\{ ( [\da-fA-F]+ ) \}
+  \\u\{ ( [\da-fA-F]+ ) \}     # Unicode code point escape.
 ///g
+
+toUnicodeEscape = (val) ->
+  str = val.toString 16
+  "\\u#{repeat '0', 4 - str.length}#{str}"

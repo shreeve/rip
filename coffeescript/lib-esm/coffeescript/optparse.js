@@ -1,7 +1,9 @@
-import { repeat } from './helpers';
-
-var LONG_FLAG, MULTI_FLAG, OPTIONAL, SHORT_FLAG, buildRule, buildRules, normalizeArguments, repeat;
+var LONG_FLAG, MULTI_FLAG, OPTIONAL, SHORT_FLAG, buildRule, buildRules, normalizeArguments,
   splice = [].splice;
+
+import {
+  repeat
+} from './helpers.js';
 
 // A simple **OptionParser** class to parse option flags from the command-line.
 // Use it like so:
@@ -14,7 +16,7 @@ var LONG_FLAG, MULTI_FLAG, OPTIONAL, SHORT_FLAG, buildRule, buildRules, normaliz
 
 // The `coffee` command uses an instance of **OptionParser** to parse its
 // command-line arguments in `src/command.coffee`.
-export const OptionParser = class OptionParser {
+export var OptionParser = class OptionParser {
   // Initialize with a list of valid options, in the form:
 
   //     [short-flag, long-flag, description]
@@ -32,7 +34,7 @@ export const OptionParser = class OptionParser {
   // parsers that allow you to attach callback actions for every flag. Instead,
   // you're responsible for interpreting the options object.
   parse(args) {
-    var argument, hasArgument, i, isList, len, name, options, positional, rules;;
+    var argument, hasArgument, i, isList, len, name, options, positional, rules;
     // The CoffeeScript option parser is a little odd; options after the first
     // non-option argument are treated as non-option arguments themselves.
     // Optional arguments are normalized by expanding merged flags into multiple
@@ -70,7 +72,7 @@ export const OptionParser = class OptionParser {
   // Return the help text for this **OptionParser**, listing and describing all
   // of the valid options, for `--help` and such.
   help() {
-    var i, len, letPart, lines, ref, rule, spaces;;
+    var i, len, letPart, lines, ref, rule, spaces;
     lines = [];
     if (this.banner) {
       lines.unshift(`${this.banner}\n`);
@@ -105,9 +107,9 @@ OPTIONAL = /\[(\w+(\*?))\]/;
 // Build and return the list of option rules. If the optional *short-flag* is
 // unspecified, leave it out by padding with `null`.
 buildRules = function(ruleDeclarations) {
-  var flag, flagDict, i, j, len, len1, ref, rule, ruleList, tuple;;
+  var flag, flagDict, i, j, len, len1, ref, rule, ruleList, tuple;
   ruleList = (function() {
-    var i, len, results;;
+    var i, len, results;
     results = [];
     for (i = 0, len = ruleDeclarations.length; i < len; i++) {
       tuple = ruleDeclarations[i];
@@ -140,7 +142,7 @@ buildRules = function(ruleDeclarations) {
 // Build a rule from a `-o` short flag, a `--output [DIR]` long flag, and the
 // description of what the option does.
 buildRule = function(shortFlag, longFlag, description) {
-  var match;;
+  var match;
   match = longFlag.match(OPTIONAL);
   shortFlag = shortFlag != null ? shortFlag.match(SHORT_FLAG)[1] : void 0;
   longFlag = longFlag.match(LONG_FLAG)[1];
@@ -155,7 +157,7 @@ buildRule = function(shortFlag, longFlag, description) {
 };
 
 normalizeArguments = function(args, flagDict) {
-  var arg, argIndex, flag, i, innerOpts, j, lastOpt, len, len1, multiFlags, multiOpts, needsArgOpt, positional, ref, rule, rules, singleRule, withArg;;
+  var arg, argIndex, flag, i, innerOpts, j, lastOpt, len, len1, multiFlags, multiOpts, needsArgOpt, positional, ref, rule, rules, singleRule, withArg;
   rules = [];
   positional = [];
   needsArgOpt = null;
@@ -177,7 +179,7 @@ normalizeArguments = function(args, flagDict) {
     }) : void 0;
     if (multiFlags != null) {
       multiOpts = multiFlags.map(function(flag) {
-        var rule;;
+        var rule;
         rule = flagDict[flag];
         if (rule == null) {
           throw new Error(`unrecognized option ${flag} in multi-flag ${arg}`);

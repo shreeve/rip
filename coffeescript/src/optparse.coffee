@@ -1,4 +1,4 @@
-{repeat} = require './helpers'
+import {repeat} from './helpers.js'
 
 # A simple **OptionParser** class to parse option flags from the command-line.
 # Use it like so:
@@ -11,7 +11,7 @@
 #
 # The `coffee` command uses an instance of **OptionParser** to parse its
 # command-line arguments in `src/command.coffee`.
-exports.OptionParser = class OptionParser
+export class OptionParser
 
   # Initialize with a list of valid options, in the form:
   #

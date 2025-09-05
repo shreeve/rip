@@ -5,7 +5,7 @@
 # variables are new and need to be declared with `var`, and which are shared
 # with external scopes.
 
-exports.Scope = class Scope
+export class Scope
 
 # Initialize a scope with its parent, for lookups up the chain,
 # as well as a reference to the **Block** node it belongs to, which is

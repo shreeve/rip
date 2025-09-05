@@ -1,34 +1,43 @@
-import { Lexer } from './lexer';
-import { parser } from './parser';
-
 // CoffeeScript can be used both on the server, as a command-line compiler based
 // on Node.js/V8. This module
 // contains the main entry functions for tokenizing, parsing, and compiling
 // source CoffeeScript into JavaScript.
-var Lexer, SourceMap, base64encode, checkShebangLine, getSourceMap, lexer, packageJson, parser, withPrettyErrors;;
+var base64encode, checkShebangLine, getSourceMap, lexer, registerCompiled, withPrettyErrors;
 
-helpers = require('./helpers');
+import {
+  Lexer
+} from './lexer.js';
 
-SourceMap = require('./sourcemap');
+import {
+  parser
+} from './parser.js';
 
-// Require `package.json`, which is two levels above this file, as this file is
-// evaluated from `lib/coffeescript`.
-packageJson = require('../../package.json');
+import * as helpers from './helpers.js';
+
+import SourceMap from './sourcemap.js';
+
+import packageJson from '../../package.json' assert {
+  type: 'json'
+};
 
 // The current CoffeeScript version number.
-export const VERSION = packageJson.version;
+export var VERSION = packageJson.version;
 
-export const FILE_EXTENSIONS = ['.coffee'];
+export var FILE_EXTENSIONS = ['.coffee'];
 
-// Expose helpers for testing.
-export const helpers = helpers;
+export {
+  // Expose helpers for testing.
+  helpers
+};
 
 ({getSourceMap, registerCompiled} = SourceMap);
 
-// This is exported to enable an external module to implement caching of
-// sourcemaps. This is used only when `patchStackTrace` has been called to adjust
-// stack traces for files with cached source maps.
-export const registerCompiled = registerCompiled;
+export {
+  // This is exported to enable an external module to implement caching of
+  // sourcemaps. This is used only when `patchStackTrace` has been called to adjust
+  // stack traces for files with cached source maps.
+  registerCompiled
+};
 
 // Function that allows for btoa in Node.js.
 base64encode = function(src) {
@@ -52,7 +61,7 @@ base64encode = function(src) {
 // lexer/parser/compiler.
 withPrettyErrors = function(fn) {
   return function(code, options = {}) {
-    var err;;
+    var err;
     try {
       return fn.call(this, code, options);
     } catch (error) {
@@ -75,8 +84,8 @@ withPrettyErrors = function(fn) {
 // in which case this returns a `{js, v3SourceMap, sourceMap}`
 // object, where sourceMap is a sourcemap.coffee#SourceMap object, handy for
 // doing programmatic lookups.
-export const compile = withPrettyErrors(function(code, options = {}) {
-  var ast, currentColumn, currentLine, encoded, filename, fragment, fragments, generateSourceMap, header, i, js, len, map, newLines, range, sourceCodeLastLine, sourceCodeNumberOfLines, sourceMapDataURI, sourceURL, token, transpiler, transpilerOptions, transpilerOutput, v3SourceMap;;
+export var compile = withPrettyErrors(function(code, options = {}) {
+  var ast, currentColumn, currentLine, encoded, filename, fragment, fragments, generateSourceMap, header, i, js, len, map, newLines, nodes, range, sourceCodeLastLine, sourceCodeNumberOfLines, sourceMapDataURI, sourceURL, token, tokens, transpiler, transpilerOptions, transpilerOutput, v3SourceMap;
   // Clone `options`, to avoid mutating the `options` object passed in.
   options = Object.assign({}, options);
   generateSourceMap = options.sourceMap || options.inlineMap || (options.filename == null);
@@ -89,7 +98,7 @@ export const compile = withPrettyErrors(function(code, options = {}) {
   // Pass a list of referenced variables, so that generated variables won’t get
   // the same name.
   options.referencedVars = (function() {
-    var i, len, results;;
+    var i, len, results;
     results = [];
     for (i = 0, len = tokens.length; i < len; i++) {
       token = tokens[i];
@@ -207,14 +216,14 @@ export const compile = withPrettyErrors(function(code, options = {}) {
 });
 
 // Tokenize a string of CoffeeScript code, and return the array of tokens.
-export const tokens = withPrettyErrors(function(code, options) {
+export var tokens = withPrettyErrors(function(code, options) {
   return lexer.tokenize(code, options);
 });
 
 // Parse a string of CoffeeScript code or an array of lexed tokens, and
 // return the AST. You can then compile it by calling `.compile()` on the root,
 // or traverse it by using `.traverseChildren()` with a callback.
-export const nodes = withPrettyErrors(function(source, options) {
+export var nodes = withPrettyErrors(function(source, options) {
   if (typeof source === 'string') {
     source = lexer.tokenize(source, options);
   }
@@ -226,8 +235,16 @@ export const nodes = withPrettyErrors(function(source, options) {
 // separate entrypoints for Node and non-Node environments, so that static
 // analysis tools don’t choke on Node packages when compiling for a non-Node
 // environment.
-export const run = export const eval = export const register = function() {
+export var run = function() {
   throw new Error('require index.coffee, not this file');
+};
+
+export {
+  run as eval
+};
+
+export {
+  run as register
 };
 
 // Instantiate a Lexer for our use here.
@@ -244,7 +261,7 @@ parser.lexer = {
     ranges: true
   },
   lex: function() {
-    var tag, token;;
+    var tag, token;
     token = parser.tokens[this.pos++];
     if (token) {
       [tag, this.yytext, this.yylloc] = token;
@@ -294,12 +311,12 @@ parser.yy.parseError = function(message, {token}) {
   return helpers.throwSyntaxError(`unexpected ${errorText}`, errorLoc);
 };
 
-export const patchStackTrace = function() {
-  var formatSourcePosition, getSourceMapping;;
+export var patchStackTrace = function() {
+  var formatSourcePosition, getSourceMapping;
   // Based on http://v8.googlecode.com/svn/branches/bleeding_edge/src/messages.js
   // Modified to handle sourceMap
   formatSourcePosition = function(frame, getSourceMapping) {
-    var as, column, fileLocation, filename, functionName, isConstructor, isMethodCall, line, methodName, source, tp, typeName;;
+    var as, column, fileLocation, filename, functionName, isConstructor, isMethodCall, line, methodName, source, tp, typeName;
     filename = void 0;
     fileLocation = '';
     if (frame.isNative()) {
@@ -347,7 +364,7 @@ export const patchStackTrace = function() {
     }
   };
   getSourceMapping = function(filename, line, column) {
-    var answer, sourceMap;;
+    var answer, sourceMap;
     sourceMap = getSourceMap(filename, line, column);
     if (sourceMap != null) {
       answer = sourceMap.sourceLocation([line - 1, column - 1]);
@@ -363,9 +380,9 @@ export const patchStackTrace = function() {
   // sourceMap, so we must monkey-patch Error to display CoffeeScript source
   // positions.
   return Error.prepareStackTrace = function(err, stack) {
-    var frame, frames;;
+    var frame, frames;
     frames = (function() {
-      var i, len, results;;
+      var i, len, results;
       results = [];
       for (i = 0, len = stack.length; i < len; i++) {
         frame = stack[i];
@@ -382,7 +399,7 @@ export const patchStackTrace = function() {
 };
 
 checkShebangLine = function(file, input) {
-  var args, firstLine, ref, rest;;
+  var args, firstLine, ref, rest;
   firstLine = input.split(/$/m, 1)[0];
   rest = firstLine != null ? firstLine.match(/^#!\s*([^\s]+\s*)(.*)/) : void 0;
   args = rest != null ? (ref = rest[2]) != null ? ref.split(/\s/).filter(function(s) {

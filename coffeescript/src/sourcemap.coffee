@@ -196,5 +196,4 @@ class LineMap
 
 
 # Our API for source maps is just the `SourceMap` class.
-
-  module.exports = SourceMap
+export default SourceMap
