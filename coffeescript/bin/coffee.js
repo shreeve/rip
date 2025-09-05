@@ -14,7 +14,15 @@ const potentialPaths = [
 
 for (const base of potentialPaths) {
   const target = join(base, 'command.js');
-  if (existsSync(target)) {
+  const targetCJS = join(base, 'command.cjs');
+  if (existsSync(targetCJS)) {
+    const mod = await import(pathToFileURL(targetCJS).href);
+    const api = mod?.run ? mod : mod?.default;
+    if (api?.run) {
+      await api.run();
+      break;
+    }
+  } else if (existsSync(target)) {
     const mod = await import(pathToFileURL(target).href);
     const api = mod?.run ? mod : mod?.default;
     if (api?.run) {
