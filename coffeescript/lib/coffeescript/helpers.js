@@ -267,7 +267,7 @@
 
   // Determine if a filename represents a CoffeeScript file.
   exports.isCoffee = function(file) {
-    return /\.(coffee|coffee\.md)$/.test(file);
+    return /\.coffee$/.test(file);
   };
 
   // Throws a SyntaxError from a given location.

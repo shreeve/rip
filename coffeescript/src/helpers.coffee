@@ -172,7 +172,7 @@ exports.baseFileName = (file, stripExt = no, useWinPathSep = no) ->
   parts.join('.')
 
 # Determine if a filename represents a CoffeeScript file.
-exports.isCoffee = (file) -> /\.(coffee|coffee\.md)$/.test file
+exports.isCoffee = (file) -> /\.coffee$/.test file
 
 
 # Throws a SyntaxError from a given location.

@@ -109,11 +109,6 @@ test "the `baseFileName` helper returns the file name to write to", ->
     'b.lit': 'b' + ext
     'coffee.lit': 'coffee' + ext
 
-    '.coffee.md': ext
-    'a.coffee.md': 'a' + ext
-    'b.coffee.md': 'b' + ext
-    'coffee.coffee.md': 'coffee' + ext
-
   for sourceFileName, expectedFileName of sourceToCompiled
     name = baseFileName sourceFileName, yes
     filename = name + ext

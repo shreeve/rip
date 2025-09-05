@@ -271,8 +271,6 @@ buildDocTests = (watch = no) ->
     for filename in fs.readdirSync(testsSourceFolder).sort()
       if filename.indexOf('.coffee') isnt -1
         type = 'coffeescript'
-      else if filename.indexOf('.coffee.md') isnt -1
-        type = 'coffeescript'
       else
         continue
 
