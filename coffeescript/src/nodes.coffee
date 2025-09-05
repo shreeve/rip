@@ -4232,6 +4232,10 @@ exports.Splat = class Splat extends Base
 
   compileNode: (o) ->
     compiledSplat = [@makeCode('...'), @name.compileToFragments(o, LEVEL_OP)...]
+<<<<<<< Updated upstream
+=======
+    return compiledSplat
+>>>>>>> Stashed changes
 
   unwrap: -> @name
 
@@ -4941,6 +4945,10 @@ exports.Parens = class Parens extends Base
         expr instanceof Op and not expr.isInOperator() or expr.unwrap() instanceof Call or
         (expr instanceof For and expr.returns)
       ) and (o.level < LEVEL_COND or fragments.length <= 3)
+<<<<<<< Updated upstream
+=======
+
+>>>>>>> Stashed changes
     if bare then fragments else @wrapInParentheses fragments
 
   astNode: (o) -> @body.unwrap().ast o, LEVEL_PAREN
@@ -5017,14 +5025,26 @@ exports.StringWithInterpolations = class StringWithInterpolations extends Base
     @comments ?= @startQuote?.comments
 
 
+<<<<<<< Updated upstream
     elements = @extractElements o
 
     fragments = []
+=======
+
+    elements = @extractElements o
+
+    fragments = []
+    fragments.push @makeCode '`'
+>>>>>>> Stashed changes
     for element in elements
       if element instanceof StringLiteral
         unquotedElementValue = element.unquotedValueForTemplateLiteral
         fragments.push @makeCode unquotedElementValue
       else
+<<<<<<< Updated upstream
+=======
+        fragments.push @makeCode '$'
+>>>>>>> Stashed changes
         code = element.compileToFragments(o, LEVEL_PAREN)
         if not @isNestedTag(element) or
            code.some((fragment) -> fragment.comments?.some((comment) -> comment.here is no))
@@ -5038,11 +5058,19 @@ exports.StringWithInterpolations = class StringWithInterpolations extends Base
           code[0].isStringWithInterpolations = yes
           code[code.length - 1].isStringWithInterpolations = yes
         fragments.push code...
+<<<<<<< Updated upstream
     fragments
 
   isNestedTag: (element) ->
     call = element.unwrapAll?()
     false
+=======
+    fragments.push @makeCode '`'
+    fragments
+
+  isNestedTag: (element) ->
+    no
+>>>>>>> Stashed changes
 
   astType: -> 'TemplateLiteral'
 

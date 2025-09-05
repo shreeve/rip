@@ -1067,9 +1067,8 @@
     //    `#{` if interpolations are desired).
     //  - `delimiter` is the delimiter of the token. Examples are `'`, `"`, `'''`,
     //    `"""` and `///`.
-    //  - `closingDelimiter` is different from `delimiter` only in JSX
-    //  - `interpolators` matches the start of an interpolation, for JSX it's both
-    //    `{` and `<` (i.e. nested JSX tag)
+    //  - `closingDelimiter` can be customized
+    //  - `interpolators` matches the start of an interpolation
 
     // This method allows us to have strings within interpolations within strings,
     // ad infinitum.
@@ -1169,8 +1168,8 @@
     // of `'NEOSTRING'`s are converted using `fn` and turned into strings using
     // `options` first.
     mergeInterpolationTokens(tokens, options, fn) {
-      var $, converted, double, endOffset, firstIndex, heregex, i, indent, j, jsx, k, lastToken, len, len1, locationToken, lparen, placeholderToken, quote, ref, ref1, rparen, tag, token, tokensToPush, val, value;
-      ({quote, indent, double, heregex, endOffset, jsx} = options);
+      var $, converted, double, endOffset, firstIndex, heregex, i, indent, j, k, lastToken, len, len1, locationToken, lparen, placeholderToken, quote, ref, ref1, rparen, tag, token, tokensToPush, val, value;
+      ({quote, indent, double, heregex, endOffset} = options);
       if (tokens.length > 1) {
         lparen = this.token('STRING_START', '(', {
           length: (ref = quote != null ? quote.length : void 0) != null ? ref : 0,
@@ -1225,9 +1224,6 @@
             addTokenData(token, {indent, quote, double});
             if (heregex) {
               addTokenData(token, {heregex});
-            }
-            if (jsx) {
-              addTokenData(token, {jsx});
             }
             token[0] = 'STRING';
             token[1] = '"' + converted + '"';

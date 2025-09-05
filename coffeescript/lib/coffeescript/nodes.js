@@ -1639,11 +1639,7 @@
       }
 
       astType() {
-        if (this.jsx) {
-          return 'JSXIdentifier';
-        } else {
-          return 'Identifier';
-        }
+        return 'Identifier';
       }
 
       astProperties() {
@@ -6280,10 +6276,7 @@
       compileNode(o) {
         var compiledSplat;
         compiledSplat = [this.makeCode('...'), ...this.name.compileToFragments(o, LEVEL_OP)];
-        if (!this.jsx) {
-          return compiledSplat;
-        }
-        return [this.makeCode('{'), ...compiledSplat, this.makeCode('}')];
+        return compiledSplat;
       }
 
       unwrap() {
@@ -6302,9 +6295,7 @@
       }
 
       astType() {
-        if (this.jsx) {
-          return 'JSXSpreadAttribute';
-        } else if (this.lhs) {
+        if (this.lhs) {
           return 'RestElement';
         } else {
           return 'SpreadElement';
@@ -7356,15 +7347,12 @@
         shouldWrapComment = (ref1 = expr.comments) != null ? ref1.some(function(comment) {
           return comment.here && !comment.unshift && !comment.newLine;
         }) : void 0;
-        if (expr instanceof Value && expr.isAtomic() && !this.jsxAttribute && !shouldWrapComment) {
+        if (expr instanceof Value && expr.isAtomic() && !shouldWrapComment) {
           expr.front = this.front;
           return expr.compileToFragments(o);
         }
         fragments = expr.compileToFragments(o, LEVEL_PAREN);
         bare = o.level < LEVEL_OP && !shouldWrapComment && (expr instanceof Op && !expr.isInOperator() || expr.unwrap() instanceof Call || (expr instanceof For && expr.returns)) && (o.level < LEVEL_COND || fragments.length <= 3);
-        if (this.jsxAttribute) {
-          return this.wrapInBraces(fragments);
-        }
         if (bare) {
           return fragments;
         } else {
@@ -7387,12 +7375,11 @@
   //### StringWithInterpolations
   exports.StringWithInterpolations = StringWithInterpolations = (function() {
     class StringWithInterpolations extends Base {
-      constructor(body1, {quote, startQuote, jsxAttribute} = {}) {
+      constructor(body1, {quote, startQuote} = {}) {
         super();
         this.body = body1;
         this.quote = quote;
         this.startQuote = startQuote;
-        this.jsxAttribute = jsxAttribute;
       }
 
       static fromStringLiteral(stringLiteral) {
@@ -7400,8 +7387,7 @@
         updatedString = stringLiteral.withoutQuotesInLocationData();
         updatedStringValue = new Value(updatedString).withLocationDataFrom(updatedString);
         return new StringWithInterpolations(Block.wrap([updatedStringValue]), {
-          quote: stringLiteral.quote,
-          jsxAttribute: stringLiteral.jsxAttribute
+          quote: stringLiteral.quote
         }).withLocationDataFrom(stringLiteral);
       }
 
@@ -7416,7 +7402,7 @@
         return this.body.shouldCache();
       }
 
-      extractElements(o, {includeInterpolationWrappers, isJsx} = {}) {
+      extractElements(o, {includeInterpolationWrappers} = {}) {
         var elements, expr, salvagedComments;
         // Assumes that `expr` is `Block`
         expr = this.body.unwrap();
@@ -7440,7 +7426,7 @@
               }
               attachCommentsToNode(salvagedComments, node);
             }
-            if ((unwrapped = (ref1 = node.expression) != null ? ref1.unwrapAll() : void 0) instanceof PassthroughLiteral && unwrapped.generated && !(isJsx && o.compiling)) {
+            if ((unwrapped = (ref1 = node.expression) != null ? ref1.unwrapAll() : void 0) instanceof PassthroughLiteral && unwrapped.generated) {
               if (o.compiling) {
                 commentPlaceholder = new StringLiteral('').withLocationDataFrom(node);
                 commentPlaceholder.comments = unwrapped.comments;
@@ -7481,31 +7467,20 @@
       }
 
       compileNode(o) {
-        var code, element, elements, fragments, j, len1, ref1, unquotedElementValue, wrapped;
+        var code, element, elements, fragments, j, len1, ref1, unquotedElementValue;
         if (this.comments == null) {
           this.comments = (ref1 = this.startQuote) != null ? ref1.comments : void 0;
         }
-        if (this.jsxAttribute) {
-          wrapped = new Parens(new StringWithInterpolations(this.body));
-          wrapped.jsxAttribute = true;
-          return wrapped.compileNode(o);
-        }
-        elements = this.extractElements(o, {
-          isJsx: this.jsx
-        });
+        elements = this.extractElements(o);
         fragments = [];
-        if (!this.jsx) {
-          fragments.push(this.makeCode('`'));
-        }
+        fragments.push(this.makeCode('`'));
         for (j = 0, len1 = elements.length; j < len1; j++) {
           element = elements[j];
           if (element instanceof StringLiteral) {
-            unquotedElementValue = this.jsx ? element.unquotedValueForJSX : element.unquotedValueForTemplateLiteral;
+            unquotedElementValue = element.unquotedValueForTemplateLiteral;
             fragments.push(this.makeCode(unquotedElementValue));
           } else {
-            if (!this.jsx) {
-              fragments.push(this.makeCode('$'));
-            }
+            fragments.push(this.makeCode('$'));
             code = element.compileToFragments(o, LEVEL_PAREN);
             if (!this.isNestedTag(element) || code.some(function(fragment) {
               var ref2;
@@ -7526,16 +7501,12 @@
             fragments.push(...code);
           }
         }
-        if (!this.jsx) {
-          fragments.push(this.makeCode('`'));
-        }
+        fragments.push(this.makeCode('`'));
         return fragments;
       }
 
       isNestedTag(element) {
-        var call;
-        call = typeof element.unwrapAll === "function" ? element.unwrapAll() : void 0;
-        return this.jsx && call instanceof JSXElement;
+        return false;
       }
 
       astType() {
@@ -8834,7 +8805,7 @@
   };
 
   // We don’t currently have a token corresponding to the empty space
-  // between interpolation/JSX expression braces, so piece together the location
+  // between interpolation expression braces, so piece together the location
   // data by trimming the braces from the Interpolation’s location data.
   // Technically the last_line/last_column calculation here could be
   // incorrect if the ending brace is preceded by a newline, but
