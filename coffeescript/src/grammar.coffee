@@ -177,12 +177,6 @@ grammar =
 
   Identifier: [
     o 'IDENTIFIER',                             -> new IdentifierLiteral $1
-    o 'JSX_TAG',                                -> new JSXTag $1.toString(),
-                                                     tagNameLocationData:                  $1.tagNameToken[2]
-                                                     closingTagOpeningBracketLocationData: $1.closingTagOpeningBracketToken?[2]
-                                                     closingTagSlashLocationData:          $1.closingTagSlashToken?[2]
-                                                     closingTagNameLocationData:           $1.closingTagNameToken?[2]
-                                                     closingTagClosingBracketLocationData: $1.closingTagClosingBracketToken?[2]
   ]
 
   Property: [

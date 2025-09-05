@@ -48,8 +48,6 @@ exports.Lexer = class Lexer
     @seenExport = no             # Used to recognize `EXPORT FROM? AS?` tokens.
     @importSpecifierList = no    # Used to identify when in an `IMPORT {...} FROM? ...`.
     @exportSpecifierList = no    # Used to identify when in an `EXPORT {...} FROM? ...`.
-    @jsxDepth = 0                # Used to optimize JSX checks, how deep in JSX we are.
-    @jsxObjAttribute = {}        # Used to detect if JSX attributes is wrapped in {} (<div {props...} />).
 
     @chunkLine =
       opts.line or 0             # The start line for the current @chunk.
@@ -73,7 +71,6 @@ exports.Lexer = class Lexer
            @lineToken()       or
            @stringToken()     or
            @numberToken()     or
-           @jsxToken()        or
            @regexToken()      or
            @jsToken()         or
            @literalToken()
@@ -120,9 +117,7 @@ exports.Lexer = class Lexer
   # referenced as property names here, so you can still do `jQuery.is()` even
   # though `is` means `===` otherwise.
   identifierToken: ->
-    inJSXTag = @atJSXTag()
-    regex = if inJSXTag then JSX_ATTRIBUTE else IDENTIFIER
-    return 0 unless match = regex.exec @chunk
+    return 0 unless match = IDENTIFIER.exec @chunk
     [input, id, colon] = match
 
     # Preserve length of id for location data
@@ -225,7 +220,7 @@ exports.Lexer = class Lexer
           @error "'#{prevprev[1]}' cannot be used as a keyword, or as a
           function call without parentheses", prevprev[2]
 
-    if tag is 'IDENTIFIER' and id in RESERVED and not inJSXTag
+    if tag is 'IDENTIFIER' and id in RESERVED
       @error "reserved word '#{id}'", length: id.length
 
     unless tag is 'PROPERTY' or @exportSpecifierList or @importSpecifierList
@@ -259,11 +254,8 @@ exports.Lexer = class Lexer
       [tagToken[2].first_line, tagToken[2].first_column, tagToken[2].range[0]] =
         [poppedToken[2].first_line, poppedToken[2].first_column, poppedToken[2].range[0]]
     if colon
-      colonOffset = input.lastIndexOf if inJSXTag then '=' else ':'
+      colonOffset = input.lastIndexOf ':'
       colonToken = @token ':', ':', offset: colonOffset
-      colonToken.jsxColon = yes if inJSXTag # used by rewriter
-    if inJSXTag and tag is 'IDENTIFIER' and prev[0] isnt ':'
-      @token ',', ',', length: 0, origin: tagToken, generated: yes
 
     # Return the actual consumed length (accounts for 'is not' → 'isnt' transformation)
     if colon then idLength + colon.length else idLength
@@ -328,8 +320,6 @@ exports.Lexer = class Lexer
     @mergeInterpolationTokens tokens, {quote, indent, endOffset: end}, (value) =>
       @validateUnicodeCodePointEscapes value, delimiter: quote
 
-    if @atJSXTag()
-      @token ',', ',', length: 0, origin: @prev, generated: yes
 
     end
 
@@ -631,130 +621,6 @@ exports.Lexer = class Lexer
         attachCommentsToNode prev.comments, @tokens[@tokens.length - 2]
       @tokens.pop()
     this
-
-  jsxToken: ->
-    firstChar = @chunk[0]
-    # Check the previous token to detect if attribute is spread.
-    prevChar = if @tokens.length > 0 then @tokens[@tokens.length - 1][0] else ''
-    if firstChar is '<'
-      match = JSX_IDENTIFIER.exec(@chunk[1...]) or JSX_FRAGMENT_IDENTIFIER.exec(@chunk[1...])
-      return 0 unless match and (
-        @jsxDepth > 0 or
-        # Not the right hand side of an unspaced comparison (i.e. `a<b`).
-        not (prev = @prev()) or
-        prev.spaced or
-        prev[0] not in COMPARABLE_LEFT_SIDE
-      )
-      [input, id] = match
-      fullId = id
-      if '.' in id
-        [id, properties...] = id.split '.'
-      else
-        properties = []
-      tagToken = @token 'JSX_TAG', id,
-        length: id.length + 1
-        data:
-          openingBracketToken: @makeToken '<', '<'
-          tagNameToken: @makeToken 'IDENTIFIER', id, offset: 1
-      offset = id.length + 1
-      for property in properties
-        @token '.', '.', {offset}
-        offset += 1
-        @token 'PROPERTY', property, {offset}
-        offset += property.length
-      @token 'CALL_START', '(', generated: yes
-      @token '[', '[', generated: yes
-      @ends.push {tag: '/>', origin: tagToken, name: id, properties}
-      @jsxDepth++
-      return fullId.length + 1
-    else if jsxTag = @atJSXTag()
-      if @chunk[...2] is '/>' # Self-closing tag.
-        @pair '/>'
-        @token ']', ']',
-          length: 2
-          generated: yes
-        @token 'CALL_END', ')',
-          length: 2
-          generated: yes
-          data:
-            selfClosingSlashToken: @makeToken '/', '/'
-            closingBracketToken: @makeToken '>', '>', offset: 1
-        @jsxDepth--
-        return 2
-      else if firstChar is '{'
-        if prevChar is ':'
-          # This token represents the start of a JSX attribute value
-          # that’s an expression (e.g. the `{b}` in `<div a={b} />`).
-          # Our grammar represents the beginnings of expressions as `(`
-          # tokens, so make this into a `(` token that displays as `{`.
-          token = @token '(', '{'
-          @jsxObjAttribute[@jsxDepth] = no
-          # tag attribute name as JSX
-          addTokenData @tokens[@tokens.length - 3],
-            jsx: yes
-        else
-          token = @token '{', '{'
-          @jsxObjAttribute[@jsxDepth] = yes
-        @ends.push {tag: '}', origin: token}
-        return 1
-      else if firstChar is '>' # end of opening tag
-        # Ignore terminators inside a tag.
-        {origin: openingTagToken} = @pair '/>' # As if the current tag was self-closing.
-        @token ']', ']',
-          generated: yes
-          data:
-            closingBracketToken: @makeToken '>', '>'
-        @token ',', 'JSX_COMMA', generated: yes
-        {tokens, index: end} =
-          @matchWithInterpolations INSIDE_JSX, '>', '</', JSX_INTERPOLATION
-        @mergeInterpolationTokens tokens, {endOffset: end, jsx: yes}, (value) =>
-          @validateUnicodeCodePointEscapes value, delimiter: '>'
-        match = JSX_IDENTIFIER.exec(@chunk[end...]) or JSX_FRAGMENT_IDENTIFIER.exec(@chunk[end...])
-        if not match or match[1] isnt "#{jsxTag.name}#{(".#{property}" for property in jsxTag.properties).join ''}"
-          @error "expected corresponding JSX closing tag for #{jsxTag.name}",
-            jsxTag.origin.data.tagNameToken[2]
-        [, fullTagName] = match
-        afterTag = end + fullTagName.length
-        if @chunk[afterTag] isnt '>'
-          @error "missing closing > after tag name", offset: afterTag, length: 1
-        # -2/+2 for the opening `</` and +1 for the closing `>`.
-        endToken = @token 'CALL_END', ')',
-          offset: end - 2
-          length: fullTagName.length + 3
-          generated: yes
-          data:
-            closingTagOpeningBracketToken: @makeToken '<', '<', offset: end - 2
-            closingTagSlashToken: @makeToken '/', '/', offset: end - 1
-            # TODO: individual tokens for complex tag name? eg < / A . B >
-            closingTagNameToken: @makeToken 'IDENTIFIER', fullTagName, offset: end
-            closingTagClosingBracketToken: @makeToken '>', '>', offset: end + fullTagName.length
-        # make the closing tag location data more easily accessible to the grammar
-        addTokenData openingTagToken, endToken.data
-        @jsxDepth--
-        return afterTag + 1
-      else
-        return 0
-    else if @atJSXTag 1
-      if firstChar is '}'
-        @pair firstChar
-        if @jsxObjAttribute[@jsxDepth]
-          @token '}', '}'
-          @jsxObjAttribute[@jsxDepth] = no
-        else
-          @token ')', '}'
-        @token ',', ',', generated: yes
-        return 1
-      else
-        return 0
-    else
-      return 0
-
-  atJSXTag: (depth = 0) ->
-    return no if @jsxDepth is 0
-    i = @ends.length - 1
-    i-- while @ends[i]?.tag is 'OUTDENT' or depth-- > 0 # Ignore indents.
-    last = @ends[i]
-    last?.tag is '/>' and last
 
   # We treat all other single characters as a token. E.g.: `( ) , . !`
   # Multi-character operators are also literal tokens, so that Jison can assign
@@ -1286,34 +1152,6 @@ IDENTIFIER = /// ^
   ( [^\n\S]* : (?!:) )?  # Is this a property name?
 ///
 
-# Like `IDENTIFIER`, but includes `-`s
-JSX_IDENTIFIER_PART = /// (?: (?!\s)[\-$\w\x7f-\uffff] )+ ///.source
-
-# In https://facebook.github.io/jsx/ spec, JSXElementName can be
-# JSXIdentifier, JSXNamespacedName (JSXIdentifier : JSXIdentifier), or
-# JSXMemberExpression (two or more JSXIdentifier connected by `.`s).
-JSX_IDENTIFIER = /// ^
-  (?![\d<]) # Must not start with `<`.
-  ( #{JSX_IDENTIFIER_PART}
-    (?: \s* : \s* #{JSX_IDENTIFIER_PART}       # JSXNamespacedName
-    | (?: \s* \. \s* #{JSX_IDENTIFIER_PART} )+ # JSXMemberExpression
-    )? )
-///
-
-# Fragment: <></>
-JSX_FRAGMENT_IDENTIFIER = /// ^
-  ()> # Ends immediately with `>`.
-///
-
-# In https://facebook.github.io/jsx/ spec, JSXAttributeName can be either
-# JSXIdentifier or JSXNamespacedName which is JSXIdentifier : JSXIdentifier
-JSX_ATTRIBUTE = /// ^
-  (?!\d)
-  ( #{JSX_IDENTIFIER_PART}
-    (?: \s* : \s* #{JSX_IDENTIFIER_PART}       # JSXNamespacedName
-    )? )
-  ( [^\S]* = (?!=) )?  # Is this an attribute with a value?
-///
 
 NUMBER     = ///
   ^ 0b[01](?:_?[01])*n?                         | # binary
@@ -1355,17 +1193,6 @@ STRING_SINGLE  = /// ^(?: [^\\']  | \\[\s\S]                      )* ///
 STRING_DOUBLE  = /// ^(?: [^\\"#] | \\[\s\S] |           \#(?!\{) )* ///
 HEREDOC_SINGLE = /// ^(?: [^\\']  | \\[\s\S] | '(?!'')            )* ///
 HEREDOC_DOUBLE = /// ^(?: [^\\"#] | \\[\s\S] | "(?!"") | \#(?!\{) )* ///
-
-INSIDE_JSX = /// ^(?:
-    [^
-      \{ # Start of CoffeeScript interpolation.
-      <  # Maybe JSX tag (`<` not allowed even if bare).
-    ]
-  )* /// # Similar to `HEREDOC_DOUBLE` but there is no escaping.
-JSX_INTERPOLATION = /// ^(?:
-      \{       # CoffeeScript interpolation.
-    | <(?!/)   # JSX opening tag.
-  )///
 
 HEREDOC_INDENT     = /\n+([^\n\S]*)(?=\S)/g
 

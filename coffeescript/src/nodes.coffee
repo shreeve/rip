@@ -610,15 +610,6 @@ exports.Block = class Block extends Base
     len = @expressions.length
     [..., lastExp] = @expressions
     lastExp = lastExp?.unwrap() or no
-    # We also need to check that we’re not returning a JSX tag if there’s an
-    # adjacent one at the same level; JSX doesn’t allow that.
-    if lastExp and lastExp instanceof Parens and lastExp.body.expressions.length > 1
-      {body:{expressions}} = lastExp
-      [..., penult, last] = expressions
-      penult = penult.unwrap()
-      last = last.unwrap()
-      if penult instanceof JSXElement and last instanceof JSXElement
-        expressions[expressions.length - 1].error 'Adjacent JSX elements must be wrapped in an enclosing tag'
     if mark
       @expressions[len - 1]?.makeReturn results, mark
       return
@@ -1048,16 +1039,9 @@ exports.StringLiteral = class StringLiteral extends Literal
       convertTrailingNullEscapes: yes
     }
 
-    @unquotedValueForJSX = makeDelimitedLiteral val, {
-      @double
-      escapeNewlines: no
-      includeDelimiters: no
-      escapeDelimiter: no
-    }
 
   compileNode: (o) ->
     return StringWithInterpolations.fromStringLiteral(@).compileNode o if @shouldGenerateTemplateLiteral()
-    return [@makeCode @unquotedValueForJSX] if @jsx
     super o
 
   # `StringLiteral`s can represent either entire literal strings
@@ -1187,10 +1171,7 @@ exports.PropertyName = class PropertyName extends Literal
   isAssignable: YES
 
   astType: ->
-    if @jsx
-      'JSXIdentifier'
-    else
-      'Identifier'
+    'Identifier'
 
   astProperties: ->
     return
@@ -1410,7 +1391,6 @@ exports.Value = class Value extends Base
                       @isUndefined() or @isNull() or @isBoolean()
 
   isStatement : (o)    -> not @properties.length and @base.isStatement o
-  isJSXTag    : -> @base instanceof JSXTag
   assigns     : (name) -> not @properties.length and @base.assigns name
   jumps       : (o)    -> not @properties.length and @base.jumps o
 
@@ -1601,9 +1581,7 @@ exports.Value = class Value extends Base
     super o
 
   astType: ->
-    if @isJSXTag()
-      'JSXMemberExpression'
-    else if @containsSoak()
+    if @containsSoak()
       'OptionalMemberExpression'
     else
       'MemberExpression'
@@ -1613,7 +1591,6 @@ exports.Value = class Value extends Base
   # a child `Value` node assigned to the `object` property.
   astProperties: (o) ->
     [..., property] = @properties
-    property.name.jsx = yes if @isJSXTag()
     computed = property instanceof Index or property.name?.unwrap() not instanceof PropertyName
     return {
       object: @object().ast o, LEVEL_ACCESS
@@ -1623,13 +1600,6 @@ exports.Value = class Value extends Base
       shorthand: !!property.shorthand
     }
 
-  astLocationData: ->
-    return super() unless @isJSXTag()
-    # don't include leading < of JSX tag in location data
-    mergeAstLocationData(
-      jisonLocationDataToAstLocationData(@base.tagNameLocationData),
-      jisonLocationDataToAstLocationData(@properties[@properties.length - 1].locationData)
-    )
 
 exports.MetaProperty = class MetaProperty extends Base
   constructor: (@meta, @property) ->
@@ -1721,306 +1691,6 @@ exports.LineComment = class LineComment extends Base
     return
       value: @content
 
-#### JSX
-
-exports.JSXIdentifier = class JSXIdentifier extends IdentifierLiteral
-  astType: -> 'JSXIdentifier'
-
-exports.JSXTag = class JSXTag extends JSXIdentifier
-  constructor: (value, {
-    @tagNameLocationData
-    @closingTagOpeningBracketLocationData
-    @closingTagSlashLocationData
-    @closingTagNameLocationData
-    @closingTagClosingBracketLocationData
-  }) ->
-    super value
-
-  astProperties: ->
-    return
-      name: @value
-
-exports.JSXExpressionContainer = class JSXExpressionContainer extends Base
-  constructor: (@expression, {locationData} = {}) ->
-    super()
-    @expression.jsxAttribute = yes
-    @locationData = locationData ? @expression.locationData
-
-  children: ['expression']
-
-  compileNode: (o) ->
-    @expression.compileNode(o)
-
-  astProperties: (o) ->
-    return
-      expression: astAsBlockIfNeeded @expression, o
-
-exports.JSXEmptyExpression = class JSXEmptyExpression extends Base
-
-exports.JSXText = class JSXText extends Base
-  constructor: (stringLiteral) ->
-    super()
-    @value = stringLiteral.unquotedValueForJSX
-    @locationData = stringLiteral.locationData
-
-  astProperties: ->
-    return {
-      @value
-      extra:
-        raw: @value
-    }
-
-exports.JSXAttribute = class JSXAttribute extends Base
-  constructor: ({@name, value}) ->
-    super()
-    @value =
-      if value?
-        value = value.base
-        if value instanceof StringLiteral and not value.shouldGenerateTemplateLiteral()
-          value
-        else
-          new JSXExpressionContainer value
-      else
-        null
-    @value?.comments = value.comments
-
-  children: ['name', 'value']
-
-  compileNode: (o) ->
-    compiledName = @name.compileToFragments o, LEVEL_LIST
-    return compiledName unless @value?
-    val = @value.compileToFragments o, LEVEL_LIST
-    compiledName.concat @makeCode('='), val
-
-  astProperties: (o) ->
-    name = @name
-    if ':' in name.value
-      name = new JSXNamespacedName name
-    return
-      name: name.ast o
-      value: @value?.ast(o) ? null
-
-exports.JSXAttributes = class JSXAttributes extends Base
-  constructor: (arr) ->
-    super()
-    @attributes = []
-    for object in arr.objects
-      @checkValidAttribute object
-      {base} = object
-      if base instanceof IdentifierLiteral
-        # attribute with no value eg disabled
-        attribute = new JSXAttribute name: new JSXIdentifier(base.value).withLocationDataAndCommentsFrom base
-        attribute.locationData = base.locationData
-        @attributes.push attribute
-      else if not base.generated
-        # object spread attribute eg {...props}
-        attribute = base.properties[0]
-        attribute.jsx = yes
-        attribute.locationData = base.locationData
-        @attributes.push attribute
-      else
-        # Obj containing attributes with values eg a="b" c={d}
-        for property in base.properties
-          {variable, value} = property
-          attribute = new JSXAttribute {
-            name: new JSXIdentifier(variable.base.value).withLocationDataAndCommentsFrom variable.base
-            value
-          }
-          attribute.locationData = property.locationData
-          @attributes.push attribute
-    @locationData = arr.locationData
-
-  children: ['attributes']
-
-  # Catch invalid attributes: <div {a:"b", props} {props} "value" />
-  checkValidAttribute: (object) ->
-    {base: attribute} = object
-    properties = attribute?.properties or []
-    if not (attribute instanceof Obj or attribute instanceof IdentifierLiteral) or (attribute instanceof Obj and not attribute.generated and (properties.length > 1 or not (properties[0] instanceof Splat)))
-      object.error """
-        Unexpected token. Allowed JSX attributes are: id="val", src={source}, {props...} or attribute.
-      """
-
-  compileNode: (o) ->
-    fragments = []
-    for attribute in @attributes
-      fragments.push @makeCode ' '
-      fragments.push attribute.compileToFragments(o, LEVEL_TOP)...
-    fragments
-
-  astNode: (o) ->
-    attribute.ast(o) for attribute in @attributes
-
-exports.JSXNamespacedName = class JSXNamespacedName extends Base
-  constructor: (tag) ->
-    super()
-    [namespace, name] = tag.value.split ':'
-    @namespace = new JSXIdentifier(namespace).withLocationDataFrom locationData: extractSameLineLocationDataFirst(namespace.length) tag.locationData
-    @name      = new JSXIdentifier(name     ).withLocationDataFrom locationData: extractSameLineLocationDataLast(name.length      ) tag.locationData
-    @locationData = tag.locationData
-
-  children: ['namespace', 'name']
-
-  astProperties: (o) ->
-    return
-      namespace: @namespace.ast o
-      name: @name.ast o
-
-# Node for a JSX element
-exports.JSXElement = class JSXElement extends Base
-  constructor: ({@tagName, @attributes, @content}) ->
-    super()
-
-  children: ['tagName', 'attributes', 'content']
-
-  compileNode: (o) ->
-    @content?.base.jsx = yes
-    fragments = [@makeCode('<')]
-    fragments.push (tag = @tagName.compileToFragments(o, LEVEL_ACCESS))...
-    fragments.push @attributes.compileToFragments(o)...
-    if @content
-      fragments.push @makeCode('>')
-      fragments.push @content.compileNode(o, LEVEL_LIST)...
-      fragments.push [@makeCode('</'), tag..., @makeCode('>')]...
-    else
-      fragments.push @makeCode(' />')
-    fragments
-
-  isFragment: ->
-    !@tagName.base.value.length
-
-  astNode: (o) ->
-    # The location data spanning the opening element < ... > is captured by
-    # the generated Arr which contains the element's attributes
-    @openingElementLocationData = jisonLocationDataToAstLocationData @attributes.locationData
-
-    tagName = @tagName.base
-    tagName.locationData = tagName.tagNameLocationData
-    if @content?
-      @closingElementLocationData = mergeAstLocationData(
-        jisonLocationDataToAstLocationData tagName.closingTagOpeningBracketLocationData
-        jisonLocationDataToAstLocationData tagName.closingTagClosingBracketLocationData
-      )
-
-    super o
-
-  astType: ->
-    if @isFragment()
-      'JSXFragment'
-    else
-      'JSXElement'
-
-  elementAstProperties: (o) ->
-    tagNameAst = =>
-      tag = @tagName.unwrap()
-      if tag?.value and ':' in tag.value
-        tag = new JSXNamespacedName tag
-      tag.ast o
-
-    openingElement = Object.assign {
-      type: 'JSXOpeningElement'
-      name: tagNameAst()
-      selfClosing: not @closingElementLocationData?
-      attributes: @attributes.ast o
-    }, @openingElementLocationData
-
-    closingElement = null
-    if @closingElementLocationData?
-      closingElement = Object.assign {
-        type: 'JSXClosingElement'
-        name: Object.assign(
-          tagNameAst(),
-          jisonLocationDataToAstLocationData @tagName.base.closingTagNameLocationData
-        )
-      }, @closingElementLocationData
-      if closingElement.name.type in ['JSXMemberExpression', 'JSXNamespacedName']
-        rangeDiff = closingElement.range[0] - openingElement.range[0] + '/'.length
-        columnDiff = closingElement.loc.start.column - openingElement.loc.start.column + '/'.length
-        shiftAstLocationData = (node) =>
-          node.range = [
-            node.range[0] + rangeDiff
-            node.range[1] + rangeDiff
-          ]
-          node.start += rangeDiff
-          node.end += rangeDiff
-          node.loc.start =
-            line: @closingElementLocationData.loc.start.line
-            column: node.loc.start.column + columnDiff
-          node.loc.end =
-            line: @closingElementLocationData.loc.start.line
-            column: node.loc.end.column + columnDiff
-        if closingElement.name.type is 'JSXMemberExpression'
-          currentExpr = closingElement.name
-          while currentExpr.type is 'JSXMemberExpression'
-            shiftAstLocationData currentExpr unless currentExpr is closingElement.name
-            shiftAstLocationData currentExpr.property
-            currentExpr = currentExpr.object
-          shiftAstLocationData currentExpr
-        else # JSXNamespacedName
-          shiftAstLocationData closingElement.name.namespace
-          shiftAstLocationData closingElement.name.name
-
-    {openingElement, closingElement}
-
-  fragmentAstProperties: (o) ->
-    openingFragment = Object.assign {
-      type: 'JSXOpeningFragment'
-    }, @openingElementLocationData
-
-    closingFragment = Object.assign {
-      type: 'JSXClosingFragment'
-    }, @closingElementLocationData
-
-    {openingFragment, closingFragment}
-
-  contentAst: (o) ->
-    return [] unless @content and not @content.base.isEmpty?()
-
-    content = @content.unwrapAll()
-    children =
-      if content instanceof StringLiteral
-        [new JSXText content]
-      else # StringWithInterpolations
-        for element in @content.unwrapAll().extractElements o, includeInterpolationWrappers: yes, isJsx: yes
-          if element instanceof StringLiteral
-            new JSXText element
-          else # Interpolation
-            {expression} = element
-            unless expression?
-              emptyExpression = new JSXEmptyExpression()
-              emptyExpression.locationData = emptyExpressionLocationData {
-                interpolationNode: element
-                openingBrace: '{'
-                closingBrace: '}'
-              }
-
-              new JSXExpressionContainer emptyExpression, locationData: element.locationData
-            else
-              unwrapped = expression.unwrapAll()
-              if unwrapped instanceof JSXElement and
-                  # distinguish `<a><b /></a>` from `<a>{<b />}</a>`
-                  unwrapped.locationData.range[0] is element.locationData.range[0]
-                unwrapped
-              else
-                new JSXExpressionContainer unwrapped, locationData: element.locationData
-
-    child.ast(o) for child in children when not (child instanceof JSXText and child.value.length is 0)
-
-  astProperties: (o) ->
-    Object.assign(
-      if @isFragment()
-        @fragmentAstProperties o
-      else
-        @elementAstProperties o
-    ,
-      children: @contentAst o
-    )
-
-  astLocationData: ->
-    if @closingElementLocationData?
-      mergeAstLocationData @openingElementLocationData, @closingElementLocationData
-    else
-      @openingElementLocationData
 
 #### Call
 
@@ -2034,12 +1704,6 @@ exports.Call = class Call extends Base
     if @variable instanceof Value and @variable.isNotCallable()
       @variable.error "literal is not a function"
 
-    if @variable.base instanceof JSXTag
-      return new JSXElement(
-        tagName: @variable
-        attributes: new JSXAttributes @args[0].base
-        content: @args[1]
-      )
 
     # `@variable` never gets output as a result of this node getting created as
     # part of `RegexWithInterpolations`, so for that case move any comments to
