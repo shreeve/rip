@@ -720,3 +720,25 @@ When your module is loaded, `@rip/api` resolves your handler in one of two ways:
 Notes:
 - Do not mix both styles in the same module. If you export an app with `fetch`, any DSL routes queued in that module are ignored (by design) to keep behavior deterministic.
 - Hot reload: The reloader checks the entry file’s mtime (debounced ~100ms). For deep dependency changes, prefer `--hot-reload=process` or restart workers periodically.
+
+### Miscellaneous
+
+```coffee
+stampLocal = (d = new Date()) ->
+  y = d.getFullYear()
+  m = ("0#{d.getMonth()+1}").slice(-2)
+  dd = ("0#{d.getDate()}").slice(-2)
+  hh = ("0#{d.getHours()}").slice(-2)
+  mm = ("0#{d.getMinutes()}").slice(-2)
+  ss = ("0#{d.getSeconds()}").slice(-2)
+  off = -d.getTimezoneOffset()   # minutes east of UTC
+  sign = if off >= 0 then '+' else '-'
+  off = Math.abs off
+  oh = ("0#{Math.floor(off/60)}").slice(-2)
+  om = ("0#{off%60}").slice(-2)
+  "#{y}-#{m}-#{dd} at #{hh}:#{mm}:#{ss}#{sign}#{oh}#{om}"
+
+# example:
+y = stampLocal()  # "2025-09-02 at 17:59:15-0600"  (example)
+```
+
