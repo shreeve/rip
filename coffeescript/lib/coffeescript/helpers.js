@@ -248,7 +248,7 @@
     };
   })();
 
-  // A `.coffee.md` compatible version of `basename`, that returns the file sans-extension.
+  // A version of `basename` that returns the file sans-extension.
   exports.baseFileName = function(file, stripExt = false, useWinPathSep = false) {
     var parts, pathSep;
     pathSep = useWinPathSep ? /\\|\// : /\//;

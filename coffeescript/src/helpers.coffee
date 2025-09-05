@@ -160,7 +160,7 @@ exports.anonymousFileName = do ->
   ->
     "<anonymous-#{n++}>"
 
-# A `.coffee.md` compatible version of `basename`, that returns the file sans-extension.
+# A version of `basename` that returns the file sans-extension.
 exports.baseFileName = (file, stripExt = no, useWinPathSep = no) ->
   pathSep = if useWinPathSep then /\\|\// else /\//
   parts = file.split(pathSep)
