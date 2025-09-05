@@ -1157,10 +1157,7 @@ exports.IdentifierLiteral = class IdentifierLiteral extends Literal
       super(o)
 
   astType: ->
-    if @jsx
-      'JSXIdentifier'
-    else
-      'Identifier'
+    'Identifier'
 
   astProperties: ->
     return
@@ -4235,8 +4232,6 @@ exports.Splat = class Splat extends Base
 
   compileNode: (o) ->
     compiledSplat = [@makeCode('...'), @name.compileToFragments(o, LEVEL_OP)...]
-    return compiledSplat unless @jsx
-    return [@makeCode('{'), compiledSplat..., @makeCode('}')]
 
   unwrap: -> @name
 
@@ -4246,9 +4241,7 @@ exports.Splat = class Splat extends Base
     @name.propagateLhs? yes
 
   astType: ->
-    if @jsx
-      'JSXSpreadAttribute'
-    else if @lhs
+    if @lhs
       'RestElement'
     else
       'SpreadElement'
@@ -4940,7 +4933,7 @@ exports.Parens = class Parens extends Base
     # by comment-based type annotations from JavaScript labels.
     shouldWrapComment = expr.comments?.some(
       (comment) -> comment.here and not comment.unshift and not comment.newLine)
-    if expr instanceof Value and expr.isAtomic() and not @jsxAttribute and not shouldWrapComment
+    if expr instanceof Value and expr.isAtomic() and not shouldWrapComment
       expr.front = @front
       return expr.compileToFragments o
     fragments = expr.compileToFragments o, LEVEL_PAREN
@@ -4948,7 +4941,6 @@ exports.Parens = class Parens extends Base
         expr instanceof Op and not expr.isInOperator() or expr.unwrap() instanceof Call or
         (expr instanceof For and expr.returns)
       ) and (o.level < LEVEL_COND or fragments.length <= 3)
-    return @wrapInBraces fragments if @jsxAttribute
     if bare then fragments else @wrapInParentheses fragments
 
   astNode: (o) -> @body.unwrap().ast o, LEVEL_PAREN
@@ -4956,13 +4948,13 @@ exports.Parens = class Parens extends Base
 #### StringWithInterpolations
 
 exports.StringWithInterpolations = class StringWithInterpolations extends Base
-  constructor: (@body, {@quote, @startQuote, @jsxAttribute} = {}) ->
+  constructor: (@body, {@quote, @startQuote} = {}) ->
     super()
 
   @fromStringLiteral: (stringLiteral) ->
     updatedString = stringLiteral.withoutQuotesInLocationData()
     updatedStringValue = new Value(updatedString).withLocationDataFrom updatedString
-    new StringWithInterpolations Block.wrap([updatedStringValue]), quote: stringLiteral.quote, jsxAttribute: stringLiteral.jsxAttribute
+    new StringWithInterpolations Block.wrap([updatedStringValue]), quote: stringLiteral.quote
     .withLocationDataFrom stringLiteral
 
   children: ['body']
@@ -4974,7 +4966,7 @@ exports.StringWithInterpolations = class StringWithInterpolations extends Base
 
   shouldCache: -> @body.shouldCache()
 
-  extractElements: (o, {includeInterpolationWrappers, isJsx} = {}) ->
+  extractElements: (o, {includeInterpolationWrappers} = {}) ->
     # Assumes that `expr` is `Block`
     expr = @body.unwrap()
 
@@ -4993,7 +4985,7 @@ exports.StringWithInterpolations = class StringWithInterpolations extends Base
             comment.unshift = yes
             comment.newLine = yes
           attachCommentsToNode salvagedComments, node
-        if (unwrapped = node.expression?.unwrapAll()) instanceof PassthroughLiteral and unwrapped.generated and not (isJsx and o.compiling)
+        if (unwrapped = node.expression?.unwrapAll()) instanceof PassthroughLiteral and unwrapped.generated
           if o.compiling
             commentPlaceholder = new StringLiteral('').withLocationDataFrom node
             commentPlaceholder.comments = unwrapped.comments
@@ -5024,21 +5016,15 @@ exports.StringWithInterpolations = class StringWithInterpolations extends Base
   compileNode: (o) ->
     @comments ?= @startQuote?.comments
 
-    if @jsxAttribute
-      wrapped = new Parens new StringWithInterpolations @body
-      wrapped.jsxAttribute = yes
-      return wrapped.compileNode o
 
-    elements = @extractElements o, isJsx: @jsx
+    elements = @extractElements o
 
     fragments = []
-    fragments.push @makeCode '`' unless @jsx
     for element in elements
       if element instanceof StringLiteral
-        unquotedElementValue = if @jsx then element.unquotedValueForJSX else element.unquotedValueForTemplateLiteral
+        unquotedElementValue = element.unquotedValueForTemplateLiteral
         fragments.push @makeCode unquotedElementValue
       else
-        fragments.push @makeCode '$' unless @jsx
         code = element.compileToFragments(o, LEVEL_PAREN)
         if not @isNestedTag(element) or
            code.some((fragment) -> fragment.comments?.some((comment) -> comment.here is no))
@@ -5052,12 +5038,11 @@ exports.StringWithInterpolations = class StringWithInterpolations extends Base
           code[0].isStringWithInterpolations = yes
           code[code.length - 1].isStringWithInterpolations = yes
         fragments.push code...
-    fragments.push @makeCode '`' unless @jsx
     fragments
 
   isNestedTag: (element) ->
     call = element.unwrapAll?()
-    @jsx and call instanceof JSXElement
+    false
 
   astType: -> 'TemplateLiteral'
 
@@ -5934,7 +5919,7 @@ extractSameLineLocationDataLast = (numChars) -> ({range: [, endRange], last_line
 }
 
 # We don’t currently have a token corresponding to the empty space
-# between interpolation/JSX expression braces, so piece together the location
+# between interpolation expression braces, so piece together the location
 # data by trimming the braces from the Interpolation’s location data.
 # Technically the last_line/last_column calculation here could be
 # incorrect if the ending brace is preceded by a newline, but

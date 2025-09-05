@@ -749,9 +749,6 @@ exports.Lexer = class Lexer
   #    `#{` if interpolations are desired).
   #  - `delimiter` is the delimiter of the token. Examples are `'`, `"`, `'''`,
   #    `"""` and `///`.
-  #  - `closingDelimiter` is different from `delimiter` only in JSX
-  #  - `interpolators` matches the start of an interpolation, for JSX it's both
-  #    `{` and `<` (i.e. nested JSX tag)
   #
   # This method allows us to have strings within interpolations within strings,
   # ad infinitum.
@@ -826,7 +823,7 @@ exports.Lexer = class Lexer
   # of `'NEOSTRING'`s are converted using `fn` and turned into strings using
   # `options` first.
   mergeInterpolationTokens: (tokens, options, fn) ->
-    {quote, indent, double, heregex, endOffset, jsx} = options
+    {quote, indent, double, heregex, endOffset} = options
 
     if tokens.length > 1
       lparen = @token 'STRING_START', '(', length: quote?.length ? 0, data: {quote}, generated: not quote?.length
@@ -857,7 +854,6 @@ exports.Lexer = class Lexer
           addTokenData token, finalChunk: yes   if i is $
           addTokenData token, {indent, quote, double}
           addTokenData token, {heregex} if heregex
-          addTokenData token, {jsx} if jsx
           token[0] = 'STRING'
           token[1] = '"' + converted + '"'
           if tokens.length is 1 and quote?
