@@ -1,24 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bash
 
-import { existsSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-const potentialPaths = [
-  join(process.cwd(), 'node_modules/rip/lib/coffeescript'),
-  join(process.cwd(), 'node_modules/coffeescript/lib/coffeescript'),
-  join(__dirname, '../lib/coffeescript')
-];
-
-for (const base of potentialPaths) {
-  const target = join(base, 'cake.js');
-  if (existsSync(target)) {
-    const mod = await import(pathToFileURL(target).href);
-    if (mod?.run) {
-      await mod.run();
-      break;
-    }
-  }
-}
+DIR="$(cd "$(dirname "$0")" && pwd)"
+exec node "$DIR/cake.js" "$@"
