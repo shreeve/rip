@@ -68,7 +68,7 @@ buildExceptParser = (callback) ->
   for file in files
     try
       source = fs.readFileSync file, 'utf8'
-      output = CoffeeScript.compile source, {bare: false, filename: file, literate: file.match(/\.coffee\.md$/)}
+      output = CoffeeScript.compile source, {bare: false, filename: file}
       outputFile = "lib/coffeescript/#{path.basename(file, path.extname(file))}.js"
       fs.writeFileSync outputFile, output
       compiled++
@@ -272,11 +272,11 @@ buildDocTests = (watch = no) ->
       if filename.indexOf('.coffee') isnt -1
         type = 'coffeescript'
       else if filename.indexOf('.coffee.md') isnt -1
-        type = 'literate-coffeescript'
+        type = 'coffeescript'
       else
         continue
 
-      # Set the type to text/x-coffeescript or text/x-literate-coffeescript
+      # Set the type to text/x-coffeescript
       # to prevent the compiler from automatically running the script
       output += """
         <script type="text/x-#{type}" class="test" id="#{filename.split('.')[0]}">

@@ -215,7 +215,6 @@ compileScript = (file, input, base = null) ->
       CoffeeScript.eval opts.prelude, task.options if opts.prelude
       CoffeeScript.run task.input, task.options
     else if opts.join and task.file isnt opts.join
-      task.input = helpers.invertLiterate task.input if helpers.isLiterate file
       sourceCode[sources.indexOf(task.file)] = task.input
       compileJoin()
     else

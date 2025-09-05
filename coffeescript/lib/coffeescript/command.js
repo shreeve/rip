@@ -283,9 +283,6 @@ with...
         }
         return CoffeeScript.run(task.input, task.options);
       } else if (opts.join && task.file !== opts.join) {
-        if (helpers.isLiterate(file)) {
-          task.input = helpers.invertLiterate(task.input);
-        }
         sourceCode[sources.indexOf(task.file)] = task.input;
         return compileJoin();
       } else {
