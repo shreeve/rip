@@ -5,11 +5,7 @@ import { parser } from './parser';
 // on Node.js/V8. This module
 // contains the main entry functions for tokenizing, parsing, and compiling
 // source CoffeeScript into JavaScript.
-var Lexer, SourceMap, base64encode, checkShebangLine, getSourceMap, lexer, packageJson, parser, withPrettyErrors;
-
-
-
-
+var Lexer, SourceMap, base64encode, checkShebangLine, getSourceMap, lexer, packageJson, parser, withPrettyErrors;;
 
 helpers = require('./helpers');
 
@@ -56,7 +52,7 @@ base64encode = function(src) {
 // lexer/parser/compiler.
 withPrettyErrors = function(fn) {
   return function(code, options = {}) {
-    var err;
+    var err;;
     try {
       return fn.call(this, code, options);
     } catch (error) {
@@ -80,7 +76,7 @@ withPrettyErrors = function(fn) {
 // object, where sourceMap is a sourcemap.coffee#SourceMap object, handy for
 // doing programmatic lookups.
 export const compile = withPrettyErrors(function(code, options = {}) {
-  var ast, currentColumn, currentLine, encoded, filename, fragment, fragments, generateSourceMap, header, i, js, len, map, newLines, nodes, range, sourceCodeLastLine, sourceCodeNumberOfLines, sourceMapDataURI, sourceURL, token, tokens, transpiler, transpilerOptions, transpilerOutput, v3SourceMap;
+  var ast, currentColumn, currentLine, encoded, filename, fragment, fragments, generateSourceMap, header, i, js, len, map, newLines, range, sourceCodeLastLine, sourceCodeNumberOfLines, sourceMapDataURI, sourceURL, token, transpiler, transpilerOptions, transpilerOutput, v3SourceMap;;
   // Clone `options`, to avoid mutating the `options` object passed in.
   options = Object.assign({}, options);
   generateSourceMap = options.sourceMap || options.inlineMap || (options.filename == null);
@@ -93,7 +89,7 @@ export const compile = withPrettyErrors(function(code, options = {}) {
   // Pass a list of referenced variables, so that generated variables won’t get
   // the same name.
   options.referencedVars = (function() {
-    var i, len, results;
+    var i, len, results;;
     results = [];
     for (i = 0, len = tokens.length; i < len; i++) {
       token = tokens[i];
@@ -248,7 +244,7 @@ parser.lexer = {
     ranges: true
   },
   lex: function() {
-    var tag, token;
+    var tag, token;;
     token = parser.tokens[this.pos++];
     if (token) {
       [tag, this.yytext, this.yylloc] = token;
@@ -273,7 +269,7 @@ parser.yy = require('./nodes');
 
 // Override Jison's default error handling function.
 parser.yy.parseError = function(message, {token}) {
-  var errorLoc, errorTag, errorText, errorToken, tokens;
+  var errorLoc, errorTag, errorText, errorToken;
   // Disregard Jison's message, it contains redundant line number information.
   // Disregard the token, we take its value directly from the lexer in case
   // the error is caused by a generated token which might refer to its origin.
@@ -299,11 +295,11 @@ parser.yy.parseError = function(message, {token}) {
 };
 
 export const patchStackTrace = function() {
-  var formatSourcePosition, getSourceMapping;
+  var formatSourcePosition, getSourceMapping;;
   // Based on http://v8.googlecode.com/svn/branches/bleeding_edge/src/messages.js
   // Modified to handle sourceMap
   formatSourcePosition = function(frame, getSourceMapping) {
-    var as, column, fileLocation, filename, functionName, isConstructor, isMethodCall, line, methodName, source, tp, typeName;
+    var as, column, fileLocation, filename, functionName, isConstructor, isMethodCall, line, methodName, source, tp, typeName;;
     filename = void 0;
     fileLocation = '';
     if (frame.isNative()) {
@@ -351,7 +347,7 @@ export const patchStackTrace = function() {
     }
   };
   getSourceMapping = function(filename, line, column) {
-    var answer, sourceMap;
+    var answer, sourceMap;;
     sourceMap = getSourceMap(filename, line, column);
     if (sourceMap != null) {
       answer = sourceMap.sourceLocation([line - 1, column - 1]);
@@ -367,9 +363,9 @@ export const patchStackTrace = function() {
   // sourceMap, so we must monkey-patch Error to display CoffeeScript source
   // positions.
   return Error.prepareStackTrace = function(err, stack) {
-    var frame, frames;
+    var frame, frames;;
     frames = (function() {
-      var i, len, results;
+      var i, len, results;;
       results = [];
       for (i = 0, len = stack.length; i < len; i++) {
         frame = stack[i];
@@ -386,7 +382,7 @@ export const patchStackTrace = function() {
 };
 
 checkShebangLine = function(file, input) {
-  var args, firstLine, ref, rest;
+  var args, firstLine, ref, rest;;
   firstLine = input.split(/$/m, 1)[0];
   rest = firstLine != null ? firstLine.match(/^#!\s*([^\s]+\s*)(.*)/) : void 0;
   args = rest != null ? (ref = rest[2]) != null ? ref.split(/\s/).filter(function(s) {

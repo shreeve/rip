@@ -1,7 +1,7 @@
 import { merge, updateSyntaxError } from './helpers';
 import { Block, Assign, Value, Literal, Call, Code, Root } from './nodes';
 
-var CoffeeScript, addHistory, addMultilineHandler, fs, getCommandId, merge, nodeREPL, path, replDefaults, runInContext, sawSIGINT, transpile, updateSyntaxError, vm;
+var CoffeeScript, addHistory, addMultilineHandler, fs, getCommandId, merge, nodeREPL, path, replDefaults, runInContext, sawSIGINT, transpile, updateSyntaxError, vm;;
 
 fs = require('fs');
 
@@ -13,8 +13,6 @@ nodeREPL = require('repl');
 
 CoffeeScript = require('./');
 
-
-
 sawSIGINT = false;
 
 transpile = false;
@@ -22,7 +20,7 @@ transpile = false;
 replDefaults = {
   prompt: 'coffee> ',
   historyFile: (function() {
-    var historyPath;
+    var historyPath;;
     historyPath = process.env.XDG_CACHE_HOME || process.env.HOME;
     if (historyPath) {
       return path.join(historyPath, '.coffee_history');
@@ -30,7 +28,7 @@ replDefaults = {
   })(),
   historyMaxInputSize: 10240,
   eval: function(input, context, filename, cb) {
-    var Assign, Block, Call, Code, Literal, Root, Value, ast, err, isAsync, js, ref, ref1, referencedVars, result, token, tokens;
+    var Assign, Block, Call, Code, Literal, Root, Value, ast, err, isAsync, js, ref, ref1, referencedVars, result, token, tokens;;
     // XXX: multiline hack.
     input = input.replace(/\uFF00/g, '\n');
     // Node's REPL sends the input ending with a newline and then wrapped in
@@ -53,7 +51,7 @@ replDefaults = {
       }
       // Collect referenced variable names just like in `CoffeeScript.compile`.
       referencedVars = (function() {
-        var i, len, results;
+        var i, len, results;;
         results = [];
         for (i = 0, len = tokens.length; i < len; i++) {
           token = tokens[i];
@@ -114,7 +112,7 @@ runInContext = function(js, context, filename) {
 };
 
 addMultilineHandler = function(repl) {
-  var inputStream, multiline, nodeLineListener, origPrompt, outputStream, ref;
+  var inputStream, multiline, nodeLineListener, origPrompt, outputStream, ref;;
   ({inputStream, outputStream} = repl);
   // Node 0.11.12 changed API, prompt is now _prompt.
   origPrompt = (ref = repl._prompt) != null ? ref : repl.prompt;
@@ -178,7 +176,7 @@ addMultilineHandler = function(repl) {
 
 // Store and load command history from a file
 addHistory = function(repl, filename, maxSize) {
-  var buffer, fd, lastLine, readFd, size, stat;
+  var buffer, fd, lastLine, readFd, size, stat;;
   lastLine = null;
   try {
     // Get file info and at most maxSize of command history
@@ -228,7 +226,7 @@ addHistory = function(repl, filename, maxSize) {
 };
 
 getCommandId = function(repl, commandName) {
-  var commandsHaveLeadingDot;
+  var commandsHaveLeadingDot;;
   // Node 0.11 changed API, a command such as '.help' is now stored as 'help'
   commandsHaveLeadingDot = repl.commands['.help'] != null;
   if (commandsHaveLeadingDot) {
@@ -240,7 +238,7 @@ getCommandId = function(repl, commandName) {
 
 export default {
   start: function(opts = {}) {
-    var Module, build, major, minor, originalModuleLoad, repl;
+    var Module, build, major, minor, originalModuleLoad, repl;;
     [major, minor, build] = process.versions.node.split('.').map(function(n) {
       return parseInt(n, 10);
     });

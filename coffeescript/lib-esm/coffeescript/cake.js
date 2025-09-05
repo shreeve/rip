@@ -7,7 +7,7 @@
 // current directory's Cakefile.
 
 // External dependencies.
-var CoffeeScript, cakefileDirectory, fatalError, fs, helpers, missingTask, oparse, options, optparse, path, printTasks, switches, tasks;
+var CoffeeScript, cakefileDirectory, fatalError, fs, helpers, missingTask, oparse, options, optparse, path, printTasks, switches, tasks;;
 
 fs = require('fs');
 
@@ -61,7 +61,7 @@ helpers.extend(global, {
 // If no tasks are passed, print the help screen. Keep a reference to the
 // original directory name, when running Cake tasks from subdirectories.
 export const run = function() {
-  var arg, args, e, i, len, ref, results;
+  var arg, args, e, i, len, ref, results;;
   global.__originalDirname = fs.realpathSync('.');
   process.chdir(cakefileDirectory(__originalDirname));
   args = process.argv.slice(2);
@@ -89,7 +89,7 @@ export const run = function() {
 
 // Display the list of Cake tasks in a format similar to `rake -T`
 printTasks = function() {
-  var cakefilePath, desc, name, relative, spaces, task;
+  var cakefilePath, desc, name, relative, spaces, task;;
   relative = path.relative || path.resolve;
   cakefilePath = path.join(relative(__originalDirname, process.cwd()), 'Cakefile');
   console.log(`${cakefilePath} defines the following tasks:\n`);
@@ -119,7 +119,7 @@ missingTask = function(task) {
 // When `cake` is invoked, search in the current and all parent directories
 // to find the relevant Cakefile.
 cakefileDirectory = function(dir) {
-  var parent;
+  var parent;;
   if (fs.existsSync(path.join(dir, 'Cakefile'))) {
     return dir;
   }

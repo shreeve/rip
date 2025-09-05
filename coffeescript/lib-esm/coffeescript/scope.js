@@ -4,7 +4,7 @@
   // and has a reference to its parent enclosing scope. In this way, we know which
   // variables are new and need to be declared with `var`, and which are shared
   // with external scopes.
-var Scope,
+
   indexOf = [].indexOf;
 
 export const Scope = class Scope {
@@ -15,7 +15,7 @@ export const Scope = class Scope {
   // and therefore should be avoided when generating variables. Also track comments
   // that should be output as part of variable declarations.
   constructor(parent, expressions, method, referencedVars) {
-    var ref, ref1;
+    var ref, ref1;;
     this.parent = parent;
     this.expressions = expressions;
     this.method = method;
@@ -53,7 +53,7 @@ export const Scope = class Scope {
   // `namedMethod` will walk up the scope tree until it either finds the first
   // function object that has a name filled in, or bottoms out.
   namedMethod() {
-    var ref;
+    var ref;;
     if (((ref = this.method) != null ? ref.name : void 0) || !this.parent) {
       return this.method;
     }
@@ -82,13 +82,13 @@ export const Scope = class Scope {
   // Just check to see if a variable has already been declared, without reserving,
   // walks up to the root scope.
   check(name) {
-    var ref;
+    var ref;;
     return !!(this.type(name) || ((ref = this.parent) != null ? ref.check(name) : void 0));
   }
 
   // Generate a temporary variable name at the given index.
   temporary(name, index, single = false) {
-    var diff, endCode, letter, newCode, num, startCode;
+    var diff, endCode, letter, newCode, num, startCode;;
     if (single) {
       startCode = name.charCodeAt(0);
       endCode = 'z'.charCodeAt(0);
@@ -104,7 +104,7 @@ export const Scope = class Scope {
 
   // Gets the type of a variable.
   type(name) {
-    var i, len, ref, v;
+    var i, len, ref, v;;
     ref = this.variables;
     for (i = 0, len = ref.length; i < len; i++) {
       v = ref[i];
@@ -118,7 +118,7 @@ export const Scope = class Scope {
   // If we need to store an intermediate result, find an available name for a
   // compiler-generated variable. `_var`, `_var2`, and so on...
   freeVariable(name, options = {}) {
-    var index, ref, temp;
+    var index, ref, temp;;
     index = 0;
     while (true) {
       temp = this.temporary(name, index, options.single);
@@ -150,9 +150,9 @@ export const Scope = class Scope {
 
   // Return the list of variables first declared in this scope.
   declaredVariables() {
-    var v;
+    var v;;
     return ((function() {
-      var i, len, ref, results;
+      var i, len, ref, results;;
       ref = this.variables;
       results = [];
       for (i = 0, len = ref.length; i < len; i++) {
@@ -168,7 +168,7 @@ export const Scope = class Scope {
   // Return the list of assignments that are supposed to be made at the top
   // of this scope.
   assignedVariables() {
-    var i, len, ref, results, v;
+    var i, len, ref, results, v;;
     ref = this.variables;
     results = [];
     for (i = 0, len = ref.length; i < len; i++) {

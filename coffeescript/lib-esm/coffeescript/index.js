@@ -1,5 +1,5 @@
   // Node.js Implementation
-var CoffeeScript, ext, fs, helpers, i, len, path, ref, universalCompile, vm,
+var CoffeeScript, ext, fs, i, len, path, ref, universalCompile, vm,
   hasProp = {}.hasOwnProperty;
 
 CoffeeScript = require('./coffeescript');
@@ -13,7 +13,7 @@ path = require('path');
 helpers = CoffeeScript.helpers;
 
 CoffeeScript.transpile = function(js, options) {
-  var babel;
+  var babel;;
   try {
     babel = require('@babel/core');
   } catch (error) {
@@ -46,7 +46,7 @@ CoffeeScript.compile = function(code, options) {
 // Compile and execute a string of CoffeeScript (on the server), correctly
 // setting `__filename`, `__dirname`, and relative `require()`.
 CoffeeScript.run = function(code, options = {}) {
-  var answer, dir, mainModule, ref;
+  var answer, dir, mainModule, ref;;
   mainModule = require.main;
   // Set the filename.
   mainModule.filename = process.argv[1] = options.filename ? fs.realpathSync(options.filename) : helpers.anonymousFileName();
@@ -68,7 +68,7 @@ CoffeeScript.run = function(code, options = {}) {
 // Compile and evaluate a string of CoffeeScript (in a Node.js-like environment).
 // The CoffeeScript REPL uses this to run the input.
 CoffeeScript.eval = function(code, options = {}) {
-  var Module, _module, _require, createContext, i, isContext, js, k, len, o, r, ref, ref1, ref2, ref3, sandbox, v;
+  var Module, _module, _require, createContext, i, isContext, js, k, len, o, r, ref, ref1, ref2, ref3, sandbox, v;;
   if (!(code = code.trim())) {
     return;
   }
@@ -142,7 +142,7 @@ if (require.extensions) {
   for (i = 0, len = ref.length; i < len; i++) {
     ext = ref[i];
     (function(ext) {
-      var base;
+      var base;;
       return (base = require.extensions)[ext] != null ? base[ext] : base[ext] = function() {
         throw new Error(`Use CoffeeScript.register() or require the coffeescript/register module to require ${ext} files.`);
       };
@@ -151,7 +151,7 @@ if (require.extensions) {
 }
 
 CoffeeScript._compileRawFileContent = function(raw, filename, options = {}) {
-  var answer, err, stripped;
+  var answer, err, stripped;;
   // Strip the Unicode byte order mark, if this file begins with one.
   stripped = raw.charCodeAt(0) === 0xFEFF ? raw.substring(1) : raw;
   options = Object.assign({}, options, {
@@ -171,7 +171,7 @@ CoffeeScript._compileRawFileContent = function(raw, filename, options = {}) {
 };
 
 CoffeeScript._compileFile = function(filename, options = {}) {
-  var raw;
+  var raw;;
   raw = fs.readFileSync(filename, 'utf8');
   return CoffeeScript._compileRawFileContent(raw, filename, options);
 };

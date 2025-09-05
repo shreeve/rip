@@ -3,7 +3,7 @@
   // arrays, count characters, that sort of thing.
 
 // Peek at the beginning of a given string to see if it matches a sequence.
-var UNICODE_CODE_POINT_ESCAPE, attachCommentsToNode, buildLocationData, buildLocationHash, buildTokenDataDictionary, extend, flatten, isBoolean, isNumber, isString, ref, repeat, syntaxErrorToString, unicodeCodePointToUnicodeEscapes,
+var UNICODE_CODE_POINT_ESCAPE, buildLocationData, buildLocationHash, ref, syntaxErrorToString, unicodeCodePointToUnicodeEscapes;
   indexOf = [].indexOf;
 
 export const starts = function(string, literal, start) {
@@ -12,14 +12,14 @@ export const starts = function(string, literal, start) {
 
 // Peek at the end of a given string to see if it matches a sequence.
 export const ends = function(string, literal, back) {
-  var len;
+  var len;;
   len = literal.length;
   return literal === string.substr(string.length - len - (back || 0), len);
 };
 
 // Repeat a string `n` times.
 export const repeat = function(str, n) {
-  var res;
+  var res;;
   // Use clever algorithm to have O(log(n)) string concatenation operations.
   res = '';
   while (n > 0) {
@@ -34,7 +34,7 @@ export const repeat = function(str, n) {
 
 // Trim out all falsy values from an array.
 export const compact = function(array) {
-  var i, item, len1, results;
+  var i, item, len1, results;;
   results = [];
   for (i = 0, len1 = array.length; i < len1; i++) {
     item = array[i];
@@ -47,7 +47,7 @@ export const compact = function(array) {
 
 // Count the number of occurrences of a string in a string.
 export const count = function(string, substr) {
-  var num, pos;
+  var num, pos;;
   num = pos = 0;
   if (!substr.length) {
     return 1 / 0;
@@ -67,7 +67,7 @@ export const merge = function(options, overrides) {
 
 // Extend a source object with the properties of another object (shallow copy).
 extend = export const extend = function(object, properties) {
-  var key, val;
+  var key, val;;
   for (key in properties) {
     val = properties[key];
     object[key] = val;
@@ -84,7 +84,7 @@ export const flatten = function(array) {
 // Delete a key from an object, returning the value. Useful when a node is
 // looking for a particular method in an options hash.
 export const del = function(obj, key) {
-  var val;
+  var val;;
   val = obj[key];
   delete obj[key];
   return val;
@@ -92,7 +92,7 @@ export const del = function(obj, key) {
 
 // Typical Array::some
 export const some = (ref = Array.prototype.some) != null ? ref : function(fn) {
-  var e, i, len1, ref1;
+  var e, i, len1, ref1;;
   ref1 = this;
   for (i = 0, len1 = ref1.length; i < len1; i++) {
     e = ref1[i];
@@ -123,7 +123,7 @@ buildLocationData = function(first, last) {
 
 // Build a list of all comments attached to tokens.
 export const extractAllCommentTokens = function(tokens) {
-  var allCommentsObj, comment, commentKey, i, j, k, key, len1, len2, len3, ref1, results, sortedKeys, token;
+  var allCommentsObj, comment, commentKey, i, j, k, key, len1, len2, len3, ref1, results, sortedKeys, token;;
   allCommentsObj = {};
   for (i = 0, len1 = tokens.length; i < len1; i++) {
     token = tokens[i];
@@ -158,7 +158,7 @@ buildLocationHash = function(loc) {
 // Build a dictionary of extra token properties organized by tokens’ locations
 // used as lookup hashes.
 export const buildTokenDataDictionary = function(tokens) {
-  var base1, i, len1, token, tokenData, tokenHash;
+  var base1, i, len1, token, tokenData, tokenHash;;
   tokenData = {};
   for (i = 0, len1 = tokens.length; i < len1; i++) {
     token = tokens[i];
@@ -188,7 +188,7 @@ export const buildTokenDataDictionary = function(tokens) {
 // The object is returned either way.
 export const addDataToNode = function(parserState, firstLocationData, firstValue, lastLocationData, lastValue, forceUpdateLocation = true) {
   return function(obj) {
-    var locationData, objHash, ref1, ref2, ref3;
+    var locationData, objHash, ref1, ref2, ref3;;
     // Add location data.
     locationData = buildLocationData((ref1 = firstValue != null ? firstValue.locationData : void 0) != null ? ref1 : firstLocationData, (ref2 = lastValue != null ? lastValue.locationData : void 0) != null ? ref2 : lastLocationData);
     if (((obj != null ? obj.updateLocationDataIfMissing : void 0) != null) && (firstLocationData != null)) {
@@ -224,7 +224,7 @@ export const attachCommentsToNode = function(comments, node) {
 // Convert jison location data to a string.
 // `obj` can be a token, or a locationData.
 export const locationDataToString = function(obj) {
-  var locationData;
+  var locationData;;
   if (("2" in obj) && ("first_line" in obj[2])) {
     locationData = obj[2];
   } else if ("first_line" in obj) {
@@ -240,7 +240,7 @@ export const locationDataToString = function(obj) {
 // Generate a unique anonymous file name so we can distinguish source map cache
 // entries for any number of anonymous scripts.
 export const anonymousFileName = (function() {
-  var n;
+  var n;;
   n = 0;
   return function() {
     return `<anonymous-${n++}>`;
@@ -249,7 +249,7 @@ export const anonymousFileName = (function() {
 
 // A version of `basename` that returns the file sans-extension.
 export const baseFileName = function(file, stripExt = false, useWinPathSep = false) {
-  var parts, pathSep;
+  var parts, pathSep;;
   pathSep = useWinPathSep ? /\\|\// : /\//;
   parts = file.split(pathSep);
   file = parts[parts.length - 1];
@@ -274,7 +274,7 @@ export const isCoffee = function(file) {
 // format `<filename>:<line>:<col>: <message>` plus the line with the error and a
 // marker showing where the error is.
 export const throwSyntaxError = function(message, location) {
-  var error;
+  var error;;
   error = new SyntaxError(message);
   error.location = location;
   error.toString = syntaxErrorToString;
@@ -298,7 +298,7 @@ export const updateSyntaxError = function(error, code, filename) {
 };
 
 syntaxErrorToString = function() {
-  var codeLine, colorize, colorsEnabled, end, filename, first_column, first_line, last_column, last_line, marker, ref1, ref2, ref3, ref4, start;
+  var codeLine, colorize, colorsEnabled, end, filename, first_column, first_line, last_column, last_line, marker, ref1, ref2, ref3, ref4, start;;
   if (!(this.code && this.location)) {
     return Error.prototype.toString.call(this);
   }
@@ -351,7 +351,7 @@ export const nameWhitespaceCharacter = function(string) {
 };
 
 export const parseNumber = function(string) {
-  var base;
+  var base;;
   if (string == null) {
     return 0/0;
   }
@@ -395,9 +395,9 @@ export const isPlainObject = function(obj) {
 };
 
 unicodeCodePointToUnicodeEscapes = function(codePoint) {
-  var high, low, toUnicodeEscape;
+  var high, low, toUnicodeEscape;;
   toUnicodeEscape = function(val) {
-    var str;
+    var str;;
     str = val.toString(16);
     return `\\u${repeat('0', 4 - str.length)}${str}`;
   };
@@ -412,10 +412,10 @@ unicodeCodePointToUnicodeEscapes = function(codePoint) {
 
 // Replace `\u{...}` with `\uxxxx[\uxxxx]` in regexes without `u` flag
 export const replaceUnicodeCodePointEscapes = function(str, {flags, error, delimiter = ''} = {}) {
-  var shouldReplace;
+  var shouldReplace;;
   shouldReplace = (flags != null) && indexOf.call(flags, 'u') < 0;
   return str.replace(UNICODE_CODE_POINT_ESCAPE, function(match, escapedBackslash, codePointHex, offset) {
-    var codePointDecimal;
+    var codePointDecimal;;
     if (escapedBackslash) {
       return escapedBackslash;
     }

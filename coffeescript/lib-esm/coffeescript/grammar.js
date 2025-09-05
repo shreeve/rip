@@ -30,7 +30,7 @@ unwrap = /^function\s*\(\)\s*\{\s*return\s*([\s\S]*);\s*\}/;
 // optionally. If no action is specified, we simply pass the value of the
 // previous nonterminal.
 o = function(patternString, action, options) {
-  var getAddDataToNodeFunctionString, match, patternCount, performActionFunctionString, returnsLoc;
+  var getAddDataToNodeFunctionString, match, patternCount, performActionFunctionString, returnsLoc;;
   patternString = patternString.replace(/\s{2,}/g, ' ');
   patternCount = patternString.split(' ').length;
   if (action) {
@@ -2449,7 +2449,7 @@ for (name in grammar) {
   if (!hasProp.call(grammar, name)) continue;
   alternatives = grammar[name];
   grammar[name] = (function() {
-    var i, len, results;
+    var i, len, results;;
     results = [];
     for (i = 0, len = alternatives.length; i < len; i++) {
       alt = alternatives[i];

@@ -6,15 +6,13 @@ import { throwSyntaxError, extractAllCommentTokens } from './helpers';
   // a series of passes over the token stream, using this **Rewriter** to convert
   // shorthand into the unambiguous long form, add implicit indentation and
   // parentheses, and generally clean things up.
-var BALANCED_PAIRS, CALL_CLOSERS, CONTROL_IN_IMPLICIT, DISCARDED, EXPRESSION_CLOSE, EXPRESSION_END, EXPRESSION_START, IMPLICIT_CALL, IMPLICIT_END, IMPLICIT_FUNC, IMPLICIT_UNSPACED_CALL, INVERSES, LINEBREAKS, Rewriter, SINGLE_CLOSERS, SINGLE_LINERS, UNFINISHED, extractAllCommentTokens, generate, k, left, len, moveComments, right, throwSyntaxError,
+var BALANCED_PAIRS, CALL_CLOSERS, CONTROL_IN_IMPLICIT, DISCARDED, EXPRESSION_CLOSE, EXPRESSION_END, EXPRESSION_START, IMPLICIT_CALL, IMPLICIT_END, IMPLICIT_FUNC, IMPLICIT_UNSPACED_CALL, LINEBREAKS, SINGLE_CLOSERS, SINGLE_LINERS, extractAllCommentTokens, generate, k, left, len, moveComments, right, throwSyntaxError;
   indexOf = [].indexOf,
   hasProp = {}.hasOwnProperty;
 
-
-
 // Move attached comments from one token to another.
 moveComments = function(fromToken, toToken) {
-  var comment, k, len, ref, unshiftedComments;
+  var comment, k, len, ref, unshiftedComments;;
   if (!fromToken.comments) {
     return;
   }
@@ -39,7 +37,7 @@ moveComments = function(fromToken, toToken) {
 // Create a generated token: one that exists due to a use of implicit syntax.
 // Optionally have this new token take the attached comments from another token.
 generate = function(tag, value, origin, commentsToken) {
-  var token;
+  var token;;
   token = [tag, value];
   token.generated = true;
   if (origin) {
@@ -61,7 +59,7 @@ export const Rewriter = (function() {
     // like this. The order of these passes matters—indentation must be
     // corrected before implicit parentheses can be wrapped around blocks of code.
     rewrite(tokens1) {
-      var ref, ref1, t;
+      var ref, ref1, t;;
       this.tokens = tokens1;
       // Set environment variable `DEBUG_TOKEN_STREAM` to `true` to output token
       // debugging info. Also set `DEBUG_REWRITTEN_TOKEN_STREAM` to `true` to
@@ -71,7 +69,7 @@ export const Rewriter = (function() {
           console.log('Initial token stream:');
         }
         console.log(((function() {
-          var k, len, ref1, results;
+          var k, len, ref1, results;;
           ref1 = this.tokens;
           results = [];
           for (k = 0, len = ref1.length; k < len; k++) {
@@ -96,7 +94,7 @@ export const Rewriter = (function() {
           console.log('Rewritten token stream:');
         }
         console.log(((function() {
-          var k, len, ref2, results;
+          var k, len, ref2, results;;
           ref2 = this.tokens;
           results = [];
           for (k = 0, len = ref2.length; k < len; k++) {
@@ -115,7 +113,7 @@ export const Rewriter = (function() {
     // as tokens are inserted and removed, and the stream changes length under
     // our feet.
     scanTokens(block) {
-      var i, token, tokens;
+      var i, token, tokens;;
       ({tokens} = this);
       i = 0;
       while (token = tokens[i]) {
@@ -125,7 +123,7 @@ export const Rewriter = (function() {
     }
 
     detectEnd(i, condition, action, opts = {}) {
-      var levels, ref, ref1, token, tokens;
+      var levels, ref, ref1, token, tokens;;
       ({tokens} = this);
       levels = 0;
       while (token = tokens[i]) {
@@ -151,7 +149,7 @@ export const Rewriter = (function() {
     // Leading newlines would introduce an ambiguity in the grammar, so we
     // dispatch them here.
     removeLeadingNewlines() {
-      var i, k, l, leadingNewlineToken, len, len1, ref, ref1, tag;
+      var i, k, l, leadingNewlineToken, len, len1, ref, ref1, tag;;
       ref = this.tokens;
       for (i = k = 0, len = ref.length; k < len; i = ++k) {
         [tag] = ref[i];
@@ -177,9 +175,9 @@ export const Rewriter = (function() {
     // The lexer has tagged the opening parenthesis of a method call. Match it with
     // its paired close.
     closeOpenCalls() {
-      var action, condition;
+      var action, condition;;
       condition = function(token, i) {
-        var ref;
+        var ref;;
         return (ref = token[0]) === ')' || ref === 'CALL_END';
       };
       action = function(token, i) {
@@ -196,10 +194,10 @@ export const Rewriter = (function() {
     // The lexer has tagged the opening bracket of an indexing operation call.
     // Match it with its paired close.
     closeOpenIndexes() {
-      var action, condition, startToken;
+      var action, condition, startToken;;
       startToken = null;
       condition = function(token, i) {
-        var ref;
+        var ref;;
         return (ref = token[0]) === ']' || ref === 'INDEX_END';
       };
       action = function(token, i) {
@@ -223,7 +221,7 @@ export const Rewriter = (function() {
     // `pattern` may consist of strings (equality), an array of strings (one of)
     // or null (wildcard). Returns the index of the match or -1 if no match.
     indexOfTag(i, ...pattern) {
-      var fuzz, j, k, ref, ref1;
+      var fuzz, j, k, ref, ref1;;
       fuzz = 0;
       for (j = k = 0, ref = pattern.length; (0 <= ref ? k < ref : k > ref); j = 0 <= ref ? ++k : --k) {
         if (pattern[j] == null) {
@@ -242,7 +240,7 @@ export const Rewriter = (function() {
     // Returns `yes` if standing in front of something looking like
     // `@<x>:`, `<x>:` or `<EXPRESSION_START><x>...<EXPRESSION_END>:`.
     looksObjectish(j) {
-      var end, index;
+      var end, index;;
       if (this.indexOfTag(j, '@', null, ':') !== -1 || this.indexOfTag(j, null, ':') !== -1) {
         return true;
       }
@@ -250,7 +248,7 @@ export const Rewriter = (function() {
       if (index !== -1) {
         end = null;
         this.detectEnd(index + 1, (function(token) {
-          var ref;
+          var ref;;
           return ref = token[0], indexOf.call(EXPRESSION_END, ref) >= 0;
         }), (function(token, i) {
           return end = i;
@@ -266,7 +264,7 @@ export const Rewriter = (function() {
     // expression level. Stop searching at `LINEBREAKS` or explicit start of
     // containing balanced expression.
     findTagsBackwards(i, tags) {
-      var backStack, ref, ref1, ref2, ref3, ref4, ref5;
+      var backStack, ref, ref1, ref2, ref3, ref4, ref5;;
       backStack = [];
       while (i >= 0 && (backStack.length || (ref2 = this.tag(i), indexOf.call(tags, ref2) < 0) && ((ref3 = this.tag(i), indexOf.call(EXPRESSION_START, ref3) < 0) || this.tokens[i].generated) && (ref4 = this.tag(i), indexOf.call(LINEBREAKS, ref4) < 0))) {
         if (ref = this.tag(i), indexOf.call(EXPRESSION_END, ref) >= 0) {
@@ -283,12 +281,12 @@ export const Rewriter = (function() {
     // Look for signs of implicit calls and objects in the token stream and
     // add them.
     addImplicitBracesAndParens() {
-      var stack, start;
+      var stack, start;;
       // Track current balancing depth (both implicit and explicit) on stack.
       stack = [];
       start = null;
       return this.scanTokens(function(token, i, tokens) {
-        var endImplicitCall, endImplicitObject, forward, implicitObjectContinues, implicitObjectIndent, inControlFlow, inImplicit, inImplicitCall, inImplicitControl, inImplicitObject, isImplicit, isImplicitCall, isImplicitObject, k, newLine, nextTag, nextToken, offset, preContinuationLineIndent, preObjectToken, prevTag, prevToken, ref, ref1, ref2, ref3, ref4, ref5, s, sameLine, stackIdx, stackItem, stackNext, stackTag, stackTop, startIdx, startImplicitCall, startImplicitObject, startIndex, startTag, startsLine, tag;
+        var endImplicitCall, endImplicitObject, forward, implicitObjectContinues, implicitObjectIndent, inControlFlow, inImplicit, inImplicitCall, inImplicitControl, inImplicitObject, isImplicit, isImplicitCall, isImplicitObject, k, newLine, nextTag, nextToken, offset, preContinuationLineIndent, preObjectToken, prevTag, prevToken, ref, ref1, ref2, ref3, ref4, ref5, s, sameLine, stackIdx, stackItem, stackNext, stackTag, stackTop, startIdx, startImplicitCall, startImplicitObject, startIndex, startTag, startsLine, tag;;
         [tag] = token;
         [prevTag] = prevToken = i > 0 ? tokens[i - 1] : [];
         [nextTag] = nextToken = i < tokens.length - 1 ? tokens[i + 1] : [];
@@ -303,7 +301,7 @@ export const Rewriter = (function() {
         };
         // Helper functions
         isImplicit = function(stackItem) {
-          var ref;
+          var ref;;
           return stackItem != null ? (ref = stackItem[2]) != null ? ref.ours : void 0 : void 0;
         };
         isImplicitObject = function(stackItem) {
@@ -324,7 +322,7 @@ export const Rewriter = (function() {
         // Unclosed control statement inside implicit parens (like
         // class declaration or if-conditionals).
         inImplicitControl = function() {
-          var ref;
+          var ref;;
           return inImplicit() && ((ref = stackTop()) != null ? ref[0] : void 0) === 'CONTROL';
         };
         startImplicitCall = function(idx) {
@@ -343,7 +341,7 @@ export const Rewriter = (function() {
           return i += 1;
         };
         startImplicitObject = function(idx, {startsLine = true, continuationLineIndent} = {}) {
-          var val;
+          var val;;
           stack.push([
             '{',
             idx,
@@ -365,7 +363,7 @@ export const Rewriter = (function() {
           return i += 1;
         };
         implicitObjectContinues = (j) => {
-          var nextTerminatorIdx;
+          var nextTerminatorIdx;;
           nextTerminatorIdx = null;
           this.detectEnd(j, function(token) {
             return token[0] === 'TERMINATOR';
@@ -429,7 +427,7 @@ export const Rewriter = (function() {
           start = stack.pop();
         }
         inControlFlow = () => {
-          var controlFlow, isFunc, seenFor, tagCurrentLine;
+          var controlFlow, isFunc, seenFor, tagCurrentLine;;
           seenFor = this.findTagsBackwards(i, ['FOR']) && this.findTagsBackwards(i, ['FORIN', 'FOROF', 'FORFROM']);
           controlFlow = seenFor || this.findTagsBackwards(i, ['WHILE', 'UNTIL', 'LOOP', 'LEADING_WHEN']);
           if (!controlFlow) {
@@ -438,10 +436,10 @@ export const Rewriter = (function() {
           isFunc = false;
           tagCurrentLine = token[2].first_line;
           this.detectEnd(i, function(token, i) {
-            var ref;
+            var ref;;
             return ref = token[0], indexOf.call(LINEBREAKS, ref) >= 0;
           }, function(token, i) {
-            var first_line;
+            var first_line;;
             [prevTag, , {first_line}] = tokens[i - 1] || [];
             return isFunc = tagCurrentLine === first_line && (prevTag === '->' || prevTag === '=>');
           }, {
@@ -486,7 +484,7 @@ export const Rewriter = (function() {
         if (tag === ':') {
           // Go back to the (implicit) start of the object.
           s = (function() {
-            var ref3;
+            var ref3;;
             switch (false) {
               case ref3 = this.tag(i - 1), indexOf.call(EXPRESSION_END, ref3) < 0:
                 [startTag, startIndex] = start;
@@ -608,7 +606,7 @@ export const Rewriter = (function() {
     // lost into the ether, find comments attached to doomed tokens and move them
     // to a token that will make it to the other side.
     rescueStowawayComments() {
-      var dontShiftForward, insertPlaceholder, shiftCommentsBackward, shiftCommentsForward;
+      var dontShiftForward, insertPlaceholder, shiftCommentsBackward, shiftCommentsForward;;
       insertPlaceholder = function(token, j, tokens, method) {
         if (tokens[j][0] !== 'TERMINATOR') {
           tokens[method](generate('TERMINATOR', '\n', tokens[j]));
@@ -616,7 +614,7 @@ export const Rewriter = (function() {
         return tokens[method](generate('JS', '', tokens[j], token));
       };
       dontShiftForward = function(i, tokens) {
-        var j, ref;
+        var j, ref;;
         j = i + 1;
         while (j !== tokens.length && (ref = tokens[j][0], indexOf.call(DISCARDED, ref) >= 0)) {
           if (tokens[j][0] === 'INTERPOLATION_END') {
@@ -627,7 +625,7 @@ export const Rewriter = (function() {
         return false;
       };
       shiftCommentsForward = function(token, i, tokens) {
-        var comment, j, k, len, ref, ref1, ref2;
+        var comment, j, k, len, ref, ref1, ref2;;
         // Find the next surviving token and attach this token’s comments to it,
         // with a flag that we know to output such comments *before* that
         // token’s own compilation. (Otherwise comments are output following
@@ -652,7 +650,7 @@ export const Rewriter = (function() {
         }
       };
       shiftCommentsBackward = function(token, i, tokens) {
-        var j, ref, ref1;
+        var j, ref, ref1;;
         // Find the last surviving token and attach this token’s comments to it.
         j = i;
         while (j !== -1 && (ref = tokens[j][0], indexOf.call(DISCARDED, ref) >= 0)) {
@@ -668,7 +666,7 @@ export const Rewriter = (function() {
         }
       };
       return this.scanTokens(function(token, i, tokens) {
-        var dummyToken, j, ref, ref1, ret;
+        var dummyToken, j, ref, ref1, ret;;
         if (!token.comments) {
           return 1;
         }
@@ -732,7 +730,7 @@ export const Rewriter = (function() {
     // Add location data to all tokens generated by the rewriter.
     addLocationDataToGeneratedTokens() {
       return this.scanTokens(function(token, i, tokens) {
-        var column, line, nextLocation, prevLocation, rangeIndex, ref, ref1;
+        var column, line, nextLocation, prevLocation, rangeIndex, ref, ref1;;
         if (token[2]) {
           return 1;
         }
@@ -777,12 +775,12 @@ export const Rewriter = (function() {
     // previous token, so that AST nodes ending in an `OUTDENT` token end up with a
     // location corresponding to the last “real” token under the node.
     fixIndentationLocationData() {
-      var findPrecedingComment;
+      var findPrecedingComment;;
       if (this.allComments == null) {
         this.allComments = extractAllCommentTokens(this.tokens);
       }
       findPrecedingComment = (token, {afterPosition, indentSize, first, indented}) => {
-        var comment, k, l, lastMatching, matches, ref, ref1, tokenStart;
+        var comment, k, l, lastMatching, matches, ref, ref1, tokenStart;;
         tokenStart = token[2].range[0];
         matches = function(comment) {
           if (comment.outdented) {
@@ -824,7 +822,7 @@ export const Rewriter = (function() {
         return null;
       };
       return this.scanTokens(function(token, i, tokens) {
-        var isIndent, nextToken, nextTokenIndex, precedingComment, prevLocationData, prevToken, ref, ref1, ref2, useNextToken;
+        var isIndent, nextToken, nextTokenIndex, precedingComment, prevLocationData, prevToken, ref, ref1, ref2, useNextToken;;
         if (!(((ref = token[0]) === 'INDENT' || ref === 'OUTDENT') || (token.generated && token[0] === 'CALL_END' && !((ref1 = token.data) != null ? ref1.closingTagNameToken : void 0)) || (token.generated && token[0] === '}'))) {
           return 1;
         }
@@ -880,14 +878,14 @@ export const Rewriter = (function() {
     // newlines within expressions are removed and the indentation tokens of empty
     // blocks are added.
     normalizeLines() {
-      var action, closeElseTag, condition, ifThens, indent, leading_if_then, leading_switch_when, outdent, starter;
+      var action, closeElseTag, condition, ifThens, indent, leading_if_then, leading_switch_when, outdent, starter;;
       starter = indent = outdent = null;
       leading_switch_when = null;
       leading_if_then = null;
       // Count `THEN` tags
       ifThens = [];
       condition = function(token, i) {
-        var ref, ref1, ref2, ref3;
+        var ref, ref1, ref2, ref3;;
         return token[1] !== ';' && (ref = token[0], indexOf.call(SINGLE_CLOSERS, ref) >= 0) && !(token[0] === 'TERMINATOR' && (ref1 = this.tag(i + 1), indexOf.call(EXPRESSION_CLOSE, ref1) >= 0)) && !(token[0] === 'ELSE' && (starter !== 'THEN' || (leading_if_then || leading_switch_when))) && !(((ref2 = token[0]) === 'CATCH' || ref2 === 'FINALLY') && (starter === '->' || starter === '=>')) || (ref3 = token[0], indexOf.call(CALL_CLOSERS, ref3) >= 0) && (this.tokens[i - 1].newLine || this.tokens[i - 1][0] === 'OUTDENT');
       };
       action = function(token, i) {
@@ -897,7 +895,7 @@ export const Rewriter = (function() {
         return this.tokens.splice((this.tag(i - 1) === ',' ? i - 1 : i), 0, outdent);
       };
       closeElseTag = (tokens, i) => {
-        var lastThen, outdentElse, tlen;
+        var lastThen, outdentElse, tlen;;
         tlen = ifThens.length;
         if (!(tlen > 0)) {
           return i;
@@ -912,7 +910,7 @@ export const Rewriter = (function() {
         tokens.splice(i + 1, 0, outdentElse);
         // Remove outdents from the end.
         this.detectEnd(i + 2, function(token, i) {
-          var ref;
+          var ref;;
           return (ref = token[0]) === 'OUTDENT' || ref === 'TERMINATOR';
         }, function(token, i) {
           if (this.tag(i) === 'OUTDENT' && this.tag(i + 1) === 'OUTDENT') {
@@ -922,7 +920,7 @@ export const Rewriter = (function() {
         return i + 2;
       };
       return this.scanTokens(function(token, i, tokens) {
-        var conditionTag, j, k, ref, ref1, ref2, tag;
+        var conditionTag, j, k, ref, ref1, ref2, tag;;
         [tag] = token;
         conditionTag = (tag === '->' || tag === '=>') && this.findTagsBackwards(i, ['IF', 'WHILE', 'FOR', 'UNTIL', 'SWITCH', 'WHEN', 'LEADING_WHEN', '[', 'INDEX_START']) && !(this.findTagsBackwards(i, ['THEN', '..', '...']));
         if (tag === 'TERMINATOR') {
@@ -984,10 +982,10 @@ export const Rewriter = (function() {
     // Tag postfix conditionals as such, so that we can parse them with a
     // different precedence.
     tagPostfixConditionals() {
-      var action, condition, original;
+      var action, condition, original;;
       original = null;
       condition = function(token, i) {
-        var prevTag, tag;
+        var prevTag, tag;;
         [tag] = token;
         [prevTag] = this.tokens[i - 1];
         return tag === 'TERMINATOR' || (tag === 'INDENT' && indexOf.call(SINGLE_LINERS, prevTag) < 0);
@@ -1014,7 +1012,7 @@ export const Rewriter = (function() {
     // primitive string and separately passing any expected token data properties
     exposeTokenDataToGrammar() {
       return this.scanTokens(function(token, i) {
-        var key, ref, ref1, val;
+        var key, ref, ref1, val;;
         if (token.generated || (token.data && Object.keys(token.data).length !== 0)) {
           token[1] = new String(token[1]);
           ref1 = (ref = token.data) != null ? ref : {};
@@ -1033,7 +1031,7 @@ export const Rewriter = (function() {
 
     // Generate the indentation tokens, based on another token on the same line.
     indentation(origin) {
-      var indent, outdent;
+      var indent, outdent;;
       indent = ['INDENT', 2];
       outdent = ['OUTDENT', 2];
       if (origin) {
@@ -1047,7 +1045,7 @@ export const Rewriter = (function() {
 
     // Look up a tag by token index.
     tag(i) {
-      var ref;
+      var ref;;
       return (ref = this.tokens[i]) != null ? ref[0] : void 0;
     }
 

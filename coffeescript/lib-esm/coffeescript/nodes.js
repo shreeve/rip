@@ -6,19 +6,14 @@ import { compact, flatten, extend, merge, del, starts, ends, some, addDataToNode
   // nodes are created as the result of actions in the [grammar](grammar.html),
   // but some are created by other nodes as a method of code generation. To convert
   // the syntax tree into a string of JavaScript code, call `compile()` on the root.
-var Access, Arr, Assign, AwaitReturn, Base, Block, BooleanLiteral, Call, Catch, Class, ClassProperty, ClassPrototypeProperty, Code, CodeFragment, ComputedPropertyName, DefaultLiteral, Directive, DynamicImport, DynamicImportCall, Elision, EmptyInterpolation, ExecutableClassBody, Existence, Expansion, ExportAllDeclaration, ExportDeclaration, ExportDefaultDeclaration, ExportNamedDeclaration, ExportSpecifier, ExportSpecifierList, Extends, For, FuncDirectiveReturn, FuncGlyph, HEREGEX_OMIT, HereComment, HoistTarget, IdentifierLiteral, If, ImportClause, ImportDeclaration, ImportDefaultSpecifier, ImportNamespaceSpecifier, ImportSpecifier, ImportSpecifierList, In, Index, InfinityLiteral, Interpolation, JS_FORBIDDEN, LEADING_BLANK_LINE, LEVEL_ACCESS, LEVEL_COND, LEVEL_LIST, LEVEL_OP, LEVEL_PAREN, LEVEL_TOP, LineComment, Literal, MetaProperty, ModuleDeclaration, ModuleSpecifier, ModuleSpecifierList, NEGATE, NO, NaNLiteral, NullLiteral, NumberLiteral, Obj, ObjectProperty, Op, Param, Parens, PassthroughLiteral, PropertyName, Range, RegexIndex, RegexLiteral, RegexWithInterpolations, Return, Root, SIMPLENUM, SIMPLE_STRING_OMIT, STRING_OMIT, Scope, Sequence, Slice, Splat, StatementLiteral, StringLiteral, StringWithInterpolations, Super, SuperCall, Switch, SwitchCase, SwitchWhen, TAB, THIS, TRAILING_BLANK_LINE, TaggedTemplateCall, TemplateElement, ThisLiteral, Throw, Try, UTILITIES, UndefinedLiteral, Value, While, YES, YieldReturn, addDataToNode, astAsBlockIfNeeded, attachCommentsToNode, compact, del, emptyExpressionLocationData, ends, extend, extractSameLineLocationDataFirst, extractSameLineLocationDataLast, flatten, fragmentsToText, greater, hasLineComments, indentInitial, isAstLocGreater, isFunction, isLiteralArguments, isLiteralThis, isLocationDataEndGreater, isLocationDataStartGreater, isNumber, isPlainObject, isUnassignable, jisonLocationDataToAstLocationData, lesser, locationDataToString, makeDelimitedLiteral, merge, mergeAstLocationData, mergeLocationData, moveComments, multident, parseNumber, replaceUnicodeCodePointEscapes, shouldCacheOrIsAssignable, sniffDirectives, some, starts, throwSyntaxError, unfoldSoak, unshiftAfterComments, utility, zeroWidthLocationDataFromEndLocation,
-  indexOf = [].indexOf,
-  splice = [].splice,
+var HEREGEX_OMIT, JS_FORBIDDEN, LEADING_BLANK_LINE, LEVEL_ACCESS, LEVEL_COND, LEVEL_LIST, LEVEL_OP, LEVEL_PAREN, LEVEL_TOP, NEGATE, NO, SIMPLENUM, SIMPLE_STRING_OMIT, STRING_OMIT, Scope, SwitchCase, TAB, THIS, TRAILING_BLANK_LINE, UTILITIES, YES, astAsBlockIfNeeded, attachCommentsToNode, compact, del, emptyExpressionLocationData, ends, extractSameLineLocationDataFirst, extractSameLineLocationDataLast, flatten, fragmentsToText, greater, hasLineComments, indentInitial, isAstLocGreater, isFunction, isLiteralArguments, isLiteralThis, isLocationDataEndGreater, isLocationDataStartGreater, isNumber, isPlainObject, isUnassignable, lesser, locationDataToString, makeDelimitedLiteral, merge, moveComments, multident, parseNumber, replaceUnicodeCodePointEscapes, shouldCacheOrIsAssignable, sniffDirectives, some, starts, throwSyntaxError, unfoldSoak, unshiftAfterComments, utility, zeroWidthLocationDataFromEndLocation;
+  indexOf = [].indexOf;
+  splice = [].splice;
   slice1 = [].slice;
 
 Error.stackTraceLimit = 2e308;
 
-
-
-
-
 // Import the helpers we plan to use.
-
 
 // Functions required by parser.
 export const extend = extend;
@@ -51,7 +46,7 @@ NEGATE = function() {
 // all the CodeFragments' `code` snippets, in order.
 export const CodeFragment = class CodeFragment {
   constructor(parent, code) {
-    var ref1;
+    var ref1;;
     this.code = `${code}`;
     this.type = (parent != null ? (ref1 = parent.constructor) != null ? ref1.name : void 0 : void 0) || 'unknown';
     this.locationData = parent != null ? parent.locationData : void 0;
@@ -67,9 +62,9 @@ export const CodeFragment = class CodeFragment {
 
 // Convert an array of CodeFragments into a string.
 fragmentsToText = function(fragments) {
-  var fragment;
+  var fragment;;
   return ((function() {
-    var j, len1, results1;
+    var j, len1, results1;;
     results1 = [];
     for (j = 0, len1 = fragments.length; j < len1; j++) {
       fragment = fragments[j];
@@ -102,7 +97,7 @@ export const Base = (function() {
     // so that they’re preserved for a later `compile` call that will result in
     // the comments being included in the output.
     compileWithoutComments(o, lvl, method = 'compile') {
-      var fragments, unwrapped;
+      var fragments, unwrapped;;
       if (this.comments) {
         this.ignoreTheseCommentsTemporarily = this.comments;
         delete this.comments;
@@ -135,7 +130,7 @@ export const Base = (function() {
     // already been asked to return the result (because statements know how to
     // return results).
     compileToFragments(o, lvl) {
-      var fragments, node;
+      var fragments, node;;
       o = extend({}, o);
       if (lvl) {
         o.level = lvl;
@@ -154,7 +149,7 @@ export const Base = (function() {
     // Statements converted into expressions via closure-wrapping share a scope
     // object with their parent closure, to preserve the expected lexical scope.
     compileClosure(o) {
-      var args, argumentsNode, func, meth, parts, ref1, ref2;
+      var args, argumentsNode, func, meth, parts, ref1, ref2;;
       this.checkForPureStatementInExpression();
       o.sharedScope = true;
       func = new Code([], Block.wrap([this]));
@@ -187,7 +182,7 @@ export const Base = (function() {
     }
 
     compileCommentFragments(o, node, fragments) {
-      var base1, base2, comment, commentFragment, j, len1, ref1, unshiftCommentFragment;
+      var base1, base2, comment, commentFragment, j, len1, ref1, unshiftCommentFragment;;
       if (!node.comments) {
         return fragments;
       }
@@ -199,7 +194,7 @@ export const Base = (function() {
       // to remain stowaways until they get properly output in `compileComments`
       // later on.
       unshiftCommentFragment = function(commentFragment) {
-        var precedingFragment;
+        var precedingFragment;;
         if (commentFragment.unshift) {
           // Find the first non-comment fragment and insert `commentFragment`
           // before it.
@@ -264,7 +259,7 @@ export const Base = (function() {
     // is the compiled reference. If `level` is not passed, this returns `[val, ref]` where
     // the two values are raw nodes which have not been compiled.
     cache(o, level, shouldCache) {
-      var complex, ref, sub;
+      var complex, ref, sub;;
       complex = shouldCache != null ? shouldCache(this) : this.shouldCache();
       if (complex) {
         ref = new IdentifierLiteral(o.scope.freeVariable('ref'));
@@ -289,7 +284,7 @@ export const Base = (function() {
     // methods to store their result for later replacing the `target` node, which is returned by the
     // call.
     hoist() {
-      var compileNode, compileToFragments, target;
+      var compileNode, compileToFragments, target;;
       this.hoisted = true;
       target = new HoistTarget(this);
       compileNode = this.compileNode;
@@ -311,7 +306,7 @@ export const Base = (function() {
     // Note that this is overridden for smarter behavior for
     // many statement nodes (e.g. `If`, `For`).
     makeReturn(results, mark) {
-      var node;
+      var node;;
       if (mark) {
         // Mark this node as implicitly returned, so that it can be part of the
         // node metadata returned in the AST.
@@ -331,7 +326,7 @@ export const Base = (function() {
     // that verifies `pred`. Otherwise return undefined. `contains` does not cross
     // scope boundaries.
     contains(pred) {
-      var node;
+      var node;;
       node = void 0;
       this.traverseChildren(false, function(n) {
         if (pred(n)) {
@@ -354,7 +349,7 @@ export const Base = (function() {
     // Debugging representation of the node, for inspecting the parse tree.
     // This is what `coffee --nodes` prints out.
     toString(idt = '', name = this.constructor.name) {
-      var tree;
+      var tree;;
       tree = '\n' + idt + name;
       if (this.soak) {
         tree += '?';
@@ -366,7 +361,7 @@ export const Base = (function() {
     }
 
     checkForPureStatementInExpression() {
-      var jumpNode;
+      var jumpNode;;
       if (jumpNode = this.jumps()) {
         return jumpNode.error('cannot use a pure statement in an expression');
       }
@@ -379,7 +374,7 @@ export const Base = (function() {
     // **WARNING: DO NOT OVERRIDE THIS METHOD IN CHILD CLASSES.**
     // Only override the component `ast*` methods as needed.
     ast(o, level) {
-      var astNode;
+      var astNode;;
       // Merge `level` into `o` and perform other universal checks.
       o = this.astInitialize(o, level);
       // Create serializable representation of this node.
@@ -450,7 +445,7 @@ export const Base = (function() {
 
     // Passes each child to a function, breaking when the function returns `false`.
     eachChild(func) {
-      var attr, child, j, k, len1, len2, ref1, ref2;
+      var attr, child, j, k, len1, len2, ref1, ref2;;
       if (!this.children) {
         return this;
       }
@@ -472,7 +467,7 @@ export const Base = (function() {
 
     traverseChildren(crossScope, func) {
       return this.eachChild(function(child) {
-        var recur;
+        var recur;;
         recur = func(child);
         if (recur !== false) {
           return child.traverseChildren(crossScope, func);
@@ -483,7 +478,7 @@ export const Base = (function() {
     // `replaceInContext` will traverse children looking for a node for which `match` returns
     // true. Once found, the matching node will be replaced by the result of calling `replacement`.
     replaceInContext(match, replacement) {
-      var attr, child, children, i, j, k, len1, len2, ref1, ref2;
+      var attr, child, children, i, j, k, len1, len2, ref1, ref2;;
       if (!this.children) {
         return false;
       }
@@ -520,7 +515,7 @@ export const Base = (function() {
     }
 
     unwrapAll() {
-      var node;
+      var node;;
       node = this;
       while (node !== (node = node.unwrap())) {
         continue;
@@ -551,7 +546,7 @@ export const Base = (function() {
 
     // Add location data and comments from another node
     withLocationDataAndCommentsFrom(node) {
-      var comments;
+      var comments;;
       this.withLocationDataFrom(node);
       ({comments} = node);
       if (comments != null ? comments.length : void 0) {
@@ -581,7 +576,7 @@ export const Base = (function() {
     // concatenated together, with `joinStr` added in between each, to produce a final flat array
     // of fragments.
     joinFragmentArrays(fragmentsList, joinStr) {
-      var answer, fragments, i, j, len1;
+      var answer, fragments, i, j, len1;;
       answer = [];
       for (i = j = 0, len1 = fragmentsList.length; j < len1; i = ++j) {
         fragments = fragmentsList[i];
@@ -661,7 +656,7 @@ export const Base = (function() {
 export const HoistTarget = class HoistTarget extends Base {
   // Expands hoisted fragments in the given array
   static expand(fragments) {
-    var fragment, i, j, ref1;
+    var fragment, i, j, ref1;;
     for (i = j = fragments.length - 1; j >= 0; i = j += -1) {
       fragment = fragments[i];
       if (fragment.fragments) {
@@ -725,7 +720,7 @@ export const Root = (function() {
     // better not to generate them in the first place, but for now, clean up
     // obvious double-parentheses.
     compileNode(o) {
-      var fragments, functionKeyword;
+      var fragments, functionKeyword;;
       o.indent = o.bare ? '' : TAB;
       o.level = LEVEL_TOP;
       o.compiling = true;
@@ -739,7 +734,7 @@ export const Root = (function() {
     }
 
     initializeScope(o) {
-      var j, len1, name, ref1, ref2, results1;
+      var j, len1, name, ref1, ref2, results1;;
       o.scope = new Scope(null, this.body, null, (ref1 = o.referencedVars) != null ? ref1 : []);
       ref2 = o.locals || [];
       results1 = [];
@@ -753,10 +748,10 @@ export const Root = (function() {
     }
 
     commentsAst() {
-      var comment, commentToken, j, len1, ref1, results1;
+      var comment, commentToken, j, len1, ref1, results1;;
       if (this.allComments == null) {
         this.allComments = (function() {
-          var j, len1, ref1, ref2, results1;
+          var j, len1, ref1, ref2, results1;;
           ref2 = (ref1 = this.allCommentTokens) != null ? ref1 : [];
           results1 = [];
           for (j = 0, len1 = ref2.length; j < len1; j++) {
@@ -852,7 +847,7 @@ export const Block = (function() {
     }
 
     isStatement(o) {
-      var exp, j, len1, ref1;
+      var exp, j, len1, ref1;;
       ref1 = this.expressions;
       for (j = 0, len1 = ref1.length; j < len1; j++) {
         exp = ref1[j];
@@ -864,7 +859,7 @@ export const Block = (function() {
     }
 
     jumps(o) {
-      var exp, j, jumpNode, len1, ref1;
+      var exp, j, jumpNode, len1, ref1;;
       ref1 = this.expressions;
       for (j = 0, len1 = ref1.length; j < len1; j++) {
         exp = ref1[j];
@@ -877,7 +872,7 @@ export const Block = (function() {
     // A Block node does not return its entire body, rather it
     // ensures that the final expression is returned.
     makeReturn(results, mark) {
-      var expr, lastExp, len, ref1, ref2;
+      var expr, lastExp, len, ref1, ref2;;
       len = this.expressions.length;
       ref1 = this.expressions, [lastExp] = slice1.call(ref1, -1);
       lastExp = (lastExp != null ? lastExp.unwrap() : void 0) || false;
@@ -909,7 +904,7 @@ export const Block = (function() {
     // the result, and it’s an expression, simply return it. If it’s a statement,
     // ask the statement to do so.
     compileNode(o) {
-      var answer, compiledNodes, fragments, index, j, lastFragment, len1, node, ref1, top;
+      var answer, compiledNodes, fragments, index, j, lastFragment, len1, node, ref1, top;;
       this.tab = o.indent;
       top = o.level === LEVEL_TOP;
       compiledNodes = [];
@@ -963,7 +958,7 @@ export const Block = (function() {
     }
 
     compileRoot(o) {
-      var fragments;
+      var fragments;;
       this.spaced = true;
       fragments = this.compileWithDeclarations(o);
       HoistTarget.expand(fragments);
@@ -973,7 +968,7 @@ export const Block = (function() {
     // Compile the expressions body for the contents of a function, with
     // declarations of all inner variables pushed up to the top.
     compileWithDeclarations(o) {
-      var assigns, declaredVariable, declaredVariables, declaredVariablesIndex, declars, exp, fragments, i, j, k, len1, len2, post, ref1, rest, scope, spaced;
+      var assigns, declaredVariable, declaredVariables, declaredVariablesIndex, declars, exp, fragments, i, j, k, len1, len2, post, ref1, rest, scope, spaced;;
       fragments = [];
       post = [];
       ref1 = this.expressions;
@@ -1031,7 +1026,7 @@ export const Block = (function() {
     }
 
     compileComments(fragments) {
-      var code, commentFragment, fragment, fragmentIndent, fragmentIndex, indent, j, k, l, len1, len2, len3, newLineIndex, onNextLine, p, pastFragment, pastFragmentIndex, q, ref1, ref2, ref3, ref4, trail, upcomingFragment, upcomingFragmentIndex;
+      var code, commentFragment, fragment, fragmentIndent, fragmentIndex, indent, j, k, l, len1, len2, len3, newLineIndex, onNextLine, p, pastFragment, pastFragmentIndex, q, ref1, ref2, ref3, ref4, trail, upcomingFragment, upcomingFragmentIndex;;
       for (fragmentIndex = j = 0, len1 = fragments.length; j < len1; fragmentIndex = ++j) {
         fragment = fragments[fragmentIndex];
         // Insert comments into the output at the next or previous newline.
@@ -1056,7 +1051,7 @@ export const Block = (function() {
             }
           }
           code = `\n${fragmentIndent}` + ((function() {
-            var l, len2, ref2, results1;
+            var l, len2, ref2, results1;;
             ref2 = fragment.precedingComments;
             results1 = [];
             for (l = 0, len2 = ref2.length; l < len2; l++) {
@@ -1132,7 +1127,7 @@ export const Block = (function() {
           code = fragmentIndex === 1 && /^\s+$/.test(fragments[0].code) ? '' : trail ? ' ' : `\n${fragmentIndent}`;
           // Assemble properly indented comments.
           code += ((function() {
-            var len3, q, ref4, results1;
+            var len3, q, ref4, results1;;
             ref4 = fragment.followingComments;
             results1 = [];
             for (q = 0, len3 = ref4.length; q < len3; q++) {
@@ -1204,7 +1199,7 @@ export const Block = (function() {
     }
 
     astProperties(o) {
-      var body, checkForDirectives, directives, expression, expressionAst, j, len1, ref1;
+      var body, checkForDirectives, directives, expression, expressionAst, j, len1, ref1;;
       checkForDirectives = del(o, 'checkForDirectives');
       if (this.isRootBlock || checkForDirectives) {
         sniffDirectives(this.expressions, {
@@ -1397,7 +1392,7 @@ export const NaNLiteral = class NaNLiteral extends NumberLiteral {
   }
 
   compileNode(o) {
-    var code;
+    var code;;
     code = [this.makeCode('0/0')];
     if (o.level >= LEVEL_OP) {
       return this.wrapInParentheses(code);
@@ -1428,7 +1423,7 @@ export const StringLiteral = class StringLiteral extends Literal {
       double: double1,
       heregex: heregex1
     } = {}) {
-    var heredoc, indentRegex, val;
+    var heredoc, indentRegex, val;;
     super('');
     this.originalValue = originalValue;
     this.quote = quote;
@@ -1486,7 +1481,7 @@ export const StringLiteral = class StringLiteral extends Literal {
   // a copy of the `StringLiteral` with the quotes trimmed from its location
   // data (like it would have if parsed as part of an interpolated string).
   withoutQuotesInLocationData() {
-    var copy, endsWithNewline, locationData;
+    var copy, endsWithNewline, locationData;;
     endsWithNewline = this.originalValue.slice(-1) === '\n';
     locationData = Object.assign({}, this.locationData);
     locationData.first_column += this.quote.length;
@@ -1532,7 +1527,7 @@ export const StringLiteral = class StringLiteral extends Literal {
 export const RegexLiteral = (function() {
   class RegexLiteral extends Literal {
     constructor(value, {delimiter: delimiter1 = '/', heregexCommentTokens: heregexCommentTokens = []} = {}) {
-      var endDelimiterIndex, heregex, val;
+      var endDelimiterIndex, heregex, val;;
       super('');
       this.delimiter = delimiter1;
       this.heregexCommentTokens = heregexCommentTokens;
@@ -1554,7 +1549,7 @@ export const RegexLiteral = (function() {
     }
 
     astProperties(o) {
-      var heregexCommentToken, pattern;
+      var heregexCommentToken, pattern;;
       [, pattern] = this.REGEX_REGEX.exec(this.value);
       return {
         value: void 0,
@@ -1568,7 +1563,7 @@ export const RegexLiteral = (function() {
           rawValue: void 0
         },
         comments: (function() {
-          var j, len1, ref1, results1;
+          var j, len1, ref1, results1;;
           ref1 = this.heregexCommentTokens;
           results1 = [];
           for (j = 0, len1 = ref1.length; j < len1; j++) {
@@ -1629,7 +1624,7 @@ export const IdentifierLiteral = (function() {
 
     // rip: Override compilation to handle async call operator (!)
     compileNode(o) {
-      var name;
+      var name;;
       // Check if identifier ends with ! (async call operator)
       if (this.value.endsWith('!')) {
         // Remove the ! and wrap with await and parentheses
@@ -1735,7 +1730,7 @@ export const ThisLiteral = class ThisLiteral extends Literal {
   }
 
   compileNode(o) {
-    var code, ref1;
+    var code, ref1;;
     code = ((ref1 = o.scope.method) != null ? ref1.bound : void 0) ? o.scope.method.context : this.value;
     return [this.makeCode(code)];
   }
@@ -1825,7 +1820,7 @@ export const Return = (function() {
     }
 
     compileToFragments(o, level) {
-      var expr, ref1;
+      var expr, ref1;;
       expr = (ref1 = this.expression) != null ? ref1.makeReturn() : void 0;
       if (expr && !(expr instanceof Return)) {
         return expr.compileToFragments(o, level);
@@ -1835,7 +1830,7 @@ export const Return = (function() {
     }
 
     compileNode(o) {
-      var answer, fragment, j, len1;
+      var answer, fragment, j, len1;;
       answer = [];
       // TODO: If we call `expression.compile()` here twice, we’ll sometimes
       // get back different results!
@@ -1874,7 +1869,7 @@ export const Return = (function() {
     }
 
     astProperties(o) {
-      var ref1, ref2;
+      var ref1, ref2;;
       return {
         argument: (ref1 = (ref2 = this.expression) != null ? ref2.ast(o, LEVEL_PAREN) : void 0) != null ? ref1 : null
       };
@@ -1957,7 +1952,7 @@ export const AwaitReturn = (function() {
 export const Value = (function() {
   class Value extends Base {
     constructor(base, props, tag, isDefaultValue = false) {
-      var ref1, ref2;
+      var ref1, ref2;;
       super();
       if (!props && base instanceof Value) {
         return base;
@@ -2033,7 +2028,7 @@ export const Value = (function() {
     }
 
     isAtomic() {
-      var j, len1, node, ref1;
+      var j, len1, node, ref1;;
       ref1 = this.properties.concat(this.base);
       for (j = 0, len1 = ref1.length; j < len1; j++) {
         node = ref1[j];
@@ -2075,13 +2070,13 @@ export const Value = (function() {
     }
 
     isSplice() {
-      var lastProperty, ref1;
+      var lastProperty, ref1;;
       ref1 = this.properties, [lastProperty] = slice1.call(ref1, -1);
       return lastProperty instanceof Slice;
     }
 
     looksStatic(className) {
-      var name, ref1, thisLiteral;
+      var name, ref1, thisLiteral;;
       if (!(((thisLiteral = this.base) instanceof ThisLiteral || (name = this.base).value === className) && this.properties.length === 1 && ((ref1 = this.properties[0].name) != null ? ref1.value : void 0) !== 'prototype')) {
         return false;
       }
@@ -2104,7 +2099,7 @@ export const Value = (function() {
     // We cache them separately for compiling complex expressions.
     // `a()[b()] ?= c` -> `(_base = a())[_name = b()] ? _base[_name] = c`
     cacheReference(o) {
-      var base, bref, name, nref, ref1;
+      var base, bref, name, nref, ref1;;
       ref1 = this.properties, [name] = slice1.call(ref1, -1);
       if (this.properties.length < 2 && !this.base.shouldCache() && !(name != null ? name.shouldCache() : void 0)) {
         return [this, this]; // `a` `a.b`
@@ -2130,7 +2125,7 @@ export const Value = (function() {
     // operators `?.` interspersed. Then we have to take care not to accidentally
     // evaluate anything twice when building the soak chain.
     compileNode(o) {
-      var base1, captureCode, fragments, hasMultilineFlag, i, indexStr, isAsyncCall, isBeingCalled, j, lastProp, len1, multilineParam, prop, propName, props, ref1, ref2, ref3, regexCode, toSearchableRef;
+      var base1, captureCode, fragments, hasMultilineFlag, i, indexStr, isAsyncCall, isBeingCalled, j, lastProp, len1, multilineParam, prop, propName, props, ref1, ref2, ref3, regexCode, toSearchableRef;;
       this.base.front = this.front;
       props = this.properties;
       // rip: Check if last property ends with ! (async call operator)
@@ -2198,7 +2193,7 @@ export const Value = (function() {
     // Unfold a soak into an `If`: `a?.b` -> `a.b if a?`
     unfoldSoak(o) {
       return this.unfoldedSoak != null ? this.unfoldedSoak : this.unfoldedSoak = (() => {
-        var fst, i, ifn, j, len1, prop, ref, ref1, snd;
+        var fst, i, ifn, j, len1, prop, ref, ref1, snd;;
         ifn = this.base.unfoldSoak(o);
         if (ifn) {
           ifn.body.properties.push(...this.properties);
@@ -2239,7 +2234,7 @@ export const Value = (function() {
     // For AST generation, we need an `object` that’s this `Value` minus its last
     // property, if it has properties.
     object() {
-      var initialProperties, object;
+      var initialProperties, object;;
       if (!this.hasProperties()) {
         return this;
       }
@@ -2261,7 +2256,7 @@ export const Value = (function() {
     }
 
     containsSoak() {
-      var j, len1, property, ref1;
+      var j, len1, property, ref1;;
       if (!this.hasProperties()) {
         return false;
       }
@@ -2301,7 +2296,7 @@ export const Value = (function() {
     // becomes the `property`, and the preceding properties (e.g. `a.b`) become
     // a child `Value` node assigned to the `object` property.
     astProperties(o) {
-      var computed, property, ref1, ref2;
+      var computed, property, ref1, ref2;;
       ref1 = this.properties, [property] = slice1.call(ref1, -1);
       computed = property instanceof Index || !(((ref2 = property.name) != null ? ref2.unwrap() : void 0) instanceof PropertyName);
       return {
@@ -2346,7 +2341,7 @@ export const MetaProperty = (function() {
     }
 
     compileNode(o) {
-      var fragments;
+      var fragments;;
       this.checkValid(o);
       fragments = [];
       fragments.push(...this.meta.compileToFragments(o, LEVEL_ACCESS));
@@ -2388,7 +2383,7 @@ export const HereComment = class HereComment extends Base {
   }
 
   compileNode(o) {
-    var fragment, hasLeadingMarks, indent, j, leadingWhitespace, len1, line, multiline, ref1;
+    var fragment, hasLeadingMarks, indent, j, leadingWhitespace, len1, line, multiline, ref1;;
     multiline = indexOf.call(this.content, '\n') >= 0;
     // Unindent multiline comments. They will be reindented later.
     if (multiline) {
@@ -2451,7 +2446,7 @@ export const LineComment = class LineComment extends Base {
   }
 
   compileNode(o) {
-    var fragment;
+    var fragment;;
     fragment = this.makeCode(/^\s*$/.test(this.content) ? '' : `${this.precededByBlankLine ? `\n${o.indent}` : ''}//${this.content}`);
     fragment.newLine = this.newLine;
     fragment.unshift = this.unshift;
@@ -2479,7 +2474,7 @@ export const LineComment = class LineComment extends Base {
 export const Call = (function() {
   class Call extends Base {
     constructor(variable1, args1 = [], soak1, token1) {
-      var ref1;
+      var ref1;;
       super();
       this.variable = variable1;
       this.args = args1;
@@ -2503,7 +2498,7 @@ export const Call = (function() {
     // account for a newly-discovered `new` operator to the left of us. This
     // expands the range on the left, but not the right.
     updateLocationDataIfMissing(locationData) {
-      var base, ref1;
+      var base, ref1;;
       if (this.locationData && this.needsUpdatedStartLocation) {
         this.locationData = Object.assign({}, this.locationData, {
           first_line: locationData.first_line,
@@ -2526,7 +2521,7 @@ export const Call = (function() {
 
     // Tag this invocation as creating a new instance.
     newInstance() {
-      var base, ref1;
+      var base, ref1;;
       base = ((ref1 = this.variable) != null ? ref1.base : void 0) || this.variable;
       if (base instanceof Call && !base.isNew) {
         base.newInstance();
@@ -2539,7 +2534,7 @@ export const Call = (function() {
 
     // Soaked chained invocations unfold into if/else ternary structures.
     unfoldSoak(o) {
-      var call, ifn, j, left, len1, list, ref1, rite;
+      var call, ifn, j, left, len1, list, ref1, rite;;
       if (this.soak) {
         if (this.variable instanceof Super) {
           left = new Literal(this.variable.compile(o));
@@ -2593,7 +2588,7 @@ export const Call = (function() {
 
     // Compile a vanilla function call.
     compileNode(o) {
-      var arg, argCode, argIndex, cache, compiledArgs, fragments, isAsyncCall, j, lastProp, len1, ref1, ref2, ref3, ref4, ref5, ref6, ref7, ref8, varAccess;
+      var arg, argCode, argIndex, cache, compiledArgs, fragments, isAsyncCall, j, lastProp, len1, ref1, ref2, ref3, ref4, ref5, ref6, ref7, ref8, varAccess;;
       this.checkForNewSuper();
       if ((ref1 = this.variable) != null) {
         ref1.front = this.front;
@@ -2611,7 +2606,7 @@ export const Call = (function() {
       // (see issue #4437, https://github.com/jashkenas/coffeescript/issues/4437)
       varAccess = ((ref6 = this.variable) != null ? (ref7 = ref6.properties) != null ? ref7[0] : void 0 : void 0) instanceof Access;
       argCode = (function() {
-        var j, len1, ref8, results1;
+        var j, len1, ref8, results1;;
         ref8 = this.args || [];
         results1 = [];
         for (j = 0, len1 = ref8.length; j < len1; j++) {
@@ -2660,7 +2655,7 @@ export const Call = (function() {
     }
 
     containsSoak() {
-      var ref1;
+      var ref1;;
       if (this.soak) {
         return true;
       }
@@ -2671,7 +2666,7 @@ export const Call = (function() {
     }
 
     astNode(o) {
-      var ref1;
+      var ref1;;
       if (this.soak && this.variable instanceof Super && ((ref1 = o.scope.namedMethod()) != null ? ref1.ctor : void 0)) {
         this.variable.error("Unsupported reference to 'super'");
       }
@@ -2690,11 +2685,11 @@ export const Call = (function() {
     }
 
     astProperties(o) {
-      var arg;
+      var arg;;
       return {
         callee: this.variable.ast(o, LEVEL_ACCESS),
         arguments: (function() {
-          var j, len1, ref1, results1;
+          var j, len1, ref1, results1;;
           ref1 = this.args;
           results1 = [];
           for (j = 0, len1 = ref1.length; j < len1; j++) {
@@ -2726,12 +2721,12 @@ export const Call = (function() {
 export const SuperCall = (function() {
   class SuperCall extends Call {
     isStatement(o) {
-      var ref1;
+      var ref1;;
       return ((ref1 = this.expressions) != null ? ref1.length : void 0) && o.level === LEVEL_TOP;
     }
 
     compileNode(o) {
-      var ref, ref1, replacement, superCall;
+      var ref, ref1, replacement, superCall;;
       if (!((ref1 = this.expressions) != null ? ref1.length : void 0)) {
         return super.compileNode(o);
       }
@@ -2763,7 +2758,7 @@ export const Super = (function() {
     }
 
     compileNode(o) {
-      var fragments, method, name, nref, ref1, ref2, salvagedComments, variable;
+      var fragments, method, name, nref, ref1, ref2, salvagedComments, variable;;
       this.checkInInstanceMethod(o);
       method = o.scope.namedMethod();
       if (!((method.ctor != null) || (this.accessor != null))) {
@@ -2794,7 +2789,7 @@ export const Super = (function() {
     }
 
     checkInInstanceMethod(o) {
-      var method;
+      var method;;
       method = o.scope.namedMethod();
       if (!(method != null ? method.isMethod : void 0)) {
         return this.error('cannot use super outside of an instance method');
@@ -2802,7 +2797,7 @@ export const Super = (function() {
     }
 
     astNode(o) {
-      var ref1;
+      var ref1;;
       this.checkInInstanceMethod(o);
       if (this.accessor != null) {
         return (new Value(new Super().withLocationDataFrom((ref1 = this.superLiteral) != null ? ref1 : this), [this.accessor]).withLocationDataFrom(this)).ast(o);
@@ -2839,12 +2834,12 @@ export const RegexWithInterpolations = (function() {
     }
 
     astProperties(o) {
-      var heregexCommentToken, ref1, ref2;
+      var heregexCommentToken, ref1, ref2;;
       return {
         interpolatedPattern: this.call.args[0].ast(o),
         flags: (ref1 = (ref2 = this.call.args[1]) != null ? ref2.unwrap().originalValue : void 0) != null ? ref1 : '',
         comments: (function() {
-          var j, len1, ref3, results1;
+          var j, len1, ref3, results1;;
           ref3 = this.heregexCommentTokens;
           results1 = [];
           for (j = 0, len1 = ref3.length; j < len1; j++) {
@@ -2937,7 +2932,7 @@ export const Access = (function() {
     }
 
     compileToFragments(o) {
-      var name, node;
+      var name, node;;
       name = this.name.compileToFragments(o);
       node = this.name.unwrap();
       if (node instanceof PropertyName) {
@@ -3043,7 +3038,7 @@ export const Range = (function() {
     // Compiles the range's source variables -- where it starts and where it ends.
     // But only if they need to be cached to avoid double evaluation.
     compileVariables(o) {
-      var shouldCache, step;
+      var shouldCache, step;;
       o = merge(o, {
         top: true
       });
@@ -3061,7 +3056,7 @@ export const Range = (function() {
     // When compiled normally, the range returns the contents of the *for loop*
     // needed to iterate over the values in the range. Used by comprehensions.
     compileNode(o) {
-      var cond, condPart, from, gt, idx, idxName, known, lowerBound, lt, namedIndex, ref1, ref2, stepCond, stepNotZero, stepPart, to, upperBound, varPart;
+      var cond, condPart, from, gt, idx, idxName, known, lowerBound, lt, namedIndex, ref1, ref2, stepCond, stepNotZero, stepPart, to, upperBound, varPart;;
       if (!this.fromVar) {
         this.compileVariables(o);
       }
@@ -3104,11 +3099,11 @@ export const Range = (function() {
 
     // When used as a value, expand the range into the equivalent array.
     compileArray(o) {
-      var args, body, cond, hasArgs, i, idt, known, post, pre, range, ref1, ref2, result, vars;
+      var args, body, cond, hasArgs, i, idt, known, post, pre, range, ref1, ref2, result, vars;;
       known = (this.fromNum != null) && (this.toNum != null);
       if (known && Math.abs(this.fromNum - this.toNum) <= 20) {
         range = (function() {
-          var results1 = [];
+          var results1 = [];;
           for (var j = ref1 = this.fromNum, ref2 = this.toNum; ref1 <= ref2 ? j <= ref2 : j >= ref2; ref1 <= ref2 ? j++ : j--){ results1.push(j); }
           return results1;
         }).apply(this);
@@ -3145,7 +3140,7 @@ export const Range = (function() {
     }
 
     astProperties(o) {
-      var ref1, ref2, ref3, ref4;
+      var ref1, ref2, ref3, ref4;;
       return {
         from: (ref1 = (ref2 = this.from) != null ? ref2.ast(o) : void 0) != null ? ref1 : null,
         to: (ref3 = (ref4 = this.to) != null ? ref4.ast(o) : void 0) != null ? ref3 : null,
@@ -3177,7 +3172,7 @@ export const Slice = (function() {
     // `9e9` is used because not all implementations respect `undefined` or `1/0`.
     // `9e9` should be safe because `9e9` > `2**32`, the max array length.
     compileNode(o) {
-      var compiled, compiledText, from, fromCompiled, to, toStr;
+      var compiled, compiledText, from, fromCompiled, to, toStr;;
       ({to, from} = this.range);
       // Handle an expression in the property access, e.g. `a[!b in c..]`.
       if (from != null ? from.shouldCache() : void 0) {
@@ -3221,7 +3216,7 @@ export const Obj = (function() {
     }
 
     isAssignable(opts) {
-      var j, len1, message, prop, ref1, ref2;
+      var j, len1, message, prop, ref1, ref2;;
       ref1 = this.properties;
       for (j = 0, len1 = ref1.length; j < len1; j++) {
         prop = ref1[j];
@@ -3246,7 +3241,7 @@ export const Obj = (function() {
 
     // Check if object contains splat.
     hasSplat() {
-      var j, len1, prop, ref1;
+      var j, len1, prop, ref1;;
       ref1 = this.properties;
       for (j = 0, len1 = ref1.length; j < len1; j++) {
         prop = ref1[j];
@@ -3261,7 +3256,7 @@ export const Obj = (function() {
     // `{a, rest..., b} = obj` -> `{a, b, rest...} = obj`
     // `foo = ({a, rest..., b}) ->` -> `foo = {a, b, rest...}) ->`
     reorderProperties() {
-      var props, splatProp, splatProps;
+      var props, splatProp, splatProps;;
       props = this.properties;
       splatProps = this.getAndCheckSplatProps();
       splatProp = props.splice(splatProps[0], 1);
@@ -3269,7 +3264,7 @@ export const Obj = (function() {
     }
 
     compileNode(o) {
-      var answer, i, idt, indent, isCompact, j, join, k, key, l, lastNode, len1, len2, len3, node, prop, props, ref1, value;
+      var answer, i, idt, indent, isCompact, j, join, k, key, l, lastNode, len1, len2, len3, node, prop, props, ref1, value;;
       if (this.hasSplat() && this.lhs) {
         this.reorderProperties();
       }
@@ -3350,13 +3345,13 @@ export const Obj = (function() {
     }
 
     getAndCheckSplatProps() {
-      var i, prop, props, splatProps;
+      var i, prop, props, splatProps;;
       if (!(this.hasSplat() && this.lhs)) {
         return;
       }
       props = this.properties;
       splatProps = (function() {
-        var j, len1, results1;
+        var j, len1, results1;;
         results1 = [];
         for (i = j = 0, len1 = props.length; j < len1; i = ++j) {
           prop = props[i];
@@ -3373,7 +3368,7 @@ export const Obj = (function() {
     }
 
     assigns(name) {
-      var j, len1, prop, ref1;
+      var j, len1, prop, ref1;;
       ref1 = this.properties;
       for (j = 0, len1 = ref1.length; j < len1; j++) {
         prop = ref1[j];
@@ -3385,7 +3380,7 @@ export const Obj = (function() {
     }
 
     eachName(iterator) {
-      var j, len1, prop, ref1, results1;
+      var j, len1, prop, ref1, results1;;
       ref1 = this.properties;
       results1 = [];
       for (j = 0, len1 = ref1.length; j < len1; j++) {
@@ -3405,7 +3400,7 @@ export const Obj = (function() {
 
     // Convert “bare” properties to `ObjectProperty`s (or `Splat`s).
     expandProperty(property) {
-      var context, key, operatorToken, variable;
+      var context, key, operatorToken, variable;;
       ({variable, context, operatorToken} = property);
       key = property instanceof Assign && context === 'object' ? variable : property instanceof Assign ? (!this.lhs ? operatorToken.error(`unexpected ${operatorToken.value}`) : void 0, variable) : property;
       if (key instanceof Value && key.hasProperties()) {
@@ -3436,7 +3431,7 @@ export const Obj = (function() {
     }
 
     expandProperties() {
-      var j, len1, property, ref1, results1;
+      var j, len1, property, ref1, results1;;
       ref1 = this.properties;
       results1 = [];
       for (j = 0, len1 = ref1.length; j < len1; j++) {
@@ -3447,7 +3442,7 @@ export const Obj = (function() {
     }
 
     propagateLhs(setLhs) {
-      var j, len1, property, ref1, results1, unwrappedValue, value;
+      var j, len1, property, ref1, results1, unwrappedValue, value;;
       if (setLhs) {
         this.lhs = true;
       }
@@ -3494,11 +3489,11 @@ export const Obj = (function() {
     }
 
     astProperties(o) {
-      var property;
+      var property;;
       return {
         implicit: !!this.generated,
         properties: (function() {
-          var j, len1, ref1, results1;
+          var j, len1, ref1, results1;;
           ref1 = this.expandProperties();
           results1 = [];
           for (j = 0, len1 = ref1.length; j < len1; j++) {
@@ -3520,7 +3515,7 @@ export const Obj = (function() {
 
 export const ObjectProperty = class ObjectProperty extends Base {
   constructor({key, fromAssign}) {
-    var context, value;
+    var context, value;;
     super();
     if (fromAssign) {
       ({
@@ -3546,7 +3541,7 @@ export const ObjectProperty = class ObjectProperty extends Base {
   }
 
   astProperties(o) {
-    var isComputedPropertyName, keyAst, ref1, ref2;
+    var isComputedPropertyName, keyAst, ref1, ref2;;
     isComputedPropertyName = (this.key instanceof Value && this.key.base instanceof ComputedPropertyName) || this.key.unwrap() instanceof StringWithInterpolations;
     keyAst = this.key.ast(o, LEVEL_LIST);
     return {
@@ -3575,7 +3570,7 @@ export const Arr = (function() {
     }
 
     hasElision() {
-      var j, len1, obj, ref1;
+      var j, len1, obj, ref1;;
       ref1 = this.objects;
       for (j = 0, len1 = ref1.length; j < len1; j++) {
         obj = ref1[j];
@@ -3587,7 +3582,7 @@ export const Arr = (function() {
     }
 
     isAssignable(opts) {
-      var allowEmptyArray, allowExpansion, allowNontrailingSplat, i, j, len1, obj, ref1;
+      var allowEmptyArray, allowExpansion, allowNontrailingSplat, i, j, len1, obj, ref1;;
       ({allowExpansion, allowNontrailingSplat, allowEmptyArray = false} = opts != null ? opts : {});
       if (!this.objects.length) {
         return allowEmptyArray;
@@ -3610,7 +3605,7 @@ export const Arr = (function() {
     }
 
     compileNode(o) {
-      var answer, compiledObjs, fragment, fragmentIndex, fragmentIsElision, fragments, includesLineCommentsOnNonFirstElement, index, j, k, l, len1, len2, len3, len4, len5, obj, objIndex, olen, p, passedElision, q, ref1, ref2, unwrappedObj;
+      var answer, compiledObjs, fragment, fragmentIndex, fragmentIsElision, fragments, includesLineCommentsOnNonFirstElement, index, j, k, l, len1, len2, len3, len4, len5, obj, objIndex, olen, p, passedElision, q, ref1, ref2, unwrappedObj;;
       if (!this.objects.length) {
         return [this.makeCode('[]')];
       }
@@ -3634,7 +3629,7 @@ export const Arr = (function() {
         }
       }
       compiledObjs = (function() {
-        var k, len2, ref2, results1;
+        var k, len2, ref2, results1;;
         ref2 = this.objects;
         results1 = [];
         for (k = 0, len2 = ref2.length; k < len2; k++) {
@@ -3695,7 +3690,7 @@ export const Arr = (function() {
     }
 
     assigns(name) {
-      var j, len1, obj, ref1;
+      var j, len1, obj, ref1;;
       ref1 = this.objects;
       for (j = 0, len1 = ref1.length; j < len1; j++) {
         obj = ref1[j];
@@ -3707,7 +3702,7 @@ export const Arr = (function() {
     }
 
     eachName(iterator) {
-      var j, len1, obj, ref1, results1;
+      var j, len1, obj, ref1, results1;;
       ref1 = this.objects;
       results1 = [];
       for (j = 0, len1 = ref1.length; j < len1; j++) {
@@ -3721,7 +3716,7 @@ export const Arr = (function() {
     // If this array is the left-hand side of an assignment, all its children
     // are too.
     propagateLhs(setLhs) {
-      var j, len1, object, ref1, results1, unwrappedObject;
+      var j, len1, object, ref1, results1, unwrappedObject;;
       if (setLhs) {
         this.lhs = true;
       }
@@ -3756,10 +3751,10 @@ export const Arr = (function() {
     }
 
     astProperties(o) {
-      var object;
+      var object;;
       return {
         elements: (function() {
-          var j, len1, ref1, results1;
+          var j, len1, ref1, results1;;
           ref1 = this.objects;
           results1 = [];
           for (j = 0, len1 = ref1.length; j < len1; j++) {
@@ -3797,7 +3792,7 @@ export const Class = (function() {
     }
 
     compileNode(o) {
-      var executableBody, node, parentName;
+      var executableBody, node, parentName;;
       this.name = this.determineName();
       executableBody = this.walkBody(o);
       if (this.parent instanceof Value && !this.parent.hasProperties()) {
@@ -3832,7 +3827,7 @@ export const Class = (function() {
     }
 
     compileClassDeclaration(o) {
-      var ref1, ref2, result;
+      var ref1, ref2, result;;
       if (this.externalCtor || this.boundMethods.length) {
         if (this.ctor == null) {
           this.ctor = this.makeDefaultConstructor();
@@ -3872,7 +3867,7 @@ export const Class = (function() {
 
     // Figure out the appropriate name for this class
     determineName() {
-      var message, name, node, ref1, tail;
+      var message, name, node, ref1, tail;;
       if (!this.variable) {
         return null;
       }
@@ -3896,7 +3891,7 @@ export const Class = (function() {
     }
 
     walkBody(o) {
-      var assign, end, executableBody, expression, expressions, exprs, i, initializer, initializerExpression, j, k, len1, len2, method, properties, pushSlice, ref1, start;
+      var assign, end, executableBody, expression, expressions, exprs, i, initializer, initializerExpression, j, k, len1, len2, method, properties, pushSlice, ref1, start;;
       this.ctor = null;
       this.boundMethods = [];
       executableBody = null;
@@ -3956,7 +3951,7 @@ export const Class = (function() {
       }
       if (initializer.length !== expressions.length) {
         this.body.expressions = (function() {
-          var l, len3, results1;
+          var l, len3, results1;;
           results1 = [];
           for (l = 0, len3 = initializer.length; l < len3; l++) {
             expression = initializer[l];
@@ -4010,7 +4005,7 @@ export const Class = (function() {
 
     // Returns a configured class initializer method
     addInitializerMethod(assign) {
-      var isConstructor, method, methodName, operatorToken, variable;
+      var isConstructor, method, methodName, operatorToken, variable;;
       ({
         variable,
         value: method,
@@ -4044,7 +4039,7 @@ export const Class = (function() {
     }
 
     addClassProperty(assign) {
-      var operatorToken, staticClassName, value, variable;
+      var operatorToken, staticClassName, value, variable;;
       ({variable, value, operatorToken} = assign);
       ({staticClassName} = variable.looksStatic(this.name));
       return new ClassProperty({
@@ -4064,7 +4059,7 @@ export const Class = (function() {
     }
 
     addClassPrototypeProperty(assign) {
-      var value, variable;
+      var value, variable;;
       ({variable, value} = assign);
       return new ClassPrototypeProperty({
         name: variable.base,
@@ -4073,7 +4068,7 @@ export const Class = (function() {
     }
 
     makeDefaultConstructor() {
-      var applyArgs, applyCtor, ctor;
+      var applyArgs, applyCtor, ctor;;
       ctor = this.addInitializerMethod(new Assign(new Value(new PropertyName('constructor')), new Code()));
       this.body.unshift(ctor);
       if (this.parent) {
@@ -4089,9 +4084,9 @@ export const Class = (function() {
     }
 
     proxyBoundMethods() {
-      var method, name;
+      var method, name;;
       this.ctor.thisAssignments = (function() {
-        var j, len1, ref1, results1;
+        var j, len1, ref1, results1;;
         ref1 = this.boundMethods;
         results1 = [];
         for (j = 0, len1 = ref1.length; j < len1; j++) {
@@ -4108,7 +4103,7 @@ export const Class = (function() {
     }
 
     declareName(o) {
-      var alreadyDeclared, name, ref1;
+      var alreadyDeclared, name, ref1;;
       if (!((name = (ref1 = this.variable) != null ? ref1.unwrap() : void 0) instanceof IdentifierLiteral)) {
         return;
       }
@@ -4121,7 +4116,7 @@ export const Class = (function() {
     }
 
     astNode(o) {
-      var argumentsNode, jumpNode, ref1;
+      var argumentsNode, jumpNode, ref1;;
       if (jumpNode = this.body.jumps()) {
         jumpNode.error('Class bodies cannot contain pure statements');
       }
@@ -4151,7 +4146,7 @@ export const Class = (function() {
     }
 
     astProperties(o) {
-      var ref1, ref2, ref3, ref4;
+      var ref1, ref2, ref3, ref4;;
       return {
         id: (ref1 = (ref2 = this.variable) != null ? ref2.ast(o) : void 0) != null ? ref1 : null,
         superClass: (ref3 = (ref4 = this.parent) != null ? ref4.ast(o, LEVEL_PAREN) : void 0) != null ? ref3 : null,
@@ -4176,7 +4171,7 @@ export const ExecutableClassBody = (function() {
     }
 
     compileNode(o) {
-      var args, argumentsNode, directives, externalCtor, ident, jumpNode, klass, params, parent, ref1, wrapper;
+      var args, argumentsNode, directives, externalCtor, ident, jumpNode, klass, params, parent, ref1, wrapper;;
       if (jumpNode = this.body.jumps()) {
         jumpNode.error('Class bodies cannot contain pure statements');
       }
@@ -4221,7 +4216,7 @@ export const ExecutableClassBody = (function() {
     // - Hoist static assignments into `@properties`
     // - Convert invalid ES properties into class or prototype assignments
     walkBody() {
-      var directives, expr, index;
+      var directives, expr, index;;
       directives = [];
       index = 0;
       while (expr = this.body.expressions[index]) {
@@ -4235,7 +4230,7 @@ export const ExecutableClassBody = (function() {
         }
       }
       this.traverseChildren(false, (child) => {
-        var cont, i, j, len1, node, ref1;
+        var cont, i, j, len1, node, ref1;;
         if (child instanceof Class || child instanceof HoistTarget) {
           return false;
         }
@@ -4270,9 +4265,9 @@ export const ExecutableClassBody = (function() {
 
     // Make class/prototype assignments for invalid ES properties
     addProperties(assigns) {
-      var assign, base, name, prototype, result, value, variable;
+      var assign, base, name, prototype, result, value, variable;;
       result = (function() {
-        var j, len1, results1;
+        var j, len1, results1;;
         results1 = [];
         for (j = 0, len1 = assigns.length; j < len1; j++) {
           assign = assigns[j];
@@ -4329,7 +4324,7 @@ export const ClassProperty = (function() {
     }
 
     astProperties(o) {
-      var ref1, ref2, ref3, ref4;
+      var ref1, ref2, ref3, ref4;;
       return {
         key: this.name.ast(o, LEVEL_LIST),
         value: this.value.ast(o, LEVEL_LIST),
@@ -4407,10 +4402,10 @@ export const ModuleDeclaration = (function() {
     }
 
     astAssertions(o) {
-      var ref1;
+      var ref1;;
       if (((ref1 = this.assertions) != null ? ref1.properties : void 0) != null) {
         return this.assertions.properties.map((assertion) => {
-          var end, left, loc, right, start;
+          var end, left, loc, right, start;;
           ({start, end, loc, left, right} = assertion.ast(o));
           return {
             type: 'ImportAttribute',
@@ -4442,7 +4437,7 @@ export const ModuleDeclaration = (function() {
 
 export const ImportDeclaration = class ImportDeclaration extends ModuleDeclaration {
   compileNode(o) {
-    var code, ref1;
+    var code, ref1;;
     this.checkScope(o, 'import');
     o.importedSymbols = [];
     code = [];
@@ -4470,7 +4465,7 @@ export const ImportDeclaration = class ImportDeclaration extends ModuleDeclarati
   }
 
   astProperties(o) {
-    var ref1, ref2, ret;
+    var ref1, ref2, ret;;
     ret = {
       specifiers: (ref1 = (ref2 = this.clause) != null ? ref2.ast(o) : void 0) != null ? ref1 : [],
       source: this.source.ast(o),
@@ -4493,7 +4488,7 @@ export const ImportClause = (function() {
     }
 
     compileNode(o) {
-      var code;
+      var code;;
       code = [];
       if (this.defaultBinding != null) {
         code.push(...this.defaultBinding.compileNode(o));
@@ -4508,7 +4503,7 @@ export const ImportClause = (function() {
     }
 
     astNode(o) {
-      var ref1, ref2;
+      var ref1, ref2;;
       // The AST for `ImportClause` is the non-nested list of import specifiers
       // that will be the `specifiers` property of an `ImportDeclaration` AST
       return compact(flatten([(ref1 = this.defaultBinding) != null ? ref1.ast(o) : void 0, (ref2 = this.namedImports) != null ? ref2.ast(o) : void 0]));
@@ -4524,7 +4519,7 @@ export const ImportClause = (function() {
 
 export const ExportDeclaration = class ExportDeclaration extends ModuleDeclaration {
   compileNode(o) {
-    var code, ref1;
+    var code, ref1;;
     this.checkScope(o, 'export');
     this.checkForAnonymousClassExport();
     code = [];
@@ -4568,7 +4563,7 @@ export const ExportDeclaration = class ExportDeclaration extends ModuleDeclarati
 
 export const ExportNamedDeclaration = class ExportNamedDeclaration extends ExportDeclaration {
   astProperties(o) {
-    var clauseAst, ref1, ref2, ret;
+    var clauseAst, ref1, ref2, ret;;
     ret = {
       source: (ref1 = (ref2 = this.source) != null ? ref2.ast(o) : void 0) != null ? ref1 : null,
       assertions: this.astAssertions(o),
@@ -4616,11 +4611,11 @@ export const ModuleSpecifierList = (function() {
     }
 
     compileNode(o) {
-      var code, compiledList, fragments, index, j, len1, specifier;
+      var code, compiledList, fragments, index, j, len1, specifier;;
       code = [];
       o.indent += TAB;
       compiledList = (function() {
-        var j, len1, ref1, results1;
+        var j, len1, ref1, results1;;
         ref1 = this.specifiers;
         results1 = [];
         for (j = 0, len1 = ref1.length; j < len1; j++) {
@@ -4646,7 +4641,7 @@ export const ModuleSpecifierList = (function() {
     }
 
     astNode(o) {
-      var j, len1, ref1, results1, specifier;
+      var j, len1, ref1, results1, specifier;;
       ref1 = this.specifiers;
       results1 = [];
       for (j = 0, len1 = ref1.length; j < len1; j++) {
@@ -4671,7 +4666,7 @@ export const ExportSpecifierList = class ExportSpecifierList extends ModuleSpeci
 export const ModuleSpecifier = (function() {
   class ModuleSpecifier extends Base {
     constructor(original, alias, moduleDeclarationType1) {
-      var ref1, ref2;
+      var ref1, ref2;;
       super();
       this.original = original;
       this.alias = alias;
@@ -4690,7 +4685,7 @@ export const ModuleSpecifier = (function() {
     }
 
     compileNode(o) {
-      var code;
+      var code;;
       this.addIdentifierToScope(o);
       code = [];
       code.push(this.makeCode(this.original.value));
@@ -4723,7 +4718,7 @@ export const ImportSpecifier = class ImportSpecifier extends ModuleSpecifier {
   }
 
   addIdentifierToScope(o) {
-    var ref1;
+    var ref1;;
     // Per the spec, symbols can’t be imported multiple times
     // (e.g. `import { foo, foo } from 'lib'` is invalid)
     if ((ref1 = this.identifier, indexOf.call(o.importedSymbols, ref1) >= 0) || o.scope.check(this.identifier)) {
@@ -4735,7 +4730,7 @@ export const ImportSpecifier = class ImportSpecifier extends ModuleSpecifier {
   }
 
   astProperties(o) {
-    var originalAst, ref1, ref2;
+    var originalAst, ref1, ref2;;
     originalAst = this.original.ast(o);
     return {
       imported: originalAst,
@@ -4770,7 +4765,7 @@ export const ExportSpecifier = class ExportSpecifier extends ModuleSpecifier {
   }
 
   astProperties(o) {
-    var originalAst, ref1, ref2;
+    var originalAst, ref1, ref2;;
     originalAst = this.original.ast(o);
     return {
       local: originalAst,
@@ -4798,7 +4793,7 @@ export const DynamicImportCall = class DynamicImportCall extends Call {
   }
 
   checkArguments() {
-    var ref1;
+    var ref1;;
     if (!((1 <= (ref1 = this.args.length) && ref1 <= 2))) {
       return this.error('import() accepts either one or two arguments');
     }
@@ -4848,7 +4843,7 @@ export const Assign = (function() {
     // that are considered “unassignable” during compile-to-JS, while still
     // flagging things like `[null] = b`.
     addScopeVariables(o, {allowAssignmentToExpansion = false, allowAssignmentToNontrailingSplat = false, allowAssignmentToEmptyArray = false, allowAssignmentToComplexSplat = false} = {}) {
-      var varBase;
+      var varBase;;
       if (!(!this.context || this.context === '**=')) {
         return;
       }
@@ -4862,7 +4857,7 @@ export const Assign = (function() {
         this.variable.error(`'${this.variable.compile(o)}' can't be assigned`);
       }
       return varBase.eachName((name) => {
-        var alreadyDeclared, commentFragments, commentsNode, message;
+        var alreadyDeclared, commentFragments, commentsNode, message;;
         if (typeof name.hasProperties === "function" ? name.hasProperties() : void 0) {
           return;
         }
@@ -4906,7 +4901,7 @@ export const Assign = (function() {
     // we've been assigned to, for correct internal references. If the variable
     // has not been seen yet within the current scope, declare it.
     compileNode(o) {
-      var answer, compiledName, isValue, name, properties, prototype, ref1, ref2, ref3, ref4, val;
+      var answer, compiledName, isValue, name, properties, prototype, ref1, ref2, ref3, ref4, val;;
       isValue = this.variable instanceof Value;
       if (isValue) {
         // If `@variable` is an array or an object, we’re destructuring;
@@ -4966,7 +4961,7 @@ export const Assign = (function() {
 
     // Object rest property is not assignable: `{{a}...}`
     compileObjectDestruct(o) {
-      var assigns, props, refVal, splat, splatProp;
+      var assigns, props, refVal, splat, splatProp;;
       this.variable.base.reorderProperties();
       ({
         properties: props
@@ -4984,7 +4979,7 @@ export const Assign = (function() {
     // Brief implementation of recursive pattern matching, when assigning array or
     // object literals to a value. Peeks at their properties to assign inner names.
     compileDestructuring(o) {
-      var assignObjects, assigns, code, compSlice, compSplice, complexObjects, expIdx, expans, fragments, hasObjAssigns, isExpans, isSplat, leftObjs, loopObjects, obj, objIsUnassignable, objects, olen, processObjects, pushAssign, ref, refExp, restVar, rightObjs, slicer, splatVar, splatVarAssign, splatVarRef, splats, splatsAndExpans, top, value, vvar, vvarText;
+      var assignObjects, assigns, code, compSlice, compSplice, complexObjects, expIdx, expans, fragments, hasObjAssigns, isExpans, isSplat, leftObjs, loopObjects, obj, objIsUnassignable, objects, olen, processObjects, pushAssign, ref, refExp, restVar, rightObjs, slicer, splatVar, splatVarAssign, splatVarRef, splats, splatsAndExpans, top, value, vvar, vvarText;;
       top = o.level === LEVEL_TOP;
       ({value} = this);
       ({objects} = this.variable.base);
@@ -5034,7 +5029,7 @@ export const Assign = (function() {
       }
       slicer = function(type) {
         return function(vvar, start, end = false) {
-          var args, slice;
+          var args, slice;;
           if (!(vvar instanceof Value)) {
             vvar = new IdentifierLiteral(vvar);
           }
@@ -5052,7 +5047,7 @@ export const Assign = (function() {
       compSplice = slicer("splice");
       // Check if `objects` array contains any instance of `Assign`, e.g. {a:1}.
       hasObjAssigns = function(objs) {
-        var i, j, len1, results1;
+        var i, j, len1, results1;;
         results1 = [];
         for (i = j = 0, len1 = objs.length; j < len1; i = ++j) {
           obj = objs[i];
@@ -5064,7 +5059,7 @@ export const Assign = (function() {
       };
       // Check if `objects` array contains any unassignable object.
       objIsUnassignable = function(objs) {
-        var j, len1;
+        var j, len1;;
         for (j = 0, len1 = objs.length; j < len1; j++) {
           obj = objs[j];
           if (!obj.isAssignable()) {
@@ -5081,7 +5076,7 @@ export const Assign = (function() {
       // "Complex" `objects` are processed in a loop.
       // Examples: [a, b, {c, r...}, d], [a, ..., {b, r...}, c, d]
       loopObjects = (objs, vvar, vvarTxt) => {
-        var acc, i, idx, j, len1, message, results1, vval;
+        var acc, i, idx, j, len1, message, results1, vval;;
         results1 = [];
         for (i = j = 0, len1 = objs.length; j < len1; i = ++j) {
           obj = objs[i];
@@ -5134,7 +5129,7 @@ export const Assign = (function() {
       };
       // "Simple" `objects` can be split and compiled to arrays, [a, b, c] = arr, [a, b, c...] = arr
       assignObjects = (objs, vvar, vvarTxt) => {
-        var vval;
+        var vval;;
         vvar = new Value(new Arr(objs, true));
         vval = vvarTxt instanceof Value ? vvarTxt : new Value(new Literal(vvarTxt));
         return pushAssign(vvar, vval);
@@ -5201,7 +5196,7 @@ export const Assign = (function() {
 
     // Disallow `[...] = a` for some reason. (Could be equivalent to `[] = a`?)
     disallowLoneExpansion() {
-      var loneObject, objects;
+      var loneObject, objects;;
       if (!(this.variable.base instanceof Arr)) {
         return;
       }
@@ -5218,7 +5213,7 @@ export const Assign = (function() {
     // Show error if there is more than one `Splat`, or `Expansion`.
     // Examples: [a, b, c..., d, e, f...], [a, b, ..., c, d, ...], [a, b, ..., c, d, e...]
     getAndCheckSplatsAndExpansions() {
-      var expans, i, obj, objects, splats, splatsAndExpans;
+      var expans, i, obj, objects, splats, splatsAndExpans;;
       if (!(this.variable.base instanceof Arr)) {
         return {
           splats: [],
@@ -5229,7 +5224,7 @@ export const Assign = (function() {
       ({objects} = this.variable.base);
       // Count all `Splats`: [a, b, c..., d, e]
       splats = (function() {
-        var j, len1, results1;
+        var j, len1, results1;;
         results1 = [];
         for (i = j = 0, len1 = objects.length; j < len1; i = ++j) {
           obj = objects[i];
@@ -5241,7 +5236,7 @@ export const Assign = (function() {
       })();
       // Count all `Expansions`: [a, b, ..., c, d]
       expans = (function() {
-        var j, len1, results1;
+        var j, len1, results1;;
         results1 = [];
         for (i = j = 0, len1 = objects.length; j < len1; i = ++j) {
           obj = objects[i];
@@ -5264,7 +5259,7 @@ export const Assign = (function() {
     // operands are only evaluated once, even though we have to reference them
     // more than once.
     compileConditional(o) {
-      var fragments, left, right;
+      var fragments, left, right;;
       [left, right] = this.variable.cacheReference(o);
       // Disallow conditional assignment of undefined variables.
       if (!left.properties.length && left.base instanceof Literal && !(left.base instanceof ThisLiteral) && !o.scope.check(left.base.value)) {
@@ -5288,7 +5283,7 @@ export const Assign = (function() {
     // Convert special math assignment operators like `a //= b` to the equivalent
     // extended form `a = a ** b` and then compiles that.
     compileSpecialMath(o) {
-      var left, right;
+      var left, right;;
       [left, right] = this.variable.cacheReference(o);
       return new Assign(left, new Op(this.context.slice(0, -1), right, this.value)).compileToFragments(o);
     }
@@ -5296,7 +5291,7 @@ export const Assign = (function() {
     // Compile the assignment from an array splice literal, using JavaScript's
     // `Array#splice` method.
     compileSplice(o) {
-      var answer, exclusive, from, fromDecl, fromRef, name, to, unwrappedVar, valDef, valRef;
+      var answer, exclusive, from, fromDecl, fromRef, name, to, unwrappedVar, valDef, valRef;;
       ({
         range: {from, to, exclusive}
       } = this.variable.properties.pop());
@@ -5344,7 +5339,7 @@ export const Assign = (function() {
     }
 
     propagateLhs() {
-      var ref1, ref2;
+      var ref1, ref2;;
       if (!(((ref1 = this.variable) != null ? typeof ref1.isArray === "function" ? ref1.isArray() : void 0 : void 0) || ((ref2 = this.variable) != null ? typeof ref2.isObject === "function" ? ref2.isObject() : void 0 : void 0))) {
         return;
       }
@@ -5359,12 +5354,12 @@ export const Assign = (function() {
     }
 
     isConditional() {
-      var ref1;
+      var ref1;;
       return (ref1 = this.context) === '||=' || ref1 === '&&=' || ref1 === '?=';
     }
 
     astNode(o) {
-      var variable;
+      var variable;;
       this.disallowLoneExpansion();
       this.getAndCheckSplatsAndExpansions();
       if (this.isConditional()) {
@@ -5391,7 +5386,7 @@ export const Assign = (function() {
     }
 
     astProperties(o) {
-      var ref1, ret;
+      var ref1, ret;;
       ret = {
         right: this.value.ast(o, LEVEL_LIST),
         left: this.variable.ast(o, LEVEL_LIST)
@@ -5431,7 +5426,7 @@ export const FuncGlyph = class FuncGlyph extends Base {
 export const Code = (function() {
   class Code extends Base {
     constructor(params, body, funcGlyph, paramStart) {
-      var ref1;
+      var ref1;;
       super();
       this.funcGlyph = funcGlyph;
       this.paramStart = paramStart;
@@ -5442,7 +5437,7 @@ export const Code = (function() {
       this.isAsync = false;
       this.isMethod = false;
       this.body.traverseChildren(false, (node) => {
-        var lastProp, ref2, ref3, ref4, ref5;
+        var lastProp, ref2, ref3, ref4, ref5;;
         if ((node instanceof Op && node.isYield()) || node instanceof YieldReturn) {
           this.isGenerator = true;
         }
@@ -5481,7 +5476,7 @@ export const Code = (function() {
     // parameters after the splat, they are declared via expressions in the
     // function body.
     compileNode(o) {
-      var answer, body, boundMethodCheck, comment, condition, exprs, generatedVariables, haveBodyParam, haveSplatParam, i, ifTrue, j, k, l, len1, len2, len3, m, methodScope, modifiers, name, param, paramToAddToScope, params, paramsAfterSplat, ref, ref1, ref2, ref3, ref4, ref5, ref6, ref7, ref8, scopeVariablesCount, signature, splatParamName, thisAssignments, wasEmpty, yieldNode;
+      var answer, body, boundMethodCheck, comment, condition, exprs, generatedVariables, haveBodyParam, haveSplatParam, i, ifTrue, j, k, l, len1, len2, len3, m, methodScope, modifiers, name, param, paramToAddToScope, params, paramsAfterSplat, ref, ref1, ref2, ref3, ref4, ref5, ref6, ref7, ref8, scopeVariablesCount, signature, splatParamName, thisAssignments, wasEmpty, yieldNode;;
       this.checkForAsyncOrGeneratorConstructor();
       if (this.bound) {
         if ((ref1 = o.scope.method) != null ? ref1.bound : void 0) {
@@ -5502,7 +5497,7 @@ export const Code = (function() {
       this.disallowLoneExpansionAndMultipleSplats();
       // Separate `this` assignments.
       this.eachParamName(function(name, node, param, obj) {
-        var replacement, target;
+        var replacement, target;;
         if (node.this) {
           name = node.properties[0].name.value;
           if (indexOf.call(JS_FORBIDDEN, name) >= 0) {
@@ -5733,7 +5728,7 @@ export const Code = (function() {
         o.scope = methodScope;
       }
       answer = this.joinFragmentArrays((function() {
-        var len4, p, results1;
+        var len4, p, results1;;
         results1 = [];
         for (p = 0, len4 = modifiers.length; p < len4; p++) {
           m = modifiers[p];
@@ -5775,7 +5770,7 @@ export const Code = (function() {
     }
 
     checkForDuplicateParams() {
-      var paramNames;
+      var paramNames;;
       paramNames = [];
       return this.eachParamName(function(name, node, param) {
         if (indexOf.call(paramNames, name) >= 0) {
@@ -5786,7 +5781,7 @@ export const Code = (function() {
     }
 
     eachParamName(iterator) {
-      var j, len1, param, ref1, results1;
+      var j, len1, param, ref1, results1;;
       ref1 = this.params;
       results1 = [];
       for (j = 0, len1 = ref1.length; j < len1; j++) {
@@ -5826,7 +5821,7 @@ export const Code = (function() {
     }
 
     checkSuperCallsInConstructorBody() {
-      var seenSuper;
+      var seenSuper;;
       if (!this.ctor) {
         return false;
       }
@@ -5854,7 +5849,7 @@ export const Code = (function() {
     }
 
     disallowLoneExpansionAndMultipleSplats() {
-      var j, len1, param, ref1, results1, seenSplatParam;
+      var j, len1, param, ref1, results1, seenSplatParam;;
       seenSplatParam = false;
       ref1 = this.params;
       results1 = [];
@@ -5877,7 +5872,7 @@ export const Code = (function() {
     }
 
     expandCtorSuper(thisAssignments) {
-      var haveThisParam, param, ref1, seenSuper;
+      var haveThisParam, param, ref1, seenSuper;;
       if (!this.ctor) {
         return false;
       }
@@ -5895,10 +5890,10 @@ export const Code = (function() {
     // Find all super calls in the given context node;
     // returns `true` if `iterator` is called.
     eachSuperCall(context, iterator, {checkForThisBeforeSuper = true} = {}) {
-      var seenSuper;
+      var seenSuper;;
       seenSuper = false;
       context.traverseChildren(true, (child) => {
-        var childArgs;
+        var childArgs;;
         if (child instanceof SuperCall) {
           // `super` in a constructor (the only `super` without an accessor)
           // cannot be given an argument with a reference to `this`, as that would
@@ -5925,7 +5920,7 @@ export const Code = (function() {
     }
 
     propagateLhs() {
-      var j, len1, name, param, ref1, results1;
+      var j, len1, name, param, ref1, results1;;
       ref1 = this.params;
       results1 = [];
       for (j = 0, len1 = ref1.length; j < len1; j++) {
@@ -5949,7 +5944,7 @@ export const Code = (function() {
     }
 
     astNode(o) {
-      var seenSuper;
+      var seenSuper;;
       this.updateOptions(o);
       this.checkForAsyncOrGeneratorConstructor();
       this.checkForDuplicateParams();
@@ -5983,7 +5978,7 @@ export const Code = (function() {
     }
 
     paramForAst(param) {
-      var name, splat, value;
+      var name, splat, value;;
       if (param instanceof Expansion) {
         return param;
       }
@@ -6005,7 +6000,7 @@ export const Code = (function() {
     }
 
     methodAstProperties(o) {
-      var getIsComputed, ref1, ref2, ref3, ref4;
+      var getIsComputed, ref1, ref2, ref3, ref4;;
       getIsComputed = () => {
         if (this.name instanceof Index) {
           return true;
@@ -6030,10 +6025,10 @@ export const Code = (function() {
     }
 
     astProperties(o) {
-      var param, ref1;
+      var param, ref1;;
       return Object.assign({
         params: (function() {
-          var j, len1, ref1, results1;
+          var j, len1, ref1, results1;;
           ref1 = this.params;
           results1 = [];
           for (j = 0, len1 = ref1.length; j < len1; j++) {
@@ -6055,7 +6050,7 @@ export const Code = (function() {
     }
 
     astLocationData() {
-      var astLocationData, functionLocationData;
+      var astLocationData, functionLocationData;;
       functionLocationData = super.astLocationData();
       if (!this.isMethod) {
         return functionLocationData;
@@ -6085,7 +6080,7 @@ export const Code = (function() {
 export const Param = (function() {
   class Param extends Base {
     constructor(name1, value1, splat1) {
-      var message, token;
+      var message, token;;
       super();
       this.name = name1;
       this.value = value1;
@@ -6109,7 +6104,7 @@ export const Param = (function() {
     }
 
     asReference(o) {
-      var name, node;
+      var name, node;;
       if (this.reference) {
         return this.reference;
       }
@@ -6139,9 +6134,9 @@ export const Param = (function() {
     // `name` is the name of the parameter and `node` is the AST node corresponding
     // to that name.
     eachName(iterator, name = this.name) {
-      var atParam, checkAssignabilityOfLiteral, j, len1, nObj, node, obj, ref1, ref2;
+      var atParam, checkAssignabilityOfLiteral, j, len1, nObj, node, obj, ref1, ref2;;
       checkAssignabilityOfLiteral = function(literal) {
-        var message;
+        var message;;
         message = isUnassignable(literal.value);
         if (message) {
           literal.error(message);
@@ -6210,12 +6205,12 @@ export const Param = (function() {
     // Rename a param by replacing the given AST node for a name with a new node.
     // This needs to ensure that the the source for object destructuring does not change.
     renameParam(node, newNode) {
-      var isNode, replacement;
+      var isNode, replacement;;
       isNode = function(candidate) {
         return candidate === node;
       };
       replacement = (node, parent) => {
-        var key;
+        var key;;
         if (parent instanceof Obj) {
           key = node;
           if (node.this) {
@@ -6277,7 +6272,7 @@ export const Splat = (function() {
     }
 
     compileNode(o) {
-      var compiledSplat;
+      var compiledSplat;;
       compiledSplat = [this.makeCode('...'), ...this.name.compileToFragments(o, LEVEL_OP)];
       return compiledSplat;
     }
@@ -6287,7 +6282,7 @@ export const Splat = (function() {
     }
 
     propagateLhs(setLhs) {
-      var base1;
+      var base1;;
       if (setLhs) {
         this.lhs = true;
       }
@@ -6371,7 +6366,7 @@ export const Expansion = (function() {
 export const Elision = (function() {
   class Elision extends Base {
     compileToFragments(o, level) {
-      var fragment;
+      var fragment;;
       fragment = super.compileToFragments(o, level);
       fragment.isElision = true;
       return fragment;
@@ -6440,7 +6435,7 @@ export const While = (function() {
     }
 
     jumps() {
-      var expressions, j, jumpNode, len1, node;
+      var expressions, j, jumpNode, len1, node;;
       ({expressions} = this.body);
       if (!expressions.length) {
         return false;
@@ -6460,7 +6455,7 @@ export const While = (function() {
     // *while* can be used as a part of a larger expression -- while loops may
     // return an array containing the computed result of each iteration.
     compileNode(o) {
-      var answer, body, rvar, set;
+      var answer, body, rvar, set;;
       o.indent += TAB;
       set = '';
       ({body} = this);
@@ -6498,7 +6493,7 @@ export const While = (function() {
     }
 
     astProperties(o) {
-      var ref1, ref2;
+      var ref1, ref2;;
       return {
         test: this.condition.ast(o, LEVEL_PAREN),
         body: this.body.ast(o, LEVEL_TOP),
@@ -6524,11 +6519,11 @@ export const While = (function() {
 // Simple Arithmetic and logical operations. Performs some conversion from
 // CoffeeScript operations into their JavaScript equivalents.
 export const Op = (function() {
-  var CONVERSIONS, INVERSIONS;
+  var CONVERSIONS, INVERSIONS;;
 
   class Op extends Base {
     constructor(op, first, second, flip, {invertOperator, originalOperator: originalOperator = op} = {}) {
-      var call, firstCall, message, ref1, unwrapped;
+      var call, firstCall, message, ref1, unwrapped;;
       super();
       this.invertOperator = invertOperator;
       this.originalOperator = originalOperator;
@@ -6558,7 +6553,7 @@ export const Op = (function() {
     }
 
     isNumber() {
-      var ref1;
+      var ref1;;
       return this.isUnary() && ((ref1 = this.operator) === '+' || ref1 === '-') && this.first instanceof Value && this.first.isNumber();
     }
 
@@ -6567,7 +6562,7 @@ export const Op = (function() {
     }
 
     isYield() {
-      var ref1;
+      var ref1;;
       return (ref1 = this.operator) === 'yield' || ref1 === 'yield*';
     }
 
@@ -6582,7 +6577,7 @@ export const Op = (function() {
     // Am I capable of
     // [Python-style comparison chaining](https://docs.python.org/3/reference/expressions.html#not-in)?
     isChainable() {
-      var ref1;
+      var ref1;;
       return (ref1 = this.operator) === '<' || ref1 === '>' || ref1 === '>=' || ref1 === '<=' || ref1 === '===' || ref1 === '!==';
     }
 
@@ -6591,7 +6586,7 @@ export const Op = (function() {
     }
 
     invert() {
-      var allInvertable, curr, fst, op, ref1;
+      var allInvertable, curr, fst, op, ref1;;
       if (this.isInOperator()) {
         this.invertOperator = '!';
         return this;
@@ -6629,12 +6624,12 @@ export const Op = (function() {
     }
 
     unfoldSoak(o) {
-      var ref1;
+      var ref1;;
       return ((ref1 = this.operator) === '++' || ref1 === '--' || ref1 === 'delete') && unfoldSoak(o, this, 'first');
     }
 
     generateDo(exp) {
-      var call, func, j, len1, param, passedParams, ref, ref1;
+      var call, func, j, len1, param, passedParams, ref, ref1;;
       passedParams = [];
       func = exp instanceof Assign && (ref = exp.value.unwrap()) instanceof Code ? ref : exp;
       ref1 = func.params || [];
@@ -6657,7 +6652,7 @@ export const Op = (function() {
     }
 
     compileNode(o) {
-      var answer, inNode, isChain, lhs, rhs;
+      var answer, inNode, isChain, lhs, rhs;;
       if (this.isInOperator()) {
         inNode = new In(this.first, this.second);
         return (this.invertOperator ? inNode.invert() : inNode).compileNode(o);
@@ -6712,7 +6707,7 @@ export const Op = (function() {
     //     bin/coffee -e 'console.log 50 < 65 > 10'
     //     true
     compileChain(o) {
-      var fragments, fst, shared;
+      var fragments, fst, shared;;
       [this.first.second, shared] = this.first.second.cache(o);
       fst = this.first.compileToFragments(o, LEVEL_OP);
       fragments = fst.concat(this.makeCode(` ${this.invert ? '&&' : '||'} `), shared.compileToFragments(o), this.makeCode(` ${this.operator} `), this.second.compileToFragments(o, LEVEL_OP));
@@ -6721,7 +6716,7 @@ export const Op = (function() {
 
     // Keep reference to the left expression, unless this an existential assignment
     compileExistence(o, checkOnlyUndefined) {
-      var fst, ref;
+      var fst, ref;;
       if (this.first.shouldCache()) {
         ref = new IdentifierLiteral(o.scope.freeVariable('ref'));
         fst = new Parens(new Assign(ref, this.first));
@@ -6736,7 +6731,7 @@ export const Op = (function() {
 
     // Compile a unary **Op**.
     compileUnary(o) {
-      var op, parts, plusMinus;
+      var op, parts, plusMinus;;
       parts = [];
       op = this.operator;
       parts.push([this.makeCode(op)]);
@@ -6762,7 +6757,7 @@ export const Op = (function() {
     }
 
     compileContinuation(o) {
-      var op, parts, ref1;
+      var op, parts, ref1;;
       parts = [];
       op = this.operator;
       if (!this.isAwait()) {
@@ -6789,7 +6784,7 @@ export const Op = (function() {
     }
 
     checkContinuation(o) {
-      var ref1;
+      var ref1;;
       if (o.scope.parent == null) {
         this.error(`${this.operator} can only occur inside functions`);
       }
@@ -6799,7 +6794,7 @@ export const Op = (function() {
     }
 
     compileFloorDivision(o) {
-      var div, floor, second;
+      var div, floor, second;;
       floor = new Value(new IdentifierLiteral('Math'), [new Access(new PropertyName('floor'))]);
       second = this.second.shouldCache() ? new Parens(this.second) : this.second;
       div = new Op('/', this.first, second);
@@ -6807,13 +6802,13 @@ export const Op = (function() {
     }
 
     compileModulo(o) {
-      var mod;
+      var mod;;
       mod = new Value(new Literal(utility('modulo', o)));
       return new Call(mod, [this.first, this.second]).compileToFragments(o);
     }
 
     compileMatch(o) {
-      var base1, hasMultilineFlag, leftFragments, multilineParam, ref1, regexFragments, toSearchableRef;
+      var base1, hasMultilineFlag, leftFragments, multilineParam, ref1, regexFragments, toSearchableRef;;
       // Ensure '_' is declared in the current scope so strict mode doesn't throw ReferenceError
       o.scope.find('_');
       toSearchableRef = utility('toSearchable', o);
@@ -6875,7 +6870,7 @@ export const Op = (function() {
     }
 
     chainAstProperties(o) {
-      var currentOp, operand, operands, operators;
+      var currentOp, operand, operands, operators;;
       operators = [this.operatorAst()];
       operands = [this.second];
       currentOp = this.first;
@@ -6891,7 +6886,7 @@ export const Op = (function() {
       return {
         operators,
         operands: (function() {
-          var j, len1, results1;
+          var j, len1, results1;;
           results1 = [];
           for (j = 0, len1 = operands.length; j < len1; j++) {
             operand = operands[j];
@@ -6903,7 +6898,7 @@ export const Op = (function() {
     }
 
     astProperties(o) {
-      var argument, firstAst, operatorAst, ref1, secondAst;
+      var argument, firstAst, operatorAst, ref1, secondAst;;
       if (this.isChain()) {
         return this.chainAstProperties(o);
       }
@@ -6968,7 +6963,7 @@ export const In = (function() {
     }
 
     compileNode(o) {
-      var hasSplat, j, len1, obj, ref1;
+      var hasSplat, j, len1, obj, ref1;;
       if (this.array instanceof Value && this.array.isArray() && this.array.base.objects.length) {
         ref1 = this.array.base.objects;
         for (j = 0, len1 = ref1.length; j < len1; j++) {
@@ -6988,7 +6983,7 @@ export const In = (function() {
     }
 
     compileOrTest(o) {
-      var cmp, cnj, i, item, j, len1, ref, ref1, sub, tests;
+      var cmp, cnj, i, item, j, len1, ref, ref1, sub, tests;;
       [sub, ref] = this.object.cache(o, LEVEL_OP);
       [cmp, cnj] = this.negated ? [' !== ', ' && '] : [' === ', ' || '];
       tests = [];
@@ -7008,7 +7003,7 @@ export const In = (function() {
     }
 
     compileLoopTest(o) {
-      var fragments, ref, sub;
+      var fragments, ref, sub;;
       [sub, ref] = this.object.cache(o, LEVEL_LIST);
       fragments = [].concat(this.makeCode(utility('indexOf', o) + ".call("), this.array.compileToFragments(o, LEVEL_LIST), this.makeCode(", "), ref, this.makeCode(") " + (this.negated ? '< 0' : '>= 0')));
       if (fragmentsToText(sub) === fragmentsToText(ref)) {
@@ -7050,12 +7045,12 @@ export const Try = (function() {
     }
 
     jumps(o) {
-      var ref1;
+      var ref1;;
       return this.attempt.jumps(o) || ((ref1 = this.catch) != null ? ref1.jumps(o) : void 0);
     }
 
     makeReturn(results, mark) {
-      var ref1, ref2;
+      var ref1, ref2;;
       if (mark) {
         if ((ref1 = this.attempt) != null) {
           ref1.makeReturn(results, mark);
@@ -7077,7 +7072,7 @@ export const Try = (function() {
     // Compilation is more or less as you would expect -- the *finally* clause
     // is optional, the *catch* is not.
     compileNode(o) {
-      var catchPart, ensurePart, generatedErrorVariableName, originalIndent, tryPart;
+      var catchPart, ensurePart, generatedErrorVariableName, originalIndent, tryPart;;
       originalIndent = o.indent;
       o.indent += TAB;
       tryPart = this.attempt.compileToFragments(o, LEVEL_TOP);
@@ -7095,7 +7090,7 @@ export const Try = (function() {
     }
 
     astProperties(o) {
-      var ref1, ref2;
+      var ref1, ref2;;
       return {
         block: this.attempt.ast(o, LEVEL_TOP),
         handler: (ref1 = (ref2 = this.catch) != null ? ref2.ast(o) : void 0) != null ? ref1 : null,
@@ -7117,7 +7112,7 @@ export const Try = (function() {
 export const Catch = (function() {
   class Catch extends Base {
     constructor(recovery, errorVariable) {
-      var base1, ref1;
+      var base1, ref1;;
       super();
       this.recovery = recovery;
       this.errorVariable = errorVariable;
@@ -7133,7 +7128,7 @@ export const Catch = (function() {
     }
 
     makeReturn(results, mark) {
-      var ret;
+      var ret;;
       ret = this.recovery.makeReturn(results, mark);
       if (mark) {
         return;
@@ -7143,7 +7138,7 @@ export const Catch = (function() {
     }
 
     compileNode(o) {
-      var generatedErrorVariableName, placeholder;
+      var generatedErrorVariableName, placeholder;;
       o.indent += TAB;
       generatedErrorVariableName = o.scope.freeVariable('error', {
         reserve: false
@@ -7157,7 +7152,7 @@ export const Catch = (function() {
     }
 
     checkUnassignable() {
-      var message;
+      var message;;
       if (this.errorVariable) {
         message = isUnassignable(this.errorVariable.unwrapAll().value);
         if (message) {
@@ -7167,11 +7162,11 @@ export const Catch = (function() {
     }
 
     astNode(o) {
-      var ref1;
+      var ref1;;
       this.checkUnassignable();
       if ((ref1 = this.errorVariable) != null) {
         ref1.eachName(function(name) {
-          var alreadyDeclared;
+          var alreadyDeclared;;
           alreadyDeclared = o.scope.find(name.value);
           return name.isDeclaration = !alreadyDeclared;
         });
@@ -7184,7 +7179,7 @@ export const Catch = (function() {
     }
 
     astProperties(o) {
-      var ref1, ref2;
+      var ref1, ref2;;
       return {
         param: (ref1 = (ref2 = this.errorVariable) != null ? ref2.ast(o) : void 0) != null ? ref1 : null,
         body: this.recovery.ast(o, LEVEL_TOP)
@@ -7212,7 +7207,7 @@ export const Throw = (function() {
     }
 
     compileNode(o) {
-      var fragments;
+      var fragments;;
       fragments = this.expression.compileToFragments(o, LEVEL_LIST);
       unshiftAfterComments(fragments, this.makeCode('throw '));
       fragments.unshift(this.makeCode(this.tab));
@@ -7253,13 +7248,13 @@ export const Throw = (function() {
 export const Existence = (function() {
   class Existence extends Base {
     constructor(expression1, onlyNotUndefined = false) {
-      var salvagedComments;
+      var salvagedComments;;
       super();
       this.expression = expression1;
       this.comparisonTarget = onlyNotUndefined ? 'undefined' : 'null';
       salvagedComments = [];
       this.expression.traverseChildren(true, function(child) {
-        var comment, j, len1, ref1;
+        var comment, j, len1, ref1;;
         if (child.comments) {
           ref1 = child.comments;
           for (j = 0, len1 = ref1.length; j < len1; j++) {
@@ -7276,7 +7271,7 @@ export const Existence = (function() {
     }
 
     compileNode(o) {
-      var cmp, cnj, code;
+      var cmp, cnj, code;;
       this.expression.front = this.front;
       code = this.expression.compile(o, LEVEL_OP);
       if (this.expression.unwrap() instanceof IdentifierLiteral && !o.scope.check(code)) {
@@ -7340,7 +7335,7 @@ export const Parens = (function() {
     }
 
     compileNode(o) {
-      var bare, expr, fragments, ref1, shouldWrapComment;
+      var bare, expr, fragments, ref1, shouldWrapComment;;
       expr = this.body.unwrap();
       // If these parentheses are wrapping an `IdentifierLiteral` followed by a
       // block comment, output the parentheses (or put another way, don’t optimize
@@ -7386,7 +7381,7 @@ export const StringWithInterpolations = (function() {
     }
 
     static fromStringLiteral(stringLiteral) {
-      var updatedString, updatedStringValue;
+      var updatedString, updatedStringValue;;
       updatedString = stringLiteral.withoutQuotesInLocationData();
       updatedStringValue = new Value(updatedString).withLocationDataFrom(updatedString);
       return new StringWithInterpolations(Block.wrap([updatedStringValue]), {
@@ -7406,13 +7401,13 @@ export const StringWithInterpolations = (function() {
     }
 
     extractElements(o, {includeInterpolationWrappers} = {}) {
-      var elements, expr, salvagedComments;
+      var elements, expr, salvagedComments;;
       // Assumes that `expr` is `Block`
       expr = this.body.unwrap();
       elements = [];
       salvagedComments = [];
       expr.traverseChildren(false, (node) => {
-        var comment, commentPlaceholder, empty, j, k, len1, len2, ref1, ref2, ref3, unwrapped;
+        var comment, commentPlaceholder, empty, j, k, len1, len2, ref1, ref2, ref3, unwrapped;;
         if (node instanceof StringLiteral) {
           if (node.comments) {
             salvagedComments.push(...node.comments);
@@ -7470,7 +7465,7 @@ export const StringWithInterpolations = (function() {
     }
 
     compileNode(o) {
-      var code, element, elements, fragments, j, len1, ref1, unquotedElementValue;
+      var code, element, elements, fragments, j, len1, ref1, unquotedElementValue;;
       if (this.comments == null) {
         this.comments = (ref1 = this.startQuote) != null ? ref1.comments : void 0;
       }
@@ -7486,7 +7481,7 @@ export const StringWithInterpolations = (function() {
           fragments.push(this.makeCode('$'));
           code = element.compileToFragments(o, LEVEL_PAREN);
           if (!this.isNestedTag(element) || code.some(function(fragment) {
-            var ref2;
+            var ref2;;
             return (ref2 = fragment.comments) != null ? ref2.some(function(comment) {
               return comment.here === false;
             }) : void 0;
@@ -7517,7 +7512,7 @@ export const StringWithInterpolations = (function() {
     }
 
     astProperties(o) {
-      var element, elements, emptyInterpolation, expression, expressions, index, j, last, len1, node, quasis;
+      var element, elements, emptyInterpolation, expression, expressions, index, j, last, len1, node, quasis;;
       elements = this.extractElements(o, {
         includeInterpolationWrappers: true
       });
@@ -7613,12 +7608,12 @@ export const For = (function() {
     }
 
     isAwait() {
-      var ref1;
+      var ref1;;
       return (ref1 = this.await) != null ? ref1 : false;
     }
 
     addBody(body) {
-      var base1, expressions;
+      var base1, expressions;;
       this.body = Block.wrap([body]);
       ({expressions} = this.body);
       if (expressions.length) {
@@ -7630,7 +7625,7 @@ export const For = (function() {
     }
 
     addSource(source) {
-      var attr, attribs, attribute, base1, j, k, len1, len2, ref1, ref2, ref3, ref4;
+      var attr, attribs, attribute, base1, j, k, len1, len2, ref1, ref2, ref3, ref4;;
       ({source: this.source = false} = source);
       attribs = ["name", "index", "guard", "step", "own", "ownTag", "await", "awaitTag", "object", "from"];
       for (j = 0, len1 = attribs.length; j < len1; j++) {
@@ -7679,7 +7674,7 @@ export const For = (function() {
           continue;
         }
         this[attribute].traverseChildren(true, (node) => {
-          var comment, l, len3, ref5;
+          var comment, l, len3, ref5;;
           if (node.comments) {
             ref5 = node.comments;
             for (l = 0, len3 = ref5.length; l < len3; l++) {
@@ -7703,7 +7698,7 @@ export const For = (function() {
     // comprehensions. Some of the generated code can be shared in common, and
     // some cannot.
     compileNode(o) {
-      var body, bodyFragments, compare, compareDown, declare, declareDown, defPart, down, forClose, forCode, forPartFragments, fragments, guardPart, idt1, increment, index, ivar, kvar, kvarAssign, last, lvar, name, namePart, ref, ref1, resultPart, returnResult, rvar, scope, source, step, stepNum, stepVar, svar, varPart;
+      var body, bodyFragments, compare, compareDown, declare, declareDown, defPart, down, forClose, forCode, forPartFragments, fragments, guardPart, idt1, increment, index, ivar, kvar, kvarAssign, last, lvar, name, namePart, ref, ref1, resultPart, returnResult, rvar, scope, source, step, stepNum, stepVar, svar, varPart;;
       body = Block.wrap([this.body]);
       ref1 = body.expressions, [last] = slice1.call(ref1, -1);
       if ((last != null ? last.jumps() : void 0) instanceof Return) {
@@ -7848,9 +7843,9 @@ export const For = (function() {
     }
 
     astNode(o) {
-      var addToScope, ref1, ref2;
+      var addToScope, ref1, ref2;;
       addToScope = function(name) {
-        var alreadyDeclared;
+        var alreadyDeclared;;
         alreadyDeclared = o.scope.find(name.value);
         return name.isDeclaration = !alreadyDeclared;
       };
@@ -7872,7 +7867,7 @@ export const For = (function() {
     }
 
     astProperties(o) {
-      var ref1, ref2, ref3, ref4, ref5, ref6, ref7, ref8, ref9;
+      var ref1, ref2, ref3, ref4, ref5, ref6, ref7, ref8, ref9;;
       return {
         source: (ref1 = this.source) != null ? ref1.ast(o) : void 0,
         body: this.body.ast(o, LEVEL_TOP),
@@ -7921,7 +7916,7 @@ export const Switch = (function() {
     jumps(o = {
         block: true
       }) {
-      var block, j, jumpNode, len1, ref1, ref2;
+      var block, j, jumpNode, len1, ref1, ref2;;
       ref1 = this.cases;
       for (j = 0, len1 = ref1.length; j < len1; j++) {
         ({block} = ref1[j]);
@@ -7933,7 +7928,7 @@ export const Switch = (function() {
     }
 
     makeReturn(results, mark) {
-      var block, j, len1, ref1, ref2;
+      var block, j, len1, ref1, ref2;;
       ref1 = this.cases;
       for (j = 0, len1 = ref1.length; j < len1; j++) {
         ({block} = ref1[j]);
@@ -7949,7 +7944,7 @@ export const Switch = (function() {
     }
 
     compileNode(o) {
-      var block, body, cond, conditions, expr, fragments, i, idt1, idt2, j, k, len1, len2, ref1, ref2;
+      var block, body, cond, conditions, expr, fragments, i, idt1, idt2, j, k, len1, len2, ref1, ref2;;
       idt1 = o.indent + TAB;
       idt2 = o.indent = idt1 + TAB;
       fragments = [].concat(this.makeCode(this.tab + "switch ("), (this.subject ? this.subject.compileToFragments(o, LEVEL_PAREN) : this.makeCode("false")), this.makeCode(") {\n"));
@@ -7988,7 +7983,7 @@ export const Switch = (function() {
     }
 
     casesAst(o) {
-      var caseIndex, caseLocationData, cases, consequent, j, k, kase, l, lastTestIndex, len1, len2, len3, ref1, ref2, results1, test, testConsequent, testIndex, tests;
+      var caseIndex, caseLocationData, cases, consequent, j, k, kase, l, lastTestIndex, len1, len2, len3, ref1, ref2, results1, test, testConsequent, testIndex, tests;;
       cases = [];
       ref1 = this.cases;
       for (caseIndex = j = 0, len1 = ref1.length; j < len1; caseIndex = ++j) {
@@ -8035,7 +8030,7 @@ export const Switch = (function() {
     }
 
     astProperties(o) {
-      var ref1, ref2;
+      var ref1, ref2;;
       return {
         discriminant: (ref1 = (ref2 = this.subject) != null ? ref2.ast(o, LEVEL_PAREN) : void 0) != null ? ref1 : null,
         cases: this.casesAst(o)
@@ -8062,7 +8057,7 @@ SwitchCase = (function() {
     }
 
     astProperties(o) {
-      var ref1, ref2, ref3, ref4;
+      var ref1, ref2, ref3, ref4;;
       return {
         test: (ref1 = (ref2 = this.test) != null ? ref2.ast(o, LEVEL_PAREN) : void 0) != null ? ref1 : null,
         consequent: (ref3 = (ref4 = this.block) != null ? ref4.ast(o, LEVEL_TOP).body : void 0) != null ? ref3 : [],
@@ -8116,12 +8111,12 @@ export const If = (function() {
     }
 
     bodyNode() {
-      var ref1;
+      var ref1;;
       return (ref1 = this.body) != null ? ref1.unwrap() : void 0;
     }
 
     elseBodyNode() {
-      var ref1;
+      var ref1;;
       return (ref1 = this.elseBody) != null ? ref1.unwrap() : void 0;
     }
 
@@ -8144,12 +8139,12 @@ export const If = (function() {
     // The **If** only compiles into a statement if either of its bodies needs
     // to be a statement. Otherwise a conditional operator is safe.
     isStatement(o) {
-      var ref1;
+      var ref1;;
       return (o != null ? o.level : void 0) === LEVEL_TOP || this.bodyNode().isStatement(o) || ((ref1 = this.elseBodyNode()) != null ? ref1.isStatement(o) : void 0);
     }
 
     jumps(o) {
-      var ref1;
+      var ref1;;
       return this.body.jumps(o) || ((ref1 = this.elseBody) != null ? ref1.jumps(o) : void 0);
     }
 
@@ -8162,7 +8157,7 @@ export const If = (function() {
     }
 
     makeReturn(results, mark) {
-      var ref1, ref2;
+      var ref1, ref2;;
       if (mark) {
         if ((ref1 = this.body) != null) {
           ref1.makeReturn(results, mark);
@@ -8191,7 +8186,7 @@ export const If = (function() {
     // Compile the `If` as a regular *if-else* statement. Flattened chains
     // force inner *else* bodies into statement form.
     compileStatement(o) {
-      var answer, body, child, cond, exeq, ifPart, indent;
+      var answer, body, child, cond, exeq, ifPart, indent;;
       child = del(o, 'chainChild');
       exeq = del(o, 'isExistentialEquals');
       if (exeq) {
@@ -8221,7 +8216,7 @@ export const If = (function() {
 
     // Compile the `If` as a conditional operator.
     compileExpression(o) {
-      var alt, body, cond, fragments;
+      var alt, body, cond, fragments;;
       cond = this.processedCondition().compileToFragments(o, LEVEL_COND);
       body = this.bodyNode().compileToFragments(o, LEVEL_LIST);
       alt = this.elseBodyNode() ? this.elseBodyNode().compileToFragments(o, LEVEL_LIST) : [this.makeCode('void 0')];
@@ -8254,7 +8249,7 @@ export const If = (function() {
     }
 
     astProperties(o) {
-      var isStatement, ref1, ref2, ref3, ref4;
+      var isStatement, ref1, ref2, ref3, ref4;;
       isStatement = this.isStatementAst(o);
       return {
         test: this.condition.ast(o, isStatement ? LEVEL_PAREN : LEVEL_COND),
@@ -8294,10 +8289,10 @@ export const Sequence = (function() {
     }
 
     astProperties(o) {
-      var expression;
+      var expression;;
       return {
         expressions: (function() {
-          var j, len1, ref1, results1;
+          var j, len1, ref1, results1;;
           ref1 = this.expressions;
           results1 = [];
           for (j = 0, len1 = ref1.length; j < len1; j++) {
@@ -8382,7 +8377,6 @@ LEVEL_OP = 5; // !...
 
 LEVEL_ACCESS = 6; // ...[0]
 
-
 // Tabs are two spaces for pretty printing.
 TAB = '  ';
 
@@ -8406,7 +8400,7 @@ HEREGEX_OMIT = /((?:\\\\)+)|\\(\s)|\s+(?:#.*)?/g; // Consume (and preserve) an e
 
 // Helper for ensuring that utility functions are assigned at the top level.
 utility = function(name, o) {
-  var ref, root;
+  var ref, root;;
   ({root} = o.scope);
   if (name in root.utilities) {
     return root.utilities[name];
@@ -8418,7 +8412,7 @@ utility = function(name, o) {
 };
 
 multident = function(code, tab, includingFirstLine = true) {
-  var endsWithNewLine;
+  var endsWithNewLine;;
   endsWithNewLine = code[code.length - 1] === '\n';
   code = (includingFirstLine ? tab : '') + code.replace(/\n/g, `$&${tab}`);
   code = code.replace(/\s+$/, '');
@@ -8433,7 +8427,7 @@ multident = function(code, tab, includingFirstLine = true) {
 // preceding that line of code. If there are such comments, indent each line of
 // such comments, and _then_ indent the first following line of code.
 indentInitial = function(fragments, node) {
-  var fragment, fragmentIndex, j, len1;
+  var fragment, fragmentIndex, j, len1;;
   for (fragmentIndex = j = 0, len1 = fragments.length; j < len1; fragmentIndex = ++j) {
     fragment = fragments[fragmentIndex];
     if (fragment.isHereComment) {
@@ -8447,7 +8441,7 @@ indentInitial = function(fragments, node) {
 };
 
 hasLineComments = function(node) {
-  var comment, j, len1, ref1;
+  var comment, j, len1, ref1;;
   if (!node.comments) {
     return false;
   }
@@ -8475,7 +8469,7 @@ moveComments = function(from, to) {
 // of an array of fragments; but if the start has one or more comment fragments,
 // we want to insert this fragment after those but before any non-comments.
 unshiftAfterComments = function(fragments, fragmentToInsert) {
-  var fragment, fragmentIndex, inserted, j, len1;
+  var fragment, fragmentIndex, inserted, j, len1;;
   inserted = false;
   for (fragmentIndex = j = 0, len1 = fragments.length; j < len1; fragmentIndex = ++j) {
     fragment = fragments[fragmentIndex];
@@ -8506,7 +8500,7 @@ shouldCacheOrIsAssignable = function(node) {
 
 // Unfold a node's child if soak, then tuck the node under created `If`
 unfoldSoak = function(o, parent, name) {
-  var ifn;
+  var ifn;;
   if (!(ifn = parent[name].unfoldSoak(o))) {
     return;
   }
@@ -8524,7 +8518,7 @@ makeDelimitedLiteral = function(body, {
     escapeDelimiter = true,
     convertTrailingNullEscapes
   } = {}) {
-  var escapeTemplateLiteralCurlies, printedDelimiter, regex;
+  var escapeTemplateLiteralCurlies, printedDelimiter, regex;;
   if (body === '' && delimiterOption === '/') {
     body = '(?:)';
   }
@@ -8540,7 +8534,7 @@ makeDelimitedLiteral = function(body, {
 }${escapeTemplateLiteralCurlies ? /|\\?(\$\{)/.source : '' // `${` inside template literals must be escaped.
 }|\\\\?(?:${escapeNewlines ? '(\n)|' : ''}(\\r)|(\\u2028)|(\\u2029))|(\\\\.)`, "g");
   body = body.replace(regex, function(match, backslash, nul, ...args) {
-    var cr, delimiter, lf, ls, other, ps, templateLiteralCurly, trailingNullEscape;
+    var cr, delimiter, lf, ls, other, ps, templateLiteralCurly, trailingNullEscape;;
     trailingNullEscape = convertTrailingNullEscapes ? args.shift() : void 0;
     delimiter = escapeDelimiter ? args.shift() : void 0;
     templateLiteralCurly = escapeTemplateLiteralCurlies ? args.shift() : void 0;
@@ -8583,7 +8577,7 @@ makeDelimitedLiteral = function(body, {
 };
 
 sniffDirectives = function(expressions, {notFinalExpression} = {}) {
-  var expression, index, lastIndex, results1, unwrapped;
+  var expression, index, lastIndex, results1, unwrapped;;
   index = 0;
   lastIndex = expressions.length - 1;
   results1 = [];
@@ -8606,7 +8600,7 @@ sniffDirectives = function(expressions, {notFinalExpression} = {}) {
 };
 
 astAsBlockIfNeeded = function(node, o) {
-  var unwrapped;
+  var unwrapped;;
   unwrapped = node.unwrap();
   if (unwrapped instanceof Block && unwrapped.expressions.length > 1) {
     unwrapped.makeReturn(null, true);

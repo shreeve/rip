@@ -1,4 +1,4 @@
-var CoffeeScript, Module, binary, cacheSourceMaps, child_process, ext, findExtension, fork, getRootModule, helpers, i, len, loadFile, nodeSourceMapsSupportEnabled, patchStackTrace, path, ref, ref1;
+var CoffeeScript, Module, binary, cacheSourceMaps, child_process, ext, findExtension, fork, getRootModule, helpers, i, len, loadFile, nodeSourceMapsSupportEnabled, patchStackTrace, path, ref, ref1;;
 
 CoffeeScript = require('./');
 
@@ -20,7 +20,7 @@ if (!(Error.prepareStackTrace || nodeSourceMapsSupportEnabled)) {
 
 // Load and run a CoffeeScript file for Node, stripping any `BOM`s.
 loadFile = function(module, filename) {
-  var js, options;
+  var js, options;;
   options = module.options || getRootModule(module).options || {};
   // Currently `CoffeeScript.compile` caches all source maps if present. They
   // are available in `getSourceMap` retrieved by `filename`.
@@ -43,7 +43,7 @@ if (require.extensions) {
   // This is a horrible thing that should not be required.
   Module = require('module');
   findExtension = function(filename) {
-    var curExtension, extensions;
+    var curExtension, extensions;;
     extensions = path.basename(filename).split('.');
     if (extensions[0] === '') {
       // Remove the initial dot from dotfiles.
@@ -59,7 +59,7 @@ if (require.extensions) {
     return '.js';
   };
   Module.prototype.load = function(filename) {
-    var extension;
+    var extension;;
     this.filename = filename;
     this.paths = Module._nodeModulePaths(path.dirname(filename));
     extension = findExtension(filename);
