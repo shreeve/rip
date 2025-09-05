@@ -1,25 +1,24 @@
 #!/usr/bin/env node
 
-try {
-  new Function('var {a} = {a: 1}')();
-} catch (error) {
-  console.error('Your JavaScript runtime does not support some features used by the coffee command. Please use Node 6 or later.');
-  process.exit(1);
-}
+import { existsSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath, pathToFileURL } from 'url';
 
-var path = require('path');
-var fs   = require('fs');
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
-var potentialPaths = [
-  path.join(process.cwd(), 'node_modules/coffeescript/lib/coffeescript'),
-  path.join(process.cwd(), 'node_modules/coffeescript/lib/coffee-script'),
-  path.join(process.cwd(), 'node_modules/coffee-script/lib/coffee-script'),
-  path.join(__dirname, '../lib/coffeescript')
+const potentialPaths = [
+  join(process.cwd(), 'node_modules/rip/lib/coffeescript'),
+  join(process.cwd(), 'node_modules/coffeescript/lib/coffeescript'),
+  join(__dirname, '../lib/coffeescript')
 ];
 
-for (var i = 0, len = potentialPaths.length; i < len; i++) {
-  if (fs.existsSync(potentialPaths[i])) {
-    require(potentialPaths[i] + '/command').run();
-    break;
+for (const base of potentialPaths) {
+  const target = join(base, 'command.js');
+  if (existsSync(target)) {
+    const mod = await import(pathToFileURL(target).href);
+    if (mod?.run) {
+      await mod.run();
+      break;
+    }
   }
 }
