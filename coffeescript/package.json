@@ -22,7 +22,10 @@
   },
   "main": "./lib/coffeescript/index.js",
   "exports": {
-    ".": "./lib/coffeescript/index.js"
+    ".": {
+      "require": "./lib/coffeescript/index.js",
+      "import": "./lib/coffeescript/index.js"
+    }
   },
   "bin": {
     "rip": "./bin/coffee.js",
