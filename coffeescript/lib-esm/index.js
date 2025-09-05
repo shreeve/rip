@@ -24,5 +24,3 @@ export const transpile = CoffeeScript.transpile;
 export const patchStackTrace = CoffeeScript.patchStackTrace;
 export const _compileRawFileContent = CoffeeScript._compileRawFileContent;
 export const _compileFile = CoffeeScript._compileFile;
-
-
