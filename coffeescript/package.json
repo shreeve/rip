@@ -24,7 +24,7 @@
   "exports": {
     ".": {
       "require": "./lib/coffeescript/index.js",
-      "import": "./lib/coffeescript/index.js"
+      "import": "./lib-esm/index.js"
     }
   },
   "bin": {
