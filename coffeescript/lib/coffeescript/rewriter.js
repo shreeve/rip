@@ -88,7 +88,6 @@
         this.addImplicitBracesAndParens();
         this.rescueStowawayComments();
         this.addLocationDataToGeneratedTokens();
-        this.enforceValidJSXAttributes();
         this.fixIndentationLocationData();
         this.exposeTokenDataToGrammar();
         if (typeof process !== "undefined" && process !== null ? (ref1 = process.env) != null ? ref1.DEBUG_REWRITTEN_TOKEN_STREAM : void 0 : void 0) {
@@ -601,20 +600,6 @@
             }
           }
           return forward(1);
-        });
-      }
-
-      // Make sure only strings and wrapped expressions are used in JSX attributes.
-      enforceValidJSXAttributes() {
-        return this.scanTokens(function(token, i, tokens) {
-          var next, ref;
-          if (token.jsxColon) {
-            next = tokens[i + 1];
-            if ((ref = next[0]) !== 'STRING_START' && ref !== 'STRING' && ref !== '(') {
-              throwSyntaxError('expected wrapped or quoted JSX attribute', next[2]);
-            }
-          }
-          return 1;
         });
       }
 

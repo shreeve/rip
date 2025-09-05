@@ -9,7 +9,7 @@
   // where locationData is {first_line, first_column, last_line, last_column, last_line_exclusive, last_column_exclusive}, which is a
   // format that can be fed directly into [Jison](https://github.com/zaach/jison).  These
   // are read by jison in the `parser.lexer` function defined in coffeescript.coffee.
-  var BOM, BOOL, CALLABLE, CODE, COFFEE_ALIASES, COFFEE_ALIAS_MAP, COFFEE_KEYWORDS, COMMENT, COMPARABLE_LEFT_SIDE, COMPARE, COMPOUND_ASSIGN, HERECOMMENT_ILLEGAL, HEREDOC_DOUBLE, HEREDOC_INDENT, HEREDOC_SINGLE, HEREGEX, HEREGEX_COMMENT, HERE_JSTOKEN, IDENTIFIER, INDENTABLE_CLOSERS, INDEXABLE, INSIDE_JSX, INVERSES, JSTOKEN, JSX_ATTRIBUTE, JSX_FRAGMENT_IDENTIFIER, JSX_IDENTIFIER, JSX_IDENTIFIER_PART, JSX_INTERPOLATION, JS_KEYWORDS, LINE_BREAK, LINE_CONTINUER, Lexer, MATH, MULTI_DENT, NOT_REGEX, NUMBER, OPERATOR, POSSIBLY_DIVISION, REGEX, REGEX_FLAGS, REGEX_ILLEGAL, REGEX_INVALID_ESCAPE, RELATION, RESERVED, Rewriter, SHIFT, STRICT_PROSCRIBED, STRING_DOUBLE, STRING_INVALID_ESCAPE, STRING_SINGLE, STRING_START, TRAILING_SPACES, UNARY, UNARY_MATH, UNFINISHED, VALID_FLAGS, WHITESPACE, addTokenData, attachCommentsToNode, compact, count, flatten, isForFrom, isUnassignable, key, locationDataToString, merge, parseNumber, repeat, replaceUnicodeCodePointEscapes, starts, throwSyntaxError,
+  var BOM, BOOL, CALLABLE, CODE, COFFEE_ALIASES, COFFEE_ALIAS_MAP, COFFEE_KEYWORDS, COMMENT, COMPARABLE_LEFT_SIDE, COMPARE, COMPOUND_ASSIGN, HERECOMMENT_ILLEGAL, HEREDOC_DOUBLE, HEREDOC_INDENT, HEREDOC_SINGLE, HEREGEX, HEREGEX_COMMENT, HERE_JSTOKEN, IDENTIFIER, INDENTABLE_CLOSERS, INDEXABLE, INVERSES, JSTOKEN, JS_KEYWORDS, LINE_BREAK, LINE_CONTINUER, Lexer, MATH, MULTI_DENT, NOT_REGEX, NUMBER, OPERATOR, POSSIBLY_DIVISION, REGEX, REGEX_FLAGS, REGEX_ILLEGAL, REGEX_INVALID_ESCAPE, RELATION, RESERVED, Rewriter, SHIFT, STRICT_PROSCRIBED, STRING_DOUBLE, STRING_INVALID_ESCAPE, STRING_SINGLE, STRING_START, TRAILING_SPACES, UNARY, UNARY_MATH, UNFINISHED, VALID_FLAGS, WHITESPACE, addTokenData, attachCommentsToNode, compact, count, flatten, isForFrom, isUnassignable, key, locationDataToString, merge, parseNumber, repeat, replaceUnicodeCodePointEscapes, starts, throwSyntaxError,
     indexOf = [].indexOf,
     slice = [].slice;
 
@@ -56,8 +56,6 @@
       this.seenExport = false; // Used to recognize `EXPORT FROM? AS?` tokens.
       this.importSpecifierList = false; // Used to identify when in an `IMPORT {...} FROM? ...`.
       this.exportSpecifierList = false; // Used to identify when in an `EXPORT {...} FROM? ...`.
-      this.jsxDepth = 0; // Used to optimize JSX checks, how deep in JSX we are.
-      this.jsxObjAttribute = {}; // Used to detect if JSX attributes is wrapped in {} (<div {props...} />).
       this.chunkLine = opts.line || 0; // The start line for the current @chunk.
       this.chunkColumn = opts.column || 0; // The start column of the current @chunk.
       this.chunkOffset = opts.offset || 0; // The start offset for the current @chunk.
@@ -69,7 +67,7 @@
       // `@literalToken` is the fallback catch-all.
       i = 0;
       while (this.chunk = code.slice(i)) {
-        consumed = this.identifierToken() || this.commentToken() || this.whitespaceToken() || this.lineToken() || this.stringToken() || this.numberToken() || this.jsxToken() || this.regexToken() || this.jsToken() || this.literalToken();
+        consumed = this.identifierToken() || this.commentToken() || this.whitespaceToken() || this.lineToken() || this.stringToken() || this.numberToken() || this.regexToken() || this.jsToken() || this.literalToken();
         // Update position.
         [this.chunkLine, this.chunkColumn, this.chunkOffset] = this.getLineAndColumnFromChunk(consumed);
         i += consumed;
@@ -125,10 +123,8 @@
     // referenced as property names here, so you can still do `jQuery.is()` even
     // though `is` means `===` otherwise.
     identifierToken() {
-      var afterNot, alias, colon, colonOffset, colonToken, id, idLength, inJSXTag, input, match, poppedToken, prev, prevprev, ref, ref1, ref10, ref11, ref12, ref2, ref3, ref4, ref5, ref6, ref7, ref8, ref9, regExSuper, regex, sup, tag, tagToken, tokenData;
-      inJSXTag = this.atJSXTag();
-      regex = inJSXTag ? JSX_ATTRIBUTE : IDENTIFIER;
-      if (!(match = regex.exec(this.chunk))) {
+      var afterNot, alias, colon, colonOffset, colonToken, id, idLength, input, match, poppedToken, prev, prevprev, ref, ref1, ref10, ref11, ref12, ref2, ref3, ref4, ref5, ref6, ref7, ref8, ref9, regExSuper, sup, tag, tagToken, tokenData;
+      if (!(match = IDENTIFIER.exec(this.chunk))) {
         return 0;
       }
       [input, id, colon] = match;
@@ -234,7 +230,7 @@
           }
         }
       }
-      if (tag === 'IDENTIFIER' && indexOf.call(RESERVED, id) >= 0 && !inJSXTag) {
+      if (tag === 'IDENTIFIER' && indexOf.call(RESERVED, id) >= 0) {
         this.error(`reserved word '${id}'`, {
           length: id.length
         });
@@ -289,19 +285,9 @@
         [tagToken[2].first_line, tagToken[2].first_column, tagToken[2].range[0]] = [poppedToken[2].first_line, poppedToken[2].first_column, poppedToken[2].range[0]];
       }
       if (colon) {
-        colonOffset = input.lastIndexOf(inJSXTag ? '=' : ':');
+        colonOffset = input.lastIndexOf(':');
         colonToken = this.token(':', ':', {
           offset: colonOffset
-        });
-        if (inJSXTag) { // used by rewriter
-          colonToken.jsxColon = true;
-        }
-      }
-      if (inJSXTag && tag === 'IDENTIFIER' && prev[0] !== ':') {
-        this.token(',', ',', {
-          length: 0,
-          origin: tagToken,
-          generated: true
         });
       }
       // Return the actual consumed length (accounts for 'is not' → 'isnt' transformation)
@@ -412,13 +398,6 @@
           delimiter: quote
         });
       });
-      if (this.atJSXTag()) {
-        this.token(',', ',', {
-          length: 0,
-          origin: this.prev,
-          generated: true
-        });
-      }
       return end;
     }
 
@@ -907,204 +886,6 @@
         this.tokens.pop();
       }
       return this;
-    }
-
-    jsxToken() {
-      var afterTag, end, endToken, firstChar, fullId, fullTagName, id, input, j, jsxTag, len, match, offset, openingTagToken, prev, prevChar, properties, property, ref, tagToken, token, tokens;
-      firstChar = this.chunk[0];
-      // Check the previous token to detect if attribute is spread.
-      prevChar = this.tokens.length > 0 ? this.tokens[this.tokens.length - 1][0] : '';
-      if (firstChar === '<') {
-        match = JSX_IDENTIFIER.exec(this.chunk.slice(1)) || JSX_FRAGMENT_IDENTIFIER.exec(this.chunk.slice(1));
-        // Not the right hand side of an unspaced comparison (i.e. `a<b`).
-        if (!(match && (this.jsxDepth > 0 || !(prev = this.prev()) || prev.spaced || (ref = prev[0], indexOf.call(COMPARABLE_LEFT_SIDE, ref) < 0)))) {
-          return 0;
-        }
-        [input, id] = match;
-        fullId = id;
-        if (indexOf.call(id, '.') >= 0) {
-          [id, ...properties] = id.split('.');
-        } else {
-          properties = [];
-        }
-        tagToken = this.token('JSX_TAG', id, {
-          length: id.length + 1,
-          data: {
-            openingBracketToken: this.makeToken('<', '<'),
-            tagNameToken: this.makeToken('IDENTIFIER', id, {
-              offset: 1
-            })
-          }
-        });
-        offset = id.length + 1;
-        for (j = 0, len = properties.length; j < len; j++) {
-          property = properties[j];
-          this.token('.', '.', {offset});
-          offset += 1;
-          this.token('PROPERTY', property, {offset});
-          offset += property.length;
-        }
-        this.token('CALL_START', '(', {
-          generated: true
-        });
-        this.token('[', '[', {
-          generated: true
-        });
-        this.ends.push({
-          tag: '/>',
-          origin: tagToken,
-          name: id,
-          properties
-        });
-        this.jsxDepth++;
-        return fullId.length + 1;
-      } else if (jsxTag = this.atJSXTag()) {
-        if (this.chunk.slice(0, 2) === '/>') { // Self-closing tag.
-          this.pair('/>');
-          this.token(']', ']', {
-            length: 2,
-            generated: true
-          });
-          this.token('CALL_END', ')', {
-            length: 2,
-            generated: true,
-            data: {
-              selfClosingSlashToken: this.makeToken('/', '/'),
-              closingBracketToken: this.makeToken('>', '>', {
-                offset: 1
-              })
-            }
-          });
-          this.jsxDepth--;
-          return 2;
-        } else if (firstChar === '{') {
-          if (prevChar === ':') {
-            // This token represents the start of a JSX attribute value
-            // that’s an expression (e.g. the `{b}` in `<div a={b} />`).
-            // Our grammar represents the beginnings of expressions as `(`
-            // tokens, so make this into a `(` token that displays as `{`.
-            token = this.token('(', '{');
-            this.jsxObjAttribute[this.jsxDepth] = false;
-            // tag attribute name as JSX
-            addTokenData(this.tokens[this.tokens.length - 3], {
-              jsx: true
-            });
-          } else {
-            token = this.token('{', '{');
-            this.jsxObjAttribute[this.jsxDepth] = true;
-          }
-          this.ends.push({
-            tag: '}',
-            origin: token
-          });
-          return 1;
-        } else if (firstChar === '>') { // end of opening tag
-          ({
-            // Ignore terminators inside a tag.
-            origin: openingTagToken
-          } = this.pair('/>')); // As if the current tag was self-closing.
-          this.token(']', ']', {
-            generated: true,
-            data: {
-              closingBracketToken: this.makeToken('>', '>')
-            }
-          });
-          this.token(',', 'JSX_COMMA', {
-            generated: true
-          });
-          ({
-            tokens,
-            index: end
-          } = this.matchWithInterpolations(INSIDE_JSX, '>', '</', JSX_INTERPOLATION));
-          this.mergeInterpolationTokens(tokens, {
-            endOffset: end,
-            jsx: true
-          }, (value) => {
-            return this.validateUnicodeCodePointEscapes(value, {
-              delimiter: '>'
-            });
-          });
-          match = JSX_IDENTIFIER.exec(this.chunk.slice(end)) || JSX_FRAGMENT_IDENTIFIER.exec(this.chunk.slice(end));
-          if (!match || match[1] !== `${jsxTag.name}${((function() {
-            var k, len1, ref1, results;
-            ref1 = jsxTag.properties;
-            results = [];
-            for (k = 0, len1 = ref1.length; k < len1; k++) {
-              property = ref1[k];
-              results.push(`.${property}`);
-            }
-            return results;
-          })()).join('')}`) {
-            this.error(`expected corresponding JSX closing tag for ${jsxTag.name}`, jsxTag.origin.data.tagNameToken[2]);
-          }
-          [, fullTagName] = match;
-          afterTag = end + fullTagName.length;
-          if (this.chunk[afterTag] !== '>') {
-            this.error("missing closing > after tag name", {
-              offset: afterTag,
-              length: 1
-            });
-          }
-          // -2/+2 for the opening `</` and +1 for the closing `>`.
-          endToken = this.token('CALL_END', ')', {
-            offset: end - 2,
-            length: fullTagName.length + 3,
-            generated: true,
-            data: {
-              closingTagOpeningBracketToken: this.makeToken('<', '<', {
-                offset: end - 2
-              }),
-              closingTagSlashToken: this.makeToken('/', '/', {
-                offset: end - 1
-              }),
-              // TODO: individual tokens for complex tag name? eg < / A . B >
-              closingTagNameToken: this.makeToken('IDENTIFIER', fullTagName, {
-                offset: end
-              }),
-              closingTagClosingBracketToken: this.makeToken('>', '>', {
-                offset: end + fullTagName.length
-              })
-            }
-          });
-          // make the closing tag location data more easily accessible to the grammar
-          addTokenData(openingTagToken, endToken.data);
-          this.jsxDepth--;
-          return afterTag + 1;
-        } else {
-          return 0;
-        }
-      } else if (this.atJSXTag(1)) {
-        if (firstChar === '}') {
-          this.pair(firstChar);
-          if (this.jsxObjAttribute[this.jsxDepth]) {
-            this.token('}', '}');
-            this.jsxObjAttribute[this.jsxDepth] = false;
-          } else {
-            this.token(')', '}');
-          }
-          this.token(',', ',', {
-            generated: true
-          });
-          return 1;
-        } else {
-          return 0;
-        }
-      } else {
-        return 0;
-      }
-    }
-
-    atJSXTag(depth = 0) {
-      var i, last, ref;
-      if (this.jsxDepth === 0) {
-        return false;
-      }
-      i = this.ends.length - 1;
-      while (((ref = this.ends[i]) != null ? ref.tag : void 0) === 'OUTDENT' || depth-- > 0) { // Ignore indents.
-        i--;
-      }
-      last = this.ends[i];
-      return (last != null ? last.tag : void 0) === '/>' && last;
     }
 
     // We treat all other single characters as a token. E.g.: `( ) , . !`
@@ -1797,26 +1578,6 @@
   IDENTIFIER = /^(?!\d)((?:(?!\s)[$\w\x7f-\uffff])+!?)([^\n\S]*:(?!:))?/; // rip: allow optional trailing ! for async calls
   // Is this a property name?
 
-  // Like `IDENTIFIER`, but includes `-`s
-  JSX_IDENTIFIER_PART = /(?:(?!\s)[\-$\w\x7f-\uffff])+/.source;
-
-  // In https://facebook.github.io/jsx/ spec, JSXElementName can be
-  // JSXIdentifier, JSXNamespacedName (JSXIdentifier : JSXIdentifier), or
-  // JSXMemberExpression (two or more JSXIdentifier connected by `.`s).
-  JSX_IDENTIFIER = RegExp(`^(?![\\d<])(${JSX_IDENTIFIER_PART // Must not start with `<`.
-  // JSXNamespacedName
-  // JSXMemberExpression
-}(?:\\s*:\\s*${JSX_IDENTIFIER_PART}|(?:\\s*\\.\\s*${JSX_IDENTIFIER_PART})+)?)`);
-
-  // Fragment: <></>
-  JSX_FRAGMENT_IDENTIFIER = /^()>/; // Ends immediately with `>`.
-
-  // In https://facebook.github.io/jsx/ spec, JSXAttributeName can be either
-  // JSXIdentifier or JSXNamespacedName which is JSXIdentifier : JSXIdentifier
-  JSX_ATTRIBUTE = RegExp(`^(?!\\d)(${JSX_IDENTIFIER_PART // JSXNamespacedName
-  // Is this an attribute with a value?
-}(?:\\s*:\\s*${JSX_IDENTIFIER_PART})?)([^\\S]*=(?!=))?`);
-
   NUMBER = /^0b[01](?:_?[01])*n?|^0o[0-7](?:_?[0-7])*n?|^0x[\da-f](?:_?[\da-f])*n?|^\d+(?:_\d+)*n|^(?:\d+(?:_\d+)*)?\.?\d+(?:_\d+)*(?:e[+-]?\d+(?:_\d+)*)?/i; // binary
   // octal
   // hex
@@ -1856,12 +1617,6 @@
   HEREDOC_SINGLE = /^(?:[^\\']|\\[\s\S]|'(?!''))*/;
 
   HEREDOC_DOUBLE = /^(?:[^\\"#]|\\[\s\S]|"(?!"")|\#(?!\{))*/;
-
-  INSIDE_JSX = /^(?:[^\{<])*/; // Start of CoffeeScript interpolation. // Similar to `HEREDOC_DOUBLE` but there is no escaping.
-  // Maybe JSX tag (`<` not allowed even if bare).
-
-  JSX_INTERPOLATION = /^(?:\{|<(?!\/))/; // CoffeeScript interpolation.
-  // JSX opening tag.
 
   HEREDOC_INDENT = /\n+([^\n\S]*)(?=\S)/g;
 

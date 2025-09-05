@@ -3,7 +3,7 @@
   // nodes are created as the result of actions in the [grammar](grammar.html),
   // but some are created by other nodes as a method of code generation. To convert
   // the syntax tree into a string of JavaScript code, call `compile()` on the root.
-  var Access, Arr, Assign, AwaitReturn, Base, Block, BooleanLiteral, Call, Catch, Class, ClassProperty, ClassPrototypeProperty, Code, CodeFragment, ComputedPropertyName, DefaultLiteral, Directive, DynamicImport, DynamicImportCall, Elision, EmptyInterpolation, ExecutableClassBody, Existence, Expansion, ExportAllDeclaration, ExportDeclaration, ExportDefaultDeclaration, ExportNamedDeclaration, ExportSpecifier, ExportSpecifierList, Extends, For, FuncDirectiveReturn, FuncGlyph, HEREGEX_OMIT, HereComment, HoistTarget, IdentifierLiteral, If, ImportClause, ImportDeclaration, ImportDefaultSpecifier, ImportNamespaceSpecifier, ImportSpecifier, ImportSpecifierList, In, Index, InfinityLiteral, Interpolation, JSXAttribute, JSXAttributes, JSXElement, JSXEmptyExpression, JSXExpressionContainer, JSXIdentifier, JSXNamespacedName, JSXTag, JSXText, JS_FORBIDDEN, LEADING_BLANK_LINE, LEVEL_ACCESS, LEVEL_COND, LEVEL_LIST, LEVEL_OP, LEVEL_PAREN, LEVEL_TOP, LineComment, Literal, MetaProperty, ModuleDeclaration, ModuleSpecifier, ModuleSpecifierList, NEGATE, NO, NaNLiteral, NullLiteral, NumberLiteral, Obj, ObjectProperty, Op, Param, Parens, PassthroughLiteral, PropertyName, Range, RegexIndex, RegexLiteral, RegexWithInterpolations, Return, Root, SIMPLENUM, SIMPLE_STRING_OMIT, STRING_OMIT, Scope, Sequence, Slice, Splat, StatementLiteral, StringLiteral, StringWithInterpolations, Super, SuperCall, Switch, SwitchCase, SwitchWhen, TAB, THIS, TRAILING_BLANK_LINE, TaggedTemplateCall, TemplateElement, ThisLiteral, Throw, Try, UTILITIES, UndefinedLiteral, Value, While, YES, YieldReturn, addDataToNode, astAsBlockIfNeeded, attachCommentsToNode, compact, del, emptyExpressionLocationData, ends, extend, extractSameLineLocationDataFirst, extractSameLineLocationDataLast, flatten, fragmentsToText, greater, hasLineComments, indentInitial, isAstLocGreater, isFunction, isLiteralArguments, isLiteralThis, isLocationDataEndGreater, isLocationDataStartGreater, isNumber, isPlainObject, isUnassignable, jisonLocationDataToAstLocationData, lesser, locationDataToString, makeDelimitedLiteral, merge, mergeAstLocationData, mergeLocationData, moveComments, multident, parseNumber, replaceUnicodeCodePointEscapes, shouldCacheOrIsAssignable, sniffDirectives, some, starts, throwSyntaxError, unfoldSoak, unshiftAfterComments, utility, zeroWidthLocationDataFromEndLocation,
+  var Access, Arr, Assign, AwaitReturn, Base, Block, BooleanLiteral, Call, Catch, Class, ClassProperty, ClassPrototypeProperty, Code, CodeFragment, ComputedPropertyName, DefaultLiteral, Directive, DynamicImport, DynamicImportCall, Elision, EmptyInterpolation, ExecutableClassBody, Existence, Expansion, ExportAllDeclaration, ExportDeclaration, ExportDefaultDeclaration, ExportNamedDeclaration, ExportSpecifier, ExportSpecifierList, Extends, For, FuncDirectiveReturn, FuncGlyph, HEREGEX_OMIT, HereComment, HoistTarget, IdentifierLiteral, If, ImportClause, ImportDeclaration, ImportDefaultSpecifier, ImportNamespaceSpecifier, ImportSpecifier, ImportSpecifierList, In, Index, InfinityLiteral, Interpolation, JS_FORBIDDEN, LEADING_BLANK_LINE, LEVEL_ACCESS, LEVEL_COND, LEVEL_LIST, LEVEL_OP, LEVEL_PAREN, LEVEL_TOP, LineComment, Literal, MetaProperty, ModuleDeclaration, ModuleSpecifier, ModuleSpecifierList, NEGATE, NO, NaNLiteral, NullLiteral, NumberLiteral, Obj, ObjectProperty, Op, Param, Parens, PassthroughLiteral, PropertyName, Range, RegexIndex, RegexLiteral, RegexWithInterpolations, Return, Root, SIMPLENUM, SIMPLE_STRING_OMIT, STRING_OMIT, Scope, Sequence, Slice, Splat, StatementLiteral, StringLiteral, StringWithInterpolations, Super, SuperCall, Switch, SwitchCase, SwitchWhen, TAB, THIS, TRAILING_BLANK_LINE, TaggedTemplateCall, TemplateElement, ThisLiteral, Throw, Try, UTILITIES, UndefinedLiteral, Value, While, YES, YieldReturn, addDataToNode, astAsBlockIfNeeded, attachCommentsToNode, compact, del, emptyExpressionLocationData, ends, extend, extractSameLineLocationDataFirst, extractSameLineLocationDataLast, flatten, fragmentsToText, greater, hasLineComments, indentInitial, isAstLocGreater, isFunction, isLiteralArguments, isLiteralThis, isLocationDataEndGreater, isLocationDataStartGreater, isNumber, isPlainObject, isUnassignable, jisonLocationDataToAstLocationData, lesser, locationDataToString, makeDelimitedLiteral, merge, mergeAstLocationData, mergeLocationData, moveComments, multident, parseNumber, replaceUnicodeCodePointEscapes, shouldCacheOrIsAssignable, sniffDirectives, some, starts, throwSyntaxError, unfoldSoak, unshiftAfterComments, utility, zeroWidthLocationDataFromEndLocation,
     indexOf = [].indexOf,
     splice = [].splice,
     slice1 = [].slice;
@@ -874,23 +874,10 @@
       // A Block node does not return its entire body, rather it
       // ensures that the final expression is returned.
       makeReturn(results, mark) {
-        var expr, expressions, last, lastExp, len, penult, ref1, ref2;
+        var expr, lastExp, len, ref1, ref2;
         len = this.expressions.length;
         ref1 = this.expressions, [lastExp] = slice1.call(ref1, -1);
         lastExp = (lastExp != null ? lastExp.unwrap() : void 0) || false;
-        // We also need to check that we’re not returning a JSX tag if there’s an
-        // adjacent one at the same level; JSX doesn’t allow that.
-        if (lastExp && lastExp instanceof Parens && lastExp.body.expressions.length > 1) {
-          ({
-            body: {expressions}
-          } = lastExp);
-          [penult, last] = slice1.call(expressions, -2);
-          penult = penult.unwrap();
-          last = last.unwrap();
-          if (penult instanceof JSXElement && last instanceof JSXElement) {
-            expressions[expressions.length - 1].error('Adjacent JSX elements must be wrapped in an enclosing tag');
-          }
-        }
         if (mark) {
           if ((ref2 = this.expressions[len - 1]) != null) {
             ref2.makeReturn(results, mark);
@@ -1480,20 +1467,11 @@
         includeDelimiters: false,
         convertTrailingNullEscapes: true
       });
-      this.unquotedValueForJSX = makeDelimitedLiteral(val, {
-        double: this.double,
-        escapeNewlines: false,
-        includeDelimiters: false,
-        escapeDelimiter: false
-      });
     }
 
     compileNode(o) {
       if (this.shouldGenerateTemplateLiteral()) {
         return StringWithInterpolations.fromStringLiteral(this).compileNode(o);
-      }
-      if (this.jsx) {
-        return [this.makeCode(this.unquotedValueForJSX)];
       }
       return super.compileNode(o);
     }
@@ -1686,11 +1664,7 @@
   exports.PropertyName = PropertyName = (function() {
     class PropertyName extends Literal {
       astType() {
-        if (this.jsx) {
-          return 'JSXIdentifier';
-        } else {
-          return 'Identifier';
-        }
+        return 'Identifier';
       }
 
       astProperties() {
@@ -2079,10 +2053,6 @@
         return !this.properties.length && this.base.isStatement(o);
       }
 
-      isJSXTag() {
-        return this.base instanceof JSXTag;
-      }
-
       assigns(name) {
         return !this.properties.length && this.base.assigns(name);
       }
@@ -2321,9 +2291,7 @@
       }
 
       astType() {
-        if (this.isJSXTag()) {
-          return 'JSXMemberExpression';
-        } else if (this.containsSoak()) {
+        if (this.containsSoak()) {
           return 'OptionalMemberExpression';
         } else {
           return 'MemberExpression';
@@ -2336,9 +2304,6 @@
       astProperties(o) {
         var computed, property, ref1, ref2;
         ref1 = this.properties, [property] = slice1.call(ref1, -1);
-        if (this.isJSXTag()) {
-          property.name.jsx = true;
-        }
         computed = property instanceof Index || !(((ref2 = property.name) != null ? ref2.unwrap() : void 0) instanceof PropertyName);
         return {
           object: this.object().ast(o, LEVEL_ACCESS),
@@ -2347,14 +2312,6 @@
           optional: !!property.soak,
           shorthand: !!property.shorthand
         };
-      }
-
-      astLocationData() {
-        if (!this.isJSXTag()) {
-          return super.astLocationData();
-        }
-        // don't include leading < of JSX tag in location data
-        return mergeAstLocationData(jisonLocationDataToAstLocationData(this.base.tagNameLocationData), jisonLocationDataToAstLocationData(this.properties[this.properties.length - 1].locationData));
       }
 
     };
@@ -2419,13 +2376,13 @@
   // Comment delimited by `###` (becoming `/* */`).
   exports.HereComment = HereComment = class HereComment extends Base {
     constructor({
-        content: content1,
+        content,
         newLine,
         unshift,
         locationData: locationData1
       }) {
       super();
-      this.content = content1;
+      this.content = content;
       this.newLine = newLine;
       this.unshift = unshift;
       this.locationData = locationData1;
@@ -2480,14 +2437,14 @@
   // Comment running from `#` to the end of a line (becoming `//`).
   exports.LineComment = LineComment = class LineComment extends Base {
     constructor({
-        content: content1,
+        content,
         newLine,
         unshift,
         locationData: locationData1,
         precededByBlankLine
       }) {
       super();
-      this.content = content1;
+      this.content = content;
       this.newLine = newLine;
       this.unshift = unshift;
       this.locationData = locationData1;
@@ -2517,444 +2474,6 @@
 
   };
 
-  //### JSX
-  exports.JSXIdentifier = JSXIdentifier = class JSXIdentifier extends IdentifierLiteral {
-    astType() {
-      return 'JSXIdentifier';
-    }
-
-  };
-
-  exports.JSXTag = JSXTag = class JSXTag extends JSXIdentifier {
-    constructor(value, {tagNameLocationData, closingTagOpeningBracketLocationData, closingTagSlashLocationData, closingTagNameLocationData, closingTagClosingBracketLocationData}) {
-      super(value);
-      this.tagNameLocationData = tagNameLocationData;
-      this.closingTagOpeningBracketLocationData = closingTagOpeningBracketLocationData;
-      this.closingTagSlashLocationData = closingTagSlashLocationData;
-      this.closingTagNameLocationData = closingTagNameLocationData;
-      this.closingTagClosingBracketLocationData = closingTagClosingBracketLocationData;
-    }
-
-    astProperties() {
-      return {
-        name: this.value
-      };
-    }
-
-  };
-
-  exports.JSXExpressionContainer = JSXExpressionContainer = (function() {
-    class JSXExpressionContainer extends Base {
-      constructor(expression1, {locationData} = {}) {
-        super();
-        this.expression = expression1;
-        this.expression.jsxAttribute = true;
-        this.locationData = locationData != null ? locationData : this.expression.locationData;
-      }
-
-      compileNode(o) {
-        return this.expression.compileNode(o);
-      }
-
-      astProperties(o) {
-        return {
-          expression: astAsBlockIfNeeded(this.expression, o)
-        };
-      }
-
-    };
-
-    JSXExpressionContainer.prototype.children = ['expression'];
-
-    return JSXExpressionContainer;
-
-  }).call(this);
-
-  exports.JSXEmptyExpression = JSXEmptyExpression = class JSXEmptyExpression extends Base {};
-
-  exports.JSXText = JSXText = class JSXText extends Base {
-    constructor(stringLiteral) {
-      super();
-      this.value = stringLiteral.unquotedValueForJSX;
-      this.locationData = stringLiteral.locationData;
-    }
-
-    astProperties() {
-      return {
-        value: this.value,
-        extra: {
-          raw: this.value
-        }
-      };
-    }
-
-  };
-
-  exports.JSXAttribute = JSXAttribute = (function() {
-    class JSXAttribute extends Base {
-      constructor({
-          name: name1,
-          value
-        }) {
-        var ref1;
-        super();
-        this.name = name1;
-        this.value = value != null ? (value = value.base, value instanceof StringLiteral && !value.shouldGenerateTemplateLiteral() ? value : new JSXExpressionContainer(value)) : null;
-        if ((ref1 = this.value) != null) {
-          ref1.comments = value.comments;
-        }
-      }
-
-      compileNode(o) {
-        var compiledName, val;
-        compiledName = this.name.compileToFragments(o, LEVEL_LIST);
-        if (this.value == null) {
-          return compiledName;
-        }
-        val = this.value.compileToFragments(o, LEVEL_LIST);
-        return compiledName.concat(this.makeCode('='), val);
-      }
-
-      astProperties(o) {
-        var name, ref1, ref2;
-        name = this.name;
-        if (indexOf.call(name.value, ':') >= 0) {
-          name = new JSXNamespacedName(name);
-        }
-        return {
-          name: name.ast(o),
-          value: (ref1 = (ref2 = this.value) != null ? ref2.ast(o) : void 0) != null ? ref1 : null
-        };
-      }
-
-    };
-
-    JSXAttribute.prototype.children = ['name', 'value'];
-
-    return JSXAttribute;
-
-  }).call(this);
-
-  exports.JSXAttributes = JSXAttributes = (function() {
-    class JSXAttributes extends Base {
-      constructor(arr) {
-        var attribute, base, j, k, len1, len2, object, property, ref1, ref2, value, variable;
-        super();
-        this.attributes = [];
-        ref1 = arr.objects;
-        for (j = 0, len1 = ref1.length; j < len1; j++) {
-          object = ref1[j];
-          this.checkValidAttribute(object);
-          ({base} = object);
-          if (base instanceof IdentifierLiteral) {
-            // attribute with no value eg disabled
-            attribute = new JSXAttribute({
-              name: new JSXIdentifier(base.value).withLocationDataAndCommentsFrom(base)
-            });
-            attribute.locationData = base.locationData;
-            this.attributes.push(attribute);
-          } else if (!base.generated) {
-            // object spread attribute eg {...props}
-            attribute = base.properties[0];
-            attribute.jsx = true;
-            attribute.locationData = base.locationData;
-            this.attributes.push(attribute);
-          } else {
-            ref2 = base.properties;
-            // Obj containing attributes with values eg a="b" c={d}
-            for (k = 0, len2 = ref2.length; k < len2; k++) {
-              property = ref2[k];
-              ({variable, value} = property);
-              attribute = new JSXAttribute({
-                name: new JSXIdentifier(variable.base.value).withLocationDataAndCommentsFrom(variable.base),
-                value
-              });
-              attribute.locationData = property.locationData;
-              this.attributes.push(attribute);
-            }
-          }
-        }
-        this.locationData = arr.locationData;
-      }
-
-      // Catch invalid attributes: <div {a:"b", props} {props} "value" />
-      checkValidAttribute(object) {
-        var attribute, properties;
-        ({
-          base: attribute
-        } = object);
-        properties = (attribute != null ? attribute.properties : void 0) || [];
-        if (!(attribute instanceof Obj || attribute instanceof IdentifierLiteral) || (attribute instanceof Obj && !attribute.generated && (properties.length > 1 || !(properties[0] instanceof Splat)))) {
-          return object.error(`Unexpected token. Allowed JSX attributes are: id="val", src={source}, {props...} or attribute.`);
-        }
-      }
-
-      compileNode(o) {
-        var attribute, fragments, j, len1, ref1;
-        fragments = [];
-        ref1 = this.attributes;
-        for (j = 0, len1 = ref1.length; j < len1; j++) {
-          attribute = ref1[j];
-          fragments.push(this.makeCode(' '));
-          fragments.push(...attribute.compileToFragments(o, LEVEL_TOP));
-        }
-        return fragments;
-      }
-
-      astNode(o) {
-        var attribute, j, len1, ref1, results1;
-        ref1 = this.attributes;
-        results1 = [];
-        for (j = 0, len1 = ref1.length; j < len1; j++) {
-          attribute = ref1[j];
-          results1.push(attribute.ast(o));
-        }
-        return results1;
-      }
-
-    };
-
-    JSXAttributes.prototype.children = ['attributes'];
-
-    return JSXAttributes;
-
-  }).call(this);
-
-  exports.JSXNamespacedName = JSXNamespacedName = (function() {
-    class JSXNamespacedName extends Base {
-      constructor(tag) {
-        var name, namespace;
-        super();
-        [namespace, name] = tag.value.split(':');
-        this.namespace = new JSXIdentifier(namespace).withLocationDataFrom({
-          locationData: extractSameLineLocationDataFirst(namespace.length)(tag.locationData)
-        });
-        this.name = new JSXIdentifier(name).withLocationDataFrom({
-          locationData: extractSameLineLocationDataLast(name.length)(tag.locationData)
-        });
-        this.locationData = tag.locationData;
-      }
-
-      astProperties(o) {
-        return {
-          namespace: this.namespace.ast(o),
-          name: this.name.ast(o)
-        };
-      }
-
-    };
-
-    JSXNamespacedName.prototype.children = ['namespace', 'name'];
-
-    return JSXNamespacedName;
-
-  }).call(this);
-
-  // Node for a JSX element
-  exports.JSXElement = JSXElement = (function() {
-    class JSXElement extends Base {
-      constructor({
-          tagName: tagName1,
-          attributes,
-          content: content1
-        }) {
-        super();
-        this.tagName = tagName1;
-        this.attributes = attributes;
-        this.content = content1;
-      }
-
-      compileNode(o) {
-        var fragments, ref1, tag;
-        if ((ref1 = this.content) != null) {
-          ref1.base.jsx = true;
-        }
-        fragments = [this.makeCode('<')];
-        fragments.push(...(tag = this.tagName.compileToFragments(o, LEVEL_ACCESS)));
-        fragments.push(...this.attributes.compileToFragments(o));
-        if (this.content) {
-          fragments.push(this.makeCode('>'));
-          fragments.push(...this.content.compileNode(o, LEVEL_LIST));
-          fragments.push(...[this.makeCode('</'), ...tag, this.makeCode('>')]);
-        } else {
-          fragments.push(this.makeCode(' />'));
-        }
-        return fragments;
-      }
-
-      isFragment() {
-        return !this.tagName.base.value.length;
-      }
-
-      astNode(o) {
-        var tagName;
-        // The location data spanning the opening element < ... > is captured by
-        // the generated Arr which contains the element's attributes
-        this.openingElementLocationData = jisonLocationDataToAstLocationData(this.attributes.locationData);
-        tagName = this.tagName.base;
-        tagName.locationData = tagName.tagNameLocationData;
-        if (this.content != null) {
-          this.closingElementLocationData = mergeAstLocationData(jisonLocationDataToAstLocationData(tagName.closingTagOpeningBracketLocationData), jisonLocationDataToAstLocationData(tagName.closingTagClosingBracketLocationData));
-        }
-        return super.astNode(o);
-      }
-
-      astType() {
-        if (this.isFragment()) {
-          return 'JSXFragment';
-        } else {
-          return 'JSXElement';
-        }
-      }
-
-      elementAstProperties(o) {
-        var closingElement, columnDiff, currentExpr, openingElement, rangeDiff, ref1, shiftAstLocationData, tagNameAst;
-        tagNameAst = () => {
-          var tag;
-          tag = this.tagName.unwrap();
-          if ((tag != null ? tag.value : void 0) && indexOf.call(tag.value, ':') >= 0) {
-            tag = new JSXNamespacedName(tag);
-          }
-          return tag.ast(o);
-        };
-        openingElement = Object.assign({
-          type: 'JSXOpeningElement',
-          name: tagNameAst(),
-          selfClosing: this.closingElementLocationData == null,
-          attributes: this.attributes.ast(o)
-        }, this.openingElementLocationData);
-        closingElement = null;
-        if (this.closingElementLocationData != null) {
-          closingElement = Object.assign({
-            type: 'JSXClosingElement',
-            name: Object.assign(tagNameAst(), jisonLocationDataToAstLocationData(this.tagName.base.closingTagNameLocationData))
-          }, this.closingElementLocationData);
-          if ((ref1 = closingElement.name.type) === 'JSXMemberExpression' || ref1 === 'JSXNamespacedName') {
-            rangeDiff = closingElement.range[0] - openingElement.range[0] + '/'.length;
-            columnDiff = closingElement.loc.start.column - openingElement.loc.start.column + '/'.length;
-            shiftAstLocationData = (node) => {
-              node.range = [node.range[0] + rangeDiff, node.range[1] + rangeDiff];
-              node.start += rangeDiff;
-              node.end += rangeDiff;
-              node.loc.start = {
-                line: this.closingElementLocationData.loc.start.line,
-                column: node.loc.start.column + columnDiff
-              };
-              return node.loc.end = {
-                line: this.closingElementLocationData.loc.start.line,
-                column: node.loc.end.column + columnDiff
-              };
-            };
-            if (closingElement.name.type === 'JSXMemberExpression') {
-              currentExpr = closingElement.name;
-              while (currentExpr.type === 'JSXMemberExpression') {
-                if (currentExpr !== closingElement.name) {
-                  shiftAstLocationData(currentExpr);
-                }
-                shiftAstLocationData(currentExpr.property);
-                currentExpr = currentExpr.object;
-              }
-              shiftAstLocationData(currentExpr); // JSXNamespacedName
-            } else {
-              shiftAstLocationData(closingElement.name.namespace);
-              shiftAstLocationData(closingElement.name.name);
-            }
-          }
-        }
-        return {openingElement, closingElement};
-      }
-
-      fragmentAstProperties(o) {
-        var closingFragment, openingFragment;
-        openingFragment = Object.assign({
-          type: 'JSXOpeningFragment'
-        }, this.openingElementLocationData);
-        closingFragment = Object.assign({
-          type: 'JSXClosingFragment'
-        }, this.closingElementLocationData);
-        return {openingFragment, closingFragment};
-      }
-
-      contentAst(o) {
-        var base1, child, children, content, element, emptyExpression, expression, j, len1, results1, unwrapped;
-        if (!(this.content && !(typeof (base1 = this.content.base).isEmpty === "function" ? base1.isEmpty() : void 0))) {
-          return [];
-        }
-        content = this.content.unwrapAll();
-        children = (function() {
-          var j, len1, ref1, results1;
-          if (content instanceof StringLiteral) {
-            return [new JSXText(content)]; // StringWithInterpolations
-          } else {
-            ref1 = this.content.unwrapAll().extractElements(o, {
-              includeInterpolationWrappers: true,
-              isJsx: true
-            });
-            results1 = [];
-            for (j = 0, len1 = ref1.length; j < len1; j++) {
-              element = ref1[j];
-              if (element instanceof StringLiteral) {
-                results1.push(new JSXText(element)); // Interpolation
-              } else {
-                ({expression} = element);
-                if (expression == null) {
-                  emptyExpression = new JSXEmptyExpression();
-                  emptyExpression.locationData = emptyExpressionLocationData({
-                    interpolationNode: element,
-                    openingBrace: '{',
-                    closingBrace: '}'
-                  });
-                  results1.push(new JSXExpressionContainer(emptyExpression, {
-                    locationData: element.locationData
-                  }));
-                } else {
-                  unwrapped = expression.unwrapAll();
-                  // distinguish `<a><b /></a>` from `<a>{<b />}</a>`
-                  if (unwrapped instanceof JSXElement && unwrapped.locationData.range[0] === element.locationData.range[0]) {
-                    results1.push(unwrapped);
-                  } else {
-                    results1.push(new JSXExpressionContainer(unwrapped, {
-                      locationData: element.locationData
-                    }));
-                  }
-                }
-              }
-            }
-            return results1;
-          }
-        }).call(this);
-        results1 = [];
-        for (j = 0, len1 = children.length; j < len1; j++) {
-          child = children[j];
-          if (!(child instanceof JSXText && child.value.length === 0)) {
-            results1.push(child.ast(o));
-          }
-        }
-        return results1;
-      }
-
-      astProperties(o) {
-        return Object.assign(this.isFragment() ? this.fragmentAstProperties(o) : this.elementAstProperties(o), {
-          children: this.contentAst(o)
-        });
-      }
-
-      astLocationData() {
-        if (this.closingElementLocationData != null) {
-          return mergeAstLocationData(this.openingElementLocationData, this.closingElementLocationData);
-        } else {
-          return this.openingElementLocationData;
-        }
-      }
-
-    };
-
-    JSXElement.prototype.children = ['tagName', 'attributes', 'content'];
-
-    return JSXElement;
-
-  }).call(this);
-
   //### Call
 
   // Node for a function invocation.
@@ -2971,13 +2490,6 @@
         this.isNew = false;
         if (this.variable instanceof Value && this.variable.isNotCallable()) {
           this.variable.error("literal is not a function");
-        }
-        if (this.variable.base instanceof JSXTag) {
-          return new JSXElement({
-            tagName: this.variable,
-            attributes: new JSXAttributes(this.args[0].base),
-            content: this.args[1]
-          });
         }
         // `@variable` never gets output as a result of this node getting created as
         // part of `RegexWithInterpolations`, so for that case move any comments to
