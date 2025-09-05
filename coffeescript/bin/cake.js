@@ -31,5 +31,3 @@ for (const base of potentialPaths) {
     }
   }
 }
-
-

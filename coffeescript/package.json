@@ -16,7 +16,7 @@
   "engines": {
     "node": ">=16"
   },
-  "type": "module",
+  "type": "commonjs",
   "directories": {
     "lib": "./lib/coffeescript"
   },
@@ -33,9 +33,9 @@
     "lib"
   ],
   "scripts": {
-    "test": "NODE_OPTIONS=\"--no-warnings=ExperimentalWarning\" node ./bin/cake.js test",
-    "test:rip": "NODE_OPTIONS=\"--no-warnings=ExperimentalWarning\" node ./bin/cake.js test:rip",
-    "test:all": "NODE_OPTIONS=\"--no-warnings=ExperimentalWarning\" node ./bin/cake.js test:all"
+    "test": "NODE_OPTIONS=\"--no-warnings=ExperimentalWarning\" node ./bin/cake.cjs test",
+    "test:rip": "NODE_OPTIONS=\"--no-warnings=ExperimentalWarning\" node ./bin/cake.cjs test:rip",
+    "test:all": "NODE_OPTIONS=\"--no-warnings=ExperimentalWarning\" node ./bin/cake.cjs test:all"
   },
   "homepage": "https://coffeescript.org",
   "bugs": "https://github.com/shreeve/rip/issues",

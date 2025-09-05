@@ -3,7 +3,7 @@
 try {
   new Function('var {a} = {a: 1}')();
 } catch (error) {
-  console.error('Your JavaScript runtime does not support some features used by the cake command. Please use Node 6 or later.');
+  console.error('Your JavaScript runtime does not support some features used by the coffee command. Please use Node 6 or later.');
   process.exit(1);
 }
 
@@ -19,7 +19,9 @@ var potentialPaths = [
 
 for (var i = 0, len = potentialPaths.length; i < len; i++) {
   if (fs.existsSync(potentialPaths[i])) {
-    require(potentialPaths[i] + '/cake').run();
+    require(potentialPaths[i] + '/command').run();
     break;
   }
 }
+
+
