@@ -14,21 +14,23 @@
   "version": "0.1.0",
   "license": "MIT",
   "engines": {
-    "node": ">=6"
+    "node": ">=16"
   },
+  "type": "module",
   "directories": {
     "lib": "./lib/coffeescript"
   },
-  "main": "./lib/coffeescript/index",
+  "main": "./lib/coffeescript/index.js",
+  "exports": {
+    ".": "./lib/coffeescript/index.js"
+  },
   "bin": {
     "rip": "./bin/coffee",
     "rip-cake": "./bin/cake"
   },
   "files": [
     "bin",
-    "lib",
-    "register.js",
-    "repl.js"
+    "lib"
   ],
   "scripts": {
     "test": "NODE_OPTIONS=\"--no-warnings=ExperimentalWarning\" node ./bin/cake test",
