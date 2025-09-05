@@ -118,13 +118,13 @@ transformCJSToESM = (code, filename) ->
   exports = []
   hasDefaultExport = no
   imports = []
-  
+
   # First, handle all the destructured requires
   code = code.replace /\(\{([^}]+)\}\s*=\s*require\(['"`]([^'"`]+)['"`]\)\);?/g, (match, names, modulePath) ->
     cleanNames = names.split(',').map((n) -> n.trim()).join(', ')
     imports.push "import { #{cleanNames} } from '#{modulePath}';"
     ''
-  
+
   # Collect all exported names first
   exportedNames = []
   code.replace /exports\.(\w+)\s*=\s*(\w+)\s*=\s*/g, (match, name, alias) ->
@@ -134,7 +134,7 @@ transformCJSToESM = (code, filename) ->
   code.replace /exports\.(\w+)\s*=/g, (match, name) ->
     exportedNames.push name unless name in exportedNames
     match
-  
+
   # Now process var declarations - completely rewrite them
   varLines = []
   code = code.replace /^(\s*)var\s+(.+?)(\s*,\s*)?$/gm, (match, indent, content, trailingComma) ->
@@ -144,7 +144,7 @@ transformCJSToESM = (code, filename) ->
     depth = 0
     inString = false
     stringChar = null
-    
+
     for char, i in content
       if not inString
         if char in ["'", '"']
@@ -160,11 +160,11 @@ transformCJSToESM = (code, filename) ->
           continue
       else if char is stringChar and content[i-1] isnt '\\'
         inString = false
-      
+
       current += char
-    
+
     parts.push current.trim() if current.trim()
-    
+
     # Process each part
     keptVars = []
     for part in parts
@@ -176,49 +176,49 @@ transformCJSToESM = (code, filename) ->
         varMatch = part.match /^(\w+)/
         if varMatch and varMatch[1] not in exportedNames
           keptVars.push part
-    
+
     # Handle indexOf and slice special cases
     if match.includes('indexOf = [].indexOf')
       keptVars.push 'indexOf = [].indexOf'
     if match.includes('slice = [].slice')
       keptVars.push 'slice = [].slice'
-    
+
     if keptVars.length > 0
       "#{indent}var #{keptVars.join(', ')}#{trailingComma or ';'}"
     else
       ''
-  
+
   # Clean up any leftover trailing commas from removed var lines
   code = code.replace /,\s*\n\s*(\w+)\s*=\s*\[\]\.(\w+)/g, ';\n  $1 = [].$2'
-  
+
   # Replace exports - handle the case where variable is assigned and exported
   code = code.replace /(\w+)\s*=\s*exports\.(\w+)\s*=\s*/g, (match, alias, name) ->
     if name is alias
       "export const #{name} = "
     else
       "const #{alias} = export const #{name} = "
-  
+
   # Now handle regular exports patterns
   code = code.replace /exports\.(\w+)\s*=\s*(\w+)\s*=\s*/g, (match, name, alias) ->
     if name is alias
       "export const #{name} = "
     else
       "export const #{name} = #{alias} = "
-  
+
   code = code.replace /exports\.(\w+)\s*=\s*/g, (match, name) ->
     "export const #{name} = "
-  
+
   code = code.replace /module\.exports\s*=\s*/g, ->
     hasDefaultExport = yes
     "export default "
-  
+
   # Add imports at the top
   if imports.length > 0
     code = imports.join('\n') + '\n\n' + code
-  
+
   # Clean up any double blank lines
   code = code.replace /\n\n\n+/g, '\n\n'
-  
+
   code
 
 transpile = (code, options = {}) ->
