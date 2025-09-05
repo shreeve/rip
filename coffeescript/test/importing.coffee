@@ -25,9 +25,3 @@ test "coffeescript modules can be imported and executed", ->
     magicVal = 2
     for module in '.import.coffee import.coffee import.extension.coffee'.split ' '
       ok require("./importing/#{module}").value?() is magicVal, module
-
-  test "literate coffeescript modules can be imported", ->
-    magicVal = 3
-    # Leading space intentional to check for index.coffee.md
-    for module in ' .import.coffee.md import.coffee.md import.extension.coffee.md'.split ' '
-      ok require("./importing/#{module}").value?() is magicVal, module

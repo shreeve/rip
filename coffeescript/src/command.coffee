@@ -39,7 +39,6 @@ SWITCHES = [
   ['-h', '--help',              'display this help message']
   ['-i', '--interactive',       'run an interactive CoffeeScript REPL']
   ['-j', '--join [FILE]',       'concatenate the source CoffeeScript before compiling']
-  ['-l', '--literate',          'treat stdio as literate style coffeescript']
   ['-m', '--map',               'generate source map and save as .js.map files']
   ['-M', '--inline-map',        'generate source map and include it directly in output']
   ['-n', '--nodes',             'print out the parse tree that the parser produces']
@@ -500,7 +499,6 @@ compileOptions = (filename, base) ->
 
   answer =
     filename: filename
-    literate: opts.literate or helpers.isLiterate(filename)
     bare: opts.bare
     header: opts.compile and not opts['no-header']
     transpile: opts.transpile

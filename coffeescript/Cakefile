@@ -428,11 +428,10 @@ runTests = (CoffeeScript) ->
 
   startTime = Date.now()
   for file in files when helpers.isCoffee file
-    literate = helpers.isLiterate file
     currentFile = filename = path.join 'test', file
     code = fs.readFileSync filename
     try
-      CoffeeScript.run code.toString(), {filename, literate}
+      CoffeeScript.run code.toString(), {filename}
     catch error
       failures.push {filename, error}
 

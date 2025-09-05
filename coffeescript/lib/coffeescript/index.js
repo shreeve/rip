@@ -157,7 +157,6 @@
     stripped = raw.charCodeAt(0) === 0xFEFF ? raw.substring(1) : raw;
     options = Object.assign({}, options, {
       filename: filename,
-      literate: helpers.isLiterate(filename),
       sourceFiles: [filename]
     });
     try {

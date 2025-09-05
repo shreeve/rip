@@ -9,14 +9,14 @@
   // where locationData is {first_line, first_column, last_line, last_column, last_line_exclusive, last_column_exclusive}, which is a
   // format that can be fed directly into [Jison](https://github.com/zaach/jison).  These
   // are read by jison in the `parser.lexer` function defined in coffeescript.coffee.
-  var BOM, BOOL, CALLABLE, CODE, COFFEE_ALIASES, COFFEE_ALIAS_MAP, COFFEE_KEYWORDS, COMMENT, COMPARABLE_LEFT_SIDE, COMPARE, COMPOUND_ASSIGN, HERECOMMENT_ILLEGAL, HEREDOC_DOUBLE, HEREDOC_INDENT, HEREDOC_SINGLE, HEREGEX, HEREGEX_COMMENT, HERE_JSTOKEN, IDENTIFIER, INDENTABLE_CLOSERS, INDEXABLE, INSIDE_JSX, INVERSES, JSTOKEN, JSX_ATTRIBUTE, JSX_FRAGMENT_IDENTIFIER, JSX_IDENTIFIER, JSX_IDENTIFIER_PART, JSX_INTERPOLATION, JS_KEYWORDS, LINE_BREAK, LINE_CONTINUER, Lexer, MATH, MULTI_DENT, NOT_REGEX, NUMBER, OPERATOR, POSSIBLY_DIVISION, REGEX, REGEX_FLAGS, REGEX_ILLEGAL, REGEX_INVALID_ESCAPE, RELATION, RESERVED, Rewriter, SHIFT, STRICT_PROSCRIBED, STRING_DOUBLE, STRING_INVALID_ESCAPE, STRING_SINGLE, STRING_START, TRAILING_SPACES, UNARY, UNARY_MATH, UNFINISHED, VALID_FLAGS, WHITESPACE, addTokenData, attachCommentsToNode, compact, count, flatten, invertLiterate, isForFrom, isUnassignable, key, locationDataToString, merge, parseNumber, repeat, replaceUnicodeCodePointEscapes, starts, throwSyntaxError,
+  var BOM, BOOL, CALLABLE, CODE, COFFEE_ALIASES, COFFEE_ALIAS_MAP, COFFEE_KEYWORDS, COMMENT, COMPARABLE_LEFT_SIDE, COMPARE, COMPOUND_ASSIGN, HERECOMMENT_ILLEGAL, HEREDOC_DOUBLE, HEREDOC_INDENT, HEREDOC_SINGLE, HEREGEX, HEREGEX_COMMENT, HERE_JSTOKEN, IDENTIFIER, INDENTABLE_CLOSERS, INDEXABLE, INSIDE_JSX, INVERSES, JSTOKEN, JSX_ATTRIBUTE, JSX_FRAGMENT_IDENTIFIER, JSX_IDENTIFIER, JSX_IDENTIFIER_PART, JSX_INTERPOLATION, JS_KEYWORDS, LINE_BREAK, LINE_CONTINUER, Lexer, MATH, MULTI_DENT, NOT_REGEX, NUMBER, OPERATOR, POSSIBLY_DIVISION, REGEX, REGEX_FLAGS, REGEX_ILLEGAL, REGEX_INVALID_ESCAPE, RELATION, RESERVED, Rewriter, SHIFT, STRICT_PROSCRIBED, STRING_DOUBLE, STRING_INVALID_ESCAPE, STRING_SINGLE, STRING_START, TRAILING_SPACES, UNARY, UNARY_MATH, UNFINISHED, VALID_FLAGS, WHITESPACE, addTokenData, attachCommentsToNode, compact, count, flatten, isForFrom, isUnassignable, key, locationDataToString, merge, parseNumber, repeat, replaceUnicodeCodePointEscapes, starts, throwSyntaxError,
     indexOf = [].indexOf,
     slice = [].slice;
 
   ({Rewriter, INVERSES, UNFINISHED} = require('./rewriter'));
 
   // Import the helpers we need.
-  ({count, starts, compact, repeat, invertLiterate, merge, attachCommentsToNode, locationDataToString, throwSyntaxError, replaceUnicodeCodePointEscapes, flatten, parseNumber} = require('./helpers'));
+  ({count, starts, compact, repeat, merge, attachCommentsToNode, locationDataToString, throwSyntaxError, replaceUnicodeCodePointEscapes, flatten, parseNumber} = require('./helpers'));
 
   // The Lexer Class
   // ---------------
@@ -43,7 +43,6 @@
     // Before returning the token stream, run it through the [Rewriter](rewriter.html).
     tokenize(code, opts = {}) {
       var consumed, end, i, ref;
-      this.literate = opts.literate; // Are we lexing literate CoffeeScript?
       this.indent = 0; // The current indentation level.
       this.baseIndent = 0; // The overall minimum indentation level.
       this.continuationLineAdditionalIndent = 0; // The over-indentation at the current level.
@@ -92,8 +91,7 @@
     }
 
     // Preprocess the code to remove leading and trailing whitespace, carriage
-    // returns, etc. If we're lexing literate CoffeeScript, strip external Markdown
-    // by removing all lines that aren't indented by at least four spaces or a tab.
+    // returns, etc.
     clean(code) {
       var base, thusFar;
       thusFar = 0;
@@ -114,9 +112,6 @@
         this.locationDataCompensations[thusFar + offset] = 1;
         return '';
       }).replace(TRAILING_SPACES, '');
-      if (this.literate) {
-        code = invertLiterate(code);
-      }
       return code;
     }
 

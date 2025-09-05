@@ -119,7 +119,6 @@ CoffeeScript._compileRawFileContent = (raw, filename, options = {}) ->
 
   options = Object.assign {}, options,
     filename: filename
-    literate: helpers.isLiterate filename
     sourceFiles: [filename]
 
   try

@@ -104,38 +104,6 @@
     return false;
   };
 
-  // Helper function for extracting code from Literate CoffeeScript by stripping
-  // out all non-code blocks, producing a string of CoffeeScript code that can
-  // be compiled “normally.”
-  exports.invertLiterate = function(code) {
-    var blankLine, i, indented, insideComment, len1, line, listItemStart, out, ref1;
-    out = [];
-    blankLine = /^\s*$/;
-    indented = /^[\t ]/;
-    listItemStart = /^(?:\t?| {0,3})(?:[\*\-\+]|[0-9]{1,9}\.)[ \t]/; // Up to one tab, or up to three spaces, or neither;
-    // followed by `*`, `-` or `+`;
-    // or by an integer up to 9 digits long, followed by a period;
-    // followed by a space or a tab.
-    insideComment = false;
-    ref1 = code.split('\n');
-    for (i = 0, len1 = ref1.length; i < len1; i++) {
-      line = ref1[i];
-      if (blankLine.test(line)) {
-        insideComment = false;
-        out.push(line);
-      } else if (insideComment || listItemStart.test(line)) {
-        insideComment = true;
-        out.push(`# ${line}`);
-      } else if (!insideComment && indented.test(line)) {
-        out.push(line);
-      } else {
-        insideComment = true;
-        out.push(`# ${line}`);
-      }
-    }
-    return out.join('\n');
-  };
-
   // Merge two jison-style location data objects together.
   // If `last` is not provided, this will simply return `first`.
   buildLocationData = function(first, last) {
@@ -300,11 +268,6 @@
   // Determine if a filename represents a CoffeeScript file.
   exports.isCoffee = function(file) {
     return /\.(coffee|coffee\.md)$/.test(file);
-  };
-
-  // Determine if a filename represents a Literate CoffeeScript file.
-  exports.isLiterate = function(file) {
-    return /\.coffee\.md$/.test(file);
   };
 
   // Throws a SyntaxError from a given location.
