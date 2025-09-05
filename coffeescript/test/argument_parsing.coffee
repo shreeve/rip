@@ -17,9 +17,9 @@ test "combined options are not split after initial file name", ->
   expected = arguments: ['some-file.coffee', '-bc']
   sameOptions parsed, expected
 
-  argv = ['some-file.litcoffee', '-bc']
+  argv = ['some-file.coffee', '-bc']
   parsed = optionParser.parse argv
-  expected = arguments: ['some-file.litcoffee', '-bc']
+  expected = arguments: ['some-file.coffee', '-bc']
   sameOptions parsed, expected
 
   argv = ['-c', 'some-file.coffee', '-bc']

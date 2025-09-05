@@ -29,5 +29,5 @@ test "coffeescript modules can be imported and executed", ->
   test "literate coffeescript modules can be imported", ->
     magicVal = 3
     # Leading space intentional to check for index.coffee.md
-    for module in ' .import.coffee.md import.coffee.md import.litcoffee import.extension.coffee.md'.split ' '
+    for module in ' .import.coffee.md import.coffee.md import.extension.coffee.md'.split ' '
       ok require("./importing/#{module}").value?() is magicVal, module

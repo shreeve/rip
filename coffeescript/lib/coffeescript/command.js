@@ -171,7 +171,7 @@ with...
   };
 
   // Compile a path, which could be a script or a directory. If a directory
-  // is passed, recursively compile all '.coffee', '.litcoffee', and '.coffee.md'
+  // is passed, recursively compile all '.coffee' and '.coffee.md'
   // extension source files in it and all subdirectories.
   compilePath = function(source, topLevel, base) {
     var code, err, file, files, i, len, results, stats;
@@ -256,7 +256,7 @@ with...
         }
       }
     }
-    console.error(`Missing index.coffee or index.litcoffee in ${source}`);
+    console.error(`Missing index.coffee in ${source}`);
     return process.exit(1);
   };
 

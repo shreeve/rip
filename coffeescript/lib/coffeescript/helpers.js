@@ -299,12 +299,12 @@
 
   // Determine if a filename represents a CoffeeScript file.
   exports.isCoffee = function(file) {
-    return /\.((lit)?coffee|coffee\.md)$/.test(file);
+    return /\.(coffee|coffee\.md)$/.test(file);
   };
 
   // Determine if a filename represents a Literate CoffeeScript file.
   exports.isLiterate = function(file) {
-    return /\.(litcoffee|coffee\.md)$/.test(file);
+    return /\.coffee\.md$/.test(file);
   };
 
   // Throws a SyntaxError from a given location.

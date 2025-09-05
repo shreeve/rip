@@ -104,11 +104,6 @@ test "the `baseFileName` helper returns the file name to write to", ->
     'b.coffee': 'b' + ext
     'coffee.coffee': 'coffee' + ext
 
-    '.litcoffee': ext
-    'a.litcoffee': 'a' + ext
-    'b.litcoffee': 'b' + ext
-    'coffee.litcoffee': 'coffee' + ext
-
     '.lit': ext
     'a.lit': 'a' + ext
     'b.lit': 'b' + ext

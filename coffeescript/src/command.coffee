@@ -146,7 +146,7 @@ makePrelude = (requires) ->
   .join ';'
 
 # Compile a path, which could be a script or a directory. If a directory
-# is passed, recursively compile all '.coffee', '.litcoffee', and '.coffee.md'
+# is passed, recursively compile all '.coffee' and '.coffee.md'
 # extension source files in it and all subdirectories.
 compilePath = (source, topLevel, base) ->
   return if source in sources   or
@@ -193,7 +193,7 @@ findDirectoryIndex = (source) ->
       return index if (fs.statSync index).isFile()
     catch err
       throw err unless err.code is 'ENOENT'
-  console.error "Missing index.coffee or index.litcoffee in #{source}"
+  console.error "Missing index.coffee in #{source}"
   process.exit 1
 
 # Compile a single source script, containing the given code, according to the

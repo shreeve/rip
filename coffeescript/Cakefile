@@ -68,7 +68,7 @@ buildExceptParser = (callback) ->
   for file in files
     try
       source = fs.readFileSync file, 'utf8'
-      output = CoffeeScript.compile source, {bare: false, filename: file, literate: file.match(/\.litcoffee$/)}
+      output = CoffeeScript.compile source, {bare: false, filename: file, literate: file.match(/\.coffee\.md$/)}
       outputFile = "lib/coffeescript/#{path.basename(file, path.extname(file))}.js"
       fs.writeFileSync outputFile, output
       compiled++
@@ -271,7 +271,7 @@ buildDocTests = (watch = no) ->
     for filename in fs.readdirSync(testsSourceFolder).sort()
       if filename.indexOf('.coffee') isnt -1
         type = 'coffeescript'
-      else if filename.indexOf('.litcoffee') isnt -1
+      else if filename.indexOf('.coffee.md') isnt -1
         type = 'literate-coffeescript'
       else
         continue
@@ -330,14 +330,11 @@ task 'bench', 'quick benchmark of compilation time', ->
   {Rewriter} = require './lib/coffeescript/rewriter'
   sources = ['coffeescript', 'grammar', 'helpers', 'lexer', 'nodes', 'rewriter']
   coffee  = sources.map((name) -> fs.readFileSync "src/#{name}.coffee").join '\n'
-  litcoffee = fs.readFileSync("src/scope.litcoffee").toString()
   fmt    = (ms) -> " #{bold}#{ "   #{ms}".slice -4 }#{reset} ms"
   total  = 0
   now    = Date.now()
   time   = -> total += ms = -(now - now = Date.now()); fmt ms
   tokens = CoffeeScript.tokens coffee, rewrite: no
-  littokens = CoffeeScript.tokens litcoffee, rewrite: no, literate: yes
-  tokens = tokens.concat(littokens)
   console.log "Lex    #{time()} (#{tokens.length} tokens)"
   tokens = new Rewriter().rewrite tokens
   console.log "Rewrite#{time()} (#{tokens.length} tokens)"
