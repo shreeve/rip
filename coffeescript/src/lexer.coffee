@@ -749,11 +749,8 @@ exports.Lexer = class Lexer
   #    `#{` if interpolations are desired).
   #  - `delimiter` is the delimiter of the token. Examples are `'`, `"`, `'''`,
   #    `"""` and `///`.
-<<<<<<< Updated upstream
-=======
   #  - `closingDelimiter` can be customized
   #  - `interpolators` matches the start of an interpolation
->>>>>>> Stashed changes
   #
   # This method allows us to have strings within interpolations within strings,
   # ad infinitum.

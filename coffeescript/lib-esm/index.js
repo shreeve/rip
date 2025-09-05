@@ -7,7 +7,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const require = createRequire(import.meta.url);
 
-const CoffeeScript = require(join(__dirname, '../coffeescript/index.js'));
+const CoffeeScript = require(join(__dirname, '../lib/coffeescript/index.js'));
 
 export default CoffeeScript;
 export const VERSION = CoffeeScript.VERSION;

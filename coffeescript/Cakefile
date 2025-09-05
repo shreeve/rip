@@ -82,6 +82,121 @@ build = (callback) ->
   buildParser()
   buildExceptParser callback
 
+buildESM = (callback) ->
+  # First ensure lib-esm directory exists
+  fs.mkdirSync 'lib-esm/coffeescript', recursive: yes
+  
+  # For now, just copy the parser as-is (it's generated, not source)
+  fs.copyFileSync 'lib/coffeescript/parser.js', 'lib-esm/coffeescript/parser.js'
+  
+  # Build ESM versions of source files
+  files = fs.readdirSync 'src'
+  files = ('src/' + file for file in files when file.match(/\.(lit)?coffee$/))
+  compiled = 0
+  
+  for file in files
+    try
+      source = fs.readFileSync file, 'utf8'
+      # For ESM, compile with bare:true and transform the output
+      output = CoffeeScript.compile source, {bare: true, filename: file}
+      
+      # Transform CommonJS to ESM
+      output = transformCJSToESM output, file
+      
+      outputFile = "lib-esm/coffeescript/#{path.basename(file, path.extname(file))}.js"
+      fs.writeFileSync outputFile, output
+      compiled++
+    catch error
+      console.log "Error compiling #{file} for ESM: #{error.message}"
+  
+  console.log "Compiled #{compiled} files to lib-esm/coffeescript/"
+  callback() if typeof callback is 'function'
+
+# Transform CommonJS output to ESM
+transformCJSToESM = (code, filename) ->
+  # Track what we're exporting
+  exports = []
+  hasDefaultExport = no
+  imports = []
+  
+  # Collect all require statements first (including destructured ones)
+  # Handle destructured requires like ({foo, bar} = require('./module'))
+  code = code.replace /\(\{([^}]+)\}\s*=\s*require\(['"`]([^'"`]+)['"`]\)\);?/g, (match, names, modulePath) ->
+    # Clean up the names and create named imports
+    cleanNames = names.split(',').map((n) -> n.trim()).join(', ')
+    imports.push "import { #{cleanNames} } from '#{modulePath}';"
+    '' # Remove the original require
+  
+  # Handle simple requires like (foo = require('./module'))
+  code = code.replace /^var\s+(.+);$/gm, (match, varDecls) ->
+    # Check if this line contains requires
+    if match.includes('require(')
+      # Process each variable declaration
+      newVarDecls = []
+      for decl in varDecls.split(',')
+        decl = decl.trim()
+        if requireMatch = decl.match /(\w+)\s*=\s*require\(['"`]([^'"`]+)['"`]\)/
+          [_, varName, modulePath] = requireMatch
+          imports.push "import #{varName} from '#{modulePath}';"
+        else if not decl.match /^\s*$/
+          newVarDecls.push decl
+      
+      if newVarDecls.length > 0
+        "var #{newVarDecls.join(', ')};"
+      else
+        '' # Remove the line if it only had requires
+    else
+      match # Keep non-require var declarations
+  
+  # First pass: collect all exports to know what will be exported
+  exportedNames = []
+  code.replace /exports\.(\w+)\s*=/g, (match, name) ->
+    exportedNames.push name unless name in exportedNames
+    match
+  
+  # Replace exports.name = value with export const name = value
+  code = code.replace /exports\.(\w+)\s*=\s*(\w+)\s*=\s*/g, (match, name, alias) ->
+    exports.push name
+    # When name and alias are the same, just use one declaration
+    if name is alias
+      "export const #{name} = "
+    else
+      "export const #{name} = #{alias} = "
+  
+  # Replace exports.name = value (without alias)
+  code = code.replace /exports\.(\w+)\s*=\s*/g, (match, name) ->
+    exports.push name unless name in exports
+    "export const #{name} = "
+  
+  # Replace module.exports = value with export default
+  code = code.replace /module\.exports\s*=\s*/g, ->
+    hasDefaultExport = yes
+    "export default "
+  
+  # Remove variables from var declarations if they're being exported
+  if exportedNames.length > 0
+    code = code.replace /^var\s+(.+);$/gm, (match, varDecls) ->
+      if not match.includes('require(')
+        # Filter out exported names from var declarations
+        newVarDecls = []
+        for decl in varDecls.split(',')
+          varName = decl.trim().split(/\s*=\s*/)[0]
+          unless varName in exportedNames
+            newVarDecls.push decl.trim()
+        
+        if newVarDecls.length > 0
+          "var #{newVarDecls.join(', ')};"
+        else
+          '' # Remove the line if all vars are exported
+      else
+        match
+  
+  # Add imports at the top
+  if imports.length > 0
+    code = imports.join('\n') + '\n\n' + code
+  
+  code
+
 transpile = (code, options = {}) ->
   options.minify =      process.env.MINIFY    isnt 'false'
   options.transform =   process.env.TRANSFORM isnt 'false'
@@ -145,6 +260,8 @@ task 'build:except-parser', 'build the CoffeeScript compiler, except for the par
 task 'build:full', 'build the CoffeeScript compiler from source twice, and run the tests', ->
   build ->
     build testBuiltCode
+
+task 'build:esm', 'build ESM version of the CoffeeScript compiler', buildESM
 
 
 

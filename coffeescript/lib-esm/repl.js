@@ -6,7 +6,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const require = createRequire(import.meta.url);
 
-const Repl = require(join(__dirname, '../coffeescript/repl.js'));
+const Repl = require(join(__dirname, '../lib/coffeescript/repl.js'));
 
 export default Repl;
 export const start = Repl.start;

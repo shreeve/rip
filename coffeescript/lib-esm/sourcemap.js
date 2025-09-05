@@ -6,6 +6,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const require = createRequire(import.meta.url);
 
-const SourceMap = require(join(__dirname, '../coffeescript/sourcemap.js'));
+const SourceMap = require(join(__dirname, '../lib/coffeescript/sourcemap.js'));
 
 export default SourceMap;
