@@ -282,7 +282,7 @@ parser.lexer = {
 };
 
 // Make all the AST nodes visible to the parser.
-parser.yy = require('./nodes');
+Object.assign(parser.yy, nodes);
 
 // Override Jison's default error handling function.
 parser.yy.parseError = function(message, {token}) {

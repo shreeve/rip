@@ -7,20 +7,20 @@
 // current directory's Cakefile.
 
 // External dependencies.
-var CoffeeScript, cakefileDirectory, fatalError, fs, helpers, missingTask, oparse, options, optparse, path, printTasks, switches, tasks;;
+var cakefileDirectory, fatalError, missingTask, oparse, options, printTasks, switches, tasks;
 
-fs = require('fs');
+import fs from 'fs';
 
-path = require('path');
+import path from 'path';
 
-helpers = require('./helpers');
+import * as helpers from './helpers.js';
 
-optparse = require('./optparse');
+import * as optparse from './optparse.js';
 
-CoffeeScript = require('./');
+import * as CoffeeScript from './coffeescript.js';
 
 // Register .coffee extension
-CoffeeScript.register();
+// CoffeeScript.register() # Not available in ESM
 
 // Keep track of the list of defined tasks, the accepted options, and so on.
 tasks = {};
@@ -60,8 +60,8 @@ helpers.extend(global, {
 // asynchrony may cause tasks to execute in a different order than you'd expect.
 // If no tasks are passed, print the help screen. Keep a reference to the
 // original directory name, when running Cake tasks from subdirectories.
-export const run = function() {
-  var arg, args, e, i, len, ref, results;;
+export var run = function() {
+  var arg, args, e, i, len, ref, results;
   global.__originalDirname = fs.realpathSync('.');
   process.chdir(cakefileDirectory(__originalDirname));
   args = process.argv.slice(2);
@@ -89,7 +89,7 @@ export const run = function() {
 
 // Display the list of Cake tasks in a format similar to `rake -T`
 printTasks = function() {
-  var cakefilePath, desc, name, relative, spaces, task;;
+  var cakefilePath, desc, name, relative, spaces, task;
   relative = path.relative || path.resolve;
   cakefilePath = path.join(relative(__originalDirname, process.cwd()), 'Cakefile');
   console.log(`${cakefilePath} defines the following tasks:\n`);
@@ -119,7 +119,7 @@ missingTask = function(task) {
 // When `cake` is invoked, search in the current and all parent directories
 // to find the relevant Cakefile.
 cakefileDirectory = function(dir) {
-  var parent;;
+  var parent;
   if (fs.existsSync(path.join(dir, 'Cakefile'))) {
     return dir;
   }

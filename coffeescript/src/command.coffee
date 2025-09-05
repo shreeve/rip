@@ -5,18 +5,18 @@
 # interactive REPL.
 
 # External dependencies.
-fs             = require 'fs'
-path           = require 'path'
-helpers        = require './helpers'
-optparse       = require './optparse'
-CoffeeScript   = require './'
-{spawn, exec}  = require 'child_process'
-{EventEmitter} = require 'events'
+import fs from 'fs'
+import path from 'path'
+import * as helpers from './helpers.js'
+import * as optparse from './optparse.js'
+import * as CoffeeScript from './coffeescript.js'
+import {spawn, exec} from 'child_process'
+import {EventEmitter} from 'events'
 
 useWinPathSep  = path.sep is '\\'
 
-# Allow CoffeeScript to emit Node.js events.
-helpers.extend CoffeeScript, new EventEmitter
+# Create an EventEmitter for CoffeeScript events
+coffeeEvents = new EventEmitter
 
 printLine = (line) -> process.stdout.write line + '\n'
 printWarn = (line) -> process.stderr.write line + '\n'
@@ -62,13 +62,13 @@ notSources   = {}
 watchedDirs  = {}
 optionParser = null
 
-exports.buildCSOptionParser = buildCSOptionParser = ->
+export buildCSOptionParser = ->
   new optparse.OptionParser SWITCHES, BANNER
 
 # Run `coffee` by parsing passed options and determining what action to take.
 # Many flags cause us to divert before compiling anything. Flags passed after
 # `--` will be passed verbatim to your script as arguments in `process.argv`
-exports.run = ->
+export run = ->
   optionParser = buildCSOptionParser()
   try parseOptions()
   catch err
@@ -202,7 +202,7 @@ compileScript = (file, input, base = null) ->
   options = compileOptions file, base
   try
     task = {file, input, options}
-    CoffeeScript.emit 'compile', task
+    coffeeEvents.emit 'compile', task
     if opts.tokens
       printTokens CoffeeScript.tokens task.input, task.options
     else if opts.nodes
@@ -224,7 +224,7 @@ compileScript = (file, input, base = null) ->
         task.output = compiled.js
         task.sourceMap = compiled.v3SourceMap
 
-      CoffeeScript.emit 'success', task
+      coffeeEvents.emit 'success', task
       if opts.print
         printLine task.output.trim()
       else if opts.compile or opts.map
@@ -234,8 +234,8 @@ compileScript = (file, input, base = null) ->
           options.jsPath
         writeJs base, task.file, task.output, saveTo, task.sourceMap
   catch err
-    CoffeeScript.emit 'failure', err, task
-    return if CoffeeScript.listeners('failure').length
+    coffeeEvents.emit 'failure', err, task
+    return if coffeeEvents.listeners('failure').length
     message = err?.stack or "#{err}"
     if opts.watch
       printLine message + '\x07'

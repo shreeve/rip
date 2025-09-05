@@ -1,17 +1,29 @@
-import { merge, updateSyntaxError } from './helpers';
-import { Block, Assign, Value, Literal, Call, Code, Root } from './nodes';
+var addHistory, addMultilineHandler, getCommandId, replDefaults, runInContext, sawSIGINT, transpile;
 
-var CoffeeScript, addHistory, addMultilineHandler, fs, getCommandId, merge, nodeREPL, path, replDefaults, runInContext, sawSIGINT, transpile, updateSyntaxError, vm;;
+import fs from 'fs';
 
-fs = require('fs');
+import path from 'path';
 
-path = require('path');
+import vm from 'vm';
 
-vm = require('vm');
+import nodeREPL from 'repl';
 
-nodeREPL = require('repl');
+import * as CoffeeScript from './coffeescript.js';
 
-CoffeeScript = require('./');
+import {
+  merge,
+  updateSyntaxError
+} from './helpers.js';
+
+import {
+  Block,
+  Assign,
+  Value,
+  Literal,
+  Call,
+  Code,
+  Root
+} from './nodes.js';
 
 sawSIGINT = false;
 
@@ -20,7 +32,7 @@ transpile = false;
 replDefaults = {
   prompt: 'coffee> ',
   historyFile: (function() {
-    var historyPath;;
+    var historyPath;
     historyPath = process.env.XDG_CACHE_HOME || process.env.HOME;
     if (historyPath) {
       return path.join(historyPath, '.coffee_history');
@@ -28,7 +40,7 @@ replDefaults = {
   })(),
   historyMaxInputSize: 10240,
   eval: function(input, context, filename, cb) {
-    var Assign, Block, Call, Code, Literal, Root, Value, ast, err, isAsync, js, ref, ref1, referencedVars, result, token, tokens;;
+    var ast, err, isAsync, js, ref, ref1, referencedVars, result, token, tokens;
     // XXX: multiline hack.
     input = input.replace(/\uFF00/g, '\n');
     // Node's REPL sends the input ending with a newline and then wrapped in
@@ -37,10 +49,9 @@ replDefaults = {
     // Node's REPL v6.9.1+ sends the input wrapped in a try/catch statement.
     // Unwrap that too.
     input = input.replace(/^\s*try\s*{([\s\S]*)}\s*catch.*$/m, '$1');
-    // Require AST nodes to do some AST manipulation.
-    
     try {
       // Tokenize the clean input.
+      // AST nodes are now imported at the top level
       tokens = CoffeeScript.tokens(input);
       // Filter out tokens generated just to hold comments.
       if (tokens.length >= 2 && tokens[0].generated && ((ref = tokens[0].comments) != null ? ref.length : void 0) !== 0 && `${tokens[0][1]}` === '' && tokens[1][0] === 'TERMINATOR') {
@@ -51,7 +62,7 @@ replDefaults = {
       }
       // Collect referenced variable names just like in `CoffeeScript.compile`.
       referencedVars = (function() {
-        var i, len, results;;
+        var i, len, results;
         results = [];
         for (i = 0, len = tokens.length; i < len; i++) {
           token = tokens[i];
@@ -112,7 +123,7 @@ runInContext = function(js, context, filename) {
 };
 
 addMultilineHandler = function(repl) {
-  var inputStream, multiline, nodeLineListener, origPrompt, outputStream, ref;;
+  var inputStream, multiline, nodeLineListener, origPrompt, outputStream, ref;
   ({inputStream, outputStream} = repl);
   // Node 0.11.12 changed API, prompt is now _prompt.
   origPrompt = (ref = repl._prompt) != null ? ref : repl.prompt;
@@ -176,7 +187,7 @@ addMultilineHandler = function(repl) {
 
 // Store and load command history from a file
 addHistory = function(repl, filename, maxSize) {
-  var buffer, fd, lastLine, readFd, size, stat;;
+  var buffer, fd, lastLine, readFd, size, stat;
   lastLine = null;
   try {
     // Get file info and at most maxSize of command history
@@ -226,7 +237,7 @@ addHistory = function(repl, filename, maxSize) {
 };
 
 getCommandId = function(repl, commandName) {
-  var commandsHaveLeadingDot;;
+  var commandsHaveLeadingDot;
   // Node 0.11 changed API, a command such as '.help' is now stored as 'help'
   commandsHaveLeadingDot = repl.commands['.help'] != null;
   if (commandsHaveLeadingDot) {
@@ -236,67 +247,65 @@ getCommandId = function(repl, commandName) {
   }
 };
 
-export default {
-  start: function(opts = {}) {
-    var Module, build, major, minor, originalModuleLoad, repl;;
-    [major, minor, build] = process.versions.node.split('.').map(function(n) {
-      return parseInt(n, 10);
-    });
-    if (major < 6) {
-      console.warn("Node 6+ required for CoffeeScript REPL");
-      process.exit(1);
-    }
-    CoffeeScript.register();
-    process.argv = ['coffee'].concat(process.argv.slice(2));
-    if (opts.transpile) {
-      transpile = {};
+export var start = function(opts = {}) {
+  var Module, build, major, minor, originalModuleLoad, repl;
+  [major, minor, build] = process.versions.node.split('.').map(function(n) {
+    return parseInt(n, 10);
+  });
+  if (major < 6) {
+    console.warn("Node 6+ required for CoffeeScript REPL");
+    process.exit(1);
+  }
+  CoffeeScript.register();
+  process.argv = ['coffee'].concat(process.argv.slice(2));
+  if (opts.transpile) {
+    transpile = {};
+    try {
+      transpile.transpile = require('@babel/core').transform;
+    } catch (error) {
       try {
-        transpile.transpile = require('@babel/core').transform;
+        transpile.transpile = require('babel-core').transform;
       } catch (error) {
-        try {
-          transpile.transpile = require('babel-core').transform;
-        } catch (error) {
-          console.error(`To use --transpile with an interactive REPL, @babel/core must be installed either in the current folder or globally:
+        console.error(`To use --transpile with an interactive REPL, @babel/core must be installed either in the current folder or globally:
   npm install --save-dev @babel/core
 or
   npm install --global @babel/core
 And you must save options to configure Babel in one of the places it looks to find its options.
 See https://coffeescript.org/#transpilation`);
-          process.exit(1);
-        }
+        process.exit(1);
       }
-      transpile.options = {
-        filename: path.resolve(process.cwd(), '<repl>')
+    }
+    transpile.options = {
+      filename: path.resolve(process.cwd(), '<repl>')
+    };
+    // Since the REPL compilation path is unique (in `eval` above), we need
+    // another way to get the `options` object attached to a module so that
+    // it knows later on whether it needs to be transpiled. In the case of
+    // the REPL, the only applicable option is `transpile`.
+    Module = require('module');
+    originalModuleLoad = Module.prototype.load;
+    Module.prototype.load = function(filename) {
+      this.options = {
+        transpile: transpile.options
       };
-      // Since the REPL compilation path is unique (in `eval` above), we need
-      // another way to get the `options` object attached to a module so that
-      // it knows later on whether it needs to be transpiled. In the case of
-      // the REPL, the only applicable option is `transpile`.
-      Module = require('module');
-      originalModuleLoad = Module.prototype.load;
-      Module.prototype.load = function(filename) {
-        this.options = {
-          transpile: transpile.options
-        };
-        return originalModuleLoad.call(this, filename);
-      };
-    }
-    opts = merge(replDefaults, opts);
-    repl = nodeREPL.start(opts);
-    if (opts.prelude) {
-      runInContext(opts.prelude, repl.context, 'prelude');
-    }
-    repl.on('exit', function() {
-      if (!repl.closed) {
-        return repl.outputStream.write('\n');
-      }
-    });
-    addMultilineHandler(repl);
-    if (opts.historyFile) {
-      addHistory(repl, opts.historyFile, opts.historyMaxInputSize);
-    }
-    // Adapt help inherited from the node REPL
-    repl.commands[getCommandId(repl, 'load')].help = 'Load code from a file into this REPL session';
-    return repl;
+      return originalModuleLoad.call(this, filename);
+    };
   }
+  opts = merge(replDefaults, opts);
+  repl = nodeREPL.start(opts);
+  if (opts.prelude) {
+    runInContext(opts.prelude, repl.context, 'prelude');
+  }
+  repl.on('exit', function() {
+    if (!repl.closed) {
+      return repl.outputStream.write('\n');
+    }
+  });
+  addMultilineHandler(repl);
+  if (opts.historyFile) {
+    addHistory(repl, opts.historyFile, opts.historyMaxInputSize);
+  }
+  // Adapt help inherited from the node REPL
+  repl.commands[getCommandId(repl, 'load')].help = 'Load code from a file into this REPL session';
+  return repl;
 };

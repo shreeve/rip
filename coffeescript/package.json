@@ -16,27 +16,25 @@
   "engines": {
     "node": ">=16"
   },
-  "type": "commonjs",
+  "type": "module",
   "directories": {
-    "lib": "./lib/coffeescript"
+    "lib": "./lib-esm/coffeescript"
   },
-  "main": "./lib/coffeescript/index.js",
+  "main": "./lib-esm/index.js",
   "exports": {
-    ".": {
-      "require": "./lib/coffeescript/index.js",
-      "import": "./lib-esm/index.js"
-    }
+    ".": "./lib-esm/index.js",
+    "./package.json": "./package.json"
   },
   "bin": {
-    "rip": "./bin/coffee.js",
-    "rip-cake": "./bin/cake.js"
+    "rip": "./bin/coffee-esm.js",
+    "rip-cake": "./bin/cake-esm.js"
   },
   "files": [
     "bin",
     "lib"
   ],
   "scripts": {
-    "test": "NODE_OPTIONS=\"--no-warnings=ExperimentalWarning\" node ./bin/cake.cjs test",
+    "test": "NODE_OPTIONS=\"--no-warnings=ExperimentalWarning\" node ./bin/cake-esm.js test",
     "test:rip": "NODE_OPTIONS=\"--no-warnings=ExperimentalWarning\" node ./bin/cake.cjs test:rip",
     "test:all": "NODE_OPTIONS=\"--no-warnings=ExperimentalWarning\" node ./bin/cake.cjs test:all"
   },

@@ -1230,17 +1230,9 @@ parser.Parser = Parser;
 return new Parser;
 })();
 
-if (typeof require !== 'undefined' && typeof exports !== 'undefined') {
-  exports.parser = parser;
-  exports.Parser = parser.Parser;
-  exports.parse = function () { return parser.parse.apply(parser, arguments); };
-  exports.main = function() {};
-  if (typeof module !== 'undefined' && require.main === module) { exports.main(process.argv.slice(1)); }
-}
 
 // ESM exports
-const parserInstance = (typeof parser !== 'undefined') ? parser : exports.parser;
-export const parser = parserInstance;
-export const Parser = parserInstance.Parser;
-export const parse = function() { return parserInstance.parse.apply(parserInstance, arguments); };
+export { parser };
+export const Parser = parser.Parser;
+export const parse = function() { return parser.parse.apply(parser, arguments); };
 export const main = function() {};

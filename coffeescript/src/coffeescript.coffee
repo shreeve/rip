@@ -7,9 +7,12 @@ import {Lexer} from './lexer.js'
 import {parser} from './parser.js'
 import * as helpers from './helpers.js'
 import SourceMap from './sourcemap.js'
+import * as nodes from './nodes.js'
 # Import `package.json`, which is two levels above this file, as this file is
 # evaluated from `lib/coffeescript`.
-import packageJson from '../../package.json' assert { type: 'json' }
+# TODO: Use import assertion when CoffeeScript supports it
+# For now, we'll need to handle this differently
+packageJson = {version: '0.1.0'} # Hardcoded for now
 
 # The current CoffeeScript version number.
 export VERSION = packageJson.version
@@ -223,7 +226,7 @@ parser.lexer =
   upcomingInput: -> ''
 
 # Make all the AST nodes visible to the parser.
-parser.yy = require './nodes'
+Object.assign parser.yy, nodes
 
 # Override Jison's default error handling function.
 parser.yy.parseError = (message, {token}) ->

@@ -88,48 +88,48 @@ build = (callback) ->
 buildESM = (callback) ->
   # First ensure lib-esm directory exists
   fs.mkdirSync 'lib-esm/coffeescript', recursive: yes
-  
+
   # Convert the parser to ESM
   if fs.existsSync 'lib/coffeescript/parser.js'
     parserContent = fs.readFileSync 'lib/coffeescript/parser.js', 'utf8'
-    # The parser is wrapped in an IIFE and has conditional exports
-    # We need to extract the parser and export it properly
-    esmParser = """
-#{parserContent}
+    # Remove the conditional exports section and add ESM exports
+    esmParser = parserContent.replace(
+      /if \(typeof require !== 'undefined' && typeof exports !== 'undefined'\) \{[\s\S]*?\n\}/,
+      ''
+    ) + """
 
 // ESM exports
-const parserInstance = (typeof parser !== 'undefined') ? parser : exports.parser;
-export const parser = parserInstance;
-export const Parser = parserInstance.Parser;
-export const parse = function() { return parserInstance.parse.apply(parserInstance, arguments); };
+export { parser };
+export const Parser = parser.Parser;
+export const parse = function() { return parser.parse.apply(parser, arguments); };
 export const main = function() {};
 """
     fs.writeFileSync 'lib-esm/coffeescript/parser.js', esmParser
-  
+
   # Build ESM versions of source files
   files = fs.readdirSync 'src'
   files = ('src/' + file for file in files when file.match(/\.(lit)?coffee$/))
   compiled = 0
-  
+
   for file in files
     try
       source = fs.readFileSync file, 'utf8'
       # Check if file has ES module syntax
       isESM = source.match(/^(import|export)\s/m)
-      
+
       # Compile with bare:true for ESM files
       output = CoffeeScript.compile source, {bare: isESM, filename: file}
-      
+
       # For CJS files, transform CommonJS to ESM
       if not isESM
         output = transformCJSToESM output, file
-      
+
       outputFile = "lib-esm/coffeescript/#{path.basename(file, path.extname(file))}.js"
       fs.writeFileSync outputFile, output
       compiled++
     catch error
       console.log "Error compiling #{file} for ESM: #{error.message}"
-  
+
   console.log "Compiled #{compiled} files to lib-esm/coffeescript/"
   callback() if typeof callback is 'function'
 

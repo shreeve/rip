@@ -1,9 +1,10 @@
-fs = require 'fs'
-path = require 'path'
-vm = require 'vm'
-nodeREPL = require 'repl'
-CoffeeScript = require './'
-{merge, updateSyntaxError} = require './helpers'
+import fs from 'fs'
+import path from 'path'
+import vm from 'vm'
+import nodeREPL from 'repl'
+import * as CoffeeScript from './coffeescript.js'
+import {merge, updateSyntaxError} from './helpers.js'
+import {Block, Assign, Value, Literal, Call, Code, Root} from './nodes.js'
 
 sawSIGINT = no
 transpile = no
@@ -24,8 +25,7 @@ replDefaults =
     # Unwrap that too.
     input = input.replace /^\s*try\s*{([\s\S]*)}\s*catch.*$/m, '$1'
 
-    # Require AST nodes to do some AST manipulation.
-    {Block, Assign, Value, Literal, Call, Code, Root} = require './nodes'
+    # AST nodes are now imported at the top level
 
     try
       # Tokenize the clean input.
@@ -171,8 +171,7 @@ getCommandId = (repl, commandName) ->
   commandsHaveLeadingDot = repl.commands['.help']?
   if commandsHaveLeadingDot then ".#{commandName}" else commandName
 
-module.exports =
-  start: (opts = {}) ->
+export start = (opts = {}) ->
     [major, minor, build] = process.versions.node.split('.').map (n) -> parseInt(n, 10)
 
     if major < 6
