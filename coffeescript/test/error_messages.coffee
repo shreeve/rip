@@ -95,9 +95,7 @@ if require?
     notEqual error.stack.toString().indexOf(filePath), -1, "Expected " + filePath + "in stack trace: " + error.stack.toString()
 
   test "#4418: stack traces for compiled files reference the correct line number", ->
-    # The browser is already compiling other anonymous scripts (the tests)
-    # which will conflict.
-    return if global.testingBrowser
+    # Test stack traces for compiled files reference the correct line number
     filePath = path.join os.tmpdir(), 'StackTraceLineNumberTestFile.coffee'
     fileContents = """
       testCompiledFileStackTraceLineNumber = ->
@@ -119,9 +117,7 @@ if require?
 
 
 test "#4418: stack traces for compiled strings reference the correct line number", ->
-  # The browser is already compiling other anonymous scripts (the tests)
-  # which will conflict.
-  return if global.testingBrowser
+  # Test stack traces for compiled strings reference the correct line number
   try
     CoffeeScript.run '''
       testCompiledStringStackTraceLineNumber = ->
@@ -138,9 +134,7 @@ test "#4418: stack traces for compiled strings reference the correct line number
 
 
 test "#4558: compiling a string inside a script doesn’t screw up stack trace line number", ->
-  # The browser is already compiling other anonymous scripts (the tests)
-  # which will conflict.
-  return if global.testingBrowser
+  # Test that compiling a string inside a script doesn't screw up stack trace line number
   try
     CoffeeScript.run '''
       testCompilingInsideAScriptDoesntScrewUpStackTraceLineNumber = ->

@@ -456,7 +456,7 @@ compileOptions = (filename, base) ->
     # avoid dependencies in general, and most users probably won’t be relying
     # on us to transpile for them; we assume most users will probably either
     # run CoffeeScript’s output without transpilation (modern Node or evergreen
-    # browsers) or use a proper build chain like Gulp or Webpack.
+    # environments) or use a proper build chain like Gulp or Webpack.
     try
       require '@babel/core'
     catch

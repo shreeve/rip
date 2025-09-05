@@ -40,12 +40,9 @@ exports.eqJS = (input, expectedOutput, msg) ->
 exports.isWindows = -> process.platform is 'win32'
 
 exports.inspect = (obj) ->
-  if global.testingBrowser
-    JSON.stringify obj, null, 2
-  else
-    require('util').inspect obj,
-      depth: 10
-      colors: if process.env.NODE_DISABLE_COLORS then no else yes
+  require('util').inspect obj,
+    depth: 10
+    colors: if process.env.NODE_DISABLE_COLORS then no else yes
 
 # Helpers to get AST nodes for a string of code.
 exports.getAstRoot = getAstRoot = (code) ->

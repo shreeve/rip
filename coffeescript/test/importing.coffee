@@ -1,8 +1,7 @@
 # Importing
 # ---------
 
-unless window? or testingBrowser?
-  test "coffeescript modules can be imported and executed", ->
+test "coffeescript modules can be imported and executed", ->
 
     magicKey = __filename
     magicValue = 0xFFFF

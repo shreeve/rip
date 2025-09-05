@@ -1,4 +1,3 @@
-return if window? or testingBrowser?
 
 {EventEmitter}  = require 'events'
 {join}          = require 'path'

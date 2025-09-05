@@ -1476,7 +1476,7 @@ test "ES6 prototypes can be overriden", ->
 # test "Class function environment should be in `strict mode`, ie as if 'use strict' was in use", ->
 #   class A
 #     # this might be a meaningless test, since these are likely to be runtime errors and different
-#     # for every browser.  Thoughts?
+#     # across JavaScript environments.  Thoughts?
 #     constructor: () ->
 #       # Ivalid: prop reassignment
 #       @state = {prop: [1], prop: {a: 'a'}}

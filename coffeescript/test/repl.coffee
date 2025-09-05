@@ -1,4 +1,3 @@
-return if global.testingBrowser
 
 os = require 'os'
 fs = require 'fs'

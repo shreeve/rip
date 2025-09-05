@@ -6,8 +6,8 @@ transpile = (method, code, options = {}) ->
   # `method` should be 'compile' or 'eval' or 'run'
   options.bare = yes
   options.transpile =
-    # Target Internet Explorer 6, which supports no ES2015+ features.
-    presets: [['@babel/env', {targets: browsers: ['ie 6']}]]
+    # Target a very old JavaScript environment to test transpilation
+    presets: [['@babel/env', {targets: {node: '6'}}]]
   CoffeeScript[method] code, options
 
 
@@ -130,19 +130,15 @@ test "#2994: single-line `if` requires `then`", ->
   throwsCompileError "if b else x"
 
 test "transpile option, for Node API CoffeeScript.compile", ->
-  return if global.testingBrowser
   ok transpile('compile', "import fs from 'fs'").includes 'require'
 
 test "transpile option, for Node API CoffeeScript.eval", ->
-  return if global.testingBrowser
   ok transpile 'eval', "import path from 'path'; path.sep in ['/', '\\\\']"
 
 test "transpile option, for Node API CoffeeScript.run", ->
-  return if global.testingBrowser
   doesNotThrow -> transpile 'run', "import fs from 'fs'"
 
 test "transpile option has merged source maps", ->
-  return if global.testingBrowser
   untranspiledOutput = CoffeeScript.compile "import path from 'path'\nconsole.log path.sep", sourceMap: yes
   transpiledOutput   = transpile 'compile', "import path from 'path'\nconsole.log path.sep", sourceMap: yes
   untranspiledOutput.v3SourceMap = JSON.parse untranspiledOutput.v3SourceMap
@@ -164,7 +160,6 @@ test "using transpile from the Node API requires an object", ->
     eq exception.message, 'The transpile option must be given an object with options to pass to Babel'
 
 test "transpile option applies to imported .coffee files", ->
-  return if global.testingBrowser
   doesNotThrow -> transpile 'run', "import { getSep } from './test/importing/transpile_import'\ngetSep()"
 
 test "#3306: trailing comma in a function call in the last line", ->

@@ -1,6 +1,6 @@
 (function() {
   // CoffeeScript can be used both on the server, as a command-line compiler based
-  // on Node.js/V8, or to run CoffeeScript directly in the browser. This module
+  // on Node.js/V8. This module
   // contains the main entry functions for tokenizing, parsing, and compiling
   // source CoffeeScript into JavaScript.
   var FILE_EXTENSIONS, Lexer, SourceMap, base64encode, checkShebangLine, compile, getSourceMap, helpers, lexer, packageJson, parser, registerCompiled, withPrettyErrors;
@@ -32,7 +32,7 @@
   // stack traces for files with cached source maps.
   exports.registerCompiled = registerCompiled;
 
-  // Function that allows for btoa in both nodejs and the browser.
+  // Function that allows for btoa in Node.js.
   base64encode = function(src) {
     switch (false) {
       case typeof Buffer !== 'function':

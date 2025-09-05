@@ -1,7 +1,6 @@
 # Cluster Module
 # ---------
 
-return if testingBrowser?
 
 cluster = require 'cluster'
 

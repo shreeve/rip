@@ -18,7 +18,7 @@ CoffeeScript.transpile = (js, options) ->
       throw new Error 'To use the transpile option, you must have the \'@babel/core\' module installed'
   babel.transform js, options
 
-# The `compile` method shared by the CLI, Node and browser APIs.
+# The `compile` method shared by the CLI and Node APIs.
 universalCompile = CoffeeScript.compile
 # The `compile` method particular to the Node API.
 CoffeeScript.compile = (code, options) ->

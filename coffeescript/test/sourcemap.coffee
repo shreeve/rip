@@ -1,4 +1,3 @@
-return if global.testingBrowser
 
 {spawn, fork} = require('child_process')
 SourceMap = require '../src/sourcemap'
