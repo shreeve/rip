@@ -37,7 +37,7 @@ try {
   const js2 = compiler.compile(test2);
   console.log('Output JS:', js2.trim());
   console.log('✅ Success!\n');
-  
+
   // Actually run it!
   console.log('Running the compiled code:');
   eval(js2);
@@ -62,7 +62,7 @@ try {
   const js3 = compiler.compile(test3);
   console.log('Output JS:', js3.trim());
   console.log('✅ Success!\n');
-  
+
   // Actually run it!
   console.log('Running the compiled code:');
   eval(js3);
@@ -76,7 +76,7 @@ console.log('Test 4: Class definition');
 const test4 = `
 class Animal
   constructor: (@name) ->
-  
+
   speak: ->
     console.log "#{@name} makes a sound"
 
@@ -89,7 +89,7 @@ try {
   const js4 = compiler.compile(test4);
   console.log('Output JS:', js4.trim());
   console.log('✅ Success!\n');
-  
+
   // Actually run it!
   console.log('Running the compiled code:');
   eval(js4);

@@ -30,14 +30,14 @@ console.log "Can code? #{developer.canCode()}"
 # Classes
 class Animal
   constructor: (@name, @sound) ->
-  
+
   speak: ->
     console.log "#{@name} says: #{@sound}"
 
 class Dog extends Animal
   constructor: (name) ->
     super name, "Woof!"
-  
+
   wagTail: ->
     console.log "#{@name} wags tail happily!"
 

@@ -17,11 +17,11 @@ export class MinimalLexer {
   tokenize(source) {
     this.reset();
     this.source = source;
-    
+
     while (!this.isAtEnd()) {
       this.scanToken();
     }
-    
+
     this.addToken('EOF', '');
     return this.tokens;
   }
@@ -148,11 +148,11 @@ export class MinimalLexer {
 
   scanNumber() {
     const start = this.current - 1; // We've already consumed the first digit
-    
+
     while (this.isDigit(this.peek())) {
       this.advance();
     }
-    
+
     // Decimal part
     if (this.peek() === '.' && this.isDigit(this.peekNext())) {
       this.advance(); // consume '.'
@@ -160,20 +160,20 @@ export class MinimalLexer {
         this.advance();
       }
     }
-    
+
     const value = this.source.substring(start, this.current);
     this.addToken('NUMBER', value);
   }
 
   scanIdentifier() {
     const start = this.current - 1; // We've already consumed the first character
-    
+
     while (this.isAlphaNumeric(this.peek())) {
       this.advance();
     }
-    
+
     const value = this.source.substring(start, this.current);
-    
+
     // Check for keywords
     const keywords = {
       'if': 'IF',
@@ -223,14 +223,14 @@ export class MinimalLexer {
       'is': 'IS',
       'isnt': 'ISNT'
     };
-    
+
     const type = keywords[value] || 'IDENTIFIER';
     this.addToken(type, value);
   }
 
   scanString(quote) {
     const start = this.current; // Start after the opening quote
-    
+
     while (this.peek() !== quote && !this.isAtEnd()) {
       if (this.peek() === '\n') this.line++;
       if (this.peek() === '\\') {
@@ -240,15 +240,15 @@ export class MinimalLexer {
         this.advance();
       }
     }
-    
+
     if (this.isAtEnd()) {
       console.error(`Unterminated string at line ${this.line}`);
       return;
     }
-    
+
     // Consume closing quote
     this.advance();
-    
+
     // The value is without quotes
     const value = this.source.substring(start, this.current - 1);
     this.addToken('STRING', value);

@@ -18,17 +18,17 @@ class RipCLI {
     }
 
     const command = args[0];
-    
+
     if (command === '-h' || command === '--help') {
       this.printHelp();
       return;
     }
-    
+
     if (command === '-v' || command === '--version') {
       console.log('Rip 0.1.0 (Cheat Mode - using CoffeeScript)');
       return;
     }
-    
+
     if (command === '-c' || command === '--compile') {
       // Compile to stdout
       const filename = args[1];
@@ -39,7 +39,7 @@ class RipCLI {
       this.compileFile(filename, { output: 'stdout' });
       return;
     }
-    
+
     if (command === '-e' || command === '--eval') {
       // Evaluate code
       const code = args[1];
@@ -50,16 +50,16 @@ class RipCLI {
       this.evalCode(code);
       return;
     }
-    
+
     // Default: compile and run file
     this.runFile(command);
   }
-  
+
   compileFile(filename, options = {}) {
     try {
       const source = fs.readFileSync(filename, 'utf-8');
       const compiled = this.compiler.compile(source);
-      
+
       if (options.output === 'stdout') {
         console.log(compiled);
       } else if (options.output) {
@@ -71,19 +71,19 @@ class RipCLI {
         fs.writeFileSync(outputFile, compiled);
         console.log(`Compiled to ${outputFile}`);
       }
-      
+
       return compiled;
     } catch (error) {
       console.error(`Error compiling ${filename}:`, error.message);
       process.exit(1);
     }
   }
-  
+
   runFile(filename) {
     try {
       const source = fs.readFileSync(filename, 'utf-8');
       const compiled = this.compiler.compile(source);
-      
+
       // Run the compiled code
       eval(compiled);
     } catch (error) {
@@ -91,7 +91,7 @@ class RipCLI {
       process.exit(1);
     }
   }
-  
+
   evalCode(code) {
     try {
       const compiled = this.compiler.compile(code);
@@ -101,7 +101,7 @@ class RipCLI {
       process.exit(1);
     }
   }
-  
+
   printHelp() {
     console.log(`
 Rip Language - Cheat Mode (using CoffeeScript)
