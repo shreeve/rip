@@ -1,6 +1,6 @@
 {
   "name": "@rip/lang",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A clean, simple language that compiles to JavaScript. No classes, just data.",
   "type": "module",
   "main": "./lib/index.js",
