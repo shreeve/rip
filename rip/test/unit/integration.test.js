@@ -11,7 +11,7 @@ describe("Integration Tests", () => {
   test("CLI compiles simple code", () => {
     // Create a test file
     fs.writeFileSync('test-temp.rip', 'console.log 42');
-
+    
     try {
       const output = execSync('./bin/rip -c test-temp.rip', { encoding: 'utf-8' });
       expect(output).toContain('console.log(42)');
@@ -24,7 +24,7 @@ describe("Integration Tests", () => {
 
   test("CLI runs simple code", () => {
     fs.writeFileSync('test-temp.rip', 'console.log "test-output"');
-
+    
     try {
       const output = execSync('./bin/rip test-temp.rip', { encoding: 'utf-8' });
       expect(output.trim()).toBe('test-output');
@@ -35,11 +35,11 @@ describe("Integration Tests", () => {
 
   test("CLI shows AST", () => {
     fs.writeFileSync('test-temp.rip', 'x = 42');
-
+    
     try {
       const output = execSync('./bin/rip --ast test-temp.rip', { encoding: 'utf-8' });
       const ast = JSON.parse(output);
-
+      
       expect(ast.type).toBe('root');
       expect(ast.stmts).toBeArray();
       expect(ast.stmts[0].expr.type).toBe('assign');
@@ -50,10 +50,10 @@ describe("Integration Tests", () => {
 
   test("CLI shows tokens", () => {
     fs.writeFileSync('test-temp.rip', 'console.log 42');
-
+    
     try {
       const output = execSync('./bin/rip --tokens test-temp.rip', { encoding: 'utf-8' });
-
+      
       expect(output).toContain('IDENTIFIER: "console"');
       expect(output).toContain('NUMBER: "42"');
       expect(output).toContain('CALL_START [generated]');
@@ -70,9 +70,9 @@ y = 20
 z = x + y
 console.log z
 `;
-
+    
     fs.writeFileSync('test-temp.rip', code);
-
+    
     try {
       const output = execSync('./bin/rip test-temp.rip', { encoding: 'utf-8' });
       expect(output.trim()).toBe('10 20'); // Our simple parser doesn't handle addition yet
@@ -84,7 +84,7 @@ console.log z
   test("handles implicit function calls", () => {
     const code = 'console.log "Hello from Rip!"';
     fs.writeFileSync('test-temp.rip', code);
-
+    
     try {
       const output = execSync('./bin/rip test-temp.rip', { encoding: 'utf-8' });
       expect(output.trim()).toBe('Hello from Rip!');
@@ -99,13 +99,13 @@ console.log "First"
 console.log "Second"
 console.log "Third"
 `;
-
+    
     fs.writeFileSync('test-temp.rip', code);
-
+    
     try {
       const output = execSync('./bin/rip test-temp.rip', { encoding: 'utf-8' });
       const lines = output.trim().split('\n');
-
+      
       expect(lines[0]).toBe('First');
       expect(lines[1]).toBe('Second');
       expect(lines[2]).toBe('Third');
@@ -129,9 +129,9 @@ console.log "Third"
 x = 42  # inline comment
 console.log x
 `;
-
+    
     fs.writeFileSync('test-temp.rip', code);
-
+    
     try {
       const jsOutput = execSync('./bin/rip -c test-temp.rip', { encoding: 'utf-8' });
       // Comments should not appear in output

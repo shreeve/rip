@@ -24,9 +24,12 @@
   },
   "scripts": {
     "compile": "coffee -c -b -o lib/ src/",
-    "test": "bun test",
-    "test:watch": "bun test --watch",
-    "test:coverage": "bun test --coverage",
+    "test": "bun test test/unit",
+    "test:unit": "bun test test/unit",
+    "test:features": "./test/run-rip-tests.js",
+    "test:all": "bun run test:unit && bun run test:features",
+    "test:watch": "bun test --watch test/unit",
+    "test:coverage": "bun test --coverage test/unit",
     "rip": "./bin/rip"
   },
   "keywords": ["rip", "language", "compiler", "simple", "clean", "ast", "es6", "esm", "bun", "deno", "node"],

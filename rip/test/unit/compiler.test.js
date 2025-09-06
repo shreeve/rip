@@ -1,16 +1,7 @@
 import { test, expect, describe } from "bun:test";
-import fs from 'fs';
+import { loadModule } from './test-helpers.js';
 
-// Fix exports
-let compilerJs = fs.readFileSync('./lib/compiler.js', 'utf-8')
-  .replace(/var\s+(\w+);?\s*\1\s*=\s*class\s+\1/g, 'const $1 = class $1')
-  .replace(/module\.exports = (\w+);/, '');
-if (!compilerJs.includes('export default')) {
-  compilerJs += '\nexport default Compiler;\nexport { Compiler };';
-}
-fs.writeFileSync('./lib/compiler.js', compilerJs);
-
-const Compiler = (await import('../lib/compiler.js')).default;
+const Compiler = (await loadModule('compiler')).default;
 
 describe("Compiler", () => {
   const compiler = new Compiler();

@@ -1,0 +1,43 @@
+# Math Operations Test Suite
+# Testing Rip with Rip! 🎉
+
+# Simple test helper
+test = (name, fn) ->
+  console.log "  ✓ #{name}" if fn()
+  console.log "  ✗ #{name}" unless fn()
+
+assert = (condition) -> condition
+
+console.log "\n📐 Math Tests:"
+
+test "addition works", ->
+  assert 2 + 2 is 4
+
+test "subtraction works", ->
+  assert 10 - 3 is 7
+
+test "multiplication works", ->
+  assert 5 * 6 is 30
+
+test "division works", ->
+  assert 20 / 4 is 5
+
+test "operator precedence", ->
+  assert 2 + 3 * 4 is 14
+
+test "parentheses override precedence", ->
+  assert (2 + 3) * 4 is 20
+
+test "complex expressions", ->
+  x = 10
+  y = 20
+  z = (x + y) * 2 - 10
+  assert z is 50
+
+test "modulo operator", ->
+  assert 10 % 3 is 1
+
+test "exponentiation", ->
+  assert 2 ** 3 is 8
+
+console.log ""
