@@ -1,0 +1,92 @@
+# Test Literals and Basic Operators
+# ==================================
+
+console.log "===== Testing Literals ====="
+
+# Boolean literals
+console.log "Boolean literals:"
+console.log true
+console.log false
+console.log yes
+console.log no
+console.log on
+console.log off
+
+# Null and undefined
+console.log "\nNull and undefined:"
+console.log null
+console.log undefined
+
+console.log "\n===== Testing Comparison Operators ====="
+
+x = 5
+y = 10
+
+console.log "x = 5, y = 10"
+console.log "x == 5:"
+console.log x == 5
+console.log "x != 5:"
+console.log x != 5
+console.log "x < y:"
+console.log x < y
+console.log "x > y:"
+console.log x > y
+console.log "x <= 5:"
+console.log x <= 5
+console.log "x >= 10:"
+console.log x >= 10
+
+console.log "\n===== Testing Logical Operators ====="
+
+a = true
+b = false
+
+console.log "a = true, b = false"
+console.log "a and b:"
+console.log a and b
+console.log "a or b:"
+console.log a or b
+
+console.log "\n===== Testing typeof Operator ====="
+
+n = 42
+console.log "n = 42"
+console.log "typeof n:"
+console.log typeof n
+console.log "typeof 'hello':"
+console.log typeof "hello"
+console.log "typeof true:"
+console.log typeof true
+
+console.log "\n===== Testing Unary Operators ====="
+
+console.log "-42:"
+console.log -42
+console.log "+42:"
+console.log +42
+
+console.log "\n===== Testing in/of Operators ====="
+
+arr = [1, 2, 3, 4, 5]
+obj = {a: 1, b: 2, c: 3}
+
+console.log "arr = [1, 2, 3, 4, 5]"
+console.log "3 in arr:"
+console.log 3 in arr
+console.log "10 in arr:"
+console.log 10 in arr
+
+console.log "\nobj = {a: 1, b: 2, c: 3}"
+console.log "'a' of obj:"
+console.log "a" of obj
+console.log "'z' of obj:"
+console.log "z" of obj
+
+console.log "\n===== Testing instanceof ====="
+
+console.log "[] instanceof Array:"
+console.log [] instanceof Array
+console.log "{} instanceof Object:"
+console.log {} instanceof Object
+
+console.log "\n===== All Basic Tests Complete ====="

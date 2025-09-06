@@ -36,41 +36,38 @@ const Compiler = class Compiler {
       case 'id':
         return n.name;
       case 'prop':
-        return `.${n.name}`;
-      
-        // Operations
+        return this.prop(n);
+      case 'index':
+        return this.index(n);
+      // Operations
       case 'op':
         return this.op(n);
       case 'unary':
         return this.unary(n);
       case 'assign':
         return this.assign(n);
-      
-        // Functions
+      // Functions
       case 'func':
         return this.func(n);
       case 'call':
         return this.call(n);
       case 'return':
         return this.return(n);
-      
-        // Control flow
+      // Control flow
       case 'if':
         return this.if(n);
       case 'while':
         return this.while(n);
       case 'for':
         return this.for(n);
-      
-        // Collections
+      // Collections
       case 'array':
         return this.array(n);
       case 'object':
         return this.object(n);
       case 'access':
         return this.access(n);
-      
-        // Structure
+      // Structure
       case 'block':
         return this.block(n);
       case 'root':
@@ -98,8 +95,7 @@ const Compiler = class Compiler {
     var left, right;
     left = this.node(n.left);
     right = this.node(n.right);
-    
-        // Special cases
+    // Special cases
     switch (n.op) {
       case '**':
         return `Math.pow(${left}, ${right})`;
@@ -138,7 +134,6 @@ const Compiler = class Compiler {
     target = this.node(n.target);
     value = this.node(n.value);
     op = n.op || '=';
-    
     // Add 'let' for first assignment (simple heuristic)
     if (op === '=' && n.target.type === 'id') {
       return `let ${target} = ${value}`;
@@ -154,7 +149,6 @@ const Compiler = class Compiler {
       return this.node(p);
     }).join(', ') : void 0) || '';
     body = this.node(n.body);
-    
     // Arrow function
     if (n.arrow) {
       if (n.body.type === 'block') {
@@ -178,6 +172,31 @@ const Compiler = class Compiler {
     return `${func}(${args})`;
   }
 
+  // Property access
+  prop(n) {
+    var obj, propName;
+    obj = this.node(n.obj);
+    // prop is a node with type 'id' containing the name
+    propName = n.prop.name;
+    if (n.optional) {
+      return `${obj}?.${propName}`;
+    } else {
+      return `${obj}.${propName}`;
+    }
+  }
+
+  // Index access
+  index(n) {
+    var idx, obj;
+    obj = this.node(n.obj);
+    idx = this.node(n.index);
+    if (n.optional) {
+      return `${obj}?.[${idx}]`;
+    } else {
+      return `${obj}[${idx}]`;
+    }
+  }
+
   // Return statement
   return(n) {
     if (n.expr) {
@@ -193,7 +212,6 @@ const Compiler = class Compiler {
     cond = this.node(n.cond);
     then_ = this.node(n.then);
     else_ = n.else ? this.node(n.else) : null;
-    
     // Ternary for simple expressions
     if (n.expr && !((ref = n.else) != null ? ref.type : void 0) === 'if') {
       if (else_) {
@@ -305,8 +323,16 @@ const Compiler = class Compiler {
   // Root/program
   root(n) {
     var ref, stmts;
+    // Each statement is directly a node, not wrapped in stmt
     stmts = ((ref = n.stmts) != null ? ref.map((s) => {
-      return this.stmt(s);
+      var code;
+      code = this.node(s);
+      // Add semicolon if needed
+      if (code && !code.match(/[{}]$/)) {
+        return `${code};`;
+      } else {
+        return code;
+      }
     }).filter(function(s) {
       return s;
     }).join('\n') : void 0) || '';

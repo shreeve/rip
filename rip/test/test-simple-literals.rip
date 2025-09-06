@@ -1,0 +1,5 @@
+# Test just booleans
+console.log true
+console.log false
+console.log yes
+console.log no

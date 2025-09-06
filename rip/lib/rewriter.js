@@ -37,8 +37,8 @@ Rewriter = class Rewriter {
     var EXPRESSION_END, EXPRESSION_START, i, levels, ref, ref1, token;
     levels = 0;
     i = start;
-    EXPRESSION_START = ['INDENT', '(', '[', '{', 'CALL_START', 'INDEX_START'];
-    EXPRESSION_END = ['OUTDENT', ')', ']', '}', 'CALL_END', 'INDEX_END'];
+    EXPRESSION_START = ['INDENT', '(', '[', '{'];
+    EXPRESSION_END = ['OUTDENT', ')', ']', '}'];
     while (i < this.tokens.length) {
       token = this.tokens[i];
       // Check end condition at depth 0
@@ -49,9 +49,9 @@ Rewriter = class Rewriter {
         return i;
       }
       // Track nesting depth
-      if (ref = token.type, indexOf.call(EXPRESSION_START, ref) >= 0) {
+      if (ref = token[0], indexOf.call(EXPRESSION_START, ref) >= 0) {
         levels += 1;
-      } else if (ref1 = token.type, indexOf.call(EXPRESSION_END, ref1) >= 0) {
+      } else if (ref1 = token[0], indexOf.call(EXPRESSION_END, ref1) >= 0) {
         levels -= 1;
       }
       if (levels < 0) {
@@ -65,24 +65,21 @@ Rewriter = class Rewriter {
   // Helper to get token type at index
   tag(i) {
     var ref;
-    return (ref = this.tokens[i]) != null ? ref.type : void 0;
+    return (ref = this.tokens[i]) != null ? ref[0] : void 0;
   }
 
   // Generate a synthetic token
   generate(type, value = '') {
-    return {
-      type,
-      value,
-      generated: true,
-      line: 0,
-      column: 0
-    };
+    var token;
+    token = [type, value, 0, 0];
+    token.generated = true;
+    return token;
   }
 
   // Remove leading newlines (they confuse the grammar)
   removeLeadingNewlines() {
     var ref;
-    while (((ref = this.tokens[0]) != null ? ref.type : void 0) === 'TERMINATOR') {
+    while (((ref = this.tokens[0]) != null ? ref[0] : void 0) === 'TERMINATOR') {
       this.tokens.shift();
     }
     return true;
@@ -92,16 +89,16 @@ Rewriter = class Rewriter {
   tagPostfixConditionals() {
     return this.scanTokens((token, i, tokens) => {
       var next, prev, ref, ref1, ref2;
-      if ((ref = token.type) !== 'IF' && ref !== 'UNLESS') {
+      if ((ref = token[0]) !== 'IF' && ref !== 'UNLESS') {
         return 1;
       }
       // Check if this is postfix by looking backward
       prev = tokens[i - 1];
-      if (prev && ((ref1 = prev.type) !== 'TERMINATOR' && ref1 !== 'INDENT' && ref1 !== 'OUTDENT' && ref1 !== 'THEN' && ref1 !== null)) {
+      if (prev && ((ref1 = prev[0]) !== 'TERMINATOR' && ref1 !== 'INDENT' && ref1 !== 'OUTDENT' && ref1 !== 'THEN' && ref1 !== null)) {
         // Look forward to see if there's a block
         next = tokens[i + 1];
-        if ((ref2 = next != null ? next.type : void 0) !== 'INDENT' && ref2 !== 'THEN') {
-          token.type = 'POST_' + token.type;
+        if ((ref2 = next != null ? next[0] : void 0) !== 'INDENT' && ref2 !== 'THEN') {
+          token[0] = 'POST_' + token[0];
         }
       }
       return 1;
@@ -129,7 +126,8 @@ Rewriter = class Rewriter {
       next = tokens[i + 1];
       nextNext = tokens[i + 2];
       // Check for implicit function call
-      if ((ref = token.type, indexOf.call(IMPLICIT_FUNC, ref) >= 0) && (ref1 = next != null ? next.type : void 0, indexOf.call(IMPLICIT_CALL, ref1) >= 0)) {
+      // Token needs to be spaced (or certain types like PROPERTY)
+      if ((ref = token[0], indexOf.call(IMPLICIT_FUNC, ref) >= 0) && token.spaced && (ref1 = next != null ? next[0] : void 0, indexOf.call(IMPLICIT_CALL, ref1) >= 0)) {
         // Don't add implicit call if:
         // 1. We're in a control flow condition
         // 2. Next is a comma (we're in a list)
@@ -139,31 +137,31 @@ Rewriter = class Rewriter {
         // Check for control flow
         isControl = false;
         for (j = k = ref2 = i - 1; k >= 0; j = k += -1) {
-          if (ref3 = tokens[j].type, indexOf.call(IMPLICIT_BLOCK, ref3) >= 0) {
+          if (ref3 = tokens[j][0], indexOf.call(IMPLICIT_BLOCK, ref3) >= 0) {
             isControl = true;
             break;
           }
-          if ((ref4 = tokens[j].type) === 'TERMINATOR' || ref4 === 'INDENT' || ref4 === 'OUTDENT') {
+          if ((ref4 = tokens[j][0]) === 'TERMINATOR' || ref4 === 'INDENT' || ref4 === 'OUTDENT') {
             break;
           }
         }
         // Add implicit call if appropriate
-        if (!isControl && next.type !== ',') {
+        if (!isControl && next[0] !== ',') {
           // For same line or indented block
-          if (!next.newLine || (nextNext != null ? nextNext.type : void 0) === 'INDENT') {
-            // Insert CALL_START
-            callStart = this.generate('CALL_START', '(');
+          if (!next.newLine || (nextNext != null ? nextNext[0] : void 0) === 'INDENT') {
+            // Insert opening paren
+            callStart = this.generate('(', '(');
             tokens.splice(i + 1, 0, callStart);
             stack.push(['CALL', i + 1]);
             // Find where to end the call
             endIdx = this.detectEnd(i + 2, function(t) {
               var ref5;
-              return ref5 = t.type, indexOf.call(IMPLICIT_END, ref5) >= 0;
+              return ref5 = t[0], indexOf.call(IMPLICIT_END, ref5) >= 0;
             }, function(t, j) {
               return j;
             });
-            // Insert CALL_END
-            callEnd = this.generate('CALL_END', ')');
+            // Insert closing paren
+            callEnd = this.generate(')', ')');
             tokens.splice(endIdx, 0, callEnd);
             return 2;
           }
@@ -175,16 +173,16 @@ Rewriter = class Rewriter {
       //     a: 1
       //     b: 2
       // or inline: {a: 1, b: 2}
-      if (token.type === ':' && (prev != null ? prev.type : void 0) === 'IDENTIFIER') {
+      if (token[0] === ':' && (prev != null ? prev[0] : void 0) === 'IDENTIFIER') {
         // Look backwards to see if we need to open an object
         needsOpen = true;
 // Check if we're already in an explicit object
         for (j = l = ref5 = i - 1; l >= 0; j = l += -1) {
-          if (tokens[j].type === '{') {
+          if (tokens[j][0] === '{') {
             needsOpen = false;
             break;
           }
-          if ((ref6 = tokens[j].type) === 'TERMINATOR' || ref6 === 'INDENT' || ref6 === '=' || ref6 === '(') {
+          if ((ref6 = tokens[j][0]) === 'TERMINATOR' || ref6 === 'INDENT' || ref6 === '=' || ref6 === '(') {
             break;
           }
         }
@@ -192,7 +190,7 @@ Rewriter = class Rewriter {
           // Find where to insert the opening brace
           insertIdx = i - 1;
           // Move back past the key
-          while (insertIdx > 0 && ((ref7 = tokens[insertIdx - 1].type) !== 'TERMINATOR' && ref7 !== 'INDENT' && ref7 !== '=' && ref7 !== '(' && ref7 !== ',')) {
+          while (insertIdx > 0 && ((ref7 = tokens[insertIdx - 1][0]) !== 'TERMINATOR' && ref7 !== 'INDENT' && ref7 !== '=' && ref7 !== '(' && ref7 !== ',')) {
             insertIdx -= 1;
           }
           // Insert opening brace
@@ -202,7 +200,7 @@ Rewriter = class Rewriter {
           // Find where to close
           endIdx = this.detectEnd(i + 2, function(t) { // +2 because we inserted one token
             var ref8;
-            return (ref8 = t.type) === 'TERMINATOR' || ref8 === 'OUTDENT' || ref8 === ')' || ref8 === ']' || ref8 === '}';
+            return (ref8 = t[0]) === 'TERMINATOR' || ref8 === 'OUTDENT' || ref8 === ')' || ref8 === ']' || ref8 === '}';
           }, function(t, j) {
             return j;
           });
@@ -213,7 +211,7 @@ Rewriter = class Rewriter {
         }
       }
       // Close implicit calls/objects when appropriate
-      if (stack.length > 0 && (ref8 = token.type, indexOf.call(IMPLICIT_END, ref8) >= 0)) {
+      if (stack.length > 0 && (ref8 = token[0], indexOf.call(IMPLICIT_END, ref8) >= 0)) {
         while (stack.length > 0) {
           [type, startIdx] = stack[stack.length - 1];
           // Check if we should close this level
@@ -239,15 +237,15 @@ Rewriter = class Rewriter {
     SINGLE_LINERS = ['ELSE', '->', '=>', 'TRY', 'FINALLY', 'THEN', 'CATCH'];
     return this.scanTokens((token, i, tokens) => {
       var endIdx, indent, next, outdent, ref, ref1, ref2;
-      if (ref = token.type, indexOf.call(SINGLE_LINERS, ref) < 0) {
+      if (ref = token[0], indexOf.call(SINGLE_LINERS, ref) < 0) {
         return 1;
       }
       next = tokens[i + 1];
-      if (!next || ((ref1 = next.type) === 'INDENT' || ref1 === 'TERMINATOR' || ref1 === 'OUTDENT')) {
+      if (!next || ((ref1 = next[0]) === 'INDENT' || ref1 === 'TERMINATOR' || ref1 === 'OUTDENT')) {
         // Skip if already has indent or is end of line
         return 1;
       }
-      if (token.type === 'ELSE' && next.type === 'IF') {
+      if (token[0] === 'ELSE' && next[0] === 'IF') {
         // Special case: ELSE IF should not get wrapped
         return 1;
       }
@@ -257,13 +255,13 @@ Rewriter = class Rewriter {
       // Find where to OUTDENT
       endIdx = this.detectEnd(i + 2, function(t) {
         var ref2;
-        return (ref2 = t.type) === 'TERMINATOR' || ref2 === 'OUTDENT' || ref2 === 'ELSE' || ref2 === 'CATCH' || ref2 === 'FINALLY';
+        return (ref2 = t[0]) === 'TERMINATOR' || ref2 === 'OUTDENT' || ref2 === 'ELSE' || ref2 === 'CATCH' || ref2 === 'FINALLY';
       }, function(t, j) {
         return j;
       });
       // Insert OUTDENT
       outdent = this.generate('OUTDENT', 2);
-      if (((ref2 = tokens[endIdx - 1]) != null ? ref2.type : void 0) === 'TERMINATOR') {
+      if (((ref2 = tokens[endIdx - 1]) != null ? ref2[0] : void 0) === 'TERMINATOR') {
         // Insert before the terminator
         tokens.splice(endIdx - 1, 0, outdent);
       } else {
@@ -277,4 +275,6 @@ Rewriter = class Rewriter {
 
 export default Rewriter;
 
-export { Rewriter };
+export {
+  Rewriter
+};

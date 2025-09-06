@@ -26,7 +26,8 @@ class Compiler
       when 'null'   then 'null'
       when 'undef'  then 'undefined'
       when 'id'     then n.name
-      when 'prop'   then ".#{n.name}"
+      when 'prop'   then @prop(n)
+      when 'index'  then @index(n)
 
       # Operations
       when 'op'     then @op(n)
@@ -120,6 +121,25 @@ class Compiler
     func = @node(n.func)
     args = n.args?.map((a) => @node(a)).join(', ') || ''
     "#{func}(#{args})"
+
+  # Property access
+  prop: (n) ->
+    obj = @node(n.obj)
+    # prop is a node with type 'id' containing the name
+    propName = n.prop.name
+    if n.optional
+      "#{obj}?.#{propName}"
+    else
+      "#{obj}.#{propName}"
+
+  # Index access
+  index: (n) ->
+    obj = @node(n.obj)
+    idx = @node(n.index)
+    if n.optional
+      "#{obj}?.[#{idx}]"
+    else
+      "#{obj}[#{idx}]"
 
   # Return statement
   return: (n) ->
@@ -216,7 +236,15 @@ class Compiler
 
   # Root/program
   root: (n) ->
-    stmts = n.stmts?.map((s) => @stmt(s)).filter((s) -> s).join('\n') || ''
+    # Each statement is directly a node, not wrapped in stmt
+    stmts = n.stmts?.map((s) => 
+      code = @node(s)
+      # Add semicolon if needed
+      if code and not code.match(/[{}]$/)
+        "#{code};"
+      else
+        code
+    ).filter((s) -> s).join('\n') || ''
     stmts
 
   # Helper for indentation

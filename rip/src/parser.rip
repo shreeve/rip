@@ -3,23 +3,6 @@
 
 import Solar from './solar.rip'
 import { grammar } from './grammar.rip'
-import * as nodes from './nodes.rip'
-
-# Add nodes to the grammar for use in parser actions
-grammar.yy = nodes
-
-# Add module include for the generated parser
-grammar.moduleInclude = """
-  import * as nodes from './nodes.js';
-  const yy = nodes;
-"""
-
-# Action include - helper functions available in grammar actions
-grammar.actionInclude = """
-  // Helper for wrapping nodes
-  yy.Block = nodes.Block;
-  yy.Block.wrap = nodes.Block.wrap;
-"""
 
 # Generate the parser using Solar
 generateParser = ->
@@ -31,9 +14,6 @@ generateParser = ->
 
     # Create the parser
     parser = generator.createParser()
-
-    # Add nodes to parser.yy for runtime access
-    parser.yy = nodes
 
     # Add parse helper function
     parser.parseSource = (source, options = {}) ->
@@ -53,9 +33,6 @@ export parser = generateParser()
 # Export the Parser class
 export Parser = parser.Parser
 
-# Export nodes for external use
-export { nodes }
-
 # Convenience parse function
 export parse = (tokens, options = {}) ->
   parser.lexer = {
@@ -72,16 +49,16 @@ export parse = (tokens, options = {}) ->
     lex: ->
       token = @tokens[@pos++]
       if token
-        @yytext = token.value
-        @yylineno = token.line or 0
+        @yytext = token[1] or ''
+        @yylineno = token[2] or 0
         @yylloc = {
-          first_line: token.line or 0
-          first_column: token.column or 0
-          last_line: token.line or 0
-          last_column: (token.column or 0) + (token.value?.length or 0)
+          first_line: token[2] or 0
+          first_column: token[3] or 0
+          last_line: token[2] or 0
+          last_column: (token[3] or 0) + (token[1]?.length or 0)
         }
         # Return the token type for the parser
-        token.type
+        token[0]
       else
         'EOF'
 

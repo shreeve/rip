@@ -726,6 +726,7 @@ class Generator
     [stk, val, loc] = [[0], [null], []]
     [parseTable, yytext, yylineno, yyleng, recovering] = [@parseTable, '', 0, 0, 0]
     [TERROR, EOF] = [2, 1]
+    state = undefined # current state
 
     lexer = Object.create @lexer
     sharedState = {yy: {}}
