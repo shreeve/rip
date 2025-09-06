@@ -168,17 +168,58 @@ function compileRip(source) {
   return compiler.compile(ast);
 }
 
+// Get AST (for --ast flag)
+function getAST(source) {
+  // Lex
+  const lexer = new Lexer();
+  const rawTokens = lexer.tokenize(source);
+  
+  // Convert to object format
+  const tokens = rawTokens.map(([type, value, line, column]) => ({
+    type, value, line: line || 0, column: column || 0
+  }));
+  
+  // Rewrite
+  const rewriter = new Rewriter();
+  const rewritten = rewriter.rewrite(tokens);
+  
+  // Parse
+  const parser = new SimpleParser();
+  return parser.parse(rewritten);
+}
+
 // Main CLI
 const args = process.argv.slice(2);
 
 if (args.length === 0) {
-  console.log('Usage: rip <file.rip>');
-  console.log('       rip -c <file.rip>  (compile only, show JS)');
+  console.log('Usage: rip <file.rip>           # Run the file');
+  console.log('       rip -c <file.rip>         # Show compiled JavaScript');
+  console.log('       rip --ast <file.rip>      # Show AST nodes');
+  console.log('       rip --tokens <file.rip>   # Show token stream');
   process.exit(1);
 }
 
-const compileOnly = args[0] === '-c';
-const filename = compileOnly ? args[1] : args[0];
+let mode = 'run';
+let filename = args[0];
+
+if (args[0].startsWith('-')) {
+  switch(args[0]) {
+    case '-c':
+    case '--compile':
+      mode = 'compile';
+      break;
+    case '--ast':
+      mode = 'ast';
+      break;
+    case '--tokens':
+      mode = 'tokens';
+      break;
+    default:
+      console.log(`Unknown option: ${args[0]}`);
+      process.exit(1);
+  }
+  filename = args[1];
+}
 
 if (!filename) {
   console.log('Error: No file specified');
@@ -188,16 +229,41 @@ if (!filename) {
 try {
   // Read the Rip file
   const source = fs.readFileSync(filename, 'utf-8');
-
-  // Compile to JavaScript
-  const js = compileRip(source);
-
-  if (compileOnly) {
-    // Just show the compiled JavaScript
-    console.log(js);
-  } else {
-    // Run the JavaScript!
-    eval(js);
+  
+  switch(mode) {
+    case 'run':
+      // Compile and run
+      const js = compileRip(source);
+      eval(js);
+      break;
+      
+    case 'compile':
+      // Show compiled JavaScript
+      console.log(compileRip(source));
+      break;
+      
+    case 'ast':
+      // Show AST
+      const ast = getAST(source);
+      console.log(JSON.stringify(ast, null, 2));
+      break;
+      
+    case 'tokens':
+      // Show token stream
+      const lexer = new Lexer();
+      const rawTokens = lexer.tokenize(source);
+      const tokens = rawTokens.map(([type, value, line, column]) => ({
+        type, value, line: line || 0, column: column || 0
+      }));
+      const rewriter = new Rewriter();
+      const rewritten = rewriter.rewrite(tokens);
+      
+      console.log('Tokens after rewriter:');
+      rewritten.forEach(t => {
+        const gen = t.generated ? ' [generated]' : '';
+        console.log(`  ${t.type}${gen}: "${t.value}"`);
+      });
+      break;
   }
 } catch (e) {
   if (e.code === 'ENOENT') {
