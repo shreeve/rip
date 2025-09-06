@@ -1,0 +1,14 @@
+# Rip with Solar parser is working!
+console.log "Hello from Rip with Solar!"
+
+# Implicit calls work
+Math.max 5, 10
+
+# Property access works
+process.env.HOME
+
+# Assignment works
+x = 42
+y = x + 8
+
+console.log y

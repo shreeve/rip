@@ -116,7 +116,7 @@ Generator = class Generator {
     });
   }
 
-  
+
     // ============================================================================
   // Helper Functions
   // ============================================================================
@@ -168,7 +168,7 @@ Generator = class Generator {
       "error": 2 // Add reserved symbols
     };
     symbolId = 3; // Next available symbol ID (after special symbols)
-    
+
     // Add symbol to symbol table if not already present
     addSymbol = (name) => {
       var id, symbol;
@@ -276,7 +276,7 @@ Generator = class Generator {
         }
       });
     }
-    
+
     // Transform $$ and positional references
     return action.replace(/([^'"])\$\$|^\$\$/g, '$1this.$').replace(/@[0$]/g, "this._$").replace(/\$(-?\d+)/g, function(_, n) { // Like $$var // Like @var
       return "$$[$0" + (parseInt(n, 10) - rhs.length || '') + "]"; // Like $1
@@ -404,7 +404,7 @@ Generator = class Generator {
     closureSet = new LRState();
     workingSet = new Set(itemSet.items);
     itemCores = new Map(); // item.id -> item
-    
+
       // Process all items
     while (workingSet.size > 0) {
       newItems = new Set();
@@ -519,7 +519,7 @@ Generator = class Generator {
     return this._assignItemLookaheads(); // FOLLOW(A) → item lookaheads
   }
 
-  
+
     // Determine nullable symbols (can derive ε)
   _computeNullableSets() {
     var changed, j, len1, nonterminal, production, ref, results, symbol;

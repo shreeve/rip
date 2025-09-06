@@ -237,7 +237,7 @@ class Compiler
   # Root/program
   root: (n) ->
     # Each statement is directly a node, not wrapped in stmt
-    stmts = n.stmts?.map((s) => 
+    stmts = n.stmts?.map((s) =>
       code = @node(s)
       # Add semicolon if needed
       if code and not code.match(/[{}]$/)
