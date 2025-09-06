@@ -214,7 +214,7 @@ The migration is complete when:
 
 ## Repository State
 - **Branch**: main
-- **Last Commit**: "Clean up trailing whitespace" (344af43)
+- **Last Commit**: "Update date to September 5, 2025 in AGENT.md" (9be2d7b)
 - **Working Directory**: `/Users/shreeve/Data/Code/rip/coffeescript`
 - **Date**: September 5, 2025
 
@@ -225,6 +225,8 @@ The migration is complete when:
 2. "Update AGENT.md with handoff completion notes" (5231072)
 3. "Add final handoff summary to AGENT.md" (a8c5d18)
 4. "Clean up trailing whitespace" (344af43)
+5. "Update AGENT.md with latest repository state and commit history" (6cda03e)
+6. "Update date to September 5, 2025 in AGENT.md" (9be2d7b)
 
 ### Completed Fixes to index.coffee
 1. **Removed all CommonJS dependencies**:
