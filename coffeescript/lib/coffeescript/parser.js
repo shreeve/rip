@@ -661,10 +661,10 @@ case 226:
 this.$ = yy.addDataToNode(yy, _$[$0-1], $$[$0-1], _$[$0], $$[$0], true)([]);
 break;
 case 227:
-this.$ = yy.addDataToNode(yy, _$[$0-3], $$[$0-3], _$[$0], $$[$0], true)(
+this.$ = yy.addDataToNode(yy, _$[$0-3], $$[$0-3], _$[$0], $$[$0], true)((function() {
         $$[$0-2].implicit = $$[$0-3].generated;
         return $$[$0-2];
-      }()));
+      })());
 break;
 case 228: case 229:
 this.$ = yy.addDataToNode(yy, _$[$0], $$[$0], _$[$0], $$[$0], true)(new yy.Value(new yy.ThisLiteral($$[$0])));
@@ -1229,6 +1229,5 @@ parser.Parser = Parser;
 
 
 // ESM exports
-export { parser };
+export { parser, Parser };
 
-export {parser, Parser};

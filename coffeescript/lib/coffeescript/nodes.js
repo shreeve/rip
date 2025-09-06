@@ -7802,6 +7802,7 @@ isAstLocGreater = function(a, b) {
 };
 
 isLocationDataStartGreater = function(a, b) {
+  if (!a || !b) return false;
   if (a.first_line > b.first_line) {
     return true;
   }
@@ -7822,6 +7823,7 @@ isLocationDataEndGreater = function(a, b) {
 };
 
 mergeLocationData = function(locationDataA, locationDataB, {justLeading, justEnding} = {}) {
+  if (!locationDataA || !locationDataB) return locationDataA || locationDataB || {};
   return Object.assign(justEnding ? {
     first_line: locationDataA.first_line,
     first_column: locationDataA.first_column

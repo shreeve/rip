@@ -5750,6 +5750,7 @@ isAstLocGreater = (a, b) ->
   a.column > b.column
 
 isLocationDataStartGreater = (a, b) ->
+  return no unless a and b
   return yes if a.first_line > b.first_line
   return no unless a.first_line is b.first_line
   a.first_column > b.first_column
@@ -5773,7 +5774,8 @@ isLocationDataEndGreater = (a, b) ->
 # mergeLocationData(first, second, justLeading: yes).range # [1, 5]
 # mergeLocationData(first, second, justEnding:  yes).range # [4, 10]
 # ```
-exports.mergeLocationData = mergeLocationData = (locationDataA, locationDataB, {justLeading, justEnding} = {}) ->
+export mergeLocationData = (locationDataA, locationDataB, {justLeading, justEnding} = {}) ->
+  return locationDataA or locationDataB or {} unless locationDataA and locationDataB
   return Object.assign(
     if justEnding
       first_line:   locationDataA.first_line

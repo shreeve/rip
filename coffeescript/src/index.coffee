@@ -6,7 +6,7 @@ import path from 'path'
 
 helpers       = CoffeeScript.helpers
 
-transpile = (js, options) ->
+export transpile = (js, options) ->
   try
     babel = require '@babel/core'
   catch
@@ -18,21 +18,19 @@ transpile = (js, options) ->
       throw new Error 'To use the transpile option, you must have the \'@babel/core\' module installed'
   babel.transform js, options
 
-# The `compile` method shared by the CLI and Node APIs.
-universalCompile = CoffeeScript.compile
 # The `compile` method particular to the Node API.
-CoffeeScript.compile = (code, options) ->
+export compile = (code, options) ->
   # Pass a reference to Babel into the compiler, so that the transpile option
   # is available in the Node API. We need to do this so that tools like Webpack
   # can `require('coffeescript')` and build correctly, without trying to
   # require Babel.
   if options?.transpile
-    options.transpile.transpile = CoffeeScript.transpile
-  universalCompile.call CoffeeScript, code, options
+    options.transpile.transpile = transpile
+  CoffeeScript.compile code, options
 
 # Compile and execute a string of CoffeeScript (on the server), correctly
 # setting `__filename`, `__dirname`, and relative `require()`.
-run = (code, options = {}) ->
+export run = (code, options = {}) ->
   mainModule = require.main
 
   # Set the filename.
@@ -63,7 +61,7 @@ run = (code, options = {}) ->
 
 # Compile and evaluate a string of CoffeeScript (in a Node.js-like environment).
 # The CoffeeScript REPL uses this to run the input.
-coffeeEval = (code, options = {}) ->
+export coffeeEval = (code, options = {}) ->
   return unless code = code.trim()
   createContext = vm.Script.createContext ? vm.createContext
 
@@ -102,7 +100,7 @@ coffeeEval = (code, options = {}) ->
   else
     vm.runInContext js, sandbox
 
-register = -> require './register'
+export register = -> require './register'
 
 # Throw error with deprecation warning when depending upon implicit `require.extensions` registration
 if require.extensions
@@ -112,7 +110,7 @@ if require.extensions
       Use CoffeeScript.register() or require the coffeescript/register module to require #{ext} files.
       """
 
-_compileRawFileContent = (raw, filename, options = {}) ->
+export _compileRawFileContent = (raw, filename, options = {}) ->
 
   # Strip the Unicode byte order mark, if this file begins with one.
   stripped = if raw.charCodeAt(0) is 0xFEFF then raw.substring 1 else raw
@@ -131,7 +129,7 @@ _compileRawFileContent = (raw, filename, options = {}) ->
 
   answer
 
-_compileFile = (filename, options = {}) ->
+export _compileFile = (filename, options = {}) ->
   raw = fs.readFileSync filename, 'utf8'
 
   CoffeeScript._compileRawFileContent raw, filename, options
@@ -139,5 +137,5 @@ _compileFile = (filename, options = {}) ->
 # Re-export everything from CoffeeScript
 export * from './coffeescript.js'
 
-# Also export the functions defined in this file
-export {transpile, run, coffeeEval as eval, register, _compileRawFileContent, _compileFile}
+# Export coffeeEval as eval for compatibility
+export {coffeeEval as eval}
