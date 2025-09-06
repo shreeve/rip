@@ -12,7 +12,7 @@ let compilerJs = fs.readFileSync('/Users/shreeve/Data/Code/rip/rip/lib/compiler-
 compilerJs = compilerJs
   .replace(/var\s+(\w+);?\s*\1\s*=\s*class\s+\1/g, 'const $1 = class $1')
   .replace(/module\.exports = (\w+);/, '');
-  
+
 // Only add exports if they don't exist
 if (!compilerJs.includes('export default')) {
   compilerJs += '\nexport default Compiler;\nexport { Compiler };';
@@ -31,16 +31,16 @@ class SimpleParser {
     // Convert token arrays to a simple AST
     const stmts = [];
     let i = 0;
-    
+
     while (i < tokens.length) {
       const token = tokens[i];
-      
+
       // Skip terminators and EOF
       if (token.type === 'TERMINATOR' || token.type === 'EOF') {
         i++;
         continue;
       }
-      
+
       // Simple assignment: ID = EXPR
       if (i + 2 < tokens.length && tokens[i+1].type === '=') {
         const stmt = {
@@ -49,19 +49,19 @@ class SimpleParser {
           value: this.parseExpr(tokens, i + 2)
         };
         stmts.push({ type: 'stmt', expr: stmt });
-        
+
         // Skip to next statement
         while (i < tokens.length && tokens[i].type !== 'TERMINATOR' && tokens[i].type !== 'EOF') {
           i++;
         }
         continue;
       }
-      
+
       // Function call: console.log(...)
       if (token.type === 'IDENTIFIER' && i + 1 < tokens.length && tokens[i+1].type === '.') {
         let expr = { type: 'id', name: token.value };
         i++;
-        
+
         while (i < tokens.length && tokens[i].type === '.') {
           i++; // skip dot
           if (tokens[i].type === 'PROPERTY' || tokens[i].type === 'IDENTIFIER') {
@@ -74,12 +74,12 @@ class SimpleParser {
             i++;
           }
         }
-        
+
         // Check for call
         if (i < tokens.length && tokens[i].type === 'CALL_START') {
           const args = [];
           i++; // skip CALL_START
-          
+
           while (i < tokens.length && tokens[i].type !== 'CALL_END') {
             if (tokens[i].type === 'STRING') {
               args.push({ type: 'str', val: tokens[i].value.slice(1, -1) }); // Remove quotes
@@ -91,25 +91,25 @@ class SimpleParser {
             i++;
           }
           i++; // skip CALL_END
-          
+
           expr = { type: 'call', func: expr, args };
         }
-        
+
         stmts.push({ type: 'stmt', expr });
         continue;
       }
-      
+
       i++;
     }
-    
+
     return { type: 'root', stmts };
   }
-  
+
   parseExpr(tokens, start) {
     const token = tokens[start];
-    
+
     if (!token) return { type: 'null' };
-    
+
     // Number
     if (token.type === 'NUMBER') {
       // Check for operation
@@ -123,12 +123,12 @@ class SimpleParser {
       }
       return { type: 'num', val: token.value };
     }
-    
+
     // String
     if (token.type === 'STRING') {
       return { type: 'str', val: token.value.slice(1, -1) }; // Remove quotes
     }
-    
+
     // Identifier
     if (token.type === 'IDENTIFIER') {
       // Check for operation
@@ -142,7 +142,7 @@ class SimpleParser {
       }
       return { type: 'id', name: token.value };
     }
-    
+
     return { type: 'null' };
   }
 }
@@ -185,33 +185,33 @@ for (const test of tests) {
   console.log(`📝 Test: ${test.name}`);
   console.log('Rip code:');
   console.log('  ' + test.code.trim().split('\n').join('\n  '));
-  
+
   try {
     // Step 1: Lex
     const lexer = new Lexer();
     const rawTokens = lexer.tokenize(test.code);
-    
+
     // Convert to object format for rewriter
     const tokens = rawTokens.map(([type, value, line, column]) => ({
       type, value, line: line || 0, column: column || 0
     }));
-    
+
     // Step 2: Rewrite
     const rewriter = new Rewriter();
     const rewritten = rewriter.rewrite(tokens);
-    
+
     // Step 3: Parse
     const parser = new SimpleParser();
     const ast = parser.parse(rewritten);
-    
+
     // Step 4: COMPILE!
     const compiler = new Compiler();
     const js = compiler.compile(ast);
-    
+
     console.log('JavaScript output:');
     console.log('  ' + js.trim().split('\n').join('\n  '));
     console.log('✅ SUCCESS!\n');
-    
+
   } catch (e) {
     console.log(`❌ Error: ${e.message}\n`);
   }
