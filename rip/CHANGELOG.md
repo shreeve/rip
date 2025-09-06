@@ -5,6 +5,29 @@ All notable changes to the Rip language will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2025-09-06 - 05:00 MST
+
+### 📊 Test Coverage Tracking
+
+#### **Added Grammar Test Coverage Markers**
+- **Visual indicators** in `grammar.rip` showing test status for each rule
+- **Coverage legend** at top of grammar file for clarity
+- **27 rules tested and passing** (✅)
+- **2 rules partially tested** (⚠️) - implicit function calls
+- **4 rules tested but failing** (❌) - If/Block structures
+- **Unmarked rules** are not yet tested (keeps file clean)
+
+### 🎯 Benefits
+- **Immediate visual feedback** on what's working and what needs attention
+- **Grep-friendly** - Easy to find failures with `grep "# ❌"`
+- **Progress tracking** - Watch coverage improve over time
+- **Clean approach** - No clutter for untested features
+
+### 📝 Documentation
+- Added test coverage legend to grammar file
+- Coverage markers align visually for easy scanning
+- Simple to remove later with sed when no longer needed
+
 ## [0.2.1] - 2025-09-06 - 04:33 MST
 
 ### 🐛 Bug Fixes
