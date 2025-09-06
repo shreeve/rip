@@ -14,9 +14,9 @@
     },
     "./compiler": "./lib/compiler.js",
     "./lexer": "./lib/lexer.js",
-    "./parser": "./lib/parser.js",
     "./rewriter": "./lib/rewriter.js",
     "./grammar": "./lib/grammar.js",
+    "./grammar-solar": "./lib/grammar-solar.js",
     "./solar": "./lib/solar.js"
   },
   "bin": {

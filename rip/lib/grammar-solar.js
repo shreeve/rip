@@ -23,7 +23,7 @@ grammar = {
     Body: [o("Line", "$$ = [$1]"), o("Body TERMINATOR Line", "$1.push($3); $$ = $1"), o("Body TERMINATOR", "$$ = $1")],
     Line: [o("Expression", "$$ = $1"), o("Statement", "$$ = $1"), o("", "$$ = null")],
     Statement: [o("Return", "$$ = $1"), o("Throw", "$$ = $1"), o("Break", "$$ = $1"), o("Continue", "$$ = $1"), o("Import", "$$ = $1"), o("Export", "$$ = $1")],
-    Expression: [o("Value", "$$ = $1"), o("Assign", "$$ = $1"), o("Operation", "$$ = $1"), o("Code", "$$ = $1"), o("If", "$$ = $1"), o("For", "$$ = $1"), o("While", "$$ = $1"), o("Try", "$$ = $1")],
+    Expression: [o("Assign", "$$ = $1"), o("Operation", "$$ = $1"), o("Value", "$$ = $1"), o("Code", "$$ = $1"), o("If", "$$ = $1"), o("For", "$$ = $1"), o("While", "$$ = $1"), o("Try", "$$ = $1")],
     Value: [o("Literal", "$$ = $1"), o("Identifier", "$$ = $1"), o("ThisProperty", "$$ = $1"), o("Array", "$$ = $1"), o("Object", "$$ = $1"), o("Parenthetical", "$$ = $1"), o("Range", "$$ = $1"), o("Invocation", "$$ = $1"), o("Member", "$$ = $1")],
     Literal: [o("NUMBER", "$$ = {type: 'num', val: $1}"), o("STRING", "$$ = {type: 'str', val: $1}"), o("BOOL", "$$ = {type: 'bool', val: $1}"), o("NULL", "$$ = {type: 'null'}"), o("UNDEFINED", "$$ = {type: 'undef'}"), o("REGEX", "$$ = {type: 'regex', val: $1}")],
     Identifier: [o("IDENTIFIER", "$$ = {type: 'id', name: $1}")],

@@ -54,9 +54,9 @@ grammar =
     ]
 
     Expression: [
-      o "Value", "$$ = $1"
       o "Assign", "$$ = $1"
       o "Operation", "$$ = $1"
+      o "Value", "$$ = $1"
       o "Code", "$$ = $1"
       o "If", "$$ = $1"
       o "For", "$$ = $1"
