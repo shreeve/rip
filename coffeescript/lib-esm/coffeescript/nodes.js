@@ -1517,7 +1517,7 @@ export var StringLiteral = class StringLiteral extends Literal {
       locationData.last_column -= this.quote.length;
     }
     locationData.last_column_exclusive -= this.quote.length;
-    locationData.range = [locationData.range[0] + this.quote.length, locationData.range[1] - this.quote.length];
+    if (locationData?.range) locationData.range = [locationData.range[0] + this.quote.length, locationData.range[1] - this.quote.length];
     copy = new StringLiteral(this.originalValue, {quote: this.quote, initialChunk: this.initialChunk, finalChunk: this.finalChunk, indent: this.indent, double: this.double, heregex: this.heregex});
     copy.locationData = locationData;
     return copy;
@@ -8664,6 +8664,7 @@ isAstLocGreater = function(a, b) {
 };
 
 isLocationDataStartGreater = function(a, b) {
+  if (!a || !b) return false;
   if (a.first_line > b.first_line) {
     return true;
   }
@@ -8698,6 +8699,7 @@ isLocationDataEndGreater = function(a, b) {
 // mergeLocationData(first, second, justEnding:  yes).range # [4, 10]
 // ```
 mergeLocationData = function(locationDataA, locationDataB, {justLeading, justEnding} = {}) {
+  if (!locationDataA || !locationDataB) return locationDataA || locationDataB || {};
   return Object.assign(justEnding ? {
     first_line: locationDataA.first_line,
     first_column: locationDataA.first_column
@@ -8723,7 +8725,7 @@ mergeLocationData = function(locationDataA, locationDataB, {justLeading, justEnd
     last_line_exclusive: locationDataB.last_line_exclusive,
     last_column_exclusive: locationDataB.last_column_exclusive
   }, {
-    range: [justEnding ? locationDataA.range[0] : lesser(locationDataA.range[0], locationDataB.range[0]), justLeading ? locationDataA.range[1] : greater(locationDataA.range[1], locationDataB.range[1])]
+    range: (locationDataA?.range && locationDataB?.range) ? [justEnding ? locationDataA.range[0] : lesser(locationDataA.range[0], locationDataB.range[0]), justLeading ? locationDataA.range[1] : greater(locationDataA.range[1], locationDataB.range[1])] : locationDataA?.range || locationDataB?.range || []
   });
 };
 

@@ -87,7 +87,7 @@ build = (callback) ->
 
 buildESM = (callback) ->
   # First ensure lib-esm directory exists
-  fs.mkdirSync 'lib-esm/coffeescript', recursive: yes
+  fs.mkdirSync 'lib/coffeescript', recursive: yes
 
   # Convert the parser to ESM
   if fs.existsSync 'lib/coffeescript/parser.js'
@@ -104,7 +104,7 @@ export const Parser = parser.Parser;
 export const parse = function() { return parser.parse.apply(parser, arguments); };
 export const main = function() {};
 """
-    fs.writeFileSync 'lib-esm/coffeescript/parser.js', esmParser
+    fs.writeFileSync 'lib/coffeescript/parser.js', esmParser
 
   # Build ESM versions of source files
   files = fs.readdirSync 'src'
@@ -124,7 +124,7 @@ export const main = function() {};
       if not isESM
         output = transformCJSToESM output, file
 
-      outputFile = "lib-esm/coffeescript/#{path.basename(file, path.extname(file))}.js"
+      outputFile = "lib/coffeescript/#{path.basename(file, path.extname(file))}.js"
 
       # Fix specific issues in coffeescript.js
       if path.basename(file, '.coffee') is 'coffeescript'
@@ -163,10 +163,10 @@ Object.keys(nodes).forEach(function(key) {
 });''')
 
 
-        fs.writeFileSync 'lib-esm/coffeescript/coffeescript.js', esmCode
+        fs.writeFileSync 'lib/coffeescript/coffeescript.js', esmCode
         compiled++
 
-  console.log "Compiled #{compiled} files to lib-esm/coffeescript/"
+  console.log "Compiled #{compiled} files to lib/coffeescript/"
   callback() if typeof callback is 'function'
 
 # Transform CommonJS output to ESM

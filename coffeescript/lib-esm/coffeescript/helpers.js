@@ -161,7 +161,7 @@ export var extractAllCommentTokens = function(tokens) {
 // location data distinguishes e.g. zero-length generated tokens from
 // actual source tokens.
 buildLocationHash = function(loc) {
-  if (!loc) return '';
+  if (!loc || !loc.range) return '';
   return `${loc.range[0]}-${loc.range[1]}`;
 };
 

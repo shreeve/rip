@@ -232,7 +232,7 @@ const packageJson = {version: '0.1.0'};
 // register is alias
 
   const run = function(code, options = {}) {
-        const js = compile(code, options);
+    const js = compile(code, options);
     return eval(js);
   };
 
