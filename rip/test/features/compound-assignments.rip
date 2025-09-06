@@ -14,7 +14,7 @@ console.log "  After x += 5: "
 console.log x
 console.log "  Expected: 15"
 
-# Test -= (subtraction assignment)  
+# Test -= (subtraction assignment)
 console.log ""
 console.log "Testing -= operator:"
 y = 20
@@ -76,6 +76,6 @@ console.log ""
 console.log "===== All Compound Assignment Tests Complete ====="
 console.log "✅ += (addition assignment)"
 console.log "✅ -= (subtraction assignment)"
-console.log "✅ *= (multiplication assignment)"  
+console.log "✅ *= (multiplication assignment)"
 console.log "✅ /= (division assignment)"
 console.log ""

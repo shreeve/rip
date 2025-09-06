@@ -50,9 +50,9 @@ class SimpleParser {
       }
 
       // Assignment: ID = EXPR or ID += EXPR, etc.
-      if (i + 2 < tokens.length && 
-          (tokens[i+1].type === '=' || tokens[i+1].type === '+=' || 
-           tokens[i+1].type === '-=' || tokens[i+1].type === '*=' || 
+      if (i + 2 < tokens.length &&
+          (tokens[i+1].type === '=' || tokens[i+1].type === '+=' ||
+           tokens[i+1].type === '-=' || tokens[i+1].type === '*=' ||
            tokens[i+1].type === '/=')) {
         const op = tokens[i+1].type;
         const stmt = {

@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### **Added Full Support for Compound Assignments**
 - **Operators supported**: `+=`, `-=`, `*=`, `/=`
 - **Lexer enhancement**: Added tokenization for compound assignment operators
-- **Parser update**: Extended SimpleParser to handle compound assignments  
+- **Parser update**: Extended SimpleParser to handle compound assignments
 - **Compiler ready**: Already supported via `op` field in assign nodes
 - **Test coverage**: Added comprehensive unit and feature tests
 - **Grammar markers**: Updated to show ✅ for all compound assignment rules

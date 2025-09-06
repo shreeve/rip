@@ -10,28 +10,28 @@ const { Compiler } = await loadModule("compiler");
 describe("Compound Assignments", () => {
   const lexer = new Lexer();
   const compiler = new Compiler();
-  
+
   // Simple parser for basic assignment tests
   class SimpleParser {
     parse(tokens) {
       const stmts = [];
       let i = 0;
-      
+
       while (i < tokens.length) {
         const token = tokens[i];
-        
+
         if (token[0] === 'TERMINATOR' || token[0] === 'EOF') {
           i++;
           continue;
         }
-        
+
         // Check for assignments (including compound)
         if (token[0] === 'IDENTIFIER' && i + 1 < tokens.length) {
           const nextToken = tokens[i + 1];
-          if (nextToken[0] === '=' || nextToken[0] === '+=' || 
-              nextToken[0] === '-=' || nextToken[0] === '*=' || 
+          if (nextToken[0] === '=' || nextToken[0] === '+=' ||
+              nextToken[0] === '-=' || nextToken[0] === '*=' ||
               nextToken[0] === '/=') {
-            
+
             // Collect expression tokens
             const exprTokens = [];
             let j = i + 2;
@@ -39,30 +39,30 @@ describe("Compound Assignments", () => {
               exprTokens.push(tokens[j]);
               j++;
             }
-            
+
             // Build assignment node
             const assign = {
               type: 'assign',
               target: { type: 'id', name: token[1] },
               value: this.parseSimpleExpr(exprTokens)
             };
-            
+
             if (nextToken[0] !== '=') {
               assign.op = nextToken[0];
             }
-            
+
             stmts.push({ type: 'stmt', expr: assign });
             i = j;
             continue;
           }
         }
-        
+
         i++;
       }
-      
+
       return { type: 'root', stmts };
     }
-    
+
     parseSimpleExpr(tokens) {
       if (tokens.length === 0) return { type: 'undef' };
       if (tokens.length === 1) {
@@ -83,7 +83,7 @@ describe("Compound Assignments", () => {
       return this.parseSimpleExpr([tokens[0]]);
     }
   }
-  
+
   const parser = new SimpleParser();
 
   const compile = (code) => {
