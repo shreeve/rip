@@ -402,16 +402,16 @@ grammar =
 
   # Start symbol
   start: "Root"
-  
+
   # =========================================================================
   # ADVANCED FEATURES - NOT YET IMPLEMENTED
   # =========================================================================
-  # Below this line are advanced CoffeeScript features that we haven't 
-  # focused on yet. They're here so we have everything in one place and 
+  # Below this line are advanced CoffeeScript features that we haven't
+  # focused on yet. They're here so we have everything in one place and
   # can stop referring back to grammar.coffee. These will be activated
   # progressively as we build out the language.
   # =========================================================================
-  
+
   # Classes (ES6 class syntax)
   Class: [
     o "CLASS", -> type: 'class', pos: '@$'
@@ -423,17 +423,17 @@ grammar =
     o "CLASS SimpleAssignable EXTENDS Expression", -> type: 'class', name: $2, superClass: $4, pos: '@$'
     o "CLASS SimpleAssignable EXTENDS Expression Block", -> type: 'class', name: $2, superClass: $4, body: $5, pos: '@$'
   ]
-  
+
   # Super calls
   Super: [
     o "SUPER", -> type: 'super', pos: '@$'
     o "SUPER Arguments", -> type: 'super', args: $2, pos: '@$'
     o "SUPER . Property", -> type: 'super', prop: $3, pos: '@$'
   ]
-  
+
   # Switch statements
   Switch: [
-    o "SWITCH Expression INDENT Whens OUTDENT", -> 
+    o "SWITCH Expression INDENT Whens OUTDENT", ->
       type: 'switch', test: $2, cases: $4, pos: '@$'
     o "SWITCH Expression INDENT Whens ELSE Block OUTDENT", ->
       type: 'switch', test: $2, cases: $4, default: $6, pos: '@$'
@@ -442,117 +442,117 @@ grammar =
     o "SWITCH INDENT Whens ELSE Block OUTDENT", ->
       type: 'switch', cases: $3, default: $5, pos: '@$'
   ]
-  
+
   Whens: [
     o "When", -> [$1]
     o "Whens When", -> $1.concat $2
   ]
-  
+
   When: [
     o "WHEN SimpleArgs Block", -> type: 'case', tests: $2, body: $3, pos: '@$'
     o "WHEN SimpleArgs Block TERMINATOR", -> type: 'case', tests: $2, body: $3, pos: '@$'
   ]
-  
+
   SimpleArgs: [
     o "Expression", -> [$1]
     o "SimpleArgs , Expression", -> $1.concat $3
   ]
-  
+
   # Generators and yield
   Yield: [
     o "YIELD", -> type: 'yield', pos: '@$'
     o "YIELD Expression", -> type: 'yield', arg: $2, pos: '@$'
     o "YIELD FROM Expression", -> type: 'yield', delegate: yes, arg: $3, pos: '@$'
   ]
-  
+
   # Async/await
   Await: [
     o "AWAIT Expression", -> type: 'await', arg: $2, pos: '@$'
   ]
-  
+
   # Do expressions (IIFE)
   DoExpression: [
     o "DO Expression", -> type: 'do', body: $2, pos: '@$'
     o "DO Block", -> type: 'do', body: $2, pos: '@$'
   ]
-  
+
   # Existence operator
   Existence: [
     o "Expression ?", -> type: 'existence', expr: $1, pos: '@$'
   ]
-  
+
   # String interpolation
   StringWithInterpolations: [
-    o "STRING_START Interpolations STRING_END", -> 
+    o "STRING_START Interpolations STRING_END", ->
       type: 'template', parts: $2, pos: '@$'
   ]
-  
+
   Interpolations: [
     o "InterpolationChunk", -> [$1]
     o "Interpolations InterpolationChunk", -> $1.concat $2
   ]
-  
+
   InterpolationChunk: [
-    o "INTERPOLATION_START Body INTERPOLATION_END", -> 
+    o "INTERPOLATION_START Body INTERPOLATION_END", ->
       type: 'interpolation', expr: $2, pos: '@$'
     o "String", -> $1
   ]
-  
+
   # Destructuring assignments (arrays and objects)
   Destructuring: [
     o "[ DestructureList ]", -> type: 'array-pattern', elements: $2, pos: '@$'
     o "{ DestructureList }", -> type: 'object-pattern', properties: $2, pos: '@$'
   ]
-  
+
   DestructureList: [
     o "DestructureItem", -> [$1]
     o "DestructureList , DestructureItem", -> $1.concat $3
   ]
-  
+
   DestructureItem: [
     o "Identifier", -> $1
     o "Identifier = Expression", -> type: 'default', left: $1, right: $3, pos: '@$'
     o "... Identifier", -> type: 'rest', arg: $2, pos: '@$'
   ]
-  
+
   # Splats in arrays and arguments
   Splat: [
     o "Expression ...", -> type: 'spread', arg: $1, pos: '@$'
     o "... Expression", -> type: 'spread', arg: $2, prefix: yes, pos: '@$'
   ]
-  
+
   # JS passthrough (backticks)
   JSLiteral: [
     o "JS", -> type: 'js', code: $1, pos: '@$'
   ]
-  
+
   # Regex with interpolation
   RegexWithInterpolations: [
-    o "REGEX_START Invocation REGEX_END", -> 
+    o "REGEX_START Invocation REGEX_END", ->
       type: 'regex-template', pattern: $2, pos: '@$'
   ]
-  
+
   # Meta properties (new.target, import.meta)
   MetaProperty: [
     o "NEW_TARGET", -> type: 'meta', meta: 'new', prop: 'target', pos: '@$'
     o "IMPORT_META", -> type: 'meta', meta: 'import', prop: 'meta', pos: '@$'
   ]
-  
+
   # Tagged template literals
   TaggedTemplate: [
     o "Value String", -> type: 'tagged', tag: $1, template: $2, pos: '@$'
   ]
-  
+
   # Dynamic import
   DynamicImport: [
     o "DYNAMIC_IMPORT Arguments", -> type: 'dynamic-import', args: $2, pos: '@$'
   ]
-  
+
   # Array elisions (holes)
   Elision: [
     o ",", -> type: 'elision', pos: '@$'
   ]
-  
+
   # =========================================================================
   # END OF ADVANCED FEATURES
   # =========================================================================
