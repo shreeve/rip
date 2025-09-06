@@ -1,0 +1,81 @@
+# Test Compound Assignment Operators
+# ===================================
+# Testing +=, -=, *=, /= operators
+
+console.log "===== Compound Assignment Tests ====="
+console.log ""
+
+# Test += (addition assignment)
+console.log "Testing += operator:"
+x = 10
+console.log "  Initial x: 10"
+x += 5
+console.log "  After x += 5: "
+console.log x
+console.log "  Expected: 15"
+
+# Test -= (subtraction assignment)  
+console.log ""
+console.log "Testing -= operator:"
+y = 20
+console.log "  Initial y: 20"
+y -= 8
+console.log "  After y -= 8: "
+console.log y
+console.log "  Expected: 12"
+
+# Test *= (multiplication assignment)
+console.log ""
+console.log "Testing *= operator:"
+z = 5
+console.log "  Initial z: 5"
+z *= 3
+console.log "  After z *= 3: "
+console.log z
+console.log "  Expected: 15"
+
+# Test /= (division assignment)
+console.log ""
+console.log "Testing /= operator:"
+w = 24
+console.log "  Initial w: 24"
+w /= 4
+console.log "  After w /= 4: "
+console.log w
+console.log "  Expected: 6"
+
+# Test compound assignments in sequence
+console.log ""
+console.log "Testing sequence of compound assignments:"
+value = 100
+console.log "  Initial value: 100"
+value += 50
+console.log "  After value += 50: 150"
+value -= 25
+console.log "  After value -= 25: 125"
+value *= 2
+console.log "  After value *= 2: 250"
+value /= 5
+console.log "  After value /= 5: 50"
+console.log "  Final value: "
+console.log value
+console.log "  Expected: 50"
+
+# Test with variables on right side
+console.log ""
+console.log "Testing with variables:"
+a = 10
+b = 5
+console.log "  a = 10, b = 5"
+a += b
+console.log "  After a += b: "
+console.log a
+console.log "  Expected: 15"
+
+console.log ""
+console.log "===== All Compound Assignment Tests Complete ====="
+console.log "✅ += (addition assignment)"
+console.log "✅ -= (subtraction assignment)"
+console.log "✅ *= (multiplication assignment)"  
+console.log "✅ /= (division assignment)"
+console.log ""

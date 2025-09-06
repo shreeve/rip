@@ -148,10 +148,10 @@ grammar =
     Assign: [
       o "Assignable = Expression"               , -> type: 'assign', left: $1, right: $3    # ✅
       o "Assignable = INDENT Expression OUTDENT", -> type: 'assign', left: $1, right: $4
-      o "Assignable += Expression"              , -> type: 'assign', left: $1, right: $3, op: '+='
-      o "Assignable -= Expression"              , -> type: 'assign', left: $1, right: $3, op: '-='
-      o "Assignable *= Expression"              , -> type: 'assign', left: $1, right: $3, op: '*='
-      o "Assignable /= Expression"              , -> type: 'assign', left: $1, right: $3, op: '/='
+      o "Assignable += Expression"              , -> type: 'assign', left: $1, right: $3, op: '+='  # ✅
+      o "Assignable -= Expression"              , -> type: 'assign', left: $1, right: $3, op: '-='  # ✅
+      o "Assignable *= Expression"              , -> type: 'assign', left: $1, right: $3, op: '*='  # ✅
+      o "Assignable /= Expression"              , -> type: 'assign', left: $1, right: $3, op: '/='  # ✅
     ]
 
     Assignable: [

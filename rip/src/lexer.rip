@@ -189,8 +189,8 @@ class Lexer
 
   # Match literal tokens (operators and punctuation)
   literalToken: ->
-    # Two-character operators
-    if match = /^(->|=>|==|!=|<=|>=|&&|\|\||\.\.|\.\.\.)/.exec @chunk
+    # Two-character operators (including compound assignments)
+    if match = /^(->|=>|==|!=|<=|>=|&&|\|\||\.\.|\.\.\.|[+\-*/]=)/.exec @chunk
       tag = switch match[0]
         when "->" then "->"
         when "=>" then "=>"
@@ -202,6 +202,10 @@ class Lexer
         when "||" then "||"
         when ".." then ".."
         when "..." then "..."
+        when "+=" then "+="
+        when "-=" then "-="
+        when "*=" then "*="
+        when "/=" then "/="
         else match[0]
 
       @token tag, match[0]

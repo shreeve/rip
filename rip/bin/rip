@@ -49,13 +49,21 @@ class SimpleParser {
         continue;
       }
 
-      // Assignment: ID = EXPR
-      if (i + 2 < tokens.length && tokens[i+1].type === '=') {
+      // Assignment: ID = EXPR or ID += EXPR, etc.
+      if (i + 2 < tokens.length && 
+          (tokens[i+1].type === '=' || tokens[i+1].type === '+=' || 
+           tokens[i+1].type === '-=' || tokens[i+1].type === '*=' || 
+           tokens[i+1].type === '/=')) {
+        const op = tokens[i+1].type;
         const stmt = {
           type: 'assign',
           target: { type: 'id', name: token.value },
           value: this.parseExpr(tokens, i + 2)
         };
+        // Add op field for compound assignments
+        if (op !== '=') {
+          stmt.op = op;
+        }
         stmts.push({ type: 'stmt', expr: stmt });
 
         while (i < tokens.length && tokens[i].type !== 'TERMINATOR' && tokens[i].type !== 'EOF') {
