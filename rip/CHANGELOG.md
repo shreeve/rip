@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 📊 Test Suite Recovery
 - **Before**: Tests couldn't run due to `SyntaxError: Only one 'default' export is allowed`
-- **After**: 
+- **After**:
   - ✅ **39 tests passing** (up from 17)
   - ❌ **8 tests failing** (down from 14) - expected due to SimpleParser limitations
   - 🚀 **90 expect() calls** executing successfully
