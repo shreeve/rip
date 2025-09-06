@@ -35,11 +35,11 @@ export function showError(source, node, message) {
     console.error(`Error: ${message}`);
     return;
   }
-  
+
   const [line, col] = node.loc;
   const lines = source.split('\n');
   const errorLine = lines[line - 1];
-  
+
   console.error(`Error: ${message}`);
   console.error(`  Line ${line}, Column ${col}:`);
   console.error(`    ${errorLine}`);
@@ -62,11 +62,11 @@ export function formatError(source, loc, message) {
   const lines = source.split('\n');
   const errorLine = lines[line - 1] || '';
   const pointer = ' '.repeat(col) + '^';
-  
+
   return `
 Error: ${message}
   at ${formatLoc(loc)}
-  
+
   ${line} | ${errorLine}
   ${' '.repeat(String(line).length + 3)}${pointer}
 `;
