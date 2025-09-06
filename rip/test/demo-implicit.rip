@@ -1,0 +1,18 @@
+# Demo: Implicit function calls in Rip!
+
+console.log "🚀 Rip supports implicit function calls!"
+console.log 42
+console.log "No parentheses needed!"
+
+# Works with variables too
+message = "Hello from Rip!"
+console.log message
+
+# And with expressions
+x = 10
+y = 20
+console.log x
+console.log y
+
+# Even method chaining
+console.log "✨ Clean syntax!"
