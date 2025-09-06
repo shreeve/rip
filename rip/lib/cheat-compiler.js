@@ -5,7 +5,7 @@
 import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import MinimalLexer from './minimal-lexer.js';
+import MinimalLexer from './lexer-minimal.js';
 
 export class CheatCompiler {
   constructor(options = {}) {

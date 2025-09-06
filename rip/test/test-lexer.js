@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Test our minimal lexer
 
-import MinimalLexer from '../lib/minimal-lexer.js';
+import MinimalLexer from '../lib/lexer-minimal.js';
 
 const lexer = new MinimalLexer();
 

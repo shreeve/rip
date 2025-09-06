@@ -3,14 +3,13 @@
 
 import Solar from '../lib/solar.js';
 import { grammar } from '../lib/grammar.js';
-import * as nodes from '../lib/nodes.js';
 
 console.log('Testing Solar Parser Generator');
 console.log('==============================');
 console.log('');
 
-// Add nodes to grammar
-grammar.yy = nodes;
+// No need for nodes - we use simple objects!
+// grammar.yy = {};  // Would be set if needed
 
 try {
   console.log('Creating generator...');

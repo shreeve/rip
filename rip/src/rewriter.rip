@@ -1,0 +1,239 @@
+# Rip Rewriter - Essential token stream transformations
+# Makes Rip feel natural by adding implicit syntax
+
+class Rewriter
+  constructor: ->
+    @tokens = []
+    @stack = []  # Track nesting for implicit calls/objects
+  
+  # Main rewrite pipeline - order matters!
+  rewrite: (tokens) ->
+    @tokens = tokens
+    @removeLeadingNewlines()
+    @tagPostfixConditionals()
+    @addImplicitBracesAndParens()
+    @normalizeLines()
+    @tokens
+  
+  # Scan tokens with ability to insert/remove
+  scanTokens: (fn) ->
+    i = 0
+    while i < @tokens.length
+      delta = fn.call(this, @tokens[i], i, @tokens)
+      i += delta
+    true
+  
+  # Find matching end of balanced expression
+  detectEnd: (start, condition, action) ->
+    levels = 0
+    i = start
+    
+    EXPRESSION_START = ['INDENT', '(', '[', '{', 'CALL_START', 'INDEX_START']
+    EXPRESSION_END   = ['OUTDENT', ')', ']', '}', 'CALL_END', 'INDEX_END']
+    
+    while i < @tokens.length
+      token = @tokens[i]
+      
+      # Check end condition at depth 0
+      if levels is 0 and condition.call(this, token, i)
+        return action.call(this, token, i) if action
+        return i
+      
+      # Track nesting depth
+      if token.type in EXPRESSION_START
+        levels += 1
+      else if token.type in EXPRESSION_END
+        levels -= 1
+      
+      return i if levels < 0
+      i += 1
+    i
+  
+  # Helper to get token type at index
+  tag: (i) -> @tokens[i]?.type
+  
+  # Generate a synthetic token
+  generate: (type, value = '') ->
+    {type, value, generated: true, line: 0, column: 0}
+  
+  # Remove leading newlines (they confuse the grammar)
+  removeLeadingNewlines: ->
+    while @tokens[0]?.type is 'TERMINATOR'
+      @tokens.shift()
+    true
+  
+  # Tag postfix conditionals so grammar can handle them differently
+  tagPostfixConditionals: ->
+    @scanTokens (token, i, tokens) =>
+      return 1 unless token.type in ['IF', 'UNLESS']
+      
+      # Check if this is postfix by looking backward
+      prev = tokens[i - 1]
+      if prev and prev.type not in ['TERMINATOR', 'INDENT', 'OUTDENT', 'THEN', null]
+        # Look forward to see if there's a block
+        next = tokens[i + 1]
+        unless next?.type in ['INDENT', 'THEN']
+          token.type = 'POST_' + token.type
+      
+      1
+  
+  # The big one - add implicit calls and objects
+  addImplicitBracesAndParens: ->
+    # Track what we're inside of
+    stack = []
+    
+    # Tokens that can be implicitly called
+    IMPLICIT_FUNC = ['IDENTIFIER', 'PROPERTY', ')', ']', 'THIS', 'SUPER']
+    
+    # Tokens that can be arguments to implicit calls  
+    IMPLICIT_CALL = [
+      'IDENTIFIER', 'NUMBER', 'STRING', 'REGEX', 
+      'BOOL', 'NULL', 'UNDEFINED',
+      'THIS', 'SUPER', '@',
+      '(', '[', '{',
+      'IF', 'UNLESS', 'FOR', 'WHILE', 'SWITCH', 'TRY',
+      '->', '=>'
+    ]
+    
+    # Don't start implicit calls in these contexts
+    IMPLICIT_BLOCK = ['IF', 'UNLESS', 'FOR', 'WHILE', 'SWITCH', 'CATCH', 'FINALLY']
+    
+    # Tokens that end implicit calls
+    IMPLICIT_END = ['TERMINATOR', 'OUTDENT', 'POST_IF', 'POST_UNLESS', ',', ')', ']', '}']
+    
+    @scanTokens (token, i, tokens) =>
+      prev = tokens[i - 1] if i > 0
+      next = tokens[i + 1]
+      nextNext = tokens[i + 2]
+      
+      # Check for implicit function call
+      if token.type in IMPLICIT_FUNC and next?.type in IMPLICIT_CALL
+        # Don't add implicit call if:
+        # 1. We're in a control flow condition
+        # 2. Next is a comma (we're in a list)
+        # 3. Already has explicit parens
+        # 4. We're on different lines (unless indented)
+        
+        # Check for control flow
+        isControl = false
+        for j in [i-1..0] by -1
+          if tokens[j].type in IMPLICIT_BLOCK
+            isControl = true
+            break
+          break if tokens[j].type in ['TERMINATOR', 'INDENT', 'OUTDENT']
+        
+        # Add implicit call if appropriate
+        if not isControl and next.type isnt ','
+          # For same line or indented block
+          if not next.newLine or nextNext?.type is 'INDENT'
+            # Insert CALL_START
+            callStart = @generate('CALL_START', '(')
+            tokens.splice i + 1, 0, callStart
+            stack.push ['CALL', i + 1]
+            
+            # Find where to end the call
+            endIdx = @detectEnd i + 2,
+              (t) -> t.type in IMPLICIT_END,
+              (t, j) -> j
+            
+            # Insert CALL_END
+            callEnd = @generate('CALL_END', ')')
+            tokens.splice endIdx, 0, callEnd
+            
+            return 2
+      
+      # Check for implicit object
+      # This happens with patterns like:
+      #   func
+      #     a: 1
+      #     b: 2
+      # or inline: {a: 1, b: 2}
+      if token.type is ':' and prev?.type is 'IDENTIFIER'
+        # Look backwards to see if we need to open an object
+        needsOpen = true
+        
+        # Check if we're already in an explicit object
+        for j in [i-1..0] by -1
+          if tokens[j].type is '{'
+            needsOpen = false
+            break
+          break if tokens[j].type in ['TERMINATOR', 'INDENT', '=', '(']
+        
+        if needsOpen
+          # Find where to insert the opening brace
+          insertIdx = i - 1
+          
+          # Move back past the key
+          while insertIdx > 0 and tokens[insertIdx - 1].type not in ['TERMINATOR', 'INDENT', '=', '(', ',']
+            insertIdx -= 1
+          
+          # Insert opening brace
+          openBrace = @generate('{', '{')
+          tokens.splice insertIdx, 0, openBrace
+          stack.push ['OBJECT', insertIdx]
+          
+          # Find where to close
+          endIdx = @detectEnd i + 2,  # +2 because we inserted one token
+            (t) -> t.type in ['TERMINATOR', 'OUTDENT', ')', ']', '}'],
+            (t, j) -> j
+          
+          # Insert closing brace
+          closeBrace = @generate('}', '}')
+          tokens.splice endIdx, 0, closeBrace
+          
+          return 2
+      
+      # Close implicit calls/objects when appropriate
+      if stack.length > 0 and token.type in IMPLICIT_END
+        while stack.length > 0
+          [type, startIdx] = stack[stack.length - 1]
+          
+          # Check if we should close this level
+          if type is 'CALL'
+            # Already handled by insertion above
+            stack.pop()
+          else if type is 'OBJECT'
+            # Already handled by insertion above
+            stack.pop()
+          else
+            break
+      
+      1
+  
+  # Add INDENT/OUTDENT for single-line blocks
+  normalizeLines: ->
+    # Tokens that should have blocks after them
+    SINGLE_LINERS = ['ELSE', '->', '=>', 'TRY', 'FINALLY', 'THEN', 'CATCH']
+    
+    @scanTokens (token, i, tokens) =>
+      return 1 unless token.type in SINGLE_LINERS
+      
+      next = tokens[i + 1]
+      
+      # Skip if already has indent or is end of line
+      return 1 if not next or next.type in ['INDENT', 'TERMINATOR', 'OUTDENT']
+      
+      # Special case: ELSE IF should not get wrapped
+      return 1 if token.type is 'ELSE' and next.type is 'IF'
+      
+      # Insert INDENT after this token
+      indent = @generate('INDENT', 2)
+      tokens.splice i + 1, 0, indent
+      
+      # Find where to OUTDENT
+      endIdx = @detectEnd i + 2,
+        (t) -> t.type in ['TERMINATOR', 'OUTDENT', 'ELSE', 'CATCH', 'FINALLY'],
+        (t, j) -> j
+      
+      # Insert OUTDENT
+      outdent = @generate('OUTDENT', 2)
+      if tokens[endIdx - 1]?.type is 'TERMINATOR'
+        # Insert before the terminator
+        tokens.splice endIdx - 1, 0, outdent
+      else
+        tokens.splice endIdx, 0, outdent
+      
+      2
+
+export default Rewriter
+export { Rewriter }
