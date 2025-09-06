@@ -1,14 +1,19 @@
 # Rip Grammar for Solar Parser Generator
 # Uses string-based actions that Solar can process
 
-o = (pattern, action = "$$ = $1") ->
-  [pattern, action]
+o = (pattern, action = "$$ = $1", prec) ->
+  if prec
+    [pattern, action, {prec}]
+  else
+    [pattern, action]
 
 binOp = (ripOp, jsOp = ripOp) ->
-  o "Expression #{ripOp} Expression", "$$ = {type: 'op', op: '#{jsOp}', left: $1, right: $3}"
+  action = "$$ = {type: 'op', op: '" + jsOp + "', left: $1, right: $3}"
+  o "Expression #{ripOp} Expression", action, ripOp
 
 unOp = (ripOp, jsOp = ripOp) ->
-  o "#{ripOp} Expression", "$$ = {type: 'unary', op: '#{jsOp}', expr: $2}"
+  action = "$$ = {type: 'unary', op: '" + jsOp + "', expr: $2}"
+  o "#{ripOp} Expression", action, ripOp
 
 grammar =
 
@@ -54,9 +59,9 @@ grammar =
     ]
 
     Expression: [
-      o "Assign", "$$ = $1"
-      o "Operation", "$$ = $1"
       o "Value", "$$ = $1"
+      o "Assign", "$$ = $1", '='
+      o "Operation", "$$ = $1"
       o "Code", "$$ = $1"
       o "If", "$$ = $1"
       o "For", "$$ = $1"
@@ -131,12 +136,12 @@ grammar =
     ]
 
     Assign: [
-      o "Assignable = Expression"               , "$$ = {type: 'assign', target: $1, value: $3}"
-      o "Assignable = INDENT Expression OUTDENT", "$$ = {type: 'assign', target: $1, value: $4}"
-      o "Assignable += Expression"              , "$$ = {type: 'assign', target: $1, value: $3, op: '+='}"
-      o "Assignable -= Expression"              , "$$ = {type: 'assign', target: $1, value: $3, op: '-='}"
-      o "Assignable *= Expression"              , "$$ = {type: 'assign', target: $1, value: $3, op: '*='}"
-      o "Assignable /= Expression"              , "$$ = {type: 'assign', target: $1, value: $3, op: '/='}"
+      o "Assignable = Expression"               , "$$ = {type: 'assign', target: $1, value: $3}", '='
+      o "Assignable = INDENT Expression OUTDENT", "$$ = {type: 'assign', target: $1, value: $4}", '='
+      o "Assignable += Expression"              , "$$ = {type: 'assign', target: $1, value: $3, op: '+='}", '+='
+      o "Assignable -= Expression"              , "$$ = {type: 'assign', target: $1, value: $3, op: '-='}", '-='
+      o "Assignable *= Expression"              , "$$ = {type: 'assign', target: $1, value: $3, op: '*='}", '*='
+      o "Assignable /= Expression"              , "$$ = {type: 'assign', target: $1, value: $3, op: '/='}", '/='
     ]
 
     Assignable: [

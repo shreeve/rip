@@ -12,7 +12,7 @@
   // ==============================================================================
 
 // Terminal symbols (tokens, cannot be expanded)
-var Generator, Item, LRState, Nonterminal, Production, Solar, Terminal, arg, error, fs, generator, grammar, grammarFile, i, options, parserCode, path, showHelp, showStats,
+var Generator, Item, LRState, Nonterminal, Production, Solar, Terminal,
   hasProp = {}.hasOwnProperty;
 
 Terminal = class Terminal {
@@ -116,7 +116,7 @@ Generator = class Generator {
     });
   }
 
-
+  
     // ============================================================================
   // Helper Functions
   // ============================================================================
@@ -168,7 +168,7 @@ Generator = class Generator {
       "error": 2 // Add reserved symbols
     };
     symbolId = 3; // Next available symbol ID (after special symbols)
-
+    
     // Add symbol to symbol table if not already present
     addSymbol = (name) => {
       var id, symbol;
@@ -276,7 +276,7 @@ Generator = class Generator {
         }
       });
     }
-
+    
     // Transform $$ and positional references
     return action.replace(/([^'"])\$\$|^\$\$/g, '$1this.$').replace(/@[0$]/g, "this._$").replace(/\$(-?\d+)/g, function(_, n) { // Like $$var // Like @var
       return "$$[$0" + (parseInt(n, 10) - rhs.length || '') + "]"; // Like $1
@@ -404,7 +404,7 @@ Generator = class Generator {
     closureSet = new LRState();
     workingSet = new Set(itemSet.items);
     itemCores = new Map(); // item.id -> item
-
+    
       // Process all items
     while (workingSet.size > 0) {
       newItems = new Set();
@@ -519,7 +519,7 @@ Generator = class Generator {
     return this._assignItemLookaheads(); // FOLLOW(A) → item lookaheads
   }
 
-
+  
     // Determine nullable symbols (can derive ε)
   _computeNullableSets() {
     var changed, j, len1, nonterminal, production, ref, results, symbol;
@@ -1146,7 +1146,7 @@ return new Parser;
           stk.push(newState);
           break;
         case 3: // accept
-          return val[1];
+          return true;
       }
     }
   }
@@ -1188,145 +1188,117 @@ Solar.Parser = function(grammar, options) {
   return generator.createParser();
 };
 
-Solar.Generator = function(g, options) {
-  return new Generator(g, Object.assign({}, g.options, options));
+Solar.Generator = Generator;
+
+Solar.createParser = function(grammar, options) {
+  var generator;
+  generator = new Generator(grammar, options);
+  return generator.createParser();
 };
 
-Solar.Parser = function(grammar, options) {
-  var generator;
-  generator = Solar.Generator(grammar, options);
-  return generator.createParser();
+export default Solar;
+
+export {
+  Generator,
+  Solar
 };
 
 // ==============================================================================
 // CLI Interface (disabled for ESM)
 // ==============================================================================
-/*
-if (require.main === module) {
-  fs = require('fs');
-  path = require('path');
-  showHelp = function() {
-    return console.log(`Solar - SLR(1) Parser Generator
-===============================
+/* Disabled for ESM
+if require.main is module
+  fs = require 'fs'
+  path = require 'path'
 
-Usage: coffee solar.coffee [options] [grammar-file]
+  showHelp = ->
+    console.log """
+    Solar - SLR(1) Parser Generator
+    ===============================
 
-Options:
-  -h, --help              Show this help
-  -s, --stats             Show grammar statistics
-  -g, --generate          Generate parser (default)
-  -o, --output <file>     Output file (default: parser.js)
-  -c, --compress          Compress parser with Brotli (requires Brotli support)
-  -v, --verbose           Verbose output
+    Usage: coffee solar.coffee [options] [grammar-file]
 
-Examples:
-  coffee solar.coffee grammar.coffee
-  coffee solar.coffee --stats grammar.coffee
-  coffee solar.coffee -c -o parser.js grammar.coffee
-  coffee solar.coffee --compress --output parser.js grammar.coffee`);
-  };
-  showStats = function(generator) {
-    var conflicts, nonterminals, productions, ref, ref1, states, terminals;
-    terminals = Object.keys(generator.terminalNames || {}).length;
-    nonterminals = Object.keys(generator.nonterminals || {}).length;
-    productions = ((ref = generator.productions) != null ? ref.length : void 0) || 0;
-    states = ((ref1 = generator.states) != null ? ref1.length : void 0) || 0;
-    conflicts = generator.conflicts || 0;
-    return console.log(`
-⏱️ Statistics:
-• Terminals: ${terminals}
-• Nonterminals: ${nonterminals}
-• Productions: ${productions}
-• States: ${states}
-• Conflicts: ${conflicts}`);
-  };
-  // Parse command line
-  options = {
-    help: false,
-    stats: false,
-    generate: false,
-    output: 'parser.js',
-    verbose: false,
-    compress: false
-  };
-  grammarFile = null;
-  i = 0;
-  while (i < process.argv.length - 2) {
-    arg = process.argv[i + 2];
-    switch (arg) {
-      case '-h':
-      case '--help':
-        options.help = true;
-        break;
-      case '-s':
-      case '--stats':
-        options.stats = true;
-        break;
-      case '-g':
-      case '--generate':
-        options.generate = true;
-        break;
-      case '-o':
-      case '--output':
-        options.output = process.argv[++i + 2];
-        break;
-      case '-v':
-      case '--verbose':
-        options.verbose = true;
-        break;
-      case '-c':
-      case '--compress':
-        options.compress = true;
-        break;
-      default:
-        if (!arg.startsWith('-')) {
-          grammarFile = arg;
-        }
-    }
-    i++;
-  }
-  if (options.help || !grammarFile) {
-    showHelp();
-    process.exit(0);
-  }
-  try {
-    if (!fs.existsSync(grammarFile)) {
-      console.error(`Grammar file not found: ${grammarFile}`);
-      process.exit(1);
-    }
-    // Load grammar
-    grammar = (function() {
-      if (grammarFile.endsWith('.coffee')) {
-        return require(path.resolve(grammarFile));
-      } else if (grammarFile.endsWith('.json')) {
-        return JSON.parse(fs.readFileSync(grammarFile, 'utf8'));
-      } else {
-        throw new Error("Unsupported format. Use .coffee or .json");
-      }
-    })();
-    if (!grammar) {
-      throw new Error("Failed to load grammar");
-    }
-    // Generate parser
-    generator = new Generator(grammar, options);
-    if (options.stats) {
-      showStats(generator);
-    }
-    if (options.generate || !options.stats) {
-      parserCode = generator.generate();
-      fs.writeFileSync(options.output, parserCode);
-      console.log(`\nParser generated: ${options.output}`);
-    }
-  } catch (error1) {
-    error = error1;
-    console.error("Error:", error.message);
-    if (options.verbose) {
-      console.error(error.stack);
-    }
-    process.exit(1);
-  }
-}
-*/
+    Options:
+      -h, --help              Show this help
+      -s, --stats             Show grammar statistics
+      -g, --generate          Generate parser (default)
+      -o, --output <file>     Output file (default: parser.js)
+      -c, --compress          Compress parser with Brotli (requires Brotli support)
+      -v, --verbose           Verbose output
 
-export default Solar;
-export { Solar };
+    Examples:
+      coffee solar.coffee grammar.coffee
+      coffee solar.coffee --stats grammar.coffee
+      coffee solar.coffee -c -o parser.js grammar.coffee
+      coffee solar.coffee --compress --output parser.js grammar.coffee
+    """
+
+  showStats = (generator) ->
+    terminals = Object.keys(generator.terminalNames or {}).length
+    nonterminals = Object.keys(generator.nonterminals or {}).length
+    productions = generator.productions?.length or 0
+    states = generator.states?.length or 0
+    conflicts = generator.conflicts or 0
+
+    console.log """
+
+    ⏱️ Statistics:
+    • Terminals: #{terminals}
+    • Nonterminals: #{nonterminals}
+    • Productions: #{productions}
+    • States: #{states}
+    • Conflicts: #{conflicts}
+    """
+
+ * Parse command line
+  options = {help: false, stats: false, generate: false, output: 'parser.js', verbose: false, compress: false}
+  grammarFile = null
+
+  i = 0
+  while i < process.argv.length - 2
+    arg = process.argv[i + 2]
+    switch arg
+      when '-h', '--help'     then options.help     = true
+      when '-s', '--stats'    then options.stats    = true
+      when '-g', '--generate' then options.generate = true
+      when '-o', '--output'   then options.output   = process.argv[++i + 2]
+      when '-v', '--verbose'  then options.verbose  = true
+      when '-c', '--compress' then options.compress = true
+      else grammarFile = arg unless arg.startsWith('-')
+    i++
+
+  if options.help or not grammarFile
+    showHelp()
+    process.exit 0
+
+  try
+    unless fs.existsSync grammarFile
+      console.error "Grammar file not found: #{grammarFile}"
+      process.exit 1
+
+ * Load grammar
+    grammar = if grammarFile.endsWith('.coffee')
+      require(path.resolve(grammarFile))
+    else if grammarFile.endsWith('.json')
+      JSON.parse fs.readFileSync(grammarFile, 'utf8')
+    else
+      throw new Error "Unsupported format. Use .coffee or .json"
+    unless grammar
+      throw new Error "Failed to load grammar"
+
+ * Generate parser
+    generator = new Generator grammar, options
+
+    if options.stats
+      showStats generator
+
+    if options.generate or not options.stats
+      parserCode = generator.generate()
+      fs.writeFileSync options.output, parserCode
+      console.log "\nParser generated: #{options.output}"
+
+  catch error
+    console.error "Error:", error.message
+    console.error error.stack if options.verbose
+    process.exit 1
+ */

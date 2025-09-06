@@ -840,25 +840,26 @@ class Generator
 # Exports
 # ==============================================================================
 
-Solar = exports.Solar = exports
+Solar = {}
 
 Solar.Parser = (grammar, options) ->
   generator = new Generator grammar, options
   generator.createParser()
 
-exports.Generator = Generator
+Solar.Generator = Generator
 
-Solar.Generator = (g, options) ->
-  new Generator g, Object.assign({}, g.options, options)
-
-exports.Parser = (grammar, options) ->
-  generator = Solar.Generator grammar, options
+Solar.createParser = (grammar, options) ->
+  generator = new Generator grammar, options
   generator.createParser()
 
+export default Solar
+export { Generator, Solar }
+
 # ==============================================================================
-# CLI Interface
+# CLI Interface (disabled for ESM)
 # ==============================================================================
 
+### Disabled for ESM
 if require.main is module
   fs = require 'fs'
   path = require 'path'
@@ -953,3 +954,4 @@ if require.main is module
     console.error "Error:", error.message
     console.error error.stack if options.verbose
     process.exit 1
+###

@@ -3,19 +3,19 @@
   // Multi-runtime support: Bun (primary), Deno, Node.js, Browser
 export {
   Compiler
-} from './compiler.rip';
+} from './compiler.js';
 
 export {
   Lexer
-} from './lexer.rip';
+} from './lexer.js';
 
 export {
   Rewriter
-} from './rewriter.rip';
+} from './rewriter.js';
 
 export {
   default as Solar
-} from './solar.rip';
+} from './solar.js';
 
 export {
   version

@@ -3,16 +3,24 @@
 // Uses string-based actions that Solar can process
 var binOp, grammar, o, unOp;
 
-o = function(pattern, action = "$$ = $1") {
-  return [pattern, action];
+o = function(pattern, action = "$$ = $1", prec) {
+  if (prec) {
+    return [pattern, action, {prec}];
+  } else {
+    return [pattern, action];
+  }
 };
 
 binOp = function(ripOp, jsOp = ripOp) {
-  return o(`Expression ${ripOp} Expression`, `$$ = {type: 'op', op: '${jsOp}', left: $1, right: $3}`);
+  var action;
+  action = "$$ = {type: 'op', op: '" + jsOp + "', left: $1, right: $3}";
+  return o(`Expression ${ripOp} Expression`, action, ripOp);
 };
 
 unOp = function(ripOp, jsOp = ripOp) {
-  return o(`${ripOp} Expression`, `$$ = {type: 'unary', op: '${jsOp}', expr: $2}`);
+  var action;
+  action = "$$ = {type: 'unary', op: '" + jsOp + "', expr: $2}";
+  return o(`${ripOp} Expression`, action, ripOp);
 };
 
 grammar = {
@@ -23,7 +31,7 @@ grammar = {
     Body: [o("Line", "$$ = [$1]"), o("Body TERMINATOR Line", "$1.push($3); $$ = $1"), o("Body TERMINATOR", "$$ = $1")],
     Line: [o("Expression", "$$ = $1"), o("Statement", "$$ = $1"), o("", "$$ = null")],
     Statement: [o("Return", "$$ = $1"), o("Throw", "$$ = $1"), o("Break", "$$ = $1"), o("Continue", "$$ = $1"), o("Import", "$$ = $1"), o("Export", "$$ = $1")],
-    Expression: [o("Assign", "$$ = $1"), o("Operation", "$$ = $1"), o("Value", "$$ = $1"), o("Code", "$$ = $1"), o("If", "$$ = $1"), o("For", "$$ = $1"), o("While", "$$ = $1"), o("Try", "$$ = $1")],
+    Expression: [o("Value", "$$ = $1"), o("Assign", "$$ = $1", '='), o("Operation", "$$ = $1"), o("Code", "$$ = $1"), o("If", "$$ = $1"), o("For", "$$ = $1"), o("While", "$$ = $1"), o("Try", "$$ = $1")],
     Value: [o("Literal", "$$ = $1"), o("Identifier", "$$ = $1"), o("ThisProperty", "$$ = $1"), o("Array", "$$ = $1"), o("Object", "$$ = $1"), o("Parenthetical", "$$ = $1"), o("Range", "$$ = $1"), o("Invocation", "$$ = $1"), o("Member", "$$ = $1")],
     Literal: [o("NUMBER", "$$ = {type: 'num', val: $1}"), o("STRING", "$$ = {type: 'str', val: $1}"), o("BOOL", "$$ = {type: 'bool', val: $1}"), o("NULL", "$$ = {type: 'null'}"), o("UNDEFINED", "$$ = {type: 'undef'}"), o("REGEX", "$$ = {type: 'regex', val: $1}")],
     Identifier: [o("IDENTIFIER", "$$ = {type: 'id', name: $1}")],
@@ -34,7 +42,7 @@ grammar = {
     PropList: [o("Property", "$$ = [$1]"), o("PropList , Property", "$$ = $1.concat($3)"), o("PropList TERMINATOR Property", "$$ = $1.concat($3)")],
     Property: [o("IDENTIFIER : Expression", "$$ = {key: {type: 'id', name: $1}, val: $3}"), o("STRING : Expression", "$$ = {key: {type: 'str', val: $1}, val: $3}"), o("[ Expression ] : Expression", "$$ = {key: $2, val: $4, computed: true}"), o("IDENTIFIER", "$$ = {key: {type: 'id', name: $1}, val: {type: 'id', name: $1}, shorthand: true}")],
     Range: [o("[ Expression .. Expression ]", "$$ = {type: 'range', from: $2, to: $4, exclusive: false}"), o("[ Expression ... Expression ]", "$$ = {type: 'range', from: $2, to: $4, exclusive: true}")],
-    Assign: [o("Assignable = Expression", "$$ = {type: 'assign', target: $1, value: $3}"), o("Assignable = INDENT Expression OUTDENT", "$$ = {type: 'assign', target: $1, value: $4}"), o("Assignable += Expression", "$$ = {type: 'assign', target: $1, value: $3, op: '+='}"), o("Assignable -= Expression", "$$ = {type: 'assign', target: $1, value: $3, op: '-='}"), o("Assignable *= Expression", "$$ = {type: 'assign', target: $1, value: $3, op: '*='}"), o("Assignable /= Expression", "$$ = {type: 'assign', target: $1, value: $3, op: '/='}")],
+    Assign: [o("Assignable = Expression", "$$ = {type: 'assign', target: $1, value: $3}", '='), o("Assignable = INDENT Expression OUTDENT", "$$ = {type: 'assign', target: $1, value: $4}", '='), o("Assignable += Expression", "$$ = {type: 'assign', target: $1, value: $3, op: '+='}", '+='), o("Assignable -= Expression", "$$ = {type: 'assign', target: $1, value: $3, op: '-='}", '-='), o("Assignable *= Expression", "$$ = {type: 'assign', target: $1, value: $3, op: '*='}", '*='), o("Assignable /= Expression", "$$ = {type: 'assign', target: $1, value: $3, op: '/='}", '/=')],
     Assignable: [o("Identifier", "$$ = $1"), o("Member", "$$ = $1"), o("ThisProperty", "$$ = $1")],
     // Binary and unary operations
     Operation: [binOp("+"), binOp("-"), binOp("*"), binOp("/"), binOp("%"), binOp("**"), binOp("=="), binOp("!="), binOp("<"), binOp(">"), binOp("<="), binOp(">="), binOp("and", "&&"), binOp("or", "||"), binOp("is", "==="), binOp("isnt", "!=="), binOp("in"), binOp("of"), binOp("instanceof"), unOp("!"), unOp("not", "!"), unOp("-"), unOp("+"), unOp("typeof"), unOp("delete"), o("Expression ++", "$$ = {type: 'update', op: '++', expr: $1, prefix: false}"), o("Expression --", "$$ = {type: 'update', op: '--', expr: $1, prefix: false}"), o("++ Expression", "$$ = {type: 'update', op: '++', expr: $2, prefix: true}"), o("-- Expression", "$$ = {type: 'update', op: '--', expr: $2, prefix: true}"), o("Expression ? Expression : Expression", "$$ = {type: 'ternary', test: $1, then: $3, else: $5}")],
