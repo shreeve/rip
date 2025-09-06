@@ -190,7 +190,7 @@ test "object with methods", ->
     value: 0
     add: (n) -> @value += n
     get: -> @value
-  
+
   calculator.add(5)
   calculator.add(3)
   assert calculator.get() is 8
@@ -207,7 +207,7 @@ test "nested conditionals", ->
         "y big"
       else
         "both small"
-  
+
   assert getValue(15, 15) is "both big"
   assert getValue(15, 5) is "x big"
   assert getValue(5, 15) is "y big"
