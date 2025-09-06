@@ -2,7 +2,7 @@
 
 All notable changes to the Rip language will be documented in this file.
 
-## [3.0.0] - 2025-01-06 - 06:30 MST
+## [0.3.0] - 2025-01-06 - 06:30 MST
 
 ### 🌟 **SOLAR-IZED!** - Full Solar Parser Integration
 
