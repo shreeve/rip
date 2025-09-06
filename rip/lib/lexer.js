@@ -91,7 +91,7 @@ const Lexer = class Lexer {
           return "IN";
         case "of":
           return "OF";
-        
+
           // Boolean literals
         case "true":
         case "yes":
@@ -105,7 +105,7 @@ const Lexer = class Lexer {
           return "NULL";
         case "undefined":
           return "UNDEFINED";
-        
+
           // CoffeeScript aliases
         case "and":
           return "and";
@@ -118,7 +118,7 @@ const Lexer = class Lexer {
         case "isnt":
           return "isnt";
         default:
-          
+
           // Check if it's a property after dot
           prev = this.tokens[this.tokens.length - 1];
           if (prev && ((ref = prev[0]) === "." || ref === "?.")) {
@@ -128,7 +128,7 @@ const Lexer = class Lexer {
           }
       }
     }).call(this);
-    
+
     // For boolean literals, normalize the value
     value = tag === "BOOL" ? word === "true" || word === "yes" || word === "on" ? "true" : "false" : word;
     this.token(tag, value);
@@ -156,10 +156,10 @@ const Lexer = class Lexer {
     if (!(match = regex.exec(this.chunk))) {
       return 0;
     }
-    
+
     // Extract string content without quotes
     content = match[0].slice(1, -1);
-    
+
     // Basic escape sequence handling
     content = content.replace(/\\n/g, "\n");
     content = content.replace(/\\t/g, "\t");
@@ -179,7 +179,7 @@ const Lexer = class Lexer {
       // Skip comment, don't create token
       return match[0].length;
     }
-    
+
     // Block comment
     if (match = /^###([\s\S]*?)###/.exec(this.chunk)) {
       // Skip comment, don't create token
@@ -196,7 +196,7 @@ const Lexer = class Lexer {
     if (!(match = /^[ \t]+/.exec(this.chunk))) {
       return 0;
     }
-    
+
     // Mark previous token as spaced
     if (this.tokens.length > 0) {
       this.tokens[this.tokens.length - 1].spaced = true;
@@ -214,14 +214,14 @@ const Lexer = class Lexer {
     this.line++;
     indent = match[0].substring(1);
     this.column = indent.length + 1;
-    
+
     // Calculate indent level (convert tabs to spaces)
     size = 0;
     for (i = 0, len = indent.length; i < len; i++) {
       char = indent[i];
       size += char === "\t" ? 4 : 1;
     }
-    
+
     // Handle indent changes
     if (size > this.currentIndent) {
       diff = size - this.currentIndent;
@@ -275,7 +275,7 @@ const Lexer = class Lexer {
       this.token(tag, match[0]);
       return match[0].length;
     }
-    
+
     // Single character tokens
     char = this.chunk[0];
     tag = (function() {
@@ -328,7 +328,7 @@ const Lexer = class Lexer {
       this.token(tag, char);
       return 1;
     }
-    
+
     // Unknown character
     throw new Error(`Unexpected character '${char}' at line ${this.line}, column ${this.column}`);
   }
