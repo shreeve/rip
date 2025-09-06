@@ -5,6 +5,67 @@ All notable changes to the Rip language will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2025-01-01
+
+### 🎯 Test Suite & Organization Release
+
+This release establishes a comprehensive testing framework and improves project organization.
+
+### ✨ Added
+
+#### **Testing Infrastructure**
+- **Bun test framework integration** - Professional test suite with 31 tests
+- **Two-tier testing strategy**:
+  - `test/unit/` - JavaScript tests for compiler internals (lexer, rewriter, compiler, integration)
+  - `test/features/` - Rip tests for language features (math, functions, objects, control flow)
+- **Test helper module** - Shared utilities for ESM conversion and module loading
+- **Test runner for Rip files** - Execute `.rip` test files to verify language features
+- **Coverage and watch modes** - `bun test:watch` and `bun test:coverage` scripts
+
+#### **Examples & Documentation**
+- **Organized examples directory** with descriptive names:
+  - `hello-world.rip` - Classic first program
+  - `implicit-calls.rip` - Demonstrates implicit function calls
+  - `basic-features.rip` - Core language features
+  - `advanced-features.rip` - Classes, destructuring, higher-order functions
+- **README for examples** - Learning path and running instructions
+
+### 🔧 Changed
+
+#### **File Organization**
+- Renamed files for clarity and brevity:
+  - `implicit-function-calls.rip` → `implicit-calls.rip`
+  - `control-flow.rip` → `control.rip`
+  - `VICTORY.rip` → `basic-features.rip`
+  - `demo-rip-features.rip` → `advanced-features.rip`
+- Moved test files to structured directories (`test/unit/` and `test/features/`)
+- Cleaned up `tmp/` directory of old experiments
+
+#### **Package Scripts**
+- Updated test scripts in `package.json`:
+  - `test` - Run unit tests
+  - `test:unit` - Run JavaScript tests
+  - `test:features` - Run Rip language tests
+  - `test:all` - Run both test suites
+  - `test:watch` - Watch mode for development
+  - `test:coverage` - Generate coverage reports
+
+### 🐛 Fixed
+- Fixed typo in `bin/rip` (line 171) - stray `3` character
+- Resolved duplicate export issues in compiled modules
+- Fixed ESM conversion race conditions with lock file
+
+### 📊 Statistics
+- **17 unit tests passing** (14 pending features)
+- **4 feature test suites** ready for parser integration
+- **Test organization**: Clear separation between internal and feature tests
+- **Examples**: 4 well-documented example programs
+
+### 🎨 Philosophy Reinforced
+- **Testing at two levels**: Test the machinery (JS) and the experience (Rip)
+- **Self-documenting code**: File names clearly indicate purpose
+- **Clean structure**: Everything has its place
+
 ## [0.1.0] - 2025-09-06
 
 ### 🎉 Initial Release - "The Birth of Rip"
