@@ -270,7 +270,7 @@ echo 'console.log "test"' | node ./bin/coffee.js -c -s
 
 ### Current Working State
 - ✅ **Basic CoffeeScript → JavaScript compilation works**
-- ✅ **index.coffee is fully ESM-compatible** 
+- ✅ **index.coffee is fully ESM-compatible**
 - ✅ **Clean, unified directory structure**
 - ⚠️ **nodes.coffee still needs location data fixes**
 - ⚠️ **Test suite needs adaptation for ESM**

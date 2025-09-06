@@ -30,7 +30,7 @@ export run = (code, options = {}) ->
 # The CoffeeScript REPL uses this to run the input.
 export coffeeEval = (code, options = {}) ->
   return unless code = code.trim()
-  
+
   createContext = vm.Script.createContext ? vm.createContext
   isContext = vm.isContext ? (ctx) ->
     options.sandbox instanceof createContext().constructor
@@ -45,27 +45,27 @@ export coffeeEval = (code, options = {}) ->
     sandbox.global = sandbox.root = sandbox.GLOBAL = sandbox
   else
     sandbox = global
-  
+
   # Basic filename/dirname setup
   sandbox.__filename = options.filename || 'eval'
   sandbox.__dirname  = path.dirname sandbox.__filename
-  
+
   # Note: In ESM mode, we cannot provide CommonJS module/require in the sandbox
   # This functionality would need to be implemented differently for ESM
-  
+
   # Compile the code
   o = {}
   o[k] = v for own k, v of options
   o.bare = on # ensure return value
   js = CoffeeScript.compile code, o
-  
+
   # Execute in the appropriate context
   if sandbox is global
     vm.runInThisContext js
   else
     vm.runInContext js, sandbox
 
-export register = -> 
+export register = ->
   throw new Error "register() is not available in ESM mode. Use import syntax instead."
 
 # Note: require.extensions is not available in ESM
