@@ -15,12 +15,12 @@ All notable changes to the Rip language will be documented in this file.
   - Properly uses array token format (`token[0]` for type)
   - Checks `spaced` property for implicit function detection
   - Generates standard parentheses instead of special tokens
-  
+
 - **Solar parser integration complete**:
   - Parser returns proper AST from value stack
   - EOF token correctly maps to `$end` symbol
   - Lexer interface fully compatible with Solar
-  
+
 - **Compiler enhancements**:
   - Added `prop()` method for property access
   - Added `index()` method for array/object indexing
