@@ -10,10 +10,10 @@ assert = (condition) -> condition
 console.log "\n📦 Object & Array Tests:"
 
 test "object literals", ->
-  person = 
+  person =
     name: "Alice"
     age: 30
-  
+
   assert person.name is "Alice"
   assert person.age is 30
 
@@ -24,7 +24,7 @@ test "nested objects", ->
       port: 3000
     database:
       name: "mydb"
-  
+
   assert config.server.port is 3000
   assert config.database.name is "mydb"
 
@@ -33,7 +33,7 @@ test "object methods", ->
     value: 10
     add: (n) -> @value + n
     multiply: (n) -> @value * n
-  
+
   assert calculator.add(5) is 15
   assert calculator.multiply(3) is 30
 
@@ -50,7 +50,7 @@ test "array comprehensions", ->
 
 test "array destructuring", ->
   [first, second, ...rest] = [10, 20, 30, 40]
-  
+
   assert first is 10
   assert second is 20
   assert rest[0] is 30
@@ -58,14 +58,14 @@ test "array destructuring", ->
 
 test "object destructuring", ->
   {name, age} = {name: "Bob", age: 25, city: "NYC"}
-  
+
   assert name is "Bob"
   assert age is 25
 
 test "spread in objects", ->
   defaults = {a: 1, b: 2}
   custom = {...defaults, b: 3, c: 4}
-  
+
   assert custom.a is 1
   assert custom.b is 3
   assert custom.c is 4
