@@ -1,4 +1,4 @@
-<div align="center"><img src="assets/logo.png" style="height:75px" /><br></div>
+<div align="center"><img src="logo.png" style="height:75px" /><br></div>
 
 # Rip Language
 
