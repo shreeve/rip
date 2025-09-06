@@ -104,15 +104,15 @@ const {registerCompiled} = SourceMap;
 export {registerCompiled};
 `;
 
-fs.writeFileSync('lib-esm/coffeescript/coffeescript.js', esm);
+fs.writeFileSync('lib/coffeescript/coffeescript.js', esm);
 
 // 2. Fix nodes.js exports
 console.log('Fixing nodes.js...');
-let nodesCode = fs.readFileSync('lib-esm/coffeescript/nodes.js', 'utf8');
+let nodesCode = fs.readFileSync('lib/coffeescript/nodes.js', 'utf8');
 nodesCode = nodesCode.replace(/^exports\./gm, 'export const ');
 nodesCode = nodesCode.replace(/export const mergeLocationData = mergeLocationData = /g, 'mergeLocationData = ');
 nodesCode = nodesCode.replace(/export const mergeAstLocationData = mergeAstLocationData = /g, 'mergeAstLocationData = ');
 nodesCode = nodesCode.replace(/export const jisonLocationDataToAstLocationData = jisonLocationDataToAstLocationData = /g, 'jisonLocationDataToAstLocationData = ');
-fs.writeFileSync('lib-esm/coffeescript/nodes.js', nodesCode);
+fs.writeFileSync('lib/coffeescript/nodes.js', nodesCode);
 
 console.log('ESM build fixed!');

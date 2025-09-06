@@ -18,16 +18,16 @@
   },
   "type": "module",
   "directories": {
-    "lib": "./lib-esm/coffeescript"
+    "lib": "./lib/coffeescript"
   },
-  "main": "./lib-esm/index.js",
+  "main": "./lib/coffeescript/index.js",
   "exports": {
     ".": "./lib-esm/index.js",
     "./package.json": "./package.json"
   },
   "bin": {
-    "rip": "./bin/coffee-esm.js",
-    "rip-cake": "./bin/cake-esm.js"
+    "coffee": "./bin/coffee.js",
+    "cake": "./bin/cake.js"
   },
   "files": [
     "bin",

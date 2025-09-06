@@ -1,1 +1,1 @@
-console.log "Hello from ESM CoffeeScript!"
+console.log "Unified ESM works!"

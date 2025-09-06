@@ -1,4 +1,4 @@
-import * as CoffeeScript from './lib-esm/coffeescript/index.js';
+import * as CoffeeScript from './lib/coffeescript/index.js';
 import fs from 'fs';
 import path from 'path';
 

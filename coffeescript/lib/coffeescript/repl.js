@@ -41,26 +41,17 @@ replDefaults = {
   historyMaxInputSize: 10240,
   eval: function(input, context, filename, cb) {
     var ast, err, isAsync, js, ref, ref1, referencedVars, result, token, tokens;
-    // XXX: multiline hack.
     input = input.replace(/\uFF00/g, '\n');
-    // Node's REPL sends the input ending with a newline and then wrapped in
-    // parens. Unwrap all that.
     input = input.replace(/^\(([\s\S]*)\n\)$/m, '$1');
-    // Node's REPL v6.9.1+ sends the input wrapped in a try/catch statement.
-    // Unwrap that too.
     input = input.replace(/^\s*try\s*{([\s\S]*)}\s*catch.*$/m, '$1');
     try {
-      // Tokenize the clean input.
-      // AST nodes are now imported at the top level
       tokens = CoffeeScript.tokens(input);
-      // Filter out tokens generated just to hold comments.
       if (tokens.length >= 2 && tokens[0].generated && ((ref = tokens[0].comments) != null ? ref.length : void 0) !== 0 && `${tokens[0][1]}` === '' && tokens[1][0] === 'TERMINATOR') {
         tokens = tokens.slice(2);
       }
       if (tokens.length >= 1 && tokens[tokens.length - 1].generated && ((ref1 = tokens[tokens.length - 1].comments) != null ? ref1.length : void 0) !== 0 && `${tokens[tokens.length - 1][1]}` === '') {
         tokens.pop();
       }
-      // Collect referenced variable names just like in `CoffeeScript.compile`.
       referencedVars = (function() {
         var i, len, results;
         results = [];
@@ -72,14 +63,10 @@ replDefaults = {
         }
         return results;
       })();
-      // Generate the AST of the tokens.
       ast = CoffeeScript.nodes(tokens).body;
-      // Add assignment to `__` variable to force the input to be an expression.
       ast = new Block([new Assign(new Value(new Literal('__')), ast, '=')]);
-      // Wrap the expression in a closure to support top-level `await`.
       ast = new Code([], ast);
       isAsync = ast.isAsync;
-      // Invoke the wrapping closure.
       ast = new Root(new Block([new Call(ast)]));
       js = ast.compile({
         bare: true,
@@ -89,12 +76,9 @@ replDefaults = {
       });
       if (transpile) {
         js = transpile.transpile(js, transpile.options).code;
-        // Strip `"use strict"`, to avoid an exception on assigning to
-        // undeclared variable `__`.
         js = js.replace(/^"use strict"|^'use strict'/, '');
       }
       result = runInContext(js, context, filename);
-      // Await an async result, if necessary.
       if (isAsync) {
         result.then(function(resolvedResult) {
           if (!sawSIGINT) {
@@ -107,7 +91,6 @@ replDefaults = {
       }
     } catch (error) {
       err = error;
-      // AST's `compile` does not add source code information to syntax errors.
       updateSyntaxError(err, input);
       return cb(err);
     }
@@ -125,7 +108,6 @@ runInContext = function(js, context, filename) {
 addMultilineHandler = function(repl) {
   var inputStream, multiline, nodeLineListener, origPrompt, outputStream, ref;
   ({inputStream, outputStream} = repl);
-  // Node 0.11.12 changed API, prompt is now _prompt.
   origPrompt = (ref = repl._prompt) != null ? ref : repl.prompt;
   multiline = {
     enabled: false,
@@ -137,7 +119,6 @@ addMultilineHandler = function(repl) {
     }),
     buffer: ''
   };
-  // Proxy node's line listener
   nodeLineListener = repl.listeners('line')[0];
   repl.removeListener('line', nodeLineListener);
   repl.on('line', function(cmd) {
@@ -150,30 +131,25 @@ addMultilineHandler = function(repl) {
       nodeLineListener(cmd);
     }
   });
-  // Handle Ctrl-v
   return inputStream.on('keypress', function(char, key) {
     if (!(key && key.ctrl && !key.meta && !key.shift && key.name === 'v')) {
       return;
     }
     if (multiline.enabled) {
-      // allow arbitrarily switching between modes any time before multiple lines are entered
       if (!multiline.buffer.match(/\n/)) {
         multiline.enabled = !multiline.enabled;
         repl.setPrompt(origPrompt);
         repl.prompt(true);
         return;
       }
-      // no-op unless the current line is empty
       if ((repl.line != null) && !repl.line.match(/^\s*$/)) {
         return;
       }
-      // eval, print, loop
       multiline.enabled = !multiline.enabled;
       repl.line = '';
       repl.cursor = 0;
       repl.output.cursorTo(0);
       repl.output.clearLine(1);
-      // XXX: multiline hack
       multiline.buffer = multiline.buffer.replace(/\n/g, '\uFF00');
       repl.emit('line', multiline.buffer);
       multiline.buffer = '';
@@ -185,27 +161,21 @@ addMultilineHandler = function(repl) {
   });
 };
 
-// Store and load command history from a file
 addHistory = function(repl, filename, maxSize) {
   var buffer, fd, lastLine, readFd, size, stat;
   lastLine = null;
   try {
-    // Get file info and at most maxSize of command history
     stat = fs.statSync(filename);
     size = Math.min(maxSize, stat.size);
-    // Read last `size` bytes from the file
     readFd = fs.openSync(filename, 'r');
     buffer = Buffer.alloc(size);
     fs.readSync(readFd, buffer, 0, size, stat.size - size);
     fs.closeSync(readFd);
-    // Set the history on the interpreter
     repl.history = buffer.toString().split('\n').reverse();
     if (stat.size > maxSize) {
-      // If the history file was truncated we should pop off a potential partial line
       repl.history.pop();
     }
     if (repl.history[0] === '') {
-      // Shift off the final blank newline
       repl.history.shift();
     }
     repl.historyIndex = -1;
@@ -214,19 +184,16 @@ addHistory = function(repl, filename, maxSize) {
   fd = fs.openSync(filename, 'a');
   repl.addListener('line', function(code) {
     if (code && code.length && code !== '.history' && code !== '.exit' && lastLine !== code) {
-      // Save the latest command in the file
       fs.writeSync(fd, `${code}\n`);
       return lastLine = code;
     }
   });
-  // XXX: The SIGINT event from REPLServer is undocumented, so this is a bit fragile
   repl.on('SIGINT', function() {
     return sawSIGINT = true;
   });
   repl.on('exit', function() {
     return fs.closeSync(fd);
   });
-  // Add a command to show the history stack
   return repl.commands[getCommandId(repl, 'history')] = {
     help: 'Show command history',
     action: function() {
@@ -238,7 +205,6 @@ addHistory = function(repl, filename, maxSize) {
 
 getCommandId = function(repl, commandName) {
   var commandsHaveLeadingDot;
-  // Node 0.11 changed API, a command such as '.help' is now stored as 'help'
   commandsHaveLeadingDot = repl.commands['.help'] != null;
   if (commandsHaveLeadingDot) {
     return `.${commandName}`;
@@ -278,10 +244,6 @@ See https://coffeescript.org/#transpilation`);
     transpile.options = {
       filename: path.resolve(process.cwd(), '<repl>')
     };
-    // Since the REPL compilation path is unique (in `eval` above), we need
-    // another way to get the `options` object attached to a module so that
-    // it knows later on whether it needs to be transpiled. In the case of
-    // the REPL, the only applicable option is `transpile`.
     Module = require('module');
     originalModuleLoad = Module.prototype.load;
     Module.prototype.load = function(filename) {
@@ -305,7 +267,6 @@ See https://coffeescript.org/#transpilation`);
   if (opts.historyFile) {
     addHistory(repl, opts.historyFile, opts.historyMaxInputSize);
   }
-  // Adapt help inherited from the node REPL
   repl.commands[getCommandId(repl, 'load')].help = 'Load code from a file into this REPL session';
   return repl;
 };

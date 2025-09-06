@@ -1,9 +1,4 @@
-  // The CoffeeScript language has a good deal of optional syntax, implicit syntax,
-  // and shorthand syntax. This can greatly complicate a grammar and bloat
-  // the resulting parse table. Instead of making the parser handle it all, we take
-  // a series of passes over the token stream, using this **Rewriter** to convert
-  // shorthand into the unambiguous long form, add implicit indentation and
-  // parentheses, and generally clean things up.
+
 var BALANCED_PAIRS, CALL_CLOSERS, CONTROL_IN_IMPLICIT, DISCARDED, EXPRESSION_CLOSE, EXPRESSION_END, EXPRESSION_START, IMPLICIT_CALL, IMPLICIT_END, IMPLICIT_FUNC, IMPLICIT_UNSPACED_CALL, LINEBREAKS, SINGLE_CLOSERS, SINGLE_LINERS, generate, k, left, len, moveComments, right,
   indexOf = [].indexOf,
   hasProp = {}.hasOwnProperty;
@@ -13,7 +8,6 @@ import {
   extractAllCommentTokens
 } from './helpers.js';
 
-// Move attached comments from one token to another.
 moveComments = function(fromToken, toToken) {
   var comment, k, len, ref, unshiftedComments;
   if (!fromToken.comments) {
@@ -37,8 +31,6 @@ moveComments = function(fromToken, toToken) {
   return delete fromToken.comments;
 };
 
-// Create a generated token: one that exists due to a use of implicit syntax.
-// Optionally have this new token take the attached comments from another token.
 generate = function(tag, value, origin, commentsToken) {
   var token;
   token = [tag, value];
@@ -53,20 +45,10 @@ generate = function(tag, value, origin, commentsToken) {
 };
 
 export var Rewriter = (function() {
-  // The **Rewriter** class is used by the [Lexer](lexer.html), directly against
-  // its internal array of tokens.
   class Rewriter {
-    // Rewrite the token stream in multiple passes, one logical filter at
-    // a time. This could certainly be changed into a single pass through the
-    // stream, with a big ol’ efficient switch, but it’s much nicer to work with
-    // like this. The order of these passes matters—indentation must be
-    // corrected before implicit parentheses can be wrapped around blocks of code.
     rewrite(tokens1) {
       var ref, ref1, t;
       this.tokens = tokens1;
-      // Set environment variable `DEBUG_TOKEN_STREAM` to `true` to output token
-      // debugging info. Also set `DEBUG_REWRITTEN_TOKEN_STREAM` to `true` to
-      // output the token stream after it has been rewritten by this file.
       if (typeof process !== "undefined" && process !== null ? (ref = process.env) != null ? ref.DEBUG_TOKEN_STREAM : void 0 : void 0) {
         if (process.env.DEBUG_REWRITTEN_TOKEN_STREAM) {
           console.log('Initial token stream:');
@@ -110,11 +92,6 @@ export var Rewriter = (function() {
       return this.tokens;
     }
 
-    // Rewrite the token stream, looking one token ahead and behind.
-    // Allow the return value of the block to tell us how many tokens to move
-    // forwards (or backwards) in the stream, to make sure we don’t miss anything
-    // as tokens are inserted and removed, and the stream changes length under
-    // our feet.
     scanTokens(block) {
       var i, token, tokens;
       ({tokens} = this);
@@ -149,15 +126,12 @@ export var Rewriter = (function() {
       return i - 1;
     }
 
-    // Leading newlines would introduce an ambiguity in the grammar, so we
-    // dispatch them here.
     removeLeadingNewlines() {
       var i, k, l, leadingNewlineToken, len, len1, ref, ref1, tag;
       ref = this.tokens;
       for (i = k = 0, len = ref.length; k < len; i = ++k) {
         [tag] = ref[i];
         if (tag !== 'TERMINATOR') {
-          // Find the index of the first non-`TERMINATOR` token.
           break;
         }
       }
@@ -165,18 +139,13 @@ export var Rewriter = (function() {
         return;
       }
       ref1 = this.tokens.slice(0, i);
-      // If there are any comments attached to the tokens we’re about to discard,
-      // shift them forward to what will become the new first token.
       for (l = 0, len1 = ref1.length; l < len1; l++) {
         leadingNewlineToken = ref1[l];
         moveComments(leadingNewlineToken, this.tokens[i]);
       }
-      // Discard all the leading newline tokens.
       return this.tokens.splice(0, i);
     }
 
-    // The lexer has tagged the opening parenthesis of a method call. Match it with
-    // its paired close.
     closeOpenCalls() {
       var action, condition;
       condition = function(token, i) {
@@ -194,8 +163,6 @@ export var Rewriter = (function() {
       });
     }
 
-    // The lexer has tagged the opening bracket of an indexing operation call.
-    // Match it with its paired close.
     closeOpenIndexes() {
       var action, condition, startToken;
       startToken = null;
@@ -220,9 +187,6 @@ export var Rewriter = (function() {
       });
     }
 
-    // Match tags in token stream starting at `i` with `pattern`.
-    // `pattern` may consist of strings (equality), an array of strings (one of)
-    // or null (wildcard). Returns the index of the match or -1 if no match.
     indexOfTag(i, ...pattern) {
       var fuzz, j, k, ref, ref1;
       fuzz = 0;
@@ -240,8 +204,6 @@ export var Rewriter = (function() {
       return i + j + fuzz - 1;
     }
 
-    // Returns `yes` if standing in front of something looking like
-    // `@<x>:`, `<x>:` or `<EXPRESSION_START><x>...<EXPRESSION_END>:`.
     looksObjectish(j) {
       var end, index;
       if (this.indexOfTag(j, '@', null, ':') !== -1 || this.indexOfTag(j, null, ':') !== -1) {
@@ -263,9 +225,6 @@ export var Rewriter = (function() {
       return false;
     }
 
-    // Returns `yes` if current line of tokens contain an element of tags on same
-    // expression level. Stop searching at `LINEBREAKS` or explicit start of
-    // containing balanced expression.
     findTagsBackwards(i, tags) {
       var backStack, ref, ref1, ref2, ref3, ref4, ref5;
       backStack = [];
@@ -281,11 +240,8 @@ export var Rewriter = (function() {
       return ref5 = this.tag(i), indexOf.call(tags, ref5) >= 0;
     }
 
-    // Look for signs of implicit calls and objects in the token stream and
-    // add them.
     addImplicitBracesAndParens() {
       var stack, start;
-      // Track current balancing depth (both implicit and explicit) on stack.
       stack = [];
       start = null;
       return this.scanTokens(function(token, i, tokens) {
@@ -297,12 +253,9 @@ export var Rewriter = (function() {
           return stack[stack.length - 1];
         };
         startIdx = i;
-        // Helper function, used for keeping track of the number of tokens consumed
-        // and spliced, when returning for getting a new token.
         forward = function(n) {
           return i - startIdx + n;
         };
-        // Helper functions
         isImplicit = function(stackItem) {
           var ref;
           return stackItem != null ? (ref = stackItem[2]) != null ? ref.ours : void 0 : void 0;
@@ -322,8 +275,6 @@ export var Rewriter = (function() {
         inImplicitObject = function() {
           return isImplicitObject(stackTop());
         };
-        // Unclosed control statement inside implicit parens (like
-        // class declaration or if-conditionals).
         inImplicitControl = function() {
           var ref;
           return inImplicit() && ((ref = stackTop()) != null ? ref[0] : void 0) === 'CONTROL';
@@ -380,7 +331,6 @@ export var Rewriter = (function() {
           }
           return this.looksObjectish(nextTerminatorIdx + 1);
         };
-        // Don’t end an implicit call/object on next indent if any of these are in an argument/value.
         if ((inImplicitCall() || inImplicitObject()) && indexOf.call(CONTROL_IN_IMPLICIT, tag) >= 0 || inImplicitObject() && prevTag === ':' && tag === 'FOR') {
           stack.push([
             'CONTROL',
@@ -392,10 +342,6 @@ export var Rewriter = (function() {
           return forward(1);
         }
         if (tag === 'INDENT' && inImplicit()) {
-          // An `INDENT` closes an implicit call unless
-
-          //  1. We have seen a `CONTROL` argument on the line.
-          //  2. The last token before the indent is part of the list below.
           if (prevTag !== '=>' && prevTag !== '->' && prevTag !== '[' && prevTag !== '(' && prevTag !== ',' && prevTag !== '{' && prevTag !== 'ELSE' && prevTag !== '=') {
             while (inImplicitCall() || inImplicitObject() && prevTag !== ':') {
               if (inImplicitCall()) {
@@ -411,12 +357,10 @@ export var Rewriter = (function() {
           stack.push([tag, i]);
           return forward(1);
         }
-        // Straightforward start of explicit expression.
         if (indexOf.call(EXPRESSION_START, tag) >= 0) {
           stack.push([tag, i]);
           return forward(1);
         }
-        // Close all implicit expressions inside of explicitly closed expressions.
         if (indexOf.call(EXPRESSION_END, tag) >= 0) {
           while (inImplicit()) {
             if (inImplicitCall()) {
@@ -450,9 +394,6 @@ export var Rewriter = (function() {
           });
           return isFunc;
         };
-        // Recognize standard implicit calls like
-        // f a, f() b, f? c, h[0] d etc.
-        // Added support for spread dots on the left side: f ...a
         if ((indexOf.call(IMPLICIT_FUNC, tag) >= 0 && token.spaced || tag === '?' && i > 0 && !tokens[i - 1].spaced) && (indexOf.call(IMPLICIT_CALL, nextTag) >= 0 || (nextTag === '...' && (ref = this.tag(i + 2), indexOf.call(IMPLICIT_CALL, ref) >= 0) && !this.findTagsBackwards(i, ['INDEX_START', '['])) || indexOf.call(IMPLICIT_UNSPACED_CALL, nextTag) >= 0 && !nextToken.spaced && !nextToken.newLine) && !inControlFlow()) {
           if (tag === '?') {
             tag = token[0] = 'FUNC_EXIST';
@@ -460,32 +401,12 @@ export var Rewriter = (function() {
           startImplicitCall(i + 1);
           return forward(2);
         }
-        // Implicit call taking an implicit indented object as first argument.
-
-        //     f
-        //       a: b
-        //       c: d
-
-        // Don’t accept implicit calls of this type, when on the same line
-        // as the control structures below as that may misinterpret constructs like:
-
-        //     if f
-        //        a: 1
-        // as
-
-        //     if f(a: 1)
-
-        // which is probably always unintended.
-        // Furthermore don’t allow this in the first line of a literal array
-        // or explicit object, as that creates grammatical ambiguities (#5368).
         if (indexOf.call(IMPLICIT_FUNC, tag) >= 0 && this.indexOfTag(i + 1, 'INDENT') > -1 && this.looksObjectish(i + 2) && !this.findTagsBackwards(i, ['CLASS', 'EXTENDS', 'IF', 'CATCH', 'SWITCH', 'LEADING_WHEN', 'FOR', 'WHILE', 'UNTIL']) && !(((ref1 = (s = (ref2 = stackTop()) != null ? ref2[0] : void 0)) === '{' || ref1 === '[') && !isImplicit(stackTop()) && this.findTagsBackwards(i, s))) {
           startImplicitCall(i + 1);
           stack.push(['INDENT', i + 2]);
           return forward(3);
         }
-        // Implicit objects start here.
         if (tag === ':') {
-          // Go back to the (implicit) start of the object.
           s = (function() {
             var ref3;
             switch (false) {
@@ -504,8 +425,6 @@ export var Rewriter = (function() {
             }
           }).call(this);
           startsLine = s <= 0 || (ref3 = this.tag(s - 1), indexOf.call(LINEBREAKS, ref3) >= 0) || tokens[s - 1].newLine;
-          // Are we just continuing an already declared object?
-          // Including the case where we indent on the line after an explicit '{'.
           if (stackTop()) {
             [stackTag, stackIdx] = stackTop();
             stackNext = stack[stack.length - 2];
@@ -520,22 +439,6 @@ export var Rewriter = (function() {
           });
           return forward(2);
         }
-        // End implicit calls when chaining method calls
-        // like e.g.:
-
-        //     f ->
-        //       a
-        //     .g b, ->
-        //       c
-        //     .h a
-
-        // and also
-
-        //     f a
-        //     .g b
-        //     .h a
-
-        // Mark all enclosing objects as not sameLine
         if (indexOf.call(LINEBREAKS, tag) >= 0) {
           for (k = stack.length - 1; k >= 0; k += -1) {
             stackItem = stack[k];
@@ -547,7 +450,6 @@ export var Rewriter = (function() {
             }
           }
         }
-        // End indented-continuation-line implicit objects once that indentation is over.
         if (tag === 'TERMINATOR' && token.endsContinuationLineIndentation) {
           ({preContinuationLineIndent} = token.endsContinuationLineIndentation);
           while (inImplicitObject() && ((implicitObjectIndent = stackTop()[2].continuationLineIndent) != null) && implicitObjectIndent > preContinuationLineIndent) {
@@ -558,16 +460,10 @@ export var Rewriter = (function() {
         if (indexOf.call(IMPLICIT_END, tag) >= 0 || (indexOf.call(CALL_CLOSERS, tag) >= 0 && newLine) || ((tag === '..' || tag === '...') && this.findTagsBackwards(i, ["INDEX_START"]))) {
           while (inImplicit()) {
             [stackTag, stackIdx, {sameLine, startsLine}] = stackTop();
-            // Close implicit calls when reached end of argument list
             if (inImplicitCall() && prevTag !== ',' || (prevTag === ',' && tag === 'TERMINATOR' && (nextTag == null))) {
               endImplicitCall();
-            // Close implicit objects such as:
-            // return a: 1, b: 2 unless true
             } else if (inImplicitObject() && sameLine && tag !== 'TERMINATOR' && prevTag !== ':' && !((tag === 'POST_IF' || tag === 'FOR' || tag === 'WHILE' || tag === 'UNTIL') && startsLine && implicitObjectContinues(i + 1))) {
               endImplicitObject();
-            // Close implicit objects when at end of line, line didn't end with a comma
-            // and the implicit object didn't start the line or the next line doesn’t look like
-            // the continuation of an object.
             } else if (inImplicitObject() && tag === 'TERMINATOR' && prevTag !== ',' && !(startsLine && this.looksObjectish(i + 1))) {
               endImplicitObject();
             } else if (inImplicitControl() && tokens[stackTop()[1]][0] === 'CLASS' && tag === 'TERMINATOR') {
@@ -577,25 +473,7 @@ export var Rewriter = (function() {
             }
           }
         }
-        // Close implicit object if comma is the last character
-        // and what comes after doesn’t look like it belongs.
-        // This is used for trailing commas and calls, like:
-
-        //     x =
-        //         a: b,
-        //         c: d,
-        //     e = 2
-
-        // and
-
-        //     f a, b: c, d: e, f, g: h: i, j
-
         if (tag === ',' && !this.looksObjectish(i + 1) && inImplicitObject() && !((ref5 = this.tag(i + 2)) === 'FOROF' || ref5 === 'FORIN') && (nextTag !== 'TERMINATOR' || !this.looksObjectish(i + 2))) {
-          // When nextTag is OUTDENT the comma is insignificant and
-          // should just be ignored so embed it in the implicit object.
-
-          // When it isn’t the comma go on to play a role in a call or
-          // array further up the stack, so give it a chance.
           offset = nextTag === 'OUTDENT' ? 1 : 0;
           while (inImplicitObject()) {
             endImplicitObject(i + offset);
@@ -605,9 +483,6 @@ export var Rewriter = (function() {
       });
     }
 
-    // Not all tokens survive processing by the parser. To avoid comments getting
-    // lost into the ether, find comments attached to doomed tokens and move them
-    // to a token that will make it to the other side.
     rescueStowawayComments() {
       var dontShiftForward, insertPlaceholder, shiftCommentsBackward, shiftCommentsForward;
       insertPlaceholder = function(token, j, tokens, method) {
@@ -629,10 +504,6 @@ export var Rewriter = (function() {
       };
       shiftCommentsForward = function(token, i, tokens) {
         var comment, j, k, len, ref, ref1, ref2;
-        // Find the next surviving token and attach this token’s comments to it,
-        // with a flag that we know to output such comments *before* that
-        // token’s own compilation. (Otherwise comments are output following
-        // the token they’re attached to.)
         j = i;
         while (j !== tokens.length && (ref = tokens[j][0], indexOf.call(DISCARDED, ref) >= 0)) {
           j++;
@@ -644,27 +515,24 @@ export var Rewriter = (function() {
             comment.unshift = true;
           }
           moveComments(token, tokens[j]);
-          return 1; // All following tokens are doomed!
+          return 1;
         } else {
           j = tokens.length - 1;
           insertPlaceholder(token, j, tokens, 'push');
-          // The generated tokens were added to the end, not inline, so we don’t skip.
           return 1;
         }
       };
       shiftCommentsBackward = function(token, i, tokens) {
         var j, ref, ref1;
-        // Find the last surviving token and attach this token’s comments to it.
         j = i;
         while (j !== -1 && (ref = tokens[j][0], indexOf.call(DISCARDED, ref) >= 0)) {
           j--;
         }
         if (!(j === -1 || (ref1 = tokens[j][0], indexOf.call(DISCARDED, ref1) >= 0))) {
           moveComments(token, tokens[j]);
-          return 1; // All previous tokens are doomed!
+          return 1;
         } else {
           insertPlaceholder(token, 0, tokens, 'unshift');
-          // We added two tokens, so shift forward to account for the insertion.
           return 3;
         }
       };
@@ -675,10 +543,6 @@ export var Rewriter = (function() {
         }
         ret = 1;
         if (ref = token[0], indexOf.call(DISCARDED, ref) >= 0) {
-          // This token won’t survive passage through the parser, so we need to
-          // rescue its attached tokens and redistribute them to nearby tokens.
-          // Comments that don’t start a new line can shift backwards to the last
-          // safe token, while other tokens should shift forward.
           dummyToken = {
             comments: []
           };
@@ -697,17 +561,6 @@ export var Rewriter = (function() {
             shiftCommentsForward(token, i, tokens);
           }
         } else if (!dontShiftForward(i, tokens)) {
-          // If any of this token’s comments start a line—there’s only
-          // whitespace between the preceding newline and the start of the
-          // comment—and this isn’t one of the special `JS` tokens, then
-          // shift this comment forward to precede the next valid token.
-          // `Block.compileComments` also has logic to make sure that
-          // “starting new line” comments follow or precede the nearest
-          // newline relative to the token that the comment is attached to,
-          // but that newline might be inside a `}` or `)` or other generated
-          // token that we really want this comment to output after. Therefore
-          // we need to shift the comments here, avoiding such generated and
-          // discarded tokens.
           dummyToken = {
             comments: []
           };
@@ -730,7 +583,6 @@ export var Rewriter = (function() {
       });
     }
 
-    // Add location data to all tokens generated by the rewriter.
     addLocationDataToGeneratedTokens() {
       return this.scanTokens(function(token, i, tokens) {
         var column, line, nextLocation, prevLocation, rangeIndex, ref, ref1;
@@ -774,9 +626,6 @@ export var Rewriter = (function() {
       });
     }
 
-    // `OUTDENT` tokens should always be positioned at the last character of the
-    // previous token, so that AST nodes ending in an `OUTDENT` token end up with a
-    // location corresponding to the last “real” token under the node.
     fixIndentationLocationData() {
       var findPrecedingComment;
       if (this.allComments == null) {
@@ -832,9 +681,6 @@ export var Rewriter = (function() {
         isIndent = token[0] === 'INDENT';
         prevToken = (ref2 = token.prevToken) != null ? ref2 : tokens[i - 1];
         prevLocationData = prevToken[2];
-        // addLocationDataToGeneratedTokens() set the outdent’s location data
-        // to the preceding token’s, but in order to detect comments inside an
-        // empty "block" we want to look for comments preceding the next token.
         useNextToken = token.explicit || token.generated;
         if (useNextToken) {
           nextToken = token;
@@ -855,8 +701,6 @@ export var Rewriter = (function() {
           }
         }
         if (token.generated && token[0] === 'CALL_END' && (precedingComment != null ? precedingComment.indented : void 0)) {
-          // We don’t want e.g. an implicit call at the end of an `if` condition to
-          // include a following indented comment.
           return 1;
         }
         if (precedingComment != null) {
@@ -875,17 +719,11 @@ export var Rewriter = (function() {
       });
     }
 
-    // Because our grammar is LALR(1), it can’t handle some single-line
-    // expressions that lack ending delimiters. The **Rewriter** adds the implicit
-    // blocks, so it doesn’t need to. To keep the grammar clean and tidy, trailing
-    // newlines within expressions are removed and the indentation tokens of empty
-    // blocks are added.
     normalizeLines() {
       var action, closeElseTag, condition, ifThens, indent, leading_if_then, leading_switch_when, outdent, starter;
       starter = indent = outdent = null;
       leading_switch_when = null;
       leading_if_then = null;
-      // Count `THEN` tags
       ifThens = [];
       condition = function(token, i) {
         var ref, ref1, ref2, ref3;
@@ -905,13 +743,10 @@ export var Rewriter = (function() {
         }
         lastThen = ifThens.pop();
         [, outdentElse] = this.indentation(tokens[lastThen]);
-        // Insert `OUTDENT` to close inner `IF`.
         outdentElse[1] = tlen * 2;
         tokens.splice(i, 0, outdentElse);
-        // Insert `OUTDENT` to close outer `IF`.
         outdentElse[1] = 2;
         tokens.splice(i + 1, 0, outdentElse);
-        // Remove outdents from the end.
         this.detectEnd(i + 2, function(token, i) {
           var ref;
           return (ref = token[0]) === 'OUTDENT' || ref === 'TERMINATOR';
@@ -967,7 +802,6 @@ export var Rewriter = (function() {
           if (tag === 'THEN' && this.findTagsBackwards(i, ['IF'])) {
             ifThens.push(i);
           }
-          // `ELSE` tag is not closed.
           if (tag === 'ELSE' && this.tag(i - 1) !== 'OUTDENT') {
             i = closeElseTag(tokens, i);
           }
@@ -982,8 +816,6 @@ export var Rewriter = (function() {
       });
     }
 
-    // Tag postfix conditionals as such, so that we can parse them with a
-    // different precedence.
     tagPostfixConditionals() {
       var action, condition, original;
       original = null;
@@ -1008,11 +840,6 @@ export var Rewriter = (function() {
       });
     }
 
-    // For tokens with extra data, we want to make that data visible to the grammar
-    // by wrapping the token value as a String() object and setting the data as
-    // properties of that object. The grammar should then be responsible for
-    // cleaning this up for the node constructor: unwrapping the token value to a
-    // primitive string and separately passing any expected token data properties
     exposeTokenDataToGrammar() {
       return this.scanTokens(function(token, i) {
         var key, ref, ref1, val;
@@ -1032,7 +859,6 @@ export var Rewriter = (function() {
       });
     }
 
-    // Generate the indentation tokens, based on another token on the same line.
     indentation(origin) {
       var indent, outdent;
       indent = ['INDENT', 2];
@@ -1046,7 +872,6 @@ export var Rewriter = (function() {
       return [indent, outdent];
     }
 
-    // Look up a tag by token index.
     tag(i) {
       var ref;
       return (ref = this.tokens[i]) != null ? ref[0] : void 0;
@@ -1060,17 +885,10 @@ export var Rewriter = (function() {
 
 }).call(this);
 
-// Constants
-// ---------
-
-// List of the token pairs that must be balanced.
 BALANCED_PAIRS = [['(', ')'], ['[', ']'], ['{', '}'], ['INDENT', 'OUTDENT'], ['CALL_START', 'CALL_END'], ['PARAM_START', 'PARAM_END'], ['INDEX_START', 'INDEX_END'], ['STRING_START', 'STRING_END'], ['INTERPOLATION_START', 'INTERPOLATION_END'], ['REGEX_START', 'REGEX_END']];
 
-// The inverse mappings of `BALANCED_PAIRS` we’re trying to fix up, so we can
-// look things up from either end.
 export var INVERSES = {};
 
-// The tokens that signal the start/end of a balanced pair.
 EXPRESSION_START = [];
 
 EXPRESSION_END = [];
@@ -1081,42 +899,26 @@ for (k = 0, len = BALANCED_PAIRS.length; k < len; k++) {
   EXPRESSION_END.push(INVERSES[left] = right);
 }
 
-// Tokens that indicate the close of a clause of an expression.
 EXPRESSION_CLOSE = ['CATCH', 'THEN', 'ELSE', 'FINALLY'].concat(EXPRESSION_END);
 
-// Tokens that, if followed by an `IMPLICIT_CALL`, indicate a function invocation.
 IMPLICIT_FUNC = ['IDENTIFIER', 'PROPERTY', 'SUPER', ')', 'CALL_END', ']', 'INDEX_END', '@', 'THIS'];
 
-// If preceded by an `IMPLICIT_FUNC`, indicates a function invocation.
 IMPLICIT_CALL = ['IDENTIFIER', 'PROPERTY', 'NUMBER', 'INFINITY', 'NAN', 'STRING', 'STRING_START', 'REGEX', 'REGEX_START', 'JS', 'NEW', 'PARAM_START', 'CLASS', 'IF', 'TRY', 'SWITCH', 'THIS', 'DYNAMIC_IMPORT', 'IMPORT_META', 'NEW_TARGET', 'UNDEFINED', 'NULL', 'BOOL', 'UNARY', 'DO', 'DO_IIFE', 'YIELD', 'AWAIT', 'UNARY_MATH', 'SUPER', 'THROW', '@', '->', '=>', '[', '(', '{', '--', '++'];
 
 IMPLICIT_UNSPACED_CALL = ['+', '-'];
 
-// Tokens that always mark the end of an implicit call for single-liners.
 IMPLICIT_END = ['POST_IF', 'FOR', 'WHILE', 'UNTIL', 'WHEN', 'BY', 'LOOP', 'TERMINATOR'];
 
-// Single-line flavors of block expressions that have unclosed endings.
-// The grammar can’t disambiguate them, so we insert the implicit indentation.
 SINGLE_LINERS = ['ELSE', '->', '=>', 'TRY', 'FINALLY', 'THEN'];
 
 SINGLE_CLOSERS = ['TERMINATOR', 'CATCH', 'FINALLY', 'ELSE', 'OUTDENT', 'LEADING_WHEN'];
 
-// Tokens that end a line.
 LINEBREAKS = ['TERMINATOR', 'INDENT', 'OUTDENT'];
 
-// Tokens that close open calls when they follow a newline.
 CALL_CLOSERS = ['.', '?.', '::', '?::'];
 
-// Tokens that prevent a subsequent indent from ending implicit calls/objects
 CONTROL_IN_IMPLICIT = ['IF', 'TRY', 'FINALLY', 'CATCH', 'CLASS', 'SWITCH'];
 
-// Tokens that are swallowed up by the parser, never leading to code generation.
-// You can spot these in `grammar.coffee` because the `o` function second
-// argument doesn’t contain a `new` call for these tokens.
-// `STRING_START` isn’t on this list because its `locationData` matches that of
-// the node that becomes `StringWithInterpolations`, and therefore
-// `addDataToNode` attaches `STRING_START`’s tokens to that node.
 DISCARDED = ['(', ')', '[', ']', '{', '}', ':', '.', '..', '...', ',', '=', '++', '--', '?', 'AS', 'AWAIT', 'CALL_START', 'CALL_END', 'DEFAULT', 'DO', 'DO_IIFE', 'ELSE', 'EXTENDS', 'EXPORT', 'FORIN', 'FOROF', 'FORFROM', 'IMPORT', 'INDENT', 'INDEX_SOAK', 'INTERPOLATION_START', 'INTERPOLATION_END', 'LEADING_WHEN', 'OUTDENT', 'PARAM_END', 'REGEX_START', 'REGEX_END', 'RETURN', 'STRING_END', 'THROW', 'UNARY', 'YIELD'].concat(IMPLICIT_UNSPACED_CALL.concat(IMPLICIT_END.concat(CALL_CLOSERS.concat(CONTROL_IN_IMPLICIT))));
 
-// Tokens that, when appearing at the end of a line, suppress a following TERMINATOR/INDENT token
 export var UNFINISHED = ['\\', '.', '?.', '?::', 'UNARY', 'DO', 'DO_IIFE', 'MATH', 'UNARY_MATH', '+', '-', '**', 'SHIFT', 'RELATION', 'COMPARE', '&', '^', '|', '&&', '||', 'BIN?', 'EXTENDS'];

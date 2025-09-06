@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 
-let code = fs.readFileSync('lib-esm/coffeescript/coffeescript.js', 'utf8');
+let code = fs.readFileSync('lib/coffeescript/coffeescript.js', 'utf8');
 
 // Track what's already been exported
 const exportedNames = new Set();
@@ -33,5 +33,5 @@ for (const line of lines) {
   newLines.push(line);
 }
 
-fs.writeFileSync('lib-esm/coffeescript/coffeescript.js', newLines.join('\n'));
+fs.writeFileSync('lib/coffeescript/coffeescript.js', newLines.join('\n'));
 console.log('Fixed duplicates in coffeescript.js');

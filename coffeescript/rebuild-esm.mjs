@@ -3,12 +3,12 @@
 import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
-import * as CoffeeScript from './lib-esm/coffeescript/coffeescript.js';
+import * as CoffeeScript from './lib/coffeescript/coffeescript.js';
 
 console.log('Building ESM version...');
 
 // Create lib-esm directories
-const dirs = ['lib-esm', 'lib-esm/coffeescript'];
+const dirs = ['lib-esm', 'lib/coffeescript'];
 for (const dir of dirs) {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir);
@@ -25,23 +25,23 @@ let parserESM = parserSrc
 
 // Add ESM exports at the end
 parserESM += '\nexport {parser, Parser};';
-fs.writeFileSync('lib-esm/coffeescript/parser.js', parserESM);
+fs.writeFileSync('lib/coffeescript/parser.js', parserESM);
 
 // Compile source files
 const srcFiles = fs.readdirSync('src').filter(f => f.endsWith('.coffee'));
 for (const file of srcFiles) {
   if (file === 'grammar.coffee') continue; // Skip grammar
-  
+
   console.log(`Compiling ${file}...`);
   const source = fs.readFileSync(`src/${file}`, 'utf8');
-  
+
   try {
     const compiled = CoffeeScript.compile(source, {
       bare: true,
       filename: `src/${file}`
     });
-    
-    const outputFile = `lib-esm/coffeescript/${file.replace('.coffee', '.js')}`;
+
+    const outputFile = `lib/coffeescript/${file.replace('.coffee', '.js')}`;
     fs.writeFileSync(outputFile, compiled);
   } catch (error) {
     console.error(`Error compiling ${file}:`, error.message);
