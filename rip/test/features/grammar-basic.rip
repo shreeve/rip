@@ -17,7 +17,7 @@ x = 42
 y = 100
 z = x
 
-console.log "  ✓ assignments work" 
+console.log "  ✓ assignments work"
 
 # ==========================================
 # Literals
@@ -29,7 +29,7 @@ console.log "===== Literals ====="
 num = 42
 console.log "  ✓ number literal"
 
-# Strings  
+# Strings
 str = "hello"
 console.log "  ✓ string literal"
 
@@ -45,7 +45,7 @@ b = 20
 c = a + b
 console.log "  ✓ addition"
 
-d = b - a  
+d = b - a
 console.log "  ✓ subtraction"
 
 e = a * 2

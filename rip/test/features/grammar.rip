@@ -36,7 +36,7 @@ test "multiple lines with terminators", ->
 console.log "\n📝 Statements:"
 
 test "return statement", ->
-  getValue = -> 
+  getValue = ->
     return 42
     0  # should never reach
   assert getValue() is 42
@@ -202,7 +202,7 @@ test "member access - bracket notation", ->
 console.log "\n🎯 Complex Grammar Combinations:"
 
 test "chained member access", ->
-  obj = 
+  obj =
     nested:
       deeply:
         value: 42
@@ -228,7 +228,7 @@ test "object with methods", ->
     value: 0
     add: (n) -> @value += n
     get: -> @value
-  
+
   calculator.add(5)
   calculator.add(3)
   assert calculator.get() is 8
@@ -245,7 +245,7 @@ test "nested conditionals", ->
         "y big"
       else
         "both small"
-  
+
   assert getValue(15, 15) is "both big"
   assert getValue(15, 5) is "x big"
   assert getValue(5, 15) is "y big"
