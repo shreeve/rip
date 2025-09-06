@@ -1,60 +1,34 @@
-# COMPLETE MINIMAL RIP GRAMMAR
-# Beautiful, simple, powerful - using Rip's own syntax!
-#
-# UNIVERSAL POSITION TRACKING: Every AST node and array automatically
-# gets position data via the 'o' helper. This enables perfect error
-# messages, source maps, and IDE features!
+# Rip's beautiful, simple, powerful grammar - using Rip's own syntax!
 
-# Helper for rules - keeps pattern/action pairs clean
-# UNIVERSAL: Every single thing gets position data!
-o = (pattern, action) ->
-  # If no action provided, default to passthrough
-  action ?= -> $1
-
-  # Wrap action to add pos to EVERYTHING
-  originalAction = action
-  action = ->
-    result = originalAction.apply(this, arguments)
-    # Add pos to any result that can hold it (objects and arrays)
-    if result? and typeof result is 'object' and not result.pos
-      result.pos = '@$'
+o = (pattern, action = (-> $1)) ->
+  [pattern, ->
+    result = action.apply this, arguments
+    result.pos = '@$' if result? and typeof result is 'object' and not result.pos
     result
+  ]
 
-  [pattern, action]
+binOp = (ripOp, jsOp = ripOp) -> o "Expression #{ripOp} Expression", -> type: 'op'   , op: jsOp, left: $1, right: $3
+unOp  = (ripOp, jsOp = ripOp) -> o            "#{ripOp} Expression", -> type: 'unary', op: jsOp, expr: $2
 
-# Binary operator helper - super DRY!
-binOp = (ripOp, jsOp = ripOp) ->
-  o "Expression #{ripOp} Expression", ->
-    type: 'op', op: jsOp, left: $1, right: $3
-    # pos added automatically by o helper!
-
-# Unary operator helper
-unOp = (ripOp, jsOp = ripOp) ->
-  o "#{ripOp} Expression", ->
-    type: 'unary', op: jsOp, expr: $2
-    # pos added automatically by o helper!
-
-# The grammar - clean and simple!
 grammar =
 
   # Operator precedence (from lowest to highest)
+  # TODO: Use a """ and split these for visual clarity
   operators: [
-    ["right", "=", "+=", "-=", "*=", "/="]
-    ["left", "or", "||"]
-    ["left", "and", "&&"]
-    ["left", "==", "!=", "is", "isnt"]
-    ["left", "<", ">", "<=", ">=", "in", "of"]
-    ["left", "+", "-"]
-    ["left", "*", "/", "%"]
-    ["right", "!", "not", "typeof"]
-    ["left", ".", "?.", "[", "]"]
-    ["left", "CALL"]
+    ["right", "=", "+=", "-=", "*=", "/="     ]
+    ["left" , "or", "||"                      ]
+    ["left" , "and", "&&"                     ]
+    ["left" , "==", "!=", "is", "isnt"        ]
+    ["left" , "<", ">", "<=", ">=", "in", "of"]
+    ["left" , "+", "-"                        ]
+    ["left" , "*", "/", "%"                   ]
+    ["right", "!", "not", "typeof"            ]
+    ["left" , ".", "?.", "[", "]"             ]
+    ["left" , "CALL"                          ]
   ]
 
-  # The beautiful BNF rules
   bnf:
 
-    # Program structure
     Root: [
       o "Body"
     ]
@@ -93,7 +67,7 @@ grammar =
       o "Try"
     ]
 
-    # Values - things that can be assigned to or called
+    # Values (things that can be assigned to or called)
     Value: [
       o "Literal"
       o "Identifier"
@@ -106,14 +80,14 @@ grammar =
       o "Member"
     ]
 
-    # Literals - the atoms of our language
+    # Literals (the atoms of our language)
     Literal: [
-      o "NUMBER", -> type: 'num', val: $1
-      o "STRING", -> type: 'str', val: $1
-      o "BOOL", -> type: 'bool', val: $1
-      o "NULL", -> type: 'null'
+      o "NUMBER"   , -> type: 'num'  , val: $1
+      o "STRING"   , -> type: 'str'  , val: $1
+      o "BOOL"     , -> type: 'bool' , val: $1
+      o "NULL"     , -> type: 'null'
       o "UNDEFINED", -> type: 'undef'
-      o "REGEX", -> type: 'regex', val: $1
+      o "REGEX"    , -> type: 'regex', val: $1
     ]
 
     # Identifiers and properties
@@ -122,73 +96,57 @@ grammar =
     ]
 
     ThisProperty: [
-      o "@ IDENTIFIER", ->
-        type: 'prop',
-        obj: {type: 'this', pos: '@1'},
-        prop: {type: 'id', name: $2, pos: '@2'}
-        # outer pos added automatically!
+      o "@ IDENTIFIER", -> type: 'prop', obj: {type: 'this', pos: '@1'}, prop: {type: 'id', name: $2, pos: '@2'}
     ]
 
     # Member access (dot notation and brackets)
     Member: [
-      o "Value . IDENTIFIER", ->
-        type: 'prop', obj: $1, prop: {type: 'id', name: $3, pos: '@3'}
-      o "Value ?. IDENTIFIER", ->
-        type: 'prop', obj: $1, prop: {type: 'id', name: $3, pos: '@3'}, optional: yes
-      o "Value [ Expression ]", ->
-        type: 'index', obj: $1, index: $3
-      o "Value ?[ Expression ]", ->
-        type: 'index', obj: $1, index: $3, optional: yes    ]
-
-    # Arrays
-    Array: [
-      o "[ ]", -> type: 'array', items: []      o "[ ArgList ]", -> type: 'array', items: $2      o "[ ArgList , ]", -> type: 'array', items: $2  # trailing comma
+      o "Value . IDENTIFIER"   , -> type: 'prop' , obj: $1, prop: {type: 'id', name: $3, pos: '@3'}
+      o "Value ?. IDENTIFIER"  , -> type: 'prop' , obj: $1, prop: {type: 'id', name: $3, pos: '@3'}, optional: yes
+      o "Value [ Expression ]" , -> type: 'index', obj: $1, index: $3
+      o "Value ?[ Expression ]", -> type: 'index', obj: $1, index: $3, optional: yes
     ]
 
-    # Objects
+    Array: [
+      o "[ ]"          , -> type: 'array', items: []
+      o "[ ArgList ]"  , -> type: 'array', items: $2
+      o "[ ArgList , ]", -> type: 'array', items: $2  # trailing comma
+    ]
+
     Object: [
-      o "{ }", -> type: 'object', props: []      o "{ PropList }", -> type: 'object', props: $2      o "{ PropList , }", -> type: 'object', props: $2  # trailing comma
+      o "{ }"           , -> type: 'object', props: []
+      o "{ PropList }"  , -> type: 'object', props: $2
+      o "{ PropList , }", -> type: 'object', props: $2  # trailing comma
     ]
 
     PropList: [
       o "Property", -> [$1]
-      o "PropList , Property", -> $1.concat $3
+      o "PropList , Property"         , -> $1.concat $3
       o "PropList TERMINATOR Property", -> $1.concat $3
     ]
 
     Property: [
-      o "IDENTIFIER : Expression", ->
-        key: {type: 'id', name: $1, pos: '@1'}, val: $3
-      o "STRING : Expression", ->
-        key: {type: 'str', val: $1, pos: '@1'}, val: $3
-      o "[ Expression ] : Expression", ->
-        key: $2, val: $4, computed: yes
-      o "IDENTIFIER", ->  # shorthand
-        key: {type: 'id', name: $1, pos: '@1'},
-        val: {type: 'id', name: $1, pos: '@1'},
-        shorthand: yes    ]
+      o "IDENTIFIER : Expression"    , -> key: {type: 'id', name: $1, pos: '@1'}, val: $3
+      o "STRING : Expression"        , -> key: {type: 'str', val: $1, pos: '@1'}, val: $3
+      o "[ Expression ] : Expression", -> key: $2          , val: $4, computed: yes
+      o "IDENTIFIER"                 , -> key: {type: 'id', name: $1, pos: '@1'}, val: {type: 'id', name: $1, pos: '@1'}, shorthand: yes
+    ]
 
     # Ranges
     Range: [
-      o "[ Expression .. Expression ]", ->
-        type: 'range', from: $2, to: $4, exclusive: no
-      o "[ Expression ... Expression ]", ->
-        type: 'range', from: $2, to: $4, exclusive: yes    ]
+      o "[ Expression .. Expression ]" , -> type: 'range', from: $2, to: $4, exclusive: no
+      o "[ Expression ... Expression ]", -> type: 'range', from: $2, to: $4, exclusive: yes
+    ]
 
     # Assignment
     Assign: [
-      o "Assignable = Expression", ->
-        type: 'assign', left: $1, right: $3
-      o "Assignable = INDENT Expression OUTDENT", ->
-        type: 'assign', left: $1, right: $4
-      o "Assignable += Expression", ->
-        type: 'assign', left: $1, right: $3, op: '+='
-      o "Assignable -= Expression", ->
-        type: 'assign', left: $1, right: $3, op: '-='
-      o "Assignable *= Expression", ->
-        type: 'assign', left: $1, right: $3, op: '*='
-      o "Assignable /= Expression", ->
-        type: 'assign', left: $1, right: $3, op: '/='    ]
+      o "Assignable = Expression"               , -> type: 'assign', left: $1, right: $3
+      o "Assignable = INDENT Expression OUTDENT", -> type: 'assign', left: $1, right: $4
+      o "Assignable += Expression"              , -> type: 'assign', left: $1, right: $3, op: '+='
+      o "Assignable -= Expression"              , -> type: 'assign', left: $1, right: $3, op: '-='
+      o "Assignable *= Expression"              , -> type: 'assign', left: $1, right: $3, op: '*='
+      o "Assignable /= Expression"              , -> type: 'assign', left: $1, right: $3, op: '/='
+    ]
 
     Assignable: [
       o "Identifier"
@@ -228,126 +186,130 @@ grammar =
       unOp "delete"
 
       # Postfix
-      o "Expression ++", -> type: 'update', op: '++', expr: $1, prefix: no      o "Expression --", -> type: 'update', op: '--', expr: $1, prefix: no      o "++ Expression", -> type: 'update', op: '++', expr: $2, prefix: yes      o "-- Expression", -> type: 'update', op: '--', expr: $2, prefix: yes
+      o "Expression ++", -> type: 'update', op: '++', expr: $1, prefix: no
+      o "Expression --", -> type: 'update', op: '--', expr: $1, prefix: no
+      o "++ Expression", -> type: 'update', op: '++', expr: $2, prefix: yes
+      o "-- Expression", -> type: 'update', op: '--', expr: $2, prefix: yes
+
       # Ternary
-      o "Expression ? Expression : Expression", ->
-        type: 'ternary', test: $1, then: $3, else: $5    ]
+      o "Expression ? Expression : Expression", -> type: 'ternary', test: $1, then: $3, else: $5
+    ]
 
     # Function invocation
     Invocation: [
-      o "Value ( )", -> type: 'call', func: $1, args: []      o "Value ( ArgList )", -> type: 'call', func: $1, args: $3      o "Value ?( )", -> type: 'call', func: $1, args: [], optional: yes      o "Value ?( ArgList )", -> type: 'call', func: $1, args: $3, optional: yes    ]
+      o "Value ( )"         , -> type: 'call', func: $1, args: []
+      o "Value ( ArgList )" , -> type: 'call', func: $1, args: $3
+      o "Value ?( )"        , -> type: 'call', func: $1, args: [], optional: yes
+      o "Value ?( ArgList )", -> type: 'call', func: $1, args: $3, optional: yes
+    ]
 
     ArgList: [
-      o "Expression", -> [$1]
+      o "Expression"          , -> [$1]
       o "ArgList , Expression", -> $1.concat $3
     ]
 
     # Functions (Code)
     Code: [
-      o "-> Block", -> type: 'func', params: [], body: $2, bound: no      o "=> Block", -> type: 'func', params: [], body: $2, bound: yes      o "ParamList -> Block", -> type: 'func', params: $1, body: $3, bound: no      o "ParamList => Block", -> type: 'func', params: $1, body: $3, bound: yes    ]
+      o "-> Block"          , -> type: 'func', params: [], body: $2, bound: no
+      o "=> Block"          , -> type: 'func', params: [], body: $2, bound: yes
+      o "ParamList -> Block", -> type: 'func', params: $1, body: $3, bound: no
+      o "ParamList => Block", -> type: 'func', params: $1, body: $3, bound: yes
+    ]
 
     ParamList: [
-      o "( )", -> []
+      o "( )"       , -> []
       o "( Params )", -> $2
-      o "Param", -> [$1]  # no parens for single param
+      o "Param"     , -> [$1]  # no parens for single param
     ]
 
     Params: [
-      o "Param", -> [$1]
+      o "Param"         , -> [$1]
       o "Params , Param", -> $1.concat $3
     ]
 
     Param: [
-      o "IDENTIFIER", -> type: 'param', name: $1      o "IDENTIFIER = Expression", -> type: 'param', name: $1, default: $3      o "... IDENTIFIER", -> type: 'param', name: $2, rest: yes    ]
+      o "IDENTIFIER"             , -> type: 'param', name: $1
+      o "IDENTIFIER = Expression", -> type: 'param', name: $1, default: $3
+      o "... IDENTIFIER"         , -> type: 'param', name: $2, rest: yes
+    ]
 
     # Control flow
     If: [
-      o "IF Expression Block", ->
-        type: 'if', test: $2, then: $3
-      o "IF Expression Block ELSE Block", ->
-        type: 'if', test: $2, then: $3, else: $5
-      o "IF Expression Block ELSE IF Expression Block", ->
-        type: 'if', test: $2, then: $3,
-        else: {type: 'if', test: $5, then: $7, pos: '@5'}
-      o "Expression IF Expression", ->  # postfix
-        type: 'if', test: $3, then: $1, postfix: yes
-      o "Expression UNLESS Expression", ->  # postfix unless
-        type: 'if', test: $3, then: $1, invert: yes, postfix: yes    ]
+      o "IF Expression Block"                         , -> type: 'if', test: $2, then: $3
+      o "IF Expression Block ELSE Block"              , -> type: 'if', test: $2, then: $3, else: $5
+      o "IF Expression Block ELSE IF Expression Block", -> type: 'if', test: $2, then: $3, else: {type: 'if', test: $5, then: $7, pos: '@5'}
+      o "Expression IF Expression"                    , -> type: 'if', test: $3, then: $1, postfix: yes
+      o "Expression UNLESS Expression"                , -> type: 'if', test: $3, then: $1, invert: yes, postfix: yes
+    ]
 
     For: [
-      o "FOR IDENTIFIER IN Expression Block", ->
-        type: 'for-in', var: $2, iter: $4, body: $5
-      o "FOR IDENTIFIER OF Expression Block", ->
-        type: 'for-of', var: $2, iter: $4, body: $5
-      o "Expression FOR IDENTIFIER IN Expression", ->  # comprehension
-        type: 'for-in', var: $3, iter: $5, body: $1, postfix: yes    ]
+      o "FOR IDENTIFIER IN Expression Block"     , -> type: 'for-in', var: $2, iter: $4, body: $5
+      o "FOR IDENTIFIER OF Expression Block"     , -> type: 'for-of', var: $2, iter: $4, body: $5
+      o "Expression FOR IDENTIFIER IN Expression", -> type: 'for-in', var: $3, iter: $5, body: $1, postfix: yes
+    ]
 
     While: [
-      o "WHILE Expression Block", ->
-        type: 'while', test: $2, body: $3
-      o "UNTIL Expression Block", ->
-        type: 'while', test: $2, body: $3, invert: yes
-      o "LOOP Block", ->
-        type: 'while', test: {type: 'bool', val: 'true', pos: '@1'}, body: $2    ]
+      o "WHILE Expression Block", -> type: 'while', test: $2, body: $3
+      o "UNTIL Expression Block", -> type: 'while', test: $2, body: $3, invert: yes
+      o "LOOP Block"            , -> type: 'while', test: {type: 'bool', val: 'true', pos: '@1'}, body: $2
+    ]
 
     Try: [
-      o "TRY Block", ->
-        type: 'try', body: $2
-      o "TRY Block CATCH IDENTIFIER Block", ->
-        type: 'try', body: $2, param: $4, handler: $5
-      o "TRY Block FINALLY Block", ->
-        type: 'try', body: $2, finalizer: $4    ]
+      o "TRY Block"                       , -> type: 'try', body: $2
+      o "TRY Block CATCH IDENTIFIER Block", -> type: 'try', body: $2, param: $4, handler: $5
+      o "TRY Block FINALLY Block"         , -> type: 'try', body: $2, finalizer: $4
+    ]
 
     # Other statements
     Return: [
-      o "RETURN", -> type: 'return'      o "RETURN Expression", -> type: 'return', val: $2    ]
+      o "RETURN"           , -> type: 'return'
+      o "RETURN Expression", -> type: 'return', val: $2
+    ]
 
     Throw: [
-      o "THROW Expression", -> type: 'throw', arg: $2    ]
+      o "THROW Expression", -> type: 'throw', arg: $2
+    ]
 
     Break: [
-      o "BREAK", -> type: 'break'    ]
+      o "BREAK", -> type: 'break'
+    ]
 
     Continue: [
-      o "CONTINUE", -> type: 'continue'    ]
+      o "CONTINUE", -> type: 'continue'
+    ]
 
     # Module system
     Import: [
-      o "IMPORT STRING", ->
-        type: 'import', source: $2
-      o "IMPORT IDENTIFIER FROM STRING", ->
-        type: 'import', default: $2, source: $4
-      o "IMPORT { ImportList } FROM STRING", ->
-        type: 'import', specs: $3, source: $6
-      o "IMPORT * AS IDENTIFIER FROM STRING", ->
-        type: 'import', namespace: $4, source: $6    ]
+      o "IMPORT STRING"                     , -> type: 'import', source: $2
+      o "IMPORT IDENTIFIER FROM STRING"     , -> type: 'import', default: $2, source: $4
+      o "IMPORT { ImportList } FROM STRING" , -> type: 'import', specs: $3, source: $6
+      o "IMPORT * AS IDENTIFIER FROM STRING", -> type: 'import', namespace: $4, source: $6
+    ]
 
     ImportList: [
-      o "IDENTIFIER", -> [{imported: $1, local: $1}]
-      o "IDENTIFIER AS IDENTIFIER", -> [{imported: $1, local: $3}]
-      o "ImportList , IDENTIFIER", -> $1.concat [{imported: $3, local: $3}]
+      o "IDENTIFIER"                           , ->           [{imported: $1, local: $1}]
+      o "IDENTIFIER AS IDENTIFIER"             , ->           [{imported: $1, local: $3}]
+      o "ImportList , IDENTIFIER"              , -> $1.concat [{imported: $3, local: $3}]
       o "ImportList , IDENTIFIER AS IDENTIFIER", -> $1.concat [{imported: $3, local: $5}]
     ]
 
     Export: [
-      o "EXPORT Expression", ->
-        type: 'export', val: $2
-      o "EXPORT DEFAULT Expression", ->
-        type: 'export', val: $3, default: yes
-      o "EXPORT { ExportList }", ->
-        type: 'export', specs: $3    ]
+      o "EXPORT Expression"        , -> type: 'export', val: $2
+      o "EXPORT DEFAULT Expression", -> type: 'export', val: $3, default: yes
+      o "EXPORT { ExportList }"    , -> type: 'export', specs: $3
+    ]
 
     ExportList: [
-      o "IDENTIFIER", -> [{local: $1, exported: $1}]
-      o "IDENTIFIER AS IDENTIFIER", -> [{local: $1, exported: $3}]
-      o "ExportList , IDENTIFIER", -> $1.concat [{local: $3, exported: $3}]
+      o "IDENTIFIER"                           , ->           [{local: $1, exported: $1}]
+      o "IDENTIFIER AS IDENTIFIER"             , ->           [{local: $1, exported: $3}]
+      o "ExportList , IDENTIFIER"              , -> $1.concat [{local: $3, exported: $3}]
       o "ExportList , IDENTIFIER AS IDENTIFIER", -> $1.concat [{local: $3, exported: $5}]
     ]
 
     # Blocks
     Block: [
       o "INDENT Body OUTDENT", -> $2
-      o "Expression", -> [$1]
+      o "Expression"         , -> [$1]
     ]
 
     # Parenthetical (for grouping)
@@ -369,36 +331,52 @@ grammar =
 
   # Classes (ES6 class syntax)
   Class: [
-    o "CLASS", -> type: 'class'    o "CLASS Block", -> type: 'class', body: $2    o "CLASS EXTENDS Expression", -> type: 'class', superClass: $3    o "CLASS EXTENDS Expression Block", -> type: 'class', superClass: $3, body: $4    o "CLASS SimpleAssignable", -> type: 'class', name: $2    o "CLASS SimpleAssignable Block", -> type: 'class', name: $2, body: $3    o "CLASS SimpleAssignable EXTENDS Expression", -> type: 'class', name: $2, superClass: $4    o "CLASS SimpleAssignable EXTENDS Expression Block", -> type: 'class', name: $2, superClass: $4, body: $5  ]
+    o "CLASS"                                          , -> type: 'class'
+    o "CLASS Block"                                    , -> type: 'class', body: $2
+    o "CLASS EXTENDS Expression"                       , -> type: 'class', superClass: $3
+    o "CLASS EXTENDS Expression Block"                 , -> type: 'class', superClass: $3, body: $4
+    o "CLASS SimpleAssignable"                         , -> type: 'class', name: $2
+    o "CLASS SimpleAssignable Block"                   , -> type: 'class', name: $2, body: $3
+    o "CLASS SimpleAssignable EXTENDS Expression"      , -> type: 'class', name: $2, superClass: $4
+    o "CLASS SimpleAssignable EXTENDS Expression Block", -> type: 'class', name: $2, superClass: $4, body: $5
+  ]
 
   # Super calls
   Super: [
-    o "SUPER", -> type: 'super'    o "SUPER Arguments", -> type: 'super', args: $2    o "SUPER . Property", -> type: 'super', prop: $3  ]
+    o "SUPER"           , -> type: 'super'
+    o "SUPER Arguments" , -> type: 'super', args: $2
+    o "SUPER . Property", -> type: 'super', prop: $3
+  ]
 
   # Switch statements
   Switch: [
-    o "SWITCH Expression INDENT Whens OUTDENT", ->
-      type: 'switch', test: $2, cases: $4    o "SWITCH Expression INDENT Whens ELSE Block OUTDENT", ->
-      type: 'switch', test: $2, cases: $4, default: $6    o "SWITCH INDENT Whens OUTDENT", ->
-      type: 'switch', cases: $3    o "SWITCH INDENT Whens ELSE Block OUTDENT", ->
-      type: 'switch', cases: $3, default: $5  ]
+    o "SWITCH Expression INDENT Whens OUTDENT"           , -> type: 'switch', test: $2, cases: $4
+    o "SWITCH Expression INDENT Whens ELSE Block OUTDENT", -> type: 'switch', test: $2, cases: $4, default: $6
+    o "SWITCH INDENT Whens OUTDENT"                      , -> type: 'switch',           cases: $3
+    o "SWITCH INDENT Whens ELSE Block OUTDENT"           , -> type: 'switch',           cases: $3, default: $5
+  ]
 
   Whens: [
-    o "When", -> [$1]
+    o "When"      , -> [$1]
     o "Whens When", -> $1.concat $2
   ]
 
   When: [
-    o "WHEN SimpleArgs Block", -> type: 'case', tests: $2, body: $3    o "WHEN SimpleArgs Block TERMINATOR", -> type: 'case', tests: $2, body: $3  ]
+    o "WHEN SimpleArgs Block"           , -> type: 'case', tests: $2, body: $3
+    o "WHEN SimpleArgs Block TERMINATOR", -> type: 'case', tests: $2, body: $3
+  ]
 
   SimpleArgs: [
-    o "Expression", -> [$1]
+    o "Expression"             , -> [$1]
     o "SimpleArgs , Expression", -> $1.concat $3
   ]
 
   # Generators and yield
   Yield: [
-    o "YIELD", -> type: 'yield'    o "YIELD Expression", -> type: 'yield', arg: $2    o "YIELD FROM Expression", -> type: 'yield', delegate: yes, arg: $3  ]
+    o "YIELD"                , -> type: 'yield'
+    o "YIELD Expression"     , -> type: 'yield', arg: $2
+    o "YIELD FROM Expression", -> type: 'yield', delegate: yes, arg: $3
+  ]
 
   # Async/await
   Await: [
@@ -406,30 +384,35 @@ grammar =
 
   # Do expressions (IIFE)
   DoExpression: [
-    o "DO Expression", -> type: 'do', body: $2    o "DO Block", -> type: 'do', body: $2  ]
+    o "DO Expression", -> type: 'do', body: $2
+    o "DO Block"     , -> type: 'do', body: $2
+  ]
 
   # Existence operator
   Existence: [
-    o "Expression ?", -> type: 'existence', expr: $1  ]
+    o "Expression ?", -> type: 'existence', expr: $1
+  ]
 
   # String interpolation
   StringWithInterpolations: [
-    o "STRING_START Interpolations STRING_END", ->
-      type: 'template', parts: $2  ]
+    o "STRING_START Interpolations STRING_END", -> type: 'template', parts: $2
+  ]
 
   Interpolations: [
-    o "InterpolationChunk", -> [$1]
+    o "InterpolationChunk"               , -> [$1]
     o "Interpolations InterpolationChunk", -> $1.concat $2
   ]
 
   InterpolationChunk: [
-    o "INTERPOLATION_START Body INTERPOLATION_END", ->
-      type: 'interpolation', expr: $2    o "String", -> $1
+    o "INTERPOLATION_START Body INTERPOLATION_END", -> type: 'interpolation', expr: $2
+    o "String", -> $1
   ]
 
   # Destructuring assignments (arrays and objects)
   Destructuring: [
-    o "[ DestructureList ]", -> type: 'array-pattern', elements: $2    o "{ DestructureList }", -> type: 'object-pattern', properties: $2  ]
+    o "[ DestructureList ]", -> type: 'array-pattern' , elements: $2
+    o "{ DestructureList }", -> type: 'object-pattern', properties: $2
+  ]
 
   DestructureList: [
     o "DestructureItem", -> [$1]
@@ -437,41 +420,47 @@ grammar =
   ]
 
   DestructureItem: [
-    o "Identifier", -> $1
-    o "Identifier = Expression", -> type: 'default', left: $1, right: $3    o "... Identifier", -> type: 'rest', arg: $2  ]
+    o "Identifier"             , -> $1
+    o "Identifier = Expression", -> type: 'default', left: $1, right: $3
+    o "... Identifier"         , -> type: 'rest', arg: $2
+  ]
 
   # Splats in arrays and arguments
   Splat: [
-    o "Expression ...", -> type: 'spread', arg: $1    o "... Expression", -> type: 'spread', arg: $2, prefix: yes  ]
+    o "Expression ...", -> type: 'spread', arg: $1
+    o "... Expression", -> type: 'spread', arg: $2, prefix: yes
+  ]
 
   # JS passthrough (backticks)
   JSLiteral: [
-    o "JS", -> type: 'js', code: $1  ]
+    o "JS", -> type: 'js', code: $1
+  ]
 
   # Regex with interpolation
   RegexWithInterpolations: [
-    o "REGEX_START Invocation REGEX_END", ->
-      type: 'regex-template', pattern: $2  ]
+    o "REGEX_START Invocation REGEX_END", -> type: 'regex-template', pattern: $2
+    ]
 
   # Meta properties (new.target, import.meta)
   MetaProperty: [
-    o "NEW_TARGET", -> type: 'meta', meta: 'new', prop: 'target'    o "IMPORT_META", -> type: 'meta', meta: 'import', prop: 'meta'  ]
+    o "NEW_TARGET" , -> type: 'meta', meta: 'new'   , prop: 'target'
+    o "IMPORT_META", -> type: 'meta', meta: 'import', prop: 'meta'
+  ]
 
   # Tagged template literals
   TaggedTemplate: [
-    o "Value String", -> type: 'tagged', tag: $1, template: $2  ]
+    o "Value String", -> type: 'tagged', tag: $1, template: $2
+  ]
 
   # Dynamic import
   DynamicImport: [
-    o "DYNAMIC_IMPORT Arguments", -> type: 'dynamic-import', args: $2  ]
+    o "DYNAMIC_IMPORT Arguments", -> type: 'dynamic-import', args: $2
+  ]
 
   # Array elisions (holes)
   Elision: [
-    o ",", -> type: 'elision'  ]
-
-  # =========================================================================
-  # END OF ADVANCED FEATURES
-  # =========================================================================
+    o ",", -> type: 'elision'
+  ]
 
 # Export the grammar
 export default grammar
