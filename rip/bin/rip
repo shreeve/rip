@@ -173,16 +173,16 @@ function getAST(source) {
   // Lex
   const lexer = new Lexer();
   const rawTokens = lexer.tokenize(source);
-  
+
   // Convert to object format
   const tokens = rawTokens.map(([type, value, line, column]) => ({
     type, value, line: line || 0, column: column || 0
   }));
-  
+
   // Rewrite
   const rewriter = new Rewriter();
   const rewritten = rewriter.rewrite(tokens);
-  
+
   // Parse
   const parser = new SimpleParser();
   return parser.parse(rewritten);
@@ -229,25 +229,25 @@ if (!filename) {
 try {
   // Read the Rip file
   const source = fs.readFileSync(filename, 'utf-8');
-  
+
   switch(mode) {
     case 'run':
       // Compile and run
       const js = compileRip(source);
       eval(js);
       break;
-      
+
     case 'compile':
       // Show compiled JavaScript
       console.log(compileRip(source));
       break;
-      
+
     case 'ast':
       // Show AST
       const ast = getAST(source);
       console.log(JSON.stringify(ast, null, 2));
       break;
-      
+
     case 'tokens':
       // Show token stream
       const lexer = new Lexer();
@@ -257,7 +257,7 @@ try {
       }));
       const rewriter = new Rewriter();
       const rewritten = rewriter.rewrite(tokens);
-      
+
       console.log('Tokens after rewriter:');
       rewritten.forEach(t => {
         const gen = t.generated ? ' [generated]' : '';
