@@ -249,7 +249,7 @@ Generator = class Generator {
               return s.length > 0;
             });
             action = rule[1];
-          } else {
+    } else {
             throw new Error(`Invalid rule format: ${rule}`);
           }
           // Register symbols in RHS
@@ -264,7 +264,7 @@ Generator = class Generator {
                   this.terminals[token] = new Terminal(token, Object.keys(this.terminals).length);
                   this.terminalNames[symbol] = token;
                 }
-              } else {
+        } else {
                 // It's a nonterminal
                 this.nonterminals[symbol] = new Nonterminal(symbol, Object.keys(this.nonterminals).length);
               }
@@ -283,7 +283,7 @@ Generator = class Generator {
             if (symbol instanceof Terminal && symbol.precedence) {
               production.precedence = symbol.precedence;
               production.associativity = symbol.associativity;
-              break;
+          break;
             }
           }
           this.productions.push(production);
@@ -438,7 +438,7 @@ Generator = class Generator {
                   changed = true;
                 }
                 break;
-              } else {
+      } else {
                 nextSymbol.first.forEach((terminal) => {
                   if (!symbol.follows.has(terminal)) {
                     symbol.follows.add(terminal);
@@ -484,7 +484,7 @@ Generator = class Generator {
           production.lhs.follows.forEach((terminal) => {
             if (typeof terminal === 'string') {
               item.lookaheads.add(terminal);
-            } else {
+          } else {
               item.lookaheads.add(terminal.name);
             }
           });
@@ -536,7 +536,7 @@ Generator = class Generator {
             if (!this.table[state.id]['$EOF']) {
               this.table[state.id]['$EOF'] = [3]; // [ACCEPT]
             }
-          } else {
+            } else {
             // Reduce action for lookaheads
             item.lookaheads.forEach((lookahead) => {
               terminalId = lookahead === '$EOF' ? '$EOF' : ((ref3 = this.terminals[lookahead]) != null ? ref3.id : void 0);
@@ -544,7 +544,7 @@ Generator = class Generator {
                 action = [2, production.id]; // [REDUCE, production]
                 if (!this.table[state.id][terminalId]) {
                   this.table[state.id][terminalId] = action;
-                } else {
+          } else {
                   // Reduce-reduce or shift-reduce conflict
                   this.handleConflict(state, lookahead, action, this.table[state.id][terminalId]);
                 }
@@ -646,7 +646,7 @@ Generator = class Generator {
     return `(function() {
   var parser = {
     trace: function ${this.trace.toString().replace(/^trace/, '')},
-    yy: {},
+      yy: {},
     symbols_: ${JSON.stringify(this.terminalNames)},
     terminals_: ${JSON.stringify(this.terminals)},
     productionData: ${this.generateProductionData()},
@@ -772,7 +772,7 @@ Generator = class Generator {
       // Get default action for this state
       if (this.defaultActions[state]) {
         action = this.defaultActions[state];
-      } else {
+    } else {
         // Get next token if needed
         if (!symbol) {
           symbol = lexer.lex() || EOF;

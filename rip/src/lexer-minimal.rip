@@ -1,0 +1,252 @@
+# Minimal Rip Lexer
+# Just enough to tokenize our minimal grammar
+
+class Lexer
+  constructor: ->
+    @reset()
+
+  reset: ->
+    @tokens = []
+    @indents = []
+    @ends = []
+    @currentIndent = 0
+    @line = 1
+    @column = 1
+    @pos = 0
+    @chunk = ""
+
+  tokenize: (code) ->
+    @reset()
+    @code = @clean code
+
+    while @chunk = @code[@pos..]
+      consumed =
+        @identifierToken() or
+        @numberToken() or
+        @stringToken() or
+        @commentToken() or
+        @whitespaceToken() or
+        @lineToken() or
+        @literalToken()
+
+      @pos += consumed
+
+    @closeIndentation()
+    @tokens.push ["EOF", "", @line, @column]
+    @tokens
+
+  # Clean the source code
+  clean: (code) ->
+    # Remove carriage returns and trailing spaces
+    code = code.replace /\r/g, ""
+    code = code.replace /\s+$/gm, ""
+    # Ensure file ends with newline
+    code += "\n" unless code.endsWith "\n"
+    code
+
+  # Match identifiers and keywords
+  identifierToken: ->
+    return 0 unless match = /^[a-zA-Z_$][a-zA-Z0-9_$]*/.exec @chunk
+
+    word = match[0]
+    tag = switch word
+      # Keywords
+      when "if" then "IF"
+      when "else" then "ELSE"
+      when "unless" then "UNLESS"
+      when "return" then "RETURN"
+      when "import" then "IMPORT"
+      when "export" then "EXPORT"
+      when "from" then "FROM"
+      when "as" then "AS"
+      when "default" then "DEFAULT"
+      when "super" then "SUPER"
+      when "this" then "THIS"
+      when "class" then "CLASS"
+      when "extends" then "EXTENDS"
+      when "new" then "NEW"
+      when "typeof" then "TYPEOF"
+      when "instanceof" then "INSTANCEOF"
+      when "in" then "IN"
+      when "of" then "OF"
+
+      # Boolean literals
+      when "true", "yes", "on" then "BOOL"
+      when "false", "no", "off" then "BOOL"
+      when "null" then "NULL"
+      when "undefined" then "UNDEFINED"
+
+      # CoffeeScript aliases
+      when "and" then "and"
+      when "or" then "or"
+      when "not" then "not"
+      when "is" then "is"
+      when "isnt" then "isnt"
+
+      # Check if it's a property after dot
+      else
+        prev = @tokens[@tokens.length - 1]
+        if prev and prev[0] in [".", "?."]
+          "PROPERTY"
+        else
+          "IDENTIFIER"
+
+    # For boolean literals, normalize the value
+    value = if tag is "BOOL"
+      if word in ["true", "yes", "on"] then "true" else "false"
+    else
+      word
+
+    @token tag, value
+    word.length
+
+  # Match numbers
+  numberToken: ->
+    return 0 unless match = /^(0b[01]+|0o[0-7]+|0x[\da-fA-F]+|\d+(\.\d+)?([eE][+-]?\d+)?)/.exec @chunk
+
+    @token "NUMBER", match[0]
+    match[0].length
+
+  # Match strings (single and double quotes)
+  stringToken: ->
+    return 0 unless match = /^(['"])/.exec @chunk
+
+    quote = match[0]
+    regex = if quote is "'" then /^'([^'\\]|\\.)*'/ else /^"([^"\\]|\\.)*"/
+
+    return 0 unless match = regex.exec @chunk
+
+    # Extract string content without quotes
+    content = match[0][1...-1]
+
+    # Basic escape sequence handling
+    content = content.replace /\\n/g, "\n"
+    content = content.replace /\\t/g, "\t"
+    content = content.replace /\\r/g, "\r"
+    content = content.replace /\\\\/g, "\\"
+    content = content.replace /\\'/g, "'"
+    content = content.replace /\\"/g, '"'
+
+    @token "STRING", '"' + content + '"'
+    match[0].length
+
+  # Match comments
+  commentToken: ->
+    # Single line comment
+    if match = /^#[^\n]*/.exec @chunk
+      # Skip comment, don't create token
+      return match[0].length
+
+    # Block comment
+    if match = /^###([\s\S]*?)###/.exec @chunk
+      # Skip comment, don't create token
+      lines = match[0].split("\n").length - 1
+      @line += lines
+      return match[0].length
+
+    0
+
+  # Match whitespace (but not newlines)
+  whitespaceToken: ->
+    return 0 unless match = /^[ \t]+/.exec @chunk
+
+    # Mark previous token as spaced
+    if @tokens.length > 0
+      @tokens[@tokens.length - 1].spaced = true
+
+    @column += match[0].length
+    match[0].length
+
+  # Match newlines and handle indentation
+  lineToken: ->
+    return 0 unless match = /^(\n[ \t]*)/.exec @chunk
+
+    @line++
+    indent = match[0].substring(1)
+    @column = indent.length + 1
+
+    # Calculate indent level (convert tabs to spaces)
+    size = 0
+    for char in indent
+      size += if char is "\t" then 4 else 1
+
+    # Handle indent changes
+    if size > @currentIndent
+      diff = size - @currentIndent
+      @currentIndent = size
+      @indents.push diff
+      @token "INDENT", diff
+    else if size < @currentIndent
+      while size < @currentIndent and @indents.length > 0
+        lastIndent = @indents.pop()
+        @currentIndent -= lastIndent
+        @token "OUTDENT", lastIndent
+      @token "TERMINATOR", "\n"
+    else
+      @token "TERMINATOR", "\n"
+
+    match[0].length
+
+  # Match literal tokens (operators and punctuation)
+  literalToken: ->
+    # Two-character operators
+    if match = /^(->|=>|==|!=|<=|>=|&&|\|\||\.\.|\.\.\.)/.exec @chunk
+      tag = switch match[0]
+        when "->" then "->"
+        when "=>" then "=>"
+        when "==" then "=="
+        when "!=" then "!="
+        when "<=" then "<="
+        when ">=" then ">="
+        when "&&" then "&&"
+        when "||" then "||"
+        when ".." then ".."
+        when "..." then "..."
+        else match[0]
+
+      @token tag, match[0]
+      return match[0].length
+
+    # Single character tokens
+    char = @chunk[0]
+    tag = switch char
+      when "(" then "("
+      when ")" then ")"
+      when "[" then "["
+      when "]" then "]"
+      when "{" then "{"
+      when "}" then "}"
+      when "," then ","
+      when "." then "."
+      when ":" then ":"
+      when ";" then "TERMINATOR"
+      when "+" then "+"
+      when "-" then "-"
+      when "*" then "*"
+      when "/" then "/"
+      when "%" then "%"
+      when "=" then "="
+      when "<" then "<"
+      when ">" then ">"
+      when "!" then "!"
+      when "@" then "@"
+      else null
+
+    if tag
+      @token tag, char
+      return 1
+
+    # Unknown character
+    throw new Error "Unexpected character '#{char}' at line #{@line}, column #{@column}"
+
+  # Close all open indentations at end of file
+  closeIndentation: ->
+    while @indents.length > 0
+      @indents.pop()
+      @token "OUTDENT", 0
+
+  # Add a token to the stream
+  token: (tag, value) ->
+    @tokens.push [tag, value, @line, @column]
+
+module.exports = Lexer
