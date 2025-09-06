@@ -1,12 +1,4 @@
-// `cake` is a simplified version of [Make](http://www.gnu.org/software/make/)
-// ([Rake](http://rake.rubyforge.org/), [Jake](https://github.com/280north/jake))
-// for CoffeeScript. You define tasks with names and descriptions in a Cakefile,
-// and can call them from the command line, or invoke them from other tasks.
 
-// Running `cake` with no arguments will print out a list of all the tasks in the
-// current directory's Cakefile.
-
-// External dependencies.
 var cakefileDirectory, fatalError, missingTask, oparse, options, printTasks, switches, tasks;
 
 import fs from 'fs';
@@ -19,10 +11,6 @@ import * as optparse from './optparse.js';
 
 import * as CoffeeScript from './coffeescript.js';
 
-// Register .coffee extension
-// CoffeeScript.register() # Not available in ESM
-
-// Keep track of the list of defined tasks, the accepted options, and so on.
 tasks = {};
 
 options = {};
@@ -31,23 +19,16 @@ switches = [];
 
 oparse = null;
 
-// Mixin the top-level Cake functions for Cakefiles to use directly.
 helpers.extend(global, {
-  // Define a Cake task with a short name, an optional sentence description,
-  // and the function to run as the action itself.
   task: function(name, description, action) {
     if (!action) {
       [action, description] = [description, action];
     }
     return tasks[name] = {name, description, action};
   },
-  // Define an option that the Cakefile accepts. The parsed options hash,
-  // containing all of the command-line options passed, will be made available
-  // as the first argument to the action.
   option: function(letter, flag, description) {
     return switches.push([letter, flag, description]);
   },
-  // Invoke another task in the current Cakefile.
   invoke: function(name) {
     if (!tasks[name]) {
       missingTask(name);
@@ -56,10 +37,6 @@ helpers.extend(global, {
   }
 });
 
-// Run `cake`. Executes all of the tasks you pass, in order. Note that Node's
-// asynchrony may cause tasks to execute in a different order than you'd expect.
-// If no tasks are passed, print the help screen. Keep a reference to the
-// original directory name, when running Cake tasks from subdirectories.
 export var run = function() {
   var arg, args, e, i, len, ref, results;
   global.__originalDirname = fs.realpathSync('.');
@@ -87,7 +64,6 @@ export var run = function() {
   return results;
 };
 
-// Display the list of Cake tasks in a format similar to `rake -T`
 printTasks = function() {
   var cakefilePath, desc, name, relative, spaces, task;
   relative = path.relative || path.resolve;
@@ -105,7 +81,6 @@ printTasks = function() {
   }
 };
 
-// Print an error and exit when attempting to use an invalid task/option.
 fatalError = function(message) {
   console.error(message + '\n');
   console.log('To see a list of all tasks/options, run "cake"');
@@ -116,8 +91,6 @@ missingTask = function(task) {
   return fatalError(`No such task: ${task}`);
 };
 
-// When `cake` is invoked, search in the current and all parent directories
-// to find the relevant Cakefile.
 cakefileDirectory = function(dir) {
   var parent;
   if (fs.existsSync(path.join(dir, 'Cakefile'))) {

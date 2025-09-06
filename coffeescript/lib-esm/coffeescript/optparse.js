@@ -5,47 +5,16 @@ import {
   repeat
 } from './helpers.js';
 
-// A simple **OptionParser** class to parse option flags from the command-line.
-// Use it like so:
-
-//     parser  = new OptionParser switches, helpBanner
-//     options = parser.parse process.argv
-
-// The first non-option is considered to be the start of the file (and file
-// option) list, and all subsequent arguments are left unparsed.
-
-// The `coffee` command uses an instance of **OptionParser** to parse its
-// command-line arguments in `src/command.coffee`.
 export var OptionParser = class OptionParser {
-  // Initialize with a list of valid options, in the form:
-
-  //     [short-flag, long-flag, description]
-
-  // Along with an optional banner for the usage help.
   constructor(ruleDeclarations, banner) {
     this.banner = banner;
     this.rules = buildRules(ruleDeclarations);
   }
 
-  // Parse the list of arguments, populating an `options` object with all of the
-  // specified options, and return it. Options after the first non-option
-  // argument are treated as arguments. `options.arguments` will be an array
-  // containing the remaining arguments. This is a simpler API than many option
-  // parsers that allow you to attach callback actions for every flag. Instead,
-  // you're responsible for interpreting the options object.
   parse(args) {
     var argument, hasArgument, i, isList, len, name, options, positional, rules;
-    // The CoffeeScript option parser is a little odd; options after the first
-    // non-option argument are treated as non-option arguments themselves.
-    // Optional arguments are normalized by expanding merged flags into multiple
-    // flags. This allows you to have `-wl` be the same as `--watch --lint`.
-    // Note that executable scripts with a shebang (`#!`) line should use the
-    // line `#!/usr/bin/env coffee`, or `#!/absolute/path/to/coffee`, without a
-    // `--` argument after, because that will fail on Linux (see #3946).
     ({rules, positional} = normalizeArguments(args, this.rules.flagDict));
     options = {};
-// The `argument` field is added to the rule instance non-destructively by
-// `normalizeArguments`.
     for (i = 0, len = rules.length; i < len; i++) {
       ({hasArgument, argument, isList, name} = rules[i]);
       if (hasArgument) {
@@ -69,8 +38,6 @@ export var OptionParser = class OptionParser {
     return options;
   }
 
-  // Return the help text for this **OptionParser**, listing and describing all
-  // of the valid options, for `--help` and such.
   help() {
     var i, len, letPart, lines, ref, rule, spaces;
     lines = [];
@@ -90,22 +57,14 @@ export var OptionParser = class OptionParser {
 
 };
 
-// Helpers
-// -------
-
-// Regex matchers for option flags on the command line and their rules.
 LONG_FLAG = /^(--\w[\w\-]*)/;
 
 SHORT_FLAG = /^(-\w)$/;
 
 MULTI_FLAG = /^-(\w{2,})/;
 
-// Matches the long flag part of a rule for an option with an argument. Not
-// applied to anything in process.argv.
 OPTIONAL = /\[(\w+(\*?))\]/;
 
-// Build and return the list of option rules. If the optional *short-flag* is
-// unspecified, leave it out by padding with `null`.
 buildRules = function(ruleDeclarations) {
   var flag, flagDict, i, j, len, len1, ref, rule, ruleList, tuple;
   ruleList = (function() {
@@ -124,7 +83,6 @@ buildRules = function(ruleDeclarations) {
   for (i = 0, len = ruleList.length; i < len; i++) {
     rule = ruleList[i];
     ref = [rule.shortFlag, rule.longFlag];
-    // `shortFlag` is null if not provided in the rule.
     for (j = 0, len1 = ref.length; j < len1; j++) {
       flag = ref[j];
       if (!(flag != null)) {
@@ -139,8 +97,6 @@ buildRules = function(ruleDeclarations) {
   return {ruleList, flagDict};
 };
 
-// Build a rule from a `-o` short flag, a `--output [DIR]` long flag, and the
-// description of what the option does.
 buildRule = function(shortFlag, longFlag, description) {
   var match;
   match = longFlag.match(OPTIONAL);
@@ -163,9 +119,6 @@ normalizeArguments = function(args, flagDict) {
   needsArgOpt = null;
   for (argIndex = i = 0, len = args.length; i < len; argIndex = ++i) {
     arg = args[argIndex];
-    // If the previous argument given to the script was an option that uses the
-    // next command-line argument as its argument, create copy of the option’s
-    // rule with an `argument` field.
     if (needsArgOpt != null) {
       withArg = Object.assign({}, needsArgOpt.rule, {
         argument: arg
@@ -186,7 +139,6 @@ normalizeArguments = function(args, flagDict) {
         }
         return {rule, flag};
       });
-      // Only the last flag in a multi-flag may have an argument.
       [...innerOpts] = multiOpts, [lastOpt] = splice.call(innerOpts, -1);
       for (j = 0, len1 = innerOpts.length; j < len1; j++) {
         ({rule, flag} = innerOpts[j]);
@@ -216,7 +168,6 @@ normalizeArguments = function(args, flagDict) {
         rules.push(singleRule);
       }
     } else {
-      // This is a positional argument.
       positional = args.slice(argIndex);
       break;
     }

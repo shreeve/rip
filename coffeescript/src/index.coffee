@@ -1,12 +1,12 @@
 # Node.js Implementation
-CoffeeScript  = require './coffeescript'
-fs            = require 'fs'
-vm            = require 'vm'
-path          = require 'path'
+import * as CoffeeScript from './coffeescript.js'
+import fs from 'fs'
+import vm from 'vm'
+import path from 'path'
 
 helpers       = CoffeeScript.helpers
 
-CoffeeScript.transpile = (js, options) ->
+transpile = (js, options) ->
   try
     babel = require '@babel/core'
   catch
@@ -32,7 +32,7 @@ CoffeeScript.compile = (code, options) ->
 
 # Compile and execute a string of CoffeeScript (on the server), correctly
 # setting `__filename`, `__dirname`, and relative `require()`.
-CoffeeScript.run = (code, options = {}) ->
+run = (code, options = {}) ->
   mainModule = require.main
 
   # Set the filename.
@@ -63,7 +63,7 @@ CoffeeScript.run = (code, options = {}) ->
 
 # Compile and evaluate a string of CoffeeScript (in a Node.js-like environment).
 # The CoffeeScript REPL uses this to run the input.
-CoffeeScript.eval = (code, options = {}) ->
+coffeeEval = (code, options = {}) ->
   return unless code = code.trim()
   createContext = vm.Script.createContext ? vm.createContext
 
@@ -102,7 +102,7 @@ CoffeeScript.eval = (code, options = {}) ->
   else
     vm.runInContext js, sandbox
 
-CoffeeScript.register = -> require './register'
+register = -> require './register'
 
 # Throw error with deprecation warning when depending upon implicit `require.extensions` registration
 if require.extensions
@@ -112,7 +112,7 @@ if require.extensions
       Use CoffeeScript.register() or require the coffeescript/register module to require #{ext} files.
       """
 
-CoffeeScript._compileRawFileContent = (raw, filename, options = {}) ->
+_compileRawFileContent = (raw, filename, options = {}) ->
 
   # Strip the Unicode byte order mark, if this file begins with one.
   stripped = if raw.charCodeAt(0) is 0xFEFF then raw.substring 1 else raw
@@ -131,29 +131,13 @@ CoffeeScript._compileRawFileContent = (raw, filename, options = {}) ->
 
   answer
 
-CoffeeScript._compileFile = (filename, options = {}) ->
+_compileFile = (filename, options = {}) ->
   raw = fs.readFileSync filename, 'utf8'
 
   CoffeeScript._compileRawFileContent raw, filename, options
 
-module.exports = CoffeeScript
+# Re-export everything from CoffeeScript
+export * from './coffeescript.js'
 
-# Explicitly define all named exports so that Node’s automatic detection of
-# named exports from CommonJS packages finds all of them. This enables consuming
-# packages to write code like `import { compile } from 'coffeescript'`.
-# Don’t simplify this into a loop or similar; the `module.exports.name` part is
-# essential for Node’s algorithm to successfully detect the name.
-module.exports.VERSION = CoffeeScript.VERSION
-module.exports.FILE_EXTENSIONS = CoffeeScript.FILE_EXTENSIONS
-module.exports.helpers = CoffeeScript.helpers
-module.exports.registerCompiled = CoffeeScript.registerCompiled
-module.exports.compile = CoffeeScript.compile
-module.exports.tokens = CoffeeScript.tokens
-module.exports.nodes = CoffeeScript.nodes
-module.exports.register = CoffeeScript.register
-module.exports.eval = CoffeeScript.eval
-module.exports.run = CoffeeScript.run
-module.exports.transpile = CoffeeScript.transpile
-module.exports.patchStackTrace = CoffeeScript.patchStackTrace
-module.exports._compileRawFileContent = CoffeeScript._compileRawFileContent
-module.exports._compileFile = CoffeeScript._compileFile
+# Also export the functions defined in this file
+export {transpile, run, coffeeEval as eval, register, _compileRawFileContent, _compileFile}

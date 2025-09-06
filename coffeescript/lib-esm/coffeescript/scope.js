@@ -1,18 +1,7 @@
-// The **Scope** class regulates lexical scoping within CoffeeScript. As you
-// generate code, you create a tree of scopes in the same shape as the nested
-// function bodies. Each scope knows about the variables declared within it,
-// and has a reference to its parent enclosing scope. In this way, we know which
-// variables are new and need to be declared with `var`, and which are shared
-// with external scopes.
+
 var indexOf = [].indexOf;
 
 export var Scope = class Scope {
-  // Initialize a scope with its parent, for lookups up the chain,
-  // as well as a reference to the **Block** node it belongs to, which is
-  // where it should declare its variables, a reference to the function that
-  // it belongs to, and a list of variables referenced in the source code
-  // and therefore should be avoided when generating variables. Also track comments
-  // that should be output as part of variable declarations.
   constructor(parent, expressions, method, referencedVars) {
     var ref, ref1;
     this.parent = parent;
@@ -30,11 +19,9 @@ export var Scope = class Scope {
     if (!this.parent) {
       this.utilities = {};
     }
-    // The `@root` is the top-level **Scope** object for a given file.
     this.root = (ref = (ref1 = this.parent) != null ? ref1.root : void 0) != null ? ref : this;
   }
 
-  // Adds a new variable or overrides an existing one.
   add(name, type, immediate) {
     if (this.shared && !immediate) {
       return this.parent.add(name, type, immediate);
@@ -46,11 +33,6 @@ export var Scope = class Scope {
     }
   }
 
-  // When `super` is called, we need to find the name of the current method we're
-  // in, so that we know how to invoke the same method of the parent class. This
-  // can get complicated if super is being called from an inner function.
-  // `namedMethod` will walk up the scope tree until it either finds the first
-  // function object that has a name filled in, or bottoms out.
   namedMethod() {
     var ref;
     if (((ref = this.method) != null ? ref.name : void 0) || !this.parent) {
@@ -59,8 +41,6 @@ export var Scope = class Scope {
     return this.parent.namedMethod();
   }
 
-  // Look up a variable name in lexical scope, and declare it if it does not
-  // already exist.
   find(name, type = 'var') {
     if (this.check(name)) {
       return true;
@@ -69,8 +49,6 @@ export var Scope = class Scope {
     return false;
   }
 
-  // Reserve a variable name as originating from a function parameter for this
-  // scope. No `var` required for internal references.
   parameter(name) {
     if (this.shared && this.parent.check(name, true)) {
       return;
@@ -78,14 +56,11 @@ export var Scope = class Scope {
     return this.add(name, 'param');
   }
 
-  // Just check to see if a variable has already been declared, without reserving,
-  // walks up to the root scope.
   check(name) {
     var ref;
     return !!(this.type(name) || ((ref = this.parent) != null ? ref.check(name) : void 0));
   }
 
-  // Generate a temporary variable name at the given index.
   temporary(name, index, single = false) {
     var diff, endCode, letter, newCode, num, startCode;
     if (single) {
@@ -101,7 +76,6 @@ export var Scope = class Scope {
     }
   }
 
-  // Gets the type of a variable.
   type(name) {
     var i, len, ref, v;
     ref = this.variables;
@@ -114,8 +88,6 @@ export var Scope = class Scope {
     return null;
   }
 
-  // If we need to store an intermediate result, find an available name for a
-  // compiler-generated variable. `_var`, `_var2`, and so on...
   freeVariable(name, options = {}) {
     var index, ref, temp;
     index = 0;
@@ -132,8 +104,6 @@ export var Scope = class Scope {
     return temp;
   }
 
-  // Ensure that an assignment is made at the top of this scope
-  // (or at the top-level scope, if requested).
   assign(name, value) {
     this.add(name, {
       value,
@@ -142,12 +112,10 @@ export var Scope = class Scope {
     return this.hasAssignments = true;
   }
 
-  // Does this scope have any declared variables?
   hasDeclarations() {
     return !!this.declaredVariables().length;
   }
 
-  // Return the list of variables first declared in this scope.
   declaredVariables() {
     var v;
     return ((function() {
@@ -164,8 +132,6 @@ export var Scope = class Scope {
     }).call(this)).sort();
   }
 
-  // Return the list of assignments that are supposed to be made at the top
-  // of this scope.
   assignedVariables() {
     var i, len, ref, results, v;
     ref = this.variables;

@@ -1,13 +1,4 @@
-  // The CoffeeScript Lexer. Uses a series of token-matching regexes to attempt
-  // matches against the beginning of the source code. When a match is found,
-  // a token is produced, we consume the match, and start again. Tokens are in the
-  // form:
 
-  //     [tag, value, locationData]
-
-  // where locationData is {first_line, first_column, last_line, last_column, last_line_exclusive, last_column_exclusive}, which is a
-  // format that can be fed directly into [Jison](https://github.com/zaach/jison).  These
-  // are read by jison in the `parser.lexer` function defined in coffeescript.coffee.
 var BOM, BOOL, CALLABLE, CODE, COFFEE_ALIASES, COFFEE_ALIAS_MAP, COFFEE_KEYWORDS, COMMENT, COMPARABLE_LEFT_SIDE, COMPARE, COMPOUND_ASSIGN, HERECOMMENT_ILLEGAL, HEREDOC_DOUBLE, HEREDOC_INDENT, HEREDOC_SINGLE, HEREGEX, HEREGEX_COMMENT, HERE_JSTOKEN, IDENTIFIER, INDENTABLE_CLOSERS, INDEXABLE, JSTOKEN, JS_KEYWORDS, LINE_BREAK, LINE_CONTINUER, MATH, MULTI_DENT, NOT_REGEX, NUMBER, OPERATOR, POSSIBLY_DIVISION, REGEX, REGEX_FLAGS, REGEX_ILLEGAL, REGEX_INVALID_ESCAPE, RELATION, RESERVED, SHIFT, STRICT_PROSCRIBED, STRING_DOUBLE, STRING_INVALID_ESCAPE, STRING_SINGLE, STRING_START, TRAILING_SPACES, UNARY, UNARY_MATH, VALID_FLAGS, WHITESPACE, addTokenData, isForFrom, isUnassignable, key,
   indexOf = [].indexOf,
   slice = [].slice;
@@ -19,7 +10,6 @@ import {
 } from './rewriter.js';
 
 import {
-  // Import the helpers we need.
   count,
   starts,
   compact,
@@ -33,57 +23,34 @@ import {
   parseNumber
 } from './helpers.js';
 
-// The Lexer Class
-// ---------------
-
-  // The Lexer class reads a stream of CoffeeScript and divvies it up into tagged
-// tokens. Some potential ambiguity in the grammar has been avoided by
-// pushing some extra smarts into the Lexer.
 export var Lexer = class Lexer {
   constructor() {
-    // Throws an error at either a given offset from the current chunk or at the
-    // location of a token (`token[2]`).
     this.error = this.error.bind(this);
   }
 
-  // **tokenize** is the Lexer's main method. Scan by attempting to match tokens
-  // one at a time, using a regular expression anchored at the start of the
-  // remaining code, or a custom recursive token-matching method
-  // (for interpolations). When the next token has been recorded, we move forward
-  // within the code past the token, and begin again.
-
-  // Each tokenizing method is responsible for returning the number of characters
-  // it has consumed.
-
-  // Before returning the token stream, run it through the [Rewriter](rewriter.html).
   tokenize(code, opts = {}) {
     var consumed, end, i, ref;
-    this.indent = 0; // The current indentation level.
-    this.baseIndent = 0; // The overall minimum indentation level.
-    this.continuationLineAdditionalIndent = 0; // The over-indentation at the current level.
-    this.outdebt = 0; // The under-outdentation at the current level.
-    this.indents = []; // The stack of all current indentation levels.
-    this.indentLiteral = ''; // The indentation.
-    this.ends = []; // The stack for pairing up tokens.
-    this.tokens = []; // Stream of parsed tokens in the form `['TYPE', value, location data]`.
-    this.seenFor = false; // Used to recognize `FORIN`, `FOROF` and `FORFROM` tokens.
-    this.seenImport = false; // Used to recognize `IMPORT FROM? AS?` tokens.
-    this.seenExport = false; // Used to recognize `EXPORT FROM? AS?` tokens.
-    this.importSpecifierList = false; // Used to identify when in an `IMPORT {...} FROM? ...`.
-    this.exportSpecifierList = false; // Used to identify when in an `EXPORT {...} FROM? ...`.
-    this.chunkLine = opts.line || 0; // The start line for the current @chunk.
-    this.chunkColumn = opts.column || 0; // The start column of the current @chunk.
-    this.chunkOffset = opts.offset || 0; // The start offset for the current @chunk.
+    this.indent = 0;
+    this.baseIndent = 0;
+    this.continuationLineAdditionalIndent = 0;
+    this.outdebt = 0;
+    this.indents = [];
+    this.indentLiteral = '';
+    this.ends = [];
+    this.tokens = [];
+    this.seenFor = false;
+    this.seenImport = false;
+    this.seenExport = false;
+    this.importSpecifierList = false;
+    this.exportSpecifierList = false;
+    this.chunkLine = opts.line || 0;
+    this.chunkColumn = opts.column || 0;
+    this.chunkOffset = opts.offset || 0;
     this.locationDataCompensations = opts.locationDataCompensations || {};
-    code = this.clean(code); // The stripped, cleaned original source code.
-    
-    // At every position, run through this list of attempted matches,
-    // short-circuiting if any of them succeed. Their order determines precedence:
-    // `@literalToken` is the fallback catch-all.
+    code = this.clean(code);
     i = 0;
     while (this.chunk = code.slice(i)) {
       consumed = this.identifierToken() || this.commentToken() || this.whitespaceToken() || this.lineToken() || this.stringToken() || this.numberToken() || this.regexToken() || this.jsToken() || this.literalToken();
-      // Update position.
       [this.chunkLine, this.chunkColumn, this.chunkOffset] = this.getLineAndColumnFromChunk(consumed);
       i += consumed;
       if (opts.untilBalanced && this.ends.length === 0) {
@@ -103,8 +70,6 @@ export var Lexer = class Lexer {
     return (new Rewriter()).rewrite(this.tokens);
   }
 
-  // Preprocess the code to remove leading and trailing whitespace, carriage
-  // returns, etc.
   clean(code) {
     var base, thusFar;
     thusFar = 0;
@@ -128,22 +93,12 @@ export var Lexer = class Lexer {
     return code;
   }
 
-  // Tokenizers
-  // ----------
-
-    // Matches identifying literals: variables, keywords, method names, etc.
-  // Check to ensure that JavaScript reserved words aren’t being used as
-  // identifiers. Because CoffeeScript reserves a handful of keywords that are
-  // allowed in JavaScript, we’re careful not to tag them as keywords when
-  // referenced as property names here, so you can still do `jQuery.is()` even
-  // though `is` means `===` otherwise.
   identifierToken() {
     var afterNot, alias, colon, colonOffset, colonToken, id, idLength, input, match, poppedToken, prev, prevprev, ref, ref1, ref10, ref11, ref12, ref2, ref3, ref4, ref5, ref6, ref7, ref8, ref9, regExSuper, sup, tag, tagToken, tokenData;
     if (!(match = IDENTIFIER.exec(this.chunk))) {
       return 0;
     }
     [input, id, colon] = match;
-    // Preserve length of id for location data
     idLength = id.length;
     poppedToken = void 0;
     if (id === 'own' && this.tag() === 'FOR') {
@@ -227,9 +182,6 @@ export var Lexer = class Lexer {
     } else if (tag === 'IDENTIFIER' && this.seenFor && id === 'from' && isForFrom(prev)) {
       tag = 'FORFROM';
       this.seenFor = false;
-    // Throw an error on attempts to use `get` or `set` as keywords, or
-    // what CoffeeScript would normally interpret as calls to functions named
-    // `get` or `set`, i.e. `get({foo: function () {}})`.
     } else if (tag === 'PROPERTY' && prev) {
       if (prev.spaced && (ref9 = prev[0], indexOf.call(CALLABLE, ref9) >= 0) && /^[gs]et$/.test(prev[1]) && this.tokens.length > 1 && ((ref10 = this.tokens[this.tokens.length - 2][0]) !== '.' && ref10 !== '?.' && ref10 !== '@')) {
         this.error(`'${prev[1]}' cannot be used as a keyword, or as a function call without parentheses`, prev[2]);
@@ -251,15 +203,11 @@ export var Lexer = class Lexer {
       });
     }
     if (!(tag === 'PROPERTY' || this.exportSpecifierList || this.importSpecifierList)) {
-      // Transform 'is not' → 'isnt' for cleaner syntax (before alias processing)
-      // Only transform when 'not' is followed by a non-boolean value to avoid breaking chains
       if (id === 'is' && this.chunk.slice(idLength, idLength + 4) === ' not') {
-        // Look ahead to see what comes after ' not '
         afterNot = this.chunk.slice(idLength + 4).trim();
-        // Only transform if NOT followed by 'false', 'true' (which could be part of chains)
         if (!afterNot.match(/^(false|true)\s+(is|isnt|==|!=)/)) {
           id = 'isnt';
-          idLength += 4; // Consume ' not' as well
+          idLength += 4;
         }
       }
       if (indexOf.call(COFFEE_ALIASES, id) >= 0) {
@@ -305,7 +253,6 @@ export var Lexer = class Lexer {
         offset: colonOffset
       });
     }
-    // Return the actual consumed length (accounts for 'is not' → 'isnt' transformation)
     if (colon) {
       return idLength + colon.length;
     } else {
@@ -313,8 +260,6 @@ export var Lexer = class Lexer {
     }
   }
 
-  // Matches numbers, including decimals, hex, and exponential notation.
-  // Be careful not to interfere with ranges in progress.
   numberToken() {
     var lexedLength, match, number, parsedValue, tag, tokenData;
     if (!(match = NUMBER.exec(this.chunk))) {
@@ -351,16 +296,12 @@ export var Lexer = class Lexer {
     return lexedLength;
   }
 
-  // Matches strings, including multiline strings, as well as heredocs, with or without
-  // interpolation.
   stringToken() {
     var attempt, delimiter, doc, end, heredoc, i, indent, match, prev, quote, ref, regex, token, tokens;
     [quote] = STRING_START.exec(this.chunk) || [];
     if (!quote) {
       return 0;
     }
-    // If the preceding token is `from` and this is an import or export statement,
-    // properly tag the `from`.
     prev = this.prev();
     if (prev && this.value() === 'from' && (this.seenImport || this.seenExport)) {
       prev[0] = 'FROM';
@@ -383,7 +324,6 @@ export var Lexer = class Lexer {
     } = this.matchWithInterpolations(regex, quote));
     heredoc = quote.length === 3;
     if (heredoc) {
-      // Find the smallest indentation. It will be removed from all lines later.
       indent = null;
       doc = ((function() {
         var j, len, results;
@@ -416,9 +356,6 @@ export var Lexer = class Lexer {
     return end;
   }
 
-  // Matches and consumes comments. The comments are taken out of the token
-  // stream and saved for later, to be reinserted into the output after
-  // everything has been parsed and the JavaScript code generated.
   commentToken(chunk = this.chunk, {heregex, returnCommentTokens = false, offsetInChunk = 0} = {}) {
     var commentAttachment, commentAttachments, commentWithSurroundingWhitespace, content, contents, getIndentSize, hasSeenFirstCommentLine, hereComment, hereLeadingWhitespace, hereTrailingWhitespace, i, indentSize, leadingNewline, leadingNewlineOffset, leadingNewlines, leadingWhitespace, length, lineComment, match, matchIllegal, noIndent, nonInitial, placeholderToken, precededByBlankLine, precedingNonCommentLines, prev;
     if (!(match = chunk.match(COMMENT))) {
@@ -426,7 +363,6 @@ export var Lexer = class Lexer {
     }
     [commentWithSurroundingWhitespace, hereLeadingWhitespace, hereComment, hereTrailingWhitespace, lineComment] = match;
     contents = null;
-    // Does this comment follow code on the same line?
     leadingNewline = /^\s*\n+\s*#/.test(commentWithSurroundingWhitespace);
     if (hereComment) {
       matchIllegal = HERECOMMENT_ILLEGAL.exec(hereComment);
@@ -436,13 +372,9 @@ export var Lexer = class Lexer {
           length: matchIllegal[0].length
         });
       }
-      // Parse indentation or outdentation as if this block comment didn’t exist.
       chunk = chunk.replace(`###${hereComment}###`, '');
-      // Remove leading newlines, like `Rewriter::removeLeadingNewlines`, to
-      // avoid the creation of unwanted `TERMINATOR` tokens.
       chunk = chunk.replace(/^\n+/, '');
       this.lineToken({chunk});
-      // Pull out the ###-style comment’s content, and format it.
       content = hereComment;
       contents = [
         {
@@ -452,9 +384,6 @@ export var Lexer = class Lexer {
         }
       ];
     } else {
-      // The `COMMENT` regex captures successive line comments as one token.
-      // Remove any leading newlines before the first comment, but preserve
-      // blank lines between line comments.
       leadingNewlines = '';
       content = lineComment.replace(/^(\n*)/, function(leading) {
         leadingNewlines = leading;
@@ -513,7 +442,7 @@ export var Lexer = class Lexer {
         commentAttachment = {
           content,
           here: hereComment != null,
-          newLine: leadingNewline || nonInitial, // Line comments after the first one start new lines, by definition.
+          newLine: leadingNewline || nonInitial,
           locationData: this.makeLocationData({offsetInChunk, length}),
           precededByBlankLine,
           indentSize,
@@ -530,12 +459,10 @@ export var Lexer = class Lexer {
     }).call(this);
     prev = this.prev();
     if (!prev) {
-      // If there’s no previous token, create a placeholder token to attach
-      // this comment to; and follow with a newline.
       commentAttachments[0].newLine = true;
       this.lineToken({
         chunk: this.chunk.slice(commentWithSurroundingWhitespace.length),
-        offset: commentWithSurroundingWhitespace.length // Set the indent.
+        offset: commentWithSurroundingWhitespace.length
       });
       placeholderToken = this.makeToken('JS', '', {
         offset: commentWithSurroundingWhitespace.length,
@@ -553,14 +480,11 @@ export var Lexer = class Lexer {
     return commentWithSurroundingWhitespace.length;
   }
 
-  // Matches JavaScript interpolated directly into the source via backticks.
   jsToken() {
     var length, match, matchedHere, script;
     if (!(this.chunk.charAt(0) === '`' && (match = (matchedHere = HERE_JSTOKEN.exec(this.chunk)) || JSTOKEN.exec(this.chunk)))) {
       return 0;
     }
-    // Convert escaped backticks to backticks, and escaped backslashes
-    // just before escaped backticks to backslashes
     script = match[1];
     ({length} = match[0]);
     this.token('JS', script, {
@@ -572,9 +496,6 @@ export var Lexer = class Lexer {
     return length;
   }
 
-  // Matches regular expression literals, as well as multiline extended ones.
-  // Lexing regular expressions is difficult to distinguish from division, so we
-  // borrow some basic heuristics from JavaScript and Ruby.
   regexToken() {
     var body, closed, comment, commentIndex, commentOpts, commentTokens, comments, delimiter, end, flags, fullMatch, index, leadingWhitespace, match, matchedComment, origin, prev, ref, ref1, regex, tokens;
     switch (false) {
@@ -701,7 +622,6 @@ export var Lexer = class Lexer {
           generated: true
         });
     }
-    // Explicitly attach any heregex comments to the REGEX/REGEX_END token.
     if (commentTokens != null ? commentTokens.length : void 0) {
       addTokenData(this.tokens[this.tokens.length - 1], {
         heregexCommentTokens: commentTokens
@@ -710,16 +630,6 @@ export var Lexer = class Lexer {
     return end;
   }
 
-  // Matches newlines, indents, and outdents, and determines which is which.
-  // If we can detect that the current line is continued onto the next line,
-  // then the newline is suppressed:
-
-  //     elements
-  //       .each( ... )
-  //       .map( ... )
-
-  // Keeps track of the level of indentation, because a single outdent token
-  // can close multiple indents, so we need to know how far in we happen to be.
   lineToken({chunk = this.chunk, offset = 0} = {}) {
     var backslash, diff, endsContinuationLineIndentation, indent, match, minLiteralLength, newIndentLiteral, noNewlines, prev, ref, size;
     if (!(match = MULTI_DENT.exec(chunk))) {
@@ -808,8 +718,6 @@ export var Lexer = class Lexer {
     return indent.length;
   }
 
-  // Record an outdent token or multiple tokens, if we happen to be moving back
-  // inwards past several recorded indents. Sets new @indent value.
   outdentToken({moveOut, noNewlines, outdentLength = 0, offset = 0, indentSize, endsContinuationLineIndentation}) {
     var decreasedIndent, dent, lastIndent, ref, terminatorToken;
     decreasedIndent = this.indent - moveOut;
@@ -827,7 +735,6 @@ export var Lexer = class Lexer {
           moveOut = dent;
         }
         this.outdebt = 0;
-        // pair might call outdentToken, so preserve decreasedIndent
         this.pair('OUTDENT');
         this.token('OUTDENT', moveOut, {
           length: outdentLength,
@@ -856,8 +763,6 @@ export var Lexer = class Lexer {
     return this;
   }
 
-  // Matches and consumes non-meaningful whitespace. Tag the previous token
-  // as being “spaced”, because there are some cases where it makes a difference.
   whitespaceToken() {
     var match, nline, prev;
     if (!((match = WHITESPACE.exec(this.chunk)) || (nline = this.chunk.charAt(0) === '\n'))) {
@@ -874,7 +779,6 @@ export var Lexer = class Lexer {
     }
   }
 
-  // Generate a newline token. Consecutive newlines get merged together.
   newlineToken(offset) {
     this.suppressSemicolons();
     if (this.tag() !== 'TERMINATOR') {
@@ -886,16 +790,11 @@ export var Lexer = class Lexer {
     return this;
   }
 
-  // Use a `\` at a line-ending to suppress the newline.
-  // The slash is removed here once its job is done.
   suppressNewlines() {
     var prev;
     prev = this.prev();
     if (prev[1] === '\\') {
       if (prev.comments && this.tokens.length > 1) {
-        // `@tokens.length` should be at least 2 (some code, then `\`).
-        // If something puts a `\` after nothing, they deserve to lose any
-        // comments that trail it.
         attachCommentsToNode(prev.comments, this.tokens[this.tokens.length - 2]);
       }
       this.tokens.pop();
@@ -903,11 +802,6 @@ export var Lexer = class Lexer {
     return this;
   }
 
-  // We treat all other single characters as a token. E.g.: `( ) , . !`
-  // Multi-character operators are also literal tokens, so that Jison can assign
-  // the proper order of operations. There are some symbols that we tag specially
-  // here. `;` and newlines are both treated as a `TERMINATOR`, we distinguish
-  // parentheses that indicate a method call from regular parentheses, and so on.
   literalToken() {
     var match, message, origin, prev, ref, ref1, ref2, ref3, ref4, ref5, skipToken, tag, token, value;
     if (match = OPERATOR.exec(this.chunk)) {
@@ -985,7 +879,7 @@ export var Lexer = class Lexer {
           prev[0] = 'FUNC_EXIST';
         }
         tag = 'CALL_START';
-      } else if (value === '[' && (((ref5 = prev[0], indexOf.call(INDEXABLE, ref5) >= 0) && !prev.spaced) || (prev[0] === '::'))) { // `.prototype` can’t be a method you can call.
+      } else if (value === '[' && (((ref5 = prev[0], indexOf.call(INDEXABLE, ref5) >= 0) && !prev.spaced) || (prev[0] === '::'))) {
         tag = 'INDEX_START';
         switch (prev[0]) {
           case '?':
@@ -1012,12 +906,6 @@ export var Lexer = class Lexer {
     return value.length;
   }
 
-  // Token Manipulators
-  // ------------------
-
-    // A source of ambiguity in our grammar used to be parameter lists in function
-  // definitions versus argument lists in function calls. Walk backwards, tagging
-  // parameters specially in order to make things easier for the parser.
   tagParameters() {
     var i, paramEndToken, stack, tok, tokens;
     if (this.tag() !== ')') {
@@ -1049,8 +937,6 @@ export var Lexer = class Lexer {
     return this;
   }
 
-  // Tag `do` followed by a function differently than `do` followed by eg an
-  // identifier to allow for different grammar precedence
   tagDoIife(tokenIndex) {
     var tok;
     tok = this.tokens[tokenIndex != null ? tokenIndex : this.tokens.length - 1];
@@ -1061,7 +947,6 @@ export var Lexer = class Lexer {
     return this;
   }
 
-  // Close up all remaining open blocks at the end of the file.
   closeIndentation() {
     return this.outdentToken({
       moveOut: this.indent,
@@ -1069,24 +954,6 @@ export var Lexer = class Lexer {
     });
   }
 
-  // Match the contents of a delimited token and expand variables and expressions
-  // inside it using Ruby-like notation for substitution of arbitrary
-  // expressions.
-
-  //     "Hello #{name.capitalize()}."
-
-  // If it encounters an interpolation, this method will recursively create a new
-  // Lexer and tokenize until the `{` of `#{` is balanced with a `}`.
-
-  //  - `regex` matches the contents of a token (but not `delimiter`, and not
-  //    `#{` if interpolations are desired).
-  //  - `delimiter` is the delimiter of the token. Examples are `'`, `"`, `'''`,
-  //    `"""` and `///`.
-  //  - `closingDelimiter` can be customized
-  //  - `interpolators` matches the start of an interpolation
-
-  // This method allows us to have strings within interpolations within strings,
-  // ad infinitum.
   matchWithInterpolations(regex, delimiter, closingDelimiter = delimiter, interpolators = /^#\{/) {
     var braceInterpolator, close, column, index, interpolationOffset, interpolator, line, match, nested, offset, offsetInChunk, open, ref, ref1, rest, str, strPart, tokens;
     tokens = [];
@@ -1101,7 +968,6 @@ export var Lexer = class Lexer {
         isRegex: delimiter.charAt(0) === '/',
         offsetInChunk
       });
-      // Push a fake `'NEOSTRING'` token, which will get turned into a real string later.
       tokens.push(this.makeToken('NEOSTRING', strPart, {
         offset: offsetInChunk
       }));
@@ -1111,7 +977,6 @@ export var Lexer = class Lexer {
         break;
       }
       [interpolator] = match;
-      // To remove the `#` in `#{`.
       interpolationOffset = interpolator.length - 1;
       [line, column, offset] = this.getLineAndColumnFromChunk(offsetInChunk + interpolationOffset);
       rest = str.slice(interpolationOffset);
@@ -1125,12 +990,9 @@ export var Lexer = class Lexer {
         untilBalanced: true,
         locationDataCompensations: this.locationDataCompensations
       }));
-      // Account for the `#` in `#{`.
       index += interpolationOffset;
       braceInterpolator = str[index - 1] === '}';
       if (braceInterpolator) {
-        // Turn the leading and trailing `{` and `}` into parentheses. Unnecessary
-        // parentheses will be removed later.
         [open] = nested, [close] = slice.call(nested, -1);
         open[0] = 'INTERPOLATION_START';
         open[1] = '(';
@@ -1141,15 +1003,12 @@ export var Lexer = class Lexer {
         close.origin = ['', 'end of interpolation', close[2]];
       }
       if (((ref = nested[1]) != null ? ref[0] : void 0) === 'TERMINATOR') {
-        // Remove leading `'TERMINATOR'` (if any).
         nested.splice(1, 1);
       }
       if (((ref1 = nested[nested.length - 3]) != null ? ref1[0] : void 0) === 'INDENT' && nested[nested.length - 2][0] === 'OUTDENT') {
-        // Remove trailing `'INDENT'/'OUTDENT'` pair (if any).
         nested.splice(-3, 2);
       }
       if (!braceInterpolator) {
-        // We are not using `{` and `}`, so wrap the interpolated tokens instead.
         open = this.makeToken('INTERPOLATION_START', '(', {
           offset: offsetInChunk,
           length: 0,
@@ -1162,7 +1021,6 @@ export var Lexer = class Lexer {
         });
         nested = [open, ...nested, close];
       }
-      // Push a fake `'TOKENS'` token, which will get turned into real tokens later.
       tokens.push(['TOKENS', nested]);
       str = str.slice(index);
       offsetInChunk += index;
@@ -1178,10 +1036,6 @@ export var Lexer = class Lexer {
     };
   }
 
-  // Merge the array `tokens` of the fake token types `'TOKENS'` and `'NEOSTRING'`
-  // (as returned by `matchWithInterpolations`) into the token stream. The value
-  // of `'NEOSTRING'`s are converted using `fn` and turned into strings using
-  // `options` first.
   mergeInterpolationTokens(tokens, options, fn) {
     var $, converted, double, endOffset, firstIndex, heregex, i, indent, j, k, lastToken, len, len1, locationToken, lparen, placeholderToken, quote, ref, ref1, rparen, tag, token, tokensToPush, val, value;
     ({quote, indent, double, heregex, endOffset} = options);
@@ -1199,12 +1053,10 @@ export var Lexer = class Lexer {
       [tag, value] = token;
       switch (tag) {
         case 'TOKENS':
-          // There are comments (and nothing else) in this interpolation.
           if (value.length === 2 && (value[0].comments || value[1].comments)) {
             placeholderToken = this.makeToken('JS', '', {
               generated: true
             });
-            // Use the same location data as the first parenthesis.
             placeholderToken[2] = value[0][2];
             for (k = 0, len1 = value.length; k < len1; k++) {
               val = value[k];
@@ -1218,13 +1070,10 @@ export var Lexer = class Lexer {
             }
             value.splice(1, 0, placeholderToken);
           }
-          // Push all the tokens in the fake `'TOKENS'` token. These already have
-          // sane location data.
           locationToken = value[0];
           tokensToPush = value;
           break;
         case 'NEOSTRING':
-          // Convert `'NEOSTRING'` into `'STRING'`.
           converted = fn.call(this, token[1], i);
           if (i === 0) {
             addTokenData(token, {
@@ -1288,8 +1137,6 @@ export var Lexer = class Lexer {
     }
   }
 
-  // Pairs up a closing token, ensuring that all listed pairs of tokens are
-  // correctly balanced throughout the course of the token stream.
   pair(tag) {
     var lastIndent, prev, ref, ref1, wanted;
     ref = this.ends, [prev] = slice.call(ref, -1);
@@ -1297,11 +1144,6 @@ export var Lexer = class Lexer {
       if ('OUTDENT' !== wanted) {
         this.error(`unmatched ${tag}`);
       }
-      // Auto-close `INDENT` to support syntax like this:
-
-      //     el.click((event) ->
-      //       el.hide())
-
       ref1 = this.indents, [lastIndent] = slice.call(ref1, -1);
       this.outdentToken({
         moveOut: lastIndent,
@@ -1312,11 +1154,6 @@ export var Lexer = class Lexer {
     return this.ends.pop();
   }
 
-  // Helpers
-  // -------
-
-    // Compensate for the things we strip out initially (e.g. carriage returns)
-  // so that location data stays accurate with respect to the original source file.
   getLocationDataCompensation(start, end) {
     var compensation, current, initialEnd, totalCompensation;
     totalCompensation = 0;
@@ -1336,9 +1173,6 @@ export var Lexer = class Lexer {
     return totalCompensation;
   }
 
-  // Returns the line and column number from an offset into the current chunk.
-
-  // `offset` is a number of characters into `@chunk`.
   getLineAndColumnFromChunk(offset) {
     var column, columnCompensation, compensation, lastLine, lineCount, previousLinesCompensation, ref, string;
     compensation = this.getLocationDataCompensation(this.chunkOffset, this.chunkOffset + offset);
@@ -1357,7 +1191,6 @@ export var Lexer = class Lexer {
       column = lastLine.length;
       previousLinesCompensation = this.getLocationDataCompensation(this.chunkOffset, this.chunkOffset + offset - column);
       if (previousLinesCompensation < 0) {
-        // Don't recompensate for initially inserted newline.
         previousLinesCompensation = 0;
       }
       columnCompensation = this.getLocationDataCompensation(this.chunkOffset + offset + previousLinesCompensation - column, this.chunkOffset + offset + previousLinesCompensation);
@@ -1374,8 +1207,6 @@ export var Lexer = class Lexer {
       range: []
     };
     [locationData.first_line, locationData.first_column, locationData.range[0]] = this.getLineAndColumnFromChunk(offsetInChunk);
-    // Use length - 1 for the final offset - we’re supplying the last_line and the last_column,
-    // so if last_column == first_column, then we’re looking at a character of length 1.
     lastCharacter = length > 0 ? length - 1 : 0;
     [locationData.last_line, locationData.last_column, endOffset] = this.getLineAndColumnFromChunk(offsetInChunk + lastCharacter);
     [locationData.last_line_exclusive, locationData.last_column_exclusive] = this.getLineAndColumnFromChunk(offsetInChunk + lastCharacter + (length > 0 ? 1 : 0));
@@ -1383,8 +1214,6 @@ export var Lexer = class Lexer {
     return locationData;
   }
 
-  // Same as `token`, except this just returns the token without adding it
-  // to the results.
   makeToken(tag, value, {
       offset: offsetInChunk = 0,
       length = value.length,
@@ -1406,12 +1235,6 @@ export var Lexer = class Lexer {
     return token;
   }
 
-  // Add a token to the results.
-  // `offset` is the offset into the current `@chunk` where the token starts.
-  // `length` is the length of the token in the `@chunk`, after the offset.  If
-  // not specified, the length of `value` will be used.
-
-  // Returns the new token.
   token(tag, value, {offset, length, origin, data, generated, indentSize} = {}) {
     var token;
     token = this.makeToken(tag, value, {offset, length, origin, generated, indentSize});
@@ -1422,14 +1245,12 @@ export var Lexer = class Lexer {
     return token;
   }
 
-  // Peek at the last tag in the token stream.
   tag() {
     var ref, token;
     ref = this.tokens, [token] = slice.call(ref, -1);
     return token != null ? token[0] : void 0;
   }
 
-  // Peek at the last value in the token stream.
   value(useOrigin = false) {
     var ref, token;
     ref = this.tokens, [token] = slice.call(ref, -1);
@@ -1440,12 +1261,10 @@ export var Lexer = class Lexer {
     }
   }
 
-  // Get the previous token in the token stream.
   prev() {
     return this.tokens[this.tokens.length - 1];
   }
 
-  // Are we in the midst of an unfinished expression?
   unfinished() {
     var ref;
     return LINE_CONTINUER.test(this.chunk) || (ref = this.tag(), indexOf.call(UNFINISHED, ref) >= 0);
@@ -1455,7 +1274,6 @@ export var Lexer = class Lexer {
     return replaceUnicodeCodePointEscapes(str, merge(options, {error: this.error}));
   }
 
-  // Validates escapes in strings and regexes.
   validateEscapes(str, options = {}) {
     var before, hex, invalidEscape, invalidEscapeRegex, match, message, octal, ref, unicode, unicodeCodePoint;
     invalidEscapeRegex = options.isRegex ? REGEX_INVALID_ESCAPE : STRING_INVALID_ESCAPE;
@@ -1498,8 +1316,6 @@ export var Lexer = class Lexer {
 
 };
 
-// Helper functions
-// ----------------
 isUnassignable = function(name, displayName = name) {
   switch (false) {
     case indexOf.call([...JS_KEYWORDS, ...COFFEE_KEYWORDS], name) < 0:
@@ -1517,19 +1333,12 @@ export {
   isUnassignable
 };
 
-// `from` isn’t a CoffeeScript keyword, but it behaves like one in `import` and
-// `export` statements (handled above) and in the declaration line of a `for`
-// loop. Try to detect when `from` is a variable identifier and when it is this
-// “sometimes” keyword.
 isForFrom = function(prev) {
   var ref;
-  // `for i from iterable`
   if (prev[0] === 'IDENTIFIER') {
     return true;
-  // `for from…`
   } else if (prev[0] === 'FOR') {
     return false;
-  // `for {from}…`, `for [from]…`, `for {a, from}…`, `for {a: from}…`
   } else if ((ref = prev[1]) === '{' || ref === '[' || ref === ',' || ref === ':') {
     return false;
   } else {
@@ -1541,13 +1350,8 @@ addTokenData = function(token, data) {
   return Object.assign((token.data != null ? token.data : token.data = {}), data);
 };
 
-// Constants
-// ---------
-
-// Keywords that CoffeeScript shares in common with JavaScript.
 JS_KEYWORDS = ['true', 'false', 'null', 'this', 'new', 'delete', 'typeof', 'in', 'instanceof', 'return', 'throw', 'break', 'continue', 'debugger', 'yield', 'await', 'if', 'else', 'switch', 'for', 'while', 'do', 'try', 'catch', 'finally', 'class', 'extends', 'super', 'import', 'export', 'default'];
 
-// CoffeeScript-only keywords.
 COFFEE_KEYWORDS = ['undefined', 'Infinity', 'NaN', 'then', 'unless', 'until', 'loop', 'of', 'by', 'when'];
 
 COFFEE_ALIAS_MAP = {
@@ -1573,40 +1377,19 @@ COFFEE_ALIASES = (function() {
 
 COFFEE_KEYWORDS = COFFEE_KEYWORDS.concat(COFFEE_ALIASES);
 
-// The list of keywords that are reserved by JavaScript, but not used, or are
-// used by CoffeeScript internally. We throw an error when these are encountered,
-// to avoid having a JavaScript error at runtime.
 RESERVED = ['case', 'function', 'var', 'void', 'with', 'const', 'let', 'enum', 'native', 'implements', 'interface', 'package', 'private', 'protected', 'public', 'static'];
 
 STRICT_PROSCRIBED = ['arguments', 'eval'];
 
-// The superset of both JavaScript keywords and reserved words, none of which may
-// be used as identifiers or properties.
 export var JS_FORBIDDEN = JS_KEYWORDS.concat(RESERVED).concat(STRICT_PROSCRIBED);
 
-// The character code of the nasty Microsoft madness otherwise known as the BOM.
 BOM = 65279;
 
-// Token matching regexes.
-IDENTIFIER = /^(?!\d)((?:(?!\s)[$\w\x7f-\uffff])+!?)([^\n\S]*:(?!:))?/; // rip: allow optional trailing ! for async calls
-// Is this a property name?
+IDENTIFIER = /^(?!\d)((?:(?!\s)[$\w\x7f-\uffff])+!?)([^\n\S]*:(?!:))?/;
 
-NUMBER = /^0b[01](?:_?[01])*n?|^0o[0-7](?:_?[0-7])*n?|^0x[\da-f](?:_?[\da-f])*n?|^\d+(?:_\d+)*n|^(?:\d+(?:_\d+)*)?\.?\d+(?:_\d+)*(?:e[+-]?\d+(?:_\d+)*)?/i; // binary
-// octal
-// hex
-// decimal bigint
-// decimal
-// decimal without support for numeric literal separators for reference:
-// \d*\.?\d+ (?:e[+-]?\d+)?
+NUMBER = /^0b[01](?:_?[01])*n?|^0o[0-7](?:_?[0-7])*n?|^0x[\da-f](?:_?[\da-f])*n?|^\d+(?:_\d+)*n|^(?:\d+(?:_\d+)*)?\.?\d+(?:_\d+)*(?:e[+-]?\d+(?:_\d+)*)?/i;
 
-OPERATOR = /^(?:[-=]>|=~|[-+*\/%<>&|^!?=]=|>>>=?|([-+:])\1|([&|<>*\/%])\2=?|\?(\.|::)|\.{2,3})/; // function
-// regex match operator
-// compound assign / compare
-// zero-fill right shift
-// doubles
-// logic / shift / power / floor division / modulo
-// soak access
-// range or splat
+OPERATOR = /^(?:[-=]>|=~|[-+*\/%<>&|^!?=]=|>>>=?|([-+:])\1|([&|<>*\/%])\2=?|\?(\.|::)|\.{2,3})/;
 
 WHITESPACE = /^[^\n\S]+/;
 
@@ -1620,7 +1403,6 @@ JSTOKEN = /^`(?!``)((?:[^`\\]|\\[\s\S])*)`/;
 
 HERE_JSTOKEN = /^```((?:[^`\\]|\\[\s\S]|`(?!``))*)```/;
 
-// String-matching-regexes.
 STRING_START = /^(?:'''|"""|'|")/;
 
 STRING_SINGLE = /^(?:[^\\']|\\[\s\S])*/;
@@ -1633,20 +1415,13 @@ HEREDOC_DOUBLE = /^(?:[^\\"#]|\\[\s\S]|"(?!"")|\#(?!\{))*/;
 
 HEREDOC_INDENT = /\n+([^\n\S]*)(?=\S)/g;
 
-// Regex-matching-regexes.
-REGEX = /^\/(?!\/)((?:[^[\/\n\\]|\\[^\n]|\[(?:\\[^\n]|[^\]\n\\])*\])*)(\/)?/; // Every other thing.
-// Anything but newlines escaped.
-// Character class.
+REGEX = /^\/(?!\/)((?:[^[\/\n\\]|\\[^\n]|\[(?:\\[^\n]|[^\]\n\\])*\])*)(\/)?/;
 
 REGEX_FLAGS = /^\w*/;
 
 VALID_FLAGS = /^(?!.*(.).*\1)[gimsuy]*$/;
 
-HEREGEX = /^(?:[^\\\/#\s]|\\[\s\S]|\/(?!\/\/)|\#(?!\{)|\s+(?:#(?!\{).*)?)*/; // Match any character, except those that need special handling below.
-// Match `\` followed by any character.
-// Match any `/` except `///`.
-// Match `#` which is not part of interpolation, e.g. `#{}`.
-// Comments consume everything until the end of the line, including `///`.
+HEREGEX = /^(?:[^\\\/#\s]|\\[\s\S]|\/(?!\/\/)|\#(?!\{)|\s+(?:#(?!\{).*)?)*/;
 
 HEREGEX_COMMENT = /(\s+)(#(?!{).*)/gm;
 
@@ -1654,68 +1429,40 @@ REGEX_ILLEGAL = /^(\/|\/{3}\s*)(\*)/;
 
 POSSIBLY_DIVISION = /^\/=?\s/;
 
-// Other regexes.
 HERECOMMENT_ILLEGAL = /\*\//;
 
 LINE_CONTINUER = /^\s*(?:,|\??\.(?![.\d])|\??::)/;
 
-STRING_INVALID_ESCAPE = /((?:^|[^\\])(?:\\\\)*)\\(?:(0\d|[1-7])|(x(?![\da-fA-F]{2}).{0,2})|(u\{(?![\da-fA-F]{1,}\})[^}]*\}?)|(u(?!\{|[\da-fA-F]{4}).{0,4}))/; // Make sure the escape isn’t escaped.
-// octal escape
-// hex escape
-// unicode code point escape
-// unicode escape
+STRING_INVALID_ESCAPE = /((?:^|[^\\])(?:\\\\)*)\\(?:(0\d|[1-7])|(x(?![\da-fA-F]{2}).{0,2})|(u\{(?![\da-fA-F]{1,}\})[^}]*\}?)|(u(?!\{|[\da-fA-F]{4}).{0,4}))/;
 
-REGEX_INVALID_ESCAPE = /((?:^|[^\\])(?:\\\\)*)\\(?:(0\d)|(x(?![\da-fA-F]{2}).{0,2})|(u\{(?![\da-fA-F]{1,}\})[^}]*\}?)|(u(?!\{|[\da-fA-F]{4}).{0,4}))/; // Make sure the escape isn’t escaped.
-// octal escape
-// hex escape
-// unicode code point escape
-// unicode escape
+REGEX_INVALID_ESCAPE = /((?:^|[^\\])(?:\\\\)*)\\(?:(0\d)|(x(?![\da-fA-F]{2}).{0,2})|(u\{(?![\da-fA-F]{1,}\})[^}]*\}?)|(u(?!\{|[\da-fA-F]{4}).{0,4}))/;
 
 TRAILING_SPACES = /\s+$/;
 
-// Compound assignment tokens.
 COMPOUND_ASSIGN = ['-=', '+=', '/=', '*=', '%=', '||=', '&&=', '?=', '<<=', '>>=', '>>>=', '&=', '^=', '|=', '**=', '//=', '%%='];
 
-// Unary tokens.
 UNARY = ['NEW', 'TYPEOF', 'DELETE'];
 
 UNARY_MATH = ['!', '~'];
 
-// Bit-shifting tokens.
 SHIFT = ['<<', '>>', '>>>'];
 
-// Comparison tokens.
 COMPARE = ['==', '!=', '<', '>', '<=', '>=', '=~'];
 
-// Mathematical tokens.
 MATH = ['*', '/', '%', '//', '%%'];
 
-// Relational tokens that are negatable with `not` prefix.
 RELATION = ['IN', 'OF', 'INSTANCEOF'];
 
-// Boolean tokens.
 BOOL = ['TRUE', 'FALSE'];
 
-// Tokens which could legitimately be invoked or indexed. An opening
-// parentheses or bracket following these tokens will be recorded as the start
-// of a function invocation or indexing operation.
 CALLABLE = ['IDENTIFIER', 'PROPERTY', ')', ']', '?', '@', 'THIS', 'SUPER', 'DYNAMIC_IMPORT'];
 
 INDEXABLE = CALLABLE.concat(['NUMBER', 'INFINITY', 'NAN', 'STRING', 'STRING_END', 'REGEX', 'REGEX_END', 'BOOL', 'NULL', 'UNDEFINED', '}', '::']);
 
-// Tokens which can be the left-hand side of a less-than comparison, i.e. `a<b`.
 COMPARABLE_LEFT_SIDE = ['IDENTIFIER', ')', ']', 'NUMBER'];
 
-// Tokens which a regular expression will never immediately follow (except spaced
-// CALLABLEs in some cases), but which a division operator can.
-
-// See: http://www-archive.mozilla.org/js/language/js20-2002-04/rationale/syntax.html#regular-expressions
 NOT_REGEX = INDEXABLE.concat(['++', '--']);
 
-// Tokens that, when immediately preceding a `WHEN`, indicate that the `WHEN`
-// occurs at the start of a line. We disambiguate these from trailing whens to
-// avoid an ambiguity in the grammar.
 LINE_BREAK = ['INDENT', 'OUTDENT', 'TERMINATOR'];
 
-// Additional indent in front of these is ignored.
 INDENTABLE_CLOSERS = [')', '}', ']'];
