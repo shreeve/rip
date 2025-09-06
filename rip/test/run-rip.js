@@ -7,19 +7,19 @@ console.log('🚀 RUNNING COMPILED RIP CODE!!!');
 console.log('================================\n');
 
 // Fix exports
-let compilerJs = fs.readFileSync('/Users/shreeve/Data/Code/rip/rip/lib/compiler-minimal.js', 'utf-8');
+let compilerJs = fs.readFileSync('/Users/shreeve/Data/Code/rip/rip/lib/compiler.js', 'utf-8');
 compilerJs = compilerJs
   .replace(/var\s+(\w+);?\s*\1\s*=\s*class\s+\1/g, 'const $1 = class $1')
   .replace(/module\.exports = (\w+);/, '');
 if (!compilerJs.includes('export default')) {
   compilerJs += '\nexport default Compiler;\nexport { Compiler };';
 }
-fs.writeFileSync('/Users/shreeve/Data/Code/rip/rip/lib/compiler-minimal.js', compilerJs);
+fs.writeFileSync('/Users/shreeve/Data/Code/rip/rip/lib/compiler.js', compilerJs);
 
 // Import components
 const Lexer = (await import('/Users/shreeve/Data/Code/rip/rip/lib/lexer-minimal.js')).default;
 const Rewriter = (await import('/Users/shreeve/Data/Code/rip/rip/lib/rewriter.js')).default;
-const Compiler = (await import('/Users/shreeve/Data/Code/rip/rip/lib/compiler-minimal.js')).default;
+const Compiler = (await import('/Users/shreeve/Data/Code/rip/rip/lib/compiler.js')).default;
 
 // Simple parser (same as before)
 class SimpleParser {
