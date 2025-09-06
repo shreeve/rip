@@ -16,7 +16,7 @@ class Compiler
   # Compile any node based on its type
   node: (n) ->
     return '' unless n?
-    
+
     switch n.type
       # Literals
       when 'num'    then n.val
@@ -26,32 +26,32 @@ class Compiler
       when 'undef'  then 'undefined'
       when 'id'     then n.name
       when 'prop'   then ".#{n.name}"
-      
+
       # Operations
       when 'op'     then @op(n)
       when 'unary'  then @unary(n)
       when 'assign' then @assign(n)
-      
+
       # Functions
       when 'func'   then @func(n)
       when 'call'   then @call(n)
       when 'return' then @return(n)
-      
+
       # Control flow
       when 'if'     then @if(n)
       when 'while'  then @while(n)
       when 'for'    then @for(n)
-      
+
       # Collections
       when 'array'  then @array(n)
       when 'object' then @object(n)
       when 'access' then @access(n)
-      
+
       # Structure
       when 'block'  then @block(n)
       when 'root'   then @root(n)
       when 'stmt'   then @stmt(n)
-      
+
       else
         console.warn "Unknown node type: #{n.type}"
         ''
@@ -68,7 +68,7 @@ class Compiler
   op: (n) ->
     left = @node(n.left)
     right = @node(n.right)
-    
+
     # Special cases
     switch n.op
       when '**'  then "Math.pow(#{left}, #{right})"
@@ -92,7 +92,7 @@ class Compiler
     target = @node(n.target)
     value = @node(n.value)
     op = n.op || '='
-    
+
     # Add 'let' for first assignment (simple heuristic)
     if op is '=' and n.target.type is 'id'
       "let #{target} = #{value}"
@@ -103,7 +103,7 @@ class Compiler
   func: (n) ->
     params = n.params?.map((p) => @node(p)).join(', ') || ''
     body = @node(n.body)
-    
+
     # Arrow function
     if n.arrow
       if n.body.type is 'block'
@@ -132,7 +132,7 @@ class Compiler
     cond = @node(n.cond)
     then_ = @node(n.then)
     else_ = if n.else then @node(n.else) else null
-    
+
     # Ternary for simple expressions
     if n.expr and not n.else?.type is 'if'
       if else_
@@ -159,7 +159,7 @@ class Compiler
       var_ = @node(n.var)
       iter = @node(n.iterable)
       body = @node(n.body)
-      
+
       if n.own  # for own key of object
         "for (const #{var_} in #{iter}) if (#{iter}.hasOwnProperty(#{var_})) #{body}"
       else if n.of
@@ -187,7 +187,7 @@ class Compiler
   # Property/index access
   access: (n) ->
     obj = @node(n.object)
-    
+
     if n.computed
       # obj[prop]
       prop = @node(n.property)
