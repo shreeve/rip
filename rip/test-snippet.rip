@@ -1,0 +1,6 @@
+class Test
+  constructor: ->
+    @options = {
+      bare: true           # Don't wrap in IIFE
+      sourceMap: false     # Source map generation
+    }

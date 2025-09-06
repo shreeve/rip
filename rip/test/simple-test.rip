@@ -1,0 +1,10 @@
+# Test @ conversion
+class TestClass
+  constructor: ->
+    @options = {
+      test: true
+    }
+    @name = "Test"
+
+  method: ->
+    console.log @name
