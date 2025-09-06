@@ -1,4 +1,10 @@
 # Rip's beautiful, simple, powerful grammar - using Rip's own syntax!
+# 
+# Test Coverage Legend:
+#   ✅ = Tested and passing
+#   ⚠️ = Partially tested or has issues  
+#   ❌ = Tested but failing
+#   (no marker) = Not yet tested
 
 o = (pattern, action = (-> $1)) ->
   [pattern, ->
@@ -82,8 +88,8 @@ grammar =
 
     # Literals (the atoms of our language)
     Literal: [
-      o "NUMBER"   , -> type: 'num'  , val: $1
-      o "STRING"   , -> type: 'str'  , val: $1
+      o "NUMBER"   , -> type: 'num'  , val: $1                 # ✅
+      o "STRING"   , -> type: 'str'  , val: $1                 # ✅
       o "BOOL"     , -> type: 'bool' , val: $1
       o "NULL"     , -> type: 'null'
       o "UNDEFINED", -> type: 'undef'
@@ -92,7 +98,7 @@ grammar =
 
     # Identifiers and properties
     Identifier: [
-      o "IDENTIFIER", -> type: 'id', name: $1
+      o "IDENTIFIER", -> type: 'id', name: $1                   # ✅
     ]
 
     ThisProperty: [
@@ -101,21 +107,21 @@ grammar =
 
     # Member access (dot notation and brackets)
     Member: [
-      o "Value . IDENTIFIER"   , -> type: 'prop' , obj: $1, prop: {type: 'id', name: $3, pos: '@3'}
+      o "Value . IDENTIFIER"   , -> type: 'prop' , obj: $1, prop: {type: 'id', name: $3, pos: '@3'}       # ✅
       o "Value ?. IDENTIFIER"  , -> type: 'prop' , obj: $1, prop: {type: 'id', name: $3, pos: '@3'}, optional: yes
-      o "Value [ Expression ]" , -> type: 'index', obj: $1, index: $3
+      o "Value [ Expression ]" , -> type: 'index', obj: $1, index: $3      # ✅
       o "Value ?[ Expression ]", -> type: 'index', obj: $1, index: $3, optional: yes
     ]
 
     Array: [
-      o "[ ]"          , -> type: 'array', items: []
-      o "[ ArgList ]"  , -> type: 'array', items: $2
+      o "[ ]"          , -> type: 'array', items: []            # ✅
+      o "[ ArgList ]"  , -> type: 'array', items: $2            # ✅
       o "[ ArgList , ]", -> type: 'array', items: $2  # trailing comma
     ]
 
     Object: [
-      o "{ }"           , -> type: 'object', props: []
-      o "{ PropList }"  , -> type: 'object', props: $2
+      o "{ }"           , -> type: 'object', props: []           # ✅
+      o "{ PropList }"  , -> type: 'object', props: $2           # ✅
       o "{ PropList , }", -> type: 'object', props: $2  # trailing comma
     ]
 
@@ -140,7 +146,7 @@ grammar =
 
     # Assignment
     Assign: [
-      o "Assignable = Expression"               , -> type: 'assign', left: $1, right: $3
+      o "Assignable = Expression"               , -> type: 'assign', left: $1, right: $3    # ✅
       o "Assignable = INDENT Expression OUTDENT", -> type: 'assign', left: $1, right: $4
       o "Assignable += Expression"              , -> type: 'assign', left: $1, right: $3, op: '+='
       o "Assignable -= Expression"              , -> type: 'assign', left: $1, right: $3, op: '-='
@@ -157,11 +163,11 @@ grammar =
     # Operations - using our beautiful helpers!
     Operation: [
       # Binary operators
-      binOp "+"
-      binOp "-"
-      binOp "*"
-      binOp "/"
-      binOp "%"
+      binOp "+"                                            # ✅
+      binOp "-"                                            # ✅
+      binOp "*"                                            # ✅
+      binOp "/"                                            # ✅
+      binOp "%"                                            # ✅
       binOp "**"  # power
       binOp "=="
       binOp "!="
@@ -171,15 +177,15 @@ grammar =
       binOp ">="
       binOp "and", "&&"
       binOp "or", "||"
-      binOp "is", "==="
-      binOp "isnt", "!=="
+      binOp "is", "==="                                   # ✅
+      binOp "isnt", "!=="                                 # ✅
       binOp "in"
       binOp "of"
       binOp "instanceof"
 
       # Unary operators
-      unOp "!"
-      unOp "not", "!"
+      unOp "!"                                             # ✅
+      unOp "not", "!"                                      # ✅
       unOp "-"
       unOp "+"
       unOp "typeof"
@@ -197,10 +203,10 @@ grammar =
 
     # Function invocation
     Invocation: [
-      o "Value ( )"         , -> type: 'call', func: $1, args: []
-      o "Value ( ArgList )" , -> type: 'call', func: $1, args: $3
-      o "Value ?( )"        , -> type: 'call', func: $1, args: [], optional: yes
-      o "Value ?( ArgList )", -> type: 'call', func: $1, args: $3, optional: yes
+      o "Value ( )"         , -> type: 'call', func: $1, args: []         # ✅
+      o "Value ( ArgList )" , -> type: 'call', func: $1, args: $3         # ✅
+      o "Value ?( )"        , -> type: 'call', func: $1, args: [], optional: yes   # ⚠️ implicit calls
+      o "Value ?( ArgList )", -> type: 'call', func: $1, args: $3, optional: yes   # ⚠️ implicit calls
     ]
 
     ArgList: [
@@ -210,9 +216,9 @@ grammar =
 
     # Functions (Code)
     Code: [
-      o "-> Block"          , -> type: 'func', params: [], body: $2, bound: no
+      o "-> Block"          , -> type: 'func', params: [], body: $2, bound: no      # ✅
       o "=> Block"          , -> type: 'func', params: [], body: $2, bound: yes
-      o "ParamList -> Block", -> type: 'func', params: $1, body: $3, bound: no
+      o "ParamList -> Block", -> type: 'func', params: $1, body: $3, bound: no     # ✅
       o "ParamList => Block", -> type: 'func', params: $1, body: $3, bound: yes
     ]
 
@@ -235,11 +241,11 @@ grammar =
 
     # Control flow
     If: [
-      o "IF Expression Block"                         , -> type: 'if', test: $2, then: $3
-      o "IF Expression Block ELSE Block"              , -> type: 'if', test: $2, then: $3, else: $5
+      o "IF Expression Block"                         , -> type: 'if', test: $2, then: $3                              # ❌
+      o "IF Expression Block ELSE Block"              , -> type: 'if', test: $2, then: $3, else: $5                    # ❌
       o "IF Expression Block ELSE IF Expression Block", -> type: 'if', test: $2, then: $3, else: {type: 'if', test: $5, then: $7, pos: '@5'}
-      o "Expression IF Expression"                    , -> type: 'if', test: $3, then: $1, postfix: yes
-      o "Expression UNLESS Expression"                , -> type: 'if', test: $3, then: $1, invert: yes, postfix: yes
+      o "Expression IF Expression"                    , -> type: 'if', test: $3, then: $1, postfix: yes             # ✅
+      o "Expression UNLESS Expression"                , -> type: 'if', test: $3, then: $1, invert: yes, postfix: yes  # ✅
     ]
 
     For: [
@@ -262,8 +268,8 @@ grammar =
 
     # Other statements
     Return: [
-      o "RETURN"           , -> type: 'return'
-      o "RETURN Expression", -> type: 'return', val: $2
+      o "RETURN"           , -> type: 'return'                                 # ✅
+      o "RETURN Expression", -> type: 'return', val: $2                        # ✅
     ]
 
     Throw: [
@@ -308,8 +314,8 @@ grammar =
 
     # Blocks
     Block: [
-      o "INDENT Body OUTDENT", -> $2
-      o "Expression"         , -> [$1]
+      o "INDENT Body OUTDENT", -> $2                                         # ❌
+      o "Expression"         , -> [$1]                                       # ❌
     ]
 
     # Parenthetical (for grouping)
