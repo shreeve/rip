@@ -17,7 +17,7 @@ if (!compilerJs.includes('export default')) {
 fs.writeFileSync('/Users/shreeve/Data/Code/rip/rip/lib/compiler.js', compilerJs);
 
 // Import components
-const Lexer = (await import('/Users/shreeve/Data/Code/rip/rip/lib/lexer-minimal.js')).default;
+const Lexer = (await import('/Users/shreeve/Data/Code/rip/rip/lib/lexer.js')).default;
 const Rewriter = (await import('/Users/shreeve/Data/Code/rip/rip/lib/rewriter.js')).default;
 const Compiler = (await import('/Users/shreeve/Data/Code/rip/rip/lib/compiler.js')).default;
 

@@ -7,7 +7,7 @@ console.log('🚀 Testing FULL Rip Pipeline');
 console.log('============================\n');
 
 // Import our components
-const Lexer = (await import('/Users/shreeve/Data/Code/rip/rip/lib/lexer-minimal.js')).default;
+const Lexer = (await import('/Users/shreeve/Data/Code/rip/rip/lib/lexer.js')).default;
 const Rewriter = (await import('/Users/shreeve/Data/Code/rip/rip/lib/rewriter.js')).default;
 
 // Test cases
