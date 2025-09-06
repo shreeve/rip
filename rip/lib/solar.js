@@ -656,9 +656,9 @@ Generator = class Generator {
     parse: function ${this.parse.toString().replace(/^parse/, '')},
     lexer: undefined
   };
-  
+
   ${this.generatePerformAction()}
-  
+
   parser.performAction = performAction;
   return parser;
 })()`;
