@@ -380,7 +380,8 @@ grammar =
 
   # Async/await
   Await: [
-    o "AWAIT Expression", -> type: 'await', arg: $2  ]
+    o "AWAIT Expression", -> type: 'await', arg: $2
+  ]
 
   # Do expressions (IIFE)
   DoExpression: [
