@@ -1,5 +1,5 @@
 
-var _compileFile, _compileRawFileContent, coffeeEval, ext, helpers, i, len, ref, register, run, transpile, universalCompile,
+var ext, helpers, i, len, ref,
   hasProp = {}.hasOwnProperty;
 
 import * as CoffeeScript from './coffeescript.js';
@@ -12,7 +12,7 @@ import path from 'path';
 
 helpers = CoffeeScript.helpers;
 
-transpile = function(js, options) {
+export var transpile = function(js, options) {
   var babel;
   try {
     babel = require('@babel/core');
@@ -26,16 +26,14 @@ transpile = function(js, options) {
   return babel.transform(js, options);
 };
 
-universalCompile = CoffeeScript.compile;
-
-CoffeeScript.compile = function(code, options) {
+export var compile = function(code, options) {
   if (options != null ? options.transpile : void 0) {
-    options.transpile.transpile = CoffeeScript.transpile;
+    options.transpile.transpile = transpile;
   }
-  return universalCompile.call(CoffeeScript, code, options);
+  return CoffeeScript.compile(code, options);
 };
 
-run = function(code, options = {}) {
+export var run = function(code, options = {}) {
   var answer, dir, mainModule, ref;
   mainModule = require.main;
   mainModule.filename = process.argv[1] = options.filename ? fs.realpathSync(options.filename) : helpers.anonymousFileName();
@@ -50,7 +48,7 @@ run = function(code, options = {}) {
   return mainModule._compile(code, mainModule.filename);
 };
 
-coffeeEval = function(code, options = {}) {
+export var coffeeEval = function(code, options = {}) {
   var Module, _module, _require, createContext, i, isContext, js, k, len, o, r, ref, ref1, ref2, ref3, sandbox, v;
   if (!(code = code.trim())) {
     return;
@@ -113,7 +111,7 @@ coffeeEval = function(code, options = {}) {
   }
 };
 
-register = function() {
+export var register = function() {
   return require('./register');
 };
 
@@ -130,7 +128,7 @@ if (require.extensions) {
   }
 }
 
-_compileRawFileContent = function(raw, filename, options = {}) {
+export var _compileRawFileContent = function(raw, filename, options = {}) {
   var answer, err, stripped;
   stripped = raw.charCodeAt(0) === 0xFEFF ? raw.substring(1) : raw;
   options = Object.assign({}, options, {
@@ -146,7 +144,7 @@ _compileRawFileContent = function(raw, filename, options = {}) {
   return answer;
 };
 
-_compileFile = function(filename, options = {}) {
+export var _compileFile = function(filename, options = {}) {
   var raw;
   raw = fs.readFileSync(filename, 'utf8');
   return CoffeeScript._compileRawFileContent(raw, filename, options);
@@ -155,10 +153,5 @@ _compileFile = function(filename, options = {}) {
 export * from './coffeescript.js';
 
 export {
-  transpile,
-  run,
-  coffeeEval as eval,
-  register,
-  _compileRawFileContent,
-  _compileFile
+  coffeeEval as eval
 };

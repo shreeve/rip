@@ -1063,10 +1063,11 @@ export class StringLiteral extends Literal
     else
       locationData.last_column         -= @quote.length
     locationData.last_column_exclusive -= @quote.length
-    locationData.range = [
-      locationData.range[0] + @quote.length
-      locationData.range[1] - @quote.length
-    ]
+    if locationData.range
+      locationData.range = [
+        locationData.range[0] + @quote.length
+        locationData.range[1] - @quote.length
+      ]
     copy = new StringLiteral @originalValue, {@quote, @initialChunk, @finalChunk, @indent, @double, @heregex}
     copy.locationData = locationData
     copy
@@ -5805,17 +5806,20 @@ export mergeLocationData = (locationDataA, locationDataB, {justLeading, justEndi
         last_line_exclusive:   locationDataB.last_line_exclusive
         last_column_exclusive: locationDataB.last_column_exclusive
   ,
-    range: [
-      if justEnding
-        locationDataA.range[0]
-      else
-        lesser locationDataA.range[0], locationDataB.range[0]
-    ,
-      if justLeading
-        locationDataA.range[1]
-      else
-        greater locationDataA.range[1], locationDataB.range[1]
-    ]
+    range: if locationDataA?.range and locationDataB?.range
+      [
+        if justEnding
+          locationDataA.range[0]
+        else
+          lesser locationDataA.range[0], locationDataB.range[0]
+      ,
+        if justLeading
+          locationDataA.range[1]
+        else
+          greater locationDataA.range[1], locationDataB.range[1]
+      ]
+    else
+      locationDataA?.range or locationDataB?.range or []
   )
 
 # Take two AST nodes, or two AST nodes’ location data objects, and return a new
