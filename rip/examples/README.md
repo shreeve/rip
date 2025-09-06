@@ -7,7 +7,7 @@ This directory contains example programs demonstrating various features of the R
 ### `hello-world.rip`
 The classic first program - demonstrates basic syntax, functions, and objects.
 
-### `implicit-function-calls.rip`
+### `implicit-calls.rip`
 Shows Rip's clean implicit function call syntax - no parentheses needed!
 
 ### `basic-features.rip`
@@ -37,7 +37,7 @@ Comprehensive showcase of Rip's capabilities:
 ../bin/rip -c basic-features.rip
 
 # View the AST
-../bin/rip --ast implicit-function-calls.rip
+../bin/rip --ast implicit-calls.rip
 
 # See token stream
 ../bin/rip --tokens advanced-features.rip
@@ -46,7 +46,7 @@ Comprehensive showcase of Rip's capabilities:
 ## 📖 Learning Path
 
 1. Start with `hello-world.rip` - basic syntax
-2. Try `implicit-function-calls.rip` - Rip's clean syntax
+2. Try `implicit-calls.rip` - Rip's clean syntax
 3. Explore `basic-features.rip` - core functionality
 4. Study `advanced-features.rip` - full language power
 
