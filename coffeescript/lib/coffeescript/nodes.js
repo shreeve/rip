@@ -2178,14 +2178,14 @@ export var Call = (function() {
         this.locationData = Object.assign({}, this.locationData, {
           first_line: locationData.first_line,
           first_column: locationData.first_column,
-          range: [locationData.range[0], this.locationData.range[1]]
+          range: locationData.range && this.locationData.range ? [locationData.range[0], this.locationData.range[1]] : undefined
         });
         base = ((ref1 = this.variable) != null ? ref1.base : void 0) || this.variable;
         if (base.needsUpdatedStartLocation) {
           this.variable.locationData = Object.assign({}, this.variable.locationData, {
             first_line: locationData.first_line,
             first_column: locationData.first_column,
-            range: [locationData.range[0], this.variable.locationData.range[1]]
+            range: locationData.range && this.variable.locationData.range ? [locationData.range[0], this.variable.locationData.range[1]] : undefined
           });
           base.updateLocationDataIfMissing(locationData);
         }
@@ -7951,6 +7951,6 @@ emptyExpressionLocationData = function({
     last_column: element.locationData.last_column - closingBrace.length,
     last_line_exclusive: element.locationData.last_line,
     last_column_exclusive: element.locationData.last_column,
-    range: [element.locationData.range[0] + openingBrace.length, element.locationData.range[1] - closingBrace.length]
+    range: element.locationData.range ? [element.locationData.range[0] + openingBrace.length, element.locationData.range[1] - closingBrace.length] : undefined
   };
 };

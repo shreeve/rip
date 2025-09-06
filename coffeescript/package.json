@@ -22,7 +22,7 @@
   },
   "main": "./lib/coffeescript/index.js",
   "exports": {
-    ".": "./lib-esm/index.js",
+    ".": "./lib/coffeescript/index.js",
     "./package.json": "./package.json"
   },
   "bin": {
@@ -34,9 +34,9 @@
     "lib"
   ],
   "scripts": {
-    "test": "NODE_OPTIONS=\"--no-warnings=ExperimentalWarning\" node ./bin/cake-esm.js test",
-    "test:rip": "NODE_OPTIONS=\"--no-warnings=ExperimentalWarning\" node ./bin/cake.cjs test:rip",
-    "test:all": "NODE_OPTIONS=\"--no-warnings=ExperimentalWarning\" node ./bin/cake.cjs test:all"
+    "test": "NODE_OPTIONS=\"--no-warnings=ExperimentalWarning\" node ./bin/cake.js test",
+    "test:rip": "NODE_OPTIONS=\"--no-warnings=ExperimentalWarning\" node ./bin/cake.js test:rip",
+    "test:all": "NODE_OPTIONS=\"--no-warnings=ExperimentalWarning\" node ./bin/cake.js test:all"
   },
   "homepage": "https://coffeescript.org",
   "bugs": "https://github.com/shreeve/rip/issues",
