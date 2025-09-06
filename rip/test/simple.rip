@@ -1,0 +1,13 @@
+# Very simple Rip test file
+import { compile } from '../lib/compiler.rip'
+
+# Test basic assignment
+message = "Hello from Rip!"
+console.log message
+
+# Test function
+greet = (name) -> "Hello, #{name}!"
+console.log greet("World")
+
+# Test export
+export testValue = 42

@@ -1,0 +1,240 @@
+# Rip Grammar for Solar Parser Generator
+# This defines the syntax rules for the Rip language
+
+# Helper function for creating grammar rules
+o = (pattern, action, options) ->
+  [pattern, action, options]
+
+# The grammar object that Solar expects
+export grammar =
+  
+  # Parser options
+  options:
+    debug: false
+  
+  # Define operator precedence and associativity (from lowest to highest)
+  operators: [
+    ["left", ","]
+    ["right", "=", "+=", "-=", "*=", "/=", "%="]
+    ["right", "?", ":"]
+    ["left", "or", "||"]
+    ["left", "and", "&&"]
+    ["left", "==", "!=", "===", "!==", "is", "isnt"]
+    ["left", "<", ">", "<=", ">=", "instanceof", "in", "of"]
+    ["left", "<<", ">>", ">>>"]
+    ["left", "+", "-"]
+    ["left", "*", "/", "%"]
+    ["right", "!", "~", "typeof", "delete"]
+    ["left", ".", "?."]
+    ["left", "CALL"]
+    ["left", "[", "]"]
+  ]
+  
+  # BNF grammar rules
+  bnf:
+    
+    # Root of the grammar
+    Root: [
+      o "", "-> new yy.Root()"
+      o "Body", "-> new yy.Root($1)"
+    ]
+    
+    # Body is a list of lines
+    Body: [
+      o "Line", "-> yy.Block.wrap([$1])"
+      o "Body TERMINATOR Line", "-> $1.push($3)"
+      o "Body TERMINATOR", "-> $1"
+    ]
+    
+    # Line terminators
+    TERMINATOR: [
+      o "NEWLINE", "-> $1"
+      o "SEMICOLON", "-> $1"
+    ]
+    
+    # A line can be an expression or statement
+    Line: [
+      o "Expression", "-> $1"
+      o "Statement", "-> $1"
+      o "", "-> new yy.Literal('')"
+    ]
+    
+    # Statements
+    Statement: [
+      o "Return", "-> $1"
+      o "Import", "-> $1"
+      o "Export", "-> $1"
+      o "If", "-> $1"
+      o "For", "-> $1"
+      o "While", "-> $1"
+      o "Class", "-> $1"
+      o "Function", "-> $1"
+    ]
+    
+    # Expressions
+    Expression: [
+      o "Value", "-> $1"
+      o "Call", "-> $1"
+      o "Operation", "-> $1"
+      o "Assign", "-> $1"
+    ]
+    
+    # Identifier
+    Identifier: [
+      o "IDENTIFIER", "-> new yy.Identifier($1)"
+    ]
+    
+    # Values
+    Value: [
+      o "Assignable", "-> $1"
+      o "Literal", "-> new yy.Value($1)"
+      o "Parenthetical", "-> $1"
+      o "This", "-> $1"
+    ]
+    
+    # Assignable values
+    Assignable: [
+      o "Identifier", "-> new yy.Value($1)"
+      o "Value . Identifier", "-> $1.add(new yy.Access($3))"
+      o "Value [ Expression ]", "-> $1.add(new yy.Index($3))"
+    ]
+    
+    # Literals
+    Literal: [
+      o "NUMBER", "-> new yy.Literal($1)"
+      o "STRING", "-> new yy.Literal($1)"
+      o "TRUE", "-> new yy.Literal('true')"
+      o "FALSE", "-> new yy.Literal('false')"
+      o "NULL", "-> new yy.Literal('null')"
+      o "UNDEFINED", "-> new yy.Literal('undefined')"
+    ]
+    
+    # Assignment
+    Assign: [
+      o "Assignable = Expression", "-> new yy.Assign($1, $3)"
+      o "Assignable += Expression", "-> new yy.Assign($1, $3, '+=')"
+      o "Assignable -= Expression", "-> new yy.Assign($1, $3, '-=')"
+      o "Assignable *= Expression", "-> new yy.Assign($1, $3, '*=')"
+      o "Assignable /= Expression", "-> new yy.Assign($1, $3, '/=')"
+    ]
+    
+    # Function calls
+    Call: [
+      o "Value ( )", "-> new yy.Call($1, [])"
+      o "Value ( ArgList )", "-> new yy.Call($1, $3)"
+    ]
+    
+    # Argument list
+    ArgList: [
+      o "Expression", "-> [$1]"
+      o "ArgList , Expression", "-> $1.concat($3)"
+    ]
+    
+    # Binary operations
+    Operation: [
+      o "Expression + Expression", "-> new yy.Op('+', $1, $3)"
+      o "Expression - Expression", "-> new yy.Op('-', $1, $3)"
+      o "Expression * Expression", "-> new yy.Op('*', $1, $3)"
+      o "Expression / Expression", "-> new yy.Op('/', $1, $3)"
+      o "Expression % Expression", "-> new yy.Op('%', $1, $3)"
+      o "Expression == Expression", "-> new yy.Op('==', $1, $3)"
+      o "Expression != Expression", "-> new yy.Op('!=', $1, $3)"
+      o "Expression === Expression", "-> new yy.Op('===', $1, $3)"
+      o "Expression !== Expression", "-> new yy.Op('!==', $1, $3)"
+      o "Expression < Expression", "-> new yy.Op('<', $1, $3)"
+      o "Expression > Expression", "-> new yy.Op('>', $1, $3)"
+      o "Expression <= Expression", "-> new yy.Op('<=', $1, $3)"
+      o "Expression >= Expression", "-> new yy.Op('>=', $1, $3)"
+      o "Expression and Expression", "-> new yy.Op('&&', $1, $3)"
+      o "Expression or Expression", "-> new yy.Op('||', $1, $3)"
+      o "! Expression", "-> new yy.Op('!', $2)"
+      o "- Expression", "-> new yy.Op('-', $2)", prec: "UMINUS"
+    ]
+    
+    # Parenthetical expressions
+    Parenthetical: [
+      o "( Expression )", "-> new yy.Parens($2)"
+      o "( )", "-> new yy.Parens(new yy.Literal(''))"
+    ]
+    
+    # This keyword
+    This: [
+      o "THIS", "-> new yy.Value(new yy.This())"
+      o "@ Identifier", "-> new yy.Value(new yy.This()).add(new yy.Access($2))"
+    ]
+    
+    # Return statement
+    Return: [
+      o "RETURN Expression", "-> new yy.Return($2)"
+      o "RETURN", "-> new yy.Return()"
+    ]
+    
+    # Import statement
+    Import: [
+      o "IMPORT STRING", "-> new yy.Import(null, $2)"
+      o "IMPORT Identifier FROM STRING", "-> new yy.Import($2, $4)"
+      o "IMPORT { ImportList } FROM STRING", "-> new yy.Import($3, $6)"
+      o "IMPORT * AS Identifier FROM STRING", "-> new yy.Import(new yy.ImportStar($4), $6)"
+    ]
+    
+    ImportList: [
+      o "Identifier", "-> [$1.name]"
+      o "ImportList , Identifier", "-> $1.concat($3.name)"
+    ]
+    
+    # Export statement
+    Export: [
+      o "EXPORT Expression", "-> new yy.Export($2)"
+      o "EXPORT DEFAULT Expression", "-> new yy.Export($3, true)"
+      o "EXPORT Identifier", "-> new yy.Export($2)"
+      o "EXPORT Class", "-> new yy.Export($2)"
+      o "EXPORT Function", "-> new yy.Export($2)"
+    ]
+    
+    # If statement
+    If: [
+      o "IF Expression Block", "-> new yy.If($2, $3)"
+      o "IF Expression Block ELSE Block", "-> new yy.If($2, $3, $5)"
+    ]
+    
+    # Block of code
+    Block: [
+      o "INDENT Body OUTDENT", "-> $2"
+      o "{ Body }", "-> $2"
+    ]
+    
+    # For loop
+    For: [
+      o "FOR Identifier IN Expression Block", "-> new yy.For($2, $4, $5)"
+      o "FOR Identifier OF Expression Block", "-> new yy.For($2, $4, $5, 'of')"
+    ]
+    
+    # While loop
+    While: [
+      o "WHILE Expression Block", "-> new yy.While($2, $3)"
+    ]
+    
+    # Class definition
+    Class: [
+      o "CLASS Identifier Block", "-> new yy.Class($2, null, $3)"
+      o "CLASS Identifier EXTENDS Value Block", "-> new yy.Class($2, $4, $5)"
+    ]
+    
+    # Function definition
+    Function: [
+      o "FUNCTION Identifier ( ParamList ) Block", "-> new yy.Function($2, $4, $6)"
+      o "Identifier = -> Expression", "-> new yy.Assign(new yy.Value($1), new yy.Function(null, [], new yy.Block([$4])))"
+      o "Identifier = ( ParamList ) -> Expression", "-> new yy.Assign(new yy.Value($1), new yy.Function(null, $3, new yy.Block([$6])))"
+    ]
+    
+    # Parameter list
+    ParamList: [
+      o "", "-> []"
+      o "Identifier", "-> [new yy.Param($1)]"
+      o "ParamList , Identifier", "-> $1.concat(new yy.Param($3))"
+    ]
+  
+  # Start symbol
+  start: "Root"
+
+export default grammar

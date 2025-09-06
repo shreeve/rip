@@ -1,0 +1,271 @@
+# Rip AST Nodes - Minimal implementation
+# Pure ESM from the start
+
+# Base class for all AST nodes
+export class Base
+  constructor: ->
+    @children = []
+
+  compile: (options = {}) ->
+    code = @compileNode(options)
+    if options.level is 'top'
+      code
+    else
+      code
+
+  compileNode: (options) ->
+    throw new Error "#{@constructor.name} has no compileNode method"
+
+  makeCode: (code) ->
+    code
+
+  wrapInParens: (code) ->
+    "(#{code})"
+
+# Root node of the AST
+export class Root extends Base
+  constructor: (@body) ->
+    super()
+
+  compileNode: (options) ->
+    options.level = 'top'
+    if @body
+      @body.compile(options)
+    else
+      ''
+
+# Block of statements
+export class Block extends Base
+  constructor: (@expressions = []) ->
+    super()
+
+  push: (expr) ->
+    @expressions.push expr
+    this
+
+  @wrap: (expressions) ->
+    new Block(expressions)
+
+  compileNode: (options) ->
+    codes = []
+    for expr in @expressions when expr
+      code = expr.compile(options)
+      codes.push code if code
+    codes.join(';\n')
+
+# Literal values (numbers, strings, booleans, etc.)
+export class Literal extends Base
+  constructor: (@value) ->
+    super()
+
+  compileNode: (options) ->
+    if typeof @value is 'string' and @value[0] in ['"', "'"]
+      @value  # Already quoted
+    else
+      String(@value)
+
+# Identifiers (variable names)
+export class Identifier extends Base
+  constructor: (@name) ->
+    super()
+
+  compileNode: (options) ->
+    @name
+
+# Value wrapper (can have properties/methods accessed)
+export class Value extends Base
+  constructor: (@base, @properties = []) ->
+    super()
+
+  add: (property) ->
+    @properties.push property
+    this
+
+  compileNode: (options) ->
+    code = @base.compile(options)
+    for prop in @properties
+      code = prop.compile(options, code)
+    code
+
+# Property access (dot notation)
+export class Access extends Base
+  constructor: (@name) ->
+    super()
+
+  compile: (options, value) ->
+    "#{value}.#{@name}"
+
+# Array/object index access
+export class Index extends Base
+  constructor: (@index) ->
+    super()
+
+  compile: (options, value) ->
+    idx = @index.compile(options)
+    "#{value}[#{idx}]"
+
+# Assignment
+export class Assign extends Base
+  constructor: (@variable, @value) ->
+    super()
+
+  compileNode: (options) ->
+    left = @variable.compile(options)
+    right = @value.compile(options)
+
+    # Check if we need to declare the variable
+    if options.level is 'top' and @variable instanceof Value
+      if @variable.base instanceof Identifier
+        "const #{left} = #{right}"
+      else
+        "#{left} = #{right}"
+    else
+      "#{left} = #{right}"
+
+# Binary operations
+export class Op extends Base
+  constructor: (@operator, @first, @second) ->
+    super()
+
+  compileNode: (options) ->
+    first = @first.compile(options)
+
+    # Unary operator
+    unless @second
+      return "#{@operator}#{first}"
+
+    second = @second.compile(options)
+
+    # Map CoffeeScript operators to JavaScript
+    jsOp = switch @operator
+      when 'and' then '&&'
+      when 'or' then '||'
+      when 'not' then '!'
+      when 'is' then '==='
+      when 'isnt' then '!=='
+      else @operator
+
+    "#{first} #{jsOp} #{second}"
+
+# Function calls
+export class Call extends Base
+  constructor: (@variable, @args = []) ->
+    super()
+
+  compileNode: (options) ->
+    func = @variable.compile(options)
+    args = (@arg.compile(options) for arg in @args)
+    "#{func}(#{args.join(', ')})"
+
+# Return statement
+export class Return extends Base
+  constructor: (@expression) ->
+    super()
+
+  compileNode: (options) ->
+    if @expression
+      expr = @expression.compile(options)
+      "return #{expr}"
+    else
+      "return"
+
+# Import statement
+export class Import extends Base
+  constructor: (@names, @source) ->
+    super()
+
+  compileNode: (options) ->
+    source = @source
+
+    # Remove quotes if they're included
+    if source[0] in ['"', "'"]
+      source = source[1...-1]
+
+    unless @names
+      "import '#{source}'"
+    else if @names instanceof ImportStar
+      "import * as #{@names.alias} from '#{source}'"
+    else if typeof @names is 'string'
+      "import #{@names} from '#{source}'"
+    else if Array.isArray @names
+      names = @names.join(', ')
+      "import { #{names} } from '#{source}'"
+    else
+      "import #{@names} from '#{source}'"
+
+# Import * as alias
+export class ImportStar extends Base
+  constructor: (@alias) ->
+    super()
+
+# Export statement
+export class Export extends Base
+  constructor: (@expression, @isDefault = false) ->
+    super()
+
+  compileNode: (options) ->
+    expr = @expression.compile(options)
+    if @isDefault
+      "export default #{expr}"
+    else
+      "export #{expr}"
+
+# Parentheses
+export class Parens extends Base
+  constructor: (@expression) ->
+    super()
+
+  compileNode: (options) ->
+    if @expression
+      expr = @expression.compile(options)
+      "(#{expr})"
+    else
+      "()"
+
+# This keyword
+export class This extends Base
+  compileNode: (options) ->
+    "this"
+
+# Super keyword
+export class Super extends Base
+  compileNode: (options) ->
+    "super"
+
+# Function definition
+export class Function extends Base
+  constructor: (@name, @params = [], @body) ->
+    super()
+
+  compileNode: (options) ->
+    params = (@param.compile(options) for param in @params)
+    body = @body.compile(options)
+
+    if @name
+      "function #{@name}(#{params.join(', ')}) {\n#{body}\n}"
+    else
+      "(#{params.join(', ')}) => {\n#{body}\n}"
+
+# Function parameter
+export class Param extends Base
+  constructor: (@name) ->
+    super()
+
+  compileNode: (options) ->
+    if @name instanceof Identifier
+      @name.compile(options)
+    else
+      @name
+
+# Class definition
+export class Class extends Base
+  constructor: (@name, @parent, @body) ->
+    super()
+
+  compileNode: (options) ->
+    body = @body?.compile(options) or ''
+
+    if @parent
+      "class #{@name} extends #{@parent} {\n#{body}\n}"
+    else
+      "class #{@name} {\n#{body}\n}"

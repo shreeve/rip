@@ -1,0 +1,99 @@
+# Rip Parser - Orchestrates parser generation using Solar
+# This module loads the grammar and generates/exports the parser
+
+import Solar from './solar.rip'
+import { grammar } from './grammar.rip'
+import * as nodes from './nodes.rip'
+
+# Add nodes to the grammar for use in parser actions
+grammar.yy = nodes
+
+# Add module include for the generated parser
+grammar.moduleInclude = """
+  import * as nodes from './nodes.js';
+  const yy = nodes;
+"""
+
+# Action include - helper functions available in grammar actions
+grammar.actionInclude = """
+  // Helper for wrapping nodes
+  yy.Block = nodes.Block;
+  yy.Block.wrap = nodes.Block.wrap;
+"""
+
+# Generate the parser using Solar
+generateParser = ->
+  try
+    # Create parser generator
+    generator = new Solar.Generator(grammar, {
+      debug: false
+    })
+
+    # Create the parser
+    parser = generator.createParser()
+
+    # Add nodes to parser.yy for runtime access
+    parser.yy = nodes
+
+    # Add parse helper function
+    parser.parseSource = (source, options = {}) ->
+      # This expects tokens from the lexer
+      # The lexer should set up the parser.lexer interface
+      @parse(source)
+
+    parser
+
+  catch error
+    console.error "Failed to generate parser:", error.message
+    throw error
+
+# Create and export the parser
+export parser = generateParser()
+
+# Export the Parser class
+export Parser = parser.Parser
+
+# Export nodes for external use
+export { nodes }
+
+# Convenience parse function
+export parse = (tokens, options = {}) ->
+  parser.lexer = {
+    tokens: tokens
+    pos: 0
+    yytext: ''
+    yylineno: 0
+    yylloc: {}
+
+    setInput: (tokens) ->
+      @tokens = tokens
+      @pos = 0
+
+    lex: ->
+      token = @tokens[@pos++]
+      if token
+        @yytext = token.value
+        @yylineno = token.line or 0
+        @yylloc = {
+          first_line: token.line or 0
+          first_column: token.column or 0
+          last_line: token.line or 0
+          last_column: (token.column or 0) + (token.value?.length or 0)
+        }
+        # Return the token type for the parser
+        token.type
+      else
+        'EOF'
+
+    showPosition: ->
+      "Line #{@yylineno}"
+
+    upcomingInput: ->
+      ''
+  }
+
+  parser.lexer.setInput(tokens)
+  parser.parse()
+
+# Export default parser
+export default parser

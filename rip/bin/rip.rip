@@ -1,0 +1,264 @@
+#!/usr/bin/env bun
+# Rip CLI - Command-line interface for the Rip compiler
+# Primary target: Bun, but falls back gracefully to other runtimes
+
+import { compile, compileFile } from '../src/compiler.rip'
+import { version } from '../package.json'
+
+class RipCLI
+  constructor: ->
+    @args = @parseArgs()
+    @runtime = @detectRuntime()
+    
+  parseArgs: ->
+    # Get command-line arguments (works across runtimes)
+    args = @getRuntimeArgs()
+    
+    options = {
+      help: false
+      version: false
+      compile: false
+      output: null
+      execute: false
+      bare: true
+      sourceMap: false
+      watch: false
+      stdin: false
+      files: []
+    }
+    
+    i = 0
+    while i < args.length
+      arg = args[i]
+      switch arg
+        when '-h', '--help'
+          options.help = true
+        when '-v', '--version'  
+          options.version = true
+        when '-c', '--compile'
+          options.compile = true
+        when '-o', '--output'
+          options.output = args[++i]
+        when '-e', '--execute'
+          options.execute = true
+        when '-b', '--bare'
+          options.bare = true
+        when '--no-bare'
+          options.bare = false
+        when '-m', '--map', '--source-map'
+          options.sourceMap = true
+        when '-w', '--watch'
+          options.watch = true
+        when '-s', '--stdin'
+          options.stdin = true
+        else
+          unless arg.startsWith('-')
+            options.files.push(arg)
+      i++
+    
+    options
+    
+  getRuntimeArgs: ->
+    # Bun
+    if typeof Bun isnt 'undefined'
+      return Bun.argv.slice(2)
+    
+    # Deno
+    if typeof Deno isnt 'undefined'
+      return Deno.args
+    
+    # Node.js
+    if typeof process isnt 'undefined'
+      return process.argv.slice(2)
+    
+    # Browser (shouldn't happen for CLI)
+    []
+    
+  detectRuntime: ->
+    if typeof Bun isnt 'undefined'
+      'bun'
+    else if typeof Deno isnt 'undefined'
+      'deno'
+    else if typeof process isnt 'undefined'
+      'node'
+    else
+      'unknown'
+      
+  run: ->
+    # Show help
+    if @args.help or @args.files.length is 0 and not @args.stdin
+      @showHelp()
+      return
+    
+    # Show version
+    if @args.version
+      @showVersion()
+      return
+    
+    # Read from stdin
+    if @args.stdin
+      @compileStdin()
+      return
+    
+    # Watch mode (Bun-specific feature for now)
+    if @args.watch
+      if @runtime is 'bun'
+        @watchFiles()
+      else
+        console.error "Watch mode is currently only supported in Bun"
+        @exit(1)
+      return
+    
+    # Compile files
+    @compileFiles()
+    
+  showHelp: ->
+    console.log """
+    Rip - A modern programming language that compiles to ES6+
+    
+    Usage: rip [options] [files]
+    
+    Options:
+      -h, --help          Show this help message
+      -v, --version       Show version
+      -c, --compile       Compile to JavaScript
+      -o, --output FILE   Output to file (otherwise stdout)
+      -e, --execute       Execute compiled JavaScript
+      -b, --bare          Compile without wrapper (default)
+      --no-bare           Compile with wrapper
+      -m, --source-map    Generate source map
+      -w, --watch         Watch files for changes (Bun only)
+      -s, --stdin         Read from stdin
+    
+    Examples:
+      rip -c script.rip              # Compile to stdout
+      rip -c script.rip -o script.js # Compile to file
+      rip -e script.rip              # Compile and execute
+      echo 'x = 42' | rip -cs       # Compile from stdin
+      
+    Runtime: #{@runtime}
+    Version: #{version}
+    """
+    
+  showVersion: ->
+    console.log "Rip v#{version} (runtime: #{@runtime})"
+    
+  compileStdin: async ->
+    source = await @readStdin()
+    
+    try
+      result = compile(source, {
+        filename: '<stdin>'
+        bare: @args.bare
+        sourceMap: @args.sourceMap
+      })
+      
+      if @args.execute
+        @executeJS(result)
+      else
+        console.log(result)
+    catch error
+      console.error("Compilation error:", error.message)
+      @exit(1)
+      
+  compileFiles: async ->
+    for file in @args.files
+      try
+        result = await compileFile(file, {
+          bare: @args.bare
+          sourceMap: @args.sourceMap
+        })
+        
+        if @args.output
+          await @writeFile(@args.output, result)
+          console.log("Compiled #{file} -> #{@args.output}")
+        else if @args.execute
+          @executeJS(result)
+        else
+          console.log(result)
+          
+      catch error
+        console.error("Error compiling #{file}:", error.message)
+        @exit(1)
+        
+  watchFiles: ->
+    console.log("Watching files for changes... (Ctrl+C to stop)")
+    
+    # Bun-specific file watcher
+    if typeof Bun isnt 'undefined'
+      # This would use Bun's file watching API
+      console.log("Watch mode not yet implemented")
+    else
+      console.error("Watch mode requires Bun runtime")
+      
+  readStdin: ->
+    # Bun
+    if typeof Bun isnt 'undefined'
+      reader = Bun.stdin.stream().getReader()
+      chunks = []
+      
+      loop
+        { done, value } = await reader.read()
+        break if done
+        chunks.push(value)
+      
+      decoder = new TextDecoder()
+      return chunks.map((chunk) -> decoder.decode(chunk)).join('')
+    
+    # Deno
+    if typeof Deno isnt 'undefined'
+      decoder = new TextDecoder()
+      data = await Deno.readAll(Deno.stdin)
+      return decoder.decode(data)
+    
+    # Node.js
+    if typeof process isnt 'undefined'
+      return new Promise (resolve) ->
+        chunks = []
+        process.stdin.on 'data', (chunk) -> chunks.push(chunk)
+        process.stdin.on 'end', -> resolve(chunks.join(''))
+    
+    throw new Error("Cannot read from stdin in this environment")
+    
+  writeFile: (filepath, content) ->
+    # Bun
+    if typeof Bun isnt 'undefined'
+      return Bun.write(filepath, content)
+    
+    # Deno
+    if typeof Deno isnt 'undefined'
+      encoder = new TextEncoder()
+      return Deno.writeFile(filepath, encoder.encode(content))
+    
+    # Node.js
+    if typeof process isnt 'undefined'
+      { promises: fs } = await import('fs')
+      return fs.writeFile(filepath, content, 'utf8')
+    
+    throw new Error("Cannot write files in this environment")
+    
+  executeJS: (js) ->
+    # For now, just eval the JavaScript
+    # In a real implementation, we'd want better isolation
+    try
+      eval(js)
+    catch error
+      console.error("Runtime error:", error.message)
+      @exit(1)
+      
+  exit: (code = 0) ->
+    # Bun
+    if typeof Bun isnt 'undefined'
+      process.exit(code)
+    
+    # Deno
+    if typeof Deno isnt 'undefined'
+      Deno.exit(code)
+    
+    # Node.js
+    if typeof process isnt 'undefined'
+      process.exit(code)
+
+# Run the CLI
+cli = new RipCLI()
+cli.run()

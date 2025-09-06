@@ -1,0 +1,43 @@
+{
+  "name": "@rip/lang",
+  "version": "0.1.0",
+  "description": "A modern programming language that compiles to ES6+ with multi-runtime support",
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": {
+      "bun": "./lib/index.js",
+      "deno": "./lib/index.js",
+      "node": "./lib/index.js",
+      "browser": "./lib/index.js",
+      "default": "./lib/index.js"
+    },
+    "./compiler": "./lib/compiler.js",
+    "./lexer": "./lib/lexer.js",
+    "./parser": "./lib/parser.js",
+    "./nodes": "./lib/nodes.js"
+  },
+  "bin": {
+    "rip": "./bin/rip.js"
+  },
+  "scripts": {
+    "build": "bun run build:bootstrap",
+    "build:bootstrap": "echo 'TODO: Bootstrap Rip compiler'",
+    "test": "bun test",
+    "test:deno": "deno test --allow-read test/",
+    "test:node": "node --test test/"
+  },
+  "keywords": ["rip", "language", "compiler", "es6", "esm", "bun", "deno", "node", "browser"],
+  "author": "Steve Shreeve",
+  "license": "MIT",
+  "engines": {
+    "node": ">=16",
+    "bun": ">=1.0.0"
+  },
+  "runtimes": {
+    "primary": "bun",
+    "supported": ["bun", "deno", "node", "browser"]
+  },
+  "devDependencies": {},
+  "dependencies": {}
+}
