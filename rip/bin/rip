@@ -197,7 +197,18 @@ const args = process.argv.slice(2);
 
 // Handle --version flag
 if (args[0] === '--version' || args[0] === '-v') {
-  console.log(`Rip v${RIP_VERSION}`);
+  console.log(`
+    ╔═══════════════════════════════╗
+    ║    ██████╗ ██╗██████╗         ║
+    ║    ██╔══██╗██║██╔══██╗        ║
+    ║    ██████╔╝██║██████╔╝        ║
+    ║    ██╔══██╗██║██╔═══╝         ║
+    ║    ██║  ██║██║██║             ║
+    ║    ╚═╝  ╚═╝╚═╝╚═╝             ║
+    ║                               ║
+    ║         Version ${RIP_VERSION}          ║
+    ╚═══════════════════════════════╝
+  `);
   process.exit(0);
 }
 

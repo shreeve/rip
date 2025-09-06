@@ -1,0 +1,37 @@
+    ╔═══════════════════════════════╗
+    ║                               ║
+    ║    ██████╗ ██╗██████╗         ║
+    ║    ██╔══██╗██║██╔══██╗        ║
+    ║    ██████╔╝██║██████╔╝        ║
+    ║    ██╔══██╗██║██╔═══╝         ║
+    ║    ██║  ██║██║██║             ║
+    ║    ╚═╝  ╚═╝╚═╝╚═╝             ║
+    ║                               ║
+    ║    simple • fast • clean      ║
+    ║                               ║
+    ╚═══════════════════════════════╝
+
+    The language that compiles to JS
+    No classes, just data.
+    ~1000 lines total.
+
+
+Alternative minimalist version:
+
+     _____ _____ _____ 
+    |  __ \_   _|  __ \
+    | |__) || | | |__) |
+    |  _  / | | |  ___/
+    | | \ \_| |_| |    
+    |_|  \_\___/|_|    
+                       
+    No classes. Just data.
+
+
+Ultra-minimal:
+
+    RIP
+    ───
+    Simple language.
+    Clean design.
+    Fast compilation.

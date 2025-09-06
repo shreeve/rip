@@ -1,0 +1,30 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background Circle -->
+  <circle cx="100" cy="100" r="90" fill="#1e1e1e" stroke="#4a9eff" stroke-width="3"/>
+  
+  <!-- Lightning bolt symbolizing speed -->
+  <path d="M 110 40 L 80 90 L 95 90 L 85 140 L 120 75 L 105 75 Z" 
+        fill="#ffd700" 
+        stroke="#ffa500" 
+        stroke-width="2"
+        opacity="0.9"/>
+  
+  <!-- "RIP" text -->
+  <text x="100" y="170" 
+        font-family="'SF Mono', Monaco, 'Courier New', monospace" 
+        font-size="32" 
+        font-weight="bold" 
+        text-anchor="middle" 
+        fill="#4a9eff">
+    RIP
+  </text>
+  
+  <!-- Tagline -->
+  <text x="100" y="185" 
+        font-family="'SF Pro', -apple-system, sans-serif" 
+        font-size="10" 
+        text-anchor="middle" 
+        fill="#888">
+    simple • fast • clean
+  </text>
+</svg>
