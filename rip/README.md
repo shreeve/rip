@@ -1,3 +1,5 @@
+<div align="center"><img src="assets/logo.png" style="height:75px" /><br></div>
+
 # Rip Language
 
 A modern programming language that compiles to ES6+ with first-class multi-runtime support.
