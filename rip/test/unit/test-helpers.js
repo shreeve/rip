@@ -6,64 +6,46 @@
 import fs from 'fs';
 import { execSync } from 'child_process';
 
-// Use a lock file to prevent race conditions
-const lockFile = './lib/.conversion-lock';
-let isConverting = false;
+// Cache of already processed modules
+const processedModules = new Set();
 
 export async function ensureESMExports() {
-  // If another process is converting, wait
-  while (fs.existsSync(lockFile)) {
-    await new Promise(resolve => setTimeout(resolve, 50));
-  }
-
-  // Check if already converted
-  try {
-    const lexerContent = fs.readFileSync('./lib/lexer.js', 'utf-8');
-    if (lexerContent.includes('export default Lexer') &&
-        !lexerContent.match(/export default Lexer[\s\S]*export default Lexer/)) {
-      // Already properly converted
-      return;
+  // Only run once per test run
+  if (processedModules.size > 0) return;
+  
+  // Always start fresh - recompile from source
+  execSync('coffee -c -b -o lib/ src/', { stdio: 'ignore' });
+  
+  // Convert each module
+  const modules = ['lexer', 'rewriter', 'compiler'];
+  
+  for (const moduleName of modules) {
+    const modulePath = `./lib/${moduleName}.js`;
+    
+    if (!fs.existsSync(modulePath)) continue;
+    
+    let js = fs.readFileSync(modulePath, 'utf-8');
+    
+    // Skip if already has proper exports
+    if (js.includes('export default') && js.includes('export {')) {
+      processedModules.add(moduleName);
+      continue;
     }
-  } catch (e) {
-    // File doesn't exist, need to compile
-  }
-
-  // Lock for conversion
-  fs.writeFileSync(lockFile, 'converting');
-
-  try {
-    // Recompile from source to ensure clean state
-    execSync('coffee -c -b -o lib/ src/', { stdio: 'ignore' });
-
-    // Convert each module
-    const modules = ['lexer', 'rewriter', 'compiler'];
-
-    for (const moduleName of modules) {
-      const modulePath = `./lib/${moduleName}.js`;
-
-      if (!fs.existsSync(modulePath)) continue;
-
-      let js = fs.readFileSync(modulePath, 'utf-8');
-
-      // Fix class declarations
-      js = js.replace(/var\s+(\w+);?\s*\1\s*=\s*class\s+\1/g, 'const $1 = class $1');
-
-      // Remove CommonJS exports
-      js = js.replace(/module\.exports = (\w+);/, '');
-
-      // Add ESM exports if not present
-      if (!js.includes('export default')) {
-        const className = moduleName.charAt(0).toUpperCase() + moduleName.slice(1);
-        js += `\nexport default ${className};\nexport { ${className} };`;
-      }
-
-      fs.writeFileSync(modulePath, js);
+    
+    // Fix class declarations
+    js = js.replace(/var\s+(\w+);?\s*\1\s*=\s*class\s+\1/g, 'const $1 = class $1');
+    
+    // Remove CommonJS exports
+    js = js.replace(/module\.exports = (\w+);/, '');
+    
+    // Add ESM exports only if completely missing
+    if (!js.includes('export default') && !js.includes('export {')) {
+      const className = moduleName.charAt(0).toUpperCase() + moduleName.slice(1);
+      js += `\nexport default ${className};\nexport { ${className} };`;
     }
-  } finally {
-    // Remove lock
-    if (fs.existsSync(lockFile)) {
-      fs.unlinkSync(lockFile);
-    }
+    
+    fs.writeFileSync(modulePath, js);
+    processedModules.add(moduleName);
   }
 }
 
