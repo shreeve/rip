@@ -18,6 +18,7 @@ class Compiler
     return '' unless n?
 
     switch n.type
+
       # Literals
       when 'num'    then n.val
       when 'str'    then @string(n.val)
