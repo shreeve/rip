@@ -214,8 +214,33 @@ The migration is complete when:
 
 ## Repository State
 - **Branch**: main
-- **Last Commit**: "Fix source files and bootstrap index.js - partial progress on nodes.js"
+- **Last Commit**: "Complete ESM migration of index.coffee - handoff point"
 - **Working Directory**: `/Users/shreeve/Data/Code/rip/coffeescript`
+
+## Handoff Completion Notes (Final Agent Actions)
+
+### Completed Fixes to index.coffee
+1. **Removed all CommonJS dependencies**:
+   - Deleted `require.extensions` deprecation code
+   - Removed `Module` class usage from coffeeEval
+   - Eliminated dynamic `require()` calls for Babel
+
+2. **Simplified runtime functions**:
+   - `run()` - Now just compiles and returns JavaScript (no module execution)
+   - `coffeeEval()` - Basic VM evaluation without CommonJS module context
+   - `register()` - Throws error explaining ESM incompatibility
+   - `transpile()` - Disabled with clear error message
+
+3. **Successfully tested**:
+   - Basic compilation works: `echo 'console.log "test"' | node ./bin/coffee.js -c -s`
+   - Produces valid JavaScript output
+
+### Current Working State
+- ✅ **index.coffee/index.js** - Fully ESM compatible, no CommonJS dependencies
+- ✅ **Basic compilation** - Works end-to-end
+- ⚠️ **nodes.coffee/nodes.js** - Still needs location data fixes
+- ⚠️ **Test suite** - Not yet functional
+- ⚠️ **REPL** - Needs rework for ESM
 
 ## Key Commands for Testing
 ```bash
