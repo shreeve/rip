@@ -64,15 +64,15 @@ export class Lexer
     i = 0
     while @chunk = code[i..]
       consumed = \
-           @identifierToken() or
-           @commentToken()    or
-           @whitespaceToken() or
-           @lineToken()       or
-           @stringToken()     or
-           @numberToken()     or
-           # @regexToken()      or  # TODO: Enable regex support later
-           # @jsToken()         or  # TODO: Enable JS backtick support later
-           @literalToken()
+        @identifierToken() or
+        @commentToken()    or
+        @whitespaceToken() or
+        @lineToken()       or
+        @stringToken()     or
+        @numberToken()     or
+        # @regexToken()      or  # TODO: Enable regex support later
+        # @jsToken()         or  # TODO: Enable JS backtick support later
+        @literalToken()
 
       # Update position.
       [@chunkLine, @chunkColumn, @chunkOffset] = @getLineAndColumnFromChunk consumed
