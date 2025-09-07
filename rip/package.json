@@ -1,7 +1,7 @@
 {
   "name": "@rip/lang",
   "version": "0.3.0",
-  "description": "A clean, simple language that compiles to JavaScript. No classes, just data.",
+  "description": "A modern programming language that compiles to ES6+ JavaScript",
   "type": "module",
   "main": "./lib/index.js",
   "exports": {
@@ -23,16 +23,10 @@
     "rip": "./bin/rip"
   },
   "scripts": {
-    "compile": "coffee -c -b -o lib/ src/",
-    "test": "bun test test/unit",
-    "test:unit": "bun test test/unit",
-    "test:features": "./test/run-rip-tests.js",
-    "test:all": "bun run test:unit && bun run test:features",
-    "test:watch": "bun test --watch test/unit",
-    "test:coverage": "bun test --coverage test/unit",
+    "compile": "bunx coffeescript@latest -c -b -o lib/ src/",
     "rip": "./bin/rip"
   },
-  "keywords": ["rip", "language", "compiler", "simple", "clean", "ast", "es6", "esm", "bun", "deno", "node"],
+  "keywords": ["rip", "language", "compiler", "es6", "esm", "bun"],
   "author": "Steve Shreeve",
   "license": "MIT",
   "repository": {
@@ -47,11 +41,6 @@
   "runtimes": {
     "primary": "bun",
     "supported": ["bun", "deno", "node", "browser"]
-  },
-  "highlights": {
-    "lines": "~1000 total",
-    "ast": "Simple objects, no classes",
-    "performance": "108,000 compilations/sec"
   },
   "devDependencies": {},
   "dependencies": {}
