@@ -8,7 +8,8 @@
 //   Date: September 7, 2025
 // ==============================================================================
 
-import { version } from '../package.json';
+import packageData from '../package.json' with { type: 'json' };
+const version = packageData.version;
 
 // Terminal symbols (tokens, cannot be expanded)
 class Terminal {

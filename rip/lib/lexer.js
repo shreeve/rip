@@ -1,55 +1,12 @@
-  // The Rip Lexer. Uses a series of token-matching regexes to attempt
-  // matches against the beginning of the source code. When a match is found,
-  // a token is produced, we consume the match, and start again. Tokens are in the
-  // form:
-
-  //     [tag, value, locationData]
-
-  // where locationData is {first_line, first_column, last_line, last_column, last_line_exclusive, last_column_exclusive}, which is a
-  // format that can be fed directly into the parser. These are read by the parser in the `parser.lexer` function.
-let BOM;
-let BOOL;
-let CALLABLE;
-let CODE;
-let COMMENT;
-let COMPARABLE_LEFT_SIDE;
-let COMPARE;
-let COMPOUND_ASSIGN;
-let HERECOMMENT_ILLEGAL;
-let HEREDOC_DOUBLE;
-let HEREDOC_INDENT;
-let HEREDOC_SINGLE;
-let IDENTIFIER;
-let INDENTABLE_CLOSERS;
-let INDEXABLE;
-let JS_KEYWORDS;
-let LINE_BREAK;
-let LINE_CONTINUER;
-let MATH;
-let MULTI_DENT;
-let NOT_REGEX;
-let NUMBER;
-let OPERATOR;
-let REGEX_INVALID_ESCAPE;
-let RELATION;
-let RESERVED;
-let RIP_ALIASES;
-let RIP_ALIAS_MAP;
-let RIP_KEYWORDS;
-let SHIFT;
-let STRICT_PROSCRIBED;
-let STRING_DOUBLE;
-let STRING_INVALID_ESCAPE;
-let STRING_SINGLE;
-let STRING_START;
-let TRAILING_SPACES;
-let UNARY;
-let UNARY_MATH;
-let WHITESPACE;
-let addTokenData;
-let isForFrom;
-let isUnassignable;
-let key;
+// The Rip Lexer. Uses a series of token-matching regexes to attempt
+// matches against the beginning of the source code. When a match is found,
+// a token is produced, we consume the match, and start again. Tokens are in the
+// form:
+//
+//     [tag, value, locationData]
+//
+// where locationData is {first_line, first_column, last_line, last_column, last_line_exclusive, last_column_exclusive}, which is a
+// format that can be fed directly into the parser. These are read by the parser in the `parser.lexer` function.
 
 import {
   Rewriter,
@@ -115,7 +72,7 @@ export class Lexer {
     this.chunkOffset = opts.offset || 0; // The start offset for the current @chunk.
     this.locationDataCompensations = opts.locationDataCompensations || {};
     code = this.clean(code); // The stripped, cleaned original source code.
-    
+
     // At every position, run through this list of attempted matches,
     // short-circuiting if any of them succeed. Their order determines precedence:
     // `@literalToken` is the fallback catch-all.
@@ -633,7 +590,7 @@ export class Lexer {
     indent = match[0];
     prev = this.prev();
     backslash = (prev != null ? prev[0] : void 0) === '\\';
-    if (!((backslash || ((this.seenFor != null) ? ref.endsLength : void 0) < this.ends.length) && this.seenFor)) {
+    if (!((backslash || ((this.seenFor != null) ? this.seenFor.endsLength : void 0) < this.ends.length) && this.seenFor)) {
       this.seenFor = false;
     }
     if (!((backslash && this.seenImport) || this.importSpecifierList)) {
@@ -825,7 +782,7 @@ export class Lexer {
     }
     tag = value;
     prev = this.prev();
-    if (prev && ['='.includes(...COMPOUND_ASSIGN], value)) {
+    if (prev && (value === '=' || COMPOUND_ASSIGN.includes(value))) {
       skipToken = false;
       if (value === '=' && ((ref = prev[1]) === '||' || ref === '&&') && !prev.spaced) {
         prev[0] = 'COMPOUND_ASSIGN';
@@ -840,8 +797,8 @@ export class Lexer {
         skipToken = true;
       }
       if (prev && prev[0] !== 'PROPERTY') {
-        origin = (prev.origin ?? prev;
-        message = isUnassignable(prev[1], origin[1]));
+        origin = prev.origin ?? prev;
+        message = isUnassignable(prev[1], origin[1]);
         if (message) {
           this.error(message, origin[2]);
         }
@@ -863,7 +820,7 @@ export class Lexer {
       this.exportSpecifierList = false;
     }
     if (value === ';') {
-      if (ref3 = prev != null ? prev[0] : void 0, ['='.includes(...UNFINISHED], ref3)) {
+      if (ref3 = prev != null ? prev[0] : void 0, (ref3 === '=' || UNFINISHED.includes(ref3))) {
         this.error('unexpected ;');
       }
       this.seenFor = this.seenImport = this.seenExport = false;
@@ -1038,9 +995,9 @@ export class Lexer {
     ({quote, indent, double, heregex, endOffset} = options);
     if (tokens.length > 1) {
       lparen = this.token('STRING_START', '(', {
-        length: (quote != null ? quote.length : void 0 ?? 0,
+        length: (quote != null ? quote.length : void 0) ?? 0,
         data: {quote},
-        generated: !(quote != null ? quote.length : void 0))
+        generated: !(quote != null ? quote.length : void 0)
       });
     }
     firstIndex = this.tokens.length;
@@ -1113,7 +1070,7 @@ export class Lexer {
       this.tokens.push(...tokensToPush);
     }
     if (lparen) {
-      [lastToken] = Array.from(tokens, -1);
+      lastToken = tokens[tokens.length - 1];
       lparen.origin = [
         'STRING',
         null,
@@ -1133,8 +1090,8 @@ export class Lexer {
       }
       return rparen = this.token('STRING_END', ')', {
         offset: endOffset - (quote != null ? quote : '').length,
-        length: (quote != null ? quote.length : void 0 ?? 0,
-        generated: !(quote != null ? quote.length : void 0))
+        length: (quote != null ? quote.length : void 0) ?? 0,
+        generated: !(quote != null ? quote.length : void 0)
       });
     }
   }
@@ -1143,7 +1100,7 @@ export class Lexer {
   // correctly balanced throughout the course of the token stream.
   pair(tag) {
     let lastIndent, prev, ref, ref1, wanted;
-    ref = this.ends, [prev] = Array.from(ref, -1);
+    ref = this.ends, prev = ref[ref.length - 1];
     if (tag !== (wanted = prev != null ? prev.tag : void 0)) {
       if ('OUTDENT' !== wanted) {
         this.error(`unmatched ${tag}`);
@@ -1153,7 +1110,7 @@ export class Lexer {
       //     el.click((event) ->
       //       el.hide())
 
-      ref1 = this.indents, [lastIndent] = Array.from(ref1, -1);
+      ref1 = this.indents, lastIndent = ref1[ref1.length - 1];
       this.outdentToken({
         moveOut: lastIndent,
         noNewlines: true
@@ -1204,7 +1161,7 @@ export class Lexer {
     lineCount = count(string, '\n');
     column = this.chunkColumn;
     if (lineCount > 0) {
-      ref = string.split('\n'), [lastLine] = Array.from(ref, -1);
+      ref = string.split('\n'), lastLine = ref[ref.length - 1];
       column = lastLine.length;
       previousLinesCompensation = this.getLocationDataCompensation(this.chunkOffset, this.chunkOffset + offset - column);
       if (previousLinesCompensation < 0) {
@@ -1276,14 +1233,14 @@ export class Lexer {
   // Peek at the last tag in the token stream.
   tag() {
     let ref, token;
-    ref = this.tokens, [token] = Array.from(ref, -1);
+    ref = this.tokens, token = ref[ref.length - 1];
     return token != null ? token[0] : void 0;
   }
 
   // Peek at the last value in the token stream.
   value(useOrigin = false) {
     let ref, token;
-    ref = this.tokens, [token] = Array.from(ref, -1);
+    ref = this.tokens, token = ref[ref.length - 1];
     if (useOrigin && ((token != null ? token.origin : void 0) != null)) {
       return token.origin[1];
     } else {
@@ -1328,7 +1285,7 @@ export class Lexer {
     results = [];
     while (this.value() === ';') {
       this.tokens.pop();
-      if (ref = (ref1 = this.prev()) != null ? ref1[0] : void 0, ['='.includes(...UNFINISHED], ref)) {
+      if (ref = (ref1 = this.prev()) != null ? ref1[0] : void 0, (ref === '=' || UNFINISHED.includes(ref))) {
         results.push(this.error('unexpected ;'));
       } else {
         results.push(void 0);
@@ -1353,7 +1310,7 @@ export class Lexer {
 // ----------------
 const isUnassignable = (name, displayName = name) => {
   switch (false) {
-    case ![...JS_KEYWORDS.includes(...RIP_KEYWORDS], name):
+    case !(JS_KEYWORDS.includes(name) || RIP_KEYWORDS.includes(name)):
       return `keyword '${displayName}' can't be assigned`;
     case !STRICT_PROSCRIBED.includes(name):
       return `'${displayName}' can't be assigned`;
@@ -1397,7 +1354,7 @@ const addTokenData = (token, data) => {
 const JS_KEYWORDS = ['true', 'false', 'null', 'this', 'new', 'delete', 'typeof', 'in', 'instanceof', 'return', 'throw', 'break', 'continue', 'debugger', 'yield', 'await', 'if', 'else', 'switch', 'for', 'while', 'do', 'try', 'catch', 'finally', 'class', 'extends', 'super', 'import', 'export', 'default'];
 
 // Rip-only keywords.
-const RIP_KEYWORDS = ['undefined', 'Infinity', 'NaN', 'then', 'unless', 'until', 'loop', 'of', 'by', 'when'];
+const RIP_KEYWORDS_BASE = ['undefined', 'Infinity', 'NaN', 'then', 'unless', 'until', 'loop', 'of', 'by', 'when'];
 
 const RIP_ALIAS_MAP = {
   and: '&&',
@@ -1414,13 +1371,13 @@ const RIP_ALIAS_MAP = {
 const RIP_ALIASES = (function() {
   let results;
   results = [];
-  for (key in RIP_ALIAS_MAP) {
+  for (let key in RIP_ALIAS_MAP) {
     results.push(key);
   }
   return results;
 })();
 
-const RIP_KEYWORDS = RIP_KEYWORDS.concat(RIP_ALIASES);
+const RIP_KEYWORDS = RIP_KEYWORDS_BASE.concat(RIP_ALIASES);
 
 // The list of keywords that are reserved by JavaScript, but not used, or are
 // used by Rip internally. We throw an error when these are encountered,

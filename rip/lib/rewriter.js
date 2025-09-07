@@ -4,25 +4,9 @@
   // a series of passes over the token stream, using this **Rewriter** to convert
   // shorthand into the unambiguous long form, add implicit indentation and
   // parentheses, and generally clean things up.
-let BALANCED_PAIRS;
-let CALL_CLOSERS;
-let CONTROL_IN_IMPLICIT;
-let DISCARDED;
-let EXPRESSION_CLOSE;
-let EXPRESSION_END;
-let EXPRESSION_START;
-let IMPLICIT_CALL;
-let IMPLICIT_END;
-let IMPLICIT_FUNC;
-let IMPLICIT_UNSPACED_CALL;
-let LINEBREAKS;
-let SINGLE_CLOSERS;
-let SINGLE_LINERS;
-let generate;
 let k;
 let left;
 let len;
-let moveComments;
 let right;
 
 import {
@@ -83,7 +67,7 @@ export class Rewriter {
       // Set environment variable `DEBUG_TOKEN_STREAM` to `true` to output token
       // debugging info. Also set `DEBUG_REWRITTEN_TOKEN_STREAM` to `true` to
       // output the token stream after it has been rewritten by this file.
-      if (typeof process !== "undefined" && process !== null ? (process.env != null) ? ref.DEBUG_TOKEN_STREAM : void 0 : void 0) {
+      if (typeof process !== "undefined" && process !== null && process.env?.DEBUG_TOKEN_STREAM) {
         if (process.env.DEBUG_REWRITTEN_TOKEN_STREAM) {
           console.log('Initial token stream:');
         }
@@ -108,7 +92,7 @@ export class Rewriter {
       this.addLocationDataToGeneratedTokens();
       this.fixIndentationLocationData();
       this.exposeTokenDataToGrammar();
-      if (typeof process !== "undefined" && process !== null ? (process.env != null) ? ref1.DEBUG_REWRITTEN_TOKEN_STREAM : void 0 : void 0) {
+      if (typeof process !== "undefined" && process !== null && process.env?.DEBUG_REWRITTEN_TOKEN_STREAM) {
         if (process.env.DEBUG_TOKEN_STREAM) {
           console.log('Rewritten token stream:');
         }
@@ -846,7 +830,7 @@ export class Rewriter {
           return 1;
         }
         isIndent = token[0] === 'INDENT';
-        prevToken = (token.prevToken ?? tokens[i - 1];
+        prevToken = token.prevToken ?? tokens[i - 1];
         prevLocationData = prevToken[2];
         // addLocationDataToGeneratedTokens()) set the outdent's location data
         // to the preceding token's, but in order to detect comments inside an
@@ -1034,8 +1018,8 @@ export class Rewriter {
         let key, ref, ref1, val;
         if (token.generated || (token.data && Object.keys(token.data).length !== 0)) {
           token[1] = new String(token[1]);
-          ref1 = (token.data ?? {};
-          for (key in ref1)) {
+          ref1 = token.data ?? {};
+          for (key in ref1) {
             if (!Object.prototype.hasOwnProperty.call(ref1, key)) continue;
             val = ref1[key];
             token[1][key] = val;
@@ -1064,11 +1048,8 @@ export class Rewriter {
 
     // Look up a tag by token index.
     tag(i) {
-      let ref;
-      return (this.tokens[i] != null) ? ref[0] : void 0;
+      return (this.tokens[i] != null) ? this.tokens[i][0] : void 0;
     }
-
-  generate = generate;
 }
 
 // Constants
