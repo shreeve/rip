@@ -1,23 +1,23 @@
-# # Rip Grammar - Converted from CoffeeScript's battle-tested grammar
-# #
-# # This grammar uses a clean data-driven approach:
-# # - Simple rules use data objects with '$1', '$2', ... placeholders
-# # - Complex rules use 'code:' property for computation
-# # - All nodes are pure data (no methods), following modern compiler design
-# #
-# # Parser Pipeline: Lexer -> Rewriter -> Parser (this grammar) -> Compiler -> JS
+# Rip Grammar - Converted from CoffeeScript's battle-tested grammar
 #
-# # Helper function for grammar rules
-# o =     (...args)  -> args
+# This grammar uses a clean data-driven approach:
+# - Simple rules use data objects with '$1', '$2', ... placeholders
+# - Complex rules use 'code:' property for computation
+# - All nodes are pure data (no methods), following modern compiler design
+#
+# Parser Pipeline: Lexer -> Rewriter -> Parser (this grammar) -> Compiler -> JS
+
+# Helper function for grammar rules
+o =     (...args)  -> args
 # binOp = (op, prec) -> o "Expression #{op} Expression", type: 'BinaryExpression', op: op, left: '$1', right: '$3', prec
 # unOp  = (op, prec) -> o            "#{op} Expression", type: 'UnaryExpression' , op: op, arg: '$2', prec
-#
-# # ================================================================================
-# # GRAMMAR RULES
-# # ================================================================================
-#
-# grammar =
-#
+
+# ================================================================================
+# GRAMMAR RULES
+# ================================================================================
+
+grammar =
+
 #   # The **Program** is the top-level node in the syntax tree
 #   Program: [
 #     o ''
@@ -823,13 +823,13 @@
 #   DoIife: [
 #     o 'DO_IIFE Code'                         , type: 'DoIife', body: '$2'
 #   ]
-#
-# # ================================================================================
-# # OPERATOR PRECEDENCE
-# # ================================================================================
-#
-# # Operators at the top have higher precedence
-# operators = [
+
+# ================================================================================
+# OPERATOR PRECEDENCE
+# ================================================================================
+
+# Operators at the top have higher precedence
+operators = [
 #   ['right',    'DO_IIFE']
 #   ['left',     '.', '?.', '::', '?::']
 #   ['left',     'CALL_START', 'CALL_END']
@@ -856,19 +856,19 @@
 #   ['right',    'FORIN', 'FOROF', 'FORFROM', 'BY', 'WHEN']
 #   ['right',    'IF', 'ELSE', 'THEN', 'FOR', 'WHILE', 'UNTIL', 'LOOP', 'SUPER', 'CLASS', 'IMPORT', 'EXPORT', 'DYNAMIC_IMPORT']
 #   ['left',     'POST_IF']
-# ]
-#
-# # Process the grammar for the parser generator
-# for own name, alternatives of grammar
-#   grammar[name] = for alt in alternatives
-#     # For Program rules, add return statement
-#     alt[1] = "return #{alt[1]}" if name is 'Program'
-#     alt
-#
-# # Export the grammar
-# module.exports =
-#   bnf: grammar
-#   operators: operators.reverse()  # Parser generator wants low to high
-#
-# # Export the module
-# export default module.exports
+]
+
+# Process the grammar for the parser generator
+for own name, alternatives of grammar
+  grammar[name] = for alt in alternatives
+    # For Program rules, add return statement
+    alt[1] = "return #{alt[1]}" if name is 'Program'
+    alt
+
+# Export the grammar
+module.exports =
+  bnf: grammar
+  operators: operators.reverse()  # Parser generator wants low to high
+
+# Export the module
+export default module.exports
