@@ -30,6 +30,230 @@ Rip is designed from the ground up to be **runtime-agnostic** while being **Bun-
 └── test/          # Test suite
 ```
 
+## How Parsing Works
+
+Let's trace through how Rip parses a simple statement like `console.log 42`:
+
+### Token Stream (from Lexer/Rewriter)
+```
+IDENTIFIER("console") . PROPERTY("log") CALL_START NUMBER("42") CALL_END
+```
+*Note: The rewriter adds implicit `CALL_START` and `CALL_END` for the implicit function call*
+
+### Parse Tree with Captured Values
+
+```coffeescript
+Program: o 'Body', body: '$1'
+  # $1 = Body node (array with one Line)
+
+  Body: o 'Line', code: -> [$1]
+    # $1 = Line node (the Invocation)
+
+    Line: o 'Expression'
+      # $1 = Expression node (passes through)
+
+      Expression: o 'Value'
+        # $1 = Value node (the Invocation)
+
+        Value: o 'Invocation'
+          # $1 = Invocation node
+
+          Invocation: o 'Value OptFuncExist Arguments'
+            # $1 = Value node (console.log - the callee)
+            # $2 = OptFuncExist (empty, returns nothing/false)
+            # $3 = Arguments node (array containing 42)
+
+            # For $1 (console.log):
+            Value: o 'Assignable'
+              Assignable: o 'SimpleAssignable'
+                SimpleAssignable: o 'Value Accessor'
+                  # $1 = Value node (console)
+                  # $2 = Accessor node (.log)
+
+                  # For $1 (console):
+                  Value: o 'Assignable'
+                    Assignable: o 'SimpleAssignable'
+                      SimpleAssignable: o 'Identifier'
+                        Identifier: o 'IDENTIFIER'
+                          # $1 = "console" (the token value)
+
+                  # For $2 (.log):
+                  Accessor: o '. Property'
+                    # $1 = "." (the dot token)
+                    # $2 = Property node
+
+                    Property: o 'PROPERTY'
+                      # $1 = "log" (the token value)
+
+            # For $3 (Arguments):
+            Arguments: o 'CALL_START ArgList OptComma CALL_END'
+              # $1 = CALL_START token
+              # $2 = ArgList node (array with one Arg)
+              # $3 = OptComma (empty)
+              # $4 = CALL_END token
+
+              ArgList: o 'Arg'
+                # $1 = Arg node (the number 42)
+
+                Arg: o 'Expression'
+                  Expression: o 'Value'
+                    Value: o 'Literal'
+                      Literal: o 'AlphaNumeric'
+                        AlphaNumeric: o 'NUMBER'
+                          # $1 = "42" (the token value)
+```
+
+### Summary of Key Captures
+
+| Rule | Pattern | Captured Values |
+|------|---------|-----------------|
+| `Identifier` | `IDENTIFIER` | `$1 = "console"` |
+| `Property` | `PROPERTY` | `$1 = "log"` |
+| `Accessor` | `. Property` | `$1 = "."`, `$2 = Property("log")` |
+| `SimpleAssignable` | `Value Accessor` | `$1 = Value(console)`, `$2 = Accessor(.log)` |
+| `AlphaNumeric` | `NUMBER` | `$1 = "42"` |
+| `ArgList` | `Arg` | `$1 = Arg(42)` |
+| `Arguments` | `CALL_START ArgList OptComma CALL_END` | `$1 = CALL_START`, `$2 = ArgList`, `$3 = empty`, `$4 = CALL_END` |
+| `Invocation` | `Value OptFuncExist Arguments` | `$1 = Value(console.log)`, `$2 = false/empty`, `$3 = Arguments([42])` |
+
+The `$` variables always refer to the positional elements in the pattern, counting terminals and non-terminals from left to right!
+
+### Minimal Grammar Required
+
+For this simple example, we only need about **18 grammar rules**:
+- Program, Body, Line
+- Expression, Value
+- Invocation, Arguments, ArgList, Arg
+- SimpleAssignable, Assignable
+- Identifier, Property, Accessor
+- Literal, AlphaNumeric
+- OptFuncExist, OptComma
+
+Yet with just these rules, we can already parse meaningful programs. The grammar scales beautifully - each new feature (functions, if statements, loops) adds just a few more rules while exponentially increasing expressiveness!
+
+## Complex Example: Functions, If/Else, and String Interpolation
+
+Let's trace through a more complex CoffeeScript-style program:
+
+```coffeescript
+show = (args) -> console.log ...args
+
+if (x = Math.rand()) > 0..5
+  show "Biggie: #{x}"
+else
+  show "Smalls: #{x}"
+```
+
+### Token Stream (simplified)
+
+```
+IDENTIFIER("show") = PARAM_START IDENTIFIER("args") PARAM_END ->
+  IDENTIFIER("console") . PROPERTY("log") CALL_START ... IDENTIFIER("args") CALL_END
+TERMINATOR
+IF ( IDENTIFIER("x") = IDENTIFIER("Math") . PROPERTY("rand") CALL_START CALL_END )
+  COMPARE(">") NUMBER("0") .. NUMBER("5")
+INDENT
+  IDENTIFIER("show") CALL_START STRING_START "Biggie: " INTERPOLATION_START
+    IDENTIFIER("x") INTERPOLATION_END STRING_END CALL_END
+OUTDENT
+ELSE
+INDENT
+  IDENTIFIER("show") CALL_START STRING_START "Smalls: " INTERPOLATION_START
+    IDENTIFIER("x") INTERPOLATION_END STRING_END CALL_END
+OUTDENT
+```
+
+### Key Parse Tree Elements
+
+#### Line 1: `show = (args) -> console.log ...args`
+
+```coffeescript
+Assign: o 'Assignable = Expression'
+  # $1 = Assignable (show)
+  # $3 = Expression (the arrow function)
+
+  Code: o 'PARAM_START ParamList PARAM_END FuncGlyph Line'
+    # $2 = ParamList ([args])
+    # $4 = FuncGlyph (-> = false, not bound)
+    # $5 = Line (console.log ...args)
+
+    # The spread operator:
+    Splat: o '... Expression'
+      # $1 = "..."
+      # $2 = Expression (args identifier)
+```
+
+#### Line 2: `if (x = Math.rand()) > 0..5`
+
+```coffeescript
+If: o 'IfBlock ELSE Block'
+  IfBlock: o 'IF Expression Block'
+    # $2 = Expression (the comparison)
+
+    Operation: o 'Expression COMPARE Expression'
+      # $1 = Expression (parenthetical assignment)
+      # $2 = ">"
+      # $3 = Expression (range 0..5)
+
+      # Parenthetical assignment:
+      Parenthetical: o '( Body )'
+        Assign: o 'Assignable = Expression'
+          # x = Math.rand()
+
+      # Range literal:
+      Range: o 'Expression RangeDots Expression'
+        # $1 = Expression (0)
+        # $2 = RangeDots (..)
+        # $3 = Expression (5)
+
+        RangeDots: o '..'
+          # Returns {exclusive: false}
+```
+
+#### Lines 3 & 5: String Interpolation
+
+```coffeescript
+String: o 'STRING_START Interpolations STRING_END'
+  # Creates a template literal
+
+  Interpolations: o 'Interpolations InterpolationChunk'
+    # Combines literal strings and interpolated expressions
+
+    # Literal part:
+    InterpolationChunk: o 'String'
+      # "Biggie: " or "Smalls: "
+
+    # Interpolated variable:
+    InterpolationChunk: o 'INTERPOLATION_START Body INTERPOLATION_END'
+      # $2 = Body containing identifier 'x'
+```
+
+### Summary of Features Used
+
+| Feature | Key Rules | Description |
+|---------|-----------|-------------|
+| **Function Definition** | `Code`, `ParamList`, `FuncGlyph` | Arrow functions with parameters |
+| **Assignment** | `Assign`, `Assignable` | Variable binding |
+| **Parenthetical Grouping** | `Parenthetical` | Expression grouping with `()` |
+| **Method Calls** | `Invocation`, `Accessor` | Dot notation like `Math.rand()` |
+| **Comparison** | `Operation COMPARE` | Binary comparison operators |
+| **Range Literals** | `Range`, `RangeDots` | Inclusive `..` and exclusive `...` ranges |
+| **If/Else** | `IfBlock`, `Block` | Conditional branching |
+| **String Interpolation** | `Interpolations` | Template literals with `#{}` |
+| **Spread Operator** | `Splat` | Rest/spread with `...` |
+| **Implicit Calls** | Rewriter adds `CALL_START/END` | Parenthesis-free function calls |
+
+With just **~33 grammar rule categories**, Rip can parse this rich, expressive program that includes:
+- Function definitions with parameter lists
+- Nested expressions and assignments
+- String templates with interpolation
+- Range literals for numeric sequences
+- Spread operators for variadic arguments
+- Control flow with if/else blocks
+- Implicit function calls for cleaner syntax
+
+The parse tree elegantly composes these features - each rule handles its specific concern while seamlessly integrating with others. This composability is what makes the grammar both powerful and maintainable!
+
 ## Multi-Runtime Support
 
 ### Bun (Primary)
