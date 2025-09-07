@@ -1,6 +1,6 @@
 {
   "name": "@rip/lang",
-  "version": "0.3.0",
+  "version": "0.1.0",
   "description": "A modern programming language that compiles to ES6+ JavaScript",
   "type": "module",
   "main": "./lib/index.js",
