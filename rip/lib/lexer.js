@@ -78,9 +78,7 @@ export class Lexer {
     // `@literalToken` is the fallback catch-all.
     i = 0;
     while (this.chunk = code.slice(i)) {
-      // @regexToken()      or  # TODO: Enable regex support later
-      // @jsToken()         or  # TODO: Enable JS backtick support later
-      consumed = this.identifierToken() || this.commentToken() || this.whitespaceToken() || this.lineToken() || this.stringToken() || this.numberToken() || this.literalToken();
+      consumed = this.identifierToken() || this.commentToken() || this.whitespaceToken() || this.lineToken() || this.stringToken() || this.numberToken() || this.regexToken() || this.jsToken() || this.literalToken();
       // Update position.
       [this.chunkLine, this.chunkColumn, this.chunkOffset] = this.getLineAndColumnFromChunk(consumed);
       i += consumed;
@@ -553,24 +551,162 @@ export class Lexer {
     return commentWithSurroundingWhitespace.length;
   }
 
-  // TODO: Enable JS backtick support later
   // Matches JavaScript interpolated directly into the source via backticks.
-  // jsToken: ->
-  //   return 0 unless @chunk.charAt(0) is '`' and
-  //     (match = (matchedHere = HERE_JSTOKEN.exec(@chunk)) or JSTOKEN.exec(@chunk))
-  //   # Convert escaped backticks to backticks, and escaped backslashes
-  //   # just before escaped backticks to backslashes
-  //   script = match[1]
-  //   {length} = match[0]
-  //   @token 'JS', script, {length, data: {here: !!matchedHere}}
-  //   length
+  jsToken() {
+    let length, match, matchedHere, script;
+    if (!(this.chunk.charAt(0) === '`' && (match = (matchedHere = HERE_JSTOKEN.exec(this.chunk)) || JSTOKEN.exec(this.chunk)))) {
+      return 0;
+    }
+    // Convert escaped backticks to backticks, and escaped backslashes
+    // just before escaped backticks to backslashes
+    script = match[1];
+    ({length} = match[0]);
+    this.token('JS', script, {
+      length,
+      data: {
+        here: !!matchedHere
+      }
+    });
+    return length;
+  }
 
-    // TODO: Enable regex support later
   // Matches regular expression literals, as well as multiline extended ones.
   // Lexing regular expressions is difficult to distinguish from division, so we
   // borrow some basic heuristics from JavaScript and Ruby.
-  // regexToken: ->
-  //   ... (keep all the regex code commented for now)
+  regexToken() {
+    let body, closed, comment, commentIndex, commentOpts, commentTokens, comments, delimiter, end, flags, fullMatch, index, leadingWhitespace, match, matchedComment, origin, prev, ref, ref1, regex, tokens;
+    switch (false) {
+      case !(match = REGEX_ILLEGAL.exec(this.chunk)):
+        this.error(`regular expressions cannot begin with ${match[2]}`, {
+          offset: match.index + match[1].length
+        });
+        break;
+      case !(match = this.matchWithInterpolations(HEREGEX, '///')):
+        ({tokens, index} = match);
+        comments = [];
+        while (matchedComment = HEREGEX_COMMENT.exec(this.chunk.slice(0, index))) {
+          ({
+            index: commentIndex
+          } = matchedComment);
+          [fullMatch, leadingWhitespace, comment] = matchedComment;
+          comments.push({
+            comment,
+            offsetInChunk: commentIndex + leadingWhitespace.length
+          });
+        }
+        commentTokens = flatten((function() {
+          let i, len, results;
+          results = [];
+          for (i = 0, len = comments.length; i < len; i++) {
+            commentOpts = comments[i];
+            results.push(this.commentToken(commentOpts.comment, Object.assign(commentOpts, {
+              heregex: true,
+              returnCommentTokens: true
+            })));
+          }
+          return results;
+        }).call(this));
+        break;
+      case !(match = REGEX.exec(this.chunk)):
+        [regex, body, closed] = match;
+        this.validateEscapes(body, {
+          isRegex: true,
+          offsetInChunk: 1
+        });
+        index = regex.length;
+        prev = this.prev();
+        if (prev) {
+          if (prev.spaced && CALLABLE.includes(prev[0])) {
+            if (!closed || POSSIBLY_DIVISION.test(regex)) {
+              return 0;
+            }
+          } else if (NOT_REGEX.includes(prev[0])) {
+            return 0;
+          }
+        }
+        if (!closed) {
+          this.error('missing / (unclosed regex)');
+        }
+        break;
+      default:
+        return 0;
+    }
+    [flags] = REGEX_FLAGS.exec(this.chunk.slice(index));
+    end = index + flags.length;
+    origin = this.makeToken('REGEX', null, {
+      length: end
+    });
+    switch (false) {
+      case !!VALID_FLAGS.test(flags):
+        this.error(`invalid regular expression flags ${flags}`, {
+          offset: index,
+          length: flags.length
+        });
+        break;
+      case !(regex || tokens.length === 1):
+        delimiter = body ? '/' : '///';
+        if (body == null) {
+          body = tokens[0][1];
+        }
+        this.validateUnicodeCodePointEscapes(body, {delimiter});
+        this.token('REGEX', `/${body}/${flags}`, {
+          length: end,
+          origin,
+          data: {delimiter}
+        });
+        break;
+      default:
+        this.token('REGEX_START', '(', {
+          length: 0,
+          origin,
+          generated: true
+        });
+        this.token('IDENTIFIER', 'RegExp', {
+          length: 0,
+          generated: true
+        });
+        this.token('CALL_START', '(', {
+          length: 0,
+          generated: true
+        });
+        this.mergeInterpolationTokens(tokens, {
+          double: true,
+          heregex: {flags},
+          endOffset: end - flags.length,
+          quote: '///'
+        }, (str) => {
+          return this.validateUnicodeCodePointEscapes(str, {delimiter});
+        });
+        if (flags) {
+          this.token(',', ',', {
+            offset: index - 1,
+            length: 0,
+            generated: true
+          });
+          this.token('STRING', '"' + flags + '"', {
+            offset: index,
+            length: flags.length
+          });
+        }
+        this.token(')', ')', {
+          offset: end,
+          length: 0,
+          generated: true
+        });
+        this.token('REGEX_END', ')', {
+          offset: end,
+          length: 0,
+          generated: true
+        });
+    }
+    // Explicitly attach any heregex comments to the REGEX/REGEX_END token.
+    if (commentTokens?.length) {
+      addTokenData(this.tokens[this.tokens.length - 1], {
+        heregexCommentTokens: commentTokens
+      });
+    }
+    return end;
+  }
 
     // Matches newlines, indents, and outdents, and determines which is which.
   // If we can detect that the current line is continued onto the next line,
@@ -950,7 +1086,7 @@ export class Lexer {
   // This method allows us to have strings within interpolations within strings,
   // ad infinitum.
   matchWithInterpolations(regex, delimiter, closingDelimiter = delimiter, interpolators = /^#\{/) {
-    let offsetInChunk, str, strPart, tokens;
+    let column, index, interpolator, line, match, nested, offset, offsetInChunk, str, strPart, tokens;
     tokens = [];
     offsetInChunk = delimiter.length;
     if (this.chunk.slice(0, offsetInChunk) !== delimiter) {
@@ -969,11 +1105,51 @@ export class Lexer {
       }));
       str = str.slice(strPart.length);
       offsetInChunk += strPart.length;
-      if (!false) { // Disable interpolation check: match = interpolators.exec str
-        // TODO: For bootstrapping, disable interpolation for now
-        // We'll just treat the whole thing as a simple string
+      if (!(match = interpolators.exec(str))) {
         break;
       }
+      [interpolator] = match;
+      interpolator = interpolator.slice(1); // Remove leading '#{' to get '{'
+      // Look for the end of the interpolation.
+      [line, column, offset] = this.getLineAndColumnFromChunk(offsetInChunk + 1);
+      ({
+        tokens: nested,
+        index
+      } = new Lexer().tokenize(interpolator, {
+        line,
+        column,
+        offset,
+        untilBalanced: true,
+        locationDataCompensations: this.locationDataCompensations
+      }));
+      // Account for the `#`.
+      index += 1;
+      // Make sure that the closing curly brace we found is immediately followed by another curly brace.
+      // (In the case of #{foo}, the closing } in the original source is at the index indicated by `index`.)
+      if (str[index] !== '}') {
+        this.error("missing }", {
+          offset: offsetInChunk + 2
+        });
+      }
+      // Push a fake `'TOKENS'` token, which will get turned into real tokens later.
+      nested.unshift(this.makeToken('(', '(', {
+        offset: offsetInChunk,
+        length: 2,
+        generated: true
+      }));
+      nested.push(this.makeToken(')', ')', {
+        offset: offsetInChunk + index,
+        length: 1,
+        generated: true
+      }));
+      // Remove leading and trailing parentheses
+      nested[0][0] = nested[nested.length - 1][0] = 'INTERPOLATION';
+      tokens.push(this.makeToken('TOKENS', nested, {
+        offset: offsetInChunk,
+        length: index + 1
+      }));
+      str = str.slice(index + 1);
+      offsetInChunk += index + 1;
     }
     if (str.slice(0, closingDelimiter.length) !== closingDelimiter) {
       this.error(`missing ${closingDelimiter}`, {
@@ -1422,9 +1598,8 @@ const CODE = /^[-=]>/;
 
 const MULTI_DENT = /^(?:\n[^\n\S]*)+/;
 
-// TODO: Enable JS tokens later
-// JSTOKEN      = ///^ `(?!``) ((?: [^`\\] | \\[\s\S]           )*) `   ///
-// HERE_JSTOKEN = ///^ ```     ((?: [^`\\] | \\[\s\S] | `(?!``) )*) ``` ///
+const JSTOKEN      = /^`(?!``)((?: [^`\\] | \\[\s\S]           )*)`/;
+const HERE_JSTOKEN = /^```((?: [^`\\] | \\[\s\S] | `(?!``) )*) ```/;
 
 // String-matching-regexes.
 const STRING_START = /^(?:'''|"""|'|")/;
@@ -1439,41 +1614,19 @@ const HEREDOC_DOUBLE = /^(?:[^\\"#]|\\[\s\S]|"(?!"")|\#(?!\{))*/;
 
 const HEREDOC_INDENT = /\n+([^\n\S]*)(?=\S)/g;
 
-// TODO: Enable regex support later
 // Regex-matching-regexes.
-// REGEX = /// ^
-//   / (?!/) ((
-//   ?: [^ [ / \n \\ ]  # Every other thing.
-//    | \\[^\n]         # Anything but newlines escaped.
-//    | \[              # Character class.
-//        (?: \\[^\n] | [^ \] \n \\ ] )*
-//      \]
-//   )*) (/)?
-// ///
+const REGEX = /^\/(?!\/)((?: [^ [ / \n \\ ] | \\[^\n] | \[ (?: \\[^\n] | [^ \] \n \\ ] )* \])*)(\/)?/;
 
-// REGEX_FLAGS  = /^\w*/
-// VALID_FLAGS  = /^(?!.*(.).*\1)[gimsuy]*$/
+const REGEX_FLAGS  = /^\w*/;
+const VALID_FLAGS  = /^(?!.*(.).*\1)[gimsuy]*$/;
 
-// HEREGEX      = /// ^
-//   (?:
-//       # Match any character, except those that need special handling below.
-//       [^\\/#\s]
-//       # Match `\` followed by any character.
-//     | \\[\s\S]
-//       # Match any `/` except `///`.
-//     | /(?!//)
-//       # Match `#` which is not part of interpolation, e.g. `#{}`.
-//     | \#(?!\{)
-//       # Comments consume everything until the end of the line, including `///`.
-//     | \s+(?:#(?!\{).*)?
-//   )*
-// ///
+const HEREGEX = /^(?:[^\\/#\s]|\\[\s\S]|\/(?!\/\/)|\#(?!\{)|\s+(?:#(?!\{).*)?)*/ ;
 
-// HEREGEX_COMMENT = /(\s+)(#(?!{).*)/gm
+const HEREGEX_COMMENT = /(\s+)(#(?!{).*)/gm;
 
-// REGEX_ILLEGAL = /// ^ ( / | /{3}\s*) (\*) ///
+const REGEX_ILLEGAL = /^(\/|\/{3}\s*)(\*)/;
 
-// POSSIBLY_DIVISION   = /// ^ /=?\s ///
+const POSSIBLY_DIVISION = /^\/=?\s/;
 
 // Other regexes.
 const HERECOMMENT_ILLEGAL = /\*\//;
