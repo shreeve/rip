@@ -304,8 +304,7 @@ export class Rewriter {
         };
         // Helper functions
         isImplicit = (stackItem) => {
-          let ref;
-          return stackItem != null ? (stackItem[2] != null) ? ref.ours : void 0 : void 0;
+          return stackItem != null ? (stackItem[2] != null ? stackItem[2].ours : void 0) : void 0;
         };
         isImplicitObject = (stackItem) => {
           return isImplicit(stackItem) && (stackItem != null ? stackItem[0] : void 0) === '{';
@@ -723,7 +722,7 @@ export class Rewriter {
             ret = shiftCommentsForward(dummyToken, i + 1, tokens);
           }
         }
-        if (((token.comments != null) ? ref1.length : void 0) === 0) {
+        if ((token.comments != null ? token.comments.length : void 0) === 0) {
           delete token.comments;
         }
         return ret;
@@ -744,13 +743,13 @@ export class Rewriter {
           token[2] = token.origin[2];
           return 1;
         }
-        if (token[0] === '{' && (nextLocation = (tokens[i + 1] != null) ? ref[2] : void 0)) {
+        if (token[0] === '{' && (nextLocation = (tokens[i + 1] != null) ? tokens[i + 1][2] : void 0)) {
           ({
             first_line: line,
             first_column: column,
             range: [rangeIndex]
           } = nextLocation);
-        } else if (prevLocation = (tokens[i - 1] != null) ? ref1[2] : void 0) {
+        } else if (prevLocation = (tokens[i - 1] != null) ? tokens[i - 1][2] : void 0) {
           ({
             last_line: line,
             last_column: column,
