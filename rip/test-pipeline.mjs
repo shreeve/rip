@@ -18,7 +18,7 @@ greet = (name) ->
 
 # Array and object
 numbers = [1, 2, 3]
-person = 
+person =
   name: "Alice"
   age: 30
 
@@ -41,25 +41,25 @@ try {
   const lexer = new Lexer();
   const tokens = lexer.tokenize(testCode);
   console.log(`   ✓ Generated ${tokens.length} tokens`);
-  
+
   // Show some token types
   const tokenTypes = [...new Set(tokens.map(t => t[0]))];
   console.log(`   Token types: ${tokenTypes.slice(0, 10).join(', ')}...`);
-  
+
   // Step 2: Parser
   console.log('\n2️⃣  Parser:');
   const parser = createParser(grammar);
   console.log('   ✓ Parser created from grammar');
-  
+
   // Step 3: Verify helpers are available
   console.log('\n3️⃣  Helpers:');
   import('./lib/helpers.js').then(helpers => {
     console.log(`   ✓ Loaded ${Object.keys(helpers).length} helper functions`);
     console.log(`   Functions: ${Object.keys(helpers).slice(0, 5).join(', ')}...`);
   });
-  
+
   console.log('\n✅ All components working correctly!');
-  
+
 } catch (error) {
   console.error('\n❌ Error:', error.message);
   console.error('Stack:', error.stack);
