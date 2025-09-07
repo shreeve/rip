@@ -8,7 +8,7 @@
 # Parser Pipeline: Lexer -> Rewriter -> Parser (this grammar) -> Compiler -> JS
 
 # Helper function for grammar rules
-o =     (...args)  -> args
+o = (args...) -> args
 # binOp = (op, prec) -> o "Expression #{op} Expression", type: 'BinaryExpression', op: op, left: '$1', right: '$3', prec
 # unOp  = (op, prec) -> o            "#{op} Expression", type: 'UnaryExpression' , op: op, arg: '$2', prec
 
