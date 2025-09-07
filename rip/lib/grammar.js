@@ -8,12 +8,7 @@
   // Parser Pipeline: Lexer -> Rewriter -> Parser (this grammar) -> Compiler -> JS
 
 // Helper function for grammar rules
-var alt, alternatives, grammar, name, o, operators,
-  hasProp = {}.hasOwnProperty;
-
-o = function(...args) {
-  return args;
-};
+const o = (...args) => args
 
 // binOp = (op, prec) -> o "Expression #{op} Expression", type: 'BinaryExpression', op: op, left: '$1', right: '$3', prec
 // unOp  = (op, prec) -> o            "#{op} Expression", type: 'UnaryExpression' , op: op, arg: '$2', prec
@@ -21,7 +16,7 @@ o = function(...args) {
 // ================================================================================
 // GRAMMAR RULES
 // ================================================================================
-grammar = {
+const grammar = {
   // Start with the a basic example: "console.log 42", which needs the following:
 
   // Program
@@ -185,9 +180,9 @@ grammar = {
     []),
     o('CALL_START ArgList OptComma CALL_END',
     {
-      code: function() {
-        $2.implicit = $1.generated;
-        return $2;
+      code: () => {
+        $2.implicit = $1.generated
+        return $2
       }
     })
   ],
@@ -197,15 +192,11 @@ grammar = {
     ['$1']),
     o('ArgList , Arg',
     {
-      code: function() {
-        return $1.concat($3);
-      }
+      code: () => $1.concat($3)
     }),
     o('ArgList OptComma TERMINATOR Arg',
     {
-      code: function() {
-        return $1.concat($4);
-      }
+      code: () => $1.concat($4)
     })
   ],
   // Optional comma
@@ -262,17 +253,14 @@ grammar = {
   String: [
     o('STRING',
     {
-      code: function() {
-        return {
-          type: 'StringLiteral',
-          value: $1.slice(1,
-    -1),
-          raw: $1
-        };
-      }
+      code: () => ({
+        type: 'StringLiteral',
+        value: $1.slice(1, -1),
+        raw: $1
+      })
     })
   ]
-};
+}
 
 //   # Function directives (yield return, await return)
 //   FuncDirective: [
@@ -933,27 +921,20 @@ grammar = {
 
 // Operators at the top have higher precedence
 // o 'STRING_START Interpolations STRING_END', type: 'TemplateLiteral', parts: '$2'
-operators = [];
+const operators = []
 
-for (name in grammar) {
-  if (!hasProp.call(grammar, name)) continue;
-  alternatives = grammar[name];
-  grammar[name] = (function() {
-    var i, len, results;
-    results = [];
-    for (i = 0, len = alternatives.length; i < len; i++) {
-      alt = alternatives[i];
-      if (name === 'Program') {
-        // For Program rules, add return statement
-        alt[1] = `return ${alt[1]}`;
-      }
-      results.push(alt);
+// Process grammar rules - add return statement to Program rules
+for (const [name, alternatives] of Object.entries(grammar)) {
+  grammar[name] = alternatives.map(alt => {
+    if (name === 'Program') {
+      // For Program rules, add return statement
+      alt[1] = `return ${alt[1]}`
     }
-    return results;
-  })();
+    return alt
+  })
 }
 
 export default {
   bnf: grammar,
   operators: operators.reverse() // Parser generator needs low to high
-};
+}
