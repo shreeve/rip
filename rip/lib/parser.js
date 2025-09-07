@@ -1,0 +1,1173 @@
+  // ==============================================================================
+  // parser - SLR(1) Parser Generator for Rip
+
+  // Clean implementation influenced by Jison, but rewritten for Rip with modern
+  // ES6/ESM patterns for readability, efficiency, and maintainability.
+
+  // Author: Steve Shreeve <steve.shreeve@gmail.com>
+  //   Date: September 7, 2025
+  // ==============================================================================
+var Item, LRState, Nonterminal, Production, Terminal,
+  hasProp = {}.hasOwnProperty;
+
+import {
+  version
+} from '../package.json';
+
+// Terminal symbols (tokens, cannot be expanded)
+Terminal = class Terminal {
+  constructor(name, id) {
+    this.id = id;
+    this.name = name;
+  }
+
+};
+
+// Nonterminal symbols (can be expanded by productions)
+Nonterminal = class Nonterminal {
+  constructor(name, id) {
+    this.id = id;
+    this.name = name;
+    this.productions = []; // productions where this symbol is the LHS
+    this.nullable = false; // true if symbol can derive empty string
+    this.first = new Set(); // terminals that can appear first
+    this.follows = new Set(); // terminals that can follow this symbol
+  }
+
+};
+
+
+  // Production rule (Expression → Expression + Term)
+Production = class Production {
+  constructor(lhs, rhs, id) {
+    this.lhs = lhs; // left-hand side (nonterminal)
+    this.rhs = rhs; // right-hand side (array of symbols)
+    this.id = id; // unique production number
+    this.nullable = false; // true if RHS can derive empty string
+    this.first = new Set(); // terminals that can appear first in RHS
+    this.precedence = 0; // operator precedence for conflict resolution
+  }
+
+};
+
+
+  // LR item (Expression → Expression • + Term)
+Item = class Item {
+  constructor(production, lookaheads, dot = 0) {
+    this.production = production; // the production rule
+    this.dot = dot; // position of parse progress
+    this.lookaheads = new Set(lookaheads || []);
+    this.nextSymbol = this.production.rhs[this.dot];
+    this.id = this.production.id * 100 + this.dot; // compact unique ID
+  }
+
+};
+
+
+  // LR state (set of items with transitions)
+LRState = class LRState {
+  constructor(...items) {
+    this.id = null; // state number (assigned later)
+    this.items = new Set(items); // kernel and closure items
+    this.transitions = new Map(); // symbol → next state
+    this.reductions = new Set(); // reduction items
+    this.hasShifts = false; // has shift actions
+    this.hasConflicts = false; // has shift/reduce or reduce/reduce conflicts
+  }
+
+};
+
+
+  // ==============================================================================
+// SLR(1) Parser Generator
+// ==============================================================================
+export var Generator = class Generator {
+  constructor(grammar, options = {}) {
+    // Configuration
+    this.options = {...grammar.options, ...options};
+    this.parseParams = grammar.parseParams;
+    this.yy = {};
+    // Grammar structures
+    this.operators = {};
+    this.productions = [];
+    this.conflicts = 0;
+    // Initialize symbol table with special symbols
+    this.symbolTable = new Map();
+    this.symbolTable.set("$accept", new Nonterminal("$accept", 0));
+    this.symbolTable.set("$end", new Terminal("$end", 1));
+    this.symbolTable.set("error", new Terminal("error", 2));
+    // Code generation setup
+    this.moduleInclude = grammar.moduleInclude || '';
+    this.actionInclude = grammar.actionInclude && (typeof grammar.actionInclude === 'function' ? String(grammar.actionInclude).replace(/^\s*function \(\) \{|\}\s*$/g, '') : grammar.actionInclude);
+    // Build parser
+    this.timing('💥 Total time', () => {
+      this.timing('processGrammar', () => {
+        return this.processGrammar(grammar); // Process grammar rules
+      });
+      this.timing('buildLRAutomaton', () => {
+        return this.buildLRAutomaton(); // Build LR(0) automaton
+      });
+      this.timing('processLookaheads', () => {
+        return this.processLookaheads(); // Compute FIRST/FOLLOW and assign lookaheads
+      });
+      return this.timing('buildParseTable', () => {
+        return this.buildParseTable(); // Build parse table with default actions
+      });
+    });
+  }
+
+  
+    // ============================================================================
+  // Helper Functions
+  // ============================================================================
+  timing(label, fn) {
+    var result;
+    console.time(label);
+    if (fn) {
+      result = fn();
+    }
+    console.timeEnd(label);
+    return result;
+  }
+
+  // ============================================================================
+  // Grammar Processing
+  // ============================================================================
+  processGrammar(grammar) {
+    this.nonterminals = {};
+    this.operators = this._processOperators(grammar.operators);
+    this._buildProductions(grammar.bnf, this.productions, this.nonterminals, this.operators);
+    return this._augmentGrammar(grammar);
+  }
+
+  _processOperators(ops) {
+    var i, j, k, l, len1, operators, precedence, ref;
+    if (!ops) {
+      return {};
+    }
+    operators = {};
+    for (i = j = 0, len1 = ops.length; j < len1; i = ++j) {
+      precedence = ops[i];
+      for (k = l = 1, ref = precedence.length; (1 <= ref ? l < ref : l > ref); k = 1 <= ref ? ++l : --l) {
+        operators[precedence[k]] = {
+          precedence: i + 1,
+          assoc: precedence[0]
+        };
+      }
+    }
+    return operators;
+  }
+
+  _buildProductions(bnf, productions, nonterminals, operators) {
+    var action, actionGroups, actionsCode, addSymbol, handle, handles, j, l, label, len1, len2, parameters, precedence, production, productionTable, ref, rhs, rules, symbol, symbolId, token;
+    actionGroups = {};
+    productionTable = [0];
+    this.symbolIds = {
+      "$accept": 0,
+      "$end": 1,
+      "error": 2 // Add reserved symbols
+    };
+    symbolId = 3; // Next available symbol ID (after special symbols)
+    
+    // Add symbol to symbol table if not already present
+    addSymbol = (name) => {
+      var id, symbol;
+      if (!name || this.symbolIds[name]) {
+        return;
+      }
+      // Use existing symbol or create a new one
+      if (!(symbol = this.symbolTable.get(name))) {
+        id = symbolId++;
+        symbol = bnf[name] ? new Nonterminal(name, id) : new Terminal(name, id);
+        this.symbolTable.set(name, symbol);
+      }
+      return this.symbolIds[name] = symbol.id;
+    };
+    for (symbol in bnf) {
+      if (!hasProp.call(bnf, symbol)) continue;
+      rules = bnf[symbol];
+      addSymbol(symbol);
+      nonterminals[symbol] = this.symbolTable.get(symbol);
+      handles = typeof rules === 'string' ? rules.split(/\s*\|\s*/g) : [...rules];
+      for (j = 0, len1 = handles.length; j < len1; j++) {
+        handle = handles[j];
+        [rhs, action, precedence] = this._parseHandle(handle);
+        for (l = 0, len2 = rhs.length; l < len2; l++) {
+          token = rhs[l];
+          // Add symbols to grammar
+          addSymbol(token);
+        }
+        // Process semantic actions
+        if (action) {
+          action = this._processSemanticAction(action, rhs);
+          label = 'case ' + (productions.length + 1) + ':';
+          ((ref = actionGroups[action]) != null ? ref.push(label) : void 0) || (actionGroups[action] = [label]);
+        }
+        // Create production
+        production = new Production(symbol, rhs, productions.length + 1);
+        // Set precedence
+        this._assignPrecedence(production, precedence, operators, nonterminals);
+        productions.push(production);
+        productionTable.push([this.symbolIds[symbol], rhs[0] === '' ? 0 : rhs.length]);
+        nonterminals[symbol].productions.push(production);
+      }
+    }
+    // Generate parser components
+    actionsCode = this._generateActionCode(actionGroups);
+    this.productionData = productionTable;
+    this._buildTerminalMappings(nonterminals);
+    parameters = "yytext, yyleng, yylineno, yy, yystate, $$, _$";
+    if (this.parseParams) {
+      parameters += ', ' + this.parseParams.join(', ');
+    }
+    return this.performAction = `function anonymous(${parameters}) {\n${actionsCode}\n}`;
+  }
+
+  _parseHandle(handle) {
+    var action, precedence, rhs;
+    if (Array.isArray(handle)) {
+      rhs = typeof handle[0] === 'string' ? handle[0].trim().split(' ') : [...handle[0]];
+      rhs = rhs.map(function(e) {
+        return e.replace(/\[[a-zA-Z_][a-zA-Z0-9_-]*\]/g, '');
+      });
+      action = typeof handle[1] === 'string' || handle.length === 3 ? handle[1] : null;
+      precedence = handle[2] ? handle[2] : handle[1] && typeof handle[1] !== 'string' ? handle[1] : null;
+      return [rhs, action, precedence];
+    } else {
+      handle = handle.replace(/\[[a-zA-Z_][a-zA-Z0-9_-]*\]/g, '');
+      rhs = handle.trim().split(' ');
+      return [rhs, null, null];
+    }
+  }
+
+  _processSemanticAction(action, rhs) {
+    var count, i, j, len1, names, rhs_i, token;
+    // Process named semantic values
+    if (action.match(/[$@][a-zA-Z][a-zA-Z0-9_]*/)) {
+      count = {};
+      names = {};
+      for (i = j = 0, len1 = rhs.length; j < len1; i = ++j) {
+        token = rhs[i];
+        rhs_i = token.match(/\[[a-zA-Z][a-zA-Z0-9_-]*\]/); // Like [var]
+        if (rhs_i) {
+          rhs_i = rhs_i[0].slice(1, -1);
+        } else {
+          rhs_i = token;
+        }
+        if (names[rhs_i]) {
+          names[rhs_i + (++count[rhs_i])] = i + 1;
+        } else {
+          names[rhs_i] = i + 1;
+          names[rhs_i + "1"] = i + 1;
+          count[rhs_i] = 1;
+        }
+      }
+      action = action.replace(/\$([a-zA-Z][a-zA-Z0-9_]*)/g, function(str, pl) {
+        if (names[pl]) {
+          return '$' + names[pl];
+        } else {
+          return str; // Like $var
+        }
+      }).replace(/@([a-zA-Z][a-zA-Z0-9_]*)/g, function(str, pl) {
+        if (names[pl]) {
+          return '@' + names[pl];
+        } else {
+          return str; // Like @var
+        }
+      });
+    }
+    
+    // Transform $$ and positional references
+    return action.replace(/([^'"])\$\$|^\$\$/g, '$1this.$').replace(/@[0$]/g, "this._$").replace(/\$(-?\d+)/g, function(_, n) { // Like $$var // Like @var
+      return "$$[$0" + (parseInt(n, 10) - rhs.length || '') + "]"; // Like $1
+    }).replace(/@(-?\d+)/g, function(_, n) {
+      return "_$[$0" + (n - rhs.length || '') + "]"; // Like @1
+    });
+  }
+
+  _assignPrecedence(production, precedence, operators, nonterminals) {
+    var j, ref, results, token;
+    if ((precedence != null ? precedence.prec : void 0) && operators[precedence.prec]) {
+      return production.precedence = operators[precedence.prec].precedence;
+    } else if (production.precedence === 0) {
+      ref = production.rhs;
+      // Use rightmost terminal's precedence
+      results = [];
+      for (j = ref.length - 1; j >= 0; j += -1) {
+        token = ref[j];
+        if (operators[token] && !nonterminals[token]) {
+          production.precedence = operators[token].precedence;
+          break;
+        } else {
+          results.push(void 0);
+        }
+      }
+      return results;
+    }
+  }
+
+  _generateActionCode(actionGroups) {
+    var action, actions, labels;
+    actions = ['/* this == yyval */', this.actionInclude || '', 'var $0 = $$.length - 1;', 'const hasProp = {}.hasOwnProperty;', 'switch (yystate) {'];
+    for (action in actionGroups) {
+      labels = actionGroups[action];
+      actions.push(labels.join(' '), action, 'break;');
+    }
+    actions.push('}');
+    return actions.join('\n').replace(/YYABORT/g, 'return false').replace(/YYACCEPT/g, 'return true');
+  }
+
+  _buildTerminalMappings(nonterminals) {
+    var id, name, ref, results;
+    this.terminalNames = {};
+    ref = this.symbolIds;
+    results = [];
+    for (name in ref) {
+      if (!hasProp.call(ref, name)) continue;
+      id = ref[name];
+      if (id >= 2) {
+        if (!nonterminals[name]) {
+          results.push(this.terminalNames[id] = name);
+        } else {
+          results.push(void 0);
+        }
+      }
+    }
+    return results;
+  }
+
+  _augmentGrammar(grammar) {
+    var acceptProduction;
+    if (this.productions.length === 0) {
+      throw new Error("Grammar error: must have at least one production rule.");
+    }
+    this.start = grammar.start || this.productions[0].lhs;
+    if (!this.nonterminals[this.start]) {
+      throw new Error(`Grammar error: start symbol '${this.start}' must be a nonterminal defined in the grammar.`);
+    }
+    acceptProduction = new Production("$accept", [this.start, "$end"], 0);
+    this.productions.push(acceptProduction);
+    this.acceptProductionIndex = this.productions.length - 1;
+    this.nonterminals.$accept = this.symbolTable.get("$accept");
+    this.nonterminals.$accept.productions.push(acceptProduction);
+    return this.nonterminals[this.start].follows.add("$end");
+  }
+
+  // ============================================================================
+  // LR Automaton Construction
+  // ============================================================================
+  buildLRAutomaton() {
+    var acceptItem, firstState, item, itemSet, marked, ref, stateMap, states, sym, symbol, symbols;
+    acceptItem = new Item(this.productions[this.acceptProductionIndex]);
+    firstState = this._closure(new LRState(acceptItem));
+    firstState.id = 0;
+    firstState.signature = this._computeStateSignature(firstState);
+    states = [firstState];
+    stateMap = new Map(); // stateSignature -> state index
+    stateMap.set(firstState.signature, 0);
+    // Build automaton by exploring all transitions
+    marked = 0;
+    while (marked < states.length) {
+      itemSet = states[marked++];
+      symbols = new Set();
+      ref = itemSet.items;
+      for (item of ref) {
+        if (sym = item.nextSymbol) {
+          if (sym !== '$end') {
+            symbols.add(sym);
+          }
+        }
+      }
+      for (symbol of symbols) {
+        this._insertLRState(symbol, itemSet, states, stateMap);
+      }
+    }
+    return this.states = states;
+  }
+
+  // Calculate unique identifier for a state based on its items
+  _computeStateSignature(state) {
+    var ids, item, ref;
+    ids = [];
+    ref = state.items;
+    for (item of ref) {
+      ids.push(item.id);
+    }
+    return ids.sort(function(a, b) {
+      return a - b;
+    }).join('|');
+  }
+
+  // Compute closure of an LR item set (lookaheads assigned later using FOLLOW sets)
+  _closure(itemSet) {
+    var closureSet, item, itemCores, j, len1, newItem, newItems, nextSymbol, nonterminal, production, ref, workingSet;
+    closureSet = new LRState();
+    workingSet = new Set(itemSet.items);
+    itemCores = new Map(); // item.id -> item
+    
+      // Process all items
+    while (workingSet.size > 0) {
+      newItems = new Set();
+// Only process item cores we haven't yet seen
+      for (item of workingSet) {
+        if (!(!itemCores.has(item.id))) {
+          continue;
+        }
+        // Add item to closure
+        closureSet.items.add(item);
+        itemCores.set(item.id, item);
+        // Check item type
+        ({nextSymbol} = item);
+        if (!nextSymbol) {
+          // Reduction item
+          closureSet.reductions.add(item);
+          closureSet.hasConflicts = closureSet.reductions.size > 1 || closureSet.hasShifts;
+        } else if (!this.nonterminals[nextSymbol]) {
+          // Shift item (terminal)
+          closureSet.hasShifts = true;
+          closureSet.hasConflicts = closureSet.reductions.size > 0;
+        } else {
+          // Nonterminal - add items for all its productions
+          nonterminal = this.nonterminals[nextSymbol];
+          ref = nonterminal.productions;
+          for (j = 0, len1 = ref.length; j < len1; j++) {
+            production = ref[j];
+            // Create [B → •γ] with empty lookaheads (will be filled by FOLLOW sets later)
+            newItem = new Item(production);
+            if (!itemCores.has(newItem.id)) {
+              newItems.add(newItem);
+            }
+          }
+        }
+      }
+      workingSet = newItems;
+    }
+    return closureSet;
+  }
+
+  // Compute GOTO(state, symbol) - transitions from one state to another
+  _goto(itemSet, symbol) {
+    var gotoSet, item, newItem, ref;
+    gotoSet = new LRState();
+    ref = itemSet.items;
+    for (item of ref) {
+      if (!(item.nextSymbol === symbol)) {
+        continue;
+      }
+      // Create advanced item (lookaheads will be set from FOLLOW sets later)
+      newItem = new Item(item.production, null, item.dot + 1);
+      gotoSet.items.add(newItem);
+    }
+    if (gotoSet.items.size === 0) {
+      return gotoSet;
+    } else {
+      return this._closure(gotoSet);
+    }
+  }
+
+  // Insert new state into automaton
+  _insertLRState(symbol, itemSet, states, stateMap) {
+    var existing, gotoSet, item, kernel, kernelSig, pid, pos, ref;
+    // Build kernel signature (advanced items) before computing closure
+    kernel = [];
+    ref = itemSet.items;
+    for (item of ref) {
+      if (item.nextSymbol === symbol) {
+        kernel.push([item.production.id, item.dot + 1]);
+      }
+    }
+    if (!kernel.length) {
+      return;
+    }
+    kernel.sort(function(a, b) {
+      return (a[0] - b[0]) || (a[1] - b[1]);
+    });
+    kernelSig = ((function() {
+      var j, len1, results;
+      results = [];
+      for (j = 0, len1 = kernel.length; j < len1; j++) {
+        [pid, pos] = kernel[j];
+        results.push(pid + '.' + pos);
+      }
+      return results;
+    })()).join('|');
+    existing = stateMap.get(kernelSig);
+    if (existing != null) {
+      itemSet.transitions.set(symbol, existing);
+      return;
+    }
+    // Kernel is new; compute closure now
+    gotoSet = this._goto(itemSet, symbol);
+    if (!(gotoSet.items.size > 0)) {
+      return;
+    }
+    gotoSet.signature = kernelSig;
+    gotoSet.id = states.length;
+    stateMap.set(kernelSig, gotoSet.id);
+    itemSet.transitions.set(symbol, gotoSet.id);
+    return states.push(gotoSet);
+  }
+
+  // ============================================================================
+  // Lookahead Computation - SLR(1) Algorithm
+  // ============================================================================
+  processLookaheads() {
+    this.processLookaheads = function() {}; // Computes once; no-op on subsequent calls
+    this._computeNullableSets(); // ε-derivable symbols
+    this._computeFirstSets(); // First terminals
+    this._computeFollowSets(); // Following terminals
+    return this._assignItemLookaheads(); // FOLLOW(A) → item lookaheads
+  }
+
+  
+    // Determine nullable symbols (can derive ε)
+  _computeNullableSets() {
+    var changed, j, len1, nonterminal, production, ref, results, symbol;
+    changed = true;
+    results = [];
+    while (changed) {
+      changed = false;
+      ref = this.productions;
+      // Mark productions nullable if all handle symbols are nullable
+      for (j = 0, len1 = ref.length; j < len1; j++) {
+        production = ref[j];
+        if (!production.nullable) {
+          if (production.rhs.every((symbol) => {
+            return this._isNullable(symbol);
+          })) {
+            production.nullable = changed = true;
+          }
+        }
+      }
+      results.push((function() {
+        var ref1, results1;
+        ref1 = this.nonterminals;
+        // Propagate to nonterminals
+        results1 = [];
+        for (symbol in ref1) {
+          nonterminal = ref1[symbol];
+          if (!this._isNullable(symbol)) {
+            if (nonterminal.productions.some(function(p) {
+              return p.nullable;
+            })) {
+              results1.push(nonterminal.nullable = changed = true);
+            } else {
+              results1.push(void 0);
+            }
+          }
+        }
+        return results1;
+      }).call(this));
+    }
+    return results;
+  }
+
+  _isNullable(symbol) {
+    var ref;
+    if (symbol === '') {
+      return true;
+    }
+    if (Array.isArray(symbol)) {
+      return symbol.every((s) => {
+        return this._isNullable(s);
+      });
+    }
+    return ((ref = this.nonterminals[symbol]) != null ? ref.nullable : void 0) || false;
+  }
+
+  // Compute FIRST sets (terminals that can begin derivations)
+  _computeFirstSets() {
+    var changed, firsts, j, len1, nonterminal, oldSize, production, ref, results, symbol;
+    changed = true;
+    results = [];
+    while (changed) {
+      changed = false;
+      ref = this.productions;
+      for (j = 0, len1 = ref.length; j < len1; j++) {
+        production = ref[j];
+        firsts = this._computeFirst(production.rhs);
+        oldSize = production.first.size;
+        production.first.clear();
+        firsts.forEach((item) => {
+          return production.first.add(item);
+        });
+        if (production.first.size > oldSize) {
+          changed = true;
+        }
+      }
+      results.push((function() {
+        var l, len2, ref1, ref2, results1;
+        ref1 = this.nonterminals;
+        results1 = [];
+        for (symbol in ref1) {
+          nonterminal = ref1[symbol];
+          oldSize = nonterminal.first.size;
+          nonterminal.first.clear();
+          ref2 = nonterminal.productions;
+          for (l = 0, len2 = ref2.length; l < len2; l++) {
+            production = ref2[l];
+            production.first.forEach((s) => {
+              return nonterminal.first.add(s);
+            });
+          }
+          if (nonterminal.first.size > oldSize) {
+            results1.push(changed = true);
+          } else {
+            results1.push(void 0);
+          }
+        }
+        return results1;
+      }).call(this));
+    }
+    return results;
+  }
+
+  _computeFirst(symbols) {
+    if (symbols === '') {
+      return new Set();
+    }
+    if (Array.isArray(symbols)) {
+      return this._computeFirstOfSequence(symbols);
+    }
+    if (!this.nonterminals[symbols]) {
+      return new Set([symbols]);
+    }
+    return this.nonterminals[symbols].first;
+  }
+
+  _computeFirstOfSequence(symbols) {
+    var firsts, j, len1, symbol;
+    firsts = new Set();
+    for (j = 0, len1 = symbols.length; j < len1; j++) {
+      symbol = symbols[j];
+      if (this.nonterminals[symbol]) {
+        this.nonterminals[symbol].first.forEach((s) => {
+          return firsts.add(s);
+        });
+      } else {
+        firsts.add(symbol);
+      }
+      if (!this._isNullable(symbol)) {
+        break;
+      }
+    }
+    return firsts;
+  }
+
+  // Compute FOLLOW sets (terminals that can follow nonterminals)
+  _computeFollowSets() {
+    var beta, changed, firstSet, i, oldSize, production, results, symbol;
+    changed = true;
+    results = [];
+    while (changed) {
+      changed = false;
+      results.push((function() {
+        var j, len1, ref, results1;
+        ref = this.productions;
+        results1 = [];
+        for (j = 0, len1 = ref.length; j < len1; j++) {
+          production = ref[j];
+          results1.push((function() {
+            var l, len2, ref1, results2;
+            ref1 = production.rhs;
+            results2 = [];
+            for (i = l = 0, len2 = ref1.length; l < len2; i = ++l) {
+              symbol = ref1[i];
+              if (!this.nonterminals[symbol]) {
+                continue;
+              }
+              oldSize = this.nonterminals[symbol].follows.size;
+              if (i === production.rhs.length - 1) {
+                // Symbol at end: add FOLLOW(LHS)
+                this.nonterminals[production.lhs].follows.forEach((item) => {
+                  return this.nonterminals[symbol].follows.add(item);
+                });
+              } else {
+                // Add FIRST(β) where β follows symbol
+                beta = production.rhs.slice(i + 1);
+                firstSet = this._computeFirst(beta);
+                firstSet.forEach((item) => {
+                  return this.nonterminals[symbol].follows.add(item);
+                });
+                // If β is nullable, also add FOLLOW(LHS)
+                if (this._isNullable(beta)) {
+                  this.nonterminals[production.lhs].follows.forEach((item) => {
+                    return this.nonterminals[symbol].follows.add(item);
+                  });
+                }
+              }
+              if (this.nonterminals[symbol].follows.size > oldSize) {
+                results2.push(changed = true);
+              } else {
+                results2.push(void 0);
+              }
+            }
+            return results2;
+          }).call(this));
+        }
+        return results1;
+      }).call(this));
+    }
+    return results;
+  }
+
+  // Assign FOLLOW sets to reduction items
+  _assignItemLookaheads() {
+    var follows, item, j, len1, ref, results, state, terminal;
+    ref = this.states;
+    results = [];
+    for (j = 0, len1 = ref.length; j < len1; j++) {
+      state = ref[j];
+      results.push((function() {
+        var ref1, ref2, results1;
+        ref1 = state.reductions;
+        results1 = [];
+        for (item of ref1) {
+          follows = (ref2 = this.nonterminals[item.production.lhs]) != null ? ref2.follows : void 0;
+          if (follows) {
+            item.lookaheads.clear();
+            results1.push((function() {
+              var results2;
+              results2 = [];
+              for (terminal of follows) {
+                results2.push(item.lookaheads.add(terminal));
+              }
+              return results2;
+            })());
+          } else {
+            results1.push(void 0);
+          }
+        }
+        return results1;
+      }).call(this));
+    }
+    return results;
+  }
+
+  // ============================================================================
+  // Parse Table Generation
+  // ============================================================================
+  buildParseTable(itemSets = this.states) {
+    var ACCEPT, NONASSOC, REDUCE, SHIFT, action, gotoState, item, itemSet, j, k, len1, nonterminals, op, operators, ref, ref1, ref2, ref3, ref4, solution, stackSymbol, state, states, which, x;
+    states = [];
+    ({nonterminals, operators} = this);
+    [NONASSOC, SHIFT, REDUCE, ACCEPT] = [0, 1, 2, 3];
+    for (k = j = 0, len1 = itemSets.length; j < len1; k = ++j) {
+      itemSet = itemSets[k];
+      state = states[k] = {};
+      ref = itemSet.transitions;
+      // Shift and goto actions
+      for (x of ref) {
+        [stackSymbol, gotoState] = x;
+        if (this.symbolIds[stackSymbol] != null) {
+          ref1 = itemSet.items;
+          for (item of ref1) {
+            if (item.nextSymbol === stackSymbol) {
+              if (nonterminals[stackSymbol]) {
+                state[this.symbolIds[stackSymbol]] = gotoState;
+              } else {
+                state[this.symbolIds[stackSymbol]] = [SHIFT, gotoState];
+              }
+            }
+          }
+        }
+      }
+      ref2 = itemSet.items;
+      // Accept action
+      for (item of ref2) {
+        if (item.nextSymbol === "$end" && (this.symbolIds["$end"] != null)) {
+          state[this.symbolIds["$end"]] = [ACCEPT];
+        }
+      }
+      ref3 = itemSet.reductions;
+      // Reduce actions
+      for (item of ref3) {
+        ref4 = item.lookaheads;
+        for (stackSymbol of ref4) {
+          if (!(this.symbolIds[stackSymbol] != null)) {
+            continue;
+          }
+          action = state[this.symbolIds[stackSymbol]];
+          op = operators[stackSymbol];
+          if (action) {
+            // Resolve conflict
+            which = action[0] instanceof Array ? action[0] : action;
+            solution = this._resolveConflict(item.production, op, [REDUCE, item.production.id], which);
+            if (solution.bydefault) {
+              this.conflicts++;
+            } else {
+              action = solution.action;
+            }
+          } else {
+            action = [REDUCE, item.production.id];
+          }
+          if (action != null ? action.length : void 0) {
+            state[this.symbolIds[stackSymbol]] = action;
+          } else if (action === NONASSOC) {
+            state[this.symbolIds[stackSymbol]] = void 0;
+          }
+        }
+      }
+    }
+    return this._computeDefaultActions(this.parseTable = states);
+  }
+
+  // Resolve conflicts using precedence and associativity
+  _resolveConflict(production, op, reduce, shift) {
+    var NONASSOC, REDUCE, SHIFT, solution;
+    solution = {
+      production,
+      operator: op,
+      r: reduce,
+      s: shift
+    };
+    [NONASSOC, SHIFT, REDUCE] = [0, 1, 2];
+    if (shift[0] === REDUCE) {
+      solution.action = shift[1] < reduce[1] ? shift : reduce;
+      if (shift[1] !== reduce[1]) {
+        solution.bydefault = true;
+      }
+      return solution;
+    }
+    if (production.precedence === 0 || !op) {
+      solution.bydefault = true;
+      solution.action = shift;
+    } else if (production.precedence < op.precedence) {
+      solution.action = shift;
+    } else if (production.precedence === op.precedence) {
+      solution.action = (function() {
+        switch (op.assoc) {
+          case "right":
+            return shift;
+          case "left":
+            return reduce;
+          case "nonassoc":
+            return NONASSOC;
+          default:
+            return shift;
+        }
+      })();
+    } else {
+      solution.action = reduce;
+    }
+    return solution;
+  }
+
+  // Compute default actions for single-action states
+  _computeDefaultActions(states) {
+    var action, actionCount, defaults, j, k, lastAction, len1, state;
+    defaults = {};
+    for (k = j = 0, len1 = states.length; j < len1; k = ++j) {
+      state = states[k];
+      actionCount = 0;
+      lastAction = null;
+      for (action in state) {
+        if (!hasProp.call(state, action)) continue;
+        actionCount++;
+        lastAction = state[action];
+      }
+      if (actionCount === 1 && lastAction[0] === 2) {
+        defaults[k] = lastAction;
+      }
+    }
+    return this.defaultActions = defaults;
+  }
+
+  // ============================================================================
+  // Code Generation
+  // ============================================================================
+  generate(options = {}) {
+    var parserCode;
+    this.options = {...this.options, ...options};
+    parserCode = this.generateModule(this.options);
+    if (this.options.compress) {
+      return this._compressParser(parserCode);
+    } else {
+      return parserCode;
+    }
+  }
+
+  generateModule(options = {}) {
+    var moduleName, out;
+    moduleName = options.moduleName || "parser";
+    out = `/* parser generated by Rip ${version} */\n`;
+    out += moduleName.match(/\./) ? moduleName : `export const ${moduleName}`;
+    return out += ` = ${this.generateModuleExpr()}`;
+  }
+
+  generateModuleExpr() {
+    var module;
+    module = this._generateModuleCore();
+    return `(function(){
+  const hasProp = {}.hasOwnProperty;
+  ${module.commonCode}
+  const parser = ${module.moduleCode};
+  ${this.moduleInclude}
+  function Parser () { this.yy = {}; }
+  Parser.prototype = parser;
+  parser.Parser = Parser;
+  return new Parser;
+})();`;
+  }
+
+  _generateModuleCore() {
+    var moduleCode, tableCode;
+    tableCode = this._generateTableCode(this.parseTable);
+    moduleCode = `{
+  trace: function trace() {},
+  yy: {},
+  symbolIds: ${JSON.stringify(this.symbolIds)},
+  terminalNames: ${JSON.stringify(this.terminalNames).replace(/"([0-9]+)":/g, "$1:")},
+  productionData: ${JSON.stringify(this.productionData)},
+  parseTable: ${tableCode.moduleCode},
+  defaultActions: ${JSON.stringify(this.defaultActions).replace(/"([0-9]+)":/g, "$1:")},
+  performAction: ${this.performAction},
+  parseError: function ${this.parseError},
+  parse: function ${this.parse}
+}`;
+    return {
+      commonCode: tableCode.commonCode,
+      moduleCode
+    };
+  }
+
+  _generateTableCode(stateTable) {
+    var moduleCode;
+    moduleCode = JSON.stringify(stateTable, null, 0).replace(/"([0-9]+)"(?=:)/g, "$1");
+    return {
+      commonCode: '',
+      moduleCode
+    };
+  }
+
+  _compressParser(parserCode) {
+    var compressedData;
+    // Compress the entire parser with Brotli
+    compressedData = this._brotliCompress(parserCode);
+    return `/* Brotli-compressed parser generated by Rip ${version} */
+(function() {
+  // Brotli decompression (requires Node.js with Brotli support)
+  function loadBrotliDecoder() {
+    if (typeof require !== 'undefined') {
+      try {
+        // Try built-in Node.js zlib brotli first (Node 12+)
+        const zlib = require('zlib');
+        if (zlib.brotliDecompressSync) {
+          return function(buffer) {
+            return zlib.brotliDecompressSync(buffer);
+          };
+        }
+      } catch (e) {}
+
+      try {
+        // Fallback to brotli package
+        const brotli = require('brotli');
+        return function(buffer) {
+          return Buffer.from(brotli.decompress(new Uint8Array(buffer)));
+        };
+      } catch (e) {
+        throw new Error('Brotli decompression not available. This parser requires Brotli support. Please install the brotli package or use Node.js 12+.');
+      }
+    }
+    throw new Error('This compressed parser requires Node.js environment with Brotli support.');
+  }
+
+  // Decompress and evaluate the parser
+  const brotliDecode = loadBrotliDecoder();
+  const compressedBuffer = Buffer.from('${compressedData}', 'base64');
+  const decompressedBuffer = brotliDecode(compressedBuffer);
+  const parserCode = decompressedBuffer.toString('utf8');
+
+  // Evaluate the decompressed parser code
+  return eval(parserCode);
+})();`;
+  }
+
+  _brotliCompress(data) {
+    var brotli, compressed, error, zlib;
+    try {
+      if (typeof require !== 'undefined') {
+        // Try Node.js built-in zlib brotli first
+        zlib = require('zlib');
+        if (zlib.brotliCompressSync) {
+          compressed = zlib.brotliCompressSync(Buffer.from(data));
+          return compressed.toString('base64');
+        }
+        // Fallback to brotli package
+        brotli = require('brotli');
+        compressed = brotli.compress(Buffer.from(data));
+        return Buffer.from(compressed).toString('base64');
+      } else {
+        throw new Error('Brotli compression requires Node.js environment');
+      }
+    } catch (error1) {
+      error = error1;
+      throw new Error(`Brotli compression failed: ${error.message}. Please ensure Brotli is available (Node.js 12+ or install 'brotli' package).`);
+    }
+  }
+
+  // ============================================================================
+  // Runtime Parser
+  // ============================================================================
+  parseError(str, hash) {
+    var error;
+    if (hash.recoverable) {
+      return this.trace(str);
+    } else {
+      error = new Error(str);
+      error.hash = hash;
+      throw error;
+    }
+  }
+
+  parse(input) {
+    var EOF, TERROR, action, errStr, expected, k, len, lex, lexer, loc, locFirst, locLast, newState, p, parseTable, preErrorSymbol, r, ranges, recovering, ref, ref1, ref2, sharedState, state, stk, symbol, v, val, yyleng, yylineno, yyloc, yytext, yyval;
+    [stk, val, loc] = [[0], [null], []];
+    [parseTable, yytext, yylineno, yyleng, recovering] = [this.parseTable, '', 0, 0, 0];
+    [TERROR, EOF] = [2, 1];
+    lexer = Object.create(this.lexer);
+    sharedState = {
+      yy: {}
+    };
+    ref = this.yy;
+    for (k in ref) {
+      if (!hasProp.call(ref, k)) continue;
+      v = ref[k];
+      sharedState.yy[k] = v;
+    }
+    lexer.setInput(input, sharedState.yy);
+    [sharedState.yy.lexer, sharedState.yy.parser] = [lexer, this];
+    if (lexer.yylloc == null) {
+      lexer.yylloc = {};
+    }
+    yyloc = lexer.yylloc;
+    loc.push(yyloc);
+    ranges = (ref1 = lexer.options) != null ? ref1.ranges : void 0;
+    this.parseError = typeof sharedState.yy.parseError === 'function' ? sharedState.yy.parseError : Object.getPrototypeOf(this).parseError;
+    lex = () => {
+      var token;
+      token = lexer.lex() || EOF;
+      if (typeof token !== 'number') {
+        token = this.symbolIds[token] || token;
+      }
+      return token;
+    };
+    [symbol, preErrorSymbol, state, action, r, yyval, p, len, newState, expected] = [null, null, null, null, null, {}, null, null, null, null];
+    while (true) {
+      state = stk[stk.length - 1];
+      action = this.defaultActions[state] || (symbol == null ? symbol = lex() : void 0, (ref2 = parseTable[state]) != null ? ref2[symbol] : void 0);
+      if (!((action != null ? action.length : void 0) && action[0])) {
+        errStr = '';
+        if (!recovering) {
+          expected = (function() {
+            var ref3, results;
+            ref3 = parseTable[state];
+            results = [];
+            for (p in ref3) {
+              if (!hasProp.call(ref3, p)) continue;
+              if (this.terminalNames[p] && p > TERROR) {
+                results.push(`'${this.terminalNames[p]}'`);
+              }
+            }
+            return results;
+          }).call(this);
+        }
+        errStr = lexer.showPosition ? `Parse error on line ${yylineno + 1}:\n${lexer.showPosition()}\nExpecting ${expected.join(', ')}, got '${this.terminalNames[symbol] || symbol}'` : (`Parse error on line ${yylineno + 1}: Unexpected ${symbol === EOF ? "end of input" : `'${this.terminalNames[symbol] || symbol}'`}`, this.parseError(errStr, {
+          text: lexer.match,
+          token: this.terminalNames[symbol] || symbol,
+          line: lexer.yylineno,
+          loc: yyloc,
+          expected
+        }));
+        throw new Error(errStr);
+      }
+      if (action[0] instanceof Array && action.length > 1) {
+        throw new Error(`Parse Error: multiple actions possible at state: ${state}, token: ${symbol}`);
+      }
+      switch (action[0]) {
+        case 1: // shift
+          stk.push(symbol, action[1]);
+          val.push(lexer.yytext);
+          loc.push(lexer.yylloc);
+          symbol = null;
+          if (!preErrorSymbol) {
+            [yyleng, yytext, yylineno, yyloc] = [lexer.yyleng, lexer.yytext, lexer.yylineno, lexer.yylloc];
+            if (recovering > 0) {
+              recovering--;
+            }
+          } else {
+            [symbol, preErrorSymbol] = [preErrorSymbol, null];
+          }
+          break;
+        case 2: // reduce
+          len = this.productionData[action[1]][1];
+          yyval.$ = val[val.length - len];
+          [locFirst, locLast] = [loc[loc.length - (len || 1)], loc[loc.length - 1]];
+          yyval._$ = {
+            first_line: locFirst.first_line,
+            last_line: locLast.last_line,
+            first_column: locFirst.first_column,
+            last_column: locLast.last_column
+          };
+          if (ranges) {
+            yyval._$.range = [locFirst.range[0], locLast.range[1]];
+          }
+          r = this.performAction.apply(yyval, [yytext, yyleng, yylineno, sharedState.yy, action[1], val, loc]);
+          if (r != null) {
+            return r;
+          }
+          if (len) {
+            stk.length -= len * 2;
+            val.length -= len;
+            loc.length -= len;
+          }
+          stk.push(this.productionData[action[1]][0]);
+          val.push(yyval.$);
+          loc.push(yyval._$);
+          newState = parseTable[stk[stk.length - 2]][stk[stk.length - 1]];
+          stk.push(newState);
+          break;
+        case 3: // accept
+          return true;
+      }
+    }
+  }
+
+  trace(msg) { // Debug output (no-op by default)
+    var ref;
+    if ((ref = this.options) != null ? ref.debug : void 0) {
+      return console.log(msg);
+    }
+  }
+
+  createParser() {
+    var bindMethod, parser;
+    parser = eval(this.generateModuleExpr());
+    parser.productions = this.productions;
+    bindMethod = (method) => {
+      return () => {
+        this.lexer = parser.lexer;
+        return this[method].apply(this, arguments);
+      };
+    };
+    parser.lexer = this.lexer;
+    parser.generate = bindMethod('generate');
+    parser.generateModule = bindMethod('generateModule');
+    return parser;
+  }
+
+};
+
+// ==============================================================================
+// Exports
+// ==============================================================================
+export var createParser = function(grammar, options = {}) {
+  return new Generator(grammar, options).createParser();
+};
+
+// ==============================================================================
+// CLI Interface
+// ==============================================================================
+
+// TODO: Add CLI support when needed for Rip compilation
+// This would handle command-line usage of the parser generator
