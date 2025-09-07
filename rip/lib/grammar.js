@@ -143,7 +143,7 @@ const grammar = {
       name: '$1'
     })
   ],
-  // Function invocaåtion
+  // Function invocation
   Invocation: [
     o('Value OptFuncExist String',
     {
@@ -180,7 +180,7 @@ const grammar = {
     []),
     o('CALL_START ArgList OptComma CALL_END',
     {
-      code: () => {
+      code: ($1, $2) => {
         $2.implicit = $1.generated
         return $2
       }
@@ -192,11 +192,11 @@ const grammar = {
     ['$1']),
     o('ArgList , Arg',
     {
-      code: () => $1.concat($3)
+      code: ($1, $2, $3) => $1.concat($3)
     }),
     o('ArgList OptComma TERMINATOR Arg',
     {
-      code: () => $1.concat($4)
+      code: ($1, $2, $3, $4) => $1.concat($4)
     })
   ],
   // Optional comma
@@ -253,7 +253,7 @@ const grammar = {
   String: [
     o('STRING',
     {
-      code: () => ({
+      code: ($1) => ({
         type: 'StringLiteral',
         value: $1.slice(1, -1),
         raw: $1
