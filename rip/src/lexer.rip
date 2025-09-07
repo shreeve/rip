@@ -70,8 +70,8 @@ export class Lexer
         @lineToken()       or
         @stringToken()     or
         @numberToken()     or
-        # @regexToken()      or  # TODO: Enable regex support later
-        # @jsToken()         or  # TODO: Enable JS backtick support later
+        @regexToken()      or
+        @jsToken()         or
         @literalToken()
 
       # Update position.
@@ -304,8 +304,6 @@ export class Lexer
       when "'''" then HEREDOC_SINGLE
       when '"""' then HEREDOC_DOUBLE
 
-    # TODO: For now, disable interpolation. Later we can enable it.
-    # For bootstrapping, we'll just match simple strings without interpolation
     {tokens, index: end} = @matchWithInterpolations regex, quote
 
     heredoc = quote.length is 3
@@ -426,24 +424,79 @@ export class Lexer
     return commentAttachments if returnCommentTokens
     commentWithSurroundingWhitespace.length
 
-  # TODO: Enable JS backtick support later
   # Matches JavaScript interpolated directly into the source via backticks.
-  # jsToken: ->
-  #   return 0 unless @chunk.charAt(0) is '`' and
-  #     (match = (matchedHere = HERE_JSTOKEN.exec(@chunk)) or JSTOKEN.exec(@chunk))
-  #   # Convert escaped backticks to backticks, and escaped backslashes
-  #   # just before escaped backticks to backslashes
-  #   script = match[1]
-  #   {length} = match[0]
-  #   @token 'JS', script, {length, data: {here: !!matchedHere}}
-  #   length
+  jsToken: ->
+    return 0 unless @chunk.charAt(0) is '`' and
+      (match = (matchedHere = HERE_JSTOKEN.exec(@chunk)) or JSTOKEN.exec(@chunk))
+    # Convert escaped backticks to backticks, and escaped backslashes
+    # just before escaped backticks to backslashes
+    script = match[1]
+    {length} = match[0]
+    @token 'JS', script, {length, data: {here: !!matchedHere}}
+    length
 
-  # TODO: Enable regex support later
   # Matches regular expression literals, as well as multiline extended ones.
   # Lexing regular expressions is difficult to distinguish from division, so we
   # borrow some basic heuristics from JavaScript and Ruby.
-  # regexToken: ->
-  #   ... (keep all the regex code commented for now)
+  regexToken: ->
+    switch
+      when match = REGEX_ILLEGAL.exec @chunk
+        @error "regular expressions cannot begin with #{match[2]}",
+          offset: match.index + match[1].length
+      when match = @matchWithInterpolations HEREGEX, '///'
+        {tokens, index} = match
+        comments = []
+        while matchedComment = HEREGEX_COMMENT.exec @chunk[0...index]
+          {index: commentIndex} = matchedComment
+          [fullMatch, leadingWhitespace, comment] = matchedComment
+          comments.push {comment, offsetInChunk: commentIndex + leadingWhitespace.length}
+        commentTokens = flatten(
+          for commentOpts in comments
+            @commentToken commentOpts.comment, Object.assign commentOpts, heregex: yes, returnCommentTokens: yes
+        )
+      when match = REGEX.exec @chunk
+        [regex, body, closed] = match
+        @validateEscapes body, isRegex: yes, offsetInChunk: 1
+        index = regex.length
+        prev = @prev()
+        if prev
+          if prev.spaced and prev[0] in CALLABLE
+            return 0 if not closed or POSSIBLY_DIVISION.test regex
+          else if prev[0] in NOT_REGEX
+            return 0
+        @error 'missing / (unclosed regex)' unless closed
+      else
+        return 0
+
+    [flags] = REGEX_FLAGS.exec @chunk[index..]
+    end = index + flags.length
+    origin = @makeToken 'REGEX', null, length: end
+    switch
+      when not VALID_FLAGS.test flags
+        @error "invalid regular expression flags #{flags}", offset: index, length: flags.length
+      when regex or tokens.length is 1
+        delimiter = if body then '/' else '///'
+        body ?= tokens[0][1]
+        @validateUnicodeCodePointEscapes body, {delimiter}
+        @token 'REGEX', "/#{body}/#{flags}", {length: end, origin, data: {delimiter}}
+      else
+        @token 'REGEX_START', '(',    {length: 0, origin, generated: yes}
+        @token 'IDENTIFIER', 'RegExp', length: 0, generated: yes
+        @token 'CALL_START', '(',      length: 0, generated: yes
+        @mergeInterpolationTokens tokens, {double: yes, heregex: {flags}, endOffset: end - flags.length, quote: '///'}, (str) =>
+          @validateUnicodeCodePointEscapes str, {delimiter}
+        if flags
+          @token ',', ',',                    offset: index - 1, length: 0, generated: yes
+          @token 'STRING', '"' + flags + '"', offset: index,     length: flags.length
+        @token ')', ')',                      offset: end,       length: 0, generated: yes
+        @token 'REGEX_END', ')',              offset: end,       length: 0, generated: yes
+
+    # Explicitly attach any heregex comments to the REGEX/REGEX_END token.
+    if commentTokens?.length
+      addTokenData @tokens[@tokens.length - 1],
+        heregexCommentTokens: commentTokens
+
+    end
 
   # Matches newlines, indents, and outdents, and determines which is which.
   # If we can detect that the current line is continued onto the next line,
@@ -715,9 +768,32 @@ export class Lexer
       str = str[strPart.length..]
       offsetInChunk += strPart.length
 
-      # TODO: For bootstrapping, disable interpolation for now
-      # We'll just treat the whole thing as a simple string
-      break unless false # Disable interpolation check: match = interpolators.exec str
+      break unless match = interpolators.exec str
+
+      [interpolator] = match
+      interpolator = interpolator[1..] # Remove leading '#{' to get '{'
+      # Look for the end of the interpolation.
+      [line, column, offset] = @getLineAndColumnFromChunk offsetInChunk + 1
+      {tokens: nested, index} =
+        new Lexer().tokenize interpolator,
+          {line, column, offset, untilBalanced: yes, locationDataCompensations: @locationDataCompensations}
+      # Account for the `#`.
+      index += 1
+
+      # Make sure that the closing curly brace we found is immediately followed by another curly brace.
+      # (In the case of #{foo}, the closing } in the original source is at the index indicated by `index`.)
+      unless str[index] is '}'
+        @error "missing }", offset: offsetInChunk + 2
+
+      # Push a fake `'TOKENS'` token, which will get turned into real tokens later.
+      nested.unshift @makeToken('(', '(',   offset: offsetInChunk,                      length: 2, generated: yes)
+      nested.push    @makeToken(')', ')',   offset: offsetInChunk + index,             length: 1, generated: yes)
+      # Remove leading and trailing parentheses
+      nested[0][0] = nested[nested.length - 1][0] = 'INTERPOLATION'
+      tokens.push @makeToken 'TOKENS', nested, offset: offsetInChunk, length: index + 1
+
+      str = str[index + 1..]
+      offsetInChunk += index + 1
 
     unless str[...closingDelimiter.length] is closingDelimiter
       @error "missing #{closingDelimiter}", length: delimiter.length
@@ -1085,9 +1161,8 @@ CODE       = /^[-=]>/
 
 MULTI_DENT = /^(?:\n[^\n\S]*)+/
 
-# TODO: Enable JS tokens later
-# JSTOKEN      = ///^ `(?!``) ((?: [^`\\] | \\[\s\S]           )*) `   ///
-# HERE_JSTOKEN = ///^ ```     ((?: [^`\\] | \\[\s\S] | `(?!``) )*) ``` ///
+JSTOKEN      = ///^ `(?!``) ((?: [^`\\] | \\[\s\S]           )*) `   ///
+HERE_JSTOKEN = ///^ ```     ((?: [^`\\] | \\[\s\S] | `(?!``) )*) ``` ///
 
 # String-matching-regexes.
 STRING_START   = /^(?:'''|"""|'|")/
@@ -1099,41 +1174,40 @@ HEREDOC_DOUBLE = /// ^(?: [^\\"#] | \\[\s\S] | "(?!"") | \#(?!\{) )* ///
 
 HEREDOC_INDENT     = /\n+([^\n\S]*)(?=\S)/g
 
-# TODO: Enable regex support later
 # Regex-matching-regexes.
-# REGEX = /// ^
-#   / (?!/) ((
-#   ?: [^ [ / \n \\ ]  # Every other thing.
-#    | \\[^\n]         # Anything but newlines escaped.
-#    | \[              # Character class.
-#        (?: \\[^\n] | [^ \] \n \\ ] )*
-#      \]
-#   )*) (/)?
-# ///
+REGEX = /// ^
+  / (?!/) ((
+  ?: [^ [ / \n \\ ]  # Every other thing.
+   | \\[^\n]         # Anything but newlines escaped.
+   | \[              # Character class.
+       (?: \\[^\n] | [^ \] \n \\ ] )*
+     \]
+  )*) (/)?
+///
 
-# REGEX_FLAGS  = /^\w*/
-# VALID_FLAGS  = /^(?!.*(.).*\1)[gimsuy]*$/
+REGEX_FLAGS  = /^\w*/
+VALID_FLAGS  = /^(?!.*(.).*\1)[gimsuy]*$/
 
-# HEREGEX      = /// ^
-#   (?:
-#       # Match any character, except those that need special handling below.
-#       [^\\/#\s]
-#       # Match `\` followed by any character.
-#     | \\[\s\S]
-#       # Match any `/` except `///`.
-#     | /(?!//)
-#       # Match `#` which is not part of interpolation, e.g. `#{}`.
-#     | \#(?!\{)
-#       # Comments consume everything until the end of the line, including `///`.
-#     | \s+(?:#(?!\{).*)?
-#   )*
-# ///
+HEREGEX      = /// ^
+  (?:
+      # Match any character, except those that need special handling below.
+      [^\\/#\s]
+      # Match `\` followed by any character.
+    | \\[\s\S]
+      # Match any `/` except `///`.
+    | /(?!//)
+      # Match `#` which is not part of interpolation, e.g. `#{}`.
+    | \#(?!\{)
+      # Comments consume everything until the end of the line, including `///`.
+    | \s+(?:#(?!\{).*)?
+  )*
+///
 
-# HEREGEX_COMMENT = /(\s+)(#(?!{).*)/gm
+HEREGEX_COMMENT = /(\s+)(#(?!{).*)/gm
 
-# REGEX_ILLEGAL = /// ^ ( / | /{3}\s*) (\*) ///
+REGEX_ILLEGAL = /// ^ ( / | /{3}\s*) (\*) ///
 
-# POSSIBLY_DIVISION   = /// ^ /=?\s ///
+POSSIBLY_DIVISION   = /// ^ /=?\s ///
 
 # Other regexes.
 HERECOMMENT_ILLEGAL = /\*\//
