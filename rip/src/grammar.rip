@@ -18,27 +18,170 @@ o =     (...args)  -> args
 
 grammar =
 
-#   # The **Program** is the top-level node in the syntax tree
-#   Program: [
-#     o ''
-#     o 'Body', body: '$1'
-#   ]
-#
-#   # Any list of statements and expressions, separated by line breaks or semicolons
-#   Body: [
-#     o 'Line'                                 , code: -> [$1]
-#     o 'Body TERMINATOR Line'                 , code: -> $1.push($3); $1
-#     o 'Body TERMINATOR'
-#   ]
-#
-#   # Statements and expressions that make up a line in a body
-#   Line: [
-#     o 'Expression'
-#     o 'ExpressionLine'
-#     o 'Statement'
-#     o 'FuncDirective'
-#   ]
-#
+  # Start with the a basic example: "console.log 42", which needs the following:
+  #
+  # Program
+  #   Body
+  #     Line
+  #       Expression
+  #         Value
+  #           Invocation (CallExpression)
+  #             callee: Value (MemberExpression: console.log)
+  #             args: [Value (Literal: 42)]
+
+  # The top-level node in the syntax tree
+  Program: [
+    o ''
+    o 'Body', body: '$1'
+  ]
+
+  # Any list of statements and expressions, separated by line breaks or semicolons
+  Body: [
+    o 'Line'                , wrap: '$1'
+    o 'Body TERMINATOR Line', push: '$3'
+    o 'Body TERMINATOR'
+  ]
+
+  # Statements and expressions that make up a line in a body
+  Line: [
+    o 'Expression'
+    # o 'ExpressionLine'
+    # o 'Statement'
+    # o 'FuncDirective'
+  ]
+
+  # All the different types of expressions in our language
+  Expression: [
+    o 'Value'
+    # o 'Code'
+    # o 'Operation'
+    # o 'Assign'
+    # o 'If'
+    # o 'Try'
+    # o 'While'
+    # o 'For'
+    # o 'Switch'
+    # o 'Class'
+    # o 'Throw'
+    # o 'Yield'
+  ]
+
+  # Values - things that can be assigned to, invoked, indexed, etc.
+  Value: [
+    o 'Assignable'
+    o 'Literal'
+    # o 'Parenthetical'
+    # o 'Range'
+    o 'Invocation'
+    # o 'DoIife'
+    # o 'This'
+    # o 'Super'
+    # o 'MetaProperty'
+  ]
+
+  # Everything that can be assigned to
+  Assignable: [
+    o 'SimpleAssignable'
+    # o 'Array'
+    # o 'Object'
+  ]
+
+  # Simple assignables
+  SimpleAssignable: [
+    o 'Identifier'
+    o 'Value Accessor'                       , type: 'MemberExpression', object: '$1', property: '$2'
+    # o 'Code Accessor'                        , type: 'MemberExpression', object: '$1', property: '$2'
+    # o 'ThisProperty'
+  ]
+
+  # Identifier
+  Identifier: [
+    o 'IDENTIFIER'                           , type: 'Identifier', name: '$1'
+  ]
+
+  # Accessors into objects
+  Accessor: [
+    o '.  Property'                          , type: 'MemberExpression', computed: false, property: '$2'
+    o '?. Property'                          , type: 'OptionalMemberExpression', property: '$2'
+    o ':: Property'                          , type: 'PrototypeAccess', property: '$2'
+    o '?:: Property'                         , type: 'OptionalPrototypeAccess', property: '$2'
+    o '::'                                   , type: 'PrototypeAccess'
+    o '?::'                                  , type: 'OptionalPrototypeAccess'
+    # o 'Index'
+  ]
+
+  # Property name (different from identifier)
+  Property: [
+    o 'PROPERTY'                             , type: 'Property', name: '$1'
+  ]
+
+  # Function invocaåtion
+  Invocation: [
+    o 'Value OptFuncExist String'            , type: 'TaggedTemplateExpression', tag: '$1', quasi: '$3', optional: '$2'
+    o 'Value OptFuncExist Arguments'         , type: 'CallExpression', callee: '$1', args: '$3', optional: '$2'
+    o 'SUPER OptFuncExist Arguments'         , type: 'SuperCall', args: '$3', optional: '$2'
+    o 'DYNAMIC_IMPORT Arguments'             , type: 'Import', args: '$2', dynamic: true
+  ]
+
+  # Optional function existence check
+  OptFuncExist: [
+    o ''                                     , false
+    o 'FUNC_EXIST'                           , true
+  ]
+
+  # Function arguments
+  Arguments: [
+    o 'CALL_START CALL_END'                  , []
+    o 'CALL_START ArgList OptComma CALL_END' , code: -> $2.implicit = $1.generated; $2
+  ]
+
+  # Argument list (comma-separated expressions)
+  ArgList: [
+    o 'Arg'                                  , ['$1']
+    o 'ArgList , Arg'                        , code: -> $1.concat $3
+    o 'ArgList OptComma TERMINATOR Arg'      , code: -> $1.concat $4
+    # o 'INDENT ArgList OptComma OUTDENT'
+    # o 'ArgList OptComma INDENT ArgList OptComma OUTDENT', code: -> $1.concat $4
+  ]
+
+  # Optional comma
+  OptComma: [
+    o ''                                     , null
+    o ','                                    , null
+  ]
+
+  # Arguments (expressions or splats)
+  Arg: [
+    o 'Expression'
+    # o 'ExpressionLine'
+    # o 'Splat'
+    # o '...'                                  , type: 'SpreadElement'
+  ]
+
+  # All immediate literal values
+  Literal: [
+    o 'AlphaNumeric'
+    o 'JS'                                   , type: 'JSLiteral', code: '$1'
+    # o 'Regex'
+    o 'UNDEFINED'                            , type: 'Undefined'
+    o 'NULL'                                 , type: 'NullLiteral'
+    o 'BOOL'                                 , type: 'BooleanLiteral', value: '$1'
+    o 'INFINITY'                             , type: 'Infinity', value: '$1'
+    o 'NAN'                                  , type: 'NaN'
+  ]
+
+  # Alphanumerics - can serve as keys in object literals
+  AlphaNumeric: [
+    o 'NUMBER'                               , type: 'NumericLiteral', value: '$1'
+    o 'String'
+  ]
+
+  # String literals with potential interpolation
+  String: [
+    o 'STRING'                               , code: -> type: 'StringLiteral', value: $1.slice(1, -1), raw: $1
+    # o 'STRING_START Interpolations STRING_END', type: 'TemplateLiteral', parts: '$2'
+  ]
+
 #   # Function directives (yield return, await return)
 #   FuncDirective: [
 #     o 'YieldReturn'
@@ -51,22 +194,6 @@ grammar =
 #     o 'STATEMENT'                            , type: 'StatementLiteral', value: '$1'
 #     o 'Import'
 #     o 'Export'
-#   ]
-#
-#   # All the different types of expressions in our language
-#   Expression: [
-#     o 'Value'
-#     o 'Code'
-#     o 'Operation'
-#     o 'Assign'
-#     o 'If'
-#     o 'Try'
-#     o 'While'
-#     o 'For'
-#     o 'Switch'
-#     o 'Class'
-#     o 'Throw'
-#     o 'Yield'
 #   ]
 #
 #   # Single-line expressions that would otherwise require braces
@@ -90,28 +217,6 @@ grammar =
 #     o 'INDENT Body OUTDENT'                  , type: 'BlockStatement', body: '$2'
 #   ]
 #
-#   # Identifier
-#   Identifier: [
-#     o 'IDENTIFIER'                           , type: 'Identifier', name: '$1'
-#   ]
-#
-#   # Property name (different from identifier)
-#   Property: [
-#     o 'PROPERTY'                             , type: 'Property', name: '$1'
-#   ]
-#
-#   # Alphanumerics - can serve as keys in object literals
-#   AlphaNumeric: [
-#     o 'NUMBER'                               , type: 'NumericLiteral', value: '$1'
-#     o 'String'
-#   ]
-#
-#   # String literals with potential interpolation
-#   String: [
-#     o 'STRING'                               , code: -> type: 'StringLiteral', value: $1.slice(1, -1), raw: $1
-#     o 'STRING_START Interpolations STRING_END', type: 'TemplateLiteral', parts: '$2'
-#   ]
-#
 #   # String interpolation parts
 #   Interpolations: [
 #     o 'InterpolationChunk'                   , ['$1']
@@ -130,18 +235,6 @@ grammar =
 #   Regex: [
 #     o 'REGEX'                                , type: 'RegExpLiteral', pattern: '$1'
 #     o 'REGEX_START Invocation REGEX_END'     , type: 'RegExpWithInterpolation', body: '$2'
-#   ]
-#
-#   # All immediate literal values
-#   Literal: [
-#     o 'AlphaNumeric'
-#     o 'JS'                                   , type: 'JSLiteral', code: '$1'
-#     o 'Regex'
-#     o 'UNDEFINED'                            , type: 'Undefined'
-#     o 'NULL'                                 , type: 'NullLiteral'
-#     o 'BOOL'                                 , type: 'BooleanLiteral', value: '$1'
-#     o 'INFINITY'                             , type: 'Infinity', value: '$1'
-#     o 'NAN'                                  , type: 'NaN'
 #   ]
 #
 #   # Assignment of a variable, property, or index to a value
@@ -240,12 +333,6 @@ grammar =
 #     o '=>'                                   , true   # Bound to this
 #   ]
 #
-#   # Optional comma
-#   OptComma: [
-#     o ''                                     , null
-#     o ','                                    , null
-#   ]
-#
 #   # Parameter list
 #   ParamList: [
 #     o ''                                     , []
@@ -278,34 +365,6 @@ grammar =
 #     o '... Expression'                       , type: 'SpreadElement', arg: '$2'
 #   ]
 #
-#   # Simple assignables
-#   SimpleAssignable: [
-#     o 'Identifier'
-#     o 'Value Accessor'                       , type: 'MemberExpression', object: '$1', property: '$2'
-#     o 'Code Accessor'                        , type: 'MemberExpression', object: '$1', property: '$2'
-#     o 'ThisProperty'
-#   ]
-#
-#   # Everything that can be assigned to
-#   Assignable: [
-#     o 'SimpleAssignable'
-#     o 'Array'
-#     o 'Object'
-#   ]
-#
-#   # Values - things that can be assigned to, invoked, indexed, etc.
-#   Value: [
-#     o 'Assignable'
-#     o 'Literal'
-#     o 'Parenthetical'
-#     o 'Range'
-#     o 'Invocation'
-#     o 'DoIife'
-#     o 'This'
-#     o 'Super'
-#     o 'MetaProperty'
-#   ]
-#
 #   # Super expressions
 #   Super: [
 #     o 'SUPER . Property'                                     , type: 'Super', property: '$3'
@@ -317,17 +376,6 @@ grammar =
 #   MetaProperty: [
 #     o 'NEW_TARGET . Property'                , type: 'MetaProperty', meta: 'new', property: 'target'
 #     o 'IMPORT_META . Property'               , type: 'MetaProperty', meta: 'import', property: 'meta'
-#   ]
-#
-#   # Accessors into objects
-#   Accessor: [
-#     o '.  Property'                          , type: 'MemberExpression', computed: false, property: '$2'
-#     o '?. Property'                          , type: 'OptionalMemberExpression', property: '$2'
-#     o ':: Property'                          , type: 'PrototypeAccess', property: '$2'
-#     o '?:: Property'                         , type: 'OptionalPrototypeAccess', property: '$2'
-#     o '::'                                   , type: 'PrototypeAccess'
-#     o '?::'                                  , type: 'OptionalPrototypeAccess'
-#     o 'Index'
 #   ]
 #
 #   # Array/object indexing
@@ -457,26 +505,6 @@ grammar =
 #     o 'DEFAULT AS Identifier'                , type: 'ExportSpecifier', local: type: 'Identifier', name: 'default', exported: '$3'
 #   ]
 #
-#   # Function invocation
-#   Invocation: [
-#     o 'Value OptFuncExist String'            , type: 'TaggedTemplateExpression', tag: '$1', quasi: '$3', optional: '$2'
-#     o 'Value OptFuncExist Arguments'         , type: 'CallExpression', callee: '$1', args: '$3', optional: '$2'
-#     o 'SUPER OptFuncExist Arguments'         , type: 'SuperCall', args: '$3', optional: '$2'
-#     o 'DYNAMIC_IMPORT Arguments'             , type: 'Import', args: '$2', dynamic: true
-#   ]
-#
-#   # Optional function existence check
-#   OptFuncExist: [
-#     o ''                                     , false
-#     o 'FUNC_EXIST'                           , true
-#   ]
-#
-#   # Function arguments
-#   Arguments: [
-#     o 'CALL_START CALL_END'                  , []
-#     o 'CALL_START ArgList OptComma CALL_END' , code: -> $2.implicit = $1.generated; $2
-#   ]
-#
 #   # This reference
 #   This: [
 #     o 'THIS'                                 , type: 'ThisExpression'
@@ -515,23 +543,6 @@ grammar =
 #     o 'ExpressionLine RangeDots'             , code: -> type: 'Slice', from: $1, to: null, exclusive: $2.exclusive
 #     o 'RangeDots Expression'                 , code: -> type: 'Slice', from: null, to: $2, exclusive: $1.exclusive
 #     o 'RangeDots'                            , code: -> type: 'Slice', from: null, to: null, exclusive: $1.exclusive
-#   ]
-#
-#   # Argument list (comma-separated expressions)
-#   ArgList: [
-#     o 'Arg'                                  , ['$1']
-#     o 'ArgList , Arg'                        , code: -> $1.concat $3
-#     o 'ArgList OptComma TERMINATOR Arg'      , code: -> $1.concat $4
-#     o 'INDENT ArgList OptComma OUTDENT'
-#     o 'ArgList OptComma INDENT ArgList OptComma OUTDENT', code: -> $1.concat $4
-#   ]
-#
-#   # Arguments (expressions or splats)
-#   Arg: [
-#     o 'Expression'
-#     o 'ExpressionLine'
-#     o 'Splat'
-#     o '...'                                  , type: 'SpreadElement'
 #   ]
 #
 #   # Array elements with elisions (holes)
@@ -858,6 +869,7 @@ operators = [
 #   ['left',     'POST_IF']
 ]
 
+# TODO: It's very likely that the following is NOT NEEDED
 # Process the grammar for the parser generator
 for own name, alternatives of grammar
   grammar[name] = for alt in alternatives
@@ -865,10 +877,7 @@ for own name, alternatives of grammar
     alt[1] = "return #{alt[1]}" if name is 'Program'
     alt
 
-# Export the grammar
-module.exports =
+export default {
   bnf: grammar
-  operators: operators.reverse()  # Parser generator wants low to high
-
-# Export the module
-export default module.exports
+  operators: operators.reverse() # Parser generator needs low to high
+}
