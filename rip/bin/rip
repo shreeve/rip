@@ -62,19 +62,9 @@ compileGrammar();
 const Lexer = (await import('../lib/lexer.js')).default;
 const Rewriter = (await import('../lib/rewriter.js')).default;
 const Compiler = (await import('../lib/compiler.js')).default;
-const Solar = (await import('../lib/solar.js')).default;
-const { grammar } = await import('../lib/grammar-solar.js');
 
-// Create the Solar parser
-function createParser() {
-  const generator = new Solar.Generator(grammar, { debug: false });
-  const parser = generator.createParser();
-
-  return parser;
-}
-
-// Create a single parser instance
-const parser = createParser();
+// Import the pre-generated parser
+const parser = (await import('../lib/parser.js')).default;
 
 // Main compilation pipeline
 function compile(code, filename = 'input') {

@@ -1,8 +1,8 @@
 # Rip Grammar for Solar Parser Generator
 # Uses string-based actions that Solar can process
 
-o = (pattern, action = "$$ = $1") ->
-  [pattern, action]
+o = (pattern, action, options) ->
+  [pattern, action, options]
 
 binOp = (ripOp, jsOp = ripOp) ->
   o "Expression #{ripOp} Expression", "$$ = {type: 'op', op: '#{jsOp}', left: $1, right: $3}"

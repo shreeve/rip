@@ -839,20 +839,20 @@ class Generator
 # Exports
 # ==============================================================================
 
-Solar = exports.Solar = exports
+Solar = {}
 
 Solar.Parser = (grammar, options) ->
   generator = new Generator grammar, options
   generator.createParser()
 
-exports.Generator = Generator
+Solar.Generator = Generator
 
-Solar.Generator = (g, options) ->
-  new Generator g, Object.assign({}, g.options, options)
-
-exports.Parser = (grammar, options) ->
-  generator = Solar.Generator grammar, options
+Solar.createParser = (grammar, options) ->
+  generator = new Generator grammar, options
   generator.createParser()
+
+export default Solar
+export { Generator, Solar }
 
 # ==============================================================================
 # CLI Interface

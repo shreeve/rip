@@ -1,4 +1,0 @@
-# Debug the Solar parser with a minimal test
-console.log "Testing parser..."
-x = 5
-console.log x

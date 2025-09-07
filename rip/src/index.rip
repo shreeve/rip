@@ -1,9 +1,10 @@
 # Rip Language - Main entry point
 # Multi-runtime support: Bun (primary), Deno, Node.js, Browser
 
-export { compile, compileFile, Compiler } from './compiler.rip'
+export { Compiler } from './compiler.rip'
 export { Lexer } from './lexer.rip'
-export * as nodes from './nodes.rip'
+export { Rewriter } from './rewriter.rip'
+export { default as Solar } from './solar.rip'
 export { version } from '../package.json'
 
 # Platform detection helper
@@ -19,5 +20,3 @@ export getPlatform = ->
   else
     { runtime: 'unknown', version: 'unknown' }
 
-# Export default compile function for convenience
-export default compile from './compiler.rip'
