@@ -1,23 +1,16 @@
 # Rip Grammar - Converted from CoffeeScript's battle-tested grammar
 #
 # This grammar uses a clean data-driven approach:
-# - Simple rules use data objects with '$1', '$2' placeholders
+# - Simple rules use data objects with '$1', '$2', ... placeholders
 # - Complex rules use 'code:' property for computation
 # - All nodes are pure data (no methods), following modern compiler design
 #
-# Parser Pipeline:
-#   Lexer -> Rewriter -> Parser (this grammar) -> Compiler -> JS
+# Parser Pipeline: Lexer -> Rewriter -> Parser (this grammar) -> Compiler -> JS
 
 # Helper function for grammar rules
-o = (pattern, action, options) ->
-  [pattern, action, options]
-
-# Helper functions for common patterns
-binOp = (op, prec) ->
-  o "Expression #{op} Expression", type: 'BinaryExpression', op: op, left: '$1', right: '$3', prec
-
-unOp = (op, prec) ->
-  o "#{op} Expression", type: 'UnaryExpression', op: op, arg: '$2', prec
+o =     (...args)  -> args
+binOp = (op, prec) -> o "Expression #{op} Expression", type: 'BinaryExpression', op: op, left: '$1', right: '$3', prec
+unOp  = (op, prec) -> o            "#{op} Expression", type: 'UnaryExpression' , op: op, arg: '$2', prec
 
 # ================================================================================
 # GRAMMAR RULES
@@ -25,17 +18,17 @@ unOp = (op, prec) ->
 
 grammar =
 
-  # The **Root** is the top-level node in the syntax tree
-  Root: [
-    o ''                                     , type: 'Program', body: []
-    o 'Body'                                 , type: 'Program', body: '$1'
+  # The **Program** is the top-level node in the syntax tree
+  Program: [
+    o ''
+    o 'Body', body: '$1'
   ]
 
   # Any list of statements and expressions, separated by line breaks or semicolons
   Body: [
     o 'Line'                                 , code: -> [$1]
     o 'Body TERMINATOR Line'                 , code: -> $1.push($3); $1
-    o 'Body TERMINATOR'                      , '$1'
+    o 'Body TERMINATOR'
   ]
 
   # Statements and expressions that make up a line in a body
@@ -110,15 +103,12 @@ grammar =
   # Alphanumerics - can serve as keys in object literals
   AlphaNumeric: [
     o 'NUMBER'                               , type: 'NumericLiteral', value: '$1'
-    o 'String'                               , '$1'
+    o 'String'
   ]
 
   # String literals with potential interpolation
   String: [
-    o 'STRING'                               , code: ->
-      type: 'StringLiteral'
-      value: $1.slice(1, -1)  # Strip quotes
-      raw: $1
+    o 'STRING'                               , code: -> type: 'StringLiteral', value: $1.slice(1, -1), raw: $1
     o 'STRING_START Interpolations STRING_END', type: 'TemplateLiteral', parts: '$2'
   ]
 
@@ -133,7 +123,7 @@ grammar =
     o 'INTERPOLATION_START Body INTERPOLATION_END'               , type: 'Interpolation', expr: '$2'
     o 'INTERPOLATION_START INDENT Body OUTDENT INTERPOLATION_END', type: 'Interpolation', expr: '$3'
     o 'INTERPOLATION_START INTERPOLATION_END'                    , type: 'Interpolation', expr: null
-    o 'String'                                                    , '$1'
+    o 'String'
   ]
 
   # Regular expressions
@@ -144,9 +134,9 @@ grammar =
 
   # All immediate literal values
   Literal: [
-    o 'AlphaNumeric'                         , '$1'
+    o 'AlphaNumeric'
     o 'JS'                                   , type: 'JSLiteral', code: '$1'
-    o 'Regex'                                , '$1'
+    o 'Regex'
     o 'UNDEFINED'                            , type: 'Undefined'
     o 'NULL'                                 , type: 'NullLiteral'
     o 'BOOL'                                 , type: 'BooleanLiteral', value: '$1'
@@ -156,34 +146,34 @@ grammar =
 
   # Assignment of a variable, property, or index to a value
   Assign: [
-    o 'Assignable = Expression'              , type: 'AssignmentExpression', left: '$1', right: '$3'
-    o 'Assignable = TERMINATOR Expression'   , type: 'AssignmentExpression', left: '$1', right: '$4'
+    o 'Assignable = Expression'               , type: 'AssignmentExpression', left: '$1', right: '$3'
+    o 'Assignable = TERMINATOR Expression'    , type: 'AssignmentExpression', left: '$1', right: '$4'
     o 'Assignable = INDENT Expression OUTDENT', type: 'AssignmentExpression', left: '$1', right: '$4'
   ]
 
   # Assignment within object literals
   AssignObj: [
-    o 'ObjAssignable'                        , '$1'
-    o 'ObjRestValue'                         , '$1'
-    o 'ObjAssignable : Expression'           , type: 'ObjectProperty', key: '$1', value: '$3'
-    o 'ObjAssignable : INDENT Expression OUTDENT', type: 'ObjectProperty', key: '$1', value: '$4'
-    o 'SimpleObjAssignable = Expression'     , type: 'ObjectProperty', key: '$1', value: '$3', shorthand: true
+    o 'ObjAssignable'
+    o 'ObjRestValue'
+    o 'ObjAssignable : Expression'                     , type: 'ObjectProperty', key: '$1', value: '$3'
+    o 'ObjAssignable : INDENT Expression OUTDENT'      , type: 'ObjectProperty', key: '$1', value: '$4'
+    o 'SimpleObjAssignable = Expression'               , type: 'ObjectProperty', key: '$1', value: '$3', shorthand: true
     o 'SimpleObjAssignable = INDENT Expression OUTDENT', type: 'ObjectProperty', key: '$1', value: '$4', shorthand: true
   ]
 
   # Simple object assignables
   SimpleObjAssignable: [
-    o 'Identifier'                           , '$1'
-    o 'Property'                             , '$1'
-    o 'ThisProperty'                         , '$1'
+    o 'Identifier'
+    o 'Property'
+    o 'ThisProperty'
   ]
 
   # Object assignables (including computed properties)
   ObjAssignable: [
-    o 'SimpleObjAssignable'                  , '$1'
+    o 'SimpleObjAssignable'
     o '[ Expression ]'                       , type: 'ComputedProperty', expr: '$2'
     o '@ [ Expression ]'                     , type: 'ComputedThisProperty', expr: '$3'
-    o 'AlphaNumeric'                         , '$1'
+    o 'AlphaNumeric'
   ]
 
   # Object spread/rest properties
@@ -196,15 +186,15 @@ grammar =
 
   # Object spread expressions
   ObjSpreadExpr: [
-    o 'ObjSpreadIdentifier'                  , '$1'
-    o 'Object'                               , '$1'
-    o 'Parenthetical'                        , '$1'
-    o 'Super'                                , '$1'
-    o 'This'                                 , '$1'
-    o 'SUPER OptFuncExist Arguments'         , type: 'SuperCall', args: '$3', optional: '$2'
-    o 'DYNAMIC_IMPORT Arguments'             , type: 'Import', args: '$2', dynamic: true
+    o 'ObjSpreadIdentifier'
+    o 'Object'
+    o 'Parenthetical'
+    o 'Super'
+    o 'This'
+    o 'SUPER OptFuncExist Arguments'              ,      type: 'SuperCall', args: '$3', optional: '$2'
+    o 'DYNAMIC_IMPORT Arguments'                  ,      type: 'Import', args: '$2', dynamic: true
     o 'SimpleObjAssignable OptFuncExist Arguments', type: 'CallExpression', callee: '$1', args: '$3', optional: '$2'
-    o 'ObjSpreadExpr OptFuncExist Arguments' , type: 'CallExpression', callee: '$1', args: '$3', optional: '$2'
+    o 'ObjSpreadExpr OptFuncExist Arguments'      , type: 'CallExpression', callee: '$1', args: '$3', optional: '$2'
   ]
 
   # Object spread with accessor
@@ -235,13 +225,13 @@ grammar =
   # Function literals
   Code: [
     o 'PARAM_START ParamList PARAM_END FuncGlyph Block', type: 'FunctionExpression', params: '$2', body: '$5', bound: '$4'
-    o 'FuncGlyph Block'                      , type: 'FunctionExpression', params: [], body: '$2', bound: '$1'
+    o 'FuncGlyph Block'                                , type: 'FunctionExpression', params: [], body: '$2', bound: '$1'
   ]
 
   # Single-line functions
   CodeLine: [
     o 'PARAM_START ParamList PARAM_END FuncGlyph Line', type: 'FunctionExpression', params: '$2', body: '$5', bound: '$4'
-    o 'FuncGlyph Line'                       , type: 'FunctionExpression', params: [], body: '$2', bound: '$1'
+    o 'FuncGlyph Line'                                , type: 'FunctionExpression', params: [], body: '$2', bound: '$1'
   ]
 
   # Function arrows (-> vs =>)
@@ -276,10 +266,10 @@ grammar =
 
   # Parameter variables
   ParamVar: [
-    o 'Identifier'                           , '$1'
-    o 'ThisProperty'                         , '$1'
-    o 'Array'                                , '$1'
-    o 'Object'                               , '$1'
+    o 'Identifier'
+    o 'ThisProperty'
+    o 'Array'
+    o 'Object'
   ]
 
   # Splat operator
@@ -290,36 +280,36 @@ grammar =
 
   # Simple assignables
   SimpleAssignable: [
-    o 'Identifier'                           , '$1'
+    o 'Identifier'
     o 'Value Accessor'                       , type: 'MemberExpression', object: '$1', property: '$2'
     o 'Code Accessor'                        , type: 'MemberExpression', object: '$1', property: '$2'
-    o 'ThisProperty'                         , '$1'
+    o 'ThisProperty'
   ]
 
   # Everything that can be assigned to
   Assignable: [
-    o 'SimpleAssignable'                     , '$1'
-    o 'Array'                                , '$1'
-    o 'Object'                               , '$1'
+    o 'SimpleAssignable'
+    o 'Array'
+    o 'Object'
   ]
 
   # Values - things that can be assigned to, invoked, indexed, etc.
   Value: [
-    o 'Assignable'                           , '$1'
-    o 'Literal'                              , '$1'
-    o 'Parenthetical'                        , '$1'
-    o 'Range'                                , '$1'
-    o 'Invocation'                           , '$1'
-    o 'DoIife'                               , '$1'
-    o 'This'                                 , '$1'
-    o 'Super'                                , '$1'
-    o 'MetaProperty'                         , '$1'
+    o 'Assignable'
+    o 'Literal'
+    o 'Parenthetical'
+    o 'Range'
+    o 'Invocation'
+    o 'DoIife'
+    o 'This'
+    o 'Super'
+    o 'MetaProperty'
   ]
 
   # Super expressions
   Super: [
-    o 'SUPER . Property'                     , type: 'Super', property: '$3'
-    o 'SUPER INDEX_START Expression INDEX_END', type: 'Super', computed: '$3'
+    o 'SUPER . Property'                                     , type: 'Super', property: '$3'
+    o 'SUPER INDEX_START Expression INDEX_END'               , type: 'Super', computed: '$3'
     o 'SUPER INDEX_START INDENT Expression OUTDENT INDEX_END', type: 'Super', computed: '$4'
   ]
 
@@ -337,22 +327,22 @@ grammar =
     o '?:: Property'                         , type: 'OptionalPrototypeAccess', property: '$2'
     o '::'                                   , type: 'PrototypeAccess'
     o '?::'                                  , type: 'OptionalPrototypeAccess'
-    o 'Index'                                , '$1'
+    o 'Index'
   ]
 
   # Array/object indexing
   Index: [
-    o 'INDEX_START IndexValue INDEX_END'     , '$2'
-    o 'INDEX_START INDENT IndexValue OUTDENT INDEX_END', '$3'
+    o 'INDEX_START IndexValue INDEX_END'
+    o 'INDEX_START INDENT IndexValue OUTDENT INDEX_END'
     o 'INDEX_SOAK Index'                     , code: -> $2.optional = true; $2
   ]
 
   # Index values
   IndexValue: [
     o 'Expression'                           , type: 'Index', expr: '$1'
-    o 'Slice'                                , '$1'
+    o 'Slice'
     o 'Regex'                                , type: 'RegexIndex', pattern: '$1'
-    o 'RegexWithIndex'                       , '$1'
+    o 'RegexWithIndex'
   ]
 
   # Regex with index
@@ -376,31 +366,31 @@ grammar =
 
   # Class definitions
   Class: [
-    o 'CLASS'                                , type: 'ClassExpression'
-    o 'CLASS Block'                          , type: 'ClassExpression', body: '$2'
-    o 'CLASS EXTENDS Expression'             , type: 'ClassExpression', superClass: '$3'
-    o 'CLASS EXTENDS Expression Block'       , type: 'ClassExpression', superClass: '$3', body: '$4'
-    o 'CLASS SimpleAssignable'               , type: 'ClassExpression', id: '$2'
-    o 'CLASS SimpleAssignable Block'         , type: 'ClassExpression', id: '$2', body: '$3'
-    o 'CLASS SimpleAssignable EXTENDS Expression', type: 'ClassExpression', id: '$2', superClass: '$4'
+    o 'CLASS'                                          , type: 'ClassExpression'
+    o 'CLASS Block'                                    , type: 'ClassExpression', body: '$2'
+    o 'CLASS EXTENDS Expression'                       , type: 'ClassExpression', superClass: '$3'
+    o 'CLASS EXTENDS Expression Block'                 , type: 'ClassExpression', superClass: '$3', body: '$4'
+    o 'CLASS SimpleAssignable'                         , type: 'ClassExpression', id: '$2'
+    o 'CLASS SimpleAssignable Block'                   , type: 'ClassExpression', id: '$2', body: '$3'
+    o 'CLASS SimpleAssignable EXTENDS Expression'      , type: 'ClassExpression', id: '$2', superClass: '$4'
     o 'CLASS SimpleAssignable EXTENDS Expression Block', type: 'ClassExpression', id: '$2', superClass: '$4', body: '$5'
   ]
 
   # Import statements
   Import: [
-    o 'IMPORT String'                        , type: 'ImportDeclaration', source: '$2'
-    o 'IMPORT String ASSERT Object'          , type: 'ImportDeclaration', source: '$2', assertions: '$4'
-    o 'IMPORT ImportDefaultSpecifier FROM String', type: 'ImportDeclaration', specifiers: ['$2'], source: '$4'
-    o 'IMPORT ImportDefaultSpecifier FROM String ASSERT Object', type: 'ImportDeclaration', specifiers: ['$2'], source: '$4', assertions: '$6'
-    o 'IMPORT ImportNamespaceSpecifier FROM String', type: 'ImportDeclaration', specifiers: ['$2'], source: '$4'
-    o 'IMPORT ImportNamespaceSpecifier FROM String ASSERT Object', type: 'ImportDeclaration', specifiers: ['$2'], source: '$4', assertions: '$6'
-    o 'IMPORT { } FROM String'               , type: 'ImportDeclaration', specifiers: [], source: '$5'
-    o 'IMPORT { } FROM String ASSERT Object' , type: 'ImportDeclaration', specifiers: [], source: '$5', assertions: '$7'
-    o 'IMPORT { ImportSpecifierList OptComma } FROM String', type: 'ImportDeclaration', specifiers: '$3', source: '$7'
-    o 'IMPORT { ImportSpecifierList OptComma } FROM String ASSERT Object', type: 'ImportDeclaration', specifiers: '$3', source: '$7', assertions: '$9'
+    o 'IMPORT String'                                                       , type: 'ImportDeclaration', source: '$2'
+    o 'IMPORT String ASSERT Object'                                         , type: 'ImportDeclaration', source: '$2', assertions: '$4'
+    o 'IMPORT ImportDefaultSpecifier FROM String'                           , type: 'ImportDeclaration', specifiers: ['$2'], source: '$4'
+    o 'IMPORT ImportDefaultSpecifier FROM String ASSERT Object'             , type: 'ImportDeclaration', specifiers: ['$2'], source: '$4', assertions: '$6'
+    o 'IMPORT ImportNamespaceSpecifier FROM String'                         , type: 'ImportDeclaration', specifiers: ['$2'], source: '$4'
+    o 'IMPORT ImportNamespaceSpecifier FROM String ASSERT Object'           , type: 'ImportDeclaration', specifiers: ['$2'], source: '$4', assertions: '$6'
+    o 'IMPORT { } FROM String'                                              , type: 'ImportDeclaration', specifiers: [], source: '$5'
+    o 'IMPORT { } FROM String ASSERT Object'                                , type: 'ImportDeclaration', specifiers: [], source: '$5', assertions: '$7'
+    o 'IMPORT { ImportSpecifierList OptComma } FROM String'                 , type: 'ImportDeclaration', specifiers: '$3', source: '$7'
+    o 'IMPORT { ImportSpecifierList OptComma } FROM String ASSERT Object'   , type: 'ImportDe claration', specifiers: '$3', source: '$7', assertions: '$9'
     o 'IMPORT ImportDefaultSpecifier , ImportNamespaceSpecifier FROM String', type: 'ImportDeclaration', specifiers: ['$2', '$4'], source: '$6'
-    o 'IMPORT ImportDefaultSpecifier , ImportNamespaceSpecifier FROM String ASSERT Object', type: 'ImportDeclaration', specifiers: ['$2', '$4'], source: '$6', assertions: '$8'
-    o 'IMPORT ImportDefaultSpecifier , { ImportSpecifierList OptComma } FROM String', code: -> type: 'ImportDeclaration', specifiers: [$2].concat($5), source: $9
+    o 'IMPORT ImportDefaultSpecifier , ImportNamespaceSpecifier FROM String ASSERT Object'        , type: 'ImportDeclaration', specifiers: ['$2', '$4'], source: '$6', assertions: '$8'
+    o 'IMPORT ImportDefaultSpecifier , { ImportSpecifierList OptComma } FROM String'              , code: -> type: 'ImportDeclaration', specifiers: [$2].concat($5), source: $9
     o 'IMPORT ImportDefaultSpecifier , { ImportSpecifierList OptComma } FROM String ASSERT Object', code: -> type: 'ImportDeclaration', specifiers: [$2].concat($5), source: $9, assertions: $11
   ]
 
@@ -409,7 +399,7 @@ grammar =
     o 'ImportSpecifier'                      , ['$1']
     o 'ImportSpecifierList , ImportSpecifier', code: -> $1.concat $3
     o 'ImportSpecifierList OptComma TERMINATOR ImportSpecifier', code: -> $1.concat $4
-    o 'INDENT ImportSpecifierList OptComma OUTDENT', '$2'
+    o 'INDENT ImportSpecifierList OptComma OUTDENT'
     o 'ImportSpecifierList OptComma INDENT ImportSpecifierList OptComma OUTDENT', code: -> $1.concat $4
   ]
 
@@ -454,7 +444,7 @@ grammar =
     o 'ExportSpecifier'                      , ['$1']
     o 'ExportSpecifierList , ExportSpecifier', code: -> $1.concat $3
     o 'ExportSpecifierList OptComma TERMINATOR ExportSpecifier', code: -> $1.concat $4
-    o 'INDENT ExportSpecifierList OptComma OUTDENT', '$2'
+    o 'INDENT ExportSpecifierList OptComma OUTDENT'
     o 'ExportSpecifierList OptComma INDENT ExportSpecifierList OptComma OUTDENT', code: -> $1.concat $4
   ]
 
@@ -532,21 +522,21 @@ grammar =
     o 'Arg'                                  , ['$1']
     o 'ArgList , Arg'                        , code: -> $1.concat $3
     o 'ArgList OptComma TERMINATOR Arg'      , code: -> $1.concat $4
-    o 'INDENT ArgList OptComma OUTDENT'      , '$2'
+    o 'INDENT ArgList OptComma OUTDENT'
     o 'ArgList OptComma INDENT ArgList OptComma OUTDENT', code: -> $1.concat $4
   ]
 
   # Arguments (expressions or splats)
   Arg: [
-    o 'Expression'                           , '$1'
-    o 'ExpressionLine'                       , '$1'
-    o 'Splat'                                , '$1'
+    o 'Expression'
+    o 'ExpressionLine'
+    o 'Splat'
     o '...'                                  , type: 'SpreadElement'
   ]
 
   # Array elements with elisions (holes)
   ArgElisionList: [
-    o 'ArgElision'                           , '$1'
+    o 'ArgElision'
     o 'ArgElisionList , ArgElision'          , code: -> $1.concat $3
     o 'ArgElisionList OptComma TERMINATOR ArgElision', code: -> $1.concat $4
     o 'INDENT ArgElisionList OptElisions OUTDENT', code: -> $2.concat $3
@@ -562,7 +552,7 @@ grammar =
   # Optional elisions
   OptElisions: [
     o 'OptComma'                             , []
-    o ', Elisions'                           , '$2'
+    o ', Elisions'
   ]
 
   # Elisions (array holes)
@@ -574,7 +564,7 @@ grammar =
   # Single elision
   Elision: [
     o ','                                    , type: 'Elision'
-    o 'Elision TERMINATOR'                   , '$1'
+    o 'Elision TERMINATOR'
   ]
 
   # Simple arguments (no newlines)
@@ -635,7 +625,7 @@ grammar =
     o 'WhileLineSource Block'                , code: -> $1.body = $2; $1
     o 'Statement WhileSource'                , code: -> $2.body = $1; $2.postfix = true; $2
     o 'Expression WhileSource'               , code: -> $2.body = $1; $2.postfix = true; $2
-    o 'Loop'                                 , '$1'
+    o 'Loop'
   ]
 
   # Loop construct
@@ -674,10 +664,10 @@ grammar =
 
   # For loop values
   ForValue: [
-    o 'Identifier'                           , '$1'
-    o 'ThisProperty'                         , '$1'
-    o 'Array'                                , '$1'
-    o 'Object'                               , '$1'
+    o 'Identifier'
+    o 'ThisProperty'
+    o 'Array'
+    o 'Object'
   ]
 
   # For loop variables
@@ -762,7 +752,7 @@ grammar =
 
   # If statements
   If: [
-    o 'IfBlock'                              , '$1'
+    o 'IfBlock'
     o 'IfBlock ELSE Block'                   , code: -> $1.alternate = $3; $1
     o 'Statement POST_IF Expression'         , type: 'IfStatement', test: '$3', consequent: '$1', postfix: true
     o 'Expression POST_IF Expression'        , type: 'IfStatement', test: '$3', consequent: '$1', postfix: true
@@ -776,7 +766,7 @@ grammar =
 
   # If line statements
   IfLine: [
-    o 'IfBlockLine'                          , '$1'
+    o 'IfBlockLine'
     o 'IfBlockLine ELSE Block'               , code: -> $1.alternate = $3; $1
     o 'Statement POST_IF ExpressionLine'     , type: 'IfStatement', test: '$3', consequent: '$1', postfix: true
     o 'Expression POST_IF ExpressionLine'    , type: 'IfStatement', test: '$3', consequent: '$1', postfix: true
@@ -834,7 +824,6 @@ grammar =
     o 'DO_IIFE Code'                         , type: 'DoIife', body: '$2'
   ]
 
-
 # ================================================================================
 # OPERATOR PRECEDENCE
 # ================================================================================
@@ -872,8 +861,8 @@ operators = [
 # Process the grammar for the parser generator
 for own name, alternatives of grammar
   grammar[name] = for alt in alternatives
-    # For Root rules, add return statement
-    alt[1] = "return #{alt[1]}" if name is 'Root'
+    # For Program rules, add return statement
+    alt[1] = "return #{alt[1]}" if name is 'Program'
     alt
 
 # Export the grammar
@@ -881,5 +870,5 @@ module.exports =
   bnf: grammar
   operators: operators.reverse()  # Parser generator wants low to high
 
+# Export the module
 export default module.exports
-export { grammar, operators }
