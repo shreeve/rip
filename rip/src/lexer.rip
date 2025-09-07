@@ -131,7 +131,7 @@ export class Lexer
     if id is 'as' and @seenImport
       if @value() is '*'
         @tokens[@tokens.length - 1][0] = 'IMPORT_ALL'
-      else if @value(yes) in COFFEE_KEYWORDS
+      else if @value(yes) in RIP_KEYWORDS
         prev = @prev()
         [prev[0], prev[1]] = ['IDENTIFIER', @value(yes)]
       if @tag() in ['DEFAULT', 'IMPORT_ALL', 'IDENTIFIER']
@@ -141,7 +141,7 @@ export class Lexer
       if @tag() in ['IDENTIFIER', 'DEFAULT']
         @token 'AS', id
         return id.length
-      if @value(yes) in COFFEE_KEYWORDS
+      if @value(yes) in RIP_KEYWORDS
         prev = @prev()
         [prev[0], prev[1]] = ['IDENTIFIER', @value(yes)]
         @token 'AS', id
@@ -170,8 +170,8 @@ export class Lexer
         'IDENTIFIER'
 
     tokenData = {}
-    if tag is 'IDENTIFIER' and (id in JS_KEYWORDS or id in COFFEE_KEYWORDS) and
-       not (@exportSpecifierList and id in COFFEE_KEYWORDS)
+    if tag is 'IDENTIFIER' and (id in JS_KEYWORDS or id in RIP_KEYWORDS) and
+       not (@exportSpecifierList and id in RIP_KEYWORDS)
       tag = id.toUpperCase()
       if tag is 'WHEN' and @tag() in LINE_BREAK
         tag = 'LEADING_WHEN'
@@ -233,9 +233,9 @@ export class Lexer
           id = 'isnt'
           idLength += 4  # Consume ' not' as well
 
-      if id in COFFEE_ALIASES
+      if id in RIP_ALIASES
         alias = id
-        id = COFFEE_ALIAS_MAP[id]
+        id = RIP_ALIAS_MAP[id]
         tokenData.original = alias
 
       tag = switch id
@@ -965,7 +965,7 @@ export class Lexer
 # ----------------
 
 isUnassignable = (name, displayName = name) -> switch
-  when name in [JS_KEYWORDS..., COFFEE_KEYWORDS...]
+  when name in [JS_KEYWORDS..., RIP_KEYWORDS...]
     "keyword '#{displayName}' can't be assigned"
   when name in STRICT_PROSCRIBED
     "'#{displayName}' can't be assigned"
@@ -1010,12 +1010,12 @@ JS_KEYWORDS = [
 ]
 
 # Rip-only keywords.
-COFFEE_KEYWORDS = [
+RIP_KEYWORDS = [
   'undefined', 'Infinity', 'NaN'
   'then', 'unless', 'until', 'loop', 'of', 'by', 'when'
 ]
 
-COFFEE_ALIAS_MAP =
+RIP_ALIAS_MAP =
   and  : '&&'
   or   : '||'
   is   : '=='
@@ -1026,8 +1026,8 @@ COFFEE_ALIAS_MAP =
   on   : 'true'
   off  : 'false'
 
-COFFEE_ALIASES  = (key for key of COFFEE_ALIAS_MAP)
-COFFEE_KEYWORDS = COFFEE_KEYWORDS.concat COFFEE_ALIASES
+RIP_ALIASES  = (key for key of RIP_ALIAS_MAP)
+RIP_KEYWORDS = RIP_KEYWORDS.concat RIP_ALIASES
 
 # The list of keywords that are reserved by JavaScript, but not used, or are
 # used by Rip internally. We throw an error when these are encountered,

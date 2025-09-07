@@ -1,4 +1,4 @@
-# Rip Grammar - Converted from CoffeeScript's battle-tested grammar
+# Rip Grammar - Adapted from CoffeeScript's battle-tested grammar
 #
 # This grammar uses a clean data-driven approach:
 # - Simple rules use data objects with '$1', '$2', ... placeholders
