@@ -114,7 +114,7 @@ isPassSpec = (spec) ->
 
 # Type guard for special operators
 hasSpecialOperators = (node) ->
-  node and typeof node is 'object' and 
+  node and typeof node is 'object' and
     (node.$concat or node.$slice or node.$array)
 
 # Parser generator's node expansion function
@@ -123,51 +123,55 @@ expandNodeSpec = (lhs, nodeSpec) ->
   # Handle o() nodes - BUILD with auto-typing
   if isNodeSpec nodeSpec
     node = nodeSpec.$node
-    
+
     return '$1' if not node?
     return { $array: node } if Array.isArray node
-    
+
     if typeof node is 'object'
       # Special operators pass through
       return node if hasSpecialOperators node
-      
+
       # AUTO-TYPE: Add type field if not present
       if not node.type and not node.$noType
         return { type: lhs, node... }
       return node
-    
+
     return node
-  
+
   # Handle x() values - PASS without modification
   if isPassSpec nodeSpec
     return nodeSpec.$pass
-  
+
   throw new Error "Production for #{lhs} missing o() or x() wrapper"
 
 # Process grammar for parser generator
 # Flattens arrays and validates structure
 processGrammar = (grammar) ->
   processed = {}
-  
+
   for own lhs, rule of grammar
     # Validate LHS
     throw new Error "Invalid LHS: #{lhs}" unless lhs and typeof lhs is 'string'
-    
+
     # Handle both array format and direct function call format
     # Array format: Body: [o(...), x(...)]
     # Direct format: Assignable: x 'SimpleAssignable | Array | Object'
-    if Array.isArray rule
-      # Check if first element looks like a production (3-element array with string pattern)
-      firstElem = rule[0]
-      if firstElem and Array.isArray(firstElem) and firstElem.length is 3 and typeof firstElem[0] is 'string'
-        # It's already an array of productions (from direct x() or o() call)
-        processed[lhs] = rule
-      else
-        # It's an array containing helper function calls - flatten one level
-        processed[lhs] = rule.flat()
-    else
+    if not Array.isArray rule
       throw new Error "Invalid rule format for #{lhs} - must be array"
-    
+
+    # Check if it's a direct production array (from inline x() or o())
+    # These return arrays like [[pattern, spec, prec]]
+    firstElem = rule[0]
+    if firstElem and Array.isArray(firstElem) and firstElem.length is 3 and typeof firstElem[0] is 'string'
+      # It's already an array of productions
+      processed[lhs] = rule
+    else if rule.length > 0 and not Array.isArray(rule[0])
+      # It looks like a malformed rule
+      throw new Error "Invalid rule format for #{lhs} - expected array of productions"
+    else
+      # It's an array containing helper function calls - flatten one level
+      processed[lhs] = rule.flat()
+
     # Validate each production
     for production in processed[lhs]
       unless Array.isArray(production) and production.length is 3
@@ -175,7 +179,7 @@ processGrammar = (grammar) ->
       [pattern, spec, precedence] = production
       unless typeof pattern is 'string'
         throw new Error "Invalid pattern in #{lhs}: #{pattern}"
-  
+
   processed
 
 # Export all functions
