@@ -615,14 +615,14 @@ class Generator
     module = @_generateModuleCore()
     """
     (function(){
-    var hasProp = {}.hasOwnProperty;
-    #{module.commonCode}
-    var parser = #{module.moduleCode};
-    #{@moduleInclude}
-    function Parser () { this.yy = {}; }
-    Parser.prototype = parser;
-    parser.Parser = Parser;
-    return new Parser;
+      var hasProp = {}.hasOwnProperty;
+      #{module.commonCode}
+      var parser = #{module.moduleCode};
+      #{@moduleInclude}
+      function Parser () { this.yy = {}; }
+      Parser.prototype = parser;
+      parser.Parser = Parser;
+      return new Parser;
     })();
     """
 
