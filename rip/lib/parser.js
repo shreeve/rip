@@ -217,58 +217,6 @@ export class Generator {
     this.performAction = `function anonymous(${parameters}) {\n${actionsCode}\n}`;
   }
 
-  _parseHandle(handle) {
-    if (Array.isArray(handle)) {
-      let rhs = typeof handle[0] === 'string' ? handle[0].trim().split(' ') : [...handle[0]];
-      rhs = rhs.map(e => e.replace(/\[[a-zA-Z_][a-zA-Z0-9_-]*\]/g, ''));
-
-      const action = (typeof handle[1] === 'string' || handle.length === 3) ? handle[1] : null;
-      const precedence = handle[2] ? handle[2] : (handle[1] && typeof handle[1] !== 'string' ? handle[1] : null);
-
-      return [rhs, action, precedence];
-    } else {
-      const cleanHandle = handle.replace(/\[[a-zA-Z_][a-zA-Z0-9_-]*\]/g, '');
-      const rhs = cleanHandle.trim().split(' ');
-      return [rhs, null, null];
-    }
-  }
-
-  _processSemanticAction(action, rhs) {
-    // Process named semantic values
-    if (action.match(/[$@][a-zA-Z][a-zA-Z0-9_]*/)) {
-      const count = {};
-      const names = {};
-
-      for (let i = 0; i < rhs.length; i++) {
-        const token = rhs[i];
-        let rhs_i = token.match(/\[[a-zA-Z][a-zA-Z0-9_-]*\]/); // Like [var]
-        if (rhs_i) {
-          rhs_i = rhs_i[0].slice(1, -1);
-        } else {
-          rhs_i = token;
-        }
-
-        if (names[rhs_i]) {
-          names[rhs_i + (++count[rhs_i])] = i + 1;
-        } else {
-          names[rhs_i] = i + 1;
-          names[rhs_i + "1"] = i + 1;
-          count[rhs_i] = 1;
-        }
-      }
-
-      action = action
-        .replace(/\$([a-zA-Z][a-zA-Z0-9_]*)/g, (str, pl) => names[pl] ? '$' + names[pl] : str) // Like $var
-        .replace(/@([a-zA-Z][a-zA-Z0-9_]*)/g, (str, pl) => names[pl] ? '@' + names[pl] : str); // Like @var
-    }
-
-    // Transform $$ and positional references
-    return action
-      .replace(/([^'"])\$\$|^\$\$/g, '$1this.$') // Like $$var
-      .replace(/@[0$]/g, "this._$") // Like @var
-      .replace(/\$(-?\d+)/g, (_, n) => `$$[$0${parseInt(n, 10) - rhs.length || ''}]`) // Like $1
-      .replace(/@(-?\d+)/g, (_, n) => `_$[$0${n - rhs.length || ''}]`); // Like @1
-  }
 
   _assignPrecedence(production, precedence, operators, nonterminals) {
     if (precedence?.prec && operators[precedence.prec]) {
