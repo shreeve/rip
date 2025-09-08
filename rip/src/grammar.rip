@@ -24,13 +24,13 @@ import { o, x, binOp, unaryOp, list, star, plus, opt, wrapped, keywords, process
 grammar =
 
   Root: [
-    o '',                                      body: $node: 'Block', statements: []
+    o '', body: $node: 'Block', statements: []
     x 'Body'
   ]
 
   Body: [
-    o 'Line',                                  $array: ['$1']
-    o 'Body TERMINATOR Line',                  $concat: ['$1', '$3']
+    o 'Line'                , $array: ['$1']
+    o 'Body TERMINATOR Line', $concat: ['$1', '$3']
     x 'Body TERMINATOR'
   ]
 
@@ -40,7 +40,7 @@ grammar =
 
   Statement: [
     x 'Return'
-    o 'STATEMENT',                             value: '$1'
+    o 'STATEMENT', value: '$1'
     x 'Import | Export'
   ]
 
@@ -49,15 +49,15 @@ grammar =
   ExpressionLine: x 'CodeLine | IfLine | OperationLine'
 
   Yield: [
-    o 'YIELD',                                 argument: value: ''
-    o 'YIELD Expression',                      argument: '$2'
-    o 'YIELD INDENT Object OUTDENT',           argument: '$3'
-    o 'YIELD FROM Expression',                 delegate: true, argument: '$3'
+    o 'YIELD'                      , argument: value: ''
+    o 'YIELD Expression'           , argument: '$2'
+    o 'YIELD INDENT Object OUTDENT', argument: '$3'
+    o 'YIELD FROM Expression'      , delegate: true, argument: '$3'
   ]
 
   Block: [
-    o 'INDENT OUTDENT',                        statements: []
-    x 'INDENT Body OUTDENT',                   '$2'
+    o 'INDENT OUTDENT'     , statements: []
+    x 'INDENT Body OUTDENT', '$2'
   ]
 
   Identifier: o 'IDENTIFIER',                  name: '$1'
@@ -65,50 +65,50 @@ grammar =
   Property: o 'PROPERTY',                      name: '$1'
 
   AlphaNumeric: [
-    o 'NUMBER',                                value: '$1', parsedValue: '$parsedValue'
+    o 'NUMBER', value: '$1', parsedValue: '$parsedValue'
     x 'String'
   ]
 
   String: [
-    o 'STRING',                                value: '$1', quote: '$quote', initialChunk: '$initialChunk', finalChunk: '$finalChunk', indent: '$indent', double: '$double', heregex: '$heregex'
+    o 'STRING'                                , value: '$1', quote: '$quote', initialChunk: '$initialChunk', finalChunk: '$finalChunk', indent: '$indent', double: '$double', heregex: '$heregex'
     o 'STRING_START Interpolations STRING_END', interpolations: '$2', quote: '$quote'
   ]
 
   Interpolations: [
-    o 'InterpolationChunk',                    ['$1']
-    o 'Interpolations InterpolationChunk',     $concat: ['$1', '$2']
+    o 'InterpolationChunk'               , ['$1']
+    o 'Interpolations InterpolationChunk', $concat: ['$1', '$2']
   ]
 
   InterpolationChunk: [
     o 'INTERPOLATION_START Body INTERPOLATION_END', body: '$2'
     o 'INTERPOLATION_START INDENT Body OUTDENT INTERPOLATION_END', body: '$3'
-    o 'INTERPOLATION_START INTERPOLATION_END', body: null
+    o 'INTERPOLATION_START INTERPOLATION_END'     , body: null
     x 'String'
   ]
 
   Regex: [
-    o 'REGEX',                                 pattern: '$1', delimiter: '$delimiter', heregexCommentTokens: '$heregexCommentTokens'
-    o 'REGEX_START Invocation REGEX_END',      invocation: '$2', heregexCommentTokens: '$heregexCommentTokens'
+    o 'REGEX'                           , pattern: '$1', delimiter: '$delimiter', heregexCommentTokens: '$heregexCommentTokens'
+    o 'REGEX_START Invocation REGEX_END', invocation: '$2', heregexCommentTokens: '$heregexCommentTokens'
   ]
 
   Literal: [
     x 'AlphaNumeric'
-    o 'JS',                                    code: '$1', here: '$here', generated: '$generated'
+    o 'JS', code: '$1', here: '$here', generated: '$generated'
     x 'Regex'
     keywords 'UNDEFINED | NULL | BOOL | INFINITY | NAN'
   ]
 
   Assign: [
-    o 'Assignable = Expression',               left: '$1', right: '$3'
-    o 'Assignable = TERMINATOR Expression',    left: '$1', right: '$4'
+    o 'Assignable = Expression'               , left: '$1', right: '$3'
+    o 'Assignable = TERMINATOR Expression'    , left: '$1', right: '$4'
     o 'Assignable = INDENT Expression OUTDENT', left: '$1', right: '$4'
   ]
 
   AssignObj: [
     x 'ObjAssignable | ObjRestValue'
-    o 'ObjAssignable : Expression',            left: '$1', right: '$3', context: 'object'
-    o 'ObjAssignable : INDENT Expression OUTDENT', left: '$1', right: '$4', context: 'object'
-    o 'SimpleObjAssignable = Expression',      left: '$1', right: '$3'
+    o 'ObjAssignable : Expression'                     , left: '$1', right: '$3', context: 'object'
+    o 'ObjAssignable : INDENT Expression OUTDENT'      , left: '$1', right: '$4', context: 'object'
+    o 'SimpleObjAssignable = Expression'               , left: '$1', right: '$3'
     o 'SimpleObjAssignable = INDENT Expression OUTDENT', left: '$1', right: '$4'
   ]
 
@@ -116,89 +116,89 @@ grammar =
 
   ObjAssignable: [
     x 'SimpleObjAssignable | AlphaNumeric'
-    o '[ Expression ]',                        computed: true, property: '$2'
-    o '@ [ Expression ]',                      computed: true, property: '$3', object: '@'
+    o '[ Expression ]'  , computed: true, property: '$2'
+    o '@ [ Expression ]', computed: true, property: '$3', object: '@'
   ]
 
   ObjRestValue: [
-    o 'SimpleObjAssignable ...',               argument: '$1', postfix: true
-    o '... SimpleObjAssignable',               argument: '$2', postfix: false
-    o 'ObjSpreadExpr ...',                     argument: '$1', postfix: true
-    o '... ObjSpreadExpr',                     argument: '$2', postfix: false
+    o 'SimpleObjAssignable ...', argument: '$1', postfix: true
+    o '... SimpleObjAssignable', argument: '$2', postfix: false
+    o 'ObjSpreadExpr ...'      , argument: '$1', postfix: true
+    o '... ObjSpreadExpr'      , argument: '$2', postfix: false
   ]
 
   ObjSpreadExpr: [
     x 'ObjSpreadIdentifier | Object | Parenthetical | Super | This'
-    o 'SUPER OptFuncExist Arguments',          callee: 'super', arguments: '$3', optional: '$2'
-    o 'DYNAMIC_IMPORT Arguments',              callee: 'import', arguments: '$2'
+    o 'SUPER OptFuncExist Arguments'              , callee: 'super', arguments: '$3', optional: '$2'
+    o 'DYNAMIC_IMPORT Arguments'                  , callee: 'import', arguments: '$2'
     o 'SimpleObjAssignable OptFuncExist Arguments', callee: '$1', arguments: '$3', optional: '$2'
-    o 'ObjSpreadExpr OptFuncExist Arguments',  callee: '$1', arguments: '$3', optional: '$2'
+    o 'ObjSpreadExpr OptFuncExist Arguments'      , callee: '$1', arguments: '$3', optional: '$2'
   ]
 
   ObjSpreadIdentifier: [
-    o 'SimpleObjAssignable Accessor',          object: '$1', property: '$2'
-    o 'ObjSpreadExpr Accessor',                object: '$1', property: '$2'
+    o 'SimpleObjAssignable Accessor', object: '$1', property: '$2'
+    o 'ObjSpreadExpr Accessor'      , object: '$1', property: '$2'
   ]
 
   Return: [
-    o 'RETURN Expression',                     argument: '$2'
-    o 'RETURN INDENT Object OUTDENT',          argument: '$3'
-    o 'RETURN',                                argument: null
+    o 'RETURN Expression'           , argument: '$2'
+    o 'RETURN INDENT Object OUTDENT', argument: '$3'
+    o 'RETURN'                      , argument: null
   ]
 
   YieldReturn: [
-    o 'YIELD RETURN Expression',               argument: '$3'
-    o 'YIELD RETURN',                          argument: null
+    o 'YIELD RETURN Expression', argument: '$3'
+    o 'YIELD RETURN'           , argument: null
   ]
 
   AwaitReturn: [
-    o 'AWAIT RETURN Expression',               argument: '$3'
-    o 'AWAIT RETURN',                          argument: null
+    o 'AWAIT RETURN Expression', argument: '$3'
+    o 'AWAIT RETURN'           , argument: null
   ]
 
   Code: [
     o 'PARAM_START ParamList PARAM_END FuncGlyph Block', params: '$2', body: '$5', arrow: '$4'
-    o 'FuncGlyph Block',                       params: [], body: '$2', arrow: '$1'
+    o 'FuncGlyph Block'                                , params: [], body: '$2', arrow: '$1'
   ]
 
   CodeLine: [
     o 'PARAM_START ParamList PARAM_END FuncGlyph Line', params: '$2', body: ['$5'], arrow: '$4'
-    o 'FuncGlyph Line',                        params: [], body: ['$2'], arrow: '$1'
+    o 'FuncGlyph Line'                                , params: [], body: ['$2'], arrow: '$1'
   ]
 
   FuncGlyph: [
-    o '->',                                    type: 'function'
-    o '=>',                                    type: 'bound'
+    o '->', type: 'function'
+    o '=>', type: 'bound'
   ]
 
   OptComma: opt ',', true, false
 
   ParamList: [
-    o '',                                      []
-    list 'Param', ','
+    o ''                                   , []
+    list 'Param'                           , ','
     o 'ParamList OptComma TERMINATOR Param', $concat: ['$1', '$4']
     o 'ParamList OptComma INDENT ParamList OptComma OUTDENT', $concat: ['$1', '$4']
   ]
 
   Param: [
-    o 'ParamVar',                              name: '$1'
-    o 'ParamVar ...',                          name: '$1', rest: true
-    o '... ParamVar',                          name: '$2', rest: true, postfix: false
-    o 'ParamVar = Expression',                 name: '$1', default: '$3'
-    o '...',                                   expansion: true
+    o 'ParamVar'             , name: '$1'
+    o 'ParamVar ...'         , name: '$1', rest: true
+    o '... ParamVar'         , name: '$2', rest: true, postfix: false
+    o 'ParamVar = Expression', name: '$1', default: '$3'
+    o '...'                  , expansion: true
   ]
 
   ParamVar: x 'Identifier | ThisProperty | Array | Object'
 
   Splat: [
-    o 'Expression ...',                        argument: '$1', postfix: true
-    o '... Expression',                        argument: '$2', postfix: false
+    o 'Expression ...', argument: '$1', postfix: true
+    o '... Expression', argument: '$2', postfix: false
   ]
 
   SimpleAssignable: [
     x 'Identifier'
-    o 'Value Accessor',                        object: '$1', property: '$2'
-    o 'Code Accessor',                         object: '$1', property: '$2'
+    o 'Value Accessor', object: '$1', property: '$2'
+    o 'Code Accessor' , object: '$1', property: '$2'
     x 'ThisProperty'
   ]
 
@@ -207,34 +207,34 @@ grammar =
   Value: x 'Assignable | Literal | Parenthetical | Range | Invocation | DoIife | This | Super | MetaProperty'
 
   Super: [
-    o 'SUPER . Property',                      property: '$3'
+    o 'SUPER . Property'                      , property: '$3'
     o 'SUPER INDEX_START Expression INDEX_END', computed: true, property: '$3'
     o 'SUPER INDEX_START INDENT Expression OUTDENT INDEX_END', computed: true, property: '$4'
   ]
 
   MetaProperty: [
-    o 'NEW_TARGET . Property',                 meta: 'new', property: '$3'
-    o 'IMPORT_META . Property',                meta: 'import', property: '$3'
+    o 'NEW_TARGET . Property' , meta: 'new', property: '$3'
+    o 'IMPORT_META . Property', meta: 'import', property: '$3'
   ]
 
   Accessor: [
-    o '. Property',                            property: '$2'
-    o '?. Property',                           property: '$2', optional: true
-    o ':: Property',                           prototype: true, property: '$2'
-    o '?:: Property',                          prototype: true, property: '$2', optional: true
-    o '::',                                    prototype: true
-    o '?::',                                   prototype: true, optional: true
+    o '. Property'  , property: '$2'
+    o '?. Property' , property: '$2', optional: true
+    o ':: Property' , prototype: true, property: '$2'
+    o '?:: Property', prototype: true, property: '$2', optional: true
+    o '::'          , prototype: true
+    o '?::'         , prototype: true, optional: true
     x 'Index'
   ]
 
   Index: [
-    o 'INDEX_START IndexValue INDEX_END',      '$2'
+    o 'INDEX_START IndexValue INDEX_END'               , '$2'
     o 'INDEX_START INDENT IndexValue OUTDENT INDEX_END', '$3'
-    o 'INDEX_SOAK Index',                      $merge: ['$2', { optional: true }]
+    o 'INDEX_SOAK Index'                               , $merge: ['$2', { optional: true }]
   ]
 
   IndexValue: [
-    o 'Expression',                            index: '$1'
+    o 'Expression', index: '$1'
     x 'Slice | Regex | RegexWithIndex'
   ]
 
@@ -243,32 +243,32 @@ grammar =
   Object: o '{ AssignList OptComma }',         properties: '$2', generated: '$generated'
 
   AssignList: [
-    o '',                                      []
-    list 'AssignObj', ','
+    o ''                                        , []
+    list 'AssignObj'                            , ','
     o 'AssignList OptComma TERMINATOR AssignObj', $concat: ['$1', '$4']
     o 'AssignList OptComma INDENT AssignList OptComma OUTDENT', $concat: ['$1', '$4']
   ]
 
   Class: [
-    o 'CLASS',                                 name: null, parent: null, body: null
-    o 'CLASS Block',                           name: null, parent: null, body: '$2'
-    o 'CLASS EXTENDS Expression',              name: null, parent: '$3', body: null
-    o 'CLASS EXTENDS Expression Block',        name: null, parent: '$3', body: '$4'
-    o 'CLASS SimpleAssignable',                name: '$2', parent: null, body: null
-    o 'CLASS SimpleAssignable Block',          name: '$2', parent: null, body: '$3'
-    o 'CLASS SimpleAssignable EXTENDS Expression', name: '$2', parent: '$4', body: null
+    o 'CLASS'                                          , name: null, parent: null, body: null
+    o 'CLASS Block'                                    , name: null, parent: null, body: '$2'
+    o 'CLASS EXTENDS Expression'                       , name: null, parent: '$3', body: null
+    o 'CLASS EXTENDS Expression Block'                 , name: null, parent: '$3', body: '$4'
+    o 'CLASS SimpleAssignable'                         , name: '$2', parent: null, body: null
+    o 'CLASS SimpleAssignable Block'                   , name: '$2', parent: null, body: '$3'
+    o 'CLASS SimpleAssignable EXTENDS Expression'      , name: '$2', parent: '$4', body: null
     o 'CLASS SimpleAssignable EXTENDS Expression Block', name: '$2', parent: '$4', body: '$5'
   ]
 
   Import: [
-    o 'IMPORT String',                         source: '$2'
-    o 'IMPORT String ASSERT Object',           source: '$2', assertions: '$4'
-    o 'IMPORT ImportDefaultSpecifier FROM String', specifiers: ['$2'], source: '$4'
+    o 'IMPORT String'                                      , source: '$2'
+    o 'IMPORT String ASSERT Object'                        , source: '$2', assertions: '$4'
+    o 'IMPORT ImportDefaultSpecifier FROM String'          , specifiers: ['$2'], source: '$4'
     o 'IMPORT ImportDefaultSpecifier FROM String ASSERT Object', specifiers: ['$2'], source: '$4', assertions: '$6'
-    o 'IMPORT ImportNamespaceSpecifier FROM String', specifiers: ['$2'], source: '$4'
+    o 'IMPORT ImportNamespaceSpecifier FROM String'        , specifiers: ['$2'], source: '$4'
     o 'IMPORT ImportNamespaceSpecifier FROM String ASSERT Object', specifiers: ['$2'], source: '$4', assertions: '$6'
-    o 'IMPORT { } FROM String',                specifiers: [], source: '$5'
-    o 'IMPORT { } FROM String ASSERT Object',  specifiers: [], source: '$5', assertions: '$7'
+    o 'IMPORT { } FROM String'                             , specifiers: [], source: '$5'
+    o 'IMPORT { } FROM String ASSERT Object'               , specifiers: [], source: '$5', assertions: '$7'
     o 'IMPORT { ImportSpecifierList OptComma } FROM String', specifiers: '$3', source: '$7'
     o 'IMPORT { ImportSpecifierList OptComma } FROM String ASSERT Object', specifiers: '$3', source: '$7', assertions: '$9'
     o 'IMPORT ImportDefaultSpecifier , ImportNamespaceSpecifier FROM String', specifiers: ['$2', '$4'], source: '$6'
@@ -278,17 +278,17 @@ grammar =
   ]
 
   ImportSpecifierList: [
-    list 'ImportSpecifier', ','
+    list 'ImportSpecifier'                         , ','
     o 'ImportSpecifierList OptComma TERMINATOR ImportSpecifier', $concat: ['$1', '$4']
     o 'INDENT ImportSpecifierList OptComma OUTDENT', '$2'
     o 'ImportSpecifierList OptComma INDENT ImportSpecifierList OptComma OUTDENT', $concat: ['$1', '$4']
   ]
 
   ImportSpecifier: [
-    o 'Identifier',                            imported: '$1', local: '$1'
-    o 'Identifier AS Identifier',              imported: '$1', local: '$3'
-    o 'DEFAULT',                               imported: 'default', local: 'default'
-    o 'DEFAULT AS Identifier',                 imported: 'default', local: '$3'
+    o 'Identifier'              , imported: '$1', local: '$1'
+    o 'Identifier AS Identifier', imported: '$1', local: '$3'
+    o 'DEFAULT'                 , imported: 'default', local: 'default'
+    o 'DEFAULT AS Identifier'   , imported: 'default', local: '$3'
   ]
 
   ImportDefaultSpecifier: o 'Identifier',      type: 'default', local: '$1'
@@ -296,49 +296,49 @@ grammar =
   ImportNamespaceSpecifier: o 'IMPORT_ALL AS Identifier', type: 'namespace', local: '$3'
 
   Export: [
-    o 'EXPORT { }',                            specifiers: []
-    o 'EXPORT { ExportSpecifierList OptComma }', specifiers: '$3'
-    o 'EXPORT Class',                          declaration: '$2'
-    o 'EXPORT Identifier = Expression',        declaration: { left: '$2', right: '$4' }
-    o 'EXPORT Identifier = TERMINATOR Expression', declaration: { left: '$2', right: '$5' }
-    o 'EXPORT Identifier = INDENT Expression OUTDENT', declaration: { left: '$2', right: '$5' }
-    o 'EXPORT DEFAULT Expression',             default: true, declaration: '$3'
-    o 'EXPORT DEFAULT INDENT Object OUTDENT',  default: true, declaration: '$4'
-    o 'EXPORT EXPORT_ALL FROM String',         all: true, source: '$4'
-    o 'EXPORT EXPORT_ALL FROM String ASSERT Object', all: true, source: '$4', assertions: '$6'
-    o 'EXPORT { } FROM String',                specifiers: [], source: '$5'
-    o 'EXPORT { } FROM String ASSERT Object',  specifiers: [], source: '$5', assertions: '$7'
+    o 'EXPORT { }'                                         , specifiers: []
+    o 'EXPORT { ExportSpecifierList OptComma }'            , specifiers: '$3'
+    o 'EXPORT Class'                                       , declaration: '$2'
+    o 'EXPORT Identifier = Expression'                     , declaration: { left: '$2', right: '$4' }
+    o 'EXPORT Identifier = TERMINATOR Expression'          , declaration: { left: '$2', right: '$5' }
+    o 'EXPORT Identifier = INDENT Expression OUTDENT'      , declaration: { left: '$2', right: '$5' }
+    o 'EXPORT DEFAULT Expression'                          , default: true, declaration: '$3'
+    o 'EXPORT DEFAULT INDENT Object OUTDENT'               , default: true, declaration: '$4'
+    o 'EXPORT EXPORT_ALL FROM String'                      , all: true, source: '$4'
+    o 'EXPORT EXPORT_ALL FROM String ASSERT Object'        , all: true, source: '$4', assertions: '$6'
+    o 'EXPORT { } FROM String'                             , specifiers: [], source: '$5'
+    o 'EXPORT { } FROM String ASSERT Object'               , specifiers: [], source: '$5', assertions: '$7'
     o 'EXPORT { ExportSpecifierList OptComma } FROM String', specifiers: '$3', source: '$7'
     o 'EXPORT { ExportSpecifierList OptComma } FROM String ASSERT Object', specifiers: '$3', source: '$7', assertions: '$9'
   ]
 
   ExportSpecifierList: [
-    list 'ExportSpecifier', ','
+    list 'ExportSpecifier'                         , ','
     o 'ExportSpecifierList OptComma TERMINATOR ExportSpecifier', $concat: ['$1', '$4']
     o 'INDENT ExportSpecifierList OptComma OUTDENT', '$2'
     o 'ExportSpecifierList OptComma INDENT ExportSpecifierList OptComma OUTDENT', $concat: ['$1', '$4']
   ]
 
   ExportSpecifier: [
-    o 'Identifier',                            local: '$1', exported: '$1'
-    o 'Identifier AS Identifier',              local: '$1', exported: '$3'
-    o 'Identifier AS DEFAULT',                 local: '$1', exported: 'default'
-    o 'DEFAULT',                               local: 'default', exported: 'default'
-    o 'DEFAULT AS Identifier',                 local: 'default', exported: '$3'
+    o 'Identifier'              , local: '$1', exported: '$1'
+    o 'Identifier AS Identifier', local: '$1', exported: '$3'
+    o 'Identifier AS DEFAULT'   , local: '$1', exported: 'default'
+    o 'DEFAULT'                 , local: 'default', exported: 'default'
+    o 'DEFAULT AS Identifier'   , local: 'default', exported: '$3'
   ]
 
   Invocation: [
-    o 'Value OptFuncExist String',             callee: '$1', arguments: ['$3'], optional: '$2', taggedTemplate: true
-    o 'Value OptFuncExist Arguments',          callee: '$1', arguments: '$3', optional: '$2'
-    o 'SUPER OptFuncExist Arguments',          callee: 'super', arguments: '$3', optional: '$2'
-    o 'DYNAMIC_IMPORT Arguments',              callee: 'import', arguments: '$2', dynamic: true
+    o 'Value OptFuncExist String'   , callee: '$1', arguments: ['$3'], optional: '$2', taggedTemplate: true
+    o 'Value OptFuncExist Arguments', callee: '$1', arguments: '$3', optional: '$2'
+    o 'SUPER OptFuncExist Arguments', callee: 'super', arguments: '$3', optional: '$2'
+    o 'DYNAMIC_IMPORT Arguments'    , callee: 'import', arguments: '$2', dynamic: true
   ]
 
   OptFuncExist: opt 'FUNC_EXIST', { soak: true }, { soak: false }
 
   Arguments: [
-    o 'CALL_START CALL_END',                   []
-    o 'CALL_START ArgList OptComma CALL_END',  '$2'
+    o 'CALL_START CALL_END'                 , []
+    o 'CALL_START ArgList OptComma CALL_END', '$2'
   ]
 
   This: o 'THIS | @',                          type: 'this'
@@ -346,190 +346,190 @@ grammar =
   ThisProperty: o '@ Property',                object: '@', property: '$2'
 
   Array: [
-    o '[ ]',                                   elements: []
-    o '[ Elisions ]',                          elements: '$2'
-    o '[ ArgElisionList OptElisions ]',        elements: $concat: ['$2', '$3']
+    o '[ ]'                           , elements: []
+    o '[ Elisions ]'                  , elements: '$2'
+    o '[ ArgElisionList OptElisions ]', elements: $concat: ['$2', '$3']
   ]
 
   RangeDots: [
-    o '..',                                    exclusive: false
-    o '...',                                   exclusive: true
+    o '..' , exclusive: false
+    o '...', exclusive: true
   ]
 
   Range: [
-    o '[ Expression RangeDots Expression ]',   start: '$2', end: '$4', exclusive: '$3'
+    o '[ Expression RangeDots Expression ]'    , start: '$2', end: '$4', exclusive: '$3'
     o '[ ExpressionLine RangeDots Expression ]', start: '$2', end: '$4', exclusive: '$3'
   ]
 
   Slice: [
-    o 'Expression RangeDots Expression',       start: '$1', end: '$3', exclusive: '$2'
-    o 'Expression RangeDots',                  start: '$1', end: null, exclusive: '$2'
-    o 'ExpressionLine RangeDots Expression',   start: '$1', end: '$3', exclusive: '$2'
-    o 'ExpressionLine RangeDots',              start: '$1', end: null, exclusive: '$2'
-    o 'RangeDots Expression',                  start: null, end: '$2', exclusive: '$1'
-    o 'RangeDots',                             start: null, end: null, exclusive: '$1'
+    o 'Expression RangeDots Expression'    , start: '$1', end: '$3', exclusive: '$2'
+    o 'Expression RangeDots'               , start: '$1', end: null, exclusive: '$2'
+    o 'ExpressionLine RangeDots Expression', start: '$1', end: '$3', exclusive: '$2'
+    o 'ExpressionLine RangeDots'           , start: '$1', end: null, exclusive: '$2'
+    o 'RangeDots Expression'               , start: null, end: '$2', exclusive: '$1'
+    o 'RangeDots'                          , start: null, end: null, exclusive: '$1'
   ]
 
   ArgList: [
-    list 'Arg', ','
-    o 'ArgList OptComma TERMINATOR Arg',       $concat: ['$1', '$4']
-    o 'INDENT ArgList OptComma OUTDENT',       '$2'
+    list 'Arg'                                          , ','
+    o 'ArgList OptComma TERMINATOR Arg'                 , $concat: ['$1', '$4']
+    o 'INDENT ArgList OptComma OUTDENT'                 , '$2'
     o 'ArgList OptComma INDENT ArgList OptComma OUTDENT', $concat: ['$1', '$4']
   ]
 
   Arg: [
     x 'Expression | ExpressionLine | Splat'
-    o '...',                                   expansion: true
+    o '...', expansion: true
   ]
 
   ArgElisionList: [
-    o 'ArgElision',                            '$1'
-    o 'ArgElisionList , ArgElision',           $concat: ['$1', '$3']
+    o 'ArgElision'                                   , '$1'
+    o 'ArgElisionList , ArgElision'                  , $concat: ['$1', '$3']
     o 'ArgElisionList OptComma TERMINATOR ArgElision', $concat: ['$1', '$4']
-    o 'INDENT ArgElisionList OptElisions OUTDENT', $concat: ['$2', '$3']
+    o 'INDENT ArgElisionList OptElisions OUTDENT'    , $concat: ['$2', '$3']
     o 'ArgElisionList OptElisions INDENT ArgElisionList OptElisions OUTDENT', $concat: ['$1', '$2', '$4', '$5']
   ]
 
   ArgElision: [
-    o 'Arg',                                   ['$1']
-    o 'Elisions Arg',                          $concat: ['$1', '$2']
+    o 'Arg'         , ['$1']
+    o 'Elisions Arg', $concat: ['$1', '$2']
   ]
 
   OptElisions: [
-    o 'OptComma',                              []
-    o ', Elisions',                            '$2'
+    o 'OptComma'  , []
+    o ', Elisions', '$2'
   ]
 
   Elisions: [
-    o 'Elision',                               ['$1']
-    o 'Elisions Elision',                      $concat: ['$1', '$2']
+    o 'Elision'         , ['$1']
+    o 'Elisions Elision', $concat: ['$1', '$2']
   ]
 
   Elision: [
-    o ',',                                     type: 'elision'
+    o ',', type: 'elision'
     x 'Elision TERMINATOR'
   ]
 
   SimpleArgs: [
     x 'Expression | ExpressionLine'
-    o 'SimpleArgs , Expression',               $concat: ['$1', '$3']
-    o 'SimpleArgs , ExpressionLine',           $concat: ['$1', '$3']
+    o 'SimpleArgs , Expression'    , $concat: ['$1', '$3']
+    o 'SimpleArgs , ExpressionLine', $concat: ['$1', '$3']
   ]
 
   Try: [
-    o 'TRY Block',                             block: '$2'
-    o 'TRY Block Catch',                       block: '$2', handler: '$3'
-    o 'TRY Block FINALLY Block',               block: '$2', finalizer: '$4'
-    o 'TRY Block Catch FINALLY Block',         block: '$2', handler: '$3', finalizer: '$5'
+    o 'TRY Block'                    , block: '$2'
+    o 'TRY Block Catch'              , block: '$2', handler: '$3'
+    o 'TRY Block FINALLY Block'      , block: '$2', finalizer: '$4'
+    o 'TRY Block Catch FINALLY Block', block: '$2', handler: '$3', finalizer: '$5'
   ]
 
   Catch: [
-    o 'CATCH Identifier Block',                param: '$2', body: '$3'
-    o 'CATCH Object Block',                    param: '$2', body: '$3'
-    o 'CATCH Block',                           body: '$2'
+    o 'CATCH Identifier Block', param: '$2', body: '$3'
+    o 'CATCH Object Block'    , param: '$2', body: '$3'
+    o 'CATCH Block'           , body: '$2'
   ]
 
   Throw: [
-    o 'THROW Expression',                      argument: '$2'
-    o 'THROW INDENT Object OUTDENT',           argument: '$3'
+    o 'THROW Expression'           , argument: '$2'
+    o 'THROW INDENT Object OUTDENT', argument: '$3'
   ]
 
   Parenthetical: [
-    wrapped '(', ')', 'Body'
-    o '( INDENT Body OUTDENT )',               '$3'
+    wrapped '('                , ')', 'Body'
+    o '( INDENT Body OUTDENT )', '$3'
   ]
 
   WhileLineSource: [
-    o 'WHILE ExpressionLine',                  test: '$2'
+    o 'WHILE ExpressionLine'                    , test: '$2'
     o 'WHILE ExpressionLine WHEN ExpressionLine', test: '$2', guard: '$4'
-    o 'UNTIL ExpressionLine',                  test: '$2', inverted: true
+    o 'UNTIL ExpressionLine'                    , test: '$2', inverted: true
     o 'UNTIL ExpressionLine WHEN ExpressionLine', test: '$2', guard: '$4', inverted: true
   ]
 
   WhileSource: [
-    o 'WHILE Expression',                      test: '$2'
-    o 'WHILE Expression WHEN Expression',      test: '$2', guard: '$4'
-    o 'WHILE ExpressionLine WHEN Expression',  test: '$2', guard: '$4'
-    o 'UNTIL Expression',                      test: '$2', inverted: true
-    o 'UNTIL Expression WHEN Expression',      test: '$2', guard: '$4', inverted: true
-    o 'UNTIL ExpressionLine WHEN Expression',  test: '$2', guard: '$4', inverted: true
+    o 'WHILE Expression'                    , test: '$2'
+    o 'WHILE Expression WHEN Expression'    , test: '$2', guard: '$4'
+    o 'WHILE ExpressionLine WHEN Expression', test: '$2', guard: '$4'
+    o 'UNTIL Expression'                    , test: '$2', inverted: true
+    o 'UNTIL Expression WHEN Expression'    , test: '$2', guard: '$4', inverted: true
+    o 'UNTIL ExpressionLine WHEN Expression', test: '$2', guard: '$4', inverted: true
   ]
 
   While: [
-    o 'WhileSource Block',                     $merge: ['$1', { body: '$2' }]
-    o 'WhileLineSource Block',                 $merge: ['$1', { body: '$2' }]
-    o 'Statement WhileSource',                 $merge: ['$2', { body: ['$1'], postfix: true }]
-    o 'Expression WhileSource',                $merge: ['$2', { body: ['$1'], postfix: true }]
+    o 'WhileSource Block'     , $merge: ['$1', { body: '$2' }]
+    o 'WhileLineSource Block' , $merge: ['$1', { body: '$2' }]
+    o 'Statement WhileSource' , $merge: ['$2', { body: ['$1'], postfix: true }]
+    o 'Expression WhileSource', $merge: ['$2', { body: ['$1'], postfix: true }]
     x 'Loop'
   ]
 
   Loop: [
-    o 'LOOP Block',                            loop: true, body: '$2'
-    o 'LOOP Expression',                       loop: true, body: ['$2']
+    o 'LOOP Block'     , loop: true, body: '$2'
+    o 'LOOP Expression', loop: true, body: ['$2']
   ]
 
   For: [
-    o 'Statement ForBody',                     $merge: ['$2', { body: '$1', postfix: true }]
-    o 'Expression ForBody',                    $merge: ['$2', { body: '$1', postfix: true }]
-    o 'ForBody Block',                         $merge: ['$1', { body: '$2' }]
-    o 'ForLineBody Block',                     $merge: ['$1', { body: '$2' }]
+    o 'Statement ForBody' , $merge: ['$2', { body: '$1', postfix: true }]
+    o 'Expression ForBody', $merge: ['$2', { body: '$1', postfix: true }]
+    o 'ForBody Block'     , $merge: ['$1', { body: '$2' }]
+    o 'ForLineBody Block' , $merge: ['$1', { body: '$2' }]
   ]
 
   ForBody: [
-    o 'FOR Range',                             source: '$2'
-    o 'FOR Range BY Expression',               source: '$2', step: '$4'
-    o 'ForStart ForSource',                    $merge: ['$1', '$2']
+    o 'FOR Range'              , source: '$2'
+    o 'FOR Range BY Expression', source: '$2', step: '$4'
+    o 'ForStart ForSource'     , $merge: ['$1', '$2']
   ]
 
   ForLineBody: [
-    o 'FOR Range BY ExpressionLine',           source: '$2', step: '$4'
-    o 'ForStart ForLineSource',                $merge: ['$1', '$2']
+    o 'FOR Range BY ExpressionLine', source: '$2', step: '$4'
+    o 'ForStart ForLineSource'     , $merge: ['$1', '$2']
   ]
 
   ForStart: [
-    o 'FOR ForVariables',                      name: '$2[0]', index: '$2[1]'
-    o 'FOR AWAIT ForVariables',                name: '$3[0]', index: '$3[1]', await: true
-    o 'FOR OWN ForVariables',                  name: '$3[0]', index: '$3[1]', own: true
+    o 'FOR ForVariables'      , name: '$2[0]', index: '$2[1]'
+    o 'FOR AWAIT ForVariables', name: '$3[0]', index: '$3[1]', await: true
+    o 'FOR OWN ForVariables'  , name: '$3[0]', index: '$3[1]', own: true
   ]
 
   ForValue: x 'Identifier | ThisProperty | Array | Object'
 
   ForVariables: [
-    o 'ForValue',                              ['$1']
-    o 'ForValue , ForValue',                   ['$1', '$3']
+    o 'ForValue'           , ['$1']
+    o 'ForValue , ForValue', ['$1', '$3']
   ]
 
   ForSource: [
-    o 'FORIN Expression',                      source: '$2'
-    o 'FOROF Expression',                      source: '$2', object: true
-    o 'FORIN Expression WHEN Expression', source: '$2', guard: '$4'
-    o 'FORIN ExpressionLine WHEN Expression', source: '$2', guard: '$4'
-    o 'FOROF Expression WHEN Expression', source: '$2', guard: '$4', object: true
-    o 'FOROF ExpressionLine WHEN Expression', source: '$2', guard: '$4', object: true
-    o 'FORIN Expression BY Expression', source: '$2', step: '$4'
-    o 'FORIN ExpressionLine BY Expression', source: '$2', step: '$4'
-    o 'FORIN Expression WHEN Expression BY Expression', source: '$2', guard: '$4', step: '$6'
+    o 'FORIN Expression'                                  , source: '$2'
+    o 'FOROF Expression'                                  , source: '$2', object: true
+    o 'FORIN Expression WHEN Expression'                  , source: '$2', guard: '$4'
+    o 'FORIN ExpressionLine WHEN Expression'              , source: '$2', guard: '$4'
+    o 'FOROF Expression WHEN Expression'                  , source: '$2', guard: '$4', object: true
+    o 'FOROF ExpressionLine WHEN Expression'              , source: '$2', guard: '$4', object: true
+    o 'FORIN Expression BY Expression'                    , source: '$2', step: '$4'
+    o 'FORIN ExpressionLine BY Expression'                , source: '$2', step: '$4'
+    o 'FORIN Expression WHEN Expression BY Expression'    , source: '$2', guard: '$4', step: '$6'
     o 'FORIN ExpressionLine WHEN Expression BY Expression', source: '$2', guard: '$4', step: '$6'
     o 'FORIN Expression WHEN ExpressionLine BY Expression', source: '$2', guard: '$4', step: '$6'
     o 'FORIN ExpressionLine WHEN ExpressionLine BY Expression', source: '$2', guard: '$4', step: '$6'
-    o 'FORIN Expression BY Expression WHEN Expression', source: '$2', step: '$4', guard: '$6'
+    o 'FORIN Expression BY Expression WHEN Expression'    , source: '$2', step: '$4', guard: '$6'
     o 'FORIN ExpressionLine BY Expression WHEN Expression', source: '$2', step: '$4', guard: '$6'
     o 'FORIN Expression BY ExpressionLine WHEN Expression', source: '$2', step: '$4', guard: '$6'
     o 'FORIN ExpressionLine BY ExpressionLine WHEN Expression', source: '$2', step: '$4', guard: '$6'
-    o 'FORFROM Expression',                    source: '$2', from: true
-    o 'FORFROM Expression WHEN Expression', source: '$2', guard: '$4', from: true
-    o 'FORFROM ExpressionLine WHEN Expression', source: '$2', guard: '$4', from: true
+    o 'FORFROM Expression'                                , source: '$2', from: true
+    o 'FORFROM Expression WHEN Expression'                , source: '$2', guard: '$4', from: true
+    o 'FORFROM ExpressionLine WHEN Expression'            , source: '$2', guard: '$4', from: true
   ]
 
   ForLineSource: [
-    o 'FORIN ExpressionLine',                        source: '$2'
-    o 'FOROF ExpressionLine',                        source: '$2', object: true
-    o 'FORIN Expression WHEN ExpressionLine',        source: '$2', guard: '$4'
-    o 'FORIN ExpressionLine WHEN ExpressionLine',    source: '$2', guard: '$4'
-    o 'FOROF Expression WHEN ExpressionLine',        source: '$2', guard: '$4', object: true
-    o 'FOROF ExpressionLine WHEN ExpressionLine',    source: '$2', guard: '$4', object: true
-    o 'FORIN Expression BY ExpressionLine',          source: '$2', step: '$4'
-    o 'FORIN ExpressionLine BY ExpressionLine',      source: '$2', step: '$4'
+    o 'FORIN ExpressionLine'                              , source: '$2'
+    o 'FOROF ExpressionLine'                              , source: '$2', object: true
+    o 'FORIN Expression WHEN ExpressionLine'              , source: '$2', guard: '$4'
+    o 'FORIN ExpressionLine WHEN ExpressionLine'          , source: '$2', guard: '$4'
+    o 'FOROF Expression WHEN ExpressionLine'              , source: '$2', guard: '$4', object: true
+    o 'FOROF ExpressionLine WHEN ExpressionLine'          , source: '$2', guard: '$4', object: true
+    o 'FORIN Expression BY ExpressionLine'                , source: '$2', step: '$4'
+    o 'FORIN ExpressionLine BY ExpressionLine'            , source: '$2', step: '$4'
     o 'FORIN Expression WHEN Expression BY ExpressionLine', source: '$2', guard: '$4', step: '$6'
     o 'FORIN ExpressionLine WHEN Expression BY ExpressionLine', source: '$2', guard: '$4', step: '$6'
     o 'FORIN Expression WHEN ExpressionLine BY ExpressionLine', source: '$2', guard: '$4', step: '$6'
@@ -538,79 +538,79 @@ grammar =
     o 'FORIN ExpressionLine BY Expression WHEN ExpressionLine', source: '$2', step: '$4', guard: '$6'
     o 'FORIN Expression BY ExpressionLine WHEN ExpressionLine', source: '$2', step: '$4', guard: '$6'
     o 'FORIN ExpressionLine BY ExpressionLine WHEN ExpressionLine', source: '$2', step: '$4', guard: '$6'
-    o 'FORFROM ExpressionLine',                      source: '$2', from: true
-    o 'FORFROM Expression WHEN ExpressionLine',      source: '$2', guard: '$4', from: true
-    o 'FORFROM ExpressionLine WHEN ExpressionLine',  source: '$2', guard: '$4', from: true
+    o 'FORFROM ExpressionLine'                            , source: '$2', from: true
+    o 'FORFROM Expression WHEN ExpressionLine'            , source: '$2', guard: '$4', from: true
+    o 'FORFROM ExpressionLine WHEN ExpressionLine'        , source: '$2', guard: '$4', from: true
   ]
 
   Switch: [
-    o 'SWITCH Expression INDENT Whens OUTDENT',      discriminant: '$2', cases: '$4'
-    o 'SWITCH ExpressionLine INDENT Whens OUTDENT',  discriminant: '$2', cases: '$4'
+    o 'SWITCH Expression INDENT Whens OUTDENT'           , discriminant: '$2', cases: '$4'
+    o 'SWITCH ExpressionLine INDENT Whens OUTDENT'       , discriminant: '$2', cases: '$4'
     o 'SWITCH Expression INDENT Whens ELSE Block OUTDENT', discriminant: '$2', cases: '$4', default: '$6'
     o 'SWITCH ExpressionLine INDENT Whens ELSE Block OUTDENT', discriminant: '$2', cases: '$4', default: '$6'
-    o 'SWITCH INDENT Whens OUTDENT',                 discriminant: null, cases: '$3'
-    o 'SWITCH INDENT Whens ELSE Block OUTDENT',      discriminant: null, cases: '$3', default: '$5'
+    o 'SWITCH INDENT Whens OUTDENT'                      , discriminant: null, cases: '$3'
+    o 'SWITCH INDENT Whens ELSE Block OUTDENT'           , discriminant: null, cases: '$3', default: '$5'
   ]
 
   Whens: [
-    o 'When',                                  ['$1']
-    o 'Whens When',                            $concat: ['$1', '$2']
+    o 'When'      , ['$1']
+    o 'Whens When', $concat: ['$1', '$2']
   ]
 
   When: [
-    o 'LEADING_WHEN SimpleArgs Block',         test: '$2', consequent: '$3'
+    o 'LEADING_WHEN SimpleArgs Block'           , test: '$2', consequent: '$3'
     o 'LEADING_WHEN SimpleArgs Block TERMINATOR', test: '$2', consequent: '$3'
   ]
 
   IfBlock: [
-    o 'IF Expression Block',                   test: '$2', consequent: '$3', type: '$1'
-    o 'IfBlock ELSE IF Expression Block',      test: '$4', consequent: '$5', type: '$3', alternate: '$1'
+    o 'IF Expression Block'             , test: '$2', consequent: '$3', type: '$1'
+    o 'IfBlock ELSE IF Expression Block', test: '$4', consequent: '$5', type: '$3', alternate: '$1'
   ]
 
   If: [
     x 'IfBlock'
-    o 'IfBlock ELSE Block',                    $merge: ['$1', { alternate: '$3' }]
-    o 'Statement POST_IF Expression',          test: '$3', consequent: ['$1'], type: '$2', postfix: true
-    o 'Expression POST_IF Expression',         test: '$3', consequent: ['$1'], type: '$2', postfix: true
+    o 'IfBlock ELSE Block'           , $merge: ['$1', { alternate: '$3' }]
+    o 'Statement POST_IF Expression' , test: '$3', consequent: ['$1'], type: '$2', postfix: true
+    o 'Expression POST_IF Expression', test: '$3', consequent: ['$1'], type: '$2', postfix: true
   ]
 
   IfBlockLine: [
-    o 'IF ExpressionLine Block',               test: '$2', consequent: '$3', type: '$1'
+    o 'IF ExpressionLine Block'                 , test: '$2', consequent: '$3', type: '$1'
     o 'IfBlockLine ELSE IF ExpressionLine Block', test: '$4', consequent: '$5', type: '$3', alternate: '$1'
   ]
 
   IfLine: [
     x 'IfBlockLine'
-    o 'IfBlockLine ELSE Block',                $merge: ['$1', { alternate: '$3' }]
-    o 'Statement POST_IF ExpressionLine',      test: '$3', consequent: ['$1'], type: '$2', postfix: true
-    o 'Expression POST_IF ExpressionLine',     test: '$3', consequent: ['$1'], type: '$2', postfix: true
+    o 'IfBlockLine ELSE Block'           , $merge: ['$1', { alternate: '$3' }]
+    o 'Statement POST_IF ExpressionLine' , test: '$3', consequent: ['$1'], type: '$2', postfix: true
+    o 'Expression POST_IF ExpressionLine', test: '$3', consequent: ['$1'], type: '$2', postfix: true
   ]
 
   OperationLine: [
     unaryOp 'UNARY | DO', 'UNARY'
-    o 'DO_IIFE CodeLine',                      operator: '$1', argument: '$2'
+    o 'DO_IIFE CodeLine', operator: '$1', argument: '$2'
   ]
 
   Operation: [
     unaryOp 'UNARY | DO | UNARY_MATH | AWAIT', 'UNARY'
-    o '- Expression',                          operator: '-', argument: '$2', 'UNARY_MATH'
-    o '+ Expression',                          operator: '+', argument: '$2', 'UNARY_MATH'
-    o 'AWAIT INDENT Object OUTDENT',           operator: 'await', argument: '$3'
+    o '- Expression'                         , operator: '-', argument: '$2', 'UNARY_MATH'
+    o '+ Expression'                         , operator: '+', argument: '$2', 'UNARY_MATH'
+    o 'AWAIT INDENT Object OUTDENT'          , operator: 'await', argument: '$3'
 
-    o '-- SimpleAssignable',                   operator: '--', argument: '$2', prefix: true
-    o '++ SimpleAssignable',                   operator: '++', argument: '$2', prefix: true
-    o 'SimpleAssignable --',                   operator: '--', argument: '$1', prefix: false
-    o 'SimpleAssignable ++',                   operator: '++', argument: '$1', prefix: false
+    o '-- SimpleAssignable', operator: '--', argument: '$2', prefix: true
+    o '++ SimpleAssignable', operator: '++', argument: '$2', prefix: true
+    o 'SimpleAssignable --', operator: '--', argument: '$1', prefix: false
+    o 'SimpleAssignable ++', operator: '++', argument: '$1', prefix: false
 
-    o 'Expression ?',                          operator: '?', argument: '$1'
+    o 'Expression ?', operator: '?', argument: '$1'
 
-    binOp '+ | -', 'ADDITIVE'
+    binOp '+ | -'            , 'ADDITIVE'
     binOp 'MATH | ** | SHIFT', 'MULTIPLICATIVE'
-    binOp 'COMPARE', 'COMPARE'
-    binOp '& | ^ | | | BAR', 'BITWISE'
-    binOp '&& | ||', 'LOGICAL'
-    binOp 'BIN?', 'BIN?'
-    binOp 'RELATION', 'RELATION'
+    binOp 'COMPARE'          , 'COMPARE'
+    binOp '& | ^ | | | BAR'  , 'BITWISE'
+    binOp '&& | ||'          , 'LOGICAL'
+    binOp 'BIN?'             , 'BIN?'
+    binOp 'RELATION'         , 'RELATION'
 
     o 'SimpleAssignable COMPOUND_ASSIGN Expression', left: '$1', operator: '$2', right: '$3'
     o 'SimpleAssignable COMPOUND_ASSIGN INDENT Expression OUTDENT', left: '$1', operator: '$2', right: '$4'
