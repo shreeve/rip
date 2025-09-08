@@ -190,7 +190,6 @@ o 'Expr + Expr', { left: '$1', op: '+', right: '$3' }, 'ADDITIVE'
 Grammar files can define domain-specific helpers that leverage the pipe syntax:
 
 ```coffeescript
-
 # Custom helper that expands pipe syntax
 binary = (ops) ->
   ops.split('|').map (op) ->
