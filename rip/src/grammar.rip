@@ -611,31 +611,31 @@ grammar =
 
 export default
   bnf: processGrammar grammar
-  operators: [
-    ['right',    'DO_IIFE']
-    ['left',     '.', '?.', '::', '?::']
-    ['left',     'CALL_START', 'CALL_END']
-    ['nonassoc', '++', '--']
-    ['left',     '?']
-    ['right',    'UNARY', 'DO']
-    ['right',    'AWAIT']
-    ['right',    '**']
-    ['right',    'UNARY_MATH']
-    ['left',     'MATH']
-    ['left',     '+', '-']
-    ['left',     'SHIFT']
-    ['left',     'RELATION']
-    ['left',     'COMPARE']
-    ['left',     '&']
-    ['left',     '^']
-    ['left',     '|', 'BAR']
-    ['left',     '&&']
-    ['left',     '||']
-    ['left',     'BIN?']
-    ['nonassoc', 'INDENT', 'OUTDENT']
-    ['right',    'YIELD']
-    ['right',    '=', ':', 'COMPOUND_ASSIGN', 'RETURN', 'THROW', 'EXTENDS']
-    ['right',    'FORIN', 'FOROF', 'FORFROM', 'BY', 'WHEN']
-    ['right',    'IF', 'ELSE', 'THEN', 'FOR', 'WHILE', 'UNTIL', 'LOOP', 'SUPER', 'CLASS', 'IMPORT', 'EXPORT', 'DYNAMIC_IMPORT']
-    ['left',     'POST_IF']
-  ].reverse()
+  operators: """
+    right       DO_IIFE
+    left        . ?. :: ?::
+    left        CALL_START CALL_END
+    nonassoc    ++ --
+    left        ?
+    right       UNARY DO
+    right       AWAIT
+    right       **
+    right       UNARY_MATH
+    left        MATH
+    left        + -
+    left        SHIFT
+    left        RELATION
+    left        COMPARE
+    left        &
+    left        ^
+    left        BAR
+    left        &&
+    left        ||
+    left        BIN?
+    nonassoc    INDENT OUTDENT
+    right       YIELD
+    right       = : COMPOUND_ASSIGN RETURN THROW EXTENDS
+    right       FORIN FOROF FORFROM BY WHEN
+    right       IF ELSE THEN FOR WHILE UNTIL LOOP SUPER CLASS IMPORT EXPORT DYNAMIC_IMPORT
+    left        POST_IF
+  """.trim().split('\n').reverse().map (line) -> line.trim().split /\s+/ #!# FIXME: Convert to ES6
