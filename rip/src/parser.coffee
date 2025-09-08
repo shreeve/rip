@@ -1,11 +1,12 @@
+#!/usr/bin/env coffee
+
 # ==============================================================================
 # parser - SLR(1) Parser Generator for Rip
 #
 # Clean implementation influenced by Jison, but rewritten for Rip with modern
-# ES6/ESM patterns for readability, efficiency, and maintainability.
 #
 # Author: Steve Shreeve <steve.shreeve@gmail.com>
-#   Date: September 7, 2025
+#   Date: September 8, 2025
 # ==============================================================================
 
 {version} = require '../package.json'
@@ -857,5 +858,97 @@ module.exports = { Generator, createParser }
 # CLI Interface
 # ==============================================================================
 
-# TODO: Add CLI support when needed for Rip compilation
-# This would handle command-line usage of the parser generator
+if require.main is module
+  fs = require 'fs'
+  path = require 'path'
+
+  showHelp = ->
+    console.log """
+    Solar - SLR(1) Parser Generator
+    ===============================
+
+    Usage: coffee solar.coffee [options] [grammar-file]
+
+    Options:
+      -h, --help              Show this help
+      -s, --stats             Show grammar statistics
+      -g, --generate          Generate parser (default)
+      -o, --output <file>     Output file (default: parser.js)
+      -c, --compress          Compress parser with Brotli (requires Brotli support)
+      -v, --verbose           Verbose output
+
+    Examples:
+      coffee solar.coffee grammar.coffee
+      coffee solar.coffee --stats grammar.coffee
+      coffee solar.coffee -c -o parser.js grammar.coffee
+      coffee solar.coffee --compress --output parser.js grammar.coffee
+    """
+
+  showStats = (generator) ->
+    terminals = Object.keys(generator.terminalNames or {}).length
+    nonterminals = Object.keys(generator.nonterminals or {}).length
+    productions = generator.productions?.length or 0
+    states = generator.states?.length or 0
+    conflicts = generator.conflicts or 0
+
+    console.log """
+
+    ⏱️ Statistics:
+    • Terminals: #{terminals}
+    • Nonterminals: #{nonterminals}
+    • Productions: #{productions}
+    • States: #{states}
+    • Conflicts: #{conflicts}
+    """
+
+  # Parse command line
+  options = {help: false, stats: false, generate: false, output: 'parser.js', verbose: false, compress: false}
+  grammarFile = null
+
+  i = 0
+  while i < process.argv.length - 2
+    arg = process.argv[i + 2]
+    switch arg
+      when '-h', '--help'     then options.help     = true
+      when '-s', '--stats'    then options.stats    = true
+      when '-g', '--generate' then options.generate = true
+      when '-o', '--output'   then options.output   = process.argv[++i + 2]
+      when '-v', '--verbose'  then options.verbose  = true
+      when '-c', '--compress' then options.compress = true
+      else grammarFile = arg unless arg.startsWith('-')
+    i++
+
+  if options.help or not grammarFile
+    showHelp()
+    process.exit 0
+
+  try
+    unless fs.existsSync grammarFile
+      console.error "Grammar file not found: #{grammarFile}"
+      process.exit 1
+
+    # Load grammar
+    grammar = if grammarFile.endsWith('.coffee')
+      require(path.resolve(grammarFile))
+    else if grammarFile.endsWith('.json')
+      JSON.parse fs.readFileSync(grammarFile, 'utf8')
+    else
+      throw new Error "Unsupported format. Use .coffee or .json"
+    unless grammar
+      throw new Error "Failed to load grammar"
+
+    # Generate parser
+    generator = new Generator grammar, options
+
+    if options.stats
+      showStats generator
+
+    if options.generate or not options.stats
+      parserCode = generator.generate()
+      fs.writeFileSync options.output, parserCode
+      console.log "\nParser generated: #{options.output}"
+
+  catch error
+    console.error "Error:", error.message
+    console.error error.stack if options.verbose
+    process.exit 1
