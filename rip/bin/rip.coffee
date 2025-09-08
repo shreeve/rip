@@ -87,12 +87,12 @@ showVersion = ->
   console.log "Rip v#{version}"
 
 # Format tokens for display
-formatTokens = (tokens) ->
+formatTokens = (tokens, showAll = false) ->
   output = []
   for token, i in tokens
     [type, value, location] = token
-    # Skip TERMINATOR tokens for cleaner output unless in verbose mode
-    continue if type is 'TERMINATOR' and value is '\n'
+    # Skip TERMINATOR tokens for cleaner output unless showing all
+    continue if not showAll and type is 'TERMINATOR'
 
     loc = if location
       "[#{location.first_line}:#{location.first_column}]"
@@ -174,7 +174,10 @@ processCode = (code, options) ->
     if options.tokens
       console.log "📝 Token Stream:"
       console.log "─────────────────"
-      console.log formatTokens(tokens)
+      showAll = options.verbose or process.env.DEBUG
+      console.log formatTokens(tokens, showAll)
+      console.log ''
+      console.log "Total tokens: #{tokens.length} (#{tokens.filter((t) -> t[0] is 'TERMINATOR').length} terminators)"
       console.log ''
 
     # Step 3: Parser
@@ -182,29 +185,51 @@ processCode = (code, options) ->
       console.log "🌳 Abstract Syntax Tree:"
       console.log "────────────────────────"
 
-      # Create parser and set up lexer interface
+      # For now, remove TERMINATOR tokens entirely
+      # The parser seems to have issues with them
+      tokens = tokens.filter (t) -> t[0] isnt 'TERMINATOR'
+
+      # Always show tokens in debug for now to diagnose the issue
+      console.log "Tokens to parse (#{tokens.length} total):"
+      for token, i in tokens[0..10]  # Show first 10 tokens
+        loc = if token[2] then "[#{token[2].first_line}:#{token[2].first_column}]" else ""
+        console.log "  #{i}: #{token[0].padEnd(15)} #{JSON.stringify(token[1]).padEnd(10)} #{loc}"
+      console.log "  ..." if tokens.length > 10
+      console.log ''
+
+      # Create parser and set up lexer interface (CoffeeScript style)
       parser = createParser grammar
 
-      # Create a lexer interface for the parser
-      tokenIndex = 0
-      parserLexer =
+      # Set up the lexer interface like CoffeeScript does
+      parser.tokens = tokens
+      parser.pos = 0
+
+      parser.lexer =
+        yylloc:
+          range: []
+        options:
+          ranges: yes
         lex: ->
-          return 1 if tokenIndex >= tokens.length  # EOF
-          token = tokens[tokenIndex++]
-          @yytext = token[1]
-          @yylloc = token[2] or {}
-          @yylineno = @yylloc.first_line or 0
-          token[0]  # Return token type
-        setInput: ->
-          tokenIndex = 0
-        yylloc: {}
-        options: {}
+          token = parser.tokens[parser.pos++]
+          if token
+            [tag, @yytext, @yylloc] = token
+            @yylineno = @yylloc?.first_line or 0
+          else
+            tag = ''  # EOF
 
-      parser.lexer = parserLexer
+          # Debug lexer output
+          if process.env.DEBUG and parser.pos <= 10
+            console.log "  Lexer returning: #{tag or 'EOF'} at pos #{parser.pos - 1}"
 
-      # Parse!
+          tag
+        setInput: (tokens) ->
+          parser.tokens = tokens
+          parser.pos = 0
+        upcomingInput: -> ''
+
+      # Parse! (CoffeeScript style - pass tokens to parse)
       try
-        ast = parser.parse()
+        ast = parser.parse(tokens)
         console.log formatAST(ast)
       catch parseError
         console.error "Parse error: #{parseError.message or parseError}"
