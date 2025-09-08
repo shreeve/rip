@@ -242,11 +242,13 @@ export function processGrammar(grammar: Grammar): ProcessedGrammar {
       throw new Error(`Invalid LHS: ${lhs}`);
     }
 
-    // Direct result from o() or x() (already an array)
+    // Simply flatten one level - helper functions return arrays, we just need to unwrap them
+    // Example: Body: [o(...), x(...)] where o() returns [production]
+    //          → Body: [production, production] after .flat()
     if (Array.isArray(rule)) {
       processed[lhs] = rule.flat();
     } else {
-      throw new Error(`Invalid rule format for ${lhs} - all rules must use o() or x()`);
+      throw new Error(`Invalid rule format for ${lhs} - all rules must be arrays`);
     }
 
     // Validate each production
