@@ -34,13 +34,9 @@ grammar =
   ]
 
   # Line - statements and expressions that make up a body
-  Line: [
-    x 'Expression | ExpressionLine | Statement | FuncDirective'
-  ]
+  Line: x 'Expression | ExpressionLine | Statement | FuncDirective'
 
-  FuncDirective: [
-    x 'YieldReturn | AwaitReturn'
-  ]
+  FuncDirective: x 'YieldReturn | AwaitReturn'
 
   # Pure statements (cannot be expressions)
   Statement: [
@@ -50,14 +46,10 @@ grammar =
   ]
 
   # All expression types
-  Expression: [
-    x 'Value | Code | Operation | Assign | If | Try | While | For | Switch | Class | Throw | Yield'
-  ]
+  Expression: x 'Value | Code | Operation | Assign | If | Try | While | For | Switch | Class | Throw | Yield'
 
   # Single-line expressions
-  ExpressionLine: [
-    x 'CodeLine | IfLine | OperationLine'
-  ]
+  ExpressionLine: x 'CodeLine | IfLine | OperationLine'
 
   # Yield expressions
   Yield: [
@@ -74,13 +66,9 @@ grammar =
   ]
 
   # Identifiers and properties
-  Identifier: [
-    o 'IDENTIFIER',                 name: '$1'
-  ]
+  Identifier: o 'IDENTIFIER',                 name: '$1'
 
-  Property: [
-    o 'PROPERTY',                   name: '$1'
-  ]
+  Property: o 'PROPERTY',                   name: '$1'
 
   # Alphanumeric literals
   AlphaNumeric: [
@@ -145,9 +133,7 @@ grammar =
     o 'SimpleObjAssignable = INDENT Expression OUTDENT', left: '$1', right: '$4'
   ]
 
-  SimpleObjAssignable: [
-    x 'Identifier | Property | ThisProperty'
-  ]
+  SimpleObjAssignable: x 'Identifier | Property | ThisProperty'
 
   ObjAssignable: [
     x 'SimpleObjAssignable | AlphaNumeric'
@@ -215,9 +201,7 @@ grammar =
   ]
 
   # Optional comma
-  OptComma: [
-    opt ',', true, false
-  ]
+  OptComma: opt ',', true, false
 
   # Parameter lists
   ParamList: [
@@ -235,9 +219,7 @@ grammar =
     o '...',                        expansion: true
   ]
 
-  ParamVar: [
-    x 'Identifier | ThisProperty | Array | Object'
-  ]
+  ParamVar: x 'Identifier | ThisProperty | Array | Object'
 
   # Splat operator
   Splat: [
@@ -253,14 +235,10 @@ grammar =
     x 'ThisProperty'
   ]
 
-  Assignable: [
-    x 'SimpleAssignable | Array | Object'
-  ]
+  Assignable: x 'SimpleAssignable | Array | Object'
 
   # Values - anything that can be assigned to, called, indexed, etc.
-  Value: [
-    x 'Assignable | Literal | Parenthetical | Range | Invocation | DoIife | This | Super | MetaProperty'
-  ]
+  Value: x 'Assignable | Literal | Parenthetical | Range | Invocation | DoIife | This | Super | MetaProperty'
 
   # Super expressions
   Super: [
@@ -299,14 +277,10 @@ grammar =
     x 'Slice | Regex | RegexWithIndex'
   ]
 
-  RegexWithIndex: [
-    o 'Regex , Expression',         regex: '$1', index: '$3'
-  ]
+  RegexWithIndex: o 'Regex , Expression',         regex: '$1', index: '$3'
 
   # Object literals
-  Object: [
-    o '{ AssignList OptComma }',    properties: '$2', generated: '$generated'
-  ]
+  Object: o '{ AssignList OptComma }',    properties: '$2', generated: '$generated'
 
   # Assignment lists (for objects)
   AssignList: [
@@ -373,13 +347,9 @@ grammar =
     o 'DEFAULT AS Identifier',      imported: 'default', local: '$3'
   ]
 
-  ImportDefaultSpecifier: [
-    o 'Identifier',                 type: 'default', local: '$1'
-  ]
+  ImportDefaultSpecifier: o 'Identifier',                 type: 'default', local: '$1'
 
-  ImportNamespaceSpecifier: [
-    o 'IMPORT_ALL AS Identifier',   type: 'namespace', local: '$3'
-  ]
+  ImportNamespaceSpecifier: o 'IMPORT_ALL AS Identifier',   type: 'namespace', local: '$3'
 
   # Export statements
   Export: [
@@ -433,9 +403,7 @@ grammar =
       callee: 'import', arguments: '$2', dynamic: true
   ]
 
-  OptFuncExist: [
-    opt 'FUNC_EXIST', { soak: true }, { soak: false }
-  ]
+  OptFuncExist: opt 'FUNC_EXIST', { soak: true }, { soak: false }
 
   Arguments: [
     o 'CALL_START CALL_END',        []
@@ -443,13 +411,9 @@ grammar =
   ]
 
   # This reference
-  This: [
-    o 'THIS | @',                   type: 'this'
-  ]
+  This: o 'THIS | @',                   type: 'this'
 
-  ThisProperty: [
-    o '@ Property',                 object: '@', property: '$2'
-  ]
+  ThisProperty: o '@ Property',                 object: '@', property: '$2'
 
   # Array literals
   Array: [
@@ -614,9 +578,7 @@ grammar =
     o 'FOR OWN ForVariables',       name: '$3[0]', index: '$3[1]', own: true
   ]
 
-  ForValue: [
-    x 'Identifier | ThisProperty | Array | Object'
-  ]
+  ForValue: x 'Identifier | ThisProperty | Array | Object'
 
   ForVariables: [
     o 'ForValue',                   ['$1']
@@ -779,9 +741,7 @@ grammar =
       left: '$1', operator: '$2', right: '$4'
   ]
 
-  DoIife: [
-    o 'DO_IIFE Code',               operator: '$1', argument: '$2'
-  ]
+  DoIife: o 'DO_IIFE Code',               operator: '$1', argument: '$2'
 
 # Operator precedence (from lowest to highest)
 operators = [
