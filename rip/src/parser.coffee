@@ -123,6 +123,20 @@ class Generator
         operators[precedence[k]] = {precedence: i + 1, assoc: precedence[0]}
     operators
 
+  _expandNode: (lhs, node, rhs) ->
+    t = typeof node
+
+    return node if t is 'string' and node[0] is '$' # x() pass-through
+    return node if t in ['boolean','number'] or node is null # literals
+    return { $array: node } if Array.isArray node # array literals
+
+    if t is 'object'
+      return node if node.$concat? or node.$array? or node.$passthrough?
+      return node if node.type? or node.$noType?
+      return { type: lhs, ...node }  # auto-add type for o() if missing
+
+    '$1'  # default x() pass-through
+
   _buildProductions: (bnf, productions, nonterminals, operators) ->
     actionGroups = {}
     productionTable = [0]
@@ -140,49 +154,22 @@ class Generator
         @symbolTable.set name, symbol
       @symbolIds[name] = symbol.id
 
-    # Process a single production (from o() or x())
-    processProduction = (lhs, pattern, nodeSpec, precedence) =>
-      # Handle pipe syntax in pattern - split into multiple productions
-      patterns = if pattern.includes '|'
-        pattern.split('|').map (p) -> p.trim()
-      else
-        [pattern]
+    processProduction = (lhs, pattern, node, precedence) =>
+      for singlePattern in pattern.split('|').map (p) -> p.trim()
+        rhs = singlePattern.split(/\s+/g).filter(Boolean)
+        rhs = [''] if rhs.length is 0
 
-      for singlePattern in patterns
-        # Split pattern into rhs array
-        rhs = singlePattern.trim().split(/\s+/g).filter(Boolean)
-        rhs.push('') if rhs.length is 0  # Handle empty pattern
+        addSymbol token for token in rhs when token
 
-        # Add symbols for each element in rhs
-        for token in rhs when token
-          addSymbol token
+        if node?
+          action = @_expandNode lhs, node, rhs
+          if action?
+            actionStr = if typeof action is 'string' then action else "this.$ = #{JSON.stringify action}"
+            key = @_processSemanticAction actionStr, rhs
+            (actionGroups[key] ?= []).push "case #{productions.length + 1}:"
 
-        # Process the node/action specification
-        action = null
-        if nodeSpec isnt undefined
-          action = @_expandNodeSpec lhs, nodeSpec, rhs
-
-        # Generate action code
-        if action
-          # Convert action object to string if needed
-          actionStr = if typeof action is 'string'
-            action
-          else if typeof action is 'object'
-            # Convert object to JSON-like assignment
-            "this.$ = " + JSON.stringify(action)
-          else
-            "this.$ = " + JSON.stringify(action)
-
-          processedAction = @_processSemanticAction actionStr, rhs
-          label = 'case ' + (productions.length + 1) + ':'
-          actionGroups[processedAction]?.push(label) or actionGroups[processedAction] = [label]
-
-        # Create production
         production = new Production lhs, rhs, productions.length + 1
-
-        # Set precedence
         @_assignPrecedence production, precedence, operators, nonterminals
-
         productions.push production
         productionTable.push [@symbolIds[lhs], if rhs[0] is '' then 0 else rhs.length]
         nonterminals[lhs].productions.push production
@@ -194,10 +181,9 @@ class Generator
 
       # Handle both array format and single production format
       if Array.isArray rules
-        # Multiple productions in array
         for handle in rules
-          [pattern, nodeSpec, precedence] = handle
-          processProduction lhs, pattern, nodeSpec, precedence
+          [pattern, node, precedence] = handle
+          processProduction lhs, pattern, node, precedence
       else if typeof rules is 'object' and rules.pattern
         # Single production from inline syntax (e.g., Line: x 'Expression')
         # Expecting rules = { pattern: 'Expression', type: 'x', spec: ... }
@@ -231,37 +217,6 @@ class Generator
       handle = handle.replace /\[[a-zA-Z_][a-zA-Z0-9_-]*\]/g, ''
       rhs = handle.trim().split ' '
       [rhs, null, null]
-
-  # New helper method to expand node specifications based on o/x semantics
-  _expandNodeSpec: (lhs, nodeSpec, rhs) ->
-    # If nodeSpec is from x() function (pass-through)
-    if typeof nodeSpec is 'string' and nodeSpec.startsWith '$'
-      return nodeSpec  # Pass through position
-
-    # If nodeSpec is a boolean, null, or number (literal from x())
-    if typeof nodeSpec is 'boolean' or nodeSpec is null or typeof nodeSpec is 'number'
-      return nodeSpec
-
-    # If nodeSpec is an array (array literal from o())
-    if Array.isArray nodeSpec
-      return { $array: nodeSpec }
-
-    # If nodeSpec is an object (from o())
-    if typeof nodeSpec is 'object'
-      # Handle special operators
-      if nodeSpec.$concat or nodeSpec.$array or nodeSpec.$passthrough
-        return nodeSpec
-
-      # Auto-add type if not present (for o() function)
-      if not nodeSpec.type and not nodeSpec.$noType
-        result = { type: lhs }
-        result[k] = v for k, v of nodeSpec
-        return result
-
-      return nodeSpec
-
-    # Default pass-through for x() with no spec
-    '$1'
 
   _processSemanticAction: (action, rhs) ->
     # Process named semantic values
