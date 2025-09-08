@@ -43,7 +43,7 @@ This makes parsing predictable, debugging trivial, and enables optimizations imp
 Grammar alternatives use the familiar `|` operator, collapsing verbose definitions into readable one-liners:
 
 ```typescript
-// Without pipes: 14 lines
+// Without pipes: 3 lines
 Value: [
   x('Literal'),
   x('Identifier'),
