@@ -12,6 +12,7 @@ Rip is designed from the ground up to be **runtime-agnostic** while being **Bun-
 - **Full Support**: Deno, Node.js, and modern browsers
 - **Pure ES6/ESM Output**: Generated JavaScript works everywhere
 - **No Runtime Lock-in**: Your compiled code isn't tied to any specific platform
+- **Pure Data AST**: Uses data-driven AST nodes instead of executable semantic actions
 
 ## Architecture
 
@@ -20,7 +21,8 @@ Rip is designed from the ground up to be **runtime-agnostic** while being **Bun-
 ├── src/           # Source files (all .rip)
 │   ├── lexer.rip      # Tokenizer
 │   ├── parser.rip     # Parser (using Solar)
-│   ├── nodes.rip      # AST nodes
+│   ├── grammar.rip    # Grammar definition with o/x DSL
+│   ├── nodes.rip      # AST node definitions
 │   ├── compiler.rip   # Main compiler
 │   ├── solar.rip      # Parser generator
 │   └── index.rip      # Main exports
@@ -30,108 +32,7 @@ Rip is designed from the ground up to be **runtime-agnostic** while being **Bun-
 └── test/          # Test suite
 ```
 
-## How Parsing Works
-
-Let's trace through how Rip parses a simple statement like `console.log 42`:
-
-### Token Stream (from Lexer/Rewriter)
-```
-IDENTIFIER("console") . PROPERTY("log") CALL_START NUMBER("42") CALL_END
-```
-*Note: The rewriter adds implicit `CALL_START` and `CALL_END` for the implicit function call*
-
-### Parse Tree with Captured Values
-
-```coffeescript
-Program: o 'Body', body: '$1'
-  # $1 = Body node (array with one Line)
-
-  Body: o 'Line', code: -> [$1]
-    # $1 = Line node (the Invocation)
-
-    Line: o 'Expression'
-      # $1 = Expression node (passes through)
-
-      Expression: o 'Value'
-        # $1 = Value node (the Invocation)
-
-        Value: o 'Invocation'
-          # $1 = Invocation node
-
-          Invocation: o 'Value OptFuncExist Arguments'
-            # $1 = Value node (console.log - the callee)
-            # $2 = OptFuncExist (empty, returns nothing/false)
-            # $3 = Arguments node (array containing 42)
-
-            # For $1 (console.log):
-            Value: o 'Assignable'
-              Assignable: o 'SimpleAssignable'
-                SimpleAssignable: o 'Value Accessor'
-                  # $1 = Value node (console)
-                  # $2 = Accessor node (.log)
-
-                  # For $1 (console):
-                  Value: o 'Assignable'
-                    Assignable: o 'SimpleAssignable'
-                      SimpleAssignable: o 'Identifier'
-                        Identifier: o 'IDENTIFIER'
-                          # $1 = "console" (the token value)
-
-                  # For $2 (.log):
-                  Accessor: o '. Property'
-                    # $1 = "." (the dot token)
-                    # $2 = Property node
-
-                    Property: o 'PROPERTY'
-                      # $1 = "log" (the token value)
-
-            # For $3 (Arguments):
-            Arguments: o 'CALL_START ArgList OptComma CALL_END'
-              # $1 = CALL_START token
-              # $2 = ArgList node (array with one Arg)
-              # $3 = OptComma (empty)
-              # $4 = CALL_END token
-
-              ArgList: o 'Arg'
-                # $1 = Arg node (the number 42)
-
-                Arg: o 'Expression'
-                  Expression: o 'Value'
-                    Value: o 'Literal'
-                      Literal: o 'AlphaNumeric'
-                        AlphaNumeric: o 'NUMBER'
-                          # $1 = "42" (the token value)
-```
-
-### Summary of Key Captures
-
-| Rule | Pattern | Captured Values |
-|------|---------|-----------------|
-| `Identifier` | `IDENTIFIER` | `$1 = "console"` |
-| `Property` | `PROPERTY` | `$1 = "log"` |
-| `Accessor` | `. Property` | `$1 = "."`, `$2 = Property("log")` |
-| `SimpleAssignable` | `Value Accessor` | `$1 = Value(console)`, `$2 = Accessor(.log)` |
-| `AlphaNumeric` | `NUMBER` | `$1 = "42"` |
-| `ArgList` | `Arg` | `$1 = Arg(42)` |
-| `Arguments` | `CALL_START ArgList OptComma CALL_END` | `$1 = CALL_START`, `$2 = ArgList`, `$3 = empty`, `$4 = CALL_END` |
-| `Invocation` | `Value OptFuncExist Arguments` | `$1 = Value(console.log)`, `$2 = false/empty`, `$3 = Arguments([42])` |
-
-The `$` variables always refer to the positional elements in the pattern, counting terminals and non-terminals from left to right!
-
-### Minimal Grammar Required
-
-For this simple example, we only need about **18 grammar rules**:
-- Program, Body, Line
-- Expression, Value
-- Invocation, Arguments, ArgList, Arg
-- SimpleAssignable, Assignable
-- Identifier, Property, Accessor
-- Literal, AlphaNumeric
-- OptFuncExist, OptComma
-
-Yet with just these rules, we can already parse meaningful programs. The grammar scales beautifully - each new feature (functions, if statements, loops) adds just a few more rules while exponentially increasing expressiveness!
-
-## The `o` vs `x` Parser DSL Design with Pipe Syntax and Custom Helpers
+## The `o` vs `x` Parser DSL Design
 
 ### The Core Insight
 When writing grammar rules for a parser generator, every production does one of two things:
@@ -199,7 +100,7 @@ binary = (ops) ->
 BinaryOp: binary '+ | - | * | / | ** | %'  # Expands to 6 productions!
 ```
 
-### Complete Example
+### Complete Grammar Example
 ```coffeescript
 grammar =
   Program: [
@@ -224,154 +125,221 @@ grammar =
   # Custom helpers for repetitive patterns
   BinaryOp: binary '+ | - | * | / | ** | %'
   UnaryOp:  unary '! | ~ | typeof | delete'
+  
+  # Bitwise OR uses BAR since | is reserved for DSL
+  BitwiseOp: o 'Expression BAR Expression', { op: '|', left: '$1', right: '$3' }
 ```
 
-### Key Benefits
-1. **Visual clarity** - The `o` vs `x` distinction shows intent at a glance
-2. **Minimal boilerplate** - Inline syntax and pipe operators eliminate repetition
-3. **Extensible** - Custom helpers allow domain-specific abstractions
-4. **Familiar** - Pipe syntax honors BNF traditions
-5. **Progressive** - Start simple, add helpers as patterns emerge
-6. **Clean separation** - Parser provides tools, grammar uses them
-
-### Special Features
+### Key Features
 - **Auto-typing**: Objects created with `o()` automatically get `type: LHS` if not specified
 - **Default pass-through**: `x()` with no second parameter passes through `$1`
 - **Explicit values**: `x()` can pass specific positions or literal values:
   ```coffeescript
-  # x() can also pass specific positions or literal values
   OptComma:    x ' | ,'           # Empty string or comma
   Wrapped:     x '( Expr )', '$2'  # Pass through position 2
   OptFlag:     x '', false         # Return literal false
   RequireFlag: x 'REQUIRED', true  # Return literal true
   ```
 - **Array operations**: Special operators like `$concat` for building lists
-- **Literal values**: Boolean/null/number literals are passed through directly
+- **Pure data nodes**: All semantic actions are data structures, not executable code
 
-This design achieves near-theoretical minimum verbosity while maintaining crystal clarity. Grammar files become true DSLs for describing languages, not parser implementation details.
+## How Parsing Works
 
-## Complex Example: Functions, If/Else, and String Interpolation
+Let's trace through how Rip parses a simple statement like `console.log 42`:
 
-Let's trace through a more complex CoffeeScript-style program:
+### Token Stream (from Lexer/Rewriter)
+```
+IDENTIFIER("console") . PROPERTY("log") CALL_START NUMBER("42") CALL_END
+```
+*Note: The rewriter adds implicit `CALL_START` and `CALL_END` for the implicit function call*
+
+### Parse Tree with Pure Data Nodes
+
+```coffeescript
+Program: o 'Body', { body: '$1' }
+  # Creates: { type: 'Program', body: ... }
+
+  Body: o 'Line', ['$1']
+    # Creates: array with single Line
+
+    Line: x 'Expression'
+      # Passes through Expression
+
+      Expression: x 'Value'
+        # Passes through Value
+
+        Value: x 'Invocation'
+          # Passes through Invocation
+
+          Invocation: o 'Value OptFuncExist Arguments', {
+            type: 'CallExpression',
+            callee: '$1',
+            args: '$3',
+            optional: '$2'
+          }
+            # $1 = Value node (console.log - the callee)
+            # $2 = OptFuncExist (false)
+            # $3 = Arguments node (array containing 42)
+
+            # For $1 (console.log):
+            SimpleAssignable: o 'Value Accessor', {
+              type: 'MemberExpression',
+              object: '$1',
+              property: '$2'
+            }
+              # $1 = Identifier(console)
+              # $2 = Accessor(.log)
+
+            # For $3 (Arguments):
+            Arguments: x 'CALL_START ArgList OptComma CALL_END', '$2'
+              # Passes through ArgList
+
+              ArgList: o 'Arg', ['$1']
+                # Creates array with single Arg
+
+                Arg: x 'Expression'
+                  # Passes through Expression
+                  
+                  AlphaNumeric: o 'NUMBER', { 
+                    type: 'NumericLiteral', 
+                    value: '$1' 
+                  }
+                    # Creates: { type: 'NumericLiteral', value: '42' }
+```
+
+### Summary of Key Productions
+
+| Rule | Type | Pattern | Result |
+|------|------|---------|--------|
+| `Identifier` | `o` | `IDENTIFIER` | Creates `{ type: 'Identifier', name: '$1' }` |
+| `Property` | `o` | `PROPERTY` | Creates `{ type: 'Property', name: '$1' }` |
+| `Expression` | `x` | `Value` | Passes through `$1` |
+| `SimpleAssignable` | `o` | `Value Accessor` | Creates `{ type: 'MemberExpression', ... }` |
+| `ArgList` | `o` | `Arg` | Creates `['$1']` |
+| `OptFuncExist` | `x` | `''` | Returns `false` |
+
+The `o` function creates new nodes (automatically adding types), while `x` forwards existing values. This distinction makes the grammar's intent crystal clear!
+
+## Complex Example: Functions and Control Flow
 
 ```coffeescript
 show = (args) -> console.log ...args
 
-if (x = Math.rand()) > 0..5
-  show "Biggie: #{x}"
+if x > 0.5
+  show "Big"
 else
-  show "Smalls: #{x}"
+  show "Small"
 ```
 
-### Token Stream (simplified)
-
-```
-IDENTIFIER("show") = PARAM_START IDENTIFIER("args") PARAM_END ->
-  IDENTIFIER("console") . PROPERTY("log") CALL_START ... IDENTIFIER("args") CALL_END
-TERMINATOR
-IF ( IDENTIFIER("x") = IDENTIFIER("Math") . PROPERTY("rand") CALL_START CALL_END )
-  COMPARE(">") NUMBER("0") .. NUMBER("5")
-INDENT
-  IDENTIFIER("show") CALL_START STRING_START "Biggie: " INTERPOLATION_START
-    IDENTIFIER("x") INTERPOLATION_END STRING_END CALL_END
-OUTDENT
-ELSE
-INDENT
-  IDENTIFIER("show") CALL_START STRING_START "Smalls: " INTERPOLATION_START
-    IDENTIFIER("x") INTERPOLATION_END STRING_END CALL_END
-OUTDENT
-```
-
-### Key Parse Tree Elements
-
-#### Line 1: `show = (args) -> console.log ...args`
+### Grammar Rules in Action
 
 ```coffeescript
-Assign: o 'Assignable = Expression'
-  # $1 = Assignable (show)
-  # $3 = Expression (the arrow function)
+# Function definition
+Code: o 'PARAM_START ParamList PARAM_END FuncGlyph Block', {
+  params: '$2',
+  bound: '$4',
+  body: '$5'
+}
 
-  Code: o 'PARAM_START ParamList PARAM_END FuncGlyph Line'
-    # $2 = ParamList ([args])
-    # $4 = FuncGlyph (-> = false, not bound)
-    # $5 = Line (console.log ...args)
+# Assignment
+Assign: o 'Assignable = Expression', {
+  left: '$1',
+  right: '$3'
+}
 
-    # The spread operator:
-    Splat: o '... Expression'
-      # $1 = "..."
-      # $2 = Expression (args identifier)
+# If/else
+If: [
+  o 'IfBlock', { consequent: '$1' }
+  o 'IfBlock ELSE Block', { consequent: '$1', alternate: '$3' }
+]
+
+# Comparison operators
+Operation: o 'Expression COMPARE Expression', {
+  op: '$2',
+  left: '$1',
+  right: '$3'
+}
+
+# Spread operator
+Splat: o '... Expression', {
+  type: 'SpreadElement',
+  argument: '$2'
+}
+
+# String literals
+String: o 'STRING', {
+  type: 'StringLiteral',
+  value: { $slice: ['$1', 1, -1] },  # Remove quotes
+  raw: '$1'
+}
 ```
 
-#### Line 2: `if (x = Math.rand()) > 0..5`
+## Special Syntax Notes
+
+### Reserved Characters
+The pipe character `|` is reserved for the DSL's alternative syntax. For bitwise OR operations, use the `BAR` token:
 
 ```coffeescript
-If: o 'IfBlock ELSE Block'
-  IfBlock: o 'IF Expression Block'
-    # $2 = Expression (the comparison)
+# Grammar definition uses | for alternatives
+Value: x 'Literal | Identifier | Call'
 
-    Operation: o 'Expression COMPARE Expression'
-      # $1 = Expression (parenthetical assignment)
-      # $2 = ">"
-      # $3 = Expression (range 0..5)
-
-      # Parenthetical assignment:
-      Parenthetical: o '( Body )'
-        Assign: o 'Assignable = Expression'
-          # x = Math.rand()
-
-      # Range literal:
-      Range: o 'Expression RangeDots Expression'
-        # $1 = Expression (0)
-        # $2 = RangeDots (..)
-        # $3 = Expression (5)
-
-        RangeDots: o '..'
-          # Returns {exclusive: false}
+# Bitwise OR uses BAR token
+BitwiseOp: o 'Expression BAR Expression', { op: '|', left: '$1', right: '$3' }
 ```
 
-#### Lines 3 & 5: String Interpolation
+### Array Building
+Lists are built using special operators:
 
 ```coffeescript
-String: o 'STRING_START Interpolations STRING_END'
-  # Creates a template literal
-
-  Interpolations: o 'Interpolations InterpolationChunk'
-    # Combines literal strings and interpolated expressions
-
-    # Literal part:
-    InterpolationChunk: o 'String'
-      # "Biggie: " or "Smalls: "
-
-    # Interpolated variable:
-    InterpolationChunk: o 'INTERPOLATION_START Body INTERPOLATION_END'
-      # $2 = Body containing identifier 'x'
+Body: [
+  o 'Statement', ['$1']                           # Start with single item
+  o 'Body TERMINATOR Statement', { $concat: ['$1', '$3'] }  # Concatenate
+  x 'Body TERMINATOR'                             # Pass through (trailing terminator)
+]
 ```
 
-### Summary of Features Used
+## Current Status
 
-| Feature | Key Rules | Description |
-|---------|-----------|-------------|
-| **Function Definition** | `Code`, `ParamList`, `FuncGlyph` | Arrow functions with parameters |
-| **Assignment** | `Assign`, `Assignable` | Variable binding |
-| **Parenthetical Grouping** | `Parenthetical` | Expression grouping with `()` |
-| **Method Calls** | `Invocation`, `Accessor` | Dot notation like `Math.rand()` |
-| **Comparison** | `Operation COMPARE` | Binary comparison operators |
-| **Range Literals** | `Range`, `RangeDots` | Inclusive `..` and exclusive `...` ranges |
-| **If/Else** | `IfBlock`, `Block` | Conditional branching |
-| **String Interpolation** | `Interpolations` | Template literals with `#{}` |
-| **Spread Operator** | `Splat` | Rest/spread with `...` |
-| **Implicit Calls** | Rewriter adds `CALL_START/END` | Parenthesis-free function calls |
+This is a **work-in-progress implementation** of Rip:
 
-With just **~33 grammar rule categories**, Rip can parse this rich, expressive program that includes:
-- Function definitions with parameter lists
-- Nested expressions and assignments
-- String templates with interpolation
-- Range literals for numeric sequences
-- Spread operators for variadic arguments
-- Control flow with if/else blocks
-- Implicit function calls for cleaner syntax
+### Completed
+- ✅ Parser DSL design (o/x functions)
+- ✅ Grammar syntax with pipe operators
+- ✅ Pure data AST node approach
 
-The parse tree elegantly composes these features - each rule handles its specific concern while seamlessly integrating with others. This composability is what makes the grammar both powerful and maintainable!
+### In Progress
+- 🚧 Lexer implementation
+- 🚧 Parser generator (Solar) integration
+- 🚧 AST node definitions
+- 🚧 Compiler framework
+- 🚧 Bootstrap process
+
+### Planned
+- 📋 Full test suite
+- 📋 Runtime-specific optimizations
+- 📋 Source maps
+- 📋 REPL
+- 📋 Language server protocol
+
+## Why Pure Data Nodes?
+
+Instead of mixing executable code into the parser (like traditional semantic actions), Rip uses pure data structures to define AST nodes:
+
+**Traditional (with code):**
+```javascript
+Body: o 'Line', code: -> [$1]  // Executable function
+```
+
+**Rip (pure data):**
+```coffeescript
+Body: o 'Line', ['$1']  // Data structure
+```
+
+Benefits:
+1. **Predictable** - No side effects during parsing
+2. **Debuggable** - AST is just data, easy to inspect
+3. **Portable** - Same grammar works across all runtimes
+4. **Optimizable** - Parser generator can optimize better
 
 ## Multi-Runtime Support
 
@@ -396,38 +364,6 @@ import { compile } from '@rip/lang';
 const js = compile('x = 42');
 ```
 
-## Current Status
-
-This is a **clean-room implementation** of Rip, starting fresh with:
-
-- ✅ Multi-runtime architecture
-- ✅ Basic lexer implementation
-- ✅ AST node definitions
-- ✅ Compiler framework
-- ✅ CLI interface
-- 🚧 Parser integration (Solar)
-- 🚧 Bootstrap process
-- 📋 Test suite
-- 📋 Documentation
-
-## Why Start Fresh?
-
-Instead of trying to fix the CoffeeScript codebase in place (which has deep CommonJS dependencies), we're building Rip from scratch with:
-
-1. **Pure ESM from day one** - No CommonJS baggage
-2. **Runtime-agnostic design** - Works everywhere
-3. **Modern tooling** - Bun-first for speed
-4. **Clean architecture** - No legacy compatibility layers
-5. **Gradual feature addition** - Start simple, build up
-
-## Bootstrap Strategy
-
-1. **Phase 1**: Manual JavaScript compilation of core `.rip` files
-2. **Phase 2**: Use bootstrap compiler to compile itself
-3. **Phase 3**: Full self-hosting with all features
-4. **Phase 4**: Feature parity with CoffeeScript
-5. **Phase 5**: Rip-specific enhancements
-
 ## Development
 
 ```bash
@@ -443,10 +379,19 @@ bun run test:deno  # Deno
 bun run test:node  # Node.js
 ```
 
+## Bootstrap Strategy
+
+1. **Phase 1**: Manual JavaScript compilation of core `.rip` files
+2. **Phase 2**: Use bootstrap compiler to compile itself
+3. **Phase 3**: Full self-hosting with all features
+4. **Phase 4**: Feature parity with CoffeeScript
+5. **Phase 5**: Rip-specific enhancements
+
 ## Goals
 
-- **Simple**: Clean, readable syntax
+- **Simple**: Clean, readable syntax with clear grammar
 - **Fast**: Bun-optimized performance
 - **Portable**: Runs everywhere JavaScript runs
 - **Modern**: ES6+ output by default
+- **Maintainable**: Pure data approach keeps complexity low
 - **Practical**: Designed for real-world use
