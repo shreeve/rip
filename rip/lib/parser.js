@@ -166,22 +166,30 @@ export class Generator {
       return this.symbolIds[name] = symbol.id;
     };
 
-    for (const symbol in bnf) {
-      if (!Object.prototype.hasOwnProperty.call(bnf, symbol)) continue;
-      const rules = bnf[symbol];
-      addSymbol(symbol);
-      nonterminals[symbol] = this.symbolTable.get(symbol);
-      const handles = typeof rules === 'string' ? rules.split(/\s*\|\s*/g) : [...rules];
+    // Process a single production (from o() or x())
+    const processProduction = (lhs, pattern, nodeSpec, precedence) => {
+      // Handle pipe syntax in pattern - split into multiple productions
+      const patterns = pattern.includes('|')
+        ? pattern.split('|').map(p => p.trim())
+        : [pattern];
 
-      for (const handle of handles) {
-        const [rhs, action, precedence] = this._parseHandle(handle);
+      for (const singlePattern of patterns) {
+        // Split pattern into rhs array
+        const rhs = singlePattern.trim().split(/\s+/g).filter(Boolean);
+        if (rhs.length === 0) rhs.push(''); // Handle empty pattern
 
-        // Add symbols to grammar
+        // Add symbols for each element in rhs
         for (const token of rhs) {
-          addSymbol(token);
+          if (token) addSymbol(token);
         }
 
-        // Process semantic actions
+        // Process the node/action specification
+        let action = null;
+        if (nodeSpec !== undefined) {
+          action = this._expandNodeSpec(lhs, nodeSpec, rhs);
+        }
+
+        // Generate action code
         if (action) {
           const processedAction = this._processSemanticAction(action, rhs);
           const label = 'case ' + (productions.length + 1) + ':';
@@ -193,14 +201,42 @@ export class Generator {
         }
 
         // Create production
-        const production = new Production(symbol, rhs, productions.length + 1);
+        const production = new Production(lhs, rhs, productions.length + 1);
 
         // Set precedence
         this._assignPrecedence(production, precedence, operators, nonterminals);
 
         productions.push(production);
-        productionTable.push([this.symbolIds[symbol], rhs[0] === '' ? 0 : rhs.length]);
-        nonterminals[symbol].productions.push(production);
+        productionTable.push([this.symbolIds[lhs], rhs[0] === '' ? 0 : rhs.length]);
+        nonterminals[lhs].productions.push(production);
+      }
+    };
+
+    // Process all grammar rules
+    for (const lhs in bnf) {
+      if (!Object.prototype.hasOwnProperty.call(bnf, lhs)) continue;
+
+      const rules = bnf[lhs];
+      addSymbol(lhs);
+      nonterminals[lhs] = this.symbolTable.get(lhs);
+
+      // Handle both array format and single production format
+      if (Array.isArray(rules)) {
+        // Multiple productions in array
+        for (const handle of rules) {
+          const [pattern, nodeSpec, precedence] = handle;
+          processProduction(lhs, pattern, nodeSpec, precedence);
+        }
+      } else if (typeof rules === 'object' && rules.pattern) {
+        // Single production from inline syntax (e.g., Line: x 'Expression')
+        // Expecting rules = { pattern: 'Expression', type: 'x', spec: ... }
+        processProduction(lhs, rules.pattern, rules.spec, rules.precedence);
+      } else {
+        // Legacy string format (fallback)
+        const patterns = rules.split(/\s*\|\s*/g);
+        for (const pattern of patterns) {
+          processProduction(lhs, pattern, null, null);
+        }
       }
     }
 
@@ -217,6 +253,41 @@ export class Generator {
     this.performAction = `function anonymous(${parameters}) {\n${actionsCode}\n}`;
   }
 
+  // New helper method to expand node specifications based on o/x semantics
+  _expandNodeSpec(lhs, nodeSpec, rhs) {
+    // If nodeSpec is from x() function (pass-through)
+    if (typeof nodeSpec === 'string' && nodeSpec.startsWith('$')) {
+      return nodeSpec; // Pass through position
+    }
+
+    // If nodeSpec is a boolean, null, or number (literal from x())
+    if (typeof nodeSpec === 'boolean' || nodeSpec === null || typeof nodeSpec === 'number') {
+      return nodeSpec;
+    }
+
+    // If nodeSpec is an array (array literal from o())
+    if (Array.isArray(nodeSpec)) {
+      return { $array: nodeSpec };
+    }
+
+    // If nodeSpec is an object (from o())
+    if (typeof nodeSpec === 'object') {
+      // Handle special operators
+      if (nodeSpec.$concat || nodeSpec.$array || nodeSpec.$passthrough) {
+        return nodeSpec;
+      }
+
+      // Auto-add type if not present (for o() function)
+      if (!nodeSpec.type && !nodeSpec.$noType) {
+        return { type: lhs, ...nodeSpec };
+      }
+
+      return nodeSpec;
+    }
+
+    // Default pass-through for x() with no spec
+    return '$1';
+  }
 
   _assignPrecedence(production, precedence, operators, nonterminals) {
     if (precedence?.prec && operators[precedence.prec]) {
