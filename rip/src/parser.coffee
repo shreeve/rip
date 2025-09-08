@@ -64,7 +64,7 @@ class Generator
   constructor: (grammar, options = {}) ->
 
     # Configuration
-    @options = { ...grammar.options, ...options }
+    @options = {...grammar.options, ...options}
     @parseParams = grammar.parseParams
     @yy = {}
 
@@ -129,12 +129,12 @@ class Generator
 
     return node if t is 'string' and node[0] is '$' # x() pass-through
     return node if t in ['boolean','number'] or node is null # literals
-    return { $array: node } if Array.isArray node # array literals
+    return {$array: node} if Array.isArray node # array literals
 
     if t is 'object'
       return node if node.$concat? or node.$array? or node.$passthrough?
       return node if node.type? or node.$noType?
-      return { type: lhs, ...node }  # auto-add type for o() if missing
+      return {type: lhs, ...node}  # auto-add type for o() if missing
 
     '$1'  # default x() pass-through
 
@@ -187,7 +187,7 @@ class Generator
           processProduction lhs, pattern, node, precedence
       else if typeof rules is 'object' and rules.pattern
         # Single production from inline syntax (e.g., Line: x 'Expression')
-        # Expecting rules = { pattern: 'Expression', type: 'x', spec: ... }
+        # Expecting rules = {pattern: 'Expression', type: 'x', spec: ...}
         processProduction lhs, rules.pattern, rules.spec, rules.precedence
       else
         # Legacy string format (fallback)
@@ -607,7 +607,7 @@ class Generator
   # ============================================================================
 
   generate: (options = {}) ->
-    @options = { ...@options, ...options }
+    @options = {...@options, ...options}
     parserCode = @generateModule @options
 
     if @options.compress
@@ -629,7 +629,7 @@ class Generator
       #{module.commonCode}
       const parser = #{module.moduleCode};
       #{@moduleInclude}
-      function Parser () { this.yy = {}; }
+      function Parser () {this.yy = {};}
       Parser.prototype = parser;
       parser.Parser = Parser;
       return new Parser;
@@ -852,7 +852,7 @@ createParser = (grammar, options = {}) ->
   new Generator(grammar, options).createParser()
 
 # Export the Generator class and createParser function
-module.exports = { Generator, createParser }
+module.exports = {Generator, createParser}
 
 # ==============================================================================
 # CLI Interface
