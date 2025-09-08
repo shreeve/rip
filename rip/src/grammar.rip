@@ -11,9 +11,7 @@
 # - Pipe syntax for alternatives
 # - Helper functions for common patterns
 
-import {
-  o, x, binOp, unaryOp, list, star, plus, opt, wrapped, keywords, processGrammar
-} from './grammar-helpers'
+import { o, x, binOp, unaryOp, list, star, plus, opt, wrapped, keywords, processGrammar } from './grammar-helpers'
 
 # Grammar Definition
 # ==================
