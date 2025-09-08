@@ -76,12 +76,8 @@ grammar =
 
   # String literals
   String: [
-    o 'STRING',
-      value: '$1', quote: '$quote', initialChunk: '$initialChunk'
-      finalChunk: '$finalChunk', indent: '$indent'
-      double: '$double', heregex: '$heregex'
-    o 'STRING_START Interpolations STRING_END',
-      interpolations: '$2', quote: '$quote'
+    o 'STRING', value: '$1', quote: '$quote', initialChunk: '$initialChunk', finalChunk: '$finalChunk', indent: '$indent', double: '$double', heregex: '$heregex'
+    o 'STRING_START Interpolations STRING_END', interpolations: '$2', quote: '$quote'
   ]
 
   # String interpolations
@@ -99,11 +95,8 @@ grammar =
 
   # Regular expressions
   Regex: [
-    o 'REGEX',
-      pattern: '$1', delimiter: '$delimiter'
-      heregexCommentTokens: '$heregexCommentTokens'
-    o 'REGEX_START Invocation REGEX_END',
-      invocation: '$2', heregexCommentTokens: '$heregexCommentTokens'
+    o 'REGEX', pattern: '$1', delimiter: '$delimiter', heregexCommentTokens: '$heregexCommentTokens'
+    o 'REGEX_START Invocation REGEX_END', invocation: '$2', heregexCommentTokens: '$heregexCommentTokens'
   ]
 
   # Literal values
@@ -125,8 +118,7 @@ grammar =
   AssignObj: [
     x 'ObjAssignable | ObjRestValue'
     o 'ObjAssignable : Expression', left: '$1', right: '$3', context: 'object'
-    o 'ObjAssignable : INDENT Expression OUTDENT',
-      left: '$1', right: '$4', context: 'object'
+    o 'ObjAssignable : INDENT Expression OUTDENT', left: '$1', right: '$4', context: 'object'
     o 'SimpleObjAssignable = Expression', left: '$1', right: '$3'
     o 'SimpleObjAssignable = INDENT Expression OUTDENT', left: '$1', right: '$4'
   ]
@@ -149,13 +141,10 @@ grammar =
 
   ObjSpreadExpr: [
     x 'ObjSpreadIdentifier | Object | Parenthetical | Super | This'
-    o 'SUPER OptFuncExist Arguments',
-      callee: 'super', arguments: '$3', optional: '$2'
+    o 'SUPER OptFuncExist Arguments', callee: 'super', arguments: '$3', optional: '$2'
     o 'DYNAMIC_IMPORT Arguments',   callee: 'import', arguments: '$2'
-    o 'SimpleObjAssignable OptFuncExist Arguments',
-      callee: '$1', arguments: '$3', optional: '$2'
-    o 'ObjSpreadExpr OptFuncExist Arguments',
-      callee: '$1', arguments: '$3', optional: '$2'
+    o 'SimpleObjAssignable OptFuncExist Arguments', callee: '$1', arguments: '$3', optional: '$2'
+    o 'ObjSpreadExpr OptFuncExist Arguments', callee: '$1', arguments: '$3', optional: '$2'
   ]
 
   ObjSpreadIdentifier: [
@@ -182,14 +171,12 @@ grammar =
 
   # Function literals
   Code: [
-    o 'PARAM_START ParamList PARAM_END FuncGlyph Block',
-      params: '$2', body: '$5', arrow: '$4'
+    o 'PARAM_START ParamList PARAM_END FuncGlyph Block', params: '$2', body: '$5', arrow: '$4'
     o 'FuncGlyph Block',            params: [], body: '$2', arrow: '$1'
   ]
 
   CodeLine: [
-    o 'PARAM_START ParamList PARAM_END FuncGlyph Line',
-      params: '$2', body: ['$5'], arrow: '$4'
+    o 'PARAM_START ParamList PARAM_END FuncGlyph Line', params: '$2', body: ['$5'], arrow: '$4'
     o 'FuncGlyph Line',             params: [], body: ['$2'], arrow: '$1'
   ]
 
@@ -242,8 +229,7 @@ grammar =
   Super: [
     o 'SUPER . Property',           property: '$3'
     o 'SUPER INDEX_START Expression INDEX_END', computed: true, property: '$3'
-    o 'SUPER INDEX_START INDENT Expression OUTDENT INDEX_END',
-      computed: true, property: '$4'
+    o 'SUPER INDEX_START INDENT Expression OUTDENT INDEX_END', computed: true, property: '$4'
   ]
 
   # Meta properties (new.target, import.meta)
@@ -296,39 +282,26 @@ grammar =
     o 'CLASS EXTENDS Expression Block', name: null, parent: '$3', body: '$4'
     o 'CLASS SimpleAssignable',     name: '$2', parent: null, body: null
     o 'CLASS SimpleAssignable Block', name: '$2', parent: null, body: '$3'
-    o 'CLASS SimpleAssignable EXTENDS Expression',
-      name: '$2', parent: '$4', body: null
-    o 'CLASS SimpleAssignable EXTENDS Expression Block',
-      name: '$2', parent: '$4', body: '$5'
+    o 'CLASS SimpleAssignable EXTENDS Expression', name: '$2', parent: '$4', body: null
+    o 'CLASS SimpleAssignable EXTENDS Expression Block', name: '$2', parent: '$4', body: '$5'
   ]
 
   # Import statements
   Import: [
     o 'IMPORT String',              source: '$2'
     o 'IMPORT String ASSERT Object', source: '$2', assertions: '$4'
-    o 'IMPORT ImportDefaultSpecifier FROM String',
-      specifiers: ['$2'], source: '$4'
-    o 'IMPORT ImportDefaultSpecifier FROM String ASSERT Object',
-      specifiers: ['$2'], source: '$4', assertions: '$6'
-    o 'IMPORT ImportNamespaceSpecifier FROM String',
-      specifiers: ['$2'], source: '$4'
-    o 'IMPORT ImportNamespaceSpecifier FROM String ASSERT Object',
-      specifiers: ['$2'], source: '$4', assertions: '$6'
+    o 'IMPORT ImportDefaultSpecifier FROM String', specifiers: ['$2'], source: '$4'
+    o 'IMPORT ImportDefaultSpecifier FROM String ASSERT Object', specifiers: ['$2'], source: '$4', assertions: '$6'
+    o 'IMPORT ImportNamespaceSpecifier FROM String', specifiers: ['$2'], source: '$4'
+    o 'IMPORT ImportNamespaceSpecifier FROM String ASSERT Object', specifiers: ['$2'], source: '$4', assertions: '$6'
     o 'IMPORT { } FROM String',     specifiers: [], source: '$5'
-    o 'IMPORT { } FROM String ASSERT Object',
-      specifiers: [], source: '$5', assertions: '$7'
-    o 'IMPORT { ImportSpecifierList OptComma } FROM String',
-      specifiers: '$3', source: '$7'
-    o 'IMPORT { ImportSpecifierList OptComma } FROM String ASSERT Object',
-      specifiers: '$3', source: '$7', assertions: '$9'
-    o 'IMPORT ImportDefaultSpecifier , ImportNamespaceSpecifier FROM String',
-      specifiers: ['$2', '$4'], source: '$6'
-    o 'IMPORT ImportDefaultSpecifier , ImportNamespaceSpecifier FROM String ASSERT Object',
-      specifiers: ['$2', '$4'], source: '$6', assertions: '$8'
-    o 'IMPORT ImportDefaultSpecifier , { ImportSpecifierList OptComma } FROM String',
-      specifiers: $concat: [['$2'], '$5'], source: '$9'
-    o 'IMPORT ImportDefaultSpecifier , { ImportSpecifierList OptComma } FROM String ASSERT Object',
-      specifiers: $concat: [['$2'], '$5'], source: '$9', assertions: '$11'
+    o 'IMPORT { } FROM String ASSERT Object', specifiers: [], source: '$5', assertions: '$7'
+    o 'IMPORT { ImportSpecifierList OptComma } FROM String', specifiers: '$3', source: '$7'
+    o 'IMPORT { ImportSpecifierList OptComma } FROM String ASSERT Object', specifiers: '$3', source: '$7', assertions: '$9'
+    o 'IMPORT ImportDefaultSpecifier , ImportNamespaceSpecifier FROM String', specifiers: ['$2', '$4'], source: '$6'
+    o 'IMPORT ImportDefaultSpecifier , ImportNamespaceSpecifier FROM String ASSERT Object', specifiers: ['$2', '$4'], source: '$6', assertions: '$8'
+    o 'IMPORT ImportDefaultSpecifier , { ImportSpecifierList OptComma } FROM String', specifiers: $concat: [['$2'], '$5'], source: '$9'
+    o 'IMPORT ImportDefaultSpecifier , { ImportSpecifierList OptComma } FROM String ASSERT Object', specifiers: $concat: [['$2'], '$5'], source: '$9', assertions: '$11'
   ]
 
   ImportSpecifierList: [
@@ -354,24 +327,17 @@ grammar =
     o 'EXPORT { }',                 specifiers: []
     o 'EXPORT { ExportSpecifierList OptComma }', specifiers: '$3'
     o 'EXPORT Class',               declaration: '$2'
-    o 'EXPORT Identifier = Expression',
-      declaration: { left: '$2', right: '$4' }
-    o 'EXPORT Identifier = TERMINATOR Expression',
-      declaration: { left: '$2', right: '$5' }
-    o 'EXPORT Identifier = INDENT Expression OUTDENT',
-      declaration: { left: '$2', right: '$5' }
+    o 'EXPORT Identifier = Expression', declaration: { left: '$2', right: '$4' }
+    o 'EXPORT Identifier = TERMINATOR Expression', declaration: { left: '$2', right: '$5' }
+    o 'EXPORT Identifier = INDENT Expression OUTDENT', declaration: { left: '$2', right: '$5' }
     o 'EXPORT DEFAULT Expression',  default: true, declaration: '$3'
     o 'EXPORT DEFAULT INDENT Object OUTDENT', default: true, declaration: '$4'
     o 'EXPORT EXPORT_ALL FROM String', all: true, source: '$4'
-    o 'EXPORT EXPORT_ALL FROM String ASSERT Object',
-      all: true, source: '$4', assertions: '$6'
+    o 'EXPORT EXPORT_ALL FROM String ASSERT Object', all: true, source: '$4', assertions: '$6'
     o 'EXPORT { } FROM String',     specifiers: [], source: '$5'
-    o 'EXPORT { } FROM String ASSERT Object',
-      specifiers: [], source: '$5', assertions: '$7'
-    o 'EXPORT { ExportSpecifierList OptComma } FROM String',
-      specifiers: '$3', source: '$7'
-    o 'EXPORT { ExportSpecifierList OptComma } FROM String ASSERT Object',
-      specifiers: '$3', source: '$7', assertions: '$9'
+    o 'EXPORT { } FROM String ASSERT Object', specifiers: [], source: '$5', assertions: '$7'
+    o 'EXPORT { ExportSpecifierList OptComma } FROM String', specifiers: '$3', source: '$7'
+    o 'EXPORT { ExportSpecifierList OptComma } FROM String ASSERT Object', specifiers: '$3', source: '$7', assertions: '$9'
   ]
 
   ExportSpecifierList: [
@@ -391,14 +357,10 @@ grammar =
 
   # Function invocation
   Invocation: [
-    o 'Value OptFuncExist String',
-      callee: '$1', arguments: ['$3'], optional: '$2', taggedTemplate: true
-    o 'Value OptFuncExist Arguments',
-      callee: '$1', arguments: '$3', optional: '$2'
-    o 'SUPER OptFuncExist Arguments',
-      callee: 'super', arguments: '$3', optional: '$2'
-    o 'DYNAMIC_IMPORT Arguments',
-      callee: 'import', arguments: '$2', dynamic: true
+    o 'Value OptFuncExist String', callee: '$1', arguments: ['$3'], optional: '$2', taggedTemplate: true
+    o 'Value OptFuncExist Arguments', callee: '$1', arguments: '$3', optional: '$2'
+    o 'SUPER OptFuncExist Arguments', callee: 'super', arguments: '$3', optional: '$2'
+    o 'DYNAMIC_IMPORT Arguments', callee: 'import', arguments: '$2', dynamic: true
   ]
 
   OptFuncExist: opt 'FUNC_EXIST', { soak: true }, { soak: false }
@@ -427,19 +389,15 @@ grammar =
   ]
 
   Range: [
-    o '[ Expression RangeDots Expression ]',
-      start: '$2', end: '$4', exclusive: '$3'
-    o '[ ExpressionLine RangeDots Expression ]',
-      start: '$2', end: '$4', exclusive: '$3'
+    o '[ Expression RangeDots Expression ]', start: '$2', end: '$4', exclusive: '$3'
+    o '[ ExpressionLine RangeDots Expression ]', start: '$2', end: '$4', exclusive: '$3'
   ]
 
   # Array slices
   Slice: [
-    o 'Expression RangeDots Expression',
-      start: '$1', end: '$3', exclusive: '$2'
+    o 'Expression RangeDots Expression', start: '$1', end: '$3', exclusive: '$2'
     o 'Expression RangeDots',       start: '$1', end: null, exclusive: '$2'
-    o 'ExpressionLine RangeDots Expression',
-      start: '$1', end: '$3', exclusive: '$2'
+    o 'ExpressionLine RangeDots Expression', start: '$1', end: '$3', exclusive: '$2'
     o 'ExpressionLine RangeDots',   start: '$1', end: null, exclusive: '$2'
     o 'RangeDots Expression',       start: null, end: '$2', exclusive: '$1'
     o 'RangeDots',                  start: null, end: null, exclusive: '$1'
@@ -464,8 +422,7 @@ grammar =
     o 'ArgElisionList , ArgElision', $concat: ['$1', '$3']
     o 'ArgElisionList OptComma TERMINATOR ArgElision', $concat: ['$1', '$4']
     o 'INDENT ArgElisionList OptElisions OUTDENT', $concat: ['$2', '$3']
-    o 'ArgElisionList OptElisions INDENT ArgElisionList OptElisions OUTDENT',
-      $concat: ['$1', '$2', '$4', '$5']
+    o 'ArgElisionList OptElisions INDENT ArgElisionList OptElisions OUTDENT', $concat: ['$1', '$2', '$4', '$5']
   ]
 
   ArgElision: [
@@ -592,22 +549,14 @@ grammar =
     o 'FOROF ExpressionLine WHEN Expression', source: '$2', guard: '$4', object: true
     o 'FORIN Expression BY Expression', source: '$2', step: '$4'
     o 'FORIN ExpressionLine BY Expression', source: '$2', step: '$4'
-    o 'FORIN Expression WHEN Expression BY Expression',
-      source: '$2', guard: '$4', step: '$6'
-    o 'FORIN ExpressionLine WHEN Expression BY Expression',
-      source: '$2', guard: '$4', step: '$6'
-    o 'FORIN Expression WHEN ExpressionLine BY Expression',
-      source: '$2', guard: '$4', step: '$6'
-    o 'FORIN ExpressionLine WHEN ExpressionLine BY Expression',
-      source: '$2', guard: '$4', step: '$6'
-    o 'FORIN Expression BY Expression WHEN Expression',
-      source: '$2', step: '$4', guard: '$6'
-    o 'FORIN ExpressionLine BY Expression WHEN Expression',
-      source: '$2', step: '$4', guard: '$6'
-    o 'FORIN Expression BY ExpressionLine WHEN Expression',
-      source: '$2', step: '$4', guard: '$6'
-    o 'FORIN ExpressionLine BY ExpressionLine WHEN Expression',
-      source: '$2', step: '$4', guard: '$6'
+    o 'FORIN Expression WHEN Expression BY Expression', source: '$2', guard: '$4', step: '$6'
+    o 'FORIN ExpressionLine WHEN Expression BY Expression', source: '$2', guard: '$4', step: '$6'
+    o 'FORIN Expression WHEN ExpressionLine BY Expression', source: '$2', guard: '$4', step: '$6'
+    o 'FORIN ExpressionLine WHEN ExpressionLine BY Expression', source: '$2', guard: '$4', step: '$6'
+    o 'FORIN Expression BY Expression WHEN Expression', source: '$2', step: '$4', guard: '$6'
+    o 'FORIN ExpressionLine BY Expression WHEN Expression', source: '$2', step: '$4', guard: '$6'
+    o 'FORIN Expression BY ExpressionLine WHEN Expression', source: '$2', step: '$4', guard: '$6'
+    o 'FORIN ExpressionLine BY ExpressionLine WHEN Expression', source: '$2', step: '$4', guard: '$6'
     o 'FORFROM Expression',         source: '$2', from: true
     o 'FORFROM Expression WHEN Expression', source: '$2', guard: '$4', from: true
     o 'FORFROM ExpressionLine WHEN Expression', source: '$2', guard: '$4', from: true
@@ -622,22 +571,14 @@ grammar =
     o 'FOROF ExpressionLine WHEN ExpressionLine', source: '$2', guard: '$4', object: true
     o 'FORIN Expression BY ExpressionLine', source: '$2', step: '$4'
     o 'FORIN ExpressionLine BY ExpressionLine', source: '$2', step: '$4'
-    o 'FORIN Expression WHEN Expression BY ExpressionLine',
-      source: '$2', guard: '$4', step: '$6'
-    o 'FORIN ExpressionLine WHEN Expression BY ExpressionLine',
-      source: '$2', guard: '$4', step: '$6'
-    o 'FORIN Expression WHEN ExpressionLine BY ExpressionLine',
-      source: '$2', guard: '$4', step: '$6'
-    o 'FORIN ExpressionLine WHEN ExpressionLine BY ExpressionLine',
-      source: '$2', guard: '$4', step: '$6'
-    o 'FORIN Expression BY Expression WHEN ExpressionLine',
-      source: '$2', step: '$4', guard: '$6'
-    o 'FORIN ExpressionLine BY Expression WHEN ExpressionLine',
-      source: '$2', step: '$4', guard: '$6'
-    o 'FORIN Expression BY ExpressionLine WHEN ExpressionLine',
-      source: '$2', step: '$4', guard: '$6'
-    o 'FORIN ExpressionLine BY ExpressionLine WHEN ExpressionLine',
-      source: '$2', step: '$4', guard: '$6'
+    o 'FORIN Expression WHEN Expression BY ExpressionLine', source: '$2', guard: '$4', step: '$6'
+    o 'FORIN ExpressionLine WHEN Expression BY ExpressionLine', source: '$2', guard: '$4', step: '$6'
+    o 'FORIN Expression WHEN ExpressionLine BY ExpressionLine', source: '$2', guard: '$4', step: '$6'
+    o 'FORIN ExpressionLine WHEN ExpressionLine BY ExpressionLine', source: '$2', guard: '$4', step: '$6'
+    o 'FORIN Expression BY Expression WHEN ExpressionLine', source: '$2', step: '$4', guard: '$6'
+    o 'FORIN ExpressionLine BY Expression WHEN ExpressionLine', source: '$2', step: '$4', guard: '$6'
+    o 'FORIN Expression BY ExpressionLine WHEN ExpressionLine', source: '$2', step: '$4', guard: '$6'
+    o 'FORIN ExpressionLine BY ExpressionLine WHEN ExpressionLine', source: '$2', step: '$4', guard: '$6'
     o 'FORFROM ExpressionLine',     source: '$2', from: true
     o 'FORFROM Expression WHEN ExpressionLine', source: '$2', guard: '$4', from: true
     o 'FORFROM ExpressionLine WHEN ExpressionLine', source: '$2', guard: '$4', from: true
@@ -645,18 +586,12 @@ grammar =
 
   # Switch statements
   Switch: [
-    o 'SWITCH Expression INDENT Whens OUTDENT',
-      discriminant: '$2', cases: '$4'
-    o 'SWITCH ExpressionLine INDENT Whens OUTDENT',
-      discriminant: '$2', cases: '$4'
-    o 'SWITCH Expression INDENT Whens ELSE Block OUTDENT',
-      discriminant: '$2', cases: '$4', default: '$6'
-    o 'SWITCH ExpressionLine INDENT Whens ELSE Block OUTDENT',
-      discriminant: '$2', cases: '$4', default: '$6'
-    o 'SWITCH INDENT Whens OUTDENT',
-      discriminant: null, cases: '$3'
-    o 'SWITCH INDENT Whens ELSE Block OUTDENT',
-      discriminant: null, cases: '$3', default: '$5'
+    o 'SWITCH Expression INDENT Whens OUTDENT', discriminant: '$2', cases: '$4'
+    o 'SWITCH ExpressionLine INDENT Whens OUTDENT', discriminant: '$2', cases: '$4'
+    o 'SWITCH Expression INDENT Whens ELSE Block OUTDENT', discriminant: '$2', cases: '$4', default: '$6'
+    o 'SWITCH ExpressionLine INDENT Whens ELSE Block OUTDENT', discriminant: '$2', cases: '$4', default: '$6'
+    o 'SWITCH INDENT Whens OUTDENT', discriminant: null, cases: '$3'
+    o 'SWITCH INDENT Whens ELSE Block OUTDENT', discriminant: null, cases: '$3', default: '$5'
   ]
 
   Whens: [
@@ -672,32 +607,26 @@ grammar =
   # If statements
   IfBlock: [
     o 'IF Expression Block',        test: '$2', consequent: '$3', type: '$1'
-    o 'IfBlock ELSE IF Expression Block',
-      test: '$4', consequent: '$5', type: '$3', alternate: '$1'
+    o 'IfBlock ELSE IF Expression Block', test: '$4', consequent: '$5', type: '$3', alternate: '$1'
   ]
 
   If: [
     x 'IfBlock'
     o 'IfBlock ELSE Block',         $merge: ['$1', { alternate: '$3' }]
-    o 'Statement POST_IF Expression',
-      test: '$3', consequent: ['$1'], type: '$2', postfix: true
-    o 'Expression POST_IF Expression',
-      test: '$3', consequent: ['$1'], type: '$2', postfix: true
+    o 'Statement POST_IF Expression', test: '$3', consequent: ['$1'], type: '$2', postfix: true
+    o 'Expression POST_IF Expression', test: '$3', consequent: ['$1'], type: '$2', postfix: true
   ]
 
   IfBlockLine: [
     o 'IF ExpressionLine Block',    test: '$2', consequent: '$3', type: '$1'
-    o 'IfBlockLine ELSE IF ExpressionLine Block',
-      test: '$4', consequent: '$5', type: '$3', alternate: '$1'
+    o 'IfBlockLine ELSE IF ExpressionLine Block', test: '$4', consequent: '$5', type: '$3', alternate: '$1'
   ]
 
   IfLine: [
     x 'IfBlockLine'
     o 'IfBlockLine ELSE Block',     $merge: ['$1', { alternate: '$3' }]
-    o 'Statement POST_IF ExpressionLine',
-      test: '$3', consequent: ['$1'], type: '$2', postfix: true
-    o 'Expression POST_IF ExpressionLine',
-      test: '$3', consequent: ['$1'], type: '$2', postfix: true
+    o 'Statement POST_IF ExpressionLine', test: '$3', consequent: ['$1'], type: '$2', postfix: true
+    o 'Expression POST_IF ExpressionLine', test: '$3', consequent: ['$1'], type: '$2', postfix: true
   ]
 
   # Operations
@@ -731,12 +660,9 @@ grammar =
     binOp 'RELATION', 'RELATION'
 
     # Compound assignment
-    o 'SimpleAssignable COMPOUND_ASSIGN Expression',
-      left: '$1', operator: '$2', right: '$3'
-    o 'SimpleAssignable COMPOUND_ASSIGN INDENT Expression OUTDENT',
-      left: '$1', operator: '$2', right: '$4'
-    o 'SimpleAssignable COMPOUND_ASSIGN TERMINATOR Expression',
-      left: '$1', operator: '$2', right: '$4'
+    o 'SimpleAssignable COMPOUND_ASSIGN Expression', left: '$1', operator: '$2', right: '$3'
+    o 'SimpleAssignable COMPOUND_ASSIGN INDENT Expression OUTDENT', left: '$1', operator: '$2', right: '$4'
+    o 'SimpleAssignable COMPOUND_ASSIGN TERMINATOR Expression', left: '$1', operator: '$2', right: '$4'
   ]
 
   DoIife: o 'DO_IIFE Code',               operator: '$1', argument: '$2'
