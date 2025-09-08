@@ -1,30 +1,33 @@
-# Rip Grammar
-# ============
-#
-# A modern grammar definition using pure data structures and the o/x DSL.
-# Converted from CoffeeScript's grammar to showcase Rip's revolutionary approach.
-#
-# Key concepts:
-# - o creates/builds new AST nodes (with auto-typing)
-# - x forwards/passes values through without modification
-# - Pure data structures, no executable code
-# - Pipe syntax for alternatives
-# - Helper functions for common patterns
+###
+Rip Grammar
+============
+
+A modern grammar definition using pure data structures and our expressive DSL.
+Converted from CoffeeScript to showcase Rip's revolutionary approach.
+
+Key concepts:
+- o() creates/builds new AST nodes (with auto-typing)
+- x() forwards/passes values through without modification
+- Pure data structures, no executable code
+- Pipe syntax for alternatives
+- Helper functions for common patterns
+
+NOTES:
+Pure statements (cannot be expressions)
+Values - anything that can be assigned to, called, indexed, etc.
+Meta properties (new.target, import.meta)
+Assignment lists (for objects)
+###
 
 import { o, x, binOp, unaryOp, list, star, plus, opt, wrapped, keywords, processGrammar } from './grammar-helpers'
 
-# Grammar Definition
-# ==================
-
 grammar =
 
-  # Root - top-level node in the syntax tree
   Root: [
     o '',                           body: $node: 'Block', statements: []
     x 'Body'
   ]
 
-  # Body - list of statements/expressions separated by line breaks
   Body: [
     o 'Line',                       $array: ['$1']
     o 'Body TERMINATOR Line',       $concat: ['$1', '$3']
@@ -35,7 +38,6 @@ grammar =
 
   FuncDirective: x 'YieldReturn | AwaitReturn'
 
-  # Pure statements (cannot be expressions)
   Statement: [
     x 'Return'
     o 'STATEMENT',                  value: '$1'
@@ -202,7 +204,6 @@ grammar =
 
   Assignable: x 'SimpleAssignable | Array | Object'
 
-  # Values - anything that can be assigned to, called, indexed, etc.
   Value: x 'Assignable | Literal | Parenthetical | Range | Invocation | DoIife | This | Super | MetaProperty'
 
   Super: [
@@ -211,7 +212,6 @@ grammar =
     o 'SUPER INDEX_START INDENT Expression OUTDENT INDEX_END', computed: true, property: '$4'
   ]
 
-  # Meta properties (new.target, import.meta)
   MetaProperty: [
     o 'NEW_TARGET . Property',      meta: 'new', property: '$3'
     o 'IMPORT_META . Property',    meta: 'import', property: '$3'
@@ -242,7 +242,6 @@ grammar =
 
   Object: o '{ AssignList OptComma }',    properties: '$2', generated: '$generated'
 
-  # Assignment lists (for objects)
   AssignList: [
     o '',                           []
     list 'AssignObj', ','
@@ -411,7 +410,6 @@ grammar =
     x 'Elision TERMINATOR'
   ]
 
-  # Simple arguments (no newlines)
   SimpleArgs: [
     x 'Expression | ExpressionLine'
     o 'SimpleArgs , Expression',    $concat: ['$1', '$3']
@@ -470,7 +468,6 @@ grammar =
     o 'LOOP Expression',            loop: true, body: ['$2']
   ]
 
-  # For loops / comprehensions
   For: [
     o 'Statement ForBody',          $merge: ['$2', { body: '$1', postfix: true }]
     o 'Expression ForBody',         $merge: ['$2', { body: '$1', postfix: true }]
@@ -600,16 +597,13 @@ grammar =
     o '+ Expression',               operator: '+', argument: '$2', 'UNARY_MATH'
     o 'AWAIT INDENT Object OUTDENT', operator: 'await', argument: '$3'
 
-    # Pre/post increment/decrement
     o '-- SimpleAssignable',        operator: '--', argument: '$2', prefix: true
     o '++ SimpleAssignable',        operator: '++', argument: '$2', prefix: true
     o 'SimpleAssignable --',        operator: '--', argument: '$1', prefix: false
     o 'SimpleAssignable ++',        operator: '++', argument: '$1', prefix: false
 
-    # Existential operator
     o 'Expression ?',               operator: '?', argument: '$1'
 
-    # Binary operators
     binOp '+ | -', 'ADDITIVE'
     binOp 'MATH | ** | SHIFT', 'MULTIPLICATIVE'
     binOp 'COMPARE', 'COMPARE'
@@ -618,7 +612,6 @@ grammar =
     binOp 'BIN?', 'BIN?'
     binOp 'RELATION', 'RELATION'
 
-    # Compound assignment
     o 'SimpleAssignable COMPOUND_ASSIGN Expression', left: '$1', operator: '$2', right: '$3'
     o 'SimpleAssignable COMPOUND_ASSIGN INDENT Expression OUTDENT', left: '$1', operator: '$2', right: '$4'
     o 'SimpleAssignable COMPOUND_ASSIGN TERMINATOR Expression', left: '$1', operator: '$2', right: '$4'
@@ -626,7 +619,6 @@ grammar =
 
   DoIife: o 'DO_IIFE Code',               operator: '$1', argument: '$2'
 
-# Operator precedence (from lowest to highest)
 operators = [
   ['right',    'DO_IIFE']
   ['left',     '.', '?.', '::', '?::']
@@ -656,8 +648,6 @@ operators = [
   ['left',     'POST_IF']
 ]
 
-# Export the grammar and operators
-export default {
+export default
   bnf: processGrammar grammar
-  operators: operators.reverse()  # Parser generator expects low to high precedence
-}
+  operators: operators.reverse()
