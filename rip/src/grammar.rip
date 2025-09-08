@@ -117,10 +117,10 @@ grammar =
 
   # Function invocaåtion
   Invocation: [
-    o 'Value OptFuncExist String'            , type: 'TaggedTemplateExpression', tag: '$1', quasi: '$3', optional: '$2'
-    o 'Value OptFuncExist Arguments'         , type: 'CallExpression', callee: '$1', args: '$3', optional: '$2'
-    o 'SUPER OptFuncExist Arguments'         , type: 'SuperCall', args: '$3', optional: '$2'
-    o 'DYNAMIC_IMPORT Arguments'             , type: 'Import', args: '$2', dynamic: true
+    o 'Value OptFuncExist String'            , type: 'TaggedTemplateCall', tag: '$1', quasi: '$3', optional: '$2'
+    o 'Value OptFuncExist Arguments'         , type: 'Call'              , callee: '$1', args: '$3', optional: '$2'
+    o 'SUPER OptFuncExist Arguments'         , type: 'SuperCall'         , args: '$3', optional: '$2'
+    o 'DYNAMIC_IMPORT Arguments'             , type: 'DynamicImportCall' , args: '$2', dynamic: true
   ]
 
   # Optional function existence check
