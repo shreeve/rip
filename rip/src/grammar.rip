@@ -31,7 +31,6 @@ grammar =
     x 'Body TERMINATOR'
   ]
 
-  # Line - statements and expressions that make up a body
   Line: x 'Expression | ExpressionLine | Statement | FuncDirective'
 
   FuncDirective: x 'YieldReturn | AwaitReturn'
@@ -43,13 +42,10 @@ grammar =
     x 'Import | Export'
   ]
 
-  # All expression types
   Expression: x 'Value | Code | Operation | Assign | If | Try | While | For | Switch | Class | Throw | Yield'
 
-  # Single-line expressions
   ExpressionLine: x 'CodeLine | IfLine | OperationLine'
 
-  # Yield expressions
   Yield: [
     o 'YIELD',                      argument: value: ''
     o 'YIELD Expression',           argument: '$2'
@@ -57,30 +53,25 @@ grammar =
     o 'YIELD FROM Expression',      delegate: true, argument: '$3'
   ]
 
-  # Indented blocks
   Block: [
     o 'INDENT OUTDENT',             statements: []
     x 'INDENT Body OUTDENT',        '$2'
   ]
 
-  # Identifiers and properties
   Identifier: o 'IDENTIFIER',                 name: '$1'
 
   Property: o 'PROPERTY',                   name: '$1'
 
-  # Alphanumeric literals
   AlphaNumeric: [
     o 'NUMBER',                     value: '$1', parsedValue: '$parsedValue'
     x 'String'
   ]
 
-  # String literals
   String: [
     o 'STRING', value: '$1', quote: '$quote', initialChunk: '$initialChunk', finalChunk: '$finalChunk', indent: '$indent', double: '$double', heregex: '$heregex'
     o 'STRING_START Interpolations STRING_END', interpolations: '$2', quote: '$quote'
   ]
 
-  # String interpolations
   Interpolations: [
     o 'InterpolationChunk',         ['$1']
     o 'Interpolations InterpolationChunk', $concat: ['$1', '$2']
@@ -93,13 +84,11 @@ grammar =
     x 'String'
   ]
 
-  # Regular expressions
   Regex: [
     o 'REGEX', pattern: '$1', delimiter: '$delimiter', heregexCommentTokens: '$heregexCommentTokens'
     o 'REGEX_START Invocation REGEX_END', invocation: '$2', heregexCommentTokens: '$heregexCommentTokens'
   ]
 
-  # Literal values
   Literal: [
     x 'AlphaNumeric'
     o 'JS',                         code: '$1', here: '$here', generated: '$generated'
@@ -107,14 +96,12 @@ grammar =
     keywords 'UNDEFINED | NULL | BOOL | INFINITY | NAN'
   ]
 
-  # Assignment operations
   Assign: [
     o 'Assignable = Expression',    left: '$1', right: '$3'
     o 'Assignable = TERMINATOR Expression', left: '$1', right: '$4'
     o 'Assignable = INDENT Expression OUTDENT', left: '$1', right: '$4'
   ]
 
-  # Object assignment
   AssignObj: [
     x 'ObjAssignable | ObjRestValue'
     o 'ObjAssignable : Expression', left: '$1', right: '$3', context: 'object'
@@ -131,7 +118,6 @@ grammar =
     o '@ [ Expression ]',           computed: true, property: '$3', object: '@'
   ]
 
-  # Object spread/rest
   ObjRestValue: [
     o 'SimpleObjAssignable ...',    argument: '$1', postfix: true
     o '... SimpleObjAssignable',    argument: '$2', postfix: false
@@ -152,7 +138,6 @@ grammar =
     o 'ObjSpreadExpr Accessor',     object: '$1', property: '$2'
   ]
 
-  # Return statements
   Return: [
     o 'RETURN Expression',          argument: '$2'
     o 'RETURN INDENT Object OUTDENT', argument: '$3'
@@ -169,7 +154,6 @@ grammar =
     o 'AWAIT RETURN',               argument: null
   ]
 
-  # Function literals
   Code: [
     o 'PARAM_START ParamList PARAM_END FuncGlyph Block', params: '$2', body: '$5', arrow: '$4'
     o 'FuncGlyph Block',            params: [], body: '$2', arrow: '$1'
@@ -185,10 +169,8 @@ grammar =
     o '=>',                         type: 'bound'
   ]
 
-  # Optional comma
   OptComma: opt ',', true, false
 
-  # Parameter lists
   ParamList: [
     o '',                           []
     list 'Param', ','
@@ -206,13 +188,11 @@ grammar =
 
   ParamVar: x 'Identifier | ThisProperty | Array | Object'
 
-  # Splat operator
   Splat: [
     o 'Expression ...',             argument: '$1', postfix: true
     o '... Expression',             argument: '$2', postfix: false
   ]
 
-  # Assignable values
   SimpleAssignable: [
     x 'Identifier'
     o 'Value Accessor',             object: '$1', property: '$2'
@@ -225,7 +205,6 @@ grammar =
   # Values - anything that can be assigned to, called, indexed, etc.
   Value: x 'Assignable | Literal | Parenthetical | Range | Invocation | DoIife | This | Super | MetaProperty'
 
-  # Super expressions
   Super: [
     o 'SUPER . Property',           property: '$3'
     o 'SUPER INDEX_START Expression INDEX_END', computed: true, property: '$3'
@@ -238,7 +217,6 @@ grammar =
     o 'IMPORT_META . Property',    meta: 'import', property: '$3'
   ]
 
-  # Property accessors
   Accessor: [
     o '. Property',                 property: '$2'
     o '?. Property',                property: '$2', optional: true
@@ -249,7 +227,6 @@ grammar =
     x 'Index'
   ]
 
-  # Array/object indexing
   Index: [
     o 'INDEX_START IndexValue INDEX_END', '$2'
     o 'INDEX_START INDENT IndexValue OUTDENT INDEX_END', '$3'
@@ -263,7 +240,6 @@ grammar =
 
   RegexWithIndex: o 'Regex , Expression',         regex: '$1', index: '$3'
 
-  # Object literals
   Object: o '{ AssignList OptComma }',    properties: '$2', generated: '$generated'
 
   # Assignment lists (for objects)
@@ -274,7 +250,6 @@ grammar =
     o 'AssignList OptComma INDENT AssignList OptComma OUTDENT', $concat: ['$1', '$4']
   ]
 
-  # Class definitions
   Class: [
     o 'CLASS',                      name: null, parent: null, body: null
     o 'CLASS Block',                name: null, parent: null, body: '$2'
@@ -286,7 +261,6 @@ grammar =
     o 'CLASS SimpleAssignable EXTENDS Expression Block', name: '$2', parent: '$4', body: '$5'
   ]
 
-  # Import statements
   Import: [
     o 'IMPORT String',              source: '$2'
     o 'IMPORT String ASSERT Object', source: '$2', assertions: '$4'
@@ -322,7 +296,6 @@ grammar =
 
   ImportNamespaceSpecifier: o 'IMPORT_ALL AS Identifier',   type: 'namespace', local: '$3'
 
-  # Export statements
   Export: [
     o 'EXPORT { }',                 specifiers: []
     o 'EXPORT { ExportSpecifierList OptComma }', specifiers: '$3'
@@ -355,7 +328,6 @@ grammar =
     o 'DEFAULT AS Identifier',      local: 'default', exported: '$3'
   ]
 
-  # Function invocation
   Invocation: [
     o 'Value OptFuncExist String', callee: '$1', arguments: ['$3'], optional: '$2', taggedTemplate: true
     o 'Value OptFuncExist Arguments', callee: '$1', arguments: '$3', optional: '$2'
@@ -370,19 +342,16 @@ grammar =
     o 'CALL_START ArgList OptComma CALL_END', '$2'
   ]
 
-  # This reference
   This: o 'THIS | @',                   type: 'this'
 
   ThisProperty: o '@ Property',                 object: '@', property: '$2'
 
-  # Array literals
   Array: [
     o '[ ]',                        elements: []
     o '[ Elisions ]',                elements: '$2'
     o '[ ArgElisionList OptElisions ]', elements: $concat: ['$2', '$3']
   ]
 
-  # Range operators
   RangeDots: [
     o '..',                         exclusive: false
     o '...',                        exclusive: true
@@ -393,7 +362,6 @@ grammar =
     o '[ ExpressionLine RangeDots Expression ]', start: '$2', end: '$4', exclusive: '$3'
   ]
 
-  # Array slices
   Slice: [
     o 'Expression RangeDots Expression', start: '$1', end: '$3', exclusive: '$2'
     o 'Expression RangeDots',       start: '$1', end: null, exclusive: '$2'
@@ -403,7 +371,6 @@ grammar =
     o 'RangeDots',                  start: null, end: null, exclusive: '$1'
   ]
 
-  # Argument lists
   ArgList: [
     list 'Arg', ','
     o 'ArgList OptComma TERMINATOR Arg', $concat: ['$1', '$4']
@@ -416,7 +383,6 @@ grammar =
     o '...',                        expansion: true
   ]
 
-  # Array element lists with elisions
   ArgElisionList: [
     o 'ArgElision',                 '$1'
     o 'ArgElisionList , ArgElision', $concat: ['$1', '$3']
@@ -452,7 +418,6 @@ grammar =
     o 'SimpleArgs , ExpressionLine', $concat: ['$1', '$3']
   ]
 
-  # Try/catch/finally
   Try: [
     o 'TRY Block',                  block: '$2'
     o 'TRY Block Catch',            block: '$2', handler: '$3'
@@ -466,19 +431,16 @@ grammar =
     o 'CATCH Block',                body: '$2'
   ]
 
-  # Throw statement
   Throw: [
     o 'THROW Expression',           argument: '$2'
     o 'THROW INDENT Object OUTDENT', argument: '$3'
   ]
 
-  # Parenthetical expressions
   Parenthetical: [
     wrapped '(', ')', 'Body'
     o '( INDENT Body OUTDENT )',    '$3'
   ]
 
-  # While loops
   WhileLineSource: [
     o 'WHILE ExpressionLine',       test: '$2'
     o 'WHILE ExpressionLine WHEN ExpressionLine', test: '$2', guard: '$4'
@@ -584,7 +546,6 @@ grammar =
     o 'FORFROM ExpressionLine WHEN ExpressionLine', source: '$2', guard: '$4', from: true
   ]
 
-  # Switch statements
   Switch: [
     o 'SWITCH Expression INDENT Whens OUTDENT', discriminant: '$2', cases: '$4'
     o 'SWITCH ExpressionLine INDENT Whens OUTDENT', discriminant: '$2', cases: '$4'
@@ -604,7 +565,6 @@ grammar =
     o 'LEADING_WHEN SimpleArgs Block TERMINATOR', test: '$2', consequent: '$3'
   ]
 
-  # If statements
   IfBlock: [
     o 'IF Expression Block',        test: '$2', consequent: '$3', type: '$1'
     o 'IfBlock ELSE IF Expression Block', test: '$4', consequent: '$5', type: '$3', alternate: '$1'
@@ -629,7 +589,6 @@ grammar =
     o 'Expression POST_IF ExpressionLine', test: '$3', consequent: ['$1'], type: '$2', postfix: true
   ]
 
-  # Operations
   OperationLine: [
     unaryOp 'UNARY | DO', 'UNARY'
     o 'DO_IIFE CodeLine',           operator: '$1', argument: '$2'
