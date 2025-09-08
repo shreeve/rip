@@ -23,6 +23,36 @@ import { o, x, binOp, unaryOp, list, star, plus, opt, wrapped, keywords, process
 
 grammar =
 
+  # === ATOMS: Simple rules used as building blocks ===
+
+  # Alternatives
+  Assignable:               x 'SimpleAssignable | Array | Object'
+  Expression:               x 'Value | Code | Operation | Assign | If | Try | While | For | Switch | Class | Throw | Yield'
+  ExpressionLine:           x 'CodeLine | IfLine | OperationLine'
+  ForValue:                 x 'Identifier | ThisProperty | Array | Object'
+  FuncDirective:            x 'YieldReturn | AwaitReturn'
+  Line:                     x 'Expression | ExpressionLine | Statement | FuncDirective'
+  ParamVar:                 x 'Identifier | ThisProperty | Array | Object'
+  SimpleObjAssignable:      x 'Identifier | Property | ThisProperty'
+  Value:                    x 'Assignable | Literal | Parenthetical | Range | Invocation | DoIife | This | Super | MetaProperty'
+
+  # Tokens
+  DoIife:                   o 'DO_IIFE Code', operator: '$1', argument: '$2'
+  Identifier:               o 'IDENTIFIER', name: '$1'
+  ImportDefaultSpecifier:   o 'Identifier', type: 'default', local: '$1'
+  ImportNamespaceSpecifier: o 'IMPORT_ALL AS Identifier', type: 'namespace', local: '$3'
+  Object:                   o '{ AssignList OptComma }', properties: '$2', generated: '$generated'
+  Property:                 o 'PROPERTY', name: '$1'
+  RegexWithIndex:           o 'Regex , Expression', regex: '$1', index: '$3'
+  This:                     o 'THIS | @', type: 'this'
+  ThisProperty:             o '@ Property', object: '@', property: '$2'
+
+  # Optionals
+  OptComma:                 opt ',', true, false
+  OptFuncExist:             opt 'FUNC_EXIST', { soak: true }, { soak: false }
+
+  # === CORE GRAMMAR ===
+
   Root: [
     o '', body: $node: 'Block', statements: []
     x 'Body'
@@ -34,19 +64,11 @@ grammar =
     x 'Body TERMINATOR'
   ]
 
-  Line: x 'Expression | ExpressionLine | Statement | FuncDirective'
-
-  FuncDirective: x 'YieldReturn | AwaitReturn'
-
   Statement: [
     x 'Return'
     o 'STATEMENT', value: '$1'
     x 'Import | Export'
   ]
-
-  Expression: x 'Value | Code | Operation | Assign | If | Try | While | For | Switch | Class | Throw | Yield'
-
-  ExpressionLine: x 'CodeLine | IfLine | OperationLine'
 
   Yield: [
     o 'YIELD'                      , argument: value: ''
@@ -59,10 +81,6 @@ grammar =
     o 'INDENT OUTDENT'     , statements: []
     x 'INDENT Body OUTDENT', '$2'
   ]
-
-  Identifier: o 'IDENTIFIER',                  name: '$1'
-
-  Property: o 'PROPERTY',                      name: '$1'
 
   AlphaNumeric: [
     o 'NUMBER', value: '$1', parsedValue: '$parsedValue'
@@ -111,8 +129,6 @@ grammar =
     o 'SimpleObjAssignable = Expression'               , left: '$1', right: '$3'
     o 'SimpleObjAssignable = INDENT Expression OUTDENT', left: '$1', right: '$4'
   ]
-
-  SimpleObjAssignable: x 'Identifier | Property | ThisProperty'
 
   ObjAssignable: [
     x 'SimpleObjAssignable | AlphaNumeric'
@@ -171,8 +187,6 @@ grammar =
     o '=>', type: 'bound'
   ]
 
-  OptComma: opt ',', true, false
-
   ParamList: [
     o ''                                   , []
     list 'Param'                           , ','
@@ -188,8 +202,6 @@ grammar =
     o '...'                  , expansion: true
   ]
 
-  ParamVar: x 'Identifier | ThisProperty | Array | Object'
-
   Splat: [
     o 'Expression ...', argument: '$1', postfix: true
     o '... Expression', argument: '$2', postfix: false
@@ -201,10 +213,6 @@ grammar =
     o 'Code Accessor' , object: '$1', property: '$2'
     x 'ThisProperty'
   ]
-
-  Assignable: x 'SimpleAssignable | Array | Object'
-
-  Value: x 'Assignable | Literal | Parenthetical | Range | Invocation | DoIife | This | Super | MetaProperty'
 
   Super: [
     o 'SUPER . Property'                      , property: '$3'
@@ -237,10 +245,6 @@ grammar =
     o 'Expression', index: '$1'
     x 'Slice | Regex | RegexWithIndex'
   ]
-
-  RegexWithIndex: o 'Regex , Expression',      regex: '$1', index: '$3'
-
-  Object: o '{ AssignList OptComma }',         properties: '$2', generated: '$generated'
 
   AssignList: [
     o ''                                        , []
@@ -291,10 +295,6 @@ grammar =
     o 'DEFAULT AS Identifier'   , imported: 'default', local: '$3'
   ]
 
-  ImportDefaultSpecifier: o 'Identifier',      type: 'default', local: '$1'
-
-  ImportNamespaceSpecifier: o 'IMPORT_ALL AS Identifier', type: 'namespace', local: '$3'
-
   Export: [
     o 'EXPORT { }'                                         , specifiers: []
     o 'EXPORT { ExportSpecifierList OptComma }'            , specifiers: '$3'
@@ -334,16 +334,10 @@ grammar =
     o 'DYNAMIC_IMPORT Arguments'    , callee: 'import', arguments: '$2', dynamic: true
   ]
 
-  OptFuncExist: opt 'FUNC_EXIST', { soak: true }, { soak: false }
-
   Arguments: [
     o 'CALL_START CALL_END'                 , []
     o 'CALL_START ArgList OptComma CALL_END', '$2'
   ]
-
-  This: o 'THIS | @',                          type: 'this'
-
-  ThisProperty: o '@ Property',                object: '@', property: '$2'
 
   Array: [
     o '[ ]'                           , elements: []
@@ -492,8 +486,6 @@ grammar =
     o 'FOR OWN ForVariables'  , name: '$3[0]', index: '$3[1]', own: true
   ]
 
-  ForValue: x 'Identifier | ThisProperty | Array | Object'
-
   ForVariables: [
     o 'ForValue'           , ['$1']
     o 'ForValue , ForValue', ['$1', '$3']
@@ -616,8 +608,6 @@ grammar =
     o 'SimpleAssignable COMPOUND_ASSIGN INDENT Expression OUTDENT', left: '$1', operator: '$2', right: '$4'
     o 'SimpleAssignable COMPOUND_ASSIGN TERMINATOR Expression', left: '$1', operator: '$2', right: '$4'
   ]
-
-  DoIife: o 'DO_IIFE Code',                    operator: '$1', argument: '$2'
 
 export default
   bnf: processGrammar grammar
