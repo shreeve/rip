@@ -977,6 +977,8 @@ export class Lexer {
       tag = 'SHIFT';
     } else if (value === '?' && (prev != null ? prev.spaced : void 0)) {
       tag = 'BIN?';
+    } else if (value === '|') {
+      tag = 'BAR';
     } else if (prev) {
       if (value === '(' && !prev.spaced && (ref4 = prev[0], CALLABLE.includes(ref4))) {
         if (prev[0] === '?') {
