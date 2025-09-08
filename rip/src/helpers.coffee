@@ -3,16 +3,16 @@
 # arrays, count characters, that sort of thing.
 
 # Peek at the beginning of a given string to see if it matches a sequence.
-export starts = (string, literal, start) ->
+starts = (string, literal, start) ->
   literal is string.substr start, literal.length
 
 # Peek at the end of a given string to see if it matches a sequence.
-export ends = (string, literal, back) ->
+ends = (string, literal, back) ->
   len = literal.length
   literal is string.substr string.length - len - (back or 0), len
 
 # Repeat a string `n` times.
-export repeat = (str, n) ->
+repeat = (str, n) ->
   # Use clever algorithm to have O(log(n)) string concatenation operations.
   res = ''
   while n > 0
@@ -22,11 +22,11 @@ export repeat = (str, n) ->
   res
 
 # Trim out all falsy values from an array.
-export compact = (array) ->
+compact = (array) ->
   item for item in array when item
 
 # Count the number of occurrences of a string in a string.
-export count = (string, substr) ->
+count = (string, substr) ->
   num = pos = 0
   return 1/0 unless substr.length
   num++ while pos = 1 + string.indexOf substr, pos
@@ -35,36 +35,36 @@ export count = (string, substr) ->
 # Merge objects, returning a fresh copy with attributes from both sides.
 # Used every time `Base#compile` is called, to allow properties in the
 # options hash to propagate down the tree without polluting other branches.
-export merge = (options, overrides) ->
+merge = (options, overrides) ->
   extend (extend {}, options), overrides
 
 # Extend a source object with the properties of another object (shallow copy).
-export extend = (object, properties) ->
+extend = (object, properties) ->
   for key, val of properties
     object[key] = val
   object
 
 # Return a flattened version of an array.
 # Handy for getting a list of `children` from the nodes.
-export flatten = (array) ->
+flatten = (array) ->
   array.flat(Infinity)
 
 # Delete a key from an object, returning the value. Useful when a node is
 # looking for a particular method in an options hash.
-export del = (obj, key) ->
+del = (obj, key) ->
   val = obj[key]
   delete obj[key]
   val
 
 # Typical Array::some
-export some = Array::some ? (fn) ->
+some = Array::some ? (fn) ->
   return true for e in this when fn e
   false
 
 # Helper function for extracting code from Literate Rip by stripping
 # out all non-code blocks, producing a string of Rip code that can
 # be compiled "normally."
-export invertLiterate = (code) ->
+invertLiterate = (code) ->
   out = []
   blankLine = /^\s*$/
   indented = /^[\t ]/
@@ -110,7 +110,7 @@ buildLocationData = (first, last) ->
     ]
 
 # Build a list of all comments attached to tokens.
-export extractAllCommentTokens = (tokens) ->
+extractAllCommentTokens = (tokens) ->
   allCommentsObj = {}
   for token in tokens when token.comments
     for comment in token.comments
@@ -129,7 +129,7 @@ buildLocationHash = (loc) ->
 
 # Build a dictionary of extra token properties organized by tokens' locations
 # used as lookup hashes.
-export buildTokenDataDictionary = (tokens) ->
+buildTokenDataDictionary = (tokens) ->
   tokenData = {}
   for token in tokens when token.comments
     tokenHash = buildLocationHash token[2]
@@ -148,7 +148,7 @@ export buildTokenDataDictionary = (tokens) ->
 # This returns a function which takes an object as a parameter, and if that
 # object is an AST node, updates that object's locationData.
 # The object is returned either way.
-export addDataToNode = (parserState, firstLocationData, firstValue, lastLocationData, lastValue, forceUpdateLocation = yes) ->
+addDataToNode = (parserState, firstLocationData, firstValue, lastLocationData, lastValue, forceUpdateLocation = yes) ->
   (obj) ->
     # Add location data.
     locationData = buildLocationData(firstValue?.locationData ? firstLocationData, lastValue?.locationData ? lastLocationData)
@@ -166,14 +166,14 @@ export addDataToNode = (parserState, firstLocationData, firstValue, lastLocation
         attachCommentsToNode parserState.tokenData[objHash].comments, obj
     obj
 
-export attachCommentsToNode = (comments, node) ->
+attachCommentsToNode = (comments, node) ->
   return if not comments? or comments.length is 0
   node.comments ?= []
   node.comments.push comments...
 
 # Convert jison location data to a string.
 # `obj` can be a token, or a locationData.
-export locationDataToString = (obj) ->
+locationDataToString = (obj) ->
   if ("2" of obj) and ("first_line" of obj[2]) then locationData = obj[2]
   else if "first_line" of obj then locationData = obj
 
@@ -185,13 +185,13 @@ export locationDataToString = (obj) ->
 
 # Generate a unique anonymous file name so we can distinguish source map cache
 # entries for any number of anonymous scripts.
-export anonymousFileName = do ->
+anonymousFileName = do ->
   n = 0
   ->
     "<anonymous-#{n++}>"
 
 # A `.rip` compatible version of `basename`, that returns the file sans-extension.
-export baseFileName = (file, stripExt = no, useWinPathSep = no) ->
+baseFileName = (file, stripExt = no, useWinPathSep = no) ->
   pathSep = if useWinPathSep then /\\|\// else /\//
   parts = file.split(pathSep)
   file = parts[parts.length - 1]
@@ -202,16 +202,16 @@ export baseFileName = (file, stripExt = no, useWinPathSep = no) ->
   parts.join('.')
 
 # Determine if a filename represents a Rip file.
-export isRip = (file) -> /\.rip$/.test file
+isRip = (file) -> /\.rip$/.test file
 
 # Determine if a filename represents a Literate Rip file.
-export isLiterate = (file) -> /\.litrip$/.test file
+isLiterate = (file) -> /\.litrip$/.test file
 
 # Throws a SyntaxError from a given location.
 # The error's `toString` will return an error message following the "standard"
 # format `<filename>:<line>:<col>: <message>` plus the line with the error and a
 # marker showing where the error is.
-export throwSyntaxError = (message, location) ->
+throwSyntaxError = (message, location) ->
   error = new SyntaxError message
   error.location = location
   error.toString = syntaxErrorToString
@@ -225,7 +225,7 @@ export throwSyntaxError = (message, location) ->
 
 # Update a compiler SyntaxError with source code information if it didn't have
 # it already.
-export updateSyntaxError = (error, code, filename) ->
+updateSyntaxError = (error, code, filename) ->
   # Avoid screwing up the `stack` property of other errors (i.e. possible bugs).
   if error.toString is syntaxErrorToString
     error.code or= code
@@ -266,7 +266,7 @@ syntaxErrorToString = ->
     #{marker}
   """
 
-export nameWhitespaceCharacter = (string) ->
+nameWhitespaceCharacter = (string) ->
   switch string
     when ' ' then 'space'
     when '\n' then 'newline'
@@ -274,7 +274,7 @@ export nameWhitespaceCharacter = (string) ->
     when '\t' then 'tab'
     else string
 
-export parseNumber = (string) ->
+parseNumber = (string) ->
   return NaN unless string?
 
   base = switch string.charAt 1
@@ -288,11 +288,11 @@ export parseNumber = (string) ->
   else
     parseFloat string.replace(/_/g, '')
 
-export isFunction = (obj) -> Object::toString.call(obj) is '[object Function]'
-export isNumber = (obj) -> Object::toString.call(obj) is '[object Number]'
-export isString = (obj) -> Object::toString.call(obj) is '[object String]'
-export isBoolean = (obj) -> obj is yes or obj is no or Object::toString.call(obj) is '[object Boolean]'
-export isPlainObject = (obj) -> typeof obj is 'object' and !!obj and not Array.isArray(obj) and not isNumber(obj) and not isString(obj) and not isBoolean(obj)
+isFunction = (obj) -> Object::toString.call(obj) is '[object Function]'
+isNumber = (obj) -> Object::toString.call(obj) is '[object Number]'
+isString = (obj) -> Object::toString.call(obj) is '[object String]'
+isBoolean = (obj) -> obj is yes or obj is no or Object::toString.call(obj) is '[object Boolean]'
+isPlainObject = (obj) -> typeof obj is 'object' and !!obj and not Array.isArray(obj) and not isNumber(obj) and not isString(obj) and not isBoolean(obj)
 
 unicodeCodePointToUnicodeEscapes = (codePoint) ->
   toUnicodeEscape = (val) ->
@@ -305,7 +305,7 @@ unicodeCodePointToUnicodeEscapes = (codePoint) ->
   "#{toUnicodeEscape(high)}#{toUnicodeEscape(low)}"
 
 # Replace `\u{...}` with `\uxxxx[\uxxxx]` in regexes without `u` flag
-export replaceUnicodeCodePointEscapes = (str, {flags, error, delimiter = ''} = {}) ->
+replaceUnicodeCodePointEscapes = (str, {flags, error, delimiter = ''} = {}) ->
   shouldReplace = flags? and 'u' not in flags
   str.replace UNICODE_CODE_POINT_ESCAPE, (match, escapedBackslash, codePointHex, offset) ->
     return escapedBackslash if escapedBackslash
@@ -324,3 +324,14 @@ UNICODE_CODE_POINT_ESCAPE = ///
   |
   \\u\{ ( [\da-fA-F]+ ) \}
 ///g
+
+# Export all helper functions
+module.exports = {
+  starts, ends, repeat, compact, count, merge, extend, flatten, del, some,
+  invertLiterate, extractAllCommentTokens, buildTokenDataDictionary,
+  addDataToNode, attachCommentsToNode, locationDataToString,
+  anonymousFileName, baseFileName, isRip, isLiterate,
+  throwSyntaxError, updateSyntaxError, nameWhitespaceCharacter,
+  parseNumber, isFunction, isNumber, isString, isBoolean,
+  isPlainObject, replaceUnicodeCodePointEscapes
+}

@@ -8,7 +8,7 @@
 #   Date: September 7, 2025
 # ==============================================================================
 
-import {version} from '../package.json'
+{version} = require '../package.json'
 
 # Terminal symbols (tokens, cannot be expanded)
 class Terminal
@@ -59,7 +59,7 @@ class LRState
 # SLR(1) Parser Generator
 # ==============================================================================
 
-export class Generator
+class Generator
   constructor: (grammar, options = {}) ->
 
     # Configuration
@@ -140,34 +140,73 @@ export class Generator
         @symbolTable.set name, symbol
       @symbolIds[name] = symbol.id
 
-    # Process nonterminals and their productions
-    for own symbol, rules of bnf
-      addSymbol symbol
-      nonterminals[symbol] = @symbolTable.get symbol
+    # Process a single production (from o() or x())
+    processProduction = (lhs, pattern, nodeSpec, precedence) =>
+      # Handle pipe syntax in pattern - split into multiple productions
+      patterns = if pattern.includes '|'
+        pattern.split('|').map (p) -> p.trim()
+      else
+        [pattern]
 
-      handles = if typeof rules is 'string' then rules.split(/\s*\|\s*/g) else [...rules]
+      for singlePattern in patterns
+        # Split pattern into rhs array
+        rhs = singlePattern.trim().split(/\s+/g).filter(Boolean)
+        rhs.push('') if rhs.length is 0  # Handle empty pattern
 
-      for handle in handles
-        [rhs, action, precedence] = @_parseHandle handle
+        # Add symbols for each element in rhs
+        for token in rhs when token
+          addSymbol token
 
-        # Add symbols to grammar
-        addSymbol token for token in rhs
+        # Process the node/action specification
+        action = null
+        if nodeSpec isnt undefined
+          action = @_expandNodeSpec lhs, nodeSpec, rhs
 
-        # Process semantic actions
+        # Generate action code
         if action
-          action = @_processSemanticAction action, rhs
+          # Convert action object to string if needed
+          actionStr = if typeof action is 'string'
+            action
+          else if typeof action is 'object'
+            # Convert object to JSON-like assignment
+            "this.$ = " + JSON.stringify(action)
+          else
+            "this.$ = " + JSON.stringify(action)
+
+          processedAction = @_processSemanticAction actionStr, rhs
           label = 'case ' + (productions.length + 1) + ':'
-          actionGroups[action]?.push(label) or actionGroups[action] = [label]
+          actionGroups[processedAction]?.push(label) or actionGroups[processedAction] = [label]
 
         # Create production
-        production = new Production symbol, rhs, productions.length + 1
+        production = new Production lhs, rhs, productions.length + 1
 
         # Set precedence
         @_assignPrecedence production, precedence, operators, nonterminals
 
         productions.push production
-        productionTable.push [@symbolIds[symbol], if rhs[0] is '' then 0 else rhs.length]
-        nonterminals[symbol].productions.push production
+        productionTable.push [@symbolIds[lhs], if rhs[0] is '' then 0 else rhs.length]
+        nonterminals[lhs].productions.push production
+
+    # Process all grammar rules
+    for own lhs, rules of bnf
+      addSymbol lhs
+      nonterminals[lhs] = @symbolTable.get lhs
+
+      # Handle both array format and single production format
+      if Array.isArray rules
+        # Multiple productions in array
+        for handle in rules
+          [pattern, nodeSpec, precedence] = handle
+          processProduction lhs, pattern, nodeSpec, precedence
+      else if typeof rules is 'object' and rules.pattern
+        # Single production from inline syntax (e.g., Line: x 'Expression')
+        # Expecting rules = { pattern: 'Expression', type: 'x', spec: ... }
+        processProduction lhs, rules.pattern, rules.spec, rules.precedence
+      else
+        # Legacy string format (fallback)
+        patterns = rules.split /\s*\|\s*/g
+        for pattern in patterns
+          processProduction lhs, pattern, null, null
 
     # Generate parser components
     actionsCode = @_generateActionCode actionGroups
@@ -192,6 +231,37 @@ export class Generator
       handle = handle.replace /\[[a-zA-Z_][a-zA-Z0-9_-]*\]/g, ''
       rhs = handle.trim().split ' '
       [rhs, null, null]
+
+  # New helper method to expand node specifications based on o/x semantics
+  _expandNodeSpec: (lhs, nodeSpec, rhs) ->
+    # If nodeSpec is from x() function (pass-through)
+    if typeof nodeSpec is 'string' and nodeSpec.startsWith '$'
+      return nodeSpec  # Pass through position
+
+    # If nodeSpec is a boolean, null, or number (literal from x())
+    if typeof nodeSpec is 'boolean' or nodeSpec is null or typeof nodeSpec is 'number'
+      return nodeSpec
+
+    # If nodeSpec is an array (array literal from o())
+    if Array.isArray nodeSpec
+      return { $array: nodeSpec }
+
+    # If nodeSpec is an object (from o())
+    if typeof nodeSpec is 'object'
+      # Handle special operators
+      if nodeSpec.$concat or nodeSpec.$array or nodeSpec.$passthrough
+        return nodeSpec
+
+      # Auto-add type if not present (for o() function)
+      if not nodeSpec.type and not nodeSpec.$noType
+        result = { type: lhs }
+        result[k] = v for k, v of nodeSpec
+        return result
+
+      return nodeSpec
+
+    # Default pass-through for x() with no spec
+    '$1'
 
   _processSemanticAction: (action, rhs) ->
     # Process named semantic values
@@ -822,8 +892,11 @@ export class Generator
 # Exports
 # ==============================================================================
 
-export createParser = (grammar, options = {}) ->
+createParser = (grammar, options = {}) ->
   new Generator(grammar, options).createParser()
+
+# Export the Generator class and createParser function
+module.exports = { Generator, createParser }
 
 # ==============================================================================
 # CLI Interface

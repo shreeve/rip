@@ -1,14 +1,12 @@
 # Rip Language - Main entry point
 # Multi-runtime support: Bun (primary), Deno, Node.js, Browser
 
-export { Compiler } from './compiler.rip'
-export { Lexer } from './lexer.rip'
-export { Rewriter } from './rewriter.rip'
-export { default as Solar } from './solar.rip'
-export { version } from '../package.json'
+{ Lexer } = require './lexer'
+{ Rewriter } = require './rewriter'
+{ version } = require '../package.json'
 
 # Platform detection helper
-export getPlatform = ->
+getPlatform = ->
   if typeof Bun isnt 'undefined'
     { runtime: 'bun', version: Bun.version }
   else if typeof Deno isnt 'undefined'
@@ -20,3 +18,6 @@ export getPlatform = ->
   else
     { runtime: 'unknown', version: 'unknown' }
 
+
+# Export all components
+module.exports = { Lexer, Rewriter, version, getPlatform }

@@ -5,7 +5,7 @@
 # shorthand into the unambiguous long form, add implicit indentation and
 # parentheses, and generally clean things up.
 
-import {throwSyntaxError, extractAllCommentTokens} from './helpers.js'
+{throwSyntaxError, extractAllCommentTokens} = require './helpers'
 
 # Move attached comments from one token to another.
 moveComments = (fromToken, toToken) ->
@@ -33,7 +33,7 @@ generate = (tag, value, origin, commentsToken) ->
 
 # The **Rewriter** class is used by the [Lexer](lexer.html), directly against
 # its internal array of tokens.
-export class Rewriter
+class Rewriter
 
   # Rewrite the token stream in multiple passes, one logical filter at
   # a time. This could certainly be changed into a single pass through the
@@ -793,7 +793,7 @@ BALANCED_PAIRS = [
 
 # The inverse mappings of `BALANCED_PAIRS` we're trying to fix up, so we can
 # look things up from either end.
-export INVERSES = {}
+INVERSES = {}
 
 # The tokens that signal the start/end of a balanced pair.
 EXPRESSION_START = []
@@ -849,6 +849,9 @@ DISCARDED = ['(', ')', '[', ']', '{', '}', ':', '.', '..', '...', ',', '=', '++'
 ].concat IMPLICIT_UNSPACED_CALL.concat IMPLICIT_END.concat CALL_CLOSERS.concat CONTROL_IN_IMPLICIT
 
 # Tokens that, when appearing at the end of a line, suppress a following TERMINATOR/INDENT token
-export UNFINISHED = ['\\', '.', '?.', '?::', 'UNARY', 'DO', 'DO_IIFE', 'MATH', 'UNARY_MATH', '+', '-',
+UNFINISHED = ['\\', '.', '?.', '?::', 'UNARY', 'DO', 'DO_IIFE', 'MATH', 'UNARY_MATH', '+', '-',
            '**', 'SHIFT', 'RELATION', 'COMPARE', '&', '^', '|', '&&', '||',
            'BIN?', 'EXTENDS']
+
+# Export the Rewriter class and constants
+module.exports = { Rewriter, INVERSES, UNFINISHED }

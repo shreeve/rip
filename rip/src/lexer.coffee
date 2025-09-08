@@ -8,12 +8,12 @@
 # where locationData is {first_line, first_column, last_line, last_column, last_line_exclusive, last_column_exclusive}, which is a
 # format that can be fed directly into the parser. These are read by the parser in the `parser.lexer` function.
 
-import {Rewriter, INVERSES, UNFINISHED} from './rewriter.js'
+{Rewriter, INVERSES, UNFINISHED} = require './rewriter'
 
 # Import the helpers we need.
-import {count, starts, compact, repeat, merge,
+{count, starts, compact, repeat, merge,
 attachCommentsToNode, locationDataToString, throwSyntaxError,
-replaceUnicodeCodePointEscapes, flatten, parseNumber} from './helpers.js'
+replaceUnicodeCodePointEscapes, flatten, parseNumber} = require './helpers'
 
 # The Lexer Class
 # ---------------
@@ -21,7 +21,7 @@ replaceUnicodeCodePointEscapes, flatten, parseNumber} from './helpers.js'
 # The Lexer class reads a stream of Rip and divvies it up into tagged
 # tokens. Some potential ambiguity in the grammar has been avoided by
 # pushing some extra smarts into the Lexer.
-export class Lexer
+class Lexer
 
   # **tokenize** is the Lexer's main method. Scan by attempting to match tokens
   # one at a time, using a regular expression anchored at the start of the
@@ -1051,7 +1051,7 @@ isUnassignable = (name, displayName = name) -> switch
   else
     false
 
-export {isUnassignable}
+# isUnassignable is used internally and exported
 
 # `from` isn't a Rip keyword, but it behaves like one in `import` and
 # `export` statements (handled above) and in the declaration line of a `for`
@@ -1119,7 +1119,7 @@ STRICT_PROSCRIBED = ['arguments', 'eval']
 
 # The superset of both JavaScript keywords and reserved words, none of which may
 # be used as identifiers or properties.
-export JS_FORBIDDEN = JS_KEYWORDS.concat(RESERVED).concat(STRICT_PROSCRIBED)
+JS_FORBIDDEN = JS_KEYWORDS.concat(RESERVED).concat(STRICT_PROSCRIBED)
 
 # The character code of the nasty Microsoft madness otherwise known as the BOM.
 BOM = 65279
@@ -1287,3 +1287,6 @@ LINE_BREAK = ['INDENT', 'OUTDENT', 'TERMINATOR']
 
 # Additional indent in front of these is ignored.
 INDENTABLE_CLOSERS = [')', '}', ']']
+
+# Export the Lexer class and utilities
+module.exports = { Lexer, isUnassignable, JS_FORBIDDEN }
