@@ -19,7 +19,7 @@ Meta properties (new.target, import.meta)
 Assignment lists (for objects)
 ###
 
-import { o, x, binOp, unaryOp, list, star, plus, opt, wrapped, keywords, processGrammar } from './grammar-helpers'
+{ o, x, binOp, unaryOp, list, star, plus, opt, wrapped, keywords, processGrammar } = require './grammar-helpers'
 
 grammar =
 
@@ -609,7 +609,7 @@ grammar =
     o 'SimpleAssignable COMPOUND_ASSIGN TERMINATOR Expression', left: '$1', operator: '$2', right: '$4'
   ]
 
-export default
+module.exports =
   bnf: processGrammar grammar
   operators: """
     right       DO_IIFE
@@ -638,4 +638,4 @@ export default
     right       FORIN FOROF FORFROM BY WHEN
     right       IF ELSE THEN FOR WHILE UNTIL LOOP SUPER CLASS IMPORT EXPORT DYNAMIC_IMPORT
     left        POST_IF
-  """.trim().split('\n').reverse().map (line) -> line.trim().split /\s+/ #!# FIXME: Convert to ES6
+  """.trim().split('\n').reverse().map (line) -> line.trim().split /\s+/
