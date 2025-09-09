@@ -174,7 +174,7 @@ processCode = (code, options) ->
     if options.tokens
       console.log "📝 Token Stream:"
       console.log "─────────────────"
-      showAll = options.verbose or process.env.DEBUG
+      showAll = true  # Always show all tokens for debugging
       console.log formatTokens(tokens, showAll)
       console.log ''
       console.log "Total tokens: #{tokens.length} (#{tokens.filter((t) -> t[0] is 'TERMINATOR').length} terminators)"
