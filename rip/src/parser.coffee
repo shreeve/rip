@@ -129,6 +129,7 @@ class Generator
 
     return node if t is 'string' and node[0] is '$' # x() pass-through
     return node if t in ['boolean','number'] or node is null # literals
+    return { $array: node } if Array.isArray node # array literals
 
     if t is 'object'
       return node if node.$concat? or node.$array? or node.$passthrough?
