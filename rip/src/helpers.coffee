@@ -328,7 +328,7 @@ UNICODE_CODE_POINT_ESCAPE = ///
 # Export all helper functions
 module.exports = {
   starts, ends, repeat, compact, count, merge, extend, flatten, del, some,
-  invertLiterate, extractAllCommentTokens, buildTokenDataDictionary,
+  extractAllCommentTokens, buildTokenDataDictionary,
   addDataToNode, attachCommentsToNode, locationDataToString,
   anonymousFileName, baseFileName, isRip, isLiterate,
   throwSyntaxError, updateSyntaxError, nameWhitespaceCharacter,
