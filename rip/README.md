@@ -363,6 +363,25 @@ bun run rip examples/hello.rip
 - **Maintainable** - Clear separation of concerns
 - **Extensible** - Add new syntax without touching the core
 
+
+## Metadata available
+
+```
+$parsedValue - Parsed numeric value
+$original - Original text before alias conversion
+$invert - Inversion flag for relations
+$here - Heredoc flag for JS backticks
+$delimiter - Regex delimiter ('/' or '///')
+$quote - Quote style for strings
+$initialChunk - First part marker
+$finalChunk - Last part marker
+$indent - Indentation for heredocs
+$double - Double-quoted flag
+$heregex - Heregex flag
+$heregexCommentTokens - Comments in heregex
+$generated - Synthetic token flag
+```
+
 ## Contributing
 
 Rip is in active development. We welcome contributions in:
