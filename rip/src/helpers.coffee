@@ -68,12 +68,12 @@ invertLiterate = (code) ->
   out = []
   blankLine = /^\s*$/
   indented = /^[\t ]/
-  listItemStart = ///
-    ^
-    (?:\t?|\ {0,3})   # Up to one tab, or up to three spaces, or neither;
+  listItemStart = /// ^
+    (?:\t?|\ {0,3})       # Up to one tab, or up to three spaces, or neither;
     (?:
-      [\*\-\+] |      # followed by `*`, `-` or `+`;
-      [0-9]{1,9}\.    # or by an integer up to 9 digits long, followed by a period;
+      [*\-+] |            # followed by `*`, `-` or `+`;
+      \d{1,9}\. |         # or by an integer up to 9 digits long, followed by a period;
+      \d{1,9}\)           # or by an integer up to 9 digits long, followed by a closing parenthesis.
     )
     [\ \t]            # followed by a space or a tab.
   ///
@@ -82,32 +82,12 @@ invertLiterate = (code) ->
     if blankLine.test(line)
       insideComment = no
       out.push line
-    else if insideComment or listItemStart.test(line)
+    else if insideComment or listItemStart.test(line) or not indented.test(line)
       insideComment = yes
       out.push "# #{line}"
-    else if not insideComment and indented.test(line)
-      out.push line
     else
-      insideComment = yes
-      out.push "# #{line}"
+      out.push line
   out.join '\n'
-
-# Merge two jison-style location data objects together.
-# If `last` is not provided, this will simply return `first`.
-buildLocationData = (first, last) ->
-  if not last
-    first
-  else
-    first_line: first.first_line
-    first_column: first.first_column
-    last_line: last.last_line
-    last_column: last.last_column
-    last_line_exclusive: last.last_line_exclusive
-    last_column_exclusive: last.last_column_exclusive
-    range: [
-      first.range[0]
-      last.range[1]
-    ]
 
 # Build a list of all comments attached to tokens.
 extractAllCommentTokens = (tokens) ->
