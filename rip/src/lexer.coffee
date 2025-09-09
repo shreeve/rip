@@ -319,6 +319,7 @@ class Lexer
     @mergeInterpolationTokens tokens, {quote, indent, endOffset: end}, (value) =>
       @validateUnicodeCodePointEscapes value, delimiter: quote
 
+
     end
 
   # Matches and consumes comments. The comments are taken out of the token
@@ -678,8 +679,8 @@ class Lexer
     else if value in UNARY           then tag = 'UNARY'
     else if value in UNARY_MATH      then tag = 'UNARY_MATH'
     else if value in SHIFT           then tag = 'SHIFT'
-    else if value is '?' and prev?.spaced then tag = 'BIN?'
     else if value is '|'             then tag = 'BAR'
+    else if value is '?' and prev?.spaced then tag = 'BIN?'
     else if prev
       if value is '(' and not prev.spaced and prev[0] in CALLABLE
         prev[0] = 'FUNC_EXIST' if prev[0] is '?'
@@ -770,31 +771,49 @@ class Lexer
       offsetInChunk += strPart.length
 
       break unless match = interpolators.exec str
-
       [interpolator] = match
-      interpolator = interpolator[1..] # Remove leading '#{' to get '{'
-      # Look for the end of the interpolation.
-      [line, column, offset] = @getLineAndColumnFromChunk offsetInChunk + 1
-      {tokens: nested, index} =
-        new Lexer().tokenize interpolator,
-          {line, column, offset, untilBalanced: yes, locationDataCompensations: @locationDataCompensations}
-      # Account for the `#`.
-      index += 1
 
-      # Make sure that the closing curly brace we found is immediately followed by another curly brace.
-      # (In the case of #{foo}, the closing } in the original source is at the index indicated by `index`.)
-      unless str[index] is '}'
-        @error "missing }", offset: offsetInChunk + 2
+      # To remove the `#` in `#{`.
+      interpolationOffset = interpolator.length - 1
+      [line, column, offset] = @getLineAndColumnFromChunk offsetInChunk + interpolationOffset
+      rest = str[interpolationOffset..]
+      {tokens: nested, index} =
+        new Lexer().tokenize rest, {line, column, offset, untilBalanced: on, @locationDataCompensations}
+      # Account for the `#` in `#{`.
+      index += interpolationOffset
+
+      braceInterpolator = str[index - 1] is '}'
+      if braceInterpolator
+        # Turn the leading and trailing `{` and `}` into parentheses. Unnecessary
+        # parentheses will be removed later.
+        [open, ..., close] = nested
+        open[0]  = 'INTERPOLATION_START'
+        open[1]  = '('
+        open[2].first_column -= interpolationOffset
+        open[2].range = [
+          open[2].range[0] - interpolationOffset
+          open[2].range[1]
+        ]
+        close[0]  = 'INTERPOLATION_END'
+        close[1] = ')'
+        close.origin = ['', 'end of interpolation', close[2]]
+
+      # Remove leading `'TERMINATOR'` (if any).
+      nested.splice 1, 1 if nested[1]?[0] is 'TERMINATOR'
+      # Remove trailing `'INDENT'/'OUTDENT'` pair (if any).
+      nested.splice -3, 2 if nested[nested.length - 3]?[0] is 'INDENT' and nested[nested.length - 2][0] is 'OUTDENT'
+
+      unless braceInterpolator
+        # We are not using `{` and `}`, so wrap the interpolated tokens instead.
+        open = @makeToken 'INTERPOLATION_START', '(', offset: offsetInChunk,         length: 0, generated: yes
+        close = @makeToken 'INTERPOLATION_END', ')',  offset: offsetInChunk + index, length: 0, generated: yes
+        nested = [open, nested..., close]
 
       # Push a fake `'TOKENS'` token, which will get turned into real tokens later.
-      nested.unshift @makeToken('(', '(',   offset: offsetInChunk,                      length: 2, generated: yes)
-      nested.push    @makeToken(')', ')',   offset: offsetInChunk + index,             length: 1, generated: yes)
-      # Remove leading and trailing parentheses
-      nested[0][0] = nested[nested.length - 1][0] = 'INTERPOLATION'
-      tokens.push @makeToken 'TOKENS', nested, offset: offsetInChunk, length: index + 1
+      tokens.push ['TOKENS', nested]
 
-      str = str[index + 1..]
-      offsetInChunk += index + 1
+      str = str[index..]
+      offsetInChunk += index
 
     unless str[...closingDelimiter.length] is closingDelimiter
       @error "missing #{closingDelimiter}", length: delimiter.length
@@ -1050,8 +1069,6 @@ isUnassignable = (name, displayName = name) -> switch
     "reserved word '#{displayName}' can't be assigned"
   else
     false
-
-# isUnassignable is used internally and exported
 
 # `from` isn't a Rip keyword, but it behaves like one in `import` and
 # `export` statements (handled above) and in the declaration line of a `for`
