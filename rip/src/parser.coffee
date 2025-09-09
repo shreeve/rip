@@ -127,10 +127,8 @@ class Generator
   _expandNode: (lhs, node, rhs) ->
     # Handle grammar-helpers wrapper format
     if node?.$node?
-      console.log "  Unwrapping $node for #{lhs}:", node.$node if lhs in ['Root', 'Body', 'Line', 'Expression', 'Value', 'Literal']
       node = node.$node
     else if node?.$pass?
-      console.log "  Unwrapping $pass for #{lhs}:", node.$pass if lhs in ['Root', 'Body', 'Line', 'Expression', 'Value', 'Literal']
       return node.$pass
 
     t = typeof node
