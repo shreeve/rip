@@ -64,7 +64,7 @@ class Generator
   constructor: (grammar, options = {}) ->
 
     # Configuration
-    @options = {...grammar.options, ...options}
+    @options = { ...grammar.options, ...options }
     @parseParams = grammar.parseParams
     @yy = {}
 
@@ -121,7 +121,7 @@ class Generator
     operators = {}
     for precedence, i in ops
       for k in [1...precedence.length]
-        operators[precedence[k]] = {precedence: i + 1, assoc: precedence[0]}
+        operators[precedence[k]] = { precedence: i + 1, assoc: precedence[0] }
     operators
 
   _expandNode: (lhs, node, rhs) ->
@@ -129,12 +129,11 @@ class Generator
 
     return node if t is 'string' and node[0] is '$' # x() pass-through
     return node if t in ['boolean','number'] or node is null # literals
-    return {$array: node} if Array.isArray node # array literals
 
     if t is 'object'
       return node if node.$concat? or node.$array? or node.$passthrough?
       return node if node.type? or node.$noType?
-      return {type: lhs, ...node}  # auto-add type for o() if missing
+      return { type: lhs, ...node }  # auto-add type for o() if missing
 
     '$1'  # default x() pass-through
 
@@ -186,11 +185,8 @@ class Generator
           [pattern, node, precedence] = handle
           processProduction lhs, pattern, node, precedence
       else if typeof rules is 'object' and rules.pattern
-        # Single production from inline syntax (e.g., Line: x 'Expression')
-        # Expecting rules = {pattern: 'Expression', type: 'x', spec: ...}
         processProduction lhs, rules.pattern, rules.spec, rules.precedence
       else
-        # Legacy string format (fallback)
         patterns = rules.split /\s*\|\s*/g
         for pattern in patterns
           processProduction lhs, pattern, null, null
@@ -563,7 +559,7 @@ class Generator
 
   # Resolve conflicts using precedence and associativity
   _resolveConflict: (production, op, reduce, shift) ->
-    solution = {production, operator: op, r: reduce, s: shift}
+    solution = { production, operator: op, r: reduce, s: shift }
     [NONASSOC, SHIFT, REDUCE] = [0, 1, 2]
 
     if shift[0] is REDUCE
@@ -607,7 +603,7 @@ class Generator
   # ============================================================================
 
   generate: (options = {}) ->
-    @options = {...@options, ...options}
+    @options = { ...@options, ...options }
     parserCode = @generateModule @options
 
     if @options.compress
@@ -629,7 +625,7 @@ class Generator
       #{module.commonCode}
       const parser = #{module.moduleCode};
       #{@moduleInclude}
-      function Parser () {this.yy = {};}
+      function Parser () { this.yy = {}; }
       Parser.prototype = parser;
       parser.Parser = Parser;
       return new Parser;
@@ -652,11 +648,11 @@ class Generator
       parse: function #{@parse}
     }"""
 
-    {commonCode: tableCode.commonCode, moduleCode}
+    { commonCode: tableCode.commonCode, moduleCode }
 
   _generateTableCode: (stateTable) ->
     moduleCode = JSON.stringify(stateTable, null, 0).replace /"([0-9]+)"(?=:)/g, "$1"
-    {commonCode: '', moduleCode}
+    { commonCode: '', moduleCode }
 
   _compressParser: (parserCode) ->
     # Compress the entire parser with Brotli
@@ -738,7 +734,7 @@ class Generator
     [TERROR, EOF] = [2, 1]
 
     lexer = Object.create @lexer
-    sharedState = {yy: {}}
+    sharedState = { yy: {} }
     sharedState.yy[k] = v for own k, v of @yy
 
     lexer.setInput input, sharedState.yy
@@ -852,7 +848,7 @@ createParser = (grammar, options = {}) ->
   new Generator(grammar, options).createParser()
 
 # Export the Generator class and createParser function
-module.exports = {Generator, createParser}
+module.exports = { Generator, createParser }
 
 # ==============================================================================
 # CLI Interface
