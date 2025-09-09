@@ -185,10 +185,6 @@ processCode = (code, options) ->
       console.log "🌳 Abstract Syntax Tree:"
       console.log "────────────────────────"
 
-      # For now, remove TERMINATOR tokens entirely
-      # The parser seems to have issues with them
-      tokens = tokens.filter (t) -> t[0] isnt 'TERMINATOR'
-
       # Always show tokens in debug for now to diagnose the issue
       console.log "Tokens to parse (#{tokens.length} total):"
       for token, i in tokens[0..10]  # Show first 10 tokens
