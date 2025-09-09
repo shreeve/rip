@@ -94,11 +94,12 @@ extractAllCommentTokens = (tokens) ->
   allCommentsObj = {}
   for token in tokens when token.comments
     for comment in token.comments
-      commentKey = comment.locationData.range[0]
+      commentKey = "#{comment.locationData.first_line}-#{comment.locationData.first_column}"
       allCommentsObj[commentKey] = comment
-  sortedKeys = Object.keys(allCommentsObj).sort (a, b) -> a - b
-  for key in sortedKeys
-    allCommentsObj[key]
+  allComments = []
+  for k, comment of allCommentsObj
+    allComments.push comment
+  allComments
 
 # Get a lookup hash for a token based on its location data.
 # Multiple tokens might have the same location hash, but using exclusive
@@ -117,12 +118,8 @@ buildTokenDataDictionary = (tokens) ->
     # `JS` tokens added at the start or end of the token stream to hold
     # comments that start or end a file.
     tokenData[tokenHash] ?= {}
-    if token.comments # `comments` is always an array.
-      # For "overlapping" tokens, that is tokens with the same location data
-      # and therefore matching `tokenHash`es, merge the comments from both/all
-      # tokens together into one array, even if there are duplicate comments;
-      # they will get sorted out later.
-      (tokenData[tokenHash].comments ?= []).push token.comments...
+    tokenData[tokenHash].comments = token.comments if token.comments
+    tokenData[tokenHash].csx = token.csx if token.csx
   tokenData
 
 # This returns a function which takes an object as a parameter, and if that
@@ -130,28 +127,21 @@ buildTokenDataDictionary = (tokens) ->
 # The object is returned either way.
 addDataToNode = (parserState, firstLocationData, firstValue, lastLocationData, lastValue, forceUpdateLocation = yes) ->
   (obj) ->
-    # Add location data.
-    locationData = buildLocationData(firstValue?.locationData ? firstLocationData, lastValue?.locationData ? lastLocationData)
-    if obj?.updateLocationDataIfMissing? and firstLocationData?
-      obj.updateLocationDataIfMissing locationData, forceUpdateLocation
-    else
-      obj.locationData = locationData
-
-    # Add comments, building the dictionary of token data if it hasn't been
-    # built yet.
-    parserState.tokenData ?= buildTokenDataDictionary parserState.parser.tokens
-    if obj.locationData?
-      objHash = buildLocationHash obj.locationData
-      if parserState.tokenData[objHash]?.comments?
-        attachCommentsToNode parserState.tokenData[objHash].comments, obj
+    objHash = buildLocationHash obj.locationData
+    if obj.locationData? and (forceUpdateLocation or not parserState.tokenData[objHash]?)
+      obj.locationData = buildLocationData(firstLocationData, lastLocationData)
+    if parserState.tokenData[objHash]?.comments?
+      attachCommentsToNode parserState.tokenData[objHash].comments, obj
+    if parserState.tokenData[objHash]?.csx?
+      obj.csx = yes
     obj
 
-attachCommentsToNode = (comments, node) ->
+export attachCommentsToNode = (comments, node) ->
   return if not comments? or comments.length is 0
   node.comments ?= []
   node.comments.push comments...
 
-# Convert jison location data to a string.
+# Convert jison location data to our style.
 # `obj` can be a token, or a locationData.
 locationDataToString = (obj) ->
   if ("2" of obj) and ("first_line" of obj[2]) then locationData = obj[2]
@@ -167,31 +157,31 @@ locationDataToString = (obj) ->
 # entries for any number of anonymous scripts.
 anonymousFileName = do ->
   n = 0
-  ->
-    "<anonymous-#{n++}>"
+  -> "<anonymous-#{n++}>"
 
-# A `.rip` compatible version of `basename`, that returns the file sans-extension.
-baseFileName = (file, stripExt = no, useWinPathSep = no) ->
+# A `.coffee.md` compatible version of `basename`, that returns the file sans-extension.
+# A version of `basename` that returns the file sans-extension.
+export baseFileName = (file, stripExt = no, useWinPathSep = no) ->
   pathSep = if useWinPathSep then /\\|\// else /\//
   parts = file.split(pathSep)
   file = parts[parts.length - 1]
   return file unless stripExt and file.indexOf('.') >= 0
   parts = file.split('.')
   parts.pop()
-  parts.pop() if parts[parts.length - 1] is 'rip' and parts.length > 1
+  parts.pop() if parts[parts.length - 1] is 'coffee' and parts.length > 1
   parts.join('.')
 
-# Determine if a filename represents a Rip file.
-isRip = (file) -> /\.rip$/.test file
+# Determine if a filename represents a CoffeeScript file.
+export isCoffee = (file) -> /\.coffee$/.test file
 
-# Determine if a filename represents a Literate Rip file.
-isLiterate = (file) -> /\.litrip$/.test file
+# Determine if a filename represents a Literate CoffeeScript file.
+isLiterate = (file) -> /\.(litcoffee|coffee\.md)$/.test file
 
 # Throws a SyntaxError from a given location.
 # The error's `toString` will return an error message following the "standard"
-# format `<filename>:<line>:<col>: <message>` plus the line with the error and a
+# format <filename>:<line>:<col>: <message> plus the line with the error and a
 # marker showing where the error is.
-throwSyntaxError = (message, location) ->
+export throwSyntaxError = (message, location) ->
   error = new SyntaxError message
   error.location = location
   error.toString = syntaxErrorToString
@@ -220,11 +210,7 @@ syntaxErrorToString = ->
   last_line ?= first_line
   last_column ?= first_column
 
-  if @filename?.startsWith '<anonymous'
-    filename = '[stdin]'
-  else
-    filename = @filename or '[stdin]'
-
+  filename = @filename or '[stdin]'
   codeLine = @code.split('\n')[first_line]
   start    = first_column
   # Show only the first line on multi-line errors.
@@ -274,15 +260,18 @@ isString = (obj) -> Object::toString.call(obj) is '[object String]'
 isBoolean = (obj) -> obj is yes or obj is no or Object::toString.call(obj) is '[object Boolean]'
 isPlainObject = (obj) -> typeof obj is 'object' and !!obj and not Array.isArray(obj) and not isNumber(obj) and not isString(obj) and not isBoolean(obj)
 
-unicodeCodePointToUnicodeEscapes = (codePoint) ->
-  toUnicodeEscape = (val) ->
-    str = val.toString 16
-    "\\u#{repeat '0', 4 - str.length}#{str}"
-  return toUnicodeEscape(codePoint) if codePoint < 0x10000
-  # surrogate pair
-  high = Math.floor((codePoint - 0x10000) / 0x400) + 0xD800
-  low = (codePoint - 0x10000) % 0x400 + 0xDC00
-  "#{toUnicodeEscape(high)}#{toUnicodeEscape(low)}"
+# Private function for location data
+buildLocationData = (first, last) ->
+  first_line:   first.first_line
+  first_column: first.first_column
+  last_line:    last.last_line
+  last_column:  last.last_column
+  last_line_exclusive: last.last_line_exclusive
+  last_column_exclusive: last.last_column_exclusive
+  range: [
+    first.range[0]
+    last.range[1]
+  ]
 
 # Replace `\u{...}` with `\uxxxx[\uxxxx]` in regexes without `u` flag
 replaceUnicodeCodePointEscapes = (str, {flags, error, delimiter = ''} = {}) ->
@@ -295,14 +284,23 @@ replaceUnicodeCodePointEscapes = (str, {flags, error, delimiter = ''} = {}) ->
       error "unicode code point escapes greater than \\u{10ffff} are not allowed",
         offset: offset + delimiter.length
         length: codePointHex.length + 4
+
     return match unless shouldReplace
 
     unicodeCodePointToUnicodeEscapes codePointDecimal
+    # Convert surrogate pairs. See:
+    # http://mathiasbynens.be/notes/javascript-encoding#surrogate-pairs
+    if codePointDecimal <= 0xffff
+      toUnicodeEscape codePointDecimal
+    else
+      high = Math.floor((codePointDecimal - 0x10000) / 0x400) + 0xd800
+      low = (codePointDecimal - 0x10000) % 0x400 + 0xdc00
+      "#{toUnicodeEscape high}#{toUnicodeEscape low}"
 
 UNICODE_CODE_POINT_ESCAPE = ///
-  ( \\\\ )        # Make sure the escape isn't escaped.
+  ( \\\\ )                     # Escaped backslash.
   |
-  \\u\{ ( [\da-fA-F]+ ) \}
+  \\u\{ ( [\da-fA-F]+ ) \}     # Unicode code point escape.
 ///g
 
 # Export all helper functions
@@ -315,3 +313,6 @@ module.exports = {
   parseNumber, isFunction, isNumber, isString, isBoolean,
   isPlainObject, replaceUnicodeCodePointEscapes
 }
+toUnicodeEscape = (val) ->
+  str = val.toString 16
+  "\\u#{repeat '0', 4 - str.length}#{str}"
