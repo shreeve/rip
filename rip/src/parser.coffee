@@ -9,7 +9,7 @@
 #   Date: September 8, 2025
 # ==============================================================================
 
-{version} = require '../package.json'
+{ version } = require '../package.json'
 
 # Terminal symbols (tokens, cannot be expanded)
 class Terminal
@@ -141,7 +141,7 @@ class Generator
   _buildProductions: (bnf, productions, nonterminals, operators) ->
     actionGroups = {}
     productionTable = [0]
-    @symbolIds = {"$accept": 0, "$end": 1, "error": 2}  # Add reserved symbols
+    @symbolIds = { "$accept": 0, "$end": 1, "error": 2 }  # Add reserved symbols
     symbolId = 3 # Next available symbol ID (after special symbols)
 
     # Add symbol to symbol table if not already present
@@ -345,7 +345,7 @@ class Generator
         itemCores.set(item.id, item)
 
         # Check item type
-        {nextSymbol} = item
+        { nextSymbol } = item
 
         if not nextSymbol
           # Reduction item
@@ -515,7 +515,7 @@ class Generator
 
   buildParseTable: (itemSets = @states) ->
     states = []
-    {nonterminals, operators} = this
+    { nonterminals, operators } = this
     [NONASSOC, SHIFT, REDUCE, ACCEPT] = [0, 1, 2, 3]
 
     for itemSet, k in itemSets
@@ -899,7 +899,7 @@ if require.main is module
     """
 
   # Parse command line
-  options = {help: false, stats: false, generate: false, output: 'parser.js', verbose: false, compress: false}
+  options = { help: false, stats: false, generate: false, output: 'parser.js', verbose: false, compress: false }
   grammarFile = null
 
   i = 0
