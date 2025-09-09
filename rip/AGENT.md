@@ -48,20 +48,25 @@ rip [options] [file]
 
 3. **CLI Infrastructure** - Clean pipeline established: source → lexer → rewriter → parser → AST
 
+4. **Parser Generator** - Core parser works with minimal grammars (tested and verified)
+
+5. **Node Unwrapping** - Fixed `_expandNode()` to handle `{ $node: ... }` and `{ $pass: ... }` wrappers
+
 ### ❌ What's Broken
-**Grammar Integration** - Parser doesn't receive correct node format
-- Error: `expected: [long list of tokens], got: TERMINATOR` or `got: 1`
-- The parser state machine can't parse even simple expressions
+**Parser Integration** - The full grammar isn't parsing simple expressions
+- Error: `expected: [function call tokens], got: TERMINATOR` after parsing NUMBER
+- The parser successfully parses the NUMBER token but expects more tokens after it
 
 ## 🔍 The Core Problem
 
-There's a **format mismatch** between what `grammar-helpers.coffee` produces and what `parser.coffee` expects:
+**UPDATE**: The node unwrapping issue has been FIXED! The parser now correctly handles `{ $node: ... }` and `{ $pass: ... }` wrappers.
 
-1. **Grammar helpers produce**: `[pattern, { $node: ... } or { $pass: ... }, precedence]`
-2. **Parser expects**: Direct node objects without `$node`/`$pass` wrappers
-3. **Parser's `_expandNode()`**: Doesn't know about `$node`/`$pass` markers
+**NEW ISSUE**: The grammar's parse rules aren't matching simple expressions correctly:
+1. Parser successfully recognizes NUMBER token (verified)
+2. But then expects property access or function calls instead of accepting it as a complete expression
+3. The grammar path `NUMBER → AlphaNumeric → Literal → Value → Expression → Line → Body → Root` should work but doesn't
 
-The issue is NOT in the parser generator itself (which has been cleaned up and refactored), but in the integration layer between the grammar DSL and the parser.
+This suggests the grammar rules or state machine transitions aren't set up correctly for simple standalone expressions.
 
 ## 🚀 Bootstrap Strategy
 
