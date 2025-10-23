@@ -123,7 +123,7 @@ export var Lexer = class Lexer {
   // referenced as property names here, so you can still do `jQuery.is()` even
   // though `is` means `===` otherwise.
   identifierToken() {
-    var alias, colon, colonOffset, colonToken, id, idLength, input, match, poppedToken, prev, prevprev, ref, ref1, ref10, ref11, ref12, ref2, ref3, ref4, ref5, ref6, ref7, ref8, ref9, regExSuper, sup, tag, tagToken, tokenData;
+    var afterNot, alias, colon, colonOffset, colonToken, id, idLength, input, match, poppedToken, prev, prevprev, ref, ref1, ref10, ref11, ref12, ref2, ref3, ref4, ref5, ref6, ref7, ref8, ref9, regExSuper, sup, tag, tagToken, tokenData;
     if (!(match = IDENTIFIER.exec(this.chunk))) {
       return 0;
     }
@@ -236,6 +236,17 @@ export var Lexer = class Lexer {
       });
     }
     if (!(tag === 'PROPERTY' || this.exportSpecifierList || this.importSpecifierList)) {
+      // Transform 'is not' → 'isnt' for cleaner syntax (before alias processing)
+      // Only transform when 'not' is followed by a non-boolean value to avoid breaking chains
+      if (id === 'is' && this.chunk.slice(idLength, idLength + 4) === ' not') {
+        // Look ahead to see what comes after ' not '
+        afterNot = this.chunk.slice(idLength + 4).trim();
+        // Only transform if NOT followed by 'false', 'true' (which could be part of chains)
+        if (!afterNot.match(/^(false|true)\s+(is|isnt|==|!=)/)) {
+          id = 'isnt';
+          idLength += 4; // Consume ' not' as well
+        }
+      }
       if (indexOf.call(COFFEE_ALIASES, id) >= 0) {
         alias = id;
         id = COFFEE_ALIAS_MAP[id];
@@ -279,7 +290,12 @@ export var Lexer = class Lexer {
         offset: colonOffset
       });
     }
-    return input.length;
+    // Return the actual consumed length (accounts for 'is not' → 'isnt' transformation)
+    if (colon) {
+      return idLength + colon.length;
+    } else {
+      return idLength;
+    }
   }
 
   // Matches numbers, including decimals, hex, and exponential notation.
@@ -1553,7 +1569,8 @@ export var JS_FORBIDDEN = JS_KEYWORDS.concat(RESERVED).concat(STRICT_PROSCRIBED)
 BOM = 65279;
 
 // Token matching regexes.
-IDENTIFIER = /^(?!\d)((?:(?!\s)[$\w\x7f-\uffff])+)([^\n\S]*:(?!:))?/; // Is this a property name?
+IDENTIFIER = /^(?!\d)((?:(?!\s)[$\w\x7f-\uffff])+!?)([^\n\S]*:(?!:))?/; // rip: allow optional trailing ! for async calls
+// Is this a property name?
 
 NUMBER = /^0b[01](?:_?[01])*n?|^0o[0-7](?:_?[0-7])*n?|^0x[\da-f](?:_?[\da-f])*n?|^\d+(?:_\d+)*n|^(?:\d+(?:_\d+)*)?\.?\d+(?:_\d+)*(?:e[+-]?\d+(?:_\d+)*)?/i; // binary
 // octal
@@ -1563,7 +1580,8 @@ NUMBER = /^0b[01](?:_?[01])*n?|^0o[0-7](?:_?[0-7])*n?|^0x[\da-f](?:_?[\da-f])*n?
 // decimal without support for numeric literal separators for reference:
 // \d*\.?\d+ (?:e[+-]?\d+)?
 
-OPERATOR = /^(?:[-=]>|[-+*\/%<>&|^!?=]=|>>>=?|([-+:])\1|([&|<>*\/%])\2=?|\?(\.|::)|\.{2,3})/; // function
+OPERATOR = /^(?:[-=]>|=~|[-+*\/%<>&|^!?=]=|>>>=?|([-+:])\1|([&|<>*\/%])\2=?|\?(\.|::)|\.{2,3})/; // function
+// regex match operator
 // compound assign / compare
 // zero-fill right shift
 // doubles
@@ -1648,7 +1666,7 @@ UNARY_MATH = ['!', '~'];
 SHIFT = ['<<', '>>', '>>>'];
 
 // Comparison tokens.
-COMPARE = ['==', '!=', '<', '>', '<=', '>='];
+COMPARE = ['==', '!=', '<', '>', '<=', '>=', '=~'];
 
 // Mathematical tokens.
 MATH = ['*', '/', '%', '//', '%%'];

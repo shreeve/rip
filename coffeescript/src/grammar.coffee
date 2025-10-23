@@ -13,8 +13,7 @@
 # reduces into the [nonterminal](https://en.wikipedia.org/wiki/Terminal_and_nonterminal_symbols)
 # (the enclosing name at the top), and we proceed from there.
 #
-# If you run the `cake build:parser` command, the parser generator constructs a parse table
-# from our rules and saves it into `lib/parser.js`.
+# Generate a new `lib/parser.js` file by running `npm run parser`.
 
 # Since we're going to be wrapped in a parser function in any case, if our
 # action immediately returns a value, we can optimize by removing the function
@@ -927,7 +926,6 @@ grammar =
        INDENT Expression OUTDENT',              -> new Assign $1, $4, $2.toString(), originalContext: $2.original
     o 'SimpleAssignable COMPOUND_ASSIGN TERMINATOR
        Expression',                             -> new Assign $1, $4, $2.toString(), originalContext: $2.original
-
   ]
 
   DoIife: [

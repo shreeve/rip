@@ -61,45 +61,33 @@ export some = Array::some ? (fn) ->
   return true for e in this when fn e
   false
 
-# Helper function for extracting code from Literate CoffeeScript by stripping
-# out all non-code blocks, producing a string of CoffeeScript code that can
-# be compiled "normally."
-invertLiterate = (code) ->
-  out = []
-  blankLine = /^\s*$/
-  indented = /^[\t ]/
-  listItemStart = /// ^
-    (?:\t?|\ {0,3})       # Up to one tab, or up to three spaces, or neither;
-    (?:
-      [*\-+] |            # followed by `*`, `-` or `+`;
-      \d{1,9}\. |         # or by an integer up to 9 digits long, followed by a period;
-      \d{1,9}\)           # or by an integer up to 9 digits long, followed by a closing parenthesis.
-    )
-    [\ \t]                # followed by a space or a tab.
-  ///
-  insideComment = no
-  for line in code.split('\n')
-    if blankLine.test(line)
-      insideComment = no
-      out.push line
-    else if insideComment or listItemStart.test(line) or not indented.test(line)
-      insideComment = yes
-      out.push "# #{line}"
-    else
-      out.push line
-  out.join '\n'
+# Merge two location data objects together.
+# If `last` is not provided, this will simply return `first`.
+buildLocationData = (first, last) ->
+  if not last
+    first
+  else
+    first_line: first.first_line
+    first_column: first.first_column
+    last_line: last.last_line
+    last_column: last.last_column
+    last_line_exclusive: last.last_line_exclusive
+    last_column_exclusive: last.last_column_exclusive
+    range: [
+      first.range[0]
+      last.range[1]
+    ]
 
 # Build a list of all comments attached to tokens.
 export extractAllCommentTokens = (tokens) ->
   allCommentsObj = {}
   for token in tokens when token.comments
     for comment in token.comments
-      commentKey = "#{comment.locationData.first_line}-#{comment.locationData.first_column}"
+      commentKey = comment.locationData.range[0]
       allCommentsObj[commentKey] = comment
-  allComments = []
-  for k, comment of allCommentsObj
-    allComments.push comment
-  allComments
+  sortedKeys = Object.keys(allCommentsObj).sort (a, b) -> a - b
+  for key in sortedKeys
+    allCommentsObj[key]
 
 # Get a lookup hash for a token based on its location data.
 # Multiple tokens might have the same location hash, but using exclusive
@@ -112,13 +100,18 @@ buildLocationHash = (loc) ->
 # used as lookup hashes.
 export buildTokenDataDictionary = (tokens) ->
   tokenData = {}
-  for token in tokens when token.comments or token.csx
+  for token in tokens when token.comments
     tokenHash = buildLocationHash token[2]
     # Multiple tokens might have the same location hash, such as the generated
-    # `JS` tokens added at the start/end of CSX fragments.
+    # `JS` tokens added at the start or end of the token stream to hold
+    # comments that start or end a file.
     tokenData[tokenHash] ?= {}
-    tokenData[tokenHash].comments = token.comments if token.comments
-    tokenData[tokenHash].csx = token.csx if token.csx
+    if token.comments # `comments` is always an array.
+      # For "overlapping" tokens, that is tokens with the same location data
+      # and therefore matching `tokenHash`es, merge the comments from both/all
+      # tokens together into one array, even if there are duplicate comments;
+      # they will get sorted out later.
+      (tokenData[tokenHash].comments ?= []).push token.comments...
   tokenData
 
 # This returns a function which takes an object as a parameter, and if that
@@ -126,13 +119,20 @@ export buildTokenDataDictionary = (tokens) ->
 # The object is returned either way.
 export addDataToNode = (parserState, firstLocationData, firstValue, lastLocationData, lastValue, forceUpdateLocation = yes) ->
   (obj) ->
-    objHash = buildLocationHash obj.locationData
-    if obj.locationData? and (forceUpdateLocation or not parserState.tokenData[objHash]?)
-      obj.locationData = buildLocationData(firstLocationData, lastLocationData)
-    if parserState.tokenData[objHash]?.comments?
-      attachCommentsToNode parserState.tokenData[objHash].comments, obj
-    if parserState.tokenData[objHash]?.csx?
-      obj.csx = yes
+    # Add location data.
+    locationData = buildLocationData(firstValue?.locationData ? firstLocationData, lastValue?.locationData ? lastLocationData)
+    if obj?.updateLocationDataIfMissing? and firstLocationData?
+      obj.updateLocationDataIfMissing locationData, forceUpdateLocation
+    else
+      obj.locationData = locationData
+
+    # Add comments, building the dictionary of token data if it hasn't been
+    # built yet.
+    parserState.tokenData ?= buildTokenDataDictionary parserState.parser.tokens
+    if obj.locationData?
+      objHash = buildLocationHash obj.locationData
+      if parserState.tokenData[objHash]?.comments?
+        attachCommentsToNode parserState.tokenData[objHash].comments, obj
     obj
 
 export attachCommentsToNode = (comments, node) ->
@@ -173,12 +173,9 @@ export baseFileName = (file, stripExt = no, useWinPathSep = no) ->
 # Determine if a filename represents a CoffeeScript file.
 export isCoffee = (file) -> /\.coffee$/.test file
 
-# Determine if a filename represents a Literate CoffeeScript file.
-isLiterate = (file) -> /\.(litcoffee|coffee\.md)$/.test file
-
 # Throws a SyntaxError from a given location.
 # The error's `toString` will return an error message following the "standard"
-# format <filename>:<line>:<col>: <message> plus the line with the error and a
+# format `<filename>:<line>:<col>: <message>` plus the line with the error and a
 # marker showing where the error is.
 export throwSyntaxError = (message, location) ->
   error = new SyntaxError message
@@ -259,18 +256,15 @@ export isString = (obj) -> Object::toString.call(obj) is '[object String]'
 export isBoolean = (obj) -> obj is yes or obj is no or Object::toString.call(obj) is '[object Boolean]'
 export isPlainObject = (obj) -> typeof obj is 'object' and !!obj and not Array.isArray(obj) and not isNumber(obj) and not isString(obj) and not isBoolean(obj)
 
-# Private function for location data
-buildLocationData = (first, last) ->
-  first_line:   first.first_line
-  first_column: first.first_column
-  last_line:    last.last_line
-  last_column:  last.last_column
-  last_line_exclusive: last.last_line_exclusive
-  last_column_exclusive: last.last_column_exclusive
-  range: [
-    first.range[0]
-    last.range[1]
-  ]
+unicodeCodePointToUnicodeEscapes = (codePoint) ->
+  toUnicodeEscape = (val) ->
+    str = val.toString 16
+    "\\u#{repeat '0', 4 - str.length}#{str}"
+  return toUnicodeEscape(codePoint) if codePoint < 0x10000
+  # surrogate pair
+  high = Math.floor((codePoint - 0x10000) / 0x400) + 0xD800
+  low = (codePoint - 0x10000) % 0x400 + 0xDC00
+  "#{toUnicodeEscape(high)}#{toUnicodeEscape(low)}"
 
 # Replace `\u{...}` with `\uxxxx[\uxxxx]` in regexes without `u` flag
 export replaceUnicodeCodePointEscapes = (str, {flags, error, delimiter = ''} = {}) ->
@@ -283,24 +277,12 @@ export replaceUnicodeCodePointEscapes = (str, {flags, error, delimiter = ''} = {
       error "unicode code point escapes greater than \\u{10ffff} are not allowed",
         offset: offset + delimiter.length
         length: codePointHex.length + 4
-
     return match unless shouldReplace
 
-    # Convert surrogate pairs. See:
-    # http://mathiasbynens.be/notes/javascript-encoding#surrogate-pairs
-    if codePointDecimal <= 0xffff
-      toUnicodeEscape codePointDecimal
-    else
-      high = Math.floor((codePointDecimal - 0x10000) / 0x400) + 0xd800
-      low = (codePointDecimal - 0x10000) % 0x400 + 0xdc00
-      "#{toUnicodeEscape high}#{toUnicodeEscape low}"
+    unicodeCodePointToUnicodeEscapes codePointDecimal
 
 UNICODE_CODE_POINT_ESCAPE = ///
-  ( \\\\ )                     # Escaped backslash.
+  ( \\\\ )        # Make sure the escape isn't escaped.
   |
-  \\u\{ ( [\da-fA-F]+ ) \}     # Unicode code point escape.
+  \\u\{ ( [\da-fA-F]+ ) \}
 ///g
-
-toUnicodeEscape = (val) ->
-  str = val.toString 16
-  "\\u#{repeat '0', 4 - str.length}#{str}"

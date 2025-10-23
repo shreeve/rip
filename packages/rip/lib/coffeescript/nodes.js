@@ -1806,6 +1806,20 @@ export var IdentifierLiteral = (function() {
       return iterator(this);
     }
 
+    // rip: Override compilation to handle async call operator (!)
+    compileNode(o) {
+      var name;
+      // Check if identifier ends with ! (async call operator)
+      if (this.value.endsWith('!')) {
+        // Remove the ! and wrap with await and parentheses
+        name = this.value.slice(0, -1);
+        return [this.makeCode(`await ${name}()`)];
+      } else {
+        // Normal identifier compilation
+        return super.compileNode(o);
+      }
+    }
+
     astType() {
       return 'Identifier';
     }
@@ -2295,9 +2309,13 @@ export var Value = (function() {
     // operators `?.` interspersed. Then we have to take care not to accidentally
     // evaluate anything twice when building the soak chain.
     compileNode(o) {
-      var fragments, j, len1, prop, props;
+      var base1, captureCode, fragments, hasMultilineFlag, i, indexStr, isAsyncCall, isBeingCalled, j, lastProp, len1, multilineParam, prop, propName, props, ref1, ref2, ref3, regexCode, toSearchableRef;
       this.base.front = this.front;
       props = this.properties;
+      // rip: Check if last property ends with ! (async call operator)
+      lastProp = props[props.length - 1];
+      isAsyncCall = lastProp != null ? (ref1 = lastProp.name) != null ? (ref2 = ref1.value) != null ? typeof ref2.endsWith === "function" ? ref2.endsWith('!') : void 0 : void 0 : void 0 : void 0;
+      isBeingCalled = this.isBeingCalled;
       if (props.length && (this.base.cached != null)) {
         // Cached fragments enable correct order of the compilation,
         // and reuse of variables in the scope.
@@ -2312,11 +2330,48 @@ export var Value = (function() {
       if (props.length && SIMPLENUM.test(fragmentsToText(fragments))) {
         fragments.push(this.makeCode('.'));
       }
-      for (j = 0, len1 = props.length; j < len1; j++) {
-        prop = props[j];
-        fragments.push(...(prop.compileToFragments(o)));
+      for (i = j = 0, len1 = props.length; j < len1; i = ++j) {
+        prop = props[i];
+        if (isAsyncCall && i === props.length - 1) {
+          // For the last property with !, remove the !
+          propName = prop.name.value.slice(0, -1);
+          if (isBeingCalled) {
+            // If being called, just remove ! (Call will handle await and args)
+            fragments.push(this.makeCode(`.${propName}`));
+          } else {
+            // If not being called, add () and await
+            fragments.push(this.makeCode(`.${propName}()`));
+          }
+        } else if (prop instanceof RegexIndex) {
+          // Handle regex indexing: obj[/regex/] -> (_ = toSearchable(obj).match(/regex/)) && _[0]
+          // Or with capture group: obj[/regex/, 1] -> (_ = toSearchable(obj).match(/regex/)) && _[1]
+
+          // This provides elegant syntax for regex matching with automatic _ variable assignment:
+          //   email[/@(.+)$/] and _[1]  # Gets domain part, sets _ globally
+          //   phone[/^\d{10}$/]         # Returns full match or null
+
+          // Uses toSearchable for universal type coercion and security - safely handles null, numbers, symbols, etc.
+          // Generate: (_ = toSearchable(obj).match(regex)) && _[index] or (_ = toSearchable(obj, true).match(regex)) && _[index] for multiline
+          // Ensure '_' is declared in the current scope so strict mode doesn't throw ReferenceError
+          o.scope.find('_');
+          toSearchableRef = utility('toSearchable', o);
+          regexCode = prop.regex.compileToFragments(o, LEVEL_PAREN);
+          indexStr = prop.captureIndex ? (captureCode = prop.captureIndex.compileToFragments(o, LEVEL_PAREN), `[${fragmentsToText(captureCode)}]`) : "[0]";
+          // Conditional second parameter for multiline regex
+          hasMultilineFlag = (typeof (base1 = prop.regex).toString === "function" ? base1.toString().includes('/m') : void 0) || ((ref3 = prop.regex.value) != null ? typeof ref3.toString === "function" ? ref3.toString().includes('m') : void 0 : void 0);
+          multilineParam = hasMultilineFlag ? ", true" : "";
+          // Generate clean JavaScript: (_ = toSearchable(obj).match(regex)) && _[index]
+          fragments = [this.makeCode(`(_ = ${toSearchableRef}(`), ...fragments, this.makeCode(`${multilineParam}).match(`), ...regexCode, this.makeCode(`)) && _${indexStr}`)];
+        } else {
+          fragments.push(...(prop.compileToFragments(o)));
+        }
       }
-      return fragments;
+      // rip: Wrap entire expression with await if last property had ! and not being called
+      if (isAsyncCall && !isBeingCalled) {
+        return [[this.makeCode('await ')], ...fragments].flat();
+      } else {
+        return fragments;
+      }
     }
 
     // Unfold a soak into an `If`: `a?.b` -> `a.b if a?`
@@ -2717,12 +2772,15 @@ export var Call = (function() {
 
     // Compile a vanilla function call.
     compileNode(o) {
-      var arg, argCode, argIndex, cache, compiledArgs, fragments, j, len1, ref1, ref2, ref3, ref4, varAccess;
+      var arg, argCode, argIndex, cache, compiledArgs, fragments, isAsyncCall, j, lastProp, len1, ref1, ref2, ref3, ref4, ref5, ref6, ref7, ref8, varAccess;
       this.checkForNewSuper();
       if ((ref1 = this.variable) != null) {
         ref1.front = this.front;
       }
       compiledArgs = [];
+      // rip: Check if this is an async call (variable ends with !)
+      lastProp = (ref2 = this.variable) != null ? (ref3 = ref2.properties) != null ? ref3[this.variable.properties.length - 1] : void 0 : void 0;
+      isAsyncCall = lastProp != null ? (ref4 = lastProp.name) != null ? (ref5 = ref4.value) != null ? typeof ref5.endsWith === "function" ? ref5.endsWith('!') : void 0 : void 0 : void 0 : void 0;
       // If variable is `Accessor` fragments are cached and used later
       // in `Value::compileNode` to ensure correct order of the compilation,
       // and reuse of variables in the scope.
@@ -2730,13 +2788,13 @@ export var Call = (function() {
       // `a(x = 5).b(-> x = 6)` should compile in the same order as
       // `a(x = 5); b(-> x = 6)`
       // (see issue #4437, https://github.com/jashkenas/coffeescript/issues/4437)
-      varAccess = ((ref2 = this.variable) != null ? (ref3 = ref2.properties) != null ? ref3[0] : void 0 : void 0) instanceof Access;
+      varAccess = ((ref6 = this.variable) != null ? (ref7 = ref6.properties) != null ? ref7[0] : void 0 : void 0) instanceof Access;
       argCode = (function() {
-        var j, len1, ref4, results1;
-        ref4 = this.args || [];
+        var j, len1, ref8, results1;
+        ref8 = this.args || [];
         results1 = [];
-        for (j = 0, len1 = ref4.length; j < len1; j++) {
-          arg = ref4[j];
+        for (j = 0, len1 = ref8.length; j < len1; j++) {
+          arg = ref8[j];
           if (arg instanceof Code) {
             results1.push(arg);
           }
@@ -2749,9 +2807,9 @@ export var Call = (function() {
         });
         this.variable.base.cached = cache;
       }
-      ref4 = this.args;
-      for (argIndex = j = 0, len1 = ref4.length; j < len1; argIndex = ++j) {
-        arg = ref4[argIndex];
+      ref8 = this.args;
+      for (argIndex = j = 0, len1 = ref8.length; j < len1; argIndex = ++j) {
+        arg = ref8[argIndex];
         if (argIndex) {
           compiledArgs.push(this.makeCode(", "));
         }
@@ -2760,6 +2818,12 @@ export var Call = (function() {
       fragments = [];
       if (this.isNew) {
         fragments.push(this.makeCode('new '));
+      }
+      // rip: Handle async call with arguments
+      if (isAsyncCall) {
+        // Mark the variable to not add automatic () in Value.compileNode
+        this.variable.isBeingCalled = true;
+        fragments.push(this.makeCode('await '));
       }
       fragments.push(...this.variable.compileToFragments(o, LEVEL_ACCESS));
       fragments.push(this.makeCode('('), ...compiledArgs, this.makeCode(')'));
@@ -3111,6 +3175,32 @@ export var Index = (function() {
   Index.prototype.children = ['index'];
 
   return Index;
+
+}).call(this);
+
+export var RegexIndex = (function() {
+  //### RegexIndex
+
+    // A `[ /regex/ ]` indexed access that performs regex matching.
+  class RegexIndex extends Base {
+    constructor(regex1, captureIndex = null) {
+      super();
+      this.regex = regex1;
+      this.captureIndex = captureIndex;
+    }
+
+    astNode(o) {
+      // For now, treat as a computed member expression
+      return this.regex.ast(o);
+    }
+
+  };
+
+  RegexIndex.prototype.children = ['regex', 'captureIndex'];
+
+  RegexIndex.prototype.shouldCache = NO;
+
+  return RegexIndex;
 
 }).call(this);
 
@@ -5623,6 +5713,7 @@ export var Code = (function() {
       this.isAsync = false;
       this.isMethod = false;
       this.body.traverseChildren(false, (node) => {
+        var lastProp, ref2, ref3, ref4, ref5;
         if ((node instanceof Op && node.isYield()) || node instanceof YieldReturn) {
           this.isGenerator = true;
         }
@@ -5630,7 +5721,17 @@ export var Code = (function() {
           this.isAsync = true;
         }
         if (node instanceof For && node.isAwait()) {
-          return this.isAsync = true;
+          this.isAsync = true;
+        }
+        // rip: Detect ! suffix (async call operator) to set @isAsync
+        if (node instanceof IdentifierLiteral && ((ref2 = node.value) != null ? typeof ref2.endsWith === "function" ? ref2.endsWith('!') : void 0 : void 0)) {
+          this.isAsync = true;
+        }
+        if (node instanceof Value) {
+          lastProp = (ref3 = node.properties) != null ? ref3[node.properties.length - 1] : void 0;
+          if (lastProp != null ? (ref4 = lastProp.name) != null ? (ref5 = ref4.value) != null ? typeof ref5.endsWith === "function" ? ref5.endsWith('!') : void 0 : void 0 : void 0 : void 0) {
+            return this.isAsync = true;
+          }
         }
       });
       this.propagateLhs();
@@ -6860,6 +6961,8 @@ export var Op = (function() {
           return this.compileFloorDivision(o);
         case '%%':
           return this.compileModulo(o);
+        case '=~':
+          return this.compileMatch(o);
         default:
           lhs = this.first.compileToFragments(o, LEVEL_OP);
           rhs = this.second.compileToFragments(o, LEVEL_OP);
@@ -6976,6 +7079,19 @@ export var Op = (function() {
       var mod;
       mod = new Value(new Literal(utility('modulo', o)));
       return new Call(mod, [this.first, this.second]).compileToFragments(o);
+    }
+
+    compileMatch(o) {
+      var base1, hasMultilineFlag, leftFragments, multilineParam, ref1, regexFragments, toSearchableRef;
+      // Ensure '_' is declared in the current scope so strict mode doesn't throw ReferenceError
+      o.scope.find('_');
+      toSearchableRef = utility('toSearchable', o);
+      leftFragments = this.first.compileToFragments(o, LEVEL_PAREN);
+      regexFragments = this.second.compileToFragments(o, LEVEL_PAREN);
+      // Conditional second parameter for multiline regex (true allows newlines)
+      hasMultilineFlag = (typeof (base1 = this.second).toString === "function" ? base1.toString().includes('/m') : void 0) || ((ref1 = this.second.value) != null ? typeof ref1.toString === "function" ? ref1.toString().includes('m') : void 0 : void 0);
+      multilineParam = hasMultilineFlag ? ", true" : "";
+      return [this.makeCode(`(_ = ${toSearchableRef}(`), ...leftFragments, this.makeCode(`${multilineParam}).match(`), ...regexFragments, this.makeCode("))")];
     }
 
     toString(idt) {
@@ -8479,6 +8595,33 @@ UTILITIES = {
   },
   splice: function() {
     return '[].splice';
+  },
+  // Rip: Enhanced regex matching with universal type coercion and security
+  // Security: By default, reject strings with newlines to prevent injection attacks
+  // (mimics Ruby's \A and \z behavior). Use allowNewlines=true for explicit multiline.
+  toSearchable: function() {
+    return `function(v, allowNewlines) {
+  if (typeof v === 'string') {
+    if (!allowNewlines && (v.includes('\\n') || v.includes('\\r'))) return null;
+    return v;
+  }
+  if (v == null) return '';
+  if (typeof v === 'number' || typeof v === 'bigint' || typeof v === 'boolean') {
+    return String(v);
+  }
+  if (typeof v === 'symbol') return v.description || '';
+  if (v instanceof Uint8Array) return new TextDecoder().decode(v);
+  if (v instanceof ArrayBuffer) return new TextDecoder().decode(new Uint8Array(v));
+  if (Array.isArray(v)) return v.join(',');
+  if (typeof v.toString === 'function' && v.toString !== Object.prototype.toString) {
+    try {
+      return v.toString();
+    } catch (e) {
+      return '';
+    }
+  }
+  return '';
+}`;
   }
 };
 

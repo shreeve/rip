@@ -222,10 +222,21 @@ export class Lexer
       @error "reserved word '#{id}'", length: id.length
 
     unless tag is 'PROPERTY' or @exportSpecifierList or @importSpecifierList
+      # Transform 'is not' → 'isnt' for cleaner syntax (before alias processing)
+      # Only transform when 'not' is followed by a non-boolean value to avoid breaking chains
+      if id is 'is' and @chunk[idLength...idLength+4] is ' not'
+        # Look ahead to see what comes after ' not '
+        afterNot = @chunk[idLength + 4...].trim()
+        # Only transform if NOT followed by 'false', 'true' (which could be part of chains)
+        unless afterNot.match(/^(false|true)\s+(is|isnt|==|!=)/)
+          id = 'isnt'
+          idLength += 4  # Consume ' not' as well
+
       if id in COFFEE_ALIASES
         alias = id
         id = COFFEE_ALIAS_MAP[id]
         tokenData.original = alias
+
       tag = switch id
         when '!'                 then 'UNARY'
         when '==', '!='          then 'COMPARE'
@@ -244,7 +255,8 @@ export class Lexer
       colonOffset = input.lastIndexOf ':'
       colonToken = @token ':', ':', offset: colonOffset
 
-    input.length
+    # Return the actual consumed length (accounts for 'is not' → 'isnt' transformation)
+    if colon then idLength + colon.length else idLength
 
   # Matches numbers, including decimals, hex, and exponential notation.
   # Be careful not to interfere with ranges in progress.
@@ -1129,7 +1141,7 @@ BOM = 65279
 # Token matching regexes.
 IDENTIFIER = /// ^
   (?!\d)
-  ( (?: (?!\s)[$\w\x7f-\uffff] )+ )
+  ( (?: (?!\s)[$\w\x7f-\uffff] )+ !? )  # rip: allow optional trailing ! for async calls
   ( [^\n\S]* : (?!:) )?  # Is this a property name?
 ///
 
@@ -1146,6 +1158,7 @@ NUMBER     = ///
 
 OPERATOR   = /// ^ (
   ?: [-=]>             # function
+   | =~                # regex match operator
    | [-+*/%<>&|^!?=]=  # compound assign / compare
    | >>>=?             # zero-fill right shift
    | ([-+:])\1         # doubles
@@ -1251,7 +1264,7 @@ UNARY_MATH = ['!', '~']
 SHIFT = ['<<', '>>', '>>>']
 
 # Comparison tokens.
-COMPARE = ['==', '!=', '<', '>', '<=', '>=']
+COMPARE = ['==', '!=', '<', '>', '<=', '>=', '=~']
 
 # Mathematical tokens.
 MATH = ['*', '/', '%', '//', '%%']

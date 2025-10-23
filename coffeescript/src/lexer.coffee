@@ -622,7 +622,7 @@ export class Lexer
     this
 
   # We treat all other single characters as a token. E.g.: `( ) , . !`
-  # Multi-character operators are also literal tokens, so that Jison can assign
+  # Multi-character operators are also literal tokens, so that the parser can assign
   # the proper order of operations. There are some symbols that we tag specially
   # here. `;` and newlines are both treated as a `TERMINATOR`, we distinguish
   # parentheses that indicate a method call from regular parentheses, and so on.
@@ -1059,7 +1059,7 @@ export class Lexer
 # Helper functions
 # ----------------
 
-isUnassignable = (name, displayName = name) -> switch
+export isUnassignable = (name, displayName = name) -> switch
   when name in [JS_KEYWORDS..., COFFEE_KEYWORDS...]
     "keyword '#{displayName}' can't be assigned"
   when name in STRICT_PROSCRIBED
@@ -1068,8 +1068,6 @@ isUnassignable = (name, displayName = name) -> switch
     "reserved word '#{displayName}' can't be assigned"
   else
     false
-
-export {isUnassignable}
 
 # `from` isn't a CoffeeScript keyword, but it behaves like one in `import` and
 # `export` statements (handled above) and in the declaration line of a `for`

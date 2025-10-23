@@ -1267,6 +1267,17 @@ export class IdentifierLiteral extends Literal
   eachName: (iterator) ->
     iterator @
 
+  # rip: Override compilation to handle async call operator (!)
+  compileNode: (o) ->
+    # Check if identifier ends with ! (async call operator)
+    if @value.endsWith('!')
+      # Remove the ! and wrap with await and parentheses
+      name = @value.slice(0, -1)
+      [@makeCode("await #{name}()")]
+    else
+      # Normal identifier compilation
+      super(o)
+
   astType: ->
     'Identifier'
 
@@ -1550,6 +1561,12 @@ export class Value extends Base
   compileNode: (o) ->
     @base.front = @front
     props = @properties
+
+    # rip: Check if last property ends with ! (async call operator)
+    lastProp = props[props.length - 1]
+    isAsyncCall = lastProp?.name?.value?.endsWith?('!')
+    isBeingCalled = @isBeingCalled
+
     if props.length and @base.cached?
       # Cached fragments enable correct order of the compilation,
       # and reuse of variables in the scope.
@@ -1562,10 +1579,57 @@ export class Value extends Base
       fragments = @base.compileToFragments o, (if props.length then LEVEL_ACCESS else null)
     if props.length and SIMPLENUM.test fragmentsToText fragments
       fragments.push @makeCode '.'
-    for prop in props
-      fragments.push (prop.compileToFragments o)...
 
-    fragments
+    for prop, i in props
+      if isAsyncCall and i is props.length - 1
+        # For the last property with !, remove the !
+        propName = prop.name.value.slice(0, -1)
+        if isBeingCalled
+          # If being called, just remove ! (Call will handle await and args)
+          fragments.push @makeCode(".#{propName}")
+        else
+          # If not being called, add () and await
+          fragments.push @makeCode(".#{propName}()")
+      else if prop instanceof RegexIndex
+        # Handle regex indexing: obj[/regex/] -> (_ = toSearchable(obj).match(/regex/)) && _[0]
+        # Or with capture group: obj[/regex/, 1] -> (_ = toSearchable(obj).match(/regex/)) && _[1]
+        #
+        # This provides elegant syntax for regex matching with automatic _ variable assignment:
+        #   email[/@(.+)$/] and _[1]  # Gets domain part, sets _ globally
+        #   phone[/^\d{10}$/]         # Returns full match or null
+        #
+        # Uses toSearchable for universal type coercion and security - safely handles null, numbers, symbols, etc.
+        # Generate: (_ = toSearchable(obj).match(regex)) && _[index] or (_ = toSearchable(obj, true).match(regex)) && _[index] for multiline
+        # Ensure '_' is declared in the current scope so strict mode doesn't throw ReferenceError
+        o.scope.find '_'
+        toSearchableRef = utility 'toSearchable', o
+        regexCode = prop.regex.compileToFragments(o, LEVEL_PAREN)
+        indexStr = if prop.captureIndex
+          captureCode = prop.captureIndex.compileToFragments(o, LEVEL_PAREN)
+          "[#{fragmentsToText(captureCode)}]"
+        else
+          "[0]"
+
+        # Conditional second parameter for multiline regex
+        hasMultilineFlag = prop.regex.toString?().includes('/m') or prop.regex.value?.toString?().includes('m')
+        multilineParam = if hasMultilineFlag then ", true" else ""
+
+        # Generate clean JavaScript: (_ = toSearchable(obj).match(regex)) && _[index]
+        fragments = [
+          @makeCode("(_ = #{toSearchableRef}("),
+          fragments...,
+          @makeCode("#{multilineParam}).match("),
+          regexCode...,
+          @makeCode(")) && _#{indexStr}")
+        ]
+      else
+        fragments.push (prop.compileToFragments o)...
+
+    # rip: Wrap entire expression with await if last property had ! and not being called
+    if isAsyncCall and not isBeingCalled
+      [[@makeCode('await ')], fragments...].flat()
+    else
+      fragments
 
   # Unfold a soak into an `If`: `a?.b` -> `a.b if a?`
   unfoldSoak: (o) ->
@@ -1841,6 +1905,11 @@ export class Call extends Base
     @checkForNewSuper()
     @variable?.front = @front
     compiledArgs = []
+
+    # rip: Check if this is an async call (variable ends with !)
+    lastProp = @variable?.properties?[@variable.properties.length - 1]
+    isAsyncCall = lastProp?.name?.value?.endsWith?('!')
+
     # If variable is `Accessor` fragments are cached and used later
     # in `Value::compileNode` to ensure correct order of the compilation,
     # and reuse of variables in the scope.
@@ -1861,6 +1930,13 @@ export class Call extends Base
     fragments = []
     if @isNew
       fragments.push @makeCode 'new '
+
+    # rip: Handle async call with arguments
+    if isAsyncCall
+      # Mark the variable to not add automatic () in Value.compileNode
+      @variable.isBeingCalled = yes
+      fragments.push @makeCode 'await '
+
     fragments.push @variable.compileToFragments(o, LEVEL_ACCESS)...
     fragments.push @makeCode('('), compiledArgs..., @makeCode(')')
     fragments
@@ -2077,6 +2153,21 @@ export class Index extends Base
     # `property` is an Index means that `computed` is `true` for the
     # `MemberExpression`.
     @index.ast o
+
+#### RegexIndex
+
+# A `[ /regex/ ]` indexed access that performs regex matching.
+export class RegexIndex extends Base
+  constructor: (@regex, @captureIndex = null) ->
+    super()
+
+  children: ['regex', 'captureIndex']
+
+  shouldCache: NO
+
+  astNode: (o) ->
+    # For now, treat as a computed member expression
+    @regex.ast o
 
 #### Range
 
@@ -3771,6 +3862,13 @@ export class Code extends Base
         @isAsync = yes
       if node instanceof For and node.isAwait()
         @isAsync = yes
+      # rip: Detect ! suffix (async call operator) to set @isAsync
+      if node instanceof IdentifierLiteral and node.value?.endsWith?('!')
+        @isAsync = yes
+      if node instanceof Value
+        lastProp = node.properties?[node.properties.length - 1]
+        if lastProp?.name?.value?.endsWith?('!')
+          @isAsync = yes
 
     @propagateLhs()
 
@@ -4612,6 +4710,7 @@ export class Op extends Base
       when '?'  then @compileExistence o, @second.isDefaultValue
       when '//' then @compileFloorDivision o
       when '%%' then @compileModulo o
+      when '=~' then @compileMatch o
       else
         lhs = @first.compileToFragments o, LEVEL_OP
         rhs = @second.compileToFragments o, LEVEL_OP
@@ -4688,6 +4787,25 @@ export class Op extends Base
   compileModulo: (o) ->
     mod = new Value new Literal utility 'modulo', o
     new Call(mod, [@first, @second]).compileToFragments o
+
+  compileMatch: (o) ->
+    # Ensure '_' is declared in the current scope so strict mode doesn't throw ReferenceError
+    o.scope.find '_'
+    toSearchableRef = utility 'toSearchable', o
+    leftFragments = @first.compileToFragments o, LEVEL_PAREN
+    regexFragments = @second.compileToFragments o, LEVEL_PAREN
+
+    # Conditional second parameter for multiline regex (true allows newlines)
+    hasMultilineFlag = @second.toString?().includes('/m') or @second.value?.toString?().includes('m')
+    multilineParam = if hasMultilineFlag then ", true" else ""
+
+    [
+      @makeCode("(_ = #{toSearchableRef}("),
+      leftFragments...,
+      @makeCode("#{multilineParam}).match("),
+      regexFragments...,
+      @makeCode("))")
+    ]
 
   toString: (idt) ->
     super idt, @constructor.name + ' ' + @operator
@@ -5602,6 +5720,34 @@ UTILITIES =
   indexOf: -> '[].indexOf'
   slice  : -> '[].slice'
   splice : -> '[].splice'
+
+  # Rip: Enhanced regex matching with universal type coercion and security
+  # Security: By default, reject strings with newlines to prevent injection attacks
+  # (mimics Ruby's \A and \z behavior). Use allowNewlines=true for explicit multiline.
+  toSearchable: -> '''
+    function(v, allowNewlines) {
+      if (typeof v === 'string') {
+        if (!allowNewlines && (v.includes('\\n') || v.includes('\\r'))) return null;
+        return v;
+      }
+      if (v == null) return '';
+      if (typeof v === 'number' || typeof v === 'bigint' || typeof v === 'boolean') {
+        return String(v);
+      }
+      if (typeof v === 'symbol') return v.description || '';
+      if (v instanceof Uint8Array) return new TextDecoder().decode(v);
+      if (v instanceof ArrayBuffer) return new TextDecoder().decode(new Uint8Array(v));
+      if (Array.isArray(v)) return v.join(',');
+      if (typeof v.toString === 'function' && v.toString !== Object.prototype.toString) {
+        try {
+          return v.toString();
+        } catch (e) {
+          return '';
+        }
+      }
+      return '';
+    }
+    '''
 
 # Levels indicate a node's position in the AST. Useful for knowing if
 # parens are necessary or superfluous.
