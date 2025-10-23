@@ -77,12 +77,9 @@ export compile = withPrettyErrors (code, options = {}) ->
     token[1] for token in tokens when token[0] is 'IDENTIFIER'
   )
 
-  # Check for import or export; if found, force bare mode.
-  unless options.bare? and options.bare is yes
-    for token in tokens
-      if token[0] in ['IMPORT', 'EXPORT']
-        options.bare = yes
-        break
+  # Default to bare mode
+  unless options.bare is no
+    options.bare = yes
 
   nodes = parser.parse tokens
   # If all that was requested was a POJO representation of the nodes, e.g.
