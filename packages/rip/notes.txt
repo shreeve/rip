@@ -1,23 +1,18 @@
 
-==[ Biggie ]==
-
-lexer.coffee and nodes.coffee have a ton of the cleanups and ready code
-
-==[ Fixes] ==
-
-1) We improved the formatting of commas, newlines, separators for array output
+[x] Improve the JS output for arrays (very nice code cleanup!)
+[x] Force bare mode, unless otherwise
+[x] Remove JSX
+[x] Remove .litcoffee and .md.coffee
+[ ] Rename from CoffeeScript to Rip
+[ ] Add our cool regex work
+[ ] Transform 'is not' → 'isnt'
+[ ] Allow optional trailing ! for async calls
 
 ==[ Remember ]==
 
 Added for ruby like:
     Regex
     RegexIndex
-
-Let's nuke:
-    JSX
-    Literate coffee
-    .md.coffee
-    .litcoffee
 
 ==[ Use native ?. instead of CS's generated output ]==
 
