@@ -118,7 +118,7 @@ normalizeArguments = (args, flagDict) ->
   needsArgOpt = null
   for arg, argIndex in args
     # If the previous argument given to the script was an option that uses the
-    # next command-line argument as its argument, create copy of the option’s
+    # next command-line argument as its argument, create copy of the option's
     # rule with an `argument` field.
     if needsArgOpt?
       withArg = Object.assign {}, needsArgOpt.rule, {argument: arg}

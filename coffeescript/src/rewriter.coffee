@@ -37,7 +37,7 @@ export class Rewriter
 
   # Rewrite the token stream in multiple passes, one logical filter at
   # a time. This could certainly be changed into a single pass through the
-  # stream, with a big ol’ efficient switch, but it’s much nicer to work with
+  # stream, with a big ol' efficient switch, but it's much nicer to work with
   # like this. The order of these passes matters—indentation must be
   # corrected before implicit parentheses can be wrapped around blocks of code.
   rewrite: (@tokens) ->
@@ -64,7 +64,7 @@ export class Rewriter
 
   # Rewrite the token stream, looking one token ahead and behind.
   # Allow the return value of the block to tell us how many tokens to move
-  # forwards (or backwards) in the stream, to make sure we don’t miss anything
+  # forwards (or backwards) in the stream, to make sure we don't miss anything
   # as tokens are inserted and removed, and the stream changes length under
   # our feet.
   scanTokens: (block) ->
@@ -94,7 +94,7 @@ export class Rewriter
     # Find the index of the first non-`TERMINATOR` token.
     break for [tag], i in @tokens when tag isnt 'TERMINATOR'
     return if i is 0
-    # If there are any comments attached to the tokens we’re about to discard,
+    # If there are any comments attached to the tokens we're about to discard,
     # shift them forward to what will become the new first token.
     for leadingNewlineToken in @tokens[0...i]
       moveComments leadingNewlineToken, @tokens[i]
@@ -229,7 +229,7 @@ export class Rewriter
         return no unless nextTerminatorIdx?
         @looksObjectish nextTerminatorIdx + 1
 
-      # Don’t end an implicit call/object on next indent if any of these are in an argument/value.
+      # Don't end an implicit call/object on next indent if any of these are in an argument/value.
       if (
         (inImplicitCall() or inImplicitObject()) and tag in CONTROL_IN_IMPLICIT or
         inImplicitObject() and prevTag is ':' and tag is 'FOR'
@@ -303,7 +303,7 @@ export class Rewriter
       #       a: b
       #       c: d
       #
-      # Don’t accept implicit calls of this type, when on the same line
+      # Don't accept implicit calls of this type, when on the same line
       # as the control structures below as that may misinterpret constructs like:
       #
       #     if f
@@ -313,7 +313,7 @@ export class Rewriter
       #     if f(a: 1)
       #
       # which is probably always unintended.
-      # Furthermore don’t allow this in the first line of a literal array
+      # Furthermore don't allow this in the first line of a literal array
       # or explicit object, as that creates grammatical ambiguities (#5368).
       if tag in IMPLICIT_FUNC and
          @indexOfTag(i + 1, 'INDENT') > -1 and @looksObjectish(i + 2) and
@@ -401,7 +401,7 @@ export class Rewriter
                   not (tag in ['POST_IF', 'FOR', 'WHILE', 'UNTIL'] and startsLine and implicitObjectContinues(i + 1))
             endImplicitObject()
           # Close implicit objects when at end of line, line didn't end with a comma
-          # and the implicit object didn't start the line or the next line doesn’t look like
+          # and the implicit object didn't start the line or the next line doesn't look like
           # the continuation of an object.
           else if inImplicitObject() and tag is 'TERMINATOR' and prevTag isnt ',' and
                   not (startsLine and @looksObjectish(i + 1))
@@ -412,7 +412,7 @@ export class Rewriter
             break
 
       # Close implicit object if comma is the last character
-      # and what comes after doesn’t look like it belongs.
+      # and what comes after doesn't look like it belongs.
       # This is used for trailing commas and calls, like:
       #
       #     x =
@@ -429,7 +429,7 @@ export class Rewriter
         # When nextTag is OUTDENT the comma is insignificant and
         # should just be ignored so embed it in the implicit object.
         #
-        # When it isn’t the comma go on to play a role in a call or
+        # When it isn't the comma go on to play a role in a call or
         # array further up the stack, so give it a chance.
         offset = if nextTag is 'OUTDENT' then 1 else 0
         while inImplicitObject()
@@ -453,10 +453,10 @@ export class Rewriter
       no
 
     shiftCommentsForward = (token, i, tokens) ->
-      # Find the next surviving token and attach this token’s comments to it,
+      # Find the next surviving token and attach this token's comments to it,
       # with a flag that we know to output such comments *before* that
-      # token’s own compilation. (Otherwise comments are output following
-      # the token they’re attached to.)
+      # token's own compilation. (Otherwise comments are output following
+      # the token they're attached to.)
       j = i
       j++ while j isnt tokens.length and tokens[j][0] in DISCARDED
       unless j is tokens.length or tokens[j][0] in DISCARDED
@@ -466,11 +466,11 @@ export class Rewriter
       else # All following tokens are doomed!
         j = tokens.length - 1
         insertPlaceholder token, j, tokens, 'push'
-        # The generated tokens were added to the end, not inline, so we don’t skip.
+        # The generated tokens were added to the end, not inline, so we don't skip.
         return 1
 
     shiftCommentsBackward = (token, i, tokens) ->
-      # Find the last surviving token and attach this token’s comments to it.
+      # Find the last surviving token and attach this token's comments to it.
       j = i
       j-- while j isnt -1 and tokens[j][0] in DISCARDED
       unless j is -1 or tokens[j][0] in DISCARDED
@@ -485,9 +485,9 @@ export class Rewriter
       return 1 unless token.comments
       ret = 1
       if token[0] in DISCARDED
-        # This token won’t survive passage through the parser, so we need to
+        # This token won't survive passage through the parser, so we need to
         # rescue its attached tokens and redistribute them to nearby tokens.
-        # Comments that don’t start a new line can shift backwards to the last
+        # Comments that don't start a new line can shift backwards to the last
         # safe token, while other tokens should shift forward.
         dummyToken = comments: []
         j = token.comments.length - 1
@@ -501,12 +501,12 @@ export class Rewriter
         if token.comments.length isnt 0
           shiftCommentsForward token, i, tokens
       else unless dontShiftForward i, tokens
-        # If any of this token’s comments start a line—there’s only
+        # If any of this token's comments start a line—there's only
         # whitespace between the preceding newline and the start of the
-        # comment—and this isn’t one of the special `JS` tokens, then
+        # comment—and this isn't one of the special `JS` tokens, then
         # shift this comment forward to precede the next valid token.
         # `Block.compileComments` also has logic to make sure that
-        # “starting new line” comments follow or precede the nearest
+        # "starting new line" comments follow or precede the nearest
         # newline relative to the token that the comment is attached to,
         # but that newline might be inside a `}` or `)` or other generated
         # token that we really want this comment to output after. Therefore
@@ -554,7 +554,7 @@ export class Rewriter
 
   # `OUTDENT` tokens should always be positioned at the last character of the
   # previous token, so that AST nodes ending in an `OUTDENT` token end up with a
-  # location corresponding to the last “real” token under the node.
+  # location corresponding to the last "real" token under the node.
   fixIndentationLocationData: ->
     @allComments ?= extractAllCommentTokens @tokens
     findPrecedingComment = (token, {afterPosition, indentSize, first, indented}) =>
@@ -585,8 +585,8 @@ export class Rewriter
       isIndent = token[0] is 'INDENT'
       prevToken = token.prevToken ? tokens[i - 1]
       prevLocationData = prevToken[2]
-      # addLocationDataToGeneratedTokens() set the outdent’s location data
-      # to the preceding token’s, but in order to detect comments inside an
+      # addLocationDataToGeneratedTokens() set the outdent's location data
+      # to the preceding token's, but in order to detect comments inside an
       # empty "block" we want to look for comments preceding the next token.
       useNextToken = token.explicit or token.generated
       if useNextToken
@@ -605,7 +605,7 @@ export class Rewriter
       )
       if isIndent
         return 1 unless precedingComment?.newLine
-      # We don’t want e.g. an implicit call at the end of an `if` condition to
+      # We don't want e.g. an implicit call at the end of an `if` condition to
       # include a following indented comment.
       return 1 if token.generated and token[0] is 'CALL_END' and precedingComment?.indented
       prevLocationData = precedingComment.locationData if precedingComment?
@@ -637,9 +637,9 @@ export class Rewriter
             prevLocationData.range
       return 1
 
-  # Because our grammar is LALR(1), it can’t handle some single-line
+  # Because our grammar is LALR(1), it can't handle some single-line
   # expressions that lack ending delimiters. The **Rewriter** adds the implicit
-  # blocks, so it doesn’t need to. To keep the grammar clean and tidy, trailing
+  # blocks, so it doesn't need to. To keep the grammar clean and tidy, trailing
   # newlines within expressions are removed and the indentation tokens of empty
   # blocks are added.
   normalizeLines: ->
@@ -791,7 +791,7 @@ BALANCED_PAIRS = [
   ['REGEX_START', 'REGEX_END']
 ]
 
-# The inverse mappings of `BALANCED_PAIRS` we’re trying to fix up, so we can
+# The inverse mappings of `BALANCED_PAIRS` we're trying to fix up, so we can
 # look things up from either end.
 export INVERSES = {}
 
@@ -827,7 +827,7 @@ IMPLICIT_END     = ['POST_IF', 'FOR', 'WHILE', 'UNTIL', 'WHEN', 'BY',
   'LOOP', 'TERMINATOR']
 
 # Single-line flavors of block expressions that have unclosed endings.
-# The grammar can’t disambiguate them, so we insert the implicit indentation.
+# The grammar can't disambiguate them, so we insert the implicit indentation.
 SINGLE_LINERS    = ['ELSE', '->', '=>', 'TRY', 'FINALLY', 'THEN']
 SINGLE_CLOSERS   = ['TERMINATOR', 'CATCH', 'FINALLY', 'ELSE', 'OUTDENT', 'LEADING_WHEN']
 
@@ -842,10 +842,10 @@ CONTROL_IN_IMPLICIT = ['IF', 'TRY', 'FINALLY', 'CATCH', 'CLASS', 'SWITCH']
 
 # Tokens that are swallowed up by the parser, never leading to code generation.
 # You can spot these in `grammar.coffee` because the `o` function second
-# argument doesn’t contain a `new` call for these tokens.
-# `STRING_START` isn’t on this list because its `locationData` matches that of
+# argument doesn't contain a `new` call for these tokens.
+# `STRING_START` isn't on this list because its `locationData` matches that of
 # the node that becomes `StringWithInterpolations`, and therefore
-# `addDataToNode` attaches `STRING_START`’s tokens to that node.
+# `addDataToNode` attaches `STRING_START`'s tokens to that node.
 DISCARDED = ['(', ')', '[', ']', '{', '}', ':', '.', '..', '...', ',', '=', '++', '--', '?',
   'AS', 'AWAIT', 'CALL_START', 'CALL_END', 'DEFAULT', 'DO', 'DO_IIFE', 'ELSE',
   'EXTENDS', 'EXPORT', 'FORIN', 'FOROF', 'FORFROM', 'IMPORT', 'INDENT', 'INDEX_SOAK',
