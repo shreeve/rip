@@ -3883,8 +3883,6 @@ export class Code extends Base
     answer.push @makeCode ' ' if modifiers.length and name
     answer.push name... if name
     answer.push signature...
-
-
     answer.push @makeCode ' =>' if @bound and not @isMethod
     answer.push @makeCode ' {'
     answer.push @makeCode('\n'), body..., @makeCode("\n#{@tab}") if body?.length
@@ -3921,8 +3919,6 @@ export class Code extends Base
       super child, replacement
     else
       false
-
-
 
   disallowSuperInParamDefaults: ({forAst} = {}) ->
     return false unless @ctor

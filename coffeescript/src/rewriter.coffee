@@ -436,7 +436,6 @@ export class Rewriter
           endImplicitObject i + offset
       return forward(1)
 
-
   # Not all tokens survive processing by the parser. To avoid comments getting
   # lost into the ether, find comments attached to doomed tokens and move them
   # to a token that will make it to the other side.
@@ -705,7 +704,6 @@ export class Rewriter
         [indent, outdent] = @indentation tokens[i]
         tokens.splice i + 1, 0, indent, outdent
         return 1
-
       if tag in SINGLE_LINERS and @tag(i + 1) isnt 'INDENT' and
          not (tag is 'ELSE' and @tag(i + 1) is 'IF') and
          not conditionTag
