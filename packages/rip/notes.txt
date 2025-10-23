@@ -1,7 +1,23 @@
 
+==[ Biggie ]==
+
+lexer.coffee and nodes.coffee have a ton of the cleanups and ready code
+
 ==[ Fixes] ==
 
 1) We improved the formatting of commas, newlines, separators for array output
+
+==[ Remember ]==
+
+Added for ruby like:
+    Regex
+    RegexIndex
+
+Let's nuke:
+    JSX
+    Literate coffee
+    .md.coffee
+    .litcoffee
 
 ==[ Use native ?. instead of CS's generated output ]==
 
