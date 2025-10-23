@@ -75,7 +75,7 @@ withPrettyErrors = function(fn) {
 // object, where sourceMap is a sourcemap.coffee#SourceMap object, handy for
 // doing programmatic lookups.
 export var compile = withPrettyErrors(function(code, options = {}) {
-  var ast, currentColumn, currentLine, encoded, filename, fragment, fragments, generateSourceMap, header, i, j, js, len, len1, map, newLines, nodes, range, ref, sourceCodeLastLine, sourceCodeNumberOfLines, sourceMapDataURI, sourceURL, token, tokens, v3SourceMap;
+  var ast, currentColumn, currentLine, encoded, filename, fragment, fragments, generateSourceMap, header, i, js, len, map, newLines, nodes, range, sourceCodeLastLine, sourceCodeNumberOfLines, sourceMapDataURI, sourceURL, token, tokens, v3SourceMap;
   // Clone `options`, to avoid mutating the `options` object passed in.
   options = Object.assign({}, options);
   generateSourceMap = options.sourceMap || options.inlineMap || (options.filename == null);
@@ -98,15 +98,9 @@ export var compile = withPrettyErrors(function(code, options = {}) {
     }
     return results;
   })();
-  // Check for import or export; if found, force bare mode.
-  if (!((options.bare != null) && options.bare === true)) {
-    for (i = 0, len = tokens.length; i < len; i++) {
-      token = tokens[i];
-      if ((ref = token[0]) === 'IMPORT' || ref === 'EXPORT') {
-        options.bare = true;
-        break;
-      }
-    }
+  // Default to bare mode
+  if (options.bare !== false) {
+    options.bare = true;
   }
   nodes = parser.parse(tokens);
   // If all that was requested was a POJO representation of the nodes, e.g.
@@ -142,8 +136,8 @@ export var compile = withPrettyErrors(function(code, options = {}) {
   }
   currentColumn = 0;
   js = "";
-  for (j = 0, len1 = fragments.length; j < len1; j++) {
-    fragment = fragments[j];
+  for (i = 0, len = fragments.length; i < len; i++) {
+    fragment = fragments[i];
     // Update the sourcemap with data from each fragment.
     if (generateSourceMap) {
       // Do not include empty, whitespace, or semicolon-only fragments.
