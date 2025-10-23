@@ -3,10 +3,10 @@
 [x] Force bare mode, unless otherwise
 [x] Remove JSX
 [x] Remove .litcoffee and .md.coffee
+[x] Add our cool regex work
+[x] Transform 'is not' → 'isnt'
+[x] Allow optional trailing ! for async calls
 [ ] Rename from CoffeeScript to Rip
-[ ] Add our cool regex work
-[ ] Transform 'is not' → 'isnt'
-[ ] Allow optional trailing ! for async calls
 
 ==[ Remember ]==
 
