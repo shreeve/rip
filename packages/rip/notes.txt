@@ -8,12 +8,6 @@
 [x] Allow optional trailing ! for async calls
 [ ] Rename from CoffeeScript to Rip
 
-==[ Remember ]==
-
-Added for ruby like:
-    Regex
-    RegexIndex
-
 ==[ Use native ?. instead of CS's generated output ]==
 
 Possible speedups:
