@@ -1,0 +1,24 @@
+
+==[ Fixes] ==
+
+1) We improved the formatting of commas, newlines, separators for array output
+
+==[ Use native ?. instead of CS's generated output ]==
+
+Possible speedups:
+
+Are these identically the same or does CS's "?." operator do anything differently?
+
+// ES6
+const ranges = lexer.options?.ranges
+
+// CS
+ranges = (ref1 = lexer.options) != null ? ref1.ranges : void 0;
+
+Performance: The ES6 optional chaining is slightly faster in modern engines because:
+
+It's a native operator with optimized bytecode
+No temporary variable assignment
+No ternary expression evaluation
+
+==

@@ -1,0 +1,44 @@
+{
+  "name": "coffeescript",
+  "description": "Unfancy JavaScript",
+  "keywords": [
+    "javascript",
+    "language",
+    "coffeescript",
+    "compiler",
+    "es6",
+    "esm"
+  ],
+  "type": "module",
+  "version": "2.9.0",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "directories": {
+    "lib": "./lib/coffeescript"
+  },
+  "main": "./lib/coffeescript/index.js",
+  "exports": {
+    ".": "./lib/coffeescript/index.js"
+  },
+  "bin": {
+    "coffee": "./bin/coffee"
+  },
+  "files": [
+    "bin",
+    "lib"
+  ],
+  "scripts": {
+    "parser":  "./bin/coffee solar.coffee -o lib/coffeescript/parser.js src/grammar.coffee",
+    "build":   "./bin/coffee -c -o lib/coffeescript src/*.coffee",
+    "test":    "./bin/coffee test/runner.coffee",
+    "version": "./bin/coffee coffee --version"
+  },
+  "homepage": "https://coffeescript.org",
+  "bugs": "https://github.com/jashkenas/coffeescript/issues",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/jashkenas/coffeescript.git"
+  }
+}
