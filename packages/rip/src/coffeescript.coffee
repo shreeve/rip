@@ -13,7 +13,7 @@ import packageJson      from '../../package.json'
 # The current CoffeeScript version number.
 export VERSION = packageJson.version
 
-export FILE_EXTENSIONS = FILE_EXTENSIONS = ['.coffee', '.litcoffee', '.coffee.md']
+export FILE_EXTENSIONS = ['.coffee']
 
 # Expose helpers for testing.
 export {helpers}

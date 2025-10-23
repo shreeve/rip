@@ -11,7 +11,7 @@
 import {Rewriter, INVERSES, UNFINISHED} from './rewriter'
 
 # Import the helpers we need.
-import {count, starts, compact, repeat, invertLiterate, merge,
+import {count, starts, compact, repeat, merge,
 attachCommentsToNode, locationDataToString, throwSyntaxError,
 replaceUnicodeCodePointEscapes, flatten, parseNumber} from './helpers'
 
@@ -34,7 +34,6 @@ export class Lexer
   #
   # Before returning the token stream, run it through the [Rewriter](rewriter.html).
   tokenize: (code, opts = {}) ->
-    @literate   = opts.literate  # Are we lexing literate CoffeeScript?
     @indent     = 0              # The current indentation level.
     @baseIndent = 0              # The overall minimum indentation level.
     @continuationLineAdditionalIndent = 0 # The over-indentation at the current level.
@@ -88,8 +87,7 @@ export class Lexer
     (new Rewriter).rewrite @tokens
 
   # Preprocess the code to remove leading and trailing whitespace, carriage
-  # returns, etc. If we're lexing literate CoffeeScript, strip external Markdown
-  # by removing all lines that aren't indented by at least four spaces or a tab.
+  # returns, etc.
   clean: (code) ->
     thusFar = 0
     if code.charCodeAt(0) is BOM
@@ -101,13 +99,11 @@ export class Lexer
       @chunkLine--
       @locationDataCompensations[0] ?= 0
       @locationDataCompensations[0] -= 1
-    code = code
+    code
       .replace /\r/g, (match, offset) =>
         @locationDataCompensations[thusFar + offset] = 1
         ''
       .replace TRAILING_SPACES, ''
-    code = invertLiterate code if @literate
-    code
 
   # Tokenizers
   # ----------

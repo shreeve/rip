@@ -17,7 +17,7 @@ import packageJson from '../../package.json' with { type: "json" };
 // The current CoffeeScript version number.
 export var VERSION = packageJson.version;
 
-export var FILE_EXTENSIONS = FILE_EXTENSIONS = ['.coffee', '.litcoffee', '.coffee.md'];
+export var FILE_EXTENSIONS = ['.coffee'];
 
 // Expose helpers for testing.
 export { helpers };

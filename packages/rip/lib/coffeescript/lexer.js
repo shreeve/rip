@@ -14,7 +14,7 @@ import { Rewriter, INVERSES, UNFINISHED } from './rewriter.js';
 
 import {
   // Import the helpers we need.
-  count, starts, compact, repeat, invertLiterate, merge, attachCommentsToNode,
+  count, starts, compact, repeat, merge, attachCommentsToNode,
   locationDataToString, throwSyntaxError, replaceUnicodeCodePointEscapes,
   flatten, parseNumber
 } from './helpers.js';
@@ -44,7 +44,6 @@ export var Lexer = class Lexer {
   // Before returning the token stream, run it through the [Rewriter](rewriter.html).
   tokenize(code, opts = {}) {
     var consumed, end, i, ref;
-    this.literate = opts.literate; // Are we lexing literate CoffeeScript?
     this.indent = 0; // The current indentation level.
     this.baseIndent = 0; // The overall minimum indentation level.
     this.continuationLineAdditionalIndent = 0; // The over-indentation at the current level.
@@ -91,8 +90,7 @@ export var Lexer = class Lexer {
   }
 
   // Preprocess the code to remove leading and trailing whitespace, carriage
-  // returns, etc. If we're lexing literate CoffeeScript, strip external Markdown
-  // by removing all lines that aren't indented by at least four spaces or a tab.
+  // returns, etc.
   clean(code) {
     var base, thusFar;
     thusFar = 0;
@@ -109,14 +107,10 @@ export var Lexer = class Lexer {
       }
       this.locationDataCompensations[0] -= 1;
     }
-    code = code.replace(/\r/g, (match, offset) => {
+    return code.replace(/\r/g, (match, offset) => {
       this.locationDataCompensations[thusFar + offset] = 1;
       return '';
     }).replace(TRAILING_SPACES, '');
-    if (this.literate) {
-      code = invertLiterate(code);
-    }
-    return code;
   }
 
   // Tokenizers

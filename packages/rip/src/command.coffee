@@ -37,7 +37,6 @@ SWITCHES = [
   ['-e', '--eval',              'pass a string from the command line as input']
   ['-h', '--help',              'display this help message']
   ['-j', '--join [FILE]',       'concatenate the source CoffeeScript before compiling']
-  ['-l', '--literate',          'treat stdio as literate style coffeescript']
   ['-m', '--map',               'generate source map and save as .js.map files']
   ['-M', '--inline-map',        'generate source map and include it directly in output']
   ['-n', '--nodes',             'print out the parse tree that the parser produces']
@@ -127,8 +126,7 @@ export run = ->
     compilePath source, yes, source
 
 # Compile a path, which could be a script or a directory. If a directory
-# is passed, recursively compile all '.coffee', '.litcoffee', and '.coffee.md'
-# extension source files in it and all subdirectories.
+# is passed, recursively compile all '.coffee' files, including subdirectories.
 compilePath = (source, topLevel, base) ->
   return if source in sources   or
             watchedDirs[source] or
@@ -174,7 +172,7 @@ findDirectoryIndex = (source) ->
       return index if (fs.statSync index).isFile()
     catch err
       throw err unless err.code is 'ENOENT'
-  console.error "Missing index.coffee or index.litcoffee in #{source}"
+  console.error "Missing index.coffee in #{source}"
   process.exit 1
 
 # Compile a single source script, containing the given code, according to the
@@ -195,7 +193,6 @@ compileScript = (file, input, base = null) ->
     else if opts.run
       CoffeeScript.run task.input, task.options
     else if opts.join and task.file isnt opts.join
-      task.input = helpers.invertLiterate task.input if helpers.isLiterate file
       sourceCode[sources.indexOf(task.file)] = task.input
       compileJoin()
     else
@@ -431,7 +428,6 @@ parseOptions = ->
 compileOptions = (filename, base) ->
   answer =
     filename: filename
-    literate: opts.literate or helpers.isLiterate(filename)
     bare: opts.bare
     header: opts.compile and not opts['no-header']
     sourceMap: opts.map

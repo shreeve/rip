@@ -61,36 +61,6 @@ export some = Array::some ? (fn) ->
   return true for e in this when fn e
   false
 
-# Helper function for extracting code from Literate CoffeeScript by stripping
-# out all non-code blocks, producing a string of CoffeeScript code that can
-# be compiled "normally."
-export invertLiterate = (code) ->
-  out = []
-  blankLine = /^\s*$/
-  indented = /^[\t ]/
-  listItemStart = /// ^
-    (?:\t?|\ {0,3})   # Up to one tab, or up to three spaces, or neither;
-    (?:
-      [\*\-\+] |      # followed by `*`, `-` or `+`;
-      [0-9]{1,9}\.    # or by an integer up to 9 digits long, followed by a period;
-    )
-    [\ \t]            # followed by a space or a tab.
-  ///
-  insideComment = no
-  for line in code.split('\n')
-    if blankLine.test(line)
-      insideComment = no
-      out.push line
-    else if insideComment or listItemStart.test(line)
-      insideComment = yes
-      out.push "# #{line}"
-    else if not insideComment and indented.test(line)
-      out.push line
-    else
-      insideComment = yes
-      out.push "# #{line}"
-  out.join '\n'
-
 # Merge two location data objects together.
 # If `last` is not provided, this will simply return `first`.
 buildLocationData = (first, last) ->
@@ -189,7 +159,8 @@ export anonymousFileName = do ->
   ->
     "<anonymous-#{n++}>"
 
-# A `.coffee.md` compatible version of `basename`, that returns the file sans-extension.
+# FIXME: I believe this can be removed completely, but we need to do it cleanly.
+# An enhanced version of `basename`, that returns the file sans-extension.
 export baseFileName = (file, stripExt = no, useWinPathSep = no) ->
   pathSep = if useWinPathSep then /\\|\// else /\//
   parts = file.split(pathSep)
@@ -201,10 +172,7 @@ export baseFileName = (file, stripExt = no, useWinPathSep = no) ->
   parts.join('.')
 
 # Determine if a filename represents a CoffeeScript file.
-export isCoffee = (file) -> /\.((lit)?coffee|coffee\.md)$/.test file
-
-# Determine if a filename represents a Literate CoffeeScript file.
-export isLiterate = (file) -> /\.(litcoffee|coffee\.md)$/.test file
+export isCoffee = (file) -> /\.coffee$/.test file
 
 # Throws a SyntaxError from a given location.
 # The error's `toString` will return an error message following the "standard"
