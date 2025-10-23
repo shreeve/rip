@@ -466,18 +466,6 @@ test "tabs in heredocs", '''
   "\\tTabbed"
 ''', '\tTabbed'
 
-code "jsx-like in heredoc", '''
-  """
-  <Component>
-    <Child />
-  </Component>
-  """
-''', '''
-  `<Component>
-    <Child />
-  </Component>`;
-'''
-
 test "backslash at end of heredoc line", '''
   """
   Line 1\\

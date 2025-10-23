@@ -135,11 +135,6 @@ fail 'await outside async', 'await promise'
 
 fail 'top-level await', 'x = await fetch()'
 
-# JSX errors (if applicable)
-fail 'jsx self-close with children', '<div />text</div>'
-
-fail 'jsx mismatched tags', '<div></span>'
-
 # Invalid comprehensions
 fail 'comprehension without target', 'x for'
 

@@ -86,7 +86,6 @@ export var Rewriter = (function() {
       this.addImplicitBracesAndParens();
       this.rescueStowawayComments();
       this.addLocationDataToGeneratedTokens();
-      this.enforceValidJSXAttributes();
       this.fixIndentationLocationData();
       this.exposeTokenDataToGrammar();
       if (typeof process !== "undefined" && process !== null ? (ref1 = process.env) != null ? ref1.DEBUG_REWRITTEN_TOKEN_STREAM : void 0 : void 0) {
@@ -602,20 +601,6 @@ export var Rewriter = (function() {
       });
     }
 
-    // Make sure only strings and wrapped expressions are used in JSX attributes.
-    enforceValidJSXAttributes() {
-      return this.scanTokens(function(token, i, tokens) {
-        var next, ref;
-        if (token.jsxColon) {
-          next = tokens[i + 1];
-          if ((ref = next[0]) !== 'STRING_START' && ref !== 'STRING' && ref !== '(') {
-            throwSyntaxError('expected wrapped or quoted JSX attribute', next[2]);
-          }
-        }
-        return 1;
-      });
-    }
-
     // Not all tokens survive processing by the parser. To avoid comments getting
     // lost into the ether, find comments attached to doomed tokens and move them
     // to a token that will make it to the other side.
@@ -1102,7 +1087,7 @@ EXPRESSION_CLOSE = ['CATCH', 'THEN', 'ELSE', 'FINALLY'].concat(EXPRESSION_END);
 IMPLICIT_FUNC = ['IDENTIFIER', 'PROPERTY', 'SUPER', ')', 'CALL_END', ']', 'INDEX_END', '@', 'THIS'];
 
 // If preceded by an `IMPLICIT_FUNC`, indicates a function invocation.
-IMPLICIT_CALL = ['IDENTIFIER', 'JSX_TAG', 'PROPERTY', 'NUMBER', 'INFINITY', 'NAN', 'STRING', 'STRING_START', 'REGEX', 'REGEX_START', 'JS', 'NEW', 'PARAM_START', 'CLASS', 'IF', 'TRY', 'SWITCH', 'THIS', 'DYNAMIC_IMPORT', 'IMPORT_META', 'NEW_TARGET', 'UNDEFINED', 'NULL', 'BOOL', 'UNARY', 'DO', 'DO_IIFE', 'YIELD', 'AWAIT', 'UNARY_MATH', 'SUPER', 'THROW', '@', '->', '=>', '[', '(', '{', '--', '++'];
+IMPLICIT_CALL = ['IDENTIFIER', 'PROPERTY', 'NUMBER', 'INFINITY', 'NAN', 'STRING', 'STRING_START', 'REGEX', 'REGEX_START', 'JS', 'NEW', 'PARAM_START', 'CLASS', 'IF', 'TRY', 'SWITCH', 'THIS', 'DYNAMIC_IMPORT', 'IMPORT_META', 'NEW_TARGET', 'UNDEFINED', 'NULL', 'BOOL', 'UNARY', 'DO', 'DO_IIFE', 'YIELD', 'AWAIT', 'UNARY_MATH', 'SUPER', 'THROW', '@', '->', '=>', '[', '(', '{', '--', '++'];
 
 IMPLICIT_UNSPACED_CALL = ['+', '-'];
 
