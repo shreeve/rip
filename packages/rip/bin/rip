@@ -1,0 +1,42 @@
+#!/usr/bin/env node --no-warnings
+
+import { spawn } from 'child_process';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
+
+const args = process.argv.slice(2);
+
+// Check if we're just running a file (no compile/REPL flags)
+const isRunningFile = args.length > 0 &&
+  args[0].endsWith('.rip') &&
+  !args.some(arg =>
+    arg === '-c' || arg === '--compile' ||
+    arg === '-e' || arg === '--eval' ||
+    arg === '-p' || arg === '--print' ||
+    arg === '-s' || arg === '--stdio' ||
+    arg === '-n' || arg === '--nodes' ||
+    arg === '-i' || arg === '--interactive' ||
+    arg === '-w' || arg === '--watch' ||
+    arg === '--ast' || arg === '--tokens'
+  );
+
+if (isRunningFile) {
+  // Use the ES module loader to run the file directly
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = dirname(__filename);
+  const loaderPath = join(__dirname, '..', 'lib', 'rip', 'loader.js');
+
+  const child = spawn('node', ['--no-warnings', '--loader', loaderPath, ...args], {
+    stdio: 'inherit'
+  });
+
+  child.on('exit', code => process.exit(code || 0));
+  child.on('error', err => {
+    console.error(err);
+    process.exit(1);
+  });
+} else {
+  // Use traditional command processing for compilation, REPL, etc.
+  const { run } = await import('../lib/rip/command.js');
+  run();
+}

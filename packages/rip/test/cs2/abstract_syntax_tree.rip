@@ -1,0 +1,316 @@
+# Abstract Syntax Tree Tests
+# --------------------------
+
+# Test that AST generation is working for basic node types
+
+# Helper to check AST structure
+testAST = (code, nodeType) ->
+  ast = Rip.compile code, ast: yes
+  ast.program.body[0].type is nodeType or
+    ast.program.body[0].expression?.type is nodeType
+
+# Number literals
+
+test "AST for number literal", """
+  ast = Rip.compile '42', ast: yes
+  ast.program.body[0].expression.type
+""", 'NumericLiteral'
+
+test "AST number value", """
+  ast = Rip.compile '42', ast: yes
+  ast.program.body[0].expression.value
+""", 42
+
+test "AST for hex number", """
+  ast = Rip.compile '0xFF', ast: yes
+  ast.program.body[0].expression.value
+""", 255
+
+# String literals
+
+test "AST for string literal", """
+  ast = Rip.compile '"hello"', ast: yes
+  ast.program.body[0].expression.type
+""", 'StringLiteral'
+
+test "AST string value", """
+  ast = Rip.compile '"hello"', ast: yes
+  ast.program.body[0].expression.value
+""", 'hello'
+
+# Boolean literals
+
+test "AST for boolean true", """
+  ast = Rip.compile 'true', ast: yes
+  ast.program.body[0].expression.type
+""", 'BooleanLiteral'
+
+test "AST boolean value", """
+  ast = Rip.compile 'false', ast: yes
+  ast.program.body[0].expression.value
+""", false
+
+# Null literal
+
+test "AST for null", """
+  ast = Rip.compile 'null', ast: yes
+  ast.program.body[0].expression.type
+""", 'NullLiteral'
+
+# Undefined
+
+test "AST for undefined", """
+  ast = Rip.compile 'undefined', ast: yes
+  ast.program.body[0].expression.type
+""", 'Identifier'
+
+test "AST undefined name", """
+  ast = Rip.compile 'undefined', ast: yes
+  ast.program.body[0].expression.name
+""", 'undefined'
+
+# Identifiers
+
+test "AST for identifier", """
+  ast = Rip.compile 'variable', ast: yes
+  ast.program.body[0].expression.type
+""", 'Identifier'
+
+test "AST identifier name", """
+  ast = Rip.compile 'myVar', ast: yes
+  ast.program.body[0].expression.name
+""", 'myVar'
+
+# Arrays
+
+test "AST for array", """
+  ast = Rip.compile '[1, 2, 3]', ast: yes
+  ast.program.body[0].expression.type
+""", 'ArrayExpression'
+
+test "AST array length", """
+  ast = Rip.compile '[1, 2, 3]', ast: yes
+  ast.program.body[0].expression.elements.length
+""", 3
+
+# Objects
+
+test "AST for object", """
+  ast = Rip.compile '{a: 1}', ast: yes
+  ast.program.body[0].expression.type
+""", 'ObjectExpression'
+
+test "AST object property", """
+  ast = Rip.compile '{a: 1}', ast: yes
+  ast.program.body[0].expression.properties[0].type
+""", 'ObjectProperty'
+
+# Functions
+
+test "AST for function", """
+  ast = Rip.compile '-> 5', ast: yes
+  ast.program.body[0].expression.type
+""", 'ArrowFunctionExpression'
+
+test "AST function params", """
+  ast = Rip.compile '(x) -> x', ast: yes
+  ast.program.body[0].expression.params.length
+""", 1
+
+test "AST function body", """
+  ast = Rip.compile '-> 5', ast: yes
+  ast.program.body[0].expression.body.type
+""", 'BlockStatement'
+
+# Binary operations
+
+test "AST for addition", """
+  ast = Rip.compile '1 + 2', ast: yes
+  ast.program.body[0].expression.type
+""", 'BinaryExpression'
+
+test "AST addition operator", """
+  ast = Rip.compile '1 + 2', ast: yes
+  ast.program.body[0].expression.operator
+""", '+'
+
+# Unary operations
+
+test "AST for negation", """
+  ast = Rip.compile '-5', ast: yes
+  ast.program.body[0].expression.type
+""", 'UnaryExpression'
+
+test "AST negation operator", """
+  ast = Rip.compile '-5', ast: yes
+  ast.program.body[0].expression.operator
+""", '-'
+
+test "AST not operator", """
+  ast = Rip.compile 'not true', ast: yes
+  ast.program.body[0].expression.operator
+""", '!'
+
+# Assignment
+
+test "AST for assignment", """
+  ast = Rip.compile 'a = 5', ast: yes
+  ast.program.body[0].expression.type
+""", 'AssignmentExpression'
+
+test "AST assignment operator", """
+  ast = Rip.compile 'a = 5', ast: yes
+  ast.program.body[0].expression.operator
+""", '='
+
+# Conditionals
+
+test "AST for if statement", """
+  ast = Rip.compile 'if true then 1', ast: yes
+  ast.program.body[0].type
+""", 'IfStatement'
+
+test "AST for ternary", """
+  ast = Rip.compile 'if true then 1 else 2', ast: yes
+  ast.program.body[0].type
+""", 'ExpressionStatement'
+
+# Loops
+
+test "AST for while loop", """
+  ast = Rip.compile 'while true\\n  break', ast: yes
+  ast.program.body[0].type
+""", 'WhileStatement'
+
+test "AST for for loop", """
+  ast = Rip.compile 'for x in [1,2,3]\\n  x', ast: yes
+  ast.program.body[0].type
+""", 'ForStatement'
+
+# Classes
+
+test "AST for class", """
+  ast = Rip.compile 'class Foo', ast: yes
+  ast.program.body[0].type
+""", 'ClassDeclaration'
+
+test "AST class name", """
+  ast = Rip.compile 'class MyClass', ast: yes
+  ast.program.body[0].id.name
+""", 'MyClass'
+
+# Comments
+
+test "AST preserves comments", """
+  ast = Rip.compile '# comment\\n42', ast: yes
+  ast.comments.length
+""", 1
+
+test "AST comment type", """
+  ast = Rip.compile '# hello', ast: yes
+  ast.comments[0].type
+""", 'CommentLine'
+
+test "AST comment value", """
+  ast = Rip.compile '# hello', ast: yes
+  ast.comments[0].value
+""", ' hello'
+
+# Template literals
+
+test "AST for template literal", """
+  ast = Rip.compile '"hello #{name}"', ast: yes
+  ast.program.body[0].expression.type
+""", 'TemplateLiteral'
+
+# Regular expressions
+
+test "AST for regex", """
+  ast = Rip.compile '/pattern/', ast: yes
+  ast.program.body[0].expression.type
+""", 'RegExpLiteral'
+
+test "AST regex pattern", """
+  ast = Rip.compile '/abc/', ast: yes
+  ast.program.body[0].expression.pattern
+""", 'abc'
+
+# Try/Catch
+
+test "AST for try statement", """
+  ast = Rip.compile 'try\\n  1\\ncatch\\n  2', ast: yes
+  ast.program.body[0].type
+""", 'TryStatement'
+
+# Switch
+
+test "AST for switch", """
+  ast = Rip.compile 'switch x\\n  when 1 then 2', ast: yes
+  ast.program.body[0].type
+""", 'SwitchStatement'
+
+# Return
+
+test "AST for return", """
+  ast = Rip.compile 'return 5', ast: yes
+  ast.program.body[0].type
+""", 'ReturnStatement'
+
+# Throw
+
+test "AST for throw", """
+  ast = Rip.compile 'throw new Error', ast: yes
+  ast.program.body[0].type
+""", 'ThrowStatement'
+
+# Member access
+
+test "AST for member access", """
+  ast = Rip.compile 'obj.prop', ast: yes
+  ast.program.body[0].expression.type
+""", 'MemberExpression'
+
+test "AST computed member access", """
+  ast = Rip.compile 'obj[0]', ast: yes
+  ast.program.body[0].expression.computed
+""", true
+
+# Call expressions
+
+test "AST for function call", """
+  ast = Rip.compile 'fn()', ast: yes
+  ast.program.body[0].expression.type
+""", 'CallExpression'
+
+test "AST call arguments", """
+  ast = Rip.compile 'fn(1, 2)', ast: yes
+  ast.program.body[0].expression.arguments.length
+""", 2
+
+# New expression
+
+test "AST for new", """
+  ast = Rip.compile 'new Foo', ast: yes
+  ast.program.body[0].expression.type
+""", 'NewExpression'
+
+# Spread
+
+test "AST for spread", """
+  ast = Rip.compile '[...arr]', ast: yes
+  ast.program.body[0].expression.elements[0].type
+""", 'SpreadElement'
+
+# Async/Await
+
+test "AST for await", """
+  ast = Rip.compile 'await promise', ast: yes
+  ast.program.body[0].expression.type
+""", 'AwaitExpression'
+
+test "AST async function", """
+  ast = Rip.compile '-> await 1', ast: yes
+  ast.program.body[0].expression.async
+""", true
+
+

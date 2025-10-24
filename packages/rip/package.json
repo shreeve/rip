@@ -1,10 +1,10 @@
 {
-  "name": "coffeescript",
+  "name": "rip",
   "description": "Unfancy JavaScript",
   "keywords": [
     "javascript",
     "language",
-    "coffeescript",
+    "rip",
     "compiler",
     "es6",
     "esm"
@@ -16,24 +16,24 @@
     "node": ">=20"
   },
   "directories": {
-    "lib": "./lib/coffeescript"
+    "lib": "./lib/rip"
   },
-  "main": "./lib/coffeescript/index.js",
+  "main": "./lib/rip/index.js",
   "exports": {
-    ".": "./lib/coffeescript/index.js"
+    ".": "./lib/rip/index.js"
   },
   "bin": {
-    "coffee": "./bin/coffee"
+    "rip": "./bin/rip"
   },
   "files": [
     "bin",
     "lib"
   ],
   "scripts": {
-    "parser":  "./bin/coffee solar.coffee -o lib/coffeescript/parser.js src/grammar.coffee",
-    "build":   "./bin/coffee -c -o lib/coffeescript src/*.coffee",
-    "test":    "./bin/coffee test/runner.coffee",
-    "version": "./bin/coffee coffee --version"
+    "parser":  "./bin/rip solar.rip -o lib/rip/parser.js src/grammar.rip",
+    "build":   "./bin/rip -c -o lib/rip src/*.rip",
+    "test":    "./bin/rip test/runner.rip",
+    "version": "./bin/rip rip --version"
   },
   "homepage": "https://coffeescript.org",
   "bugs": "https://github.com/jashkenas/coffeescript/issues",

@@ -2,11 +2,11 @@
 [x] Improve the JS output for arrays (very nice code cleanup!)
 [x] Force bare mode, unless otherwise
 [x] Remove JSX
-[x] Remove .litcoffee and .md.coffee
+[x] Remove .litcoffee and .md.rip
 [x] Add our cool regex work
 [x] Transform 'is not' → 'isnt'
 [x] Allow optional trailing ! for async calls
-[ ] Rename from CoffeeScript to Rip
+[x] Rename from Rip to Rip
 
 ==[ Use native ?. instead of CS's generated output ]==
 
