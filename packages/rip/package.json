@@ -29,13 +29,18 @@
   },
   "files": [
     "bin",
-    "lib"
+    "lib",
+    "dist"
   ],
   "scripts": {
-    "parser":  "./bin/rip solar.rip -o lib/rip/parser.js src/grammar.rip",
-    "build":   "./bin/rip -c -o lib/rip src/*.rip",
-    "test":    "./bin/rip test/runner.rip",
-    "version": "./bin/rip rip --version"
+    "version":        "./bin/rip rip --version",
+    "test":           "./bin/rip test/runner.rip",
+    "parser":         "./bin/rip solar.rip -o lib/rip/parser.js src/grammar.rip",
+    "build":          "./bin/rip -c -o lib/rip src/{browser,command,helpers,index,lexer,loader,nodes,rip,sourcemap}.rip",
+    "build:bundle":   "bun build lib/rip/browser.js --outfile=dist/rip.browser.js     --bundle --format=esm",
+    "build:browser":  "bun build lib/rip/browser.js --outfile=dist/rip.browser.min.js --bundle --format=esm --minify",
+    "compress":       "brotli -f -q 11 -o dist/rip.browser.min.js.br dist/rip.browser.min.js && gzip -9 -c dist/rip.browser.min.js > dist/rip.browser.min.js.gz",
+    "dist":           "bun run build && bun run build:browser && bun run compress"
   },
   "homepage": "https://github.com/shreeve/rip",
   "bugs": "https://github.com/shreeve/rip/issues",
