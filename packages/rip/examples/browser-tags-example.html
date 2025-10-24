@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rip Browser Tags - Auto-Execute</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 900px;
+      margin: 40px auto;
+      padding: 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+    .container {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(10px);
+      padding: 30px;
+      border-radius: 12px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    }
+    h1 {
+      margin-top: 0;
+      font-size: 2.5em;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+    }
+    .code-block {
+      background: rgba(0, 0, 0, 0.3);
+      padding: 20px;
+      border-radius: 8px;
+      margin: 20px 0;
+      border-left: 4px solid #4ade80;
+    }
+    .output {
+      background: rgba(255, 255, 255, 0.9);
+      color: #1f2937;
+      padding: 15px;
+      border-radius: 6px;
+      margin: 10px 0;
+      font-family: 'Monaco', 'Courier New', monospace;
+    }
+    .label {
+      font-weight: bold;
+      color: #4ade80;
+      margin-bottom: 10px;
+    }
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    #results {
+      min-height: 50px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🚀 Rip Browser Tags</h1>
+    <p style="font-size: 1.2em; opacity: 0.9;">
+      Just include one script tag and write <code>&lt;script type="text/rip"&gt;</code> anywhere!
+    </p>
+
+    <div class="code-block">
+      <div class="label">Setup (in &lt;head&gt;):</div>
+      <pre>&lt;script type="module" src="../lib/rip/browser.js"&gt;&lt;/script&gt;</pre>
+    </div>
+
+    <div class="code-block">
+      <div class="label">Then use anywhere:</div>
+      <pre>&lt;script type="text/rip"&gt;
+  console.log 'Hello from Rip!'
+  x = (y for y in [2..5] when y isnt 3)
+  console.log 'Filtered array:', x
+&lt;/script&gt;</pre>
+    </div>
+
+    <div class="output">
+      <div class="label">Results:</div>
+      <div id="results"></div>
+    </div>
+  </div>
+
+  <!--
+    Step 1: Include the Rip browser module
+    This automatically finds and executes all <script type="text/rip"> tags
+  -->
+  <script type="module" src="../lib/rip/browser.js"></script>
+
+  <!--
+    Step 2: Write Rip code in <script type="text/rip"> tags
+    They will be automatically compiled and executed!
+  -->
+  <script type="text/rip">
+    # This code runs automatically!
+    console.log '✅ Rip browser tags are working!'
+
+    # Array comprehension with filter
+    x = (y for y in [2..5] when y isnt 3)
+    console.log 'Filtered array:', x
+
+    # Object creation
+    data =
+      message: 'Hello from Rip!'
+      numbers: x
+      timestamp: new Date().toISOString()
+
+    console.log 'Data object:', data
+
+    # Update the page
+    results = document.getElementById('results')
+    results.innerHTML = """
+      <strong>Message:</strong> #{data.message}<br>
+      <strong>Numbers:</strong> #{data.numbers.join(', ')}<br>
+      <strong>Timestamp:</strong> #{data.timestamp}
+    """
+  </script>
+
+  <!-- You can have multiple <script type="text/rip"> tags! -->
+  <script type="text/rip">
+    # Second script tag - also runs automatically
+    console.log '✅ Multiple Rip script tags work too!'
+
+    # Class example
+    class Greeter
+      constructor: (@name) ->
+      greet: -> "Hello, #{@name}!"
+      shout: -> @greet().toUpperCase()
+
+    greeter = new Greeter('World')
+    console.log greeter.shout()
+
+    # Async example
+    do ->
+      await new Promise (resolve) -> setTimeout resolve, 100
+      console.log '✅ Async/await works in Rip tags!'
+  </script>
+
+  <script type="text/rip" data-filename="custom-name.rip">
+    # You can even give scripts custom filenames for better error messages
+    console.log '✅ Custom filenames work too!'
+  </script>
+
+  <!-- Regular JavaScript still works! -->
+  <script>
+    console.log('✅ Regular JavaScript scripts still work normally');
+  </script>
+</body>
+</html>
