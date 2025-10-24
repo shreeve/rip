@@ -20,7 +20,9 @@
   },
   "main": "./lib/rip/index.js",
   "exports": {
-    ".": "./lib/rip/index.js"
+    ".": "./lib/rip/index.js",
+    "./browser": "./lib/rip/browser.js",
+    "./loader": "./lib/rip/loader.js"
   },
   "bin": {
     "rip": "./bin/rip"
