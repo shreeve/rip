@@ -247,22 +247,17 @@ export var anonymousFileName = (function() {
   };
 })();
 
-// FIXME: I believe this can be removed completely, but we need to do it cleanly.
-// An enhanced version of `basename`, that returns the file sans-extension.
-export var baseFileName = function(file, stripExt = false, useWinPathSep = false) {
-  var parts, pathSep;
-  pathSep = useWinPathSep ? /\\|\// : /\//;
-  parts = file.split(pathSep);
-  file = parts[parts.length - 1];
-  if (!(stripExt && file.indexOf('.') >= 0)) {
-    return file;
+// Simple basename helper that optionally strips the extension.
+export var baseFileName = function(file, stripExt = false) {
+  var basename;
+  // Get the basename (last path component)
+  basename = file.split(/[\/\\]/).pop();
+  // Strip extension if requested
+  if (stripExt && basename.indexOf('.') >= 0) {
+    return basename.replace(/\.[^.]*$/, '');
+  } else {
+    return basename;
   }
-  parts = file.split('.');
-  parts.pop();
-  if (parts[parts.length - 1] === 'rip' && parts.length > 1) {
-    parts.pop();
-  }
-  return parts.join('.');
 };
 
 // Determine if a filename represents a Rip file.
