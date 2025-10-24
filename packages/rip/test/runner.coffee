@@ -140,8 +140,8 @@ runTests = ->
 
       # Try to provide helpful suggestions
       if testPath.endsWith('.coffee')
-        # Check if they forgot "old/" subdirectory
-        altPath = path.join(path.dirname(testPath), 'old', path.basename(testPath))
+        # Check if they forgot "cs2/" subdirectory
+        altPath = path.join(path.dirname(testPath), 'cs2', path.basename(testPath))
         if fs.existsSync(path.resolve(altPath))
           console.log "#{yellow}Did you mean: #{altPath}?#{reset}"
 
