@@ -753,6 +753,7 @@ export class Block extends Base
     @tab  = o.indent
     top   = o.level is LEVEL_TOP
     compiledNodes = []
+    nodeMapping = []  # Track which expression each compiled node came from
 
     for node, index in @expressions
       if node.hoisted
@@ -766,6 +767,7 @@ export class Block extends Base
         # enclose it in a new scope; we just compile the statements in this
         # block along with our own.
         compiledNodes.push node.compileNode o
+        nodeMapping.push index
       else if top
         node.front = yes
         fragments = node.compileToFragments o
@@ -775,11 +777,35 @@ export class Block extends Base
           unless lastFragment.code is '' or lastFragment.isComment
             fragments.push @makeCode ';'
         compiledNodes.push fragments
+        nodeMapping.push index
       else
         compiledNodes.push node.compileToFragments o, LEVEL_LIST
+        nodeMapping.push index
     if top
       if @spaced
-        return [].concat @joinFragmentArrays(compiledNodes, '\n\n'), @makeCode('\n')
+        # For consecutive imports, preserve original spacing instead of always using \n\n
+        answer = []
+        for fragments, compiledIndex in compiledNodes
+          answer.push fragments...
+          if compiledIndex < compiledNodes.length - 1
+            # Get the actual expression indices
+            thisExprIndex = nodeMapping[compiledIndex]
+            nextExprIndex = nodeMapping[compiledIndex + 1]
+            thisNode = @expressions[thisExprIndex]
+            nextNode = @expressions[nextExprIndex]
+            thisIsImport = thisNode?.unwrap() instanceof ImportDeclaration
+            nextIsImport = nextNode?.unwrap() instanceof ImportDeclaration
+
+            if thisIsImport and nextIsImport and thisNode.locationData and nextNode.locationData
+              # Check line gap between imports
+              lineGap = nextNode.locationData.first_line - thisNode.locationData.last_line
+              separator = if lineGap > 1 then '\n\n' else '\n'
+              answer.push @makeCode separator
+            else
+              # Normal spacing for non-import or import followed by non-import
+              answer.push @makeCode '\n\n'
+        answer.push @makeCode '\n'
+        return answer
       else
         return @joinFragmentArrays(compiledNodes, '\n')
     if compiledNodes.length
@@ -1580,6 +1606,7 @@ export class Value extends Base
     if props.length and SIMPLENUM.test fragmentsToText fragments
       fragments.push @makeCode '.'
 
+    # rip: Support the Ruby-like regex matching
     for prop, i in props
       if isAsyncCall and i is props.length - 1
         # For the last property with !, remove the !
@@ -1795,7 +1822,7 @@ export class LineComment extends Base
     super()
 
   compileNode: (o) ->
-    fragment = @makeCode(if /^\s*$/.test @content then '' else "#{if @precededByBlankLine then "\n#{o.indent}" else ''}//#{@content}")
+    fragment = @makeCode("#{if @precededByBlankLine then "\n#{o.indent}" else ''}//#{@content}")
     fragment.newLine = @newLine
     fragment.unshift = @unshift
     fragment.trail = not @newLine and not @unshift
@@ -3172,7 +3199,7 @@ export class ImportClause extends Base
     code = []
 
     if @defaultBinding?
-      code.push @defaultBinding.compileNode(o)...
+      code.push @defaultBinding.compileToFragments(o, LEVEL_LIST)...
       code.push @makeCode ', ' if @namedImports?
 
     if @namedImports?
