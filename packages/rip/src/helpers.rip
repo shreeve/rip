@@ -159,17 +159,16 @@ export anonymousFileName = do ->
   ->
     "<anonymous-#{n++}>"
 
-# FIXME: I believe this can be removed completely, but we need to do it cleanly.
-# An enhanced version of `basename`, that returns the file sans-extension.
-export baseFileName = (file, stripExt = no, useWinPathSep = no) ->
-  pathSep = if useWinPathSep then /\\|\// else /\//
-  parts = file.split(pathSep)
-  file = parts[parts.length - 1]
-  return file unless stripExt and file.indexOf('.') >= 0
-  parts = file.split('.')
-  parts.pop()
-  parts.pop() if parts[parts.length - 1] is 'rip' and parts.length > 1
-  parts.join('.')
+# Simple basename helper that optionally strips the extension.
+export baseFileName = (file, stripExt = no) ->
+  # Get the basename (last path component)
+  basename = file.split(/[\/\\]/).pop()
+
+  # Strip extension if requested
+  if stripExt and basename.indexOf('.') >= 0
+    basename.replace /\.[^.]*$/, ''
+  else
+    basename
 
 # Determine if a filename represents a Rip file.
 export isRip = (file) -> /\.rip$/.test file
