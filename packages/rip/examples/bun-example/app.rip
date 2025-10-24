@@ -1,0 +1,42 @@
+# Example Rip file for Bun
+# This file can be imported directly when using the Rip Bun plugin
+
+# Simple function
+export greet = (name) ->
+  "Hello, #{name}! Welcome to Rip with Bun."
+
+# Async function
+export fetchData = (url) ->
+  response = await fetch(url)
+  await response.json()
+
+# Class example
+export class Calculator
+  constructor: (@value = 0) ->
+  
+  add: (n) ->
+    @value += n
+    this
+  
+  multiply: (n) ->
+    @value *= n
+    this
+  
+  result: -> @value
+
+# Array comprehensions
+export fibonacci = (n) ->
+  return [] if n <= 0
+  return [0] if n is 1
+  
+  fib = [0, 1]
+  fib.push(fib[i-1] + fib[i-2]) for i in [2...n]
+  fib
+
+# Object with methods
+export utils =
+  sum: (arr) -> arr.reduce ((a, b) -> a + b), 0
+  average: (arr) -> @sum(arr) / arr.length
+  max: (arr) -> Math.max arr...
+  min: (arr) -> Math.min arr...
+
