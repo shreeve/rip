@@ -1,15 +1,21 @@
 #!/usr/bin/env bun
 
 /**
- * Rip Transpiler Plugin
+ * Rip Transpiler Plugin for Bun
  *
  * Transpiles .rip files to JavaScript using the Bun plugin system.
- * This plugin is preloaded globally via bunfig.toml for the entire monorepo.
+ *
+ * Usage:
+ *   // In bunfig.toml:
+ *   preload = ["rip/bun"]
+ *
+ *   // Then just import .rip files:
+ *   import { myFunc } from "./app.rip"
  */
 
 /// <reference types="bun-types" />
 
-import { compile } from '../../coffeescript/lib/coffeescript'
+import { compile } from '../rip/lib/rip/index.js'
 
 Bun.plugin({
   name: 'rip-bun',
