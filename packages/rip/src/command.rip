@@ -11,8 +11,6 @@ import Rip   from './index'
 import {spawn, exec}  from 'child_process'
 import {EventEmitter} from 'events'
 
-useWinPathSep  = path.sep is '\\'
-
 # Allow Rip to emit Node.js events.
 helpers.extend Rip, new EventEmitter
 
@@ -521,7 +519,7 @@ silentUnlink = (path) ->
 
 # Get the corresponding output JavaScript path for a source file.
 outputPath = (source, base, extension=".js") ->
-  basename  = helpers.baseFileName source, yes, useWinPathSep
+  basename  = helpers.baseFileName source, yes
   srcDir    = path.dirname source
   dir = unless opts.outputPath
     srcDir
@@ -557,7 +555,7 @@ writeJs = (base, sourcePath, js, jsPath, generatedSourceMap = null) ->
   compile = ->
     if opts.compile
       js = ' ' if js.length <= 0
-      if generatedSourceMap then js = "#{js}\n//# sourceMappingURL=#{helpers.baseFileName sourceMapPath, no, useWinPathSep}\n"
+      if generatedSourceMap then js = "#{js}\n//# sourceMappingURL=#{helpers.baseFileName sourceMapPath}\n"
       fs.writeFile jsPath, js, (err) ->
         if err
           printLine err.message
@@ -614,13 +612,13 @@ compileOptions = (filename, base) ->
         jsPath
         sourceRoot: path.relative(jsDir, cwd) + path.sep
         sourceFiles: [path.relative cwd, filename]
-        generatedFile: helpers.baseFileName(jsPath, no, useWinPathSep)
+        generatedFile: helpers.baseFileName(jsPath)
       }
     else
       answer = helpers.merge answer,
         sourceRoot: ""
-        sourceFiles: [helpers.baseFileName filename, no, useWinPathSep]
-        generatedFile: helpers.baseFileName(filename, yes, useWinPathSep) + ".js"
+        sourceFiles: [helpers.baseFileName filename]
+        generatedFile: helpers.baseFileName(filename, yes) + ".js"
   answer
 
 # Start up a new Node.js instance with the arguments in `--nodejs` passed to
