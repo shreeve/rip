@@ -10,10 +10,10 @@
     "esm"
   ],
   "type": "module",
-  "version": "2.9.0",
+  "version": "3.0.0",
   "license": "MIT",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "directories": {
     "lib": "./lib/rip"
