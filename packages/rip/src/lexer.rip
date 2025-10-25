@@ -36,7 +36,7 @@ export class Lexer
   tokenize: (code, opts = {}) ->
     @indent     = 0              # The current indentation level.
     @baseIndent = 0              # The overall minimum indentation level.
-    @continuationLineAdditionalIndent = 0 # The over-indentation at the current level.
+    @overIndent = 0              # The over-indentation at the current level.
     @outdebt    = 0              # The under-outdentation at the current level.
     @indents    = []             # The stack of all current indentation levels.
     @indentLiteral = ''          # The indentation.
@@ -48,12 +48,10 @@ export class Lexer
     @importSpecifierList = no    # Used to identify when in an `IMPORT {...} FROM? ...`.
     @exportSpecifierList = no    # Used to identify when in an `EXPORT {...} FROM? ...`.
 
-    @chunkLine   = opts.line   or 0 # The start line for the current @chunk.
-    @chunkColumn = opts.column or 0 # The start column of the current @chunk.
-    @chunkOffset = opts.offset or 0 # The start offset for the current @chunk.
-
-    # The location data compensations for the current @chunk.
-    @locationDataCompensations = opts.locationDataCompensations or {}
+    @chunkLine   = opts.line      or 0  # The start line for the current @chunk.
+    @chunkColumn = opts.column    or 0  # The start column of the current @chunk.
+    @chunkOffset = opts.offset    or 0  # The start offset for the current @chunk.
+    @locTweaks   = opts.locTweaks or {} # The location data tweaks for the current @chunk.
 
     code = @clean code           # The stripped, cleaned original source code.
 
@@ -91,16 +89,16 @@ export class Lexer
     thusFar = 0
     if code.charCodeAt(0) is BOM
       code = code.slice 1
-      @locationDataCompensations[0] = 1
+      @locTweaks[0] = 1
       thusFar += 1
     if WHITESPACE.test code
       code = "\n#{code}"
       @chunkLine--
-      @locationDataCompensations[0] ?= 0
-      @locationDataCompensations[0] -= 1
+      @locTweaks[0] ?= 0
+      @locTweaks[0] -= 1
     code
       .replace /\r/g, (match, offset) =>
-        @locationDataCompensations[thusFar + offset] = 1
+        @locTweaks[thusFar + offset] = 1
         ''
       .replace TRAILING_SPACES, ''
 
@@ -402,15 +400,15 @@ export class Lexer
       @error 'indentation mismatch', offset: indent.length
       return indent.length
 
-    if size - @continuationLineAdditionalIndent is @indent
+    if size - @overIndent is @indent
       if noNewlines then @suppressNewlines() else @newlineToken offset
       return indent.length
 
     if size > @indent
       if noNewlines
-        @continuationLineAdditionalIndent = size - @indent unless backslash
-        if @continuationLineAdditionalIndent
-          prev.continuationLineIndent = @indent + @continuationLineAdditionalIndent
+        @overIndent = size - @indent unless backslash
+        if @overIndent
+          prev.continuationLineIndent = @indent + @overIndent
         @suppressNewlines()
         return indent.length
       unless @tokens.length
@@ -421,14 +419,14 @@ export class Lexer
       @token 'INDENT', diff, offset: offset + indent.length - size, length: size
       @indents.push diff
       @ends.push {tag: 'OUTDENT'}
-      @outdebt = @continuationLineAdditionalIndent = 0
+      @outdebt = @overIndent = 0
       @indent = size
       @indentLiteral = newIndentLiteral
     else if size < @baseIndent
       @error 'missing indentation', offset: offset + indent.length
     else
-      endsContinuationLineIndentation = @continuationLineAdditionalIndent > 0
-      @continuationLineAdditionalIndent = 0
+      endsContinuationLineIndentation = @overIndent > 0
+      @overIndent = 0
       @outdentToken {moveOut: @indent - size, noNewlines, outdentLength: indent.length, offset, indentSize: size, endsContinuationLineIndentation}
     indent.length
 
@@ -774,7 +772,7 @@ export class Lexer
       [line, column, offset] = @getLineAndColumnFromChunk offsetInChunk + interpolationOffset
       rest = str[interpolationOffset..]
       {tokens: nested, index} =
-        new Lexer().tokenize rest, {line, column, offset, untilBalanced: on, @locationDataCompensations}
+        new Lexer().tokenize rest, {line, column, offset, untilBalanced: on, @locTweaks}
       # Account for the `#` in `#{`.
       index += interpolationOffset
 
@@ -915,7 +913,7 @@ export class Lexer
     current = start
     while current <= end
       break if current is end and start isnt initialEnd
-      compensation = @locationDataCompensations[current]
+      compensation = @locTweaks[current]
       if compensation?
         totalCompensation += compensation
         end += compensation
