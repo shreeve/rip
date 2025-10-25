@@ -48,14 +48,13 @@ export class Lexer
     @importSpecifierList = no    # Used to identify when in an `IMPORT {...} FROM? ...`.
     @exportSpecifierList = no    # Used to identify when in an `EXPORT {...} FROM? ...`.
 
-    @chunkLine =
-      opts.line or 0             # The start line for the current @chunk.
-    @chunkColumn =
-      opts.column or 0           # The start column of the current @chunk.
-    @chunkOffset =
-      opts.offset or 0           # The start offset for the current @chunk.
-    @locationDataCompensations =
-      opts.locationDataCompensations or {} # The location data compensations for the current @chunk.
+    @chunkLine   = opts.line   or 0 # The start line for the current @chunk.
+    @chunkColumn = opts.column or 0 # The start column of the current @chunk.
+    @chunkOffset = opts.offset or 0 # The start offset for the current @chunk.
+
+    # The location data compensations for the current @chunk.
+    @locationDataCompensations = opts.locationDataCompensations or {}
+
     code = @clean code           # The stripped, cleaned original source code.
 
     # At every position, run through this list of attempted matches,
@@ -258,68 +257,6 @@ export class Lexer
     # Return the actual consumed length (accounts for 'is not' → 'isnt' transformation)
     if colon then idLength + colon.length else idLength
 
-  # Matches numbers, including decimals, hex, and exponential notation.
-  # Be careful not to interfere with ranges in progress.
-  numberToken: ->
-    return 0 unless match = NUMBER.exec @chunk
-
-    number = match[0]
-    lexedLength = number.length
-
-    switch
-      when /^0[BOX]/.test number
-        @error "radix prefix in '#{number}' must be lowercase", offset: 1
-      when /^0\d*[89]/.test number
-        @error "decimal literal '#{number}' must not be prefixed with '0'", length: lexedLength
-      when /^0\d+/.test number
-        @error "octal literal '#{number}' must be prefixed with '0o'", length: lexedLength
-
-    parsedValue = parseNumber number
-    tokenData = {parsedValue}
-
-    tag = if parsedValue is Infinity then 'INFINITY' else 'NUMBER'
-    if tag is 'INFINITY'
-      tokenData.original = number
-    @token tag, number,
-      length: lexedLength
-      data: tokenData
-    lexedLength
-
-  # Matches strings, including multiline strings, as well as heredocs, with or without
-  # interpolation.
-  stringToken: ->
-    [quote] = STRING_START.exec(@chunk) || []
-    return 0 unless quote
-
-    # If the preceding token is `from` and this is an import or export statement,
-    # properly tag the `from`.
-    prev = @prev()
-    if prev and @value() is 'from' and (@seenImport or @seenExport)
-      prev[0] = 'FROM'
-
-    regex = switch quote
-      when "'"   then STRING_SINGLE
-      when '"'   then STRING_DOUBLE
-      when "'''" then HEREDOC_SINGLE
-      when '"""' then HEREDOC_DOUBLE
-
-    {tokens, index: end} = @matchWithInterpolations regex, quote
-
-    heredoc = quote.length is 3
-    if heredoc
-      # Find the smallest indentation. It will be removed from all lines later.
-      indent = null
-      doc = (token[1] for token, i in tokens when token[0] is 'NEOSTRING').join '#{}'
-      while match = HEREDOC_INDENT.exec doc
-        attempt = match[1]
-        indent = attempt if indent is null or 0 < attempt.length < indent.length
-
-    delimiter = quote.charAt(0)
-    @mergeInterpolationTokens tokens, {quote, indent, endOffset: end}, (value) =>
-      @validateUnicodeCodePointEscapes value, delimiter: quote
-
-    end
-
   # Matches and consumes comments. The comments are taken out of the token
   # stream and saved for later, to be reinserted into the output after
   # everything has been parsed and the JavaScript code generated.
@@ -423,79 +360,14 @@ export class Lexer
     return commentAttachments if returnCommentTokens
     commentWithSurroundingWhitespace.length
 
-  # Matches JavaScript interpolated directly into the source via backticks.
-  jsToken: ->
-    return 0 unless @chunk.charAt(0) is '`' and
-      (match = (matchedHere = HERE_JSTOKEN.exec(@chunk)) or JSTOKEN.exec(@chunk))
-    # Convert escaped backticks to backticks, and escaped backslashes
-    # just before escaped backticks to backslashes
-    script = match[1]
-    {length} = match[0]
-    @token 'JS', script, {length, data: {here: !!matchedHere}}
-    length
-
-  # Matches regular expression literals, as well as multiline extended ones.
-  # Lexing regular expressions is difficult to distinguish from division, so we
-  # borrow some basic heuristics from JavaScript and Ruby.
-  regexToken: ->
-    switch
-      when match = REGEX_ILLEGAL.exec @chunk
-        @error "regular expressions cannot begin with #{match[2]}",
-          offset: match.index + match[1].length
-      when match = @matchWithInterpolations HEREGEX, '///'
-        {tokens, index} = match
-        comments = []
-        while matchedComment = HEREGEX_COMMENT.exec @chunk[0...index]
-          {index: commentIndex} = matchedComment
-          [fullMatch, leadingWhitespace, comment] = matchedComment
-          comments.push {comment, offsetInChunk: commentIndex + leadingWhitespace.length}
-        commentTokens = flatten(
-          for commentOpts in comments
-            @commentToken commentOpts.comment, Object.assign commentOpts, heregex: yes, returnCommentTokens: yes
-        )
-      when match = REGEX.exec @chunk
-        [regex, body, closed] = match
-        @validateEscapes body, isRegex: yes, offsetInChunk: 1
-        index = regex.length
-        prev = @prev()
-        if prev
-          if prev.spaced and prev[0] in CALLABLE
-            return 0 if not closed or POSSIBLY_DIVISION.test regex
-          else if prev[0] in NOT_REGEX
-            return 0
-        @error 'missing / (unclosed regex)' unless closed
-      else
-        return 0
-
-    [flags] = REGEX_FLAGS.exec @chunk[index..]
-    end = index + flags.length
-    origin = @makeToken 'REGEX', null, length: end
-    switch
-      when not VALID_FLAGS.test flags
-        @error "invalid regular expression flags #{flags}", offset: index, length: flags.length
-      when regex or tokens.length is 1
-        delimiter = if body then '/' else '///'
-        body ?= tokens[0][1]
-        @validateUnicodeCodePointEscapes body, {delimiter}
-        @token 'REGEX', "/#{body}/#{flags}", {length: end, origin, data: {delimiter}}
-      else
-        @token 'REGEX_START', '(',    {length: 0, origin, generated: yes}
-        @token 'IDENTIFIER', 'RegExp', length: 0, generated: yes
-        @token 'CALL_START', '(',      length: 0, generated: yes
-        @mergeInterpolationTokens tokens, {double: yes, heregex: {flags}, endOffset: end - flags.length, quote: '///'}, (str) =>
-          @validateUnicodeCodePointEscapes str, {delimiter}
-        if flags
-          @token ',', ',',                    offset: index - 1, length: 0, generated: yes
-          @token 'STRING', '"' + flags + '"', offset: index,     length: flags.length
-        @token ')', ')',                      offset: end,       length: 0, generated: yes
-        @token 'REGEX_END', ')',              offset: end,       length: 0, generated: yes
-
-    # Explicitly attach any heregex comments to the REGEX/REGEX_END token.
-    if commentTokens?.length
-      addTokenData @tokens[@tokens.length - 1],
-        heregexCommentTokens: commentTokens
-
-    end
+  # Matches and consumes non-meaningful whitespace. Tag the previous token
+  # as being "spaced", because there are some cases where it makes a difference.
+  whitespaceToken: ->
+    return 0 unless (match = WHITESPACE.exec @chunk) or
+                    (nline = @chunk.charAt(0) is '\n')
+    prev = @prev()
+    prev[if match then 'spaced' else 'newLine'] = true if prev
+    if match then match[0].length else 0
 
   # Matches newlines, indents, and outdents, and determines which is which.
   # If we can detect that the current line is continued onto the next line,
@@ -560,64 +432,141 @@ export class Lexer
       @outdentToken {moveOut: @indent - size, noNewlines, outdentLength: indent.length, offset, indentSize: size, endsContinuationLineIndentation}
     indent.length
 
-  # Record an outdent token or multiple tokens, if we happen to be moving back
-  # inwards past several recorded indents. Sets new @indent value.
-  outdentToken: ({moveOut, noNewlines, outdentLength = 0, offset = 0, indentSize, endsContinuationLineIndentation}) ->
-    decreasedIndent = @indent - moveOut
-    while moveOut > 0
-      lastIndent = @indents[@indents.length - 1]
-      if not lastIndent
-        @outdebt = moveOut = 0
-      else if @outdebt and moveOut <= @outdebt
-        @outdebt -= moveOut
-        moveOut   = 0
+  # Matches strings, including multiline strings, as well as heredocs, with or without
+  # interpolation.
+  stringToken: ->
+    [quote] = STRING_START.exec(@chunk) || []
+    return 0 unless quote
+
+    # If the preceding token is `from` and this is an import or export statement,
+    # properly tag the `from`.
+    prev = @prev()
+    if prev and @value() is 'from' and (@seenImport or @seenExport)
+      prev[0] = 'FROM'
+
+    regex = switch quote
+      when "'"   then STRING_SINGLE
+      when '"'   then STRING_DOUBLE
+      when "'''" then HEREDOC_SINGLE
+      when '"""' then HEREDOC_DOUBLE
+
+    {tokens, index: end} = @matchWithInterpolations regex, quote
+
+    heredoc = quote.length is 3
+    if heredoc
+      # Find the smallest indentation. It will be removed from all lines later.
+      indent = null
+      doc = (token[1] for token, i in tokens when token[0] is 'NEOSTRING').join '#{}'
+      while match = HEREDOC_INDENT.exec doc
+        attempt = match[1]
+        indent = attempt if indent is null or 0 < attempt.length < indent.length
+
+    delimiter = quote.charAt(0)
+    @mergeInterpolationTokens tokens, {quote, indent, endOffset: end}, (value) =>
+      @validateUnicodeCodePointEscapes value, delimiter: quote
+
+    end
+
+  # Matches numbers, including decimals, hex, and exponential notation.
+  # Be careful not to interfere with ranges in progress.
+  numberToken: ->
+    return 0 unless match = NUMBER.exec @chunk
+
+    number = match[0]
+    lexedLength = number.length
+
+    switch
+      when /^0[BOX]/.test number
+        @error "radix prefix in '#{number}' must be lowercase", offset: 1
+      when /^0\d*[89]/.test number
+        @error "decimal literal '#{number}' must not be prefixed with '0'", length: lexedLength
+      when /^0\d+/.test number
+        @error "octal literal '#{number}' must be prefixed with '0o'", length: lexedLength
+
+    parsedValue = parseNumber number
+    tokenData = {parsedValue}
+
+    tag = if parsedValue is Infinity then 'INFINITY' else 'NUMBER'
+    if tag is 'INFINITY'
+      tokenData.original = number
+    @token tag, number,
+      length: lexedLength
+      data: tokenData
+    lexedLength
+
+  # Matches regular expression literals, as well as multiline extended ones.
+  # Lexing regular expressions is difficult to distinguish from division, so we
+  # borrow some basic heuristics from JavaScript and Ruby.
+  regexToken: ->
+    switch
+      when match = REGEX_ILLEGAL.exec @chunk
+        @error "regular expressions cannot begin with #{match[2]}",
+          offset: match.index + match[1].length
+      when match = @matchWithInterpolations HEREGEX, '///'
+        {tokens, index} = match
+        comments = []
+        while matchedComment = HEREGEX_COMMENT.exec @chunk[0...index]
+          {index: commentIndex} = matchedComment
+          [fullMatch, leadingWhitespace, comment] = matchedComment
+          comments.push {comment, offsetInChunk: commentIndex + leadingWhitespace.length}
+        commentTokens = flatten(
+          for commentOpts in comments
+            @commentToken commentOpts.comment, Object.assign commentOpts, heregex: yes, returnCommentTokens: yes
+        )
+      when match = REGEX.exec @chunk
+        [regex, body, closed] = match
+        @validateEscapes body, isRegex: yes, offsetInChunk: 1
+        index = regex.length
+        prev = @prev()
+        if prev
+          if prev.spaced and prev[0] in CALLABLE
+            return 0 if not closed or POSSIBLY_DIVISION.test regex
+          else if prev[0] in NOT_REGEX
+            return 0
+        @error 'missing / (unclosed regex)' unless closed
       else
-        dent = @indents.pop() + @outdebt
-        if outdentLength and @chunk[outdentLength] in INDENTABLE_CLOSERS
-          decreasedIndent -= dent - moveOut
-          moveOut = dent
-        @outdebt = 0
-        # pair might call outdentToken, so preserve decreasedIndent
-        @pair 'OUTDENT'
-        @token 'OUTDENT', moveOut, length: outdentLength, indentSize: indentSize + moveOut - dent
-        moveOut -= dent
-    @outdebt -= moveOut if dent
-    @suppressSemicolons()
+        return 0
 
-    unless @tag() is 'TERMINATOR' or noNewlines
-      terminatorToken = @token 'TERMINATOR', '\n', offset: offset + outdentLength, length: 0
-      terminatorToken.endsContinuationLineIndentation = {preContinuationLineIndent: @indent} if endsContinuationLineIndentation
-    @indent = decreasedIndent
-    @indentLiteral = @indentLiteral[...decreasedIndent]
-    this
+    [flags] = REGEX_FLAGS.exec @chunk[index..]
+    end = index + flags.length
+    origin = @makeToken 'REGEX', null, length: end
+    switch
+      when not VALID_FLAGS.test flags
+        @error "invalid regular expression flags #{flags}", offset: index, length: flags.length
+      when regex or tokens.length is 1
+        delimiter = if body then '/' else '///'
+        body ?= tokens[0][1]
+        @validateUnicodeCodePointEscapes body, {delimiter}
+        @token 'REGEX', "/#{body}/#{flags}", {length: end, origin, data: {delimiter}}
+      else
+        @token 'REGEX_START', '(',    {length: 0, origin, generated: yes}
+        @token 'IDENTIFIER', 'RegExp', length: 0, generated: yes
+        @token 'CALL_START', '(',      length: 0, generated: yes
+        @mergeInterpolationTokens tokens, {double: yes, heregex: {flags}, endOffset: end - flags.length, quote: '///'}, (str) =>
+          @validateUnicodeCodePointEscapes str, {delimiter}
+        if flags
+          @token ',', ',',                    offset: index - 1, length: 0, generated: yes
+          @token 'STRING', '"' + flags + '"', offset: index,     length: flags.length
+        @token ')', ')',                      offset: end,       length: 0, generated: yes
+        @token 'REGEX_END', ')',              offset: end,       length: 0, generated: yes
 
-  # Matches and consumes non-meaningful whitespace. Tag the previous token
-  # as being "spaced", because there are some cases where it makes a difference.
-  whitespaceToken: ->
-    return 0 unless (match = WHITESPACE.exec @chunk) or
-                    (nline = @chunk.charAt(0) is '\n')
-    prev = @prev()
-    prev[if match then 'spaced' else 'newLine'] = true if prev
-    if match then match[0].length else 0
+    # Explicitly attach any heregex comments to the REGEX/REGEX_END token.
+    if commentTokens?.length
+      addTokenData @tokens[@tokens.length - 1],
+        heregexCommentTokens: commentTokens
 
-  # Generate a newline token. Consecutive newlines get merged together.
-  newlineToken: (offset) ->
-    @suppressSemicolons()
-    @token 'TERMINATOR', '\n', {offset, length: 0} unless @tag() is 'TERMINATOR'
-    this
+    end
 
-  # Use a `\` at a line-ending to suppress the newline.
-  # The slash is removed here once its job is done.
-  suppressNewlines: ->
-    prev = @prev()
-    if prev[1] is '\\'
-      if prev.comments and @tokens.length > 1
-        # `@tokens.length` should be at least 2 (some code, then `\`).
-        # If something puts a `\` after nothing, they deserve to lose any
-        # comments that trail it.
-        attachCommentsToNode prev.comments, @tokens[@tokens.length - 2]
-      @tokens.pop()
-    this
+  # Matches JavaScript interpolated directly into the source via backticks.
+  jsToken: ->
+    return 0 unless @chunk.charAt(0) is '`' and
+      (match = (matchedHere = HERE_JSTOKEN.exec(@chunk)) or JSTOKEN.exec(@chunk))
+    # Convert escaped backticks to backticks, and escaped backslashes
+    # just before escaped backticks to backslashes
+    script = match[1]
+    {length} = match[0]
+    @token 'JS', script, {length, data: {here: !!matchedHere}}
+    length
 
   # We treat all other single characters as a token. E.g.: `( ) , . !`
   # Multi-character operators are also literal tokens, so that the parser can assign
@@ -693,6 +642,56 @@ export class Lexer
       when ')', '}', ']' then @pair value
     @tokens.push @makeToken tag, value
     value.length
+
+  # Record an outdent token or multiple tokens, if we happen to be moving back
+  # inwards past several recorded indents. Sets new @indent value.
+  outdentToken: ({moveOut, noNewlines, outdentLength = 0, offset = 0, indentSize, endsContinuationLineIndentation}) ->
+    decreasedIndent = @indent - moveOut
+    while moveOut > 0
+      lastIndent = @indents[@indents.length - 1]
+      if not lastIndent
+        @outdebt = moveOut = 0
+      else if @outdebt and moveOut <= @outdebt
+        @outdebt -= moveOut
+        moveOut   = 0
+      else
+        dent = @indents.pop() + @outdebt
+        if outdentLength and @chunk[outdentLength] in INDENTABLE_CLOSERS
+          decreasedIndent -= dent - moveOut
+          moveOut = dent
+        @outdebt = 0
+        # pair might call outdentToken, so preserve decreasedIndent
+        @pair 'OUTDENT'
+        @token 'OUTDENT', moveOut, length: outdentLength, indentSize: indentSize + moveOut - dent
+        moveOut -= dent
+    @outdebt -= moveOut if dent
+    @suppressSemicolons()
+
+    unless @tag() is 'TERMINATOR' or noNewlines
+      terminatorToken = @token 'TERMINATOR', '\n', offset: offset + outdentLength, length: 0
+      terminatorToken.endsContinuationLineIndentation = {preContinuationLineIndent: @indent} if endsContinuationLineIndentation
+    @indent = decreasedIndent
+    @indentLiteral = @indentLiteral[...decreasedIndent]
+    this
+
+  # Generate a newline token. Consecutive newlines get merged together.
+  newlineToken: (offset) ->
+    @suppressSemicolons()
+    @token 'TERMINATOR', '\n', {offset, length: 0} unless @tag() is 'TERMINATOR'
+    this
+
+  # Use a `\` at a line-ending to suppress the newline.
+  # The slash is removed here once its job is done.
+  suppressNewlines: ->
+    prev = @prev()
+    if prev[1] is '\\'
+      if prev.comments and @tokens.length > 1
+        # `@tokens.length` should be at least 2 (some code, then `\`).
+        # If something puts a `\` after nothing, they deserve to lose any
+        # comments that trail it.
+        attachCommentsToNode prev.comments, @tokens[@tokens.length - 2]
+      @tokens.pop()
+    this
 
   # Token Manipulators
   # ------------------

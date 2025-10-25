@@ -59,6 +59,8 @@ export var Lexer = class Lexer {
     this.chunkLine = opts.line || 0; // The start line for the current @chunk.
     this.chunkColumn = opts.column || 0; // The start column of the current @chunk.
     this.chunkOffset = opts.offset || 0; // The start offset for the current @chunk.
+    
+    // The location data compensations for the current @chunk.
     this.locationDataCompensations = opts.locationDataCompensations || {};
     code = this.clean(code); // The stripped, cleaned original source code.
     
@@ -297,109 +299,6 @@ export var Lexer = class Lexer {
     }
   }
 
-  // Matches numbers, including decimals, hex, and exponential notation.
-  // Be careful not to interfere with ranges in progress.
-  numberToken() {
-    var lexedLength, match, number, parsedValue, tag, tokenData;
-    if (!(match = NUMBER.exec(this.chunk))) {
-      return 0;
-    }
-    number = match[0];
-    lexedLength = number.length;
-    switch (false) {
-      case !/^0[BOX]/.test(number):
-        this.error(`radix prefix in '${number}' must be lowercase`, {
-          offset: 1
-        });
-        break;
-      case !/^0\d*[89]/.test(number):
-        this.error(`decimal literal '${number}' must not be prefixed with '0'`, {
-          length: lexedLength
-        });
-        break;
-      case !/^0\d+/.test(number):
-        this.error(`octal literal '${number}' must be prefixed with '0o'`, {
-          length: lexedLength
-        });
-    }
-    parsedValue = parseNumber(number);
-    tokenData = {parsedValue};
-    tag = parsedValue === 2e308 ? 'INFINITY' : 'NUMBER';
-    if (tag === 'INFINITY') {
-      tokenData.original = number;
-    }
-    this.token(tag, number, {
-      length: lexedLength,
-      data: tokenData
-    });
-    return lexedLength;
-  }
-
-  // Matches strings, including multiline strings, as well as heredocs, with or without
-  // interpolation.
-  stringToken() {
-    var attempt, delimiter, doc, end, heredoc, i, indent, match, prev, quote, ref, regex, token, tokens;
-    [quote] = STRING_START.exec(this.chunk) || [];
-    if (!quote) {
-      return 0;
-    }
-    // If the preceding token is `from` and this is an import or export statement,
-    // properly tag the `from`.
-    prev = this.prev();
-    if (prev && this.value() === 'from' && (this.seenImport || this.seenExport)) {
-      prev[0] = 'FROM';
-    }
-    regex = (function() {
-      switch (quote) {
-        case "'":
-          return STRING_SINGLE;
-        case '"':
-          return STRING_DOUBLE;
-        case "'''":
-          return HEREDOC_SINGLE;
-        case '"""':
-          return HEREDOC_DOUBLE;
-      }
-    })();
-    ({
-      tokens,
-      index: end
-    } = this.matchWithInterpolations(regex, quote));
-    heredoc = quote.length === 3;
-    if (heredoc) {
-      // Find the smallest indentation. It will be removed from all lines later.
-      indent = null;
-      doc = ((function() {
-        var k, len, results;
-        results = [];
-        for (i = k = 0, len = tokens.length; k < len; i = ++k) {
-          token = tokens[i];
-          if (token[0] === 'NEOSTRING') {
-            results.push(token[1]);
-          }
-        }
-        return results;
-      })()).join('#{}');
-      while (match = HEREDOC_INDENT.exec(doc)) {
-        attempt = match[1];
-        if (indent === null || (0 < (ref = attempt.length) && ref < indent.length)) {
-          indent = attempt;
-        }
-      }
-    }
-    delimiter = quote.charAt(0);
-    this.mergeInterpolationTokens(tokens, {
-      quote,
-      indent,
-      endOffset: end
-    }, (value) => {
-      return this.validateUnicodeCodePointEscapes(value, {
-        delimiter: quote
-      });
-    });
-    return end;
-  }
-
   // Matches and consumes comments. The comments are taken out of the token
   // stream and saved for later, to be reinserted into the output after
   // everything has been parsed and the JavaScript code generated.
@@ -537,23 +436,223 @@ export var Lexer = class Lexer {
     return commentWithSurroundingWhitespace.length;
   }
 
-  // Matches JavaScript interpolated directly into the source via backticks.
-  jsToken() {
-    var length, match, matchedHere, script;
-    if (!(this.chunk.charAt(0) === '`' && (match = (matchedHere = HERE_JSTOKEN.exec(this.chunk)) || JSTOKEN.exec(this.chunk)))) {
+  // Matches and consumes non-meaningful whitespace. Tag the previous token
+  // as being "spaced", because there are some cases where it makes a difference.
+  whitespaceToken() {
+    var match, nline, prev;
+    if (!((match = WHITESPACE.exec(this.chunk)) || (nline = this.chunk.charAt(0) === '\n'))) {
       return 0;
     }
-    // Convert escaped backticks to backticks, and escaped backslashes
-    // just before escaped backticks to backslashes
-    script = match[1];
-    ({length} = match[0]);
-    this.token('JS', script, {
-      length,
-      data: {
-        here: !!matchedHere
+    prev = this.prev();
+    if (prev) {
+      prev[match ? 'spaced' : 'newLine'] = true;
+    }
+    if (match) {
+      return match[0].length;
+    } else {
+      return 0;
+    }
+  }
+
+  // Matches newlines, indents, and outdents, and determines which is which.
+  // If we can detect that the current line is continued onto the next line,
+  // then the newline is suppressed:
+  //
+  //     elements
+  //       .each( ... )
+  //       .map( ... )
+  //
+  // Keeps track of the level of indentation, because a single outdent token
+  // can close multiple indents, so we need to know how far in we happen to be.
+  lineToken({chunk = this.chunk, offset = 0} = {}) {
+    var backslash, diff, endsContinuationLineIndentation, indent, match, minLiteralLength, newIndentLiteral, noNewlines, prev, ref, size;
+    if (!(match = MULTI_DENT.exec(chunk))) {
+      return 0;
+    }
+    indent = match[0];
+    prev = this.prev();
+    backslash = (prev != null ? prev[0] : void 0) === '\\';
+    if (!((backslash || ((ref = this.seenFor) != null ? ref.endsLength : void 0) < this.ends.length) && this.seenFor)) {
+      this.seenFor = false;
+    }
+    if (!((backslash && this.seenImport) || this.importSpecifierList)) {
+      this.seenImport = false;
+    }
+    if (!((backslash && this.seenExport) || this.exportSpecifierList)) {
+      this.seenExport = false;
+    }
+    size = indent.length - 1 - indent.lastIndexOf('\n');
+    noNewlines = this.unfinished();
+    newIndentLiteral = size > 0 ? indent.slice(-size) : '';
+    if (!/^(.?)\1*$/.exec(newIndentLiteral)) {
+      this.error('mixed indentation', {
+        offset: indent.length
+      });
+      return indent.length;
+    }
+    minLiteralLength = Math.min(newIndentLiteral.length, this.indentLiteral.length);
+    if (newIndentLiteral.slice(0, minLiteralLength) !== this.indentLiteral.slice(0, minLiteralLength)) {
+      this.error('indentation mismatch', {
+        offset: indent.length
+      });
+      return indent.length;
+    }
+    if (size - this.continuationLineAdditionalIndent === this.indent) {
+      if (noNewlines) {
+        this.suppressNewlines();
+      } else {
+        this.newlineToken(offset);
       }
+      return indent.length;
+    }
+    if (size > this.indent) {
+      if (noNewlines) {
+        if (!backslash) {
+          this.continuationLineAdditionalIndent = size - this.indent;
+        }
+        if (this.continuationLineAdditionalIndent) {
+          prev.continuationLineIndent = this.indent + this.continuationLineAdditionalIndent;
+        }
+        this.suppressNewlines();
+        return indent.length;
+      }
+      if (!this.tokens.length) {
+        this.baseIndent = this.indent = size;
+        this.indentLiteral = newIndentLiteral;
+        return indent.length;
+      }
+      diff = size - this.indent + this.outdebt;
+      this.token('INDENT', diff, {
+        offset: offset + indent.length - size,
+        length: size
+      });
+      this.indents.push(diff);
+      this.ends.push({
+        tag: 'OUTDENT'
+      });
+      this.outdebt = this.continuationLineAdditionalIndent = 0;
+      this.indent = size;
+      this.indentLiteral = newIndentLiteral;
+    } else if (size < this.baseIndent) {
+      this.error('missing indentation', {
+        offset: offset + indent.length
+      });
+    } else {
+      endsContinuationLineIndentation = this.continuationLineAdditionalIndent > 0;
+      this.continuationLineAdditionalIndent = 0;
+      this.outdentToken({
+        moveOut: this.indent - size,
+        noNewlines,
+        outdentLength: indent.length,
+        offset,
+        indentSize: size,
+        endsContinuationLineIndentation
+      });
+    }
+    return indent.length;
+  }
+
+  // Matches strings, including multiline strings, as well as heredocs, with or without
+  // interpolation.
+  stringToken() {
+    var attempt, delimiter, doc, end, heredoc, i, indent, match, prev, quote, ref, regex, token, tokens;
+    [quote] = STRING_START.exec(this.chunk) || [];
+    if (!quote) {
+      return 0;
+    }
+    // If the preceding token is `from` and this is an import or export statement,
+    // properly tag the `from`.
+    prev = this.prev();
+    if (prev && this.value() === 'from' && (this.seenImport || this.seenExport)) {
+      prev[0] = 'FROM';
+    }
+    regex = (function() {
+      switch (quote) {
+        case "'":
+          return STRING_SINGLE;
+        case '"':
+          return STRING_DOUBLE;
+        case "'''":
+          return HEREDOC_SINGLE;
+        case '"""':
+          return HEREDOC_DOUBLE;
+      }
+    })();
+    ({
+      tokens,
+      index: end
+    } = this.matchWithInterpolations(regex, quote));
+    heredoc = quote.length === 3;
+    if (heredoc) {
+      // Find the smallest indentation. It will be removed from all lines later.
+      indent = null;
+      doc = ((function() {
+        var k, len, results;
+        results = [];
+        for (i = k = 0, len = tokens.length; k < len; i = ++k) {
+          token = tokens[i];
+          if (token[0] === 'NEOSTRING') {
+            results.push(token[1]);
+          }
+        }
+        return results;
+      })()).join('#{}');
+      while (match = HEREDOC_INDENT.exec(doc)) {
+        attempt = match[1];
+        if (indent === null || (0 < (ref = attempt.length) && ref < indent.length)) {
+          indent = attempt;
+        }
+      }
+    }
+    delimiter = quote.charAt(0);
+    this.mergeInterpolationTokens(tokens, {
+      quote,
+      indent,
+      endOffset: end
+    }, (value) => {
+      return this.validateUnicodeCodePointEscapes(value, {
+        delimiter: quote
+      });
     });
-    return length;
+    return end;
+  }
+
+  // Matches numbers, including decimals, hex, and exponential notation.
+  // Be careful not to interfere with ranges in progress.
+  numberToken() {
+    var lexedLength, match, number, parsedValue, tag, tokenData;
+    if (!(match = NUMBER.exec(this.chunk))) {
+      return 0;
+    }
+    number = match[0];
+    lexedLength = number.length;
+    switch (false) {
+      case !/^0[BOX]/.test(number):
+        this.error(`radix prefix in '${number}' must be lowercase`, {
+          offset: 1
+        });
+        break;
+      case !/^0\d*[89]/.test(number):
+        this.error(`decimal literal '${number}' must not be prefixed with '0'`, {
+          length: lexedLength
+        });
+        break;
+      case !/^0\d+/.test(number):
+        this.error(`octal literal '${number}' must be prefixed with '0o'`, {
+          length: lexedLength
+        });
+    }
+    parsedValue = parseNumber(number);
+    tokenData = {parsedValue};
+    tag = parsedValue === 2e308 ? 'INFINITY' : 'NUMBER';
+    if (tag === 'INFINITY') {
+      tokenData.original = number;
+    }
+    this.token(tag, number, {
+      length: lexedLength,
+      data: tokenData
+    });
+    return lexedLength;
   }
 
   // Matches regular expression literals, as well as multiline extended ones.
@@ -694,197 +793,23 @@ export var Lexer = class Lexer {
     return end;
   }
 
-  // Matches newlines, indents, and outdents, and determines which is which.
-  // If we can detect that the current line is continued onto the next line,
-  // then the newline is suppressed:
-  //
-  //     elements
-  //       .each( ... )
-  //       .map( ... )
-  //
-  // Keeps track of the level of indentation, because a single outdent token
-  // can close multiple indents, so we need to know how far in we happen to be.
-  lineToken({chunk = this.chunk, offset = 0} = {}) {
-    var backslash, diff, endsContinuationLineIndentation, indent, match, minLiteralLength, newIndentLiteral, noNewlines, prev, ref, size;
-    if (!(match = MULTI_DENT.exec(chunk))) {
+  // Matches JavaScript interpolated directly into the source via backticks.
+  jsToken() {
+    var length, match, matchedHere, script;
+    if (!(this.chunk.charAt(0) === '`' && (match = (matchedHere = HERE_JSTOKEN.exec(this.chunk)) || JSTOKEN.exec(this.chunk)))) {
       return 0;
     }
-    indent = match[0];
-    prev = this.prev();
-    backslash = (prev != null ? prev[0] : void 0) === '\\';
-    if (!((backslash || ((ref = this.seenFor) != null ? ref.endsLength : void 0) < this.ends.length) && this.seenFor)) {
-      this.seenFor = false;
-    }
-    if (!((backslash && this.seenImport) || this.importSpecifierList)) {
-      this.seenImport = false;
-    }
-    if (!((backslash && this.seenExport) || this.exportSpecifierList)) {
-      this.seenExport = false;
-    }
-    size = indent.length - 1 - indent.lastIndexOf('\n');
-    noNewlines = this.unfinished();
-    newIndentLiteral = size > 0 ? indent.slice(-size) : '';
-    if (!/^(.?)\1*$/.exec(newIndentLiteral)) {
-      this.error('mixed indentation', {
-        offset: indent.length
-      });
-      return indent.length;
-    }
-    minLiteralLength = Math.min(newIndentLiteral.length, this.indentLiteral.length);
-    if (newIndentLiteral.slice(0, minLiteralLength) !== this.indentLiteral.slice(0, minLiteralLength)) {
-      this.error('indentation mismatch', {
-        offset: indent.length
-      });
-      return indent.length;
-    }
-    if (size - this.continuationLineAdditionalIndent === this.indent) {
-      if (noNewlines) {
-        this.suppressNewlines();
-      } else {
-        this.newlineToken(offset);
+    // Convert escaped backticks to backticks, and escaped backslashes
+    // just before escaped backticks to backslashes
+    script = match[1];
+    ({length} = match[0]);
+    this.token('JS', script, {
+      length,
+      data: {
+        here: !!matchedHere
       }
-      return indent.length;
-    }
-    if (size > this.indent) {
-      if (noNewlines) {
-        if (!backslash) {
-          this.continuationLineAdditionalIndent = size - this.indent;
-        }
-        if (this.continuationLineAdditionalIndent) {
-          prev.continuationLineIndent = this.indent + this.continuationLineAdditionalIndent;
-        }
-        this.suppressNewlines();
-        return indent.length;
-      }
-      if (!this.tokens.length) {
-        this.baseIndent = this.indent = size;
-        this.indentLiteral = newIndentLiteral;
-        return indent.length;
-      }
-      diff = size - this.indent + this.outdebt;
-      this.token('INDENT', diff, {
-        offset: offset + indent.length - size,
-        length: size
-      });
-      this.indents.push(diff);
-      this.ends.push({
-        tag: 'OUTDENT'
-      });
-      this.outdebt = this.continuationLineAdditionalIndent = 0;
-      this.indent = size;
-      this.indentLiteral = newIndentLiteral;
-    } else if (size < this.baseIndent) {
-      this.error('missing indentation', {
-        offset: offset + indent.length
-      });
-    } else {
-      endsContinuationLineIndentation = this.continuationLineAdditionalIndent > 0;
-      this.continuationLineAdditionalIndent = 0;
-      this.outdentToken({
-        moveOut: this.indent - size,
-        noNewlines,
-        outdentLength: indent.length,
-        offset,
-        indentSize: size,
-        endsContinuationLineIndentation
-      });
-    }
-    return indent.length;
-  }
-
-  // Record an outdent token or multiple tokens, if we happen to be moving back
-  // inwards past several recorded indents. Sets new @indent value.
-  outdentToken({moveOut, noNewlines, outdentLength = 0, offset = 0, indentSize, endsContinuationLineIndentation}) {
-    var decreasedIndent, dent, lastIndent, ref, terminatorToken;
-    decreasedIndent = this.indent - moveOut;
-    while (moveOut > 0) {
-      lastIndent = this.indents[this.indents.length - 1];
-      if (!lastIndent) {
-        this.outdebt = moveOut = 0;
-      } else if (this.outdebt && moveOut <= this.outdebt) {
-        this.outdebt -= moveOut;
-        moveOut = 0;
-      } else {
-        dent = this.indents.pop() + this.outdebt;
-        if (outdentLength && (ref = this.chunk[outdentLength], indexOf.call(INDENTABLE_CLOSERS, ref) >= 0)) {
-          decreasedIndent -= dent - moveOut;
-          moveOut = dent;
-        }
-        this.outdebt = 0;
-        // pair might call outdentToken, so preserve decreasedIndent
-        this.pair('OUTDENT');
-        this.token('OUTDENT', moveOut, {
-          length: outdentLength,
-          indentSize: indentSize + moveOut - dent
-        });
-        moveOut -= dent;
-      }
-    }
-    if (dent) {
-      this.outdebt -= moveOut;
-    }
-    this.suppressSemicolons();
-    if (!(this.tag() === 'TERMINATOR' || noNewlines)) {
-      terminatorToken = this.token('TERMINATOR', '\n', {
-        offset: offset + outdentLength,
-        length: 0
-      });
-      if (endsContinuationLineIndentation) {
-        terminatorToken.endsContinuationLineIndentation = {
-          preContinuationLineIndent: this.indent
-        };
-      }
-    }
-    this.indent = decreasedIndent;
-    this.indentLiteral = this.indentLiteral.slice(0, decreasedIndent);
-    return this;
-  }
-
-  // Matches and consumes non-meaningful whitespace. Tag the previous token
-  // as being "spaced", because there are some cases where it makes a difference.
-  whitespaceToken() {
-    var match, nline, prev;
-    if (!((match = WHITESPACE.exec(this.chunk)) || (nline = this.chunk.charAt(0) === '\n'))) {
-      return 0;
-    }
-    prev = this.prev();
-    if (prev) {
-      prev[match ? 'spaced' : 'newLine'] = true;
-    }
-    if (match) {
-      return match[0].length;
-    } else {
-      return 0;
-    }
-  }
-
-  // Generate a newline token. Consecutive newlines get merged together.
-  newlineToken(offset) {
-    this.suppressSemicolons();
-    if (this.tag() !== 'TERMINATOR') {
-      this.token('TERMINATOR', '\n', {
-        offset,
-        length: 0
-      });
-    }
-    return this;
-  }
-
-  // Use a `\` at a line-ending to suppress the newline.
-  // The slash is removed here once its job is done.
-  suppressNewlines() {
-    var prev;
-    prev = this.prev();
-    if (prev[1] === '\\') {
-      if (prev.comments && this.tokens.length > 1) {
-        // `@tokens.length` should be at least 2 (some code, then `\`).
-        // If something puts a `\` after nothing, they deserve to lose any
-        // comments that trail it.
-        attachCommentsToNode(prev.comments, this.tokens[this.tokens.length - 2]);
-      }
-      this.tokens.pop();
-    }
-    return this;
+    });
+    return length;
   }
 
   // We treat all other single characters as a token. E.g.: `( ) , . !`
@@ -994,6 +919,83 @@ export var Lexer = class Lexer {
     }
     this.tokens.push(this.makeToken(tag, value));
     return value.length;
+  }
+
+  // Record an outdent token or multiple tokens, if we happen to be moving back
+  // inwards past several recorded indents. Sets new @indent value.
+  outdentToken({moveOut, noNewlines, outdentLength = 0, offset = 0, indentSize, endsContinuationLineIndentation}) {
+    var decreasedIndent, dent, lastIndent, ref, terminatorToken;
+    decreasedIndent = this.indent - moveOut;
+    while (moveOut > 0) {
+      lastIndent = this.indents[this.indents.length - 1];
+      if (!lastIndent) {
+        this.outdebt = moveOut = 0;
+      } else if (this.outdebt && moveOut <= this.outdebt) {
+        this.outdebt -= moveOut;
+        moveOut = 0;
+      } else {
+        dent = this.indents.pop() + this.outdebt;
+        if (outdentLength && (ref = this.chunk[outdentLength], indexOf.call(INDENTABLE_CLOSERS, ref) >= 0)) {
+          decreasedIndent -= dent - moveOut;
+          moveOut = dent;
+        }
+        this.outdebt = 0;
+        // pair might call outdentToken, so preserve decreasedIndent
+        this.pair('OUTDENT');
+        this.token('OUTDENT', moveOut, {
+          length: outdentLength,
+          indentSize: indentSize + moveOut - dent
+        });
+        moveOut -= dent;
+      }
+    }
+    if (dent) {
+      this.outdebt -= moveOut;
+    }
+    this.suppressSemicolons();
+    if (!(this.tag() === 'TERMINATOR' || noNewlines)) {
+      terminatorToken = this.token('TERMINATOR', '\n', {
+        offset: offset + outdentLength,
+        length: 0
+      });
+      if (endsContinuationLineIndentation) {
+        terminatorToken.endsContinuationLineIndentation = {
+          preContinuationLineIndent: this.indent
+        };
+      }
+    }
+    this.indent = decreasedIndent;
+    this.indentLiteral = this.indentLiteral.slice(0, decreasedIndent);
+    return this;
+  }
+
+  // Generate a newline token. Consecutive newlines get merged together.
+  newlineToken(offset) {
+    this.suppressSemicolons();
+    if (this.tag() !== 'TERMINATOR') {
+      this.token('TERMINATOR', '\n', {
+        offset,
+        length: 0
+      });
+    }
+    return this;
+  }
+
+  // Use a `\` at a line-ending to suppress the newline.
+  // The slash is removed here once its job is done.
+  suppressNewlines() {
+    var prev;
+    prev = this.prev();
+    if (prev[1] === '\\') {
+      if (prev.comments && this.tokens.length > 1) {
+        // `@tokens.length` should be at least 2 (some code, then `\`).
+        // If something puts a `\` after nothing, they deserve to lose any
+        // comments that trail it.
+        attachCommentsToNode(prev.comments, this.tokens[this.tokens.length - 2]);
+      }
+      this.tokens.pop();
+    }
+    return this;
   }
 
   // Token Manipulators
