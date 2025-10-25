@@ -45,7 +45,7 @@ export var Lexer = class Lexer {
     var consumed, end, i, ref;
     this.indent = 0; // The current indentation level.
     this.baseIndent = 0; // The overall minimum indentation level.
-    this.continuationLineAdditionalIndent = 0; // The over-indentation at the current level.
+    this.overIndent = 0; // The over-indentation at the current level.
     this.outdebt = 0; // The under-outdentation at the current level.
     this.indents = []; // The stack of all current indentation levels.
     this.indentLiteral = ''; // The indentation.
@@ -59,9 +59,7 @@ export var Lexer = class Lexer {
     this.chunkLine = opts.line || 0; // The start line for the current @chunk.
     this.chunkColumn = opts.column || 0; // The start column of the current @chunk.
     this.chunkOffset = opts.offset || 0; // The start offset for the current @chunk.
-    
-    // The location data compensations for the current @chunk.
-    this.locationDataCompensations = opts.locationDataCompensations || {};
+    this.locTweaks = opts.locTweaks || {};
     code = this.clean(code); // The stripped, cleaned original source code.
     
     // At every position, run through this list of attempted matches,
@@ -97,19 +95,19 @@ export var Lexer = class Lexer {
     thusFar = 0;
     if (code.charCodeAt(0) === BOM) {
       code = code.slice(1);
-      this.locationDataCompensations[0] = 1;
+      this.locTweaks[0] = 1;
       thusFar += 1;
     }
     if (WHITESPACE.test(code)) {
       code = `\n${code}`;
       this.chunkLine--;
-      if ((base = this.locationDataCompensations)[0] == null) {
+      if ((base = this.locTweaks)[0] == null) {
         base[0] = 0;
       }
-      this.locationDataCompensations[0] -= 1;
+      this.locTweaks[0] -= 1;
     }
     return code.replace(/\r/g, (match, offset) => {
-      this.locationDataCompensations[thusFar + offset] = 1;
+      this.locTweaks[thusFar + offset] = 1;
       return '';
     }).replace(TRAILING_SPACES, '');
   }
@@ -497,7 +495,7 @@ export var Lexer = class Lexer {
       });
       return indent.length;
     }
-    if (size - this.continuationLineAdditionalIndent === this.indent) {
+    if (size - this.overIndent === this.indent) {
       if (noNewlines) {
         this.suppressNewlines();
       } else {
@@ -508,10 +506,10 @@ export var Lexer = class Lexer {
     if (size > this.indent) {
       if (noNewlines) {
         if (!backslash) {
-          this.continuationLineAdditionalIndent = size - this.indent;
+          this.overIndent = size - this.indent;
         }
-        if (this.continuationLineAdditionalIndent) {
-          prev.continuationLineIndent = this.indent + this.continuationLineAdditionalIndent;
+        if (this.overIndent) {
+          prev.continuationLineIndent = this.indent + this.overIndent;
         }
         this.suppressNewlines();
         return indent.length;
@@ -530,7 +528,7 @@ export var Lexer = class Lexer {
       this.ends.push({
         tag: 'OUTDENT'
       });
-      this.outdebt = this.continuationLineAdditionalIndent = 0;
+      this.outdebt = this.overIndent = 0;
       this.indent = size;
       this.indentLiteral = newIndentLiteral;
     } else if (size < this.baseIndent) {
@@ -538,8 +536,8 @@ export var Lexer = class Lexer {
         offset: offset + indent.length
       });
     } else {
-      endsContinuationLineIndentation = this.continuationLineAdditionalIndent > 0;
-      this.continuationLineAdditionalIndent = 0;
+      endsContinuationLineIndentation = this.overIndent > 0;
+      this.overIndent = 0;
       this.outdentToken({
         moveOut: this.indent - size,
         noNewlines,
@@ -1109,7 +1107,7 @@ export var Lexer = class Lexer {
         column,
         offset,
         untilBalanced: true,
-        locationDataCompensations: this.locationDataCompensations
+        locTweaks: this.locTweaks
       }));
       // Account for the `#` in `#{`.
       index += interpolationOffset;
@@ -1312,7 +1310,7 @@ export var Lexer = class Lexer {
       if (current === end && start !== initialEnd) {
         break;
       }
-      compensation = this.locationDataCompensations[current];
+      compensation = this.locTweaks[current];
       if (compensation != null) {
         totalCompensation += compensation;
         end += compensation;
