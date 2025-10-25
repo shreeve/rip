@@ -13,8 +13,7 @@ var BALANCED_PAIRS, BOM, BOOL, CALLABLE, CALL_CLOSERS, CODE, COMMENT, COMPARABLE
 
 // Import the helpers we need.
 import {
-  count, starts, compact, repeat, merge, extractAllCommentTokens,
-  attachCommentsToNode, locationDataToString, throwSyntaxError,
+  count, merge, extractAllCommentTokens, attachCommentsToNode, throwSyntaxError,
   replaceUnicodeCodePointEscapes, flatten, parseNumber
 } from './helpers.js';
 
