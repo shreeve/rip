@@ -1,0 +1,3 @@
+[submodule "packages/rip-lang"]
+	path = packages/rip-lang
+	url = git@github.com:shreeve/rip-lang.git
