@@ -26,19 +26,19 @@
 ```rip
 # Schema definition (packages/schema)
 @model 'User', ->
-  @string   'username', [3, 20]        # 3-20 characters
-  @integer  'age', [18, 120]          # 18-120 years
-  @email    'email', [5, 255]         # Email length limit
-  @integer  'views', min: 0           # Non-negative numbers
-  @text     'bio', max: 500           # Up to 500 characters
+  @string   'username', [3, 20]    # 3-20 characters
+  @integer  'age'     , [18, 120]  # 18-120 years
+  @email    'email'   , [5, 255]   # Email length limit
+  @integer  'views'   , min: 0     # Non-negative numbers
+  @text     'bio'     , max: 500   # Up to 500 characters
 
 # API validation (packages/api) - IDENTICAL SYNTAX!
 app.post '/users', ->
-  username = read 'username', [3, 20]      # Same syntax!
-  age = read 'age', [18, 120]             # Same syntax!
-  email = read 'email', [5, 255]          # Same syntax!
-  views = read 'views', min: 0             # Same syntax!
-  bio = read 'bio', max: 500               # Same syntax!
+  username = read 'username', [3, 20]    # Same syntax!
+  age      = read 'age'     , [18, 120]  # Same syntax!
+  email    = read 'email'   , [5, 255]   # Same syntax!
+  views    = read 'views'   , min: 0     # Same syntax!
+  bio      = read 'bio'     , max: 500   # Same syntax!
 
   json success: true, user: { username, age, email, views, bio }
 ```
@@ -304,70 +304,70 @@ app.post '/api/users', ->
 
 #### **Basic Types**
 ```rip
-id = read 'user_id', 'id!'        # All calls synchronous (middleware pre-parses)
-count = read 'count', 'whole'      # Pure synchronous elegance
-price = read 'price', 'decimal'    # No async complexity
-cost = read 'cost', 'money'        # Clean and simple
+id = read 'user_id', 'id!'       # All calls synchronous (middleware pre-parses)
+count = read 'count', 'whole'    # Pure synchronous elegance
+price = read 'price', 'decimal'  # No async complexity
+cost = read 'cost', 'money'      # Clean and simple
 ```
 
 #### **Text Processing**
 ```rip
-title = read 'title', 'string'    # All calls synchronous (middleware pre-parses)
-bio = read 'bio', 'text'           # Pure synchronous elegance
-full_name = read 'name', 'name'    # Clean and simple
+title = read 'title', 'string'   # All calls synchronous (middleware pre-parses)
+bio = read 'bio', 'text'         # Pure synchronous elegance
+full_name = read 'name', 'name'  # Clean and simple
 ```
 
 #### **Contact Information**
 ```rip
-email = read 'email', 'email'     # All calls synchronous (middleware pre-parses)
-phone = read 'phone', 'phone'      # No async complexity
-address = read 'address', 'address' # Pure elegance
+email = read 'email', 'email'        # All calls synchronous (middleware pre-parses)
+phone = read 'phone', 'phone'        # No async complexity
+address = read 'address', 'address'  # Pure elegance
 ```
 
 #### **Geographic Data**
 ```rip
-state = read 'state', 'state'     # All calls synchronous (middleware pre-parses)
+state = read 'state', 'state'      # All calls synchronous (middleware pre-parses)
 zip = read 'zip', 'zip'            # Clean and simple
 zipplus4 = read 'zip', 'zipplus4'  # Pure elegance
 ```
 
 #### **Identity & Security**
 ```rip
-ssn = read 'ssn', 'ssn'           # All calls synchronous (middleware pre-parses)
-sex = read 'gender', 'sex'         # No async complexity
-username = read 'username', 'username' # Pure elegance
+ssn = read 'ssn', 'ssn'                 # All calls synchronous (middleware pre-parses)
+sex = read 'gender', 'sex'              # No async complexity
+username = read 'username', 'username'  # Pure elegance
 ```
 
 #### **Web & Technical**
 ```rip
-website = read 'website', 'url'   # All calls synchronous (middleware pre-parses)
-ip = read 'ip_address', 'ip'       # Clean and simple
-mac = read 'mac', 'mac'            # Pure elegance
-color = read 'color', 'color'      # No async complexity
+website = read 'website', 'url'  # All calls synchronous (middleware pre-parses)
+ip = read 'ip_address', 'ip'     # Clean and simple
+mac = read 'mac', 'mac'          # Pure elegance
+color = read 'color', 'color'    # No async complexity
 ```
 
 #### **Development & Standards**
 ```rip
-version = read 'version', 'semver' # All calls synchronous (middleware pre-parses)
-user_id = read 'user_id', 'uuid'   # Pure elegance
-slug = read 'slug', 'slug'         # Clean and simple
-credit_card = read 'cc', 'creditcard' # No async complexity
+version = read 'version', 'semver'     # All calls synchronous (middleware pre-parses)
+user_id = read 'user_id', 'uuid'       # Pure elegance
+slug = read 'slug', 'slug'             # Clean and simple
+credit_card = read 'cc', 'creditcard'  # No async complexity
 ```
 
 #### **Time & Money**
 ```rip
-meeting = read 'time', 'time24'   # All calls synchronous (middleware pre-parses)
-appointment = read 'time', 'time12' # Pure elegance
-price = read 'price', 'currency'   # Clean and simple
+meeting = read 'time', 'time24'      # All calls synchronous (middleware pre-parses)
+appointment = read 'time', 'time12'  # Pure elegance
+price = read 'price', 'currency'     # Clean and simple
 ```
 
 #### **Boolean & Collections**
 ```rip
-active = read 'active', 'bool'    # All calls synchronous (middleware pre-parses)
-tags = read 'tags', 'array'        # No async complexity
-config = read 'config', 'hash'     # Pure elegance
-settings = read 'settings', 'json' # Smart JSON parsing!
-admin_ids = read 'admins', 'ids'   # Clean and simple
+active = read 'active', 'bool'      # All calls synchronous (middleware pre-parses)
+tags = read 'tags', 'array'         # No async complexity
+config = read 'config', 'hash'      # Pure elegance
+settings = read 'settings', 'json'  # Smart JSON parsing!
+admin_ids = read 'admins', 'ids'    # Clean and simple
 ```
 
 #### **Range Validation (Elegant!)**
@@ -375,16 +375,16 @@ admin_ids = read 'admins', 'ids'   # Clean and simple
 **✅ Common Things Easy** - `[min, max]` (90% of use cases):
 ```rip
 # Numbers: value range - super clean!
-age = read 'age', [18, 120]        # Between 18 and 120
+age = read 'age', [18, 120]             # Between 18 and 120
 priority = read 'priority', [1, 10], 5  # Range 1-10, default 5
-score = read 'score', [0, 100]     # Percentage validation
-rating = read 'rating', [1, 5]     # Star rating system
+score = read 'score', [0, 100]          # Percentage validation
+rating = read 'rating', [1, 5]          # Star rating system
 
 # Strings: length range - equally clean!
 username = read 'username', [3, 20]  # 3-20 characters
-title = read 'title', [1, 100]      # 1-100 characters
-bio = read 'bio', [0, 500]          # Up to 500 characters
-code = read 'code', [6, 6]          # Exactly 6 characters
+title = read 'title', [1, 100]       # 1-100 characters
+bio = read 'bio', [0, 500]           # Up to 500 characters
+code = read 'code', [6, 6]           # Exactly 6 characters
 ```
 
 **🎯 Rare Things Possible** - `min:` / `max:` (10% of use cases):
@@ -578,11 +578,11 @@ import { read, c, withHelpers } from '@rip/api'
 app.use withHelpers  # Enable Sinatra-style context-free helpers
 
 app.post '/signup', ->  # No context parameter needed
-  email = read 'email', 'email!'                    # All calls synchronous (middleware pre-parses)
-  name = read 'name', 'name!'
+  email = read 'email', 'email!'  # All calls synchronous (middleware pre-parses)
+  name  = read 'name' , 'name!'
   phone = read 'phone', 'phone'
   state = read 'state', 'state!'
-  age = read 'age', [18, 120], null    # Pure elegance
+  age   = read 'age'  , [18, 120], null  # Pure elegance
 
   user = createUser! email, name, phone, state, age # Use ! suffix for async operations
   { success: true, user }
@@ -725,20 +725,19 @@ Notes:
 
 ```coffee
 stampLocal = (d = new Date()) ->
-  y = d.getFullYear()
-  m = ("0#{d.getMonth()+1}").slice(-2)
-  dd = ("0#{d.getDate()}").slice(-2)
-  hh = ("0#{d.getHours()}").slice(-2)
-  mm = ("0#{d.getMinutes()}").slice(-2)
-  ss = ("0#{d.getSeconds()}").slice(-2)
-  off = -d.getTimezoneOffset()   # minutes east of UTC
+  y    = d.getFullYear()
+  m    = ("0#{d.getMonth()+1}").slice(-2)
+  dd   = ("0#{d.getDate()}").slice(-2)
+  hh   = ("0#{d.getHours()}").slice(-2)
+  mm   = ("0#{d.getMinutes()}").slice(-2)
+  ss   = ("0#{d.getSeconds()}").slice(-2)
+  off  = -d.getTimezoneOffset()   # minutes east of UTC
   sign = if off >= 0 then '+' else '-'
-  off = Math.abs off
-  oh = ("0#{Math.floor(off/60)}").slice(-2)
-  om = ("0#{off%60}").slice(-2)
+  off  = Math.abs off
+  oh   = ("0#{Math.floor(off/60)}").slice(-2)
+  om   = ("0#{off%60}").slice(-2)
   "#{y}-#{m}-#{dd} at #{hh}:#{mm}:#{ss}#{sign}#{oh}#{om}"
 
 # example:
 y = stampLocal()  # "2025-09-02 at 17:59:15-0600"  (example)
 ```
-
