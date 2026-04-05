@@ -46,7 +46,7 @@ Initial language subset:
 - Zig-aligned module/import boundaries
 - the basic shape of capability-pack enablement, even if only one pack exists at first
 - value-position versus effect-position analysis for routines and `if`
-- `def` versus `sub`, call-site `!` as `await`, and `?` as part of the real routine name
+- `fun` versus `sub`, call-site `!` as `await`, and `?` as part of the real routine name
 - optional type annotations with a narrow v0 inference policy
 
 Compiler stages:

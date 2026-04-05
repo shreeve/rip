@@ -113,9 +113,9 @@ Capability packs fit into this stage boundary as well. They should be enabled in
 
 The same kind of contextual rule should apply to value flow more generally, but routine behavior should be anchored at definition time. In the current direction:
 
-- `def` declares a value-yielding routine
+- `fun` declares a value-yielding routine
 - `sub` declares an effect-oriented routine
-- `def` implicitly yields its final expression by default
+- `fun` implicitly yields its final expression by default
 - `sub` does not implicitly yield a final value
 - a call-site `!` keeps the `rip-lang` meaning of `await`
 - a `?` suffix remains part of the actual routine name

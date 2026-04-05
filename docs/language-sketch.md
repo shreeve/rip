@@ -59,9 +59,9 @@ For routines, `Rip` should use two clear declaration forms rather than encoding 
 
 The model is:
 
-- `def` declares a value-yielding routine
+- `fun` declares a value-yielding routine
 - `sub` declares an effect-oriented routine
-- every `def` implicitly yields its final expression by default
+- every `fun` implicitly yields its final expression by default
 - `sub` does not implicitly yield a final value
 - explicit `return` exists for early exit
 - appending `!` at call time keeps the `rip-lang` meaning of `await`
@@ -91,7 +91,7 @@ Applied to `if`:
 ## Example Source
 
 ```text
-def add a: i32, b: i32 -> i32
+fun add a: i32, b: i32 -> i32
   a + b
 
 sub main
@@ -104,14 +104,14 @@ sub main
 
 In this example:
 
-- `add` is a `def`, so it implicitly yields its final expression
+- `add` is a `fun`, so it implicitly yields its final expression
 - `main` is a `sub`, so it does not need to yield a final value
 - the `if` in `main` is used in effect position, so it does not need to yield a value
 
 An equally valid long-term direction would be:
 
 ```text
-def add a, b
+fun add a, b
   a + b
 ```
 
@@ -123,7 +123,7 @@ The parser can emit a direct structural representation of the source:
 
 ```lisp
 (module
-  (def add
+  (fun add
     ((param a i32)
      (param b i32))
     (ret i32)
@@ -148,7 +148,7 @@ After normalization, the compiler should operate on a smaller and more regular s
 
 ```lisp
 (module
-  (def add
+  (fun add
     ((a i32) (b i32))
     i32
     (block
@@ -204,7 +204,7 @@ pub fn main() void {
 The first implementation should stay close to a very small vocabulary:
 
 - `module`
-- `def`
+- `fun`
 - `sub`
 - `block`
 - `let`
@@ -222,13 +222,13 @@ This is enough to bootstrap the parser, normalization pass, and emitter without 
 The best initial policy is:
 
 - infer locals when the answer is obvious
-- infer final return types for simple `def` bodies when obvious
+- infer final return types for simple `fun` bodies when obvious
 - keep literals context-sensitive until they are constrained
 - require explicit types at important boundaries
 
 Important boundaries likely include:
 
-- `def` parameters in v0
+- `fun` parameters in v0
 - public definitions
 - extern or FFI boundaries
 - struct fields and other layout-sensitive declarations
