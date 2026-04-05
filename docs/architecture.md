@@ -1,0 +1,183 @@
+# Rip Architecture
+
+## Thesis
+
+`Rip` is a systems language with elegant syntax and an intentionally pragmatic backend story: target `Zig` first, not because `Zig` is the final destination, but because it gives `Rip` a credible path to native output immediately.
+
+The first version should keep the semantic layer thin. The goal is not to out-Zig `Zig`; the goal is to prove that systems programming can feel much cleaner at the source level without sacrificing explicit meaning or native performance.
+
+Just as importantly, `Rip` should preserve the ethos of `rip-lang` without copying its syntax literally. The continuity should come from language feel: whitespace-sensitive structure, succinct forms, value-oriented expressions, and a bias against boilerplate when the meaning is already clear.
+
+That continuity stops at JavaScript-specific semantics. Systems `Rip` should not inherit UI or reactivity constructs like `component`, `render`, `:=`, `~=`, or `~>`. Module/import boundaries should instead align with the Zig ecosystem.
+
+However, a small core language does not mean a barren one. `Rip` should support optional capability packs that can inject well-chosen runtime or standard-library substrate when needed. Regex support is a good example: the language can enable a high-performance regex facility without making regex engine implementation part of the language core.
+
+## Initial Pipeline
+
+```mermaid
+flowchart TD
+  ripSource["Rip source"] --> sexps["S-expressions"]
+  sexps --> normalizedSexps["Normalized S-expressions"]
+  normalizedSexps --> typeResolution["Type resolution"]
+  typeResolution --> zigSource["Generated Zig source"]
+  zigSource --> zigCompiler["zig build-exe / zig test / zig build-lib"]
+```
+
+## Stage Boundaries
+
+### 1. Rip Source
+
+This is the user-facing language:
+
+- indentation-sensitive
+- no semicolons
+- expression-friendly
+- value-oriented when forms are used as values
+- module structure aligned with Zig rather than JavaScript
+- optional capability packs for non-core facilities
+- explicit enough for systems programming
+
+The source language is allowed to be pleasant. It does not need to look like the eventual target language.
+
+### 2. S-expressions
+
+The parser should produce S-expressions directly instead of a separate AST layer. That makes the compiler operate on uniform structure from the beginning.
+
+This layer should preserve:
+
+- lexical structure
+- symbol names
+- literal forms
+- source spans for diagnostics
+
+At this stage, the representation may still be close to the original surface syntax.
+
+The important point is that this should be a real first-pass representation, not a temporary pseudo-AST that later gets converted into S-expressions. `Rip` should parse into raw S-expressions, rewrite those into normalized S-expressions, and continue transforming the same structural form as long as that remains practical.
+
+### 3. Normalized S-expressions
+
+This is the first serious compiler boundary. Surface sugar should be removed here so later stages only work with a small number of canonical forms.
+
+Examples of normalization:
+
+- alternate declaration sugar becomes one declaration form
+- expression sugar becomes explicit calls or bindings
+- control-flow shorthand becomes canonical `if`, `while`, or block forms
+- value-yielding forms become explicit in the canonical representation
+
+The point is not to make the program low-level yet. The point is to make it structurally regular.
+
+This also means the rewrite pipeline can stay simple:
+
+- parse into raw S-expressions
+- rewrite into normalized S-expressions
+- keep rewriting S-expressions until a stronger IR is clearly needed
+
+### 4. Type Resolution
+
+Types can be optional in `Rip` source, but they cannot remain optional by the time the compiler emits `Zig`.
+
+This pass should:
+
+- preserve explicit type annotations from source
+- infer missing types where the answer is safe and obvious
+- propagate resolved types through expressions and bindings
+- reject unresolved or ambiguous cases before code generation
+
+The main policy should be:
+
+- infer when safe
+- require explicit types at important boundaries
+- do not silently guess a "smallest" or "most efficient" type when the choice affects semantics
+
+Likely boundaries that should require explicit types early:
+
+- public definitions
+- function parameters in v0
+- extern or FFI boundaries
+- struct fields and layout-sensitive declarations
+
+### 5. Generated Zig Source
+
+For v0, `Rip` should emit readable `Zig` source and let the Zig compiler own:
+
+- semantic checks that map directly to Zig
+- optimization
+- machine code generation
+- linking
+- platform and target details
+
+This is the main leverage move for the project.
+
+Capability packs fit into this stage boundary as well. They should be enabled in source, but they are not primarily grammar or parser features. They are downstream compilation features: the compiler sees that a capability is enabled and injects the supporting Zig modules, imports, helpers, wrappers, or preamble code needed for that capability.
+
+The same kind of contextual rule should apply to value flow more generally, but routine behavior should be anchored at definition time. In the current direction:
+
+- `def` declares a value-yielding routine
+- `sub` declares an effect-oriented routine
+- `def` implicitly yields its final expression by default
+- `sub` does not implicitly yield a final value
+- a call-site `!` keeps the `rip-lang` meaning of `await`
+- a `?` suffix remains part of the actual routine name
+
+Value position versus effect position still matters for forms like `if` and blocks. A form used in value position must yield a value. The same form used only for effect can have its value ignored.
+
+Optional typing should work similarly to how `rip-lang` evolved, but with an important difference: in `rip-lang`, types can be erased into JavaScript-facing metadata and declarations; in `Rip`, optional source types must eventually become concrete emitted Zig types. So the type pass is not optional, only the source annotations are.
+
+## Capability Packs
+
+The core language should stay small. Optional power should come from explicit capability packs.
+
+Properties of a good capability pack:
+
+- opt-in rather than implicit
+- easy to enable and easy to disable
+- maps cleanly to generated Zig
+- does not distort the core language semantics
+- gives access to genuinely useful functionality that would be wasteful to reimplement repeatedly
+- is handled downstream of parsing rather than forcing the grammar core to know about every optional facility
+
+Early examples:
+
+- regex support backed by a performant engine or library
+- future text/binary utilities
+- future platform or FFI helpers
+
+This gives `Rip` a middle ground between a tiny bare language and a bloated everything-in-core design.
+
+The likely first surface syntax for this is `use`, with possible inference from actual use left as a later convenience rather than a v0 requirement.
+
+## Why Not Target Zig Internals
+
+`Rip` should not target actual Zig internal IRs such as `ZIR` in v0.
+
+Reasons:
+
+- Zig internals are not a stable public contract
+- the project would become tightly coupled to compiler implementation details
+- the fastest path to a working language is emitting Zig source cleanly
+
+`ZIR` can still be a useful architectural inspiration. It should not be the first external dependency boundary.
+
+## Design Principles
+
+- Keep the first implementation narrow.
+- Prefer simple lowering over clever semantics.
+- Preserve the ethos of succinctness even when the implementation starts conservatively.
+- Preserve source spans from the first parsed form onward.
+- Only add a dedicated core IR when the compiler starts to outgrow normalized S-expressions.
+- Treat `Zig` as the initial ecosystem target, not as a permanent design constraint.
+- Exclude JS-specific UI/reactivity features from the systems-language core.
+- Use optional capability packs for powerful non-core facilities.
+- Accept audited LR conflicts when they keep the language simpler and the parser behavior remains well understood.
+- Keep source types optional, but require full type resolution before Zig emission.
+
+## Likely Evolution
+
+The expected progression is:
+
+1. `Rip -> S-expressions -> normalized S-expressions -> Zig`
+2. `Rip -> normalized S-expressions -> typed/core IR -> Zig`
+3. `Rip -> typed/core IR -> alternate backend choices`
+
+That sequence keeps the early project honest while preserving room for deeper compiler work later.
