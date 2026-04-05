@@ -23,23 +23,29 @@ Deliverables:
 - architecture overview
 - roadmap
 - initial language sketch
+- compact v0 syntax/type spec
 
 Success criteria:
 
 - a new reader can understand the thesis in under two minutes
 - the repo explains why `Rip -> Zig` is the first implementation strategy
 - the project feels focused rather than speculative
+- the bootstrap syntax surface is concrete enough to implement without inventing semantics on the fly
 
 ## Phase 1: Bootstrap Compiler
 
 Goal: compile a tiny `Rip` subset into valid `Zig`.
+
+Primary spec reference:
+
+- `docs/v0-syntax.md`
 
 Initial language subset:
 
 - function declarations
 - typed parameters
 - typed return values
-- local bindings
+- bindings via `=` and `=!`
 - arithmetic expressions
 - function calls
 - `if` expressions or statements

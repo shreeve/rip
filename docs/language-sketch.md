@@ -4,6 +4,8 @@
 
 This document defines the smallest useful slice of `Rip` for the first compiler bootstrap. It is not a complete language spec. It is a constrained starting point that is easy to parse, normalize, and lower into `Zig`.
 
+For the concrete bootstrap surface, see `docs/v0-syntax.md`.
+
 ## Principles For The First Subset
 
 - indentation-sensitive syntax
@@ -95,7 +97,7 @@ fun add a: i32, b: i32 -> i32
   a + b
 
 sub main
-  let total = add 1, 2
+  total = add 1, 2
   if total > 0
     print total
   else
@@ -130,7 +132,7 @@ The parser can emit a direct structural representation of the source:
     (+ a b))
   (sub main
     ()
-    (let total (call add 1 2))
+    (= total (call add 1 2))
     (if (> total 0)
         (call print total)
         (call print 0))))
@@ -156,7 +158,7 @@ After normalization, the compiler should operate on a smaller and more regular s
   (sub main
     ()
     (block
-      (let total (call add 1 2))
+      (= total (call add 1 2))
       (if (call > total 0)
           (block
             (expr (call print total)))
@@ -207,7 +209,8 @@ The first implementation should stay close to a very small vocabulary:
 - `fun`
 - `sub`
 - `block`
-- `let`
+- `=`
+- `=!`
 - `return`
 - `if`
 - `call`

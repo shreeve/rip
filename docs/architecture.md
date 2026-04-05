@@ -122,6 +122,11 @@ The same kind of contextual rule should apply to value flow more generally, but 
 
 Value position versus effect position still matters for forms like `if` and blocks. A form used in value position must yield a value. The same form used only for effect can have its value ignored.
 
+Bindings should also stay low-ceremony. Instead of `let` or `const`, the current direction is:
+
+- plain `=` for normal bindings under scope rules
+- `=!` for explicit constant bindings
+
 Optional typing should work similarly to how `rip-lang` evolved, but with an important difference: in `rip-lang`, types can be erased into JavaScript-facing metadata and declarations; in `Rip`, optional source types must eventually become concrete emitted Zig types. So the type pass is not optional, only the source annotations are.
 
 ## Capability Packs
