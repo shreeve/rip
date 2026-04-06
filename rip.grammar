@@ -20,9 +20,12 @@
 # ==============================================================================
 
 state
-    beg   = 1       # At beginning of line (1 = true, 0 = false)
-    paren = 0       # Parenthesis nesting depth
-    brace = 0       # Brace nesting depth
+    beg   = 1       # beginning of line
+    paren = 0       # parenthesis depth
+    brace = 0       # brace depth
+
+after
+    beg = 0         # cleared after each token
 
 # ==============================================================================
 # TOKEN TYPES
@@ -35,8 +38,8 @@ tokens
     real            # Decimal: 3.14, .5, 2.0
     string_sq       # Single-quoted string: 'hello world'
     string_dq       # Double-quoted string: "hello #{name}"
-    bool_true       # true
-    bool_false      # false
+    true            # true
+    false           # false
 
     # Operators — arithmetic
     plus            # +
@@ -91,13 +94,6 @@ tokens
     err             # Lexer error
 
 # ==============================================================================
-# DEFAULT ACTIONS
-# ==============================================================================
-
-defaults
-    beg = 0         # Most tokens clear line-start flag
-
-# ==============================================================================
 # COMMENTS
 # ==============================================================================
 
@@ -113,11 +109,8 @@ defaults
 '\r'                                        → newline, {beg = 1}
 
 # ==============================================================================
-# STRING LITERALS
+# STRINGS
 # ==============================================================================
-#
-# Single-quoted strings: no interpolation, no escapes except ''
-# Double-quoted strings: interpolation, standard escapes
 
 '"' ([^"\\$\n] | '\\' . | '$')* '"'         → string_dq
 "'" ([^'\n] | "''")* "'"                    → string_sq
@@ -130,10 +123,8 @@ defaults
 [0-9]+                                      → integer
 
 # ==============================================================================
-# MULTI-CHARACTER OPERATORS
+# MULTI-CHARACTER OPERATORS (longer patterns first)
 # ==============================================================================
-#
-# Order matters: longer patterns first to get correct greedy match.
 
 "**"                                        → power
 "=="                                        → eq
@@ -176,24 +167,13 @@ defaults
 '.'                                         → dot
 
 # ==============================================================================
-# IDENTIFIERS AND KEYWORDS
+# IDENTIFIERS
 # ==============================================================================
-#
-# Identifiers start with a letter or underscore and may contain digits.
-# The trailing ? is part of the identifier (e.g., exists?, empty?).
-# Keywords are recognized in the parser via @as directives.
 
 [a-zA-Z_][a-zA-Z0-9_]* '?'?                 → ident
 
 # ==============================================================================
-# BOOLEAN LITERALS
-# ==============================================================================
-#
-# true and false are handled as keyword promotion from ident via @as,
-# but we keep them in the token list for clarity.
-
-# ==============================================================================
-# ERROR / FALLBACK
+# FALLBACK
 # ==============================================================================
 
 .                                           → err
@@ -208,11 +188,11 @@ defaults
 
 @as = [ident, keyword]
 
-name = IDENT
-
 # ==============================================================================
 # PROGRAM STRUCTURE
 # ==============================================================================
+
+name = IDENT
 
 program! = body                             → (module ...1)
 expr!    = expr                             → 1
@@ -248,9 +228,10 @@ params   = L(name)                          → (...1)
 # ==============================================================================
 
 expr     = if
+         | return
          | assign
          | const
-         | infix
+         | @infix
 
 if       = IF expr block ELSE if            → (if 2 3 5)
          | IF expr block ELSE block         → (if 2 3 5)
@@ -288,10 +269,10 @@ atom     = name
          | "(" expr ")"                     → 2
 
 # ==============================================================================
-# PRECEDENCE
+# INFIX OPERATORS
 # ==============================================================================
 
-@precedence unary
+@infix unary
     "||"  left
     "&&"  left
     "=="  none, "!=" none, "<" none, ">" none, "<=" none, ">=" none

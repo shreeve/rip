@@ -339,7 +339,7 @@ const LexerParser = struct {
             }
 
             // Parse defaults block
-            if (self.expectStr("defaults")) {
+            if (self.expectStr("after")) {
                 try self.parseDefaultsBlock();
                 continue;
             }
@@ -1442,8 +1442,7 @@ const LexerGenerator = struct {
                 }
             }
             if (std.mem.eql(u8, rule.token, "integer") or
-                std.mem.eql(u8, rule.token, "real") or
-                std.mem.eql(u8, rule.token, "zdigits"))
+                std.mem.eql(u8, rule.token, "real"))
             {
                 has_number = true;
                 if (std.mem.indexOf(u8, rule.pattern, "'.'") != null and
@@ -2628,7 +2627,7 @@ const ParserDSLParser = struct {
             try self.parseCodeDirective();
         } else if (std.mem.eql(u8, directive_name, "errors")) {
             try self.parseErrorsDirective();
-        } else if (std.mem.eql(u8, directive_name, "precedence")) {
+        } else if (std.mem.eql(u8, directive_name, "infix")) {
             try self.parseInfixDirective();
         } else if (std.mem.eql(u8, directive_name, "conflicts")) {
             try self.expect(.eq, "Expected '=' after @conflicts");
@@ -2983,6 +2982,14 @@ const ParserDSLParser = struct {
         var element: ParsedElement = .{ .kind = undefined, .value = undefined };
 
         switch (self.current.kind) {
+            .at => {
+                // @infix reference — resolves to generated nonterminal
+                self.advance(); // skip @
+                const name = self.current.text;
+                self.advance();
+                element.kind = .ident;
+                element.value = name;
+            },
             .ident => {
                 element.kind = .ident;
                 element.value = self.current.text;
