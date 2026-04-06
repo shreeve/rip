@@ -1568,13 +1568,11 @@ const LexerGenerator = struct {
 
     fn generateScannerDispatch(self: *LexerGenerator) !void {
         // Derive dispatch conditions from grammar patterns
-        var has_string = false;
-        var string_open: u8 = 0;
         var has_number = false;
         var number_has_leading_dot = false;
         var has_ident = false;
 
-        // Collect string patterns: both "string" (mumps) and "string_sq"/"string_dq" (slash)
+        // Collect string patterns with optional heredoc (triple-quote) detection
         const StringInfo = struct { open_char: u8, token: []const u8, has_heredoc: bool, heredoc_token: []const u8 };
         var string_infos: [4]StringInfo = undefined;
         var string_info_count: usize = 0;
@@ -1588,12 +1586,7 @@ const LexerGenerator = struct {
                 if (rule.pattern.len >= 3 and (rule.pattern[0] == '\'' or rule.pattern[0] == '"')) {
                     const delim = rule.pattern[0];
                     if (rule.pattern[1] != delim) {
-                        // Check for mumps-style "string" token (uses scanString)
-                        if (std.mem.eql(u8, rule.token, "string")) {
-                            has_string = true;
-                            string_open = rule.pattern[1];
-                        } else if (string_info_count < string_infos.len) {
-                            // Slash-style string_sq/string_dq — handled inline
+                        if (string_info_count < string_infos.len) {
                             const oc = rule.pattern[1];
                             // Check if there's a matching heredoc (triple-quote) pattern
                             var has_hd = false;
@@ -1637,19 +1630,7 @@ const LexerGenerator = struct {
             }
         }
 
-        // Mumps-style: single "string" token handled by scanString
-        if (has_string) {
-            const lit = charToZigLiteral(string_open);
-            try self.print(
-                \\        // String literal
-                \\        if (c == '{s}') {{
-                \\            return self.scanString(start, ws_count);
-                \\        }}
-                \\
-            , .{lit.buf[0..lit.len]});
-        }
-
-        // Slash-style: multiple string token types with inline heredoc detection
+        // String token types with optional heredoc (triple-quote) detection
         for (string_infos[0..string_info_count]) |si| {
             const lit = charToZigLiteral(si.open_char);
             const lit_str = lit.buf[0..lit.len];
@@ -1690,7 +1671,7 @@ const LexerGenerator = struct {
                     \\
                 , .{ lit_str, lit_str, si.token });
             } else {
-                // Double-quote: backslash escape, $-passthrough, stop on \n
+                // Double-quote: backslash escape, stop on \n
                 try self.print(
                     \\            self.pos += 1;
                     \\            while (self.pos < self.source.len) {{
@@ -1762,12 +1743,6 @@ const LexerGenerator = struct {
         // consumed as a standalone operator token.
         try self.generatePrefixScanners();
 
-        // Generate flag scanner: '-' followed by letter → scan flag token
-        try self.generateFlagScanner();
-
-        // Generate path/glob dispatch: characters like '/', '.', '~' that start ident
-        // patterns when not in math mode
-        try self.generatePathDispatch();
     }
 
     fn generatePrefixScanners(self: *LexerGenerator) !void {
@@ -1914,201 +1889,9 @@ const LexerGenerator = struct {
         }
     }
 
-    fn generateFlagScanner(self: *LexerGenerator) !void {
-        // Check if grammar has a 'flag' token type
-        var has_flag = false;
-        for (self.spec.rules.items) |rule| {
-            if (std.mem.eql(u8, rule.token, "flag")) { has_flag = true; break; }
-        }
-        if (!has_flag) return;
-
-        try self.write(
-            \\        // Flag: -f, -la, --verbose
-            \\        if (c == '-') {
-            \\            const nc = if (self.pos + 1 < self.source.len) self.source[self.pos + 1] else 0;
-            \\            const is_flag_start = (nc >= 'a' and nc <= 'z') or (nc >= 'A' and nc <= 'Z') or nc == '-';
-            \\            if (is_flag_start) {
-            \\                self.pos += 1;
-            \\                if (self.source[self.pos] == '-') self.pos += 1; // skip second '-' for --flag
-            \\                while (self.pos < self.source.len) {
-            \\                    const fc = self.source[self.pos];
-            \\                    if (!((fc >= 'a' and fc <= 'z') or (fc >= 'A' and fc <= 'Z') or (fc >= '0' and fc <= '9') or fc == '_' or fc == '-')) break;
-            \\                    self.pos += 1;
-            \\                }
-            \\                // Check for =value suffix
-            \\                if (self.pos < self.source.len and self.source[self.pos] == '=') {
-            \\                    self.pos += 1;
-            \\                    while (self.pos < self.source.len) {
-            \\                        const vc = self.source[self.pos];
-            \\                        if (vc == ' ' or vc == '\t' or vc == '\n' or vc == '\r') break;
-            \\                        self.pos += 1;
-            \\                    }
-            \\                }
-            \\                return Token{ .cat = .flag, .pre = ws_count, .pos = start, .len = @intCast(self.pos - start) };
-            \\            }
-            \\        }
-            \\
-        );
-    }
-
-    fn generatePathDispatch(self: *LexerGenerator) !void {
-        // Check if grammar has ident patterns starting with path chars (./ ~)
-        var has_path_idents = false;
-        for (self.spec.rules.items) |rule| {
-            if (!std.mem.eql(u8, rule.token, "ident")) continue;
-            if (rule.pattern.len > 0 and (rule.pattern[0] == '[')) {
-                if (std.mem.indexOf(u8, rule.pattern, "./~") != null or
-                    std.mem.indexOf(u8, rule.pattern, ".") != null)
-                {
-                    has_path_idents = true;
-                    break;
-                }
-            }
-        }
-        if (!has_path_idents) return;
-
-        // Check if grammar has a 'math' state variable
-        var has_math = false;
-        for (self.spec.states.items) |s| {
-            if (std.mem.eql(u8, s.name, "math")) { has_math = true; break; }
-        }
-
-        if (has_math) {
-            try self.write(
-                \\        // Path-like identifiers: /path, ./rel, ~/home (not in math mode)
-                \\        if (self.math == 0 and (c == '/' or c == '.' or c == '~')) {
-                \\            const nc = if (self.pos + 1 < self.source.len) self.source[self.pos + 1] else 0;
-                \\            const is_path = (c == '/' or c == '~') or
-                \\                (c == '.' and ((nc >= 'a' and nc <= 'z') or (nc >= 'A' and nc <= 'Z') or nc == '/' or nc == '_' or nc == '.'));
-                \\            if (is_path) {
-                \\                while (self.pos < self.source.len) {
-                \\                    const pc = self.source[self.pos];
-                \\                    if (!((pc >= 'a' and pc <= 'z') or (pc >= 'A' and pc <= 'Z') or (pc >= '0' and pc <= '9') or pc == '_' or pc == '.' or pc == '/' or pc == '-' or pc == '~')) break;
-                \\                    self.pos += 1;
-                \\                }
-                \\                return Token{ .cat = .ident, .pre = ws_count, .pos = start, .len = @intCast(self.pos - start) };
-                \\            }
-                \\        }
-                \\
-            );
-        } else {
-            try self.write(
-                \\        // Path-like identifiers: /path, ./rel, ~/home
-                \\        if (c == '/' or c == '.' or c == '~') {
-                \\            const nc = if (self.pos + 1 < self.source.len) self.source[self.pos + 1] else 0;
-                \\            const is_path = (c == '/' or c == '~') or
-                \\                (c == '.' and ((nc >= 'a' and nc <= 'z') or (nc >= 'A' and nc <= 'Z') or nc == '/' or nc == '_' or nc == '.'));
-                \\            if (is_path) {
-                \\                while (self.pos < self.source.len) {
-                \\                    const pc = self.source[self.pos];
-                \\                    if (!((pc >= 'a' and pc <= 'z') or (pc >= 'A' and pc <= 'Z') or (pc >= '0' and pc <= '9') or pc == '_' or pc == '.' or pc == '/' or pc == '-' or pc == '~')) break;
-                \\                    self.pos += 1;
-                \\                }
-                \\                return Token{ .cat = .ident, .pre = ws_count, .pos = start, .len = @intCast(self.pos - start) };
-                \\            }
-                \\        }
-                \\
-            );
-        }
-    }
-
     fn generateScanners(self: *LexerGenerator) !void {
-        try self.generateStringScanner();
         try self.generateNumberScanner();
         try self.generateIdentScanner();
-    }
-
-    fn generateStringScanner(self: *LexerGenerator) !void {
-        // Find the string pattern: 'X' body* 'X' → string
-        for (self.spec.rules.items) |rule| {
-            if (!std.mem.eql(u8, rule.token, "string")) continue;
-            if (rule.guards.len > 0) continue;
-
-            // Extract open char from pattern (first literal char)
-            if (rule.pattern.len < 3) continue;
-            const delim = rule.pattern[0];
-            if (delim != '\'' and delim != '"') continue;
-            const open_char = rule.pattern[1];
-            if (open_char == delim) continue;
-            const open_lit = charToZigLiteral(open_char);
-            const open_str = open_lit.buf[0..open_lit.len];
-
-            // Detect escape mechanism and stop chars from the body pattern.
-            // Grammar literals are quoted, so doubled delimiters appear as
-            // delimiter + open_char + open_char + delimiter, e.g. '""'.
-            const has_doubled_escape = blk: {
-                const needle = [_]u8{ delim, open_char, open_char, delim };
-                break :blk std.mem.indexOf(u8, rule.pattern, &needle) != null;
-            };
-
-            // Detect stop chars from [^...] in body
-            var stop_char: ?u8 = null;
-            if (std.mem.indexOf(u8, rule.pattern, "[^")) |idx| {
-                var i = idx + 2;
-                while (i < rule.pattern.len and rule.pattern[i] != ']') {
-                    if (rule.pattern[i] == open_char) { i += 1; continue; }
-                    if (rule.pattern[i] == '\\' and i + 1 < rule.pattern.len) {
-                        stop_char = switch (rule.pattern[i + 1]) {
-                            'n' => '\n', 'r' => '\r', 't' => '\t',
-                            else => rule.pattern[i + 1],
-                        };
-                        i += 2;
-                    } else {
-                        stop_char = rule.pattern[i];
-                        i += 1;
-                    }
-                }
-            }
-
-            try self.print(
-                \\    /// Scan string literal (generated from grammar)
-                \\    fn scanString(self: *Self, start: u32, ws: u8) Token {{
-                \\        self.pos += 1; // Skip opening quote
-                \\        while (self.pos < self.source.len) {{
-                \\            const ch = self.source[self.pos];
-                \\            if (ch == '{s}') {{
-                \\                self.pos += 1;
-                \\
-            , .{open_str});
-
-            if (has_doubled_escape) {
-                try self.print(
-                    \\                if (self.pos < self.source.len and self.source[self.pos] == '{s}') {{
-                    \\                    self.pos += 1; // Escaped quote, continue
-                    \\                    continue;
-                    \\                }}
-                    \\
-                , .{open_str});
-            }
-
-            try self.write(
-                \\                break; // End of string
-            );
-            // The closing brace must join with else-if or stand alone
-            if (stop_char) |sc| {
-                const sc_lit = charToZigLiteral(sc);
-                try self.print("\n            }} else if (ch == '{s}') {{\n", .{sc_lit.buf[0..sc_lit.len]});
-                try self.write(
-                    \\                break; // Unclosed string
-                    \\            }
-                    \\
-                );
-            } else {
-                try self.write(
-                    \\
-                    \\            }
-                    \\
-                );
-            }
-
-            try self.write(
-                \\            self.pos += 1;
-                \\        }
-                \\        return Token{ .cat = .string, .pre = ws, .pos = start, .len = @intCast(self.pos - start) };
-                \\    }
-            );
-            return;
-        }
     }
 
     fn generateNumberScanner(self: *LexerGenerator) !void {
@@ -2830,7 +2613,7 @@ const OpMapping = struct {
 };
 
 /// @lang directive specifies the language helper module
-// @lang directive: just stores the module name (e.g., "mumps" -> imports mumps.zig as `lang`)
+// @lang directive: specifies the language helper module (e.g., "rip" -> imports rip.zig)
 
 /// @errors directive for human-readable rule names in diagnostics
 const ErrorName = struct {
@@ -5719,7 +5502,7 @@ const ParserGenerator = struct {
                 // vs a real lexer token (needs tokenToSymbol mapping).
                 var is_as_keyword = false;
                 if (sym.name[0] >= 'A' and sym.name[0] <= 'Z') {
-                    // Check if there's a corresponding lowercase nonterminal (e.g., SET↔set in MUMPS)
+                    // Check if there's a corresponding lowercase nonterminal (e.g., FUN↔fun)
                     for (self.symbols.items) |other| {
                         if (other.kind == .nonterminal and std.ascii.eqlIgnoreCase(sym.name, other.name)) {
                             is_as_keyword = true;
@@ -6630,7 +6413,7 @@ pub fn main() !void {
             \\  -h, --help     Show this help
             \\
             \\Examples:
-            \\  grammar mumps.grammar src/parser.zig
+            \\  grammar rip.grammar src/parser.zig
             \\
         , .{});
         return;
