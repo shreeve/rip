@@ -33,7 +33,7 @@ The first two stages of the pipeline (Rip source to S-expressions) are driven by
 |------|------|
 | `rip.grammar` | Single source of truth: lexer tokens, parser rules, directives |
 | `src/grammar.zig` | Language-agnostic engine: reads `.grammar`, generates `parser.zig` |
-| `src/rip.zig` | Language module: `Tag` enum, keyword lookup, wrapper `Lexer` |
+| `src/rip.zig` | Language module: `Tag` enum, keyword lookup, rewriter |
 | `src/parser.zig` | Auto-generated lexer + SLR(1) parser (never hand-edit) |
 
 ### Generation Flow
@@ -69,7 +69,7 @@ The `@lang` module (`src/rip.zig`) provides three things:
 
 1. **`Tag` enum** -- semantic node types for S-expression output (`module`, `fun`, `sub`, `call`, `if`, operator tags, etc.)
 2. **`keyword_as()`** -- maps identifier text to keyword IDs so the parser can promote `"fun"` to the `FUN` terminal when the parse state expects it
-3. **Wrapper `Lexer`** -- sits between the generated `BaseLexer` and the parser, handling indentation tracking (indent/outdent tokens), type annotation stripping, and duplicate newline suppression
+3. **Rewriter** -- sits between the generated `BaseLexer` and the parser, handling indentation tracking (indent/outdent tokens), type annotation stripping, and duplicate newline suppression
 
 ### Build Commands
 

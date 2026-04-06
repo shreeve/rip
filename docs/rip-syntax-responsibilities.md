@@ -7,7 +7,7 @@ This document is a **stage-ownership matrix**: for each syntax form, it specifie
 ## Pipeline
 
 1. `BaseLexer` (generated from `rip.grammar`)
-2. Wrapper `Lexer` (in `rip.zig` — indentation, type stripping, newline handling)
+2. Rewriter (in `rip.zig` — indentation, type stripping, newline handling)
 3. Parser (generated SLR(1))
 4. Normalization
 5. Type resolution
