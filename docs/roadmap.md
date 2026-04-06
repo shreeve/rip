@@ -36,22 +36,49 @@ Primary spec reference:
 - `docs/syntax.md`
 - `docs/stages.md`
 
-### What works now (v0.2-compiler)
+### What works now (v0.3-grammar)
 
-- `rip.grammar` defines the full v0 lexer and parser (282 lines, 0 conflicts)
-- grammar engine generates `src/parser.zig` from the grammar file
-- rewriter handles indentation, type stripping, newline normalization
+- 51-rule grammar, 2 audited conflicts, 311 parser states
+- grammar engine generates `src/parser.zig` from `rip.grammar`
+- rewriter handles indentation, type annotation passthrough, newline normalization
 - parser produces raw S-expressions directly
 - `src/compiler.zig` walks sexps and emits readable Zig source
 - `./bin/rip --run test/examples/hello.rip` compiles and runs end-to-end
-- `fun`, `sub`, `=`, `=!`, `if`/`else`, calls, `return`, all arithmetic/comparison/logical operators
+- all high-priority and medium-priority Zig target features implemented
+
+Syntax coverage:
+
+- declarations: `fun`, `sub`, `enum`, `struct`, `error`, `alias`, `test`, `use`
+- modifiers: `pub`, `extern`, `export` (stackable), `inline`, `comptime`
+- control flow: `if`/`else`/`else if` (prefix + postfix), `while`, `for`, `match`
+- captures: `as val`, `|val|` in `if`/`while`
+- bindings: `=`, `=!`, `+=`, `-=`, `*=`, `/=`, scope-tracked `var`/`const`
+- operators: `??`, `catch`, `try`, `|>`, `..`, `**`, all arithmetic/comparison/logical
+- types: `?T`, `*T`, `[]T`, `!T`, typed params, return types, field defaults
+- atoms: integers, reals, strings, booleans, arrays, struct literals, lambdas, `@builtins`
+- features: tagged unions, enum values, struct methods, defer/errdefer, `_` discard
+
+### Remaining grammar items
+
+| Feature | Difficulty | Frequency |
+|---------|-----------|-----------|
+| Pointer deref `ptr.*` | Small | Common with pointers |
+| Match with ranges | Small | Occasional |
+| Match with capture | Small | Occasional |
+| For with pointer capture | Small | Occasional |
+| Labeled blocks | Medium | Rare |
+| Packed/extern struct | Small | Niche |
+| Multi-line strings | Medium | Niche |
+| Sentinel types `[*:0]T` | Medium | Niche |
+| Anonymous struct types | Medium | Occasional |
+
+None of these block writing normal programs. Add as specific programs need them.
 
 ### What's next
 
 - normalization pass (raw sexps → canonical forms)
 - type resolution (strip-and-default → real inference)
 - source diagnostics pointing back to Rip locations
-- broader language subset (`while`, `for`, strings, structs)
 
 Compiler stages:
 
