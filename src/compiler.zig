@@ -550,6 +550,20 @@ pub const Compiler = struct {
                         try self.emitExpr(children[1], w);
                     },
 
+                    .@"if" => if (children.len >= 3) {
+                        try w.writeAll("if (");
+                        try self.emitExpr(children[0], w);
+                        try w.writeAll(") ");
+                        try self.emitExpr(children[1], w);
+                        try w.writeAll(" else ");
+                        try self.emitExpr(children[2], w);
+                    } else if (children.len >= 2) {
+                        try w.writeAll("if (");
+                        try self.emitExpr(children[0], w);
+                        try w.writeAll(") ");
+                        try self.emitExpr(children[1], w);
+                    },
+
                     .@"builtin" => {
                         try w.writeAll("@");
                         if (children.len > 0) try w.writeAll(self.txt(children[0]));
