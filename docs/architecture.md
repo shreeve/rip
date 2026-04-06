@@ -71,18 +71,23 @@ The `@lang` module (`src/rip.zig`) provides three things:
 
 1. **`Tag` enum** -- semantic node types for S-expression output (`module`, `fun`, `sub`, `call`, `if`, operator tags, etc.)
 2. **`keyword_as()`** -- maps identifier text to keyword IDs so the parser can promote `"fun"` to the `FUN` terminal when the parse state expects it
-3. **Rewriter** -- sits between the generated `BaseLexer` and the parser, handling indentation tracking (indent/outdent tokens), type annotation stripping, and duplicate newline suppression
+3. **Rewriter** -- sits between the generated `BaseLexer` and the parser, handling indentation tracking (indent/outdent tokens), type annotation passthrough, and duplicate newline suppression
 
-### Current Nonterminals
+### Current Grammar (49 rules)
 
 ```
-program  body  stmt  block
-fun  sub  use  params
-expr  if  return  assign  const
-unary  call  args  atom
+program  body  stmt  decl  defn  block
+fun  sub  use  alias  test  enum  errors  struct
+members  member  field  params  returns  type
+expr  cond  if  while  for  match  arms  arm
+suffix_if  coalesce  catch
+return  break  continue
+defer  errdefer  comptime  inline
+assign  const
+unary  call  args  atom  record  pair  lambda
 ```
 
-Key grammar features: `body` uses NEWLINE as separator (not terminator) shared by top-level and blocks; `block` is `INDENT body OUTDENT`; `L(X)` handles comma-separated lists; zero parser conflicts.
+Key grammar features: `body` uses NEWLINE as separator (not terminator); `block` is `INDENT body OUTDENT`; `L(X)` handles comma-separated lists; `decl`/`defn` provides stackable modifiers; `members`/`member` shared by enum, struct, and error; `if` works in both prefix and postfix position; 2 audited conflicts (dangling else).
 
 ### Build Commands
 

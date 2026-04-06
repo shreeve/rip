@@ -72,7 +72,15 @@ Syntax coverage:
 | Sentinel types `[*:0]T` | Medium | Niche |
 | Anonymous struct types | Medium | Occasional |
 
-None of these block writing normal programs. Add as specific programs need them.
+### Compiler emission gaps (parse but don't compile yet)
+
+| Feature | What's needed |
+|---------|--------------|
+| Struct literals (`record`) | Emit `Name{ .field = val, ... }` |
+| Lambdas | Emit anonymous function |
+| Error union types (`!T`) | Emit in type positions |
+
+None of the above or below block writing normal programs. Add as needed.
 
 ### What's next
 
