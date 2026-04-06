@@ -181,6 +181,38 @@ const LexerParser = struct {
         }
     }
 
+    /// Check if the current position is at the start of an indented line.
+    /// Skips blank lines and comment-only lines to find the next content line.
+    fn atIndentedLine(self: *LexerParser) bool {
+        var p = self.pos;
+        while (p < self.source.len) {
+            if (self.source[p] == ' ' or self.source[p] == '\t') return true;
+            if (self.source[p] == '\n') { p += 1; continue; }
+            if (self.source[p] == '#') {
+                while (p < self.source.len and self.source[p] != '\n') p += 1;
+                if (p < self.source.len) p += 1;
+                continue;
+            }
+            return false;
+        }
+        return false;
+    }
+
+    /// Skip to the end of the current line (past the newline).
+    fn skipToNextLine(self: *LexerParser) void {
+        while (self.pos < self.source.len and self.source[self.pos] != '\n') self.pos += 1;
+        if (self.pos < self.source.len) { self.line += 1; self.pos += 1; }
+    }
+
+    /// Skip blank lines and comment-only lines at column 0.
+    fn skipBlankLines(self: *LexerParser) void {
+        while (self.pos < self.source.len) {
+            if (self.source[self.pos] == '\n') { self.line += 1; self.pos += 1; continue; }
+            if (self.source[self.pos] == '#') { self.skipToNextLine(); continue; }
+            break;
+        }
+    }
+
     fn skipWhitespaceAndNewlines(self: *LexerParser) void {
         while (self.pos < self.source.len) {
             const c = self.source[self.pos];
@@ -332,10 +364,25 @@ const LexerParser = struct {
     }
 
     fn parseStateDecl(self: *LexerParser) !void {
+        // Check for block form: `state` followed by newline + indented lines
+        self.skipWhitespace();
+        if (self.peek() == '\n' or self.peek() == '#') {
+            self.skipToNextLine();
+            while (self.atIndentedLine()) {
+                try self.parseOneState();
+                self.skipWhitespace();
+                if (self.peek() == '\n' or self.peek() == '#') self.skipToNextLine();
+            }
+            return;
+        }
+        // Inline form: `state name = value`
+        try self.parseOneState();
+    }
+
+    fn parseOneState(self: *LexerParser) !void {
         const name = self.parseIdentifier() orelse return error.ExpectedIdentifier;
         if (!self.expect('=')) return error.ExpectedEquals;
 
-        // Parse value (true/false or integer)
         self.skipWhitespace();
         var value: i32 = 0;
         if (self.expectStr("true")) {
@@ -350,37 +397,34 @@ const LexerParser = struct {
     }
 
     fn parseDefaultsBlock(self: *LexerParser) !void {
-        self.skipWhitespaceAndNewlines();
-        if (!self.expect('{')) return error.ExpectedOpenBrace;
-
-        while (self.pos < self.source.len) {
-            self.skipWhitespaceAndNewlines();
-            if (self.expect('}')) break;
-
-            // Parse {var = val}
-            if (self.expect('{')) {
-                const name = self.parseIdentifier() orelse return error.ExpectedIdentifier;
-                if (!self.expect('=')) return error.ExpectedEquals;
-                const value = self.parseInt() orelse return error.ExpectedValue;
-                if (!self.expect('}')) return error.ExpectedCloseBrace;
-                try self.spec.defaults.append(self.allocator, .{ .variable = name, .value = value });
-            }
+        self.skipWhitespace();
+        if (self.peek() == '\n' or self.peek() == '#') self.skipToNextLine();
+        while (self.atIndentedLine()) {
+            const name = self.parseIdentifier() orelse {
+                self.skipToNextLine();
+                continue;
+            };
+            if (!self.expect('=')) return error.ExpectedEquals;
+            const value = self.parseInt() orelse return error.ExpectedValue;
+            try self.spec.defaults.append(self.allocator, .{ .variable = name, .value = value });
+            self.skipWhitespace();
+            if (self.peek() == '\n' or self.peek() == '#') self.skipToNextLine();
         }
     }
 
     fn parseTokensBlock(self: *LexerParser) !void {
-        self.skipWhitespaceAndNewlines();
-        if (!self.expect('{')) return error.ExpectedOpenBrace;
-
-        while (self.pos < self.source.len) {
-            self.skipWhitespaceAndNewlines();
-            if (self.expect('}')) break;
-
-            const name = self.parseIdentifier() orelse continue;
+        self.skipToNextLine();
+        while (self.atIndentedLine()) {
+            self.skipBlankLines();
+            if (!self.atIndentedLine()) break;
+            const name = self.parseIdentifier() orelse {
+                self.skipToNextLine();
+                continue;
+            };
             try self.spec.tokens.append(self.allocator, .{ .name = name });
-
-            // Skip comma if present
             _ = self.expect(',');
+            self.skipWhitespace();
+            if (self.peek() == '\n' or self.peek() == '#') self.skipToNextLine();
         }
     }
 
@@ -2584,10 +2628,10 @@ const ParserDSLParser = struct {
             try self.parseCodeDirective();
         } else if (std.mem.eql(u8, directive_name, "errors")) {
             try self.parseErrorsDirective();
-        } else if (std.mem.eql(u8, directive_name, "infix")) {
+        } else if (std.mem.eql(u8, directive_name, "precedence")) {
             try self.parseInfixDirective();
-        } else if (std.mem.eql(u8, directive_name, "expect")) {
-            try self.expect(.eq, "Expected '=' after @expect");
+        } else if (std.mem.eql(u8, directive_name, "conflicts")) {
+            try self.expect(.eq, "Expected '=' after @conflicts");
             if (self.current.kind != .number) {
                 std.debug.print("Expected number after @expect = at line {d}\n", .{self.current.line});
                 return error.ParseError;
@@ -2741,62 +2785,37 @@ const ParserDSLParser = struct {
     }
 
     fn parseErrorsDirective(self: *ParserDSLParser) !void {
-        // Parse @errors = [ rule: "name", ... ] or block form
-        try self.expect(.eq, "Expected '=' after @errors");
         if (self.current.kind == .newline) self.advance();
         self.skipTrivia();
 
-        if (self.current.kind == .lbracket) {
+        while ((self.current.kind == .ident or self.current.kind == .token) and self.peekKind() == .colon) {
+            const rule = self.current.text;
             self.advance();
-            while (self.current.kind != .rbracket and self.current.kind != .eof) {
-                self.skipTrivia();
-                if (self.current.kind == .rbracket) break;
-                const rule = try self.expectIdent("rule name");
-                // Accept either : or = as separator
-                if (self.current.kind == .colon or self.current.kind == .eq) self.advance();
-                const name = try self.expectString("error display name");
-                try self.error_names.append(self.allocator, .{ .rule = rule, .name = name });
-                if (self.current.kind == .comma) self.advance();
-                if (self.current.kind == .newline) self.advance();
-            }
-            if (self.current.kind == .rbracket) self.advance();
-        } else {
-            // Indented block form: one per line
-            while (self.current.kind == .ident or self.current.kind == .token) {
-                const rule = self.current.text;
-                self.advance();
-                if (self.current.kind == .colon or self.current.kind == .eq) self.advance();
-                const name = try self.expectString("error display name");
-                try self.error_names.append(self.allocator, .{ .rule = rule, .name = name });
-                if (self.current.kind == .comma) self.advance();
-                if (self.current.kind == .newline) self.advance();
-                self.skipTrivia();
-            }
+            self.advance(); // skip :
+            const name = try self.expectString("error display name");
+            try self.error_names.append(self.allocator, .{ .rule = rule, .name = name });
+            if (self.current.kind == .comma) self.advance();
+            if (self.current.kind == .newline) self.advance();
+            self.skipTrivia();
         }
-        if (self.current.kind == .newline) self.advance();
     }
 
     fn parseInfixDirective(self: *ParserDSLParser) !void {
-        // Syntax: @infix = base_expr [
-        //   "op" left|right|none level
+        // Syntax: @precedence base_expr
+        //   "op" assoc
+        //   "op" assoc, "op" assoc     (same precedence)
         //   ...
-        // ]
-        // Generates a nonterminal called `infix` with a full precedence chain.
-        try self.expect(.eq, "Expected '=' after @infix");
+        // Line order determines precedence (first = lowest).
+        if (self.current.kind == .eq) self.advance();
 
-        // Parse base expression name
-        const base = try self.expectIdent("base expression name for @infix");
+        const base = try self.expectIdent("base expression name for @precedence");
         self.infix_base = base;
 
         if (self.current.kind == .newline) self.advance();
         self.skipTrivia();
 
-        try self.expect(.lbracket, "Expected '[' to open @infix operator list");
-
-        while (self.current.kind != .rbracket and self.current.kind != .eof) {
-            self.skipTrivia();
-            if (self.current.kind == .rbracket) break;
-
+        var prec: u32 = 1;
+        while (self.current.kind == .string) {
             const op = try self.expectString("operator literal");
 
             const assoc_name = try self.expectIdent("associativity (left, right, none)");
@@ -2811,24 +2830,19 @@ const ParserDSLParser = struct {
                 return error.ParseError;
             };
 
-            if (self.current.kind != .number) {
-                std.debug.print("Expected precedence level number at line {d}\n", .{self.current.line});
-                return error.ParseError;
-            }
-            const prec = std.fmt.parseInt(u32, self.current.text, 10) catch {
-                std.debug.print("Invalid precedence number '{s}' at line {d}\n", .{ self.current.text, self.current.line });
-                return error.ParseError;
-            };
-            self.advance();
+            // Skip explicit precedence number if present (backward compat)
+            if (self.current.kind == .number) self.advance();
 
             try self.infix_ops.append(self.allocator, .{ .op = op, .assoc = assoc, .prec = prec });
 
-            if (self.current.kind == .comma) self.advance();
-            if (self.current.kind == .newline) self.advance();
+            if (self.current.kind == .comma) {
+                self.advance(); // same-line comma = same precedence level
+            } else if (self.current.kind == .newline) {
+                self.advance(); // newline = next precedence level
+                self.skipTrivia();
+                prec += 1;
+            }
         }
-
-        try self.expect(.rbracket, "Expected ']' to close @infix operator list");
-        if (self.current.kind == .newline) self.advance();
     }
 
     fn parseRule(self: *ParserDSLParser) !void {

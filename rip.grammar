@@ -18,93 +18,84 @@
 # ==============================================================================
 # STATE VARIABLES
 # ==============================================================================
-#
-# These track lexer context across tokens within a single parse.
-#
-#   beg   - At beginning of line (1 = true, 0 = false)
-#   paren - Parenthesis nesting depth
-#   brace - Brace nesting depth
 
-state beg   = 1
-state paren = 0
-state brace = 0
+state
+    beg   = 1       # At beginning of line (1 = true, 0 = false)
+    paren = 0       # Parenthesis nesting depth
+    brace = 0       # Brace nesting depth
 
 # ==============================================================================
 # TOKEN TYPES
 # ==============================================================================
-#
-# All token types the lexer can produce. The generator creates a Zig enum.
 
-tokens {
+tokens
     # Literals
-    ident,          # Identifier: variable, function, type name
-    integer,        # Integer: 0, 1, 42, 1000
-    real,           # Decimal: 3.14, .5, 2.0
-    string_sq,      # Single-quoted string: 'hello world'
-    string_dq,      # Double-quoted string: "hello #{name}"
-    bool_true,      # true
-    bool_false,     # false
+    ident           # Identifier: variable, function, type name
+    integer         # Integer: 0, 1, 42, 1000
+    real            # Decimal: 3.14, .5, 2.0
+    string_sq       # Single-quoted string: 'hello world'
+    string_dq       # Double-quoted string: "hello #{name}"
+    bool_true       # true
+    bool_false      # false
 
     # Operators — arithmetic
-    plus,           # +
-    minus,          # -
-    star,           # *
-    slash,          # /
-    percent,        # %
-    power,          # **
+    plus            # +
+    minus           # -
+    star            # *
+    slash           # /
+    percent         # %
+    power           # **
 
     # Operators — comparison
-    eq,             # ==
-    ne,             # !=
-    lt,             # <
-    gt,             # >
-    le,             # <=
-    ge,             # >=
+    eq              # ==
+    ne              # !=
+    lt              # <
+    gt              # >
+    le              # <=
+    ge              # >=
 
     # Operators — logical
-    and_sym,        # &&
-    or_sym,         # ||
-    not_sym,        # !
+    and_sym         # &&
+    or_sym          # ||
+    not_sym         # !
 
     # Operators — assignment
-    assign,         # =
-    const_assign,   # =!
-    plus_assign,    # +=
-    minus_assign,   # -=
-    star_assign,    # *=
-    slash_assign,   # /=
+    assign          # =
+    const_assign    # =!
+    plus_assign     # +=
+    minus_assign    # -=
+    star_assign     # *=
+    slash_assign    # /=
 
     # Punctuation
-    lparen,         # (
-    rparen,         # )
-    lbrace,         # {
-    rbrace,         # }
-    lbracket,       # [
-    rbracket,       # ]
-    comma,          # ,
-    colon,          # :
-    arrow,          # ->
-    fat_arrow,      # =>
-    dot,            # .
-    dotdot,         # ..
-    pipe,           # |>
+    lparen          # (
+    rparen          # )
+    lbrace          # {
+    rbrace          # }
+    lbracket        # [
+    rbracket        # ]
+    comma           # ,
+    colon           # :
+    arrow           # ->
+    fat_arrow       # =>
+    dot             # .
+    dotdot          # ..
+    pipe            # |>
 
     # Whitespace and structure
-    indent,         # Indentation increase
-    outdent,        # Indentation decrease
-    newline,        # Line terminator
-    comment,        # # through end of line
-    eof,            # End of input
+    indent          # Indentation increase
+    outdent         # Indentation decrease
+    newline         # Line terminator
+    comment         # # through end of line
+    eof             # End of input
     err             # Lexer error
-}
 
 # ==============================================================================
 # DEFAULT ACTIONS
 # ==============================================================================
 
-defaults {
-    {beg = 0}       # Most tokens clear line-start flag
-}
+defaults
+    beg = 0         # Most tokens clear line-start flag
 
 # ==============================================================================
 # COMMENTS
@@ -208,27 +199,14 @@ defaults {
 .                                           → err
 
 # ==============================================================================
-# END OF LEXER SECTION
+# PARSER
 # ==============================================================================
 
 @parser
 
-# ==============================================================================
-# DIRECTIVES
-# ==============================================================================
-
-@expect = 1
+@conflicts = 0
 
 @as = [ident, keyword]
-
-@errors = [
-  expr: "expression"
-  stmt: "statement"
-  params: "parameter list"
-  fun: "function declaration"
-  sub: "subroutine declaration"
-  block: "indented block"
-]
 
 name = IDENT
 
@@ -248,22 +226,12 @@ stmt     = use
          | sub
          | expr
 
-# ==============================================================================
-# BLOCKS
-# ==============================================================================
-
 block    = INDENT body OUTDENT              → (block ...2)
          | INDENT OUTDENT                   → (block)
 
 # ==============================================================================
 # DECLARATIONS
 # ==============================================================================
-#
-# fun = value-yielding routine (implicitly yields final expression)
-# sub = effect-oriented routine (does not implicitly yield)
-#
-# Type annotations (`: type` and `-> type`) are stripped by the rewriter
-# before parsing. The parser only sees parameter names.
 
 fun      = FUN name params block            → (fun 2 params:3 body:4)
          | FUN name block                   → (fun 2 body:3)
@@ -284,10 +252,6 @@ expr     = if
          | const
          | infix
 
-# ==============================================================================
-# CONTROL FLOW
-# ==============================================================================
-
 if       = IF expr block ELSE if            → (if 2 3 5)
          | IF expr block ELSE block         → (if 2 3 5)
          | IF expr block                    → (if 2 3)
@@ -295,45 +259,24 @@ if       = IF expr block ELSE if            → (if 2 3 5)
 return   = RETURN expr                      → (return 2)
          | RETURN                           → (return)
 
-# ==============================================================================
-# ASSIGNMENT
-# ==============================================================================
-
 assign   = name "=" expr                    → (= 1 3)
 const    = name "=!" expr                   → (const 1 3)
 
 # ==============================================================================
-# OPERATORS
+# CALLS AND ATOMS
 # ==============================================================================
-
-@infix = unary [
-  "||"  left  1
-  "&&"  left  2
-  "=="  none  3, "!=" none 3, "<" none 3, ">" none 3, "<=" none 3, ">=" none 3
-  "+"   left  4, "-"  left  4
-  "*"   left  5, "/"  left  5, "%"  left  5
-  "**"  right 6
-]
 
 unary    = "!" unary                        → (not 2)
          | "-" unary                        → (neg 2)
          | call
-
-# ==============================================================================
-# CALLS
-# ==============================================================================
 
 call     = call "!" atom                    → (await 1 3)
          | call L(atom)                     → (call 1 ...2)
          | call "(" args ")"                → (call 1 ...3)
          | atom
 
-args     = expr ("," expr)*                 → (1 ...2)
+args     = L(expr)                          → (...1)
          |                                  → ()
-
-# ==============================================================================
-# ATOMS
-# ==============================================================================
 
 atom     = name
          | INTEGER
@@ -343,3 +286,15 @@ atom     = name
          | TRUE
          | FALSE
          | "(" expr ")"                     → 2
+
+# ==============================================================================
+# PRECEDENCE
+# ==============================================================================
+
+@precedence unary
+    "||"  left
+    "&&"  left
+    "=="  none, "!=" none, "<" none, ">" none, "<=" none, ">=" none
+    "+"   left, "-"  left
+    "*"   left, "/"  left, "%"  left
+    "**"  right
