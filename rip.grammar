@@ -250,6 +250,10 @@ struct_item = field
          | fun
          | sub
 
+# ==============================================================================
+# BUILDING BLOCKS — shared by declarations
+# ==============================================================================
+
 members  = member                           → (1)
          | members NEWLINE member           → (...1 3)
          | members NEWLINE                  → 1
@@ -261,6 +265,7 @@ field    = name                             → 1
          | name ":" typeref                 → (: 1 3)
          | name ":" typeref "=" expr        → (default 1 3 5)
 
+params   = L(field)                         → (...1)
 ret      = "->" typeref                     → 2
 
 typeref  = name
@@ -268,8 +273,6 @@ typeref  = name
          | "?" typeref                      → (? 2)
          | "*" typeref                      → (ptr 2)
          | "[" "]" typeref                  → (slice 3)
-
-params   = L(field)                         → (...1)
 
 # ==============================================================================
 # EXPRESSIONS
@@ -279,6 +282,9 @@ expr     = if
          | while
          | for
          | match
+         | suffix_if
+         | or_else
+         | or_catch
          | return
          | break
          | continue
@@ -288,17 +294,9 @@ expr     = if
          | inline
          | assign
          | const
-         | or_else
-         | or_catch
-         | suffix_if
          | @infix
 
-suffix_if = @infix IF expr ELSE expr        → (if 3 1 5)
-         | @infix IF expr                   → (if 3 1)
-
-or_else  = @infix "??" expr                 → (?? 1 3)
-or_catch = @infix CATCH AS name expr        → (catch 1 4 5)
-         | @infix CATCH expr                → (catch 1 3)
+# --- Control flow ---
 
 cond     = expr
          | expr AS name                     → (as 1 3)
@@ -314,21 +312,37 @@ while    = WHILE cond block                 → (while 2 _ 3)
 for      = FOR name IN expr block           → (for 2 _ 4 5)
          | FOR name "," name IN expr block  → (for 2 4 6 7)
 
+match    = MATCH expr INDENT matchers OUTDENT → (match 2 ...4)
 matchers = matcher                          → (1)
          | matchers NEWLINE matcher         → (...1 3)
          | matchers NEWLINE                 → 1
 matcher  = atom "=>" expr                   → (arm 1 3)
          | atom block                       → (arm 1 2)
-match    = MATCH expr INDENT matchers OUTDENT → (match 2 ...4)
+
+# --- Expression modifiers ---
+
+suffix_if = @infix IF expr ELSE expr        → (if 3 1 5)
+         | @infix IF expr                   → (if 3 1)
+
+or_else  = @infix "??" expr                 → (?? 1 3)
+or_catch = @infix CATCH AS name expr        → (catch 1 4 5)
+         | @infix CATCH expr                → (catch 1 3)
+
+# --- Flow control ---
 
 return   = RETURN expr                      → (return 2)
          | RETURN                           → (return)
 break    = BREAK                            → (break)
 continue = CONTINUE                         → (continue)
+
+# --- Statement modifiers ---
+
 defer    = DEFER expr                       → (defer 2)
 errdefer = ERRDEFER expr                    → (errdefer 2)
 comptime = COMPTIME expr                    → (comptime 2)
 inline   = INLINE expr                      → (inline 2)
+
+# --- Bindings ---
 
 assign   = call "=" expr                    → (= 1 3)
          | call "+=" expr                   → (+= 1 3)
