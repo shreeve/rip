@@ -1,5 +1,5 @@
 # Comprehensive grammar coverage test
-# Tests parsing of all 47 rules — not all forms compile to valid Zig
+# Tests parsing of all 51 rules — not all forms compile to valid Zig
 
 use std
 
@@ -9,10 +9,27 @@ error FileError
   NotFound
   PermissionDenied
 
+# Plain enum
 enum Color
   red
   green
   blue
+
+# Tagged union (enum with typed variants)
+enum Result
+  ok: i32
+  err: []u8
+  none
+
+# Enum with explicit values
+enum Priority
+  low = 0
+  high = 1
+
+# Struct with defaults
+struct Config
+  width: i32 = 800
+  height: i32 = 600
 
 struct Point
   x: f64
@@ -20,6 +37,13 @@ struct Point
 
   fun sum self: Point -> f64
     self.x + self.y
+
+# Modifiers
+pub fun double x: i32 -> i32
+  x * 2
+
+# extern fun c_alloc size: usize -> ?*u8
+# export fun handler -> void
 
 fun add a: i32, b: i32 -> i32
   a + b
@@ -121,8 +145,10 @@ sub main
   defer print "cleanup"
   errdefer print "error cleanup"
 
-  # comptime (parse-tested, needs comptime-compatible expressions to compile)
+  # comptime and inline (parse-tested, need specific contexts to compile)
   # comptime print "compile time"
+  # inline for i in 0..5
+  #   print i
 
   # unreachable and undefined
   if false
@@ -138,6 +164,9 @@ sub main
   #   print val
   # while iter() as item
   #   print item
+
+  # slice syntax (parse-tested)
+  # slice = arr[1..5]
 
   # @builtin calls (parse-tested)
   # z = @intCast(42)

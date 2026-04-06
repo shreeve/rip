@@ -210,20 +210,15 @@ body     = stmt                             → (1)
          | body NEWLINE                     → 1
 
 stmt     = use
-         | pub_decl
-         | fun
-         | sub
-         | enum
-         | struct
-         | error_set
-         | alias
-         | test_decl
+         | decl
          | expr
 
-pub_decl = PUB fun                          → (pub 2)
-         | PUB sub                          → (pub 2)
-         | PUB enum                         → (pub 2)
-         | PUB struct                       → (pub 2)
+decl     = defn
+         | PUB decl                         → (pub 2)
+         | EXTERN decl                      → (extern 2)
+         | EXPORT decl                      → (export 2)
+
+defn     = fun | sub | enum | struct | errors | alias | test
 
 block    = INDENT body OUTDENT              → (block ...2)
          | INDENT OUTDENT                   → (block)
@@ -242,10 +237,10 @@ sub      = SUB name params block            → (sub 2 3 _ 4)
 
 use      = USE name                         → (use 2)
 alias    = ALIAS name "=" typeref           → (alias 2 4)
-test_decl = TEST STRING_DQ block            → (test 2 3)
+test     = TEST STRING_DQ block             → (test 2 3)
 
 enum     = ENUM name INDENT members OUTDENT  → (enum 2 ...4)
-error_set = ERROR name INDENT members OUTDENT → (error_set 2 ...4)
+errors   = ERROR name INDENT members OUTDENT → (error_set 2 ...4)
 
 struct   = STRUCT name INDENT struct_body OUTDENT → (struct 2 ...4)
 struct_body = struct_item                   → (1)
@@ -255,12 +250,16 @@ struct_item = field
          | fun
          | sub
 
-members  = name                             → (1)
-         | members NEWLINE name             → (...1 3)
+members  = member                           → (1)
+         | members NEWLINE member           → (...1 3)
          | members NEWLINE                  → 1
+member   = name
+         | name ":" typeref                 → (typed 1 3)
+         | name "=" expr                    → (valued 1 3)
 
 field    = name                             → 1
          | name ":" typeref                 → (: 1 3)
+         | name ":" typeref "=" expr        → (default 1 3 5)
 
 ret      = "->" typeref                     → 2
 
@@ -286,6 +285,7 @@ expr     = if
          | defer
          | errdefer
          | comptime
+         | inline
          | assign
          | const
          | or_else
@@ -297,8 +297,8 @@ suffix_if = @infix IF expr ELSE expr        → (if 3 1 5)
          | @infix IF expr                   → (if 3 1)
 
 or_else  = @infix "??" expr                 → (?? 1 3)
-or_catch = @infix CATCH AS name expr       → (catch 1 4 5)
-         | @infix CATCH expr               → (catch 1 3)
+or_catch = @infix CATCH AS name expr        → (catch 1 4 5)
+         | @infix CATCH expr                → (catch 1 3)
 
 cond     = expr
          | expr AS name                     → (as 1 3)
@@ -314,12 +314,12 @@ while    = WHILE cond block                 → (while 2 _ 3)
 for      = FOR name IN expr block           → (for 2 _ 4 5)
          | FOR name "," name IN expr block  → (for 2 4 6 7)
 
-match    = MATCH expr INDENT matchers OUTDENT → (match 2 ...4)
 matchers = matcher                          → (1)
          | matchers NEWLINE matcher         → (...1 3)
          | matchers NEWLINE                 → 1
 matcher  = atom "=>" expr                   → (arm 1 3)
          | atom block                       → (arm 1 2)
+match    = MATCH expr INDENT matchers OUTDENT → (match 2 ...4)
 
 return   = RETURN expr                      → (return 2)
          | RETURN                           → (return)
@@ -328,6 +328,7 @@ continue = CONTINUE                         → (continue)
 defer    = DEFER expr                       → (defer 2)
 errdefer = ERRDEFER expr                    → (errdefer 2)
 comptime = COMPTIME expr                    → (comptime 2)
+inline   = INLINE expr                      → (inline 2)
 
 assign   = call "=" expr                    → (= 1 3)
          | call "+=" expr                   → (+= 1 3)

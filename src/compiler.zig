@@ -60,8 +60,9 @@ pub const Compiler = struct {
             .@"fun" => try self.emitFun(items[1..], w),
             .@"sub" => try self.emitSub(items[1..], w),
             .@"use" => {}, // handled by module preamble
-            .@"pub" => if (items.len > 1) {
-                try w.writeAll("pub ");
+            .@"pub", .@"extern", .@"export" => if (items.len > 1) {
+                try w.writeAll(@tagName(items[0].tag));
+                try w.writeAll(" ");
                 try self.emitTopLevel(items[1], w);
             },
             .@"error_set" => try self.emitErrorSet(items[1..], w),
@@ -160,15 +161,55 @@ pub const Compiler = struct {
     fn emitEnum(self: *Compiler, children: []const Sexp, w: *Writer) Writer.Error!void {
         if (children.len < 1) return;
         const name = self.txt(children[0]);
-        try w.print("const {s} = enum {{\n", .{name});
-        self.depth += 1;
-        for (children[1..]) |member| {
-            try self.writeIndent(w);
-            try w.writeAll(self.txt(member));
-            try w.writeAll(",\n");
+        const members = children[1..];
+
+        // Detect if any member is typed → emit union(enum), else plain enum
+        var has_typed = false;
+        for (members) |m| {
+            if (m == .list and m.list.len > 0 and m.list[0] == .tag and
+                m.list[0].tag == .@"typed")
+                has_typed = true;
         }
-        self.depth -= 1;
-        try w.writeAll("};\n");
+
+        if (has_typed) {
+            try w.print("const {s} = union(enum) {{\n", .{name});
+            self.depth += 1;
+            for (members) |m| {
+                try self.writeIndent(w);
+                if (m == .list and m.list.len >= 3 and m.list[0] == .tag and
+                    m.list[0].tag == .@"typed")
+                {
+                    try w.writeAll(self.txt(m.list[1]));
+                    try w.writeAll(": ");
+                    try self.emitTyperef(m.list[2], w);
+                    try w.writeAll(",\n");
+                } else {
+                    try w.writeAll(self.txt(m));
+                    try w.writeAll(": void,\n");
+                }
+            }
+            self.depth -= 1;
+            try w.writeAll("};\n");
+        } else {
+            try w.print("const {s} = enum {{\n", .{name});
+            self.depth += 1;
+            for (members) |m| {
+                try self.writeIndent(w);
+                if (m == .list and m.list.len >= 3 and m.list[0] == .tag and
+                    m.list[0].tag == .@"valued")
+                {
+                    try w.writeAll(self.txt(m.list[1]));
+                    try w.writeAll(" = ");
+                    try self.emitExpr(m.list[2], w);
+                    try w.writeAll(",\n");
+                } else {
+                    try w.writeAll(self.txt(m));
+                    try w.writeAll(",\n");
+                }
+            }
+            self.depth -= 1;
+            try w.writeAll("};\n");
+        }
     }
 
     fn emitStruct(self: *Compiler, children: []const Sexp, w: *Writer) Writer.Error!void {
@@ -184,6 +225,16 @@ pub const Compiler = struct {
                     try w.writeAll(self.txt(item.list[1]));
                     try w.writeAll(": ");
                     try self.emitTyperef(item.list[2], w);
+                    try w.writeAll(",\n");
+                    continue;
+                }
+                if (tag == .@"default") {
+                    try self.writeIndent(w);
+                    try w.writeAll(self.txt(item.list[1]));
+                    try w.writeAll(": ");
+                    try self.emitTyperef(item.list[2], w);
+                    try w.writeAll(" = ");
+                    try self.emitExpr(item.list[3], w);
                     try w.writeAll(",\n");
                     continue;
                 }
@@ -385,7 +436,7 @@ pub const Compiler = struct {
         if (items.len == 0 or items[0] != .tag) return false;
         return switch (items[0].tag) {
             .@"=", .@"const", .@"return", .@"if", .@"while", .@"for",
-            .@"match", .@"break", .@"continue", .@"defer", .@"errdefer", .@"comptime",
+            .@"match", .@"break", .@"continue", .@"defer", .@"errdefer", .@"comptime", .@"inline",
             .@"+=", .@"-=", .@"*=", .@"/=" => true,
             else => false,
         };
@@ -451,6 +502,11 @@ pub const Compiler = struct {
                 try w.writeAll("comptime ");
                 if (items.len > 1) try self.emitExpr(items[1], w);
                 try w.writeAll(";\n");
+            },
+            .@"inline" => {
+                try self.writeIndent(w);
+                try w.writeAll("inline ");
+                if (items.len > 1) try self.emitStmt(items[1], w) else try w.writeAll(";\n");
             },
             .@"=", .@"const" => {
                 try self.writeIndent(w);

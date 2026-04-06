@@ -21,6 +21,8 @@ pub const Tag = enum(u8) {
     @"struct",
     @"alias",
     @"pub",
+    @"extern",
+    @"export",
     @"error_set",
     @"test",
     @"unreachable",
@@ -60,6 +62,7 @@ pub const Tag = enum(u8) {
     @"defer",
     @"errdefer",
     @"try",
+    @"inline",
     @"lambda",
 
     // Calls and access
@@ -106,6 +109,9 @@ pub const Tag = enum(u8) {
     @"..",
 
     // Type annotations and type constructors
+    @"typed",
+    @"valued",
+    @"default",
     @":",
     @"?",
     @"ptr",
@@ -140,6 +146,9 @@ pub const keyword_id = enum(u16) {
     TRY,
     FN,
     PUB,
+    EXTERN,
+    EXPORT,
+    INLINE,
     ENUM,
     STRUCT,
     ERROR,
@@ -184,6 +193,9 @@ const keyword_map = std.StaticStringMap(keyword_id).initComptime(.{
     .{ "try", .TRY },
     .{ "fn", .FN },
     .{ "pub", .PUB },
+    .{ "extern", .EXTERN },
+    .{ "export", .EXPORT },
+    .{ "inline", .INLINE },
     .{ "enum", .ENUM },
     .{ "struct", .STRUCT },
     .{ "error", .ERROR },
