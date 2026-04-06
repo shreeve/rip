@@ -115,4 +115,5 @@ What works now: `fun`, `sub`, `if`/`else`, `=`, `=!`, `return`, function calls, 
 - `docs/dsl.md` — grammar DSL reference
 - `docs/lessons.md` — lessons from rip-lang, slash, mumps
 - `docs/types.md` — type system direction
+- `docs/target.md` — Zig construct catalog from real-world embedded codebase
 - `docs/zig-notes.md` — Zig target notes
