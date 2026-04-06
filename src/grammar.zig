@@ -2832,6 +2832,12 @@ const OpMapping = struct {
 /// @lang directive specifies the language helper module
 // @lang directive: just stores the module name (e.g., "mumps" -> imports mumps.zig as `lang`)
 
+/// @errors directive for human-readable rule names in diagnostics
+const ErrorName = struct {
+    rule: []const u8, // "expr"
+    name: []const u8, // "expression"
+};
+
 /// @code directive for injecting code at specific locations
 const CodeBlock = struct {
     location: []const u8, // "imports", "sexp", "parser", "bottom"
@@ -2860,6 +2866,7 @@ const ParsedElement = struct {
     value: []const u8,
     quantifier: Quantifier = .one,
     optional_items: bool = false, // For L(X?): items can be empty
+    list_separator: ?[]const u8 = null, // For L(X, sep): custom separator
     sub_elements: []const ParsedElement = &[_]ParsedElement{}, // For groups
     skip: bool = false, // For !element: parse but don't assign position
 
@@ -3092,6 +3099,7 @@ const ParserDSLParser = struct {
     start_symbols: std.ArrayListUnmanaged([]const u8) = .{},
     as_directives: std.ArrayListUnmanaged(AsDirective) = .{},
     op_mappings: std.ArrayListUnmanaged(OpMapping) = .{},
+    error_names: std.ArrayListUnmanaged(ErrorName) = .{},
     lang: ?[]const u8 = null,
     code_blocks: std.ArrayListUnmanaged(CodeBlock) = .{},
     expect_conflicts: ?u32 = null,
@@ -3118,6 +3126,7 @@ const ParserDSLParser = struct {
         self.start_symbols.deinit(self.allocator);
         self.as_directives.deinit(self.allocator);
         self.op_mappings.deinit(self.allocator);
+        self.error_names.deinit(self.allocator);
         self.code_blocks.deinit(self.allocator);
     }
 
@@ -3155,6 +3164,8 @@ const ParserDSLParser = struct {
             try self.parseLangDirective();
         } else if (std.mem.eql(u8, directive_name, "code")) {
             try self.parseCodeDirective();
+        } else if (std.mem.eql(u8, directive_name, "errors")) {
+            try self.parseErrorsDirective();
         } else if (std.mem.eql(u8, directive_name, "expect")) {
             try self.expect(.eq, "Expected '=' after @expect");
             if (self.current.kind != .number) {
@@ -3309,6 +3320,42 @@ const ParserDSLParser = struct {
         if (self.current.kind == .newline) self.advance();
     }
 
+    fn parseErrorsDirective(self: *ParserDSLParser) !void {
+        // Parse @errors = [ rule: "name", ... ] or block form
+        try self.expect(.eq, "Expected '=' after @errors");
+        if (self.current.kind == .newline) self.advance();
+        self.skipTrivia();
+
+        if (self.current.kind == .lbracket) {
+            self.advance();
+            while (self.current.kind != .rbracket and self.current.kind != .eof) {
+                self.skipTrivia();
+                if (self.current.kind == .rbracket) break;
+                const rule = try self.expectIdent("rule name");
+                // Accept either : or = as separator
+                if (self.current.kind == .colon or self.current.kind == .eq) self.advance();
+                const name = try self.expectString("error display name");
+                try self.error_names.append(self.allocator, .{ .rule = rule, .name = name });
+                if (self.current.kind == .comma) self.advance();
+                if (self.current.kind == .newline) self.advance();
+            }
+            if (self.current.kind == .rbracket) self.advance();
+        } else {
+            // Indented block form: one per line
+            while (self.current.kind == .ident or self.current.kind == .token) {
+                const rule = self.current.text;
+                self.advance();
+                if (self.current.kind == .colon or self.current.kind == .eq) self.advance();
+                const name = try self.expectString("error display name");
+                try self.error_names.append(self.allocator, .{ .rule = rule, .name = name });
+                if (self.current.kind == .comma) self.advance();
+                if (self.current.kind == .newline) self.advance();
+                self.skipTrivia();
+            }
+        }
+        if (self.current.kind == .newline) self.advance();
+    }
+
     fn parseRule(self: *ParserDSLParser) !void {
         self.skipTrivia();
         if (self.current.kind == .eof) return;
@@ -3453,7 +3500,7 @@ const ParserDSLParser = struct {
                 self.advance();
             },
             .token => {
-                // Check for L(X) syntax (required list)
+                // Check for L(X) or L(X, sep) syntax (required list)
                 if (std.mem.eql(u8, self.current.text, "L") and self.peekKind() == .lparen) {
                     self.advance(); // skip L
                     self.advance(); // skip (
@@ -3464,6 +3511,14 @@ const ParserDSLParser = struct {
                         if (self.current.kind == .question) {
                             element.optional_items = true;
                             self.advance();
+                        }
+                        // Check for custom separator: L(X, sep)
+                        if (self.current.kind == .comma) {
+                            self.advance(); // skip comma
+                            if (self.current.kind == .string or self.current.kind == .token) {
+                                element.list_separator = self.current.text;
+                                self.advance();
+                            }
                         }
                         while (self.current.kind != .rparen and self.current.kind != .eof) {
                             self.advance();
@@ -3517,7 +3572,7 @@ const ParserDSLParser = struct {
                 const first_token = self.current.text;
                 const first_kind = self.current.kind;
 
-                // Check for [L(X)] syntax
+                // Check for [L(X)] or [L(X, sep)] syntax
                 if (std.mem.eql(u8, first_token, "L") and first_kind == .token and self.peekKind() == .lparen) {
                     self.advance(); // skip L
                     self.advance(); // skip (
@@ -3528,6 +3583,14 @@ const ParserDSLParser = struct {
                         if (self.current.kind == .question) {
                             element.optional_items = true;
                             self.advance();
+                        }
+                        // Check for custom separator: [L(X, sep)]
+                        if (self.current.kind == .comma) {
+                            self.advance(); // skip comma
+                            if (self.current.kind == .string or self.current.kind == .token) {
+                                element.list_separator = self.current.text;
+                                self.advance();
+                            }
                         }
                         while (self.current.kind != .rbracket and self.current.kind != .eof) {
                             self.advance();
@@ -3719,6 +3782,7 @@ const ParserGenerator = struct {
     // Directives
     as_directives: std.ArrayListUnmanaged(AsDirective) = .{},
     op_mappings: std.ArrayListUnmanaged(OpMapping) = .{},
+    error_names: std.ArrayListUnmanaged(ErrorName) = .{},
     lang: ?[]const u8 = null,
     lexer_spec: ?*const LexerSpec = null,
     code_blocks: std.ArrayListUnmanaged(CodeBlock) = .{},
@@ -3759,6 +3823,7 @@ const ParserGenerator = struct {
         self.accept_rules.deinit(self.allocator);
         self.as_directives.deinit(self.allocator);
         self.op_mappings.deinit(self.allocator);
+        self.error_names.deinit(self.allocator);
         self.code_blocks.deinit(self.allocator);
         self.collected_tags.deinit(self.allocator);
         self.tag_list.deinit(self.allocator);
@@ -4215,6 +4280,7 @@ const ParserGenerator = struct {
         // Copy directives
         for (parser.as_directives.items) |d| try self.as_directives.append(self.allocator, d);
         for (parser.op_mappings.items) |m| try self.op_mappings.append(self.allocator, m);
+        for (parser.error_names.items) |e| try self.error_names.append(self.allocator, e);
         self.lang = parser.lang;
         self.expect_conflicts = parser.expect_conflicts;
         for (parser.code_blocks.items) |b| try self.code_blocks.append(self.allocator, b);
@@ -4384,17 +4450,17 @@ const ParserGenerator = struct {
             .opt_group => self.error_id, // Should be expanded
             .req_list => blk: {
                 const item_name = elem.value;
-                break :blk try self.createRequiredList(item_name, elem.optional_items);
+                break :blk try self.createRequiredList(item_name, elem.optional_items, elem.list_separator);
             },
             .opt_list => blk: {
                 const item_name = elem.value;
-                const req_list = try self.createRequiredList(item_name, elem.optional_items);
+                const req_list = try self.createRequiredList(item_name, elem.optional_items, elem.list_separator);
                 break :blk try self.createOptionalRule(req_list);
             },
         };
     }
 
-    fn createRequiredList(self: *ParserGenerator, item_name: []const u8, optional_items: bool) !u16 {
+    fn createRequiredList(self: *ParserGenerator, item_name: []const u8, optional_items: bool, custom_sep: ?[]const u8) !u16 {
         const item_id = self.getSymbol(item_name) orelse blk: {
             const kind: ParserSymbol.Kind = if (item_name.len > 0 and item_name[0] >= 'A' and item_name[0] <= 'Z')
                 .terminal
@@ -4408,11 +4474,13 @@ const ParserGenerator = struct {
         else
             item_id;
 
-        const comma_id = try self.addSymbol("\",\"", .terminal);
+        const sep_str = custom_sep orelse "\",\"";
+        const sep_id = try self.addSymbol(sep_str, .terminal);
 
         const suffix: []const u8 = if (optional_items) "opt" else "";
-        const list_name = try std.fmt.allocPrint(self.allocator, "_list_{d}{s}", .{ item_id, suffix });
-        const tail_name = try std.fmt.allocPrint(self.allocator, "_tail_{d}{s}", .{ item_id, suffix });
+        const sep_suffix: []const u8 = if (custom_sep != null) "s" else "";
+        const list_name = try std.fmt.allocPrint(self.allocator, "_list_{d}{s}{s}", .{ item_id, suffix, sep_suffix });
+        const tail_name = try std.fmt.allocPrint(self.allocator, "_tail_{d}{s}{s}", .{ item_id, suffix, sep_suffix });
 
         if (self.getSymbol(list_name)) |existing| return existing;
 
@@ -4432,10 +4500,10 @@ const ParserGenerator = struct {
         });
         try self.symbols.items[list_id].rules.append(self.allocator, list_rule_id);
 
-        // Rule: _tail → "," item _tail → (!2 ...3)
+        // Rule: _tail → sep item _tail → (!2 ...3)
         const tail_rule1_id: u16 = @intCast(self.rules.items.len);
         var tail_rhs1: std.ArrayListUnmanaged(u16) = .{};
-        try tail_rhs1.append(self.allocator, comma_id);
+        try tail_rhs1.append(self.allocator, sep_id);
         try tail_rhs1.append(self.allocator, effective_item_id);
         try tail_rhs1.append(self.allocator, tail_id);
         try self.rules.append(self.allocator, .{

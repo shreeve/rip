@@ -221,6 +221,15 @@ defaults {
 
 @as = [ident, keyword]
 
+@errors = [
+  expr: "expression"
+  stmt: "statement"
+  param_list: "parameter list"
+  fun_decl: "function declaration"
+  sub_decl: "subroutine declaration"
+  block: "indented block"
+]
+
 # ==============================================================================
 # ALIASES
 # ==============================================================================
@@ -289,7 +298,7 @@ sub_decl = SUB name param_list block             → (sub 2 params:3 body:4)
 # Type annotations (`: type` and `-> type`) are stripped by the rewriter
 # before parsing. The parser only sees parameter names.
 
-param_list = name ("," name)*                → (1 ...2)
+param_list = L(name)                          → (...1)
 
 # ==============================================================================
 # EXPRESSIONS
