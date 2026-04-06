@@ -57,9 +57,6 @@ const Action = struct {
         set, // {var = val}
         inc, // {var++}
         dec, // {var--}
-        counted, // {var = counted('x')}
-        hold, // hold
-        rewind, // rewind(n)
         skip, // skip
         simd_to, // simd_to 'x'
     };
@@ -71,12 +68,9 @@ const LexerRule = struct {
     guards: []const Guard,
     token: []const u8,
     actions: []const Action,
-    rewind_amount: ?u8 = null,
     is_simd: bool = false,
     simd_char: ?u8 = null,
     is_skip: bool = false,
-    is_hold: bool = false,
-    pre_counted_char: ?u8 = null, // For {pre = counted('.')}
 };
 
 /// Default action
@@ -92,7 +86,6 @@ const LexerSpec = struct {
     defaults: std.ArrayListUnmanaged(DefaultAction),
     tokens: std.ArrayListUnmanaged(TokenDef),
     rules: std.ArrayListUnmanaged(LexerRule),
-    code_functions: std.ArrayListUnmanaged([]const u8),
     lang_name: ?[]const u8 = null,
 
     fn init(allocator: Allocator) LexerSpec {
@@ -102,7 +95,6 @@ const LexerSpec = struct {
             .defaults = .{},
             .tokens = .{},
             .rules = .{},
-            .code_functions = .{},
         };
     }
 
@@ -326,15 +318,6 @@ const LexerParser = struct {
                 continue;
             }
 
-            // Parse @code directive
-            if (self.expectStr("@code")) {
-                self.skipWhitespace();
-                if (self.expect('=')) self.skipWhitespace();
-                const name = self.parseIdentifier() orelse return error.ExpectedIdentifier;
-                try self.spec.code_functions.append(self.spec.allocator, name);
-                continue;
-            }
-
             // Parse lexer rule (starts with pattern, including empty-pattern @ guards)
             if (self.peek() == '\'' or self.peek() == '"' or self.peek() == '[' or self.peek() == '.' or self.peek() == '@') {
                 try self.parseLexerRule();
@@ -432,24 +415,13 @@ const LexerParser = struct {
         var actions: std.ArrayListUnmanaged(Action) = .{};
         defer actions.deinit(self.allocator);
 
-        var rewind_amount: ?u8 = null;
         var is_simd = false;
         var simd_char: ?u8 = null;
         var is_skip = false;
-        var is_hold = false;
-        var pre_counted_char: ?u8 = null;
 
         self.skipWhitespace();
         while (self.expect(',')) {
             self.skipWhitespace();
-
-            // Check for special actions
-            if (self.expectStr("rewind")) {
-                if (!self.expect('(')) return error.ExpectedOpenParen;
-                rewind_amount = @intCast(self.parseInt() orelse return error.ExpectedValue);
-                if (!self.expect(')')) return error.ExpectedCloseParen;
-                continue;
-            }
 
             if (self.expectStr("simd_to")) {
                 is_simd = true;
@@ -465,14 +437,9 @@ const LexerParser = struct {
                 continue;
             }
 
-            if (self.expectStr("hold")) {
-                is_hold = true;
-                continue;
-            }
-
             // Parse action block {var = val} or {var++} etc.
             if (self.expect('{')) {
-                const action = try self.parseAction(&pre_counted_char);
+                const action = try self.parseAction();
                 try actions.append(self.allocator, action);
                 if (!self.expect('}')) return error.ExpectedCloseBrace;
             }
@@ -484,12 +451,9 @@ const LexerParser = struct {
             .guards = try guards.toOwnedSlice(self.allocator),
             .token = token,
             .actions = try actions.toOwnedSlice(self.allocator),
-            .rewind_amount = rewind_amount,
             .is_simd = is_simd,
             .simd_char = simd_char,
             .is_skip = is_skip,
-            .is_hold = is_hold,
-            .pre_counted_char = pre_counted_char,
         });
     }
 
@@ -619,7 +583,7 @@ const LexerParser = struct {
         };
     }
 
-    fn parseAction(self: *LexerParser, pre_counted_char: *?u8) !Action {
+    fn parseAction(self: *LexerParser) !Action {
         const name = self.parseIdentifier() orelse return error.ExpectedIdentifier;
 
         self.skipWhitespace();
@@ -634,27 +598,9 @@ const LexerParser = struct {
             return Action{ .kind = .dec, .variable = name };
         }
 
-        // {var = ...}
+        // {var = val}
         if (self.expect('=')) {
             self.skipWhitespace();
-
-            // {var = counted('x')}
-            if (self.expectStr("counted")) {
-                if (!self.expect('(')) return error.ExpectedOpenParen;
-                if (!self.expect('\'')) return error.ExpectedQuote;
-                const c = self.parseEscapedChar();
-                if (!self.expect('\'')) return error.ExpectedQuote;
-                if (!self.expect(')')) return error.ExpectedCloseParen;
-
-                // Special case: {pre = counted('.')} sets the pre_counted_char
-                if (std.mem.eql(u8, name, "pre")) {
-                    pre_counted_char.* = c;
-                }
-
-                return Action{ .kind = .counted, .variable = name, .char = c };
-            }
-
-            // {var = val}
             const value = self.parseInt() orelse return error.ExpectedValue;
             return Action{ .kind = .set, .variable = name, .value = value };
         }
@@ -861,51 +807,8 @@ const LexerGenerator = struct {
         }
     }
 
-    fn emitTokenReturn(self: *LexerGenerator, keyword: []const u8, token: []const u8, is_hold: bool, char_count: u8) !void {
-        if (is_hold) {
-            try self.write("                    self.pos -= 1;\n");
-            try self.print("                    {s} Token{{ .cat = .{s}, .pre = ws_count, .pos = start, .len = 0 }};\n", .{ keyword, token });
-        } else {
-            try self.print("                    {s} Token{{ .cat = .{s}, .pre = ws_count, .pos = start, .len = {d} }};\n", .{ keyword, token, char_count });
-        }
-    }
-
-    /// Find the state variable that complex (non-literal) rules set for a character.
-    /// Returns the variable name if found, null otherwise. Used to determine whether
-    /// an @code function should be called and which state variable it affects.
-    fn findCodeFnStateVar(self: *LexerGenerator, first_char: u8) ?[]const u8 {
-        for (self.spec.rules.items) |rule| {
-            if (parseLiteralPattern(rule.pattern) != null) continue;
-            if (rule.pattern.len == 0) continue;
-            if (rule.pattern[0] == '.' and rule.pattern.len == 1) continue;
-
-            var starts_with: ?u8 = null;
-            if (rule.pattern.len >= 3 and (rule.pattern[0] == '\'' or rule.pattern[0] == '"')) {
-                if (rule.pattern[1] == '\\' and rule.pattern.len >= 4) {
-                    starts_with = switch (rule.pattern[2]) {
-                        'n' => '\n',
-                        'r' => '\r',
-                        't' => '\t',
-                        '\\' => '\\',
-                        '\'' => '\'',
-                        '"' => '"',
-                        else => rule.pattern[2],
-                    };
-                } else {
-                    starts_with = rule.pattern[1];
-                }
-            }
-
-            if (starts_with) |c| {
-                if (c == first_char) {
-                    for (rule.actions) |action| {
-                        if (action.kind == .set and action.variable != null and
-                            action.value != null and action.value.? != 0) return action.variable;
-                    }
-                }
-            }
-        }
-        return null;
+    fn emitTokenReturn(self: *LexerGenerator, keyword: []const u8, token: []const u8, char_count: u8) !void {
+        try self.print("                    {s} Token{{ .cat = .@\"{s}\", .pre = ws_count, .pos = start, .len = {d} }};\n", .{ keyword, token, char_count });
     }
 
     const OpRule = struct {
@@ -914,7 +817,6 @@ const LexerGenerator = struct {
         token: []const u8,
         guards: []const Guard,
         actions: []const Action,
-        is_hold: bool,
     };
 
     fn generateOperatorSwitch(self: *LexerGenerator) !void {
@@ -961,15 +863,9 @@ const LexerGenerator = struct {
                 .token = rule.token,
                 .guards = rule.guards,
                 .actions = rule.actions,
-                .is_hold = rule.is_hold,
             });
         }
 
-        // Determine @code function name for chars with complex rules (e.g., ? with pattern-mode entry)
-        const code_fn_name: ?[]const u8 = if (self.spec.code_functions.items.len > 0)
-            self.spec.code_functions.items[0]
-        else
-            null;
 
         try self.write(
             \\        // Single/multi-char operators
@@ -981,12 +877,11 @@ const LexerGenerator = struct {
         for (0..256) |i| {
             const c: u8 = @intCast(i);
             if (groups[c].items.len == 0) continue;
-            const needs_code_fn = code_fn_name != null and self.findCodeFnStateVar(c) != null;
-            try self.emitSwitchArm(c, groups[c].items, if (needs_code_fn) code_fn_name else null);
+            try self.emitSwitchArm(c, groups[c].items, null);
         }
 
         try self.write(
-            \\            else => Token{ .cat = .err, .pre = ws_count, .pos = start, .len = 1 },
+            \\            else => Token{ .cat = .@"err", .pre = ws_count, .pos = start, .len = 1 },
             \\        };
             \\    }
             \\
@@ -1014,26 +909,21 @@ const LexerGenerator = struct {
             break :blk false;
         };
         const has_actions = blk: {
-            for (single_rules.items) |r| if (r.actions.len > 0 or r.is_hold) break :blk true;
+            for (single_rules.items) |r| if (r.actions.len > 0) break :blk true;
             break :blk false;
         };
-        // Characters like ! and + are expression operators that can follow a
-        // complete pattern atom; they must exit pattern mode before being emitted.
-        const exits_pattern = first_char == '!' or first_char == '+';
-
-        const needs_blk = multi_rules.items.len > 0 or has_guards or has_actions or
-            code_fn != null or exits_pattern;
+        const needs_blk = multi_rules.items.len > 0 or has_guards or has_actions;
 
         if (!needs_blk) {
             const r = single_rules.items[0];
-            try self.print("            '{s}' => Token{{ .cat = .{s}, .pre = ws_count, .pos = start, .len = 1 }},\n", .{ lit_str, r.token });
+            try self.print("            '{s}' => Token{{ .cat = .@\"{s}\", .pre = ws_count, .pos = start, .len = 1 }},\n", .{ lit_str, r.token });
             return;
         }
 
         // Pre-guard shortcut: two rules for same char differing only by pre guard,
         // both producing single-char tokens with no actions.
         // Skip shortcut if pattern-exit logic is needed (requires a block).
-        if (multi_rules.items.len == 0 and single_rules.items.len == 2 and !has_actions and !exits_pattern) {
+        if (multi_rules.items.len == 0 and single_rules.items.len == 2 and !has_actions) {
             var guarded: ?[]const u8 = null;
             var default: ?[]const u8 = null;
             for (single_rules.items) |r| {
@@ -1050,7 +940,7 @@ const LexerGenerator = struct {
                 }
             }
             if (guarded != null and default != null) {
-                try self.print("            '{s}' => Token{{ .cat = if (ws_count > 0) .{s} else .{s}, .pre = ws_count, .pos = start, .len = 1 }},\n", .{ lit_str, guarded.?, default.? });
+                try self.print("            '{s}' => Token{{ .cat = if (ws_count > 0) .@\"{s}\" else .@\"{s}\", .pre = ws_count, .pos = start, .len = 1 }},\n", .{ lit_str, guarded.?, default.? });
                 return;
             }
         }
@@ -1060,72 +950,6 @@ const LexerGenerator = struct {
         // Multi-char rules: group by second char, longest first
         if (multi_rules.items.len > 0) {
             try self.emitMultiCharPeekAhead(multi_rules.items, 1, code_fn);
-        }
-
-        // Exit pattern mode at depth 0 for expression operators like !
-        // Only emitted when grammar has a 'pat' state. If a depth-tracking
-        // state exists (found by looking for inc/dec actions on pat-guarded
-        // rules), gate on depth == 0; otherwise just check pat != 0.
-        if (exits_pattern) {
-            const has_pat_state = blk: {
-                for (self.spec.states.items) |s| {
-                    if (std.mem.eql(u8, s.name, "pat")) break :blk true;
-                }
-                break :blk false;
-            };
-            if (has_pat_state) {
-                // Find the depth-tracking companion state (e.g., 'dep')
-                // by looking for a state with inc/dec actions on pat-guarded rules
-                const depth_var: ?[]const u8 = blk: {
-                    for (self.spec.rules.items) |rule| {
-                        var has_pat_guard = false;
-                        for (rule.guards) |g| {
-                            if (std.mem.eql(u8, g.variable, "pat")) has_pat_guard = true;
-                        }
-                        if (!has_pat_guard) continue;
-                        for (rule.actions) |a| {
-                            if (a.kind == .inc or a.kind == .dec) {
-                                if (a.variable) |v| {
-                                    if (!std.mem.eql(u8, v, "pat")) break :blk v;
-                                }
-                            }
-                        }
-                    }
-                    break :blk null;
-                };
-                if (depth_var) |dv| {
-                    try self.print(
-                        "                if (self.pat != 0 and self.{s} == 0) {{\n" ++
-                            "                    self.pat = 0;\n" ++
-                            "                    self.pos -= 1;\n" ++
-                            "                    break :blk Token{{ .cat = .patend, .pre = ws_count, .pos = start, .len = 0 }};\n" ++
-                            "                }}\n",
-                        .{dv},
-                    );
-                } else {
-                    try self.write(
-                        "                if (self.pat != 0) {\n" ++
-                            "                    self.pat = 0;\n" ++
-                            "                    self.pos -= 1;\n" ++
-                            "                    break :blk Token{ .cat = .patend, .pre = ws_count, .pos = start, .len = 0 };\n" ++
-                            "                }\n",
-                    );
-                }
-            }
-        }
-
-        // Call @code function if this char has complex rules (e.g., pattern-mode entry)
-        if (code_fn) |fn_name| {
-            if (single_rules.items.len > 0) {
-                // Check if rules are guarded by the @code state variable — if so,
-                // only call the @code function when NOT already in that state
-                const state_var = self.findCodeFnStateVar(first_char);
-                if (state_var) |sv| {
-                    try self.print("                if (self.{s} == 0) self.{s}();\n", .{ sv, fn_name });
-                } else {
-                    try self.print("                self.{s}();\n", .{fn_name});
-                }
-            }
         }
 
         // Single-char rules with guards
@@ -1152,7 +976,7 @@ const LexerGenerator = struct {
                 } else if (is_digit) {
                     try self.write("                break :blk self.scanNumber(start, ws_count);\n");
                 } else {
-                    try self.write("                break :blk Token{ .cat = .err, .pre = ws_count, .pos = start, .len = 1 };\n");
+                    try self.write("                break :blk Token{ .cat = .@\"err\", .pre = ws_count, .pos = start, .len = 1 };\n");
                 }
             }
         }
@@ -1232,32 +1056,18 @@ const LexerGenerator = struct {
             var terminated = false;
             for (matching.items) |r| {
                 if (r.char_count == depth + 1) {
-                    if (code_fn) |fn_name| {
-                        if (r.chars[0] == '\'' and depth == 1 and sc == '?') {
-                            if (r.guards.len > 0) {
-                                try self.write(indent);
-                                try self.write("    if (");
-                                try self.emitAllGuards(r.guards);
-                                try self.print(") self.{s}();\n", .{fn_name});
-                            } else {
-                                try self.write(indent);
-                                try self.print("    self.{s}();\n", .{fn_name});
-                            }
-                        }
-                    }
-
                     if (!all_same_guard and r.guards.len > 0) {
                         try self.write(indent);
                         try self.write("    if (");
                         try self.emitAllGuards(r.guards);
                         try self.write(") {\n");
                         try self.emitActions(r.actions, indent);
-                        try self.emitTokenReturn("break :blk", r.token, r.is_hold, r.char_count);
+                        try self.emitTokenReturn("break :blk", r.token, r.char_count);
                         try self.write(indent);
                         try self.write("    }\n");
                     } else if (!terminated) {
                         try self.emitActions(r.actions, indent);
-                        try self.emitTokenReturn("break :blk", r.token, r.is_hold, r.char_count);
+                        try self.emitTokenReturn("break :blk", r.token, r.char_count);
                         terminated = true;
                     }
                 }
@@ -1303,7 +1113,7 @@ const LexerGenerator = struct {
                 try self.write(") {\n");
             }
             try self.emitActions(r.actions, "                    ");
-            try self.emitTokenReturn("break :blk", r.token, r.is_hold, r.char_count);
+            try self.emitTokenReturn("break :blk", r.token, r.char_count);
             try self.write("                }");
         }
 
@@ -1313,10 +1123,10 @@ const LexerGenerator = struct {
                 try self.write("\n");
             }
             try self.emitActions(r.actions, "                ");
-            try self.emitTokenReturn("break :blk", r.token, r.is_hold, r.char_count);
+            try self.emitTokenReturn("break :blk", r.token, r.char_count);
         } else if (guarded.items.len > 0) {
             // All rules are guarded — emit error fallback when no guard matches
-            try self.write("\n                break :blk Token{ .cat = .err, .pre = ws_count, .pos = start, .len = 1 };\n");
+            try self.write("\n                break :blk Token{ .cat = .@\"err\", .pre = ws_count, .pos = start, .len = 1 };\n");
         }
     }
 
@@ -1328,7 +1138,6 @@ const LexerGenerator = struct {
             token: []const u8,
             guards: []const Guard,
             actions: []const Action,
-            is_hold: bool,
         };
 
         var crlf_rules = std.ArrayListUnmanaged(NlRule){};
@@ -1347,7 +1156,6 @@ const LexerGenerator = struct {
                     .token = rule.token,
                     .guards = rule.guards,
                     .actions = rule.actions,
-                    .is_hold = rule.is_hold,
                 });
             } else if (info.len == 1 and info.chars[0] == '\n') {
                 try lf_rules.append(self.allocator, .{
@@ -1356,7 +1164,6 @@ const LexerGenerator = struct {
                     .token = rule.token,
                     .guards = rule.guards,
                     .actions = rule.actions,
-                    .is_hold = rule.is_hold,
                 });
             } else if (info.len == 1 and info.chars[0] == '\r') {
                 try cr_rules.append(self.allocator, .{
@@ -1365,7 +1172,6 @@ const LexerGenerator = struct {
                     .token = rule.token,
                     .guards = rule.guards,
                     .actions = rule.actions,
-                    .is_hold = rule.is_hold,
                 });
             }
         }
@@ -1399,34 +1205,16 @@ const LexerGenerator = struct {
     }
 
     fn emitNewlineRules(self: *LexerGenerator, rules: anytype, char_count: u8) !void {
-        // Separate guarded from unguarded
-        var guarded_hold = std.ArrayListUnmanaged(@TypeOf(rules[0])){};
-        defer guarded_hold.deinit(self.allocator);
-        var guarded_emit = std.ArrayListUnmanaged(@TypeOf(rules[0])){};
-        defer guarded_emit.deinit(self.allocator);
+        var guarded = std.ArrayListUnmanaged(@TypeOf(rules[0])){};
+        defer guarded.deinit(self.allocator);
         var unguarded: ?@TypeOf(rules[0]) = null;
 
         for (rules) |r| {
             if (r.guards.len > 0) {
-                if (r.is_hold)
-                    try guarded_hold.append(self.allocator, r)
-                else
-                    try guarded_emit.append(self.allocator, r);
+                try guarded.append(self.allocator, r);
             } else {
                 unguarded = r;
             }
-        }
-
-        // Emit hold rules first (e.g., pat mode → patend before consuming newline)
-        for (guarded_hold.items) |r| {
-            try self.write("                if (");
-            try self.emitAllGuards(r.guards);
-            try self.write(") {\n");
-            try self.emitActions(r.actions, "                    ");
-            try self.write("                    return Token{ .cat = .");
-            try self.write(r.token);
-            try self.write(", .pre = ws_count, .pos = start, .len = 0 };\n");
-            try self.write("                }\n");
         }
 
         // Consume the newline character(s)
@@ -1436,28 +1224,18 @@ const LexerGenerator = struct {
             try self.write("                self.pos += 1;\n");
         }
 
-        // Emit remaining rules (non-hold)
-        // If hold rules already handled guarded cases via early return,
-        // remaining rules can be emitted unconditionally
-        const has_hold_guards = guarded_hold.items.len > 0;
-
-        for (guarded_emit.items) |r| {
-            if (!has_hold_guards) {
-                try self.write("                if (");
-                try self.emitAllGuards(r.guards);
-                try self.write(") {\n");
-                try self.emitActions(r.actions, "                    ");
-                try self.print("                    return Token{{ .cat = .{s}, .pre = ws_count, .pos = start, .len = {d} }};\n", .{ r.token, char_count });
-                try self.write("                }\n");
-            } else {
-                try self.emitActions(r.actions, "                ");
-                try self.print("                return Token{{ .cat = .{s}, .pre = ws_count, .pos = start, .len = {d} }};\n", .{ r.token, char_count });
-            }
+        for (guarded.items) |r| {
+            try self.write("                if (");
+            try self.emitAllGuards(r.guards);
+            try self.write(") {\n");
+            try self.emitActions(r.actions, "                    ");
+            try self.print("                    return Token{{ .cat = .@\"{s}\", .pre = ws_count, .pos = start, .len = {d} }};\n", .{ r.token, char_count });
+            try self.write("                }\n");
         }
 
         if (unguarded) |r| {
             try self.emitActions(r.actions, "                ");
-            try self.print("                return Token{{ .cat = .{s}, .pre = ws_count, .pos = start, .len = {d} }};\n", .{ r.token, char_count });
+            try self.print("                return Token{{ .cat = .@\"{s}\", .pre = ws_count, .pos = start, .len = {d} }};\n", .{ r.token, char_count });
         }
     }
 
@@ -1657,12 +1435,12 @@ const LexerGenerator = struct {
                     \\                if (ch == '{s}') {{
                     \\                    self.pos += 1;
                     \\                    if (self.pos < self.source.len and self.source[self.pos] == '{s}') {{ self.pos += 1; continue; }}
-                    \\                    return Token{{ .cat = .{s}, .pre = ws_count, .pos = start, .len = @intCast(self.pos - start) }};
+                    \\                    return Token{{ .cat = .@"{s}", .pre = ws_count, .pos = start, .len = @intCast(self.pos - start) }};
                     \\                }}
                     \\                if (ch == '\n') break;
                     \\                self.pos += 1;
                     \\            }}
-                    \\            return Token{{ .cat = .err, .pre = ws_count, .pos = start, .len = @intCast(self.pos - start) }};
+                    \\            return Token{{ .cat = .@"err", .pre = ws_count, .pos = start, .len = @intCast(self.pos - start) }};
                     \\        }}
                     \\
                 , .{ lit_str, lit_str, si.token });
@@ -1674,13 +1452,13 @@ const LexerGenerator = struct {
                     \\                const ch = self.source[self.pos];
                     \\                if (ch == '{s}') {{
                     \\                    self.pos += 1;
-                    \\                    return Token{{ .cat = .{s}, .pre = ws_count, .pos = start, .len = @intCast(self.pos - start) }};
+                    \\                    return Token{{ .cat = .@"{s}", .pre = ws_count, .pos = start, .len = @intCast(self.pos - start) }};
                     \\                }}
                     \\                if (ch == '\\') {{ self.pos += 2; continue; }}
                     \\                if (ch == '\n') break;
                     \\                self.pos += 1;
                     \\            }}
-                    \\            return Token{{ .cat = .err, .pre = ws_count, .pos = start, .len = @intCast(self.pos - start) }};
+                    \\            return Token{{ .cat = .@"err", .pre = ws_count, .pos = start, .len = @intCast(self.pos - start) }};
                     \\        }}
                     \\
                 , .{ lit_str, si.token });
@@ -1828,7 +1606,7 @@ const LexerGenerator = struct {
                                         \\                self.pos += 2;
                                         \\                while (self.pos < self.source.len and self.source[self.pos] != '{s}' and self.source[self.pos] != '\n') self.pos += 1;
                                         \\                if (self.pos < self.source.len and self.source[self.pos] == '{s}') self.pos += 1;
-                                        \\                return Token{{ .cat = .{s}, .pre = ws_count, .pos = start, .len = @intCast(self.pos - start) }};
+                                        \\                return Token{{ .cat = .@"{s}", .pre = ws_count, .pos = start, .len = @intCast(self.pos - start) }};
                                         \\            }}
                                         \\
                                     , .{ sc_str, cl_str, cl_str, pr.token });
@@ -1854,7 +1632,7 @@ const LexerGenerator = struct {
                             \\                    if (!((vc >= 'a' and vc <= 'z') or (vc >= 'A' and vc <= 'Z') or (vc >= '0' and vc <= '9') or vc == '_')) break;
                             \\                    self.pos += 1;
                             \\                }}
-                            \\                return Token{{ .cat = .{s}, .pre = ws_count, .pos = start, .len = @intCast(self.pos - start) }};
+                            \\                return Token{{ .cat = .@"{s}", .pre = ws_count, .pos = start, .len = @intCast(self.pos - start) }};
                             \\            }}
                             \\
                         , .{pr.token});
@@ -1863,7 +1641,7 @@ const LexerGenerator = struct {
                         try self.print(
                             \\            if (nc >= '0' and nc <= '9') {{
                             \\                self.pos += 2;
-                            \\                return Token{{ .cat = .{s}, .pre = ws_count, .pos = start, .len = 2 }};
+                            \\                return Token{{ .cat = .@"{s}", .pre = ws_count, .pos = start, .len = 2 }};
                             \\            }}
                             \\
                         , .{pr.token});
@@ -1872,7 +1650,7 @@ const LexerGenerator = struct {
                         try self.print(
                             \\            if (nc == '?' or nc == '$' or nc == '!' or nc == '#' or nc == '*') {{
                             \\                self.pos += 2;
-                            \\                return Token{{ .cat = .{s}, .pre = ws_count, .pos = start, .len = 2 }};
+                            \\                return Token{{ .cat = .@"{s}", .pre = ws_count, .pos = start, .len = 2 }};
                             \\            }}
                             \\
                         , .{pr.token});
@@ -1893,9 +1671,7 @@ const LexerGenerator = struct {
         // Analyze number patterns to detect features
         var has_decimal = false;
         var has_exponent = false;
-        var has_zdigits = false;
         var has_leading_dot = false;
-        var has_pat_mode = false;
         for (self.spec.rules.items) |rule| {
             if (std.mem.eql(u8, rule.token, "real")) {
                 if (std.mem.indexOf(u8, rule.pattern, "'.'") != null) has_decimal = true;
@@ -1906,20 +1682,13 @@ const LexerGenerator = struct {
                         has_leading_dot = true;
                 }
             }
-            if (std.mem.eql(u8, rule.token, "zdigits")) has_zdigits = true;
-            if (std.mem.eql(u8, rule.token, "integer") and rule.guards.len > 0) {
-                for (rule.guards) |g| {
-                    if (std.mem.eql(u8, g.variable, "pat")) has_pat_mode = true;
-                }
-            }
         }
 
         // Check if any number patterns exist
         var has_any = false;
         for (self.spec.rules.items) |rule| {
             if (std.mem.eql(u8, rule.token, "integer") or
-                std.mem.eql(u8, rule.token, "real") or
-                std.mem.eql(u8, rule.token, "zdigits"))
+                std.mem.eql(u8, rule.token, "real"))
             {
                 has_any = true;
                 break;
@@ -1943,11 +1712,6 @@ const LexerGenerator = struct {
                 \\        var has_exponent = false;
             );
         }
-        if (has_zdigits) {
-            try self.write(
-                \\        const starts_with_zero = self.source[self.pos] == '0';
-            );
-        }
         if (has_leading_dot) {
             try self.write(
                 \\        const starts_with_dot = self.source[self.pos] == '.';
@@ -1965,17 +1729,6 @@ const LexerGenerator = struct {
             \\        }
             \\
         );
-
-        // Pattern mode shortcut
-        if (has_pat_mode) {
-            try self.write(
-                \\        // In pattern mode, stop here (no decimal, no exponent)
-                \\        if (self.pat != 0) {
-                \\            return Token{ .cat = .integer, .pre = ws, .pos = start, .len = @intCast(self.pos - start) };
-                \\        }
-                \\
-            );
-        }
 
         // Decimal part
         if (has_decimal) {
@@ -2020,7 +1773,7 @@ const LexerGenerator = struct {
         }
 
         // Classification
-        if (has_decimal or has_exponent or has_zdigits or has_leading_dot) {
+        if (has_decimal or has_exponent or has_leading_dot) {
             try self.write("        // Classify\n");
             try self.write("        const token_cat: TokenCat = ");
 
@@ -2040,14 +1793,8 @@ const LexerGenerator = struct {
                     if (!first_cond) try self.write(" or ");
                     try self.write("starts_with_dot");
                 }
-                try self.write(")\n            .real\n");
-
-                if (has_zdigits) {
-                    try self.write("        else if (starts_with_zero and (self.pos - start) > 1)\n            .zdigits\n");
-                }
-                try self.write("        else\n            .integer;\n");
-            } else if (has_zdigits) {
-                try self.write("if (starts_with_zero and (self.pos - start) > 1)\n            .zdigits\n        else\n            .integer;\n");
+                try self.write(")\n            .@\"real\"\n");
+                try self.write("        else\n            .@\"integer\";\n");
             }
 
             try self.write(
@@ -2058,7 +1805,7 @@ const LexerGenerator = struct {
             );
         } else {
             try self.write(
-                \\        return Token{ .cat = .integer, .pre = ws, .pos = start, .len = @intCast(self.pos - start) };
+                \\        return Token{ .cat = .@"integer", .pre = ws, .pos = start, .len = @intCast(self.pos - start) };
                 \\    }
                 \\
             );
@@ -2066,37 +1813,14 @@ const LexerGenerator = struct {
     }
 
     fn generateIdentScanner(self: *LexerGenerator) !void {
-        // Check for pat-mode variant
-        var has_pat_mode = false;
-        for (self.spec.rules.items) |rule| {
-            if (!std.mem.eql(u8, rule.token, "ident")) continue;
-            for (rule.guards) |g| {
-                if (std.mem.eql(u8, g.variable, "pat")) has_pat_mode = true;
-            }
-        }
-
         try self.write(
             \\
             \\    /// Scan identifier (generated from grammar)
             \\    fn scanIdent(self: *Self, start: u32, ws: u8) Token {
-        );
-
-        if (has_pat_mode) {
-            try self.write(
-                \\        // In pattern mode, single character only (pattern codes)
-                \\        if (self.pat != 0) {
-                \\            self.pos += 1;
-                \\            return Token{ .cat = .ident, .pre = ws, .pos = start, .len = 1 };
-                \\        }
-            );
-        }
-
-        try self.write(
-            \\        // Normal mode: full identifier
             \\        while (self.pos < self.source.len and isIdentChar(self.source[self.pos])) {
             \\            self.pos += 1;
             \\        }
-            \\        return Token{ .cat = .ident, .pre = ws, .pos = start, .len = @intCast(self.pos - start) };
+            \\        return Token{ .cat = .@"ident", .pre = ws, .pos = start, .len = @intCast(self.pos - start) };
             \\    }
             \\
         );
@@ -2138,7 +1862,7 @@ const LexerGenerator = struct {
                     \\            const remaining = self.source[self.pos..];
                     \\            const offset = simd.findByte(remaining, '{s}');
                     \\            self.pos += @intCast(offset);
-                    \\            return Token{{ .cat = .{s}, .pre = ws_count, .pos = start, .len = @intCast(self.pos - start) }};
+                    \\            return Token{{ .cat = .@"{s}", .pre = ws_count, .pos = start, .len = @intCast(self.pos - start) }};
                     \\        }}
                     \\
                 , .{ start_str, stop_str, rule.token });
@@ -2149,7 +1873,7 @@ const LexerGenerator = struct {
                     \\            while (self.pos < self.source.len and self.source[self.pos] != '\n') {{
                     \\                self.pos += 1;
                     \\            }}
-                    \\            return Token{{ .cat = .{s}, .pre = ws_count, .pos = start, .len = @intCast(self.pos - start) }};
+                    \\            return Token{{ .cat = .@"{s}", .pre = ws_count, .pos = start, .len = @intCast(self.pos - start) }};
                     \\        }}
                     \\
                 , .{ start_str, rule.token });
@@ -2193,14 +1917,14 @@ const LexerGenerator = struct {
         );
 
         for (self.spec.tokens.items) |tok| {
-            try self.print("    {s},\n", .{tok.name});
+            try self.print("    @\"{s}\",\n", .{tok.name});
         }
 
         // Add internal skip token
         try self.write(
             \\
             \\    // Internal (used by generator)
-            \\    skip,
+            \\    @"skip",
             \\};
             \\
             \\
@@ -2342,39 +2066,6 @@ const LexerGenerator = struct {
     fn generateMatchRules(self: *LexerGenerator) !void {
         try self.generateCharClassification();
 
-        // Generate @code function wrappers (imported from @lang module)
-        for (self.spec.code_functions.items) |func_name| {
-            if (self.spec.lang_name) |lang| {
-                const state_var = self.findCodeFnStateVar('?') orelse "pat";
-                try self.print(
-                    \\    fn {s}(self: *Self) void {{
-                    \\        if ({s}.{s}(self.source, self.pos)) self.{s} = 1;
-                    \\    }}
-                    \\
-                , .{ func_name, lang, func_name, state_var });
-            }
-        }
-
-        // Feature detection from grammar
-        const has_pat = blk: {
-            for (self.spec.states.items) |s| {
-                if (std.mem.eql(u8, s.name, "pat")) break :blk true;
-            }
-            break :blk false;
-        };
-        const has_indent_token = blk: {
-            for (self.spec.tokens.items) |t| {
-                if (std.mem.eql(u8, t.name, "indent")) break :blk true;
-            }
-            break :blk false;
-        };
-        const has_spaces_token = blk: {
-            for (self.spec.tokens.items) |t| {
-                if (std.mem.eql(u8, t.name, "spaces")) break :blk true;
-            }
-            break :blk false;
-        };
-
         try self.write(
             \\    /// Match lexer rules
             \\    pub fn matchRules(self: *Self) Token {
@@ -2384,80 +2075,11 @@ const LexerGenerator = struct {
             \\            self.pos += 1;
             \\        }
             \\        const ws_count: u8 = @intCast(@min(self.pos - ws_start, 255));
-            \\
-        );
-
-        // Pattern mode exit on whitespace (only if grammar has 'pat' state)
-        if (has_pat) {
-            try self.write(
-                \\        // Exit pattern mode on whitespace (with hold semantics)
-                \\        if (self.pat != 0 and ws_count > 0) {
-                \\            self.pat = 0;
-                \\            self.pos = ws_start;
-                \\            return Token{ .cat = .patend, .pre = 0, .pos = ws_start, .len = 0 };
-                \\        }
-                \\
-            );
-        }
-
-        // INDENT with dot-level counting (only if grammar has 'indent' token)
-        if (has_indent_token) {
-            // Check if grammar uses dot-level counting (pre = counted('.'))
-            const has_dot_counting = blk: {
-                for (self.spec.rules.items) |r| {
-                    if (r.pre_counted_char != null and r.pre_counted_char.? == '.') break :blk true;
-                }
-                break :blk false;
-            };
-            if (has_dot_counting) {
-                try self.write(
-                    \\        // INDENT: 1+ spaces at line start, with dot-level counting
-                    \\        if (self.beg != 0 and ws_count >= 1) {
-                    \\            self.beg = 0;
-                    \\            var dot_count: u8 = 0;
-                    \\            while (self.pos < self.source.len and self.source[self.pos] == '.') {
-                    \\                self.pos += 1;
-                    \\                dot_count += 1;
-                    \\                while (self.pos < self.source.len and isWhitespace(self.source[self.pos])) {
-                    \\                    self.pos += 1;
-                    \\                }
-                    \\            }
-                    \\            return Token{ .cat = .indent, .pre = dot_count, .pos = ws_start, .len = @intCast(self.pos - ws_start) };
-                    \\        }
-                    \\
-                );
-            }
-        }
-
-        // SPACES: 2+ spaces mid-line (only if grammar has 'spaces' token)
-        if (has_spaces_token) {
-            try self.write(
-                \\        // SPACES: 2+ spaces mid-line (argumentless command)
-                \\        if (self.beg == 0 and ws_count >= 2) {
-                \\            const prev_ch = if (ws_start > 0) self.source[ws_start - 1] else 0;
-                \\            const next_ch = if (self.pos < self.source.len) self.source[self.pos] else 0;
-                \\            if (prev_ch != ',' and prev_ch != '(' and next_ch != ',' and next_ch != ')') {
-                \\                return Token{ .cat = .spaces, .pre = 0, .pos = ws_start, .len = ws_count };
-                \\            }
-                \\        }
-                \\
-            );
-        }
-
-        try self.write(
             \\        // EOF check
             \\        if (self.pos >= self.source.len) {
         );
-        if (has_pat) {
-            try self.write(
-                \\            if (self.pat != 0) {
-                \\                self.pat = 0;
-                \\                return Token{ .cat = .patend, .pre = ws_count, .pos = self.pos, .len = 0 };
-                \\            }
-            );
-        }
         try self.write(
-            \\            return Token{ .cat = .eof, .pre = ws_count, .pos = self.pos, .len = 0 };
+            \\            return Token{ .cat = .@"eof", .pre = ws_count, .pos = self.pos, .len = 0 };
             \\        }
             \\
             \\        const start = self.pos;
@@ -5457,7 +5079,7 @@ const ParserGenerator = struct {
         );
 
         // Generate token to symbol mapping
-        try writer.print("            .eof => {d},\n", .{self.end_id});
+        try writer.print("            .@\"eof\" => {d},\n", .{self.end_id});
         var emitted_cats: std.StringHashMapUnmanaged(void) = .{};
         defer {
             var it = emitted_cats.keyIterator();
@@ -5474,7 +5096,7 @@ const ParserGenerator = struct {
             }
         }
         if (has_ident_as) {
-            try writer.writeAll("            .ident => self.identToSymbol(token),\n");
+            try writer.writeAll("            .@\"ident\" => self.identToSymbol(token),\n");
         }
 
         for (self.symbols.items) |sym| {
@@ -5559,7 +5181,7 @@ const ParserGenerator = struct {
                     }
                 }
                 if (valid and !emitted_cats.contains(lower_name)) {
-                    try writer.print("            .{s} => {d},\n", .{ lower_name, sym.id });
+                    try writer.print("            .@\"{s}\" => {d},\n", .{ lower_name, sym.id });
                     try emitted_cats.put(self.allocator, try self.allocator.dupe(u8, lower_name), {});
                 }
             }
@@ -5586,7 +5208,7 @@ const ParserGenerator = struct {
                 // Look up in @op mappings
                 for (self.op_mappings.items) |m| {
                     if (std.mem.eql(u8, literal, m.lit) and !emitted_cats.contains(m.tok)) {
-                        try writer.print("            .{s} => {d},\n", .{ m.tok, sym.id });
+                        try writer.print("            .@\"{s}\" => {d},\n", .{ m.tok, sym.id });
                         try emitted_cats.put(self.allocator, try self.allocator.dupe(u8, m.tok), {});
                         break;
                     }
@@ -5609,7 +5231,7 @@ const ParserGenerator = struct {
                 if (self.lexer_spec) |spec| {
                     if (findTokenForChar(spec, c)) |tok_name| {
                         if (!emitted_cats.contains(tok_name)) {
-                            try writer.print("            .{s} => {d},\n", .{ tok_name, sym.id });
+                            try writer.print("            .@\"{s}\" => {d},\n", .{ tok_name, sym.id });
                             try emitted_cats.put(self.allocator, try self.allocator.dupe(u8, tok_name), {});
                         }
                         continue;
@@ -5626,7 +5248,7 @@ const ParserGenerator = struct {
             if (self.lexer_spec) |spec| {
                 if (findTokenForLiteral(spec, raw)) |tok_name| {
                     if (!emitted_cats.contains(tok_name)) {
-                        try writer.print("            .{s} => {d},\n", .{ tok_name, sym.id });
+                        try writer.print("            .@\"{s}\" => {d},\n", .{ tok_name, sym.id });
                         try emitted_cats.put(self.allocator, try self.allocator.dupe(u8, tok_name), {});
                     }
                 }

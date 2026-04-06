@@ -20,56 +20,56 @@ const simd = struct {
 // =============================================================================
 
 pub const TokenCat = enum(u8) {
-    ident,
-    integer,
-    real,
-    string_sq,
-    string_dq,
-    bool_true,
-    bool_false,
-    plus,
-    minus,
-    star,
-    slash,
-    percent,
-    power,
-    eq,
-    ne,
-    lt,
-    gt,
-    le,
-    ge,
-    and_sym,
-    or_sym,
-    not_sym,
-    assign,
-    const_assign,
-    plus_assign,
-    minus_assign,
-    star_assign,
-    slash_assign,
-    lparen,
-    rparen,
-    lbrace,
-    rbrace,
-    lbracket,
-    rbracket,
-    comma,
-    colon,
-    arrow,
-    fat_arrow,
-    dot,
-    dotdot,
-    pipe,
-    indent,
-    outdent,
-    newline,
-    comment,
-    eof,
-    err,
+    @"ident",
+    @"integer",
+    @"real",
+    @"string_sq",
+    @"string_dq",
+    @"bool_true",
+    @"bool_false",
+    @"plus",
+    @"minus",
+    @"star",
+    @"slash",
+    @"percent",
+    @"power",
+    @"eq",
+    @"ne",
+    @"lt",
+    @"gt",
+    @"le",
+    @"ge",
+    @"and_sym",
+    @"or_sym",
+    @"not_sym",
+    @"assign",
+    @"const_assign",
+    @"plus_assign",
+    @"minus_assign",
+    @"star_assign",
+    @"slash_assign",
+    @"lparen",
+    @"rparen",
+    @"lbrace",
+    @"rbrace",
+    @"lbracket",
+    @"rbracket",
+    @"comma",
+    @"colon",
+    @"arrow",
+    @"fat_arrow",
+    @"dot",
+    @"dotdot",
+    @"pipe",
+    @"indent",
+    @"outdent",
+    @"newline",
+    @"comment",
+    @"eof",
+    @"err",
 
     // Internal (used by generator)
-    skip,
+    @"skip",
 };
 
 // =============================================================================
@@ -182,7 +182,7 @@ pub const BaseLexer = struct {
         }
         const ws_count: u8 = @intCast(@min(self.pos - ws_start, 255));
         // EOF check
-        if (self.pos >= self.source.len) {            return Token{ .cat = .eof, .pre = ws_count, .pos = self.pos, .len = 0 };
+        if (self.pos >= self.source.len) {            return Token{ .cat = .@"eof", .pre = ws_count, .pos = self.pos, .len = 0 };
         }
 
         const start = self.pos;
@@ -192,11 +192,11 @@ pub const BaseLexer = struct {
             if (c == '\r' and self.pos + 1 < self.source.len and self.source[self.pos + 1] == '\n') {
                 self.pos += 2;
                 self.beg = 1;
-                return Token{ .cat = .newline, .pre = ws_count, .pos = start, .len = 2 };
+                return Token{ .cat = .@"newline", .pre = ws_count, .pos = start, .len = 2 };
             }
                 self.pos += 1;
                 self.beg = 1;
-                return Token{ .cat = .newline, .pre = ws_count, .pos = start, .len = 1 };
+                return Token{ .cat = .@"newline", .pre = ws_count, .pos = start, .len = 1 };
         }
         // From here, clear line-start flag
         self.beg = 0;
@@ -205,13 +205,13 @@ pub const BaseLexer = struct {
                 const ch = self.source[self.pos];
                 if (ch == '"') {
                     self.pos += 1;
-                    return Token{ .cat = .string_dq, .pre = ws_count, .pos = start, .len = @intCast(self.pos - start) };
+                    return Token{ .cat = .@"string_dq", .pre = ws_count, .pos = start, .len = @intCast(self.pos - start) };
                 }
                 if (ch == '\\') { self.pos += 2; continue; }
                 if (ch == '\n') break;
                 self.pos += 1;
             }
-            return Token{ .cat = .err, .pre = ws_count, .pos = start, .len = @intCast(self.pos - start) };
+            return Token{ .cat = .@"err", .pre = ws_count, .pos = start, .len = @intCast(self.pos - start) };
         }
         if (c == '\'') {            self.pos += 1;
             while (self.pos < self.source.len) {
@@ -219,12 +219,12 @@ pub const BaseLexer = struct {
                 if (ch == '\'') {
                     self.pos += 1;
                     if (self.pos < self.source.len and self.source[self.pos] == '\'') { self.pos += 1; continue; }
-                    return Token{ .cat = .string_sq, .pre = ws_count, .pos = start, .len = @intCast(self.pos - start) };
+                    return Token{ .cat = .@"string_sq", .pre = ws_count, .pos = start, .len = @intCast(self.pos - start) };
                 }
                 if (ch == '\n') break;
                 self.pos += 1;
             }
-            return Token{ .cat = .err, .pre = ws_count, .pos = start, .len = @intCast(self.pos - start) };
+            return Token{ .cat = .@"err", .pre = ws_count, .pos = start, .len = @intCast(self.pos - start) };
         }
         // Number (digit or leading dot followed by digit)
         if (isDigit(c) or (c == '.' and self.pos + 1 < self.source.len and isDigit(self.source[self.pos + 1]))) {
@@ -239,7 +239,7 @@ pub const BaseLexer = struct {
             while (self.pos < self.source.len and self.source[self.pos] != '\n') {
                 self.pos += 1;
             }
-            return Token{ .cat = .comment, .pre = ws_count, .pos = start, .len = @intCast(self.pos - start) };
+            return Token{ .cat = .@"comment", .pre = ws_count, .pos = start, .len = @intCast(self.pos - start) };
         }
         // Single/multi-char operators
         self.pos += 1;
@@ -247,132 +247,132 @@ pub const BaseLexer = struct {
             '!' => blk: {
                 if (self.peek() == '=') {
                     self.pos += 1;
-                    break :blk Token{ .cat = .ne, .pre = ws_count, .pos = start, .len = 2 };
+                    break :blk Token{ .cat = .@"ne", .pre = ws_count, .pos = start, .len = 2 };
                 }
-                    break :blk Token{ .cat = .not_sym, .pre = ws_count, .pos = start, .len = 1 };
+                    break :blk Token{ .cat = .@"not_sym", .pre = ws_count, .pos = start, .len = 1 };
             },
-            '%' => Token{ .cat = .percent, .pre = ws_count, .pos = start, .len = 1 },
+            '%' => Token{ .cat = .@"percent", .pre = ws_count, .pos = start, .len = 1 },
             '&' => blk: {
                 if (self.peek() == '&') {
                     self.pos += 1;
-                    break :blk Token{ .cat = .and_sym, .pre = ws_count, .pos = start, .len = 2 };
+                    break :blk Token{ .cat = .@"and_sym", .pre = ws_count, .pos = start, .len = 2 };
                 }
                 self.pos -= 1;
-                break :blk Token{ .cat = .err, .pre = ws_count, .pos = start, .len = 1 };
+                break :blk Token{ .cat = .@"err", .pre = ws_count, .pos = start, .len = 1 };
             },
             '(' => blk: {
                 self.paren += 1;
-                    break :blk Token{ .cat = .lparen, .pre = ws_count, .pos = start, .len = 1 };
+                    break :blk Token{ .cat = .@"lparen", .pre = ws_count, .pos = start, .len = 1 };
             },
             ')' => blk: {
                 self.paren -= 1;
-                    break :blk Token{ .cat = .rparen, .pre = ws_count, .pos = start, .len = 1 };
+                    break :blk Token{ .cat = .@"rparen", .pre = ws_count, .pos = start, .len = 1 };
             },
             '*' => blk: {
                 if (self.peek() == '*') {
                     self.pos += 1;
-                    break :blk Token{ .cat = .power, .pre = ws_count, .pos = start, .len = 2 };
+                    break :blk Token{ .cat = .@"power", .pre = ws_count, .pos = start, .len = 2 };
                 }
                 if (self.peek() == '=') {
                     self.pos += 1;
-                    break :blk Token{ .cat = .star_assign, .pre = ws_count, .pos = start, .len = 2 };
+                    break :blk Token{ .cat = .@"star_assign", .pre = ws_count, .pos = start, .len = 2 };
                 }
-                    break :blk Token{ .cat = .star, .pre = ws_count, .pos = start, .len = 1 };
+                    break :blk Token{ .cat = .@"star", .pre = ws_count, .pos = start, .len = 1 };
             },
             '+' => blk: {
                 if (self.peek() == '=') {
                     self.pos += 1;
-                    break :blk Token{ .cat = .plus_assign, .pre = ws_count, .pos = start, .len = 2 };
+                    break :blk Token{ .cat = .@"plus_assign", .pre = ws_count, .pos = start, .len = 2 };
                 }
-                    break :blk Token{ .cat = .plus, .pre = ws_count, .pos = start, .len = 1 };
+                    break :blk Token{ .cat = .@"plus", .pre = ws_count, .pos = start, .len = 1 };
             },
-            ',' => Token{ .cat = .comma, .pre = ws_count, .pos = start, .len = 1 },
+            ',' => Token{ .cat = .@"comma", .pre = ws_count, .pos = start, .len = 1 },
             '-' => blk: {
                 if (self.peek() == '=') {
                     self.pos += 1;
-                    break :blk Token{ .cat = .minus_assign, .pre = ws_count, .pos = start, .len = 2 };
+                    break :blk Token{ .cat = .@"minus_assign", .pre = ws_count, .pos = start, .len = 2 };
                 }
                 if (self.peek() == '>') {
                     self.pos += 1;
-                    break :blk Token{ .cat = .arrow, .pre = ws_count, .pos = start, .len = 2 };
+                    break :blk Token{ .cat = .@"arrow", .pre = ws_count, .pos = start, .len = 2 };
                 }
-                    break :blk Token{ .cat = .minus, .pre = ws_count, .pos = start, .len = 1 };
+                    break :blk Token{ .cat = .@"minus", .pre = ws_count, .pos = start, .len = 1 };
             },
             '.' => blk: {
                 if (self.peek() == '.') {
                     self.pos += 1;
-                    break :blk Token{ .cat = .dotdot, .pre = ws_count, .pos = start, .len = 2 };
+                    break :blk Token{ .cat = .@"dotdot", .pre = ws_count, .pos = start, .len = 2 };
                 }
-                    break :blk Token{ .cat = .dot, .pre = ws_count, .pos = start, .len = 1 };
+                    break :blk Token{ .cat = .@"dot", .pre = ws_count, .pos = start, .len = 1 };
             },
             '/' => blk: {
                 if (self.peek() == '=') {
                     self.pos += 1;
-                    break :blk Token{ .cat = .slash_assign, .pre = ws_count, .pos = start, .len = 2 };
+                    break :blk Token{ .cat = .@"slash_assign", .pre = ws_count, .pos = start, .len = 2 };
                 }
-                    break :blk Token{ .cat = .slash, .pre = ws_count, .pos = start, .len = 1 };
+                    break :blk Token{ .cat = .@"slash", .pre = ws_count, .pos = start, .len = 1 };
             },
-            ':' => Token{ .cat = .colon, .pre = ws_count, .pos = start, .len = 1 },
+            ':' => Token{ .cat = .@"colon", .pre = ws_count, .pos = start, .len = 1 },
             '<' => blk: {
                 if (self.peek() == '=') {
                     self.pos += 1;
-                    break :blk Token{ .cat = .le, .pre = ws_count, .pos = start, .len = 2 };
+                    break :blk Token{ .cat = .@"le", .pre = ws_count, .pos = start, .len = 2 };
                 }
-                    break :blk Token{ .cat = .lt, .pre = ws_count, .pos = start, .len = 1 };
+                    break :blk Token{ .cat = .@"lt", .pre = ws_count, .pos = start, .len = 1 };
             },
             '=' => blk: {
                 if (self.peek() == '=') {
                     self.pos += 1;
-                    break :blk Token{ .cat = .eq, .pre = ws_count, .pos = start, .len = 2 };
+                    break :blk Token{ .cat = .@"eq", .pre = ws_count, .pos = start, .len = 2 };
                 }
                 if (self.peek() == '!') {
                     self.pos += 1;
-                    break :blk Token{ .cat = .const_assign, .pre = ws_count, .pos = start, .len = 2 };
+                    break :blk Token{ .cat = .@"const_assign", .pre = ws_count, .pos = start, .len = 2 };
                 }
                 if (self.peek() == '>') {
                     self.pos += 1;
-                    break :blk Token{ .cat = .fat_arrow, .pre = ws_count, .pos = start, .len = 2 };
+                    break :blk Token{ .cat = .@"fat_arrow", .pre = ws_count, .pos = start, .len = 2 };
                 }
-                    break :blk Token{ .cat = .assign, .pre = ws_count, .pos = start, .len = 1 };
+                    break :blk Token{ .cat = .@"assign", .pre = ws_count, .pos = start, .len = 1 };
             },
             '>' => blk: {
                 if (self.peek() == '=') {
                     self.pos += 1;
-                    break :blk Token{ .cat = .ge, .pre = ws_count, .pos = start, .len = 2 };
+                    break :blk Token{ .cat = .@"ge", .pre = ws_count, .pos = start, .len = 2 };
                 }
-                    break :blk Token{ .cat = .gt, .pre = ws_count, .pos = start, .len = 1 };
+                    break :blk Token{ .cat = .@"gt", .pre = ws_count, .pos = start, .len = 1 };
             },
-            '[' => Token{ .cat = .lbracket, .pre = ws_count, .pos = start, .len = 1 },
+            '[' => Token{ .cat = .@"lbracket", .pre = ws_count, .pos = start, .len = 1 },
             '\\' => blk: {
                 if (self.peek() == '\n') {
                     self.pos += 1;
-                    break :blk Token{ .cat = .skip, .pre = ws_count, .pos = start, .len = 2 };
+                    break :blk Token{ .cat = .@"skip", .pre = ws_count, .pos = start, .len = 2 };
                 }
                 self.pos -= 1;
-                break :blk Token{ .cat = .err, .pre = ws_count, .pos = start, .len = 1 };
+                break :blk Token{ .cat = .@"err", .pre = ws_count, .pos = start, .len = 1 };
             },
-            ']' => Token{ .cat = .rbracket, .pre = ws_count, .pos = start, .len = 1 },
+            ']' => Token{ .cat = .@"rbracket", .pre = ws_count, .pos = start, .len = 1 },
             '{' => blk: {
                 self.brace += 1;
-                    break :blk Token{ .cat = .lbrace, .pre = ws_count, .pos = start, .len = 1 };
+                    break :blk Token{ .cat = .@"lbrace", .pre = ws_count, .pos = start, .len = 1 };
             },
             '|' => blk: {
                 if (self.peek() == '|') {
                     self.pos += 1;
-                    break :blk Token{ .cat = .or_sym, .pre = ws_count, .pos = start, .len = 2 };
+                    break :blk Token{ .cat = .@"or_sym", .pre = ws_count, .pos = start, .len = 2 };
                 }
                 if (self.peek() == '>') {
                     self.pos += 1;
-                    break :blk Token{ .cat = .pipe, .pre = ws_count, .pos = start, .len = 2 };
+                    break :blk Token{ .cat = .@"pipe", .pre = ws_count, .pos = start, .len = 2 };
                 }
                 self.pos -= 1;
-                break :blk Token{ .cat = .err, .pre = ws_count, .pos = start, .len = 1 };
+                break :blk Token{ .cat = .@"err", .pre = ws_count, .pos = start, .len = 1 };
             },
             '}' => blk: {
                 self.brace -= 1;
-                    break :blk Token{ .cat = .rbrace, .pre = ws_count, .pos = start, .len = 1 };
+                    break :blk Token{ .cat = .@"rbrace", .pre = ws_count, .pos = start, .len = 1 };
             },
-            else => Token{ .cat = .err, .pre = ws_count, .pos = start, .len = 1 },
+            else => Token{ .cat = .@"err", .pre = ws_count, .pos = start, .len = 1 },
         };
     }
 
@@ -397,19 +397,19 @@ pub const BaseLexer = struct {
         }
         // Classify
         const token_cat: TokenCat = if (has_decimal or starts_with_dot)
-            .real
+            .@"real"
         else
-            .integer;
+            .@"integer";
 
         return Token{ .cat = token_cat, .pre = ws, .pos = start, .len = @intCast(self.pos - start) };
     }
 
     /// Scan identifier (generated from grammar)
-    fn scanIdent(self: *Self, start: u32, ws: u8) Token {        // Normal mode: full identifier
+    fn scanIdent(self: *Self, start: u32, ws: u8) Token {
         while (self.pos < self.source.len and isIdentChar(self.source[self.pos])) {
             self.pos += 1;
         }
-        return Token{ .cat = .ident, .pre = ws, .pos = start, .len = @intCast(self.pos - start) };
+        return Token{ .cat = .@"ident", .pre = ws, .pos = start, .len = @intCast(self.pos - start) };
     }
 };
 
@@ -651,51 +651,51 @@ pub const Parser = struct {
             6 => self.list(pass),
             7 => self.list(pass),
             8 => self.list(pass),
-            9 => self.sexp(.@"use", &.{pass[1]}),
-            10 => self.sexp(.@"fun", &.{pass[1], pass[2], pass[3]}),
-            11 => self.sexp(.@"fun", &.{pass[1], pass[2]}),
-            12 => self.sexp(.@"sub", &.{pass[1], pass[2], pass[3]}),
-            13 => self.sexp(.@"sub", &.{pass[1], pass[2]}),
-            14 => self.spreadList(pass[0], pass[1]),
-            15 => self.spreadList(pass[1], pass[2]),
-            16 => .{ .list = &[_]Sexp{} },
-            17 => blk: { var out: std.ArrayListUnmanaged(Sexp) = .{}; if (pass[0] == .list) for (pass[0].list) |item| out.append(self.allocator(), item) catch break :blk .nil; while (out.items.len > 0 and out.items[out.items.len - 1] == .nil) _ = out.pop(); break :blk .{ .list = out.toOwnedSlice(self.allocator()) catch &[_]Sexp{} }; },
-            18 => self.list(pass),
-            19 => self.list(pass),
+            9 => self.sexpSpread(.@"block", pass[1]),
+            10 => self.sexp(.@"block", &.{}),
+            11 => self.sexp(.@"fun", &.{pass[1], pass[2], pass[3]}),
+            12 => self.sexp(.@"fun", &.{pass[1], pass[2]}),
+            13 => self.sexp(.@"sub", &.{pass[1], pass[2], pass[3]}),
+            14 => self.sexp(.@"sub", &.{pass[1], pass[2]}),
+            15 => self.sexp(.@"use", &.{pass[1]}),
+            16 => self.spreadList(pass[0], pass[1]),
+            17 => self.spreadList(pass[1], pass[2]),
+            18 => .{ .list = &[_]Sexp{} },
+            19 => blk: { var out: std.ArrayListUnmanaged(Sexp) = .{}; if (pass[0] == .list) for (pass[0].list) |item| out.append(self.allocator(), item) catch break :blk .nil; while (out.items.len > 0 and out.items[out.items.len - 1] == .nil) _ = out.pop(); break :blk .{ .list = out.toOwnedSlice(self.allocator()) catch &[_]Sexp{} }; },
             20 => self.list(pass),
             21 => self.list(pass),
-            22 => blk: { var out: std.ArrayListUnmanaged(Sexp) = .{}; out.append(self.allocator(), .{ .tag = .@"=" }) catch break :blk .nil; out.append(self.allocator(), pass[0]) catch break :blk .nil; out.append(self.allocator(), pass[2]) catch break :blk .nil; while (out.items.len > 0 and out.items[out.items.len - 1] == .nil) _ = out.pop(); break :blk .{ .list = out.toOwnedSlice(self.allocator()) catch &[_]Sexp{} }; },
-            23 => self.sexp(.@"const", &.{pass[0], pass[2]}),
-            24 => self.sexp(.@"not", &.{pass[1]}),
-            25 => self.sexp(.@"neg", &.{pass[1]}),
-            26 => self.list(pass),
-            27 => self.sexp(.@"await", &.{pass[0], pass[2]}),
-            28 => self.spreadList(pass[0], pass[1]),
-            29 => self.spreadList(pass[1], pass[2]),
-            30 => .{ .list = &[_]Sexp{} },
-            31 => self.sexpPosSpread(.@"call", pass[0], pass[1]),
-            32 => self.sexpPosSpread(.@"call", pass[0], pass[2]),
+            22 => self.list(pass),
+            23 => self.list(pass),
+            24 => self.sexp(.@"if", &.{pass[1], pass[2], pass[4]}),
+            25 => self.sexp(.@"if", &.{pass[1], pass[2], pass[4]}),
+            26 => self.sexp(.@"if", &.{pass[1], pass[2]}),
+            27 => self.sexp(.@"return", &.{pass[1]}),
+            28 => self.sexp(.@"return", &.{}),
+            29 => blk: { var out: std.ArrayListUnmanaged(Sexp) = .{}; out.append(self.allocator(), .{ .tag = .@"=" }) catch break :blk .nil; out.append(self.allocator(), pass[0]) catch break :blk .nil; out.append(self.allocator(), pass[2]) catch break :blk .nil; while (out.items.len > 0 and out.items[out.items.len - 1] == .nil) _ = out.pop(); break :blk .{ .list = out.toOwnedSlice(self.allocator()) catch &[_]Sexp{} }; },
+            30 => self.sexp(.@"const", &.{pass[0], pass[2]}),
+            31 => self.sexp(.@"not", &.{pass[1]}),
+            32 => self.sexp(.@"neg", &.{pass[1]}),
             33 => self.list(pass),
-            34 => self.list(pass),
+            34 => self.sexp(.@"await", &.{pass[0], pass[2]}),
             35 => self.spreadList(pass[0], pass[1]),
-            36 => .{ .list = &[_]Sexp{} },
-            37 => blk: { var out: std.ArrayListUnmanaged(Sexp) = .{}; out.append(self.allocator(), pass[0]) catch break :blk .nil; if (pass[1] == .list) for (pass[1].list) |item| out.append(self.allocator(), item) catch break :blk .nil; while (out.items.len > 0 and out.items[out.items.len - 1] == .nil) _ = out.pop(); break :blk .{ .list = out.toOwnedSlice(self.allocator()) catch &[_]Sexp{} }; },
-            38 => .{ .list = &[_]Sexp{} },
-            39 => self.list(pass),
+            36 => self.spreadList(pass[1], pass[2]),
+            37 => .{ .list = &[_]Sexp{} },
+            38 => self.sexpPosSpread(.@"call", pass[0], pass[1]),
+            39 => self.sexpPosSpread(.@"call", pass[0], pass[2]),
             40 => self.list(pass),
             41 => self.list(pass),
-            42 => self.list(pass),
-            43 => self.list(pass),
-            44 => self.list(pass),
-            45 => self.list(pass),
-            46 => pass[1],
-            47 => self.sexpSpread(.@"block", pass[1]),
-            48 => self.sexp(.@"block", &.{}),
-            49 => self.sexp(.@"if", &.{pass[1], pass[2], pass[4]}),
-            50 => self.sexp(.@"if", &.{pass[1], pass[2], pass[4]}),
-            51 => self.sexp(.@"if", &.{pass[1], pass[2]}),
-            52 => self.sexp(.@"return", &.{pass[1]}),
-            53 => self.sexp(.@"return", &.{}),
+            42 => self.spreadList(pass[0], pass[1]),
+            43 => .{ .list = &[_]Sexp{} },
+            44 => blk: { var out: std.ArrayListUnmanaged(Sexp) = .{}; out.append(self.allocator(), pass[0]) catch break :blk .nil; if (pass[1] == .list) for (pass[1].list) |item| out.append(self.allocator(), item) catch break :blk .nil; while (out.items.len > 0 and out.items[out.items.len - 1] == .nil) _ = out.pop(); break :blk .{ .list = out.toOwnedSlice(self.allocator()) catch &[_]Sexp{} }; },
+            45 => .{ .list = &[_]Sexp{} },
+            46 => self.list(pass),
+            47 => self.list(pass),
+            48 => self.list(pass),
+            49 => self.list(pass),
+            50 => self.list(pass),
+            51 => self.list(pass),
+            52 => self.list(pass),
+            53 => pass[1],
             54 => self.list(pass),
             55 => self.list(pass),
             56 => blk: { var out: std.ArrayListUnmanaged(Sexp) = .{}; out.append(self.allocator(), .{ .tag = .@"||" }) catch break :blk .nil; out.append(self.allocator(), pass[0]) catch break :blk .nil; out.append(self.allocator(), pass[2]) catch break :blk .nil; while (out.items.len > 0 and out.items[out.items.len - 1] == .nil) _ = out.pop(); break :blk .{ .list = out.toOwnedSlice(self.allocator()) catch &[_]Sexp{} }; },
@@ -725,35 +725,35 @@ pub const Parser = struct {
 
     fn tokenToSymbol(self: *Parser, token: Token) u16 {
         return switch (token.cat) {
-            .eof => 1,
-            .ident => self.identToSymbol(token),
-            .newline => 20,
-            .integer => 39,
-            .real => 40,
-            .string_sq => 41,
-            .string_dq => 42,
-            .indent => 45,
-            .outdent => 46,
-            .comma => 25,
-            .assign => 29,
-            .not_sym => 31,
-            .minus => 32,
-            .lparen => 35,
-            .rparen => 36,
-            .lt => 64,
-            .gt => 65,
-            .plus => 68,
-            .star => 69,
-            .slash => 70,
-            .percent => 71,
-            .const_assign => 30,
-            .or_sym => 60,
-            .and_sym => 61,
-            .eq => 62,
-            .ne => 63,
-            .le => 66,
-            .ge => 67,
-            .power => 72,
+            .@"eof" => 1,
+            .@"ident" => self.identToSymbol(token),
+            .@"newline" => 20,
+            .@"indent" => 21,
+            .@"outdent" => 22,
+            .@"integer" => 44,
+            .@"real" => 45,
+            .@"string_sq" => 46,
+            .@"string_dq" => 47,
+            .@"comma" => 27,
+            .@"assign" => 34,
+            .@"not_sym" => 36,
+            .@"minus" => 37,
+            .@"lparen" => 40,
+            .@"rparen" => 41,
+            .@"lt" => 64,
+            .@"gt" => 65,
+            .@"plus" => 68,
+            .@"star" => 69,
+            .@"slash" => 70,
+            .@"percent" => 71,
+            .@"const_assign" => 35,
+            .@"or_sym" => 60,
+            .@"and_sym" => 61,
+            .@"eq" => 62,
+            .@"ne" => 63,
+            .@"le" => 66,
+            .@"ge" => 67,
+            .@"power" => 72,
             else => 2, // error
         };
     }
@@ -799,33 +799,33 @@ const SYM_program: u16 = 3;
 const SYM_program_START: u16 = 50;
 const SYM_expr: u16 = 4;
 const SYM_expr_START: u16 = 52;
-const SYM_IDENT: u16 = 22;
+const SYM_IDENT: u16 = 24;
 
 // Mapping from rip.keyword_id to grammar symbol IDs (computed at comptime)
 const keyword_to_symbol = blk: {
     var arr: [512]u16 = .{0} ** 512;
     if (@hasField(rip.keyword_id, "NEWLINE")) arr[@intFromEnum(rip.keyword_id.NEWLINE)] = 20;
-    if (@hasField(rip.keyword_id, "USE")) arr[@intFromEnum(rip.keyword_id.USE)] = 21;
-    if (@hasField(rip.keyword_id, "IDENT")) arr[@intFromEnum(rip.keyword_id.IDENT)] = 22;
+    if (@hasField(rip.keyword_id, "INDENT")) arr[@intFromEnum(rip.keyword_id.INDENT)] = 21;
+    if (@hasField(rip.keyword_id, "OUTDENT")) arr[@intFromEnum(rip.keyword_id.OUTDENT)] = 22;
     if (@hasField(rip.keyword_id, "FUN")) arr[@intFromEnum(rip.keyword_id.FUN)] = 23;
-    if (@hasField(rip.keyword_id, "SUB")) arr[@intFromEnum(rip.keyword_id.SUB)] = 24;
-    if (@hasField(rip.keyword_id, "INTEGER")) arr[@intFromEnum(rip.keyword_id.INTEGER)] = 39;
-    if (@hasField(rip.keyword_id, "REAL")) arr[@intFromEnum(rip.keyword_id.REAL)] = 40;
-    if (@hasField(rip.keyword_id, "STRING_SQ")) arr[@intFromEnum(rip.keyword_id.STRING_SQ)] = 41;
-    if (@hasField(rip.keyword_id, "STRING_DQ")) arr[@intFromEnum(rip.keyword_id.STRING_DQ)] = 42;
-    if (@hasField(rip.keyword_id, "TRUE")) arr[@intFromEnum(rip.keyword_id.TRUE)] = 43;
-    if (@hasField(rip.keyword_id, "FALSE")) arr[@intFromEnum(rip.keyword_id.FALSE)] = 44;
-    if (@hasField(rip.keyword_id, "INDENT")) arr[@intFromEnum(rip.keyword_id.INDENT)] = 45;
-    if (@hasField(rip.keyword_id, "OUTDENT")) arr[@intFromEnum(rip.keyword_id.OUTDENT)] = 46;
-    if (@hasField(rip.keyword_id, "IF")) arr[@intFromEnum(rip.keyword_id.IF)] = 47;
-    if (@hasField(rip.keyword_id, "ELSE")) arr[@intFromEnum(rip.keyword_id.ELSE)] = 48;
-    if (@hasField(rip.keyword_id, "RETURN")) arr[@intFromEnum(rip.keyword_id.RETURN)] = 49;
+    if (@hasField(rip.keyword_id, "IDENT")) arr[@intFromEnum(rip.keyword_id.IDENT)] = 24;
+    if (@hasField(rip.keyword_id, "SUB")) arr[@intFromEnum(rip.keyword_id.SUB)] = 25;
+    if (@hasField(rip.keyword_id, "USE")) arr[@intFromEnum(rip.keyword_id.USE)] = 26;
+    if (@hasField(rip.keyword_id, "IF")) arr[@intFromEnum(rip.keyword_id.IF)] = 31;
+    if (@hasField(rip.keyword_id, "ELSE")) arr[@intFromEnum(rip.keyword_id.ELSE)] = 32;
+    if (@hasField(rip.keyword_id, "RETURN")) arr[@intFromEnum(rip.keyword_id.RETURN)] = 33;
+    if (@hasField(rip.keyword_id, "INTEGER")) arr[@intFromEnum(rip.keyword_id.INTEGER)] = 44;
+    if (@hasField(rip.keyword_id, "REAL")) arr[@intFromEnum(rip.keyword_id.REAL)] = 45;
+    if (@hasField(rip.keyword_id, "STRING_SQ")) arr[@intFromEnum(rip.keyword_id.STRING_SQ)] = 46;
+    if (@hasField(rip.keyword_id, "STRING_DQ")) arr[@intFromEnum(rip.keyword_id.STRING_DQ)] = 47;
+    if (@hasField(rip.keyword_id, "TRUE")) arr[@intFromEnum(rip.keyword_id.TRUE)] = 48;
+    if (@hasField(rip.keyword_id, "FALSE")) arr[@intFromEnum(rip.keyword_id.FALSE)] = 49;
     break :blk arr;
 };
 const keyword_fallback_symbol: u16 = 0;
 
-const rule_lhs = [_]u16{ 3, 4, 5, 5, 5, 6, 6, 6, 6, 7, 8, 8, 9, 9, 26, 27, 27, 10, 4, 4, 4, 4, 11, 12, 13, 13, 13, 14, 33, 34, 34, 14, 14, 14, 37, 38, 38, 15, 15, 16, 16, 16, 16, 16, 16, 16, 16, 17, 17, 18, 18, 18, 19, 19, 51, 53, 54, 54, 55, 55, 56, 56, 56, 56, 56, 56, 56, 57, 57, 57, 58, 58, 58, 58, 59, 59, 28 };
-const rule_len = [_]u8{ 2, 2, 1, 3, 2, 1, 1, 1, 1, 2, 4, 3, 4, 3, 2, 3, 0, 1, 1, 1, 1, 1, 3, 3, 2, 2, 1, 3, 2, 3, 0, 2, 4, 1, 2, 2, 0, 2, 0, 1, 1, 1, 1, 1, 1, 1, 3, 3, 2, 5, 5, 3, 2, 1, 2, 2, 3, 1, 3, 1, 3, 3, 3, 3, 3, 3, 1, 3, 3, 1, 3, 3, 3, 1, 3, 1, 1 };
+const rule_lhs = [_]u16{ 3, 4, 5, 5, 5, 6, 6, 6, 6, 7, 7, 8, 8, 9, 9, 10, 28, 29, 29, 11, 4, 4, 4, 4, 12, 12, 12, 13, 13, 14, 15, 16, 16, 16, 17, 38, 39, 39, 17, 17, 17, 42, 43, 43, 18, 18, 19, 19, 19, 19, 19, 19, 19, 19, 51, 53, 54, 54, 55, 55, 56, 56, 56, 56, 56, 56, 56, 57, 57, 57, 58, 58, 58, 58, 59, 59, 30 };
+const rule_len = [_]u8{ 2, 2, 1, 3, 2, 1, 1, 1, 1, 3, 2, 4, 3, 4, 3, 2, 2, 3, 0, 1, 1, 1, 1, 1, 5, 5, 3, 2, 1, 3, 3, 2, 2, 1, 3, 2, 3, 0, 2, 4, 1, 2, 2, 0, 2, 0, 1, 1, 1, 1, 1, 1, 1, 3, 2, 2, 3, 1, 3, 1, 3, 3, 3, 3, 3, 3, 1, 3, 3, 1, 3, 3, 3, 1, 3, 1, 1 };
 
 // Parse Table: 122 states × 73 symbols
 const NUM_STATES = 122;
@@ -833,127 +833,127 @@ const NUM_SYMBOLS = 73;
 
 const sparse = [NUM_STATES][]const i16{
     &.{3,2,50,3},
-    &.{4,25,11,20,12,11,13,6,14,17,16,8,18,24,22,16,28,18,31,29,32,14,35,4,39,10,40,22,41,9,42,15,43,12,44,26,47,27,52,23,54,28,55,21,56,13,57,5,58,7,59,19},
+    &.{4,25,12,10,14,14,15,13,16,7,17,9,19,17,24,22,30,4,31,26,36,8,37,18,40,21,44,28,45,20,46,19,47,29,48,11,49,24,52,23,54,27,55,16,56,12,57,5,58,6,59,15},
     &.{1,-1},
-    &.{4,38,5,36,6,35,7,33,8,34,9,31,11,20,12,11,13,6,14,17,16,8,18,24,21,32,22,16,23,39,24,37,28,18,31,29,32,14,35,4,39,10,40,22,41,9,42,15,43,12,44,26,47,27,52,23,54,28,55,21,56,13,57,5,58,7,59,19},
-    &.{4,40,11,20,12,11,13,6,14,17,16,8,18,24,22,16,28,18,31,29,32,14,35,4,39,10,40,22,41,9,42,15,43,12,44,26,47,27,52,23,54,28,55,21,56,13,57,5,58,7,59,19},
-    &.{1,-68,20,-68,25,-68,32,47,36,-68,45,-68,46,-68,60,-68,61,-68,62,48,63,44,64,42,65,46,66,43,67,41,68,45},
-    &.{1,-77,20,-77,25,-77,32,-77,36,-77,45,-77,46,-77,60,-77,61,-77,62,-77,63,-77,64,-77,65,-77,66,-77,67,-77,68,-77,69,-77,70,-77,71,-77,72,49},
-    &.{1,-71,20,-71,25,-71,32,-71,36,-71,45,-71,46,-71,60,-71,61,-71,62,-71,63,-71,64,-71,65,-71,66,-71,67,-71,68,-71,69,52,70,50,71,51},
-    &.{1,-35,20,-35,22,-35,25,-35,31,-35,32,-35,35,-35,36,-35,39,-35,40,-35,41,-35,42,-35,43,-35,44,-35,45,-35,46,-35,60,-35,61,-35,62,-35,63,-35,64,-35,65,-35,66,-35,67,-35,68,-35,69,-35,70,-35,71,-35,72,-35},
-    &.{1,-44,20,-44,22,-44,25,-44,31,-44,32,-44,35,-44,36,-44,39,-44,40,-44,41,-44,42,-44,43,-44,44,-44,45,-44,46,-44,60,-44,61,-44,62,-44,63,-44,64,-44,65,-44,66,-44,67,-44,68,-44,69,-44,70,-44,71,-44,72,-44},
-    &.{1,-42,20,-42,22,-42,25,-42,31,-42,32,-42,35,-42,36,-42,39,-42,40,-42,41,-42,42,-42,43,-42,44,-42,45,-42,46,-42,60,-42,61,-42,62,-42,63,-42,64,-42,65,-42,66,-42,67,-42,68,-42,69,-42,70,-42,71,-42,72,-42},
-    &.{1,-22,20,-22,25,-22,36,-22,45,-22,46,-22},
-    &.{1,-46,20,-46,22,-46,25,-46,31,-46,32,-46,35,-46,36,-46,39,-46,40,-46,41,-46,42,-46,43,-46,44,-46,45,-46,46,-46,60,-46,61,-46,62,-46,63,-46,64,-46,65,-46,66,-46,67,-46,68,-46,69,-46,70,-46,71,-46,72,-46},
-    &.{1,-61,20,-61,25,-61,36,-61,45,-61,46,-61,60,-61,61,-61},
-    &.{13,53,14,17,16,8,22,54,31,29,32,14,35,4,39,10,40,22,41,9,42,15,43,12,44,26},
-    &.{1,-45,20,-45,22,-45,25,-45,31,-45,32,-45,35,-45,36,-45,39,-45,40,-45,41,-45,42,-45,43,-45,44,-45,45,-45,46,-45,60,-45,61,-45,62,-45,63,-45,64,-45,65,-45,66,-45,67,-45,68,-45,69,-45,70,-45,71,-45,72,-45},
-    &.{1,-41,20,-41,22,-41,25,-41,29,55,30,56,31,-41,32,-41,35,-41,36,-41,39,-41,40,-41,41,-41,42,-41,43,-41,44,-41,45,-41,46,-41,60,-41,61,-41,62,-41,63,-41,64,-41,65,-41,66,-41,67,-41,68,-41,69,-41,70,-41,71,-41,72,-41},
-    &.{1,-28,16,59,20,-28,22,54,25,-28,31,60,32,-28,33,57,35,58,36,-28,39,10,40,22,41,9,42,15,43,12,44,26,45,-28,46,-28,60,-28,61,-28,62,-28,63,-28,64,-28,65,-28,66,-28,67,-28,68,-28,69,-28,70,-28,71,-28,72,-28},
-    &.{1,-23,20,-23,25,-23,36,-23,45,-23,46,-23},
-    &.{1,-75,20,-75,25,-75,32,-75,36,-75,45,-75,46,-75,60,-75,61,-75,62,-75,63,-75,64,-75,65,-75,66,-75,67,-75,68,-75,69,-75,70,-75,71,-75},
-    &.{1,-21,20,-21,25,-21,36,-21,45,-21,46,-21},
-    &.{1,-59,20,-59,25,-59,36,-59,45,-59,46,-59,60,-59,61,61},
-    &.{1,-43,20,-43,22,-43,25,-43,31,-43,32,-43,35,-43,36,-43,39,-43,40,-43,41,-43,42,-43,43,-43,44,-43,45,-43,46,-43,60,-43,61,-43,62,-43,63,-43,64,-43,65,-43,66,-43,67,-43,68,-43,69,-43,70,-43,71,-43,72,-43},
-    &.{4,62,11,20,12,11,13,6,14,17,16,8,18,24,22,16,28,18,31,29,32,14,35,4,39,10,40,22,41,9,42,15,43,12,44,26,47,27,52,23,54,28,55,21,56,13,57,5,58,7,59,19},
-    &.{1,-20,20,-20,25,-20,36,-20,45,-20,46,-20},
+    &.{4,38,5,37,6,34,8,33,9,31,10,32,12,10,14,14,15,13,16,7,17,9,19,17,23,39,24,22,25,35,26,36,30,4,31,26,36,8,37,18,40,21,44,28,45,20,46,19,47,29,48,11,49,24,52,23,54,27,55,16,56,12,57,5,58,6,59,15},
+    &.{1,-25,20,-25,21,-25,22,-25,27,-25,41,-25},
+    &.{1,-68,20,-68,21,-68,22,-68,27,-68,37,47,41,-68,60,-68,61,-68,62,46,63,43,64,41,65,45,66,42,67,40,68,44},
+    &.{1,-71,20,-71,21,-71,22,-71,27,-71,37,-71,41,-71,60,-71,61,-71,62,-71,63,-71,64,-71,65,-71,66,-71,67,-71,68,-71,69,50,70,48,71,49},
+    &.{1,-77,20,-77,21,-77,22,-77,27,-77,37,-77,41,-77,60,-77,61,-77,62,-77,63,-77,64,-77,65,-77,66,-77,67,-77,68,-77,69,-77,70,-77,71,-77,72,51},
+    &.{16,52,17,9,19,17,24,53,36,8,37,18,40,21,44,28,45,20,46,19,47,29,48,11,49,24},
+    &.{1,-35,19,57,20,-35,21,-35,22,-35,24,53,27,-35,36,56,37,-35,38,55,40,54,41,-35,44,28,45,20,46,19,47,29,48,11,49,24,60,-35,61,-35,62,-35,63,-35,64,-35,65,-35,66,-35,67,-35,68,-35,69,-35,70,-35,71,-35,72,-35},
+    &.{1,-22,20,-22,21,-22,22,-22,27,-22,41,-22},
+    &.{1,-53,20,-53,21,-53,22,-53,24,-53,27,-53,36,-53,37,-53,40,-53,41,-53,44,-53,45,-53,46,-53,47,-53,48,-53,49,-53,60,-53,61,-53,62,-53,63,-53,64,-53,65,-53,66,-53,67,-53,68,-53,69,-53,70,-53,71,-53,72,-53},
+    &.{1,-61,20,-61,21,-61,22,-61,27,-61,41,-61,60,-61,61,-61},
+    &.{1,-24,20,-24,21,-24,22,-24,27,-24,41,-24},
+    &.{1,-23,20,-23,21,-23,22,-23,27,-23,41,-23},
+    &.{1,-75,20,-75,21,-75,22,-75,27,-75,37,-75,41,-75,60,-75,61,-75,62,-75,63,-75,64,-75,65,-75,66,-75,67,-75,68,-75,69,-75,70,-75,71,-75},
+    &.{1,-59,20,-59,21,-59,22,-59,27,-59,41,-59,60,-59,61,58},
+    &.{1,-42,20,-42,21,-42,22,-42,24,-42,27,-42,36,-42,37,-42,40,-42,41,-42,44,-42,45,-42,46,-42,47,-42,48,-42,49,-42,60,-42,61,-42,62,-42,63,-42,64,-42,65,-42,66,-42,67,-42,68,-42,69,-42,70,-42,71,-42,72,-42},
+    &.{16,59,17,9,19,17,24,53,36,8,37,18,40,21,44,28,45,20,46,19,47,29,48,11,49,24},
+    &.{1,-51,20,-51,21,-51,22,-51,24,-51,27,-51,36,-51,37,-51,40,-51,41,-51,44,-51,45,-51,46,-51,47,-51,48,-51,49,-51,60,-51,61,-51,62,-51,63,-51,64,-51,65,-51,66,-51,67,-51,68,-51,69,-51,70,-51,71,-51,72,-51},
+    &.{1,-50,20,-50,21,-50,22,-50,24,-50,27,-50,36,-50,37,-50,40,-50,41,-50,44,-50,45,-50,46,-50,47,-50,48,-50,49,-50,60,-50,61,-50,62,-50,63,-50,64,-50,65,-50,66,-50,67,-50,68,-50,69,-50,70,-50,71,-50,72,-50},
+    &.{4,60,12,10,14,14,15,13,16,7,17,9,19,17,24,22,30,4,31,26,36,8,37,18,40,21,44,28,45,20,46,19,47,29,48,11,49,24,52,23,54,27,55,16,56,12,57,5,58,6,59,15},
+    &.{1,-48,20,-48,21,-48,22,-48,24,-48,27,-48,34,61,35,62,36,-48,37,-48,40,-48,41,-48,44,-48,45,-48,46,-48,47,-48,48,-48,49,-48,60,-48,61,-48,62,-48,63,-48,64,-48,65,-48,66,-48,67,-48,68,-48,69,-48,70,-48,71,-48,72,-48},
+    &.{4,63,12,10,14,14,15,13,16,7,17,9,19,17,24,22,30,4,31,26,36,8,37,18,40,21,44,28,45,20,46,19,47,29,48,11,49,24,52,23,54,27,55,16,56,12,57,5,58,6,59,15},
+    &.{1,-54,20,-54,21,-54,22,-54,24,-54,27,-54,36,-54,37,-54,40,-54,41,-54,44,-54,45,-54,46,-54,47,-54,48,-54,49,-54,60,-54,61,-54,62,-54,63,-54,64,-54,65,-54,66,-54,67,-54,68,-54,69,-54,70,-54,71,-54,72,-54},
     &.{1,-1},
-    &.{1,-47,20,-47,22,-47,25,-47,31,-47,32,-47,35,-47,36,-47,39,-47,40,-47,41,-47,42,-47,43,-47,44,-47,45,-47,46,-47,60,-47,61,-47,62,-47,63,-47,64,-47,65,-47,66,-47,67,-47,68,-47,69,-47,70,-47,71,-47,72,-47},
-    &.{4,64,11,20,12,11,13,6,14,17,16,8,18,24,22,16,28,18,31,29,32,14,35,4,39,10,40,22,41,9,42,15,43,12,44,26,47,27,52,23,54,28,55,21,56,13,57,5,58,7,59,19},
-    &.{1,-78,20,-78,25,-78,36,-78,45,-78,46,-78,60,65},
-    &.{13,66,14,17,16,8,22,54,31,29,32,14,35,4,39,10,40,22,41,9,42,15,43,12,44,26},
+    &.{4,65,12,10,14,14,15,13,16,7,17,9,19,17,24,22,30,4,31,26,36,8,37,18,40,21,44,28,45,20,46,19,47,29,48,11,49,24,52,23,54,27,55,16,56,12,57,5,58,6,59,15},
+    &.{1,-78,20,-78,21,-78,22,-78,27,-78,41,-78,60,66},
+    &.{1,-49,20,-49,21,-49,22,-49,24,-49,27,-49,36,-49,37,-49,40,-49,41,-49,44,-49,45,-49,46,-49,47,-49,48,-49,49,-49,60,-49,61,-49,62,-49,63,-49,64,-49,65,-49,66,-49,67,-49,68,-49,69,-49,70,-49,71,-49,72,-49},
+    &.{1,-52,20,-52,21,-52,22,-52,24,-52,27,-52,36,-52,37,-52,40,-52,41,-52,44,-52,45,-52,46,-52,47,-52,48,-52,49,-52,60,-52,61,-52,62,-52,63,-52,64,-52,65,-52,66,-52,67,-52,68,-52,69,-52,70,-52,71,-52,72,-52},
     &.{1,-1},
-    &.{1,-9,20,-9,46,-9},
-    &.{22,67},
-    &.{1,-7,20,-7,46,-7},
-    &.{1,-8,20,-8,46,-8},
-    &.{1,-4,20,-4,46,-4},
-    &.{1,-2,20,68},
-    &.{22,69},
-    &.{1,-10,20,-10,46,-10},
-    &.{22,70},
-    &.{36,71},
-    &.{13,6,14,17,16,8,22,54,31,29,32,14,35,4,39,10,40,22,41,9,42,15,43,12,44,26,57,72,58,7,59,19},
-    &.{13,6,14,17,16,8,22,54,31,29,32,14,35,4,39,10,40,22,41,9,42,15,43,12,44,26,57,73,58,7,59,19},
-    &.{13,6,14,17,16,8,22,54,31,29,32,14,35,4,39,10,40,22,41,9,42,15,43,12,44,26,57,74,58,7,59,19},
-    &.{13,6,14,17,16,8,22,54,31,29,32,14,35,4,39,10,40,22,41,9,42,15,43,12,44,26,57,75,58,7,59,19},
-    &.{13,6,14,17,16,8,22,54,31,29,32,14,35,4,39,10,40,22,41,9,42,15,43,12,44,26,58,76,59,19},
-    &.{13,6,14,17,16,8,22,54,31,29,32,14,35,4,39,10,40,22,41,9,42,15,43,12,44,26,57,77,58,7,59,19},
-    &.{13,6,14,17,16,8,22,54,31,29,32,14,35,4,39,10,40,22,41,9,42,15,43,12,44,26,58,78,59,19},
-    &.{13,6,14,17,16,8,22,54,31,29,32,14,35,4,39,10,40,22,41,9,42,15,43,12,44,26,57,79,58,7,59,19},
-    &.{13,6,14,17,16,8,22,54,31,29,32,14,35,4,39,10,40,22,41,9,42,15,43,12,44,26,59,80},
-    &.{13,6,14,17,16,8,22,54,31,29,32,14,35,4,39,10,40,22,41,9,42,15,43,12,44,26,59,81},
-    &.{13,6,14,17,16,8,22,54,31,29,32,14,35,4,39,10,40,22,41,9,42,15,43,12,44,26,59,82},
-    &.{13,6,14,17,16,8,22,54,31,29,32,14,35,4,39,10,40,22,41,9,42,15,43,12,44,26,59,83},
-    &.{1,-27,20,-27,25,-27,32,-27,36,-27,45,-27,46,-27,60,-27,61,-27,62,-27,63,-27,64,-27,65,-27,66,-27,67,-27,68,-27,69,-27,70,-27,71,-27,72,-27},
-    &.{1,-41,20,-41,22,-41,25,-41,31,-41,32,-41,35,-41,36,-41,39,-41,40,-41,41,-41,42,-41,43,-41,44,-41,45,-41,46,-41,60,-41,61,-41,62,-41,63,-41,64,-41,65,-41,66,-41,67,-41,68,-41,69,-41,70,-41,71,-41,72,-41},
-    &.{4,84,11,20,12,11,13,6,14,17,16,8,18,24,22,16,28,18,31,29,32,14,35,4,39,10,40,22,41,9,42,15,43,12,44,26,47,27,52,23,54,28,55,21,56,13,57,5,58,7,59,19},
-    &.{4,85,11,20,12,11,13,6,14,17,16,8,18,24,22,16,28,18,31,29,32,14,35,4,39,10,40,22,41,9,42,15,43,12,44,26,47,27,52,23,54,28,55,21,56,13,57,5,58,7,59,19},
-    &.{1,-33,20,-33,22,-33,25,-33,31,-33,32,-33,35,-33,36,-33,39,-33,40,-33,41,-33,42,-33,43,-33,44,-33,45,-33,46,-33,60,-33,61,-33,62,-33,63,-33,64,-33,65,-33,66,-33,67,-33,68,-33,69,-33,70,-33,71,-33,72,-33},
-    &.{4,87,11,20,12,11,13,6,14,17,15,86,16,8,18,24,22,16,28,18,31,29,32,14,35,4,36,-40,39,10,40,22,41,9,42,15,43,12,44,26,47,27,52,23,54,28,55,21,56,13,57,5,58,7,59,19},
-    &.{1,-32,20,-32,22,-32,25,89,31,-32,32,-32,34,88,35,-32,36,-32,39,-32,40,-32,41,-32,42,-32,43,-32,44,-32,45,-32,46,-32,60,-32,61,-32,62,-32,63,-32,64,-32,65,-32,66,-32,67,-32,68,-32,69,-32,70,-32,71,-32,72,-32},
-    &.{16,90,22,54,35,4,39,10,40,22,41,9,42,15,43,12,44,26},
-    &.{13,6,14,17,16,8,22,54,31,29,32,14,35,4,39,10,40,22,41,9,42,15,43,12,44,26,56,91,57,5,58,7,59,19},
-    &.{1,-3,20,-3,25,-3,36,-3,45,-3,46,-3},
+    &.{1,-9,20,-9,22,-9},
+    &.{1,-7,20,-7,22,-7},
+    &.{1,-8,20,-8,22,-8},
+    &.{1,-4,20,-4,22,-4},
+    &.{24,67},
+    &.{24,68},
+    &.{1,-2,20,69},
+    &.{1,-10,20,-10,22,-10},
+    &.{24,70},
+    &.{16,7,17,9,19,17,24,53,36,8,37,18,40,21,44,28,45,20,46,19,47,29,48,11,49,24,57,71,58,6,59,15},
+    &.{16,7,17,9,19,17,24,53,36,8,37,18,40,21,44,28,45,20,46,19,47,29,48,11,49,24,57,72,58,6,59,15},
+    &.{16,7,17,9,19,17,24,53,36,8,37,18,40,21,44,28,45,20,46,19,47,29,48,11,49,24,57,73,58,6,59,15},
+    &.{16,7,17,9,19,17,24,53,36,8,37,18,40,21,44,28,45,20,46,19,47,29,48,11,49,24,57,74,58,6,59,15},
+    &.{16,7,17,9,19,17,24,53,36,8,37,18,40,21,44,28,45,20,46,19,47,29,48,11,49,24,58,75,59,15},
+    &.{16,7,17,9,19,17,24,53,36,8,37,18,40,21,44,28,45,20,46,19,47,29,48,11,49,24,57,76,58,6,59,15},
+    &.{16,7,17,9,19,17,24,53,36,8,37,18,40,21,44,28,45,20,46,19,47,29,48,11,49,24,57,77,58,6,59,15},
+    &.{16,7,17,9,19,17,24,53,36,8,37,18,40,21,44,28,45,20,46,19,47,29,48,11,49,24,58,78,59,15},
+    &.{16,7,17,9,19,17,24,53,36,8,37,18,40,21,44,28,45,20,46,19,47,29,48,11,49,24,59,79},
+    &.{16,7,17,9,19,17,24,53,36,8,37,18,40,21,44,28,45,20,46,19,47,29,48,11,49,24,59,80},
+    &.{16,7,17,9,19,17,24,53,36,8,37,18,40,21,44,28,45,20,46,19,47,29,48,11,49,24,59,81},
+    &.{16,7,17,9,19,17,24,53,36,8,37,18,40,21,44,28,45,20,46,19,47,29,48,11,49,24,59,82},
+    &.{1,-33,20,-33,21,-33,22,-33,27,-33,37,-33,41,-33,60,-33,61,-33,62,-33,63,-33,64,-33,65,-33,66,-33,67,-33,68,-33,69,-33,70,-33,71,-33,72,-33},
+    &.{1,-48,20,-48,21,-48,22,-48,24,-48,27,-48,36,-48,37,-48,40,-48,41,-48,44,-48,45,-48,46,-48,47,-48,48,-48,49,-48,60,-48,61,-48,62,-48,63,-48,64,-48,65,-48,66,-48,67,-48,68,-48,69,-48,70,-48,71,-48,72,-48},
+    &.{4,84,12,10,14,14,15,13,16,7,17,9,18,83,19,17,24,22,30,4,31,26,36,8,37,18,40,21,41,-47,44,28,45,20,46,19,47,29,48,11,49,24,52,23,54,27,55,16,56,12,57,5,58,6,59,15},
+    &.{1,-40,20,-40,21,-40,22,-40,24,-40,27,-40,36,-40,37,-40,40,-40,41,-40,44,-40,45,-40,46,-40,47,-40,48,-40,49,-40,60,-40,61,-40,62,-40,63,-40,64,-40,65,-40,66,-40,67,-40,68,-40,69,-40,70,-40,71,-40,72,-40},
+    &.{19,85,24,53,40,21,44,28,45,20,46,19,47,29,48,11,49,24},
+    &.{1,-39,20,-39,21,-39,22,-39,24,-39,27,87,36,-39,37,-39,39,86,40,-39,41,-39,44,-39,45,-39,46,-39,47,-39,48,-39,49,-39,60,-39,61,-39,62,-39,63,-39,64,-39,65,-39,66,-39,67,-39,68,-39,69,-39,70,-39,71,-39,72,-39},
+    &.{16,7,17,9,19,17,24,53,36,8,37,18,40,21,44,28,45,20,46,19,47,29,48,11,49,24,56,88,57,5,58,6,59,15},
+    &.{1,-34,20,-34,21,-34,22,-34,27,-34,37,-34,41,-34,60,-34,61,-34,62,-34,63,-34,64,-34,65,-34,66,-34,67,-34,68,-34,69,-34,70,-34,71,-34,72,-34},
+    &.{41,89},
+    &.{4,90,12,10,14,14,15,13,16,7,17,9,19,17,24,22,30,4,31,26,36,8,37,18,40,21,44,28,45,20,46,19,47,29,48,11,49,24,52,23,54,27,55,16,56,12,57,5,58,6,59,15},
+    &.{4,91,12,10,14,14,15,13,16,7,17,9,19,17,24,22,30,4,31,26,36,8,37,18,40,21,44,28,45,20,46,19,47,29,48,11,49,24,52,23,54,27,55,16,56,12,57,5,58,6,59,15},
+    &.{1,-3,20,-3,21,-3,22,-3,27,-3,41,-3},
     &.{1,-1},
-    &.{17,92,45,93},
-    &.{13,6,14,17,16,8,22,54,31,29,32,14,35,4,39,10,40,22,41,9,42,15,43,12,44,26,55,94,56,13,57,5,58,7,59,19},
-    &.{1,-26,20,-26,25,-26,32,-26,36,-26,45,-26,46,-26,60,-26,61,-26,62,-26,63,-26,64,-26,65,-26,66,-26,67,-26,68,-26,69,-26,70,-26,71,-26,72,-26},
-    &.{1,-11,20,-11,46,-11},
-    &.{1,-6,4,38,6,95,7,33,8,34,9,31,11,20,12,11,13,6,14,17,16,8,18,24,20,-6,21,32,22,16,23,39,24,37,28,18,31,29,32,14,35,4,39,10,40,22,41,9,42,15,43,12,44,26,46,-6,47,27,52,23,54,28,55,21,56,13,57,5,58,7,59,19},
-    &.{10,97,17,98,22,96,26,99,45,93},
-    &.{10,100,17,101,22,96,26,99,45,93},
-    &.{1,-48,20,-48,22,-48,25,-48,31,-48,32,-48,35,-48,36,-48,39,-48,40,-48,41,-48,42,-48,43,-48,44,-48,45,-48,46,-48,60,-48,61,-48,62,-48,63,-48,64,-48,65,-48,66,-48,67,-48,68,-48,69,-48,70,-48,71,-48,72,-48},
-    &.{1,-67,20,-67,25,-67,32,47,36,-67,45,-67,46,-67,60,-67,61,-67,68,45},
-    &.{1,-64,20,-64,25,-64,32,47,36,-64,45,-64,46,-64,60,-64,61,-64,68,45},
-    &.{1,-66,20,-66,25,-66,32,47,36,-66,45,-66,46,-66,60,-66,61,-66,68,45},
-    &.{1,-63,20,-63,25,-63,32,47,36,-63,45,-63,46,-63,60,-63,61,-63,68,45},
-    &.{1,-69,20,-69,25,-69,32,-69,36,-69,45,-69,46,-69,60,-69,61,-69,62,-69,63,-69,64,-69,65,-69,66,-69,67,-69,68,-69,69,52,70,50,71,51},
-    &.{1,-65,20,-65,25,-65,32,47,36,-65,45,-65,46,-65,60,-65,61,-65,68,45},
-    &.{1,-70,20,-70,25,-70,32,-70,36,-70,45,-70,46,-70,60,-70,61,-70,62,-70,63,-70,64,-70,65,-70,66,-70,67,-70,68,-70,69,52,70,50,71,51},
-    &.{1,-62,20,-62,25,-62,32,47,36,-62,45,-62,46,-62,60,-62,61,-62,68,45},
-    &.{1,-76,20,-76,25,-76,32,-76,36,-76,45,-76,46,-76,60,-76,61,-76,62,-76,63,-76,64,-76,65,-76,66,-76,67,-76,68,-76,69,-76,70,-76,71,-76},
-    &.{1,-73,20,-73,25,-73,32,-73,36,-73,45,-73,46,-73,60,-73,61,-73,62,-73,63,-73,64,-73,65,-73,66,-73,67,-73,68,-73,69,-73,70,-73,71,-73},
-    &.{1,-74,20,-74,25,-74,32,-74,36,-74,45,-74,46,-74,60,-74,61,-74,62,-74,63,-74,64,-74,65,-74,66,-74,67,-74,68,-74,69,-74,70,-74,71,-74},
-    &.{1,-72,20,-72,25,-72,32,-72,36,-72,45,-72,46,-72,60,-72,61,-72,62,-72,63,-72,64,-72,65,-72,66,-72,67,-72,68,-72,69,-72,70,-72,71,-72},
-    &.{1,-24,20,-24,25,-24,36,-24,45,-24,46,-24},
-    &.{1,-25,20,-25,25,-25,36,-25,45,-25,46,-25},
-    &.{36,102},
-    &.{25,105,36,71,37,104,38,103},
-    &.{1,-30,20,-30,22,-30,25,-30,31,-30,32,-30,35,-30,36,-30,39,-30,40,-30,41,-30,42,-30,43,-30,44,-30,45,-30,46,-30,60,-30,61,-30,62,-30,63,-30,64,-30,65,-30,66,-30,67,-30,68,-30,69,-30,70,-30,71,-30,72,-30},
-    &.{16,106,22,54,35,4,39,10,40,22,41,9,42,15,43,12,44,26},
-    &.{1,-29,20,-29,22,-29,25,-29,31,-29,32,-29,35,-29,36,-29,39,-29,40,-29,41,-29,42,-29,43,-29,44,-29,45,-29,46,-29,60,-29,61,-29,62,-29,63,-29,64,-29,65,-29,66,-29,67,-29,68,-29,69,-29,70,-29,71,-29,72,-29},
-    &.{1,-60,20,-60,25,-60,36,-60,45,-60,46,-60,60,-60,61,-60},
-    &.{1,-53,20,-53,25,-53,36,-53,45,-53,46,-53,48,107},
-    &.{4,38,5,108,6,35,7,33,8,34,9,31,11,20,12,11,13,6,14,17,16,8,18,24,21,32,22,16,23,39,24,37,28,18,31,29,32,14,35,4,39,10,40,22,41,9,42,15,43,12,44,26,46,109,47,27,52,23,54,28,55,21,56,13,57,5,58,7,59,19},
-    &.{1,-58,20,-58,25,-58,36,-58,45,-58,46,-58,60,-58,61,61},
-    &.{1,-5,20,-5,46,-5},
-    &.{25,110,27,111,45,-18},
-    &.{17,112,45,93},
-    &.{1,-15,20,-15,46,-15},
-    &.{45,-19},
-    &.{17,113,45,93},
-    &.{1,-13,20,-13,46,-13},
-    &.{1,-34,20,-34,22,-34,25,-34,31,-34,32,-34,35,-34,36,-34,39,-34,40,-34,41,-34,42,-34,43,-34,44,-34,45,-34,46,-34,60,-34,61,-34,62,-34,63,-34,64,-34,65,-34,66,-34,67,-34,68,-34,69,-34,70,-34,71,-34,72,-34},
-    &.{36,-39},
-    &.{25,105,36,-38,37,104,38,114},
-    &.{4,115,11,20,12,11,13,6,14,17,16,8,18,24,22,16,28,18,31,29,32,14,35,4,39,10,40,22,41,9,42,15,43,12,44,26,47,27,52,23,54,28,55,21,56,13,57,5,58,7,59,19},
-    &.{1,-32,20,-32,22,-32,25,89,31,-32,32,-32,34,116,35,-32,36,-32,39,-32,40,-32,41,-32,42,-32,43,-32,44,-32,45,-32,46,-32,60,-32,61,-32,62,-32,63,-32,64,-32,65,-32,66,-32,67,-32,68,-32,69,-32,70,-32,71,-32,72,-32},
-    &.{17,118,18,117,45,93,47,27},
-    &.{20,68,46,119},
-    &.{1,-50,20,-50,25,-50,36,-50,45,-50,46,-50,48,-50},
-    &.{22,120},
-    &.{45,-16},
-    &.{1,-14,20,-14,46,-14},
-    &.{1,-12,20,-12,46,-12},
-    &.{36,-37},
-    &.{25,-36,36,-36},
-    &.{1,-31,20,-31,22,-31,25,-31,31,-31,32,-31,35,-31,36,-31,39,-31,40,-31,41,-31,42,-31,43,-31,44,-31,45,-31,46,-31,60,-31,61,-31,62,-31,63,-31,64,-31,65,-31,66,-31,67,-31,68,-31,69,-31,70,-31,71,-31,72,-31},
-    &.{1,-51,20,-51,25,-51,36,-51,45,-51,46,-51},
-    &.{1,-52,20,-52,25,-52,36,-52,45,-52,46,-52},
-    &.{1,-49,20,-49,25,-49,36,-49,45,-49,46,-49,48,-49},
-    &.{25,110,27,121,45,-18},
-    &.{45,-17},
+    &.{7,92,21,93},
+    &.{16,7,17,9,19,17,24,53,36,8,37,18,40,21,44,28,45,20,46,19,47,29,48,11,49,24,55,94,56,12,57,5,58,6,59,15},
+    &.{7,98,11,97,21,93,24,96,28,95},
+    &.{1,-17,20,-17,22,-17},
+    &.{1,-6,4,38,6,99,8,33,9,31,10,32,12,10,14,14,15,13,16,7,17,9,19,17,20,-6,22,-6,23,39,24,22,25,35,26,36,30,4,31,26,36,8,37,18,40,21,44,28,45,20,46,19,47,29,48,11,49,24,52,23,54,27,55,16,56,12,57,5,58,6,59,15},
+    &.{7,101,11,100,21,93,24,96,28,95},
+    &.{1,-67,20,-67,21,-67,22,-67,27,-67,37,47,41,-67,60,-67,61,-67,68,44},
+    &.{1,-64,20,-64,21,-64,22,-64,27,-64,37,47,41,-64,60,-64,61,-64,68,44},
+    &.{1,-66,20,-66,21,-66,22,-66,27,-66,37,47,41,-66,60,-66,61,-66,68,44},
+    &.{1,-63,20,-63,21,-63,22,-63,27,-63,37,47,41,-63,60,-63,61,-63,68,44},
+    &.{1,-69,20,-69,21,-69,22,-69,27,-69,37,-69,41,-69,60,-69,61,-69,62,-69,63,-69,64,-69,65,-69,66,-69,67,-69,68,-69,69,50,70,48,71,49},
+    &.{1,-65,20,-65,21,-65,22,-65,27,-65,37,47,41,-65,60,-65,61,-65,68,44},
+    &.{1,-62,20,-62,21,-62,22,-62,27,-62,37,47,41,-62,60,-62,61,-62,68,44},
+    &.{1,-70,20,-70,21,-70,22,-70,27,-70,37,-70,41,-70,60,-70,61,-70,62,-70,63,-70,64,-70,65,-70,66,-70,67,-70,68,-70,69,50,70,48,71,49},
+    &.{1,-73,20,-73,21,-73,22,-73,27,-73,37,-73,41,-73,60,-73,61,-73,62,-73,63,-73,64,-73,65,-73,66,-73,67,-73,68,-73,69,-73,70,-73,71,-73},
+    &.{1,-74,20,-74,21,-74,22,-74,27,-74,37,-74,41,-74,60,-74,61,-74,62,-74,63,-74,64,-74,65,-74,66,-74,67,-74,68,-74,69,-74,70,-74,71,-74},
+    &.{1,-72,20,-72,21,-72,22,-72,27,-72,37,-72,41,-72,60,-72,61,-72,62,-72,63,-72,64,-72,65,-72,66,-72,67,-72,68,-72,69,-72,70,-72,71,-72},
+    &.{1,-76,20,-76,21,-76,22,-76,27,-76,37,-76,41,-76,60,-76,61,-76,62,-76,63,-76,64,-76,65,-76,66,-76,67,-76,68,-76,69,-76,70,-76,71,-76},
+    &.{41,102},
+    &.{27,105,41,89,42,104,43,103},
+    &.{1,-36,20,-36,21,-36,22,-36,24,-36,27,-36,36,-36,37,-36,40,-36,41,-36,44,-36,45,-36,46,-36,47,-36,48,-36,49,-36,60,-36,61,-36,62,-36,63,-36,64,-36,65,-36,66,-36,67,-36,68,-36,69,-36,70,-36,71,-36,72,-36},
+    &.{1,-37,20,-37,21,-37,22,-37,24,-37,27,-37,36,-37,37,-37,40,-37,41,-37,44,-37,45,-37,46,-37,47,-37,48,-37,49,-37,60,-37,61,-37,62,-37,63,-37,64,-37,65,-37,66,-37,67,-37,68,-37,69,-37,70,-37,71,-37,72,-37},
+    &.{19,106,24,53,40,21,44,28,45,20,46,19,47,29,48,11,49,24},
+    &.{1,-60,20,-60,21,-60,22,-60,27,-60,41,-60,60,-60,61,-60},
+    &.{1,-55,20,-55,21,-55,22,-55,24,-55,27,-55,36,-55,37,-55,40,-55,41,-55,44,-55,45,-55,46,-55,47,-55,48,-55,49,-55,60,-55,61,-55,62,-55,63,-55,64,-55,65,-55,66,-55,67,-55,68,-55,69,-55,70,-55,71,-55,72,-55},
+    &.{1,-31,20,-31,21,-31,22,-31,27,-31,41,-31},
+    &.{1,-32,20,-32,21,-32,22,-32,27,-32,41,-32},
+    &.{1,-28,20,-28,21,-28,22,-28,27,-28,32,107,41,-28},
+    &.{4,38,5,109,6,34,8,33,9,31,10,32,12,10,14,14,15,13,16,7,17,9,19,17,22,108,23,39,24,22,25,35,26,36,30,4,31,26,36,8,37,18,40,21,44,28,45,20,46,19,47,29,48,11,49,24,52,23,54,27,55,16,56,12,57,5,58,6,59,15},
+    &.{1,-58,20,-58,21,-58,22,-58,27,-58,41,-58,60,-58,61,58},
+    &.{21,-21},
+    &.{21,-20,27,111,29,110},
+    &.{7,112,21,93},
+    &.{1,-16,20,-16,22,-16},
+    &.{1,-5,20,-5,22,-5},
+    &.{7,113,21,93},
+    &.{1,-14,20,-14,22,-14},
+    &.{1,-41,20,-41,21,-41,22,-41,24,-41,27,-41,36,-41,37,-41,40,-41,41,-41,44,-41,45,-41,46,-41,47,-41,48,-41,49,-41,60,-41,61,-41,62,-41,63,-41,64,-41,65,-41,66,-41,67,-41,68,-41,69,-41,70,-41,71,-41,72,-41},
+    &.{41,-46},
+    &.{27,105,41,-45,42,104,43,114},
+    &.{4,115,12,10,14,14,15,13,16,7,17,9,19,17,24,22,30,4,31,26,36,8,37,18,40,21,44,28,45,20,46,19,47,29,48,11,49,24,52,23,54,27,55,16,56,12,57,5,58,6,59,15},
+    &.{1,-39,20,-39,21,-39,22,-39,24,-39,27,87,36,-39,37,-39,39,116,40,-39,41,-39,44,-39,45,-39,46,-39,47,-39,48,-39,49,-39,60,-39,61,-39,62,-39,63,-39,64,-39,65,-39,66,-39,67,-39,68,-39,69,-39,70,-39,71,-39,72,-39},
+    &.{7,118,12,117,21,93,31,26},
+    &.{1,-12,20,-12,21,-12,22,-12,27,-12,32,-12,41,-12},
+    &.{20,69,22,119},
+    &.{21,-18},
+    &.{24,120},
+    &.{1,-15,20,-15,22,-15},
+    &.{1,-13,20,-13,22,-13},
+    &.{41,-44},
+    &.{27,-43,41,-43},
+    &.{1,-38,20,-38,21,-38,22,-38,24,-38,27,-38,36,-38,37,-38,40,-38,41,-38,44,-38,45,-38,46,-38,47,-38,48,-38,49,-38,60,-38,61,-38,62,-38,63,-38,64,-38,65,-38,66,-38,67,-38,68,-38,69,-38,70,-38,71,-38,72,-38},
+    &.{1,-26,20,-26,21,-26,22,-26,27,-26,41,-26},
+    &.{1,-27,20,-27,21,-27,22,-27,27,-27,41,-27},
+    &.{1,-11,20,-11,21,-11,22,-11,27,-11,32,-11,41,-11},
+    &.{21,-20,27,111,29,121},
+    &.{21,-19},
 };
 
 const parse_table = blk: {

@@ -230,33 +230,18 @@ defaults {
   block: "indented block"
 ]
 
-# ==============================================================================
-# ALIASES
-# ==============================================================================
-
 name = IDENT
 
 # ==============================================================================
-# START SYMBOLS
+# PROGRAM STRUCTURE
 # ==============================================================================
 
 program! = body                             → (module ...1)
 expr!    = expr                             → 1
 
-# ==============================================================================
-# BODY (NEWLINE separates statements, not terminates)
-# ==============================================================================
-
 body     = stmt                             → (1)
          | body NEWLINE stmt                → (...1 3)
          | body NEWLINE                     → 1
-
-# ==============================================================================
-# STATEMENTS
-# ==============================================================================
-#
-# Statements are top-level forms. Most things in Rip lean expression-first,
-# but routine declarations, use, and return are true statements.
 
 stmt     = use
          | fun
@@ -264,17 +249,21 @@ stmt     = use
          | expr
 
 # ==============================================================================
-# CAPABILITIES
+# BLOCKS
 # ==============================================================================
 
-use      = USE name                         → (use 2)
+block    = INDENT body OUTDENT              → (block ...2)
+         | INDENT OUTDENT                   → (block)
 
 # ==============================================================================
-# ROUTINE DECLARATIONS
+# DECLARATIONS
 # ==============================================================================
 #
 # fun = value-yielding routine (implicitly yields final expression)
 # sub = effect-oriented routine (does not implicitly yield)
+#
+# Type annotations (`: type` and `-> type`) are stripped by the rewriter
+# before parsing. The parser only sees parameter names.
 
 fun      = FUN name params block            → (fun 2 params:3 body:4)
          | FUN name block                   → (fun 2 body:3)
@@ -282,12 +271,7 @@ fun      = FUN name params block            → (fun 2 params:3 body:4)
 sub      = SUB name params block            → (sub 2 params:3 body:4)
          | SUB name block                   → (sub 2 body:3)
 
-# ==============================================================================
-# PARAMETERS
-# ==============================================================================
-#
-# Type annotations (`: type` and `-> type`) are stripped by the rewriter
-# before parsing. The parser only sees parameter names.
+use      = USE name                         → (use 2)
 
 params   = L(name)                          → (...1)
 
@@ -301,6 +285,17 @@ expr     = if
          | infix
 
 # ==============================================================================
+# CONTROL FLOW
+# ==============================================================================
+
+if       = IF expr block ELSE if            → (if 2 3 5)
+         | IF expr block ELSE block         → (if 2 3 5)
+         | IF expr block                    → (if 2 3)
+
+return   = RETURN expr                      → (return 2)
+         | RETURN                           → (return)
+
+# ==============================================================================
 # ASSIGNMENT
 # ==============================================================================
 
@@ -308,7 +303,7 @@ assign   = name "=" expr                    → (= 1 3)
 const    = name "=!" expr                   → (const 1 3)
 
 # ==============================================================================
-# INFIX OPERATORS (auto-generated precedence chain)
+# OPERATORS
 # ==============================================================================
 
 @infix = unary [
@@ -320,10 +315,6 @@ const    = name "=!" expr                   → (const 1 3)
   "**"  right 6
 ]
 
-# ==============================================================================
-# UNARY OPERATORS
-# ==============================================================================
-
 unary    = "!" unary                        → (not 2)
          | "-" unary                        → (neg 2)
          | call
@@ -331,13 +322,10 @@ unary    = "!" unary                        → (not 2)
 # ==============================================================================
 # CALLS
 # ==============================================================================
-#
-# Calls are one of the most important forms. The rewriter will help
-# clarify implicit call boundaries before the parser sees them.
 
-call     = call "!" atom                     → (await 1 3)
+call     = call "!" atom                    → (await 1 3)
          | call L(atom)                     → (call 1 ...2)
-         | call "(" args ")"               → (call 1 ...3)
+         | call "(" args ")"                → (call 1 ...3)
          | atom
 
 args     = expr ("," expr)*                 → (1 ...2)
@@ -355,27 +343,3 @@ atom     = name
          | TRUE
          | FALSE
          | "(" expr ")"                     → 2
-
-# ==============================================================================
-# BLOCKS
-# ==============================================================================
-
-block    = INDENT body OUTDENT              → (block ...2)
-         | INDENT OUTDENT                   → (block)
-
-# ==============================================================================
-# CONDITIONALS
-# ==============================================================================
-
-if       = IF expr block ELSE if            → (if 2 3 5)
-         | IF expr block ELSE block         → (if 2 3 5)
-         | IF expr block                    → (if 2 3)
-
-# ==============================================================================
-# RETURN
-# ==============================================================================
-#
-# return is an expression (so it can appear in tail position).
-
-return   = RETURN expr                      → (return 2)
-         | RETURN                           → (return)
