@@ -1,0 +1,152 @@
+# Comprehensive grammar coverage test
+# Tests parsing of all 47 rules — not all forms compile to valid Zig
+
+use std
+
+alias Num = i64
+
+error FileError
+  NotFound
+  PermissionDenied
+
+enum Color
+  red
+  green
+  blue
+
+struct Point
+  x: f64
+  y: f64
+
+  fun sum self: Point -> f64
+    self.x + self.y
+
+fun add a: i32, b: i32 -> i32
+  a + b
+
+fun identity x
+  return x
+
+fun apply f, x
+  f(x)
+
+fun square x
+  x ** 2
+
+sub greet name: []u8
+  print name
+
+test "addition"
+  _ = add(2, 3)
+
+pub fun double x: i32 -> i32
+  x * 2
+
+sub main
+  # const binding
+  limit =! 100
+  print limit
+
+  # typed params and return
+  result = add(1, 2)
+  print result
+
+  # explicit return
+  val = identity(42)
+
+  # if / else if / else
+  if val > 50
+    print "big"
+  else if val > 20
+    print "medium"
+  else
+    print "small"
+
+  # while with continue
+  n = 0
+  while n < 10
+    n += 1
+    if n == 5
+      continue
+    if n > 8
+      break
+
+  # for loop (range)
+  for i in 0..5
+    print i
+
+  # match: single-line and block arms
+  c = 1
+  match c
+    0 => print "zero"
+    1
+      print "one"
+    _ => print "other"
+
+  # compound assignments
+  x = 10
+  x *= 2
+  print x
+
+  # boolean and real literals
+  flag = true
+  pi = 3.14
+  msg = 'hello world'
+
+  # unary operators
+  neg = -42
+  inv = !flag
+
+  # logical operators
+  both = true && false
+  either = true || false
+
+  # parenthesized expression
+  grouped = (1 + 2) * 3
+  print grouped
+
+  # array literal
+  nums = [10, 20, 30]
+
+  # dot access and index
+  print nums.len
+  print nums[0]
+
+  # pipe operator
+  val2 = 7 |> square
+  print val2
+
+  # defer and errdefer
+  defer print "cleanup"
+  errdefer print "error cleanup"
+
+  # comptime
+  comptime print "compile time"
+
+  # unreachable and undefined
+  if false
+    unreachable
+
+  # orelse and catch
+  # x = maybe_null orelse 0
+  # y = maybe_error catch 0
+
+  # @builtin calls
+  # z = @intCast(42)
+
+  # struct literal
+  # p = Point { x: 1.0, y: 2.0 }
+
+  # lambda
+  # fn x
+  #   x + 1
+
+  # for over slice
+  # for item in items
+  #   print item
+
+  # if with capture
+  # if optional as val
+  #   print val
+
+  print "done"

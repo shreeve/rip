@@ -15,28 +15,61 @@ const TokenCat = parser.TokenCat;
 
 pub const Tag = enum(u8) {
     // Module structure
-    module,
-    use,
+    @"module",
+    @"use",
+    @"enum",
+    @"struct",
+    @"alias",
+    @"pub",
+    @"error_set",
+    @"test",
+    @"unreachable",
+    @"undefined",
+    @"comptime",
+    @"as",
+    @"orelse",
+    @"catch",
+    @"builtin",
+    @"error_union",
 
     // Routines
-    fun,
-    sub,
-    param,
+    @"fun",
+    @"sub",
+    @"param",
     @"return",
 
     // Bindings
-    assign, // =
-    @"const", // =!
-    @"=", // raw assign sexp head
-    @"[]", // empty param list marker
+    @"assign",
+    @"const",
+    @"=",
+    @"+=",
+    @"-=",
+    @"*=",
+    @"/=",
+    @"[]",
 
     // Control flow
     @"if",
     @"else",
+    @"while",
+    @"for",
+    @"match",
+    @"arm",
+    @"break",
+    @"continue",
+    @"defer",
+    @"errdefer",
+    @"try",
+    @"lambda",
 
-    // Calls
-    call,
+    // Calls and access
+    @"call",
     @"await",
+    @".",
+    @"index",
+    @"array",
+    @"literal",
+    @"pair",
 
     // Operators — arithmetic
     @"+",
@@ -45,16 +78,16 @@ pub const Tag = enum(u8) {
     @"/",
     @"%",
     @"**",
-    neg, // unary -
-    not, // unary !
+    @"neg",
+    @"not",
 
     // Operators — comparison
-    eq,
-    ne,
-    lt,
-    gt,
-    le,
-    ge,
+    @"eq",
+    @"ne",
+    @"lt",
+    @"gt",
+    @"le",
+    @"ge",
     @"==",
     @"!=",
     @"<",
@@ -68,9 +101,19 @@ pub const Tag = enum(u8) {
     @"||",
     @"&&",
 
+    // Operators — pipe and range
+    @"|>",
+    @"..",
+
+    // Type annotations and type constructors
+    @":",
+    @"?",
+    @"ptr",
+    @"slice",
+
     // Structure
-    block,
-    expr, // expression statement wrapper
+    @"block",
+    @"expr",
 
     _,
 };
@@ -85,7 +128,29 @@ pub const keyword_id = enum(u16) {
     USE,
     IF,
     ELSE,
+    WHILE,
+    FOR,
+    IN,
+    MATCH,
     RETURN,
+    BREAK,
+    CONTINUE,
+    DEFER,
+    ERRDEFER,
+    TRY,
+    FN,
+    PUB,
+    ENUM,
+    STRUCT,
+    ERROR,
+    ALIAS,
+    TEST,
+    COMPTIME,
+    UNREACHABLE,
+    UNDEFINED,
+    AS,
+    ORELSE,
+    CATCH,
     TRUE,
     FALSE,
     AND,
@@ -108,7 +173,29 @@ const keyword_map = std.StaticStringMap(keyword_id).initComptime(.{
     .{ "use", .USE },
     .{ "if", .IF },
     .{ "else", .ELSE },
+    .{ "while", .WHILE },
+    .{ "for", .FOR },
+    .{ "in", .IN },
+    .{ "match", .MATCH },
     .{ "return", .RETURN },
+    .{ "break", .BREAK },
+    .{ "continue", .CONTINUE },
+    .{ "defer", .DEFER },
+    .{ "errdefer", .ERRDEFER },
+    .{ "try", .TRY },
+    .{ "fn", .FN },
+    .{ "pub", .PUB },
+    .{ "enum", .ENUM },
+    .{ "struct", .STRUCT },
+    .{ "error", .ERROR },
+    .{ "alias", .ALIAS },
+    .{ "test", .TEST },
+    .{ "comptime", .COMPTIME },
+    .{ "unreachable", .UNREACHABLE },
+    .{ "undefined", .UNDEFINED },
+    .{ "as", .AS },
+    .{ "orelse", .ORELSE },
+    .{ "catch", .CATCH },
     .{ "true", .TRUE },
     .{ "false", .FALSE },
     .{ "and", .AND },
@@ -174,29 +261,8 @@ pub const Lexer = struct {
             // Skip comment tokens
             if (tok.cat == .comment) continue;
 
-            // Strip type annotations: `: type` after identifiers
-            if (tok.cat == .colon and (self.last_cat == .ident or self.last_cat == .rparen)) {
-                const peek = self.base.matchRules();
-                if (peek.cat == .ident) {
-                    continue;
-                }
-                // Not a type annotation — we consumed one token too many.
-                // Put the peeked token in the queue and return the colon.
-                // For now, just skip both (colon without type is unusual in v0).
-                continue;
-            }
-
-            // Strip return type annotations: `-> type` after param lists
-            if (tok.cat == .arrow and (self.last_cat == .ident or self.last_cat == .rparen)) {
-                const peek = self.base.matchRules();
-                if (peek.cat == .ident) {
-                    continue;
-                }
-                continue;
-            }
-
             // Skip duplicate newlines, but still process indent changes on the last one
-            if (tok.cat == .newline and (self.last_cat == .newline or self.last_cat == .indent or self.last_cat == .outdent)) {
+            if (tok.cat == .newline and (self.last_cat == .newline or self.last_cat == .indent or self.last_cat == .outdent or self.last_cat == .eof)) {
                 // Peek ahead: if this newline leads to an indent change, process it
                 var ws: u32 = 0;
                 while (self.base.pos + ws < self.base.source.len) {
@@ -205,11 +271,11 @@ pub const Lexer = struct {
                         ws += 1;
                     } else break;
                 }
-                const next_is_blank = (self.base.pos + ws >= self.base.source.len or
-                    self.base.source[self.base.pos + ws] == '\n' or
-                    self.base.source[self.base.pos + ws] == '\r' or
-                    self.base.source[self.base.pos + ws] == '#');
-                if (next_is_blank) continue;
+                const dup_at_eof = self.base.pos + ws >= self.base.source.len;
+                const dup_next = if (!dup_at_eof) self.base.source[self.base.pos + ws] else 0;
+                const dup_is_empty = dup_at_eof or dup_next == '\n' or dup_next == '\r';
+                if (dup_is_empty) continue;
+                if (dup_next == '#' and ws == self.indent_level) continue;
                 if (ws != self.indent_level) {
                     const result = self.handleIndent(tok);
                     self.last_cat = result.cat;
@@ -256,11 +322,14 @@ pub const Lexer = struct {
             } else break;
         }
         const at_eof = self.base.pos + ws >= self.base.source.len;
-        const next_is_blank = !at_eof and
-            (self.base.source[self.base.pos + ws] == '\n' or
-            self.base.source[self.base.pos + ws] == '\r' or
-            self.base.source[self.base.pos + ws] == '#');
-        if (next_is_blank) {
+        const next_ch = if (!at_eof) self.base.source[self.base.pos + ws] else 0;
+        const next_is_empty = !at_eof and (next_ch == '\n' or next_ch == '\r');
+        if (next_is_empty) {
+            return nl_tok;
+        }
+        // Comment-only lines still participate in indentation changes
+        // but don't emit a newline at the same indent level
+        if (next_ch == '#' and ws == self.indent_level) {
             return nl_tok;
         }
         if (at_eof) {
