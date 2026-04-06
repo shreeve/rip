@@ -1,19 +1,20 @@
 //! Rip Compiler — Bootstrap Driver
 //!
 //! Reads a .rip source file and parses it into S-expressions,
-//! emits Zig source, or dumps the token stream for debugging.
+//! compiles to Zig source, or runs the result end-to-end.
 //!
 //! Usage:
-//!   rip <file.rip>                — parse and print S-expressions
+//!   rip <file.rip>                 — parse and print S-expressions
 //!   rip -c, --compile <file.rip>   — compile to Zig source
-//!   rip -t, --tokens <file.rip>   — dump token stream
+//!   rip -r, --run <file.rip>       — compile and run via zig
+//!   rip -t, --tokens <file.rip>    — dump token stream
 
 const std = @import("std");
 const parser = @import("parser.zig");
 const rip = @import("rip.zig");
 const Compiler = @import("compiler.zig").Compiler;
 
-const Mode = enum { parse, tokens, emit };
+const Mode = enum { parse, compile, run, tokens };
 
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
@@ -25,10 +26,12 @@ pub fn main() !void {
     var file_path: ?[]const u8 = null;
 
     for (args[1..]) |arg| {
-        if (std.mem.eql(u8, arg, "-t") or std.mem.eql(u8, arg, "--tokens")) {
+        if (std.mem.eql(u8, arg, "-c") or std.mem.eql(u8, arg, "--compile")) {
+            mode = .compile;
+        } else if (std.mem.eql(u8, arg, "-r") or std.mem.eql(u8, arg, "--run")) {
+            mode = .run;
+        } else if (std.mem.eql(u8, arg, "-t") or std.mem.eql(u8, arg, "--tokens")) {
             mode = .tokens;
-        } else if (std.mem.eql(u8, arg, "-c") or std.mem.eql(u8, arg, "--compile")) {
-            mode = .emit;
         } else if (arg.len > 0 and arg[0] == '-') {
             std.debug.print("Unknown option: {s}\n", .{arg});
             std.process.exit(1);
@@ -38,7 +41,13 @@ pub fn main() !void {
     }
 
     if (file_path == null) {
-        std.debug.print("Usage: rip [options] <file.rip>\n  -c, --compile  Compile to Zig source\n  -t, --tokens   Dump token stream\n", .{});
+        std.debug.print(
+            "Usage: rip [options] <file.rip>\n" ++
+                "  -c, --compile  Compile to Zig source\n" ++
+                "  -r, --run      Compile and run via zig\n" ++
+                "  -t, --tokens   Dump token stream\n",
+            .{},
+        );
         std.process.exit(1);
     }
 
@@ -49,9 +58,10 @@ pub fn main() !void {
     defer allocator.free(source);
 
     switch (mode) {
-        .tokens => dumpTokens(source),
         .parse => try parseAndPrint(allocator, source),
-        .emit => try compileAndEmit(allocator, source),
+        .compile => try compileToStdout(allocator, source),
+        .run => try compileAndRun(allocator, source),
+        .tokens => dumpTokens(source),
     }
 }
 
@@ -86,7 +96,7 @@ fn parseAndPrint(allocator: std.mem.Allocator, source: []const u8) !void {
     try w.flush();
 }
 
-fn compileAndEmit(allocator: std.mem.Allocator, source: []const u8) !void {
+fn compileToStdout(allocator: std.mem.Allocator, source: []const u8) !void {
     var p = parser.Parser.init(allocator, source);
     defer p.deinit();
 
@@ -102,4 +112,38 @@ fn compileAndEmit(allocator: std.mem.Allocator, source: []const u8) !void {
     const w: *std.Io.Writer = &stdout_writer.interface;
     try c.compile(result, w);
     try w.flush();
+}
+
+fn compileAndRun(allocator: std.mem.Allocator, source: []const u8) !void {
+    var p = parser.Parser.init(allocator, source);
+    defer p.deinit();
+
+    const result = p.parseProgram() catch {
+        p.printError();
+        std.process.exit(1);
+    };
+
+    const tmp_path = "/tmp/_rip_out.zig";
+    {
+        const f = std.fs.cwd().createFile(tmp_path, .{}) catch |err| {
+            std.debug.print("Error creating {s}: {}\n", .{ tmp_path, err });
+            std.process.exit(1);
+        };
+        defer f.close();
+
+        var c = Compiler.init(source);
+        var file_buffer: [4096]u8 = undefined;
+        var file_writer = f.writer(&file_buffer);
+        const w: *std.Io.Writer = &file_writer.interface;
+        try c.compile(result, w);
+        try w.flush();
+    }
+
+    const argv = [_][]const u8{ "zig", "run", tmp_path };
+    var child = std.process.Child.init(&argv, allocator);
+    const term = try child.spawnAndWait();
+    switch (term) {
+        .Exited => |code| if (code != 0) std.process.exit(code),
+        else => std.process.exit(1),
+    }
 }

@@ -37,8 +37,9 @@ pub const Compiler = struct {
     // =========================================================================
 
     fn emitModule(self: *Compiler, children: []const Sexp, w: *Writer) Writer.Error!void {
-        for (children, 0..) |child, i| {
-            if (i > 0) try w.writeAll("\n");
+        try w.writeAll("const std = @import(\"std\");\n");
+        for (children) |child| {
+            try w.writeAll("\n");
             try self.emitTopLevel(child, w);
         }
     }
@@ -164,14 +165,9 @@ pub const Compiler = struct {
                 try self.emitIf(items[1..], w);
                 try w.writeAll("\n");
             },
-            .@"=" => {
+            .@"=", .@"const" => {
                 try self.writeIndent(w);
-                try self.emitAssign(items[1..], w);
-                try w.writeAll(";\n");
-            },
-            .@"const" => {
-                try self.writeIndent(w);
-                try self.emitConstBinding(items[1..], w);
+                try self.emitBinding(items[1..], w);
                 try w.writeAll(";\n");
             },
             .@"return" => {
@@ -215,14 +211,14 @@ pub const Compiler = struct {
                     },
 
                     .@"&&" => if (children.len >= 2) {
-                        try self.emitExpr(children[0], w);
+                        try self.emitGrouped(children[0], w);
                         try w.writeAll(" and ");
-                        try self.emitExpr(children[1], w);
+                        try self.emitGrouped(children[1], w);
                     },
                     .@"||" => if (children.len >= 2) {
-                        try self.emitExpr(children[0], w);
+                        try self.emitGrouped(children[0], w);
                         try w.writeAll(" or ");
-                        try self.emitExpr(children[1], w);
+                        try self.emitGrouped(children[1], w);
                     },
 
                     .@"**" => {
@@ -238,9 +234,9 @@ pub const Compiler = struct {
                     .@"+", .@"-", .@"*", .@"/", .@"%",
                     .@"==", .@"!=", .@"<", .@">", .@"<=", .@">=",
                     => if (children.len >= 2) {
-                        try self.emitExpr(children[0], w);
+                        try self.emitGrouped(children[0], w);
                         try w.print(" {s} ", .{@tagName(tag)});
-                        try self.emitExpr(children[1], w);
+                        try self.emitGrouped(children[1], w);
                     },
 
                     else => try w.print("/* {s} */", .{@tagName(tag)}),
@@ -251,6 +247,13 @@ pub const Compiler = struct {
 
     fn emitCall(self: *Compiler, children: []const Sexp, w: *Writer) Writer.Error!void {
         if (children.len == 0) return;
+        const name = self.txt(children[0]);
+        if (std.mem.eql(u8, name, "print")) {
+            try w.writeAll("std.debug.print(\"{d}\\n\", .{");
+            if (children.len > 1) try self.emitExpr(children[1], w);
+            try w.writeAll("})");
+            return;
+        }
         try self.emitExpr(children[0], w);
         try w.writeAll("(");
         for (children[1..], 0..) |arg, i| {
@@ -258,6 +261,28 @@ pub const Compiler = struct {
             try self.emitExpr(arg, w);
         }
         try w.writeAll(")");
+    }
+
+    fn emitGrouped(self: *Compiler, sexp: Sexp, w: *Writer) Writer.Error!void {
+        if (isBinOp(sexp)) {
+            try w.writeAll("(");
+            try self.emitExpr(sexp, w);
+            try w.writeAll(")");
+        } else {
+            try self.emitExpr(sexp, w);
+        }
+    }
+
+    fn isBinOp(sexp: Sexp) bool {
+        if (sexp != .list) return false;
+        const items = sexp.list;
+        if (items.len == 0 or items[0] != .tag) return false;
+        return switch (items[0].tag) {
+            .@"+", .@"-", .@"*", .@"/", .@"%", .@"**",
+            .@"==", .@"!=", .@"<", .@">", .@"<=", .@">=",
+            .@"&&", .@"||" => true,
+            else => false,
+        };
     }
 
     // =========================================================================
@@ -302,15 +327,7 @@ pub const Compiler = struct {
     // Bindings
     // =========================================================================
 
-    fn emitAssign(self: *Compiler, children: []const Sexp, w: *Writer) Writer.Error!void {
-        if (children.len < 2) return;
-        try w.writeAll("const ");
-        try self.emitExpr(children[0], w);
-        try w.writeAll(" = ");
-        try self.emitExpr(children[1], w);
-    }
-
-    fn emitConstBinding(self: *Compiler, children: []const Sexp, w: *Writer) Writer.Error!void {
+    fn emitBinding(self: *Compiler, children: []const Sexp, w: *Writer) Writer.Error!void {
         if (children.len < 2) return;
         try w.writeAll("const ");
         try self.emitExpr(children[0], w);
