@@ -557,11 +557,6 @@ pub const Compiler = struct {
                         try self.emitExpr(children[1], w);
                         try w.writeAll(" else ");
                         try self.emitExpr(children[2], w);
-                    } else if (children.len >= 2) {
-                        try w.writeAll("if (");
-                        try self.emitExpr(children[0], w);
-                        try w.writeAll(") ");
-                        try self.emitExpr(children[1], w);
                     },
 
                     .@"builtin" => {
@@ -712,23 +707,18 @@ pub const Compiler = struct {
     }
 
     fn emitBlockOrExpr(self: *Compiler, sexp: Sexp, w: *Writer) Writer.Error!void {
+        try w.writeAll(" {\n");
+        self.depth += 1;
         if (isBlock(sexp)) {
-            try w.writeAll(" {\n");
-            self.depth += 1;
             try self.emitBody(sexp, false, w);
-            self.depth -= 1;
-            try self.writeIndent(w);
-            try w.writeAll("}");
         } else {
-            try w.writeAll(" {\n");
-            self.depth += 1;
             try self.writeIndent(w);
             try self.emitExpr(sexp, w);
             try w.writeAll(";\n");
-            self.depth -= 1;
-            try self.writeIndent(w);
-            try w.writeAll("}");
         }
+        self.depth -= 1;
+        try self.writeIndent(w);
+        try w.writeAll("}");
     }
 
     fn emitIf(self: *Compiler, children: []const Sexp, w: *Writer) Writer.Error!void {
