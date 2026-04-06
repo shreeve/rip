@@ -11,6 +11,8 @@ It is intentionally narrow. The goal is not to finalize the whole language. The 
 - type-resolved
 - emitted as valid `Zig`
 
+For the grammar-oriented view of the same subset, see `docs/v0-grammar-sketch.md`.
+
 ## Included In V0
 
 - `use`

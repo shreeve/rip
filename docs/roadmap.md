@@ -24,6 +24,8 @@ Deliverables:
 - roadmap
 - initial language sketch
 - compact v0 syntax/type spec
+- grammar-system lessons from `rip-lang`, `slash`, and `mumps`
+- a concrete type-system direction note comparing `rip-lang` lessons with Zig-like requirements
 
 Success criteria:
 
@@ -39,6 +41,8 @@ Goal: compile a tiny `Rip` subset into valid `Zig`.
 Primary spec reference:
 
 - `docs/v0-syntax.md`
+- `docs/v0-grammar-sketch.md`
+- `docs/rip-syntax-responsibilities.md`
 
 Initial language subset:
 
