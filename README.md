@@ -102,4 +102,4 @@ Another key design choice is that the core language can stay small while optiona
 - `docs/rip-syntax-responsibilities.md`
 - `docs/grammar-system-lessons.md`
 - `docs/type-system-direction.md`
-- `docs/findings/zig-parsing-notes.md`
+- `docs/zig-parsing-notes.md`
