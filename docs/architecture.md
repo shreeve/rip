@@ -71,6 +71,17 @@ The `@lang` module (`src/rip.zig`) provides three things:
 2. **`keyword_as()`** -- maps identifier text to keyword IDs so the parser can promote `"fun"` to the `FUN` terminal when the parse state expects it
 3. **Rewriter** -- sits between the generated `BaseLexer` and the parser, handling indentation tracking (indent/outdent tokens), type annotation stripping, and duplicate newline suppression
 
+### Current Nonterminals
+
+```
+program  body  stmt  block
+fun  sub  use  params
+expr  if  return  assign  const
+unary  call  args  atom
+```
+
+Key grammar features: `body` uses NEWLINE as separator (not terminator) shared by top-level and blocks; `block` is `INDENT body OUTDENT`; `L(X)` handles comma-separated lists; zero parser conflicts.
+
 ### Build Commands
 
 ```bash

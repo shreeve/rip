@@ -98,7 +98,6 @@ Another key design choice is that the core language can stay small while optiona
 - `docs/architecture.md`
 - `docs/roadmap.md`
 - `docs/v0-syntax.md`
-- `docs/v0-grammar-sketch.md`
 - `docs/rip-syntax-responsibilities.md`
 - `docs/grammar-system-lessons.md`
 - `docs/type-system-direction.md`
