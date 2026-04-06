@@ -13,64 +13,58 @@ That means:
 - keep the first passes in S-expression form instead of inventing extra representations too early
 - allow types to stay optional in source while requiring full resolution before Zig emission
 
-## Phase 0: Foundation
+## Phase 0: Foundation ✓
 
 Goal: make the project understandable and directionally credible.
 
-Deliverables:
+Deliverables (all complete):
 
 - expanded `README`
-- architecture overview
-- roadmap
-- initial language sketch
-- compact v0 syntax/type spec
-- grammar-system lessons from `rip-lang`, `slash`, and `mumps`
-- a concrete type-system direction note comparing `rip-lang` lessons with Zig-like requirements
+- architecture overview (`docs/architecture.md`)
+- roadmap (`docs/roadmap.md`)
+- initial language sketch (`docs/syntax.md`)
+- compact v0 syntax/type spec (`docs/types.md`)
+- grammar-system lessons from `rip-lang`, `slash`, and `mumps` (`docs/lessons.md`)
+- grammar DSL reference (`docs/dsl.md`)
 
-Success criteria:
-
-- a new reader can understand the thesis in under two minutes
-- the repo explains why `Rip -> Zig` is the first implementation strategy
-- the project feels focused rather than speculative
-- the bootstrap syntax surface is concrete enough to implement without inventing semantics on the fly
-
-## Phase 1: Bootstrap Compiler
+## Phase 1: Bootstrap Compiler (in progress)
 
 Goal: compile a tiny `Rip` subset into valid `Zig`.
 
 Primary spec reference:
 
 - `docs/syntax.md`
-- `docs/v0-grammar-sketch.md`
 - `docs/stages.md`
 
-Initial language subset:
+### What works now (v0.2-compiler)
 
-- function declarations
-- typed parameters
-- typed return values
-- bindings via `=` and `=!`
-- arithmetic expressions
-- function calls
-- `if` expressions or statements
-- Zig-aligned module/import boundaries
-- the basic shape of capability-pack enablement, even if only one pack exists at first
-- value-position versus effect-position analysis for routines and `if`
-- `fun` versus `sub`, call-site `!` as `await`, and `?` as part of the real routine name
-- optional type annotations with a narrow v0 inference policy
+- `rip.grammar` defines the full v0 lexer and parser (282 lines, 0 conflicts)
+- grammar engine generates `src/parser.zig` from the grammar file
+- rewriter handles indentation, type stripping, newline normalization
+- parser produces raw S-expressions directly
+- `src/compiler.zig` walks sexps and emits readable Zig source
+- `./bin/rip --run test/examples/hello.rip` compiles and runs end-to-end
+- `fun`, `sub`, `=`, `=!`, `if`/`else`, calls, `return`, all arithmetic/comparison/logical operators
+
+### What's next
+
+- normalization pass (raw sexps → canonical forms)
+- type resolution (strip-and-default → real inference)
+- source diagnostics pointing back to Rip locations
+- broader language subset (`while`, `for`, strings, structs)
 
 Compiler stages:
 
-1. parse source directly into S-expressions
+1. parse source directly into S-expressions ✓
 2. normalize S-expressions into a smaller canonical set
 3. resolve required types
-4. emit `Zig` source
-5. execute `zig build-exe` or `zig test`
+4. emit `Zig` source ✓
+5. execute `zig run` ✓
 
 Success criteria:
 
-- a small example program compiles end-to-end
-- the generated `Zig` is readable
+- a small example program compiles end-to-end ✓
+- the generated `Zig` is readable ✓
 - diagnostics still point back to source locations in `Rip`
 
 ## Phase 2: Stronger Internal Structure

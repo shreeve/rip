@@ -35,6 +35,8 @@ The first two stages of the pipeline (Rip source to S-expressions) are driven by
 | `src/grammar.zig` | Language-agnostic engine: reads `.grammar`, generates `parser.zig` |
 | `src/rip.zig` | Language module: `Tag` enum, keyword lookup, rewriter |
 | `src/parser.zig` | Auto-generated lexer + SLR(1) parser (never hand-edit) |
+| `src/compiler.zig` | S-expression to Zig source emitter (Tag-based dispatch) |
+| `src/main.zig` | CLI driver: parse, compile, run, tokens |
 
 ### Generation Flow
 
@@ -88,7 +90,10 @@ Key grammar features: `body` uses NEWLINE as separator (not terminator) shared b
 zig build grammar                            # build the grammar tool
 ./bin/grammar rip.grammar src/parser.zig     # generate parser from grammar
 zig build                                    # build the rip compiler
-./bin/rip test/examples/tiny.rip              # parse and print S-expressions
+./bin/rip test/examples/hello.rip             # parse and print S-expressions
+./bin/rip --compile test/examples/hello.rip   # emit Zig source
+./bin/rip --run test/examples/hello.rip       # compile and run end-to-end
+./bin/rip --tokens test/examples/hello.rip    # dump token stream
 ```
 
 ## Stage Boundaries

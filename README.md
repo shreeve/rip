@@ -75,14 +75,27 @@ Another key design choice is that types can be optional in source but not option
 
 Another key design choice is that the core language can stay small while optional capability packs provide additional power. A regex pack is the clearest early example: if a program uses regex features, the compiler can enable a performant base module and expose the corresponding forms without bloating the core language for everyone else.
 
+## Current Status
+
+The bootstrap compiler works end-to-end:
+
+```bash
+./bin/rip --run test/examples/hello.rip    # → prints "3"
+./bin/rip --compile test/examples/hello.rip # → emits Zig source
+./bin/rip test/examples/hello.rip           # → prints S-expressions
+```
+
+What works now: `fun`, `sub`, `if`/`else`, `=`, `=!`, `return`, function calls, arithmetic, comparison, logical operators, unary operators, indentation-sensitive blocks.
+
 ## Near-Term Roadmap
 
-1. Define the public language thesis and repo structure.
-2. Specify a tiny source language subset.
-3. Lower that subset into raw and normalized S-expressions.
-4. Resolve required types for the minimal subset.
-5. Emit valid Zig for the minimal subset.
-6. Only introduce a more explicit core IR when the compiler truly needs it.
+1. ~~Define the public language thesis and repo structure.~~ ✓
+2. ~~Specify a tiny source language subset.~~ ✓
+3. ~~Lower that subset into raw S-expressions.~~ ✓
+4. Normalize S-expressions into canonical forms.
+5. Resolve required types for the minimal subset.
+6. ~~Emit valid Zig for the minimal subset.~~ ✓
+7. Only introduce a more explicit core IR when the compiler truly needs it.
 
 ## Non-Goals For V0
 
@@ -93,12 +106,13 @@ Another key design choice is that the core language can stay small while optiona
 - carrying over JS UI/reactivity constructs that do not belong in systems `Rip`
 - forcing every non-core feature into the core language instead of using opt-in capability packs
 
-## Initial Docs
+## Docs
 
-- `docs/architecture.md`
-- `docs/roadmap.md`
-- `docs/syntax.md`
-- `docs/stages.md`
-- `docs/lessons.md`
-- `docs/types.md`
-- `docs/zig-notes.md`
+- `docs/architecture.md` — pipeline, grammar engine, file roles, build commands
+- `docs/roadmap.md` — phased project plan
+- `docs/syntax.md` — v0 source language surface
+- `docs/stages.md` — stage-ownership matrix for each syntax form
+- `docs/dsl.md` — grammar DSL reference
+- `docs/lessons.md` — lessons from rip-lang, slash, mumps
+- `docs/types.md` — type system direction
+- `docs/zig-notes.md` — Zig target notes
