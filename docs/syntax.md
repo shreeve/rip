@@ -1,396 +1,258 @@
-# Rip V0 Syntax Spec
+# Rip Syntax Reference
 
-## Purpose
+## Principles
 
-This document defines the first implementation target for `Rip`. It is intentionally narrow: a small, coherent subset that can be parsed, normalized, type-resolved, and emitted as valid `Zig`. The actual grammar lives in `rip.grammar`.
+- Indentation-sensitive, no semicolons, no braces
+- Expressions and routines produce values when those values are used
+- Obvious intent should not require extra boilerplate
+- Types are optional in source, required by code generation
+- Rip says less, Zig gets the right thing
 
-## Language Principles
+## Conditionals
 
-- indentation-sensitive, no semicolons
-- expressions and routines produce values when those values are used
-- obvious intent should not require extra boilerplate
-- optional type annotations (required by code generation, not by the programmer)
-- prefer succinct forms over ceremonial ones
-- continuity with `rip-lang` is philosophical, not syntactic
-- Zig-shaped module boundaries, not JavaScript-style import/export
-- optional capability packs for powerful non-core features
-- no JS-specific reactivity or UI constructs
+Two forms, zero overlap:
 
-## Included In V0
-
-- `use`
-- `fun`
-- `sub`
-- parameters
-- optional type annotations
-- bindings with `=` and `=!`
-- function calls
-- call-site `!` for `await`
-- `?` as a valid identifier suffix
-- arithmetic and comparison
-- `if`
-- block structure via indentation
-
-## Excluded From V0
-
-- structs
-- enums
-- loops
-- pattern matching
-- macros
-- FFI syntax
-- capability-specific syntax beyond `use`
-- ownership or effect systems beyond the `fun` / `sub` split
-
-## Surface Syntax
-
-### Capabilities
-
-Use an explicit `use` form at the top level.
+- **`if`** — blocks, captures, else-if chains
+- **`when`** — inline guards and conditional values
 
 ```text
-use regex
-use text
+# Block conditional (multi-line, supports captures)
+if x > 0
+  print x
+else
+  print 0
+
+# Else-if chain
+if x > 100
+  print "big"
+else if x > 0
+  print "small"
+else
+  print "zero"
+
+# Optional unwrap with capture
+if user as val
+  process val
+
+# Pipe capture (synonym for `as`)
+if user |val|
+  process val
+
+# Inline guard
+print x when x > 0
+return when done
+
+# Conditional value
+label = "big" when x > 100 else "small"
 ```
 
-This is a source-level declaration that enables downstream compilation features. It is not meant to complicate the parser or become a deep semantic construct by itself.
+Rule: *blocks use `if`, inline uses `when`, bindings use `if`.*
 
-### Value-Yielding Routines
+## Routines
 
-Use `fun` for routines that implicitly yield their final expression.
-
-```text
-fun add a: i32, b: i32 -> i32
-  a + b
-```
-
-Parameter types may be required in v0 even if the long-term language supports more omission.
-
-### Effect-Oriented Routines
-
-Use `sub` for routines whose main role is effect, not value production.
-
-```text
-sub log_total total: i32
-  print total
-```
-
-`sub` does not implicitly yield a final value.
-
-### Optional Types
-
-Source annotations are optional where the compiler can infer safely.
+`fun` yields a value (last expression returned implicitly). `sub` is for effects (returns void).
 
 ```text
 fun add a: i32, b: i32 -> i32
   a + b
 
-fun square x: i32
+sub greet name: []u8
+  print name
+```
+
+Types are optional — untyped params default to `i64`, untyped `fun` returns `i64`.
+
+```text
+fun square x
   x * x
 ```
 
-The compiler may infer the return type of `square`, but should not guess types at important semantic boundaries when the answer is unclear.
+## Bindings
 
-### Bindings
-
-Use plain `=` for normal bindings. In v0, a bare binding should create a scoped mutable binding by default, similar to how `rip-lang` treats assignment.
+`=` for normal bindings, `=!` for constants. No `let` or `const` keywords.
 
 ```text
 total = add 1, 2
-```
-
-Use `=!` to force a constant binding.
-
-```text
 limit =! 100
 ```
 
-The intent is:
+The compiler infers `var` vs `const` from usage — if a name is reassigned later, it gets `var`; otherwise `const`.
 
-- `=` defines or updates according to normal scope rules
-- `=!` explicitly declares a constant binding
-- there is no `let` keyword
-- there is no `const` keyword
-
-### Calls
-
-Calls stay lightweight.
+## Compound Assignment
 
 ```text
+x += 1
+x -= 1
+x *= 2
+x /= 4
+```
+
+## Loops
+
+```text
+# While loop
+while count < 10
+  count += 1
+
+# While with continue expression
+while i < n : i += 1
+  process i
+
+# For over range
+for i in 0..10
+  print i
+
+# For over slice
+for item in items
+  print item
+
+# For with index
+for item, i in items
+  print i
+```
+
+`break` and `continue` work as expected.
+
+## Match
+
+```text
+# Single-line arms
+match color
+  0 => print "red"
+  1 => print "green"
+  _ => print "other"
+
+# Block arms
+match value
+  0 => print "zero"
+  1
+    print "one"
+    doMore()
+  _ => print "other"
+```
+
+## Declarations
+
+```text
+# Enum
+enum Color
+  red
+  green
+  blue
+
+# Struct with typed fields
+struct Point
+  x: f64
+  y: f64
+
+# Struct with methods
+struct Point
+  x: f64
+  y: f64
+
+  fun sum self: Point -> f64
+    self.x + self.y
+
+# Error set
+error FileError
+  NotFound
+  PermissionDenied
+
+# Type alias
+alias Num = i64
+
+# Visibility
+pub fun double x: i32 -> i32
+  x * 2
+```
+
+## Calls
+
+```text
+# Implicit (no parens)
 add 1, 2
-log_total total
-```
+print total
 
-### Awaited Calls
+# Explicit parens
+add(1, 2)
+square(7)
 
-Call-site `!` means await.
+# Dot access
+point.x
+items.len
 
-```text
+# Index access
+items[0]
+matrix[i]
+
+# Await
 fetch! url
-save_result! total
 ```
 
-This is distinct from identifier spelling and from routine declaration keywords.
+## Operators
 
-### Identifier Suffixes
+Arithmetic: `+`, `-`, `*`, `/`, `%`, `**`
+Comparison: `==`, `!=`, `<`, `>`, `<=`, `>=`
+Logical: `&&`, `||`, `!`
+Null coalescing: `??` (lowers to Zig `orelse`)
+Error handling: `catch`, `catch as err`
+Pipe: `|>`
+Range: `..`
+Unary: `-x`, `!x`, `try expr`
 
-A trailing `?` is just part of the identifier.
+## Type Annotations
+
+Types are optional on parameters and return values.
 
 ```text
-fun exists? path: string -> bool
-  # ...
+fun add a: i32, b: i32 -> i32    # fully typed
+fun square x                      # untyped (defaults to i64)
 ```
 
-This is not a special parser mode for routines. It is simply valid identifier syntax.
-
-### Conditionals
-
-Use indentation-sensitive `if`.
+Type references support modifiers:
 
 ```text
-if total > 0
-  print total
-else
-  print 0
+name: ?i32       # optional
+name: *Point     # pointer
+name: []u8       # slice
+name: !void      # error union
 ```
 
-An `if` in value position must yield a value on every relevant branch.
+## Other
 
 ```text
-sign =
-  if n > 0
-    1
-  else
-    -1
+# Defer and errdefer
+defer cleanup()
+errdefer handle_error()
+
+# Comptime
+comptime expr
+
+# Unreachable and undefined
+unreachable
+undefined
+
+# @builtins
+@import("std")
+@intCast(x)
+
+# Array literal
+nums = [1, 2, 3]
+
+# Struct literal
+p = Point { x: 1.0, y: 2.0 }
+
+# Lambda
+fn x, y
+  x + y
+
+# Discard
+_ = unused_result()
+
+# Test block
+test "description"
+  body
+
+# Use (capability/import)
+use std
 ```
-
-## Raw S-expression Shapes
-
-These shapes stay fairly close to the original source.
-
-### `use`
-
-```lisp
-(use regex)
-```
-
-### `fun`
-
-```lisp
-(fun add
-  ((param a i32)
-   (param b i32))
-  (ret i32)
-  (+ a b))
-```
-
-### `sub`
-
-```lisp
-(sub log_total
-  ((param total i32))
-  (call print total))
-```
-
-### Local Binding
-
-```lisp
-(= total (call add 1 2))
-```
-
-### Constant Binding
-
-```lisp
-(const limit 100)
-```
-
-### Awaited Call
-
-```lisp
-(await (call fetch url))
-```
-
-### `if` In Value Position
-
-```lisp
-(= sign
-  (if (> n 0)
-      1
-      -1))
-```
-
-### `if` In Effect Position
-
-```lisp
-(if (> total 0)
-    (call print total)
-    (call print 0))
-```
-
-## Normalized S-expression Shapes
-
-These shapes should be the first canonical target of the bootstrap compiler.
-
-### Module
-
-```lisp
-(module
-  (use regex)
-  ...)
-```
-
-### `fun`
-
-```lisp
-(fun add
-  ((a i32) (b i32))
-  i32
-  (block
-    (return (+ a b))))
-```
-
-### `sub`
-
-```lisp
-(sub log_total
-  ((total i32))
-  void
-  (block
-    (expr (call print total))))
-```
-
-### Local Binding
-
-```lisp
-(= total (call add 1 2))
-```
-
-### Constant Binding
-
-```lisp
-(const limit 100)
-```
-
-### Awaited Call
-
-```lisp
-(await (call fetch url))
-```
-
-### `if` In Value Position
-
-```lisp
-(= sign
-  (if (call > n 0)
-      (block
-        (return 1))
-      (block
-        (return -1))))
-```
-
-### `if` In Effect Position
-
-```lisp
-(if (call > total 0)
-    (block
-      (expr (call print total)))
-    (block
-      (expr (call print 0))))
-```
-
-## Type-Resolution Expectations
-
-### `use`
-
-- does not itself carry a type
-- affects downstream code generation and available facilities
-
-### `fun`
-
-- parameters should be explicitly typed in v0
-- return type may be explicit or inferred when obvious
-- must resolve to a concrete emitted Zig return type
-
-### `sub`
-
-- parameters should be explicitly typed in v0
-- normal emitted return type is `void`
-- explicit `return` is still allowed for early exit without a value
-
-### `=`
-
-- binding types may be inferred when obvious
-- unresolved bindings become errors if later code requires a concrete type and inference fails
-
-### `=!`
-
-- constant bindings may be inferred when obvious
-- constantness is part of the binding semantics even if the type is inferred
-
-### Calls
-
-- callee and argument types must resolve before Zig emission
-- awaited calls must resolve to awaitable forms supported by the lowering strategy
-
-### `if`
-
-- in value position, all branches must resolve compatibly
-- in effect position, no meaningful yielded value is required
-
-## Zig Lowering Sketch
-
-### `fun`
-
-```text
-fun add a: i32, b: i32 -> i32
-  a + b
-```
-
-lowers to:
-
-```zig
-pub fn add(a: i32, b: i32) i32 {
-    return a + b;
-}
-```
-
-### `sub`
-
-```text
-sub log_total total: i32
-  print total
-```
-
-lowers to:
-
-```zig
-pub fn log_total(total: i32) void {
-    print(total);
-}
-```
-
-### Value `if`
-
-```text
-sign =
-  if n > 0
-    1
-  else
-    -1
-```
-
-lowers to something Zig can express cleanly, such as:
-
-```zig
-const sign = if (n > 0) 1 else -1;
-```
-
-or a more explicit block-based lowering when necessary.
-
-## Notes
-
-- This spec is intentionally small.
-- If a feature is not needed to prove the bootstrap pipeline, leave it out.
-- The parser target is raw S-expressions.
-- The first rewrite target is normalized S-expressions.
-- Type resolution happens after normalization and before Zig emission.
