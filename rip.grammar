@@ -276,25 +276,20 @@ use_decl = USE name                          → (use 2)
 # fun = value-yielding routine (implicitly yields final expression)
 # sub = effect-oriented routine (does not implicitly yield)
 
-fun_decl = FUN name param_list ret_clause block  → (fun 2 3 ret:4 body:5)
-         | FUN name param_list block             → (fun 2 3 body:4)
-         | FUN name block                        → (fun 2 [] body:3)
+fun_decl = FUN name param_list block             → (fun 2 params:3 body:4)
+         | FUN name block                        → (fun 2 body:3)
 
-sub_decl = SUB name param_list block             → (sub 2 3 body:4)
-         | SUB name block                        → (sub 2 [] body:3)
+sub_decl = SUB name param_list block             → (sub 2 params:3 body:4)
+         | SUB name block                        → (sub 2 body:3)
 
 # ==============================================================================
-# PARAMETERS AND RETURN TYPE
+# PARAMETERS
 # ==============================================================================
+#
+# Type annotations (`: type` and `-> type`) are stripped by the rewriter
+# before parsing. The parser only sees parameter names.
 
-param_list = param ("," param)*              → (1 ...2)
-
-param    = name ":" type_expr                → (param 1 type:3)
-         | name                              → (param 1)
-
-ret_clause = "->" type_expr                  → 2
-
-type_expr = name                             → 1
+param_list = name ("," name)*                → (1 ...2)
 
 # ==============================================================================
 # EXPRESSIONS

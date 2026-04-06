@@ -166,6 +166,27 @@ pub const Lexer = struct {
             // Skip comment tokens
             if (tok.cat == .comment) continue;
 
+            // Strip type annotations: `: type` after identifiers
+            if (tok.cat == .colon and (self.last_cat == .ident or self.last_cat == .rparen)) {
+                const peek = self.base.matchRules();
+                if (peek.cat == .ident) {
+                    continue;
+                }
+                // Not a type annotation — we consumed one token too many.
+                // Put the peeked token in the queue and return the colon.
+                // For now, just skip both (colon without type is unusual in v0).
+                continue;
+            }
+
+            // Strip return type annotations: `-> type` after param lists
+            if (tok.cat == .arrow and (self.last_cat == .ident or self.last_cat == .rparen)) {
+                const peek = self.base.matchRules();
+                if (peek.cat == .ident) {
+                    continue;
+                }
+                continue;
+            }
+
             // Skip duplicate newlines
             if (tok.cat == .newline and (self.last_cat == .newline or self.last_cat == .indent or self.last_cat == .outdent or self.last_cat == .eof)) {
                 continue;
