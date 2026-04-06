@@ -2838,6 +2838,15 @@ const ErrorName = struct {
     name: []const u8, // "expression"
 };
 
+/// @infix directive for automatic precedence-climbing expression grammar
+const InfixOp = struct {
+    op: []const u8, // "+" or "||"
+    assoc: Assoc,
+    prec: u32,
+
+    const Assoc = enum { left, right, none };
+};
+
 /// @code directive for injecting code at specific locations
 const CodeBlock = struct {
     location: []const u8, // "imports", "sexp", "parser", "bottom"
@@ -3100,6 +3109,8 @@ const ParserDSLParser = struct {
     as_directives: std.ArrayListUnmanaged(AsDirective) = .{},
     op_mappings: std.ArrayListUnmanaged(OpMapping) = .{},
     error_names: std.ArrayListUnmanaged(ErrorName) = .{},
+    infix_ops: std.ArrayListUnmanaged(InfixOp) = .{},
+    infix_base: ?[]const u8 = null,
     lang: ?[]const u8 = null,
     code_blocks: std.ArrayListUnmanaged(CodeBlock) = .{},
     expect_conflicts: ?u32 = null,
@@ -3127,6 +3138,7 @@ const ParserDSLParser = struct {
         self.as_directives.deinit(self.allocator);
         self.op_mappings.deinit(self.allocator);
         self.error_names.deinit(self.allocator);
+        self.infix_ops.deinit(self.allocator);
         self.code_blocks.deinit(self.allocator);
     }
 
@@ -3166,6 +3178,8 @@ const ParserDSLParser = struct {
             try self.parseCodeDirective();
         } else if (std.mem.eql(u8, directive_name, "errors")) {
             try self.parseErrorsDirective();
+        } else if (std.mem.eql(u8, directive_name, "infix")) {
+            try self.parseInfixDirective();
         } else if (std.mem.eql(u8, directive_name, "expect")) {
             try self.expect(.eq, "Expected '=' after @expect");
             if (self.current.kind != .number) {
@@ -3353,6 +3367,61 @@ const ParserDSLParser = struct {
                 self.skipTrivia();
             }
         }
+        if (self.current.kind == .newline) self.advance();
+    }
+
+    fn parseInfixDirective(self: *ParserDSLParser) !void {
+        // Syntax: @infix = base_expr [
+        //   "op" left|right|none level
+        //   ...
+        // ]
+        // Generates a nonterminal called `infix_expr` with a full precedence chain.
+        try self.expect(.eq, "Expected '=' after @infix");
+
+        // Parse base expression name
+        const base = try self.expectIdent("base expression name for @infix");
+        self.infix_base = base;
+
+        if (self.current.kind == .newline) self.advance();
+        self.skipTrivia();
+
+        try self.expect(.lbracket, "Expected '[' to open @infix operator list");
+
+        while (self.current.kind != .rbracket and self.current.kind != .eof) {
+            self.skipTrivia();
+            if (self.current.kind == .rbracket) break;
+
+            const op = try self.expectString("operator literal");
+
+            const assoc_name = try self.expectIdent("associativity (left, right, none)");
+            const assoc: InfixOp.Assoc = if (std.mem.eql(u8, assoc_name, "left"))
+                .left
+            else if (std.mem.eql(u8, assoc_name, "right"))
+                .right
+            else if (std.mem.eql(u8, assoc_name, "none"))
+                .none
+            else {
+                std.debug.print("Invalid associativity '{s}' at line {d} (expected left, right, none)\n", .{ assoc_name, self.current.line });
+                return error.ParseError;
+            };
+
+            if (self.current.kind != .number) {
+                std.debug.print("Expected precedence level number at line {d}\n", .{self.current.line});
+                return error.ParseError;
+            }
+            const prec = std.fmt.parseInt(u32, self.current.text, 10) catch {
+                std.debug.print("Invalid precedence number '{s}' at line {d}\n", .{ self.current.text, self.current.line });
+                return error.ParseError;
+            };
+            self.advance();
+
+            try self.infix_ops.append(self.allocator, .{ .op = op, .assoc = assoc, .prec = prec });
+
+            if (self.current.kind == .comma) self.advance();
+            if (self.current.kind == .newline) self.advance();
+        }
+
+        try self.expect(.rbracket, "Expected ']' to close @infix operator list");
         if (self.current.kind == .newline) self.advance();
     }
 
@@ -3783,6 +3852,8 @@ const ParserGenerator = struct {
     as_directives: std.ArrayListUnmanaged(AsDirective) = .{},
     op_mappings: std.ArrayListUnmanaged(OpMapping) = .{},
     error_names: std.ArrayListUnmanaged(ErrorName) = .{},
+    infix_ops: std.ArrayListUnmanaged(InfixOp) = .{},
+    infix_base: ?[]const u8 = null,
     lang: ?[]const u8 = null,
     lexer_spec: ?*const LexerSpec = null,
     code_blocks: std.ArrayListUnmanaged(CodeBlock) = .{},
@@ -3824,6 +3895,7 @@ const ParserGenerator = struct {
         self.as_directives.deinit(self.allocator);
         self.op_mappings.deinit(self.allocator);
         self.error_names.deinit(self.allocator);
+        self.infix_ops.deinit(self.allocator);
         self.code_blocks.deinit(self.allocator);
         self.collected_tags.deinit(self.allocator);
         self.tag_list.deinit(self.allocator);
@@ -4281,8 +4353,15 @@ const ParserGenerator = struct {
         for (parser.as_directives.items) |d| try self.as_directives.append(self.allocator, d);
         for (parser.op_mappings.items) |m| try self.op_mappings.append(self.allocator, m);
         for (parser.error_names.items) |e| try self.error_names.append(self.allocator, e);
+        for (parser.infix_ops.items) |op| try self.infix_ops.append(self.allocator, op);
+        self.infix_base = parser.infix_base;
         self.lang = parser.lang;
         self.expect_conflicts = parser.expect_conflicts;
+
+        // Generate infix expression chain if @infix was declared
+        if (self.infix_ops.items.len > 0 and self.infix_base != null) {
+            try self.generateInfixChain();
+        }
         for (parser.code_blocks.items) |b| try self.code_blocks.append(self.allocator, b);
     }
 
@@ -4528,6 +4607,119 @@ const ParserGenerator = struct {
         self.symbols.items[tail_id].nullable = true;
 
         return list_id;
+    }
+
+    fn generateInfixChain(self: *ParserGenerator) !void {
+        const base_name = self.infix_base orelse return;
+        const base_id = self.getSymbol(base_name) orelse blk: {
+            break :blk try self.addSymbol(base_name, .nonterminal);
+        };
+
+        // Collect unique precedence levels and sort them
+        var levels_seen: [64]u32 = undefined;
+        var level_count: usize = 0;
+
+        for (self.infix_ops.items) |op| {
+            var found = false;
+            for (levels_seen[0..level_count]) |l| {
+                if (l == op.prec) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found and level_count < 64) {
+                levels_seen[level_count] = op.prec;
+                level_count += 1;
+            }
+        }
+
+        // Sort levels ascending (level 1 = loosest binding)
+        for (0..level_count) |i| {
+            for (i + 1..level_count) |j| {
+                if (levels_seen[j] < levels_seen[i]) {
+                    const tmp = levels_seen[i];
+                    levels_seen[i] = levels_seen[j];
+                    levels_seen[j] = tmp;
+                }
+            }
+        }
+
+        // Create a nonterminal for each level
+        var level_ids: [64]u16 = undefined;
+        for (0..level_count) |i| {
+            const name = try std.fmt.allocPrint(self.allocator, "_infix_{d}", .{levels_seen[i]});
+            level_ids[i] = try self.addSymbol(name, .nonterminal);
+        }
+
+        // For each level, generate rules
+        for (0..level_count) |i| {
+            const level = levels_seen[i];
+            const this_id = level_ids[i];
+            const next_id = if (i + 1 < level_count) level_ids[i + 1] else base_id;
+
+            // Find all operators at this level
+            for (self.infix_ops.items) |op| {
+                if (op.prec != level) continue;
+
+                const op_str = try std.fmt.allocPrint(self.allocator, "\"{s}\"", .{op.op});
+                const op_id = try self.addSymbol(op_str, .terminal);
+
+                const action_str = try std.fmt.allocPrint(self.allocator, "({s} 1 3)", .{op.op});
+
+                var rhs: std.ArrayListUnmanaged(u16) = .{};
+                switch (op.assoc) {
+                    .left => {
+                        try rhs.append(self.allocator, this_id);
+                        try rhs.append(self.allocator, op_id);
+                        try rhs.append(self.allocator, next_id);
+                    },
+                    .right => {
+                        try rhs.append(self.allocator, next_id);
+                        try rhs.append(self.allocator, op_id);
+                        try rhs.append(self.allocator, this_id);
+                    },
+                    .none => {
+                        try rhs.append(self.allocator, next_id);
+                        try rhs.append(self.allocator, op_id);
+                        try rhs.append(self.allocator, next_id);
+                    },
+                }
+
+                const rule_id: u16 = @intCast(self.rules.items.len);
+                try self.rules.append(self.allocator, .{
+                    .id = rule_id,
+                    .lhs = this_id,
+                    .rhs = try rhs.toOwnedSlice(self.allocator),
+                    .action = .{ .template = action_str, .kind = .sexp },
+                });
+                try self.symbols.items[this_id].rules.append(self.allocator, rule_id);
+            }
+
+            // Passthrough rule: this_level → next_level
+            const passthrough_id: u16 = @intCast(self.rules.items.len);
+            var pass_rhs: std.ArrayListUnmanaged(u16) = .{};
+            try pass_rhs.append(self.allocator, next_id);
+            try self.rules.append(self.allocator, .{
+                .id = passthrough_id,
+                .lhs = this_id,
+                .rhs = try pass_rhs.toOwnedSlice(self.allocator),
+                .action = .{ .template = "1", .kind = .passthrough },
+            });
+            try self.symbols.items[this_id].rules.append(self.allocator, passthrough_id);
+        }
+
+        // Create the `infix_expr` entry point that aliases to the lowest-precedence level
+        const infix_id = try self.addSymbol("infix_expr", .nonterminal);
+        const infix_rule_id: u16 = @intCast(self.rules.items.len);
+        var infix_rhs: std.ArrayListUnmanaged(u16) = .{};
+        try infix_rhs.append(self.allocator, level_ids[0]);
+        try self.rules.append(self.allocator, .{
+            .id = infix_rule_id,
+            .lhs = infix_id,
+            .rhs = try infix_rhs.toOwnedSlice(self.allocator),
+            .action = .{ .template = "1", .kind = .passthrough },
+        });
+        try self.symbols.items[infix_id].rules.append(self.allocator, infix_rule_id);
     }
 
     fn createOptionalRule(self: *ParserGenerator, sym_id: u16) !u16 {

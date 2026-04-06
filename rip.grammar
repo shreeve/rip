@@ -307,7 +307,7 @@ param_list = L(name)                          → (...1)
 expr     = if_expr
          | assign_expr
          | const_expr
-         | or_expr
+         | infix_expr
 
 # ==============================================================================
 # ASSIGNMENT
@@ -317,34 +317,21 @@ assign_expr = name "=" expr                  → (= 1 3)
 const_expr  = name "=!" expr                 → (const 1 3)
 
 # ==============================================================================
-# BINARY OPERATORS (precedence low to high)
+# INFIX OPERATORS (auto-generated precedence chain)
 # ==============================================================================
 
-or_expr  = or_expr "||" and_expr             → (or 1 3)
-         | and_expr
+@infix = unary [
+  "||"  left  1
+  "&&"  left  2
+  "=="  none  3, "!=" none 3, "<" none 3, ">" none 3, "<=" none 3, ">=" none 3
+  "+"   left  4, "-"  left  4
+  "*"   left  5, "/"  left  5, "%"  left  5
+  "**"  right 6
+]
 
-and_expr = and_expr "&&" cmp_expr            → (and 1 3)
-         | cmp_expr
-
-cmp_expr = sum "==" sum                      → (eq 1 3)
-         | sum "!=" sum                      → (ne 1 3)
-         | sum "<"  sum                      → (lt 1 3)
-         | sum ">"  sum                      → (gt 1 3)
-         | sum "<=" sum                      → (le 1 3)
-         | sum ">=" sum                      → (ge 1 3)
-         | sum
-
-sum      = sum "+" term                      → (+ 1 3)
-         | sum "-" term                      → (- 1 3)
-         | term
-
-term     = term "*" power_expr               → (* 1 3)
-         | term "/" power_expr               → (/ 1 3)
-         | term "%" power_expr               → (% 1 3)
-         | power_expr
-
-power_expr = unary "**" power_expr           → (** 1 3)
-           | unary
+# ==============================================================================
+# UNARY OPERATORS
+# ==============================================================================
 
 unary    = "!" unary                         → (not 2)
          | "-" unary                         → (neg 2)

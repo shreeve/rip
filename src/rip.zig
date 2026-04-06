@@ -55,10 +55,18 @@ pub const Tag = enum(u8) {
     gt,
     le,
     ge,
+    @"==",
+    @"!=",
+    @"<",
+    @">",
+    @"<=",
+    @">=",
 
     // Operators — logical
     @"and",
     @"or",
+    @"||",
+    @"&&",
 
     // Structure
     block,
