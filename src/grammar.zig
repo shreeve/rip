@@ -3159,7 +3159,7 @@ const ParserDSLParser = struct {
         //   "op" left|right|none level
         //   ...
         // ]
-        // Generates a nonterminal called `infix_expr` with a full precedence chain.
+        // Generates a nonterminal called `infix` with a full precedence chain.
         try self.expect(.eq, "Expected '=' after @infix");
 
         // Parse base expression name
@@ -4492,8 +4492,8 @@ const ParserGenerator = struct {
             try self.symbols.items[this_id].rules.append(self.allocator, passthrough_id);
         }
 
-        // Create the `infix_expr` entry point that aliases to the lowest-precedence level
-        const infix_id = try self.addSymbol("infix_expr", .nonterminal);
+        // Create the `infix` entry point that aliases to the lowest-precedence level
+        const infix_id = try self.addSymbol("infix", .nonterminal);
         const infix_rule_id: u16 = @intCast(self.rules.items.len);
         var infix_rhs: std.ArrayListUnmanaged(u16) = .{};
         try infix_rhs.append(self.allocator, level_ids[0]);
@@ -6455,8 +6455,11 @@ pub fn main() !void {
     });
 
     // Pre-scan for @lang directive (needed by lexer generator for @code imports)
-    if (std.mem.indexOf(u8, source, "\n@lang")) |nl_idx| {
-        var i = nl_idx + 6; // skip "\n@lang"
+    // Matches @lang at start of file or after a newline
+    const lang_pos = std.mem.indexOf(u8, source, "\n@lang") orelse
+        if (source.len >= 5 and std.mem.eql(u8, source[0..5], "@lang")) @as(?usize, 0) else null;
+    if (lang_pos) |pos| {
+        var i = pos + if (pos == 0) @as(usize, 5) else @as(usize, 6);
         while (i < source.len and (source[i] == ' ' or source[i] == '=' or source[i] == '\t')) : (i += 1) {}
         if (i < source.len and source[i] == '"') {
             i += 1;
@@ -6492,6 +6495,11 @@ pub fn main() !void {
             std.debug.print("❌ Parser parse error: {any}\n", .{err});
             return;
         };
+
+        // Propagate @lang from pre-scan if not set in @parser section
+        if (parser_dsl.lang == null) {
+            parser_dsl.lang = lexer_parser.spec.lang_name;
+        }
 
         std.debug.print("   Parser: {d} rules, {d} start symbols\n", .{
             parser_dsl.rules.items.len,

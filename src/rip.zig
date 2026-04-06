@@ -255,12 +255,16 @@ pub const Lexer = struct {
                 ws += 1;
             } else break;
         }
-        if (self.base.pos + ws >= self.base.source.len or
-            self.base.source[self.base.pos + ws] == '\n' or
+        const at_eof = self.base.pos + ws >= self.base.source.len;
+        const next_is_blank = !at_eof and
+            (self.base.source[self.base.pos + ws] == '\n' or
             self.base.source[self.base.pos + ws] == '\r' or
-            self.base.source[self.base.pos + ws] == '#')
-        {
+            self.base.source[self.base.pos + ws] == '#');
+        if (next_is_blank) {
             return nl_tok;
+        }
+        if (at_eof) {
+            ws = 0;
         }
 
         if (ws > self.indent_level) {
@@ -284,9 +288,12 @@ pub const Lexer = struct {
                 return Token{ .cat = .err, .pre = 0, .pos = @intCast(self.base.pos), .len = 0 };
             self.indent_level = ws;
             if (count > 0) {
+                const needs_newline = !at_eof and !self.nextTokenIsElse();
                 if (count > 1) {
                     self.indent_pending = count - 1;
-                    self.indent_trailing_newline = !self.nextTokenIsElse();
+                    self.indent_trailing_newline = needs_newline;
+                } else if (needs_newline) {
+                    self.indent_queued = Token{ .cat = .newline, .pre = 0, .pos = @intCast(self.base.pos), .len = 0 };
                 }
                 return Token{ .cat = .outdent, .pre = 0, .pos = @intCast(self.base.pos), .len = 0 };
             }
