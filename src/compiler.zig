@@ -532,7 +532,7 @@ pub const Compiler = struct {
                     .@"unreachable" => try w.writeAll("unreachable"),
                     .@"undefined" => try w.writeAll("undefined"),
 
-                    .@"orelse" => if (children.len >= 2) {
+                    .@"??" => if (children.len >= 2) {
                         try self.emitExpr(children[0], w);
                         try w.writeAll(" orelse ");
                         try self.emitExpr(children[1], w);
@@ -633,7 +633,7 @@ pub const Compiler = struct {
                 try w.writeAll(raw[1 .. raw.len - 1]);
                 try w.writeAll("\\n\", .{})");
             } else if (children.len > 1) {
-                try w.writeAll("std.debug.print(\"{d}\\n\", .{");
+                try w.writeAll("std.debug.print(\"{any}\\n\", .{");
                 try self.emitExpr(children[1], w);
                 try w.writeAll("})");
             } else {
@@ -692,37 +692,49 @@ pub const Compiler = struct {
         }
     }
 
+    fn isBlock(sexp: Sexp) bool {
+        return sexp == .list and sexp.list.len > 0 and
+            sexp.list[0] == .tag and sexp.list[0].tag == .@"block";
+    }
+
+    fn emitBodyOrExpr(self: *Compiler, sexp: Sexp, w: *Writer) Writer.Error!void {
+        if (isBlock(sexp)) {
+            try w.writeAll(" {\n");
+            self.depth += 1;
+            try self.emitBody(sexp, false, w);
+            self.depth -= 1;
+            try self.writeIndent(w);
+            try w.writeAll("}");
+        } else {
+            try w.writeAll(" {\n");
+            self.depth += 1;
+            try self.writeIndent(w);
+            try self.emitExpr(sexp, w);
+            try w.writeAll(";\n");
+            self.depth -= 1;
+            try self.writeIndent(w);
+            try w.writeAll("}");
+        }
+    }
+
     fn emitIf(self: *Compiler, children: []const Sexp, w: *Writer) Writer.Error!void {
         if (children.len < 2) return;
 
         try w.writeAll("if ");
         try self.emitCaptureCond(children[0], w);
-        try w.writeAll(" {\n");
-
-        self.depth += 1;
-        try self.emitBody(children[1], false, w);
-        self.depth -= 1;
+        try self.emitBodyOrExpr(children[1], w);
 
         if (children.len >= 3) {
             const else_clause = children[2];
             if (else_clause == .list and else_clause.list.len > 0 and
                 else_clause.list[0] == .tag and else_clause.list[0].tag == .@"if")
             {
-                try self.writeIndent(w);
-                try w.writeAll("} else ");
+                try w.writeAll(" else ");
                 try self.emitIf(else_clause.list[1..], w);
             } else {
-                try self.writeIndent(w);
-                try w.writeAll("} else {\n");
-                self.depth += 1;
-                try self.emitBody(else_clause, false, w);
-                self.depth -= 1;
-                try self.writeIndent(w);
-                try w.writeAll("}");
+                try w.writeAll(" else");
+                try self.emitBodyOrExpr(else_clause, w);
             }
-        } else {
-            try self.writeIndent(w);
-            try w.writeAll("}");
         }
     }
 
@@ -861,7 +873,9 @@ pub const Compiler = struct {
         const name = self.txt(children[0]);
         const already = isEmitted(name);
 
-        if (already) {
+        if (std.mem.eql(u8, name, "_")) {
+            try w.writeAll("_");
+        } else if (already) {
             try self.emitExpr(children[0], w);
         } else {
             markEmitted(name);

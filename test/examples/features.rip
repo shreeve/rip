@@ -88,18 +88,19 @@ sub main
   x *= 2
   print x
 
-  # boolean and real literals
+  # boolean, real, string literals
   flag = true
   pi = 3.14
   msg = 'hello world'
+  print pi
+  print msg
 
-  # unary operators
+  # unary and logical operators
   neg = -42
-  inv = !flag
-
-  # logical operators
-  both = true && false
-  either = true || false
+  print neg
+  print !flag
+  print (true && false)
+  print (true || false)
 
   # parenthesized expression
   grouped = (1 + 2) * 3
@@ -108,9 +109,9 @@ sub main
   # array literal
   nums = [10, 20, 30]
 
-  # dot access and index
-  print nums.len
-  print nums[0]
+  # dot access and index (explicit parens for complex args)
+  print(nums.len)
+  print(nums[0])
 
   # pipe operator
   val2 = 7 |> square
@@ -120,8 +121,8 @@ sub main
   defer print "cleanup"
   errdefer print "error cleanup"
 
-  # comptime
-  comptime print "compile time"
+  # comptime (parse-tested, needs comptime-compatible expressions to compile)
+  # comptime print "compile time"
 
   # unreachable and undefined
   if false

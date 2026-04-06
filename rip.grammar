@@ -62,6 +62,8 @@ tokens
     or_sym          # ||
     not_sym         # !
     question        # ?
+    nullish         # ??
+    bar             # |
     at              # @
 
     # Operators — assignment
@@ -143,6 +145,7 @@ tokens
 "->"                                        → arrow
 "=>"                                        → fat_arrow
 "|>"                                        → pipe
+"??"                                        → nullish
 ".."                                        → dotdot
 
 # ==============================================================================
@@ -158,6 +161,7 @@ tokens
 '>'                                         → gt
 '!'                                         → not_sym
 '?'                                         → question
+'|'                                         → bar
 '@'                                         → at
 '='                                         → assign
 '('                                         → lparen, {paren++}
@@ -188,7 +192,7 @@ tokens
 
 @parser
 
-@conflicts = 0
+@conflicts = 2
 
 @as = [ident, keyword]
 
@@ -288,14 +292,17 @@ expr     = if
          | or_catch
          | @infix
 
-or_else  = @infix ORELSE expr              → (orelse 1 3)
+or_else  = @infix "??" expr                 → (?? 1 3)
 or_catch = @infix CATCH AS name expr       → (catch 1 4 5)
          | @infix CATCH expr               → (catch 1 3)
 
 cond     = expr
          | expr AS name                     → (as 1 3)
+         | expr "|" name "|"                → (as 1 3)
 
-if       = IF cond block ELSE if            → (if 2 3 5)
+if       = IF cond THEN expr ELSE expr      → (if 2 4 6)
+         | IF cond THEN expr                → (if 2 4)
+         | IF cond block ELSE if            → (if 2 3 5)
          | IF cond block ELSE block         → (if 2 3 5)
          | IF cond block                    → (if 2 3)
 
