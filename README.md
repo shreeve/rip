@@ -108,12 +108,12 @@ What works now: `fun`, `sub`, `if`/`else`, `=`, `=!`, `return`, function calls, 
 
 ## Docs
 
+- `docs/syntax.md` — language reference (the cheat sheet)
 - `docs/architecture.md` — pipeline, grammar engine, file roles, build commands
-- `docs/roadmap.md` — phased project plan
-- `docs/syntax.md` — v0 source language surface
-- `docs/stages.md` — stage-ownership matrix for each syntax form
-- `docs/dsl.md` — grammar DSL reference
-- `docs/lessons.md` — lessons from rip-lang, slash, mumps
+- `docs/roadmap.md` — project status, what's done, bucket list
+- `docs/stages.md` — stage ownership: what the rewriter, grammar, and compiler each own
+- `docs/dsl.md` — grammar DSL reference (how to read/write .grammar files)
 - `docs/types.md` — type system direction
 - `docs/target.md` — Zig construct catalog from real-world embedded codebase
-- `docs/zig-notes.md` — Zig target notes
+- `docs/lessons.md` — design lessons from rip-lang, slash, mumps (historical reference)
+- `docs/zig-notes.md` — how Zig's own frontend works (reference)

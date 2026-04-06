@@ -38,7 +38,7 @@ Primary spec reference:
 
 ### What works now (v0.3-grammar)
 
-- 51-rule grammar, 2 audited conflicts, 311 parser states
+- 49-rule grammar, 2 audited conflicts, 306 parser states
 - grammar engine generates `src/parser.zig` from `rip.grammar`
 - rewriter handles indentation, type annotation passthrough, newline normalization
 - parser produces raw S-expressions directly
@@ -167,7 +167,7 @@ Deferred topics:
 - Raw S-expressions are the first compiler product.
 - Rewriting should continue in S-expression form as long as that stays tractable.
 - Capability packs are enabled in source but handled downstream during compilation, not as core grammar features.
-- Target a conflict-free grammar; the current grammar has zero parser conflicts.
+- Target a near-conflict-free grammar; the current grammar has 2 audited conflicts (dangling else).
 - Explicit `return` is for early exit; final-expression yielding should handle the non-early-return case.
 - Routine declaration semantics are definition-driven, while expression value/effect behavior remains context-sensitive.
 - Types may be optional in source, but unresolved types must not survive past the type-resolution stage.
