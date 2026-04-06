@@ -57,12 +57,11 @@ The `@parser` section of the grammar file supports these directives:
 |-----------|---------|
 | `@lang` | Import a language module (`rip.zig`) for keyword/tag support |
 | `@as` | Context-sensitive keyword promotion from identifiers |
-| `@infix` | Auto-generate operator precedence chain from a table |
-| `@expect` | Declare expected number of audited LR conflicts |
-| `@errors` | Map rule names to human-readable diagnostics |
+| `@infix` | Auto-generate operator precedence chain from a declarative table |
+| `@conflicts` | Declare expected number of parser conflicts (currently 0) |
 | `@code` | Inject raw Zig at specific locations in the output |
 
-Rules use `L(X)` for comma-separated lists, `_` for nil, `...N` for spread, and `key:N` for schema documentation. Parser hints include `<` (tight binding / prefer reduce) and `X "c"` (exclude when next character matches).
+The grammar DSL uses indentation-based blocks (`state`, `after`, `tokens`, `@infix`) with no braces or brackets. Rules use `L(X)` for comma-separated lists, `_` for nil, `...N` for spread, and `key:N` for schema documentation. `@infix` can be referenced directly in rules (e.g., `expr = ... | @infix`).
 
 ### Language Module Contract
 
@@ -232,7 +231,7 @@ Reasons:
 - Treat `Zig` as the initial ecosystem target, not as a permanent design constraint.
 - Exclude JS-specific UI/reactivity features from the systems-language core.
 - Use optional capability packs for powerful non-core facilities.
-- Accept audited LR conflicts when they keep the language simpler and the parser behavior remains well understood.
+- Target a conflict-free grammar; accept audited conflicts only when clearly justified.
 - Keep source types optional, but require full type resolution before Zig emission.
 
 ## Likely Evolution

@@ -130,7 +130,7 @@ Deferred topics:
 - Raw S-expressions are the first compiler product.
 - Rewriting should continue in S-expression form as long as that stays tractable.
 - Capability packs are enabled in source but handled downstream during compilation, not as core grammar features.
-- Audited LR conflicts are acceptable when they preserve a cleaner language design and the parser behavior is understood.
+- Target a conflict-free grammar; the current grammar has zero parser conflicts.
 - Explicit `return` is for early exit; final-expression yielding should handle the non-early-return case.
 - Routine declaration semantics are definition-driven, while expression value/effect behavior remains context-sensitive.
 - Types may be optional in source, but unresolved types must not survive past the type-resolution stage.

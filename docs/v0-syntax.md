@@ -2,16 +2,19 @@
 
 ## Purpose
 
-This document defines the first implementation target for `Rip`.
+This document defines the first implementation target for `Rip`. It is intentionally narrow: a small, coherent subset that can be parsed, normalized, type-resolved, and emitted as valid `Zig`. The actual grammar lives in `rip.grammar`.
 
-It is intentionally narrow. The goal is not to finalize the whole language. The goal is to specify a small, coherent subset that can be:
+## Language Principles
 
-- parsed into raw S-expressions
-- normalized into a smaller canonical form
-- type-resolved
-- emitted as valid `Zig`
-
-For the grammar-oriented view of the same subset, see `docs/v0-grammar-sketch.md`.
+- indentation-sensitive, no semicolons
+- expressions and routines produce values when those values are used
+- obvious intent should not require extra boilerplate
+- optional type annotations (required by code generation, not by the programmer)
+- prefer succinct forms over ceremonial ones
+- continuity with `rip-lang` is philosophical, not syntactic
+- Zig-shaped module boundaries, not JavaScript-style import/export
+- optional capability packs for powerful non-core features
+- no JS-specific reactivity or UI constructs
 
 ## Included In V0
 

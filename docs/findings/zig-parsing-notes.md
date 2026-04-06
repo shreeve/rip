@@ -223,8 +223,7 @@ This is a very good boundary.
 ```text
 source
   -> BaseLexer
-  -> Rip rewriter
-  -> token array
+  -> wrapper Lexer (rip.zig: indentation, type stripping)
   -> parser
 ```
 
@@ -246,7 +245,7 @@ This is one of Zig's strongest architectural traits.
 For `Rip`, the desired phase split should remain:
 
 ```text
-lexer -> rewriter -> parser -> raw sexps -> normalization -> type resolution -> Zig emission
+lexer -> wrapper lexer -> parser -> raw sexps -> normalization -> type resolution -> Zig emission
 ```
 
 The important thing is to avoid backward entanglement between stages.

@@ -2,29 +2,15 @@
 
 ## Purpose
 
-This document defines the bootstrap `Rip` syntax in terms of compiler responsibilities.
-
-Instead of only saying what the syntax looks like, it answers:
-
-- what the lexer must recognize
-- what the rewriter should infer or insert
-- what the grammar should parse
-- what raw S-expressions should look like
-- what normalization should produce
-- what type resolution must decide
-- how the result should lower to `Zig`
-
-This is meant to make the first implementation effort concrete and prevent responsibility from drifting between stages.
+This document is a **stage-ownership matrix**: for each syntax form, it specifies which compiler stage is responsible for what. For the syntax surface itself, see `docs/v0-syntax.md`.
 
 ## Pipeline
 
-The relevant pipeline is:
-
-1. `BaseLexer`
-2. `Rip` rewriter
-3. parser
-4. normalization
-5. type resolution
+1. `BaseLexer` (generated from `rip.grammar`)
+2. Wrapper `Lexer` (in `rip.zig` — indentation, type stripping, newline handling)
+3. Parser (generated SLR(1))
+4. Normalization
+5. Type resolution
 6. `Zig` emission
 
 ## Token Metadata Contract
