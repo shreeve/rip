@@ -1572,8 +1572,8 @@ const LexerGenerator = struct {
         var number_has_leading_dot = false;
         var has_ident = false;
 
-        // Collect string patterns with optional heredoc (triple-quote) detection
-        const StringInfo = struct { open_char: u8, token: []const u8, has_heredoc: bool, heredoc_token: []const u8 };
+        // Collect string patterns (heredocs are handled by the language wrapper, not the engine)
+        const StringInfo = struct { open_char: u8, token: []const u8 };
         var string_infos: [4]StringInfo = undefined;
         var string_info_count: usize = 0;
 
@@ -1587,25 +1587,9 @@ const LexerGenerator = struct {
                     const delim = rule.pattern[0];
                     if (rule.pattern[1] != delim) {
                         if (string_info_count < string_infos.len) {
-                            const oc = rule.pattern[1];
-                            // Check if there's a matching heredoc (triple-quote) pattern
-                            var has_hd = false;
-                            var hd_tok: []const u8 = "";
-                            for (self.spec.rules.items) |r2| {
-                                const info2 = parseLiteralPattern(r2.pattern) orelse continue;
-                                if (info2.len == 3 and info2.chars[0] == oc and
-                                    info2.chars[1] == oc and info2.chars[2] == oc)
-                                {
-                                    has_hd = true;
-                                    hd_tok = r2.token;
-                                    break;
-                                }
-                            }
                             string_infos[string_info_count] = .{
-                                .open_char = oc,
+                                .open_char = rule.pattern[1],
                                 .token = rule.token,
-                                .has_heredoc = has_hd,
-                                .heredoc_token = hd_tok,
                             };
                             string_info_count += 1;
                         }
@@ -1630,25 +1614,14 @@ const LexerGenerator = struct {
             }
         }
 
-        // String token types with optional heredoc (triple-quote) detection
+        // String token types
         for (string_infos[0..string_info_count]) |si| {
             const lit = charToZigLiteral(si.open_char);
             const lit_str = lit.buf[0..lit.len];
 
-            if (si.has_heredoc) {
-                // Check for triple-quote heredoc first, then scan string
-                try self.print(
-                    \\        if (c == '{s}') {{
-                    \\            if (self.pos + 2 < self.source.len and self.source[self.pos + 1] == '{s}' and self.source[self.pos + 2] == '{s}') {{
-                    \\                self.pos += 3;
-                    \\                return Token{{ .cat = .{s}, .pre = ws_count, .pos = start, .len = 3 }};
-                    \\            }}
-                , .{ lit_str, lit_str, lit_str, si.heredoc_token });
-            } else {
-                try self.print(
-                    \\        if (c == '{s}') {{
-                , .{lit_str});
-            }
+            try self.print(
+                \\        if (c == '{s}') {{
+            , .{lit_str});
 
             // Detect escape mechanism from the grammar pattern
             const is_sq = (si.open_char == '\'');
