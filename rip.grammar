@@ -227,28 +227,21 @@ block    = INDENT body OUTDENT              → (block ...2)
 # DECLARATIONS
 # ==============================================================================
 
-fun      = FUN name params ret block        → (fun 2 3 4 5)
+fun      = FUN name params returns block     → (fun 2 3 4 5)
          | FUN name params block            → (fun 2 3 _ 4)
-         | FUN name ret block               → (fun 2 _ 3 4)
+         | FUN name returns block           → (fun 2 _ 3 4)
          | FUN name block                   → (fun 2 _ _ 3)
 
 sub      = SUB name params block            → (sub 2 3 _ 4)
          | SUB name block                   → (sub 2 _ _ 3)
 
 use      = USE name                         → (use 2)
-alias    = ALIAS name "=" typeref           → (alias 2 4)
+alias    = ALIAS name "=" type              → (alias 2 4)
 test     = TEST STRING_DQ block             → (test 2 3)
 
 enum     = ENUM name INDENT members OUTDENT  → (enum 2 ...4)
 errors   = ERROR name INDENT members OUTDENT → (error_set 2 ...4)
-
-struct   = STRUCT name INDENT struct_body OUTDENT → (struct 2 ...4)
-struct_body = struct_item                   → (1)
-         | struct_body NEWLINE struct_item  → (...1 3)
-         | struct_body NEWLINE              → 1
-struct_item = field
-         | fun
-         | sub
+struct   = STRUCT name INDENT members OUTDENT → (struct 2 ...4)
 
 # ==============================================================================
 # BUILDING BLOCKS — shared by declarations
@@ -257,22 +250,23 @@ struct_item = field
 members  = member                           → (1)
          | members NEWLINE member           → (...1 3)
          | members NEWLINE                  → 1
-member   = name
-         | name ":" typeref                 → (typed 1 3)
+member   = field
          | name "=" expr                    → (valued 1 3)
+         | fun
+         | sub
 
 field    = name                             → 1
-         | name ":" typeref                 → (: 1 3)
-         | name ":" typeref "=" expr        → (default 1 3 5)
+         | name ":" type                    → (: 1 3)
+         | name ":" type "=" expr           → (default 1 3 5)
 
 params   = L(field)                         → (...1)
-ret      = "->" typeref                     → 2
+returns  = "->" type                        → 2
 
-typeref  = name
-         | "!" typeref                      → (error_union 2)
-         | "?" typeref                      → (? 2)
-         | "*" typeref                      → (ptr 2)
-         | "[" "]" typeref                  → (slice 3)
+type     = name
+         | "!" type                         → (error_union 2)
+         | "?" type                         → (? 2)
+         | "*" type                         → (ptr 2)
+         | "[" "]" type                     → (slice 3)
 
 # ==============================================================================
 # EXPRESSIONS
@@ -283,8 +277,8 @@ expr     = if
          | for
          | match
          | suffix_if
-         | or_else
-         | or_catch
+         | coalesce
+         | catch
          | return
          | break
          | continue
@@ -312,11 +306,11 @@ while    = WHILE cond block                 → (while 2 _ 3)
 for      = FOR name IN expr block           → (for 2 _ 4 5)
          | FOR name "," name IN expr block  → (for 2 4 6 7)
 
-match    = MATCH expr INDENT matchers OUTDENT → (match 2 ...4)
-matchers = matcher                          → (1)
-         | matchers NEWLINE matcher         → (...1 3)
-         | matchers NEWLINE                 → 1
-matcher  = atom "=>" expr                   → (arm 1 3)
+match    = MATCH expr INDENT arms OUTDENT    → (match 2 ...4)
+arms     = arm                              → (1)
+         | arms NEWLINE arm                 → (...1 3)
+         | arms NEWLINE                     → 1
+arm      = atom "=>" expr                   → (arm 1 3)
          | atom block                       → (arm 1 2)
 
 # --- Expression modifiers ---
@@ -324,8 +318,8 @@ matcher  = atom "=>" expr                   → (arm 1 3)
 suffix_if = @infix IF expr ELSE expr        → (if 3 1 5)
          | @infix IF expr                   → (if 3 1)
 
-or_else  = @infix "??" expr                 → (?? 1 3)
-or_catch = @infix CATCH AS name expr        → (catch 1 4 5)
+coalesce = @infix "??" expr                 → (?? 1 3)
+catch    = @infix CATCH AS name expr        → (catch 1 4 5)
          | @infix CATCH expr                → (catch 1 3)
 
 # --- Flow control ---
@@ -380,12 +374,12 @@ atom     = name
          | UNREACHABLE                      → (unreachable)
          | UNDEFINED                        → (undefined)
          | "@" name "(" args ")"            → (builtin 2 ...4)
-         | literal
+         | record
          | lambda
          | "[" args "]"                     → (array ...2)
          | "(" expr ")"                     → 2
 
-literal  = name "{" L(pair) "}"             → (literal 1 ...3)
+record   = name "{" L(pair) "}"             → (record 1 ...3)
 pair     = name ":" expr                    → (pair 1 3)
 
 lambda   = FN params block                  → (lambda 2 _ 3)

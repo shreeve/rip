@@ -71,7 +71,7 @@ pub const Tag = enum(u8) {
     @".",
     @"index",
     @"array",
-    @"literal",
+    @"record",
     @"pair",
 
     // Operators — arithmetic
