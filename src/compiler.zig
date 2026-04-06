@@ -706,37 +706,49 @@ pub const Compiler = struct {
         }
     }
 
+    fn isBlock(sexp: Sexp) bool {
+        return sexp == .list and sexp.list.len > 0 and
+            sexp.list[0] == .tag and sexp.list[0].tag == .@"block";
+    }
+
+    fn emitBlockOrExpr(self: *Compiler, sexp: Sexp, w: *Writer) Writer.Error!void {
+        if (isBlock(sexp)) {
+            try w.writeAll(" {\n");
+            self.depth += 1;
+            try self.emitBody(sexp, false, w);
+            self.depth -= 1;
+            try self.writeIndent(w);
+            try w.writeAll("}");
+        } else {
+            try w.writeAll(" {\n");
+            self.depth += 1;
+            try self.writeIndent(w);
+            try self.emitExpr(sexp, w);
+            try w.writeAll(";\n");
+            self.depth -= 1;
+            try self.writeIndent(w);
+            try w.writeAll("}");
+        }
+    }
+
     fn emitIf(self: *Compiler, children: []const Sexp, w: *Writer) Writer.Error!void {
         if (children.len < 2) return;
 
         try w.writeAll("if ");
         try self.emitCaptureCond(children[0], w);
-        try w.writeAll(" {\n");
-
-        self.depth += 1;
-        try self.emitBody(children[1], false, w);
-        self.depth -= 1;
+        try self.emitBlockOrExpr(children[1], w);
 
         if (children.len >= 3) {
             const else_clause = children[2];
             if (else_clause == .list and else_clause.list.len > 0 and
                 else_clause.list[0] == .tag and else_clause.list[0].tag == .@"if")
             {
-                try self.writeIndent(w);
-                try w.writeAll("} else ");
+                try w.writeAll(" else ");
                 try self.emitIf(else_clause.list[1..], w);
             } else {
-                try self.writeIndent(w);
-                try w.writeAll("} else {\n");
-                self.depth += 1;
-                try self.emitBody(else_clause, false, w);
-                self.depth -= 1;
-                try self.writeIndent(w);
-                try w.writeAll("}");
+                try w.writeAll(" else");
+                try self.emitBlockOrExpr(else_clause, w);
             }
-        } else {
-            try self.writeIndent(w);
-            try w.writeAll("}");
         }
     }
 

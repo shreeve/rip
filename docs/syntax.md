@@ -10,19 +10,16 @@
 
 ## Conditionals
 
-Two forms, zero overlap:
-
-- **`if`** — blocks, captures, else-if chains
-- **`when`** — inline guards and conditional values
+One keyword — `if` — works in both prefix and postfix position. The parser distinguishes them automatically by grammar context.
 
 ```text
-# Block conditional (multi-line, supports captures)
+# Prefix: block form (multi-line)
 if x > 0
   print x
 else
   print 0
 
-# Else-if chain
+# Prefix: else-if chain
 if x > 100
   print "big"
 else if x > 0
@@ -30,23 +27,21 @@ else if x > 0
 else
   print "zero"
 
-# Optional unwrap with capture
+# Prefix: optional unwrap with capture
 if user as val
   process val
 
-# Pipe capture (synonym for `as`)
+# Prefix: pipe capture (synonym for `as`)
 if user |val|
   process val
 
-# Inline guard
-print x when x > 0
-return when done
+# Postfix: inline guard
+print x if x > 0
+return if done
 
-# Conditional value
-label = "big" when x > 100 else "small"
+# Postfix: conditional value
+label = "big" if x > 100 else "small"
 ```
-
-Rule: *blocks use `if`, inline uses `when`, bindings use `if`.*
 
 ## Routines
 
