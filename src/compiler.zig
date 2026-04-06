@@ -104,6 +104,7 @@ pub const Compiler = struct {
         self.depth += 1;
         try self.emitBody(body, true, w);
         self.depth -= 1;
+        try self.writeIndent(w);
         try w.writeAll("}\n");
     }
 
@@ -128,6 +129,7 @@ pub const Compiler = struct {
         self.depth += 1;
         try self.emitBody(body, false, w);
         self.depth -= 1;
+        try self.writeIndent(w);
         try w.writeAll("}\n");
     }
 
@@ -167,7 +169,7 @@ pub const Compiler = struct {
         var has_typed = false;
         for (members) |m| {
             if (m == .list and m.list.len > 0 and m.list[0] == .tag and
-                m.list[0].tag == .@"typed")
+                (m.list[0].tag == .@"typed" or m.list[0].tag == .@":"))
                 has_typed = true;
         }
 
@@ -177,7 +179,7 @@ pub const Compiler = struct {
             for (members) |m| {
                 try self.writeIndent(w);
                 if (m == .list and m.list.len >= 3 and m.list[0] == .tag and
-                    m.list[0].tag == .@"typed")
+                    (m.list[0].tag == .@"typed" or m.list[0].tag == .@":"))
                 {
                     try w.writeAll(self.txt(m.list[1]));
                     try w.writeAll(": ");
