@@ -72,6 +72,12 @@ Syntax coverage:
 | Sentinel types `[*:0]T` | Medium | Niche |
 | Anonymous struct types | Medium | Occasional |
 
+### Rewriter enhancement
+
+| Feature | What's needed |
+|---------|--------------|
+| Unary args in implicit calls | Split `-`/`!` into prefix vs infix tokens in the rewriter so `print -42` works without parens. Well-defined fix: add `minus_prefix` token, detect spacing context in rewriter, update grammar. |
+
 ### Compiler emission gaps (parse but don't compile yet)
 
 | Feature | What's needed |
@@ -79,6 +85,8 @@ Syntax coverage:
 | Struct literals (`record`) | Emit `Name{ .field = val, ... }` |
 | Lambdas | Emit anonymous function |
 | Error union types (`!T`) | Emit in type positions |
+| Enum backing types | Emit `enum(u8)` for valued enums |
+| `/=` on signed ints | Emit `@divTrunc` instead |
 
 None of the above or below block writing normal programs. Add as needed.
 
