@@ -40,9 +40,9 @@ Goal: compile a tiny `Rip` subset into valid `Zig`.
 
 Primary spec reference:
 
-- `docs/v0-syntax.md`
+- `docs/syntax.md`
 - `docs/v0-grammar-sketch.md`
-- `docs/rip-syntax-responsibilities.md`
+- `docs/stages.md`
 
 Initial language subset:
 

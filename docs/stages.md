@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document is a **stage-ownership matrix**: for each syntax form, it specifies which compiler stage is responsible for what. For the syntax surface itself, see `docs/v0-syntax.md`.
+This document is a **stage-ownership matrix**: for each syntax form, it specifies which compiler stage is responsible for what. For the syntax surface itself, see `docs/syntax.md`.
 
 ## Pipeline
 

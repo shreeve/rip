@@ -97,8 +97,8 @@ Another key design choice is that the core language can stay small while optiona
 
 - `docs/architecture.md`
 - `docs/roadmap.md`
-- `docs/v0-syntax.md`
-- `docs/rip-syntax-responsibilities.md`
-- `docs/grammar-system-lessons.md`
-- `docs/type-system-direction.md`
-- `docs/zig-parsing-notes.md`
+- `docs/syntax.md`
+- `docs/stages.md`
+- `docs/lessons.md`
+- `docs/types.md`
+- `docs/zig-notes.md`
