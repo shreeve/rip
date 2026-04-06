@@ -5767,7 +5767,7 @@ const ParserGenerator = struct {
         if (std.mem.indexOfScalar(u8, tag, ':')) |colon_pos| {
             const after = tag[colon_pos + 1 ..];
             if (after.len > 0 and (after[0] >= '1' and after[0] <= '9' or
-                after[0] == '.' or after[0] == '~'))
+                after[0] == '.' or after[0] == '~' or after[0] == '_'))
             {
                 tag_name = tag[0..colon_pos];
             }
@@ -5819,11 +5819,11 @@ const ParserGenerator = struct {
         var tag_has_value = false;
         var tag_value: []const u8 = "";
 
-        // Check if tag has key:value format (like "dots:2?")
+        // Check if tag has key:value format (like "dots:2?", "type:_")
         if (std.mem.indexOfScalar(u8, tag, ':')) |colon_pos| {
             const after = tag[colon_pos + 1 ..];
             if (after.len > 0 and (after[0] >= '1' and after[0] <= '9' or
-                after[0] == '.' or after[0] == '~'))
+                after[0] == '.' or after[0] == '~' or after[0] == '_'))
             {
                 tag_has_value = true;
                 tag_value = self.stripKeyAndSuffix(tag);
@@ -5888,11 +5888,11 @@ const ParserGenerator = struct {
     fn stripKeyAndSuffix(self: *ParserGenerator, elem: []const u8) []const u8 {
         _ = self;
         var work = elem;
-        // Strip key: prefix (e.g., "offset:3" -> "3")
+        // Strip key: prefix (e.g., "offset:3" -> "3", "type:_" -> "_")
         if (std.mem.indexOfScalar(u8, work, ':')) |colon_pos| {
             const after = work[colon_pos + 1 ..];
             if (after.len > 0 and (after[0] >= '1' and after[0] <= '9' or
-                after[0] == '.' or after[0] == '~'))
+                after[0] == '.' or after[0] == '~' or after[0] == '_'))
             {
                 work = after;
             }

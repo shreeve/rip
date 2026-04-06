@@ -227,7 +227,7 @@ block    = INDENT body OUTDENT              → (block ...2)
 # DECLARATIONS
 # ==============================================================================
 
-fun      = FUN name params returns block     → (fun 2 3 4 5)
+fun      = FUN name params returns block    → (fun 2 3 4 5)
          | FUN name params block            → (fun 2 3 _ 4)
          | FUN name returns block           → (fun 2 _ 3 4)
          | FUN name block                   → (fun 2 _ _ 3)
@@ -382,8 +382,8 @@ atom     = name
 record   = name "{" L(pair) "}"             → (record 1 ...3)
 pair     = name ":" expr                    → (pair 1 3)
 
-lambda   = FN params block                  → (lambda 2 _ 3)
-         | FN block                         → (lambda _ _ 2)
+lambda   = FN params block                  → (lambda 2 returns:_ 3)
+         | FN block                         → (lambda params:_ returns:_ 2)
 
 # ==============================================================================
 # INFIX OPERATORS
