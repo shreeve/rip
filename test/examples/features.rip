@@ -128,8 +128,8 @@ sub main
   if false
     unreachable
 
-  # orelse and catch (parse-tested, need error context to compile)
-  # val = maybe_null orelse 0
+  # ?? and catch (parse-tested, need error context to compile)
+  # val = maybe_null ?? 0
   # val = maybe_err catch 0
   # val = maybe_err catch as err handle(err)
 
