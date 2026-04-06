@@ -7,7 +7,7 @@
 // Usage: grammar <grammar-file> [output-file]
 //
 // Author: Steve Shreeve <steve.shreeve@gmail.com>
-//   Date: January 2026
+//   Date: April 2026
 // =============================================================================
 
 const std = @import("std");
@@ -727,7 +727,6 @@ fn findTokenForLiteral(spec: *const LexerSpec, literal: []const u8) ?[]const u8 
     return null;
 }
 
-
 // =============================================================================
 // Lexer Code Generator
 // =============================================================================
@@ -811,11 +810,11 @@ const LexerGenerator = struct {
 
     fn charToZigLiteral(c: u8) struct { buf: [4]u8, len: u8 } {
         return switch (c) {
-            '\n' => .{ .buf = "\\n".*  ++ .{ 0, 0 }, .len = 2 },
-            '\r' => .{ .buf = "\\r".*  ++ .{ 0, 0 }, .len = 2 },
-            '\t' => .{ .buf = "\\t".*  ++ .{ 0, 0 }, .len = 2 },
-            '\\' => .{ .buf = "\\\\".*  ++ .{ 0, 0 }, .len = 2 },
-            '\'' => .{ .buf = "\\'".*  ++ .{ 0, 0 }, .len = 2 },
+            '\n' => .{ .buf = "\\n".* ++ .{ 0, 0 }, .len = 2 },
+            '\r' => .{ .buf = "\\r".* ++ .{ 0, 0 }, .len = 2 },
+            '\t' => .{ .buf = "\\t".* ++ .{ 0, 0 }, .len = 2 },
+            '\\' => .{ .buf = "\\\\".* ++ .{ 0, 0 }, .len = 2 },
+            '\'' => .{ .buf = "\\'".* ++ .{ 0, 0 }, .len = 2 },
             else => .{ .buf = .{ c, 0, 0, 0 }, .len = 1 },
         };
     }
@@ -831,8 +830,12 @@ const LexerGenerator = struct {
             try self.print("{s}{s} != 0", .{ prefix, lhs });
         } else {
             const op: []const u8 = switch (guard.op) {
-                .gt => ">", .lt => "<", .eq => "==",
-                .ne => "!=", .ge => ">=", .le => "<=",
+                .gt => ">",
+                .lt => "<",
+                .eq => "==",
+                .ne => "!=",
+                .ge => ">=",
+                .le => "<=",
                 .truthy => unreachable,
             };
             try self.print("{s}{s} {s} {d}", .{ prefix, lhs, op, guard.value });
@@ -880,8 +883,12 @@ const LexerGenerator = struct {
             if (rule.pattern.len >= 3 and (rule.pattern[0] == '\'' or rule.pattern[0] == '"')) {
                 if (rule.pattern[1] == '\\' and rule.pattern.len >= 4) {
                     starts_with = switch (rule.pattern[2]) {
-                        'n' => '\n', 'r' => '\r', 't' => '\t',
-                        '\\' => '\\', '\'' => '\'', '"' => '"',
+                        'n' => '\n',
+                        'r' => '\r',
+                        't' => '\t',
+                        '\\' => '\\',
+                        '\'' => '\'',
+                        '"' => '"',
                         else => rule.pattern[2],
                     };
                 } else {
@@ -1159,7 +1166,7 @@ const LexerGenerator = struct {
         const extra: usize = (@as(usize, depth) - 1) * 4;
         const indent = blk: {
             @memset(&indent_buf, ' ');
-            break :blk indent_buf[0..base_indent.len + extra];
+            break :blk indent_buf[0 .. base_indent.len + extra];
         };
 
         var seen_second: [256]bool = @splat(false);
@@ -1212,7 +1219,10 @@ const LexerGenerator = struct {
             // Check for deeper (3-char) rules
             var has_deeper = false;
             for (matching.items) |r| {
-                if (r.char_count > depth + 1) { has_deeper = true; break; }
+                if (r.char_count > depth + 1) {
+                    has_deeper = true;
+                    break;
+                }
             }
             if (has_deeper) {
                 try self.emitMultiCharPeekAhead(matching.items, depth + 1, code_fn);
@@ -1509,7 +1519,10 @@ const LexerGenerator = struct {
         // Emit DIGIT entries
         var has_digit_range = true;
         for ('0'..('9' + 1)) |c| {
-            if (!digit_chars[c]) { has_digit_range = false; break; }
+            if (!digit_chars[c]) {
+                has_digit_range = false;
+                break;
+            }
         }
         if (has_digit_range) {
             try self.write("        for ('0'..'9' + 1) |c| table[c] = DIGIT;\n");
@@ -1525,8 +1538,18 @@ const LexerGenerator = struct {
         // Emit LETTER entries — check for standard ranges first
         var has_upper = true;
         var has_lower = true;
-        for ('A'..('Z' + 1)) |c| { if (!letter_chars[c]) { has_upper = false; break; } }
-        for ('a'..('z' + 1)) |c| { if (!letter_chars[c]) { has_lower = false; break; } }
+        for ('A'..('Z' + 1)) |c| {
+            if (!letter_chars[c]) {
+                has_upper = false;
+                break;
+            }
+        }
+        for ('a'..('z' + 1)) |c| {
+            if (!letter_chars[c]) {
+                has_lower = false;
+                break;
+            }
+        }
 
         if (has_upper) try self.write("        for ('A'..'Z' + 1) |c| table[c] = LETTER;\n");
         if (has_lower) try self.write("        for ('a'..'z' + 1) |c| table[c] = LETTER;\n");
@@ -1715,7 +1738,6 @@ const LexerGenerator = struct {
         // These must dispatch before the operator switch to avoid the prefix char being
         // consumed as a standalone operator token.
         try self.generatePrefixScanners();
-
     }
 
     fn generatePrefixScanners(self: *LexerGenerator) !void {
@@ -1898,7 +1920,10 @@ const LexerGenerator = struct {
             if (std.mem.eql(u8, rule.token, "integer") or
                 std.mem.eql(u8, rule.token, "real") or
                 std.mem.eql(u8, rule.token, "zdigits"))
-            { has_any = true; break; }
+            {
+                has_any = true;
+                break;
+            }
         }
         if (!has_any) return;
 
@@ -2086,8 +2111,11 @@ const LexerGenerator = struct {
                 if (rule.pattern.len >= 3 and rule.pattern[0] == '\'') {
                     if (rule.pattern[1] == '\\' and rule.pattern.len >= 4)
                         break :blk switch (rule.pattern[2]) {
-                            'n' => @as(u8, '\n'), 'r' => '\r', 't' => '\t',
-                            '\\' => '\\', '\'' => '\'',
+                            'n' => @as(u8, '\n'),
+                            'r' => '\r',
+                            't' => '\t',
+                            '\\' => '\\',
+                            '\'' => '\'',
                             else => rule.pattern[2],
                         }
                     else

@@ -1,11 +1,17 @@
 //! Rip Compiler — Bootstrap Driver
 //!
-//! Reads a .rip source file, parses it into S-expressions, and prints
-//! the resulting tree. This is the first end-to-end test of the
-//! rip.grammar -> grammar.zig -> parser.zig pipeline.
+//! Reads a .rip source file and either parses it into S-expressions
+//! or dumps the token stream for debugging.
+//!
+//! Usage:
+//!   rip <file.rip>              — parse and print S-expressions
+//!   rip -t, --tokens <file.rip>  — dump token stream
 
 const std = @import("std");
 const parser = @import("parser.zig");
+const rip = @import("rip.zig");
+
+const Mode = enum { parse, tokens };
 
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
@@ -13,18 +19,52 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
-    if (args.len < 2) {
-        std.debug.print("Usage: rip <file.rip>\n", .{});
+    var mode: Mode = .parse;
+    var file_path: ?[]const u8 = null;
+
+    for (args[1..]) |arg| {
+        if (std.mem.eql(u8, arg, "-t") or std.mem.eql(u8, arg, "--tokens")) {
+            mode = .tokens;
+        } else if (arg.len > 0 and arg[0] == '-') {
+            std.debug.print("Unknown option: {s}\n", .{arg});
+            std.process.exit(1);
+        } else {
+            file_path = arg;
+        }
+    }
+
+    if (file_path == null) {
+        std.debug.print("Usage: rip [options] <file.rip>\n  -t, --tokens  Dump token stream\n", .{});
         std.process.exit(1);
     }
 
-    const file_path = args[1];
-    const source = std.fs.cwd().readFileAlloc(allocator, file_path, 1024 * 1024) catch |err| {
-        std.debug.print("Error reading {s}: {}\n", .{ file_path, err });
+    const source = std.fs.cwd().readFileAlloc(allocator, file_path.?, 1024 * 1024) catch |err| {
+        std.debug.print("Error reading {s}: {}\n", .{ file_path.?, err });
         std.process.exit(1);
     };
     defer allocator.free(source);
 
+    switch (mode) {
+        .tokens => dumpTokens(source),
+        .parse => try parseAndPrint(allocator, source),
+    }
+}
+
+fn dumpTokens(source: []const u8) void {
+    var lexer = rip.Lexer.init(source);
+    var i: u32 = 0;
+    while (true) {
+        const tok = lexer.next();
+        const text = if (tok.len > 0) source[tok.pos..][0..tok.len] else "";
+        std.debug.print("{d:3}: {s:15} pre={d} pos={d} len={d} \"{s}\"\n", .{
+            i, @tagName(tok.cat), tok.pre, tok.pos, tok.len, text,
+        });
+        if (tok.cat == .eof) break;
+        i += 1;
+    }
+}
+
+fn parseAndPrint(allocator: std.mem.Allocator, source: []const u8) !void {
     var p = parser.Parser.init(allocator, source);
     defer p.deinit();
 

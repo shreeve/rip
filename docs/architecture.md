@@ -23,6 +23,64 @@ flowchart TD
   zigSource --> zigCompiler["zig build-exe / zig test / zig build-lib"]
 ```
 
+## Grammar Engine
+
+The first two stages of the pipeline (Rip source to S-expressions) are driven by a grammar-based toolchain. A single `.grammar` file defines both the lexer and parser, and a language-agnostic engine generates the parser module from it.
+
+### File Roles
+
+| File | Role |
+|------|------|
+| `rip.grammar` | Single source of truth: lexer tokens, parser rules, directives |
+| `src/grammar.zig` | Language-agnostic engine: reads `.grammar`, generates `parser.zig` |
+| `src/rip.zig` | Language module: `Tag` enum, keyword lookup, wrapper `Lexer` |
+| `src/parser.zig` | Auto-generated lexer + SLR(1) parser (never hand-edit) |
+
+### Generation Flow
+
+```mermaid
+flowchart LR
+  grammar["rip.grammar"] --> engine["grammar.zig"]
+  engine --> parser["src/parser.zig"]
+  lang["src/rip.zig"] -.->|"imported via @lang"| parser
+```
+
+The grammar file sits at the repo root as `rip.grammar`. Running the grammar tool reads it and writes `src/parser.zig`. The generated parser imports `src/rip.zig` via the `@lang = "rip"` directive, which wires in language-specific helpers without putting any Rip knowledge into the engine itself.
+
+The same `grammar.zig` engine is used across projects. Only the grammar file and language module change between languages.
+
+### Grammar Directives
+
+The `@parser` section of the grammar file supports these directives:
+
+| Directive | Purpose |
+|-----------|---------|
+| `@lang` | Import a language module (`rip.zig`) for keyword/tag support |
+| `@as` | Context-sensitive keyword promotion from identifiers |
+| `@infix` | Auto-generate operator precedence chain from a table |
+| `@expect` | Declare expected number of audited LR conflicts |
+| `@errors` | Map rule names to human-readable diagnostics |
+| `@code` | Inject raw Zig at specific locations in the output |
+
+Rules use `L(X)` for comma-separated lists, `_` for nil, `...N` for spread, and `key:N` for schema documentation. Parser hints include `<` (tight binding / prefer reduce) and `X "c"` (exclude when next character matches).
+
+### Language Module Contract
+
+The `@lang` module (`src/rip.zig`) provides three things:
+
+1. **`Tag` enum** -- semantic node types for S-expression output (`module`, `fun`, `sub`, `call`, `if`, operator tags, etc.)
+2. **`keyword_as()`** -- maps identifier text to keyword IDs so the parser can promote `"fun"` to the `FUN` terminal when the parse state expects it
+3. **Wrapper `Lexer`** -- sits between the generated `BaseLexer` and the parser, handling indentation tracking (indent/outdent tokens), type annotation stripping, and duplicate newline suppression
+
+### Build Commands
+
+```bash
+zig build grammar                            # build the grammar tool
+./bin/grammar rip.grammar src/parser.zig     # generate parser from grammar
+zig build                                    # build the rip compiler
+./bin/rip examples/tiny.rip                  # parse and print S-expressions
+```
+
 ## Stage Boundaries
 
 ### 1. Rip Source
