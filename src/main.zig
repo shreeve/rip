@@ -5,7 +5,7 @@
 //!
 //! Usage:
 //!   rip <file.rip>                — parse and print S-expressions
-//!   rip --emit <file.rip>         — compile to Zig source
+//!   rip -c, --compile <file.rip>   — compile to Zig source
 //!   rip -t, --tokens <file.rip>   — dump token stream
 
 const std = @import("std");
@@ -27,7 +27,7 @@ pub fn main() !void {
     for (args[1..]) |arg| {
         if (std.mem.eql(u8, arg, "-t") or std.mem.eql(u8, arg, "--tokens")) {
             mode = .tokens;
-        } else if (std.mem.eql(u8, arg, "-e") or std.mem.eql(u8, arg, "--emit")) {
+        } else if (std.mem.eql(u8, arg, "-c") or std.mem.eql(u8, arg, "--compile")) {
             mode = .emit;
         } else if (arg.len > 0 and arg[0] == '-') {
             std.debug.print("Unknown option: {s}\n", .{arg});
@@ -38,7 +38,7 @@ pub fn main() !void {
     }
 
     if (file_path == null) {
-        std.debug.print("Usage: rip [options] <file.rip>\n  -e, --emit    Compile to Zig source\n  -t, --tokens  Dump token stream\n", .{});
+        std.debug.print("Usage: rip [options] <file.rip>\n  -c, --compile  Compile to Zig source\n  -t, --tokens   Dump token stream\n", .{});
         std.process.exit(1);
     }
 
