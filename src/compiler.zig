@@ -537,7 +537,14 @@ pub const Compiler = struct {
                         try w.writeAll(" orelse ");
                         try self.emitExpr(children[1], w);
                     },
-                    .@"catch" => if (children.len >= 2) {
+                    .@"catch" => if (children.len >= 3) {
+                        // (catch expr name handler) — with capture
+                        try self.emitExpr(children[0], w);
+                        try w.writeAll(" catch |");
+                        try w.writeAll(self.txt(children[1]));
+                        try w.writeAll("| ");
+                        try self.emitExpr(children[2], w);
+                    } else if (children.len >= 2) {
                         try self.emitExpr(children[0], w);
                         try w.writeAll(" catch ");
                         try self.emitExpr(children[1], w);
@@ -669,12 +676,28 @@ pub const Compiler = struct {
     // Control flow
     // =========================================================================
 
+    fn emitCaptureCond(self: *Compiler, cond: Sexp, w: *Writer) Writer.Error!void {
+        if (cond == .list and cond.list.len >= 3 and
+            cond.list[0] == .tag and cond.list[0].tag == .@"as")
+        {
+            try w.writeAll("(");
+            try self.emitExpr(cond.list[1], w);
+            try w.writeAll(") |");
+            try w.writeAll(self.txt(cond.list[2]));
+            try w.writeAll("|");
+        } else {
+            try w.writeAll("(");
+            try self.emitExpr(cond, w);
+            try w.writeAll(")");
+        }
+    }
+
     fn emitIf(self: *Compiler, children: []const Sexp, w: *Writer) Writer.Error!void {
         if (children.len < 2) return;
 
-        try w.writeAll("if (");
-        try self.emitExpr(children[0], w);
-        try w.writeAll(") {\n");
+        try w.writeAll("if ");
+        try self.emitCaptureCond(children[0], w);
+        try w.writeAll(" {\n");
 
         self.depth += 1;
         try self.emitBody(children[1], false, w);
@@ -707,9 +730,8 @@ pub const Compiler = struct {
         // (while cond update body) — update can be nil
         if (children.len < 3) return;
 
-        try w.writeAll("while (");
-        try self.emitExpr(children[0], w);
-        try w.writeAll(")");
+        try w.writeAll("while ");
+        try self.emitCaptureCond(children[0], w);
         if (children[1] != .nil) {
             try w.writeAll(" : (");
             try self.emitExpr(children[1], w);

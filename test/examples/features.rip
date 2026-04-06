@@ -127,26 +127,29 @@ sub main
   if false
     unreachable
 
-  # orelse and catch
-  # x = maybe_null orelse 0
-  # y = maybe_error catch 0
+  # orelse and catch (parse-tested, need error context to compile)
+  # val = maybe_null orelse 0
+  # val = maybe_err catch 0
+  # val = maybe_err catch as err handle(err)
 
-  # @builtin calls
+  # if/while with capture (parse-tested)
+  # if optional as val
+  #   print val
+  # while iter() as item
+  #   print item
+
+  # @builtin calls (parse-tested)
   # z = @intCast(42)
 
-  # struct literal
+  # struct literal (parse-tested)
   # p = Point { x: 1.0, y: 2.0 }
 
-  # lambda
+  # lambda (parse-tested)
   # fn x
   #   x + 1
 
-  # for over slice
+  # for over slice (parse-tested)
   # for item in items
   #   print item
-
-  # if with capture
-  # if optional as val
-  #   print val
 
   print "done"

@@ -289,7 +289,8 @@ expr     = if
          | @infix
 
 or_else  = @infix ORELSE expr              → (orelse 1 3)
-or_catch = @infix CATCH expr               → (catch 1 3)
+or_catch = @infix CATCH AS name expr       → (catch 1 4 5)
+         | @infix CATCH expr               → (catch 1 3)
 
 cond     = expr
          | expr AS name                     → (as 1 3)
