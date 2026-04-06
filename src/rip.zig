@@ -195,8 +195,26 @@ pub const Lexer = struct {
                 continue;
             }
 
-            // Skip duplicate newlines
-            if (tok.cat == .newline and (self.last_cat == .newline or self.last_cat == .indent or self.last_cat == .outdent or self.last_cat == .eof)) {
+            // Skip duplicate newlines, but still process indent changes on the last one
+            if (tok.cat == .newline and (self.last_cat == .newline or self.last_cat == .indent or self.last_cat == .outdent)) {
+                // Peek ahead: if this newline leads to an indent change, process it
+                var ws: u32 = 0;
+                while (self.base.pos + ws < self.base.source.len) {
+                    const ch = self.base.source[self.base.pos + ws];
+                    if (ch == ' ' or ch == '\t') {
+                        ws += 1;
+                    } else break;
+                }
+                const next_is_blank = (self.base.pos + ws >= self.base.source.len or
+                    self.base.source[self.base.pos + ws] == '\n' or
+                    self.base.source[self.base.pos + ws] == '\r' or
+                    self.base.source[self.base.pos + ws] == '#');
+                if (next_is_blank) continue;
+                if (ws != self.indent_level) {
+                    const result = self.handleIndent(tok);
+                    self.last_cat = result.cat;
+                    return result;
+                }
                 continue;
             }
 
