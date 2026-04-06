@@ -1,0 +1,402 @@
+# ==============================================================================
+# rip.grammar — Rip Language Lexer and Parser Grammar
+# ==============================================================================
+#
+# Defines the lexer and parser for Rip. Processed by src/grammar.zig to
+# generate src/parser.zig.
+#
+# Usage: grammar rip.grammar src/parser.zig
+#
+# Rip is a high-performance systems language with elegant syntax that
+# compiles to Zig. This grammar defines the v0 bootstrap subset.
+# ==============================================================================
+
+@lexer
+
+# ==============================================================================
+# STATE VARIABLES
+# ==============================================================================
+#
+# These track lexer context across tokens within a single parse.
+#
+#   beg   - At beginning of line (1 = true, 0 = false)
+#   paren - Parenthesis nesting depth
+#   brace - Brace nesting depth
+
+state beg   = 1
+state paren = 0
+state brace = 0
+
+# ==============================================================================
+# TOKEN TYPES
+# ==============================================================================
+#
+# All token types the lexer can produce. The generator creates a Zig enum.
+
+tokens {
+    # Literals
+    ident,          # Identifier: variable, function, type name
+    integer,        # Integer: 0, 1, 42, 1000
+    real,           # Decimal: 3.14, .5, 2.0
+    string_sq,      # Single-quoted string: 'hello world'
+    string_dq,      # Double-quoted string: "hello #{name}"
+    bool_true,      # true
+    bool_false,     # false
+
+    # Operators — arithmetic
+    plus,           # +
+    minus,          # -
+    star,           # *
+    slash,          # /
+    percent,        # %
+    power,          # **
+
+    # Operators — comparison
+    eq,             # ==
+    ne,             # !=
+    lt,             # <
+    gt,             # >
+    le,             # <=
+    ge,             # >=
+
+    # Operators — logical
+    and_sym,        # &&
+    or_sym,         # ||
+    not_sym,        # !
+
+    # Operators — assignment
+    assign,         # =
+    const_assign,   # =!
+    plus_assign,    # +=
+    minus_assign,   # -=
+    star_assign,    # *=
+    slash_assign,   # /=
+
+    # Punctuation
+    lparen,         # (
+    rparen,         # )
+    lbrace,         # {
+    rbrace,         # }
+    lbracket,       # [
+    rbracket,       # ]
+    comma,          # ,
+    colon,          # :
+    arrow,          # ->
+    fat_arrow,      # =>
+    dot,            # .
+    dotdot,         # ..
+    pipe,           # |>
+
+    # Whitespace and structure
+    indent,         # Indentation increase
+    outdent,        # Indentation decrease
+    newline,        # Line terminator
+    comment,        # # through end of line
+    eof,            # End of input
+    err             # Lexer error
+}
+
+# ==============================================================================
+# DEFAULT ACTIONS
+# ==============================================================================
+
+defaults {
+    {beg = 0}       # Most tokens clear line-start flag
+}
+
+# ==============================================================================
+# COMMENTS
+# ==============================================================================
+
+'#' [^\n]*                                  → comment
+
+# ==============================================================================
+# NEWLINES AND LINE CONTINUATION
+# ==============================================================================
+
+"\\\n"                                      → skip         # line continuation
+"\r\n"                                      → newline, {beg = 1}
+'\n'                                        → newline, {beg = 1}
+'\r'                                        → newline, {beg = 1}
+
+# ==============================================================================
+# STRING LITERALS
+# ==============================================================================
+#
+# Single-quoted strings: no interpolation, no escapes except ''
+# Double-quoted strings: interpolation, standard escapes
+
+'"' ([^"\\$\n] | '\\' . | '$')* '"'        → string_dq
+"'" ([^'\n] | "''")* "'"                    → string_sq
+
+# ==============================================================================
+# NUMBERS
+# ==============================================================================
+
+[0-9]* '.' [0-9]+                           → real
+[0-9]+                                      → integer
+
+# ==============================================================================
+# MULTI-CHARACTER OPERATORS
+# ==============================================================================
+#
+# Order matters: longer patterns first to get correct greedy match.
+
+"**"                                        → power
+"=="                                        → eq
+"!="                                        → ne
+"<="                                        → le
+">="                                        → ge
+"&&"                                        → and_sym
+"||"                                        → or_sym
+"=!"                                        → const_assign
+"+="                                        → plus_assign
+"-="                                        → minus_assign
+"*="                                        → star_assign
+"/="                                        → slash_assign
+"->"                                        → arrow
+"=>"                                        → fat_arrow
+"|>"                                        → pipe
+".."                                        → dotdot
+
+# ==============================================================================
+# SINGLE-CHARACTER OPERATORS AND PUNCTUATION
+# ==============================================================================
+
+'+'                                         → plus
+'-'                                         → minus
+'*'                                         → star
+'/'                                         → slash
+'%'                                         → percent
+'<'                                         → lt
+'>'                                         → gt
+'!'                                         → not_sym
+'='                                         → assign
+'('                                         → lparen, {paren++}
+')'                                         → rparen, {paren--}
+'{'                                         → lbrace, {brace++}
+'}'                                         → rbrace, {brace--}
+'['                                         → lbracket
+']'                                         → rbracket
+','                                         → comma
+':'                                         → colon
+'.'                                         → dot
+
+# ==============================================================================
+# IDENTIFIERS AND KEYWORDS
+# ==============================================================================
+#
+# Identifiers start with a letter or underscore and may contain digits.
+# The trailing ? is part of the identifier (e.g., exists?, empty?).
+# Keywords are recognized in the parser via @as directives.
+
+[a-zA-Z_][a-zA-Z0-9_]* '?'?                → ident
+
+# ==============================================================================
+# BOOLEAN LITERALS
+# ==============================================================================
+#
+# true and false are handled as keyword promotion from ident via @as,
+# but we keep them in the token list for clarity.
+
+# ==============================================================================
+# ERROR / FALLBACK
+# ==============================================================================
+
+.                                           → err
+
+# ==============================================================================
+# END OF LEXER SECTION
+# ==============================================================================
+
+@parser
+
+# ==============================================================================
+# DIRECTIVES
+# ==============================================================================
+
+@lang = "rip"
+
+@expect = 18
+
+@as = [ident, keyword]
+
+# ==============================================================================
+# ALIASES
+# ==============================================================================
+
+name = IDENT
+
+# ==============================================================================
+# START SYMBOLS
+# ==============================================================================
+
+program! = top_item*                         → (module ...1)
+expr!    = expr                              → 1
+
+# ==============================================================================
+# TOP-LEVEL STRUCTURE
+# ==============================================================================
+
+top_item = stmt NEWLINE                      → 1
+         | stmt >                            → 1
+         | COMMENT                           → _
+         | NEWLINE                           → _
+
+# ==============================================================================
+# LINE STRUCTURE (inside blocks)
+# ==============================================================================
+
+line     = stmt NEWLINE                      → 1
+         | COMMENT NEWLINE                   → _
+         | NEWLINE                           → _
+
+# ==============================================================================
+# STATEMENTS
+# ==============================================================================
+#
+# Statements are top-level forms. Most things in Rip lean expression-first,
+# but routine declarations, use, and return are true statements.
+
+stmt     = use_decl
+         | fun_decl
+         | sub_decl
+         | expr
+
+# ==============================================================================
+# CAPABILITIES
+# ==============================================================================
+
+use_decl = USE name                          → (use 2)
+
+# ==============================================================================
+# ROUTINE DECLARATIONS
+# ==============================================================================
+#
+# fun = value-yielding routine (implicitly yields final expression)
+# sub = effect-oriented routine (does not implicitly yield)
+
+fun_decl = FUN name param_list ret_clause block  → (fun 2 3 ret:4 body:5)
+         | FUN name param_list block             → (fun 2 3 body:4)
+         | FUN name block                        → (fun 2 [] body:3)
+
+sub_decl = SUB name param_list block             → (sub 2 3 body:4)
+         | SUB name block                        → (sub 2 [] body:3)
+
+# ==============================================================================
+# PARAMETERS AND RETURN TYPE
+# ==============================================================================
+
+param_list = param ("," param)*              → (1 ...2)
+
+param    = name ":" type_expr                → (param 1 type:3)
+         | name                              → (param 1)
+
+ret_clause = "->" type_expr                  → 2
+
+type_expr = name                             → 1
+
+# ==============================================================================
+# EXPRESSIONS
+# ==============================================================================
+
+expr     = if_expr
+         | assign_expr
+         | const_expr
+         | or_expr
+
+# ==============================================================================
+# ASSIGNMENT
+# ==============================================================================
+
+assign_expr = name "=" expr                  → (= 1 3)
+const_expr  = name "=!" expr                 → (const 1 3)
+
+# ==============================================================================
+# BINARY OPERATORS (precedence low to high)
+# ==============================================================================
+
+or_expr  = or_expr "||" and_expr             → (or 1 3)
+         | and_expr
+
+and_expr = and_expr "&&" cmp_expr            → (and 1 3)
+         | cmp_expr
+
+cmp_expr = sum "==" sum                      → (eq 1 3)
+         | sum "!=" sum                      → (ne 1 3)
+         | sum "<"  sum                      → (lt 1 3)
+         | sum ">"  sum                      → (gt 1 3)
+         | sum "<=" sum                      → (le 1 3)
+         | sum ">=" sum                      → (ge 1 3)
+         | sum
+
+sum      = sum "+" term                      → (+ 1 3)
+         | sum "-" term                      → (- 1 3)
+         | term
+
+term     = term "*" power_expr               → (* 1 3)
+         | term "/" power_expr               → (/ 1 3)
+         | term "%" power_expr               → (% 1 3)
+         | power_expr
+
+power_expr = unary "**" power_expr           → (** 1 3)
+           | unary
+
+unary    = "!" unary                         → (not 2)
+         | "-" unary                         → (neg 2)
+         | call_expr
+
+# ==============================================================================
+# CALLS
+# ==============================================================================
+#
+# Calls are one of the most important forms. The rewriter will help
+# clarify implicit call boundaries before the parser sees them.
+
+call_expr = call_expr "!" atom               → (await 1 3)
+          | call_expr atom                   → (call 1 2)
+          | call_expr "(" arg_list ")"       → (call 1 ...3)
+          | atom
+
+arg_list = expr ("," expr)*                  → (1 ...2)
+         |                                   → ()
+
+# ==============================================================================
+# ATOMS
+# ==============================================================================
+
+atom     = name
+         | INTEGER
+         | REAL
+         | STRING_SQ
+         | STRING_DQ
+         | TRUE
+         | FALSE
+         | "(" expr ")"                      → 2
+         | block_expr
+
+# ==============================================================================
+# BLOCKS
+# ==============================================================================
+
+block    = INDENT line* OUTDENT               → (block ...2)
+
+block_expr = INDENT line* OUTDENT            → (block ...2)
+
+# ==============================================================================
+# CONDITIONALS
+# ==============================================================================
+
+if_expr  = IF expr block else_clause?        → (if 2 3 4)
+
+else_clause = ELSE if_expr                   → 2
+            | ELSE block                     → (else 2)
+
+# ==============================================================================
+# RETURN
+# ==============================================================================
+#
+# return is an expression (so it can appear in tail position).
+
+return_expr = RETURN expr                    → (return 2)
+            | RETURN                         → (return)
