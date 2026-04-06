@@ -78,7 +78,7 @@ The `@lang` module (`src/rip.zig`) provides three things:
 zig build grammar                            # build the grammar tool
 ./bin/grammar rip.grammar src/parser.zig     # generate parser from grammar
 zig build                                    # build the rip compiler
-./bin/rip examples/tiny.rip                  # parse and print S-expressions
+./bin/rip test/examples/tiny.rip              # parse and print S-expressions
 ```
 
 ## Stage Boundaries

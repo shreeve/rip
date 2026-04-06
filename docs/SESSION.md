@@ -109,10 +109,10 @@ produces:
 | `src/dump_tokens.zig` | ~33 | Debug tool: dumps raw token stream |
 | `build.zig` | ~80 | Build system: grammar tool, main exe, tests |
 | `ZIG-0.15.2.md` | ~1070 | Zig 0.15.2 API reference (critical for I/O changes) |
-| `examples/tiny.rip` | 3 | Minimal untyped example |
-| `examples/typed.rip` | 3 | Same example with type annotations |
-| `examples/hello.rip` | 10 | Full example (not yet fully parsing) |
-| `examples/unary.rip` | 6 | Unary operator test |
+| `test/examples/tiny.rip` | 3 | Minimal untyped example |
+| `test/examples/typed.rip` | 3 | Same example with type annotations |
+| `test/examples/hello.rip` | 10 | Full example (not yet fully parsing) |
+| `test/examples/unary.rip` | 6 | Unary operator test |
 | `docs/architecture.md` | | Pipeline, stage boundaries, design principles |
 | `docs/roadmap.md` | | Phase 0-3, compiler stages, parsing philosophy |
 | `docs/language-sketch.md` | | Principles, routine semantics, examples, sexps |
@@ -137,7 +137,7 @@ produces:
 zig build grammar          # build the grammar tool
 ./bin/grammar rip.grammar src/parser.zig  # generate parser from grammar
 zig build                  # build the rip compiler
-./bin/rip examples/tiny.rip  # parse a .rip file and print sexps
+./bin/rip test/examples/tiny.rip  # parse a .rip file and print sexps
 zig build test             # run rip.zig tests
 ```
 
