@@ -23,7 +23,7 @@ pub const Tag = enum(u8) {
     @"pub",
     @"extern",
     @"export",
-    @"error_set",
+    @"errors",
     @"test",
     @"unreachable",
     @"undefined",
@@ -37,22 +37,18 @@ pub const Tag = enum(u8) {
     // Routines
     @"fun",
     @"sub",
-    @"param",
     @"return",
 
     // Bindings
-    @"assign",
     @"const",
     @"=",
     @"+=",
     @"-=",
     @"*=",
     @"/=",
-    @"[]",
 
     // Control flow
     @"if",
-    @"else",
     @"while",
     @"for",
     @"match",
@@ -85,12 +81,6 @@ pub const Tag = enum(u8) {
     @"not",
 
     // Operators — comparison
-    @"eq",
-    @"ne",
-    @"lt",
-    @"gt",
-    @"le",
-    @"ge",
     @"==",
     @"!=",
     @"<",

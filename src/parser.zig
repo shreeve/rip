@@ -684,7 +684,7 @@ pub const Parser = struct {
             28 => self.sexp(.@"alias", &.{pass[1], pass[3]}),
             29 => self.sexp(.@"test", &.{pass[1], pass[2]}),
             30 => self.sexpPosSpread(.@"enum", pass[1], pass[3]),
-            31 => self.sexpPosSpread(.@"error_set", pass[1], pass[3]),
+            31 => self.sexpPosSpread(.@"errors", pass[1], pass[3]),
             32 => self.sexpPosSpread(.@"struct", pass[1], pass[3]),
             33 => blk: { var out: std.ArrayListUnmanaged(Sexp) = .{}; out.append(self.allocator(), pass[0]) catch break :blk .nil; while (out.items.len > 0 and out.items[out.items.len - 1] == .nil) _ = out.pop(); break :blk .{ .list = out.toOwnedSlice(self.allocator()) catch &[_]Sexp{} }; },
             34 => blk: { var out: std.ArrayListUnmanaged(Sexp) = .{}; if (pass[0] == .list) for (pass[0].list) |item| out.append(self.allocator(), item) catch break :blk .nil; out.append(self.allocator(), pass[2]) catch break :blk .nil; while (out.items.len > 0 and out.items[out.items.len - 1] == .nil) _ = out.pop(); break :blk .{ .list = out.toOwnedSlice(self.allocator()) catch &[_]Sexp{} }; },

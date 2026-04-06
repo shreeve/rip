@@ -65,7 +65,7 @@ pub const Compiler = struct {
                 try w.writeAll(" ");
                 try self.emitTopLevel(items[1], w);
             },
-            .@"error_set" => try self.emitErrorSet(items[1..], w),
+            .@"errors" => try self.emitErrorSet(items[1..], w),
             .@"test" => try self.emitTest(items[1..], w),
             .@"enum" => try self.emitEnum(items[1..], w),
             .@"struct" => try self.emitStruct(items[1..], w),

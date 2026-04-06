@@ -240,7 +240,7 @@ alias    = ALIAS name "=" type              → (alias 2 4)
 test     = TEST STRING_DQ block             → (test 2 3)
 
 enum     = ENUM   name INDENT members OUTDENT → (enum 2 ...4)
-errors   = ERROR  name INDENT members OUTDENT → (error_set 2 ...4)
+errors   = ERROR  name INDENT members OUTDENT → (errors 2 ...4)
 struct   = STRUCT name INDENT members OUTDENT → (struct 2 ...4)
 
 # ==============================================================================
