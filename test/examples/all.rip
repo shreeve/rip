@@ -139,12 +139,12 @@ test "add works"                           # test
 
 sub main                                   # sub (block only)
 
-
-
   # --- Bindings ---
   #
   # Zig: const result = add(1, 2);
   #      const limit = 100;
+  #      std.debug.print("{any}\n", .{result});
+  #      std.debug.print("{any}\n", .{limit});
 
   result = add(1, 2)                       # assign (=), call
   limit =! 100                             # const (=!)
