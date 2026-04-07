@@ -295,16 +295,32 @@ sub main                                   # sub (block only)
   casted = @as(i64, 42)                   # atom (builtin)
   print casted
 
-  # --- Emit-verified features (need null/optional/error runtime values) ---
-  # These compile correctly (verified separately) but Rip can't yet
-  # create optional/error values (no null keyword, no ?T in expressions).
+  # --- Null and coalesce ---
   #
-  # coalesce:   maybe ?? 99                → Zig: maybe orelse 99
-  # catch:      risky() catch 0            → Zig: risky() catch 0
-  # catch as:   f() catch as e g(e)        → Zig: f() catch |e| g(e)
-  # if capture: if opt as val              → Zig: if (opt) |val|
-  # try:        try something()            → Zig: try something()
-  # errdefer:   errdefer cleanup()         → Zig: errdefer cleanup()
+  # Zig: const maybe = null;
+  #      const safe = maybe orelse 99;
+
+  maybe = null                             # atom (NULL)
+  safe = maybe ?? 99                       # coalesce (??)
+  print safe
+
+  # --- Catch ---
+  #
+  # Zig: const caught = maybe_fail(0) catch 77;
+
+  caught = maybe_fail(0) catch 77          # catch
+  print caught
+
+  # --- If capture (parse-tested, needs ?T in expression position) ---
+  #
+  # if opt as w                            → Zig: if (opt) |w| { ... }
+  #   print w
+
+  # --- Still need specific contexts ---
+  #
+  # try:        try something()            → needs error-returning main
+  # errdefer:   errdefer cleanup()         → needs error-returning main
+  # catch as:   f() catch as e g(e)        → needs error handler function
   # inline:     inline for i in 0..5       → needs comptime-known slice
   # comptime:   comptime expr              → needs comptime-compatible expr
 

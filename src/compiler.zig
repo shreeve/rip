@@ -610,6 +610,7 @@ pub const Compiler = struct {
                         if (children.len > 0) try self.emitExpr(children[0], w);
                     },
 
+                    .@"null" => try w.writeAll("null"),
                     .@"unreachable" => try w.writeAll("unreachable"),
                     .@"undefined" => try w.writeAll("undefined"),
 

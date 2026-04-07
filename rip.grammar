@@ -371,6 +371,7 @@ atom     = name
          | STRING_DQ
          | TRUE
          | FALSE
+         | NULL                             → (null)
          | UNREACHABLE                      → (unreachable)
          | UNDEFINED                        → (undefined)
          | "@" name "(" args ")"            → (builtin 2 ...4)
