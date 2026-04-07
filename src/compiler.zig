@@ -60,10 +60,30 @@ pub const Compiler = struct {
             .@"fun" => try self.emitFun(items[1..], w),
             .@"sub" => try self.emitSub(items[1..], w),
             .@"use" => {}, // handled by module preamble
-            .@"pub", .@"extern", .@"export" => if (items.len > 1) {
+            .@"pub", .@"export" => if (items.len > 1) {
                 try w.writeAll(@tagName(items[0].tag));
                 try w.writeAll(" ");
                 try self.emitTopLevel(items[1], w);
+            },
+            .@"extern" => if (items.len > 1) {
+                // extern struct → const Name = extern struct { ... }
+                if (items[1] == .list and items[1].list.len > 0 and
+                    items[1].list[0] == .tag and items[1].list[0].tag == .@"struct")
+                {
+                    try self.emitExternStruct(items[1].list[1..], w);
+                } else {
+                    try w.writeAll("extern ");
+                    try self.emitTopLevel(items[1], w);
+                }
+            },
+            .@"callconv" => if (items.len > 2) {
+                try self.emitTopLevel(items[2], w);
+            },
+            .@"extern_var" => if (items.len > 1) {
+                const name = self.txt(items[1]);
+                try w.print("extern var {s}: ", .{name});
+                if (items.len > 2) try self.emitTyperef(items[2], w);
+                try w.writeAll(";\n");
             },
             .@"zig" => if (items.len > 1) {
                 const raw = self.source[items[1].src.pos..][0..items[1].src.len];
@@ -278,6 +298,40 @@ pub const Compiler = struct {
         try w.writeAll("};\n");
     }
 
+    fn emitExternStruct(self: *Compiler, children: []const Sexp, w: *Writer) Writer.Error!void {
+        if (children.len < 1) return;
+        const name = self.txt(children[0]);
+        try w.print("const {s} = extern struct {{\n", .{name});
+        self.depth += 1;
+        for (children[1..]) |item| {
+            if (item == .list and item.list.len > 0 and item.list[0] == .tag) {
+                const tag = item.list[0].tag;
+                if (tag == .@":" or tag == .@"default" or tag == .@"aligned") {
+                    try self.writeIndent(w);
+                    try w.writeAll(self.txt(item.list[1]));
+                    try w.writeAll(": ");
+                    try self.emitTyperef(item.list[2], w);
+                    if (tag == .@"aligned" and item.list.len >= 4) {
+                        try w.writeAll(" align(");
+                        try self.emitExpr(item.list[3], w);
+                        try w.writeAll(")");
+                    }
+                    if (tag == .@"default" and item.list.len >= 4) {
+                        try w.writeAll(" = ");
+                        try self.emitExpr(item.list[3], w);
+                    }
+                    try w.writeAll(",\n");
+                    continue;
+                }
+            }
+            try self.writeIndent(w);
+            try w.writeAll(self.txt(item));
+            try w.writeAll(": i64,\n");
+        }
+        self.depth -= 1;
+        try w.writeAll("};\n");
+    }
+
     fn emitErrorSet(self: *Compiler, children: []const Sexp, w: *Writer) Writer.Error!void {
         if (children.len < 1) return;
         const name = self.txt(children[0]);
@@ -332,6 +386,26 @@ pub const Compiler = struct {
                     .@"error_union" => {
                         try w.writeAll("!");
                         try self.emitTyperef(items[1], w);
+                    },
+                    .@"volatile_ptr" => {
+                        try w.writeAll("*volatile ");
+                        try self.emitTyperef(items[1], w);
+                    },
+                    .@"many_ptr" => {
+                        try w.writeAll("[*]");
+                        try self.emitTyperef(items[1], w);
+                    },
+                    .@"sentinel_ptr" => if (items.len >= 3) {
+                        try w.writeAll("[*:");
+                        try self.emitExpr(items[1], w);
+                        try w.writeAll("]");
+                        try self.emitTyperef(items[2], w);
+                    },
+                    .@"aligned" => if (items.len >= 3) {
+                        try self.emitTyperef(items[1], w);
+                        try w.writeAll(" align(");
+                        try self.emitExpr(items[2], w);
+                        try w.writeAll(")");
                     },
                     else => try self.emitExpr(sexp, w),
                 }
@@ -460,6 +534,7 @@ pub const Compiler = struct {
         return switch (items[0].tag) {
             .@"=", .@"const", .@"return", .@"if", .@"while", .@"for",
             .@"match", .@"break", .@"continue", .@"defer", .@"errdefer", .@"comptime", .@"inline", .@"zig",
+            .@"typed_assign", .@"typed_const",
             .@"+=", .@"-=", .@"*=", .@"/=" => true,
             else => false,
         };
@@ -573,6 +648,11 @@ pub const Compiler = struct {
             .@"=", .@"const" => {
                 try self.writeIndent(w);
                 try self.emitBinding(items[0].tag, items[1..], w);
+                try w.writeAll(";\n");
+            },
+            .@"typed_assign", .@"typed_const" => {
+                try self.writeIndent(w);
+                try self.emitTypedBinding(items[0].tag, items[1..], w);
                 try w.writeAll(";\n");
             },
             .@"+=", .@"-=", .@"*=" => {
@@ -1107,6 +1187,29 @@ pub const Compiler = struct {
         try self.emitExpr(children[0], w);
         try w.print(" {s} ", .{@tagName(tag)});
         try self.emitExpr(children[1], w);
+    }
+
+    fn emitTypedBinding(self: *Compiler, tag: Tag, children: []const Sexp, w: *Writer) Writer.Error!void {
+        // (typed_assign name type expr) or (typed_const name type expr)
+        if (children.len < 3) return;
+        const name = self.txt(children[0]);
+        const is_const = tag == .@"typed_const" or !self.isMutated(name);
+
+        if (std.mem.eql(u8, name, "_")) {
+            try w.writeAll("_");
+        } else {
+            markEmitted(name);
+            if (is_const) {
+                try w.writeAll("const ");
+            } else {
+                try w.writeAll("var ");
+            }
+            try self.emitExpr(children[0], w);
+        }
+        try w.writeAll(": ");
+        try self.emitTyperef(children[1], w);
+        try w.writeAll(" = ");
+        try self.emitExpr(children[2], w);
     }
 
     fn emitReturn(self: *Compiler, children: []const Sexp, w: *Writer) Writer.Error!void {
