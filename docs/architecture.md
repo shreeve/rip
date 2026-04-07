@@ -77,7 +77,7 @@ The `@lang` module (`src/rip.zig`) provides three things:
 
 ```
 program  body  stmt  decl  defn  block
-fun  sub  use  alias  test  enum  errors  struct
+fun  sub  use  typedef  test  enum  errors  struct
 members  member  field  params  returns  type
 expr  cond  if  while  for  match  arms  arm
 suffix_if  coalesce  catch

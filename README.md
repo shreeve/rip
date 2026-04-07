@@ -85,7 +85,7 @@ The bootstrap compiler works end-to-end — 49-rule grammar, ~85% of day-to-day 
 ./bin/rip test/examples/hello.rip           # print S-expressions
 ```
 
-What works now: `fun`/`sub`, `if` (prefix + postfix), `while`, `for`, `match`, `enum` (plain + tagged unions), `struct` (fields, defaults, methods), `error` sets, `alias`, `test`, `pub`/`extern`/`export`, `try`/`catch`/`??`, captures (`as`/`|val|`), `defer`/`errdefer`, `comptime`/`inline`, `=`/`=!`/`+=`/`-=`/`*=`, typed params, return types, `?T`/`*T`/`[]T`/`!T`, `@builtins`, array literals, pipe `|>`, range `..`, `break`/`continue`/`return`, `unreachable`/`undefined`, lambdas, struct literals (parse).
+What works now: `fun`/`sub`, `if` (prefix + postfix), `while`, `for`, `match`, `enum` (plain + tagged unions), `struct` (fields, defaults, methods), `error` sets, `type`, `test`, `pub`/`extern`/`export`, `try`/`catch`/`??`, captures (`as`/`|val|`), `defer`/`errdefer`, `comptime`/`inline`, `=`/`=!`/`+=`/`-=`/`*=`, typed params, return types, `?T`/`*T`/`[]T`/`!T`, `@builtins`, array literals, pipe `|>`, range `..`, `break`/`continue`/`return`, `unreachable`/`undefined`, lambdas, struct literals (parse).
 
 ## Near-Term Roadmap
 

@@ -48,7 +48,7 @@ Primary spec reference:
 
 Syntax coverage:
 
-- declarations: `fun`, `sub`, `enum`, `struct`, `error`, `alias`, `test`, `use`
+- declarations: `fun`, `sub`, `enum`, `struct`, `error`, `type`, `test`, `use`
 - modifiers: `pub`, `extern`, `export` (stackable), `inline`, `comptime`
 - control flow: `if`/`else`/`else if` (prefix + postfix), `while`, `for`, `match`
 - captures: `as val`, `|val|` in `if`/`while`

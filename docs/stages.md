@@ -42,7 +42,7 @@ These features should stay in the rewriter rather than being pushed into the gra
 - routine declarations (`fun`, `sub`)
 - control flow (`if`, `while`, `for`, `match`)
 - bindings and assignments
-- type declarations (`enum`, `struct`, `error`, `alias`)
+- type declarations (`enum`, `struct`, `error`, `type`)
 - expression precedence via `@infix`
 - block structure via `INDENT`/`OUTDENT`
 
