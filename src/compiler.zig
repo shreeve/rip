@@ -615,7 +615,7 @@ pub const Compiler = struct {
         if (sexp != .list) return false;
         const items = sexp.list;
         if (items.len < 2 or items[0] != .tag) return false;
-        if (items[0].tag != .@"call" and items[0].tag != .@"await") return false;
+        if (items[0].tag != .@"call") return false;
         if (items[1] != .src) return false;
         const name = self.txt(items[1]);
         if (std.mem.eql(u8, name, "print")) return true;
@@ -636,7 +636,7 @@ pub const Compiler = struct {
             .list => |items| {
                 if (items.len < 2 or items[0] != .tag) return null;
                 switch (items[0].tag) {
-                    .@"call", .@"await" => {
+                    .@"call" => {
                         if (items[1] != .src) return null;
                         const name = self.txt(items[1]);
                         if (self.lookupFn(name)) |info| {
@@ -847,7 +847,7 @@ pub const Compiler = struct {
             },
             else => {
                 try self.writeIndent(w);
-                const is_call = (items[0].tag == .@"call" or items[0].tag == .@"await");
+                const is_call = items[0].tag == .@"call";
                 const is_dot_call = items[0].tag == .@"." and items.len >= 3;
                 if ((is_call and !self.isVoidCall(sexp)) or is_dot_call) try w.writeAll("_ = ");
                 try self.emitExpr(sexp, w);
@@ -881,7 +881,7 @@ pub const Compiler = struct {
                 const tag = items[0].tag;
                 const children = items[1..];
                 switch (tag) {
-                    .@"call", .@"await" => try self.emitCall(children, w),
+                    .@"call" => try self.emitCall(children, w),
 
                     .@"." => if (children.len >= 2) {
                         try self.emitExpr(children[0], w);
@@ -1341,7 +1341,7 @@ pub const Compiler = struct {
                 try w.writeAll("},\n");
             } else {
                 if (arm_body == .list and arm_body.list.len > 0 and arm_body.list[0] == .tag and
-                    (arm_body.list[0].tag == .@"call" or arm_body.list[0].tag == .@"await") and
+                    arm_body.list[0].tag == .@"call" and
                     !self.isVoidCall(arm_body))
                     try w.writeAll("_ = ");
                 try self.emitExpr(arm_body, w);

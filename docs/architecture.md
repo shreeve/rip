@@ -73,7 +73,7 @@ The `@lang` module (`src/rip.zig`) provides three things:
 2. **`keyword_as()`** -- maps identifier text to keyword IDs so the parser can promote `"fun"` to the `FUN` terminal when the parse state expects it
 3. **Rewriter** -- sits between the generated `BaseLexer` and the parser, handling indentation tracking (indent/outdent tokens), type annotation passthrough, and duplicate newline suppression
 
-### Current Grammar (53 rules)
+### Current Grammar (54 rules)
 
 ```
 program  body  stmt  decl  defn  block
@@ -85,7 +85,7 @@ suffix_if  coalesce  catch
 return  break  continue
 defer  errdefer  comptime  inline
 assign  const
-unary  call  args  atom  record  pair  lambda
+unary  call  args  term  atom  record  pair  lambda
 ```
 
 Key grammar features: `body` uses NEWLINE as separator (not terminator); `block` is `INDENT body OUTDENT`; `L(X)` handles comma-separated lists; `decl`/`defn` provides stackable modifiers; `members`/`member` shared by enum, struct, and error; `if` works in both prefix and postfix position; `pattern` nonterminal supports range and enum patterns in match arms; 3 audited conflicts (dangling else × 2, typed binding).

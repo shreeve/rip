@@ -35,7 +35,8 @@ These features should stay in the rewriter rather than being pushed into the gra
 - duplicate newline suppression
 - comment-line handling during indent changes
 - leading blank line suppression
-- future: implicit call inference, spacing-sensitive token splitting (`-` prefix vs infix)
+- spacing-sensitive minus classification (`-` prefix vs infix based on adjacency)
+- future: implicit call inference for other operators
 
 ## Grammar Responsibilities
 

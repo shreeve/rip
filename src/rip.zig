@@ -77,7 +77,6 @@ pub const Tag = enum(u8) {
 
     // Calls and access
     @"call",
-    @"await",
     @".",
     @"deref",
     @"index",
@@ -331,9 +330,36 @@ pub const Lexer = struct {
                 return tok;
             }
 
+            if (tok.cat == .minus) {
+                var classified = tok;
+                classified.cat = self.classifyMinus(tok);
+                self.last_cat = classified.cat;
+                return classified;
+            }
+
             self.last_cat = tok.cat;
             return tok;
         }
+    }
+
+    fn classifyMinus(self: *const Lexer, tok: Token) TokenCat {
+        const end = tok.pos + tok.len;
+        const space_after = end >= self.base.source.len or
+            self.base.source[end] == ' ' or self.base.source[end] == '\t' or
+            self.base.source[end] == '\n' or self.base.source[end] == '\r';
+        if (space_after) return .minus;
+        if (!canEndExpr(self.last_cat) or tok.pre > 0) return .minus_prefix;
+        return .minus;
+    }
+
+    fn canEndExpr(cat: TokenCat) bool {
+        return switch (cat) {
+            .ident, .integer, .real, .string_sq, .string_dq,
+            .@"true", .@"false",
+            .rparen, .rbracket, .rbrace,
+            => true,
+            else => false,
+        };
     }
 
     fn handleIndent(self: *Lexer, nl_tok: Token) Token {

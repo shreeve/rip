@@ -77,7 +77,7 @@ Another key design choice is that the core language can stay small while optiona
 
 ## Current Status
 
-The bootstrap compiler works end-to-end — 53-rule grammar, ~95% of day-to-day Zig expressible:
+The bootstrap compiler works end-to-end — 54-rule grammar, ~95% of day-to-day Zig expressible:
 
 ```bash
 ./bin/rip --run test/examples/hello.rip    # compile and run

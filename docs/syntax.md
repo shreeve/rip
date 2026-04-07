@@ -179,10 +179,14 @@ pub fun double x: i32 -> i32
 
 ## Calls
 
+Implicit calls accept atoms and prefix-negated/negated terms. Tight `-` and `!` are prefix; spaced `-` is subtraction.
+
 ```text
 # Implicit (no parens)
 add 1, 2
 print total
+print -42              # prefix negation (tight minus)
+print !done            # prefix not
 
 # Explicit parens
 add(1, 2)
@@ -200,8 +204,6 @@ ptr.*.field
 items[0]
 matrix[i]
 
-# Await
-fetch! url
 ```
 
 ## Operators

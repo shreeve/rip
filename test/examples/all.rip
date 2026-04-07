@@ -238,8 +238,8 @@ fun main -> !void                          # fun (main can return errors for try
   # Zig: std.debug.print("{any}\n", .{-42});
   #      std.debug.print("{any}\n", .{!false});
 
-  print(-42)                               # unary (neg) — parens needed for implicit call
-  print(!false)                            # unary (not)
+  print -42                                # unary (neg) — no parens needed
+  print !false                             # unary (not) — no parens needed
 
   # --- Literals ---
   #

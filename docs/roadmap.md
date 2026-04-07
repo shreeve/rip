@@ -38,7 +38,7 @@ Primary spec reference:
 
 ### What works now (v0.7-type-resolution)
 
-- 53-rule grammar, 3 audited conflicts, 368 parser states
+- 54-rule grammar, 3 audited conflicts, 371 parser states
 - grammar engine generates `src/parser.zig` from `rip.grammar`
 - rewriter handles indentation, type annotation passthrough, newline normalization
 - parser produces raw S-expressions directly
@@ -73,7 +73,7 @@ Type resolution:
 
 | Feature | Difficulty | Frequency |
 |---------|-----------|-----------|
-| Unary args in implicit calls | Medium | Common (needs grammar redesign, `L(unary)` causes S/R conflict) |
+| Await (`call!`) | Small | Deferred until Zig 0.16.0 restores async |
 | Labeled blocks | Medium | Rare |
 | Packed/extern struct | Small | Niche |
 | Multi-line strings | Medium | Niche |
