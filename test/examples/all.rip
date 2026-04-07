@@ -72,6 +72,19 @@ struct Config                              # struct, field (default)
   width: i32 = 800
   height: i32 = 600
 
+# --- Packed struct ---
+#
+# Zig: const Flags = packed struct {
+#          a: u1,
+#          b: u1,
+#          padding: u6,
+#      };
+
+packed struct Flags                        # packed struct
+  a: u1
+  b: u1
+  padding: u6
+
 # --- Struct with methods ---
 #
 # Zig: const Point = struct {
@@ -186,6 +199,15 @@ fun main -> !void                          # fun (main can return errors for try
   while n < 5                             # while, cond
     n += 1                                 # assign (+=)
   print n
+
+  # --- Labeled break ---
+  #
+  # Zig: outer: while (true) {
+  #          break :outer;
+  #      }
+
+  :outer while true                        # labeled statement
+    break :outer                           # break_to
 
   # --- For range ---
   #

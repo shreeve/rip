@@ -279,57 +279,25 @@ pub const Compiler = struct {
 
     fn emitStruct(self: *Compiler, children: []const Sexp, w: *Writer) Writer.Error!void {
         if (children.len < 1) return;
-        const name = self.txt(children[0]);
-        try w.print("const {s} = struct {{\n", .{name});
-        self.depth += 1;
-        for (children[1..]) |item| {
-            if (item == .list and item.list.len > 0 and item.list[0] == .tag) {
-                const tag = item.list[0].tag;
-                if (tag == .@":") {
-                    try self.writeIndent(w);
-                    try w.writeAll(self.txt(item.list[1]));
-                    try w.writeAll(": ");
-                    try self.emitTyperef(item.list[2], w);
-                    try w.writeAll(",\n");
-                    continue;
-                }
-                if (tag == .@"default") {
-                    try self.writeIndent(w);
-                    try w.writeAll(self.txt(item.list[1]));
-                    try w.writeAll(": ");
-                    try self.emitTyperef(item.list[2], w);
-                    try w.writeAll(" = ");
-                    try self.emitExpr(item.list[3], w);
-                    try w.writeAll(",\n");
-                    continue;
-                }
-                if (tag == .@"fun") {
-                    try w.writeAll("\n");
-                    try self.writeIndent(w);
-                    try self.emitFun(item.list[1..], w);
-                    continue;
-                }
-                if (tag == .@"sub") {
-                    try w.writeAll("\n");
-                    try self.writeIndent(w);
-                    try self.emitSub(item.list[1..], w);
-                    continue;
-                }
-            }
-            try self.writeIndent(w);
-            try w.writeAll(self.txt(item));
-            try w.writeAll(": i64,\n");
-        }
-        self.depth -= 1;
-        try w.writeAll("};\n");
+        try w.print("const {s} = struct {{\n", .{self.txt(children[0])});
+        try self.emitStructBody(children[1..], true, w);
     }
 
     fn emitExternStruct(self: *Compiler, children: []const Sexp, w: *Writer) Writer.Error!void {
         if (children.len < 1) return;
-        const name = self.txt(children[0]);
-        try w.print("const {s} = extern struct {{\n", .{name});
+        try w.print("const {s} = extern struct {{\n", .{self.txt(children[0])});
+        try self.emitStructBody(children[1..], false, w);
+    }
+
+    fn emitPackedStruct(self: *Compiler, children: []const Sexp, w: *Writer) Writer.Error!void {
+        if (children.len < 1) return;
+        try w.print("const {s} = packed struct {{\n", .{self.txt(children[0])});
+        try self.emitStructBody(children[1..], false, w);
+    }
+
+    fn emitStructBody(self: *Compiler, members: []const Sexp, allow_methods: bool, w: *Writer) Writer.Error!void {
         self.depth += 1;
-        for (children[1..]) |item| {
+        for (members) |item| {
             if (item == .list and item.list.len > 0 and item.list[0] == .tag) {
                 const tag = item.list[0].tag;
                 if (tag == .@":" or tag == .@"default" or tag == .@"aligned") {
@@ -349,38 +317,24 @@ pub const Compiler = struct {
                     try w.writeAll(",\n");
                     continue;
                 }
-            }
-            try self.writeIndent(w);
-            try w.writeAll(self.txt(item));
-            try w.writeAll(": i64,\n");
-        }
-        self.depth -= 1;
-        try w.writeAll("};\n");
-    }
-
-    fn emitPackedStruct(self: *Compiler, children: []const Sexp, w: *Writer) Writer.Error!void {
-        if (children.len < 1) return;
-        const name = self.txt(children[0]);
-        try w.print("const {s} = packed struct {{\n", .{name});
-        self.depth += 1;
-        for (children[1..]) |item| {
-            if (item == .list and item.list.len > 0 and item.list[0] == .tag) {
-                const tag = item.list[0].tag;
-                if (tag == .@":" or tag == .@"default" or tag == .@"aligned") {
-                    try self.writeIndent(w);
-                    try w.writeAll(self.txt(item.list[1]));
-                    try w.writeAll(": ");
-                    try self.emitTyperef(item.list[2], w);
-                    if (tag == .@"default" and item.list.len >= 4) {
-                        try w.writeAll(" = ");
-                        try self.emitExpr(item.list[3], w);
+                if (allow_methods) {
+                    if (tag == .@"fun") {
+                        try w.writeAll("\n");
+                        try self.writeIndent(w);
+                        try self.emitFun(item.list[1..], w);
+                        continue;
                     }
-                    try w.writeAll(",\n");
-                    continue;
+                    if (tag == .@"sub") {
+                        try w.writeAll("\n");
+                        try self.writeIndent(w);
+                        try self.emitSub(item.list[1..], w);
+                        continue;
+                    }
                 }
             }
             try self.writeIndent(w);
             try w.writeAll(self.txt(item));
+            if (allow_methods) try w.writeAll(": i64");
             try w.writeAll(",\n");
         }
         self.depth -= 1;
