@@ -36,71 +36,64 @@ Primary spec reference:
 - `docs/syntax.md`
 - `docs/stages.md`
 
-### What works now (v0.3-grammar)
+### What works now (v0.7-type-resolution)
 
-- 49-rule grammar, 2 audited conflicts, 306 parser states
+- 53-rule grammar, 3 audited conflicts, 368 parser states
 - grammar engine generates `src/parser.zig` from `rip.grammar`
 - rewriter handles indentation, type annotation passthrough, newline normalization
 - parser produces raw S-expressions directly
+- type resolution pre-pass: symbol table, void detection, `typeOf()`, declaration warnings
 - `src/compiler.zig` walks sexps and emits readable Zig source
 - `./bin/rip --run test/examples/hello.rip` compiles and runs end-to-end
 - all high-priority and medium-priority Zig target features implemented
+- real embedded protocol handler converted to Rip (test/examples/protocol.rip)
 
 Syntax coverage:
 
 - declarations: `fun`, `sub`, `enum`, `struct`, `error`, `type`, `test`, `use`
 - modifiers: `pub`, `extern`, `export` (stackable), `inline`, `comptime`
-- control flow: `if`/`else`/`else if` (prefix + postfix), `while`, `for`, `match`
+- control flow: `if`/`else`/`else if` (prefix + postfix), `while`, `for`, `for *item`, `match`
+- match patterns: literals, wildcards, enum `.variant`, range `a..b`
 - captures: `as val`, `|val|` in `if`/`while`
 - bindings: `=`, `=!`, `+=`, `-=`, `*=`, `/=`, scope-tracked `var`/`const`
 - operators: `??`, `catch`, `try`, `|>`, `..`, `**`, all arithmetic/comparison/logical
 - types: `?T`, `*T`, `[]T`, `!T`, typed params, return types, field defaults
 - atoms: integers, reals, strings, booleans, arrays, struct literals, lambdas, `@builtins`
-- features: tagged unions, enum values, struct methods, defer/errdefer, `_` discard
+- features: tagged unions, enum values, struct methods, defer/errdefer, `_` discard, pointer deref `ptr.*`
+
+Type resolution:
+
+- symbol table from fun/sub declarations (return type, visibility, param typing)
+- void-call detection: bare calls to void functions skip `_ = ` prefix
+- `typeOf()`: infers types for bools, `!expr`, calls to typed functions
+- var binding inference: `var x: i32` from callee return type (not just `i64`)
+- declaration warnings: untyped pub/extern params and return types
 
 ### Remaining grammar items
 
 | Feature | Difficulty | Frequency |
 |---------|-----------|-----------|
-| Pointer deref `ptr.*` | Small | Common with pointers |
-| Match with ranges | Small | Occasional |
-| Match with capture | Small | Occasional |
-| For with pointer capture | Small | Occasional |
+| Unary args in implicit calls | Medium | Common (needs grammar redesign, `L(unary)` causes S/R conflict) |
 | Labeled blocks | Medium | Rare |
 | Packed/extern struct | Small | Niche |
 | Multi-line strings | Medium | Niche |
-| Sentinel types `[*:0]T` | Medium | Niche |
 | Anonymous struct types | Medium | Occasional |
 
-### Rewriter enhancement
+### Compiler emission gaps
 
-| Feature | What's needed |
-|---------|--------------|
-| Unary args in implicit calls | Split `-`/`!` into prefix vs infix tokens in the rewriter so `print -42` works without parens. Well-defined fix: add `minus_prefix` token, detect spacing context in rewriter, update grammar. |
-
-### Compiler emission gaps (parse but don't compile yet)
-
-| Feature | What's needed |
-|---------|--------------|
-| Struct literals (`record`) | Emit `Name{ .field = val, ... }` |
-| Lambdas | Emit anonymous function |
-| Error union types (`!T`) | Emit in type positions |
-| Enum backing types | Emit `enum(u8)` for valued enums |
-| `/=` on signed ints | Emit `@divTrunc` instead |
-
-None of the above or below block writing normal programs. Add as needed.
+All v0 emission gaps resolved. Struct literals, lambdas, error union types, enum backing types, and `/=` → `@divTrunc` all compile end-to-end.
 
 ### What's next
 
 - normalization pass (raw sexps → canonical forms)
-- type resolution (strip-and-default → real inference)
-- source diagnostics pointing back to Rip locations
+- deeper type resolution (expression propagation, cross-assignment unification)
+- source diagnostics pointing back to Rip locations (Zig error line → Rip source line)
 
 Compiler stages:
 
 1. parse source directly into S-expressions ✓
 2. normalize S-expressions into a smaller canonical set
-3. resolve required types
+3. resolve required types (basic version) ✓
 4. emit `Zig` source ✓
 5. execute `zig run` ✓
 

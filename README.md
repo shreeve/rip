@@ -77,7 +77,7 @@ Another key design choice is that the core language can stay small while optiona
 
 ## Current Status
 
-The bootstrap compiler works end-to-end — 49-rule grammar, ~85% of day-to-day Zig expressible:
+The bootstrap compiler works end-to-end — 53-rule grammar, ~95% of day-to-day Zig expressible:
 
 ```bash
 ./bin/rip --run test/examples/hello.rip    # compile and run
@@ -85,7 +85,9 @@ The bootstrap compiler works end-to-end — 49-rule grammar, ~85% of day-to-day 
 ./bin/rip test/examples/hello.rip           # print S-expressions
 ```
 
-What works now: `fun`/`sub`, `if` (prefix + postfix), `while`, `for`, `match`, `enum` (plain + tagged unions), `struct` (fields, defaults, methods), `error` sets, `type`, `test`, `pub`/`extern`/`export`, `try`/`catch`/`??`, captures (`as`/`|val|`), `defer`/`errdefer`, `comptime`/`inline`, `=`/`=!`/`+=`/`-=`/`*=`, typed params, return types, `?T`/`*T`/`[]T`/`!T`, `@builtins`, array literals, pipe `|>`, range `..`, `break`/`continue`/`return`, `unreachable`/`undefined`, lambdas, struct literals (parse).
+What works now: `fun`/`sub`, `if` (prefix + postfix), `while`, `for`/`for *item`, `match` (with range and enum patterns), `enum` (plain + tagged unions), `struct` (fields, defaults, methods), `error` sets, `type`, `test`, `pub`/`extern`/`export`, `try`/`catch`/`??`, captures (`as`/`|val|`), `defer`/`errdefer`, `comptime`/`inline`, `=`/`=!`/`+=`/`-=`/`*=`, typed params, return types, `?T`/`*T`/`[]T`/`!T`, `@builtins`, array literals, pipe `|>`, range `..`, `break`/`continue`/`return`, `unreachable`/`undefined`, lambdas, struct literals, pointer deref `ptr.*`.
+
+Type resolution: symbol table from fun/sub declarations, void-call detection (clean `_ =` removal), `typeOf()` inference for var binding types, declaration warnings for untyped pub/extern boundaries.
 
 ## Near-Term Roadmap
 
@@ -93,7 +95,7 @@ What works now: `fun`/`sub`, `if` (prefix + postfix), `while`, `for`, `match`, `
 2. ~~Specify a tiny source language subset.~~ ✓
 3. ~~Lower that subset into raw S-expressions.~~ ✓
 4. Normalize S-expressions into canonical forms.
-5. Resolve required types for the minimal subset.
+5. ~~Resolve required types for the minimal subset.~~ ✓ (basic)
 6. ~~Emit valid Zig for the minimal subset.~~ ✓
 7. Only introduce a more explicit core IR when the compiler truly needs it.
 

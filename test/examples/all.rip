@@ -377,6 +377,19 @@ fun main -> !void                          # fun (main can return errors for try
   inline for j in 0..3                     # inline for (native, not while desugaring)
     _ = j
 
+  # --- Match with range and enum patterns ---
+  #
+  # Zig: switch (c) {
+  #          0...1 => ...,
+  #          2...9 => ...,
+  #          else => ...,
+  #      }
+
+  match c                                  # match with range pattern
+    0..1 => print "low"
+    2..9 => print "mid"                    # range_pattern
+    _ => print "high"
+
   # --- Defer ---
   #
   # Zig: defer std.debug.print("cleanup\n", .{});

@@ -1,9 +1,9 @@
 //! Rip Compiler — S-expression to Zig Source Emitter
 //!
 //! Walks the parsed S-expression tree and emits readable Zig source.
-//! Includes a type resolution pre-pass that builds a symbol table from
-//! function declarations (fun/sub return types) and uses it during
-//! emission to skip unnecessary `_ = ` on void-returning calls.
+//! Type resolution pre-pass builds a symbol table from fun/sub
+//! declarations for void-call detection, var binding type inference,
+//! and declaration diagnostics at public/extern boundaries.
 
 const std = @import("std");
 const parser = @import("parser.zig");
@@ -15,6 +15,15 @@ const Writer = std.Io.Writer;
 
 const MAX_NAMES = 128;
 
+const FnInfo = struct {
+    name: []const u8,
+    ret: Sexp,
+    is_void: bool,
+    is_pub: bool,
+    is_extern: bool,
+    has_untyped_params: bool,
+};
+
 pub const Compiler = struct {
     source: []const u8,
     depth: u32 = 0,
@@ -25,9 +34,8 @@ pub const Compiler = struct {
     bound: [MAX_NAMES][]const u8 = undefined,
     bound_count: usize = 0,
 
-    // Symbol table: function return types from pre-pass
-    fn_names: [MAX_NAMES][]const u8 = undefined,
-    fn_is_void: [MAX_NAMES]bool = undefined,
+    // Symbol table: function declarations from pre-pass
+    fn_info: [MAX_NAMES]FnInfo = undefined,
     fn_count: usize = 0,
 
     pub fn init(source: []const u8) Compiler {
@@ -44,6 +52,7 @@ pub const Compiler = struct {
         if (items.len == 0 or items[0] != .tag) return;
         if (items[0].tag != .@"module") return;
         self.buildSymbolTable(items[1..]);
+        self.emitDeclWarnings();
         try self.emitModule(items[1..], w);
     }
 
@@ -522,29 +531,59 @@ pub const Compiler = struct {
 
     fn buildSymbolTable(self: *Compiler, children: []const Sexp) void {
         for (children) |child| {
-            self.scanDeclTypes(child);
+            self.scanDeclTypes(child, false, false);
         }
     }
 
-    fn scanDeclTypes(self: *Compiler, sexp: Sexp) void {
+    fn scanDeclTypes(self: *Compiler, sexp: Sexp, is_pub: bool, is_extern: bool) void {
         if (sexp != .list) return;
         const items = sexp.list;
         if (items.len == 0 or items[0] != .tag) return;
         switch (items[0].tag) {
-            .@"sub" => if (items.len >= 2) {
-                self.addFnType(self.txt(items[1]), true);
+            .@"sub" => if (items.len >= 5) {
+                const params = items[2];
+                self.addFnInfo(.{
+                    .name = self.txt(items[1]),
+                    .ret = .nil,
+                    .is_void = true,
+                    .is_pub = is_pub,
+                    .is_extern = is_extern,
+                    .has_untyped_params = self.hasUntypedParams(params),
+                });
             },
-            .@"fun" => if (items.len >= 4) {
-                self.addFnType(self.txt(items[1]), self.isVoidType(items[3]));
+            .@"fun" => if (items.len >= 5) {
+                const ret = items[3];
+                const params = items[2];
+                self.addFnInfo(.{
+                    .name = self.txt(items[1]),
+                    .ret = ret,
+                    .is_void = self.isVoidType(ret),
+                    .is_pub = is_pub,
+                    .is_extern = is_extern,
+                    .has_untyped_params = self.hasUntypedParams(params),
+                });
             },
-            .@"pub", .@"export", .@"extern" => if (items.len > 1) {
-                self.scanDeclTypes(items[1]);
+            .@"pub", .@"export" => if (items.len > 1) {
+                self.scanDeclTypes(items[1], true, is_extern);
+            },
+            .@"extern" => if (items.len > 1) {
+                self.scanDeclTypes(items[1], is_pub, true);
             },
             .@"callconv" => if (items.len > 2) {
-                self.scanDeclTypes(items[2]);
+                self.scanDeclTypes(items[2], is_pub, is_extern);
             },
             else => {},
         }
+    }
+
+    fn hasUntypedParams(_: *const Compiler, params: Sexp) bool {
+        if (params == .nil) return false;
+        if (params != .list) return true;
+        for (params.list) |param| {
+            if (param != .list or param.list.len < 3 or param.list[0] != .tag or param.list[0].tag != .@":")
+                return true;
+        }
+        return false;
     }
 
     fn isVoidType(self: *const Compiler, ret: Sexp) bool {
@@ -558,12 +597,18 @@ pub const Compiler = struct {
         return false;
     }
 
-    fn addFnType(self: *Compiler, name: []const u8, is_void: bool) void {
+    fn addFnInfo(self: *Compiler, info: FnInfo) void {
         if (self.fn_count < MAX_NAMES) {
-            self.fn_names[self.fn_count] = name;
-            self.fn_is_void[self.fn_count] = is_void;
+            self.fn_info[self.fn_count] = info;
             self.fn_count += 1;
         }
+    }
+
+    fn lookupFn(self: *const Compiler, name: []const u8) ?FnInfo {
+        for (0..self.fn_count) |i| {
+            if (std.mem.eql(u8, self.fn_info[i].name, name)) return self.fn_info[i];
+        }
+        return null;
     }
 
     fn isVoidCall(self: *const Compiler, sexp: Sexp) bool {
@@ -574,10 +619,54 @@ pub const Compiler = struct {
         if (items[1] != .src) return false;
         const name = self.txt(items[1]);
         if (std.mem.eql(u8, name, "print")) return true;
-        for (0..self.fn_count) |i| {
-            if (std.mem.eql(u8, self.fn_names[i], name)) return self.fn_is_void[i];
-        }
+        if (self.lookupFn(name)) |info| return info.is_void;
         return false;
+    }
+
+    fn typeOf(self: *const Compiler, sexp: Sexp) ?Sexp {
+        switch (sexp) {
+            .src => |s| {
+                const text = self.source[s.pos..][0..s.len];
+                if (text.len > 0 and text[0] >= '0' and text[0] <= '9') return null;
+                if (text.len >= 2 and (text[0] == '\'' or text[0] == '"')) return null;
+                if (std.mem.eql(u8, text, "true") or std.mem.eql(u8, text, "false"))
+                    return Sexp{ .str = "bool" };
+                return null;
+            },
+            .list => |items| {
+                if (items.len < 2 or items[0] != .tag) return null;
+                switch (items[0].tag) {
+                    .@"call", .@"await" => {
+                        if (items[1] != .src) return null;
+                        const name = self.txt(items[1]);
+                        if (self.lookupFn(name)) |info| {
+                            if (info.is_void) return null;
+                            if (info.ret != .nil) return info.ret;
+                        }
+                        return null;
+                    },
+                    .@"neg" => return null,
+                    .@"not" => return Sexp{ .str = "bool" },
+                    else => return null,
+                }
+            },
+            else => return null,
+        }
+    }
+
+    fn emitDeclWarnings(self: *const Compiler) void {
+        for (0..self.fn_count) |i| {
+            const info = self.fn_info[i];
+            if (info.is_pub and info.has_untyped_params) {
+                std.debug.print("warning: pub function '{s}' has untyped parameters\n", .{info.name});
+            }
+            if (info.is_pub and !info.is_void and info.ret == .nil) {
+                std.debug.print("warning: pub function '{s}' has no explicit return type (defaults to i64)\n", .{info.name});
+            }
+            if (info.is_extern and info.has_untyped_params) {
+                std.debug.print("warning: extern function '{s}' has untyped parameters\n", .{info.name});
+            }
+        }
     }
 
     // =========================================================================
@@ -609,7 +698,7 @@ pub const Compiler = struct {
         const items = sexp.list;
         if (items.len == 0 or items[0] != .tag) return false;
         return switch (items[0].tag) {
-            .@"=", .@"const", .@"return", .@"if", .@"while", .@"for",
+            .@"=", .@"const", .@"return", .@"if", .@"while", .@"for", .@"for_ptr",
             .@"match", .@"break", .@"continue", .@"defer", .@"errdefer", .@"comptime", .@"inline", .@"zig",
             .@"typed_assign", .@"typed_const",
             .@"+=", .@"-=", .@"*=", .@"/=" => true,
@@ -645,6 +734,11 @@ pub const Compiler = struct {
             .@"for" => {
                 try self.writeIndent(w);
                 try self.emitFor(items[1..], w);
+                try w.writeAll("\n");
+            },
+            .@"for_ptr" => {
+                try self.writeIndent(w);
+                try self.emitForPtr(items[1..], w);
                 try w.writeAll("\n");
             },
             .@"match" => {
@@ -793,6 +887,11 @@ pub const Compiler = struct {
                         try self.emitExpr(children[0], w);
                         try w.writeAll(".");
                         try w.writeAll(self.txt(children[1]));
+                    },
+
+                    .@"deref" => if (children.len >= 1) {
+                        try self.emitExpr(children[0], w);
+                        try w.writeAll(".*");
                     },
 
                     .@"index" => if (children.len >= 2) {
@@ -1182,6 +1281,30 @@ pub const Compiler = struct {
         }
     }
 
+    fn emitForPtr(self: *Compiler, children: []const Sexp, w: *Writer) Writer.Error!void {
+        if (children.len < 4) return;
+        const name = self.txt(children[0]);
+        const collection = children[2];
+        const body = children[3];
+
+        try w.writeAll("for (");
+        try self.emitExpr(collection, w);
+        try w.writeAll(") |*");
+        try w.writeAll(name);
+        if (children[1] != .nil) {
+            try w.writeAll(", ");
+            try w.writeAll(self.txt(children[1]));
+        }
+        try w.writeAll("| {\n");
+
+        self.depth += 1;
+        try self.emitBody(body, false, w);
+        self.depth -= 1;
+
+        try self.writeIndent(w);
+        try w.writeAll("}");
+    }
+
     fn emitMatch(self: *Compiler, children: []const Sexp, w: *Writer) Writer.Error!void {
         if (children.len < 1) return;
 
@@ -1195,19 +1318,12 @@ pub const Compiler = struct {
             const arm = arm_sexp.list;
             if (arm.len < 4 or arm[0] != .tag) continue;
             // (arm pattern capture body) — capture can be nil
-            const pattern = self.txt(arm[1]);
+            const pat = arm[1];
             const capture = arm[2];
             const arm_body = arm[3];
 
             try self.writeIndent(w);
-            if (std.mem.eql(u8, pattern, "_")) {
-                try w.writeAll("else");
-            } else if (pattern.len > 0 and (pattern[0] >= '0' and pattern[0] <= '9')) {
-                try w.writeAll(pattern);
-            } else {
-                try w.writeAll(".");
-                try w.writeAll(pattern);
-            }
+            try self.emitPattern(pat, w);
 
             try w.writeAll(" => ");
             if (capture != .nil) {
@@ -1238,6 +1354,33 @@ pub const Compiler = struct {
         try w.writeAll("}");
     }
 
+    fn emitPattern(self: *Compiler, pat: Sexp, w: *Writer) Writer.Error!void {
+        if (pat == .list and pat.list.len > 0 and pat.list[0] == .tag) {
+            switch (pat.list[0].tag) {
+                .@"range_pattern" => if (pat.list.len >= 3) {
+                    try self.emitExpr(pat.list[1], w);
+                    try w.writeAll("...");
+                    try self.emitExpr(pat.list[2], w);
+                },
+                .@"enum_pattern" => if (pat.list.len >= 2) {
+                    try w.writeAll(".");
+                    try w.writeAll(self.txt(pat.list[1]));
+                },
+                else => try self.emitExpr(pat, w),
+            }
+        } else {
+            const text = self.txt(pat);
+            if (std.mem.eql(u8, text, "_")) {
+                try w.writeAll("else");
+            } else if (text.len > 0 and text[0] >= '0' and text[0] <= '9') {
+                try w.writeAll(text);
+            } else {
+                try w.writeAll(".");
+                try w.writeAll(text);
+            }
+        }
+    }
+
     // =========================================================================
     // Bindings
     // =========================================================================
@@ -1259,7 +1402,12 @@ pub const Compiler = struct {
             } else {
                 try w.writeAll("var ");
                 try self.emitExpr(children[0], w);
-                try w.writeAll(": i64");
+                if (self.typeOf(children[1])) |rhs_type| {
+                    try w.writeAll(": ");
+                    try self.emitTyperef(rhs_type, w);
+                } else {
+                    try w.writeAll(": i64");
+                }
             }
         }
         try w.writeAll(" = ");

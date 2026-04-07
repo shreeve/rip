@@ -104,6 +104,10 @@ for item in items
 # For with index
 for item, i in items
   print i
+
+# For with pointer capture (mutation)
+for *item in items
+  item.* += 1
 ```
 
 `break` and `continue` work as expected.
@@ -123,6 +127,18 @@ match value
   1
     print "one"
     doMore()
+  _ => print "other"
+
+# Range patterns
+match code
+  0..31 => print "control"
+  32..126 => print "printable"
+  _ => print "extended"
+
+# Enum patterns
+match color
+  .red => print "red"
+  .green => print "green"
   _ => print "other"
 ```
 
@@ -175,6 +191,10 @@ square(7)
 # Dot access
 point.x
 items.len
+
+# Pointer deref
+ptr.*
+ptr.*.field
 
 # Index access
 items[0]

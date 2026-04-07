@@ -10,7 +10,7 @@ For each compiler stage, what it owns. For the syntax surface itself, see `docs/
 2. **Rewriter** — in `rip.zig`. Indentation tracking (indent/outdent), type annotation passthrough, duplicate newline suppression, comment handling.
 3. **Parser** — generated SLR(1). Produces raw S-expressions directly.
 4. **Normalization** — (future) canonical structural forms.
-5. **Type resolution** — (future) preserve explicit types, infer missing ones, reject ambiguous cases.
+5. **Type resolution** — `compiler.zig` pre-pass. Builds symbol table from fun/sub declarations (return types, visibility, param typing). Used for void-call detection, var binding type inference, and declaration warnings.
 6. **Zig emission** — `compiler.zig`. Tag-based dispatch, walks sexps, emits readable Zig source.
 
 ## Token Metadata Contract
@@ -50,7 +50,10 @@ These features should stay in the rewriter rather than being pushed into the gra
 
 - Tag-based dispatch on S-expression nodes
 - Scope tracking (var vs const inference via pre-scan)
-- Type-aware emission (explicit types from source, defaults for untyped)
+- Type resolution pre-pass (symbol table from fun/sub declarations)
+- Type-aware emission (explicit types from source, inferred from callee return types, defaults for untyped)
+- Void-call detection (skip `_ = ` prefix for void-returning calls)
+- Declaration diagnostics (warnings for untyped pub/extern boundaries)
 - Zig-specific lowering (print mapping, for-range to while, `??` to orelse, captures to |val| pipes)
 
 ## Notes
