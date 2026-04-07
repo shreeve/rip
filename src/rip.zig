@@ -321,16 +321,29 @@ pub const Lexer = struct {
                 ws += 1;
             } else break;
         }
-        const at_eof = self.base.pos + ws >= self.base.source.len;
-        const next_ch = if (!at_eof) self.base.source[self.base.pos + ws] else 0;
-        const next_is_empty = !at_eof and (next_ch == '\n' or next_ch == '\r');
-        if (next_is_empty) {
-            return nl_tok;
+        // Scan past blank lines to find the first content line's indent
+        var line_start = self.base.pos;
+        while (line_start + ws < self.base.source.len) {
+            const ch = self.base.source[line_start + ws];
+            if (ch == '\n' or ch == '\r') {
+                line_start = line_start + ws + 1;
+                ws = 0;
+                while (line_start + ws < self.base.source.len) {
+                    const wc = self.base.source[line_start + ws];
+                    if (wc == ' ' or wc == '\t') {
+                        ws += 1;
+                    } else break;
+                }
+                continue;
+            }
+            break;
         }
-        // Comment-only lines still participate in indentation changes
-        // but don't emit a newline at the same indent level
-        if (next_ch == '#' and ws == self.indent_level) {
-            return nl_tok;
+        const at_eof = line_start + ws >= self.base.source.len;
+        if (!at_eof) {
+            const next_ch = self.base.source[line_start + ws];
+            if (next_ch == '#' and ws == self.indent_level) {
+                return nl_tok;
+            }
         }
         if (at_eof) {
             ws = 0;
