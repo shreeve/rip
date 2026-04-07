@@ -89,6 +89,7 @@ pub const Compiler = struct {
         self.resetScope();
         self.scanAssignments(body);
 
+        if (std.mem.eql(u8, name, "main")) try w.writeAll("pub ");
         try w.writeAll("fn ");
         try w.writeAll(name);
         try w.writeAll("(");
@@ -615,6 +616,14 @@ pub const Compiler = struct {
                         if (children.len > 0) try self.emitExpr(children[0], w);
                     },
 
+                    .@"comptime" => {
+                        try w.writeAll("comptime ");
+                        if (children.len > 0) try self.emitExpr(children[0], w);
+                    },
+                    .@"inline" => {
+                        try w.writeAll("inline ");
+                        if (children.len > 0) try self.emitExpr(children[0], w);
+                    },
                     .@"null" => try w.writeAll("null"),
                     .@"unreachable" => try w.writeAll("unreachable"),
                     .@"undefined" => try w.writeAll("undefined"),

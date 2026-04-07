@@ -137,7 +137,7 @@ test "add works"                           # test
 #
 # Zig: pub fn main() void {
 
-sub main                                   # sub (block only)
+fun main -> !void                          # fun (main can return errors for try/errdefer)
 
   # --- Bindings ---
   #
@@ -350,12 +350,29 @@ sub main                                   # sub (block only)
 
   # (break expr used inside loops/blocks to return values)
 
-  # --- Still need specific runtime contexts ---
+  # --- Try ---
   #
-  # try:        try something()            → needs error-returning main
-  # errdefer:   errdefer cleanup()         → needs error-returning main
-  # inline:     inline for i in 0..5       → needs comptime-known slice
-  # comptime:   comptime expr              → needs comptime-compatible expr
+  # Zig: const tried = try maybe_fail(42);
+
+  tried = try maybe_fail(42)               # unary (try)
+  print tried
+
+  # --- Errdefer ---
+  #
+  # Zig: errdefer std.debug.print("error cleanup\n", .{});
+
+  errdefer print "error cleanup"           # errdefer
+
+  # --- Comptime expression ---
+  #
+  # Zig: const ct = comptime 1 + 2;
+
+  ct = comptime 1 + 2                      # comptime in expression position
+  print ct
+
+  # --- Inline (parse-tested, needs comptime-known slice) ---
+  #
+  # inline for i in items                  → inline for (items) |i|
 
   # --- Defer ---
   #
