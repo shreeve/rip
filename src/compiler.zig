@@ -1,8 +1,9 @@
 //! Rip Compiler — S-expression to Zig Source Emitter
 //!
 //! Walks the parsed S-expression tree and emits readable Zig source.
-//! This is the v0 bootstrap emitter: fun params/returns default to i64,
-//! sub returns default to void. Type resolution is a later pass.
+//! Includes a type resolution pre-pass that builds a symbol table from
+//! function declarations (fun/sub return types) and uses it during
+//! emission to skip unnecessary `_ = ` on void-returning calls.
 
 const std = @import("std");
 const parser = @import("parser.zig");
@@ -24,6 +25,11 @@ pub const Compiler = struct {
     bound: [MAX_NAMES][]const u8 = undefined,
     bound_count: usize = 0,
 
+    // Symbol table: function return types from pre-pass
+    fn_names: [MAX_NAMES][]const u8 = undefined,
+    fn_is_void: [MAX_NAMES]bool = undefined,
+    fn_count: usize = 0,
+
     pub fn init(source: []const u8) Compiler {
         return .{ .source = source };
     }
@@ -37,6 +43,7 @@ pub const Compiler = struct {
         const items = sexp.list;
         if (items.len == 0 or items[0] != .tag) return;
         if (items[0].tag != .@"module") return;
+        self.buildSymbolTable(items[1..]);
         try self.emitModule(items[1..], w);
     }
 
@@ -510,6 +517,70 @@ pub const Compiler = struct {
     }
 
     // =========================================================================
+    // Type resolution pre-pass
+    // =========================================================================
+
+    fn buildSymbolTable(self: *Compiler, children: []const Sexp) void {
+        for (children) |child| {
+            self.scanDeclTypes(child);
+        }
+    }
+
+    fn scanDeclTypes(self: *Compiler, sexp: Sexp) void {
+        if (sexp != .list) return;
+        const items = sexp.list;
+        if (items.len == 0 or items[0] != .tag) return;
+        switch (items[0].tag) {
+            .@"sub" => if (items.len >= 2) {
+                self.addFnType(self.txt(items[1]), true);
+            },
+            .@"fun" => if (items.len >= 4) {
+                self.addFnType(self.txt(items[1]), self.isVoidType(items[3]));
+            },
+            .@"pub", .@"export", .@"extern" => if (items.len > 1) {
+                self.scanDeclTypes(items[1]);
+            },
+            .@"callconv" => if (items.len > 2) {
+                self.scanDeclTypes(items[2]);
+            },
+            else => {},
+        }
+    }
+
+    fn isVoidType(self: *const Compiler, ret: Sexp) bool {
+        if (ret == .nil) return false;
+        if (ret == .src) return std.mem.eql(u8, self.txt(ret), "void");
+        if (ret == .list) {
+            const items = ret.list;
+            if (items.len >= 2 and items[0] == .tag and items[0].tag == .@"error_union")
+                return self.isVoidType(items[1]);
+        }
+        return false;
+    }
+
+    fn addFnType(self: *Compiler, name: []const u8, is_void: bool) void {
+        if (self.fn_count < MAX_NAMES) {
+            self.fn_names[self.fn_count] = name;
+            self.fn_is_void[self.fn_count] = is_void;
+            self.fn_count += 1;
+        }
+    }
+
+    fn isVoidCall(self: *const Compiler, sexp: Sexp) bool {
+        if (sexp != .list) return false;
+        const items = sexp.list;
+        if (items.len < 2 or items[0] != .tag) return false;
+        if (items[0].tag != .@"call" and items[0].tag != .@"await") return false;
+        if (items[1] != .src) return false;
+        const name = self.txt(items[1]);
+        if (std.mem.eql(u8, name, "print")) return true;
+        for (0..self.fn_count) |i| {
+            if (std.mem.eql(u8, self.fn_names[i], name)) return self.fn_is_void[i];
+        }
+        return false;
+    }
+
+    // =========================================================================
     // Block body
     // =========================================================================
 
@@ -682,11 +753,9 @@ pub const Compiler = struct {
             },
             else => {
                 try self.writeIndent(w);
-                // Auto-discard: bare call statements get _ = prefix
-                // so Zig doesn't complain about unused return values
                 const is_call = (items[0].tag == .@"call" or items[0].tag == .@"await");
                 const is_dot_call = items[0].tag == .@"." and items.len >= 3;
-                if (is_call or is_dot_call) try w.writeAll("_ = ");
+                if ((is_call and !self.isVoidCall(sexp)) or is_dot_call) try w.writeAll("_ = ");
                 try self.emitExpr(sexp, w);
                 try w.writeAll(";\n");
             },
@@ -1155,9 +1224,9 @@ pub const Compiler = struct {
                 try self.writeIndent(w);
                 try w.writeAll("},\n");
             } else {
-                // Auto-discard calls in one-liner match arms
                 if (arm_body == .list and arm_body.list.len > 0 and arm_body.list[0] == .tag and
-                    (arm_body.list[0].tag == .@"call" or arm_body.list[0].tag == .@"await"))
+                    (arm_body.list[0].tag == .@"call" or arm_body.list[0].tag == .@"await") and
+                    !self.isVoidCall(arm_body))
                     try w.writeAll("_ = ");
                 try self.emitExpr(arm_body, w);
                 try w.writeAll(",\n");
