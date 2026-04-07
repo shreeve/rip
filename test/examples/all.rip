@@ -1,31 +1,87 @@
 # Comprehensive rule coverage test — every rule that compiles
-# 46 of 49 grammar rules exercised (record, pair, lambda parse-only)
+# 40+ of 49 grammar rules exercised (record, pair, lambda parse-only)
+
+# --- Preamble ---
+#
+# Zig: const std = @import("std");
 
 use std                                    # use, name
 
+# --- Type alias ---
+#
+# Zig: const Count = i64;
+
 alias Count = i64                          # alias, type
+
+# --- Error set ---
+#
+# Zig: const AppError = error{
+#          NotFound,
+#          InvalidInput,
+#      };
 
 error AppError                             # errors, members, member
   NotFound
   InvalidInput
+
+# --- Plain enum ---
+#
+# Zig: const Color = enum {
+#          red,
+#          green,
+#          blue,
+#      };
 
 enum Color                                 # enum (plain)
   red
   green
   blue
 
+# --- Tagged union (enum with typed variants) ---
+#
+# Zig: const Result = union(enum) {
+#          ok: i32,
+#          err: []u8,
+#          none: void,
+#      };
+
 enum Result                                # enum (tagged union → union(enum))
-  ok: i32                                  # member (typed)
+  ok: i32                                  # member (typed via field)
   err: []u8                                # type (slice)
   none
+
+# --- Enum with explicit values (parse-tested) ---
+#
+# Zig: const Priority = enum(u8) {
+#          low = 0,
+#          high = 1,
+#      };
 
 # enum Priority                            # member (valued) — needs backing type for Zig
 #   low = 0
 #   high = 1
 
+# --- Struct with defaults ---
+#
+# Zig: const Config = struct {
+#          width: i32 = 800,
+#          height: i32 = 600,
+#      };
+
 struct Config                              # struct, field (default)
   width: i32 = 800
   height: i32 = 600
+
+# --- Struct with methods ---
+#
+# Zig: const Point = struct {
+#          x: i64,
+#          y: i64,
+#
+#          fn sum(self: Point) i64 {
+#              return self.x + self.y;
+#          }
+#      };
 
 struct Point                               # struct with methods
   x: i64                                   # field (typed)
@@ -34,26 +90,65 @@ struct Point                               # struct with methods
   fun sum self: Point -> i64               # fun inside struct, params, returns, type
     self.x + self.y
 
+# --- Functions ---
+#
+# Zig: fn add(a: i32, b: i32) i32 {
+#          return a + b;
+#      }
+
 fun add a: i32, b: i32 -> i32             # fun (params + returns)
   a + b
+
+# Zig: fn square(x: i64) i64 {
+#          return x * x;
+#      }
 
 fun square x                               # fun (params only)
   x * x
 
+# --- Modifiers ---
+#
+# Zig: pub fn double(x: i32) i32 {
+#          return x * 2;
+#      }
+
 pub fun double x: i32 -> i32              # decl (pub), defn
   x * 2
 
+# --- Test block ---
+#
+# Zig: test "add works" {
+#          _ = add(2, 3);
+#      }
+
 test "add works"                           # test
-  _ = add(2, 3)                            # call (parens), args, const (=!)
+  _ = add(2, 3)                            # call (parens), args, discard _
+
+# --- Main ---
+#
+# Zig: pub fn main() void {
 
 sub main                                   # sub (block only)
-  # bindings
+  # --- Bindings ---
+  #
+  # Zig: const result = add(1, 2);
+  #      const limit = 100;
+
   result = add(1, 2)                       # assign (=), call
   limit =! 100                             # const (=!)
   print result
   print limit
 
-  # if prefix: block, else-if, else
+  # --- If prefix: block, else-if, else ---
+  #
+  # Zig: if (result > 2) {
+  #          ...
+  #      } else if (result > 0) {
+  #          ...
+  #      } else {
+  #          ...
+  #      }
+
   if result > 2                            # if, cond, block
     print "big"
   else if result > 0                       # if/else if chain
@@ -61,22 +156,41 @@ sub main                                   # sub (block only)
   else
     print "small"
 
-  # if postfix: guard and value
+  # --- If postfix: guard and value ---
+  #
+  # Zig: if (true) { ... }
+  #      const x = if (true) 42 else 0;
+
   print "yes" if true                      # suffix_if
   x = 42 if true else 0                   # suffix_if (value)
   print x
 
-  # while
+  # --- While ---
+  #
+  # Zig: var n: i64 = 0;
+  #      while (n < 5) { n += 1; }
+
   n = 0
   while n < 5                             # while, cond
     n += 1                                 # assign (+=)
   print n
 
-  # for range
-  for i in 0..3                            # for (range), name, @infix (..)
+  # --- For range ---
+  #
+  # Zig: { var i: i64 = 0;
+  #        while (i < 3) : (i += 1) { ... } }
+
+  for i in 0..3                            # for (range), @infix (..)
     print i
 
-  # match: single-line and block arms
+  # --- Match ---
+  #
+  # Zig: switch (c) {
+  #          0 => ...,
+  #          1 => { ... },
+  #          else => ...,
+  #      }
+
   c = 1
   match c                                  # match, arms
     0 => print "zero"                      # arm (=> expr)
@@ -84,70 +198,94 @@ sub main                                   # sub (block only)
       print "one"                          # arm (block)
     _ => print "other"                     # arm (wildcard)
 
-  # compound assignments
+  # --- Compound assignments ---
+  #
+  # Zig: var v: i64 = 10;
+  #      v -= 1;
+  #      v *= 2;
+
   v = 10
   v -= 1                                   # assign (-=)
   v *= 2                                   # assign (*=)
   # v /= 3                                 # assign (/=) — Zig rejects /= on signed integers
   print v
 
-  # unary
-  print(-42)                               # unary (neg) — parens needed, else binary minus
+  # --- Unary ---
+  #
+  # Zig: std.debug.print("{any}\n", .{-42});
+  #      std.debug.print("{any}\n", .{!false});
+
+  print(-42)                               # unary (neg) — parens needed for implicit call
   print(!false)                            # unary (not)
 
-  # boolean, real, string literals
+  # --- Literals ---
+  #
+  # Zig: std.debug.print("{any}\n", .{true});
+  #      std.debug.print("{any}\n", .{3.14});
+  #      std.debug.print("single quoted\n", .{});
+
   print true                               # atom (TRUE)
   print 3.14                               # atom (REAL)
   print 'single quoted'                    # atom (STRING_SQ → converted to "")
 
-  # parenthesized expression
+  # --- Parenthesized expression ---
+  #
+  # Zig: std.debug.print("{any}\n", .{(1 + 2) * 3});
+
   print((1 + 2) * 3)                       # atom (parens), @infix (+, *)
 
-  # array literal
+  # --- Array literal ---
+  #
+  # Zig: const nums = [_]i64{ 10, 20, 30 };
+
   nums = [10, 20, 30]                      # atom (array)
 
-  # dot access and index access
+  # --- Dot access and index ---
+  #
+  # Zig: std.debug.print("{any}\n", .{nums.len});
+  #      std.debug.print("{any}\n", .{nums[0]});
+
   print(nums.len)                          # call (dot)
   print(nums[0])                           # call (index)
 
-  # pipe operator
+  # --- Pipe operator ---
+  #
+  # Zig: const val = square(7);
+
   val = 7 |> square                        # @infix (|>)
   print val
 
-  # power operator
+  # --- Power operator ---
+  #
+  # Zig: std.debug.print("{any}\n", .{square(3)});
+
   print(square(3))                         # @infix (**)
 
-  # coalesce, catch, try (parse-tested, need error context)
-  # y = maybe ?? 0                         # coalesce
-  # z = risky() catch 0                    # catch
-  # z = risky() catch as err handle(err)   # catch (with capture)
-  # w = try something()                    # unary (try)
+  # --- Parse-tested features (need specific contexts to compile) ---
+  #
+  # coalesce:   y = maybe ?? 0             → Zig: maybe orelse 0
+  # catch:      z = risky() catch 0        → Zig: risky() catch 0
+  # catch as:   z = risky() catch as e f(e)→ Zig: risky() catch |e| f(e)
+  # try:        w = try something()        → Zig: try something()
+  # if capture: if opt as val / if opt |val| → Zig: if (opt) |val|
+  # errdefer:   errdefer cleanup()         → Zig: errdefer cleanup()
+  # inline:     inline for i in 0..5       → Zig: inline for (0..5) |i|
+  # comptime:   comptime expr              → Zig: comptime expr
+  # record:     p = Point { x: 1, y: 2 }  → Zig: Point{ .x = 1, .y = 2 }
+  # lambda:     fn x                       → Zig: anonymous function
+  # builtin:    @intCast(42)               → Zig: @intCast(42)
 
-  # if/while with capture (parse-tested, need optionals)
-  # if optional as val                     # cond (as)
-  #   print val
-  # if optional |val|                      # cond (|val|)
-  #   print val
+  # --- Defer ---
+  #
+  # Zig: defer std.debug.print("cleanup\n", .{});
 
-  # defer
   defer print "cleanup"                    # defer
-  # errdefer print "error cleanup"         # errdefer — needs error-returning context
 
-  # unreachable and undefined
+  # --- Unreachable ---
+  #
+  # Zig: if (false) { unreachable; }
+
   if false
     unreachable                            # atom (UNREACHABLE)
-
-  # inline, comptime (parse-tested, need specific contexts)
-  # inline for i in 0..5                   # inline
-  #   print i
-  # comptime expr                          # comptime
-
-  # struct literal, lambda (parse-tested, need compiler emission)
-  # p = Point { x: 1, y: 2 }              # record, pair
-  # fn x                                   # lambda
-  #   x + 1
-
-  # builtin (parse-tested)
-  # @intCast(42)                           # atom (builtin)
 
   print "done"
