@@ -50,16 +50,16 @@ enum Result                                # enum (tagged union → union(enum))
   err: []u8                                # type (slice)
   none
 
-# --- Enum with explicit values (parse-tested) ---
+# --- Enum with explicit values ---
 #
-# Zig: const Priority = enum(u8) {
+# Zig: const Priority = enum(i64) {
 #          low = 0,
 #          high = 1,
 #      };
 
-# enum Priority                            # member (valued) — needs backing type for Zig
-#   low = 0
-#   high = 1
+enum Priority                              # member (valued)
+  low = 0
+  high = 1
 
 # --- Struct with defaults ---
 #
@@ -105,6 +105,15 @@ fun add a: i32, b: i32 -> i32             # fun (params + returns)
 
 fun square x                               # fun (params only)
   x * x
+
+# --- Error union return type ---
+#
+# Zig: fn maybe_fail(x: i64) !i64 {
+#          return x;
+#      }
+
+fun maybe_fail x: i64 -> !i64             # type (error_union)
+  x
 
 # --- Modifiers ---
 #
@@ -261,19 +270,38 @@ sub main                                   # sub (block only)
 
   print(square(3))                         # @infix (**)
 
-  # --- Parse-tested features (need specific contexts to compile) ---
+  # --- Struct literal ---
+  #
+  # Zig: const p = Point{ .x = 10, .y = 20 };
+
+  p = Point { x: 10, y: 20 }              # record, pair
+  print(p.x)
+
+  # --- Lambda ---
+  #
+  # Zig: const inc = struct { fn f(n: i64) i64 { return n + 1; } }.f;
+
+  inc = fn z
+    z + 1                                 # lambda
+  print(inc(5))
+
+  # --- @builtin ---
+  #
+  # Zig: const casted = @as(i64, 42);
+
+  casted = @as(i64, 42)                   # atom (builtin)
+  print casted
+
+  # --- Parse-tested features (need specific runtime context) ---
   #
   # coalesce:   y = maybe ?? 0             → Zig: maybe orelse 0
   # catch:      z = risky() catch 0        → Zig: risky() catch 0
   # catch as:   z = risky() catch as e f(e)→ Zig: risky() catch |e| f(e)
   # try:        w = try something()        → Zig: try something()
-  # if capture: if opt as val / if opt |val| → Zig: if (opt) |val|
+  # if capture: if opt as val              → Zig: if (opt) |val|
   # errdefer:   errdefer cleanup()         → Zig: errdefer cleanup()
   # inline:     inline for i in 0..5       → Zig: inline for (0..5) |i|
   # comptime:   comptime expr              → Zig: comptime expr
-  # record:     p = Point { x: 1, y: 2 }  → Zig: Point{ .x = 1, .y = 2 }
-  # lambda:     fn x                       → Zig: anonymous function
-  # builtin:    @intCast(42)               → Zig: @intCast(42)
 
   # --- Defer ---
   #

@@ -193,7 +193,17 @@ pub const Compiler = struct {
             self.depth -= 1;
             try w.writeAll("};\n");
         } else {
-            try w.print("const {s} = enum {{\n", .{name});
+            var has_valued = false;
+            for (members) |m| {
+                if (m == .list and m.list.len > 0 and m.list[0] == .tag and
+                    m.list[0].tag == .@"valued")
+                    has_valued = true;
+            }
+            if (has_valued) {
+                try w.print("const {s} = enum(i64) {{\n", .{name});
+            } else {
+                try w.print("const {s} = enum {{\n", .{name});
+            }
             self.depth += 1;
             for (members) |m| {
                 try self.writeIndent(w);
@@ -310,6 +320,10 @@ pub const Compiler = struct {
                     },
                     .@"slice" => {
                         try w.writeAll("[]");
+                        try self.emitTyperef(items[1], w);
+                    },
+                    .@"error_union" => {
+                        try w.writeAll("!");
                         try self.emitTyperef(items[1], w);
                     },
                     else => try self.emitExpr(sexp, w),
@@ -590,6 +604,62 @@ pub const Compiler = struct {
                     .@"unreachable" => try w.writeAll("unreachable"),
                     .@"undefined" => try w.writeAll("undefined"),
 
+                    .@"record" => {
+                        if (children.len > 0) try w.writeAll(self.txt(children[0]));
+                        try w.writeAll("{ ");
+                        for (children[1..], 0..) |p, i| {
+                            if (i > 0) try w.writeAll(", ");
+                            if (p == .list and p.list.len >= 3 and
+                                p.list[0] == .tag and p.list[0].tag == .@"pair")
+                            {
+                                try w.writeAll(".");
+                                try w.writeAll(self.txt(p.list[1]));
+                                try w.writeAll(" = ");
+                                try self.emitExpr(p.list[2], w);
+                            }
+                        }
+                        try w.writeAll(" }");
+                    },
+
+                    .@"lambda" => {
+                        // (lambda params returns:_ body)
+                        try w.writeAll("struct { fn f(");
+                        if (children.len >= 3 and children[0] != .nil) {
+                            try self.emitParams(children[0], w);
+                        }
+                        try w.writeAll(") ");
+                        if (children.len >= 3 and children[1] != .nil) {
+                            try self.emitTyperef(children[1], w);
+                        } else {
+                            try w.writeAll("i64");
+                        }
+                        try w.writeAll(" { return ");
+                        if (children.len >= 3) {
+                            // body is a block — emit last expression
+                            const body = children[2];
+                            if (isBlock(body) and body.list.len >= 2) {
+                                try self.emitExpr(body.list[body.list.len - 1], w);
+                            }
+                        } else if (children.len >= 1) {
+                            const body = children[children.len - 1];
+                            if (isBlock(body) and body.list.len >= 2) {
+                                try self.emitExpr(body.list[body.list.len - 1], w);
+                            }
+                        }
+                        try w.writeAll("; } }.f");
+                    },
+
+                    .@"builtin" => {
+                        try w.writeAll("@");
+                        if (children.len > 0) try w.writeAll(self.txt(children[0]));
+                        try w.writeAll("(");
+                        for (children[1..], 0..) |arg, i| {
+                            if (i > 0) try w.writeAll(", ");
+                            try self.emitExpr(arg, w);
+                        }
+                        try w.writeAll(")");
+                    },
+
                     .@"??" => if (children.len >= 2) {
                         try self.emitExpr(children[0], w);
                         try w.writeAll(" orelse ");
@@ -615,17 +685,6 @@ pub const Compiler = struct {
                         try self.emitExpr(children[1], w);
                         try w.writeAll(" else ");
                         try self.emitExpr(children[2], w);
-                    },
-
-                    .@"builtin" => {
-                        try w.writeAll("@");
-                        if (children.len > 0) try w.writeAll(self.txt(children[0]));
-                        try w.writeAll("(");
-                        for (children[1..], 0..) |arg, i| {
-                            if (i > 0) try w.writeAll(", ");
-                            try self.emitExpr(arg, w);
-                        }
-                        try w.writeAll(")");
                     },
 
                     .@"neg" => {
