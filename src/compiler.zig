@@ -395,6 +395,12 @@ pub const Compiler = struct {
                         try w.writeAll("[*]");
                         try self.emitTyperef(items[1], w);
                     },
+                    .@"array_type" => if (items.len >= 3) {
+                        try w.writeAll("[");
+                        try self.emitExpr(items[1], w);
+                        try w.writeAll("]");
+                        try self.emitTyperef(items[2], w);
+                    },
                     .@"sentinel_ptr" => if (items.len >= 3) {
                         try w.writeAll("[*:");
                         try self.emitExpr(items[1], w);

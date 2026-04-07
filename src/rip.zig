@@ -28,6 +28,7 @@ pub const Tag = enum(u8) {
     @"volatile_ptr",
     @"many_ptr",
     @"sentinel_ptr",
+    @"array_type",
     @"aligned",
     @"errors",
     @"test",

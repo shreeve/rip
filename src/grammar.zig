@@ -1761,10 +1761,36 @@ const LexerGenerator = struct {
             );
         }
 
-        // Integer part
+        // Integer part (with hex/binary/octal prefix support)
         try self.write(
             \\
-            \\        // Integer part
+            \\        // Check for 0x, 0b, 0o prefixes
+            \\        if (self.source[self.pos] == '0' and self.pos + 1 < self.source.len) {
+            \\            const prefix = self.source[self.pos + 1];
+            \\            if (prefix == 'x' or prefix == 'X') {
+            \\                self.pos += 2;
+            \\                while (self.pos < self.source.len) {
+            \\                    const hc = self.source[self.pos];
+            \\                    if ((hc >= '0' and hc <= '9') or (hc >= 'a' and hc <= 'f') or (hc >= 'A' and hc <= 'F') or hc == '_') {
+            \\                        self.pos += 1;
+            \\                    } else break;
+            \\                }
+            \\                return Token{ .cat = .@"integer", .pre = ws, .pos = start, .len = @intCast(self.pos - start) };
+            \\            } else if (prefix == 'b' or prefix == 'B') {
+            \\                self.pos += 2;
+            \\                while (self.pos < self.source.len and (self.source[self.pos] == '0' or self.source[self.pos] == '1' or self.source[self.pos] == '_')) {
+            \\                    self.pos += 1;
+            \\                }
+            \\                return Token{ .cat = .@"integer", .pre = ws, .pos = start, .len = @intCast(self.pos - start) };
+            \\            } else if (prefix == 'o' or prefix == 'O') {
+            \\                self.pos += 2;
+            \\                while (self.pos < self.source.len and self.source[self.pos] >= '0' and self.source[self.pos] <= '7') {
+            \\                    self.pos += 1;
+            \\                }
+            \\                return Token{ .cat = .@"integer", .pre = ws, .pos = start, .len = @intCast(self.pos - start) };
+            \\            }
+            \\        }
+            \\        // Decimal integer
             \\        if (isDigit(self.source[self.pos])) {
             \\            while (self.pos < self.source.len and isDigit(self.source[self.pos])) {
             \\                self.pos += 1;

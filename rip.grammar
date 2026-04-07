@@ -277,6 +277,7 @@ type     = name
          | "*"                  type        → (ptr 2)
          | "*" VOLATILE         type        → (volatile_ptr 3)
          | "["              "]" type        → (slice 3)
+         | "[" INTEGER      "]" type        → (array_type 2 4)
          | "[" "*"          "]" type        → (many_ptr 4)
          | "[" "*" ":" atom "]" type        → (sentinel_ptr 4 6)
 
