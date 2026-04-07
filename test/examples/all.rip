@@ -219,7 +219,7 @@ sub main                                   # sub (block only)
   v = 10
   v -= 1                                   # assign (-=)
   v *= 2                                   # assign (*=)
-  # v /= 3                                 # assign (/=) — Zig rejects /= on signed integers
+  v /= 3                                   # assign (/=) → @divTrunc
   print v
 
   # --- Unary ---

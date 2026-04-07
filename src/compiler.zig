@@ -529,10 +529,19 @@ pub const Compiler = struct {
                 try self.emitBinding(items[0].tag, items[1..], w);
                 try w.writeAll(";\n");
             },
-            .@"+=", .@"-=", .@"*=", .@"/=" => {
+            .@"+=", .@"-=", .@"*=" => {
                 try self.writeIndent(w);
                 try self.emitCompoundAssign(items[0].tag, items[1..], w);
                 try w.writeAll(";\n");
+            },
+            .@"/=" => if (items.len >= 3) {
+                try self.writeIndent(w);
+                try self.emitExpr(items[1], w);
+                try w.writeAll(" = @divTrunc(");
+                try self.emitExpr(items[1], w);
+                try w.writeAll(", ");
+                try self.emitExpr(items[2], w);
+                try w.writeAll(");\n");
             },
             .@"return" => {
                 try self.writeIndent(w);
