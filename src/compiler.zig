@@ -495,7 +495,12 @@ pub const Compiler = struct {
             },
             .@"break" => {
                 try self.writeIndent(w);
-                try w.writeAll("break;\n");
+                try w.writeAll("break");
+                if (items.len > 1) {
+                    try w.writeAll(" ");
+                    try self.emitExpr(items[1], w);
+                }
+                try w.writeAll(";\n");
             },
             .@"continue" => {
                 try self.writeIndent(w);
@@ -859,7 +864,21 @@ pub const Compiler = struct {
         try self.emitCaptureCond(children[0], w);
         try self.emitBlockOrExpr(children[1], w);
 
-        if (children.len >= 3) {
+        if (children.len >= 4) {
+            // (if cond block capture_name else_block) — else with capture
+            try w.writeAll(" else |");
+            try w.writeAll(self.txt(children[2]));
+            try w.writeAll("|");
+            const else_clause = children[3];
+            if (else_clause == .list and else_clause.list.len > 0 and
+                else_clause.list[0] == .tag and else_clause.list[0].tag == .@"if")
+            {
+                try w.writeAll(" ");
+                try self.emitIf(else_clause.list[1..], w);
+            } else {
+                try self.emitBlockOrExpr(else_clause, w);
+            }
+        } else if (children.len >= 3) {
             const else_clause = children[2];
             if (else_clause == .list and else_clause.list.len > 0 and
                 else_clause.list[0] == .tag and else_clause.list[0].tag == .@"if")
@@ -965,9 +984,12 @@ pub const Compiler = struct {
         for (children[1..]) |arm_sexp| {
             if (arm_sexp != .list) continue;
             const arm = arm_sexp.list;
-            if (arm.len < 3 or arm[0] != .tag) continue;
-            // (arm pattern expr)
+            if (arm.len < 4 or arm[0] != .tag) continue;
+            // (arm pattern capture body) — capture can be nil
             const pattern = self.txt(arm[1]);
+            const capture = arm[2];
+            const arm_body = arm[3];
+
             try self.writeIndent(w);
             if (std.mem.eql(u8, pattern, "_")) {
                 try w.writeAll("else");
@@ -977,18 +999,22 @@ pub const Compiler = struct {
                 try w.writeAll(".");
                 try w.writeAll(pattern);
             }
-            const arm_body = arm[2];
-            if (arm_body == .list and arm_body.list.len > 0 and
-                arm_body.list[0] == .tag and arm_body.list[0].tag == .@"block")
-            {
-                try w.writeAll(" => {\n");
+
+            try w.writeAll(" => ");
+            if (capture != .nil) {
+                try w.writeAll("|");
+                try w.writeAll(self.txt(capture));
+                try w.writeAll("| ");
+            }
+
+            if (isBlock(arm_body)) {
+                try w.writeAll("{\n");
                 self.depth += 1;
                 try self.emitBody(arm_body, false, w);
                 self.depth -= 1;
                 try self.writeIndent(w);
                 try w.writeAll("},\n");
             } else {
-                try w.writeAll(" => ");
                 try self.emitExpr(arm_body, w);
                 try w.writeAll(",\n");
             }
