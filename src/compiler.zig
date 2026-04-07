@@ -69,7 +69,7 @@ pub const Compiler = struct {
             .@"test" => try self.emitTest(items[1..], w),
             .@"enum" => try self.emitEnum(items[1..], w),
             .@"struct" => try self.emitStruct(items[1..], w),
-            .@"alias" => try self.emitAlias(items[1..], w),
+            .@"type" => try self.emitTypeDef(items[1..], w),
             else => try self.emitStmt(sexp, w),
         }
     }
@@ -296,7 +296,7 @@ pub const Compiler = struct {
         try w.writeAll("}\n");
     }
 
-    fn emitAlias(self: *Compiler, children: []const Sexp, w: *Writer) Writer.Error!void {
+    fn emitTypeDef(self: *Compiler, children: []const Sexp, w: *Writer) Writer.Error!void {
         if (children.len < 2) return;
         const name = self.txt(children[0]);
         try w.print("const {s} = ", .{name});

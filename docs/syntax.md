@@ -153,8 +153,8 @@ error FileError
   NotFound
   PermissionDenied
 
-# Type alias
-alias Num = i64
+# Type definition
+type Num = i64
 
 # Visibility
 pub fun double x: i32 -> i32

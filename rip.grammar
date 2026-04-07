@@ -218,7 +218,7 @@ decl     = defn
          | EXTERN decl                      → (extern 2)
          | EXPORT decl                      → (export 2)
 
-defn     = fun | sub | enum | struct | errors | alias | test
+defn     = fun | sub | enum | struct | errors | typedef | test
 
 block    = INDENT body OUTDENT              → (block ...2)
          | INDENT      OUTDENT              → (block)
@@ -236,7 +236,7 @@ sub      = SUB name params block            → (sub 2 3 _ 4)
          | SUB name        block            → (sub 2 _ _ 3)
 
 use      = USE name                         → (use 2)
-alias    = ALIAS name "=" type              → (alias 2 4)
+typedef  = TYPE name "=" type               → (type 2 4)
 test     = TEST STRING_DQ block             → (test 2 3)
 
 enum     = ENUM   name INDENT members OUTDENT → (enum 2 ...4)

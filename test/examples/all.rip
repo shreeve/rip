@@ -11,7 +11,7 @@ use std                                    # use, name
 #
 # Zig: const Count = i64;
 
-alias Count = i64                          # alias, type
+type Count = i64                           # typedef, type
 
 # --- Error set ---
 #
