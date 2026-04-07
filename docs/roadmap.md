@@ -27,7 +27,7 @@ Deliverables (all complete):
 - grammar-system lessons from `rip-lang`, `slash`, and `mumps` (`docs/lessons.md`)
 - grammar DSL reference (`docs/dsl.md`)
 
-## Phase 1: Bootstrap Compiler (in progress)
+## Phase 1: Bootstrap Compiler ✓
 
 Goal: compile a tiny `Rip` subset into valid `Zig`.
 
@@ -158,7 +158,7 @@ Deferred topics:
 - Raw S-expressions are the first compiler product.
 - Rewriting should continue in S-expression form as long as that stays tractable.
 - Capability packs are enabled in source but handled downstream during compilation, not as core grammar features.
-- Target a near-conflict-free grammar; the current grammar has 2 audited conflicts (dangling else).
+- Target a near-conflict-free grammar; the current grammar has 5 audited conflicts (dangling else × 2, typed binding, labeled break/continue × 2).
 - Explicit `return` is for early exit; final-expression yielding should handle the non-early-return case.
 - Routine declaration semantics are definition-driven, while expression value/effect behavior remains context-sensitive.
 - Types may be optional in source, but unresolved types must not survive past the type-resolution stage.

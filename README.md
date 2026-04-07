@@ -85,7 +85,7 @@ The bootstrap compiler works end-to-end — 54-rule grammar, ~95% of day-to-day 
 ./bin/rip test/examples/hello.rip           # print S-expressions
 ```
 
-What works now: `fun`/`sub`, `if` (prefix + postfix), `while`, `for`/`for *item`, `match` (with range and enum patterns), `enum` (plain + tagged unions), `struct` (fields, defaults, methods), `error` sets, `type`, `test`, `pub`/`extern`/`export`, `try`/`catch`/`??`, captures (`as`/`|val|`), `defer`/`errdefer`, `comptime`/`inline`, `=`/`=!`/`+=`/`-=`/`*=`, typed params, return types, `?T`/`*T`/`[]T`/`!T`, `@builtins`, array literals, pipe `|>`, range `..`, `break`/`continue`/`return`, `unreachable`/`undefined`, lambdas, struct literals, pointer deref `ptr.*`.
+What works now: `fun`/`sub`, `if` (prefix + postfix), `while`, `for`/`for *item`, `match` (range/enum patterns), `enum` (plain + tagged unions), `struct`/`packed struct` (fields, defaults, methods), `error` sets, `type`, `test`, `pub`/`extern`/`export`/`packed`, `try`/`catch`/`??`, captures (`as`/`|val|`), `defer`/`errdefer`, `comptime`/`inline`, `=`/`=!`/`+=`/`-=`/`*=`, typed params, return types, `?T`/`*T`/`[]T`/`!T`, `@builtins`, array literals, pipe `|>`, range `..`, `break :label`/`continue :label`/`return`, `unreachable`/`undefined`, lambdas, struct literals, pointer deref `ptr.*`, implicit call with prefix `-`/`!`.
 
 Type resolution: symbol table from fun/sub declarations, void-call detection (clean `_ =` removal), `typeOf()` inference for var binding types, declaration warnings for untyped pub/extern boundaries.
 
