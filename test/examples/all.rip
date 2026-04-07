@@ -210,6 +210,17 @@ sub main                                   # sub (block only)
       print "one"                          # arm (block)
     _ => print "other"                     # arm (wildcard)
 
+  # --- Match with payload capture ---
+  #
+  # Zig: switch (result) {
+  #          .ok => |val| std.debug.print("{any}\n", .{val}),
+  #          .none => std.debug.print("nothing\n", .{}),
+  #      }
+
+  # match result                           # match payload capture (needs union value)
+  #   ok as val => print val               # arm with capture → .ok => |val| ...
+  #   none => print "nothing"
+
   # --- Compound assignments ---
   #
   # Zig: var v: i64 = 10;
@@ -320,11 +331,29 @@ sub main                                   # sub (block only)
   if opt as w                              # cond (as capture)
     print w
 
-  # --- Still need specific contexts ---
+  # --- Else capture ---
+  #
+  # Zig: if (risky()) |val| {
+  #          ...
+  #      } else |err| {
+  #          ...
+  #      }
+
+  # if risky() as val                      # else capture (needs error union value)
+  #   use val
+  # else as err                            # → else |err| { ... }
+  #   handle err
+
+  # --- Break with value ---
+  #
+  # Zig: break 42;
+
+  # (break expr used inside loops/blocks to return values)
+
+  # --- Still need specific runtime contexts ---
   #
   # try:        try something()            → needs error-returning main
   # errdefer:   errdefer cleanup()         → needs error-returning main
-  # catch as:   f() catch as e g(e)        → needs error handler function
   # inline:     inline for i in 0..5       → needs comptime-known slice
   # comptime:   comptime expr              → needs comptime-compatible expr
 

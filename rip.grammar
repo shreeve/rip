@@ -296,7 +296,7 @@ cond     = expr
          | expr AS  name                    → (as 1 3)
          | expr "|" name "|"                → (as 1 3)
 
-if       = IF cond block ELSE AS name block  → (if 2 3 6 7)
+if       = IF cond block ELSE AS name block → (if 2 3 6 7)
          | IF cond block ELSE AS name if    → (if 2 3 6 7)
          | IF cond block ELSE if            → (if 2 3 5)
          | IF cond block ELSE block         → (if 2 3 5)
@@ -312,7 +312,7 @@ match    = MATCH expr INDENT arms OUTDENT   → (match 2 ...4)
 arms     = arm                              → (1)
          | arms NEWLINE arm                 → (...1 3)
          | arms NEWLINE                     → 1
-arm      = atom AS name "=>" expr            → (arm 1 3 5)
+arm      = atom AS name "=>" expr           → (arm 1 3 5)
          | atom AS name block               → (arm 1 3 4)
          | atom "=>" expr                   → (arm 1 _ 3)
          | atom block                       → (arm 1 _ 2)
