@@ -46,35 +46,35 @@ sub processCommand
   cmd = parseCommand(line)
 
   match cmd
-    ping => _ = tcp.send("PONG\n")
+    ping => tcp.send("PONG\n")
     upload
       size = parseSizeArg(line) ?? 0
       if size == 0
-        _ = tcp.send("ERR: bad size\n")
+        tcp.send("ERR: bad size\n")
         return
       if size > MAX_SCRIPT_SIZE
-        _ = tcp.send("ERR: too large\n")
+        tcp.send("ERR: too large\n")
         return
       pending_upload_size = size
       script_len = 0
       proto_state = State.receiving_upload
-      _ = tcp.send("OK: ready\n")
+      tcp.send("OK: ready\n")
     run
       if script_len == 0
-        _ = tcp.send("ERR: no script\n")
+        tcp.send("ERR: no script\n")
         return
-      _ = tcp.send("OK: running\n")
+      tcp.send("OK: running\n")
       runScript()
-    restart => _ = tcp.send("OK: restarting\n")
-    logs => _ = tcp.send("OK: log streaming not yet implemented\n")
-    repl => _ = tcp.send("OK: REPL not yet implemented\n")
-    unknown => _ = tcp.send("ERR: unknown command\n")
+    restart => tcp.send("OK: restarting\n")
+    logs => tcp.send("OK: log streaming not yet implemented\n")
+    repl => tcp.send("OK: REPL not yet implemented\n")
+    unknown => tcp.send("ERR: unknown command\n")
 
 sub receiveUpload
   remaining = pending_upload_size - script_len
   if remaining == 0
     proto_state = State.idle
-    _ = tcp.send("OK: uploaded\n")
+    tcp.send("OK: uploaded\n")
     console.puts("[proto] script uploaded\n")
     return
 
@@ -83,11 +83,11 @@ sub receiveUpload
 
   if script_len >= pending_upload_size
     proto_state = State.idle
-    _ = tcp.send("OK: uploaded\n")
+    tcp.send("OK: uploaded\n")
 
 sub runScript
   console.puts("[proto] running script...\n")
-  _ = engine.eval(script_buf[0..script_len], "<remote>") catch 0
+  engine.eval(script_buf[0..script_len], "<remote>") catch 0
   console.puts("[proto] script done\n")
 
 fun parseCommand line: []u8 -> Command

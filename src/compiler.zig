@@ -682,6 +682,11 @@ pub const Compiler = struct {
             },
             else => {
                 try self.writeIndent(w);
+                // Auto-discard: bare call statements get _ = prefix
+                // so Zig doesn't complain about unused return values
+                const is_call = (items[0].tag == .@"call" or items[0].tag == .@"await");
+                const is_dot_call = items[0].tag == .@"." and items.len >= 3;
+                if (is_call or is_dot_call) try w.writeAll("_ = ");
                 try self.emitExpr(sexp, w);
                 try w.writeAll(";\n");
             },
@@ -1150,6 +1155,10 @@ pub const Compiler = struct {
                 try self.writeIndent(w);
                 try w.writeAll("},\n");
             } else {
+                // Auto-discard calls in one-liner match arms
+                if (arm_body == .list and arm_body.list.len > 0 and arm_body.list[0] == .tag and
+                    (arm_body.list[0].tag == .@"call" or arm_body.list[0].tag == .@"await"))
+                    try w.writeAll("_ = ");
                 try self.emitExpr(arm_body, w);
                 try w.writeAll(",\n");
             }
