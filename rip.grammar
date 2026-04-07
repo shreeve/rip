@@ -374,6 +374,7 @@ atom     = name
          | NULL                             → (null)
          | UNREACHABLE                      → (unreachable)
          | UNDEFINED                        → (undefined)
+         | "?" atom                         → (? 2)
          | "@" name "(" args ")"            → (builtin 2 ...4)
          | record
          | lambda

@@ -311,10 +311,14 @@ sub main                                   # sub (block only)
   caught = maybe_fail(0) catch 77          # catch
   print caught
 
-  # --- If capture (parse-tested, needs ?T in expression position) ---
+  # --- If capture ---
   #
-  # if opt as w                            → Zig: if (opt) |w| { ... }
-  #   print w
+  # Zig: const opt = @as(?i64, 42);
+  #      if (opt) |w| { ... }
+
+  opt = @as(?i64, 42)
+  if opt as w                              # cond (as capture)
+    print w
 
   # --- Still need specific contexts ---
   #

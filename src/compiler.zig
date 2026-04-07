@@ -614,6 +614,10 @@ pub const Compiler = struct {
                     .@"unreachable" => try w.writeAll("unreachable"),
                     .@"undefined" => try w.writeAll("undefined"),
 
+                    .@"?", .@"ptr", .@"slice", .@"error_union" => {
+                        try self.emitTyperef(sexp, w);
+                    },
+
                     .@"record" => {
                         if (children.len > 0) try w.writeAll(self.txt(children[0]));
                         try w.writeAll("{ ");
