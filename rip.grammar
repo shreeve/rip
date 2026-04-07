@@ -196,7 +196,7 @@ tokens
 
 @parser
 
-@conflicts = 3
+@conflicts = 5
 
 @as = [ident, keyword]
 
@@ -217,6 +217,7 @@ stmt     = use
          | decl
          | zig
          | extvar
+         | ":" name stmt                    → (labeled 2 3)
          | expr
 
 extvar   = EXTERN name ":" type             → (extern_var 2 4)
@@ -228,6 +229,7 @@ decl     = defn
          | PUB decl                         → (pub 2)
          | EXTERN decl                      → (extern 2)
          | EXPORT decl                      → (export 2)
+         | PACKED decl                      → (packed 2)
          | CALLCONV name decl               → (callconv 2 3)
 
 defn     = fun | sub | enum | struct | errors | typedef | test
@@ -355,9 +357,12 @@ catch    = @infix CATCH AS name expr        → (catch 1 4 5)
 
 return   = RETURN expr                      → (return 2)
          | RETURN                           → (return)
-break    = BREAK expr                       → (break 2)
+break    = BREAK ":" name expr              → (break_to 3 4)
+         | BREAK ":" name                   → (break_to 3)
+         | BREAK expr                       → (break 2)
          | BREAK                            → (break)
-continue = CONTINUE                         → (continue)
+continue = CONTINUE ":" name                → (continue_to 2)
+         | CONTINUE                         → (continue)
 
 # --- Statement modifiers ---
 
@@ -396,8 +401,8 @@ call     = call "." "*"                     → (deref 1)
 args     = L(expr)                          → (...1)
          |                                  → ()
 
-term     = MINUS_PREFIX term               → (neg 2)
-         | "!" term                        → (not 2)
+term     = MINUS_PREFIX term                → (neg 2)
+         | "!" term                         → (not 2)
          | atom
 
 atom     = name

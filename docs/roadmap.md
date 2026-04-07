@@ -38,7 +38,7 @@ Primary spec reference:
 
 ### What works now (v0.7-type-resolution)
 
-- 54-rule grammar, 3 audited conflicts, 371 parser states
+- 54-rule grammar, 5 audited conflicts, 385 parser states
 - grammar engine generates `src/parser.zig` from `rip.grammar`
 - rewriter handles indentation, type annotation passthrough, newline normalization
 - parser produces raw S-expressions directly
@@ -59,7 +59,7 @@ Syntax coverage:
 - operators: `??`, `catch`, `try`, `|>`, `..`, `**`, all arithmetic/comparison/logical
 - types: `?T`, `*T`, `[]T`, `!T`, typed params, return types, field defaults
 - atoms: integers, reals, strings, booleans, arrays, struct literals, lambdas, `@builtins`
-- features: tagged unions, enum values, struct methods, defer/errdefer, `_` discard, pointer deref `ptr.*`
+- features: tagged unions, enum values, struct methods, defer/errdefer, `_` discard, pointer deref `ptr.*`, packed struct, labeled break/continue
 
 Type resolution:
 
@@ -74,9 +74,7 @@ Type resolution:
 | Feature | Difficulty | Frequency |
 |---------|-----------|-----------|
 | Await (`call!`) | Small | Deferred until Zig 0.16.0 restores async |
-| Labeled blocks | Medium | Rare |
-| Packed/extern struct | Small | Niche |
-| Multi-line strings | Medium | Niche |
+| Multi-line strings | Medium | Deferred: triple-quote DFA conflicts with string_dq |
 | Anonymous struct types | Medium | Occasional |
 
 ### Compiler emission gaps

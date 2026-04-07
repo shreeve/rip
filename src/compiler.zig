@@ -111,6 +111,16 @@ pub const Compiler = struct {
             .@"test" => try self.emitTest(items[1..], w),
             .@"enum" => try self.emitEnum(items[1..], w),
             .@"struct" => try self.emitStruct(items[1..], w),
+            .@"packed" => if (items.len > 1) {
+                if (items[1] == .list and items[1].list.len > 0 and
+                    items[1].list[0] == .tag and items[1].list[0].tag == .@"struct")
+                {
+                    try self.emitPackedStruct(items[1].list[1..], w);
+                } else {
+                    try w.writeAll("packed ");
+                    try self.emitTopLevel(items[1], w);
+                }
+            },
             .@"type" => try self.emitTypeDef(items[1..], w),
             else => try self.emitStmt(sexp, w),
         }
@@ -343,6 +353,35 @@ pub const Compiler = struct {
             try self.writeIndent(w);
             try w.writeAll(self.txt(item));
             try w.writeAll(": i64,\n");
+        }
+        self.depth -= 1;
+        try w.writeAll("};\n");
+    }
+
+    fn emitPackedStruct(self: *Compiler, children: []const Sexp, w: *Writer) Writer.Error!void {
+        if (children.len < 1) return;
+        const name = self.txt(children[0]);
+        try w.print("const {s} = packed struct {{\n", .{name});
+        self.depth += 1;
+        for (children[1..]) |item| {
+            if (item == .list and item.list.len > 0 and item.list[0] == .tag) {
+                const tag = item.list[0].tag;
+                if (tag == .@":" or tag == .@"default" or tag == .@"aligned") {
+                    try self.writeIndent(w);
+                    try w.writeAll(self.txt(item.list[1]));
+                    try w.writeAll(": ");
+                    try self.emitTyperef(item.list[2], w);
+                    if (tag == .@"default" and item.list.len >= 4) {
+                        try w.writeAll(" = ");
+                        try self.emitExpr(item.list[3], w);
+                    }
+                    try w.writeAll(",\n");
+                    continue;
+                }
+            }
+            try self.writeIndent(w);
+            try w.writeAll(self.txt(item));
+            try w.writeAll(",\n");
         }
         self.depth -= 1;
         try w.writeAll("};\n");
@@ -699,7 +738,8 @@ pub const Compiler = struct {
         if (items.len == 0 or items[0] != .tag) return false;
         return switch (items[0].tag) {
             .@"=", .@"const", .@"return", .@"if", .@"while", .@"for", .@"for_ptr",
-            .@"match", .@"break", .@"continue", .@"defer", .@"errdefer", .@"comptime", .@"inline", .@"zig",
+            .@"match", .@"break", .@"break_to", .@"continue", .@"continue_to",
+            .@"defer", .@"errdefer", .@"comptime", .@"inline", .@"zig", .@"labeled",
             .@"typed_assign", .@"typed_const",
             .@"+=", .@"-=", .@"*=", .@"/=" => true,
             else => false,
@@ -755,9 +795,43 @@ pub const Compiler = struct {
                 }
                 try w.writeAll(";\n");
             },
+            .@"break_to" => {
+                try self.writeIndent(w);
+                try w.writeAll("break :");
+                try w.writeAll(self.txt(items[1]));
+                if (items.len > 2) {
+                    try w.writeAll(" ");
+                    try self.emitExpr(items[2], w);
+                }
+                try w.writeAll(";\n");
+            },
             .@"continue" => {
                 try self.writeIndent(w);
                 try w.writeAll("continue;\n");
+            },
+            .@"continue_to" => {
+                try self.writeIndent(w);
+                try w.writeAll("continue :");
+                try w.writeAll(self.txt(items[1]));
+                try w.writeAll(";\n");
+            },
+            .@"labeled" => if (items.len >= 3) {
+                try self.writeIndent(w);
+                try w.writeAll(self.txt(items[1]));
+                try w.writeAll(": ");
+                const inner = items[2];
+                if (inner == .list and inner.list.len > 0 and inner.list[0] == .tag) {
+                    switch (inner.list[0].tag) {
+                        .@"while" => try self.emitWhile(inner.list[1..], w),
+                        .@"for" => try self.emitFor(inner.list[1..], w),
+                        .@"for_ptr" => try self.emitForPtr(inner.list[1..], w),
+                        .@"if" => try self.emitIf(inner.list[1..], w),
+                        else => try self.emitBlockOrExpr(inner, w),
+                    }
+                } else {
+                    try self.emitBlockOrExpr(inner, w);
+                }
+                try w.writeAll("\n");
             },
             .@"defer" => {
                 try self.writeIndent(w);

@@ -60,7 +60,7 @@ pub fn main() !void {
     switch (mode) {
         .parse => try parseAndPrint(allocator, source),
         .compile => try compileToStdout(allocator, source),
-        .run => try compileAndRun(allocator, source),
+        .run => try compileAndRun(allocator, source, file_path.?),
         .tokens => dumpTokens(source),
     }
 }
@@ -114,7 +114,7 @@ fn compileToStdout(allocator: std.mem.Allocator, source: []const u8) !void {
     try w.flush();
 }
 
-fn compileAndRun(allocator: std.mem.Allocator, source: []const u8) !void {
+fn compileAndRun(allocator: std.mem.Allocator, source: []const u8, rip_path: []const u8) !void {
     var p = parser.Parser.init(allocator, source);
     defer p.deinit();
 
@@ -123,7 +123,9 @@ fn compileAndRun(allocator: std.mem.Allocator, source: []const u8) !void {
         std.process.exit(1);
     };
 
-    const tmp_path = "/tmp/_rip_out.zig";
+    var tmp_buf: [256]u8 = undefined;
+    const tmp_path = makeTmpPath(&tmp_buf, rip_path);
+
     {
         const f = std.fs.cwd().createFile(tmp_path, .{}) catch |err| {
             std.debug.print("Error creating {s}: {}\n", .{ tmp_path, err });
@@ -143,7 +145,28 @@ fn compileAndRun(allocator: std.mem.Allocator, source: []const u8) !void {
     var child = std.process.Child.init(&argv, allocator);
     const term = try child.spawnAndWait();
     switch (term) {
-        .Exited => |code| if (code != 0) std.process.exit(code),
+        .Exited => |code| if (code != 0) {
+            std.debug.print("note: generated Zig at {s}\n", .{tmp_path});
+            std.process.exit(code);
+        },
         else => std.process.exit(1),
     }
+}
+
+fn makeTmpPath(buf: []u8, rip_path: []const u8) []const u8 {
+    var start: usize = 0;
+    for (rip_path, 0..) |c, i| {
+        if (c == '/' or c == '\\') start = i + 1;
+    }
+    var base = rip_path[start..];
+    if (base.len > 4 and std.mem.eql(u8, base[base.len - 4 ..], ".rip")) {
+        base = base[0 .. base.len - 4];
+    }
+    const prefix = "/tmp/rip_";
+    const suffix = ".zig";
+    if (prefix.len + base.len + suffix.len > buf.len) return "/tmp/_rip_out.zig";
+    @memcpy(buf[0..prefix.len], prefix);
+    @memcpy(buf[prefix.len..][0..base.len], base);
+    @memcpy(buf[prefix.len + base.len ..][0..suffix.len], suffix);
+    return buf[0 .. prefix.len + base.len + suffix.len];
 }
