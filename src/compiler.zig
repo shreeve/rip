@@ -527,8 +527,36 @@ pub const Compiler = struct {
             },
             .@"inline" => {
                 try self.writeIndent(w);
-                try w.writeAll("inline ");
-                if (items.len > 1) try self.emitStmt(items[1], w) else try w.writeAll(";\n");
+                // inline for → emit native Zig inline for (not while desugaring)
+                if (items.len > 1 and items[1] == .list and items[1].list.len > 0 and
+                    items[1].list[0] == .tag and items[1].list[0].tag == .@"for")
+                {
+                    const fc = items[1].list[1..];
+                    if (fc.len >= 4) {
+                        try w.writeAll("inline for (");
+                        const collection = fc[2];
+                        if (collection == .list and collection.list.len >= 3 and
+                            collection.list[0] == .tag and collection.list[0].tag == .@"..")
+                        {
+                            try self.emitExpr(collection.list[1], w);
+                            try w.writeAll("..");
+                            try self.emitExpr(collection.list[2], w);
+                        } else {
+                            try self.emitExpr(collection, w);
+                        }
+                        try w.writeAll(") |");
+                        try w.writeAll(self.txt(fc[0]));
+                        try w.writeAll("| {\n");
+                        self.depth += 1;
+                        try self.emitBody(fc[3], false, w);
+                        self.depth -= 1;
+                        try self.writeIndent(w);
+                        try w.writeAll("}\n");
+                    }
+                } else {
+                    try w.writeAll("inline ");
+                    if (items.len > 1) try self.emitStmt(items[1], w) else try w.writeAll(";\n");
+                }
             },
             .@"=", .@"const" => {
                 try self.writeIndent(w);

@@ -370,9 +370,12 @@ fun main -> !void                          # fun (main can return errors for try
   ct = comptime 1 + 2                      # comptime in expression position
   print ct
 
-  # --- Inline (parse-tested, needs comptime-known slice) ---
+  # --- Inline for ---
   #
-  # inline for i in items                  → inline for (items) |i|
+  # Zig: inline for (0..3) |j| { ... }
+
+  inline for j in 0..3                     # inline for (native, not while desugaring)
+    _ = j
 
   # --- Defer ---
   #
