@@ -389,28 +389,36 @@ pub const BaseLexer = struct {
 
     /// Scan number (generated from grammar)
     fn scanNumber(self: *Self, start: u32, ws: u8) Token {        var has_decimal = false;        const starts_with_dot = self.source[self.pos] == '.';
-        // Check for 0x, 0b, 0o prefixes
+        // Number prefix patterns (from grammar)
         if (self.source[self.pos] == '0' and self.pos + 1 < self.source.len) {
             const prefix = self.source[self.pos + 1];
             if (prefix == 'x' or prefix == 'X') {
                 self.pos += 2;
                 while (self.pos < self.source.len) {
-                    const hc = self.source[self.pos];
-                    if ((hc >= '0' and hc <= '9') or (hc >= 'a' and hc <= 'f') or (hc >= 'A' and hc <= 'F') or hc == '_') {
+                    const dc = self.source[self.pos];
+                    if ((dc >= '0' and dc <= '9') or (dc >= 'a' and dc <= 'f') or (dc >= 'A' and dc <= 'F') or dc == '_') {
                         self.pos += 1;
                     } else break;
                 }
                 return Token{ .cat = .@"integer", .pre = ws, .pos = start, .len = @intCast(self.pos - start) };
-            } else if (prefix == 'b' or prefix == 'B') {
+            }
+            else if (prefix == 'b' or prefix == 'B') {
                 self.pos += 2;
-                while (self.pos < self.source.len and (self.source[self.pos] == '0' or self.source[self.pos] == '1' or self.source[self.pos] == '_')) {
-                    self.pos += 1;
+                while (self.pos < self.source.len) {
+                    const dc = self.source[self.pos];
+                    if (dc == '0' or dc == '1' or dc == '_') {
+                        self.pos += 1;
+                    } else break;
                 }
                 return Token{ .cat = .@"integer", .pre = ws, .pos = start, .len = @intCast(self.pos - start) };
-            } else if (prefix == 'o' or prefix == 'O') {
+            }
+            else if (prefix == 'o' or prefix == 'O') {
                 self.pos += 2;
-                while (self.pos < self.source.len and self.source[self.pos] >= '0' and self.source[self.pos] <= '7') {
-                    self.pos += 1;
+                while (self.pos < self.source.len) {
+                    const dc = self.source[self.pos];
+                    if ((dc >= '0' and dc <= '7') or dc == '_') {
+                        self.pos += 1;
+                    } else break;
                 }
                 return Token{ .cat = .@"integer", .pre = ws, .pos = start, .len = @intCast(self.pos - start) };
             }

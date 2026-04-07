@@ -1761,35 +1761,25 @@ const LexerGenerator = struct {
             );
         }
 
-        // Integer part (with hex/binary/octal prefix support)
+        // Check for grammar-defined number prefix patterns (e.g., 0x hex, 0b binary, 0o octal)
+        const has_prefixed = self.hasNumberPrefixPatterns();
+        if (has_prefixed) {
+            try self.write(
+                \\
+                \\        // Number prefix patterns (from grammar)
+                \\        if (self.source[self.pos] == '0' and self.pos + 1 < self.source.len) {
+                \\            const prefix = self.source[self.pos + 1];
+                \\
+            );
+            try self.emitNumberPrefixBranches();
+            try self.write(
+                \\        }
+                \\
+            );
+        }
+
+        // Integer part
         try self.write(
-            \\
-            \\        // Check for 0x, 0b, 0o prefixes
-            \\        if (self.source[self.pos] == '0' and self.pos + 1 < self.source.len) {
-            \\            const prefix = self.source[self.pos + 1];
-            \\            if (prefix == 'x' or prefix == 'X') {
-            \\                self.pos += 2;
-            \\                while (self.pos < self.source.len) {
-            \\                    const hc = self.source[self.pos];
-            \\                    if ((hc >= '0' and hc <= '9') or (hc >= 'a' and hc <= 'f') or (hc >= 'A' and hc <= 'F') or hc == '_') {
-            \\                        self.pos += 1;
-            \\                    } else break;
-            \\                }
-            \\                return Token{ .cat = .@"integer", .pre = ws, .pos = start, .len = @intCast(self.pos - start) };
-            \\            } else if (prefix == 'b' or prefix == 'B') {
-            \\                self.pos += 2;
-            \\                while (self.pos < self.source.len and (self.source[self.pos] == '0' or self.source[self.pos] == '1' or self.source[self.pos] == '_')) {
-            \\                    self.pos += 1;
-            \\                }
-            \\                return Token{ .cat = .@"integer", .pre = ws, .pos = start, .len = @intCast(self.pos - start) };
-            \\            } else if (prefix == 'o' or prefix == 'O') {
-            \\                self.pos += 2;
-            \\                while (self.pos < self.source.len and self.source[self.pos] >= '0' and self.source[self.pos] <= '7') {
-            \\                    self.pos += 1;
-            \\                }
-            \\                return Token{ .cat = .@"integer", .pre = ws, .pos = start, .len = @intCast(self.pos - start) };
-            \\            }
-            \\        }
             \\        // Decimal integer
             \\        if (isDigit(self.source[self.pos])) {
             \\            while (self.pos < self.source.len and isDigit(self.source[self.pos])) {
@@ -1878,6 +1868,86 @@ const LexerGenerator = struct {
                 \\    }
                 \\
             );
+        }
+    }
+
+    /// Check if grammar defines number prefix patterns like '0' [xX] ...
+    fn hasNumberPrefixPatterns(self: *LexerGenerator) bool {
+        for (self.spec.rules.items) |rule| {
+            if (!std.mem.eql(u8, rule.token, "integer")) continue;
+            if (rule.pattern.len >= 5 and rule.pattern[0] == '\'' and
+                rule.pattern[1] == '0' and rule.pattern[2] == '\'')
+                return true;
+        }
+        return false;
+    }
+
+    /// Emit prefix branches for grammar-defined patterns like '0' [xX] [0-9a-fA-F]+
+    fn emitNumberPrefixBranches(self: *LexerGenerator) !void {
+        var first = true;
+        for (self.spec.rules.items) |rule| {
+            if (!std.mem.eql(u8, rule.token, "integer")) continue;
+            if (rule.pattern.len < 5 or rule.pattern[0] != '\'' or
+                rule.pattern[1] != '0' or rule.pattern[2] != '\'') continue;
+
+            // Parse: '0' [xXbBoO] [digit-class]+
+            const rest = std.mem.trimLeft(u8, rule.pattern[3..], " ");
+            if (rest.len < 3 or rest[0] != '[') continue;
+            const close = std.mem.indexOfScalar(u8, rest, ']') orelse continue;
+            const char_class = rest[1..close];
+            const digit_part = std.mem.trimLeft(u8, rest[close + 1 ..], " ");
+
+            // Build condition for prefix char
+            if (!first) {
+                try self.write("            else ");
+            } else {
+                try self.write("            ");
+                first = false;
+            }
+            try self.write("if (");
+            var first_cond = true;
+            var i: usize = 0;
+            while (i < char_class.len) {
+                if (!first_cond) try self.write(" or ");
+                first_cond = false;
+                try self.print("prefix == '{c}'", .{char_class[i]});
+                i += 1;
+            }
+            try self.write(") {\n");
+            try self.write("                self.pos += 2;\n");
+
+            // Build digit scanning loop from the digit class pattern
+            if (digit_part.len > 0 and digit_part[0] == '[') {
+                const dclose = std.mem.indexOfScalar(u8, digit_part, ']') orelse continue;
+                const dclass = digit_part[1..dclose];
+                try self.write("                while (self.pos < self.source.len) {\n");
+                try self.write("                    const dc = self.source[self.pos];\n");
+                try self.write("                    if (");
+                // Parse ranges in digit class
+                var di: usize = 0;
+                var first_dc = true;
+                while (di < dclass.len) {
+                    if (di + 2 < dclass.len and dclass[di + 1] == '-') {
+                        if (!first_dc) try self.write(" or ");
+                        first_dc = false;
+                        try self.print("(dc >= '{c}' and dc <= '{c}')", .{ dclass[di], dclass[di + 2] });
+                        di += 3;
+                    } else {
+                        if (!first_dc) try self.write(" or ");
+                        first_dc = false;
+                        try self.print("dc == '{c}'", .{dclass[di]});
+                        di += 1;
+                    }
+                }
+                try self.write(" or dc == '_'");
+                try self.write(") {\n");
+                try self.write("                        self.pos += 1;\n");
+                try self.write("                    } else break;\n");
+                try self.write("                }\n");
+            }
+
+            try self.write("                return Token{ .cat = .@\"integer\", .pre = ws, .pos = start, .len = @intCast(self.pos - start) };\n");
+            try self.write("            }\n");
         }
     }
 
