@@ -65,6 +65,12 @@ pub const Compiler = struct {
                 try w.writeAll(" ");
                 try self.emitTopLevel(items[1], w);
             },
+            .@"zig" => if (items.len > 1) {
+                const raw = self.source[items[1].src.pos..][0..items[1].src.len];
+                try self.writeIndent(w);
+                if (raw.len >= 2) try w.writeAll(raw[1 .. raw.len - 1]);
+                try w.writeAll("\n");
+            },
             .@"errors" => try self.emitErrorSet(items[1..], w),
             .@"test" => try self.emitTest(items[1..], w),
             .@"enum" => try self.emitEnum(items[1..], w),
@@ -453,7 +459,7 @@ pub const Compiler = struct {
         if (items.len == 0 or items[0] != .tag) return false;
         return switch (items[0].tag) {
             .@"=", .@"const", .@"return", .@"if", .@"while", .@"for",
-            .@"match", .@"break", .@"continue", .@"defer", .@"errdefer", .@"comptime", .@"inline",
+            .@"match", .@"break", .@"continue", .@"defer", .@"errdefer", .@"comptime", .@"inline", .@"zig",
             .@"+=", .@"-=", .@"*=", .@"/=" => true,
             else => false,
         };
@@ -524,6 +530,12 @@ pub const Compiler = struct {
                 try w.writeAll("comptime ");
                 if (items.len > 1) try self.emitExpr(items[1], w);
                 try w.writeAll(";\n");
+            },
+            .@"zig" => if (items.len > 1) {
+                try self.writeIndent(w);
+                const raw = self.source[items[1].src.pos..][0..items[1].src.len];
+                if (raw.len >= 2) try w.writeAll(raw[1 .. raw.len - 1]);
+                try w.writeAll("\n");
             },
             .@"inline" => {
                 try self.writeIndent(w);

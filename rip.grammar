@@ -211,7 +211,11 @@ body     = stmt                             → (1)
 
 stmt     = use
          | decl
+         | zig
          | expr
+
+zig      = ZIG STRING_SQ                   → (zig 2)
+         | ZIG STRING_DQ                   → (zig 2)
 
 decl     = defn
          | PUB decl                         → (pub 2)
