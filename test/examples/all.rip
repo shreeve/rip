@@ -138,6 +138,9 @@ test "add works"                           # test
 # Zig: pub fn main() void {
 
 sub main                                   # sub (block only)
+
+
+
   # --- Bindings ---
   #
   # Zig: const result = add(1, 2);
