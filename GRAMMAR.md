@@ -255,3 +255,36 @@ defaults to `std.math.pow(i64, ...)`. Both require a full type resolution pass
 to handle non-integer types correctly. These are inherent to the current
 bootstrap compiler and will be addressed when the type resolution phase (roadmap
 Phase 2) is implemented.
+
+---
+
+## Remaining Zig Constructs
+
+The following Zig constructs are not natively expressible in Rip. All have clean
+workarounds and none block real programs.
+
+| Construct | Frequency | Workaround |
+|-----------|-----------|------------|
+| Multi-value for (`for (a, b) \|x, y\|`) | Rare | Use indexed loop |
+| Merged error sets (`E1 \|\| E2`) | Occasional | Declare one combined error set |
+| `noalias` param modifier | Rare (perf hint) | Omit — no correctness impact |
+| Inline assembly (`asm volatile`) | Bare-metal only | `zig 'asm volatile(...)'` |
+| `@cImport` / `@cInclude` | C interop setup | `zig '@cImport(...)'` |
+| Multiline strings (`\\\\` syntax) | Occasional | Use single-line strings or concatenation |
+
+**Why these are deferred:**
+
+- **Multi-value for** — requires parenthesized multi-expression iterator syntax
+  and multi-name captures; medium grammar complexity for a rare use case.
+- **Merged error sets** — `||` token is overloaded with logical OR; adding it to
+  the `type` nonterminal causes 13 SLR conflicts. Could be solved with a
+  rewriter-based token classification in a future pass.
+- **`noalias`** — a performance hint, not a semantic requirement. Adding it as a
+  param modifier (like `comptime`) would be straightforward if demand arises.
+- **Inline assembly** — highly specialized and inherently Zig-syntax-heavy. The
+  `zig "..."` passthrough handles it naturally.
+- **`@cImport`** — already works via `@builtin` passthrough for simple cases;
+  the block form (`@cImport({ @cInclude("..."); })`) needs the `zig` passthrough.
+- **Multiline strings** — Zig uses `\\\\` line prefixes which conflict with
+  indentation-sensitive parsing. Deferred pending a design decision on Rip's
+  own multiline string syntax.
