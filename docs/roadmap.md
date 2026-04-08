@@ -38,7 +38,7 @@ Primary spec reference:
 
 ### What works now (v0.7-type-resolution)
 
-- 54-rule grammar, 11 audited conflicts, 412 parser states
+- 56-rule grammar, 18 audited conflicts, 469 parser states
 - grammar engine generates `src/parser.zig` from `rip.grammar`
 - rewriter handles indentation, type annotation passthrough, newline normalization
 - parser produces raw S-expressions directly

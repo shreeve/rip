@@ -110,6 +110,15 @@ pub const Compiler = struct {
                 if (items.len > 2) try self.emitTyperef(items[2], w);
                 try w.writeAll(";\n");
             },
+            .@"extern_const" => if (items.len > 1) {
+                const name = self.txt(items[1]);
+                try w.print("extern const {s}: ", .{name});
+                if (items.len > 2) try self.emitTyperef(items[2], w);
+                try w.writeAll(";\n");
+            },
+            .@"opaque" => if (items.len > 1) {
+                try w.print("const {s} = opaque {{}};\n", .{self.txt(items[1])});
+            },
             .@"zig" => if (items.len > 1) {
                 const raw = self.source[items[1].src.pos..][0..items[1].src.len];
                 try self.writeIndent(w);
@@ -212,6 +221,13 @@ pub const Compiler = struct {
         for (sexp.list, 0..) |param, i| {
             if (i > 0) try w.writeAll(", ");
             if (param == .list and param.list.len >= 3 and
+                param.list[0] == .tag and param.list[0].tag == .@"comptime_param")
+            {
+                try w.writeAll("comptime ");
+                try w.writeAll(self.txt(param.list[1]));
+                try w.writeAll(": ");
+                try self.emitTyperef(param.list[2], w);
+            } else if (param == .list and param.list.len >= 3 and
                 param.list[0] == .tag and param.list[0].tag == .@":")
             {
                 try w.writeAll(self.txt(param.list[1]));
@@ -409,6 +425,32 @@ pub const Compiler = struct {
                     .@"const_ptr" => {
                         try w.writeAll("*const ");
                         try self.emitTyperef(items[1], w);
+                    },
+                    .@"sentinel_slice" => {
+                        try w.writeAll("[:");
+                        try self.emitExpr(items[1], w);
+                        try w.writeAll("]");
+                        try self.emitTyperef(items[2], w);
+                    },
+                    .@"fn_type" => {
+                        try w.writeAll("fn(");
+                        if (items[1] != .nil) {
+                            if (items[1] == .list) {
+                                for (items[1].list, 0..) |param, i| {
+                                    if (i > 0) try w.writeAll(", ");
+                                    try self.emitTyperef(param, w);
+                                }
+                            } else {
+                                try self.emitTyperef(items[1], w);
+                            }
+                        }
+                        try w.writeAll(") ");
+                        if (items.len > 2) try self.emitTyperef(items[2], w);
+                    },
+                    .@"error_merge" => {
+                        try self.emitTyperef(items[1], w);
+                        try w.writeAll(" || ");
+                        try self.emitTyperef(items[2], w);
                     },
                     .@"slice" => {
                         try w.writeAll("[]");
@@ -999,6 +1041,24 @@ pub const Compiler = struct {
                         try self.emitTyperef(sexp, w);
                     },
 
+                    .@"anon_init" => {
+                        try w.writeAll(".{ ");
+                        for (children, 0..) |p, i| {
+                            if (i > 0) try w.writeAll(", ");
+                            if (p == .list and p.list.len >= 3 and
+                                p.list[0] == .tag and p.list[0].tag == .@"pair")
+                            {
+                                try w.writeAll(".");
+                                try w.writeAll(self.txt(p.list[1]));
+                                try w.writeAll(" = ");
+                                try self.emitExpr(p.list[2], w);
+                            } else {
+                                try self.emitExpr(p, w);
+                            }
+                        }
+                        try w.writeAll(" }");
+                    },
+
                     .@"record" => {
                         if (children.len > 0) try w.writeAll(self.txt(children[0]));
                         try w.writeAll("{ ");
@@ -1140,7 +1200,7 @@ pub const Compiler = struct {
 
                     .@"+", .@"-", .@"*", .@"/", .@"%",
                     .@"==", .@"!=", .@"<", .@">", .@"<=", .@">=",
-                    .@"&", .@"^", .@"<<", .@">>",
+                    .@"&", .@"|", .@"^", .@"<<", .@">>",
                     => if (children.len >= 2) {
                         try self.emitGrouped(children[0], w);
                         try w.print(" {s} ", .{@tagName(tag)});
@@ -1295,7 +1355,7 @@ pub const Compiler = struct {
     }
 
     fn emitWhile(self: *Compiler, children: []const Sexp, w: *Writer) Writer.Error!void {
-        // (while cond update body) — update can be nil
+        // (while cond update body [else_body])
         if (children.len < 3) return;
 
         try w.writeAll("while ");
@@ -1313,6 +1373,10 @@ pub const Compiler = struct {
 
         try self.writeIndent(w);
         try w.writeAll("}");
+        if (children.len > 3 and children[3] != .nil) {
+            try w.writeAll(" else");
+            try self.emitBlockOrExpr(children[3], w);
+        }
     }
 
     fn emitFor(self: *Compiler, children: []const Sexp, w: *Writer) Writer.Error!void {
@@ -1372,6 +1436,10 @@ pub const Compiler = struct {
 
             try self.writeIndent(w);
             try w.writeAll("}");
+            if (children.len > 4 and children[4] != .nil) {
+                try w.writeAll(" else");
+                try self.emitBlockOrExpr(children[4], w);
+            }
         }
     }
 
@@ -1397,6 +1465,10 @@ pub const Compiler = struct {
 
         try self.writeIndent(w);
         try w.writeAll("}");
+        if (children.len > 4 and children[4] != .nil) {
+            try w.writeAll(" else");
+            try self.emitBlockOrExpr(children[4], w);
+        }
     }
 
     fn emitMatch(self: *Compiler, children: []const Sexp, w: *Writer) Writer.Error!void {

@@ -100,6 +100,8 @@ tokens
     outdent         # Indentation decrease
     newline         # Line terminator
     post_if         # if (postfix, after return/break/continue)
+    dot_lbrace      # .{ (anonymous struct/array init)
+    bar_capture     # | (capture delimiter, rewriter-classified)
     comment         # # through end of line
     eof             # End of input
     err             # Lexer error
@@ -207,7 +209,7 @@ tokens
 
 @parser
 
-@conflicts = 11
+@conflicts = 18
 
 @as = [ident, keyword]
 
@@ -231,7 +233,8 @@ stmt     = use
          | ":" name stmt                    → (labeled 2 3)
          | expr
 
-extvar   = EXTERN name ":" type             → (extern_var 2 4)
+extvar   = EXTERN CONST name ":" type       → (extern_const 3 5)
+         | EXTERN name ":" type             → (extern_var 2 4)
 
 zig      = ZIG STRING_SQ                    → (zig 2)
          | ZIG STRING_DQ                    → (zig 2)
@@ -243,7 +246,7 @@ decl     = defn
          | PACKED decl                      → (packed 2)
          | CALLCONV name decl               → (callconv 2 3)
 
-defn     = fun | sub | enum | struct | errors | typedef | test
+defn     = fun | sub | enum | struct | errors | typedef | test | opaq
 
 block    = INDENT body OUTDENT              → (block ...2)
          | INDENT      OUTDENT              → (block)
@@ -263,6 +266,7 @@ sub      = SUB name params block            → (sub 2 3 _ 4)
 use      = USE name                         → (use 2)
 typedef  = TYPE name "=" type               → (type 2 4)
 test     = TEST STRING_DQ block             → (test 2 3)
+opaq     = OPAQUE name                      → (opaque 2)
 
 enum     = ENUM   name INDENT members OUTDENT → (enum 2 ...4)
 errors   = ERROR  name INDENT members OUTDENT → (errors 2 ...4)
@@ -280,7 +284,8 @@ member   = field
          | fun
          | sub
 
-field    = name                             → 1
+field    = COMPTIME name ":" type           → (comptime_param 2 4)
+         | name                             → 1
          | name ":" type                    → (: 1 3)
          | name ":" type ALIGN atom         → (aligned 1 3 5)
          | name ":" type "=" expr           → (default 1 3 5)
@@ -295,9 +300,12 @@ type     = name
          | "*" CONST            type        → (const_ptr 3)
          | "*" VOLATILE         type        → (volatile_ptr 3)
          | "["              "]" type        → (slice 3)
+         | "[" ":" atom     "]" type        → (sentinel_slice 3 5)
          | "[" INTEGER      "]" type        → (array_type 2 4)
          | "[" "*"          "]" type        → (many_ptr 4)
          | "[" "*" ":" atom "]" type        → (sentinel_ptr 4 6)
+         | FN "(" L(type)   ")" type        → (fn_type 3 5)
+         | FN "("           ")" type        → (fn_type _ 4)
 
 # ==============================================================================
 # EXPRESSIONS
@@ -325,7 +333,7 @@ expr     = if
 
 cond     = expr
          | expr AS  name                    → (as 1 3)
-         | expr "|" name "|"                → (as 1 3)
+         | expr BAR_CAPTURE name BAR_CAPTURE → (as 1 3)
 
 if       = IF cond block ELSE AS name block → (if 2 3 6 7)
          | IF cond block ELSE AS name if    → (if 2 3 6 7)
@@ -333,10 +341,16 @@ if       = IF cond block ELSE AS name block → (if 2 3 6 7)
          | IF cond block ELSE block         → (if 2 3 5)
          | IF cond block                    → (if 2 3)
 
-while    = WHILE cond          block        → (while 2 _ 3)
+while    = WHILE cond          block ELSE block → (while 2 _ 3 else:5)
+         | WHILE cond ":" expr block ELSE block → (while 2 4 5 else:7)
+         | WHILE cond          block        → (while 2 _ 3)
          | WHILE cond ":" expr block        → (while 2 4 5)
 
-for      = FOR "*" name          IN expr block  → (for_ptr 3 _ 5 6)
+for      = FOR "*" name          IN expr block ELSE block → (for_ptr 3 _ 5 6 else:8)
+         | FOR "*" name "," name IN expr block ELSE block → (for_ptr 3 5 7 8 else:10)
+         | FOR          name     IN expr block ELSE block → (for 2 _ 4 5 else:7)
+         | FOR name "," name     IN expr block ELSE block → (for 2 4 6 7 else:9)
+         | FOR "*" name          IN expr block  → (for_ptr 3 _ 5 6)
          | FOR "*" name "," name IN expr block  → (for_ptr 3 5 7 8)
          | FOR          name     IN expr block  → (for 2 _ 4 5)
          | FOR name "," name     IN expr block  → (for 2 4 6 7)
@@ -443,9 +457,13 @@ atom     = name
          | lambda
          | "[" args "]"                     → (array ...2)
          | "(" expr ")"                     → 2
+         | DOT_LBRACE L(anon_field) "}"     → (anon_init ...2)
+         | DOT_LBRACE args "}"              → (anon_init ...2)
+         | DOT_LBRACE "}"                   → (anon_init)
 
 record   = name "{" L(pair) "}"             → (record 1 ...3)
 pair     = name ":" expr                    → (pair 1 3)
+anon_field = "." name "=" expr              → (pair 2 4)
 
 lambda   = FN params block                  → (lambda 2 returns:_ 3)
          | FN        block                  → (lambda params:_ returns:_ 2)
@@ -458,6 +476,7 @@ lambda   = FN params block                  → (lambda 2 returns:_ 3)
     "|>"  left
     "||"  left
     "&&"  left
+    "|"   left
     "^"   left
     "&"   left
     "=="  none, "!=" none, "<" none, ">" none, "<=" none, ">=" none

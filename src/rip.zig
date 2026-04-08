@@ -27,6 +27,8 @@ pub const Tag = enum(u8) {
     @"export",
     @"callconv",
     @"extern_var",
+    @"extern_const",
+    @"opaque",
     @"volatile_ptr",
     @"many_ptr",
     @"sentinel_ptr",
@@ -111,6 +113,7 @@ pub const Tag = enum(u8) {
 
     // Operators — bitwise
     @"&",
+    @"|",
     @"^",
     @"<<",
     @">>",
@@ -128,6 +131,11 @@ pub const Tag = enum(u8) {
     @"?",
     @"ptr",
     @"const_ptr",
+    @"sentinel_slice",
+    @"fn_type",
+    @"error_merge",
+    @"comptime_param",
+    @"anon_init",
     @"slice",
 
     // Structure
@@ -168,6 +176,7 @@ pub const keyword_id = enum(u16) {
     ENUM,
     STRUCT,
     PACKED,
+    OPAQUE,
     ERROR,
     TYPE,
     TEST,
@@ -222,6 +231,7 @@ const keyword_map = std.StaticStringMap(keyword_id).initComptime(.{
     .{ "enum", .ENUM },
     .{ "struct", .STRUCT },
     .{ "packed", .PACKED },
+    .{ "opaque", .OPAQUE },
     .{ "error", .ERROR },
     .{ "type", .TYPE },
     .{ "test", .TEST },
@@ -359,6 +369,29 @@ pub const Lexer = struct {
             if (tok.cat == .lbracket) self.bracket_depth += 1;
             if (tok.cat == .rbracket and self.bracket_depth > 0) self.bracket_depth -= 1;
 
+            // .{ → fuse into dot_lbrace token for anonymous struct init
+            if (tok.cat == .dot and self.base.pos < self.base.source.len and
+                self.base.source[self.base.pos] == '{')
+            {
+                var fused = tok;
+                fused.cat = .dot_lbrace;
+                fused.len = 2;
+                self.base.pos += 1;
+                self.base.brace += 1;
+                self.last_cat = .dot_lbrace;
+                return fused;
+            }
+
+            // | → classify as bar_capture when in |name| capture context
+            if (tok.cat == .bar) {
+                if (self.isCapturePipe()) {
+                    var cap = tok;
+                    cap.cat = .bar_capture;
+                    self.last_cat = .bar_capture;
+                    return cap;
+                }
+            }
+
             if (tok.cat == .ident) {
                 const ident_text = self.base.source[tok.pos..][0..tok.len];
                 if (std.mem.eql(u8, ident_text, "if") and self.flow_if_active and
@@ -480,6 +513,14 @@ pub const Lexer = struct {
         var probe = self.base;
         const tok = probe.matchRules();
         return tok.cat == .ident and std.mem.eql(u8, self.base.source[tok.pos..][0..tok.len], "else");
+    }
+
+    fn isCapturePipe(self: *const Lexer) bool {
+        var probe = self.base;
+        const tok1 = probe.matchRules();
+        if (tok1.cat != .ident) return false;
+        const tok2 = probe.matchRules();
+        return tok2.cat == .bar;
     }
 };
 
