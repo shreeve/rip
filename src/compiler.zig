@@ -692,7 +692,7 @@ pub const Compiler = struct {
         if (items.len == 0 or items[0] != .tag) return false;
         return switch (items[0].tag) {
             .@"=", .@"const", .@"return", .@"if", .@"while", .@"for", .@"for_ptr",
-            .@"match", .@"break", .@"break_to", .@"continue", .@"continue_to",
+            .@"match", .@"break", .@"continue",
             .@"defer", .@"errdefer", .@"comptime", .@"inline", .@"zig", .@"labeled",
             .@"typed_assign", .@"typed_const",
             .@"+=", .@"-=", .@"*=", .@"/=" => true,
@@ -741,32 +741,42 @@ pub const Compiler = struct {
                 try w.writeAll("\n");
             },
             .@"break" => {
+                // (break [value] [to] [if])
+                const has_cond = items.len > 3;
+                const value = if (items.len > 1 and items[1] != .nil) items[1] else .nil;
+                const label = if (items.len > 2 and items[2] != .nil) items[2] else .nil;
                 try self.writeIndent(w);
-                try w.writeAll("break");
-                if (items.len > 1) {
-                    try w.writeAll(" ");
-                    try self.emitExpr(items[1], w);
+                if (has_cond) {
+                    try w.writeAll("if (");
+                    try self.emitExpr(items[3], w);
+                    try w.writeAll(") ");
                 }
-                try w.writeAll(";\n");
-            },
-            .@"break_to" => {
-                try self.writeIndent(w);
-                try w.writeAll("break :");
-                try w.writeAll(self.txt(items[1]));
-                if (items.len > 2) {
+                try w.writeAll("break");
+                if (label != .nil) {
+                    try w.writeAll(" :");
+                    try w.writeAll(self.txt(label));
+                }
+                if (value != .nil) {
                     try w.writeAll(" ");
-                    try self.emitExpr(items[2], w);
+                    try self.emitExpr(value, w);
                 }
                 try w.writeAll(";\n");
             },
             .@"continue" => {
+                // (continue [to] [if])
+                const label = if (items.len > 1 and items[1] != .nil) items[1] else .nil;
+                const has_cond = items.len > 2 and items[2] != .nil;
                 try self.writeIndent(w);
-                try w.writeAll("continue;\n");
-            },
-            .@"continue_to" => {
-                try self.writeIndent(w);
-                try w.writeAll("continue :");
-                try w.writeAll(self.txt(items[1]));
+                if (has_cond) {
+                    try w.writeAll("if (");
+                    try self.emitExpr(items[2], w);
+                    try w.writeAll(") ");
+                }
+                try w.writeAll("continue");
+                if (label != .nil) {
+                    try w.writeAll(" :");
+                    try w.writeAll(self.txt(label));
+                }
                 try w.writeAll(";\n");
             },
             .@"labeled" => if (items.len >= 3) {
@@ -869,8 +879,20 @@ pub const Compiler = struct {
                 try w.writeAll(");\n");
             },
             .@"return" => {
+                // (return [value] [if])
+                const value = if (items.len > 1 and items[1] != .nil) items[1] else .nil;
+                const has_cond = items.len > 2 and items[2] != .nil;
                 try self.writeIndent(w);
-                try self.emitReturn(items[1..], w);
+                if (has_cond) {
+                    try w.writeAll("if (");
+                    try self.emitExpr(items[2], w);
+                    try w.writeAll(") ");
+                }
+                try w.writeAll("return");
+                if (value != .nil) {
+                    try w.writeAll(" ");
+                    try self.emitExpr(value, w);
+                }
                 try w.writeAll(";\n");
             },
             else => {
@@ -1048,6 +1070,10 @@ pub const Compiler = struct {
                     },
                     .@"not" => {
                         try w.writeAll("!");
+                        if (children.len > 0) try self.emitExpr(children[0], w);
+                    },
+                    .@"addr_of" => {
+                        try w.writeAll("&");
                         if (children.len > 0) try self.emitExpr(children[0], w);
                     },
 
@@ -1470,14 +1496,6 @@ pub const Compiler = struct {
         try self.emitTyperef(children[1], w);
         try w.writeAll(" = ");
         try self.emitExpr(children[2], w);
-    }
-
-    fn emitReturn(self: *Compiler, children: []const Sexp, w: *Writer) Writer.Error!void {
-        try w.writeAll("return");
-        if (children.len > 0) {
-            try w.writeAll(" ");
-            try self.emitExpr(children[0], w);
-        }
     }
 
     // =========================================================================

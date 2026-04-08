@@ -870,7 +870,6 @@ const LexerGenerator = struct {
         // Build set of characters that start string literal patterns
         // (these are handled by the string scanner, not the operator switch)
         var string_start_chars: [256]bool = @splat(false);
-        string_start_chars['"'] = true; // double-quote always excluded
         for (self.spec.rules.items) |rule| {
             const is_string_tok = std.mem.startsWith(u8, rule.token, "string");
             if (!is_string_tok) continue;
@@ -1510,29 +1509,13 @@ const LexerGenerator = struct {
 
         if (has_number) {
             if (number_has_leading_dot) {
-                const has_pat_state = blk: {
-                    for (self.spec.states.items) |s| {
-                        if (std.mem.eql(u8, s.name, "pat")) break :blk true;
-                    }
-                    break :blk false;
-                };
-                if (has_pat_state) {
-                    try self.write(
-                        \\        // Number (digit or leading dot followed by digit, not in pattern mode)
-                        \\        if (isDigit(c) or (self.pat == 0 and c == '.' and self.pos + 1 < self.source.len and isDigit(self.source[self.pos + 1]))) {
-                        \\            return self.scanNumber(start, ws_count);
-                        \\        }
-                        \\
-                    );
-                } else {
-                    try self.write(
-                        \\        // Number (digit or leading dot followed by digit)
-                        \\        if (isDigit(c) or (c == '.' and self.pos + 1 < self.source.len and isDigit(self.source[self.pos + 1]))) {
-                        \\            return self.scanNumber(start, ws_count);
-                        \\        }
-                        \\
-                    );
-                }
+                try self.write(
+                    \\        // Number (digit or leading dot followed by digit)
+                    \\        if (isDigit(c) or (c == '.' and self.pos + 1 < self.source.len and isDigit(self.source[self.pos + 1]))) {
+                    \\            return self.scanNumber(start, ws_count);
+                    \\        }
+                    \\
+                );
             } else {
                 try self.write(
                     \\        // Number
@@ -1582,7 +1565,6 @@ const LexerGenerator = struct {
                 (prefix_char >= 'A' and prefix_char <= 'Z') or prefix_char == '_' or prefix_char == '%') continue;
             // Skip comment start chars and flag chars (handled elsewhere)
             if (std.mem.eql(u8, rule.token, "comment")) continue;
-            if (std.mem.eql(u8, rule.token, "flag")) continue;
             if (std.mem.eql(u8, rule.token, "skip")) continue;
 
             // Must have a 2nd part that's a character class or literal (not just [^\n]*)
@@ -2080,7 +2062,7 @@ const LexerGenerator = struct {
             \\    pos: u32,         // Byte position in source (4 bytes)
             \\    len: u16,         // Token length in bytes (2 bytes)
             \\    cat: TokenCat,    // Token category (1 byte)
-            \\    pre: u8,          // Preceding whitespace OR dot-level for indent (1 byte)
+            \\    pre: u8,          // Preceding whitespace count (1 byte)
             \\
             \\    comptime {
             \\        std.debug.assert(@sizeOf(Token) == 8);
@@ -2228,11 +2210,16 @@ const LexerGenerator = struct {
 
         try self.generateNewlineHandling();
 
-        try self.write(
-            \\        // From here, clear line-start flag
-            \\        self.beg = 0;
-            \\
-        );
+        const has_beg_state = for (self.spec.states.items) |s| {
+            if (std.mem.eql(u8, s.name, "beg")) break true;
+        } else false;
+        if (has_beg_state) {
+            try self.write(
+                \\        // From here, clear line-start flag
+                \\        self.beg = 0;
+                \\
+            );
+        }
 
         try self.generateScannerDispatch();
 
@@ -2365,7 +2352,7 @@ const ParserTransition = struct {
 /// @as directive for token-to-rule mapping (uses @lang module)
 const AsDirective = struct {
     token: []const u8, // "ident"
-    rule: []const u8, // "cmd" -> cmd_id, cmd_as, cmd_to_symbol
+    rule: []const u8, // "kw" -> kw_id, kw_as, kw_to_symbol
 };
 
 /// @op directive for operator literal-to-token mappings
@@ -5242,7 +5229,7 @@ const ParserGenerator = struct {
                 // vs a real lexer token (needs tokenToSymbol mapping).
                 var is_as_keyword = false;
                 if (sym.name[0] >= 'A' and sym.name[0] <= 'Z') {
-                    // Check if there's a corresponding lowercase nonterminal (e.g., FUN↔fun)
+                    // Check if there's a corresponding lowercase nonterminal (e.g., IF↔if)
                     for (self.symbols.items) |other| {
                         if (other.kind == .nonterminal and std.ascii.eqlIgnoreCase(sym.name, other.name)) {
                             is_as_keyword = true;
@@ -6153,7 +6140,7 @@ pub fn main() !void {
             \\  -h, --help     Show this help
             \\
             \\Examples:
-            \\  grammar rip.grammar src/parser.zig
+            \\  grammar lang.grammar src/parser.zig
             \\
         , .{});
         return;

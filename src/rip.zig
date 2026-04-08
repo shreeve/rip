@@ -70,9 +70,7 @@ pub const Tag = enum(u8) {
     @"range_pattern",
     @"enum_pattern",
     @"break",
-    @"break_to",
     @"continue",
-    @"continue_to",
     @"defer",
     @"errdefer",
     @"try",
@@ -80,6 +78,7 @@ pub const Tag = enum(u8) {
     @"lambda",
 
     // Calls and access
+    @"addr_of",
     @"call",
     @".",
     @"deref",
@@ -250,6 +249,8 @@ pub const Lexer = struct {
     indent_queued: ?Token = null,
     indent_trailing_newline: bool = false,
     last_cat: TokenCat = .eof,
+    flow_if_active: bool = false,
+    bracket_depth: u8 = 0,
 
     pub fn init(source: []const u8) Lexer {
         return .{ .base = BaseLexer.init(source) };
@@ -267,6 +268,8 @@ pub const Lexer = struct {
         self.indent_queued = null;
         self.indent_trailing_newline = false;
         self.last_cat = .eof;
+        self.flow_if_active = false;
+        self.bracket_depth = 0;
     }
 
     pub fn next(self: *Lexer) Token {
@@ -307,6 +310,7 @@ pub const Lexer = struct {
                 if (dup_is_empty) continue;
                 if (dup_next == '#' and ws == self.indent_level) continue;
                 if (ws != self.indent_level) {
+                    self.flow_if_active = false;
                     const result = self.handleIndent(tok);
                     self.last_cat = result.cat;
                     return result;
@@ -315,12 +319,14 @@ pub const Lexer = struct {
             }
 
             if (tok.cat == .newline) {
+                self.flow_if_active = false;
                 const result = self.handleIndent(tok);
                 self.last_cat = result.cat;
                 return result;
             }
 
             if (tok.cat == .eof) {
+                self.flow_if_active = false;
                 if (self.indent_depth > 0) {
                     self.indent_depth -= 1;
                     if (self.indent_depth > 0) {
@@ -341,6 +347,28 @@ pub const Lexer = struct {
                 classified.cat = self.classifyMinus(tok);
                 self.last_cat = classified.cat;
                 return classified;
+            }
+
+            if (tok.cat == .lbracket) self.bracket_depth += 1;
+            if (tok.cat == .rbracket and self.bracket_depth > 0) self.bracket_depth -= 1;
+
+            if (tok.cat == .ident) {
+                const ident_text = self.base.source[tok.pos..][0..tok.len];
+                if (std.mem.eql(u8, ident_text, "if") and self.flow_if_active and
+                    self.base.paren == 0 and self.base.brace == 0 and self.bracket_depth == 0)
+                {
+                    var post = tok;
+                    post.cat = .post_if;
+                    self.flow_if_active = false;
+                    self.last_cat = .post_if;
+                    return post;
+                }
+                if (std.mem.eql(u8, ident_text, "return") or
+                    std.mem.eql(u8, ident_text, "break") or
+                    std.mem.eql(u8, ident_text, "continue"))
+                {
+                    self.flow_if_active = true;
+                }
             }
 
             self.last_cat = tok.cat;

@@ -209,6 +209,24 @@ fun main -> !void                          # fun (main can return errors for try
   :outer while true                        # labeled statement
     break :outer                           # break_to
 
+  # --- Postfix if (conditional flow control) ---
+  #
+  # Zig: if (n == 5) break;
+  #      if (n > 100) return n;
+
+  n = 0
+  while n < 10
+    n += 1
+    break if n == 5                        # break if cond
+  print n
+
+  n = 0
+  while n < 10
+    n += 1
+    continue if n < 3                      # continue if cond
+    break
+  print n
+
   # --- For range ---
   #
   # Zig: { var i: i64 = 0;
