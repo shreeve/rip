@@ -106,10 +106,15 @@ pub const Tag = enum(u8) {
     @">=",
 
     // Operators — logical
-    @"and",
-    @"or",
     @"||",
     @"&&",
+
+    // Operators — bitwise
+    @"&",
+    @"^",
+    @"<<",
+    @">>",
+    @"bit_not",
 
     // Operators — pipe and range
     @"|>",
@@ -122,11 +127,11 @@ pub const Tag = enum(u8) {
     @":",
     @"?",
     @"ptr",
+    @"const_ptr",
     @"slice",
 
     // Structure
     @"block",
-    @"expr",
 
     _,
 };
@@ -157,6 +162,7 @@ pub const keyword_id = enum(u16) {
     EXPORT,
     INLINE,
     VOLATILE,
+    CONST,
     ALIGN,
     CALLCONV,
     ENUM,
@@ -210,6 +216,7 @@ const keyword_map = std.StaticStringMap(keyword_id).initComptime(.{
     .{ "export", .EXPORT },
     .{ "inline", .INLINE },
     .{ "volatile", .VOLATILE },
+    .{ "const", .CONST },
     .{ "align", .ALIGN },
     .{ "callconv", .CALLCONV },
     .{ "enum", .ENUM },

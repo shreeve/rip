@@ -32,6 +32,28 @@ The following language-specific vestiges have been fixed:
   rather than separate tags for each variant.
 - **Address-of operator** — added `&` as a prefix unary operator (`addr_of` tag),
   enabling `&variable` syntax for pointer-taking.
+- **Bitwise operators** — added `&` (AND), `^` (XOR), `~` (NOT prefix), `<<`
+  (shift left), `>>` (shift right) with correct Zig precedence in the `@infix`
+  table. Bitwise `|` (OR) is deferred because it conflicts with capture syntax
+  (`|name|`) in the SLR grammar.
+- **`*const T` pointer type** — added `CONST` keyword and `const_ptr` grammar
+  rule for const pointer types.
+- **`defer`/`errdefer` with blocks** — grammar now accepts both block and
+  single-expression forms.
+- **Packed/extern struct methods** — enabled method declarations inside packed
+  and extern structs (they are namespace members, not layout-affecting).
+- **Calling convention** — `callconv` decorator now threads through to the
+  generated function signature, emitting `callconv(.name)` after the return type.
+- **`use` wired up** — `use name` emits `const name = @import("name");`
+  (skips `std` since the preamble handles it).
+- **Dead code removed** — eliminated unused `emitReturn` function, dead `and`/
+  `or`/`expr` tags, and moved container-level `emitted_names` state to instance
+  fields for reentrancy.
+- **Silent fallback replaced** — unknown expression tags now emit
+  `@compileError("unsupported: tag")` with a stderr warning instead of silently
+  producing `/* tag */` comments in the output.
+- **Power operator heuristic** — `**` detects float literals and uses `f64`
+  instead of the default `i64` for `std.math.pow`.
 
 ---
 

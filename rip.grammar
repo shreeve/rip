@@ -66,6 +66,10 @@ tokens
     nullish         # ??
     bar             # |
     ampersand       # &
+    caret           # ^
+    tilde           # ~
+    lshift          # <<
+    rshift          # >>
     at              # @
 
     # Operators — assignment
@@ -153,6 +157,8 @@ tokens
 "|>"                                        → pipe
 "??"                                        → nullish
 ".."                                        → dotdot
+"<<"                                        → lshift
+">>"                                        → rshift
 
 # ==============================================================================
 # SINGLE-CHARACTER OPERATORS AND PUNCTUATION
@@ -169,6 +175,8 @@ tokens
 '?'                                         → question
 '|'                                         → bar
 '&'                                         → ampersand
+'^'                                         → caret
+'~'                                         → tilde
 '@'                                         → at
 '='                                         → assign
 '('                                         → lparen, {paren++}
@@ -284,6 +292,7 @@ type     = name
          | "!"                  type        → (error_union 2)
          | "?"                  type        → (? 2)
          | "*"                  type        → (ptr 2)
+         | "*" CONST            type        → (const_ptr 3)
          | "*" VOLATILE         type        → (volatile_ptr 3)
          | "["              "]" type        → (slice 3)
          | "[" INTEGER      "]" type        → (array_type 2 4)
@@ -375,8 +384,10 @@ continue = CONTINUE ":" name POST_IF expr   → (continue to:3 if:5)
 
 # --- Statement modifiers ---
 
-defer    = DEFER    expr                    → (defer 2)
-errdefer = ERRDEFER expr                    → (errdefer 2)
+defer    = DEFER    block                   → (defer 2)
+         | DEFER    expr                    → (defer 2)
+errdefer = ERRDEFER block                   → (errdefer 2)
+         | ERRDEFER expr                    → (errdefer 2)
 comptime = COMPTIME expr                    → (comptime 2)
 inline   = INLINE   expr                    → (inline 2)
 
@@ -399,6 +410,7 @@ unary    = "!" unary                        → (not 2)
          | MINUS_PREFIX unary               → (neg 2)
          | TRY unary                        → (try 2)
          | "&" unary                        → (addr_of 2)
+         | "~" unary                        → (bit_not 2)
          | call
 
 call     = call "." "*"                     → (deref 1)
@@ -446,8 +458,11 @@ lambda   = FN params block                  → (lambda 2 returns:_ 3)
     "|>"  left
     "||"  left
     "&&"  left
+    "^"   left
+    "&"   left
     "=="  none, "!=" none, "<" none, ">" none, "<=" none, ">=" none
     ".."  none
+    "<<"  left, ">>" left
     "+"   left, "-"  left
     "*"   left, "/"  left, "%"  left
     "**"  right

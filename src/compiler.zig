@@ -38,6 +38,13 @@ pub const Compiler = struct {
     fn_info: [MAX_NAMES]FnInfo = undefined,
     fn_count: usize = 0,
 
+    // Declaration tracking (per-function scope)
+    emitted_names: [MAX_NAMES][]const u8 = undefined,
+    emitted_count: usize = 0,
+
+    // Declaration attributes (set by decorator unwrapping)
+    pending_callconv: ?[]const u8 = null,
+
     pub fn init(source: []const u8) Compiler {
         return .{ .source = source };
     }
@@ -75,7 +82,7 @@ pub const Compiler = struct {
         switch (items[0].tag) {
             .@"fun" => try self.emitFun(items[1..], w),
             .@"sub" => try self.emitSub(items[1..], w),
-            .@"use" => {}, // handled by module preamble
+            .@"use" => try self.emitUse(items[1..], w),
             .@"pub", .@"export" => if (items.len > 1) {
                 try w.writeAll(@tagName(items[0].tag));
                 try w.writeAll(" ");
@@ -93,7 +100,9 @@ pub const Compiler = struct {
                 }
             },
             .@"callconv" => if (items.len > 2) {
+                self.pending_callconv = self.txt(items[1]);
                 try self.emitTopLevel(items[2], w);
+                self.pending_callconv = null;
             },
             .@"extern_var" => if (items.len > 1) {
                 const name = self.txt(items[1]);
@@ -152,6 +161,9 @@ pub const Compiler = struct {
         } else {
             try w.writeAll("i64");
         }
+        if (self.pending_callconv) |cc| {
+            try w.print(" callconv(.{s})", .{cc});
+        }
         try w.writeAll(" {\n");
 
         self.depth += 1;
@@ -177,7 +189,12 @@ pub const Compiler = struct {
         try w.writeAll(name);
         try w.writeAll("(");
         if (params != .nil) try self.emitParams(params, w);
-        try w.writeAll(") void {\n");
+        try w.writeAll(") ");
+        try w.writeAll("void");
+        if (self.pending_callconv) |cc| {
+            try w.print(" callconv(.{s})", .{cc});
+        }
+        try w.writeAll(" {\n");
 
         self.depth += 1;
         try self.emitBody(body, false, w);
@@ -210,6 +227,7 @@ pub const Compiler = struct {
     fn emitUse(self: *Compiler, children: []const Sexp, w: *Writer) Writer.Error!void {
         if (children.len == 0) return;
         const name = self.txt(children[0]);
+        if (std.mem.eql(u8, name, "std")) return;
         try w.print("const {s} = @import(\"{s}\");\n", .{ name, name });
     }
 
@@ -286,13 +304,13 @@ pub const Compiler = struct {
     fn emitExternStruct(self: *Compiler, children: []const Sexp, w: *Writer) Writer.Error!void {
         if (children.len < 1) return;
         try w.print("const {s} = extern struct {{\n", .{self.txt(children[0])});
-        try self.emitStructBody(children[1..], false, w);
+        try self.emitStructBody(children[1..], true, w);
     }
 
     fn emitPackedStruct(self: *Compiler, children: []const Sexp, w: *Writer) Writer.Error!void {
         if (children.len < 1) return;
         try w.print("const {s} = packed struct {{\n", .{self.txt(children[0])});
-        try self.emitStructBody(children[1..], false, w);
+        try self.emitStructBody(children[1..], true, w);
     }
 
     fn emitStructBody(self: *Compiler, members: []const Sexp, allow_methods: bool, w: *Writer) Writer.Error!void {
@@ -388,6 +406,10 @@ pub const Compiler = struct {
                         try w.writeAll("*");
                         try self.emitTyperef(items[1], w);
                     },
+                    .@"const_ptr" => {
+                        try w.writeAll("*const ");
+                        try self.emitTyperef(items[1], w);
+                    },
                     .@"slice" => {
                         try w.writeAll("[]");
                         try self.emitTyperef(items[1], w);
@@ -436,7 +458,7 @@ pub const Compiler = struct {
     fn resetScope(self: *Compiler) void {
         self.mut_count = 0;
         self.bound_count = 0;
-        resetEmitted();
+        self.resetEmitted();
     }
 
     /// Pre-scan a sexp tree to find names assigned more than once.
@@ -496,23 +518,19 @@ pub const Compiler = struct {
         return false;
     }
 
-    // Track which names have been emitted as declarations in the current function
-    var emitted_names: [MAX_NAMES][]const u8 = undefined;
-    var emitted_count: usize = 0;
-
-    fn resetEmitted() void {
-        emitted_count = 0;
+    fn resetEmitted(self: *Compiler) void {
+        self.emitted_count = 0;
     }
 
-    fn markEmitted(name: []const u8) void {
-        if (emitted_count < MAX_NAMES) {
-            emitted_names[emitted_count] = name;
-            emitted_count += 1;
+    fn markEmitted(self: *Compiler, name: []const u8) void {
+        if (self.emitted_count < MAX_NAMES) {
+            self.emitted_names[self.emitted_count] = name;
+            self.emitted_count += 1;
         }
     }
 
-    fn isEmitted(name: []const u8) bool {
-        for (emitted_names[0..emitted_count]) |n| {
+    fn isEmitted(self: *const Compiler, name: []const u8) bool {
+        for (self.emitted_names[0..self.emitted_count]) |n| {
             if (std.mem.eql(u8, n, name)) return true;
         }
         return false;
@@ -1076,6 +1094,10 @@ pub const Compiler = struct {
                         try w.writeAll("&");
                         if (children.len > 0) try self.emitExpr(children[0], w);
                     },
+                    .@"bit_not" => {
+                        try w.writeAll("~");
+                        if (children.len > 0) try self.emitExpr(children[0], w);
+                    },
 
                     .@"&&" => if (children.len >= 2) {
                         try self.emitGrouped(children[0], w);
@@ -1102,7 +1124,12 @@ pub const Compiler = struct {
                     },
 
                     .@"**" => {
-                        try w.writeAll("std.math.pow(i64, ");
+                        const pow_type = if (children.len >= 2 and
+                            (self.isFloatLit(children[0]) or self.isFloatLit(children[1])))
+                            "f64"
+                        else
+                            "i64";
+                        try w.print("std.math.pow({s}, ", .{pow_type});
                         if (children.len >= 2) {
                             try self.emitExpr(children[0], w);
                             try w.writeAll(", ");
@@ -1113,13 +1140,17 @@ pub const Compiler = struct {
 
                     .@"+", .@"-", .@"*", .@"/", .@"%",
                     .@"==", .@"!=", .@"<", .@">", .@"<=", .@">=",
+                    .@"&", .@"^", .@"<<", .@">>",
                     => if (children.len >= 2) {
                         try self.emitGrouped(children[0], w);
                         try w.print(" {s} ", .{@tagName(tag)});
                         try self.emitGrouped(children[1], w);
                     },
 
-                    else => try w.print("/* {s} */", .{@tagName(tag)}),
+                    else => {
+                        std.debug.print("warning: unsupported tag '{s}' in expression\n", .{@tagName(tag)});
+                        try w.print("@compileError(\"unsupported: {s}\")", .{@tagName(tag)});
+                    },
                 }
             },
         }
@@ -1128,6 +1159,15 @@ pub const Compiler = struct {
     fn isStringLit(self: *const Compiler, sexp: Sexp) bool {
         const t = self.txt(sexp);
         return t.len >= 2 and (t[0] == '\'' or t[0] == '"');
+    }
+
+    fn isFloatLit(self: *const Compiler, sexp: Sexp) bool {
+        if (sexp != .src) return false;
+        const t = self.source[sexp.src.pos..][0..sexp.src.len];
+        for (t) |c| {
+            if (c == '.') return true;
+        }
+        return false;
     }
 
     fn emitCall(self: *Compiler, children: []const Sexp, w: *Writer) Writer.Error!void {
@@ -1442,14 +1482,14 @@ pub const Compiler = struct {
     fn emitBinding(self: *Compiler, tag: Tag, children: []const Sexp, w: *Writer) Writer.Error!void {
         if (children.len < 2) return;
         const name = self.txt(children[0]);
-        const already = isEmitted(name);
+        const already = self.isEmitted(name);
 
         if (std.mem.eql(u8, name, "_")) {
             try w.writeAll("_");
         } else if (already) {
             try self.emitExpr(children[0], w);
         } else {
-            markEmitted(name);
+            self.markEmitted(name);
             if (tag == .@"const" or !self.isMutated(name)) {
                 try w.writeAll("const ");
                 try self.emitExpr(children[0], w);
@@ -1484,7 +1524,7 @@ pub const Compiler = struct {
         if (std.mem.eql(u8, name, "_")) {
             try w.writeAll("_");
         } else {
-            markEmitted(name);
+            self.markEmitted(name);
             if (is_const) {
                 try w.writeAll("const ");
             } else {
