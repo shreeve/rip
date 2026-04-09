@@ -38,6 +38,10 @@ pub const Compiler = struct {
     fn_info: [MAX_NAMES]FnInfo = undefined,
     fn_count: usize = 0,
 
+    // Module-level binding names (so functions don't re-declare them)
+    module_names: [MAX_NAMES][]const u8 = undefined,
+    module_name_count: usize = 0,
+
     // Declaration tracking (per-function scope)
     emitted_names: [MAX_NAMES][]const u8 = undefined,
     emitted_count: usize = 0,
@@ -578,6 +582,13 @@ pub const Compiler = struct {
         return false;
     }
 
+    fn isModuleName(self: *const Compiler, name: []const u8) bool {
+        for (self.module_names[0..self.module_name_count]) |n| {
+            if (std.mem.eql(u8, n, name)) return true;
+        }
+        return false;
+    }
+
     // =========================================================================
     // Type resolution pre-pass
     // =========================================================================
@@ -585,6 +596,16 @@ pub const Compiler = struct {
     fn buildSymbolTable(self: *Compiler, children: []const Sexp) void {
         for (children) |child| {
             self.scanDeclTypes(child, false, false);
+            if (child == .list and child.list.len >= 3 and child.list[0] == .tag) {
+                const tag = child.list[0].tag;
+                if (tag == .@"=" or tag == .@"const" or tag == .@"typed_assign" or tag == .@"typed_const") {
+                    const name = self.txt(child.list[1]);
+                    if (self.module_name_count < MAX_NAMES) {
+                        self.module_names[self.module_name_count] = name;
+                        self.module_name_count += 1;
+                    }
+                }
+            }
         }
     }
 
@@ -1554,7 +1575,7 @@ pub const Compiler = struct {
     fn emitBinding(self: *Compiler, tag: Tag, children: []const Sexp, w: *Writer) Writer.Error!void {
         if (children.len < 2) return;
         const name = self.txt(children[0]);
-        const already = self.isEmitted(name);
+        const already = self.isEmitted(name) or (self.depth > 0 and self.isModuleName(name));
 
         if (std.mem.eql(u8, name, "_")) {
             try w.writeAll("_");
