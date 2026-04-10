@@ -159,7 +159,7 @@ fun main -> !void                          # fun (main can return errors for try
   #      std.debug.print("{any}\n", .{result});
   #      std.debug.print("{any}\n", .{limit});
 
-  result = add(1, 2)                       # assign (=), call
+  result = add 1, 2                        # assign (=), implicit call
   limit =! 100                             # const (=!)
   print result
   print limit
