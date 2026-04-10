@@ -7,7 +7,7 @@ This document records our best current understanding of how Zig handles source p
 - direct inspection of the Zig source vendored under `misc/zig`
 - a second-opinion review from the `user-ai` MCP peer
 
-This is not meant to be a formal grammar reference for Zig. It is an implementation-oriented note intended to help `Rip` decide what to borrow, what not to borrow, and why.
+This is not meant to be a formal grammar reference for Zig. It is an implementation-oriented note intended to help `Zag` decide what to borrow, what not to borrow, and why.
 
 ## Short Answer
 
@@ -87,7 +87,7 @@ This is an important distinction:
 - tokenization completes first
 - parsing then operates over a full token array
 
-That is a useful lesson for `Rip`.
+That is a useful lesson for `Zag`.
 
 ### `Parse.zig`
 
@@ -197,33 +197,33 @@ The AST representation in `Ast.zig` appears especially optimized for:
 - index-based access
 - no per-node heap-object overhead
 
-## What `Rip` Should Not Copy Exactly
+## What `Zag` Should Not Copy Exactly
 
-Even though Zig's approach is strong, `Rip` should probably not imitate it exactly.
+Even though Zig's approach is strong, `Zag` should probably not imitate it exactly.
 
 Main reasons:
 
-- `Rip` wants a grammar-driven source of truth
-- `Rip` wants a rewriter as a first-class stage
-- `Rip` wants raw S-expression output
-- `Rip` is still evolving its surface syntax quickly
+- `Zag` wants a grammar-driven source of truth
+- `Zag` wants a rewriter as a first-class stage
+- `Zag` wants raw S-expression output
+- `Zag` is still evolving its surface syntax quickly
 
 Those goals are different enough that a fully hand-written parser architecture would likely be the wrong fit.
 
-## What `Rip` Should Borrow
+## What `Zag` Should Borrow
 
-Even if `Rip` should not copy Zig's parser design literally, there are several excellent lessons to borrow.
+Even if `Zag` should not copy Zig's parser design literally, there are several excellent lessons to borrow.
 
 ### 1. Fully tokenize first, then parse
 
 This is a very good boundary.
 
-`Rip` should likely do:
+`Zag` should likely do:
 
 ```text
 source
   -> BaseLexer
-  -> rewriter (rip.zig: indentation, type stripping)
+  -> rewriter (zag.zig: indentation, type stripping)
   -> parser
 ```
 
@@ -233,7 +233,7 @@ That keeps parsing simple and makes lookahead/backtracking easier.
 
 Zig's AST refers back to source via token positions.
 
-`Rip` should preserve this same spirit:
+`Zag` should preserve this same spirit:
 
 - sexps or intermediate structures should point into source when possible
 - diagnostics should retain source origin through rewriting and normalization
@@ -242,7 +242,7 @@ Zig's AST refers back to source via token positions.
 
 This is one of Zig's strongest architectural traits.
 
-For `Rip`, the desired phase split should remain:
+For `Zag`, the desired phase split should remain:
 
 ```text
 lexer -> rewriter -> parser -> raw sexps -> normalization -> type resolution -> Zig emission
@@ -257,9 +257,9 @@ It is:
 
 - keep the syntax disciplined enough that the parser stays boring
 
-That is a valuable design principle for `Rip` too.
+That is a valuable design principle for `Zag` too.
 
-## Main Contrast With `Rip`
+## Main Contrast With `Zag`
 
 The best overall contrast is:
 
@@ -270,7 +270,7 @@ The best overall contrast is:
 - indexed AST
 - AST -> ZIR lowering
 
-### Rip
+### Zag
 
 - grammar-driven lexer/parser generation
 - rewriter as a first-class stage
@@ -279,7 +279,7 @@ The best overall contrast is:
 - type resolution
 - Zig emission
 
-So `Rip` should aim to borrow Zig's discipline, not Zig's exact front-end implementation style.
+So `Zag` should aim to borrow Zig's discipline, not Zig's exact front-end implementation style.
 
 ## Best Current Takeaway
 
@@ -287,15 +287,15 @@ The best current takeaway is:
 
 - Zig proves that strong stage separation is valuable
 - Zig proves that concrete internal representations matter
-- Zig does **not** suggest that `Rip` should abandon its grammar-driven / rewriter / sexp-based design
+- Zig does **not** suggest that `Zag` should abandon its grammar-driven / rewriter / sexp-based design
 
-Instead, `Rip` should keep its own architecture and borrow the best implementation discipline from Zig.
+Instead, `Zag` should keep its own architecture and borrow the best implementation discipline from Zig.
 
 ## Note On Confidence
 
 This note reflects our best current understanding from source inspection plus peer-AI review.
 
-It is strong enough to guide `Rip` design decisions, but it should still be treated as:
+It is strong enough to guide `Zag` design decisions, but it should still be treated as:
 
 - implementation-oriented understanding
 - not a formal language-reference substitute

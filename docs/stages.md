@@ -6,8 +6,8 @@ For each compiler stage, what it owns. For the syntax surface itself, see `docs/
 
 ## Pipeline
 
-1. **BaseLexer** — generated from `rip.grammar`. Tokenization, state variables, character-class dispatch.
-2. **Rewriter** — in `rip.zig`. Indentation tracking (indent/outdent), type annotation passthrough, duplicate newline suppression, comment handling.
+1. **BaseLexer** — generated from `zag.grammar`. Tokenization, state variables, character-class dispatch.
+2. **Rewriter** — in `zag.zig`. Indentation tracking (indent/outdent), type annotation passthrough, duplicate newline suppression, comment handling.
 3. **Parser** — generated SLR(1). Produces raw S-expressions directly.
 4. **Normalization** — (future) canonical structural forms.
 5. **Type resolution** — `compiler.zig` pre-pass. Builds symbol table from fun/sub declarations (return types, visibility, param typing). Used for void-call detection, var binding type inference, and declaration warnings.
@@ -60,6 +60,6 @@ These features should stay in the rewriter rather than being pushed into the gra
 ## Notes
 
 - The lexer does more than raw tokenization, but less than full syntactic inference.
-- The rewriter is where most "Rip beauty" lives.
+- The rewriter is where most "Zag beauty" lives.
 - The grammar stays smaller because the rewriter clarifies token structure first.
 - The goal is not to eliminate the rewriter — it is to make it small, principled, and debuggable.

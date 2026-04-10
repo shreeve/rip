@@ -5,7 +5,7 @@
 
 const std = @import("std");
 const MAX_ARGS: usize = 32;
-const rip = @import("rip.zig");
+const zag = @import("zag.zig");
 
 // SIMD helpers (fallback if simd.zig not available)
 const simd = struct {
@@ -476,12 +476,12 @@ pub const BaseLexer = struct {
     }
 };
 
-pub const Lexer = if (@hasDecl(rip, "Lexer")) rip.Lexer else BaseLexer;
+pub const Lexer = if (@hasDecl(zag, "Lexer")) zag.Lexer else BaseLexer;
 
 // =============================================================================
 // Tag Enum (re-exported from language module)
 // =============================================================================
-pub const Tag = rip.Tag;
+pub const Tag = zag.Tag;
 
 // =============================================================================
 // S-Expression (AST Node) - 5 Clean Variants
@@ -1031,7 +1031,7 @@ pub const Parser = struct {
     fn try_ident_as_keyword(self: *Parser, token: Token, text: []const u8) ?u16 {
         _ = token;
         const state = self.state_stack.getLast();
-        if (rip.keyword_as(text)) |id| {
+        if (zag.keyword_as(text)) |id| {
             const id_idx = @intFromEnum(id);
             const sym = keyword_to_symbol[id_idx];
             if (sym != 0 and getAction(state, sym) != 0) {
@@ -1064,61 +1064,61 @@ const SYM_expr: u16 = 4;
 const SYM_expr_START: u16 = 149;
 const SYM_IDENT: u16 = 59;
 
-// Mapping from rip.keyword_id to grammar symbol IDs (computed at comptime)
+// Mapping from zag.keyword_id to grammar symbol IDs (computed at comptime)
 const keyword_to_symbol = blk: {
     var arr: [512]u16 = .{0} ** 512;
-    if (@hasField(rip.keyword_id, "NEWLINE")) arr[@intFromEnum(rip.keyword_id.NEWLINE)] = 57;
-    if (@hasField(rip.keyword_id, "IDENT")) arr[@intFromEnum(rip.keyword_id.IDENT)] = 59;
-    if (@hasField(rip.keyword_id, "EXTERN")) arr[@intFromEnum(rip.keyword_id.EXTERN)] = 60;
-    if (@hasField(rip.keyword_id, "CONST")) arr[@intFromEnum(rip.keyword_id.CONST)] = 61;
-    if (@hasField(rip.keyword_id, "ZIG")) arr[@intFromEnum(rip.keyword_id.ZIG)] = 62;
-    if (@hasField(rip.keyword_id, "STRING_SQ")) arr[@intFromEnum(rip.keyword_id.STRING_SQ)] = 63;
-    if (@hasField(rip.keyword_id, "STRING_DQ")) arr[@intFromEnum(rip.keyword_id.STRING_DQ)] = 64;
-    if (@hasField(rip.keyword_id, "PUB")) arr[@intFromEnum(rip.keyword_id.PUB)] = 65;
-    if (@hasField(rip.keyword_id, "EXPORT")) arr[@intFromEnum(rip.keyword_id.EXPORT)] = 66;
-    if (@hasField(rip.keyword_id, "PACKED")) arr[@intFromEnum(rip.keyword_id.PACKED)] = 67;
-    if (@hasField(rip.keyword_id, "CALLCONV")) arr[@intFromEnum(rip.keyword_id.CALLCONV)] = 68;
-    if (@hasField(rip.keyword_id, "INDENT")) arr[@intFromEnum(rip.keyword_id.INDENT)] = 69;
-    if (@hasField(rip.keyword_id, "OUTDENT")) arr[@intFromEnum(rip.keyword_id.OUTDENT)] = 70;
-    if (@hasField(rip.keyword_id, "FUN")) arr[@intFromEnum(rip.keyword_id.FUN)] = 71;
-    if (@hasField(rip.keyword_id, "SUB")) arr[@intFromEnum(rip.keyword_id.SUB)] = 72;
-    if (@hasField(rip.keyword_id, "USE")) arr[@intFromEnum(rip.keyword_id.USE)] = 73;
-    if (@hasField(rip.keyword_id, "TYPE")) arr[@intFromEnum(rip.keyword_id.TYPE)] = 74;
-    if (@hasField(rip.keyword_id, "TEST")) arr[@intFromEnum(rip.keyword_id.TEST)] = 76;
-    if (@hasField(rip.keyword_id, "OPAQUE")) arr[@intFromEnum(rip.keyword_id.OPAQUE)] = 77;
-    if (@hasField(rip.keyword_id, "ENUM")) arr[@intFromEnum(rip.keyword_id.ENUM)] = 78;
-    if (@hasField(rip.keyword_id, "ERROR")) arr[@intFromEnum(rip.keyword_id.ERROR)] = 79;
-    if (@hasField(rip.keyword_id, "STRUCT")) arr[@intFromEnum(rip.keyword_id.STRUCT)] = 80;
-    if (@hasField(rip.keyword_id, "COMPTIME")) arr[@intFromEnum(rip.keyword_id.COMPTIME)] = 81;
-    if (@hasField(rip.keyword_id, "ALIGN")) arr[@intFromEnum(rip.keyword_id.ALIGN)] = 82;
-    if (@hasField(rip.keyword_id, "VOLATILE")) arr[@intFromEnum(rip.keyword_id.VOLATILE)] = 90;
-    if (@hasField(rip.keyword_id, "INTEGER")) arr[@intFromEnum(rip.keyword_id.INTEGER)] = 93;
-    if (@hasField(rip.keyword_id, "FN")) arr[@intFromEnum(rip.keyword_id.FN)] = 94;
-    if (@hasField(rip.keyword_id, "AS")) arr[@intFromEnum(rip.keyword_id.AS)] = 100;
-    if (@hasField(rip.keyword_id, "BAR_CAPTURE")) arr[@intFromEnum(rip.keyword_id.BAR_CAPTURE)] = 101;
-    if (@hasField(rip.keyword_id, "IF")) arr[@intFromEnum(rip.keyword_id.IF)] = 102;
-    if (@hasField(rip.keyword_id, "ELSE")) arr[@intFromEnum(rip.keyword_id.ELSE)] = 103;
-    if (@hasField(rip.keyword_id, "WHILE")) arr[@intFromEnum(rip.keyword_id.WHILE)] = 104;
-    if (@hasField(rip.keyword_id, "FOR")) arr[@intFromEnum(rip.keyword_id.FOR)] = 105;
-    if (@hasField(rip.keyword_id, "IN")) arr[@intFromEnum(rip.keyword_id.IN)] = 106;
-    if (@hasField(rip.keyword_id, "MATCH")) arr[@intFromEnum(rip.keyword_id.MATCH)] = 107;
-    if (@hasField(rip.keyword_id, "CATCH")) arr[@intFromEnum(rip.keyword_id.CATCH)] = 112;
-    if (@hasField(rip.keyword_id, "RETURN")) arr[@intFromEnum(rip.keyword_id.RETURN)] = 113;
-    if (@hasField(rip.keyword_id, "POST_IF")) arr[@intFromEnum(rip.keyword_id.POST_IF)] = 114;
-    if (@hasField(rip.keyword_id, "BREAK")) arr[@intFromEnum(rip.keyword_id.BREAK)] = 115;
-    if (@hasField(rip.keyword_id, "CONTINUE")) arr[@intFromEnum(rip.keyword_id.CONTINUE)] = 116;
-    if (@hasField(rip.keyword_id, "DEFER")) arr[@intFromEnum(rip.keyword_id.DEFER)] = 117;
-    if (@hasField(rip.keyword_id, "ERRDEFER")) arr[@intFromEnum(rip.keyword_id.ERRDEFER)] = 118;
-    if (@hasField(rip.keyword_id, "INLINE")) arr[@intFromEnum(rip.keyword_id.INLINE)] = 119;
-    if (@hasField(rip.keyword_id, "MINUS_PREFIX")) arr[@intFromEnum(rip.keyword_id.MINUS_PREFIX)] = 125;
-    if (@hasField(rip.keyword_id, "TRY")) arr[@intFromEnum(rip.keyword_id.TRY)] = 126;
-    if (@hasField(rip.keyword_id, "REAL")) arr[@intFromEnum(rip.keyword_id.REAL)] = 133;
-    if (@hasField(rip.keyword_id, "TRUE")) arr[@intFromEnum(rip.keyword_id.TRUE)] = 134;
-    if (@hasField(rip.keyword_id, "FALSE")) arr[@intFromEnum(rip.keyword_id.FALSE)] = 135;
-    if (@hasField(rip.keyword_id, "NULL")) arr[@intFromEnum(rip.keyword_id.NULL)] = 136;
-    if (@hasField(rip.keyword_id, "UNREACHABLE")) arr[@intFromEnum(rip.keyword_id.UNREACHABLE)] = 137;
-    if (@hasField(rip.keyword_id, "UNDEFINED")) arr[@intFromEnum(rip.keyword_id.UNDEFINED)] = 138;
-    if (@hasField(rip.keyword_id, "DOT_LBRACE")) arr[@intFromEnum(rip.keyword_id.DOT_LBRACE)] = 140;
+    if (@hasField(zag.keyword_id, "NEWLINE")) arr[@intFromEnum(zag.keyword_id.NEWLINE)] = 57;
+    if (@hasField(zag.keyword_id, "IDENT")) arr[@intFromEnum(zag.keyword_id.IDENT)] = 59;
+    if (@hasField(zag.keyword_id, "EXTERN")) arr[@intFromEnum(zag.keyword_id.EXTERN)] = 60;
+    if (@hasField(zag.keyword_id, "CONST")) arr[@intFromEnum(zag.keyword_id.CONST)] = 61;
+    if (@hasField(zag.keyword_id, "ZIG")) arr[@intFromEnum(zag.keyword_id.ZIG)] = 62;
+    if (@hasField(zag.keyword_id, "STRING_SQ")) arr[@intFromEnum(zag.keyword_id.STRING_SQ)] = 63;
+    if (@hasField(zag.keyword_id, "STRING_DQ")) arr[@intFromEnum(zag.keyword_id.STRING_DQ)] = 64;
+    if (@hasField(zag.keyword_id, "PUB")) arr[@intFromEnum(zag.keyword_id.PUB)] = 65;
+    if (@hasField(zag.keyword_id, "EXPORT")) arr[@intFromEnum(zag.keyword_id.EXPORT)] = 66;
+    if (@hasField(zag.keyword_id, "PACKED")) arr[@intFromEnum(zag.keyword_id.PACKED)] = 67;
+    if (@hasField(zag.keyword_id, "CALLCONV")) arr[@intFromEnum(zag.keyword_id.CALLCONV)] = 68;
+    if (@hasField(zag.keyword_id, "INDENT")) arr[@intFromEnum(zag.keyword_id.INDENT)] = 69;
+    if (@hasField(zag.keyword_id, "OUTDENT")) arr[@intFromEnum(zag.keyword_id.OUTDENT)] = 70;
+    if (@hasField(zag.keyword_id, "FUN")) arr[@intFromEnum(zag.keyword_id.FUN)] = 71;
+    if (@hasField(zag.keyword_id, "SUB")) arr[@intFromEnum(zag.keyword_id.SUB)] = 72;
+    if (@hasField(zag.keyword_id, "USE")) arr[@intFromEnum(zag.keyword_id.USE)] = 73;
+    if (@hasField(zag.keyword_id, "TYPE")) arr[@intFromEnum(zag.keyword_id.TYPE)] = 74;
+    if (@hasField(zag.keyword_id, "TEST")) arr[@intFromEnum(zag.keyword_id.TEST)] = 76;
+    if (@hasField(zag.keyword_id, "OPAQUE")) arr[@intFromEnum(zag.keyword_id.OPAQUE)] = 77;
+    if (@hasField(zag.keyword_id, "ENUM")) arr[@intFromEnum(zag.keyword_id.ENUM)] = 78;
+    if (@hasField(zag.keyword_id, "ERROR")) arr[@intFromEnum(zag.keyword_id.ERROR)] = 79;
+    if (@hasField(zag.keyword_id, "STRUCT")) arr[@intFromEnum(zag.keyword_id.STRUCT)] = 80;
+    if (@hasField(zag.keyword_id, "COMPTIME")) arr[@intFromEnum(zag.keyword_id.COMPTIME)] = 81;
+    if (@hasField(zag.keyword_id, "ALIGN")) arr[@intFromEnum(zag.keyword_id.ALIGN)] = 82;
+    if (@hasField(zag.keyword_id, "VOLATILE")) arr[@intFromEnum(zag.keyword_id.VOLATILE)] = 90;
+    if (@hasField(zag.keyword_id, "INTEGER")) arr[@intFromEnum(zag.keyword_id.INTEGER)] = 93;
+    if (@hasField(zag.keyword_id, "FN")) arr[@intFromEnum(zag.keyword_id.FN)] = 94;
+    if (@hasField(zag.keyword_id, "AS")) arr[@intFromEnum(zag.keyword_id.AS)] = 100;
+    if (@hasField(zag.keyword_id, "BAR_CAPTURE")) arr[@intFromEnum(zag.keyword_id.BAR_CAPTURE)] = 101;
+    if (@hasField(zag.keyword_id, "IF")) arr[@intFromEnum(zag.keyword_id.IF)] = 102;
+    if (@hasField(zag.keyword_id, "ELSE")) arr[@intFromEnum(zag.keyword_id.ELSE)] = 103;
+    if (@hasField(zag.keyword_id, "WHILE")) arr[@intFromEnum(zag.keyword_id.WHILE)] = 104;
+    if (@hasField(zag.keyword_id, "FOR")) arr[@intFromEnum(zag.keyword_id.FOR)] = 105;
+    if (@hasField(zag.keyword_id, "IN")) arr[@intFromEnum(zag.keyword_id.IN)] = 106;
+    if (@hasField(zag.keyword_id, "MATCH")) arr[@intFromEnum(zag.keyword_id.MATCH)] = 107;
+    if (@hasField(zag.keyword_id, "CATCH")) arr[@intFromEnum(zag.keyword_id.CATCH)] = 112;
+    if (@hasField(zag.keyword_id, "RETURN")) arr[@intFromEnum(zag.keyword_id.RETURN)] = 113;
+    if (@hasField(zag.keyword_id, "POST_IF")) arr[@intFromEnum(zag.keyword_id.POST_IF)] = 114;
+    if (@hasField(zag.keyword_id, "BREAK")) arr[@intFromEnum(zag.keyword_id.BREAK)] = 115;
+    if (@hasField(zag.keyword_id, "CONTINUE")) arr[@intFromEnum(zag.keyword_id.CONTINUE)] = 116;
+    if (@hasField(zag.keyword_id, "DEFER")) arr[@intFromEnum(zag.keyword_id.DEFER)] = 117;
+    if (@hasField(zag.keyword_id, "ERRDEFER")) arr[@intFromEnum(zag.keyword_id.ERRDEFER)] = 118;
+    if (@hasField(zag.keyword_id, "INLINE")) arr[@intFromEnum(zag.keyword_id.INLINE)] = 119;
+    if (@hasField(zag.keyword_id, "MINUS_PREFIX")) arr[@intFromEnum(zag.keyword_id.MINUS_PREFIX)] = 125;
+    if (@hasField(zag.keyword_id, "TRY")) arr[@intFromEnum(zag.keyword_id.TRY)] = 126;
+    if (@hasField(zag.keyword_id, "REAL")) arr[@intFromEnum(zag.keyword_id.REAL)] = 133;
+    if (@hasField(zag.keyword_id, "TRUE")) arr[@intFromEnum(zag.keyword_id.TRUE)] = 134;
+    if (@hasField(zag.keyword_id, "FALSE")) arr[@intFromEnum(zag.keyword_id.FALSE)] = 135;
+    if (@hasField(zag.keyword_id, "NULL")) arr[@intFromEnum(zag.keyword_id.NULL)] = 136;
+    if (@hasField(zag.keyword_id, "UNREACHABLE")) arr[@intFromEnum(zag.keyword_id.UNREACHABLE)] = 137;
+    if (@hasField(zag.keyword_id, "UNDEFINED")) arr[@intFromEnum(zag.keyword_id.UNDEFINED)] = 138;
+    if (@hasField(zag.keyword_id, "DOT_LBRACE")) arr[@intFromEnum(zag.keyword_id.DOT_LBRACE)] = 140;
     break :blk arr;
 };
 const keyword_fallback_symbol: u16 = 0;

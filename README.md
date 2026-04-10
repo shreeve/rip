@@ -1,18 +1,18 @@
-# Rip
+# Zag
 
 A fast, modern systems language with elegant syntax.
 
-`Rip` is a systems language project focused on clean, expressive syntax without giving up explicit control, predictable performance, or native compilation. The initial strategy is straightforward: compile `Rip` to `Zig`, and let the Zig toolchain own the lower half of the stack.
+`Zag` is a systems language project focused on clean, expressive syntax without giving up explicit control, predictable performance, or native compilation. The initial strategy is straightforward: compile `Zag` to `Zig`, and let the Zig toolchain own the lower half of the stack.
 
-This keeps the early implementation narrow and practical. `Rip` can focus on syntax, structure, lowering, and semantics that feel good to write, while `Zig` handles code generation, linking, cross-compilation, and platform details.
+This keeps the early implementation narrow and practical. `Zag` can focus on syntax, structure, lowering, and semantics that feel good to write, while `Zig` handles code generation, linking, cross-compilation, and platform details.
 
-`Rip` does not need to copy the exact syntax of `rip-lang`, but it should preserve the same ethos: whitespace-sensitive structure, succinct expression-oriented code, routines that naturally yield values when those values are used, and a bias toward removing ceremony when the meaning is already obvious.
+`Zag` does not need to copy the exact syntax of `rip-lang`, but it should preserve the same ethos: whitespace-sensitive structure, succinct expression-oriented code, routines that naturally yield values when those values are used, and a bias toward removing ceremony when the meaning is already obvious.
 
-Types should follow the same spirit. They can be optional in `Rip` source, selective where useful, and resolved before final `Zig` emission. That means the language can stay low-ceremony at the surface while still producing the concrete types that `Zig` requires underneath.
+Types should follow the same spirit. They can be optional in `Zag` source, selective where useful, and resolved before final `Zig` emission. That means the language can stay low-ceremony at the surface while still producing the concrete types that `Zig` requires underneath.
 
-## Why Rip
+## Why Zag
 
-Most systems languages inherit a lot of their surface shape from `C`, whether or not that syntax is actually required for performance. `Rip` starts from a different assumption:
+Most systems languages inherit a lot of their surface shape from `C`, whether or not that syntax is actually required for performance. `Zag` starts from a different assumption:
 
 - fast code does not require ugly syntax
 - explicit semantics do not require excessive ceremony
@@ -22,7 +22,7 @@ The goal is not to hide low-level reality. The goal is to make systems programmi
 
 ## Language Ethos
 
-`Rip` should feel like `Rip`, even in a different runtime and compilation world.
+`Zag` should feel like `Zag`, even in a different runtime and compilation world.
 
 - whitespace-sensitive and structurally clean
 - concise by default
@@ -33,15 +33,15 @@ The goal is not to hide low-level reality. The goal is to make systems programmi
 
 The point is not to imitate JavaScript semantics. The point is to preserve the feeling of writing in a language that values succinctness, expressiveness, and compositional power.
 
-That also means leaving JavaScript-specific features behind when they do not belong in a systems language. `Rip` should not carry over `component`, `render`, or reactive assignment/effect features into this project.
+That also means leaving JavaScript-specific features behind when they do not belong in a systems language. `Zag` should not carry over `component`, `render`, or reactive assignment/effect features into this project.
 
-At the same time, being a systems language should not force every program down to bare-metal minimalism. `Rip` should be able to offer optional capability packs for things like regex support, where the language can enable a high-performance substrate module instead of pretending every project should invent its own engine from scratch.
+At the same time, being a systems language should not force every program down to bare-metal minimalism. `Zag` should be able to offer optional capability packs for things like regex support, where the language can enable a high-performance substrate module instead of pretending every project should invent its own engine from scratch.
 
 ## Why Zig First
 
-`Rip` is not trying to replace `Zig` on day one. It is using `Zig` as the initial backend substrate.
+`Zag` is not trying to replace `Zig` on day one. It is using `Zig` as the initial backend substrate.
 
-That means `Rip` can inherit:
+That means `Zag` can inherit:
 
 - native code generation
 - optimization
@@ -61,7 +61,7 @@ That does not rule out higher-level conveniences. It means those conveniences sh
 The initial pipeline is:
 
 ```text
-Rip source
+Zag source
   -> S-expressions
   -> normalized S-expressions
   -> type resolution
@@ -80,9 +80,9 @@ Another key design choice is that the core language can stay small while optiona
 The bootstrap compiler works end-to-end — 54-rule grammar, ~95% of day-to-day Zig expressible:
 
 ```bash
-./bin/rip --run test/examples/hello.rip    # compile and run
-./bin/rip --compile test/examples/hello.rip # emit Zig source
-./bin/rip test/examples/hello.rip           # print S-expressions
+./bin/zag --run test/examples/hello.zag    # compile and run
+./bin/zag --compile test/examples/hello.zag # emit Zig source
+./bin/zag test/examples/hello.zag           # print S-expressions
 ```
 
 What works now: `fun`/`sub`, `if` (prefix + postfix), `while`, `for`/`for *item`, `match` (range/enum patterns), `enum` (plain + tagged unions), `struct`/`packed struct` (fields, defaults, methods), `error` sets, `type`, `test`, `pub`/`extern`/`export`/`packed`, `try`/`catch`/`??`, captures (`as`/`|val|`), `defer`/`errdefer`, `comptime`/`inline`, `=`/`=!`/`+=`/`-=`/`*=`, typed params, return types, `?T`/`*T`/`[]T`/`!T`, `@builtins`, array literals, pipe `|>`, range `..`, `break :label`/`continue :label`/`return`, `unreachable`/`undefined`, lambdas, struct literals, pointer deref `ptr.*`, implicit call with prefix `-`/`!`.
@@ -105,7 +105,7 @@ Type resolution: symbol table from fun/sub declarations, void-call detection (cl
 - targeting Zig internal IRs directly
 - designing every advanced feature up front
 - overcommitting to ownership, effects, macros, or comptime semantics before the bootstrap compiler exists
-- carrying over JS UI/reactivity constructs that do not belong in systems `Rip`
+- carrying over JS UI/reactivity constructs that do not belong in systems `Zag`
 - forcing every non-core feature into the core language instead of using opt-in capability packs
 
 ## Docs

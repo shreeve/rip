@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document catalogs the Zig language features and patterns found in a real-world embedded codebase (`pico/src` — RP2040/RP2350 firmware with Wi-Fi, USB host, cooperative runtime, and MQuickJS integration). The goal is to inform which Zig constructs Rip must be able to generate, in what order.
+This document catalogs the Zig language features and patterns found in a real-world embedded codebase (`pico/src` — RP2040/RP2350 firmware with Wi-Fi, USB host, cooperative runtime, and MQuickJS integration). The goal is to inform which Zig constructs Zag must be able to generate, in what order.
 
 The analysis covers 48 Zig source files spanning bare-metal boot code, hardware abstraction, networking, and JavaScript FFI.
 
@@ -100,7 +100,7 @@ The analysis covers 48 Zig source files spanning bare-metal boot code, hardware 
 - **C API shim layer** — hand-written declarations instead of `@cImport`
 - **Optional feature detection** — `@hasDecl` for conditional root hooks
 
-## Priority for Rip
+## Priority for Zag
 
 ### Tier 1 — Express soon
 

@@ -1,4 +1,4 @@
-//! Rip Compiler — S-expression to Zig Source Emitter
+//! Zag Compiler — S-expression to Zig Source Emitter
 //!
 //! Walks the parsed S-expression tree and emits readable Zig source.
 //! Type resolution pre-pass builds a symbol table from fun/sub
@@ -7,10 +7,10 @@
 
 const std = @import("std");
 const parser = @import("parser.zig");
-const rip = @import("rip.zig");
+const zag = @import("zag.zig");
 
 const Sexp = parser.Sexp;
-const Tag = rip.Tag;
+const Tag = zag.Tag;
 const Writer = std.Io.Writer;
 
 const MAX_NAMES = 128;

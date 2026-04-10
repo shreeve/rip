@@ -1,17 +1,17 @@
-//! Rip Compiler — Bootstrap Driver
+//! Zag Compiler — Bootstrap Driver
 //!
-//! Reads a .rip source file and parses it into S-expressions,
+//! Reads a .zag source file and parses it into S-expressions,
 //! compiles to Zig source, or runs the result end-to-end.
 //!
 //! Usage:
-//!   rip <file.rip>                 — parse and print S-expressions
-//!   rip -c, --compile <file.rip>   — compile to Zig source
-//!   rip -r, --run <file.rip>       — compile and run via zig
-//!   rip -t, --tokens <file.rip>    — dump token stream
+//!   zag <file.zag>                 — parse and print S-expressions
+//!   zag -c, --compile <file.zag>   — compile to Zig source
+//!   zag -r, --run <file.zag>       — compile and run via zig
+//!   zag -t, --tokens <file.zag>    — dump token stream
 
 const std = @import("std");
 const parser = @import("parser.zig");
-const rip = @import("rip.zig");
+const zag = @import("zag.zig");
 const Compiler = @import("compiler.zig").Compiler;
 
 const Mode = enum { parse, compile, run, tokens };
@@ -42,7 +42,7 @@ pub fn main() !void {
 
     if (file_path == null) {
         std.debug.print(
-            "Usage: rip [options] <file.rip>\n" ++
+            "Usage: zag [options] <file.zag>\n" ++
                 "  -c, --compile  Compile to Zig source\n" ++
                 "  -r, --run      Compile and run via zig\n" ++
                 "  -t, --tokens   Dump token stream\n",
@@ -66,7 +66,7 @@ pub fn main() !void {
 }
 
 fn dumpTokens(source: []const u8) void {
-    var lexer = rip.Lexer.init(source);
+    var lexer = zag.Lexer.init(source);
     var i: u32 = 0;
     while (true) {
         const tok = lexer.next();
@@ -114,7 +114,7 @@ fn compileToStdout(allocator: std.mem.Allocator, source: []const u8) !void {
     try w.flush();
 }
 
-fn compileAndRun(allocator: std.mem.Allocator, source: []const u8, rip_path: []const u8) !void {
+fn compileAndRun(allocator: std.mem.Allocator, source: []const u8, zag_path: []const u8) !void {
     var p = parser.Parser.init(allocator, source);
     defer p.deinit();
 
@@ -124,7 +124,7 @@ fn compileAndRun(allocator: std.mem.Allocator, source: []const u8, rip_path: []c
     };
 
     var tmp_buf: [256]u8 = undefined;
-    const tmp_path = makeTmpPath(&tmp_buf, rip_path);
+    const tmp_path = makeTmpPath(&tmp_buf, zag_path);
 
     {
         const f = std.fs.cwd().createFile(tmp_path, .{}) catch |err| {
@@ -153,18 +153,18 @@ fn compileAndRun(allocator: std.mem.Allocator, source: []const u8, rip_path: []c
     }
 }
 
-fn makeTmpPath(buf: []u8, rip_path: []const u8) []const u8 {
+fn makeTmpPath(buf: []u8, zag_path: []const u8) []const u8 {
     var start: usize = 0;
-    for (rip_path, 0..) |c, i| {
+    for (zag_path, 0..) |c, i| {
         if (c == '/' or c == '\\') start = i + 1;
     }
-    var base = rip_path[start..];
-    if (base.len > 4 and std.mem.eql(u8, base[base.len - 4 ..], ".rip")) {
+    var base = zag_path[start..];
+    if (base.len > 4 and std.mem.eql(u8, base[base.len - 4 ..], ".zag")) {
         base = base[0 .. base.len - 4];
     }
-    const prefix = "/tmp/rip_";
+    const prefix = "/tmp/zag_";
     const suffix = ".zig";
-    if (prefix.len + base.len + suffix.len > buf.len) return "/tmp/_rip_out.zig";
+    if (prefix.len + base.len + suffix.len > buf.len) return "/tmp/_zag_out.zig";
     @memcpy(buf[0..prefix.len], prefix);
     @memcpy(buf[prefix.len..][0..base.len], base);
     @memcpy(buf[prefix.len + base.len ..][0..suffix.len], suffix);

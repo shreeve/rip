@@ -1,4 +1,4 @@
-# Rip Project Handoff
+# Zag Project Handoff
 
 ## Current State (Phase 1 Complete)
 
@@ -11,12 +11,12 @@ Phase 3: Broader Semantics   ░░░░░░░░░░░░░░░░░
 
 **54-rule grammar, 5 audited conflicts, ~1,500 line compiler, 429 line test suite, 271kB binary.**
 
-The bootstrap compiler works end-to-end: Rip source → S-expressions → Zig source → native binary. All high-priority Zig features are expressible. A real embedded protocol handler compiles from Rip.
+The bootstrap compiler works end-to-end: Zag source → S-expressions → Zig source → native binary. All high-priority Zig features are expressible. A real embedded protocol handler compiles from Zag.
 
 ## Pipeline
 
 ```
-Rip source → Rewriter (indent/outdent, minus classification)
+Zag source → Rewriter (indent/outdent, minus classification)
            → Parser (SLR(1), 54 rules, S-expressions)
            → Type resolution pre-pass (symbol table, typeOf)
            → Zig emission (tag-based dispatch)
@@ -27,25 +27,25 @@ Rip source → Rewriter (indent/outdent, minus classification)
 
 | File | Role |
 |------|------|
-| `rip.grammar` | Lexer + parser definition (54 rules) |
+| `zag.grammar` | Lexer + parser definition (54 rules) |
 | `src/grammar.zig` | Language-agnostic grammar engine (reads .grammar, generates parser) |
 | `src/parser.zig` | Auto-generated lexer + SLR(1) parser (never hand-edit) |
-| `src/rip.zig` | Language module: Tag enum, keywords, rewriter (indent, minus classify) |
+| `src/zag.zig` | Language module: Tag enum, keywords, rewriter (indent, minus classify) |
 | `src/compiler.zig` | S-expression → Zig emitter + type resolution pre-pass |
 | `src/main.zig` | CLI driver: parse, compile, run, tokens |
-| `test/examples/all.rip` | Comprehensive regression test (429 lines) |
-| `test/examples/protocol.rip` | Real embedded protocol handler converted to Rip |
+| `test/examples/all.zag` | Comprehensive regression test (429 lines) |
+| `test/examples/protocol.zag` | Real embedded protocol handler converted to Zag |
 
 ## Build Commands
 
 ```bash
 zig build grammar                            # build the grammar tool
-./bin/grammar rip.grammar src/parser.zig     # generate parser from grammar
-zig build                                    # build the rip compiler
-./bin/rip test/examples/hello.rip            # parse → print S-expressions
-./bin/rip --compile test/examples/all.rip    # emit Zig source
-./bin/rip --run test/examples/all.rip        # compile and run end-to-end
-./bin/rip --tokens test/examples/hello.rip   # dump token stream
+./bin/grammar zag.grammar src/parser.zig     # generate parser from grammar
+zig build                                    # build the zag compiler
+./bin/zag test/examples/hello.zag            # parse → print S-expressions
+./bin/zag --compile test/examples/all.zag    # emit Zig source
+./bin/zag --run test/examples/all.zag        # compile and run end-to-end
+./bin/zag --tokens test/examples/hello.zag   # dump token stream
 ```
 
 ## What's Done
@@ -115,7 +115,7 @@ This is the next frontier. Nothing is started.
 | **Cross-assignment type checking** | `x = foo()` then `x = bar()` — are the types compatible? Error or widen? | High |
 | **Internal type representation** | Replace raw Sexp types with a proper type enum/struct. Needed when `isVoidType` / structural comparison isn't enough. | High (architectural) |
 | **Cross-module symbol resolution** | `use std` → know what `std.debug.print` returns. The hardest single piece. | Very high |
-| **Zig error line → Rip source line** | Full line-level remapping (current version just shows the temp file path). | Medium |
+| **Zig error line → Zag source line** | Full line-level remapping (current version just shows the temp file path). | Medium |
 
 **Entry point recommendation:** The normalization pass is the safest Phase 2 starter — it's design work that makes everything after it easier. Expression type propagation is the highest-impact item.
 
@@ -136,7 +136,7 @@ Full pointer/mutability story, FFI boundaries, capability packs (`use regex`), c
 ## External References
 
 - `rip-lang` at `/Users/shreeve/Data/Code/rip-lang/` — the original rip-lang project (JS-targeting)
-- `pico` at `/Users/shreeve/Data/Code/pico/` — embedded firmware, source of protocol.rip
+- `pico` at `/Users/shreeve/Data/Code/pico/` — embedded firmware, source of protocol.zag
 - Zig 0.15.2 — see `ZIG-0.15.2.md` for breaking I/O changes
 - AI peer MCP available (`user-ai`) with chat/review/discuss/status tools
 

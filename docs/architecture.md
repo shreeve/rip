@@ -1,22 +1,22 @@
-# Rip Architecture
+# Zag Architecture
 
 ## Thesis
 
-`Rip` is a systems language with elegant syntax and an intentionally pragmatic backend story: target `Zig` first, not because `Zig` is the final destination, but because it gives `Rip` a credible path to native output immediately.
+`Zag` is a systems language with elegant syntax and an intentionally pragmatic backend story: target `Zig` first, not because `Zig` is the final destination, but because it gives `Zag` a credible path to native output immediately.
 
 The first version should keep the semantic layer thin. The goal is not to out-Zig `Zig`; the goal is to prove that systems programming can feel much cleaner at the source level without sacrificing explicit meaning or native performance.
 
-Just as importantly, `Rip` should preserve the ethos of `rip-lang` without copying its syntax literally. The continuity should come from language feel: whitespace-sensitive structure, succinct forms, value-oriented expressions, and a bias against boilerplate when the meaning is already clear.
+Just as importantly, `Zag` should preserve the ethos of `rip-lang` without copying its syntax literally. The continuity should come from language feel: whitespace-sensitive structure, succinct forms, value-oriented expressions, and a bias against boilerplate when the meaning is already clear.
 
-That continuity stops at JavaScript-specific semantics. Systems `Rip` should not inherit UI or reactivity constructs like `component`, `render`, `:=`, `~=`, or `~>`. Module/import boundaries should instead align with the Zig ecosystem.
+That continuity stops at JavaScript-specific semantics. Systems `Zag` should not inherit UI or reactivity constructs like `component`, `render`, `:=`, `~=`, or `~>`. Module/import boundaries should instead align with the Zig ecosystem.
 
-However, a small core language does not mean a barren one. `Rip` should support optional capability packs that can inject well-chosen runtime or standard-library substrate when needed. Regex support is a good example: the language can enable a high-performance regex facility without making regex engine implementation part of the language core.
+However, a small core language does not mean a barren one. `Zag` should support optional capability packs that can inject well-chosen runtime or standard-library substrate when needed. Regex support is a good example: the language can enable a high-performance regex facility without making regex engine implementation part of the language core.
 
 ## Initial Pipeline
 
 ```mermaid
 flowchart TD
-  ripSource["Rip source"] --> sexps["S-expressions"]
+  zagSource["Zag source"] --> sexps["S-expressions"]
   sexps --> normalizedSexps["Normalized S-expressions"]
   normalizedSexps --> typeResolution["Type resolution"]
   typeResolution --> zigSource["Generated Zig source"]
@@ -25,15 +25,15 @@ flowchart TD
 
 ## Grammar Engine
 
-The first two stages of the pipeline (Rip source to S-expressions) are driven by a grammar-based toolchain. A single `.grammar` file defines both the lexer and parser, and a language-agnostic engine generates the parser module from it.
+The first two stages of the pipeline (Zag source to S-expressions) are driven by a grammar-based toolchain. A single `.grammar` file defines both the lexer and parser, and a language-agnostic engine generates the parser module from it.
 
 ### File Roles
 
 | File | Role |
 |------|------|
-| `rip.grammar` | Single source of truth: lexer tokens, parser rules, directives |
+| `zag.grammar` | Single source of truth: lexer tokens, parser rules, directives |
 | `src/grammar.zig` | Language-agnostic engine: reads `.grammar`, generates `parser.zig` |
-| `src/rip.zig` | Language module: `Tag` enum, keyword lookup, rewriter |
+| `src/zag.zig` | Language module: `Tag` enum, keyword lookup, rewriter |
 | `src/parser.zig` | Auto-generated lexer + SLR(1) parser (never hand-edit) |
 | `src/compiler.zig` | S-expression to Zig source emitter (Tag-based dispatch) |
 | `src/main.zig` | CLI driver: parse, compile, run, tokens |
@@ -42,12 +42,12 @@ The first two stages of the pipeline (Rip source to S-expressions) are driven by
 
 ```mermaid
 flowchart LR
-  grammar["rip.grammar"] --> engine["grammar.zig"]
+  grammar["zag.grammar"] --> engine["grammar.zig"]
   engine --> parser["src/parser.zig"]
-  lang["src/rip.zig"] -.->|"imported via @lang"| parser
+  lang["src/zag.zig"] -.->|"imported via @lang"| parser
 ```
 
-The grammar file sits at the repo root as `rip.grammar`. Running the grammar tool reads it and writes `src/parser.zig`. The generated parser imports `src/rip.zig` via the `@lang = "rip"` directive, which wires in language-specific helpers without putting any Rip knowledge into the engine itself.
+The grammar file sits at the repo root as `zag.grammar`. Running the grammar tool reads it and writes `src/parser.zig`. The generated parser imports `src/zag.zig` via the `@lang = "zag"` directive, which wires in language-specific helpers without putting any Zag knowledge into the engine itself.
 
 The same `grammar.zig` engine is used across projects. Only the grammar file and language module change between languages.
 
@@ -57,7 +57,7 @@ The `@parser` section of the grammar file supports these directives:
 
 | Directive | Purpose |
 |-----------|---------|
-| `@lang` | Import a language module (`rip.zig`) for keyword/tag support |
+| `@lang` | Import a language module (`zag.zig`) for keyword/tag support |
 | `@as` | Context-sensitive keyword promotion from identifiers |
 | `@infix` | Auto-generate operator precedence chain from a declarative table |
 | `@conflicts` | Declare expected number of parser conflicts (currently 11) |
@@ -67,7 +67,7 @@ The grammar DSL uses indentation-based blocks (`state`, `after`, `tokens`, `@inf
 
 ### Language Module Contract
 
-The `@lang` module (`src/rip.zig`) provides three things:
+The `@lang` module (`src/zag.zig`) provides three things:
 
 1. **`Tag` enum** -- semantic node types for S-expression output (`module`, `fun`, `sub`, `call`, `if`, operator tags, etc.)
 2. **`keyword_as()`** -- maps identifier text to keyword IDs so the parser can promote `"fun"` to the `FUN` terminal when the parse state expects it
@@ -94,17 +94,17 @@ Key grammar features: `body` uses NEWLINE as separator (not terminator); `block`
 
 ```bash
 zig build grammar                            # build the grammar tool
-./bin/grammar rip.grammar src/parser.zig     # generate parser from grammar
-zig build                                    # build the rip compiler
-./bin/rip test/examples/hello.rip             # parse and print S-expressions
-./bin/rip --compile test/examples/hello.rip   # emit Zig source
-./bin/rip --run test/examples/hello.rip       # compile and run end-to-end
-./bin/rip --tokens test/examples/hello.rip    # dump token stream
+./bin/grammar zag.grammar src/parser.zig     # generate parser from grammar
+zig build                                    # build the zag compiler
+./bin/zag test/examples/hello.zag             # parse and print S-expressions
+./bin/zag --compile test/examples/hello.zag   # emit Zig source
+./bin/zag --run test/examples/hello.zag       # compile and run end-to-end
+./bin/zag --tokens test/examples/hello.zag    # dump token stream
 ```
 
 ## Stage Boundaries
 
-### 1. Rip Source
+### 1. Zag Source
 
 This is the user-facing language:
 
@@ -131,7 +131,7 @@ This layer should preserve:
 
 At this stage, the representation may still be close to the original surface syntax.
 
-The important point is that this should be a real first-pass representation, not a temporary pseudo-AST that later gets converted into S-expressions. `Rip` should parse into raw S-expressions, rewrite those into normalized S-expressions, and continue transforming the same structural form as long as that remains practical.
+The important point is that this should be a real first-pass representation, not a temporary pseudo-AST that later gets converted into S-expressions. `Zag` should parse into raw S-expressions, rewrite those into normalized S-expressions, and continue transforming the same structural form as long as that remains practical.
 
 ### 3. Normalized S-expressions
 
@@ -154,7 +154,7 @@ This also means the rewrite pipeline can stay simple:
 
 ### 4. Type Resolution
 
-Types can be optional in `Rip` source, but they cannot remain optional by the time the compiler emits `Zig`.
+Types can be optional in `Zag` source, but they cannot remain optional by the time the compiler emits `Zig`.
 
 This pass should:
 
@@ -178,7 +178,7 @@ Likely boundaries that should require explicit types early:
 
 ### 5. Generated Zig Source
 
-For v0, `Rip` should emit readable `Zig` source and let the Zig compiler own:
+For v0, `Zag` should emit readable `Zig` source and let the Zig compiler own:
 
 - semantic checks that map directly to Zig
 - optimization
@@ -206,7 +206,7 @@ Bindings should also stay low-ceremony. Instead of `let` or `const`, the current
 - plain `=` for normal bindings under scope rules
 - `=!` for explicit constant bindings
 
-Optional typing should work similarly to how `rip-lang` evolved, but with an important difference: in `rip-lang`, types can be erased into JavaScript-facing metadata and declarations; in `Rip`, optional source types must eventually become concrete emitted Zig types. So the type pass is not optional, only the source annotations are.
+Optional typing should work similarly to how `rip-lang` evolved, but with an important difference: in `rip-lang`, types can be erased into JavaScript-facing metadata and declarations; in `Zag`, optional source types must eventually become concrete emitted Zig types. So the type pass is not optional, only the source annotations are.
 
 ## Capability Packs
 
@@ -227,13 +227,13 @@ Early examples:
 - future text/binary utilities
 - future platform or FFI helpers
 
-This gives `Rip` a middle ground between a tiny bare language and a bloated everything-in-core design.
+This gives `Zag` a middle ground between a tiny bare language and a bloated everything-in-core design.
 
 The likely first surface syntax for this is `use`, with possible inference from actual use left as a later convenience rather than a v0 requirement.
 
 ## Why Not Target Zig Internals
 
-`Rip` should not target actual Zig internal IRs such as `ZIR` in v0.
+`Zag` should not target actual Zig internal IRs such as `ZIR` in v0.
 
 Reasons:
 
@@ -260,8 +260,8 @@ Reasons:
 
 The expected progression is:
 
-1. `Rip -> S-expressions -> normalized S-expressions -> Zig`
-2. `Rip -> normalized S-expressions -> typed/core IR -> Zig`
-3. `Rip -> typed/core IR -> alternate backend choices`
+1. `Zag -> S-expressions -> normalized S-expressions -> Zig`
+2. `Zag -> normalized S-expressions -> typed/core IR -> Zig`
+3. `Zag -> typed/core IR -> alternate backend choices`
 
 That sequence keeps the early project honest while preserving room for deeper compiler work later.

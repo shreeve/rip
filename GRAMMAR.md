@@ -2,7 +2,7 @@
 
 `src/grammar.zig` is a language-agnostic parser generator that reads a `.grammar`
 file with `@lexer` and `@parser` sections and generates a combined `parser.zig`
-(lexer + SLR(1) parser). It is designed to be shared across projects (rip, em,
+(lexer + SLR(1) parser). It is designed to be shared across projects (zag, em,
 slash, and beyond).
 
 ---
@@ -21,8 +21,8 @@ The following language-specific vestiges have been fixed:
 - **Hardcoded `"` exclusion** — double-quote was unconditionally excluded from the
   operator switch regardless of whether the grammar used it for strings. Now
   string-start characters are derived entirely from grammar rules.
-- **Stale comments** — removed references to MUMPS dot-level counting, rip-specific
-  examples, and `rip.grammar` in help text.
+- **Stale comments** — removed references to MUMPS dot-level counting, zag-specific
+  examples, and `zag.grammar` in help text.
 - **Postfix-if for flow control** — added `POST_IF` token and grammar rules so
   `return if cond`, `return value if cond`, `break if cond`, and `continue if cond`
   all parse correctly. The rewriter classifies `if` as `post_if` after flow keywords
@@ -59,7 +59,7 @@ The following language-specific vestiges have been fixed:
 
 ## Grammar DSL Features
 
-The grammar DSL has features beyond what Rip currently uses. These are documented
+The grammar DSL has features beyond what Zag currently uses. These are documented
 here for reference and future use.
 
 ### Action syntax
@@ -204,7 +204,7 @@ String scanning currently assumes:
 - Double-quote delimiters use `\` backslash escaping
 - Both stop on newline (no multiline strings)
 
-This covers rip, em, and slash. If a future language needs different escape
+This covers zag, em, and slash. If a future language needs different escape
 semantics, the recommended path is explicit annotations:
 
 ```
@@ -260,7 +260,7 @@ Phase 2) is implemented.
 
 ## Remaining Zig Constructs
 
-The following Zig constructs are not natively expressible in Rip. All have clean
+The following Zig constructs are not natively expressible in Zag. All have clean
 workarounds and none block real programs.
 
 | Construct | Frequency | Workaround |
@@ -286,5 +286,5 @@ workarounds and none block real programs.
 - **`@cImport`** — already works via `@builtin` passthrough for simple cases;
   the block form (`@cImport({ @cInclude("..."); })`) needs the `zig` passthrough.
 - **Multiline strings** — Zig uses `\\\\` line prefixes which conflict with
-  indentation-sensitive parsing. Deferred pending a design decision on Rip's
+  indentation-sensitive parsing. Deferred pending a design decision on Zag's
   own multiline string syntax.

@@ -1,8 +1,8 @@
-# Rip Roadmap
+# Zag Roadmap
 
 ## Guiding Strategy
 
-Build the smallest credible version of `Rip` first.
+Build the smallest credible version of `Zag` first.
 
 That means:
 
@@ -29,7 +29,7 @@ Deliverables (all complete):
 
 ## Phase 1: Bootstrap Compiler ✓
 
-Goal: compile a tiny `Rip` subset into valid `Zig`.
+Goal: compile a tiny `Zag` subset into valid `Zig`.
 
 Primary spec reference:
 
@@ -39,14 +39,14 @@ Primary spec reference:
 ### What works now (v0.7-type-resolution)
 
 - 56-rule grammar, 18 audited conflicts, 469 parser states
-- grammar engine generates `src/parser.zig` from `rip.grammar`
+- grammar engine generates `src/parser.zig` from `zag.grammar`
 - rewriter handles indentation, type annotation passthrough, newline normalization
 - parser produces raw S-expressions directly
 - type resolution pre-pass: symbol table, void detection, `typeOf()`, declaration warnings
 - `src/compiler.zig` walks sexps and emits readable Zig source
-- `./bin/rip --run test/examples/hello.rip` compiles and runs end-to-end
+- `./bin/zag --run test/examples/hello.zag` compiles and runs end-to-end
 - all high-priority and medium-priority Zig target features implemented
-- real embedded protocol handler converted to Rip (test/examples/protocol.rip)
+- real embedded protocol handler converted to Zag (test/examples/protocol.zag)
 
 Syntax coverage:
 
@@ -85,7 +85,7 @@ All v0 emission gaps resolved. Struct literals, lambdas, error union types, enum
 
 - normalization pass (raw sexps → canonical forms)
 - deeper type resolution (expression propagation, cross-assignment unification)
-- source diagnostics pointing back to Rip locations (Zig error line → Rip source line)
+- source diagnostics pointing back to Zag locations (Zig error line → Zag source line)
 
 Compiler stages:
 
@@ -99,7 +99,7 @@ Success criteria:
 
 - a small example program compiles end-to-end ✓
 - the generated `Zig` is readable ✓
-- diagnostics still point back to source locations in `Rip`
+- diagnostics still point back to source locations in `Zag`
 
 ## Phase 2: Stronger Internal Structure
 

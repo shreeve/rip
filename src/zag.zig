@@ -1,7 +1,7 @@
-//! Rip Language Module
+//! Zag Language Module
 //!
-//! Provides keyword lookup and tag definitions for the Rip language.
-//! Imported by the generated parser via @lang = "rip".
+//! Provides keyword lookup and tag definitions for the Zag language.
+//! Imported by the generated parser via @lang = "zag".
 
 const std = @import("std");
 const parser = @import("parser.zig");

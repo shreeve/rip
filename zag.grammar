@@ -1,17 +1,17 @@
 # ==============================================================================
-# rip.grammar — Rip Language Lexer and Parser Grammar
+# zag.grammar — Zag Language Lexer and Parser Grammar
 # ==============================================================================
 #
-# Defines the lexer and parser for Rip. Processed by src/grammar.zig to
+# Defines the lexer and parser for Zag. Processed by src/grammar.zig to
 # generate src/parser.zig.
 #
-# Usage: grammar rip.grammar src/parser.zig
+# Usage: grammar zag.grammar src/parser.zig
 #
-# Rip is a high-performance systems language with elegant syntax that
+# Zag is a high-performance systems language with elegant syntax that
 # compiles to Zig. This grammar defines the v0 bootstrap subset.
 # ==============================================================================
 
-@lang = "rip"
+@lang = "zag"
 
 @lexer
 

@@ -2,19 +2,19 @@
 
 ## Purpose
 
-This document captures the most important lessons for `Rip` from studying three existing systems:
+This document captures the most important lessons for `Zag` from studying three existing systems:
 
 - `rip-lang` — especially `src/grammar/grammar.rip` and `src/lexer.js`
 - `slash` — especially `slash.grammar` and `src/grammar.zig`
 - `em` / MUMPS — especially `mumps.grammar`, `docs/language/GRAMMAR.md`, and `docs/language/LEXER.md`
 
-The goal is not to document those projects for their own sake. The goal is to identify what `Rip` should borrow, what it should avoid, and what architectural patterns are now proven enough to trust.
+The goal is not to document those projects for their own sake. The goal is to identify what `Zag` should borrow, what it should avoid, and what architectural patterns are now proven enough to trust.
 
 ## The Big Conclusion
 
 The most important conclusion is this:
 
-`Rip` should use a grammar file as the single source of truth for:
+`Zag` should use a grammar file as the single source of truth for:
 
 - lexer state
 - token types
@@ -22,9 +22,9 @@ The most important conclusion is this:
 - parser rules
 - direct S-expression actions
 
-and it should pair that with a `Rip`-specific rewriter that preserves the language's beautiful implicit syntax.
+and it should pair that with a `Zag`-specific rewriter that preserves the language's beautiful implicit syntax.
 
-This gives `Rip` the best qualities of all three systems:
+This gives `Zag` the best qualities of all three systems:
 
 - `rip-lang`'s beautiful token rewriting and implicit syntax
 - `slash`'s unified lexer/parser generation from one grammar file
@@ -45,7 +45,7 @@ Both `slash` and `mumps` show that one grammar file can define:
 
 That is not just elegant. It is strategically important.
 
-It means `Rip` can keep its language definition concentrated and visible rather than splitting it across:
+It means `Zag` can keep its language definition concentrated and visible rather than splitting it across:
 
 - ad hoc lexer code
 - parser code
@@ -66,7 +66,7 @@ Benefits:
 - easier normalization
 - easier downstream compilation
 
-For `Rip`, this supports:
+For `Zag`, this supports:
 
 - raw sexps first
 - normalized sexps second
@@ -85,7 +85,7 @@ The rewriter is doing things that are hard to express cleanly in the grammar alo
 - lightweight syntax sugar cleanup
 - optional type-token shaping
 
-The lesson for `Rip` is:
+The lesson for `Zag` is:
 
 - do not try to push all beauty into the grammar
 - do not try to eliminate the rewriter
@@ -104,7 +104,7 @@ Important supporting ideas:
 - character-class based dispatch is generated
 - whitespace-sensitive behavior is generated
 
-This means `Rip` does not need to choose between:
+This means `Zag` does not need to choose between:
 
 - grammar-driven design
 - performance
@@ -119,11 +119,11 @@ The generated lexer path in `slash` and `mumps` uses character classification ta
 - `isLetter`
 - `isWhitespace`
 
-This is important for `Rip`.
+This is important for `Zag`.
 
 It means the grammar system is not merely matching regex-like patterns at runtime. It can generate the same kind of fast character dispatch a human would hand-write.
 
-This should definitely be preserved in `Rip`'s local `src/grammar.zig`.
+This should definitely be preserved in `Zag`'s local `src/grammar.zig`.
 
 ## Lesson 6: `pre` Is A Foundational Abstraction
 
@@ -137,7 +137,7 @@ It enables:
 - structural inference
 - token-level context without separate whitespace tokens
 
-For `Rip`, `pre` should remain foundational.
+For `Zag`, `pre` should remain foundational.
 
 It should be paired with a token metadata contract that likely includes:
 
@@ -157,14 +157,14 @@ That pattern is very useful:
 - some ambiguities are much easier to resolve in the lexer
 - not everything should be deferred to parser conflicts or rewrite heuristics
 
-For `Rip`, this means:
+For `Zag`, this means:
 
 - when spacing creates a sharp local distinction, specialized tokens may be the right tool
 - but generalized implicit structure should still stay in the rewriter
 
 ## Lesson 8: `_`, `...N`, `key:N`, and `~N` Are Excellent Action Features
 
-The `mumps` grammar DSL has several action features that are especially valuable for `Rip`.
+The `mumps` grammar DSL has several action features that are especially valuable for `Zag`.
 
 ### `_`
 
@@ -223,7 +223,7 @@ Useful for:
 - rare special cases
 - narrowly-scoped language-specific helpers
 
-For `Rip`, all three are likely worth preserving.
+For `Zag`, all three are likely worth preserving.
 
 ## Lesson 10: Whitespace Sensitivity Can Be Defined In The Grammar
 
@@ -236,13 +236,13 @@ It shows that the grammar-driven lexer can treat whitespace as a first-class con
 - zero-width structural tokens
 - counted prefixes
 
-This matters for `Rip` because it means indentation-sensitive syntax does not require abandoning the grammar-driven lexer model.
+This matters for `Zag` because it means indentation-sensitive syntax does not require abandoning the grammar-driven lexer model.
 
 ## Lesson 11: Multiple Start Symbols Are Valuable
 
 Both for parser development and later tooling, multiple start symbols are a big win.
 
-For `Rip`, likely useful entry points include:
+For `Zag`, likely useful entry points include:
 
 - full module/file
 - expression
@@ -269,10 +269,10 @@ This is a much better approach than over-twisting the language to satisfy parser
 
 ## Lesson 13: The Grammar Should Stay Narrow Even If The Engine Is Powerful
 
-A major risk is letting the proven power of the engine tempt `Rip` into too much early scope.
+A major risk is letting the proven power of the engine tempt `Zag` into too much early scope.
 
 The existing systems prove the engine can do a lot.
-That does not mean the first `Rip` grammar should do a lot.
+That does not mean the first `Zag` grammar should do a lot.
 
 The bootstrap subset should remain small:
 
@@ -291,15 +291,15 @@ The bootstrap subset should remain small:
 
 Everything else should wait until the bootstrap path works.
 
-## Lesson 14: The Right Architecture For Rip
+## Lesson 14: The Right Architecture For Zag
 
 The strongest architecture now looks like this:
 
-1. `rip.grammar`
+1. `zag.grammar`
    - source of truth for lexer + parser
 2. generated `BaseLexer`
    - tokenization, state, whitespace-sensitive behavior, character-class dispatch
-3. `Rip` rewriter
+3. `Zag` rewriter
    - implicit calls
    - implicit grouping where obvious
    - line normalization
@@ -314,7 +314,7 @@ The strongest architecture now looks like this:
 
 This is the synthesis of the best ideas from all three systems.
 
-## What Rip Should Borrow Directly
+## What Zag Should Borrow Directly
 
 - one-file grammar definition
 - grammar-driven lexer state
@@ -331,7 +331,7 @@ This is the synthesis of the best ideas from all three systems.
 - audited LR conflict discipline
 - generated fast character-class lexer support
 
-## What Rip Should Borrow Carefully
+## What Zag Should Borrow Carefully
 
 - implicit syntax machinery
 - line normalization
@@ -341,7 +341,7 @@ This is the synthesis of the best ideas from all three systems.
 
 These are powerful, but they belong in a carefully designed rewriter rather than as uncontrolled cleverness.
 
-## What Rip Should Not Copy Directly
+## What Zag Should Not Copy Directly
 
 - JS-specific syntax from `rip-lang`
 - shell-specific constructs from `slash`
@@ -351,9 +351,9 @@ These are powerful, but they belong in a carefully designed rewriter rather than
 
 ## Final Takeaway
 
-The combined lesson from `rip-lang`, `slash`, and `mumps` is not just that `Rip` can have a good grammar system.
+The combined lesson from `rip-lang`, `slash`, and `mumps` is not just that `Zag` can have a good grammar system.
 
-It is that `Rip` can plausibly have:
+It is that `Zag` can plausibly have:
 
 - a single grammar source of truth
 - a generated, fast, whitespace-sensitive lexer

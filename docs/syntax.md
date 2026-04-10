@@ -1,4 +1,4 @@
-# Rip Syntax Reference
+# Zag Syntax Reference
 
 ## Principles
 
@@ -6,7 +6,7 @@
 - Expressions and routines produce values when those values are used
 - Obvious intent should not require extra boilerplate
 - Types are optional in source, required by code generation
-- Rip says less, Zig gets the right thing
+- Zag says less, Zig gets the right thing
 
 ## Conditionals
 

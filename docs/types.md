@@ -2,10 +2,10 @@
 
 ## Purpose
 
-This document clarifies how `Rip` should think about types by separating two questions:
+This document clarifies how `Zag` should think about types by separating two questions:
 
-1. What should `Rip` borrow from `rip-lang`'s optional type support?
-2. What must become more Zig-like because `Rip` emits real `Zig` source?
+1. What should `Zag` borrow from `rip-lang`'s optional type support?
+2. What must become more Zig-like because `Zag` emits real `Zig` source?
 
 The answer is not "choose one." The right design is a synthesis:
 
@@ -18,7 +18,7 @@ The answer is not "choose one." The right design is a synthesis:
 
 One of the best lessons from `rip-lang` is that the parser does not need to become a full type-system engine.
 
-That means for `Rip`:
+That means for `Zag`:
 
 - type syntax should be tokenized and preserved structurally
 - explicit source annotations should act as metadata, constraints, and declarations
@@ -30,7 +30,7 @@ This keeps the grammar smaller and the parser easier to evolve.
 
 `rip-lang` proves that optional typing can be ergonomic and practical.
 
-For `Rip`, the front-end lesson is:
+For `Zag`, the front-end lesson is:
 
 - users should be able to add types where helpful
 - users should not be forced to annotate everything just to get started
@@ -40,7 +40,7 @@ For `Rip`, the front-end lesson is:
 
 `rip-lang` preserves type information as metadata rather than forcing it into the main parse structure everywhere.
 
-For `Rip`, this suggests:
+For `Zag`, this suggests:
 
 - keep explicit source types attached to tokens or raw structural forms
 - preserve them through rewriting and normalization
@@ -62,13 +62,13 @@ That is more powerful than merely carrying type syntax along for documentation.
 
 This is not only about types, but the type story should support it.
 
-For `Rip`, the source-language goal should remain:
+For `Zag`, the source-language goal should remain:
 
 - optional type annotations
 - selective annotation where desired
 - readable and concise surface syntax
 
-## What Must Be More Zig-like In `Rip`
+## What Must Be More Zig-like In `Zag`
 
 ### 1. Final emitted code must be concretely typed
 
@@ -79,7 +79,7 @@ In `rip-lang`:
 - JavaScript does not require concrete static types to run
 - TypeScript support can live in declarations or shadow files
 
-In `Rip`:
+In `Zag`:
 
 - emitted `Zig` must be concretely typed
 - unresolved types cannot survive to code generation
@@ -101,7 +101,7 @@ That means the compiler cannot casually guess a "smallest" or "most efficient" t
 
 ### 3. Important boundaries must become explicit
 
-Because `Rip` targets `Zig`, some places need stronger discipline early:
+Because `Zag` targets `Zig`, some places need stronger discipline early:
 
 - public definitions
 - routine parameters in v0
@@ -118,7 +118,7 @@ This is one of the biggest danger areas.
 In a JS-targeting language, numeric ambiguity is often survivable.
 In a Zig-targeting language, it is much more serious.
 
-For `Rip`, the compiler should:
+For `Zag`, the compiler should:
 
 - keep literals context-sensitive as long as possible
 - infer only when context makes the answer safe
@@ -126,7 +126,7 @@ For `Rip`, the compiler should:
 
 ### 5. Type resolution must be a real compiler phase
 
-For `Rip`, type handling cannot just be a formatting pass or external tooling path.
+For `Zag`, type handling cannot just be a formatting pass or external tooling path.
 
 The compiler needs a real stage that:
 
@@ -139,7 +139,7 @@ The compiler needs a real stage that:
 
 ## The Right Synthesis
 
-The right overall model for `Rip` is:
+The right overall model for `Zag` is:
 
 1. Source types are optional.
 2. Explicit types are preserved as constraints.
@@ -148,7 +148,7 @@ The right overall model for `Rip` is:
 5. A dedicated type-resolution phase makes the program concrete enough for `Zig`.
 6. Zig emission assumes the type story is complete.
 
-This gives `Rip`:
+This gives `Zag`:
 
 - a pleasant source language
 - a clean parser and grammar
@@ -185,10 +185,10 @@ This gives `Rip`:
 
 ## Practical Compiler Impact
 
-This means the pipeline for `Rip` should look like:
+This means the pipeline for `Zag` should look like:
 
 ```text
-Rip source
+Zag source
   -> tokens with optional type metadata
   -> raw S-expressions
   -> normalized S-expressions
@@ -201,7 +201,7 @@ The important point is:
 - `rip-lang` provides the front-end philosophy
 - Zig provides the back-end discipline
 
-`Rip` should combine both.
+`Zag` should combine both.
 
 ## Final Recommendation
 
@@ -220,4 +220,4 @@ Become more Zig-like in:
 - layout/ABI awareness
 - mandatory pre-codegen type resolution
 
-That is the right balance for `Rip`.
+That is the right balance for `Zag`.

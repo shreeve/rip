@@ -5,7 +5,7 @@ The grammar DSL defines both lexer and parser in a single `.grammar` file. The g
 ## File Structure
 
 ```
-@lang = "rip"          # language module (imports rip.zig)
+@lang = "zag"          # language module (imports zag.zig)
 
 @lexer                 # lexer section
 
@@ -203,7 +203,7 @@ Trailing nils are automatically stripped.
 
 | Directive | Purpose |
 |-----------|---------|
-| `@lang = "rip"` | Import language module (`rip.zig`) |
+| `@lang = "zag"` | Import language module (`zag.zig`) |
 | `@conflicts = 0` | Expected parser conflict count |
 | `@as = [ident, keyword]` | Promote identifiers to keywords when parser state expects them |
 | `@code location { ... }` | Inject raw Zig at `imports`, `sexp`, `parser`, or `bottom` |

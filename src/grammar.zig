@@ -2362,7 +2362,7 @@ const OpMapping = struct {
 };
 
 /// @lang directive specifies the language helper module
-// @lang directive: specifies the language helper module (e.g., "rip" -> imports rip.zig)
+// @lang directive: specifies the language helper module (e.g., "zag" -> imports zag.zig)
 
 /// @errors directive for human-readable rule names in diagnostics
 const ErrorName = struct {
