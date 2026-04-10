@@ -9,7 +9,7 @@ Phase 2: Stronger Structure  ░░░░░░░░░░░░░░░░░
 Phase 3: Broader Semantics   ░░░░░░░░░░░░░░░░░░░░ NOT STARTED
 ```
 
-**54-rule grammar, 5 audited conflicts, ~1,500 line compiler, 429 line test suite, 271kB binary.**
+**56-rule grammar, 18 audited conflicts, ~1,650 line compiler, 446 line test suite, 333kB binary (ReleaseSmall).**
 
 The bootstrap compiler works end-to-end: Zag source → S-expressions → Zig source → native binary. All high-priority Zig features are expressible. A real embedded protocol handler compiles from Zag.
 
@@ -17,7 +17,7 @@ The bootstrap compiler works end-to-end: Zag source → S-expressions → Zig so
 
 ```
 Zag source → Rewriter (indent/outdent, minus classification)
-           → Parser (SLR(1), 54 rules, S-expressions)
+           → Parser (SLR(1), 56 rules, S-expressions)
            → Type resolution pre-pass (symbol table, typeOf)
            → Zig emission (tag-based dispatch)
            → zig run
@@ -27,13 +27,13 @@ Zag source → Rewriter (indent/outdent, minus classification)
 
 | File | Role |
 |------|------|
-| `zag.grammar` | Lexer + parser definition (54 rules) |
+| `zag.grammar` | Lexer + parser definition (56 rules) |
 | `src/grammar.zig` | Language-agnostic grammar engine (reads .grammar, generates parser) |
 | `src/parser.zig` | Auto-generated lexer + SLR(1) parser (never hand-edit) |
 | `src/zag.zig` | Language module: Tag enum, keywords, rewriter (indent, minus classify) |
 | `src/compiler.zig` | S-expression → Zig emitter + type resolution pre-pass |
 | `src/main.zig` | CLI driver: parse, compile, run, tokens |
-| `test/examples/all.zag` | Comprehensive regression test (429 lines) |
+| `test/examples/all.zag` | Comprehensive regression test (446 lines) |
 | `test/examples/protocol.zag` | Real embedded protocol handler converted to Zag |
 
 ## Build Commands
@@ -50,7 +50,7 @@ zig build                                    # build the zag compiler
 
 ## What's Done
 
-### Grammar (54 rules, 5 audited conflicts)
+### Grammar (56 rules, 18 audited conflicts)
 
 - Declarations: `fun`, `sub`, `enum`, `struct`, `packed struct`, `error`, `type`, `test`, `use`
 - Modifiers: `pub`, `extern`, `export`, `packed`, `inline`, `comptime`, `callconv` (stackable)
@@ -86,13 +86,14 @@ zig build                                    # build the zag compiler
 - All v0 emission gaps resolved (struct literals, lambdas, error unions, enum backing, `/=` → `@divTrunc`)
 - Source diagnostics: recognizable temp filenames, error pointer on failure
 
-### Audited Conflicts (5)
+### Audited Conflicts (18)
 
-1. Dangling else (if vs ELSE) — standard, shift correct
-2. Dangling else (suffix_if vs ELSE) — standard, shift correct
-3. Typed binding (unary vs ":") — shift into type annotation, correct
-4. Labeled break (break vs ":") — shift into label, correct
-5. Labeled continue (continue vs ":") — shift into label, correct
+1. Dangling else: if vs ELSE (×1), while vs ELSE (×2), for vs ELSE (×4), postif vs ELSE (×1) — standard, shift correct
+2. Typed binding (unary vs ":") — shift into type annotation, correct
+3. Labeled break (break vs ":") — shift into label, correct
+4. Labeled continue (continue vs ":") — shift into label, correct
+5. Postfix-if on flow control: return vs POST_IF (×2), break vs POST_IF (×2), continue vs POST_IF (×2) — shift into conditional, correct
+6. Args vs "}" (×1) — shift correct
 
 ## What's Left
 

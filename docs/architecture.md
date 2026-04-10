@@ -60,7 +60,7 @@ The `@parser` section of the grammar file supports these directives:
 | `@lang` | Import a language module (`zag.zig`) for keyword/tag support |
 | `@as` | Context-sensitive keyword promotion from identifiers |
 | `@infix` | Auto-generate operator precedence chain from a declarative table |
-| `@conflicts` | Declare expected number of parser conflicts (currently 11) |
+| `@conflicts` | Declare expected number of parser conflicts (currently 18) |
 | `@code` | Inject raw Zig at specific locations in the output |
 
 The grammar DSL uses indentation-based blocks (`state`, `after`, `tokens`, `@infix`) with no braces or brackets. Rules use `L(X)` for comma-separated lists, `_` for nil, `...N` for spread, and `key:N` for schema documentation. `@infix` can be referenced directly in rules (e.g., `expr = ... | @infix`).
@@ -73,7 +73,7 @@ The `@lang` module (`src/zag.zig`) provides three things:
 2. **`keyword_as()`** -- maps identifier text to keyword IDs so the parser can promote `"fun"` to the `FUN` terminal when the parse state expects it
 3. **Rewriter** -- sits between the generated `BaseLexer` and the parser, handling indentation tracking (indent/outdent tokens), type annotation passthrough, and duplicate newline suppression
 
-### Current Grammar (54 rules)
+### Current Grammar (56 rules)
 
 ```
 program  body  stmt  decl  defn  block
@@ -88,7 +88,7 @@ assign  const
 unary  call  args  term  atom  record  pair  lambda
 ```
 
-Key grammar features: `body` uses NEWLINE as separator (not terminator); `block` is `INDENT body OUTDENT`; `L(X)` handles comma-separated lists; `decl`/`defn` provides stackable modifiers; `members`/`member` shared by enum, struct, and error; `if` works in both prefix and postfix position; `pattern` nonterminal supports range and enum patterns in match arms; `term` nonterminal enables prefix negation in implicit calls; 11 audited conflicts (dangling else × 2, typed binding, labeled break/continue × 2, postfix-if on return/break/continue × 6).
+Key grammar features: `body` uses NEWLINE as separator (not terminator); `block` is `INDENT body OUTDENT`; `L(X)` handles comma-separated lists; `decl`/`defn` provides stackable modifiers; `members`/`member` shared by enum, struct, and error; `if` works in both prefix and postfix position; `pattern` nonterminal supports range and enum patterns in match arms; `term` nonterminal enables prefix negation in implicit calls; 18 audited conflicts (dangling else × 8, typed binding, labeled break/continue × 2, postfix-if on return/break/continue × 6, args vs "}").
 
 ### Build Commands
 
