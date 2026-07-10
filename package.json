@@ -1,0 +1,10 @@
+{
+  "name": "rip",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Zero-build, full-stack language for reactive UI, schemas, ORM, and server logic.",
+  "scripts": {
+    "test": "bun test --timeout 15000"
+  }
+}
