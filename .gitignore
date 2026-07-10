@@ -1,0 +1,10 @@
+node_modules/
+build/
+dist/
+coverage/
+*.log
+*.vsix
+.DS_Store
+.env
+.env.*
+.stage-*/
