@@ -11,8 +11,11 @@
 //   checkAll — coverage policy for the batch checker: check every
 //              non-@nocheck file, not just annotated ones. Carried by
 //              this seam; the batch checker is its consumer.
-//   exclude  — glob list carved out of the batch checker's project
-//              walk. Carried by this seam.
+//   noCheck  — glob list of paths NOT type-checked in the editor: their
+//              diagnostics are silenced, but the files stay in the
+//              program so imports still resolve — the project-glob form
+//              of the per-file `# @ts-nocheck` directive. For partly-
+//              typed projects quieting untyped/legacy paths.
 //
 // Resolution: walk UP to the FIRST package.json and stop — that file
 // is the project boundary whether or not it carries a `rip` block. A
@@ -23,7 +26,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 
 export function readProjectConfig(dir) {
-  const config = { strict: false, checkAll: false, exclude: [], _configDir: null };
+  const config = { strict: false, checkAll: false, noCheck: [], _configDir: null };
   try {
     let d = resolve(dir);
     for (;;) {
@@ -33,7 +36,12 @@ export function readProjectConfig(dir) {
         if (pkg.rip && typeof pkg.rip === 'object') {
           config.strict = pkg.rip.strict === true;
           config.checkAll = pkg.rip.checkAll === true;
-          if (Array.isArray(pkg.rip.exclude)) config.exclude = pkg.rip.exclude.filter((g) => typeof g === 'string');
+          // Normalize to the canonical string[]: a bare string is a
+          // single glob; an array is filtered to its string entries;
+          // anything else leaves the [] default.
+          const nc = pkg.rip.noCheck;
+          if (typeof nc === 'string') config.noCheck = [nc];
+          else if (Array.isArray(nc)) config.noCheck = nc.filter((g) => typeof g === 'string');
         }
         config._configDir = d;
         break;
