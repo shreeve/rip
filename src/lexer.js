@@ -197,7 +197,9 @@ export function insertArrowCommas(tokens) {
     if (k === 'CALL_START') depth++;
     else if (k === 'CALL_END') depth--;
     else if (depth > 0 && (k === '->' || k === '=>') && i > 0 &&
-             ARROW_COMMA_AFTER.has(tokens[i - 1].kind)) {
+             (ARROW_COMMA_AFTER.has(tokens[i - 1].kind) ||
+              (tokens[i - 1].kind === 'IDENTIFIER' &&
+               (tokens[i - 1].value === 'Infinity' || tokens[i - 1].value === 'NaN')))) {
       tokens.splice(i, 0, { kind: ',', value: ',', start: tokens[i].start, end: tokens[i].start });
       i++;
     }
@@ -3751,6 +3753,11 @@ const startsImplicitCall = (tokens, j) => {
   const next = tokens[j + 1];
   if (!t || !next || !next.spaced || !IMPLICIT_FUNC.has(t.kind)) return false;
   if ((t.kind === ']' || t.kind === '}') && (next.kind === '->' || next.kind === '=>')) return false;
+  // Infinity and NaN are value LITERALS spelled as identifiers — they
+  // never head a call, so an arrow after one is the NEXT argument
+  // (`handle Infinity -> fn` — the commaless bridge), never a callee.
+  if (t.kind === 'IDENTIFIER' && (t.value === 'Infinity' || t.value === 'NaN') &&
+      (next.kind === '->' || next.kind === '=>')) return false;
   if (IMPLICIT_CALL_STARTERS.has(next.kind)) return true;
   return next.kind === '...' && tokens[j + 2] != null && IMPLICIT_CALL_STARTERS.has(tokens[j + 2].kind);
 };

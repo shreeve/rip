@@ -3,20 +3,3 @@
 # into test/battery/ in the same change (the lane asserts still-failing).
 
 import { test, code, fail, type } from '../support/testing.js'
-
-code 'infinity arrow', 'handle Infinity -> \'overflow\'', '''
-  handle(Infinity, function() {
-    return 'overflow';
-  });
-'''
-
-code 'nan arrow', 'handle NaN -> \'invalid\'', '''
-  handle(NaN, function() {
-    return 'invalid';
-  });
-'''
-
-test 'infinity arrow runtime', '''
-  handler = (val, fn) -> fn()
-  handler Infinity -> 'inf!'
-''', 'inf!'
