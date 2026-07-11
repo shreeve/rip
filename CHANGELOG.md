@@ -5,6 +5,15 @@ repository's pull requests.
 
 ## Unreleased
 
+- Declaration output carries the module's edges: imports whose names
+  the declarations reference are retained (an unimported name broke
+  every consumer with TS2304), `export default` emits as itself
+  instead of an export-nothing marker, and re-export lists and star
+  re-exports pass through. Unreferenced and side-effect imports drop;
+  an untyped name's export specifier drops (no declaration to name).
+  A consumer-resolution gate now type-checks a real importing program
+  against the generated declarations under tsc (#36)
+
 - AGENTS.md — the operating rules for any agent (AI or human) working
   in this repository — now lives at the top level. Eight standing
   rules (reject loudly; lowerings preserve source shape; no hand-

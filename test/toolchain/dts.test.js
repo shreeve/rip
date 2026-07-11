@@ -20,6 +20,23 @@ const dts = (src) => compile(src).declarations;
 const ROWS = [
   // typed declarations → declare let (the delivery shapes)
   ['x: number = 5', 'declare let x: number;\nexport {};\n'],
+  // module edges: the declaration artifact describes the same module
+  // surface as the emitted JS — referenced imports retain, the
+  // default export is real, re-export lists and star re-exports pass
+  // through, unreferenced and side-effect imports drop, and an
+  // untyped name's export specifier drops (no declaration to name)
+  ['import { User } from "./model.js"\nexport current: User = new User()', "import { User } from './model.js';\nexport declare let current: User;\n"],
+  ['x: number = 5\nexport default x', 'declare let x: number;\nexport default x;\n'],
+  ['export { User } from "./model.js"', "export { User } from './model.js';\n"],
+  ['export * from "./model.js"', "export * from './model.js';\n"],
+  ['import Def, { a, b as c } from "./m.js"\nx: typeof Def = Def', "import Def, { a, b as c } from './m.js';\ndeclare let x: typeof Def;\n"],
+  ['import * as NS from "./m.js"\nv: NS.T = w', "import * as NS from './m.js';\ndeclare let v: NS.T;\n"],
+  ['import { Unused } from "./m.js"\nx: number = 1', 'declare let x: number;\nexport {};\n'],
+  ['import "./side.js"\nx: number = 1', 'declare let x: number;\nexport {};\n'],
+  ['a: number = 1\nexport { a }', 'declare let a: number;\nexport { a };\n'],
+  ['a: number = 1\nb = 2\nexport { a, b }', 'declare let a: number;\nexport { a };\n'],
+  ['b = 1\nexport { b }', ''],
+  ['export default -> 42', ''],
   ['export x: number = 5', 'export declare let x: number;\n'],
   ['flags: {a: number, b?: string} = {a: 1}', 'declare let flags: {a: number, b?: string};\nexport {};\n'],
   ['pick: (n: number) => number = (n: number) -> n + 1', 'declare let pick: (n: number) => number;\nexport {};\n'],

@@ -44,7 +44,7 @@ import {
   renderParams, paramTyped,
 } from './typetext.js';
 import { buildSchemaTypeStory, SchemaTypeError } from './schema-types.js';
-import { protoMemberTarget, PROTO_GENERIC_PARAMS } from './emitter.js';
+import { protoMemberTarget, PROTO_GENERIC_PARAMS, moduleSourceText } from './emitter.js';
 import {
   componentTypeInfo, propsTypeText, propsParamOptional, instanceTypeLines, containerType,
 } from './component-types.js';
@@ -297,11 +297,92 @@ export function emitDeclarations({ sexpr, stores, source }) {
     return (id !== null ? stores.node(id)?.semanticKind : null) === 'readonly';
   };
 
+  // ── module edges ─────────────────────────────────────────────────
+  // The declaration artifact must describe the SAME module surface as
+  // the emitted JavaScript: imports whose names the declarations
+  // reference, the default export, re-export lists, and star
+  // re-exports all carry through. Dropping an edge makes a consumer's
+  // type-check lie — a declaration referencing an unimported name
+  // (TS2304), or a module face missing exports the runtime has.
+  const pendingImports = [];     // import nodes, source order
+  const pendingDefaults = [];    // identifier default exports
+  const pendingExportLists = []; // bare `export { … }` specifier lists
+
+  const specListText = (list) =>
+    list.map((s) => (isNode(s) ? `${s[0]} as ${s[1]}` : s)).join(', ');
+
+  const importText = (node) => {
+    const source = node[node.length - 1];
+    const specs = node.slice(1, -1).map((spec) => {
+      if (typeof spec === 'string') return spec;
+      if (spec[0] === '*') return `* as ${spec[1]}`;
+      return `{ ${specListText(spec)} }`;
+    });
+    return `import ${specs.join(', ')} from ${moduleSourceText(source)};`;
+  };
+
+  // The names an import binds locally: the default name, the
+  // namespace name, or each specifier's local (its alias when
+  // renamed). A side-effect import binds nothing.
+  const importBoundNames = (node) => {
+    const names = [];
+    for (const spec of node.slice(1, -1)) {
+      if (spec === '{}') continue;
+      if (typeof spec === 'string') names.push(spec);
+      else if (spec[0] === '*') names.push(spec[1]);
+      else for (const s of spec) names.push(isNode(s) ? s[1] : s);
+    }
+    return names;
+  };
+
+  const isModuleImport = (x) => {
+    if (!isNode(x) || x[0] !== 'import' || x.length < 3) return false;
+    const id = stores.idOf(x);
+    return (id !== null ? stores.node(id)?.semanticKind : null) === 'import';
+  };
+
+  // An export payload that is a specifier LIST, not a declaration.
+  // Three tests, all required: no structural statement head, no
+  // store-verified declaration kind (a `state` node's elements can
+  // all be identifier strings — the stores, not the shape, are the
+  // authority), and every element a plain identifier or an
+  // identifier pair.
+  const STMT_HEADS = new Set([
+    '=', 'void-assign', 'class', 'enum', 'type-decl', 'typed-var',
+    'def', 'void-def', 'def-sig', 'state', 'computed', 'effect',
+    'readonly', 'component', 'schema',
+  ]);
+  const isIdent = (s) => typeof s === 'string' && /^[A-Za-z_$][\w$]*$/.test(s);
+  const isExportList = (x) =>
+    isNode(x) && !STMT_HEADS.has(x[0]) &&
+    !isReactiveDecl(x) && !isEffectDecl(x) && !isReadonlyDecl(x) &&
+    x.every((s) => isIdent(s) || (isNode(s) && s.length === 2 && isIdent(s[0]) && isIdent(s[1])));
+
   const stmtDecl = (stmt, exported) => {
     if (!isNode(stmt)) return;
     const head = stmt[0];
     if (head === 'export') {
-      stmtDecl(stmt[1], true);
+      if (stmt[1] !== '{}' && isExportList(stmt[1])) pendingExportLists.push(stmt[1]);
+      else stmtDecl(stmt[1], true);
+      return;
+    }
+    if (isModuleImport(stmt)) {
+      pendingImports.push(stmt);
+      return;
+    }
+    if (head === 'export-all') {
+      lines.push(`export * from ${moduleSourceText(stmt[1])};`);
+      return;
+    }
+    if (head === 'export-from') {
+      const spec = stmt[1] === '{}' ? '{}' : `{ ${specListText(stmt[1])} }`;
+      lines.push(`export ${spec} from ${moduleSourceText(stmt[2])};`);
+      return;
+    }
+    if (head === 'export-default') {
+      if (typeof stmt[1] === 'string') pendingDefaults.push(stmt[1]);
+      // A non-identifier default carries no annotation, so it
+      // contributes no declaration (the untyped-export rule).
       return;
     }
     if (isReactiveDecl(stmt)) {
@@ -350,9 +431,40 @@ export function emitDeclarations({ sexpr, stores, source }) {
   }
 
   for (const stmt of sexpr.slice(1)) stmtDecl(stmt, false);
+
+  // Deferred edges resolve against the FULL declaration text: a
+  // default export or bare export list names a binding whose
+  // declaration may sit anywhere in the module (modules hoist), and
+  // an untyped binding has no declaration to reference — its
+  // specifier drops (the untyped-export rule), never a dangling name.
+  const declaredName = (name) => {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`\\b(?:let|const|function|class|interface|enum|type) ${escaped}\\b`).test(lines.join('\n'));
+  };
+  for (const name of pendingDefaults) {
+    if (declaredName(name)) lines.push(`export default ${name};`);
+  }
+  for (const list of pendingExportLists) {
+    const kept = list.filter((s) => declaredName(isNode(s) ? s[0] : s));
+    if (kept.length > 0) lines.push(`export { ${specListText(kept)} };`);
+  }
+  // An import is retained when a declaration references one of its
+  // bound names; text the declarations never mention imports nothing
+  // (retention errs toward keeping — an unused import in a
+  // declaration file is inert, a missing one breaks every consumer).
+  const bodyText = lines.join('\n');
+  const referenced = (name) => {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(?:^|[^\\w$.])${escaped}(?![\\w$])`).test(bodyText);
+  };
+  const keptImports = pendingImports
+    .filter((node) => importBoundNames(node).some(referenced))
+    .map(importText);
+  if (keptImports.length > 0) lines.unshift(...keptImports);
+
   // The module marker (ARTIFACT-gated): declaration emission can
-  // erase every module indicator the source carried — import lines
-  // never emit, and an untyped export contributes no declaration —
+  // erase every module indicator the source carried when nothing
+  // above retained one — and an untyped export contributes no declaration —
   // so the gate reads the EMITTED lines, not the source shape (the
   // face's gate; faces preserve import/export bytes). Unless some
   // emitted declaration is itself an import/export line, a non-empty
