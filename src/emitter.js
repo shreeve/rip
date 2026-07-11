@@ -4561,6 +4561,10 @@ class Emitter {
     if (head === '%%' && node.length === 3) return this.modulo(node);
     if (head === '//=' && node.length === 3) return this.floorDivAssign(node);
     if (head === '=~' && node.length === 3) return this.matchOp(node);
+    if (head === 'symbol' && node.length === 2) {
+      // Interned symbol: identity holds across realms and modules.
+      return this.mark(node, '$self', () => this.b.emit(`Symbol.for(${JSON.stringify(node[1])})`));
+    }
     if ((head === '.=' || head === '*>') && node.length === 3) {
       throw this.positionedError(node, `emitter: ${head} is a statement — its target is spelled twice (write + read), which has no single-expression form`);
     }

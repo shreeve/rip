@@ -806,7 +806,7 @@ describe('schema: stores and mappings', () => {
     // $self spans `schema` through the body's end
     expect(src.slice(nodes[0].sourceStart, nodes[0].sourceEnd)).toBe('schema :shape\n  a! string\n  b? integer');
     const body = stores.role(id, 'body');
-    expect(src.slice(body.sourceStart, body.sourceEnd)).toBe('shape\n  a! string\n  b? integer');
+    expect(src.slice(body.sourceStart, body.sourceEnd)).toBe(':shape\n  a! string\n  b? integer');
     // both round-trip: the whole emitted __schema(...) is the cover
     const gen = mappings.bestAtSource(body.sourceStart);
     expect(gen).not.toBeNull();
@@ -839,7 +839,7 @@ describe('schema: stores and mappings', () => {
       .toBe('schema :model, on: analytics\n  a! string\n  @timestamps\n  beforeSave: -> @a');
     const body = stores.role(id, 'body');
     expect(src.slice(body.sourceStart, body.sourceEnd))
-      .toBe('model, on: analytics\n  a! string\n  @timestamps\n  beforeSave: -> @a');
+      .toBe(':model, on: analytics\n  a! string\n  @timestamps\n  beforeSave: -> @a');
     const gen = mappings.bestAtSource(body.sourceStart);
     expect(gen).not.toBeNull();
     expect(gen.mappingKind).toBe('cover');
