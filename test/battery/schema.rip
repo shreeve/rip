@@ -5269,6 +5269,10 @@ code "fold: bails to the runtime call on dynamic keys", '''
   V = User.pick(k);
 ''', { foldProjections: true }
 
+fail 'migration verbs are CLI-only in programs', '''
+  schema.plan!
+  ''', "CLI-only"
+
 test 'transaction! on: pins one adapter; other-adapter calls run outside', '''
   calls = {a: [], b: []}
   mk = (tag) ->
