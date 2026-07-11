@@ -1,0 +1,105 @@
+{
+  "name": "vscode-rip",
+  "displayName": "Rip Language",
+  "description": "Rip language support — syntax highlighting, hover, diagnostics, completions, go-to-definition, references, rename, signature help, semantic tokens, code actions, outline, inlay hints, and document links through the Rip compiler and the TypeScript 7 LSP server",
+  "version": "1.0.0",
+  "publisher": "rip-lang",
+  "license": "MIT",
+  "main": "./src/extension.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shreeve/rip.git",
+    "directory": "packages/vscode"
+  },
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "activationEvents": [
+    "onLanguage:rip"
+  ],
+  "categories": [
+    "Programming Languages"
+  ],
+  "icon": "icon.png",
+  "keywords": [
+    "rip",
+    "reactive",
+    "types",
+    "compiler"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "rip",
+        "extensions": [
+          ".rip"
+        ],
+        "aliases": [
+          "Rip",
+          "rip"
+        ],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icon.png",
+          "dark": "./icon.png"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "rip",
+        "scopeName": "source.rip",
+        "path": "./syntaxes/rip.tmLanguage.json"
+      },
+      {
+        "scopeName": "rip.injection.html",
+        "path": "./syntaxes/rip-html-injection.tmLanguage.json",
+        "injectTo": [
+          "text.html.basic",
+          "text.html.derivative"
+        ],
+        "embeddedLanguages": {
+          "meta.embedded.block.rip": "rip"
+        }
+      },
+      {
+        "scopeName": "rip.injection.markdown",
+        "path": "./syntaxes/rip-markdown-injection.tmLanguage.json",
+        "injectTo": [
+          "text.html.markdown"
+        ],
+        "embeddedLanguages": {
+          "meta.embedded.block.rip": "rip"
+        }
+      }
+    ],
+    "configurationDefaults": {
+      "[rip]": {
+        "editor.tabSize": 2,
+        "editor.insertSpaces": true,
+        "diffEditor.ignoreTrimWhitespace": false
+      },
+      "tailwindCSS.includeLanguages": {
+        "rip": "html"
+      },
+      "tailwindCSS.experimental.classRegex": [
+        "class:\\s*[\"']([^\"']*)[\"']",
+        ["class:\\s*\\[((?:[^\\[\\]]|\\[[^\\]]*\\])*)\\]", "[\"']([^\"']*)[\"']"],
+        ["class:\\s*\\(((?:[^()]|\\([^)]*\\))*)\\)", "[\"']([^\"']*)[\"']"],
+        ["\\.\\(((?:[^()]|\\([^)]*\\))*)\\)", "[\"']([^\"']*)[\"']"]
+      ]
+    }
+  },
+  "scripts": {
+    "test": "RIP_REQUIRE_TSGO=1 bun test --timeout 30000",
+    "package": "bun scripts/package.js",
+    "install-vscode": "bun ../../scripts/install-ext.mjs rip vscode",
+    "install-cursor": "bun ../../scripts/install-ext.mjs rip cursor"
+  },
+  "dependencies": {
+    "typescript": "7.0.2",
+    "vscode-languageclient": "9.0.1",
+    "vscode-languageserver": "9.0.1",
+    "vscode-languageserver-textdocument": "1.0.12"
+  }
+}

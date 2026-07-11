@@ -1,0 +1,57 @@
+{
+  "comments": {
+    "lineComment": "#",
+    "blockComment": ["###", "###"]
+  },
+  "brackets": [
+    ["{", "}"],
+    ["[", "]"],
+    ["(", ")"]
+  ],
+  "autoClosingPairs": [
+    { "open": "{", "close": "}" },
+    { "open": "[", "close": "]" },
+    { "open": "(", "close": ")" },
+    { "open": "\"", "close": "\"", "notIn": ["string"] },
+    { "open": "'", "close": "'", "notIn": ["string"] },
+    { "open": "#{", "close": "}", "notIn": ["string.quoted.single"] },
+    { "open": "###", "close": "###", "notIn": ["string"] }
+  ],
+  "surroundingPairs": [
+    { "open": "{", "close": "}" },
+    { "open": "[", "close": "]" },
+    { "open": "(", "close": ")" },
+    { "open": "\"", "close": "\"" },
+    { "open": "'", "close": "'" }
+  ],
+  "folding": {
+    "offSide": true,
+    "markers": {
+      "start": "^\\s*#\\s*region\\b",
+      "end": "^\\s*#\\s*endregion\\b"
+    }
+  },
+  "onEnterRules": [
+    {
+      "beforeText": "^\\s*(?!.*\\bthen\\b)(?:def|class|render|if|unless|else|for|while|until|loop|switch|when|try|catch|finally|enum|interface)\\b.*$",
+      "action": { "indent": "indent" }
+    },
+    {
+      "beforeText": "=\\s*component\\s*$",
+      "action": { "indent": "indent" }
+    },
+    {
+      "beforeText": "[-=]>\\s*$",
+      "action": { "indent": "indent" }
+    },
+    {
+      "beforeText": "\\btype\\s+[A-Z]\\w*(?:<[^>]+>)?\\s*=\\s*$",
+      "action": { "indent": "indent" }
+    },
+    {
+      "beforeText": "^\\s*(?!.*\\bthen\\b)(?!(?:import|export|from|return|throw|yield|await|delete|new|typeof|void|do|type|const|let|var|function)\\b)[A-Za-z][\\w-]*(?:[ \\t]+(?![-=<>~:!&|^%+*/?]).*)?$",
+      "action": { "indent": "indent" }
+    }
+  ],
+  "wordPattern": "(-?\\d*\\.\\d\\w*)|([^\\`\\~\\!\\@\\#\\%\\^\\&\\*\\(\\)\\-\\=\\+\\[\\{\\]\\}\\\\\\|\\;\\:\\'\\\"\\,\\.\\<\\>\\/\\?\\s]+)"
+}

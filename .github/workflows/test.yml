@@ -36,3 +36,9 @@ jobs:
         run: |
           bun run corpus-expected
           git diff --exit-code test/corpus/expected
+
+      - name: Extension suite (packages/vscode — its own suite, its own boundary)
+        working-directory: packages/vscode
+        run: |
+          bun install --frozen-lockfile
+          bun run test

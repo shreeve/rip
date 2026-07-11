@@ -5,6 +5,13 @@ repository's pull requests.
 
 ## Unreleased
 
+- Add the VS Code extension: syntax highlighting, hover, diagnostics,
+  completions, go-to-definition, references, rename, signature help,
+  semantic tokens, code actions, outline, inlay hints, and document
+  links through the compiler's TS face and the TypeScript 7 LSP server;
+  its suite runs as its own CI step and the dependency budget is
+  enforced (#11)
+
 - Add the UI and face test suites: components and the render DSL,
   reactive declarations, effects, readonly, the reactive/component/ORM
   runtime batteries, the TS-face strip gate with real-tsc validation,
