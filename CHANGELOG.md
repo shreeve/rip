@@ -5,6 +5,11 @@ repository's pull requests.
 
 ## Unreleased
 
+- `bun run test:rip` — the battery alone: every test/battery/*.rip
+  row (the language's syntax contract), sub-second. The inner loop
+  for language work; `bun run test` stays the fast full loop and
+  `bun run test:all` the canonical suite (#41)
+
 - JavaScript-parity spellings: literal `===`/`!==` normalize to the
   strict COMPARE the two-character spellings already emit (all four
   spellings mean strict equality); `?=` assigns when the target is
