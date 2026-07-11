@@ -611,3 +611,49 @@ test 'enum auto-numbering runtime', '''
   ''', [0, 11, 'South']
 
 fail 'bare enum member after a string value rejects', 'enum Mix\n  ok = "fine"\n  broken', 'no number to continue'
+
+test 'generic function runtime', '''
+    def identity<T>(value: T): T
+      value
+    identity(42)
+  ''', 42
+
+test 'generic function with string', '''
+    def identity<T>(value: T): T
+      value
+    identity("hello")
+  ''', "hello"
+
+test 'generic function with array', '''
+    def first<T>(items: T[]): T
+      items[0]
+    first([10, 20, 30])
+  ''', 10
+
+code 'structural type optional prop erased', '''
+    type Config =
+      host: string
+      port: number
+      ssl?: boolean
+  ''', '''
+  
+  '''
+
+code 'exported generic close on type alias body line', '''
+    export type ApiErrors =
+      field?: Record<string, string>
+  
+    doStuff()
+  ''', '''
+  doStuff();
+  '''
+
+code 'optional property erased', '''
+    type Config =
+      host: string
+      port: number
+      ssl?: boolean
+      timeout?: number
+  ''', '''
+  
+  '''

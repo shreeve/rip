@@ -4942,3 +4942,70 @@ fail 'a transition on a static element rejects (branch roots only)', '''
     render
       div ~slide
   ''', "put it on the FIRST top-level element of an if/else branch"
+
+test 'text output in switch loop with postfix if else compiles', '''
+    A = component
+      items := [{status: "ready"}]
+      tab := "reports"
+      render
+        switch tab
+          when "reports"
+            div
+              for report in items
+                span
+                  = "Ready" if report.status is "ready" else "Processing"
+          else
+            div "Other"
+    typeof A
+  ''', "function"
+
+test 'text output in switch loop with attrs and postfix if else compiles', '''
+    A = component
+      items := [{status: "ready"}]
+      tab := "reports"
+      render
+        switch tab
+          when "reports"
+            div
+              for report in items
+                span
+                  class: if report.status is "ready" then "a" else "b"
+                  = "Ready" if report.status is "ready" else "Processing"
+          else
+            div "Other"
+    typeof A
+  ''', "function"
+
+test 'uppercase loop iterable in render compiles as data, not component', '''
+    A = component
+      render
+        div
+          for report in RESULTS_REPORTS
+            span
+              = "Ready" if report.status is "ready" else "Processing"
+    typeof A
+  ''', "function"
+
+code 'plain `=` write is a property write; `:=` write is a signal write', '''
+  export A = component
+    flag = false
+    count := 0
+    toggle: ->
+      flag = not flag
+      count = count + 1
+    render null
+  ''', '''
+  export const A = class extends __Component {
+    _init(props) {
+      this.flag = false;
+      this.count = __state(0);
+    }
+    toggle() {
+      this.flag = !this.flag;
+      return (this.count.value = this.count.value + 1);
+    }
+    _create() {
+      return null;
+    }
+  };
+  '''

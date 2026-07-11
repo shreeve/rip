@@ -230,3 +230,12 @@ fail 'binary existential hints ??', 'x = opts?.input ? null', 'x ?? y'
 fail 'bare binary existential hints ??', 'x = a ? b', 'x ?? y'
 fail 'incomplete ternary hints ??', 'y = cond ? 1', 'x ?? y'
 fail 'binary existential in call arg hints ??', 'foo a ? b', 'x ?? y'
+
+test 'throw in || expression', '''
+    fn = -> null
+    result = try
+      x = fn() || throw "error"
+    catch e
+      e
+    result
+  ''', "error"

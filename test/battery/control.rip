@@ -975,3 +975,194 @@ code '?? throw assignment generates if with nullish check', '  data = getValue()
 
   if ((data = getValue()) == null) throw new Error('Missing');
 '''
+
+test 'or return with assignment falsy', '''
+    fn = ->
+      sql = null or return 'empty'
+      'got: ' + sql
+    fn()
+  ''', "empty"
+
+test 'or return with assignment truthy', '''
+    fn = ->
+      sql = 'data' or return 'empty'
+      'got: ' + sql
+    fn()
+  ''', "got: data"
+
+test 'or throw with assignment falsy', '''
+    fn = ->
+      try
+        data = null or throw new Error 'No data'
+        'got: ' + data
+      catch e
+        'caught: ' + e.message
+    fn()
+  ''', "caught: No data"
+
+test 'or throw with assignment truthy', '''
+    fn = ->
+      try
+        data = 'value' or throw new Error 'No data'
+        'got: ' + data
+      catch e
+        'caught: ' + e.message
+    fn()
+  ''', "got: value"
+
+test 'and return with assignment truthy', '''
+    fn = ->
+      cached = 'cached!' and return 'cached!'
+      'not cached'
+    fn()
+  ''', "cached!"
+
+test 'and return with assignment falsy', '''
+    fn = ->
+      cached = null and return 'cached!'
+      'not cached'
+    fn()
+  ''', "not cached"
+
+test 'and throw with assignment truthy', '''
+    fn = ->
+      try
+        error = 'validation failed' and throw new Error 'validation failed'
+        'success'
+      catch e
+        'caught: ' + e.message
+    fn()
+  ''', "caught: validation failed"
+
+test 'and throw with assignment falsy', '''
+    fn = ->
+      try
+        error = null and throw new Error 'should not throw'
+        'success'
+      catch e
+        'caught: ' + e.message
+    fn()
+  ''', "success"
+
+test 'standalone or return', '''
+    fn = (val) ->
+      val or return 'fallback'
+      'got: ' + val
+    fn(null)
+  ''', "fallback"
+
+test 'standalone and throw', '''
+    fn = (isError) ->
+      try
+        isError and throw new Error 'error!'
+        'ok'
+      catch e
+        e.message
+    fn(true)
+  ''', "error!"
+
+test '?? return with null', '''
+    fn = ->
+      data = null ?? return 'was null'
+      'got: ' + data
+    fn()
+  ''', "was null"
+
+test '?? return with undefined', '''
+    fn = ->
+      data = undefined ?? return 'was undefined'
+      'got: ' + data
+    fn()
+  ''', "was undefined"
+
+test '?? return with empty string (should NOT return)', '''
+    fn = ->
+      data = '' ?? return 'was nullish'
+      'got empty: ' + (data is '')
+    fn()
+  ''', "got empty: true"
+
+test '?? return with zero (should NOT return)', '''
+    fn = ->
+      data = 0 ?? return 'was nullish'
+      'got zero: ' + data
+    fn()
+  ''', "got zero: 0"
+
+test '?? return with false (should NOT return)', '''
+    fn = ->
+      data = false ?? return 'was nullish'
+      'got false: ' + data
+    fn()
+  ''', "got false: false"
+
+test '?? return with truthy value', '''
+    fn = ->
+      data = 'hello' ?? return 'was nullish'
+      'got: ' + data
+    fn()
+  ''', "got: hello"
+
+test '?? throw with null', '''
+    fn = ->
+      try
+        data = null ?? throw new Error 'was null'
+        'got: ' + data
+      catch e
+        'caught: ' + e.message
+    fn()
+  ''', "caught: was null"
+
+test '?? throw with undefined', '''
+    fn = ->
+      try
+        data = undefined ?? throw new Error 'was undefined'
+        'got: ' + data
+      catch e
+        'caught: ' + e.message
+    fn()
+  ''', "caught: was undefined"
+
+test '?? throw with empty string (should NOT throw)', '''
+    fn = ->
+      try
+        data = '' ?? throw new Error 'was nullish'
+        'got empty: ' + (data is '')
+      catch e
+        'caught: ' + e.message
+    fn()
+  ''', "got empty: true"
+
+test '?? throw with zero (should NOT throw)', '''
+    fn = ->
+      try
+        data = 0 ?? throw new Error 'was nullish'
+        'got zero: ' + data
+      catch e
+        'caught: ' + e.message
+    fn()
+  ''', "got zero: 0"
+
+test 'standalone ?? return with null', '''
+    fn = (val) ->
+      val ?? return 'fallback'
+      'got: ' + val
+    fn(null)
+  ''', "fallback"
+
+test 'standalone ?? return with empty string', '''
+    fn = (val) ->
+      val ?? return 'fallback'
+      'got empty: ' + (val is '')
+    fn('')
+  ''', "got empty: true"
+
+test 'standalone ?? throw with undefined', '''
+    fn = (val) ->
+      try
+        val ?? throw new Error 'was nullish'
+        'got: ' + val
+      catch e
+        e.message
+    fn(undefined)
+  ''', "was nullish"
