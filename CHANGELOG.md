@@ -5,6 +5,40 @@ repository's pull requests.
 
 ## Unreleased
 
+- Interpolated string keys: `{"#{k}": v}` — the template is a
+  computed key (`[\`${k}\`]: v`), surrounding literal text included
+  (`{"pre#{k}post": 1}`). The misleading "@-keys" rejection this
+  input used to trip is gone (#49)
+
+- Compound object keys: an identifier chain joined by `.` (any
+  spacing) or `-` (tight on both sides) directly before `:` is ONE
+  string key — `{ data-src: 1 }`, `{ www.amazon.com: 4 }`,
+  `{ beta-site.amazon.com: 2 }` — in explicit and implicit objects.
+  Spaced subtraction keeps its reading (`{ k: a - b }`), and a
+  ternary's `:` never claims (`a ? b.c : d` keeps its member read).
+  Vim and VS Code highlight the chain as a key (#48)
+
+- Tagged templates: a string right against a value (`tag"x"`,
+  `obj.fn"x"`, `f(1)"x"`) or bridged by `$` (`sh $"cmd #{c}"`) calls
+  the tag with the template — `tag\`x\``, raw strings preserved,
+  interpolation carried through. A SPACED string keeps its
+  implicit-call reading (`tag "x"` → `tag("x")`). All three editor
+  grammars highlight the `$` bridge (#47)
+
+- The pending lane reads like the battery it feeds: blank line
+  between rows, `'''` heredocs for multi-line sources and expected
+  code, single-quoted one-liners — regenerated mechanically and
+  round-trip-verified through the runner's own transforms (507/507
+  exact) (#46)
+
+- The pending lane (test/battery-pending): 507 language behaviors the
+  battery does not cover yet, spelled as battery rows (same four
+  verbs) and asserted to STILL FAIL — the suite stays green while
+  features are missing and flips red exactly when a change makes a
+  pending row pass without moving it into the real battery. Reviving
+  a row is cut-and-paste into test/battery/ in the feature's own
+  change; the lane dies when the directory empties (#44, #45)
+
 - Editor grammars live here and move with the language: the vim
   plugin (packages/vim — syntax, indent, ftdetect, ftplugin) and the
   highlight.js grammar (packages/highlight — Rip Print consumes it)

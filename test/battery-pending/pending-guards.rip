@@ -1,0 +1,33 @@
+# Pending rows for guards — behaviors the battery does not cover yet.
+# Every row here FAILS today; when a feature revives one, MOVE the row
+# into test/battery/ in the same change (the lane asserts still-failing).
+
+import { test, code, fail, type } from '../support/testing.js'
+
+test 'for-in when item not in list', '''
+  result = []
+  for item in ['apple', 'grape', 'banana'] when item not in ['apple', 'banana']
+    result.push(item)
+  result
+''', ['grape']
+
+test 'for-of when key not of object', '''
+  obj = {a: 1, b: 2, c: 3}
+  result = []
+  for key of obj when key not of {a: true, c: true}
+    result.push(key)
+  result
+''', ['b']
+
+test 'for-in when not instanceof', '''
+  class Fruit
+  class Veggie
+  apple = new Fruit
+  grape = new Fruit
+  carrot = new Veggie
+  items = [apple, grape, carrot]
+  result = []
+  for item in items when item not instanceof Fruit
+    result.push(item)
+  result.length
+''', 1

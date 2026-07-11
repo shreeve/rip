@@ -1,0 +1,71 @@
+# Pending rows for control — behaviors the battery does not cover yet.
+# Every row here FAILS today; when a feature revives one, MOVE the row
+# into test/battery/ in the same change (the lane asserts still-failing).
+
+import { test, code, fail, type } from '../support/testing.js'
+
+code 'or throw assignment generates if', '  data = fetchData() or throw new Error \'No data\'', '''
+  let data;
+
+  if (!(data = fetchData())) throw new Error('No data');
+'''
+
+code 'and throw assignment generates if', '  error = validate() and throw error', '''
+  let error;
+
+  if ((error = validate())) throw error;
+'''
+
+code 'standalone and throw generates if', '  isError and throw new Error \'Failed\'', 'if (isError) throw new Error(\'Failed\');'
+
+code '?? throw assignment generates if with nullish check', '  data = getValue() ?? throw new Error \'Missing\'', '''
+  let data;
+
+  if ((data = getValue()) == null) throw new Error('Missing');
+'''
+
+code 'standalone ?? throw generates if with nullish check', '  getValue() ?? throw new Error \'Not found\'', 'if ((getValue()) == null) throw new Error(\'Not found\');'
+
+fail 'nested ternary in then branch', 'x = true ? (false ? "a" : "b") : "c"', null
+
+code 'or-throw in sibling exports hoists variable in each function', '''
+  export first = (data) ->
+    store = getData() or throw new Error 'no context'
+    store.value
+
+  export second = ->
+    store = getData()
+    store
+''', '''
+  export const first = (function(data) {
+    let store;
+    if (!(store = getData())) throw new Error('no context');
+    return store.value;
+  });
+  export const second = (function() {
+    let store;
+    store = getData();
+    return store;
+  });
+'''
+
+test 'bare try expression returns value on success', '''
+    x = try 42
+    x
+''', 42
+
+test 'bare try expression returns undefined on throw', '''
+    x = try (throw new Error('boom'))
+    x
+''', null
+
+test 'bare try statement swallows error', '''
+    try (throw new Error('boom'))
+    'ok'
+''', 'ok'
+
+code 'bare try statement generates catch {}', 'try foo()', '''
+  try {
+    foo();
+  } catch {}
+'''
