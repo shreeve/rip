@@ -4898,6 +4898,12 @@ class Emitter {
   }
 
   assign(node) {
+    // A string-literal target is the string-NAMED class field's shape
+    // (`"data-src" = v`) — the class-member walk owns that form;
+    // everywhere else a string is not an assignment target.
+    if (typeof node[1] === 'string' && node[1][0] === '"') {
+      throw this.positionedError(node, 'emitter: a string is not an assignment target — a string-NAMED member (`"data-src" = v`) lives in a class body');
+    }
     // Pattern targets emit as direct ES destructuring —
     // names hoist like plain targets. An OBJECT pattern wraps the whole
     // assignment in parens (a bare `{` would open a block)

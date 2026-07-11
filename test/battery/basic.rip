@@ -379,3 +379,18 @@ test 'interpolated string key access', '''
 ''', 'Alice'
 test 'interpolated key with surrounding text', 'k = "x"\no = {"pre#{k}post": 1}\no.prexpost', 1
 code 'interpolated key compiles to a computed key', 'k = "x"\no = {"#{k}": 42}', 'let k = "x";\n\nlet o = {[`${k}`]: 42};'
+
+# ==============================================================================
+# String-named class fields — the TS spelling for names identifiers
+# cannot carry ("data-src" = v); outside a class body the shape rejects
+# ==============================================================================
+
+test 'compound key in class-body property', '''
+  class Setting
+    "data-src" = "default"
+    "api.host" = "localhost"
+  s = new Setting()
+  [s["data-src"], s["api.host"]]
+  ''', ['default', 'localhost']
+
+fail 'a string is not an assignment target outside classes', '"foo" = "bar"', 'lives in a class body'
