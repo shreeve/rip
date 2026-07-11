@@ -1789,7 +1789,13 @@ describe('`extends <tag>`: the rest-forwarding surface', () => {
 
 
 describe('member initialization order is observable source order', () => {
-  test('a state above a plain member initializes first; the plain member reads it', () => {
+  // Executed in a SUBPROCESS: an inline runtime copy inside the test
+  // process would collide with the shared runtime the other UI tests
+  // load (the two-copies guard is load-bearing).
+  test('a state above a plain member initializes first; the plain member reads it', async () => {
+    const os = await import('node:os');
+    const fs = await import('node:fs');
+    const path = await import('node:path');
     const src = [
       'trace = []',
       'mark = (n, v) ->',
@@ -1799,12 +1805,16 @@ describe('member initialization order is observable source order', () => {
       '  a := mark "state", 1',
       '  b = mark "plain", a + 1',
       'x = new C()',
-      'globalThis.__initOrder = [trace, x.b]',
+      'console.log JSON.stringify [trace, x.b]',
       '',
     ].join('\n');
-    const { code } = compile(src, { runtimeDelivery: 'inline' });
-    new Function(code)();
-    expect(globalThis.__initOrder).toEqual([['state', 'plain'], 2]);
-    delete globalThis.__initOrder;
+    const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rip-init-')), 'order.rip');
+    fs.writeFileSync(f, src);
+    try {
+      const r = Bun.spawnSync(['bun', path.join(import.meta.dir, '../../bin/rip'), f]);
+      expect(r.stdout.toString().trim()).toBe('[["state","plain"],2]');
+    } finally {
+      fs.rmSync(path.dirname(f), { recursive: true, force: true });
+    }
   });
 });
