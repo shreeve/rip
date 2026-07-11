@@ -4,81 +4,6 @@
 
 import { test, code, fail, type } from '../support/testing.js'
 
-test 'component owns its own effect disposers', '''
-  A = component
-    x := 0
-    log =! []
-    ~> @log.push(x + 0)
-  a = A.new()
-  a._disposers?.length > 0
-''', true
-
-test 'init failure with handled onError sets _initFailed flag', '''
-  caught = null
-  Bad = component
-    onError = (err) -> caught = err.message
-    _init = -> raise "boom"
-  bad = Bad.new()
-  # onError caught the error (existing semantics) AND _initFailed marks
-  # the instance for parent emit-sites to substitute a placeholder.
-  caught is "boom" and bad._initFailed is true
-''', true
-
-test 'init failure without onError throws from constructor', '''
-  Bad = component
-    _init = -> raise "boom"
-  caught = null
-  try
-    bad = Bad.new()
-  catch e
-    caught = e.message
-  caught
-''', 'boom'
-
-test 'getContext terminates on cycled parent chain', '''
-  A = component
-    val =! "x"
-  a = A.new()
-  a._parent = a              # poison the chain
-  __pushComponent(a)
-  result = getContext("missing")
-  __popComponent(null)
-  result is undefined        # returned, did not hang
-''', true
-
-test '__pushComponent preserves _parent across re-pushes', '''
-  A = component
-    val =! "outer"
-  B = component
-    val =! "inner"
-  outer = A.new()
-  inner = B.new()
-  __pushComponent(outer)     # outer becomes current
-  __pushComponent(inner)     # inner._parent = outer
-  __popComponent(outer)
-  __popComponent(null)
-  __pushComponent(inner)     # re-push inner with no current — must NOT clobber to null
-  __popComponent(null)
-  inner._parent is outer
-''', true
-
-test 'context propagates from outer to inner across re-push', '''
-  Outer = component
-    init = -> setContext("greeting", "hi")
-  Inner = component
-    val = null
-    _init = -> @val = getContext("greeting")
-  outer = Outer.new()
-  __pushComponent(outer)
-  outer.init()
-  inner = Inner.new()        # constructor runs _init under outer scope
-  __popComponent(null)
-  __pushComponent(inner)     # later self-push must preserve _parent
-  again = getContext("greeting")
-  __popComponent(null)
-  inner.val is "hi" and again is "hi"
-''', true
-
 code 'bare-ident shorthand — unresolved name is a boolean attribute', '''
   export A = component
     render
@@ -94,13 +19,6 @@ code 'bare-ident shorthand — unresolved name is a boolean attribute', '''
     }
   }
 '''
-
-test 'getContext returns undefined when not set', '''
-  A = component
-    val =! getContext("missing")
-  a = A.new()
-  a.val
-''', null
 
 code 'transition with ~slide preset', '''
   export A = component
