@@ -5,6 +5,13 @@ repository's pull requests.
 
 ## Unreleased
 
+- Word arrays: `%w[foo bar baz]` is `["foo", "bar", "baz"]`.
+  Delimiters pair (`[] () {} <>`, nesting counted) or repeat
+  symmetrically (`%w|a b|`, `%w/x y/`); backslash-space keeps a
+  space inside a word; an unclosed literal rejects positioned. The
+  scan emits real bracket/string/comma tokens with each word's true
+  span, so mapping stays exact (#42)
+
 - `bun run test:rip` — the battery alone: every test/battery/*.rip
   row (the language's syntax contract), sub-second. The inner loop
   for language work; `bun run test` stays the fast full loop and
