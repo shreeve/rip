@@ -6,6 +6,8 @@
 # ==============================================================================
 
 # Basic for-in
+import { test, code, fail, type } from '../support/testing.js'
+
 test "for-in array", "sum = 0; for x in [1, 2, 3]\n  sum += x\nsum", 6
 test "for-in with index", "result = ''; for item, i in ['a', 'b', 'c']\n  result += i\nresult", "012"
 test "for-in range", "sum = 0; for i in [1..5]\n  sum += i\nsum", 15

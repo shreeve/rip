@@ -4,6 +4,8 @@
 # syntactic form. `test` cases execute the runtime against the compiled
 # output. `type` cases snapshot shadow TypeScript emission.
 
+import { test, code, fail, type } from '../support/testing.js'
+
 opts = { skipPreamble: true, skipRuntimes: true, skipDataPart: true }
 
 # ==============================================================================

@@ -6,6 +6,8 @@
 # ==============================================================================
 
 # Basic import
+import { test, code, fail, type } from '../support/testing.js'
+
 code "import default", 'import React from "react"', "import React from 'react';"
 code "import named", 'import { useState } from "react"', "import { useState } from 'react';"
 code "import namespace", 'import * as Utils from "./utils"', "import * as Utils from './utils';"

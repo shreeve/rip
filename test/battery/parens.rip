@@ -5,6 +5,8 @@
 # If Statement Conditions
 # ==============================================================================
 
+import { test, code, fail, type } from '../support/testing.js'
+
 code "if simple condition", "if x > y\n  z", "if (x > y) {\n  z;\n}"
 code "if complex condition", "if x > 5 and y < 10\n  z", "if ((x > 5) && (y < 10)) {\n  z;\n}"
 code "unless condition", "unless x is 5\n  y", "if (!(x === 5)) {\n  y;\n}"

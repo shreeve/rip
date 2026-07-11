@@ -6,6 +6,8 @@
 # FOR-IN GUARDS
 # ==============================================================================
 
+import { test, code, fail, type } from '../support/testing.js'
+
 test 'for-in with simple guard', '''
   result = []
   for x in [1, 2, 3, 4, 5] when x > 2

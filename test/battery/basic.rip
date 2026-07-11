@@ -6,6 +6,8 @@
 # ==============================================================================
 
 # Empty array
+import { test, code, fail, type } from '../support/testing.js'
+
 test "empty array", "x = []; x.length", 0
 
 # Simple arrays

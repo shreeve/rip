@@ -16,6 +16,8 @@
 # Runtime — bare picks
 # ==============================================================================
 
+import { test, code, fail, type } from '../support/testing.js'
+
 test "bare single"         , "o = {a: 1}; o.{a}"                         , {a: 1}
 test "bare multi"          , "o = {a: 1, b: 2, c: 3}; o.{a, b}"          , {a: 1, b: 2}
 test "missing key → undef" , "o = {a: 1}; r = o.{a, b}; [r.a, r.b]"      , [1, undefined]

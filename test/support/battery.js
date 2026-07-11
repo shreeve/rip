@@ -17,8 +17,8 @@
 // load ONCE per process from the assembled build and their exports are
 // in scope for every evaluation — one shared runtime, exactly the
 // posture of a real module graph.
-import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
+import { collectInto } from './testing.js';
 
 import { compile, CompileError } from '../../src/compile.js';
 import * as reactiveRuntime from '../../src/runtime/reactive.js';
@@ -301,14 +301,14 @@ async function evaluate(compiled) {
 
 // Load a battery file: compile it through the engine and execute it
 // with RECORDING verbs — the result is the row list, in file order.
-export function loadBattery(path) {
-  const source = readFileSync(path, 'utf8');
-  const { code: compiled } = compile(source, { path, runtimeDelivery: 'none' });
+export async function loadBattery(path) {
   const rows = [];
-  const record = (verb) => (name, src, expected, options) =>
-    rows.push({ verb, name, src, expected, options, file: basename(path) });
-  const runner = new Function('test', 'code', 'fail', 'type', compiled);
-  runner(record('test'), record('code'), record('fail'), record('type'));
+  collectInto(rows, basename(path));
+  try {
+    await import(path);
+  } finally {
+    collectInto(null, 'battery');
+  }
   return rows;
 }
 

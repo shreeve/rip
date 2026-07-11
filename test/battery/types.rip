@@ -10,6 +10,8 @@
 # Type Annotations on Variables — Erased from JS
 # ==============================================================================
 
+import { test, code, fail, type } from '../support/testing.js'
+
 code "typed variable", "count: number = 0", "let count = 0;"
 code "typed string variable", "name: string = \"Rip\"", "let name = \"Rip\";"
 code "typed array variable", "ids: number[] = []", "let ids = [];"

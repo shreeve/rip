@@ -5,6 +5,8 @@
 # Single Parameter (NO parens)
 # ==============================================================================
 
+import { test, code, fail, type } from '../support/testing.js'
+
 code "arrow single param", "f = (x) => x * 2", "let f = x => (x * 2);"
 code "arrow single param block", '''
   f = (x) =>

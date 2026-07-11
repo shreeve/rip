@@ -6,6 +6,8 @@
 # ==============================================================================
 
 # Class with methods
+import { test, code, fail, type } from '../support/testing.js'
+
 test "class methods", "class Math\n  add: (a, b) -> a + b\n  multiply: (a, b) -> a * b\nm = new Math(); m.add(2, 3)", 5
 
 # Static methods

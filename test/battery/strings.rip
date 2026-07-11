@@ -6,6 +6,8 @@
 # ==============================================================================
 
 # Double quoted strings
+import { test, code, fail, type } from '../support/testing.js'
+
 test "double quoted string", '"hello"', "hello"
 test "double quoted with spaces", '"hello world"', "hello world"
 test "empty double quoted", '""', ""

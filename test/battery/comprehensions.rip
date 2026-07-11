@@ -6,6 +6,8 @@
 # ==============================================================================
 
 # Basic array comprehension
+import { test, code, fail, type } from '../support/testing.js'
+
 test "simple comprehension", "(x * 2 for x in [1, 2, 3])", [2, 4, 6]
 test "comprehension with string", "(c.toUpperCase() for c in ['a', 'b', 'c'])", ['A', 'B', 'C']
 

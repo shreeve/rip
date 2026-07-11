@@ -6,6 +6,8 @@
 # ==============================================================================
 
 # Basic try-catch
+import { test, code, fail, type } from '../support/testing.js'
+
 test "try catch", "result = try\n  throw 'error'\ncatch e\n  e\nresult", "error"
 
 # Try-catch with no error

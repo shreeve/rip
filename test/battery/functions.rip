@@ -6,6 +6,8 @@
 # ==============================================================================
 
 # Simple function
+import { test, code, fail, type } from '../support/testing.js'
+
 test "simple function", "def add(a, b)\n  a + b\nadd(2, 3)", 5
 test "function with no params", "def greet\n  'hello'\ngreet()", "hello"
 

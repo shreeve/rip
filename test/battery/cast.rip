@@ -11,6 +11,8 @@
 # Runtime erasure — the cast leaves no trace in the emitted JS
 # ==============================================================================
 
+import { test, code, fail, type } from '../support/testing.js'
+
 code "cast on identifier erased", "y = x as Foo", "let y = x;"
 code "parenthesized cast erased", "y = (x as Foo)", "let y = x;"
 code "cast inside call erased", "foo(x as Bar)", "foo(x)"

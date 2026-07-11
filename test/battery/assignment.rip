@@ -5,6 +5,8 @@
 # Simple Assignment
 # ==============================================================================
 
+import { test, code, fail, type } from '../support/testing.js'
+
 test "assign integer", "x = 42; x", 42
 test "assign string", 'x = "hello"; x', "hello"
 test "assign boolean", "x = true; x", true

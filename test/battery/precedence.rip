@@ -7,6 +7,8 @@
 # ==============================================================================
 
 # Basic: or after implicit call returns call result when truthy
+import { test, code, fail, type } from '../support/testing.js'
+
 test "or returns call result when truthy", "fn = (x) -> x\nfn 'hello' or 'default'", "hello"
 
 # or returns default when call result is falsy

@@ -12,6 +12,8 @@
 # lines (a multi-line arrow, so the last emitted line is `});`). The async
 # wrapper must inject `return` at the statement's true start, not give up on
 # the closing-brace line and silently yield undefined.
+import { test, code, fail, type } from '../support/testing.js'
+
 test "async value from multi-line final arrow", '''
   items = await Promise.resolve [1, 2, 3]
   items.map (x) ->

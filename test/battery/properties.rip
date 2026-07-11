@@ -6,6 +6,8 @@
 # ==============================================================================
 
 # Basic property access
+import { test, code, fail, type } from '../support/testing.js'
+
 test "property access", "obj = {x: 42}; obj.x", 42
 test "nested property", "obj = {a: {b: 10}}; obj.a.b", 10
 test "property chain", "obj = {a: {b: {c: 5}}}; obj.a.b.c", 5

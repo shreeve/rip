@@ -6,6 +6,8 @@
 # ==============================================================================
 
 # Integers
+import { test, code, fail, type } from '../support/testing.js'
+
 test "integer literal", "42", 42
 test "negative integer", "-10", -10
 test "zero", "0", 0

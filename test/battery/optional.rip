@@ -6,6 +6,8 @@
 # ==============================================================================
 
 # Pattern: expr? → (expr != null)
+import { test, code, fail, type } from '../support/testing.js'
+
 test "existence check value", "x = 42\nx?", true
 test "existence check null", "x = null\nx?", false
 test "existence check undefined", "x = undefined\nx?", false

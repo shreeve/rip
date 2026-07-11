@@ -7,6 +7,8 @@
 # State (:=) — Code Generation
 # ==============================================================================
 
+import { test, code, fail, type } from '../support/testing.js'
+
 skip = { skipPreamble: true }
 
 code "state creation", "count := 0", "const count = __state(0)", skip

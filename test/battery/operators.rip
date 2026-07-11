@@ -6,6 +6,8 @@
 # ==============================================================================
 
 # Addition: "+"
+import { test, code, fail, type } from '../support/testing.js'
+
 test "addition integers", "5 + 3", 8
 test "addition decimals", "2.5 + 1.5", 4.0
 test "addition negative", "-5 + 10", 5

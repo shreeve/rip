@@ -5,6 +5,8 @@
 # Function Declarations (NO semicolon after })
 # ==============================================================================
 
+import { test, code, fail, type } from '../support/testing.js'
+
 code "function declaration", "def foo()\n  42", "function foo() {\n  return 42;\n}"
 code "async function", "def bar()\n  fetch!()", "async function bar() {\n  return await fetch();\n}"
 
