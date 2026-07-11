@@ -5,6 +5,16 @@ repository's pull requests.
 
 ## Unreleased
 
+- Index the mapping offset queries: atGenerated/atSource answer
+  through a centered interval tree (O(log n + k) per stab) instead of
+  filtering and sorting every row (O(n)), with results byte-identical
+  to the full scan, order included. The editor maps every diagnostic,
+  hover, and navigation position through these queries, so per-publish
+  mapping cost on large files drops ~250x (300 queries over a
+  48,000-row table: 19.1 ms to 0.08 ms; the index builds lazily per
+  side in ~5 ms, once per compile). Pinned by corpus-wide equivalence,
+  a count-keyed staleness test, and a near-linear ops-scaling gate (#24)
+
 - Restore stripped test coverage: eight test files defined fixtures
   whose consuming blocks were lost to over-eager de-witnessing — six
   ran zero tests. Every self-contained block is converted and kept;

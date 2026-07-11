@@ -573,3 +573,66 @@ describe('store invariants over the corpus', () => {
     });
   }
 });
+
+// ── the mapping query index ──────────────────────────────────────────
+// atGenerated/atSource answer through a centered interval tree. These
+// pins hold it to the full-scan CONTRACT (same rows, same order) and
+// to its scaling promise.
+describe('the mapping query index', () => {
+  const bruteAtGenerated = (rows, x) => rows
+    .filter((r) => r.generatedStart <= x && x < r.generatedEnd)
+    .sort((a, b) => (a.generatedEnd - a.generatedStart) - (b.generatedEnd - b.generatedStart));
+  const bruteAtSource = (rows, x) => rows
+    .filter((r) => r.sourceStart <= x && x < r.sourceEnd)
+    .sort((a, b) => (a.sourceEnd - a.sourceStart) - (b.sourceEnd - b.sourceStart));
+
+  test('answers byte-identically to the full scan over the corpus, order included', async () => {
+    const { compile } = await import('../../src/compile.js');
+    const dir = join(import.meta.dir, '../corpus');
+    for (const f of readdirSync(dir).filter((n) => n.endsWith('.rip'))) {
+      const src = readFileSync(join(dir, f), 'utf8');
+      const r = compile(src, { path: f });
+      const m = r.mappings;
+      const probes = [0, Math.max(0, r.code.length - 1)];
+      for (let x = 0; x < r.code.length; x += 61) probes.push(x);
+      for (let x = 0; x < src.length; x += 61) probes.push(x);
+      for (const x of probes) {
+        expect(m.atGenerated(x)).toEqual(bruteAtGenerated(m.rows, x));
+        expect(m.atSource(x)).toEqual(bruteAtSource(m.rows, x));
+      }
+    }
+  }, 30000);
+
+  test('rows appended after a query are visible to the next query (count-keyed rebuild)', async () => {
+    const { compile } = await import('../../src/compile.js');
+    const r = compile('x = 1\ny = x + 2\n', { path: 'p.rip' });
+    const m = r.mappings;
+    const before = m.atGenerated(0).length;
+    expect(before).toBeGreaterThan(0);
+    m.rows.push({
+      nodeId: -1, role: '$self', mappingKind: 'cover',
+      sourceStart: 0, sourceEnd: 1, generatedStart: 0, generatedEnd: r.code.length, fileId: 0,
+    });
+    const after = m.atGenerated(0);
+    expect(after.length).toBe(before + 1);
+    expect(after).toEqual(bruteAtGenerated(m.rows, 0));
+  });
+
+  test('scaling: an n-query batch over an n-statement program stays near-linear in index ops', async () => {
+    const { compile } = await import('../../src/compile.js');
+    const { syncOpsFlag } = await import('../../src/ops.js');
+    expectLinearOpsDoubling({
+      prepare: (n) => {
+        const src = Array.from({ length: n }, (_, i) => `v${i} = w${i}.p.q + ${i}`).join('\n');
+        const r = compile(src, { path: 'scale.rip' });
+        const offsets = Array.from({ length: n }, (_, i) => (i * 7919) % r.code.length);
+        return { m: r.mappings, offsets };
+      },
+      run: ({ m, offsets }) => {
+        syncOpsFlag(); // count index build + queries only, not the compile
+        for (const x of offsets) m.bestAtGenerated(x);
+      },
+      sizes: [250, 500, 1000, 2000],
+    });
+  }, 30000);
+});

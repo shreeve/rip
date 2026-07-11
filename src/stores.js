@@ -17,6 +17,8 @@
 //   literal role { nodeId, role, grammarRef: null, childSlot, literal,
 //                  fileId } — statically-known value, no span
 
+import { ops } from './ops.js';
+
 export class Stores {
   constructor({ nodes, roles, nodeIds = null }) {
     this.nodes = nodes;
@@ -66,13 +68,124 @@ export class Stores {
   }
 }
 
+// ── interval index over mapping spans ────────────────────────────────
+// A static centered interval tree over half-open spans [start, end):
+// each node holds the spans containing its center (sorted by start
+// ascending and by end descending), with strictly-left spans below
+// `left` and strictly-right below `right`. A stab at offset x visits
+// O(log n) nodes and touches only matching spans plus one sentinel per
+// node — O(log n + k) against a full scan's O(n). The editor pays this
+// query once per diagnostic per publish, where n reaches tens of
+// thousands of rows on large files, so scan cost is quadratic in
+// aggregate exactly where latency shows.
+//
+// Entries carry their original row index: results sort by span width
+// then row index, which reproduces the previous stable
+// filter-then-sort ordering byte-for-byte (a stable sort resolves
+// equal widths in original order).
+// Entries arrive sorted by start (one global sort); the center is the
+// slice's median start in O(1), and an order-preserving partition
+// keeps every sublist start-sorted — `byStart` needs no re-sort, and
+// only the per-node `byEnd` sorts, so construction is one global sort
+// plus O(n log n) cheap passes (build stays a small fraction of a
+// compile even at tens of thousands of rows).
+const buildIntervalTree = (entries) => {
+  if (entries.length === 0) return null;
+  const center = entries[entries.length >> 1].start;
+  const here = [], left = [], right = [];
+  for (const e of entries) {
+    if (ops.on) ops.n++;
+    if (e.end <= center) left.push(e);
+    else if (e.start > center) right.push(e);
+    else here.push(e);
+  }
+  // The median start belongs to some entry, and that entry contains
+  // it — `here` is never empty, so each level strictly consumes.
+  return {
+    center,
+    byStart: here,
+    byEnd: [...here].sort((a, b) => b.end - a.end),
+    left: buildIntervalTree(left),
+    right: buildIntervalTree(right),
+  };
+};
+
+const stabIntervalTree = (root, x, out) => {
+  let node = root;
+  while (node !== null) {
+    if (ops.on) ops.n++;
+    if (x < node.center) {
+      // Every node span ends past the center (> x): match iff start <= x.
+      for (const e of node.byStart) {
+        if (ops.on) ops.n++;
+        if (e.start > x) break;
+        out.push(e);
+      }
+      node = node.left;
+    } else if (x > node.center) {
+      // Every node span starts at or before the center (< x): match iff end > x.
+      for (const e of node.byEnd) {
+        if (ops.on) ops.n++;
+        if (e.end <= x) break;
+        out.push(e);
+      }
+      node = node.right;
+    } else {
+      // x IS the center: every node span matches, and neither subtree
+      // can (left spans end at or before x, right spans start past it).
+      for (const e of node.byStart) {
+        if (ops.on) ops.n++;
+        out.push(e);
+      }
+      break;
+    }
+  }
+  return out;
+};
+
 // Query layer over MappingStore rows (produced by CodeBuilder at emission).
 // Rows are plain objects: { nodeId, role, mappingKind, sourceStart,
 // sourceEnd, generatedStart, generatedEnd, fileId }. One (nodeId, role)
 // may own MULTIPLE rows, kept in generated-offset order.
+//
+// The offset queries answer through the interval index, built lazily
+// on the first query (rows are complete by query time) and rebuilt if
+// the row count has moved since — the count is the staleness signal
+// for an append-only table.
 export class Mappings {
   constructor(rows) {
     this.rows = rows;
+    this._genTree = null;
+    this._srcTree = null;
+    this._genCount = -1;
+    this._srcCount = -1;
+  }
+
+  // Each side builds on ITS first query only — a diagnostics batch
+  // (generated side) never pays for the source index, and vice versa.
+  _tree(side) {
+    const gen = side === 'generated';
+    if ((gen ? this._genCount : this._srcCount) !== this.rows.length) {
+      const entries = [];
+      this.rows.forEach((r, i) => {
+        if (ops.on) ops.n++;
+        const start = gen ? r.generatedStart : r.sourceStart;
+        const end = gen ? r.generatedEnd : r.sourceEnd;
+        // A zero-width span can never satisfy start <= x < end; it
+        // stays out of the index entirely.
+        if (start != null && start < end) entries.push({ start, end, width: end - start, i });
+      });
+      entries.sort((a, b) => a.start - b.start || a.i - b.i);
+      if (gen) { this._genTree = buildIntervalTree(entries); this._genCount = this.rows.length; }
+      else { this._srcTree = buildIntervalTree(entries); this._srcCount = this.rows.length; }
+    }
+    return gen ? this._genTree : this._srcTree;
+  }
+
+  _stab(side, offset) {
+    const hits = stabIntervalTree(this._tree(side), offset, []);
+    hits.sort((a, b) => a.width - b.width || a.i - b.i);
+    return hits.map((e) => this.rows[e.i]);
   }
 
   // All rows for (nodeId, role), ordered by generated offset.
@@ -84,16 +197,12 @@ export class Mappings {
 
   // Rows whose generated span contains the offset, innermost first.
   atGenerated(offset) {
-    return this.rows
-      .filter(r => r.generatedStart <= offset && offset < r.generatedEnd)
-      .sort((a, b) => (a.generatedEnd - a.generatedStart) - (b.generatedEnd - b.generatedStart));
+    return this._stab('generated', offset);
   }
 
   // Rows whose source span contains the offset, innermost first.
   atSource(offset) {
-    return this.rows
-      .filter(r => r.sourceStart <= offset && offset < r.sourceEnd)
-      .sort((a, b) => (a.sourceEnd - a.sourceStart) - (b.sourceEnd - b.sourceStart));
+    return this._stab('source', offset);
   }
 
   // Cover-vs-direct policy: a row is DIRECT iff its
