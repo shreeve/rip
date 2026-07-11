@@ -204,3 +204,78 @@ test 'regex index out of range is nullish', '''
   x = "test"[/test/, 5]
   x is undefined
   ''', true
+
+test 'regex literal test', '''
+  /hello/.test("hello world")
+  ''', true
+
+test 'regex literal no match', '''
+  /goodbye/.test("hello world")
+  ''', false
+
+test 'regex with i flag', '''
+  /HELLO/i.test("hello")
+  ''', true
+
+test 'regex with g flag', '''
+  "aaa".match(/a/g).length
+  ''', 3
+
+test 'regex exec', '''
+  /world/.exec("hello world")[0]
+  ''', "world"
+
+test 'string match', '''
+  "test123".match(/\\d+/)[0]
+  ''', "123"
+
+fail '=~ does not chain', '''
+    s = 'ab'
+    s =~ /a/ =~ /b/
+  '''
+
+test 'regex in conditional', '''
+    text = 'user@example.com'
+    result = if text =~ /@/
+      'has @'
+    else
+      'no @'
+    result
+  ''', 'has @'
+
+test 'validator truthy pattern', '''
+    validate = (v) -> (v =~ /^(true|t|1|yes|y|on)$/i) and true
+    validate('YES')
+  ''', true
+
+test 'regex index out of range', '''
+    x = "test"[/test/, 5]
+    x
+  ''', undefined
+
+test 'heregex #{} interpolation', '''
+    name = "world"
+    pattern = ///hello#{name}///
+    pattern.test("helloworld")
+  ''', true
+
+test 'heregex $ anchor', '''
+    pattern = ///^test$///
+    pattern.test("test") and not pattern.test("testing")
+  ''', true
+
+test 'heregex forward slashes', '''
+    pattern = ///
+      ^(https?://)  # protocol
+      ([^/]+)       # hostname
+      (/.*)?$       # path
+    ///
+    [_, proto, host, path] = "https://rip-lang.org/docs".match(pattern)
+    host
+  ''', "rip-lang.org"
+
+code 'regex literal', '/test/', '/test/'
+
+code 'regex with flags', '/test/gi', '/test/gi'
+
+code 'heregex ${} no interpolation', '///test${var}end///', '/test${var}end/'

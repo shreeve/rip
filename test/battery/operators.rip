@@ -389,3 +389,43 @@ test "modulo assign evaluates an index key once", '''
   a[key()] %%= 4
   [a[0], i]
 ''', [1, 1]
+
+test 'string repeat longer', '''
+  "ha" * 4
+  ''', "hahahaha"
+
+test 'string repeat single char', '''
+  "=" * 5
+  ''', "====="
+
+test 'prototype access', '''
+    String::starts = String::startsWith
+    "hello".starts "he"
+  ''', true
+
+test 'method assign chained', '''
+    str = "  Hello World  "
+    str .= trim()
+    str .= toLowerCase()
+    str
+  ''', "hello world"
+
+test 'method assign map', '''
+    items = [1, 2, 3]
+    items .= map -> it * 10
+    items
+  ''', [10, 20, 30]
+
+test 'merge assign inline', '''
+    opts = {}
+    *>opts = {a: 1, b: 2}
+    opts.a + opts.b
+  ''', 3
+
+test 'not base of power', '''
+  not false ** 2
+  ''', 1
+
+code 'prototype compiles to .prototype.', 'String::trim', 'String.prototype.trim'
+
+code 'method assign chain compiles', 'a.b .= trim()', 'a.b = a.b.trim();'

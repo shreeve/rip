@@ -738,3 +738,11 @@ code 'try expr await emits await before IIFE', 'x = try fetch!', '''
     return await fetch();
   } catch {} })();
 '''
+
+test 'async canary - multi-hop await is tracked by runner', '''
+    fn = ->
+      inner = -> Promise.resolve(Promise.resolve(42))
+      result = try await inner()
+      result
+    fn()
+  ''', 42
