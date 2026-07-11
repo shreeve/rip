@@ -4,30 +4,85 @@
 
 import { test, code, fail, type } from '../support/testing.js'
 
-code "empty map", "*{}", "new Map()"
-code "identifier keys", "*{ a: 1, b: 2 }", "new Map([[\"a\", 1], [\"b\", 2]])"
-code "string keys", "*{ \"hello\": 1, \"world\": 2 }", "new Map([[\"hello\", 1], [\"world\", 2]])"
-code "number keys", "*{ 1: 'one', 2: 'two' }", "new Map([[1, 'one'], [2, 'two']])"
-code "regex key", "*{ /^NAME:/: 1 }", "new Map([[/^NAME:/, 1]])"
-code "boolean keys", "*{ true: 'yes', false: 'no' }", "new Map([[true, 'yes'], [false, 'no']])"
-code "null key", "*{ null: 'nothing' }", "new Map([[null, 'nothing']])"
-code "undefined key", "*{ undefined: 'nope' }", "new Map([[undefined, 'nope']])"
-code "mixed keys", "*{ /^NAME:/: [\"\"], \"CHOOSE 1\": [1], 1: \"one\", true: \"yes\", null: \"nothing\" }", "new Map([[/^NAME:/, [\"\"]], [\"CHOOSE 1\", [1]], [1, \"one\"], [true, \"yes\"], [null, \"nothing\"]])"
-code "array values", "*{ a: [1, 2, 3] }", "new Map([[\"a\", [1, 2, 3]]])"
-code "nested object values", "*{ a: { x: 1 } }", "new Map([[\"a\", {x: 1}]])"
-test "map is instanceof Map", "*{ a: 1 } instanceof Map", true
-test "map size", "*{ a: 1, b: 2 }.size", 2
-test "empty map size", "*{}.size", 0
-test "get identifier key", "*{ a: 42 }.get(\"a\")", 42
-test "get string key", "*{ \"hello\": 99 }.get(\"hello\")", 99
-test "get number key", "*{ 1: 'one' }.get(1)", "one"
-test "get boolean key", "*{ true: 'yes' }.get(true)", "yes"
-test "get null key", "*{ null: 'nil' }.get(null)", "nil"
-test "normal object is not Map", "{ a: 1 } instanceof Map", false
-test "multiline map", "m = *{\n  a: 1\n  b: 2\n  c: 3\n}\nm.size", 3
-test "regex key get", "m = *{ /^NAME:/: 'found' }\nkey = null\nfor [k, v] as m\n  key = k\nkey instanceof RegExp", true
-test "map with computed values", "x = 10\nm = *{ a: x * 2, b: x + 5 }\nm.get(\"a\") + m.get(\"b\")", 35
-test "parenthetical key", "fn = -> 'dynamic'\nm = *{ (fn()): 42 }\nm.get('dynamic')", 42
-test "spread map", "extra = *{ b: 2, c: 3 }\nm = *{ a: 1, ...extra }\nm.size", 3
-test "spread entries", "entries = [[\"x\", 10], [\"y\", 20]]\nm = *{ a: 1, ...entries }\nm.get(\"x\") + m.get(\"y\")", 30
-code "spread codegen", "*{ a: 1, ...other }", "new Map([[\"a\", 1], ...other])"
+code 'empty map', '*{}', 'new Map()'
+
+code 'identifier keys', '*{ a: 1, b: 2 }', 'new Map([["a", 1], ["b", 2]])'
+
+code 'string keys', '*{ "hello": 1, "world": 2 }', 'new Map([["hello", 1], ["world", 2]])'
+
+code 'number keys', '*{ 1: \'one\', 2: \'two\' }', 'new Map([[1, \'one\'], [2, \'two\']])'
+
+code 'regex key', '*{ /^NAME:/: 1 }', 'new Map([[/^NAME:/, 1]])'
+
+code 'boolean keys', '*{ true: \'yes\', false: \'no\' }', 'new Map([[true, \'yes\'], [false, \'no\']])'
+
+code 'null key', '*{ null: \'nothing\' }', 'new Map([[null, \'nothing\']])'
+
+code 'undefined key', '*{ undefined: \'nope\' }', 'new Map([[undefined, \'nope\']])'
+
+code 'mixed keys', '*{ /^NAME:/: [""], "CHOOSE 1": [1], 1: "one", true: "yes", null: "nothing" }', 'new Map([[/^NAME:/, [""]], ["CHOOSE 1", [1]], [1, "one"], [true, "yes"], [null, "nothing"]])'
+
+code 'array values', '*{ a: [1, 2, 3] }', 'new Map([["a", [1, 2, 3]]])'
+
+code 'nested object values', '*{ a: { x: 1 } }', 'new Map([["a", {x: 1}]])'
+
+test 'map is instanceof Map', '*{ a: 1 } instanceof Map', true
+
+test 'map size', '*{ a: 1, b: 2 }.size', 2
+
+test 'empty map size', '*{}.size', 0
+
+test 'get identifier key', '*{ a: 42 }.get("a")', 42
+
+test 'get string key', '*{ "hello": 99 }.get("hello")', 99
+
+test 'get number key', '*{ 1: \'one\' }.get(1)', 'one'
+
+test 'get boolean key', '*{ true: \'yes\' }.get(true)', 'yes'
+
+test 'get null key', '*{ null: \'nil\' }.get(null)', 'nil'
+
+test 'normal object is not Map', '{ a: 1 } instanceof Map', false
+
+test 'multiline map', '''
+  m = *{
+    a: 1
+    b: 2
+    c: 3
+  }
+  m.size
+''', 3
+
+test 'regex key get', '''
+  m = *{ /^NAME:/: 'found' }
+  key = null
+  for [k, v] as m
+    key = k
+  key instanceof RegExp
+''', true
+
+test 'map with computed values', '''
+  x = 10
+  m = *{ a: x * 2, b: x + 5 }
+  m.get("a") + m.get("b")
+''', 35
+
+test 'parenthetical key', '''
+  fn = -> 'dynamic'
+  m = *{ (fn()): 42 }
+  m.get('dynamic')
+''', 42
+
+test 'spread map', '''
+  extra = *{ b: 2, c: 3 }
+  m = *{ a: 1, ...extra }
+  m.size
+''', 3
+
+test 'spread entries', '''
+  entries = [["x", 10], ["y", 20]]
+  m = *{ a: 1, ...entries }
+  m.get("x") + m.get("y")
+''', 30
+
+code 'spread codegen', '*{ a: 1, ...other }', 'new Map([["a", 1], ...other])'

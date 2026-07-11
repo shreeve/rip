@@ -4,38 +4,204 @@
 
 import { test, code, fail, type } from '../support/testing.js'
 
-code "string arrow thin", "get '/users' -> 1", "get('/users', function() {\n  return 1;\n});"
-code "string arrow thin block", "get '/users' ->\n  1", "get('/users', function() {\n  return 1;\n});"
-code "string fat arrow", "get '/users' => 1", "get('/users', () => 1);"
-code "string fat arrow block", "get '/users' =>\n  1", "get('/users', () => 1);"
-code "multiple routes", "get '/a' -> 1\nget '/b' -> 2", "get('/a', function() {\n  return 1;\n});\n\nget('/b', function() {\n  return 2;\n});"
-code "chained call string arrow", "app.get '/users' -> 1", "app.get('/users', function() {\n  return 1;\n});"
-test "string arrow runtime", "handler = (path, fn) -> fn()\nhandler '/test' -> 42", 42
-test "string fat arrow runtime", "handler = (path, fn) -> fn()\nhandler '/test' => 42", 42
-code "regex arrow thin", "get /^\\/api/ -> 1", "get(/^\\/api/, function() {\n  return 1;\n});"
-code "regex fat arrow", "get /^\\/api/ => 1", "get(/^\\/api/, () => 1);"
-code "regex complex", "match /^user-(\\d+)$/ -> 1", "match(/^user-(\\d+)$/, function() {\n  return 1;\n});"
-test "regex arrow runtime", "handler = (pattern, fn) -> fn()\nhandler /test/ -> 42", 42
-test "regex fat arrow runtime", "handler = (pattern, fn) -> fn()\nhandler /test/ => 42", 42
-code "number arrow thin", "handle 404 -> 1", "handle(404, function() {\n  return 1;\n});"
-code "number fat arrow", "handle 404 => 1", "handle(404, () => 1);"
-code "multiple number handlers", "handle 404 -> 1\nhandle 500 -> 2", "handle(404, function() {\n  return 1;\n});\n\nhandle(500, function() {\n  return 2;\n});"
-test "number arrow runtime", "handler = (code, fn) -> fn()\nhandler 404 -> 'not found'", "not found"
-test "number fat arrow runtime", "handler = (code, fn) -> fn()\nhandler 500 => 'error'", "error"
-code "arrow with object", "get '/config' -> { port: 3000 }", "get('/config', function() {\n  return {port: 3000};\n});"
-code "bool true arrow", "check true -> 1", "check(true, function() {\n  return 1;\n});"
-code "bool false arrow", "check false -> 0", "check(false, function() {\n  return 0;\n});"
-test "bool arrow runtime", "handler = (flag, fn) -> fn()\nhandler true -> 'yes'", "yes"
-code "null arrow", "handle null -> 'default'", "handle(null, function() {\n  return 'default';\n});"
-code "undefined arrow", "handle undefined -> 'missing'", "handle(undefined, function() {\n  return 'missing';\n});"
-test "null arrow runtime", "handler = (val, fn) -> fn()\nhandler null -> 'null!'", "null!"
-test "undefined arrow runtime", "handler = (val, fn) -> fn()\nhandler undefined -> 'undef!'", "undef!"
-code "infinity arrow", "handle Infinity -> 'overflow'", "handle(Infinity, function() {\n  return 'overflow';\n});"
-code "nan arrow", "handle NaN -> 'invalid'", "handle(NaN, function() {\n  return 'invalid';\n});"
-test "infinity arrow runtime", "handler = (val, fn) -> fn()\nhandler Infinity -> 'inf!'", "inf!"
-code "array arrow", "match [1, 2, 3] -> 'found'", "match([1, 2, 3], function() {\n  return 'found';\n});"
-code "empty array arrow", "match [] -> 'empty'", "match([], function() {\n  return 'empty';\n});"
-test "array arrow runtime", "handler = (arr, fn) -> fn()\nhandler [1, 2] -> 'got array'", "got array"
-code "object arrow", "match {x: 1} -> 'found'", "match({x: 1}, function() {\n  return 'found';\n});"
-code "empty object arrow", "match {} -> 'empty'", "match({}, function() {\n  return 'empty';\n});"
-test "object arrow runtime", "handler = (obj, fn) -> fn()\nhandler {a: 1} -> 'got object'", "got object"
+code 'string arrow thin', 'get \'/users\' -> 1', '''
+  get('/users', function() {
+    return 1;
+  });
+'''
+
+code 'string arrow thin block', '''
+  get '/users' ->
+    1
+''', '''
+  get('/users', function() {
+    return 1;
+  });
+'''
+
+code 'string fat arrow', 'get \'/users\' => 1', 'get(\'/users\', () => 1);'
+
+code 'string fat arrow block', '''
+  get '/users' =>
+    1
+''', 'get(\'/users\', () => 1);'
+
+code 'multiple routes', '''
+  get '/a' -> 1
+  get '/b' -> 2
+''', '''
+  get('/a', function() {
+    return 1;
+  });
+
+  get('/b', function() {
+    return 2;
+  });
+'''
+
+code 'chained call string arrow', 'app.get \'/users\' -> 1', '''
+  app.get('/users', function() {
+    return 1;
+  });
+'''
+
+test 'string arrow runtime', '''
+  handler = (path, fn) -> fn()
+  handler '/test' -> 42
+''', 42
+
+test 'string fat arrow runtime', '''
+  handler = (path, fn) -> fn()
+  handler '/test' => 42
+''', 42
+
+code 'regex arrow thin', 'get /^\\/api/ -> 1', '''
+  get(/^\\/api/, function() {
+    return 1;
+  });
+'''
+
+code 'regex fat arrow', 'get /^\\/api/ => 1', 'get(/^\\/api/, () => 1);'
+
+code 'regex complex', 'match /^user-(\\d+)$/ -> 1', '''
+  match(/^user-(\\d+)$/, function() {
+    return 1;
+  });
+'''
+
+test 'regex arrow runtime', '''
+  handler = (pattern, fn) -> fn()
+  handler /test/ -> 42
+''', 42
+
+test 'regex fat arrow runtime', '''
+  handler = (pattern, fn) -> fn()
+  handler /test/ => 42
+''', 42
+
+code 'number arrow thin', 'handle 404 -> 1', '''
+  handle(404, function() {
+    return 1;
+  });
+'''
+
+code 'number fat arrow', 'handle 404 => 1', 'handle(404, () => 1);'
+
+code 'multiple number handlers', '''
+  handle 404 -> 1
+  handle 500 -> 2
+''', '''
+  handle(404, function() {
+    return 1;
+  });
+
+  handle(500, function() {
+    return 2;
+  });
+'''
+
+test 'number arrow runtime', '''
+  handler = (code, fn) -> fn()
+  handler 404 -> 'not found'
+''', 'not found'
+
+test 'number fat arrow runtime', '''
+  handler = (code, fn) -> fn()
+  handler 500 => 'error'
+''', 'error'
+
+code 'arrow with object', 'get \'/config\' -> { port: 3000 }', '''
+  get('/config', function() {
+    return {port: 3000};
+  });
+'''
+
+code 'bool true arrow', 'check true -> 1', '''
+  check(true, function() {
+    return 1;
+  });
+'''
+
+code 'bool false arrow', 'check false -> 0', '''
+  check(false, function() {
+    return 0;
+  });
+'''
+
+test 'bool arrow runtime', '''
+  handler = (flag, fn) -> fn()
+  handler true -> 'yes'
+''', 'yes'
+
+code 'null arrow', 'handle null -> \'default\'', '''
+  handle(null, function() {
+    return 'default';
+  });
+'''
+
+code 'undefined arrow', 'handle undefined -> \'missing\'', '''
+  handle(undefined, function() {
+    return 'missing';
+  });
+'''
+
+test 'null arrow runtime', '''
+  handler = (val, fn) -> fn()
+  handler null -> 'null!'
+''', 'null!'
+
+test 'undefined arrow runtime', '''
+  handler = (val, fn) -> fn()
+  handler undefined -> 'undef!'
+''', 'undef!'
+
+code 'infinity arrow', 'handle Infinity -> \'overflow\'', '''
+  handle(Infinity, function() {
+    return 'overflow';
+  });
+'''
+
+code 'nan arrow', 'handle NaN -> \'invalid\'', '''
+  handle(NaN, function() {
+    return 'invalid';
+  });
+'''
+
+test 'infinity arrow runtime', '''
+  handler = (val, fn) -> fn()
+  handler Infinity -> 'inf!'
+''', 'inf!'
+
+code 'array arrow', 'match [1, 2, 3] -> \'found\'', '''
+  match([1, 2, 3], function() {
+    return 'found';
+  });
+'''
+
+code 'empty array arrow', 'match [] -> \'empty\'', '''
+  match([], function() {
+    return 'empty';
+  });
+'''
+
+test 'array arrow runtime', '''
+  handler = (arr, fn) -> fn()
+  handler [1, 2] -> 'got array'
+''', 'got array'
+
+code 'object arrow', 'match {x: 1} -> \'found\'', '''
+  match({x: 1}, function() {
+    return 'found';
+  });
+'''
+
+code 'empty object arrow', 'match {} -> \'empty\'', '''
+  match({}, function() {
+    return 'empty';
+  });
+'''
+
+test 'object arrow runtime', '''
+  handler = (obj, fn) -> fn()
+  handler {a: 1} -> 'got object'
+''', 'got object'
