@@ -80,11 +80,21 @@ describe('enum: statement discipline and rejections', () => {
     expect(code).not.toContain('return const');
   });
 
-  test('bare members reject — a bare member has no value for the reverse mapping', () => {
-    const src = 'enum Color\n  red\n  green';
+  test('bare members auto-number — 0-based, continuing after an explicit numeric', () => {
+    const src = 'enum Color\n  red\n  green\n  blue = 10\n  cyan';
     const r = parser.parse(src);
     expect(r.diagnostics).toEqual([]);
-    expect(() => emit(r, { source: src })).toThrow(/bare member has no value/);
+    const { code } = emit(r, { source: src });
+    expect(code).toContain('red: 0');
+    expect(code).toContain('green: 1');
+    expect(code).toContain('cyan: 11');
+  });
+
+  test('a bare member after a STRING value rejects — no number to continue', () => {
+    const src = 'enum Mix\n  ok = "fine"\n  broken';
+    const r = parser.parse(src);
+    expect(r.diagnostics).toEqual([]);
+    expect(() => emit(r, { source: src })).toThrow(/no number to continue/);
   });
 
   test('expression values reject — the reverse mapping needs a literal key', () => {
