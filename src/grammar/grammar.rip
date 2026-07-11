@@ -606,6 +606,9 @@ grammar =
 
   Object: [
     o '{ AssignList OptComma }', '["object", ...2]', 'object: _, ...pairs'
+    # Map literals: `*{ k: v, … }` — same pair grammar, Map semantics
+    # (any-typed keys preserved; identifier keys read as strings).
+    o 'MAP_START { AssignList OptComma }', '["map", ...3]', 'map: _, ...pairs'
   ]
 
   AssignList: [

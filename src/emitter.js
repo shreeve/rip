@@ -4561,6 +4561,7 @@ class Emitter {
     if (head === '%%' && node.length === 3) return this.modulo(node);
     if (head === '//=' && node.length === 3) return this.floorDivAssign(node);
     if (head === '=~' && node.length === 3) return this.matchOp(node);
+    if (head === 'map') return this.mapLiteral(node);
     if (head === 'symbol' && node.length === 2) {
       // Interned symbol: identity holds across realms and modules.
       return this.mark(node, '$self', () => this.b.emit(`Symbol.for(${JSON.stringify(node[1])})`));
@@ -10224,6 +10225,46 @@ class Emitter {
           this.expr(s);
         }
       });
+    });
+  }
+
+  // ["map", ...pairs] — `*{ k: v, … }` builds a Map: identifier keys
+  // read as strings (the object-key convention); literal keys of any
+  // other kind — strings, numbers, booleans, null, undefined,
+  // regexes — pass through as themselves; a computed key ([k]: v)
+  // passes its expression. Values are plain expressions.
+  mapLiteral(node) {
+    this.mark(node, '$self', () => {
+      const pairs = node.slice(1);
+      if (pairs.length === 0) {
+        this.b.emit('new Map()');
+        return;
+      }
+      this.b.emit('new Map([');
+      pairs.forEach((pair, i) => {
+        if (i > 0) this.b.emit(', ');
+        if (!isNode(pair) || pair[0] !== ':' || pair.length !== 3) {
+          throw this.positionedError(isNode(pair) ? pair : node, 'emitter: a map literal takes explicit `key: value` pairs — shorthand and spread have no Map reading');
+        }
+        this.mark(pair, '$self', () => {
+          this.b.emit('[');
+          const key = pair[1];
+          this.mark(pair, 'key', () => {
+            if (typeof key === 'string' && /^[A-Za-z_$][\w$]*$/.test(key) &&
+                key !== 'true' && key !== 'false' && key !== 'null' && key !== 'undefined') {
+              this.b.emit(JSON.stringify(key));
+            } else if (isNode(key) && key[0] === 'dynamicKey') {
+              this.expr(key[1]);
+            } else {
+              this.expr(key);
+            }
+          });
+          this.b.emit(', ');
+          this.mark(pair, 'value', () => this.expr(pair[2]));
+          this.b.emit(']');
+        });
+      });
+      this.b.emit('])');
     });
   }
 

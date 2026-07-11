@@ -2014,6 +2014,11 @@ const OPS2 = {
   // tight `*` `>` pair (a comparison cannot follow a bare `*`), so
   // the claim can never change a program's meaning.
   '*>': 'MERGE_ASSIGN',
+  // Map literals: ADJACENT `*{` marks the brace as a MAP (`*{a: 1}` →
+  // new Map([["a", 1]])). The star claims; the `{` itself follows as
+  // a normal brace so every brace pass (implicit structure, matching)
+  // is untouched. A spaced `* {` keeps multiplication.
+  '*{': 'MAP_START',
 };
 
 // Token kinds that leave the line UNFINISHED at a newline: the next line
@@ -3055,6 +3060,14 @@ export function tokenize(text, path = '<anonymous>') {
       pos += 2;
       continue;
     }
+    // `*{` claims only the STAR (span one char) — the `{` scans next
+    // as a normal brace, so brace matching and the implicit passes
+    // never see a special opener.
+    if (two === '*{') {
+      push('MAP_START', '*', pos, pos + 1);
+      pos += 1;
+      continue;
+    }
     if (OPS2[two]) {
       // Unspaced `!=` directly after a name is the bang sigil
       // colliding with an assignment (`f!= 1`) — rejected; a spaced
@@ -3673,7 +3686,7 @@ export function implicitBlocks(tokens, mintId) {
 // so call spans stay honest.
 const IMPLICIT_FUNC = new Set(['IDENTIFIER', 'PROPERTY', 'SUPER', ')', 'CALL_END', ']', 'INDEX_END', '@', 'THIS', 'DAMMIT']);
 const IMPLICIT_CALL_STARTERS = new Set([
-  'IDENTIFIER', 'PROPERTY', 'NUMBER', 'STRING', 'STRING_START', 'REGEX', 'HEREGEX_START', 'SYMBOL',
+  'IDENTIFIER', 'PROPERTY', 'NUMBER', 'STRING', 'STRING_START', 'REGEX', 'HEREGEX_START', 'SYMBOL', 'MAP_START',
   'PARAM_START', 'IF', 'TRY', 'SWITCH', 'CLASS', 'THIS', 'SUPER',
   'UNDEFINED', 'NULL',
   'BOOL', 'UNARY', 'DO', 'DO_IIFE', 'UNARY_MATH', 'AWAIT', 'YIELD', 'THROW', '@', '->', '=>', '[', '(', '{',
