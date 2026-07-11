@@ -5,6 +5,9 @@ repository's pull requests.
 
 ## Unreleased
 
+- Give the VS Code extension a real icon: the rip wordmark on a
+  violet-to-rose tile, SVG source committed beside the rendered PNG (#15)
+
 - Wire `bun run ext` to the shared extension installer (#14)
 
 - Set the VS Code extension version to 4.0.0 (#13)
