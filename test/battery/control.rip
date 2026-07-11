@@ -864,3 +864,17 @@ code "postfix if with @method call in value context", "f = -> @header \"a\", \"b
     return (cond ? this.header("a", "b") : undefined);
   };
   '''
+
+# ==============================================================================
+# Value-position subjectless switch ORs every condition in a when
+# ==============================================================================
+
+test "value switch: a later condition in the same when decides", '''
+  a = false
+  b = true
+  switch
+    when a, b
+      "hit"
+    else
+      "miss"
+''', "hit"

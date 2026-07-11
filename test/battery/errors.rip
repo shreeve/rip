@@ -170,3 +170,15 @@ code "throw in else block", '''
     }
   };
   '''
+
+# ==============================================================================
+# Catch patterns escape regardless of the bound names
+# ==============================================================================
+
+test "a catch-pattern target named error escapes to the enclosing scope", '''
+  try
+    throw {message: "boom"}
+  catch {message: error}
+    1
+  error
+''', "boom"

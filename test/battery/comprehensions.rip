@@ -328,3 +328,14 @@ test "prefix for as assignment RHS still parses", '''
     nums
   fn()
   ''', [10, 20, 30]
+
+# ==============================================================================
+# The accumulator dodges user identifiers
+# ==============================================================================
+
+test "a comprehension body reads the user's own `result`", '''
+  result = 10
+  ys = for x in [1, 2]
+    result
+  ys
+''', [10, 10]

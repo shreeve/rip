@@ -51,9 +51,12 @@ const FLOORS = {
   'regexes.rip': 32,
   'compose5.rip': 59,
   'loops2.rip': 84,
-  'compose4.rip': 73,
+  // compose4/postfix floors reflect the single-evaluation membership
+  // helper: the container and key map ONCE each (the inline dispatch
+  // re-emitted them, and every duplicate counted as a mapped position).
+  'compose4.rip': 67,
   'control.rip': 68,
-  'postfix.rip': 52,
+  'postfix.rip': 46,
   'switchtry.rip': 63,
   'compose3.rip': 56,
   'functions.rip': 35,
