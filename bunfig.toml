@@ -5,6 +5,10 @@ preload = ["./src/loader.js"]
 [test]
 preload = ["./src/loader.js"]
 
+# The test boundary: the extension suite runs ONLY from packages/vscode
+# (its own script, its own CI step). Root runs exclude it mechanically.
+pathIgnorePatterns = ["packages/**"]
+
 # The per-test timeout lives in package.json's test script as a CLI
 # flag (`bun test --timeout 15000`): Bun ignores a bunfig [test]
 # timeout key — a key here would be dead config.

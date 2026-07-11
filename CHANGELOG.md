@@ -5,6 +5,9 @@ repository's pull requests.
 
 ## Unreleased
 
+- Enforce the test boundary: root test runs mechanically exclude
+  packages/**, whose suites run from their own packages (#12)
+
 - Add the VS Code extension: syntax highlighting, hover, diagnostics,
   completions, go-to-definition, references, rename, signature help,
   semantic tokens, code actions, outline, inlay hints, and document
