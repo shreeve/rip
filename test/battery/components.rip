@@ -3515,3 +3515,17 @@ test 'a method param named like a =! member shadows it (standard scoping)', '''
   a._init({})
   [a.use(10), a.c]
   ''', [11, 5]
+
+fail 'ref to a readonly (=!) is rejected', '''
+  export A = component
+    el =! null
+    render
+      div ref: el
+  ''', "not a writable state cell"
+
+fail 'ref to a plain (=) member is rejected', '''
+  export A = component
+    el = null
+    render
+      div ref: el
+  ''', "not a writable state cell"
