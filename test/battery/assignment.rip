@@ -211,3 +211,12 @@ fail 'destructure: function call as target', '[fn()] = src'
 
 fail 'destructure: comprehension as target',
   '{x: y for x in [1]} = src'
+
+# ==============================================================================
+# Existence Assignment — ?= (assign when nullish; the ??= compound's short spelling)
+# ==============================================================================
+
+test "nullish assignment null", "a = null\na ?= 5\na", 5
+test "nullish assignment value", "a = 10\na ?= 5\na", 10
+test "nullish assignment keeps falsy non-nullish", "c = 0\nc ?= 9\nc", 0
+code "nullish assignment compiles to ??=", "a = 1\na ?= 5", "let a = 1;\n\na ??= 5;"

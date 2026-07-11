@@ -5,6 +5,13 @@ repository's pull requests.
 
 ## Unreleased
 
+- JavaScript-parity spellings: literal `===`/`!==` normalize to the
+  strict COMPARE the two-character spellings already emit (all four
+  spellings mean strict equality); `?=` assigns when the target is
+  nullish (the `??=` compound's short spelling — `0` and `""` are
+  kept); and `new.target` passes through inside constructors (the
+  import.meta meta-property precedent) (#40)
+
 - Method assignment and merge assignment: `x .= trim()` re-binds the
   target to a method call on itself (`x = x.trim()`, chained right
   sides included), and `*>obj = {…}` merges the value into the

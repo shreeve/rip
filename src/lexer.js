@@ -1903,6 +1903,7 @@ const ALIASES = {
 const OPS4 = { '>>>=': 'COMPOUND_ASSIGN' };
 const OPS3 = {
   '**=': 'COMPOUND_ASSIGN', '&&=': 'COMPOUND_ASSIGN', '||=': 'COMPOUND_ASSIGN', '??=': 'COMPOUND_ASSIGN',
+
   '<<=': 'COMPOUND_ASSIGN', '>>=': 'COMPOUND_ASSIGN',
   '//=': 'COMPOUND_ASSIGN', '%%=': 'COMPOUND_ASSIGN',
   '>>>': 'SHIFT', '...': '...',
@@ -2779,6 +2780,11 @@ export function tokenize(text, path = '<anonymous>') {
         if ((word === 'and' || word === 'or') && text[pos] === '=' && text[pos + 1] !== '=') {
           pos++;
           push('COMPOUND_ASSIGN', `${value}=`, start, pos);
+        } else if (word === 'new' && text[pos] === '.' && /^\.target\b/.test(text.slice(pos))) {
+          // `new.target` heads a meta-property member (the
+          // import.meta precedent); a bare `new.` anything else keeps
+          // its UNARY reading and rejects at the parser.
+          push('NEW_TARGET', 'new', start, pos);
         } else {
           push(kind, value, start, pos);
         }
@@ -2891,12 +2897,30 @@ export function tokenize(text, path = '<anonymous>') {
       continue;
     }
     const three = text.slice(pos, pos + 3);
+    // The literal strict spellings normalize to the two-character
+    // COMPARE values (which EMIT strict): all four spellings mean
+    // strict equality — there is no loose-equality surface. A tight
+    // `===` had no other reading, so the claim is safe.
+    if (three === '===' || three === '!==') {
+      push('COMPARE', three.slice(0, 2), pos, pos + 3);
+      pos += 3;
+      continue;
+    }
     if (OPS3[three]) {
       push(OPS3[three], three, pos, pos + 3);
       pos += 3;
       continue;
     }
     const two = text.slice(pos, pos + 2);
+    // `?=` assigns when the target is nullish — the `??=` compound's
+    // short spelling. The token VALUE is '??=' (one operator
+    // downstream); the span covers the two source characters. A tight
+    // `?=` had no other reading (postfix `?` + `=` was a parse error).
+    if (two === '?=' && text[pos + 2] !== '=') {
+      push('COMPOUND_ASSIGN', '??=', pos, pos + 2);
+      pos += 2;
+      continue;
+    }
     if (OPS2[two]) {
       // Unspaced `!=` directly after a name is the bang sigil
       // colliding with an assignment (`f!= 1`) — rejected; a spaced

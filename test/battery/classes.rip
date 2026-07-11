@@ -147,3 +147,15 @@ fail "class with index name does not parse", '''
   class arr[0]
   '''
 
+
+# ==============================================================================
+# new.target — the meta-property distinguishes construction from a plain call
+# ==============================================================================
+
+test "new.target in constructor", '''
+  class A
+    constructor: ->
+      @viaNew = new.target isnt undefined
+  new A().viaNew
+''', true
+code "new.target passes through", "class A\n  constructor: ->\n    @t = new.target", "class A {\n  constructor() {\n    this.t = new.target;\n  }\n};"
