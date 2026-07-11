@@ -21,8 +21,11 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
 
-      - name: Full suite
-        run: bun run test
+      - name: Install TypeScript as an external tool (pinned; never a repository dependency)
+        run: npm install -g typescript@7.0.2
+
+      - name: Full suite, extended tier included
+        run: bun run test:all
 
       - name: Parser regeneration — must be byte-identical to the committed file
         run: |

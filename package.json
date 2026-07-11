@@ -7,7 +7,8 @@
   "scripts": {
     "parser": "bun src/grammar/solar.rip -o src/parser.js src/grammar/grammar.rip",
     "corpus-expected": "bun scripts/corpus-expected.mjs",
-    "test": "bun test --timeout 15000"
+    "test": "bun test --timeout 15000",
+    "test:all": "RIP_EXTENDED=1 RIP_REQUIRE_TSC=1 bun test --timeout 15000"
   },
   "bin": {
     "rip": "bin/rip"
