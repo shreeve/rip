@@ -718,3 +718,23 @@ test "nested if inside switch with await resolves", '''
     result
   fn()
   ''', 30
+
+# ==============================================================================
+# Inline try with await — the async IIFE carries the await
+# ==============================================================================
+
+test 'try expr with await resolves value', '''
+  fn = ->
+    resolve = (v) -> Promise.resolve(v)
+    result = try resolve!(42)
+    result + 1
+  fn()
+''', 43
+
+code 'try expr await emits await before IIFE', 'x = try fetch!', '''
+  let x;
+
+  x = await (async () => { try {
+    return await fetch();
+  } catch {} })();
+'''

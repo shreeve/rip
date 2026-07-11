@@ -49,23 +49,7 @@ code 'or-throw in sibling exports hoists variable in each function', '''
   });
 '''
 
-test 'bare try expression returns value on success', '''
-    x = try 42
-    x
-''', 42
-
 test 'bare try expression returns undefined on throw', '''
     x = try (throw new Error('boom'))
     x
 ''', null
-
-test 'bare try statement swallows error', '''
-    try (throw new Error('boom'))
-    'ok'
-''', 'ok'
-
-code 'bare try statement generates catch {}', 'try foo()', '''
-  try {
-    foo();
-  } catch {}
-'''

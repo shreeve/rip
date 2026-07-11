@@ -5,19 +5,3 @@
 import { test, code, fail, type } from '../support/testing.js'
 
 code 'yield', 'yield value', 'yield value'
-
-test 'try expr with await resolves value', '''
-  fn = ->
-    resolve = (v) -> Promise.resolve(v)
-    result = try resolve!(42)
-    result + 1
-  fn()
-''', 43
-
-code 'try expr await emits await before IIFE', 'x = try fetch!', '''
-  let x;
-
-  x = await (async () => { try {
-    return await fetch();
-  } catch {} })();
-'''

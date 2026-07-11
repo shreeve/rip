@@ -2912,7 +2912,12 @@ class Emitter {
   tryStatement(node, ind) {
     this.mark(node, '$self', () => {
       this.b.emit('try ');
-      this.mark(node, 'body', () => this.braceBlock(node[1], ind));
+      // An inline body (`try f()`) is its own one-statement block; a
+      // handler-less try gains `catch {}` — JS requires a handler or
+      // finalizer, and the bare form's contract is to swallow.
+      const body = isBlock(node[1]) ? node[1] : ['block', node[1]];
+      this.mark(node, 'body', () => this.braceBlock(body, ind));
+      if (node.length === 2) this.b.emit(' catch {}');
       // [binding|null, block] pairs are catch handlers; block nodes are
       // finalizers.
       for (const part of node.slice(2)) {
@@ -3836,7 +3841,12 @@ class Emitter {
     this.b.emit(Emitter.containsAwait(node) ? 'await (async () => { ' : '(() => { ');
     this.mark(node, '$self', () => {
       this.b.emit('try ');
-      this.mark(node, 'body', () => this.returnBlock(node[1], ind));
+      // An inline body (`x = try f()`) is its own one-statement
+      // block; a handler-less try gains `catch {}`, so the value is
+      // the body's result or undefined on throw.
+      const vbody = isBlock(node[1]) ? node[1] : ['block', node[1]];
+      this.mark(node, 'body', () => this.returnBlock(vbody, ind));
+      if (node.length === 2) this.b.emit(' catch {}');
       for (const part of node.slice(2)) {
         if (!isNode(part)) continue;
         if (isBlock(part)) {
