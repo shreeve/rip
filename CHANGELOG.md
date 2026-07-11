@@ -5,6 +5,14 @@ repository's pull requests.
 
 ## Unreleased
 
+- Compound object keys: an identifier chain joined by `.` (any
+  spacing) or `-` (tight on both sides) directly before `:` is ONE
+  string key — `{ data-src: 1 }`, `{ www.amazon.com: 4 }`,
+  `{ beta-site.amazon.com: 2 }` — in explicit and implicit objects.
+  Spaced subtraction keeps its reading (`{ k: a - b }`), and a
+  ternary's `:` never claims (`a ? b.c : d` keeps its member read).
+  Vim and VS Code highlight the chain as a key (#48)
+
 - Tagged templates: a string right against a value (`tag"x"`,
   `obj.fn"x"`, `f(1)"x"`) or bridged by `$` (`sh $"cmd #{c}"`) calls
   the tag with the template — `tag\`x\``, raw strings preserved,
