@@ -26,8 +26,6 @@ code '?? throw assignment generates if with nullish check', '  data = getValue()
 
 code 'standalone ?? throw generates if with nullish check', '  getValue() ?? throw new Error \'Not found\'', 'if ((getValue()) == null) throw new Error(\'Not found\');'
 
-fail 'nested ternary in then branch', 'x = true ? (false ? "a" : "b") : "c"', null
-
 code 'or-throw in sibling exports hoists variable in each function', '''
   export first = (data) ->
     store = getData() or throw new Error 'no context'

@@ -1614,7 +1614,14 @@ export function rewriteTypes(tokens, mintId, text, fail) {
             if (optMarker) {
               prev.kind = 'OPT_MARKER';
               if (beforePrev.kind === 'PROPERTY') beforePrev.kind = 'IDENTIFIER';
-            } else if (prev.kind === 'PROPERTY') prev.kind = 'IDENTIFIER';
+            } else if (prev.kind === 'PROPERTY' &&
+                       tokens[i - 2]?.kind !== '@') {
+              // A promoted parameter's name stays PROPERTY — the
+              // ThisProperty grammar reads `@ Property` (`(@url:
+              // string)`); every other annotated param name reads
+              // as a plain Identifier.
+              prev.kind = 'IDENTIFIER';
+            }
             f.sawType = true;
             i = last;
             continue;

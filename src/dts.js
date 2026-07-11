@@ -121,16 +121,26 @@ export function emitDeclarations({ sexpr, stores, source }) {
 
   // ── declaring statements ───────────────────────────────────────────
 
+  // A definition's generic parameter list (`def add<T>(…)`) rides the
+  // typeParams role — the declaration repeats it verbatim.
+  const typeParamsOf = (node) => {
+    const id = stores.idOf(node);
+    if (id === null) return '';
+    const row = stores.role(id, 'typeParams');
+    if (!row || row.sourceStart == null) return '';
+    return source.slice(row.sourceStart, row.sourceEnd);
+  };
+
   const defDecl = (node, exported) => {
     const [head, name, params] = node;
     const returnType = roleType(node, 'returnType') ?? (head === 'void-def' ? 'void' : null);
     if (returnType === null && !params.some(paramTyped)) return;
-    lines.push(`${exported ? 'export ' : ''}declare function ${name}${rendered(() => renderParams(params))}: ${returnType ?? 'any'};`);
+    lines.push(`${exported ? 'export ' : ''}declare function ${name}${typeParamsOf(node)}${rendered(() => renderParams(params))}: ${returnType ?? 'any'};`);
   };
 
   const defSigDecl = (node) => {
     const [, name, params, returnType] = node;
-    lines.push(`declare function ${name}${rendered(() => renderParams(params))}: ${tidyType(returnType)};`);
+    lines.push(`declare function ${name}${typeParamsOf(node)}${rendered(() => renderParams(params))}: ${tidyType(returnType)};`);
   };
 
   const assignDecl = (node, exported) => {
@@ -162,9 +172,24 @@ export function emitDeclarations({ sexpr, stores, source }) {
           if (!isFunc(value)) continue;
           const mName = memberName(key);
           if (typeof mName !== 'string') continue;
-          const params = value[1];
+          let params = value[1];
           const returnType = roleType(value, 'returnType') ?? (pair[0] === 'void-pair' ? 'void' : null);
           if (mName === 'constructor') {
+            // Promoted parameters (`(@url: string)`) declare BOTH the
+            // class field and a plain constructor parameter — the
+            // strip mirrors the emitter's.
+            params = params.map((pp) => {
+              let x = pp;
+              let dflt = null;
+              if (isNode(x) && x[0] === 'default' && x.length === 3) { dflt = x; x = x[1]; }
+              let typed = null;
+              if (isNode(x) && x[0] === 'typed-var' && x.length === 3) { typed = x; x = x[1]; }
+              if (!(isNode(x) && x[0] === '.' && x[1] === 'this' && typeof x[2] === 'string')) return pp;
+              const n = x[2];
+              if (typed !== null) members.push(`${n}: ${tidyType(typed[2])};`);
+              const plain = typed !== null ? ['typed-var', n, typed[2]] : n;
+              return dflt !== null ? ['default', plain, dflt[2]] : plain;
+            });
             if (params.some(paramTyped)) members.push(`constructor${rendered(() => renderParams(params))};`);
             continue;
           }

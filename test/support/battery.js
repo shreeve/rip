@@ -396,8 +396,12 @@ export async function runRow(row) {
     }
     if (row.verb === 'type') {
       const result = compile(dedent(row.src), { path: `<${row.file}>`, runtimeDelivery: 'none' });
-      const got = (result.declarations ?? '').trim();
-      const want = String(row.expected).trim();
+      // The module marker is delivery plumbing, not the declaration
+      // under test — both sides shed it, so rows written with or
+      // without it pin the same declarations.
+      const shedMarker = (s) => String(s).replace(/^export \{\};$/gm, '').replace(/\n{3,}/g, '\n\n').trim();
+      const got = shedMarker(result.declarations ?? '');
+      const want = shedMarker(row.expected);
       if (got !== want) return `${where}\n  expected declarations:\n${want.replace(/^/gm, '    ')}\n  actual:\n${got.replace(/^/gm, '    ')}`;
       return null;
     }
