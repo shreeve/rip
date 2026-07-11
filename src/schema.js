@@ -171,7 +171,7 @@ export function rewriteSchema(tokens, mintId, text, fail) {
       continue;
     }
     if (isSchemaStart(tokens, i, fail)) {
-      i = collapseSchemaAt(tokens, i, out, config, mintId, fail);
+      i = collapseSchemaAt(tokens, i, out, config, mintId, fail, text);
       continue;
     }
     out.push(t);
@@ -268,7 +268,7 @@ function isSchemaStart(tokens, i, fail) {
 
 // Collapse the region starting at `i` into SCHEMA + SCHEMA_BODY,
 // pushing both onto `out`. Returns the index AFTER the region.
-function collapseSchemaAt(tokens, i, out, config, mintId, fail) {
+function collapseSchemaAt(tokens, i, out, config, mintId, fail, text) {
   const schemaTok = tokens[i];
   let kind = KIND_DEFAULT;
   let kindTok = null;
@@ -324,6 +324,14 @@ function collapseSchemaAt(tokens, i, out, config, mintId, fail) {
         depth--;
         if (depth < 0) break; // the enclosing expression's closer
       } else if (depth === 0 && tag === 'TERMINATOR' && tk.value !== ';') break;
+      else if (depth === 0 && tag === 'TERMINATOR' &&
+               /\n/.test(text.slice(tk.start, tokens[end + 1]?.start ?? tk.end))) {
+        // A trailing `;` at line end folds with its newline into one
+        // ';'-valued TERMINATOR — the raw source between it and the
+        // next token carries the line break, so the body still ends
+        // here (`schema :shape; name!;` never swallows the next line).
+        break;
+      }
       else if (depth === 0 && (tag === 'INDENT' || tag === 'OUTDENT')) break;
       else if (depth === 0 && tag === '->') {
         fail(`inline schema bodies do not support '->' (methods/hooks/scopes/transforms) — use the indented form`, tk.start);
@@ -1323,6 +1331,11 @@ function parseRangeTokens(tokens, fieldName, fail) {
   i++; // consume '..'
   let max;
   if (i < tokens.length) max = readOne();
+  // A bare '..' constrains nothing — noise, not a range. Omitting the
+  // trailer entirely says the same thing loudly less.
+  if (min === undefined && max === undefined) {
+    fail(`a bare '..' range constrains nothing on field '${fieldName}' — give an endpoint (1.., ..60, 1..60) or drop the range`, tokens[0].start);
+  }
   if (min !== undefined && max !== undefined && min > max) {
     fail(`range '${min}..${max}' is reversed — write the smaller endpoint first`, tokens[0].start);
   }
