@@ -109,6 +109,36 @@ if (EXTENDED && TSC) {
 }
 const runBatch = () => { batch ??= tscBatch(TSC, files); return batch; };
 
+// Module edges survive to a real CONSUMER: a program that imports the
+// declared module type-checks against the .d.ts alone. This is the
+// failure the in-memory rows cannot see — a declaration referencing an
+// unimported name, or a module face missing its default/re-exports,
+// only breaks when tsc resolves the edges across files.
+describeTscExtended('module edges resolve for a consumer program', () => {
+  test('imports, default export, and re-exports carry through declarations', () => {
+    const model = compile('export class User\n  name: string = ""');
+    const main = compile('import { User } from "./model.js"\nexport current: User = new User()\nexport { User } from "./model.js"');
+    const dflt = compile('x: number = 5\nexport default x');
+    const consumer = [
+      "import def from './dflt.js';",
+      "import { current, User } from './main.js';",
+      'const u: User = current;',
+      'const n: number = def;',
+      'export {};',
+      '',
+    ].join('\n');
+    const r = tscBatch(TSC, {
+      'model.d.ts': model.declarations,
+      'main.d.ts': main.declarations,
+      'dflt.d.ts': dflt.declarations,
+      'consumer.ts': consumer,
+    });
+    for (const [name, diags] of r.byFile) expect({ name, diags }).toEqual({ name, diags: [] });
+    expect(r.unattributed).toEqual([]);
+    expect(r.status).toBe(0);
+  }, TSC_TIMEOUT);
+});
+
 describeTscExtended('tsc validates every corpus file\'s declarations', () => {
   for (const file of declared) {
     test(file, () => {

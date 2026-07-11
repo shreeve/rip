@@ -112,6 +112,16 @@ const isLoopNode = (x) => isNode(x) && (
   (x[0] === 'while' && (x.length === 3 || x.length === 4)) ||
   (x[0] === 'loop' && x.length === 2));
 
+// Module source strings emit single-quoted; the token value carries
+// normalized double quotes, so embedded single quotes (and
+// backslashes) must escape or the emitted specifier breaks the
+// string it sits in. Shared with declaration emission — the two
+// renderings of one module edge must never drift.
+export function moduleSourceText(s) {
+  const inner = String(s).slice(1, -1).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  return `'${inner}'`;
+}
+
 class Emitter {
   constructor(stores, builder, { face = 'js', pins = null, strict = false } = {}) {
     this.stores = stores;
@@ -2143,13 +2153,8 @@ class Emitter {
     'export-from': (e, node, ind) => (e.exportStatement(node, ind), true),
   };
 
-  // Module source strings emit single-quoted; the token value carries
-  // normalized double quotes, so embedded single quotes (and
-  // backslashes) must escape or the emitted specifier breaks the
-  // string it sits in.
   moduleSource(s) {
-    const inner = String(s).slice(1, -1).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-    return `'${inner}'`;
+    return moduleSourceText(s);
   }
 
   // A specifier list entry: a plain name, `default`, or [name, alias].
