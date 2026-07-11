@@ -178,15 +178,25 @@ test "return if falsy", "fn = (flag) ->\n  return 'early' if flag\n  'normal'\nf
 
 # code generation tests
 code "return unless generates if statement", """
-  return binaryResponse serializeErrorResult 'Error' unless sql
+  f = ->
+    return binaryResponse serializeErrorResult 'Error' unless sql
 """, """
-if (!sql) return binaryResponse(serializeErrorResult('Error'));
+let f = function() {
+  if (!sql) {
+    return binaryResponse(serializeErrorResult("Error"));
+  }
+};
 """
 
 code "return if generates if statement", """
-  return handleError 'Not found' if notFound
+  f = ->
+    return handleError 'Not found' if notFound
 """, """
-if (notFound) return handleError('Not found');
+let f = function() {
+  if (notFound) {
+    return handleError("Not found");
+  }
+};
 """
 
 # ==============================================================================

@@ -254,7 +254,7 @@ test "generator sequence", '''
   ''', [1,2,3]
 
 # Code generation
-code "yield", "yield value", "yield value"
+code "yield inside a generator", "g = -> yield v", "let g = function*() {\n  return yield v;\n};"
 
 # ==============================================================================
 # Yield From (Generator Delegation): "yield-from"

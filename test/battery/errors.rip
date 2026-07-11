@@ -182,3 +182,41 @@ test "a catch-pattern target named error escapes to the enclosing scope", '''
     1
   error
 ''', "boom"
+
+# ==============================================================================
+# Control flow rejects where it has no target
+# ==============================================================================
+
+fail "top-level return rejects", "return 1", "'return' outside a function"
+fail "top-level yield rejects", "yield 1", "'yield' outside a function"
+fail "top-level break rejects", "break", "'break' outside a loop or switch"
+fail "top-level continue rejects", "continue", "'continue' outside a loop"
+
+fail "return inside a value-position if rejects", '''
+  f = (ok) ->
+    x = if ok then return 1 else 2
+    x
+''', "cannot cross the IIFE boundary"
+
+test "return in a function-TAIL switch tunnels through the lowering", '''
+  fn = (x) ->
+    switch x
+      when "a" then return "found"
+      else "other"
+  [fn("a"), fn("b")]
+''', ["found", "other"]
+
+fail "write to a computed rejects at compile", '''
+  x ~= 1
+  x = 2
+''', "cannot assign to computed 'x'"
+
+fail "update of a computed rejects at compile", '''
+  x ~= 1
+  x++
+''', "cannot assign to computed 'x'"
+
+fail "an optional chain cannot be an update target", '''
+  obj = {x: 1}
+  obj?.x++
+''', "no reference exists"

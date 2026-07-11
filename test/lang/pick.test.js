@@ -101,7 +101,7 @@ describe('pick emission and evaluation', () => {
       'console.log o.{a}, o.{b}',
       'x = h?.(o.{a})',
       'class A extends B\n  constructor: ->\n    super(o.{a})',
-      'return o.{a}',
+      'f = -> return o.{a}',
       'x = o.{a} if c',
       'x = o.{a} or 1',
       '{p} = o.{a}',

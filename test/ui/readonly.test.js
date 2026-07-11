@@ -247,7 +247,7 @@ describe('readonly declarations have no expression form (the pinned contract)', 
   });
 
   test('the composition matrix closes: head positions (member-object, call-callee, index-key) and return reject too', () => {
-    for (const src of ['(x =! 5).toString()', '(x =! 5)(1)', 'a[x =! 5]', 'return x =! 5']) {
+    for (const src of ['(x =! 5).toString()', '(x =! 5)(1)', 'a[x =! 5]', 'f = -> return x =! 5']) {
       emitFails(src, /no expression form/);
     }
   });

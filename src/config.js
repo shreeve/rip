@@ -1,28 +1,24 @@
 // Project configuration — the `package.json#rip` block: the seam
-// that makes project-level compiler options real (previously absent
-// strict-project opt-in).
+// that makes project-level compiler options real.
 //
 //   strict   — presentation-only strictness: surface the implicit-any
 //              diagnostic family (TS7xxx) instead of suppressing it,
 //              and emit typed forwards/pins WITHOUT the `!`
 //              definite-assignment assertion so use-before-assign is
-//              checked. tsgo itself always runs strict (that is
-//              today's behavior for every project); this flag never
+//              checked. tsgo always runs strict; this flag never
 //              weakens checking of annotated code — it only decides
 //              whether MISSING annotations get complained about.
-//   checkAll — coverage policy for the batch checker (`rip check`,
-//              future): check every non-@nocheck file, not just
-//              annotated ones. Carried, not yet consumed.
+//   checkAll — coverage policy for the batch checker: check every
+//              non-@nocheck file, not just annotated ones. Carried by
+//              this seam; the batch checker is its consumer.
 //   exclude  — glob list carved out of the batch checker's project
-//              walk. Carried, not yet consumed.
+//              walk. Carried by this seam.
 //
 // Resolution: walk UP to the FIRST package.json and stop — that file
 // is the project boundary whether or not it carries a `rip` block. A
-// parent repo's config must never leak across a project boundary (a
-// standalone app nested inside a larger repo must not inherit that
-// repo's `strict`); inheritance, if ever wanted, should be opt-in and
-// explicit rather than positional. (The readProjectConfig rule,
-// preserved deliberately.)
+// parent repo's config never leaks across a project boundary (a
+// standalone app nested inside a larger repo does not inherit that
+// repo's `strict`); config is positional to exactly one project.
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 
