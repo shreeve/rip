@@ -4,20 +4,6 @@
 
 import { test, code, fail, type } from '../support/testing.js'
 
-test 'default-string: required+unique without explicit type', '''
-  U = schema :shape
-    code! @unique
-  U.ok({code: "abc"})
-''', true
-
-code 'required @unique + ..N implies min=1', '''
-  X = schema
-    token! ..60, @unique
-''', '''
-  let X;
-  X = __schema({kind: "input", name: "X", entries: [{tag: "field", name: "token", modifiers: ["!"], typeName: "string", array: false, unique: true, constraints: {min: 1, max: 60}}]});
-'''
-
 test 'diamond mixin inclusion dedupes', '''
     Base = schema :mixin
       id! uuid
