@@ -4,6 +4,7 @@
 // diagnostic mapping, and the synthetic-drop policy.
 import { test, expect, describe } from 'bun:test';
 import { compile } from '../../../src/compile.js';
+import { Mappings } from '../../../src/stores.js';
 import {
   lineStartsOf, offsetToPosition, positionToOffset,
   sourceOffsetToGenerated, sourceOffsetToGeneratedExact, sourceCursorToGenerated,
@@ -368,5 +369,17 @@ describe('diagnostic tag restoration (the rendering seam)', () => {
     for (const code of [2322, 2339, 2578, 7043, 6134, 6205]) {
       expect(diagnosticTagsFor(code)).toEqual([]);
     }
+  });
+});
+
+describe('generatedCursorToSource refuses the vacuous cover match', () => {
+  test('a cursor exactly at a cover row start (zero verified bytes) answers null', () => {
+    const rows = [{ nodeId: 1, role: '$self', mappingKind: 'cover', sourceStart: 0, sourceEnd: 5, generatedStart: 10, generatedEnd: 20, fileId: 0 }];
+    expect(generatedCursorToSource(new Mappings(rows), 10, 'ABCDE', '0123456789XYZWVUTSRQ')).toBeNull();
+  });
+
+  test('one verified byte in, the cover still answers linearly', () => {
+    const rows = [{ nodeId: 1, role: '$self', mappingKind: 'cover', sourceStart: 0, sourceEnd: 5, generatedStart: 10, generatedEnd: 20, fileId: 0 }];
+    expect(generatedCursorToSource(new Mappings(rows), 11, 'XBCDE', '0123456789XYZWVUTSRQ')).toBe(1);
   });
 });

@@ -60,3 +60,17 @@ describe('SourceFile', () => {
     expect(sf.slice(1, 3)).toBe('😀');
   });
 });
+
+describe('offsetAt clamps to the logical end of line', () => {
+  test('a CRLF line clamps AT the \r, never between the newline bytes', () => {
+    const f = new SourceFile('ab\r\ncd');
+    expect(f.offsetAt(0, 999)).toBe(2);
+    expect(f.offsetAt(0, 2)).toBe(2);
+    expect(f.offsetAt(1, 999)).toBe(6);
+  });
+
+  test('an LF line clamps at the newline as before', () => {
+    const f = new SourceFile('ab\ncd');
+    expect(f.offsetAt(0, 999)).toBe(2);
+  });
+});

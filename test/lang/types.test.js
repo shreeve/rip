@@ -223,10 +223,11 @@ describe('erasure boundary pins: guards, forwards, segments, ternary casts', () 
     // The cast run stops at the ternary's else-colon; the PROPERTY
     // key-tag on the type name is a type starter.
     expect(compile('y = a ? x as T : b').code).toBe('let y = a ? x : b;');
-    // No collision: an object literal in a ternary branch has no
-    // grammar form — rejected...
+    // No collision: an object literal in a ternary branch parses —
+    // each brace depth pairs its own colons, so the brace-inner pair
+    // colon never claims the ternary's else-colon...
     const r = parser.parse('y = a ? {x: 1} : b');
-    expect(r.sexpr).toBeNull();
+    expect(r.sexpr).toEqual(['program', ['=', 'y', ['?:', 'a', ['object', [':', 'x', '1']], 'b']]]);
     // ...and an `as` PROPERTY key keeps its implicit-object reading.
     expect(compile('f as: 1').code).toBe('f({as: 1});');
   });

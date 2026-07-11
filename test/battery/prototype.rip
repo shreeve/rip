@@ -110,3 +110,8 @@ test "soak write lands only when the head exists", '''
 
 fail "annotated soak write rejects — the augmentation needs the unconditional chain", 'String?::cap: () => string = -> "x"',
   "the soak form cannot carry the annotation"
+
+test "a unicode member name crosses the operator", '''
+  String::señal = -> "sí"
+  "x".señal()
+''', "sí"
