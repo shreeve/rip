@@ -498,6 +498,7 @@ grammar =
     # import.meta: a member node whose object is the token's own value
     # ('import'), so chains read through it (`import.meta.url`).
     o 'IMPORT_META . Property', '[".", 1, 3]', 'member: operator, object, property'
+    o 'NEW_TARGET . Property'  , '[".", 1, 3]', 'member: operator, object, property'
   ]
 
   # Subjectable — anything that can carry a postfix accessor chain. Code

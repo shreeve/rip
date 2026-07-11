@@ -246,6 +246,15 @@ code "ternary subscript with parens", "a ? (b[0]) : c", "(a ? b[0] : c)"
 # String Repeat — "str" * n (literal-only: a dynamic left operand keeps JS `*`)
 # ==============================================================================
 
+# The literal strict spellings normalize to `==`/`!=` (all four mean
+# strict equality — there is no loose-equality surface)
+test "strict equality triple equals", "1 === 1", true
+test "strict equality false", "1 === '1'", false
+test "strict inequality triple", "1 !== '1'", true
+test "strict inequality false", "1 !== 1", false
+code "triple equals compiles to strict", "a === b", "a === b;"
+code "triple not-equals compiles to strict", "a !== b", "a !== b;"
+
 code "string repeat compiles to repeat", '"-" * 40', '"-".repeat(40);'
 test "string repeat repeats", '"ab" * 3', "ababab"
 test "string repeat composes with concat", '"a" * 2 + "b"', "aab"
