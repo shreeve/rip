@@ -12,25 +12,11 @@ code 'schema as variable still works', '''
   (schema + 1);
 '''
 
-code 'inline: trailing semicolon before newline', '''
-  X = schema :shape; name!;
-  y = 1
-''', '''
-  let X, y;
-  X = __schema({kind: "shape", name: "X", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}]});
-  y = 1;
-'''
-
 test 'default-string: required+unique without explicit type', '''
   U = schema :shape
     code! @unique
   U.ok({code: "abc"})
 ''', true
-
-fail 'open-ended: bare \'..\' is rejected', '''
-  X = schema
-    name! ..
-''', null
 
 code 'required @unique + ..N implies min=1', '''
   X = schema

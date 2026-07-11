@@ -389,7 +389,7 @@ test 'compound key in class-body property', '''
   class Setting
     "data-src" = "default"
     "api.host" = "localhost"
-  s = new Setting()
+  s = Setting.new()
   [s["data-src"], s["api.host"]]
   ''', ['default', 'localhost']
 
@@ -410,7 +410,7 @@ test 'static string-named field', '''
 test 'string-named member read via @', '''
   class W
     m: -> @"a-b"
-  w = new W()
+  w = W.new()
   w["a-b"] = 7
   w.m()
   ''', 7
@@ -449,3 +449,11 @@ test 'static methods write both spellings via @', '''
   C.bump()
   [C.version, C["app-name"]]
   ''', [2, 'rip2']
+
+test 'prefix and suffix construction are the same call', '''
+  class P
+    constructor: (@v) ->
+  a = new P(1)
+  b = P.new(2)
+  [a.v, b.v, a.constructor is b.constructor]
+  ''', [1, 2, true]

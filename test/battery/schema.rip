@@ -5333,3 +5333,22 @@ test '.upsert! emits ON CONFLICT DO UPDATE; branch hooks skipped', '''
     sql = adapter.calls[0].sql
     [sql.includes('ON CONFLICT ("email") DO UPDATE SET'), sql.includes('"name" = EXCLUDED."name"'), trace, u.id, u._persisted]
 ''', [true, true, ['beforeSave', 'afterSave'], 1, true]
+
+# ==============================================================================
+# Schema body edges — trailing semicolons end inline bodies; a bare
+# '..' range constrains nothing and rejects
+# ==============================================================================
+
+code 'inline: trailing semicolon before newline', '''
+  X = schema :shape; name!;
+  y = 1
+''', '''
+  let X, y;
+  X = __schema({kind: "shape", name: "X", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}]});
+  y = 1;
+'''
+
+fail 'open-ended: bare \'..\' is rejected', '''
+  X = schema
+    name! ..
+''', null
