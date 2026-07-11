@@ -1,0 +1,14 @@
+let a = 1 + 2;
+let b = 3 - 4;
+let c = 5 * 6;
+let d = 7 / 8;
+let e = 9 % 2;
+let f = 1 + (2 * 3);
+let g = (1 + 2) * 3;
+let h = -a;
+let i = +b;
+let j = a < b;
+let k = a === b;
+let l = a !== b;
+let m = a >= b;
+let n = (1 + 2) - ((3 * 4) / 5);

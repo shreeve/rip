@@ -1,0 +1,20 @@
+const answer = 42;
+const total = (1 + 2);
+const motto = "steady";
+const tight = 7;
+const snug = 8;
+let flag = !answer;
+const limit = 100;
+const pick = ((total > 2) ? 1 : undefined);
+let sum = answer + total;
+let viaCall = Math.max(answer, 5);
+let inArray = [answer, total];
+let inObject = {n: answer, answer};
+const count = __state(0);
+const snapshot = (count.value + 1);
+const doubled = __computed(() => (answer * 2));
+__effect(() => { probe(answer); });
+let scaled = function(k) {
+  const base = 10;
+  return (base * k);
+};

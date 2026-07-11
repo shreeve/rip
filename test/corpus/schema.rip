@@ -1,0 +1,81 @@
+# Schema DSL: the validation kinds through every corpus layer.
+# The byte layer pins the emission without runtime bodies, so the
+# corpus body stays runtime-free — the eval tiers live in
+# the schema test file against the runtime module.
+
+schema.defaultMaxString = 80
+
+SignupInput = schema
+  email!    email
+  password! string, 8..100, /[A-Z]/
+  handle?   string, 2..24
+  invite?   string, [null]
+
+Address = schema :shape
+  street! string
+  city!   string
+  zip!    zip
+  full: ~> @street + ", " + @city
+  label: (prefix) -> prefix + ": " + @full
+
+Timestamps = schema :mixin
+  createdAt! datetime
+  updatedAt! datetime
+
+User = schema :shape
+  name!  string
+  email! email
+  bio?   text
+  tags?  string[]
+  addr?  Address
+  @mixin Timestamps
+
+Role = schema :enum
+  :admin
+  :editor
+  :viewer
+
+Status = schema :enum
+  :pending 0
+  :active  1
+  :done    2
+
+Click = schema :shape
+  kind! "click"
+  x! integer
+  y! integer
+
+Scroll = schema :shape
+  kind! "scroll"
+  dy! integer
+
+Event = schema :union
+  @on :kind
+  Click
+  Scroll
+
+# `when` is a keyword-named field (a legitimate column name); the `?`
+# modifier after a keyword word rejects at scan (deliberately strict,
+# pinned in test/schema.test.js) so the corpus spells it required.
+Wire = schema
+  count!  ~integer
+  active? ~boolean, [true]
+  when!   date
+
+Form = schema :input
+  pw!  string, 8..
+  pw2! string
+  @ensure "passwords must match", :pw2, (u) -> u.pw is u.pw2
+
+Report = schema :shape
+  first! string
+  last!  string
+  full!  string, -> it.first + " " + it.last
+  size:  !> @first.length + @last.length
+  shout: ->
+    s = @full
+    s.toUpperCase()
+
+Compact = schema :shape; a!; b? integer; c? "x" | "y"
+
+View = User.omit("bio")

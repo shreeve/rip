@@ -1,0 +1,68 @@
+# composition matrix rows for implicit objects:
+# x = a: 1 → x = {a: 1} — single-line and indented-block objects,
+# object-in-call (`f a: 1`), nesting with implicit calls in property
+# values, nested key objects, objects in arrays/parens/interpolations,
+# keyword and string/number keys, member access on parenthesized
+# objects, and postfix guards ending the object before the IF.
+mk = (o) -> o
+pick = (o) -> o.a
+
+# assignment forms: single pair, multiple pairs, spaced colon
+p1 = a: 1
+p2 = a: 1, b: 2
+p3 = a : 3
+
+# object-in-call: whole-argument object, trailing pairs after a value
+c1 = mk a: 1, b: 2
+c2 = mk 1, a: 2
+c3 = mk a: 1, 2
+
+# nested keys and explicit-brace interleaving
+n1 = a: b: 1
+n2 = {a: b: 2}
+
+# implicit calls inside property values (the F2/F3 interleaving)
+v1 = a: mk 1
+v2 = a: 1, b: pick a: 9, c: 3
+
+# indented object bodies; indented pair values; blank lines inside
+m1 =
+  a: 1
+  b: 2
+m2 = a:
+  4
+m3 =
+  a:
+    b: 5
+  c: 6
+
+m4 =
+  a: 1
+
+  b: 2
+
+# collections and receivers
+l1 = [a: 1, b: 2]
+l2 = [{a: 1}, b: 2]
+g1 = mk (a: 1), 2
+r1 = (a: 7).a
+o1 = mk.call null, a: 8
+
+# keyword, string, and number keys
+k1 = when: 1, if: 2, for: 3
+k2 = "s": 4
+k3 = 1: "one"
+
+# ternary colons are not object keys; object values may hold ternaries
+t1 = p1.a ? 1 : 2
+t2 = k: p1.a ? 3 : 4
+
+# logical operators bind the property value, never end the object
+lg = a: 1 && 2
+
+# postfix guard ends the object (and its call) before the IF
+h = 0
+h = mk a: 5 if p2.b > 0
+
+# implicit object inside an interpolation
+msg = "obj: #{(a: 1).a}"

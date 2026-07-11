@@ -1,0 +1,50 @@
+# Pick expressions — the `.{}`/`?.{}` operator: shorthand, rename,
+# nullish defaults, rename-with-default, optional picks, simple and
+# single-evaluation (IIFE) sources, chains off the picked literal, and
+# the spread forms (`{...obj.{a}}` — the ObjSpreadExpr pick rules).
+user = {id: 7, name: "ada", role: "admin"}
+basic = user.{id, name}
+renamed = user.{name: label}
+defaulted = user.{email = "none"}
+both = user.{name: who = "anon", id}
+
+# Optional picks: nullish sources short-circuit to undefined.
+missing = null
+optHit = user?.{id}
+optMiss = missing?.{id}
+
+# Single-evaluation sources: calls, members, indexes bind `_` once.
+calls = []
+fetch = -> (calls.push(1); {a: 1, b: 2})
+fromCall = fetch().{a, b}
+fromCallOpt = fetch()?.{a}
+box = {inner: {v: 3, w: 4}}
+fromMember = box.inner.{v}
+table = [{k: 9}]
+fromIndex = table[0].{k}
+
+# Compound sources group; compound defaults group.
+either = (user or missing).{role}
+guarded = user.{role = "guest" or "none"}
+
+# Chains off the picked literal; picks in argument position.
+firstKey = user.{id, name}.id
+keyCount = Object.keys(user.{id, name}).length
+
+# Multiline bodies, trailing commas, spaced braces.
+wide = user.{
+  id
+  name: tag
+  role = "basic"
+}
+trailing = user.{id,}
+spaced = user.{ id, name }
+
+# The spread forms — the four ObjSpreadExpr pick rules.
+merged = { ...user.{id, name}, extra: 1 }
+optSpread = { ...missing?.{id}, tag: 2 }
+callSpread = { ...fetch().{a}, b: 9 }
+deepSpread = { ...user.{
+  id
+  role
+}, last: true }

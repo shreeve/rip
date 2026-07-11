@@ -1,0 +1,1 @@
+{"version":3,"file":"unicode.rip.js","sources":["unicode.rip"],"sourcesContent":["x = \"😀\"\ny = \"héllo wörld\"\nz = x\nemoji = \"🎉🎊\"\nw = f(\"😀\", 2)\n"],"names":["x","y","z","emoji","w","f"],"mappings":"AAAA,IAAAA,IAAI;IACJC,IAAI;IACJC,IAAIF;IACJG,QAAQ;IACRC,IAAIC,CAAC"}

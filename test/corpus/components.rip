@@ -1,0 +1,147 @@
+# Components: declarations, the member model, the static
+# render DSL. The seven member spellings lower into _init(props) in
+# fixed order; render lowers to _create()/_setup() with one __effect
+# per dynamic binding.
+
+Counter = component
+  count := 0
+  @label
+  @opt?
+  @step := 1
+  limit =! 100
+  note = "plain"
+  total ~= count * 2
+  onClick = (e) ->
+    count += step
+  describe = ->
+    "#{note}: #{count} of #{limit}"
+  beforeMount = ->
+    console.log "mounting"
+  ~> console.log count
+  render
+    div.card
+      h1 "Counter"
+      = count
+      span.badge total
+      button @click, disabled: count > 5
+        "Step"
+
+Panel = component
+  active := true
+  render
+    .shell
+      div#main
+        "id kid"
+      .('grid', active && 'on')
+      p class: "static"
+      section $open: true, $my-thing: "x"
+      article data-lucide: "search"
+      form noValidate
+      . role: "note"
+        "dot attributes"
+      .counter-display "hyphenated"
+      = active
+
+Badge = component
+  @size: number
+  @label: string = "x"
+  @step: number := 1
+  @name? := "anon"
+  @nick?: string := "nn"
+  onClick = -> 1
+  render
+    button @click
+      "go"
+    span
+      = @name
+
+Two = component
+  render
+    div "a"
+    span "b"
+
+# The dynamic layer: conditionals with a branch-root
+# transition, a keyed loop, two-way binding, a ref, a render local.
+Roster = component
+  items := [{id: 1, name: "a"}]
+  vis := true
+  sel := ""
+  el := null
+  render
+    section
+      total = items.length
+      = total
+      if vis
+        div ~fade
+          "shown"
+      else
+        p "hidden"
+      ul
+        for item, idx in items
+          li key: item.id
+            = item.name
+            span idx
+      input type: "text", value <=> sel
+      div ref: el
+        "anchored"
+
+Chooser = component
+  n := 1
+  render
+    div
+      switch n
+        when 1
+          span "one"
+        when 2, 3
+          span "few"
+        else
+          span "many"
+
+Chart = component
+  render
+    svg viewBox: "0 0 10 10"
+      circle cx: "5", cy: "5", r: "4"
+
+# Composition: child components with the declared-prop contract
+# (container / static / snapshot+updater), boolean shorthand, an
+# explicit child event binding, keyed child rows, children through
+# slot, extends + rest. (The offer/accept spellings stay out of the
+# corpus — the token stream cannot carry the difference;
+# the sexpr spot tier and the paired scenarios hold them.)
+Chip = component
+  @label := "c"
+  fire = ->
+    @emit "pick", @label
+  render
+    span.chip
+      = @label
+
+Deck = component
+  name := "n"
+  onPick = (e) ->
+    name = e.detail
+  render
+    div.deck
+      Chip label: name
+      Chip label: "static", compact, @pick: @onPick
+      Chip label: (name + "!")
+      Chip label <=> name
+      ul
+        for item, i in ["a", "b"]
+          Chip key: item, label: item
+
+Frame = component
+  render
+    div.frame
+      slot
+
+Holder = component
+  render
+    Frame
+      p "projected"
+
+FancyBtn = component extends button
+  @label := "go"
+  render
+    button
+      = @label

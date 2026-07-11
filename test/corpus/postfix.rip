@@ -1,0 +1,13 @@
+a = 5
+b = 0
+b = 1 if a > 2
+c = 0
+c = 2 unless a > 2
+early = ->
+  return "early" if a > 4
+  "late"
+got = early()
+d = a in [1, 5]
+e = "x" of {x: 1}
+f = 3
+f-- if d

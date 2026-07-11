@@ -1,0 +1,1 @@
+{"version":3,"file":"literals.rip.js","sources":["literals.rip"],"sourcesContent":["t = true\nf = false\nn = null\nu = undefined\nx = true\ny = not false\nz = null ?? undefined\n"],"names":["t","true","f","false","n","null","u","undefined","x","y","z"],"mappings":"AAAA,IAAAA,IAAIC;IACJC,IAAIC;IACJC,IAAIC;IACJC,IAAIC;IACJC,IAAIP;IACJQ,IAAI,CAAIN;IACRO,IAAIL,QAAQE"}

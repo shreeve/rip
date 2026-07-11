@@ -1,0 +1,81 @@
+# composition matrix rows for implicit function calls:
+# f x, y → f(x, y) — single/multiple args, nested implicit-in-implicit
+# and implicit-around-explicit, method-chain receivers, spaced-bracket
+# array arguments, arrow arguments, curried calls on CALL_END, unary
+# spacing (`f -1` calls, `a - 3` subtracts), and implicit calls inside
+# conditions, loops, switch heads, interpolations, and postfix guards.
+double = (x) -> x * 2
+add = (a, b) -> a + b
+pick = (xs) -> xs[0]
+run = (f) -> f()
+each = (xs, f) -> f(xs[0])
+mk = (x) -> (y) -> x + y
+
+# single and multiple arguments
+a = double 4
+b = add 1, 2
+c = add a, double b
+
+# nesting: implicit inside implicit, explicit inside implicit
+d = double double 3
+e = double add(1, 2)
+f2 = add 1, add 2, 3
+
+# method receivers take implicit arguments
+s = "x,y,z"
+n = s.indexOf "y"
+m = s.split ","
+o = m.slice 1
+
+# spaced bracket is an array-literal ARGUMENT, not an index
+p = pick [7, 8]
+q = pick [9]
+
+# arrow arguments without parens; curried call on a CALL_END
+rv = run -> 5
+ea = each m, (x) -> x + "!"
+cu = mk(1) 2
+
+# unary spacing: `double -3` calls, `a - 3` subtracts
+g1 = double -3
+g2 = a - 3
+
+# implicit calls in condition heads, loop heads, and switch heads
+w = 0
+if double 2
+  w = 1
+i = 30
+while double i > 99
+  i -= 1
+sw = 0
+switch double 2
+  when 4 then sw = 1
+  else sw = 2
+
+# postfix guard ends the implicit call before the IF
+h = 0
+h = double 6 if b > 0
+
+# implicit call inside an interpolation
+msg = "twice: #{double 5}"
+
+# implicit call as a loop-body argument
+total = ""
+for v in m
+  total += pick [v]
+
+# member-object position: the call's result is the receiver
+len = (s.split ",").length
+
+# return position inside a def body
+def tw(x)
+  return double x
+tv = tw 21
+
+# implicit call as an explicit call's argument, and vice versa
+x1 = run(-> double 4)
+x2 = double add(2, 3)
+
+# operand positions: implicit call under binary and unary operators
+y1 = 1 + double 2
+y2 = !run -> false

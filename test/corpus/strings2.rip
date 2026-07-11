@@ -1,0 +1,19 @@
+who = "world"
+a = "Hello #{who}!"
+b = "#{who}#{who}"
+c = "pre #{1 + 2} post"
+d = "just #{}"
+e = "nested #{"in #{who}"}"
+f = """
+  line one
+  line two
+"""
+g = """
+  greet #{who}
+  done
+"""
+h = '''
+  raw #{n}
+'''
+i = "tick `quote` #{who}"
+j = f

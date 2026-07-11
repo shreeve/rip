@@ -1,0 +1,158 @@
+# multiline collection layout : newlines
+# inside brackets separate elements, deeper lines open INDENT blocks,
+# closers auto-close them; lines ending in an unfinished operator or
+# starting with a continuer (',', '.', '?.') extend the logical line.
+mk = (o) -> o
+add = (a, b) -> a + b
+pair = (a, b) -> [a, b]
+
+# the headline forms: multiline object, array, and call
+config = {
+  name: "app"
+  port: 8080
+}
+list = [
+  1
+  2
+  3
+]
+sum = add(
+  1
+  2
+)
+
+# mixed separators and trailing commas
+mixed = [
+  1, 2, 3
+  4, 5
+]
+trail = {
+  a: 1,
+  b: 2,
+}
+
+# nesting: arrays of arrays, objects in arrays, collections in objects
+grid = [
+  [1, 2]
+  [3, 4]
+]
+recs = [
+  {a: 1}
+  {b: 2}
+]
+data = {
+  list: [
+    1
+    2
+  ]
+  fn: mk(
+    3
+  )
+}
+
+# blank and comment lines inside brackets are trivia
+holey = [
+  1
+
+  # a comment between elements
+  2
+]
+
+# an unindented OBJECT body parses (the empty pair-list row admits it)
+flat = {
+a: 1
+b: 2
+}
+
+# a closer on the last element's line
+tight = [
+  7
+  8]
+
+# implicit-call continuation across a trailing comma; indented-object
+# call arguments; a second object argument after a comma
+sum2 = add 1,
+  2
+made = mk
+  a: 1
+  b: 2
+two = pair {a: 1},
+  {b: 2}
+
+# leading-dot chain lines close the implicit call and chain on it
+chain = mk name: "x"
+.name
+count = list
+  .filter (n) -> n > 1
+  .length
+
+# unfinished operators at line ends continue the logical line
+total = 1 +
+  2 +
+  3
+
+# multiline parentheticals and parameter lists
+avg = (
+  1 + 2
+)
+join = (
+  a
+  b
+) -> a + b
+def prod(
+  x
+  y
+)
+  x * y
+
+# indented-object bodies for return; multiline index and super-index
+build = ->
+  return
+    a: 1
+    b: 2
+class Box
+  constructor: (v) ->
+    @v = v
+  get: (k) ->
+    @v[
+      k
+    ]
+class SubBox extends Box
+  get: (k) ->
+    m = "get"
+    super[
+      m
+    ](k) + 1
+
+# comprehension over a multiline array
+doubled = (n * 2 for n in [
+  10
+  20
+])
+
+results = [
+  config.port
+  list.length
+  sum
+  mixed.length
+  trail.b
+  grid[1][0]
+  recs[0].a
+  data.list[1]
+  data.fn
+  holey[1]
+  flat.b
+  tight[1]
+  sum2
+  made.b
+  two[1].b
+  chain
+  count
+  total
+  avg
+  join(2, 3)
+  prod(4, 5)
+  build().a
+  new SubBox({k: 9}).get("k")
+  doubled[1]
+]

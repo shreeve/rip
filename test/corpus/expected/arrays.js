@@ -1,0 +1,12 @@
+let x = 2;
+let y = 3;
+let i = 0;
+let a = [1, 2, 3];
+let b = [];
+let c = [1, , 2];
+let d = [x, (y && x)];
+let e = a[0];
+let f = a[i + 1];
+let g = [1, 2][0];
+let h = [[1], [2]];
+let k = h[0][0];

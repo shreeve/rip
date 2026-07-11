@@ -1,0 +1,20 @@
+# MATH-wave operators: `//` floor division with its compound
+# form. `//` shares the `/` scan prefix with regex literals and `///`
+# heregex openers — the ambiguous positions here pin the
+# disambiguation. (`%%` true modulo lowers through an INLINE helper
+# with a helper-referencing shape — a documented
+# lowering difference — so `%%` rows live in test/smallgaps.test.js
+# by the sexpr/token/eval layers, not in the shared corpus, whose
+# byte layer requires normalized equality.)
+q1 = 7 // 2
+q2 = -7 // 2
+q3 = a // b // c
+q4 = a // b + c
+q5 = (a // b) * 2
+x = 9
+x //= 2
+arr = [a // b, c // d]
+f(a // b)
+z1 = a / b
+z2 = a/b
+z3 = a //b

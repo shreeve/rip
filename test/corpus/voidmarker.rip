@@ -1,0 +1,32 @@
+# The void-marker family — a trailing `!` on a function's name at a
+# DEFINITION site makes the function void (implicit return suppressed).
+# This file carries the def and arrow-assignment forms, where every
+# corpus layer holds (sexpr via canonicalized heads
+# def!/=!; bytes; tokens via the documented VOID_MARKER mapping).
+# Export forms (module syntax) and method keys (pinned
+# silently discards them) live in
+# test/voidmarker.test.js with the rest of the family surface.
+def save!(x)
+  register(x)
+def tick!
+  count = 0
+def typed!(x): Number
+  bump(x)
+
+# Arrow assignments, both kinds, block and single-line bodies.
+logIt! = (m) ->
+  emitLog(m)
+notify! = (m) => sendOut(m)
+flush! = ->
+  drain()
+chained! = (x) -> track(x)
+
+# A void body may define plain functions; their returns are their own.
+nested! = (a) ->
+  inner = (b) -> b + 1
+  inner(a)
+
+# Chained void definition and an async void def.
+alias = wipe! = -> reset()
+def store!(u)
+  await persist(u)

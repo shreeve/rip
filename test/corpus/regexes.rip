@@ -1,0 +1,9 @@
+r = /ab+c/gi
+s = /\d+/
+t = "x123y".match(/\d+/)
+d1 = 10 / 2
+d2 = 10 / 2 / 5
+u = /[/\]]/
+v = r.source
+café = 1
+naïve = café + 1

@@ -1,0 +1,19 @@
+arr = [1, 2, 3]
+total = 0
+for x in arr
+  total += x
+for x, i in arr
+  total += x * i
+obj = {a: 1, b: 2}
+keys = ""
+for own k of obj
+  keys += k
+for k, v of obj
+  total += v
+for i in [1..3]
+  total += i
+for x in arr when x > 1
+  total += x
+squares = (x * x for x in arr)
+evens = (x for x in arr when x % 2 == 0)
+names = (k for k of obj)

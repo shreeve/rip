@@ -1,0 +1,48 @@
+# The :model persistence DSL through every corpus layer. The
+# byte layer pins the emission without runtime bodies, so the
+# corpus body stays runtime-free — the eval and delivery tiers live in
+# the runtime test files against the runtime modules.
+
+Organization = schema :model
+  name! string
+
+User = schema :model
+  name!   string
+  email!  email @unique
+  handle? string, 2..24
+  bio?    text
+  @timestamps
+  @belongs_to Organization
+  @has_many Order
+  beforeSave: -> @name = @name.trim()
+  afterCreate: -> console.log @id
+  greet: (prefix) -> prefix + " " + @name
+  slug: ~> @name.toLowerCase()
+
+Order = schema :model
+  total!  ~integer
+  status! "open" | "paid" | "void"
+  @belongs_to User
+  @belongs_to Coupon?
+  @softDelete
+  @idStart 10001
+  @tableWas legacy_orders
+  @unique [:total, :status]
+  @index total
+
+Coupon = schema :model
+  code! string, /^[A-Z0-9]+$/
+  @scope :active, -> @where(active: true)
+  @scope :since, (d) -> @where("created_at > ?", d)
+  @defaultScope -> @order("id")
+
+Pinned = schema :model, on: analytics
+  name! string
+
+Person = schema :model
+  firstName! string, {was: "given_name"}
+  ssn?       ~:ssn
+  @mixin Stamps
+  @ensure "named", (p) -> p.firstName.length > 0
+
+Inline = schema :model; label!; @timestamps; @belongs_to Person

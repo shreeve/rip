@@ -1,0 +1,8 @@
+a = x && y
+b = x || y
+c = x ?? y
+d = x and y or z
+e = not x
+g = !x
+h = (x && y) || (a ?? b)
+i = obj.p && f(1)

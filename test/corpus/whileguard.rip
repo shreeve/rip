@@ -1,0 +1,15 @@
+i = 0
+evens = []
+evens.push(i) while (i += 1) < 8 when i % 2 == 0
+j = 10
+downs = []
+downs.push(j) until (j -= 1) <= 4 when j % 2 == 1
+k = 0
+vals = (k * 3 while (k += 1) < 5 when k != 2)
+m = 0
+while (m += 1) < 6 when m > 3
+  last = m
+n = 9
+until (n -= 2) < 3 when n > 4
+  edge = n
+sum = evens.length + downs.length + vals.length + last + edge

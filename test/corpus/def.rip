@@ -1,0 +1,10 @@
+def noop
+  return
+def one()
+  return 1
+def add(a, b)
+  return a + b
+def compute(x)
+  y = x * 2
+  return y + 1
+add(1, 2)

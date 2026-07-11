@@ -1,0 +1,34 @@
+let mk = function(o) {
+  return o;
+};
+let pick = function(o) {
+  return o.a;
+};
+let p1 = {a: 1};
+let p2 = {a: 1, b: 2};
+let p3 = {a: 3};
+let c1 = mk({a: 1, b: 2});
+let c2 = mk(1, {a: 2});
+let c3 = mk({a: 1}, 2);
+let n1 = {a: {b: 1}};
+let n2 = {a: {b: 2}};
+let v1 = {a: mk(1)};
+let v2 = {a: 1, b: pick({a: 9, c: 3})};
+let m1 = {a: 1, b: 2};
+let m2 = {a: 4};
+let m3 = {a: {b: 5}, c: 6};
+let m4 = {a: 1, b: 2};
+let l1 = [{a: 1, b: 2}];
+let l2 = [{a: 1}, {b: 2}];
+let g1 = mk({a: 1}, 2);
+let r1 = ({a: 7}).a;
+let o1 = mk.call(null, {a: 8});
+let k1 = {when: 1, if: 2, for: 3};
+let k2 = {"s": 4};
+let k3 = {1: "one"};
+let t1 = p1.a ? 1 : 2;
+let t2 = {k: (p1.a ? 3 : 4)};
+let lg = {a: (1 && 2)};
+let h = 0;
+if (p2.b > 0) h = mk({a: 5});
+let msg = `obj: ${({a: 1}).a}`;

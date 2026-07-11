@@ -1,0 +1,31 @@
+# composition-and-boundary fixture: interpolation, heredocs,
+# regexes, unicode identifiers in every applicable matrix position with
+# trivia at block boundaries. Statement-position row included (a bare
+# interpolated string is a valid expression statement). Inapplicable:
+# regex literals as call callees are nonsense; heredoc delimiters cannot
+# nest inside interpolations of the same kind this wave.
+def shout(msg)
+  return "#{msg}!"
+
+who = "crowd"
+m1 = "Hello #{who}".length
+c1 = shout("hey #{who}")
+v1 = "#{who} says #{"hi #{who}"}"
+ix = "abc#{who}"[0]
+rx = /abc/.source
+n1 = "#{1 + 2}"
+
+if who
+  t1 = """
+    inside #{who}
+  """
+
+# trivia at a block boundary
+
+while who && who.length > 99
+
+  # trivia inside a block
+  who = ""
+
+"statement #{who}"
+café = shout("naïve #{who}")

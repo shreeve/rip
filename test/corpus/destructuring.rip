@@ -1,0 +1,68 @@
+# composition matrix rows for destructuring + splats: array and
+# object targets (nested, defaults, renames, rests), the swap idiom,
+# rest params, param patterns and defaults, spread in array literals
+# and call arguments (explicit and implicit), array catch patterns, and
+# pattern loop variables — instantiated so every row evals. (The
+# catch-OBJECT form is pinned outside the byte corpus: its
+# hoist.)
+pair = [1, 2]
+obj = a: 10, b: 20
+
+[a1, b1] = pair
+{a, b} = obj
+{a: ren, b: keep} = obj
+[x1, [y1, z1]] = [7, [8, 9]]
+{m1 = 5} = a: 3
+[x1, y1] = [y1, x1]
+[head, ...tail] = [1, 2, 3, 4]
+{a: aOut, ...others} = a: 1, b: 2, c: 3
+
+sum = (...nums) ->
+  t = 0
+  for n in nums
+    t += n
+  t
+s1 = sum 1, 2, 3
+s2 = sum ...[4, 5]
+s3 = sum 1, ...[2, 3], 4
+
+joined = [0, ...pair, 9]
+
+dflt = (v = 42) -> v
+d1 = dflt()
+d2 = dflt 7
+
+pick = ({a, b}) -> a + b
+p1 = pick a: 1, b: 2
+second = ([f2, s2x]) -> s2x
+p2 = second [3, 4]
+
+caught2 = 0
+try
+  throw [1, 2]
+catch [c1, c2]
+  caught2 = c2
+
+total = 0
+for [k, v] in [[1, 2], [3, 4]]
+  total += k * v
+names = ""
+for {a: nm} in [{a: "x"}, {a: "y"}]
+  names += nm
+
+# pattern defaults in the straightforward positions: params
+# (array-element and shorthand-object defaults), loop variables, and
+# nested shorthand defaults in assignment position. Rename defaults
+# and array-element defaults in ASSIGNMENT position are pinned
+# outside the byte corpus.
+pd1 = ([a3 = 1]) -> a3
+pd2 = (x3 = 1, [y3 = 2]) -> x3 + y3
+pd3 = ({w = 9}) -> w
+dv1 = pd1 []
+dv2 = pd2 5, [6]
+dv3 = pd3 {}
+dfor = 0
+for [q = 7] in [[], [2]]
+  dfor += q
+[{sd = 8}] = [{}]
+comp = (x2 for [a2, x2] in [[1, 2], [3, 4]])

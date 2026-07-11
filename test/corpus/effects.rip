@@ -1,0 +1,60 @@
+# Reactive effects: the `~>` family — every grammar form, the
+# dispose handle, arrow-valued bodies, cleanup returns, and effects
+# across the composition surface.
+
+# State the effects observe
+count := 0
+label := "tick"
+
+# Bare effects — expression, terminator, and block forms
+~> console.log count
+~>
+console.log label
+~>
+  snapshot = count * 2
+  console.log snapshot
+
+# Bound effects — the dispose handle is a real const binding
+watcher ~> console.log count
+logger ~>
+  console.log label + ": " + count
+
+# Typed handle erases to the same bytes
+typedHandle: Function ~> console.log count
+
+# Arrow-valued bodies pass through as the effect function
+~> -> console.log count
+fat ~> => console.log count
+
+# The postfix shift: the guard compiles INTO the body
+~> console.log count if count > 0
+guarded ~> console.log count unless count > 5
+
+# Writes inside effect bodies unwrap and track
+total = 0
+~> total = total + count
+
+# The cleanup channel: a block body returns its cleanup function
+ticker ~>
+  id = setInterval (-> console.log label), 1000
+  -> clearInterval id
+
+# Effect-in-effect: the inner re-creates per outer run
+~>
+  seen = count
+  ~> console.log seen
+
+# A bare effect is a valid expression — the disposer is the value
+stop = (~> console.log count)
+stop()
+
+# Bare effects nest in statement blocks (plain expression statements)
+if count > 0
+  ~> console.log "positive"
+
+# A function's tail effect returns the disposer to the caller
+makeWatcher = ->
+  ~> console.log count
+
+# The dispose handle works like any const
+watcher()

@@ -1,0 +1,21 @@
+let a = 5;
+let b = 0;
+let c = null;
+let flag = a ? true : undefined;
+let gone = c ? true : undefined;
+let zero = b ? true : undefined;
+let obj = {v: 1};
+let m = obj.v ? true : undefined;
+let list = [(a ? true : undefined), (b ? true : undefined), (c ? true : undefined)];
+let combo = (b ? true : undefined) ?? "absent";
+let neg = !(b ? true : undefined);
+let eq = (a ? true : undefined) === true;
+let paren = (a + b) ? true : undefined;
+let text = `${(a ? true : undefined)}`;
+let probe = function(v) {
+  return (v ? true : undefined);
+};
+let r1 = probe(0);
+let r2 = probe("x");
+let keep = (a ? true : undefined) ? "yes" : "no";
+let out = [flag, gone, zero, m, combo, neg, eq, paren, text, r1, r2, keep];

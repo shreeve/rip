@@ -1,0 +1,32 @@
+n = 2
+label = ""
+switch n
+  when 1
+    label = "one"
+  when 2, 3
+    label = "few"
+  else
+    label = "many"
+big = 0
+switch
+  when n > 10
+    big = 1
+  else
+    big = 0
+result = ""
+done = 0
+try
+  result = risky()
+catch e
+  result = "err"
+finally
+  done = 1
+ignored = 0
+try
+  f()
+catch
+  ignored = 1
+x = 0
+loop
+  x += 1
+  break if x > 2

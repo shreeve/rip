@@ -23,3 +23,13 @@ jobs:
 
       - name: Full suite
         run: bun run test
+
+      - name: Parser regeneration — must be byte-identical to the committed file
+        run: |
+          bun run parser
+          git diff --exit-code src/parser.js
+
+      - name: Corpus snapshots — must be byte-identical to the committed artifacts
+        run: |
+          bun run corpus-expected
+          git diff --exit-code test/corpus/expected

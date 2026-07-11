@@ -1,0 +1,45 @@
+# Object spread — the ObjSpreadExpr family: member chains, calls,
+# indexing, optional chains, parentheticals, object-literal heads, and
+# `this`, mixed with plain spreads, pairs, and shorthand. Composition
+# positions ride along: nested literals, call arguments, comprehension
+# bodies, typed-decl values. Config sits at FILE TOP: the tokenstream
+# TYPE_DECL mapping requires the
+# file-top placement — a mid-file declaration's surrounding layout
+# leaves a doubled TERMINATOR behind; the file's declarations must
+# stand alone under the tsc harness, so the name is defined here.
+type Config = {on: boolean}
+grammar = {options: {a: 1, b: 2}}
+deep = {x: {y: {z: 9}}}
+extra = {c: 3}
+opts = { ...grammar.options, ...extra }
+merged = { ...deep.x.y, w: 0 }
+both = { base: 1, ...grammar.options, ...deep.x.y }
+inCall = Object.keys({ ...grammar.options })
+
+# Call heads: plain, chained, and argument-carrying.
+make = (n) -> {v: n, n: n * 2}
+wrap = (o) -> {inner: o}
+fromCall = { ...make(3), tag: "c" }
+fromChain = { ...wrap(make(1)).inner, more: true }
+
+# Index heads, plain and chained; optional-chain property heads.
+table = {k1: {a: 1}, k2: {b: 2}}
+key = "k1"
+fromIndex = { ...table[key] }
+idxChain = { ...wrap(table)["inner"].k2, w: 9 }
+optChain = { ...table?.k2 }
+
+# Parenthetical and object-literal heads.
+fromParen = { ...(table.k2 or {}), extra: 4 }
+fromObject = { ...{lit: 5}, lit2: 6 }
+
+# `this` head, through a method's dynamic this.
+carrier = {v: 7, dup: -> { ...this }}
+fromThis = {got: carrier.dup().v, size: Object.keys(carrier.dup()).length}
+
+# Composition: nested literal, call argument, comprehension body,
+# typed-decl value (Config is defined at file top).
+nested = {outer: { ...make(4), o: 1 }}
+inArg = Object.keys({ ...make(5), z: 1 }).length
+comp = ({ ...make(i), i: i } for i in [1, 2])
+conf: Config = { ...make(2), on: true }

@@ -1,0 +1,16 @@
+i = 0
+j = 10
+i++
+++i
+j--
+--j
+x = i++
+y = j ? i : 0
+z = i > 0 ? "pos" : "zero"
+counter = {n: 1}
+w = counter?.n
+v = counter.n ? counter.n : 0
+setup = ->
+  @count = 0
+  @count++
+  @name ? "anon" : @name

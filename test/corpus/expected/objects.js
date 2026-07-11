@@ -1,0 +1,12 @@
+let x = 1;
+let y = 2;
+let obj = {prop: 9};
+let a = {};
+let b = {x: 1, y: 2};
+let c = {x};
+let d = {x, y: 2};
+let e = {a: {b: 2}};
+let f = ({n: 1}).n;
+let g = obj.prop;
+let h = {key: obj.prop, val: (x && y)};
+let i = {1: "one", "two": 2};
