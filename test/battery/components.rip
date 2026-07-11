@@ -666,3 +666,51 @@ test 'onError on parent catches child error', '''
   __popComponent(null)
   caught
 ''', 'child boom'
+
+# ==============================================================================
+# Dual-namespace tag resolution
+# ==============================================================================
+# `a`, `script`, `style`, and `title` exist in BOTH the HTML and SVG
+# namespaces. Outside an SVG subtree they are HTML; an enclosing SVG
+# element flips them. Misresolving `a` silently creates an SVGAElement
+# whose href/click behavior is not an anchor's.
+
+code 'top-level `a` is an HTML anchor, not an SVG element', '''
+  A = component
+    render
+      a href: "/home"
+        "go"
+  ''', '''
+  let A = class extends __Component {
+    _init(props) {
+    }
+    _create() {
+      this._el0 = document.createElement('a');
+      this._el0.setAttribute('data-part', 'A');
+      this._el0.setAttribute('href', "/home");
+      this._t0 = document.createTextNode("go");
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+  };
+  '''
+
+code 'inside an svg subtree, `a` takes the SVG namespace', '''
+  B = component
+    render
+      svg
+        a href: "/x"
+  ''', '''
+  let B = class extends __Component {
+    _init(props) {
+    }
+    _create() {
+      this._el0 = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      this._el0.setAttribute('data-part', 'B');
+      this._el1 = document.createElementNS('http://www.w3.org/2000/svg', 'a');
+      this._el1.setAttribute('href', "/x");
+      this._el0.appendChild(this._el1);
+      return this._el0;
+    }
+  };
+  '''

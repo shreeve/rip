@@ -26,7 +26,7 @@ import { buildSchemaTypeStory, isModuleShaped, SchemaTypeError } from './schema-
 import { Parser } from './parser.js';
 import { applyInsertionPass, implicitBlocks, implicitObjects, implicitCalls, tagPostfixConditionals, rewriteTypes } from './lexer.js';
 import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams } from './typetext.js';
-import { TEMPLATE_TAGS, SVG_TAGS, DOM_EVENTS, knownBareAttribute } from './dom-vocab.js';
+import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, knownBareAttribute } from './dom-vocab.js';
 import {
   COMPONENT_HOOKS, componentTypeInfo, memberDeclareSegments, isDeclarableMember,
   propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType,
@@ -6534,7 +6534,7 @@ class Emitter {
     if (R.transitionSlot !== null && R.transitionSlot.record === R.sink && R.transitionSlot.el === null) {
       R.transitionSlot.el = el;
     }
-    const isSvg = SVG_TAGS.has(tag) || R.svgDepth > 0;
+    const isSvg = R.svgDepth > 0 || SVG_ONLY_TAGS.has(tag);
     this.renderLine(node, () => {
       this.b.emit(isSvg
         ? `${el} = document.createElementNS('${Emitter.SVG_NS}', '${tag}')`
@@ -6551,9 +6551,9 @@ class Emitter {
       R.pendingClassArgs = [`'${classes.join(' ')}'`];
       R.pendingClassEl = el;
     }
-    if (tag === 'svg') R.svgDepth++;
+    if (isSvg) R.svgDepth++;
     this.renderChildren(el, args);
-    if (tag === 'svg') R.svgDepth--;
+    if (isSvg) R.svgDepth--;
     if (classes.length > 0) {
       if (R.pendingClassArgs.length === 1) {
         this.renderLine(node, () => this.b.emit(isSvg
@@ -6586,7 +6586,7 @@ class Emitter {
     if (R.transitionSlot !== null && R.transitionSlot.record === R.sink && R.transitionSlot.el === null) {
       R.transitionSlot.el = el;
     }
-    const isSvg = SVG_TAGS.has(tag) || R.svgDepth > 0;
+    const isSvg = R.svgDepth > 0 || SVG_ONLY_TAGS.has(tag);
     this.renderLine(node, () => {
       this.b.emit(isSvg
         ? `${el} = document.createElementNS('${Emitter.SVG_NS}', '${tag}')`
@@ -6605,9 +6605,9 @@ class Emitter {
       ...classExprs.map((e) => () => this.renderExpr(e)),
     ];
     R.pendingClassEl = el;
-    if (tag === 'svg') R.svgDepth++;
+    if (isSvg) R.svgDepth++;
     this.renderChildren(el, children);
-    if (tag === 'svg') R.svgDepth--;
+    if (isSvg) R.svgDepth--;
     const parts = R.pendingClassArgs;
     if (parts.length > 0) {
       this.renderEffect(node, () => {
@@ -8218,7 +8218,7 @@ class Emitter {
         // must reject taking a ref at all).
         const tag = this.renderTagOf(el);
         if (this.ts && tag !== null && /^[a-z][a-z0-9-]*$/.test(tag)) {
-          const map = SVG_TAGS.has(tag) ? 'SVGElementTagNameMap' : 'HTMLElementTagNameMap';
+          const map = (this.rstate.svgDepth > 0 || SVG_ONLY_TAGS.has(tag)) ? 'SVGElementTagNameMap' : 'HTMLElementTagNameMap';
           this.b.tsOnly(() => this.b.emit(` as ${map}['${tag}'] | null`));
         }
       });
