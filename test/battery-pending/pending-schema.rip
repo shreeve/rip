@@ -66,23 +66,6 @@ test 'transaction! on: pins one adapter; other-adapter calls run outside', '''
     [txB.length, txA.length, calls.b.includes("COMMIT"), calls.a.includes("BEGIN")]
 ''', [1, 0, true, false]
 
-test '@unique survives mixin expansion', '''
-    adapter =
-      calls: []
-      canned: {}
-      query: (sql, params) ->
-        @calls.push {sql, params}
-        if @canned[sql] then @canned[sql] else (@canned.__default ?? {columns: [], data: [], rows: 0})
-    __schemaSetAdapter adapter
-    __SchemaRegistry.reset()
-    Keyed = schema :mixin
-      code! string @unique
-    Thing = schema :model
-      @mixin Keyed
-      name! string
-    Thing._tableSpec().indexes.map (i) -> i.name + (i.unique ? "!" : "")
-''', ['idx_things_code!']
-
 test 'diff: empty database plans CREATE for every model', '''
     deployed = {tables: []}
     history  = []

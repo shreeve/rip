@@ -243,8 +243,8 @@ describe('schema runtime: the validation pipeline', () => {
 
 describe('schema DSL: loud rejections', () => {
   test('the persistence spellings stay :model-only on the other kinds (the completed matrix)', () => {
-    lexFails('S = schema :shape\n  a! string, {was: "b"}', /persistence metadata.*:model-only/);
-    lexFails('S = schema :shape\n  a! string @unique', /persistence metadata.*:model-only/);
+    lexFails('S = schema :shape\n  a! string, {was: "b"}', /persistence metadata.*:model\/:mixin-only/);
+    lexFails('S = schema :shape\n  a! string @unique', /persistence metadata.*:model\/:mixin-only/);
     lexFails('I = schema :input\n  a! string\n  @timestamps', /:model-only/);
     lexFails('S = schema :shape\n  a! string\n  @belongs_to User', /:model-only/);
     lexFails('S = schema :shape\n  a! string\n  @scope :hot, -> @where(a: 1)', /query scopes.*:model-only/);

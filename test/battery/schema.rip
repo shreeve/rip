@@ -436,10 +436,28 @@ fail ":shape rejects @belongs_to", '''
     @belongs_to Other
   '''
 
-fail "inline @unique off :model is rejected as persistence metadata", '''
+fail "inline @unique off :model/:mixin is rejected as persistence metadata", '''
   X = schema :shape
     code! @unique
-  ''', ":model-only"
+  ''', ":model/:mixin-only"
+
+test '@unique survives mixin expansion into a :model', '''
+  Keyed = schema :mixin
+    code! string @unique
+  Thing = schema :model
+    @mixin Keyed
+    name! string
+  Thing._tableSpec().indexes.map (i) -> i.name + (i.unique ? "!" : "")
+  ''', ['idx_things_code!']
+
+fail 'a mixin field carrying @unique rejects inclusion into a :shape', '''
+  Keyed = schema :mixin
+    code! string @unique
+  Bad = schema :shape
+    street! string
+    @mixin Keyed
+  Bad.ok({street: "x", code: "y"})
+  ''', "persistence metadata"
 
 code 'required @unique + ..N implies min=1', '''
   X = schema :model
