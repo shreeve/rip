@@ -2239,7 +2239,14 @@ class Emitter {
         this.b.emit(';');
       } else if (head === 'export-default') {
         this.b.emit('export default ');
-        this.mark(node, 'spec', () => this.expr(node[1]));
+        // `export default def name(…)` exports the function ITSELF —
+        // a named function expression (the def statement's body
+        // machinery, minus the declaration).
+        if (isNode(node[1]) && isDefHead(node[1][0]) && node[1].length === 4) {
+          this.mark(node, 'spec', () => this.defStatement(node[1], ind));
+        } else {
+          this.mark(node, 'spec', () => this.expr(node[1]));
+        }
         this.b.emit(';');
       } else {
         const spec = node[1];
@@ -8967,6 +8974,13 @@ class Emitter {
   }
 
   object(node) {
+    // A regex KEY exists for Map literals only — a plain object would
+    // stringify it into a property name nobody can spell back.
+    for (const pair of node.slice(1)) {
+      if (isNode(pair) && pair[0] === ':' && typeof pair[1] === 'string' && pair[1][0] === '/') {
+        throw this.positionedError(pair, 'emitter: a regex key needs a MAP literal (`*{ /re/: v }`) — object property names are strings');
+      }
+    }
     const comp = !this.inPattern && Emitter.objectComprehension(node);
     // A dynamicKey comprehension key accumulates through its inner
     // expression (`result[k] = v`).
@@ -10329,8 +10343,17 @@ class Emitter {
       this.b.emit('new Map([');
       pairs.forEach((pair, i) => {
         if (i > 0) this.b.emit(', ');
+        if (isNode(pair) && pair[0] === '...' && pair.length === 2) {
+          // A spread contributes its ENTRIES: `*{ a: 1, ...other }`
+          // spreads an iterable of [key, value] pairs (another Map).
+          this.mark(pair, '$self', () => {
+            this.b.emit('...');
+            this.expr(pair[1]);
+          });
+          return;
+        }
         if (!isNode(pair) || pair[0] !== ':' || pair.length !== 3) {
-          throw this.positionedError(isNode(pair) ? pair : node, 'emitter: a map literal takes explicit `key: value` pairs — shorthand and spread have no Map reading');
+          throw this.positionedError(isNode(pair) ? pair : node, 'emitter: a map literal takes explicit `key: value` pairs — shorthand has no Map reading');
         }
         this.mark(pair, '$self', () => {
           this.b.emit('[');
