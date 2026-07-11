@@ -52,7 +52,7 @@ const ROWS = [
   // contexts) and a reconstructed explicit-any structural type
   ['f = ({a, b = 1}, n: number) -> a', 'declare function f({a, b}: {a: any, b?: any}, n: number): any;\nexport {};\n'],
   ['f = ({a, b = 1}) -> a', ''],
-  // the void-marker family declares `: void` (the PR #41 synergy)
+  // the void-marker family declares `: void`
   ['def save!(x: number)\n  x', 'declare function save(x: number): void;\nexport {};\n'],
   ['def tick!\n  1', 'declare function tick(): void;\nexport {};\n'],
   ['save! = (x) -> x', 'declare function save(x: any): void;\nexport {};\n'],

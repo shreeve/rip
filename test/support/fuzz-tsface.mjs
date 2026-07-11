@@ -1,4 +1,4 @@
-// The TS-face drift-detection generator (M10-C, PR #58 review F5):
+// The TS-face drift-detection generator :
 // seeded, deterministic random programs across the M8/M10-B annotated
 // surface. The strip gate structurally prevents byte drift, but only
 // for corpus-exercised features — this layer generates programs the
@@ -21,8 +21,8 @@
 // all-or-nothing, so the separators keep each construct's
 // claim — and its face regions — attributable to that construct
 // alone.
-import { compile } from '../src/compile.js';
-import { stripFace } from '../src/emitter.js';
+import { compile } from '../../src/compile.js';
+import { stripFace } from '../../src/emitter.js';
 
 // mulberry32 — deterministic, seedable, good-enough dispersion for
 // construct selection.

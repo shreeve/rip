@@ -5,6 +5,11 @@ repository's pull requests.
 
 ## Unreleased
 
+- Add the UI and face test suites: components and the render DSL,
+  reactive declarations, effects, readonly, the reactive/component/ORM
+  runtime batteries, the TS-face strip gate with real-tsc validation,
+  and the recording DOM and adapter test doubles (#10)
+
 - Group the test suite by layer: lang/, mapping/, schema/, and
   toolchain/ directories under test/, with corpus/, battery/, and
   support/ unchanged and the battery runner beside its rows (#9)
