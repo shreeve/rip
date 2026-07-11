@@ -349,12 +349,15 @@ export async function runRow(row) {
       // (no injected preamble, no delivered runtime) is ALREADY the
       // engine's posture at runtime delivery 'none' — no-ops here.
       const NOOP_OPTIONS = new Set(['skipPreamble', 'skipRuntimes', 'skipDataPart', 'bare']);
+      // Real compile options a row may exercise — passed through as-is.
+      const PASS_OPTIONS = new Set(['foldProjections']);
       codeParser ??= new Bun.Transpiler({ loader: 'js' });
-      const unknown = Object.keys(row.options ?? {}).filter((k) => !NOOP_OPTIONS.has(k));
+      const unknown = Object.keys(row.options ?? {}).filter((k) => !NOOP_OPTIONS.has(k) && !PASS_OPTIONS.has(k));
       if (unknown.length > 0) {
         return `${where}\n  carries compile options ${JSON.stringify(row.options)} — no equivalent surface`;
       }
-      const { code: compiled } = compile(dedent(row.src), { path: `<${row.file}>`, runtimeDelivery: 'none' });
+      const pass = Object.fromEntries(Object.entries(row.options ?? {}).filter(([k]) => PASS_OPTIONS.has(k)));
+      const { code: compiled } = compile(dedent(row.src), { path: `<${row.file}>`, runtimeDelivery: 'none', ...pass });
       const got = normalizeCode(compiled);
       const want = normalizeCode(row.expected);
       if (got !== want) {
