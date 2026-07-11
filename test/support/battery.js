@@ -401,7 +401,7 @@ export async function runRow(row) {
       // without it pin the same declarations.
       const shedMarker = (s) => String(s).replace(/^export \{\};$/gm, '').replace(/\n{3,}/g, '\n\n').trim();
       const got = shedMarker(result.declarations ?? '');
-      const want = shedMarker(row.expected);
+      const want = shedMarker(dedent(row.expected));
       if (got !== want) return `${where}\n  expected declarations:\n${want.replace(/^/gm, '    ')}\n  actual:\n${got.replace(/^/gm, '    ')}`;
       return null;
     }

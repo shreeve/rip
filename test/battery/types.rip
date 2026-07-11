@@ -537,3 +537,45 @@ type 'typed promoted parameter declares its class field', '''
     constructor(url: string);
   }
   '''
+
+type 'type alias dts', '''
+  type User =
+    id: number
+    name: string
+    email?: string
+''', '''
+  type User = {
+    id: number;
+    name: string;
+    email?: string;
+  };
+'''
+
+type 'interface with : annotations', '''
+  interface User
+    id: number
+    name: string
+    email: string
+    isAdmin?: boolean
+''', '''
+  interface User {
+    id: number;
+    name: string;
+    email: string;
+    isAdmin?: boolean;
+  }
+'''
+
+type 'class with methods dts', '''
+  class UserService
+    url: string = ""
+    constructor: (@url: string) ->
+    fetch: (id: number) ->
+      console.log id
+''', '''
+  declare class UserService {
+    url: string;
+    constructor(url: string);
+    fetch(id: number): any;
+  }
+'''

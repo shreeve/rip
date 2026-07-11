@@ -4455,6 +4455,11 @@ class Emitter {
     }
     if (context === 'head') return tier !== 'primary';
     // context === 'statement'
+    // A statement whose FIRST TOKEN would be `{` parses as a block in
+    // JS no matter what follows — the leading-operand walk catches an
+    // object at the head of a binary/relation spine
+    // (`{a: 1} instanceof Map` must group its object).
+    if (Emitter.leadsWithObject(child)) return true;
     return tier === 'object' || isUpdate(child) ||
       (tier === 'function' && child[0] === '->') ||
       (isNode(child) && (child[0] === 'class' || child[0] === 'component')) ||
@@ -8398,6 +8403,20 @@ class Emitter {
   // `lit.repeat(n)`, a call: the primary tier, never a spine member.
   static isStrRepeat(x) {
     return isNode(x) && x[0] === '*' && x.length === 3 && typeof x[1] === 'string' && x[1][0] === '"';
+  }
+
+  // Does this expression's EMISSION begin with an object literal's
+  // `{`? Walks left operands of binaries/relations and chain heads.
+  static leadsWithObject(x) {
+    let cur = x;
+    for (;;) {
+      if (!isNode(cur)) return false;
+      if (isObject(cur)) return true;
+      if (isBinary(cur) || isRelation(cur) || isChainLink(cur)) { cur = cur[1]; continue; }
+      const slot = Emitter.chainHeadSlot(cur);
+      if (slot !== null) { cur = cur[slot]; continue; }
+      return false;
+    }
   }
 
   static chainHeadSlot(x) {
