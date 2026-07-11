@@ -121,3 +121,26 @@ test "trailing if with nullish default", '''
   result = (a if c) ?? []
   result
 ''', []
+
+# ==============================================================================
+# Optional-chain assignment evaluates its receiver exactly once
+# ==============================================================================
+
+test "the guard and the write see the same object", '''
+  objects = [{x: 0}, {x: 0}]
+  i = -1
+  get = -> objects[++i]
+  get()?.x = 7
+  [objects[0].x, objects[1].x, i]
+''', [7, 0, 0]
+
+test "a nullish receiver skips the write after one evaluation", '''
+  n = 0
+  get = ->
+    n += 1
+    null
+  get()?.x = 7
+  n
+''', 1
+
+code "a pure receiver keeps the plain guard", "o.a?.x = 5", "if (o.a != null) o.a.x = 5;"

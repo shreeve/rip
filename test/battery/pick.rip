@@ -265,3 +265,9 @@ o.{
 }
 ''', {default: 1, class: 'c', delete: true, new: 2}
 test "reserved: default value ok"   , "o = {}; o.{role = 'u', class: c = 'btn'}"         , {role: 'u', c: 'btn'}
+
+test "a pick default reads the user's own underscore binding", '''
+  _ = 42
+  make = -> {}
+  make().{a = _}
+''', {a: 42}

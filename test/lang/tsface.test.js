@@ -969,7 +969,7 @@ describe('types-gaps wave: type declarations in lowered value bodies reach the f
 
   test('catch-pattern handler renders the alias after the destructure line', () => {
     const faced = stripIsTwin('x = try\n  1\ncatch {message}\n  type E = string\n  message as E\n');
-    expect(faced.code).toContain('({message} = error);\n  type E = string;');
+    expect(faced.code).toContain('({message} = _err);\n  type E = string;');
   });
 
   test('SLOTLESS: a ternary-lowered branch flushes its alias to the enclosing list (hoisted, TS-legal)', () => {

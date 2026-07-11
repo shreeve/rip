@@ -226,3 +226,12 @@ test "ternary branches may build objects", '''
   v = t ? {a: 1} : {b: 2}
   v.a
 ''', 1
+
+test "a ternary condition keeps its parens", '''
+  a = true
+  b = false
+  c = true
+  (a ? b : c) ? 1 : 2
+''', 2
+
+code "ternary-condition grouping", "x = (a ? b : c) ? 1 : 2", "let x = (a ? b : c) ? 1 : 2;"
