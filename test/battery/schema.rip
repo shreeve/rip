@@ -436,6 +436,19 @@ fail ":shape rejects @belongs_to", '''
     @belongs_to Other
   '''
 
+fail "inline @unique off :model is rejected as persistence metadata", '''
+  X = schema :shape
+    code! @unique
+  ''', ":model-only"
+
+code 'required @unique + ..N implies min=1', '''
+  X = schema :model
+    token! ..60, @unique
+  ''', '''
+  let X;
+  X = __schema({kind: "model", name: "X", entries: [{tag: "field", name: "token", modifiers: ["!"], typeName: "string", array: false, unique: true, constraints: {min: 1, max: 60}}]});
+  ''', opts
+
 code ":input + @mixin is allowed (field sharing)", '''
   Base = schema :mixin
     id! uuid
@@ -624,6 +637,12 @@ test "default-string: bare optional modifier accepts missing field", '''
   out = Form.parse({})
   out.name
   ''', undefined
+
+test 'default-string: required+unique without explicit type', '''
+  U = schema :model
+    code! @unique
+  U.ok({code: "abc"})
+  ''', true
 
 test "default-string: still validates the inferred string type", '''
   Form = schema
