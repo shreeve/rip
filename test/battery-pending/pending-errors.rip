@@ -1,0 +1,10 @@
+# Pending rows for errors — behaviors the battery does not cover yet.
+# Every row here FAILS today; when a feature revives one, MOVE the row
+# into test/battery/ in the same change (the lane asserts still-failing).
+
+import { test, code, fail, type } from '../support/testing.js'
+
+fail 'binary existential hints ??', 'x = opts?.input ? null', 'x ?? y'
+fail 'bare binary existential hints ??', 'x = a ? b', 'x ?? y'
+fail 'incomplete ternary hints ??', 'y = cond ? 1', 'x ?? y'
+fail 'binary existential in call arg hints ??', 'foo a ? b', 'x ?? y'

@@ -5116,3 +5116,16 @@ test "the coercing form rejects impossible dates too", '''
     c? ~date
   [S.ok({c: "2024-02-30"}), S.ok({c: "2024-02-29"})]
 ''', [false, true]
+
+# Pick folding bails to the runtime call when a key is dynamic
+code "fold: bails to the runtime call on dynamic keys", '''
+  User = schema :model
+    name! string
+  k = "name"
+  V = User.pick(k)
+''', '''
+  let User, V, k;
+  User = __schema({kind: "model", name: "User", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}]});
+  k = "name";
+  V = User.pick(k);
+'''

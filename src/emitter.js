@@ -106,11 +106,12 @@ const isBlock = (x) => isNode(x) && x[0] === 'block';
 // component references.
 const isHtmlTag = (name) => TEMPLATE_TAGS.has(String(name).split('#')[0]);
 const isComponentName = (name) => typeof name === 'string' && /^[A-Z][A-Za-z0-9]*[a-z][A-Za-z0-9]*$/.test(name);
-const STATEMENT_HEADS = new Set(['for-in', 'for-of', 'for-as', 'switch', 'try', 'throw', 'loop', 'comprehension']);
+const STATEMENT_HEADS = new Set(['for-in', 'for-of', 'for-as', 'switch', 'try', 'throw', 'loop', 'loop-n', 'comprehension']);
 const isLoopNode = (x) => isNode(x) && (
   ((x[0] === 'for-in' || x[0] === 'for-of' || x[0] === 'for-as') && x.length === 6) ||
   (x[0] === 'while' && (x.length === 3 || x.length === 4)) ||
-  (x[0] === 'loop' && x.length === 2));
+  (x[0] === 'loop' && x.length === 2) ||
+  (x[0] === 'loop-n' && x.length === 3));
 
 // Module source strings emit single-quoted; the token value carries
 // normalized double quotes, so embedded single quotes (and
@@ -2103,6 +2104,7 @@ class Emitter {
     'return': (e, node) => (e.returnStatement(node), true),
     'while': (e, node, ind) => (node.length === 3 || node.length === 4) && (e.whileStatement(node, ind), true),
     'loop': (e, node, ind) => (e.loopStatement(node, ind), true),
+    'loop-n': (e, node, ind) => (e.loopStatement(node, ind), true),
     'for-in': (e, node, ind) => (e.forIn(node, ind), true),
     'for-of': (e, node, ind) => (e.forOf(node, ind), true),
     'for-as': (e, node, ind) => (e.forAs(node, ind), true),
@@ -2886,13 +2888,16 @@ class Emitter {
   }
 
   loopStatement(node, ind) {
-    this.inCtrl(() => this.loopStatementCtrl(node, ind));
+    this.withBindings(this.loopBindingNames(node), () => this.inCtrl(() => this.loopStatementCtrl(node, ind)));
   }
 
   loopStatementCtrl(node, ind) {
     this.mark(node, '$self', () => {
-      this.b.emit('while (true) ');
-      this.mark(node, 'body', () => this.braceBlock(node[1], ind));
+      // Both loop forms share the header emitter: `loop` is
+      // `while (true)`, `loop n` the counted for with `it` bound.
+      const { body } = this.loopHeader(node);
+      this.b.emit(' ');
+      this.mark(node, 'body', () => this.braceBlock(body, ind));
     });
   }
 
@@ -3019,6 +3024,7 @@ class Emitter {
   loopBindingNames(node) {
     const h = isNode(node) ? node[0] : null;
     let vars = null;
+    if (h === 'loop-n') return ['it'];
     if (h === 'for-in' || h === 'for-of' || h === 'for-as') vars = node[1];
     else if (h === 'comprehension') vars = node[2][0][1];
     if (vars === null) return [];
@@ -3950,6 +3956,24 @@ class Emitter {
       this.b.emit('while (true)');
       return { body: node[1], guard: null, setups: [] };
     }
+    if (head === 'loop-n') {
+      // `loop n` — n iterations, `it` bound as the counter. The count
+      // evaluates ONCE: a pure count reads inline in the header test;
+      // an impure one binds beside the counter.
+      const count = node[1];
+      const pure = typeof count === 'string' || Emitter.pureChain(count);
+      const ref = pure ? null : this.loopTempName('_n');
+      this.b.emit('for (let it = 0');
+      if (ref !== null) {
+        this.b.emit(`, ${ref} = `);
+        this.mark(node, 'count', () => this.expr(count));
+      }
+      this.b.emit('; it < ');
+      if (ref !== null) this.b.emit(ref);
+      else this.mark(node, 'count', () => this.expr(count));
+      this.b.emit('; it++)');
+      return { body: node[2], guard: null, setups: [] };
+    }
     const [, vars, iter, aux, guard, body] = node;
     const setups = this.clauseHeader(node, head, vars, iter, aux);
     return { body, guard, setups };
@@ -4435,6 +4459,7 @@ class Emitter {
     }
     const head = node[0];
     if (head === 'str') return this.strTemplate(node);
+    if (head === 'tagged-template' && node.length === 3) return this.taggedTemplate(node);
     if (head === 'here-regex') return this.heregex(node);
     if (isNode(head)) return this.call(node);
     // An assignment whose target spine holds an optional link lowers to
@@ -4550,6 +4575,7 @@ class Emitter {
     if (head === 'switch' && node.length === 4) return this.valueSwitch(node);
     if (head === 'while' && (node.length === 3 || node.length === 4)) return this.accumulatorIIFE(node);
     if (head === 'loop' && node.length === 2) return this.accumulatorIIFE(node);
+    if (head === 'loop-n' && node.length === 3) return this.accumulatorIIFE(node);
     if ((head === 'for-in' || head === 'for-of' || head === 'for-as') && node.length === 6) return this.accumulatorIIFE(node);
     // `throw` in an operand slot lowers to a throwing IIFE — the one
     // JS spelling that throws from any expression position (`a ?? throw
@@ -8878,8 +8904,20 @@ class Emitter {
           // this-index key form (`{@[k]: v}`) has no valid JS emission
           // anywhere and rejects with it. Rest elements (`{...rest}`)
           // pass — their payload is a name.
-          if (pair[0] !== '...' && isNode(pair[1]) && !dynamicKey) {
+          // An INTERPOLATED string key is a computed key: the
+          // template IS the key expression (`{"#{k}": v}` → `[\`${k}\`]: v`).
+          const strKey = isNode(pair[1]) && pair[1][0] === 'str';
+          if (pair[0] !== '...' && isNode(pair[1]) && !dynamicKey && !strKey) {
             throw this.positionedError(pair, 'emitter: @-keys are only supported in class bodies', node);
+          }
+          if (pair[0] === ':' && strKey) {
+            this.mark(pair, '$self', () => {
+              this.b.emit('[');
+              this.mark(pair, 'key', () => this.strTemplate(pair[1]));
+              this.b.emit(']: ');
+              this.mark(pair, 'value', () => this.expr(pair[2]));
+            });
+            return;
           }
           this.mark(pair, '$self', () => {
             if (pair[0] === ':' && dynamicKey) {
@@ -10032,6 +10070,35 @@ class Emitter {
       this.b.emit(' ??= {}, ');
       this.mark(node, 'value', () => this.expr(value));
       this.b.emit(')');
+    });
+  }
+
+  // ["tagged-template", tag, str] — the tag calls the template:
+  // `tag"x"` / `sh $"cmd #{c}"` → tag`x` / sh`cmd ${c}`. The tag is a
+  // head position (a non-primary tag would rebind the template onto
+  // its last sub-expression); the template re-emits the string in
+  // backtick form — a plain value's quotes swap (its escapes carry),
+  // a single-quote heredoc is already backtick-delimited, and an
+  // interpolated string's own emission is the template.
+  taggedTemplate(node) {
+    this.mark(node, '$self', () => {
+      const tag = node[1];
+      this.mark(node, 'tag', () => {
+        if (Emitter.needsGrouping(tag, 'head')) {
+          this.b.emit('(');
+          this.expr(tag);
+          this.b.emit(')');
+        } else this.expr(tag);
+      });
+      const s = node[2];
+      this.mark(node, 'str', () => {
+        if (typeof s === 'string') {
+          if (s[0] === '`') this.b.emit(s);
+          else this.b.emit('`' + Emitter.escapeTemplate(s.slice(1, -1).replace(/\\"/g, '"')) + '`');
+        } else {
+          this.expr(s);
+        }
+      });
     });
   }
 

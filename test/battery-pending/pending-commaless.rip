@@ -1,0 +1,207 @@
+# Pending rows for commaless — behaviors the battery does not cover yet.
+# Every row here FAILS today; when a feature revives one, MOVE the row
+# into test/battery/ in the same change (the lane asserts still-failing).
+
+import { test, code, fail, type } from '../support/testing.js'
+
+code 'string arrow thin', 'get \'/users\' -> 1', '''
+  get('/users', function() {
+    return 1;
+  });
+'''
+
+code 'string arrow thin block', '''
+  get '/users' ->
+    1
+''', '''
+  get('/users', function() {
+    return 1;
+  });
+'''
+
+code 'string fat arrow', 'get \'/users\' => 1', 'get(\'/users\', () => 1);'
+
+code 'string fat arrow block', '''
+  get '/users' =>
+    1
+''', 'get(\'/users\', () => 1);'
+
+code 'multiple routes', '''
+  get '/a' -> 1
+  get '/b' -> 2
+''', '''
+  get('/a', function() {
+    return 1;
+  });
+
+  get('/b', function() {
+    return 2;
+  });
+'''
+
+code 'chained call string arrow', 'app.get \'/users\' -> 1', '''
+  app.get('/users', function() {
+    return 1;
+  });
+'''
+
+test 'string arrow runtime', '''
+  handler = (path, fn) -> fn()
+  handler '/test' -> 42
+''', 42
+
+test 'string fat arrow runtime', '''
+  handler = (path, fn) -> fn()
+  handler '/test' => 42
+''', 42
+
+code 'regex arrow thin', 'get /^\\/api/ -> 1', '''
+  get(/^\\/api/, function() {
+    return 1;
+  });
+'''
+
+code 'regex fat arrow', 'get /^\\/api/ => 1', 'get(/^\\/api/, () => 1);'
+
+code 'regex complex', 'match /^user-(\\d+)$/ -> 1', '''
+  match(/^user-(\\d+)$/, function() {
+    return 1;
+  });
+'''
+
+test 'regex arrow runtime', '''
+  handler = (pattern, fn) -> fn()
+  handler /test/ -> 42
+''', 42
+
+test 'regex fat arrow runtime', '''
+  handler = (pattern, fn) -> fn()
+  handler /test/ => 42
+''', 42
+
+code 'number arrow thin', 'handle 404 -> 1', '''
+  handle(404, function() {
+    return 1;
+  });
+'''
+
+code 'number fat arrow', 'handle 404 => 1', 'handle(404, () => 1);'
+
+code 'multiple number handlers', '''
+  handle 404 -> 1
+  handle 500 -> 2
+''', '''
+  handle(404, function() {
+    return 1;
+  });
+
+  handle(500, function() {
+    return 2;
+  });
+'''
+
+test 'number arrow runtime', '''
+  handler = (code, fn) -> fn()
+  handler 404 -> 'not found'
+''', 'not found'
+
+test 'number fat arrow runtime', '''
+  handler = (code, fn) -> fn()
+  handler 500 => 'error'
+''', 'error'
+
+code 'arrow with object', 'get \'/config\' -> { port: 3000 }', '''
+  get('/config', function() {
+    return {port: 3000};
+  });
+'''
+
+code 'bool true arrow', 'check true -> 1', '''
+  check(true, function() {
+    return 1;
+  });
+'''
+
+code 'bool false arrow', 'check false -> 0', '''
+  check(false, function() {
+    return 0;
+  });
+'''
+
+test 'bool arrow runtime', '''
+  handler = (flag, fn) -> fn()
+  handler true -> 'yes'
+''', 'yes'
+
+code 'null arrow', 'handle null -> \'default\'', '''
+  handle(null, function() {
+    return 'default';
+  });
+'''
+
+code 'undefined arrow', 'handle undefined -> \'missing\'', '''
+  handle(undefined, function() {
+    return 'missing';
+  });
+'''
+
+test 'null arrow runtime', '''
+  handler = (val, fn) -> fn()
+  handler null -> 'null!'
+''', 'null!'
+
+test 'undefined arrow runtime', '''
+  handler = (val, fn) -> fn()
+  handler undefined -> 'undef!'
+''', 'undef!'
+
+code 'infinity arrow', 'handle Infinity -> \'overflow\'', '''
+  handle(Infinity, function() {
+    return 'overflow';
+  });
+'''
+
+code 'nan arrow', 'handle NaN -> \'invalid\'', '''
+  handle(NaN, function() {
+    return 'invalid';
+  });
+'''
+
+test 'infinity arrow runtime', '''
+  handler = (val, fn) -> fn()
+  handler Infinity -> 'inf!'
+''', 'inf!'
+
+code 'array arrow', 'match [1, 2, 3] -> \'found\'', '''
+  match([1, 2, 3], function() {
+    return 'found';
+  });
+'''
+
+code 'empty array arrow', 'match [] -> \'empty\'', '''
+  match([], function() {
+    return 'empty';
+  });
+'''
+
+test 'array arrow runtime', '''
+  handler = (arr, fn) -> fn()
+  handler [1, 2] -> 'got array'
+''', 'got array'
+
+code 'object arrow', 'match {x: 1} -> \'found\'', '''
+  match({x: 1}, function() {
+    return 'found';
+  });
+'''
+
+code 'empty object arrow', 'match {} -> \'empty\'', '''
+  match({}, function() {
+    return 'empty';
+  });
+'''
+
+test 'object arrow runtime', '''
+  handler = (obj, fn) -> fn()
+  handler {a: 1} -> 'got object'
+''', 'got object'

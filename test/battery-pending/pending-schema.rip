@@ -1,0 +1,795 @@
+# Pending rows for schema — behaviors the battery does not cover yet.
+# Every row here FAILS today; when a feature revives one, MOVE the row
+# into test/battery/ in the same change (the lane asserts still-failing).
+
+import { test, code, fail, type } from '../support/testing.js'
+
+code 'schema as variable still works', '''
+  export schema = 42
+  schema + 1
+''', '''
+  export const schema = 42;
+  (schema + 1);
+'''
+
+code 'inline: trailing semicolon before newline', '''
+  X = schema :shape; name!;
+  y = 1
+''', '''
+  let X, y;
+  X = __schema({kind: "shape", name: "X", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}]});
+  y = 1;
+'''
+
+test 'default-string: required+unique without explicit type', '''
+  U = schema :shape
+    code! @unique
+  U.ok({code: "abc"})
+''', true
+
+fail 'open-ended: bare \'..\' is rejected', '''
+  X = schema
+    name! ..
+''', null
+
+code 'required @unique + ..N implies min=1', '''
+  X = schema
+    token! ..60, @unique
+''', '''
+  let X;
+  X = __schema({kind: "input", name: "X", entries: [{tag: "field", name: "token", modifiers: ["!"], typeName: "string", array: false, unique: true, constraints: {min: 1, max: 60}}]});
+'''
+
+test 'diamond mixin inclusion dedupes', '''
+    Base = schema :mixin
+      id! uuid
+    Left = schema :mixin
+      left! string
+      @mixin Base
+    Right = schema :mixin
+      right! string
+      @mixin Base
+    User = schema :model
+      name! string
+      @mixin Left
+      @mixin Right
+    [...User._normalize().fields.keys()]
+''', ['name', 'id', 'left', 'right']
+
+test 'algebra preserves sourceModel through chain', '''
+    User = schema :model
+      name! string
+      email! email
+    A = User.pick("name")
+    B = A.partial()
+    [A._sourceModel is User, B._sourceModel is User]
+''', [true, true]
+
+code 'fold: pick emits a self-contained shape literal', '''
+  User = schema :model
+    name! string
+    @timestamps
+  V = User.pick("id", "name")
+''', '''
+  let User, V;
+  User = __schema({kind: "model", name: "User", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}, {tag: "directive", name: "timestamps"}]});
+  V = __schema({kind: "shape", name: "V", entries: [{tag: "field", name: "id", modifiers: ["!"], typeName: "integer", array: false}, {tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}]});
+'''
+
+test '.includes(:orders) batches one IN query and fills the memo', '''
+    adapter =
+      calls: []
+      canned: {}
+      query: (sql, params) ->
+        @calls.push {sql, params}
+        if @canned[sql] then @canned[sql] else (@canned.__default ?? {columns: [], data: [], rows: 0})
+    __schemaSetAdapter adapter
+    __SchemaRegistry.reset()
+    User = schema :model
+      name! string
+      @has_many Order
+    Order = schema :model
+      total! integer
+      @belongs_to User
+    adapter.canned['SELECT * FROM "users"'] =
+      {columns: [{name: "id"}, {name: "name"}], data: [[1, "A"], [2, "B"]], rows: 2}
+    adapter.canned['SELECT * FROM "orders" WHERE "user_id" IN (?, ?)'] =
+      {columns: [{name: "id"}, {name: "total"}, {name: "user_id"}], data: [[7, 100, 1], [8, 50, 1], [9, 25, 2]], rows: 3}
+    users = User.includes(:orders).all!
+    queries = adapter.calls.length
+    a = users[0].orders!
+    b = users[1].orders!
+    [queries, adapter.calls.length, a.length, b.length, a[0].total]
+''', [2, 2, 2, 1, 100]
+
+test '.includes(:user) on belongs_to batches via findMany; instances shared', '''
+    adapter =
+      calls: []
+      canned: {}
+      query: (sql, params) ->
+        @calls.push {sql, params}
+        if @canned[sql] then @canned[sql] else (@canned.__default ?? {columns: [], data: [], rows: 0})
+    __schemaSetAdapter adapter
+    __SchemaRegistry.reset()
+    User = schema :model
+      name! string
+      @has_many Order
+    Order = schema :model
+      total! integer
+      @belongs_to User
+    adapter.canned['SELECT * FROM "orders"'] =
+      {columns: [{name: "id"}, {name: "total"}, {name: "user_id"}], data: [[7, 100, 1], [8, 50, 1]], rows: 2}
+    adapter.canned['SELECT * FROM "users" WHERE "id" IN (?)'] =
+      {columns: [{name: "id"}, {name: "name"}], data: [[1, "A"]], rows: 1}
+    orders = Order.includes(:user).all!
+    u1 = orders[0].user!
+    u2 = orders[1].user!
+    [adapter.calls.length, u1.name, u1 is u2]
+''', [2, 'A', true]
+
+test 'nested includes: {orders: :user} preloads two levels', '''
+    adapter =
+      calls: []
+      canned: {}
+      query: (sql, params) ->
+        @calls.push {sql, params}
+        if @canned[sql] then @canned[sql] else (@canned.__default ?? {columns: [], data: [], rows: 0})
+    __schemaSetAdapter adapter
+    __SchemaRegistry.reset()
+    User = schema :model
+      name! string
+      @has_many Order
+    Order = schema :model
+      total! integer
+      @belongs_to User
+    adapter.canned['SELECT * FROM "users"'] =
+      {columns: [{name: "id"}, {name: "name"}], data: [[1, "A"], [2, "B"]], rows: 2}
+    adapter.canned['SELECT * FROM "orders" WHERE "user_id" IN (?, ?)'] =
+      {columns: [{name: "id"}, {name: "total"}, {name: "user_id"}], data: [[7, 100, 1], [8, 50, 2]], rows: 2}
+    adapter.canned['SELECT * FROM "users" WHERE "id" IN (?, ?)'] =
+      {columns: [{name: "id"}, {name: "name"}], data: [[1, "A"], [2, "B"]], rows: 2}
+    users = User.includes(orders: :user).all!
+    total = adapter.calls.length
+    orders = users[0].orders!
+    owner = orders[0].user!
+    [total, adapter.calls.length, owner.name]
+''', [3, 3, 'A']
+
+test '.includes with unknown relation throws a helpful error', '''
+    adapter =
+      calls: []
+      canned: {}
+      query: (sql, params) ->
+        @calls.push {sql, params}
+        if @canned[sql] then @canned[sql] else (@canned.__default ?? {columns: [], data: [], rows: 0})
+    __schemaSetAdapter adapter
+    __SchemaRegistry.reset()
+    User = schema :model
+      name! string
+    adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}], data: [[1, "A"]], rows: 1}
+    err = null
+    try
+      User.includes(:bogus).all!
+    catch e
+      err = e.message
+    [err.includes("bogus"), err.includes("no such relation")]
+''', [true, true]
+
+test '.upsert! emits ON CONFLICT DO UPDATE; branch hooks skipped', '''
+    adapter =
+      calls: []
+      canned: {}
+      query: (sql, params) ->
+        @calls.push {sql, params}
+        if @canned[sql] then @canned[sql] else (@canned.__default ?? {columns: [], data: [], rows: 0})
+    __schemaSetAdapter adapter
+    __SchemaRegistry.reset()
+    trace = []
+    User = schema :model
+      name! string
+      email! email @unique
+      beforeSave:   -> trace.push "beforeSave"
+      beforeCreate: -> trace.push "beforeCreate"
+      beforeUpdate: -> trace.push "beforeUpdate"
+      afterSave:    -> trace.push "afterSave"
+    adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}, {name: "email"}], data: [[1, "Alice", "a@b.c"]], rows: 1}
+    u = User.upsert! {email: "a@b.c", name: "Alice"}, on: :email
+    sql = adapter.calls[0].sql
+    [sql.includes('ON CONFLICT ("email") DO UPDATE SET'), sql.includes('"name" = EXCLUDED."name"'), trace, u.id, u._persisted]
+''', [true, true, ['beforeSave', 'afterSave'], 1, true]
+
+test '~:name resolves through the registry; output validates and constrains', '''
+    __ripSchema.__schemaRegisterCoercer "id", (v) ->
+      m = v.match(/^([1-9]\\d{0,14})$/)
+      if m then parseInt(m[1]) else null
+    __ripSchema.__schemaRegisterCoercer "ssn", (v) ->
+      m = v.match(/^(\\d{3})-?(\\d{2})-?(\\d{4})$/)
+      if m then m[1] + m[2] + m[3] else null
+    X = schema
+      chart! ~:id, 1..99999
+      ssn?   ~:ssn
+    a = X.parse {chart: "42", ssn: "123-45-6789"}
+    r1 = X.safe {chart: "0"}
+    r2 = X.safe {chart: "999999999"}
+    [a.chart, a.ssn, r1.errors[0].error, r2.errors[0].error]
+''', [42, '123456789', 'coerce', 'max']
+
+test '~:name failures use the coercer\'s name in the issue', '''
+    __ripSchema.__schemaRegisterCoercer "state2", (v) ->
+      m = v.match(/^([a-z][a-z])$/i)
+      if m then m[1].toUpperCase() else null
+    X = schema
+      state? ~:state2
+    r = X.safe {state: "utah"}
+    [r.errors[0].field, r.errors[0].error, r.errors[0].message]
+''', ['state', 'coerce', 'state is not a valid state2']
+
+test 'custom ~:name coercers type as any — value-typed constraints still apply', '''
+    __ripSchema.__schemaRegisterCoercer "evenInt", (v) ->
+      n = parseInt(v, 10)
+      if Number.isInteger(n) and n % 2 is 0 then n else null
+    X = schema
+      n? ~:evenInt, 0..10
+    a = X.parse {n: "4"}
+    r = X.safe {n: "3"}
+    r2 = X.safe {n: "12"}
+    [a.n, r.errors[0].error, r2.errors[0].error]
+''', [4, 'coerce', 'max']
+
+test 'methods accept parameters (typed and untyped) at runtime', '''
+    Money = schema :shape
+      amount!   integer
+      currency! string, 3..3
+      add: (other: Money) ->
+        Money.parse {amount: @amount + other.amount, currency: @currency}
+      scaled: (factor, label) ->
+        label + (@amount * factor)
+    a = Money.parse {amount: 100, currency: "USD"}
+    b = a.add(Money.parse {amount: 25, currency: "USD"})
+    [b.amount, a.scaled(2, "x")]
+''', [125, 'x200']
+
+test 'transaction! on: pins one adapter; other-adapter calls run outside', '''
+    calls = {a: [], b: []}
+    mk = (tag) ->
+      adapter = {}
+      adapter.query = (sql, params) ->
+        calls[tag].push sql
+        {columns: [{name: "id"}, {name: "name"}], data: [[1, "x"]], rows: 1}
+      adapter.begin = ->
+        calls[tag].push "BEGIN"
+        handle = {}
+        handle.query = (sql) ->
+          calls[tag].push "tx:" + sql.split(" ")[0]
+          {columns: [], data: [], rows: 0}
+        handle.commit = -> calls[tag].push "COMMIT"
+        handle.rollback = -> calls[tag].push "ROLLBACK"
+        handle
+      adapter
+    __schemaSetAdapter mk("a")
+    __SchemaRegistry.reset()
+    analytics = mk("b")
+    User = schema :model
+      name! string
+    Event = schema :model, on: analytics
+      name! string
+    schema.transaction! on: analytics, ->
+      Event.create! name: "e"
+      User.create! name: "u"
+      null
+    txB = calls.b.filter (s) -> s.startsWith("tx:")
+    txA = calls.a.filter (s) -> s.startsWith("tx:")
+    [txB.length, txA.length, calls.b.includes("COMMIT"), calls.a.includes("BEGIN")]
+''', [1, 0, true, false]
+
+test '@unique survives mixin expansion', '''
+    adapter =
+      calls: []
+      canned: {}
+      query: (sql, params) ->
+        @calls.push {sql, params}
+        if @canned[sql] then @canned[sql] else (@canned.__default ?? {columns: [], data: [], rows: 0})
+    __schemaSetAdapter adapter
+    __SchemaRegistry.reset()
+    Keyed = schema :mixin
+      code! string @unique
+    Thing = schema :model
+      @mixin Keyed
+      name! string
+    Thing._tableSpec().indexes.map (i) -> i.name + (i.unique ? "!" : "")
+''', ['idx_things_code!']
+
+test 'diff: empty database plans CREATE for every model', '''
+    deployed = {tables: []}
+    history  = []
+    calls    = []
+    adapter =
+      introspect: -> deployed
+      query: (sql, params) ->
+        calls.push {sql, params}
+        if sql.startsWith("SELECT version")
+          {columns: [{name: "version"}, {name: "name"}, {name: "checksum"}, {name: "applied_at"}], data: history.map((h) -> [h.version, h.name, h.checksum, null]), rows: history.length}
+        else if sql.startsWith("INSERT INTO _rip_migrations")
+          history.push {version: params[0], name: params[1], checksum: params[2]}
+          {columns: [], data: [], rows: 1}
+        else
+          {columns: [], data: [], rows: 0}
+    __schemaSetAdapter adapter
+    __SchemaRegistry.reset()
+    User = schema :model
+      name! string
+    Order = schema :model
+      total! integer
+      @belongs_to User
+    steps = schema.plan!
+    kinds = steps.map (s) -> s.kind + ":" + s.class
+    out = [
+      steps.length
+      kinds
+      steps[0].sql.join("\\n").includes("CREATE TABLE users")
+      steps[1].sql.join("\\n").includes("user_id INTEGER NOT NULL REFERENCES users(id)")
+    ]
+    out
+''', [2, ['create-table:safe', 'create-table:safe'], true, true]
+
+test 'diff: matching database plans nothing (round-trip clean)', '''
+    deployed = {tables: []}
+    history  = []
+    calls    = []
+    adapter =
+      introspect: -> deployed
+      query: (sql, params) ->
+        calls.push {sql, params}
+        if sql.startsWith("SELECT version")
+          {columns: [{name: "version"}, {name: "name"}, {name: "checksum"}, {name: "applied_at"}], data: history.map((h) -> [h.version, h.name, h.checksum, null]), rows: history.length}
+        else if sql.startsWith("INSERT INTO _rip_migrations")
+          history.push {version: params[0], name: params[1], checksum: params[2]}
+          {columns: [], data: [], rows: 1}
+        else
+          {columns: [], data: [], rows: 0}
+    __schemaSetAdapter adapter
+    __SchemaRegistry.reset()
+    User = schema :model
+      name!   string, 1..100
+      email!  email @unique
+      @timestamps
+    deployed.tables = [{
+      name: "users"
+      sequence: {name: "users_seq", start: 1}
+      primaryKey: "id"
+      columns: [
+        {name: "id", type: "INTEGER", notNull: true, unique: false, primary: true, default: "nextval('users_seq')"}
+        {name: "name", type: "VARCHAR", notNull: true, unique: false, default: null}
+        {name: "email", type: "VARCHAR", notNull: true, unique: true, default: null}
+        {name: "created_at", type: "TIMESTAMP", notNull: false, unique: false, default: "CURRENT_TIMESTAMP"}
+        {name: "updated_at", type: "TIMESTAMP", notNull: false, unique: false, default: "now()"}
+      ]
+      indexes: [{name: "idx_users_email", columns: ["email"], unique: true}]
+      foreignKeys: []
+      tableWas: null
+    }]
+    steps = schema.plan!
+    steps.length
+''', 0
+
+test 'diff: added columns classify by shape (optional / default / required / unique)', '''
+    deployed = {tables: []}
+    history  = []
+    calls    = []
+    adapter =
+      introspect: -> deployed
+      query: (sql, params) ->
+        calls.push {sql, params}
+        if sql.startsWith("SELECT version")
+          {columns: [{name: "version"}, {name: "name"}, {name: "checksum"}, {name: "applied_at"}], data: history.map((h) -> [h.version, h.name, h.checksum, null]), rows: history.length}
+        else if sql.startsWith("INSERT INTO _rip_migrations")
+          history.push {version: params[0], name: params[1], checksum: params[2]}
+          {columns: [], data: [], rows: 1}
+        else
+          {columns: [], data: [], rows: 0}
+    __schemaSetAdapter adapter
+    __SchemaRegistry.reset()
+    User = schema :model
+      name!  string
+      bio?   text
+      plan?  string, ["free"]
+      code!  string
+      tag!   string @unique
+    deployed.tables = [{
+      name: "users", sequence: {name: "users_seq", start: 1}, primaryKey: "id"
+      columns: [
+        {name: "id", type: "INTEGER", notNull: true, unique: false, primary: true, default: "nextval('users_seq')"}
+        {name: "name", type: "VARCHAR", notNull: true, unique: false, default: null}
+      ]
+      indexes: [], foreignKeys: [], tableWas: null
+    }]
+    steps = schema.plan!
+    byKind = {}
+    for s in steps
+      byKind[s.sql[0].match(/ADD COLUMN (\\w+)/)?[1] ?? s.kind] = s
+    hasTodo = byKind.code.sql.some (l) -> l.includes("TODO: backfill")
+    hasUniq = byKind.tag.sql.some (l) -> l.includes("CREATE UNIQUE INDEX idx_users_tag")
+    out = [
+      byKind.bio.sql.length
+      byKind.plan.sql[0].includes("DEFAULT 'free'")
+      hasTodo
+      byKind.code.sql[byKind.code.sql.length - 1].includes("SET NOT NULL")
+      hasUniq
+    ]
+    out
+''', [1, true, true, true, true]
+
+test 'diff: drops are destructive; type/null changes classify lossy/safe', '''
+    deployed = {tables: []}
+    history  = []
+    calls    = []
+    adapter =
+      introspect: -> deployed
+      query: (sql, params) ->
+        calls.push {sql, params}
+        if sql.startsWith("SELECT version")
+          {columns: [{name: "version"}, {name: "name"}, {name: "checksum"}, {name: "applied_at"}], data: history.map((h) -> [h.version, h.name, h.checksum, null]), rows: history.length}
+        else if sql.startsWith("INSERT INTO _rip_migrations")
+          history.push {version: params[0], name: params[1], checksum: params[2]}
+          {columns: [], data: [], rows: 1}
+        else
+          {columns: [], data: [], rows: 0}
+    __schemaSetAdapter adapter
+    __SchemaRegistry.reset()
+    User = schema :model
+      name!  string
+      age?   integer
+    deployed.tables = [{
+      name: "users", sequence: {name: "users_seq", start: 1}, primaryKey: "id"
+      columns: [
+        {name: "id", type: "INTEGER", notNull: true, unique: false, primary: true, default: "nextval('users_seq')"}
+        {name: "name", type: "VARCHAR", notNull: false, unique: false, default: null}
+        {name: "age", type: "VARCHAR", notNull: true, unique: false, default: null}
+        {name: "legacy", type: "VARCHAR", notNull: false, unique: false, default: null}
+      ]
+      indexes: [], foreignKeys: [], tableWas: null
+    }, {
+      name: "ghosts", sequence: null, primaryKey: "id"
+      columns: [{name: "id", type: "INTEGER", notNull: true, unique: false, primary: true, default: null}]
+      indexes: [], foreignKeys: [], tableWas: null
+    }]
+    steps = schema.plan!
+    kinds = steps.map((s) -> s.kind + ":" + s.class).sort()
+    kinds
+''', ['alter-type:lossy', 'drop-column:destructive', 'drop-not-null:safe', 'drop-table:destructive', 'set-not-null:lossy']
+
+test 'diff: VARCHAR length hints never produce drift (DuckDB erases them)', '''
+    deployed = {tables: []}
+    history  = []
+    calls    = []
+    adapter =
+      introspect: -> deployed
+      query: (sql, params) ->
+        calls.push {sql, params}
+        if sql.startsWith("SELECT version")
+          {columns: [{name: "version"}, {name: "name"}, {name: "checksum"}, {name: "applied_at"}], data: history.map((h) -> [h.version, h.name, h.checksum, null]), rows: history.length}
+        else if sql.startsWith("INSERT INTO _rip_migrations")
+          history.push {version: params[0], name: params[1], checksum: params[2]}
+          {columns: [], data: [], rows: 1}
+        else
+          {columns: [], data: [], rows: 0}
+    __schemaSetAdapter adapter
+    __SchemaRegistry.reset()
+    User = schema :model
+      name! string, 1..100
+    deployed.tables = [{
+      name: "users", sequence: {name: "users_seq", start: 1}, primaryKey: "id"
+      columns: [
+        {name: "id", type: "INTEGER", notNull: true, unique: false, primary: true, default: "nextval('users_seq')"}
+        {name: "name", type: "VARCHAR", notNull: true, unique: false, default: null}
+      ]
+      indexes: [], foreignKeys: [], tableWas: null
+    }]
+    steps = schema.plan!
+    steps.length
+''', 0
+
+test 'rename: {was: ...} emits RENAME COLUMN instead of drop + add', '''
+    deployed = {tables: []}
+    history  = []
+    calls    = []
+    adapter =
+      introspect: -> deployed
+      query: (sql, params) ->
+        calls.push {sql, params}
+        if sql.startsWith("SELECT version")
+          {columns: [{name: "version"}, {name: "name"}, {name: "checksum"}, {name: "applied_at"}], data: history.map((h) -> [h.version, h.name, h.checksum, null]), rows: history.length}
+        else if sql.startsWith("INSERT INTO _rip_migrations")
+          history.push {version: params[0], name: params[1], checksum: params[2]}
+          {columns: [], data: [], rows: 1}
+        else
+          {columns: [], data: [], rows: 0}
+    __schemaSetAdapter adapter
+    __SchemaRegistry.reset()
+    User = schema :model
+      givenName! string, {was: "first_name"}
+    deployed.tables = [{
+      name: "users", sequence: {name: "users_seq", start: 1}, primaryKey: "id"
+      columns: [
+        {name: "id", type: "INTEGER", notNull: true, unique: false, primary: true, default: "nextval('users_seq')"}
+        {name: "first_name", type: "VARCHAR", notNull: true, unique: false, default: null}
+      ]
+      indexes: [], foreignKeys: [], tableWas: null
+    }]
+    steps = schema.plan!
+    [steps.length, steps[0].kind, steps[0].sql[0]]
+''', [1, 'rename-column', 'ALTER TABLE users RENAME COLUMN first_name TO given_name;']
+
+test 'rename: @tableWas emits RENAME TO and then diffs columns', '''
+    deployed = {tables: []}
+    history  = []
+    calls    = []
+    adapter =
+      introspect: -> deployed
+      query: (sql, params) ->
+        calls.push {sql, params}
+        if sql.startsWith("SELECT version")
+          {columns: [{name: "version"}, {name: "name"}, {name: "checksum"}, {name: "applied_at"}], data: history.map((h) -> [h.version, h.name, h.checksum, null]), rows: history.length}
+        else if sql.startsWith("INSERT INTO _rip_migrations")
+          history.push {version: params[0], name: params[1], checksum: params[2]}
+          {columns: [], data: [], rows: 1}
+        else
+          {columns: [], data: [], rows: 0}
+    __schemaSetAdapter adapter
+    __SchemaRegistry.reset()
+    Member = schema :model
+      name! string
+      @tableWas users
+    deployed.tables = [{
+      name: "users", sequence: {name: "users_seq", start: 1}, primaryKey: "id"
+      columns: [
+        {name: "id", type: "INTEGER", notNull: true, unique: false, primary: true, default: "nextval('users_seq')"}
+        {name: "name", type: "VARCHAR", notNull: true, unique: false, default: null}
+      ]
+      indexes: [], foreignKeys: [], tableWas: null
+    }]
+    steps = schema.plan!
+    [steps.length, steps[0].kind, steps[0].sql[0]]
+''', [1, 'rename-table', 'ALTER TABLE users RENAME TO members;']
+
+test 'diff: ALTERs on FK-referenced tables classify as blocked (DuckDB wall)', '''
+    deployed = {tables: []}
+    history  = []
+    calls    = []
+    adapter =
+      introspect: -> deployed
+      query: (sql, params) ->
+        calls.push {sql, params}
+        if sql.startsWith("SELECT version")
+          {columns: [{name: "version"}, {name: "name"}, {name: "checksum"}, {name: "applied_at"}], data: history.map((h) -> [h.version, h.name, h.checksum, null]), rows: history.length}
+        else if sql.startsWith("INSERT INTO _rip_migrations")
+          history.push {version: params[0], name: params[1], checksum: params[2]}
+          {columns: [], data: [], rows: 1}
+        else
+          {columns: [], data: [], rows: 0}
+    __schemaSetAdapter adapter
+    __SchemaRegistry.reset()
+    User = schema :model
+      fullName! string, {was: "name"}
+      phone?    string
+    Order = schema :model
+      total! integer
+      @belongs_to User
+    deployed.tables = [{
+      name: "users", sequence: {name: "users_seq", start: 1}, primaryKey: "id"
+      columns: [
+        {name: "id", type: "INTEGER", notNull: true, unique: false, primary: true, default: "nextval('users_seq')"}
+        {name: "name", type: "VARCHAR", notNull: true, unique: false, default: null}
+      ]
+      indexes: [], foreignKeys: [], tableWas: null
+    }, {
+      name: "orders", sequence: {name: "orders_seq", start: 1}, primaryKey: "id"
+      columns: [
+        {name: "id", type: "INTEGER", notNull: true, unique: false, primary: true, default: "nextval('orders_seq')"}
+        {name: "total", type: "INTEGER", notNull: true, unique: false, default: null}
+        {name: "user_id", type: "INTEGER", notNull: true, unique: false, default: null}
+      ]
+      indexes: [], foreignKeys: [{column: "user_id", refTable: "users", refColumn: "id"}], tableWas: null
+    }]
+    steps = schema.plan!
+    rename = steps.find (s) -> s.kind is "rename-column"
+    added  = steps.find (s) -> s.kind is "add-column"
+    err = null
+    try
+      schema.make! "x", {dir: "/tmp/__rip_mig_blocked"}
+    catch e
+      err = e.message
+    out = [rename.class, added.class, rename.notes.some((n) -> n.includes("Dependency Error")), err.includes("cannot execute")]
+    out
+''', ['blocked', 'safe', true, true]
+
+test 'make: refuses gated steps without allow flags; allows with them', '''
+    deployed = {tables: []}
+    history  = []
+    calls    = []
+    adapter =
+      introspect: -> deployed
+      query: (sql, params) ->
+        calls.push {sql, params}
+        if sql.startsWith("SELECT version")
+          {columns: [{name: "version"}, {name: "name"}, {name: "checksum"}, {name: "applied_at"}], data: history.map((h) -> [h.version, h.name, h.checksum, null]), rows: history.length}
+        else if sql.startsWith("INSERT INTO _rip_migrations")
+          history.push {version: params[0], name: params[1], checksum: params[2]}
+          {columns: [], data: [], rows: 1}
+        else
+          {columns: [], data: [], rows: 0}
+    __schemaSetAdapter adapter
+    __SchemaRegistry.reset()
+    User = schema :model
+      name! string
+    deployed.tables = [{
+      name: "users", sequence: {name: "users_seq", start: 1}, primaryKey: "id"
+      columns: [
+        {name: "id", type: "INTEGER", notNull: true, unique: false, primary: true, default: "nextval('users_seq')"}
+        {name: "name", type: "VARCHAR", notNull: true, unique: false, default: null}
+        {name: "legacy", type: "VARCHAR", notNull: false, unique: false, default: null}
+      ]
+      indexes: [], foreignKeys: [], tableWas: null
+    }]
+    err = null
+    try
+      schema.make! "drop_legacy", {dir: "/tmp/__rip_mig_test_none"}
+    catch e
+      err = e.message
+    [err.includes("gated steps"), err.includes("destructive")]
+''', [true, true]
+
+test 'make + migrate: write file, apply pending, record history, idempotent', '''
+    deployed = {tables: []}
+    history  = []
+    calls    = []
+    adapter =
+      introspect: -> deployed
+      query: (sql, params) ->
+        calls.push {sql, params}
+        if sql.startsWith("SELECT version")
+          {columns: [{name: "version"}, {name: "name"}, {name: "checksum"}, {name: "applied_at"}], data: history.map((h) -> [h.version, h.name, h.checksum, null]), rows: history.length}
+        else if sql.startsWith("INSERT INTO _rip_migrations")
+          history.push {version: params[0], name: params[1], checksum: params[2]}
+          {columns: [], data: [], rows: 1}
+        else
+          {columns: [], data: [], rows: 0}
+    __schemaSetAdapter adapter
+    __SchemaRegistry.reset()
+    fs = await import("node:fs")
+    dir = "/tmp/__rip_mig_test_" + Date.now()
+    User = schema :model
+      name! string
+    out = schema.make! "init", {dir}
+    applied1 = schema.migrate! {dir}
+    ranSQL = calls.filter((c) -> c.sql.includes("CREATE TABLE users") or c.sql.includes("CREATE SEQUENCE users_seq")).length
+    applied2 = schema.migrate! {dir}
+    content = fs.readFileSync(out.file, "utf8")
+    fs.rmSync(dir, {recursive: true, force: true})
+    result = [
+      out.file.endsWith("0001_init.sql")
+      content.includes("CREATE TABLE users")
+      applied1.ran
+      ranSQL >= 2
+      history.length
+      applied2.ran.length
+    ]
+    result
+''', [true, true, ['0001_init'], true, 1, 0]
+
+test 'migrate: checksum mismatch on applied file aborts; --repair re-records', '''
+    deployed = {tables: []}
+    history  = []
+    calls    = []
+    adapter =
+      introspect: -> deployed
+      query: (sql, params) ->
+        calls.push {sql, params}
+        if sql.startsWith("SELECT version")
+          {columns: [{name: "version"}, {name: "name"}, {name: "checksum"}, {name: "applied_at"}], data: history.map((h) -> [h.version, h.name, h.checksum, null]), rows: history.length}
+        else if sql.startsWith("INSERT INTO _rip_migrations")
+          history.push {version: params[0], name: params[1], checksum: params[2]}
+          {columns: [], data: [], rows: 1}
+        else
+          {columns: [], data: [], rows: 0}
+    __schemaSetAdapter adapter
+    __SchemaRegistry.reset()
+    fs = await import("node:fs")
+    dir = "/tmp/__rip_mig_chk_" + Date.now()
+    User = schema :model
+      name! string
+    out = schema.make! "init", {dir}
+    schema.migrate! {dir}
+    fs.appendFileSync(out.file, "\\n-- edited after apply\\n")
+    err = null
+    try
+      schema.migrate! {dir}
+    catch e
+      err = e.message
+    schema.migrate! {dir, repair: true}
+    fs.rmSync(dir, {recursive: true, force: true})
+    repaired = calls.some (c) -> c.sql.startsWith("UPDATE _rip_migrations")
+    [err.includes("checksum mismatch"), repaired]
+''', [true, true]
+
+test 'afterRollback fires on rollback; afterCommit does not', '''
+    events = []
+    txCalls = []
+    mainCalls = []
+    resState = {res: {columns: [{name: "id"}, {name: "name"}], data: [[1, "A"]], rows: 1}}
+    adapter =
+      query: (sql, params) ->
+        mainCalls.push sql
+        events.push "main"
+        resState.res
+      begin: (opts) ->
+        events.push "BEGIN"
+        handle = {}
+        handle.query = (sql, params) ->
+          txCalls.push sql
+          events.push "stmt"
+          resState.res
+        handle.commit = -> events.push "COMMIT"
+        handle.rollback = -> events.push "ROLLBACK"
+        handle
+      capabilities: {tx: true}
+    __schemaSetAdapter adapter
+    __SchemaRegistry.reset()
+    User = schema :model
+      name! string
+      afterCommit:   -> events.push "afterCommit"
+      afterRollback: -> events.push "afterRollback"
+    try
+      schema.transaction! ->
+        User.create! {name: "A"}
+        throw new Error "x"
+    events
+''', ['BEGIN', 'stmt', 'ROLLBACK', 'afterRollback']
+
+test 'two parallel transactions use independent handles (no cross-talk)', '''
+    events = []
+    txCalls = []
+    mainCalls = []
+    resState = {res: {columns: [{name: "id"}, {name: "name"}], data: [[1, "A"]], rows: 1}}
+    adapter =
+      query: (sql, params) ->
+        mainCalls.push sql
+        events.push "main"
+        resState.res
+      begin: (opts) ->
+        events.push "BEGIN"
+        handle = {}
+        handle.query = (sql, params) ->
+          txCalls.push sql
+          events.push "stmt"
+          resState.res
+        handle.commit = -> events.push "COMMIT"
+        handle.rollback = -> events.push "ROLLBACK"
+        handle
+      capabilities: {tx: true}
+    __schemaSetAdapter adapter
+    __SchemaRegistry.reset()
+    User = schema :model
+      name! string
+    handles = []
+    adapter.begin = ->
+      box = {sqls: []}
+      handles.push box
+      handle = {}
+      handle.query = (sql, params) ->
+        box.sqls.push sql
+        resState.res
+      handle.commit = -> null
+      handle.rollback = -> null
+      handle
+    run = (a, b) ->
+      schema.transaction! ->
+        User.create! {name: a}
+        sleep! 5
+        User.create! {name: b}
+        null
+    p1 = run "A", "B"
+    p2 = run "C", "D"
+    Promise.all! [p1, p2]
+    [handles.length, handles[0].sqls.length, handles[1].sqls.length, mainCalls.length]
+''', [2, 2, 2, 0]

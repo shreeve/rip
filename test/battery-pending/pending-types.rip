@@ -1,0 +1,71 @@
+# Pending rows for types — behaviors the battery does not cover yet.
+# Every row here FAILS today; when a feature revives one, MOVE the row
+# into test/battery/ in the same change (the lane asserts still-failing).
+
+import { test, code, fail, type } from '../support/testing.js'
+
+type 'generic function dts', '''
+  def add<T>(a: T, b: T): T
+    a + b
+''', 'declare function add<T>(a: T, b: T): T;'
+
+type 'generic constraint dts', '''
+  def identity<T extends object>(v: T): T
+    v
+''', 'declare function identity<T extends object>(v: T): T;'
+
+type 'type alias dts', '''
+  type User =
+    id: number
+    name: string
+    email?: string
+''', '''
+  type User = {
+    id: number;
+    name: string;
+    email?: string;
+  };
+'''
+
+type 'enum dts', '''
+  enum Direction
+    North
+    South
+''', '''
+  enum Direction {
+    North,
+    South
+  }
+'''
+
+fail 'fat arrow parenthesized function-type return', 'g = (x: number): ((n: number) => number) => h', null
+fail 'fat arrow parenthesized conditional return', 'f = (x: number): (T extends U ? A : B) => h', null
+
+type 'class with methods dts', '''
+  class UserService
+    url: string = ""
+    constructor: (@url: string) ->
+    fetch: (id: number) ->
+      console.log id
+''', '''
+  declare class UserService {
+    url: string;
+    constructor(url: string);
+    fetch(id: number);
+  }
+'''
+
+type 'interface with : annotations', '''
+  interface User
+    id: number
+    name: string
+    email: string
+    isAdmin?: boolean
+''', '''
+  interface User {
+    id: number;
+    name: string;
+    email: string;
+    isAdmin?: boolean;
+  }
+'''

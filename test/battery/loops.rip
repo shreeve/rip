@@ -482,3 +482,59 @@ code "a plain-name indexed source keeps its bytes", "for x, i in xs\n  x", '''
     x;
   }
 '''
+
+# ==============================================================================
+# Counted Loop — loop n (runs n times; `it` is the counter binding)
+# ==============================================================================
+
+test 'loop n times', '''
+  count = 0
+  loop 3
+    count++
+  count
+  ''', 3
+
+test 'loop n inline', '''
+  arr = []
+  loop 5
+    arr.push arr.length
+  arr
+  ''', [0, 1, 2, 3, 4]
+
+test 'loop n with it as counter', '''
+  arr = []
+  loop 5
+    arr.push it
+  arr
+  ''', [0, 1, 2, 3, 4]
+
+code 'loop n compiles to for', '''
+  loop 3
+    console.log 'hi'
+  ''', '''
+  for (let it = 0; it < 3; it++) {
+    console.log('hi');
+  };
+  '''
+
+test 'loop n as value collects results', '''
+  x = loop 3
+    "hi"
+  x
+  ''', ['hi', 'hi', 'hi']
+
+test 'loop n count evaluates once', '''
+  n = 0
+  g = -> (n += 1; 3)
+  loop g()
+    0
+  n
+  ''', 1
+
+test 'plain loop stays infinite until break', '''
+  i = 0
+  loop
+    i++
+    break if i is 4
+  i
+  ''', 4

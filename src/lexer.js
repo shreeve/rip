@@ -178,6 +178,54 @@ export function tagDynamicKeys(tokens) {
   return tokens;
 }
 
+// Compound object keys: an IDENTIFIER/PROPERTY chain joined by `.`
+// (any spacing) or `-` (tight on both sides — spaced subtraction and
+// line-broken expressions keep their readings) and followed directly
+// by `:` is ONE string key: `{ data-src: 1 }`, `{ www.amazon.com: 4 }`,
+// `{ beta-site.amazon.com: 2 }`. The chain collapses to a STRING token
+// spanning the written chain; the value concatenates the parts
+// (spacing around dots drops). A ternary's `:` never claims —
+// `a ? b.c : d` keeps its member read — the same pending-ternary
+// discipline as tagDynamicKeys.
+export function tagCompoundKeys(tokens) {
+  const OPENERS = new Set(['(', '[', '{', 'PICK_START', 'OPTPICK_START', 'CALL_START', 'INDEX_START', 'PARAM_START', 'STRING_START', 'INTERPOLATION_START', 'HEREGEX_START', 'INDENT']);
+  const CLOSERS = new Set([')', ']', '}', 'PICK_END', 'CALL_END', 'INDEX_END', 'PARAM_END', 'STRING_END', 'INTERPOLATION_END', 'HEREGEX_END', 'OUTDENT']);
+  const identish = (x) => x !== undefined && (x.kind === 'IDENTIFIER' || x.kind === 'PROPERTY');
+  const pendingTernary = [0];
+  for (let i = 0; i < tokens.length; i++) {
+    if (ops.on) ops.n++;
+    const k = tokens[i].kind;
+    if (k === 'TERNARY') {
+      pendingTernary[pendingTernary.length - 1]++;
+    } else if (k === ':' || k === 'TERMINATOR') {
+      const top = pendingTernary.length - 1;
+      if (k === 'TERMINATOR') pendingTernary[top] = 0;
+      else if (pendingTernary[top] > 0) pendingTernary[top]--;
+    } else if (identish(tokens[i]) && pendingTernary[pendingTernary.length - 1] === 0 &&
+               tokens[i - 1]?.kind !== '.' && tokens[i - 1]?.kind !== '?.') {
+      let j = i;
+      for (;;) {
+        if (ops.on) ops.n++;
+        const sep = tokens[j + 1];
+        const nxt = tokens[j + 2];
+        if (sep === undefined || !identish(nxt)) break;
+        if (sep.kind === '.') { j += 2; continue; }
+        if (sep.kind === '-' && sep.start === tokens[j].end && nxt.start === sep.end) { j += 2; continue; }
+        break;
+      }
+      if (j > i && tokens[j + 1]?.kind === ':') {
+        let buf = '';
+        for (let m = i; m <= j; m++) buf += tokens[m].value;
+        const collapsed = { ...tokens[i], kind: 'STRING', value: JSON.stringify(buf), end: tokens[j].end };
+        tokens.splice(i, j - i + 1, collapsed);
+      }
+    }
+    if (OPENERS.has(tokens[i].kind)) pendingTernary.push(0);
+    else if (CLOSERS.has(tokens[i].kind)) pendingTernary.pop();
+  }
+  return tokens;
+}
+
 // ── Definition-site void markers ─────────────────────────────────────
 // A trailing `!` on a function's NAME at a definition site means the
 // function is VOID (implicit return suppressed). The scanner mints
@@ -1898,6 +1946,11 @@ const ALIASES = {
   off: ['BOOL', 'false'],
 };
 
+// Value-ending token kinds that can HEAD a tagged template: a string
+// right against one of these (or bridged by `$`) is `tag\`…\``, never
+// a call argument.
+const TAGGABLE = new Set(['IDENTIFIER', 'PROPERTY', ')', 'CALL_END', ']', 'INDEX_END']);
+
 // Four- through two-character operators, longest match first ('...'
 // range dots before '..'; '..' before '.'; '>>>' before '>>').
 const OPS4 = { '>>>=': 'COMPOUND_ASSIGN' };
@@ -2684,6 +2737,20 @@ export function tokenize(text, path = '<anonymous>') {
       continue;
     }
 
+    // `$` bridging a value to a string spells a tagged template with
+    // the space before the tag intact: `sh $"cmd"` → sh`cmd`. The `$`
+    // is the TEMPLATE_TAG token (its span, one character). A `$`
+    // anywhere else stays an identifier — claimed here because the
+    // identifier scanner would otherwise take the `$` as a name.
+    if (ch === '$' && (text[pos + 1] === '"' || text[pos + 1] === "'")) {
+      const prevTok = tokens[tokens.length - 1];
+      if (prevTok && TAGGABLE.has(prevTok.kind)) {
+        push('TEMPLATE_TAG', '$', pos, pos + 1);
+        pos += 1;
+        continue;
+      }
+    }
+
     // ── Identifiers, keywords, properties ──
     if (IDENT_START.test(ch)) {
       const start = pos;
@@ -2828,6 +2895,15 @@ export function tokenize(text, path = '<anonymous>') {
     // indentation from every line, drop the newline after
     // the opener and the one before the closer; spans stay raw.
     if (ch === '"' || ch === "'") {
+      // A string RIGHT AGAINST a value token (no gap) is a tagged
+      // template: `tag"x"`, `obj.fn"x"`, `f(1)"x"`. The zero-width
+      // TEMPLATE_TAG marks the boundary; a SPACED string keeps its
+      // implicit-call reading (`tag "x"` → tag("x")). The tight
+      // spelling was a parse error before this claim.
+      const prevTok = tokens[tokens.length - 1];
+      if (prevTok && TAGGABLE.has(prevTok.kind) && prevTok.end === pos) {
+        push('TEMPLATE_TAG', '$', pos, pos);
+      }
       const delim = text.startsWith(ch.repeat(3), pos) ? ch.repeat(3) : ch;
       const start = pos;
       pos += delim.length;
@@ -3268,6 +3344,11 @@ export function tokenize(text, path = '<anonymous>') {
   // arrows, pairs) participate in implicitObjects/implicitCalls like
   // user-written ones.
   rewriteRender(tokens, mintId, fail);
+  // Compound keys collapse AFTER render rewriting (a render block's
+  // hyphenated class chains are render grammar, never object keys)
+  // and BEFORE the implicit-structure passes (the collapsed STRING
+  // must be the key implicitObjects reads).
+  tagCompoundKeys(tokens);
   applyInsertionPass(tokens, implicitBlocks, mintId);
   tagPostfixConditionals(tokens);
   applyInsertionPass(tokens, implicitObjects, mintId);
