@@ -161,8 +161,8 @@ test "early return", "fn = (x) ->\n  return 1 if x < 0\n  return 2\nfn(-5)", 1
 test "return expression", "fn = -> return 5 + 10\nfn()", 15
 
 # Code generation
-code "simple return", "return 42", "return 42"
-code "return expression", "return a + b", "return (a + b)"
+code "simple return", "f = -> return 42", "let f = function() {\n  return 42;\n};"
+code "return expression", "f = -> return a + b", "let f = function() {\n  return (a + b);\n};"
 
 # Return in different contexts
 test "return in if", "fn = (x) ->\n  if x > 0\n    return 'positive'\n  'negative'\nfn(5)", "positive"

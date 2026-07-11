@@ -712,3 +712,26 @@ describe('loader: in-process imports through the bunfig preload', () => {
     }
   });
 });
+
+describe('compile() input validation and diagnostic rendering', () => {
+  test('a non-string source fails with ONE stable identifying error', () => {
+    for (const [bad, kind] of [[null, 'null'], [undefined, 'a undefined'], [42, 'a number'], [{}, 'a object'], [['x'], 'an array']]) {
+      expect(() => compile(bad)).toThrow(`compile: source must be a string; got ${kind}`);
+    }
+  });
+
+  test('the human caret respects display cells: tabs stay tabs, an astral glyph pads one cell', () => {
+    // A tab before the offender: the caret line carries the SAME tab,
+    // so any tab width aligns identically.
+    try { compile('x = 1\n\t)\n', { path: 'p.rip' }); throw new Error('unreachable'); }
+    catch (e) { expect(e.message).toContain('\n    | \t^'); }
+    // An astral glyph is two UTF-16 units but one display cell: the
+    // caret pad counts code points (structured col stays UTF-16).
+    try { compile('x = "🙂" )\n', { path: 'p.rip' }); throw new Error('unreachable'); }
+    catch (e) {
+      const caretLine = e.message.split('\n').pop();
+      expect(caretLine).toBe('    | ' + ' '.repeat(8) + '^');
+      expect(e.col).toBe(10); // structured column stays UTF-16
+    }
+  });
+});

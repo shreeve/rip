@@ -251,6 +251,8 @@ class Emitter {
     // names never collide; `n` is the monotonic allocation cursor.
     // Shared with sub-emitters (schema callable bodies).
     this.temps = { used: new Set(), n: 0, byNode: new WeakMap() };
+    this.ctrlDepth = 0;
+    this.tailReturnOk = false;
     // Reactive scope frames, innermost last: { reactive, bound }.
     // `reactive` is the set of names the frame's scope declares with
     // `:=`/`~=`; `bound` is every OTHER binding the scope introduces
@@ -531,6 +533,7 @@ class Emitter {
     const readonly = this.collectReadonlyNames(stmts);
     this.rframes.push({
       reactive,
+      computed: this.collectComputedNames(stmts),
       bound: new Set([...bound, ...Emitter.declaredNames(stmts), ...handles, ...readonly]),
     });
     return new Set([...reactive, ...handles, ...readonly]);
@@ -566,6 +569,37 @@ class Emitter {
   // Does `name` read (or write) as a reactive container here?
   isReactiveName(name) {
     return this.resolveBareRead(name) === 'reactive';
+  }
+
+  // The computed (`~=`) subset of the innermost frame that binds
+  // `name`: a computed derives — it has no legal write.
+  isComputedName(name) {
+    for (let i = this.rframes.length - 1; i >= 0; i--) {
+      const f = this.rframes[i];
+      if (f.reactive.has(name)) return f.computed !== undefined && f.computed.has(name);
+      if (f.bound.has(name)) return false;
+      if (f.members !== undefined && f.members.has(name)) return false;
+    }
+    return false;
+  }
+
+  // The `~=` names among a scope's declarations — the write-rejection
+  // subset of collectReactiveNames (same walk, computed heads only).
+  collectComputedNames(stmts) {
+    const names = new Set();
+    const walk = (n, nested) => {
+      if (!isNode(n) || isDefHead(n[0]) || isFunc(n) || n[0] === 'class' || n[0] === 'enum') return;
+      if (n[0] === 'component' && n.length === 3) return;
+      if (this.isReactiveDecl(n)) {
+        if (!nested && n[0] === 'computed' && typeof n[1] === 'string') names.add(n[1]);
+        return;
+      }
+      if (this.isEffectDecl(n)) return;
+      const below = nested || Emitter.BLOCK_HEADS.has(n[0]);
+      for (const el of n) walk(el, below);
+    };
+    for (const n of stmts) walk(n, false);
+    return names;
   }
 
   // The read/write rewrite decision for a bare identifier in the
@@ -1808,6 +1842,13 @@ class Emitter {
   // The name is NOT reserved: each use is block-scoped to its own
   // loop header, so sibling and nested loops share a spelling safely
   // — and a program that never spells a base name keeps its bytes.
+  // Loop/switch context for the bare `break`/`continue` legality
+  // check: bodies emitted inside this wrapper may carry them.
+  inCtrl(fn) {
+    this.ctrlDepth++;
+    try { fn(); } finally { this.ctrlDepth--; }
+  }
+
   loopTempName(base) {
     let name = base;
     for (let n = 1; this.temps.used.has(name); n++) name = `${base}${n}`;
@@ -2759,6 +2800,10 @@ class Emitter {
   // `if (guard)` block (value position guards with `continue` instead —
   // accumulatorIIFECore).
   whileStatement(node, ind) {
+    this.inCtrl(() => this.whileStatementCtrl(node, ind));
+  }
+
+  whileStatementCtrl(node, ind) {
     const guard = node.length === 4 ? node[2] : null;
     const body = node[node.length - 1];
     this.mark(node, '$self', () => {
@@ -2808,6 +2853,10 @@ class Emitter {
   }
 
   loopStatement(node, ind) {
+    this.inCtrl(() => this.loopStatementCtrl(node, ind));
+  }
+
+  loopStatementCtrl(node, ind) {
     this.mark(node, '$self', () => {
       this.b.emit('while (true) ');
       this.mark(node, 'body', () => this.braceBlock(node[1], ind));
@@ -2916,6 +2965,10 @@ class Emitter {
   }
 
   caseBody(block, ind) {
+    this.inCtrl(() => this.caseBodyCtrl(block, ind));
+  }
+
+  caseBodyCtrl(block, ind) {
     const stmts = this.liveStmts(isBlock(block) ? block.slice(1) : [block]);
     this.emitTsTypeDecls(isBlock(block) ? block.slice(1) : [block], '  '.repeat(ind + 2));
     for (const stmt of stmts) {
@@ -2950,6 +3003,10 @@ class Emitter {
   }
 
   forIn(node, ind) {
+    this.inCtrl(() => this.forInCtrl(node, ind));
+  }
+
+  forInCtrl(node, ind) {
     const [, vars, iter, step, guard, body] = node;
     this.withBindings(this.loopBindingNames(node), () => this.forInCore(node, vars, iter, step, guard, body, ind));
   }
@@ -3101,6 +3158,10 @@ class Emitter {
   // key BY NAME — the `own` hasOwn filter and a value binding's
   // `obj[key]` index — reject.
   forOf(node, ind) {
+    this.inCtrl(() => this.forOfCtrl(node, ind));
+  }
+
+  forOfCtrl(node, ind) {
     const [, vars, obj, own, guard, body] = node;
     this.checkForOfPatternKey(vars, own);
     this.withBindings(this.loopBindingNames(node), () => this.forOfCore(node, vars, obj, own, guard, body, ind));
@@ -3173,6 +3234,10 @@ class Emitter {
   // set). The header — including the one-loop-variable enforcement —
   // is clauseHeader's, shared with every expression-position form.
   forAs(node, ind) {
+    this.inCtrl(() => this.forAsCtrl(node, ind));
+  }
+
+  forAsCtrl(node, ind) {
     const [, vars, iter, isAwait, guard, body] = node;
     this.withBindings(this.loopBindingNames(node), () => {
       this.mark(node, '$self', () => {
@@ -3427,6 +3492,10 @@ class Emitter {
   }
 
   comprehensionCore(node, ind, keyExpr) {
+    this.inCtrl(() => this.comprehensionCoreCtrl(node, ind, keyExpr));
+  }
+
+  comprehensionCoreCtrl(node, ind, keyExpr) {
     const [, expr, [clause], guards] = node;
     const pad = '  '.repeat(ind);
     this.rejectYieldInIIFE(node);
@@ -3671,6 +3740,55 @@ class Emitter {
     if (Emitter.containsYield(node)) {
       throw this.positionedError(node, 'emitter: yield inside an expression-lowered construct cannot cross the IIFE boundary; restructure as statements');
     }
+    this.rejectCapturedCtrl(node);
+  }
+
+  // Control flow that would cross a value-lowering's IIFE: `return`
+  // anywhere (it would return from the generated function, not the
+  // enclosing one), and `break`/`continue` not bound by a loop (or,
+  // for break, a switch) INSIDE the construct — bare, they emit
+  // engine-invalid JavaScript.
+  static findCapturedCtrl(stmt) {
+    let found = null;
+    const walk = (n, loops, switches) => {
+      if (found !== null) return;
+      if (typeof n === 'string') {
+        if (n === 'break' && loops + switches === 0) found = { kind: 'break', node: null };
+        else if (n === 'continue' && loops === 0) found = { kind: 'continue', node: null };
+        return;
+      }
+      if (!isNode(n) || n[0] === '->' || n[0] === '=>' || isDefHead(n[0]) || n[0] === 'class') return;
+      if (n[0] === 'return') { found = { kind: 'return', node: n }; return; }
+      const l = isLoopNode(n) || n[0] === 'comprehension' ? loops + 1 : loops;
+      const s = n[0] === 'switch' ? switches + 1 : switches;
+      for (const el of n) walk(el, l, s);
+    };
+    walk(stmt, 0, 0);
+    return found;
+  }
+
+  rejectCapturedCtrl(node) {
+    // Consume-once tail exemption: when the construct's value is
+    // IMMEDIATELY returned (a function-tail if/try/switch), a source
+    // `return` tunnels through the IIFE — the returned value flows to
+    // the enclosing return — so it stays legal there. Nested
+    // constructs see the flag cleared and reject as usual;
+    // break/continue never tunnel.
+    const tailOk = this.tailReturnOk;
+    this.tailReturnOk = false;
+    const hit = Emitter.findCapturedCtrl(node);
+    if (hit !== null && !(tailOk && hit.kind === 'return')) {
+      throw this.positionedError(hit.node ?? node,
+        `emitter: '${hit.kind}' inside an expression-lowered construct cannot cross the IIFE boundary — ` +
+        'restructure with statement position (or assign from the branches)', node);
+    }
+  }
+
+  // Emit fn with the tail-return exemption armed, clearing it even on
+  // paths that never consult it (the simple-ternary tail).
+  withTailReturn(fn) {
+    this.tailReturnOk = true;
+    try { fn(); } finally { this.tailReturnOk = false; }
   }
 
   valueTry(node) {
@@ -3770,6 +3888,10 @@ class Emitter {
   }
 
   returnCaseBody(body, ind) {
+    this.inCtrl(() => this.returnCaseBodyCtrl(body, ind));
+  }
+
+  returnCaseBodyCtrl(body, ind) {
     const stmts = this.branchLive(body);
     this.emitTsTypeDecls(isBlock(body) ? body.slice(1) : [body[0]], '  '.repeat(ind + 2));
     stmts.forEach((stmt, i) => {
@@ -3809,6 +3931,10 @@ class Emitter {
   }
 
   accumulatorIIFECore(node) {
+    this.inCtrl(() => this.accumulatorIIFECoreCtrl(node));
+  }
+
+  accumulatorIIFECoreCtrl(node) {
     const ind = this.ind;
     const p1 = '  '.repeat(ind + 1);
     this.rejectYieldInIIFE(node);
@@ -3895,6 +4021,10 @@ class Emitter {
   }
 
   plainLoopComprehensionCore(node, ind) {
+    this.inCtrl(() => this.plainLoopComprehensionCoreCtrl(node, ind));
+  }
+
+  plainLoopComprehensionCoreCtrl(node, ind) {
     const [, expr, [clause], guards] = node;
     const pad = '  '.repeat(ind);
     this.mark(node, '$self', () => {
@@ -3927,6 +4057,10 @@ class Emitter {
   }
 
   returnifyLoopCore(node, ind) {
+    this.inCtrl(() => this.returnifyLoopCoreCtrl(node, ind));
+  }
+
+  returnifyLoopCoreCtrl(node, ind) {
     const pad = '  '.repeat(ind);
     const acc = this.loopTempName('_result');
     this.b.emit(`const ${acc} = [];\n`);
@@ -4015,6 +4149,12 @@ class Emitter {
   }
 
   returnStatement(node) {
+    // Outside any function a `return` has no target — the emitted
+    // module would fail at load, which is the loud error in the
+    // wrong place.
+    if (this.scopes.length <= 1) {
+      throw this.positionedError(node, "emitter: 'return' outside a function");
+    }
     // A void function's body cannot return a value — the `!` on its
     // definition declares it returns undefined. Bare
     // `return` stays legal.
@@ -4241,6 +4381,14 @@ class Emitter {
         // `@member` chains) is the ctx parameter — the factory methods
         // run unbound, so a literal `this` would be the block handle.
         if (node === 'this' && this.renderSelf !== null) return this.b.emit(this.renderSelf);
+      }
+      if ((node === 'break' || node === 'continue') && this.ctrlDepth === 0) {
+        const err = this.positionedError(node, `emitter: '${node}' outside a loop${node === 'break' ? ' or switch' : ''}`);
+        if (typeof err.start !== 'number' && this.b.currentMark) {
+          err.start = this.b.currentMark.sourceStart;
+          err.end = this.b.currentMark.sourceEnd;
+        }
+        throw err;
       }
       this.b.emit(node);
       return;
@@ -4523,6 +4671,13 @@ class Emitter {
     // value is an expression position again.
     const patternTarget = Emitter.isPattern(node[1]);
     const wrapParens = isObject(node[1]) && !this.inPattern;
+    // A computed (`~=`) derives from its dependencies — it has no
+    // legal write; the runtime's read-only container would throw at
+    // the assignment, which is the loud error in the wrong place.
+    if (typeof node[1] === 'string' && this.isComputedName(node[1])) {
+      throw this.positionedError(node,
+        `emitter: cannot assign to computed '${node[1]}' — a '~=' binding derives from its dependencies; write to those instead`);
+    }
     // A void definition (`save! = ->`, head 'void-assign') validates its
     // function value and emits as a plain '='; the value's body owns
     // the void shape. The voidMarker role (side-band) covers the
@@ -9365,13 +9520,13 @@ class Emitter {
       }
       if (h === 'try') {
         this.b.emit('return ');
-        this.valueTry(stmt);
+        this.withTailReturn(() => this.valueTry(stmt));
         this.b.emit(';');
         return;
       }
       if (h === 'switch' && stmt.length === 4) {
         this.b.emit('return ');
-        this.valueSwitch(stmt);
+        this.withTailReturn(() => this.valueSwitch(stmt));
         this.b.emit(';');
         return;
       }
@@ -9398,15 +9553,28 @@ class Emitter {
       }
     }
     this.b.emit('return ');
-    const wrap = Emitter.needsGrouping(stmt, 'return');
-    if (wrap) this.b.emit('(');
-    this.expr(stmt);
-    if (wrap) this.b.emit(')');
+    this.withTailReturn(() => {
+      const wrap = Emitter.needsGrouping(stmt, 'return');
+      if (wrap) this.b.emit('(');
+      this.expr(stmt);
+      if (wrap) this.b.emit(')');
+    });
     this.b.emit(';');
   }
 
   // [op, target, postfix] — prefix/postfix increment and decrement.
   update(node) {
+    if (typeof node[1] === 'string' && this.isComputedName(node[1])) {
+      throw this.positionedError(node,
+        `emitter: cannot assign to computed '${node[1]}' — a '~=' binding derives from its dependencies; write to those instead`);
+    }
+    // An optional chain is not a JavaScript assignment reference —
+    // `obj?.x++` has no valid emission; guard the update explicitly.
+    if (isNode(node[1]) && Emitter.optionalGuard(node[1]) !== null) {
+      throw this.positionedError(node,
+        "emitter: an optional chain cannot be an update target — no reference exists for `obj?.x++`; " +
+        'guard it explicitly (`obj.x++ if obj?`)');
+    }
     this.mark(node, '$self', () => {
       const [op, target, postfix] = node;
       if (postfix) {
@@ -9737,6 +9905,9 @@ class Emitter {
 
   // ["yield"] | ["yield", value] | ["yield-from", value]
   yieldExpr(node) {
+    if (this.scopes.length <= 1) {
+      throw this.positionedError(node, "emitter: 'yield' outside a function");
+    }
     this.mark(node, '$self', () => {
       this.b.emit(node[0] === 'yield-from' ? 'yield*' : 'yield');
       const value = node[0] === 'yield-from' ? node[1] : node[1];

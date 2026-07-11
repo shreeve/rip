@@ -46,7 +46,12 @@ const excerpt = (file, offset) => {
   const lineEnd = line + 1 < file.lineStarts.length ? file.lineStarts[line + 1] - 1 : file.text.length;
   const text = file.text.slice(lineStart, lineEnd).replace(/\r$/, '');
   const gutter = String(line + 1);
-  return `  ${gutter} | ${text}\n  ${' '.repeat(gutter.length)} | ${' '.repeat(col)}^`;
+  // The caret pad mirrors the prefix's DISPLAY cells: tabs stay tabs
+  // (the terminal aligns them identically), and an astral glyph — two
+  // UTF-16 units, one cell — pads as one space (structured columns
+  // stay UTF-16; only the human rendering adjusts).
+  const pad = Array.from(text.slice(0, col)).map((ch) => (ch === '\t' ? '\t' : ' ')).join('');
+  return `  ${gutter} | ${text}\n  ${' '.repeat(gutter.length)} | ${pad}^`;
 };
 
 const positioned = (file, path, reason, start, end) => {
@@ -84,6 +89,13 @@ const positioned = (file, path, reason, start, end) => {
 // generated spans of every TS-only byte, whose deletion reproduces
 // the JS emission exactly (the byte-equality invariant).
 export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inline', face = 'js', pins = null, strict = false } = {}) {
+  // One stable identifying error for a non-string source — without
+  // it, malformed input fails in whichever subsystem dereferences it
+  // first, with an incidental TypeError.
+  if (typeof source !== 'string') {
+    const kind = source === null ? 'null' : Array.isArray(source) ? 'an array' : `a ${typeof source}`;
+    throw new CompileError(`compile: source must be a string; got ${kind}`, { path });
+  }
   const file = new SourceFile(source, path);
 
   const parser = Parser();

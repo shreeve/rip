@@ -5,6 +5,20 @@ repository's pull requests.
 
 ## Unreleased
 
+- Reject loudly where control flow and writes have no target: `return`
+  and `yield` outside a function, `break`/`continue` outside a loop,
+  and `return`/`break`/`continue` inside an expression-lowered
+  construct (the IIFE would capture them) all reject positioned — a
+  function-TAIL if/try/switch keeps its `return`, which tunnels
+  through the lowering to the enclosing function. Writes and updates
+  to a computed (`~=`) binding reject at compile instead of throwing
+  at the runtime's read-only container; an optional chain rejects as
+  an update target (`obj?.x++` has no JavaScript reference); a
+  non-string `compile()` source fails with one stable identifying
+  error; the human diagnostic caret respects display cells (tabs and
+  astral glyphs); and the project-config comment states present
+  invariants (#33)
+
 - Component value members initialize in SOURCE ORDER (they were
   grouped by kind, so a plain member written after a state ran first
   and could not read it); offers register after the values and
