@@ -59,7 +59,7 @@ describe.skipIf(!tsgoAvailable)('rip → tsgo → rip round trip', () => {
       'console.log greeting, count, bad',
       '',
     ].join('\n');
-    // The TS face — exactly what the server compiles (the settled scope, the settled rule).
+    // The TS face — exactly what the server compiles.
     const { code, mappings } = compile(source, { path: 'demo.rip', runtimeDelivery: 'inline', face: 'ts' });
     const srcLS = lineStartsOf(source);
     const genLS = lineStartsOf(code);
@@ -74,7 +74,7 @@ describe.skipIf(!tsgoAvailable)('rip → tsgo → rip round trip', () => {
       // Diagnostics: TS2339 on `toUpperCase`, mapped back to the .rip
       // line; the UNANNOTATED hoisted `let` declarations draw
       // implicit-any codes that the server suppresses as a class
-      // (legal, idiomatic Rip — the the settled rule posture).
+      // (legal, idiomatic Rip — the gradual-typing posture).
       const pulled = await client.request('textDocument/diagnostic', { textDocument: { uri } });
       expect(pulled.kind).toBe('full');
       const surfaced = pulled.items.filter((it) => !SUPPRESSED_TS_CODES.has(it.code));

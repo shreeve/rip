@@ -14,7 +14,7 @@
 //      write-site hover on an annotated declaration reads the real
 //      type, an annotation violation surfaces as a TS diagnostic
 //      positioned on Rip source, and annotating a legal Rip pattern
-//      never CREATES a diagnostic (the the settled rule definite-assignment
+//      never CREATES a diagnostic (the definite-assignment
 //      spelling keeps hoisted read-before-assign quiet).
 //
 // Same availability guard as the broker suite: dependencies absent →
@@ -152,7 +152,7 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
     }
   }, 30000);
 
-  test('TS face: write-site hover reads the annotated type (the settled scope acceptance)', async () => {
+  test('TS face: write-site hover reads the annotated type', async () => {
     const published = [];
     const client = await startServer((p) => published.push(p));
     try {
@@ -180,7 +180,7 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
     }
   }, 30000);
 
-  test('TS face: a cast reaches hover — the asserted type reads at the value (the settled scope acceptance)', async () => {
+  test('TS face: a cast reaches hover — the asserted type reads at the value', async () => {
     const published = [];
     const client = await startServer((p) => published.push(p));
     try {
@@ -204,7 +204,7 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
     }
   }, 30000);
 
-  test('TS face: an annotation violation diagnoses on the Rip source line (the settled scope acceptance)', async () => {
+  test('TS face: an annotation violation diagnoses on the Rip source line', async () => {
     const published = [];
     const client = await startServer((p) => published.push(p));
     try {
@@ -231,14 +231,14 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
     // landed in). Sane means: a callable-free model draws ZERO
     // diagnostics; a model WITH callables draws NONE either — the
     // The schema type story types callable `this` per the runtime's
-    // calling conventions (the settled rule (ii)), which RETIRED the TS2683 class
+    // calling conventions (the typed-`this` injection), which RETIRED the TS2683 class
     // this test used to pin; hover answers at a use site; and no
     // position inside the new syntax crashes the server.
     const published = [];
     const client = await startServer((p) => published.push(p));
     try {
       let wait = nextDiagnostics(published);
-      // (`console.log User` — the the settled rule (i) module marker makes a
+      // (`console.log User` — the module marker makes a
       // schema file a module, so a DEAD demo binding would draw the
       // true 6133 unused hint; the fixture consumes what it binds)
       const fixture = [
@@ -270,7 +270,7 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
 
       // With hook/scope callables the model draws NO diagnostics: the
       // The schema type story injects `this: User` / `this: SchemaQuery<…>`
-      // parameters into the face (the settled rule (ii)), so the TS2683 class this
+      // parameters into the face (the typed-`this` injection), so the TS2683 class this
       // test used to pin is retired — `@name` inside the hook and
       // `@where(...)` inside the scope both type-check.
       wait = nextDiagnostics(published);
@@ -518,7 +518,7 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
       const computed = await hoverAt(client, 4, 3);
       expect(computed.contents.value).toContain('readonly value');
       // A member READ inside a render block hovers the same container
-      // (the the settled rule write-site question never arises — members are
+      // (the write-site question never arises — members are
       // declared class properties, typed at every site).
       const renderRead = await hoverAt(client, 10, 9);
       expect(renderRead.contents.value).toContain('value: string');
@@ -777,12 +777,12 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
     }
   }, 30000);
 
-  test('the settled rule evolving-let UX: unannotated locals stay quiet like plain TS — the unused hint carries the Unnecessary tag, reads infer, violations error (the owner fixture)', async () => {
+  test('evolving-let UX: unannotated locals stay quiet like plain TS — the unused hint carries the Unnecessary tag, reads infer, violations error', async () => {
     const published = [];
     const client = await startServer((p) => published.push(p));
     try {
-      // The owner's fixture: `main: ->` is a statement-level implicit-
-      // object member (the the settled rule sibling machinery keeps a function-valued
+      // The fixture: `main: ->` is a statement-level implicit-
+      // object member (the sibling-run machinery keeps a function-valued
       // `name:` line an object member — only type-shaped values claim as
       // forwards), so the body is an ordinary method scope. `total` is
       // unannotated and rides evolving-let; its only use is the write
@@ -866,7 +866,7 @@ describe.skipIf(!tsgoAvailable)('server over LSP stdio', () => {
     }
   }, 30000);
 
-  test('TS face: annotating a legal hoisted pattern draws no diagnostic (the settled rule — the TS2454 class stays quiet)', async () => {
+  test('TS face: annotating a legal hoisted pattern draws no diagnostic (the TS2454 class stays quiet)', async () => {
     const published = [];
     const client = await startServer((p) => published.push(p));
     try {

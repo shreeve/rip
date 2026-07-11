@@ -17,8 +17,8 @@
 //     corresponding source bytes (injected runtime/import lines), and a
 //     diagnostic there must be dropped, never pinned to unrelated code.
 
-// The implicit-any diagnostic family, suppressed AS A CLASS (the the settled rule
-// posture): the server compiles the TS FACE, so annotations
+// The implicit-any diagnostic family, suppressed AS A CLASS (the
+// gradual-typing posture): the server compiles the TS FACE, so annotations
 // flow through and annotated code never fires these — what remains of
 // the family is UNANNOTATED Rip, which is legal and idiomatic, so the
 // codes are noise there, not defects. noImplicitAny stays ON in the
@@ -51,7 +51,7 @@ export const SUPPRESSED_TS_CODES = new Set([
 // probed against the pinned tsgo; the push-slot declaration alone yields no
 // tags on pulled items). Without the tag, VS Code renders these
 // hint-severity items as a dotted underline that reads like a type
-// error on legal Rip (the the settled rule evolving-let acceptance fixture:
+// error on legal Rip (the evolving-let acceptance fixture:
 // `total = count + ratio` as an implicit return draws TS6133 on
 // `total`). tsgo-supplied tags govern; these sets are the FALLBACK
 // for any item tsgo leaves untagged, mirroring TypeScript's own
@@ -308,7 +308,7 @@ export function generatedInsertionToSource(mappings, offset, source, code) {
   return atCodeLineStart && atSourceLineStart ? earliest : null;
 }
 
-// The whole-import-line edit mapper (the settled scope, the settled rule): the organizeImports
+// The whole-import-line edit mapper: the organizeImports
 // family rewrites COMPLETE face import lines, and those spans never
 // verify verbatim — the face re-quotes specifiers and appends `;` — so
 // the byte-for-byte seam refuses them. This mapper accepts exactly the
@@ -331,7 +331,7 @@ export function generatedInsertionToSource(mappings, offset, source, code) {
 //     semantically untouched by a clause rewrite, so its bytes must
 //     not change. The user's style comes from the FIRST source
 //     import/export statement (source order) naming that module,
-//     FILE-WIDE — the deterministic rule the settled rule records, whatever
+//     FILE-WIDE — the deterministic rule, whatever
 //     produced the rewritten line; a specifier with no source
 //     statement to read the style from refuses the whole edit. The
 //     rewritten CLAUSE itself takes the face's spelling (brace

@@ -99,7 +99,7 @@ describe('module shape', () => {
   });
 
   test('importing the module touches globalThis at the sentinel ONLY — no __rip bridge, no getEffectSignal global', () => {
-    // A fresh process: this test file imports the the old runtime template above,
+    // A fresh process: this test file imports the runtime template above,
     // which DOES write the bridge globals, so the assertion needs an
     // unpolluted globalThis.
     const code = [
@@ -116,7 +116,7 @@ describe('module shape', () => {
 });
 
 // ════════════════════════════════════════════════════════════════════
-// Behavior, paired against the the runtime
+// Behavior, paired against the runtime
 // ════════════════════════════════════════════════════════════════════
 
 describe('dependency tracking', () => {
@@ -798,7 +798,7 @@ describe('the owner-frame seam (M12-A)', () => {
   });
 });
 
-describe('__detachRef (-paired —  keeps it in its reactive runtime too)', () => {
+describe('__detachRef', () => {
   test('clears the cell only while it still holds THIS element, notifying subscribers', () => {
     expect(both((rt) => {
       const el = { tag: 'div' };
@@ -882,7 +882,7 @@ describe('divergence: a throwing flush must not brick the state', () => {
     })).toEqual([['throw', 'Error', 'A'], ['A1', 'B1', 'A-throw']]);
   });
 
-  test('#78 sibling facet: an UNBATCHED throw drops the sibling too —  resurrects it on the next write,  never can', () => {
+  test('sibling facet: an UNBATCHED throw drops the sibling too — the next write resurrects it', () => {
     // The dropped sibling B is not merely skipped once: in the old runtime the
     // bricked state can never notify again, so B is dead FOREVER; in
     // this side the next write re-queues it.
@@ -905,7 +905,7 @@ describe('divergence: a throwing flush must not brick the state', () => {
     ]);
   });
 
-  test('#78 cascade facet: a throw inside a NESTED flush bricks every state whose notify is on the stack in  —  restores them all', () => {
+  test('cascade facet: a throw inside a NESTED flush bricks every state whose notify is on the stack — the next write restores them all', () => {
     // s1's effect writes s2 unbatched, so s2's flush runs INSIDE s1's
     // notify window; the inner throw unwinds through both guards.
     const scenario = (rt) => {

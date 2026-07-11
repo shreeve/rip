@@ -18,7 +18,7 @@ const dts = (src) => compile(src).declarations;
 
 // ── The declaration surface, row by row ──────────────────────────────
 const ROWS = [
-  // typed declarations → declare let (the §6- delivery shapes)
+  // typed declarations → declare let (the delivery shapes)
   ['x: number = 5', 'declare let x: number;\nexport {};\n'],
   ['export x: number = 5', 'export declare let x: number;\n'],
   ['flags: {a: number, b?: string} = {a: 1}', 'declare let flags: {a: number, b?: string};\nexport {};\n'],

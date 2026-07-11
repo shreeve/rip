@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// Shared VS Code extension installer (the settled scope; the repo grows more
+// Shared VS Code extension installer (the repo grows more
 // extensions than one — "Rip Print" is next).
 //
 //   bun run ext <name> <editor>

@@ -270,7 +270,7 @@ describe('the #79/the pinned contractes extend to effects: no expression form fo
 
 });
 
-describe('the the pinned contract extends to the dispose handle: bound effects sit at module or function scope', () => {
+describe('the pinned contract extends to the dispose handle: bound effects sit at module or function scope', () => {
 
   test('module and function scope stay legal — including effect and computed block bodies (their own scopes)', () => {
     expect(compile('h ~> f()').code).toBe('const h = __effect(() => { f(); });');
@@ -279,7 +279,7 @@ describe('the the pinned contract extends to the dispose handle: bound effects s
   });
 });
 
-describe('the the pinned contract extends: no effect class members', () => {
+describe('the pinned contract extends: no effect class members', () => {
 });
 
 describe(' extends: the effect head is spellable — semanticKind discriminates', () => {

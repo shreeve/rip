@@ -11,14 +11,14 @@
 //   3. WATCHER: a .rip file created mid-session that an importer was
 //      waiting on joins the program (TS2307 clears); deleting it brings
 //      TS2307 back.
-//   4. the settled scope READINESS: hover crosses the file boundary — an imported
+//   4. CROSS-FILE READINESS: hover crosses the file boundary — an imported
 //      name reads the dependency's real type, with the range landing on
 //      the importer's .rip source (positions translate across files).
 //   5. REAL .ts SIBLINGS: a .rip file importing a plain TypeScript file
 //      from the workspace resolves (the rootDirs merge).
 //   6. USER TSCONFIG mid-session: a lib change in the workspace's
 //      tsconfig.json re-governs open buffers without a restart.
-//   7. DEMAND-DRIVEN SCALING (the the settled rule posture pin): only the import
+//   7. DEMAND-DRIVEN SCALING (the posture pin): only the import
 //      closure materializes — a workspace of hundreds of unrelated .rip
 //      files contributes NOTHING to startup or the mirror tree.
 //   8. PERSISTENT CACHE: a restart revalidates by source hash and
@@ -241,7 +241,7 @@ describe.skipIf(!tsgoAvailable)('the workspace project model', () => {
     });
   }, 30000);
 
-  test('the settled scope readiness: hover crosses the file boundary onto .rip source', async () => {
+  test('cross-file readiness: hover crosses the file boundary onto .rip source', async () => {
     await inWorkspace({ 'util.rip': UTIL }, async (api) => {
       await api.open('app.rip', APP);
       await api.change('app.rip', APP + '\n');
@@ -279,7 +279,7 @@ describe.skipIf(!tsgoAvailable)('the workspace project model', () => {
 
   test('demand-driven: only the import closure materializes, however large the workspace', async () => {
     // 200 unrelated .rip files + a 3-file chain: app → a → b. The
-    // program is the chain; the 200 contribute nothing (the the settled rule scaling
+    // program is the chain; the 200 contribute nothing (the scaling
     // posture: startup work follows the closure, not the workspace).
     const files = {
       'chain/a.rip': 'import { b } from "./b.rip"\nexport a = b + 1\n',
@@ -494,7 +494,7 @@ describe.skipIf(!tsgoAvailable)('disk-layer hygiene', () => {
 describe.skipIf(!tsgoAvailable)('the module marker over LSP', () => {
   // Shared top-level names across both files; `total` is unannotated
   // (evolving-let) with a read, so the write-site hover exercises the
-  // the settled rule enrichment path.
+  // enrichment path.
   const PLAIN = 'count: number = 0\nratio: number = 3.14\ntotal = count + ratio\ntotal.toFixed(2)\n';
 
   test('two plain buffers: zero TS2451 on both; write-site hover answers the evolved type memo-cold', async () => {

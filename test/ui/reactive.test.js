@@ -299,7 +299,7 @@ describe('reactive names never hoist ()', () => {
 describe('export registration is order-independent ()', () => {
 });
 
-describe("the existential reads the VALUE () —  checks the container, which is never null", () => {
+describe("the existential reads the VALUE — the container itself is never null, so testing it would always answer true", () => {
 });
 
 describe('bare template interpolations unwrap (deliberate byte divergence; eval-equal)', () => {
@@ -342,7 +342,7 @@ describe(': reactive declarations sit at module or function scope — statement 
   });
 });
 
-describe(': `delete` on a reactive name rejects —  deletes the container\'s accessor', () => {
+describe('`delete` on a reactive name rejects — never a silent accessor deletion', () => {
 });
 
 describe(': no reactive class members', () => {

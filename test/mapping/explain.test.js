@@ -96,7 +96,7 @@ describe('explain: plain exact-mapped identifier (x = y + 1)', () => {
     expect(out).toMatch(row('target', 'exact', '[0,1) 1:1-1:2', '->', '[4,5) 1:5-1:6', '`x`', 'V3 map'));
     expect(out.match(/target\s+exact/g)).toHaveLength(1);
     // A branch-first write stays hoisted (Tier 2): `if y\n  x = 1` emits
-    // `let x;\n\nif (y) {\n  x = 1;\n}` — the §4.1 one-to-many contract
+    // `let x;\n\nif (y) {\n  x = 1;\n}` — the one-to-many contract
     // keeps BOTH manifestations (hoist line + branch assignment).
     const hoisted = explainSource('if y\n  x = 1\n', { path, pos: { offset: 7 } });
     expect(hoisted).toMatch(row('target', 'exact', '[7,8) 2:3-2:4', '->', '[4,5) 1:5-1:6', '`x`', 'V3 map'));

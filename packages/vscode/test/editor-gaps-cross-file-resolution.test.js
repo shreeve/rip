@@ -9,7 +9,7 @@
 // in-memory-only mirrors fragment the project, app.rip.ts can't see
 // util.rip.ts, and TS2307 persists even with both files open (confirmed
 // structural in the bundle: forcing mirrors onto disk makes cross-file
-// resolve — not the import shape, not a bug). the settled rule disk-mirror project
+// resolve — not the import shape, not a bug). The disk-mirror project
 // model is what keeps this green; if it regresses, this suite goes red
 // with the original reproduction.
 //

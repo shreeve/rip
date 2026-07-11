@@ -3,7 +3,7 @@
 // (scripts/fuzz-tsface.mjs: seeded, deterministic, type-correct by
 // construction). Three properties per program:
 //   1. STRIP IDENTITY: stripFace(tsFace) === JS-mode bytes, both
-//      runtime deliveries — the the contract gate over programs the corpus
+//      runtime deliveries — the drift gate over programs the corpus
 //      never spelled.
 //   2. DRIFT DETECTOR: every annotated construct, compiled alone,
 //      produces ≥1 TS-only region — an emission path that silently

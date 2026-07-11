@@ -324,7 +324,7 @@ describe('typed and optional props', () => {
     expect(compile('a = 1\nb = if a then 2 else 3\n').code).toContain('b = a ? 2 : 3;');
   });
 
-  test('`@items: Array<number>` lowers as a required typed prop —  parse-rejects generic type text here ()', () => {
+  test('`@items: Array<number>` lowers as a required typed prop — generic type text is legal here', () => {
     expect(compile('C = component\n  @items: Array<number>\n  render\n    div "x"\n').code)
       .toContain('this.items = __state(props.__bind_items__ ?? props.items);');
   });
@@ -707,7 +707,7 @@ describe('the static render DSL: emission pins', () => {
       .toContain("this._el0.addEventListener('click', (e) => __batch(() => this.save(e)));");
   });
 
-  test('a bare directive with INLINE text means handler + text child ( —  ships a tagged template)', () => {
+  test('a bare directive with INLINE text means handler + text child', () => {
     const bytes = (src) => compile(src, { runtimeDelivery: 'none' }).code.match(/_create\(\) \{[\s\S]*?\n  \}/)[0];
     const inline = bytes('C = component\n  onClick = -> 1\n  render\n    button @click "go"\n');
     expect(inline).toContain("addEventListener('click', (e) => __batch(() => (this.onClick)(e)))");
@@ -724,7 +724,7 @@ describe('the static render DSL: emission pins', () => {
     expect(attr).toContain("toggleAttribute('disabled'");
   });
 
-  test('a `=` directly after a bare event directive rejects positioned —  ships an assignment-invoked listener (, split-pinned)', () => {
+  test('a `=` directly after a bare event directive rejects positioned — never an assignment-invoked listener', () => {
     // The one-line tag-head spelling, positioned ON the `=`.
     const head = 'C = component\n  count := 0\n  onClick = -> count += 1\n  render\n    button @click = count\n';
     const err = lexFails(head, /a `=` cannot follow a bare event directive/s);
@@ -767,12 +767,12 @@ describe('the static render DSL: emission pins', () => {
     expect(arg).toContain('this._t0 = document.createTextNode(lbl);');
   });
 
-  test('`= expr` with an indented continuation rejects —  silently discards it (, split-pinned)', () => {
+  test('`= expr` with an indented continuation rejects — never a silent discard', () => {
     const src = 'T = component\n  items := [1, 2]\n  render\n    div\n      = @items\n        .map (v) -> v * 2\n';
     emitFails(src, /the `= expr` text form takes ONE expression/s);
   });
 
-  test('a member chain in an attribute value keeps the subtraction reading —  rewrites the property name (, split-pinned)', () => {
+  test('a member chain in an attribute value keeps the subtraction reading — never a rewritten property name', () => {
     const { code } = compile('T = component\n  box := { w: 10 }\n  render\n    div width: @box.w-pad\n');
     expect(code).toContain("setAttribute('width', (this.box.value.w - pad))");
     // Class-SELECTOR chains keep the hyphen consumption: tag-rooted
@@ -785,12 +785,12 @@ describe('the static render DSL: emission pins', () => {
       .toContain("setAttribute('width', (Math.max - 1))");
   });
 
-  test('a parameterized chain continuation under an element rejects —  mints nonsense DOM (, split-pinned)', () => {
+  test('a parameterized chain continuation under an element rejects — never minted nonsense DOM', () => {
     emitFails('C = component\n  items := [1]\n  render\n    div items\n      .map (v) -> v\n',
       /parameterized function is not a render child/s);
   });
 
-  test('a nested component declaration is a plain field whose data-part takes the MEMBER name (, graduated —  threads the OUTER name)', () => {
+  test('a nested component declaration is a plain field whose data-part takes the MEMBER name', () => {
     const { code } = compile('A = component\n  B = component\n    y := 1\n    render\n      span "inner"\n  render\n    div "outer"\n');
     expect(code).toContain('this.B = class extends __Component {');
     // The inner render's data-part prints the MEMBER's name —
@@ -801,7 +801,7 @@ describe('the static render DSL: emission pins', () => {
     expect(inner).not.toContain("setAttribute('data-part', 'A')");
   });
 
-  test('a tight `#word` line meant as a comment becomes an id element —  parity, cataloged (); the comment spelling is spaced `# word`', () => {
+  test('a tight `#word` line meant as a comment becomes an id element — cataloged; the comment spelling is spaced `# word`', () => {
     // Both compilers ship the same absurd-but-legal call chain; the
     // catalog carries the class, the spaced spelling stays a comment.
     const { code } = compile('T = component\n  render\n    div\n      #note this was a comment\n');
@@ -877,7 +877,7 @@ describe('the reserved-name mechanism: minted scaffold names never capture user 
     expect(ctx).toContain('ctx_.hits.push(ctx)');
   });
 
-  test('the swap scaffold dodges loop variables its condition reads (`anchor`/`show`/`want` —  renders the wrong branch or throws TDZ)', () => {
+  test('the swap scaffold dodges loop variables its condition reads (`anchor`/`show`/`want` — a collision would render the wrong branch or throw TDZ)', () => {
     const a = compile(LOOP('anchor'), { runtimeDelivery: 'none' }).code;
     expect(a).toMatch(/const anchor_ = _anchor\d+;/);
     expect(a).toContain('const show = !!((anchor > 1));');
@@ -981,7 +981,7 @@ describe('conditionals: anchor + branch factories + one swap effect', () => {
     expect(() => new Function(code)).not.toThrow();
   });
 
-  test('`= expr` with an expression-if stays TEXT (never a block factory) —  parity', () => {
+  test('`= expr` with an expression-if stays TEXT (never a block factory)', () => {
     const { code } = compile('T = component\n  vis := true\n  render\n    div\n      = if vis then "y" else "n"\n');
     expect(code).toContain(`__effect(() => { this._t0.data = String((this.vis.value ? "y" : "n")); });`);
     expect(code).not.toContain('create_block');
@@ -1189,7 +1189,7 @@ describe('two-way binding: the `<=>` matrix and its loudness fork', () => {
     expect(mod).toContain("addEventListener('input', (e) => { mstate.value[0].x = e.target.value; mstate.touch?.(); });");
   });
 
-  test('`value <=> @name` (the member spelled with @) is a  superset —  parse-rejects the same member ()', () => {
+  test('`value <=> @name` (the member spelled with @) is a supported spelling', () => {
     const { code } = compile('F = component\n  name := ""\n  render\n    input value <=> @name\n');
     expect(code).toContain("addEventListener('input', (e) => { this.name.value = e.target.value; });");
   });
@@ -1377,7 +1377,7 @@ describe('child components: the instantiation protocol', () => {
   });
 });
 
-describe('child components: props — the the pinned contract', () => {
+describe('child components: props — the pinned contract', () => {
   test('a bare reactive member passes its CONTAINER (no updater); expressions snapshot with an _updateProp effect ', () => {
     const { code } = compile(`${KID}App = component
   name := "n"

@@ -134,7 +134,7 @@ describe('generated → source (the diagnostics direction)', () => {
     expect(generatedEditSpanToSource(mappings, genSpec, genSpec + 5, source, code)).toBeNull();
   });
 
-  test('a generated insertion point anchors per the the settled rule three-tier rule', () => {
+  test('a generated insertion point anchors per the three-tier rule', () => {
     const source = 'import { answer } from "./util.rip"\nk = answer\n';
     const { code, mappings } = compile(source, { face: 'ts' });
     // Tier 2 (verbatim cover): inside the import clause's braces —
@@ -151,7 +151,7 @@ describe('generated → source (the diagnostics direction)', () => {
     expect(generatedInsertionToSource(mappings, midSpec, source, code)).toBeNull();
   });
 
-  test('an insertion anchor beneath a next-line-attached directive hoists ABOVE it (the settled rule adjacency)', () => {
+  test('an insertion anchor beneath a next-line-attached directive hoists ABOVE it (directive adjacency)', () => {
     // The directive governs the statement directly beneath; a
     // whole-line insertion between them would split the pair (TS2578 +
     // the suppressed error both resurface). The anchor hoists to the
@@ -160,7 +160,7 @@ describe('generated → source (the diagnostics direction)', () => {
     const { mappings } = compile(source, { face: 'ts' });
     const governed = source.indexOf('count:');
     expect(insertionAboveAttachedDirectives(mappings, governed, source)).toBe(0);
-    // A stacked pair: only the ADJACENT directive attaches (the settled rule
+    // A stacked pair: only the ADJACENT directive attaches (the
     // next-line rule — the outer one declines, stays ordinary), so the
     // anchor hoists exactly one line, above the attached directive.
     const stacked = '# @ts-expect-error\n# @ts-ignore\ncount: number = "nope"\n';
@@ -212,7 +212,7 @@ describe('generated → source (the diagnostics direction)', () => {
 
     // A COMBINED clause (two same-module imports merged) takes the
     // style of the FIRST source statement naming that module — the
-    // deterministic the settled rule rule.
+    // deterministic first-statement rule.
     const twoSame = 'import { zz } from "./m.rip"\nimport { aa } from \'./m.rip\'\nk = zz + aa\n';
     const ts = compile(twoSame, { face: 'ts' });
     const tsFace = { ...ts, source: twoSame };
@@ -220,7 +220,7 @@ describe('generated → source (the diagnostics direction)', () => {
     expect(combined.newText).toBe('import { aa, zz } from "./m.rip"\n');
 
     // A specifier with NO source statement to read the style from
-    // refuses the whole edit (all-or-nothing, the settled rule).
+    // refuses the whole edit (all-or-nothing).
     expect(wholeImportLinesEdit(face, genLine(0), genLine(2), "import { answer, zz } from './invented.rip';\n")).toBeNull();
 
     // The single-quote control: the user's style already matches the
@@ -332,7 +332,7 @@ describe('TS-face artifact filters', () => {
     expect(isScaffoldingLabel('answer')).toBe(false);
   });
 
-  test('scrubFaceArtifacts: the the settled rule `!:` assertion and mirror .rip.ts specifiers leave user-visible strings', () => {
+  test('scrubFaceArtifacts: the `!:` assertion and mirror .rip.ts specifiers leave user-visible strings', () => {
     expect(scrubFaceArtifacts('let y!: number')).toBe('let y: number');
     expect(scrubFaceArtifacts('Add import from "./util.rip.ts"')).toBe('Add import from "./util.rip"');
     // A genuine non-null assertion on a call result is not the pattern.
@@ -347,7 +347,7 @@ describe('TS-face artifact filters', () => {
   });
 });
 
-describe('diagnostic tag restoration (the the settled rule rendering seam)', () => {
+describe('diagnostic tag restoration (the rendering seam)', () => {
   test('the fallback table mirrors TypeScript\'s reportsUnnecessary/reportsDeprecated sets exactly', () => {
     // Source of truth: the typescript diagnostics table
     // (diagnosticMessages.json upstream; diagnostics_generated.go in

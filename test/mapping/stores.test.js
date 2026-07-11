@@ -1,5 +1,5 @@
 // NodeStore + RoleStore populated at reduce
-// time, asserted by OFFSET — plus the §4.6 store invariants over the corpus.
+// time, asserted by OFFSET — plus the store invariants over the corpus.
 import { describe, test, expect } from 'bun:test';
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
@@ -158,7 +158,7 @@ describe('un-annotated constructed nodes get rows', () => {
   });
 });
 
-describe('§4.6: pass-through creates no identity', () => {
+describe('pass-through creates no identity', () => {
   // Exact node counts: every count below includes ONLY constructed arrays
   // (construct rules + list plumbing). Any pass-through or Parenthetical
   // reduction registering its child again would inflate these.
@@ -189,7 +189,7 @@ describe('§4.6: pass-through creates no identity', () => {
   });
 });
 
-describe('§4.6 $self extent: spans cover exactly real content', () => {
+describe('$self extent: spans cover exactly real content', () => {
   test('trailing blank/comment lines never extend a block or if span', () => {
     const src = 'if a\n  return a\n\n# c\n\nz = 1';
     const { stores } = parse(src);
@@ -500,7 +500,7 @@ describe('CodeBuilder mark-span protocol', () => {
   });
 });
 
-describe('§4.6 invariants over the corpus', () => {
+describe('store invariants over the corpus', () => {
   const corpusDir = join(import.meta.dir, '../corpus');
   const files = readdirSync(corpusDir).filter(f => f.endsWith('.rip')).sort();
 

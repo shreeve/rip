@@ -15,7 +15,7 @@
 //      array entry is the container/item two-stage form).
 //
 // A future wave adding a class-value spelling to the DSL adds its
-// fixture here in the same commit (the §9-agreement-8 pattern, editor
+// fixture here in the same commit (the working-agreement pattern, editor
 // tier) — without a regex covering it, the new spelling ships without
 // Tailwind completions and this suite is where that shows.
 import { describe, test, expect } from 'bun:test';
