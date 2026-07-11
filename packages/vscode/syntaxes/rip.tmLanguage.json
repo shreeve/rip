@@ -1,0 +1,986 @@
+{
+  "information_for_contributors": [
+    "Adapted from VS Code's built-in CoffeeScript grammar (MIT licensed).",
+    "Original: https://github.com/atom/language-coffee-script",
+    "Extended for Rip: type annotations, reactive operators, enums, interfaces, components."
+  ],
+  "name": "Rip",
+  "scopeName": "source.rip",
+  "fileTypes": ["rip"],
+  "patterns": [
+
+    {"comment": "=== COMMENTS (must be first to prevent # in strings from matching) ==="},
+    {
+      "begin": "(?<!#)###(?!#)",
+      "beginCaptures": { "0": { "name": "punctuation.definition.comment.rip" } },
+      "end": "###",
+      "endCaptures": { "0": { "name": "punctuation.definition.comment.rip" } },
+      "name": "comment.block.rip",
+      "patterns": [
+        { "match": "(?<=^|\\s)@\\w*(?=\\s)", "name": "storage.type.annotation.rip" }
+      ]
+    },
+    {
+      "match": "(#)(?!\\{).*$",
+      "name": "comment.line.number-sign.rip",
+      "captures": { "1": { "name": "punctuation.definition.comment.rip" } }
+    },
+
+    {"comment": "=== SCHEMA BLOCKS (`Name = schema [:kind]` + indented body) ==="},
+    { "include": "#schema-block" },
+
+    {"comment": "=== HEREDOCS (before regular strings — triple quotes first) ==="},
+    {
+      "begin": "'''",
+      "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.rip" } },
+      "end": "'''",
+      "endCaptures": { "0": { "name": "punctuation.definition.string.end.rip" } },
+      "name": "string.quoted.single.heredoc.rip",
+      "patterns": [
+        { "match": "(\\\\).", "name": "constant.character.escape.backslash.rip",
+          "captures": { "1": { "name": "punctuation.definition.escape.backslash.rip" } } }
+      ]
+    },
+    {
+      "begin": "\"\"\"",
+      "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.rip" } },
+      "end": "\"\"\"",
+      "endCaptures": { "0": { "name": "punctuation.definition.string.end.rip" } },
+      "name": "string.quoted.double.heredoc.rip",
+      "patterns": [
+        { "match": "(\\\\).", "name": "constant.character.escape.backslash.rip",
+          "captures": { "1": { "name": "punctuation.definition.escape.backslash.rip" } } },
+        { "include": "#interpolated_rip" }
+      ]
+    },
+
+    {"comment": "=== STRINGS ==="},
+    {
+      "begin": "'",
+      "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.rip" } },
+      "end": "'",
+      "endCaptures": { "0": { "name": "punctuation.definition.string.end.rip" } },
+      "name": "string.quoted.single.rip",
+      "patterns": [
+        { "match": "(\\\\).", "name": "constant.character.escape.backslash.rip",
+          "captures": { "1": { "name": "punctuation.definition.escape.backslash.rip" } } }
+      ]
+    },
+    {
+      "begin": "\"",
+      "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.rip" } },
+      "end": "\"",
+      "endCaptures": { "0": { "name": "punctuation.definition.string.end.rip" } },
+      "name": "string.quoted.double.rip",
+      "patterns": [
+        { "match": "(\\\\).", "name": "constant.character.escape.backslash.rip",
+          "captures": { "1": { "name": "punctuation.definition.escape.backslash.rip" } } },
+        { "include": "#interpolated_rip" }
+      ]
+    },
+
+    {"comment": "=== INLINE JAVASCRIPT ==="},
+    {
+      "match": "(`)(.*)(`)",
+      "name": "string.quoted.script.rip",
+      "captures": {
+        "1": { "name": "punctuation.definition.string.begin.rip" },
+        "2": { "name": "source.js.embedded.rip", "patterns": [{ "include": "source.js" }] },
+        "3": { "name": "punctuation.definition.string.end.rip" }
+      }
+    },
+
+    {"comment": "=== HEREGEX and REGEX ==="},
+    {
+      "begin": "///",
+      "end": "(///)[gimsuy]*",
+      "name": "string.regexp.multiline.rip",
+      "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.rip" } },
+      "endCaptures": { "1": { "name": "punctuation.definition.string.end.rip" } },
+      "patterns": [
+        { "include": "#interpolated_rip" },
+        { "match": "\\\\.", "name": "constant.character.escape.backslash.rip" },
+        { "match": "#.*$", "name": "comment.line.number-sign.rip" }
+      ]
+    },
+    {
+      "begin": "(?<![\\w$])(/)(?=(?![/*+?])([^/\\\\]|\\\\.)*?/[gimsuy]*(?!\\s*[\\w$/(]))",
+      "beginCaptures": { "1": { "name": "punctuation.definition.string.begin.rip" } },
+      "end": "(/)[gimsuy]*",
+      "endCaptures": { "1": { "name": "punctuation.definition.string.end.rip" } },
+      "name": "string.regexp.rip",
+      "patterns": [
+        { "match": "\\\\.", "name": "constant.character.escape.backslash.rip" }
+      ]
+    },
+
+    {"comment": "=== TYPE DECLARATIONS (type, enum, interface — before keywords to get name capture) ==="},
+    {
+      "begin": "\\b(type)\\s+([A-Z]\\w*)",
+      "beginCaptures": {
+        "1": { "name": "storage.type.type.rip" },
+        "2": { "name": "entity.name.type.alias.rip" }
+      },
+      "end": "(?=^\\S)",
+      "patterns": [
+        {
+          "match": "\\b(readonly)\\b",
+          "name": "storage.modifier.rip"
+        },
+        {
+          "match": "\\b([a-zA-Z_$]\\w*)(\\?)?(:)(?![:=])\\s*",
+          "captures": {
+            "1": { "name": "variable.other.object.property.rip" },
+            "2": { "name": "keyword.operator.type.optional.rip" },
+            "3": { "name": "keyword.operator.type.annotation.rip" }
+          }
+        },
+        { "include": "#type_expression" },
+        { "include": "$self" }
+      ]
+    },
+    {
+      "match": "\\b(enum)\\s+([A-Z]\\w*)",
+      "captures": {
+        "1": { "name": "storage.type.enum.rip" },
+        "2": { "name": "entity.name.type.enum.rip" }
+      }
+    },
+    {
+      "begin": "\\b(interface)\\s+([A-Z]\\w*)(?:\\s+(extends)\\s+([A-Z]\\w*))?",
+      "beginCaptures": {
+        "1": { "name": "storage.type.interface.rip" },
+        "2": { "name": "entity.name.type.interface.rip" },
+        "3": { "name": "storage.modifier.extends.rip" },
+        "4": { "name": "entity.other.inherited-class.rip" }
+      },
+      "end": "(?=^\\S)",
+      "patterns": [
+        {
+          "match": "\\b(readonly)\\b",
+          "name": "storage.modifier.rip"
+        },
+        {
+          "match": "\\b([a-zA-Z_$]\\w*)(\\?)?(:)(?![:=])\\s*",
+          "captures": {
+            "1": { "name": "variable.other.object.property.rip" },
+            "2": { "name": "keyword.operator.type.optional.rip" },
+            "3": { "name": "keyword.operator.type.annotation.rip" }
+          }
+        },
+        { "include": "#type_expression" },
+        { "include": "$self" }
+      ]
+    },
+    {
+      "match": "\\b(class)\\s+(\\w+(?:\\.\\w*)*)(?:\\s+(extends)\\s+(\\w+(?:\\.\\w*)*))?",
+      "name": "meta.class.rip",
+      "captures": {
+        "1": { "name": "storage.type.class.rip" },
+        "2": { "name": "entity.name.type.class.rip" },
+        "3": { "name": "keyword.control.inheritance.rip" },
+        "4": { "name": "entity.other.inherited-class.rip" }
+      }
+    },
+
+    {"comment": "=== FUNCTION DEFINITIONS ==="},
+    {
+      "comment": "def name(...) or def name!(...)",
+      "begin": "\\b(def)\\s+([a-zA-Z_$]\\w*[!?]?)",
+      "beginCaptures": {
+        "1": { "name": "storage.type.function.rip" },
+        "2": { "name": "entity.name.function.rip" }
+      },
+      "end": "(?=$|[=-]>|\\n)",
+      "name": "meta.function.rip",
+      "patterns": [{ "include": "#function_params" }, { "include": "$self" }]
+    },
+    {
+      "comment": "name = (...) -> or name = ->",
+      "begin": "((@)?[a-zA-Z_$][\\w$]*)\\s*(=)\\s*(?=(\\([^()]*\\)\\s*)?[=-]>)",
+      "beginCaptures": {
+        "1": { "name": "entity.name.function.rip" },
+        "2": { "name": "variable.other.readwrite.instance.rip" },
+        "3": { "name": "keyword.operator.assignment.rip" }
+      },
+      "end": "[=-]>",
+      "endCaptures": { "0": { "name": "storage.type.function.rip" } },
+      "name": "meta.function.rip",
+      "patterns": [{ "include": "#function_params" }]
+    },
+    {
+      "comment": "name: (...) -> or name: -> (method in object/class)",
+      "begin": "((@)?[a-zA-Z_$][\\w$]*)\\s*(:)\\s*(?=(\\([^()]*\\)\\s*)?[=-]>)",
+      "beginCaptures": {
+        "1": { "name": "entity.name.function.rip" },
+        "2": { "name": "variable.other.readwrite.instance.rip" },
+        "3": { "name": "keyword.operator.assignment.rip" }
+      },
+      "end": "[=-]>",
+      "endCaptures": { "0": { "name": "storage.type.function.rip" } },
+      "name": "meta.function.rip",
+      "patterns": [{ "include": "#function_params" }]
+    },
+    {
+      "comment": "Inline arrow: (...) -> or ->",
+      "begin": "(?=(\\([^()]*\\)\\s*)?[=-]>)",
+      "end": "[=-]>",
+      "endCaptures": { "0": { "name": "storage.type.function.rip" } },
+      "name": "meta.function.inline.rip",
+      "patterns": [{ "include": "#function_params" }]
+    },
+
+    {"comment": "=== CONSTRUCTOR: new and .new() ==="},
+    {
+      "match": "(new)\\s+(?:(?:(class)\\s+(\\w+(?:\\.\\w*)*)?)|(\\w+(?:\\.\\w*)*))",
+      "name": "meta.class.instance.constructor.rip",
+      "captures": {
+        "1": { "name": "keyword.operator.new.rip" },
+        "2": { "name": "storage.type.class.rip" },
+        "3": { "name": "entity.name.function.rip" },
+        "4": { "name": "entity.name.function.rip" }
+      }
+    },
+    {
+      "comment": "Ruby-style .new()",
+      "match": "(\\.)(new)\\s*(?=\\()",
+      "captures": {
+        "1": { "name": "punctuation.accessor.rip" },
+        "2": { "name": "keyword.operator.new.rip" }
+      }
+    },
+
+    {"comment": "=== CONSTANTS ==="},
+    { "match": "\\b(true|yes|on)\\b",    "name": "constant.language.boolean.true.rip" },
+    { "match": "\\b(false|no|off)\\b",  "name": "constant.language.boolean.false.rip" },
+    { "match": "\\b(null)\\b",          "name": "constant.language.null.rip" },
+    { "match": "\\b(undefined)\\b",     "name": "constant.language.undefined.rip" },
+    { "match": "\\b(NaN|Infinity)\\b",  "name": "constant.language.rip" },
+    { "match": "\\b(this)\\b",          "name": "variable.language.this.rip" },
+
+    {"comment": "=== INSTANCE VARIABLES (@name) ==="},
+    {
+      "match": "(@)([a-zA-Z_$]\\w*)?",
+      "name": "variable.other.readwrite.instance.rip",
+      "captures": {
+        "1": { "name": "punctuation.definition.variable.rip" }
+      }
+    },
+
+    {"comment": "=== COMPONENT DEFINITIONS (export Name = component extends tag) ==="},
+    {
+      "match": "\\b(export\\s+)?([A-Z]\\w*)\\s*(=)\\s*(component)(?:\\s+(extends)\\s+([a-z]\\w*))?\\b",
+      "captures": {
+        "1": { "name": "keyword.control.rip" },
+        "2": { "name": "entity.name.type.class.rip" },
+        "3": { "name": "keyword.operator.assignment.rip" },
+        "4": { "name": "keyword.control.rip" },
+        "5": { "name": "storage.modifier.extends.rip" },
+        "6": { "name": "entity.name.tag.rip" }
+      }
+    },
+    {
+      "comment": "Fallback for generic components: scopes 'component extends tag' when the full definition rule doesn't match (due to <...> type params).",
+      "match": "\\b(component)\\s+(extends)\\s+([a-z]\\w*)\\b",
+      "captures": {
+        "1": { "name": "keyword.control.rip" },
+        "2": { "name": "storage.modifier.extends.rip" },
+        "3": { "name": "entity.name.tag.rip" }
+      }
+    },
+
+    {"comment": "=== $ SIGIL DATA ATTRIBUTES ==="},
+    {
+      "match": "(\\$)([a-zA-Z_]\\w*)",
+      "captures": {
+        "1": { "name": "punctuation.definition.variable.rip" },
+        "2": { "name": "entity.other.attribute-name.data.rip" }
+      }
+    },
+
+    {"comment": "=== RENDER BLOCK (context-aware tag/component/attribute highlighting) ==="},
+    {
+      "comment": "Captures render keyword + indentation. HTML tags, components, and attributes are only highlighted inside this context. The block ends when a non-blank line is not indented deeper than render.",
+      "begin": "^([ \\t]*)(render)[ \\t]*(?:#.*)?$",
+      "beginCaptures": {
+        "2": { "name": "keyword.control.rip" }
+      },
+      "end": "^(?!\\1[ \\t]|[ \\t]*$)",
+      "patterns": [
+        {
+          "comment": "HTML/SVG tag names. Mirrors TEMPLATE_TAGS in src/components.js.",
+          "begin": "^[ \\t]+(a|abbr|address|animate|animateMotion|animateTransform|area|article|aside|audio|b|base|bdi|bdo|blockquote|body|br|button|canvas|caption|circle|cite|clipPath|code|col|colgroup|data|datalist|dd|defs|del|desc|details|dfn|dialog|div|dl|dt|ellipse|em|embed|feBlend|feColorMatrix|feComponentTransfer|feComposite|feConvolveMatrix|feDiffuseLighting|feDisplacementMap|feDistantLight|feDropShadow|feFlood|feFuncA|feFuncB|feFuncG|feFuncR|feGaussianBlur|feImage|feMerge|feMergeNode|feMorphology|feOffset|fePointLight|feSpecularLighting|feSpotLight|feTile|feTurbulence|fieldset|figcaption|figure|filter|footer|foreignObject|form|g|h1|h2|h3|h4|h5|h6|head|header|hr|html|i|iframe|image|img|input|ins|kbd|label|legend|li|line|linearGradient|link|main|map|mark|marker|mask|math|menu|meta|metadata|meter|mpath|nav|noscript|object|ol|optgroup|option|output|p|param|path|pattern|picture|polygon|polyline|portal|pre|progress|q|radialGradient|rect|rp|rt|ruby|s|samp|script|section|select|set|slot|small|source|span|stop|strong|style|sub|summary|sup|svg|symbol|table|tbody|td|template|text|textPath|textarea|tfoot|th|thead|time|title|tr|track|tspan|u|ul|var|video|view|wbr)\\b(?!\\s*[=:]|\\s*\\()",
+          "beginCaptures": {
+            "1": { "name": "entity.name.tag.rip" }
+          },
+          "end": "$",
+          "patterns": [
+            { "include": "#render-prop-class" },
+            { "include": "#render-prop-event-region" },
+            { "include": "#render-prop-key-region" },
+            { "include": "#render-prop-bool-shorthand" },
+            { "include": "$self" }
+          ]
+        },
+        {
+          "comment": "PascalCase component usage. Uses begin/end variants of @event: and key: so their values are consumed before the boolean-shorthand pattern can re-match the value identifiers.",
+          "begin": "^[ \\t]+([A-Z]\\w*)\\b(?!\\s*[=:(])",
+          "beginCaptures": {
+            "1": { "name": "entity.name.type.class.rip" }
+          },
+          "end": "$",
+          "patterns": [
+            { "include": "#render-prop-class" },
+            { "include": "#render-prop-event-region" },
+            { "include": "#render-prop-key-region" },
+            { "include": "#render-prop-bool-shorthand" },
+            { "include": "$self" }
+          ]
+        },
+        {
+          "comment": "Implicit div with CSS class shorthand (.class)",
+          "begin": "^[ \\t]+(?=\\.[a-zA-Z])",
+          "end": "$",
+          "patterns": [
+            { "include": "#render-prop-class" },
+            { "include": "#render-prop-event-region" },
+            { "include": "#render-prop-key-region" },
+            { "include": "#render-prop-bool-shorthand" },
+            { "include": "$self" }
+          ]
+        },
+        {
+          "comment": "Standalone event prop (@name: handler) on its own line.",
+          "match": "^[ \\t]+(@)([a-zA-Z_$][\\w$-]*)(?=\\s*:(?![:=]))",
+          "captures": {
+            "1": { "name": "punctuation.definition.event.rip" },
+            "2": { "name": "entity.other.attribute-name.event.rip" }
+          }
+        },
+        {
+          "comment": "Standalone attribute props (key: value or key <=> binding).",
+          "match": "^[ \\t]+([a-zA-Z_$][\\w$-]*)(?=\\s*(?::(?![:=])|<=>))",
+          "captures": {
+            "1": { "name": "entity.other.attribute-name.rip" }
+          }
+        },
+        { "include": "$self" }
+      ]
+    },
+
+    {"comment": "=== IMPORT STATEMENTS (before keywords so imported names get scoped) ==="},
+    {
+      "comment": "Named imports: import { a, b as c } from 'path'",
+      "begin": "\\b(import)\\s*(\\{)",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.rip" },
+        "2": { "name": "punctuation.definition.modules.begin.rip" }
+      },
+      "end": "(\\})",
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.modules.end.rip" }
+      },
+      "patterns": [
+        {
+          "match": "\\b(as)\\b",
+          "name": "keyword.control.rip"
+        },
+        {
+          "match": "\\b([a-zA-Z_$]\\w*)\\b",
+          "name": "variable.other.readwrite.alias.rip"
+        }
+      ]
+    },
+    {
+      "comment": "Namespace import: import * as name from 'path'",
+      "match": "\\b(import)\\s+(\\*)\\s+(as)\\s+([a-zA-Z_$]\\w*)",
+      "captures": {
+        "1": { "name": "keyword.control.rip" },
+        "2": { "name": "constant.language.import-export-all.rip" },
+        "3": { "name": "keyword.control.rip" },
+        "4": { "name": "variable.other.readwrite.alias.rip" }
+      }
+    },
+    {
+      "comment": "Default import: import name from 'path'",
+      "match": "\\b(import)\\s+([a-zA-Z_$]\\w*)(?=\\s+from\\b)",
+      "captures": {
+        "1": { "name": "keyword.control.rip" },
+        "2": { "name": "variable.other.readwrite.alias.rip" }
+      }
+    },
+
+    {"comment": "=== FOR-LOOP VARIABLES (for item in array / for key, value of object) ==="},
+    {
+      "match": "\\b(for)\\s+([a-zA-Z_$]\\w*)(?:\\s*,\\s*([a-zA-Z_$]\\w*))?\\s+(in|of|as)\\b",
+      "captures": {
+        "1": { "name": "keyword.control.rip" },
+        "2": { "name": "variable.other.constant.rip" },
+        "3": { "name": "variable.other.constant.rip" },
+        "4": { "name": "keyword.control.rip" }
+      }
+    },
+
+    {"comment": "=== KEYWORDS ==="},
+    {
+      "match": "\\b(return|throw|break|continue|switch|when|then|if|else|unless|for|in|of|by|as|while|until|loop|do|try|catch|finally|yield|await|import|export|from|default|delete|typeof|instanceof|new|super|debugger|use|own|component|render|offer|accept|slot|it|is|isnt|and|or|not)\\b",
+      "name": "keyword.control.rip"
+    },
+    {
+      "match": "\\bextends\\b",
+      "name": "storage.modifier.extends.rip"
+    },
+
+    {"comment": "=== BUILT-IN TYPE KEYWORDS (always highlighted, except as an object key) ==="},
+    {
+      "match": "\\b(number|string|boolean|void|any|never|unknown|object|symbol|bigint)\\b(?!\\s*\\??:(?![:=]))",
+      "name": "support.type.primitive.rip"
+    },
+
+    {"comment": "=== TYPE DECLARATIONS AND ANNOTATIONS ==="},
+    {
+      "comment": "Type alias: type Name = type-expression",
+      "match": "\\b(type)\\s+([A-Z][\\w$]*)(?:(<[^>]+>))?\\s*(=)",
+      "captures": {
+        "1": { "name": "keyword.control.rip" },
+        "2": { "name": "entity.name.type.rip" },
+        "3": { "name": "meta.type.rip" },
+        "4": { "name": "keyword.operator.assignment.rip" }
+      }
+    },
+    {
+      "comment": "Return type annotation: ): Type. The type-start lookahead keeps `): value` object/ternary tails out (single-colon era).",
+      "begin": "(?<=\\))\\s*(:)(?![:=])(?=\\s*(?:\\b(?:number|string|boolean|void|any|never|unknown|object|symbol|bigint|null|undefined|typeof|keyof|readonly|infer)\\b|[A-Z]\\w*\\b(?!\\s*[.(])|[{(\\[]))",
+      "beginCaptures": {
+        "1": { "name": "keyword.operator.type-annotation.rip" }
+      },
+      "end": "(?=\\s*(?:=(?![>=])|:=|~=|~>|=!|<=>|\\)|->))|$|(?=#)",
+      "contentName": "meta.type.rip",
+      "patterns": [{ "include": "#type_expression" }]
+    },
+    {
+      "comment": "Typed constant: name: Type =! (lookahead for =! to scope as constant; =! is itself enough to disambiguate from an object key)",
+      "begin": "(?:(@)([a-zA-Z_$]\\w*)|([a-zA-Z_$]\\w*))\\s*(:)(?![:=])(?=.*=!)",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.variable.rip" },
+        "2": { "name": "variable.other.constant.rip" },
+        "3": { "name": "variable.other.constant.rip" },
+        "4": { "name": "keyword.operator.type-annotation.rip" }
+      },
+      "end": "(?=\\s*=!)|$|(?=#)",
+      "contentName": "meta.type.rip",
+      "patterns": [{ "include": "#type_expression" }]
+    },
+    {
+      "comment": "Type annotation: name: Type or @name: Type. In the single-colon era this is ambiguous with an object key, so the type-start lookahead only fires when the colon is followed by a built-in type keyword or a PascalCase type name that is NOT a member access or call (so `x: Math.max(a, b)` and `x: User.find()` stay value expressions, not types).",
+      "begin": "(?:(@)([a-zA-Z_$]\\w*)|([a-zA-Z_$]\\w*))\\s*(:)(?![:=])(?=\\s*(?:\\b(?:number|string|boolean|void|any|never|unknown|object|symbol|bigint|null|undefined|typeof|keyof|readonly|infer)\\b|[A-Z]\\w*\\b(?!\\s*[.(])))",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.variable.rip" },
+        "2": { "name": "variable.other.readwrite.instance.rip" },
+        "3": { "name": "variable.other.readwrite.rip" },
+        "4": { "name": "keyword.operator.type-annotation.rip" }
+      },
+      "end": "(?=\\s*(?:=(?![>=])|:=|~=|~>|=!|<=>|\\)|->))|$|(?=#)",
+      "contentName": "meta.type.rip",
+      "patterns": [{ "include": "#type_expression" }]
+    },
+
+    {"comment": "=== REACTIVE OPERATORS (before general assignment) ==="},
+    {
+      "match": "([a-zA-Z$_][\\w$]*)\\s*(~=)",
+      "captures": {
+        "1": { "name": "variable.other.readwrite.rip" },
+        "2": { "name": "keyword.operator.assignment.reactive.rip" }
+      }
+    },
+    {
+      "match": "([a-zA-Z$_][\\w$]*)\\s*(:=)",
+      "captures": {
+        "1": { "name": "variable.other.readwrite.rip" },
+        "2": { "name": "keyword.operator.assignment.reactive.rip" }
+      }
+    },
+    {
+      "match": "([a-zA-Z$_][\\w$]*)\\s*(~>)",
+      "captures": {
+        "1": { "name": "variable.other.readwrite.rip" },
+        "2": { "name": "keyword.operator.assignment.reactive.rip" }
+      }
+    },
+    {
+      "match": "([a-zA-Z$_][\\w$]*)\\s*(<=>)",
+      "captures": {
+        "1": { "name": "variable.other.readwrite.rip" },
+        "2": { "name": "keyword.operator.assignment.reactive.rip" }
+      }
+    },
+
+    {"comment": "=== READONLY ASSIGNMENT (with constant name capture) ==="},
+    {
+      "match": "([a-zA-Z$_][\\w$]*)\\s*(=!)",
+      "captures": {
+        "1": { "name": "variable.other.constant.rip" },
+        "2": { "name": "keyword.operator.assignment.readonly.rip" }
+      }
+    },
+
+    {"comment": "=== MAP LITERAL (before operators — *{ } → new Map) ==="},
+    { "match": "\\*(?=\\{)", "name": "keyword.operator.map-literal.rip" },
+
+    {"comment": "=== SPECIAL OPERATORS (before general operators) ==="},
+    { "match": "!\\?",            "name": "keyword.operator.otherwise.rip" },
+    { "match": "\\?!",            "name": "keyword.operator.presence.rip" },
+    { "match": "\\?\\?",          "name": "keyword.operator.nullish.rip" },
+    { "match": "\\?\\.(?![0-9])", "name": "keyword.operator.optional-chaining.rip" },
+    { "match": "(?<=[a-zA-Z0-9_$)])!(?![=?])", "name": "keyword.operator.dammit.rip" },
+
+    {"comment": "=== REGEX MATCH (before comparison) ==="},
+    { "match": "=~", "name": "keyword.operator.regex-match.rip" },
+
+    {"comment": "=== TWO-WAY BINDING (before comparison to prevent <=> matching <= then >) ==="},
+    { "match": "<=>", "name": "keyword.control.bind.rip" },
+
+    {"comment": "=== COMPUTED / REACTIVE ARROW (before comparison and bitwise so ~> / !> don't split into ~ + > or ! + >) ==="},
+    { "match": "[~!]>", "name": "keyword.operator.assignment.reactive.rip" },
+
+    {"comment": "=== COMPARISON (before assignment to prevent == matching =) ==="},
+    { "match": "===|!==|==|!=|<=|>=", "name": "keyword.operator.comparison.rip" },
+
+    {"comment": "=== COMPOUND ASSIGNMENT (before simple assignment) ==="},
+    { "match": "\\.=|&&=|\\|\\|=|\\?\\?=|\\+=|-=|\\*\\*=|\\*=|//=|%%=|/=|%=|<<=|>>>=|>>=|&=|\\|=|\\^=",
+      "name": "keyword.operator.assignment.compound.rip" },
+
+    {"comment": "=== ASSIGNMENT (with variable name capture) ==="},
+    {
+      "match": "([a-zA-Z$_][\\w$]*)\\s*(=)(?![>=])",
+      "captures": {
+        "1": { "name": "variable.other.readwrite.rip" },
+        "2": { "name": "keyword.operator.assignment.rip" }
+      }
+    },
+
+    {"comment": "=== LOGICAL ==="},
+    { "match": "&&",  "name": "keyword.operator.logical.rip" },
+    { "match": "\\|\\|",  "name": "keyword.operator.logical.rip" },
+    { "match": "!(?![=?])", "name": "keyword.operator.logical.rip" },
+
+    {"comment": "=== ARITHMETIC (longest match first) ==="},
+    { "match": "\\*\\*", "name": "keyword.operator.arithmetic.rip" },
+    { "match": "//",     "name": "keyword.operator.arithmetic.rip" },
+    { "match": "%%",     "name": "keyword.operator.arithmetic.rip" },
+    { "match": "\\+\\+", "name": "keyword.operator.increment.rip" },
+    { "match": "--",      "name": "keyword.operator.decrement.rip" },
+    { "match": "[+\\-*/%]", "name": "keyword.operator.arithmetic.rip" },
+
+    {"comment": "=== BITWISE ==="},
+    { "match": ">>>|>>|<<", "name": "keyword.operator.bitwise.shift.rip" },
+    { "match": "[&|^~]",    "name": "keyword.operator.bitwise.rip" },
+
+    {"comment": "=== COMPARISON (< > after bitwise shifts to prevent <<= matching) ==="},
+    { "match": "[<>]", "name": "keyword.operator.comparison.rip" },
+
+    {"comment": "=== RANGE AND SPREAD ==="},
+    { "match": "\\.\\.\\.", "name": "keyword.operator.splat.rip" },
+    { "match": "\\.\\.",     "name": "keyword.operator.range.rip" },
+
+    {"comment": "=== EXISTENTIAL ==="},
+    { "match": "\\?", "name": "keyword.operator.existential.rip" },
+
+    {"comment": "=== NUMBERS ==="},
+    { "match": "\\b0x[0-9a-fA-F](?:_?[0-9a-fA-F])*n?\\b", "name": "constant.numeric.hex.rip" },
+    { "match": "\\b0o[0-7](?:_?[0-7])*n?\\b",               "name": "constant.numeric.octal.rip" },
+    { "match": "\\b0b[01](?:_?[01])*n?\\b",                  "name": "constant.numeric.binary.rip" },
+    { "match": "\\b\\d[\\d_]*(?:\\.[\\d][\\d_]*)?(?:[eE][+-]?\\d+)?n?\\b", "name": "constant.numeric.decimal.rip" },
+
+    {"comment": "=== METHOD CALLS (.method()) ==="},
+    {
+      "match": "(\\.)([a-zA-Z_$]\\w*)\\s*(?=\\()",
+      "captures": {
+        "1": { "name": "punctuation.accessor.rip" },
+        "2": { "name": "entity.name.function.method.rip" }
+      }
+    },
+
+    {"comment": "=== FUNCTION CALLS (name()) ==="},
+    {
+      "match": "\\b([a-zA-Z_$]\\w*)\\s*(?=\\()",
+      "captures": { "1": { "name": "entity.name.function.rip" } }
+    },
+
+    {"comment": "=== DAMMIT CALLS (name!) ==="},
+    {
+      "match": "\\b([a-zA-Z_$]\\w*)(!)",
+      "captures": {
+        "1": { "name": "entity.name.function.rip" },
+        "2": { "name": "keyword.operator.dammit.rip" }
+      }
+    },
+
+    {"comment": "=== PROPERTY ACCESS ==="},
+    {
+      "match": "(\\.)([a-zA-Z_$]\\w*)",
+      "captures": {
+        "1": { "name": "punctuation.accessor.rip" },
+        "2": { "name": "variable.other.object.property.rip" }
+      }
+    },
+
+    {"comment": "=== OBJECT KEYS (name: value, name?: optional) ==="},
+    {
+      "match": "\\b([a-zA-Z_$]\\w*)(\\?)?([:])(?![:=])",
+      "captures": {
+        "1": { "name": "meta.object-literal.key.rip" },
+        "2": { "name": "keyword.operator.type.optional.rip" },
+        "3": { "name": "punctuation.separator.key-value.rip" }
+      }
+    }
+  ],
+
+  "repository": {
+    "render-prop-class": {
+      "comment": "CSS class shorthand (.className) used inside any render-block tag/component context.",
+      "match": "(\\.)(\\w[\\w-]*)",
+      "captures": {
+        "1": { "name": "punctuation.definition.entity.css.class.rip" },
+        "2": { "name": "entity.other.attribute-name.class.rip" }
+      }
+    },
+    "render-prop-event-region": {
+      "comment": "Event prop @name: handler — begin/end variant used in every render-arg context, so the handler value isn't matched by the boolean shorthand pattern.",
+      "begin": "(@)([a-zA-Z_$][\\w$-]*)(?=\\s*:(?![:=]))",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.event.rip" },
+        "2": { "name": "entity.other.attribute-name.event.rip" }
+      },
+      "end": "(?=,|$)",
+      "patterns": [{ "include": "$self" }]
+    },
+    "render-prop-key-region": {
+      "comment": "Attribute key:value or key<=>binding — begin/end variant used in every render-arg context, consumes value through next comma or EOL so its identifiers don't match the boolean shorthand pattern.",
+      "begin": "(?<![\\w$])([a-zA-Z_$][\\w$-]*)(?=\\s*(?::(?![:=])|<=>))",
+      "beginCaptures": {
+        "1": { "name": "entity.other.attribute-name.rip" }
+      },
+      "end": "(?=,|$)",
+      "patterns": [{ "include": "$self" }]
+    },
+    "render-prop-bool-shorthand": {
+      "comment": "Boolean flag shorthand — a bare identifier that resolves to nothing is a `name: true` prop/attribute. Used for HTML tags, implicit divs, and components alike. Must come after render-prop-event-region and render-prop-key-region so colon-values are consumed first.",
+      "match": "(?<![\\w$.])([a-zA-Z_$][\\w$]*)\\b(?=\\s*(?:,|$))",
+      "name": "entity.other.attribute-name.rip"
+    },
+    "type_expression": {
+      "patterns": [
+        {
+          "comment": "Object/inline type literal — consume balanced braces so inner commas don't leak to the outer parameter-list end pattern.",
+          "begin": "\\{",
+          "beginCaptures": { "0": { "name": "punctuation.definition.typeparameters.rip" } },
+          "end": "\\}",
+          "endCaptures": { "0": { "name": "punctuation.definition.typeparameters.rip" } },
+          "patterns": [{ "include": "#type_expression" }]
+        },
+        {
+          "comment": "Generic brackets — consume balanced angles for the same reason.",
+          "begin": "<",
+          "beginCaptures": { "0": { "name": "punctuation.definition.typeparameters.rip" } },
+          "end": ">",
+          "endCaptures": { "0": { "name": "punctuation.definition.typeparameters.rip" } },
+          "patterns": [{ "include": "#type_expression" }]
+        },
+        {
+          "comment": "Function-type parens — consume balanced parens.",
+          "begin": "\\(",
+          "beginCaptures": { "0": { "name": "punctuation.definition.typeparameters.rip" } },
+          "end": "\\)",
+          "endCaptures": { "0": { "name": "punctuation.definition.typeparameters.rip" } },
+          "patterns": [{ "include": "#type_expression" }]
+        },
+        {
+          "comment": "Built-in types",
+          "match": "\\b(number|string|boolean|void|any|never|unknown|object|symbol|bigint|null|undefined)\\b",
+          "name": "support.type.primitive.rip"
+        },
+        {
+          "comment": "typeof in type position",
+          "match": "\\b(typeof)\\b",
+          "name": "keyword.operator.expression.typeof.rip"
+        },
+        {
+          "comment": "keyof type operator",
+          "match": "\\b(keyof)\\b",
+          "name": "keyword.operator.expression.keyof.rip"
+        },
+        {
+          "comment": "infer type operator (conditional types)",
+          "match": "\\b(infer)\\b",
+          "name": "keyword.operator.expression.infer.rip"
+        },
+        {
+          "comment": "extends — generic constraints and conditional types",
+          "match": "\\b(extends)\\b",
+          "name": "keyword.operator.expression.extends.rip"
+        },
+        {
+          "comment": "in — mapped type key iteration ([P in K])",
+          "match": "\\b(in)\\b",
+          "name": "keyword.operator.expression.in.rip"
+        },
+        {
+          "comment": "is — type predicates (x is Foo)",
+          "match": "\\b(is)\\b",
+          "name": "keyword.operator.expression.is.rip"
+        },
+        {
+          "comment": "readonly — array/tuple/mapped type modifier",
+          "match": "\\b(readonly)\\b",
+          "name": "storage.modifier.rip"
+        },
+        {
+          "comment": "Type names (PascalCase)",
+          "match": "\\b([A-Z]\\w*)\\b",
+          "name": "entity.name.type.rip"
+        },
+        {
+          "comment": "Array type brackets",
+          "match": "\\[\\]",
+          "name": "punctuation.definition.typeparameters.rip"
+        },
+        {
+          "comment": "Union pipe",
+          "match": "\\|",
+          "name": "keyword.operator.type.union.rip"
+        },
+        {
+          "comment": "Intersection",
+          "match": "&",
+          "name": "keyword.operator.type.intersection.rip"
+        },
+        {
+          "comment": "Function type arrow",
+          "match": "=>",
+          "name": "storage.type.function.arrow.rip"
+        },
+        {
+          "comment": "Optional type suffix",
+          "match": "\\?",
+          "name": "keyword.operator.type.optional.rip"
+        },
+        {
+          "comment": "Non-nullable suffix",
+          "match": "!",
+          "name": "keyword.operator.type.nonnullable.rip"
+        },
+        {
+          "comment": "Type keyword (for structural types)",
+          "match": "\\b(type)\\b",
+          "name": "storage.type.rip"
+        },
+        {
+          "comment": "Comma separator",
+          "match": ",",
+          "name": "punctuation.separator.comma.rip"
+        },
+        {
+          "comment": "Colon in function type params",
+          "match": ":",
+          "name": "punctuation.separator.type.rip"
+        },
+        {
+          "comment": "Lowercase identifiers in types (param names)",
+          "match": "\\b[a-z_$]\\w*\\b",
+          "name": "variable.parameter.type.rip"
+        },
+        { "include": "#strings" }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "begin": "\"",
+          "end": "\"",
+          "name": "string.quoted.double.rip",
+          "patterns": [{ "match": "\\\\.", "name": "constant.character.escape.rip" }]
+        },
+        {
+          "begin": "'",
+          "end": "'",
+          "name": "string.quoted.single.rip",
+          "patterns": [{ "match": "\\\\.", "name": "constant.character.escape.rip" }]
+        }
+      ]
+    },
+    "interpolated_rip": {
+      "patterns": [
+        {
+          "begin": "\\#\\{",
+          "beginCaptures": { "0": { "name": "punctuation.definition.template-expression.begin.rip" } },
+          "end": "\\}",
+          "endCaptures": { "0": { "name": "punctuation.definition.template-expression.end.rip" } },
+          "name": "meta.embedded.line.rip",
+          "contentName": "meta.template.expression.rip",
+          "patterns": [
+            { "include": "$self" },
+            { "match": "[a-zA-Z_$][\\w$]*", "name": "variable.other.readwrite.rip" }
+          ]
+        },
+        {
+          "begin": "\\$\\{",
+          "beginCaptures": { "0": { "name": "punctuation.definition.template-expression.begin.rip" } },
+          "end": "\\}",
+          "endCaptures": { "0": { "name": "punctuation.definition.template-expression.end.rip" } },
+          "name": "meta.embedded.line.rip",
+          "contentName": "meta.template.expression.rip",
+          "patterns": [
+            { "include": "$self" },
+            { "match": "[a-zA-Z_$][\\w$]*", "name": "variable.other.readwrite.rip" }
+          ]
+        }
+      ]
+    },
+    "function_params": {
+      "patterns": [
+        {
+          "begin": "\\(",
+          "beginCaptures": { "0": { "name": "punctuation.definition.parameters.begin.bracket.round.rip" } },
+          "end": "\\)",
+          "endCaptures": { "0": { "name": "punctuation.definition.parameters.end.bracket.round.rip" } },
+          "name": "meta.parameters.rip",
+          "patterns": [
+            {
+              "comment": "Type annotation inside params: person: string or title?: string. Single-colon era: the type-start lookahead also admits `{`/`(`/`[` so inline object, function, and tuple/array param types work (e.g. opts: { host: string }, cb: (n: number) => void), while a default object value like `(x = {a: 1})` is unaffected because it has no `name:` before the brace.",
+              "begin": "(?:(@)([a-zA-Z_$]\\w*)|([a-zA-Z_$]\\w*))(\\?)?\\s*(:)(?![:=])(?=\\s*(?:\\b(?:number|string|boolean|void|any|never|unknown|object|symbol|bigint|null|undefined|typeof|keyof|readonly|infer)\\b|[A-Z]\\w*\\b(?!\\s*[.(])|[{(\\[]))",
+              "beginCaptures": {
+                "1": { "name": "punctuation.definition.variable.rip" },
+                "2": { "name": "variable.parameter.rip" },
+                "3": { "name": "variable.parameter.rip" },
+                "4": { "name": "keyword.operator.type.optional.rip" },
+                "5": { "name": "keyword.operator.type-annotation.rip" }
+              },
+              "end": "(?=\\s*(?:=(?![>=])|:=|~=|~>|=!|<=>|\\)|,|->))|$|(?=#)",
+              "contentName": "meta.type.rip",
+              "patterns": [{ "include": "#type_expression" }]
+            },
+            {
+              "match": "(@)?([a-zA-Z_$][\\w$]*)(\\.\\.\\.)?",
+              "captures": {
+                "1": { "name": "variable.other.readwrite.instance.rip" },
+                "2": { "name": "variable.parameter.rip" },
+                "3": { "name": "keyword.operator.splat.rip" }
+              }
+            },
+            { "include": "$self" }
+          ]
+        }
+      ]
+    },
+
+    "schema-block": {
+      "comment": "Inline schema declaration: a `... = schema [:kind]` head ending the line opens an indented block. The body runs until a line dedents back to column 0 (the next top-level statement); non-schema tokens (constraints, expression bodies, strings) fall through to $self.",
+      "begin": "\\b(schema)\\b[ \\t]*(:[a-z][A-Za-z0-9_]*)?[ \\t]*$",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.schema.rip" },
+        "2": { "name": "storage.type.schema.rip" }
+      },
+      "end": "^(?=\\S)",
+      "patterns": [
+        { "include": "#schema-directives" },
+        { "include": "#schema-enum-member" },
+        { "include": "#schema-entry-key" },
+        { "include": "#schema-field" },
+        { "include": "$self" }
+      ]
+    },
+
+    "schema-directives": {
+      "patterns": [
+        {
+          "comment": "Relationship directives carry a model name: @belongs_to User, @has_many Order",
+          "match": "(@(?:belongs_to|belongsTo|has_many|hasMany|has_one|hasOne))\\s+([A-Z]\\w*)",
+          "captures": {
+            "1": { "name": "entity.name.function.decorator.rip" },
+            "2": { "name": "entity.name.type.rip" }
+          }
+        },
+        {
+          "comment": "Composite index / unique with a column list: @index [role, active], @unique [:partnerId, :mrn]. The listed names reference fields, so they take the field scope.",
+          "begin": "(@(?:index|unique))\\s*(\\[)",
+          "beginCaptures": {
+            "1": { "name": "entity.name.function.decorator.rip" },
+            "2": { "name": "punctuation.definition.array.rip" }
+          },
+          "end": "\\]",
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.array.rip" }
+          },
+          "patterns": [
+            { "match": ",", "name": "punctuation.separator.comma.rip" },
+            {
+              "match": "(:)?([a-z]\\w*)",
+              "captures": {
+                "1": { "name": "punctuation.definition.symbol.rip" },
+                "2": { "name": "variable.other.property.rip" }
+              }
+            }
+          ]
+        },
+        {
+          "comment": "Single-column index / unique: @index role, @unique :email. The column references a field.",
+          "match": "(@(?:index|unique))\\s+(:)?([a-z]\\w*)",
+          "captures": {
+            "1": { "name": "entity.name.function.decorator.rip" },
+            "2": { "name": "punctuation.definition.symbol.rip" },
+            "3": { "name": "variable.other.property.rip" }
+          }
+        },
+        {
+          "comment": "Standalone / field-level directives — an explicit allowlist, NOT a \\w+ catch-all, so instance member access (@email, @role, @first) inside hook/computed bodies falls through to the @-variable rule instead of being mis-scoped as a directive. @id and @index are intentionally omitted: @id collides with the common @id member access, and @index always carries a column arg (handled by the composite/single-column rules above).",
+          "match": "@(?:timestamps|softDelete|soft_delete|unique|mixin|ensure|check|scope|defaultScope|idStart|on|where|belongs_to|belongsTo|has_many|hasMany|has_one|hasOne)\\b",
+          "name": "entity.name.function.decorator.rip"
+        }
+      ]
+    },
+
+    "schema-enum-member": {
+      "comment": "Enum members are bare symbols, optionally valued: :admin, :pending 0, :free \"free\". The value falls through to $self.",
+      "match": "^(\\s*)(:)([a-z]\\w*)",
+      "captures": {
+        "2": { "name": "punctuation.definition.symbol.rip" },
+        "3": { "name": "variable.other.enummember.rip" }
+      }
+    },
+
+    "schema-entry-key": {
+      "comment": "Hook / method / computed entries: `name: -> @` (method), `name: ~> @x` (lazy), `name: !> @x` (eager). The body falls through to $self.",
+      "match": "^(\\s*)([a-z]\\w*)(\\s*)(:)(?=\\s*[-~!]>)",
+      "captures": {
+        "2": { "name": "entity.name.function.rip" },
+        "4": { "name": "punctuation.separator.key-value.rip" }
+      }
+    },
+
+    "schema-field": {
+      "patterns": [
+        {
+          "comment": "Field with a model-reference type: items! OrderItem[], author? User",
+          "match": "^(\\s*)([a-z]\\w*)((?:[!?])+)?\\s+([A-Z]\\w*)(\\[\\])?",
+          "captures": {
+            "2": { "name": "variable.other.property.rip" },
+            "3": { "name": "keyword.operator.modifier.rip" },
+            "4": { "name": "entity.name.type.rip" },
+            "5": { "name": "punctuation.definition.array.rip" }
+          }
+        },
+        {
+          "comment": "Field with a primitive type: email! string, tags! string[]",
+          "match": "^(\\s*)([a-z]\\w*)((?:[!?])+)?\\s+([a-z]\\w*)(\\[\\])?",
+          "captures": {
+            "2": { "name": "variable.other.property.rip" },
+            "3": { "name": "keyword.operator.modifier.rip" },
+            "4": { "name": "support.type.rip" },
+            "5": { "name": "punctuation.definition.array.rip" }
+          }
+        }
+      ]
+    }
+  }
+}

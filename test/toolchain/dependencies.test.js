@@ -26,3 +26,14 @@ const VSCODE_DEPENDENCY_BUDGET = new Set([
   'vscode-languageserver',
   'vscode-languageserver-textdocument',
 ]);
+
+test('packages/vscode stays inside the dependency budget, exact pins only', () => {
+  const pkg = JSON.parse(readFileSync(join(import.meta.dir, '../../packages/vscode/package.json'), 'utf8'));
+  const deps = pkg.dependencies ?? {};
+  const allowed = new Set(['typescript', 'vscode-languageclient', 'vscode-languageserver', 'vscode-languageserver-textdocument']);
+  for (const [name, version] of Object.entries(deps)) {
+    expect(allowed.has(name)).toBe(true);
+    expect(version).toMatch(/^\d/); // exact pin, no range sigils
+  }
+  expect(pkg.devDependencies ?? null).toBeNull();
+});
