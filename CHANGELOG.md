@@ -5,6 +5,8 @@ repository's pull requests.
 
 ## Unreleased
 
+- Wire `bun run ext` to the shared extension installer (#14)
+
 - Set the VS Code extension version to 4.0.0 (#13)
 
 - Enforce the test boundary: root test runs mechanically exclude
