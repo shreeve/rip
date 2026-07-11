@@ -393,7 +393,7 @@ fail "valued enum with bare name: value form is rejected", '''
   '''
 
 # ==============================================================================
-# Kind-capability enforcement (§3 matrix)
+# Kind-capability enforcement (the capability matrix)
 # ==============================================================================
 
 fail ":input rejects methods", '''
@@ -451,7 +451,7 @@ code ":shape + @mixin is allowed (field sharing)", '''
   ''', opts
 
 # ==============================================================================
-# Remaining §9.1 coverage
+# Remaining named-coercer coverage
 # ==============================================================================
 
 fail "field vs computed collision in :model", '''
@@ -4902,7 +4902,7 @@ test "toJSONSchema: recursive shapes are cycle-safe via $defs", '''
 # Schema evolution — _tableSpec, introspect, diff, status/make/migrate
 # ==============================================================================
 #
-# The differ is tested against fixtures (roadmap §2.6): the mock adapter
+# The differ is tested against fixtures: the mock adapter
 # implements the Contract-v2 `introspect()` capability and returns a
 # canned DeployedSchema; declared models come from real declarations.
 

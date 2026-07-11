@@ -6,11 +6,11 @@
 // upgrades to the workspace `tsconfig.json` if one is present. The
 // guarded failure mode: a FIXED synthetic project in a temp dir that
 // reads neither — the workspace `tsconfig` and the installed `@types`
-// both invisible. the settled rule workspace-rooted project (mirror config extends
+// both invisible. The workspace-rooted project config (mirror config extends
 // the user's tsconfig; types:["*"] restores the visible-@types
 // enumeration TS 6/7 dropped) is what keeps this green.
 //
-// This is `.ts`-parity, and it is the settled rule-clean — rip reads the consumer's
+// This is `.ts`-parity, and it is dependency-clean — rip reads the consumer's
 // `@types`, it never ships its own. The one conscious trade: a bare file
 // with no `@types/bun` won't get Bun globals — exactly like a lone
 // `.ts`. So these tests assert the standard TS behaviors, using a real

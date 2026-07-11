@@ -83,7 +83,7 @@ const defineComponent = (api, spec = {}) => {
 // _children registration); the is the same protocol over the owner
 // seam (the child's frame pushed around _create, exactly what 
 // emission does). Both report construction failures through
-// console.error and continue — the the pinned contract.
+// console.error and continue — the pinned contract.
 const childCreate = (api, parent, Cls, props = {}) => {
   let inst = null, el = null;
   const prev = api.__pushComponent(parent);
@@ -150,7 +150,7 @@ describe('module shape', () => {
   });
 
   test('importing the module touches globalThis at the two sentinels ONLY — no __ripComponent, no __rip bridge', () => {
-    // A fresh process: this test file imports the the old runtime templates above,
+    // A fresh process: this test file imports the runtime templates above,
     // which DO write the bridge globals, so the assertion needs an
     // unpolluted globalThis. Importing components.js evaluates
     // reactive.js too (the module import), so both sentinels land.

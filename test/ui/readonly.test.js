@@ -237,7 +237,7 @@ describe('documented equivalences: operand grouping diverges in bytes, never in 
 // The rejection classes extend
 // ════════════════════════════════════════════════════════════════════
 
-describe(': readonly declarations have no expression form (the the pinned contract)', () => {
+describe('readonly declarations have no expression form (the pinned contract)', () => {
   test.each([
     ['y = (x =! 5)', 'y = const x = 5;'],
     ['f(x =! 5)', 'f(const x = 5);'],
@@ -253,7 +253,7 @@ describe(': readonly declarations have no expression form (the the pinned contra
   });
 });
 
-describe(': readonly targets are plain names (the the pinned contract)', () => {
+describe('readonly targets are plain names (the pinned contract)', () => {
   test.each([
     ['obj.x =! 5', 'const .,obj,x = 5;'],
     ['x[0] =! 5', 'const [],x,0 = 5;'],
@@ -264,10 +264,10 @@ describe(': readonly targets are plain names (the the pinned contract)', () => {
   });
 });
 
-describe(': no readonly class members (the the pinned contract)', () => {
+describe('no readonly class members (the pinned contract)', () => {
 });
 
-describe(': readonly declarations sit at module or function scope (the the pinned contract)', () => {
+describe('readonly declarations sit at module or function scope (the pinned contract)', () => {
   const positions = [
  'if c\n  x =! 5',
  'while c\n  x =! 5',
@@ -297,11 +297,11 @@ describe(': readonly names never hoist; registration is order-independent (the #
 
 });
 
-describe(': the scope-blind set unwraps a shadowing readonly (the the pinned contract extends)', () => {
+describe('the scope-blind set unwraps a shadowing readonly (the pinned contract extends)', () => {
 
 });
 
-describe(': a bang-marked readonly target rejects at parse —  silently drops the bang (the the pinned contract)', () => {
+describe('a bang-marked readonly target rejects at parse — never a silently dropped bang (the pinned contract)', () => {
 });
 
 describe(' extends: the `readonly` head is spellable — semanticKind discriminates (D6)', () => {

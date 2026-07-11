@@ -1,4 +1,4 @@
-// The the settled scope editor features driven over real LSP stdio against the
+// The editor features driven over real LSP stdio against the
 // real server + tsgo, per-feature acceptance plus the recorded
 // negatives:
 //
@@ -9,15 +9,15 @@
 //     an existing clause; staleness respected (a broken buffer's changed
 //     region answers null, aligned positions serve).
 //   DEFINITION (+implementation): same-doc, cross-file into an UNOPENED
-//     dependency (the settled rule recompile-for-mappings), and pass-through into a
+//     dependency (recompile-for-mappings), and pass-through into a
 //     real .ts sibling.
-//   SIGNATURE HELP: active parameter indices correct across the the settled scope
+//   SIGNATURE HELP: active parameter indices correct across the
 //     bodiless overload rows.
 //   SEMANTIC TOKENS: tokens land on Rip spans (annotation tokens map —
 //     they have real Rip spans in the face), hoist-duplicated tokens
 //     DEDUP to one source token, range requests answer the range.
 //   REFERENCES: lists span three files, two of them never opened.
-//   RENAME: the the settled rule dedup pinned (a hoisted declaration's let-line and
+//   RENAME: the coincident-span dedup pinned (a hoisted declaration's let-line and
 //     assignment are one source span → ONE edit), cross-file edits reach
 //     unopened files, out-of-closure files stay untouched;
 //     prepareRename refuses unmappable positions; a rename touching a
@@ -213,7 +213,7 @@ describe.skipIf(!tsgoAvailable)('completions', () => {
   }, 30000);
 
   test('auto-import inserts a NEW idiomatic Rip import line at the top (no semicolon, .rip specifier)', async () => {
-    // Auto-import candidates come from the ACTIVE PROGRAM (the the settled rule
+    // Auto-import candidates come from the ACTIVE PROGRAM (the demand-driven
     // corollary): util.rip is in the program because a.rip imports it —
     // app.rip itself has no import line yet, which is the point.
     await inWorkspace({
@@ -229,7 +229,7 @@ describe.skipIf(!tsgoAvailable)('completions', () => {
       expect(resolved.additionalTextEdits).toHaveLength(1);
       const edit = resolved.additionalTextEdits[0];
       // A whole new import line, after the existing import block — the
-      // the settled rule between-constructs insertion anchor.
+      // between-constructs insertion anchor.
       expect(edit.range.start).toEqual({ line: 1, character: 0 });
       expect(edit.range.end).toEqual({ line: 1, character: 0 });
       expect(edit.newText).toMatch(/^import \{ shout \} from ['"]\.\/util\.rip['"]\n$/);
@@ -299,7 +299,7 @@ describe.skipIf(!tsgoAvailable)('completions', () => {
     });
   }, 30000);
 
-  test('auto-import never splits a next-line-attached directive: the insertion hoists ABOVE `# @ts-expect-error` (the settled scope, the the settled rule neighbor)', async () => {
+  test('auto-import never splits a next-line-attached directive: the insertion hoists ABOVE `# @ts-expect-error` (the attached-directive neighbor rule)', async () => {
     await inWorkspace({
       'util.rip': UTIL,
       'a.rip': 'import { answer } from "./util.rip"\nexport aa = answer + 1\n',
@@ -432,10 +432,10 @@ describe.skipIf(!tsgoAvailable)('definition and implementation', () => {
     });
   }, 30000);
 
-  test('a mirror corrupted AFTER the face warmed stops answering: results drop, rename refuses (the settled rule on every ask)', async () => {
+  test('a mirror corrupted AFTER the face warmed stops answering: results drop, rename refuses (byte-verification on every ask)', async () => {
     await inWorkspace(THREE_FILES, async (api) => {
       await api.open('app.rip', APP_AB); // pulls a, b, util into the program
-      // WARM the the settled rule face: a cross-file definition into unopened a.rip.
+      // WARM the mirror face: a cross-file definition into unopened a.rip.
       const defs = await api.definition('app.rip', 2, 5); // aa at its use
       expect(defs).toHaveLength(1);
       expect(defs[0].uri).toBe(api.uriOf('a.rip'));
@@ -461,7 +461,7 @@ describe.skipIf(!tsgoAvailable)('definition and implementation', () => {
     });
   }, 30000);
 
-  test('typeDefinition resolves class- and interface-typed values to their Rip declarations (the settled scope re-probe)', async () => {
+  test('typeDefinition resolves class- and interface-typed values to their Rip declarations', async () => {
     await inWorkspace({
       'shapes.rip': 'export class Point\n  x: number = 0\n  move: (dx: number) ->\n    @x = @x + dx\n',
     }, async (api) => {
@@ -478,7 +478,7 @@ describe.skipIf(!tsgoAvailable)('definition and implementation', () => {
       await api.open('app.rip', SRC);
 
       // A class-typed value at a READ site: its type declaration lives
-      // in the UNOPENED shapes.rip (the settled rule maps it back).
+      // in the UNOPENED shapes.rip (recompile-for-mappings maps it back).
       const classTargets = await api.typeDefinition('app.rip', 6, 4); // p in p.x
       expect(classTargets).toHaveLength(1);
       expect(classTargets[0].uri).toBe(api.uriOf('shapes.rip'));
@@ -494,7 +494,7 @@ describe.skipIf(!tsgoAvailable)('definition and implementation', () => {
       expect(ifaceTargets[0].range.start.line).toBe(1);
 
       // A primitive-typed value has no type-declaration site: empty is
-      // the honest answer (the original the settled scope probe's actual finding).
+      // the honest answer.
       await api.change('app.rip', SRC + 'n = 42\nm = n\n');
       expect(await api.typeDefinition('app.rip', 8, 4)).toEqual([]);
     });
@@ -512,7 +512,7 @@ describe.skipIf(!tsgoAvailable)('definition and implementation', () => {
 });
 
 describe.skipIf(!tsgoAvailable)('signature help', () => {
-  test('active parameter indices hold across the the settled scope bodiless overload rows', async () => {
+  test('active parameter indices hold across bodiless overload rows', async () => {
     await inWorkspace({}, async (api) => {
       const src = [
         'def pick(a: number, b: number): number',
@@ -642,7 +642,7 @@ describe.skipIf(!tsgoAvailable)('document and workspace symbols', () => {
     });
   }, 30000);
 
-  test('workspace symbols reach unopened closure members with Rip positions (the settled rule/the settled rule)', async () => {
+  test('workspace symbols reach unopened closure members with Rip positions', async () => {
     await inWorkspace({
       'util.rip': UTIL,
       'a.rip': 'import { answer } from "./util.rip"\nexport aa = answer + 1\n',
@@ -703,7 +703,7 @@ describe.skipIf(!tsgoAvailable)('inlay hints', () => {
   }, 30000);
 });
 
-describe.skipIf(!tsgoAvailable)('document links (the settled scope — the trivia channel serves)', () => {
+describe.skipIf(!tsgoAvailable)('document links (the trivia channel serves)', () => {
   test('relative paths in COMMENTS linkify; strings that look like paths and missing files do not', async () => {
     await inWorkspace({
       'NOTES.md': '# notes\n<a id="setup"></a>\nsetup here\n',
@@ -763,7 +763,7 @@ describe.skipIf(!tsgoAvailable)('references', () => {
       expect(byUri.has(api.uriOf('b.rip'))).toBe(true); // never opened
 
       // The unopened file's USE site lands exactly on `answer`
-      // (line 1: `export aa = answer + 1`, chars 12..18) — the settled rule mapped
+      // (line 1: `export aa = answer + 1`, chars 12..18) — the broker mapped
       // it through the recompiled face.
       const aRefs = byUri.get(api.uriOf('a.rip'));
       expect(aRefs.some((r) =>
@@ -774,7 +774,7 @@ describe.skipIf(!tsgoAvailable)('references', () => {
 });
 
 describe.skipIf(!tsgoAvailable)('rename', () => {
-  test('the the settled rule dedup: a hoisted declaration renames as ONE edit, never coincident duplicates', async () => {
+  test('the coincident-span dedup: a hoisted declaration renames as ONE edit, never coincident duplicates', async () => {
     await inWorkspace({}, async (api) => {
       // `count: number = 42` emits a typed hoist line AND an assignment
       // — two generated manifestations of the IDENTICAL source span.
@@ -808,7 +808,7 @@ describe.skipIf(!tsgoAvailable)('rename', () => {
     await inWorkspace({
       ...THREE_FILES,
       // c.rip imports `answer` too, but nothing open reaches it — it is
-      // OUTSIDE the program, so the settled rule scopes the rename away from it.
+      // OUTSIDE the program, so the active-program scope keeps the rename away from it.
       'c.rip': 'import { answer } from "./util.rip"\nexport cc = answer + 3\n',
     }, async (api) => {
       await api.open('app.rip', APP_AB); // pulls a, b, util into the program
@@ -843,7 +843,7 @@ describe.skipIf(!tsgoAvailable)('rename', () => {
       expect(onName.range.start.line).toBe(1);
 
       // Comment bytes emit nothing — no verbatim generated twin, so the
-      // position refuses (the the settled rule exact flavor).
+      // position refuses (the exact flavor).
       expect(await api.prepareRename('app.rip', 0, 20)).toBeNull();
     });
   }, 30000);
@@ -950,7 +950,7 @@ describe.skipIf(!tsgoAvailable)('source.* code actions', () => {
     });
   }, 30000);
 
-  test('import COMBINING takes the FIRST source statement\'s quote style (the deterministic the settled rule rule)', async () => {
+  test('import COMBINING takes the FIRST source statement\'s quote style (the deterministic first-statement rule)', async () => {
     await inWorkspace({ 'util.rip': UTIL }, async (api) => {
       // Two same-module imports, both used: organize merges them into
       // one clause — a line with no face twin. The merged specifier
@@ -970,7 +970,7 @@ describe.skipIf(!tsgoAvailable)('source.* code actions', () => {
     await inWorkspace({ 'util.rip': UTIL, 'zed.rip': 'export zz = 1\n' }, async (api) => {
       // The unused import carries a comment tsgo never saw; deleting
       // the whole source line would take the comment with it — the
-      // the settled rule shape refuses and the action drops.
+      // whole-line-edit shape refuses and the action drops.
       const SRC = 'import { zz } from "./zed.rip" # keep me\nimport { answer } from "./util.rip"\nexport k = answer + 1\n';
       await api.open('app.rip', SRC);
       const actions = await api.codeAction('app.rip', WHOLE_DOC, [], ['source.organizeImports']);
@@ -980,7 +980,7 @@ describe.skipIf(!tsgoAvailable)('source.* code actions', () => {
   }, 30000);
 });
 
-describe.skipIf(!tsgoAvailable)('TS directives reach the editor (the settled rule inheritance)', () => {
+describe.skipIf(!tsgoAvailable)('TS directives reach the editor (directive inheritance)', () => {
   test('# @ts-expect-error suppresses the next line; an unused one lands TS2578 on the Rip comment', async () => {
     await inWorkspace({}, async (api) => {
       // The directive places in the face, so the deliberate
@@ -1000,7 +1000,7 @@ describe.skipIf(!tsgoAvailable)('TS directives reach the editor (the settled rul
   }, 30000);
 });
 
-describe.skipIf(!tsgoAvailable)('write-site hover enrichment across files (the settled rule/the settled rule)', () => {
+describe.skipIf(!tsgoAvailable)('write-site hover enrichment across files', () => {
   test('an EXPORTED unannotated binding hovers its inferred type at the write site (Tier 1 declare-in-place)', async () => {
     // Formerly this pinned a limitation: the hoisted shape left an
     // exported let un-evolved (TypeScript's own rule), so the write

@@ -5,6 +5,12 @@ repository's pull requests.
 
 ## Unreleased
 
+- Fix comment and test-title typos left by earlier scrubbing: doubled
+  articles, unfilled placeholder phrases reworded to name the actual
+  rule or mechanism, empty citation parentheses, dangling section
+  references, and mangled comparison titles restated as the invariant
+  they pin. Comments and test titles only — no behavior changes (#22)
+
 - Enable prototype access: `X::m` reads and writes `X.prototype.m`
   (`String::capitalize = -> …`), and an ANNOTATED write
   (`String::capitalize: () => string = -> …`) manifests its annotation

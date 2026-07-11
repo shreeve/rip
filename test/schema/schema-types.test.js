@@ -71,7 +71,7 @@ describe('schema declarations: the per-kind shapes', () => {
     expect(valued).toContain('type St = 0 | 1;');
     expect(valued).toContain('ok(data: unknown): boolean;');
     expect(valued).not.toContain('data is St');
-    // the async family and array combinator the the compiler runtime serves
+    // the async family and array combinator the compiler runtime serves
     expect(bare).toContain('parseAsync(data: unknown): Promise<R>;');
     expect(bare).toContain('array: ArraySchema<R>;');
   });

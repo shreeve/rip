@@ -8,7 +8,7 @@
 //
 // The client is deliberately small — Content-Length framing, request/
 // notification dispatch, and a notification listener — because the Rip
-// server (and the spike scripts) need exactly that and nothing more.
+// server needs exactly that and nothing more.
 // The vscode-languageserver dependency serves the EDITOR-facing side of
 // the Rip server; this module is the tsgo-facing side.
 

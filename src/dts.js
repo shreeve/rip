@@ -73,7 +73,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
   // declarations project their shapes — the intrinsic block prepends
   // once, each schema contributes its alias lines and a typed const
   // at its own program position. Collisions on the emitted type
-  // names reject here (); JS output never carries them.
+  // names reject here; JS output never carries them.
   let schemaStory = null;
   try {
     schemaStory = buildSchemaTypeStory(sexpr);

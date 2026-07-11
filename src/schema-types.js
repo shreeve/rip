@@ -7,7 +7,7 @@
 // What renders:
 //   - the INTRINSIC declarations (SchemaIssue / SchemaSafeResult /
 //     ArraySchema / Schema / SchemaQuery / ModelSchema) — type-level
-//     interfaces ONLY, per-file inline (); the persistence
+//     interfaces ONLY, per-file inline; the persistence
 //     tier (SchemaQuery/ModelSchema) emits only where a :model exists
 //   - per-schema alias lines and the binding's declared type:
 //       :enum   → bare literal-union type + validation const
@@ -43,7 +43,7 @@
 // The emitted type names are a module-level namespace: a collision —
 // with the intrinsic vocabulary, between two schema-derived aliases,
 // or with a user-declared type/interface/class/enum name — REJECTS
-// loudly at the typed artifact (); JS shipping output never
+// loudly at the typed artifact; JS shipping output never
 // carries these names and is untouched.
 //
 // Pure text/tree work: no stores, no builder, no I/O. Rejections

@@ -8,7 +8,7 @@
 //
 // Runs on Bun, spawned by the client shell (src/extension.js).
 //
-// The project model (the settled rule, spikes 3+4):
+// The project model:
 //   - Mirror tree: <workspace>/.rip/editor/<rel-path>.rip.ts carries the
 //     last-compiled TS face of every .rip file the program NEEDS — the
 //     open buffers plus their transitive .rip imports (the closure),
@@ -16,7 +16,7 @@
 //     the watched-files handler. Never an unconditional whole-workspace
 //     pass: standard language-server whole-project semantics,
 //     demand-driven materialization. The tree is a regenerable,
-//     self-gitignoring cache (never a shipping artifact — the settled rule strip
+//     self-gitignoring cache (never a shipping artifact — the strip
 //     gate stands).
 //   - Persistent cache: the mirror tree survives restarts; a manifest
 //     (.cache.json) keys every mirror by its source text's hash AND the
@@ -32,8 +32,8 @@
 //     unless the user's config sets `types` itself. rootDirs merges the
 //     mirror tree with the real workspace so .rip files can import real
 //     .ts siblings.
-//   - Open buffers OVERLAY their mirrors via didOpen/didChange (spike 4:
-//     the overlay governs over stale disk bytes); closure files serve
+//   - Open buffers OVERLAY their mirrors via didOpen/didChange (the
+//     overlay governs over stale disk bytes); closure files serve
 //     from their last-compiled face on disk; closing a buffer falls back
 //     to its mirror.
 //   - Unwritable/nonexistent workspace roots fall back to a temp mirror
@@ -312,12 +312,12 @@ function chainSetsTypes(configPath, visited = new Set(), depth = 0) {
 }
 
 // The generated mirror-root tsconfig. Overrides applied over the
-// user's config (or the defaults): noImplicitAny stays ON (the settled rule — it
+// user's config (or the defaults): noImplicitAny stays ON (it
 // activates the evolving-`let` inference; the implicit-any family is
 // suppressed per-code in translate.js), noEmit (the project never emits;
 // also what legalizes allowImportingTsExtensions), and rootDirs merging
-// the mirror tree with the real workspace (spike 4's R probe: a .rip
-// file importing a real .ts sibling resolves).
+// the mirror tree with the real workspace (a .rip file importing a
+// real .ts sibling resolves).
 function generatedTsconfig() {
   const overrides = {
     noImplicitAny: true,
@@ -488,7 +488,7 @@ const TSGO_CLIENT_CAPABILITIES = {
 
 // tsgo keys inlay hints (and other preference-driven behavior) on
 // workspace/configuration answers — every hint class defaults OFF
-// (spikes 5+6). The broker FORWARDS tsgo's asks to the editor when
+// The broker FORWARDS tsgo's asks to the editor when
 // the client declared configuration support, so the user's own
 // typescript.* settings govern hints on .rip files exactly as they do
 // on .ts files (plain-TS parity — VS Code ships the typescript.*
@@ -590,7 +590,7 @@ function stateOf(uri) {
 // never-list): import/export nodes carry a `source` role whose exact
 // source span is the specifier string; dynimport nodes carry an `args`
 // span, followed only when it is a single static string literal (a
-// computed specifier is a recorded closure miss — the settled rule).
+// computed specifier is a recorded closure miss).
 function ripImportsOf(stores, sourceText, fromDir) {
   const targets = [];
   const addSpec = (spec) => {
@@ -618,8 +618,8 @@ function ripImportsOf(stores, sourceText, fromDir) {
 // ---- cross-file mappings: the closure cache is TEXT-only, so a
 // result landing inside an UNOPENED mirror (a definition target, a
 // reference site, a rename edit) recompiles its source for mappings on
-// demand (~0.1 ms warm — the the settled rule measurement; persistence in the cache
-// manifest was the rejected option). Faces are memoized by source hash
+// demand (~0.1 ms warm, measured; persisting mappings in the cache
+// manifest is the rejected alternative). Faces are memoized by source hash
 // and verified against the mirror bytes tsgo answered from — ON EVERY
 // ASK, cache hits included: a mirror that drifts or corrupts AFTER
 // the face warmed must not keep answering from the stale memo. A face
@@ -811,7 +811,7 @@ async function pruneClosure() {
   repullOpenDocuments();
 }
 
-// Orphan mirrors (the the settled rule companion server fix): a mirror file with no
+// Orphan mirrors: a mirror file with no
 // manifest entry — a crash between the mirror write and the debounced
 // manifest save — is invisible to revalidateCache and pruneClosure but
 // joins the program through the tsconfig include glob, forever. Sweep
@@ -1033,7 +1033,7 @@ function mapTsDiagnostic(good, d) {
   // item tsgo leaves untagged, so VS Code renders the unused/
   // deprecated classes faded/struck, never underlined.
   const tags = d.tags ?? diagnosticTagsFor(d.code);
-  // Suggestion-class rendering needs an EXACT span (the the settled rule rendering
+  // Suggestion-class rendering needs an EXACT span (the rendering
   // seam): a fade/strike-through paints its whole
   // range, and a COVER-mapped range paints bytes the user never wrote
   // — a minted name's unused hint (`_init(props)` on a prop-less
@@ -1169,7 +1169,7 @@ async function refresh(document) {
 
   let result;
   try {
-    // The TS FACE (the settled scope, the settled rule): the mirror carries Rip's type
+    // The TS FACE: the mirror carries Rip's type
     // information — annotations, structured type/interface
     // declarations, typed hoist lines — so tsgo checks declared types
     // and write-site hover reads them. Never a shipping surface;
@@ -1393,8 +1393,7 @@ documents.onDidClose(({ document }) => {
 // closure is ignored (demand-driven — the program never grows from
 // unrelated workspace churn). A workspace tsconfig.json change
 // regenerates the mirror config. Everything forwards to tsgo as
-// mirror-file events (spike 3's F/N probes, spike 4's T probe: tsgo
-// invalidates on didChangeWatchedFiles), then every open document's
+// mirror-file events (tsgo invalidates on didChangeWatchedFiles), then every open document's
 // diagnostics re-pull.
 connection.onDidChangeWatchedFiles(async ({ changes }) => {
   if (!compile || !mirrorRoot) return;
@@ -1467,7 +1466,7 @@ connection.onDidChangeWatchedFiles(async ({ changes }) => {
 //   RESULT: generated positions land in THREE kinds of file — the open
 //     buffers (their live lastGood mappings translate, then the
 //     alignment guard maps back into the current text), unopened
-//     closure mirrors (the settled rule recompile-for-mappings — same exactness
+//     closure mirrors (recompile-for-mappings — same exactness
 //     semantics as open buffers), and real TypeScript files
 //     (node_modules, .d.ts, workspace .ts siblings — passed through
 //     untouched). Synthetic generated spans DROP their results
@@ -1614,11 +1613,10 @@ async function tsgoRequest(method, params, label) {
   }
 }
 
-// ---- write-site hover enrichment (the settled rule, owner-directed): tsgo's
+// ---- write-site hover enrichment: tsgo's
 // quickinfo for an evolving let answers `let x: any` at the declaration
 // and every WRITE reference — the evolving type manifests only at READ
-// references (ground truth probed against the pinned tsgo; the the settled rule
-// amendment records it). When a hover answer is exactly that shape,
+// references (ground truth probed against the pinned tsgo). When a hover answer is exactly that shape,
 // the server asks tsgo for the symbol's references (document order,
 // requesting face first) and presents the first reference whose
 // quickinfo answers a DIFFERENT declaration type — by construction a
@@ -1773,12 +1771,10 @@ connection.onDefinition(async (params) => {
   return ripLocations(result);
 });
 
-// Type definition: the the settled scope probe answered null and the coverage
-// table flagged it unproven — that probe's fixtures were primitives,
-// where null IS the answer (a number has no type-declaration site).
-// Re-probed against class-typed fixtures (spike 5): tsgo serves it;
-// the broker treats it exactly like definition (EXACT flavor,
-// synthetic drops, the settled rule for unopened members, real-.ts pass-through).
+// Type definition: served exactly like definition (EXACT flavor,
+// synthetic drops, recompile-for-mappings for unopened members,
+// real-.ts pass-through). A null answer is honest for primitive-typed
+// symbols — a number has no type-declaration site.
 connection.onTypeDefinition(async (params) => {
   await tsgoReady;
   const ctx = requestContext(params);
@@ -1821,7 +1817,7 @@ connection.onReferences(async (params) => {
 // server kept.
 
 // A file-level directive (`# @ts-nocheck` — emitted as the face's
-// FIRST line, the settled rule) must stay first on the Rip side too: no statement
+// FIRST line) must stay first on the Rip side too: no statement
 // may precede it, so an insertion anchored at or inside its source
 // line pushes past it — the zero-delta cover match at offset 0 would
 // otherwise anchor a new import ABOVE the directive, demoting it and
@@ -2232,7 +2228,7 @@ connection.languages.inlayHint.on(async (params) => {
 // ---- document symbols (outline) and workspace symbols: tsgo's
 // hierarchical symbol tree decodes against the face; each symbol's
 // NAME range (selectionRange) maps generated → Rip (verbatim first,
-// cover tolerance for navigation — the settled rule) and the construct range rides
+// cover tolerance for navigation) and the construct range rides
 // along (clamped to contain the name). Symbols DEDUP by mapped name
 // span: one symbol per Rip declaration — an enum's const object and
 // its same-name type companion are two generated manifestations of ONE
@@ -2301,10 +2297,11 @@ connection.onDocumentSymbol(async (params) => {
   return ripDocumentSymbols(ctx, result);
 });
 
-// Workspace symbols search the ACTIVE PROGRAM (the settled rule — the open
+// Workspace symbols search the ACTIVE PROGRAM (the open
 // buffers' closure; out-of-program files are honestly out of scope).
 // Locations map exactly like every other result: open buffers through
-// their live mappings, unopened closure members through the settled rule, real
+// their live mappings, unopened closure members through
+// recompile-for-mappings, real
 // TypeScript files pass through; synthetic landings drop. The same
 // one-symbol-per-declaration dedup as the outline.
 connection.onWorkspaceSymbol(async (params) => {
@@ -2337,9 +2334,9 @@ connection.onWorkspaceSymbol(async (params) => {
 // every touched file must land on Rip source — all-or-nothing. Edits
 // land in three file kinds exactly like locations do: open buffers
 // (which must MATCH their lastGood — an edit computed against a stale
-// face could half-apply; the fail-safe), unopened mirrors (the settled rule
+// face could half-apply; the fail-safe), unopened mirrors (recompiled
 // mappings), and real TypeScript files (passed through untouched).
-// The the settled rule dedup: a hoisted declaration and its assignment are two
+// The coincident-span dedup: a hoisted declaration and its assignment are two
 // generated manifestations of the IDENTICAL source span, so their
 // mapped edits coincide — coincident spans with identical newText
 // collapse to one edit, and any remaining overlap refuses loudly.
@@ -2402,7 +2399,7 @@ function mapWorkspaceEditToRip(edit) {
       mapped.push(srcEdit);
     }
 
-    // The the settled rule collapse, then the non-overlap assertion.
+    // The coincident-span collapse, then the non-overlap assertion.
     const keyed = new Map();
     for (const e of mapped) {
       const key = `${e.range.start.line}:${e.range.start.character}:${e.range.end.line}:${e.range.end.character}`;
@@ -2473,9 +2470,9 @@ connection.onRenameRequest(async (params) => {
   return { changes };
 });
 
-// ---- code actions: quickfix plus the source.* family (the settled scope — the
+// ---- code actions: quickfix plus the source.* family (the
 // organizeImports/removeUnusedImports/sortImports rewrites land
-// through the the settled rule whole-import-line mapping; fixAll's auto-imports
+// through the whole-import-line mapping; fixAll's auto-imports
 // land through the standing insertion rules). The request range and
 // its diagnostics map Rip → TS; returned edits map back through the
 // same all-or-nothing WorkspaceEdit path as rename — an action whose

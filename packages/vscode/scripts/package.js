@@ -6,7 +6,7 @@
 // node_modules, a lockfile npm recognizes, and no monorepo context for
 // its `npm ls` walk to trip over. We stage a clean copy in a temp
 // directory: the extension sources, a dereferenced node_modules carrying
-// exactly the the settled rule dependency budget, the COMPILER copied from the
+// exactly the enumerated dependency budget, the COMPILER copied from the
 // repository's src/ (the extension embeds the compiler it versions with
 // — never fetched), a stripped package.json, and a stub
 // package-lock.json so vsce doesn't try to install anything. Run vsce
@@ -42,7 +42,7 @@ fs.cpSync(path.join(repoRoot, 'src'), path.join(stage, 'compiler', 'src'), {
   recursive: true, dereference: true,
 });
 
-// Dependencies: the the dependency budget, dereferenced from this package's own
+// Dependencies: the enumerated budget, dereferenced from this package's own
 // install (a standalone bun install — real directories, no store links).
 fs.cpSync(path.join(pkgDir, 'node_modules'), path.join(stage, 'node_modules'), {
   recursive: true, dereference: true,

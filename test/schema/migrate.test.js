@@ -200,7 +200,7 @@ describe('migrate: the differ — step kinds and classes', () => {
     // Required with a DEFAULT: the executable SET NOT NULL is sound
     // (the default backfilled existing rows) and the step stays safe.
     expect(byCol.plan.sql.length).toBe(1);
-    // Required with NO default: lossy (the the contract classification rule),
+    // Required with NO default: lossy (the classification rule),
     // and no executable SET NOT NULL hides behind a comment — the
     // manual step is stated, not executed.
     expect(byCol.code.class).toBe('lossy');

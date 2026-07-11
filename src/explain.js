@@ -6,8 +6,8 @@
 // is reverse-only (Mappings.serializableRows() is the single policy
 // point; this tool reports its verdict, never re-derives it).
 //
-// This is a human diagnostic surface — a serialization boundary
-// §3): offsets convert to 1-based line:col here, via SourceFile
+// This is a human diagnostic surface — a serialization boundary:
+// offsets convert to 1-based line:col here, via SourceFile
 // lineStarts, for display alongside the offsets themselves.
 
 import { SourceFile } from './source.js';
@@ -49,7 +49,7 @@ export function parseTarget(arg) {
 // in-file UTF-16 code unit, line-terminator bytes included; `line:col`
 // addresses VISIBLE text only — the line terminator (`\n`, or `\r\n`
 // counted as one terminator) is not a column, so an empty line has zero
-// addressable columns. Columns count UTF-16 code units (§3: an astral
+// addressable columns. Columns count UTF-16 code units (an astral
 // character is two columns wide).
 const resolveOffset = (file, path, pos, label) => {
   if (pos.offset !== undefined) {

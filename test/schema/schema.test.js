@@ -5,7 +5,7 @@
 // time, positioned. Also the FIRST feature runtime through the
 // delivery machinery: injected import on toolchain paths,
 // inlined-once standalone output, the duplicate-runtime sentinel,
-// scope-aware suppression, and the the contract zero-cost gate as a TEST for
+// scope-aware suppression, and the zero-cost gate as a TEST for
 // the injection machinery. (The persistence runtime's own delivery
 // batteries live in test/runtime-schema-orm.test.js.)
 import { test, expect, beforeEach } from 'bun:test';

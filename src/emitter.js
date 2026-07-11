@@ -599,7 +599,7 @@ class Emitter {
   // operand/value/target role of the read site), the bare identifier
   // re-marks that same (nodeId, role) — an EXACT row on the read site
   // nested inside the role's cover row over the full `count.value`
-  // (§4.1 one-to-many; serialization prefers the exact row, so a
+  // (one-to-many; serialization prefers the exact row, so a
   // breakpoint on the read lands on the identifier). Any other
   // enclosing span (a spread args role, a lowered construct's $self)
   // gains no inner row — re-marking it around the identifier would
@@ -743,7 +743,7 @@ class Emitter {
   }
 
   // Emit `: T` as a TS-only region, re-marked under (node, role) — the
-  // annotation's generated manifestation (§4.1 one-to-many; exact when
+  // annotation's generated manifestation (one-to-many; exact when
   // the emitted bytes equal the recorded span verbatim, cover
   // otherwise — the builder decides, never a declaration).
   tsAnnotate(node, role, text) {
@@ -2713,7 +2713,7 @@ class Emitter {
     // `function` is a declaration needing a name). `=>`
     // arrows are valid bare and stay so. Update statements group
     // ((i++);). The grouped form is a second $self
-    // manifestation (cover row over the parens, §4.1 one-to-many) so the
+    // manifestation (cover row over the parens — one-to-many) so the
     // statement start itself maps.
     const wrap = Emitter.needsGrouping(node, 'statement');
     if (wrap) {
@@ -3412,7 +3412,7 @@ class Emitter {
   // each tail, while/loop/for → accumulator IIFE collecting each
   // iteration's last value. Generated IIFE scaffolding sits OUTSIDE
   // role marks; branch/condition marks stay honest (cover rows over
-  // lowered forms — §4.5's mappingKind by construction).
+  // lowered forms — mappingKind by construction).
 
   static ifArms(node) {
     const arms = [];
@@ -4451,7 +4451,7 @@ class Emitter {
   // generated manifestation the emitted `=` (a cover row by
   // construction: the glyphs differ). The `__state(` / `__computed(()
   // => ` glyphs are the lowering's own text — inside $self, outside
-  // every child role (§4.6: cover rows over the lowering, exact rows
+  // every child role (cover rows over the lowering, exact rows
   // on user expressions).
   reactiveDecl(node, ind) {
     const [head, target, value] = node;
@@ -8120,7 +8120,7 @@ class Emitter {
   // the temp (`(a < (_ref = f(b))) && (_ref < c)`).
   // Marks: each link's $self covers its whole accumulated
   // conjunction; the mid's re-emission (temp read included)
-  // re-marks the PREVIOUS link's `right` role — the §4.1
+  // re-marks the PREVIOUS link's `right` role — the
   // one-to-many precedent; the synthesized `&&`s and parens sit
   // between role marks as parent syntax.
   comparisonChain(node) {
