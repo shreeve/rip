@@ -606,3 +606,19 @@ describe.skipIf(!tsgoAvailable)('workspace ambient .d.ts and prototype augmentat
     });
   }, 30000);
 });
+
+// Importing a plain .js module is legal, idiomatic Rip — the
+// no-declaration-file complaint (TS7016) is implicit-any-family noise
+// on exactly that pattern and never publishes.
+describe.skipIf(!tsgoAvailable)('untyped .js imports stay quiet', () => {
+  test('a .rip importing a sibling .js draws no 7016; real errors still report', async () => {
+    await inWorkspace({ 'util.js': 'export const shout = (s) => s.toUpperCase();\n' }, async (api) => {
+      await api.open('app.rip', 'import { shout } from "./util.js"\nout = shout("hi")\n');
+      await api.until('app.rip', (codes) => !codes.includes(7016) && !codes.includes(2307));
+      // The import types as `any` under the gradual posture — a WRONG
+      // use elsewhere still reports through the real error classes.
+      await api.change('app.rip', 'import { shout } from "./util.js"\nn: number = "not a number"\n');
+      await api.until('app.rip', (codes) => codes.includes(2322));
+    });
+  }, 30000);
+});

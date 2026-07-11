@@ -5,6 +5,13 @@ repository's pull requests.
 
 ## Unreleased
 
+- Quiet the implicit-any family's missing members in the editor:
+  importing a plain .js module (no declaration file, TS7016) is legal,
+  idiomatic Rip and no longer squiggles — likewise `new` on an untyped
+  target (7009), indexing without a signature (7017), and the indirect
+  self-reference return (7024). Annotated code never fires the family;
+  real error classes are untouched and pinned so (#29)
+
 - Fix five findings from the second cross-vendor review: `throw` in
   any expression position lowers to a throwing IIFE (it previously
   emitted `throw(...)` — a call of the keyword, invalid JavaScript
