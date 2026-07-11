@@ -178,6 +178,33 @@ export function tagDynamicKeys(tokens) {
   return tokens;
 }
 
+// Commaless call arguments: inside a call, an arrow directly after a
+// completed LITERAL argument reads as the next argument — the comma
+// is implied: `get '/users' -> handler` is `get('/users', handler)`.
+// The splice is a zero-width ',' at the arrow's start (a synthesized
+// separator, the zero-width row discipline). Identifier-ended
+// arguments do NOT trigger (`f x -> 1` keeps its reading: x called
+// with the function? no — x is not a literal; explicit comma rules).
+const ARROW_COMMA_AFTER = new Set([
+  'STRING', 'STRING_END', 'REGEX', 'HEREGEX_END', 'NUMBER',
+  'BOOL', 'NULL', 'UNDEFINED', ']', '}', 'SYMBOL',
+]);
+export function insertArrowCommas(tokens) {
+  let depth = 0;
+  for (let i = 0; i < tokens.length; i++) {
+    if (ops.on) ops.n++;
+    const k = tokens[i].kind;
+    if (k === 'CALL_START') depth++;
+    else if (k === 'CALL_END') depth--;
+    else if (depth > 0 && (k === '->' || k === '=>') && i > 0 &&
+             ARROW_COMMA_AFTER.has(tokens[i - 1].kind)) {
+      tokens.splice(i, 0, { kind: ',', value: ',', start: tokens[i].start, end: tokens[i].start });
+      i++;
+    }
+  }
+  return tokens;
+}
+
 // Compound object keys: an IDENTIFIER/PROPERTY chain joined by `.`
 // (any spacing) or `-` (tight on both sides — spaced subtraction and
 // line-broken expressions keep their readings) and followed directly
@@ -3417,6 +3444,7 @@ export function tokenize(text, path = '<anonymous>') {
   tagPostfixConditionals(tokens);
   applyInsertionPass(tokens, implicitObjects, mintId);
   applyInsertionPass(tokens, implicitCalls, mintId);
+  insertArrowCommas(tokens);
 
   return { tokens, trivia, source };
 }
