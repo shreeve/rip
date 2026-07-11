@@ -5269,6 +5269,40 @@ code "fold: bails to the runtime call on dynamic keys", '''
   V = User.pick(k);
 ''', { foldProjections: true }
 
+test 'transaction! on: pins one adapter; other-adapter calls run outside', '''
+  calls = {a: [], b: []}
+  mk = (tag) ->
+    adapter = {}
+    adapter.query = (sql, params) ->
+      calls[tag].push sql
+      {columns: [{name: "id"}, {name: "name"}], data: [[1, "x"]], rows: 1}
+    adapter.begin = ->
+      calls[tag].push "BEGIN"
+      handle = {}
+      handle.query = (sql) ->
+        calls[tag].push "tx:" + sql.split(" ")[0]
+        {columns: [{name: "id"}, {name: "name"}], data: [[1, "x"]], rows: 1}
+      handle.commit = -> calls[tag].push "COMMIT"
+      handle.rollback = -> calls[tag].push "ROLLBACK"
+      handle
+    adapter.capabilities = {tx: true}
+    adapter
+  __schemaSetAdapter mk("a")
+  __SchemaRegistry.reset()
+  analytics = mk("b")
+  User = schema :model
+    name! string
+  Event = schema :model, on: analytics
+    name! string
+  schema.transaction! on: analytics, ->
+    Event.create! name: "e"
+    User.create! name: "u"
+    null
+  txB = calls.b.filter (s) -> s.startsWith("tx:")
+  txA = calls.a.filter (s) -> s.startsWith("tx:")
+  [txB.length, txA.length, calls.b.includes("COMMIT"), calls.a.includes("BEGIN")]
+  ''', [1, 0, true, false]
+
 test 'afterRollback fires on rollback; afterCommit does not', '''
     events = []
     txCalls = []
