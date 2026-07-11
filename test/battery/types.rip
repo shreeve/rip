@@ -514,3 +514,26 @@ code "arrow-valued object literal not armed", "obj = { f: (e) -> e }", '''
     return e;
   }};
   '''
+# ==============================================================================
+# Declaration pins — the type verb compares emitted .d.ts (module marker shed)
+# ==============================================================================
+
+type 'generic function dts', '''
+  def add<T>(a: T, b: T): T
+    a + b
+''', 'declare function add<T>(a: T, b: T): T;'
+
+type 'generic constraint dts', '''
+  def identity<T extends object>(v: T): T
+    v
+''', 'declare function identity<T extends object>(v: T): T;'
+
+type 'typed promoted parameter declares its class field', '''
+  class Api
+    constructor: (@url: string) ->
+  ''', '''
+  declare class Api {
+    url: string;
+    constructor(url: string);
+  }
+  '''
