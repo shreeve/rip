@@ -486,6 +486,10 @@ grammar =
     o 'Subjectable . Property' , '[".", 1, 3]' , 'member: operator, object, property'
     o 'Subjectable ?. Property', '["?.", 1, 3]', 'member: operator, object, property'
     o 'Subjectable INDEX_START Expression INDEX_END'               , '["[]", 1, 3]', 'index: operator, object, key'
+    # Regex capture index: `text[/re/, n]` — the match's nth capture
+    # (the emitter requires a regex-literal key; any other two-part
+    # index rejects loudly there).
+    o 'Subjectable INDEX_START Expression , Expression INDEX_END'  , '["regex-index", 1, 3, 5]', 'regexindex: _, object, key, capture'
     o 'Subjectable INDEX_START INDENT Expression OUTDENT INDEX_END', '["[]", 1, 4]', 'index: operator, object, key'
     o 'Subjectable INDEX_START Slice INDEX_END'                    , '["[]", 1, 3]', 'index: operator, object, key'
     o 'Subjectable INDEX_START INDENT Slice OUTDENT INDEX_END'     , '["[]", 1, 4]', 'index: operator, object, key'
