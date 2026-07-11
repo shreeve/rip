@@ -114,6 +114,12 @@ export default function(hljs) {
     begin: /@[a-zA-Z_$][\w$]*/,
   };
 
+  // :name → Symbol.for("name")
+  const SYMBOL_LIT = {
+    className: 'symbol',
+    match: /(?<![\w$]):[a-zA-Z_$][\w$]*/,
+  };
+
   const SIGIL_ATTR = {
     className: 'attribute',
     begin: /\$[a-zA-Z_][\w]*/,
@@ -132,6 +138,7 @@ export default function(hljs) {
     keywords: { keyword: 'def' },
     contains: [
       WORD_ARRAY,
+      SYMBOL_LIT,
       { className: 'title.function', begin: /[a-zA-Z_$][\w$]*[!?]?/ },
     ],
   };

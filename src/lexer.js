@@ -2083,6 +2083,9 @@ export function tokenize(text, path = '<anonymous>') {
   // frame, and a dedent can never cross the innermost frame's floor.
   const parens = [];
   let pos = 0;
+  // Open ternaries during the scan: a pending `?` claims the next
+  // bare `:` as its ELSE, so `c ? a :b` never mints a symbol there.
+  let scanTernary = 0;
   let atLineStart = true;
   let lastNewlinePos = -1; // offset of the newline that ended the previous LOGICAL line
   let pendingSpaced = false;
@@ -2766,7 +2769,15 @@ export function tokenize(text, path = '<anonymous>') {
       // classification: `when: 1` and `if: 2` are pairs). Ternary
       // branches are guarded; `::` and `:=` never key — the
       // prototype operator and the reactive assign own those colons.
-      const keysColon = /^[^\S\n]*:(?![=:])/.test(text.slice(pos)) && prev?.kind !== 'TERNARY';
+      // A SPACED colon tight to a following word is a SYMBOL, never a
+      // key (`a is :b`, `schema :model` — the schema-kind rule
+      // generalized); a tight colon (`when: 1`) or a spaced colon with
+      // a spaced value (`{a : b}`) keys as before.
+      const afterWord = text.slice(pos);
+      const tightColon = /^:(?![=:])/.test(afterWord);
+      const spacedColon = /^[^\S\n]+:(?![=:])/.exec(afterWord);
+      const symbolish = spacedColon !== null && IDENT_START.test(afterWord[spacedColon[0].length] ?? '');
+      const keysColon = (tightColon || (spacedColon !== null && !symbolish)) && prev?.kind !== 'TERNARY';
       if (prev && (prev.kind === '.' || prev.kind === '?.' || (prev.kind === '@' && !pendingSpaced))) {
         // Render blocks: a `.class-name` chain consumes tight hyphens
         // (`.counter-display` is ONE class name); never when
@@ -3138,6 +3149,7 @@ export function tokenize(text, path = '<anonymous>') {
         }
         fail("unspaced '?' needs a value before it (postfix existence) — write ' ? ' for a ternary", pos);
       }
+      scanTernary++;
       push('TERNARY', '?', pos, pos + 1);
       pos++;
       continue;
@@ -3270,7 +3282,43 @@ export function tokenize(text, path = '<anonymous>') {
       }
       fail("type annotations use a single ':' (e.g. `x: number`), not '::'", pos, pos + 2);
     }
+    // Symbol literals: `:name` → Symbol.for("name") — only where the
+    // colon CANNOT be structural: after a value-ending token the
+    // colon is a key/annotation/ternary colon (`{a:b}`, `x:number`,
+    // `c ? a :b` all keep their readings), and a schema HEAD's kind
+    // (`schema :model`) follows an identifier, so it never mints
+    // (schema BODY symbols mint and split back inside rewriteSchema).
+    // Type bodies use colons structurally and never mint.
+    if (ch === ':' && IDENT_START.test(text[pos + 1] ?? '') &&
+        !insideTypeBody() && !aliasHeadOpen()) {
+      const prevTok = tokens[tokens.length - 1];
+      const structural = prevTok !== undefined && (
+        prevTok.kind === 'PROPERTY' ||
+        prevTok.kind === ')' || prevTok.kind === ']' || prevTok.kind === '}' ||
+        prevTok.kind === 'CALL_END' || prevTok.kind === 'INDEX_END' ||
+        prevTok.kind === 'PARAM_END' || prevTok.kind === 'PICK_END' ||
+        prevTok.kind === 'STRING' || prevTok.kind === 'STRING_END' ||
+        prevTok.kind === 'NUMBER' || prevTok.kind === 'REGEX' ||
+        prevTok.kind === 'HEREGEX_END' || prevTok.kind === 'BOOL' ||
+        prevTok.kind === 'NULL' || prevTok.kind === 'UNDEFINED' ||
+        prevTok.kind === 'DAMMIT' || prevTok.kind === '?' ||
+        prevTok.kind === 'PRESENCE' || prevTok.kind === 'OPT_MARKER' ||
+        prevTok.kind === 'THIS' || prevTok.kind === '@' || prevTok.kind === 'SYMBOL' ||
+        // A pending ternary's ELSE colon: after a bare identifier the
+        // colon closes the ternary (`c ? d :e`); after `?` or another
+        // colon the branch NEEDS a value, so `:yes` mints
+        // (`c ? :yes : :no`).
+        (scanTernary > 0 && prevTok.kind === 'IDENTIFIER'));
+      if (!structural) {
+        let end2 = pos + 1;
+        while (end2 < text.length && IDENT_PART.test(text[end2])) end2++;
+        push('SYMBOL', text.slice(pos + 1, end2), pos, end2);
+        pos = end2;
+        continue;
+      }
+    }
     if (ch === '=' || ch === '+' || ch === '-' || ch === '.' || ch === ',' || ch === ';' || ch === ':') {
+      if (ch === ':' && scanTernary > 0) scanTernary--;
       push(ch === ';' ? 'TERMINATOR' : ch, ch, pos, pos + 1);
       pos++;
       continue;
@@ -3625,7 +3673,7 @@ export function implicitBlocks(tokens, mintId) {
 // so call spans stay honest.
 const IMPLICIT_FUNC = new Set(['IDENTIFIER', 'PROPERTY', 'SUPER', ')', 'CALL_END', ']', 'INDEX_END', '@', 'THIS', 'DAMMIT']);
 const IMPLICIT_CALL_STARTERS = new Set([
-  'IDENTIFIER', 'PROPERTY', 'NUMBER', 'STRING', 'STRING_START', 'REGEX', 'HEREGEX_START',
+  'IDENTIFIER', 'PROPERTY', 'NUMBER', 'STRING', 'STRING_START', 'REGEX', 'HEREGEX_START', 'SYMBOL',
   'PARAM_START', 'IF', 'TRY', 'SWITCH', 'CLASS', 'THIS', 'SUPER',
   'UNDEFINED', 'NULL',
   'BOOL', 'UNARY', 'DO', 'DO_IIFE', 'UNARY_MATH', 'AWAIT', 'YIELD', 'THROW', '@', '->', '=>', '[', '(', '{',

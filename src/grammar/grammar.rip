@@ -257,6 +257,9 @@ grammar =
   Atom: [
     o 'NUMBER'
     o 'String'
+    # Symbol literals: `:name` is Symbol.for("name") — interned,
+    # identity-comparable across modules.
+    o 'SYMBOL', '["symbol", 1]', 'symbol: _, name'
   ]
 
   String: [

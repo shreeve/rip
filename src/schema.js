@@ -216,8 +216,16 @@ function matchSchemaPragma(tokens, i, config, depth, fail) {
 // The KIND spelling is `schema :word`: a SPACED ':' with the word
 // unspaced after it — `{schema: shape}` (key colon, unspaced) and
 // `{schema:shape}` never match.
-const kindSymAt = (tokens, j) =>
-  tokens[j]?.kind === ':' && tokens[j].spaced ? symWordAt(tokens, j, true) : null;
+const kindSymAt = (tokens, j) => {
+  // The scanner mints a SYMBOL token for the spaced `:word` spelling;
+  // the raw ':' + word pair survives only where minting was blocked.
+  if (tokens[j]?.kind === 'SYMBOL') return tokens[j];
+  return tokens[j]?.kind === ':' && tokens[j].spaced ? symWordAt(tokens, j, true) : null;
+};
+
+// A kind marker's token width: the minted SYMBOL is one token, the
+// raw pair is two.
+const kindSymWidth = (tokens, j) => (tokens[j]?.kind === 'SYMBOL' ? 1 : 2);
 
 // The `on:` declaration option after a kind marker: `, on <:> …` up
 // to the line end. Returns the index AFTER the option (the position
@@ -241,7 +249,7 @@ function isSchemaStart(tokens, i, fail) {
   let j = i + 1;
   const kind = kindSymAt(tokens, j);
   if (kind) {
-    j += 2;
+    j += kindSymWidth(tokens, j);
     j = scanOnOption(tokens, j);
   }
   if (tokens[j]?.kind === 'TERMINATOR') {
@@ -274,7 +282,7 @@ function collapseSchemaAt(tokens, i, out, config, mintId, fail) {
     }
     kind = k;
     kindTok = kw;
-    j += 2;
+    j += kindSymWidth(tokens, j);
   }
 
   // `schema :model, on: <expr>` — the per-schema adapter expression,
@@ -352,6 +360,14 @@ function collapseSchemaAt(tokens, i, out, config, mintId, fail) {
     endIdx = outdentIdx + 1;
     bodyEnd = bodyTokens.length ? bodyTokens[bodyTokens.length - 1].end : tokens[indentIdx].end;
   }
+
+  // Scanner-minted SYMBOL tokens split back into ':' + word pairs
+  // inside the body — schema grammar reads the two-token spelling
+  // everywhere (`@unique [:total, :status]`, `@ensure "…", :pw2`).
+  bodyTokens = bodyTokens.flatMap((tk) => tk.kind === 'SYMBOL'
+    ? [{ ...tk, kind: ':', value: ':', end: tk.start + 1 },
+       { ...tk, kind: 'IDENTIFIER', start: tk.start + 1, spaced: false }]
+    : [tk]);
 
   const descriptor = parseSchemaBody(kind, kindTok, bodyTokens, {
     schemaStart: schemaTok.start,
