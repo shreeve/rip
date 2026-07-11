@@ -5129,3 +5129,37 @@ code "fold: bails to the runtime call on dynamic keys", '''
   k = "name";
   V = User.pick(k);
 '''
+
+test 'afterRollback fires on rollback; afterCommit does not', '''
+    events = []
+    txCalls = []
+    mainCalls = []
+    resState = {res: {columns: [{name: "id"}, {name: "name"}], data: [[1, "A"]], rows: 1}}
+    adapter =
+      query: (sql, params) ->
+        mainCalls.push sql
+        events.push "main"
+        resState.res
+      begin: (opts) ->
+        events.push "BEGIN"
+        handle = {}
+        handle.query = (sql, params) ->
+          txCalls.push sql
+          events.push "stmt"
+          resState.res
+        handle.commit = -> events.push "COMMIT"
+        handle.rollback = -> events.push "ROLLBACK"
+        handle
+      capabilities: {tx: true}
+    __schemaSetAdapter adapter
+    __SchemaRegistry.reset()
+    User = schema :model
+      name! string
+      afterCommit:   -> events.push "afterCommit"
+      afterRollback: -> events.push "afterRollback"
+    try
+      schema.transaction! ->
+        User.create! {name: "A"}
+        throw new Error "x"
+    events
+''', ['BEGIN', 'stmt', 'ROLLBACK', 'afterRollback']

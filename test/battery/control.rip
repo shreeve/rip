@@ -918,3 +918,37 @@ test "value switch: a later condition in the same when decides", '''
     else
       "miss"
 ''', "hit"
+
+# ==============================================================================
+# Inline and bare try — `try expr` swallows; as a value it yields the
+# expression's result or undefined on throw
+# ==============================================================================
+
+test 'bare try expression returns value on success', '''
+    x = try 42
+    x
+''', 42
+
+test 'bare try statement swallows error', '''
+    try (throw new Error('boom'))
+    'ok'
+''', 'ok'
+
+code 'bare try statement generates catch {}', 'try foo()', '''
+  try {
+    foo();
+  } catch {}
+'''
+
+test 'bare try expression returns undefined on throw', '''
+  boom = -> throw new Error 'no'
+  x = try boom()
+  x is undefined
+  ''', true
+
+test 'multi-line handler-less try swallows', '''
+  boom = -> throw new Error 'no'
+  try
+    boom()
+  'after'
+  ''', 'after'

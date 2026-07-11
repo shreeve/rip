@@ -1037,6 +1037,10 @@ grammar =
 
   Try: [
     o 'TRY Block'                    , '["try", 2]'      , 'try: _, body'
+    # Inline try: `x = try f()` — the expression is the body; errors
+    # swallow (the no-handler form), the value is the expression or
+    # undefined on throw.
+    o 'TRY Expression'               , '["try", 2]'      , 'try: _, body'
     o 'TRY Block Catch'              , '["try", 2, 3]'   , 'try: _, body, handler'
     o 'TRY Block FINALLY Block'      , '["try", 2, 4]'   , 'try: _, body, finalizer'
     o 'TRY Block Catch FINALLY Block', '["try", 2, 3, 5]', 'try: _, body, handler, finalizer'
