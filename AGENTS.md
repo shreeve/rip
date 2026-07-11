@@ -166,6 +166,9 @@ strict as the emitter's.
 
 ## Commands
 
+- `bun run test:rip` — the battery alone (every test/battery/*.rip
+  row — the language's syntax contract), sub-second: the inner loop
+  for language work.
 - `bun run test` — the FAST compiler loop: language, mapping,
   snapshots, strip/emission pins. The extended tier (tsc-spawning
   validity gates, scaling gates, fuzz drift) registers visible skips
