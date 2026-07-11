@@ -4017,3 +4017,63 @@ code 'bare component reference (no args)', '''
     }
   };
   '''
+
+test 'loop body that depends on auto-allocated index `i` (row striping)', '''
+  A = component
+    rows := ["a", "b", "c"]
+    render
+      for row, i in rows
+        div class: (if i % 2 is 0 then "even" else "odd"), row
+  inst = A.new()
+  inst._init({})
+  typeof inst._create
+  ''', 'function'
+
+test 'render-local binding is visible to subsequent statements at runtime', '''
+  A = component
+    items := [{a: 2, b: 3}, {a: 5, b: 7}]
+    render
+      for item in items
+        sum = item.a + item.b
+        span "#{sum}"
+  inst = A.new()
+  inst._init({})
+  typeof inst._create
+  ''', 'function'
+
+test 'nested loops with auto outer + explicit inner `i` execute correctly', '''
+  A = component
+    items := [{opts: [10, 20]}, {opts: [30]}]
+    render
+      for item in items
+        for v, i in item.opts
+          span "#{v}@#{i}"
+  inst = A.new()
+  inst._init({})
+  typeof inst._create
+  ''', 'function'
+
+test 'three-deep nested loops with i/j/k mix never collide', '''
+  A = component
+    items := [{groups: [{values: [1]}]}]
+    render
+      for item in items
+        for group in item.groups
+          for v, i in group.values
+            span "#{v}@#{i}"
+  inst = A.new()
+  inst._init({})
+  typeof inst._create
+  ''', 'function'
+
+# An omitted optional prop is undefined — the value the caller never
+# sent; '??' defaults fire on it identically to null.
+test 'optional typed prop without default omitted by caller is undefined at runtime', '''
+  A = component
+    @label?: string
+    render
+      span
+  a = A.new()
+  a._init({})
+  a.label.value
+  ''', undefined

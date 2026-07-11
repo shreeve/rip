@@ -92,42 +92,6 @@ code 'outer auto-index avoids inner explicit `i`', '''
   })();
 '''
 
-test 'nested loops with auto outer + explicit inner `i` execute correctly', '''
-    A = component
-      items := [{opts: [10, 20]}, {opts: [30]}]
-      render
-        for item in items
-          for v, i in item.opts
-            span "#{v}@#{i}"
-    inst = A.new(items: [{opts: ["a", "b"]}, {opts: ["c"]}])
-    inst._init({})
-    typeof inst._create
-''', 'function'
-
-test 'three-deep nested loops with i/j/k mix never collide', '''
-    A = component
-      items := [{groups: [{values: [1]}]}]
-      render
-        for item in items
-          for group in item.groups
-            for v, i in group.values
-              span "#{v}@#{i}"
-    inst = A.new(items: [{groups: [{values: [1, 2]}]}])
-    inst._init({})
-    typeof inst._create
-''', 'function'
-
-test 'loop body that depends on auto-allocated index `i` (row striping)', '''
-    A = component
-      rows := ["a", "b", "c"]
-      render
-        for row, i in rows
-          div class: (if i % 2 is 0 then "even" else "odd"), row
-    inst = A.new(rows: ["x", "y", "z"])
-    inst._init({})
-    typeof inst._create
-''', 'function'
-
 code 'outer auto-index avoids body-level render-local declaration', '''
   export A = component
     items := [1, 2]
@@ -406,18 +370,6 @@ code 'render-local binding compiles to a hoisted `let`, not a textnode', '''
   })();
 '''
 
-test 'render-local binding is visible to subsequent statements at runtime', '''
-    A = component
-      items := [{a: 2, b: 3}, {a: 5, b: 7}]
-      render
-        for item in items
-          sum = item.a + item.b
-          span "#{sum}"
-    inst = A.new(items: [{a: 4, b: 5}])
-    inst._init({})
-    typeof inst._create
-''', 'function'
-
 code 'compound assignment mutates a render-local without re-declaring', '''
   export A = component
     items := [{a: 1, b: 2}]
@@ -501,16 +453,6 @@ code 'private `=` member is plain, `:=` is reactive state', '''
     }
   }
 '''
-
-test 'optional typed prop without default omitted by caller is undefined at runtime', '''
-    A = component
-      @label?: string
-      render
-        span
-    a = A.new()
-    a._init({})
-    a.label.value
-''', null
 
 test 'component owns its own effect disposers', '''
   A = component
