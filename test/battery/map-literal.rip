@@ -82,3 +82,11 @@ test 'spread entries', '''
 ''', 30
 
 code 'spread codegen', '*{ a: 1, ...other }', 'new Map([["a", 1], ...other])'
+
+test 'normal object is not Map', '{ a: 1 } instanceof Map', false
+
+test 'computed key via brackets', '''
+  fn = -> 'dynamic'
+  m = *{ [fn()]: 42 }
+  m.get('dynamic')
+  ''', 42

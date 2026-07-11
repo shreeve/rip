@@ -4,19 +4,6 @@
 
 import { test, code, fail, type } from '../support/testing.js'
 
-type 'type alias dts', '''
-  type User =
-    id: number
-    name: string
-    email?: string
-''', '''
-  type User = {
-    id: number;
-    name: string;
-    email?: string;
-  };
-'''
-
 type 'enum dts', '''
   enum Direction
     North
@@ -25,34 +12,5 @@ type 'enum dts', '''
   enum Direction {
     North,
     South
-  }
-'''
-
-type 'class with methods dts', '''
-  class UserService
-    url: string = ""
-    constructor: (@url: string) ->
-    fetch: (id: number) ->
-      console.log id
-''', '''
-  declare class UserService {
-    url: string;
-    constructor(url: string);
-    fetch(id: number);
-  }
-'''
-
-type 'interface with : annotations', '''
-  interface User
-    id: number
-    name: string
-    email: string
-    isAdmin?: boolean
-''', '''
-  interface User {
-    id: number;
-    name: string;
-    email: string;
-    isAdmin?: boolean;
   }
 '''

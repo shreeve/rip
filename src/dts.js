@@ -186,7 +186,11 @@ export function emitDeclarations({ sexpr, stores, source }) {
               if (isNode(x) && x[0] === 'typed-var' && x.length === 3) { typed = x; x = x[1]; }
               if (!(isNode(x) && x[0] === '.' && x[1] === 'this' && typeof x[2] === 'string')) return pp;
               const n = x[2];
-              if (typed !== null) members.push(`${n}: ${tidyType(typed[2])};`);
+              // The field may ALSO be declared explicitly in the
+              // class body (`url: string = ""`) — one declaration.
+              if (typed !== null && !members.some((m) => m.startsWith(`${n}:`))) {
+                members.push(`${n}: ${tidyType(typed[2])};`);
+              }
               const plain = typed !== null ? ['typed-var', n, typed[2]] : n;
               return dflt !== null ? ['default', plain, dflt[2]] : plain;
             });

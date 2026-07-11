@@ -117,3 +117,43 @@ test 'data marker payload keeps its newline', '''
   __DATA__
   hello world
 ''', 12
+
+test 'data marker simple', '''
+  x = DATA
+  x
+  __DATA__
+  hello world
+  ''', 'hello world\n'
+
+test 'data marker template', '''
+  name = 'Alice'
+  "Hello, \#{name}!"
+  __DATA__
+  unused payload
+  ''', 'Hello, Alice!'
+
+test 'data marker only', '''
+  DATA
+  __DATA__
+  just data
+  ''', 'just data\n'
+
+code 'data marker compiler', '''
+  x = 42
+  console.log DATA
+  __DATA__
+  test data
+  ''', '''
+  const DATA = "test data\\n";
+  let x = 42;
+  console.log(DATA);
+  '''
+
+code 'data marker hoisting', '''
+  console.log DATA
+  __DATA__
+  hoisted!
+  ''', '''
+  const DATA = "hoisted!\\n";
+  console.log(DATA);
+  '''
