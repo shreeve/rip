@@ -5,6 +5,18 @@ repository's pull requests.
 
 ## Unreleased
 
+- Fix five findings from the second cross-vendor review: `throw` in
+  any expression position lowers to a throwing IIFE (it previously
+  emitted `throw(...)` — a call of the keyword, invalid JavaScript
+  that seven stale pins had locked in); a nested block loop in value
+  position accumulates like the parenthesized comprehension (it
+  silently produced `[]`), staying a statement only when a `return`
+  must cross out; `//=` and `%%=` evaluate a member/index base exactly
+  once through an IIFE lowering; an unescaped `#{` in a slash regex
+  rejects loudly naming the heregex form (it silently matched literal
+  characters); and a second `export default` rejects at emit instead
+  of shipping a module that cannot instantiate (#28)
+
 - Fix five front-end findings from the cross-vendor cold review:
   signed numeric literal casts claim (`x = y as -1` erases; `+1`
   rejects naming TypeScript's '-'-only rule; a committed cast that

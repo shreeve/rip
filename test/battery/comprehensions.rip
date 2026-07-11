@@ -339,3 +339,19 @@ test "a comprehension body reads the user's own `result`", '''
     result
   ys
 ''', [10, 10]
+
+test "a nested block loop accumulates like the paren form", '''
+  ys = for x in [1, 2]
+    for y in [10, 20]
+      x + y
+  JSON.stringify ys
+''', "[[11,21],[12,22]]"
+
+test "a tail loop with a return inside stays a statement (the return crosses out)", '''
+  f = ->
+    for x in [1, 2]
+      for y in [3]
+        return "early" if x is 2
+        x * y
+  f()
+''', "early"

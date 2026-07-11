@@ -78,3 +78,16 @@ code "@ shorthand", "@", "this"
 # ==============================================================================
 # Word Literals: %w
 # ==============================================================================
+
+# ==============================================================================
+# Slash regexes do not interpolate — the heregex form owns that
+# ==============================================================================
+
+fail "interpolation in a slash regex rejects with the heregex fix", 'r = /#{x}/',
+  "a slash regex does not interpolate"
+
+test "the heregex form interpolates", '''
+  x = "a+"
+  r = ///#{x}///
+  r.source
+''', "a+"
