@@ -1540,6 +1540,21 @@ export function rewriteTypes(tokens, mintId, text, fail) {
         atStatementBoundary(out, nameBoundaryAt);
       if (frames.length === 0 && namedColon && !isAtName) curLineKV = true;
 
+      // An annotated SOAK prototype write (`X?::m: T = v`): the
+      // augmentation declares that the member EXISTS on the type — a
+      // conditional write cannot carry that claim. Reject shaped,
+      // naming the fix.
+      if (frames.length === 0 && prev.kind === 'PROPERTY' &&
+          out[out.length - 2]?.kind === '.' &&
+          out[out.length - 3]?.kind === 'PROPERTY' && out[out.length - 3].value === 'prototype' &&
+          out[out.length - 4]?.kind === '?.' &&
+          out[out.length - 5]?.kind === 'IDENTIFIER' &&
+          atStatementBoundary(out, out.length - 6) &&
+          typedDeclEq(tokens, i) >= 0) {
+        fail('an annotated prototype member requires the unconditional chain (`X::m: T = v`) — ' +
+          'the soak form cannot carry the annotation', tok.start, tok.end);
+      }
+
       // Typed prototype member: `X.prototype.m: T = v` (the `::`
       // spelling reads identically after the scanner's expansion) at a
       // statement boundary. The chain shape is exact — head
@@ -3042,15 +3057,27 @@ export function tokenize(text, path = '<anonymous>') {
     // immediately (`A::m` reads as `A.prototype.m`): three minted
     // tokens all spanning the two `::` bytes, so mapping rows over the
     // expansion classify as honest covers (emitted `.prototype.` never
-    // matches the source bytes). Any other doubled colon is a
-    // type-spelling mistake and rejects with the fix; in the
-    // scanner-known type positions (a type body, an alias RHS) the
-    // prototype reading never applies, so `::` rejects there too.
+    // matches the source bytes). A tight existence token ahead makes
+    // it the SOAK form (`a?::b` reads as `a?.prototype.b`): the `?`
+    // retags to the optional-member link and widens over the `::`
+    // bytes. Any other doubled colon is a type-spelling mistake and
+    // rejects with the fix; in the scanner-known type positions (a
+    // type body, an alias RHS) the prototype reading never applies,
+    // so `::` rejects there too.
     if (ch === ':' && text[pos + 1] === ':') {
       if (!insideTypeBody() && !aliasHeadOpen() && /[A-Za-z_$]/.test(text[pos + 2] ?? '')) {
-        push('.', '.', pos, pos + 2);
-        push('PROPERTY', 'prototype', pos, pos + 2);
-        push('.', '.', pos, pos + 2);
+        const prev = tokens[tokens.length - 1];
+        if (prev?.kind === '?' && prev.end === pos) {
+          prev.kind = '?.';
+          prev.value = '?.';
+          prev.end = pos + 2;
+          push('PROPERTY', 'prototype', pos, pos + 2);
+          push('.', '.', pos, pos + 2);
+        } else {
+          push('.', '.', pos, pos + 2);
+          push('PROPERTY', 'prototype', pos, pos + 2);
+          push('.', '.', pos, pos + 2);
+        }
         pos += 2;
         continue;
       }
