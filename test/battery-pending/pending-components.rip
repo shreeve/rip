@@ -4,66 +4,6 @@
 
 import { test, code, fail, type } from '../support/testing.js'
 
-code 'transition with ~slide preset', '''
-  export A = component
-    render
-      div ~slide
-''', '''
-  export const A = class extends __Component {
-    _init(props) {}
-    _create() {
-      this._el0 = document.createElement('div');
-      this._t = "slide";
-      return this._el0;
-    }
-  }
-'''
-
-code 'transition with ~scale preset', '''
-  export A = component
-    render
-      div ~scale
-''', '''
-  export const A = class extends __Component {
-    _init(props) {}
-    _create() {
-      this._el0 = document.createElement('div');
-      this._t = "scale";
-      return this._el0;
-    }
-  }
-'''
-
-code 'transition with ~blur preset', '''
-  export A = component
-    render
-      div ~blur
-''', '''
-  export const A = class extends __Component {
-    _init(props) {}
-    _create() {
-      this._el0 = document.createElement('div');
-      this._t = "blur";
-      return this._el0;
-    }
-  }
-'''
-
-code 'transition with ~fly preset', '''
-  export A = component
-    render
-      div ~fly
-''', '''
-  export const A = class extends __Component {
-    _init(props) {}
-    _create() {
-      this._el0 = document.createElement('div');
-      this._t = "fly";
-      return this._el0;
-    }
-  }
-'''
-
 code 'gate: hoists static __gates and binds via __gateBind', '''
   export A = component
     user <~ @app.data.user
