@@ -303,7 +303,11 @@
     "arrowFat@312": "let arrowFat: (n: number) => number",
     "arrowFatRet@317": "let arrowFatRet: (n: number) => string",
     "console@318": "var console: Console",
-    "badArrowFatRet@321": "let badArrowFatRet: number"
+    "badArrowFatRet@321": "let badArrowFatRet: number",
+    "String@326": "var String: StringConstructor Allows manipulation and formatting of text strings and determination and location of substrings within strings.",
+    "titled@327": "let titled: string",
+    "console@328": "var console: Console",
+    "badTitled@331": "let badTitled: number"
   },
   "07-integration.rip": {
     "point@7": "let point: Point",

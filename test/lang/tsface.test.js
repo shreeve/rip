@@ -1005,3 +1005,61 @@ describe('types-gaps wave: type declarations in lowered value bodies reach the f
     expect(faced.code).toBe('this.x = 5;' + MARKER);
   });
 });
+
+// ── typed prototype members (`X::m: T = v`) ─────────────────────────
+
+describe('typed prototype members', () => {
+  // The typed write and its untyped twin ship the same JS: stripping
+  // the face restores the twin's bytes exactly.
+  const stripEqualsUntyped = (typed, untyped) => {
+    const faced = ts(typed);
+    expect(stripFace(faced.code, faced.tsRegions)).toBe(js(untyped).code);
+    return faced;
+  };
+
+  test('outside head: the annotation manifests as a `declare global` augmentation line', () => {
+    const faced = stripEqualsUntyped('String::cap: () => string = -> "x"\n', 'String::cap = -> "x"\n');
+    expect(faced.code).toBe(
+      'declare global { interface String { cap: () => string } }\n' +
+      'String.prototype.cap = function() {\n  return "x";\n};' + MARKER);
+  });
+
+  test('module class-declaration head: a same-module interface merges with the class', () => {
+    const faced = stripEqualsUntyped('class Box\nBox::m: () => number = -> 1\n', 'class Box\nBox::m = -> 1\n');
+    expect(faced.code).toContain('interface Box { m: () => number }\n');
+    expect(faced.code).not.toContain('declare global');
+  });
+
+  test('expression-form class head: the annotation rejects — nothing merges with a let binding', () => {
+    expect(() => ts('A = class\nA::m: () => number = -> 1\n'))
+      .toThrow(/not a class declaration/);
+    // The UNANNOTATED write stays legal anywhere.
+    stripEqualsUntyped('A = class\nA::m = -> 1\n', 'A = class\nA::m = -> 1\n');
+  });
+
+  test('a nested annotated write rejects — augmentations are module-top-level TS', () => {
+    for (const src of [
+      'setup = ->\n  String::deep: () => string = -> "d"\n',
+      'if c\n  String::deep: () => string = -> "d"\n',
+    ]) {
+      expect(() => ts(src)).toThrow(/module top-level statement/);
+    }
+    // The UNANNOTATED nested write stays legal.
+    stripEqualsUntyped('if c\n  String::deep = -> "d"\n', 'if c\n  String::deep = -> "d"\n');
+  });
+});
+
+// The generic globals repeat their parameter list in the
+// augmentation — and the member's annotation may NAME the parameter.
+describe('typed prototype members on generic globals', () => {
+  test('Array repeats <T>, and the annotation can reference it', () => {
+    const faced = ts('Array::second: () => T = -> @[1]\n');
+    expect(faced.code).toContain('declare global { interface Array<T> { second: () => T } }\n');
+    expect(stripFace(faced.code, faced.tsRegions)).toBe(js('Array::second = -> @[1]\n').code);
+  });
+
+  test('Map repeats <K, V>', () => {
+    const faced = ts('Map::firstKey: () => K = -> @keys().next().value\n');
+    expect(faced.code).toContain('declare global { interface Map<K, V> { firstKey: () => K } }\n');
+  });
+});

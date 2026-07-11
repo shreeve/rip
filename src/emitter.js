@@ -49,6 +49,28 @@ const JS_OP = { '==': '===', '!=': '!==' };
 
 const isNode = (x) => Array.isArray(x);
 const isBinary = (x) => isNode(x) && BINOPS.has(x[0]) && x.length === 3;
+
+// The standard generic globals' type parameters: augmenting a generic
+// interface must repeat its parameter list (`interface Array<T>`), and
+// repeating it lets a member's annotation NAME the parameter
+// (`Array::second: () => T`). Heads outside this table augment bare.
+export const PROTO_GENERIC_PARAMS = {
+  Array: '<T>', ReadonlyArray: '<T>', Map: '<K, V>', Set: '<T>',
+  WeakMap: '<K, V>', WeakSet: '<T>', Promise: '<T>', WeakRef: '<T>',
+};
+
+// An assignment whose target is the exact prototype-member chain
+// `head.prototype.member` (both names plain): {head, member}, else
+// null. The shape the `::` spelling produces — the face's augmentation
+// emission and the declaration pipeline both key on it.
+export function protoMemberTarget(node) {
+  if (node[0] !== '=' || node.length !== 3) return null;
+  const t = node[1];
+  if (!isNode(t) || t[0] !== '.' || typeof t[2] !== 'string') return null;
+  const o = t[1];
+  if (!isNode(o) || o[0] !== '.' || o[2] !== 'prototype' || typeof o[1] !== 'string') return null;
+  return { head: o[1], member: t[2] };
+}
 // The comparison family — every COMPARE-level operator chains,
 // equality included (otherwise `a == b < c` silently compares a
 // boolean against c).
@@ -1192,6 +1214,20 @@ class Emitter {
     return isObject(x) || (isNode(x) && x[0] === 'array');
   }
 
+  // The module's class-DECLARATION names (`class Box`, exported or
+  // not). Interface merging joins a same-module interface only to a
+  // class declaration — an expression-form class (`A = class`) binds a
+  // variable, which no interface merges with.
+  static classDeclNames(stmts) {
+    const out = new Set();
+    for (const s of stmts) {
+      if (!isNode(s)) continue;
+      const t = s[0] === 'export' && isNode(s[1]) ? s[1] : s;
+      if (isNode(t) && t[0] === 'class' && typeof t[1] === 'string') out.add(t[1]);
+    }
+    return out;
+  }
+
   // The erased typed wrapper: ["typed-var", target, "T"]. Hyphenated
   // like every invented head (the naming convention) — no identifier
   // spells it, so no user call can ever build the same shape and the
@@ -1878,6 +1914,7 @@ class Emitter {
         const names = new Set([...entries.map(([n]) => n), ...Emitter.importedNames(all.slice(0, lead))]);
         for (const n of this.pushReactiveFrame(rest, names)) names.add(n);
         this.moduleBound = Emitter.moduleBoundNames(rest);
+        this.moduleClassNames = Emitter.classDeclNames(rest);
         this.scopes.push(names);
         entries = this.applyDeclareInPlace(entries, sexpr.slice(1));
         if (entries.length) {
@@ -1945,6 +1982,7 @@ class Emitter {
       const names = new Set(entries.map(([n]) => n));
       for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
       this.moduleBound = Emitter.moduleBoundNames(stmts);
+      this.moduleClassNames = Emitter.classDeclNames(stmts);
       this.scopes.push(names);
       entries = this.applyDeclareInPlace(entries, sexpr.slice(1));
       if (entries.length) {
@@ -1964,6 +2002,10 @@ class Emitter {
     this.emitTsTypeDecls(list, pad);
     live.forEach((stmt, i) => {
       this.b.emit(pad);
+      // Direct program children only — the augmentation emission's
+      // position test (nested lists never reassign it, so a block's
+      // statements compare unequal).
+      if (mode === 'program') this.moduleTopStmt = stmt;
       this.statement(stmt, ind);
       const last = i === live.length - 1;
       if (mode === 'block' || !last) this.b.emit('\n');
@@ -4282,6 +4324,58 @@ class Emitter {
     // whole emitted assignment — the bang's only generated
     // manifestation; mark() is a no-op for plain rows (no such role).
     if (node[0] === 'void-assign') this.registerVoidValue(node[2], node);
+    // A typed prototype member (`X::m: T = v`, target
+    // `X.prototype.m`): the annotation's face manifestation is an
+    // interface AUGMENTATION line ahead of the assignment — `declare
+    // global` when the head names an outside type (String, Array), a
+    // same-module interface when the head is declared here (TS merges
+    // it with the class declaration). The member then EXISTS on the
+    // target type: the write checks against the declared type, and
+    // every call site and hover resolves it. TS-only bytes, so the
+    // stripped face stays byte-equal to the JS emission; the line is
+    // marked with the annotation role, so any TS diagnostic on the
+    // augmentation itself (a malformed type, a generic global outside
+    // the arity table) maps back to the author's annotation instead of
+    // dropping with the synthetic span.
+    //
+    // An annotation that CANNOT manifest rejects loudly (never a
+    // silently untyped member): augmentations are legal only at a
+    // module's top level, and a module-bound head that is not a class
+    // DECLARATION (an import, an expression-form `A = class`) gives
+    // the interface nothing to merge with.
+    {
+      const proto = protoMemberTarget(node);
+      const text = proto !== null ? this.annotationText(node) : null;
+      if (text !== null) {
+        const protoError = (message) => {
+          const id = this.stores.idOf(node);
+          const row = id !== null ? this.stores.role(id, 'annotation') : null;
+          return row !== null && row.sourceStart != null
+            ? this.positionedErrorAt(row.sourceStart, row.sourceEnd, message)
+            : this.positionedError(node, message);
+        };
+        if (node !== this.moduleTopStmt) {
+          throw protoError(
+            'emitter: an annotated prototype member must be a module top-level statement — ' +
+            'the annotation manifests as an interface augmentation, which TypeScript admits ' +
+            'only at a module\'s top level; move the write there or drop the annotation');
+        }
+        if (this.moduleClassNames?.has(proto.head)) {
+          if (this.ts) this.b.tsOnly(() => this.mark(node, 'annotation', () =>
+            this.b.emit(`interface ${proto.head} { ${proto.member}: ${text} }\n`)));
+        } else if (!this.scopes[0].has(proto.head)) {
+          const params = PROTO_GENERIC_PARAMS[proto.head] ?? '';
+          if (this.ts) this.b.tsOnly(() => this.mark(node, 'annotation', () =>
+            this.b.emit(`declare global { interface ${proto.head}${params} { ${proto.member}: ${text} } }\n`)));
+        } else {
+          throw protoError(
+            `emitter: the annotation on \`${proto.head}::${proto.member}\` cannot augment — ` +
+            `\`${proto.head}\` is a module binding, not a class declaration, so the interface has ` +
+            `nothing to merge with; declare \`class ${proto.head}\`, drop the annotation, or ` +
+            'describe the member in a workspace .d.ts');
+        }
+      }
+    }
     // A typed declaration's annotation role (side-band) covers
     // the whole emitted assignment — its only generated manifestation;
     // mark() is a no-op for the untyped rows (no such role).

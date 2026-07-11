@@ -352,10 +352,10 @@ describe.skipIf(!tsgoAvailable)('the workspace project model', () => {
   }, 60000);
 });
 
-// Disk-layer hygiene: disk-layer hygiene (GPT majors 1-3, moderate
-// 4) and the Opus findings with a code disposition (F-1 extends-chain
-// types, F-3 collision guard, F-7 traversal bound).
-describe.skipIf(!tsgoAvailable)('the the settled rule review round', () => {
+// Disk-layer hygiene: mirror-tree ownership, collision guards, and
+// traversal bounds — the mirror is editor scratch and must never
+// clobber or escape user territory.
+describe.skipIf(!tsgoAvailable)('disk-layer hygiene', () => {
   const mirrorFileOf = (ws, rel) => path.join(ws, '.rip', 'editor', rel + '.ts');
 
   test('user territory: a pre-existing .rip/.gitignore survives byte-identical; ours lives in editor/', async () => {
@@ -483,15 +483,15 @@ describe.skipIf(!tsgoAvailable)('the the settled rule review round', () => {
   }, 30000);
 });
 
-// The the settled rule module marker driven end-to-end: two PLAIN buffers (no
-// imports/exports) share one tsgo program under the settled rule — without the
+// The module marker driven end-to-end: two PLAIN buffers (no
+// imports/exports) share one tsgo program — without the
 // marker both faces are global scripts and every shared top-level
 // name draws a false TS2451 in both files, which also starves the
-// the settled rule write-site hover enrichment (references answer [] under the
+// write-site hover enrichment (references answer [] under the
 // collision and the memo stores the null). Plus the restart shape
 // (the persisted closure re-materializes without collisions) and the
-// orphan-mirror startup sweep (the the settled rule companion server fix).
-describe.skipIf(!tsgoAvailable)('the the settled rule module marker over LSP', () => {
+// orphan-mirror startup sweep.
+describe.skipIf(!tsgoAvailable)('the module marker over LSP', () => {
   // Shared top-level names across both files; `total` is unannotated
   // (evolving-let) with a read, so the write-site hover exercises the
   // the settled rule enrichment path.
@@ -580,4 +580,29 @@ describe.skipIf(!tsgoAvailable)('the the settled rule module marker over LSP', (
       fs.rmSync(ws, { recursive: true, force: true });
     }
   }, 60000);
+});
+
+// Workspace ambient declarations join the program: an augmentation the
+// project declares (a prototype extension's interface, a window field)
+// governs in the editor exactly as it does under a workspace-root tsc
+// run — and the compiler's own augmentation line makes an ANNOTATED
+// prototype member self-sufficient, no ambient file needed.
+describe.skipIf(!tsgoAvailable)('workspace ambient .d.ts and prototype augmentation', () => {
+  test('a workspace .d.ts augmentation governs: the patched method is a known member', async () => {
+    await inWorkspace({ 'rip-env.d.ts': 'interface String { shout(): string }\n' }, async (api) => {
+      await api.open('app.rip', 'String.prototype.shout = -> @toUpperCase() + "!"\nout = "hi".shout()\n');
+      await api.until('app.rip', (codes) => !codes.includes(2339));
+      // The d.ts widened one interface, not the checking: a real typo
+      // still reports.
+      await api.change('app.rip', 'bad = "hi".missing()\n');
+      await api.until('app.rip', (codes) => codes.includes(2339));
+    });
+  }, 30000);
+
+  test('an annotated prototype member is self-sufficient: the face augments, the editor resolves', async () => {
+    await inWorkspace({}, async (api) => {
+      await api.open('app.rip', 'String::cap: () => string = -> @charAt(0).toUpperCase()\nout = "hi".cap()\n');
+      await api.until('app.rip', (codes) => !codes.includes(2339) && !codes.includes(2304));
+    });
+  }, 30000);
 });

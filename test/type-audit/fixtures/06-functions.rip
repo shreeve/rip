@@ -319,3 +319,13 @@ console.log 'arrowFatRet:', arrowFatRet(9)
 
 # @ts-expect-error — fat-arrow return type enforced (returns string, not number)
 badArrowFatRet: number = arrowFatRet(9)
+
+# ── prototype access: `::` extends a type's prototype; the ANNOTATED form
+# manifests as a global interface augmentation, so the write, every call
+# site, and hover all resolve the member.
+String::titleCase: () => string = -> @charAt(0).toUpperCase() + @slice(1)
+titled = "veni vidi".titleCase()
+console.log 'titled:', titled
+
+# @ts-expect-error — the augmentation types the member (returns string, not number)
+badTitled: number = "x".titleCase()

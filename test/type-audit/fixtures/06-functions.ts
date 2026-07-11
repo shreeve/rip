@@ -316,3 +316,13 @@ console.log('arrowFatRet:', arrowFatRet(9))
 
 // @ts-expect-error — fat-arrow return type enforced (returns string, not number)
 let badArrowFatRet: number = arrowFatRet(9)
+
+// ── prototype access: the global augmentation declares the member the
+// runtime patches in, so the write, every call site, and hover all resolve.
+declare global { interface String { titleCase(): string } }
+String.prototype.titleCase = function () { return this.charAt(0).toUpperCase() + this.slice(1) }
+const titled = 'veni vidi'.titleCase()
+console.log('titled:', titled)
+
+// @ts-expect-error — the augmentation types the member (returns string, not number)
+let badTitled: number = 'x'.titleCase()

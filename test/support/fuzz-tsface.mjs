@@ -72,6 +72,15 @@ const CONSTRUCTS = [
     return { kind: 'typed declaration', source: `d${id}: ${t} = ${v}\nd${id} = ${v}\n` };
   },
   (rng, id) => {
+    // A typed prototype member: the annotation surfaces as the
+    // augmentation line (TS-only), and the write checks against it.
+    const [t, v] = pick(rng, SCALARS);
+    return {
+      kind: 'typed prototype member',
+      source: `Array::pm${id}: () => ${t} = -> ${v}\n`,
+    };
+  },
+  (rng, id) => {
     const [t, v] = typedPair(rng);
     return { kind: 'bare typed forward', source: `w${id}: ${t}\nw${id} = ${v}\n` };
   },

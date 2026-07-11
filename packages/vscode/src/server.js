@@ -325,12 +325,26 @@ function generatedTsconfig() {
     allowImportingTsExtensions: true,
   };
   if (!mirrorRootIsFallback) overrides.rootDirs = ['.', '../..'];
+  // Workspace AMBIENT declarations (`rip-env.d.ts` and kin) join the
+  // program: an augmentation the project declares — a prototype
+  // extension's global interface, a window field — governs in the
+  // editor exactly as it does under a workspace-root tsc run. The
+  // mirror root sits two levels below the workspace. An explicit
+  // `exclude` REPLACES the built-in defaults, so `node_modules` is
+  // restated alongside the `../../` reach-up (the defaults cover only
+  // config-relative names).
+  const include = ['**/*.ts'];
+  const exclude = ['node_modules'];
+  if (!mirrorRootIsFallback) {
+    include.push('../../**/*.d.ts');
+    exclude.push('../../**/node_modules');
+  }
   const userConfig = !mirrorRootIsFallback && workspaceRoot
     ? path.join(workspaceRoot, 'tsconfig.json') : null;
   if (userConfig && fs.existsSync(userConfig)) {
     userConfigChain.clear();
     if (!chainSetsTypes(userConfig)) overrides.types = ['*'];
-    return { extends: '../../tsconfig.json', compilerOptions: overrides, include: ['**/*.ts'] };
+    return { extends: '../../tsconfig.json', compilerOptions: overrides, include, exclude };
   }
   userConfigChain.clear();
   return {
@@ -339,7 +353,8 @@ function generatedTsconfig() {
       types: ['*'],
       ...overrides,
     },
-    include: ['**/*.ts'],
+    include,
+    exclude,
   };
 }
 
