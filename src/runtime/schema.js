@@ -299,6 +299,7 @@ class __SchemaDef {
     this._norm = null;
     this._klass = null;
     this._unionPlanCache = null;
+    this._sourceModel = null;
     if (desc.kind === 'model') __schemaPersistence.decorateDef(this, desc);
   }
 
@@ -1285,7 +1286,11 @@ function __schemaDerive(source, transform) {
   const name = (source.name || 'Schema') + 'Derived';
   // Derived schemas bypass the registry — their synthetic names must
   // not shadow the source.
-  return new __SchemaDef({ kind: 'shape', name, entries });
+  const derived = new __SchemaDef({ kind: 'shape', name, entries });
+  // sourceModel propagates through chained algebra: tooling follows the
+  // chain back to the original :model for projection hints.
+  derived._sourceModel = source._sourceModel || (source.kind === 'model' ? source : null);
+  return derived;
 }
 
 function __schemaExpandMixins(host, fields, directives, ctx) {
