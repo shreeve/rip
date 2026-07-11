@@ -1,0 +1,478 @@
+# 09-components.rip — Typed component props
+#
+# Rip components define typed props with @prop: type := default.
+# The component definitions emit typed DTS declarations.
+# Prop values are type-checked at construction sites via `rip check`.
+
+# ── Components ──
+
+export Input = component extends input
+  @label?: string
+  @value?: string := ''
+  @error?: string
+
+  render
+    div
+      if label
+        label label
+      input
+        value <=> value
+      if error
+        div error
+
+export Button = component extends button
+  @variant: 'primary' | 'secondary'
+  @shape?: 'rounded' | 'pill' := 'rounded'
+  @loading?: boolean
+
+  bg ~= if variant is 'primary' then '#0066ff' else '#e5e5e5'
+  fg ~= if variant is 'primary' then '#fff' else '#333'
+
+  render
+    button
+      style: "background: #{bg}; color: #{fg}"
+      if loading
+        'Loading...'
+      else
+        slot
+
+export Form = component
+  @title?: string
+  email := ''
+  password := ''
+  loading := false
+
+  onSubmit: (e: SubmitEvent) ->
+    e.preventDefault()
+    loading = true
+    p "Signing in: #{email}"
+    loading = false
+
+  render
+    form @submit: @onSubmit
+      h1 title
+      Input
+        label: 'Email'
+        value <=> email
+        placeholder: 'jane@example.com'
+        type: 'email'
+      Input
+        label: 'Password'
+        value <=> password
+        placeholder: '••••••••'
+        type: 'password'
+      Button
+        variant: 'primary'
+        type: 'submit'
+        loading: loading
+        'Sign In'
+
+# ── Negative: wrong prop types must be caught ──
+#
+# These match the TSX companion's negative prop-type tests.
+# The enriched stub emits constructor calls in _render(),
+# so TypeScript catches wrong literals, type mismatches, etc.
+
+export PropTypeTests = component
+  render
+    div
+      # @ts-expect-error — wrong variant literal
+      Button variant: 'danger'
+      # @ts-expect-error — disabled expects boolean
+      Button variant: 'primary', disabled: 'yes'
+      # @ts-expect-error — wrong type for label
+      Input label: 123
+      # @ts-expect-error — inherited intrinsic: maxLength expects number
+      Input maxLength: 'ten'
+
+# ── Two-way binding type safety ──
+#
+# The <=> operator passes the parent's Signal directly to the child.
+# The constructor accepts __bind_prop__?: Signal<T> for each public
+# state prop, so TypeScript can check that the bound signal matches
+# the child's expected type.
+
+export BindingTypeTests = component
+  email := ''
+  count := 0
+
+  render
+    div
+      # Correct: string <=> string — no error
+      Input
+        value <=> email
+      # @ts-expect-error — Type 'number' is not assignable to type 'string'
+      Input
+        value <=> count
+
+# ── Negative: type safety inside component bodies ──
+
+export TypeTestComp = component
+  @variant?: 'primary' | 'secondary' := 'primary'
+  @count?: number := 0
+  loading := false
+
+  ok ~= if variant is 'primary' then '#0066ff' else '#e5e5e5'
+
+  # @ts-expect-error — toFixed doesn't exist on string union
+  badFixed ~= variant.toFixed(2)
+
+  # @ts-expect-error — arithmetic on string type
+  badMath ~= variant * 2
+
+  badMethod = ->
+    # @ts-expect-error — string assigned to number state
+    count = 'hello'
+
+  badBodyAssign = ->
+    # @ts-expect-error — string assigned to inferred boolean state
+    loading = 'wrong'
+
+  render
+    null
+
+# ── Negative: render block expression type checking ──
+#
+# Conditionals, switch discriminants, loop iterables, and text expressions
+# in render blocks are type-checked. Typos emit into the stub so TS catches them.
+
+export RenderCondTest = component
+  label := ''
+  error := ''
+  items := ['a', 'b']
+  status := 'active'
+  loading := false
+  count := 42
+
+  render
+    div
+      # @ts-expect-error — typo: 'labelz' does not exist on component
+      if labelz
+        span 'label'
+      # @ts-expect-error — typo: 'loadingz' does not exist
+      unless loadingz
+        span 'ready'
+      # @ts-expect-error — typo: 'statusz' does not exist
+      switch statusz
+        when 'active' then span 'on'
+        when 'inactive' then span 'off'
+      # @ts-expect-error — typo: 'itemsz' does not exist
+      for item in itemsz
+        span 'list'
+      # @ts-expect-error — typo: 'countz' does not exist
+      = countz
+
+# ── Conditional-scoped variable used in callback ──
+#
+# A variable first assigned inside a conditional and captured by a
+# callback (e.g. .filter()) is correctly inferred. The patcher
+# recurses into class methods and computed arrow bodies, so no
+# explicit `: string` annotation is needed on `term`.
+
+export FilterGapTest = component
+  items: string[] := ['a', 'b', 'c']
+  search := ''
+
+  filtered ~=
+    result = items.slice()
+    if search
+      term = search.toLowerCase()
+      result = result.filter (s) -> s.includes(term)
+      # @ts-expect-error — term is inferred as string, not number
+      term.toFixed(2)
+    result
+
+  render
+    null
+
+# ── Event handler typing ──
+#
+# Both inline and named method refs are typed:
+#   @click: (e) -> ...        # inline — contextual typing from __RipEvents
+#   @submit: @handleSubmit    # named — stub injects HTMLElementEventMap type
+#
+# The stub pre-scans the render block for @event: @method bindings
+# and annotates the first untyped parameter with the event type.
+
+export EventHandlerTest = component
+  # Named method refs — stub injects event parameter types
+  handleSubmit: (e) -> e.preventDefault()
+  handleClick: (e) -> p e.clientX
+
+  render
+    form @submit: @handleSubmit
+      button @click: @handleClick, 'Click'
+      # Inline handlers — contextual typing from __RipEvents
+      button @click: (e) -> p e.clientX, 'Inline'
+      input @keydown: (e) -> p e.key
+
+# ── Generic components ──
+#
+# Components can be parameterized by type. A real-world Select uses
+# a bounded generic — options must be strings or { value, label }.
+
+type TOptionShape = string | { value: string, label: string }
+
+export Select<TOption extends TOptionShape> = component extends select
+  @label?: string
+  @options?: TOption[] := []
+  @placeholder?: string
+  @error?: string
+
+  render
+    div
+      if label
+        label label
+      select
+        if placeholder
+          option value: '', disabled, placeholder
+        for opt in options
+          option
+            key: typeof opt is 'string' ? opt : opt.value
+            value: typeof opt is 'string' ? opt : opt.value
+            typeof opt is 'string' ? opt : opt.label
+      if error
+        div error
+
+# Usage — T is inferred from the options array
+export GenericUsageTests = component
+  render
+    div
+      # Simple: string options
+      Select options: ['Red', 'Green', 'Blue']
+
+      # Structured: { value, label } options
+      Select options: [{ value: 'admin', label: 'Admin' }, { value: 'user', label: 'User' }]
+
+      # @ts-expect-error — number doesn't extend TOptionShape
+      Select options: [1, 2, 3]
+
+      # @ts-expect-error — object missing 'label' field (has 'name' instead)
+      Select options: [{ value: 'a', name: 'A' }]
+
+# ── Typed shared state ──
+#
+# Pattern: declare a `Cart`-shaped type, build a typed value of that
+# shape, and consume it from a component. Demonstrates that the type
+# DSL covers the same ground as zustand's `create<State>()` — fields,
+# methods, and negative cases (typos, wrong arg shapes) all fire.
+#
+# In a real app, the same `Cart` type lives in `<root>/app/stash.rip`
+# and the compiler splices it into every component's `@app.data`
+# automatically. This section keeps the value-shape and negative-test
+# coverage self-contained within the audit.
+
+export type CartItem =
+  id: number
+  name: string
+  price: number
+  quantity: number
+
+export type Cart =
+  items: CartItem[]
+  addItem(item: CartItem): void
+  removeItem(item: CartItem): void
+  total(): number
+
+# Typed value of `Cart` shape. Stub bodies — the section's job is to
+# verify the type DSL covers fields, methods, and negative cases.
+cart: Cart =
+  items: []
+  addItem: noop
+  removeItem: noop
+  total: -> 0
+
+export CartDemo = component
+  store ~= cart
+
+  render
+    div
+      span "#{store.items.length} items — $#{store.total()}"
+      button @click: (-> store.addItem(id: 1, name: 'Widget', price: 9.99, quantity: 1)), 'Add to Cart'
+      ul
+        for item in store.items
+          li "#{item.name} x#{item.quantity} — $#{item.price}"
+
+# ── Negative tests: typos and wrong arg types are caught ──
+#
+# Mirrors the TSX zustand negatives. Read typos produce TS2551; wrong
+# argument types to store methods produce TS2345.
+
+export CartTypeTests = component
+  store ~= cart
+
+  # @ts-expect-error — typo: 'itms' does not exist
+  bad1 ~= store.itms
+
+  # @ts-expect-error — CartItem has no 'qty' field
+  bad2 ~= store.items[0]?.qty
+
+  # @ts-expect-error — toFixed doesn't exist on CartItem[]
+  bad3 ~= store.items.toFixed(2)
+
+  # @ts-expect-error — nonexistent path
+  bad4 ~= store.tax
+
+  badAdd: ->
+    # @ts-expect-error — wrong item shape: missing required fields
+    store.addItem(broken: true)
+
+  badRemove: ->
+    # @ts-expect-error — wrong arg type: number instead of CartItem
+    store.removeItem(42)
+
+  render null
+
+# ── Defaulted method params ──
+#
+# Component methods mixing typed params with `= default` params emit
+# `name?: type` in the shadow stub. Defaulted params become optional;
+# typed params keep their declared type and reject mismatched args.
+
+export DefaultedMethodParams = component
+  setOne:   (key: string, val = 'x')               -> p key, val
+  setTwo:   (key: string, count: number = 0)      -> p key, count
+  setThree: (key: string, val = 'x', flag = false) -> p key, val, flag
+  setFour:  (val: string = 'x', count = 1)         -> p val, count
+
+  callSites: ->
+    @setOne('name')
+    @setTwo('name', 5)
+    @setThree('name', 'x', true)
+    @setFour()
+    @setFour('y', 2)
+
+  render null
+
+export DefaultedMethodParamsTests = component
+  ref ~= new DefaultedMethodParams({})
+
+  bad: ->
+    # @ts-expect-error — first arg must be string
+    @ref.setOne(42)
+    # @ts-expect-error — second arg must be number
+    @ref.setTwo('name', 'nope')
+    # @ts-expect-error — first arg must be string
+    @ref.setThree(false, 'x', true)
+    # @ts-expect-error — first arg must be string
+    @ref.setFour(true)
+
+  render null
+
+# ── Equals-form method assignments with typed params ──
+#
+# `name = (p: T) ->` (assignment form, vs the `name: (p: T) ->` colon form
+# above) also emits a class method on the check path. A stale manual type
+# append in the component emitter used to double the annotation
+# (`p: T: T` → TS1005) now that `formatParam` emits the inline type itself;
+# this guards that the equals form type-checks and enforces its param types.
+
+export EqualsFormMethods = component
+  greet = (n: number) -> n + 1
+  label = (s: string) -> s.toUpperCase()
+
+  callSites: ->
+    @greet(5)
+    @label('x')
+
+  render null
+
+export EqualsFormMethodTests = component
+  ref ~= new EqualsFormMethods({})
+
+  bad: ->
+    # @ts-expect-error — greet's param must be number, not string
+    @ref.greet('nope')
+    # @ts-expect-error — label's param must be string, not number
+    @ref.label(42)
+
+  render null
+
+# ── Element refs (timeless: ref binds a writable state cell) ──
+#
+# `ref: cell` writes the live DOM element into a state cell (declared
+# `:= null`). The cell's value type must admit null AND accept the tag's
+# element type — narrowed per tag (input → HTMLInputElement, div →
+# HTMLDivElement, svg → SVGSVGElement). A widened `Element | null` cell
+# accepts any tag. The cell is passed as the Signal OBJECT, not its value.
+
+export RefTests = component
+  inputEl: HTMLInputElement | null := null
+  divEl: HTMLDivElement | null := null
+  svgEl: SVGSVGElement | null := null
+  anyEl: Element | null := null
+
+  render
+    div
+      input ref: inputEl
+      div ref: divEl
+      svg ref: svgEl
+      # widened Element cell accepts any tag
+      section ref: anyEl
+
+# ── Negative: ref cell type must match the element and admit null ──
+
+export RefMismatchTests = component
+  inputCell: HTMLInputElement | null := null
+  # A non-nullable cell (no `| null`) — seeded with a real element so the
+  # declaration itself is clean; the ref site is where it must be rejected.
+  nonNull: HTMLDivElement := document.createElement('div')
+
+  render
+    div
+      # @ts-expect-error — a div element can't be stored in an HTMLInputElement cell
+      div ref: inputCell
+      # @ts-expect-error — ref cell type must admit null (non-nullable rejected)
+      div ref: nonNull
+
+# ── Forwarded ref: parent owns the cell, child fills it via a state prop ──
+#
+# A child exposes its DOM node by binding a public state prop two-way (<=>);
+# the parent owns the cell and the child writes its element into it with
+# `ref:`. Both endpoints type-check: the <=> channel passes Signal<T> under
+# __bind_, and the child's `ref: field` checks the same element type.
+
+export RefForwardChild = component
+  @field: HTMLInputElement | null := null
+
+  render
+    input ref: field
+
+export RefForwardParent = component
+  myInput: HTMLInputElement | null := null
+
+  render
+    RefForwardChild
+      field <=> myInput
+
+# ── `=!` const members surface as `readonly`; siblings do NOT ──
+#
+# A `=!` member is a genuine const. The Rip-native check forbids reassigning it
+# inside the SAME component (a compile error that fires before TS runs), so the
+# TS2540 surface is observed by a CONSUMER holding an instance: the shadow class
+# declares the `=!` member `readonly`, while `=`/`:=`/`~=` members stay mutable
+# (`Signal<T>.value` writable, `Computed<T>` readable, plain field reassignable).
+
+export ConstMembers = component
+  a: number =! 5     # =! → readonly a: number
+  b: number := 10    # := → b: Signal<number>   (NOT readonly; .value writable)
+  c: number ~= 20    # ~= → c: Computed<number>  (NOT readonly)
+  d: number = 30     # =  → plain d: number      (NOT readonly; reassignable)
+
+  render
+    div "#{a}"
+
+export ConstMemberTests = component
+  ref ~= new ConstMembers({})
+
+  checks: ->
+    # @ts-expect-error — `a` is a =! const member → readonly (TS2540)
+    @ref.a = 6
+    # `:=` state stays writable through its signal's `.value` — no error
+    @ref.b.value = 11
+    # `~=` computed is readable as Computed<number> — no error
+    p @ref.c.value
+    # plain `=` field is reassignable — no error
+    @ref.d = 31
+
+  render null

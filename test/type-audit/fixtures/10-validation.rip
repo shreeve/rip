@@ -1,0 +1,182 @@
+# 10-validation.rip — Runtime validation use cases
+#
+# rip `schema` fills the role Zod plays in the .ts companion: a schema is
+# the single source of truth — it defines the shape, validates incoming
+# data on `.parse()`, AND its bare name is the compile-time type. Compare
+# with 10-validation.ts (Zod): same four cases, identical output.
+#
+# Schemas here default to the `:input` kind (bare `schema`, no
+# `:symbol`): the whole file validates data entering from outside — API
+# responses, JSON config, a 3rd-party payload. `:input` is the direct
+# parallel to Zod's plain `z.object`. Two exceptions: `Order` is a
+# `:shape` (it carries computed getters — behavior), and `Step` is a
+# `:union` (the parallel to z.discriminatedUnion).
+#
+# Use cases:
+#   1. API response shape — validate what the server returns
+#   2. Composition — client schema ≠ server model
+#   3. Non-DB config — discriminated unions with no backing table
+#   4. 3rd-party API transform — normalize external data on parse
+
+# ── 1. API response shape ──
+#
+# The server returns JSON; the client validates it into a typed value via
+# `.parse()`, and the bare `User` name is the compile-time type.
+#
+# Nullability note — rip vs Zod (known limitation): rip folds Zod's three
+# absent/null states into one marker. `name?` is *nullish* — it accepts a
+# present `null` OR an absent key (the loosest); the .ts companion matches it
+# with `z.string().nullish()`. rip can't express the stricter two: `.optional()`
+# (absent-or-value, reject null) or `.nullable()` (present, value-or-null, reject
+# absent). Two consequences worth knowing:
+#   • The emitted type under-states the runtime: `name?: string` (no `| null`)
+#     even though `parse` accepts `null` — so `bob.name` is typed
+#     `string | undefined` but can actually be `null`.
+#   • "present, but may be null" is unrepresentable, so a contract that must
+#     tell absent from null can't be modeled — e.g. PUT (full replace: every
+#     field present, `null` = explicitly cleared) vs PATCH (absent = no-op).
+# The runtime divergence can't be demonstrated here: the parity check requires
+# both companions to produce identical output on every input, and any input that
+# exposed it would break parity — so it's documented, not tested. Deliberate
+# design (`src/schema/schema.js`: "nullability is carried by the `?` modifier").
+
+User = schema
+  id!    number
+  email! string
+  name?  string
+
+# .parse() validates at runtime AND returns the typed value
+def fetchUser(id: number): Promise<User>
+  response = fetch!("/api/users/#{id}")
+  return User.parse(response.json())
+
+alice = User.parse({ id: 1, email: 'alice@example.com', name: 'Alice' })
+bob = User.parse({ id: 2, email: 'bob@example.com', name: null })
+
+console.log("user: #{alice.id} #{alice.email} #{alice.name}")
+console.log("user: #{bob.id} #{bob.email} #{bob.name ?? '(anon)'}")
+
+# ── 2. Composition — client schema ≠ server model ──
+#
+# The DB stores order items inside a Json `meta` column and dates as
+# strings over the wire. The client schema types `meta` into OrderItem[],
+# coerces the ISO `createdAt` string to a Date, and keeps the nullable
+# `shippedAt`/`completedAt`. `name` and `status` are both computed getters
+# (`~>`): lazy, read-only views derived from the parsed fields, never
+# serialized or sent back, so neither needs to be a stored own property.
+# (Reach for an eager-derived field (`!>`) only when the derived value must
+# serialize — sent over the wire, persisted, or snapshotted.) Both are
+# behavior, so `Order` is a `:shape` (`:input` is fields-only).
+
+OrderItem = schema
+  id!       number
+  name!     string
+  price!    number
+  quantity! number
+
+OrderMeta = schema
+  items! OrderItem[]
+
+Order = schema :shape
+  id!          number
+  number!      string
+  payment!     string
+  subtotal!    number
+  total!       number
+  meta!        OrderMeta
+  shippedAt?   datetime
+  completedAt? datetime
+  createdAt!   datetime
+  name:   ~> (@meta.items[0]?.name ?? '') + (if @meta.items.length > 1 then " + #{@meta.items.length - 1} more item#{if @meta.items.length - 1 is 1 then '' else 's'}" else '')
+  status: ~> if @completedAt then 'Completed' else if @shippedAt then 'Shipped' else 'Pending'
+
+order = Order.parse({
+  id: 1
+  number: 'ORD-1001'
+  payment: 'card'
+  subtotal: 22500
+  total: 22500
+  meta: {
+    items: [
+      { id: 1, name: 'Lab Panel A', price: 7500, quantity: 1 }
+      { id: 2, name: 'Lab Panel B', price: 7500, quantity: 2 }
+    ]
+  }
+  shippedAt: null
+  completedAt: null
+  createdAt: '2024-03-15T10:30:00Z'
+})
+
+console.log("order: #{order.number} #{order.name}")
+console.log("status: #{order.status}")
+console.log("item: #{order.meta.items[0].name} $#{(order.meta.items[0].price / 100).toFixed(2)}")
+console.log("item: #{order.meta.items[1].name} $#{(order.meta.items[1].price / 100).toFixed(2)} x#{order.meta.items[1].quantity}")
+
+# ── 3. Non-DB config — discriminated unions ──
+#
+# Workflow configs are built server-side and returned as JSON — no DB
+# table. Each step type carries different fields. `schema :union` is
+# the direct parallel to z.discriminatedUnion(): `@on :type` names the
+# discriminant, each constituent tags itself with a single-literal
+# constant field (`type! "intro"`), and `.parse()` dispatches O(1) to
+# the matching constituent — enforcing the per-variant shape at runtime
+# while the shadow TS union narrows on `step.type` at compile time.
+
+IntroStep = schema
+  type!    'intro'
+  heading! string
+  consent! string
+
+TaskStep = schema
+  type!     'task'
+  heading!  string
+  duration! number
+
+FinalStep = schema
+  type!    'final'
+  heading! string
+  button?  string
+
+Step = schema :union
+  @on :type
+  IntroStep
+  TaskStep
+  FinalStep
+
+Workflow = schema
+  name!  string
+  steps! Step[]
+
+workflow = Workflow.parse({
+  name: 'Lab Kit Collection'
+  steps: [
+    { type: 'intro', heading: 'Welcome', consent: 'I agree to the terms' }
+    { type: 'task', heading: 'Collect Sample', duration: 300 }
+    { type: 'final', heading: 'Ship Kit', button: 'findLocations' }
+  ]
+})
+
+console.log("workflow: #{workflow.name} (#{workflow.steps.length} steps)")
+for step in workflow.steps
+  console.log("step: #{step.type} - #{step.heading}")
+  # after narrowing on step.type, variant-specific fields are accessible
+  if step.type is 'intro'
+    console.log("  consent: #{step.consent}")
+  else if step.type is 'task'
+    console.log("  duration: #{step.duration}s")
+  else if step.type is 'final'
+    console.log("  button: #{step.button}")
+
+# ── 4. 3rd-party API transform ──
+#
+# QuickBooks returns PascalCase fields; the app wants camelCase. A field
+# transform (`-> it.X`) remaps each key during `.parse()` — one schema
+# validates the input and reshapes it. This data doesn't come from your
+# DB, so a server :model can't define it.
+
+QBCustomer = schema
+  id!          -> it.Id
+  displayName! -> it.DisplayName
+
+customer = QBCustomer.parse({ Id: '123', DisplayName: 'Acme Corp' })
+console.log("customer: #{customer.id} #{customer.displayName}")

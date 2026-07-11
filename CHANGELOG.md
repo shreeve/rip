@@ -5,6 +5,13 @@ repository's pull requests.
 
 ## Unreleased
 
+
+- Add the type-audit gauge (test/type-audit): twelve real-world typed
+  fixtures with .ts/.tsx twins, a six-dimension audit runner (compiles,
+  directives kept, editor verdict, runtime parity, twin validity, and
+  pinned hover snapshots), the any-hover gauge metric, and the
+  `bun run type-audit` script (#17)
+
 - Give battery files real imports: the four verbs (test, code, fail,
   type) live in test/support/testing.js and every battery file imports
   them — the editor resolves the vocabulary, and a battery file run
