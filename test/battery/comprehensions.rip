@@ -1,0 +1,328 @@
+# Test: Comprehensions (2 node types)
+# Tests "comprehension" and "object-comprehension" node types
+
+# ==============================================================================
+# Array Comprehensions: "comprehension"
+# ==============================================================================
+
+# Basic array comprehension
+test "simple comprehension", "(x * 2 for x in [1, 2, 3])", [2, 4, 6]
+test "comprehension with string", "(c.toUpperCase() for c in ['a', 'b', 'c'])", ['A', 'B', 'C']
+
+# Comprehension with guard
+test "comprehension when", "(x for x in [1, 2, 3, 4, 5] when x > 2)", [3, 4, 5]
+test "comprehension multiple guards", "(x for x in [1, 2, 3, 4] when x > 1 && x < 4)", [2, 3]
+
+# ==============================================================================
+# Comprehension filters use `when`, not `if` — the Python-habit trap
+# A trailing/leading `if` parses as a postfix conditional wrapping the whole
+# comprehension; its loop variable is then out of scope. Reject with a clear
+# error rather than emitting code that throws ReferenceError at runtime.
+# ==============================================================================
+
+fail "comprehension if filter is rejected", "(x for x in [1, 2, 3] if x > 1)"
+fail "comprehension unless filter is rejected", "(x for x in [1, 2, 3] unless x > 1)"
+fail "leading if comprehension filter is rejected", "(x if x > 1 for x in [1, 2, 3])"
+fail "object comprehension if filter is rejected", "(k for k, v of {a: 1} if v > 1)"
+fail "object-comprehension brace if filter is rejected", "r = ({k: v for k, v of obj if v > 1})"
+
+# The leak is caught even when the comprehension is buried under a wrapper
+# (here a postfix-if on an assignment), and for destructured loop vars.
+fail "if filter rejected through assignment wrapper", "r = (1 for [a, b] in pairs) if a > 0"
+fail "if filter rejected for object-destructured target", "r = (1 for {x: y} in pairs) if y > 0"
+
+# Scope-aware: a nested comprehension that rebinds the name is its own scope,
+# so this is NOT a leak and must still compile.
+test "nested comprehension rebinding name is not a leak", '''
+  a = [1, 2]
+  b = [3]
+  r = (x for x in a) if (x for x in b).length > 0
+  r
+  ''', [1, 2]
+
+# An object-destructure KEY is not a binding, so referencing the key name in
+# the guard is a legit outer reference, not a loop-var leak.
+test "object-destructure key in guard is not a leak", '''
+  x = 9
+  pairs = [{k: 1}]
+  r = (v for {k: v} in pairs) if x > 0
+  r
+  ''', [1]
+
+# `when` is the real filter and still works
+test "comprehension when filter works", "(x for x in [1, 2, 3] when x > 1)", [2, 3]
+
+# A guard that does NOT reference the loop var is a legit list-or-undefined
+test "comprehension guarded by unrelated cond", "cond = true\nr = (x for x in [1, 2, 3]) if cond\nr", [1, 2, 3]
+test "comprehension guarded by false cond", "cond = false\nr = (x for x in [1, 2, 3]) if cond\nr", undefined
+
+# A comprehension in a ternary else branch is fine (loop var doesn't leak)
+test "comprehension in ternary else", "cond = false\n'a' if cond else (y for y in [1, 2])", [1, 2]
+
+# Comprehension with index
+test "comprehension with index", "(i for item, i in ['a', 'b', 'c'])", [0, 1, 2]
+
+# Nested comprehensions
+test "nested comprehension", "((x * y for x in [1, 2]) for y in [10, 20])", [[10, 20], [20, 40]]
+
+# Comprehension from range
+test "comprehension range", "(x * x for x in [1..5])", [1, 4, 9, 16, 25]
+
+# String comprehension
+test 'string comprehension', "(c.toUpperCase() for c in 'abc')", ['A', 'B', 'C']
+
+# Comprehension with destructuring
+test 'comprehension with array destructuring', '''
+  pairs = [[1,2], [3,4], [5,6]]
+  (a + b for [a, b] in pairs)
+  ''', [3, 7, 11]
+
+# Empty comprehension
+test 'empty comprehension', "(x for x in [] when x > 0)", []
+
+# Comprehension with break
+test 'comprehension with break', '''
+  result = for i in [1..10]
+    break if i > 3
+    i
+  result
+  ''', [1, 2, 3]
+
+# Comprehension with continue
+test 'comprehension with continue', '''
+  result = for i in [1..5]
+    continue if i == 3
+    i
+  result
+  ''', [1, 2, 4, 5]
+
+# Nested comprehensions should use plain loops (not nested IIFEs)
+test "nested comprehension side effects", '''
+  count = 0
+  for x in [1, 2]
+    count++ for y in [1, 2, 3]
+  count
+  ''', 6
+
+code "nested comprehension plain loops", '''
+  for x in [1, 2]
+    process(y) for y in [1, 2, 3]
+  ''', "for (let x of [1, 2]) {\n  for (let y of [1, 2, 3]) {\n    process(y);\n  }\n}"
+
+# Code generation
+code "comprehension", "(x * 2 for x in arr)", "(() => {\n  const result = [];\n  for (let x of arr) {\n    result.push((x * 2));\n  }\n  return result;\n})()"
+
+# ==============================================================================
+# Object Comprehensions: "object-comprehension"
+# ==============================================================================
+
+# Basic object comprehension
+test "object comprehension", "{k: v * 2 for k, v of {a: 1, b: 2}}", {a: 2, b: 4}
+test "object comprehension keys only", "{k: k for k of {a: 1, b: 2}}", {a: 'a', b: 'b'}
+
+# Object comprehension with guard
+test "object comprehension when", "{k: v for k, v of {a: 1, b: 2, c: 3} when v > 1}", {b: 2, c: 3}
+
+# Object comprehension values
+test 'object comprehension values', '''
+  obj = {a: 1, b: 2, c: 3}
+  {k: v * 2 for k, v of obj}
+  ''', {a: 2, b: 4, c: 6}
+
+# Object comprehension key-value
+test 'object comprehension key-value', '''
+  {k: k for k, v of {x: 1, y: 2}}
+  ''', {x: 'x', y: 'y'}
+
+# Code generation
+code "object comprehension", "{k: v * 2 for k, v of obj}", "((() => {\n  const result = {};\n  for (let k in obj) {\n    let v = obj[k];\n    result[k] = (v * 2);\n  }\n  return result;\n})());"
+
+# ==============================================================================
+# Function-Local Comprehension Assignment (direct array building, no IIFE)
+# ==============================================================================
+
+code "function comprehension assignment", '''
+  def makeList
+    items = (x * 2 for x in [1, 2, 3])
+''', '''
+  function makeList() {
+    let items;
+    return (items = (() => {
+      const result = [];
+      for (let x of [1, 2, 3]) {
+        result.push((x * 2));
+      }
+      return result;
+    })());
+  }
+'''
+
+code "function for-in assignment", '''
+  def makeList
+    items = for x in [1, 2, 3]
+      x * 2
+''', '''
+  function makeList() {
+    let items;
+    return (items = (() => {
+      const result = [];
+      for (let x of [1, 2, 3]) {
+        result.push((x * 2));
+      }
+      return result;
+    })());
+  }
+'''
+
+test "function comprehension execution", '''
+  def makeList
+    items = (x * 2 for x in [1, 2, 3])
+  makeList()
+  ''', [2, 4, 6]
+
+test "no iife in generated code", '''
+  def test
+    x = (i for i in [1, 2, 3])
+  result = test()
+  result
+  ''', [1, 2, 3]
+
+test "no iife with guard", '''
+  def test
+    x = (i for i in [1, 2, 3, 4, 5] when i > 2)
+  result = test()
+  result
+  ''', [3, 4, 5]
+
+# Forward for-of comprehension (for k, v of obj in value context returns array)
+test "forward for-of comprehension", '''
+  obj = { a: 1, b: 2, c: 3 }
+  result = for k, v of obj
+    { k, v }
+  result
+  ''', [{ k: 'a', v: 1 }, { k: 'b', v: 2 }, { k: 'c', v: 3 }]
+
+# ==============================================================================
+# Regression: comprehensionTarget scoping
+# ==============================================================================
+# When a function's body ends with a `loop` (auto-return wrapping logic
+# previously set comprehensionTarget = '_result' for the entire body), an
+# inner parenthesized comprehension on an assignment RHS would inherit
+# that target and emit a bare for-loop without its own IIFE — producing
+# invalid JS like `expected =     for (let x of ...)`.
+#
+# This pinned the bug that broke `bun run parser` when solar.rip:723 used
+# `expected = ("..." for own p of ...)` inside an outer `loop`. The fix
+# (1) skips auto-collect for `loop`/`while` (which have no comprehension
+# wrapping path) and (2) consume-and-clears comprehensionTarget at the
+# direct-target site so nested comprehensions always get their own IIFE.
+test "parenthesized comprehension RHS keeps own IIFE inside outer loop", '''
+  fn = (input) ->
+    done = false
+    loop
+      if done then return
+      expected = (x * 2 for x in [1, 2, 3])
+      return expected
+  fn 'go'
+  ''', [2, 4, 6]
+
+# Companion test — same shape, but with an object comprehension `for own ... of`,
+# matching the original solar.rip:723 pattern more closely.
+test "for-own-of comprehension RHS keeps own IIFE inside outer loop", '''
+  fn = ->
+    done = false
+    obj = { a: 1, b: 2, c: 3 }
+    loop
+      if done then return
+      expected = ("k=#{k}" for own k of obj)
+      return expected.sort()
+  fn()
+  ''', ['k=a', 'k=b', 'k=c']
+
+# Negative companion — the auto-return-loop wrapping must continue to work for
+# `for-in` / `for-of` / `for-as` (the legitimate cases where _result is wired
+# up via the comprehension wrapping path).
+test "for-in as last stmt of fn still auto-collects to _result", '''
+  fn = ->
+    for x in [1, 2, 3]
+      x * 10
+  fn()
+  ''', [10, 20, 30]
+
+test "for-of as last stmt of fn still auto-collects to _result", '''
+  fn = ->
+    for own k of {a: 1, b: 2}
+      k
+  fn().sort()
+  ''', ['a', 'b']
+
+# ==============================================================================
+# Regression: lexer rewriter — postfix `for` after implicit call argument
+# ==============================================================================
+# `obj.method arg for arg as iter` previously parsed as
+# `obj.method(arg for arg as iter)` because the lexer rewriter pushed a
+# CONTROL frame on FOR inside an implicit call, suppressing the
+# IMPLICIT_END close. Now FOR after a value-completing token (IDENTIFIER,
+# `)`, `]`, etc.) on the same line ends the implicit call so the
+# comprehension wraps the call rather than becoming its argument.
+
+test "postfix for on implicit call invokes per-iteration", '''
+  fn = ->
+    syms = []
+    log = (s) -> syms.push s
+    log s for s in ['a', 'b', 'c']
+    syms.join ','
+  fn()
+  ''', 'a,b,c'
+
+test "postfix for on method call (object.method arg for ...)", '''
+  fn = ->
+    obj = items: []
+    addItem = (o, x) -> o.items.push x
+    addItem obj, x for x in [1, 2, 3]
+    obj.items
+  fn()
+  ''', [1, 2, 3]
+
+test "postfix for + sibling if remain independent statements", '''
+  fn = ->
+    syms = []
+    log = (s) -> syms.push s
+    flag = true
+    log s for s in ['a', 'b']
+    if flag
+      log 'Y'
+    syms.join ','
+  fn()
+  ''', 'a,b,Y'
+
+test "postfix for as iter on implicit call", '''
+  fn = ->
+    out = []
+    push = (x) -> out.push x
+    items = ['x', 'y', 'z']
+    push s for s as items
+    out.join ','
+  fn()
+  ''', 'x,y,z'
+
+# Negative regression: prefix FOR after `:` in implicit object literal
+# must still keep the object open (this previously failed when the postfix
+# detection was too eager).
+test "prefix for as object property value still parses", '''
+  items = ['a', 'b']
+  data =
+    codes: for x in items
+      x.toUpperCase()
+    other: 99
+  [data.codes.length, data.codes[0], data.other]
+  ''', [2, 'A', 99]
+
+# Negative regression: prefix FOR as RHS of assignment still parses.
+test "prefix for as assignment RHS still parses", '''
+  fn = ->
+    nums = for x in [1, 2, 3]
+      x * 10
+    nums
+  fn()
+  ''', [10, 20, 30]

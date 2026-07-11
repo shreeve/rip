@@ -1,0 +1,115 @@
+# Test: Arrow Function Parameter Syntax
+# Tests that single parameters don't have unnecessary parens
+
+# ==============================================================================
+# Single Parameter (NO parens)
+# ==============================================================================
+
+code "arrow single param", "f = (x) => x * 2", "let f = x => (x * 2);"
+code "arrow single param block", '''
+  f = (x) =>
+    x * 2
+  ''', "let f = x => (x * 2);"
+test "arrow single param execution", "f = (x) => x * 2\nf(5)", 10
+
+# ==============================================================================
+# Multiple Parameters (KEEP parens)
+# ==============================================================================
+
+code "arrow no params", "f = => 42", "let f = () => 42;"
+code "arrow two params", "f = (x, y) => x + y", "let f = (x, y) => (x + y);"
+
+# ==============================================================================
+# Special Cases (KEEP parens)
+# ==============================================================================
+
+code "arrow destructuring", "f = ({x, y}) => x + y", "let f = ({x, y}) => (x + y);"
+code "arrow default param", "f = (x = 5) => x", "let f = (x = 5) => x;"
+code "arrow rest param", "f = (...args) => args", "let f = (...args) => args;"
+
+# Destructured parameter + default value (e.g. bag-of-options API pattern).
+# Currently emits a malformed parameter list like `(object,,a,a,,b,b = {})`
+# in every function form; these tests pin the correct shape so the fix can
+# land cleanly. See https://… (compiler issue).
+code "arrow destructuring with default", "f = ({a, b} = {}) => a + b", "let f = ({a, b} = {}) => (a + b);"
+code "thin arrow destructuring with default", "f = ({a, b} = {}) -> a + b", '''
+  let f = function({a, b} = {}) {
+    return (a + b);
+  };
+  '''
+code "second-position destructuring with default", "f = (x, {a, b} = {}) -> x + a + b", '''
+  let f = function(x, {a, b} = {}) {
+    return ((x + a) + b);
+  };
+  '''
+test "destructuring with default — runtime",
+  "f = ({a, b} = {}) -> a + b\nf({a: 1, b: 2})", 3
+test "destructuring with default — omitted",
+  "f = ({a, b} = {a: 10, b: 20}) -> a + b\nf()", 30
+
+# ==============================================================================
+# Implicit Objects in Single-Line Arrow Bodies
+# ==============================================================================
+
+# Throw with implicit object — comma should not end the arrow body
+code "arrow throw implicit object", "f = -> throw status: 400, error: \"oops\"", '''
+  let f = function() {
+    throw {status: 400, error: "oops"};
+  };
+  '''
+
+test "arrow throw implicit object runtime", """
+  f = ->
+    try
+      g = -> throw status: 400, error: "oops"
+      g()
+    catch e
+      e
+  result = f()
+  [result.status, result.error]
+  """, [400, "oops"]
+
+# Return with implicit object
+code "arrow return implicit object", "f = -> return status: 200, data: \"ok\"", '''
+  let f = function() {
+    return {status: 200, data: "ok"};
+  };
+  '''
+
+test "arrow return implicit object runtime", """
+  f = -> return status: 200, data: "ok"
+  result = f()
+  [result.status, result.data]
+  """, [200, "ok"]
+
+# Implicit object as arrow body (implicit return)
+code "arrow implicit object body", "f = -> status: 200, data: \"ok\"", '''
+  let f = function() {
+    return {status: 200, data: "ok"};
+  };
+  '''
+
+test "arrow implicit object body runtime", """
+  f = -> status: 200, data: "ok"
+  result = f()
+  [result.status, result.data]
+  """, [200, "ok"]
+
+# Arrow with params and throw implicit object
+code "arrow params throw implicit object", "error = (note = \"oops!\", code = 400) -> throw status: code, error: note", '''
+  let error = function(note = "oops!", code = 400) {
+    throw {status: code, error: note};
+  };
+  '''
+
+# Fat arrow with implicit object
+code "fat arrow implicit object", "f = => status: 200, data: \"ok\"", "let f = () => ({status: 200, data: \"ok\"});"
+
+# Comma that SHOULD end arrow body (not an implicit object)
+code "arrow comma ends body not object", """
+  fn 1, -> 42, 99
+  """, """
+  fn(1, function() {
+    return 42;
+  }, 99);
+"""

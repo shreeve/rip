@@ -1,0 +1,5087 @@
+# Test: Schema Keyword
+#
+# `code` snapshots pin the emitted `__schema({...})` shape for every
+# syntactic form. `test` cases execute the runtime against the compiled
+# output. `type` cases snapshot shadow TypeScript emission.
+
+opts = { skipPreamble: true, skipRuntimes: true, skipDataPart: true }
+
+# ==============================================================================
+# Emission shape
+# ==============================================================================
+
+code "input default kind", '''
+  SignupInput = schema
+    email!    email
+    password! string, 8..100
+  ''', '''
+  let SignupInput;
+  SignupInput = __schema({kind: "input", name: "SignupInput", entries: [{tag: "field", name: "email", modifiers: ["!"], typeName: "email", array: false}, {tag: "field", name: "password", modifiers: ["!"], typeName: "string", array: false, constraints: {min: 8, max: 100}}]});
+  ''', opts
+
+code "explicit :input kind", '''
+  X = schema :input
+    name! string
+  ''', '''
+  let X;
+  X = __schema({kind: "input", name: "X", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}]});
+  ''', opts
+
+code "shape with fields", '''
+  Address = schema :shape
+    street! string
+    city!   string
+    state!  string
+  ''', '''
+  let Address;
+  Address = __schema({kind: "shape", name: "Address", entries: [{tag: "field", name: "street", modifiers: ["!"], typeName: "string", array: false}, {tag: "field", name: "city", modifiers: ["!"], typeName: "string", array: false}, {tag: "field", name: "state", modifiers: ["!"], typeName: "string", array: false}]});
+  ''', opts
+
+code "shape with method and computed", '''
+  Address = schema :shape
+    street! string
+    full: ~> @street
+    normalize: -> @
+  ''', '''
+  let Address;
+  Address = __schema({kind: "shape", name: "Address", entries: [{tag: "field", name: "street", modifiers: ["!"], typeName: "string", array: false}, {tag: "computed", name: "full", fn: (function() { return this.street; })}, {tag: "method", name: "normalize", fn: (function() { return this; })}]});
+  ''', opts
+
+code "bare :symbol enum", '''
+  Role = schema :enum
+    :admin
+    :user
+    :guest
+  ''', '''
+  let Role;
+  Role = __schema({kind: "enum", name: "Role", entries: [{tag: "enum-member", name: "admin"}, {tag: "enum-member", name: "user"}, {tag: "enum-member", name: "guest"}]});
+  ''', opts
+
+fail "bare identifier enum members are rejected", '''
+  Role = schema :enum
+    admin
+    user
+  '''
+
+code "valued enum", '''
+  Status = schema :enum
+    :pending 0
+    :active  1
+    :done    2
+  ''', '''
+  let Status;
+  Status = __schema({kind: "enum", name: "Status", entries: [{tag: "enum-member", name: "pending", value: 0}, {tag: "enum-member", name: "active", value: 1}, {tag: "enum-member", name: "done", value: 2}]});
+  ''', opts
+
+code "string-valued enum", '''
+  Tier = schema :enum
+    :free "free"
+    :pro  "pro"
+  ''', '''
+  let Tier;
+  Tier = __schema({kind: "enum", name: "Tier", entries: [{tag: "enum-member", name: "free", value: "free"}, {tag: "enum-member", name: "pro", value: "pro"}]});
+  ''', opts
+
+code "mixin with fields only", '''
+  Timestamps = schema :mixin
+    createdAt! datetime
+    updatedAt! datetime
+  ''', '''
+  let Timestamps;
+  Timestamps = __schema({kind: "mixin", name: "Timestamps", entries: [{tag: "field", name: "createdAt", modifiers: ["!"], typeName: "datetime", array: false}, {tag: "field", name: "updatedAt", modifiers: ["!"], typeName: "datetime", array: false}]});
+  ''', opts
+
+code "model with modifiers and directives", '''
+  User = schema :model
+    name!    string
+    email!   email @unique
+    bio?     text
+    @timestamps
+    @belongs_to Organization
+  ''', '''
+  let User;
+  User = __schema({kind: "model", name: "User", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}, {tag: "field", name: "email", modifiers: ["!"], typeName: "email", array: false, unique: true}, {tag: "field", name: "bio", modifiers: ["?"], typeName: "text", array: false}, {tag: "directive", name: "timestamps"}, {tag: "directive", name: "belongs_to", args: [{target: "Organization"}]}]});
+  ''', opts
+
+code "model recognizes known hook names", '''
+  User = schema :model
+    name! string
+    beforeSave:   -> @
+    afterCreate:  -> @
+    greet:        -> @
+    identifier:   ~> @name
+  ''', '''
+  let User;
+  User = __schema({kind: "model", name: "User", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}, {tag: "hook", name: "beforeSave", fn: (function() { return this; })}, {tag: "hook", name: "afterCreate", fn: (function() { return this; })}, {tag: "method", name: "greet", fn: (function() { return this; })}, {tag: "computed", name: "identifier", fn: (function() { return this.name; })}]});
+  ''', opts
+
+code "shape does not classify hook names as hooks", '''
+  X = schema :shape
+    name! string
+    beforeSave: -> @
+  ''', '''
+  let X;
+  X = __schema({kind: "shape", name: "X", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}, {tag: "method", name: "beforeSave", fn: (function() { return this; })}]});
+  ''', opts
+
+code "array field type", '''
+  X = schema :shape
+    tags! string[]
+  ''', '''
+  let X;
+  X = __schema({kind: "shape", name: "X", entries: [{tag: "field", name: "tags", modifiers: ["!"], typeName: "string", array: true}]});
+  ''', opts
+
+code "exported schema", '''
+  export User = schema :model
+    name! string
+  ''', '''
+  export const User = __schema({kind: "model", name: "User", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}]});
+  ''', opts
+
+code "schema.member access", '''
+  x = schema.member
+  ''', '''
+  let x;
+  x = schema.member;
+  ''', opts
+
+# Inline one-liner form: `schema [:kind]; entry; entry; ...` up to the
+# end of the line. Semicolons become field separators via the same
+# TERMINATOR-split the indented body uses. Methods / computed / hooks /
+# transforms (anything with `->` / `~>` / `!>`) are rejected because
+# their bodies are ambiguous with subsequent `;`-separated entries.
+
+code "inline: three bare fields", '''
+  Addr = schema :shape; street?; city?; state?
+  ''', '''
+  let Addr;
+  Addr = __schema({kind: "shape", name: "Addr", entries: [{tag: "field", name: "street", modifiers: ["?"], typeName: "string", array: false}, {tag: "field", name: "city", modifiers: ["?"], typeName: "string", array: false}, {tag: "field", name: "state", modifiers: ["?"], typeName: "string", array: false}]});
+  ''', opts
+
+code "inline: fields with ranges", '''
+  Addr = schema :shape; street? ..200; city? ..100; state? ..2
+  ''', '''
+  let Addr;
+  Addr = __schema({kind: "shape", name: "Addr", entries: [{tag: "field", name: "street", modifiers: ["?"], typeName: "string", array: false, constraints: {max: 200}}, {tag: "field", name: "city", modifiers: ["?"], typeName: "string", array: false, constraints: {max: 100}}, {tag: "field", name: "state", modifiers: ["?"], typeName: "string", array: false, constraints: {max: 2}}]});
+  ''', opts
+
+code "inline: required + email type", '''
+  Login = schema; email! email; password! 8..100
+  ''', '''
+  let Login;
+  Login = __schema({kind: "input", name: "Login", entries: [{tag: "field", name: "email", modifiers: ["!"], typeName: "email", array: false}, {tag: "field", name: "password", modifiers: ["!"], typeName: "string", array: false, constraints: {min: 8, max: 100}}]});
+  ''', opts
+
+code "inline: enum members", '''
+  Role = schema :enum; :admin; :user; :guest
+  ''', '''
+  let Role;
+  Role = __schema({kind: "enum", name: "Role", entries: [{tag: "enum-member", name: "admin"}, {tag: "enum-member", name: "user"}, {tag: "enum-member", name: "guest"}]});
+  ''', opts
+
+code "inline: bare schema infers :enum from :symbol members", '''
+  Tier = schema; :free; :pro; :enterprise
+  ''', '''
+  let Tier;
+  Tier = __schema({kind: "enum", name: "Tier", entries: [{tag: "enum-member", name: "free"}, {tag: "enum-member", name: "pro"}, {tag: "enum-member", name: "enterprise"}]});
+  ''', opts
+
+code "inline: directive + field", '''
+  Payload = schema :input; @mixin Base; name!
+  Base = schema :mixin; id! uuid
+  ''', '''
+  let Base, Payload;
+  Payload = __schema({kind: "input", name: "Payload", entries: [{tag: "directive", name: "mixin", args: [{target: "Base"}]}, {tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}]});
+  Base = __schema({kind: "mixin", name: "Base", entries: [{tag: "field", name: "id", modifiers: ["!"], typeName: "uuid", array: false}]});
+  ''', opts
+
+code "inline: composes with schema.defaultMaxString pragma", '''
+  schema.defaultMaxString = 100
+  Form = schema :shape; name!; bio? text
+  ''', '''
+  let Form;
+  Form = __schema({kind: "shape", name: "Form", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false, constraints: {max: 100}}, {tag: "field", name: "bio", modifiers: ["?"], typeName: "text", array: false}]});
+  ''', opts
+
+code "inline: required implies min=1 with ..N shorthand", '''
+  X = schema :shape; nick! ..10
+  ''', '''
+  let X;
+  X = __schema({kind: "shape", name: "X", entries: [{tag: "field", name: "nick", modifiers: ["!"], typeName: "string", array: false, constraints: {min: 1, max: 10}}]});
+  ''', opts
+
+fail "inline: rejects `->` (method/hook/transform)", '''
+  X = schema :shape; name!; greet: -> @name
+  '''
+
+fail "inline: rejects `~>` (computed)", '''
+  X = schema :shape; name!; full: ~> @name
+  '''
+
+fail "inline: rejects `!>` (eager derived)", '''
+  X = schema :shape; name!; tag: !> @name.toUpperCase()
+  '''
+
+fail "inline: rejects inline transform `id! -> it.Id`", '''
+  X = schema :shape; id! -> it.Id
+  '''
+
+# Runtime parity — the inline form produces byte-equivalent descriptors,
+# so parse/safe/ok all behave exactly as the indented form.
+
+test "inline: .parse validates fields", '''
+  Addr = schema :shape; street? ..200; city? ..100; state? ..2
+  r = Addr.safe({street: "1 Main", city: "SF", state: "CA"})
+  [r.ok, r.value.street, r.value.city]
+  ''', [true, "1 Main", "SF"]
+
+test "inline: rejects field over max", '''
+  Form = schema; name! ..5
+  [Form.ok({name: "ok"}), Form.ok({name: "too long"})]
+  ''', [true, false]
+
+# Empty inline body — `X = schema :shape;` with nothing between `;`
+# and the newline is almost certainly a typo; reject loudly.
+
+fail "inline: empty body rejected with :kind", '''
+  X = schema :shape;
+  '''
+
+fail "inline: empty body rejected without :kind", '''
+  X = schema;
+  '''
+
+# Inline body termination — newline at depth 0 ends the inline span
+# and does NOT consume the next statement's tokens. This is the core
+# correctness property of the inline collector.
+
+code "inline: newline at depth 0 ends body, next statement survives", '''
+  Form = schema :shape; name!; email! email
+  y = 1
+  ''', '''
+  let Form, y;
+  Form = __schema({kind: "shape", name: "Form", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}, {tag: "field", name: "email", modifiers: ["!"], typeName: "email", array: false}]});
+  y = 1;
+  ''', opts
+
+code "inline: two inline schemas on consecutive lines", '''
+  A = schema :shape; a!
+  B = schema :shape; b!
+  ''', '''
+  let A, B;
+  A = __schema({kind: "shape", name: "A", entries: [{tag: "field", name: "a", modifiers: ["!"], typeName: "string", array: false}]});
+  B = __schema({kind: "shape", name: "B", entries: [{tag: "field", name: "b", modifiers: ["!"], typeName: "string", array: false}]});
+  ''', opts
+
+# Inline body with arrows — the rejection scan only fires at depth 0.
+# A literal-union or type-arg expression can contain arrow-like tokens
+# at nested depth (none exist in schema grammar today, but the guard
+# must stay scoped). This test pins the depth-scoping rule so a future
+# refactor can't accidentally tighten it.
+test "inline: literal-union + other fields parse in order", '''
+  Form = schema :shape; role! "admin" | "user" | "guest"; name!
+  r = Form.safe({role: "admin", name: "Alice"})
+  [r.ok, r.value.role, r.value.name]
+  ''', [true, "admin", "Alice"]
+
+# Inline directive entries — `@timestamps`, `@belongs_to X`, `@mixin M`
+# — all parse correctly inline alongside fields. Punctuation-heavy
+# grammars are the most likely place for the inline collector to get
+# semicolon-splitting wrong, so each form needs explicit coverage.
+
+code "inline: multiple directives + fields in one schema", '''
+  User = schema :model; name!; @timestamps; @belongs_to Org
+  Org = schema :model; name!
+  ''', '''
+  let Org, User;
+  User = __schema({kind: "model", name: "User", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}, {tag: "directive", name: "timestamps"}, {tag: "directive", name: "belongs_to", args: [{target: "Org"}]}]});
+  Org = __schema({kind: "model", name: "Org", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}]});
+  ''', opts
+
+# Trailing semicolon before newline — Rip's lexer collapses `;\n`
+# into a single `;`-valued TERMINATOR, so naive end-of-inline
+# detection via token value misses this case. The inline collector
+# uses source-row metadata to catch it and trims the trailing
+# TERMINATOR out of the splice span so the next statement isn't
+# accidentally pulled into the schema body.
+
+# Schema-mode-aware diagnostics
+
+fail "field with colon before type", '''
+  X = schema
+    name: string
+  '''
+
+fail "bare value binding in non-enum", '''
+  X = schema
+    answer: 42
+  '''
+
+fail "unknown schema kind", '''
+  X = schema :widget
+    name! string
+  '''
+
+# NOTE: `name!` with no type was previously an error. As of Phase 2 of
+# the grammar cleanup the type slot is optional and defaults to `string`.
+# A dedicated negative case is no longer applicable; see the
+# "default-string: …" runtime tests below for the positive coverage.
+
+fail "bad arrow after colon", '''
+  X = schema
+    greet: 42
+  '''
+
+code "multi-line method body (nested indent)", '''
+  X = schema :shape
+    name! string
+    greet: ->
+      @name
+  ''', '''
+  let X;
+  X = __schema({kind: "shape", name: "X", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}, {tag: "method", name: "greet", fn: (function() { return this.name; })}]});
+  ''', opts
+
+code "multi-line computed body", '''
+  X = schema :shape
+    name! string
+    full: ~>
+      @name + "!"
+  ''', '''
+  let X;
+  X = __schema({kind: "shape", name: "X", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}, {tag: "computed", name: "full", fn: (function() { return (this.name + "!"); })}]});
+  ''', opts
+
+code "field with constraints", '''
+  X = schema
+    password! string, 8..100
+  ''', '''
+  let X;
+  X = __schema({kind: "input", name: "X", entries: [{tag: "field", name: "password", modifiers: ["!"], typeName: "string", array: false, constraints: {min: 8, max: 100}}]});
+  ''', opts
+
+code "comments between entries", '''
+  X = schema :shape
+    # first field
+    name! string
+    # second
+    age? integer
+  ''', '''
+  let X;
+  X = __schema({kind: "shape", name: "X", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}, {tag: "field", name: "age", modifiers: ["?"], typeName: "integer", array: false}]});
+  ''', opts
+
+code ":admin 1 is a valued symbol member", '''
+  R = schema :enum
+    :admin 1
+  ''', '''
+  let R;
+  R = __schema({kind: "enum", name: "R", entries: [{tag: "enum-member", name: "admin", value: 1}]});
+  ''', opts
+
+fail "admin: 1 in :model is not allowed (bare value binding)", '''
+  X = schema :model
+    admin: 1
+  '''
+
+fail "valued enum with bare name: value form is rejected", '''
+  R = schema :enum
+    pending: 0
+  '''
+
+# ==============================================================================
+# Kind-capability enforcement (§3 matrix)
+# ==============================================================================
+
+fail ":input rejects methods", '''
+  X = schema :input
+    name! string
+    greet: -> "hi"
+  '''
+
+fail ":input rejects computed getters", '''
+  X = schema :input
+    name! string
+    upper: ~> @name
+  '''
+
+fail ":input rejects non-@mixin directives", '''
+  X = schema :input
+    name! string
+    @timestamps
+  '''
+
+fail ":shape rejects @timestamps", '''
+  X = schema :shape
+    name! string
+    @timestamps
+  '''
+
+fail ":shape rejects @belongs_to", '''
+  X = schema :shape
+    name! string
+    @belongs_to Other
+  '''
+
+code ":input + @mixin is allowed (field sharing)", '''
+  Base = schema :mixin
+    id! uuid
+  X = schema :input
+    name! string
+    @mixin Base
+  ''', '''
+  let Base, X;
+  Base = __schema({kind: "mixin", name: "Base", entries: [{tag: "field", name: "id", modifiers: ["!"], typeName: "uuid", array: false}]});
+  X = __schema({kind: "input", name: "X", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}, {tag: "directive", name: "mixin", args: [{target: "Base"}]}]});
+  ''', opts
+
+code ":shape + @mixin is allowed (field sharing)", '''
+  Stamps = schema :mixin
+    createdAt! datetime
+  Addr = schema :shape
+    street! string
+    @mixin Stamps
+  ''', '''
+  let Addr, Stamps;
+  Stamps = __schema({kind: "mixin", name: "Stamps", entries: [{tag: "field", name: "createdAt", modifiers: ["!"], typeName: "datetime", array: false}]});
+  Addr = __schema({kind: "shape", name: "Addr", entries: [{tag: "field", name: "street", modifiers: ["!"], typeName: "string", array: false}, {tag: "directive", name: "mixin", args: [{target: "Stamps"}]}]});
+  ''', opts
+
+# ==============================================================================
+# Remaining §9.1 coverage
+# ==============================================================================
+
+fail "field vs computed collision in :model", '''
+  User = schema :model
+    name! string
+    name: ~> @email
+  User.toSQL()
+'''
+
+fail "reserved instance method name collides as a field", '''
+  User = schema :model
+    save! string
+  User.toSQL()
+'''
+
+test "algebra on :input returns :shape (kind transition)", '''
+  Signup = schema
+    email!    email
+    password! string
+  Compact = Signup.pick("email")
+  [Compact.kind, [...Compact._normalize().fields.keys()]]
+''', ["shape", ["email"]]
+
+code "multi-line field constraints parse", '''
+  X = schema
+    password! string,
+      8..100
+  ''', '''
+  let X;
+  X = __schema({kind: "input", name: "X", entries: [{tag: "field", name: "password", modifiers: ["!"], typeName: "string", array: false, constraints: {min: 8, max: 100}}]});
+  ''', opts
+
+# ==============================================================================
+# Symbol-literal enum members and inferred :enum kind
+# ==============================================================================
+
+code ":symbol members work under explicit :enum", '''
+  R = schema :enum
+    :draft
+    :active
+    :done
+  ''', '''
+  let R;
+  R = __schema({kind: "enum", name: "R", entries: [{tag: "enum-member", name: "draft"}, {tag: "enum-member", name: "active"}, {tag: "enum-member", name: "done"}]});
+  ''', opts
+
+code "bare schema with :symbol body infers :enum kind", '''
+  Status = schema
+    :draft
+    :active
+  ''', '''
+  let Status;
+  Status = __schema({kind: "enum", name: "Status", entries: [{tag: "enum-member", name: "draft"}, {tag: "enum-member", name: "active"}]});
+  ''', opts
+
+code ":symbol with value drops the colon separator", '''
+  Tier = schema
+    :free 0
+    :pro  1
+  ''', '''
+  let Tier;
+  Tier = __schema({kind: "enum", name: "Tier", entries: [{tag: "enum-member", name: "free", value: 0}, {tag: "enum-member", name: "pro", value: 1}]});
+  ''', opts
+
+fail ":symbol with trailing-colon separator is rejected", '''
+  R = schema :enum
+    :free: 0
+  '''
+
+test ":symbol valued enum round-trip", '''
+  Status = schema
+    :draft     0
+    :active    1
+  [Status.parse("draft"), Status.parse(0), Status.parse("active"), Status.parse(1)]
+''', [0, 0, 1, 1]
+
+code "constraint :symbol compiles to its name string", '''
+  X = schema
+    status! string, [:draft]
+  ''', '''
+  let X;
+  X = __schema({kind: "input", name: "X", entries: [{tag: "field", name: "status", modifiers: ["!"], typeName: "string", array: false, constraints: {default: "draft"}}]});
+  ''', opts
+
+test ":symbol enum round-trips the member name", '''
+  Status = schema
+    :draft
+    :active
+  [Status.parse("draft"), Status.ok("draft"), Status.ok("unknown")]
+''', ["draft", true, false]
+
+fail "explicit :input prevents inference (:symbol is not a field)", '''
+  X = schema :input
+    :oops
+  '''
+
+# ==============================================================================
+# Runtime — .parse, .safe, .ok for :input, :shape, :enum
+# ==============================================================================
+
+test ":input .parse returns cleaned value", '''
+  Signup = schema
+    email!    email
+    password! string
+  out = Signup.parse({email: "a@b.c", password: "xyz"})
+  out.email
+  ''', "a@b.c"
+
+# Phase 2 — type slot is optional; bare modifier means `string`.
+# These forms were previously invalid ("Schema field X is missing a type").
+
+test "default-string: bare required modifier", '''
+  Form = schema
+    name!
+  out = Form.parse({name: "Alice"})
+  out.name
+  ''', "Alice"
+
+test "default-string: bare optional modifier accepts missing field", '''
+  Form = schema
+    name?
+  out = Form.parse({})
+  out.name
+  ''', undefined
+
+test "default-string: still validates the inferred string type", '''
+  Form = schema
+    name!
+  Form.ok({name: 42})
+  ''', false
+
+test "default-string: constraint immediately after modifier", '''
+  Form = schema
+    phone? 1..20
+  [Form.ok({phone: "555-0100"}), Form.ok({phone: ""}), Form.ok({})]
+  ''', [true, false, true]
+
+# Phase 3 — range constraint `min..max`.
+
+test "range: string length", '''
+  Form = schema
+    password! 8..16
+  [Form.ok({password: "hello123"}), Form.ok({password: "short"}), Form.ok({password: "x" + "y".repeat(20)})]
+  ''', [true, false, false]
+
+test "range: integer value", '''
+  Form = schema
+    age! integer, 0..120
+  [Form.ok({age: 30}), Form.ok({age: -1}), Form.ok({age: 121})]
+  ''', [true, false, false]
+
+test "range: exactly-N via n..n", '''
+  Form = schema
+    code! 4..4
+  [Form.ok({code: "abcd"}), Form.ok({code: "abc"}), Form.ok({code: "abcde"})]
+  ''', [true, false, false]
+
+test "range: combined with default in bracket", '''
+  Form = schema
+    role? 3..20, ["guest"]
+  out = Form.parse({})
+  [out.role, Form.ok({role: "admin"}), Form.ok({role: "ab"})]
+  ''', ["guest", true, false]
+
+fail "range: old bracket form [n, n] is rejected", '''
+  X = schema
+    name! string, [8, 100]
+  '''
+
+fail "range: old triple bracket form [n, n, n] is rejected", '''
+  X = schema
+    name! string, [8, 100, 42]
+  '''
+
+fail "range: reversed endpoints rejected", '''
+  X = schema
+    password! 100..8
+  '''
+
+fail "range: duplicate ranges rejected", '''
+  X = schema
+    name! 1..20, 5..10
+  '''
+
+# Open-ended range shorthands — `..N` means "at most N" (no min);
+# `N..` means "at least N" (no max). Either endpoint may be omitted,
+# but not both.
+
+code "open-ended: max-only (..N) on optional field has no implicit min", '''
+  X = schema
+    password? ..100
+  ''', '''
+  let X;
+  X = __schema({kind: "input", name: "X", entries: [{tag: "field", name: "password", modifiers: ["?"], typeName: "string", array: false, constraints: {max: 100}}]});
+  ''', opts
+
+code "open-ended: max-only (..N) on required field implies min=1", '''
+  X = schema
+    password! ..100
+  ''', '''
+  let X;
+  X = __schema({kind: "input", name: "X", entries: [{tag: "field", name: "password", modifiers: ["!"], typeName: "string", array: false, constraints: {min: 1, max: 100}}]});
+  ''', opts
+
+code "open-ended: min-only (N..) emits min without max", '''
+  X = schema
+    password! 8..
+  ''', '''
+  let X;
+  X = __schema({kind: "input", name: "X", entries: [{tag: "field", name: "password", modifiers: ["!"], typeName: "string", array: false, constraints: {min: 8}}]});
+  ''', opts
+
+test "open-ended max-only on ? allows empty string", '''
+  F = schema
+    name? ..5
+  [F.ok({name: "abc"}), F.ok({name: "abcdef"}), F.ok({name: ""})]
+  ''', [true, false, true]
+
+test "open-ended max-only on ! rejects empty string (implicit min=1)", '''
+  F = schema
+    name! ..5
+  [F.ok({name: "abc"}), F.ok({name: "abcdef"}), F.ok({name: ""})]
+  ''', [true, false, false]
+
+test "open-ended min-only validates lower bound", '''
+  F = schema
+    name! 3..
+  [F.ok({name: "ab"}), F.ok({name: "abc"}), F.ok({name: "x".repeat(200)})]
+  ''', [false, true, true]
+
+test "open-ended range on integer field", '''
+  F = schema
+    age! integer, 0..
+  [F.ok({age: -1}), F.ok({age: 0}), F.ok({age: 99})]
+  ''', [false, true, true]
+
+test "open-ended range composes with pragma (min from user, max from pragma)", '''
+  schema.defaultMaxString = 50
+  F = schema
+    name! 3..
+  [F.ok({name: "ab"}), F.ok({name: "abc"}), F.ok({name: "x".repeat(60)})]
+  ''', [false, true, false]
+
+test "open-ended range with explicit max overrides pragma", '''
+  schema.defaultMaxString = 50
+  F = schema
+    name! ..10
+  [F.ok({name: "x".repeat(5)}), F.ok({name: "x".repeat(20)})]
+  ''', [true, false]
+
+# Negative endpoints on open-ended ranges — `isRangeConstraintTokens`
+# now treats `-` as part of an optional endpoint, so these must parse.
+# Reversed check fires only when both endpoints are present.
+
+code "open-ended: max-only negative (..-1)", '''
+  X = schema :shape
+    signed? integer, ..-1
+  ''', '''
+  let X;
+  X = __schema({kind: "shape", name: "X", entries: [{tag: "field", name: "signed", modifiers: ["?"], typeName: "integer", array: false, constraints: {max: -1}}]});
+  ''', opts
+
+fail "post-merge consistency catches sugar-induced min > max", '''
+  X = schema
+    n! ..0
+  '''
+
+fail "post-merge consistency catches sugar vs user-negative max", '''
+  X = schema
+    n! ..-1
+  '''
+
+code "open-ended: min-only negative (-5..)", '''
+  X = schema :shape
+    signed? integer, -5..
+  ''', '''
+  let X;
+  X = __schema({kind: "shape", name: "X", entries: [{tag: "field", name: "signed", modifiers: ["?"], typeName: "integer", array: false, constraints: {min: -5}}]});
+  ''', opts
+
+code "bounded: negative-to-negative range (-5..-1)", '''
+  X = schema :shape
+    signed! integer, -5..-1
+  ''', '''
+  let X;
+  X = __schema({kind: "shape", name: "X", entries: [{tag: "field", name: "signed", modifiers: ["!"], typeName: "integer", array: false, constraints: {min: -5, max: -1}}]});
+  ''', opts
+
+# Emitted-shape asserts for open-ended forms — if a future cleanup
+# accidentally reintroduces `undefined` into the constraint object,
+# these tests fail rather than silently passing on runtime behavior.
+
+code "emit-shape: ..N omits min key entirely", '''
+  X = schema :shape
+    name? ..20
+  ''', '''
+  let X;
+  X = __schema({kind: "shape", name: "X", entries: [{tag: "field", name: "name", modifiers: ["?"], typeName: "string", array: false, constraints: {max: 20}}]});
+  ''', opts
+
+code "emit-shape: N.. omits max key entirely", '''
+  X = schema :shape
+    name? 5..
+  ''', '''
+  let X;
+  X = __schema({kind: "shape", name: "X", entries: [{tag: "field", name: "name", modifiers: ["?"], typeName: "string", array: false, constraints: {min: 5}}]});
+  ''', opts
+
+# Reversed-range check must NOT fire on open-ended forms — reversed
+# detection requires both endpoints to exist.
+
+fail "reversed check fires on closed range", '''
+  X = schema
+    n! 10..5
+  '''
+
+code "reversed check does not fire on open-ended ..N", '''
+  X = schema
+    n? ..5
+  ''', '''
+  let X;
+  X = __schema({kind: "input", name: "X", entries: [{tag: "field", name: "n", modifiers: ["?"], typeName: "string", array: false, constraints: {max: 5}}]});
+  ''', opts
+
+code "reversed check does not fire on open-ended N..", '''
+  X = schema
+    n? 5..
+  ''', '''
+  let X;
+  X = __schema({kind: "input", name: "X", entries: [{tag: "field", name: "n", modifiers: ["?"], typeName: "string", array: false, constraints: {min: 5}}]});
+  ''', opts
+
+# Pragma vs user-declared max — user's explicit `..N` always wins.
+
+test "pragma does not override explicit ..N on optional field", '''
+  schema.defaultMaxString = 100
+  F = schema
+    name? ..10
+  [F.ok({name: "ok"}), F.ok({name: "way-way-way-too-long"})]
+  ''', [true, false]
+
+# Required-implies-min shorthand — `!` + `..N` auto-sets min=1 so
+# "required AND non-empty" is the default reading. Explicit mins
+# (including explicit `0..N`) override this; bare `!` without range
+# stays unchanged (empty string remains acceptable unless bounded).
+
+code "! + ..N implies min=1", '''
+  X = schema
+    name! ..20
+  ''', '''
+  let X;
+  X = __schema({kind: "input", name: "X", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false, constraints: {min: 1, max: 20}}]});
+  ''', opts
+
+code "? + ..N has no implicit min", '''
+  X = schema
+    name? ..20
+  ''', '''
+  let X;
+  X = __schema({kind: "input", name: "X", entries: [{tag: "field", name: "name", modifiers: ["?"], typeName: "string", array: false, constraints: {max: 20}}]});
+  ''', opts
+
+code "bare modifier (no ! no ?) has no implicit min", '''
+  X = schema :shape
+    name ..20
+  ''', '''
+  let X;
+  X = __schema({kind: "shape", name: "X", entries: [{tag: "field", name: "name", modifiers: [], typeName: "string", array: false, constraints: {max: 20}}]});
+  ''', opts
+
+code "! + N..N (explicit min) does not override", '''
+  X = schema
+    code! 4..8
+  ''', '''
+  let X;
+  X = __schema({kind: "input", name: "X", entries: [{tag: "field", name: "code", modifiers: ["!"], typeName: "string", array: false, constraints: {min: 4, max: 8}}]});
+  ''', opts
+
+code "! + N.. (explicit min, open max) does not trigger implicit", '''
+  X = schema
+    code! 4..
+  ''', '''
+  let X;
+  X = __schema({kind: "input", name: "X", entries: [{tag: "field", name: "code", modifiers: ["!"], typeName: "string", array: false, constraints: {min: 4}}]});
+  ''', opts
+
+code "! bare (no range) leaves min unset — existing semantics preserved", '''
+  X = schema
+    name!
+  ''', '''
+  let X;
+  X = __schema({kind: "input", name: "X", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}]});
+  ''', opts
+
+test "! bare still accepts empty string (min unchanged)", '''
+  F = schema
+    name!
+  [F.ok({name: ""}), F.ok({name: "x"}), F.ok({})]
+  ''', [true, true, false]
+
+test "! + pragma only (no ..N) does not imply min=1", '''
+  schema.defaultMaxString = 50
+  F = schema
+    name!
+  [F.ok({name: ""}), F.ok({name: "x".repeat(60)})]
+  ''', [true, false]
+
+# Phase 4 — bare regex `/pattern/` (no brackets).
+
+test "regex: bare regex validates pattern", '''
+  Form = schema
+    zip! /^\\d{5}$/
+  [Form.ok({zip: "94301"}), Form.ok({zip: "abcde"}), Form.ok({zip: "1234"})]
+  ''', [true, false, false]
+
+test "regex: combined with range", '''
+  Form = schema
+    code! 4..10, /^[A-Z]+$/
+  [Form.ok({code: "HELLO"}), Form.ok({code: "abc"}), Form.ok({code: "AB"})]
+  ''', [true, false, false]
+
+fail "regex: old bracket form [/.../] is rejected", '''
+  X = schema
+    zip! string, [/^\\d{5}$/]
+  '''
+
+fail "regex: duplicate regex rejected", '''
+  X = schema
+    zip! /^\\d+$/, /^[a-z]+$/
+  '''
+
+# Phase 5 — string-literal unions in the type slot.
+
+test "literal union: accepts declared members", '''
+  Form = schema
+    sex! "M" | "F" | "U"
+  [Form.ok({sex: "M"}), Form.ok({sex: "F"}), Form.ok({sex: "U"})]
+  ''', [true, true, true]
+
+test "literal union: rejects non-members", '''
+  Form = schema
+    sex! "M" | "F" | "U"
+  [Form.ok({sex: "X"}), Form.ok({sex: "m"}), Form.ok({sex: 1})]
+  ''', [false, false, false]
+
+test "literal union: works with default", '''
+  Form = schema
+    sex? "M" | "F" | "U", ["U"]
+  out = Form.parse({})
+  out.sex
+  ''', "U"
+
+test "literal union: SchemaError lists allowed members", '''
+  Form = schema
+    sex! "M" | "F" | "U"
+  r = Form.safe({sex: "X"})
+  [r.ok, r.errors[0].error, r.errors[0].message.includes('"M"'), r.errors[0].message.includes('"U"')]
+  ''', [false, 'enum', true, true]
+
+fail "literal union: rejects mixing with identifier type", '''
+  X = schema
+    x! "a" | "b" | string
+  '''
+
+# A single literal is a CONSTANT field — `kind! "click"` — the building
+# block of discriminated unions (each :union constituent tags itself
+# this way). Was rejected pre-union; now first-class.
+test "literal union: single literal is a constant field", '''
+  X = schema
+    x! "only"
+  [X.ok({x: "only"}), X.ok({x: "other"})]
+''', [true, false]
+
+fail "literal union: rejects array suffix", '''
+  X = schema
+    x! "a" | "b" []
+  '''
+
+# Phase 6 — inline field transforms (`-> fn(it)`).
+
+test "transform: remaps input field name", '''
+  X = schema
+    id! -> it.Id
+  out = X.parse({Id: "abc"})
+  out.id
+  ''', "abc"
+
+test "transform: derives from other raw keys", '''
+  Y = schema
+    slug! -> "#{it.FirstName}-#{it.LastName}".toLowerCase()
+  out = Y.parse({FirstName: "Alice", LastName: "Smith"})
+  out.slug
+  ''', "alice-smith"
+
+test "transform: coerces wire string to Date via constructor", '''
+  Order = schema :shape
+    shippedAt? datetime, -> if it.shippedAt then new Date(it.shippedAt) else null
+  out = Order.parse({shippedAt: "2026-04-18T10:00:00Z"})
+  out.shippedAt instanceof Date
+  ''', true
+
+# Date coercion only accepts ISO-shaped strings — `new Date(v)` is otherwise
+# lax (`new Date("5")` is a valid Date), which would let junk pass a date field.
+test "date coercion: ISO string coerces to Date; non-ISO junk is rejected", '''
+  E = schema :shape
+    at! datetime
+  [E.safe({at: "2024-03-15T10:30:00Z"}).ok, E.parse({at: "2024-03-15T10:30:00Z"}).at instanceof Date, E.safe({at: "5"}).ok, E.safe({at: "nope"}).ok]
+  ''', [true, true, false, false]
+
+# Array-of-date fields coerce element-wise.
+test "date coercion: array-of-date coerces each ISO element", '''
+  E = schema :shape
+    days! date[]
+  out = E.parse({days: ["2024-01-01", "2024-02-02"]})
+  [out.days[0] instanceof Date, out.days[1] instanceof Date]
+  ''', [true, true]
+
+test "transform: combined with default for missing input", '''
+  X = schema
+    role? ["guest"], -> it.Role
+  out = X.parse({})
+  out.role
+  ''', "guest"
+
+test "transform: output validated against declared type", '''
+  X = schema
+    n! integer, -> it.count
+  [X.ok({count: 5}), X.ok({count: "five"})]
+  ''', [true, false]
+
+test "transform: thrown error surfaces as issue", '''
+  X = schema
+    x! -> throw new Error("bad")
+  r = X.safe({})
+  [r.ok, r.errors[0].error, r.errors[0].message]
+  ''', [false, 'transform', 'bad']
+
+test "transform: survives algebra (.pick preserves transform)", '''
+  User = schema :shape
+    email! email, -> it.email.toLowerCase()
+    name! -> it.Name
+  Slim = User.pick("email", "name")
+  out = Slim.parse({email: "ALICE@X.com", Name: "Alice"})
+  [out.email, out.name]
+  ''', ["alice@x.com", "Alice"]
+
+fail "transform: must be the last element on the line", '''
+  X = schema
+    x! -> it.foo, [1, 5]
+  '''
+
+# Comma-less `-> transform` is ONLY legal when nothing precedes it on
+# the line (bare transform on the modifier alone). When a type,
+# constraint, default, regex, or attrs is present, the comma before
+# '->' is required as a structural boundary between the field
+# declaration and the transform.
+
+test "transform: comma-less bare form (no type, no constraints)", '''
+  X = schema
+    id! -> it.Id
+  X.parse({Id: "abc"}).id
+  ''', "abc"
+
+test "transform: comma required after type", '''
+  X = schema
+    email! email, -> it.email.toLowerCase()
+  X.parse({email: "HELLO@X.COM"}).email
+  ''', "hello@x.com"
+
+test "transform: comma required after range", '''
+  X = schema
+    password! 8..100, -> it.password.trim()
+  X.parse({password: "  secretpass123  "}).password
+  ''', "secretpass123"
+
+fail "transform: missing comma after type is rejected", '''
+  X = schema
+    email! email -> it.email.toLowerCase()
+  '''
+
+fail "transform: missing comma after range is rejected", '''
+  X = schema
+    password! 8..100 -> it.password.trim()
+  '''
+
+fail "transform: missing comma after regex is rejected", '''
+  X = schema
+    code! /^[A-Z]+$/ -> it.Code.toUpperCase()
+  '''
+
+fail "transform: missing comma after default is rejected", '''
+  X = schema
+    role? ["guest"] -> it.Role
+  '''
+
+# Phase 7 — eager derived fields `!>`.
+
+test "eager derived: computed at parse, stored as own property", '''
+  X = schema :shape
+    firstName!
+    lastName!
+    fullName: !> "#{@firstName} #{@lastName}"
+  out = X.parse({firstName: "Alice", lastName: "Smith"})
+  [out.fullName, Object.keys(out).includes("fullName")]
+  ''', ["Alice Smith", true]
+
+test "eager derived: does NOT re-run on field mutation (stale by design)", '''
+  X = schema :shape
+    name!
+    tag: !> @name.toLowerCase()
+  out = X.parse({name: "Alice"})
+  out.name = "Bob"
+  out.tag
+  ''', "alice"
+
+test "eager derived: different from ~> (lazy getter)", '''
+  X = schema :shape
+    name!
+    lazy: ~> @name.toLowerCase()
+    eager: !> @name.toLowerCase()
+  out = X.parse({name: "Alice"})
+  before = [out.lazy, out.eager]
+  out.name = "Bob"
+  after = [out.lazy, out.eager]
+  [before, after]
+  ''', [["alice", "alice"], ["bob", "alice"]]
+
+test "eager derived: runs in declaration order (can read earlier !>)", '''
+  X = schema :shape
+    first!
+    last!
+    full: !> "#{@first} #{@last}"
+    slug: !> @full.toLowerCase().replace(/\\s/g, "-")
+  out = X.parse({first: "Alice", last: "Smith"})
+  [out.full, out.slug]
+  ''', ["Alice Smith", "alice-smith"]
+
+test "eager derived: collides with field name (runtime error)", '''
+  X = schema :shape
+    name!
+    name: !> "x"
+  err = null
+  try
+    X.parse({name: "hi"})
+  catch e
+    err = e
+  [err?.name, err?.issues?[0]?.error]
+  ''', ["SchemaError", "collision"]
+
+# ------------------------------------------------------------------------------
+# Phase 8 — refinements (`@ensure "msg", (fn)` inline or `@ensure [...]` array).
+# Schema-level cross-field predicates. Run after field validation, before
+# eager-derived. Skipped on _hydrate. Dropped by all algebra.
+
+test "ensure: inline form passes when predicate returns truthy", '''
+  X = schema :shape
+    name! 1..50
+    email! email
+    @ensure "name and email must differ", (u) -> u.name isnt u.email
+  out = X.parse({name: "Alice", email: "a@b.c"})
+  out.name
+  ''', "Alice"
+
+test "ensure: inline form fails when predicate returns false", '''
+  X = schema :shape
+    name! 1..50
+    email! email
+    @ensure "name and email must differ", (u) -> u.name isnt u.email
+  err = null
+  try
+    X.parse({name: "a@b.c", email: "a@b.c"})
+  catch e
+    err = e
+  [err?.name, err?.issues?[0]?.error, err?.issues?[0]?.field, err?.issues?[0]?.message]
+  ''', ["SchemaError", "ensure", "", "name and email must differ"]
+
+test "ensure: falsy values (null, 0, '') all fail", '''
+  X = schema :shape
+    name!
+    @ensure "always fails", (u) -> null
+  r = X.safe({name: "x"})
+  [r.ok, r.errors[0].error, r.errors[0].message]
+  ''', [false, "ensure", "always fails"]
+
+test "ensure: truthy non-boolean (object, array) pass", '''
+  X = schema :shape
+    name!
+    @ensure "never", (u) -> {any: "truthy"}
+  r = X.safe({name: "x"})
+  [r.ok, r.errors]
+  ''', [true, null]
+
+test "ensure: thrown exception becomes ensure issue with user message", '''
+  X = schema :shape
+    name!
+    @ensure "custom msg", (u) -> throw new Error("boom")
+  r = X.safe({name: "x"})
+  [r.ok, r.errors[0].error, r.errors[0].message]
+  ''', [false, "ensure", "custom msg"]
+
+test "ensure: array form — multiple refinements collect all issues", '''
+  X = schema :shape
+    a!
+    b!
+    @ensure [
+      "a bad", (u) -> u.a is "ok"
+      "b bad", (u) -> u.b is "ok"
+    ]
+  r = X.safe({a: "x", b: "y"})
+  [r.ok, r.errors.length, r.errors[0].message, r.errors[1].message]
+  ''', [false, 2, "a bad", "b bad"]
+
+test "ensure: array form — declaration order preserved", '''
+  X = schema :shape
+    x!
+    @ensure [
+      "first",  (u) -> false
+      "second", (u) -> false
+      "third",  (u) -> false
+    ]
+  r = X.safe({x: "y"})
+  r.errors.map((e) -> e.message)
+  ''', ["first", "second", "third"]
+
+test "ensure: multiple inline @ensure lines also collect all issues", '''
+  X = schema :shape
+    a!
+    b!
+    @ensure "a bad", (u) -> u.a is "ok"
+    @ensure "b bad", (u) -> u.b is "ok"
+  r = X.safe({a: "x", b: "y"})
+  [r.ok, r.errors.length, r.errors[0].message, r.errors[1].message]
+  ''', [false, 2, "a bad", "b bad"]
+
+test "ensure: mixed inline and array forms in same schema", '''
+  X = schema :shape
+    a!
+    b!
+    c!
+    @ensure "inline rule", (u) -> u.a is "ok"
+    @ensure [
+      "array rule 1", (u) -> u.b is "ok"
+      "array rule 2", (u) -> u.c is "ok"
+    ]
+  r = X.safe({a: "x", b: "y", c: "z"})
+  r.errors.map((e) -> e.message)
+  ''', ["inline rule", "array rule 1", "array rule 2"]
+
+test "ensure: short-circuits when field validation fails", '''
+  X = schema :shape
+    name! 1..50
+    @ensure "never seen", (u) -> throw new Error("should not run")
+  r = X.safe({})
+  [r.ok, r.errors[0].error]
+  ''', [false, "required"]
+
+test "ensure: sees defaulted values", '''
+  X = schema :shape
+    role! "admin" | "user", ["user"]
+    @ensure "must be user", (u) -> u.role is "user"
+  r = X.safe({})
+  [r.ok, r.errors]
+  ''', [true, null]
+
+test "ensure: sees transformed values", '''
+  X = schema :shape
+    id!, -> String(it.Id).toUpperCase()
+    @ensure "must start with X", (u) -> u.id.startsWith("X")
+  r = X.safe({Id: "x123"})
+  [r.ok, r.value?.id]
+  ''', [true, "X123"]
+
+test "ensure: runs BEFORE eager-derived fields", '''
+  X = schema :shape
+    a!
+    @ensure "a bad", (u) -> u.a is "ok"
+    upper: !> @a.toUpperCase()
+  r = X.safe({a: "bad"})
+  [r.ok, r.errors[0].error, r.errors[0].message]
+  ''', [false, "ensure", "a bad"]
+
+test "ensure: .ok() runs refinements", '''
+  X = schema :shape
+    name!
+    @ensure "must be ok", (u) -> u.name is "ok"
+  [X.ok({name: "ok"}), X.ok({name: "bad"})]
+  ''', [true, false]
+
+test "ensure: multi-line fn body in array form", '''
+  X = schema :shape
+    name!
+    @ensure [
+      "not reserved", (u) ->
+        normalized = u.name.toLowerCase()
+        normalized isnt "reserved"
+    ]
+  [X.ok({name: "Alice"}), X.ok({name: "Reserved"})]
+  ''', [true, false]
+
+fail "ensure: rejected on :enum", '''
+  X = schema :enum
+    :a
+    :b
+    @ensure "nope", (u) -> true
+  '''
+
+fail "ensure: rejected on :mixin", '''
+  X = schema :mixin
+    name!
+    @ensure "nope", (u) -> true
+  '''
+
+test "ensure: dropped on .pick", '''
+  X = schema :shape
+    a!
+    b!
+    @ensure "never", (u) -> false
+  Picked = X.pick("a")
+  r = Picked.safe({a: "x"})
+  [r.ok, r.errors]
+  ''', [true, null]
+
+test "ensure: dropped on .omit", '''
+  X = schema :shape
+    a!
+    b!
+    @ensure "never", (u) -> false
+  Trimmed = X.omit("b")
+  r = Trimmed.safe({a: "x"})
+  [r.ok, r.errors]
+  ''', [true, null]
+
+test "ensure: dropped on .partial", '''
+  X = schema :shape
+    a!
+    @ensure "never", (u) -> false
+  P = X.partial()
+  r = P.safe({})
+  [r.ok, r.errors]
+  ''', [true, null]
+
+test "ensure: dropped on .extend", '''
+  A = schema :shape
+    a!
+    @ensure "never", (u) -> false
+  B = schema :shape
+    b!
+  M = A.extend(B)
+  r = M.safe({a: "x", b: "y"})
+  [r.ok, r.errors]
+  ''', [true, null]
+
+test "ensure: works on :input schemas", '''
+  I = schema :input
+    pw!
+    pw2!
+    @ensure "passwords must match", (u) -> u.pw is u.pw2
+  r = I.safe({pw: "a", pw2: "b"})
+  [r.ok, r.errors[0].message]
+  ''', [false, "passwords must match"]
+
+test "ensure: hydrate skips refinements (trusted data)", '''
+  X = schema :model
+    name!
+    @ensure "never", (u) -> false
+  inst = X._hydrate([{name: "name"}], ["Alice"])
+  [inst.name, inst instanceof X._getClass()]
+  ''', ["Alice", true]
+
+# ------------------------------------------------------------------------------
+
+test ":input .ok returns boolean true on valid", '''
+  Signup = schema
+    email! email
+  Signup.ok({email: "a@b.c"})
+  ''', true
+
+test ":input .ok returns boolean false on invalid", '''
+  Signup = schema
+    email! email
+  Signup.ok({email: "nope"})
+  ''', false
+
+test ":input .safe returns {ok, value, errors: null} on success", '''
+  Signup = schema
+    email! email
+  r = Signup.safe({email: "a@b.c"})
+  [r.ok, r.errors]
+  ''', [true, null]
+
+test ":input .safe returns {ok: false, value: null, errors: [...]} on failure", '''
+  Signup = schema
+    email! email
+  r = Signup.safe({email: "nope"})
+  [r.ok, r.value, r.errors[0].field, r.errors[0].error]
+  ''', [false, null, 'email', 'type']
+
+test "zip type accepts US 5-digit form", '''
+  Form = schema
+    zip! zip
+  Form.ok({zip: "94301"})
+  ''', true
+
+test "zip type accepts ZIP+4 form", '''
+  Form = schema
+    zip! zip
+  Form.ok({zip: "94301-1234"})
+  ''', true
+
+test "zip type rejects non-matching strings", '''
+  Form = schema
+    zip! zip
+  [Form.ok({zip: "abcde"}), Form.ok({zip: "1234"}), Form.ok({zip: "94301-12"})]
+  ''', [false, false, false]
+
+test "required field missing is an error", '''
+  Signup = schema
+    email! email
+  r = Signup.safe({})
+  [r.ok, r.errors[0].error]
+  ''', [false, 'required']
+
+test "optional field missing is fine", '''
+  X = schema
+    bio? text
+  X.ok({})
+  ''', true
+
+test ":enum bare members", '''
+  Role = schema
+    :admin
+    :user
+  [Role.parse("admin"), Role.ok("admin"), Role.ok("other")]
+  ''', ["admin", true, false]
+
+test ":enum valued members return value", '''
+  Status = schema :enum
+    :pending 0
+    :active  1
+  [Status.parse("pending"), Status.parse(1), Status.ok("active"), Status.ok(99)]
+  ''', [0, 1, true, false]
+
+test ":shape .parse returns instance with getters and methods", '''
+  Address = schema :shape
+    street! string
+    city! string
+    full: ~> "#{@street}, #{@city}"
+    normalize: ->
+      @city = @city.trim()
+      @
+  a = Address.parse({street: "X", city: " Y "})
+  before = a.full
+  a.normalize()
+  [before, a.city, a.full]
+  ''', ["X,  Y ", "Y", "X, Y"]
+
+test ":shape .parse throws SchemaError on invalid", '''
+  X = schema :shape
+    name! string
+  try
+    X.parse({name: 42})
+    "no-throw"
+  catch e
+    [e.name, e.schemaKind, e.issues[0].field]
+  ''', ["SchemaError", "shape", "name"]
+
+test ".parse! (dammit) works for sync validators", '''
+  X = schema
+    name! string
+  (-> (X.parse! {name: "ok"}).name)()
+  ''', "ok"
+
+test ":shape generated class instance has enumerable own fields only", '''
+  X = schema :shape
+    name! string
+    greet: -> @name
+    full: ~> @name + "!"
+  a = X.parse({name: "x"})
+  Object.keys(a)
+  ''', ["name"]
+
+test ":mixin is not instantiable", '''
+  M = schema :mixin
+    createdAt! datetime
+  try
+    M.parse({})
+    "no-throw"
+  catch e
+    "threw"
+  ''', "threw"
+
+test ":input field array validation", '''
+  X = schema
+    tags! string[]
+  r = X.safe({tags: ["a", 42, "c"]})
+  [r.ok, r.errors[0].error]
+  ''', [false, 'type']
+
+# ==============================================================================
+# File-level `schema.<key>` pragmas
+# ==============================================================================
+#
+# `schema.defaultMaxString = N` fills in a `max` constraint on every
+# VARCHAR-like field (string, email, url, phone, zip, or bare) in
+# subsequent schemas when the user wrote no explicit narrowing of their
+# own. `text` is the opt-out for long-form content and is never capped.
+
+code "pragma caps bare and explicit string types", '''
+  schema.defaultMaxString = 100
+  Form = schema
+    name!
+    email! email
+    url? url
+  ''', '''
+  let Form;
+  Form = __schema({kind: "input", name: "Form", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false, constraints: {max: 100}}, {tag: "field", name: "email", modifiers: ["!"], typeName: "email", array: false, constraints: {max: 100}}, {tag: "field", name: "url", modifiers: ["?"], typeName: "url", array: false, constraints: {max: 100}}]});
+  ''', opts
+
+code "pragma does not touch text type (long-form opt-out)", '''
+  schema.defaultMaxString = 100
+  Post = schema
+    title!
+    body? text
+  ''', '''
+  let Post;
+  Post = __schema({kind: "input", name: "Post", entries: [{tag: "field", name: "title", modifiers: ["!"], typeName: "string", array: false, constraints: {max: 100}}, {tag: "field", name: "body", modifiers: ["?"], typeName: "text", array: false}]});
+  ''', opts
+
+code "pragma does not touch explicit range", '''
+  schema.defaultMaxString = 100
+  Form = schema
+    password! 8..200
+  ''', '''
+  let Form;
+  Form = __schema({kind: "input", name: "Form", entries: [{tag: "field", name: "password", modifiers: ["!"], typeName: "string", array: false, constraints: {min: 8, max: 200}}]});
+  ''', opts
+
+code "pragma does not touch regex-constrained field", '''
+  schema.defaultMaxString = 100
+  Form = schema
+    zip! /^\\d{5}$/
+  ''', '''
+  let Form;
+  Form = __schema({kind: "input", name: "Form", entries: [{tag: "field", name: "zip", modifiers: ["!"], typeName: "string", array: false, constraints: {regex: /^\\d{5}$/}}]});
+  ''', opts
+
+code "pragma does not touch literal-union field", '''
+  schema.defaultMaxString = 100
+  Form = schema
+    role? "admin" | "user"
+  ''', '''
+  let Form;
+  Form = __schema({kind: "input", name: "Form", entries: [{tag: "field", name: "role", modifiers: ["?"], typeName: "literal-union", array: false, literals: ["admin","user"]}]});
+  ''', opts
+
+code "pragma does not touch integer/number/boolean/date types", '''
+  schema.defaultMaxString = 100
+  Form = schema
+    age! integer
+    amount! number
+    active? boolean
+    bornOn? date
+  ''', '''
+  let Form;
+  Form = __schema({kind: "input", name: "Form", entries: [{tag: "field", name: "age", modifiers: ["!"], typeName: "integer", array: false}, {tag: "field", name: "amount", modifiers: ["!"], typeName: "number", array: false}, {tag: "field", name: "active", modifiers: ["?"], typeName: "boolean", array: false}, {tag: "field", name: "bornOn", modifiers: ["?"], typeName: "date", array: false}]});
+  ''', opts
+
+code "pragma applies to later schemas only (snapshotted per decl)", '''
+  Before = schema
+    name!
+  schema.defaultMaxString = 100
+  After = schema
+    name!
+  ''', '''
+  let After, Before;
+  Before = __schema({kind: "input", name: "Before", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}]});
+  After = __schema({kind: "input", name: "After", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false, constraints: {max: 100}}]});
+  ''', opts
+
+code "pragma = 0 disables previously-set default", '''
+  schema.defaultMaxString = 100
+  Capped = schema
+    name!
+  schema.defaultMaxString = 0
+  Open = schema
+    name!
+  ''', '''
+  let Capped, Open;
+  Capped = __schema({kind: "input", name: "Capped", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false, constraints: {max: 100}}]});
+  Open = __schema({kind: "input", name: "Open", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}]});
+  ''', opts
+
+code "pragma composes with user-declared bracket default", '''
+  schema.defaultMaxString = 100
+  Form = schema
+    role? ["guest"]
+  ''', '''
+  let Form;
+  Form = __schema({kind: "input", name: "Form", entries: [{tag: "field", name: "role", modifiers: ["?"], typeName: "string", array: false, constraints: {max: 100, default: "guest"}}]});
+  ''', opts
+
+fail "pragma rejects unknown key", '''
+  schema.defaultMacString = 100
+  X = schema
+    name!
+  '''
+
+fail "pragma rejects non-number value", '''
+  schema.defaultMaxString = "100"
+  X = schema
+    name!
+  '''
+
+fail "pragma rejects negative value", '''
+  schema.defaultMaxString = -5
+  X = schema
+    name!
+  '''
+
+fail "pragma rejects decimal value", '''
+  schema.defaultMaxString = 1.5
+  X = schema
+    name!
+  '''
+
+# Top-level scope enforcement — file-level pragmas must not appear
+# inside function / class / block bodies. Left alone, a nested pragma
+# would silently leak into module-scope schemas declared after the
+# block, which is confusing at best and wrong at worst.
+
+fail "pragma rejected inside function body", '''
+  foo = ->
+    schema.defaultMaxString = 10
+  Y = schema
+    name!
+  '''
+
+fail "pragma rejected inside if block", '''
+  if true
+    schema.defaultMaxString = 10
+  Y = schema
+    name!
+  '''
+
+fail "pragma rejected inside for loop body", '''
+  for i in [1..3]
+    schema.defaultMaxString = 10
+  Y = schema
+    name!
+  '''
+
+fail "pragma rejected inside class body", '''
+  class Foo
+    schema.defaultMaxString = 10
+  Y = schema
+    name!
+  '''
+
+# Depth-recovery regression tests — after collapsing a nested schema
+# (indented or inline), the outer scanner's depth must return to 0 so
+# subsequent top-level pragmas are accepted. Catches a bug where the
+# inline collector was eating the surrounding block's OUTDENT.
+
+code "pragma accepted after nested INDENTED schema ends", '''
+  if cond
+    X = schema
+      name!
+  schema.defaultMaxString = 10
+  Y = schema
+    name!
+  ''', '''
+  let X, Y;
+  if (cond) {
+    X = __schema({kind: "input", name: "X", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}]});
+  }
+  Y = __schema({kind: "input", name: "Y", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false, constraints: {max: 10}}]});
+  ''', opts
+
+code "pragma accepted after nested INLINE schema ends", '''
+  if cond
+    X = schema :shape; name!
+  schema.defaultMaxString = 10
+  Y = schema
+    name!
+  ''', '''
+  let X, Y;
+  if (cond) {
+    X = __schema({kind: "shape", name: "X", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}]});
+  }
+  Y = __schema({kind: "input", name: "Y", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false, constraints: {max: 10}}]});
+  ''', opts
+
+# VARCHAR coverage — every type in VARCHAR_TYPES gets the cap.
+
+code "pragma caps phone", '''
+  schema.defaultMaxString = 30
+  X = schema
+    p! phone
+  ''', '''
+  let X;
+  X = __schema({kind: "input", name: "X", entries: [{tag: "field", name: "p", modifiers: ["!"], typeName: "phone", array: false, constraints: {max: 30}}]});
+  ''', opts
+
+code "pragma caps zip", '''
+  schema.defaultMaxString = 30
+  X = schema
+    z! zip
+  ''', '''
+  let X;
+  X = __schema({kind: "input", name: "X", entries: [{tag: "field", name: "z", modifiers: ["!"], typeName: "zip", array: false, constraints: {max: 30}}]});
+  ''', opts
+
+code "pragma does NOT cap uuid (fixed-format)", '''
+  schema.defaultMaxString = 30
+  X = schema
+    id! uuid
+  ''', '''
+  let X;
+  X = __schema({kind: "input", name: "X", entries: [{tag: "field", name: "id", modifiers: ["!"], typeName: "uuid", array: false}]});
+  ''', opts
+
+code "multiple pragma updates are snapshotted per declaration", '''
+  schema.defaultMaxString = 10
+  A = schema
+    n!
+  schema.defaultMaxString = 20
+  B = schema
+    n!
+  schema.defaultMaxString = 0
+  C = schema
+    n!
+  ''', '''
+  let A, B, C;
+  A = __schema({kind: "input", name: "A", entries: [{tag: "field", name: "n", modifiers: ["!"], typeName: "string", array: false, constraints: {max: 10}}]});
+  B = __schema({kind: "input", name: "B", entries: [{tag: "field", name: "n", modifiers: ["!"], typeName: "string", array: false, constraints: {max: 20}}]});
+  C = __schema({kind: "input", name: "C", entries: [{tag: "field", name: "n", modifiers: ["!"], typeName: "string", array: false}]});
+  ''', opts
+
+test "pragma enforces cap at runtime", '''
+  schema.defaultMaxString = 10
+  Form = schema
+    name!
+  [Form.ok({name: "short"}), Form.ok({name: "way too long for this"})]
+  ''', [true, false]
+
+test "pragma cap surfaces as max issue at runtime", '''
+  schema.defaultMaxString = 5
+  Form = schema
+    name!
+  r = Form.safe({name: "too long"})
+  [r.ok, r.errors[0].error]
+  ''', [false, "max"]
+
+# ==============================================================================
+# Nested schema-typed fields
+# ==============================================================================
+#
+# A declared typeName that matches a registered :shape / :input / :model
+# validates the value against that schema recursively. Arrays of such
+# types validate each element. Enum-typed fields accept only members.
+# Unknown typenames remain permissive (forward references, unresolved
+# cross-file names).
+
+test "nested :shape field validates each property", '''
+  Address = schema :shape
+    street! string
+    city!   string
+  User = schema :shape
+    name!     string
+    address!  Address
+  r = User.safe({name: "Alice", address: {street: 123, city: "SF"}})
+  [r.ok, r.errors[0].field, r.errors[0].error]
+  ''', [false, "address.street", "type"]
+
+test "nested :shape field accepts valid nested value", '''
+  Address = schema :shape
+    street! string
+    city!   string
+  User = schema :shape
+    name!     string
+    address!  Address
+  r = User.safe({name: "Alice", address: {street: "1 Main St", city: "SF"}})
+  [r.ok, r.errors]
+  ''', [true, null]
+
+test "nested :shape field rejects non-object value", '''
+  Address = schema :shape
+    street! string
+  User = schema :shape
+    address! Address
+  r = User.safe({address: "not an object"})
+  [r.ok, r.errors[0].field, r.errors[0].error]
+  ''', [false, "address", "type"]
+
+test "nested :shape field validates missing nested required field", '''
+  Address = schema :shape
+    street! string
+    city!   string
+  User = schema :shape
+    address! Address
+  r = User.safe({address: {street: "1 Main St"}})
+  [r.ok, r.errors[0].field, r.errors[0].error]
+  ''', [false, "address.city", "required"]
+
+test "array of nested :shape validates each element", '''
+  Item = schema :shape
+    id!   integer
+    name! string
+  Order = schema :shape
+    items! Item[]
+  r = Order.safe({items: [{id: 1, name: "A"}, {id: "bad", name: "B"}, {id: 3, name: 4}]})
+  [r.ok, r.errors.length, r.errors[0].field, r.errors[0].error, r.errors[1].field, r.errors[1].error]
+  ''', [false, 2, "items[1].id", "type", "items[2].name", "type"]
+
+test "array of nested :shape accepts valid elements", '''
+  Item = schema :shape
+    id!   integer
+    name! string
+  Order = schema :shape
+    items! Item[]
+  r = Order.safe({items: [{id: 1, name: "A"}, {id: 2, name: "B"}]})
+  [r.ok, r.errors]
+  ''', [true, null]
+
+test "nested :input field validates via registry", '''
+  Login = schema :input
+    email!    email
+    password! string
+  Envelope = schema :shape
+    kind!    string
+    payload! Login
+  r = Envelope.safe({kind: "login", payload: {email: "bad", password: "x"}})
+  [r.ok, r.errors[0].field, r.errors[0].error]
+  ''', [false, "payload.email", "type"]
+
+test "enum-typed field accepts declared members", '''
+  Role = schema :enum
+    :admin
+    :user
+  User = schema :shape
+    name! string
+    role! Role
+  r = User.safe({name: "Alice", role: "admin"})
+  [r.ok, r.errors]
+  ''', [true, null]
+
+test "enum-typed field rejects non-members", '''
+  Role = schema :enum
+    :admin
+    :user
+  User = schema :shape
+    name! string
+    role! Role
+  r = User.safe({name: "Alice", role: "other"})
+  [r.ok, r.errors[0].field, r.errors[0].error]
+  ''', [false, "role", "enum"]
+
+test "nested schemas survive .parse() (throws with prefixed path)", '''
+  Address = schema :shape
+    street! string
+  User = schema :shape
+    address! Address
+  try
+    User.parse({address: {street: 42}})
+    "no-throw"
+  catch e
+    [e.name, e.issues[0].field]
+  ''', ["SchemaError", "address.street"]
+
+test "unknown typename stays permissive (forward refs)", '''
+  X = schema :shape
+    thing! SomethingNotRegistered
+  r = X.safe({thing: {any: "value"}})
+  [r.ok, r.errors]
+  ''', [true, null]
+
+test "nested :shape in optional field skips when missing", '''
+  Address = schema :shape
+    street! string
+  User = schema :shape
+    name!     string
+    address?  Address
+  r = User.safe({name: "Alice"})
+  [r.ok, r.errors]
+  ''', [true, null]
+
+test "deeply nested (3 levels) propagates path", '''
+  Coord = schema :shape
+    lat! number
+    lng! number
+  Address = schema :shape
+    city!  string
+    coord! Coord
+  User = schema :shape
+    address! Address
+  r = User.safe({address: {city: "SF", coord: {lat: "bad", lng: 0}}})
+  [r.ok, r.errors[0].field, r.errors[0].error]
+  ''', [false, "address.coord.lat", "type"]
+
+# ==============================================================================
+# Shadow TypeScript emission
+# ==============================================================================
+
+INTRINSICS = '''
+  interface SchemaIssue { field: string; error: string; message: string; }
+  type SchemaSafeResult<T> = { ok: true; value: T; errors: null } | { ok: false; value: null; errors: SchemaIssue[] };
+  interface ArraySchema<Out> {
+    parse(data: unknown): Out[];
+    safe(data: unknown): SchemaSafeResult<Out[]>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out[]>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out[]>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+  }
+  interface Schema<Out, In = unknown> {
+    parse(data: unknown): Out;
+    array: ArraySchema<Out>;
+    safe(data: unknown): SchemaSafeResult<Out>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+    pick<K extends keyof In>(...keys: K[]): Schema<Pick<In, K>, Pick<In, K>>;
+    omit<K extends keyof In>(...keys: K[]): Schema<Omit<In, K>, Omit<In, K>>;
+    partial(): Schema<Partial<In>, Partial<In>>;
+    required<K extends keyof In>(...keys: K[]): Schema<Omit<In, K> & Required<Pick<In, K>>, Omit<In, K> & Required<Pick<In, K>>>;
+    extend<U>(other: Schema<U>): Schema<In & U, In & U>;
+  }
+  interface SchemaQuery<T, Data = Record<string, unknown>> {
+    all(): Promise<T[]>;
+    first(): Promise<T | null>;
+    count(): Promise<number>;
+    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<T, Data>;
+    limit(n: number): SchemaQuery<T, Data>;
+    offset(n: number): SchemaQuery<T, Data>;
+    order(spec: string): SchemaQuery<T, Data>;
+    orderBy(spec: string): SchemaQuery<T, Data>;
+    includes(...specs: unknown[]): SchemaQuery<T, Data>;
+    withDeleted(): SchemaQuery<T, Data>;
+    onlyDeleted(): SchemaQuery<T, Data>;
+    updateAll(values: Partial<Record<keyof Data, unknown>>): Promise<number | null>;
+    deleteAll(): Promise<number | null>;
+    unscoped(): SchemaQuery<T, Data>;
+  }
+  interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>> extends Schema<Instance, Data> {
+    find(id: Id): Promise<Instance | null>;
+    findMany(ids: Id[]): Promise<Instance[]>;
+    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<Instance, Data>;
+    includes(...specs: unknown[]): SchemaQuery<Instance, Data>;
+    withDeleted(): SchemaQuery<Instance, Data>;
+    onlyDeleted(): SchemaQuery<Instance, Data>;
+    unscoped(): SchemaQuery<Instance, Data>;
+    all(limit?: number): Promise<Instance[]>;
+    first(): Promise<Instance | null>;
+    count(cond?: Partial<Record<keyof Data, unknown>>): Promise<number>;
+    create(data: Create): Promise<Instance>;
+    upsert(data: Create, opts: { on: unknown }): Promise<Instance>;
+    insertMany(rows: Create[]): Promise<Instance[]>;
+    toSQL(options?: { dropFirst?: boolean; header?: string; idStart?: number }): string;
+  }
+  declare const schema: {
+    transaction<T>(fn: () => T | Promise<T>): Promise<T>;
+    transaction<T>(opts: Record<string, unknown>, fn: () => T | Promise<T>): Promise<T>;
+  };
+
+  '''
+
+type ":input emits a bare value type", '''
+    SignupInput = schema
+      email! email
+      password! string
+  ''', '''
+  interface SchemaIssue { field: string; error: string; message: string; }
+  type SchemaSafeResult<T> = { ok: true; value: T; errors: null } | { ok: false; value: null; errors: SchemaIssue[] };
+  interface ArraySchema<Out> {
+    parse(data: unknown): Out[];
+    safe(data: unknown): SchemaSafeResult<Out[]>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out[]>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out[]>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+  }
+  interface Schema<Out, In = unknown> {
+    parse(data: unknown): Out;
+    array: ArraySchema<Out>;
+    safe(data: unknown): SchemaSafeResult<Out>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+    pick<K extends keyof In>(...keys: K[]): Schema<Pick<In, K>, Pick<In, K>>;
+    omit<K extends keyof In>(...keys: K[]): Schema<Omit<In, K>, Omit<In, K>>;
+    partial(): Schema<Partial<In>, Partial<In>>;
+    required<K extends keyof In>(...keys: K[]): Schema<Omit<In, K> & Required<Pick<In, K>>, Omit<In, K> & Required<Pick<In, K>>>;
+    extend<U>(other: Schema<U>): Schema<In & U, In & U>;
+  }
+  type SignupInput = { email: string; password: string };
+  declare const SignupInput: Schema<SignupInput, SignupInput>;
+  export {};
+  '''
+
+type ":shape emits Data + Instance types", '''
+    Address = schema :shape
+      street! string
+      city! string
+      full: ~> "x"
+      normalize: -> @
+  ''', '''
+  interface SchemaIssue { field: string; error: string; message: string; }
+  type SchemaSafeResult<T> = { ok: true; value: T; errors: null } | { ok: false; value: null; errors: SchemaIssue[] };
+  interface ArraySchema<Out> {
+    parse(data: unknown): Out[];
+    safe(data: unknown): SchemaSafeResult<Out[]>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out[]>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out[]>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+  }
+  interface Schema<Out, In = unknown> {
+    parse(data: unknown): Out;
+    array: ArraySchema<Out>;
+    safe(data: unknown): SchemaSafeResult<Out>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+    pick<K extends keyof In>(...keys: K[]): Schema<Pick<In, K>, Pick<In, K>>;
+    omit<K extends keyof In>(...keys: K[]): Schema<Omit<In, K>, Omit<In, K>>;
+    partial(): Schema<Partial<In>, Partial<In>>;
+    required<K extends keyof In>(...keys: K[]): Schema<Omit<In, K> & Required<Pick<In, K>>, Omit<In, K> & Required<Pick<In, K>>>;
+    extend<U>(other: Schema<U>): Schema<In & U, In & U>;
+  }
+  type AddressData = { street: string; city: string };
+  type Address = AddressData & { readonly full: unknown; normalize: (...args: any[]) => unknown };
+  declare const Address: Schema<Address, AddressData>;
+  export {};
+  '''
+
+# `!>` eager-derived is an own enumerable property — part of the instance
+# (Out) and writable (not `readonly` like a `~>` getter) — but not an
+# input/projectable field, so it sits on the bare name, never in `…Data`.
+type ":shape eager-derived (!>) attaches to instance, not Data", '''
+    Order = schema :shape
+      total! number
+      label: !> "x"
+      view:  ~> "y"
+  ''', '''
+  interface SchemaIssue { field: string; error: string; message: string; }
+  type SchemaSafeResult<T> = { ok: true; value: T; errors: null } | { ok: false; value: null; errors: SchemaIssue[] };
+  interface ArraySchema<Out> {
+    parse(data: unknown): Out[];
+    safe(data: unknown): SchemaSafeResult<Out[]>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out[]>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out[]>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+  }
+  interface Schema<Out, In = unknown> {
+    parse(data: unknown): Out;
+    array: ArraySchema<Out>;
+    safe(data: unknown): SchemaSafeResult<Out>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+    pick<K extends keyof In>(...keys: K[]): Schema<Pick<In, K>, Pick<In, K>>;
+    omit<K extends keyof In>(...keys: K[]): Schema<Omit<In, K>, Omit<In, K>>;
+    partial(): Schema<Partial<In>, Partial<In>>;
+    required<K extends keyof In>(...keys: K[]): Schema<Omit<In, K> & Required<Pick<In, K>>, Omit<In, K> & Required<Pick<In, K>>>;
+    extend<U>(other: Schema<U>): Schema<In & U, In & U>;
+  }
+  type OrderData = { total: number };
+  type Order = OrderData & { label: unknown; readonly view: unknown };
+  declare const Order: Schema<Order, OrderData>;
+  export {};
+  '''
+
+# `:input` permits `!>` (its one bit of behavior), so a derived field there
+# also splits the input shape (In) from the instance (Out).
+type ":input eager-derived (!>) splits Data from the bare instance", '''
+    Tag = schema
+      name! string
+      slug: !> "s"
+  ''', '''
+  interface SchemaIssue { field: string; error: string; message: string; }
+  type SchemaSafeResult<T> = { ok: true; value: T; errors: null } | { ok: false; value: null; errors: SchemaIssue[] };
+  interface ArraySchema<Out> {
+    parse(data: unknown): Out[];
+    safe(data: unknown): SchemaSafeResult<Out[]>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out[]>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out[]>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+  }
+  interface Schema<Out, In = unknown> {
+    parse(data: unknown): Out;
+    array: ArraySchema<Out>;
+    safe(data: unknown): SchemaSafeResult<Out>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+    pick<K extends keyof In>(...keys: K[]): Schema<Pick<In, K>, Pick<In, K>>;
+    omit<K extends keyof In>(...keys: K[]): Schema<Omit<In, K>, Omit<In, K>>;
+    partial(): Schema<Partial<In>, Partial<In>>;
+    required<K extends keyof In>(...keys: K[]): Schema<Omit<In, K> & Required<Pick<In, K>>, Omit<In, K> & Required<Pick<In, K>>>;
+    extend<U>(other: Schema<U>): Schema<In & U, In & U>;
+  }
+  type TagData = { name: string };
+  type Tag = TagData & { slug: unknown };
+  declare const Tag: Schema<Tag, TagData>;
+  export {};
+  '''
+
+type ":enum emits union + const with predicate ok()", '''
+    Role = schema
+      :admin
+      :user
+      :guest
+  ''', '''
+  interface SchemaIssue { field: string; error: string; message: string; }
+  type SchemaSafeResult<T> = { ok: true; value: T; errors: null } | { ok: false; value: null; errors: SchemaIssue[] };
+  interface ArraySchema<Out> {
+    parse(data: unknown): Out[];
+    safe(data: unknown): SchemaSafeResult<Out[]>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out[]>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out[]>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+  }
+  interface Schema<Out, In = unknown> {
+    parse(data: unknown): Out;
+    array: ArraySchema<Out>;
+    safe(data: unknown): SchemaSafeResult<Out>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+    pick<K extends keyof In>(...keys: K[]): Schema<Pick<In, K>, Pick<In, K>>;
+    omit<K extends keyof In>(...keys: K[]): Schema<Omit<In, K>, Omit<In, K>>;
+    partial(): Schema<Partial<In>, Partial<In>>;
+    required<K extends keyof In>(...keys: K[]): Schema<Omit<In, K> & Required<Pick<In, K>>, Omit<In, K> & Required<Pick<In, K>>>;
+    extend<U>(other: Schema<U>): Schema<In & U, In & U>;
+  }
+  type Role = "admin" | "user" | "guest";
+  declare const Role: { parse(data: unknown): Role; safe(data: unknown): SchemaSafeResult<Role>; ok(data: unknown): data is Role; parseAsync(data: unknown): Promise<Role>; safeAsync(data: unknown): Promise<SchemaSafeResult<Role>>; okAsync(data: unknown): Promise<boolean>; toJSONSchema(): Record<string, unknown>; array: ArraySchema<Role>; };
+  export {};
+  '''
+
+type "valued :enum emits number union", '''
+    Status = schema :enum
+      :pending 0
+      :active  1
+  ''', '''
+  interface SchemaIssue { field: string; error: string; message: string; }
+  type SchemaSafeResult<T> = { ok: true; value: T; errors: null } | { ok: false; value: null; errors: SchemaIssue[] };
+  interface ArraySchema<Out> {
+    parse(data: unknown): Out[];
+    safe(data: unknown): SchemaSafeResult<Out[]>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out[]>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out[]>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+  }
+  interface Schema<Out, In = unknown> {
+    parse(data: unknown): Out;
+    array: ArraySchema<Out>;
+    safe(data: unknown): SchemaSafeResult<Out>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+    pick<K extends keyof In>(...keys: K[]): Schema<Pick<In, K>, Pick<In, K>>;
+    omit<K extends keyof In>(...keys: K[]): Schema<Omit<In, K>, Omit<In, K>>;
+    partial(): Schema<Partial<In>, Partial<In>>;
+    required<K extends keyof In>(...keys: K[]): Schema<Omit<In, K> & Required<Pick<In, K>>, Omit<In, K> & Required<Pick<In, K>>>;
+    extend<U>(other: Schema<U>): Schema<In & U, In & U>;
+  }
+  type Status = 0 | 1;
+  declare const Status: { parse(data: unknown): Status; safe(data: unknown): SchemaSafeResult<Status>; ok(data: unknown): boolean; parseAsync(data: unknown): Promise<Status>; safeAsync(data: unknown): Promise<SchemaSafeResult<Status>>; okAsync(data: unknown): Promise<boolean>; toJSONSchema(): Record<string, unknown>; array: ArraySchema<Status>; };
+  export {};
+  '''
+
+type "optional fields marked with ?", '''
+    User = schema
+      name!  string
+      bio?   text
+      age    integer
+  ''', '''
+  interface SchemaIssue { field: string; error: string; message: string; }
+  type SchemaSafeResult<T> = { ok: true; value: T; errors: null } | { ok: false; value: null; errors: SchemaIssue[] };
+  interface ArraySchema<Out> {
+    parse(data: unknown): Out[];
+    safe(data: unknown): SchemaSafeResult<Out[]>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out[]>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out[]>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+  }
+  interface Schema<Out, In = unknown> {
+    parse(data: unknown): Out;
+    array: ArraySchema<Out>;
+    safe(data: unknown): SchemaSafeResult<Out>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+    pick<K extends keyof In>(...keys: K[]): Schema<Pick<In, K>, Pick<In, K>>;
+    omit<K extends keyof In>(...keys: K[]): Schema<Omit<In, K>, Omit<In, K>>;
+    partial(): Schema<Partial<In>, Partial<In>>;
+    required<K extends keyof In>(...keys: K[]): Schema<Omit<In, K> & Required<Pick<In, K>>, Omit<In, K> & Required<Pick<In, K>>>;
+    extend<U>(other: Schema<U>): Schema<In & U, In & U>;
+  }
+  type User = { name: string; bio?: string; age?: number };
+  declare const User: Schema<User, User>;
+  export {};
+  '''
+
+type ":model emits ModelSchema<Instance, Data> with relation accessors", '''
+    Org = schema :model
+      name! string
+    User = schema :model
+      name! string
+      @belongs_to Org
+  ''', '''
+  interface SchemaIssue { field: string; error: string; message: string; }
+  type SchemaSafeResult<T> = { ok: true; value: T; errors: null } | { ok: false; value: null; errors: SchemaIssue[] };
+  interface ArraySchema<Out> {
+    parse(data: unknown): Out[];
+    safe(data: unknown): SchemaSafeResult<Out[]>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out[]>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out[]>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+  }
+  interface Schema<Out, In = unknown> {
+    parse(data: unknown): Out;
+    array: ArraySchema<Out>;
+    safe(data: unknown): SchemaSafeResult<Out>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+    pick<K extends keyof In>(...keys: K[]): Schema<Pick<In, K>, Pick<In, K>>;
+    omit<K extends keyof In>(...keys: K[]): Schema<Omit<In, K>, Omit<In, K>>;
+    partial(): Schema<Partial<In>, Partial<In>>;
+    required<K extends keyof In>(...keys: K[]): Schema<Omit<In, K> & Required<Pick<In, K>>, Omit<In, K> & Required<Pick<In, K>>>;
+    extend<U>(other: Schema<U>): Schema<In & U, In & U>;
+  }
+  interface SchemaQuery<T, Data = Record<string, unknown>> {
+    all(): Promise<T[]>;
+    first(): Promise<T | null>;
+    count(): Promise<number>;
+    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<T, Data>;
+    limit(n: number): SchemaQuery<T, Data>;
+    offset(n: number): SchemaQuery<T, Data>;
+    order(spec: string): SchemaQuery<T, Data>;
+    orderBy(spec: string): SchemaQuery<T, Data>;
+    includes(...specs: unknown[]): SchemaQuery<T, Data>;
+    withDeleted(): SchemaQuery<T, Data>;
+    onlyDeleted(): SchemaQuery<T, Data>;
+    updateAll(values: Partial<Record<keyof Data, unknown>>): Promise<number | null>;
+    deleteAll(): Promise<number | null>;
+    unscoped(): SchemaQuery<T, Data>;
+  }
+  interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>> extends Schema<Instance, Data> {
+    find(id: Id): Promise<Instance | null>;
+    findMany(ids: Id[]): Promise<Instance[]>;
+    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<Instance, Data>;
+    includes(...specs: unknown[]): SchemaQuery<Instance, Data>;
+    withDeleted(): SchemaQuery<Instance, Data>;
+    onlyDeleted(): SchemaQuery<Instance, Data>;
+    unscoped(): SchemaQuery<Instance, Data>;
+    all(): Promise<Instance[]>;
+    first(): Promise<Instance | null>;
+    count(): Promise<number>;
+    create(data: Create): Promise<Instance>;
+    upsert(data: Create, opts: { on: unknown }): Promise<Instance>;
+    insertMany(rows: Create[]): Promise<Instance[]>;
+    toSQL(options?: { dropFirst?: boolean; header?: string; idStart?: number }): string;
+  }
+  type OrgData = { name: string } & { id: number };
+  type OrgCreate = { name: string };
+  type Org = OrgData & { save(): Promise<Org>; destroy(opts?: { hard?: boolean }): Promise<Org>; ok(): boolean; errors(): SchemaIssue[]; markDirty(name: string): Org; savedChanges: Map<string, [unknown, unknown]>; toJSON(): OrgData };
+  declare const Org: ModelSchema<Org, OrgData, number, OrgCreate>;
+  type UserData = { name: string } & { id: number; orgId: number };
+  type UserCreate = { name: string; orgId: number };
+  type User = UserData & { org(opts?: { reload?: boolean }): Promise<Org | null>; save(): Promise<User>; destroy(opts?: { hard?: boolean }): Promise<User>; ok(): boolean; errors(): SchemaIssue[]; markDirty(name: string): User; savedChanges: Map<string, [unknown, unknown]>; toJSON(): UserData };
+  declare const User: ModelSchema<User, UserData, number, UserCreate>;
+  export {};
+  '''
+
+type ":mixin emits field-type alias; host Data intersects mixins", '''
+    User = schema :model
+      name! string
+      @mixin Timestamps
+    Timestamps = schema :mixin
+      createdAt! datetime
+      updatedAt! datetime
+  ''', '''
+  interface SchemaIssue { field: string; error: string; message: string; }
+  type SchemaSafeResult<T> = { ok: true; value: T; errors: null } | { ok: false; value: null; errors: SchemaIssue[] };
+  interface ArraySchema<Out> {
+    parse(data: unknown): Out[];
+    safe(data: unknown): SchemaSafeResult<Out[]>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out[]>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out[]>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+  }
+  interface Schema<Out, In = unknown> {
+    parse(data: unknown): Out;
+    array: ArraySchema<Out>;
+    safe(data: unknown): SchemaSafeResult<Out>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+    pick<K extends keyof In>(...keys: K[]): Schema<Pick<In, K>, Pick<In, K>>;
+    omit<K extends keyof In>(...keys: K[]): Schema<Omit<In, K>, Omit<In, K>>;
+    partial(): Schema<Partial<In>, Partial<In>>;
+    required<K extends keyof In>(...keys: K[]): Schema<Omit<In, K> & Required<Pick<In, K>>, Omit<In, K> & Required<Pick<In, K>>>;
+    extend<U>(other: Schema<U>): Schema<In & U, In & U>;
+  }
+  interface SchemaQuery<T, Data = Record<string, unknown>> {
+    all(): Promise<T[]>;
+    first(): Promise<T | null>;
+    count(): Promise<number>;
+    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<T, Data>;
+    limit(n: number): SchemaQuery<T, Data>;
+    offset(n: number): SchemaQuery<T, Data>;
+    order(spec: string): SchemaQuery<T, Data>;
+    orderBy(spec: string): SchemaQuery<T, Data>;
+    includes(...specs: unknown[]): SchemaQuery<T, Data>;
+    withDeleted(): SchemaQuery<T, Data>;
+    onlyDeleted(): SchemaQuery<T, Data>;
+    updateAll(values: Partial<Record<keyof Data, unknown>>): Promise<number | null>;
+    deleteAll(): Promise<number | null>;
+    unscoped(): SchemaQuery<T, Data>;
+  }
+  interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>> extends Schema<Instance, Data> {
+    find(id: Id): Promise<Instance | null>;
+    findMany(ids: Id[]): Promise<Instance[]>;
+    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<Instance, Data>;
+    includes(...specs: unknown[]): SchemaQuery<Instance, Data>;
+    withDeleted(): SchemaQuery<Instance, Data>;
+    onlyDeleted(): SchemaQuery<Instance, Data>;
+    unscoped(): SchemaQuery<Instance, Data>;
+    all(): Promise<Instance[]>;
+    first(): Promise<Instance | null>;
+    count(): Promise<number>;
+    create(data: Create): Promise<Instance>;
+    upsert(data: Create, opts: { on: unknown }): Promise<Instance>;
+    insertMany(rows: Create[]): Promise<Instance[]>;
+    toSQL(options?: { dropFirst?: boolean; header?: string; idStart?: number }): string;
+  }
+  type UserData = { name: string } & Timestamps & { id: number };
+  type UserCreate = { name: string } & Timestamps;
+  type User = UserData & { save(): Promise<User>; destroy(opts?: { hard?: boolean }): Promise<User>; ok(): boolean; errors(): SchemaIssue[]; markDirty(name: string): User; savedChanges: Map<string, [unknown, unknown]>; toJSON(): UserData };
+  declare const User: ModelSchema<User, UserData, number, UserCreate>;
+  type Timestamps = { createdAt: Date; updatedAt: Date };
+  export {};
+  '''
+
+type "cross-file relation target degrades to unknown", '''
+    User = schema :model
+      name! string
+      @belongs_to Organization
+      @has_many Order
+  ''', '''
+  interface SchemaIssue { field: string; error: string; message: string; }
+  type SchemaSafeResult<T> = { ok: true; value: T; errors: null } | { ok: false; value: null; errors: SchemaIssue[] };
+  interface ArraySchema<Out> {
+    parse(data: unknown): Out[];
+    safe(data: unknown): SchemaSafeResult<Out[]>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out[]>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out[]>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+  }
+  interface Schema<Out, In = unknown> {
+    parse(data: unknown): Out;
+    array: ArraySchema<Out>;
+    safe(data: unknown): SchemaSafeResult<Out>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+    pick<K extends keyof In>(...keys: K[]): Schema<Pick<In, K>, Pick<In, K>>;
+    omit<K extends keyof In>(...keys: K[]): Schema<Omit<In, K>, Omit<In, K>>;
+    partial(): Schema<Partial<In>, Partial<In>>;
+    required<K extends keyof In>(...keys: K[]): Schema<Omit<In, K> & Required<Pick<In, K>>, Omit<In, K> & Required<Pick<In, K>>>;
+    extend<U>(other: Schema<U>): Schema<In & U, In & U>;
+  }
+  interface SchemaQuery<T, Data = Record<string, unknown>> {
+    all(): Promise<T[]>;
+    first(): Promise<T | null>;
+    count(): Promise<number>;
+    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<T, Data>;
+    limit(n: number): SchemaQuery<T, Data>;
+    offset(n: number): SchemaQuery<T, Data>;
+    order(spec: string): SchemaQuery<T, Data>;
+    orderBy(spec: string): SchemaQuery<T, Data>;
+    includes(...specs: unknown[]): SchemaQuery<T, Data>;
+    withDeleted(): SchemaQuery<T, Data>;
+    onlyDeleted(): SchemaQuery<T, Data>;
+    updateAll(values: Partial<Record<keyof Data, unknown>>): Promise<number | null>;
+    deleteAll(): Promise<number | null>;
+    unscoped(): SchemaQuery<T, Data>;
+  }
+  interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>> extends Schema<Instance, Data> {
+    find(id: Id): Promise<Instance | null>;
+    findMany(ids: Id[]): Promise<Instance[]>;
+    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<Instance, Data>;
+    includes(...specs: unknown[]): SchemaQuery<Instance, Data>;
+    withDeleted(): SchemaQuery<Instance, Data>;
+    onlyDeleted(): SchemaQuery<Instance, Data>;
+    unscoped(): SchemaQuery<Instance, Data>;
+    all(): Promise<Instance[]>;
+    first(): Promise<Instance | null>;
+    count(): Promise<number>;
+    create(data: Create): Promise<Instance>;
+    upsert(data: Create, opts: { on: unknown }): Promise<Instance>;
+    insertMany(rows: Create[]): Promise<Instance[]>;
+    toSQL(options?: { dropFirst?: boolean; header?: string; idStart?: number }): string;
+  }
+  type UserData = { name: string } & { id: number; organizationId: number };
+  type UserCreate = { name: string; organizationId: number };
+  type User = UserData & { organization(opts?: { reload?: boolean }): Promise<unknown>; orders(opts?: { reload?: boolean }): Promise<unknown[]>; save(): Promise<User>; destroy(opts?: { hard?: boolean }): Promise<User>; ok(): boolean; errors(): SchemaIssue[]; markDirty(name: string): User; savedChanges: Map<string, [unknown, unknown]>; toJSON(): UserData };
+  declare const User: ModelSchema<User, UserData, number, UserCreate>;
+  export {};
+  '''
+
+# A derived schema (`Name = Base.pick(...)`) has no `schema` body, so nothing
+# declares a bare `Name` type — yet projections are exactly where one is needed
+# (annotate `u: UserView`, re-export under a clean name). Emit a bare type that
+# reads the algebra's result back off the value's own `parse`, reusing the
+# Schema<Out, In> interface inference instead of re-deriving Pick/Omit here.
+type "derived schema emits a bare projection type", '''
+    User = schema :model
+      firstName! string
+      lastName!  string
+      @timestamps
+    UserView = User.pick("id", "firstName")
+  ''', '''
+  interface SchemaIssue { field: string; error: string; message: string; }
+  type SchemaSafeResult<T> = { ok: true; value: T; errors: null } | { ok: false; value: null; errors: SchemaIssue[] };
+  interface ArraySchema<Out> {
+    parse(data: unknown): Out[];
+    safe(data: unknown): SchemaSafeResult<Out[]>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out[]>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out[]>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+  }
+  interface Schema<Out, In = unknown> {
+    parse(data: unknown): Out;
+    array: ArraySchema<Out>;
+    safe(data: unknown): SchemaSafeResult<Out>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+    pick<K extends keyof In>(...keys: K[]): Schema<Pick<In, K>, Pick<In, K>>;
+    omit<K extends keyof In>(...keys: K[]): Schema<Omit<In, K>, Omit<In, K>>;
+    partial(): Schema<Partial<In>, Partial<In>>;
+    required<K extends keyof In>(...keys: K[]): Schema<Omit<In, K> & Required<Pick<In, K>>, Omit<In, K> & Required<Pick<In, K>>>;
+    extend<U>(other: Schema<U>): Schema<In & U, In & U>;
+  }
+  interface SchemaQuery<T, Data = Record<string, unknown>> {
+    all(): Promise<T[]>;
+    first(): Promise<T | null>;
+    count(): Promise<number>;
+    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<T, Data>;
+    limit(n: number): SchemaQuery<T, Data>;
+    offset(n: number): SchemaQuery<T, Data>;
+    order(spec: string): SchemaQuery<T, Data>;
+    orderBy(spec: string): SchemaQuery<T, Data>;
+    includes(...specs: unknown[]): SchemaQuery<T, Data>;
+    withDeleted(): SchemaQuery<T, Data>;
+    onlyDeleted(): SchemaQuery<T, Data>;
+    updateAll(values: Partial<Record<keyof Data, unknown>>): Promise<number | null>;
+    deleteAll(): Promise<number | null>;
+    unscoped(): SchemaQuery<T, Data>;
+  }
+  interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>> extends Schema<Instance, Data> {
+    find(id: Id): Promise<Instance | null>;
+    findMany(ids: Id[]): Promise<Instance[]>;
+    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<Instance, Data>;
+    includes(...specs: unknown[]): SchemaQuery<Instance, Data>;
+    withDeleted(): SchemaQuery<Instance, Data>;
+    onlyDeleted(): SchemaQuery<Instance, Data>;
+    unscoped(): SchemaQuery<Instance, Data>;
+    all(): Promise<Instance[]>;
+    first(): Promise<Instance | null>;
+    count(): Promise<number>;
+    create(data: Create): Promise<Instance>;
+    upsert(data: Create, opts: { on: unknown }): Promise<Instance>;
+    insertMany(rows: Create[]): Promise<Instance[]>;
+    toSQL(options?: { dropFirst?: boolean; header?: string; idStart?: number }): string;
+  }
+  type UserData = { firstName: string; lastName: string } & { id: number; createdAt: string; updatedAt: string };
+  type UserCreate = { firstName: string; lastName: string };
+  type User = UserData & { save(): Promise<User>; destroy(opts?: { hard?: boolean }): Promise<User>; ok(): boolean; errors(): SchemaIssue[]; markDirty(name: string): User; savedChanges: Map<string, [unknown, unknown]>; toJSON(): UserData };
+  declare const User: ModelSchema<User, UserData, number, UserCreate>;
+  export {};
+  '''
+
+# Chained algebra still yields one bare type, and an exported projection carries
+# the `export` through — the client imports it under its clean name.
+type "chained + exported derived schema emits one bare type each", '''
+    User = schema :model
+      firstName! string
+      lastName!  string
+      @timestamps
+    export UserView = User.pick("id", "firstName", "lastName").omit("lastName")
+  ''', '''
+  interface SchemaIssue { field: string; error: string; message: string; }
+  type SchemaSafeResult<T> = { ok: true; value: T; errors: null } | { ok: false; value: null; errors: SchemaIssue[] };
+  interface ArraySchema<Out> {
+    parse(data: unknown): Out[];
+    safe(data: unknown): SchemaSafeResult<Out[]>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out[]>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out[]>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+  }
+  interface Schema<Out, In = unknown> {
+    parse(data: unknown): Out;
+    array: ArraySchema<Out>;
+    safe(data: unknown): SchemaSafeResult<Out>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+    pick<K extends keyof In>(...keys: K[]): Schema<Pick<In, K>, Pick<In, K>>;
+    omit<K extends keyof In>(...keys: K[]): Schema<Omit<In, K>, Omit<In, K>>;
+    partial(): Schema<Partial<In>, Partial<In>>;
+    required<K extends keyof In>(...keys: K[]): Schema<Omit<In, K> & Required<Pick<In, K>>, Omit<In, K> & Required<Pick<In, K>>>;
+    extend<U>(other: Schema<U>): Schema<In & U, In & U>;
+  }
+  interface SchemaQuery<T, Data = Record<string, unknown>> {
+    all(): Promise<T[]>;
+    first(): Promise<T | null>;
+    count(): Promise<number>;
+    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<T, Data>;
+    limit(n: number): SchemaQuery<T, Data>;
+    offset(n: number): SchemaQuery<T, Data>;
+    order(spec: string): SchemaQuery<T, Data>;
+    orderBy(spec: string): SchemaQuery<T, Data>;
+    includes(...specs: unknown[]): SchemaQuery<T, Data>;
+    withDeleted(): SchemaQuery<T, Data>;
+    onlyDeleted(): SchemaQuery<T, Data>;
+    updateAll(values: Partial<Record<keyof Data, unknown>>): Promise<number | null>;
+    deleteAll(): Promise<number | null>;
+    unscoped(): SchemaQuery<T, Data>;
+  }
+  interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>> extends Schema<Instance, Data> {
+    find(id: Id): Promise<Instance | null>;
+    findMany(ids: Id[]): Promise<Instance[]>;
+    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<Instance, Data>;
+    includes(...specs: unknown[]): SchemaQuery<Instance, Data>;
+    withDeleted(): SchemaQuery<Instance, Data>;
+    onlyDeleted(): SchemaQuery<Instance, Data>;
+    unscoped(): SchemaQuery<Instance, Data>;
+    all(): Promise<Instance[]>;
+    first(): Promise<Instance | null>;
+    count(): Promise<number>;
+    create(data: Create): Promise<Instance>;
+    upsert(data: Create, opts: { on: unknown }): Promise<Instance>;
+    insertMany(rows: Create[]): Promise<Instance[]>;
+    toSQL(options?: { dropFirst?: boolean; header?: string; idStart?: number }): string;
+  }
+  type UserData = { firstName: string; lastName: string } & { id: number; createdAt: string; updatedAt: string };
+  type UserCreate = { firstName: string; lastName: string };
+  type User = UserData & { save(): Promise<User>; destroy(opts?: { hard?: boolean }): Promise<User>; ok(): boolean; errors(): SchemaIssue[]; markDirty(name: string): User; savedChanges: Map<string, [unknown, unknown]>; toJSON(): UserData };
+  declare const User: ModelSchema<User, UserData, number, UserCreate>;
+  export {};
+  '''
+
+# A `.partial()`/`.pick()`-shaped call on a NON-schema must not be mistaken for
+# a projection — emitting a schema type for it would make its `parse` lookup
+# error. Only a base that resolves to a local schema gets a derived type.
+type "non-schema algebra-shaped call is not given a schema type", '''
+    User = schema :input
+      name! string
+    config = loader.partial()
+  ''', '''
+  interface SchemaIssue { field: string; error: string; message: string; }
+  type SchemaSafeResult<T> = { ok: true; value: T; errors: null } | { ok: false; value: null; errors: SchemaIssue[] };
+  interface ArraySchema<Out> {
+    parse(data: unknown): Out[];
+    safe(data: unknown): SchemaSafeResult<Out[]>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out[]>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out[]>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+  }
+  interface Schema<Out, In = unknown> {
+    parse(data: unknown): Out;
+    array: ArraySchema<Out>;
+    safe(data: unknown): SchemaSafeResult<Out>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+    pick<K extends keyof In>(...keys: K[]): Schema<Pick<In, K>, Pick<In, K>>;
+    omit<K extends keyof In>(...keys: K[]): Schema<Omit<In, K>, Omit<In, K>>;
+    partial(): Schema<Partial<In>, Partial<In>>;
+    required<K extends keyof In>(...keys: K[]): Schema<Omit<In, K> & Required<Pick<In, K>>, Omit<In, K> & Required<Pick<In, K>>>;
+    extend<U>(other: Schema<U>): Schema<In & U, In & U>;
+  }
+  type User = { name: string };
+  declare const User: Schema<User, User>;
+  export {};
+  '''
+
+# ==============================================================================
+# :model runtime — ORM, hooks, DDL, relations
+# ==============================================================================
+#
+# Each :model test installs a fresh in-memory adapter that records SQL
+# calls and returns canned results, then resets the registry so tests
+# don't leak state between cases.
+
+modelHeader = '''
+  adapter =
+    calls: []
+    canned: {}
+    query: (sql, params) ->
+      @calls.push {sql, params}
+      if @canned[sql] then @canned[sql] else (@canned.__default ?? {columns: [], data: [], rows: 0})
+  __schemaSetAdapter adapter
+  __SchemaRegistry.reset()
+
+'''
+
+# -- toSQL works without adapter or ORM boot --
+
+test ":model toSQL emits CREATE TABLE", modelHeader + '''
+  User = schema :model
+    name! string, 1..100
+    email! email @unique
+    @timestamps
+  sql = User.toSQL()
+  [sql.includes("CREATE TABLE users"), sql.includes("VARCHAR(100)"), sql.includes("UNIQUE"), sql.includes("created_at"), sql.includes("updated_at")]
+''', [true, true, true, true, true]
+
+test ":model toSQL emits belongs_to FK", modelHeader + '''
+  User = schema :model
+    name! string
+  Order = schema :model
+    @belongs_to User
+  sql = Order.toSQL()
+  [sql.includes("user_id INTEGER NOT NULL REFERENCES users(id)")]
+''', [true]
+
+test ":model toSQL marks optional belongs_to as nullable", modelHeader + '''
+  User = schema :model
+    name! string
+  Order = schema :model
+    @belongs_to User?
+  sql = Order.toSQL()
+  hasFK = sql.match(/user_id INTEGER REFERENCES users\\(id\\)/)?
+  hasFK
+''', true
+
+# -- toSQL: sequence start value (default / directive / option / precedence) --
+#
+# DuckDB 1.5.2 does not implement `ALTER SEQUENCE ... RESTART WITH N`, so the
+# seed value must be baked into the `CREATE SEQUENCE` statement. `@idStart N`
+# lives with the model; `.toSQL({ idStart: N })` is the caller override.
+
+test ":model toSQL defaults sequence to START 1", modelHeader + '''
+  User = schema :model
+    name! string
+  User.toSQL().includes("CREATE SEQUENCE users_seq START 1;")
+''', true
+
+test ":model toSQL honors @idStart directive", modelHeader + '''
+  User = schema :model
+    name! string
+    @idStart 10001
+  User.toSQL().includes("CREATE SEQUENCE users_seq START 10001;")
+''', true
+
+test ":model toSQL option idStart overrides @idStart directive", modelHeader + '''
+  User = schema :model
+    name! string
+    @idStart 10001
+  User.toSQL(idStart: 50000).includes("CREATE SEQUENCE users_seq START 50000;")
+''', true
+
+test ":model toSQL accepts negative @idStart", modelHeader + '''
+  User = schema :model
+    name! string
+    @idStart -5
+  User.toSQL().includes("CREATE SEQUENCE users_seq START -5;")
+''', true
+
+fail "@idStart rejects non-integer literal", '''
+  User = schema :model
+    name! string
+    @idStart 3.14
+'''
+
+fail "@idStart rejects missing argument", '''
+  User = schema :model
+    name! string
+    @idStart
+'''
+
+# -- .find / .create / .where / .all --
+
+test ":model.create inserts and hydrates", modelHeader + '''
+  User = schema :model
+    name! string
+    email! email
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}, {name: "email"}], data: [[1, "Alice", "a@b.c"]], rows: 1}
+  u = User.create! {name: "Alice", email: "a@b.c"}
+  [u.id, u.name, u.email, u._persisted]
+''', [1, "Alice", "a@b.c", true]
+
+test ":model.find returns null when no row", modelHeader + '''
+  User = schema :model
+    name! string
+  adapter.canned.__default = {columns: [], data: [], rows: 0}
+  r = User.find! 999
+  r
+''', null
+
+test ":model.where.all issues SELECT with WHERE clause", modelHeader + '''
+  User = schema :model
+    name! string
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}], data: [[1, "A"], [2, "B"]], rows: 2}
+  results = User.where(active: true).all!
+  [results.length, adapter.calls[0].sql.includes("WHERE"), adapter.calls[0].params[0]]
+''', [2, true, true]
+
+# -- hooks: beforeSave normalizes before validation is re-read; afterCreate fires --
+
+test "save() hook order: beforeValidation -> validate -> beforeSave -> INSERT -> afterCreate -> afterSave", modelHeader + '''
+  trace = []
+  User = schema :model
+    name! string
+    beforeValidation: -> trace.push "beforeValidation"
+    afterValidation:  -> trace.push "afterValidation"
+    beforeSave:       -> trace.push "beforeSave"
+    beforeCreate:     -> trace.push "beforeCreate"
+    afterCreate:      -> trace.push "afterCreate"
+    afterSave:        -> trace.push "afterSave"
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}], data: [[1, "X"]], rows: 1}
+  User.create! {name: "X"}
+  trace
+''', ["beforeValidation", "afterValidation", "beforeSave", "beforeCreate", "afterCreate", "afterSave"]
+
+test "save() throws SchemaError on invalid without running beforeSave", modelHeader + '''
+  trace = []
+  User = schema :model
+    name! string
+    afterValidation: -> trace.push "av"
+    beforeSave: -> trace.push "bs"
+  errorInfo = null
+  try
+    User.create! {}
+  catch e
+    errorInfo = [e.name, e.issues[0].error, trace.length]
+  errorInfo
+''', ["SchemaError", "required", 0]
+
+# -- getter excluded from persistence --
+
+test ".save() persists declared fields only (not computed getters)", modelHeader + '''
+  User = schema :model
+    name! string
+    upper: ~> @name.toUpperCase()
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}], data: [[1, "a"]], rows: 1}
+  User.create! {name: "a"}
+  cols = adapter.calls[0].sql
+  [cols.includes("\\"name\\""), cols.includes("upper")]
+''', [true, false]
+
+# .save() on an UPDATE path must only write columns that actually changed
+# since hydrate / last save. This protects against a hard DuckDB foreign-key
+# limitation: any UPDATE that touches an indexed column (PK / UNIQUE) on a
+# row referenced by another table's FK is rejected, even when the value
+# isn't really changing (e.g. SET mrn = mrn). Writing only changed columns
+# keeps no-op saves out of the index path entirely. See `__schemaSave` in
+# `src/schema/runtime-orm.js`.
+
+test ".save() with no changes emits no UPDATE", modelHeader + '''
+  Patient = schema :model
+    mrn?       string
+    firstName! string
+    lastName!  string
+    mdmId?     string
+    linkId?    string
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "mrn"}, {name: "first_name"}, {name: "last_name"}, {name: "mdm_id"}, {name: "link_id"}], data: [[10023, "MRN-1", "Steve", "S", "L00", "PID7"]], rows: 1}
+  p = Patient.find! 10023
+  adapter.calls = []
+  p.save!
+  updates = adapter.calls.filter (c) -> c.sql.startsWith "UPDATE"
+  updates.length
+''', 0
+
+test ".save() with one field change emits UPDATE for only that column", modelHeader + '''
+  Patient = schema :model
+    mrn?       string
+    firstName! string
+    lastName!  string
+    mdmId?     string
+    linkId?    string
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "mrn"}, {name: "first_name"}, {name: "last_name"}, {name: "mdm_id"}, {name: "link_id"}], data: [[10023, "MRN-1", "Steve", "S", "L00", "PID7"]], rows: 1}
+  p = Patient.find! 10023
+  adapter.calls = []
+  p.linkId = "PID9"
+  p.save!
+  updates = adapter.calls.filter (c) -> c.sql.startsWith "UPDATE"
+  sql  = updates[0]?.sql    or ""
+  vals = updates[0]?.params or []
+  [
+    updates.length
+    sql.includes("\\"link_id\\" = ?")
+    sql.includes("\\"mrn\\"")
+    sql.includes("\\"first_name\\"")
+    sql.includes("\\"mdm_id\\"")
+    vals[0]   # the new link_id
+    vals[1]   # the WHERE-clause id
+  ]
+''', [1, true, false, false, false, "PID9", 10023]
+
+test ".save() after a second mutation refreshes snapshot and writes only the new diff", modelHeader + '''
+  Patient = schema :model
+    mrn?    string
+    mdmId?  string
+    linkId? string
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "mrn"}, {name: "mdm_id"}, {name: "link_id"}], data: [[10023, "M1", "L00", null]], rows: 1}
+  p = Patient.find! 10023
+  p.linkId = "PID9"
+  p.save!
+  adapter.calls = []
+  p.mdmId = "L01"
+  p.save!
+  updates = adapter.calls.filter (c) -> c.sql.startsWith "UPDATE"
+  sql = updates[0]?.sql or ""
+  [updates.length, sql.includes("\\"mdm_id\\" = ?"), sql.includes("\\"link_id\\""), sql.includes("\\"mrn\\"")]
+''', [1, true, false, false]
+
+test "markDirty() forces an in-place-mutated json field into the next UPDATE", modelHeader + '''
+  User = schema :model
+    name!     string
+    settings? json
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}, {name: "settings"}], data: [[1, "Alice", {theme: "dark"}]], rows: 1}
+  u = User.find! 1
+  adapter.calls = []
+  # In-place mutation of a JSON-valued field; the JS reference is unchanged,
+  # so === comparison can't see the diff. markDirty() is the user-facing API
+  # for telling save() to write this column anyway.
+  u.settings.theme = "light"
+  u.markDirty 'settings'
+  u.save!
+  updates = adapter.calls.filter (c) -> c.sql.startsWith "UPDATE"
+  sql = updates[0]?.sql or ""
+  vals = updates[0]?.params or []
+  [
+    updates.length
+    sql.includes("\\"settings\\" = ?")
+    sql.includes("\\"name\\"")
+    JSON.parse(vals[0]).theme
+  ]
+''', [1, true, false, "light"]
+
+test "markDirty() throws on unknown field name (typo guard)", modelHeader + '''
+  User = schema :model
+    name! string
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}], data: [[1, "Alice"]], rows: 1}
+  u = User.find! 1
+  msg = null
+  try
+    u.markDirty 'naem'
+  catch e
+    msg = e.message
+  # The error must reference the bad name AND the schema name, so a typo
+  # produces a clear diagnostic rather than a silent no-op.
+  msg? and msg.includes("'naem'") and msg.includes("User")
+''', true
+
+test "markDirty() throws on non-persisted instance (INSERT writes every set field)", modelHeader + '''
+  User = schema :model
+    name! string
+  klass = User._getClass()
+  u = new klass({name: "Alice"}, false)
+  msg = null
+  try
+    u.markDirty 'name'
+  catch e
+    msg = e.message
+  msg? and msg.includes("persisted")
+''', true
+
+test "markDirty() accepts snake_case alias and resolves to camelCase field", modelHeader + '''
+  Patient = schema :model
+    firstName! string
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "first_name"}], data: [[10023, "Steve"]], rows: 1}
+  p = Patient.find! 10023
+  adapter.calls = []
+  p.markDirty 'first_name'
+  p.save!
+  updates = adapter.calls.filter (c) -> c.sql.startsWith "UPDATE"
+  [updates.length, updates[0].sql.includes("\\"first_name\\" = ?")]
+''', [1, true]
+
+test "NaN-valued field doesn't trigger forever-dirty UPDATE on no-op save", modelHeader + '''
+  Reading = schema :model
+    label! string
+    value? float
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "label"}, {name: "value"}], data: [[1, "x", NaN]], rows: 1}
+  r = Reading.find! 1
+  adapter.calls = []
+  r.save!
+  updates = adapter.calls.filter (c) -> c.sql.startsWith "UPDATE"
+  updates.length
+''', 0
+
+test "snapshot built BEFORE await: concurrent mutation during save survives to next save", modelHeader + '''
+  Patient = schema :model
+    firstName! string
+    lastName!  string
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "first_name"}, {name: "last_name"}], data: [[10023, "Steve", "Shreeve"]], rows: 1}
+  p = Patient.find! 10023
+  # Wrap the adapter to mutate the instance in flight, simulating a
+  # parallel request hitting the same in-memory inst. The query-time
+  # mutation must NOT be silently absorbed into the post-await snapshot
+  # — otherwise the change to lastName would be lost on the next save.
+  origQuery = adapter.query.bind(adapter)
+  adapter.query = (sql, params) ->
+    if sql.startsWith "UPDATE"
+      p.lastName = "MutatedDuringSave"
+    origQuery(sql, params)
+  p.firstName = "Frank"
+  p.save!  # writes only first_name
+  adapter.calls = []
+  p.save!  # must write last_name (in-flight mutation), NOT skip
+  updates = adapter.calls.filter (c) -> c.sql.startsWith "UPDATE"
+  sql = updates[0]?.sql or ""
+  [updates.length, sql.includes("\\"last_name\\" = ?"), sql.includes("\\"first_name\\"")]
+''', [1, true, false]
+
+# savedChanges — Active Record-style introspection on the field-level
+# diff of the just-completed save. INSERT yields [null, newValue]; UPDATE
+# yields [oldValue, newValue]. An empty Map after .save() means nothing
+# was actually written. afterCreate / afterUpdate / afterSave hooks see
+# this Map populated with the just-completed write's diff.
+
+test "savedChanges on INSERT records [null, newValue] for every declared field written", modelHeader + '''
+  User = schema :model
+    name!   string
+    email?  email
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}, {name: "email"}], data: [[1, "Alice", "a@b.c"]], rows: 1}
+  u = User.create! {name: "Alice", email: "a@b.c"}
+  [
+    u.savedChanges.size
+    u.savedChanges.get("name")
+    u.savedChanges.get("email")
+  ]
+''', [2, [null, "Alice"], [null, "a@b.c"]]
+
+test "savedChanges on UPDATE records [oldValue, newValue] for changed fields only", modelHeader + '''
+  Patient = schema :model
+    firstName! string
+    lastName!  string
+    mdmId?     string
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "first_name"}, {name: "last_name"}, {name: "mdm_id"}], data: [[10023, "Steve", "Shreeve", "L00"]], rows: 1}
+  p = Patient.find! 10023
+  p.lastName = "Smith"
+  p.mdmId    = "L01"
+  p.save!
+  [
+    p.savedChanges.size
+    p.savedChanges.has("firstName")
+    p.savedChanges.get("lastName")
+    p.savedChanges.get("mdmId")
+  ]
+''', [2, false, ["Shreeve", "Smith"], ["L00", "L01"]]
+
+test "savedChanges is empty after a no-op save", modelHeader + '''
+  Patient = schema :model
+    firstName! string
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "first_name"}], data: [[10023, "Steve"]], rows: 1}
+  p = Patient.find! 10023
+  p.save!
+  p.savedChanges.size
+''', 0
+
+test "savedChanges resets at the start of every save (no accumulation)", modelHeader + '''
+  Patient = schema :model
+    firstName! string
+    lastName!  string
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "first_name"}, {name: "last_name"}], data: [[10023, "Steve", "Shreeve"]], rows: 1}
+  p = Patient.find! 10023
+  p.firstName = "Frank"
+  p.save!  # changes firstName
+  first = p.savedChanges.get("firstName")
+  p.lastName = "Smith"
+  p.save!  # changes lastName; previous firstName diff must be gone
+  [
+    first
+    p.savedChanges.size
+    p.savedChanges.has("firstName")
+    p.savedChanges.get("lastName")
+  ]
+''', [["Steve", "Frank"], 1, false, ["Shreeve", "Smith"]]
+
+test "afterUpdate hook can read savedChanges and observe the diff", modelHeader + '''
+  observed = null
+  Patient = schema :model
+    firstName! string
+    afterUpdate: -> observed = [...@savedChanges.entries()]
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "first_name"}], data: [[10023, "Steve"]], rows: 1}
+  p = Patient.find! 10023
+  p.firstName = "Frank"
+  p.save!
+  observed
+''', [["firstName", ["Steve", "Frank"]]]
+
+test "afterUpdate hook on a no-op save sees empty savedChanges (AR-compatible)", modelHeader + '''
+  # Mirrors Active Record: after_update fires on every successful save,
+  # even when no SQL was emitted. The hook differentiates real writes
+  # from no-ops by checking savedChanges.size.
+  fired = 0
+  observed = null
+  Patient = schema :model
+    firstName! string
+    afterUpdate: ->
+      fired += 1
+      observed = @savedChanges.size
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "first_name"}], data: [[10023, "Steve"]], rows: 1}
+  p = Patient.find! 10023
+  p.save!
+  [fired, observed]
+''', [1, 0]
+
+# @belongs_to FK columns (e.g. user_id from `@belongs_to User`) must
+# participate in the same dirty / snapshot / savedChanges machinery as
+# declared fields. Reassigning inst.userId must trigger an UPDATE
+# writing user_id; an unchanged FK must be skipped on no-op saves.
+
+test ".save() writes belongs_to FK column when reassigned", modelHeader + '''
+  User = schema :model
+    name! string
+  Order = schema :model
+    total integer
+    @belongs_to User
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "total"}, {name: "user_id"}], data: [[10001, 100, 7]], rows: 1}
+  o = Order.find! 10001
+  adapter.calls = []
+  o.userId = 9
+  o.save!
+  updates = adapter.calls.filter (c) -> c.sql.startsWith "UPDATE"
+  sql  = updates[0]?.sql    or ""
+  vals = updates[0]?.params or []
+  [
+    updates.length
+    sql.includes("\\"user_id\\" = ?")
+    sql.includes("\\"total\\"")
+    vals[0]                               # the new user_id
+    vals[1]                               # the WHERE-clause id
+    o.savedChanges.get("userId")          # AR-style diff
+  ]
+''', [1, true, false, 9, 10001, [7, 9]]
+
+test ".save() with no FK change emits no UPDATE", modelHeader + '''
+  User = schema :model
+    name! string
+  Order = schema :model
+    total integer
+    @belongs_to User
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "total"}, {name: "user_id"}], data: [[10001, 100, 7]], rows: 1}
+  o = Order.find! 10001
+  adapter.calls = []
+  o.save!
+  updates = adapter.calls.filter (c) -> c.sql.startsWith "UPDATE"
+  updates.length
+''', 0
+
+test ".save() writes both a declared field and an FK column when both change", modelHeader + '''
+  User = schema :model
+    name! string
+  Order = schema :model
+    total integer
+    notes? string
+    @belongs_to User
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "total"}, {name: "notes"}, {name: "user_id"}], data: [[10001, 100, "old", 7]], rows: 1}
+  o = Order.find! 10001
+  o.notes  = "new"
+  o.userId = 9
+  o.save!
+  [
+    o.savedChanges.size
+    o.savedChanges.get("notes")
+    o.savedChanges.get("userId")
+  ]
+''', [2, ["old", "new"], [7, 9]]
+
+test "markDirty() accepts belongs_to FK column name (camelCase or snake_case)", modelHeader + '''
+  User = schema :model
+    name! string
+  Order = schema :model
+    total integer
+    @belongs_to User
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "total"}, {name: "user_id"}], data: [[10001, 100, 7]], rows: 1}
+  o = Order.find! 10001
+  adapter.calls = []
+  o.markDirty 'user_id'   # snake_case alias
+  o.save!
+  updates = adapter.calls.filter (c) -> c.sql.startsWith "UPDATE"
+  updates[0]?.sql.includes("\\"user_id\\" = ?")
+''', true
+
+test "Order.create! records FK column in savedChanges with [null, newValue]", modelHeader + '''
+  User = schema :model
+    name! string
+  Order = schema :model
+    total integer
+    @belongs_to User
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "total"}, {name: "user_id"}], data: [[10001, 100, 7]], rows: 1}
+  o = Order.create! {total: 100, userId: 7}
+  o.savedChanges.get("userId")
+''', [null, 7]
+
+# @timestamps: updated_at must be bumped on every real UPDATE write
+# (not on no-op saves, where the whole point of the column-targeted
+# UPDATE optimization is to skip touching the row entirely). On INSERT
+# the DB DEFAULT CURRENT_TIMESTAMP supplies the value; we record it
+# in savedChanges so it shows up in the AR-style diff.
+
+test "@timestamps INSERT records createdAt and updatedAt in savedChanges from RETURNING", modelHeader + '''
+  User = schema :model
+    name! string
+    @timestamps
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}, {name: "created_at"}, {name: "updated_at"}], data: [[1, "Alice", "T1", "T2"]], rows: 1}
+  u = User.create! {name: "Alice"}
+  [
+    u.savedChanges.get("createdAt")
+    u.savedChanges.get("updatedAt")
+  ]
+''', [[null, "T1"], [null, "T2"]]
+
+test "@timestamps UPDATE bumps updated_at when fields change", modelHeader + '''
+  User = schema :model
+    name! string
+    @timestamps
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}, {name: "created_at"}, {name: "updated_at"}], data: [[1, "Alice", "T1", "T2"]], rows: 1}
+  u = User.find! 1
+  adapter.calls = []
+  u.name = "Bob"
+  u.save!
+  updates = adapter.calls.filter (c) -> c.sql.startsWith "UPDATE"
+  sql  = updates[0]?.sql or ""
+  vals = updates[0]?.params or []
+  # The updated_at value lives at vals[length - 2] — last SET param
+  # before the WHERE-clause id. Asserting on the exact position (and
+  # checking the value parses as an ISO string) catches both "wrong
+  # column" and "right column, garbage value" regressions, even if
+  # someone later reorders the SET clauses.
+  tsVal = vals[vals.length - 2]
+  isIso = typeof tsVal is "string" and /^\\d{4}-\\d{2}-\\d{2}T/.test(tsVal)
+  [
+    sql.includes("\\"updated_at\\" = ?")
+    isIso
+    tsVal isnt "T2"            # actually changed
+    u.updatedAt is tsVal       # mirrored onto the instance
+    u.savedChanges.get("updatedAt")?[0]
+    u.savedChanges.get("updatedAt")?[1] is tsVal
+  ]
+''', [true, true, true, true, "T2", true]
+
+test "@timestamps UPDATE on a no-op save does NOT bump updated_at (no SQL)", modelHeader + '''
+  User = schema :model
+    name! string
+    @timestamps
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}, {name: "created_at"}, {name: "updated_at"}], data: [[1, "Alice", "T1", "T2"]], rows: 1}
+  u = User.find! 1
+  origTs = u.updatedAt
+  adapter.calls = []
+  u.save!
+  updates = adapter.calls.filter (c) -> c.sql.startsWith "UPDATE"
+  [
+    updates.length
+    u.updatedAt is origTs              # in-memory unchanged
+    u.savedChanges.has("updatedAt")    # not a recorded diff
+  ]
+''', [0, true, false]
+
+test "@timestamps UPDATE bumps updated_at when only an FK changes", modelHeader + '''
+  User = schema :model
+    name! string
+  Order = schema :model
+    @belongs_to User
+    @timestamps
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "user_id"}, {name: "created_at"}, {name: "updated_at"}], data: [[10001, 7, "T1", "T2"]], rows: 1}
+  o = Order.find! 10001
+  adapter.calls = []
+  o.userId = 9
+  o.save!
+  updates = adapter.calls.filter (c) -> c.sql.startsWith "UPDATE"
+  sql = updates[0]?.sql or ""
+  [
+    sql.includes("\\"user_id\\" = ?")
+    sql.includes("\\"updated_at\\" = ?")
+    o.savedChanges.has("userId")
+    o.savedChanges.has("updatedAt")
+  ]
+''', [true, true, true, true]
+
+test "@timestamps schema without directive does NOT touch updated_at", modelHeader + '''
+  Stateless = schema :model
+    name! string
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}], data: [[1, "Alice"]], rows: 1}
+  s = Stateless.find! 1
+  adapter.calls = []
+  s.name = "Bob"
+  s.save!
+  updates = adapter.calls.filter (c) -> c.sql.startsWith "UPDATE"
+  updates[0]?.sql.includes("updated_at")
+''', false
+
+# save() re-entry guard: a hook on this very instance calling .save()
+# while a save is already in flight would race the snapshot /
+# savedChanges machinery and (more often) loop forever. The guard is
+# per-instance, cleared in finally so sequential saves on the same
+# instance work fine, and independent instances saving in parallel
+# are unaffected.
+
+test "save() throws on same-instance re-entry from a hook", modelHeader + '''
+  User = schema :model
+    name! string
+    beforeSave: ->
+      # Naive recursion: hook on `@` calls @.save! which would re-enter
+      # __schemaSave on the same instance.
+      @save!
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}], data: [[1, "Alice"]], rows: 1}
+  msg = null
+  try
+    User.create! {name: "Alice"}
+  catch e
+    msg = e.message
+  msg? and msg.includes("re-entered")
+''', true
+
+test "save() guard clears in finally so a second save on the same instance works", modelHeader + '''
+  User = schema :model
+    name! string
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}], data: [[1, "Alice"]], rows: 1}
+  u = User.create! {name: "Alice"}
+  # Subsequent save must not be blocked by leftover _saving = true.
+  u.name = "Bob"
+  u.save!
+  u._saving
+''', false
+
+test "save() throws clear the re-entry guard (no leak on validation error)", modelHeader + '''
+  User = schema :model
+    name! string
+  adapter.canned.__default = {columns: [], data: [], rows: 0}
+  threw = false
+  try
+    # Required field missing → SchemaError mid-save; finally must still
+    # clear _saving on the throw path.
+    User.create! {}
+  catch
+    threw = true
+  # We can't inspect the ephemeral inst (it never returned from create),
+  # but we can verify subsequent unrelated saves work normally — i.e.
+  # the guard didn't leak onto the class prototype somehow.
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}], data: [[1, "X"]], rows: 1}
+  u = User.create! {name: "X"}
+  [threw, u._saving]
+''', [true, false]
+
+test "save() guard is per-instance: parallel saves on different instances do not interfere", modelHeader + '''
+  User = schema :model
+    name! string
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}], data: [[1, "X"]], rows: 1}
+  a = User.create! {name: "A"}
+  b = User.create! {name: "B"}
+  a.name = "A2"
+  b.name = "B2"
+  # Both should save without interference.
+  await Promise.all [a.save(), b.save()]
+  [a._saving, b._saving]
+''', [false, false]
+
+# Dev-mode PK fallback warning: when a save() finds no `_snapshot`,
+# the WHERE clause falls back to `inst[pk]`. That's almost always an
+# accidental misuse pattern (manually-constructed persisted instance
+# without going through hydrate). Emit a console.warn in non-prod so
+# the symptom is visible early.
+
+test "save() emits a console.warn when PK fallback fires (non-prod)", modelHeader + '''
+  User = schema :model
+    name! string
+  klass = User._getClass()
+  # Manually construct a persisted instance with NO _snapshot. This is
+  # the misuse pattern the warning is meant to catch.
+  u = new klass({}, true)
+  Object.defineProperty(u, "id", {value: 42, enumerable: true, writable: true, configurable: true})
+  u.name = "Bob"
+  warnings = []
+  origWarn = console.warn
+  console.warn = (msg) -> warnings.push(msg)
+  try
+    u.save!
+  finally
+    console.warn = origWarn
+  warnings.length is 1 and warnings[0].includes("no _snapshot")
+''', true
+
+test "save() does NOT warn when _snapshot is present", modelHeader + '''
+  User = schema :model
+    name! string
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}], data: [[42, "Alice"]], rows: 1}
+  u = User.find! 42
+  u.name = "Bob"
+  warnings = []
+  origWarn = console.warn
+  console.warn = (msg) -> warnings.push(msg)
+  try
+    u.save!
+  finally
+    console.warn = origWarn
+  warnings.length
+''', 0
+
+# Primary key snapshot: the UPDATE WHERE clause must target the
+# originally-loaded row even if user code reassigns inst.id in memory.
+# Mirrors Active Record's behavior — in-memory PK mutation is ignored
+# at write time. Without this, a stray `inst.id = X` would silently
+# update the wrong row (or zero rows).
+
+test "UPDATE WHERE uses original PK from snapshot, not the mutated in-memory id", modelHeader + '''
+  User = schema :model
+    name! string
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}], data: [[42, "Alice"]], rows: 1}
+  u = User.find! 42
+  adapter.calls = []
+  u.id   = 999     # rogue / unintentional in-memory PK reassignment
+  u.name = "Bob"
+  u.save!
+  updates = adapter.calls.filter (c) -> c.sql.startsWith "UPDATE"
+  vals = updates[0]?.params or []
+  # WHERE id = 42 (original from snapshot), NOT 999 (the mutated value)
+  vals[vals.length - 1]
+''', 42
+
+test "UPDATE WHERE PK survives multiple consecutive saves AND in-memory id mutation", modelHeader + '''
+  User = schema :model
+    name!  string
+    title? string
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}, {name: "title"}], data: [[42, "Alice", null]], rows: 1}
+  u = User.find! 42
+  u.name = "Bob"
+  u.save!  # first UPDATE; nextSnap installed (carrying id = 42)
+  u.id = 999  # rogue mutation between saves — must NOT redirect WHERE
+  adapter.calls = []
+  u.title = "Engineer"
+  u.save!
+  updates = adapter.calls.filter (c) -> c.sql.startsWith "UPDATE"
+  vals = updates[0]?.params or []
+  vals[vals.length - 1]
+''', 42
+
+# Canonical camelCase field names. Schema definition rejects field names
+# whose snake_case <-> camelCase mapping is ambiguous (acronym style),
+# so markDirty('foo_id') / savedChanges['fooId'] / hydrate's snake_case
+# alias setup all converge on a single identifier for any column.
+
+fail "field name 'mdmID' (acronym style) is rejected at schema-definition time", '''
+  User = schema :model
+    mdmID! string
+  User._normalize()
+'''
+
+fail "field name 'XMLPath' (leading acronym) is rejected", '''
+  User = schema :model
+    XMLPath! string
+  User._normalize()
+'''
+
+fail "field name '_dirty' (leading underscore, not lowercase letter) is rejected", '''
+  User = schema :model
+    _dirty! string
+  User._normalize()
+'''
+
+fail "field name '1stPlace' (leading digit) is rejected", '''
+  User = schema :model
+    1stPlace! string
+  User._normalize()
+'''
+
+test "field name 'mdmId' (canonical camelCase) is accepted", '''
+  User = schema :model
+    mdmId? string
+  [...User._normalize().fields.keys()]
+''', ["mdmId"]
+
+test "field name with adjacent vowels and digits accepted", '''
+  User = schema :model
+    line2!  string
+    addressZip? string
+  [...User._normalize().fields.keys()]
+''', ["line2", "addressZip"]
+
+# -- toJSON iterates own enumerable properties: id + declared + timestamps --
+# -- + @belongs_to FKs + !> eager-derived; excludes methods, ~> getters,   --
+# -- and internal state (_dirty/_persisted/_snapshot).                     --
+
+test ":model toJSON includes id and declared fields", modelHeader + '''
+  User = schema :model
+    name! string
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}], data: [[7, "Alice"]], rows: 1}
+  u = User.create! {name: "Alice"}
+  json = u.toJSON()
+  [json.id, json.name]
+''', [7, "Alice"]
+
+test ":model toJSON includes @timestamps columns", modelHeader + '''
+  User = schema :model
+    name! string
+    @timestamps
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}, {name: "created_at"}, {name: "updated_at"}], data: [[1, "a", "T1", "T2"]], rows: 1}
+  u = User.create! {name: "a"}
+  json = u.toJSON()
+  [json.id, json.name, json.createdAt, json.updatedAt]
+''', [1, "a", "T1", "T2"]
+
+test ":model toJSON includes @belongs_to FK columns", modelHeader + '''
+  Org = schema :model
+    name! string
+  User = schema :model
+    name! string
+    @belongs_to Org
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}, {name: "org_id"}], data: [[1, "Alice", 42]], rows: 1}
+  u = User.create! {name: "Alice", orgId: 42}
+  json = u.toJSON()
+  [json.id, json.orgId]
+''', [1, 42]
+
+test ":model toJSON includes !> eager-derived fields", modelHeader + '''
+  User = schema :model
+    firstName! string
+    lastName!  string
+    displayName: !> "#{@firstName} #{@lastName}"
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "first_name"}, {name: "last_name"}], data: [[1, "Alice", "Smith"]], rows: 1}
+  u = User.find! 1
+  u.toJSON().displayName
+''', "Alice Smith"
+
+# !> eager-derived fields must also run on .create() after the INSERT
+# RETURNING data lands — otherwise DB-assigned slots (id, @timestamps,
+# belongs_to FKs) would be invisible to the derivation.
+
+test ":model.create() runs !> eager-derived after RETURNING columns arrive", modelHeader + '''
+  User = schema :model
+    firstName! string
+    lastName!  string
+    displayName: !> "#{@firstName} #{@lastName}"
+    withId:      !> "u-#{@id}"
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "first_name"}, {name: "last_name"}], data: [[42, "Alice", "Smith"]], rows: 1}
+  u = User.create! {firstName: "Alice", lastName: "Smith"}
+  [u.displayName, u.withId]
+''', ["Alice Smith", "u-42"]
+
+test ":model toJSON excludes methods, ~> computed getters, and internal state", modelHeader + '''
+  User = schema :model
+    name! string
+    greet: -> "Hi, #{@name}"
+    upper: ~> @name.toUpperCase()
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}], data: [[1, "Alice"]], rows: 1}
+  u = User.create! {name: "Alice"}
+  json = u.toJSON()
+  keys = Object.keys(json)
+  [
+    ('greet'        in keys)
+    ('upper'        in keys)
+    ('_dirty'       in keys)
+    ('_persisted'   in keys)
+    ('_snapshot'    in keys)
+    ('_saving'      in keys)
+    ('savedChanges' in keys)
+  ]
+''', [false, false, false, false, false, false, false]
+
+test ":model toJSON survives JSON.stringify round-trip with id preserved", modelHeader + '''
+  User = schema :model
+    name! string
+    @timestamps
+    @belongs_to Org
+  Org = schema :model
+    name! string
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}, {name: "org_id"}, {name: "created_at"}, {name: "updated_at"}], data: [[11, "Alice", 3, "T1", "T2"]], rows: 1}
+  u = User.create! {name: "Alice", orgId: 3}
+  obj = JSON.parse(JSON.stringify(u))
+  [obj.id, obj.name, obj.orgId, obj.createdAt, obj.updatedAt]
+''', [11, "Alice", 3, "T1", "T2"]
+
+# -- relations resolve lazily, even cross-module style (same registry) --
+
+test "belongs_to relation resolves from registry", modelHeader + '''
+  User = schema :model
+    name! string
+  Order = schema :model
+    @belongs_to User
+  # find-by-id mock: returns different rows depending on SQL
+  adapter.query = (sql, params) ->
+    adapter.calls.push {sql, params}
+    if sql.match /FROM "users"/
+      {columns: [{name: "id"}, {name: "name"}], data: [[params[0], "Alice"]], rows: 1}
+    else
+      {columns: [{name: "id"}, {name: "user_id"}], data: [[7, 42]], rows: 1}
+  order = Order.find! 7
+  owner = order.user!
+  [owner.name, order.userId]
+''', ["Alice", 42]
+
+test "has_many relation resolves from registry", modelHeader + '''
+  User = schema :model
+    name! string
+  Order = schema :model
+    @belongs_to User
+  adapter.query = (sql, params) ->
+    adapter.calls.push {sql, params}
+    if sql.match /FROM "orders"/
+      {columns: [{name: "id"}, {name: "user_id"}], data: [[10, 1], [11, 1]], rows: 2}
+    else
+      {columns: [{name: "id"}, {name: "name"}], data: [[1, "Alice"]], rows: 1}
+  User.entries = User._desc.entries.concat [{tag: "directive", name: "has_many", args: [{target: "Order"}]}]
+  # Re-register the enriched descriptor so relations pick it up.
+  User2 = schema :model
+    name! string
+    @has_many Order
+  __SchemaRegistry.register User2
+  adapter.calls = []
+  adapter.query = (sql, params) ->
+    adapter.calls.push {sql, params}
+    if sql.match /FROM "orders"/
+      {columns: [{name: "id"}, {name: "user_id"}], data: [[10, 1], [11, 1]], rows: 2}
+    else
+      {columns: [{name: "id"}, {name: "name"}], data: [[1, "Alice"]], rows: 1}
+  u = User2.find! 1
+  orders = u.orders!
+  orders.length
+''', 2
+
+test "self-referential :model — Category @belongs_to Category?", modelHeader + '''
+  Category = schema :model
+    name! string
+    @belongs_to Category?
+  sql = Category.toSQL()
+  [sql.includes("category_id INTEGER REFERENCES categories(id)"), Category.kind]
+''', [true, "model"]
+
+test ".toSQL() with circular @belongs_to / @has_many doesn't loop", modelHeader + '''
+  User = schema :model
+    name! string
+    @has_many Order
+  Order = schema :model
+    total integer
+    @belongs_to User
+  [User.toSQL().includes("CREATE TABLE users"), Order.toSQL().includes("user_id INTEGER NOT NULL REFERENCES users(id)")]
+''', [true, true]
+
+# -- namespace collisions --
+
+fail "field vs method collision in :model", '''
+  User = schema :model
+    name! string
+    name: -> "hi"
+  User.toSQL()
+'''
+
+fail "reserved ORM name as field in :model", '''
+  User = schema :model
+    find! string
+  User.toSQL()
+'''
+
+# Implicit-column names (createdAt / updatedAt / deletedAt) are managed
+# by @timestamps and @softDelete. Declaring them as user fields would
+# either shadow the runtime API or produce duplicate SET writes for
+# the same column in one UPDATE statement.
+
+fail "field 'updatedAt' as a field in :model is reserved (implicit timestamp column)", '''
+  User = schema :model
+    updatedAt? datetime
+  User.toSQL()
+'''
+
+fail "field 'createdAt' as a field in :model is reserved", '''
+  User = schema :model
+    createdAt? datetime
+  User.toSQL()
+'''
+
+fail "field 'deletedAt' as a field in :model is reserved", '''
+  User = schema :model
+    deletedAt? datetime
+  User.toSQL()
+'''
+
+fail "field 'savedChanges' as a field in :model is reserved (instance API)", '''
+  User = schema :model
+    savedChanges? string
+  User.toSQL()
+'''
+
+fail "field 'markDirty' as a field in :model is reserved (instance API)", '''
+  User = schema :model
+    markDirty? string
+  User.toSQL()
+'''
+
+# ==============================================================================
+# :mixin expansion, cycles, collisions
+# ==============================================================================
+
+test "mixin expands fields into host :model", '''
+  Timestamps = schema :mixin
+    createdAt! datetime
+    updatedAt! datetime
+  User = schema :model
+    name! string
+    @mixin Timestamps
+  [...User._normalize().fields.keys()]
+''', ["name", "createdAt", "updatedAt"]
+
+test "mixin chains via nested @mixin", '''
+  A = schema :mixin
+    a! string
+  B = schema :mixin
+    b! string
+    @mixin A
+  User = schema :model
+    name! string
+    @mixin B
+  [...User._normalize().fields.keys()]
+''', ["name", "a", "b"]
+
+test "mixin collision is a compile-time error", '''
+  A = schema :mixin
+    conflict! string
+  B = schema :mixin
+    conflict! integer
+  User = schema :model
+    @mixin A
+    @mixin B
+  result = null
+  try
+    User._normalize()
+    result = "no-throw"
+  catch e
+    result = [e.name, e.issues[0].error]
+  result
+''', ["SchemaError", "mixin-collision"]
+
+test "mixin cycle throws with chain", '''
+  A = schema :mixin
+    @mixin B
+  B = schema :mixin
+    @mixin A
+  try
+    A._normalize()
+    "no-throw"
+  catch e
+    e.issues[0].error
+''', "mixin-cycle"
+
+fail ":mixin rejects method entries at parse time", '''
+  X = schema :mixin
+    a! string
+    greet: -> "hi"
+'''
+
+fail ":mixin rejects computed entries at parse time", '''
+  X = schema :mixin
+    a! string
+    full: ~> "hi"
+'''
+
+fail ":mixin rejects non-@mixin directives", '''
+  X = schema :mixin
+    a! string
+    @timestamps
+'''
+
+# ==============================================================================
+# Schema algebra: .pick / .omit / .partial / .required / .extend
+# ==============================================================================
+
+test ".pick returns a :shape with only named fields", '''
+  User = schema :model
+    name! string
+    email! email
+    bio? text
+  Picked = User.pick("name", "email")
+  [Picked.kind, [...Picked._normalize().fields.keys()]]
+''', ["shape", ["name", "email"]]
+
+test ".omit returns a :shape without named fields", '''
+  User = schema :model
+    name! string
+    email! email
+    password! string
+  Safe = User.omit("password")
+  [Safe.kind, [...Safe._normalize().fields.keys()]]
+''', ["shape", ["name", "email", "id"]]
+
+test ".partial flips all fields to optional", '''
+  X = schema
+    name! string
+    age! integer
+  P = X.partial()
+  [P._normalize().fields.get("name").required, P._normalize().fields.get("age").required]
+''', [false, false]
+
+test ".required(keys) forces required on listed fields", '''
+  X = schema
+    name? string
+    age? integer
+  R = X.required("name")
+  [R._normalize().fields.get("name").required, R._normalize().fields.get("age").required]
+''', [true, false]
+
+test "multi-line trailers split on commas (range + regex across lines)", '''
+  Account = schema
+    password! string,
+      8..100,
+      /[A-Z]/
+  r1 = Account.safe {password: "short"}
+  r2 = Account.safe {password: "longenough"}
+  ok = Account.ok {password: "Longenough"}
+  [r1.errors[0].error, r2.errors[0].error, ok]
+''', ["min", "pattern", true]
+
+test "multi-line trailer ending in a transform still parses", '''
+  X = schema
+    email! email,
+      ..320,
+      -> it.email.toLowerCase()
+  v = X.parse {email: "A@B.CO"}
+  v.email
+''', "a@b.co"
+
+test ".extend accepts an inline schema argument inside call parens", '''
+  User = schema :shape
+    name! string
+  AdminUser = User.extend(schema :shape; permissions! string[])
+  a = AdminUser.parse {name: "A", permissions: ["all"]}
+  [a.name, a.permissions]
+''', ["A", ["all"]]
+
+test ".extend accepts a parenthesized indented schema argument", '''
+  User = schema :shape
+    name! string
+  Wide = User.extend (schema :shape
+    level? integer)
+  w = Wide.parse {name: "B", level: 3}
+  [w.name, w.level]
+''', ["B", 3]
+
+test ".extend merges two schemas' fields", '''
+  A = schema :shape
+    a! string
+  B = schema :shape
+    b! integer
+  M = A.extend(B)
+  [...M._normalize().fields.keys()]
+''', ["a", "b"]
+
+test ".extend throws on field collision", '''
+  A = schema :shape
+    name! string
+  B = schema :shape
+    name! integer
+  result = null
+  try
+    A.extend(B)
+    result = "no-throw"
+  catch e
+    result = e.message.includes("collides")
+  result
+''', true
+
+test "algebra on :model returns :shape; ORM methods throw", '''
+  User = schema :model
+    name! string
+    email! email
+  UserPublic = User.omit("email")
+  findErr = null
+  toSQLErr = null
+  try
+    UserPublic.find! 1
+  catch e
+    findErr = e.message.includes(":model-only")
+  try
+    UserPublic.toSQL()
+  catch e
+    toSQLErr = e.message.includes(":model-only")
+  [UserPublic.kind, findErr, toSQLErr, typeof UserPublic.parse]
+''', ["shape", true, true, "function"]
+
+test "algebra drops behavior", '''
+  Address = schema :shape
+    street! string
+    city! string
+    full: ~> @street + ", " + @city
+    normalize: -> @city
+  ShortAddress = Address.pick("street", "city")
+  a = Address.parse({street: "X", city: "Y"})
+  b = ShortAddress.parse({street: "X", city: "Y"})
+  [typeof a.full, typeof a.normalize, typeof b.full, typeof b.normalize]
+''', ["string", "function", "undefined", "undefined"]
+
+# ==============================================================================
+# Compile-time projection folding (opt-in: foldProjections)
+# ==============================================================================
+#
+# Folding statically evaluates a derived schema's algebra against the source's
+# descriptor and rewrites the assignment to a self-contained `__schema({...})`
+# literal — no reference to the source. That's what lets a projection cross the
+# client bundle boundary without dragging the model along. It's OFF by default
+# (the runtime algebra path is unchanged), so these tests pass foldProjections.
+
+# A derived schema is a plain runtime call by default — the source stays coupled.
+code "fold off by default: derived schema stays a runtime call", '''
+  User = schema :model
+    name! string
+    @timestamps
+  V = User.pick("id", "name")
+  ''', '''
+  let User, V;
+  User = __schema({kind: "model", name: "User", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}, {tag: "directive", name: "timestamps"}]});
+  V = User.pick("id", "name");
+  ''', opts
+
+type "exported schema emits export declare const", '''
+    export Foo = schema :input
+      a! string
+  ''', '''
+  interface SchemaIssue { field: string; error: string; message: string; }
+  type SchemaSafeResult<T> = { ok: true; value: T; errors: null } | { ok: false; value: null; errors: SchemaIssue[] };
+  interface ArraySchema<Out> {
+    parse(data: unknown): Out[];
+    safe(data: unknown): SchemaSafeResult<Out[]>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out[]>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out[]>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+  }
+  interface Schema<Out, In = unknown> {
+    parse(data: unknown): Out;
+    array: ArraySchema<Out>;
+    safe(data: unknown): SchemaSafeResult<Out>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+    pick<K extends keyof In>(...keys: K[]): Schema<Pick<In, K>, Pick<In, K>>;
+    omit<K extends keyof In>(...keys: K[]): Schema<Omit<In, K>, Omit<In, K>>;
+    partial(): Schema<Partial<In>, Partial<In>>;
+    required<K extends keyof In>(...keys: K[]): Schema<Omit<In, K> & Required<Pick<In, K>>, Omit<In, K> & Required<Pick<In, K>>>;
+    extend<U>(other: Schema<U>): Schema<In & U, In & U>;
+  }
+  export type Foo = { a: string };
+  export declare const Foo: Schema<Foo, Foo>;
+  '''
+
+# ==============================================================================
+# Recursive / same-file schema references in shadow TS
+# ==============================================================================
+
+# Recursion falls out of the bare-name scheme: every named schema
+# declares a `type Name`, so self-references and mutual recursion
+# resolve natively as recursive TS type aliases.
+type "recursive :shape emits a self-referencing type alias", '''
+    Tree = schema :shape
+      value!    integer
+      children? Tree[]
+  ''', '''
+  interface SchemaIssue { field: string; error: string; message: string; }
+  type SchemaSafeResult<T> = { ok: true; value: T; errors: null } | { ok: false; value: null; errors: SchemaIssue[] };
+  interface ArraySchema<Out> {
+    parse(data: unknown): Out[];
+    safe(data: unknown): SchemaSafeResult<Out[]>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out[]>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out[]>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+  }
+  interface Schema<Out, In = unknown> {
+    parse(data: unknown): Out;
+    array: ArraySchema<Out>;
+    safe(data: unknown): SchemaSafeResult<Out>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+    pick<K extends keyof In>(...keys: K[]): Schema<Pick<In, K>, Pick<In, K>>;
+    omit<K extends keyof In>(...keys: K[]): Schema<Omit<In, K>, Omit<In, K>>;
+    partial(): Schema<Partial<In>, Partial<In>>;
+    required<K extends keyof In>(...keys: K[]): Schema<Omit<In, K> & Required<Pick<In, K>>, Omit<In, K> & Required<Pick<In, K>>>;
+    extend<U>(other: Schema<U>): Schema<In & U, In & U>;
+  }
+  type Tree = { value: number; children?: Tree[] };
+  declare const Tree: Schema<Tree, Tree>;
+  export {};
+  '''
+
+type "mutually recursive shapes resolve through bare-name aliases", '''
+    Person = schema :shape
+      name! string
+      pets? Pet[]
+    Pet = schema :shape
+      name!  string
+      owner? Person
+  ''', '''
+  interface SchemaIssue { field: string; error: string; message: string; }
+  type SchemaSafeResult<T> = { ok: true; value: T; errors: null } | { ok: false; value: null; errors: SchemaIssue[] };
+  interface ArraySchema<Out> {
+    parse(data: unknown): Out[];
+    safe(data: unknown): SchemaSafeResult<Out[]>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out[]>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out[]>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+  }
+  interface Schema<Out, In = unknown> {
+    parse(data: unknown): Out;
+    array: ArraySchema<Out>;
+    safe(data: unknown): SchemaSafeResult<Out>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+    pick<K extends keyof In>(...keys: K[]): Schema<Pick<In, K>, Pick<In, K>>;
+    omit<K extends keyof In>(...keys: K[]): Schema<Omit<In, K>, Omit<In, K>>;
+    partial(): Schema<Partial<In>, Partial<In>>;
+    required<K extends keyof In>(...keys: K[]): Schema<Omit<In, K> & Required<Pick<In, K>>, Omit<In, K> & Required<Pick<In, K>>>;
+    extend<U>(other: Schema<U>): Schema<In & U, In & U>;
+  }
+  type Person = { name: string; pets?: Pet[] };
+  declare const Person: Schema<Person, Person>;
+  type Pet = { name: string; owner?: Person };
+  declare const Pet: Schema<Pet, Pet>;
+  export {};
+  '''
+
+type "nested same-file schema reference resolves to its bare type", '''
+    Address = schema :shape
+      street! string
+    User = schema :shape
+      name!    string
+      address! Address
+  ''', '''
+  interface SchemaIssue { field: string; error: string; message: string; }
+  type SchemaSafeResult<T> = { ok: true; value: T; errors: null } | { ok: false; value: null; errors: SchemaIssue[] };
+  interface ArraySchema<Out> {
+    parse(data: unknown): Out[];
+    safe(data: unknown): SchemaSafeResult<Out[]>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out[]>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out[]>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+  }
+  interface Schema<Out, In = unknown> {
+    parse(data: unknown): Out;
+    array: ArraySchema<Out>;
+    safe(data: unknown): SchemaSafeResult<Out>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+    pick<K extends keyof In>(...keys: K[]): Schema<Pick<In, K>, Pick<In, K>>;
+    omit<K extends keyof In>(...keys: K[]): Schema<Omit<In, K>, Omit<In, K>>;
+    partial(): Schema<Partial<In>, Partial<In>>;
+    required<K extends keyof In>(...keys: K[]): Schema<Omit<In, K> & Required<Pick<In, K>>, Omit<In, K> & Required<Pick<In, K>>>;
+    extend<U>(other: Schema<U>): Schema<In & U, In & U>;
+  }
+  type Address = { street: string };
+  declare const Address: Schema<Address, Address>;
+  type User = { name: string; address: Address };
+  declare const User: Schema<User, User>;
+  export {};
+  '''
+
+# ==============================================================================
+# Registry hardening — collisions throw, replace opt-in, scope()
+# ==============================================================================
+
+test "registry: different definition under same name throws collision", '''
+  __SchemaRegistry.reset()
+  __SchemaRegistry.replace = false
+  err = null
+  try
+    R1 = schema :input; name!
+    R1 = schema :input; other! integer
+  catch e
+    err = e
+  __SchemaRegistry.replace = true
+  [err?.name, err?.issues[0].error, err.message.includes("already registered")]
+''', ["SchemaError", "collision", true]
+
+test "registry: identical redeclaration rebinds silently", '''
+  __SchemaRegistry.reset()
+  __SchemaRegistry.replace = false
+  out = null
+  try
+    R2 = schema :input; name!
+    first = __SchemaRegistry.get("R2")
+    R2 = schema :input; name!
+    second = __SchemaRegistry.get("R2")
+    out = [first isnt second, second.name]
+  finally
+    __SchemaRegistry.replace = true
+  out
+''', [true, "R2"]
+
+test "registry: replace = true restores last-loaded-wins (dev/HMR)", '''
+  __SchemaRegistry.reset()
+  R3 = schema :input; name!
+  R3 = schema :input; other! integer
+  [...__SchemaRegistry.get("R3")._normalize().fields.keys()]
+''', ["other"]
+
+test "registry: scope() runs against a fresh registry and restores", '''
+  __SchemaRegistry.reset()
+  S1 = schema :input; name!
+  inner = null
+  __SchemaRegistry.scope ->
+    S2 = schema :input; other!
+    inner = [__SchemaRegistry.has("S1"), __SchemaRegistry.has("S2")]
+    null
+  [inner[0], inner[1], __SchemaRegistry.has("S1"), __SchemaRegistry.has("S2")]
+''', [false, true, true, false]
+
+# ==============================================================================
+# findMany, relation memo, eager loading (.includes)
+# ==============================================================================
+
+test "findMany issues one IN query; [] short-circuits with no SQL", modelHeader + '''
+  User = schema :model
+    name! string
+  adapter.canned['SELECT * FROM "users" WHERE "id" IN (?, ?, ?)'] =
+    {columns: [{name: "id"}, {name: "name"}], data: [[1, "A"], [2, "B"], [3, "C"]], rows: 3}
+  list = User.findMany! [1, 2, 3]
+  none = User.findMany! []
+  [list.length, none.length, adapter.calls.length, list[0].name]
+''', [3, 0, 1, "A"]
+
+test "relation accessor memoizes; {reload: true} busts the memo", modelHeader + '''
+  User = schema :model
+    name! string
+    @has_many Order
+  Order = schema :model
+    total! integer
+    @belongs_to User
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}], data: [[1, "A"]], rows: 1}
+  u = User.find! 1
+  before = adapter.calls.length
+  o1 = u.orders!
+  mid = adapter.calls.length
+  o2 = u.orders!
+  cached = adapter.calls.length
+  u.orders! {reload: true}
+  [mid - before, cached - mid, adapter.calls.length - cached, o1 is o2]
+''', [1, 0, 1, true]
+
+# ==============================================================================
+# Constraint-violation translation — DB errors become SchemaErrors
+# ==============================================================================
+
+test "UNIQUE violation surfaces as SchemaError {field, error: 'unique'}", '''
+  adapter =
+    query: (sql, params) ->
+      throw new Error('Constraint Error: Duplicate key "email: a@b.c" violates unique constraint.')
+  __schemaSetAdapter adapter
+  __SchemaRegistry.reset()
+  User = schema :model
+    name! string
+    email! email @unique
+  err = null
+  try
+    User.create! {name: "A", email: "a@b.c"}
+  catch e
+    err = e
+  [err.name, err.issues[0].field, err.issues[0].error, err.schemaName, err.cause?.message.includes("Duplicate key")]
+''', ["SchemaError", "email", "unique", "User", true]
+
+test "NOT NULL violation surfaces as {field, error: 'required'}", '''
+  adapter =
+    query: (sql, params) ->
+      throw new Error("Constraint Error: NOT NULL constraint failed: users.name")
+  __schemaSetAdapter adapter
+  __SchemaRegistry.reset()
+  User = schema :model
+    name? string
+  err = null
+  try
+    User.create! {}
+  catch e
+    err = e
+  [err.name, err.issues[0].field, err.issues[0].error]
+''', ["SchemaError", "name", "required"]
+
+test "FK violation surfaces as {field, error: 'reference'}", '''
+  adapter =
+    query: (sql, params) ->
+      throw new Error('Constraint Error: Violates foreign key constraint because key "user_id: 99" does not exist in the referenced table')
+  __schemaSetAdapter adapter
+  __SchemaRegistry.reset()
+  User = schema :model
+    name! string
+  Order = schema :model
+    total! integer
+    @belongs_to User
+  err = null
+  try
+    Order.create! {total: 1, user_id: 99}
+  catch e
+    err = e
+  [err.name, err.issues[0].field, err.issues[0].error]
+''', ["SchemaError", "userId", "reference"]
+
+test "non-constraint DB errors propagate untouched", '''
+  adapter =
+    query: (sql, params) -> throw new Error("Catalog Error: table users does not exist")
+  __schemaSetAdapter adapter
+  __SchemaRegistry.reset()
+  User = schema :model
+    name! string
+  err = null
+  try
+    User.create! {name: "A"}
+  catch e
+    err = e
+  [err.name, err.message.includes("Catalog Error")]
+''', ["Error", true]
+
+# ==============================================================================
+# @softDelete — withDeleted / onlyDeleted / restore / hard destroy
+# ==============================================================================
+
+test "@softDelete: withDeleted / onlyDeleted control the filter", modelHeader + '''
+  User = schema :model
+    name! string
+    @softDelete
+  User.all!
+  User.withDeleted().all!
+  User.onlyDeleted().all!
+  [
+    adapter.calls[0].sql.includes('"deleted_at" IS NULL')
+    adapter.calls[1].sql.includes('deleted_at')
+    adapter.calls[2].sql.includes('"deleted_at" IS NOT NULL')
+  ]
+''', [true, false, true]
+
+test "@softDelete: restore() clears deleted_at; destroy(hard: true) DELETEs", modelHeader + '''
+  User = schema :model
+    name! string
+    @softDelete
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}, {name: "deleted_at"}], data: [[1, "A", "2026-01-01"]], rows: 1}
+  u = User.withDeleted().first!
+  u.restore!
+  restoreSQL = adapter.calls[adapter.calls.length - 1].sql
+  u.destroy! {hard: true}
+  destroySQL = adapter.calls[adapter.calls.length - 1].sql
+  [restoreSQL.includes('SET "deleted_at" = NULL'), destroySQL.startsWith("DELETE"), u.deletedAt, u._persisted]
+''', [true, true, null, false]
+
+test "restore() on a model without @softDelete throws", modelHeader + '''
+  User = schema :model
+    name! string
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}], data: [[1, "A"]], rows: 1}
+  u = User.find! 1
+  err = null
+  try
+    u.restore!
+  catch e
+    err = e.message
+  err.includes("@softDelete")
+''', true
+
+# ==============================================================================
+# Batch writes — updateAll / deleteAll / insertMany / upsert
+# ==============================================================================
+
+test ".where().updateAll! emits one UPDATE and bypasses hooks", modelHeader + '''
+  trace = []
+  User = schema :model
+    name! string
+    active? boolean
+    beforeSave: -> trace.push "bs"
+  User.where(active: false).updateAll! {name: "X"}
+  sql = adapter.calls[0].sql
+  [sql.startsWith("UPDATE"), sql.includes('SET "name" = ?'), sql.includes('WHERE "active" = ?'), adapter.calls[0].params, trace.length]
+''', [true, true, true, ["X", false], 0]
+
+test ".deleteAll! is soft-delete aware", modelHeader + '''
+  Soft = schema :model
+    name! string
+    @softDelete
+  Hard = schema :model
+    name! string
+  Soft.where(name: "x").deleteAll!
+  Hard.where(name: "x").deleteAll!
+  [
+    adapter.calls[0].sql.startsWith("UPDATE")
+    adapter.calls[0].sql.includes('"deleted_at" = ?')
+    adapter.calls[1].sql.startsWith("DELETE")
+  ]
+''', [true, true, true]
+
+test ".insertMany! validates every row before any SQL, then one INSERT", modelHeader + '''
+  User = schema :model
+    name! string
+    email! email
+  err = null
+  try
+    User.insertMany! [{name: "A", email: "a@b.c"}, {name: "B", email: "nope"}]
+  catch e
+    err = e
+  noSQL = adapter.calls.length
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}, {name: "email"}], data: [[1, "A", "a@b.c"], [2, "B", "b@b.c"]], rows: 2}
+  out = User.insertMany! [{name: "A", email: "a@b.c"}, {name: "B", email: "b@b.c"}]
+  sql = adapter.calls[0].sql
+  [err.issues[0].field, noSQL, out.length, sql.includes("VALUES (?, ?), (?, ?)"), out[0]._persisted]
+''', ["[1].email", 0, 2, true, true]
+
+test ".upsert! without a conflict target throws", modelHeader + '''
+  User = schema :model
+    name! string
+  err = null
+  try
+    User.upsert! {name: "A"}
+  catch e
+    err = e.message
+  err.includes("conflict target")
+''', true
+
+# ==============================================================================
+# Query scopes — @scope, @defaultScope, .unscoped()
+# ==============================================================================
+
+test "@scope: composes on the model and the builder, in any order", modelHeader + '''
+  User = schema :model
+    name!    string
+    active?  boolean
+    role?    string
+    @scope :active, -> @where(active: true)
+    @scope :admins, -> @where(role: "admin")
+    @scope :since,  (d) -> @where("created_at > ?", d)
+  User.active().admins().since(123).all!
+  User.where(role: "user").active().all!
+  [
+    adapter.calls[0].sql.includes('"active" = ? AND "role" = ? AND created_at > ?')
+    adapter.calls[0].params
+    adapter.calls[1].sql.includes('"role" = ? AND "active" = ?')
+  ]
+''', [true, [true, "admin", 123], true]
+
+test "@scope: chains with order/limit and terminates normally", modelHeader + '''
+  User = schema :model
+    name!   string
+    active? boolean
+    @scope :active, -> @where(active: true)
+  User.active().order("name").limit(5).all!
+  sql = adapter.calls[0].sql
+  [sql.includes('WHERE "active" = ?'), sql.includes("ORDER BY name"), sql.includes("LIMIT 5")]
+''', [true, true, true]
+
+test "@defaultScope: applies to where/all/count/find; .unscoped() skips it", modelHeader + '''
+  User = schema :model
+    name!    string
+    hidden?  boolean
+    @defaultScope -> @where(hidden: false)
+  User.all!
+  User.where(name: "A").all!
+  User.count!
+  User.find! 7
+  User.unscoped().all!
+  User.where(name: "B").unscoped().all!
+  [
+    adapter.calls[0].sql.includes('"hidden" = ?')
+    adapter.calls[1].sql.includes('"name" = ? AND "hidden" = ?')
+    adapter.calls[2].sql.includes('"hidden" = ?')
+    adapter.calls[3].sql.includes('"id" = ? AND "hidden" = ?')
+    adapter.calls[4].sql.includes("hidden")
+    adapter.calls[5].sql.includes("hidden")
+  ]
+''', [true, true, true, true, false, false]
+
+test "@defaultScope composes with @softDelete filtering", modelHeader + '''
+  User = schema :model
+    name!   string
+    hidden? boolean
+    @softDelete
+    @defaultScope -> @where(hidden: false)
+  User.all!
+  sql = adapter.calls[0].sql
+  [sql.includes('"hidden" = ?'), sql.includes('"deleted_at" IS NULL')]
+''', [true, true]
+
+test "@scope: name colliding with the query API throws at normalize", modelHeader + '''
+  User = schema :model
+    name! string
+    @scope :where, -> @limit(1)
+  err = null
+  try
+    User.all!
+  catch e
+    err = e
+  [err.name, err.issues[0].error, err.issues[0].field]
+''', ["SchemaError", "collision", "where"]
+
+test "@scope: duplicate scope names throw at normalize", modelHeader + '''
+  User = schema :model
+    name! string
+    @scope :active, -> @limit(1)
+    @scope :active, -> @limit(2)
+  err = null
+  try
+    User.all!
+  catch e
+    err = e
+  [err.name, err.issues[0].error]
+''', ["SchemaError", "collision"]
+
+test "@defaultScope: more than one throws at normalize", modelHeader + '''
+  User = schema :model
+    name! string
+    @defaultScope -> @where(a: 1)
+    @defaultScope -> @where(b: 2)
+  err = null
+  try
+    User.all!
+  catch e
+    err = e
+  [err.name, err.message.includes("one @defaultScope")]
+''', ["SchemaError", true]
+
+test "@scope: a field and a scope may share a name (static vs instance)", modelHeader + '''
+  User = schema :model
+    name!   string
+    active? boolean
+    @scope :active, -> @where(active: true)
+  adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}, {name: "active"}], data: [[1, "A", true]], rows: 1}
+  u = User.active().first!
+  [u.active, adapter.calls[0].sql.includes('"active" = ?')]
+''', [true, true]
+
+fail "@scope on :shape is rejected at compile time", '''
+  X = schema :shape
+    name! string
+    @scope :active, -> @where(active: true)
+'''
+
+fail "@defaultScope on :input is rejected at compile time", '''
+  X = schema :input
+    name! string
+    @defaultScope -> @where(a: 1)
+'''
+
+fail "@scope requires a :symbol name", '''
+  X = schema :model
+    name! string
+    @scope active, -> @where(active: true)
+'''
+
+fail "@defaultScope rejects parameters", '''
+  X = schema :model
+    name! string
+    @defaultScope (d) -> @where("created_at > ?", d)
+'''
+
+test "@scope: multi-line body parses and runs", modelHeader + '''
+  User = schema :model
+    name!   string
+    active? boolean
+    @scope :recent, ->
+      @where(active: true)
+      @order("created_at DESC")
+  User.recent().all!
+  sql = adapter.calls[0].sql
+  [sql.includes('"active" = ?'), sql.includes("ORDER BY created_at DESC")]
+''', [true, true]
+
+type "@scope emits typed statics and a per-model query alias", '''
+    User = schema :model
+      name!   string
+      active? boolean
+      @scope :active, -> @where(active: true)
+  ''', '''
+  interface SchemaIssue { field: string; error: string; message: string; }
+  type SchemaSafeResult<T> = { ok: true; value: T; errors: null } | { ok: false; value: null; errors: SchemaIssue[] };
+  interface ArraySchema<Out> {
+    parse(data: unknown): Out[];
+    safe(data: unknown): SchemaSafeResult<Out[]>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out[]>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out[]>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+  }
+  interface Schema<Out, In = unknown> {
+    parse(data: unknown): Out;
+    array: ArraySchema<Out>;
+    safe(data: unknown): SchemaSafeResult<Out>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+    pick<K extends keyof In>(...keys: K[]): Schema<Pick<In, K>, Pick<In, K>>;
+    omit<K extends keyof In>(...keys: K[]): Schema<Omit<In, K>, Omit<In, K>>;
+    partial(): Schema<Partial<In>, Partial<In>>;
+    required<K extends keyof In>(...keys: K[]): Schema<Omit<In, K> & Required<Pick<In, K>>, Omit<In, K> & Required<Pick<In, K>>>;
+    extend<U>(other: Schema<U>): Schema<In & U, In & U>;
+  }
+  interface SchemaQuery<T, Data = Record<string, unknown>> {
+    all(): Promise<T[]>;
+    first(): Promise<T | null>;
+    count(): Promise<number>;
+    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<T, Data>;
+    limit(n: number): SchemaQuery<T, Data>;
+    offset(n: number): SchemaQuery<T, Data>;
+    order(spec: string): SchemaQuery<T, Data>;
+    orderBy(spec: string): SchemaQuery<T, Data>;
+    includes(...specs: unknown[]): SchemaQuery<T, Data>;
+    withDeleted(): SchemaQuery<T, Data>;
+    onlyDeleted(): SchemaQuery<T, Data>;
+    updateAll(values: Partial<Record<keyof Data, unknown>>): Promise<number | null>;
+    deleteAll(): Promise<number | null>;
+    unscoped(): SchemaQuery<T, Data>;
+  }
+  interface ModelSchema<Instance, Data = unknown, Id = number, Create = Partial<Data>> extends Schema<Instance, Data> {
+    find(id: Id): Promise<Instance | null>;
+    findMany(ids: Id[]): Promise<Instance[]>;
+    where(cond: Partial<Record<keyof Data, unknown>> | string, ...params: unknown[]): SchemaQuery<Instance, Data>;
+    includes(...specs: unknown[]): SchemaQuery<Instance, Data>;
+    withDeleted(): SchemaQuery<Instance, Data>;
+    onlyDeleted(): SchemaQuery<Instance, Data>;
+    unscoped(): SchemaQuery<Instance, Data>;
+    all(): Promise<Instance[]>;
+    first(): Promise<Instance | null>;
+    count(): Promise<number>;
+    create(data: Create): Promise<Instance>;
+    upsert(data: Create, opts: { on: unknown }): Promise<Instance>;
+    insertMany(rows: Create[]): Promise<Instance[]>;
+    toSQL(options?: { dropFirst?: boolean; header?: string; idStart?: number }): string;
+  }
+  type UserData = { name: string; active?: boolean } & { id: number };
+  type UserCreate = { name: string; active?: boolean };
+  type User = UserData & { save(): Promise<User>; destroy(opts?: { hard?: boolean }): Promise<User>; ok(): boolean; errors(): SchemaIssue[]; markDirty(name: string): User; savedChanges: Map<string, [unknown, unknown]>; toJSON(): UserData };
+  type UserQuery = SchemaQuery<User, UserData> & { active(...args: any[]): UserQuery };
+  declare const User: ModelSchema<User, UserData, number, UserCreate> & { active(...args: any[]): UserQuery };
+  export {};
+  '''
+
+# ==============================================================================
+# Coercion types — ~integer / ~number / ~boolean / ~date
+# ==============================================================================
+
+test "~integer: integral strings coerce; floats and junk fail with {error: 'coerce'}", '''
+  X = schema
+    age? ~integer
+  a = X.parse({age: "42"})
+  b = X.parse({age: 42})
+  r1 = X.safe({age: "12.5"})
+  r2 = X.safe({age: "abc"})
+  [a.age, b.age, r1.errors[0].error, r2.errors[0].error, r2.errors.length]
+''', [42, 42, "coerce", "coerce", 1]
+
+test "~number / ~boolean coerce their strict token sets", '''
+  X = schema
+    price?  ~number
+    active? ~boolean
+  a = X.parse({price: "19.95", active: "true"})
+  b = X.parse({price: 5, active: 0})
+  r = X.safe({active: "yes"})
+  [a.price, a.active, b.active, r.errors[0].error, r.errors[0].field]
+''', [19.95, true, false, "coerce", "active"]
+
+test "~date: ISO strings and epoch numbers become Dates; junk fails", '''
+  X = schema
+    shipped? ~date
+  a = X.parse({shipped: "2026-06-10"})
+  b = X.parse({shipped: 1749600000000})
+  r = X.safe({shipped: "tomorrow"})
+  [a.shipped instanceof Date, b.shipped instanceof Date, r.errors[0].error]
+''', [true, true, "coerce"]
+
+test "coercion runs before constraints; missing values untouched", '''
+  X = schema
+    age? ~integer, 18..120
+  r = X.safe({age: "12"})
+  ok = X.parse({})
+  [r.errors[0].error, r.errors[0].field, ok.age]
+''', ["min", "age", undefined]
+
+test "coercion survives algebra (field semantics carry through .pick)", '''
+  X = schema :shape
+    age?  ~integer
+    name? string
+  P = X.pick("age")
+  p1 = P.parse({age: "33"})
+  [P.kind, p1.age]
+''', ["shape", 33]
+
+fail "~ rejects non-coercible types", '''
+  X = schema
+    name? ~string
+'''
+
+fail "~ coercion cannot combine with a transform", '''
+  X = schema
+    age? ~integer, -> Number(it.age)
+'''
+
+fail "~ coercion does not apply to arrays", '''
+  X = schema
+    ages? ~integer[]
+'''
+
+# ==============================================================================
+# Named coercers — ~:name (registry-backed wire vocabulary)
+# ==============================================================================
+
+test "~:name with an unregistered coercer fails loud at parse (config error)", '''
+  X = schema
+    npi? ~:npi9999
+  err = null
+  try
+    X.parse {npi: "123"}
+  catch e
+    err = e.message
+  [err.includes("no coercer registered"), err.includes("registerCoercer")]
+''', [true, true]
+
+# ==============================================================================
+# @ensure upgrades — field attribution and async (@ensure!)
+# ==============================================================================
+
+test "@ensure with :field attributes the failure to that field", '''
+  Signup = schema
+    password!  8..100
+    password2! 8..100
+    @ensure "passwords must match", :password2, (u) -> u.password is u.password2
+  r = Signup.safe({password: "longenough", password2: "different1"})
+  [r.errors[0].field, r.errors[0].error, r.errors[0].message]
+''', ["password2", "ensure", "passwords must match"]
+
+test "@ensure array form accepts mixed attributed and bare tuples", '''
+  X = schema
+    a! integer
+    b! integer
+    @ensure [
+      "a must be small", :a, (u) -> u.a < 10
+      "sum must be even", (u) -> (u.a + u.b) % 2 is 0
+    ]
+  r = X.safe({a: 50, b: 1})
+  fields = r.errors.map (e) -> e.field
+  fields
+''', ["a", ""]
+
+test "@ensure!: schema becomes async-validating; sync entry points throw", '''
+  X = schema
+    email! email
+    @ensure! "email taken", :email, (u) -> u.email isnt "taken@x.co"
+  err = null
+  try
+    X.parse({email: "a@b.co"})
+  catch e
+    err = e.message
+  ok = X.parseAsync! {email: "a@b.co"}
+  bad = X.safeAsync! {email: "taken@x.co"}
+  [err.includes("async refinements"), err.includes("parseAsync"), ok.email, bad.errors[0].field, bad.errors[0].error]
+''', [true, true, "a@b.co", "email", "ensure"]
+
+test "@ensure!: async predicates run concurrently; all failures collect in order", '''
+  X = schema
+    n! integer
+    @ensure! "first",  (u) -> sleep(5).then -> false
+    @ensure "syncone", (u) -> false
+    @ensure! "second", (u) -> sleep(1).then -> false
+  r = X.safeAsync! {n: 1}
+  msgs = r.errors.map (e) -> e.message
+  msgs
+''', ["first", "syncone", "second"]
+
+test "@ensure!: rejected async predicate counts as failure with declared message", '''
+  X = schema
+    n! integer
+    @ensure! "boom guard", (u) -> Promise.reject(new Error("io"))
+  r = X.safeAsync! {n: 1}
+  [r.ok, r.errors[0].message]
+''', [false, "boom guard"]
+
+test "parseAsync works on plain sync schemas too (uniform surface)", '''
+  X = schema
+    name! string
+  v = X.parseAsync! {name: "A"}
+  v.name
+''', "A"
+
+# ==============================================================================
+# Discriminated unions — schema :union
+# ==============================================================================
+
+unionHeader = '''
+  __SchemaRegistry.reset()
+  ClickEvent = schema :shape
+    kind! "click"
+    x!    integer
+    y!    integer
+    at: ~> @x + "," + @y
+  ScrollEvent = schema :shape
+    kind!  "scroll"
+    delta! integer
+  Event = schema :union
+    @on :kind
+    ClickEvent
+    ScrollEvent
+
+'''
+
+test ":union dispatches on the discriminator and returns constituent instances", unionHeader + '''
+  c = Event.parse({kind: "click", x: 1, y: 2})
+  s = Event.parse({kind: "scroll", delta: -3})
+  [c.at, s.delta, c instanceof ClickEvent._getClass()]
+''', ["1,2", -3, true]
+
+test ":union: unknown discriminator value fails with the expected list", unionHeader + '''
+  r = Event.safe({kind: "hover", x: 1})
+  [r.errors[0].field, r.errors[0].error, r.errors[0].message]
+''', ["kind", "union", "expected one of click | scroll"]
+
+test ":union: non-object input and constituent validation errors surface", unionHeader + '''
+  r1 = Event.safe(42)
+  r2 = Event.safe({kind: "click", x: "bad"})
+  [r1.errors[0].error, r2.ok, r2.errors.map((e) -> e.field).includes("x")]
+''', ["union", false, true]
+
+test ":union works as a field type, including arrays", unionHeader + '''
+  Log = schema :shape
+    events! Event[]
+  r1 = Log.safe({events: [{kind: "click", x: 1, y: 2}, {kind: "scroll", delta: 1}]})
+  r2 = Log.safe({events: [{kind: "nope"}]})
+  [r1.ok, r2.ok, r2.errors[0].field]
+''', [true, false, "events[0].kind"]
+
+test ":union: algebra throws; ok() delegates", unionHeader + '''
+  err = null
+  try
+    Event.pick("kind")
+  catch e
+    err = e.message
+  [err.includes(":union"), Event.ok({kind: "scroll", delta: 1}), Event.ok({kind: "scroll"})]
+''', [true, true, false]
+
+test ":union: duplicate discriminator values across constituents throw at first parse", '''
+  __SchemaRegistry.reset()
+  A1 = schema :shape; kind! "x"; a! integer
+  B1 = schema :shape; kind! "x"; b! integer
+  U1 = schema :union
+    @on :kind
+    A1
+    B1
+  err = null
+  try
+    U1.parse({kind: "x", a: 1})
+  catch e
+    err = e
+  [err.issues[0].error, err.message.includes("duplicate discriminator")]
+''', ["union", true]
+
+test ":union: constituent missing the discriminator literal throws at first parse", '''
+  __SchemaRegistry.reset()
+  A2 = schema :shape; kind! "x"; a! integer
+  B2 = schema :shape; name! string
+  U2 = schema :union
+    @on :kind
+    A2
+    B2
+  err = null
+  try
+    U2.parse({kind: "x", a: 1})
+  catch e
+    err = e.message
+  err.includes("string-literal")
+''', true
+
+fail ":union requires @on", '''
+  U = schema :union
+    A
+    B
+'''
+
+fail ":union needs at least two constituents", '''
+  U = schema :union
+    @on :kind
+    OnlyOne
+'''
+
+fail ":union rejects field declarations in the body", '''
+  U = schema :union
+    @on :kind
+    name! string
+'''
+
+type ":union emits a TS union + validation-only const", '''
+    Click = schema :shape
+      kind! "click"
+      x!    integer
+    Scroll = schema :shape
+      kind!  "scroll"
+      delta! integer
+    Event = schema :union
+      @on :kind
+      Click
+      Scroll
+  ''', '''
+  interface SchemaIssue { field: string; error: string; message: string; }
+  type SchemaSafeResult<T> = { ok: true; value: T; errors: null } | { ok: false; value: null; errors: SchemaIssue[] };
+  interface ArraySchema<Out> {
+    parse(data: unknown): Out[];
+    safe(data: unknown): SchemaSafeResult<Out[]>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out[]>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out[]>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+  }
+  interface Schema<Out, In = unknown> {
+    parse(data: unknown): Out;
+    array: ArraySchema<Out>;
+    safe(data: unknown): SchemaSafeResult<Out>;
+    ok(data: unknown): boolean;
+    parseAsync(data: unknown): Promise<Out>;
+    safeAsync(data: unknown): Promise<SchemaSafeResult<Out>>;
+    okAsync(data: unknown): Promise<boolean>;
+    toJSONSchema(): Record<string, unknown>;
+    pick<K extends keyof In>(...keys: K[]): Schema<Pick<In, K>, Pick<In, K>>;
+    omit<K extends keyof In>(...keys: K[]): Schema<Omit<In, K>, Omit<In, K>>;
+    partial(): Schema<Partial<In>, Partial<In>>;
+    required<K extends keyof In>(...keys: K[]): Schema<Omit<In, K> & Required<Pick<In, K>>, Omit<In, K> & Required<Pick<In, K>>>;
+    extend<U>(other: Schema<U>): Schema<In & U, In & U>;
+  }
+  type Click = { kind: "click"; x: number };
+  declare const Click: Schema<Click, Click>;
+  type Scroll = { kind: "scroll"; delta: number };
+  declare const Scroll: Schema<Scroll, Scroll>;
+  type Event = Click | Scroll;
+  declare const Event: { parse(data: unknown): Event; safe(data: unknown): SchemaSafeResult<Event>; ok(data: unknown): boolean; parseAsync(data: unknown): Promise<Event>; safeAsync(data: unknown): Promise<SchemaSafeResult<Event>>; okAsync(data: unknown): Promise<boolean>; toJSONSchema(): Record<string, unknown>; array: ArraySchema<Event>; };
+  export {};
+  '''
+
+# ==============================================================================
+# Typed method parameters
+# ==============================================================================
+
+fail "computed getters reject parameters", '''
+  X = schema :shape
+    amount! integer
+    bad: (n) ~> @amount * n
+'''
+
+fail "hooks reject parameters", '''
+  X = schema :model
+    name! string
+    beforeSave: (n) -> @name = "x"
+'''
+
+# ==============================================================================
+# Per-schema adapters — schema :model, on: adapter
+# ==============================================================================
+
+test "on: routes a model's SQL to its own adapter; others use the global", '''
+  calls = {a: [], b: []}
+  mk = (tag) -> {
+    query: (sql, params) ->
+      calls[tag].push sql
+      {columns: [{name: "id"}], data: [[1]], rows: 1}
+  }
+  __schemaSetAdapter mk("a")
+  __SchemaRegistry.reset()
+  analytics = mk("b")
+  User = schema :model
+    name! string
+  Event = schema :model, on: analytics
+    name! string
+  User.find! 1
+  Event.find! 1
+  Event.where(name: "x").count!
+  [calls.a.length, calls.b.length]
+''', [1, 2]
+
+test "cross-adapter @belongs_to: accessor works, FK DDL suppressed with a note", '''
+  rows = {columns: [{name: "id"}, {name: "name"}], data: [[7, "main"]], rows: 1}
+  __schemaSetAdapter { query: (sql, params) -> rows }
+  __SchemaRegistry.reset()
+  analytics = { query: (sql, params) -> {columns: [{name: "id"}, {name: "user_id"}], data: [[1, 7]], rows: 1} }
+  User = schema :model
+    name! string
+  Event = schema :model, on: analytics
+    name? string
+    @belongs_to User
+  sql = Event.toSQL()
+  ev = Event.find! 1
+  owner = ev.user!
+  [sql.includes("REFERENCES users"), sql.includes("FK constraint suppressed"), owner.name]
+''', [false, true, "main"]
+
+fail "on: is :model-only", '''
+  X = schema :shape, on: whatever
+    name! string
+'''
+
+# ==============================================================================
+# JSON Schema export — toJSONSchema()
+# ==============================================================================
+
+test "toJSONSchema maps fields, constraints, formats, defaults, required", '''
+  SignupInput = schema
+    email!    email
+    password! string, 8..100
+    role?     string, ["user"]
+    age?      ~integer, 18..120
+    tags?     string[], 1..5
+  js = SignupInput.toJSONSchema()
+  out = [
+    js.title
+    js.required
+    js.properties.email.format
+    [js.properties.password.minLength, js.properties.password.maxLength]
+    js.properties.role.default
+    [js.properties.age.type, js.properties.age.minimum]
+    [js.properties.tags.type, js.properties.tags.items.type, js.properties.tags.maxItems]
+  ]
+  out
+''', ["SignupInput", ["email", "password"], "email", [8, 100], "user", ["integer", 18], ["array", "string", 5]]
+
+test "toJSONSchema: nested schemas become $refs; enums and unions map", '''
+  __SchemaRegistry.reset()
+  Role = schema :enum
+    :admin
+    :user
+  Click = schema :shape
+    kind! "click"
+    x!    integer
+  Scroll = schema :shape
+    kind!  "scroll"
+    delta! integer
+  Action = schema :union
+    @on :kind
+    Click
+    Scroll
+  Profile = schema :shape
+    role!    Role
+    actions? Action[]
+  js = Profile.toJSONSchema()
+  out = [
+    js.properties.role.$ref
+    js.properties.actions.items.$ref
+    js.$defs.Role.enum
+    js.$defs.Action.oneOf.map (o) -> o.$ref
+    js.$defs.Action.discriminator.propertyName
+    js.$defs.Click.properties.kind.const
+  ]
+  out
+''', ["#/$defs/Role", "#/$defs/Action", ["admin", "user"], ["#/$defs/Click", "#/$defs/Scroll"], "kind", "click"]
+
+test "toJSONSchema: models include DB-managed columns; refinements annotate", '''
+  __SchemaRegistry.reset()
+  Org = schema :model
+    name! string
+  User = schema :model
+    name! string
+    @timestamps
+    @belongs_to Org
+    @ensure "name must not be empty-ish", (u) -> u.name.trim().length > 0
+  js = User.toJSONSchema()
+  out = [
+    js.properties.id.type
+    js.properties.orgId.type
+    js.properties.createdAt.format
+    js.description.includes("name must not be empty-ish")
+  ]
+  out
+''', ["integer", "integer", "date-time", true]
+
+test "toJSONSchema: recursive shapes are cycle-safe via $defs", '''
+  __SchemaRegistry.reset()
+  Tree = schema :shape
+    value!    integer
+    children? Tree[]
+  js = Tree.toJSONSchema()
+  [js.properties.children.items.$ref, js.$defs.Tree.properties.children.items.$ref]
+''', ["#/$defs/Tree", "#/$defs/Tree"]
+
+# ==============================================================================
+# Schema evolution — _tableSpec, introspect, diff, status/make/migrate
+# ==============================================================================
+#
+# The differ is tested against fixtures (roadmap §2.6): the mock adapter
+# implements the Contract-v2 `introspect()` capability and returns a
+# canned DeployedSchema; declared models come from real declarations.
+
+migrateHeader = '''
+  deployed = {tables: []}
+  history  = []
+  calls    = []
+  adapter =
+    introspect: -> deployed
+    query: (sql, params) ->
+      calls.push {sql, params}
+      if sql.startsWith("SELECT version")
+        {columns: [{name: "version"}, {name: "name"}, {name: "checksum"}, {name: "applied_at"}], data: history.map((h) -> [h.version, h.name, h.checksum, null]), rows: history.length}
+      else if sql.startsWith("INSERT INTO _rip_migrations")
+        history.push {version: params[0], name: params[1], checksum: params[2]}
+        {columns: [], data: [], rows: 1}
+      else
+        {columns: [], data: [], rows: 0}
+  __schemaSetAdapter adapter
+  __SchemaRegistry.reset()
+
+'''
+
+test "_tableSpec exposes the canonical table structure", modelHeader + '''
+  Org = schema :model
+    name! string
+  User = schema :model
+    name!   string, 1..100
+    email!  email @unique
+    @timestamps
+    @softDelete
+    @belongs_to Org
+    @index [name, email]
+  spec = User._tableSpec()
+  cols = spec.columns.map (c) -> c.name
+  [
+    spec.name
+    spec.sequence.name + ":" + spec.sequence.start
+    cols
+    spec.columns[1].type
+    spec.columns[2].unique
+    spec.foreignKeys[0].refTable
+    spec.indexes.map (i) -> i.name + (i.unique ? "!" : "")
+  ]
+''', ["users", "users_seq:1", ["id", "name", "email", "org_id", "created_at", "updated_at", "deleted_at"], "VARCHAR(100)", true, "orgs", ["idx_users_email!", "idx_users_name_email"]]
+
+# Regression: the `@unique` DIRECTIVE forms (the silent-no-op bug that
+# motivated retiring `#`). `@unique :col` and `@unique [a, b]` must each
+# emit a UNIQUE index — single and composite.
+test "@unique directive: single + composite emit unique indexes", modelHeader + '''
+  User = schema :model
+    a!     string
+    b!     string
+    email! email
+    @unique :email
+    @unique [:a, :b]
+  User._tableSpec().indexes.map (i) -> i.name + (i.unique ? "!" : "")
+''', ["idx_users_email!", "idx_users_a_b!"]
+
+# Two index declarations on the same columns collide on index name — a
+# redundant/contradictory schema, rejected loudly rather than emitting
+# duplicate CREATE INDEX.
+test "duplicate index on the same columns is rejected", modelHeader + '''
+  User = schema :model
+    email! email @unique
+    @index :email
+  err = null
+  try
+    User._tableSpec()
+  catch e
+    err = e
+  [err?.message.includes("duplicate index"), err?.message.includes("idx_users_email")]
+''', [true, true]
+
+#
+# The tx mock adapter records BEGIN / per-statement / COMMIT / ROLLBACK
+# events and separates statements routed through the transaction handle
+# (txCalls) from statements on the base adapter (mainCalls).
+
+txHeader = '''
+  events = []
+  txCalls = []
+  mainCalls = []
+  resState = {res: {columns: [{name: "id"}, {name: "name"}], data: [[1, "A"]], rows: 1}}
+  adapter =
+    query: (sql, params) ->
+      mainCalls.push sql
+      events.push "main"
+      resState.res
+    begin: (opts) ->
+      events.push "BEGIN"
+      handle = {}
+      handle.query = (sql, params) ->
+        txCalls.push sql
+        events.push "stmt"
+        resState.res
+      handle.commit = -> events.push "COMMIT"
+      handle.rollback = -> events.push "ROLLBACK"
+      handle
+    capabilities: {tx: true}
+  __schemaSetAdapter adapter
+  __SchemaRegistry.reset()
+
+'''
+
+test "transaction!: SQL routes through the tx handle; commit; block value returned", txHeader + '''
+  User = schema :model
+    name! string
+  result = schema.transaction! ->
+    u = User.create! {name: "A"}
+    u.name
+  [result, events, txCalls.length, mainCalls.length]
+''', ["A", ["BEGIN", "stmt", "COMMIT"], 1, 0]
+
+test "transaction!: throw rolls back and the exception propagates", txHeader + '''
+  User = schema :model
+    name! string
+  err = null
+  try
+    schema.transaction! ->
+      User.create! {name: "A"}
+      throw new Error "boom"
+  catch e
+    err = e.message
+  [err, events]
+''', ["boom", ["BEGIN", "stmt", "ROLLBACK"]]
+
+test "transaction!: nested call joins the outer transaction", txHeader + '''
+  User = schema :model
+    name! string
+  schema.transaction! ->
+    User.create! {name: "A"}
+    schema.transaction! ->
+      User.create! {name: "B"}
+    null
+  events
+''', ["BEGIN", "stmt", "stmt", "COMMIT"]
+
+test "transaction!: ORM calls outside the block use the base adapter", txHeader + '''
+  User = schema :model
+    name! string
+  User.create! {name: "X"}
+  schema.transaction! ->
+    User.create! {name: "Y"}
+    null
+  User.create! {name: "Z"}
+  [mainCalls.length, txCalls.length]
+''', [2, 1]
+
+test "afterCommit fires after COMMIT, exactly once per instance", txHeader + '''
+  User = schema :model
+    name! string
+    afterCommit: -> events.push "afterCommit"
+  schema.transaction! ->
+    u = User.create! {name: "A"}
+    u.name = "B"
+    u.save!
+    null
+  events
+''', ["BEGIN", "stmt", "stmt", "COMMIT", "afterCommit"]
+
+test "afterCommit fires immediately when no transaction is open", txHeader + '''
+  User = schema :model
+    name! string
+    afterCommit: -> events.push "afterCommit"
+  User.create! {name: "A"}
+  events
+''', ["main", "afterCommit"]
+
+test "transaction! on an adapter without begin() throws a clear error", '''
+  adapter =
+    query: (sql, params) -> {columns: [], data: [], rows: 0}
+  __schemaSetAdapter adapter
+  __SchemaRegistry.reset()
+  User = schema :model
+    name! string
+  err = null
+  try
+    schema.transaction! ->
+      User.create! {name: "A"}
+  catch e
+    err = e.message
+  [err.includes("does not support transactions"), err.includes("begin")]
+''', [true, true]

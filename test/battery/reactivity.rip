@@ -1,0 +1,269 @@
+# Test: Reactivity (4 node types)
+# Tests the reactive operators: := (state), ~= (computed), ~> (effect),
+# and =! (readonly). These compile to __state(), __computed(), __effect(),
+# and const respectively.
+
+# ==============================================================================
+# State (:=) — Code Generation
+# ==============================================================================
+
+skip = { skipPreamble: true }
+
+code "state creation", "count := 0", "const count = __state(0)", skip
+
+code "state with string", 'name := "Rip"', 'const name = __state("Rip")', skip
+
+code "state update", '''
+  count := 0
+  count += 1
+  ''', '''
+  const count = __state(0);
+  count.value += 1
+  ''', skip
+
+code "state read", '''
+  count := 0
+  x = count
+  ''', '''
+  let x;
+
+  const count = __state(0);
+  x = count.value
+  ''', skip
+
+# ==============================================================================
+# Computed (~=) — Code Generation
+# ==============================================================================
+
+code "computed creation", "doubled ~= count * 2", "const doubled = __computed(() => (count * 2))", skip
+
+code "computed with expression", '''
+  message ~= "Count is #{count}"
+  ''', '''
+  const message = __computed(() => `Count is ${count}`)
+  ''', skip
+
+# ==============================================================================
+# Effect (~>) — Code Generation
+# ==============================================================================
+
+code "fire-and-forget effect", '''
+  ~> console.log count
+  ''', '''
+  __effect(() => { console.log(count); })
+  ''', skip
+
+code "assigned effect", '''
+  logger ~> console.log count
+  ''', '''
+  const logger = __effect(() => { console.log(count); })
+  ''', skip
+
+# ==============================================================================
+# Readonly (=!) — Code Generation
+# ==============================================================================
+
+code "readonly constant", "MAX =! 100", "const MAX = 100"
+code "readonly string", 'URL =! "https://example.com"', 'const URL = "https://example.com"'
+
+# ==============================================================================
+# State (:=) — Runtime Behavior
+# ==============================================================================
+
+test "state initial value", '''
+  count := 0
+  count + 0
+  ''', 0
+
+test "state update and read", '''
+  count := 10
+  count += 5
+  count + 0
+  ''', 15
+
+test "state with string", '''
+  name := "hello"
+  name += " world"
+  "" + name
+  ''', "hello world"
+
+test "state boolean coercion", '''
+  flag := true
+  flag is true
+  ''', true
+
+# ==============================================================================
+# Computed (~=) — Runtime Behavior
+# ==============================================================================
+
+test "computed initial value", '''
+  count := 5
+  doubled ~= count * 2
+  doubled + 0
+  ''', 10
+
+test "computed updates when state changes", '''
+  count := 3
+  doubled ~= count * 2
+  count += 1
+  doubled + 0
+  ''', 8
+
+test "computed with multiple dependencies", '''
+  a := 2
+  b := 3
+  sum ~= a + b
+  sum + 0
+  ''', 5
+
+test "computed chain", '''
+  base := 10
+  doubled ~= base * 2
+  quadrupled ~= doubled * 2
+  quadrupled + 0
+  ''', 40
+
+test "computed chain updates", '''
+  base := 10
+  doubled ~= base * 2
+  quadrupled ~= doubled * 2
+  base += 5
+  quadrupled + 0
+  ''', 60
+
+# ==============================================================================
+# Readonly (=!) — Runtime Behavior
+# ==============================================================================
+
+test "readonly value", "MAX =! 42; MAX", 42
+test "readonly string", 'MSG =! "hi"; MSG', "hi"
+test "readonly in expression", "PI =! 3; PI * 2", 6
+
+# ==============================================================================
+# Mixed Reactive Patterns
+# ==============================================================================
+
+test "state + computed together", '''
+  width := 5
+  height := 10
+  area ~= width * height
+  area + 0
+  ''', 50
+
+test "state + computed + update", '''
+  price := 100
+  tax ~= price * 0.1
+  price += 50
+  tax + 0
+  ''', 15
+
+test "multiple states", '''
+  a := 1
+  b := 2
+  c := 3
+  a + b + c + 0
+  ''', 6
+
+# ==============================================================================
+# Components with reactive state
+# ==============================================================================
+
+# ==============================================================================
+# Effect Cleanup (~>) — Runtime Behavior
+# ==============================================================================
+
+test "effect without cleanup still works", '''
+  result := 0
+  count := 1
+  ~> result = count * 10
+  count += 1
+  result + 0
+  ''', 20
+
+test "effect cleanup runs before re-execution", '''
+  log = []
+  count := 0
+  __effect ->
+    v = count + 0
+    log.push "run:#{v}"
+    -> log.push "cleanup:#{v}"
+  count += 1
+  log.join ","
+  ''', "run:0,cleanup:0,run:1"
+
+test "effect cleanup on multiple re-runs", '''
+  log = []
+  count := 0
+  __effect ->
+    v = count + 0
+    -> log.push "c:#{v}"
+  count += 1
+  count += 1
+  log.join ","
+  ''', "c:0,c:1"
+
+# Zombie-effect guard. An effect can be queued in __pendingEffects when a
+# signal it subscribes to changes, then disposed before the flush reaches
+# it (e.g. its parent block was destroyed by an earlier effect in the same
+# flush). Without the disposed guard in run(), the queued effect would
+# execute, re-bind __currentEffect to itself, and any signal .value read
+# would re-subscribe it via subscribers.add(__currentEffect) — leaking one
+# subscriber per flush cycle that hits this race. Symptom in apps: each
+# navigation creates one more component instance than the previous
+# (N visits => N synchronous mounts on visit N).
+
+test "disposed effect in pending queue does not run", '''
+  log = []
+  s := 0
+  d2 = null
+  e1 = __effect ->
+    v = s + 0                # read s, subscribe E1
+    log.push "e1:#{v}"
+    d2() if d2 and v > 0     # E1 disposes E2 mid-flush after the change
+  d2 = __effect ->
+    v = s + 0                # read s, subscribe E2
+    log.push "e2:#{v}"
+  s += 1                     # writes 1; both E1 & E2 queued; E1 runs and
+                             # disposes E2; flush should NOT re-run E2.
+  log.join ","
+  ''', "e1:0,e2:0,e1:1"
+
+test "disposed effect cannot re-subscribe via signal read", '''
+  log = []
+  s := 0
+  d2 = null
+  e1 = __effect ->
+    v = s + 0
+    log.push "e1:#{v}"
+    d2() if d2 and v > 0
+  d2 = __effect ->
+    v = s + 0
+    log.push "e2:#{v}"
+  # First write: E1 disposes E2 mid-flush. Without the guard, E2 would
+  # run zombie AND re-subscribe via the signal read inside its body.
+  s += 1
+  # Second write: if E2 re-subscribed during the zombie run, this would
+  # fire it again. With the guard, E2 is gone for good.
+  s += 1
+  log.join ","
+  ''', "e1:0,e2:0,e1:1,e1:2"
+
+# ==============================================================================
+# Component Composition — Signal Passthrough (foundation of reactive props)
+# ==============================================================================
+
+test "signal passthrough identity", '''
+  count := 42
+  wrapped := count
+  wrapped is count
+  ''', true
+
+test "signal passthrough preserves value", '''
+  count := 42
+  wrapped := count
+  wrapped + 0
+  ''', 42
+
+# ==============================================================================
+# Postfix ternary in component computed members
+# ==============================================================================

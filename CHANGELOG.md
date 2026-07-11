@@ -5,6 +5,12 @@ repository's pull requests.
 
 ## Unreleased
 
+- Add the language test suite: the battery (25 files of idiom rows with
+  their own runner), mapping and source-map conformance, declaration and
+  schema-type checks, migration machinery, types, async, pick, void
+  markers, tiers, trivia, dependency budget, TS-face fuzzing, and the
+  parser-currency guard (#7)
+
 - Add the compiler surface and corpus: the compile() entry point, project
   configuration, the Bun .rip loader, the run harness, the rip CLI with
   explain and schema evolution, the corpus snapshot layer with committed

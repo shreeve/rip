@@ -1,0 +1,121 @@
+# Test: Optional Chaining, Existence Check, and Nullish Coalescing
+# Tests postfix ? existence, ES6 optional chaining (?.), and ?? operators
+
+# ==============================================================================
+# Existence Check: "?" (postfix)
+# ==============================================================================
+
+# Pattern: expr? → (expr != null)
+test "existence check value", "x = 42\nx?", true
+test "existence check null", "x = null\nx?", false
+test "existence check undefined", "x = undefined\nx?", false
+
+# Existence in conditional
+test "if exists", "x = 42; if x? then 'exists' else 'missing'", "exists"
+test "if not exists", "x = null; if x? then 'exists' else 'missing'", "missing"
+
+# Code generation
+code "existence check", "x?", "x != null;"
+
+# Existence after subscript access: arr[i]?
+test "existence subscript", "arr = [1, 2, 3]; arr[0]?", true
+test "existence subscript undefined", "arr = [1, 2, 3]; arr[99]?", false
+test "existence subscript null element", "arr = [null]; arr[0]?", false
+test "existence subscript expression", "arr = [10, 20]; arr[1 - 1]?", true
+code "existence subscript gen", "arr[0]?", "arr[0] != null;"
+
+# Existence after function call: fn()?
+test "existence call", "fn = -> 42\nfn()?", true
+test "existence call null", "fn = -> null\nfn()?", false
+test "existence call undefined", "fn = -> undefined\nfn()?", false
+code "existence call gen", "fn()?", "fn() != null;"
+
+# Existence after property access (already works, but verify compound)
+test "existence deep subscript", "obj = {a: [1, 2]}; obj.a[0]?", true
+test "existence deep subscript null", "obj = {a: [null]}; obj.a[0]?", false
+
+# ==============================================================================
+# DOT-BASED ?. - ES6 Optional Chaining (Native Passthrough)
+# ==============================================================================
+
+# Optional property: "?."
+# Pattern: obj?.prop → obj?.prop (ES6 native)
+test "optional prop exists", "obj = {name: 'test'}\nobj?.name", "test"
+test "optional prop null", "obj = null\nobj?.name", undefined
+test "optional prop undefined", "obj = undefined\nobj?.prop", undefined
+test "optional prop chain", "obj = {nested: {value: 42}}\nobj?.nested?.value", 42
+test "optional prop chain breaks", "obj = {nested: null}\nobj?.nested?.value", undefined
+
+# Optional index (ES6): ES6 native optional chaining
+# Pattern: arr?.[index] → arr?.[index] (ES6 native)
+test "es6 optional index exists", "arr = [1, 2, 3]\narr?.[1]", 2
+test "es6 optional index null", "arr = null\narr?.[0]", undefined
+test "es6 optional index chain", "obj = {arr: [1, 2]}\nobj?.arr?.[0]", 1
+
+# Optional index without dot: arr?[index] → arr?.[index]
+test "optional index no dot", "arr = [1, 2, 3]\narr?[1]", 2
+test "optional index no dot null", "arr = null\narr?[0]", undefined
+test "optional index no dot chain", "obj = {arr: [1, 2]}\nobj?.arr?[0]", 1
+code "optional index no dot gen", "arr?[0]", "arr?.[0]"
+
+# Optional call (ES6): ES6 native optional chaining
+# Pattern: fn?.(arg) → fn?.(arg) (ES6 native)
+test "es6 optional call exists", "fn = (x) -> x * 2\nfn?.(5)", 10
+test "es6 optional call null", "fn = null\nfn?.(5)", undefined
+test "es6 optional call chain", "obj = {fn: (x) -> x}\nobj?.fn?.(42)", 42
+
+# Optional call without dot: fn?(arg) → fn?.(arg)
+test "optional call no dot", "fn = (x) -> x * 2\nfn?(5)", 10
+test "optional call no dot null", "fn = null\nfn?(5)", undefined
+test "optional call no dot chain", "obj = {fn: (x) -> x}\nobj?.fn?(42)", 42
+code "optional call no dot gen", "fn?(42)", "fn?.(42)"
+
+# ==============================================================================
+# Optional Chaining in Expressions
+# ==============================================================================
+
+test "optional with default", "obj = {val: 5}\nobj?.val ?? 10", 5
+test "optional null with default", "obj = null\nobj?.val ?? 10", 10
+
+# Optional in assignments
+test "optional assign", "obj = {val: 42}\nx = obj?.val\nx", 42
+
+# ==============================================================================
+# CODE GENERATION TESTS
+# ==============================================================================
+
+# ES6 optional chaining (?.) - Passthrough to native
+code "optional property gen", "obj?.prop", "obj?.prop"
+code "es6 optional index gen", "arr?.[0]", "arr?.[0]"
+code "es6 optional call gen", "fn?.(42)", "fn?.(42)"
+
+# ==============================================================================
+# Nullish Coalescing (??)
+# ==============================================================================
+
+# These tests are Rip-specific, showing how to use ?? (ES2020)
+
+# Splat with nullish coalescing
+test "splat existential with default", '''
+  c = null
+  [...(c?.b ?? [])]
+''', []
+
+test "splat with value", '''
+  c = {b: [1, 2, 3]}
+  [...(c?.b ?? [])]
+''', [1, 2, 3]
+
+test "conditional with nullish", '''
+  a = {b: [3]}
+  f = false
+  result = (a if f)?.b ?? []
+  result
+''', []
+
+test "trailing if with nullish default", '''
+  a = [3]
+  c = false
+  result = (a if c) ?? []
+  result
+''', []
