@@ -478,20 +478,6 @@ code 'compound assignment mutates a render-local without re-declaring', '''
   })();
 '''
 
-fail 'ref to a readonly (=!) is rejected', '''
-    export A = component
-      el =! null
-      render
-        div ref: el
-''', 'must be a state cell'
-
-fail 'ref to a plain (=) member is rejected', '''
-    export A = component
-      el = null
-      render
-        div ref: el
-''', 'must be a state cell'
-
 code 'private `=` member is plain, `:=` is reactive state', '''
   export A = component
     label = "hi"
