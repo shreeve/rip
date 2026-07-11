@@ -269,12 +269,12 @@ type CartItem = {
   quantity: number
 }
 
-type Cart = Readonly<{
+type Cart = {
   items: CartItem[]
-  addItem: (item: CartItem) => void
-  removeItem: (item: CartItem) => void
-  total: () => number
-}>
+  addItem(item: CartItem): void
+  removeItem(item: CartItem): void
+  total(): number
+}
 
 const useCart = create<Cart>()((set, get) => ({
   items: [],
