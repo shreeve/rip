@@ -1,0 +1,21 @@
+# Pending rows for classes — behaviors the battery does not cover yet.
+# Every row here FAILS today; when a feature revives one, MOVE the row
+# into test/battery/ in the same change (the lane asserts still-failing).
+
+import { test, code, fail, type } from '../support/testing.js'
+
+test "basic class", "class Animal\n  constructor: (@name) ->\n  speak: -> @name\na = new Animal('Dog'); a.speak()", "Dog"
+test "class inheritance", "class Animal\n  constructor: (@name) ->\nclass Dog extends Animal\n  bark: -> 'woof'\nd = new Dog('Spot'); d.name", "Spot"
+code "simple class", "class Animal\n  constructor: (@name) ->", "class Animal { constructor(name) { this.name = name; } }"
+test "super in constructor", "class Animal\n  constructor: (@name) ->\nclass Dog extends Animal\n  constructor: (name, @breed) ->\n    super(name)\nd = new Dog('Spot', 'Terrier'); d.name", "Spot"
+test "super with @param", "class Animal\n  constructor: (@name) ->\nclass Dog extends Animal\n  constructor: (@name) -> super @name, \"woof\"\nd = Dog.new \"Rex\"\nd.name", "Rex"
+test "@param with default", "class Counter\n  constructor: (@count = 0) ->\nc = Counter.new 10\nc.count", 10
+test "@param default no args", "class Counter\n  constructor: (@count = 0) ->\nc = Counter.new()\nc.count", 0
+code "super call", "super(arg)", "super(arg)"
+code "super method", "super.method()", "super.method()"
+test "multiple @ parameters", "class Person\n  constructor: (@first, @last) ->\np = new Person('John', 'Doe')\n[p.first, p.last]", ["John", "Doe"]
+test "ruby-style new chained", "class Builder\n  constructor: (@val) ->\n  get: -> @val\nBuilder.new(42).get()", 42
+test "@param works with extra statements", "class Animal\n  constructor: (@name) ->\n  speak: -> @name\n  class @Baby\n    cry: -> \"waa\"\na = new Animal('Dog')\n[a.name, a.speak(), Animal.Baby?]", ["Dog", "Dog", true]
+test "subclass @param works with extra statements", "class Base\n  constructor: (@id) ->\nclass Sub extends Base\n  constructor: (id, @label) ->\n    super(id)\n  class @Helper\n    help: -> true\ns = new Sub(1, 'x')\n[s.id, s.label]", [1, "x"]
+test "bound method works with extra statements", "class Handler\n  constructor: ->\n    @count = 0\n  onClick: => @count += 1\n  class @Util\n    noop: ->\nh = new Handler()\nfn = h.onClick\nfn()\nh.count", 1
+test "async method works with extra statements", "class Svc\n  fetch: -> await Promise.resolve(42)\n  class @Inner\n    noop: ->\ndo ->\n  s = new Svc()\n  await s.fetch()", 42

@@ -5,12 +5,13 @@ repository's pull requests.
 
 ## Unreleased
 
-- The pending lane (test/battery-pending): 508 language behaviors the
-  battery does not cover yet, held as data and asserted to STILL FAIL
-  — the suite stays green while features are missing and flips red
-  exactly when a change makes a pending row pass without moving it
-  into the real battery. Landing a feature and moving its rows is one
-  change; the lane dies when it empties (#44)
+- The pending lane (test/battery-pending): 507 language behaviors the
+  battery does not cover yet, spelled as battery rows (same four
+  verbs) and asserted to STILL FAIL — the suite stays green while
+  features are missing and flips red exactly when a change makes a
+  pending row pass without moving it into the real battery. Reviving
+  a row is cut-and-paste into test/battery/ in the feature's own
+  change; the lane dies when the directory empties (#44, #45)
 
 - Editor grammars live here and move with the language: the vim
   plugin (packages/vim — syntax, indent, ftdetect, ftplugin) and the

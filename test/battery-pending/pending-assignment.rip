@@ -1,0 +1,9 @@
+# Pending rows for assignment — behaviors the battery does not cover yet.
+# Every row here FAILS today; when a feature revives one, MOVE the row
+# into test/battery/ in the same change (the lane asserts still-failing).
+
+import { test, code, fail, type } from '../support/testing.js'
+
+test "array rest in middle", "[first, ...middle, last] = [1, 2, 3, 4, 5]; [first, middle, last]", [1, [2, 3, 4], 5]
+test "array rest in middle two after", "[a, ...mid, b, c] = [1, 2, 3, 4, 5]; [a, mid, b, c]", [1, [2, 3], 4, 5]
+test "array rest in middle empty", "[a, ...b, c] = [1, 2]; [a, b, c]", [1, [], 2]

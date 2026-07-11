@@ -1,0 +1,11 @@
+# Pending rows for literals — behaviors the battery does not cover yet.
+# Every row here FAILS today; when a feature revives one, MOVE the row
+# into test/battery/ in the same change (the lane asserts still-failing).
+
+import { test, code, fail, type } from '../support/testing.js'
+
+test "inline JavaScript evaluation", "`var x = 5`\nx", 5
+test "block inline JavaScript", "```\nlet a = 1;\nlet b = 2;\n```\nc = 3\na + b + c", 6
+test "JS blocks mixed with Rip", "x = 1\n```\nlet y = 2;\n```\nz = 3\nx + y + z", 6
+test "inline JS with return value", "result = `(function() { return 42; })()`\nresult", 42
+test "multiple JS variables", "```\nlet a = 10;\nlet b = 20;\nlet c = 30;\n```\na + b + c", 60
