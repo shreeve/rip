@@ -4487,3 +4487,56 @@ code 'private `=` member is plain, `:=` is reactive state', '''
     }
   };
   '''
+
+# __lis — the longest-increasing-subsequence core of keyed reconcile
+# (a component in the file delivers the render runtime).
+
+test 'lis: empty array', '''
+  X = component
+    render
+      div
+  __lis([])
+  ''', []
+
+test 'lis: single element', '''
+  X = component
+    render
+      div
+  __lis([0])
+  ''', [0]
+
+test 'lis: already sorted', '''
+  X = component
+    render
+      div
+  __lis([0, 1, 2, 3])
+  ''', [0,1,2,3]
+
+test 'lis: reversed', '''
+  X = component
+    render
+      div
+  __lis([3, 2, 1, 0]).length
+  ''', 1
+
+test 'lis: with new items (-1)', '''
+  X = component
+    render
+      div
+  __lis([0, -1, 1, -1, 2])
+  ''', [0,2,4]
+
+test 'lis: swap first and last', '''
+  X = component
+    render
+      div
+  result = __lis([3, 1, 2, 0])
+  result.length
+  ''', 2
+
+test 'lis: interleaved', '''
+  X = component
+    render
+      div
+  __lis([1, 0, 3, 2])
+  ''', [1,3]
