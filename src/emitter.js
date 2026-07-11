@@ -8560,8 +8560,15 @@ class Emitter {
       if (head === '.' || head === '?.') {
         this.inTarget = f.savedTarget;
         const op = this.deopt && head === '?.' ? '.' : head;
-        this.mark(n, 'operator', () => this.b.emit(op));
-        this.mark(n, 'property', () => this.b.emit(n[2]));
+        // A string-literal PROPERTY (`@"a-b"` — a string-named
+        // member's read) has no dot spelling: it brackets.
+        if (typeof n[2] === 'string' && n[2][0] === '"') {
+          this.mark(n, 'operator', () => this.b.emit(head === '?.' && !this.deopt ? '?.' : ''));
+          this.mark(n, 'property', () => this.b.emit(`[${n[2]}]`));
+        } else {
+          this.mark(n, 'operator', () => this.b.emit(op));
+          this.mark(n, 'property', () => this.b.emit(n[2]));
+        }
         // Component scope: `@member` (this.member) reads and writes
         // its signal's `.value` when the member is reactive — chains
         // read through the unwrap (`@user.name` → this.user.value.name).

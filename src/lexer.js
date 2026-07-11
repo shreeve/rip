@@ -231,7 +231,8 @@ export function tagCompoundKeys(tokens) {
       if (k === 'TERMINATOR') pendingTernary[top] = 0;
       else if (pendingTernary[top] > 0) pendingTernary[top]--;
     } else if (identish(tokens[i]) && pendingTernary[pendingTernary.length - 1] === 0 &&
-               tokens[i - 1]?.kind !== '.' && tokens[i - 1]?.kind !== '?.') {
+               tokens[i - 1]?.kind !== '.' && tokens[i - 1]?.kind !== '?.' &&
+               tokens[i - 1]?.kind !== '@') {
       let j = i;
       for (;;) {
         if (ops.on) ops.n++;
@@ -1643,6 +1644,12 @@ export function rewriteTypes(tokens, mintId, text, fail) {
       const nameBoundaryAt = out.length - (isAtName ? 3 : 2) - marker;
       const namedColon = nameTok !== null && (nameTok.kind === 'PROPERTY' || nameTok.kind === 'IDENTIFIER') &&
         atStatementBoundary(out, nameBoundaryAt);
+      // A STRING name takes annotations too — the typed string-named
+      // class field (`"data-src": string = "v"`) — but ONLY for the
+      // full `: T =` claim below: a bare `"lit": v` line stays the
+      // implicit object it always was.
+      const stringNamedColon = nameTok !== null && nameTok.kind === 'STRING' &&
+        atStatementBoundary(out, nameBoundaryAt);
       if (frames.length === 0 && namedColon && !isAtName) curLineKV = true;
 
       // An annotated SOAK prototype write (`X?::m: T = v`): the
@@ -1684,7 +1691,7 @@ export function rewriteTypes(tokens, mintId, text, fail) {
       // claim too (`@x: T = v` — the target is the ThisProperty) and
       // keep their PROPERTY tag, as the `@ Property` grammar shape
       // requires.
-      if (frames.length === 0 && namedColon && typedDeclEq(tokens, i) >= 0) {
+      if (frames.length === 0 && (namedColon || stringNamedColon) && typedDeclEq(tokens, i) >= 0) {
         const last = claim('TYPE', tok, i + 1, {});
         if (last >= 0) {
           if (nameTok.kind === 'PROPERTY' && !isAtName) nameTok.kind = 'IDENTIFIER';
