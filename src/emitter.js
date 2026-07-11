@@ -87,7 +87,8 @@ const isChainLink = (x) => isNode(x) && COMPARISONS.has(x[0]) && x.length === 3 
   isNode(x[1]) && COMPARISONS.has(x[1][0]) && x[1].length === 3 && !x[1].parenthesized;
 const isUnary = (x) => isNode(x) && (x[0] === '-' || x[0] === '+' || x[0] === '!' || x[0] === '~' || x[0] === 'typeof' || x[0] === 'delete') && x.length === 2;
 const isAssign = (x) => isNode(x) && ASSIGNS.has(x[0]) && x.length === 3;
-const isRelation = (x) => isNode(x) && (x[0] === 'in' || x[0] === 'of' || x[0] === 'instanceof') && x.length === 3;
+const isRelation = (x) => isNode(x) && (x[0] === 'in' || x[0] === 'of' || x[0] === 'instanceof' ||
+  x[0] === '!in' || x[0] === '!of' || x[0] === '!instanceof') && x.length === 3;
 const isIf = (x) => isNode(x) && x[0] === 'if';
 const isRange = (x) => isNode(x) && (x[0] === '..' || x[0] === '...') && x.length === 3;
 const isObject = (x) => isNode(x) && x[0] === 'object';
@@ -4559,7 +4560,7 @@ class Emitter {
     if (head === 'array') return this.array(node);
     if (head === 'object') return this.object(node);
     if (isRange(node)) return this.range(node);
-    if ((head === 'in' || head === 'of') && node.length === 3) return this.relation(node);
+    if ((head === 'in' || head === 'of' || head === '!in' || head === '!of' || head === '!instanceof') && node.length === 3) return this.relation(node);
     if (head === 'instanceof' && node.length === 3) {
       // Plain JS binary — no lowering.
       this.mark(node, '$self', () => {
@@ -9879,8 +9880,20 @@ class Emitter {
   // ['in'|'of', a, b] — the RELATION lowerings: `in` is membership
   // (includes for arrays/strings, `in` otherwise); `of` is JS `in`.
   relation(node) {
-    const [op, a, b] = node;
+    const [rawOp, a, b] = node;
+    // A negated relation (`not in`/`not of`/`not instanceof`) wraps
+    // the WHOLE lowering: `!(…)` — never just the left operand.
+    const negated = rawOp[0] === '!';
+    const op = negated ? rawOp.slice(1) : rawOp;
     this.mark(node, '$self', () => {
+      if (negated) this.b.emit('!(');
+      if (op === 'instanceof') {
+        this.operand(node, 'left', a);
+        this.b.emit(' instanceof ');
+        this.operand(node, 'right', b);
+        if (negated) this.b.emit(')');
+        return;
+      }
       // `key in {literal}`: the container is statically an object, so
       // the array/string membership lowering is dead — plain JS `in`.
       if (op === 'of' || (op === 'in' && isObject(b))) {
@@ -9912,6 +9925,7 @@ class Emitter {
         this.mark(node, 'right', () => this.expr(b));
         this.b.emit(')');
       }
+      if (negated) this.b.emit(')');
     });
   }
 
