@@ -161,3 +161,8 @@ code "mixed exports and non-exports preserve source order", '''
 
 code "a single quote in a specifier escapes", 'import thing from "./it\'s.js"',
   "import thing from './it\\'s.js';"
+
+fail "a second default export rejects", '''
+  export default 1
+  export default 2
+''', "duplicate 'export default'"

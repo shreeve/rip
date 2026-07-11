@@ -58,7 +58,7 @@ test "throw in ternary", '''
 
 # Code generation
 code "throw", "throw e", "throw e"
-code "or throw as guard pattern", "x = fn() or throw \"err\"", "let x = fn() || throw(\"err\");"
+code "or throw as guard pattern", "x = fn() or throw \"err\"", "let x = fn() || (() => { throw \"err\"; })();"
 
 # ==============================================================================
 # Parser Errors

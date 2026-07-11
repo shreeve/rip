@@ -2853,6 +2853,15 @@ export function tokenize(text, path = '<anonymous>') {
         }
         if (!division) {
           if (!closed) fail('missing / (unclosed regex)', pos);
+          // `#{` inside a slash regex is NOT interpolation (the
+          // heregex form owns that); leaving it as literal pattern
+          // characters silently matches the wrong thing, so it
+          // rejects with both spellings named.
+          const interp = /(^|[^\\])(\\\\)*#\{/.exec(m[1]);
+          if (interp) {
+            const at = pos + 1 + interp.index + interp[0].length - 2;
+            fail("a slash regex does not interpolate — use the heregex form (///…#{…}…///), or escape a literal match as \\#\\{", at, at + 2);
+          }
           const flags = REGEX_FLAGS_RE.exec(text.slice(pos + m[0].length))[0];
           if (!VALID_FLAGS_RE.test(flags)) fail(`invalid regular expression flags ${flags}`, pos);
           const end = pos + m[0].length + flags.length;

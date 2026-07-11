@@ -328,3 +328,27 @@ test "a side-effecting container evaluates once", '''
   ok = "x" in xs()
   [calls, ok]
 ''', [1, true]
+
+# ==============================================================================
+# Synthesized compounds evaluate a member/index base exactly once
+# ==============================================================================
+
+test "floor-divide assign reads its base once", '''
+  o = {n: 7}
+  calls = 0
+  get = ->
+    calls += 1
+    o
+  get().n //= 2
+  [o.n, calls]
+''', [3, 1]
+
+test "modulo assign evaluates an index key once", '''
+  a = [9]
+  i = 0
+  key = ->
+    i += 1
+    0
+  a[key()] %%= 4
+  [a[0], i]
+''', [1, 1]

@@ -1218,6 +1218,20 @@ class Emitter {
   // not). Interface merging joins a same-module interface only to a
   // class declaration — an expression-form class (`A = class`) binds a
   // variable, which no interface merges with.
+  // A module carries ONE default export; the second rejects here —
+  // the emitted module would fail to instantiate, which is the loud
+  // error in the wrong place.
+  rejectDuplicateDefault(stmts) {
+    let seen = null;
+    for (const s of stmts) {
+      if (!isNode(s) || s[0] !== 'export-default') continue;
+      if (seen !== null) {
+        throw this.positionedError(s, "emitter: duplicate 'export default' — a module has exactly one default export", seen);
+      }
+      seen = s;
+    }
+  }
+
   static classDeclNames(stmts) {
     const out = new Set();
     for (const s of stmts) {
@@ -1915,6 +1929,7 @@ class Emitter {
         for (const n of this.pushReactiveFrame(rest, names)) names.add(n);
         this.moduleBound = Emitter.moduleBoundNames(rest);
         this.moduleClassNames = Emitter.classDeclNames(rest);
+        this.rejectDuplicateDefault(rest);
         this.scopes.push(names);
         entries = this.applyDeclareInPlace(entries, sexpr.slice(1));
         if (entries.length) {
@@ -1983,6 +1998,7 @@ class Emitter {
       for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
       this.moduleBound = Emitter.moduleBoundNames(stmts);
       this.moduleClassNames = Emitter.classDeclNames(stmts);
+      this.rejectDuplicateDefault(stmts);
       this.scopes.push(names);
       entries = this.applyDeclareInPlace(entries, sexpr.slice(1));
       if (entries.length) {
@@ -3475,6 +3491,17 @@ class Emitter {
   // shapes lower validly is a per-construct proof — refusing the whole
   // statement is always CORRECT (the loop yields fewer collected
   // values, never invalid JS or trapped control flow).
+  // A `return` anywhere below, NOT descending into function bodies —
+  // the one control form a value-position push cannot contain (it must
+  // cross to the enclosing function).
+  static containsReturn(stmt) {
+    if (!isNode(stmt)) return false;
+    const head = stmt[0];
+    if (head === 'return') return true;
+    if (head === '->' || head === '=>' || isDefHead(head) || head === 'class') return false;
+    return stmt.some((item) => Emitter.containsReturn(item));
+  }
+
   static containsCtrl(stmt) {
     if (typeof stmt === 'string') return stmt === 'break' || stmt === 'continue';
     if (!isNode(stmt)) return false;
@@ -3760,10 +3787,23 @@ class Emitter {
     this.emitTsTypeDecls(isBlock(body) ? body.slice(1) : [body[0]], pad);
     stmts.forEach((stmt, i) => {
       this.b.emit(pad);
-      // A loop in the accumulator's tail stays a statement — its value
-      // never collects — and carries the accumulator body's statement
-      // semicolon. A tail statement carrying control flow stays a
-      // statement too: its break/continue/return cannot cross a push.
+      // A tail LOOP accumulates like any tail expression — the nested
+      // loop's own value (its accumulator array) pushes, so block-form
+      // nesting agrees with the parenthesized comprehension — UNLESS a
+      // `return` sits inside (it must cross to the enclosing function,
+      // which a push's IIFE would capture). The loop's own
+      // break/continue bind inside it and never cross the push.
+      const tailLoop = i === stmts.length - 1 && isLoopNode(stmt) &&
+        !Emitter.containsReturn(stmt);
+      if (tailLoop) {
+        this.b.emit(`${into}.push(`);
+        this.expr(stmt);
+        this.b.emit(');');
+        this.b.emit('\n');
+        return;
+      }
+      // A tail statement carrying control flow stays a statement:
+      // its break/continue/return cannot cross a push.
       if (i === stmts.length - 1 && !Emitter.statementOnly(stmt) && !isLoopNode(stmt) && !Emitter.containsCtrl(stmt)) {
         this.b.emit(`${into}.push(`);
         const wrap = Emitter.needsGrouping(stmt, 'operand') || isUpdate(stmt);
@@ -4248,6 +4288,18 @@ class Emitter {
     if (head === 'while' && (node.length === 3 || node.length === 4)) return this.accumulatorIIFE(node);
     if (head === 'loop' && node.length === 2) return this.accumulatorIIFE(node);
     if ((head === 'for-in' || head === 'for-of' || head === 'for-as') && node.length === 6) return this.accumulatorIIFE(node);
+    // `throw` in an operand slot lowers to a throwing IIFE — the one
+    // JS spelling that throws from any expression position (`a ?? throw
+    // e`, ternary arms, call arguments). `return` stays rejected: it
+    // has no expression meaning.
+    if (head === 'throw' && node.length === 2) {
+      this.mark(node, '$self', () => {
+        this.b.emit(Emitter.containsAwait(node) ? 'await (async () => { throw ' : '(() => { throw ');
+        this.mark(node, 'value', () => this.expr(node[1]));
+        this.b.emit('; })()');
+      });
+      return;
+    }
     if (isDefHead(head) || head === 'return' || head === 'program') {
       throw this.positionedError(node, `emitter: '${head}' is not supported in expression position`);
     }
@@ -9414,32 +9466,52 @@ class Emitter {
     });
   }
 
-  // ["//=", target, value] — target = Math.floor(target / value). The
-  // target emits twice (read + write), both marked;
-  // both suppress read-only lowerings so the two spellings agree.
-  floorDivAssign(node) {
+  // The synthesized compounds (`//=`, `%%=`) spell their target twice
+  // (read + write). A plain-name target is the same binding twice —
+  // identical bytes, identical behavior. A MEMBER or INDEX target's
+  // base (and key) bind as IIFE parameters instead, so a
+  // side-effecting base evaluates exactly once (the native compounds'
+  // single-evaluation contract).
+  synthCompound(node, open, mid, close) {
+    const t = node[1];
+    if (isNode(t) && (t[0] === '.' || t[0] === '[]') && t.length === 3) {
+      this.mark(node, '$self', () => {
+        const asyncy = Emitter.containsAwait(node);
+        const indexy = t[0] === '[]';
+        const prop = indexy ? '[_k]' : `.${t[2]}`;
+        this.b.emit(asyncy ? 'await (async (' : '((');
+        this.b.emit(indexy ? '_o, _k, _v' : '_o, _v');
+        this.b.emit(`) => _o${prop} = ${open}_o${prop}${mid}_v${close})(`);
+        this.mark(node, 'target', () => this.expr(t[1]));
+        if (indexy) {
+          this.b.emit(', ');
+          this.mark(node, 'target', () => this.expr(t[2]));
+        }
+        this.b.emit(', ');
+        this.mark(node, 'value', () => this.expr(node[2]));
+        this.b.emit(')');
+      });
+      return;
+    }
     this.mark(node, '$self', () => {
       const target = () => this.mark(node, 'target', () => this.withTarget(() => this.expr(node[1])));
       target();
-      this.b.emit(' = Math.floor(');
+      this.b.emit(` = ${open}`);
       target();
-      this.b.emit(' / ');
+      this.b.emit(mid);
       this.mark(node, 'value', () => this.expr(node[2]));
-      this.b.emit(')');
+      this.b.emit(close);
     });
+  }
+
+  // ["//=", target, value] — target = Math.floor(target / value).
+  floorDivAssign(node) {
+    this.synthCompound(node, 'Math.floor(', ' / ', ')');
   }
 
   // ["%%=", target, value] — target = modulo(target, value), inlined.
   moduloAssign(node) {
-    this.mark(node, '$self', () => {
-      const target = () => this.mark(node, 'target', () => this.withTarget(() => this.expr(node[1])));
-      target();
-      this.b.emit(' = ' + Emitter.MODULO + '(');
-      target();
-      this.b.emit(', ');
-      this.mark(node, 'value', () => this.expr(node[2]));
-      this.b.emit(')');
-    });
+    this.synthCompound(node, Emitter.MODULO + '(', ', ', ')');
   }
 
   // ["await", value] — the value is an operand position (compound

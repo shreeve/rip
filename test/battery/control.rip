@@ -203,24 +203,44 @@ code "do block", '''
 # Control flow short-circuits: or return / or throw / and return / and throw
 # ==============================================================================
 
-code "or throw assignment generates if", "  data = fetchData() or throw new Error 'No data'", "let data = fetchData() || throw(new Error(\"No data\"));"
+code "or throw assignment lowers to a throwing IIFE", "  data = fetchData() or throw new Error 'No data'", "let data = fetchData() || (() => { throw new Error(\"No data\"); })();"
 
-code "and throw assignment generates if", "  error = validate() and throw error", '''
+code "and throw assignment lowers to a throwing IIFE", "  error = validate() and throw error", '''
   let error;
 
-  error = validate() && throw(error);
+  error = validate() && (() => { throw error; })();
 '''
 
-code "standalone and throw generates if", "  isError and throw new Error 'Failed'", "isError && throw(new Error(\"Failed\"));"
+code "standalone and throw lowers to a throwing IIFE", "  isError and throw new Error 'Failed'", "isError && (() => { throw new Error(\"Failed\"); })();"
 
 # ==============================================================================
 # Nullish coalescing control flow: ?? return / ?? throw
 # Key difference: ?? only triggers on null/undefined, not other falsy values
 # ==============================================================================
 
-code "?? throw assignment generates if with nullish check", "  data = getValue() ?? throw new Error 'Missing'", "let data = getValue() ?? throw(new Error(\"Missing\"));"
+code "?? throw assignment lowers to a throwing IIFE (nullish check)", "  data = getValue() ?? throw new Error 'Missing'", "let data = getValue() ?? (() => { throw new Error(\"Missing\"); })();"
 
-code "standalone ?? throw generates if with nullish check", "  getValue() ?? throw new Error 'Not found'", "getValue() ?? throw(new Error(\"Not found\"));"
+code "standalone ?? throw lowers to a throwing IIFE (nullish check)", "  getValue() ?? throw new Error 'Not found'", "getValue() ?? (() => { throw new Error(\"Not found\"); })();"
+
+# The short-circuit SEMANTICS, executed: the arm only throws when the
+# left side demands it.
+test "or throw passes a truthy left through", '''
+  fetchData = -> 42
+  fetchData() or throw new Error "No data"
+''', 42
+
+test "?? throw keeps a FALSY-but-present left (nullish only)", '''
+  v = false
+  v ?? throw new Error "Missing"
+''', false
+
+test "?? throw fires on null", '''
+  grab = -> null
+  try
+    grab() ?? throw new Error "Missing"
+  catch e
+    e.message
+''', "Missing"
 
 # ==============================================================================
 # Switch with Explicit Returns
@@ -830,7 +850,7 @@ test "postfix if else with complex condition", '''
 # into the program-level scope (which would suppress local declarations in
 # later sibling functions).
 
-code "or-throw in sibling exports hoists variable in each function", '''
+code "or-throw in sibling exports declares in each function", '''
     export first = (data) ->
       store = getData() or throw new Error 'no context'
       store.value
@@ -840,7 +860,7 @@ code "or-throw in sibling exports hoists variable in each function", '''
       store
   ''', '''
   export const first = function(data) {
-    let store = getData() || throw(new Error("no context"));
+    let store = getData() || (() => { throw new Error("no context"); })();
     return store.value;
   };
   export const second = function() {
