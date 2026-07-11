@@ -26,6 +26,9 @@ import * as schemaRuntime from '../../src/runtime/schema.js';
 import * as ormRuntime from '../../src/runtime/schema-orm.js';
 import * as componentsRuntime from '../../src/runtime/components.js';
 
+// Lazy: the code-verb parse gate's JavaScript parser.
+let codeParser = null;
+
 // The evaluation scope: every runtime export, visible to direct eval
 // through destructured locals. Battery snippets that redeclare schema
 // names across rows need the registry's replace semantics — the
@@ -330,6 +333,7 @@ export async function runRow(row) {
       // (no injected preamble, no delivered runtime) is ALREADY the
       // engine's posture at runtime delivery 'none' — no-ops here.
       const NOOP_OPTIONS = new Set(['skipPreamble', 'skipRuntimes', 'skipDataPart', 'bare']);
+      codeParser ??= new Bun.Transpiler({ loader: 'js' });
       const unknown = Object.keys(row.options ?? {}).filter((k) => !NOOP_OPTIONS.has(k));
       if (unknown.length > 0) {
         return `${where}\n  carries compile options ${JSON.stringify(row.options)} — no equivalent surface`;
@@ -339,6 +343,22 @@ export async function runRow(row) {
       const want = normalizeCode(row.expected);
       if (got !== want) {
         return `${where}\n  expected (normalized): ${want}\n  actual   (normalized): ${got}\n  actual (raw):\n${compiled.replace(/^/gm, '    ')}`;
+      }
+      // A byte match is not enough: the emitted output must BE
+      // JavaScript. A pin can otherwise lock in unparseable bytes
+      // (an unparenthesized unary base of `**` is a SyntaxError) and
+      // stay green forever — the parse gate makes that impossible.
+      try {
+        codeParser.scan(compiled);
+      } catch (err) {
+        const msg = err?.errors?.[0]?.message ?? err.message;
+        // The scanner also resolves module bindings; a fragment row
+        // exporting names it never declares trips that resolution,
+        // which PROVES the parse succeeded — only true syntax errors
+        // fail the gate.
+        if (!/is not declared in this file/.test(msg)) {
+          return `${where}\n  emitted output is not parseable JavaScript: ${msg}\n  actual (raw):\n${compiled.replace(/^/gm, '    ')}`;
+        }
       }
       return null;
     }

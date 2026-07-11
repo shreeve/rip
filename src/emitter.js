@@ -4258,12 +4258,18 @@ class Emitter {
     if (x[0] === '?' && x.length === 2) return 'binary';
     // Postfix presence emits a ternary — the ternary tier.
     if (x[0] === 'presence' && x.length === 2) return 'ternary';
+    if (Emitter.isStrRepeat(x)) return 'primary';
     if (isBinary(x) || isRelation(x)) return 'binary';
     if (isUnary(x)) return 'unary';
     // await-expressions (and dammit sugar, which EMITS one) sit in the
     // unary tier: they group in head position (`(await f()).x`) but
     // bind tighter than any binary as operands (`await f() + 1`, bare).
     if ((x[0] === 'await' || x[0] === 'dammit!') && x.length === 2) return 'unary';
+    // A call whose CALLEE is dammit emits `await callee(...)` — the
+    // await surrounds the invocation, so the call sits in the unary
+    // tier exactly like a spelled await: grouped in head position
+    // (`(await f()).x`), bare as an operand.
+    if (isNode(x[0]) && x[0][0] === 'dammit!') return 'unary';
     // yield has the LOWEST JS precedence: it groups as an operand
     // (`(yield 1) + 2`) and in head position.
     if ((x[0] === 'yield' || x[0] === 'yield-from') && x.length <= 2) return 'yield';
@@ -4297,7 +4303,8 @@ class Emitter {
     const tier = Emitter.jsTier(child);
     if (context === 'operand' || context === 'return') {
       if (tier === 'unary') {
-        return child[0] !== '!' && child[0] !== 'typeof' && child[0] !== 'await' && child[0] !== 'dammit!';
+        return !(child[0] === '!' || child[0] === 'typeof' || child[0] === 'await' ||
+          child[0] === 'dammit!' || (isNode(child[0]) && child[0][0] === 'dammit!'));
       }
       // A return value is an operand position EXCEPT for yield: `return
       // yield 1` is valid JS and needs no grouping.
@@ -8206,6 +8213,12 @@ class Emitter {
   // parens and the begin/tail phases reproduce the recursive bytes,
   // mark order, and inTarget/deopt state transitions exactly.
 
+  // `*` with a string-LITERAL left operand is repetition — it emits
+  // `lit.repeat(n)`, a call: the primary tier, never a spine member.
+  static isStrRepeat(x) {
+    return isNode(x) && x[0] === '*' && x.length === 3 && typeof x[1] === 'string' && x[1][0] === '"';
+  }
+
   static chainHeadSlot(x) {
     if ((x[0] === '.' || x[0] === '?.' || x[0] === '[]' || x[0] === 'optindex') && x.length === 3) return 1;
     if (x[0] === 'optcall') return 1;
@@ -8428,8 +8441,20 @@ class Emitter {
   // ordinary grouped operands.
   binary(node) {
     if (node[0] === '&&' || node[0] === '||') return this.logicalChain(node);
+    // A string-LITERAL left operand of `*` is repetition (`"-" * 40`
+    // is a ruler, never arithmetic — JS `*` would yield NaN). The
+    // rule is literal-only: a dynamic left operand keeps JS `*`.
+    if (Emitter.isStrRepeat(node)) {
+      this.mark(node, '$self', () => {
+        this.mark(node, 'left', () => this.b.emit(node[1]));
+        this.b.emit('.repeat(');
+        this.mark(node, 'right', () => this.expr(node[2]));
+        this.b.emit(')');
+      });
+      return;
+    }
     if (isChainLink(node)) return this.comparisonChain(node);
-    const extendsSpine = (x) => isBinary(x) && x[0] !== '&&' && x[0] !== '||' && !isChainLink(x);
+    const extendsSpine = (x) => isBinary(x) && x[0] !== '&&' && x[0] !== '||' && !isChainLink(x) && !Emitter.isStrRepeat(x);
     const spine = [node];
     while (extendsSpine(spine[spine.length - 1][1])) spine.push(spine[spine.length - 1][1]);
     const frames = [];
@@ -8443,7 +8468,18 @@ class Emitter {
       }
     }
     const inner = spine[spine.length - 1];
-    this.operand(inner, 'left', inner[1]);
+    // JS forbids an unparenthesized unary expression as the LEFT
+    // operand of `**`. The word-form unaries the operand context
+    // emits bare (typeof, `not`, await, dammit) group here; symbol
+    // unaries parse OUTSIDE the power and never reach this slot.
+    const l = inner[1];
+    const bareUnaryLeft = isNode(l) && (l[0] === '!' || l[0] === 'typeof' || l[0] === 'await' ||
+      l[0] === 'dammit!' || (isNode(l[0]) && l[0][0] === 'dammit!'));
+    if (inner[0] === '**' && bareUnaryLeft) {
+      this.b.emit('(');
+      this.operand(inner, 'left', l);
+      this.b.emit(')');
+    } else this.operand(inner, 'left', l);
     for (let j = spine.length - 1; j >= 0; j--) {
       const n = spine[j];
       this.b.emit(' ');

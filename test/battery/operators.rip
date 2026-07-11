@@ -237,17 +237,20 @@ code "ternary with property access", "a ? b.foo : c", "(a ? b.foo : c)"
 code "ternary with function call", "a ? b() : c", "(a ? b() : c)"
 code "ternary with expression", "a ? b + 1 : c", "(a ? (b + 1) : c)"
 
-# NOTE: Subscript access in ternary true-branch requires parentheses
-# This is a known limitation: `a ? b[0] : c` needs to be written as `a ? (b[0]) : c`
-# The workaround is simple and explicit
+# Subscript access is legal in a ternary true-branch, bare or parenthesized
 test "ternary subscript with parens", "arr = [1, 2, 3]\ntrue ? (arr[0]) : 0", 1
+test "ternary subscript bare", "arr = [1, 2, 3]\ntrue ? arr[0] : 0", 1
 code "ternary subscript with parens", "a ? (b[0]) : c", "(a ? b[0] : c)"
 
 # ==============================================================================
-# String Repeat — "str" * n
+# String Repeat — "str" * n (literal-only: a dynamic left operand keeps JS `*`)
 # ==============================================================================
 
-code "string repeat compiles to repeat", '"-" * 40', "\"-\" * 40;"
+code "string repeat compiles to repeat", '"-" * 40', '"-".repeat(40);'
+test "string repeat repeats", '"ab" * 3', "ababab"
+test "string repeat composes with concat", '"a" * 2 + "b"', "aab"
+test "string repeat takes an expression count", '"a" * (1 + 2)', "aaa"
+code "dynamic left operand stays multiply", 's * 3', 's * 3;'
 
 # ==============================================================================
 # Chained Comparisons — a < b < c
@@ -309,7 +312,9 @@ code "negative index -2 compiles to .at()", "arr[-2]", "arr.at(-2)"
 # Unary bases of ** must be parenthesized (bare form is a JS SyntaxError)
 # ==============================================================================
 
-code "typeof base of power parenthesized", "typeof x ** 2", "typeof x ** 2;"
+code "typeof base of power parenthesized", "typeof x ** 2", "(typeof x) ** 2;"
+code "not base of power parenthesized", "not x ** 2", "(!x) ** 2;"
+test "not base of power evaluates", "not 2 ** 2", 0
 test "power right assoc unchanged", "2 ** 3 ** 2", 512
 test "unary minus binds outside power", "-2 ** 2", -4
 
