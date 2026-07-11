@@ -82,3 +82,31 @@ fail "annotated write on a non-class module binding", '''
   A = class
   A::m: () => number = -> 1
 ''', "not a class declaration"
+
+# ==============================================================================
+# The soak form — `a?::b` reads `a?.prototype.b`
+# ==============================================================================
+
+code "soak prototype read", "x = A?::m", "let x = A?.prototype.m;"
+
+test "soak on null answers undefined", '''
+  K = null
+  K?::m
+''', undefined
+
+test "soak on a class reaches the prototype", '''
+  class B
+  B::m = -> 5
+  typeof B?::m
+''', "function"
+
+test "soak write lands only when the head exists", '''
+  A = {prototype: {}}
+  A?::m = 9
+  K = null
+  K?::m = 9
+  A.prototype.m
+''', 9
+
+fail "annotated soak write rejects — the augmentation needs the unconditional chain", 'String?::cap: () => string = -> "x"',
+  "the soak form cannot carry the annotation"

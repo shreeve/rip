@@ -5,6 +5,12 @@ repository's pull requests.
 
 ## Unreleased
 
+- Complete prototype access with the soak form: a tight `a?::b` reads
+  as `a?.prototype.b` (the existence token becomes the optional-member
+  link), soak writes lower through the optional-assign guard, and the
+  annotated soak write rejects shaped — an augmentation declares the
+  member EXISTS, which a conditional write cannot carry (#25)
+
 - Index the mapping offset queries: atGenerated/atSource answer
   through a centered interval tree (O(log n + k) per stab) instead of
   filtering and sorting every row (O(n)), with results byte-identical

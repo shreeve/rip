@@ -1063,3 +1063,22 @@ describe('typed prototype members on generic globals', () => {
     expect(faced.code).toContain('declare global { interface Map<K, V> { firstKey: () => K } }\n');
   });
 });
+
+// The soak form: `a?::b` reads `a?.prototype.b`. No augmentation ever
+// emits for it (an augmentation declares the member EXISTS — a
+// conditional write cannot carry that), and the annotated spelling
+// rejects shaped.
+describe('soak prototype access', () => {
+  test('reads and writes strip to their untyped twins; no augmentation anywhere', () => {
+    for (const src of ['x = A?::m\n', 'A?::m = 9\n']) {
+      const faced = ts(src);
+      expect(stripFace(faced.code, faced.tsRegions)).toBe(js(src).code);
+      expect(faced.code).not.toContain('interface');
+    }
+  });
+
+  test('the annotated soak write rejects with the fix named', () => {
+    expect(() => ts('String?::cap: () => string = -> "x"\n'))
+      .toThrow(/soak form cannot carry the annotation/);
+  });
+});
