@@ -5,6 +5,15 @@ repository's pull requests.
 
 ## Unreleased
 
+- Split the type-audit into two audits and add the tsgo twin oracle:
+  the default run is the five-dimension grid (fast, streams rows live);
+  `--hover`/`--all` adds the Hover Audit, which hovers every top-level
+  declaration and judges each answer against TWO references — the
+  hand-written twin hovered through a raw tsgo LSP (the actual
+  TypeScript answer, after quote/keyword/union-order normalization)
+  and the pinned hovers.json snapshot (the regression net over every
+  probe, twin or no twin) (#20)
+
 - Add the generator's own test suite (src/grammar/test: the annotation
   validator and the semantic side table, colocated with the tool) and
   the exactness differential (test/mapping/exactness.test.js: the
