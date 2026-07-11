@@ -1,0 +1,7 @@
+t = true
+f = false
+n = null
+u = undefined
+x = true
+y = not false
+z = null ?? undefined

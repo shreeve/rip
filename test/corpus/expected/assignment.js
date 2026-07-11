@@ -1,0 +1,10 @@
+let x = 42;
+let y = "hello";
+let z = x;
+let pi = 3.14;
+let s = "single";
+let a = 1;
+let b = 2;
+obj.prop = 99;
+let nested = 5;
+let q = 9;

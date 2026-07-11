@@ -1,0 +1,12 @@
+let q1 = Math.floor(7 / 2);
+let q2 = Math.floor((-7) / 2);
+let q3 = Math.floor(Math.floor(a / b) / c);
+let q4 = Math.floor(a / b) + c;
+let q5 = Math.floor(a / b) * 2;
+let x = 9;
+x = Math.floor(x / 2);
+let arr = [Math.floor(a / b), Math.floor(c / d)];
+f(Math.floor(a / b));
+let z1 = a / b;
+let z2 = a / b;
+let z3 = Math.floor(a / b);

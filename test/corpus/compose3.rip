@@ -1,0 +1,34 @@
+# composition-and-boundary fixture: arrows, this/@, ternary,
+# update ops, ?. in every applicable matrix position with trivia at block
+# boundaries. Inapplicable cells:
+#   - arrows in member-object/call-callee/argument position need block
+#     bodies inside parens — INDENT is suppressed inside brackets until
+#     the layout pass
+#   - update targets are SimpleAssignable by grammar (no literals)
+#   - `?`/ternary and `?.` compose freely below
+def pick(a)
+  return a ? a : 0
+
+make = (base) ->
+  @base = base
+  @base++
+  bump = (n) =>
+    n + @base
+  bump(1)
+
+t1 = pick(3)
+t2 = i > 0 ? i-- : ++i
+
+# trivia at a block boundary
+
+check = ->
+  flag = counter?.n ? 1 : 0
+  flag++
+
+  # trivia inside a function body
+
+  flag
+
+s = t2 ? "some" : "none"
+u = counter?.n
+i++

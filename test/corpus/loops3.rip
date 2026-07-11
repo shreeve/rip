@@ -1,0 +1,36 @@
+# Own/guarded/stepped/indexed loops in EXPRESSION position — the
+# value-usage lowerings: accumulator IIFEs for value comprehensions,
+# inline _result accumulators in tail position.
+xs = [1, 2, 3, 4]
+obj = {a: 1, b: 2, c: 3}
+evens = (x for x in xs when x % 2 == 0)
+own1 = (k for own k of obj)
+own2 = (names for own names of obj when names != "b")
+stepped = (x for x in xs by 2)
+steppedDown = (x for x in xs by -1)
+steppedGuard = (x for x in xs when x > 1 by 2)
+indexed = (x + i for x, i in xs)
+tailGuard = (xs) ->
+  for x in xs when x > 1
+    x * 2
+tailIndexed = (xs) ->
+  for v, i in xs
+    v + i
+tailOwn = (m) ->
+  for own name, id of m when id >= 2
+    name + id
+tailStep = (xs) ->
+  for v in xs by 2
+    v * 10
+valueGuard = for v in xs when v != 2
+  v + 100
+valueOwn = for own k, v of obj when v > 1
+  k + v
+sink = {}
+sink[k] = v for own k, v of obj
+sums = []
+sums.push(a + b) for [a, b] in [[1, 2], [3, 4]] when a > 0
+r1 = tailGuard(xs)
+r2 = tailIndexed(xs)
+r3 = tailOwn(obj)
+r4 = tailStep(xs)

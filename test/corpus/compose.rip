@@ -1,0 +1,70 @@
+# composition-and-boundary fixture: every core
+# construct in every applicable matrix position — member-object,
+# call-callee, argument, assignment-value, return — with trivia at block
+# boundaries. Inapplicable cells, noted per construct:
+#   - while/until are statement-only here (expression/postfix forms
+#     are rewriter territory)
+#   - compound assignment as call-callee is omitted: pinned in the
+#     emitter tests instead — a naive lowering of a
+#     parenthesized-assign callee to a comma expression, out of scope
+#   - exponentiation as call-callee is omitted as nonsense (calling a
+#     number); grouping in callee position is pinned by (a ?? b)(1)
+#   - `!` in member-object/callee position is omitted from this
+#     fixture: the grouping is load-bearing ((!x).y without it emits
+#     !x.y, changing meaning); pinned in emitter tests
+
+def pick(a, b)
+  return a ?? b
+
+def powret(a)
+  return 2 ** a
+
+def bump(a)
+  return a += 1
+
+# literals: member-object / argument / assignment-value / return(pick)
+lit1 = true.toString
+lit2 = undefined.toString
+lit3 = f(true, false)
+lit4 = f(null, undefined)
+lit5 = null ?? undefined
+u = pick(true, false)
+
+# logical + aliases + not: member-object / call-callee / argument / value
+v = (x && y).toString
+v2 = (x and y).z
+w = (a ?? b)(1)
+r = f(x || y, not z)
+r2 = !x && y
+
+# exponentiation: member-object / argument / assignment-value
+p1 = (2 ** 3).toString
+p2 = f(2 ** 3)
+s = 2 ** f(3)
+
+# compound assignment: member-object / argument / assignment-value /
+# return(bump) / continuation forms
+c1 = (a += 1).b
+c2 = f(b2 += 1)
+q2 = (b3 ??= 7)
+c3 = x and= y
+c4 = x or= y
+c5 +=
+  f(9)
+
+if true
+  t = null ?? 1
+
+# trivia at a block boundary
+
+while v && w
+
+  # trivia inside a block
+  v = false
+
+until lit1
+
+  # trivia inside an until block
+  lit1 = true
+
+q = pick(2 ** 3, x **= 2)

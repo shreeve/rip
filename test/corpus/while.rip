@@ -1,0 +1,10 @@
+a = 3
+while a
+  a = a - 1
+b = 0
+until b
+  b = b + 1
+x = 0
+while x < 10
+  x += 1
+  y = x * 2

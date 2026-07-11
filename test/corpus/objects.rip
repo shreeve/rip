@@ -1,0 +1,12 @@
+x = 1
+y = 2
+obj = {prop: 9}
+a = {}
+b = {x: 1, y: 2}
+c = {x}
+d = {x, y: 2}
+e = {a: {b: 2}}
+f = {n: 1}.n
+g = obj.prop
+h = {key: obj.prop, val: x && y}
+i = {1: "one", "two": 2}

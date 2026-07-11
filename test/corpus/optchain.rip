@@ -1,0 +1,21 @@
+# Optional-chaining call/index: `?.(` and `?.[` forms, chained
+# and composed; optional-assignment targets lower to guarded forms.
+# (Compound optindex KEYS — `a?.[i + 1]` — live in test/smallgaps.test.js:
+# they are pinned in the emitter tests instead.)
+f?.(1)
+g?.(x, y)
+r1 = obj.m?.()
+v1 = a?.[k]
+w1 = a?.[-1]
+w2 = arr[-1]
+chain = f?.(1)?.[2]?.prop
+n1 = arr?.[i]?.j
+u1 = @?.[k]
+a?.[k] = 1
+a?.b = f(2)
+a?.[k] += 1
+p1 = (a?.b = 1)
+w1 = "#{a?.[0]}"
+y1 = h a?.[k]
+z1 = a?.[k] if c
+t1 = obj.m?.() ? 1 : 2

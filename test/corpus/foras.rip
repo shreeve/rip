@@ -1,0 +1,19 @@
+# for-as: iterator-protocol loops (`for x as iterable` — an ES for-of),
+# with guards, patterns, and the comprehension forms.
+items = [1, 2, 3]
+pairs = [[1, 2], [3, 4]]
+seen = []
+for x as items
+  seen.push(x)
+for x as items when x > 1
+  seen.push(x * 10)
+for [a, b] as pairs
+  seen.push(a + b)
+for [a, b] as pairs when a > 1
+  seen.push(a * b)
+seen.push(x) for x as items
+seen.push(x + 1) for x as items when x > 2
+doubled = (x * 2 for x as items)
+picked = (x for x as items when x != 2)
+total = 0
+total += x for x as doubled

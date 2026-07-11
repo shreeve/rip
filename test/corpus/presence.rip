@@ -1,0 +1,22 @@
+a = 5
+b = 0
+c = null
+flag = a?!
+gone = c?!
+zero = b?!
+obj = { v: 1 }
+m = obj.v?!
+list = [a?!, b?!, c?!]
+combo = b?! ?? "absent"
+neg = not b?!
+eq = a?! == true
+paren = (a + b)?!
+text = "#{a?!}"
+probe = (v) -> v?!
+r1 = probe(0)
+r2 = probe("x")
+keep = if a?!
+  "yes"
+else
+  "no"
+out = [flag, gone, zero, m, combo, neg, eq, paren, text, r1, r2, keep]

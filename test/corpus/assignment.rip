@@ -1,0 +1,11 @@
+x = 42
+y = "hello"
+z = x
+pi = 3.14
+s = 'single'
+a = 1; b = 2
+obj.prop = 99
+nested =
+  5
+q =
+9

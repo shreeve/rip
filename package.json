@@ -5,6 +5,11 @@
   "type": "module",
   "description": "Zero-build, full-stack language for reactive UI, schemas, ORM, and server logic.",
   "scripts": {
+    "parser": "bun src/grammar/solar.rip -o src/parser.js src/grammar/grammar.rip",
+    "corpus-expected": "bun scripts/corpus-expected.mjs",
     "test": "bun test --timeout 15000"
+  },
+  "bin": {
+    "rip": "bin/rip"
   }
 }

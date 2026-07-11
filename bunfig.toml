@@ -1,0 +1,10 @@
+# Every .rip file in this repository — the grammar sources included —
+# compiles through the repository's own loader.
+preload = ["./src/loader.js"]
+
+[test]
+preload = ["./src/loader.js"]
+
+# The per-test timeout lives in package.json's test script as a CLI
+# flag (`bun test --timeout 15000`): Bun ignores a bunfig [test]
+# timeout key — a key here would be dead config.

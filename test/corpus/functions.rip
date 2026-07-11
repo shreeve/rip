@@ -1,0 +1,15 @@
+add = (a, b) ->
+  a + b
+double = (x) =>
+  x * 2
+zero = ->
+  0
+lazy = =>
+  42
+sum = add(1, 2)
+d = double(4)
+inner = (h) ->
+  h(zero())
+seq = ->
+  1
+  2

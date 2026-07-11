@@ -1,0 +1,82 @@
+# composition matrix rows for value-usage lowerings: statement
+# constructs in expression and tail positions — if→ternary (simple) and
+# IIFE (multi-statement), try/switch→IIFE with returns, loops→
+# accumulator IIFEs, postfix-if-ELSE ternaries with the assignment
+# hoist, statement-position comprehensions — instantiated so every row
+# evals.
+flag = true
+n = 7
+
+t1 = if flag then 1 else 2
+t2 = if flag then 1
+t3 = unless flag then 1 else 2
+t4 = if n > 5 then "big" else if n > 2 then "mid" else "small"
+t5 = (if flag then 1 else 2) + 3
+t6 = [if flag then 10 else 20, 30]
+
+seen = ""
+m1 = if flag
+  seen += "a"
+  n + 1
+else
+  0
+
+p1 = 5 if flag else 6
+p2 = (n + 1) if n > 100 else (n - 1)
+double = (x) -> x * 2
+p3 = double n if flag else 0
+
+risky = -> throw "bad"
+tv = try
+  risky()
+catch e
+  "caught"
+
+sw = switch n
+  when 7 then "seven"
+  else "other"
+
+i = 0
+acc = while i < 3
+  i += 1
+  i * 10
+
+evens = for v in [1, 2, 3, 4]
+  v * 2
+
+lp = loop
+  break
+
+sum = 0
+tally = (v) -> sum += v
+tally v for v in [1, 2, 3]
+
+tailIf = (v) ->
+  if v > 0
+    "pos"
+  else
+    "neg"
+
+tailMulti = (v) ->
+  if v > 0
+    w = v * 2
+    w + 1
+  else
+    0
+
+tailTry = ->
+  try
+    risky()
+  catch e
+    42
+
+tailSwitch = (v) ->
+  switch v
+    when 7 then "lucky"
+    else "plain"
+
+tailFor = (xs) ->
+  for x in xs
+    x + 100
+
+results = [t1, t2, t3, t4, t5, m1, p1, p2, p3, tv, sw, acc, evens, sum, tailIf(n), tailMulti(2), tailTry(), tailSwitch(7), tailFor([1])]

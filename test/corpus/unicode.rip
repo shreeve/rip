@@ -1,0 +1,5 @@
+x = "😀"
+y = "héllo wörld"
+z = x
+emoji = "🎉🎊"
+w = f("😀", 2)

@@ -1,0 +1,60 @@
+# Closure rows: postfix while/until, typeof/delete/instanceof,
+# the bare `...` expansion marker, and indexed pattern loop variables —
+# the gaps judged cheap enough to close together.
+x = 0
+x += 1 while x < 5
+x -= 1 until x is 2
+
+t1 = typeof x
+t2 = typeof {}
+obj = a: 1, b: 2
+deleted = delete obj.a
+key = "b"
+delete obj[key]
+t3 = typeof obj.a
+
+class Tool
+  kind: -> "tool"
+tool = new Tool
+i1 = tool instanceof Tool
+i2 = {} instanceof Tool
+
+# Relations as operands group (silent-miscompile class caught in
+# note: without parens `(a instanceof b) + 1` re-associates).
+g1 = (tool instanceof Tool) + 1
+g2 = not (tool instanceof Tool)
+g3 = ("a" in {a: 1}) && true
+g4 = 1 + typeof g3
+g5 = typeof typeof g1
+
+pickEnds = (first, ..., last) -> [first, last]
+ends = pickEnds 1, 2, 3, 4
+lastOf = (..., z) -> z
+l1 = lastOf 7, 8, 9
+
+pairSum = 0
+idxSum = 0
+for [a, b], i in [[1, 2], [3, 4]]
+  pairSum += a * b
+  idxSum += i
+
+src = a: 1, b: 2
+doubled = {k: v * 2 for k, v of src}
+vals = (v for k, v of src)
+
+hex = 0xff
+big = 1_000_000
+sci = 2.5e-3
+
+# Object-method values (certification addendum N1): thin arrows emit
+# ES6 method shorthand; fat arrows stay arrows.
+api = {base: 10, add: (n) -> @base + n, tag: (s) => "t:" + s}
+sum10 = api.add(5)
+tagged = api.tag "x"
+
+bits = 5 & 3
+bits |= 8
+bits ^= 1
+shifted = bits << 2 >> 1
+flipped = ~bits & 0xff
+lanes = 1 | 2 & 6 ^ 4

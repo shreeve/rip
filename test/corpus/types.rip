@@ -1,0 +1,33 @@
+# Typed corpus: annotations parse, ERASE, and record spans.
+# Every form here is byte-pinned and evaluates cleanly. Typed PARAMS
+# appear in the sexpr as the erased
+# ["typed-var", target, "T"] wrapper;
+# the corpus comparison canonicalizes the wrapper away — every other
+# typed form drops its annotation from the tree by construction.
+# Every referenced type name is DEFINED and no binding shadows a
+# lib.dom global — the file's declarations must stand alone under the
+# tsc harness (test/dts-tsc.test.js).
+type Opts = {a: number, b: number}
+limit: number = 10
+appName: string = "rip"
+ratio: number =
+  3.14
+flags: {a: number, b?: string} = {a: 1}
+pick: (n: number) => number = (n: number) -> n + 1
+
+def clamp(v: number, lo: number = 0, hi: number = limit): number
+  w = if v < lo then lo else v
+  if w > hi then hi else w
+
+scale = (factor: number, ...rest: number[]) -> factor + rest.length
+pair = ({a, b}: Opts = {a: 2, b: 3}) -> a * b
+double = (x: number): number -> x * 2
+
+total: number = clamp(12) + scale(2, 9, 9) + pair() + double(4) + pick(1)
+
+cast1 = total as number
+cast2 = (cast1 + 1) as A.B as Wide
+list: number[] = [1 as N, 2, 3]
+sum: number = 0
+sum += n for n in list
+label = "#{appName}:#{limit}"

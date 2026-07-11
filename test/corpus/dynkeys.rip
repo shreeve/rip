@@ -1,0 +1,13 @@
+# Dynamic keys: computed object keys in literals and patterns,
+# and the @/this index forms that share the bracket machinery.
+x1 = {[k]: 1}
+x2 = {[k + "s"]: v}
+x3 = {[k]: 1, b: 2}
+x4 = {["a" + i]: f(i)}
+{[k]: dv} = obj
+m1 = {[f(1)]: 2}
+o1 = {[k + 1]: 2, [j]: 3}
+meth = {[k]: -> 1}
+t1 = @[k]
+t2 = this[k]
+inx = {n: a[k]}

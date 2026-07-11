@@ -1,0 +1,42 @@
+# Readonly declarations: `=!` — every statement-position
+# grammar form, the adjacency boundary, and the reactive interplay.
+# Export forms live in test/readonly.test.js (module syntax cannot
+# join the shared corpus).
+
+# Declarations — expression, continuation, and indent forms
+answer =! 42
+total =! 1 + 2
+motto =!
+  "steady"
+
+# Adjacency spellings: unspaced pairs declare the same way
+tight =!7
+snug=!8
+
+# Spaced `= !` keeps assignment-of-negation
+flag = !answer
+
+# Typed twin erases to the same bytes
+limit: number =! 100
+
+# Postfix guard shifts INTO the value: the declaration stands
+pick =! 1 if total > 2
+
+# Reads are plain identifier references
+sum = answer + total
+viaCall = Math.max answer, 5
+inArray = [answer, total]
+inObject = {n: answer, answer}
+
+# A readonly of a reactive read is a value SNAPSHOT
+count := 0
+snapshot =! count + 1
+
+# Effects and computeds read readonly names plain
+doubled ~= answer * 2
+~> probe answer
+
+# Function scope declares its own readonly names
+scaled = (k) ->
+  base =! 10
+  base * k

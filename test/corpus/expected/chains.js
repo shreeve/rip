@@ -1,0 +1,15 @@
+let a = 1;
+let b = 2;
+let c = 3;
+let lo = (a < b) && (b < c);
+let hi = (c > b) && (b > a);
+let eq = (a === a) && (a === a);
+let ne = (a !== b) && (b !== c);
+let mix = (((a < b) && (b <= c)) && (c > a)) && (a >= a);
+let optout = (a < b) < c;
+let joined = ((a < b) && (b < c)) && ((c > b) && (b > a));
+let flat1 = a && b && c;
+let flat2 = a || b || c || a;
+let flat3 = (a && b) || c;
+let deep = (((1 < 2) && (2 < 3)) && (3 < 4)) && (4 < 5);
+let gated = ((1 < b) && (b < 9)) ? "in" : "out";

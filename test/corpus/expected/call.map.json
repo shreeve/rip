@@ -1,0 +1,1 @@
+{"version":3,"file":"call.rip.js","sources":["call.rip"],"sourcesContent":["f()\nf(1)\nf(1, 2, 3)\ng(f(1), 2)\nobj.method(x)\nf(1,)\nh()()\nx = f(y)\n"],"names":["x","f","g","obj","method","h"],"mappings":"AAAA,IAOAA;;AAPAC,CAAC;AACDA,CAAC;AACDA,CAAC;AACDC,CAAC,CAACD,CAAC;AACHE,IAAIC,MAAM;AACVH;AACAI,CAAC,EAAE;AACHL,IAAIC,CAAC"}

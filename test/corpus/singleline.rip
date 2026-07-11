@@ -1,0 +1,27 @@
+# composition matrix rows for single-line bodies: arrows in
+# assignment-value, argument, callee, and return positions; then/else
+# inline blocks at statement level and in switch arms.
+double = (x) -> x * 2
+lazy = -> 42
+d = double(4)
+r = ((x) -> x + 1)(5)
+z = apply((x) => x * 2, 1)
+def m()
+  return (x) -> x
+
+if d > 5 then big = 1
+if d > 5 then big = 2 else big = 3
+while d > 99 then d -= 1
+label = ""
+switch d
+  when 8 then label = "eight"
+  else label = "other"
+
+# semicolons continue single-line bodies; parenthetical
+# multi-statements are comma expressions in value position, bare blocks
+# in statement position
+chain = (x) -> x; inner = -> 2
+if d then t1 = 1; t2 = 2
+seq = (t1; t2)
+if d then (t1; t2)
+pick = -> (t1; t2)

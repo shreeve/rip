@@ -1,0 +1,30 @@
+arr = [1, 2, 3, 4]
+obj = {a: 1, b: 2}
+t = 0
+for x in arr when x > 1 by 2
+  t += x
+for x in arr by 2 when x > 1
+  t += x
+for x in arr by 2
+  t += x
+for x, i in arr when x
+  t += i
+for k, v of obj when v > 0
+  t += v
+for own k, v of obj when k
+  t += 1
+for own k, v of obj
+  t += 1
+for x in arr when x > 2
+  t += x
+# LITERAL negative steps walk DOWN from the end (`by -1` is the
+# descending `_i--` loop; other negatives step by their amount).
+# Non-literal steps evaluate once into a runtime-sign header and live
+# OUTSIDE this byte corpus (an ascending header
+# never terminates when the step is negative at runtime).
+for x in arr by -1
+  t += x
+for x in arr by -2
+  t += x
+for x, i in arr by -1
+  t += x + i

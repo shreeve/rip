@@ -5,6 +5,12 @@ repository's pull requests.
 
 ## Unreleased
 
+- Add the compiler surface and corpus: the compile() entry point, project
+  configuration, the Bun .rip loader, the run harness, the rip CLI with
+  explain and schema evolution, the corpus snapshot layer with committed
+  expected artifacts, and CI gates for parser regeneration and corpus
+  drift (#6)
+
 - Add the emitter, type faces, and feature runtimes: the full JS/TS
   two-face emitter with exact mapping rows, declaration emission, the
   schema and component type stories, and the inline-delivered reactive,

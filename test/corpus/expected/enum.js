@@ -1,0 +1,9 @@
+const Color = {red: 0, green: 1, blue: 2, 0: "red", 1: "green", 2: "blue"};
+const HttpCode = {ok: 200, created: 201, notFound: 404, serverError: 500, 200: "ok", 201: "created", 404: "notFound", 500: "serverError"};
+const Tier = {free: "f", pro: "p", team: "t", "f": "free", "p": "pro", "t": "team"};
+const Radix = {hex: 0x10, exp: 1e3, 0x10: "hex", 1e3: "exp"};
+const Direction = {north: 1, south: 2, east: 3, west: 4, 1: "north", 2: "south", 3: "east", 4: "west"};
+let pick = Color.green;
+let name = Color[2];
+let sum = HttpCode.ok + HttpCode.notFound;
+let back = Tier["t"] + Direction[4];

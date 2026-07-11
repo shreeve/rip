@@ -1,0 +1,39 @@
+# Enum codegen: forward + reverse const objects.
+
+enum Color
+  red = 0
+  green = 1
+  blue = 2
+
+enum HttpCode
+  ok = 200
+  created = 201
+  notFound = 404
+  serverError = 500
+
+enum Tier
+  free = "f"
+  pro = "p"
+  team = "t"
+
+enum Radix
+  hex = 0x10
+  exp = 1e3
+
+# `export enum` stays out (the eval check Function-wraps this file;
+# module syntax can't appear) — its byte pin lives in test/enum.test.js.
+enum Direction
+  north = 1
+  south = 2
+  east = 3
+  west = 4
+
+# A function-body enum stays OUT of this corpus: it exercises
+# member `let` into the function hoist there, and
+# the byte layer stays clean by design — the hoist pair
+# is pinned in test/enum.test.js instead.
+
+pick = Color.green
+name = Color[2]
+sum = HttpCode.ok + HttpCode.notFound
+back = Tier["t"] + Direction[4]

@@ -1,0 +1,1 @@
+{"version":3,"file":"member.rip.js","sources":["member.rip"],"sourcesContent":["a.b\na.b.c\nx = a.b\na.b = c\nf(a.b)\nf(x).y\nobj.if\n"],"names":["a","b","c","x","f","y","obj","if"],"mappings":"AAAAA,EAAEC;AACFD,EAAEC,EAAEC;IACJC,IAAIH,EAAEC;AACND,EAAEC,IAAIC;AACNE,CAAC,CAACJ,EAAEC;AACJG,CAAC,IAAIC;AACLC,IAAIC"}

@@ -1,0 +1,410 @@
+#!/usr/bin/env bun
+
+// The Rip CLI: compile .rip files to JavaScript, or run them directly
+// through the Bun loader plugin (src/loader.js) so .rip imports compile
+// transitively. Diagnostics print as path:line:col with a source excerpt
+// (CompileError's formatted message) and exit non-zero.
+
+import { readFileSync, writeFileSync, existsSync, statSync, rmSync, mkdirSync } from 'fs';
+import { spawnSync } from 'child_process';
+import { randomBytes } from 'crypto';
+import { join, dirname, resolve, relative, sep } from 'path';
+import { fileURLToPath } from 'url';
+import { compile, CompileError } from '../src/compile.js';
+import { explainSource, explainGenerated, parseTarget, UsageError, PositionError } from '../src/explain.js';
+import { tokenize, makeParserLexer } from '../src/lexer.js';
+import { Parser } from '../src/parser.js';
+import { toInlineMapComment } from '../src/sourcemap.js';
+import packageJson from '../package.json' with { type: 'json' };
+
+const loaderPath = join(dirname(fileURLToPath(import.meta.url)), '../src/loader.js');
+const runnerPath = join(dirname(fileURLToPath(import.meta.url)), '../src/run.js');
+
+const HELP = `rip ${packageJson.version} — ${packageJson.description}
+
+Usage:
+  rip [options] file.rip [args...]   Run a .rip file (its .rip imports compile transitively)
+  rip [options]                      Read source from stdin
+  rip schema <verb> [args...]        Schema evolution: status | plan | make | migrate
+                                     (run 'rip schema --help' for the full surface)
+
+Options:
+  -c, --compile        Print compiled JavaScript to stdout
+  -o, --output <file>  Write compiled JavaScript to <file>
+  -m, --map            Append an inline source map to compiled output
+  -t, --tokens         Print the token stream
+  -s, --sexpr          Print the s-expression tree
+  --dts                Emit type declarations: next to -o output
+                       (dist/app.js → dist/app.d.ts), or alone to stdout
+  --dts-dir <dir>      Write declarations under <dir>, mirroring the
+                       source path (implies --dts)
+  --runtime <mode>     Feature-runtime delivery for compiled
+                       output: 'inline' (default — self-contained,
+                       the runtime inlined once) or 'import' (one
+                       import of the shared runtime module). Programs
+                       using no feature runtime are identical under
+                       both
+  --explain <file.rip>:<pos>
+                       Explain a SOURCE position: the containment chain of
+                       nodes at it — semanticKind, roles, spans, mapping
+                       rows, and the generated text each maps to. <pos> is
+                       a raw offset (any in-file UTF-16 code unit, newline
+                       bytes included) or 1-based <line>:<col> (visible
+                       text only — line terminators are not columns)
+  --explain-generated <file.rip>:<pos>
+                       Explain a GENERATED position: the mapping rows
+                       containing it, resolved back to source
+  --face <js|ts>       The emission surface --explain reads against:
+                       'js' (default — the shipping emission) or 'ts'
+                       (the editor face — annotation rows
+                       included). Explain-only; compile modes always
+                       ship JS
+  --ts                 Dump the TS FACE — the exact TypeScript the editor
+                       hands tsgo to type-check — for the input file (or
+                       stdin). Inspection only, printed to stdout: the TS
+                       face is never a shipping artifact
+  -h, --help           Show this help
+  -v, --version        Show version
+
+Examples:
+  rip app.rip                        Run app.rip
+  rip -c app.rip                     Show the compiled JavaScript
+  rip -o app.js -m app.rip           Compile to app.js with an inline source map
+  rip -o dist/app.js --dts app.rip   Compile to dist/app.js + dist/app.d.ts
+  rip --dts-dir types src/app.rip    Write types/src/app.d.ts
+  rip --explain app.rip:3:5          Explain the construct at line 3, column 5
+  rip --ts app.rip                   Dump the TS face the editor type-checks
+  echo 'console.log 1 + 2' | rip     Run source from stdin
+`;
+
+const fail = (message, code = 1) => {
+  console.error(message);
+  process.exit(code);
+};
+
+// Options precede the file; everything after the file belongs to the
+// script. Combined short flags expand (-cm → -c -m).
+const args = process.argv.slice(2);
+
+// `rip schema <verb>` — the schema evolution subcommand,
+// dispatched before option parsing (the word `schema` in first
+// position is the subcommand, never an input file — run a file
+// literally named `schema` as `rip ./schema`). The harness runs
+// under the .rip loader so importing the models entry compiles its
+// modules transitively.
+if (args[0] === 'schema') {
+  const schemaCliPath = join(dirname(fileURLToPath(import.meta.url)), '../src/schema-cli.js');
+  const r = spawnSync('bun', [`--preload=${loaderPath}`, schemaCliPath, ...args.slice(1)], {
+    stdio: 'inherit',
+    env: process.env,
+  });
+  process.exit(r.status ?? 1);
+}
+const takesArgument = new Set(['-o', '--output', '--explain', '--explain-generated', '--dts-dir', '--runtime', '--face']);
+let fileIndex = -1;
+for (let i = 0; i < args.length; i++) {
+  if (i > 0 && takesArgument.has(args[i - 1])) continue;
+  if (!args[i].startsWith('-')) { fileIndex = i; break; }
+}
+const rawOptions = fileIndex === -1 ? args : args.slice(0, fileIndex);
+const scriptArgs = fileIndex === -1 ? [] : args.slice(fileIndex + 1);
+const options = rawOptions.flatMap((arg) =>
+  /^-[a-zA-Z]{2,}$/.test(arg) ? [...arg.slice(1)].map((ch) => `-${ch}`) : [arg]
+);
+
+const has = (...names) => names.some((n) => options.includes(n));
+
+if (has('-h', '--help')) {
+  console.log(HELP);
+  process.exit(0);
+}
+if (has('-v', '--version')) {
+  console.log(`rip ${packageJson.version}`);
+  process.exit(0);
+}
+
+const showCompiled = has('-c', '--compile');
+const showTsFace = has('--ts');
+const showTokens = has('-t', '--tokens');
+const showSexpr = has('-s', '--sexpr');
+const withMap = has('-m', '--map');
+let outputFile = null;
+for (let i = 0; i < options.length; i++) {
+  if (options[i] === '-o' || options[i] === '--output') {
+    outputFile = options[++i];
+    if (!outputFile) fail('rip: -o/--output requires a file argument', 2);
+  }
+}
+
+// Declaration delivery: the compiler returns declarations
+// in-memory and never writes them — persistence is THIS packaging.
+// `--dts` is opt-in (default off); `--dts-dir` implies it.
+let dtsDir = null;
+for (let i = 0; i < options.length; i++) {
+  if (options[i] === '--dts-dir') {
+    dtsDir = options[++i];
+    if (!dtsDir) fail('rip: --dts-dir requires a directory argument', 2);
+  }
+}
+const wantDts = options.includes('--dts') || dtsDir !== null;
+
+// Feature-runtime delivery: compiled-to-file/stdout output is
+// carried away, so 'inline' is the default; the flag only overrides.
+let runtimeDelivery = 'inline';
+for (let i = 0; i < options.length; i++) {
+  if (options[i] === '--runtime') {
+    runtimeDelivery = options[++i];
+    if (runtimeDelivery !== 'inline' && runtimeDelivery !== 'import') {
+      fail(`rip: --runtime takes 'inline' or 'import' (got '${runtimeDelivery ?? ''}')`, 2);
+    }
+  }
+}
+
+let explainArg = null;
+let explainDirection = null;
+for (let i = 0; i < options.length; i++) {
+  if (options[i] === '--explain' || options[i] === '--explain-generated') {
+    explainDirection = options[i];
+    explainArg = options[++i];
+    if (!explainArg) fail(`rip: ${explainDirection} requires a <file.rip>:<pos> argument`, 2);
+  }
+}
+
+// The emission surface explain reads against. Explain-only:
+// compile modes always produce the shipping JS face — the TS face is
+// never a shipping target.
+let face = 'js';
+let faceGiven = false;
+for (let i = 0; i < options.length; i++) {
+  if (options[i] === '--face') {
+    face = options[++i];
+    faceGiven = true;
+    if (face !== 'js' && face !== 'ts') {
+      fail(`rip: --face takes 'js' or 'ts' (got '${face ?? ''}')`, 2);
+    }
+  }
+}
+if (faceGiven && explainDirection === null) {
+  fail("rip: --face selects the surface --explain reads against — compile and run modes always ship JS (the TS face is never a shipping target)", 2);
+}
+
+const known = new Set(['-c', '--compile', '--ts', '-o', '--output', '-m', '--map', '-t', '--tokens', '-s', '--sexpr', '--dts', '--dts-dir', '--runtime', '--explain', '--explain-generated', '--face', outputFile, dtsDir]);
+const unknown = options.filter((o) => o.startsWith('-') && !known.has(o));
+if (unknown.length > 0) {
+  fail(`rip: unknown option${unknown.length === 1 ? '' : 's'}: ${unknown.join(', ')}\n\nRun 'rip --help' for usage.`, 2);
+}
+
+// ---- Explain mode ----
+//
+// The position's full mapping story, from the side tables of a fresh
+// compile. The target names its own file; explain combines with nothing.
+
+if (explainDirection !== null) {
+  const others = options.filter((o) => o.startsWith('-') && o !== explainDirection && o !== '--face');
+  if (others.length > 0) {
+    fail(`rip: ${explainDirection} cannot combine with other options: ${others.join(', ')}\n\nRun 'rip --help' for usage.`, 2);
+  }
+  if (fileIndex !== -1) {
+    fail(`rip: ${explainDirection} takes its file inside the target argument; unexpected: ${args.slice(fileIndex).join(' ')}\n\nRun 'rip --help' for usage.`, 2);
+  }
+  let target;
+  try {
+    target = parseTarget(explainArg);
+  } catch (err) {
+    if (err instanceof UsageError) fail(err.message, 2);
+    throw err;
+  }
+  if (!existsSync(target.path) || !statSync(target.path).isFile()) {
+    fail(`rip: file not found: ${target.path}`);
+  }
+  const text = readFileSync(target.path, 'utf8');
+  const explain = explainDirection === '--explain' ? explainSource : explainGenerated;
+  try {
+    console.log(explain(text, { ...target, face }));
+  } catch (err) {
+    if (err instanceof CompileError) fail(err.message);
+    if (err instanceof PositionError) fail(`rip: ${err.message}`);
+    throw err;
+  }
+  process.exit(0);
+}
+
+const compileMode = showCompiled || showTokens || showSexpr || withMap || outputFile !== null || wantDts;
+const inputFile = fileIndex === -1 ? null : args[fileIndex];
+
+// Declarations on STDOUT must be the only stream: without an output
+// file there is nowhere else to put the JS, and interleaving two
+// artifacts in one pipe helps nobody.
+if (wantDts && outputFile === null && dtsDir === null && (showCompiled || withMap || showTokens || showSexpr)) {
+  fail('rip: --dts without -o prints the declarations alone — add -o <file> to write JS and .d.ts together', 2);
+}
+if (dtsDir !== null && inputFile === null) {
+  fail('rip: --dts-dir mirrors the source path and needs a file input, not stdin', 2);
+}
+
+// Compile modes take exactly one input; arguments after it belong to
+// nothing and are rejected. (Run mode's trailing arguments are the
+// script's argv and pass through untouched.)
+if (compileMode && scriptArgs.length > 0) {
+  fail(`rip: unexpected argument${scriptArgs.length === 1 ? '' : 's'} after the input file in compile mode: ${scriptArgs.join(' ')}\n\nRun 'rip --help' for usage.`, 2);
+}
+
+// No file and an interactive terminal: nothing to read — show usage.
+if (inputFile === null && process.stdin.isTTY) {
+  console.log(HELP);
+  process.exit(0);
+}
+
+if (inputFile !== null && (!existsSync(inputFile) || !statSync(inputFile).isFile())) {
+  fail(`rip: file not found: ${inputFile}`);
+}
+
+// ---- TS-face mode (`--ts`) ----
+//
+// Dump the exact TypeScript the editor hands tsgo — the equivalent of
+// a `--shadow` dump — the go-to for debugging a type-related issue.
+// Inspection only: it prints to stdout and combines with nothing, because
+// the TS face is never a shipping artifact — there is no -o form.
+if (showTsFace) {
+  const others = options.filter((o) => o.startsWith('-') && o !== '--ts');
+  if (others.length > 0) {
+    fail(`rip: --ts is an inspection mode (stdout only, the TS face never ships) and cannot combine with other options: ${others.join(', ')}\n\nRun 'rip --help' for usage.`, 2);
+  }
+  const tsFaceSource = inputFile !== null ? readFileSync(inputFile, 'utf8') : readFileSync(0, 'utf8');
+  try {
+    const { code } = compile(tsFaceSource, { path: inputFile ?? '<stdin>', face: 'ts' });
+    process.stdout.write(code.endsWith('\n') ? code : `${code}\n`);
+  } catch (err) {
+    if (err instanceof CompileError) fail(err.message);
+    throw err;
+  }
+  process.exit(0);
+}
+
+// Run `path` through Bun with the .rip loader preloaded. The entry goes
+// through the run harness (src/run.js), which dynamic-imports it — so
+// the loader plugin compiles it like any import, and uncaught errors
+// print with stack frames remapped to .rip source positions (Bun's own
+// reporter shows generated-JS coordinates for plugin-loaded modules;
+// src/stackmap.js). The child's exit status is ours.
+const run = (path, argv) => {
+  const r = spawnSync('bun', [`--preload=${loaderPath}`, runnerPath, path, ...argv], {
+    stdio: 'inherit',
+    env: process.env,
+  });
+  process.exit(r.status ?? 1);
+};
+
+// ---- Run mode ----
+
+if (!compileMode) {
+  if (inputFile !== null) {
+    run(inputFile, scriptArgs);
+  }
+
+  // Stdin: materialize as a .rip scratch file IN THE CWD — that keeps
+  // relative imports in stdin source resolving against the directory
+  // the user ran from (a tmpdir would silently re-root them). The name
+  // is random and creation is exclusive ('wx'): an existing file is
+  // never overwritten, and cleanup removes only the file this process
+  // created. A cwd that refuses the write (read-only, no permission)
+  // fails with a clear diagnostic.
+  const source = readFileSync(0, 'utf8');
+  try {
+    compile(source, { path: '<stdin>' });
+  } catch (err) {
+    if (err instanceof CompileError) fail(err.message);
+    throw err;
+  }
+  let tmp = null;
+  for (let attempt = 0; attempt < 3 && tmp === null; attempt++) {
+    const candidate = join(process.cwd(), `.rip-stdin-${randomBytes(6).toString('hex')}.rip`);
+    try {
+      writeFileSync(candidate, source, { flag: 'wx' });
+      tmp = candidate;
+    } catch (err) {
+      if (err.code !== 'EEXIST') {
+        fail(`rip: cannot write the stdin scratch file in ${process.cwd()}: ${err.message}`);
+      }
+    }
+  }
+  if (tmp === null) fail(`rip: cannot create a unique stdin scratch file in ${process.cwd()}`);
+  let status;
+  try {
+    const r = spawnSync('bun', [`--preload=${loaderPath}`, runnerPath, tmp, ...scriptArgs], {
+      stdio: 'inherit',
+      env: process.env,
+    });
+    status = r.status ?? 1;
+  } finally {
+    rmSync(tmp, { force: true });
+  }
+  process.exit(status);
+}
+
+// ---- Compile mode ----
+
+const path = inputFile ?? '<stdin>';
+const source = inputFile !== null ? readFileSync(inputFile, 'utf8') : readFileSync(0, 'utf8');
+
+try {
+  if (showTokens) {
+    for (const t of tokenize(source, path).tokens) {
+      console.log(`[${t.start},${t.end}) ${t.kind}${t.value === undefined ? '' : ' ' + JSON.stringify(t.value)}`);
+    }
+  }
+
+  if (showSexpr) {
+    const parser = Parser();
+    parser.lexer = makeParserLexer(path);
+    const result = parser.parse(source);
+    if (result.diagnostics.length > 0) {
+      // Route through compile() so the diagnostic formats identically.
+      compile(source, { path });
+    }
+    console.log(JSON.stringify(result.sexpr));
+  }
+
+  const wantsJs = showCompiled || outputFile !== null || (withMap && !showTokens && !showSexpr);
+  if (wantsJs || wantDts) {
+    const result = compile(source, { path, runtimeDelivery });
+    if (wantsJs) {
+      const { code, map } = result;
+      const sep = code.endsWith('\n') ? '' : '\n';
+      const output = withMap ? `${code}${sep}${toInlineMapComment(map)}\n` : `${code}${sep}`;
+      if (outputFile !== null) {
+        writeFileSync(resolve(outputFile), output);
+      } else {
+        process.stdout.write(output);
+      }
+    }
+    if (wantDts) {
+      // Placement follows the OUTPUT: -o dist/app.js puts dist/app.d.ts
+      // beside it; --dts-dir re-roots the SOURCE path under <dir>;
+      // stdout mode prints. An untyped file yields the trivial (empty)
+      // declaration — the request was explicit, so the file is written
+      // either way (asking never changes what the code produced).
+      const declarations = result.declarations;
+      if (dtsDir !== null) {
+        const rel = relative(process.cwd(), resolve(inputFile));
+        // Containment is a path-SEGMENT test: `..` alone or a leading
+        // `../` segment escapes; a file NAMED with leading dots
+        // (`..inside.rip`) is in-tree.
+        if (rel === '..' || rel.startsWith(`..${sep}`)) {
+          fail(`rip: --dts-dir mirrors the source tree under the current directory — ${inputFile} lies outside it`, 2);
+        }
+        const target = join(resolve(dtsDir), rel.replace(/\.rip$/, '') + '.d.ts');
+        mkdirSync(dirname(target), { recursive: true });
+        writeFileSync(target, declarations);
+      } else if (outputFile !== null) {
+        const target = resolve(outputFile).replace(/\.[^./\\]+$/, '') + '.d.ts';
+        writeFileSync(target, declarations);
+      } else {
+        process.stdout.write(declarations);
+      }
+    }
+  }
+} catch (err) {
+  if (err instanceof CompileError) fail(err.message);
+  throw err;
+}

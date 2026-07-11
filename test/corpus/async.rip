@@ -1,0 +1,51 @@
+# Await, async auto-marking, and generators. All awaits sit
+# inside functions (module-level top-level await would fail the
+# Function-validation tier); dammit rows live in test/async.test.js
+# are non-comparable by design).
+double = (x) -> x * 2
+
+fetchOne = ->
+  await Promise.resolve(41)
+
+addFetched = (a) ->
+  base = await fetchOne()
+  base + a
+
+fatFetch = (k) => await Promise.resolve(k)
+
+compute = ->
+  v = if await fetchOne() then "yes" else "no"
+  w = await Promise.resolve(2) + 3
+  [v, w]
+
+grabStatus = ->
+  r = (await fetchOne()).toString()
+  r
+
+collect = ->
+  vals = (await Promise.resolve(i) for i in [1, 2, 3])
+  vals
+
+tryValue = ->
+  v = try
+    await fetchOne()
+  catch e
+    0
+  v
+
+class Fetcher
+  pull: ->
+    await fetchOne()
+  sync: -> 7
+
+api = {run: -> await fetchOne(), plain: -> 5}
+
+counter = ->
+  yield 1
+  yield 2
+
+delegate = -> yield from counter()
+
+echoBack = ->
+  got = yield 1
+  got

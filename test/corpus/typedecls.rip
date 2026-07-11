@@ -1,0 +1,36 @@
+# Declaration forms: type aliases (simple,
+# generic, function, block-union, structural), interfaces (plain,
+# extends), typed class fields (bodiless — both compilers emit the
+# bare field), a module-level @-typed declaration, and typed defs.
+# The remaining forms (bare forward declarations, initialized
+# class fields, field/method mixes, exports) are pinned in
+# test/types.test.js instead — this file must satisfy every corpus
+# corpus layer.
+
+type ID = string
+type Pair<A, B> = [A, B]
+type Handler = (e: Event) => void
+type Ok = {value: number}
+type Err = {error: string}
+type Result =
+  | Ok
+  | Err
+type Shape =
+  kind: string
+  size: number
+
+interface Point
+  x: number
+  y: number
+interface Named extends Point
+  name: string
+
+class Widget
+  width: number
+  height: string
+
+def area(w: number, h: number): number
+  w * h
+
+@tag: string = "root"
+sum = area(2, 3)

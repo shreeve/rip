@@ -1,0 +1,1 @@
+["program",["def","area",["w","h"],["block",["return",["*","w","h"]]]],["=","total",["+",["area","3","4"],["area","5","6"]]],["if",[">","total","50"],["block",["=","msg","\"big\""]],["block",["=","msg","\"small\""]]],["=","result",[".",[[".","obj","compute"],"total"],"value"]]]

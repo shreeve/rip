@@ -1,0 +1,13 @@
+let i = 1;
+let j = 3;
+let arr = [10, 20, 30, 40];
+let a = ((s, e) => Array.from({length: Math.abs(e - s) + 1}, (_, i) => s + (i * (s <= e ? 1 : -1))))(1, 5);
+let b = ((s, e) => Array.from({length: Math.max(0, Math.abs(e - s))}, (_, i) => s + (i * (s <= e ? 1 : -1))))(1, 5);
+let c = arr.slice(1, 4);
+let d = arr.slice(1);
+let e = arr.slice(0, 3);
+let f = arr.slice(i, +j + 1 || 9e9);
+let g = arr.slice(i, j);
+let h = arr.slice(0, j);
+let k = arr.slice(1);
+let m = ((s, e) => Array.from({length: Math.abs(e - s) + 1}, (_, i) => s + (i * (s <= e ? 1 : -1))))(i, j);

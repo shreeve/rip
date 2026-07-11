@@ -1,0 +1,15 @@
+a = 1
+b = 2
+c = 3
+lo = a < b < c
+hi = c > b > a
+eq = a == a == a
+ne = a != b != c
+mix = a < b <= c > a >= a
+optout = (a < b) < c
+joined = a < b < c and c > b > a
+flat1 = a and b and c
+flat2 = a or (b or c) or a
+flat3 = a and b or c
+deep = 1 < 2 < 3 < 4 < 5
+gated = if 1 < b < 9 then "in" else "out"

@@ -1,0 +1,72 @@
+# Reactive declarations: state (:=) and computed (~=), every
+# grammar form, with reads and writes across the composition surface.
+
+# Declarations — all state forms
+count := 0
+sum := 1 + 2
+mood :=
+  "curious"
+banner := "hello"
+
+# Computed — expression, terminator, and block forms
+double ~= count * 2
+greeting ~=
+  banner + "!"
+report ~=
+  d = double + 1
+  d * 10
+
+# Typed twins erase to the same bytes
+limit: number := 100
+ratio: number ~= limit / 4
+
+# Reads unwrap everywhere a value reads
+plain = count + 1
+viaCall = Math.max count, 5
+inArray = [count, sum]
+inObject = {n: count, count}
+keyed = {"count": count}
+nested ~= double + sum
+
+# Writes unwrap — plain, compound, update
+count = 5
+count += 2
+count++
+--count
+mood = "bright"
+
+# Member and index reads through the container
+user := {name: "Ada", tags: [1, 2]}
+who = user.name
+firstTag = user.tags[0]
+user.name = "Bob"
+
+# Reactive values in control flow
+if count > 3
+  hit = count
+while count > 6
+  count -= 1
+
+# Loops over reactive containers
+items := [10, 20]
+total = 0
+for it in items
+  total += it
+doubled = (x * 2 for x in items)
+
+# Functions close over the containers
+def bump()
+  count += 1
+peek = -> count + sum
+bump()
+
+# Function-local declarations
+def localState()
+  z := 7
+  z + 1
+
+# do-iife reads through the closure
+snap = do -> count
+
+# Conditional initializer (postfix shifts into the value)
+fallback := 0 if count > 0

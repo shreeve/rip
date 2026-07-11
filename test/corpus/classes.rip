@@ -1,0 +1,64 @@
+# composition matrix rows for classes: declarations (bare,
+# named, extends, with/without bodies), methods, the constructor,
+# static methods, bound (=>) methods with an explicit constructor,
+# super in constructors and methods (bare and member forms), `new`
+# with and without arguments, class expressions in assignment-value,
+# call-argument (implicit call), array-element, and member-access
+# positions, and instances driving the whole matrix at eval time.
+class Animal
+  constructor: (name) ->
+    @name = name
+  speak: -> "..."
+  describe: -> "#{@name} says #{@speak()}"
+  @kingdom: -> "Animalia"
+
+class Dog extends Animal
+  constructor: (name) ->
+    super(name)
+  speak: -> "woof"
+  describe: -> super() + "!"
+
+class Counter
+  constructor: ->
+    @n = 0
+  tick: =>
+    @n += 1
+    @n
+
+# instantiation: implicit args, explicit args, bare new
+d = new Dog "Rex"
+a = new Animal("Generic")
+c = new Counter
+
+# methods, inheritance, statics
+s1 = d.speak()
+s2 = d.describe()
+s3 = a.speak()
+k = Animal.kingdom()
+
+# bound method survives detachment (the constructor binds it)
+tick = c.tick
+t1 = tick()
+t2 = tick()
+
+# class expressions: assignment value, implicit call argument,
+# array element, member access on an instance of an expression class
+Maker = class
+  make: -> "made"
+made = (new Maker()).make()
+
+hold = (x) -> x
+Held = hold class Token
+  kind: -> "held"
+h = (new Held()).kind()
+
+pair = [class L, class R]
+lname = pair[0].name
+
+# single-line members whose bodies contain multi-argument implicit
+# calls: the commas belong to the call, not the member list
+add = (p, q) -> p + q
+class Calc
+  two: -> add 1, 1
+  three: -> add 1, add 1, 1
+sums = [new Calc().two(), (new Calc()).three()]
