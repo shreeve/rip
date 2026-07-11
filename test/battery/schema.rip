@@ -3804,6 +3804,17 @@ test "algebra drops behavior", '''
   [typeof a.full, typeof a.normalize, typeof b.full, typeof b.normalize]
 ''', ["string", "function", "undefined", "undefined"]
 
+# Every derived schema carries a back-pointer to the original :model —
+# tooling follows the chain (pick -> partial -> ...) to its source.
+test 'algebra preserves sourceModel through chain', '''
+    User = schema :model
+      name! string
+      email! email
+    A = User.pick("name")
+    B = A.partial()
+    [A._sourceModel is User, B._sourceModel is User]
+''', [true, true]
+
 # ==============================================================================
 # Compile-time projection folding (opt-in: foldProjections)
 # ==============================================================================

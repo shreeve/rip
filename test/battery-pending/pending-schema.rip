@@ -42,15 +42,6 @@ test 'diamond mixin inclusion dedupes', '''
     [...User._normalize().fields.keys()]
 ''', ['name', 'id', 'left', 'right']
 
-test 'algebra preserves sourceModel through chain', '''
-    User = schema :model
-      name! string
-      email! email
-    A = User.pick("name")
-    B = A.partial()
-    [A._sourceModel is User, B._sourceModel is User]
-''', [true, true]
-
 code 'fold: pick emits a self-contained shape literal', '''
   User = schema :model
     name! string
