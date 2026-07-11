@@ -2889,6 +2889,50 @@ export function tokenize(text, path = '<anonymous>') {
       // Division (or /=) — falls through to the operator scanners.
     }
 
+    // ── Word arrays: %w[foo bar baz] → ['foo', 'bar', 'baz'] ──
+    // Delimiters pair ([ ] ( ) { } < >, nesting counted) or repeat
+    // symmetrically (%w|a b|, %w/x y/); backslash-space keeps a space
+    // inside a word. The scan emits REAL bracket/string/comma tokens
+    // with each word's true span, so mapping stays exact. The tight
+    // spelling is claimed: `a % w[i]` keeps modulo with a space.
+    if (text[pos] === '%' && text[pos + 1] === 'w') {
+      const opener = text[pos + 2];
+      if (opener && !/[\s\w]/.test(opener)) {
+        const WORD_PAIRS = { '[': ']', '(': ')', '{': '}', '<': '>' };
+        const closer = WORD_PAIRS[opener] ?? opener;
+        const paired = closer !== opener;
+        let depth = 1;
+        let i = pos + 3;
+        while (i < text.length && depth > 0) {
+          const ch = text[i];
+          if (ch === '\\') { i += 2; continue; }
+          if (paired && ch === opener) depth++;
+          if (ch === closer) depth--;
+          if (depth > 0) i++;
+        }
+        if (depth !== 0) fail(`unclosed %w${opener} — never closed by '${closer}'`, pos, pos + 3);
+        push('[', '[', pos, pos + 3);
+        const wordRe = /(?:\\\s|\S)+/g;
+        wordRe.lastIndex = pos + 3;
+        let m2;
+        let first = true;
+        let prevEnd = pos + 3;
+        while ((m2 = wordRe.exec(text)) !== null && m2.index < i) {
+          const wEnd = Math.min(m2.index + m2[0].length, i);
+          const word = text.slice(m2.index, wEnd).replace(/\\ /g, ' ');
+          if (!first) push(',', ',', prevEnd, m2.index);
+          push('STRING', JSON.stringify(word), m2.index, wEnd);
+          first = false;
+          prevEnd = wEnd;
+          if (wEnd >= i) break;
+          wordRe.lastIndex = wEnd;
+        }
+        push(']', ']', i, i + 1);
+        pos = i + 1;
+        continue;
+      }
+    }
+
     // ── Operators and punctuation (longest match first) ──
     const four = text.slice(pos, pos + 4);
     if (OPS4[four]) {
