@@ -310,6 +310,16 @@ code "inline: multiple directives + fields in one schema", '''
 
 # Schema-mode-aware diagnostics
 
+# `schema` is a context keyword, not reserved — with no schema body
+# following, it binds and reads as an ordinary identifier.
+code 'schema as variable still works', '''
+  export schema = 42
+  schema + 1
+  ''', '''
+  export const schema = 42;
+  schema + 1;
+  '''
+
 fail "field with colon before type", '''
   X = schema
     name: string

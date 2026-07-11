@@ -4,14 +4,6 @@
 
 import { test, code, fail, type } from '../support/testing.js'
 
-code 'schema as variable still works', '''
-  export schema = 42
-  schema + 1
-''', '''
-  export const schema = 42;
-  (schema + 1);
-'''
-
 test 'default-string: required+unique without explicit type', '''
   U = schema :shape
     code! @unique
