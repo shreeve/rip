@@ -1767,7 +1767,8 @@ class Emitter {
       // A guard assign's write emits INSIDE an `if` condition
       // (`if (!(y = x)) return e;`) — `let` is invalid there, so the
       // target keeps its hoist-line declaration.
-      if (isNode(f.decl) && f.decl[0] === '=' && Emitter.returnGuard(f.decl[2])) return true;
+      if (isNode(f.decl) && f.decl[0] === '=' &&
+          (Emitter.returnGuard(f.decl[2]) || Emitter.throwGuard(f.decl[2]))) return true;
       // A bare typed FORWARD (`x: number` … `x = 5`) keeps the hoist —
       // its annotation manifests on the hoist line and the forward is
       // the name's first occurrence anyway. An annotated ASSIGN
@@ -2791,9 +2792,11 @@ class Emitter {
       // and assigning (`y = x or return e`) forms both emit an `if`
       // whose body is the return — the one lowering that keeps the
       // return's function target.
-      if (Emitter.returnGuard(node)) return this.returnGuardStatement(node, null);
+      if (Emitter.returnGuard(node) || Emitter.throwGuard(node)) {
+        return this.returnGuardStatement(node, null);
+      }
       if (node[0] === '=' && node.length === 3 && typeof node[1] === 'string' &&
-          Emitter.returnGuard(node[2])) {
+          (Emitter.returnGuard(node[2]) || Emitter.throwGuard(node[2]))) {
         return this.returnGuardStatement(node[2], node);
       }
       // Method and merge assignment are statement lowerings: the
@@ -8375,6 +8378,15 @@ class Emitter {
       x.length === 3 && isNode(x[2]) && x[2][0] === 'return';
   }
 
+  // A throw GUARD in statement position takes the same rewrite —
+  // `if (!(y = x)) throw e;` — cleaner bytes than the value form's
+  // IIFE. Value positions KEEP the IIFE (a throw propagates out of
+  // any scope, so both are correct there).
+  static throwGuard(x) {
+    return isNode(x) && (x[0] === '||' || x[0] === '&&' || x[0] === '??') &&
+      x.length === 3 && isNode(x[2]) && x[2][0] === 'throw' && x[2].length === 2;
+  }
+
   // `*` with a string-LITERAL left operand is repetition — it emits
   // `lit.repeat(n)`, a call: the primary tier, never a spine member.
   static isStrRepeat(x) {
@@ -10131,7 +10143,7 @@ class Emitter {
   //   x and return e     →  if (x) return e;
   returnGuardStatement(guard, assign) {
     const ret = guard[2];
-    if (this.scopes.length <= 1) {
+    if (ret[0] === 'return' && this.scopes.length <= 1) {
       throw this.positionedError(ret, "emitter: 'return' outside a function");
     }
     const op = guard[0];
@@ -10170,11 +10182,11 @@ class Emitter {
       emitCond();
       this.b.emit(') ');
       this.mark(ret, '$self', () => {
-        this.b.emit('return');
+        this.b.emit(ret[0]);
         if (ret.length > 1) {
           this.b.emit(' ');
           this.mark(ret, 'value', () => {
-            if (Emitter.needsGrouping(ret[1], 'return')) {
+            if (ret[0] === 'return' && Emitter.needsGrouping(ret[1], 'return')) {
               this.b.emit('('); this.expr(ret[1]); this.b.emit(')');
             } else this.expr(ret[1]);
           });

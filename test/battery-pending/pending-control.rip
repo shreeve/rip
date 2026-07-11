@@ -4,26 +4,6 @@
 
 import { test, code, fail, type } from '../support/testing.js'
 
-code 'or throw assignment generates if', '  data = fetchData() or throw new Error \'No data\'', '''
-  let data;
-
-  if (!(data = fetchData())) throw new Error('No data');
-'''
-
-code 'and throw assignment generates if', '  error = validate() and throw error', '''
-  let error;
-
-  if ((error = validate())) throw error;
-'''
-
-code 'standalone and throw generates if', '  isError and throw new Error \'Failed\'', 'if (isError) throw new Error(\'Failed\');'
-
-code '?? throw assignment generates if with nullish check', '  data = getValue() ?? throw new Error \'Missing\'', '''
-  let data;
-
-  if ((data = getValue()) == null) throw new Error('Missing');
-'''
-
 code 'standalone ?? throw generates if with nullish check', '  getValue() ?? throw new Error \'Not found\'', 'if ((getValue()) == null) throw new Error(\'Not found\');'
 
 code 'or-throw in sibling exports hoists variable in each function', '''
