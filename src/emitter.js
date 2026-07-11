@@ -3046,6 +3046,55 @@ class Emitter {
     return names;
   }
 
+  // Ranged for with a BY step. Literal steps take static-direction
+  // headers (a positive literal ascends toward TO, a negative one
+  // descends); every other step binds ONCE and the header tests its
+  // sign, so both directions terminate and a zero step iterates
+  // nothing (a zero LITERAL rejects — it never advances). Impure
+  // bounds bind once beside the counter.
+  rangedByHeader(node, markVar, vars, iter, step) {
+    const [dots, from, to] = iter;
+    const cmpUp = dots === '..' ? '<=' : '<';
+    const cmpDown = dots === '..' ? '>=' : '>';
+    const numText = (s) => (typeof s === 'string' && /^[0-9.]/.test(s) ? s : null);
+    const posLit = numText(step) ??
+      (isNode(step) && step[0] === '+' && step.length === 2 ? numText(step[1]) : null);
+    const negLit = isNode(step) && step[0] === '-' && step.length === 2 ? numText(step[1]) : null;
+    if ((posLit ?? negLit) !== null && Number((posLit ?? negLit).replace(/_/g, '')) === 0) {
+      throw this.positionedError(node, 'emitter: a BY step of 0 never advances the loop');
+    }
+    const v = vars[0];
+    const toRef = Emitter.pureIterable(to) ? null : this.loopTempName('_ref');
+    const stepRef = posLit !== null || negLit !== null ? null : this.loopTempName('_step');
+    this.b.emit('for (let ');
+    markVar(v);
+    this.b.emit(' = ');
+    this.expr(from);
+    if (toRef !== null) { this.b.emit(`, ${toRef} = `); this.expr(to); }
+    if (stepRef !== null) { this.b.emit(`, ${stepRef} = `); this.mark(node, 'step', () => this.expr(step)); }
+    const toText = () => { if (toRef !== null) this.b.emit(toRef); else this.expr(to); };
+    this.b.emit('; ');
+    if (stepRef !== null) {
+      this.b.emit(`${stepRef} > 0 ? ${v} ${cmpUp} `);
+      toText();
+      this.b.emit(` : ${v} ${cmpDown} `);
+      toText();
+      this.b.emit(`; ${v} += ${stepRef})`);
+    } else if (negLit !== null) {
+      this.b.emit(`${v} ${cmpDown} `);
+      toText();
+      this.b.emit(`; ${v} -= `);
+      this.mark(node, 'step', () => this.b.emit(negLit));
+      this.b.emit(')');
+    } else {
+      this.b.emit(`${v} ${cmpUp} `);
+      toText();
+      this.b.emit(`; ${v} += `);
+      this.mark(node, 'step', () => this.b.emit(posLit));
+      this.b.emit(')');
+    }
+  }
+
   forIn(node, ind) {
     this.inCtrl(() => this.forInCtrl(node, ind));
   }
@@ -3083,7 +3132,9 @@ class Emitter {
         this.b.emit(`; ${vars[0]}++) `);
         this.guardedBlock(body, guard, ind);
       } else if (isRange(iter)) {
-        throw this.positionedError(node, 'emitter: ranged for with BY is not supported yet');
+        this.rangedByHeader(node, markVar, vars, iter, step);
+        this.b.emit(' ');
+        this.guardedBlock(body, guard, ind);
       } else if (step !== null) {
         // Stepped iteration. A LITERAL step's direction is static:
         // positive literals ascend, `-`-literals walk DOWN from the
@@ -3419,7 +3470,8 @@ class Emitter {
       throw this.positionedError(node, 'emitter: pattern loop variables with ranges or BY steps are not supported yet');
     }
     if (isRange(iter) && step !== null) {
-      throw this.positionedError(node, 'emitter: ranged for with BY is not supported yet');
+      this.rangedByHeader(node, markVar, vars, iter, step);
+      return setups;
     }
     if (step !== null) {
       // The statement-position stepped-loop policy, at accumulator

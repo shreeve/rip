@@ -355,3 +355,37 @@ test "a tail loop with a return inside stays a statement (the return crosses out
         x * y
   f()
 ''', "early"
+
+# ==============================================================================
+# Ranged BY — stepped range iteration (literal steps take static direction;
+# dynamic steps bind once and the header tests their sign)
+# ==============================================================================
+
+test 'comprehension by 2', '(x for x in [0...10] by 2)', [0, 2, 4, 6, 8]
+test 'comprehension by 3', '(x * 2 for x in [0...12] by 3)', [0, 6, 12, 18]
+test 'comprehension by step with guard', '(x for x in [0...20] by 2 when x > 5)', [6, 8, 10, 12, 14, 16, 18]
+test 'ranged by negative literal descends', '''
+  out = []
+  for i in [10..0] by -2
+    out.push i
+  out
+  ''', [10, 8, 6, 4, 2, 0]
+
+test 'ranged by dynamic step follows its sign', '''
+  s = 3
+  a = (x for x in [0..9] by s)
+  s = -4
+  b = (x for x in [9..0] by s)
+  [a, b]
+  ''', [[0, 3, 6, 9], [9, 5, 1]]
+
+code 'ranged by literal compiles inline', '''
+  for i in [0..4] by 2
+    p i
+  ''', '''
+  for (let i = 0; i <= 4; i += 2) {
+    p(i);
+  }
+  '''
+
+fail 'ranged by zero literal rejects', 'x = (i for i in [0..4] by 0)', 'never advances'
