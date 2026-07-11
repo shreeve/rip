@@ -5,6 +5,13 @@ repository's pull requests.
 
 ## Unreleased
 
+- Component value members initialize in SOURCE ORDER (they were
+  grouped by kind, so a plain member written after a state ran first
+  and could not read it); offers register after the values and
+  effects still start last — a reaction never fires against a
+  half-built instance. The initialization contract is one sentence:
+  members initialize as written, effects start after construction (#31)
+
 - Preserve the source program's shape through seven lowerings (the
   third cross-vendor review's evaluation/scoping cluster): a ternary
   used as another ternary's condition keeps its parens; an optional-

@@ -4941,8 +4941,9 @@ class Emitter {
   // render DSL ────────────────────────────────────────────────────────
   // A component declaration lowers to an anonymous class extending the
   // runtime's __Component: members categorize into the seven-spelling
-  // model and lower into _init(props)'s order (readonly → plain
-  // → accept → state → computed → offer → effects); methods and the
+  // model; value members initialize in SOURCE ORDER inside
+  // _init(props), offers register next, and effects start last (a
+  // reaction never fires against a half-built instance); methods and the
   // exact-five lifecycle hooks emit as class methods; the render block
   // lowers to _create()/_setup(). The categorization is TOTAL — a body
   // statement matching no category REJECTS positioned,
@@ -5381,7 +5382,7 @@ class Emitter {
         this.mark(stmt, role, () => this.b.emit(name));
       };
       const readonlySet = new Set(readonlyVars);
-      for (const m of [...readonlyVars, ...plainVars]) {
+      const emitPlainish = (m) => {
         initLine(m.node, () => {
           // A readonly (`=!`) member declares `readonly` on the class,
           // and TS allows readonly writes only in the CONSTRUCTOR —
@@ -5407,15 +5408,15 @@ class Emitter {
           memberValue(m.node, m.value);
           this._componentName = prevCN;
         });
-      }
-      for (const name of acceptedVars) {
+      };
+      const emitAccept = (name) => {
         const stmt = seen.get(name);
         initLine(stmt, () => {
           memberName(stmt, name, 'name');
           this.b.emit(` = getContext('${name}')`);
         });
-      }
-      for (const m of stateVars) {
+      };
+      const emitState = (m) => {
         initLine(m.node, () => {
           memberName(m.node, m.name, m.value === undefined ? 'property' : 'target');
           this.b.emit(' = __state(');
@@ -5429,15 +5430,35 @@ class Emitter {
           }
           this.b.emit(')');
         });
-      }
-      for (const m of derivedVars) {
+      };
+      const emitComputed = (m) => {
         initLine(m.node, () => {
           memberName(m.node, m.name);
           this.b.emit(' = __computed(() => ');
           this.mark(m.node, 'value', () => this.withExpression(() => this.computedBody(m.node, m.value, ind + 2)));
           this.b.emit(')');
         });
-      }
+      };
+      // Value members initialize in SOURCE ORDER — the lowering never
+      // reorders observable initializer effects (a plain member reads
+      // a state declared above it, a trace logs in the written
+      // order). Offers then register, and effects start last: an
+      // effect is a reaction, not a value — it must not fire against
+      // a half-built instance.
+      const orderAt = new Map();
+      stmts.forEach((s, i) => {
+        orderAt.set(s, i);
+        // An offered declaration's member node is the offer's PAYLOAD —
+        // it takes the offer statement's own position.
+        if (this.isOfferNode(s)) orderAt.set(s[1], i);
+      });
+      const valueMembers = [
+        ...[...readonlyVars, ...plainVars].map((m) => ({ at: orderAt.get(m.node) ?? 0, run: () => emitPlainish(m) })),
+        ...acceptedVars.map((name) => ({ at: orderAt.get(seen.get(name)) ?? 0, run: () => emitAccept(name) })),
+        ...stateVars.map((m) => ({ at: orderAt.get(m.node) ?? 0, run: () => emitState(m) })),
+        ...derivedVars.map((m) => ({ at: orderAt.get(m.node) ?? 0, run: () => emitComputed(m) })),
+      ].sort((a, b) => a.at - b.at);
+      for (const vm of valueMembers) vm.run();
       for (const name of offeredVars) {
         initLine(seen.get(name), () => this.b.emit(`setContext('${name}', this.${name})`));
       }
