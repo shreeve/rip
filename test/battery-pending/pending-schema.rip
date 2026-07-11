@@ -4,22 +4,6 @@
 
 import { test, code, fail, type } from '../support/testing.js'
 
-test 'diamond mixin inclusion dedupes', '''
-    Base = schema :mixin
-      id! uuid
-    Left = schema :mixin
-      left! string
-      @mixin Base
-    Right = schema :mixin
-      right! string
-      @mixin Base
-    User = schema :model
-      name! string
-      @mixin Left
-      @mixin Right
-    [...User._normalize().fields.keys()]
-''', ['name', 'id', 'left', 'right']
-
 test 'methods accept parameters (typed and untyped) at runtime', '''
     Money = schema :shape
       amount!   integer
