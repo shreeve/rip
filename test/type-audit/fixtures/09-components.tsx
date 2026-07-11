@@ -1,0 +1,385 @@
+// 09-components.tsx — Typed component props
+//
+// React equivalent of the Rip component file. Direct comparison:
+// Rip's @prop: type := default → React's destructured props + useState
+// Rip's ~= computed             → derived variable (React Compiler handles memoization)
+// Rip's method: -> ...          → function in component body
+// Rip's render block            → React's JSX return
+// Rip's <=> two-way bind        → React's value + onChange (no direct equivalent)
+
+import { SubmitEventHandler, useState, useRef, ComponentProps, MouseEventHandler } from 'react'
+
+// ── Prop types ──
+
+type InputProps = ComponentProps<'input'> & {
+  label?: string
+  error?: string
+}
+
+type ButtonProps = ComponentProps<'button'> & {
+  variant: 'primary' | 'secondary'
+  shape?: 'rounded' | 'pill'
+  loading?: boolean
+}
+
+// ── Components ──
+
+function Input({ label, error, ...props }: InputProps) {
+  return (
+    <div>
+      {label && <label>{label}</label>}
+      <input {...props} />
+      {error && <div>{error}</div>}
+    </div>
+  )
+}
+
+function Button({ variant, shape = 'rounded', loading, children, ...props }: ButtonProps) {
+  const style = {
+    background: variant === 'primary' ? '#0066ff' : '#e5e5e5',
+    color: variant === 'primary' ? '#fff' : '#333',
+  }
+  return (
+    <button style={style} {...props}>
+      {loading ? 'Loading...' : children}
+    </button>
+  )
+}
+
+// ── Parent: sign-in form ──
+
+function Form({ title = 'Sign In' }: { title?: string } = {}) {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const onSubmit: SubmitEventHandler<HTMLFormElement> = (e) => {
+    e.preventDefault()
+    setLoading(true)
+    console.log(`Signing in: ${email}`)
+    setLoading(false)
+  }
+
+  return (
+    <form onSubmit={onSubmit}>
+      <h1>{title}</h1>
+      <Input
+        label='Email'
+        value={email}
+        placeholder='jane@example.com'
+        type='email'
+        onChange={(e) => setEmail(e.target.value)}
+      />
+      <Input
+        label='Password'
+        value={password}
+        placeholder='••••••••'
+        type='password'
+        onChange={(e) => setPassword(e.target.value)}
+      />
+      <Button
+        variant='primary'
+        type='submit'
+        loading={loading}>
+        Sign In
+      </Button>
+    </form>
+  )
+}
+
+// ── Negative: wrong prop types must be caught ──
+
+function PropTypeTests() {
+  return (
+    <div>
+      {/* @ts-expect-error — wrong variant literal */}
+      <Button variant='danger' />
+      {/* @ts-expect-error — disabled expects boolean */}
+      <Button variant='primary' disabled='yes' />
+      {/* @ts-expect-error — wrong type for label */}
+      <Input label={123} />
+      {/* @ts-expect-error — inherited intrinsic: maxLength expects number */}
+      <Input maxLength='ten' />
+    </div>
+  )
+}
+
+// ── Negative: type safety inside component bodies ──
+
+function TypeTestComp({ variant = 'primary' as 'primary' | 'secondary', count = 0 }) {
+  const ok = variant === 'primary' ? '#0066ff' : '#e5e5e5'
+
+  // @ts-expect-error — toFixed doesn't exist on string union
+  const badFixed = variant.toFixed(2)
+
+  // @ts-expect-error — arithmetic on string type
+  const badMath = variant * 2
+
+  function badMethod() {
+    // @ts-expect-error — string assigned to number variable
+    const x: number = 'hello'
+  }
+
+  function badBodyAssign() {
+    // @ts-expect-error — string assigned to inferred boolean variable
+    const loading: boolean = 'wrong'
+  }
+
+  return null
+}
+
+// ── Negative: render block conditional type checking ──
+//
+// In Rip, conditionals, switch discriminants, and loop iterables in render
+// blocks are now type-checked. JSX already catches these via standard scoping.
+
+function RenderCondTest() {
+  const [label] = useState('')
+  const [error] = useState('')
+  const [items] = useState(['a', 'b'])
+  const [status] = useState('active')
+  const [loading] = useState(false)
+  const [count] = useState(42)
+
+  return (
+    <div>
+      {/* @ts-expect-error — typo: 'labelz' does not exist */}
+      {labelz && <span>label</span>}
+      {/* @ts-expect-error — typo: 'loadingz' does not exist */}
+      {!loadingz && <span>ready</span>}
+      {/* @ts-expect-error — typo: 'statusz' does not exist */}
+      {statusz === 'active' ? <span>on</span> : <span>off</span>}
+      {/* @ts-expect-error — typo: 'itemsz' does not exist */}
+      {itemsz.map((item: string) => <span key={item}>{item}</span>)}
+      {/* @ts-expect-error — typo: 'countz' does not exist */}
+      {countz}
+    </div>
+  )
+}
+
+// ── Conditional-scoped variable used in callback ──
+//
+// A variable first assigned inside a conditional and captured by a
+// callback (e.g. .filter()) is correctly inferred in both TS and Rip.
+
+function FilterGapTest() {
+  const [items] = useState(['a', 'b', 'c'])
+  const [search] = useState('')
+
+  const filtered = (() => {
+    let result = items.slice()
+    if (search) {
+      const term = search.toLowerCase()
+      result = result.filter((s) => s.includes(term))
+      // @ts-expect-error — term is inferred as string, not number
+      term.toFixed(2)
+    }
+    return result
+  })()
+
+  return null
+}
+
+// ── Event handler typing ──
+//
+// Both inline and named method refs are typed.
+// In React, event handler params get contextual typing from JSX attributes
+// (onClick types e as MouseEvent, onSubmit types e as FormEvent, etc.)
+
+function EventHandlerTest() {
+  // Named method refs — explicit parameter types
+  const handleSubmit: SubmitEventHandler<HTMLFormElement> = (e) => e.preventDefault()
+  const handleClick: MouseEventHandler<HTMLButtonElement> = (e) => console.log(e.clientX)
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <button onClick={handleClick}>Click</button>
+      {/* Inline handlers — contextual typing from JSX attributes */}
+      <button onClick={(e) => console.log(e.clientX)}>Inline</button>
+      <input onKeyDown={(e) => console.log(e.key)} />
+    </form>
+  )
+}
+
+// ── Generic components ──
+//
+// TypeScript supports generic components where T is bounded by a known shape.
+// The constraint flows through all props — options must satisfy TOptionShape,
+// and the component knows how to render them without extra callbacks.
+// Rip supports this via `Name<T extends Constraint> = component` syntax.
+
+type TOptionShape = string | { value: string; label: string }
+
+type SelectProps<TOption extends TOptionShape> = ComponentProps<'select'> & {
+  label?: string
+  options: TOption[]
+  placeholder?: string
+  error?: string
+}
+
+function Select<TOption extends TOptionShape>({ label, options, placeholder, error, ...props }: SelectProps<TOption>) {
+  return (
+    <div>
+      {label && <label>{label}</label>}
+      <select {...props}>
+        {placeholder && <option value='' disabled>{placeholder}</option>}
+        {options.map((option) => {
+          const value = typeof option === 'string' ? option : option.value
+          const label = typeof option === 'string' ? option : option.label
+          return <option key={value} value={value}>{label}</option>
+        })}
+      </select>
+      {error && <div>{error}</div>}
+    </div>
+  )
+}
+
+// Usage — T is inferred from the options array
+
+function GenericUsageTests() {
+  return (
+    <div>
+      {/* Simple: string options */}
+      <Select options={['Red', 'Green', 'Blue']} />
+
+      {/* Structured: { value, label } options */}
+      <Select options={[{ value: 'admin', label: 'Admin' }, { value: 'user', label: 'User' }]} />
+
+      {/* @ts-expect-error — number doesn't extend TOptionShape */}
+      <Select options={[1, 2, 3]} />
+
+      {/* @ts-expect-error — object missing 'label' field (has 'name' instead) */}
+      <Select options={[{ value: 'a', name: 'A' }]} />
+    </div>
+  )
+}
+
+// ── Typed shared state ──
+//
+// Pattern: declare a `Cart`-shaped type, build a typed value of that
+// shape via zustand's `create<State>()`, and consume it from a
+// component. Mirrors the Rip side's typed-shared-state coverage.
+
+import { create } from 'zustand'
+
+type CartItem = {
+  id: number
+  name: string
+  price: number
+  quantity: number
+}
+
+type Cart = Readonly<{
+  items: CartItem[]
+  addItem: (item: CartItem) => void
+  removeItem: (item: CartItem) => void
+  total: () => number
+}>
+
+const useCart = create<Cart>()((set, get) => ({
+  items: [],
+  addItem: (item) => set((s) => ({ items: [...s.items, item] })),
+  removeItem: (item) => set((s) => ({ items: s.items.filter((i) => i.id !== item.id) })),
+  total: () => get().items.reduce((sum, i) => sum + i.price * i.quantity, 0),
+}))
+
+function CartDemo() {
+  const cart = useCart()
+
+  return (
+    <div>
+      <span>{cart.items.length} items — ${cart.total()}</span>
+      <button onClick={() => cart.addItem({ id: 1, name: 'Widget', price: 9.99, quantity: 1 })}>
+        Add to Cart
+      </button>
+      <ul>
+        {cart.items.map((item) => (
+          <li key={item.id}>{item.name} x{item.quantity} — ${item.price}</li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+// ── Negative tests: typos and wrong arg types are caught ──
+
+// @ts-expect-error — wrong type: items should be CartItem[], not string
+const bad1 = create<Cart>(() => ({ items: 'not an array', addItem: () => { }, removeItem: () => { }, total: () => 0 }))
+
+// The remaining negative tests call useCart() which invokes React hooks.
+// They must live inside a function body to avoid the "invalid hook call"
+// error at runtime (hooks require a React component/render context).
+function _negativeTests() {
+  const cart = useCart()
+
+  // Writes
+  // @ts-expect-error — wrong item shape: missing required fields
+  cart.addItem({ broken: true })
+  // @ts-expect-error — wrong arg type: number instead of CartItem
+  cart.removeItem(42)
+
+  // Reads
+  // @ts-expect-error — typo: 'item' doesn't exist, it's 'items'
+  const bad3 = cart.item
+  // @ts-expect-error — nonexistent path
+  const bad4 = cart.tax
+}
+
+// ── Element refs ──
+//
+// React equivalent of Rip's `ref: cell`. useRef<E | null>(null) is the
+// state cell; <input ref={cell}/> binds the element. A widened
+// Element cell accepts any tag.
+
+function RefTests() {
+  const inputEl = useRef<HTMLInputElement | null>(null)
+  const divEl = useRef<HTMLDivElement | null>(null)
+  const svgEl = useRef<SVGSVGElement | null>(null)
+  return (
+    <div>
+      <input ref={inputEl} />
+      <div ref={divEl} />
+      <svg ref={svgEl} />
+    </div>
+  )
+}
+
+// ── Negative: ref cell element type must match ──
+
+function RefMismatchTests() {
+  const inputCell = useRef<HTMLInputElement | null>(null)
+  const divCell = useRef<HTMLDivElement | null>(null)
+  return (
+    <div>
+      {/* @ts-expect-error — a div ref can't bind an input element */}
+      <input ref={divCell} />
+      {/* @ts-expect-error — an input ref can't bind an svg element */}
+      <svg ref={inputCell} />
+    </div>
+  )
+}
+
+// ── const members: =! → readonly, siblings stay mutable ──
+//
+// Mirrors the Rip ConstMembers/ConstMemberTests. Rip compiles a `=!` member to
+// a `readonly` field, `:=` to a Signal, `~=` to a Computed, and `=` to a plain
+// field; here we model the readonly-vs-mutable distinction with a class. A
+// consumer reassigning the readonly member is TS2540, while the others are
+// freely writable.
+
+class ConstMembers {
+  readonly a: number = 5
+  b: number = 10
+  c: number = 20
+  d: number = 30
+}
+
+function ConstMemberTests() {
+  const ref = new ConstMembers()
+  // @ts-expect-error — `a` is readonly (TS2540)
+  ref.a = 6
+  ref.b = 11
+  console.log(ref.c)
+  ref.d = 31
+  return null
+}

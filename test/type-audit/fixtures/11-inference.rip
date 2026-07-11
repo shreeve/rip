@@ -1,0 +1,174 @@
+# 11-inference.rip — Type inference on unannotated variables
+#
+# Two mechanisms enable inference on unannotated variables:
+#
+#   1. Shadow-TS rewrite — in the shadow TypeScript file used for type
+#      checking, hoisted `let x; x = value;` is rewritten to `let x = value;`
+#      for same-scope straight-line assignments. This gives TS a direct
+#      initializer to infer types from. Only affects the type-checking
+#      path — runtime JS always hoists for correct scoping.
+#
+#   2. patchUninitializedTypes — for variables that remain hoisted in
+#      the shadow TS (e.g., first assignment inside a branch), the
+#      type-checker patches the symbol's type from the first assignment.
+
+# ── Setup ──
+
+count = 0
+ratio = 3.14
+items = ['a', 'b', 'c']
+
+def double(n: number)
+  n * 2
+
+def expectString(x: string)
+  x
+
+# ──────────────────────────────────────────────────
+# Top-level assignment with a concrete RHS
+# ──────────────────────────────────────────────────
+
+# ── Primitives ──
+
+total = count + ratio
+label = 'hello'
+active = true
+
+# @ts-expect-error — inferred number
+total = 'oops'
+# @ts-expect-error — inferred string
+label = 42
+# @ts-expect-error — inferred boolean
+active = 'yes'
+
+# ── Typed function return ──
+
+result = double(5)
+# @ts-expect-error — inferred number
+result = 'oops'
+
+# ── Method calls on typed values ──
+
+upper = 'hello'.toUpperCase()
+joined = items.join(', ')
+
+# @ts-expect-error — inferred string
+upper = 42
+# @ts-expect-error — inferred string
+joined = false
+
+# ── Array element access ──
+
+first = items[0]
+# @ts-expect-error — inferred string | undefined
+first = 99
+
+# ── Template literals ──
+
+msg = "count is #{count}"
+# @ts-expect-error — inferred string
+msg = 42
+
+console.log(total, label, active, result, upper, joined, first, msg)
+
+# ──────────────────────────────────────────────────
+# Block-scoped and destructured assignments
+# ──────────────────────────────────────────────────
+
+# ── Block-scoped first assignment ──
+#
+# The patcher recurses into if/for/while/try/switch blocks to find
+# the first assignment, so insideIf is inferred as number.
+
+if true
+  insideIf = count + ratio
+# @ts-expect-error — number not assignable to string (block-scoped inference patched)
+expectString(insideIf)
+
+# ── Destructuring ──
+#
+# The patcher walks destructuring patterns and infers each property's
+# type from the RHS object type.
+
+{a, b} = {a: 1, b: 'hello'}
+# @ts-expect-error — number not assignable to string (destructured inference patched)
+expectString(a)
+
+console.log(insideIf, a, b)
+
+# ──────────────────────────────────────────────────
+# Shadow-TS rewrite inside functions
+# ──────────────────────────────────────────────────
+
+# Variables inside functions are hoisted in runtime JS, but the
+# shadow TS rewrites straight-line assignments to `let x = value;`
+# so TS can infer types from the initializer.
+
+def expectNum(x: number)
+  x
+
+def process(data: string[])
+  csv = data.join(', ')
+  loud = csv.toUpperCase()
+  loud
+
+out = process(items)
+# @ts-expect-error — out inferred as string
+expectNum(out)
+
+def filterBy(query: string)
+  q = query.toLowerCase()
+  items.filter((s) -> s.includes(q))
+
+matches = filterBy('a')
+# @ts-expect-error — matches inferred as string[]
+expectNum(matches)
+
+console.log(out, matches)
+
+# ──────────────────────────────────────────────────
+# Block-confined inside functions
+# ──────────────────────────────────────────────────
+
+# Variables confined to one branch stay hoisted in both runtime JS
+# and shadow TS. patchUninitializedTypes walks into the branch to
+# find the first assignment and infers the type.
+
+def search(data: string[], query: string)
+  if query.length > 0
+    needle = query.toLowerCase()
+    hits = data.filter((n) -> n.toLowerCase().includes(needle))
+    # @ts-expect-error — hits inferred as string[]
+    expectNum(hits)
+    hits.join(', ')
+  else
+    'no results'
+
+found = search(items, 'a')
+# @ts-expect-error — found inferred as string
+expectNum(found)
+
+console.log(found)
+
+# ──────────────────────────────────────────────────
+# Annotated locals keep their declared type (not first-assignment)
+# ──────────────────────────────────────────────────
+#
+# A typed local seeded with a narrow value (`res: T | null = null`) must
+# keep its DECLARED union type, not collapse to `null` from the first
+# assignment — so a later `res = <T>` type-checks. The compiler emits the
+# annotation inline on the function-top hoist (collectTypedLocals); no
+# DTS-header → body reconciliation pass is involved.
+
+def firstOr(fallback: number)
+  res: number | null = null
+  res = 42
+  res ?? fallback
+
+def pickLabel(flag: boolean)
+  tag: string | null = null
+  if flag
+    tag = "yes"
+  tag ?? "no"
+
+console.log(firstOr(7), pickLabel(true), pickLabel(false))
