@@ -623,6 +623,66 @@ class Emitter {
     return false;
   }
 
+  // The component-member KIND a bare name resolves to here (state /
+  // computed / readonly / prop / plain / method / accept) — null when
+  // a local, param, or reactive declaration shadows it, or when no
+  // enclosing component declares it. The walk mirrors resolveBareRead.
+  memberKindOf(name) {
+    for (let i = this.rframes.length - 1; i >= 0; i--) {
+      const f = this.rframes[i];
+      if (f.reactive.has(name)) return null;
+      if (f.bound.has(name)) return null;
+      if (f.members !== undefined && f.members.has(name)) return f.members.get(name);
+    }
+    return null;
+  }
+
+  // The kind of `this.<name>` against the INNERMOST component — a
+  // `this.`/`@` spelling never shadows (the receiver is explicit).
+  thisMemberKindOf(name) {
+    for (let i = this.rframes.length - 1; i >= 0; i--) {
+      const f = this.rframes[i];
+      if (f.members !== undefined) return f.members.has(name) ? f.members.get(name) : null;
+    }
+    return null;
+  }
+
+  // Component-member write guards — called with an assignment/update
+  // TARGET before emission. A readonly ('=!') member has no legal
+  // write anywhere after _init, so the write rejects at the site; a
+  // plain ('=') member write RECORDS for the silent-freeze check at
+  // component close (render reads of a plain member never re-run).
+  checkMemberWrite(node, target) {
+    if (this.cframes.length === 0) return;
+    let name = null, kind = null;
+    if (typeof target === 'string') {
+      name = target;
+      kind = this.memberKindOf(target);
+    } else if (isNode(target) && target[0] === '.' && target[1] === 'this' && typeof target[2] === 'string') {
+      name = target[2];
+      kind = this.thisMemberKindOf(name);
+    }
+    if (kind === null) return;
+    if (kind === 'readonly') {
+      throw this.positionedError(node,
+        `emitter: cannot assign to readonly member '${name}' — a '=!' member never changes after _init; ` +
+        "a member that changes is state (':=')");
+    }
+    if (kind === 'plain') {
+      const f = this.cframes[this.cframes.length - 1];
+      if (!f.plainWrites.has(name)) f.plainWrites.set(name, node);
+    }
+  }
+
+  // A render read of a plain ('=') member — the other half of the
+  // silent-freeze pair.
+  notePlainRenderRead(name, viaThis = false) {
+    if (this.rstate == null || this.cframes.length === 0) return;
+    const kind = viaThis ? this.thisMemberKindOf(name) : this.memberKindOf(name);
+    if (kind !== 'plain') return;
+    this.cframes[this.cframes.length - 1].renderPlainReads.add(name);
+  }
+
   // The `~=` names among a scope's declarations — the write-rejection
   // subset of collectReactiveNames (same walk, computed heads only).
   collectComputedNames(stmts) {
@@ -4590,6 +4650,7 @@ class Emitter {
       if (typeof node === 'string') {
         const rewrite = this.bareRewrite(node);
         if (rewrite === 'reactive') return this.reactiveRead(node);
+        if (rewrite === 'member') this.notePlainRenderRead(node);
         if (rewrite !== null) return this.memberRead(node, rewrite === 'member-reactive');
         // Inside a render factory, `this` (spelled bare or through
         // `@member` chains) is the ctx parameter — the factory methods
@@ -4919,6 +4980,7 @@ class Emitter {
       throw this.positionedError(node,
         `emitter: cannot assign to computed '${node[1]}' — a '~=' binding derives from its dependencies; write to those instead`);
     }
+    this.checkMemberWrite(node, node[1]);
     // A void definition (`save! = ->`, head 'void-assign') validates its
     // function value and emits as a plain '='; the value's body owns
     // the void shape. The voidMarker role (side-band) covers the
@@ -5702,7 +5764,7 @@ class Emitter {
     // the companion-interface emission after the binding statement.
     const tsInfo = this.ts ? componentTypeInfo(this.stores, this.b.source, node) : null;
     if (tsInfo !== null) this.componentInfo.set(node, tsInfo);
-    const frame = { members, memberReactive, name: this._componentName, extendsTag };
+    const frame = { members, memberReactive, name: this._componentName, extendsTag, plainWrites: new Map(), renderPlainReads: new Set() };
     const ind = this.ind;
     const pad = '  '.repeat(ind + 1);
     const ipad = pad + '  ';
@@ -5943,6 +6005,16 @@ class Emitter {
     });
 
     this.methodName = prevMethod;
+    // The silent-freeze pair: a plain ('=') member that render READS
+    // and anything WRITES would change state the UI never reflects —
+    // render effects track no plain field. Reject at the write.
+    for (const [mname, writeNode] of frame.plainWrites) {
+      if (frame.renderPlainReads.has(mname)) {
+        throw this.positionedError(writeNode,
+          `emitter: writing to '${mname}' silently freezes the render — it is a plain ('=') member and render ` +
+          `reads it, but render never re-runs for a non-reactive field; declare it with ':=' (state) if it changes`);
+      }
+    }
     this.rframes.pop();
     this.cframes.pop();
     this.ind = ind;
@@ -8606,6 +8678,9 @@ class Emitter {
   }
 
   member(node) {
+    if (node[0] === '.' && node[1] === 'this' && typeof node[2] === 'string' && !this.inTarget) {
+      this.notePlainRenderRead(node[2], true);
+    }
     this.chain(node);
   }
 
@@ -10041,6 +10116,7 @@ class Emitter {
       throw this.positionedError(node,
         `emitter: cannot assign to computed '${node[1]}' — a '~=' binding derives from its dependencies; write to those instead`);
     }
+    this.checkMemberWrite(node, node[1]);
     // An optional chain is not a JavaScript assignment reference —
     // `obj?.x++` has no valid emission; guard the update explicitly.
     if (isNode(node[1]) && Emitter.optionalGuard(node[1]) !== null) {

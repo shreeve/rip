@@ -3464,3 +3464,54 @@ code 'component extends: inherits tag, rest props forwarded', '''
     }
   };
   '''
+
+# ==============================================================================
+# Member write guards
+# ==============================================================================
+# A readonly ('=!') member never changes after _init — every write
+# spelling rejects at the site. A plain ('=') member that render READS
+# while anything WRITES is the silent-freeze pair: render never re-runs
+# for a non-reactive field, so the write rejects and names the fix.
+
+fail 'reassigning a =! member is a compile error', '''
+  export A = component
+    c =! 5
+    bump = -> @c = 6
+    render
+      div "hi"
+  ''', "cannot assign to readonly member 'c'"
+
+fail 'compound-assigning a =! member is a compile error', '''
+  export A = component
+    n =! 0
+    inc = -> n += 1
+    render
+      div "hi"
+  ''', "cannot assign to readonly member 'n'"
+
+fail 'updating a =! member is a compile error', '''
+  export A = component
+    n =! 0
+    pp = -> n++
+    render
+      div "hi"
+  ''', "cannot assign to readonly member 'n'"
+
+fail 'plain `=` member read in render + reassigned is a silent-freeze error', '''
+  export A = component
+    open = false
+    toggle = -> open = not open
+    render
+      button "#{open}"
+  ''', "silently freezes the render"
+
+test 'a method param named like a =! member shadows it (standard scoping)', '''
+  A = component
+    c =! 5
+    use = (c) -> c = c + 1
+    render
+      div "hi"
+  a = A.new()
+  a._init({})
+  [a.use(10), a.c]
+  ''', [11, 5]
