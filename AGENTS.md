@@ -133,6 +133,15 @@ strict as the emitter's.
   exists only at serialization boundaries (diagnostics, source maps),
   computed via `lineStarts`.
 
+## Editor Grammars
+
+Three highlighting surfaces ship from this repository and must stay
+in lockstep with the language: the VS Code TextMate grammar
+(packages/vscode/syntaxes), the highlight.js grammar
+(packages/highlight — Rip Print consumes it), and the vim plugin
+(packages/vim). A change that adds or alters surface syntax updates
+ALL THREE in the same change.
+
 ## Style
 
 - **Comments explain non-obvious intent** — invariants, constraints,
