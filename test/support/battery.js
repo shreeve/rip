@@ -25,6 +25,7 @@ import * as reactiveRuntime from '../../src/runtime/reactive.js';
 import * as schemaRuntime from '../../src/runtime/schema.js';
 import * as ormRuntime from '../../src/runtime/schema-orm.js';
 import * as componentsRuntime from '../../src/runtime/components.js';
+import * as stdlibRuntime from '../../src/runtime/stdlib.js';
 
 // Lazy: the code-verb parse gate's JavaScript parser.
 let codeParser = null;
@@ -38,6 +39,21 @@ const ENV = {
   ...schemaRuntime,
   ...ormRuntime,
   ...componentsRuntime,
+};
+
+// The stdlib names bind PER ROW, mirroring delivery's shadow rule: a
+// name binds only when the compiled row references it and does not
+// declare it itself (a row's `let p = Post.create(…)` must keep its
+// own p — in delivered output a user binding suppresses the helper).
+const stdlibEnv = (code) => {
+  const out = {};
+  for (const [k, v] of Object.entries(stdlibRuntime)) {
+    if (new RegExp(`\\b${k}\\b`).test(code) &&
+        !new RegExp(`\\b(?:let|const|var|function|class)\\s+${k}\\b`).test(code)) {
+      out[k] = v;
+    }
+  }
+  return out;
 };
 
 // Battery snippets arrive as heredoc bodies that may carry a uniform
@@ -271,14 +287,13 @@ const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 // Direct eval sees destructured locals — the runtime exports are in
 // scope for the snippet without polluting globalThis.
 function evalInScope(__code, __env) {
-  const {
-    __state, __computed, __effect, __batch, __readonly,
-    __setErrorHandler, __handleError, __catchErrors, getEffectSignal,
-    __schema, SchemaError, registerCoercer, schema, __schemaSetAdapter,
-    __SchemaRegistry, __SchemaDef,
-    setContext, getContext, hasContext, __Component,
-  } = __env;
-  return eval(__code);
+  // Every env name binds as a parameter, then a DIRECT eval inside
+  // the function body sees them all — the binding set follows the
+  // env instead of a hand-kept list (the per-row stdlib names ride
+  // the same path as the fixed runtime names).
+  const keys = Object.keys(__env);
+  const fn = new Function('__code', ...keys, 'return eval(__code);');
+  return fn(__code, ...keys.map((k) => __env[k]));
 }
 
 async function evaluate(compiled) {
@@ -290,11 +305,12 @@ async function evaluate(compiled) {
   const prior = registry?.replace;
   if (registry) registry.replace = true;
   try {
+    const env = { ...ENV, ...stdlibEnv(compiled) };
     if (needsAsyncWrapper(compiled)) {
-      const fn = new AsyncFunction(...Object.keys(ENV), injectReturn(compiled));
-      return await fn(...Object.values(ENV));
+      const fn = new AsyncFunction(...Object.keys(env), injectReturn(compiled));
+      return await fn(...Object.values(env));
     }
-    return await evalInScope(compiled, ENV);
+    return await evalInScope(compiled, env);
   } finally {
     if (registry) registry.replace = prior;
   }

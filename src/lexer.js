@@ -2000,6 +2000,9 @@ const OPS2 = {
   // bodies — a stray one is a loud parse error. Both scan as single
   // tokens so a trailing one never reads as a line-continuing COMPARE.
   '~>': 'EFFECT', '!>': '!>',
+  // The match operator: `text =~ /re/` — comparison-tier precedence,
+  // deliberately non-chaining (the emitter rejects a bare chain).
+  '=~': 'MATCH',
   '->': '->', '=>': '=>', '++': '++', '--': '--', '?.': '?.',
   // Method assignment: ADJACENT `.=` is one token (`x .= trim()` —
   // the target re-binds to a method call on itself). No legal
