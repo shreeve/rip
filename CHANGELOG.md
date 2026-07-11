@@ -5,6 +5,18 @@ repository's pull requests.
 
 ## Unreleased
 
+- Fix five front-end findings from the cross-vendor cold review:
+  signed numeric literal casts claim (`x = y as -1` erases; `+1`
+  rejects naming TypeScript's '-'-only rule; a committed cast that
+  claims no type rejects instead of silently reading `as` as a call);
+  ternaries pair their colons per bracket depth, so a parenthesized
+  nested ternary and an object literal in a ternary branch both work
+  (both previously misparsed); the `::` member lookahead accepts the
+  full identifier alphabet (`String::señal`); offsetAt clamps a CRLF
+  line at the `\r`; and the editor's cursor mapper refuses the
+  vacuous zero-byte cover match the insertion mapper already
+  refused (#27)
+
 - Fix five silent-miscompile classes found by the cross-vendor cold
   review: a value-position subjectless switch now ORs every condition
   in a multi-test `when` (only the first decided before); membership

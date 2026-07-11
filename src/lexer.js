@@ -583,7 +583,18 @@ const collectTypeRun = (tokens, j, opts, fail) => {
     if (depth === 0) {
       if (RUN_STOPS.has(kd)) break;
       if (opts.stopAtFatArrow && kd === '=>') break;
-      if (opts.cast && CAST_STOPS.has(kd)) break;
+      if (opts.cast && CAST_STOPS.has(kd)) {
+        // A cast's numeric literal type may open SIGNED: `x as -1`
+        // claims (TypeScript's negative numeric literal type). `+` is
+        // not TS type syntax there and rejects with the fix; past the
+        // opening position a sign is the arithmetic operator and ends
+        // the run (`x as T - 1`).
+        if (j === startJ && (kd === '-' || kd === '+') && tokens[j + 1]?.kind === 'NUMBER') {
+          if (kd === '+') {
+            fail("a numeric literal type spells its sign with '-' (TypeScript has no '+1' type)", t.start, tokens[j + 1].end);
+          }
+        } else break;
+      }
       if (opts.alias && ALIAS_STOPS.has(kd)) break;
     } else {
       // Inside brackets, INDENT/OUTDENT are pure layout; TERMINATOR
@@ -1364,8 +1375,18 @@ export function rewriteTypes(tokens, mintId, text, fail) {
     // ── `expr as Type` — the postfix cast ──────────────────────────
     if (kd === 'IDENTIFIER' && tok.value === 'as' &&
         prev && prev.kind !== '.' && prev.kind !== '?.' && CAST_LHS_ENDERS.has(prev.kind) &&
-        tokens[i + 1] && TYPE_STARTERS.has(tokens[i + 1].kind)) {
+        tokens[i + 1] && (TYPE_STARTERS.has(tokens[i + 1].kind) ||
+          // A signed numeric literal enters the cast reading too:
+          // `-1` claims, `+1` rejects inside the run with the fix.
+          (tokens[i + 1].kind === '+' && tokens[i + 2]?.kind === 'NUMBER'))) {
       const last = claim('CAST', tok, i + 1, { cast: true });
+      // The trigger committed the cast reading (a value ender, `as`,
+      // a type starter); a run that then claims NOTHING must reject
+      // here — falling through would read `as` as a plain identifier
+      // and emit a CALL of the left operand.
+      if (last < 0) {
+        fail("'as' begins a cast and takes a type — `x as T`", tok.start, tok.end);
+      }
       if (last >= 0) {
         i = last;
         // A type ending in `>` (COMPARE — an unfinished-line kind)
@@ -3065,7 +3086,7 @@ export function tokenize(text, path = '<anonymous>') {
     // type body, an alias RHS) the prototype reading never applies,
     // so `::` rejects there too.
     if (ch === ':' && text[pos + 1] === ':') {
-      if (!insideTypeBody() && !aliasHeadOpen() && /[A-Za-z_$]/.test(text[pos + 2] ?? '')) {
+      if (!insideTypeBody() && !aliasHeadOpen() && IDENT_START.test(text[pos + 2] ?? '')) {
         const prev = tokens[tokens.length - 1];
         if (prev?.kind === '?' && prev.end === pos) {
           prev.kind = '?.';
@@ -3579,7 +3600,12 @@ export function implicitObjects(tokens, mintId) {
   // {kind: 'object', at, sameLine, startsLine}; 'CONTROL' as {kind}.
   const stack = [];
   const insertions = []; // {at, token} against original indices
-  let inTernary = false;
+  // Pending ternaries per bracket depth: each `?` claims the next ':'
+  // at ITS depth, so nested and sequential ternaries pair
+  // innermost-first (the tagDynamicKeys discipline) and a
+  // parenthesized inner ternary never leaks its claim to the outer
+  // colon.
+  const pendingTernary = [0];
   let lastReal = null;
 
   const top = () => stack[stack.length - 1];
@@ -3672,10 +3698,12 @@ export function implicitObjects(tokens, mintId) {
       }
       if (top()?.kind === 'CONTROL') stack.pop();
       stack.push({ kind: 'INDENT', at: i });
+      pendingTernary.push(0);
       continue;
     }
     if (PASS_OPENERS.has(k)) {
       stack.push({ kind: k, at: i });
+      pendingTernary.push(0);
       continue;
     }
     if (PASS_CLOSERS.has(k)) {
@@ -3684,6 +3712,7 @@ export function implicitObjects(tokens, mintId) {
         else stack.pop();
       }
       stack.pop();
+      if (pendingTernary.length > 1) pendingTernary.pop();
       // A dedent is a line break: objects still open below the popped
       // block are no longer same-line.
       if (k === 'OUTDENT') {
@@ -3696,11 +3725,12 @@ export function implicitObjects(tokens, mintId) {
       continue;
     }
 
-    if (k === 'TERNARY') inTernary = true;
+    if (k === 'TERNARY') pendingTernary[pendingTernary.length - 1]++;
 
     if (k === ':') {
-      if (inTernary) {
-        inTernary = false;
+      const pt = pendingTernary.length - 1;
+      if (pendingTernary[pt] > 0) {
+        pendingTernary[pt]--;
         continue;
       }
       // A non-ternary colon whose key carries a trailing bang is a
@@ -3759,7 +3789,9 @@ export function implicitObjects(tokens, mintId) {
       // binds the pair's value (`x = a: 1 && 2` is {a: (1 && 2)}).
       if (k === '||' || k === '&&' || k === '??') continue;
       if (k === 'TERMINATOR') {
-        // A statement boundary un-samelines every open implicit frame.
+        // A statement boundary clears unconsumed ternary claims at
+        // this depth and un-samelines every open implicit frame.
+        pendingTernary[pendingTernary.length - 1] = 0;
         for (let d = stack.length - 1; d >= 0; d--) {
           const fr = stack[d];
           if (fr.kind !== 'object' && fr.kind !== 'CONTROL') break;

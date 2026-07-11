@@ -704,7 +704,7 @@ code "if-else in value context uses ternary not IIFE for simple branches", "x = 
 # Ternary Edge Cases
 # ==============================================================================
 
-fail 'nested ternary in then branch', 'x = true ? (false ? "a" : "b") : "c"'
+test 'nested ternary in then branch (parenthesized)', 'true ? (false ? "a" : "b") : "c"', "b"
 
 test 'nested ternary in else branch', '''
   x = 1

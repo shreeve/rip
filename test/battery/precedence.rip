@@ -204,3 +204,25 @@ test "break in parens", "i = 0\nwhile i < 10\n  if i is 5 then (i++; break)\n  i
 
 # Continue in parentheses
 test "continue in parens", "sum = 0\nfor i in [1..5]\n  if i is 3 then (sum += 100; continue)\n  sum += i\nsum", 112
+
+# ==============================================================================
+# Ternary nesting — parenthesized branches pair their own colons
+# ==============================================================================
+
+test "a parenthesized ternary in the then-branch", '''
+  a = 1
+  b = 0
+  a ? (b ? 2 : 3) : 4
+''', 3
+
+test "a ternary chained in the else-branch", '''
+  a = 0
+  c = 2
+  a ? 1 : c ? 3 : 4
+''', 3
+
+test "ternary branches may build objects", '''
+  t = true
+  v = t ? {a: 1} : {b: 2}
+  v.a
+''', 1

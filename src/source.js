@@ -40,7 +40,11 @@ export class SourceFile {
     if (line < 0) return 0;
     if (line >= this.lineStarts.length) return this.text.length;
     const start = this.lineStarts[line];
-    const end = line + 1 < this.lineStarts.length ? this.lineStarts[line + 1] - 1 : this.text.length;
+    let end = line + 1 < this.lineStarts.length ? this.lineStarts[line + 1] - 1 : this.text.length;
+    // A CRLF line's logical end sits AT the '\r': clamping between
+    // the two newline bytes would answer a position past the last
+    // column.
+    if (end > start && this.text.charCodeAt(end - 1) === 13) end--;
     const offset = start + Math.max(0, col);
     return offset > end ? end : offset;
   }

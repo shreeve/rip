@@ -83,3 +83,21 @@ code "import-as alias unaffected", "import { foo as bar } from 'mod'", "import {
 code "import-namespace-as unaffected", "import * as NS from 'mod'", "import * as NS from 'mod'"
 code "export-as re-export unaffected", "export { x as y } from 'mod'", "export { x as y } from 'mod'"
 code "dot-as is a property, not a cast", "y = obj.as", "let y = obj.as;"
+
+# ==============================================================================
+# Signed numeric literal types
+# ==============================================================================
+
+test "a negative literal cast erases", '''
+  y = 5
+  x = y as -1
+  x
+''', 5
+
+code "the negative literal reaches the face type", "x = y as -1.5", "let x = y;"
+
+fail "a plus-signed literal is not a type", "x = y as +1",
+  "a numeric literal type spells its sign with '-'"
+
+fail "a cast that claims no type rejects", "x = y as -z",
+  "'as' begins a cast and takes a type"
