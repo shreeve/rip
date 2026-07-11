@@ -8384,8 +8384,10 @@ class Emitter {
     if ((x[0] === '.' || x[0] === '?.' || x[0] === '[]' || x[0] === 'optindex') && x.length === 3) return 1;
     if (x[0] === 'optcall') return 1;
     // A node-headed node is a call (expr dispatches it to call());
-    // dammit callees keep their inline path — never a spine frame.
-    if (isNode(x[0]) && x[0][0] !== 'dammit!') return 0;
+    // dammit callees and `.new` constructor calls keep their inline
+    // paths — never a spine frame (both re-spell the invocation).
+    if (isNode(x[0]) && x[0][0] !== 'dammit!' &&
+        !(x[0][0] === '.' && x[0].length === 3 && x[0][2] === 'new')) return 0;
     return null;
   }
 
@@ -10037,6 +10039,36 @@ class Emitter {
       this.mark(node, '$self', () => {
         this.b.emit('await ');
         this.mark(node[0], '$self', () => this.head(node[0], 'target', node[0][1]));
+        this.mark(node, 'args', () => {
+          this.b.emit('(');
+          node.slice(1).forEach((arg, i) => {
+            if (i > 0) this.b.emit(', ');
+            this.callArg(arg);
+          });
+          this.b.emit(')');
+        });
+      });
+      return;
+    }
+    // Ruby-style construction: `X.new(args)` is `new X(args)` — the
+    // `.new` member CALL is the constructor invocation (a bare
+    // `X.new` property read stays a read). A non-primary constructor
+    // expression groups so the `new` binds to it whole.
+    if (isNode(node[0]) && node[0][0] === '.' && node[0].length === 3 && node[0][2] === 'new') {
+      const ctor = node[0][1];
+      this.mark(node, '$self', () => {
+        this.b.emit('new ');
+        this.mark(node[0], 'object', () => {
+          // Any non-name constructor expression groups: `new` consumes
+          // the FIRST argument list it reaches, so a call in the
+          // constructor position (`getClass().new(x)`) must
+          // parenthesize or `new` would construct the getter.
+          if (isNode(ctor)) {
+            this.b.emit('(');
+            this.expr(ctor);
+            this.b.emit(')');
+          } else this.expr(ctor);
+        });
         this.mark(node, 'args', () => {
           this.b.emit('(');
           node.slice(1).forEach((arg, i) => {
