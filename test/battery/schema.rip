@@ -5087,3 +5087,32 @@ test "transaction! on an adapter without begin() throws a clear error", '''
     err = e.message
   [err.includes("does not support transactions"), err.includes("begin")]
 ''', [true, true]
+
+# ==============================================================================
+# Validation is stateless and structural
+# ==============================================================================
+
+test "a /g constraint validates identically on repeat", '''
+  S = schema :input
+    code! /^A$/g
+  [S.ok({code: "A"}), S.ok({code: "A"}), S.ok({code: "A"})]
+''', [true, true, true]
+
+test "an object schema rejects non-object input", '''
+  Loose = schema :input
+    name?
+  r = Loose.safe(5)
+  [Loose.ok(5), Loose.ok("abc"), Loose.ok(null), Loose.ok([1]), Loose.ok({}), r.errors[0].error]
+''', [false, false, false, false, true, "object"]
+
+test "an impossible calendar date fails instead of normalizing", '''
+  S = schema :shape
+    when! date
+  [S.ok({when: "2024-02-30"}), S.ok({when: "2024-02-29"}), S.ok({when: "2023-02-29"})]
+''', [false, true, false]
+
+test "the coercing form rejects impossible dates too", '''
+  S = schema :shape
+    c? ~date
+  [S.ok({c: "2024-02-30"}), S.ok({c: "2024-02-29"})]
+''', [false, true]

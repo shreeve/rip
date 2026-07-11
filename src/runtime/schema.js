@@ -107,7 +107,16 @@ const __SCHEMA_COERCERS = {
   date(v) {
     if (v instanceof Date) return Number.isNaN(v.getTime()) ? { ok: false } : { ok: true, value: v };
     if (typeof v === 'number' && Number.isFinite(v)) return { ok: true, value: new Date(v) };
-    if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) {
+    const m = typeof v === 'string' ? /^(\d{4})-(\d{2})-(\d{2})/.exec(v) : null;
+    if (m) {
+      // The written calendar date must EXIST: Date() silently
+      // normalizes an impossible day (Feb 30 becomes Mar 1), changing
+      // the user's date instead of failing. Pure calendar math — days
+      // in the written month, leap years included — independent of
+      // any timezone suffix.
+      const mo = +m[2], day = +m[3];
+      const daysInMonth = new Date(Date.UTC(+m[1], mo, 0)).getUTCDate();
+      if (mo < 1 || mo > 12 || day < 1 || day > daysInMonth) return { ok: false };
       const d = new Date(v);
       if (!Number.isNaN(d.getTime())) return { ok: true, value: d };
     }
@@ -115,6 +124,17 @@ const __SCHEMA_COERCERS = {
   },
 };
 __SCHEMA_COERCERS.datetime = __SCHEMA_COERCERS.date;
+
+
+// An object schema's input must BE an object — a primitive, null, or
+// an array would spread into a valid-looking empty instance when every
+// field is optional. Returns the structured issue, or null for a real
+// object.
+function __schemaObjectIssue(data) {
+  if (data !== null && typeof data === 'object' && !Array.isArray(data)) return null;
+  const kind = data === null ? 'null' : Array.isArray(data) ? 'an array' : 'a ' + typeof data;
+  return { field: '', error: 'object', message: 'input must be an object; got ' + kind };
+}
 
 // Named-coercer registry for the `~:name` field syntax. A coercer is a
 // function (wireValue) → coercedValue, where null/undefined/false
@@ -625,7 +645,21 @@ class __SchemaDef {
   _coerceDates(working) {
     const norm = this._normalize();
     const isoShaped = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}([T ].*)?$/.test(s);
-    const toDate = (s) => { const d = new Date(s); return Number.isNaN(d.getTime()) ? s : d; };
+    // The written calendar date must EXIST — Date() silently
+    // normalizes an impossible day (Feb 30 becomes Mar 1), changing
+    // the user's date instead of failing validation. Pure calendar
+    // math on the written components, timezone-independent; a bad day
+    // leaves the string in place for the type check to reject.
+    const dayExists = (s) => {
+      const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+      const mo = +m[2], day = +m[3];
+      return mo >= 1 && mo <= 12 && day >= 1 && day <= new Date(Date.UTC(+m[1], mo, 0)).getUTCDate();
+    };
+    const toDate = (s) => {
+      if (!dayExists(s)) return s;
+      const d = new Date(s);
+      return Number.isNaN(d.getTime()) ? s : d;
+    };
     for (const [n, f] of norm.fields) {
       if (f.typeName !== 'date' && f.typeName !== 'datetime') continue;
       const v = working[n];
@@ -700,7 +734,13 @@ class __SchemaDef {
         if (typeof v === 'string') {
           if (c.min != null && v.length < c.min) { if (!collect) return false; errors.push({ field: n, error: 'min', message: n + ' must be at least ' + c.min + ' chars' }); }
           if (c.max != null && v.length > c.max) { if (!collect) return false; errors.push({ field: n, error: 'max', message: n + ' must be at most ' + c.max + ' chars' }); }
-          if (c.regex && !c.regex.test(v)) { if (!collect) return false; errors.push({ field: n, error: 'pattern', message: n + ' is invalid' }); }
+          if (c.regex) {
+            // A /g or /y constraint is stateful through lastIndex —
+            // identical inputs must validate identically, so the
+            // cursor resets before every test.
+            if (c.regex.global || c.regex.sticky) c.regex.lastIndex = 0;
+            if (!c.regex.test(v)) { if (!collect) return false; errors.push({ field: n, error: 'pattern', message: n + ' is invalid' }); }
+          }
         } else if (typeof v === 'number') {
           if (c.min != null && v < c.min) { if (!collect) return false; errors.push({ field: n, error: 'min', message: n + ' must be >= ' + c.min }); }
           if (c.max != null && v > c.max) { if (!collect) return false; errors.push({ field: n, error: 'max', message: n + ' must be <= ' + c.max }); }
@@ -818,7 +858,9 @@ class __SchemaDef {
       return this._materializeEnum(data);
     }
     this._assertSyncValidatable('parse');
-    const raw = data || {};
+    const objIssue = __schemaObjectIssue(data);
+    if (objIssue) throw new SchemaError([objIssue], this.name, this.kind);
+    const raw = data;
     const working = { ...raw };
     const failed = new Set();
     const transformErrors = this._applyTransforms(raw, working);
@@ -909,7 +951,9 @@ class __SchemaDef {
       return { ok: true, value: this._materializeEnum(data), errors: null };
     }
     this._assertSyncValidatable('safe');
-    const raw = data || {};
+    const objIssue = __schemaObjectIssue(data);
+    if (objIssue) return { ok: false, value: null, errors: [objIssue] };
+    const raw = data;
     const working = { ...raw };
     const failed = new Set();
     const transformErrors = this._applyTransforms(raw, working);
@@ -939,7 +983,8 @@ class __SchemaDef {
     }
     if (this.kind === 'enum') return this._validateEnum(data, false);
     this._assertSyncValidatable('ok');
-    const raw = data || {};
+    if (__schemaObjectIssue(data)) return false;
+    const raw = data;
     const working = { ...raw };
     const failed = new Set();
     if (this._applyTransforms(raw, working).length) return false;
@@ -953,7 +998,9 @@ class __SchemaDef {
   // Async entry points — work on EVERY schema (sync-only ones resolve
   // immediately); REQUIRED when @ensure! refinements exist.
   async _runPipelineAsync(data) {
-    const raw = data || {};
+    const objIssue = __schemaObjectIssue(data);
+    if (objIssue) return { errors: [objIssue] };
+    const raw = data;
     const working = { ...raw };
     const failed = new Set();
     const transformErrors = this._applyTransforms(raw, working);

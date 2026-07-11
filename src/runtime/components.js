@@ -433,6 +433,9 @@ function __checkDeclaredProps(ctor, instance) {
   __validatedProps.add(ctor);
 }
 
+// Last-applied style-object keys per element (the replacement diff).
+const __styleKeys = new WeakMap();
+
 class __Component {
   constructor(props = {}) {
     __checkDeclaredProps(this.constructor, this);
@@ -629,9 +632,18 @@ class __Component {
       return;
     }
     if (key === 'style') {
-      if (value == null) { el.removeAttribute('style'); return; }
-      if (typeof value === 'string') { el.setAttribute('style', value); return; }
-      if (typeof value === 'object') { Object.assign(el.style, value); return; }
+      // Replacing a style OBJECT clears the keys the new value omits —
+      // an assign alone leaves the old declarations active. The keys
+      // applied last are remembered per element.
+      const prevKeys = __styleKeys.get(el);
+      if (value == null) { el.removeAttribute('style'); __styleKeys.delete(el); return; }
+      if (typeof value === 'string') { el.setAttribute('style', value); __styleKeys.delete(el); return; }
+      if (typeof value === 'object') {
+        if (prevKeys) for (const k of prevKeys) { if (!(k in value)) el.style[k] = ''; }
+        __styleKeys.set(el, Object.keys(value));
+        Object.assign(el.style, value);
+        return;
+      }
     }
     if (key === 'innerHTML' || key === 'textContent' || key === 'innerText') {
       el[key] = value ?? '';
