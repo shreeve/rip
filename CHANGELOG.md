@@ -5,6 +5,12 @@ repository's pull requests.
 
 ## Unreleased
 
+- Add the generator's own test suite (src/grammar/test: the annotation
+  validator and the semantic side table, colocated with the tool) and
+  the exactness differential (test/mapping/exactness.test.js: the
+  incremental mapping-exactness algorithm proven equal to its literal
+  definition over the corpus and adversarial chain shapes) (#19)
+
 
 - Add the type-audit gauge (test/type-audit): twelve real-world typed
   fixtures with .ts/.tsx twins, a six-dimension audit runner (compiles,
