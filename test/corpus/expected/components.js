@@ -1,12 +1,12 @@
 let Counter = class extends __Component {
   static __props = ['label', 'opt', 'step'];
   _init(props) {
-    this.limit = 100;
-    this.note = "plain";
     this.count = __state(0);
     this.label = __state(props.__bind_label__ ?? props.label);
     this.opt = __state(props.__bind_opt__ ?? props.opt);
     this.step = __state(props.__bind_step__ ?? props.step ?? 1);
+    this.limit = 100;
+    this.note = "plain";
     this.total = __computed(() => (this.count.value * 2));
     __effect(() => { return console.log(this.count.value); });
   }
@@ -97,8 +97,8 @@ let Panel = class extends __Component {
 let Badge = class extends __Component {
   static __props = ['size', 'step', 'name', 'nick', 'label'];
   _init(props) {
-    this.label = props.label ?? "x";
     this.size = __state(props.__bind_size__ ?? props.size);
+    this.label = props.label ?? "x";
     this.step = __state(props.__bind_step__ ?? props.step ?? 1);
     this.name = __state(props.__bind_name__ ?? props.name ?? "anon");
     this.nick = __state(props.__bind_nick__ ?? props.nick ?? "nn");

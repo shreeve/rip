@@ -354,21 +354,24 @@ describe('the member model: _init lowering and member unwrap', () => {
     div "x"
 `;
 
-  test('the full seven-spelling lowering,  order, static __props', () => {
+  test('the full seven-spelling lowering: source-order init, offers next, effects last, static __props', () => {
     const { code } = compile(SRC);
     expect(code).toContain("static __props = ['label', 'opt', 'step'];");
     const init = code.slice(code.indexOf('_init(props) {'), code.indexOf('onClick(e)'));
     const lines = init.split('\n').map((l) => l.trim()).filter((l) => l && l !== '}' && !l.startsWith('_init'));
+    // Value members initialize in SOURCE ORDER (a plain member reads a
+    // state declared above it; traces log as written); offers register
+    // after the values; effects start last.
     expect(lines).toEqual([
- 'this.limit = 100;',
- 'this.note = "plain";',
-      "this.locale = getContext('locale');",
  'this.count = __state(0);',
  'this.label = __state(props.__bind_label__ ?? props.label);',
  'this.opt = __state(props.__bind_opt__ ?? props.opt);',
  'this.step = __state(props.__bind_step__ ?? props.step ?? 1);',
- 'this.theme = __state("dark");',
+ 'this.limit = 100;',
+ 'this.note = "plain";',
  'this.total = __computed(() => (this.count.value * 2));',
+ 'this.theme = __state("dark");',
+      "this.locale = getContext('locale');",
       "setContext('theme', this.theme);",
  '__effect(() => { return console.log(this.count.value); });',
     ]);
@@ -1784,3 +1787,24 @@ describe('`extends <tag>`: the rest-forwarding surface', () => {
   });
 });
 
+
+describe('member initialization order is observable source order', () => {
+  test('a state above a plain member initializes first; the plain member reads it', () => {
+    const src = [
+      'trace = []',
+      'mark = (n, v) ->',
+      '  trace.push n',
+      '  v',
+      'C = component',
+      '  a := mark "state", 1',
+      '  b = mark "plain", a + 1',
+      'x = new C()',
+      'globalThis.__initOrder = [trace, x.b]',
+      '',
+    ].join('\n');
+    const { code } = compile(src, { runtimeDelivery: 'inline' });
+    new Function(code)();
+    expect(globalThis.__initOrder).toEqual([['state', 'plain'], 2]);
+    delete globalThis.__initOrder;
+  });
+});
