@@ -154,3 +154,10 @@ code "mixed exports and non-exports preserve source order", '''
   let b = a + 1;
   export const c = b + 1;
   '''
+
+# ==============================================================================
+# Specifier text escapes into the emitted single-quoted form
+# ==============================================================================
+
+code "a single quote in a specifier escapes", 'import thing from "./it\'s.js"',
+  "import thing from './it\\'s.js';"

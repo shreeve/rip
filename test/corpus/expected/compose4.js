@@ -34,7 +34,7 @@ try {
 } catch (err) {
   if (err) caught = 1;
 }
-let u = Array.isArray([5, 6]) || typeof [5, 6] === 'string' ? [5, 6].includes(s) : (s in [5, 6]);
+let u = ((k, c) => Array.isArray(c) || typeof c === 'string' ? c.includes(k) : k in c)(s, [5, 6]);
 while (true) {
   s -= 1;
   if (!(s > 0)) break;

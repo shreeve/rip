@@ -207,8 +207,11 @@ test "value in empty array", "'x' in []", false
 
 # Code generation - all non-object cases should use runtime check
 code "variable in variable uses runtime check", "val in list", "Array.isArray(list) || typeof list === 'string' ? list.includes(val) : (val in list);"
-code "literal in literal uses runtime check", "'x' in ['a', 'b']", "Array.isArray([\"a\", \"b\"]) || typeof [\"a\", \"b\"] === 'string' ? [\"a\", \"b\"].includes(\"x\") : (\"x\" in [\"a\", \"b\"]);"
-code "variable in literal uses runtime check", "val in ['a', 'b']", "Array.isArray([\"a\", \"b\"]) || typeof [\"a\", \"b\"] === 'string' ? [\"a\", \"b\"].includes(val) : (val in [\"a\", \"b\"]);"
+# A CONSTRUCTED container (a literal list, a call) evaluates exactly
+# once — membership dispatches through the helper call. A plain-name
+# container keeps the inline dispatch (the rows above).
+code "literal in literal dispatches through the helper", "'x' in ['a', 'b']", "((k, c) => Array.isArray(c) || typeof c === 'string' ? c.includes(k) : k in c)(\"x\", [\"a\", \"b\"]);"
+code "variable in literal dispatches through the helper", "val in ['a', 'b']", "((k, c) => Array.isArray(c) || typeof c === 'string' ? c.includes(k) : k in c)(val, [\"a\", \"b\"]);"
 
 # Object literal should still use JavaScript 'in'
 code "property in object literal", "'key' in {key: 1}", "\"key\" in {key: 1};"
@@ -312,3 +315,16 @@ test "unary minus binds outside power", "-2 ** 2", -4
 
 # Multi-line nullish chains are one logical line.
 test "nullish chain continues across lines", "a = null; b = undefined; c = 3\nv =\n  a ??\n  b ??\n  c\nv", 3
+
+# ==============================================================================
+# Membership evaluates each operand exactly once
+# ==============================================================================
+
+test "a side-effecting container evaluates once", '''
+  calls = 0
+  xs = ->
+    calls += 1
+    ["x"]
+  ok = "x" in xs()
+  [calls, ok]
+''', [1, true]

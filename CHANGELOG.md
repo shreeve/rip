@@ -5,6 +5,19 @@ repository's pull requests.
 
 ## Unreleased
 
+- Fix five silent-miscompile classes found by the cross-vendor cold
+  review: a value-position subjectless switch now ORs every condition
+  in a multi-test `when` (only the first decided before); membership
+  (`in`) with a constructed container dispatches through a helper call
+  so the container evaluates exactly once (the inline form re-read
+  it); a catch-pattern target named `error` now escapes (the lowering
+  hard-coded the parameter name it collided with); comprehension and
+  loop accumulators dodge user identifiers (`result = 10` no longer
+  captures into its own accumulator); and module specifiers escape
+  embedded quotes and backslashes (an apostrophe emitted invalid JS).
+  Plain-name containers and collision-free programs keep byte-identical
+  output; two corpus artifacts regenerate for the membership helper (#26)
+
 - Complete prototype access with the soak form: a tight `a?::b` reads
   as `a?.prototype.b` (the existence token becomes the optional-member
   link), soak writes lower through the optional-assign guard, and the

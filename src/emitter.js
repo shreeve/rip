@@ -2086,10 +2086,13 @@ class Emitter {
     'export-from': (e, node, ind) => (e.exportStatement(node, ind), true),
   };
 
-  // Module source strings emit single-quoted; the token
-  // value carries normalized double quotes.
+  // Module source strings emit single-quoted; the token value carries
+  // normalized double quotes, so embedded single quotes (and
+  // backslashes) must escape or the emitted specifier breaks the
+  // string it sits in.
   moduleSource(s) {
-    return `'${String(s).slice(1, -1)}'`;
+    const inner = String(s).slice(1, -1).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    return `'${inner}'`;
   }
 
   // A specifier list entry: a plain name, `default`, or [name, alias].
@@ -2824,11 +2827,13 @@ class Emitter {
             // the handler's first statement (paren-wrapped for both
             // pattern kinds). The names hoist at the enclosing scope —
             // for BOTH kinds.
-            this.b.emit(' catch (error) {\n');
+            const param = this.patternNames(binding, [], true).includes('error')
+              ? this.loopTempName('_err') : 'error';
+            this.b.emit(` catch (${param}) {\n`);
             const pad = '  '.repeat(ind + 1);
             this.b.emit(pad + '(');
             this.mark(part, 'binding', () => this.withPattern(() => this.expr(binding)));
-            this.b.emit(' = error);\n');
+            this.b.emit(` = ${param});\n`);
             this.statements(isBlock(body) ? body.slice(1) : [body], ind + 1, 'block');
             this.b.emit('  '.repeat(ind) + '}');
           } else {
@@ -3344,7 +3349,8 @@ class Emitter {
     this.rejectYieldInIIFE(node);
     this.mark(node, '$self', () => {
       this.b.emit(Emitter.containsAwait(node) ? 'await (async () => {\n' : '(() => {\n');
-      this.b.emit(`${pad}  const result = ${keyExpr === null ? '[]' : '{}'};\n`);
+      const acc = this.loopTempName('result');
+      this.b.emit(`${pad}  const ${acc} = ${keyExpr === null ? '[]' : '{}'};\n`);
       this.b.emit(`${pad}  `);
       const [kind, vars, iter, aux] = clause;
       const setups = this.clauseHeader(node, kind, vars, iter, aux ?? null);
@@ -3361,7 +3367,7 @@ class Emitter {
         inner += '  ';
       }
       if (keyExpr === null) {
-        this.b.emit(`${inner}result.push(`);
+        this.b.emit(`${inner}${acc}.push(`);
         // The pushed expression is an operand position (compounds group).
         const wrap = Emitter.needsGrouping(expr, 'operand') || isUpdate(expr);
         if (wrap) this.b.emit('(');
@@ -3369,7 +3375,7 @@ class Emitter {
         if (wrap) this.b.emit(')');
         this.b.emit(');\n');
       } else {
-        this.b.emit(`${inner}result[`);
+        this.b.emit(`${inner}${acc}[`);
         // A string key is an identifier read (it routes through expr,
         // so a reactive key unwraps — `result[count.value]`;
         // loop variables are frame-bound and stay bare); a node
@@ -3384,7 +3390,7 @@ class Emitter {
       }
       if (guards.length > 0) this.b.emit(`${pad}    }\n`);
       this.b.emit(`${pad}  }\n`);
-      this.b.emit(`${pad}  return result;\n`);
+      this.b.emit(`${pad}  return ${acc};\n`);
       this.b.emit(`${pad}})()`);
     });
   }
@@ -3591,10 +3597,12 @@ class Emitter {
             this.b.emit(' catch ');
             this.returnBlock(body, ind);
           } else if (Emitter.isPattern(binding)) {
-            this.b.emit(' catch (error) {\n');
+            const param = this.patternNames(binding, [], true).includes('error')
+              ? this.loopTempName('_err') : 'error';
+            this.b.emit(` catch (${param}) {\n`);
             this.b.emit('  '.repeat(ind + 1) + '(');
             this.mark(part, 'binding', () => this.withPattern(() => this.expr(binding)));
-            this.b.emit(' = error);\n');
+            this.b.emit(` = ${param});\n`);
             const stmts = this.branchLive(body);
             this.emitTsTypeDecls(isBlock(body) ? body.slice(1) : [body[0]], '  '.repeat(ind + 1));
             stmts.forEach((stmt, i) => {
@@ -3643,12 +3651,17 @@ class Emitter {
         this.b.emit(`${pad}}`);
       } else {
         // Subjectless switch lowers to an if/else chain with returns
-        // (value context).
+        // (value context); a multi-condition `when` ORs every test,
+        // exactly like the statement-position chain.
         cases.forEach((when, i) => {
           const [, conditions, body] = when;
           if (i > 0) this.b.emit(' else ');
           this.b.emit('if ((');
-          this.expr(Array.isArray(conditions) ? conditions[0] : conditions);
+          const conds = Array.isArray(conditions) ? conditions : [conditions];
+          conds.forEach((c, k) => {
+            if (k > 0) this.b.emit(') || (');
+            this.expr(c);
+          });
           this.b.emit(')) ');
           this.returnBlock(body, ind);
         });
@@ -3705,7 +3718,8 @@ class Emitter {
     const p1 = '  '.repeat(ind + 1);
     this.rejectYieldInIIFE(node);
     this.b.emit(Emitter.containsAwait(node) ? 'await (async () => {\n' : '(() => {\n');
-    this.b.emit(`${p1}const result = [];\n`);
+    const acc = this.loopTempName('result');
+    this.b.emit(`${p1}const ${acc} = [];\n`);
     this.b.emit(p1);
     this.mark(node, '$self', () => {
       const { body, guard, setups } = this.loopHeader(node);
@@ -3724,19 +3738,19 @@ class Emitter {
         this.b.emit('if (!(');
         this.expr(guard);
         this.b.emit(')) continue;\n');
-        this.accumulateBody(body, ind + 1, 'result');
+        this.accumulateBody(body, ind + 1, acc);
       } else if (guard !== null) {
         this.b.emit(p2);
         this.guardOpen(guard);
-        this.accumulateBody(body, ind + 2, 'result');
+        this.accumulateBody(body, ind + 2, acc);
         this.b.emit(`${p2}}\n`);
       } else {
-        this.accumulateBody(body, ind + 1, 'result');
+        this.accumulateBody(body, ind + 1, acc);
       }
       this.b.emit(`${p1}}`);
     });
     this.b.emit('\n');
-    this.b.emit(`${p1}return result;\n`);
+    this.b.emit(`${p1}return ${acc};\n`);
     this.b.emit('  '.repeat(ind) + '})()');
   }
 
@@ -3806,7 +3820,8 @@ class Emitter {
 
   returnifyLoopCore(node, ind) {
     const pad = '  '.repeat(ind);
-    this.b.emit(`const _result = [];\n`);
+    const acc = this.loopTempName('_result');
+    this.b.emit(`const ${acc} = [];\n`);
     this.b.emit(pad);
     this.mark(node, '$self', () => {
       const { body, guard, setups } = this.loopHeader(node);
@@ -3820,15 +3835,15 @@ class Emitter {
       if (guard !== null) {
         this.b.emit(p1);
         this.guardOpen(guard);
-        this.accumulateBody(body, ind + 1, '_result');
+        this.accumulateBody(body, ind + 1, acc);
         this.b.emit(`${p1}}\n`);
       } else {
-        this.accumulateBody(body, ind, '_result');
+        this.accumulateBody(body, ind, acc);
       }
       this.b.emit(`${pad}}`);
     });
     this.b.emit('\n');
-    this.b.emit(`${pad}return _result;`);
+    this.b.emit(`${pad}return ${acc};`);
   }
 
   ifChain(node, ind) {
@@ -9203,6 +9218,16 @@ class Emitter {
         this.operand(node, 'left', a);
         this.b.emit(' in ');
         this.operand(node, 'right', b);
+      } else if (isNode(b)) {
+        // A CONSTRUCTED container (a call, a member read, a literal
+        // list) may carry side effects or getters — the inline
+        // dispatch would evaluate it more than once, so the helper
+        // call evaluates each operand exactly once.
+        this.b.emit(Emitter.MEMBER_IN + '(');
+        this.mark(node, 'left', () => this.expr(a));
+        this.b.emit(', ');
+        this.mark(node, 'right', () => this.expr(b));
+        this.b.emit(')');
       } else {
         this.b.emit('Array.isArray(');
         this.expr(b);
@@ -9358,6 +9383,12 @@ class Emitter {
   // emitted output is self-contained, no shared helper block). Coerces both
   // operands once and normalizes the sign to the divisor's.
   static MODULO = '((n, d) => { n = +n; d = +d; return (n % d + d) % d; })';
+
+  // Membership dispatch as a call, for containers whose evaluation
+  // must happen exactly once (the inline ternary form re-reads the
+  // container; a plain-name container keeps it — bytes and behavior
+  // are identical there).
+  static MEMBER_IN = "((k, c) => Array.isArray(c) || typeof c === 'string' ? c.includes(k) : k in c)";
 
   // ["//", left, right] — floor division: Math.floor(left / right).
   floorDiv(node) {
