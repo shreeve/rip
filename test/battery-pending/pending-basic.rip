@@ -4,18 +4,6 @@
 
 import { test, code, fail, type } from '../support/testing.js'
 
-test 'interpolated string key', '''
-  k = "x"
-  o = {"#{k}": 42}
-  o.x
-''', 42
-
-test 'interpolated string key access', '''
-  n = "name"
-  o = {"#{n}": "Alice"}
-  o.name
-''', 'Alice'
-
 test 'compound key in class-body property', '''
     class Setting
       data-src: "default"

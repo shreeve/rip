@@ -8879,8 +8879,20 @@ class Emitter {
           // this-index key form (`{@[k]: v}`) has no valid JS emission
           // anywhere and rejects with it. Rest elements (`{...rest}`)
           // pass — their payload is a name.
-          if (pair[0] !== '...' && isNode(pair[1]) && !dynamicKey) {
+          // An INTERPOLATED string key is a computed key: the
+          // template IS the key expression (`{"#{k}": v}` → `[\`${k}\`]: v`).
+          const strKey = isNode(pair[1]) && pair[1][0] === 'str';
+          if (pair[0] !== '...' && isNode(pair[1]) && !dynamicKey && !strKey) {
             throw this.positionedError(pair, 'emitter: @-keys are only supported in class bodies', node);
+          }
+          if (pair[0] === ':' && strKey) {
+            this.mark(pair, '$self', () => {
+              this.b.emit('[');
+              this.mark(pair, 'key', () => this.strTemplate(pair[1]));
+              this.b.emit(']: ');
+              this.mark(pair, 'value', () => this.expr(pair[2]));
+            });
+            return;
           }
           this.mark(pair, '$self', () => {
             if (pair[0] === ':' && dynamicKey) {
