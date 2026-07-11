@@ -394,3 +394,23 @@ test 'compound key in class-body property', '''
   ''', ['default', 'localhost']
 
 fail 'a string is not an assignment target outside classes', '"foo" = "bar"', 'lives in a class body'
+
+test 'typed string-named field', '''
+  class S
+    "k": string = "v"
+  new S()["k"]
+  ''', 'v'
+
+test 'static string-named field', '''
+  class S
+    @"s-name" = "stat"
+  S["s-name"]
+  ''', 'stat'
+
+test 'string-named member read via @', '''
+  class W
+    m: -> @"a-b"
+  w = new W()
+  w["a-b"] = 7
+  w.m()
+  ''', 7

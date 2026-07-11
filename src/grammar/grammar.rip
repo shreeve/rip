@@ -306,6 +306,7 @@ grammar =
     # field (the TS spelling for names identifiers cannot carry); the
     # emitter rejects the shape everywhere else.
     o 'STRING = Expression'                   , '["=", 1, 3]', 'assign: operator, target, value'
+    o 'STRING TYPE[annotation] = Expression'  , '["=", 1, 4]', 'assign: operator, target, value'
     o 'Assignable = TERMINATOR Expression'    , '["=", 1, 4]', 'assign: operator, target, value'
     o 'Assignable = INDENT Expression OUTDENT', '["=", 1, 4]', 'assign: operator, target, value'
     # Typed declarations (`x: T = v`): the TYPE token (the collapsed
@@ -565,6 +566,9 @@ grammar =
 
   ThisProperty: [
     o '@ Property', '[".", "this", 2]', 'member: operator, object, property'
+    # Static string-named member: `@"data-src" = v` in a class body;
+    # anywhere else the read is this["data-src"].
+    o '@ STRING'  , '[".", "this", 2]', 'member: operator, object, property'
   ]
 
   # ============================================================================
