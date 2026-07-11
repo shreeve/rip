@@ -4,19 +4,6 @@
 
 import { test, code, fail, type } from '../support/testing.js'
 
-test 'methods accept parameters (typed and untyped) at runtime', '''
-    Money = schema :shape
-      amount!   integer
-      currency! string, 3..3
-      add: (other: Money) ->
-        Money.parse {amount: @amount + other.amount, currency: @currency}
-      scaled: (factor, label) ->
-        label + (@amount * factor)
-    a = Money.parse {amount: 100, currency: "USD"}
-    b = a.add(Money.parse {amount: 25, currency: "USD"})
-    [b.amount, a.scaled(2, "x")]
-''', [125, 'x200']
-
 test 'transaction! on: pins one adapter; other-adapter calls run outside', '''
     calls = {a: [], b: []}
     mk = (tag) ->
