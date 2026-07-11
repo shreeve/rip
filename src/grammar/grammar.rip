@@ -238,6 +238,9 @@ grammar =
     # token and a real node. The head is non-spellable: a user call
     # `dammit f` must never share its shape.
     o 'Value DAMMIT', '["dammit!", 1]', 'dammit: _, target'
+    # Tagged templates: a string against a value (`tag"x"`) or
+    # bridged by `$` (`sh $"cmd"`) calls the tag with the template.
+    o 'Value TEMPLATE_TAG String', '["tagged-template", 1, 3]', 'tagged: _, tag, str'
   ]
 
   # Atom is a grammatical POSITION, not just an alternation:

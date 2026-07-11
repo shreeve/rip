@@ -110,6 +110,9 @@ syn match  ripOperator      /!?\|??\|?\./
 " existence assignment (a ?= 5)
 syn match  ripOperator      /\.=\|\*>\|?=/
 
+" Tagged-template bridge: sh $"cmd" (the $ heads the template)
+syn match  ripOperator      /\$\ze['"]/
+
 " Arrow functions
 syn match  ripArrow         /[=-]>/
 

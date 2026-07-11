@@ -1898,6 +1898,11 @@ const ALIASES = {
   off: ['BOOL', 'false'],
 };
 
+// Value-ending token kinds that can HEAD a tagged template: a string
+// right against one of these (or bridged by `$`) is `tag\`…\``, never
+// a call argument.
+const TAGGABLE = new Set(['IDENTIFIER', 'PROPERTY', ')', 'CALL_END', ']', 'INDEX_END']);
+
 // Four- through two-character operators, longest match first ('...'
 // range dots before '..'; '..' before '.'; '>>>' before '>>').
 const OPS4 = { '>>>=': 'COMPOUND_ASSIGN' };
@@ -2684,6 +2689,20 @@ export function tokenize(text, path = '<anonymous>') {
       continue;
     }
 
+    // `$` bridging a value to a string spells a tagged template with
+    // the space before the tag intact: `sh $"cmd"` → sh`cmd`. The `$`
+    // is the TEMPLATE_TAG token (its span, one character). A `$`
+    // anywhere else stays an identifier — claimed here because the
+    // identifier scanner would otherwise take the `$` as a name.
+    if (ch === '$' && (text[pos + 1] === '"' || text[pos + 1] === "'")) {
+      const prevTok = tokens[tokens.length - 1];
+      if (prevTok && TAGGABLE.has(prevTok.kind)) {
+        push('TEMPLATE_TAG', '$', pos, pos + 1);
+        pos += 1;
+        continue;
+      }
+    }
+
     // ── Identifiers, keywords, properties ──
     if (IDENT_START.test(ch)) {
       const start = pos;
@@ -2828,6 +2847,15 @@ export function tokenize(text, path = '<anonymous>') {
     // indentation from every line, drop the newline after
     // the opener and the one before the closer; spans stay raw.
     if (ch === '"' || ch === "'") {
+      // A string RIGHT AGAINST a value token (no gap) is a tagged
+      // template: `tag"x"`, `obj.fn"x"`, `f(1)"x"`. The zero-width
+      // TEMPLATE_TAG marks the boundary; a SPACED string keeps its
+      // implicit-call reading (`tag "x"` → tag("x")). The tight
+      // spelling was a parse error before this claim.
+      const prevTok = tokens[tokens.length - 1];
+      if (prevTok && TAGGABLE.has(prevTok.kind) && prevTok.end === pos) {
+        push('TEMPLATE_TAG', '$', pos, pos);
+      }
       const delim = text.startsWith(ch.repeat(3), pos) ? ch.repeat(3) : ch;
       const start = pos;
       pos += delim.length;

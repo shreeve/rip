@@ -5,6 +5,13 @@ repository's pull requests.
 
 ## Unreleased
 
+- Tagged templates: a string right against a value (`tag"x"`,
+  `obj.fn"x"`, `f(1)"x"`) or bridged by `$` (`sh $"cmd #{c}"`) calls
+  the tag with the template — `tag\`x\``, raw strings preserved,
+  interpolation carried through. A SPACED string keeps its
+  implicit-call reading (`tag "x"` → `tag("x")`). All three editor
+  grammars highlight the `$` bridge (#47)
+
 - The pending lane reads like the battery it feeds: blank line
   between rows, `'''` heredocs for multi-line sources and expected
   code, single-quoted one-liners — regenerated mechanically and

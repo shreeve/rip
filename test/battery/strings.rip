@@ -527,3 +527,65 @@ test "a source-escaped dollar-brace stays literal beside a live interpolation", 
   x = 1
   "lit \\${x} and #{x}"
 ''', 'lit ${x} and 1'
+
+# ==============================================================================
+# Tagged Templates — a string against a value (tag"x") or bridged by $ (sh $"cmd")
+# ==============================================================================
+
+test 'tagged template', '''
+  tag = (strings, ...values) -> strings[0]
+  tag"hello"
+''', 'hello'
+
+test 'tagged template with interpolation', '''
+  tag = (strings, ...values) -> values[0]
+  x = 42
+  tag"value: #{x}"
+''', 42
+
+code '$ tagged template basic', 'sh $"hello"', 'sh`hello`'
+
+code '$ tagged template interpolation', 'x = sh $"hello #{name}"', '''
+  let x;
+
+  x = sh`hello ${name}`;
+'''
+
+code '$ tagged template single-quote', 'sh $\'hello\'', 'sh`hello`'
+
+test '$ tagged template receives strings', '''
+  tag = (strings, ...values) -> strings[0]
+  tag $"hello"
+''', 'hello'
+
+test '$ tagged template receives values', '''
+  tag = (strings, ...values) -> values[0]
+  x = 42
+  tag $"val: #{x}"
+''', 42
+
+test '$ tagged template multiple values', '''
+  tag = (strings, ...values) -> values.length
+  a = 1
+  b = 2
+  tag $"#{a} and #{b}"
+''', 2
+
+test '$ tagged template strings array', '''
+  tag = (strings, ...values) -> strings.length
+  x = 1
+  tag $"a #{x} b"
+''', 2
+
+test '$ tagged template no interpolation', '''
+  tag = (strings, ...values) -> strings[0]
+  tag $"static"
+''', 'static'
+
+test 'tagged template on a member', 'obj = {t: (s) -> s[0]}\nobj.t"m"', 'm'
+
+test 'tagged template on a call result', 'mk = -> (s) -> s[0]\nmk()"z"', 'z'
+
+test 'tagged template raw preserves escapes', 'tag = (s) -> s.raw[0]\ntag"a\\nb"', 'a\\nb'
+
+test 'a SPACED string stays an implicit call', 'f = (x) -> x\nf "spaced"', 'spaced'
