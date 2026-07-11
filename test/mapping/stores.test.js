@@ -3,11 +3,11 @@
 import { describe, test, expect } from 'bun:test';
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
-import parser from '../src/parser.js';
-import { makeParserLexer } from '../src/lexer.js';
-import { Stores } from '../src/stores.js';
-import { expectLinearDoubling, expectLinearOpsDoubling } from './support/scaling.js';
-import { describeExtended } from './support/extended.js';
+import parser from '../../src/parser.js';
+import { makeParserLexer } from '../../src/lexer.js';
+import { Stores } from '../../src/stores.js';
+import { expectLinearDoubling, expectLinearOpsDoubling } from '../support/scaling.js';
+import { describeExtended } from '../support/extended.js';
 
 parser.lexer = makeParserLexer();
 
@@ -235,7 +235,7 @@ describeExtended('parse scaling', () => {
     // still splicing per body (plus a whole-tail slice per body) —
     // quadratic that only arrow-heavy input triggers. Every insertion
     // pass ships a gate that actually TRIGGERS its insertions.
-    const { tokenize } = await import('../src/lexer.js');
+    const { tokenize } = await import('../../src/lexer.js');
     expectLinearOpsDoubling({
       prepare: (n) => Array.from({ length: n }, (_, i) => `f${i} = -> ${i}`).join('\n'),
       run: (src) => tokenize(src),
@@ -248,7 +248,7 @@ describeExtended('parse scaling', () => {
     // implicit-call gate below triggers zero object insertions, so it
     // cannot see a quadratic implicitObjects. Each statement is an
     // object-in-call (four generated tokens: { } CALL_START CALL_END).
-    const { tokenize } = await import('../src/lexer.js');
+    const { tokenize } = await import('../../src/lexer.js');
     expectLinearOpsDoubling({
       prepare: (n) => Array.from({ length: n }, (_, i) => `f a: ${i}, b: ${i}`).join('\n'),
       run: (src) => tokenize(src),
@@ -261,7 +261,7 @@ describeExtended('parse scaling', () => {
     // bracket-interior INDENT/OUTDENT synthesis, closer auto-outdents,
     // and trailing-TERMINATOR drops all trigger on each one. A gate
     // blind to bracket-interior layout cannot protect it.
-    const { tokenize } = await import('../src/lexer.js');
+    const { tokenize } = await import('../../src/lexer.js');
     expectLinearOpsDoubling({
       prepare: (n) => Array.from({ length: n }, (_, i) => `a${i} = [\n  ${i}\n  {k: ${i}}\n]`).join('\n'),
       run: (src) => tokenize(src),
@@ -275,7 +275,7 @@ describeExtended('parse scaling', () => {
     // a cast per line (collection runs, claims, splices) — so a
     // quadratic collapse or backscan cannot hide behind type-free
     // input (the scaling-gate policy).
-    const { tokenize } = await import('../src/lexer.js');
+    const { tokenize } = await import('../../src/lexer.js');
     expectLinearOpsDoubling({
       prepare: (n) => Array.from({ length: n }, (_, i) =>
         `v${i}: Map<string, number> = m${i} as T\nf${i} = (a: number, b: string = "s") -> a`).join('\n'),
@@ -290,7 +290,7 @@ describeExtended('parse scaling', () => {
     // typed class field. Bare object-key lines that DON'T claim ride
     // along — the assigned-later index must answer them without
     // rescanning the tape.
-    const { tokenize } = await import('../src/lexer.js');
+    const { tokenize } = await import('../../src/lexer.js');
     expectLinearOpsDoubling({
       prepare: (n) => Array.from({ length: n }, (_, i) => [
         `type T${i} = Map<string, number>`,
@@ -309,7 +309,7 @@ describeExtended('parse scaling', () => {
     // line-end consults the tail classifier. The scanner's type-body
     // floor answers each in O(1) — the walk-back it replaces was
     // O(line-index) each, quadratic per body.
-    const { tokenize } = await import('../src/lexer.js');
+    const { tokenize } = await import('../../src/lexer.js');
     expectLinearOpsDoubling({
       prepare: (n) => 'type R =\n' + Array.from({ length: n }, () => '  | Err<E>').join('\n') + '\ny = 2',
       run: (src) => tokenize(src),
@@ -321,7 +321,7 @@ describeExtended('parse scaling', () => {
     // The sibling-run decision must walk each run ONCE (memoized per
     // colon): n adjacent forwards with n tail assignments would be
     // quadratic if every member re-walked the run.
-    const { tokenize } = await import('../src/lexer.js');
+    const { tokenize } = await import('../../src/lexer.js');
     expectLinearOpsDoubling({
       prepare: (n) => {
         const decls = Array.from({ length: n }, (_, i) => `r${i}: number`).join('\n');
@@ -340,7 +340,7 @@ describeExtended('parse scaling', () => {
     // never blocks the claim). A per-candidate forward scan is
     // O(block) each — quadratic; the per-block assignment index
     // answers each candidate in O(1).
-    const { tokenize } = await import('../src/lexer.js');
+    const { tokenize } = await import('../../src/lexer.js');
     expectLinearOpsDoubling({
       prepare: (n) => {
         const decls = Array.from({ length: n }, (_, i) => `r${i}: number\nsep${i} = 0`).join('\n');
@@ -357,7 +357,7 @@ describeExtended('parse scaling', () => {
     // cannot see a quadratic insertion pass. This input makes every
     // statement an implicit call — two generated tokens each, O(n)
     // insertions total.
-    const { tokenize } = await import('../src/lexer.js');
+    const { tokenize } = await import('../../src/lexer.js');
     expectLinearOpsDoubling({
       prepare: (n) => Array.from({ length: n }, (_, i) => `f x${i}`).join('\n'),
       run: (src) => tokenize(src),
@@ -373,7 +373,7 @@ describeExtended('parse scaling', () => {
     // once and answers each line in O(1). Both recorded shapes gate:
     // the parse-rejected `foo a<b>` lines and the LEGAL multi-line
     // comparison chain.
-    const { tokenize } = await import('../src/lexer.js');
+    const { tokenize } = await import('../../src/lexer.js');
     expectLinearOpsDoubling({
       prepare: (n) => Array.from({ length: n }, () => 'foo a<b>').join('\n'),
       run: (src) => tokenize(src),
@@ -392,7 +392,7 @@ describeExtended('parse scaling', () => {
     // O(1) — a per-pick forward matching walk re-reads every nested
     // body and is quadratic exactly here (~135x linear cost at depth
     // 2000 when this gate landed).
-    const { tokenize } = await import('../src/lexer.js');
+    const { tokenize } = await import('../../src/lexer.js');
     expectLinearOpsDoubling({
       prepare: (n) => 'x = ' + 'o.{a = '.repeat(n) + '1' + '}'.repeat(n),
       run: (src) => tokenize(src),
@@ -405,7 +405,7 @@ describeExtended('parse scaling', () => {
     // is a schema declaration, so the pass parses and replaces O(n)
     // regions. The pass rebuilds the tape ONCE (a splice per schema
     // would be quadratic exactly here).
-    const { tokenize } = await import('../src/lexer.js');
+    const { tokenize } = await import('../../src/lexer.js');
     expectLinearOpsDoubling({
       prepare: (n) => Array.from({ length: n }, (_, i) => `S${i} = schema :shape\n  a! string, 2..9\n  b? integer`).join('\n'),
       run: (src) => tokenize(src),
@@ -416,7 +416,7 @@ describeExtended('parse scaling', () => {
 
 describeExtended('emission scaling', () => {
   test('emit time grows roughly linearly with input size', async () => {
-    const { emit } = await import('../src/emitter.js');
+    const { emit } = await import('../../src/emitter.js');
     // Sizes matter: per-mark flattening of the growing output buffer only
     // shows its quadratic clearly at large N (triple-ratio ~5 first
     // appears above ~3k lines). 9k → 27k separates cleanly: linear ~3x,
@@ -442,7 +442,7 @@ describeExtended('emission scaling', () => {
   // generated byte once. Both paths need pinning: a gate blind to
   // either cannot protect it.
   test('S6 count gate: deep-chain emit walk stays linear per doubling, every chain shape', async () => {
-    const { emit } = await import('../src/emitter.js');
+    const { emit } = await import('../../src/emitter.js');
     const links = (n, sep) => 'x = ' + Array.from({ length: n + 1 }, (_, i) => `a${i}`).join(sep);
     const shapes = [
       (n) => links(n, ' + '),
@@ -463,7 +463,7 @@ describeExtended('emission scaling', () => {
   });
 
   test('S6 wall-clock gate: deep member-spine emit stays linear', async () => {
-    const { emit } = await import('../src/emitter.js');
+    const { emit } = await import('../../src/emitter.js');
     // The member spine is the shape the count gate alone cannot fully
     // protect: a regression to whole-region string building (join,
     // slice) spends its time in builtins the counters never see.
@@ -490,7 +490,7 @@ describe('CodeBuilder mark-span protocol', () => {
     // exactness check's length gate reads the span's nominal width,
     // which is equivalent to slicing only in-range. Rule 5: fail with
     // an identifying error instead of silently comparing over a clamp.
-    const { CodeBuilder } = await import('../src/builder.js');
+    const { CodeBuilder } = await import('../../src/builder.js');
     const stores = { node: () => ({ sourceStart: 0, sourceEnd: 1 }) };
     const b = new CodeBuilder(stores, { source: '' });
     b.beginMark(1, '$self');
@@ -501,7 +501,7 @@ describe('CodeBuilder mark-span protocol', () => {
 });
 
 describe('§4.6 invariants over the corpus', () => {
-  const corpusDir = join(import.meta.dir, 'corpus');
+  const corpusDir = join(import.meta.dir, '../corpus');
   const files = readdirSync(corpusDir).filter(f => f.endsWith('.rip')).sort();
 
   for (const file of files) {
@@ -514,7 +514,7 @@ describe('§4.6 invariants over the corpus', () => {
       // edges land inside a STRING token's raw extent are exempt from the
       // no-whitespace-edges check (an interpolation chunk legitimately
       // starts at a newline).
-      const { tokenize } = require('../src/lexer.js');
+      const { tokenize } = require('../../src/lexer.js');
       const stringRanges = tokenize(src).tokens
         .filter(t => t.kind === 'STRING' || t.kind === 'STRING_START' || t.kind === 'STRING_END')
         .map(t => [t.start, t.end]);

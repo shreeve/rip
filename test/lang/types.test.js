@@ -12,10 +12,10 @@
 // correct, with the divergences pinned against a pinned defect–#51.
 import { describe, test, expect } from 'bun:test';
 import { join, resolve } from 'path';
-import parser from '../src/parser.js';
-import { makeParserLexer, tokenize } from '../src/lexer.js';
-import { emit } from '../src/emitter.js';
-import { Stores, Mappings } from '../src/stores.js';
+import parser from '../../src/parser.js';
+import { makeParserLexer, tokenize } from '../../src/lexer.js';
+import { emit } from '../../src/emitter.js';
+import { Stores, Mappings } from '../../src/stores.js';
 
 parser.lexer = makeParserLexer();
 

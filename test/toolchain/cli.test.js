@@ -10,11 +10,11 @@ import { spawnSync } from 'child_process';
 import { join, resolve } from 'path';
 import { tmpdir } from 'os';
 import { pathToFileURL } from 'url';
-import { compile, CompileError } from '../src/compile.js';
-import { decodeMappings } from '../src/sourcemap.js';
-import { registerModuleMap, remapStack } from '../src/stackmap.js';
+import { compile, CompileError } from '../../src/compile.js';
+import { decodeMappings } from '../../src/sourcemap.js';
+import { registerModuleMap, remapStack } from '../../src/stackmap.js';
 
-const BIN = resolve(import.meta.dir, '../bin/rip');
+const BIN = resolve(import.meta.dir, '../../bin/rip');
 
 let dir;
 beforeAll(() => { dir = mkdtempSync(join(tmpdir(), 'rip-cli-')); });

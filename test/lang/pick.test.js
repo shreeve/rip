@@ -6,10 +6,10 @@
 // divergence classes pinned (a pinned defect assignment targets,
 // #96 IIFE-crossing await/yield defaults).
 import { test, expect } from 'bun:test';
-import parser from '../src/parser.js';
-import { tokenize, makeParserLexer } from '../src/lexer.js';
-import { emit } from '../src/emitter.js';
-import { compile } from '../src/compile.js';
+import parser from '../../src/parser.js';
+import { tokenize, makeParserLexer } from '../../src/lexer.js';
+import { emit } from '../../src/emitter.js';
+import { compile } from '../../src/compile.js';
 
 parser.lexer = makeParserLexer();
 

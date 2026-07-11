@@ -8,14 +8,14 @@
 import { describe, test, expect } from 'bun:test';
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
-import parser from '../src/parser.js';
-import { makeParserLexer } from '../src/lexer.js';
-import { emit } from '../src/emitter.js';
-import { toSourceMap } from '../src/sourcemap.js';
+import parser from '../../src/parser.js';
+import { makeParserLexer } from '../../src/lexer.js';
+import { emit } from '../../src/emitter.js';
+import { toSourceMap } from '../../src/sourcemap.js';
 
 parser.lexer = makeParserLexer();
 
-const corpusDir = join(import.meta.dir, 'corpus');
+const corpusDir = join(import.meta.dir, '../corpus');
 const expectedDir = join(corpusDir, 'expected');
 const files = readdirSync(corpusDir).filter((f) => f.endsWith('.rip')).sort();
 

@@ -4,10 +4,10 @@
 import { test, expect } from 'bun:test';
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
-import parser from '../src/parser.js';
-import { makeParserLexer } from '../src/lexer.js';
-import { emit } from '../src/emitter.js';
-import { Stores, Mappings } from '../src/stores.js';
+import parser from '../../src/parser.js';
+import { makeParserLexer } from '../../src/lexer.js';
+import { emit } from '../../src/emitter.js';
+import { Stores, Mappings } from '../../src/stores.js';
 
 parser.lexer = makeParserLexer();
 
@@ -41,6 +41,6 @@ const expectLetEqual = (v4code, v3code) => {
   expect(letNorm(v4code)).toBe(letNorm(v3code));
 };
 
-const corpusDir = join(import.meta.dir, 'corpus');
+const corpusDir = join(import.meta.dir, '../corpus');
 const corpusFiles = readdirSync(corpusDir).filter(f => f.endsWith('.rip')).sort();
 

@@ -13,11 +13,11 @@ import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, resolve } from 'path';
 import { spawnSync } from 'child_process';
-import parser from '../src/parser.js';
-import { makeParserLexer, tokenize } from '../src/lexer.js';
-import { emit, stripFace } from '../src/emitter.js';
-import { compile as fullCompile } from '../src/compile.js';
-import { Stores, Mappings } from '../src/stores.js';
+import parser from '../../src/parser.js';
+import { makeParserLexer, tokenize } from '../../src/lexer.js';
+import { emit, stripFace } from '../../src/emitter.js';
+import { compile as fullCompile } from '../../src/compile.js';
+import { Stores, Mappings } from '../../src/stores.js';
 
 parser.lexer = makeParserLexer();
 
@@ -49,7 +49,7 @@ const unplaced = (code) => code
 // The runtime module, imported ONCE for eval-tier tests (its sentinel
 // permits exactly one copy per process; the standalone-copy tests run
 // in subprocesses).
-const rt = await import('../src/runtime/schema.js');
+const rt = await import('../../src/runtime/schema.js');
 const { __schema, SchemaError, __SchemaRegistry, registerCoercer } = rt;
 
 // Compile with delivery 'none' and evaluate against the imported

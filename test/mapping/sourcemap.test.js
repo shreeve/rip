@@ -5,12 +5,12 @@
 import { test, expect } from 'bun:test';
 import { readdirSync, readFileSync } from 'fs';
 import { join, resolve } from 'path';
-import parser from '../src/parser.js';
-import { makeParserLexer } from '../src/lexer.js';
-import { emit } from '../src/emitter.js';
-import { Mappings } from '../src/stores.js';
-import { SourceFile } from '../src/source.js';
-import { encodeVLQ, decodeMappings, toSourceMap, createLookup } from '../src/sourcemap.js';
+import parser from '../../src/parser.js';
+import { makeParserLexer } from '../../src/lexer.js';
+import { emit } from '../../src/emitter.js';
+import { Mappings } from '../../src/stores.js';
+import { SourceFile } from '../../src/source.js';
+import { encodeVLQ, decodeMappings, toSourceMap, createLookup } from '../../src/sourcemap.js';
 
 parser.lexer = makeParserLexer();
 
@@ -26,6 +26,6 @@ const compile = (src) => {
   };
 };
 
-const corpusDir = join(import.meta.dir, 'corpus');
+const corpusDir = join(import.meta.dir, '../corpus');
 const corpusFiles = readdirSync(corpusDir).filter(f => f.endsWith('.rip')).sort();
 

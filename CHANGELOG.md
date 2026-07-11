@@ -5,6 +5,10 @@ repository's pull requests.
 
 ## Unreleased
 
+- Group the test suite by layer: lang/, mapping/, schema/, and
+  toolchain/ directories under test/, with corpus/, battery/, and
+  support/ unchanged and the battery runner beside its rows (#9)
+
 - Run the extended tier in CI: TypeScript installs as a pinned external
   tool and `bun run test:all` arms the extended and tsc-gated checks —
   the meta-gate that requires this in CI now passes by construction (#8)

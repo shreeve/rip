@@ -18,9 +18,9 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 
-const rt4 = await import('../src/runtime/schema.js');
-const orm4 = await import('../src/runtime/schema-orm.js');
-const mig = await import('../src/migrate.js');
+const rt4 = await import('../../src/runtime/schema.js');
+const orm4 = await import('../../src/runtime/schema-orm.js');
+const mig = await import('../../src/migrate.js');
 
 // ── kits: one uniform handle per runtime ─────────────────────────────
 
@@ -932,7 +932,7 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
 
 describe('migrate: the CLI-only boundary — no migration bytes in delivered output', () => {
   test('an inline model program carries the CLI-pointing stubs and NONE of the differ/runner', async () => {
-    const { compile } = await import('../src/compile.js');
+    const { compile } = await import('../../src/compile.js');
     const { code } = compile('export User = schema :model\n  name! string\n', { path: 'm.rip', runtimeDelivery: 'inline' });
     expect(code).toContain('__schemaMigrationStub');
     expect(code).toContain('CLI-only');

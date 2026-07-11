@@ -18,11 +18,11 @@
 //   bun scripts/fuzz-tsface.mjs <seed>
 // to print the program, its face, and the recorded regions.
 import { describe, test, expect } from 'bun:test';
-import { compile } from '../src/compile.js';
-import { stripFace } from '../src/emitter.js';
-import { describeExtended, EXTENDED } from './support/extended.js';
-import { tscBatch } from './support/tscbatch.js';
-import { generateProgram, CONSTRUCT_KINDS } from '../scripts/fuzz-tsface.mjs';
+import { compile } from '../../src/compile.js';
+import { stripFace } from '../../src/emitter.js';
+import { describeExtended, EXTENDED } from '../support/extended.js';
+import { tscBatch } from '../support/tscbatch.js';
+import { generateProgram, CONSTRUCT_KINDS } from '../../scripts/fuzz-tsface.mjs';
 
 const TSC = process.env.RIP_TSC ?? Bun.which('tsc');
 const TSC_TIMEOUT = 60_000;

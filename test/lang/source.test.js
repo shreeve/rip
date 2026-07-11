@@ -1,7 +1,7 @@
 // SourceFile: lineStarts construction and lazy offset↔line/col conversion.
 // Spans are UTF-16 code units, so astral-plane characters count as 2.
 import { describe, test, expect } from 'bun:test';
-import { SourceFile } from '../src/source.js';
+import { SourceFile } from '../../src/source.js';
 
 describe('SourceFile', () => {
   test('lineStarts for multi-line text', () => {

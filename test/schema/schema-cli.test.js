@@ -13,7 +13,7 @@ import { spawnSync } from 'child_process';
 import { join, resolve } from 'path';
 import { tmpdir } from 'os';
 
-const BIN = resolve(import.meta.dir, '../bin/rip');
+const BIN = resolve(import.meta.dir, '../../bin/rip');
 
 // RIP_DB_URL in the ambient environment would defeat the
 // unconfigured-adapter pin (and configure nothing real anywhere
