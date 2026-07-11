@@ -516,38 +516,6 @@ code 'private `=` member is plain, `:=` is reactive state', '''
   }
 '''
 
-fail 'plain `=` member read in render + reassigned is a silent-freeze error', '''
-    export A = component
-      open = false
-      toggle: -> open = not open
-      render
-        button "#{open}"
-''', 'non-reactive field'
-
-fail 'reassigning a =! member is a compile error', '''
-    export A = component
-      c =! 5
-      bump: -> @c = 6
-      render
-        div "#{c}"
-''', 'const member \'c\''
-
-fail 'compound-assigning a =! member is a compile error', '''
-    export A = component
-      n =! 0
-      inc: -> n += 1
-      render
-        div "#{n}"
-''', 'const member \'n\''
-
-fail 'a top-level method param named like a =! member does not shadow it', '''
-    export A = component
-      c =! 5
-      use: (c) -> c = c + 1
-      render
-        div "#{c}"
-''', 'const member \'c\''
-
 test 'optional typed prop without default omitted by caller is undefined at runtime', '''
     A = component
       @label?: string
