@@ -254,3 +254,64 @@ test 'ruby-style new chained', '''
     get: -> @val
   Builder.new(42).get()
 ''', 42
+
+# ==============================================================================
+# Static inner classes — class @Name inside a class body is
+# static Name = class [extends P] { … }; the top-level form rejects
+# ==============================================================================
+
+test '@param works with extra statements', '''
+  class Animal
+    constructor: (@name) ->
+    speak: -> @name
+    class @Baby
+      cry: -> "waa"
+  a = new Animal('Dog')
+  [a.name, a.speak(), Animal.Baby?]
+''', ['Dog', 'Dog', true]
+
+test 'subclass @param works with extra statements', '''
+  class Base
+    constructor: (@id) ->
+  class Sub extends Base
+    constructor: (id, @label) ->
+      super(id)
+    class @Helper
+      help: -> true
+  s = new Sub(1, 'x')
+  [s.id, s.label]
+''', [1, 'x']
+
+test 'bound method works with extra statements', '''
+  class Handler
+    constructor: ->
+      @count = 0
+    onClick: => @count += 1
+    class @Util
+      noop: ->
+  h = new Handler()
+  fn = h.onClick
+  fn()
+  h.count
+''', 1
+
+test 'async method works with extra statements', '''
+  class Svc
+    fetch: -> await Promise.resolve(42)
+    class @Inner
+      noop: ->
+  do ->
+    s = new Svc()
+    await s.fetch()
+''', 42
+
+test 'static inner class extends', '''
+  class Animal
+    constructor: (@name) ->
+  class Ext
+    class @Kid extends Animal
+      who: -> @name
+  new Ext.Kid('kid').who()
+  ''', 'kid'
+
+fail 'class @Name rejects at the top level', 'class @Top\n  x: -> 1', 'STATIC member class'

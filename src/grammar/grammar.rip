@@ -847,6 +847,11 @@ grammar =
     o 'CLASS ClassName Block'                   , '["class", 2, null, 3]'      , 'class: _, name, parent, body'
     o 'CLASS ClassName EXTENDS Expression'      , '["class", 2, 4]'            , 'class: _, name, parent'
     o 'CLASS ClassName EXTENDS Expression Block', '["class", 2, 4, 5]'         , 'class: _, name, parent, body'
+    # Static inner class: `class @Baby` inside a class body becomes a
+    # static member class (`static Baby = class { … }`); anywhere
+    # else the shape rejects at emission.
+    o 'CLASS ThisProperty Block'                   , '["class", 2, null, 3]', 'class: _, name, parent, body'
+    o 'CLASS ThisProperty EXTENDS Expression Block', '["class", 2, 4, 5]'   , 'class: _, name, parent, body'
   ]
 
   # ============================================================================
