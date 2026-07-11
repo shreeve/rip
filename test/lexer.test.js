@@ -257,6 +257,14 @@ describe('collection tokens', () => {
     expect(kinds('a.b')).toEqual(['IDENTIFIER', '.', 'PROPERTY']);
   });
 
+  test("spaced 'x [0]' is an implicit call with an array-literal argument", async () => {
+    const { default: parser } = await import('../src/parser.js');
+    parser.lexer = makeParserLexer();
+    const r = parser.parse('x [0]');
+    expect(r.diagnostics).toEqual([]);
+    expect(JSON.stringify(r.sexpr)).toBe(JSON.stringify(['program', ['x', ['array', '0']]]));
+  });
+
   test('mismatched closers fail loudly', () => {
     expect(() => tokenize('a = 1]')).toThrow(/unmatched/);
     expect(() => tokenize('a = 1}')).toThrow(/unmatched/);
