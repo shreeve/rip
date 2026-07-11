@@ -1533,6 +1533,9 @@ class Emitter {
         }
         return;
       }
+      // The match operator writes the generated last-match binding —
+      // `_` declares at the scope like any assigned name.
+      if (n[0] === '=~' && n.length === 3) add('_', n);
       if ((ASSIGNS.has(n[0]) || n[0] === '*>') && n.length === 3) {
         // Merge assignment DECLARES a plain-name target: its `??= {}`
         // initializes a nullish binding, so first use is legal.
@@ -4557,6 +4560,7 @@ class Emitter {
     if (head === '//' && node.length === 3) return this.floorDiv(node);
     if (head === '%%' && node.length === 3) return this.modulo(node);
     if (head === '//=' && node.length === 3) return this.floorDivAssign(node);
+    if (head === '=~' && node.length === 3) return this.matchOp(node);
     if ((head === '.=' || head === '*>') && node.length === 3) {
       throw this.positionedError(node, `emitter: ${head} is a statement — its target is spelled twice (write + read), which has no single-expression form`);
     }
@@ -10219,6 +10223,27 @@ class Emitter {
     });
   }
 
+  // ["=~", left, right] — the match operator: `text =~ /re/` emits
+  // `(_ = toMatchable(text).match(/re/))` — the match array or null,
+  // with `_` (the last-match binding, hoisted at the scope) holding
+  // it for later reads (`_[1]`). A literal /m flag allows multi-line
+  // receivers. Deliberately NON-chaining: `a =~ b =~ c` would match
+  // the first RESULT against the second pattern — reject loudly.
+  matchOp(node) {
+    if (isNode(node[1]) && node[1][0] === '=~' && !node[1].parenthesized) {
+      throw this.positionedError(node, 'emitter: `=~` does not chain — `a =~ b =~ c` would match the first match RESULT against the second pattern (parenthesize: `(a =~ b) =~ c`, or split the matches)');
+    }
+    const r = node[2];
+    const multiline = typeof r === 'string' && /^\/(?:[^\\/]|\\.)*\/[a-z]*m[a-z]*$/.test(r);
+    this.mark(node, '$self', () => {
+      this.b.emit('(_ = toMatchable(');
+      this.mark(node, 'left', () => this.expr(node[1]));
+      this.b.emit(multiline ? ', true).match(' : ').match(');
+      this.mark(node, 'right', () => this.expr(r));
+      this.b.emit('))');
+    });
+  }
+
   // ["%%", left, right] — true modulo (result carries the divisor's sign).
   modulo(node) {
     this.mark(node, '$self', () => {
@@ -10507,7 +10532,7 @@ const RUNTIME_TABLE = [
     // types without inferring through the IIFE.
     key: 'stdlib',
     names: ['abort', 'assert', 'exit', 'kind', 'noop', 'p', 'pp', 'pj', 'pr',
-            'raise', 'rand', 'sleep', 'todo', 'warn', 'zip'],
+            'raise', 'rand', 'sleep', 'toMatchable', 'todo', 'warn', 'zip'],
     url: new URL('./runtime/stdlib.js', import.meta.url),
     types: {
       abort: '(msg?: string) => never',
@@ -10522,6 +10547,7 @@ const RUNTIME_TABLE = [
       raise: '(a: any, b?: any) => never',
       rand: '(a?: number, b?: number) => number',
       sleep: '(ms: number) => Promise<void>',
+      toMatchable: '(v: any, allowNewlines?: boolean) => string | null',
       todo: '(msg?: string) => never',
       warn: '(...args: any[]) => void',
       zip: '(...arrays: any[][]) => any[][]',

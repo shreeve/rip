@@ -5163,3 +5163,51 @@ test 'afterRollback fires on rollback; afterCommit does not', '''
         throw new Error "x"
     events
 ''', ['BEGIN', 'stmt', 'ROLLBACK', 'afterRollback']
+
+test 'two parallel transactions use independent handles (no cross-talk)', '''
+    events = []
+    txCalls = []
+    mainCalls = []
+    resState = {res: {columns: [{name: "id"}, {name: "name"}], data: [[1, "A"]], rows: 1}}
+    adapter =
+      query: (sql, params) ->
+        mainCalls.push sql
+        events.push "main"
+        resState.res
+      begin: (opts) ->
+        events.push "BEGIN"
+        handle = {}
+        handle.query = (sql, params) ->
+          txCalls.push sql
+          events.push "stmt"
+          resState.res
+        handle.commit = -> events.push "COMMIT"
+        handle.rollback = -> events.push "ROLLBACK"
+        handle
+      capabilities: {tx: true}
+    __schemaSetAdapter adapter
+    __SchemaRegistry.reset()
+    User = schema :model
+      name! string
+    handles = []
+    adapter.begin = ->
+      box = {sqls: []}
+      handles.push box
+      handle = {}
+      handle.query = (sql, params) ->
+        box.sqls.push sql
+        resState.res
+      handle.commit = -> null
+      handle.rollback = -> null
+      handle
+    run = (a, b) ->
+      schema.transaction! ->
+        User.create! {name: a}
+        sleep! 5
+        User.create! {name: b}
+        null
+    p1 = run "A", "B"
+    p2 = run "C", "D"
+    Promise.all! [p1, p2]
+    [handles.length, handles[0].sqls.length, handles[1].sqls.length, mainCalls.length]
+''', [2, 2, 2, 0]

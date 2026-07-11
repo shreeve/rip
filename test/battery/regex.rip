@@ -1,0 +1,121 @@
+# Test: The match operator (=~) — `text =~ /re/` yields the match
+# array or null and binds `_` (the last match) for later reads.
+# Deliberately non-chaining: a bare `a =~ b =~ c` rejects.
+
+import { test, code, fail, type } from '../support/testing.js'
+
+test '=~ basic match', '''
+  text = 'hello world'
+  result = text =~ /world/
+  result[0]
+''', 'world'
+
+test '=~ capture groups', '''
+  text = 'hello world'
+  text =~ /(\\w+) (\\w+)/
+  _[1]
+''', 'hello'
+
+test '=~ multiple captures', '''
+  text = 'hello world'
+  text =~ /(\\w+) (\\w+)/
+  _[2]
+''', 'world'
+
+test '=~ no match', '''
+  text = 'hello'
+  result = text =~ /xyz/
+  result
+''', null
+
+test '=~ match at start', '''
+  text = 'hello world'
+  text =~ /^(\\w+)/
+  _[1]
+''', 'hello'
+
+test '=~ match at end', '''
+  text = 'hello world'
+  text =~ /(\\w+)$/
+  _[1]
+''', 'world'
+
+test '=~ case insensitive', '''
+  text = 'HELLO'
+  text =~ /hello/i
+  _[0]
+''', 'HELLO'
+
+test '=~ global flag', '''
+  text = 'foo bar foo'
+  text =~ /foo/g
+  _[0]
+''', 'foo'
+
+test '=~ with number', '''
+  num = 12345
+  num =~ /(\\d{3})/
+  _[1]
+''', '123'
+
+test '=~ with null', '''
+  x = null
+  result = x =~ /test/
+  result
+''', null
+
+test '=~ email parsing', '''
+  email = 'user@example.com'
+  email =~ /(.+)@(.+)/
+  _[2]
+''', 'example.com'
+
+test '=~ parenthesized chain is allowed', '''
+  s = 'true'
+  r = (s =~ /true/) =~ /true/
+  r[0]
+''', 'true'
+
+test '=~ then == checks no-match', '''
+  s = 'ab'
+  (s =~ /xyz/) == null
+''', true
+
+test 'combined =~ and _', '''
+  text = 'hello world'
+  if text =~ /(\\w+) (\\w+)/
+    _[1] + '-' + _[2]
+  else
+    'no match'
+''', 'hello-world'
+
+test 'validator phone pattern', '''
+  num = '2125551234'
+  if num =~ /^([2-9][0-8][0-9])([2-9]\\d\\d)(\\d{4})$/
+    "(#{_[1]}) #{_[2]}-#{_[3]}"
+  else
+    null
+''', '(212) 555-1234'
+
+test 'regex match null', '''
+  x = null
+  x =~ /test/
+''', null
+
+test 'regex match array', '''
+  arr = ['hello', 'world']
+  arr =~ /hello/
+  _[0]
+''', 'hello'
+
+test 'regex match boolean', '''
+  x = true
+  x =~ /true/
+  _[0]
+''', 'true'
+
+test 'ternary with match operator', '(\'ABC\' =~ /B/) ? \'found\' : \'nope\'', 'found'
+
+fail 'a bare =~ chain rejects', "s = 'x'\nr = s =~ /x/ =~ /y/", 'does not chain'
+
+code '=~ emits the coerced match', "t = 'a'\nt =~ /a/", 'let t = "a";\n\n(_ = toMatchable(t).match(/a/));'
