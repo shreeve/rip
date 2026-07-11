@@ -220,3 +220,20 @@ test "nullish assignment null", "a = null\na ?= 5\na", 5
 test "nullish assignment value", "a = 10\na ?= 5\na", 10
 test "nullish assignment keeps falsy non-nullish", "c = 0\nc ?= 9\nc", 0
 code "nullish assignment compiles to ??=", "a = 1\na ?= 5", "let a = 1;\n\na ??= 5;"
+
+# ==============================================================================
+# Middle-rest destructuring — [a, ...mid, b] binds the source once,
+# heads by index, the rest by slice, the tail from the end
+# ==============================================================================
+
+test 'array rest in middle', '[first, ...middle, last] = [1, 2, 3, 4, 5]; [first, middle, last]', [1, [2, 3, 4], 5]
+test 'array rest in middle two after', '[a, ...mid, b, c] = [1, 2, 3, 4, 5]; [a, mid, b, c]', [1, [2, 3], 4, 5]
+test 'array rest in middle empty', '[a, ...b, c] = [1, 2]; [a, b, c]', [1, [], 2]
+test 'middle rest evaluates its source once', '''
+  n = 0
+  g = -> (n += 1; [7, 8, 9])
+  [x, ...y, z] = g()
+  [x, y, z, n]
+  ''', [7, [8], 9, 1]
+
+fail 'middle rest takes plain names', '[a, ...[m], b] = xs', 'plain names'

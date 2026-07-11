@@ -2806,6 +2806,14 @@ class Emitter {
           (Emitter.returnGuard(node[2]) || Emitter.throwGuard(node[2]))) {
         return this.returnGuardStatement(node[2], node);
       }
+      // A MIDDLE-REST array pattern (`[a, ...mid, b] = src`) has no
+      // JS destructuring form — the statement lowering binds the
+      // source once and reads by index/slice.
+      if (node[0] === '=' && node.length === 3 && Emitter.middleRestPattern(node[1])) {
+        this.middleRestAssign(node, ind);
+        this.b.emit(';');
+        return;
+      }
       // Method and merge assignment are statement lowerings: the
       // target is spelled twice (write + read), and an impure member
       // target pre-binds its base on its own line.
@@ -9487,6 +9495,65 @@ class Emitter {
   // implicit return, except constructors (no implicit return; bind
   // statements insert after a leading super(...) call, first
   // otherwise).
+  // An array pattern whose rest sits BEFORE the last element:
+  // `[a, ...mid, b]` — JS forbids the shape, so it takes a statement
+  // lowering instead of the destructuring passthrough.
+  static middleRestPattern(x) {
+    if (!isNode(x) || x[0] !== 'array') return false;
+    const els = x.slice(1);
+    const at = els.findIndex((e) => isNode(e) && e[0] === '...' && e.length === 2);
+    return at !== -1 && at < els.length - 1;
+  }
+
+  // The middle-rest lowering: the source binds ONCE (pure sources
+  // spell directly), heads read by index, the rest slices between,
+  // and the tail reads from the end:
+  //   [a, ...mid, b, c] = src
+  //   → a = _ref[0]; mid = _ref.slice(1, -2); b = _ref[_ref.length - 2]; …
+  middleRestAssign(node, ind) {
+    const els = node[1].slice(1);
+    const at = els.findIndex((e) => isNode(e) && e[0] === '...' && e.length === 2);
+    const heads = els.slice(0, at);
+    const restName = els[at][1];
+    const tail = els.slice(at + 1);
+    for (const part of [...heads, restName, ...tail]) {
+      if (typeof part !== 'string') {
+        throw this.positionedError(node, 'emitter: a middle-rest pattern takes plain names (`[a, ...mid, b]`) — nested patterns have no single-read lowering');
+      }
+    }
+    this.mark(node, '$self', () => {
+      const src = node[2];
+      const ref = Emitter.pureChain(src) ? null : this.loopTempName('_ref');
+      if (ref !== null) {
+        // A scope-level const claims its name for the whole compile
+        // (unlike a for-header temp, which block-scopes per loop).
+        this.temps.used.add(ref);
+        this.b.emit(`const ${ref} = `);
+        this.mark(node, 'value', () => this.expr(src));
+        this.b.emit(`;\n${'  '.repeat(ind)}`);
+      }
+      const srcText = () => { if (ref !== null) this.b.emit(ref); else this.expr(src); };
+      const pad = () => this.b.emit(`;\n${'  '.repeat(ind)}`);
+      heads.forEach((name, i) => {
+        this.b.emit(`${name} = `);
+        srcText();
+        this.b.emit(`[${i}]`);
+        pad();
+      });
+      this.b.emit(`${restName} = `);
+      srcText();
+      this.b.emit(tail.length > 0 ? `.slice(${heads.length}, -${tail.length})` : `.slice(${heads.length})`);
+      tail.forEach((name, i) => {
+        pad();
+        this.b.emit(`${name} = `);
+        srcText();
+        this.b.emit(`[`);
+        srcText();
+        this.b.emit(`.length - ${tail.length - i}]`);
+      });
+    });
+  }
+
   // A promoted parameter's name: `@name`, typed or defaulted, at any
   // wrapper depth — null when the param is not a ThisProperty.
   static atParamName(p) {
@@ -10243,6 +10310,7 @@ class Emitter {
     }
     if (isNode(target) && (target[0] === '.' || target[0] === '[]') && target.length === 3) {
       const base = this.loopTempName('_ref');
+      this.temps.used.add(base);
       this.b.emit(`const ${base} = `);
       this.expr(target[1]);
       this.b.emit(`;\n${'  '.repeat(ind)}`);
@@ -10251,6 +10319,7 @@ class Emitter {
         let key = target[2];
         if (!(typeof key === 'string') && !Emitter.pureChain(key)) {
           const k = this.loopTempName('_key');
+          this.temps.used.add(k);
           this.b.emit(`const ${k} = `);
           this.expr(key);
           this.b.emit(`;\n${'  '.repeat(ind)}`);
