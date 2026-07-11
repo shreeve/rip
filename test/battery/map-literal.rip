@@ -56,3 +56,29 @@ test 'map with computed values', '''
 
 test 'spaced star keeps multiplication', 'x = 3 * {a: 1}\ntypeof x', 'number'
 fail 'shorthand has no Map reading', 'a = 1\nm = *{ a }', 'explicit `key: value` pairs'
+
+code 'regex key', '*{ /^NAME:/: 1 }', 'new Map([[/^NAME:/, 1]])'
+
+code 'mixed keys', '*{ /^NAME:/: [""], "CHOOSE 1": [1], 1: "one", true: "yes", null: "nothing" }', 'new Map([[/^NAME:/, [""]], ["CHOOSE 1", [1]], [1, "one"], [true, "yes"], [null, "nothing"]])'
+
+test 'regex key get', '''
+  m = *{ /^NAME:/: 'found' }
+  key = null
+  for [k, v] as m
+    key = k
+  key instanceof RegExp
+''', true
+
+test 'spread map', '''
+  extra = *{ b: 2, c: 3 }
+  m = *{ a: 1, ...extra }
+  m.size
+''', 3
+
+test 'spread entries', '''
+  entries = [["x", 10], ["y", 20]]
+  m = *{ a: 1, ...entries }
+  m.get("x") + m.get("y")
+''', 30
+
+code 'spread codegen', '*{ a: 1, ...other }', 'new Map([["a", 1], ...other])'

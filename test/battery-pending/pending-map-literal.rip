@@ -4,36 +4,10 @@
 
 import { test, code, fail, type } from '../support/testing.js'
 
-code 'regex key', '*{ /^NAME:/: 1 }', 'new Map([[/^NAME:/, 1]])'
-
-code 'mixed keys', '*{ /^NAME:/: [""], "CHOOSE 1": [1], 1: "one", true: "yes", null: "nothing" }', 'new Map([[/^NAME:/, [""]], ["CHOOSE 1", [1]], [1, "one"], [true, "yes"], [null, "nothing"]])'
-
 test 'normal object is not Map', '{ a: 1 } instanceof Map', false
-
-test 'regex key get', '''
-  m = *{ /^NAME:/: 'found' }
-  key = null
-  for [k, v] as m
-    key = k
-  key instanceof RegExp
-''', true
 
 test 'parenthetical key', '''
   fn = -> 'dynamic'
   m = *{ (fn()): 42 }
   m.get('dynamic')
 ''', 42
-
-test 'spread map', '''
-  extra = *{ b: 2, c: 3 }
-  m = *{ a: 1, ...extra }
-  m.size
-''', 3
-
-test 'spread entries', '''
-  entries = [["x", 10], ["y", 20]]
-  m = *{ a: 1, ...entries }
-  m.get("x") + m.get("y")
-''', 30
-
-code 'spread codegen', '*{ a: 1, ...other }', 'new Map([["a", 1], ...other])'

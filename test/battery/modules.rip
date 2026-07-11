@@ -177,3 +177,12 @@ code 'export class', '''
     }
   };
 '''
+
+code 'export default function', '''
+  export default def greet(name)
+    name
+''', '''
+  export default function greet(name) {
+    return name;
+  };
+'''

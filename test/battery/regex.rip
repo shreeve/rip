@@ -199,3 +199,8 @@ test 'match-index unless hit', '''
 ''', '42'
 
 fail 'a two-part index needs a regex-literal key', 'x = [1, 2]\ny = x[0, 1]', 'regex-capture form'
+
+test 'regex index out of range is nullish', '''
+  x = "test"[/test/, 5]
+  x is undefined
+  ''', true
