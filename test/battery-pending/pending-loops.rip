@@ -1,0 +1,11 @@
+# Pending rows for loops — behaviors the battery does not cover yet.
+# Every row here FAILS today; when a feature revives one, MOVE the row
+# into test/battery/ in the same change (the lane asserts still-failing).
+
+import { test, code, fail, type } from '../support/testing.js'
+
+test "loop n times", "count = 0\nloop 3\n  count++\ncount", 3
+test "loop n inline", "arr = []\nloop 5\n  arr.push arr.length\narr", [0, 1, 2, 3, 4]
+test "loop n with it as counter", "arr = []\nloop 5\n  arr.push it\narr", [0, 1, 2, 3, 4]
+code "loop n compiles to for", "loop 3\n  console.log 'hi'", "for (let it = 0; it < 3; it++) {\n  console.log('hi');\n};"
+test "loop n as value collects results", "x = loop 3\n  \"hi\"\nx", ["hi", "hi", "hi"]

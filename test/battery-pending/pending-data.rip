@@ -1,0 +1,24 @@
+# Pending rows for data — behaviors the battery does not cover yet.
+# Every row here FAILS today; when a feature revives one, MOVE the row
+# into test/battery/ in the same change (the lane asserts still-failing).
+
+import { test, code, fail, type } from '../support/testing.js'
+
+test "data marker simple", "x = DATA\nx\n__DATA__\nhello world", "hello world\n"
+test "data marker length", "DATA.length\n__DATA__\ntest", 5
+test "data marker empty", "DATA\n__DATA__", ""
+test "data marker multiline", "lines = DATA.split(\"\\n\").filter (l) -> l\nlines.length\n__DATA__\nline1\nline2\nline3", 3
+test "data marker first line", "DATA.split(\"\\n\")[0]\n__DATA__\nfirst\nsecond", "first"
+test "data marker last line", "lines = DATA.trim().split(\"\\n\")\nlines[lines.length - 1]\n__DATA__\nfirst\nsecond\nlast", "last"
+test "data marker config", "config = {}\nfor line in DATA.split(\"\\n\") when line.trim()\n  [key, val] = line.split(\"=\")\n  config[key] = val\nconfig.port\n__DATA__\nhost=localhost\nport=8080\ndebug=true", "8080"
+test "data marker csv", "rows = DATA.trim().split(\"\\n\").map (line) ->\n  line.split(\",\")\nrows[0][0]\n__DATA__\nAlice,alice@example.com\nBob,bob@example.com", "Alice"
+test "data marker template", "template = DATA\ntemplate.replace(\"{{name}}\", \"Alice\")\n__DATA__\nHello, {{name}}!", "Hello, Alice!\n"
+code "data marker compiler", "x = 42\nconsole.log DATA\n__DATA__\ntest data", "  let x;\n\n  var DATA;\n  _setDataSection();\n\n  x = 42;\n  console.log(DATA);\n\n  function _setDataSection() {\n    DATA = \"test data\\n\";\n  }"
+code "data marker hoisting", "console.log DATA\n__DATA__\nhoisted!", "  var DATA;\n  _setDataSection();\n\n  console.log(DATA);\n\n  function _setDataSection() {\n    DATA = \"hoisted!\\n\";\n  }"
+test "data marker only", "DATA\n__DATA__\njust data", "just data\n"
+test "data marker special chars", "DATA.includes(\"@\")\n__DATA__\ntest@example.com", true
+test "data marker quotes", "DATA.includes(\"'\")\n__DATA__\nIt's working!", true
+test "data marker whitespace", "DATA[0]\n__DATA__\n  indented", " "
+test "data marker users", "users = DATA.trim().split(\"\\n\").map (line) ->\n  [name, email] = line.split(\",\")\n  {name, email}\nusers[1].name\n__DATA__\nAlice,alice@example.com\nBob,bob@example.com\nCharlie,charlie@example.com", "Bob"
+test "data marker json", "obj = JSON.parse(DATA)\nobj.name\n__DATA__\n{\"name\": \"Alice\", \"age\": 30}", "Alice"
+test "data marker env parsing", "env = {}\nfor line in DATA.split(\"\\n\") when line and not line.startsWith(\"#\")\n  parts = line.split(\"=\")\n  if parts.length is 2\n    [key, val] = parts\n    env[key.trim()] = val.trim()\nenv.PORT\n__DATA__\n# Config\nHOST=localhost\nPORT=3000", "3000"

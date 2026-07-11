@@ -1,0 +1,9 @@
+# Pending rows for operators — behaviors the battery does not cover yet.
+# Every row here FAILS today; when a feature revives one, MOVE the row
+# into test/battery/ in the same change (the lane asserts still-failing).
+
+import { test, code, fail, type } from '../support/testing.js'
+
+code "literal in literal uses runtime check", "'x' in ['a', 'b']", "(Array.isArray(['a', 'b']) || typeof ['a', 'b'] === 'string' ? ['a', 'b'].includes('x') : ('x' in ['a', 'b']))"
+code "variable in literal uses runtime check", "val in ['a', 'b']", "(Array.isArray(['a', 'b']) || typeof ['a', 'b'] === 'string' ? ['a', 'b'].includes(val) : (val in ['a', 'b']))"
+test "ternary with match operator", "('ABC' =~ /B/) ? 'found' : 'nope'", "found"
