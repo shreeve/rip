@@ -9268,7 +9268,7 @@ class Emitter {
     this.b.emit('class');
     if (name != null) {
       if (typeof name !== 'string') {
-        throw this.positionedError(node, 'emitter: ThisProperty class names are not supported yet');
+        throw this.positionedError(node, 'emitter: `class @Name` is a STATIC member class — it lives inside a class body (`static Name = class`); at the top level give the class a plain name');
       }
       this.b.emit(' ');
       this.mark(node, 'name', () => this.b.emit(name));
@@ -9336,6 +9336,17 @@ class Emitter {
 
   classMember(stmt, body, ind, pad, { memberName, isStaticKey, bound }) {
     {
+      // A nested `class @Name` is a STATIC member class:
+      // `static Name = class [extends P] { … }`.
+      if (isNode(stmt) && stmt[0] === 'class' && isNode(stmt[1]) &&
+          stmt[1][0] === '.' && stmt[1][1] === 'this' && typeof stmt[1][2] === 'string') {
+        this.b.emit(pad + 'static ');
+        this.mark(stmt, 'name', () => this.b.emit(stmt[1][2]));
+        this.b.emit(' = ');
+        this.classCode(['class', null, stmt[2] ?? null, stmt[3]], ind + 1);
+        this.b.emit(';\n');
+        return;
+      }
       if (isObject(stmt)) {
         for (const pair of stmt.slice(1)) this.withTsDirectives(pair, pad, () => {
           const key = pair[1];
