@@ -2843,8 +2843,10 @@ class Emitter {
             // the handler's first statement (paren-wrapped for both
             // pattern kinds). The names hoist at the enclosing scope —
             // for BOTH kinds.
-            const param = this.patternNames(binding, [], true).includes('error')
-              ? this.loopTempName('_err') : 'error';
+            // The scaffold parameter is minted, never `error`: the
+            // handler body may READ an outer `error`, which a fixed
+            // parameter would shadow.
+            const param = this.loopTempName('_err');
             this.b.emit(` catch (${param}) {\n`);
             const pad = '  '.repeat(ind + 1);
             this.b.emit(pad + '(');
@@ -2963,12 +2965,20 @@ class Emitter {
       }
       if (isRange(iter) && step === null) {
         const [dots, from, to] = iter;
+        // The condition re-reads TO each iteration: an impure bound
+        // binds once in the init (a pure one keeps its bytes).
+        const toRef = Emitter.pureIterable(to) ? null : this.loopTempName('_ref');
         this.b.emit('for (let ');
         markVar(vars[0]);
         this.b.emit(' = ');
         this.expr(from);
+        if (toRef) {
+          this.b.emit(`, ${toRef} = `);
+          this.expr(to);
+        }
         this.b.emit(`; ${vars[0]} ${dots === '..' ? '<=' : '<'} `);
-        this.expr(to);
+        if (toRef) this.b.emit(toRef);
+        else this.expr(to);
         this.b.emit(`; ${vars[0]}++) `);
         this.guardedBlock(body, guard, ind);
       } else if (isRange(iter)) {
@@ -2992,9 +3002,16 @@ class Emitter {
         if ((posLit ?? negLit) !== null && Number((posLit ?? negLit).replace(/_/g, '')) === 0) {
           throw this.positionedError(node, 'emitter: a BY step of 0 never advances the loop');
         }
+        // An impure iterable binds ONCE in the init; every later
+        // read (bounds, element) uses the binding.
+        const it = Emitter.pureIterable(iter) ? null : this.loopTempName('_ref');
+        const bind = () => { if (it) { this.b.emit(`${it} = `); this.expr(iter); this.b.emit(', '); } };
+        const ref = () => { if (it) this.b.emit(it); else this.expr(iter); };
         if (negLit !== null) {
-          this.b.emit(`for (let ${idx} = `);
-          this.expr(iter);
+          this.b.emit('for (let ');
+          bind();
+          this.b.emit(`${idx} = `);
+          ref();
           this.b.emit(`.length - 1; ${idx} >= 0; `);
           if (negLit === '1') {
             this.mark(node, 'step', () => this.b.emit(`${idx}--`));
@@ -3007,8 +3024,10 @@ class Emitter {
             });
           }
         } else if (posLit !== null) {
-          this.b.emit(`for (let ${idx} = 0; ${idx} < `);
-          this.expr(iter);
+          this.b.emit('for (let ');
+          bind();
+          this.b.emit(`${idx} = 0; ${idx} < `);
+          ref();
           this.b.emit(`.length; `);
           if (step === '1') {
             this.mark(node, 'step', () => this.b.emit(`${idx}++`));
@@ -3022,27 +3041,36 @@ class Emitter {
           const stp = this.loopTempName('_step');
           this.b.emit(`for (let ${stp} = `);
           this.mark(node, 'step', () => this.expr(step));
-          this.b.emit(`, ${idx} = ${stp} > 0 ? 0 : `);
-          this.expr(iter);
+          this.b.emit(', ');
+          bind();
+          this.b.emit(`${idx} = ${stp} > 0 ? 0 : `);
+          ref();
           this.b.emit(`.length - 1; ${stp} > 0 ? ${idx} < `);
-          this.expr(iter);
+          ref();
           this.b.emit(`.length : ${stp} < 0 && ${idx} >= 0; ${idx} += ${stp}`);
         }
         this.b.emit(`) {\nlet `);
         markVar(vars[0]);
         this.b.emit(' = ');
-        this.expr(iter);
+        ref();
         this.b.emit(`[${idx}];\n`);
         this.flatBody(body, guard, '    ');
         this.b.emit('}');
       } else if (vars.length === 2) {
-        this.b.emit(`for (let ${vars[1]} = 0; ${vars[1]} < `);
-        this.expr(iter);
+        const it = Emitter.pureIterable(iter) ? null : this.loopTempName('_ref');
+        this.b.emit('for (let ');
+        if (it) {
+          this.b.emit(`${it} = `);
+          this.expr(iter);
+          this.b.emit(', ');
+        }
+        this.b.emit(`${vars[1]} = 0; ${vars[1]} < `);
+        if (it) this.b.emit(it); else this.expr(iter);
         this.b.emit(`.length; ${vars[1]}++) {\n`);
         this.b.emit('  '.repeat(ind + 1) + 'let ');
         markVar(vars[0]);
         this.b.emit(' = ');
-        this.expr(iter);
+        if (it) this.b.emit(it); else this.expr(iter);
         this.b.emit(`[${vars[1]}];\n`);
         if (guard !== null) {
           this.b.emit('  '.repeat(ind + 1) + 'if (');
@@ -3081,17 +3109,28 @@ class Emitter {
   forOfCore(node, vars, obj, own, guard, body, ind) {
     this.mark(node, '$self', () => {
       const markVar = (v) => this.mark(node, 'vars', () => (typeof v === 'string' ? this.b.emit(v) : this.withPattern(() => this.expr(v), true)));
+      // An impure object the own-filter or value line would re-read
+      // binds once ahead of the header.
+      const rereads = own || vars.length === 2;
+      const it = rereads && !Emitter.pureIterable(obj) ? this.loopTempName('_ref') : null;
+      if (it !== null) {
+        this.b.emit(`const ${it} = `);
+        this.mark(node, 'object', () => this.expr(obj));
+        this.b.emit(`;\n${'  '.repeat(ind)}`);
+      }
+      const ref = () => { if (it) this.b.emit(it); else this.expr(obj); };
       this.b.emit('for (let ');
       markVar(vars[0]);
       this.b.emit(' in ');
-      this.mark(node, 'object', () => this.expr(obj));
+      if (it) this.b.emit(it);
+      else this.mark(node, 'object', () => this.expr(obj));
       this.b.emit(') ');
       if (own || vars.length === 2) {
         // The hasOwn filter always emits for `own`.
         this.b.emit('{\n');
         if (own) {
           this.b.emit(`if (!Object.hasOwn(`);
-          this.expr(obj);
+          ref();
           this.b.emit(`, ${vars[0]})) continue;\n`);
         }
         if (vars.length === 2) {
@@ -3102,7 +3141,7 @@ class Emitter {
           } else {
             this.b.emit(`let ${vars[1]} = `);
           }
-          this.expr(obj);
+          ref();
           this.b.emit(`[${vars[0]}];\n`);
         }
         this.flatBody(body, guard, '');
@@ -3204,20 +3243,32 @@ class Emitter {
   // owned by the caller. `node` supplies role marks when the clause
   // belongs to an annotated loop node; comprehension clauses carry no
   // roles, so their marks fall back to plain emission.
-  clauseHeader(node, kind, vars, iter, aux) {
+  clauseHeader(node, kind, vars, iter, aux, pad = null) {
     const markVar = (v) => this.mark(node, 'vars', () => (typeof v === 'string' ? this.b.emit(v) : this.withPattern(() => this.expr(v), true)));
     const setups = [];
     if (kind === 'for-of') {
       this.checkForOfPatternKey(vars, aux === true);
+      // An impure object the own-filter or value line would re-read
+      // binds once ahead of the header (the caller's pad restores the
+      // line); a header-only read never needs it.
+      const rereads = aux === true || vars.length === 2;
+      const it = rereads && !Emitter.pureIterable(iter) ? this.loopTempName('_ref') : null;
+      if (it !== null) {
+        this.b.emit(`const ${it} = `);
+        this.mark(node, 'object', () => this.expr(iter));
+        this.b.emit(`;\n${pad ?? ''}`);
+      }
+      const ref = () => { if (it) this.b.emit(it); else this.expr(iter); };
       this.b.emit('for (let ');
       markVar(vars[0]);
       this.b.emit(' in ');
-      this.mark(node, 'object', () => this.expr(iter));
+      if (it) this.b.emit(it);
+      else this.mark(node, 'object', () => this.expr(iter));
       this.b.emit(')');
       if (aux === true) {
         setups.push(() => {
           this.b.emit('if (!Object.hasOwn(');
-          this.expr(iter);
+          ref();
           this.b.emit(`, ${vars[0]})) continue;`);
         });
       }
@@ -3230,7 +3281,7 @@ class Emitter {
           } else {
             this.b.emit(`let ${vars[1]} = `);
           }
-          this.expr(iter);
+          ref();
           this.b.emit(`[${vars[0]}];`);
         });
       }
@@ -3274,9 +3325,14 @@ class Emitter {
       if ((posLit ?? negLit) !== null && Number((posLit ?? negLit).replace(/_/g, '')) === 0) {
         throw this.positionedError(node, 'emitter: a BY step of 0 never advances the loop');
       }
+      const it = Emitter.pureIterable(iter) ? null : this.loopTempName('_ref');
+      const bind = () => { if (it) { this.b.emit(`${it} = `); this.expr(iter); this.b.emit(', '); } };
+      const ref = () => { if (it) this.b.emit(it); else this.expr(iter); };
       if (negLit !== null) {
-        this.b.emit(`for (let ${idx} = `);
-        this.expr(iter);
+        this.b.emit('for (let ');
+        bind();
+        this.b.emit(`${idx} = `);
+        ref();
         this.b.emit(`.length - 1; ${idx} >= 0; `);
         if (negLit === '1') {
           this.mark(node, 'step', () => this.b.emit(`${idx}--`));
@@ -3289,8 +3345,10 @@ class Emitter {
           });
         }
       } else if (posLit !== null) {
-        this.b.emit(`for (let ${idx} = 0; ${idx} < `);
-        this.expr(iter);
+        this.b.emit('for (let ');
+        bind();
+        this.b.emit(`${idx} = 0; ${idx} < `);
+        ref();
         this.b.emit(`.length; `);
         if (step === '1') {
           this.mark(node, 'step', () => this.b.emit(`${idx}++`));
@@ -3302,10 +3360,12 @@ class Emitter {
         const stp = this.loopTempName('_step');
         this.b.emit(`for (let ${stp} = `);
         this.mark(node, 'step', () => this.expr(step));
-        this.b.emit(`, ${idx} = ${stp} > 0 ? 0 : `);
-        this.expr(iter);
+        this.b.emit(', ');
+        bind();
+        this.b.emit(`${idx} = ${stp} > 0 ? 0 : `);
+        ref();
         this.b.emit(`.length - 1; ${stp} > 0 ? ${idx} < `);
-        this.expr(iter);
+        ref();
         this.b.emit(`.length : ${stp} < 0 && ${idx} >= 0; ${idx} += ${stp}`);
       }
       this.b.emit(')');
@@ -3313,20 +3373,27 @@ class Emitter {
         this.b.emit('let ');
         markVar(vars[0]);
         this.b.emit(' = ');
-        this.expr(iter);
+        ref();
         this.b.emit(`[${idx}];`);
       });
       return setups;
     }
     if (vars.length === 2) {
-      this.b.emit(`for (let ${vars[1]} = 0; ${vars[1]} < `);
-      this.expr(iter);
+      const it = Emitter.pureIterable(iter) ? null : this.loopTempName('_ref');
+      this.b.emit('for (let ');
+      if (it) {
+        this.b.emit(`${it} = `);
+        this.expr(iter);
+        this.b.emit(', ');
+      }
+      this.b.emit(`${vars[1]} = 0; ${vars[1]} < `);
+      if (it) this.b.emit(it); else this.expr(iter);
       this.b.emit(`.length; ${vars[1]}++)`);
       setups.push(() => {
         this.b.emit('let ');
         markVar(vars[0]);
         this.b.emit(' = ');
-        this.expr(iter);
+        if (it) this.b.emit(it); else this.expr(iter);
         this.b.emit(`[${vars[1]}];`);
       });
       return setups;
@@ -3369,7 +3436,7 @@ class Emitter {
       this.b.emit(`${pad}  const ${acc} = ${keyExpr === null ? '[]' : '{}'};\n`);
       this.b.emit(`${pad}  `);
       const [kind, vars, iter, aux] = clause;
-      const setups = this.clauseHeader(node, kind, vars, iter, aux ?? null);
+      const setups = this.clauseHeader(node, kind, vars, iter, aux ?? null, `${pad}  `);
       this.b.emit(' {\n');
       let inner = `${pad}    `;
       for (const setup of setups) {
@@ -3624,8 +3691,7 @@ class Emitter {
             this.b.emit(' catch ');
             this.returnBlock(body, ind);
           } else if (Emitter.isPattern(binding)) {
-            const param = this.patternNames(binding, [], true).includes('error')
-              ? this.loopTempName('_err') : 'error';
+            const param = this.loopTempName('_err');
             this.b.emit(` catch (${param}) {\n`);
             this.b.emit('  '.repeat(ind + 1) + '(');
             this.mark(part, 'binding', () => this.withPattern(() => this.expr(binding)));
@@ -3643,7 +3709,9 @@ class Emitter {
             this.b.emit(' catch (');
             this.mark(part, 'binding', () => this.b.emit(binding));
             this.b.emit(') ');
-            this.returnBlock(body, ind);
+            // The binding is a new name for the handler — it shadows a
+            // same-named reactive declaration (the statement path's rule).
+            this.withBindings([binding], () => this.returnBlock(body, ind));
           }
         }
       }
@@ -3831,7 +3899,7 @@ class Emitter {
     const pad = '  '.repeat(ind);
     this.mark(node, '$self', () => {
       const [kind, vars, iter, aux] = clause;
-      const setups = this.clauseHeader(node, kind, vars, iter, aux ?? null);
+      const setups = this.clauseHeader(node, kind, vars, iter, aux ?? null, pad);
       this.b.emit(' {\n');
       let inner = `${pad}  `;
       for (const setup of setups) {
@@ -4115,9 +4183,13 @@ class Emitter {
     if (wrap) this.b.emit(')');
   }
 
-  // Template-literal escaping for string content emitted inside backticks.
+  // Template-literal escaping for string content emitted inside
+  // backticks. Escape pairs pass through first, so a source-escaped
+  // `\${` (the string escape for a literal dollar) is left alone —
+  // re-escaping its `${` would turn the backslash literal and the
+  // interpolation LIVE.
   static escapeTemplate(s) {
-    return s.replace(/`|\$\{/g, (m) => `\\${m}`);
+    return s.replace(/\\[^]|`|\$\{/g, (m) => (m === '`' || m === '${') ? `\\${m}` : m);
   }
 
   // The deterministic nesting bound: deep left-nested trees
@@ -4325,14 +4397,80 @@ class Emitter {
     return null;
   }
 
+  // A receiver with no evaluation cost to repeat: a plain name or a
+  // member chain of plain names. Anything else (a call, a computed
+  // index, a construction) must evaluate exactly once.
+  static pureChain(x) {
+    if (typeof x === 'string') return true;
+    if (!isNode(x) || x.length !== 3) return false;
+    if ((x[0] === '.' || x[0] === '?.') && typeof x[2] === 'string') return Emitter.pureChain(x[1]);
+    // A pure-base, pure-key index re-read carries the same
+    // no-side-effects assumption a dot chain does.
+    if (x[0] === '[]') return Emitter.pureChain(x[1]) && Emitter.pureChain(x[2]);
+    return false;
+  }
+
+  // An iterable a loop header re-reads must have no evaluation cost:
+  // a pure chain, or a literal list/range of pure members. Anything
+  // else binds once in the header.
+  static pureIterable(x) {
+    if (Emitter.pureChain(x)) return true;
+    if (!isNode(x)) return false;
+    if (x[0] === 'array') return x.slice(1).every((e) => Emitter.pureIterable(e));
+    return false;
+  }
+
   // Assignment through an optional chain: statement position guards
   // with `if (guard != null) …`; value position lowers to a ternary
   // yielding undefined when the guard is nullish. The guard emission
   // is a second generated manifestation of the optional link's
   // `object` role, so
   // leaf guards map exactly.
+  //
+  // A receiver the guard cannot cheaply re-read (pureChain false)
+  // binds as an IIFE parameter instead: the guard and the write then
+  // see the SAME object, and the receiver evaluates exactly once. The
+  // rest of the target re-emits with the parameter standing in at the
+  // optional link's object slot.
   optionalAssign(node, optLink, context) {
     const op = node[0];
+    if (!Emitter.pureChain(optLink[1])) {
+      const p = this.loopTempName('_ref');
+      const subst = (x) => {
+        if (x === optLink) return [x[0], p, x[2]];
+        return isNode(x) ? x.map(subst) : x;
+      };
+      const clonedTarget = subst(node[1]);
+      const target = () => this.mark(node, 'target', () => this.withTarget(() => this.withDeopt(() => this.expr(clonedTarget))));
+      const value = () => this.mark(node, 'value', () => this.withExpression(() => this.expr(node[2])));
+      const emitAssign = () => {
+        if (op === '//=') {
+          target(); this.b.emit(' = Math.floor('); target(); this.b.emit(' / '); value(); this.b.emit(')');
+        } else if (op === '%%=') {
+          target(); this.b.emit(' = ' + Emitter.MODULO + '('); target(); this.b.emit(', '); value(); this.b.emit(')');
+        } else {
+          target(); this.b.emit(' ');
+          this.mark(node, 'operator', () => this.b.emit(op));
+          this.b.emit(' '); value();
+        }
+      };
+      this.mark(node, '$self', () => {
+        const asyncy = Emitter.containsAwait(node);
+        this.b.emit(asyncy ? `await (async (${p}) => ` : `((${p}) => `);
+        if (context === 'statement') {
+          this.b.emit(`{ if (${p} != null) `);
+          emitAssign();
+          this.b.emit('; })(');
+        } else {
+          this.b.emit(`${p} != null ? (`);
+          emitAssign();
+          this.b.emit(') : undefined)(');
+        }
+        this.mark(optLink, 'object', () => this.withExpression(() => this.expr(optLink[1])));
+        this.b.emit(')');
+      });
+      return;
+    }
     const guard = () => this.mark(optLink, 'object', () => this.expr(optLink[1]));
     const target = () => this.mark(node, 'target', () => this.withTarget(() => this.withDeopt(() => this.expr(node[1]))));
     const value = () => this.mark(node, 'value', () => this.withExpression(() => this.expr(node[2])));
@@ -8074,8 +8212,9 @@ class Emitter {
       } else {
         // The IIFE argument is an operand position: compound sources
         // group (`((a || b))`).
-        this.b.emit(optional ? '((_) => _ == null ? undefined : ({' : '((_) => ({');
-        body(() => this.b.emit('_'));
+        const p = this.loopTempName('_');
+        this.b.emit(optional ? `((${p}) => ${p} == null ? undefined : ({` : `((${p}) => ({`);
+        body(() => this.b.emit(p));
         this.b.emit('}))(');
         this.withExpression(() => this.grouped(node, 'source', source, Emitter.needsGrouping(source, 'operand')));
         this.b.emit(')');
@@ -9322,7 +9461,10 @@ class Emitter {
         // plain names emit verbatim as before.
         this.expr(then[1]);
         this.b.emit(' = (');
-        this.mark(node, 'condition', () => this.expr(node[1]));
+        // A condition that is itself a ternary keeps its parens —
+        // bare, JS right-associativity hands the TAIL of this ternary
+        // to the condition and changes the value.
+        this.grouped(node, 'condition', node[1], isNode(node[1]) && node[1][0] === '?:');
         this.b.emit(' ? ');
         this.grouped(node, 'then', then[2], Emitter.needsGrouping(then[2], 'operand') || isUpdate(then[2]));
         this.b.emit(' : ');
@@ -9335,7 +9477,9 @@ class Emitter {
       this.grouped(node, role, child, Emitter.needsGrouping(child, 'operand') || isUpdate(child));
     };
     this.mark(node, '$self', () => {
-      this.mark(node, 'condition', () => this.expr(node[1]));
+      // A ternary CONDITION keeps its parens — bare, JS
+      // right-associativity re-associates and changes the value.
+      this.grouped(node, 'condition', node[1], isNode(node[1]) && node[1][0] === '?:');
       this.b.emit(' ? ');
       branch('then', node[2]);
       this.b.emit(' : ');

@@ -37,8 +37,8 @@ let p2 = second([3, 4]);
 let caught2 = 0;
 try {
   throw [1, 2];
-} catch (error) {
-  ([c1, c2] = error);
+} catch (_err) {
+  ([c1, c2] = _err);
   caught2 = c2;
 }
 let total = 0;

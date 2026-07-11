@@ -5,6 +5,19 @@ repository's pull requests.
 
 ## Unreleased
 
+- Preserve the source program's shape through seven lowerings (the
+  third cross-vendor review's evaluation/scoping cluster): a ternary
+  used as another ternary's condition keeps its parens; an optional-
+  chain assignment's impure receiver binds once, so the guard and the
+  write see the same object; indexed, stepped, object, own, and
+  range-bounded loops evaluate their source exactly once (pure
+  sources keep byte-identical headers); the complex-pick parameter
+  and the catch scaffold parameter mint against user bindings (`_`
+  and outer `error` reads now resolve to the user's own); a value-try
+  catch binding shadows same-named reactives like the statement form;
+  and a source-escaped `\${` in an interpolated string stays literal
+  instead of turning into a live interpolation (#30)
+
 - Quiet the implicit-any family's missing members in the editor:
   importing a plain .js module (no declaration file, TS7016) is legal,
   idiomatic Rip and no longer squiggles — likewise `new` on an untyped

@@ -522,3 +522,8 @@ code 'single quote preserved', "'hello'", "'hello'"
 
 # Quote preservation - double quotes
 code 'double quote preserved', '"hello"', '"hello"'
+
+test "a source-escaped dollar-brace stays literal beside a live interpolation", '''
+  x = 1
+  "lit \\${x} and #{x}"
+''', 'lit ${x} and 1'
