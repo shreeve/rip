@@ -3118,7 +3118,7 @@ export function applyInsertionPass(tokens, pass, mintId) {
 // stable identity — indices are never stored, so insertion invalidates
 // nothing.
 //
-// Triggers (this wave's scope):
+// Triggers:
 //   - an arrow not followed by INDENT wraps its single-line body
 //   - THEN retags to the block's INDENT
 //   - ELSE followed by neither INDENT nor IF wraps its single-line body
