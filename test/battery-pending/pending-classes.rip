@@ -4,35 +4,6 @@
 
 import { test, code, fail, type } from '../support/testing.js'
 
-test 'basic class', '''
-  class Animal
-    constructor: (@name) ->
-    speak: -> @name
-  a = new Animal('Dog'); a.speak()
-''', 'Dog'
-
-test 'class inheritance', '''
-  class Animal
-    constructor: (@name) ->
-  class Dog extends Animal
-    bark: -> 'woof'
-  d = new Dog('Spot'); d.name
-''', 'Spot'
-
-code 'simple class', '''
-  class Animal
-    constructor: (@name) ->
-''', 'class Animal { constructor(name) { this.name = name; } }'
-
-test 'super in constructor', '''
-  class Animal
-    constructor: (@name) ->
-  class Dog extends Animal
-    constructor: (name, @breed) ->
-      super(name)
-  d = new Dog('Spot', 'Terrier'); d.name
-''', 'Spot'
-
 test 'super with @param', '''
   class Animal
     constructor: (@name) ->
@@ -57,14 +28,8 @@ test '@param default no args', '''
 ''', 0
 
 code 'super call', 'super(arg)', 'super(arg)'
-code 'super method', 'super.method()', 'super.method()'
 
-test 'multiple @ parameters', '''
-  class Person
-    constructor: (@first, @last) ->
-  p = new Person('John', 'Doe')
-  [p.first, p.last]
-''', ['John', 'Doe']
+code 'super method', 'super.method()', 'super.method()'
 
 test 'ruby-style new chained', '''
   class Builder

@@ -803,6 +803,10 @@ grammar =
     o 'Identifier'
     o 'Array'
     o 'Object'
+    # Promoted parameter: `constructor: (@name) ->` assigns the
+    # argument to `this.name`. The emitter accepts the shape in
+    # constructors only and rejects it loudly elsewhere.
+    o 'ThisProperty'
   ]
 
   # Spread in calls and arrays — ES6 prefix only (the postfix
