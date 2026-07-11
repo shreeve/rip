@@ -414,3 +414,19 @@ test 'string-named member read via @', '''
   w["a-b"] = 7
   w.m()
   ''', 7
+
+test 'string-named member write via @ in a method', '''
+  class Widget
+    "data-src" = "default"
+    bump: -> @"data-src" = "changed"
+  w = new Widget()
+  w.bump()
+  w["data-src"]
+  ''', 'changed'
+
+test 'static method reads a string-named static via @', '''
+  class Widget
+    @"app-name" = "rip"
+    @tag: -> @"app-name"
+  Widget.tag()
+  ''', 'rip'
