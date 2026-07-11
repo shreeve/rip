@@ -301,12 +301,35 @@ code "negative index -2 compiles to .at()", "arr[-2]", "arr.at(-2)"
 # ==============================================================================
 
 # ==============================================================================
-# Method Assignment — .=
+# Method Assignment — .= (the target re-binds to a method call on itself)
 # ==============================================================================
 
+code "method assign compiles", 's = " hi "\ns .= trim()', 'let s = " hi ";\n\ns = s.trim();'
+test "method assign trim", 's = "  hi  "\ns .= trim()\ns', "hi"
+test "method assign filter with implicit it", "arr = [1, 2, 3, 4, 5]\narr .= filter -> it > 3\narr", [4, 5]
+test "method assign chained calls", 'str = " A "\nstr .= trim().toLowerCase()\nstr', "a"
+test "method assign on property chain", 'obj = {name: " x "}\nobj.name .= trim()\nobj.name', "x"
+test "method assign impure base evaluates once", '''
+  n = 0
+  o = {name: " y "}
+  g = -> (n += 1; o)
+  g().name .= trim()
+  [o.name, n]
+''', ["y", 1]
+code "method assign impure base binds once", 'g().name .= trim()', "const _ref = g();\n\n_ref.name = _ref.name.trim();"
+fail "method assign needs a call chain", 's .= 5', "must be a call chain"
+fail "method assign rejects in value position", 'y = (s .= trim())', "is a statement"
+
 # ==============================================================================
-# Merge Assignment — *>obj = { ... }
+# Merge Assignment — *>obj = { ... } (merge in place, init when nullish)
 # ==============================================================================
+
+code "merge assign compiles to Object.assign", 'obj = {a: 1}\n*>obj = {b: 2}', 'let obj = {a: 1};\n\nobj = Object.assign(obj ??= {}, {b: 2});'
+test "merge assign basic", 'obj = {a: 1}\n*>obj = {b: 2}\nobj', {a: 1, b: 2}
+test "merge assign preserves existing", 'obj = {a: 1, b: 1}\n*>obj = {b: 2}\nobj', {a: 1, b: 2}
+test "merge assign auto-init", '*>cfg = {x: 1}\ncfg', {x: 1}
+test "merge assign member target", 'o = {inner: {a: 1}}\n*>o.inner = {b: 2}\no.inner', {a: 1, b: 2}
+fail "merge assign rejects in value position", 'y = (*>obj = {a: 1})', "is a statement"
 
 # ==============================================================================
 # Unary bases of ** must be parenthesized (bare form is a JS SyntaxError)

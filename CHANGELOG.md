@@ -5,6 +5,15 @@ repository's pull requests.
 
 ## Unreleased
 
+- Method assignment and merge assignment: `x .= trim()` re-binds the
+  target to a method call on itself (`x = x.trim()`, chained right
+  sides included), and `*>obj = {…}` merges the value into the
+  target, initializing it when nullish
+  (`obj = Object.assign(obj ??= {}, {…})` — a plain-name target
+  declares on first use). Both spell the target twice, so an impure
+  member target binds its base once on a pre-line; both are
+  statements and reject in value position (#39)
+
 - Return guards: `x or return e`, `x and return e`, and
   `x ?? return e` (with or without a value, bare or assigning:
   `y = x or return "no"`) lower as statement rewrites —

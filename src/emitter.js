@@ -1532,7 +1532,9 @@ class Emitter {
         }
         return;
       }
-      if (ASSIGNS.has(n[0]) && n.length === 3) {
+      if ((ASSIGNS.has(n[0]) || n[0] === '*>') && n.length === 3) {
+        // Merge assignment DECLARES a plain-name target: its `??= {}`
+        // initializes a nullish binding, so first use is legal.
         if (typeof n[1] === 'string') {
           add(n[1], n);
           noteAnnotation(n[1], n);
@@ -1682,7 +1684,7 @@ class Emitter {
         for (const el of n.slice(typeof n[1] === 'string' ? 2 : 1)) walk(el, level);
         return;
       }
-      if (ASSIGNS.has(head) && n.length === 3) {
+      if ((ASSIGNS.has(head) || head === '*>') && n.length === 3) {
         walk(n[2], inFn); // value before target: execution order
         if (typeof n[1] === 'string') {
           if (head !== '=') occur(n[1], inFn); // compound assigns read their target first
@@ -2773,6 +2775,19 @@ class Emitter {
       if (node[0] === '=' && node.length === 3 && typeof node[1] === 'string' &&
           Emitter.returnGuard(node[2])) {
         return this.returnGuardStatement(node[2], node);
+      }
+      // Method and merge assignment are statement lowerings: the
+      // target is spelled twice (write + read), and an impure member
+      // target pre-binds its base on its own line.
+      if (node[0] === '.=' && node.length === 3) {
+        this.methodAssignStatement(node, ind);
+        this.b.emit(';');
+        return;
+      }
+      if (node[0] === '*>' && node.length === 3) {
+        this.mergeAssignStatement(node, ind);
+        this.b.emit(';');
+        return;
       }
       // Optional-chain assignment in statement position guards with a
       // plain `if` (no ternary value is needed).
@@ -4455,6 +4470,9 @@ class Emitter {
     if (head === '//' && node.length === 3) return this.floorDiv(node);
     if (head === '%%' && node.length === 3) return this.modulo(node);
     if (head === '//=' && node.length === 3) return this.floorDivAssign(node);
+    if ((head === '.=' || head === '*>') && node.length === 3) {
+      throw this.positionedError(node, `emitter: ${head} is a statement — its target is spelled twice (write + read), which has no single-expression form`);
+    }
     if (head === '%%=' && node.length === 3) return this.moduloAssign(node);
     if (head === 'comprehension') return this.comprehension(node, this.ind);
     if (head === 'do-iife' && node.length === 2) return this.doIife(node);
@@ -9606,6 +9624,10 @@ class Emitter {
           (h === '=' && stmt.length === 3 && Emitter.returnGuard(stmt[2]))) {
         return this.statement(stmt, ind);
       }
+      // Tail-position method/merge assignment stays a statement (the
+      // double-spelled target has no single-expression form); the
+      // function returns undefined.
+      if ((h === '.=' || h === '*>') && stmt.length === 3) return this.statement(stmt, ind);
       // A tail-position enum stays a statement — its lowering is a
       // `const` declaration, which has no value form
       if (h === 'enum') return this.statement(stmt, ind);
@@ -9921,6 +9943,95 @@ class Emitter {
         }
       });
       this.b.emit(';');
+    });
+  }
+
+  // The compound target's WRITE spelling. Pure targets (a plain
+  // name, `this` properties, pure chains) spell twice directly —
+  // both reads are effect-free. An impure member/index target binds
+  // its base (and an impure key) ONCE on a pre-line, and both
+  // spellings go through the binding — the compounds'
+  // single-evaluation contract. Returns the node the READ spelling
+  // embeds. Minted names come from the used-name registry.
+  compoundTarget(node, target, ind) {
+    if (typeof target === 'string' || Emitter.pureChain(target)) {
+      this.mark(node, 'target', () => this.withTarget(() => this.expr(target)));
+      return target;
+    }
+    if (isNode(target) && (target[0] === '.' || target[0] === '[]') && target.length === 3) {
+      const base = this.loopTempName('_ref');
+      this.b.emit(`const ${base} = `);
+      this.expr(target[1]);
+      this.b.emit(`;\n${'  '.repeat(ind)}`);
+      let read;
+      if (target[0] === '[]') {
+        let key = target[2];
+        if (!(typeof key === 'string') && !Emitter.pureChain(key)) {
+          const k = this.loopTempName('_key');
+          this.b.emit(`const ${k} = `);
+          this.expr(key);
+          this.b.emit(`;\n${'  '.repeat(ind)}`);
+          key = k;
+        }
+        read = ['[]', base, key];
+      } else {
+        read = ['.', base, target[2]];
+      }
+      this.mark(node, 'target', () => this.expr(read));
+      return read;
+    }
+    throw this.positionedError(node, `emitter: ${node[0]} needs a stable target — a plain name or member/index chain (an optional chain has no reference to write back to)`);
+  }
+
+  // ['.=', target, rhs] — the target re-binds to a method call on
+  // itself: `x .= trim()` → `x = x.trim()`; the right side's chain
+  // HEAD call gains the target as its receiver, so a chained right
+  // side works too (`s .= trim().toLowerCase()`).
+  methodAssignStatement(node, ind) {
+    const [, target, rhs] = node;
+    let cur = rhs;
+    while (isNode(cur)) {
+      const s = Emitter.chainHeadSlot(cur);
+      if (s === null) break;
+      cur = cur[s];
+    }
+    const id = isNode(cur) ? this.stores.idOf(cur) : null;
+    const kind = id !== null ? this.stores.node(id)?.semanticKind : null;
+    const callHead = isNode(cur) && typeof cur[0] === 'string' && /^[A-Za-z_$][\w$]*$/.test(cur[0]) &&
+      (kind === 'call' || (kind == null && Emitter.jsTier(cur) === 'primary'));
+    if (!callHead) {
+      throw this.positionedError(node, "emitter: `.=` re-binds its target to a METHOD CALL on itself — the right side must be a call chain (`x .= trim()`)");
+    }
+    this.mark(node, '$self', () => {
+      const read = this.compoundTarget(node, target, ind);
+      const substHead = (n) => {
+        if (n === cur) return [['.', read, cur[0]], ...cur.slice(1)];
+        const s = Emitter.chainHeadSlot(n);
+        const copy = n.slice();
+        copy[s] = substHead(n[s]);
+        return copy;
+      };
+      this.b.emit(' ');
+      this.mark(node, 'operator', () => this.b.emit('='));
+      this.b.emit(' ');
+      this.mark(node, 'value', () => this.expr(substHead(rhs)));
+    });
+  }
+
+  // ['*>', target, value] — the value merges into the target,
+  // initializing it when nullish:
+  // `*>obj = v` → `obj = Object.assign(obj ??= {}, v)`.
+  mergeAssignStatement(node, ind) {
+    const [, target, value] = node;
+    this.mark(node, '$self', () => {
+      const read = this.compoundTarget(node, target, ind);
+      this.b.emit(' ');
+      this.mark(node, 'operator', () => this.b.emit('='));
+      this.b.emit(' Object.assign(');
+      this.mark(node, 'target', () => this.expr(read));
+      this.b.emit(' ??= {}, ');
+      this.mark(node, 'value', () => this.expr(value));
+      this.b.emit(')');
     });
   }
 
