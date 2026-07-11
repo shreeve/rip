@@ -5,6 +5,10 @@ repository's pull requests.
 
 ## Unreleased
 
+- Add the grammar and generated parser: the SLR(1) generator (solar), the
+  grammar with semantic annotations and pattern labels, and the generated
+  parser with node/role store population at reduce time (#4)
+
 - Add the lexer and its rewrite passes: the offset-native tokenizer with
   trivia channel and literal-prefix indentation, the type-annotation
   collapse pass, the schema and render sub-parsers, the DOM vocabulary

@@ -1,0 +1,1292 @@
+#!/usr/bin/env bun
+
+# ==============================================================================
+# Solar - SLR(1) Parser Generator for Rip
+#
+# Grammar rules are declared as:
+#
+#   o 'Assignable = Expression',        # pattern     — symbols to match
+#     '["=", 1, 3]',                    # action      — s-expression template
+#     'assign: operator, target, value' # annotation  — semantic kind + parts
+#
+# The annotation (optional, string) names the semantic kind of the node the
+# action builds and gives one part per template element:
+#
+#   annotation := 'kind'                    — templates with zero elements
+#               | 'kind: part, part, ...'   — otherwise
+#   part       := name      — a ref element, or a constant that carries
+#                             meaning (an operator glyph, a keyword value)
+#               | _         — a structural constant with no semantic role
+#                             (legal ONLY on literal elements)
+#               | ...name   — a spread ref (required iff the element is ...N)
+#
+# Parts align 1:1 with template elements in template order — EVERY element
+# is accounted for. Position refs always take real names, never '_'.
+# Annotations are validated at generation time and emitted into the parser
+# as a semantic side table (ruleId → kind, roles); named literal elements
+# yield roles with grammarRef null carrying the decoded literal value (the
+# template's '"="' yields "="). Annotations never change parser output.
+#
+# Pattern labels (`SYMBOL[role]`) mark matched pattern symbols the
+# template deliberately DROPS from the s-expression — spans that must
+# reach the side tables without appearing in parser output (type
+# annotations are the founding case: erased from the tree, recorded in
+# RoleStore):
+#
+#   o 'Assignable TYPE[annotation] = Expression', '["=", 1, 4]',
+#     'assign: operator, target, value'
+#
+# Naming lives where the thing lives: template-carried elements are
+# named in the annotation string (they have tree slots); dropped
+# symbols are labeled on the pattern — the only place they exist. A
+# label records a side-band RoleStore row on the rule's node
+# (grammarRef = the labeled position, childSlot null — the value lands
+# at NO index in the produced s-expression). Labels strip before any
+# grammar construction, so the SLR automaton never sees them. A label
+# on a template-CARRIED symbol, a label on a rule with no annotation,
+# a duplicate role name, '$self', an empty name, and malformed label
+# syntax all fail generation with rule-identifying errors; annotation
+# strings carry no ';' section — a ';' rejects, pointing here.
+#
+# An options object (e.g. prec: 'UNARY_MATH') may appear alongside the
+# annotation; arguments are distinguished by type, not position.
+#
+# Source spans are [start, end) UTF-16 code-unit offsets. The lexer protocol:
+# after each lex(), the lexer exposes .text and .loc = {start, end}, where
+# .loc is a FRESH object per token — the parser stores loc references on its
+# location stack, so a lexer that mutates one shared loc object in place
+# would corrupt every span.
+# ==============================================================================
+
+import * as fs from 'fs'
+import * as path from 'path'
+import { fileURLToPath, pathToFileURL } from 'url'
+
+VERSION = '2.0.0'
+
+# Terminal: a symbol that cannot be broken down further ("NUMBER" or "+")
+class Terminal
+  constructor: (name, id) ->
+    @id   = id   # unique numeric ID for this terminal
+    @name = name # terminal name
+
+# NonTerminal: a symbol matched by one or more rules ("ForLoop" or "Splat")
+class NonTerminal
+  constructor: (name, id) ->
+    @id       = id      # unique numeric ID for this nonterminal
+    @name     = name    # nonterminal name
+    @rules    = []      # rules that define this nonterminal
+    @nullable = false   # true if one of the rules can produce no tokens (ε)
+    @firsts   = new Set # FIRST set: terminals that can start this nonterminal
+    @follows  = new Set # FOLLOW set: terminals that can follow this nonterminal
+
+# Rule: one possible match for a nonterminal (Expr → Expr + Term)
+class Rule
+  constructor: (lhs, symbols, id) ->
+    @id         = id      # unique numeric ID for this rule
+    @lhs        = lhs     # nonterminal this rule defines (left-hand side)
+    @symbols    = symbols # array of symbols to match ["Expr", "+", "Expr"]
+    @nullable   = false   # true if this rule can produce no tokens (ε)
+    @firsts     = new Set # FIRST set: terminals that can start this rule
+    @precedence = 0       # operator precedence for conflict resolution
+
+# LR Item: A rule with a dot position and lookaheads (Expr → Expr • + Term)
+class Item
+  constructor: (rule, lookaheads, dot = 0) ->
+    @rule       = rule                      # the rule this item is based on
+    @dot        = dot                       # position of the dot in the rule
+    @id         = "#{@rule.id}:#{@dot}"     # compact unique ID
+    @lookaheads = new Set(lookaheads or []) # lookahead tokens (if any)
+    @nextSymbol = @rule.symbols[@dot]       # symbol after dot (if any)
+
+# LR State: A set of items with transitions to other states
+class State
+  constructor: (...items) ->
+    @id           = null           # state number (assigned later)
+    @items        = new Set(items) # kernel and closure items
+    @transitions  = new Map        # symbol → next state
+    @reductions   = new Set        # items that trigger a reduction
+    @hasShifts    = false          # if this state has shift actions
+    @hasConflicts = false          # has shift/reduce or reduce/reduce conflicts
+
+# ==============================================================================
+# SLR(1) Parser Generator
+# ==============================================================================
+
+class Generator
+  constructor: (grammar, options = {}) ->
+
+    # Configuration
+    @options     = { ...grammar.options, ...options }
+    @parseParams = grammar.parseParams
+    @ctx         = {}
+    @indent      = '  '
+    @double      = @indent.repeat 2
+    @triple      = @indent.repeat 3
+
+    # Grammar structures
+    @nonterminals = {}
+    @rules     = []
+    @operators = {}
+    @conflicts = 0
+    @conflictDetails = []  # Track conflict details for debugging
+
+    # Semantic side table: ruleId → {kind, roles: [{name, grammarRef, childSlot, spread}]}
+    @semantics = {}
+    # Rules compiled as self-accumulators (ruleId → true): left-recursive
+    # list rules whose action template spreads the rule's own position-1
+    # value first ('[...1, 3]' with symbols[0] = lhs). They MUTATE the
+    # list in place instead of spread-copying (linear, not quadratic
+    # parses); the runtime extends the node's span on each reduction.
+    @accumulators = {}
+    # Constructor rules (flat array templates) lacking an annotation —
+    # the annotation-coverage surface. Generation FAILS if any remain;
+    # a rule opts out with a '~ reason' annotation string.
+    @unannotatedConstructors = []
+    @optedOutConstructors = []
+
+    # Initialize symbol table with special symbols
+    @symbolTable = new Map
+    @symbolTable.set "$accept", new NonTerminal "$accept", 0
+    @symbolTable.set "$end"   , new Terminal    "$end"   , 1
+    @symbolTable.set "error"  , new Terminal    "error"  , 2
+
+    # Build parser
+    @timing '💥 Total time', =>
+      @timing 'processGrammar'   , => @processGrammar grammar # Process grammar rules
+      @timing 'buildLRAutomaton' , => @buildLRAutomaton()     # Build LR(0) automaton
+      @timing 'computeLookaheads', => @computeLookaheads()    # Compute FIRST/FOLLOW and assign lookaheads
+      @timing 'buildParseTable'  , => @buildParseTable()      # Build parse table with default actions
+
+  # ============================================================================
+  # Helper Functions
+  # ============================================================================
+
+  dedent: (s, indent) ->
+    m = s.match /^[ \t]+(?=\S)/gm
+    i = Math.min ...(m ?? []).map (x) => x.length
+    s = s.replace(///^[ \t]{#{i}}///gm, '').trim()
+    s = s.replace /^/gm, indent if indent
+    s
+
+  timing: (label, fn) ->
+    return fn() unless @options.verbose
+    console.time(label)
+    result = fn() if fn
+    console.timeEnd(label)
+    result
+
+  # ============================================================================
+  # Grammar Processing
+  # ============================================================================
+
+  processGrammar!: (grammar) ->
+    @_processOperators grammar.operators if grammar.operators
+    @displays = grammar.displays or {}
+    @_buildRules (grammar.grammar or grammar.bnf)
+    @_augmentGrammar grammar
+    # The annotation-coverage gate: every constructor rule is annotated
+    # or carries an explicit '~ reason' opt-out. Silent coverage gaps
+    # fail loudly.
+    if @unannotatedConstructors.length > 0
+      list = @unannotatedConstructors.map((r) -> "  • #{r}").join('\n')
+      throw new Error "annotation coverage: #{@unannotatedConstructors.length} constructor rule(s) lack annotations (annotate, or opt out with '~ reason'):\n#{list}"
+
+  _processOperators!: (ops) ->
+    for precedence, i in ops
+      for k in [1...precedence.length]
+        @operators[precedence[k]] = {precedence: i + 1, assoc: precedence[0]}
+
+  _buildRules: (grammar) ->
+    actionGroups = {}
+    ruleTable    = [0, 0] # Flat array: [typeId, count] pairs starting at index 0
+    @symbolIds   = {"$accept": 0, "$end": 1, "error": 2}  # Add reserved symbols
+    symbolId     = 3 # Next available symbol ID (after special symbols)
+
+    # Add symbol to symbol table if not already present
+    addSymbol = (name) =>
+      return if not name or @symbolIds[name]
+
+      # Use existing symbol or create a new one
+      unless symbol = @symbolTable.get(name)
+        id = symbolId++
+        symbol = if grammar[name] then new NonTerminal(name, id) else new Terminal(name, id)
+        @symbolTable.set name, symbol
+      @symbolIds[name] = symbol.id
+
+    # Process nonterminals and their rules
+    for own lhs, rules of grammar
+      addSymbol lhs
+      @nonterminals[lhs] = @symbolTable.get lhs
+
+      handles = rules[..]
+
+      for handle in handles
+        [symbols, action, annotation, precedence, labels] = @_parseHandle handle, lhs
+
+        addSymbol symbol for symbol in symbols
+
+        ruleId = @rules.length + 1
+        pattern = symbols.join(' ').trim()
+
+        # Semantic annotation → side table entry (validated; never alters
+        # output). A '~ reason' annotation is the coverage opt-out: the rule is
+        # an INTENTIONALLY un-annotated constructor (plumbing whose spans
+        # are owned by an enclosing node's roles) — recorded, no side
+        # table entry. Pattern labels record roles on the rule's NODE, so
+        # they require an annotated rule (a node with a semantic kind).
+        if annotation? and annotation.trim().startsWith('~')
+          reason = annotation.trim()[1..].trim()
+          throw new Error "coverage opt-out for (#{lhs} → #{pattern or 'ε'}) requires a reason: '~ <why>'" unless reason
+          throw new Error "Grammar error in '#{lhs}': pattern label '[#{labels[0].name}]' requires an annotated rule, not a coverage opt-out" if labels.length > 0
+          @optedOutConstructors.push "#{lhs} → #{pattern or 'ε'} (#{reason})"
+        else if annotation?
+          @semantics[ruleId] = @_parseAnnotation annotation, action, symbols, lhs, pattern, labels
+        else
+          throw new Error "Grammar error in '#{lhs}': pattern label '[#{labels[0].name}]' requires an annotated rule — the label's role records on the rule's node" if labels.length > 0
+          if typeof action is 'string' and @_templateElements(action)?
+            @unannotatedConstructors.push "#{lhs} → #{pattern or 'ε'}"
+
+        # Process semantic actions
+        if action
+          action = @_compileAction action, symbols, lhs, ruleId
+          label = 'case ' + ruleId + ':'
+          actionGroups[action]?.push(label) or actionGroups[action] = [label]
+
+        # Create rule
+        rule = new Rule lhs, symbols, ruleId
+
+        # Set precedence
+        @_assignPrecedence rule, precedence
+
+        @rules.push rule
+        ruleTable.push @symbolIds[lhs], if symbols[0] is '' then 0 else symbols.length
+        @nonterminals[lhs].rules.push rule
+
+    # Generate parser components
+    actionsCode = @_generateActionSwitch actionGroups
+    @ruleTable = ruleTable
+    @_buildTokenNames()
+
+    parameters = "rule, vals, locs, shared"
+    parameters += ', ' + @parseParams.join(', ') if @parseParams?.length
+
+    @ruleActions = "(#{parameters}) => {\n#{actionsCode}\n#{@indent}}"
+
+  _parseHandle: (handle, lhs) ->
+    if Array.isArray handle
+      pattern = if typeof handle[0] is 'string' then handle[0].trim() else handle[0].join(' ')
+      [symbols, labels] = @_parseLabels pattern, lhs
+
+      action = handle[1] ?? 1
+
+      # Trailing arguments are distinguished by type: string → semantic
+      # annotation, object → options.
+      annotation = null
+      options    = null
+      for extra in handle[2..] when extra?
+        if typeof extra is 'string'
+          throw new Error "Grammar error in '#{lhs}': multiple annotation strings on one rule" if annotation?
+          annotation = extra
+        else if typeof extra is 'object'
+          throw new Error "Grammar error in '#{lhs}': multiple options objects on one rule" if options?
+          options = extra
+        else
+          throw new Error "Grammar error in '#{lhs}': unexpected rule argument '#{extra}'"
+
+      [symbols, action, annotation, options, labels]
+    else
+      [symbols, labels] = @_parseLabels handle.trim(), lhs
+      if labels.length > 0
+        throw new Error "Grammar error in '#{lhs}': pattern label '[#{labels[0].name}]' requires an annotated rule — the label's role records on the rule's node"
+      [symbols, null, null, null, []]
+
+  # ============================================================================
+  # Semantic Annotations
+  #
+  # The third rule argument ('assign: operator, target, value') names the
+  # semantic kind of the node an action builds and gives one part per
+  # template element. _templateElements classifies the action and extracts
+  # its elements; _parseAnnotation validates the human's parts against them.
+  # The resulting side table drives NodeStore/RoleStore population at parse
+  # time.
+  # ============================================================================
+
+  # Pattern labels — strip 'SYMBOL[role]' labels from a rule pattern,
+  # returning [cleanSymbols, labels] where each label is {name, position}
+  # (1-based pattern position). '[' and ']' are ordinary grammar
+  # terminals; only a trailing '[role]' group on a pattern token is a
+  # label (the bracket terminals themselves may carry one: '[[x]').
+  # Anything else bracket-shaped in a token is malformed and rejects —
+  # nothing label-like is ever silently stripped or passed through as a
+  # symbol name. Labels on template-carried symbols reject later, in
+  # _parseAnnotation, where the template is known.
+  _parseLabels: (pattern, lhs) ->
+    failLabel = (msg) ->
+      throw new Error "Grammar error in '#{lhs}': #{msg}"
+    ident = /^[A-Za-z$][\w$-]*$|^_[\w$-]+$/
+    symbols = []
+    labels  = []
+    tokens = pattern.split(/\s+/)
+    for token, i in tokens
+      if token is '[' or token is ']' or not /[\[\]]/.test(token)
+        symbols.push token
+        continue
+      m = token.match /^(.+?)\[([^\[\]]*)\]$/
+      failLabel "malformed pattern label '#{token}' — expected SYMBOL[role]" unless m
+      symbol = m[1]
+      name   = m[2]
+      unless symbol is '[' or symbol is ']' or not /[\[\]]/.test(symbol)
+        failLabel "malformed pattern label '#{token}' — expected SYMBOL[role]"
+      failLabel "pattern label '#{token}' carries an empty role name" unless name
+      failLabel "invalid role name '#{name}' in pattern label '#{token}'" unless ident.test(name)
+      failLabel "'$self' is a reserved role name (pattern label '#{token}')" if name is '$self'
+      symbols.push symbol
+      labels.push {name, position: i + 1}
+    [symbols, labels]
+
+  # Classify an action as a flat array construction template and extract its
+  # elements, one entry per element in template order: position refs as
+  # {grammarRef, childSlot, spread}, literals as {literal, childSlot} where
+  # literal is the raw literal text (e.g. '"="' or 'true'). Returns null
+  # when the action is not a flat array template (pass-through numbers,
+  # executable JS with $n refs, nested arrays) — such actions cannot carry
+  # an annotation.
+  #
+  # childSlot is the index in the produced s-expression array where the
+  # element's value lands. It is null for any element that follows a spread,
+  # because the landed index is runtime-dependent; grammarRef remains the
+  # authoritative join key for refs.
+  #
+  # The template is scanned structurally (string literals may contain commas
+  # and brackets); it is split into top-level elements only at commas that
+  # sit outside quotes.
+  _templateElements: (action) ->
+    return null unless typeof action is 'string'
+    s = action.trim()
+    return null unless s.startsWith('[') and s.endsWith(']')
+    inner = s[1...s.length - 1]
+
+    parts = []
+    cur   = ''
+    quote = null
+    i     = 0
+    while i < inner.length
+      ch = inner[i]
+      if quote
+        if ch is '\\'
+          cur += ch + (inner[i + 1] ?? '')
+          i++
+        else
+          cur += ch
+          quote = null if ch is quote
+      else if ch is '"' or ch is "'"
+        quote = ch
+        cur += ch
+      else if ch is '[' or ch is ']'
+        return null
+      else if ch is ','
+        parts.push cur
+        cur = ''
+      else
+        cur += ch
+      i++
+    return null if quote
+    parts.push cur
+
+    elements = []
+    spreadSeen = false
+    for p, slot in parts
+      t = p.trim()
+      continue if t is ''
+      childSlot = if spreadSeen then null else slot
+      if m = t.match /^\.\.\.(\d+)$/
+        elements.push {grammarRef: parseInt(m[1], 10), childSlot, spread: true}
+        spreadSeen = true
+      else if /^\d+$/.test t
+        elements.push {grammarRef: parseInt(t, 10), childSlot, spread: false}
+      else if t[0] is '"' or t[0] is "'"
+        # A quoted element is a literal ONLY when it is a single complete
+        # JS string-literal token: scanning from the opening quote and
+        # honoring backslash escapes, the matching close quote must be the
+        # element's final character. Anything more (concatenation, calls,
+        # adjacent tokens) is executable — the template is not flat.
+        q = t[0]
+        j = 1
+        j += (if t[j] is '\\' then 2 else 1) while j < t.length and t[j] isnt q
+        return null unless j is t.length - 1
+        elements.push {literal: t, childSlot}
+      else if t is 'true' or t is 'false' or t is 'null'
+        elements.push {literal: t, childSlot}
+      else
+        return null
+    elements
+
+  # Parse and validate a semantic annotation string against its action
+  # template. Any mismatch fails generation with a rule-identifying error.
+  #
+  # Form: 'kind' (zero-element templates) or 'kind: part, part, ...' with
+  # one part per template element in template order. Refs take real names;
+  # literal elements take a real name when the constant carries meaning or
+  # '_' when it is purely structural; '...' marks spread refs.
+  _parseAnnotation: (annotation, action, symbols, lhs, pattern, labels = []) ->
+    ruleDesc = "#{lhs} → #{pattern or 'ε'}"
+    fail = (msg) ->
+      throw new Error "Annotation error (#{ruleDesc}): #{msg}"
+
+    ident = /^[A-Za-z$][\w$-]*$|^_[\w$-]+$/
+
+    # Annotation strings name template-carried elements only; a dropped
+    # symbol's role lives on the pattern as a label.
+    if annotation.includes ';'
+      fail "annotation strings carry no ';' section — record a dropped symbol's span with a pattern label: SYMBOL[role]"
+
+    colon = annotation.indexOf ':'
+    kind  = (if colon >= 0 then annotation[...colon] else annotation).trim()
+    fail "invalid semantic kind '#{kind}'" unless kind and ident.test(kind)
+
+    elements = @_templateElements action
+    fail "only flat array construction templates can be annotated (action: #{JSON.stringify action})" unless elements?
+
+    # Pattern labels → side-band roles, appended after the template's
+    # roles in pattern order. Name syntax was validated at strip time
+    # (_parseLabels); here the template is known, so a label on a
+    # CARRIED position — an element with a tree slot, named in the
+    # annotation string — rejects.
+    applyLabels = (roles, seen) =>
+      templateRefs = new Set(el.grammarRef for el in elements when el.grammarRef?)
+      for label in labels
+        if templateRefs.has label.position
+          fail "pattern label '[#{label.name}]' sits on '#{symbols[label.position - 1]}' (position #{label.position}), which the template carries — name it in the annotation string"
+        fail "duplicate role '#{label.name}'" if seen.has(label.name)
+        seen.add label.name
+        roles.push {name: label.name, grammarRef: label.position, childSlot: null, spread: false}
+      return
+
+    unless colon >= 0
+      fail "template has #{elements.length} element(s); annotation must be 'kind: part, ...' naming each one" unless elements.length is 0
+      roles = []
+      applyLabels roles, new Set
+      return {kind, roles}
+
+    parts = annotation[colon + 1..].split(',').map (s) -> s.trim()
+    fail "kind-only annotation takes no parts; template has no elements" if elements.length is 0
+    fail "template has #{elements.length} element(s) but annotation names #{parts.length} part(s) — every element needs one" unless elements.length is parts.length
+
+    seen = new Set
+    roles = []
+    for el, i in elements
+      raw    = parts[i]
+      spread = raw.startsWith('...')
+      name   = if spread then raw[3..].trim() else raw
+
+      if el.grammarRef?
+        fail "position ref #{el.grammarRef} requires a real role name, not '_'" if name is '_'
+        fail "spread ref ...#{el.grammarRef} requires spread role '...#{name}'" if el.spread and not spread
+        fail "role '...#{name}' is marked spread but ref #{el.grammarRef} is not a spread" if spread and not el.spread
+      else
+        fail "literal element #{el.literal} cannot take a spread role '...#{name}'" if spread
+        continue if name is '_'
+
+      fail "invalid role name '#{name}'" unless ident.test(name)
+      fail "'$self' is a reserved role name" if name is '$self'
+      fail "duplicate role '#{name}'" if seen.has(name)
+      seen.add name
+
+      if el.grammarRef?
+        fail "position ref #{el.grammarRef} out of range (pattern has #{symbols.length} symbol(s))" unless el.grammarRef >= 1 and el.grammarRef <= symbols.length
+        roles.push {name, grammarRef: el.grammarRef, childSlot: el.childSlot, spread: el.spread}
+      else
+        roles.push {name, grammarRef: null, childSlot: el.childSlot, literal: @_literalValue el.literal}
+
+    applyLabels roles, seen
+    {kind, roles}
+
+  # The JS value of a scanner-classified template literal element. The
+  # template is a JS array literal that the generated parser's action
+  # evaluates at runtime, so the JS engine evaluates the same text here —
+  # the semantic table's literal values match the action's by construction.
+  # Only called on literal elements of the trusted build-time grammar file
+  # (the same trust model as compiling action strings into the parser).
+  # Literal-sourced RoleStore rows are identified by grammarRef null, and
+  # only they have the literal key, so a null value is never ambiguous
+  # with "not literal".
+  _literalValue: (t) ->
+    new Function("return (#{t});")()
+
+  # Compile an action template into the JS body of its ruleActions case.
+  _compileAction: (action, symbols, lhs, ruleId) ->
+    getToken = (_, n) -> "$[$0#{parseInt(n, 10) - symbols.length || ''}]"
+
+    # Self-accumulator list rules compile to in-place mutation: the
+    # template's contents are byte-identical to the spread-copy form, but
+    # the list's identity persists across reductions (linear parses).
+    if typeof action is 'string' and lhs? and (els = @_templateElements action)? and
+       els.length and els[0].spread and els[0].grammarRef is 1 and symbols[0] is lhs
+      ref = (n) -> "$[$0#{n - symbols.length || ''}]"
+      args = for el in els[1..]
+        if el.grammarRef?
+          if el.spread then "...#{ref el.grammarRef}" else ref el.grammarRef
+        else
+          el.literal
+      @accumulators[ruleId] = true
+      code = "{ const __list = #{ref 1};"
+      code += " __list.push(#{args.join ', '});" if args.length
+      code += " return __list; }"
+      return code
+
+    # Replace token references with calculated $[n] references
+    switch typeof action
+      when 'string'
+        regex = /(?<!\$)\$(-?\d+)/gm # Look for $n (capture just digits)
+        regex = /(-?\d+)/g unless regex.test(action) # Or, all bare numbers
+        result = action.replace(regex, getToken).trim()
+      when 'number', 'undefined'
+        result = getToken('', action || 1) # No action or just a number
+      else
+        result = 'null'
+
+    "return #{result};"
+
+  _assignPrecedence!: (rule, precedence) ->
+    if precedence?.prec and @operators[precedence.prec]
+      rule.precedence = @operators[precedence.prec].precedence
+    else if rule.precedence is 0
+      # Use rightmost token's precedence
+      for token in rule.symbols by -1
+        if @operators[token] and not @nonterminals[token]
+          rule.precedence = @operators[token].precedence
+          break
+
+  # Build the switch statement that dispatches reductions to compiled actions.
+  _generateActionSwitch: (actionGroups) ->
+    actions = []
+
+    # Add $0 variable for rule value references
+    actions.push @double + 'const $ = vals;'
+    actions.push @double + 'const $0 = vals.length - 1;'
+
+    actions.push @double + 'switch (rule) {'
+    for action, labels of actionGroups
+      if '\n' in action
+        actions.push @triple + labels.join(' ')
+        actions.push @dedent action, @triple
+      else
+        actions.push @triple + labels.concat(action).join(' ')
+      actions.push @triple + 'break;' unless action.trimStart().startsWith('return')
+    actions.push @double + '}'
+
+    actions.join('\n')
+      .replace(/YYABORT/g, 'return false')
+      .replace(/YYACCEPT/g, 'return true')
+
+  # Terminal id → display name (for diagnostics and CLI output).
+  # `grammar.displays` overrides the display for terminals whose
+  # grammar-symbol name is not what the user types (lexer-minted kinds
+  # — OPT_MARKER is spelled `?`); a key naming an unknown or
+  # non-terminal symbol fails generation.
+  _buildTokenNames!: ->
+    @tokenNames = {}
+
+    for own name, display of @displays
+      unless @symbolIds[name]? and not @nonterminals[name]
+        throw new Error "Grammar error: displays['#{name}'] does not name a terminal in the grammar."
+
+    for own name, id of @symbolIds when id >= 2
+      unless @nonterminals[name]
+        @tokenNames[id] = @displays[name] ?? name
+
+  _augmentGrammar!: (grammar) ->
+    throw new Error "Grammar error: no rules defined." if @rules.length is 0
+
+    @start = grammar.start or @rules[0].lhs
+    unless @nonterminals[@start]
+      throw new Error "Grammar error: no start symbol '#{@start}' defined."
+
+    acceptRule = new Rule "$accept", [@start, "$end"], 0
+    @rules.push acceptRule
+    @acceptRuleIndex = @rules.length - 1
+
+    @nonterminals.$accept = @symbolTable.get "$accept"
+    @nonterminals.$accept.rules.push acceptRule
+    @nonterminals[@start].follows.add "$end"
+
+  # ============================================================================
+  # LR Automaton Construction
+  # ============================================================================
+
+  buildLRAutomaton!: ->
+    acceptItem = new Item @rules[@acceptRuleIndex]
+    firstState = @_closure new State(acceptItem)
+    firstState.id = 0
+    firstState.signature = "#{acceptItem.rule.id}.#{acceptItem.dot}"
+
+    states = [firstState]
+    stateMap = new Map # kernel signature -> state index
+    stateMap.set firstState.signature, 0
+
+    # Build automaton by exploring all transitions
+    marked = 0
+    while marked < states.length
+      itemSet = states[marked++]
+
+      # Single pass: group items by nextSymbol
+      symbolItems = new Map
+      for item as itemSet.items when item.nextSymbol and item.nextSymbol isnt '$end'
+        items = symbolItems.get(item.nextSymbol)
+        unless items
+          items = []
+          symbolItems.set(item.nextSymbol, items)
+        items.push(item)
+
+      # Process each symbol with its pre-collected items
+      for [symbol, items] as symbolItems
+        @_insertState symbol, items, itemSet, states, stateMap
+
+    @states = states
+
+  # Compute closure of an LR item set (lookaheads assigned later using FOLLOW sets)
+  _closure: (itemSet) ->
+    closureSet = new State
+    workingSet = new Set itemSet.items
+    itemCores  = new Map # item.id -> item
+
+    # Process all items
+    while workingSet.size > 0
+      newItems = new Set
+
+      # Only process item cores we haven't yet seen
+      for item as workingSet when !itemCores.has(item.id)
+
+        # Add item to closure
+        closureSet.items.add(item)
+        itemCores.set(item.id, item)
+
+        # Check item type
+        {nextSymbol} = item
+
+        if not nextSymbol
+          # Reduction item
+          closureSet.reductions.add(item)
+          closureSet.hasConflicts = closureSet.reductions.size > 1 or closureSet.hasShifts
+        else if not @nonterminals[nextSymbol]
+          # Shift item (token)
+          closureSet.hasShifts = true
+          closureSet.hasConflicts = closureSet.reductions.size > 0
+        else
+          # NonTerminal - add items for all its rules
+          nt = @nonterminals[nextSymbol]
+          for rule in nt.rules
+            # Create [B → •γ] with empty lookaheads (filled from FOLLOW sets later)
+            newItem = new Item rule
+            newItems.add(newItem) unless itemCores.has(newItem.id)
+
+      workingSet = newItems
+
+    closureSet
+
+  # Compute GOTO(state, symbol) - transitions from one state to another
+  _goto: (itemSet, symbol) ->
+    gotoSet = new State
+
+    for item as itemSet.items when item.nextSymbol is symbol
+      # Create advanced item (lookaheads will be set from FOLLOW sets later)
+      newItem = new Item item.rule, null, item.dot + 1
+      gotoSet.items.add newItem
+
+    if gotoSet.items.size is 0 then gotoSet else @_closure gotoSet
+
+  # Insert new state into automaton (items provided - no scanning needed)
+  _insertState!: (symbol, items, itemSet, states, stateMap) ->
+    # Build kernel signature from provided items (already filtered)
+    kernel = ([item.rule.id, item.dot + 1] for item in items)
+    return unless kernel.length
+
+    kernel.sort (a, b) -> (a[0] - b[0]) or (a[1] - b[1])
+    kernelSig = (pid + '.' + pos for [pid, pos] in kernel).join '|'
+
+    existing = stateMap.get kernelSig
+    if existing?
+      itemSet.transitions.set symbol, existing
+      return
+
+    # Kernel is new; compute closure now
+    gotoSet = @_goto itemSet, symbol
+    return unless gotoSet.items.size > 0
+
+    gotoSet.signature = kernelSig
+    gotoSet.id = states.length
+    stateMap.set kernelSig, gotoSet.id
+    itemSet.transitions.set symbol, gotoSet.id
+    states.push gotoSet
+
+  # ============================================================================
+  # Lookahead Computation - SLR(1) Algorithm
+  # ============================================================================
+
+  computeLookaheads!: ->
+    @computeLookaheads = => {} # Computes once; no-op on subsequent calls
+    @_computeNullableSets()    # ε-derivable symbols
+    @_computeFirstSets()       # First tokens
+    @_computeFollowSets()      # Following tokens
+    @_assignItemLookaheads()   # FOLLOW(A) → item lookaheads
+
+  # Determine nullable symbols (can derive ε)
+  _computeNullableSets!: ->
+    changed = true
+    while changed
+      changed = false
+
+      # Mark rules nullable if all handle symbols are nullable
+      for rule in @rules when not rule.nullable
+        if rule.symbols.every (symbol) => @_isNullable symbol
+          rule.nullable = changed = true
+
+      # Propagate to nonterminals
+      for symbol, nt of @nonterminals when not @_isNullable symbol
+        if nt.rules.some (p) -> p.nullable
+          nt.nullable = changed = true
+
+  _isNullable: (symbol) ->
+    return true if symbol is ''
+    return symbol.every((s) => @_isNullable s) if Array.isArray symbol
+    @nonterminals[symbol]?.nullable or false
+
+  # Compute FIRST sets (tokens that can begin derivations)
+  _computeFirstSets!: ->
+    changed = true
+    while changed
+      changed = false
+
+      for rule in @rules
+        firsts = @_computeFirst rule.symbols
+        oldSize = rule.firsts.size
+        rule.firsts.clear()
+        firsts.forEach (item) => rule.firsts.add item
+        changed = true if rule.firsts.size > oldSize
+
+      for symbol, nt of @nonterminals
+        oldSize = nt.firsts.size
+        nt.firsts.clear()
+        for rule in nt.rules
+          rule.firsts.forEach (s) => nt.firsts.add s
+        changed = true if nt.firsts.size > oldSize
+
+  _computeFirst: (symbols) ->
+    return new Set if symbols is ''
+    return @_computeFirstOfSequence symbols if Array.isArray symbols
+    return new Set([symbols]) unless @nonterminals[symbols]
+    @nonterminals[symbols].firsts
+
+  _computeFirstOfSequence: (symbols) ->
+    firsts = new Set
+    for symbol in symbols
+      if @nonterminals[symbol]
+        @nonterminals[symbol].firsts.forEach (s) => firsts.add s
+      else
+        firsts.add symbol
+      break unless @_isNullable symbol
+    firsts
+
+  # Compute FOLLOW sets (terminals that can follow nonterminals)
+  _computeFollowSets!: ->
+    changed = true
+    while changed
+      changed = false
+
+      for rule in @rules
+        for symbol, i in rule.symbols when @nonterminals[symbol]
+          oldSize = @nonterminals[symbol].follows.size
+
+          if i is rule.symbols.length - 1
+            # Symbol at end: add FOLLOW(LHS)
+            @nonterminals[rule.lhs].follows.forEach (item) =>
+              @nonterminals[symbol].follows.add item
+          else
+            # Add FIRST(β) where β follows symbol
+            beta = rule.symbols[i + 1..]
+            firstSet = @_computeFirst beta
+
+            firstSet.forEach (item) => @nonterminals[symbol].follows.add item
+
+            # If β is nullable, also add FOLLOW(LHS)
+            if @_isNullable beta
+              @nonterminals[rule.lhs].follows.forEach (item) =>
+                @nonterminals[symbol].follows.add item
+
+          changed = true if @nonterminals[symbol].follows.size > oldSize
+
+  # Assign FOLLOW sets to reduction items
+  _assignItemLookaheads!: ->
+    return unless @states
+    for state in @states
+      for item as state.reductions
+        follows = @nonterminals[item.rule.lhs]?.follows
+        if follows
+          item.lookaheads.clear()
+          item.lookaheads.add token for token as follows
+
+  # ============================================================================
+  # Parse Table Generation
+  # ============================================================================
+
+  buildParseTable!: (itemSets = @states) ->
+    states = []
+    {nonterminals, operators} = this
+    [NONASSOC, SHIFT, REDUCE, ACCEPT] = [0, 1, 2, 3]
+
+    for itemSet, k in itemSets
+      state = states[k] = {}
+
+      # Shift and goto actions
+      for [stackSymbol, gotoState] as itemSet.transitions when @symbolIds[stackSymbol]?
+        if nonterminals[stackSymbol]
+          state[@symbolIds[stackSymbol]] = gotoState
+        else
+          state[@symbolIds[stackSymbol]] = [SHIFT, gotoState]
+
+      # Accept action
+      for item as itemSet.items when item.nextSymbol is "$end" and @symbolIds["$end"]?
+        state[@symbolIds["$end"]] = [ACCEPT]
+
+      # Reduce actions
+      for item as itemSet.reductions
+        for stackSymbol as item.lookaheads when @symbolIds[stackSymbol]?
+          action = state[@symbolIds[stackSymbol]]
+          op = operators[stackSymbol]
+
+          if action
+            # Resolve conflict
+            which = if action[0] instanceof Array then action[0] else action
+            solution = @_resolveConflict item.rule, op, [REDUCE, item.rule.id], which
+
+            if solution.bydefault
+              # Categorize conflict type
+              isEmpty = item.rule.symbols.length is 0 or (item.rule.symbols.length is 1 and item.rule.symbols[0] is '')
+              isPassthrough = item.rule.symbols.length is 1 and nonterminals[item.rule.symbols[0]]  # Single nonterminal
+              hasPrecedence = op and item.rule.precedence > 0
+              isReduceReduce = which[0] is REDUCE
+
+              # Determine category
+              category = 'empty-optional' if isEmpty
+              category = 'passthrough' if !isEmpty and isPassthrough
+              category = 'precedence' if !isEmpty and !isPassthrough and hasPrecedence
+              category = 'reduce-reduce' if !isEmpty and !isPassthrough and !hasPrecedence and isReduceReduce
+              category = 'ambiguous' if !isEmpty and !isPassthrough and !hasPrecedence and !isReduceReduce
+
+              # Only count and track problematic conflicts (exclude benign ones)
+              if category is 'reduce-reduce' or category is 'ambiguous'
+                @conflicts++
+                @conflictDetails.push {
+                  state: k,
+                  lookahead: stackSymbol,
+                  lookaheadName: @tokenNames[@symbolIds[stackSymbol]] or stackSymbol,
+                  rule: item.rule.id,
+                  lhs: item.rule.lhs,
+                  ruleSymbols: item.rule.symbols.join(' '),
+                  shift: if which[0] is SHIFT then which[1] else null,
+                  reduce: item.rule.id,
+                  resolution: if which[0] is SHIFT then 'shift' else 'reduce',
+                  category: category
+                }
+            else
+              action = solution.action
+          else
+            action = [REDUCE, item.rule.id]
+
+          if action?.length
+            state[@symbolIds[stackSymbol]] = action
+          else if action is NONASSOC
+            state[@symbolIds[stackSymbol]] = undefined
+
+    @parseTable = states
+
+  # Resolve conflicts using precedence and associativity
+  _resolveConflict: (rule, op, reduce, shift) ->
+    solution = {rule, operator: op, r: reduce, s: shift}
+    [NONASSOC, SHIFT, REDUCE] = [0, 1, 2]
+
+    if shift[0] is REDUCE
+      solution.action = if shift[1] < reduce[1] then shift else reduce
+      solution.bydefault = true if shift[1] isnt reduce[1]
+      return solution
+
+    if rule.precedence is 0 or not op
+      solution.bydefault = true
+      solution.action = shift
+    else if rule.precedence < op.precedence
+      solution.action = shift
+    else if rule.precedence is op.precedence
+      solution.action = switch op.assoc
+        when "right" then shift
+        when "left" then reduce
+        when "nonassoc" then NONASSOC
+        else shift
+    else
+      solution.action = reduce
+
+    solution
+
+  # ============================================================================
+  # Code Generation
+  # ============================================================================
+
+  generate: ->
+    parserInstance = @_generateModuleCore()
+    """
+    // ES6 Parser generated by Solar #{VERSION}
+
+    const parserInstance = #{parserInstance}
+
+    const createParser = (init = {}) => {
+      const p = Object.create(parserInstance);
+      Object.defineProperty(p, "ctx", {
+        value: { ...init },
+        enumerable: false,
+        writable: true,
+        configurable: true,
+      })
+      return p
+    }
+
+    const parser = /*#__PURE__*/createParser()
+
+    export { parser }
+    export const Parser = createParser
+    export const parse = parser.parse.bind(parser)
+    export default parser
+    """
+
+  _generateModuleCore: ->
+    tableCode = @_generateTableCode @parseTable
+
+    """{
+      symbolIds: #{JSON.stringify @symbolIds},
+      tokenNames: #{JSON.stringify(@tokenNames).replace /"([0-9]+)":/g, "$1:"},
+      semantics: #{JSON.stringify @semantics},
+      accumulators: #{JSON.stringify @accumulators},
+      parseTable: #{tableCode},
+      ruleTable: #{JSON.stringify @ruleTable},
+      ruleActions: #{@ruleActions},
+      #{String(@parse).replace(/^function /, '')},
+      ctx: {},
+    }"""
+
+  _generateTableCode: (stateTable) ->
+    # Interleaved delta-encoded format for optimal Brotli compression (~30% smaller)
+    # Format per row: [count, Δkey₁, Δkey₂..., val₁, val₂...]
+    # Actions: positive=SHIFT/GOTO, negative=REDUCE, zero=ACCEPT
+    data = []
+
+    for state in stateTable
+      entries = []
+      for own sym, act of state when act?
+        val = if Array.isArray act
+          switch act[0]
+            when 1 then act[1]    # SHIFT
+            when 2 then -act[1]   # REDUCE
+            when 3 then 0         # ACCEPT
+        else act  # GOTO
+        entries.push [+sym, val]
+      entries.sort (a, b) -> a[0] - b[0]
+
+      data.push entries.length
+      k = 0
+      for [key] in entries
+        data.push key - k
+        k = key
+      for [, val] in entries
+        data.push val
+
+    # Decoder reconstructs [{key: val}, ...] at runtime
+    "(()=>{let d=[#{data.join ','}],t=[],p=0,n,o,k,a;while(p<d.length){n=d[p++];o={};k=0;a=[];while(n--)k+=d[p++],a.push(k);for(k of a)o[k]=d[p++];t.push(o)}return t})()"
+
+  # ============================================================================
+  # Runtime Parser
+  # ============================================================================
+  #
+  # Returns {sexpr, stores, diagnostics, trivia}:
+  #   sexpr       — the s-expression AST, or null when parsing failed
+  #   stores      — {nodes, roles, nodeIds}: plain NodeStore/RoleStore row
+  #                 arrays populated at reduce time, plus the node → nodeId
+  #                 WeakMap (the side map — how downstream consumers
+  #                 join tree arrays to rows; it serializes to nothing).
+  #                 src/stores.js is the query layer; the generated module
+  #                 stays dependency-free. Null when parsing failed.
+  #   diagnostics — array of {message, start, end, expected, got}; empty on
+  #                 success. Offsets are UTF-16 code units into the input.
+  #   trivia      — the lexer's span-anchored trivia channel (comments and
+  #                 blank-line runs, {kind, start, end, text}), relayed
+  #                 verbatim when the lexer exposes one; null otherwise.
+  #                 Present on failure too — trivia is scan-time fact.
+
+  parse: (input) ->
+    [stk, vals, locs] = [[0], [null], [null]]
+    parseTable = @parseTable
+    EOF = 1
+    diagnostics = []
+
+    # NodeStore/RoleStore accumulation. nodeIds is the
+    # node → nodeId side map: dense ids from 1, stable for this
+    # parse; the node itself carries nothing.
+    nodes = []
+    roles = []
+    nodeIds = new WeakMap
+    nextNodeId = 1
+
+    lexer = Object.create @lexer
+    sharedState = {ctx: {}}
+    sharedState.ctx[k] = v for own k, v of @ctx
+
+    lexer.setInput input, sharedState.ctx
+    [sharedState.ctx.lexer, sharedState.ctx.parser] = [lexer, this]
+
+    lex = =>
+      token = lexer.lex() or EOF
+      token = @symbolIds[token] or token unless typeof token is 'number'
+      token
+
+    symbol = null
+    tokenLoc = null
+    rv = {}
+
+    loop
+      state = stk[stk.length - 1]
+      if not symbol?
+        symbol = lex()
+        # EOF carries a zero-width span at end of input; lexers stop
+        # updating .loc once exhausted.
+        tokenLoc = if symbol is EOF
+          {start: input.length, end: input.length}
+        else
+          lexer.loc ?? null
+      action = parseTable[state]?[symbol]
+
+      unless action?
+        # +p > 2 excludes the internal error token (id 2) from user-facing
+        # expectations. The list dedups: a display override can render
+        # a minted kind as a glyph another terminal already spells
+        # (OPT_MARKER and the existence `?` both display as `?`).
+        expected = []
+        for own p of parseTable[state] when @tokenNames[p] and +p > 2
+          expected.push @tokenNames[p] unless expected.includes @tokenNames[p]
+        got = if symbol is EOF then 'end of input' else "'#{@tokenNames[symbol] or symbol}'"
+        start = tokenLoc?.start ?? 0
+        end   = tokenLoc?.end ?? start
+        message = "Unexpected #{got}"
+        message += " — expected #{expected.join(', ')}" if expected.length
+        diagnostics.push {message, start, end, expected, got}
+        return {sexpr: null, stores: null, diagnostics, trivia: lexer.trivia ?? null}
+
+      if action > 0  # SHIFT or GOTO
+        stk.push symbol, action
+        vals.push lexer.text
+        locs.push (lexer.loc ?? null)
+        symbol = null
+
+      else if action < 0  # REDUCE
+        len = @ruleTable[(-action) * 2 + 1]
+
+        # Span of the whole reduction: from the first RHS symbol's start to
+        # the last one's end. Empty productions get a zero-width span at the
+        # current lookahead's start (the position where the empty match
+        # sits), falling back to the previous symbol's end.
+        span = if len
+          first = locs[locs.length - len]
+          last  = locs[locs.length - 1]
+          {start: first?.start ?? 0, end: last?.end ?? (first?.end ?? 0)}
+        else
+          at = tokenLoc?.start ?? (locs[locs.length - 1]?.end ?? 0)
+          {start: at, end: at}
+
+        rv.$  = vals[vals.length - (len or 1)]
+        rv._$ = span
+
+        r = @ruleActions.call rv, -action, vals, locs, sharedState.ctx
+        rv.$ = r if r?
+
+        # A reduction that CONSTRUCTED a node (a fresh array) registers it:
+        # NodeStore row always, RoleStore rows when the rule is annotated.
+        # Pass-through reductions return an already-registered array and
+        # create no identity. A node's $self span is its
+        # NodeStore row's span — $self is never a RoleStore row.
+        #
+        # Accumulator rules (generator-marked) mutate and return the
+        # already-registered list: the SAME node grows, so its NodeStore
+        # span extends to the current reduction span. The refresh is
+        # scoped to accumulator rules only — pass-through/Parenthetical
+        # reductions never touch the child's own span.
+        node = rv.$
+        if Array.isArray(node) and nodeIds.has(node) and @accumulators[-action]
+          row = nodes[nodeIds.get(node) - 1]
+          row.sourceStart = span.start
+          row.sourceEnd = span.end
+        if Array.isArray(node) and not nodeIds.has(node)
+          nodeId = nextNodeId++
+          nodeIds.set node, nodeId
+          sem = @semantics[-action]
+          nodes.push {nodeId, fileId: 0, semanticKind: sem?.kind ?? null, ruleId: -action, sourceStart: span.start, sourceEnd: span.end}
+          if sem
+            base = vals.length - len
+            for part in sem.roles
+              if part.grammarRef?
+                at  = base + part.grammarRef - 1
+                loc = locs[at]
+                # Annotated refs address real matched symbols, whose locs
+                # the lexer protocol guarantees; a hole is a protocol
+                # violation, never a position to default.
+                throw new Error "parse: missing loc for grammarRef #{part.grammarRef} of rule #{-action} — lexer protocol violation" unless loc?
+                row = {nodeId, role: part.name, grammarRef: part.grammarRef, childSlot: part.childSlot, sourceStart: loc.start, sourceEnd: loc.end, childNodeId: null, fileId: 0}
+                if part.spread
+                  # Spread span covers the spliced children's full extent
+                  # (the ref'd symbol's span); per-element spans come from
+                  # the children's own NodeStore rows.
+                  row.spread = true
+                else
+                  row.childNodeId = nodeIds.get(vals[at]) ?? null
+                roles.push row
+              else
+                # Literal-sourced role: statically-known value, no span.
+                roles.push {nodeId, role: part.name, grammarRef: null, childSlot: part.childSlot, literal: part.literal, fileId: 0}
+
+        if len
+          stk.length  -= len * 2
+          vals.length -= len
+          locs.length -= len
+
+        stk.push @ruleTable[(-action) * 2]
+        vals.push rv.$
+        locs.push span
+        stk.push parseTable[stk[stk.length - 2]][stk[stk.length - 1]]
+
+      else  # ACCEPT
+        return {sexpr: vals[vals.length - 1], stores: {nodes, roles, nodeIds}, diagnostics, trivia: lexer.trivia ?? null}
+
+# ==============================================================================
+# Exports
+# ==============================================================================
+
+export { Generator }
+
+# ==============================================================================
+# CLI Interface
+# ==============================================================================
+
+# Check if running as CLI (handles symlinks from global install)
+scriptPath = fileURLToPath(import.meta.url)
+isRunAsScript = process.argv[1] and (
+  process.argv[1] is scriptPath or
+  fs.realpathSync(process.argv[1]) is scriptPath or
+  fs.realpathSync(process.argv[1]) is fs.realpathSync(scriptPath)
+)
+
+if isRunAsScript
+  do ->
+    showVersion = ->
+      console.log """
+      Solar #{VERSION} - SLR(1) Parser Generator
+      """
+
+    showHelp = ->
+      showVersion()
+      console.log """
+      Usage: solar [options] <grammar-file>
+
+      Options:
+        -h, --help              Show this help
+        -v, --version           Show version
+        -i, --info              Show grammar information
+        -c, --conflicts         Show conflict details (use with --info)
+        -o, --output <file>     Output file (default: parser.js)
+
+      Examples:
+        solar grammar.rip
+        solar --info grammar.rip
+        solar --info --conflicts grammar.rip
+        solar -o parser.js grammar.rip
+      """
+
+    showStats = (generator) ->
+      terminals = Object.keys(generator.tokenNames or {}).length
+      nonterminals = Object.keys(generator.nonterminals or {}).length
+      rules = generator.rules?.length or 0
+      states = generator.states?.length or 0
+      conflicts = generator.conflicts or 0
+      annotated = Object.keys(generator.semantics or {}).length
+      optedOut = generator.optedOutConstructors?.length or 0
+
+      console.log """
+
+      ⏱️ Statistics:
+      • Terminals: #{terminals}
+      • Nonterminals: #{nonterminals}
+      • Rules: #{rules}
+      • States: #{states}
+      • Conflicts: #{conflicts}
+      • Annotated rules: #{annotated}
+      • Opted-out constructor rules: #{optedOut}
+      """
+
+      if optedOut > 0
+        console.log "\n📋 Opted-out constructor rules (intentional, with reasons):"
+        for desc in generator.optedOutConstructors
+          console.log "  • #{desc}"
+
+      # Show conflict details if requested
+      if options.conflicts and generator.conflictDetails?.length
+        console.log "\n🔧 Conflict Details (first 30):"
+        for conflict, i in generator.conflictDetails.slice(0, 30)
+          console.log "\n  #{i + 1}. State #{conflict.state}, lookahead '#{conflict.lookaheadName}':"
+          console.log "     Rule #{conflict.rule}: #{conflict.lhs} → #{conflict.ruleSymbols}"
+          console.log "     Resolution: #{conflict.resolution} (by default)"
+
+    # Parse command line
+    options = {help: false, version: false, info: false, conflicts: false, output: 'parser.js'}
+    grammarFile = null
+    i = 0
+
+    while i < process.argv.length - 2
+      arg = process.argv[i + 2]
+      switch arg
+        when '-h', '--help'      then options.help      = true
+        when '-v', '--version'   then options.version   = true
+        when '-i', '--info'      then options.info      = true
+        when '-c', '--conflicts' then options.conflicts = true
+        when '-o', '--output'    then options.output    = process.argv[++i + 2]
+        else grammarFile = arg unless arg.startsWith('-')
+      i++
+
+    if options.help      then showHelp()    ; process.exit 0
+    if options.version   then showVersion() ; process.exit 0
+    if not grammarFile   then showHelp()    ; process.exit 0
+    if options.conflicts then options.info = true  # --conflicts implies --info
+
+    try
+      unless fs.existsSync grammarFile
+        console.error "Grammar file not found: #{grammarFile}"
+        process.exit 1
+
+      # Load grammar
+      grammar = if grammarFile.endsWith('.js') or grammarFile.endsWith('.ts') or grammarFile.endsWith('.rip')
+        import!(pathToFileURL(path.resolve(grammarFile)).href).default
+      else if grammarFile.endsWith('.json')
+        JSON.parse fs.readFileSync(grammarFile, 'utf8')
+      else
+        throw new Error "Unsupported format. Use .js, .ts, .json, or .rip"
+
+      unless grammar
+        throw new Error "Failed to load grammar"
+
+      # Generate parser
+      generator = new Generator grammar, {...options, verbose: true}
+
+      if options.info
+        showStats generator
+      else
+        parserCode = generator.generate()
+        fs.writeFileSync options.output, parserCode
+        console.log "\nParser generated: #{options.output}"
+
+    catch error
+      console.error "Error:", error.message
+      process.exit 1
