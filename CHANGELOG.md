@@ -5,6 +5,18 @@ repository's pull requests.
 
 ## Unreleased
 
+- Await-emitting call chains group correctly: `g!()` and `g!.x`-style
+  spellings agree — a call whose callee is the dammit operator sits in
+  the unary tier, so `fetch!("u").json!()` emits
+  `await (await fetch("u")).json()` instead of binding the accessor
+  onto the Promise. A string-LITERAL left operand of `*` is repetition
+  (`"-" * 40` emits `"-".repeat(40)`; a dynamic left operand keeps JS
+  `*`). A bare word-unary left operand of `**` groups
+  (`(typeof x) ** 2` — the unparenthesized form is a JS SyntaxError).
+  Every `code` battery row's emitted output must now PARSE as
+  JavaScript, so a byte pin can never lock in unrunnable output again
+  (#37)
+
 - Declaration output carries the module's edges: imports whose names
   the declarations reference are retained (an unimported name broke
   every consumer with TS2304), `export default` emits as itself
