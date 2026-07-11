@@ -430,3 +430,22 @@ test 'static method reads a string-named static via @', '''
     @tag: -> @"app-name"
   Widget.tag()
   ''', 'rip'
+
+test 'quoted and bare spellings of a plain member are interchangeable', '''
+  class C
+    count = 5
+    both: -> [@count, @"count"]
+  new C().both()
+  ''', [5, 5]
+
+test 'static methods write both spellings via @', '''
+  class C
+    @version = 1
+    @"app-name" = "rip"
+    @bump: ->
+      @version = 2
+      @"app-name" = "rip2"
+      this
+  C.bump()
+  [C.version, C["app-name"]]
+  ''', [2, 'rip2']
