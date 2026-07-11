@@ -441,6 +441,22 @@ fail "inline @unique off :model/:mixin is rejected as persistence metadata", '''
     code! @unique
   ''', ":model/:mixin-only"
 
+test 'diamond mixin inclusion dedupes', '''
+  Base = schema :mixin
+    ref! uuid
+  Left = schema :mixin
+    left! string
+    @mixin Base
+  Right = schema :mixin
+    right! string
+    @mixin Base
+  User = schema :model
+    name! string
+    @mixin Left
+    @mixin Right
+  [...User._normalize().fields.keys()]
+  ''', ['name', 'ref', 'left', 'right']
+
 test '@unique survives mixin expansion into a :model', '''
   Keyed = schema :mixin
     code! string @unique
