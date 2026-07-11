@@ -1324,6 +1324,15 @@ function __schemaExpandMixins(host, fields, directives, ctx) {
           [{ field: e.name, error: 'mixin-collision', message: e.name + ' from mixin ' + target + ' collides with existing field' }],
           host.name, host.kind);
       }
+      // A mixin field may carry persistence metadata (@unique, {attrs})
+      // for the :model that includes it; expanding it into any other
+      // kind would silently strip that metadata — reject instead.
+      if (host.kind !== 'model' && (e.unique === true || e.attrs)) {
+        throw new SchemaError(
+          [{ field: e.name, error: 'mixin-persistence',
+             message: e.name + ' from mixin ' + target + ' carries persistence metadata (@unique/attrs) — :model-only; a :' + host.kind + ' cannot include it' }],
+          host.name, host.kind);
+      }
       fields.set(e.name, {
         name: e.name,
         required: e.modifiers.includes('!'),

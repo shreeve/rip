@@ -713,8 +713,11 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
         bracketDefault = parseDefaultBracket(part, name, fail);
         hasDefault = true;
       } else if (head.kind === '{') {
-        if (kind !== 'model') {
-          fail(`field attrs ('{…}') are persistence metadata — :model-only ('{was: "old_column"}' annotates a column rename)`, head.start);
+        // Persistence metadata may also ride a :mixin field — it takes
+        // effect when a :model includes the mixin; inclusion into any
+        // other kind rejects at expansion (__schemaExpandMixins).
+        if (kind !== 'model' && kind !== 'mixin') {
+          fail(`field attrs ('{…}') are persistence metadata — :model/:mixin-only ('{was: "old_column"}' annotates a column rename)`, head.start);
         }
         if (attrs) fail(`field '${name}' has more than one '{…}' attrs bracket`, head.start);
         attrs = parseAttrsTokens(part, name, fail);
@@ -731,8 +734,8 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
         transformTokens = part.slice(1);
       } else if (head.kind === '@') {
         const attrName = isWord(part[1]) ? part[1].value : null;
-        if (kind !== 'model') {
-          fail(`inline '@${attrName ?? ''}' on field '${name}' is persistence metadata — :model-only ('@unique' marks single-column uniqueness)`, head.start);
+        if (kind !== 'model' && kind !== 'mixin') {
+          fail(`inline '@${attrName ?? ''}' on field '${name}' is persistence metadata — :model/:mixin-only ('@unique' marks single-column uniqueness)`, head.start);
         }
         if (part.length === 2 && attrName === 'unique') {
           if (uniqueAttr) fail(`field '${name}' has more than one '@unique'`, head.start);
