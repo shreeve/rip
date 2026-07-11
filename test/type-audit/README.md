@@ -11,7 +11,7 @@ of `bun test` — run it when you want the scoreboard.
 | ------------- | -------------------------------------------------------------- |
 | `fixtures/`   | Typed programs 01–12, each `.rip` with a `.ts`/`.tsx` twin.    |
 | `runner.js`   | Both audits — the dimension grid and the hover audit.          |
-| `hovers.json` | The pinned hover snapshot every hover run compares against.    |
+| `hover-pins.json` | Expected hovers for symbols the twin can't check (rip-native + no-twin), compared each run. |
 
 ## Run it
 
@@ -22,7 +22,7 @@ bun run type-audit                  # the Type Audit (five dimensions) — fast,
 bun run type-audit --hover          # the Hover Audit only (drives LSP servers; slower)
 bun run type-audit --all            # both audits
 bun run type-audit --v              # + list the expected hover divergences in full
-bun run type-audit --update-hovers  # accept current hover text as the pinned snapshot
+bun run type-audit --update-hovers  # re-pin expected hovers (verify the change is correct first)
 ```
 
 (`bun run type-audit` is `bun test/type-audit/runner.js` — the direct path
@@ -52,10 +52,10 @@ The fixtures self-check: a `# @ts-expect-error` marks a line that MUST
 error. If the face and tsgo satisfy every marker and add none, the
 editor publishes nothing — that is the verdict passing.
 
-## The Hover Audit — twin oracle + pinned snapshot
+## The Hover Audit — twin oracle + expected hovers
 
 Every top-level declaration is hovered through the editor server, and
-each answer is judged twice:
+each answer is judged against the best available reference:
 
 **Twin oracle (correctness).** Where the hand-written `.ts`/`.tsx` twin
 declares the same symbol, hovering the twin through a raw tsgo LSP gives
@@ -67,13 +67,15 @@ bucket. Rip-native constructs (component / schema / reactive) are
 expected divergences: the twin approximates them with a different
 system (React / zod), so it is not an oracle there.
 
-**Snapshot (regression).** Every probe is pinned in `hovers.json`,
-twin or no twin. This exists for the **write-only-`any`** class: a
-binding whose face compiles, emits no diagnostic, and runs identically —
-but hovers `any` where a real type belongs. Error-based dimensions
-cannot see it; pinned hover text can. Accepting new hover bytes is an
-explicit act (`--update-hovers`, regenerated in the same commit as the
-change that moved them).
+**Expected hovers (correctness baseline).** Every symbol the twin
+*cannot* validate — rip-native (component / schema / reactive) and any
+symbol with no twin — is pinned in `hover-pins.json`, seeded from
+values certified against the v3 oracle. The live hover must match its
+expected value. Twin-checked symbols are deliberately *not* pinned here:
+the twin validates them live, and pinning raw text would flag harmless
+changes (union-member order) the twin normalizes away. Re-pinning is an
+explicit act (`--update-hovers`) — verify the change is correct first,
+in the same commit as the cause.
 
 The report's closing **gauge** scores probes answering a real type
 rather than `any` — full marks is the goal. An independent invariant

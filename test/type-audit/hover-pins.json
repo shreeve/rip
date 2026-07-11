@@ -1,0 +1,77 @@
+{
+  "01-basic.rip": {
+    "notNullable@83": "let notNullable: string",
+    "implicitAny@85": "let implicitAny: (x: any) => any"
+  },
+  "06-functions.rip": {
+    "String@326": "var String: StringConstructor Allows manipulation and formatting of text strings and determination and location of substrings within strings."
+  },
+  "08-reactive.rip": {
+    "clicks@4": "let clicks: number",
+    "username@5": "let username: string",
+    "enabled@6": "let enabled: boolean",
+    "tags@7": "let tags: string[]",
+    "clicksDoubled@10": "const clicksDoubled: number",
+    "greeting@11": "const greeting: string",
+    "hasTags@12": "const hasTags: boolean",
+    "clickLogger@15": "const clickLogger: Function",
+    "badClicks@29": "let badClicks: number",
+    "badName@31": "let badName: string",
+    "badEnabled@33": "let badEnabled: boolean",
+    "badTags@35": "let badTags: string[]",
+    "badComputed@38": "const badComputed: string"
+  },
+  "09-components.rip": {
+    "Input@9": "const Input: typeof Input",
+    "Button@23": "const Button: typeof Button",
+    "Form@39": "const Form: typeof Form",
+    "PropTypeTests@76": "const PropTypeTests: typeof PropTypeTests",
+    "BindingTypeTests@95": "const BindingTypeTests: typeof BindingTypeTests",
+    "TypeTestComp@110": "const TypeTestComp: typeof TypeTestComp",
+    "RenderCondTest@139": "const RenderCondTest: typeof RenderCondTest",
+    "FilterGapTest@172": "const FilterGapTest: typeof FilterGapTest",
+    "EventHandlerTest@197": "const EventHandlerTest: typeof EventHandlerTest",
+    "Select@216": "const Select: typeof Select",
+    "GenericUsageTests@238": "const GenericUsageTests: typeof GenericUsageTests",
+    "cart@279": "let cart: Cart",
+    "CartDemo@285": "const CartDemo: typeof CartDemo",
+    "CartTypeTests@301": "const CartTypeTests: typeof CartTypeTests",
+    "DefaultedMethodParams@332": "const DefaultedMethodParams: typeof DefaultedMethodParams",
+    "DefaultedMethodParamsTests@347": "const DefaultedMethodParamsTests: typeof DefaultedMethodParamsTests",
+    "EqualsFormMethods@370": "const EqualsFormMethods: typeof EqualsFormMethods",
+    "EqualsFormMethodTests@380": "const EqualsFormMethodTests: typeof EqualsFormMethodTests",
+    "RefTests@399": "const RefTests: typeof RefTests",
+    "RefMismatchTests@415": "const RefMismatchTests: typeof RefMismatchTests",
+    "RefForwardChild@435": "const RefForwardChild: typeof RefForwardChild",
+    "RefForwardParent@441": "const RefForwardParent: typeof RefForwardParent",
+    "ConstMembers@456": "const ConstMembers: typeof ConstMembers",
+    "ConstMemberTests@465": "const ConstMemberTests: typeof ConstMemberTests"
+  },
+  "10-validation.rip": {
+    "User@43": "let User: Schema<User, User>",
+    "alice@53": "let alice: User",
+    "bob@54": "let bob: User",
+    "OrderItem@71": "let OrderItem: Schema<OrderItem, OrderItem>",
+    "OrderMeta@77": "let OrderMeta: Schema<OrderMeta, OrderMeta>",
+    "Order@80": "let Order: Schema<Order, OrderData>",
+    "order@93": "let order: Order",
+    "IntroStep@125": "let IntroStep: Schema<IntroStep, IntroStep>",
+    "TaskStep@130": "let TaskStep: Schema<TaskStep, TaskStep>",
+    "FinalStep@135": "let FinalStep: Schema<FinalStep, FinalStep>",
+    "Step@140": "let Step: { parse(data: unknown): Step; safe(data: unknown): SchemaSafeResult<Step>; ok(data: unknown): boolean; parseAsync(data: unknown): Promise<Step>; safeAsync(data: unknown): Promise<SchemaSafeResult<Step>>; okAsync(data: unknown): Promise<boolean>; toJSONSchema(): Record<string, unknown>; array: ArraySchema<Step>; }",
+    "Workflow@146": "let Workflow: Schema<Workflow, Workflow>",
+    "workflow@150": "let workflow: Workflow",
+    "QBCustomer@177": "let QBCustomer: Schema<QBCustomer, QBCustomer>",
+    "customer@181": "let customer: QBCustomer"
+  },
+  "11-inference.rip": {
+    "total@38": "let total: number",
+    "label@40": "let label: string",
+    "active@42": "let active: boolean",
+    "result@48": "let result: number",
+    "upper@56": "let upper: string",
+    "joined@58": "let joined: string",
+    "first@64": "let first: string",
+    "msg@70": "let msg: string"
+  }
+}
