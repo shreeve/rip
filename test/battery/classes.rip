@@ -1,0 +1,147 @@
+# Test: Classes (2 node types)
+# Tests "class" and "super" node types
+
+# ==============================================================================
+# Class Definitions: "class"
+# ==============================================================================
+
+# Class with methods
+test "class methods", "class Math\n  add: (a, b) -> a + b\n  multiply: (a, b) -> a * b\nm = new Math(); m.add(2, 3)", 5
+
+# Static methods
+test "static method", "class Utils\n  @square: (x) -> x * x\nUtils.square(5)", 25
+
+# Class with constructor logic
+test "constructor logic", "class Counter\n  constructor: ->\n    @count = 0\n  increment: -> @count += 1\nc = new Counter(); c.increment(); c.count", 1
+
+# ==============================================================================
+# Super Calls: "super"
+# ==============================================================================
+
+# Super method call
+test "super method call", "class Animal\n  speak: -> 'sound'\nclass Dog extends Animal\n  speak: -> super.speak() + '!'\nd = new Dog(); d.speak()", "sound!"
+
+# Super with spread arguments (Rip ES6 prefix syntax)
+test "super with spread args", '''
+  class Parent
+    method: (...args) -> args.join('-')
+
+  class Child extends Parent
+    method: -> super(...arguments)
+
+  c = new Child()
+  c.method(1, 2, 3)
+''', '1-2-3'
+
+# ==============================================================================
+# More Class Features
+# ==============================================================================
+
+# Class expressions
+test 'class expression', '''
+  Animal = class
+    speak: -> 'sound'
+  new Animal().speak()
+  ''', 'sound'
+
+# Empty class
+test 'empty class', '''
+  class Empty
+  new Empty().constructor.name
+  ''', 'Empty'
+
+# Method chaining
+test 'method chaining', '''
+  class Builder
+    setValue: (v) -> @value = v; this
+    getValue: -> @value
+  new Builder().setValue(42).getValue()
+  ''', 42
+
+# Bound methods
+test 'bound method', '''
+  class Counter
+    constructor: -> @count = 0
+    increment: => @count++
+  c = new Counter()
+  fn = c.increment
+  fn()
+  c.count
+  ''', 1
+
+# instanceof
+test 'instanceof check', '''
+  class Animal
+  a = new Animal()
+  a instanceof Animal
+  ''', true
+
+# Override method
+test 'override method', '''
+  class Animal
+    speak: -> 'sound'
+  class Dog extends Animal
+    speak: -> 'bark'
+  new Dog().speak()
+  ''', 'bark'
+
+# Constructor explicit return
+test 'constructor explicit return', '''
+  class A
+    constructor: ->
+      return {custom: 'object'}
+  new A().custom
+  ''', 'object'
+
+# Async method
+test 'async method', '''
+  class Async
+    getData: -> await Promise.resolve(42)
+  do ->
+    await new Async().getData()
+  ''', 42
+
+# Four-level inheritance
+test 'four-level inheritance', '''
+  class A
+    val: -> 'a'
+  class B extends A
+  class C extends B
+  class D extends C
+  new D().val()
+  ''', 'a'
+
+# ==============================================================================
+# Ruby-style Constructor: XXX.new()
+# ==============================================================================
+
+# Code generation
+code "ruby-style new", "Counter.new()", "Counter.new();"
+code "ruby-style new args", "Counter.new(1, 2)", "Counter.new(1, 2);"
+code "ruby-style new expression", "getClass().new(x)", "getClass().new(x);"
+
+# ==============================================================================
+# Meta Properties
+# ==============================================================================
+
+# ==============================================================================
+# Class with additional statements (object body + nested class/extra stmts)
+# @param, bound methods, and async must work even with extra statements present
+# ==============================================================================
+
+# ==============================================================================
+# Class name restriction
+# ==============================================================================
+# `class App.Sub` and `class arr[0]` used to parse but produce broken JS
+# (`class .,App,Sub`) because the codegen interpolated the array-shaped name
+# into a `class ${name}` template. The grammar now restricts class names to
+# Identifier or ThisProperty (the latter enabling nested static classes).
+
+fail "class with member-access name does not parse",
+  'class App.Sub'
+
+fail "class with index name does not parse", '''
+  arr = []
+  class arr[0]
+  '''
+

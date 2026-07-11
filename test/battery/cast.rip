@@ -1,0 +1,83 @@
+# @nocheck
+# Test: `expr as Type` cast operator
+#
+# A TypeScript-style postfix type assertion. The cast is ERASED at runtime
+# (the value is emitted unchanged) and only re-materializes as a real TS
+# `(expr as Type)` in the shadow-TS check path (`inlineTypes`). The type RHS
+# is stripped to a string by the type rewriter, so the grammar never parses a
+# type — `as` reuses the same machinery as `::` annotations.
+
+# ==============================================================================
+# Runtime erasure — the cast leaves no trace in the emitted JS
+# ==============================================================================
+
+code "cast on identifier erased", "y = x as Foo", "let y = x;"
+code "parenthesized cast erased", "y = (x as Foo)", "let y = x;"
+code "cast inside call erased", "foo(x as Bar)", "foo(x)"
+code "cast inside array erased", "z = [a as T]", "let z = [a];"
+code "cast on member access erased", "r = obj.prop as T", "let r = obj.prop;"
+code "cast on call result erased", "c = foo(1) as T", "let c = foo(1);"
+code "cast on index erased", "i = arr[0] as T", "let i = arr[0];"
+
+# ==============================================================================
+# Precedence — cast binds tighter than binary operators (postfix)
+# ==============================================================================
+
+# `x as Bar + n` is `(x as Bar) + n` — the type collection stops at `+`.
+code "cast stops before plus", "y = x as Bar + n", "let y = x + n;"
+
+# ==============================================================================
+# Type operators inside the cast type are consumed, not stops
+# ==============================================================================
+
+code "cast with generic type", "m = x as Map<string, number>", "let m = x;"
+code "cast with union type", "u = x as A | B", "let u = x;"
+code "cast with intersection type", "k = x as A & B", "let k = x;"
+code "cast with object type", "o = x as { a: number }", "let o = x;"
+code "cast with array type", "a = x as number[]", "let a = x;"
+
+# ==============================================================================
+# Chaining — `x as A as B`
+# ==============================================================================
+
+code "chained casts erased", "y = x as A as B", "let y = x;"
+
+# ==============================================================================
+# Shadow-TS check path — the cast becomes a real TS assertion (it narrows)
+# ==============================================================================
+#
+# Route A: the cast is a grammar node that reduces AFTER the full postfix
+# expression is built, so EVERY carrier narrows — identifier, member access,
+# AND call / index / parenthesized results.
+
+# ==============================================================================
+# Full narrowing — call / index / paren-prefixed results now narrow too
+# (the route-A grammar node closes the mapping-carrier gap).
+# ==============================================================================
+
+# ==============================================================================
+# `as` is NOT a cast in for / import / export / property contexts
+# ==============================================================================
+
+code "for-as iteration unaffected", '''
+  for x as items
+    p x
+  ''', '''
+  for (let x of items) {
+    p(x);
+  }
+  '''
+
+code "for-as! async iteration unaffected", '''
+  for x as! items
+    p x
+  ''', '''
+  for await (let x of items) {
+    p(x);
+  }
+  '''
+
+code "import-as alias unaffected", "import { foo as bar } from 'mod'", "import { foo as bar } from 'mod'"
+code "import-namespace-as unaffected", "import * as NS from 'mod'", "import * as NS from 'mod'"
+code "export-as re-export unaffected", "export { x as y } from 'mod'", "export { x as y } from 'mod'"
+code "dot-as is a property, not a cast", "y = obj.as", "let y = obj.as;"

@@ -1,0 +1,514 @@
+# @nocheck
+# Test: Rip Types
+# Tests the optional type system — type annotations, type aliases,
+# structural types, interfaces, enums, generics, and .d.ts emission.
+#
+# Type annotations are erased from .js output. The `types: true` option
+# enables .d.ts emission via emitTypes().
+
+# ==============================================================================
+# Type Annotations on Variables — Erased from JS
+# ==============================================================================
+
+code "typed variable", "count: number = 0", "let count = 0;"
+code "typed string variable", "name: string = \"Rip\"", "let name = \"Rip\";"
+code "typed array variable", "ids: number[] = []", "let ids = [];"
+code "typed generic variable", "items: Map<string, number> = x", "let items = x;"
+
+# ==============================================================================
+# Type Annotations on Constants — Erased from JS
+# ==============================================================================
+
+code "typed constant", "MAX: number =! 100", "const MAX = 100"
+code "typed string constant", 'URL: string =! "https://example.com"', 'const URL = "https://example.com"'
+
+# ==============================================================================
+# Type Annotations on Functions — Erased from JS
+# ==============================================================================
+
+code "typed function params", '''
+  def add(a: number, b: number)
+    a + b
+  ''', '''
+  function add(a, b) {
+    return (a + b);
+  }
+  '''
+
+code "typed function return", '''
+  def greet(name: string): string
+    "Hello, #{name}!"
+  ''', '''
+  function greet(name) {
+    return `Hello, ${name}!`;
+  }
+  '''
+
+code "parameterless typed function", '''
+  def answer(): number
+    42
+  ''', '''
+  function answer() {
+    return 42;
+  }
+  '''
+
+code "typed function three params", '''
+  def clamp(val: number, min: number, max: number): number
+    Math.max(min, Math.min(max, val))
+  ''', '''
+  function clamp(val, min, max) {
+    return Math.max(min, Math.min(max, val));
+  }
+  '''
+
+# ==============================================================================
+# Type-Only Declarations — Erased from JS
+# ==============================================================================
+
+# Simple aliases
+code "type alias erased", "type ID = number", ""
+code "union type alias erased", 'type UserID = number | string', ""
+
+# Structural types
+code "structural type erased", '''
+  type User =
+    id: number
+    name: string
+  ''', ""
+
+code "generic close in interface body line", '''
+  interface ApiErrors
+    field: Record<string, string>
+
+  y = 2
+  ''', "let y = 2;"
+
+# Block unions
+code "block union erased", '''
+  type Status =
+    | "pending"
+    | "active"
+    | "done"
+  ''', ""
+
+# Interfaces
+code "interface erased", '''
+  interface Animal
+    name: string
+    age: number
+  ''', ""
+
+code "interface extends erased", '''
+  interface Dog extends Animal
+    breed: string
+  ''', ""
+
+# Multiple type declarations in sequence
+code "multiple types erased", '''
+  type ID = number
+  type Name = string
+  type Status = "active" | "inactive"
+  ''', ""
+
+# Multiple interfaces in sequence
+code "multiple interfaces erased", '''
+  interface Readable
+    read: () => string
+  interface Writable
+    write: (data: string) => boolean
+  ''', ""
+
+# ==============================================================================
+# Enums — Runtime JS Output
+# ==============================================================================
+
+test "enum creates object", '''
+  enum Color
+    red = 0
+    green = 1
+    blue = 2
+  Color.red
+  ''', 0
+
+test "enum reverse mapping", '''
+  enum Color
+    red = 0
+    green = 1
+    blue = 2
+  Color[1]
+  ''', "green"
+
+test "enum with large values", '''
+  enum HttpCode
+    ok = 200
+    created = 201
+    notFound = 404
+    serverError = 500
+  HttpCode.ok + HttpCode.notFound
+  ''', 604
+
+test "enum member access", '''
+  enum Dir
+    up = 0
+    down = 1
+    left = 2
+    right = 3
+  [Dir.up, Dir.down, Dir.left, Dir.right]
+  ''', [0, 1, 2, 3]
+
+test "enum reverse all", '''
+  enum Size
+    sm = 1
+    md = 2
+    lg = 3
+  [Size[1], Size[2], Size[3]]
+  ''', ["sm", "md", "lg"]
+
+# ==============================================================================
+# Runtime Behavior — Types Don't Affect Execution
+# ==============================================================================
+
+test "typed variable runtime", "count: number = 42; count", 42
+test "typed constant runtime", 'msg: string =! "hello"; msg', "hello"
+test "typed boolean runtime", "flag: boolean = true; flag", true
+test "typed null runtime", "val: string = null; val", null
+
+test "typed function runtime", '''
+  def double(x: number): number
+    x * 2
+  double(21)
+  ''', 42
+
+test "typed params runtime", '''
+  def add(a: number, b: number): number
+    a + b
+  add(3, 4)
+  ''', 7
+
+test "typed function multiple calls", '''
+  def square(n: number): number
+    n * n
+  square(3) + square(4)
+  ''', 25
+
+test "typed function with string return", '''
+  def shout(msg: string): string
+    msg.toUpperCase()
+  shout("hello")
+  ''', "HELLO"
+
+test "typed function with array return", '''
+  def wrap(x: number): number[]
+    [x]
+  wrap(42)
+  ''', [42]
+
+test "typed parameterless runtime", '''
+  def pi(): number
+    3.14159
+  pi()
+  ''', 3.14159
+
+# ==============================================================================
+# Mixed: Types + Code Coexisting
+# ==============================================================================
+
+test "type alias with code", '''
+  type ID = number
+  x = 42
+  x
+  ''', 42
+
+test "interface with code", '''
+  interface Config
+    host: string
+    port: number
+  x = 99
+  x
+  ''', 99
+
+test "enum with other code", '''
+  enum Dir
+    up = 0
+    down = 1
+  x = Dir.up
+  x
+  ''', 0
+
+test "multiple types then code", '''
+  type ID = number
+  type Name = string
+  interface User
+    id: number
+    name: string
+  x = "works"
+  x
+  ''', "works"
+
+test "type alias between functions", '''
+  def first(): number
+    1
+  type ID = number
+  def second(): number
+    2
+  first() + second()
+  ''', 3
+
+test "interface then enum then code", '''
+  interface Shape
+    area: number
+  enum Color
+    red = 0
+    blue = 1
+  result = Color.red
+  result
+  ''', 0
+
+test "enum used in computation", '''
+  enum Op
+    add = 1
+    sub = 2
+    mul = 3
+  def apply(op: number, a: number, b: number): number
+    if op is Op.add
+      a + b
+    else if op is Op.mul
+      a * b
+    else
+      a - b
+  apply(Op.add, 10, 20)
+  ''', 30
+
+# ==============================================================================
+# Complex Type Annotations
+# ==============================================================================
+
+# Generic types survive in annotations without affecting JS
+code "nested generic annotation", "cache: Map<string, Set<number>> = x", "let cache = x;"
+
+# Multiple typed variables in sequence
+test "multiple typed variables", '''
+  a: number = 10
+  b: number = 20
+  c: number = 30
+  a + b + c
+  ''', 60
+
+# Typed variables used together
+test "typed variables in expression", '''
+  width: number = 5
+  height: number = 10
+  width * height
+  ''', 50
+
+# Typed constant used in function
+test "typed constant in function", '''
+  PI: number =! 3.14159
+  def circleArea(r: number): number
+    PI * r * r
+  circleArea(1)
+  ''', 3.14159
+
+# ==============================================================================
+# Generic Functions — Types Erased from JS
+# ==============================================================================
+
+# ==============================================================================
+# Structural Types with Optional Properties
+# ==============================================================================
+
+# ==============================================================================
+# Block Unions — Various Forms
+# ==============================================================================
+
+code "block union three members", '''
+  type Light =
+    | "red"
+    | "yellow"
+    | "green"
+  ''', ""
+
+code "block union many members", '''
+  type HttpMethod =
+    | "GET"
+    | "POST"
+    | "PUT"
+    | "PATCH"
+    | "DELETE"
+  ''', ""
+
+# ==============================================================================
+# Edge Cases
+# ==============================================================================
+
+# Type annotation with no assignment (in a function body)
+test "typed param used in expression", '''
+  def negate(x: number): number
+    -x
+  negate(5)
+  ''', -5
+
+# Enum with single member
+test "enum single member", '''
+  enum Single
+    only = 1
+  Single.only
+  ''', 1
+
+# Type alias then immediate use
+test "type alias immediate code", '''
+  type ID = number
+  id = 123
+  id
+  ''', 123
+
+# Sequential enums
+test "multiple enums", '''
+  enum A
+    x = 1
+  enum B
+    y = 2
+  A.x + B.y
+  ''', 3
+
+# Typed function calling another typed function
+test "typed functions calling each other", '''
+  def double(n: number): number
+    n * 2
+  def quadruple(n: number): number
+    double(double(n))
+  quadruple(5)
+  ''', 20
+
+# Function with many typed params
+test "function many typed params", '''
+  def sum5(a: number, b: number, c: number, d: number, e: number): number
+    a + b + c + d + e
+  sum5(1, 2, 3, 4, 5)
+  ''', 15
+
+# ==============================================================================
+# .d.ts Emission Tests — verify type declarations are emitted correctly
+# ==============================================================================
+
+# Variables
+type "typed variable dts", "count: number = 0", '''
+  declare let count: number;
+  export {};
+  '''
+type "typed constant dts", "MAX: number =! 100", '''
+  declare const MAX: number;
+  export {};
+  '''
+
+# Reactive state
+type "reactive state dts", "count: number := 0", '''
+  declare const count: { value: number; read(): number };
+  export {};
+  '''
+
+# Computed
+type "computed dts", '''
+    count: number := 0
+    doubled: number ~= count * 2
+  ''', '''
+  declare const count: { value: number; read(): number };
+  declare const doubled: { readonly value: number; read(): number };
+  export {};
+  '''
+
+# Effect
+type "effect dts", "logger: Function ~> console.log 42", '''
+  declare const logger: Function;
+  export {};
+  '''
+
+# Functions
+type "typed function dts", '''
+    def greet(name: string): string
+      "Hello, #{name}!"
+  ''', '''
+  declare function greet(name: string): string;
+  export {};
+  '''
+
+# Interface
+type "interface dts", '''
+    interface Readable
+      read: => string
+  ''', '''
+  interface Readable {
+    read: => string;
+  }
+  export {};
+  '''
+
+# Export reactive
+type "export reactive dts", "export count: number := 0", '''
+  export declare const count: { value: number; read(): number };
+'''
+
+# Arrow function
+type "arrow function dts", "greet = (name: string) -> \"Hello\"", '''
+  declare function greet(name: string): any;
+  export {};
+  '''
+
+# Fat-arrow return type — `(params): R => body`. The `=>` is the arrow
+# operator, not a TS function-type arrow; the type collector stops at it
+# (symmetric with `->`). Type erased from JS, surfaces in the .d.ts.
+code "fat arrow return type erased", "g = (x: number): string => \"v\"", "let g = x => \"v\";"
+type "fat arrow return type dts", "g = (x: number): string => \"v\"", '''
+  declare function g(x: number): string;
+  export {};
+  '''
+
+# A function-TYPE return must be parenthesized as a whole. Unparenthesized,
+# the collector would stop at the inner `=>` and silently re-associate the
+# body — so it's a hard error pointing at the fix.
+fail "fat arrow bare function-type return", 'g = (x: number): (n: number) => number => x'
+fail "fat arrow empty-params function-type return", 'g = (x: number): () => void => x'
+type "export interface with : annotations", """
+  export interface Config
+    host: string
+    port: number
+  """, """
+  export interface Config {
+    host: string;
+    port: number;
+  }
+  """
+
+# Rip 3.17 — single-colon contexts B (function-type-valued decl) and D (bare
+# typed forward declaration). A (typed destructuring) deliberately keeps `::`.
+code "single-colon function-type-valued decl", "get: (p: string) => void = f", "let get = f;"
+code "single-colon generic function-type-valued decl", "watchers: Set<(e: string) => void> = x", "let watchers = x;"
+code "single-colon bare typed decl (assigned later)", '''
+  r: R
+  r = fn()
+  ''', "let r = fn();"
+# `name: value` with no later assignment stays an object expression (not a decl).
+code "bare name: value stays an object", "mode: cfg", "({mode: cfg});"
+
+# Rip 3.17 — single-line braced structural type literal with an inline
+# function-type field. The function-type's `(e: Event)` params are PARAM-tagged
+# because `=>` follows; inside a `{ … }` on a `type X =` RHS they must NOT be
+# reclassified — a synthetic `::` landing inside the literal threw a spurious
+# "structural type literal" error. Arming `inType` across the type-decl RHS
+# leaves them as TS `:` separators. Completes commit 899becf5's type-context
+# guard (the indented `type T =` ⏎ field form was already immune).
+code "braced inline fn-type field erased", "type X = { f: (e: Event) => void }", ""
+code "braced optional fn-type field in intersection erased", "type X = HTMLElement & { f?: (e: Event) => void }", ""
+type "braced inline fn-type field dts", "type X = { f: (e: Event) => void }", '''
+  type X = { f: (e: Event) => void };
+  export {};
+  '''
+# Non-regression: a value-position `=` is not a type-decl `=`, so object
+# literals (incl. ones with arrow values) are untouched — `inType` stays off.
+code "value object literal not armed", "x = { a: 1 }", "let x = {a: 1};"
+code "arrow-valued object literal not armed", "obj = { f: (e) -> e }", '''
+  let obj = {f(e) {
+    return e;
+  }};
+  '''

@@ -1,0 +1,211 @@
+# Test: Assignment (1 node type)
+# Tests the "=" assignment operator
+
+# ==============================================================================
+# Simple Assignment
+# ==============================================================================
+
+test "assign integer", "x = 42; x", 42
+test "assign string", 'x = "hello"; x', "hello"
+test "assign boolean", "x = true; x", true
+test "assign null", "x = null; x", null
+test "assign expression", "x = 5 + 3; x", 8
+
+# Code generation tests
+code "simple assignment", "x = 42", "let x = 42;"
+code "assignment with expression", "y = a + b", "let y = a + b;"
+
+# ==============================================================================
+# Multiple Assignments
+# ==============================================================================
+
+test "multiple assignments", "x = 1; y = 2; x + y", 3
+test "chained values", "a = b = 5; a", 5
+
+# ==============================================================================
+# Assignment to Properties
+# ==============================================================================
+
+test "assign to property", "obj = {}; obj.x = 42; obj.x", 42
+test "assign to index", "arr = []; arr[0] = 10; arr[0]", 10
+
+# ==============================================================================
+# Compound Assignment
+# ==============================================================================
+
+test "addition assignment", "a = 5; a += 3; a", 8
+test "subtraction assignment", "a = 10; a -= 3; a", 7
+test "multiplication assignment", "a = 5; a *= 3; a", 15
+test "division assignment", "a = 15; a /= 3; a", 5
+test "modulo assignment", "a = 17; a %= 5; a", 2
+test "exponentiation assignment", "a = 2; a **= 3; a", 8
+test "floor division assignment", "a = 17; a //= 5; a", 3
+test "mathematical modulo assignment", "a = -7; a %%= 3; a", 2
+
+# ==============================================================================
+# Logical Assignment
+# ==============================================================================
+
+test "or assignment false", "a = false; a or= 5; a", 5
+test "or assignment true", "a = 10; a or= 5; a", 10
+test "and assignment true", "a = 10; a and= 5; a", 5
+test "and assignment false", "a = 0; a and= 5; a", 0
+# ==============================================================================
+# Bitwise Compound Assignment
+# ==============================================================================
+
+test "bitwise and assignment", "a = 12; a &= 10; a", 8
+test "bitwise or assignment", "a = 12; a |= 3; a", 15
+test "bitwise xor assignment", "a = 12; a ^= 5; a", 9
+test "left shift assignment", "a = 5; a <<= 2; a", 20
+test "right shift assignment", "a = 20; a >>= 2; a", 5
+test "unsigned right shift assignment", "a = -1; a >>>= 1; a", 2147483647
+
+# ==============================================================================
+# Destructuring Assignment
+# ==============================================================================
+
+test "array destructuring", "[a, b, c] = [1, 2, 3]; a + b + c", 6
+test "object destructuring", "{x, y} = {x: 10, y: 20}; x + y", 30
+test "nested destructuring", "[a, {b, c}] = [1, {b: 2, c: 3}]; a + b + c", 6
+test "destructuring with defaults", "{a = 5, b = 10} = {a: 1}; a + b", 11
+test "array destructuring skip", "[a, , c] = [1, 2, 3]; a + c", 4
+test "destructuring swap", "a = 1; b = 2; [a, b] = [b, a]; a", 2
+
+# ==============================================================================
+# Rest in Destructuring
+# ==============================================================================
+
+test "array rest destructuring", "[first, ...rest] = [1, 2, 3, 4]; rest.length", 3
+test "object rest destructuring", "{a, ...rest} = {a: 1, b: 2, c: 3}; rest.b + rest.c", 5
+
+# ==============================================================================
+# Complex Patterns
+# ==============================================================================
+
+test "destructuring rename", "{x: a, y: b} = {x: 1, y: 2}; a + b", 3
+test "deep object destructuring", "obj = {a: {b: {c: 5}}}; {a: {b: {c: value}}} = obj; value", 5
+test "mixed destructuring", "data = {items: [1, 2, 3], count: 3}; {items: [first], count} = data; first + count", 4
+
+# String key destructuring
+test "string key destructuring", '''
+  {'foo-bar': value} = {'foo-bar': 42}
+  value
+  ''', 42
+
+# Computed property destructuring
+test "computed property destructuring", '''
+  key = 'prop'
+  {[key]: value} = {prop: 100}
+  value
+  ''', 100
+
+# ==============================================================================
+# Conditional Assignment with typeof
+# ==============================================================================
+
+test 'assignment with explicit if instead of postfix unless', '''
+  token = null
+  value = 42
+  if typeof value isnt "number"
+    token = value or "default"
+  else
+    token = value
+  token
+  ''', 42
+
+# ==============================================================================
+# Optional Chain Assignment
+# ==============================================================================
+
+code 'optional chain assign: x?.prop = val', 'gc?.scrollTop = 0', 'if (gc != null) gc.scrollTop = 0'
+code 'optional chain assign: deep', 'a?.b.c = 0', 'if (a != null) a.b.c = 0'
+code 'optional chain assign: inner', 'a.b?.c = 0', 'if (a.b != null) a.b.c = 0'
+code 'optional chain assign: bracket', 'x?[0] = 1', 'if (x != null) x[0] = 1'
+code 'optional chain assign: compound', 'x?.prop += 5', 'if (x != null) x.prop += 5'
+
+test 'optional chain assign: sets when present', '''
+  obj = { x: 10 }
+  obj?.x = 42
+  obj.x
+  ''', 42
+
+test 'optional chain assign: skips when null', '''
+  obj = null
+  obj?.x = 42
+  obj
+  ''', null
+
+test 'optional chain assign: skips when undefined', '''
+  obj = undefined
+  obj?.x = 42
+  obj
+  ''', undefined
+
+test 'optional chain assign: deep sets when present', '''
+  obj = { inner: { x: 0 } }
+  obj?.inner.x = 99
+  obj.inner.x
+  ''', 99
+
+test 'optional chain assign: deep skips when null', '''
+  obj = null
+  obj?.inner.x = 99
+  obj
+  ''', null
+
+test 'optional chain assign: compound operator', '''
+  obj = { count: 10 }
+  obj?.count += 5
+  obj.count
+  ''', 15
+
+test 'optional chain assign: compound skips when null', '''
+  obj = null
+  obj?.count += 5
+  obj
+  ''', null
+
+test 'optional chain assign: bracket access', '''
+  arr = [10, 20, 30]
+  arr?[1] = 99
+  arr[1]
+  ''', 99
+
+test 'optional chain assign: bracket skips when null', '''
+  arr = null
+  arr?[0] = 99
+  arr
+  ''', null
+
+test 'optional chain assign: inner chain', '''
+  obj = { a: { b: 0 } }
+  obj.a?.b = 42
+  obj.a.b
+  ''', 42
+
+test 'optional chain assign: inner chain skips', '''
+  obj = { a: null }
+  obj.a?.b = 42
+  obj.a
+  ''', null
+
+code 'optional chain assign: style pattern', 'el?.style.display = "none"', 'if (el != null) el.style.display = "none"'
+code 'optional chain assign: value pattern', '@_input?.value = ""', 'if (this._input != null) this._input.value = ""'
+code 'optional chain assign: subtract', 'x?.y -= 1', 'if (x != null) x.y -= 1'
+
+# ==============================================================================
+# Destructuring binding-pattern validation
+# ==============================================================================
+# The grammar accepts the full Array / Object expression on the LHS of `=`,
+# so shapes like `[a + b] = src` and `{x: y for x in arr} = src` parse.
+# emitAssignment validates the LHS is a real binding pattern and rejects
+# expression / comprehension shapes with a clear message instead of crashing
+# the codegen or producing broken JS.
+
+fail 'destructure: arithmetic expression as target', '[a + b] = src'
+
+fail 'destructure: function call as target', '[fn()] = src'
+
+fail 'destructure: comprehension as target',
+  '{x: y for x in [1]} = src'
