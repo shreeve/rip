@@ -5,6 +5,12 @@ repository's pull requests.
 
 ## Unreleased
 
+- The pending lane reads like the battery it feeds: blank line
+  between rows, `'''` heredocs for multi-line sources and expected
+  code, single-quoted one-liners — regenerated mechanically and
+  round-trip-verified through the runner's own transforms (507/507
+  exact) (#46)
+
 - The pending lane (test/battery-pending): 507 language behaviors the
   battery does not cover yet, spelled as battery rows (same four
   verbs) and asserted to STILL FAIL — the suite stays green while

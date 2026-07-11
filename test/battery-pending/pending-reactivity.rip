@@ -4,14 +4,122 @@
 
 import { test, code, fail, type } from '../support/testing.js'
 
-test "component with state", "A = component\n  x := 5\na = A.new()\na.x.value", 5
-test "component state mutation", "A = component\n  x := 10\na = A.new()\na.x.value = 20\na.x.value", 20
-test "component signal read", "A = component\n  x := 5\na = A.new()\na.x.read()", 5
-test "component readonly prop via constructor", "A = component\n  @label =! \"default\"\na = A.new({ label: \"custom\" })\na.label", "custom"
-test "readonly prop receives value not signal", "A = component\n  @label =! \"hello\"\na = A.new label: \"world\"\na.label", "world"
-test "computed with postfix ternary false branch", "A = component\n  flag := false\n  result ~= \"yes\" if flag else \"no\"\na = A.new()\na.result.value", "no"
-test "computed with postfix ternary true branch", "A = component\n  flag := true\n  result ~= \"yes\" if flag else \"no\"\na = A.new()\na.result.value", "yes"
-test "computed with postfix ternary reacts to state change", "A = component\n  flag := false\n  result ~= \"yes\" if flag else \"no\"\na = A.new()\nbefore = a.result.value\na.flag.value = true\nafter = a.result.value\nbefore + \",\" + after", "no,yes"
-test "computed with postfix ternary using nullable object", "A = component\n  user := null\n  dest ~= \"/bookings\" if user else \"/auth\"\na = A.new()\nbefore = a.dest.value\na.user.value = { name: \"Steve\" }\nafter = a.dest.value\nbefore + \",\" + after", "/auth,/bookings"
-code "computed postfix ternary compiles to JS ternary", "export Foo = component\n  user := null\n  href ~= \"/b\" if user else \"/a\"\n  render\n    div \"hello\"", "export const Foo = class extends __Component {\n  _init(props) {\n    this.user = __state(null);\n    this.href = __computed(() => (this.user.value ? \"/b\" : \"/a\"));\n  }\n  _create() {\n    this._el0 = document.createElement('div');\n    this._t0 = document.createTextNode(\"hello\");\n    this._el0.appendChild(this._t0);\n    return this._el0;\n  }\n}"
-code "render block with identifier property value compiles to reactive setAttribute", "export Bar = component\n  user := null\n  href ~= \"/b\" if user else \"/a\"\n  render\n    a href: href\n      \"click\"", "export const Bar = class extends __Component {\n  _init(props) {\n    this.user = __state(null);\n    this.href = __computed(() => (this.user.value ? \"/b\" : \"/a\"));\n  }\n  _create() {\n    this._el0 = document.createElement('a');\n    this._t0 = document.createTextNode(\"click\");\n    this._el0.appendChild(this._t0);\n    return this._el0;\n  }\n  _setup() {\n    __effect(() => { this._el0.setAttribute('href', this.href.value); });\n  }\n}"
+test 'component with state', '''
+  A = component
+    x := 5
+  a = A.new()
+  a.x.value
+''', 5
+
+test 'component state mutation', '''
+  A = component
+    x := 10
+  a = A.new()
+  a.x.value = 20
+  a.x.value
+''', 20
+
+test 'component signal read', '''
+  A = component
+    x := 5
+  a = A.new()
+  a.x.read()
+''', 5
+
+test 'component readonly prop via constructor', '''
+  A = component
+    @label =! "default"
+  a = A.new({ label: "custom" })
+  a.label
+''', 'custom'
+
+test 'readonly prop receives value not signal', '''
+  A = component
+    @label =! "hello"
+  a = A.new label: "world"
+  a.label
+''', 'world'
+
+test 'computed with postfix ternary false branch', '''
+  A = component
+    flag := false
+    result ~= "yes" if flag else "no"
+  a = A.new()
+  a.result.value
+''', 'no'
+
+test 'computed with postfix ternary true branch', '''
+  A = component
+    flag := true
+    result ~= "yes" if flag else "no"
+  a = A.new()
+  a.result.value
+''', 'yes'
+
+test 'computed with postfix ternary reacts to state change', '''
+  A = component
+    flag := false
+    result ~= "yes" if flag else "no"
+  a = A.new()
+  before = a.result.value
+  a.flag.value = true
+  after = a.result.value
+  before + "," + after
+''', 'no,yes'
+
+test 'computed with postfix ternary using nullable object', '''
+  A = component
+    user := null
+    dest ~= "/bookings" if user else "/auth"
+  a = A.new()
+  before = a.dest.value
+  a.user.value = { name: "Steve" }
+  after = a.dest.value
+  before + "," + after
+''', '/auth,/bookings'
+
+code 'computed postfix ternary compiles to JS ternary', '''
+  export Foo = component
+    user := null
+    href ~= "/b" if user else "/a"
+    render
+      div "hello"
+''', '''
+  export const Foo = class extends __Component {
+    _init(props) {
+      this.user = __state(null);
+      this.href = __computed(() => (this.user.value ? "/b" : "/a"));
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._t0 = document.createTextNode("hello");
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+  }
+'''
+
+code 'render block with identifier property value compiles to reactive setAttribute', '''
+  export Bar = component
+    user := null
+    href ~= "/b" if user else "/a"
+    render
+      a href: href
+        "click"
+''', '''
+  export const Bar = class extends __Component {
+    _init(props) {
+      this.user = __state(null);
+      this.href = __computed(() => (this.user.value ? "/b" : "/a"));
+    }
+    _create() {
+      this._el0 = document.createElement('a');
+      this._t0 = document.createTextNode("click");
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+    _setup() {
+      __effect(() => { this._el0.setAttribute('href', this.href.value); });
+    }
+  }
+'''

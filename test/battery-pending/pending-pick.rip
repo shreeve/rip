@@ -4,4 +4,4 @@
 
 import { test, code, fail, type } from '../support/testing.js'
 
-test "nested default with map literal", "o = {}; o.{cfg = *{k: 1}}; true", true
+test 'nested default with map literal', 'o = {}; o.{cfg = *{k: 1}}; true', true

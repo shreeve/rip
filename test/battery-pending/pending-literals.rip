@@ -4,8 +4,39 @@
 
 import { test, code, fail, type } from '../support/testing.js'
 
-test "inline JavaScript evaluation", "`var x = 5`\nx", 5
-test "block inline JavaScript", "```\nlet a = 1;\nlet b = 2;\n```\nc = 3\na + b + c", 6
-test "JS blocks mixed with Rip", "x = 1\n```\nlet y = 2;\n```\nz = 3\nx + y + z", 6
-test "inline JS with return value", "result = `(function() { return 42; })()`\nresult", 42
-test "multiple JS variables", "```\nlet a = 10;\nlet b = 20;\nlet c = 30;\n```\na + b + c", 60
+test 'inline JavaScript evaluation', '''
+  `var x = 5`
+  x
+''', 5
+
+test 'block inline JavaScript', '''
+  ```
+  let a = 1;
+  let b = 2;
+  ```
+  c = 3
+  a + b + c
+''', 6
+
+test 'JS blocks mixed with Rip', '''
+  x = 1
+  ```
+  let y = 2;
+  ```
+  z = 3
+  x + y + z
+''', 6
+
+test 'inline JS with return value', '''
+  result = `(function() { return 42; })()`
+  result
+''', 42
+
+test 'multiple JS variables', '''
+  ```
+  let a = 10;
+  let b = 20;
+  let c = 30;
+  ```
+  a + b + c
+''', 60

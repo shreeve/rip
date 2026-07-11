@@ -4,11 +4,69 @@
 
 import { test, code, fail, type } from '../support/testing.js'
 
-type "generic function dts", "def add<T>(a: T, b: T): T\n  a + b", "declare function add<T>(a: T, b: T): T;"
-type "generic constraint dts", "def identity<T extends object>(v: T): T\n  v", "declare function identity<T extends object>(v: T): T;"
-type "type alias dts", "type User =\n  id: number\n  name: string\n  email?: string", "type User = {\n  id: number;\n  name: string;\n  email?: string;\n};"
-type "enum dts", "enum Direction\n  North\n  South", "enum Direction {\n  North,\n  South\n}"
-fail "fat arrow parenthesized function-type return", "g = (x: number): ((n: number) => number) => h", null
-fail "fat arrow parenthesized conditional return", "f = (x: number): (T extends U ? A : B) => h", null
-type "class with methods dts", "class UserService\n  url: string = \"\"\n  constructor: (@url: string) ->\n  fetch: (id: number) ->\n    console.log id", "declare class UserService {\n  url: string;\n  constructor(url: string);\n  fetch(id: number);\n}"
-type "interface with : annotations", "interface User\n  id: number\n  name: string\n  email: string\n  isAdmin?: boolean", "interface User {\n  id: number;\n  name: string;\n  email: string;\n  isAdmin?: boolean;\n}"
+type 'generic function dts', '''
+  def add<T>(a: T, b: T): T
+    a + b
+''', 'declare function add<T>(a: T, b: T): T;'
+
+type 'generic constraint dts', '''
+  def identity<T extends object>(v: T): T
+    v
+''', 'declare function identity<T extends object>(v: T): T;'
+
+type 'type alias dts', '''
+  type User =
+    id: number
+    name: string
+    email?: string
+''', '''
+  type User = {
+    id: number;
+    name: string;
+    email?: string;
+  };
+'''
+
+type 'enum dts', '''
+  enum Direction
+    North
+    South
+''', '''
+  enum Direction {
+    North,
+    South
+  }
+'''
+
+fail 'fat arrow parenthesized function-type return', 'g = (x: number): ((n: number) => number) => h', null
+
+fail 'fat arrow parenthesized conditional return', 'f = (x: number): (T extends U ? A : B) => h', null
+
+type 'class with methods dts', '''
+  class UserService
+    url: string = ""
+    constructor: (@url: string) ->
+    fetch: (id: number) ->
+      console.log id
+''', '''
+  declare class UserService {
+    url: string;
+    constructor(url: string);
+    fetch(id: number);
+  }
+'''
+
+type 'interface with : annotations', '''
+  interface User
+    id: number
+    name: string
+    email: string
+    isAdmin?: boolean
+''', '''
+  interface User {
+    id: number;
+    name: string;
+    email: string;
+    isAdmin?: boolean;
+  }
+'''
