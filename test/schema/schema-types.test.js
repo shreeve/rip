@@ -312,7 +312,7 @@ describe('schema type-name collisions reject loudly on the typed artifacts', () 
     expect(() => compile('type Extra = {k: number}\nS = schema :shape\n  a! string').declarations).not.toThrow();
   });
 
-  // The USER-vs-INTRINSIC direction (PR #72 review round, GPT HIGH):
+  // The USER-vs-INTRINSIC direction:
   // when the story emits the intrinsic block, a user declaration
   // naming an EMITTED intrinsic would duplicate (aliases) or silently
   // merge (interfaces) with it — reject, positioned on the USER

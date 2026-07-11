@@ -77,7 +77,7 @@ const PAIRS = [
   ['f = (cb: (e) => void) -> cb', 'f = (cb) -> cb'],
   ['def g(a: string, b: number = 1)\n  a', 'def g(a, b = 1)\n  a'],
   ['def m(a: number,\n      b: string)\n  a', 'def m(a,\n      b)\n  a'],
-  // newline-/semicolon-separated typed params (PR #35 review, F1):
+  // newline-/semicolon-separated typed params:
   // every separator ends a segment, so EVERY typed param erases —
   // resets on commas alone and silently miscompiles the rest into
   // destructuring patterns
@@ -93,8 +93,7 @@ const PAIRS = [
   ['f = (cb = ->\n  k: 1\n  j: 2\n, b: T) -> b', 'f = (cb = ->\n  k: 1\n  j: 2\n, b) -> b'],
   ['f = (a = if c\n  k: 1\n  m: 2\n, b: T) -> b', 'f = (a = if c\n  k: 1\n  m: 2\n, b) -> b'],
   // …but a default that completed INLINE owns no following indent —
-  // the next parameter line's annotation still erases (PR #35 review,
-  // N1: a stale body claim once exempted it)
+  // the next parameter line's annotation still erases
   ['f = (a = -> 5\n b: T) -> b', 'f = (a = -> 5\n b) -> b'],
   ['f = (a = -> 5\n b: T\n c: U) -> b', 'f = (a = -> 5\n b\n c) -> b'],
   ['f = (x = => 2\n b: T) -> b', 'f = (x = => 2\n b) -> b'],
@@ -105,7 +104,7 @@ const PAIRS = [
   ['f = (a = (g 1)\n b: T) -> b', 'f = (a = (g 1)\n b) -> b'],
   ['f = (a = switch v\n  when 1 then 2\n  else 3\n, b: T) -> b', 'f = (a = switch v\n  when 1 then 2\n  else 3\n, b) -> b'],
   ['f = (a = ->\n  k: 1\n  j: 2\n, b: T) -> b', 'f = (a = ->\n  k: 1\n  j: 2\n, b) -> b'],
-  // casts in ternary branches (PR #35 review, F2): the type name
+  // casts in ternary branches: the type name
   // before the else-colon is scanner-key-tagged PROPERTY; the cast
   // claims it and the ':' stays the ternary's (the old lowering rejects the SIMPLE
   // spelling only; the generic one compiles there too)

@@ -1,4 +1,4 @@
-// The TS-face drift-detection layer (PR #58 review F5) — the
+// The TS-face drift-detection layer — the
 // EXTENDED tier's property harness over generated annotated programs
 // (scripts/fuzz-tsface.mjs: seeded, deterministic, type-correct by
 // construction). Three properties per program:
@@ -22,7 +22,7 @@ import { compile } from '../../src/compile.js';
 import { stripFace } from '../../src/emitter.js';
 import { describeExtended, EXTENDED } from '../support/extended.js';
 import { tscBatch } from '../support/tscbatch.js';
-import { generateProgram, CONSTRUCT_KINDS } from '../../scripts/fuzz-tsface.mjs';
+import { generateProgram, CONSTRUCT_KINDS } from '../support/fuzz-tsface.mjs';
 
 const TSC = process.env.RIP_TSC ?? Bun.which('tsc');
 const TSC_TIMEOUT = 60_000;

@@ -4136,7 +4136,7 @@ class Emitter {
     // declaration, which has no expression form. A user CALL impersonating the head passes
     // through to call emission.
     if (this.isReadonlyDecl(node)) {
-      throw this.positionedError(node, `emitter: a readonly declaration ('${typeof node[1] === 'string' ? node[1] : '…'} =! …') is a statement — it lowers to a const declaration, which has no expression form `);
+      throw this.positionedError(node, `emitter: a readonly declaration ('${typeof node[1] === 'string' ? node[1] : '…'} =! …') is a statement — it lowers to a const declaration, which has no expression form`);
     }
     // A BARE effect is a valid expression — `x = (~> f())` binds the
     // disposer. The BOUND form lowers to a const declaration, which
@@ -8691,12 +8691,12 @@ class Emitter {
       // expression statement, the bound form a const declaration —
       // neither has a member reading .
       if (this.isEffectDecl(stmt)) {
-        throw this.positionedError(stmt, `emitter: an effect ('~>') cannot be a class member — run it at module or function scope, or inside a method `);
+        throw this.positionedError(stmt, `emitter: an effect ('~>') cannot be a class member — run it at module or function scope, or inside a method`);
       }
       // A readonly declaration is the same class (a `const` lowering
       // with no class-body reading).
       if (this.isReadonlyDecl(stmt)) {
-        throw this.positionedError(stmt, `emitter: a readonly declaration ('${typeof stmt[1] === 'string' ? stmt[1] : '…'} =! …') cannot be a class member — declare it at module or function scope `);
+        throw this.positionedError(stmt, `emitter: a readonly declaration ('${typeof stmt[1] === 'string' ? stmt[1] : '…'} =! …') cannot be a class member — declare it at module or function scope`);
       }
       throw this.positionedError(stmt, "emitter: unsupported class member — fields take `name = value`, `name: T = value`, `name: T`, or their `@`-static forms; methods take `name: -> …`", body);
     }
