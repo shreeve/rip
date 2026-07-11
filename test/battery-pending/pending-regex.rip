@@ -82,7 +82,6 @@ test '=~ then == checks no-match', '''
 ''', true
 
 test 'regex index simple', '"steve"[/eve/]', 'eve'
-
 test 'regex index capture', '"steve"[/e(v)e/, 1]', 'v'
 
 test 'regex index multiple captures', '''
@@ -113,7 +112,6 @@ test 'regex index url', '''
 ''', 'example.com'
 
 test 'regex index case insensitive', '"HELLO"[/hello/i]', 'HELLO'
-
 test 'regex index anchored', '"test123"[/^(test)(\\d+)$/, 1]', 'test'
 
 test 'regex index nested groups', '''

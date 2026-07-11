@@ -57,7 +57,6 @@ test '@param default no args', '''
 ''', 0
 
 code 'super call', 'super(arg)', 'super(arg)'
-
 code 'super method', 'super.method()', 'super.method()'
 
 test 'multiple @ parameters', '''

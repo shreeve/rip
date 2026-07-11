@@ -39,7 +39,6 @@ type 'enum dts', '''
 '''
 
 fail 'fat arrow parenthesized function-type return', 'g = (x: number): ((n: number) => number) => h', null
-
 fail 'fat arrow parenthesized conditional return', 'f = (x: number): (T extends U ? A : B) => h', null
 
 type 'class with methods dts', '''

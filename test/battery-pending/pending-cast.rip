@@ -5,19 +5,11 @@
 import { test, code, fail, type } from '../support/testing.js'
 
 code 'inlineTypes keeps TS cast', 'y = x as Foo', 'y = x as Foo'
-
 code 'inlineTypes keeps generic cast', 'm = x as Map<string, number>', 'm = (x as Map<string, number>)'
-
 code 'inlineTypes cast precedence', 'y = x as Bar + n', 'y = (x as Bar) + n'
-
 code 'inlineTypes chained cast', 'y = x as A as B', 'y = (x as A) as B'
-
 code 'inlineTypes parenthesized identifier', 'y = (x as Foo)', 'y = x as Foo'
-
 code 'inlineTypes member access narrows', 'r = obj.prop as Foo', 'r = obj.prop as Foo'
-
 code 'inlineTypes call result narrows', 'c = foo(1) as Foo', 'c = foo(1) as Foo'
-
 code 'inlineTypes index result narrows', 'i = arr[0] as Foo', 'i = arr[0] as Foo'
-
 code 'inlineTypes paren-prefixed narrows', 'y = (x) as Foo', 'y = x as Foo'
