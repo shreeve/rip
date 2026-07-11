@@ -557,6 +557,7 @@
     { "match": "\\.=|&&=|\\|\\|=|\\?\\?=|\\?=|\\+=|-=|\\*\\*=|\\*=|//=|%%=|/=|%=|<<=|>>>=|>>=|&=|\\|=|\\^=",
       "name": "keyword.operator.assignment.compound.rip" },
     { "match": "\\*>", "name": "keyword.operator.assignment.merge.rip" },
+    { "match": "\\*(?=\\{)", "name": "keyword.operator.map-literal.rip" },
     { "match": "\\$(?=[\"'])", "name": "keyword.operator.template-tag.rip" },
     { "match": "(?<![\\w$]):[a-zA-Z_$][\\w$]*", "name": "constant.other.symbol.rip" },
 

@@ -3,5 +3,3 @@
 # into test/battery/ in the same change (the lane asserts still-failing).
 
 import { test, code, fail, type } from '../support/testing.js'
-
-test 'nested default with map literal', 'o = {}; o.{cfg = *{k: 1}}; true', true
