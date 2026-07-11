@@ -5,6 +5,11 @@ repository's pull requests.
 
 ## Unreleased
 
+- Add the emitter, type faces, and feature runtimes: the full JS/TS
+  two-face emitter with exact mapping rows, declaration emission, the
+  schema and component type stories, and the inline-delivered reactive,
+  component, schema, ORM, and stdlib runtimes (#5)
+
 - Add the grammar and generated parser: the SLR(1) generator (solar), the
   grammar with semantic annotations and pattern labels, and the generated
   parser with node/role store population at reduce time (#4)

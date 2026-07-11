@@ -647,7 +647,7 @@ grammar =
     # and spreads the result); chains read through it (`{...f!.data}`).
     o 'ObjSpreadExpr DAMMIT'         , '["dammit!", 1]' , 'dammit: _, target'
     # Pick on a spread head: `{...obj.{a, b}}` spreads the picked
-    # literal (the four rules the objspread wave deferred to this one).
+    # literal (the four spread-head pick rules).
     o 'ObjSpreadExpr PICK_START    PickList OptComma PICK_END'               , '[".{}",  1, ...3]', 'pick: _, source, ...items'
     o 'ObjSpreadExpr OPTPICK_START PickList OptComma PICK_END'               , '["?.{}", 1, ...3]', 'pick: _, source, ...items'
     o 'ObjSpreadExpr PICK_START    INDENT PickList OptComma OUTDENT PICK_END', '[".{}",  1, ...4]', 'pick: _, source, ...items'
