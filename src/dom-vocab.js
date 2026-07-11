@@ -48,6 +48,11 @@ export const SVG_TAGS = new Set([
 
 export const TEMPLATE_TAGS = new Set([...HTML_TAGS, ...SVG_TAGS]);
 
+// The names that exist ONLY in the SVG namespace — these start an SVG
+// context on their own. Dual-namespace names (a, script, style, title)
+// are HTML unless an enclosing element already established SVG.
+export const SVG_ONLY_TAGS = new Set([...SVG_TAGS].filter((t) => !HTML_TAGS.has(t)));
+
 export const DOM_EVENTS = new Set([
   'abort', 'animationcancel', 'animationend', 'animationiteration',
   'animationstart', 'auxclick', 'beforeinput', 'beforematch', 'beforetoggle',
