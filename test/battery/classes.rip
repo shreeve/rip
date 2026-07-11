@@ -1,6 +1,8 @@
 # Test: Classes (2 node types)
 # Tests "class" and "super" node types
 
+import { test, code, fail, type } from '../support/testing.js'
+
 # ==============================================================================
 # Class Definitions: "class"
 # ==============================================================================

@@ -1,6 +1,8 @@
 # Test: Operators (24 node types)
 # Systematically tests all operator node types from grammar
 
+import { test, code, fail, type } from '../support/testing.js'
+
 # ==============================================================================
 # Arithmetic Operators
 # ==============================================================================

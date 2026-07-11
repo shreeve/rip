@@ -1,6 +1,8 @@
 # Test: Clean Parentheses (no excessive parens in conditions)
 # Tests that conditions don't have unnecessary double parentheses
 
+import { test, code, fail, type } from '../support/testing.js'
+
 # ==============================================================================
 # If Statement Conditions
 # ==============================================================================

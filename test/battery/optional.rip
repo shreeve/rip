@@ -1,6 +1,8 @@
 # Test: Optional Chaining, Existence Check, and Nullish Coalescing
 # Tests postfix ? existence, ES6 optional chaining (?.), and ?? operators
 
+import { test, code, fail, type } from '../support/testing.js'
+
 # ==============================================================================
 # Existence Check: "?" (postfix)
 # ==============================================================================

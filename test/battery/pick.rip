@@ -12,6 +12,8 @@
 # - Optional-chain `?.{ }` returns `undefined` when source is null/undefined,
 #   preserving the distinction from a present-but-empty result.
 
+import { test, code, fail, type } from '../support/testing.js'
+
 # ==============================================================================
 # Runtime — bare picks
 # ==============================================================================

@@ -2,6 +2,8 @@
 # Tests 'when' guards in for-in, for-of, while, and until loops.
 # Guards filter iterations/executions based on a condition.
 
+import { test, code, fail, type } from '../support/testing.js'
+
 # ==============================================================================
 # FOR-IN GUARDS
 # ==============================================================================

@@ -1,6 +1,8 @@
 # Test: Arrow Function Parameter Syntax
 # Tests that single parameters don't have unnecessary parens
 
+import { test, code, fail, type } from '../support/testing.js'
+
 # ==============================================================================
 # Single Parameter (NO parens)
 # ==============================================================================

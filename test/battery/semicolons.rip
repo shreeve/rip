@@ -1,6 +1,8 @@
 # Test: Clean JavaScript Output (no unnecessary semicolons)
 # Tests that block statements don't have trailing semicolons
 
+import { test, code, fail, type } from '../support/testing.js'
+
 # ==============================================================================
 # Function Declarations (NO semicolon after })
 # ==============================================================================

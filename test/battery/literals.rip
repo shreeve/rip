@@ -1,6 +1,8 @@
 # Test: Literals (5 node types)
 # Tests NUMBER, undefined, null, BOOL, this node types
 
+import { test, code, fail, type } from '../support/testing.js'
+
 # ==============================================================================
 # Number Literals: NUMBER
 # ==============================================================================

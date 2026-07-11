@@ -1,6 +1,8 @@
 # Test: Function Definitions (1 node type)
 # Tests "def" node type
 
+import { test, code, fail, type } from '../support/testing.js'
+
 # ==============================================================================
 # Function Definitions: "def"
 # ==============================================================================

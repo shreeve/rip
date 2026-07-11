@@ -3,6 +3,8 @@
 # and =! (readonly). These compile to __state(), __computed(), __effect(),
 # and const respectively.
 
+import { test, code, fail, type } from '../support/testing.js'
+
 # ==============================================================================
 # State (:=) — Code Generation
 # ==============================================================================

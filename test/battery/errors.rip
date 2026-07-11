@@ -1,6 +1,8 @@
 # Test: Exception Handling (2 node types)
 # Tests "try" and "throw" node types
 
+import { test, code, fail, type } from '../support/testing.js'
+
 # ==============================================================================
 # Try/Catch: "try"
 # ==============================================================================

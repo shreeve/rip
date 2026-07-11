@@ -2,6 +2,8 @@
 # Tests that || and && end implicit function calls
 # Allows: read 'x' or '' instead of: read('x' || '')
 
+import { test, code, fail, type } from '../support/testing.js'
+
 # ==============================================================================
 # or (||) ends implicit calls - Runtime tests
 # ==============================================================================

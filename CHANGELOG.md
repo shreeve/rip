@@ -5,6 +5,11 @@ repository's pull requests.
 
 ## Unreleased
 
+- Give battery files real imports: the four verbs (test, code, fail,
+  type) live in test/support/testing.js and every battery file imports
+  them — the editor resolves the vocabulary, and a battery file run
+  directly (bun test/battery/assignment.rip) executes standalone (#16)
+
 - Wire `bun run ext` to the shared extension installer, and carry the
   icon field into the staged vsix manifest so editors show the
   extension icon (#14)

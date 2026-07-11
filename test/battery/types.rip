@@ -6,6 +6,8 @@
 # Type annotations are erased from .js output. The `types: true` option
 # enables .d.ts emission via emitTypes().
 
+import { test, code, fail, type } from '../support/testing.js'
+
 # ==============================================================================
 # Type Annotations on Variables — Erased from JS
 # ==============================================================================

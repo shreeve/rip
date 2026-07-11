@@ -1,6 +1,8 @@
 # Test: Modules (5 node types)
 # Tests "import", "export", "export-default", "export-all", "export-from" node types
 
+import { test, code, fail, type } from '../support/testing.js'
+
 # ==============================================================================
 # Import: "import"
 # ==============================================================================

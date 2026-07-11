@@ -1,6 +1,8 @@
 # Test: Assignment (1 node type)
 # Tests the "=" assignment operator
 
+import { test, code, fail, type } from '../support/testing.js'
+
 # ==============================================================================
 # Simple Assignment
 # ==============================================================================

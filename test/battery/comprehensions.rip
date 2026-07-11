@@ -1,6 +1,8 @@
 # Test: Comprehensions (2 node types)
 # Tests "comprehension" and "object-comprehension" node types
 
+import { test, code, fail, type } from '../support/testing.js'
+
 # ==============================================================================
 # Array Comprehensions: "comprehension"
 # ==============================================================================

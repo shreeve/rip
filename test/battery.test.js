@@ -10,7 +10,7 @@ const dir = join(import.meta.dir, 'battery');
 const files = readdirSync(dir).filter((f) => f.endsWith('.rip')).sort();
 
 for (const file of files) {
-  const rows = loadBattery(join(dir, file));
+  const rows = await loadBattery(join(dir, file));
   describe(`battery: ${file}`, () => {
     for (const row of rows) {
       test(`${row.verb} ${row.name}`, async () => {

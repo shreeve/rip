@@ -1,6 +1,8 @@
 # Test: Async/Await (2 node types)
 # Tests "await" and "await-return" node types
 
+import { test, code, fail, type } from '../support/testing.js'
+
 # ==============================================================================
 # Canary: verifies the test runner properly awaits async test() calls.
 # This test uses a multi-hop async chain (nested async IIFEs) that requires

@@ -1,6 +1,8 @@
 # Test: Basic data Structures (3 node types)
 # Tests "array", "object", and "computed" node types
 
+import { test, code, fail, type } from '../support/testing.js'
+
 # ==============================================================================
 # Arrays: "array"
 # ==============================================================================

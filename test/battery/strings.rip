@@ -1,6 +1,8 @@
 # Test: Strings (2 node types)
 # Tests STRING literals and "str" (interpolation) node types
 
+import { test, code, fail, type } from '../support/testing.js'
+
 # ==============================================================================
 # String Literals: STRING
 # ==============================================================================

@@ -1,6 +1,8 @@
 # Test: Loops (5 node types)
 # Tests "for-in", "for-of", "while", "until", "loop" node types
 
+import { test, code, fail, type } from '../support/testing.js'
+
 # ==============================================================================
 # For-In Loops (Array Iteration): "for-in"
 # ==============================================================================

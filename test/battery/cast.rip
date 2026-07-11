@@ -7,6 +7,8 @@
 # is stripped to a string by the type rewriter, so the grammar never parses a
 # type — `as` reuses the same machinery as `::` annotations.
 
+import { test, code, fail, type } from '../support/testing.js'
+
 # ==============================================================================
 # Runtime erasure — the cast leaves no trace in the emitted JS
 # ==============================================================================
