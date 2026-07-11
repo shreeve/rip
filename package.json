@@ -9,7 +9,8 @@
     "corpus-expected": "bun scripts/corpus-expected.mjs",
     "test": "bun test --timeout 15000",
     "test:all": "RIP_EXTENDED=1 RIP_REQUIRE_TSC=1 bun test --timeout 15000",
-    "ext": "bun scripts/install-ext.mjs"
+    "ext": "bun scripts/install-ext.mjs",
+    "audit": "bun test/type-audit/runner.js"
   },
   "bin": {
     "rip": "bin/rip"

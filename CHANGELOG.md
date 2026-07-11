@@ -5,6 +5,8 @@ repository's pull requests.
 
 ## Unreleased
 
+- Wire `bun run audit` to the typed-editor gauge (#18)
+
 - Add the typed-editor gauge (test/type-audit): twelve real-world typed
   fixtures with .ts/.tsx twins, a six-dimension audit runner (compiles,
   directives kept, editor verdict, runtime parity, twin validity, and
