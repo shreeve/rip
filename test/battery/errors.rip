@@ -220,3 +220,13 @@ fail "an optional chain cannot be an update target", '''
   obj = {x: 1}
   obj?.x++
 ''', "no reference exists"
+
+# ==============================================================================
+# The nullish hint — an incomplete two-operand `?` names the operator
+# that means a default: x ?? y
+# ==============================================================================
+
+fail 'binary existential hints ??', 'x = opts?.input ? null', 'x ?? y'
+fail 'bare binary existential hints ??', 'x = a ? b', 'x ?? y'
+fail 'incomplete ternary hints ??', 'y = cond ? 1', 'x ?? y'
+fail 'binary existential in call arg hints ??', 'foo a ? b', 'x ?? y'

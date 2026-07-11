@@ -130,7 +130,13 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
 
   if (result.diagnostics.length > 0) {
     const d = result.diagnostics[0];
-    throw positioned(file, path, d.message, d.start, d.end);
+    // The one grammar state whose FIRST expectation is the ternary's
+    // ':' is a two-operand `a ? b` — almost always a reach for the
+    // nullish default; the hint names the operator that means it.
+    const message = d.expected?.[0] === ':'
+      ? `${d.message}\n  (a two-operand '?' is incomplete — a default for null/undefined is spelled x ?? y)`
+      : d.message;
+    throw positioned(file, path, message, d.start, d.end);
   }
 
   let emitted;
