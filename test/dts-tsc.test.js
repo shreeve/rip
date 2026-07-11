@@ -148,7 +148,7 @@ describeTscExtended('tsc validates the hand rows the corpus does not carry', () 
   }, TSC_TIMEOUT);
 });
 
-describeTscExtended('component declarations (M12-E): consumer programs check against the shipped .d.ts', () => {
+describeTscExtended('component declarations: consumer programs check against the shipped .d.ts', () => {
   // The consumer story the .d.ts exists for: a TypeScript program
   // importing a compiled component module sees the class shape —
   // typed construction, the instance surface, the companion type.

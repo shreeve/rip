@@ -5,6 +5,10 @@ repository's pull requests.
 
 ## Unreleased
 
+- Run the extended tier in CI: TypeScript installs as a pinned external
+  tool and `bun run test:all` arms the extended and tsc-gated checks —
+  the meta-gate that requires this in CI now passes by construction (#8)
+
 - Add the language test suite: the battery (25 files of idiom rows with
   their own runner), mapping and source-map conformance, declaration and
   schema-type checks, migration machinery, types, async, pick, void
