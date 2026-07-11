@@ -1754,6 +1754,10 @@ class Emitter {
       if (role !== 'target') return true;
       const f = facts.get(name);
       if (!f || f.decl === null || f.inDef || f.decl === tail) return true;
+      // A guard assign's write emits INSIDE an `if` condition
+      // (`if (!(y = x)) return e;`) — `let` is invalid there, so the
+      // target keeps its hoist-line declaration.
+      if (isNode(f.decl) && f.decl[0] === '=' && Emitter.returnGuard(f.decl[2])) return true;
       // A bare typed FORWARD (`x: number` … `x = 5`) keeps the hoist —
       // its annotation manifests on the hoist line and the forward is
       // the name's first occurrence anyway. An annotated ASSIGN
@@ -2761,6 +2765,15 @@ class Emitter {
     if (isNode(node)) {
       const form = Emitter.STATEMENT_FORMS[node[0]];
       if (form && form(this, node, ind)) return;
+      // Return guards are statement rewrites: bare (`x or return e`)
+      // and assigning (`y = x or return e`) forms both emit an `if`
+      // whose body is the return — the one lowering that keeps the
+      // return's function target.
+      if (Emitter.returnGuard(node)) return this.returnGuardStatement(node, null);
+      if (node[0] === '=' && node.length === 3 && typeof node[1] === 'string' &&
+          Emitter.returnGuard(node[2])) {
+        return this.returnGuardStatement(node[2], node);
+      }
       // Optional-chain assignment in statement position guards with a
       // plain `if` (no ternary value is needed).
       if ((ASSIGNS.has(node[0]) || node[0] === '//=' || node[0] === '%%=') && node.length === 3) {
@@ -8213,6 +8226,15 @@ class Emitter {
   // parens and the begin/tail phases reproduce the recursive bytes,
   // mark order, and inTarget/deopt state transitions exactly.
 
+  // A return GUARD: a logical operator whose right operand is a
+  // `return` statement (`x or return e`). The return must target the
+  // enclosing function, so no expression lowering exists — the guard
+  // is a statement rewrite, and every value-position use rejects.
+  static returnGuard(x) {
+    return isNode(x) && (x[0] === '||' || x[0] === '&&' || x[0] === '??') &&
+      x.length === 3 && isNode(x[2]) && x[2][0] === 'return';
+  }
+
   // `*` with a string-LITERAL left operand is repetition — it emits
   // `lit.repeat(n)`, a call: the primary tier, never a spine member.
   static isStrRepeat(x) {
@@ -8440,6 +8462,9 @@ class Emitter {
   // take over, so their nodes route through expr() dispatch as
   // ordinary grouped operands.
   binary(node) {
+    if (Emitter.returnGuard(node)) {
+      throw this.positionedError(node[2], "emitter: a return guard is a statement — in value position the 'return' would lose its function target (bind the value first, or use `or throw`)");
+    }
     if (node[0] === '&&' || node[0] === '||') return this.logicalChain(node);
     // A string-LITERAL left operand of `*` is repetition (`"-" * 40`
     // is a ruler, never arithmetic — JS `*` would yield NaN). The
@@ -9574,6 +9599,13 @@ class Emitter {
       if ((h === 'while' && (stmt.length === 3 || stmt.length === 4)) || (h === 'loop' && stmt.length === 2)) {
         return this.statement(stmt, ind);
       }
+      // A tail-position return guard stays a statement: its return
+      // fires on the guard path, and the fall-through returns
+      // undefined — there is no value form to wrap.
+      if (Emitter.returnGuard(stmt) ||
+          (h === '=' && stmt.length === 3 && Emitter.returnGuard(stmt[2]))) {
+        return this.statement(stmt, ind);
+      }
       // A tail-position enum stays a statement — its lowering is a
       // `const` declaration, which has no value form
       if (h === 'enum') return this.statement(stmt, ind);
@@ -9826,6 +9858,69 @@ class Emitter {
       this.b.emit(' ');
       this.operand(node, 'right', node[2]);
       this.b.emit(')');
+    });
+  }
+
+  // A return guard in statement position. The rewrite keeps every
+  // contract: the condition operand evaluates once, the assignment
+  // (when present) lands before the test reads it, and the `return`
+  // stays a statement of the ENCLOSING function's body.
+  //   x or return e      →  if (!x) return e;
+  //   y = x or return e  →  if (!(y = x)) return e;
+  //   x ?? return e      →  if (x == null) return e;
+  //   x and return e     →  if (x) return e;
+  returnGuardStatement(guard, assign) {
+    const ret = guard[2];
+    if (this.scopes.length <= 1) {
+      throw this.positionedError(ret, "emitter: 'return' outside a function");
+    }
+    const op = guard[0];
+    const emitCond = () => {
+      const inner = () => {
+        if (assign !== null) {
+          this.mark(assign, '$self', () => {
+            this.mark(assign, 'target', () => this.b.emit(assign[1]));
+            this.b.emit(' ');
+            this.mark(assign, 'operator', () => this.b.emit('='));
+            this.b.emit(' ');
+            this.mark(assign, 'value', () => this.expr(guard[1]));
+          });
+        } else {
+          this.mark(guard, 'left', () => this.expr(guard[1]));
+        }
+      };
+      // An assignment (or any non-primary operand) parenthesizes
+      // inside the condition; a plain name or call reads bare.
+      const grouped = assign !== null || Emitter.jsTier(guard[1]) !== 'primary';
+      if (op === '||') {
+        this.b.emit('!');
+        if (grouped) { this.b.emit('('); inner(); this.b.emit(')'); }
+        else inner();
+      } else if (op === '??') {
+        if (grouped) { this.b.emit('('); inner(); this.b.emit(')'); }
+        else inner();
+        this.b.emit(' == null');
+      } else {
+        if (grouped && assign !== null) { this.b.emit('('); inner(); this.b.emit(')'); }
+        else inner();
+      }
+    };
+    this.mark(guard, '$self', () => {
+      this.b.emit('if (');
+      emitCond();
+      this.b.emit(') ');
+      this.mark(ret, '$self', () => {
+        this.b.emit('return');
+        if (ret.length > 1) {
+          this.b.emit(' ');
+          this.mark(ret, 'value', () => {
+            if (Emitter.needsGrouping(ret[1], 'return')) {
+              this.b.emit('('); this.expr(ret[1]); this.b.emit(')');
+            } else this.expr(ret[1]);
+          });
+        }
+      });
+      this.b.emit(';');
     });
   }
 

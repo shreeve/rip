@@ -205,6 +205,26 @@ code "do block", '''
 
 code "or throw assignment lowers to a throwing IIFE", "  data = fetchData() or throw new Error 'No data'", "let data = fetchData() || (() => { throw new Error(\"No data\"); })();"
 
+# Return guards rewrite as statements — the one lowering that keeps
+# the return's function target (an IIFE would capture it)
+code "or return assignment lowers to an if-guard", "f = (x) ->\n  y = x or return 'no'\n  y", '''
+  let f;
+
+  f = function(x) {
+    let y;
+    if (!(y = x)) return "no";
+    return y;
+  };
+'''
+test "or return returns the guard value on falsy", "f = (x) ->\n  y = x or return 'no'\n  y\nf(0)", "no"
+test "or return passes the value through on truthy", "f = (x) ->\n  y = x or return 'no'\n  y\nf(5)", 5
+test "?? return fires on nullish only", "f = (x) ->\n  y = x ?? return 'nil'\n  y\n[f(null), f(0)]", ["nil", 0]
+test "and return fires on truthy", "f = (x) ->\n  x and return 'yes'\n  'fell'\n[f(1), f(0)]", ["yes", "fell"]
+test "bare or return with no value returns undefined", "f = (x) ->\n  x or return\n  'ok'\n[f(0), f(1)]", [null, "ok"]
+fail "a return guard rejects in value position", "f = (x) ->\n  g(x or return 1)", "a return guard is a statement"
+fail "a return guard rejects at the top level", "x or return 1", "'return' outside a function"
+fail "a return guard rejects inside a comprehension", "f = (xs) ->\n  ys = for x in xs\n    x or return 'bad'\n  ys", "cannot cross the IIFE boundary"
+
 code "and throw assignment lowers to a throwing IIFE", "  error = validate() and throw error", '''
   let error;
 

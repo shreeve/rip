@@ -5,6 +5,14 @@ repository's pull requests.
 
 ## Unreleased
 
+- Return guards: `x or return e`, `x and return e`, and
+  `x ?? return e` (with or without a value, bare or assigning:
+  `y = x or return "no"`) lower as statement rewrites —
+  `if (!(y = x)) return "no";` — the one lowering that keeps the
+  return's function target. Value-position uses, top-level uses, and
+  uses inside expression-lowered constructs all reject positioned
+  (#38)
+
 - Await-emitting call chains group correctly: `g!()` and `g!.x`-style
   spellings agree — a call whose callee is the dammit operator sits in
   the unary tier, so `fetch!("u").json!()` emits
