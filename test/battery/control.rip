@@ -203,7 +203,7 @@ code "do block", '''
 # Control flow short-circuits: or return / or throw / and return / and throw
 # ==============================================================================
 
-code "or throw assignment lowers to a throwing IIFE", "  data = fetchData() or throw new Error 'No data'", "let data = fetchData() || (() => { throw new Error(\"No data\"); })();"
+code "or throw assignment rewrites as an if-guard", "  data = fetchData() or throw new Error 'No data'", "let data;\n\nif (!(data = fetchData())) throw new Error(\"No data\");"
 
 # Return guards rewrite as statements — the one lowering that keeps
 # the return's function target (an IIFE would capture it)
@@ -225,33 +225,35 @@ fail "a return guard rejects in value position", "f = (x) ->\n  g(x or return 1)
 fail "a return guard rejects at the top level", "x or return 1", "'return' outside a function"
 fail "a return guard rejects inside a comprehension", "f = (xs) ->\n  ys = for x in xs\n    x or return 'bad'\n  ys", "cannot cross the IIFE boundary"
 
-code "and throw assignment lowers to a throwing IIFE", "  error = validate() and throw error", '''
+code "and throw assignment rewrites as an if-guard", "  error = validate() and throw error", '''
   let error;
 
-  error = validate() && (() => { throw error; })();
+  if ((error = validate())) throw error;
 '''
 
-code "standalone and throw lowers to a throwing IIFE", "  isError and throw new Error 'Failed'", "isError && (() => { throw new Error(\"Failed\"); })();"
+code "standalone and throw rewrites as an if-guard", "  isError and throw new Error 'Failed'", "if (isError) throw new Error(\"Failed\");"
 
 # ==============================================================================
 # Nullish coalescing control flow: ?? return / ?? throw
 # Key difference: ?? only triggers on null/undefined, not other falsy values
 # ==============================================================================
 
-code "?? throw assignment lowers to a throwing IIFE (nullish check)", "  data = getValue() ?? throw new Error 'Missing'", "let data = getValue() ?? (() => { throw new Error(\"Missing\"); })();"
+code "?? throw assignment rewrites with a nullish check", "  data = getValue() ?? throw new Error 'Missing'", "let data;\n\nif ((data = getValue()) == null) throw new Error(\"Missing\");"
 
-code "standalone ?? throw lowers to a throwing IIFE (nullish check)", "  getValue() ?? throw new Error 'Not found'", "getValue() ?? (() => { throw new Error(\"Not found\"); })();"
+code "standalone ?? throw rewrites with a nullish check", "  getValue() ?? throw new Error 'Not found'", "if (getValue() == null) throw new Error(\"Not found\");"
 
 # The short-circuit SEMANTICS, executed: the arm only throws when the
 # left side demands it.
 test "or throw passes a truthy left through", '''
   fetchData = -> 42
-  fetchData() or throw new Error "No data"
+  d = fetchData() or throw new Error "No data"
+  d
 ''', 42
 
 test "?? throw keeps a FALSY-but-present left (nullish only)", '''
   v = false
-  v ?? throw new Error "Missing"
+  w = v ?? throw new Error "Missing"
+  w
 ''', false
 
 test "?? throw fires on null", '''
@@ -880,7 +882,8 @@ code "or-throw in sibling exports declares in each function", '''
       store
   ''', '''
   export const first = function(data) {
-    let store = getData() || (() => { throw new Error("no context"); })();
+    let store;
+    if (!(store = getData())) throw new Error("no context");
     return store.value;
   };
   export const second = function() {
@@ -952,3 +955,23 @@ test 'multi-line handler-less try swallows', '''
     boom()
   'after'
   ''', 'after'
+
+code 'or throw assignment generates if', '  data = fetchData() or throw new Error \'No data\'', '''
+  let data;
+
+  if (!(data = fetchData())) throw new Error('No data');
+'''
+
+code 'and throw assignment generates if', '  error = validate() and throw error', '''
+  let error;
+
+  if ((error = validate())) throw error;
+'''
+
+code 'standalone and throw generates if', '  isError and throw new Error \'Failed\'', 'if (isError) throw new Error(\'Failed\');'
+
+code '?? throw assignment generates if with nullish check', '  data = getValue() ?? throw new Error \'Missing\'', '''
+  let data;
+
+  if ((data = getValue()) == null) throw new Error('Missing');
+'''
