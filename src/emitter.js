@@ -1980,9 +1980,11 @@ class Emitter {
     let lead = 0;
     while (lead < all.length && this.isModuleImport(all[lead])) lead++;
     this.lastProgramStmt = all[all.length - 1] ?? null;
+
     if (lead > 0) {
       this.mark(sexpr, '$self', () => {
         for (const imp of all.slice(0, lead)) this.statement(imp, 0);
+        this.emitDataConst();
         const rest = all.slice(lead);
         let entries = this.hoistTargets(rest);
         this.attachSchemaConsts(entries);
@@ -2051,8 +2053,17 @@ class Emitter {
 
   // stmts arrives pre-filtered from programWith (erased statements
   // already recorded there).
+  // The __DATA__ payload binds as DATA at the program's top (below
+  // any leading imports) — raw text, JSON-spelled, present exactly
+  // when the marker is.
+  emitDataConst() {
+    if (this.dataPayload == null) return;
+    this.b.emit(`const DATA = ${JSON.stringify(this.dataPayload)};\n\n`);
+  }
+
   programPlain(sexpr, stmts) {
     this.mark(sexpr, '$self', () => {
+      this.emitDataConst();
       let entries = this.hoistTargets(stmts);
       this.attachSchemaConsts(entries);
       const names = new Set(entries.map(([n]) => n));
@@ -10786,7 +10797,7 @@ const programScopeNames = (emitter, sexpr) => {
   return names;
 };
 
-export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false } = {}) {
+export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, dataPayload = null } = {}) {
   if (!parseResult.sexpr) {
     throw new Error('emitter: cannot emit a failed parse');
   }
@@ -10796,6 +10807,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   const stores = new Stores(parseResult.stores);
   const builder = new CodeBuilder(stores, { source });
   const emitter = new Emitter(stores, builder, { face, pins, strict });
+  emitter.dataPayload = dataPayload;
 
   if (runtimeDelivery !== 'none' && runtimeDelivery !== 'import' && runtimeDelivery !== 'inline') {
     throw new Error(`emitter: unknown runtimeDelivery '${runtimeDelivery}' — expected 'none', 'import', or 'inline'`);

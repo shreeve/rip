@@ -98,12 +98,29 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
   }
   const file = new SourceFile(source, path);
 
+  // The __DATA__ marker: everything after a line that is exactly
+  // `__DATA__` is the program's DATA constant — raw text, never
+  // parsed. The parse sees the truncated source; offsets before the
+  // marker are unchanged, so every diagnostic and mapping span stays
+  // exact against the full file.
+  let dataPayload = null;
+  let parseSource = source;
+  {
+    const lines = source.split('\n');
+    const at = lines.findIndex((line) => line === '__DATA__');
+    if (at !== -1) {
+      const rest = lines.slice(at + 1);
+      dataPayload = rest.length > 0 ? rest.join('\n') + '\n' : '';
+      parseSource = lines.slice(0, at).join('\n');
+    }
+  }
+
   const parser = Parser();
   parser.lexer = makeParserLexer(path);
 
   let result;
   try {
-    result = parser.parse(source);
+    result = parser.parse(parseSource);
   } catch (err) {
     // Lexer rejections carry offset spans; anything else is a bug, not
     // a diagnostic — let it propagate.
@@ -118,7 +135,7 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
 
   let emitted;
   try {
-    emitted = emit(result, { source, runtimeDelivery, face, pins, strict });
+    emitted = emit(result, { source, runtimeDelivery, face, pins, strict, dataPayload });
   } catch (err) {
     // Emitter rejections carry the offending node's offset span
     // (Emitter#positionedError) and format like every other
