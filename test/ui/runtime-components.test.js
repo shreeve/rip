@@ -1160,6 +1160,18 @@ describe('the extends rest seam (runtime-owned;  re-emits it per class — /#165
     expect(el.getAttribute('style')).toBe('color: red');
     inst._applyInheritedProp(el, 'style', { color: 'blue' });
     expect(el.style.color).toBe('blue');
+    // Replacing a style object CLEARS the keys the new one omits —
+    // the old declarations must not stay active.
+    inst._applyInheritedProp(el, 'style', { color: 'blue', fontWeight: 'bold' });
+    inst._applyInheritedProp(el, 'style', { color: 'green' });
+    expect(el.style.color).toBe('green');
+    expect(el.style.fontWeight).toBe('');
+    // A string or null write drops the replacement record: keys
+    // set outside an object write are never wiped by a later one.
+    inst._applyInheritedProp(el, 'style', 'color: red');
+    el.style.margin = '1px';
+    inst._applyInheritedProp(el, 'style', { color: 'blue' });
+    expect(el.style.margin).toBe('1px');
     inst._applyInheritedProp(el, 'style', null);
     expect(el.getAttribute('style')).toBeNull();
     // innerHTML family assigns directly.

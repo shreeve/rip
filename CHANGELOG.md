@@ -5,6 +5,16 @@ repository's pull requests.
 
 ## Unreleased
 
+- Runtime validation is stateless and structural: a `/g` or `/y`
+  schema constraint resets its cursor before every test (identical
+  inputs validate identically); an object schema rejects a primitive,
+  `null`, or array input with a structured issue instead of spreading
+  it into an empty instance; a written calendar date must exist —
+  `2024-02-30` fails validation instead of silently becoming March 1
+  (leap years honored, timezone-independent); and replacing a
+  component's style OBJECT clears the declarations the new value
+  omits, so stale styles never linger (#34)
+
 - Reject loudly where control flow and writes have no target: `return`
   and `yield` outside a function, `break`/`continue` outside a loop,
   and `return`/`break`/`continue` inside an expression-lowered
