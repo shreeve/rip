@@ -1,6 +1,10 @@
-# Pending rows for components — behaviors the battery does not cover yet.
-# Every row here FAILS today; when a feature revives one, MOVE the row
-# into test/battery/ in the same change (the lane asserts still-failing).
+# Pending rows for the @app/router subsystem — render gates
+# (`user <~ @app.data.user`), the router's data-prefetch contract:
+# static __gates read by the router, __gateBind seeding members from
+# the app stash. These rows come along when @app/router is
+# implemented. Every row here FAILS today; when the feature revives
+# one, MOVE the row into test/battery/ in the same change (the lane
+# asserts still-failing).
 
 import { test, code, fail, type } from '../support/testing.js'
 
