@@ -1246,13 +1246,19 @@ function extractEnsurePair(messagePart, fieldPart, fnPart, refTok, fail) {
   return { message, field, paramTokens, bodyTokens };
 }
 
-// Plain-identifier parameter names from a captured `(a, b)` slice.
+// Parameter names from a captured `(a, b)` slice. Each parameter is a
+// plain identifier, optionally typed (`other: Money`) — the annotation
+// is type-surface only and never reaches the emitted JS, exactly like
+// annotations everywhere else in the language.
 export function paramNamesOf(paramTokens, what, fail) {
   if (!paramTokens.length) return [];
   return splitTopLevelByComma(paramTokens).map((part) => {
     const toks = part.filter((t) => t.kind !== 'TERMINATOR' && t.kind !== 'INDENT' && t.kind !== 'OUTDENT' && t.kind !== 'TYPE');
-    if (toks.length !== 1 || toks[0].kind !== 'IDENTIFIER') {
-      fail(`${what}: parameters must be plain identifiers`, (toks[0] ?? part[0]).start);
+    // A typed parameter's name arrives as PROPERTY (the lexer's
+    // `word:` tagging) with the raw ':' following it.
+    const typed = toks.length >= 3 && (toks[0].kind === 'IDENTIFIER' || toks[0].kind === 'PROPERTY') && toks[1].kind === ':';
+    if (!typed && (toks.length !== 1 || toks[0].kind !== 'IDENTIFIER')) {
+      fail(`${what}: parameters must be plain identifiers, optionally typed ('name' or 'name: Type')`, (toks[0] ?? part[0]).start);
     }
     return toks[0].value;
   });
