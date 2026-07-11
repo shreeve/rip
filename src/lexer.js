@@ -1947,6 +1947,16 @@ const OPS2 = {
   // tokens so a trailing one never reads as a line-continuing COMPARE.
   '~>': 'EFFECT', '!>': '!>',
   '->': '->', '=>': '=>', '++': '++', '--': '--', '?.': '?.',
+  // Method assignment: ADJACENT `.=` is one token (`x .= trim()` —
+  // the target re-binds to a method call on itself). No legal
+  // program carries a tight `.` `=` pair (a property name must
+  // follow `.`), so the claim can never change a program's meaning.
+  '.=': 'METHOD_ASSIGN',
+  // Merge assignment: ADJACENT `*>` is one token (`*>obj = {…}` —
+  // the value merges into the target). No legal program carries a
+  // tight `*` `>` pair (a comparison cannot follow a bare `*`), so
+  // the claim can never change a program's meaning.
+  '*>': 'MERGE_ASSIGN',
 };
 
 // Token kinds that leave the line UNFINISHED at a newline: the next line
