@@ -5,6 +5,15 @@ repository's pull requests.
 
 ## Unreleased
 
+- AGENTS.md — the operating rules for any agent (AI or human) working
+  in this repository — now lives at the top level. Eight standing
+  rules (reject loudly; lowerings preserve source shape; no hand-
+  edits to generated files; timeless code; tests as contract;
+  no silent output changes; claims verified not asserted; honest
+  PR-only commits) plus the full lowering doctrine, runtime doctrine,
+  mapping never-list, style vocabulary, test-authoring sharp edges,
+  and command reference (#35)
+
 - Runtime validation is stateless and structural: a `/g` or `/y`
   schema constraint resets its cursor before every test (identical
   inputs validate identically); an object schema rejects a primitive,
