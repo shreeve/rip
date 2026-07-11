@@ -5,6 +5,13 @@ repository's pull requests.
 
 ## Unreleased
 
+- The pending lane (test/battery-pending): 508 language behaviors the
+  battery does not cover yet, held as data and asserted to STILL FAIL
+  — the suite stays green while features are missing and flips red
+  exactly when a change makes a pending row pass without moving it
+  into the real battery. Landing a feature and moving its rows is one
+  change; the lane dies when it empties (#44)
+
 - Editor grammars live here and move with the language: the vim
   plugin (packages/vim — syntax, indent, ftdetect, ftplugin) and the
   highlight.js grammar (packages/highlight — Rip Print consumes it)
