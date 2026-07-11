@@ -5,6 +5,15 @@ repository's pull requests.
 
 ## Unreleased
 
+- Restore stripped test coverage: eight test files defined fixtures
+  whose consuming blocks were lost to over-eager de-witnessing — six
+  ran zero tests. Every self-contained block is converted and kept;
+  genuine sibling-compiler comparison arms are dropped; comments and
+  titles state present-tense invariants. Recovered 723 tests
+  (~967,000 assertions): types 4→299, sourcemap 0→137, mapping 0→126,
+  schema 0→66, voidmarker 0→37, async 0→26, enum 1→23, pick 0→14.
+  The corpus-invariant sweeps now run over the full current corpus (#23)
+
 - Fix comment and test-title typos left by earlier scrubbing: doubled
   articles, unfilled placeholder phrases reworded to name the actual
   rule or mechanism, empty citation parentheses, dangling section
