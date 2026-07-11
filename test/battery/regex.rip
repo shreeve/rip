@@ -119,3 +119,83 @@ test 'ternary with match operator', '(\'ABC\' =~ /B/) ? \'found\' : \'nope\'', '
 fail 'a bare =~ chain rejects', "s = 'x'\nr = s =~ /x/ =~ /y/", 'does not chain'
 
 code '=~ emits the coerced match', "t = 'a'\nt =~ /a/", 'let t = "a";\n\n(_ = toMatchable(t).match(/a/));'
+
+# ==============================================================================
+# Regex index — text[/re/] is the whole match (or null); text[/re/, n]
+# the nth capture; both share the `_` last-match binding with =~
+# ==============================================================================
+
+test 'regex index simple', '"steve"[/eve/]', 'eve'
+
+test 'regex index capture', '"steve"[/e(v)e/, 1]', 'v'
+
+test 'regex index multiple captures', '''
+  text = 'hello world'
+  text[/(\\w+) (\\w+)/, 2]
+''', 'world'
+
+test 'regex index no match', '"hello"[/xyz/]', null
+
+test 'regex index number', '''
+  num = 12345
+  num[/\\d{3}/]
+''', '123'
+
+test 'regex index email domain', '''
+  email = 'user@example.com'
+  email[/@(.+)$/, 1]
+''', 'example.com'
+
+test 'regex index phone', '''
+  phone = '(555) 123-4567'
+  phone[/\\((\\d{3})\\) (\\d{3})-(\\d{4})/, 2]
+''', '123'
+
+test 'regex index url', '''
+  url = 'https://example.com/path'
+  url[/:\\/\\/(\\w+\\.\\w+)/, 1]
+''', 'example.com'
+
+test 'regex index case insensitive', '"HELLO"[/hello/i]', 'HELLO'
+
+test 'regex index anchored', '"test123"[/^(test)(\\d+)$/, 1]', 'test'
+
+test 'regex index nested groups', '''
+  text = 'abc123xyz'
+  text[/([a-z]+)(\\d+)/, 2]
+''', '123'
+
+test 'chained regex ops', '''
+  email = 'admin@company.com'
+  if email =~ /(.+)@(.+)/
+    domain = _[2]
+    domain[/(\\w+)\\./, 1]
+  else
+    null
+''', 'company'
+
+test 'validator id pattern', '''
+  validate = (v) -> v[/^([1-9]\\d{0,19})$/] and parseInt(_[1])
+  validate('12345')
+''', 12345
+
+test 'validator email pattern', '''
+  validate = (v) -> v[/^([a-zA-Z0-9._%+-]+)@([a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})$/] and _[0]
+  validate('test@example.com')
+''', 'test@example.com'
+
+test 'validator zip pattern', '''
+  validate = (v) -> v[/^(\\d{5})/] and _[1]
+  validate('12345-6789')
+''', '12345'
+
+test 'regex index empty string', '""[/test/]', null
+
+test 'match-index unless hit', '''
+  f = (v) ->
+    return "miss" unless v[/([0-9]+)/]
+    _[1]
+  f("x42")
+''', '42'
+
+fail 'a two-part index needs a regex-literal key', 'x = [1, 2]\ny = x[0, 1]', 'regex-capture form'

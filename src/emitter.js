@@ -1533,9 +1533,12 @@ class Emitter {
         }
         return;
       }
-      // The match operator writes the generated last-match binding —
-      // `_` declares at the scope like any assigned name.
+      // The match operator and regex-index reads write the generated
+      // last-match binding — `_` declares at the scope like any
+      // assigned name.
       if (n[0] === '=~' && n.length === 3) add('_', n);
+      if (n[0] === 'regex-index' && n.length === 4) add('_', n);
+      if (n[0] === '[]' && n.length === 3 && typeof n[2] === 'string' && n[2][0] === '/') add('_', n);
       if ((ASSIGNS.has(n[0]) || n[0] === '*>') && n.length === 3) {
         // Merge assignment DECLARES a plain-name target: its `??= {}`
         // initializes a nullish binding, so first use is legal.
@@ -4573,6 +4576,12 @@ class Emitter {
     if (head === '//=' && node.length === 3) return this.floorDivAssign(node);
     if (head === '=~' && node.length === 3) return this.matchOp(node);
     if (head === 'map') return this.mapLiteral(node);
+    if (head === 'regex-index' && node.length === 4) {
+      if (!(typeof node[2] === 'string' && node[2][0] === '/')) {
+        throw this.positionedError(node, 'emitter: a two-part index is the regex-capture form (`text[/re/, n]`) — its key must be a regex literal');
+      }
+      return this.regexIndex(node, node[1], node[2], node[3]);
+    }
     if (head === 'symbol' && node.length === 2) {
       // Interned symbol: identity holds across realms and modules.
       return this.mark(node, '$self', () => this.b.emit(`Symbol.for(${JSON.stringify(node[1])})`));
@@ -4704,8 +4713,12 @@ class Emitter {
     if (!isNode(x) || x.length !== 3) return false;
     if ((x[0] === '.' || x[0] === '?.') && typeof x[2] === 'string') return Emitter.pureChain(x[1]);
     // A pure-base, pure-key index re-read carries the same
-    // no-side-effects assumption a dot chain does.
-    if (x[0] === '[]') return Emitter.pureChain(x[1]) && Emitter.pureChain(x[2]);
+    // no-side-effects assumption a dot chain does. A regex-literal
+    // key is a MATCH (it assigns `_`), never a pure re-read.
+    if (x[0] === '[]') {
+      if (typeof x[2] === 'string' && x[2][0] === '/') return false;
+      return Emitter.pureChain(x[1]) && Emitter.pureChain(x[2]);
+    }
     return false;
   }
 
@@ -9124,8 +9137,12 @@ class Emitter {
     }
   }
 
-  // ["[]", object, key] — computed member.
+  // ["[]", object, key] — computed member; a regex-literal key is
+  // the match read (`text[/re/]`), never a property lookup.
   index(node) {
+    if (node.length === 3 && typeof node[2] === 'string' && node[2][0] === '/') {
+      return this.regexIndex(node, node[1], node[2], null);
+    }
     this.chain(node);
   }
 
@@ -10275,6 +10292,26 @@ class Emitter {
           this.b.emit(']');
         });
       });
+      this.b.emit('])');
+    });
+  }
+
+  // A regex-literal INDEX is a match read: `text[/re/]` is the whole
+  // match (or null), `text[/re/, n]` the nth capture — both spell
+  // `((_ = toMatchable(text).match(/re/)) && _[n])`, sharing the
+  // last-match binding with `=~`. The outer parens keep the whole
+  // guard one operand (`not x[/re/]` negates the READ, not the
+  // assignment). A literal /m flag admits multi-line receivers.
+  regexIndex(node, obj, regex, capture) {
+    const multiline = /^\/(?:[^\\/]|\\.)*\/[a-z]*m[a-z]*$/.test(regex);
+    this.mark(node, '$self', () => {
+      this.b.emit('((_ = toMatchable(');
+      this.mark(node, 'object', () => this.expr(obj));
+      this.b.emit(multiline ? ', true).match(' : ').match(');
+      this.mark(node, 'key', () => this.b.emit(regex));
+      this.b.emit(')) && _[');
+      if (capture === null) this.b.emit('0');
+      else this.mark(node, 'capture', () => this.expr(capture));
       this.b.emit('])');
     });
   }
