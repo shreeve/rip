@@ -1,0 +1,668 @@
+# Test: components — revived reference rows (see the file's sections).
+
+import { test, code, fail, type } from '../support/testing.js'
+
+test 'tag-named local passed as a child component prop compiles', '''
+    CodeBlock = component
+      @label?: string := ""
+      @code?: string := ""
+      render
+        pre
+          = @code
+    A = component
+      examples := [{label: "x", body: "console.log(1)"}]
+      render
+        for ex in examples
+          code = ex.body
+          CodeBlock label: ex.label, code: code
+    inst = A.new()
+    inst._init({})
+    typeof inst._create
+''', 'function'
+
+test 'duplicate render-local assignments don\'t double-declare', '''
+    A = component
+      items := [{a: 1, b: 2}]
+      render
+        for item in items
+          sum = item.a
+          sum = sum + item.b
+          span "#{sum}"
+    inst = A.new()
+    inst._init({})
+    typeof inst._create
+''', 'function'
+
+test 'function-typed render-local can be called with tag-call syntax', '''
+    A = component
+      render
+        code = (s) -> s.toUpperCase()
+        div
+          code "hello"
+    inst = A.new()
+    inst._init({})
+    typeof inst._create
+''', 'function'
+
+test 'function-typed render-local supports chain-call (code.method args)', '''
+    A = component
+      render
+        code = { hi: (s) -> "hi-" + s }
+        div
+          code.hi "world"
+    inst = A.new()
+    inst._init({})
+    typeof inst._create
+''', 'function'
+
+test 'compound assignment in render block executes (no double-declare)', '''
+    A = component
+      items := [{a: 2, b: 3}]
+      render
+        for item in items
+          sum = item.a
+          sum += item.b
+          sum ??= 0
+          span "#{sum}"
+    inst = A.new()
+    inst._init({})
+    typeof inst._create
+''', 'function'
+
+test 'content mutation of a =! array member is allowed', '''
+  A = component
+    items =! []
+    add: -> @items.push("x")
+  a = A.new()
+  a.add()
+  a.add()
+  a.items.length
+''', 2
+
+test 'property mutation of a =! object member is allowed', '''
+  A = component
+    cfg =! {}
+    set: -> @cfg.ready = true
+  a = A.new()
+  a.set()
+  a.cfg.ready
+''', true
+
+test 'a nested-arrow param shadowing a =! member is assignable', '''
+  A = component
+    c =! 5
+    use: ->
+      f = (c) ->
+        c = c + 1
+        c
+      f(10)
+  a = A.new()
+  a.use()
+''', 11
+
+test 'static ref: connected element at mount, nulled on unmount', '''
+    mkDoc = ->
+      mk = (tag) ->
+        n = { tag, childNodes: [], parentNode: null, nodeType: (if tag is '#comment' then 8 else 1), _connected: false }
+        n.appendChild = (c) ->
+          c.parentNode.removeChild(c) if c.parentNode
+          c.parentNode = n
+          n.childNodes.push c
+          c
+        n.insertBefore = (c, ref) ->
+          c.parentNode.removeChild(c) if c.parentNode
+          c.parentNode = n
+          i = if ref? then n.childNodes.indexOf(ref) else -1
+          if i >= 0 then n.childNodes.splice(i, 0, c) else n.childNodes.push c
+          c
+        n.removeChild = (c) ->
+          i = n.childNodes.indexOf c
+          n.childNodes.splice(i, 1) if i >= 0
+          c.parentNode = null
+          c
+        n.remove = -> n.parentNode.removeChild(n) if n.parentNode
+        n.setAttribute = (k, v) -> n.attrs = (n.attrs or {}); n.attrs[k] = v
+        n.removeAttribute = (k) -> delete n.attrs[k] if n.attrs
+        n.toggleAttribute = (k, on_) -> n.setAttribute(k, '')
+        Object.defineProperty n, 'nextSibling',
+          get: ->
+            p = n.parentNode
+            return null unless p
+            i = p.childNodes.indexOf n
+            if i >= 0 and i + 1 < p.childNodes.length then p.childNodes[i + 1] else null
+        Object.defineProperty n, 'isConnected',
+          get: ->
+            x = n
+            while x
+              return true if x._connected
+              x = x.parentNode
+            false
+        n
+      { createElement: mk, createComment: (-> mk('#comment')), createTextNode: (-> mk('#text')) }
+    globalThis.document = mkDoc()
+
+    result = {}
+    C = component
+      el := null
+      mounted: ->
+        result.set = @el?
+        result.connected = @el?.isConnected
+      render
+        input ref: el
+    root = document.createElement('root')
+    root._connected = true
+    inst = C.new()
+    inst.mount(root)
+    atMount = "#{result.set}/#{result.connected}"
+    inst.unmount()
+    "#{atMount}/#{inst.el.value == null}"
+''', 'true/true/true'
+
+test 'forwarded ref: child element fills parent-owned cell, nulled on child unmount', '''
+    mkDoc = ->
+      mk = (tag) ->
+        n = { tag, childNodes: [], parentNode: null, nodeType: (if tag is '#comment' then 8 else 1), _connected: false }
+        n.appendChild = (c) ->
+          c.parentNode.removeChild(c) if c.parentNode
+          c.parentNode = n
+          n.childNodes.push c
+          c
+        n.insertBefore = (c, ref) ->
+          c.parentNode.removeChild(c) if c.parentNode
+          c.parentNode = n
+          i = if ref? then n.childNodes.indexOf(ref) else -1
+          if i >= 0 then n.childNodes.splice(i, 0, c) else n.childNodes.push c
+          c
+        n.removeChild = (c) ->
+          i = n.childNodes.indexOf c
+          n.childNodes.splice(i, 1) if i >= 0
+          c.parentNode = null
+          c
+        n.remove = -> n.parentNode.removeChild(n) if n.parentNode
+        n.setAttribute = (k, v) -> n.attrs = (n.attrs or {}); n.attrs[k] = v
+        n.removeAttribute = (k) -> delete n.attrs[k] if n.attrs
+        n.toggleAttribute = (k, on_) -> n.setAttribute(k, '')
+        Object.defineProperty n, 'nextSibling',
+          get: ->
+            p = n.parentNode
+            return null unless p
+            i = p.childNodes.indexOf n
+            if i >= 0 and i + 1 < p.childNodes.length then p.childNodes[i + 1] else null
+        Object.defineProperty n, 'isConnected',
+          get: ->
+            x = n
+            while x
+              return true if x._connected
+              x = x.parentNode
+            false
+        n
+      { createElement: mk, createComment: (-> mk('#comment')), createTextNode: (-> mk('#text')) }
+    globalThis.document = mkDoc()
+
+    Child = component
+      @slot := null
+      render
+        input ref: slot
+    Parent = component
+      cell := null
+      render
+        Child
+          slot <=> cell
+    root = document.createElement('root')
+    root._connected = true
+    inst = Parent.new()
+    inst.mount(root)
+    filled = inst.cell.value?.isConnected
+    inst.unmount()
+    "#{filled}/#{inst.cell.value == null}"
+''', 'true/true'
+
+test 'dynamic ref (if): cell filled when shown, nulled when hidden', '''
+    mkDoc = ->
+      mk = (tag) ->
+        n = { tag, childNodes: [], parentNode: null, nodeType: (if tag is '#comment' then 8 else 1), _connected: false }
+        n.appendChild = (c) ->
+          c.parentNode.removeChild(c) if c.parentNode
+          c.parentNode = n
+          n.childNodes.push c
+          c
+        n.insertBefore = (c, ref) ->
+          c.parentNode.removeChild(c) if c.parentNode
+          c.parentNode = n
+          i = if ref? then n.childNodes.indexOf(ref) else -1
+          if i >= 0 then n.childNodes.splice(i, 0, c) else n.childNodes.push c
+          c
+        n.removeChild = (c) ->
+          i = n.childNodes.indexOf c
+          n.childNodes.splice(i, 1) if i >= 0
+          c.parentNode = null
+          c
+        n.remove = -> n.parentNode.removeChild(n) if n.parentNode
+        n.setAttribute = (k, v) -> n.attrs = (n.attrs or {}); n.attrs[k] = v
+        n.removeAttribute = (k) -> delete n.attrs[k] if n.attrs
+        n.toggleAttribute = (k, on_) -> n.setAttribute(k, '')
+        Object.defineProperty n, 'nextSibling',
+          get: ->
+            p = n.parentNode
+            return null unless p
+            i = p.childNodes.indexOf n
+            if i >= 0 and i + 1 < p.childNodes.length then p.childNodes[i + 1] else null
+        Object.defineProperty n, 'isConnected',
+          get: ->
+            x = n
+            while x
+              return true if x._connected
+              x = x.parentNode
+            false
+        n
+      { createElement: mk, createComment: (-> mk('#comment')), createTextNode: (-> mk('#text')) }
+    globalThis.document = mkDoc()
+
+    C = component
+      open := false
+      panel := null
+      render
+        div
+          if open
+            section ref: panel
+    root = document.createElement('root')
+    root._connected = true
+    inst = C.new()
+    inst.mount(root)
+    before = inst.panel.value == null
+    inst.open.value = true
+    shown = inst.panel.value?.isConnected
+    inst.open.value = false
+    after = inst.panel.value == null
+    "#{before}/#{shown}/#{after}"
+''', 'true/true/true'
+
+test 'component state access', '''
+  A = component
+    x := 5
+  a = A.new()
+  a.x.value
+''', 5
+
+test 'component state mutation', '''
+  A = component
+    x := 10
+  a = A.new()
+  a.x.value = 20
+  a.x.value
+''', 20
+
+test 'component computed', '''
+  A = component
+    x := 3
+    doubled ~= x * 2
+  a = A.new()
+  a.doubled.value
+''', 6
+
+test 'component computed reacts to state change', '''
+  A = component
+    x := 3
+    doubled ~= x * 2
+  a = A.new()
+  a.x.value = 10
+  a.doubled.value
+''', 20
+
+test 'component method', '''
+  A = component
+    x := 0
+    inc = -> @x += 1
+  a = A.new()
+  a.inc()
+  a.x.value
+''', 1
+
+test 'component readonly prop with default', '''
+  A = component
+    @label =! "default"
+  a = A.new()
+  a.label
+''', 'default'
+
+test 'component readonly prop from constructor', '''
+  A = component
+    @label =! "default"
+  a = A.new({ label: "custom" })
+  a.label
+''', 'custom'
+
+test 'component public state from constructor', '''
+  A = component
+    @count := 0
+  a = A.new({ count: 42 })
+  a.count.value
+''', 42
+
+test 'extends collects unknown props into _rest', '''
+  A = component extends input
+    @label := ""
+    render
+      input
+  a = A.new({ label: "x", autofocus: true, maxlength: 10 })
+  [a._rest.autofocus, a._rest.maxlength, a._rest.label?]
+''', [true, 10, false]
+
+test 'extends rest props can be updated', '''
+  A = component extends input
+    render
+      input
+  a = A.new({ autofocus: true })
+  a._setRestProp("maxlength", 25)
+  a._rest.maxlength
+''', 25
+
+test 'extends exposes @rest as reactive signal', '''
+  A = component extends button
+    render
+      button
+  a = A.new({ disabled: true, "data-id": "x1" })
+  [typeof a.rest, a.rest.value.disabled, a.rest.value["data-id"]]
+''', ['object', true, 'x1']
+
+test 'extends class-merge pattern via @rest in computed', '''
+  A = component extends button
+    @variant?: 'primary' | 'secondary' := 'primary'
+    classes ~=
+      parts = []
+      parts.push 'secondary' if @variant is 'secondary'
+      parts.push @rest.class
+      parts
+    render
+      button
+        class: classes
+  a = A.new({ variant: 'secondary', class: 'mt-4' })
+  before = a.classes.value.slice()
+  a._setRestProp('class', ['mb-2', 'mt-4'])
+  [before, a.classes.value]
+''', [['secondary', 'mt-4'], ['secondary', ['mb-2', 'mt-4']]]
+
+test 'optional typed prop without default accepts a value', '''
+    A = component
+      @label?: string
+      render
+        span
+    a = A.new(label: "hi")
+    a._init(label: "hi")
+    a.label.value
+''', 'hi'
+
+test 'optional typed prop with default falls back when omitted', '''
+    A = component
+      @label?: string := "fallback"
+      render
+        span
+    a = A.new()
+    a._init({})
+    a.label.value
+''', 'fallback'
+
+test 'typed prop with default but no ? still applies the default at runtime', '''
+    A = component
+      @label: string := "fallback"
+      render
+        span
+    a = A.new()
+    a._init({})
+    a.label.value
+''', 'fallback'
+
+test 'component effect runs on state change', '''
+  A = component
+    x := 0
+    log =! []
+    ~> @log.push(x + 0)
+  a = A.new()
+  a.x.value = 1
+  a.x.value = 2
+  a.log
+''', [0, 1, 2]
+
+test 'component effect stops on unmount', '''
+  A = component
+    x := 0
+    log =! []
+    ~> @log.push(x + 0)
+  a = A.new()
+  a.x.value = 1
+  a.unmount?(removeDOM: false)
+  a.x.value = 2
+  a.x.value = 3
+  a.log
+''', [0, 1]
+
+test 'component effect cleanup runs before re-run and on unmount', '''
+  A = component
+    x := 0
+    log =! []
+    ~>
+      val = x + 0
+      @log.push("setup-#{val}")
+      -> @log.push("cleanup-#{val}")
+  a = A.new()
+  a.x.value = 1
+  a.x.value = 2
+  a.unmount?(removeDOM: false)
+  a.log
+''', ['setup-0', 'cleanup-0', 'setup-1', 'cleanup-1', 'setup-2', 'cleanup-2']
+
+test 'Component.unmount is idempotent', '''
+  count = 0
+  A = component
+    unmounted = -> count += 1
+  a = A.new()
+  a.unmount?(removeDOM: false)
+  a.unmount?(removeDOM: false)
+  a.unmount?(removeDOM: false)
+  count
+''', 1
+
+test 'effect signal aborts on unmount', '''
+  events = []
+  A = component
+    ~>
+      signal = getEffectSignal()
+      signal?.addEventListener 'abort', -> events.push 'aborted'
+  a = A.new()
+  a.unmount?(removeDOM: false)
+  events
+''', ['aborted']
+
+test 'effect signal aborts on re-run', '''
+  aborts = 0
+  A = component
+    x := 0
+    ~>
+      v = x + 0
+      signal = getEffectSignal()
+      signal?.addEventListener 'abort', -> aborts += 1
+  a = A.new()
+  a.x.value = 1
+  a.x.value = 2
+  aborts
+''', 2
+
+test 'async effect: stale resolution does not overwrite current cleanup', '''
+  cleanups = []
+  A = component
+    x := 0
+    ~>
+      v = x + 0
+      -> cleanups.push("cleanup-#{v}")
+  a = A.new()
+  a.x.value = 1
+  a.x.value = 2
+  # Each run should install its cleanup, prior run's cleanup runs on
+  # supersession. Order: setup-0; x=1 fires cleanup-0 then setup-1;
+  # x=2 fires cleanup-1 then setup-2. Cleanups so far: ['cleanup-0',
+  # 'cleanup-1']. unmount fires cleanup-2.
+  a.unmount?(removeDOM: false)
+  cleanups
+''', ['cleanup-0', 'cleanup-1', 'cleanup-2']
+
+test '__pushComponent does not create _parent self-cycle', '''
+  A = component
+    val =! "x"
+  a = A.new()
+  __pushComponent(a)         # a is now current
+  __pushComponent(a)         # re-push while already current
+  __popComponent(null)
+  __popComponent(null)
+  a._parent isnt a           # critical invariant
+''', true
+
+test 'component computed with postfix ternary', '''
+  A = component
+    flag := false
+    result ~= "yes" if flag else "no"
+  a = A.new()
+  before = a.result.value
+  a.flag.value = true
+  after = a.result.value
+  before + "," + after
+''', 'no,yes'
+
+test 'setContext and getContext via effect', '''
+  result = null
+  A = component
+    theme =! "dark"
+    ~>
+      setContext("theme", @theme)
+      result = getContext("theme")
+  a = A.new()
+  result
+''', 'dark'
+
+test 'offer and accept share the same signal', '''
+  result = null
+  Child = component
+    accept active
+    ~> result = active
+  Parent = component
+    offer active := "hello"
+  p = __pushComponent(Parent.new())
+  c = Child.new()
+  __popComponent(null)
+  result
+''', 'hello'
+
+test 'component multiple computed chain', '''
+  A = component
+    x := 2
+    doubled ~= x * 2
+    quadrupled ~= doubled * 2
+  a = A.new()
+  a.quadrupled.value
+''', 8
+
+test 'component computed chain reacts', '''
+  A = component
+    x := 2
+    doubled ~= x * 2
+    quadrupled ~= doubled * 2
+  a = A.new()
+  a.x.value = 5
+  a.quadrupled.value
+''', 20
+
+test 'component method with args', '''
+  A = component
+    x := 0
+    add = (n) -> @x += n
+  a = A.new()
+  a.add(5)
+  a.add(3)
+  a.x.value
+''', 8
+
+test 'component multiple effects', '''
+  A = component
+    x := 0
+    log1 =! []
+    log2 =! []
+    ~> @log1.push(x + 0)
+    ~> @log2.push((x + 0) * 10)
+  a = A.new()
+  a.x.value = 1
+  [a.log1, a.log2]
+''', [[0, 1], [0, 10]]
+
+test 'loop component state access', '''
+  A = component
+    items := [1, 2, 3]
+  a = A.new()
+  a.items.value
+''', [1, 2, 3]
+
+test 'loop component state mutation', '''
+  A = component
+    items := [1, 2, 3]
+  a = A.new()
+  a.items.value = [4, 5]
+  a.items.value
+''', [4, 5]
+
+test 'loop component computed from items', '''
+  A = component
+    items := [1, 2, 3]
+    count ~= items.length
+  a = A.new()
+  a.count.value
+''', 3
+
+test 'loop component computed reacts to items change', '''
+  A = component
+    items := [1, 2, 3]
+    count ~= items.length
+  a = A.new()
+  a.items.value = [1, 2, 3, 4, 5]
+  a.count.value
+''', 5
+
+test 'onError catches error from effect in _init', '''
+  caught = null
+  A = component
+    onError = (err) -> caught = err.message
+    ~> raise "boom"
+  a = A.new()
+  caught
+''', 'boom'
+
+test 'onError receives source component', '''
+  source = null
+  A = component
+    onError = (err, comp) -> source = comp
+    ~> raise "test"
+  a = A.new()
+  source is a
+''', true
+
+test 'error without onError throws normally', '''
+  threw = false
+  A = component
+    ~> raise "unhandled"
+  try
+    a = A.new()
+  catch e
+    threw = e.message
+  threw
+''', 'unhandled'
+
+test 'onError on parent catches child error', '''
+  caught = null
+  Parent = component
+    onError = (err, comp) -> caught = err.message
+    ~> noop()
+  Child = component
+    ~> raise "child boom"
+  p = Parent.new()
+  __pushComponent(p)
+  c = Child.new()
+  __popComponent(null)
+  caught
+''', 'child boom'
