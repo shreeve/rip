@@ -32,10 +32,14 @@ export const SUPPRESSED_TS_CODES = new Set([
   7008, // member implicitly any
   7010, // function lacking return-type annotation
   7011, // function expression lacking return-type annotation
+  7009, // `new` on an untyped target implicitly any
   7015, // element implicitly any (index expression)
+  7016, // imported .js module has no declaration file — implicitly any
+  7017, // element implicitly any (type has no index signature)
   7019, // rest parameter implicitly any[]
   7022, // implicitly any from own-initializer reference
   7023, // implicitly any return type from self-reference
+  7024, // implicitly any return type from indirect self-reference
   7031, // binding element implicitly any
   7034, // variable implicitly any in some locations
   7043, // variable implicitly any — inferable suggestion
