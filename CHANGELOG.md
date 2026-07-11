@@ -5,6 +5,8 @@ repository's pull requests.
 
 ## Unreleased
 
+- Set the VS Code extension version to 4.0.0 (#13)
+
 - Enforce the test boundary: root test runs mechanically exclude
   packages/**, whose suites run from their own packages (#12)
 
