@@ -5,6 +5,11 @@ repository's pull requests.
 
 ## Unreleased
 
+- Interpolated string keys: `{"#{k}": v}` — the template is a
+  computed key (`[\`${k}\`]: v`), surrounding literal text included
+  (`{"pre#{k}post": 1}`). The misleading "@-keys" rejection this
+  input used to trip is gone (#49)
+
 - Compound object keys: an identifier chain joined by `.` (any
   spacing) or `-` (tight on both sides) directly before `:` is ONE
   string key — `{ data-src: 1 }`, `{ www.amazon.com: 4 }`,
