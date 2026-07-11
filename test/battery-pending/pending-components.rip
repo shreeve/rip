@@ -4,22 +4,6 @@
 
 import { test, code, fail, type } from '../support/testing.js'
 
-code 'bare-ident shorthand — unresolved name is a boolean attribute', '''
-  export A = component
-    render
-      div outline
-''', '''
-  export const A = class extends __Component {
-    _init(props) {
-    }
-    _create() {
-      this._el0 = document.createElement('div');
-      this._el0.setAttribute('outline', true);
-      return this._el0;
-    }
-  }
-'''
-
 code 'transition with ~slide preset', '''
   export A = component
     render

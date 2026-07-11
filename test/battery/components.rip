@@ -4634,3 +4634,29 @@ test 'getContext without a provider rejects; hasContext probes', '''
   __popComponent(null)
   [probe, msg]
   ''', [false, true]
+
+# Bare-identifier shorthand sets a boolean attribute — validated
+# against the standard vocabulary so a misspelling can never silently
+# set a bogus attribute.
+code 'bare-ident shorthand — known name is a boolean attribute', '''
+  export A = component
+    render
+      div hidden
+  ''', '''
+  export const A = class extends __Component {
+    _init(props) {
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'A');
+      this._el0.setAttribute('hidden', true);
+      return this._el0;
+    }
+  };
+  '''
+
+fail 'bare-ident shorthand — unknown name rejects against the vocabulary', '''
+  export A = component
+    render
+      div outline
+  ''', "not a known attribute of <div>"
