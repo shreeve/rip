@@ -411,9 +411,15 @@ const renderTarget = (target, type, optional) => {
   return `${name}${optional ? '?' : ''}: ${tidyType(type)}`;
 };
 
-export const renderParam = (p) => {
-  if (typeof p === 'string') return `${p}: any`;
-  if (isTypedWrapper(p)) return renderTarget(p[1], p[2], false);
+export const renderParam = (p, isOptional) => {
+  const opt = isOptional?.(p) ?? false;
+  if (typeof p === 'string') return `${p}${opt ? '?' : ''}: any`;
+  if (isTypedWrapper(p)) {
+    // A bare optional param (`title?`) is a typed-var with no type —
+    // default it to `any` (a declaration cannot carry an implicit any).
+    const type = p[2] === '' || p[2] == null ? 'any' : p[2];
+    return renderTarget(p[1], type, opt);
+  }
   if (p[0] === 'default') {
     const inner = p[1];
     if (isTypedWrapper(inner)) return renderTarget(inner[1], inner[2], true);
@@ -445,10 +451,10 @@ export const renderParam = (p) => {
   if (p[0] === 'expansion') {
     throw new TypeTextError("the '...' expansion parameter has no declaration form");
   }
-  return renderTarget(p, patternType(p), false);
+  return renderTarget(p, patternType(p), opt);
 };
 
-export const renderParams = (params) => `(${params.map(renderParam).join(', ')})`;
+export const renderParams = (params, isOptional) => `(${params.map((p) => renderParam(p, isOptional)).join(', ')})`;
 
 export const paramTyped = (p) =>
   isTypedWrapper(p) ||
