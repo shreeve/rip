@@ -119,6 +119,34 @@ const isLoopNode = (x) => isNode(x) && (
 // backslashes) must escape or the emitted specifier breaks the
 // string it sits in. Shared with declaration emission — the two
 // renderings of one module edge must never drift.
+// Enum members with AUTO-NUMBERING resolved: a bare member takes the
+// next number — 0-based, continuing after an explicit NUMERIC value
+// (the TS rule; negatives continue too). A bare member after a
+// STRING value has no number to continue: value null, callers reject
+// loudly. Non-member shapes pass through untouched for the callers'
+// own rejections.
+export function resolveEnumMembers(items) {
+  let auto = 0;
+  let numeric = true;
+  const isNodeX = (x) => Array.isArray(x);
+  return items.map((item) => {
+    if (typeof item === 'string') {
+      if (!numeric) return { item, name: item, value: null };
+      return { item, name: item, value: String(auto++) };
+    }
+    if (isNodeX(item) && item[0] === '=' && item.length === 3) {
+      const v = item[2];
+      const num = typeof v === 'string' && /^[0-9]/.test(v) ? Number(v.replace(/_/g, ''))
+        : isNodeX(v) && v[0] === '-' && typeof v[1] === 'string' ? -Number(v[1].replace(/_/g, ''))
+        : null;
+      if (num !== null && Number.isFinite(num)) { auto = num + 1; numeric = true; }
+      else if (typeof v === 'string' && v.startsWith('"')) numeric = false;
+      return { item, name: item[1], value: v };
+    }
+    return { item, name: null, value: undefined };
+  });
+}
+
 export function moduleSourceText(s) {
   const inner = String(s).slice(1, -1).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
   return `'${inner}'`;
@@ -2417,6 +2445,7 @@ class Emitter {
     // advances past each earlier item's row (or bare text), so the
     // window before the offending member holds only separators and
     // the indexOf is anchored and exact.
+    const resolved = resolveEnumMembers(items);
     const bareSpan = (k) => {
       const src = this.b.source;
       const bodyId = this.stores.idOf(body);
@@ -2448,10 +2477,28 @@ class Emitter {
           node,
         );
       }
+      if (typeof item === 'string' && /^[A-Za-z_$][\w$]*$/.test(item)) {
+        // Bare member: auto-numbered (the TS rule) — resolved once
+        // for the whole member list so explicit numerics thread the
+        // counter.
+        const rv = resolved[k].value;
+        if (rv === null) {
+          const message =
+            `emitter: enum '${name}' bare member '${item}' follows a STRING value — ` +
+            `auto-numbering has no number to continue; give it an explicit value`;
+          const span = bareSpan(k);
+          if (span) throw this.positionedErrorAt(span[0], span[1], message);
+          throw this.positionedError(node, message);
+        }
+        claim(item, `member '${item}'`, node);
+        claim(Number(rv), `value of '${item}'`, node);
+        pairs.push([node, item, rv, Number(rv)]);
+        continue;
+      }
       if (!isNode(item) || item[0] !== '=' || item.length !== 3) {
         const message =
           `emitter: enum '${name}' members are 'name = <literal>' lines — ` +
-          `a bare member has no value for the reverse mapping`;
+          `a bare or computed member has no enum form here`;
         const span = bareSpan(k);
         if (span) throw this.positionedErrorAt(span[0], span[1], message);
         throw this.positionedError(item, message, node);

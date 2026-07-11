@@ -44,7 +44,7 @@ import {
   renderParams, paramTyped,
 } from './typetext.js';
 import { buildSchemaTypeStory, SchemaTypeError } from './schema-types.js';
-import { protoMemberTarget, PROTO_GENERIC_PARAMS, moduleSourceText } from './emitter.js';
+import { protoMemberTarget, PROTO_GENERIC_PARAMS, moduleSourceText, resolveEnumMembers } from './emitter.js';
 import {
   componentTypeInfo, propsTypeText, propsParamOptional, instanceTypeLines, containerType,
 } from './component-types.js';
@@ -236,9 +236,13 @@ export function emitDeclarations({ sexpr, stores, source }) {
     const [, name, body] = node;
     const items = isNode(body) && body[0] === 'block' ? body.slice(1) : [body];
     const memberText = (v) => (isNode(v) && v[0] === '-' ? `-${v[1]}` : v);
+    const resolved = resolveEnumMembers(items);
     lines.push(`${exported ? 'export ' : ''}declare enum ${name} {`);
-    items.forEach((item, i) => {
-      lines.push(`  ${item[1]} = ${memberText(item[2])}${i < items.length - 1 ? ',' : ''}`);
+    resolved.forEach((m, i) => {
+      if (m.name === null || m.value === null) {
+        throw new DtsError(`declaration emission: enum '${name}' member has no resolvable value`);
+      }
+      lines.push(`  ${m.name} = ${memberText(m.value)}${i < resolved.length - 1 ? ',' : ''}`);
     });
     lines.push('}');
   };

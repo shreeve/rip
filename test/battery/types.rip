@@ -579,3 +579,35 @@ type 'class with methods dts', '''
     fetch(id: number): any;
   }
 '''
+
+# ==============================================================================
+# Enum auto-numbering — bare members take the next number (0-based,
+# continuing after an explicit numeric; a bare member after a STRING
+# value rejects)
+# ==============================================================================
+
+type 'enum dts', '''
+  enum Direction
+    North
+    South
+    East = 10
+    West
+  ''', '''
+  declare enum Direction {
+    North = 0,
+    South = 1,
+    East = 10,
+    West = 11
+  }
+  '''
+
+test 'enum auto-numbering runtime', '''
+  enum Direction
+    North
+    South
+    East = 10
+    West
+  [Direction.North, Direction.West, Direction[1]]
+  ''', [0, 11, 'South']
+
+fail 'bare enum member after a string value rejects', 'enum Mix\n  ok = "fine"\n  broken', 'no number to continue'

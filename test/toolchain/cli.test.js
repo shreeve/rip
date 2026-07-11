@@ -613,8 +613,7 @@ describe('emitter rejections carry source positions emitter-wide', () => {
     // A bare member is a primitive with no NodeStore row — its span
     // derives from the block row and its recorded neighbors, so the
     // caret lands on the member itself (both list positions pinned).
-    ['enum member without a value', 'pad = 1\nenum Color\n  red', 3],
-    ['bare enum member mid-list', 'pad = 1\nenum C\n  a = 1\n  red\n  b = 2', 4],
+    ['bare enum member after a string value', 'pad = 1\nenum Mix\n  ok = "s"\n  broken', 4],
     ['enum member with an expression value', 'pad = 1\nenum C\n  a = f()', 3],
     ['enum duplicate key', 'pad = 1\nenum C\n  a = 1\n  b = 1', 4],
     ['BY step of 0', 'pad = 1\nfor x in xs by 0\n  f x', 2],
