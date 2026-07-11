@@ -42,17 +42,6 @@ test 'diamond mixin inclusion dedupes', '''
     [...User._normalize().fields.keys()]
 ''', ['name', 'id', 'left', 'right']
 
-code 'fold: pick emits a self-contained shape literal', '''
-  User = schema :model
-    name! string
-    @timestamps
-  V = User.pick("id", "name")
-''', '''
-  let User, V;
-  User = __schema({kind: "model", name: "User", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}, {tag: "directive", name: "timestamps"}]});
-  V = __schema({kind: "shape", name: "V", entries: [{tag: "field", name: "id", modifiers: ["!"], typeName: "integer", array: false}, {tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}]});
-'''
-
 test '~:name resolves through the registry; output validates and constrains', '''
     __ripSchema.__schemaRegisterCoercer "id", (v) ->
       m = v.match(/^([1-9]\\d{0,14})$/)

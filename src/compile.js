@@ -23,6 +23,7 @@ import { emit } from './emitter.js';
 import { toSourceMap } from './sourcemap.js';
 import { Mappings } from './stores.js';
 import { emitDeclarations } from './dts.js';
+import { foldDerivedSchemas } from './schema.js';
 
 export class CompileError extends Error {
   constructor(message, { path, start = null, end = null, line = null, col = null } = {}) {
@@ -88,7 +89,11 @@ const positioned = (file, path, reason, start, end) => {
 // result additionally carries `tsRegions` — the recorded [start, end)
 // generated spans of every TS-only byte, whose deletion reproduces
 // the JS emission exactly (the byte-equality invariant).
-export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inline', face = 'js', pins = null, strict = false } = {}) {
+// `foldProjections` statically folds derived-schema algebra
+// (`V = User.pick("id")`) into self-contained schema literals — the
+// browser-bundle extractor's option; OFF by default so every other
+// path keeps the runtime algebra and its `_sourceModel` back-pointer.
+export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inline', face = 'js', pins = null, strict = false, foldProjections = false } = {}) {
   // One stable identifying error for a non-string source — without
   // it, malformed input fails in whichever subsystem dereferences it
   // first, with an incidental TypeError.
@@ -138,6 +143,8 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
       : d.message;
     throw positioned(file, path, message, d.start, d.end);
   }
+
+  if (foldProjections) foldDerivedSchemas(result.sexpr);
 
   let emitted;
   try {

@@ -3837,6 +3837,18 @@ code "fold off by default: derived schema stays a runtime call", '''
   V = User.pick("id", "name");
   ''', opts
 
+# With the option on, the same program folds: V references no User at all.
+code 'fold: pick emits a self-contained shape literal', '''
+  User = schema :model
+    name! string
+    @timestamps
+  V = User.pick("id", "name")
+  ''', '''
+  let User, V;
+  User = __schema({kind: "model", name: "User", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}, {tag: "directive", name: "timestamps"}]});
+  V = __schema({kind: "shape", name: "V", entries: [{tag: "field", name: "id", modifiers: ["!"], typeName: "integer", array: false}, {tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}]});
+  ''', { foldProjections: true }
+
 type "exported schema emits export declare const", '''
     export Foo = schema :input
       a! string
@@ -5128,7 +5140,9 @@ test "the coercing form rejects impossible dates too", '''
   [S.ok({c: "2024-02-30"}), S.ok({c: "2024-02-29"})]
 ''', [false, true]
 
-# Pick folding bails to the runtime call when a key is dynamic
+# Pick folding bails to the runtime call when a key is dynamic —
+# even with foldProjections on, anything unprovable keeps the runtime
+# path (a bail is never a regression).
 code "fold: bails to the runtime call on dynamic keys", '''
   User = schema :model
     name! string
@@ -5139,7 +5153,7 @@ code "fold: bails to the runtime call on dynamic keys", '''
   User = __schema({kind: "model", name: "User", entries: [{tag: "field", name: "name", modifiers: ["!"], typeName: "string", array: false}]});
   k = "name";
   V = User.pick(k);
-'''
+''', { foldProjections: true }
 
 test 'afterRollback fires on rollback; afterCommit does not', '''
     events = []
