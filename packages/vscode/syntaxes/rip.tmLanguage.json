@@ -546,9 +546,17 @@
     {"comment": "=== COMPARISON (before assignment to prevent == matching =) ==="},
     { "match": "===|!==|==|!=|<=|>=", "name": "keyword.operator.comparison.rip" },
 
+    {"comment": "=== WORD ARRAYS %w[...] (paired delimiters nest; symmetric repeat) ==="},
+    { "begin": "%w\\[", "end": "\\]", "name": "string.quoted.other.word-array.rip" },
+    { "begin": "%w\\(", "end": "\\)", "name": "string.quoted.other.word-array.rip" },
+    { "begin": "%w\\{", "end": "\\}", "name": "string.quoted.other.word-array.rip" },
+    { "begin": "%w<", "end": ">", "name": "string.quoted.other.word-array.rip" },
+    { "match": "%w([^\\s\\w\\(\\[\\{<])(?:\\\\.|(?!\\1).)*\\1", "name": "string.quoted.other.word-array.rip" },
+
     {"comment": "=== COMPOUND ASSIGNMENT (before simple assignment) ==="},
-    { "match": "\\.=|&&=|\\|\\|=|\\?\\?=|\\+=|-=|\\*\\*=|\\*=|//=|%%=|/=|%=|<<=|>>>=|>>=|&=|\\|=|\\^=",
+    { "match": "\\.=|&&=|\\|\\|=|\\?\\?=|\\?=|\\+=|-=|\\*\\*=|\\*=|//=|%%=|/=|%=|<<=|>>>=|>>=|&=|\\|=|\\^=",
       "name": "keyword.operator.assignment.compound.rip" },
+    { "match": "\\*>", "name": "keyword.operator.assignment.merge.rip" },
 
     {"comment": "=== ASSIGNMENT (with variable name capture) ==="},
     {

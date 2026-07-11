@@ -5,6 +5,14 @@ repository's pull requests.
 
 ## Unreleased
 
+- Editor grammars live here and move with the language: the vim
+  plugin (packages/vim — syntax, indent, ftdetect, ftplugin) and the
+  highlight.js grammar (packages/highlight — Rip Print consumes it)
+  join the VS Code TextMate grammar, and all three now carry word
+  arrays (`%w[…]`, every delimiter family) and the assignment
+  operators `.=`, `*>`, `?=`. Every syntax addition updates all
+  three surfaces in the same change (#43)
+
 - Word arrays: `%w[foo bar baz]` is `["foo", "bar", "baz"]`.
   Delimiters pair (`[] () {} <>`, nesting counted) or repeat
   symmetrically (`%w|a b|`, `%w/x y/`); backslash-space keeps a
