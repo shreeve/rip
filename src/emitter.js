@@ -9216,7 +9216,42 @@ class Emitter {
             if (Emitter.containsAwait(value[2])) this.b.emit('async ');
             if (Emitter.containsYield(value[2])) this.b.emit('*');
             this.mark(pair, 'key', () => this.b.emit(mName));
-            const [, params, block] = value;
+            let [, params, block] = value;
+            let atParams = [];
+            if (mName === 'constructor') {
+              // Promoted parameters: `(@name)` binds the argument to
+              // a same-named param and assigns `this.name = name`
+              // after any leading super(). Inside that super call's
+              // arguments `@name` reads the PARAM (`super(@name)` —
+              // `this` is not available yet); everywhere else it
+              // stays a normal instance read.
+              const strip = (p) => {
+                const n = Emitter.atParamName(p);
+                if (n !== null) {
+                  atParams.push(n);
+                  return isNode(p) && p[0] === 'typed-var' ? ['typed-var', n, p[2]] : n;
+                }
+                if (isNode(p) && p[0] === 'default' && p.length === 3) {
+                  const dn = Emitter.atParamName(p[1]);
+                  if (dn !== null) {
+                    atParams.push(dn);
+                    return ['default', dn, p[2]];
+                  }
+                }
+                return p;
+              };
+              params = params.map(strip);
+              if (atParams.length > 0 && isNode(block) && block[0] === 'block' &&
+                  isNode(block[1]) && block[1][0] === 'super') {
+                const names = new Set(atParams);
+                const subst = (x) => {
+                  if (!isNode(x)) return x;
+                  if (x[0] === '.' && x[1] === 'this' && names.has(x[2])) return x[2];
+                  return x.map(subst);
+                };
+                block = ['block', subst(block[1]), ...block.slice(2)];
+              }
+            }
             this.b.emit('(');
             this.emitParams(params);
             this.b.emit(')');
@@ -9231,6 +9266,7 @@ class Emitter {
                 binds: mName === 'constructor' ? bound : [],
                 methodName: mName,
                 voidBody: isVoidPair,
+                atParams,
               });
             });
           }));
@@ -9314,7 +9350,16 @@ class Emitter {
   // implicit return, except constructors (no implicit return; bind
   // statements insert after a leading super(...) call, first
   // otherwise).
-  methodBlock(funcNode, block, ind, { isConstructor, binds, methodName, voidBody = false }) {
+  // A promoted parameter's name: `@name`, typed or defaulted, at any
+  // wrapper depth — null when the param is not a ThisProperty.
+  static atParamName(p) {
+    let x = p;
+    if (isNode(x) && x[0] === 'typed-var' && x.length === 3) x = x[1];
+    if (isNode(x) && x[0] === '.' && x[1] === 'this' && typeof x[2] === 'string') return x[2];
+    return null;
+  }
+
+  methodBlock(funcNode, block, ind, { isConstructor, binds, methodName, voidBody = false, atParams = [] }) {
     const stmts = this.liveStmts(isNode(block) && block[0] === 'block' ? block.slice(1) : [block], { forwards: true });
     const { entries: hoist, names } = this.scopedHoist(stmts, funcNode[1]);
     for (const n of this.pushReactiveFrame(stmts, names)) names.add(n);
@@ -9333,6 +9378,9 @@ class Emitter {
       const pad = '  '.repeat(ind + 1);
       const emitBinds = () => {
         for (const bm of binds) this.b.emit(`${pad}this.${bm} = this.${bm}.bind(this);\n`);
+        // Promoted parameters assign after any leading super() — the
+        // instance exists, the param carries the value.
+        for (const n of atParams) this.b.emit(`${pad}this.${n} = ${n};\n`);
       };
       this.emitTsTypeDecls(isNode(block) && block[0] === 'block' ? block.slice(1) : [block], pad);
       this.mark(block, 'statements', () => {
@@ -9467,6 +9515,13 @@ class Emitter {
 
   emitParams(params) {
     Emitter.expansionSplit(params).list.forEach((p, i) => {
+      // A promoted parameter reaching emission was NOT stripped by a
+      // constructor — the shape belongs to constructors alone (there
+      // is no instance for any other function's `@name` to bind).
+      if (Emitter.atParamName(p) !== null ||
+          (isNode(p) && p[0] === 'default' && Emitter.atParamName(p[1]) !== null)) {
+        throw this.positionedError(isNode(p) ? p : params, 'emitter: an @-parameter promotes only in a constructor (`constructor: (@name) ->`) — bind a plain parameter and assign it here');
+      }
       if (i > 0) this.b.emit(', ');
       this.emitParam(p);
     });

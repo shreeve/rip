@@ -159,3 +159,68 @@ test "new.target in constructor", '''
   new A().viaNew
 ''', true
 code "new.target passes through", "class A\n  constructor: ->\n    @t = new.target", "class A {\n  constructor() {\n    this.t = new.target;\n  }\n};"
+
+# ==============================================================================
+# Promoted Parameters — constructor: (@name) -> assigns this.name; inside a
+# leading super(...) call @name reads the parameter (this is not yet available)
+# ==============================================================================
+
+test 'basic class', '''
+  class Animal
+    constructor: (@name) ->
+    speak: -> @name
+  a = new Animal('Dog'); a.speak()
+''', 'Dog'
+
+test 'class inheritance', '''
+  class Animal
+    constructor: (@name) ->
+  class Dog extends Animal
+    bark: -> 'woof'
+  d = new Dog('Spot'); d.name
+''', 'Spot'
+
+code 'simple class', '''
+  class Animal
+    constructor: (@name) ->
+''', 'class Animal { constructor(name) { this.name = name; } }'
+
+test 'super in constructor', '''
+  class Animal
+    constructor: (@name) ->
+  class Dog extends Animal
+    constructor: (name, @breed) ->
+      super(name)
+  d = new Dog('Spot', 'Terrier'); d.name
+''', 'Spot'
+
+test 'multiple @ parameters', '''
+  class Person
+    constructor: (@first, @last) ->
+  p = new Person('John', 'Doe')
+  [p.first, p.last]
+''', ['John', 'Doe']
+
+test 'promoted parameter with default', '''
+  class P
+    constructor: (@x = 5) ->
+  [new P().x, new P(9).x]
+  ''', [5, 9]
+
+test 'promoted beside plain parameters', '''
+  class M
+    constructor: (@a, b, @c) ->
+      @sum = @a + b + @c
+  new M(1, 2, 3).sum
+  ''', 6
+
+test 'subclass super with promoted parameter', '''
+  class Animal
+    constructor: (@name) ->
+  class Dog extends Animal
+    constructor: (@name) -> super(@name)
+  new Dog('Spot').name
+  ''', 'Spot'
+
+fail 'promoted parameter rejects outside constructors', 'f = (@x) -> 1', 'promotes only in a constructor'
+fail 'promoted parameter rejects in plain methods', 'class A\n  m: (@x) -> 1', 'promotes only in a constructor'

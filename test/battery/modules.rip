@@ -166,3 +166,14 @@ fail "a second default export rejects", '''
   export default 1
   export default 2
 ''', "duplicate 'export default'"
+
+code 'export class', '''
+  export class Animal
+    constructor: (@name) ->
+''', '''
+  export class Animal {
+    constructor(name) {
+      this.name = name;
+    }
+  };
+'''

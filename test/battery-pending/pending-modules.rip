@@ -4,17 +4,6 @@
 
 import { test, code, fail, type } from '../support/testing.js'
 
-code 'export class', '''
-  export class Animal
-    constructor: (@name) ->
-''', '''
-  export class Animal {
-    constructor(name) {
-      this.name = name;
-    }
-  };
-'''
-
 code 'export default function', '''
   export default def greet(name)
     name
