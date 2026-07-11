@@ -11,11 +11,11 @@ import { mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { spawnSync } from 'child_process';
 import { join, resolve } from 'path';
 import { tmpdir } from 'os';
-import { compile } from '../src/compile.js';
-import { explainSource, explainGenerated, parseTarget, UsageError, PositionError } from '../src/explain.js';
-import { Stores, Mappings } from '../src/stores.js';
+import { compile } from '../../src/compile.js';
+import { explainSource, explainGenerated, parseTarget, UsageError, PositionError } from '../../src/explain.js';
+import { Stores, Mappings } from '../../src/stores.js';
 
-const BIN = resolve(import.meta.dir, '../bin/rip');
+const BIN = resolve(import.meta.dir, '../../bin/rip');
 
 let dir;
 beforeAll(() => { dir = mkdtempSync(join(tmpdir(), 'rip-explain-')); });

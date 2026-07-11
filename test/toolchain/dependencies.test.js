@@ -7,7 +7,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 test('package.json declares no dependencies of any kind', () => {
-  const pkg = JSON.parse(readFileSync(join(import.meta.dir, '../package.json'), 'utf8'));
+  const pkg = JSON.parse(readFileSync(join(import.meta.dir, '../../package.json'), 'utf8'));
   for (const field of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
     expect(pkg[field]).toBeUndefined();
   }

@@ -13,10 +13,10 @@ import { mkdtempSync, writeFileSync } from 'fs';
 import { join, resolve } from 'path';
 import { tmpdir } from 'os';
 import { pathToFileURL } from 'url';
-import parser from '../src/parser.js';
-import { makeParserLexer, tokenize } from '../src/lexer.js';
-import { emit } from '../src/emitter.js';
-import { Mappings } from '../src/stores.js';
+import parser from '../../src/parser.js';
+import { makeParserLexer, tokenize } from '../../src/lexer.js';
+import { emit } from '../../src/emitter.js';
+import { Mappings } from '../../src/stores.js';
 
 parser.lexer = makeParserLexer();
 

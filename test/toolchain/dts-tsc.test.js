@@ -24,9 +24,9 @@
 import { describe, test, expect } from 'bun:test';
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { compile } from '../src/compile.js';
-import { describeExtended, EXTENDED } from './support/extended.js';
-import { tscBatch } from './support/tscbatch.js';
+import { compile } from '../../src/compile.js';
+import { describeExtended, EXTENDED } from '../support/extended.js';
+import { tscBatch } from '../support/tscbatch.js';
 
 const TSC = process.env.RIP_TSC ?? Bun.which('tsc');
 
@@ -54,7 +54,7 @@ describe('the tsc floor (never skipped)', () => {
   });
 });
 
-const corpusDir = join(import.meta.dir, 'corpus');
+const corpusDir = join(import.meta.dir, '../corpus');
 const corpusFiles = readdirSync(corpusDir).filter((f) => f.endsWith('.rip')).sort();
 
 // The rows run in the EXTENDED tier only ,

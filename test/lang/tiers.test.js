@@ -9,7 +9,7 @@
 // hoist — every other early-execution vector is closed by the
 // execution-order first-occurrence rule.
 import { test, expect, describe } from 'bun:test';
-import { compile } from '../src/compile.js';
+import { compile } from '../../src/compile.js';
 
 const js = (src, opts = {}) => compile(src, { path: 't.rip', runtimeDelivery: 'none', ...opts }).code;
 const ts = (src, opts = {}) => js(src, { face: 'ts', ...opts });

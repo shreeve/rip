@@ -6,7 +6,7 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-const root = resolve(import.meta.dir, '..');
+const root = resolve(import.meta.dir, '../..');
 
 test('`bun run parser` regenerates src/parser.js byte-identically (the committed file is current)', () => {
   const committed = readFileSync(join(root, 'src/parser.js'));

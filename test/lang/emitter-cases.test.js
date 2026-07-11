@@ -2,9 +2,9 @@
 // nullish-chain line continuation, loop-binding rejections,
 // statement-only arrow bodies, and loop-temporary naming.
 import { describe, test, expect } from 'bun:test';
-import parser from '../src/parser.js';
-import { makeParserLexer } from '../src/lexer.js';
-import { emit } from '../src/emitter.js';
+import parser from '../../src/parser.js';
+import { makeParserLexer } from '../../src/lexer.js';
+import { emit } from '../../src/emitter.js';
 
 parser.lexer = makeParserLexer();
 

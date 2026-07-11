@@ -19,13 +19,13 @@ import {
   sourceContentFor,
   decodedMappings,
   LEAST_UPPER_BOUND,
-} from './support/consumer.js';
-import parser from '../src/parser.js';
-import { makeParserLexer } from '../src/lexer.js';
-import { emit } from '../src/emitter.js';
-import { Mappings } from '../src/stores.js';
-import { SourceFile } from '../src/source.js';
-import { toSourceMap, decodeMappings } from '../src/sourcemap.js';
+} from '../support/consumer.js';
+import parser from '../../src/parser.js';
+import { makeParserLexer } from '../../src/lexer.js';
+import { emit } from '../../src/emitter.js';
+import { Mappings } from '../../src/stores.js';
+import { SourceFile } from '../../src/source.js';
+import { toSourceMap, decodeMappings } from '../../src/sourcemap.js';
 
 parser.lexer = makeParserLexer();
 
@@ -44,7 +44,7 @@ const compile = (src) => {
   };
 };
 
-const corpusDir = join(import.meta.dir, 'corpus');
+const corpusDir = join(import.meta.dir, '../corpus');
 const corpusFiles = readdirSync(corpusDir).filter(f => f.endsWith('.rip')).sort();
 const corpus = new Map(
   corpusFiles.map(f => [f, readFileSync(join(corpusDir, f), 'utf8')])

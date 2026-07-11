@@ -13,7 +13,7 @@ import { describe, test, expect } from 'bun:test';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
-import { compile, CompileError } from '../src/compile.js';
+import { compile, CompileError } from '../../src/compile.js';
 
 const dts = (src) => compile(src).declarations;
 

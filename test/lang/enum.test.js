@@ -2,10 +2,10 @@
 // forward (member → value) and reverse (value → member) — real
 // codegen, not erasure.
 import { test, expect } from 'bun:test';
-import parser from '../src/parser.js';
-import { makeParserLexer } from '../src/lexer.js';
-import { emit } from '../src/emitter.js';
-import { Stores, Mappings } from '../src/stores.js';
+import parser from '../../src/parser.js';
+import { makeParserLexer } from '../../src/lexer.js';
+import { emit } from '../../src/emitter.js';
+import { Stores, Mappings } from '../../src/stores.js';
 
 parser.lexer = makeParserLexer();
 
