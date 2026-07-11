@@ -634,7 +634,7 @@ const buildTypeString = (parts) => {
 
 // A bare (un-parenthesized) function type in arrow-return position:
 // the collector stops at the arrow's own `=>`, so the "type" comes
-// back as a parameter list — `(x):: (a: T) => R => body` shaped.
+// back as a parameter list — `(x): (a: T) => R => body` shaped.
 // Reject with the fix spelled out.
 const looksLikeBareFunctionType = (tokens, a, b) => {
   const isOpen = (t) => t === '(' || t === 'PARAM_START' || t === 'CALL_START';
@@ -1214,8 +1214,28 @@ export function rewriteTypes(tokens, mintId, text, fail) {
   // end. Returns the index the main loop resumes AFTER (the last
   // consumed input index), or -1 when there is nothing to claim.
   const claim = (kind, from, runStart, opts) => {
+    // A claim whose run BEGINS with another colon (`x: : number`) is
+    // the doubled-colon mistake in spaced form — the run would swallow
+    // the stray colon as leading type text and emit an invalid face.
+    if (tokens[runStart]?.kind === ':') {
+      fail("type annotations use a single ':' (e.g. `x: number`), not '::'",
+        from.start, tokens[runStart].end);
+    }
     const run = collectTypeRun(tokens, runStart, opts, fail);
     if (run.parts.length === 0) return -1;
+    // A doubled colon INSIDE the claimed text (`x: typeof Array::slice
+    // = v`) rejects at its own position: the scanner's prototype
+    // expansion is unmistakable in the run — a `prototype` PROPERTY
+    // whose source slice is the two `::` bytes — and type text spells
+    // member chains with `.` (a REAL `.prototype.` in the source spans
+    // its own nine bytes and never trips this).
+    for (let k = runStart; k < runStart + run.consumed; k++) {
+      if (ops.on) ops.n++;
+      const t = tokens[k];
+      if (t.kind === 'PROPERTY' && t.value === 'prototype' && text.slice(t.start, t.end) === '::') {
+        fail("type annotations use a single ':' (e.g. `x: number`), not '::'", t.start, t.end);
+      }
+    }
     if (opts.stopAtFatArrow && looksLikeBareFunctionType(tokens, runStart, runStart + run.consumed)) {
       fail(
         'a function-type return on an arrow must be parenthesized as a whole — ' +
@@ -1519,6 +1539,24 @@ export function rewriteTypes(tokens, mintId, text, fail) {
       const namedColon = nameTok !== null && (nameTok.kind === 'PROPERTY' || nameTok.kind === 'IDENTIFIER') &&
         atStatementBoundary(out, nameBoundaryAt);
       if (frames.length === 0 && namedColon && !isAtName) curLineKV = true;
+
+      // Typed prototype member: `X.prototype.m: T = v` (the `::`
+      // spelling reads identically after the scanner's expansion) at a
+      // statement boundary. The chain shape is exact — head
+      // identifier, `prototype`, member — and the annotation drives
+      // the face's interface augmentation, so hovers and calls of the
+      // added member resolve to the declared type. The member keeps
+      // its PROPERTY tag (the member-chain grammar shape requires it).
+      if (frames.length === 0 && prev.kind === 'PROPERTY' &&
+          out[out.length - 2]?.kind === '.' &&
+          out[out.length - 3]?.kind === 'PROPERTY' && out[out.length - 3].value === 'prototype' &&
+          out[out.length - 4]?.kind === '.' &&
+          out[out.length - 5]?.kind === 'IDENTIFIER' &&
+          atStatementBoundary(out, out.length - 6) &&
+          typedDeclEq(tokens, i) >= 0) {
+        const last = claim('TYPE', tok, i + 1, {});
+        if (last >= 0) { i = last; continue; }
+      }
 
       // Statement-level typed declaration: `name: T = v` at a
       // statement boundary, outside all brackets, with the binding `=`
@@ -2369,6 +2407,17 @@ export function tokenize(text, path = '<anonymous>') {
   // lookup per trailing-angle line; every token processed once).
   const typeGenericMemo = { upTo: 0, ref: null, level: 0, answers: new Map() };
   const insideTypeBody = () => typeBodyFloor !== null && indents.length >= typeBodyFloor;
+
+  // On a `type Name =` alias head's own line, after the `=` — the other
+  // scanner-known type position besides a type body.
+  const aliasHeadOpen = () => {
+    for (let j = tokens.length - 1; j >= 0; j--) {
+      const kd = tokens[j].kind;
+      if (kd === 'TERMINATOR' || kd === 'INDENT' || kd === 'OUTDENT') return false;
+      if (kd === '=') return typeAliasEq(tokens, j);
+    }
+    return false;
+  };
   const clearTypeBodyBelowFloor = () => {
     if (typeBodyFloor !== null && indents.length < typeBodyFloor) typeBodyFloor = null;
   };
@@ -2598,7 +2647,8 @@ export function tokenize(text, path = '<anonymous>') {
       // anything else — keywords, aliases, and reserved words included
       // (key capture precedes keyword
       // classification: `when: 1` and `if: 2` are pairs). Ternary
-      // branches are guarded; `::` and `:=` never key.
+      // branches are guarded; `::` and `:=` never key — the
+      // prototype operator and the reactive assign own those colons.
       const keysColon = /^[^\S\n]*:(?![=:])/.test(text.slice(pos)) && prev?.kind !== 'TERNARY';
       if (prev && (prev.kind === '.' || prev.kind === '?.' || (prev.kind === '@' && !pendingSpaced))) {
         // Render blocks: a `.class-name` chain consumes tight hyphens
@@ -2867,7 +2917,8 @@ export function tokenize(text, path = '<anonymous>') {
           // A `:` continuation admits a TYPE annotation between the
           // marker and the operator (`@name?: string := v` — the
           // rewriteTypes claims see through the marker); `::` stays
-          // out. The NAME must sit at a member/statement position
+          // out (the prototype operator owns the colon pair).
+          // The NAME must sit at a member/statement position
           // (after `@` or a line boundary) — a `b?: string` inside a
           // type's object literal is TYPE TEXT, never a marker.
           const beforeName = tokens[tokens.length - 2] ?? null;
@@ -2987,6 +3038,24 @@ export function tokenize(text, path = '<anonymous>') {
       pos++;
       continue;
     }
+    // `::` — prototype access when an identifier character follows
+    // immediately (`A::m` reads as `A.prototype.m`): three minted
+    // tokens all spanning the two `::` bytes, so mapping rows over the
+    // expansion classify as honest covers (emitted `.prototype.` never
+    // matches the source bytes). Any other doubled colon is a
+    // type-spelling mistake and rejects with the fix; in the
+    // scanner-known type positions (a type body, an alias RHS) the
+    // prototype reading never applies, so `::` rejects there too.
+    if (ch === ':' && text[pos + 1] === ':') {
+      if (!insideTypeBody() && !aliasHeadOpen() && /[A-Za-z_$]/.test(text[pos + 2] ?? '')) {
+        push('.', '.', pos, pos + 2);
+        push('PROPERTY', 'prototype', pos, pos + 2);
+        push('.', '.', pos, pos + 2);
+        pos += 2;
+        continue;
+      }
+      fail("type annotations use a single ':' (e.g. `x: number`), not '::'", pos, pos + 2);
+    }
     if (ch === '=' || ch === '+' || ch === '-' || ch === '.' || ch === ',' || ch === ';' || ch === ':') {
       push(ch === ';' ? 'TERMINATOR' : ch, ch, pos, pos + 1);
       pos++;
@@ -2999,14 +3068,6 @@ export function tokenize(text, path = '<anonymous>') {
     // positions are the scanner-known ones: inside a type-body block,
     // or on a `type Name =` alias head's own line.
     if (ch === '`') {
-      const aliasHeadOpen = () => {
-        for (let j = tokens.length - 1; j >= 0; j--) {
-          const kd = tokens[j].kind;
-          if (kd === 'TERMINATOR' || kd === 'INDENT' || kd === 'OUTDENT') return false;
-          if (kd === '=') return typeAliasEq(tokens, j);
-        }
-        return false;
-      };
       if (insideTypeBody() || aliasHeadOpen()) {
         fail("template-literal types are not supported — a Rip type cannot contain '`'", pos);
       }

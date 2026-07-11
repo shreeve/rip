@@ -5,6 +5,26 @@ repository's pull requests.
 
 ## Unreleased
 
+- Enable prototype access: `X::m` reads and writes `X.prototype.m`
+  (`String::capitalize = -> …`), and an ANNOTATED write
+  (`String::capitalize: () => string = -> …`) manifests its annotation
+  as an interface augmentation in the TS face and `.d.ts` — `declare
+  global` for outside heads (generic globals repeat their parameter
+  lists, so the annotation can name `T`), a same-module interface for
+  a declared class — so the write, every call site, and hover all
+  resolve the member with zero editor noise. Every shape that cannot
+  deliver rejects loudly at its own position: a doubled colon outside
+  the operator (including inside annotation text), an annotated write
+  below the module top level, and an annotated write on a module
+  binding that is not a class declaration. Augmentation bytes carry
+  the annotation's mapping role, so TS diagnostics on them land on the
+  author's annotation. The editor's generated tsconfig now also
+  includes workspace `.d.ts` files, so hand-written ambient
+  augmentations govern in the editor exactly as they do under batch
+  tsc, and the type-audit fixtures pin the whole story (hover
+  resolution included). Restores the lost consuming test sections of
+  test/toolchain/dts.test.js (#21)
+
 - Split the type-audit into two audits and add the tsgo twin oracle:
   the default run is the five-dimension grid (fast, streams rows live);
   `--hover`/`--all` adds the Hover Audit, which hovers every top-level

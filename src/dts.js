@@ -44,6 +44,7 @@ import {
   renderParams, paramTyped,
 } from './typetext.js';
 import { buildSchemaTypeStory, SchemaTypeError } from './schema-types.js';
+import { protoMemberTarget, PROTO_GENERIC_PARAMS } from './emitter.js';
 import {
   componentTypeInfo, propsTypeText, propsParamOptional, instanceTypeLines, containerType,
 } from './component-types.js';
@@ -320,10 +321,33 @@ export function emitDeclarations({ sexpr, stores, source }) {
       schemaDecl(schemaByNode.get(stmt[2]), exported);
     } else if (head === '=' && stmt.length === 3 && typeof stmt[1] === 'string' && isComponentDecl(stmt[2])) {
       componentDecl(stmt[2], stmt[1], exported);
+    } else if (head === '=' && stmt.length === 3 && protoMemberTarget(stmt) !== null) {
+      // A typed prototype member on an OUTSIDE type (`String::m: T =
+      // v`): the module's runtime patches the global, so its
+      // declaration says so — `declare global` augmentation, the
+      // face's twin. A module-declared head declares nothing here (its
+      // own class declaration is the merge target, a face-only
+      // concern); an untyped write declares nothing (no annotation, no
+      // ambient spelling).
+      const proto = protoMemberTarget(stmt);
+      const t = roleType(stmt, 'annotation');
+      if (t !== null && !moduleHeads.has(proto.head)) {
+        lines.push(`declare global { interface ${proto.head}${PROTO_GENERIC_PARAMS[proto.head] ?? ''} { ${proto.member}: ${t} } }`);
+      }
     } else if ((head === '=' || head === 'void-assign') && stmt.length === 3) assignDecl(stmt, exported);
     else if (head === 'class') classDecl(stmt, exported);
     else if (head === 'enum') enumDecl(stmt, exported);
   };
+
+  // Module-declared heads, for the prototype-augmentation split: a
+  // name declared in this module is never `declare global` material.
+  const moduleHeads = new Set();
+  for (const s of sexpr.slice(1)) {
+    const t = isNode(s) && s[0] === 'export' && isNode(s[1]) ? s[1] : s;
+    if (!isNode(t)) continue;
+    if ((t[0] === 'class' || t[0] === 'enum' || t[0] === 'typed-var' ||
+         t[0] === '=' || t[0] === 'void-assign') && typeof t[1] === 'string') moduleHeads.add(t[1]);
+  }
 
   for (const stmt of sexpr.slice(1)) stmtDecl(stmt, false);
   // The module marker (ARTIFACT-gated): declaration emission can

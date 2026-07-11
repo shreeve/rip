@@ -1,0 +1,84 @@
+# Test: Prototype access (`::`)
+# `X::m` reads and writes `X.prototype.m` — the member-extension
+# operator. A doubled colon anywhere else is a type-spelling error.
+
+import { test, code, fail, type } from '../support/testing.js'
+
+# ==============================================================================
+# Reads and writes
+# ==============================================================================
+
+code "prototype write", "A::m = 1", "A.prototype.m = 1;"
+code "prototype read", "s = Array::slice", "let s = Array.prototype.slice;"
+
+test "method on a class", '''
+  class A
+    constructor: -> @v = 21
+  A::double = -> @v * 2
+  new A().double()
+''', 42
+
+test "extend a builtin", '''
+  String::shout = -> @toUpperCase() + "!"
+  "hi".shout()
+''', "HI!"
+
+test "borrow a method reference", "s = Array::slice; typeof s", "function"
+
+test "prototype read through an instance", '''
+  class Beast
+    constructor: (name) -> @name = name
+  Beast::describe = -> "a beast named #{@name}"
+  new Beast("rex").describe()
+''', "a beast named rex"
+
+# ==============================================================================
+# The typed write — annotation erases; the type story is face/dts-side
+# ==============================================================================
+
+test "annotated prototype write runs", '''
+  String::firstUpper: () => string = -> @charAt(0).toUpperCase()
+  "rip".firstUpper()
+''', "R"
+
+code "annotation erases from the write", 'A::m: () => number = -> 1', '''
+  A.prototype.m = function() {
+    return 1;
+  };
+'''
+
+type "typed prototype member on an outside type declares globally", 'String::firstUpper: () => string = -> @charAt(0).toUpperCase()', '''
+  declare global { interface String { firstUpper: () => string } }
+  export {};
+  '''
+
+# ==============================================================================
+# The doubled colon rejects everywhere the operator does not read
+# ==============================================================================
+
+fail "doubled colon as a type sigil", "x:: number = 1",
+  "type annotations use a single ':' (e.g. `x: number`), not '::'"
+
+fail "spaced doubled colon", "x: : number = 1",
+  "type annotations use a single ':' (e.g. `x: number`), not '::'"
+
+fail "doubled colon before an assign", "x ::= 1",
+  "type annotations use a single ':' (e.g. `x: number`), not '::'"
+
+fail "doubled colon in a type body", '''
+  type T =
+    a:: number
+''', "type annotations use a single ':' (e.g. `x: number`), not '::'"
+
+fail "doubled colon inside annotation text", "x: typeof Array::slice = 1",
+  "type annotations use a single ':' (e.g. `x: number`), not '::'"
+
+fail "annotated write below the module top level", '''
+  setup = ->
+    String::deep: () => string = -> "d"
+''', "an annotated prototype member must be a module top-level statement"
+
+fail "annotated write on a non-class module binding", '''
+  A = class
+  A::m: () => number = -> 1
+''', "not a class declaration"
