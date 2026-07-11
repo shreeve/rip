@@ -634,9 +634,9 @@
       }
     },
 
-    {"comment": "=== OBJECT KEYS (name: value, name?: optional) ==="},
+    {"comment": "=== OBJECT KEYS (name: value, name?: optional; compound data-src: / www.amazon.com: chains are one key) ==="},
     {
-      "match": "\\b([a-zA-Z_$]\\w*)(\\?)?([:])(?![:=])",
+      "match": "\\b([a-zA-Z_$]\\w*(?:[.-][a-zA-Z_$]\\w*)*)(\\?)?([:])(?![:=])",
       "captures": {
         "1": { "name": "meta.object-literal.key.rip" },
         "2": { "name": "keyword.operator.type.optional.rip" },

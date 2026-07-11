@@ -135,8 +135,9 @@ syn region ripWordArray     matchgroup=ripWordDelim start=/%w\z([^ \t[:alnum:]([
 
 " --- Object Keys ------------------------------------------------------------
 
-" Object keys: name: or name?: (but not :: or :=)
-syn match  ripObjKey        /\<[a-zA-Z_$][a-zA-Z0-9_$]*?\?:\%([=:]\)\@!/
+" Object keys: name: or name?: (but not :: or :=); compound chains
+" (data-src:, www.amazon.com:) are one key
+syn match  ripObjKey        /\<[a-zA-Z_$][a-zA-Z0-9_$]*\%([.-][a-zA-Z_$][a-zA-Z0-9_$]*\)*?\?:\%([=:]\)\@!/
 
 " --- Function / Method Calls ------------------------------------------------
 

@@ -308,3 +308,57 @@ test "single-line object guard still guards the call", '''
   ''', 0
 
 code "first-line conditional keeps one object", "foo\n  a: 1 if c else 2\n  b: 3", "foo({a: (c ? 1 : 2), b: 3});"
+
+# ==============================================================================
+# Compound Object Keys — dotted (a.b:) and hyphenated (data-src:) chains
+# collapse to string keys; spaced subtraction and ternary colons unaffected
+# ==============================================================================
+
+test 'dotted key simple', 'o = { a.b: 1 }; o["a.b"]', 1
+
+test 'dotted key triple', 'o = { one.two.three: 44 }; o["one.two.three"]', 44
+
+test 'dotted key mixed', 'o = { one.two.three: 44, five: 66 }; o["one.two.three"] + o.five', 110
+
+code 'dotted key codegen', '{ a.b: 1 }', '({\'a.b\': 1})'
+
+code 'dotted key triple codegen', '{ one.two.three: 44 }', '({\'one.two.three\': 44})'
+
+test 'dotted key implicit object', '''
+  a =
+    x.y:
+      z: 1
+  a["x.y"].z
+''', 1
+
+test 'dotted key implicit siblings', '''
+  a =
+    x.y: 1
+    w.z: 2
+  a["x.y"] + a["w.z"]
+''', 3
+
+test 'hyphen key simple', 'o = { data-src: 1 }; o["data-src"]', 1
+
+test 'hyphen key triple', 'o = { a-b-c: 7 }; o["a-b-c"]', 7
+
+test 'hyphen key implicit siblings', '''
+  a =
+    data-src: 1
+    data-foo-bar: 2
+  a["data-src"] + a["data-foo-bar"]
+''', 3
+
+test 'hyphen key mixed with normal', 'o = { data-x: 1, static: 2, foo-bar-baz: 4 }; o["data-x"] + o.static + o["foo-bar-baz"]', 7
+
+code 'hyphen key codegen', '{ data-src: 1 }', '({\'data-src\': 1})'
+
+test 'mixed key dot-hyphen', 'o = { beta-site.amazon.com: 100 }; o["beta-site.amazon.com"]', 100
+
+test 'mixed key hyphen-dot', 'o = { api.v1-beta.example.com: 200 }; o["api.v1-beta.example.com"]', 200
+
+code 'mixed key codegen', '{ beta-site.amazon.com: 1 }', '({\'beta-site.amazon.com\': 1})'
+
+test 'spaced minus in a value stays subtraction', 'a = 5\nb = 3\no = { k: a - b }\no.k', 2
+
+test 'ternary colon after a member read is not a key', 'd = {p: 9}\nc = 1\nc ? d.p : 0', 9
