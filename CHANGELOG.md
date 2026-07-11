@@ -5,6 +5,10 @@ repository's pull requests.
 
 ## Unreleased
 
+- Wire `bun run ext` to the shared extension installer, and carry the
+  icon field into the staged vsix manifest so editors show the
+  extension icon (#14)
+
 - Set the VS Code extension version to 4.0.0 (#13)
 
 - Enforce the test boundary: root test runs mechanically exclude

@@ -58,6 +58,7 @@ const stagedPkg = {
   license: pkgJson.license,
   repository: pkgJson.repository,
   engines: pkgJson.engines,
+  icon: pkgJson.icon,
   categories: pkgJson.categories,
   keywords: pkgJson.keywords,
   main: pkgJson.main,
