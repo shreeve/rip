@@ -557,6 +557,7 @@
     { "match": "\\.=|&&=|\\|\\|=|\\?\\?=|\\?=|\\+=|-=|\\*\\*=|\\*=|//=|%%=|/=|%=|<<=|>>>=|>>=|&=|\\|=|\\^=",
       "name": "keyword.operator.assignment.compound.rip" },
     { "match": "\\*>", "name": "keyword.operator.assignment.merge.rip" },
+    { "match": "\\$(?=[\"'])", "name": "keyword.operator.template-tag.rip" },
 
     {"comment": "=== ASSIGNMENT (with variable name capture) ==="},
     {

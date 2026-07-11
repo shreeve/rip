@@ -4435,6 +4435,7 @@ class Emitter {
     }
     const head = node[0];
     if (head === 'str') return this.strTemplate(node);
+    if (head === 'tagged-template' && node.length === 3) return this.taggedTemplate(node);
     if (head === 'here-regex') return this.heregex(node);
     if (isNode(head)) return this.call(node);
     // An assignment whose target spine holds an optional link lowers to
@@ -10032,6 +10033,35 @@ class Emitter {
       this.b.emit(' ??= {}, ');
       this.mark(node, 'value', () => this.expr(value));
       this.b.emit(')');
+    });
+  }
+
+  // ["tagged-template", tag, str] — the tag calls the template:
+  // `tag"x"` / `sh $"cmd #{c}"` → tag`x` / sh`cmd ${c}`. The tag is a
+  // head position (a non-primary tag would rebind the template onto
+  // its last sub-expression); the template re-emits the string in
+  // backtick form — a plain value's quotes swap (its escapes carry),
+  // a single-quote heredoc is already backtick-delimited, and an
+  // interpolated string's own emission is the template.
+  taggedTemplate(node) {
+    this.mark(node, '$self', () => {
+      const tag = node[1];
+      this.mark(node, 'tag', () => {
+        if (Emitter.needsGrouping(tag, 'head')) {
+          this.b.emit('(');
+          this.expr(tag);
+          this.b.emit(')');
+        } else this.expr(tag);
+      });
+      const s = node[2];
+      this.mark(node, 'str', () => {
+        if (typeof s === 'string') {
+          if (s[0] === '`') this.b.emit(s);
+          else this.b.emit('`' + Emitter.escapeTemplate(s.slice(1, -1).replace(/\\"/g, '"')) + '`');
+        } else {
+          this.expr(s);
+        }
+      });
     });
   }
 
