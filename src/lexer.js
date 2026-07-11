@@ -2170,6 +2170,18 @@ export function tokenize(text, path = '<anonymous>') {
     if (kind === 'IDENTIFIER' && value === 'from' && tokens[tokens.length - 1]?.kind === 'YIELD') {
       kind = 'FROM';
     }
+    // Negated relations: word-`not` directly before in/of/instanceof
+    // folds into ONE token (`a not in b` → RELATION '!in' → the whole
+    // membership lowering negates). Word-not alone is UNARY '!'
+    // (symbol `!` scans UNARY_MATH, so the pair is unambiguous).
+    if (kind === 'RELATION') {
+      const prevTok = tokens[tokens.length - 1];
+      if (prevTok?.kind === 'UNARY' && prevTok.value === '!') {
+        tokens.pop();
+        value = '!' + value;
+        start = prevTok.start;
+      }
+    }
     const token = {
       id: nextId++,
       kind, value, start, end,

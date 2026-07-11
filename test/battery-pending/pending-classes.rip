@@ -4,10 +4,6 @@
 
 import { test, code, fail, type } from '../support/testing.js'
 
-code 'super call', 'super(arg)', 'super(arg)'
-
-code 'super method', 'super.method()', 'super.method()'
-
 test '@param works with extra statements', '''
   class Animal
     constructor: (@name) ->

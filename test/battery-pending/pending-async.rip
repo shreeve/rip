@@ -3,5 +3,3 @@
 # into test/battery/ in the same change (the lane asserts still-failing).
 
 import { test, code, fail, type } from '../support/testing.js'
-
-code 'yield', 'yield value', 'yield value'

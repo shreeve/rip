@@ -1,4 +1,0 @@
-count = 0
-loop 3
-  count++
-p count
