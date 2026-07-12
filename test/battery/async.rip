@@ -605,7 +605,9 @@ code "object comprehension await emits async IIFE", "x = {k: fetch!(v) for k, v 
     const result = {};
     for (let k in obj) {
       let v = obj[k];
-      result[k] = await fetch(v);
+      const key = k, val = await fetch(v);
+      if (key === "__proto__") Object.defineProperty(result, key, { value: val, writable: true, enumerable: true, configurable: true });
+      else result[key] = val;
     }
     return result;
   })();

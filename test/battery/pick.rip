@@ -33,11 +33,16 @@ test "bare this"           , """
 
 test "rename single"       , "o = {firstName: 'Alice'}; o.{firstName: fn}" , {fn: 'Alice'}
 test "rename mixed"        , "o = {a: 1, b: 2}; o.{a: x, b}"              , {x: 1, b: 2}
-# Reserved-word keys like `default`, `class`, `delete` aren't supported in
-# the PickKey slot in v1 — the lexer tokenizes them as keyword tokens, not
-# PROPERTY tokens. Use an explicit object literal for those cases:
-#   result = { default: whom.default }
-# Can revisit with a lexer retag inside pick bodies if it becomes common.
+# Reserved-word keys work in the PickKey slot.
+test "reserved-word pick key", "o = {default: 1}; o.{default}", {default: 1}
+
+# A picked `__proto__` key is an OWN property of the result, never the
+# result's prototype: copying source DATA must not mutate the prototype.
+test "picked __proto__ stays an own property", '''
+  src = JSON.parse('{"__proto__":{"polluted":true}}')
+  out = src.{__proto__}
+  [Object.hasOwn(out, "__proto__"), Object.getPrototypeOf(out) is Object.prototype]
+''', [true, true]
 
 # ==============================================================================
 # Runtime — default (`name = expr`) — nullish semantics

@@ -122,7 +122,7 @@ test 'assignment with explicit if instead of postfix unless', '''
 
 code 'optional chain assign: x?.prop = val', 'gc?.scrollTop = 0', 'if (gc != null) gc.scrollTop = 0'
 code 'optional chain assign: deep', 'a?.b.c = 0', 'if (a != null) a.b.c = 0'
-code 'optional chain assign: inner', 'a.b?.c = 0', 'if (a.b != null) a.b.c = 0'
+code 'optional chain assign: inner', 'a.b?.c = 0', '((_ref) => { if (_ref != null) _ref.c = 0; })(a.b);'
 code 'optional chain assign: bracket', 'x?[0] = 1', 'if (x != null) x[0] = 1'
 code 'optional chain assign: compound', 'x?.prop += 5', 'if (x != null) x.prop += 5'
 
@@ -193,7 +193,7 @@ test 'optional chain assign: inner chain skips', '''
   ''', null
 
 code 'optional chain assign: style pattern', 'el?.style.display = "none"', 'if (el != null) el.style.display = "none"'
-code 'optional chain assign: value pattern', '@_input?.value = ""', 'if (this._input != null) this._input.value = ""'
+code 'optional chain assign: value pattern', '@_input?.value = ""', '((_ref) => { if (_ref != null) _ref.value = ""; })(this._input);'
 code 'optional chain assign: subtract', 'x?.y -= 1', 'if (x != null) x.y -= 1'
 
 # ==============================================================================
@@ -237,3 +237,37 @@ test 'middle rest evaluates its source once', '''
   ''', [7, [8], 9, 1]
 
 fail 'middle rest takes plain names', '[a, ...[m], b] = xs', 'plain names'
+
+# Compound floor-div / modulo on a member or index target follows native
+# order — read the target property, THEN evaluate the RHS, then write —
+# and evaluates an impure index key exactly once.
+test 'floor-div on a member reads target before RHS', '''
+  log = []
+  target = {x: 9}
+  obj = new Proxy(target, {get: (o, k) -> log.push("get"); o[k], set: (o, k, v) -> log.push("set"); o[k] = v; true})
+  rhs = -> log.push("rhs"); 2
+  obj.x //= rhs()
+  [target.x, log]
+''', [4, ['get', 'rhs', 'set']]
+
+test 'floor-div on an index evaluates the key once', '''
+  n = 0
+  key = ->
+    n += 1
+    0
+  o = {a: [9]}
+  o.a[key()] //= 2
+  [o.a[0], n]
+''', [4, 1]
+
+test 'optional floor-div evaluates an impure key once, only when the guard passes', '''
+  n = 0
+  key = ->
+    n += 1
+    0
+  o = {a: [9]}
+  o?.a[key()] //= 2
+  gone = null
+  gone?.a[key()] //= 2
+  [o.a[0], n]
+''', [4, 1]

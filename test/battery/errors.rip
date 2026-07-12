@@ -198,6 +198,16 @@ fail "return inside a value-position if rejects", '''
     x
 ''', "cannot cross the IIFE boundary"
 
+# A yield in an optional assignment's value would be captured by the
+# generated `(_ref) => …` arrow (not a generator) — reject positioned
+# rather than emit invalid JS.
+fail "yield in an optional-assignment value rejects", '''
+  get = -> {x: 0}
+  f = ->
+    get()?.x = yield 1
+  f()
+''', "cannot cross the generated arrow"
+
 test "return in a function-TAIL switch tunnels through the lowering", '''
   fn = (x) ->
     switch x

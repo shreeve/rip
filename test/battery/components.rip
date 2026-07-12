@@ -5009,3 +5009,11 @@ code 'plain `=` write is a property write; `:=` write is a signal write', '''
     }
   };
   '''
+
+# A component-body effect reaches emission through the member-collection
+# path, not effectStatement() — so its yield rejection must live there
+# too: the runtime calls the effect function, a generator never runs.
+fail 'a component effect body cannot yield', '''
+  A = component
+    ~> yield 1
+  ''', "cannot yield"

@@ -3787,18 +3787,25 @@ class Emitter {
         if (wrap) this.b.emit(')');
         this.b.emit(');\n');
       } else {
-        this.b.emit(`${inner}${acc}[`);
+        // Object comprehension building from (possibly untrusted) data:
+        // a `__proto__` KEY assigned via `result[k] = v` invokes the
+        // prototype setter and mutates the result's prototype instead
+        // of creating an own property. Bind key and value once, then
+        // route a `__proto__` key through defineProperty (an ordinary
+        // own property); every other key stays the plain assignment.
+        const kt = this.loopTempName('key');
+        const vt = this.loopTempName('val');
+        this.b.emit(`${inner}const ${kt} = `);
         // A string key is an identifier read (it routes through expr,
         // so a reactive key unwraps — `result[count.value]`;
         // loop variables are frame-bound and stay bare); a node
         // key is the dynamicKey's inner expression.
         this.expr(keyExpr);
-        this.b.emit('] = ');
-        const wrap = Emitter.needsGrouping(expr, 'operand') || isUpdate(expr);
-        if (wrap) this.b.emit('(');
+        this.b.emit(`, ${vt} = `);
         this.expr(expr);
-        if (wrap) this.b.emit(')');
-        this.b.emit(';\n');
+        this.b.emit(`;\n`);
+        this.b.emit(`${inner}if (${kt} === "__proto__") Object.defineProperty(${acc}, ${kt}, { value: ${vt}, writable: true, enumerable: true, configurable: true });\n`);
+        this.b.emit(`${inner}else ${acc}[${kt}] = ${vt};\n`);
       }
       if (guards.length > 0) this.b.emit(`${pad}    }\n`);
       this.b.emit(`${pad}  }\n`);
@@ -4892,14 +4899,26 @@ class Emitter {
   // `object` role, so
   // leaf guards map exactly.
   //
-  // A receiver the guard cannot cheaply re-read (pureChain false)
-  // binds as an IIFE parameter instead: the guard and the write then
-  // see the SAME object, and the receiver evaluates exactly once. The
-  // rest of the target re-emits with the parameter standing in at the
-  // optional link's object slot.
+  // The optional receiver is read TWICE here — once for the `!= null`
+  // guard and once for the write — so it may skip a temp only when a
+  // second read is guaranteed to observe the SAME value with no side
+  // effect: a plain identifier or `this` (both bare strings in the
+  // tree). A MEMBER-CHAIN receiver (`a.b?.c = v`) is not safe to
+  // re-read even though pureChain accepts it — a getter on the chain
+  // is observable and could return a different object each read — so
+  // it binds as an IIFE parameter and evaluates exactly once. The rest
+  // of the target re-emits with the parameter at the optional link's
+  // object slot.
   optionalAssign(node, optLink, context) {
     const op = node[0];
-    if (!Emitter.pureChain(optLink[1])) {
+    if (typeof optLink[1] !== 'string') {
+      // The RHS value is emitted INSIDE the generated `(_ref) => …`
+      // arrow, which is not a generator — a yield there would compile
+      // to invalid JS. Reject it positioned instead.
+      if (Emitter.containsYield(node[2])) {
+        throw this.positionedError(node,
+          "emitter: yield inside an optional assignment's value cannot cross the generated arrow — restructure as statements (bind the receiver first, then assign)");
+      }
       const p = this.loopTempName('_ref');
       const subst = (x) => {
         if (x === optLink) return [x[0], p, x[2]];
@@ -4937,9 +4956,25 @@ class Emitter {
       return;
     }
     const guard = () => this.mark(optLink, 'object', () => this.expr(optLink[1]));
-    const target = () => this.mark(node, 'target', () => this.withTarget(() => this.withDeopt(() => this.expr(node[1]))));
+    // `//=` / `%%=` synthesize `t = op(t, v)`, so the target is emitted
+    // TWICE (read + write). An impure computed index key must evaluate
+    // exactly once — and only when the optional guard passes (native
+    // short-circuits it when the receiver is null) — so capture it in
+    // an IIFE placed INSIDE the guarded branch and reference the temp
+    // in both target emissions.
+    let effTarget = node[1];
+    let keyCapture = null;
+    if ((op === '//=' || op === '%%=') && isNode(node[1]) && node[1][0] === '[]' && node[1].length === 3) {
+      const key = node[1][2];
+      if (typeof key !== 'string' && !Emitter.pureChain(key)) {
+        const kt = this.loopTempName('_k'); this.temps.used.add(kt);
+        keyCapture = { name: kt, expr: key };
+        effTarget = ['[]', node[1][1], kt];
+      }
+    }
+    const target = () => this.mark(node, 'target', () => this.withTarget(() => this.withDeopt(() => this.expr(effTarget))));
     const value = () => this.mark(node, 'value', () => this.withExpression(() => this.expr(node[2])));
-    const emitAssign = () => {
+    const emitCore = () => {
       if (op === '//=') {
         target();
         this.b.emit(' = Math.floor(');
@@ -4960,6 +4995,17 @@ class Emitter {
         this.mark(node, 'operator', () => this.b.emit(op));
         this.b.emit(' ');
         value();
+      }
+    };
+    const emitAssign = () => {
+      if (keyCapture) {
+        this.b.emit(`((${keyCapture.name}) => `);
+        emitCore();
+        this.b.emit(')(');
+        this.mark(node, 'target', () => this.withDeopt(() => this.expr(keyCapture.expr)));
+        this.b.emit(')');
+      } else {
+        emitCore();
       }
     };
     this.mark(node, '$self', () => {
@@ -5643,6 +5689,14 @@ class Emitter {
           throw this.positionedError(stmt,
             `emitter: a bound effect ('${typeof stmt[1] === 'string' ? stmt[1] : '…'} ~> …') has no component-body reading — ` +
             'the handle would bind nothing; use a bare `~> …` effect, or bind the handle inside a method', node);
+        }
+        // Same contract as a module/function effect: the runtime calls
+        // the effect function, so a generator body would never run.
+        // Component-body effects reach emission through this collection
+        // path, not effectStatement(), so the check must live here too.
+        if (Emitter.containsYield(stmt[2])) {
+          throw this.positionedError(stmt,
+            "emitter: an effect ('~>') body cannot yield — the runtime calls the effect function (make the generator a named function the effect calls)", node);
         }
         effects.push(stmt);
         return;
@@ -8771,7 +8825,12 @@ class Emitter {
         if (i > 0) this.b.emit(', ');
         const [srcKey, dstKey, def] = item;
         this.mark(item, '$self', () => {
-          this.mark(item, 'target', () => this.b.emit(dstKey));
+          // A `__proto__` destination key as a bare identifier would set
+          // the result's PROTOTYPE (the object-literal proto setter),
+          // not create an own property — so a picked `__proto__` from
+          // source DATA silently mutates the prototype. The computed-key
+          // form `["__proto__"]:` creates an ordinary own property.
+          this.mark(item, 'target', () => this.b.emit(dstKey === '__proto__' ? '["__proto__"]' : dstKey));
           this.b.emit(': ');
           if (def !== null) this.b.emit('(');
           emitRef();
@@ -10721,20 +10780,34 @@ class Emitter {
   synthCompound(node, open, mid, close) {
     const t = node[1];
     if (isNode(t) && (t[0] === '.' || t[0] === '[]') && t.length === 3) {
+      // Native compound-assignment order is: read the target property,
+      // THEN evaluate the RHS, then write. The RHS therefore emits
+      // INSIDE the arrow, after the read — and a yield there cannot
+      // cross the (non-generator) arrow. The base and index key are
+      // arrow arguments, evaluated once each; the property is read once
+      // into `cur` and written once, so observable getters/setters and
+      // an impure index key fire exactly as they would natively.
+      if (Emitter.containsYield(node[2])) {
+        throw this.positionedError(node,
+          `emitter: yield inside a '${node[0]}' value cannot cross the generated arrow — restructure as statements`);
+      }
       this.mark(node, '$self', () => {
         const asyncy = Emitter.containsAwait(node);
         const indexy = t[0] === '[]';
-        const prop = indexy ? '[_k]' : `.${t[2]}`;
-        this.b.emit(asyncy ? 'await (async (' : '((');
-        this.b.emit(indexy ? '_o, _k, _v' : '_o, _v');
-        this.b.emit(`) => _o${prop} = ${open}_o${prop}${mid}_v${close})(`);
+        const o = this.loopTempName('_o'); this.temps.used.add(o);
+        const k = indexy ? this.loopTempName('_k') : null; if (k) this.temps.used.add(k);
+        const cur = this.loopTempName('_t'); this.temps.used.add(cur);
+        const ref = indexy ? `${o}[${k}]` : `${o}.${t[2]}`;
+        const params = indexy ? `${o}, ${k}` : o;
+        this.b.emit(asyncy ? `await (async (${params}) => ` : `((${params}) => `);
+        this.b.emit(`{ const ${cur} = ${ref}; return ${ref} = ${open}${cur}${mid}`);
+        this.mark(node, 'value', () => this.expr(node[2]));
+        this.b.emit(`${close}; })(`);
         this.mark(node, 'target', () => this.expr(t[1]));
         if (indexy) {
           this.b.emit(', ');
           this.mark(node, 'target', () => this.expr(t[2]));
         }
-        this.b.emit(', ');
-        this.mark(node, 'value', () => this.expr(node[2]));
         this.b.emit(')');
       });
       return;

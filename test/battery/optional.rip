@@ -143,4 +143,24 @@ test "a nullish receiver skips the write after one evaluation", '''
   n
 ''', 1
 
-code "a pure receiver keeps the plain guard", "o.a?.x = 5", "if (o.a != null) o.a.x = 5;"
+# A plain-name (or `this`) receiver is safe to read twice — no getter is
+# possible — so it keeps the lean inline guard, no temp.
+code "a plain-name receiver keeps the lean guard", "o?.x = 5", "if (o != null) o.x = 5;"
+
+# A member-chain receiver binds once: the guard and the write see the
+# SAME value, so a getter (or any derived read) fires exactly once.
+code "a member-chain receiver binds once (a getter is read only once)", "o.a?.x = 5", "((_ref) => { if (_ref != null) _ref.x = 5; })(o.a);"
+
+# Runtime proof: a getter that returns a different object each read is
+# observed ONCE — the object the guard checks is the object written.
+test "an optional-assign receiver getter fires exactly once", '''
+  n = 0
+  a = {x: 0}
+  b = {x: 0}
+  o = {}
+  Object.defineProperty o, "p", get: ->
+    n += 1
+    if n is 1 then a else b
+  o.p?.x = 7
+  [a.x, b.x, n]
+''', [7, 0, 1]

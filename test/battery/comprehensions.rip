@@ -137,7 +137,7 @@ test 'object comprehension key-value', '''
   ''', {x: 'x', y: 'y'}
 
 # Code generation
-code "object comprehension", "{k: v * 2 for k, v of obj}", "((() => {\n  const result = {};\n  for (let k in obj) {\n    let v = obj[k];\n    result[k] = (v * 2);\n  }\n  return result;\n})());"
+code "object comprehension", "{k: v * 2 for k, v of obj}", "((() => {\n  const result = {};\n  for (let k in obj) {\n    let v = obj[k];\n    const key = k, val = v * 2;\n    if (key === \"__proto__\") Object.defineProperty(result, key, { value: val, writable: true, enumerable: true, configurable: true });\n    else result[key] = val;\n  }\n  return result;\n})());"
 
 # ==============================================================================
 # Function-Local Comprehension Assignment (direct array building, no IIFE)
@@ -389,3 +389,13 @@ code 'ranged by literal compiles inline', '''
   '''
 
 fail 'ranged by zero literal rejects', 'x = (i for i in [0..4] by 0)', 'never advances'
+
+# An object comprehension building from (possibly untrusted) source data
+# keeps a `__proto__` KEY as an own property — copying data must never
+# mutate the result's prototype.
+test 'object comprehension keeps __proto__ as an own key', '''
+  src = Object.create(null)
+  src["__proto__"] = {polluted: true}
+  out = {k: v for k, v of src}
+  [Object.hasOwn(out, "__proto__"), Object.getPrototypeOf(out) is Object.prototype]
+''', [true, true]
