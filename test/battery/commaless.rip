@@ -219,3 +219,11 @@ test 'string then param fn', '''
   run = (path, fn) -> fn(5)
   run '/api', (x) -> x * 2
   ''', 10
+
+code 'parens are params', '''
+  map (x) -> x * 2
+  ''', '''
+  map(function(x) {
+    return (x * 2);
+  });
+  '''
