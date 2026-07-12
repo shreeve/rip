@@ -209,3 +209,13 @@ test 'infinity arrow runtime', '''
 test 'identifier param works', '''
   [1,2,3].map (x) -> x * 2
   ''', [2, 4, 6]
+
+test 'arrow expression body', '''
+  run = (name, fn) -> fn(10)
+  run 'double', (x) -> x * 2
+  ''', 20
+
+test 'string then param fn', '''
+  run = (path, fn) -> fn(5)
+  run '/api', (x) -> x * 2
+  ''', 10
