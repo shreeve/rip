@@ -245,3 +245,11 @@ test "a ternary condition keeps its parens", '''
 ''', 2
 
 code "ternary-condition grouping", "x = (a ? b : c) ? 1 : 2", "let x = (a ? b : c) ? 1 : 2;"
+
+test '?? return ends implicit call', '''
+  read = (k) -> null
+  fn = ->
+    sql = read 'body' ?? return 'empty'
+    'got: ' + sql
+  fn()
+  ''', 'empty'
