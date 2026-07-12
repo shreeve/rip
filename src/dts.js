@@ -119,6 +119,15 @@ export function emitDeclarations({ sexpr, stores, source }) {
     return normalizeTypeText(source.slice(row.sourceStart, row.sourceEnd).replace(/^\s*:\s*/, ''));
   };
 
+  // Is a param optional? The `?` is the side-band optionalMarker role
+  // (grammar-dropped), the same role the face emitter reads — so the
+  // declaration carries `name?: T` (and a bare `name?` defaults to
+  // `name?: any`), matching the face rather than dropping the marker.
+  const isOptionalParam = (node) => {
+    const id = stores.idOf(node);
+    return id !== null && !!stores.role(id, 'optionalMarker');
+  };
+
   // ── declaring statements ───────────────────────────────────────────
 
   // A definition's generic parameter list (`def add<T>(…)`) rides the
@@ -135,12 +144,12 @@ export function emitDeclarations({ sexpr, stores, source }) {
     const [head, name, params] = node;
     const returnType = roleType(node, 'returnType') ?? (head === 'void-def' ? 'void' : null);
     if (returnType === null && !params.some(paramTyped)) return;
-    lines.push(`${exported ? 'export ' : ''}declare function ${name}${typeParamsOf(node)}${rendered(() => renderParams(params))}: ${returnType ?? 'any'};`);
+    lines.push(`${exported ? 'export ' : ''}declare function ${name}${typeParamsOf(node)}${rendered(() => renderParams(params, isOptionalParam))}: ${returnType ?? 'any'};`);
   };
 
   const defSigDecl = (node) => {
     const [, name, params, returnType] = node;
-    lines.push(`declare function ${name}${typeParamsOf(node)}${rendered(() => renderParams(params))}: ${tidyType(returnType)};`);
+    lines.push(`declare function ${name}${typeParamsOf(node)}${rendered(() => renderParams(params, isOptionalParam))}: ${tidyType(returnType)};`);
   };
 
   const assignDecl = (node, exported) => {
@@ -155,7 +164,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
     if (!isFunc(value)) return;
     const returnType = roleType(value, 'returnType') ?? (head === 'void-assign' ? 'void' : null);
     if (returnType === null && !value[1].some(paramTyped)) return;
-    lines.push(`${exp}declare function ${target}${rendered(() => renderParams(value[1]))}: ${returnType ?? 'any'};`);
+    lines.push(`${exp}declare function ${target}${typeParamsOf(value)}${rendered(() => renderParams(value[1], isOptionalParam))}: ${returnType ?? 'any'};`);
   };
 
   const classDecl = (node, exported) => {
@@ -194,12 +203,12 @@ export function emitDeclarations({ sexpr, stores, source }) {
               const plain = typed !== null ? ['typed-var', n, typed[2]] : n;
               return dflt !== null ? ['default', plain, dflt[2]] : plain;
             });
-            if (params.some(paramTyped)) members.push(`constructor${rendered(() => renderParams(params))};`);
+            if (params.some(paramTyped)) members.push(`constructor${rendered(() => renderParams(params, isOptionalParam))};`);
             continue;
           }
           if (returnType === null && !params.some(paramTyped)) continue;
           const staticPrefix = isStaticKey(key) ? 'static ' : '';
-          members.push(`${staticPrefix}${mName}${rendered(() => renderParams(params))}: ${returnType ?? 'any'};`);
+          members.push(`${staticPrefix}${mName}${rendered(() => renderParams(params, isOptionalParam))}: ${returnType ?? 'any'};`);
         }
         continue;
       }

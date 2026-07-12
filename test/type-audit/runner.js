@@ -7,7 +7,7 @@
 //   bun run type-audit --hover          # the Hover Audit ONLY (slower; drives LSP servers)
 //   bun run type-audit --all            # both audits
 //   bun run type-audit --v              # + list the expected hover divergences
-//   bun run type-audit --update-hovers  # accept current hover text as the pinned snapshot
+//   bun run type-audit --update-hovers  # re-pin expected hovers (verify the change first)
 //
 // Two independent audits:
 //
@@ -24,7 +24,8 @@
 //                  tsconfig                           (else: reference twin invalid)
 //
 // B · THE HOVER AUDIT (--hover / --all) — hover every top-level
-//   declaration through the editor server and judge each answer twice:
+//   declaration through the editor server and judge each answer against
+//   the best available reference:
 //
 //   · TWIN ORACLE (correctness): where the hand-written .ts/.tsx twin
 //     declares the same symbol, tsgo's hover of the twin is the ACTUAL
@@ -34,14 +35,17 @@
 //     reactive) are EXPECTED divergences — the twin approximates them
 //     with a different system (React / zod), so it is not an oracle
 //     there.
-//   · SNAPSHOT (regression): every probe is pinned in hovers.json.
-//     `--update-hovers` is the one way snapshot bytes move (regenerate
-//     in the same commit as the change that moved them — the
-//     corpus-expected convention). This catches the write-only-`any`
-//     class everywhere, twin or no twin: a binding whose face compiles,
-//     emits no diagnostic, and runs identically, but hovers `any` where
-//     a real type belongs. Error-based dimensions cannot see it; pinned
-//     hover TEXT can.
+//   · EXPECTED HOVERS (correctness baseline): every symbol the twin
+//     CANNOT validate — rip-native (component/schema/reactive) and any
+//     symbol with no twin — is pinned in hover-pins.json, seeded
+//     from values certified against the v3 oracle. The live hover must
+//     match its expected value. `--update-hovers` re-pins, but VERIFY
+//     the change is correct first: this is a correctness baseline, not a
+//     photo of whatever the editor emitted. Twin-checked symbols are NOT
+//     pinned here — the twin validates them live, and pinning raw text
+//     would flag harmless changes (union-member order) it normalizes
+//     away. (The write-only-`any` class is caught for ALL symbols by the
+//     oracle-free invariant below.)
 //
 // The verdict (dim 3) runs under STRICT because tsgo (TS7) defaults
 // strict:true ON. The runner still copies tsconfig.json into the editor
@@ -64,7 +68,7 @@ const ROOT = path.resolve(HERE, '../..');
 const RIP = path.join(ROOT, 'bin/rip');
 const SERVER = path.join(ROOT, 'packages/vscode/src/server.js');
 const FIX = path.join(HERE, 'fixtures');
-const HOVERS = path.join(HERE, 'hovers.json');
+const HOVERS = path.join(HERE, 'hover-pins.json');
 const VERBOSE = process.argv.includes('--v');
 const UPDATE_HOVERS = process.argv.includes('--update-hovers');
 // Run selection:
@@ -158,15 +162,25 @@ const normHover = (h) => {
 };
 // Top-level declarations: a name at column 0, optionally after a leading
 // export/def/class/interface/enum/type keyword. Heuristic, not a parser.
-const DECL = /^(?:export\s+)?(?:(?:def|class|interface|enum|type)\s+)?([A-Za-z_$][\w$]*)/;
+const DECL = /^(?:export\s+)?(?:(def|class|interface|enum|type)\s+)?([A-Za-z_$][\w$]*)/;
 const KEYWORDS = new Set(['import', 'return', 'if', 'unless', 'for', 'while', 'export', 'switch', 'try', 'throw']);
 function declsOf(src) {
   const out = [];
   src.split('\n').forEach((text, line) => {
     if (/^\s*#/.test(text) || !text.trim() || /^\s/.test(text)) return;
     const m = text.match(DECL);
-    if (!m || KEYWORDS.has(m[1])) return;
-    out.push({ name: m[1], line, character: text.indexOf(m[1]), text: text.trim() });
+    if (!m || KEYWORDS.has(m[2])) return;
+    const keyword = m[1], name = m[2];
+    // Only actual DECLARATIONS, not usage statements. A keyword form
+    // (def/class/…) always declares. A bare name declares only when its
+    // next token is an assignment / annotation / reactive operator
+    // (= : := ~= ~>); a name followed by `.`/`(`/`[` is a usage
+    // (console.log(…)) — which the old heuristic wrongly probed.
+    if (!keyword) {
+      const after = text.slice(text.indexOf(name) + name.length);
+      if (!/^!?\s*(?:<[^>]*>)?\s*(?:~[=>]|[:=])/.test(after)) return;
+    }
+    out.push({ name, line, character: text.indexOf(name), text: text.trim() });
   });
   return out;
 }
@@ -396,16 +410,15 @@ if (RUN_MAIN) {
   fails = totalApplicable - totalPass;
 }
 
-// ── the Hover Audit: twin oracle (correctness) + snapshot (regression)
+// ── the Hover Audit: twin oracle (correctness) + expected hovers (baseline)
 let hp = null;
 if (RUN_HOVER) {
-  auditBanner('HOVER AUDIT', `twin oracle + pinned snapshot · ${fixtures.length} files`);
+  auditBanner('HOVER AUDIT', `twin oracle + expected hovers · ${fixtures.length} files`);
   let twin = null;
   try { twin = new TwinOracle(); await twin.start(); } catch { twin = null; }
-  if (!twin) console.log(`    ${dim('tsgo unavailable — twin oracle skipped; snapshot comparison still runs')}`);
+  if (!twin) console.log(`    ${dim('tsgo unavailable — twin oracle skipped; hover-pins comparison still runs')}`);
 
   const pinned = fs.existsSync(HOVERS) ? JSON.parse(fs.readFileSync(HOVERS, 'utf8')) : null;
-  const liveHovers = {};
   const allRows = [];
   let hskip = 0, anyCount = 0, probeCount = 0;
 
@@ -427,16 +440,13 @@ if (RUN_HOVER) {
     for (const d of decls) hovers.push(await editor.hover(uri, { line: d.line, character: d.character }));
     await editor.close(uri);
 
-    const probes = {};
     const occ = new Map();
     decls.forEach((d, i) => {
       const k = occ.get(d.name) ?? 0; occ.set(d.name, k + 1);
       allRows.push({ ...d, hover: hovers[i], ts: tmap ? (tmap.get(`${d.name}#${k}`) ?? null) : null, file: f });
-      probes[`${d.name}@${d.line + 1}`] = hovers[i];
       probeCount++;
       if (/(?:^|:\s*)any$/.test(hovers[i] ?? '')) anyCount++;
     });
-    liveHovers[f] = probes;
   }
 
   if (twin) await twin.stop();
@@ -491,7 +501,7 @@ if (RUN_HOVER) {
   //   agree        hover matches the twin's tsgo answer
   //   gap          hover ≠ tsgo twin on a COMPARABLE type — the actionable bucket
   //   rip-native   component / schema / reactive — the twin is not an oracle there
-  //   pinned-only  no twin symbol — the snapshot alone covers it
+  //   pinned-only  no twin symbol — hover-pins alone covers it
   const tally = { agree: 0, gap: 0, native: 0, pinnedOnly: 0, order: 0 };
   const gaps = [], natives = [], pinnedOnly = [];
   for (const r of allRows) {
@@ -506,13 +516,24 @@ if (RUN_HOVER) {
   }
   const violations = allRows.filter(invariantHit).map((r) => `${r.file}:${r.line + 1} ${r.name} (${r.text}) → \`${r.hover}\``);
 
-  // ── snapshot comparison (the regression net over EVERY probe)
+  // ── hover-pins comparison — the pinned file covers ONLY what the
+  // twin can't validate live (rip-native + no-twin). Twin-checked symbols
+  // are judged by the twin oracle every run; pinning their raw text would
+  // flag harmless changes (union order) the twin normalizes away.
+  const twinCovered = (r) => r.ts != null && !ripNative(r);
+  const liveScoped = {};
+  let pinnedCount = 0;
+  for (const r of allRows) {
+    if (twinCovered(r)) continue;
+    (liveScoped[r.file] ??= {})[`${r.name}@${r.line + 1}`] = r.hover;
+    pinnedCount++;
+  }
   let snapChanged = [];
   if (UPDATE_HOVERS || pinned === null) {
-    fs.writeFileSync(HOVERS, JSON.stringify(liveHovers, null, 2) + '\n');
+    fs.writeFileSync(HOVERS, JSON.stringify(liveScoped, null, 2) + '\n');
   } else {
-    for (const f of Object.keys({ ...pinned, ...liveHovers })) {
-      const want = pinned[f] ?? {}, got = liveHovers[f] ?? {};
+    for (const f of Object.keys({ ...pinned, ...liveScoped })) {
+      const want = pinned[f] ?? {}, got = liveScoped[f] ?? {};
       for (const k of new Set([...Object.keys(want), ...Object.keys(got)])) {
         if ((want[k] ?? null) !== (got[k] ?? null)) snapChanged.push(`${f} ${k}: ${JSON.stringify(want[k] ?? null)} → ${JSON.stringify(got[k] ?? null)}`);
       }
@@ -525,9 +546,9 @@ if (RUN_HOVER) {
   prow('agree', tally.agree, green, tally.order ? `incl. ${tally.order} union-order` : '');
   prow('gaps', tally.gap, tally.gap ? yellow : green, tally.gap ? 'hover ≠ tsgo twin on a comparable type' : '');
   prow('rip-native', tally.native, dim, 'component / schema / reactive — twin uses React/zod, no oracle');
-  prow('pinned-only', tally.pinnedOnly, dim, 'no twin symbol — covered by the snapshot');
-  prow('snapshot', snapChanged.length, snapChanged.length ? red : green,
-    UPDATE_HOVERS || pinned === null ? 'updated' : (snapChanged.length ? 'changed vs hovers.json' : `${probeCount} pinned, unchanged`));
+  prow('pinned-only', tally.pinnedOnly, dim, 'no twin symbol — covered by hover-pins');
+  prow('expected', snapChanged.length, snapChanged.length ? red : green,
+    UPDATE_HOVERS || pinned === null ? 'updated' : (snapChanged.length ? 'changed vs hover-pins.json' : `${pinnedCount} pinned, unchanged`));
   prow('invariant', violations.length, violations.length ? red : green, violations.length ? 'initialized binding hovers `any`' : '');
 
   if (gaps.length) {
@@ -539,7 +560,7 @@ if (RUN_HOVER) {
     }
   }
   if (snapChanged.length) {
-    console.log(`\n    ${bold('Snapshot changes')} ${dim('(--update-hovers accepts them, in the same commit as the cause)')}`);
+    console.log(`\n    ${bold('Expected-hover changes')} ${dim('(--update-hovers re-pins them — verify correctness first)')}`);
     for (const c of snapChanged.slice(0, VERBOSE ? Infinity : 10)) console.log(`      ${red('✗')} ${dim(c)}`);
     if (snapChanged.length > 10 && !VERBOSE) console.log(`      ${dim(`… ${snapChanged.length - 10} more (--v for all)`)}`);
   }
@@ -573,6 +594,6 @@ if (RUN_MAIN) console.log('    ' + (fails === 0
   : `${totalApplicable} dimension checks: ${green(totalPass + ' passing')}, ${red(fails + ' failing')}`));
 if (hp) console.log('    ' + `${hp.probed} hover probes: `
   + (hp.gap === 0 && hp.snapChanged === 0 && hp.violations.length === 0
-    ? green('twin parity + snapshot clean')
-    : `${hp.gap ? yellow(hp.gap + ' twin gap' + (hp.gap === 1 ? '' : 's')) : green('0 twin gaps')}, ${hp.snapChanged ? red(hp.snapChanged + ' snapshot change' + (hp.snapChanged === 1 ? '' : 's')) : green('snapshot clean')}${hp.violations.length ? `, ${red(hp.violations.length + ' invariant hit' + (hp.violations.length === 1 ? '' : 's'))}` : ''}`));
+    ? green('twin parity + expected clean')
+    : `${hp.gap ? yellow(hp.gap + ' twin gap' + (hp.gap === 1 ? '' : 's')) : green('0 twin gaps')}, ${hp.snapChanged ? red(hp.snapChanged + ' expected change' + (hp.snapChanged === 1 ? '' : 's')) : green('expected clean')}${hp.violations.length ? `, ${red(hp.violations.length + ' invariant hit' + (hp.violations.length === 1 ? '' : 's'))}` : ''}`));
 console.log('');

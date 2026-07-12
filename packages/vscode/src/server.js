@@ -103,7 +103,7 @@ async function loadProjectConfigReader() {
       return (await import(candidate.href)).readProjectConfig;
     }
   }
-  return () => ({ strict: false, checkAll: false, exclude: [], _configDir: null });
+  return () => ({ strict: false, checkAll: false, noCheck: [], _configDir: null });
 }
 
 const connection = createConnection(ProposedFeatures.all);
@@ -959,7 +959,7 @@ connection.onInitialize(async (params) => {
 connection.onInitialized(async () => {
   if (clientSupportsWatchers) {
     connection.client.register(DidChangeWatchedFilesNotification.type, {
-      watchers: [{ globPattern: '**/*.rip' }, { globPattern: '**/tsconfig.json' }],
+      watchers: [{ globPattern: '**/*.rip' }, { globPattern: '**/tsconfig.json' }, { globPattern: '**/package.json' }],
     });
   }
   connection.console.log(
@@ -1127,6 +1127,9 @@ async function repullDiagnostics(uri) {
   const state = states.get(uri);
   const good = state?.lastGood;
   if (!good || !state.tsOpen || !tsgo) return;
+  // rip.noCheck: silenced here too — cross-file re-pulls must not
+  // resurrect a no-check doc's diagnostics after refresh cleared them.
+  if (isNoCheck(uri, state)) { connection.sendDiagnostics({ uri, diagnostics: [] }); return; }
   if (documents.get(uri)?.getText() !== good.source) return;
   let pulled;
   try {
@@ -1151,20 +1154,58 @@ function repullOpenDocuments(exceptUri = null) {
   }
 }
 
+// A rip.noCheck glob → anchored regex, matched against a project-root-
+// relative posix path. `**/` spans zero-or-more directories (so
+// `**/*.rip` matches a root file too), a trailing/standalone `**` spans
+// anything, `*` stays within one segment, `?` is one non-slash char.
+function globToRegex(glob) {
+  let re = '';
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i];
+    if (c === '*') {
+      if (glob[i + 1] === '*') {
+        if (glob[i + 2] === '/') { re += '(?:.*/)?'; i += 2; } // `**/` → zero+ dirs
+        else { re += '.*'; i += 1; }                           // `**`  → anything
+      } else { re += '[^/]*'; }                                // `*`   → one segment
+    } else if (c === '?') { re += '[^/]'; }
+    else if ('.+^${}()|[]\\'.includes(c)) { re += '\\' + c; }  // escape regex specials
+    else { re += c; }
+  }
+  return new RegExp(`^${re}$`);
+}
+
+// Does this document match its project's rip.noCheck? Globs resolve
+// relative to the config's directory (the project root, _configDir),
+// so `legacy/**` means legacy under THIS package, never a sibling's.
+function isNoCheck(uri, state) {
+  if (!state.noCheck?.length || !state.configDir || !uri.startsWith('file://')) return false;
+  let fsPath;
+  try { fsPath = fileURLToPath(uri); } catch { return false; }
+  let rel = path.relative(state.configDir, fsPath);
+  if (rel.startsWith('..')) return false; // outside the project boundary
+  rel = rel.split(path.sep).join('/');
+  return state.noCheck.some((g) => globToRegex(g).test(rel));
+}
+
 async function refresh(document) {
   ensureMirrorRoot(); // first materialization decides/creates the tree
   const state = stateOf(document.uri);
   const text = document.getText();
   const srcLineStarts = lineStartsOf(text);
 
-  // rip.strict (package.json#rip, nearest wins, no ancestor
-  // inheritance): presentation-only — surface the implicit-any family
-  // and drop the `!` on typed forwards/pins. Re-read each refresh
-  // (cheap under the keystroke debounce; always current).
+  // rip.strict / rip.noCheck (package.json#rip, nearest wins, no
+  // ancestor inheritance). Presentation-only: strict surfaces the
+  // implicit-any family and drops the `!` on typed forwards/pins;
+  // noCheck silences diagnostics for matched paths. Re-read each
+  // refresh — cheap, always current, and reactive to the package.json
+  // watch (onDidChangeWatchedFiles refreshes open docs on a config change).
   if (document.uri.startsWith('file://')) {
     try {
-      state.strict = readProjectConfig(path.dirname(fileURLToPath(document.uri))).strict;
-    } catch { state.strict = false; }
+      const cfg = readProjectConfig(path.dirname(fileURLToPath(document.uri)));
+      state.strict = cfg.strict;
+      state.noCheck = cfg.noCheck;
+      state.configDir = cfg._configDir;
+    } catch { state.strict = false; state.noCheck = []; state.configDir = null; }
   }
 
   let result;
@@ -1266,6 +1307,17 @@ async function refresh(document) {
   // before any subsequent hover, so a hover can never pair the new
   // mapping table with the previous virtual-doc text.
   state.lastGood = good;
+
+  // rip.noCheck: the file stays in the program — imports resolve,
+  // exported types flow to typed consumers — but its OWN diagnostics
+  // are silenced, so a partly-typed project quiets its untyped/legacy
+  // paths without dropping them from the type graph. Still re-pull
+  // dependents so a typed importer reflects this face.
+  if (isNoCheck(document.uri, state)) {
+    connection.sendDiagnostics({ uri: document.uri, diagnostics: [] });
+    repullOpenDocuments(document.uri);
+    return;
+  }
 
   const versionAtRequest = document.version;
   let pulled;
@@ -1399,6 +1451,7 @@ connection.onDidChangeWatchedFiles(async ({ changes }) => {
   if (!compile || !mirrorRoot) return;
   const forward = [];
   let configChanged = false;
+  let refreshAllForConfig = false;
   for (const change of changes) {
     if (!change.uri.startsWith('file://')) continue;
     let fsPath;
@@ -1412,6 +1465,16 @@ connection.onDidChangeWatchedFiles(async ({ changes }) => {
         configChanged = true;
         forward.push({ uri: change.uri, type: change.type }); // tsgo re-reads the extends chain
       }
+      continue;
+    }
+    if (path.basename(fsPath) === 'package.json') {
+      // rip.strict / rip.noCheck live here; a change re-governs how open
+      // docs present. package.json edits are rare, so refresh ALL open
+      // docs and let each re-resolve its own nearest config (resolution
+      // is per-doc, so this is correct in a monorepo — every doc lands on
+      // its own answer). Skip dependency churn: an install rewrites
+      // node_modules/**/package.json and must not recompile the world.
+      if (!fsPath.includes(`${path.sep}node_modules${path.sep}`)) refreshAllForConfig = true;
       continue;
     }
     if (!fsPath.endsWith('.rip')) continue;
@@ -1448,6 +1511,15 @@ connection.onDidChangeWatchedFiles(async ({ changes }) => {
     // first materialization generates from the current user config.
     writeGeneratedTsconfig();
     forward.push({ uri: 'file://' + path.join(mirrorRoot, 'tsconfig.json'), type: FileChangeType.Changed });
+  }
+  if (refreshAllForConfig) {
+    // A package.json#rip edit re-governs every open doc's presentation
+    // (strict/noCheck change the face itself, not just diagnostics), so
+    // a full refresh — not a re-pull — with no window reload.
+    await tsgoReady;
+    for (const doc of documents.all()) {
+      refresh(doc).catch((err) => connection.console.error(`[rip] config-change refresh failed: ${err.stack ?? err}`));
+    }
   }
   if (!forward.length) return;
   await tsgoReady;
