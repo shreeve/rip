@@ -107,6 +107,13 @@ const isBlock = (x) => isNode(x) && x[0] === 'block';
 // component references.
 const isHtmlTag = (name) => TEMPLATE_TAGS.has(String(name).split('#')[0]);
 const isComponentName = (name) => typeof name === 'string' && /^[A-Z][A-Za-z0-9]*[a-z][A-Za-z0-9]*$/.test(name);
+// A REAL comprehension node — the loop-spec list (a plain array of
+// ['for-…'] arrays) is a shape no user call constructs; a call of a
+// function NAMED comprehension must keep its call reading everywhere.
+const isComprehensionNode = (x) =>
+  isNode(x) && x[0] === 'comprehension' && x.length === 4 && Array.isArray(x[2]) &&
+  x[2].length > 0 && Array.isArray(x[2][0]) && String(x[2][0][0]).startsWith('for-');
+
 const STATEMENT_HEADS = new Set(['for-in', 'for-of', 'for-as', 'switch', 'try', 'throw', 'loop', 'loop-n', 'comprehension']);
 const isLoopNode = (x) => isNode(x) && (
   ((x[0] === 'for-in' || x[0] === 'for-of' || x[0] === 'for-as') && x.length === 6) ||
@@ -372,6 +379,19 @@ class Emitter {
     const id = stores.idOf(x);
     const kind = id !== null ? stores.node(id)?.semanticKind : null;
     return kind === 'readonly';
+  }
+
+  // The locked-head discriminator for LITERAL constructs: a node whose
+  // head spells a construct ('array', 'str', 'map', …) is the REAL
+  // construct only when its NodeStore row says so (the grammar rules
+  // annotate the semanticKind) or when it has no row at all (emitter-
+  // synthesized lowerings). A user call `array(1)` builds the same
+  // shape through the call rule — its row carries no such kind, so it
+  // falls through to call() and the name stays an ordinary binding.
+  lockedHead(node, kind) {
+    const id = this.stores.idOf(node);
+    if (id === null) return true;
+    return this.stores.node(id)?.semanticKind === kind;
   }
 
   // A MODULE import statement — not the dynamic-import CALL, whose
@@ -1590,7 +1610,7 @@ class Emitter {
         for (const el of n.slice(2)) walk(el);
         return;
       }
-      if (n[0] === 'comprehension') {
+      if (isComprehensionNode(n)) {
         walk(n[1]);
         for (const clause of n[2] ?? []) walk(clause[2]);
         for (const g of n[3] ?? []) walk(g);
@@ -2224,6 +2244,7 @@ class Emitter {
     // a plain loop emits. The plain loop carries a statement semicolon
     // everywhere EXCEPT as a function body's direct statement.
     'comprehension': (e, node, ind) => {
+      if (!isComprehensionNode(node)) return false;
       e.ind = ind;
       if (node === e.lastProgramStmt) {
         e.comprehension(node, ind);
@@ -2733,7 +2754,7 @@ class Emitter {
       const names = new Set(params);
       for (const n of sub.pushReactiveFrame(stmts, names)) names.add(n);
       sub.scopes.push(names);
-      if (isLoopNode(stmt) || h === 'comprehension') sub.statement(stmt, 0);
+      if (isLoopNode(stmt) || isComprehensionNode(stmt)) sub.statement(stmt, 0);
       else sub.implicitReturn(stmt, 0);
       bodyText = `{ ${sub.b.code} }`;
     } else {
@@ -3174,7 +3195,7 @@ class Emitter {
     let vars = null;
     if (h === 'loop-n') return ['it'];
     if (h === 'for-in' || h === 'for-of' || h === 'for-as') vars = node[1];
-    else if (h === 'comprehension') vars = node[2][0][1];
+    else if (isComprehensionNode(node)) vars = node[2][0][1];
     if (vars === null) return [];
     // A loop that binds NO variable has no coherent emission — the
     // var-less ranged spelling (`for [1...3]`) reaches here with an
@@ -3797,7 +3818,7 @@ class Emitter {
     if (!isNode(pair) || pair[0] !== ':') return null;
     const keyOk = typeof pair[1] === 'string' || (isNode(pair[1]) && pair[1][0] === 'dynamicKey');
     if (!keyOk) return null;
-    if (!isNode(pair[2]) || pair[2][0] !== 'comprehension') return null;
+    if (!isComprehensionNode(pair[2])) return null;
     if (pair[2][2][0][0] !== 'for-of') return null;
     return pair;
   }
@@ -3998,7 +4019,7 @@ class Emitter {
       }
       if (!isNode(n) || n[0] === '->' || n[0] === '=>' || isDefHead(n[0]) || n[0] === 'class') return;
       if (n[0] === 'return') { found = { kind: 'return', node: n }; return; }
-      const l = isLoopNode(n) || n[0] === 'comprehension' ? loops + 1 : loops;
+      const l = isLoopNode(n) || isComprehensionNode(n) ? loops + 1 : loops;
       const s = n[0] === 'switch' ? switches + 1 : switches;
       for (const el of n) walk(el, l, s);
     };
@@ -4669,7 +4690,7 @@ class Emitter {
       return;
     }
     const head = node[0];
-    if (head === 'str') return this.strTemplate(node);
+    if (head === 'str' && this.lockedHead(node, 'str')) return this.strTemplate(node);
     if (head === 'tagged-template' && node.length === 3) return this.taggedTemplate(node);
     if (head === 'here-regex') return this.heregex(node);
     if (isNode(head)) return this.call(node);
@@ -4683,13 +4704,13 @@ class Emitter {
     if ((head === '.' || head === '?.') && node.length === 3) return this.member(node);
     if ((head === '.{}' || head === '?.{}') && node.length >= 3) return this.pick(node);
     if (head === '[]' && node.length === 3) return this.index(node);
-    if (head === 'optindex' && node.length === 3) return this.optIndex(node);
-    if (head === 'optcall') return this.optCall(node);
+    if (head === 'optindex' && node.length === 3 && this.lockedHead(node, 'optindex')) return this.optIndex(node);
+    if (head === 'optcall' && this.lockedHead(node, 'optcall')) return this.optCall(node);
     if (isFunc(node)) return this.func(node);
     if (isUpdate(node)) return this.update(node);
     if (isTernary(node)) return this.ternary(node);
-    if (head === 'array') return this.array(node);
-    if (head === 'object') return this.object(node);
+    if (head === 'array' && this.lockedHead(node, 'array')) return this.array(node);
+    if (head === 'object' && this.lockedHead(node, 'object')) return this.object(node);
     if (isRange(node)) return this.range(node);
     if ((head === 'in' || head === 'of' || head === '!in' || head === '!of' || head === '!instanceof') && node.length === 3) return this.relation(node);
     if (head === 'instanceof' && node.length === 3) {
@@ -4707,14 +4728,14 @@ class Emitter {
     if (head === '%%' && node.length === 3) return this.modulo(node);
     if (head === '//=' && node.length === 3) return this.floorDivAssign(node);
     if (head === '=~' && node.length === 3) return this.matchOp(node);
-    if (head === 'map') return this.mapLiteral(node);
+    if (head === 'map' && this.lockedHead(node, 'map')) return this.mapLiteral(node);
     if (head === 'regex-index' && node.length === 4) {
       if (!(typeof node[2] === 'string' && node[2][0] === '/')) {
         throw this.positionedError(node, 'emitter: a two-part index is the regex-capture form (`text[/re/, n]`) — its key must be a regex literal');
       }
       return this.regexIndex(node, node[1], node[2], node[3]);
     }
-    if (head === 'symbol' && node.length === 2) {
+    if (head === 'symbol' && node.length === 2 && this.lockedHead(node, 'symbol')) {
       // Interned symbol: identity holds across realms and modules.
       return this.mark(node, '$self', () => this.b.emit(`Symbol.for(${JSON.stringify(node[1])})`));
     }
@@ -4722,11 +4743,11 @@ class Emitter {
       throw this.positionedError(node, `emitter: ${head} is a statement — its target is spelled twice (write + read), which has no single-expression form`);
     }
     if (head === '%%=' && node.length === 3) return this.moduloAssign(node);
-    if (head === 'comprehension') return this.comprehension(node, this.ind);
+    if (isComprehensionNode(node)) return this.comprehension(node, this.ind);
     if (head === 'do-iife' && node.length === 2) return this.doIife(node);
     if (head === 'cast' && node.length === 3) return this.cast(node);
     if (head === '?' && node.length === 2) return this.existence(node);
-    if (head === 'presence' && node.length === 2) return this.presence(node);
+    if (head === 'presence' && node.length === 2 && this.lockedHead(node, 'presence')) return this.presence(node);
     if (head === 'await' && node.length === 2) return this.awaitExpr(node);
     if (head === 'dammit!' && node.length === 2) return this.dammit(node);
     if ((head === 'yield' || head === 'yield-from') && node.length <= 2) return this.yieldExpr(node);
@@ -4812,7 +4833,7 @@ class Emitter {
       });
       return;
     }
-    if (isDefHead(head) || head === 'return' || head === 'program') {
+    if (isDefHead(head) || head === 'return' || (head === 'program' && this.lockedHead(node, 'program'))) {
       throw this.positionedError(node, `emitter: '${head}' is not supported in expression position`);
     }
     // Erased type statements never emit as expressions — every
@@ -8555,6 +8576,22 @@ class Emitter {
   static chainHeadSlot(x) {
     if ((x[0] === '.' || x[0] === '?.' || x[0] === '[]' || x[0] === 'optindex') && x.length === 3) return 1;
     if (x[0] === 'optcall') return 1;
+    return Emitter.chainHeadSlotRest(x);
+  }
+
+  // The 'optindex'/'optcall' heads are legal identifiers, so the
+  // static slot test alone can hijack a call of a function so named —
+  // the instance twin applies the locked-head discrimination and is
+  // what emission paths use; the static form remains for stores-free
+  // shape checks over emitter-synthesized trees.
+  chainHeadSlotOf(x) {
+    if ((x[0] === '.' || x[0] === '?.' || x[0] === '[]') && x.length === 3) return 1;
+    if (x[0] === 'optindex' && x.length === 3 && this.lockedHead(x, 'optindex')) return 1;
+    if (x[0] === 'optcall' && this.lockedHead(x, 'optcall')) return 1;
+    return Emitter.chainHeadSlotRest(x);
+  }
+
+  static chainHeadSlotRest(x) {
     // A node-headed node is a call (expr dispatches it to call());
     // dammit callees and `.new` constructor calls keep their inline
     // paths — never a spine frame (both re-spell the invocation).
@@ -8567,12 +8604,16 @@ class Emitter {
     return isNode(x) && Emitter.chainHeadSlot(x) !== null;
   }
 
+  isChainNodeOf(x) {
+    return isNode(x) && this.chainHeadSlotOf(x) !== null;
+  }
+
   chain(node) {
     const spine = [node];
     while (true) {
       const cur = spine[spine.length - 1];
-      const child = cur[Emitter.chainHeadSlot(cur)];
-      if (!Emitter.isChainNode(child)) break;
+      const child = cur[this.chainHeadSlotOf(cur)];
+      if (!this.isChainNodeOf(child)) break;
       spine.push(child);
     }
     const frames = [];
@@ -8585,9 +8626,16 @@ class Emitter {
       const n = spine[j];
       const head = n[0];
       const isInner = j === spine.length - 1;
-      const f = { role: false };
+      // The frame KIND applies the locked-head rule once — 'optindex'
+      // and 'optcall' are legal identifiers, so a call of a function
+      // so named classifies as a plain call, never as the construct.
+      const fkind = (head === '.' || head === '?.') && n.length === 3 ? 'member'
+        : (head === '[]' && n.length === 3) || (head === 'optindex' && n.length === 3 && this.lockedHead(n, 'optindex')) ? 'index'
+        : head === 'optcall' && this.lockedHead(n, 'optcall') ? 'optcall'
+        : 'call';
+      const f = { role: false, kind: fkind };
       frames.push(f);
-      if (head === '.' || head === '?.') {
+      if (fkind === 'member') {
         // `super.prop` has no home outside a class method — reject
         // loudly (emitted blindly it is invalid JS at top level).
         if (n[1] === 'super' && !this.methodName) {
@@ -8601,7 +8649,7 @@ class Emitter {
         this.inTarget = false;
         if (isInner) this.head(n, 'object', n[1]);
         else f.role = this.beginMark(n, 'object');
-      } else if (head === '[]' || head === 'optindex') {
+      } else if (fkind === 'index') {
         // isWrite reads the state BEFORE this accessor clears it;
         // the optional spelling latches the deopt state at entry
         // (emitKey toggles deopt only inside its own save/restore).
@@ -8612,7 +8660,7 @@ class Emitter {
         this.inTarget = false;
         if (isInner) this.head(n, 'object', n[1]);
         else f.role = this.beginMark(n, 'object');
-      } else if (head === 'optcall') {
+      } else if (fkind === 'optcall') {
         f.self = this.beginMark(n, '$self');
         if (isInner) this.head(n, 'callee', n[1]);
         else f.role = this.beginMark(n, 'callee');
@@ -8629,7 +8677,7 @@ class Emitter {
       const head = n[0];
       const f = frames[j];
       this.endMark(f.role);
-      if (head === '.' || head === '?.') {
+      if (f.kind === 'member') {
         this.inTarget = f.savedTarget;
         const op = this.deopt && head === '?.' ? '.' : head;
         // A string-literal PROPERTY (`@"a-b"` — a string-named
@@ -8647,10 +8695,10 @@ class Emitter {
         if (n[1] === 'this' && typeof n[2] === 'string' && this.memberIsReactive(n[2])) {
           this.b.emit('.value');
         }
-      } else if (head === '[]' || head === 'optindex') {
+      } else if (f.kind === 'index') {
         this.indexTail(n, f.opt, f.isWrite);
         this.inTarget = f.savedTarget;
-      } else if (head === 'optcall') {
+      } else if (f.kind === 'optcall') {
         this.b.emit('?.');
         this.mark(n, 'args', () => {
           this.b.emit('(');

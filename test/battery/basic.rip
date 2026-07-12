@@ -457,3 +457,60 @@ test 'prefix and suffix construction are the same call', '''
   b = P.new(2)
   [a.v, b.v, a.constructor is b.constructor]
   ''', [1, 2, true]
+
+# ==============================================================================
+# Construct names stay ordinary bindings
+# ==============================================================================
+# Internal construct heads are spellable identifiers; the locked-head
+# rule (NodeStore semanticKind) keeps a user function so named callable
+# — a call can never be hijacked into the construct's reading.
+
+test 'a function named array is callable', '''
+  array = (x) -> x + 1
+  array(1)
+  ''', 2
+
+test 'a function named object is callable', '''
+  object = (x) -> x + 1
+  object(2)
+  ''', 3
+
+test 'a function named str is callable', '''
+  str = (x) -> x + 1
+  str(3)
+  ''', 4
+
+test 'a function named symbol is callable', '''
+  symbol = (x) -> x + 1
+  symbol(5)
+  ''', 6
+
+test 'a function named map is callable (paren and implicit forms)', '''
+  map = (f) -> f(21)
+  [map((x) -> x * 2), map (x) -> x * 2]
+  ''', [42, 42]
+
+test 'a function named comprehension is callable', '''
+  comprehension = (x) -> x + 1
+  comprehension(7)
+  ''', 8
+
+test 'a function named presence is callable', '''
+  presence = (x) -> x + 1
+  presence(10)
+  ''', 11
+
+test 'a function named program is callable', '''
+  program = (x) -> x + 1
+  program(11)
+  ''', 12
+
+test 'a function named optcall is callable', '''
+  optcall = (x) -> x + 1
+  optcall(8)
+  ''', 9
+
+test 'a function named optindex is callable', '''
+  optindex = (x) -> x + 1
+  optindex(9)
+  ''', 10
