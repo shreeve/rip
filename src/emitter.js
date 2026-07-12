@@ -25,7 +25,7 @@ import { descriptorSegments, paramNamesOf, splitTopLevelByComma } from './schema
 import { buildSchemaTypeStory, isModuleShaped, SchemaTypeError } from './schema-types.js';
 import { Parser } from './parser.js';
 import { applyInsertionPass, implicitBlocks, implicitObjects, implicitCalls, tagPostfixConditionals, rewriteTypes, isIdentifierName } from './lexer.js';
-import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams } from './typetext.js';
+import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader } from './typetext.js';
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute } from './dom-vocab.js';
 import {
   COMPONENT_HOOKS, COMPONENT_RUNTIME_FIELDS, componentTypeInfo, memberDeclareSegments, isDeclarableMember,
@@ -1344,7 +1344,11 @@ class Emitter {
     const sigs = this.pendingSigs.get(node);
     if (!sigs) return;
     for (const sig of sigs) {
-      const params = this.tsRendered(sig, () => renderParams(sig[2]));
+      // The overload row reads the SAME optionalMarker role the face's
+      // main param path and dts.js read — without it, `b?: string` in a
+      // signature printed as `b: string` here while the `.d.ts` kept the
+      // `?`, so the editor and the shipped types disagreed on the API.
+      const params = this.tsRendered(sig, () => renderParams(sig[2], optionalReader(this.stores)));
       // A directive above the signature follows it to its overload
       // row — the line its diagnostics land on.
       const directives = this.tsDirectiveMap.get(sig);
