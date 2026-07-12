@@ -514,3 +514,10 @@ test 'a function named optindex is callable', '''
   optindex = (x) -> x + 1
   optindex(9)
   ''', 10
+
+# `#` comments run to end of line — there is no inline block-comment
+# form, so a comment can never sit INSIDE a compound key; everything
+# after the `#` is comment, and the brace correctly reads unclosed.
+fail 'a comment cannot interrupt a compound key', '''
+  o = { foo-###x###bar: 7 }
+  ''', "unclosed '{'"
