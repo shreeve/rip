@@ -109,11 +109,11 @@ Why nothing caught this before: the type-audit runner copies only a `tsconfig.js
 
 **Reproduced** — `greet = (name) -> name.toUpperCase()` → face `function(name){…}`; `tsc --strict` on the face reports `TS7006: Parameter 'name' implicitly has an 'any' type`, but the v4 editor dropped it: [server.js](../../packages/vscode/src/server.js) filtered on `SUPPRESSED_TS_CODES` (the set lives in [translate.js](../../packages/vscode/src/translate.js)). That guard now reads `if (!good.strict && SUPPRESSED_TS_CODES.has(d.code))` — the strict gate is the fix.
 
-**Why** — rip allows unannotated code (gradual typing); the family would fire on every unannotated binding, which is legal rip, so it's suppressed as a class (D40).
+**Why** — rip allows unannotated code (gradual typing); the family would fire on every unannotated binding, which is legal rip, so it is suppressed as a class.
 
 **vs v3** — v3's suppression was conditional/surgical (`shouldSuppressConditional` — only specific codes in specific structural cases: DTS-header collisions, `.rip`/`@rip-lang` resolution, test globals). Implicit-any was NOT blanket-suppressed: a project opted into `noImplicitAny` via `package.json#rip.strict` and GOT the enforcement. v4 forces `noImplicitAny` on (tsgo's strict default) but unconditionally hides its diagnostics — removing that control.
 
-**Root** — this and the `!`/use-before-assign suppression below both descend from one D39 principle — *"annotations add checking, never noise on legal patterns"* — applied with no strict-project opt-in (the plan never models a `rip.strict`/`checkAll` equivalent; searched, absent). A strictly-typed rip project is not a persona the plan's diagnostic posture accounts for. Making the posture strictness-gated (as v3 was) closes both at once.
+**Root** — this and the `!`/use-before-assign suppression below both descend from one principle — *annotations add checking, never noise on legal patterns* — originally applied with no strict-project opt-in at all. A strictly-typed rip project was simply not a persona the diagnostic posture accounted for. Making the posture strictness-gated (as v3 was) closes both at once, which is the fix that landed: see #1's status.
 
 ### 2. Use-before-assign hidden on annotated forwards
 
@@ -128,7 +128,7 @@ The emitter half alone was never enough: dropping the `!` only means TS *could* 
 
 **Reproduced** — `y: number` / `console.log y` / `y = 5` → v4 face `let y!: number; console.log(y); y = 5;` passes `tsc --noEmit --strict` clean; the same face with the `!` removed (`let y: number`) errors `TS2454: Variable 'y' is used before being assigned` — so the `!` is what hides it.
 
-**Why** — rip's hoist makes read-before-assign legal (yields `undefined`); annotating opts the name into TS's definite-assignment analysis, which flags patterns that are "legal Rip." Per D39 the `!` is added so annotations *"add checking, never noise on legal patterns"* — the plan records the cost explicitly: *"the assertion also hides genuine use-before-assign mistakes — consistent with Rip's permissive model."* Type-level twin of the runtime no-TDZ behavior (a plain-`=` read before assignment yields `undefined`, not a `ReferenceError`; see the `=` hoisting note below), and shares the `Root` above.
+**Why** — rip's hoist makes read-before-assign legal (yields `undefined`); annotating opts the name into TS's definite-assignment analysis, which flags patterns that are "legal Rip." The `!` is added under the governing principle that annotations *add checking, never noise on legal patterns* — with the cost accepted explicitly at the time: the assertion also hides genuine use-before-assign mistakes, consistent with rip's permissive model. Type-level twin of the runtime no-TDZ behavior (a plain-`=` read before assignment yields `undefined`, not a `ReferenceError`; see the `=` hoisting note below), and shares the `Root` above.
 
 **vs v3** — v3 catches it: on the same code v3's `rip check` (strict+checkAll) reports `TS2454` at both read sites (v3's shadow emits a plain `let y`, no assertion). v4 hides it unconditionally.
 
@@ -164,7 +164,7 @@ For `type X = typeof y` (`y` unannotated), the face reads `typeof y` as `undefin
 
 **Reproduced** — [02-aliases.rip](fixtures/02-aliases.rip): `defaults = {theme:'dark',lang:'en'}` / `type Defaults = typeof defaults` / `prefs: Defaults = {…}` → the face fails `tsc --noEmit --strict` with `TS2322: … not assignable to type 'undefined'`; the v4 editor squiggles it.
 
-**Why** — the face is byte-equal to shipped JS after type-stripping (D37/D38), so it mirrors the JS hoist-split — the `type Defaults` line lands above the assignment, so `typeof` reads the uninitialized `let`. Same root as write-only-`any` (#9): the hoist splits declaration from initialization.
+**Why** — the face is byte-equal to shipped JS after type-stripping, so it mirrors the JS hoist-split — the `type Defaults` line lands above the assignment, so `typeof` reads the uninitialized `let`. Same root as write-only-`any` (#9): the hoist splits declaration from initialization.
 
 **vs v3** — v3's type-checking shadow is NOT strip-gated, so it declares the `typeof`'d variable in-place (`let defaults = {…}`, verified via `rip --shadow`) → `typeof` resolves to the object type; `rip check` is clean (EXIT 0). v3 does this selectively — a plain object assignment without a `typeof` still hoist-splits in v3's shadow.
 
@@ -172,11 +172,11 @@ For `type X = typeof y` (`y` unannotated), the face reads `typeof y` as `undefin
 
 A `# @ts-expect-error` guarding a statement whose face emits as MORE THAN ONE line — any arrow/function assignment (`f = (x) -> …`, `x: T = (a) -> …`, an arrow inside a call like `.reduce`) — is silently dropped from the face. The directive stops working, so a real error the author explicitly acknowledged leaks into the editor. Single-line statements keep their directive; the escape hatch just fails on the multi-line class.
 
-**Status.** ✅ **Verified · [driven]** (2026-07-12). Directives always place above the statement head (D47 probe retired), re-anchoring over inlined forwards. The audit's `directives` dimension — the face carries every `# @ts-expect-error` — is **12/12**, so the multi-line drop this finding recorded no longer happens. Caveat recorded below still holds: `directives` and `verdict` both count this one event, so they are not independent of each other.
+**Status.** ✅ **Verified · [driven]** (2026-07-12). Directives always place above the statement head (the multi-line probe is retired), re-anchoring over inlined forwards. The audit's `directives` dimension — the face carries every `# @ts-expect-error` — is **12/12**, so the multi-line drop this finding recorded no longer happens. Caveat recorded below still holds: `directives` and `verdict` both count this one event, so they are not independent of each other.
 
 **Reproduced** — [02-aliases.rip](fixtures/02-aliases.rip): `# @ts-expect-error` over `badSorter: Comparator = (a, b) -> 'nope'`. The face emits `badSorter = function(a, b){ return "nope"; };` (three lines) with **no** directive above it (`bin/rip --ts` drops it: src 5 → face 4), and the suppressed error then surfaces in the editor verdict: `62:0 [TS2322] Type '(a: number, b: number) => string' is not assignable to type 'Comparator'`. Minimal isolation: a `# @ts-expect-error` over a one-line arrow assign `b = (x) -> x.length` is dropped; over a value assign `a = 'oops'` it is kept — and both `a` and `b` are hoisted identically (`let a, b;`), so it is the multi-line emission, not the hoist, that drops it. (01-basic loses 3 the same way: `badAllIds`, `implicitAny`, one more — all arrow-bearing.)
 
-**Why (code)** — [emitter.js](../../src/emitter.js) `withTsDirectives` — a deliberate "place-or-decline" rule (D47): the statement emits behind a checkpoint, and `if (this.b.multiLineSince(cp)) return` declines the directive on any multi-line emission, reasoning that a directive governs only its immediate next line and a multi-line statement may carry its error on an inner line. That single-vs-multi-line test is a PROXY for "can the directive govern the error," and it over-declines the common case where the error lands on the head line (an arrow assigned to a hoisted typed binding — the mismatch reports on `x = function(…){`), which the directive could govern.
+**Why (code)** — [emitter.js](../../src/emitter.js) `withTsDirectives` — a deliberate "place-or-decline" rule: the statement emits behind a checkpoint, and `if (this.b.multiLineSince(cp)) return` declines the directive on any multi-line emission, reasoning that a directive governs only its immediate next line and a multi-line statement may carry its error on an inner line. That single-vs-multi-line test is a PROXY for "can the directive govern the error," and it over-declines the common case where the error lands on the head line (an arrow assigned to a hoisted typed binding — the mismatch reports on `x = function(…){`), which the directive could govern.
 
 **vs v3** — v3 hoists `badSorter` identically and emits the same multi-line `function`, but KEEPS the directive above the assignment (verified via `rip --shadow`), and `bin/rip check test/types` → EXIT 0 with no output (no leak). So v3 governs the multi-line case; v4's proxy declines it. Because the runner's `directives` and `verdict` dimensions both count this one event, they are not independent evidence of it.
 
@@ -200,7 +200,7 @@ v4 offers auto-import candidates only from the ACTIVE PROGRAM (open files + tran
 
 **Why (code)** — the generated tsconfig's `include` is `['**/*.ts']` rooted at the mirror closure ([server.js](../../packages/vscode/src/server.js), where the generated tsconfig is built); the candidate set is exactly the tsgo program.
 
-**vs v3** — v3's in-process LanguageService rooted its project at the whole workspace (tsconfig `include` globbed all sources), so every workspace file was a candidate from cold. The plan files v4's behavior as a D50 "scope note," which undersells it: for this feature it's a functional regression, not a caveat.
+**vs v3** — v3's in-process LanguageService rooted its project at the whole workspace (tsconfig `include` globbed all sources), so every workspace file was a candidate from cold. This behavior was originally filed as a "scope note," which undersells it: for this feature it is a functional regression, not a caveat.
 
 ### 9. Write-only unannotated locals hover any
 
@@ -254,7 +254,7 @@ Unestablished, both session-shaped: that silencing applies **reactively** to an 
 
 **Status.** ✅ **Addressed · [driven]** (2026-07-12). The declare-in-place fix this note proposed shipped as the evolving-`let` tiers (+ follow-ups). #4, #5 and #9 all close through it and are now each verified above; the excess-property case rides the same mechanism (12-cast passes `verdict` and `twin`).
 
-*Not a gap — a note on the shared root of findings #4, #5, and #9 (plus one unnumbered instance), and one option, for the owner to weigh. rip's type philosophy is permissive by design (D17/D39); this is not an argument against that. These regressions hold regardless of it.*
+*Not a gap — a note on the shared root of findings #4, #5, and #9 (plus one unnumbered instance), and one option, for the owner to weigh. rip's type philosophy is permissive by design; this is not an argument against that. These regressions hold regardless of it.*
 
 **The root.** Hoisting splits a plain `=` binding's declaration from its value: `x = 1` → `let x; … x = 1`. Four regressions trace to exactly that split — and it cuts *both* ways, so it is not simply "more permissive":
 - **#4 reassignment not caught** (under-check) — `total` inferred number, `total = 'oops'` not flagged; the evolving `let` never pins the type.
