@@ -343,3 +343,51 @@ test 'computed with postfix ternary using nullable object', '''
   after = a.dest.value
   before + "," + after
 ''', '/auth,/bookings'
+
+code 'computed postfix ternary compiles to JS ternary', '''
+  export Foo = component
+    user := null
+    href ~= "/b" if user else "/a"
+    render
+      div "hello"
+  ''', '''
+  export const Foo = class extends __Component {
+    _init(props) {
+      this.user = __state(null);
+      this.href = __computed(() => (this.user.value ? "/b" : "/a"));
+    }
+    _create() {
+      this._el0 = document.createElement('div');
+      this._el0.setAttribute('data-part', 'Foo');
+      this._t0 = document.createTextNode("hello");
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+  };
+  '''
+
+code 'render block with identifier property value compiles to reactive setAttribute', '''
+  export Bar = component
+    user := null
+    href ~= "/b" if user else "/a"
+    render
+      a href: href
+        "click"
+  ''', '''
+  export const Bar = class extends __Component {
+    _init(props) {
+      this.user = __state(null);
+      this.href = __computed(() => (this.user.value ? "/b" : "/a"));
+    }
+    _create() {
+      this._el0 = document.createElement('a');
+      this._el0.setAttribute('data-part', 'Bar');
+      this._t0 = document.createTextNode("click");
+      this._el0.appendChild(this._t0);
+      return this._el0;
+    }
+    _setup() {
+      __effect(() => { this._el0.setAttribute('href', this.href.value); });
+    }
+  };
+  '''
