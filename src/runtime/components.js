@@ -376,8 +376,19 @@ function __transition(el, name, dir, done) {
     requestAnimationFrame(() => {
       cl.remove(from);
       cl.add(to);
-      const end = () => { cl.remove(active, to); if (done) done(); };
-      el.addEventListener('transitionend', end, { once: true });
+      // Only THIS element's own transitionend completes the transition:
+      // a `transitionend` bubbling up from a descendant must not finish
+      // (or, with { once }, prematurely consume) the parent's animation.
+      const end = (e) => {
+        // Skip only a bubbled event whose target is a DIFFERENT element
+        // (a descendant). A direct dispatch on this element (target ===
+        // el, or an event with no target) completes the transition.
+        if (e && e.target && e.target !== el) return;
+        el.removeEventListener('transitionend', end);
+        cl.remove(active, to);
+        if (done) done();
+      };
+      el.addEventListener('transitionend', end);
     });
   });
 }
@@ -673,6 +684,14 @@ class __Component {
         'were disposed on unmount; construct a new instance',
       );
     }
+    // A second live mount would overwrite _root and strand the first
+    // tree (unmount would then only tear down the second). Reject it.
+    if (this._mounted) {
+      throw new Error(
+        `${this.constructor.name || 'component'}: already mounted — unmount it before mounting again, ` +
+        'or construct a new instance',
+      );
+    }
     if (typeof target === 'string') target = document.querySelector(target);
     this._target = target;
     // _create / _setup / hooks run with this component current on
@@ -689,7 +708,14 @@ class __Component {
       if (this.beforeMount) this.beforeMount();
       if (this._setup) this._setup();
       if (this.mounted) this.mounted();
+      this._mounted = true;
     } catch (error) {
+      // The mount failed partway: effects created before the throw are
+      // live in the owner frame with nothing to ever unmount them.
+      // Dispose the frame and mark the instance inert (a failed mount
+      // is like a failed _init — the instance is not reusable).
+      try { this._frame.dispose(); } catch { /* dispose is best-effort */ }
+      this._unmounted = true;
       __handleComponentError(error, this);
     } finally {
       __popOwner(prevO);

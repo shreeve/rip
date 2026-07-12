@@ -171,12 +171,19 @@ function __computed(fn) {
   const subscribers = new Set();
   let locked = false;
   let dead = false;
+  // Set while fn() is running; if a dependency invalidates the computed
+  // DURING its own computation, the freshly-cached value is already
+  // stale, so the getter stays dirty and recomputes on the next read.
+  let computing = false;
+  let invalidatedDuringCompute = false;
 
   const computed = {
     dependencies: new Set(),
 
     markDirty() {
-      if (dead || locked || dirty) return;
+      if (dead || locked) return;
+      if (computing) { invalidatedDuringCompute = true; return; }
+      if (dirty) return;
       dirty = true;
       for (const sub of subscribers) {
         if (sub.markDirty) sub.markDirty();
@@ -195,8 +202,12 @@ function __computed(fn) {
         computed.dependencies.clear();
         const prev = __currentEffect;
         __currentEffect = computed;
-        try { value = fn(); } finally { __currentEffect = prev; }
-        dirty = false;
+        computing = true;
+        invalidatedDuringCompute = false;
+        try { value = fn(); } finally { __currentEffect = prev; computing = false; }
+        // A dependency changed while fn() ran: the cached value reflects
+        // pre-change inputs, so stay dirty and recompute next read.
+        dirty = invalidatedDuringCompute;
       }
       return value;
     },
