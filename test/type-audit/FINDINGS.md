@@ -19,7 +19,7 @@ Each finding's body is the original audit snapshot (hence present-tense, even wh
 
 **Statuses** — `✅ Verified` · `🟡 Fix landed, unverified` (the code is in; nobody has watched it work) · `⬜ Open` (no fix).
 
-> **Driven 2026-07-12** against this code: `bun run test:all` (5258 pass / 0 fail, with `RIP_EXTENDED=1 RIP_REQUIRE_TSC=1` and a real tsc) and `bun run type-audit --all` (60/60 dimensions, 335/335 hover probes). Seven findings settle. **#1 does not** — see its status: no harness in this repo exercises it.
+> **Driven 2026-07-12** against this code: `bun run test:all` (5261 pass / 0 fail, with `RIP_EXTENDED=1 RIP_REQUIRE_TSC=1` and a real tsc), `bun run type-audit --all` (60/60 dimensions, 335/335 hover probes), and `test/toolchain/strict-modes.test.js` — a two-mode gate written for #1, which was found to be exercised by nothing at all. **Nine findings verify.** Four remain: #10 (rip-native hovers, no oracle), #11 and #12 (no harness coverage), #8 (open, no fix).
 
 ## Summary
 
@@ -29,8 +29,8 @@ Each finding's body is the original audit snapshot (hence present-tense, even wh
 | --- | --- | --- | --- | --- |
 | [C1](#c1-optional-marker-rejected) | Optional `?` marker rejected | Compiler blocker | ✅ Verified · [driven] | — |
 | [C2](#c2-method-shorthand-in-type-body-rejected) | Method-shorthand in type body rejected | Compiler blocker | ✅ Verified · [driven] | — |
-| [1](#1-implicit-any-suppressed-with-no-opt-out) | Implicit-any suppressed, no opt-out | Silent safety hole | 🟡 Fix landed, **untested by anything** | **editor** — or a new strict-configured probe |
-| [2](#2-use-before-assign-hidden-on-annotated-forwards) | Use-before-assign hidden by `!` | Silent safety hole | 🟡 Emitter half [driven]; diagnostic half unverified | **editor** — the `TS2454` surfacing |
+| [1](#1-implicit-any-suppressed-with-no-opt-out) | Implicit-any suppressed, no opt-out | Silent safety hole | ✅ Verified · [driven] | — |
+| [2](#2-use-before-assign-hidden-on-annotated-forwards) | Use-before-assign hidden by `!` | Silent safety hole | ✅ Verified · [driven] | — |
 | [3](#3-reactive-binding-annotations-not-enforced) | Reactive annotations not enforced | Silent safety hole | ✅ Verified · [driven] | — |
 | [4](#4-evolving-let-reassignment-not-caught) | Evolving-`let` reassignment not caught | Silent safety hole | ✅ Verified · [driven] | — |
 | [5](#5-typeof-on-an-unannotated-value-resolves-to-undefined) | `typeof` unannotated → `undefined` | Loud correctness | ✅ Verified · [driven] | — |
@@ -91,13 +91,21 @@ $ bin/rip --ts test/type-audit/fixtures/09-components.rip
 
 v4 is behind v3 here — consequences of the tsgo/LSP broker and the strip-gated face replacing v3's in-process LanguageService and its free-form type-checking shadow. **Ordered most-severe first:** silent, no-opt-out safety holes a strict project can't recover (1–4) → loud correctness breaks on valid typed code (5–6) → missing/degraded capabilities (7–8) → hover DX degradations (9–10).
 
-> The *gaps* below were driven against rip-v4. The **fix statuses** were re-driven against this code on 2026-07-12: #3, #4, #5, #6 and #9 verify; #2 verifies only at the emitter; **#1 remains untested by any harness in this repo** (nothing configures `rip.strict`); #10 needs an editor.
+> The *gaps* below were driven against rip-v4. The **fix statuses** were re-driven against this code on 2026-07-12: #1–#6 and #9 all verify. #10 still needs an editor — reactive hovers are rip-native, so the twin oracle cannot judge them.
 
 ### 1. Implicit-any suppressed with no opt-out
 
 v4 drops the entire implicit-any diagnostic family (`TS7005`–`7053`) for ALL code, with no config to re-enable it. A project that wants strict `noImplicitAny` enforcement cannot get it: an unannotated function parameter is silently `any` and its misuse goes unchecked (any-propagation). Real type errors (`TS2322`/`2339`/`2345`) are unaffected — only the missing-annotation family is hidden.
 
-**Status.** 🟡 **Fix landed — but untested by anything in this repo.** The fix is visibly in the source: the guard now reads `if (!good.strict && SUPPRESSED_TS_CODES.has(d.code))`, so `rip.strict` gates the implicit-any suppression. **No harness exercises it.** The type-audit runner copies only a `tsconfig.json` into its workspace and never writes a `package.json`, so `rip.strict` is always false there and the gate never fires; and no test file in the repo so much as references `SUPPRESSED_TS_CODES`. A green audit says nothing about this finding — it runs in precisely the mode where the old suppression is still active. Settle it in a live session, or by adding a strict-configured server probe.
+**Status.** ✅ **Verified · [driven]** (2026-07-12) — by `test/toolchain/strict-modes.test.js`, written for this finding.
+
+The claim is differential — *suppressed by default, surfaced under `rip.strict`* — so no single-mode run can express it. The gate drives the **real editor server** over LSP against a workspace whose `package.json` carries the config verbatim (the server reads it from disk via `readProjectConfig`), once in each mode:
+
+- **Default** — zero diagnostics. Unannotated code is legal rip, and `TS7006` never fires. This half matters as much as the other: a regression that put implicit-any noise on unannotated bindings would break the permissive contract, and a strict-only gate would be blind to it.
+- **`rip.strict: true`** — `TS7006: Parameter 'name' implicitly has an 'any' type` fires, mapped back to the `.rip` source at **1:9**, on the `name` parameter itself.
+- **The delta is additive** — every code visible by default is still visible under strict, and the added set is non-empty. An inert flag (which is exactly what this finding was, unnoticed) now fails the gate.
+
+Why nothing caught this before: the type-audit runner copies only a `tsconfig.json` into its workspace and **never writes a `package.json`**, so `rip.strict` was always false there and the gate never fired — and no other test in the repo referenced `SUPPRESSED_TS_CODES`. The audit ran green in precisely the mode where the old suppression is still active.
 
 **Reproduced** — `greet = (name) -> name.toUpperCase()` → face `function(name){…}`; `tsc --strict` on the face reports `TS7006: Parameter 'name' implicitly has an 'any' type`, but the v4 editor dropped it: [server.js](../../packages/vscode/src/server.js) filtered on `SUPPRESSED_TS_CODES` (the set lives in [translate.js](../../packages/vscode/src/translate.js)). That guard now reads `if (!good.strict && SUPPRESSED_TS_CODES.has(d.code))` — the strict gate is the fix.
 
@@ -111,7 +119,12 @@ v4 drops the entire implicit-any diagnostic family (`TS7005`–`7053`) for ALL c
 
 A bare typed forward (`y: number`) emits `let y!: number` — TypeScript's definite-assignment assertion — which suppresses `TS2454` (variable used before being assigned). A strict project that annotates *and* wants use-before-assign caught cannot get it; no opt-out.
 
-**Status.** 🟡 **Emitter half [driven]; diagnostic half unverified.** `tiers.test.js` drives the emitter directly and passes: under `strict: true` a typed forward emits `let y: number;` — the `!` is gone, so TypeScript's definite-assignment analysis is no longer suppressed. What remains unverified is the other half — that `TS2454` then actually *surfaces* to the user. That runs through the same `rip.strict` path as #1, which no harness configures.
+**Status.** ✅ **Verified · [driven]** (2026-07-12) — both halves, by two independent gates.
+
+- **Emitter** — `tiers.test.js`: under `strict: true` a typed forward emits `let y: number;`, the `!` gone, so TypeScript's definite-assignment analysis is no longer suppressed. The JS is unchanged (presentation-only).
+- **Diagnostic** — `strict-modes.test.js`: the real server publishes `TS2454: Variable 'y' is used before being assigned`, mapped back to the `.rip` source at **5:12**, on the read site. Under default it stays hidden, as designed.
+
+The emitter half alone was never enough: dropping the `!` only means TS *could* check it. This pins that the diagnostic actually reaches the user, at the right place.
 
 **Reproduced** — `y: number` / `console.log y` / `y = 5` → v4 face `let y!: number; console.log(y); y = 5;` passes `tsc --noEmit --strict` clean; the same face with the `!` removed (`let y: number`) errors `TS2454: Variable 'y' is used before being assigned` — so the `!` is what hides it.
 
