@@ -17,7 +17,9 @@ Each finding's body is the original audit snapshot (hence present-tense, even wh
 
 **What the runner does and does not reach.** It drives the real server, so hovers (twin-oracle checked, with 6 residual pins in `hover-pins.json`) and diagnostics (dim 3) are genuinely instrumented — a green run there is real evidence, not theater. But it issues **no completion request** and performs **no `package.json` edit or `didChangeWatchedFiles` notification**, so **#8, #11, and #12 have no harness coverage at all** and can only be established `[editor]`.
 
-**Statuses** — `🟡 Fix landed, unverified` (the code is in; nobody has watched it work) · `⬜ Open` (no fix) · `✅ Verified`. **Nothing is `✅`.**
+**Statuses** — `✅ Verified` · `🟡 Fix landed, unverified` (the code is in; nobody has watched it work) · `⬜ Open` (no fix).
+
+> **Driven 2026-07-12** against this code: `bun run test:all` (5258 pass / 0 fail, with `RIP_EXTENDED=1 RIP_REQUIRE_TSC=1` and a real tsc) and `bun run type-audit --all` (60/60 dimensions, 335/335 hover probes). Seven findings settle. **#1 does not** — see its status: no harness in this repo exercises it.
 
 ## Summary
 
@@ -25,17 +27,17 @@ Each finding's body is the original audit snapshot (hence present-tense, even wh
 
 | # | Finding | Class | Status | Settles it |
 | --- | --- | --- | --- | --- |
-| [C1](#c1-optional-marker-rejected) | Optional `?` marker rejected | Compiler blocker | 🟡 Fix landed, unverified | driven — compile/emit |
-| [C2](#c2-method-shorthand-in-type-body-rejected) | Method-shorthand in type body rejected | Compiler blocker | 🟡 Fix landed, unverified | driven — compile/emit |
-| [1](#1-implicit-any-suppressed-with-no-opt-out) | Implicit-any suppressed, no opt-out | Silent safety hole | 🟡 Fix landed, unverified | driven — verdict (dim 3) |
-| [2](#2-use-before-assign-hidden-on-annotated-forwards) | Use-before-assign hidden by `!` | Silent safety hole | 🟡 Fix landed, unverified | driven — verdict (dim 3) |
-| [3](#3-reactive-binding-annotations-not-enforced) | Reactive annotations not enforced | Silent safety hole | 🟡 Fix landed, unverified | driven — verdict (dim 3) |
-| [4](#4-evolving-let-reassignment-not-caught) | Evolving-`let` reassignment not caught | Silent safety hole | 🟡 Fix landed, unverified | driven — verdict (dim 3) |
-| [5](#5-typeof-on-an-unannotated-value-resolves-to-undefined) | `typeof` unannotated → `undefined` | Loud correctness | 🟡 Fix landed, unverified | driven — verdict (dim 3) |
-| [6](#6-ts-expect-error-dropped-on-multi-line-emit) | `@ts-expect-error` dropped on multi-line | Loud correctness | 🟡 Fix landed, unverified | driven — face bytes |
+| [C1](#c1-optional-marker-rejected) | Optional `?` marker rejected | Compiler blocker | ✅ Verified · [driven] | — |
+| [C2](#c2-method-shorthand-in-type-body-rejected) | Method-shorthand in type body rejected | Compiler blocker | ✅ Verified · [driven] | — |
+| [1](#1-implicit-any-suppressed-with-no-opt-out) | Implicit-any suppressed, no opt-out | Silent safety hole | 🟡 Fix landed, **untested by anything** | **editor** — or a new strict-configured probe |
+| [2](#2-use-before-assign-hidden-on-annotated-forwards) | Use-before-assign hidden by `!` | Silent safety hole | 🟡 Emitter half [driven]; diagnostic half unverified | **editor** — the `TS2454` surfacing |
+| [3](#3-reactive-binding-annotations-not-enforced) | Reactive annotations not enforced | Silent safety hole | ✅ Verified · [driven] | — |
+| [4](#4-evolving-let-reassignment-not-caught) | Evolving-`let` reassignment not caught | Silent safety hole | ✅ Verified · [driven] | — |
+| [5](#5-typeof-on-an-unannotated-value-resolves-to-undefined) | `typeof` unannotated → `undefined` | Loud correctness | ✅ Verified · [driven] | — |
+| [6](#6-ts-expect-error-dropped-on-multi-line-emit) | `@ts-expect-error` dropped on multi-line | Loud correctness | ✅ Verified · [driven] | — |
 | [7](#7-no-headless-type-checker-rip-check) | No headless `rip check` | Missing capability | ⬜ Open | — (a build, not a check) |
 | [8](#8-auto-import-is-closure-scoped) | Auto-import closure-scoped | Missing capability | ⬜ Open | **editor** — no harness coverage |
-| [9](#9-write-only-unannotated-locals-hover-any) | Write-only locals hover `any` | Hover DX | 🟡 Fix landed, unverified | driven — hover audit, oracle-free not-`any` invariant |
+| [9](#9-write-only-unannotated-locals-hover-any) | Write-only locals hover `any` | Hover DX | ✅ Verified · [driven] | — |
 | [10](#10-reactive-bindings-hover-as-their-cell-wrapper) | Reactive bindings hover cell wrapper | Hover DX | 🟡 Fix landed, unverified | **editor** — rip-native, no oracle |
 | [11](#11-config-changes-required-a-reload) | Config changes required a reload | Config surface | 🟡 Fix landed, unverified | **editor** — no harness coverage |
 | [12](#12-nocheck-parsed-but-never-applied) | `rip.noCheck` parsed but never applied | Config surface | 🟡 Fix landed, unverified | **editor** — no harness coverage |
@@ -48,7 +50,12 @@ More severe than every editor-layer regression below: these produce **no face at
 
 rip's parser rejects the TS-optional `?` suffix wherever v3 accepted it — on both type-body property members and `def`/function parameters. Any type, interface, or signature that marks a member or param optional fails to compile.
 
-**Status.** 🟡 **Fix landed, unverified.** Compile/emit finding, so `[driven]` settles it; it has not been driven against this code.
+**Status.** ✅ **Verified · [driven]** (2026-07-12).
+
+- **Face** — 03/05/06 compile; the audit's `compiles` dimension is 12/12 and `tsface-tsc` passes 59/59 under a real tsc.
+- **`.d.ts` optional params** — `bun bin/rip --dts` on 06 emits `formal(name: string, title?: string)` and, for a bare optional, `greetUntyped(name: string, title?: any)`. The marker survives and the bare case defaults, as claimed.
+- **`.d.ts` generics** — the same run emits `wrap<T extends string>(value: T): Promise<[T]>`; `T` resolves in scope, no `TS2304`.
+- **tsc-valid** — the `dts-tsc` gate, which this finding cites as its validator, passes **37/37**. It had been silently skipping 25 of 26 tests because no `tsc` was on PATH; run with `RIP_EXTENDED=1 RIP_REQUIRE_TSC=1` and `RIP_TSC` pointed at a real binary, it executes and passes.
 
 - **Face** — `bin/rip --ts` on 03/05/06 should carry the `?`.
 - **`.d.ts` optional params (C1-dts)** — `dts.js` reads the `optionalMarker` role (shared `renderParam`): typed `title?: string` keeps the `?`, bare `title?: any` (a declaration can't carry an implicit any).
@@ -70,7 +77,7 @@ $ bin/rip --ts test/type-audit/fixtures/06-functions.rip
 
 A type/interface body accepts only property-style members (`name: type`); it has no grammar for the `name(args): ret` method-signature shorthand, so any object type declaring a method fails to compile.
 
-**Status.** 🟡 **Fix landed, unverified.** Face and `.d.ts` should both render the shorthand, and the isolated `.d.ts` should pass `tsc --strict`. The fix sits in the shared `typetext.js` seam (which `dts.js` also uses), making it the positive control for C1's drift. Compile/emit finding, so `[driven]` settles it.
+**Status.** ✅ **Verified · [driven]** (2026-07-12). 09 compiles (`compiles` 12/12) and the `dts-tsc` gate passes 37/37, so the shorthand renders on both the face and the `.d.ts` and the declaration is tsc-valid. The fix sits in the shared `typetext.js` seam (which `dts.js` also uses) — the positive control for C1's drift, and it holds.
 
 **Reproduced** — [09-components.rip](fixtures/09-components.rip): `addItem(item: CartItem): void` inside `export type Cart =` (pre-fix output; a fix has landed, unverified).
 ```
@@ -84,13 +91,13 @@ $ bin/rip --ts test/type-audit/fixtures/09-components.rip
 
 v4 is behind v3 here — consequences of the tsgo/LSP broker and the strip-gated face replacing v3's in-process LanguageService and its free-form type-checking shadow. **Ordered most-severe first:** silent, no-opt-out safety holes a strict project can't recover (1–4) → loud correctness breaks on valid typed code (5–6) → missing/degraded capabilities (7–8) → hover DX degradations (9–10).
 
-> The *gaps* below were driven against rip-v4. The **fix statuses** are what is unverified — none of #1–#6, #9, or #10 has been re-run against this code.
+> The *gaps* below were driven against rip-v4. The **fix statuses** were re-driven against this code on 2026-07-12: #3, #4, #5, #6 and #9 verify; #2 verifies only at the emitter; **#1 remains untested by any harness in this repo** (nothing configures `rip.strict`); #10 needs an editor.
 
 ### 1. Implicit-any suppressed with no opt-out
 
 v4 drops the entire implicit-any diagnostic family (`TS7005`–`7053`) for ALL code, with no config to re-enable it. A project that wants strict `noImplicitAny` enforcement cannot get it: an unannotated function parameter is silently `any` and its misuse goes unchecked (any-propagation). Real type errors (`TS2322`/`2339`/`2345`) are unaffected — only the missing-annotation family is hidden.
 
-**Status.** 🟡 **Fix landed, unverified.** `rip.strict` stops suppressing the implicit-any family: `TS7006` should surface on the `.rip` param under `strict:true` and stay hidden under `strict:false`. Dim 3 pulls diagnostics from the real server, so `[driven]` settles this; it has not been run against this code.
+**Status.** 🟡 **Fix landed — but untested by anything in this repo.** The fix is visibly in the source: the guard now reads `if (!good.strict && SUPPRESSED_TS_CODES.has(d.code))`, so `rip.strict` gates the implicit-any suppression. **No harness exercises it.** The type-audit runner copies only a `tsconfig.json` into its workspace and never writes a `package.json`, so `rip.strict` is always false there and the gate never fires; and no test file in the repo so much as references `SUPPRESSED_TS_CODES`. A green audit says nothing about this finding — it runs in precisely the mode where the old suppression is still active. Settle it in a live session, or by adding a strict-configured server probe.
 
 **Reproduced** — `greet = (name) -> name.toUpperCase()` → face `function(name){…}`; `tsc --strict` on the face reports `TS7006: Parameter 'name' implicitly has an 'any' type`, but the v4 editor dropped it: [server.js](../../packages/vscode/src/server.js) filtered on `SUPPRESSED_TS_CODES` (the set lives in [translate.js](../../packages/vscode/src/translate.js)). That guard now reads `if (!good.strict && SUPPRESSED_TS_CODES.has(d.code))` — the strict gate is the fix.
 
@@ -104,7 +111,7 @@ v4 drops the entire implicit-any diagnostic family (`TS7005`–`7053`) for ALL c
 
 A bare typed forward (`y: number`) emits `let y!: number` — TypeScript's definite-assignment assertion — which suppresses `TS2454` (variable used before being assigned). A strict project that annotates *and* wants use-before-assign caught cannot get it; no opt-out.
 
-**Status.** 🟡 **Fix landed, unverified.** With #1: under `rip.strict` the emitter drops the `!` on typed forwards, so `TS2454` is checked.
+**Status.** 🟡 **Emitter half [driven]; diagnostic half unverified.** `tiers.test.js` drives the emitter directly and passes: under `strict: true` a typed forward emits `let y: number;` — the `!` is gone, so TypeScript's definite-assignment analysis is no longer suppressed. What remains unverified is the other half — that `TS2454` then actually *surfaces* to the user. That runs through the same `rip.strict` path as #1, which no harness configures.
 
 **Reproduced** — `y: number` / `console.log y` / `y = 5` → v4 face `let y!: number; console.log(y); y = 5;` passes `tsc --noEmit --strict` clean; the same face with the `!` removed (`let y: number`) errors `TS2454: Variable 'y' is used before being assigned` — so the `!` is what hides it.
 
@@ -116,7 +123,7 @@ A bare typed forward (`y: number`) emits `let y!: number` — TypeScript's defin
 
 An explicit type annotation on a reactive binding (`:=`) does not constrain the assigned value. `badClicks: number := 'oops'` compiles clean and the wrong-typed initializer is never flagged — you annotate `number`, assign a string, and get no error. Silent, no opt-out.
 
-**Status.** 🟡 **Fix landed, unverified.** `:=`/`~=` emit a face-only `satisfies T`, so the annotation checks the value; JS unchanged.
+**Status.** ✅ **Verified · [driven]** (2026-07-12). `:=`/`~=` emit a face-only `satisfies T`, so the annotation checks the value; JS unchanged. The audit's `verdict` dimension is 12/12, which means 08's `# @ts-expect-error` markers are *used* — the wrong-typed initializers now error and are absorbed. This is not circular: `TS2578` (unused directive) is **not** in `SUPPRESSED_TS_CODES` — that set is exclusively the 70xx implicit-any family — so an unfired expectation would have surfaced as a stray error and failed the dimension.
 
 **Reproduced** — [08-reactive.rip](fixtures/08-reactive.rip): `badClicks: number := 'oops'` (also `badName: string := 42`, `badEnabled: boolean := 'yes'`, …). The face emits `const badClicks: { value: number; read(): number } = __state("oops")` (driven: `bin/rip --ts test/type-audit/fixtures/08-reactive.rip`) — the `: number` becomes the reactive-CELL type and the value is handed to `__state(...)`, which does not re-check it against `number`. Nothing fires on the value, so each `# @ts-expect-error` is instead flagged `TS2578` (unused) — 5 such on 08 in the runner's verdict.
 
@@ -128,7 +135,7 @@ An explicit type annotation on a reactive binding (`:=`) does not constrain the 
 
 A plain `=` binding hoists to an evolving `let` with no type, so TS never pins its inferred type across statements: a variable inferred one type and then reassigned another is not caught. `total = count + ratio` (number) then `total = 'oops'` compiles clean; the expected type error never fires. Silent, no opt-out.
 
-**Status.** 🟡 **Fix landed, unverified.** The evolving-`let` campaign (declare-in-place; follow-ups) lets TS pin the type, so reassignment errors.
+**Status.** ✅ **Verified · [driven]** (2026-07-12). Declare-in-place lets TS pin the type, so reassignment errors. The nine `# @ts-expect-error` markers on 11-inference are used — `verdict` is 12/12, and `TS2578` is reported rather than suppressed, so the nine unused-directive errors this finding recorded are gone.
 
 **Reproduced** — [11-inference.rip](fixtures/11-inference.rip): nine reassign-to-different-type cases (`total`→string, `label`→number, `active`→string, `result`→string, `upper`→number, `joined`→boolean, `first`→number, `msg`→number), each marked `# @ts-expect-error — inferred T`. Driven three ways: (a) the minimal `let total; total = 7; total = 'oops';` passes `tsc --noEmit --strict` (EXIT 0) — evolving-`any` genuinely accepts the reassignment; (b) `tsc` on the full 11 face reports exactly the 9 `TS2578` unused directives; (c) the editor's verdict reports the same 9.
 
@@ -140,7 +147,7 @@ A plain `=` binding hoists to an evolving `let` with no type, so TS never pins i
 
 For `type X = typeof y` (`y` unannotated), the face reads `typeof y` as `undefined`, so downstream uses of `X` fail. `typeof value` is idiomatic TS (`type Config = typeof defaultConfig`), so this blocks legitimate typed code.
 
-**Status.** 🟡 **Fix landed, unverified.** Same declare-in-place campaign as #4: the `typeof`'d binding declares in place, so `typeof` reads its real value type.
+**Status.** ✅ **Verified · [driven]** (2026-07-12). Same declare-in-place campaign as #4: the `typeof`'d binding declares in place, so `typeof` reads its real value type. 02-aliases passes `verdict` and `twin`, and `tsface-tsc` (59/59, real tsc) type-checks the face — the `TS2322: … not assignable to type 'undefined'` this finding recorded is gone.
 
 **Reproduced** — [02-aliases.rip](fixtures/02-aliases.rip): `defaults = {theme:'dark',lang:'en'}` / `type Defaults = typeof defaults` / `prefs: Defaults = {…}` → the face fails `tsc --noEmit --strict` with `TS2322: … not assignable to type 'undefined'`; the v4 editor squiggles it.
 
@@ -152,7 +159,7 @@ For `type X = typeof y` (`y` unannotated), the face reads `typeof y` as `undefin
 
 A `# @ts-expect-error` guarding a statement whose face emits as MORE THAN ONE line — any arrow/function assignment (`f = (x) -> …`, `x: T = (a) -> …`, an arrow inside a call like `.reduce`) — is silently dropped from the face. The directive stops working, so a real error the author explicitly acknowledged leaks into the editor. Single-line statements keep their directive; the escape hatch just fails on the multi-line class.
 
-**Status.** 🟡 **Fix landed, unverified.** Directives always place above the statement head (D47 probe retired), re-anchoring over inlined forwards. Emit-surface, so `[driven]` on the face bytes settles it.
+**Status.** ✅ **Verified · [driven]** (2026-07-12). Directives always place above the statement head (D47 probe retired), re-anchoring over inlined forwards. The audit's `directives` dimension — the face carries every `# @ts-expect-error` — is **12/12**, so the multi-line drop this finding recorded no longer happens. Caveat recorded below still holds: `directives` and `verdict` both count this one event, so they are not independent of each other.
 
 **Reproduced** — [02-aliases.rip](fixtures/02-aliases.rip): `# @ts-expect-error` over `badSorter: Comparator = (a, b) -> 'nope'`. The face emits `badSorter = function(a, b){ return "nope"; };` (three lines) with **no** directive above it (`bin/rip --ts` drops it: src 5 → face 4), and the suppressed error then surfaces in the editor verdict: `62:0 [TS2322] Type '(a: number, b: number) => string' is not assignable to type 'Comparator'`. Minimal isolation: a `# @ts-expect-error` over a one-line arrow assign `b = (x) -> x.length` is dropped; over a value assign `a = 'oops'` it is kept — and both `a` and `b` are hoisted identically (`let a, b;`), so it is the multi-line emission, not the hoist, that drops it. (01-basic loses 3 the same way: `badAllIds`, `implicitAny`, one more — all arrow-bearing.)
 
@@ -186,7 +193,7 @@ v4 offers auto-import candidates only from the ACTIVE PROGRAM (open files + tran
 
 A **non-exported** unannotated local — a value *or* an arrow function (`f = -> …`) — assigned once and never read hovers `any` in v4; v3 showed the inferred type. Mildest of the set: degraded hover in a transient/authoring state (self-heals once any read exists), no hidden bug, no broken code. **The scope is narrow:** evolving-`let` types every case that HAS a read — including a *cross-scope* closure read (an outer var read inside a nested fn types correctly) — and **exported** bindings are exempt (they emit declare-in-place, `export const f = …`), so a `util.rip` of exported-but-uncalled functions all hover their real types. Only a never-read *local* falls to `any`.
 
-**Status.** 🟡 **Fix landed, unverified.** Declare-in-place infers has-a-read cases natively; the write-only remainder is pin-probed. The hover audit instruments this through its oracle-free not-`any` invariant (an initialized binding must not hover `any`) — no twin and no pin file, so the check cannot self-confirm. It has not been run against this code.
+**Status.** ✅ **Verified · [driven]** (2026-07-12). Declare-in-place infers has-a-read cases natively. Settled by the hover audit's **oracle-free not-`any` invariant** (an initialized binding must not hover `any`): **0 violations**, and the gauge reads **335/335 typed hovers** — every probe answers a real type. This is the strongest evidence in the ledger: no twin and no pin file are involved, so the check structurally cannot self-confirm.
 
 **Reproduced** — [11-inference.rip](fixtures/11-inference.rip): `matches = filterBy('a')` (never read) hovers `let matches: any` in v4 vs `let matches: string[]` in v3 (a hover-differential no-oracle invariant hit).
 
@@ -232,7 +239,7 @@ Unestablished, both session-shaped: that silencing applies **reactively** to an 
 
 ## `=` hoisting: four type regressions and a bounded fix (owner's call)
 
-**Status.** 🟡 **Addressed, unverified.** The declare-in-place fix this note proposed shipped as the evolving-`let` tiers (+ follow-ups); #4, #5, #9 and the excess-property case all close through it. This note inherits their status: it is settled exactly when they are, and reopens if any of them does.
+**Status.** ✅ **Addressed · [driven]** (2026-07-12). The declare-in-place fix this note proposed shipped as the evolving-`let` tiers (+ follow-ups). #4, #5 and #9 all close through it and are now each verified above; the excess-property case rides the same mechanism (12-cast passes `verdict` and `twin`).
 
 *Not a gap — a note on the shared root of findings #4, #5, and #9 (plus one unnumbered instance), and one option, for the owner to weigh. rip's type philosophy is permissive by design (D17/D39); this is not an argument against that. These regressions hold regardless of it.*
 
