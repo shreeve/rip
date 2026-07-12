@@ -33,6 +33,24 @@ import { SchemaError, __SchemaRegistry, registerCoercer, __SchemaDef, __schemaIn
 
 function __schemaSnake(s) { return s.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase(); }
 
+// A SQL identifier as a doubled-quote-escaped `"..."` token: an
+// embedded quote becomes `""`, so a name can never break out of the
+// identifier and inject SQL structure. Every dynamic column name the
+// query builder interpolates passes through here.
+function __schemaQuoteIdent(name) { return '"' + String(name).replace(/"/g, '""') + '"'; }
+
+// LIMIT/OFFSET are numeric SQL, interpolated as bare integers, so the
+// value must BE a non-negative integer — raw text (a request-derived
+// string) rejects loudly instead of reaching the query as SQL structure.
+function __schemaPageInt(n, what) {
+  if (n === null || n === undefined) return null;
+  const v = typeof n === 'number' ? n : Number(n);
+  if (!Number.isInteger(v) || v < 0) {
+    throw new Error(what + '() requires a non-negative integer; got ' + JSON.stringify(n));
+  }
+  return v;
+}
+
 function __schemaCamel(col) { return String(col).replace(/_([a-z])/g, (_, c) => c.toUpperCase()); }
 
 const __SCHEMA_UNCOUNTABLE = new Set(['equipment', 'information', 'rice', 'money', 'species', 'series', 'fish', 'sheep', 'data']);
@@ -144,6 +162,30 @@ function __schemaSnapshot(norm, inst) {
     snap[fkCamel] = inst[fkCamel];
   }
   return snap;
+}
+
+// The camelCase keys a caller may legally supply to create(): declared
+// fields, the primary key, belongsTo FK columns, and the managed
+// timestamp/soft-delete columns. Anything else is an unknown field.
+function __schemaWritableColumns(norm) {
+  const known = new Set([...norm.fields.keys(), norm.primaryKey]);
+  for (const [, rel] of norm.relations) {
+    if (rel.kind === 'belongsTo') known.add(__schemaCamel(rel.foreignKey));
+  }
+  if (norm.timestamps) { known.add('createdAt'); known.add('updatedAt'); }
+  if (norm.softDelete) known.add('deletedAt');
+  return known;
+}
+
+// The primary key that identifies this instance's DB row: the
+// originally-loaded key from the snapshot, so save/destroy/restore
+// target the row that was actually loaded even if `inst[pk]` was
+// reassigned in memory. Falls back to the live value only when no
+// snapshot exists (a manually-constructed persisted instance).
+function __schemaTargetPk(norm, inst) {
+  const pk = norm.primaryKey;
+  const snap = inst._snapshot;
+  return snap && snap[pk] != null ? snap[pk] : inst[pk];
 }
 
 // SameValue-Zero: like ===, except NaN equals NaN (a persisted NaN
@@ -751,22 +793,31 @@ class __SchemaQuery {
       this._params.push(...params);
     } else if (cond && typeof cond === 'object') {
       for (const [k, v] of Object.entries(cond)) {
-        const col = __schemaSnake(k);
+        // A column name is a QUOTED IDENTIFIER, never raw text — an
+        // embedded quote is doubled so a caller-supplied key can never
+        // break out of the identifier and alter the SQL structure.
+        const col = __schemaQuoteIdent(__schemaSnake(k));
         if (v === null || v === undefined) {
-          this._clauses.push('"' + col + '" IS NULL');
+          this._clauses.push(col + ' IS NULL');
         } else if (Array.isArray(v)) {
-          this._clauses.push('"' + col + '" IN (' + v.map(() => '?').join(', ') + ')');
-          this._params.push(...v);
+          // An empty IN list matches nothing — `IN ()` is a syntax
+          // error at the database, so emit a constant-false predicate.
+          if (v.length === 0) {
+            this._clauses.push('1 = 0');
+          } else {
+            this._clauses.push(col + ' IN (' + v.map(() => '?').join(', ') + ')');
+            this._params.push(...v);
+          }
         } else {
-          this._clauses.push('"' + col + '" = ?');
+          this._clauses.push(col + ' = ?');
           this._params.push(v);
         }
       }
     }
     return this;
   }
-  limit(n) { this._limit = n; return this; }
-  offset(n) { this._offset = n; return this; }
+  limit(n) { this._limit = __schemaPageInt(n, 'limit'); return this; }
+  offset(n) { this._offset = __schemaPageInt(n, 'offset'); return this; }
   order(spec) { this._order = spec; return this; }
   orderBy(spec) { return this.order(spec); }
   includes(...specs) {
@@ -1005,6 +1056,11 @@ async function __schemaSave(def, inst) {
   await __schemaRunHook(def, inst, 'beforeValidation');
   const errs = def._validateFields(inst, true);
   if (errs.length) throw new SchemaError(errs, def.name, def.kind);
+  // Persistence applies the SAME validation contract as safe(): field
+  // checks THEN @ensure refinements. Skipping ensures would let a row
+  // the schema's own safe() rejects reach the database.
+  const ensureErrs = await def._applyEnsuresAsync(inst);
+  if (ensureErrs.length) throw new SchemaError(ensureErrs, def.name, def.kind);
   await __schemaRunHook(def, inst, 'afterValidation');
 
   await __schemaRunHook(def, inst, 'beforeSave');
@@ -1044,7 +1100,13 @@ async function __schemaSave(def, inst) {
         writtenColumns.push([fkCamel, v]);
       }
     }
-    const sql = 'INSERT INTO "' + norm.tableName + '" (' + cols.join(', ') + ') VALUES (' + placeholders.join(', ') + ') RETURNING *';
+    // A row with no insertable values (every field optional/defaulted,
+    // none supplied) is legal — it takes the table's column defaults.
+    // `INSERT (…) VALUES (…)` with empty lists is a syntax error, so
+    // emit the standard `DEFAULT VALUES` form instead.
+    const sql = cols.length
+      ? 'INSERT INTO "' + norm.tableName + '" (' + cols.join(', ') + ') VALUES (' + placeholders.join(', ') + ') RETURNING *'
+      : 'INSERT INTO "' + norm.tableName + '" DEFAULT VALUES RETURNING *';
     const res = await __schemaRunSQL(def, sql, values);
     if (res.data?.[0] && res.columns) {
       __schemaAbsorbRow(inst, res.columns, res.data[0]);
@@ -1202,12 +1264,13 @@ async function __schemaDestroy(def, inst, opts) {
   const norm = def._normalize();
   const hard = opts && opts.hard === true;
   await __schemaRunHook(def, inst, 'beforeDestroy');
+  const targetPk = __schemaTargetPk(norm, inst);
   if (norm.softDelete && !hard) {
     const now = new Date().toISOString();
-    await __schemaRunSQL(def, 'UPDATE "' + norm.tableName + '" SET "deleted_at" = ? WHERE "' + norm.primaryKey + '" = ?', [now, inst[norm.primaryKey]]);
+    await __schemaRunSQL(def, 'UPDATE "' + norm.tableName + '" SET "deleted_at" = ? WHERE "' + norm.primaryKey + '" = ?', [now, targetPk]);
     inst.deletedAt = now;
   } else {
-    await __schemaRunSQL(def, 'DELETE FROM "' + norm.tableName + '" WHERE "' + norm.primaryKey + '" = ?', [inst[norm.primaryKey]]);
+    await __schemaRunSQL(def, 'DELETE FROM "' + norm.tableName + '" WHERE "' + norm.primaryKey + '" = ?', [targetPk]);
     inst._persisted = false;
   }
   await __schemaRunHook(def, inst, 'afterDestroy');
@@ -1224,7 +1287,7 @@ async function __schemaRestore(def, inst) {
   }
   if (!inst._persisted) return inst;
   await __schemaRunHook(def, inst, 'beforeUpdate');
-  await __schemaRunSQL(def, 'UPDATE "' + norm.tableName + '" SET "deleted_at" = NULL WHERE "' + norm.primaryKey + '" = ?', [inst[norm.primaryKey]]);
+  await __schemaRunSQL(def, 'UPDATE "' + norm.tableName + '" SET "deleted_at" = NULL WHERE "' + norm.primaryKey + '" = ?', [__schemaTargetPk(norm, inst)]);
   inst.deletedAt = null;
   await __schemaRunHook(def, inst, 'afterUpdate');
   return inst;
@@ -1325,9 +1388,20 @@ __SchemaDef.prototype.create = async function (data) {
   // Input keys may be snake_case or camelCase; canonicalize to
   // camelCase so instance properties line up with declared fields.
   const klass = this._getClass();
+  const norm = this._normalize();
   const canonical = {};
   if (data && typeof data === 'object') {
     for (const k of Object.keys(data)) canonical[__schemaCamel(k)] = data[k];
+  }
+  // An unknown key is a typo, not a silent drop: it would be omitted
+  // from the INSERT yet kept on the returned instance (appearing in
+  // toJSON as if persisted). Reject it, naming the offending fields.
+  const known = __schemaWritableColumns(norm);
+  const unknown = Object.keys(canonical).filter((k) => !known.has(k));
+  if (unknown.length) {
+    throw new Error(
+      'schema: ' + (this.name || 'model') + '.create() got unknown field(s): ' +
+      unknown.join(', ') + ' — declared columns are ' + [...known].join(', '));
   }
   const inst = new klass(this._applyDefaults(canonical), false);
   // FK columns (userId for user_id) round-trip through the INSERT
@@ -1368,6 +1442,9 @@ __SchemaDef.prototype.upsert = async function (data, opts) {
   await __schemaRunHook(this, inst, 'beforeValidation');
   const errs = this._validateFields(inst, true);
   if (errs.length) throw new SchemaError(errs, this.name, this.kind);
+  // Same full contract as create()/save(): field checks then @ensure.
+  const ensureErrs = await this._applyEnsuresAsync(inst);
+  if (ensureErrs.length) throw new SchemaError(ensureErrs, this.name, this.kind);
   await __schemaRunHook(this, inst, 'afterValidation');
   await __schemaRunHook(this, inst, 'beforeSave');
 
@@ -1405,10 +1482,19 @@ __SchemaDef.prototype.upsert = async function (data, opts) {
   const sql = 'INSERT INTO "' + norm.tableName + '" (' + cols.map((c) => '"' + c + '"').join(', ') + ')' +
     ' VALUES (' + placeholders.join(', ') + ')' + conflict + ' RETURNING *';
   const res = await __schemaRunSQL(this, sql, values);
-  if (res.data?.[0] && res.columns) __schemaAbsorbRow(inst, res.columns, res.data[0]);
+  const gotRow = !!(res.data?.[0] && res.columns);
+  if (gotRow) __schemaAbsorbRow(inst, res.columns, res.data[0]);
   this._applyEagerDerived(inst);
-  inst._snapshot = __schemaSnapshot(norm, inst);
-  inst._persisted = true;
+  // DO NOTHING with an existing conflicting row returns no row: the
+  // instance was neither inserted nor updated and carries no primary
+  // key, so it is NOT a persisted handle. Marking it persisted would
+  // let a later save() emit an UPDATE keyed on a null pk.
+  if (gotRow) {
+    inst._snapshot = __schemaSnapshot(norm, inst);
+    inst._persisted = true;
+  } else {
+    inst._persisted = false;
+  }
   await __schemaRunHook(this, inst, 'afterSave');
   await __schemaSettleTxHooks(this, inst);
   return inst;
@@ -1558,7 +1644,16 @@ __SchemaDef.prototype._getClass = function () {
       enumerable: false, configurable: true,
       value: async function (opts) {
         if (!(opts && opts.reload === true) && this._relMemo && this._relMemo.has(acc)) {
-          return this._relMemo.get(acc);
+          const memo = this._relMemo.get(acc);
+          // A belongsTo memo is valid only while the FK still points at
+          // the memoized row: reassigning the FK (userId 1 -> 2) makes
+          // the cached target stale, so re-resolve. hasOne/hasMany key
+          // off this instance's own pk, which does not change here.
+          if (rel.kind !== 'belongsTo') return memo;
+          const fk = this[__schemaCamel(rel.foreignKey)] ?? null;
+          const tpk = __SchemaRegistry.get(rel.target)?._normalize().primaryKey;
+          const memoFk = memo == null ? null : (tpk != null ? memo[tpk] ?? null : null);
+          if (fk === memoFk) return memo;
         }
         const v = await __schemaResolveRelation(def, this, rel);
         __schemaRelMemoSet(this, acc, v);

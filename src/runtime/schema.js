@@ -167,13 +167,17 @@ function __schemaValidateValue(v, typeName) {
   if (subDef.kind === 'union') {
     const r = subDef._unionResolve(v);
     if (r.issue) return [r.issue];
-    const memberErrs = r.def._validateFields(v, true);
+    // The nested value runs its resolved member's FULL contract —
+    // field checks THEN @ensure — so a child its own schema rejects
+    // can never be accepted inside a parent.
+    const memberErrs = r.def._validateFields(v, true).concat(r.def._applyEnsures(v));
     return memberErrs.length ? memberErrs : null;
   }
   if (v === null || typeof v !== 'object' || Array.isArray(v)) {
     return [{ field: '', error: 'type', message: 'must be a ' + typeName + ' object' }];
   }
-  const subErrs = subDef._validateFields(v, true);
+  // Field checks THEN the nested schema's own @ensure refinements.
+  const subErrs = subDef._validateFields(v, true).concat(subDef._applyEnsures(v));
   return subErrs.length ? subErrs : null;
 }
 
@@ -690,6 +694,13 @@ class __SchemaDef {
           if (!collect) return false;
           errors.push({ field: n, error: 'type', message: n + ' must be an array' });
           continue;
+        }
+        // Array length constraints (min/max as minItems/maxItems) —
+        // enforced here, not only advertised in the JSON Schema face.
+        const ac = f.constraints;
+        if (ac) {
+          if (ac.min != null && v.length < ac.min) { if (!collect) return false; errors.push({ field: n, error: 'min', message: n + ' must have at least ' + ac.min + ' items' }); }
+          if (ac.max != null && v.length > ac.max) { if (!collect) return false; errors.push({ field: n, error: 'max', message: n + ' must have at most ' + ac.max + ' items' }); }
         }
         let bad = false;
         for (let i = 0; i < v.length; i++) {
