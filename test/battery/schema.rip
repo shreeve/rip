@@ -3384,30 +3384,30 @@ test "save() guard is per-instance: parallel saves on different instances do not
   [a._saving, b._saving]
 ''', [false, false]
 
-# Dev-mode PK fallback warning: when a save() finds no `_snapshot`,
-# the WHERE clause falls back to `inst[pk]`. That's almost always an
-# accidental misuse pattern (manually-constructed persisted instance
-# without going through hydrate). Emit a console.warn in non-prod so
-# the symptom is visible early.
+# A persisted instance has exactly one database identity: the primary
+# key captured in its snapshot. A manually-constructed persisted shape
+# cannot redirect an UPDATE through its mutable live id.
 
-test "save() emits a console.warn when PK fallback fires (non-prod)", modelHeader + '''
+test "save() rejects a persisted instance with no snapshot identity", modelHeader + '''
   User = schema :model
     name! string
   klass = User._getClass()
-  # Manually construct a persisted instance with NO _snapshot. This is
-  # the misuse pattern the warning is meant to catch.
   u = new klass({}, true)
   Object.defineProperty(u, "id", {value: 42, enumerable: true, writable: true, configurable: true})
   u.name = "Bob"
   warnings = []
   origWarn = console.warn
   console.warn = (msg) -> warnings.push(msg)
+  before = adapter.calls.length
+  message = ""
   try
     u.save!
+  catch e
+    message = e.message
   finally
     console.warn = origWarn
-  warnings.length is 1 and warnings[0].includes("no _snapshot")
-''', true
+  [message.includes("persisted identity"), warnings.length, adapter.calls.length - before]
+''', [true, 0, 0]
 
 test "save() does NOT warn when _snapshot is present", modelHeader + '''
   User = schema :model
