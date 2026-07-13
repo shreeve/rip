@@ -391,3 +391,28 @@ code 'render block with identifier property value compiles to reactive setAttrib
     }
   };
   '''
+
+# ==============================================================================
+# Effect bodies cannot yield in ANY position — statement, expression, or tail —
+# because the runtime calls the effect function as a normal callable. A named
+# generator the effect calls stays legal.
+# ==============================================================================
+
+fail 'effect in expression position cannot yield', '''
+  f = ->
+    x = ~> yield 1
+    x
+  ''', 'cannot yield'
+
+fail 'effect in tail position cannot yield', '''
+  f = ->
+    ~> yield 1
+  ''', 'cannot yield'
+
+test 'effect may call a named generator', '''
+  out := 0
+  g = ->
+    yield 7
+  ~> out = [...g()][0]
+  out + 0
+  ''', 7

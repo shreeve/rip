@@ -74,14 +74,26 @@ the Rip compiler: language, toolchain, runtimes, and editor support.
   identifier the emitter is fond of.
 - **Operands evaluate exactly once.** A lowering that must read a
   value twice (compound assignment, membership, optional assignment,
-  ranges, loop sources) binds an impure operand to a single ref and
-  reuses the ref. Pure operands — identifiers, member chains whose
-  every link is pure, index access with pure base and key, array
-  literals of pure elements — skip the ref; the purity predicates
-  (`pureChain`, `pureIterable`) are the single source of that
-  judgment. Index-access purity is load-bearing: the parser generator
-  compiles itself, so an over-conservative predicate changes the
-  generated parser's bytes.
+  ranges, loop sources) binds a non-repeat-safe operand to a single
+  ref and reuses the ref. REPEAT-SAFE is a semantic judgment, not a
+  syntactic one: only `this`, literals, and identifiers bound in the
+  current lexical environment qualify — member and index access is
+  NEVER repeat-safe (getters and proxies are observable user code),
+  and an unresolved identifier is not either (a `globalThis` property
+  may be an accessor). `repeatSafeValue`/`singleReadIterable` are the
+  single source of that judgment; capture applies only at sites that
+  actually reread, so single-read lowerings keep their bytes. The
+  scope-boundary classifier (`scopeBoundary`) is shared by the hoist
+  collector and the reference planner — a construct with its own
+  scope rule is added there, once, and both walks follow.
+- **Generated scopes are control-flow boundaries.** Every emitter
+  site that puts a function scope into output (an arrow, an IIFE)
+  either preserves the source control context without the boundary,
+  explicitly supports async/generator behavior, or rejects positioned
+  before emitting — and registers in the generated-scope inventory
+  (`test/toolchain/generated-scopes.test.js`) with its policy. The
+  parser generator compiles itself, so ref decisions are load-bearing:
+  unexplained parser byte drift is a doctrine violation.
 - **Control transfers keep their lexical target.** `return`, `break`,
   and `continue` inside a value-position lowering (an if/try/switch
   used as an expression, a comprehension) would be captured by the

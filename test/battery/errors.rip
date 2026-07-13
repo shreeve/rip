@@ -239,3 +239,22 @@ test 'throw in || expression', '''
       e
     result
   ''', "error"
+
+# A value-position throw lowers to a throwing IIFE — yield cannot cross
+# that generated arrow; await rides the async form.
+fail 'value-position throw cannot capture yield', '''
+  f = ->
+    x = true or throw (yield 1)
+  ''', 'cannot cross the IIFE boundary'
+
+test 'value-position throw preserves await', '''
+  f = ->
+    x = false or throw (await Promise.resolve(new Error('boom')))
+  msg = ''
+  try
+    await f()
+    msg = 'no throw'
+  catch e
+    msg = e.message
+  msg
+  ''', 'boom'

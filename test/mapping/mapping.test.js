@@ -263,9 +263,11 @@ describe('construct by construct: spans, grouping, and lowerings', () => {
   test('own+guard keeps the hasOwn filter', () => {
     // A single-variable `own` loop with a guard keeps the Object.hasOwn
     // filter — the guard must not silently drop the own semantics.
+    // `obj` resolves nowhere here, so the own-filter's reread binds
+    // once (an unresolved name may be a globalThis accessor).
     const src = 'for own k of obj when k\n  f(k)';
     const { code } = compile(src);
-    expect(code).toContain('Object.hasOwn(obj, k)');
+    expect(code).toContain('Object.hasOwn(_ref, k)');
     new Function(code);
   });
 
@@ -639,7 +641,7 @@ describe('implicit-object spans stay honest', () => {
     // unconditionally ascending header would never terminate on a
     // negative runtime step.
     const src = 'for x in arr by step\n  f x';
-    expect(compile(src).code).toContain('_step > 0 ? _i < arr.length : _step < 0 && _i >= 0');
+    expect(compile(src).code).toContain('_step > 0 ? _i < _ref.length : _step < 0 && _i >= 0');
     // Eval: positive, negative, and zero runtime steps all terminate;
     // the step expression evaluates exactly once.
     const harness = [

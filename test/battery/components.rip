@@ -5009,3 +5009,47 @@ code 'plain `=` write is a property write; `:=` write is a signal write', '''
     }
   };
   '''
+
+fail 'component effect cannot yield', '''
+  A = component
+    ~> yield 1
+  ''', 'cannot yield'
+
+# A render body evaluates synchronously: text, attributes, props, and event
+# listeners all emit into non-async generated scopes, so a bare await/yield
+# in any render expression rejects positioned. A FUNCTION handler value owns
+# its own control context and passes through untouched.
+fail 'render event handler expression cannot await', '''
+  save = -> Promise.resolve(1)
+  A = component
+    render
+      button {@click: save!()}
+  ''', 'render body evaluates synchronously'
+
+fail 'render attribute expression cannot await', '''
+  f = -> Promise.resolve('x')
+  A = component
+    render
+      div {title: await f()}
+  ''', 'render body evaluates synchronously'
+
+fail 'render text interpolation cannot await', '''
+  f = -> Promise.resolve('x')
+  A = component
+    render
+      div "#{await f()}"
+  ''', 'render body evaluates synchronously'
+
+fail 'render expression cannot yield', '''
+  A = component
+    render
+      div "#{yield 1}"
+  ''', 'render body evaluates synchronously'
+
+test 'render function handler awaits in its own body', '''
+  save = -> Promise.resolve(1)
+  A = component
+    render
+      button {@click: -> await save()}
+  typeof A
+  ''', 'function'
