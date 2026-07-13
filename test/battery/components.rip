@@ -455,12 +455,34 @@ test 'Component.unmount is idempotent', '''
   count = 0
   A = component
     unmounted = -> count += 1
+    render null
   a = A.new()
+  a.mount({})
   a.unmount?(removeDOM: false)
   a.unmount?(removeDOM: false)
   a.unmount?(removeDOM: false)
   count
 ''', 1
+
+test 'component mount states are single-use and terminal', '''
+  A = component
+    render null
+  a = A.new()
+  states = [a._state]
+  a.mount({})
+  states.push a._state
+  try
+    a.mount({})
+  catch e
+    states.push e.message.includes('already-mounted')
+  a.unmount(removeDOM: false)
+  states.push a._state
+  try
+    a.mount({})
+  catch e
+    states.push e.message.includes('unmounted instance')
+  states
+''', ['new', 'mounted', true, 'unmounted', true]
 
 test 'effect signal aborts on unmount', '''
   events = []
@@ -3575,18 +3597,17 @@ code 'child component with static props', '''
       try {
       this._inst1 = new Child({ label: "hello" });
       if (this._inst1 && this._inst1._initFailed) {
-        try { this._inst1.unmount({removeDOM: false}); } catch (__ue) { console.error('[Rip] partial-init unmount error:', __ue); }
         this._inst1 = null;
         this._el2 = document.createComment('rip:child-init-failed: Child');
-      } else {
-        { const __cprev = __pushComponent(this._inst1); const __co = __pushOwner(this._inst1._frame); try {
-          this._el2 = this._inst1._root = this._inst1._create();
-        } finally { __popOwner(__co); __popComponent(__cprev); } }
+      } else if (this._inst1._mountCreate()) {
+        this._el2 = this._inst1._root;
         (this._children || (this._children = [])).push(this._inst1);
+      } else {
+        this._inst1 = null;
+        this._el2 = document.createComment('rip:child-error: Child');
       }
       } catch (__childErr) {
         console.error('[Rip] Child construction failed:', __childErr);
-        if (this._inst1) { try { this._inst1.unmount({removeDOM: false}); } catch (__ue) { console.error('[Rip] partial-child unmount error:', __ue); } }
         this._inst1 = null;
         this._el2 = document.createComment('rip:child-error: Child');
       }
@@ -3595,7 +3616,9 @@ code 'child component with static props', '''
       return this._el0;
     }
     _setup() {
-      if (this._inst1 && !this._inst1._isSetup) { this._inst1._isSetup = true; const __cprev = __pushComponent(this._inst1); const __co = __pushOwner(this._inst1._frame); try { try { if (this._inst1.beforeMount) this._inst1.beforeMount(); if (this._inst1._setup) this._inst1._setup(); if (this._inst1.mounted) this._inst1.mounted(); } catch (__e) { __handleComponentError(__e, this._inst1); } } finally { __popOwner(__co); __popComponent(__cprev); } }
+      if (this._inst1 && this._inst1._state === 'mounting') {
+        this._el2 = this._inst1._mountSetup(document.createComment('rip:child-error: Child'));
+      }
     }
   };
   '''
@@ -3630,18 +3653,17 @@ code 'child component with reactive prop (signal pass-through)', '''
       try {
       this._inst1 = new Child({ count: this.count });
       if (this._inst1 && this._inst1._initFailed) {
-        try { this._inst1.unmount({removeDOM: false}); } catch (__ue) { console.error('[Rip] partial-init unmount error:', __ue); }
         this._inst1 = null;
         this._el2 = document.createComment('rip:child-init-failed: Child');
-      } else {
-        { const __cprev = __pushComponent(this._inst1); const __co = __pushOwner(this._inst1._frame); try {
-          this._el2 = this._inst1._root = this._inst1._create();
-        } finally { __popOwner(__co); __popComponent(__cprev); } }
+      } else if (this._inst1._mountCreate()) {
+        this._el2 = this._inst1._root;
         (this._children || (this._children = [])).push(this._inst1);
+      } else {
+        this._inst1 = null;
+        this._el2 = document.createComment('rip:child-error: Child');
       }
       } catch (__childErr) {
         console.error('[Rip] Child construction failed:', __childErr);
-        if (this._inst1) { try { this._inst1.unmount({removeDOM: false}); } catch (__ue) { console.error('[Rip] partial-child unmount error:', __ue); } }
         this._inst1 = null;
         this._el2 = document.createComment('rip:child-error: Child');
       }
@@ -3650,7 +3672,9 @@ code 'child component with reactive prop (signal pass-through)', '''
       return this._el0;
     }
     _setup() {
-      if (this._inst1 && !this._inst1._isSetup) { this._inst1._isSetup = true; const __cprev = __pushComponent(this._inst1); const __co = __pushOwner(this._inst1._frame); try { try { if (this._inst1.beforeMount) this._inst1.beforeMount(); if (this._inst1._setup) this._inst1._setup(); if (this._inst1.mounted) this._inst1.mounted(); } catch (__e) { __handleComponentError(__e, this._inst1); } } finally { __popOwner(__co); __popComponent(__cprev); } }
+      if (this._inst1 && this._inst1._state === 'mounting') {
+        this._el2 = this._inst1._mountSetup(document.createComment('rip:child-error: Child'));
+      }
     }
   };
   '''
@@ -3684,18 +3708,17 @@ code 'child component with children (slot)', '''
       try {
       this._inst0 = new Child({ children: this._el2 });
       if (this._inst0 && this._inst0._initFailed) {
-        try { this._inst0.unmount({removeDOM: false}); } catch (__ue) { console.error('[Rip] partial-init unmount error:', __ue); }
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-init-failed: Child');
-      } else {
-        { const __cprev = __pushComponent(this._inst0); const __co = __pushOwner(this._inst0._frame); try {
-          this._el1 = this._inst0._root = this._inst0._create();
-        } finally { __popOwner(__co); __popComponent(__cprev); } }
+      } else if (this._inst0._mountCreate()) {
+        this._el1 = this._inst0._root;
         (this._children || (this._children = [])).push(this._inst0);
+      } else {
+        this._inst0 = null;
+        this._el1 = document.createComment('rip:child-error: Child');
       }
       } catch (__childErr) {
         console.error('[Rip] Child construction failed:', __childErr);
-        if (this._inst0) { try { this._inst0.unmount({removeDOM: false}); } catch (__ue) { console.error('[Rip] partial-child unmount error:', __ue); } }
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-error: Child');
       }
@@ -3703,7 +3726,9 @@ code 'child component with children (slot)', '''
       return this._el1;
     }
     _setup() {
-      if (this._inst0 && !this._inst0._isSetup) { this._inst0._isSetup = true; const __cprev = __pushComponent(this._inst0); const __co = __pushOwner(this._inst0._frame); try { try { if (this._inst0.beforeMount) this._inst0.beforeMount(); if (this._inst0._setup) this._inst0._setup(); if (this._inst0.mounted) this._inst0.mounted(); } catch (__e) { __handleComponentError(__e, this._inst0); } } finally { __popOwner(__co); __popComponent(__cprev); } }
+      if (this._inst0 && this._inst0._state === 'mounting') {
+        this._el1 = this._inst0._mountSetup(document.createComment('rip:child-error: Child'));
+      }
     }
   };
   '''
@@ -3740,18 +3765,17 @@ code 'child component with props and children', '''
       try {
       this._inst1 = new Child({ label: "hello", children: this._el3 });
       if (this._inst1 && this._inst1._initFailed) {
-        try { this._inst1.unmount({removeDOM: false}); } catch (__ue) { console.error('[Rip] partial-init unmount error:', __ue); }
         this._inst1 = null;
         this._el2 = document.createComment('rip:child-init-failed: Child');
-      } else {
-        { const __cprev = __pushComponent(this._inst1); const __co = __pushOwner(this._inst1._frame); try {
-          this._el2 = this._inst1._root = this._inst1._create();
-        } finally { __popOwner(__co); __popComponent(__cprev); } }
+      } else if (this._inst1._mountCreate()) {
+        this._el2 = this._inst1._root;
         (this._children || (this._children = [])).push(this._inst1);
+      } else {
+        this._inst1 = null;
+        this._el2 = document.createComment('rip:child-error: Child');
       }
       } catch (__childErr) {
         console.error('[Rip] Child construction failed:', __childErr);
-        if (this._inst1) { try { this._inst1.unmount({removeDOM: false}); } catch (__ue) { console.error('[Rip] partial-child unmount error:', __ue); } }
         this._inst1 = null;
         this._el2 = document.createComment('rip:child-error: Child');
       }
@@ -3760,7 +3784,9 @@ code 'child component with props and children', '''
       return this._el0;
     }
     _setup() {
-      if (this._inst1 && !this._inst1._isSetup) { this._inst1._isSetup = true; const __cprev = __pushComponent(this._inst1); const __co = __pushOwner(this._inst1._frame); try { try { if (this._inst1.beforeMount) this._inst1.beforeMount(); if (this._inst1._setup) this._inst1._setup(); if (this._inst1.mounted) this._inst1.mounted(); } catch (__e) { __handleComponentError(__e, this._inst1); } } finally { __popOwner(__co); __popComponent(__cprev); } }
+      if (this._inst1 && this._inst1._state === 'mounting') {
+        this._el2 = this._inst1._mountSetup(document.createComment('rip:child-error: Child'));
+      }
     }
   };
   '''
@@ -3790,18 +3816,17 @@ code 'boolean prop shorthand — single bare identifier', '''
       try {
       this._inst0 = new Btn({ outline: true });
       if (this._inst0 && this._inst0._initFailed) {
-        try { this._inst0.unmount({removeDOM: false}); } catch (__ue) { console.error('[Rip] partial-init unmount error:', __ue); }
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-init-failed: Btn');
-      } else {
-        { const __cprev = __pushComponent(this._inst0); const __co = __pushOwner(this._inst0._frame); try {
-          this._el1 = this._inst0._root = this._inst0._create();
-        } finally { __popOwner(__co); __popComponent(__cprev); } }
+      } else if (this._inst0._mountCreate()) {
+        this._el1 = this._inst0._root;
         (this._children || (this._children = [])).push(this._inst0);
+      } else {
+        this._inst0 = null;
+        this._el1 = document.createComment('rip:child-error: Btn');
       }
       } catch (__childErr) {
         console.error('[Rip] Btn construction failed:', __childErr);
-        if (this._inst0) { try { this._inst0.unmount({removeDOM: false}); } catch (__ue) { console.error('[Rip] partial-child unmount error:', __ue); } }
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-error: Btn');
       }
@@ -3809,7 +3834,9 @@ code 'boolean prop shorthand — single bare identifier', '''
       return this._el1;
     }
     _setup() {
-      if (this._inst0 && !this._inst0._isSetup) { this._inst0._isSetup = true; const __cprev = __pushComponent(this._inst0); const __co = __pushOwner(this._inst0._frame); try { try { if (this._inst0.beforeMount) this._inst0.beforeMount(); if (this._inst0._setup) this._inst0._setup(); if (this._inst0.mounted) this._inst0.mounted(); } catch (__e) { __handleComponentError(__e, this._inst0); } } finally { __popOwner(__co); __popComponent(__cprev); } }
+      if (this._inst0 && this._inst0._state === 'mounting') {
+        this._el1 = this._inst0._mountSetup(document.createComment('rip:child-error: Btn'));
+      }
     }
   };
   '''
@@ -3840,18 +3867,17 @@ code 'boolean prop shorthand — multiple bare identifiers with text child', '''
       try {
       this._inst0 = new Btn({ outline: true, ghost: true, children: this._t0 });
       if (this._inst0 && this._inst0._initFailed) {
-        try { this._inst0.unmount({removeDOM: false}); } catch (__ue) { console.error('[Rip] partial-init unmount error:', __ue); }
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-init-failed: Btn');
-      } else {
-        { const __cprev = __pushComponent(this._inst0); const __co = __pushOwner(this._inst0._frame); try {
-          this._el1 = this._inst0._root = this._inst0._create();
-        } finally { __popOwner(__co); __popComponent(__cprev); } }
+      } else if (this._inst0._mountCreate()) {
+        this._el1 = this._inst0._root;
         (this._children || (this._children = [])).push(this._inst0);
+      } else {
+        this._inst0 = null;
+        this._el1 = document.createComment('rip:child-error: Btn');
       }
       } catch (__childErr) {
         console.error('[Rip] Btn construction failed:', __childErr);
-        if (this._inst0) { try { this._inst0.unmount({removeDOM: false}); } catch (__ue) { console.error('[Rip] partial-child unmount error:', __ue); } }
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-error: Btn');
       }
@@ -3859,7 +3885,9 @@ code 'boolean prop shorthand — multiple bare identifiers with text child', '''
       return this._el1;
     }
     _setup() {
-      if (this._inst0 && !this._inst0._isSetup) { this._inst0._isSetup = true; const __cprev = __pushComponent(this._inst0); const __co = __pushOwner(this._inst0._frame); try { try { if (this._inst0.beforeMount) this._inst0.beforeMount(); if (this._inst0._setup) this._inst0._setup(); if (this._inst0.mounted) this._inst0.mounted(); } catch (__e) { __handleComponentError(__e, this._inst0); } } finally { __popOwner(__co); __popComponent(__cprev); } }
+      if (this._inst0 && this._inst0._state === 'mounting') {
+        this._el1 = this._inst0._mountSetup(document.createComment('rip:child-error: Btn'));
+      }
     }
   };
   '''
@@ -3890,18 +3918,17 @@ code 'boolean prop shorthand — mixed with @event and key:value', '''
       try {
       this._inst0 = new Btn({ outline: true, ghost: true, variant: "secondary", children: this._t0 });
       if (this._inst0 && this._inst0._initFailed) {
-        try { this._inst0.unmount({removeDOM: false}); } catch (__ue) { console.error('[Rip] partial-init unmount error:', __ue); }
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-init-failed: Btn');
-      } else {
-        { const __cprev = __pushComponent(this._inst0); const __co = __pushOwner(this._inst0._frame); try {
-          this._el1 = this._inst0._root = this._inst0._create();
-        } finally { __popOwner(__co); __popComponent(__cprev); } }
+      } else if (this._inst0._mountCreate()) {
+        this._el1 = this._inst0._root;
         (this._children || (this._children = [])).push(this._inst0);
+      } else {
+        this._inst0 = null;
+        this._el1 = document.createComment('rip:child-error: Btn');
       }
       } catch (__childErr) {
         console.error('[Rip] Btn construction failed:', __childErr);
-        if (this._inst0) { try { this._inst0.unmount({removeDOM: false}); } catch (__ue) { console.error('[Rip] partial-child unmount error:', __ue); } }
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-error: Btn');
       }
@@ -3910,7 +3937,9 @@ code 'boolean prop shorthand — mixed with @event and key:value', '''
       return this._el1;
     }
     _setup() {
-      if (this._inst0 && !this._inst0._isSetup) { this._inst0._isSetup = true; const __cprev = __pushComponent(this._inst0); const __co = __pushOwner(this._inst0._frame); try { try { if (this._inst0.beforeMount) this._inst0.beforeMount(); if (this._inst0._setup) this._inst0._setup(); if (this._inst0.mounted) this._inst0.mounted(); } catch (__e) { __handleComponentError(__e, this._inst0); } } finally { __popOwner(__co); __popComponent(__cprev); } }
+      if (this._inst0 && this._inst0._state === 'mounting') {
+        this._el1 = this._inst0._mountSetup(document.createComment('rip:child-error: Btn'));
+      }
     }
   };
   '''
@@ -3941,18 +3970,17 @@ code 'boolean prop shorthand — explicit value still wins', '''
       try {
       this._inst0 = new Btn({ outline: false, children: this._t0 });
       if (this._inst0 && this._inst0._initFailed) {
-        try { this._inst0.unmount({removeDOM: false}); } catch (__ue) { console.error('[Rip] partial-init unmount error:', __ue); }
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-init-failed: Btn');
-      } else {
-        { const __cprev = __pushComponent(this._inst0); const __co = __pushOwner(this._inst0._frame); try {
-          this._el1 = this._inst0._root = this._inst0._create();
-        } finally { __popOwner(__co); __popComponent(__cprev); } }
+      } else if (this._inst0._mountCreate()) {
+        this._el1 = this._inst0._root;
         (this._children || (this._children = [])).push(this._inst0);
+      } else {
+        this._inst0 = null;
+        this._el1 = document.createComment('rip:child-error: Btn');
       }
       } catch (__childErr) {
         console.error('[Rip] Btn construction failed:', __childErr);
-        if (this._inst0) { try { this._inst0.unmount({removeDOM: false}); } catch (__ue) { console.error('[Rip] partial-child unmount error:', __ue); } }
         this._inst0 = null;
         this._el1 = document.createComment('rip:child-error: Btn');
       }
@@ -3960,7 +3988,9 @@ code 'boolean prop shorthand — explicit value still wins', '''
       return this._el1;
     }
     _setup() {
-      if (this._inst0 && !this._inst0._isSetup) { this._inst0._isSetup = true; const __cprev = __pushComponent(this._inst0); const __co = __pushOwner(this._inst0._frame); try { try { if (this._inst0.beforeMount) this._inst0.beforeMount(); if (this._inst0._setup) this._inst0._setup(); if (this._inst0.mounted) this._inst0.mounted(); } catch (__e) { __handleComponentError(__e, this._inst0); } } finally { __popOwner(__co); __popComponent(__cprev); } }
+      if (this._inst0 && this._inst0._state === 'mounting') {
+        this._el1 = this._inst0._mountSetup(document.createComment('rip:child-error: Btn'));
+      }
     }
   };
   '''
@@ -3993,18 +4023,17 @@ code 'bare component reference (no args)', '''
       try {
       this._inst1 = new Counter({});
       if (this._inst1 && this._inst1._initFailed) {
-        try { this._inst1.unmount({removeDOM: false}); } catch (__ue) { console.error('[Rip] partial-init unmount error:', __ue); }
         this._inst1 = null;
         this._el2 = document.createComment('rip:child-init-failed: Counter');
-      } else {
-        { const __cprev = __pushComponent(this._inst1); const __co = __pushOwner(this._inst1._frame); try {
-          this._el2 = this._inst1._root = this._inst1._create();
-        } finally { __popOwner(__co); __popComponent(__cprev); } }
+      } else if (this._inst1._mountCreate()) {
+        this._el2 = this._inst1._root;
         (this._children || (this._children = [])).push(this._inst1);
+      } else {
+        this._inst1 = null;
+        this._el2 = document.createComment('rip:child-error: Counter');
       }
       } catch (__childErr) {
         console.error('[Rip] Counter construction failed:', __childErr);
-        if (this._inst1) { try { this._inst1.unmount({removeDOM: false}); } catch (__ue) { console.error('[Rip] partial-child unmount error:', __ue); } }
         this._inst1 = null;
         this._el2 = document.createComment('rip:child-error: Counter');
       }
@@ -4013,7 +4042,9 @@ code 'bare component reference (no args)', '''
       return this._el0;
     }
     _setup() {
-      if (this._inst1 && !this._inst1._isSetup) { this._inst1._isSetup = true; const __cprev = __pushComponent(this._inst1); const __co = __pushOwner(this._inst1._frame); try { try { if (this._inst1.beforeMount) this._inst1.beforeMount(); if (this._inst1._setup) this._inst1._setup(); if (this._inst1.mounted) this._inst1.mounted(); } catch (__e) { __handleComponentError(__e, this._inst1); } } finally { __popOwner(__co); __popComponent(__cprev); } }
+      if (this._inst1 && this._inst1._state === 'mounting') {
+        this._el2 = this._inst1._mountSetup(document.createComment('rip:child-error: Counter'));
+      }
     }
   };
   '''
@@ -4634,6 +4665,47 @@ test 'getContext without a provider rejects; hasContext probes', '''
   __popComponent(null)
   [probe, msg]
   ''', [false, true]
+
+test 'mount failure dispatch restores the parent component and owner frames', '''
+  source := 0
+  log = []
+  rescue = null
+  Rescue = component
+    render null
+  Broken = component
+    beforeMount = -> raise "setup boom"
+    render null
+  Boundary = component
+    onError = (err) ->
+      rescue = Rescue.new()
+      __effect -> log.push source + 0
+  parent = Boundary.new()
+  prev = __pushComponent(parent)
+  owner = __pushOwner(parent._frame)
+  broken = Broken.new()
+  broken._mountCreate()
+  broken._mountSetup()
+  __popOwner(owner)
+  __popComponent(prev)
+  source = 1
+  before = [broken._state, broken._frame.disposed, rescue._parent is parent, log.slice()]
+  parent.unmount()
+  source = 2
+  [before, log]
+  ''', [['failed', true, true, [0, 1]], [0, 1]]
+
+test 'unmount before mount disposes init effects without mounted-only hooks', '''
+  source := 0
+  log = []
+  A = component
+    ~> log.push source + 0
+    beforeUnmount = -> log.push "before"
+    unmounted = -> log.push "after"
+  a = A.new()
+  a.unmount()
+  source = 1
+  [a._state, a._frame.disposed, log]
+  ''', ['unmounted', true, [0]]
 
 # Bare-identifier shorthand sets a boolean attribute — validated
 # against the standard vocabulary so a misspelling can never silently

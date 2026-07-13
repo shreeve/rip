@@ -371,13 +371,20 @@ function __transition(el, name, dir, done) {
   const from = name + '-' + dir + '-from';
   const active = name + '-' + dir + '-active';
   const to = name + '-' + dir + '-to';
+  let completed = false;
   cl.add(from, active);
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       cl.remove(from);
       cl.add(to);
-      const end = () => { cl.remove(active, to); if (done) done(); };
-      el.addEventListener('transitionend', end, { once: true });
+      const end = (event) => {
+        if (completed || event.target !== el) return;
+        completed = true;
+        el.removeEventListener('transitionend', end);
+        cl.remove(active, to);
+        if (done) done();
+      };
+      el.addEventListener('transitionend', end);
     });
   });
 }
@@ -389,7 +396,18 @@ function __handleComponentError(error, component) {
   while (current && !visited.has(current)) {
     visited.add(current);
     if (current.onError) {
-      try { current.onError(error, component); return; } catch (_) {}
+      const prevC = __pushComponent(current);
+      const prevO = __pushOwner(current._frame);
+      try {
+        current.onError(error, component);
+        return;
+      } catch (_) {
+        // A throwing boundary declines this error; continue at its parent
+        // with the original failure after restoring both ownership stacks.
+      } finally {
+        __popOwner(prevO);
+        __popComponent(prevC);
+      }
     }
     current = current._parent;
   }
@@ -438,6 +456,7 @@ const __styleKeys = new WeakMap();
 
 class __Component {
   constructor(props = {}) {
+    this._state = 'new';
     __checkDeclaredProps(this.constructor, this);
     const declared = this.constructor.__props ?? [];
     const extendsTag = this.constructor.__extends ?? null;
@@ -491,17 +510,7 @@ class __Component {
     } catch (e) {
       __popOwner(prevO);
       __popComponent(prevC);
-      // Effects _init created BEFORE the throw are live and
-      // subscribed; nothing will ever mount or unmount this broken
-      // instance, so the frame is their only way out — dispose it on
-      // BOTH failure paths (boundary-handled and rethrow) so the
-      // instance is inert, never a subscription leak.
-      this._frame.dispose();
-      // Mark the instance as failed so parent emit-sites substitute a
-      // placeholder instead of running _create / _setup on a broken
-      // instance (the report-and-continue
-      // contract). If a boundary handles the error, control returns
-      // here; if none exists, __handleComponentError rethrows.
+      this._teardown({ state: 'failed', hooks: false, removeDOM: true });
       this._initFailed = true;
       __handleComponentError(e, this);
       return;
@@ -521,10 +530,7 @@ class __Component {
   // update can never reach — loud, naming the fix. Rest routing under
   // `extends` extends this seam.
   _updateProp(name, value) {
-    // Inert after unmount: a parent's updater effect can outlive a
-    // manually-unmounted child instance — its writes must neither
-    // reach the disposed tree nor grow writers.
-    if (this._unmounted) return;
+    if (this._state === 'failed' || this._state === 'unmounted') return;
     const declared = this.constructor.__props ?? [];
     if (!declared.includes(name)) {
       // Rest routing under `extends`: an undeclared prop's updates
@@ -557,10 +563,7 @@ class __Component {
   // application forks; the container cell is fixed at this root
   _setRestProp(key, value) {
     if (key.startsWith('__bind_')) return;
-    // Post-unmount updates are inert: the instance's frame is
-    // disposed, its DOM detached — a parent updater still holding the
-    // instance must not grow dead writers or drive a detached tree.
-    if (this._unmounted) return;
+    if (this._state === 'failed' || this._state === 'unmounted') return;
     this._rest || (this._rest = {});
     if (value == null) delete this._rest[key];
     else this._rest[key] = value;
@@ -577,10 +580,12 @@ class __Component {
     } finally { __popOwner(tok); }
   }
   _applyRestToInheritedEl() {
+    if (this._state === 'failed' || this._state === 'unmounted') return;
     if (!this._inheritedEl || !this._rest) return;
     for (const key in this._rest) this._applyInheritedProp(this._inheritedEl, key, this._rest[key]);
   }
   _applyInheritedProp(el, key, value) {
+    if (this._state === 'failed' || this._state === 'unmounted') return;
     if (!el || key === 'key' || key === 'ref' || key === 'children' || key.startsWith('__bind_')) return;
     // Each key holds at most ONE live writer: overwriting or deleting
     // a rest key disposes the previous container writer FIRST — and
@@ -663,98 +668,170 @@ class __Component {
     }
     el.setAttribute(key, value);
   }
-  mount(target) {
-    // Remount of an unmounted instance rejects:
-    // its _init-time effects were disposed in the first life and
-    // cannot be revived without re-running _init whole.
-    if (this._unmounted) {
-      throw new Error(
-        `${this.constructor.name || 'component'}: cannot mount an unmounted instance — its effects ` +
-        'were disposed on unmount; construct a new instance',
-      );
+  _beginMount() {
+    if (this._state === 'new') {
+      this._state = 'mounting';
+      return;
     }
-    if (typeof target === 'string') target = document.querySelector(target);
-    this._target = target;
-    // _create / _setup / hooks run with this component current on
-    // BOTH stacks: the component stack (context reads, parent
-    // chains) and the owner frame (effect disposers register here
-    // and fire on unmount).
+    const name = this.constructor.name || 'component';
+    if (this._state === 'mounting') {
+      throw new Error(`${name}: cannot mount an instance whose mount is already in progress`);
+    }
+    if (this._state === 'mounted') {
+      throw new Error(`${name}: cannot mount an already-mounted instance — construct a new instance for another target`);
+    }
+    if (this._state === 'failed') {
+      throw new Error(`${name}: cannot mount a failed instance — its mount rolled back; construct a new instance`);
+    }
+    throw new Error(
+      `${name}: cannot mount an unmounted instance — its effects were disposed on unmount; construct a new instance`,
+    );
+  }
+  _mountCreate() {
+    this._beginMount();
     const prevC = __pushComponent(this);
     const prevO = __pushOwner(this._frame);
+    let failure = null;
+    let failed = false;
     try {
       this._root = this._create();
-      if (this._root) target.appendChild(this._root);
-      // The full lifecycle contract on EVERY mount path
-      //: create → beforeMount → setup → mounted.
-      if (this.beforeMount) this.beforeMount();
-      if (this._setup) this._setup();
-      if (this.mounted) this.mounted();
     } catch (error) {
-      __handleComponentError(error, this);
+      failure = error;
+      failed = true;
     } finally {
       __popOwner(prevO);
       __popComponent(prevC);
     }
-    return this;
+    if (failed) {
+      this._failMount(failure);
+      return false;
+    }
+    return true;
   }
-  unmount({ removeDOM = true } = {}) {
-    // Symmetric to mount: lifecycle hooks, the owner frame's effect
-    // disposers, child components, and (optionally) the DOM.
-    //
-    //   beforeUnmount  - user hook; runs while signals/effects are
-    //                    still live, so user code can read final state.
-    //   children       - cascade BEFORE this instance's disposers so
-    //                    children can react to parent state during
-    //                    their own teardown.
-    //   _frame         - effect disposers registered by __effect
-    //                    through the owner seam.
-    //   unmounted      - user hook; final notification.
-    //   DOM removal    - skipped when the caller wants the old DOM
-    //                    visible until replacement.
-    //
-    // Idempotent: a child can be unmounted by its enclosing factory's
-    // d(detaching) AND later by the parent's unmount cascade.
-    if (this._unmounted) return;
-    this._unmounted = true;
+  _mountSetup(failurePlaceholder = null) {
+    if (this._state !== 'mounting') return this._nodes?.[0] ?? this._root;
+    const prevC = __pushComponent(this);
+    const prevO = __pushOwner(this._frame);
+    let failure = null;
+    let failed = false;
     try {
-      if (this.beforeUnmount) this.beforeUnmount();
-    } catch (e) { console.error('[Rip] beforeUnmount error:', e); }
+      if (failurePlaceholder) {
+        const first = this._nodes?.[0] ?? this._root;
+        if (first?.parentNode) first.parentNode.insertBefore(failurePlaceholder, first);
+      }
+      if (this.beforeMount) this.beforeMount();
+      if (this._setup) this._setup();
+      if (this.mounted) this.mounted();
+      this._state = 'mounted';
+      __detach(failurePlaceholder);
+    } catch (error) {
+      failure = error;
+      failed = true;
+    } finally {
+      __popOwner(prevO);
+      __popComponent(prevC);
+    }
+    if (failed) {
+      this._failMount(failure);
+      return failurePlaceholder;
+    }
+    return this._nodes?.[0] ?? this._root;
+  }
+  _failMount(error) {
+    this._teardown({ state: 'failed', hooks: false, removeDOM: true });
+    __handleComponentError(error, this);
+  }
+  _teardown({ state, hooks, removeDOM }) {
+    if (this._state === 'failed' || this._state === 'unmounted') return;
+    this._state = state;
+    const report = (label, error) => console.error(`[Rip] ${label} error:`, error);
+    if (hooks) {
+      try {
+        if (this.beforeUnmount) this.beforeUnmount();
+      } catch (e) { report('beforeUnmount', e); }
+    }
     if (this._children) {
       for (const child of this._children) {
-        try { child.unmount({ removeDOM }); }
-        catch (e) { console.error('[Rip] child unmount error:', e); }
+        try {
+          if (hooks) child.unmount({ removeDOM });
+          else child._teardown({
+            state: child._state === 'mounted' ? 'unmounted' : 'failed',
+            hooks: false,
+            removeDOM: true,
+          });
+        } catch (e) { report('child teardown', e); }
       }
       this._children = null;
     }
-    this._frame.dispose();
-    // Static template-ref cleanups run AFTER this component's own
-    // effects are disposed (nulling a ref before disposing the
-    // effects that read it could re-run them mid-teardown under the
-    // synchronous scheduler) but before the DOM detaches. Batched so
-    // a forwarded ref notifies still-live parent subscribers exactly
-    // once.
+    try { this._frame?.dispose(); } catch (e) { report('owner disposal', e); }
+    if (this._restWriters) {
+      for (const writer of Object.values(this._restWriters)) {
+        try { writer(); } catch (e) { report('rest writer cleanup', e); }
+      }
+      this._restWriters = null;
+    }
+    if (this._restHandlers) {
+      if (this._inheritedEl) {
+        for (const [key, handler] of Object.entries(this._restHandlers)) {
+          try { this._inheritedEl.removeEventListener(key.slice(1).split('.')[0], handler); }
+          catch (e) { report('rest handler cleanup', e); }
+        }
+      }
+      this._restHandlers = null;
+    }
     if (this._refCleanups) {
       const cleanups = this._refCleanups;
       this._refCleanups = null;
-      __batch(() => {
-        for (const c of cleanups) {
-          try { c(); } catch (e) { console.error('[Rip] ref cleanup error:', e); }
-        }
-      });
+      try {
+        __batch(() => {
+          for (const c of cleanups) {
+            try { c(); } catch (e) { report('ref cleanup', e); }
+          }
+        });
+      } catch (e) { report('ref cleanup batch flush', e); }
     }
-    try {
-      if (this.unmounted) this.unmounted();
-    } catch (e) { console.error('[Rip] unmounted error:', e); }
+    if (hooks) {
+      try {
+        if (this.unmounted) this.unmounted();
+      } catch (e) { report('unmounted', e); }
+    }
     if (removeDOM) {
       if (this._nodes) {
-        // Multi-root: detach each captured top-level node (the _root
-        // fragment is empty and owns nothing).
-        for (const n of this._nodes) __detach(n);
-      } else if (this._root && this._root.parentNode) {
-        this._root.parentNode.removeChild(this._root);
+        for (const n of this._nodes) {
+          try { __detach(n); } catch (e) { report('DOM detach', e); }
+        }
+      } else {
+        try { __detach(this._root); } catch (e) { report('DOM detach', e); }
       }
     }
+    this._target = null;
+    this._root = null;
     this._nodes = null;
+    this._children = null;
+    this._refCleanups = null;
+    this._restWriters = null;
+    this._restHandlers = null;
+    this._inheritedEl = null;
+  }
+  mount(target) {
+    if (!this._mountCreate()) return this;
+    try {
+      if (typeof target === 'string') target = document.querySelector(target);
+      this._target = target;
+      if (this._root) target.appendChild(this._root);
+    } catch (error) {
+      this._failMount(error);
+      return this;
+    }
+    this._mountSetup();
+    return this;
+  }
+  unmount({ removeDOM = true } = {}) {
+    if (this._state === 'failed' || this._state === 'unmounted') return;
+    if (this._state === 'mounting') {
+      throw new Error(`${this.constructor.name || 'component'}: cannot unmount while mounting`);
+    }
+    this._teardown({ state: 'unmounted', hooks: this._state === 'mounted', removeDOM });
   }
   // emit dispatches on the live root; outside that window the event
   // could only vanish (no root before mount) or dispatch into a
@@ -763,7 +840,7 @@ class __Component {
   // lifetime, so the child protocol (a parent's create phase sets the
   // child's _root) opens it exactly like a direct mount() does.
   emit(name, detail) {
-    if (!this._root || this._unmounted) {
+    if (this._state !== 'mounted' || !this._root) {
       throw new Error(
         `${this.constructor.name || 'component'}: emit('${name}') outside the mounted window — ` +
         'emit dispatches on the live root; call after mount and before unmount',

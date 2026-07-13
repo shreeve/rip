@@ -14,9 +14,10 @@
 // needs one of these must extend the stub DELIBERATELY (add the
 // feature AND remove its line here in the same commit), never bend
 // around a silent absence:
-//   - event.target / event.currentTarget: dispatch invokes listeners
-//     with the event object as-is — assert on detail and listener
-//     logs, never on targets
+//   - automatic event.target / event.currentTarget population:
+//     dispatch invokes listeners with the event object as-is, so
+//     ownership-sensitive tests provide target explicitly and events
+//     without one remain targetless
 //   - attribute→property reflection: setAttribute('value', …) never
 //     writes el.value; direct property writes are plain JS properties
 //     with no attribute echo
