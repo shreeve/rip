@@ -1,0 +1,318 @@
+# Synchronous DOM subset for server-side email rendering.
+
+export class Node
+  nodeType: number = 0
+  parentNode: Node | null = null
+  childNodes: Node[] = []
+  _next: Node | null = null
+  _previous: Node | null = null
+
+  appendChild: (child: Node): Node ->
+    child.remove() if child.parentNode
+    if child instanceof Fragment
+      for nested in [...child.childNodes]
+        @appendChild nested
+      return child
+
+    previous = @childNodes[-1] ?? null
+    previous._next = child if previous
+    child._previous = previous
+    child._next = null
+    child.parentNode = this
+    @childNodes.push child
+    child
+
+  insertBefore: (child: Node, reference: Node | null): Node ->
+    return @appendChild(child) unless reference
+    child.remove() if child.parentNode
+    if child instanceof Fragment
+      for nested in [...child.childNodes]
+        @insertBefore nested, reference
+      return child
+
+    index = @childNodes.indexOf reference
+    return @appendChild(child) if index is -1
+
+    previous = reference._previous
+    previous._next = child if previous
+    child._previous = previous
+    child._next = reference
+    reference._previous = child
+    child.parentNode = this
+    @childNodes.splice index, 0, child
+    child
+
+  removeChild: (child: Node): Node ->
+    index = @childNodes.indexOf child
+    return child if index is -1
+
+    previous = child._previous
+    following = child._next
+    previous._next = following if previous
+    following._previous = previous if following
+    child._previous = null
+    child._next = null
+    child.parentNode = null
+    @childNodes.splice index, 1
+    child
+
+  remove: (): void ->
+    @parentNode?.removeChild this
+
+Object.defineProperty Node.prototype, 'nextSibling',
+  get: -> @_next
+  enumerable: true
+
+Object.defineProperty Node.prototype, 'previousSibling',
+  get: -> @_previous
+  enumerable: true
+
+Object.defineProperty Node.prototype, 'textContent',
+  get: -> (@childNodes.map (child) -> _textContent(child)).join('')
+  set: (value) ->
+    for child in @childNodes
+      child.parentNode = null
+      child._previous = null
+      child._next = null
+    @childNodes = []
+    @appendChild(Text.new(String(value))) if value? and value isnt ''
+  enumerable: true
+
+export class Element extends Node
+  nodeType: number = 1
+  tag: string = ''
+  attributes: Map<string, string> = new Map()
+  style: Record<string, any> = {}
+  _innerHTML: string | null = null
+
+  constructor: (tag: string) ->
+    super()
+    @tag = tag
+
+  setAttribute: (key: string, value: any): void ->
+    if key is 'style'
+      if value isnt null and typeof value is 'object'
+        Object.assign @style, value
+      else
+        @_parseStyleString String(value)
+    else
+      @attributes.set key, String(value)
+
+  getAttribute: (key: string): string | null ->
+    @attributes.get(key) ?? null
+
+  removeAttribute: (key: string): boolean ->
+    @attributes.delete key
+
+  toggleAttribute: (key: string, force?: boolean): boolean ->
+    wanted = if force? then force else not @attributes.has(key)
+    if wanted then @attributes.set(key, '') else @attributes.delete(key)
+    wanted
+
+  addEventListener: (): void ->
+  removeEventListener: (): void ->
+  dispatchEvent: (): boolean -> true
+
+  _parseStyleString: (source: string): void ->
+    for raw in source.split(';')
+      declaration = raw.trim()
+      continue unless declaration
+      colon = declaration.indexOf(':')
+      continue if colon is -1
+      property = declaration.slice(0, colon).trim()
+      value = declaration.slice(colon + 1).trim()
+      camel = property.replace /-([a-z])/g, (_, letter) -> letter.toUpperCase()
+      @style[camel] = value
+
+Object.defineProperty Element.prototype, 'id',
+  get: -> @attributes.get('id') ?? ''
+  set: (value) -> @attributes.set('id', String(value))
+  enumerable: true
+
+Object.defineProperty Element.prototype, 'className',
+  get: -> @attributes.get('class') ?? ''
+  set: (value) ->
+    if value then @attributes.set('class', String(value)) else @attributes.delete('class')
+  enumerable: true
+
+Object.defineProperty Element.prototype, 'innerHTML',
+  get: -> @_innerHTML
+  set: (value) -> @_innerHTML = String(value)
+  enumerable: true
+
+Object.defineProperty Element.prototype, 'innerText',
+  get: -> @textContent
+  set: (value) -> @textContent = value
+  enumerable: true
+
+Object.defineProperty Element.prototype, 'value',
+  get: -> @attributes.get('value')
+  set: (value) -> @attributes.set('value', String(value))
+  enumerable: true
+
+Object.defineProperty Element.prototype, 'checked',
+  get: -> @attributes.has('checked')
+  set: (value) ->
+    if value then @attributes.set('checked', '') else @attributes.delete('checked')
+  enumerable: true
+
+export class Text extends Node
+  nodeType: number = 3
+  data: string = ''
+
+  constructor: (data: string = '') ->
+    super()
+    @data = data
+
+Object.defineProperty Text.prototype, 'textContent',
+  get: -> @data
+  set: (value) -> @data = String(value)
+  enumerable: true
+
+export class Comment extends Node
+  nodeType: number = 8
+  data: string = ''
+
+  constructor: (data: string = '') ->
+    super()
+    @data = data
+
+export class Fragment extends Node
+  nodeType: number = 11
+
+export class Document
+  head: Element
+  body: Element
+  __ripRenderActive: boolean = false
+
+  constructor: ->
+    @head = Element.new 'head'
+    @body = Element.new 'body'
+
+  createElement: (tag: string): Element -> Element.new tag
+  createElementNS: (_namespace: string, tag: string): Element -> Element.new tag
+  createTextNode: (value: any): Text -> Text.new String(value)
+  createComment: (value: any): Comment -> Comment.new String(value)
+  createDocumentFragment: (): Fragment -> Fragment.new()
+
+VOID_TAGS =! new Set %w[area base br col embed hr img input link meta source track wbr]
+BLOCK_TAGS =! new Set %w[p div td li dt dd blockquote figcaption address]
+HEADING_TAGS =! new Set %w[h1 h2 h3 h4 h5 h6]
+SKIP_TEXT_TAGS =! new Set %w[style script head]
+
+escapeText = (value: any): string ->
+  String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+
+escapeAttribute = (value: any): string ->
+  String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+
+styleText = (style: Record<string, any>): string ->
+  declarations = []
+  for key, value of style
+    continue unless value?
+    property = key.replace /[A-Z]/g, (letter) -> "-#{letter.toLowerCase()}"
+    declarations.push "#{property}:#{value}"
+  declarations.join ';'
+
+serializeAttributes = (element: Element): string ->
+  parts = []
+
+  parts.push " id=\"#{escapeAttribute(element.id)}\"" if element.attributes.has('id')
+
+  classes = element.attributes.get 'class'
+  parts.push " class=\"#{escapeAttribute(classes)}\"" if classes
+
+  inlineStyle = styleText element.style
+  parts.push " style=\"#{escapeAttribute(inlineStyle)}\"" if inlineStyle
+
+  for [key, value] in element.attributes
+    continue if key is 'id' or key is 'class'
+    if value is ''
+      parts.push " #{key}"
+    else
+      parts.push " #{key}=\"#{escapeAttribute(value)}\""
+
+  parts.join ''
+
+export serialize = (node: Node): string ->
+  return escapeText(node.data) if node instanceof Text
+
+  if node instanceof Comment
+    return '' if node.data is '' or node.data is 'if' or node.data is 'for' or node.data is 'unknown'
+    return "<!--#{node.data}-->"
+
+  return serializeChildren(node) if node instanceof Fragment
+
+  if node instanceof Element
+    return serializeChildren(node) if node.tag is '__root'
+    attributes = serializeAttributes node
+    return "<#{node.tag}#{attributes}>#{node._innerHTML}</#{node.tag}>" if node._innerHTML?
+    return "<#{node.tag}#{attributes} />" if VOID_TAGS.has node.tag
+    return "<#{node.tag}#{attributes}>#{serializeChildren(node)}</#{node.tag}>"
+
+  ''
+
+export serializeChildren = (node: Node): string ->
+  (node.childNodes.map (child) -> serialize child).join ''
+
+_textContent = (node: Node): string ->
+  return node.data if node instanceof Text
+  return '' if node instanceof Comment
+  (node.childNodes.map (child) -> _textContent child).join ''
+
+walkText = (node: Node, parts: string[]): void ->
+  if node instanceof Text
+    parts.push node.data
+    return
+
+  return if node instanceof Comment
+
+  if node instanceof Fragment
+    walkText(child, parts) for child in node.childNodes
+    return
+
+  return unless node instanceof Element
+  return if SKIP_TEXT_TAGS.has node.tag
+  return if node.attributes.get('data-skip-in-text') is 'true'
+  return if node._innerHTML?
+
+  if node.tag is 'br'
+    parts.push '\n'
+    return
+
+  if node.tag is 'hr'
+    parts.push '\n---\n'
+    return
+
+  if node.tag is 'img'
+    alt = node.attributes.get 'alt'
+    parts.push alt if alt
+    return
+
+  if node.tag is 'a'
+    href = node.attributes.get 'href'
+    text = _textContent node
+    if href and text and href isnt text
+      parts.push "#{text} (#{href})"
+    else
+      parts.push text
+    return
+
+  heading = HEADING_TAGS.has node.tag
+  block = BLOCK_TAGS.has(node.tag) or heading
+  parts.push '\n\n' if heading
+  parts.push '\n' if block and not heading
+  walkText(child, parts) for child in node.childNodes
+  parts.push '\n\n' if heading
+  parts.push '\n' if block and not heading
+
+export toPlainText = (node: Node): string ->
+  parts = []
+  walkText node, parts
+  parts.join('').replace(/\n{3,}/g, '\n\n').trim()
