@@ -208,6 +208,29 @@ hashes. It is never committed or shipped.
 Synthetic generated ranges do not receive fabricated Rip positions.
 Diagnostics without an honest source mapping are dropped.
 
+## Project configuration
+
+The nearest `package.json` is the project boundary. Its `rip` object
+controls editor presentation:
+
+```json
+{
+  "rip": {
+    "strict": true,
+    "noCheck": ["vendor/**"]
+  }
+}
+```
+
+`strict` surfaces implicit-any diagnostics and enables
+use-before-assignment checking for typed forwards. `noCheck` suppresses
+diagnostics for matching paths while keeping those files in the
+TypeScript program so imports continue to resolve.
+
+Configuration changes refresh open editor documents without a window
+reload. The headless checker and its `checkAll` coverage policy remain
+roadmap work.
+
 ## Correctness gates
 
 - **Erasure:** typed and untyped twins emit identical JavaScript.

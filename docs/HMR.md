@@ -35,13 +35,15 @@ reload is a fallback, not the default once framework refresh exists.
 
 ## Current baseline
 
-The development server watches files and notifies browsers over SSE.
-Stylesheets receive a cache-busted soft update. Other changes reload the
-page, and reconnection reloads once to restore synchronization.
+Rip currently compiles and runs modules through Bun and can emit feature
+runtimes inline or by import. It does not ship a browser entry, app
+framework, development server, watch transport, module graph, or
+state-preserving refresh.
 
-There is no module accept protocol, component definition registry, or
-state-preserving refresh. The current product behavior is therefore
-live reload with a CSS path.
+HMR therefore depends on the browser-delivery, app, and server
+foundations in `ROADMAP.md`. The first HMR phase establishes an honest
+last-known-good reload path; later phases add module and framework
+refresh.
 
 ## Two-layer architecture
 
@@ -222,9 +224,9 @@ remount, or reload.
 
 ### Phase 0 — honest live reload
 
-- document current behavior;
-- provide a clear compile-failure overlay;
-- keep CSS soft updates and full-reload fallback.
+- connect browser delivery to the development server;
+- provide revisioned reload notifications and a compile-failure overlay;
+- add CSS soft updates and full-reload fallback.
 
 Exit: no product surface claims state-preserving HMR.
 

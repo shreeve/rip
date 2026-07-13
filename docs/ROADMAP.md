@@ -38,6 +38,79 @@ The complete contract includes router prefetch metadata, stash-backed
 member binding, keyed gate families, and the app/router consumer.
 Gate syntax lands with that subsystem, not as an unread metadata stub.
 
+## Package and application portfolio
+
+The compiler, feature runtimes, schema/ORM core, and editor integrations
+are present. The first-party application and package portfolio remains
+open work.
+
+### Package substrate
+
+Before packages accumulate, define one package contract:
+
+- package layout, exports, and named-only public APIs;
+- direct package test commands through the Rip loader;
+- package-specific dependency budgets without adding dependencies or
+  workspace behavior to the compiler root;
+- browser-safe metadata and bundle discovery;
+- CLI subcommand discovery for package-provided tools;
+- declaration, strict-check, and public-surface audit gates.
+
+The substrate is a prerequisite for publishing and cross-package imports,
+but it must not block direct-path package implementation and tests.
+
+The UI Tailwind boundary may depend on exactly pinned `tailwindcss` and
+`css-tree` packages. `packages/ui/tailwind` is their sole owner; email
+and browser components consume its internal API rather than importing
+those dependencies directly. The compiler root remains dependency- and
+workspace-free.
+
+### Application foundation
+
+- **App:** stash, resources, timing helpers, component registry,
+  file-based router, renderer, launch, and ARIA helpers.
+- **Validate:** the shared `read()`/normalization vocabulary and schema
+  coercer registration.
+- **Server:** routing, middleware, sessions, OpenAPI, static/app serving,
+  worker management, TLS/proxy support, and development watch transport.
+- **UI:** shared rendering/styles, browser widgets, email components,
+  and Tailwind integration.
+- **Database:** database client, embedding/adapter surfaces, and CLI.
+
+The app framework precedes render gates because it owns the stash and
+router consumer. Validate precedes server. Shared UI rendering precedes
+email components.
+
+### Independent libraries and tools
+
+The remaining first-party portfolio includes HTTP, CSV, time, decimal,
+XML, X12, worker-swarm, interactive scripting, source printing, AI/MCP,
+authentication gate, and host provisioning packages. Each package earns
+its place through an independently runnable contract and current Rip
+types; implementations are reconsidered rather than copied mechanically.
+
+### Browser delivery
+
+The browser product needs:
+
+- a browser entry and self-contained bundle;
+- `<script type="text/rip">` compilation/loading;
+- module and browser-safe package graph handling;
+- bundle freshness and forbidden-dependency gates;
+- integration with the app framework and development server.
+
+This delivery layer is distinct from compiler runtime `inline`/`import`
+emission.
+
+### CLI completeness
+
+Open CLI surfaces include:
+
+- a headless project type checker;
+- an interactive REPL;
+- package tool/subcommand dispatch;
+- package linking or an equivalent source-development workflow.
+
 ## Language candidates
 
 These candidates are evidence-backed but not accepted features.
@@ -99,6 +172,27 @@ object.data-src = value
 
 Bracket access remains the language spelling.
 
+### Schema identity through value selection
+
+A direct schema binding receives its assignment name for diagnostics,
+registry identity, and debugging. A schema selected through a
+value-position `if`, `try`, or `switch` does not currently receive the
+outer binding name:
+
+```rip
+Selected = if individual
+  schema :shape
+    firstName! string
+    lastName! string
+else
+  schema :shape
+    companyName! string
+```
+
+The selected schema's `name` is `null`. A complete design must tunnel
+identity without changing branch evaluation, mappings, or anonymous
+schema behavior.
+
 ## Type and editor directions
 
 ### Headless checking
@@ -113,17 +207,13 @@ Rip source → TS face → TypeScript diagnostics → Rip mappings
 The command must share configuration, mapping, and diagnostic
 translation with the extension.
 
-### Strictness configuration
+### Bare optional parameters under strict checking
 
-Define project-level control over implicit-any suppression and
-definite-assignment behavior without creating a second language
-dialect.
-
-### Rename deduplication
-
-Hoist and assignment manifestations can share source spans. Workspace
-rename must collapse coincident edits before producing a
-`WorkspaceEdit`.
+An untyped optional parameter emits the valid TypeScript spelling
+`name?`, whose value type remains implicit `any`. A strict project asks
+for missing annotations to be diagnosed, so the language must choose
+and pin one contract: surface the diagnostic, or render an explicit
+`name?: any` matching declaration output.
 
 ### Whole-workspace features
 
