@@ -7504,9 +7504,9 @@ class Emitter {
       for (const arg of domItems) buildChild(arg);
     }
 
-    // ── The instantiation protocol (the fixed shape over the owner
-    // seam: the child's frame pushed around _create and the lifecycle
-    // calls, so its effects die on ITS unmount, never the parent's) ──
+    // ── The instantiation protocol. Child creation and setup use the
+    // runtime's mount transaction, so root and child paths share one
+    // state machine and rollback owner. ──
     // The braced scaffold consts mint against every name the
     // construct spells (module-level `__` names read inside prop
     // values must not be captured).
@@ -7514,11 +7514,7 @@ class Emitter {
     if (rec.vars !== null) for (const v of rec.vars) used.add(v);
     if (isNode(node)) Emitter.collectLeafNames(node, used);
     const prevV = Emitter.mintName('__prev', used);
-    const cprevV = Emitter.mintName('__cprev', used);
-    const coV = Emitter.mintName('__co', used);
-    const ueV = Emitter.mintName('__ue', used);
     const errV = Emitter.mintName('__childErr', used);
-    const hookErrV = Emitter.mintName('__e', used);
     if (rec.kind !== 'class') rec.hasKids = true;
 
     const line = (fn) => this.renderLine(markNode, fn, false);
@@ -7560,22 +7556,27 @@ class Emitter {
       this.b.emit(');');
     });
     line(() => this.b.emit(`if (${instVar} && ${instVar}._initFailed) {`));
-    line(() => this.b.emit(`  try { ${instVar}.unmount({removeDOM: false}); } catch (${ueV}) { console.error('[Rip] partial-init unmount error:', ${ueV}); }`));
     line(() => this.b.emit(`  ${instVar} = null;`));
     line(() => this.b.emit(`  ${elVar} = document.createComment('rip:child-init-failed: ${name}');`));
-    line(() => this.b.emit('} else {'));
-    line(() => this.b.emit(`  { const ${cprevV} = __pushComponent(${instVar}); const ${coV} = __pushOwner(${instVar}._frame); try {`));
-    line(() => this.b.emit(`    ${elVar} = ${instVar}._root = ${instVar}._create();`));
-    line(() => this.b.emit(`  } finally { __popOwner(${coV}); __popComponent(${cprevV}); } }`));
+    line(() => {
+      this.b.emit(`} else if (`);
+      const emitCreate = () => this.b.emit(`${instVar}._mountCreate()`);
+      if (markNode !== null) this.mark(markNode, '$self', emitCreate);
+      else emitCreate();
+      this.b.emit(') {');
+    });
+    line(() => this.b.emit(`  ${elVar} = ${instVar}._root;`));
     if (rec.kind === 'class') {
       line(() => this.b.emit(`  (this._children || (this._children = [])).push(${instVar});`));
     } else {
       line(() => this.b.emit(`  ${rec.kidsVar}.push(${instVar});`));
     }
+    line(() => this.b.emit('} else {'));
+    line(() => this.b.emit(`  ${instVar} = null;`));
+    line(() => this.b.emit(`  ${elVar} = document.createComment('rip:child-error: ${name}');`));
     line(() => this.b.emit('}'));
     line(() => this.b.emit(`} catch (${errV}) {`));
     line(() => this.b.emit(`  console.error('[Rip] ${name} construction failed:', ${errV});`));
-    line(() => this.b.emit(`  if (${instVar}) { try { ${instVar}.unmount({removeDOM: false}); } catch (${ueV}) { console.error('[Rip] partial-child unmount error:', ${ueV}); } }`));
     line(() => this.b.emit(`  ${instVar} = null;`));
     line(() => this.b.emit(`  ${elVar} = document.createComment('rip:child-error: ${name}');`));
     line(() => this.b.emit('}'));
@@ -7594,18 +7595,28 @@ class Emitter {
       });
     }
 
-    // ── Setup: the once-latched lifecycle (the fixed shape over the owner
-    // seam), then the reactive-prop updaters through _updateProp ──
+    // ── Setup: the runtime state machine makes this phase exactly
+    // once and returns the authoritative node at the child's position.
+    // On failure that is the marker, so every later move/destroy reads
+    // the placeholder rather than the detached failed root. ──
     rec.setups.push({
       kind: 'raw',
       fn: (pad) => {
         this.b.emit(pad);
-        const emitLatch = () => this.b.emit(
-          `if (${instVar} && !${instVar}._isSetup) { ${instVar}._isSetup = true; ` +
-          `const ${cprevV} = __pushComponent(${instVar}); const ${coV} = __pushOwner(${instVar}._frame); try { ` +
-          `try { if (${instVar}.beforeMount) ${instVar}.beforeMount(); if (${instVar}._setup) ${instVar}._setup(); ` +
-          `if (${instVar}.mounted) ${instVar}.mounted(); } catch (${hookErrV}) { __handleComponentError(${hookErrV}, ${instVar}); } ` +
-          `} finally { __popOwner(${coV}); __popComponent(${cprevV}); } }`);
+        const emitLatch = () => {
+          this.b.emit(
+            `if (${instVar} && ${instVar}._state === 'mounting') {\n` +
+            `${pad}  ${elVar} = ${instVar}._mountSetup(document.createComment('rip:child-error: ${name}'));\n`,
+          );
+          if (rec.kind !== 'class') {
+            this.b.emit(`${pad}  `);
+            if (this.ts) this.b.tsOnly(() => this.b.emit('('));
+            this.b.emit('this');
+            if (this.ts) this.b.tsOnly(() => this.b.emit(' as any)'));
+            this.b.emit(`._first = ${elVar};\n`);
+          }
+          this.b.emit(`${pad}}`);
+        };
         if (markNode !== null) this.mark(markNode, '$self', emitLatch);
         else emitLatch();
         this.b.emit('\n');
