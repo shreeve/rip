@@ -35,6 +35,7 @@ fail "if filter rejected for object-destructured target", "r = (1 for {x: y} in 
 
 # Scope-aware: a nested comprehension that rebinds the name is its own scope,
 # so this is NOT a leak and must still compile.
+
 test "nested comprehension rebinding name is not a leak", '''
   a = [1, 2]
   b = [3]
@@ -44,6 +45,7 @@ test "nested comprehension rebinding name is not a leak", '''
 
 # An object-destructure KEY is not a binding, so referencing the key name in
 # the guard is a legit outer reference, not a loop-var leak.
+
 test "object-destructure key in guard is not a leak", '''
   x = 9
   pairs = [{k: 1}]
@@ -74,6 +76,7 @@ test "comprehension range", "(x * x for x in [1..5])", [1, 4, 9, 16, 25]
 test 'string comprehension', "(c.toUpperCase() for c in 'abc')", ['A', 'B', 'C']
 
 # Comprehension with destructuring
+
 test 'comprehension with array destructuring', '''
   pairs = [[1,2], [3,4], [5,6]]
   (a + b for [a, b] in pairs)
@@ -83,6 +86,7 @@ test 'comprehension with array destructuring', '''
 test 'empty comprehension', "(x for x in [] when x > 0)", []
 
 # Comprehension with break
+
 test 'comprehension with break', '''
   result = for i in [1..10]
     break if i > 3
@@ -91,6 +95,7 @@ test 'comprehension with break', '''
   ''', [1, 2, 3]
 
 # Comprehension with continue
+
 test 'comprehension with continue', '''
   result = for i in [1..5]
     continue if i == 3
@@ -99,6 +104,7 @@ test 'comprehension with continue', '''
   ''', [1, 2, 4, 5]
 
 # Nested comprehensions should use plain loops (not nested IIFEs)
+
 test "nested comprehension side effects", '''
   count = 0
   for x in [1, 2]
@@ -126,12 +132,14 @@ test "object comprehension keys only", "{k: k for k of {a: 1, b: 2}}", {a: 'a', 
 test "object comprehension when", "{k: v for k, v of {a: 1, b: 2, c: 3} when v > 1}", {b: 2, c: 3}
 
 # Object comprehension values
+
 test 'object comprehension values', '''
   obj = {a: 1, b: 2, c: 3}
   {k: v * 2 for k, v of obj}
   ''', {a: 2, b: 4, c: 6}
 
 # Object comprehension key-value
+
 test 'object comprehension key-value', '''
   {k: k for k, v of {x: 1, y: 2}}
   ''', {x: 'x', y: 'y'}
@@ -197,6 +205,7 @@ test "no iife with guard", '''
   ''', [3, 4, 5]
 
 # Forward for-of comprehension (for k, v of obj in value context returns array)
+
 test "forward for-of comprehension", '''
   obj = { a: 1, b: 2, c: 3 }
   result = for k, v of obj
@@ -218,6 +227,7 @@ test "forward for-of comprehension", '''
 # (1) skips auto-collect for `loop`/`while` (which have no comprehension
 # wrapping path) and (2) consume-and-clears comprehensionTarget at the
 # direct-target site so nested comprehensions always get their own IIFE.
+
 test "parenthesized comprehension RHS keeps own IIFE inside outer loop", '''
   fn = (input) ->
     done = false
@@ -230,6 +240,7 @@ test "parenthesized comprehension RHS keeps own IIFE inside outer loop", '''
 
 # Companion test — same shape, but with an object comprehension `for own ... of`,
 # matching the original solar.rip:723 pattern more closely.
+
 test "for-own-of comprehension RHS keeps own IIFE inside outer loop", '''
   fn = ->
     done = false
@@ -244,6 +255,7 @@ test "for-own-of comprehension RHS keeps own IIFE inside outer loop", '''
 # Negative companion — the auto-return-loop wrapping must continue to work for
 # `for-in` / `for-of` / `for-as` (the legitimate cases where _result is wired
 # up via the comprehension wrapping path).
+
 test "for-in as last stmt of fn still auto-collects to _result", '''
   fn = ->
     for x in [1, 2, 3]
@@ -311,6 +323,7 @@ test "postfix for as iter on implicit call", '''
 # Negative regression: prefix FOR after `:` in implicit object literal
 # must still keep the object open (this previously failed when the postfix
 # detection was too eager).
+
 test "prefix for as object property value still parses", '''
   items = ['a', 'b']
   data =
@@ -321,6 +334,7 @@ test "prefix for as object property value still parses", '''
   ''', [2, 'A', 99]
 
 # Negative regression: prefix FOR as RHS of assignment still parses.
+
 test "prefix for as assignment RHS still parses", '''
   fn = ->
     nums = for x in [1, 2, 3]
@@ -364,6 +378,7 @@ test "a tail loop with a return inside stays a statement (the return crosses out
 test 'comprehension by 2', '(x for x in [0...10] by 2)', [0, 2, 4, 6, 8]
 test 'comprehension by 3', '(x * 2 for x in [0...12] by 3)', [0, 6, 12, 18]
 test 'comprehension by step with guard', '(x for x in [0...20] by 2 when x > 5)', [6, 8, 10, 12, 14, 16, 18]
+
 test 'ranged by negative literal descends', '''
   out = []
   for i in [10..0] by -2

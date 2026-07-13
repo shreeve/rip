@@ -20,6 +20,7 @@ code "import preserve ext", 'import foo from "./foo.mjs"', "import foo from './f
 code "import json", 'import data from "./config.json"', "import data from './config.json';"
 
 # Multiple imports in one file (import hoisting and path fixing)
+
 code "multiple imports", '''
   import React from "react"
   import { useState } from "react"
@@ -57,6 +58,7 @@ code "export function", "export def add(a, b)\n  a + b", "export function add(a,
 code "export named", "export { x, y }", "export { x, y };"
 
 # Export alias — assigning an existing identifier to a new exported name
+
 code "export alias identifier", '''
   foo = -> 42
   export bar = foo

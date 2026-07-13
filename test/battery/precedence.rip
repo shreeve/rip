@@ -48,6 +48,7 @@ test "?? keeps empty string from call", "fn = (x) -> x\nfn '' ?? 'default'", ""
 test "?? keeps zero from call", "fn = (x) -> x\nfn 0 ?? 99", 0
 
 # ?? parses the same as || at the implicit-call boundary
+
 code "?? ends implicit call like or", '''
   fn = (x) -> x
   x = fn null ?? 'd'
@@ -119,6 +120,7 @@ test "multiple props with and", "foo = 'yes'\nx = { a: foo and 'A', b: 'B' }\nx.
 test "nested object with or", "foo = null\nx = { outer: { inner: foo or 'default' } }\nx.outer.inner", "default"
 
 # Multi-line implicit object with or (the original bug case)
+
 code "multiline object with or", '''
       foo = null
       x =
@@ -134,6 +136,7 @@ code "multiline object with or", '''
 test "multiline object with or runtime", "foo = null\nx = { a: foo or 'default', b: 'other' }\nx.a + x.b", "defaultother"
 
 # Real-world pattern: Response headers with defaults
+
 test "headers with or defaults", """
   req = { headers: { get: (k) -> null } }
   headers =
@@ -177,6 +180,7 @@ test "return if truthy", "fn = (flag) ->\n  return 'early' if flag\n  'normal'\n
 test "return if falsy", "fn = (flag) ->\n  return 'early' if flag\n  'normal'\nfn false", "normal"
 
 # code generation tests
+
 code "return unless generates if statement", """
   f = ->
     return binaryResponse serializeErrorResult 'Error' unless sql

@@ -27,6 +27,7 @@ test "array length property", "[1, 2, 3].length", 3
 
 # Trailing commas
 test "trailing comma simple", "[1, 2, 3,].length", 3
+
 test "trailing comma multiline", '''
   arr = [
     1, 2, 3,
@@ -80,6 +81,7 @@ test "nested object", "x = {a: {b: 10}}; x.a.b", 10
 # Computed property names
 test "computed property", 'key = "name"\nx = {[key]: "value"}\nx.name', "value"
 test "computed property expression", "x = {[1 + 1]: \"two\"}\nx[2]", "two"
+
 code "computed property code", "{[key]: value}", "({[key]: value})"
 
 # Subtraction / negation must remain intact — the no-space rule is the disambiguator.
@@ -91,6 +93,7 @@ test "unary negation unchanged", '(-5)', -5
 # showing subtraction still reaches the RHS even when the first `-` sits
 # tight against its left operand and the second operand starts on the
 # next (indented) line.
+
 test "hyphen with newline does not compound", '''
 a = 100
 b = 30
@@ -101,6 +104,7 @@ x
 
 # Destructuring with an explicit string key + binding name works — this
 # is the canonical way to destructure a hyphen-keyed object.
+
 test "compound-key destructuring with explicit renaming", '''
   o = { "data-src": 1, b: 2 }
   { "data-src": ds, b } = o
@@ -111,6 +115,7 @@ test "compound-key destructuring with explicit renaming", '''
 # can't contain hyphens, so `{ data-src } = o` has no valid local
 # binding to introduce and must be rejected by the parser. Use the
 # explicit `{ "data-src": ds } = o` form instead (above test).
+
 fail "compound-key destructuring shorthand is rejected", '''
   o = { "data-src": 1 }
   { data-src } = o
@@ -300,6 +305,7 @@ test "nested implicit object with postfix conditional", '''
   ''', [2, 3, 4]
 
 # Single-line statement guard is unchanged: the call itself is conditional
+
 test "single-line object guard still guards the call", '''
   calls = 0
   f = (o) -> calls += 1
@@ -315,13 +321,10 @@ code "first-line conditional keeps one object", "foo\n  a: 1 if c else 2\n  b: 3
 # ==============================================================================
 
 test 'dotted key simple', 'o = { a.b: 1 }; o["a.b"]', 1
-
 test 'dotted key triple', 'o = { one.two.three: 44 }; o["one.two.three"]', 44
-
 test 'dotted key mixed', 'o = { one.two.three: 44, five: 66 }; o["one.two.three"] + o.five', 110
 
 code 'dotted key codegen', '{ a.b: 1 }', '({\'a.b\': 1})'
-
 code 'dotted key triple codegen', '{ one.two.three: 44 }', '({\'one.two.three\': 44})'
 
 test 'dotted key implicit object', '''
@@ -339,7 +342,6 @@ test 'dotted key implicit siblings', '''
 ''', 3
 
 test 'hyphen key simple', 'o = { data-src: 1 }; o["data-src"]', 1
-
 test 'hyphen key triple', 'o = { a-b-c: 7 }; o["a-b-c"]', 7
 
 test 'hyphen key implicit siblings', '''
@@ -354,13 +356,11 @@ test 'hyphen key mixed with normal', 'o = { data-x: 1, static: 2, foo-bar-baz: 4
 code 'hyphen key codegen', '{ data-src: 1 }', '({\'data-src\': 1})'
 
 test 'mixed key dot-hyphen', 'o = { beta-site.amazon.com: 100 }; o["beta-site.amazon.com"]', 100
-
 test 'mixed key hyphen-dot', 'o = { api.v1-beta.example.com: 200 }; o["api.v1-beta.example.com"]', 200
 
 code 'mixed key codegen', '{ beta-site.amazon.com: 1 }', '({\'beta-site.amazon.com\': 1})'
 
 test 'spaced minus in a value stays subtraction', 'a = 5\nb = 3\no = { k: a - b }\no.k', 2
-
 test 'ternary colon after a member read is not a key', 'd = {p: 9}\nc = 1\nc ? d.p : 0', 9
 
 # ==============================================================================
@@ -372,12 +372,15 @@ test 'interpolated string key', '''
   o = {"#{k}": 42}
   o.x
 ''', 42
+
 test 'interpolated string key access', '''
   n = "name"
   o = {"#{n}": "Alice"}
   o.name
 ''', 'Alice'
+
 test 'interpolated key with surrounding text', 'k = "x"\no = {"pre#{k}post": 1}\no.prexpost', 1
+
 code 'interpolated key compiles to a computed key', 'k = "x"\no = {"#{k}": 42}', 'let k = "x";\n\nlet o = {[`${k}`]: 42};'
 
 # ==============================================================================
@@ -518,6 +521,7 @@ test 'a function named optindex is callable', '''
 # `#` comments run to end of line — there is no inline block-comment
 # form, so a comment can never sit INSIDE a compound key; everything
 # after the `#` is comment, and the brace correctly reads unclosed.
+
 fail 'a comment cannot interrupt a compound key', '''
   o = { foo-###x###bar: 7 }
   ''', "unclosed '{'"

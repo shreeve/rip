@@ -11,32 +11,38 @@ import { test, code, fail, type } from '../support/testing.js'
 test "addition integers", "5 + 3", 8
 test "addition decimals", "2.5 + 1.5", 4.0
 test "addition negative", "-5 + 10", 5
+
 code "addition parens", "a + b", "a + b;"
 
 # Subtraction: "-" (binary and unary)
 test "subtraction integers", "10 - 4", 6
 test "subtraction negative result", "3 - 5", -2
 test "unary minus", "-5", -5
+
 code "subtraction parens", "a - b", "a - b;"
 
 # Multiplication: "*"
 test "multiplication", "4 * 3", 12
 test "multiplication decimal", "2.5 * 2", 5.0
+
 code "multiplication parens", "a * b", "a * b;"
 
 # Division: "/"
 test "division", "10 / 2", 5
 test "division decimal", "7 / 2", 3.5
+
 code "division parens", "a / b", "a / b;"
 
 # Modulo: "%"
 test "modulo", "10 % 3", 1
 test "modulo zero", "10 % 5", 0
+
 code "modulo parens", "a % b", "a % b;"
 
 # Exponentiation: "**"
 test "exponentiation", "2 ** 3", 8
 test "exponentiation decimal", "4 ** 0.5", 2
+
 code "exponentiation parens", "a ** b", "a ** b;"
 
 # ==============================================================================
@@ -48,6 +54,7 @@ test "equality true", "5 == 5", true
 test "equality false", "5 == 3", false
 test "is keyword", "5 is 5", true
 test "is keyword false", "5 is 3", false
+
 code "equality compiles to strict", "a == b", "a === b;"
 code "is compiles to strict", "a is b", "a === b;"
 # Inequality: "!=" (compiles to strict !==)
@@ -55,26 +62,31 @@ test "inequality true", "5 != 3", true
 test "inequality false", "5 != 5", false
 test "isnt keyword", "5 isnt 3", true
 test "isnt keyword false", "5 isnt 5", false
+
 code "inequality compiles to strict", "a != b", "a !== b;"
 code "isnt compiles to strict", "a isnt b", "a !== b;"
 # Less than: "<"
 test "less than true", "3 < 5", true
 test "less than false", "5 < 3", false
+
 code "less than parens", "a < b", "a < b;"
 
 # Greater than: ">"
 test "greater than true", "5 > 3", true
 test "greater than false", "3 > 5", false
+
 code "greater than parens", "a > b", "a > b;"
 
 # Less than or equal: "<="
 test "less than or equal true", "3 <= 5", true
 test "less than or equal equal", "5 <= 5", true
+
 code "less than or equal parens", "a <= b", "a <= b;"
 
 # Greater than or equal: ">="
 test "greater than or equal true", "5 >= 3", true
 test "greater than or equal equal", "5 >= 5", true
+
 code "greater than or equal parens", "a >= b", "a >= b;"
 
 # ==============================================================================
@@ -84,6 +96,7 @@ code "greater than or equal parens", "a >= b", "a >= b;"
 # Logical NOT: "!"
 test "logical not true", "!false", true
 test "logical not false", "!true", false
+
 code "logical not simple", "!a", "!a"
 code "logical not complex", "!(a && b)", "!(a && b);"
 
@@ -91,12 +104,14 @@ code "logical not complex", "!(a && b)", "!(a && b);"
 test "logical and both true", "true && true", true
 test "logical and first false", "false && true", false
 test "logical and second false", "true && false", false
+
 code "logical and parens", "a && b", "a && b;"
 
 # Logical OR: "||"
 test "logical or both false", "false || false", false
 test "logical or first true", "true || false", true
 test "logical or second true", "false || true", true
+
 code "logical or parens", "a || b", "a || b;"
 
 # Nullish coalescing: "??"
@@ -104,12 +119,14 @@ test "nullish with null", "null ?? 10", 10
 test "nullish with undefined", "undefined ?? 20", 20
 test "nullish with zero", "0 ?? 30", 0
 test "nullish with false", "false ?? 40", false
+
 code "nullish coalescing parens", "a ?? b", "a ?? b;"
 
 # ?? shares the || precedence level (left-assoc); && binds tighter
 code "nullish then or groups left", "x = a ?? b || c", "let x = (a ?? b) || c;"
 code "or then nullish groups left", "x = a || b ?? c", "let x = (a || b) ?? c;"
 code "and binds tighter than nullish", "x = a ?? b && c", "let x = a ?? (b && c);"
+
 test "nullish or chain runtime", "(null ?? false) || 'y'", "y"
 
 # Postfix presence check: "?!" (Houdini — truthy or undefined)
@@ -121,6 +138,7 @@ test "presence with zero", "0?!", undefined
 test "presence with null", "null?!", undefined
 test "presence with undefined", "undefined?!", undefined
 test "presence with empty string", "''?!", undefined
+
 code "presence operator parens", "a?!", "(a ? true : undefined)"
 
 # ==============================================================================
@@ -129,18 +147,22 @@ code "presence operator parens", "a?!", "(a ? true : undefined)"
 
 # Bitwise AND: "&"
 test "bitwise and", "5 & 3", 1
+
 code "bitwise and parens", "a & b", "a & b;"
 
 # Bitwise OR: "|"
 test "bitwise or", "5 | 3", 7
+
 code "bitwise or parens", "a | b", "a | b;"
 
 # Bitwise XOR: "^"
 test "bitwise xor", "5 ^ 3", 6
+
 code "bitwise xor parens", "a ^ b", "a ^ b;"
 
 # Bitwise NOT: "~"
 test "bitwise not", "~5", -6
+
 code "bitwise not parens", "~a", "~a;"
 
 # ==============================================================================
@@ -240,6 +262,7 @@ code "ternary with expression", "a ? b + 1 : c", "(a ? (b + 1) : c)"
 # Subscript access is legal in a ternary true-branch, bare or parenthesized
 test "ternary subscript with parens", "arr = [1, 2, 3]\ntrue ? (arr[0]) : 0", 1
 test "ternary subscript bare", "arr = [1, 2, 3]\ntrue ? arr[0] : 0", 1
+
 code "ternary subscript with parens", "a ? (b[0]) : c", "(a ? b[0] : c)"
 
 # ==============================================================================
@@ -252,13 +275,15 @@ test "strict equality triple equals", "1 === 1", true
 test "strict equality false", "1 === '1'", false
 test "strict inequality triple", "1 !== '1'", true
 test "strict inequality false", "1 !== 1", false
+
 code "triple equals compiles to strict", "a === b", "a === b;"
 code "triple not-equals compiles to strict", "a !== b", "a !== b;"
-
 code "string repeat compiles to repeat", '"-" * 40', '"-".repeat(40);'
+
 test "string repeat repeats", '"ab" * 3', "ababab"
 test "string repeat composes with concat", '"a" * 2 + "b"', "aab"
 test "string repeat takes an expression count", '"a" * (1 + 2)', "aaa"
+
 code "dynamic left operand stays multiply", 's * 3', 's * 3;'
 
 # ==============================================================================
@@ -272,6 +297,7 @@ test "chained less equal", "x = 5; 1 <= x <= 10", true
 test "chained less equal boundary", "x = 1; 1 <= x <= 10", true
 test "chained greater than", "x = 5; 10 > x > 1", true
 test "chained mixed", "x = 5; 0 <= x < 10", true
+
 code "chained compiles to conjunction", "1 < x < 10", "(1 < x) && (x < 10);"
 
 # Equality ops chain like relationals; explicit parens opt out
@@ -314,10 +340,12 @@ code "negative index -2 compiles to .at()", "arr[-2]", "arr.at(-2)"
 # ==============================================================================
 
 code "method assign compiles", 's = " hi "\ns .= trim()', 'let s = " hi ";\n\ns = s.trim();'
+
 test "method assign trim", 's = "  hi  "\ns .= trim()\ns', "hi"
 test "method assign filter with implicit it", "arr = [1, 2, 3, 4, 5]\narr .= filter -> it > 3\narr", [4, 5]
 test "method assign chained calls", 'str = " A "\nstr .= trim().toLowerCase()\nstr', "a"
 test "method assign on property chain", 'obj = {name: " x "}\nobj.name .= trim()\nobj.name', "x"
+
 test "method assign impure base evaluates once", '''
   n = 0
   o = {name: " y "}
@@ -325,7 +353,9 @@ test "method assign impure base evaluates once", '''
   g().name .= trim()
   [o.name, n]
 ''', ["y", 1]
+
 code "method assign impure base binds once", 'g().name .= trim()', "const _ref = g();\n\n_ref.name = _ref.name.trim();"
+
 fail "method assign needs a call chain", 's .= 5', "must be a call chain"
 fail "method assign rejects in value position", 'y = (s .= trim())', "is a statement"
 
@@ -334,10 +364,12 @@ fail "method assign rejects in value position", 'y = (s .= trim())', "is a state
 # ==============================================================================
 
 code "merge assign compiles to Object.assign", 'obj = {a: 1}\n*>obj = {b: 2}', 'let obj = {a: 1};\n\nobj = Object.assign(obj ??= {}, {b: 2});'
+
 test "merge assign basic", 'obj = {a: 1}\n*>obj = {b: 2}\nobj', {a: 1, b: 2}
 test "merge assign preserves existing", 'obj = {a: 1, b: 1}\n*>obj = {b: 2}\nobj', {a: 1, b: 2}
 test "merge assign auto-init", '*>cfg = {x: 1}\ncfg', {x: 1}
 test "merge assign member target", 'o = {inner: {a: 1}}\n*>o.inner = {b: 2}\no.inner', {a: 1, b: 2}
+
 fail "merge assign rejects in value position", 'y = (*>obj = {a: 1})', "is a statement"
 
 # ==============================================================================
@@ -346,6 +378,7 @@ fail "merge assign rejects in value position", 'y = (*>obj = {a: 1})', "is a sta
 
 code "typeof base of power parenthesized", "typeof x ** 2", "(typeof x) ** 2;"
 code "not base of power parenthesized", "not x ** 2", "(!x) ** 2;"
+
 test "not base of power evaluates", "not 2 ** 2", 0
 test "power right assoc unchanged", "2 ** 3 ** 2", 512
 test "unary minus binds outside power", "-2 ** 2", -4
@@ -427,5 +460,4 @@ test 'not base of power', '''
   ''', 1
 
 code 'prototype compiles to .prototype.', 'String::trim', 'String.prototype.trim'
-
 code 'method assign chain compiles', 'a.b .= trim()', 'a.b = a.b.trim();'

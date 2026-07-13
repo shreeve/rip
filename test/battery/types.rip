@@ -73,6 +73,7 @@ code "type alias erased", "type ID = number", ""
 code "union type alias erased", 'type UserID = number | string', ""
 
 # Structural types
+
 code "structural type erased", '''
   type User =
     id: number
@@ -87,6 +88,7 @@ code "generic close in interface body line", '''
   ''', "let y = 2;"
 
 # Block unions
+
 code "block union erased", '''
   type Status =
     | "pending"
@@ -95,6 +97,7 @@ code "block union erased", '''
   ''', ""
 
 # Interfaces
+
 code "interface erased", '''
   interface Animal
     name: string
@@ -107,6 +110,7 @@ code "interface extends erased", '''
   ''', ""
 
 # Multiple type declarations in sequence
+
 code "multiple types erased", '''
   type ID = number
   type Name = string
@@ -114,6 +118,7 @@ code "multiple types erased", '''
   ''', ""
 
 # Multiple interfaces in sequence
+
 code "multiple interfaces erased", '''
   interface Readable
     read: () => string
@@ -290,6 +295,7 @@ test "enum used in computation", '''
 code "nested generic annotation", "cache: Map<string, Set<number>> = x", "let cache = x;"
 
 # Multiple typed variables in sequence
+
 test "multiple typed variables", '''
   a: number = 10
   b: number = 20
@@ -298,6 +304,7 @@ test "multiple typed variables", '''
   ''', 60
 
 # Typed variables used together
+
 test "typed variables in expression", '''
   width: number = 5
   height: number = 10
@@ -305,6 +312,7 @@ test "typed variables in expression", '''
   ''', 50
 
 # Typed constant used in function
+
 test "typed constant in function", '''
   PI: number =! 3.14159
   def circleArea(r: number): number
@@ -345,6 +353,7 @@ code "block union many members", '''
 # ==============================================================================
 
 # Type annotation with no assignment (in a function body)
+
 test "typed param used in expression", '''
   def negate(x: number): number
     -x
@@ -352,6 +361,7 @@ test "typed param used in expression", '''
   ''', -5
 
 # Enum with single member
+
 test "enum single member", '''
   enum Single
     only = 1
@@ -359,6 +369,7 @@ test "enum single member", '''
   ''', 1
 
 # Type alias then immediate use
+
 test "type alias immediate code", '''
   type ID = number
   id = 123
@@ -366,6 +377,7 @@ test "type alias immediate code", '''
   ''', 123
 
 # Sequential enums
+
 test "multiple enums", '''
   enum A
     x = 1
@@ -375,6 +387,7 @@ test "multiple enums", '''
   ''', 3
 
 # Typed function calling another typed function
+
 test "typed functions calling each other", '''
   def double(n: number): number
     n * 2
@@ -384,6 +397,7 @@ test "typed functions calling each other", '''
   ''', 20
 
 # Function with many typed params
+
 test "function many typed params", '''
   def sum5(a: number, b: number, c: number, d: number, e: number): number
     a + b + c + d + e
@@ -395,22 +409,26 @@ test "function many typed params", '''
 # ==============================================================================
 
 # Variables
+
 type "typed variable dts", "count: number = 0", '''
   declare let count: number;
   export {};
   '''
+
 type "typed constant dts", "MAX: number =! 100", '''
   declare const MAX: number;
   export {};
   '''
 
 # Reactive state
+
 type "reactive state dts", "count: number := 0", '''
   declare const count: { value: number; read(): number };
   export {};
   '''
 
 # Computed
+
 type "computed dts", '''
     count: number := 0
     doubled: number ~= count * 2
@@ -421,12 +439,14 @@ type "computed dts", '''
   '''
 
 # Effect
+
 type "effect dts", "logger: Function ~> console.log 42", '''
   declare const logger: Function;
   export {};
   '''
 
 # Functions
+
 type "typed function dts", '''
     def greet(name: string): string
       "Hello, #{name}!"
@@ -436,6 +456,7 @@ type "typed function dts", '''
   '''
 
 # Interface
+
 type "interface dts", '''
     interface Readable
       read: => string
@@ -447,11 +468,13 @@ type "interface dts", '''
   '''
 
 # Export reactive
+
 type "export reactive dts", "export count: number := 0", '''
   export declare const count: { value: number; read(): number };
 '''
 
 # Arrow function
+
 type "arrow function dts", "greet = (name: string) -> \"Hello\"", '''
   declare function greet(name: string): any;
   export {};
@@ -461,6 +484,7 @@ type "arrow function dts", "greet = (name: string) -> \"Hello\"", '''
 # operator, not a TS function-type arrow; the type collector stops at it
 # (symmetric with `->`). Type erased from JS, surfaces in the .d.ts.
 code "fat arrow return type erased", "g = (x: number): string => \"v\"", "let g = x => \"v\";"
+
 type "fat arrow return type dts", "g = (x: number): string => \"v\"", '''
   declare function g(x: number): string;
   export {};
@@ -471,6 +495,7 @@ type "fat arrow return type dts", "g = (x: number): string => \"v\"", '''
 # body — so it's a hard error pointing at the fix.
 fail "fat arrow bare function-type return", 'g = (x: number): (n: number) => number => x'
 fail "fat arrow empty-params function-type return", 'g = (x: number): () => void => x'
+
 type "export interface with : annotations", """
   export interface Config
     host: string
@@ -486,10 +511,12 @@ type "export interface with : annotations", """
 # typed forward declaration). A (typed destructuring) deliberately keeps `::`.
 code "single-colon function-type-valued decl", "get: (p: string) => void = f", "let get = f;"
 code "single-colon generic function-type-valued decl", "watchers: Set<(e: string) => void> = x", "let watchers = x;"
+
 code "single-colon bare typed decl (assigned later)", '''
   r: R
   r = fn()
   ''', "let r = fn();"
+
 # `name: value` with no later assignment stays an object expression (not a decl).
 code "bare name: value stays an object", "mode: cfg", "({mode: cfg});"
 
@@ -502,18 +529,22 @@ code "bare name: value stays an object", "mode: cfg", "({mode: cfg});"
 # guard (the indented `type T =` ⏎ field form was already immune).
 code "braced inline fn-type field erased", "type X = { f: (e: Event) => void }", ""
 code "braced optional fn-type field in intersection erased", "type X = HTMLElement & { f?: (e: Event) => void }", ""
+
 type "braced inline fn-type field dts", "type X = { f: (e: Event) => void }", '''
   type X = { f: (e: Event) => void };
   export {};
   '''
+
 # Non-regression: a value-position `=` is not a type-decl `=`, so object
 # literals (incl. ones with arrow values) are untouched — `inType` stays off.
 code "value object literal not armed", "x = { a: 1 }", "let x = {a: 1};"
+
 code "arrow-valued object literal not armed", "obj = { f: (e) -> e }", '''
   let obj = {f(e) {
     return e;
   }};
   '''
+
 # ==============================================================================
 # Declaration pins — the type verb compares emitted .d.ts (module marker shed)
 # ==============================================================================

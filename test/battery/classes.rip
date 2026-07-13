@@ -24,6 +24,7 @@ test "constructor logic", "class Counter\n  constructor: ->\n    @count = 0\n  i
 test "super method call", "class Animal\n  speak: -> 'sound'\nclass Dog extends Animal\n  speak: -> super.speak() + '!'\nd = new Dog(); d.speak()", "sound!"
 
 # Super with spread arguments (Rip ES6 prefix syntax)
+
 test "super with spread args", '''
   class Parent
     method: (...args) -> args.join('-')
@@ -40,6 +41,7 @@ test "super with spread args", '''
 # ==============================================================================
 
 # Class expressions
+
 test 'class expression', '''
   Animal = class
     speak: -> 'sound'
@@ -47,12 +49,14 @@ test 'class expression', '''
   ''', 'sound'
 
 # Empty class
+
 test 'empty class', '''
   class Empty
   new Empty().constructor.name
   ''', 'Empty'
 
 # Method chaining
+
 test 'method chaining', '''
   class Builder
     setValue: (v) -> @value = v; this
@@ -61,6 +65,7 @@ test 'method chaining', '''
   ''', 42
 
 # Bound methods
+
 test 'bound method', '''
   class Counter
     constructor: -> @count = 0
@@ -72,6 +77,7 @@ test 'bound method', '''
   ''', 1
 
 # instanceof
+
 test 'instanceof check', '''
   class Animal
   a = new Animal()
@@ -79,6 +85,7 @@ test 'instanceof check', '''
   ''', true
 
 # Override method
+
 test 'override method', '''
   class Animal
     speak: -> 'sound'
@@ -88,6 +95,7 @@ test 'override method', '''
   ''', 'bark'
 
 # Constructor explicit return
+
 test 'constructor explicit return', '''
   class A
     constructor: ->
@@ -96,6 +104,7 @@ test 'constructor explicit return', '''
   ''', 'object'
 
 # Async method
+
 test 'async method', '''
   class Async
     getData: -> await Promise.resolve(42)
@@ -104,6 +113,7 @@ test 'async method', '''
   ''', 42
 
 # Four-level inheritance
+
 test 'four-level inheritance', '''
   class A
     val: -> 'a'
@@ -147,7 +157,6 @@ fail "class with index name does not parse", '''
   class arr[0]
   '''
 
-
 # ==============================================================================
 # new.target — the meta-property distinguishes construction from a plain call
 # ==============================================================================
@@ -158,6 +167,7 @@ test "new.target in constructor", '''
       @viaNew = new.target isnt undefined
   new A().viaNew
 ''', true
+
 code "new.target passes through", "class A\n  constructor: ->\n    @t = new.target", "class A {\n  constructor() {\n    this.t = new.target;\n  }\n};"
 
 # ==============================================================================

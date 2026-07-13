@@ -4,31 +4,18 @@
 import { test, code, fail, type } from '../support/testing.js'
 
 test 'p is a function', 'typeof p', 'function'
-
 test 'pp is a function', 'typeof pp', 'function'
-
 test 'pr is a function', 'typeof pr', 'function'
-
 test 'pj is a function', 'typeof pj', 'function'
-
 test 'p returns void (no-op chainable test below)', 'p 42; 42', 42
-
 test 'pp returns argument (number)', 'pp 42', 42
-
 test 'pr returns argument (number)', 'pr 42', 42
-
 test 'pj returns argument (number)', 'pj 42', 42
-
 test 'pp returns argument (string)', 'pp \'hello\'', 'hello'
-
 test 'pr returns argument (string)', 'pr \'hello\'', 'hello'
-
 test 'pj returns argument (string)', 'pj \'hello\'', 'hello'
-
 test 'pp returns same object', 'x = {a: 1}; pp(x) is x', true
-
 test 'pr returns same object', 'x = {a: 1}; pr(x) is x', true
-
 test 'pj returns same array', 'y = [1,2,3]; pj(y) is y', true
 
 test 'pr handles class instance', '''
@@ -43,7 +30,6 @@ test 'pr handles class instance', '''
 ''', 'ok'
 
 test 'pj passes object through', 'x = { a: 1, b: [2,3] }; pj(x) is x', true
-
 test 'pj passes nested array through', 'y = [[1,2],[3,4]]; pj(y) is y', true
 
 # ==============================================================================

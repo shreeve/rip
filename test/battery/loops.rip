@@ -16,6 +16,7 @@ test "for-in range", "sum = 0; for i in [1..5]\n  sum += i\nsum", 15
 test "for-in destructuring with defaults", "arr = [[1, 2, 3], [4, 5], [6]]\nresult = []\nfor [a, b = 99, c = 88] in arr\n  result.push(a + b + c)\nresult", [6, 97, 193]
 
 # Loop variable must be reassignable inside the body (CoffeeScript idiom)
+
 test "for-in reassign loop var", '''
   out = []
   for x in ["  a ", " b  "]
@@ -39,6 +40,7 @@ fail "range loop without var rejects", "for [1...5]\n  x = 1", "binds no variabl
 # closures created inside the body see *this* iteration's value, not
 # the last value the loop variable held. Regression for the bug where
 # `for (x of arr)` without `let` caused all closures to share one binding.
+
 test "for-in closure captures per iteration", '''
   handlers = []
   for x in [1, 2, 3]
@@ -78,6 +80,7 @@ test "for-of object", "obj = {a: 1, b: 2}; sum = 0; for key, val of obj\n  sum +
 test "for-of keys only", "obj = {a: 1, b: 2}; keys = []; for key of obj\n  keys.push(key)\nkeys.length", 2
 
 # For-of must allow reassigning the value variable inside the body
+
 test "for-of reassign value var", '''
   obj = {a: "  1 "}
   out = null
@@ -88,6 +91,7 @@ test "for-of reassign value var", '''
   ''', "1"
 
 # Closure capture: same per-iteration semantics for object iteration
+
 test "for-of closure captures per iteration", '''
   handlers = []
   for k, v of {a: 1, b: 2, c: 3}
@@ -150,6 +154,7 @@ code "infinite loop", "loop\n  body", "while (true) { body; }"
 # ==============================================================================
 
 # Break statement
+
 test "break in for-in", '''
   sum = 0
   for i in [1..10]
@@ -159,6 +164,7 @@ test "break in for-in", '''
   ''', 15
 
 # Continue statement
+
 test "continue in for-in", '''
   sum = 0
   for i in [1..10]
@@ -176,6 +182,7 @@ test "for-as array", "sum = 0; for x as [1, 2, 3]\n  sum += x\nsum", 6
 test "for-as set", "sum = 0; s = new Set([10, 20, 30]); for x as s\n  sum += x\nsum", 60
 
 # For-as with destructuring (used in packages for Map.entries())
+
 test "for-as destructure", '''
   m = new Map()
   m.set("a", 1)
@@ -196,6 +203,7 @@ test "for-as destructure array", '''
 
 # Closure capture for for-as. Includes a Map-like case that exercises
 # the bundle-registration pattern server middleware uses.
+
 test "for-as closure captures per iteration", '''
   handlers = []
   for x as [10, 20, 30]

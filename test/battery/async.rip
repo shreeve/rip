@@ -14,6 +14,7 @@ import { test, code, fail, type } from '../support/testing.js'
 # lines (a multi-line arrow, so the last emitted line is `});`). The async
 # wrapper must inject `return` at the statement's true start, not give up on
 # the closing-brace line and silently yield undefined.
+
 test "async value from multi-line final arrow", '''
   items = await Promise.resolve [1, 2, 3]
   items.map (x) ->
@@ -76,6 +77,7 @@ test "async with catch", '''
   ''', "error"
 
 # Async generator detection (runtime tests)
+
 test "async generator detection", '''
   foo = ->
     yield await 1
@@ -91,6 +93,7 @@ test "async generator with multiple yields", '''
 ''', "AsyncGeneratorFunction"
 
 # Closure capture across an async for-await loop must also be per-iteration.
+
 test "for await as closure captures per iteration", '''
   makeIter = ->
     yield await 1
@@ -106,6 +109,7 @@ test "for await as closure captures per iteration", '''
 
 # Code generation tests (Rip-specific format with 'let')
 # These verify we generate correct modern ES2022 syntax
+
 code "async for-as loop", '''
   for await x as iterable
     x
@@ -147,6 +151,7 @@ for await (let x of iterable) {
 '''
 
 # Dammit form: as! (shorthand for await ... as)
+
 code "as! loop", '''
   for x as! iterable
     x
@@ -192,6 +197,7 @@ for await (let x of iterable) {
 # ==============================================================================
 
 # Basic yield
+
 test "basic generator", '''
   gen = ->
     yield 1
@@ -202,6 +208,7 @@ test "basic generator", '''
   ''', [1, 2, 3]
 
 # Yield with value
+
 test "yield expression", '''
   gen = (x) ->
     yield x * 2
@@ -211,6 +218,7 @@ test "yield expression", '''
   ''', [10, 15]
 
 # Yield in loop
+
 test "yield in loop", '''
   gen = ->
     for i in [1, 2, 3]
@@ -223,6 +231,7 @@ test "yield in loop", '''
 test "generator function detection", "gen = -> yield\ngen.constructor.name", "GeneratorFunction"
 
 # Generator with return
+
 test "generator with return", '''
   gen = ->
     yield 1
@@ -233,6 +242,7 @@ test "generator with return", '''
   ''', 2
 
 # Yield undefined
+
 test "yield undefined", '''
   gen = -> yield
   g = gen()
@@ -240,6 +250,7 @@ test "yield undefined", '''
   ''', undefined
 
 # Generator sequence
+
 test "generator sequence", '''
   gen = ->
     yield 1
@@ -261,6 +272,7 @@ code "yield inside a generator", "g = -> yield v", "let g = function*() {\n  ret
 # ==============================================================================
 
 # Yield from delegates to another generator
+
 test "yield from delegates", '''
   other = ->
     yield 1
@@ -279,6 +291,7 @@ test "yield from delegates", '''
   ''', [1, 2, 3]
 
 # Yield from with return value
+
 test "yield from with return", '''
   other = ->
     yield 1
@@ -294,6 +307,7 @@ test "yield from with return", '''
   ''', 42
 
 # Code generation for yield from
+
 code "yield from generates yield*", '''
   gen = ->
     yield from other()
@@ -308,6 +322,7 @@ code "yield from generates yield*", '''
 # ==============================================================================
 
 # Basic dammit operator (! calls and awaits)
+
 test 'dammit operator basic', '''
   do ->
     fetchData = -> Promise.resolve(42)
@@ -315,6 +330,7 @@ test 'dammit operator basic', '''
   ''', 42
 
 # Dammit with parameters (! calls, parens provide args)
+
 test 'dammit with params', '''
   do ->
     getData = (x) -> Promise.resolve(x * 2)
@@ -322,6 +338,7 @@ test 'dammit with params', '''
   ''', 10
 
 # Dammit in method call
+
 test 'dammit method call', '''
   do ->
     obj = {
@@ -331,6 +348,7 @@ test 'dammit method call', '''
   ''', 'data'
 
 # Multiple dammit calls
+
 test 'multiple dammits', '''
   do ->
     fetch1 = -> Promise.resolve(1)
@@ -341,6 +359,7 @@ test 'multiple dammits', '''
   ''', 3
 
 # Dammit without parens (implicit call)
+
 test 'dammit no parens', '''
   do ->
     getData = -> Promise.resolve(5)
@@ -348,6 +367,7 @@ test 'dammit no parens', '''
   ''', 5
 
 # Dammit with empty parens (redundant but allowed)
+
 test 'dammit redundant parens', '''
   do ->
     getData = -> Promise.resolve(7)
@@ -355,6 +375,7 @@ test 'dammit redundant parens', '''
   ''', 7
 
 # Verify ! calls function vs bare reference
+
 test 'dammit calls vs reference', '''
   do ->
     counter = 0
@@ -381,6 +402,7 @@ test 'dammit actually calls', '''
   ''', 2
 
 # Dammit in expressions
+
 test 'dammit in expression', '''
   do ->
     getValue = -> Promise.resolve(10)
@@ -389,6 +411,7 @@ test 'dammit in expression', '''
   ''', 15
 
 # Dammit in array literal
+
 test 'dammit in array', '''
   do ->
     get1 = -> Promise.resolve(1)
@@ -413,14 +436,17 @@ code 'chained dammit', 'fetch!(url).json!', "await (await fetch(url)).json();"
 code 'chained dammit prop', 'obj!.method!.prop', '(await (await obj()).method()).prop'
 code 'dammit call then member', 'g!().x', '(await g()).x;'
 code 'dammit bare then member', 'g!.x', '(await g()).x;'
+
 test 'dammit call chain resolves through both awaits', '''
   fetch = (url) -> Promise.resolve({json: -> Promise.resolve({ok: true, url})})
   fetch!("u").json!()
 ''', {ok: true, url: 'u'}
+
 test 'dammit call then member reads the resolved value', '''
   g = -> Promise.resolve({x: 1})
   [g!().x, g!.x]
 ''', [1, 1]
+
 code 'dammit stays bare as an operand', 'f!() + 1', 'await f() + 1;'
 
 # Dynamic import with dammit operator
@@ -433,6 +459,7 @@ code 'import! with variable', 'import!(path)', "await import(path);"
 # ==============================================================================
 
 # Runtime: switch expression with await
+
 test "switch expr with await resolves value", '''
   fn = ->
     resolve = (v) -> Promise.resolve(v)
@@ -444,6 +471,7 @@ test "switch expr with await resolves value", '''
   ''', 43
 
 # Runtime: switch-as-if-chain with await
+
 test "switch-as-if expr with await resolves value", '''
   fn = ->
     resolve = (v) -> Promise.resolve(v)
@@ -457,6 +485,7 @@ test "switch-as-if expr with await resolves value", '''
   ''', "small!"
 
 # Runtime: comprehension with await
+
 test "comprehension with await resolves values", '''
   fn = ->
     resolve = (v) -> Promise.resolve(v)
@@ -466,6 +495,7 @@ test "comprehension with await resolves values", '''
   ''', 3
 
 # Codegen: switch expression with await must emit "await" before async IIFE
+
 code "switch expr await emits await before IIFE", '''
   x = switch val
     when 'a' then fetch!
@@ -480,6 +510,7 @@ code "switch expr await emits await before IIFE", '''
   '''
 
 # Codegen: switch-as-if-chain with await must emit "await (async () => ...)()"
+
 code "switch-as-if expr await emits await before IIFE", '''
     x = switch
       when a then fetch!
@@ -493,6 +524,7 @@ code "switch-as-if expr await emits await before IIFE", '''
   '''
 
 # Codegen: comprehension with await must emit "await" before async IIFE
+
 code "comprehension await emits await before IIFE", "x = (fetch!(v) for v in arr)", '''
   let x = await (async () => {
     const result = [];
@@ -508,6 +540,7 @@ code "comprehension await emits await before IIFE", "x = (fetch!(v) for v in arr
 # ==============================================================================
 
 # Runtime: await in switch discriminant
+
 test "switch with await in discriminant resolves", '''
   fn = ->
     getKey = -> Promise.resolve('a')
@@ -520,6 +553,7 @@ test "switch with await in discriminant resolves", '''
   ''', 11
 
 # Runtime: await in switch-as-if condition
+
 test "switch-as-if with await in condition resolves", '''
   fn = ->
     check = -> Promise.resolve(true)
@@ -531,6 +565,7 @@ test "switch-as-if with await in condition resolves", '''
   ''', "yes!"
 
 # Runtime: await in try/catch/finally
+
 test "try with await in finally resolves", '''
   fn = ->
     log = []
@@ -546,6 +581,7 @@ test "try with await in finally resolves", '''
   ''', [42, ['cleaned']]
 
 # Codegen: switch with await in discriminant
+
 code "switch discriminant await emits async IIFE", '''
   x = switch getAction!()
     when 'a' then 1
@@ -560,6 +596,7 @@ code "switch discriminant await emits async IIFE", '''
   '''
 
 # Codegen: switch-as-if with await in condition
+
 code "switch-as-if condition await emits async IIFE", '''
     x = switch
       when isReady!() then 'yes'
@@ -573,6 +610,7 @@ code "switch-as-if condition await emits async IIFE", '''
   '''
 
 # Codegen: try with await in finally
+
 code "try finally await emits async IIFE", '''
   x = try
     something()
@@ -591,6 +629,7 @@ code "try finally await emits async IIFE", '''
   '''
 
 # Runtime: object comprehension with await
+
 test "object comprehension with await resolves values", '''
   fn = ->
     resolve = (v) -> Promise.resolve(v * 10)
@@ -600,6 +639,7 @@ test "object comprehension with await resolves values", '''
   ''', {a: 10, b: 20}
 
 # Codegen: object comprehension with await
+
 code "object comprehension await emits async IIFE", "x = {k: fetch!(v) for k, v of obj}", '''
   let x = await (async () => {
     const result = {};
@@ -616,6 +656,7 @@ code "object comprehension await emits async IIFE", "x = {k: fetch!(v) for k, v 
 # ==============================================================================
 
 # Runtime: await in then-branch (multi-statement triggers IIFE)
+
 test "if expr with await in then-branch resolves", '''
   fn = ->
     resolve = (v) -> Promise.resolve(v)
@@ -629,6 +670,7 @@ test "if expr with await in then-branch resolves", '''
   ''', 43
 
 # Runtime: await in else-branch
+
 test "if expr with await in else-branch resolves", '''
   fn = ->
     resolve = (v) -> Promise.resolve(v)
@@ -642,6 +684,7 @@ test "if expr with await in else-branch resolves", '''
   ''', 90
 
 # Runtime: await in condition (multi-statement branch, triggers IIFE)
+
 test "if expr with await in condition resolves", '''
   fn = ->
     check = -> Promise.resolve(true)
@@ -655,6 +698,7 @@ test "if expr with await in condition resolves", '''
   ''', 20
 
 # Codegen: if-expression multi-statement with await
+
 code "if expr await emits async IIFE", '''
   x = if cond
     a = fetch!()
@@ -677,6 +721,7 @@ code "if expr await emits async IIFE", '''
 # ==============================================================================
 
 # Runtime: switch inside try, both with await
+
 test "nested switch inside try with await resolves", '''
   fn = ->
     resolve = (v) -> Promise.resolve(v)
@@ -691,6 +736,7 @@ test "nested switch inside try with await resolves", '''
   ''', 42
 
 # Runtime: comprehension inside if, both with await
+
 test "nested comprehension inside if with await resolves", '''
   fn = ->
     resolve = (v) -> Promise.resolve(v)
@@ -704,6 +750,7 @@ test "nested comprehension inside if with await resolves", '''
   ''', 3
 
 # Runtime: if inside switch, both with await
+
 test "nested if inside switch with await resolves", '''
   fn = ->
     resolve = (v) -> Promise.resolve(v)

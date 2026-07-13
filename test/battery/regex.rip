@@ -126,7 +126,6 @@ code '=~ emits the coerced match', "t = 'a'\nt =~ /a/", 'let t = "a";\n\n(_ = to
 # ==============================================================================
 
 test 'regex index simple', '"steve"[/eve/]', 'eve'
-
 test 'regex index capture', '"steve"[/e(v)e/, 1]', 'v'
 
 test 'regex index multiple captures', '''
@@ -157,7 +156,6 @@ test 'regex index url', '''
 ''', 'example.com'
 
 test 'regex index case insensitive', '"HELLO"[/hello/i]', 'HELLO'
-
 test 'regex index anchored', '"test123"[/^(test)(\\d+)$/, 1]', 'test'
 
 test 'regex index nested groups', '''
@@ -275,7 +273,5 @@ test 'heregex forward slashes', '''
   ''', "rip-lang.org"
 
 code 'regex literal', '/test/', '/test/'
-
 code 'regex with flags', '/test/gi', '/test/gi'
-
 code 'heregex ${} no interpolation', '///test${var}end///', '/test${var}end/'
