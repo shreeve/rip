@@ -56,8 +56,13 @@ export class Node
     @childNodes.splice index, 1
     child
 
-  remove: (): void ->
+  remove!: ->
     @parentNode?.removeChild this
+
+export interface Node
+  nextSibling: Node | null
+  previousSibling: Node | null
+  textContent: string
 
 Object.defineProperty Node.prototype, 'nextSibling',
   get: -> @_next
@@ -68,8 +73,8 @@ Object.defineProperty Node.prototype, 'previousSibling',
   enumerable: true
 
 Object.defineProperty Node.prototype, 'textContent',
-  get: -> (@childNodes.map (child) -> _textContent(child)).join('')
-  set: (value) ->
+  get: -> (@childNodes.map (child: Node) -> _textContent(child)).join('')
+  set: (value: any) ->
     for child in @childNodes
       child.parentNode = null
       child._previous = null
@@ -89,7 +94,7 @@ export class Element extends Node
     super()
     @tag = tag
 
-  setAttribute: (key: string, value: any): void ->
+  setAttribute!: (key: string, value: any) ->
     if key is 'style'
       if value isnt null and typeof value is 'object'
         Object.assign @style, value
@@ -109,11 +114,11 @@ export class Element extends Node
     if wanted then @attributes.set(key, '') else @attributes.delete(key)
     wanted
 
-  addEventListener: (): void ->
-  removeEventListener: (): void ->
+  addEventListener!: ->
+  removeEventListener!: ->
   dispatchEvent: (): boolean -> true
 
-  _parseStyleString: (source: string): void ->
+  _parseStyleString!: (source: string) ->
     for raw in source.split(';')
       declaration = raw.trim()
       continue unless declaration
@@ -124,35 +129,43 @@ export class Element extends Node
       camel = property.replace /-([a-z])/g, (_, letter) -> letter.toUpperCase()
       @style[camel] = value
 
+export interface Element
+  id: string
+  className: string
+  innerHTML: string
+  innerText: string
+  value: any
+  checked: boolean
+
 Object.defineProperty Element.prototype, 'id',
   get: -> @attributes.get('id') ?? ''
-  set: (value) -> @attributes.set('id', String(value))
+  set: (value: any) -> @attributes.set('id', String(value))
   enumerable: true
 
 Object.defineProperty Element.prototype, 'className',
   get: -> @attributes.get('class') ?? ''
-  set: (value) ->
+  set: (value: any) ->
     if value then @attributes.set('class', String(value)) else @attributes.delete('class')
   enumerable: true
 
 Object.defineProperty Element.prototype, 'innerHTML',
   get: -> @_innerHTML
-  set: (value) -> @_innerHTML = String(value)
+  set: (value: any) -> @_innerHTML = String(value)
   enumerable: true
 
 Object.defineProperty Element.prototype, 'innerText',
   get: -> @textContent
-  set: (value) -> @textContent = value
+  set: (value: any) -> @textContent = value
   enumerable: true
 
 Object.defineProperty Element.prototype, 'value',
   get: -> @attributes.get('value')
-  set: (value) -> @attributes.set('value', String(value))
+  set: (value: any) -> @attributes.set('value', String(value))
   enumerable: true
 
 Object.defineProperty Element.prototype, 'checked',
   get: -> @attributes.has('checked')
-  set: (value) ->
+  set: (value: any) ->
     if value then @attributes.set('checked', '') else @attributes.delete('checked')
   enumerable: true
 
@@ -166,7 +179,7 @@ export class Text extends Node
 
 Object.defineProperty Text.prototype, 'textContent',
   get: -> @data
-  set: (value) -> @data = String(value)
+  set: (value: any) -> @data = String(value)
   enumerable: true
 
 export class Comment extends Node
@@ -261,12 +274,12 @@ export serialize = (node: Node): string ->
 export serializeChildren = (node: Node): string ->
   (node.childNodes.map (child) -> serialize child).join ''
 
-_textContent = (node: Node): string ->
+def _textContent(node: Node): string
   return node.data if node instanceof Text
   return '' if node instanceof Comment
-  (node.childNodes.map (child) -> _textContent child).join ''
+  (node.childNodes.map (child: Node) -> _textContent child).join ''
 
-walkText = (node: Node, parts: string[]): void ->
+def walkText!(node: Node, parts: string[])
   if node instanceof Text
     parts.push node.data
     return
@@ -313,6 +326,6 @@ walkText = (node: Node, parts: string[]): void ->
   parts.push '\n' if block and not heading
 
 export toPlainText = (node: Node): string ->
-  parts = []
+  parts: string[] = []
   walkText node, parts
   parts.join('').replace(/\n{3,}/g, '\n\n').trim()

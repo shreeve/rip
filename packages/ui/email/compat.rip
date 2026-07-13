@@ -1,0 +1,126 @@
+# Email-client compatibility helpers.
+
+export type Padding =
+  paddingTop: number | undefined
+  paddingRight: number | undefined
+  paddingBottom: number | undefined
+  paddingLeft: number | undefined
+
+export pxToPt = (pixels: unknown): number | undefined ->
+  return undefined unless typeof pixels is 'number' and not Number.isNaN(pixels)
+  pixels * 3 / 4
+
+export convertToPx = (value: unknown): number ->
+  return 0 unless value?
+  return value if typeof value is 'number'
+
+  match = String(value).match /^([\d.]+)(px|em|rem|%)$/
+  return 0 unless match
+
+  number = parseFloat match[1]
+  switch match[2]
+    when 'px' then number
+    when 'em', 'rem' then number * 16
+    when '%' then number / 100 * 600
+    else 0
+
+emptyPadding = (): Padding ->
+  paddingTop: undefined
+  paddingRight: undefined
+  paddingBottom: undefined
+  paddingLeft: undefined
+
+parsePaddingValue = (value: unknown): Padding ->
+  return emptyPadding() unless value?
+
+  if typeof value is 'number'
+    return {
+      paddingTop: value
+      paddingRight: value
+      paddingBottom: value
+      paddingLeft: value
+    }
+
+  values = String(value).trim().split /\s+/
+  result = emptyPadding()
+  switch values.length
+    when 1
+      result.paddingTop = convertToPx values[0]
+      result.paddingRight = convertToPx values[0]
+      result.paddingBottom = convertToPx values[0]
+      result.paddingLeft = convertToPx values[0]
+    when 2
+      result.paddingTop = convertToPx values[0]
+      result.paddingRight = convertToPx values[1]
+      result.paddingBottom = convertToPx values[0]
+      result.paddingLeft = convertToPx values[1]
+    when 3
+      result.paddingTop = convertToPx values[0]
+      result.paddingRight = convertToPx values[1]
+      result.paddingBottom = convertToPx values[2]
+      result.paddingLeft = convertToPx values[1]
+    when 4
+      result.paddingTop = convertToPx values[0]
+      result.paddingRight = convertToPx values[1]
+      result.paddingBottom = convertToPx values[2]
+      result.paddingLeft = convertToPx values[3]
+  result
+
+styleObject = (style: unknown): Record<string, unknown> ->
+  return {} unless style?
+  return style as Record<string, unknown> if typeof style is 'object'
+
+  result: Record<string, unknown> = {}
+  for raw in String(style).split(';')
+    declaration = raw.trim()
+    continue unless declaration
+    colon = declaration.indexOf ':'
+    continue if colon is -1
+    property = declaration.slice(0, colon).trim()
+    value = declaration.slice(colon + 1).trim()
+    camel = property.replace /-([a-z])/g, (_, letter) -> letter.toUpperCase()
+    result[camel] = value
+  result
+
+export parsePadding = (style: unknown = {}): Padding ->
+  source = styleObject style
+  result = emptyPadding()
+
+  if source.padding?
+    result = parsePaddingValue source.padding
+
+  result.paddingTop = convertToPx(source.paddingTop) if source.paddingTop?
+  result.paddingRight = convertToPx(source.paddingRight) if source.paddingRight?
+  result.paddingBottom = convertToPx(source.paddingBottom) if source.paddingBottom?
+  result.paddingLeft = convertToPx(source.paddingLeft) if source.paddingLeft?
+  result
+
+MAX_FONT_WIDTH =! 5
+
+export computeMsoPadding = (expectedWidth: number): [number, number] ->
+  return [0, 0] if expectedWidth is 0
+  spaces = 0
+  width = Infinity
+  while width > MAX_FONT_WIDTH
+    spaces += 1
+    width = expectedWidth / spaces / 2
+  [width, spaces]
+
+PREVIEW_WHITESPACE =! '\xa0\u200C\u200B\u200D\u200E\u200F\uFEFF'
+PREVIEW_LENGTH =! 150
+
+export previewPadding = (text: string, maxLength: number = PREVIEW_LENGTH): string ->
+  remaining = maxLength - text.length
+  return '' if remaining <= 0
+  PREVIEW_WHITESPACE.repeat remaining
+
+export styleToString = (style: Record<string, unknown>): string ->
+  declarations = []
+  for key, value of style
+    continue unless value?
+    property = key.replace /[A-Z]/g, (letter) -> "-#{letter.toLowerCase()}"
+    declarations.push "#{property}:#{value}"
+  declarations.join ';'
+
+export msoConditional = (html: string): string ->
+  "<!--[if mso]>#{html}<![endif]-->"
