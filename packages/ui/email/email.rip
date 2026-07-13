@@ -4,6 +4,18 @@ import { previewPadding, computeMsoPadding, pxToPt, parsePadding } from './compa
 import { joinStyles, withMargin } from '../shared/styles.rip'
 import { registerEmailTailwindRoot } from '../tailwind/tailwind.rip'
 
+safeCssString = (value: unknown, name: string): string ->
+  text = String value
+  if /[<>'"\\\r\n]/.test text
+    throw new Error "email Font received unsafe #{name}"
+  text
+
+safeCssIdentifier = (value: unknown, name: string): string ->
+  text = String value
+  unless /^[A-Za-z0-9_-]+$/.test text
+    throw new Error "email Font received unsafe #{name}"
+  text
+
 export Email = component
   @class: string := ''
   @lang: string := 'en'
@@ -50,25 +62,32 @@ export Font = component
   @display: string := 'swap'
   @webFontUrl: string := ''
   @webFontFormat: string := 'woff2'
-  _family: string ~= @google or @fontFamily
+  _family: string ~= safeCssString(@google or @fontFamily, 'fontFamily')
+  _fontStyle: string ~= safeCssIdentifier @fontStyle, 'fontStyle'
+  _display: string ~= safeCssIdentifier @display, 'display'
+  _webFontUrl: string ~= safeCssString @webFontUrl, 'webFontUrl'
+  _webFontFormat: string ~= safeCssIdentifier @webFontFormat, 'webFontFormat'
   _googleFamily: string ~= encodeURIComponent(_family).replace(/%20/g, '+')
-  _googleSpec: string ~= if @fontStyle is 'italic'
+  _googleSpec: string ~= if _fontStyle is 'italic'
     "#{_googleFamily}:ital,wght@1,#{@fontWeight}"
   else
     "#{_googleFamily}:wght@#{@fontWeight}"
-  _googleUrl: string ~= if @google then "https://fonts.googleapis.com/css2?family=#{_googleSpec}&display=#{@display}" else ''
-  _source: string ~= if @webFontUrl then "src: url(#{@webFontUrl}) format('#{@webFontFormat}');" else ''
+  _googleUrl: string ~= if @google then "https://fonts.googleapis.com/css2?family=#{_googleSpec}&display=#{_display}" else ''
+  _source: string ~= if _webFontUrl then "src: url('#{_webFontUrl}') format('#{_webFontFormat}');" else ''
   _fallback: string[] ~= if Array.isArray(@fallbackFontFamily)
-    Array.from @fallbackFontFamily
+    values: string[] = []
+    for value in @fallbackFontFamily
+      values.push safeCssString(value, 'fallbackFontFamily')
+    values
   else
-    [@fallbackFontFamily]
+    [safeCssString(@fallbackFontFamily, 'fallbackFontFamily')]
   _fallbackText: string ~= _fallback.join ', '
   _fontRule: string ~= "* { font-family: '#{_family}', #{_fallbackText}; }"
   _css: string ~= if @webFontUrl
     """
     @font-face {
       font-family: '#{_family}';
-      font-style: #{@fontStyle};
+      font-style: #{_fontStyle};
       font-weight: #{@fontWeight};
       mso-font-alt: '#{_fallback[0]}';
       #{_source}
@@ -204,9 +223,10 @@ export Link = component
   @href: string := ''
   @target: string := '_blank'
   @style: string := ''
+  _href: string ~= safeHref @href
   _style: string ~= joinStyles 'color:#067df7;text-decoration:none', @style
   render
-    a class: @class, href: @href, target: @target, style: _style
+    a class: @class, href: _href, target: @target, style: _style
       slot
 
 export Image = component
@@ -216,9 +236,10 @@ export Image = component
   @width?: string | number := undefined
   @height?: string | number := undefined
   @style: string := ''
+  _src: string ~= safeImageSrc @src
   _style: string ~= joinStyles 'display:block;outline:none;border:none;text-decoration:none', @style
   render
-    img class: @class, src: @src, alt: @alt, width: @width, height: @height, style: _style
+    img class: @class, src: _src, alt: @alt, width: @width, height: @height, style: _style
 
 export Divider = component
   @class: string := ''
@@ -232,16 +253,17 @@ export Button = component
   @href: string := ''
   @target: string := '_blank'
   @style: string := ''
-  _padding ~= parsePadding @style
+  _href: string ~= safeHref @href
+  _padding: ReturnType<typeof parsePadding> ~= parsePadding @style
   _vertical: number ~= (_padding.paddingTop ?? 0) + (_padding.paddingBottom ?? 0)
   _textRaise: number ~= pxToPt(_vertical) ?? 0
-  _left ~= computeMsoPadding(_padding.paddingLeft ?? 0)
-  _right ~= computeMsoPadding(_padding.paddingRight ?? 0)
+  _left: [number, number] ~= computeMsoPadding(_padding.paddingLeft ?? 0)
+  _right: [number, number] ~= computeMsoPadding(_padding.paddingRight ?? 0)
   _msoLeft: string ~= "<!--[if mso]><i style=\"mso-font-width:#{_left[0] * 100}%;mso-text-raise:#{_textRaise}\" hidden>#{'&#8202;'.repeat(_left[1])}</i><![endif]-->"
   _msoRight: string ~= "<!--[if mso]><i style=\"mso-font-width:#{_right[0] * 100}%\" hidden>#{'&#8202;'.repeat(_right[1])}&#8203;</i><![endif]-->"
   _linkStyle: string ~= joinStyles 'line-height:100%;text-decoration:none;display:inline-block;max-width:100%;mso-padding-alt:0px', @style
   render
-    a class: @class, href: @href, target: @target, style: _linkStyle
+    a class: @class, href: _href, target: @target, style: _linkStyle
       span innerHTML: _msoLeft
       span style: 'max-width:100%;display:inline-block;line-height:120%;mso-padding-alt:0px'
         slot
@@ -267,21 +289,40 @@ safeHref = (href: unknown): string ->
   return value if lower.startsWith('https://')
   return value if lower.startsWith('mailto:')
   return value if lower.startsWith('tel:')
-  return value if lower.startsWith('/')
-  return value if lower.startsWith('#')
-  '#'
+  return '#' if /^[a-z][a-z0-9+.-]*:/i.test value
+  value
 
-inlineMarkdown = (text: string): string ->
-  escaped = escapeHtml text
-  escaped
+safeImageSrc = (src: unknown): string ->
+  value = String(src ?? '').trim()
+  return '' unless value
+  lower = value.toLowerCase()
+  return value if lower.startsWith('http://')
+  return value if lower.startsWith('https://')
+  return value if lower.startsWith('cid:')
+  return value if /^data:image\/(?:gif|jpeg|png|webp);base64,[a-z0-9+/=\s]+$/i.test value
+  return '' if /^[a-z][a-z0-9+.-]*:/i.test value
+  value
+
+formatInlineText = (text: string): string ->
+  escapeHtml(text)
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/__(.+?)__/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/_(.+?)_/g, '<em>$1</em>')
     .replace(/`(.+?)`/g, '<code>$1</code>')
-    .replace /\[(.+?)\]\((.+?)\)/g, (_, label, href) ->
-      safe = escapeAttribute safeHref href
-      "<a href=\"#{safe}\" target=\"_blank\">#{label}</a>"
+
+inlineMarkdown = (text: string): string ->
+  output: string[] = []
+  pattern = /\[(.+?)\]\((.+?)\)/g
+  cursor = 0
+  while match = pattern.exec text
+    output.push formatInlineText text.slice(cursor, match.index)
+    label = formatInlineText match[1]
+    href = escapeAttribute safeHref match[2]
+    output.push "<a href=\"#{href}\" target=\"_blank\">#{label}</a>"
+    cursor = pattern.lastIndex
+  output.push formatInlineText text.slice cursor
+  output.join ''
 
 parseMarkdown = (source: string): string ->
   return '' unless source
@@ -360,7 +401,7 @@ export CodeInline = component
   @style: string := ''
   @children: any =! undefined
   _style: string ~= joinStyles 'background:#f4f4f4;padding:2px 4px;border-radius:3px;font-family:monospace;font-size:0.9em', @style
-  _orangeCss =! '''
+  _orangeCss: string =! '''
     meta ~ .cino { display: none !important; opacity: 0 !important; }
     meta ~ .cio { display: block !important; }
     '''
@@ -375,7 +416,7 @@ export CodeInline = component
       = _content
 
 export Tailwind = component
-  @config: Record<string, any> := {}
+  @config: Record<string, unknown> := {}
   mounted: ->
     registerEmailTailwindRoot this, @config
   render
