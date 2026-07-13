@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./email/dom": "./email/dom.rip"
+    "./email/dom": "./email/dom.rip",
+    "./email/compat": "./email/compat.rip"
   },
   "scripts": {
     "test": "bun test --timeout 15000"
