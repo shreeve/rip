@@ -107,7 +107,11 @@ export function toSourceMap({ code, mappings }, { source, file = 'output.js', so
     prevSrcCol = src.col;
 
     const slice = code.slice(m.generatedStart, m.generatedEnd);
-    if (IDENT.test(slice)) {
+    // Only EXACT rows carry a name: names[i] presents as the ORIGINAL
+    // name of the generated identifier, and only an exact row spells
+    // its source verbatim. A cover row over a minted temp (a hoisted
+    // `_ref`) must not rename the source position it anchors to.
+    if (m.mappingKind === 'exact' && IDENT.test(slice)) {
       let idx = nameIndex.get(slice);
       if (idx === undefined) {
         idx = names.length;

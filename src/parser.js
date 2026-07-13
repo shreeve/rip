@@ -274,10 +274,11 @@ const parserInstance = {
     let action, at, base, end, expected, first, got, last, len, loc, locs, message, node, nodeId, r, row, sem, span, start, state, stk, vals;
     [stk, vals, locs] = [[0], [null], [null]];
     let parseTable = this.parseTable, EOF = 1, diagnostics = [], nodes = [], roles = [], nodeIds = new WeakMap, nextNodeId = 1, lexer = Object.create(this.lexer), sharedState = { ctx: {} };
-    for (let k in this.ctx) {
-      if (!Object.hasOwn(this.ctx, k))
+    const _ref4 = this.ctx;
+    for (let k in _ref4) {
+      if (!Object.hasOwn(_ref4, k))
         continue;
-      let v = this.ctx[k];
+      let v = _ref4[k];
       sharedState.ctx[k] = v;
     }
     lexer.setInput(input, sharedState.ctx);
@@ -297,8 +298,9 @@ const parserInstance = {
       action = parseTable[state]?.[symbol];
       if (action == null) {
         expected = [];
-        for (let p in parseTable[state]) {
-          if (!Object.hasOwn(parseTable[state], p))
+        const _ref5 = parseTable[state];
+        for (let p in _ref5) {
+          if (!Object.hasOwn(_ref5, p))
             continue;
           if (this.tokenNames[p] && +p > 2) {
             if (!expected.includes(this.tokenNames[p]))

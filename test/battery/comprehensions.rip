@@ -145,7 +145,7 @@ test 'object comprehension key-value', '''
   ''', {x: 'x', y: 'y'}
 
 # Code generation
-code "object comprehension", "{k: v * 2 for k, v of obj}", "((() => {\n  const result = {};\n  for (let k in obj) {\n    let v = obj[k];\n    result[k] = (v * 2);\n  }\n  return result;\n})());"
+code "object comprehension", "{k: v * 2 for k, v of obj}", "((() => {\n  const result = {};\n  const _ref = obj;\n  for (let k in _ref) {\n    let v = _ref[k];\n    result[k] = (v * 2);\n  }\n  return result;\n})());"
 
 # ==============================================================================
 # Function-Local Comprehension Assignment (direct array building, no IIFE)

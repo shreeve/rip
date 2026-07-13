@@ -45,6 +45,16 @@ export class Stores {
     return this.nodeIds?.get(node) ?? null;
   }
 
+  // Register a lowering's clone of a tree node under the ORIGINAL
+  // node's id: the clone's emission is a second generated
+  // manifestation of the same source construct, so its marks must
+  // resolve to the same rows. No-op when the original carries no id.
+  alias(clone, original) {
+    const id = this.nodeIds?.get(original);
+    if (id != null) this.nodeIds.set(clone, id);
+    return clone;
+  }
+
   node(nodeId) {
     return this.byId.get(nodeId) ?? null;
   }

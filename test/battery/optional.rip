@@ -148,4 +148,124 @@ test "a nullish receiver skips the write after one evaluation", '''
   n
 ''', 1
 
-code "a pure receiver keeps the plain guard", "o.a?.x = 5", "if (o.a != null) o.a.x = 5;"
+code "a member receiver captures once for the guard", "o.a?.x = 5", "if ((_ref = o.a) != null) _ref.x = 5;"
+code "a bound plain-name receiver keeps the plain guard", "o = null\no?.x = 5", "let o = null;\nif (o != null) o.x = 5;"
+
+# ==============================================================================
+# Optional assignment — single evaluation, native order, control preservation.
+# The optional receiver evaluates exactly once: the null check and the write
+# see the SAME object. Computed keys, target reads, and the RHS evaluate only
+# when the receiver is non-nullish, and exactly once.
+# ==============================================================================
+
+test 'optional assign reads a getter receiver once', '''
+  n = 0
+  a = {x: 0}
+  b = {x: 0}
+  o = {}
+  Object.defineProperty o, 'p', get: ->
+    n += 1
+    if n is 1 then a else b
+  o.p?.x = 7
+  [a.x, b.x, n]
+  ''', [7, 0, 1]
+
+test 'optional native compound reads its receiver once', '''
+  n = 0
+  target = {x: 10}
+  o = {}
+  Object.defineProperty o, 'p', get: ->
+    n += 1
+    target
+  o.p?.x += 5
+  [target.x, n]
+  ''', [15, 1]
+
+test 'optional index assign evaluates its computed key once', '''
+  n = 0
+  key = -> (n += 1; 0)
+  o = {a: [9]}
+  o?.a[key()] //= 2
+  [o.a[0], n]
+  ''', [4, 1]
+
+test 'optional nested computed keys evaluate once each', '''
+  ki = 0
+  kj = 0
+  i = -> (ki += 1; 0)
+  j = -> (kj += 1; 1)
+  o = {a: [[3, 9]]}
+  o?.a[i()][j()] //= 3
+  [o.a[0][1], ki, kj]
+  ''', [3, 1, 1]
+
+test 'optional complex receiver and computed key evaluate once', '''
+  rn = 0
+  kn = 0
+  recv = -> (rn += 1; {a: [8]})
+  key = -> (kn += 1; 0)
+  recv()?.a[key()] //= 2
+  [rn, kn]
+  ''', [1, 1]
+
+test 'optional compound skips key and value when receiver is nullish', '''
+  keyN = 0
+  rhsN = 0
+  key = -> (keyN += 1; 0)
+  rhs = -> (rhsN += 1; 2)
+  o = null
+  o?.a[key()] //= rhs()
+  [keyN, rhsN]
+  ''', [0, 0]
+
+test 'optional assign value position yields the assigned value', '''
+  o = {p: {x: 0}}
+  r = (o.p?.x = 7)
+  [r, o.p.x]
+  ''', [7, 7]
+
+test 'optional assign value position yields undefined on nullish', '''
+  o = {p: null}
+  r = (o.p?.x = 7)
+  r is undefined
+  ''', true
+
+test 'optional assign with impure receiver preserves yield', '''
+  get = -> {x: 0}
+  f = ->
+    v = yield 1
+    get()?.x = yield 2
+    'done'
+  g = f()
+  [g.next().value, g.next(10).value, g.next(20).value]
+  ''', [1, 2, 'done']
+
+test 'optional assign with impure receiver preserves await', '''
+  o = {p: {x: 0}}
+  set = -> o.p
+  set()?.x = await Promise.resolve(7)
+  o.p.x
+  ''', 7
+
+test 'optional assign temps dodge user bindings', '''
+  _ref = 'mine'
+  _o = 'also mine'
+  _k = 'still mine'
+  n = 0
+  get = -> (n += 1; {x: 1})
+  get()?.x = 5
+  [_ref, _o, _k, n]
+  ''', ['mine', 'also mine', 'still mine', 1]
+
+test 'unresolved identifier may be a global accessor - reads once', '''
+  n = 0
+  desc = {configurable: true}
+  desc.get = ->
+    n += 1
+    {x: 0}
+  Object.defineProperty globalThis, '__hardenProbe', desc
+  __hardenProbe?.x = 5
+  count = n
+  Reflect.deleteProperty globalThis, '__hardenProbe'
+  count
+  ''', 1
