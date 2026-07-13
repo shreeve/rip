@@ -1,12 +1,10 @@
 # Type-audit findings — gaps in rip's typed-editor story
 
-> **No finding here has been verified against this code.** Fixes have landed for most of them; the statuses below say only what someone actually ran.
+> **Trust the Status line, not the body.** Each finding's body is the original audit snapshot — present-tense and pre-fix, even where a fix has since landed. The **Status** line under each heading is the current truth, and records only what someone actually ran.
 >
 > **No line numbers.** Code is cited by file and symbol name — greppable, and it does not rot. (The rip-v4 line anchors this ledger used to carry were stale on arrival — most pointed into a differently-shaped file.)
 >
 > The **vs v3** comparisons throughout were established by driving v3 (the rip-lang repo) before its retirement — historical, not re-runnable. This repo is **v4, cleaned up**; the bodies' "v4" means the code here.
-
-Each finding's body is the original audit snapshot (hence present-tense, even where a fix has landed); the **Status** line under each heading is the current truth.
 
 **Evidence tags.** A status carries a tag only if someone ran the thing. **No tag means it has not been checked** — there is no tag for "we believe this."
 
@@ -20,6 +18,8 @@ Each finding's body is the original audit snapshot (hence present-tense, even wh
 **Statuses** — `✅ Verified` · `🟡 Fix landed, unverified` (the code is in; nobody has watched it work) · `⬜ Open` (no fix).
 
 > **Driven 2026-07-12** against this code: `bun run test:all` (5261 pass / 0 fail, with `RIP_EXTENDED=1 RIP_REQUIRE_TSC=1` and a real tsc), `bun run type-audit --all` (60/60 dimensions, 335/335 hover probes), and `test/toolchain/strict-modes.test.js` — a two-mode gate written for #1, which was found to be exercised by nothing at all. **Nine findings verify.** Four remain: #10 (rip-native hovers, no oracle), #11 and #12 (no harness coverage), #8 (open, no fix).
+>
+> **Driven 2026-07-13:** #7 now closes — `rip check` exists, a headless CLI that runs the editor's faces→mirror→tsgo→map-back pipeline in **batch**: one tsgo session over the whole mirror, **pin-probed like the editor** (so evolving-`any` closure reads resolve, not just a bare `tsc --noEmit`), diagnostics pulled per file and mapped onto `.rip` source. The drift-sensitive core (mapping/strict/noCheck/directives, and the mirror+tsconfig+closure) was extracted from `server.js` into shared `diagnostics.js` / `mirror.js`, so checker and editor are one implementation. Driven by `test/toolchain/check.test.js` (clean / type-error at the mapped `.rip` position / `rip.strict` differential / `rip.noCheck` / `@ts-expect-error` / cross-file / `--json`) and over the 12 audit fixtures (`bin/rip check fixtures` → 12/12 clean, matching the runner's verdict dimension — pin-dependent case included). **Ten findings now verify;** the five that remain are #8 (open, no fix), #10 (rip-native hovers, no oracle), #11 and #12 (no harness coverage), and #13 (newly filed — single-rooted tsconfig, no monorepo support; the fix approach is driven-feasible but unbuilt).
 
 ## Summary
 
@@ -35,12 +35,13 @@ Each finding's body is the original audit snapshot (hence present-tense, even wh
 | [4](#4-evolving-let-reassignment-not-caught) | Evolving-`let` reassignment not caught | Silent safety hole | ✅ Verified · [driven] | — |
 | [5](#5-typeof-on-an-unannotated-value-resolves-to-undefined) | `typeof` unannotated → `undefined` | Loud correctness | ✅ Verified · [driven] | — |
 | [6](#6-ts-expect-error-dropped-on-multi-line-emit) | `@ts-expect-error` dropped on multi-line | Loud correctness | ✅ Verified · [driven] | — |
-| [7](#7-no-headless-type-checker-rip-check) | No headless `rip check` | Missing capability | ⬜ Open | — (a build, not a check) |
+| [7](#7-no-headless-type-checker-rip-check) | No headless `rip check` | Missing capability | ✅ Verified · [driven] | — |
 | [8](#8-auto-import-is-closure-scoped) | Auto-import closure-scoped | Missing capability | ⬜ Open | **editor** — no harness coverage |
 | [9](#9-write-only-unannotated-locals-hover-any) | Write-only locals hover `any` | Hover DX | ✅ Verified · [driven] | — |
 | [10](#10-reactive-bindings-hover-as-their-cell-wrapper) | Reactive bindings hover cell wrapper | Hover DX | 🟡 Fix landed, unverified | **editor** — rip-native, no oracle |
 | [11](#11-config-changes-required-a-reload) | Config changes required a reload | Config surface | 🟡 Fix landed, unverified | **editor** — no harness coverage |
 | [12](#12-nocheck-parsed-but-never-applied) | `rip.noCheck` parsed but never applied | Config surface | 🟡 Fix landed, unverified | **editor** — no harness coverage |
+| [13](#13-single-rooted-tsconfig--no-per-project-resolution) | Single-rooted tsconfig — no monorepo support | Config surface | ⬜ Open | **driven** — code + real tsgo |
 
 ## Compiler-coverage gaps — file won't compile (hard blockers)
 
@@ -57,13 +58,11 @@ rip's parser rejects the TS-optional `?` suffix wherever v3 accepted it — on b
 - **`.d.ts` generics** — the same run emits `wrap<T extends string>(value: T): Promise<[T]>`; `T` resolves in scope, no `TS2304`.
 - **tsc-valid** — the `dts-tsc` gate, which this finding cites as its validator, passes **37/37**. It had been silently skipping 25 of 26 tests because no `tsc` was on PATH; run with `RIP_EXTENDED=1 RIP_REQUIRE_TSC=1` and `RIP_TSC` pointed at a real binary, it executes and passes.
 
-- **Face** — `bin/rip --ts` on 03/05/06 should carry the `?`.
-- **`.d.ts` optional params (C1-dts)** — `dts.js` reads the `optionalMarker` role (shared `renderParam`): typed `title?: string` keeps the `?`, bare `title?: any` (a declaration can't carry an implicit any).
-- **`.d.ts` generics (generics-dts)** — declarations emit the `<T, …>` clause from the `typeParams` role, so a generic `def` references `T` in scope instead of `TS2304`.
+**Why (code)** — `dts.js` reads the `optionalMarker` role (shared `renderParam`): typed `title?: string` keeps the `?`, bare `title?: any` (a declaration can't carry an implicit any); generic declarations emit the `<T, …>` clause from the `typeParams` role, so a generic `def` references `T` in scope instead of `TS2304`.
 
 Note: under `rip.strict` a bare optional param (`title?`, no type) flags `TS7006` on the face — a regression vs v3 (which emitted `title?: any` and stayed strict-clean). The face-side fix (emit `title?: any`, matching the `.d.ts`) is deferred to the strict-audit campaign.
 
-**Reproduced** — two surfaces (pre-fix output; a fix has landed, unverified — see Status): type-body members ([03-structural.rip](fixtures/03-structural.rip) `ssl?: boolean`, [05-interfaces.rip](fixtures/05-interfaces.rip) `method?: string`) and params ([06-functions.rip](fixtures/06-functions.rip) `title?: string`).
+**Reproduced** — two surfaces (pre-fix output — see Status): type-body members ([03-structural.rip](fixtures/03-structural.rip) `ssl?: boolean`, [05-interfaces.rip](fixtures/05-interfaces.rip) `method?: string`) and params ([06-functions.rip](fixtures/06-functions.rip) `title?: string`).
 ```
 $ bin/rip --ts test/type-audit/fixtures/03-structural.rip
 03-structural.rip:12:6: code expression ('?') in a type body — types erase and cannot execute
@@ -79,7 +78,7 @@ A type/interface body accepts only property-style members (`name: type`); it has
 
 **Status.** ✅ **Verified · [driven]** (2026-07-12). 09 compiles (`compiles` 12/12) and the `dts-tsc` gate passes 37/37, so the shorthand renders on both the face and the `.d.ts` and the declaration is tsc-valid. The fix sits in the shared `typetext.js` seam (which `dts.js` also uses) — the positive control for C1's drift, and it holds.
 
-**Reproduced** — [09-components.rip](fixtures/09-components.rip): `addItem(item: CartItem): void` inside `export type Cart =` (pre-fix output; a fix has landed, unverified).
+**Reproduced** — [09-components.rip](fixtures/09-components.rip): `addItem(item: CartItem): void` inside `export type Cart =` (pre-fix output — see Status).
 ```
 $ bin/rip --ts test/type-audit/fixtures/09-components.rip
 09-components.rip:273:10: code expression ('(') in a type body — types erase and cannot execute
@@ -184,11 +183,15 @@ A `# @ts-expect-error` guarding a statement whose face emits as MORE THAN ONE li
 
 v4 has no CLI to type-check a file or a project (the `tsc --noEmit` of rip-land). Type diagnostics exist only inside the editor server over LSP — so CI/pre-commit checking requires driving the editor (which is exactly why `runner.js` must be an LSP client).
 
-**Status.** ⬜ **Open.** No `rip check` exists; `bin/rip` has no `check` subcommand.
+**Status.** ✅ **Verified · [driven]** (2026-07-13). `rip check [paths...]` now exists — [bin/rip](../../bin/rip) dispatches the `check` subcommand to [src/check.js](../../src/check.js), the batch counterpart the finding called for: it compiles each target `.rip` (and its transitive `.rip` closure) to a TS face, materializes the faces into a mirror with the editor's generated tsconfig, then drives **one tsgo session** over the whole mirror — **pin-probing each file exactly as the editor does** (Tier-3 pins, so an evolving-`let` binding read across a closure resolves to its real type, not `any`) and pulling diagnostics per file (a request/response, so no settle) — and maps every diagnostic back onto `.rip` source. It is the editor's refresh→probe→pull loop, batched and headless.
 
-**Reproduced** — [bin/rip](../../bin/rip) has no `check` subcommand (modes: `-c`/`--ts`/`-o`/`-m`/`-t`/`-s`/`--dts`/`--runtime`/`--explain`/`--face`). v3 had `rip check [dir]`, whole-project, strict+checkAll.
+No second copy of the drift-sensitive logic: the mapping / `rip.strict` gate / `@ts-expect-error` (`applyRipDirectives`) / `rip.noCheck` core was extracted from the server into [diagnostics.js](../../packages/vscode/src/diagnostics.js), and the mirror layout + generated tsconfig + closure-edge discovery into [mirror.js](../../packages/vscode/src/mirror.js); [server.js](../../packages/vscode/src/server.js) now imports both, and pins ride the shared [pins.js](../../packages/vscode/src/pins.js). So the batch checker and the editor share one implementation — a batch run resolves imports / @types / strictness / pins and suppresses exactly as VS Code does.
 
-**vs v3** — v3's checker was an in-process LanguageService CLI; v4's moved into tsgo/LSP, so the headless equivalent no longer exists. The batch counterpart of what the editor already does (faces → mirror → tsgo batch → map diagnostics back) does not exist.
+Driven by `test/toolchain/check.test.js` and by hand: a clean file exits 0; `n: number = 'oops'` reports `TS2322` mapped to `bad.rip:1:1` and exits 1; the implicit-any family stays suppressed by default and surfaces as `TS7006` at the `name` parameter under `package.json#rip.strict` (the #1 differential, now reachable headlessly); `rip.noCheck: ['legacy/**']` silences a matched path; a `# @ts-expect-error` absorbs its error; a cross-file misuse reports `TS2345` at the call site through the imported type. **Parity check:** `bin/rip check fixtures` runs the 12 audit fixtures **12/12 clean**, matching the runner's verdict dimension — including the pin-dependent case (`11-inference`'s `matches`, an evolving-`any` closure read that only the pin pass resolves; a pins-less `tsc --noEmit` batch mis-reports it as an unused directive, so this parity is the reason for the tsgo-session-with-pins design over a bare batch). Runs in ~0.4s over the 12 fixtures (the per-keystroke editor session, driven as a client, took ~1.7s). The pin pass is the batch inheriting the editor's Tier-3 cost; the declare-in-place fix in the [`=` hoisting note](#-hoisting-four-type-regressions-and-a-bounded-fix-owners-call) below would let both retire it — a simplification (and, in the editor, one fewer async pass) more than a checker speedup: measured with-vs-without, the pin round-trips are only ~30ms (~8%) of the ~370ms wall-clock, the rest being startup and tsgo's program-build.
+
+**Reproduced** (pre-fix) — [bin/rip](../../bin/rip) had no `check` subcommand (modes: `-c`/`--ts`/`-o`/`-m`/`-t`/`-s`/`--dts`/`--runtime`/`--explain`/`--face`). v3 had `rip check [dir]`, whole-project, strict+checkAll.
+
+**vs v3** — v3's checker was an in-process LanguageService CLI; v4's moved into tsgo/LSP, so an in-process equivalent no longer exists. `rip check` restores the capability the other way: rather than re-checking in-process, it runs the editor's own pipeline (faces → mirror → tsgo-with-pins → map diagnostics back) in batch — the one honest source of truth for v4's diagnostics.
 
 ### 8. Auto-import is closure-scoped
 
@@ -250,6 +253,22 @@ v3's `rip.exclude` let a partly-typed project keep untyped/legacy paths from bei
 
 Unestablished, both session-shaped: that silencing applies **reactively** to an already-open file, and that a **cross-file re-pull cannot resurrect** a silenced file's diagnostics — the reason the guard sits in `repullDiagnostics()` as well as `refresh()`.
 
+### 13. Single-rooted tsconfig — no per-project resolution
+
+Both the editor and `rip check` generate ONE tsconfig at the mirror root that `extends` only `<workspaceRoot>/tsconfig.json` ([mirror.js](../../packages/vscode/src/mirror.js) `generatedTsconfig`: `extends: '../../tsconfig.json'`, `rootDirs: ['.', '../..']`). Every `.rip` file is type-checked under the ROOT's `compilerOptions`; a nested package's own `tsconfig.json` — its `types`, `lib`, `jsx`, `strict`, `paths` — is ignored. `package.json#rip` (`strict`/`noCheck`) is already resolved per-file via `readProjectConfig` (nearest `package.json`, [config.js](../../src/config.js)), so the two config systems disagree: rip policy is per-package, tsconfig is flat. A second symptom: the editor roots the mirror at the VS Code folder while `rip check`'s `findWorkspaceRoot` walks to the nearest `package.json`/`tsconfig.json`/`.git` marker — so in a monorepo the same file can extend DIFFERENT tsconfigs in the two surfaces.
+
+**Status.** ⬜ **Open** (no fix). The fix approach is **verified feasible · [driven]** (see below).
+
+**The fix — one mirror, one session, per-project wrapper tsconfigs.** tsgo's LSP does per-file NEAREST-`tsconfig.json` discovery (the tsserver "configured project" model), so the single mirror tree and single tsgo session stay. Instead of one generated tsconfig at the mirror root, place a generated WRAPPER at each mirrored project dir, each `extends`-ing its source `tsconfig.json` with the same overrides (`noImplicitAny`, `noEmit`, `allowImportingTsExtensions`, `types:["*"]` unless the chain sets `types`) and reach-ups (`extends`, `rootDirs`) computed by `path.relative` instead of the hardcoded `../..`. tsgo then partitions the faces per project internally. Wrappers set their own `include`/`exclude`, so a source tsconfig's file set is not inherited (only `compilerOptions` are).
+
+**Driven** — the real tsgo LSP, two probes:
+- Two sibling dirs, one with a `strict:true` `tsconfig.json`, one governed by a loose root: `let x: string = null` reported `TS2322` ONLY under the nearest strict config; the loose file stayed clean. tsgo routes per file.
+- The production shape — a nested generated wrapper `extends`-ing a strict source tsconfig via `../../../../pkg/tsconfig.json`, under one mirror root, one session: `pkg/a.rip.ts` reported `TS2322` (strict) while `root.rip.ts` stayed loose. Nested wrappers + reach-ups work.
+
+**Blast radius.** Shared: generalize `generatedTsconfig` + add a `nearestTsconfig(dir, anchor)` walk in `mirror.js`. `rip check` ([src/check.js](../../src/check.js)): after materialization, emit one wrapper per distinct owning tsconfig — small, self-contained. Editor ([server.js](../../packages/vscode/src/server.js)): larger — emit/refresh wrappers during closure materialization and on `tsconfig.json` (or extends-chain) changes via the existing watcher; no session multiplexing. The pin pass and single-session architecture are untouched.
+
+**vs v3** — not established (v3 is retired; not re-runnable). Framed as a missing capability, not a driven v3 regression.
+
 ## `=` hoisting: four type regressions and a bounded fix (owner's call)
 
 **Status.** ✅ **Addressed · [driven]** (2026-07-12). The declare-in-place fix this note proposed shipped as the evolving-`let` tiers (+ follow-ups). #4, #5 and #9 all close through it and are now each verified above; the excess-property case rides the same mechanism (12-cast passes `verdict` and `twin`).
@@ -263,6 +282,8 @@ Unestablished, both session-shaped: that silencing applies **reactively** to an 
 - **spurious excess-property error** (over-check, unnumbered) — `def getEl(): {tag:string}` with `o = {tag, __meta}` emits `let o; o = {…}`, and the evolving `let` takes the return type as context, so the fresh literal trips `TS2353` — which `const o = {…}` does not ([12-cast.rip](fixtures/12-cast.rip), driven: v4's hoisted form errors under `tsc --strict`, the declare-in-place form is clean).
 
 **The fix rip already ships.** `=!` declares in place today (`x =! 5` → `const x = 5`) — no split, no gap. `=` could do the same *where the first assignment dominates its uses*, hoisting only where it must. The rip source is unchanged; all four close.
+
+**A fifth payoff — the pin pass retires.** The editor's Tier-3 pin probe (and now the batch `rip check`'s pin pass, #7) exists ONLY to recover the type of a hoist-split binding read across a closure — the evolving-`let` declare-in-place would eliminate. Remove the split and the workaround is dead code: both drop the probe and the editor loses a per-keystroke async pass. For the batch checker the win is mostly SIMPLICITY, not speed — measured with-vs-without the pass, the pin round-trips are only ~30ms, under a tenth of `rip check`'s ~370ms wall-clock on the 12 fixtures. The checker's wall-clock is dominated by process startup and tsgo's cold program-build, not the pins; so this change is a real cleanup (and removes async latency from the editor), but not a checker-local speed lever.
 
 **Measured blast radius.** On medlabs (all 61 files compile, 1,075 hoisted bindings), **~65% already have a top-level first assignment** — the clean declare-in-place case. ~35% are assigned inside a block or nested scope; a subset of those genuinely need the hoist (used after the block), so it stays for them. The denser v3 compiler source splits ~52/48. So this is not "abandon hoisting" — it stays for a real minority, and the change targets the majority, where these regressions live. *(Proxy: top-level vs nested first assignment over emitted JS; "needs-hoist" is an upper bound.)*
 
