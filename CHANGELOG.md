@@ -5,6 +5,12 @@ repository's pull requests.
 
 ## Unreleased
 
+- Compiler and runtime correctness: lowerings preserve evaluation,
+  control, bindings, and RFC-12 mappings; schema/ORM paths validate
+  structure and stable identity; reactive/component lifecycles stay
+  coherent; compiler-emitted runtime helpers use minted aliases so
+  source bindings cannot capture language sugar (#55)
+
 - Interpolated string keys: `{"#{k}": v}` — the template is a
   computed key (`[\`${k}\`]: v`), surrounding literal text included
   (`{"pre#{k}post": 1}`). The misleading "@-keys" rejection this

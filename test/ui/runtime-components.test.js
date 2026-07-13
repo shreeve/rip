@@ -43,6 +43,7 @@ const parseFails = (src) => {
 const BIN = resolve(import.meta.dir, '../../bin/rip');
 const CRT_PATH = resolve(import.meta.dir, '../../src/runtime/components.js');
 const RRT_PATH = resolve(import.meta.dir, '../../src/runtime/reactive.js');
+const DOM_PATH = resolve(import.meta.dir, '../support/recording-dom.js');
 
 // The recording DOM is the process's `document` for both runtimes
 // (each resolves the bare global at call time).
@@ -1783,8 +1784,8 @@ describe('runtime delivery: the components runtime', () => {
   test('program-scope shadowing suppresses injection per name; all bound → nothing injects', () => {
     const a = compile('setContext = (k, v) => v\nsetContext("a", 1)\nx = getContext("a")', { runtimeDelivery: 'import' });
     const compLine = a.code.split('\n').find((l) => l.includes('components.js'));
-    expect(compLine).toMatch(/^import \{ getContext, hasContext, __Component/);
-    expect(compLine).not.toContain('setContext,');
+    expect(compLine).toMatch(/^import \{ setContext as setContext_, getContext, hasContext, __Component/);
+    expect(a.code).toContain('setContext("a", 1);');
     const allBound = ALL_COMPONENT_NAMES.map((n) => `${n} = 1`).join('\n') + '\nx = setContext';
     const b = compile(allBound, { runtimeDelivery: 'import' });
     expect(b.code).not.toContain('runtime/components.js');
@@ -1793,7 +1794,105 @@ describe('runtime delivery: the components runtime', () => {
 
   test('function-scope shadowing does NOT suppress module-level injection', () => {
     const { code } = compile('f = ->\n  setContext = 1\n  setContext\nx = getContext("k")', { runtimeDelivery: 'import' });
-    expect(code.split('\n')[1]).toMatch(COMPONENTS_IMPORT);
+    expect(code.split('\n')[1]).toMatch(/^import \{ setContext as setContext_, getContext, hasContext, __Component/);
+    expect(code).toContain('let x = getContext("k");');
+  });
+
+  test('component base, state, computed, and effect lowerings ignore same-named source bindings', () => {
+    const source = [
+      '__Component = null',
+      '__state = -> "bad-state"',
+      '__computed = -> "bad-computed"',
+      '__effect = -> "bad-effect"',
+      'App = component',
+      '  count := 1',
+      '  doubled ~= count * 2',
+      '  ~> console.log "effect:" + doubled',
+      'app = App.new()',
+      'console.log app.count.read(), app.doubled.read()',
+    ].join('\n');
+    const { code } = compile(source, { runtimeDelivery: 'inline' });
+    const run = spawnSync('bun', ['-e', code], { encoding: 'utf8' });
+    expect(run.status).toBe(0);
+    expect(run.stdout.trim().split('\n')).toEqual(['effect:2', '1 2']);
+  });
+
+  test('generated offer/accept and child-stack calls use aliases while source calls stay source-owned', () => {
+    const source = [
+      'setContext = null',
+      'getContext = null',
+      '__Component = null',
+      '__pushComponent = null',
+      '__popComponent = null',
+      'Child = component',
+      '  accept theme',
+      '  render',
+      '    span',
+      '      = theme',
+      'Parent = component',
+      '  offer theme := "dark"',
+      '  render',
+      '    Child',
+      'app = Parent.new()',
+      'app.mount document.body',
+    ].join('\n');
+    const { code } = compile(source, { runtimeDelivery: 'inline' });
+    const dir = mkdtempSync(join(tmpdir(), 'rip-component-alias-context-'));
+    try {
+      writeFileSync(join(dir, 'main.js'),
+        `import { installRecordingDOM, serialize } from ${JSON.stringify(pathToFileURL(DOM_PATH).href)};\n` +
+        `installRecordingDOM();\n${code}\nconsole.log(serialize(document.body));\n`);
+      const run = spawnSync('bun', [join(dir, 'main.js')], { encoding: 'utf8' });
+      expect(run.status).toBe(0);
+      expect(run.stdout.trim()).toContain('>dark</span>');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('render effects, events, reconciliation, transitions, refs, ownership, and teardown use aliases', () => {
+    const generated = [
+      '__effect', '__batch', '__clsx', '__reconcile', '__transition', '__detach',
+      '__ownerFrame', '__pushOwner', '__popOwner', '__detachRef',
+    ];
+    const source = [
+      ...generated.map((name) => `${name} = null`),
+      'App = component',
+      '  items := ["a"]',
+      '  shown := true',
+      '  el := null',
+      '  render',
+      '    .("root", shown && "on")',
+      '      button @click: -> items = ["b", "c"]',
+      '        "change"',
+      '      if shown',
+      '        span ~fade ref: el',
+      '          "shown"',
+      '      for item in items',
+      '        em item',
+      'app = App.new()',
+      'app.mount document.body',
+    ].join('\n');
+    const { code } = compile(source, { runtimeDelivery: 'inline' });
+    const dir = mkdtempSync(join(tmpdir(), 'rip-component-alias-render-'));
+    try {
+      writeFileSync(join(dir, 'main.js'),
+        `import { installRecordingDOM, serialize } from ${JSON.stringify(pathToFileURL(DOM_PATH).href)};\n` +
+        `installRecordingDOM();\n${code}\n` +
+        `const before = serialize(document.body);\n` +
+        `document.querySelector('button').dispatchEvent({type: 'click', bubbles: false});\n` +
+        `const after = serialize(document.body);\n` +
+        `app.unmount();\n` +
+        `console.log(JSON.stringify([before, after, serialize(document.body)]));\n`);
+      const run = spawnSync('bun', [join(dir, 'main.js')], { encoding: 'utf8' });
+      expect(run.status).toBe(0);
+      const [before, after, unmounted] = JSON.parse(run.stdout.trim());
+      expect(before).toContain('<em>a</em>');
+      expect(after).toContain('<em>b</em><em>c</em>');
+      expect(unmounted).toBe('<body></body>');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test('NAME occurrences that are not references never trigger', () => {

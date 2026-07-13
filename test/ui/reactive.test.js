@@ -367,7 +367,7 @@ describe('self-referential runtime-name targets reject (the delivered-name bound
   test('binding a DIFFERENT runtime name reactively is the bring-your-own hatch (per-name suppression)', () => {
     const { code, runtimes } = fullCompile('__effect := 5', { runtimeDelivery: 'import' });
     expect([...runtimes]).toEqual(['reactive']);
-    expect(code.split('\n')[0]).toMatch(/^import \{ __state, __computed, __batch/);
+    expect(code.split('\n')[0]).toMatch(/^import \{ __state, __computed, __effect as __effect_, __batch/);
     expect(code).toContain('const __effect = __state(5);');
   });
 });
