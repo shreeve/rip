@@ -114,6 +114,14 @@ function __state(initialValue) {
   let notifying = false;
   let locked = false;
   let dead = false;
+  const rejectComputedDependencyMutation = () => {
+    if (__currentEffect && typeof __currentEffect.markDirty === 'function' &&
+        __currentEffect.dependencies.has(subscribers)) {
+      throw new Error(
+        'reactive runtime: computed dependency changed during evaluation — ' +
+        'computed functions must derive without writing or touching a dependency');
+    }
+  };
 
   // Notify subscribers of a change: computeds mark dirty (invalidation
   // propagates without recomputation), effects queue for the flush.
@@ -146,14 +154,18 @@ function __state(initialValue) {
     },
 
     set value(newValue) {
-      if (dead || locked || newValue === value || notifying) return;
+      if (dead || locked || newValue === value) return;
+      rejectComputedDependencyMutation();
+      if (notifying) return;
       value = newValue;
       notify();
     },
 
     read() { return value; },
     touch() {
-      if (dead || notifying) return;
+      if (dead) return;
+      rejectComputedDependencyMutation();
+      if (notifying) return;
       notify();
     },
     lock() { locked = true; return state; },
@@ -171,12 +183,19 @@ function __computed(fn) {
   const subscribers = new Set();
   let locked = false;
   let dead = false;
+  let computing = false;
 
   const computed = {
     dependencies: new Set(),
 
     markDirty() {
-      if (dead || locked || dirty) return;
+      if (dead || locked) return;
+      if (computing) {
+        throw new Error(
+          'reactive runtime: computed dependency changed during evaluation — ' +
+          'computed functions must derive without writing or touching a dependency');
+      }
+      if (dirty) return;
       dirty = true;
       for (const sub of subscribers) {
         if (sub.markDirty) sub.markDirty();
@@ -186,17 +205,31 @@ function __computed(fn) {
 
     get value() {
       if (dead) return value;
-      if (__currentEffect) {
+      // A reentrant external reader must retain its dependency edge even
+      // though the value cannot be read until this computation commits.
+      // The computing value itself never subscribes to itself.
+      if (__currentEffect && __currentEffect !== computed) {
         subscribers.add(__currentEffect);
         __currentEffect.dependencies.add(subscribers);
+      }
+      if (computing) {
+        throw new Error(
+          'reactive runtime: computed value read during its own evaluation — ' +
+          'recursive computed reads are not supported');
       }
       if (dirty && !locked) {
         for (const dep of computed.dependencies) dep.delete(computed);
         computed.dependencies.clear();
         const prev = __currentEffect;
         __currentEffect = computed;
-        try { value = fn(); } finally { __currentEffect = prev; }
-        dirty = false;
+        computing = true;
+        try {
+          value = fn();
+          dirty = false;
+        } finally {
+          computing = false;
+          __currentEffect = prev;
+        }
       }
       return value;
     },
