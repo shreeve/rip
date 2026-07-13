@@ -99,6 +99,26 @@ object.data-src = value
 
 Bracket access remains the language spelling.
 
+### Schema identity through value selection
+
+A direct schema binding receives its assignment name for diagnostics,
+registry identity, and debugging. A schema selected through a
+value-position `if`, `try`, or `switch` does not currently receive the
+outer binding name:
+
+```rip
+Selected = if condition
+  schema :shape
+    value! integer
+else
+  schema :shape
+    value! integer
+```
+
+The selected schema's `name` is `null`. A complete design must tunnel
+identity without changing branch evaluation, mappings, or anonymous
+schema behavior.
+
 ## Type and editor directions
 
 ### Headless checking
