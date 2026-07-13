@@ -14,6 +14,12 @@ const compile = (src) => {
   return emit(r, { source: src }).code;
 };
 
+const compileDelivered = (src, runtimeDelivery) => {
+  const r = parser.parse(src);
+  expect(r.diagnostics).toEqual([]);
+  return emit(r, { source: src, runtimeDelivery }).code;
+};
+
 describe('trailing array elisions survive emission', () => {
   test('the trailing hole emits its own comma; interior holes ride the separators', () => {
     expect(compile('x = [,,1,2,,]')).toBe('let x = [, , 1, 2, ,];');
@@ -130,5 +136,28 @@ describe('stepped-loop temporaries dodge user identifiers', () => {
       'for (let _i = 0; _i < [1, 2, 3].length; _i += 2) {\n' +
       'let t = [1, 2, 3][_i];\nconsole.log(t);\n}',
     );
+  });
+});
+
+describe('object-comprehension intrinsic delivery', () => {
+  test('inline delivery does not capture module bindings named for host globals', () => {
+    const src = 'Reflect = null\nObject = null\nglobalThis = null\nout = {k: v for k, v of {a: 9}}';
+    const code = compileDelivered(src, 'inline');
+    expect(code).toContain('const { __toPropertyKey, __defineOwnDataProperty } = (() => {');
+    expect(code).not.toContain('Reflect.ownKeys');
+    expect(code).not.toContain('Object.defineProperty');
+    expect(new Function(`${code}\nreturn out.a;`)()).toBe(9);
+  });
+
+  test('import delivery requests only the compiler intrinsic seam', () => {
+    const code = compileDelivered('out = {k: v for k, v of src}', 'import');
+    expect(code).toStartWith(
+      'import { __toPropertyKey, __defineOwnDataProperty } from '
+    );
+    expect(code).toContain('/src/runtime/intrinsics.js";');
+  });
+
+  test('a program without an object comprehension carries no intrinsic runtime', () => {
+    expect(compileDelivered('out = {a: 1}', 'inline')).toBe('let out = {a: 1};');
   });
 });

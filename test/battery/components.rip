@@ -5018,6 +5018,61 @@ fail 'component effect cannot yield', '''
     ~> yield 1
   ''', 'cannot yield'
 
+fail 'component effect cannot take a generator callback', '''
+  A = component
+    ~> -> yield 1
+  ''', 'cannot yield'
+
+test 'single-expression component effect plans optional assignment captures', '''
+  target = {x: 0}
+  gets = 0
+  values = 0
+  get = -> (gets += 1; target)
+  value = -> (values += 1; 7)
+  A = component
+    ~> get()?.x = value()
+  A.new()
+  [target.x, gets, values]
+  ''', [7, 1, 1]
+
+test 'single-expression component effect plans floor-divide captures', '''
+  target = {x: 9}
+  gets = 0
+  values = 0
+  get = -> (gets += 1; target)
+  value = -> (values += 1; 2)
+  A = component
+    ~> get().x //= value()
+  A.new()
+  [target.x, gets, values]
+  ''', [4, 1, 1]
+
+test 'single-expression component effect plans computed modulo key captures', '''
+  target = [9]
+  keys = 0
+  values = 0
+  key = -> (keys += 1; 0)
+  value = -> (values += 1; 4)
+  A = component
+    ~> target[key()] %%= value()
+  A.new()
+  [target[0], keys, values]
+  ''', [1, 1, 1]
+
+test 'block component effect has matching reference evaluation counts', '''
+  target = {x: 9}
+  gets = 0
+  values = 0
+  get = -> (gets += 1; target)
+  value = -> (values += 1; 2)
+  A = component
+    ~>
+      marker = true
+      get().x //= value()
+  A.new()
+  [target.x, gets, values]
+  ''', [4, 1, 1]
+
 # A render body evaluates synchronously: text, attributes, props, and event
 # listeners all emit into non-async generated scopes, so a bare await/yield
 # in any render expression rejects positioned. A FUNCTION handler value owns
@@ -5047,6 +5102,22 @@ fail 'render expression cannot yield', '''
   A = component
     render
       div "#{yield 1}"
+  ''', 'render body evaluates synchronously'
+
+fail 'keyed render expression cannot await', '''
+  A = component
+    items := [{id: 1}]
+    render
+      for item in items
+        div key: await Promise.resolve(item.id)
+  ''', 'render body evaluates synchronously'
+
+fail 'keyed render expression cannot yield', '''
+  A = component
+    items := [{id: 1}]
+    render
+      for item in items
+        div key: yield item.id
   ''', 'render body evaluates synchronously'
 
 test 'render function handler awaits in its own body', '''

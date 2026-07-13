@@ -716,6 +716,44 @@ describe('implicit-object spans stay honest', () => {
   });
 });
 
+describe('hardening lowerings keep exact operand and alias mappings', () => {
+  test('synthesized compounds map base/key/RHS once and both target/operator manifestations', () => {
+    const src = 'obj()[key()] //= rhs()';
+    const { code, mappings, stores } = compile(src);
+    const [assign] = stores.nodesByKind('assign');
+    const [index] = stores.nodesByKind('index');
+
+    expect(mappings.of(index.nodeId, 'object').map(r => [r.mappingKind, code.slice(r.generatedStart, r.generatedEnd)]))
+      .toEqual([['exact', 'obj()'], ['cover', '_o'], ['cover', '_o']]);
+    expect(mappings.of(index.nodeId, 'key').map(r => [r.mappingKind, code.slice(r.generatedStart, r.generatedEnd)]))
+      .toEqual([['exact', 'key()'], ['cover', '_k'], ['cover', '_k']]);
+    expect(mappings.of(assign.nodeId, 'value').map(r => [r.mappingKind, code.slice(r.generatedStart, r.generatedEnd)]))
+      .toEqual([['exact', 'rhs()']]);
+    expect(mappings.of(assign.nodeId, 'target')).toHaveLength(2);
+    expect(mappings.of(assign.nodeId, 'operator').map(r => code.slice(r.generatedStart, r.generatedEnd)))
+      .toEqual(['=', 'Math.floor(_o[_k] / rhs())']);
+
+    for (const text of ['obj()', 'key()', 'rhs()', '_o[_k]']) {
+      const at = code.indexOf(text);
+      expect(mappings.bestAtGenerated(at)).not.toBeNull();
+    }
+  });
+
+  test('dynamic comprehension key/value roles are exact and scaffold reverse-lookups are covered', () => {
+    const src = '{[clé()]: väl() for clé, väl of obj}';
+    const { code, mappings, stores } = compile(src);
+    const [dynamicKey] = stores.nodesByKind('dynamicKey');
+    const [comprehension] = stores.nodesByKind('comprehension');
+    const key = mappings.of(dynamicKey.nodeId, 'key');
+    const value = mappings.of(comprehension.nodeId, 'value');
+
+    expect(key.map(r => [r.mappingKind, code.slice(r.generatedStart, r.generatedEnd)])).toEqual([['exact', 'clé()']]);
+    expect(value.map(r => [r.mappingKind, code.slice(r.generatedStart, r.generatedEnd)])).toEqual([['exact', 'väl()']]);
+    expect(mappings.bestAtGenerated(code.indexOf('__toPropertyKey'))?.mappingKind).toBe('cover');
+    expect(mappings.bestAtGenerated(code.indexOf('__defineOwnDataProperty'))?.mappingKind).toBe('cover');
+  });
+});
+
 describe('generated-span invariants over the corpus', () => {
   for (const file of corpusFiles) {
     test(file, () => {

@@ -638,6 +638,16 @@ test "object comprehension with await resolves values", '''
   fn()
   ''', {a: 10, b: 20}
 
+test "object comprehension preserves await in key and value order", '''
+  fn = ->
+    log = []
+    key = (v) -> (log.push "key#{v}"; Promise.resolve "k#{v}")
+    value = (v) -> (log.push "value#{v}"; Promise.resolve(v * 10))
+    result = {[key!(v)]: value!(v) for k, v of {a: 1, b: 2}}
+    [result, log]
+  fn()
+  ''', [{k1: 10, k2: 20}, ['key1', 'value1', 'key2', 'value2']]
+
 # Codegen: object comprehension with await
 
 code "object comprehension await emits async IIFE", "x = {k: fetch!(v) for k, v of obj}", '''
@@ -646,9 +656,8 @@ code "object comprehension await emits async IIFE", "x = {k: fetch!(v) for k, v 
     const _ref = obj;
     for (let k in _ref) {
       let v = _ref[k];
-      const _k = k, _v = await fetch(v);
-      if (_k === '__proto__') Object.defineProperty(result, _k, { value: _v, enumerable: true, configurable: true, writable: true });
-      else result[_k] = _v;
+      const _k = __toPropertyKey(k), _v = await fetch(v);
+      __defineOwnDataProperty(result, _k, _v);
     }
     return result;
   })();

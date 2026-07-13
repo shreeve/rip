@@ -25,6 +25,7 @@ import * as reactiveRuntime from '../../src/runtime/reactive.js';
 import * as schemaRuntime from '../../src/runtime/schema.js';
 import * as ormRuntime from '../../src/runtime/schema-orm.js';
 import * as componentsRuntime from '../../src/runtime/components.js';
+import * as intrinsicRuntime from '../../src/runtime/intrinsics.js';
 import * as stdlibRuntime from '../../src/runtime/stdlib.js';
 
 // Lazy: the code-verb parse gate's JavaScript parser.
@@ -39,6 +40,7 @@ const ENV = {
   ...schemaRuntime,
   ...ormRuntime,
   ...componentsRuntime,
+  ...intrinsicRuntime,
 };
 
 // The stdlib names bind PER ROW, mirroring delivery's shadow rule: a

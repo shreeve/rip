@@ -391,6 +391,12 @@ function finishModelNorm(def, norm) {
   // actually arise on) serves upsert targets. Caller-WRITABLE input
   // keys are a narrower set still, owned by the creation paths.
   norm.columns = known;
+  const callerWritableColumns = new Set();
+  for (const [fname] of norm.fields) callerWritableColumns.add(__schemaSnake(fname));
+  for (const [, rel] of relations) {
+    if (rel.kind === 'belongsTo') callerWritableColumns.add(rel.foreignKey);
+  }
+  norm.callerWritableColumns = callerWritableColumns;
   const conflictColumns = new Set([norm.primaryKey]);
   for (const [fname, f] of norm.fields) {
     if (f.unique === true) conflictColumns.add(__schemaSnake(fname));
@@ -825,7 +831,13 @@ class __SchemaQuery {
   }
   limit(n) { this._limit = __schemaPageInt(n, 'limit'); return this; }
   offset(n) { this._offset = __schemaPageInt(n, 'offset'); return this; }
-  order(spec) { this._order = spec; return this; }
+  order(spec) {
+    if (typeof spec !== 'string') {
+      throw new Error('schema: order(spec) accepts only a trusted SQL string; got ' + (spec === null ? 'null' : typeof spec));
+    }
+    this._order = spec;
+    return this;
+  }
   orderBy(spec) { return this.order(spec); }
   includes(...specs) {
     this._includes.push(...__schemaNormalizeIncludes(specs));
@@ -853,7 +865,7 @@ class __SchemaQuery {
   }
   _buildSQL() {
     const n = this._def._normalize();
-    const parts = ['SELECT * FROM "' + n.tableName + '"'];
+    const parts = ['SELECT * FROM ' + __schemaQuoteIdent(n.tableName, null, 'table')];
     const where = this._whereParts(n);
     if (where.length) parts.push('WHERE ' + where.join(' AND '));
     if (this._order) parts.push('ORDER BY ' + this._order);
@@ -863,6 +875,7 @@ class __SchemaQuery {
   }
   async all() {
     this._applyDefaultScope();
+    if (this._includes.length) __schemaValidateIncludes(this._def, this._includes);
     const sql = this._buildSQL();
     const res = await __schemaRunSQL(this._def, sql, this._params);
     const instances = (res.data || []).map((row) => this._def._hydrate(res.columns, row));
@@ -881,7 +894,7 @@ class __SchemaQuery {
   async count() {
     this._applyDefaultScope();
     const n = this._def._normalize();
-    const parts = ['SELECT COUNT(*) FROM "' + n.tableName + '"'];
+    const parts = ['SELECT COUNT(*) FROM ' + __schemaQuoteIdent(n.tableName, null, 'table')];
     const where = this._whereParts(n);
     if (where.length) parts.push('WHERE ' + where.join(' AND '));
     const res = await __schemaRunSQL(this._def, parts.join(' '), this._params);
@@ -893,13 +906,18 @@ class __SchemaQuery {
     this._applyDefaultScope();
     const n = this._def._normalize();
     const keys = values && typeof values === 'object' ? Object.keys(values) : [];
-    if (!keys.length) throw new Error('updateAll: requires at least one column to set');
+    // An empty bulk update is a no-op: zero affected rows and no
+    // adapter call. It must not synthesize an UPDATE containing only
+    // the managed timestamp column.
+    if (!keys.length) return 0;
     const sets = [];
     const params = [];
     for (const k of keys) {
       const name = __schemaCamel(k);
+      const column = __schemaSnake(name);
       const field = n.fields.get(name);
-      sets.push('"' + __schemaSnake(k) + '" = ?');
+      const quoted = __schemaQuoteIdent(column, n.callerWritableColumns, 'updateAll column');
+      sets.push(quoted + ' = ?');
       params.push(__schemaSerialize(values[k], field));
     }
     if (n.timestamps) {
@@ -907,7 +925,7 @@ class __SchemaQuery {
       params.push(new Date().toISOString());
     }
     const where = this._whereParts(n);
-    let sql = 'UPDATE "' + n.tableName + '" SET ' + sets.join(', ');
+    let sql = 'UPDATE ' + __schemaQuoteIdent(n.tableName, null, 'table') + ' SET ' + sets.join(', ');
     if (where.length) sql += ' WHERE ' + where.join(' AND ');
     const res = await __schemaRunSQL(this._def, sql, [...params, ...this._params]);
     return res.rowCount ?? res.rows ?? null;
@@ -921,10 +939,10 @@ class __SchemaQuery {
     const where = this._whereParts(n);
     let sql, params;
     if (n.softDelete && this._deleted === 'live') {
-      sql = 'UPDATE "' + n.tableName + '" SET "deleted_at" = ?';
+      sql = 'UPDATE ' + __schemaQuoteIdent(n.tableName, null, 'table') + ' SET "deleted_at" = ?';
       params = [new Date().toISOString(), ...this._params];
     } else {
-      sql = 'DELETE FROM "' + n.tableName + '"';
+      sql = 'DELETE FROM ' + __schemaQuoteIdent(n.tableName, null, 'table');
       params = this._params;
     }
     if (where.length) sql += ' WHERE ' + where.join(' AND ');
@@ -953,6 +971,37 @@ function __schemaNormalizeIncludes(specs) {
   return out;
 }
 
+function __schemaValidateIncludes(def, specs) {
+  const norm = def._normalize();
+  for (const spec of specs) {
+    const rel = norm.relations.get(spec.name);
+    if (!rel) {
+      throw new Error(
+        "schema: includes('" + spec.name + "') — no such relation on " + (def.name || 'model') +
+        '. Declared relations: ' + ([...norm.relations.keys()].join(', ') || '(none)'));
+    }
+    const target = __SchemaRegistry.get(rel.target);
+    if (!target) throw new Error('schema: unknown relation target "' + rel.target + '" from ' + (def.name || 'anon'));
+    __schemaValidateRelationTarget(def, rel, target);
+    if (spec.children.length) __schemaValidateIncludes(target, spec.children);
+  }
+}
+
+function __schemaValidateRelationTarget(def, rel, target) {
+  const targetNorm = target._normalize();
+  if (!(targetNorm.columns instanceof Set)) {
+    throw new Error(
+      'schema: relation ' + (def.name || 'model') + '.' + rel.accessor +
+      ' targets ' + rel.target + ', which is not a persisted :model');
+  }
+  if (rel.kind === 'belongsTo') {
+    __schemaQuoteIdent(targetNorm.primaryKey, targetNorm.columns, 'relation primary key');
+  } else {
+    __schemaQuoteIdent(rel.foreignKey, targetNorm.columns, 'relation key');
+  }
+  return targetNorm;
+}
+
 // Batched preload: one query per relation per nesting level (WHERE fk
 // IN (…)), never JOINs — no row duplication, uniform across relation
 // kinds. Results land in the relation memo, so accessors resolve from
@@ -969,12 +1018,13 @@ async function __schemaPreload(def, instances, specs) {
     }
     const target = __SchemaRegistry.get(rel.target);
     if (!target) throw new Error('schema: unknown relation target "' + rel.target + '" from ' + (def.name || 'anon'));
+    const targetNorm = __schemaValidateRelationTarget(def, rel, target);
     const children = [];
     if (rel.kind === 'belongsTo') {
       const fkCamel = __schemaCamel(rel.foreignKey);
       const ids = [...new Set(instances.map((i) => i[fkCamel]).filter((v) => v != null))];
       const rows = ids.length ? await target.findMany(ids) : [];
-      const pk = target._normalize().primaryKey;
+      const pk = targetNorm.primaryKey;
       const byId = new Map(rows.map((r) => [r[pk], r]));
       for (const inst of instances) {
         const v = inst[fkCamel] != null ? (byId.get(inst[fkCamel]) ?? null) : null;
@@ -988,7 +1038,7 @@ async function __schemaPreload(def, instances, specs) {
       let rows = [];
       if (ids.length) {
         rows = await new __SchemaQuery(target)
-          .where(__schemaQuoteIdent(rel.foreignKey, null, 'relation key') + ' IN (' + ids.map(() => '?').join(', ') + ')', ...ids)
+          .where(__schemaQuoteIdent(rel.foreignKey, targetNorm.columns, 'relation key') + ' IN (' + ids.map(() => '?').join(', ') + ')', ...ids)
           .all();
       }
       const groups = new Map();
@@ -1010,16 +1060,17 @@ async function __schemaPreload(def, instances, specs) {
 async function __schemaResolveRelation(def, inst, rel) {
   const target = __SchemaRegistry.get(rel.target);
   if (!target) throw new Error('schema: unknown relation target "' + rel.target + '" from ' + (def.name || 'anon'));
+  const targetNorm = __schemaValidateRelationTarget(def, rel, target);
   const pk = def._normalize().primaryKey;
   if (rel.kind === 'belongsTo') {
     const fk = inst[__schemaCamel(rel.foreignKey)];
     return fk != null ? await target.find(fk) : null;
   }
   if (rel.kind === 'hasOne') {
-    return await new __SchemaQuery(target).where(__schemaQuoteIdent(rel.foreignKey, null, 'relation key') + ' = ?', inst[pk]).first();
+    return await new __SchemaQuery(target).where(__schemaQuoteIdent(rel.foreignKey, targetNorm.columns, 'relation key') + ' = ?', inst[pk]).first();
   }
   if (rel.kind === 'hasMany') {
-    return await new __SchemaQuery(target).where(__schemaQuoteIdent(rel.foreignKey, null, 'relation key') + ' = ?', inst[pk]).all();
+    return await new __SchemaQuery(target).where(__schemaQuoteIdent(rel.foreignKey, targetNorm.columns, 'relation key') + ' = ?', inst[pk]).all();
   }
   return null;
 }
@@ -1061,15 +1112,22 @@ async function __schemaSave(def, inst) {
   const isNew = !inst._persisted;
 
   await __schemaRunHook(def, inst, 'beforeValidation');
-  const errs = def._validateFields(inst, true);
-  if (errs.length) throw new SchemaError(errs, def.name, def.kind);
-  // Refinements are stage 9 of the canonical pipeline and guard
-  // persistence exactly as they guard parse(): every @ensure and
-  // @ensure! is awaited against the instance's current normalized
-  // values, and neither SQL nor any post-validation hook runs after
-  // a failure.
-  const ensureErrs = await def._applyEnsuresAsync(inst);
-  if (ensureErrs.length) throw new SchemaError(ensureErrs, def.name, def.kind);
+  const validated = await def._runExistingAsync(inst, {
+    materialize: false,
+    materializeNested: true,
+    derived: 'throw',
+  });
+  if (!validated.ok) {
+    if (validated.thrown) throw validated.thrown;
+    const src = validated.from || def;
+    throw new SchemaError(validated.errors, src.name, src.kind);
+  }
+  // Existing-instance validation stages nested/enum normalization in a
+  // separate working graph. Commit only after every field and
+  // refinement succeeds, so a failed save leaves the instance intact.
+  for (const [name] of norm.fields) {
+    if (validated.value[name] !== inst[name]) inst[name] = validated.value[name];
+  }
   await __schemaRunHook(def, inst, 'afterValidation');
 
   await __schemaRunHook(def, inst, 'beforeSave');
@@ -1092,7 +1150,7 @@ async function __schemaSave(def, inst) {
     for (const [n, f] of norm.fields) {
       const v = inst[n];
       if (v == null) continue;
-      cols.push('"' + __schemaSnake(n) + '"');
+      cols.push(__schemaQuoteIdent(__schemaSnake(n), norm.callerWritableColumns, 'insert column'));
       placeholders.push('?');
       values.push(__schemaSerialize(v, f));
       writtenColumns.push([n, v]);
@@ -1103,7 +1161,7 @@ async function __schemaSave(def, inst) {
       const fkCamel = __schemaCamel(rel.foreignKey);
       const v = inst[fkCamel];
       if (v != null) {
-        cols.push('"' + rel.foreignKey + '"');
+        cols.push(__schemaQuoteIdent(rel.foreignKey, norm.callerWritableColumns, 'insert column'));
         placeholders.push('?');
         values.push(v);
         writtenColumns.push([fkCamel, v]);
@@ -1114,8 +1172,8 @@ async function __schemaSave(def, inst) {
     // column defaults. Empty `(…) VALUES (…)` lists are a syntax
     // error, so the standard DEFAULT VALUES form emits instead.
     const sql = cols.length
-      ? 'INSERT INTO "' + norm.tableName + '" (' + cols.join(', ') + ') VALUES (' + placeholders.join(', ') + ') RETURNING *'
-      : 'INSERT INTO "' + norm.tableName + '" DEFAULT VALUES RETURNING *';
+      ? 'INSERT INTO ' + __schemaQuoteIdent(norm.tableName, null, 'table') + ' (' + cols.join(', ') + ') VALUES (' + placeholders.join(', ') + ') RETURNING *'
+      : 'INSERT INTO ' + __schemaQuoteIdent(norm.tableName, null, 'table') + ' DEFAULT VALUES RETURNING *';
     const res = await __schemaRunSQL(def, sql, values);
     if (res.data?.[0] && res.columns) {
       __schemaAbsorbRow(inst, res.columns, res.data[0]);
@@ -1172,7 +1230,7 @@ async function __schemaSave(def, inst) {
       const changed = !snap || !Object.prototype.hasOwnProperty.call(snap, n) || !__schemaSameValue(snap[n], cur);
       if (!isDirty && !changed) continue;
       if (!nextSnap) nextSnap = Object.assign(Object.create(null), snap || {});
-      sets.push('"' + __schemaSnake(n) + '" = ?');
+      sets.push(__schemaQuoteIdent(__schemaSnake(n), norm.callerWritableColumns, 'update column') + ' = ?');
       values.push(__schemaSerialize(cur, f));
       nextSnap[n] = cur;
       const old = snap && Object.prototype.hasOwnProperty.call(snap, n) ? snap[n] : null;
@@ -1188,7 +1246,7 @@ async function __schemaSave(def, inst) {
       const changed = !snap || !Object.prototype.hasOwnProperty.call(snap, fkCamel) || !__schemaSameValue(snap[fkCamel], cur);
       if (!isDirty && !changed) continue;
       if (!nextSnap) nextSnap = Object.assign(Object.create(null), snap || {});
-      sets.push('"' + rel.foreignKey + '" = ?');
+      sets.push(__schemaQuoteIdent(rel.foreignKey, norm.callerWritableColumns, 'update column') + ' = ?');
       values.push(cur);
       nextSnap[fkCamel] = cur;
       const old = snap && Object.prototype.hasOwnProperty.call(snap, fkCamel) ? snap[fkCamel] : null;
@@ -1228,7 +1286,9 @@ async function __schemaSave(def, inst) {
         }
       }
       values.push(wherePk);
-      const sql = 'UPDATE "' + norm.tableName + '" SET ' + sets.join(', ') + ' WHERE "' + pk + '" = ?';
+      const sql = 'UPDATE ' + __schemaQuoteIdent(norm.tableName, null, 'table') +
+        ' SET ' + sets.join(', ') + ' WHERE ' +
+        __schemaQuoteIdent(pk, norm.columns, 'primary key') + ' = ?';
       await __schemaRunSQL(def, sql, values);
       inst._snapshot = nextSnap;
     }
@@ -1275,10 +1335,13 @@ async function __schemaDestroy(def, inst, opts) {
   await __schemaRunHook(def, inst, 'beforeDestroy');
   if (norm.softDelete && !hard) {
     const now = new Date().toISOString();
-    await __schemaRunSQL(def, 'UPDATE "' + norm.tableName + '" SET "deleted_at" = ? WHERE "' + norm.primaryKey + '" = ?', [now, inst[norm.primaryKey]]);
+    await __schemaRunSQL(def, 'UPDATE ' + __schemaQuoteIdent(norm.tableName, null, 'table') +
+      ' SET "deleted_at" = ? WHERE ' + __schemaQuoteIdent(norm.primaryKey, norm.columns, 'primary key') + ' = ?',
+    [now, inst[norm.primaryKey]]);
     inst.deletedAt = now;
   } else {
-    await __schemaRunSQL(def, 'DELETE FROM "' + norm.tableName + '" WHERE "' + norm.primaryKey + '" = ?', [inst[norm.primaryKey]]);
+    await __schemaRunSQL(def, 'DELETE FROM ' + __schemaQuoteIdent(norm.tableName, null, 'table') +
+      ' WHERE ' + __schemaQuoteIdent(norm.primaryKey, norm.columns, 'primary key') + ' = ?', [inst[norm.primaryKey]]);
     inst._persisted = false;
   }
   await __schemaRunHook(def, inst, 'afterDestroy');
@@ -1295,7 +1358,9 @@ async function __schemaRestore(def, inst) {
   }
   if (!inst._persisted) return inst;
   await __schemaRunHook(def, inst, 'beforeUpdate');
-  await __schemaRunSQL(def, 'UPDATE "' + norm.tableName + '" SET "deleted_at" = NULL WHERE "' + norm.primaryKey + '" = ?', [inst[norm.primaryKey]]);
+  await __schemaRunSQL(def, 'UPDATE ' + __schemaQuoteIdent(norm.tableName, null, 'table') +
+    ' SET "deleted_at" = NULL WHERE ' + __schemaQuoteIdent(norm.primaryKey, norm.columns, 'primary key') + ' = ?',
+  [inst[norm.primaryKey]]);
   inst.deletedAt = null;
   await __schemaRunHook(def, inst, 'afterUpdate');
   return inst;
@@ -1324,6 +1389,91 @@ function __schemaCallerPkError(def, api, pk) {
     'through the adapter.');
 }
 
+function __schemaCanonicalInput(def, data, api) {
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) return data;
+  const norm = def._normalize();
+  const writable = new Map();
+  for (const [name] of norm.fields) {
+    writable.set(name, name);
+    writable.set(__schemaSnake(name), name);
+  }
+  for (const [, rel] of norm.relations) {
+    if (rel.kind !== 'belongsTo') continue;
+    const name = __schemaCamel(rel.foreignKey);
+    writable.set(name, name);
+    writable.set(rel.foreignKey, name);
+  }
+  const managed = new Map();
+  const addManaged = (name, label) => {
+    managed.set(name, label);
+    managed.set(__schemaSnake(name), label);
+  };
+  addManaged(__schemaCamel(norm.primaryKey), 'primary key');
+  if (norm.timestamps) {
+    addManaged('createdAt', 'managed timestamp');
+    addManaged('updatedAt', 'managed timestamp');
+  }
+  if (norm.softDelete) addManaged('deletedAt', 'managed soft-delete column');
+
+  const aliases = new Map();
+  const canonical = {};
+  for (const key of Object.keys(data).sort()) {
+    const name = writable.get(key);
+    if (!name) {
+      const managedKind = managed.get(key);
+      const message = managedKind === 'primary key'
+        ? __schemaCallerPkError(def, api, __schemaCamel(norm.primaryKey)).message
+        : managedKind
+          ? 'schema: ' + api + ' on ' + (def.name || 'model') + " received runtime-managed key '" + key +
+            "' (" + managedKind + ')'
+          : 'schema: ' + api + ' on ' + (def.name || 'model') + " received unknown key '" + key +
+            "' — writable keys: " + [...new Set(writable.values())].sort().join(', ');
+      throw new SchemaError([{
+        field: key,
+        error: managedKind === 'primary key' ? 'pk' : managedKind ? 'managed' : 'unknown',
+        message,
+      }], def.name, def.kind);
+    }
+    const prior = aliases.get(name);
+    if (prior) {
+      const pair = [prior, key].sort();
+      throw new SchemaError([{
+        field: name,
+        error: 'alias',
+        message: 'schema: ' + api + ' on ' + (def.name || 'model') + ' received conflicting aliases ' +
+          pair.map((x) => "'" + x + "'").join(' and ') + " for '" + name + "'",
+      }], def.name, def.kind);
+    }
+    aliases.set(name, key);
+    canonical[name] = data[key];
+  }
+  return canonical;
+}
+
+async function __schemaNormalizePersistenceInput(def, data, opts) {
+  const canonical = __schemaCanonicalInput(def, data, opts?.api || 'create()');
+  const result = await def._runAsync(canonical, {
+    materialize: false,
+    materializeNested: true,
+    derived: 'throw',
+    skipEnsures: opts?.skipEnsures === true,
+  });
+  if (result.ok) return result.value;
+  if (result.thrown) throw result.thrown;
+  const src = result.from || def;
+  throw new SchemaError(result.errors, src.name, src.kind);
+}
+
+function __schemaConstructInputInstance(def, canonical) {
+  const inst = new (def._getClass())(canonical, false);
+  for (const [k, v] of Object.entries(canonical)) {
+    if (!(k in inst)) {
+      Object.defineProperty(inst, k, { value: v, enumerable: true, writable: true, configurable: true });
+    }
+  }
+  return inst;
+}
+
 // ── ORM statics on __SchemaDef ────────────────────────────────────────
 
 __SchemaDef.prototype._assertModel = function (api) {
@@ -1347,7 +1497,7 @@ __SchemaDef.prototype.findMany = async function (ids) {
   if (!ids.length) return [];
   const norm = this._normalize();
   return new __SchemaQuery(this)
-    .where(__schemaQuoteIdent(norm.primaryKey, null, 'primary key') + ' IN (' + ids.map(() => '?').join(', ') + ')', ...ids)
+    .where(__schemaQuoteIdent(norm.primaryKey, norm.columns, 'primary key') + ' IN (' + ids.map(() => '?').join(', ') + ')', ...ids)
     .all();
 };
 
@@ -1393,21 +1543,15 @@ __SchemaDef.prototype.count = function () {
 
 __SchemaDef.prototype.create = async function (data) {
   this._assertModel('create');
-  // Input keys may be snake_case or camelCase; canonicalize to
-  // camelCase so instance properties line up with declared fields.
-  const klass = this._getClass();
-  const canonical = {};
-  if (data && typeof data === 'object') {
-    for (const k of Object.keys(data)) canonical[__schemaCamel(k)] = data[k];
-  }
-  const inst = new klass(this._applyDefaults(canonical), false);
-  // FK columns (userId for user_id) round-trip through the INSERT
-  // path even though they are not declared fields.
-  for (const [k, v] of Object.entries(canonical)) {
-    if (!(k in inst)) {
-      Object.defineProperty(inst, k, { value: v, enumerable: true, writable: true, configurable: true });
-    }
-  }
+  // Normalize caller input before construction. Refinements run once
+  // after beforeValidation inside save(), so hooks can still affect
+  // the value they judge without transforms/coercions/defaults
+  // running a second time.
+  const canonical = await __schemaNormalizePersistenceInput(this, data, {
+    skipEnsures: true,
+    api: 'create()',
+  });
+  const inst = __schemaConstructInputInstance(this, canonical);
   await __schemaSave(this, inst);
   return inst;
 };
@@ -1424,29 +1568,42 @@ __SchemaDef.prototype.upsert = async function (data, opts) {
   // Conflict targets are STRUCTURED SQL: each validates against the
   // columns a conflict can actually arise on (pk, unique fields,
   // @unique index columns) and quotes through the identifier helper.
-  const targets = (Array.isArray(on) ? on : [on]).map((t) =>
-    __schemaSnake(typeof t === 'symbol' ? (Symbol.keyFor(t) || t.description) : String(t)));
+  const targetInputs = Array.isArray(on) ? on : [on];
+  if (!targetInputs.length) {
+    throw new Error('schema: upsert() conflict target must contain at least one column');
+  }
+  const targets = targetInputs.map((t) => {
+    if (typeof t !== 'string' && typeof t !== 'symbol') {
+      throw new Error('schema: upsert() conflict targets must be strings or symbols; got ' + (t === null ? 'null' : typeof t));
+    }
+    const text = typeof t === 'symbol' ? (Symbol.keyFor(t) || t.description) : t;
+    if (typeof text !== 'string' || !text.length) {
+      throw new Error('schema: upsert() conflict target symbols must have a description');
+    }
+    return __schemaSnake(text);
+  });
   for (const t of targets) __schemaQuoteIdent(t, norm.conflictColumns, 'conflict target');
 
-  const klass = this._getClass();
-  const canonical = {};
-  if (data && typeof data === 'object') {
-    for (const k of Object.keys(data)) canonical[__schemaCamel(k)] = data[k];
-  }
-  const inst = new klass(this._applyDefaults(canonical), false);
-  for (const [k, v] of Object.entries(canonical)) {
-    if (!(k in inst)) {
-      Object.defineProperty(inst, k, { value: v, enumerable: true, writable: true, configurable: true });
-    }
-  }
+  const canonical = await __schemaNormalizePersistenceInput(this, data, {
+    skipEnsures: true,
+    api: 'upsert()',
+  });
+  const inst = __schemaConstructInputInstance(this, canonical);
 
   await __schemaRunHook(this, inst, 'beforeValidation');
-  const errs = this._validateFields(inst, true);
-  if (errs.length) throw new SchemaError(errs, this.name, this.kind);
-  // Stage 9 of the canonical pipeline: refinements guard upsert as
-  // they guard save() — no SQL, no post-validation hook on failure.
-  const ensureErrs = await this._applyEnsuresAsync(inst);
-  if (ensureErrs.length) throw new SchemaError(ensureErrs, this.name, this.kind);
+  const validated = await this._runExistingAsync(inst, {
+    materialize: false,
+    materializeNested: true,
+    derived: 'throw',
+  });
+  if (!validated.ok) {
+    if (validated.thrown) throw validated.thrown;
+    const src = validated.from || this;
+    throw new SchemaError(validated.errors, src.name, src.kind);
+  }
+  for (const [name] of norm.fields) {
+    if (validated.value[name] !== inst[name]) inst[name] = validated.value[name];
+  }
   await __schemaRunHook(this, inst, 'afterValidation');
   await __schemaRunHook(this, inst, 'beforeSave');
 
@@ -1475,13 +1632,17 @@ __SchemaDef.prototype.upsert = async function (data, opts) {
   const updateCols = cols.filter((c) => !targets.includes(c));
   let conflict = ' ON CONFLICT (' + targets.map((t) => __schemaQuoteIdent(t, norm.conflictColumns, 'conflict target')).join(', ') + ')';
   if (updateCols.length) {
-    const sets = updateCols.map((c) => '"' + c + '" = EXCLUDED."' + c + '"');
+    const sets = updateCols.map((c) => {
+      const quoted = __schemaQuoteIdent(c, norm.callerWritableColumns, 'upsert column');
+      return quoted + ' = EXCLUDED.' + quoted;
+    });
     if (norm.timestamps) sets.push('"updated_at" = CURRENT_TIMESTAMP');
     conflict += ' DO UPDATE SET ' + sets.join(', ');
   } else {
     conflict += ' DO NOTHING';
   }
-  const sql = 'INSERT INTO "' + norm.tableName + '" (' + cols.map((c) => '"' + c + '"').join(', ') + ')' +
+  const sql = 'INSERT INTO ' + __schemaQuoteIdent(norm.tableName, null, 'table') + ' (' +
+    cols.map((c) => __schemaQuoteIdent(c, norm.callerWritableColumns, 'upsert column')).join(', ') + ')' +
     ' VALUES (' + placeholders.join(', ') + ')' + conflict + ' RETURNING *';
   const res = await __schemaRunSQL(this, sql, values);
   if (res.data?.[0] && res.columns) __schemaAbsorbRow(inst, res.columns, res.data[0]);
@@ -1506,25 +1667,26 @@ __SchemaDef.prototype.insertMany = async function (rows) {
   const canonicalRows = [];
   const allErrs = [];
   for (let i = 0; i < rows.length; i++) {
-    const canonical = {};
     const data = rows[i];
-    if (data && typeof data === 'object') {
-      for (const k of Object.keys(data)) canonical[__schemaCamel(k)] = data[k];
-    }
-    this._applyDefaults(canonical);
     const rowErrs = [];
-    if (canonical[norm.primaryKey] != null) {
-      rowErrs.push({
-        field: norm.primaryKey,
-        error: 'pk',
-        message: norm.primaryKey + ' is caller-supplied — the primary key is runtime-managed',
+    let canonical = null;
+    try {
+      canonical = __schemaCanonicalInput(this, data, 'insertMany()');
+      const result = await this._runAsync(canonical, {
+        materialize: false,
+        materializeNested: true,
+        derived: 'throw',
       });
+      if (result.ok) canonical = result.value;
+      else if (result.thrown) throw result.thrown;
+      else {
+        const src = result.from || this;
+        throw new SchemaError(result.errors, src.name, src.kind);
+      }
+    } catch (e) {
+      if (!(e instanceof SchemaError)) throw e;
+      rowErrs.push(...e.issues);
     }
-    rowErrs.push(...this._validateFields(canonical, true));
-    // Stage 9 of the canonical pipeline, per row: refinements run only
-    // when the row's fields validated (matching parse()), and every
-    // row is judged before any SQL.
-    if (!rowErrs.length) rowErrs.push(...await this._applyEnsuresAsync(canonical));
     for (const e of rowErrs) {
       allErrs.push({
         field: '[' + i + ']' + (e.field ? '.' + e.field : ''),
@@ -1558,8 +1720,8 @@ __SchemaDef.prototype.insertMany = async function (rows) {
     }
     tuples.push('(' + slots.join(', ') + ')');
   }
-  const sql = 'INSERT INTO "' + norm.tableName + '" (' +
-    colNames.map((n) => '"' + __schemaSnake(n) + '"').join(', ') + ') VALUES ' +
+  const sql = 'INSERT INTO ' + __schemaQuoteIdent(norm.tableName, null, 'table') + ' (' +
+    colNames.map((n) => __schemaQuoteIdent(__schemaSnake(n), norm.callerWritableColumns, 'insertMany column')).join(', ') + ') VALUES ' +
     tuples.join(', ') + ' RETURNING *';
   const res = await __schemaRunSQL(this, sql, values);
   return (res.data || []).map((row) => this._hydrate(res.columns, row));
@@ -1846,34 +2008,41 @@ __SchemaDef.prototype._tableSpec = function (options) {
 };
 
 function __schemaRenderColumn(spec, col, fkByColumn) {
-  const parts = ['  ' + col.name + ' ' + col.type];
+  const column = __schemaQuoteIdent(col.name, null, 'column');
+  const parts = ['  ' + column + ' ' + col.type];
   if (col.primary) {
-    parts[0] = '  ' + col.name + ' ' + col.type + ' PRIMARY KEY';
+    parts[0] = '  ' + column + ' ' + col.type + ' PRIMARY KEY';
   } else {
     if (col.notNull) parts.push('NOT NULL');
     // Uniqueness renders as a named index below, never inline column
     // UNIQUE — one index shape for declaration and introspection.
   }
   const fk = fkByColumn ? fkByColumn.get(col.name) : null;
-  if (fk) parts.push('REFERENCES ' + fk.refTable + '(' + fk.refColumn + ')');
+  if (fk) {
+    parts.push('REFERENCES ' + __schemaQuoteIdent(fk.refTable, null, 'foreign-key table') +
+      '(' + __schemaQuoteIdent(fk.refColumn, null, 'foreign-key column') + ')');
+  }
   if (col.default != null) parts.push('DEFAULT ' + col.default);
   return parts.join(' ');
 }
 
 function __schemaRenderIndex(spec, ix) {
   const u = ix.unique ? 'UNIQUE ' : '';
-  return 'CREATE ' + u + 'INDEX ' + ix.name + ' ON ' + spec.name +
-    ' (' + ix.columns.map((c) => '"' + c + '"').join(', ') + ');';
+  return 'CREATE ' + u + 'INDEX ' + __schemaQuoteIdent(ix.name, null, 'index') +
+    ' ON ' + __schemaQuoteIdent(spec.name, null, 'table') +
+    ' (' + ix.columns.map((c) => __schemaQuoteIdent(c, null, 'index column')).join(', ') + ');';
 }
 
 function __schemaRenderCreate(spec) {
   const blocks = [];
   const fkByColumn = new Map(spec.foreignKeys.map((fk) => [fk.column, fk]));
   if (spec.sequence) {
-    blocks.push('CREATE SEQUENCE ' + spec.sequence.name + ' START ' + spec.sequence.start + ';');
+    blocks.push('CREATE SEQUENCE ' + __schemaQuoteIdent(spec.sequence.name, null, 'sequence') +
+      ' START ' + spec.sequence.start + ';');
   }
   const lines = spec.columns.map((c) => __schemaRenderColumn(spec, c, fkByColumn));
-  blocks.push('CREATE TABLE ' + spec.name + ' (\n' + lines.join(',\n') + '\n);');
+  blocks.push('CREATE TABLE ' + __schemaQuoteIdent(spec.name, null, 'table') +
+    ' (\n' + lines.join(',\n') + '\n);');
   const ix = spec.indexes.map((i) => __schemaRenderIndex(spec, i));
   if (ix.length) blocks.push(ix.join('\n'));
   if (spec.notes && spec.notes.length) blocks.push(spec.notes.join('\n'));
@@ -1897,7 +2066,8 @@ __SchemaDef.prototype.toSQL = function (options) {
   const blocks = [];
   if (header) blocks.push(header);
   if (dropFirst) {
-    blocks.push('DROP TABLE IF EXISTS ' + spec.name + ' CASCADE;\nDROP SEQUENCE IF EXISTS ' + spec.sequence.name + ';');
+    blocks.push('DROP TABLE IF EXISTS ' + __schemaQuoteIdent(spec.name, null, 'table') +
+      ' CASCADE;\nDROP SEQUENCE IF EXISTS ' + __schemaQuoteIdent(spec.sequence.name, null, 'sequence') + ';');
   }
   blocks.push(...__schemaRenderCreate(spec));
   return blocks.join('\n\n') + '\n';
@@ -1940,4 +2110,4 @@ const schema = {
   introspect: __schemaMigrationStub('introspect'),
 };
 
-export { schema, __schemaSetAdapter, __schemaTransaction, __schemaConnect, __schemaRunSQL, __schemaAdapterFor, __schemaAdapterConfigured, __schemaRenderCreate, __schemaRenderIndex };
+export { schema, __schemaSetAdapter, __schemaTransaction, __schemaConnect, __schemaRunSQL, __schemaAdapterFor, __schemaAdapterConfigured, __schemaQuoteIdent, __schemaRenderCreate, __schemaRenderIndex };
