@@ -3,8 +3,8 @@ import * as inline from './inline.js'
 import * as serve from './serve.js'
 
 export compile = engine.compile
-export prepareConfig = (config: Record<string, any> = {}) -> engine.prepareConfig config
-export configKey = (config: Record<string, any> = {}): string -> engine.configCacheKey config
+export prepareConfig = (config: Record<string, unknown> = {}) -> engine.prepareConfig config
+export configKey = (config: Record<string, unknown> = {}): string -> engine.configCacheKey config
 export inlineEmailTree = inline.inlineEmailTree
 export registerEmailTailwindRoot = inline.registerEmailTailwindRoot
 export takeEmailTailwindRoots = inline.takeEmailTailwindRoots
