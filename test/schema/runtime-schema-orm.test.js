@@ -550,7 +550,9 @@ describe('schema-orm: paired reference — upsert and insertMany', () => {
   test('upsert: ON CONFLICT DO UPDATE with EXCLUDED sets; timestamps ride; missing target is loud', async () => {
     const r = await paired(async (k, adapter) => {
       adapter.on(/^INSERT/, row(['id', 'name', 'email'], [1, 'Al', 'a@b.c']));
-      const U = k.__schema(model('User', field('name'), field('email', 'email'), dir('timestamps')));
+      // The conflict target must be a column a conflict can arise on —
+      // a real database rejects ON CONFLICT over a non-unique column.
+      const U = k.__schema(model('User', field('name'), field('email', 'email', { unique: true }), dir('timestamps')));
       await U.upsert({ email: 'a@b.c', name: 'Al' }, { on: 'email' });
       let missing = null;
       try { await U.upsert({ email: 'a@b.c' }); } catch (e) { missing = 'threw'; }
@@ -1632,5 +1634,122 @@ describeExtended('schema-orm: scaling gates', () => {
     for (const r of [10, 100]) perEntry.push((await readsFor(r)) / (r + 1));
     expect(perEntry[1]).toBeLessThanOrEqual(perEntry[0] * 2);
     expect(perEntry[1]).toBeLessThanOrEqual(8);
+  });
+});
+
+
+// ════════════════════════════════════════════════════════════════════
+// SQL structure ownership — structured paths validate every identifier
+// and numeric position before touching query state; the adapter is
+// never called for rejected structure. The trusted string overloads
+// of where()/order() pass through untouched (owner decision O4).
+// ════════════════════════════════════════════════════════════════════
+
+describe('schema-orm: SQL structure ownership', () => {
+  test('object-where keys validate against the model columns', async () => {
+    const r = await paired(async (k) => {
+      const { User } = makeWorld(k);
+      const out = [];
+      for (const key of ['x" OR 1=1 --', 'naem', 'evil\u0000col']) {
+        try { await User.where({ [key]: 'v' }).all(); out.push('accepted'); }
+        catch { out.push('rejected'); }
+      }
+      return out;
+    });
+    expect(r.value).toEqual(['rejected', 'rejected', 'rejected']);
+    expect(r.calls.length).toBe(0);
+  });
+
+  test('object-where accepts declared, FK-alias, and managed columns', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^SELECT/, rows(['id'], [1]));
+      const { User, Order } = makeWorld(k);
+      await User.where({ name: 'A' }).all();
+      await Order.where({ userId: 1 }).all();
+      await User.where({ createdAt: null }).all();
+      return null;
+    });
+    expect(r.calls.map((c) => c.sql)).toEqual([
+      'SELECT * FROM "users" WHERE "name" = ?',
+      'SELECT * FROM "orders" WHERE "user_id" = ?',
+      'SELECT * FROM "users" WHERE "created_at" IS NULL',
+    ]);
+  });
+
+  test('an empty IN lowers to a constant-false predicate', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^SELECT/, rows(['id']));
+      const { User } = makeWorld(k);
+      const got = await User.where({ id: [] }).all();
+      return { got: got.length };
+    });
+    expect(r.value.got).toBe(0);
+    expect(r.calls[0].sql).toBe('SELECT * FROM "users" WHERE 1 = 0');
+    expect(r.calls[0].params).toEqual([]);
+  });
+
+  test('limit/offset require safe non-negative integer numbers', async () => {
+    const r = await paired(async (k) => {
+      const { User } = makeWorld(k);
+      const out = new Set();
+      for (const bad of ['1; DROP TABLE users; --', '5', -1, 1.5, Infinity, NaN, 2 ** 53, true, null]) {
+        try { User.where({}).limit(bad); out.add('limit accepted ' + String(bad)); }
+        catch { out.add('rejected'); }
+        try { User.where({}).offset(bad); out.add('offset accepted ' + String(bad)); }
+        catch { out.add('rejected'); }
+      }
+      return [...out];
+    });
+    expect(r.value).toEqual(['rejected']);
+    expect(r.calls.length).toBe(0);
+  });
+
+  test('zero limit and offset are legal safe integers', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^SELECT/, rows(['id']));
+      const { User } = makeWorld(k);
+      await User.where({}).limit(0).offset(0).all();
+      return null;
+    });
+    expect(r.calls[0].sql).toBe('SELECT * FROM "users" LIMIT 0 OFFSET 0');
+  });
+
+  test('a defaults-only insert emits DEFAULT VALUES', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^INSERT/, row(['id'], [1]));
+      const Memo = k.__schema(model('Memo', field('note', 'string', { optional: true })));
+      const m = await Memo.create({});
+      return { id: m.id };
+    });
+    expect(r.calls[0].sql).toBe('INSERT INTO "memos" DEFAULT VALUES RETURNING *');
+    expect(r.value.id).toBe(1);
+  });
+
+  test('upsert conflict targets validate against unique columns', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^INSERT/, row(['id', 'email', 'name'], [1, 'a@b.c', 'A']));
+      const { User } = makeWorld(k);
+      const out = [];
+      for (const on of ['name', 'no_such', 'email" OR 1=1 --']) {
+        try { await User.upsert({ name: 'A', email: 'a@b.c' }, { on }); out.push('accepted'); }
+        catch { out.push('rejected'); }
+      }
+      await User.upsert({ name: 'A', email: 'a@b.c' }, { on: 'email' });
+      return out;
+    });
+    expect(r.value).toEqual(['rejected', 'rejected', 'rejected']);
+    expect(r.calls.length).toBe(1);
+    expect(r.calls[0].sql).toContain('ON CONFLICT ("email")');
+  });
+
+  test('trusted string overloads pass through untouched (O4)', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^SELECT/, rows(['id'], [1]));
+      const { User } = makeWorld(k);
+      await User.where('"name" LIKE ? OR "email" = ?', 'A%', 'x').order('created_at DESC, name').all();
+      return null;
+    });
+    expect(r.calls[0].sql).toBe('SELECT * FROM "users" WHERE "name" LIKE ? OR "email" = ? ORDER BY created_at DESC, name');
+    expect(r.calls[0].params).toEqual(['A%', 'x']);
   });
 });
