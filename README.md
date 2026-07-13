@@ -18,6 +18,10 @@ This repository owns the complete Rip product:
 Every capability must preserve the compiler's mapping architecture and
 carry correctness tests at the surfaces it affects.
 
+The compiler, feature runtimes, schema/ORM core, and editor integrations
+are present. The remaining package and application portfolio is tracked
+in [docs/ROADMAP.md](docs/ROADMAP.md).
+
 ## Documentation
 
 - [AGENTS.md](AGENTS.md) — mandatory repository rules and invariants
