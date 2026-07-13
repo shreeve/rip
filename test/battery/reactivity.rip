@@ -133,6 +133,18 @@ test "computed chain updates", '''
   quadrupled + 0
   ''', 60
 
+test "computed dependency mutation rejects loudly", '''
+  source := 1
+  derived ~=
+    seen = source + 0
+    source = 2 if seen is 1
+    seen
+  try
+    derived + 0
+  catch e
+    e.message
+  ''', "reactive runtime: computed dependency changed during evaluation — computed functions must derive without writing or touching a dependency"
+
 # ==============================================================================
 # Readonly (=!) — Runtime Behavior
 # ==============================================================================
