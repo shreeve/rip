@@ -5,6 +5,11 @@ repository's pull requests.
 
 ## Unreleased
 
+- The typed email catalog adds document, layout, typography, button,
+  markdown, code, and font components through a named-only barrel.
+  Dynamic blocks serialize before lifecycle disposal, and twenty-four
+  component contracts joined the permanent battery (#63)
+
 - Email SSR mounts components through the public lifecycle, serializes
   synchronously, disposes owned effects, and restores host globals in
   `finally`. Nested renders reject loudly, and package type checks now
