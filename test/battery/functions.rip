@@ -127,7 +127,6 @@ code "rest params", "(first, ...rest) -> rest", "(function(first, ...rest) {\n  
 # Rest with no other params
 test "rest only", "fn = (...all) -> all.length\nfn(1, 2, 3)", 3
 
-
 # ==============================================================================
 # Default Parameters: "default"
 # ==============================================================================
