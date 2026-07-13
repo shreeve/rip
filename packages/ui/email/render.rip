@@ -1,5 +1,6 @@
 import { _renderComponent } from '../shared/render.rip'
 import { serializeChildren, toPlainText } from './dom.rip'
+import { inlineEmailTree, takeEmailTailwindRoots, configKey } from '../tailwind/tailwind.rip'
 
 export type EmailOutput =
   html: string
@@ -7,14 +8,35 @@ export type EmailOutput =
 
 DOCTYPE =! '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">'
 
+inlineTailwind = (root: any) ->
+  entries = takeEmailTailwindRoots()
+  return unless entries.length
+
+  config = entries[0].config ?? {}
+  expected = configKey config
+  for entry in entries[1..]
+    if configKey(entry.config ?? {}) isnt expected
+      throw new Error 'one email render cannot use multiple Tailwind configurations'
+
+  result = inlineEmailTree root, config
+  if result.unsupported.length
+    console.warn "Tailwind: unsupported classes retained: #{result.unsupported.join(' ')}"
+
+renderEmail = (ComponentClass: any, props: Record<string, any>, consume: any): any ->
+  takeEmailTailwindRoots()
+  try
+    _renderComponent ComponentClass, props, consume, inlineTailwind
+  finally
+    takeEmailTailwindRoots()
+
 export toHTML = (ComponentClass: any, props: Record<string, any> = {}): string ->
-  _renderComponent ComponentClass, props, (root) -> "#{DOCTYPE}#{serializeChildren(root)}"
+  renderEmail ComponentClass, props, (root) -> "#{DOCTYPE}#{serializeChildren(root)}"
 
 export toText = (ComponentClass: any, props: Record<string, any> = {}): string ->
-  _renderComponent ComponentClass, props, (root) -> toPlainText root
+  renderEmail ComponentClass, props, (root) -> toPlainText root
 
 export toEmail = (ComponentClass: any, props: Record<string, any> = {}): EmailOutput ->
-  _renderComponent ComponentClass, props, (root) ->
+  renderEmail ComponentClass, props, (root) ->
     html = serializeChildren root
     text = toPlainText root
     { html: "#{DOCTYPE}#{html}", text }

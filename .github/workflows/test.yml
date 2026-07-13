@@ -24,6 +24,10 @@ jobs:
       - name: Install TypeScript as an external tool (pinned; never a repository dependency)
         run: npm install -g typescript@7.0.2
 
+      - name: Install UI package dependencies (isolated exact budget)
+        working-directory: packages/ui
+        run: bun install --frozen-lockfile
+
       - name: Full suite, extended tier included
         run: bun run test:all
 

@@ -3,5 +3,5 @@ export {
   Email, Head, Body, Preview, Font,
   Container, Section, Row, Column,
   Heading, Text, Link, Image, Divider, Button,
-  Markdown, CodeBlock, CodeInline
+  Markdown, CodeBlock, CodeInline, Tailwind
 } from './components.rip'

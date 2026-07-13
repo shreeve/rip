@@ -5,7 +5,7 @@ test('email public barrel exposes the curated named component surface', () => {
   expect(Object.keys(email).sort()).toEqual([
     'Body', 'Button', 'CodeBlock', 'CodeInline', 'Column', 'Container',
     'Divider', 'Email', 'Font', 'Head', 'Heading', 'Image', 'Link',
-    'Markdown', 'Preview', 'Row', 'Section', 'Text',
+    'Markdown', 'Preview', 'Row', 'Section', 'Tailwind', 'Text',
     'toEmail', 'toHTML', 'toText',
   ]);
 });

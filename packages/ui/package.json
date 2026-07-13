@@ -8,7 +8,8 @@
     "./email/dom": "./email/dom.rip",
     "./email/compat": "./email/compat.rip",
     "./email/render": "./email/render.rip",
-    "./email/components": "./email/components.rip"
+    "./email/components": "./email/components.rip",
+    "./tailwind": "./tailwind/tailwind.rip"
   },
   "scripts": {
     "test": "bun test --timeout 15000"
@@ -18,5 +19,9 @@
     "shared/",
     "tailwind/",
     "README.md"
-  ]
+  ],
+  "dependencies": {
+    "css-tree": "3.2.1",
+    "tailwindcss": "4.3.2"
+  }
 }

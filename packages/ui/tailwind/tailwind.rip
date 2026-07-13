@@ -1,0 +1,11 @@
+import * as engine from './engine.js'
+import * as inline from './inline.js'
+import * as serve from './serve.js'
+
+export compile = engine.compile
+export prepareConfig = (config: Record<string, any> = {}) -> engine.prepareConfig config
+export configKey = (config: Record<string, any> = {}): string -> engine.configCacheKey config
+export inlineEmailTree = inline.inlineEmailTree
+export registerEmailTailwindRoot = inline.registerEmailTailwindRoot
+export takeEmailTailwindRoots = inline.takeEmailTailwindRoots
+export generateBrowserCss = serve.generateBrowserCss
