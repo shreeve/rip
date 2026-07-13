@@ -1,10 +1,10 @@
 node_modules/
-build/
 dist/
-coverage/
+
+.DS_Store
 *.log
 *.vsix
-.DS_Store
+
 .env
 .env.*
-.stage-*/
+!.env.example
