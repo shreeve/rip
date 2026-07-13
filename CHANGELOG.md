@@ -11,7 +11,8 @@ repository's pull requests.
   follows stylesheet and inline cascade precedence, scopes residual CSS once,
   and isolates closure-backed configurations. URL normalization, font style
   generation, and fallback rendering reject control-character bypasses
-  (#66, #67, #68, #69, #70)
+  and fail closed on ambiguous scheme prefixes; shared compatibility CSS emits
+  once per message (#66, #67, #68, #69, #70, #71)
 
 - Email support is complete: full HTML/text rendering, dynamic blocks,
   native table trees, package self-imports, and a typed welcome example
