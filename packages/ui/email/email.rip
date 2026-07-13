@@ -298,6 +298,17 @@ escapeAttribute = (text: unknown): string ->
     .replace(/&/g, '&amp;')
     .replace(/"/g, '&quot;')
 
+childText = (value: any): string ->
+  return '' unless value?
+  return value if typeof value is 'string'
+  if Array.isArray value
+    output: string[] = []
+    for child in value
+      output.push childText child
+    return output.join ''
+  return String(value) if typeof value is 'number' or typeof value is 'boolean'
+  value.textContent ?? ''
+
 safeHref = (href: unknown): string ->
   value = String(href ?? '').trim()
   return '' unless value
@@ -443,7 +454,7 @@ export CodeInline = component
   _primaryClass: string ~= [@class, 'cino'].filter(Boolean).join ' '
   _fallbackClass: string ~= [@class, 'cio'].filter(Boolean).join ' '
   _fallbackStyle: string ~= joinStyles _style, 'display:none'
-  _content: string ~= if typeof @children is 'string' then @children else @children?.textContent ?? ''
+  _content: string ~= childText @children
   render
     style 'data-email-style': 'code-inline', innerHTML: _orangeCss
     code class: _primaryClass, style: _style

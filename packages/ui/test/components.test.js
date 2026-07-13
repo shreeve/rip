@@ -110,8 +110,12 @@ test('email rendering emits shared CodeInline CSS once', () => {
 
 test('raw-HTML components preserve one plain-text representation', () => {
   expect(email.toEmail(email.Markdown, { text: '# Hello' }).text).toBe('Hello');
+  expect(email.toEmail(email.Markdown, {
+    text: '[**bold**](https://example.com)',
+  }).text).toBe('bold (https://example.com)');
   expect(email.toEmail(email.CodeBlock, { code: 'let x = 1' }).text).toBe('let x = 1');
   expect(email.toEmail(email.CodeInline, { children: 'inline' }).text).toBe('inline');
+  expect(email.toEmail(email.CodeInline, { children: ['a', 'b'] }).text).toBe('ab');
 });
 
 test('optional image dimensions remain absent', () => {
