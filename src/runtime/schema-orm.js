@@ -33,6 +33,37 @@ import { SchemaError, __SchemaRegistry, registerCoercer, __SchemaDef, __schemaIn
 
 function __schemaSnake(s) { return s.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase(); }
 
+// A SQL identifier in a STRUCTURED position: must be a string, free
+// of control characters, a member of the operation's canonical column
+// set, and emits double-quote escaped (an embedded quote doubles, so
+// a name can never break out of the identifier). The trusted string
+// overloads of where()/order() sit outside this helper by owner
+// decision O4; every other identifier the builder interpolates for a
+// caller passes through here.
+function __schemaQuoteIdent(name, allowed, what) {
+  if (typeof name !== 'string') {
+    throw new Error('schema: ' + what + ' must be a string column name; got ' + (name === null ? 'null' : typeof name));
+  }
+  if (/[\u0000-\u001f\u007f]/.test(name)) {
+    throw new Error('schema: ' + what + ' contains control characters: ' + JSON.stringify(name));
+  }
+  if (allowed !== null && !allowed.has(name)) {
+    throw new Error('schema: unknown ' + what + " '" + name + "' — known columns: " + [...allowed].sort().join(', '));
+  }
+  return '"' + name.replace(/"/g, '""') + '"';
+}
+
+// LIMIT/OFFSET are numeric SQL positions interpolated as bare
+// integers: only an actual number that is a safe non-negative integer
+// may reach them — no coercion, no numeric strings (a request-derived
+// string is exactly the injection surface this closes).
+function __schemaPageInt(n, what) {
+  if (typeof n !== 'number' || !Number.isSafeInteger(n) || n < 0) {
+    throw new Error('schema: ' + what + '() requires a safe non-negative integer number; got ' + (typeof n === 'string' ? JSON.stringify(n) : String(n)));
+  }
+  return n;
+}
+
 function __schemaCamel(col) { return String(col).replace(/_([a-z])/g, (_, c) => c.toUpperCase()); }
 
 const __SCHEMA_UNCOUNTABLE = new Set(['equipment', 'information', 'rice', 'money', 'species', 'series', 'fish', 'sheep', 'data']);
@@ -352,6 +383,22 @@ function finishModelNorm(def, norm) {
       }
     }
   }
+
+  // The canonical column sets — every STRUCTURED SQL position
+  // validates against the right one. `columns` (every persisted
+  // column) serves filters; `conflictColumns` (the pk, unique fields,
+  // and @unique index columns — the only things a conflict can
+  // actually arise on) serves upsert targets. Caller-WRITABLE input
+  // keys are a narrower set still, owned by the creation paths.
+  norm.columns = known;
+  const conflictColumns = new Set([norm.primaryKey]);
+  for (const [fname, f] of norm.fields) {
+    if (f.unique === true) conflictColumns.add(__schemaSnake(fname));
+  }
+  for (const d of norm.directives) {
+    if (d.name === 'unique') for (const c of d.args[0].fields) conflictColumns.add(__schemaSnake(c));
+  }
+  norm.conflictColumns = conflictColumns;
 }
 
 // decorateDef — construction-time model setup: the per-schema `on:`
@@ -746,27 +793,38 @@ class __SchemaQuery {
     }
   }
   where(cond, ...params) {
+    // The string form is the O4-trusted overload: caller-authored SQL,
+    // passed through verbatim with its parameters. The object form is
+    // STRUCTURED — every key validates against the model's persisted
+    // columns and quotes through the identifier helper.
     if (typeof cond === 'string') {
       this._clauses.push(cond);
       this._params.push(...params);
     } else if (cond && typeof cond === 'object') {
+      const norm = this._def._normalize();
       for (const [k, v] of Object.entries(cond)) {
-        const col = __schemaSnake(k);
+        const col = __schemaQuoteIdent(__schemaSnake(k), norm.columns, 'filter column');
         if (v === null || v === undefined) {
-          this._clauses.push('"' + col + '" IS NULL');
+          this._clauses.push(col + ' IS NULL');
         } else if (Array.isArray(v)) {
-          this._clauses.push('"' + col + '" IN (' + v.map(() => '?').join(', ') + ')');
-          this._params.push(...v);
+          // An empty IN list matches nothing — `IN ()` is a syntax
+          // error at the database, so emit a constant-false predicate.
+          if (v.length === 0) {
+            this._clauses.push('1 = 0');
+          } else {
+            this._clauses.push(col + ' IN (' + v.map(() => '?').join(', ') + ')');
+            this._params.push(...v);
+          }
         } else {
-          this._clauses.push('"' + col + '" = ?');
+          this._clauses.push(col + ' = ?');
           this._params.push(v);
         }
       }
     }
     return this;
   }
-  limit(n) { this._limit = n; return this; }
-  offset(n) { this._offset = n; return this; }
+  limit(n) { this._limit = __schemaPageInt(n, 'limit'); return this; }
+  offset(n) { this._offset = __schemaPageInt(n, 'offset'); return this; }
   order(spec) { this._order = spec; return this; }
   orderBy(spec) { return this.order(spec); }
   includes(...specs) {
@@ -930,7 +988,7 @@ async function __schemaPreload(def, instances, specs) {
       let rows = [];
       if (ids.length) {
         rows = await new __SchemaQuery(target)
-          .where('"' + rel.foreignKey + '" IN (' + ids.map(() => '?').join(', ') + ')', ...ids)
+          .where(__schemaQuoteIdent(rel.foreignKey, null, 'relation key') + ' IN (' + ids.map(() => '?').join(', ') + ')', ...ids)
           .all();
       }
       const groups = new Map();
@@ -958,10 +1016,10 @@ async function __schemaResolveRelation(def, inst, rel) {
     return fk != null ? await target.find(fk) : null;
   }
   if (rel.kind === 'hasOne') {
-    return await target.where({ [rel.foreignKey]: inst[pk] }).first();
+    return await new __SchemaQuery(target).where(__schemaQuoteIdent(rel.foreignKey, null, 'relation key') + ' = ?', inst[pk]).first();
   }
   if (rel.kind === 'hasMany') {
-    return await target.where({ [rel.foreignKey]: inst[pk] }).all();
+    return await new __SchemaQuery(target).where(__schemaQuoteIdent(rel.foreignKey, null, 'relation key') + ' = ?', inst[pk]).all();
   }
   return null;
 }
@@ -1044,7 +1102,13 @@ async function __schemaSave(def, inst) {
         writtenColumns.push([fkCamel, v]);
       }
     }
-    const sql = 'INSERT INTO "' + norm.tableName + '" (' + cols.join(', ') + ') VALUES (' + placeholders.join(', ') + ') RETURNING *';
+    // A row with no insertable values (every field optional or
+    // defaulted, none supplied) is legal — it takes the table's
+    // column defaults. Empty `(…) VALUES (…)` lists are a syntax
+    // error, so the standard DEFAULT VALUES form emits instead.
+    const sql = cols.length
+      ? 'INSERT INTO "' + norm.tableName + '" (' + cols.join(', ') + ') VALUES (' + placeholders.join(', ') + ') RETURNING *'
+      : 'INSERT INTO "' + norm.tableName + '" DEFAULT VALUES RETURNING *';
     const res = await __schemaRunSQL(def, sql, values);
     if (res.data?.[0] && res.columns) {
       __schemaAbsorbRow(inst, res.columns, res.data[0]);
@@ -1276,7 +1340,7 @@ __SchemaDef.prototype.findMany = async function (ids) {
   if (!ids.length) return [];
   const norm = this._normalize();
   return new __SchemaQuery(this)
-    .where('"' + norm.primaryKey + '" IN (' + ids.map(() => '?').join(', ') + ')', ...ids)
+    .where(__schemaQuoteIdent(norm.primaryKey, null, 'primary key') + ' IN (' + ids.map(() => '?').join(', ') + ')', ...ids)
     .all();
 };
 
@@ -1350,8 +1414,12 @@ __SchemaDef.prototype.upsert = async function (data, opts) {
   const norm = this._normalize();
   const on = opts && (opts.on ?? opts.conflict);
   if (on == null) throw new Error('schema: upsert(data, on: :column) requires a conflict target');
+  // Conflict targets are STRUCTURED SQL: each validates against the
+  // columns a conflict can actually arise on (pk, unique fields,
+  // @unique index columns) and quotes through the identifier helper.
   const targets = (Array.isArray(on) ? on : [on]).map((t) =>
     __schemaSnake(typeof t === 'symbol' ? (Symbol.keyFor(t) || t.description) : String(t)));
+  for (const t of targets) __schemaQuoteIdent(t, norm.conflictColumns, 'conflict target');
 
   const klass = this._getClass();
   const canonical = {};
@@ -1394,7 +1462,7 @@ __SchemaDef.prototype.upsert = async function (data, opts) {
   }
   if (!cols.length) throw new Error('schema: upsert() requires at least one column');
   const updateCols = cols.filter((c) => !targets.includes(c));
-  let conflict = ' ON CONFLICT (' + targets.map((t) => '"' + t + '"').join(', ') + ')';
+  let conflict = ' ON CONFLICT (' + targets.map((t) => __schemaQuoteIdent(t, norm.conflictColumns, 'conflict target')).join(', ') + ')';
   if (updateCols.length) {
     const sets = updateCols.map((c) => '"' + c + '" = EXCLUDED."' + c + '"');
     if (norm.timestamps) sets.push('"updated_at" = CURRENT_TIMESTAMP');
