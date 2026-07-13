@@ -64,7 +64,7 @@ test('email SSR restores exact globals when teardown throws', () => {
   }
 });
 
-test('email SSR rolls back partially installed globals', () => {
+test('email SSR preserves accessor-backed global descriptors', () => {
   const keys = ['document', 'Node', 'SVGElement'];
   const before = new Map(keys.map((key) => [
     key,
@@ -107,4 +107,29 @@ test('email SSR rolls back partially installed globals', () => {
       else delete globalThis[key];
     }
   }
+});
+
+test('email SSR rolls back a genuine partial global install', () => {
+  const renderUrl = new URL('../shared/render.rip', import.meta.url).href;
+  const source = `
+    import { _renderComponent } from ${JSON.stringify(renderUrl)};
+    Object.defineProperty(globalThis, 'Node', {
+      configurable: false,
+      enumerable: false,
+      writable: false,
+      value: 'sentinel',
+    });
+    try {
+      _renderComponent(class {}, {}, () => 'unused');
+    } catch (error) {
+      console.log(
+        Object.hasOwn(globalThis, 'document'),
+        globalThis.Node,
+        error instanceof TypeError,
+      );
+    }
+  `;
+  const result = Bun.spawnSync(['bun', '-e', source]);
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout.toString().trim()).toBe('false sentinel true');
 });
