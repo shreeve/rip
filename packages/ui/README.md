@@ -45,6 +45,25 @@ html = toHTML WelcomeEmail, name: 'Alice'
 APIs for framework and tooling code. Application email templates should use
 `@rip-lang/ui/email`.
 
+Email rendering is synchronous. The default Tailwind configuration is prepared
+when the package loads. Prepare a custom configuration once before passing the
+same object to `Tailwind`:
+
+```coffee
+import { prepareConfig } from '@rip-lang/ui/tailwind'
+import { Tailwind, Text, toHTML } from '@rip-lang/ui/email'
+
+config = theme: extend: colors: brand: '#123456'
+prepareConfig! config
+
+BrandedEmail = component
+  render
+    Tailwind config: config
+      Text class: 'text-brand', 'Prepared once, rendered synchronously.'
+
+html = toHTML BrandedEmail
+```
+
 ## Test
 
 ```sh
