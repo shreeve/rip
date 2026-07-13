@@ -24,6 +24,14 @@ safeFontWeight = (value: unknown): number ->
 unsafeUrlText = (value: string): boolean ->
   /[\u0000-\u001F\u007F-\u009F]/.test(value) or value.startsWith('//') or value.startsWith('\\')
 
+hasSchemeLikePrefix = (value: string): boolean ->
+  colon = value.indexOf ':'
+  return false if colon is -1
+  boundaries = [value.indexOf('/'), value.indexOf('?'), value.indexOf('#')]
+    .filter (index) -> index >= 0
+  firstBoundary = if boundaries.length then Math.min(...boundaries) else Infinity
+  colon < firstBoundary
+
 export Email = component
   @class: string := ''
   @lang: string := 'en'
@@ -299,7 +307,7 @@ safeHref = (href: unknown): string ->
   return value if lower.startsWith('https://')
   return value if lower.startsWith('mailto:')
   return value if lower.startsWith('tel:')
-  return '#' if /^[a-z][a-z0-9+.-]*:/i.test value
+  return '#' if hasSchemeLikePrefix value
   value
 
 safeImageSrc = (src: unknown): string ->
@@ -311,7 +319,7 @@ safeImageSrc = (src: unknown): string ->
   return value if lower.startsWith('https://')
   return value if lower.startsWith('cid:')
   return value if /^data:image\/(?:gif|jpeg|png|webp);base64,[a-z0-9+/=\s]+$/i.test value
-  return '' if /^[a-z][a-z0-9+.-]*:/i.test value
+  return '' if hasSchemeLikePrefix value
   value
 
 formatInlineText = (text: string): string ->
@@ -421,7 +429,7 @@ export CodeInline = component
   _fallbackStyle: string ~= joinStyles _style, 'display:none'
   _content: string ~= if typeof @children is 'string' then @children else @children?.textContent ?? ''
   render
-    style innerHTML: _orangeCss
+    style 'data-email-style': 'code-inline', innerHTML: _orangeCss
     code class: _primaryClass, style: _style
       = _content
     span class: _fallbackClass, style: _fallbackStyle

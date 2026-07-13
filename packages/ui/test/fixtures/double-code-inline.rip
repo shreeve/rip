@@ -1,0 +1,7 @@
+import { CodeInline } from '../../email/email.rip'
+
+export DoubleCodeInline = component
+  render
+    div
+      CodeInline 'first'
+      CodeInline 'second'

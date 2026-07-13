@@ -22,10 +22,30 @@ inlineTailwind = (root: any) ->
   if result.unsupported.length
     console.warn "Tailwind: unsupported classes retained: #{result.unsupported.join(' ')}"
 
+dedupeStyles = (root: any) ->
+  seen: Set<string> = new Set()
+  visit = (node: any) ->
+    marker = node.attributes?.get 'data-email-style'
+    if node.tag is 'style' and marker and node._innerHTML?
+      node.removeAttribute 'data-email-style'
+      key = "#{marker}:#{node._innerHTML}"
+      if seen.has key
+        node.remove()
+        return
+      seen.add key
+    for child in [...(node.childNodes ?? [])]
+      visit child
+    return
+  visit root
+
+finalizeEmail = (root: any) ->
+  inlineTailwind root
+  dedupeStyles root
+
 renderEmail = (ComponentClass: any, props: Record<string, any>, consume: any): any ->
   takeEmailTailwindRoots()
   try
-    _renderComponent ComponentClass, props, consume, inlineTailwind
+    _renderComponent ComponentClass, props, consume, finalizeEmail
   finally
     takeEmailTailwindRoots()
 

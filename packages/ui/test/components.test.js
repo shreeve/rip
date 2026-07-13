@@ -1,5 +1,6 @@
 import { test, expect } from 'bun:test';
 import * as email from '../email/email.rip';
+import { DoubleCodeInline } from './fixtures/double-code-inline.rip';
 
 test('email public barrel exposes the curated named component surface', () => {
   expect(Object.keys(email).sort()).toEqual([
@@ -50,6 +51,7 @@ test('curated URLs reject control-prefixed and protocol-relative schemes', () =>
   for (const href of [
     '\u0001javascript:alert(1)',
     'java\nscript:alert(1)',
+    'java%09script:alert(1)',
     '//evil.example/path',
   ]) {
     expect(email.toHTML(email.Link, { href, children: 'unsafe' }))
@@ -63,12 +65,19 @@ test('curated URLs reject control-prefixed and protocol-relative schemes', () =>
     src: '//evil.example/image.png',
     alt: 'unsafe',
   })).not.toContain(' src=');
+  expect(email.toHTML(email.Image, {
+    src: 'java%09script:alert(1)',
+    alt: 'unsafe',
+  })).not.toContain(' src=');
 
   const markdown = email.toHTML(email.Markdown, {
     text: '[unsafe](\u0001javascript:alert(1))',
   });
   expect(markdown).toContain('href="#"');
   expect(markdown).not.toContain('javascript:');
+  expect(email.toHTML(email.Markdown, {
+    text: '[unsafe](java%09script:alert(1))',
+  })).toContain('href="#"');
 });
 
 test('Markdown escapes URLs once and inline code preserves slot content', () => {
@@ -90,6 +99,13 @@ test('CodeInline keeps its fallback hidden despite caller display styles', () =>
     style: 'display:inline-block',
   });
   expect(html).toMatch(/<span class="cio" style="[^"]*display:none[^"]*">/);
+});
+
+test('email rendering emits shared CodeInline CSS once', () => {
+  const html = email.toHTML(DoubleCodeInline);
+  expect(html.match(/meta ~ \.cino/g)).toHaveLength(1);
+  expect(html).toContain('>first</code>');
+  expect(html).toContain('>second</code>');
 });
 
 test('optional image dimensions remain absent', () => {
