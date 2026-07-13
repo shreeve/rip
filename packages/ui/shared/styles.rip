@@ -1,0 +1,18 @@
+export joinStyles = (...styles: any[]): string ->
+  declarations: string[] = []
+  for style in styles
+    declarations.push String(style) if style
+  declarations.join ';'
+
+export withMargin = (options: Record<string, any> = {}): string ->
+  declarations: string[] = []
+  declarations.push("margin:#{options.m}") if options.m?
+  declarations.push("margin-left:#{options.mx}") if options.mx?
+  declarations.push("margin-right:#{options.mx}") if options.mx?
+  declarations.push("margin-top:#{options.my}") if options.my?
+  declarations.push("margin-bottom:#{options.my}") if options.my?
+  declarations.push("margin-top:#{options.mt}") if options.mt?
+  declarations.push("margin-right:#{options.mr}") if options.mr?
+  declarations.push("margin-bottom:#{options.mb}") if options.mb?
+  declarations.push("margin-left:#{options.ml}") if options.ml?
+  declarations.join ';'

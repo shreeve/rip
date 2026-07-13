@@ -115,7 +115,7 @@ export previewPadding = (text: string, maxLength: number = PREVIEW_LENGTH): stri
   PREVIEW_WHITESPACE.repeat remaining
 
 export styleToString = (style: Record<string, unknown>): string ->
-  declarations = []
+  declarations: string[] = []
   for key, value of style
     continue unless value?
     property = key.replace /[A-Z]/g, (letter) -> "-#{letter.toLowerCase()}"

@@ -4,9 +4,11 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./email": "./email/email.rip",
     "./email/dom": "./email/dom.rip",
     "./email/compat": "./email/compat.rip",
-    "./email/render": "./email/render.rip"
+    "./email/render": "./email/render.rip",
+    "./email/components": "./email/components.rip"
   },
   "scripts": {
     "test": "bun test --timeout 15000"

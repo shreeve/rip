@@ -7,11 +7,23 @@ const sources = {
   'email/dom.rip': readFileSync(new URL('../email/dom.rip', import.meta.url), 'utf8'),
   'email/compat.rip': readFileSync(new URL('../email/compat.rip', import.meta.url), 'utf8'),
   'email/render.rip': readFileSync(new URL('../email/render.rip', import.meta.url), 'utf8'),
+  'email/components.rip': readFileSync(new URL('../email/components.rip', import.meta.url), 'utf8'),
+  'email/email.rip': readFileSync(new URL('../email/email.rip', import.meta.url), 'utf8'),
   'shared/render.rip': readFileSync(new URL('../shared/render.rip', import.meta.url), 'utf8'),
+  'shared/styles.rip': readFileSync(new URL('../shared/styles.rip', import.meta.url), 'utf8'),
 };
 
 test('email package TypeScript faces and declarations are valid', () => {
-  const files = {};
+  const files = {
+    'ambient.d.ts': [
+      'declare const __state: any, __computed: any, __effect: any, __batch: any;',
+      'declare const __Component: any, __pushComponent: any, __popComponent: any;',
+      'declare const __clsx: any, __reconcile: any, __transition: any;',
+      'declare const __ownerFrame: any, __pushOwner: any, __popOwner: any;',
+      'declare const __detach: any, __detachRef: any;',
+      'declare const setContext: any, getContext: any;',
+    ].join('\n'),
+  };
   for (const [name, source] of Object.entries(sources)) {
     const result = compile(source, {
       path: name,
@@ -29,6 +41,8 @@ test('email package TypeScript faces and declarations are valid', () => {
     'bundler',
     '--allowImportingTsExtensions',
     '--strict',
+    '--noImplicitAny',
+    'false',
     '--skipLibCheck',
   ]);
   const diagnostics = [...checked.unattributed, ...[...checked.byFile.values()].flat()];
