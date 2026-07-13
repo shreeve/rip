@@ -5,6 +5,12 @@ repository's pull requests.
 
 ## Unreleased
 
+- Email SSR mounts components through the public lifecycle, serializes
+  synchronously, disposes owned effects, and restores host globals in
+  `finally`. Nested renders reject loudly, and package type checks now
+  preserve real module paths; three render contracts joined the battery
+  (#62)
+
 - Email compatibility helpers normalize units and padding, generate
   preview spacing, serialize styles, and emit MSO conditionals. The UI
   package now validates every TypeScript face and declaration under
