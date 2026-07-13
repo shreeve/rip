@@ -301,13 +301,15 @@ describe('computed: laziness, caching, invalidation', () => {
     })).toEqual([['throw', 'Error', 'cboom'], ['throw', 'Error', 'cboom'], 6, 3]);
   });
 
-  test('a SELF-REFERENCING computed recurses to stack overflow ', () => {
+  test('a SELF-REFERENCING computed rejects precisely instead of recursing', () => {
     const outcome = both((rt) => {
       const c = rt.__computed(() => c.value + 1);
-      const [kind, name] = caught(() => c.value);
-      return [kind, name];
+      return caught(() => c.value);
     });
-    expect(outcome).toEqual(['throw', 'RangeError']);
+    expect(outcome).toEqual([
+      'throw', 'Error',
+      'reactive runtime: computed value read during its own evaluation — recursive computed reads are not supported',
+    ]);
   });
 
   test('a state write during a computed recompute notifies immediately (unbatched)', () => {
@@ -318,6 +320,116 @@ describe('computed: laziness, caching, invalidation', () => {
       rt.__effect(() => seen.push(b.value));
       return [c.value, b.read(), seen];
     })).toEqual([2, 100, [10, 100]]);
+  });
+
+  test('a computed that changes its own dependency rejects loudly, stays dirty, and retries', () => {
+    const outcome = both((rt) => {
+      const source = rt.__state(1);
+      let runs = 0;
+      const derived = rt.__computed(() => {
+        runs++;
+        const seen = source.value;
+        if (seen === 1) source.value = 2;
+        return seen;
+      });
+      const first = caught(() => derived.value);
+      source.value = 2; // application state changes before the retry
+      return [first, source.read(), derived.read(), derived.value, runs];
+    });
+    expect(outcome).toEqual([
+      ['throw', 'Error',
+        'reactive runtime: computed dependency changed during evaluation — computed functions must derive without writing or touching a dependency'],
+      2, undefined, 2, 2,
+    ]);
+  });
+
+  test('a throwing self-invalidating computed publishes no stale value to an effect subscriber', () => {
+    const outcome = both((rt) => {
+      const source = rt.__state(1);
+      const seen = [];
+      const derived = rt.__computed(() => {
+        const value = source.value;
+        if (value === 1) source.value = 2;
+        return value;
+      });
+      const creation = caught(() => rt.__effect(() => seen.push(derived.value)));
+      source.value = 3; // the failed creation run disposed its subscription
+      return [creation[0], seen, derived.read(), derived.value];
+    });
+    expect(outcome).toEqual(['throw', [], undefined, 3]);
+  });
+
+  test('nested computed tracking restores after dependency-mutation rejection', () => {
+    const outcome = both((rt) => {
+      const source = rt.__state(1);
+      const inner = rt.__computed(() => {
+        const value = source.value;
+        if (value === 1) source.value = 2;
+        return value;
+      });
+      const outer = rt.__computed(() => inner.value + 1);
+      const first = caught(() => outer.value);
+      source.value = 2;
+      return [first[0], source.read(), outer.value];
+    });
+    expect(outcome).toEqual(['throw', 2, 3]);
+  });
+
+  test('dependency mutation rejects during an active notification rerun', () => {
+    const outcome = both((rt) => {
+      const source = rt.__state(0);
+      let impure = false;
+      const derived = rt.__computed(() => {
+        const value = source.value;
+        if (impure) source.value = value + 1;
+        return value;
+      });
+      const seen = [];
+      rt.__effect(() => seen.push(derived.value));
+      impure = true;
+      const write = caught(() => { source.value = 1; });
+      impure = false;
+      return [write[0], source.read(), derived.read(), seen, derived.value];
+    });
+    expect(outcome).toEqual(['throw', 1, 0, [0], 1]);
+  });
+
+  test('free() cannot hide a dependency mutation from a computing value', () => {
+    const outcome = both((rt) => {
+      const source = rt.__state(1);
+      const derived = rt.__computed(() => {
+        const value = source.value;
+        source.free();
+        source.value = 2;
+        return value;
+      });
+      const first = caught(() => derived.value);
+      source.value = 3;
+      return [first[0], source.read(), derived.read(), caught(() => derived.value)[0]];
+    });
+    expect(outcome).toEqual(['throw', 3, undefined, 'throw']);
+  });
+
+  test('an unrelated write cannot re-enter a computed before it commits', () => {
+    const outcome = both((rt) => {
+      const source = rt.__state(0);
+      const side = rt.__state(0);
+      let write = false;
+      const derived = rt.__computed(() => {
+        const value = source.value;
+        if (write) side.value = value + 1;
+        return value;
+      });
+      const seen = [];
+      rt.__effect(() => { side.value; seen.push(derived.value); });
+      write = true;
+      const update = caught(() => { source.value = 1; });
+      write = false;
+      const recovered = derived.value;
+      source.value = 2;
+      return [update[0], side.read(), recovered, seen, derived.read()];
+    });
+    expect(outcome).toEqual(['throw', 2, 1, [0, 2], 2]);
   });
 });
 
