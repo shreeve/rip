@@ -285,6 +285,116 @@ describe('schema-orm: paired reference — dirty tracking and save', () => {
     const update = r.calls.find((c) => c.sql.startsWith('UPDATE'));
     expect(update.params[update.params.length - 1]).toBe(1);
   });
+
+  test('every identity-dependent instance operation targets the hydrated PK, including reload', async () => {
+    const r = await paired(async (k, adapter) => {
+      let reads = 0;
+      adapter.on(/^SELECT/, () => rows(
+        ['id', 'name', 'deleted_at'],
+        [1, reads++ === 0 ? 'A' : 'database', null]));
+      const hooks = [];
+      const U = k.__schema(model('Stable',
+        field('name'),
+        dir('softDelete'),
+        hook('beforeUpdate', () => hooks.push('beforeUpdate')),
+        hook('afterUpdate', () => hooks.push('afterUpdate')),
+        hook('beforeDestroy', function () {
+          hooks.push('beforeDestroy');
+          this.id = 'hook-id';
+        }),
+        hook('afterDestroy', () => hooks.push('afterDestroy'))));
+      const inst = await U.first();
+      inst.id = 999;
+      inst.name = 'B';
+      await inst.save();
+      await inst.destroy();
+      await inst.restore();
+      await inst.reload();
+      inst.id = 'live-id';
+      await inst.destroy({ hard: true });
+      return {
+        name: inst.name,
+        id: inst.id,
+        hooks,
+        identityParams: adapter.calls
+          .filter((c) => /(?:WHERE "id" = \?|SET .* WHERE "id" = \?)/.test(c.sql))
+          .map((c) => c.params.at(-1)),
+      };
+    });
+    expect(r.value.name).toBe('database');
+    expect(r.value.id).toBe('hook-id');
+    expect(r.value.identityParams).toEqual([1, 1, 1, 1, 1]);
+    expect(r.value.hooks).toEqual([
+      'beforeUpdate', 'afterUpdate',
+      'beforeDestroy', 'afterDestroy',
+      'beforeUpdate', 'afterUpdate',
+      'beforeDestroy', 'afterDestroy',
+    ]);
+  });
+
+  test('reload rejects duplicate canonical identity columns before mutating instance state', async () => {
+    const r = await paired(async (k, adapter) => {
+      let reads = 0;
+      adapter.on(/^SELECT/, () => {
+        if (reads++ === 0) return rows(['id', 'name'], [1, 'A']);
+        return {
+          columns: [{ name: 'id' }, { name: 'id' }, { name: 'name' }],
+          data: [[1, 999, 'corrupt']],
+          rowCount: 1,
+        };
+      });
+      const U = k.__schema(model('ReloadDuplicate', field('name')));
+      const inst = await U.first();
+      let message = null;
+      try { await inst.reload(); } catch (error) { message = error.message; }
+      inst.name = 'B';
+      await inst.save();
+      return {
+        message,
+        id: inst.id,
+        name: inst.name,
+        updateIdentity: adapter.calls.find((c) => c.sql.startsWith('UPDATE')).params.at(-1),
+      };
+    });
+    expect(r.value.message).toMatch(/duplicate canonical column 'id'/i);
+    expect(r.value).toMatchObject({ id: 1, name: 'B', updateIdentity: 1 });
+  });
+
+  test('persisted instances with a missing or null snapshot identity reject before hooks or SQL', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^SELECT/, rows(['id', 'name', 'deleted_at'], [1, 'A', null]));
+      const hooks = [];
+      const U = k.__schema(model('Broken',
+        field('name'),
+        dir('softDelete'),
+        hook('beforeSave', () => hooks.push('save')),
+        hook('beforeDestroy', () => hooks.push('destroy')),
+        hook('beforeUpdate', () => hooks.push('update'))));
+      const operations = [
+        (x) => { x.name = 'B'; return x.save(); },
+        (x) => x.destroy(),
+        (x) => x.restore(),
+        (x) => x.reload(),
+      ];
+      const errors = [];
+      for (const snapshot of [null, { id: null }]) {
+        for (const operation of operations) {
+          const inst = await U.first();
+          inst._snapshot = snapshot;
+          const before = adapter.calls.length;
+          try { await operation(inst); } catch (error) {
+            errors.push({
+              loud: /persisted identity.*snapshot/i.test(error.message),
+              extra: adapter.calls.length - before,
+            });
+          }
+        }
+      }
+      return { errors, hooks };
+    });
+    expect(r.value.errors).toEqual(Array.from({ length: 8 }, () => ({ loud: true, extra: 0 })));
+    expect(r.value.hooks).toEqual([]);
+  });
 });
 
 describe('schema-orm: paired reference — the hook lifecycle', () => {
@@ -402,6 +512,97 @@ describe('schema-orm: paired reference — relations and eager loading', () => {
     });
     expect(r.value.memoFree).toBe(true);
     expect(r.value.reloadQueries).toBe(true);
+  });
+
+  test('belongsTo memos are keyed by the exact current FK, including cached null and string/number IDs', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/FROM "orders"/, rows(['id', 'user_id'], [9, 1]));
+      adapter.on(/FROM "users"/, (_sql, params) => {
+        if (params[0] === 1) return rows(['id', 'name'], [1, 'number']);
+        if (params[0] === '1') return rows(['id', 'name'], ['1', 'string']);
+        return rows(['id', 'name']);
+      });
+      k.__schema(model('User', field('name')));
+      const Order = k.__schema(model('Order',
+        dir('belongs_to', { target: 'User', optional: true })));
+      const order = await Order.first();
+      const number = await order.user();
+      order.userId = 2;
+      const missing = await order.user();
+      const afterNull = adapter.calls.length;
+      await order.user();
+      order.userId = '1';
+      const string = await order.user();
+      const beforeReload = adapter.calls.length;
+      await order.user({ reload: true });
+      return {
+        names: [number.name, missing, string.name],
+        cachedNull: adapter.calls.length === beforeReload + 1 && afterNull === beforeReload - 1,
+        params: adapter.calls.filter((c) => c.sql.includes('FROM "users"')).map((c) => c.params[0]),
+      };
+    });
+    expect(r.value.names).toEqual(['number', null, 'string']);
+    expect(r.value.cachedNull).toBe(true);
+    expect(r.value.params).toEqual([1, 2, '1', '1']);
+  });
+
+  test('inverse relation memos use stable persisted identity; eager loads and reload rewrite that memo', async () => {
+    const r = await paired(async (k, adapter) => {
+      let rootReads = 0;
+      adapter.on(/FROM "users"/, () => rows(['id', 'name'], [7, rootReads++ ? 'reloaded' : 'A']));
+      let relationReads = 0;
+      adapter.on(/FROM "orders"/, (_sql, params) => {
+        relationReads++;
+        return rows(['id', 'user_id'], [40 + relationReads, params[0]]);
+      });
+      const User = k.__schema(model('User',
+        field('name'),
+        dir('has_many', { target: 'Order', optional: false })));
+      k.__schema(model('Order', dir('belongs_to', { target: 'User', optional: false })));
+      const user = (await User.includes('orders').all())[0];
+      const eager = await user.orders();
+      user.id = 999;
+      const stable = await user.orders();
+      await user.reload();
+      const refreshed = await user.orders();
+      return {
+        ids: [eager[0].id, stable[0].id, refreshed[0].id],
+        relationParams: adapter.calls
+          .filter((c) => c.sql.includes('FROM "orders"'))
+          .map((c) => c.params[0]),
+      };
+    });
+    expect(r.value.ids).toEqual([41, 41, 42]);
+    expect(r.value.relationParams).toEqual([7, 7]);
+  });
+
+  test('inverse relation null and empty-array results are cached by identity', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/FROM "users"/, rows(['id'], [7]));
+      adapter.on(/FROM "(profiles|orders)"/, rows(['id', 'user_id']));
+      const User = k.__schema(model('User',
+        dir('has_one', { target: 'Profile', optional: true }),
+        dir('has_many', { target: 'Order', optional: false })));
+      k.__schema(model('Profile', dir('belongs_to', { target: 'User', optional: false })));
+      k.__schema(model('Order', dir('belongs_to', { target: 'User', optional: false })));
+      const user = await User.first();
+      const first = [await user.profile(), await user.orders()];
+      const afterFirst = adapter.calls.length;
+      const second = [await user.profile(), await user.orders()];
+      const afterSecond = adapter.calls.length;
+      await user.profile({ reload: true });
+      await user.orders({ reload: true });
+      return {
+        values: [first[0], first[1].length, second[0], second[1].length],
+        cached: afterSecond === afterFirst,
+        reloads: adapter.calls.length - afterSecond,
+      };
+    });
+    expect(r.value).toEqual({
+      values: [null, 0, null, 0],
+      cached: true,
+      reloads: 2,
+    });
   });
 
   test('.includes preloads with one batched query per relation (no N+1); unknown relation is loud', async () => {
@@ -556,17 +757,289 @@ describe('schema-orm: paired reference — upsert and insertMany', () => {
   test('upsert: ON CONFLICT DO UPDATE with EXCLUDED sets; timestamps ride; missing target is loud', async () => {
     const r = await paired(async (k, adapter) => {
       adapter.on(/^INSERT/, row(['id', 'name', 'email'], [1, 'Al', 'a@b.c']));
+      const hooks = [];
       // The conflict target must be a column a conflict can arise on —
       // a real database rejects ON CONFLICT over a non-unique column.
-      const U = k.__schema(model('User', field('name'), field('email', 'email', { unique: true }), dir('timestamps')));
-      await U.upsert({ email: 'a@b.c', name: 'Al' }, { on: 'email' });
+      const U = k.__schema(model('User',
+        field('name'),
+        field('email', 'email', { unique: true }),
+        dir('timestamps'),
+        hook('afterSave', () => hooks.push('afterSave')),
+        hook('afterCommit', () => hooks.push('afterCommit'))));
+      const written = await U.upsert({ email: 'a@b.c', name: 'Al' }, { on: 'email' });
       let missing = null;
       try { await U.upsert({ email: 'a@b.c' }); } catch (e) { missing = 'threw'; }
-      return { missing };
+      return { missing, hooks, persisted: written._persisted, saved: written.savedChanges };
     });
     expect(r.calls[0].sql).toBe(
  'INSERT INTO "users" ("name", "email") VALUES (?, ?) ON CONFLICT ("email") ' +
  'DO UPDATE SET "name" = EXCLUDED."name", "updated_at" = CURRENT_TIMESTAMP RETURNING *');
+    expect(r.value.hooks).toEqual(['afterSave', 'afterCommit']);
+    expect(r.value.persisted).toBe(true);
+    expect([...r.value.saved]).toEqual([]);
+  });
+
+  test('DO NOTHING upsert resolves the authoritative row by canonical serialized composite targets', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^INSERT/, rows([]));
+      adapter.on(/^SELECT/, rows(
+        ['id', 'when', 'meta', 'state', 'note'],
+        [8, new Date('2026-02-03'), '{"a":1}', 7, 'database']));
+      k.__schema({
+        kind: 'enum', name: 'UpsertState', entries: [
+          { tag: 'enum-member', name: 'ready', value: 7 },
+        ],
+      });
+      const hooks = [];
+      const U = k.__schema(model('Composite',
+        field('when', 'date'),
+        field('meta', 'json'),
+        field('state', 'UpsertState'),
+        field('note', 'string', { optional: true }),
+        dir('unique', { fields: ['when', 'meta', 'state'] }),
+        hook('beforeValidation', () => hooks.push('beforeValidation')),
+        hook('afterValidation', () => hooks.push('afterValidation')),
+        hook('beforeSave', () => hooks.push('beforeSave')),
+        hook('afterSave', () => hooks.push('afterSave')),
+        hook('afterCommit', () => hooks.push('afterCommit'))));
+      const inst = await U.upsert({
+        when: '2026-02-03', meta: { a: 1 }, state: 'ready',
+      }, { on: ['when', 'meta', 'state'] });
+      const upsertHooks = [...hooks];
+      const before = adapter.calls.length;
+      await inst.save();
+      return {
+        fields: { id: inst.id, note: inst.note },
+        persisted: inst._persisted,
+        saved: inst.savedChanges,
+        upsertHooks,
+        saveHooks: hooks.slice(upsertHooks.length),
+        noOp: adapter.calls.length === before,
+      };
+    });
+    expect(r.calls[1].sql).toBe(
+      'SELECT * FROM "composites" WHERE "when" = ? AND "meta" = ? AND "state" = ?');
+    expect(r.calls[1].params[0]).toBeInstanceOf(Date);
+    expect(r.calls[1].params.slice(1)).toEqual(['{"a":1}', 7]);
+    expect(r.value).toMatchObject({
+      fields: { id: 8, note: 'database' },
+      persisted: true,
+      upsertHooks: ['beforeValidation', 'afterValidation', 'beforeSave'],
+      saveHooks: [
+        'beforeValidation', 'afterValidation', 'beforeSave', 'afterSave', 'afterCommit',
+      ],
+      noOp: true,
+    });
+    expect([...r.value.saved]).toEqual([]);
+  });
+
+  test('DO NOTHING lookup stays on the ambient transaction and rejects zero or multiple rows', async () => {
+    const transaction = await paired(async (k, adapter) => {
+      adapter.on(/^INSERT/, rows([]));
+      adapter.on(/^SELECT/, rows(['id', 'email'], [3, 'a@b.co']));
+      const U = k.__schema(model('TxUpsert', field('email', 'email', { unique: true })));
+      const inst = await k.transaction(() => U.upsert({ email: 'a@b.co' }, { on: 'email' }));
+      return { id: inst.id };
+    });
+    expect(transaction.value.id).toBe(3);
+    expect(transaction.calls.filter((c) => /^(INSERT|SELECT)/.test(c.sql)).map((c) => c.tx)).toEqual([true, true]);
+
+    for (const answer of [rows(['id', 'email']), rows(['id', 'email'], [1, 'a@b.co'], [2, 'a@b.co'])]) {
+      const r = await paired(async (k, adapter) => {
+        adapter.on(/^INSERT/, rows([]));
+        adapter.on(/^SELECT/, answer);
+        const U = k.__schema(model('RaceUpsert', field('email', 'email', { unique: true })));
+        await U.upsert({ email: 'a@b.co' }, { on: 'email' });
+        return {};
+      });
+      expect(r.threw).toEqual({ error: true });
+      expect(r.calls.length).toBe(2);
+    }
+  });
+
+  test('upsert requires one exact declared unique tuple before hooks or SQL; tuple order is canonical', async () => {
+    const rejected = await paired(async (k) => {
+      const hooks = [];
+      const U = k.__schema(model('Targeted',
+        field('email', 'email', { optional: true, unique: true }),
+        field('tenant', 'string', { optional: true }),
+        field('slug', 'string', { optional: true }),
+        dir('unique', { fields: ['tenant', 'slug'] }),
+        hook('beforeValidation', () => hooks.push('beforeValidation'))));
+      const outcomes = [];
+      for (const [data, on] of [
+        [{ tenant: 'x' }, 'email'],
+        [{ email: null, tenant: 'x' }, 'email'],
+        [{ email: 'a@b.co', tenant: 'x' }, ['email', 'email']],
+        [{ tenant: 'x', slug: 's' }, 'tenant'],
+        [{ email: 'a@b.co', tenant: 'x' }, ['email', 'tenant']],
+        [{ email: 'a@b.co', tenant: 'x', slug: 's' }, ['email', 'tenant', 'slug']],
+      ]) {
+        try { await U.upsert(data, { on }); } catch (error) {
+          outcomes.push(/conflict target/i.test(error.message));
+        }
+      }
+      return { outcomes, hooks };
+    });
+    expect(rejected.value.outcomes).toEqual([true, true, true, true, true, true]);
+    // Missing/null values belong to input validation; malformed tuple
+    // shapes (duplicate, partial, superset, mixed) reject before hooks.
+    expect(rejected.value.hooks).toEqual(['beforeValidation', 'beforeValidation']);
+    expect(rejected.calls).toEqual([]);
+
+    const ordered = await paired(async (k, adapter) => {
+      adapter.on(/^INSERT/, row(['id', 'tenant', 'slug'], [4, 'x', 's']));
+      const U = k.__schema(model('OrderedTarget',
+        field('tenant'),
+        field('slug'),
+        dir('unique', { fields: ['tenant', 'slug'] })));
+      return await U.upsert({ tenant: 'x', slug: 's' }, { on: ['slug', 'tenant'] });
+    });
+    expect(ordered.calls[0].sql).toContain('ON CONFLICT ("slug", "tenant") DO NOTHING');
+    expect(ordered.value.id).toBe(4);
+  });
+
+  test('unique/index declarations reject duplicate canonical columns before upsert planning', async () => {
+    const r = await paired(async (k) => {
+      const outcomes = [];
+      for (const fields of [
+        ['tenant', 'tenant'],
+        ['firstName', 'first_name'],
+      ]) {
+        try {
+          const M = k.__schema(model('DuplicateTuple' + outcomes.length,
+            field('tenant', 'string', { optional: true }),
+            field('firstName', 'string', { optional: true }),
+            dir('unique', { fields })));
+          M._normalize();
+          outcomes.push('accepted');
+        } catch (error) {
+          outcomes.push(/distinct/i.test(error.message));
+        }
+      }
+      return outcomes;
+    });
+    expect(r.value).toEqual([true, true]);
+    expect(r.calls).toEqual([]);
+  });
+
+  test('upsert RETURNING accepts one valid row only; failures precede completion hooks', async () => {
+    for (const [data, answer] of [
+      [
+        { email: 'a@b.co', name: 'A' },
+        rows(['id', 'email', 'name']),
+      ],
+      [
+        { email: 'a@b.co', name: 'A' },
+        rows(['id', 'email', 'name'], [1, 'a@b.co', 'A'], [2, 'a@b.co', 'A']),
+      ],
+      [
+        { email: 'a@b.co' },
+        rows(['id', 'email'], [1, 'a@b.co'], [2, 'a@b.co']),
+      ],
+      [
+        { email: 'a@b.co', name: 'A' },
+        { columns: null, data: [[1, 'a@b.co', 'A']], rowCount: 1 },
+      ],
+    ]) {
+      const r = await paired(async (k, adapter) => {
+        const hooks = [];
+        adapter.on(/^INSERT/, answer);
+        const U = k.__schema(model('ReturningUpsert',
+          field('email', 'email', { unique: true }),
+          field('name', 'string', { optional: true }),
+          hook('afterSave', () => hooks.push('afterSave')),
+          hook('afterCommit', () => hooks.push('afterCommit'))));
+        try {
+          await U.upsert(data, { on: 'email' });
+        } catch {
+          return { hooks };
+        }
+        return { accepted: true, hooks };
+      });
+      expect(r.value).toEqual({ hooks: [] });
+      expect(r.calls.length).toBe(1);
+    }
+  });
+
+  test('adapter rows reject duplicate canonical columns before identity absorption', async () => {
+    for (const answer of [
+      {
+        columns: [{ name: 'id' }, { name: 'id' }, { name: 'email' }],
+        data: [[1, 999, 'a@b.co']],
+        rowCount: 1,
+      },
+      {
+        columns: [{ name: 'user_id' }, { name: 'userId' }, { name: 'email' }],
+        data: [[1, 999, 'a@b.co']],
+        rowCount: 1,
+      },
+    ]) {
+      const r = await paired(async (k, adapter) => {
+        const hooks = [];
+        adapter.on(/^INSERT/, answer);
+        const U = k.__schema(model('DuplicateColumns',
+          field('email', 'email', { unique: true }),
+          hook('afterSave', () => hooks.push('afterSave'))));
+        try {
+          await U.upsert({ email: 'a@b.co' }, { on: 'email' });
+        } catch (error) {
+          return { message: error.message, hooks };
+        }
+        return { accepted: true, hooks };
+      });
+      expect(r.value.message).toMatch(/duplicate canonical column/i);
+      expect(r.value.hooks).toEqual([]);
+    }
+  });
+
+  test('DO NOTHING lookup verifies every returned target column and serialized value', async () => {
+    for (const answer of [
+      rows(['id', 'email'], [3, 'wrong@b.co']),
+      rows(['id', 'name'], [3, 'database']),
+      {
+        columns: [{ name: 'id' }, { name: 'email' }, { name: 'email' }],
+        data: [[3, 'a@b.co', 'wrong@b.co']],
+        rowCount: 1,
+      },
+    ]) {
+      const r = await paired(async (k, adapter) => {
+        adapter.on(/^INSERT/, rows([]));
+        adapter.on(/^SELECT/, answer);
+        const U = k.__schema(model('LookupTarget', field('email', 'email', { unique: true })));
+        await U.upsert({ email: 'a@b.co' }, { on: 'email' });
+      });
+      expect(r.threw).toEqual({ error: true });
+      expect(r.calls.length).toBe(2);
+    }
+
+    for (const returnedTargetValues of [
+      [new Date('2026-02-04'), '{"a":1}', 7],
+      [new Date('2026-02-03'), '{"a":2}', 7],
+      [new Date('2026-02-03'), '{"a":1}', 8],
+    ]) {
+      const r = await paired(async (k, adapter) => {
+        adapter.on(/^INSERT/, rows([]));
+        adapter.on(/^SELECT/, rows(
+          ['id', 'when', 'meta', 'state'],
+          [8, ...returnedTargetValues]));
+        k.__schema({
+          kind: 'enum', name: 'LookupState', entries: [
+            { tag: 'enum-member', name: 'ready', value: 7 },
+          ],
+        });
+        const U = k.__schema(model('CompositeMismatch',
+          field('when', 'date'),
+          field('meta', 'json'),
+          field('state', 'LookupState'),
+          dir('unique', { fields: ['when', 'meta', 'state'] })));
+        await U.upsert({
+          when: '2026-02-03', meta: { a: 1 }, state: 'ready',
+        }, { on: ['when', 'meta', 'state'] });
+      });
+      expect(r.threw).toEqual({ error: true });
+      expect(r.calls.length).toBe(2);
+    }
   });
 
   test('insertMany validates EVERY row before any SQL; one multi-VALUES INSERT', async () => {
