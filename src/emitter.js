@@ -2609,16 +2609,12 @@ class Emitter {
       claim(valueKey, `value of '${item[1]}'`, item);
       pairs.push([item, item[1], valueText, valueKey]);
     }
-    // `__proto__` as an object-literal key — bare OR quoted — is the
-    // prototype-set form, not an own property; only the computed
-    // spelling `["__proto__"]:` creates one. A member (or string
-    // value) named `__proto__` emits through it so both lookup
-    // directions are real entries. The check reads the
-    // DECODED key — an escape spelling (`"\u005f_proto__"`) is the
-    // same key. Every other Object.prototype name (`constructor`,
-    // `hasOwnProperty`, …) is an ordinary own property in literal
-    // form and keys verbatim.
-    const ownKey = (text, decoded) => (decoded === '__proto__' ? '["__proto__"]' : text);
+    // A member (or string value) named `__proto__` emits through
+    // ownKeyText so both lookup directions are real entries. Every
+    // other Object.prototype name (`constructor`, `hasOwnProperty`,
+    // …) is an ordinary own property in literal form and keys
+    // verbatim.
+    const ownKey = Emitter.ownKeyText;
     this.mark(node, '$self', () => {
       this.b.emit('const ');
       this.mark(node, 'name', () => this.b.emit(name));
@@ -3804,18 +3800,32 @@ class Emitter {
         if (wrap) this.b.emit(')');
         this.b.emit(');\n');
       } else {
-        this.b.emit(`${inner}${acc}[`);
+        // Every dynamic key materializes as an OWN data property: a
+        // '__proto__' key from source data must create a key, never
+        // mutate the accumulator's prototype. Key and value bind once
+        // (key first — native object-literal order), then the one
+        // hazardous key routes through defineProperty; every other
+        // key keeps the plain assignment (measured ~18x faster than
+        // uniform defineProperty, with identical pinned behavior).
+        const kt = this.loopTempName('_k');
+        const vt = this.loopTempName('_v');
+        this.b.emit(`${inner}const ${kt} = `);
         // A string key is an identifier read (it routes through expr,
         // so a reactive key unwraps — `result[count.value]`;
         // loop variables are frame-bound and stay bare); a node
         // key is the dynamicKey's inner expression.
+        const wrapKey = isNode(keyExpr) && (Emitter.needsGrouping(keyExpr, 'operand') || isUpdate(keyExpr));
+        if (wrapKey) this.b.emit('(');
         this.expr(keyExpr);
-        this.b.emit('] = ');
+        if (wrapKey) this.b.emit(')');
+        this.b.emit(`, ${vt} = `);
         const wrap = Emitter.needsGrouping(expr, 'operand') || isUpdate(expr);
         if (wrap) this.b.emit('(');
         this.expr(expr);
         if (wrap) this.b.emit(')');
         this.b.emit(';\n');
+        this.b.emit(`${inner}if (${kt} === '__proto__') Object.defineProperty(${acc}, ${kt}, { value: ${vt}, enumerable: true, configurable: true, writable: true });\n`);
+        this.b.emit(`${inner}else ${acc}[${kt}] = ${vt};\n`);
       }
       if (guards.length > 0) this.b.emit(`${pad}    }\n`);
       this.b.emit(`${pad}  }\n`);
@@ -9023,7 +9033,10 @@ class Emitter {
         if (i > 0) this.b.emit(', ');
         const [srcKey, dstKey, def] = item;
         this.mark(item, '$self', () => {
-          this.mark(item, 'target', () => this.b.emit(dstKey));
+          // A picked or renamed-to '__proto__' destination is caller
+          // DATA — it materializes as an own key, never the
+          // prototype-set literal form.
+          this.mark(item, 'target', () => this.b.emit(Emitter.ownKeyText(dstKey, dstKey)));
           this.b.emit(': ');
           if (def !== null) this.b.emit('(');
           emitRef();
@@ -10665,6 +10678,17 @@ class Emitter {
   // bindings: reading them repeatedly is free of user code.
   // (undefined/NaN/Infinity are non-configurable globals in ES.)
   static LITERAL_WORDS = new Set(['true', 'false', 'null', 'undefined', 'NaN', 'Infinity']);
+
+  // A '__proto__' OBJECT-LITERAL key — bare or quoted — is
+  // JavaScript's prototype-set form, not an own property; only the
+  // computed spelling `["__proto__"]:` creates one. Everywhere the
+  // language means an ordinary data property (enum members and
+  // reverse entries, pick destinations), the key emits through this
+  // helper. The check reads the DECODED key, so an escape spelling
+  // is the same key.
+  static ownKeyText(text, decoded) {
+    return decoded === '__proto__' ? '["__proto__"]' : text;
+  }
 
   // Membership dispatch as a call, for containers whose evaluation
   // must happen exactly once (the inline ternary form re-reads the
