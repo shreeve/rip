@@ -1063,6 +1063,13 @@ async function __schemaSave(def, inst) {
   await __schemaRunHook(def, inst, 'beforeValidation');
   const errs = def._validateFields(inst, true);
   if (errs.length) throw new SchemaError(errs, def.name, def.kind);
+  // Refinements are stage 9 of the canonical pipeline and guard
+  // persistence exactly as they guard parse(): every @ensure and
+  // @ensure! is awaited against the instance's current normalized
+  // values, and neither SQL nor any post-validation hook runs after
+  // a failure.
+  const ensureErrs = await def._applyEnsuresAsync(inst);
+  if (ensureErrs.length) throw new SchemaError(ensureErrs, def.name, def.kind);
   await __schemaRunHook(def, inst, 'afterValidation');
 
   await __schemaRunHook(def, inst, 'beforeSave');
@@ -1436,6 +1443,10 @@ __SchemaDef.prototype.upsert = async function (data, opts) {
   await __schemaRunHook(this, inst, 'beforeValidation');
   const errs = this._validateFields(inst, true);
   if (errs.length) throw new SchemaError(errs, this.name, this.kind);
+  // Stage 9 of the canonical pipeline: refinements guard upsert as
+  // they guard save() — no SQL, no post-validation hook on failure.
+  const ensureErrs = await this._applyEnsuresAsync(inst);
+  if (ensureErrs.length) throw new SchemaError(ensureErrs, this.name, this.kind);
   await __schemaRunHook(this, inst, 'afterValidation');
   await __schemaRunHook(this, inst, 'beforeSave');
 
@@ -1501,14 +1512,20 @@ __SchemaDef.prototype.insertMany = async function (rows) {
       for (const k of Object.keys(data)) canonical[__schemaCamel(k)] = data[k];
     }
     this._applyDefaults(canonical);
+    const rowErrs = [];
     if (canonical[norm.primaryKey] != null) {
-      allErrs.push({
-        field: '[' + i + '].' + norm.primaryKey,
+      rowErrs.push({
+        field: norm.primaryKey,
         error: 'pk',
-        message: '[' + i + '] ' + norm.primaryKey + ' is caller-supplied — the primary key is runtime-managed',
+        message: norm.primaryKey + ' is caller-supplied — the primary key is runtime-managed',
       });
     }
-    for (const e of this._validateFields(canonical, true)) {
+    rowErrs.push(...this._validateFields(canonical, true));
+    // Stage 9 of the canonical pipeline, per row: refinements run only
+    // when the row's fields validated (matching parse()), and every
+    // row is judged before any SQL.
+    if (!rowErrs.length) rowErrs.push(...await this._applyEnsuresAsync(canonical));
+    for (const e of rowErrs) {
       allErrs.push({
         field: '[' + i + ']' + (e.field ? '.' + e.field : ''),
         error: e.error,

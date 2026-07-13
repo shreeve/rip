@@ -55,6 +55,9 @@ const field = (name, typeName = 'string', opts = {}) => ({
 });
 const dir = (name, ...args) => ({ tag: 'directive', name, args });
 const hook = (name, fn) => ({ tag: 'hook', name, fn });
+const ensure = (message, fn, opts = {}) => ({
+  tag: 'ensure', message, field: opts.field || '', async: opts.async === true, fn,
+});
 const scopeEntry = (name, fn) => ({ tag: 'scope', name, fn });
 const defaultScopeEntry = (fn) => ({ tag: 'defaultScope', name: 'defaultScope', fn });
 const model = (name, ...entries) => ({ kind: 'model', name, entries });
@@ -582,6 +585,105 @@ describe('schema-orm: paired reference — upsert and insertMany', () => {
     });
     expect(ok.calls.length).toBe(1);
     expect(ok.calls[0].sql).toBe('INSERT INTO "users" ("name") VALUES (?), (?) RETURNING *');
+  });
+});
+
+describe('schema-orm: refinements guard every persistence path (R9)', () => {
+  const Adult = (k, ...extra) => k.__schema(model('User',
+    field('age', 'integer'),
+    ensure('must be adult', (u) => u.age >= 18),
+    ...extra,
+  ));
+
+  test('create(): a failing @ensure rejects before any SQL; a passing one inserts', async () => {
+    const bad = await paired(async (k) => {
+      await Adult(k).create({ age: 12 });
+      return {};
+    });
+    expect(bad.threw.schemaError).toEqual([['', 'ensure']]);
+    expect(bad.calls.length).toBe(0);
+
+    const ok = await paired(async (k, adapter) => {
+      adapter.on(/^INSERT/, row(['id', 'age'], [1, 30]));
+      const u = await Adult(k).create({ age: 30 });
+      return { age: u.age };
+    });
+    expect(ok.value.age).toBe(30);
+    expect(ok.calls.length).toBe(1);
+  });
+
+  test('create(): validation failure stops the hook lifecycle after beforeValidation', async () => {
+    const r = await paired(async (k) => {
+      const ran = [];
+      const U = Adult(k,
+        hook('beforeValidation', () => ran.push('beforeValidation')),
+        hook('afterValidation', () => ran.push('afterValidation')),
+        hook('beforeSave', () => ran.push('beforeSave')),
+        hook('afterSave', () => ran.push('afterSave')));
+      try { await U.create({ age: 12 }); } catch { /* the rejection under test */ }
+      return { ran };
+    });
+    expect(r.value.ran).toEqual(['beforeValidation']);
+    expect(r.calls.length).toBe(0);
+  });
+
+  test('save(): an update that violates a refinement rejects with NO UPDATE SQL', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^SELECT/, rows(['id', 'age'], [1, 30]));
+      const U = Adult(k);
+      const inst = await U.first();
+      inst.age = 12;
+      const before = adapter.calls.length;
+      let threw = null;
+      try { await inst.save(); } catch (e) { threw = classify(k, e); }
+      return { threw, extra: adapter.calls.length - before };
+    });
+    expect(r.value.threw.schemaError).toEqual([['', 'ensure']]);
+    expect(r.value.extra).toBe(0);
+  });
+
+  test('upsert(): refinements run before the INSERT … ON CONFLICT', async () => {
+    const bad = await paired(async (k) => {
+      const U = k.__schema(model('User',
+        field('age', 'integer'),
+        field('email', 'email', { unique: true }),
+        ensure('must be adult', (u) => u.age >= 18)));
+      await U.upsert({ age: 12, email: 'a@b.c' }, { on: 'email' });
+      return {};
+    });
+    expect(bad.threw.schemaError).toEqual([['', 'ensure']]);
+    expect(bad.calls.length).toBe(0);
+  });
+
+  test('insertMany(): refinements run per row, issues prefixed [i], before any SQL', async () => {
+    const bad = await paired(async (k) => {
+      await Adult(k).insertMany([{ age: 30 }, { age: 12 }]);
+      return {};
+    });
+    expect(bad.threw.schemaError).toEqual([['[1]', 'ensure']]);
+    expect(bad.calls.length).toBe(0);
+  });
+
+  test('an async @ensure! is awaited on create — never silently accepted', async () => {
+    const bad = await paired(async (k) => {
+      const U = k.__schema(model('User',
+        field('age', 'integer'),
+        ensure('must be adult', (u) => Promise.resolve(u.age >= 18), { async: true })));
+      await U.create({ age: 12 });
+      return {};
+    });
+    expect(bad.threw.schemaError).toEqual([['', 'ensure']]);
+    expect(bad.calls.length).toBe(0);
+
+    const ok = await paired(async (k, adapter) => {
+      adapter.on(/^INSERT/, row(['id', 'age'], [1, 30]));
+      const U = k.__schema(model('User',
+        field('age', 'integer'),
+        ensure('must be adult', (u) => Promise.resolve(u.age >= 18), { async: true })));
+      const u = await U.create({ age: 30 });
+      return { age: u.age };
+    });
+    expect(ok.value.age).toBe(30);
   });
 });
 

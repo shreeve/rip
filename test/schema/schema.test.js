@@ -871,3 +871,125 @@ describe('schema: stores and mappings', () => {
     expect(JSON.stringify(sexpr)).toBe('["program",["=","S",["schema","shape"]]]');
   });
 });
+
+// ════════════════════════════════════════════════════════════════════
+// Wave D — the canonical validation pipeline: one value-returning
+// pipeline behind every entry point; nested schemas run their FULL
+// contract and their normalized values flow into the parent; array
+// length bounds are enforced; async status is transitive.
+// ════════════════════════════════════════════════════════════════════
+
+describe('schema pipeline: array length bounds (R14)', () => {
+  test('array min/max on length are enforced and agree with JSON Schema', () => {
+    const out = run(
+      'S = schema :shape\n  tags! string[], 1..2',
+      `return [
+        S.safe({tags: []}).errors[0].error,
+        S.safe({tags: ["a", "b", "c"]}).errors[0].error,
+        S.ok({tags: ["a"]}),
+        S.ok({tags: ["a", "b"]}),
+        S.toJSONSchema().properties.tags,
+      ];`,
+    );
+    expect(out[0]).toBe('min');
+    expect(out[1]).toBe('max');
+    expect(out[2]).toBe(true);
+    expect(out[3]).toBe(true);
+    expect(out[4]).toEqual({ type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 2 });
+  });
+
+  test('array length failure carries the field path and precedes nothing spurious', () => {
+    const out = run(
+      'S = schema :shape\n  xs! integer[], 2..3',
+      `const r = S.safe({xs: [1]}); return [r.errors.length, r.errors[0].field, r.errors[0].error];`,
+    );
+    expect(out).toEqual([1, 'xs', 'min']);
+  });
+});
+
+describe('schema pipeline: nested normalization and write-back (R10)', () => {
+  test('a nested default is applied and written into the parent value', () => {
+    const out = run(
+      'Child = schema :shape\n  a? integer, [7]\nParent = schema :shape\n  child! Child',
+      `return Parent.parse({child: {}}).child.a;`,
+    );
+    expect(out).toBe(7);
+  });
+
+  test('a nested transform is applied and written back', () => {
+    const out = run(
+      'Child = schema :shape\n  full! string, -> it.first + " " + it.last\nParent = schema :shape\n  child! Child',
+      `return Parent.parse({child: {first: "Ada", last: "L"}}).child.full;`,
+    );
+    expect(out).toBe('Ada L');
+  });
+
+  test('a nested coercion is applied and written back', () => {
+    const out = run(
+      'Child = schema :shape\n  n! ~integer\nParent = schema :shape\n  child! Child',
+      `return [Parent.parse({child: {n: "42"}}).child.n, Parent.safe({child: {n: "nan"}}).errors[0].field];`,
+    );
+    expect(out).toEqual([42, 'child.n']);
+  });
+
+  test('a nested @ensure refinement is enforced through the parent', () => {
+    const out = run(
+      'Child = schema :shape\n  a! integer\n  @ensure "positive", (c) -> c.a > 0\nParent = schema :shape\n  child! Child',
+      `return [Parent.ok({child: {a: 1}}), Parent.safe({child: {a: -1}}).errors[0].error, Parent.safe({child: {a: -1}}).errors[0].field];`,
+    );
+    expect(out).toEqual([true, 'ensure', 'child']);
+  });
+
+  test('nested date strings coerce to Date and write back', () => {
+    const out = run(
+      'Child = schema :shape\n  when! date\nParent = schema :shape\n  child! Child',
+      `return Parent.parse({child: {when: "2026-07-12"}}).child.when instanceof Date;`,
+    );
+    expect(out).toBe(true);
+  });
+
+  test('array-of-nested normalizes every element and writes them back', () => {
+    const out = run(
+      'Child = schema :shape\n  a? integer, [5]\nParent = schema :shape\n  kids! Child[]',
+      `return Parent.parse({kids: [{}, {a: 9}]}).kids.map((k) => k.a);`,
+    );
+    expect(out).toEqual([5, 9]);
+  });
+
+  test('two-level nesting normalizes and prefixes issue paths correctly', () => {
+    const out = run(
+      'Leaf = schema :shape\n  v! integer\n  @ensure "pos", (l) -> l.v > 0\nMid = schema :shape\n  leaf! Leaf\nTop = schema :shape\n  mid! Mid',
+      `return [Top.parse({mid: {leaf: {v: 3}}}).mid.leaf.v, Top.safe({mid: {leaf: {v: -1}}}).errors[0].field];`,
+    );
+    expect(out).toEqual([3, 'mid.leaf']);
+  });
+
+  test('a discriminated-union nested member runs its full contract', () => {
+    const out = run(
+      'Click = schema :shape\n  kind! "click"\n  x! integer, [0]\nScroll = schema :shape\n  kind! "scroll"\n  dy! integer\nEvent = schema :union\n  @on :kind\n  Click\n  Scroll\nWrap = schema :shape\n  ev! Event',
+      `return [Wrap.parse({ev: {kind: "click"}}).ev.x, Wrap.safe({ev: {kind: "scroll", dy: "x"}}).errors[0].field];`,
+    );
+    expect(out).toEqual([0, 'ev.dy']);
+  });
+});
+
+describe('schema pipeline: transitive async status (E2)', () => {
+  test('a parent with a nested @ensure! child refuses sync and validates async', async () => {
+    const src = 'Child = schema :shape\n  e! string\n  @ensure! "taken", (c) -> Promise.resolve(c.e != "x")\nParent = schema :shape\n  child! Child';
+    expect(() => run(src, 'return Parent.parse({child: {e: "ok"}});'))
+      .toThrow(/async refinements/);
+    const good = await run(src, 'return Parent.safeAsync({child: {e: "ok"}});');
+    expect(good.ok).toBe(true);
+    const bad = await run(src, 'return Parent.safeAsync({child: {e: "x"}});');
+    expect(bad.ok).toBe(false);
+    expect(bad.errors[0].field).toBe('child');
+  });
+
+  test('array-of-nested with async refinement is transitively async', async () => {
+    const src = 'Child = schema :shape\n  n! integer\n  @ensure! "even", (c) -> Promise.resolve(c.n % 2 is 0)\nParent = schema :shape\n  kids! Child[]';
+    expect(() => run(src, 'return Parent.ok({kids: [{n: 2}]});')).toThrow(/async refinements/);
+    const bad = await run(src, 'return Parent.safeAsync({kids: [{n: 2}, {n: 3}]});');
+    expect(bad.ok).toBe(false);
+    expect(bad.errors[0].field).toBe('kids[1]');
+  });
+});
