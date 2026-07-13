@@ -5,7 +5,7 @@ class SVGElementStub extends Node
 restoreGlobal = (host: any, key: string, present: boolean, value: any) ->
   if present then host[key] = value else delete host[key]
 
-export _renderComponent = (ComponentClass: any, props: Record<string, any> = {}, after: any = null): Node ->
+export _renderComponent = (ComponentClass: any, props: Record<string, any>, consume: any, after: any = null): any ->
   host = globalThis as any
   if host.document?.__ripRenderActive
     throw new Error 'nested or concurrent Rip SSR is not supported — complete the active synchronous render first'
@@ -23,7 +23,7 @@ export _renderComponent = (ComponentClass: any, props: Record<string, any> = {},
   host.Node = Node
   host.SVGElement = SVGElementStub
 
-  instance = null
+  instance: any = null
   root = document.createElement '__root'
   try
     instance = ComponentClass.new props
@@ -34,7 +34,10 @@ export _renderComponent = (ComponentClass: any, props: Record<string, any> = {},
       result = after root
       if result and typeof result.then is 'function'
         throw new Error 'Rip SSR post-render hooks must be synchronous'
-    root
+    output = consume root
+    if output and typeof output.then is 'function'
+      throw new Error 'Rip SSR consumers must be synchronous'
+    output
   finally
     instance.unmount(removeDOM: false) if instance? and instance._state is 'mounted'
     restoreGlobal host, 'document', hadDocument, previousDocument

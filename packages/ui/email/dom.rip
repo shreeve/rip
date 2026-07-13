@@ -208,10 +208,10 @@ export class Document
   createComment: (value: any): Comment -> Comment.new String(value)
   createDocumentFragment: (): Fragment -> Fragment.new()
 
-VOID_TAGS =! new Set %w[area base br col embed hr img input link meta source track wbr]
-BLOCK_TAGS =! new Set %w[p div td li dt dd blockquote figcaption address]
-HEADING_TAGS =! new Set %w[h1 h2 h3 h4 h5 h6]
-SKIP_TEXT_TAGS =! new Set %w[style script head]
+VOID_TAGS: Set<string> =! new Set %w[area base br col embed hr img input link meta source track wbr]
+BLOCK_TAGS: Set<string> =! new Set %w[p div td li dt dd blockquote figcaption address]
+HEADING_TAGS: Set<string> =! new Set %w[h1 h2 h3 h4 h5 h6]
+SKIP_TEXT_TAGS: Set<string> =! new Set %w[style script head]
 
 escapeText = (value: any): string ->
   String(value)
@@ -226,7 +226,7 @@ escapeAttribute = (value: any): string ->
     .replace(/"/g, '&quot;')
 
 styleText = (style: Record<string, any>): string ->
-  declarations = []
+  declarations: string[] = []
   for key, value of style
     continue unless value?
     property = key.replace /[A-Z]/g, (letter) -> "-#{letter.toLowerCase()}"
@@ -234,7 +234,7 @@ styleText = (style: Record<string, any>): string ->
   declarations.join ';'
 
 serializeAttributes = (element: Element): string ->
-  parts = []
+  parts: string[] = []
 
   parts.push " id=\"#{escapeAttribute(element.id)}\"" if element.attributes.has('id')
 
@@ -272,7 +272,7 @@ export serialize = (node: Node): string ->
   ''
 
 export serializeChildren = (node: Node): string ->
-  (node.childNodes.map (child) -> serialize child).join ''
+  (node.childNodes.map (child: Node) -> serialize child).join ''
 
 def _textContent(node: Node): string
   return node.data if node instanceof Text
