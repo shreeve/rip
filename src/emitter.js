@@ -298,6 +298,11 @@ class Emitter {
     // names never collide; `n` is the monotonic allocation cursor.
     // Shared with sub-emitters (schema callable bodies).
     this.temps = { used: new Set(), n: 0, byNode: new WeakMap() };
+    // Reference-capture plans, keyed by the assignment node: decided
+    // during the owning scope's hoist collection (planReferenceTemps),
+    // consumed verbatim at emission. See repeatSafeValue for the
+    // repeat-safety rule the plans encode.
+    this.refPlans = new WeakMap();
     this.ctrlDepth = 0;
     this.tailReturnOk = false;
     // Reactive scope frames, innermost last: { reactive, bound }.
@@ -1538,11 +1543,13 @@ class Emitter {
     const add = (name, node) => {
       if (!targets.has(name)) targets.set(name, node);
     };
+    // Scope boundaries come from scopeBoundary() — the ONE classifier
+    // this walk shares with planReferenceTemps' planning walk, so the
+    // hoist line and the reference plans can never disagree about
+    // which scope owns a construct's names and captures.
     const walk = (n) => {
-      if (!isNode(n) || isDefHead(n[0]) || isFunc(n)) return;
-      // A component's body hoists inside its own emitted scopes
-      // (_init, methods) — nothing from it reaches this scope's line.
-      if (n[0] === 'component' && n.length === 3) return;
+      const boundary = this.scopeBoundary(n);
+      if (boundary === 'skip') return;
       if (this.ts && Emitter.isTypedWrapper(n)) {
         if (typeof n[1] === 'string') noteAnnotation(n[1], n);
         this.tsForwardDirectives(n);
@@ -1550,7 +1557,7 @@ class Emitter {
       if (isChainLink(n) && isNode(n[1][2])) {
         chainTemps.push([this.chainTemp(n), n[1][2], '$self']);
       }
-      if (this.isReactiveDecl(n)) {
+      if (boundary === 'reactive') {
         if (typeof n[1] === 'string') reactive.add(n[1]);
         // A computed's multi-statement block is its own scope
         // (computedBody hoists it — the funcBlock path); every other
@@ -1564,7 +1571,7 @@ class Emitter {
       // JS's own TypeError). The body is its own function scope and
       // hoists internally; nothing inside it
       // collects here.
-      if (this.isEffectDecl(n)) {
+      if (boundary === 'effect') {
         if (typeof n[1] === 'string') reactive.add(n[1]);
         return;
       }
@@ -1574,7 +1581,7 @@ class Emitter {
       // duplicate `let` . The VALUE
       // is expression territory and hoists its assignment targets
       // here .
-      if (this.isReadonlyDecl(n)) {
+      if (boundary === 'readonly') {
         if (typeof n[1] === 'string') reactive.add(n[1]);
         walk(n[2]);
         return;
@@ -1606,11 +1613,11 @@ class Emitter {
       // Loop variables declare in the for-head (`for (let [q = 7] …)`)
       // — their pattern defaults are NOT scope-level assignments; skip
       // the vars slot.
-      if (n[0] === 'for-in' || n[0] === 'for-of' || n[0] === 'for-as') {
+      if (boundary === 'loop') {
         for (const el of n.slice(2)) walk(el);
         return;
       }
-      if (isComprehensionNode(n)) {
+      if (boundary === 'comprehension') {
         walk(n[1]);
         for (const clause of n[2] ?? []) walk(clause[2]);
         for (const g of n[3] ?? []) walk(g);
@@ -1619,15 +1626,11 @@ class Emitter {
       // Exported binding-less forms (`export {}` and any spec the
       // branch above declined) hoist nothing.
       if (n[0] === 'export') return;
-      // Enums declare through `const`; their member assignments are
-      // object entries, not scope variables — the subtree skips
-      // everywhere.
-      if (n[0] === 'enum') return;
       // Class bodies declare FIELDS, not scope variables: a field
       // assignment's target never hoists
       // ; field VALUES
       // are expressions and walk normally.
-      if (n[0] === 'class') {
+      if (boundary === 'class') {
         if (n[2] != null) walk(n[2]);
         const body = n[3];
         if (isBlock(body)) {
@@ -1683,6 +1686,14 @@ class Emitter {
     }
     const entries = [...targets.entries()].map(([name, node]) => [name, node, 'target']);
     entries.push(...chainTemps);
+    // Reference-capture temps: a second pass over the same statements
+    // plans single-evaluation captures for optional assignments and
+    // synthesized compounds (see planReferenceTemps). The plan is
+    // decided HERE — with this scope's own names known — and emission
+    // consumes it verbatim, so the hoist line and the emitted reads
+    // can never disagree.
+    const knownHere = new Set([...targets.keys(), ...excludeNames, ...reactive]);
+    entries.push(...this.planReferenceTemps(nodes, knownHere));
     entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
     if (this.ts) {
       // Fold the pre-filtered levels' forward records (liveStmts) into
@@ -3228,7 +3239,7 @@ class Emitter {
       throw this.positionedError(node, 'emitter: a BY step of 0 never advances the loop');
     }
     const v = vars[0];
-    const toRef = Emitter.pureIterable(to) ? null : this.loopTempName('_ref');
+    const toRef = this.singleReadIterable(to) ? null : this.loopTempName('_ref');
     const stepRef = posLit !== null || negLit !== null ? null : this.loopTempName('_step');
     this.b.emit('for (let ');
     markVar(v);
@@ -3281,7 +3292,7 @@ class Emitter {
         const [dots, from, to] = iter;
         // The condition re-reads TO each iteration: an impure bound
         // binds once in the init (a pure one keeps its bytes).
-        const toRef = Emitter.pureIterable(to) ? null : this.loopTempName('_ref');
+        const toRef = this.singleReadIterable(to) ? null : this.loopTempName('_ref');
         this.b.emit('for (let ');
         markVar(vars[0]);
         this.b.emit(' = ');
@@ -3320,7 +3331,7 @@ class Emitter {
         }
         // An impure iterable binds ONCE in the init; every later
         // read (bounds, element) uses the binding.
-        const it = Emitter.pureIterable(iter) ? null : this.loopTempName('_ref');
+        const it = this.singleReadIterable(iter) ? null : this.loopTempName('_ref');
         const bind = () => { if (it) { this.b.emit(`${it} = `); this.expr(iter); this.b.emit(', '); } };
         const ref = () => { if (it) this.b.emit(it); else this.expr(iter); };
         if (negLit !== null) {
@@ -3373,7 +3384,7 @@ class Emitter {
         this.flatBody(body, guard, '    ');
         this.b.emit('}');
       } else if (vars.length === 2) {
-        const it = Emitter.pureIterable(iter) ? null : this.loopTempName('_ref');
+        const it = this.singleReadIterable(iter) ? null : this.loopTempName('_ref');
         this.b.emit('for (let ');
         if (it) {
           this.b.emit(`${it} = `);
@@ -3432,8 +3443,11 @@ class Emitter {
       // An impure object the own-filter or value line would re-read
       // binds once ahead of the header.
       const rereads = own || vars.length === 2;
-      const it = rereads && !Emitter.pureIterable(obj) ? this.loopTempName('_ref') : null;
+      const it = rereads && !this.singleReadIterable(obj) ? this.loopTempName('_ref') : null;
       if (it !== null) {
+        // A scope-level const claims its name for the whole compile
+        // (unlike a for-header temp, which block-scopes per loop).
+        this.temps.used.add(it);
         this.b.emit(`const ${it} = `);
         this.mark(node, 'object', () => this.expr(obj));
         this.b.emit(`;\n${'  '.repeat(ind)}`);
@@ -3576,8 +3590,11 @@ class Emitter {
       // binds once ahead of the header (the caller's pad restores the
       // line); a header-only read never needs it.
       const rereads = aux === true || vars.length === 2;
-      const it = rereads && !Emitter.pureIterable(iter) ? this.loopTempName('_ref') : null;
+      const it = rereads && !this.singleReadIterable(iter) ? this.loopTempName('_ref') : null;
       if (it !== null) {
+        // A scope-level const claims its name for the whole compile
+        // (unlike a for-header temp, which block-scopes per loop).
+        this.temps.used.add(it);
         this.b.emit(`const ${it} = `);
         this.mark(node, 'object', () => this.expr(iter));
         this.b.emit(`;\n${pad ?? ''}`);
@@ -3650,7 +3667,7 @@ class Emitter {
       if ((posLit ?? negLit) !== null && Number((posLit ?? negLit).replace(/_/g, '')) === 0) {
         throw this.positionedError(node, 'emitter: a BY step of 0 never advances the loop');
       }
-      const it = Emitter.pureIterable(iter) ? null : this.loopTempName('_ref');
+      const it = this.singleReadIterable(iter) ? null : this.loopTempName('_ref');
       const bind = () => { if (it) { this.b.emit(`${it} = `); this.expr(iter); this.b.emit(', '); } };
       const ref = () => { if (it) this.b.emit(it); else this.expr(iter); };
       if (negLit !== null) {
@@ -3704,7 +3721,7 @@ class Emitter {
       return setups;
     }
     if (vars.length === 2) {
-      const it = Emitter.pureIterable(iter) ? null : this.loopTempName('_ref');
+      const it = this.singleReadIterable(iter) ? null : this.loopTempName('_ref');
       this.b.emit('for (let ');
       if (it) {
         this.b.emit(`${it} = `);
@@ -4187,7 +4204,7 @@ class Emitter {
       // evaluates ONCE: a pure count reads inline in the header test;
       // an impure one binds beside the counter.
       const count = node[1];
-      const pure = typeof count === 'string' || Emitter.pureChain(count);
+      const pure = this.repeatSafeValue(count);
       const ref = pure ? null : this.loopTempName('_n');
       this.b.emit('for (let it = 0');
       if (ref !== null) {
@@ -4826,6 +4843,7 @@ class Emitter {
     // e`, ternary arms, call arguments). `return` stays rejected: it
     // has no expression meaning.
     if (head === 'throw' && node.length === 2) {
+      this.rejectYieldInIIFE(node);
       this.mark(node, '$self', () => {
         this.b.emit(Emitter.containsAwait(node) ? 'await (async () => { throw ' : '(() => { throw ');
         this.mark(node, 'value', () => this.expr(node[1]));
@@ -4858,122 +4876,322 @@ class Emitter {
     return null;
   }
 
-  // A receiver with no evaluation cost to repeat: a plain name or a
-  // member chain of plain names. Anything else (a call, a computed
-  // index, a construction) must evaluate exactly once.
-  static pureChain(x) {
-    if (typeof x === 'string') return true;
-    if (!isNode(x) || x.length !== 3) return false;
-    if ((x[0] === '.' || x[0] === '?.') && typeof x[2] === 'string') return Emitter.pureChain(x[1]);
-    // A pure-base, pure-key index re-read carries the same
-    // no-side-effects assumption a dot chain does. A regex-literal
-    // key is a MATCH (it assigns `_`), never a pure re-read.
-    if (x[0] === '[]') {
-      if (typeof x[2] === 'string' && x[2][0] === '/') return false;
-      return Emitter.pureChain(x[1]) && Emitter.pureChain(x[2]);
+  // A value whose repeated evaluation provably cannot run user code
+  // or observe a different value: `this`, literal spellings, and
+  // identifiers bound in the current lexical environment (params,
+  // hoists, loop variables, reactive and component-member names — all
+  // bindings or containers this compiler owns). Member and index
+  // access is NEVER repeat-safe: a getter or proxy on the chain is
+  // observable user code. An identifier that resolves nowhere reads
+  // through globalThis, whose property may itself be an accessor —
+  // not repeat-safe either. `extra` carries walker-tracked bindings
+  // (loop variables, catch names) during reference planning.
+  repeatSafeValue(x, extra = null) {
+    if (typeof x !== 'string') return false;
+    if (x === 'this') return true;
+    // A regex spelling is a MATCH (it assigns `_`), never repeat-safe.
+    if (x[0] === '/') return false;
+    // Non-identifier spellings are literals: numbers, quoted strings.
+    if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(x)) return true;
+    if (Emitter.LITERAL_WORDS.has(x)) return true;
+    if (extra !== null && extra.has(x)) return true;
+    return this.lexicallyBound(x);
+  }
+
+  // Is `name` a binding the current lexical environment declares —
+  // a reactive frame's reactive/bound/member name, a scope-chain
+  // hoist/param/import, or a module-level class/def/export binding?
+  lexicallyBound(name) {
+    for (let i = this.rframes.length - 1; i >= 0; i--) {
+      const f = this.rframes[i];
+      if (f.reactive.has(name) || f.bound.has(name)) return true;
+      if (f.members !== undefined && f.members.has(name)) return true;
     }
+    return this.inScope(name) || this.moduleBound.has(name);
+  }
+
+  // An iterable a loop header re-reads must be repeat-safe, or a
+  // literal list of repeat-safe members (respelling a literal list
+  // rebuilds equal values). Anything else binds once in the header.
+  singleReadIterable(x, extra = null) {
+    if (this.repeatSafeValue(x, extra)) return true;
+    if (!isNode(x)) return false;
+    if (x[0] === 'array') return x.slice(1).every((e) => this.singleReadIterable(e, extra));
     return false;
   }
 
-  // An iterable a loop header re-reads must have no evaluation cost:
-  // a pure chain, or a literal list/range of pure members. Anything
-  // else binds once in the header.
-  static pureIterable(x) {
-    if (Emitter.pureChain(x)) return true;
-    if (!isNode(x)) return false;
-    if (x[0] === 'array') return x.slice(1).every((e) => Emitter.pureIterable(e));
-    return false;
+  // The scope-boundary classification shared by hoistTargets'
+  // collector walk and planReferenceTemps' planning walk. The two
+  // walks MUST see identical boundaries — a construct whose body
+  // hoists in its own scope plans its captures there too — so the
+  // decision lives here, once. A new construct with its own scope
+  // rule is added HERE and both walks follow.
+  //
+  //   'skip'           nothing inside reaches this scope (a nested
+  //                    function, def, component body, or enum)
+  //   'effect'         the body is its own function scope; only the
+  //                    handle name binds here
+  //   'reactive'       a reactive declaration — the value emits inline
+  //                    here UNLESS it is a multi-statement computed
+  //                    block (its own scope); the walker checks
+  //                    `n[0] === 'computed' && isBlock(n[2]) &&
+  //                    n[2].length > 2` for that split
+  //   'readonly'       the name const-binds; the value walks here
+  //   'class'          fields are members, not scope names; the head
+  //                    and field VALUES walk here
+  //   'loop'           for-in/of/as — vars declare in the for-head;
+  //                    slots from 2 walk here
+  //   'comprehension'  clause vars bind per-construct; value, clause
+  //                    sources, and guards walk here
+  //   'try'            catch patterns bind per-handler; parts walk
+  //   null             an ordinary node — generic descent
+  scopeBoundary(n) {
+    if (!isNode(n) || isDefHead(n[0]) || isFunc(n)) return 'skip';
+    if (n[0] === 'component' && n.length === 3) return 'skip';
+    if (n[0] === 'enum') return 'skip';
+    if (this.isEffectDecl(n)) return 'effect';
+    if (this.isReactiveDecl(n)) return 'reactive';
+    if (this.isReadonlyDecl(n)) return 'readonly';
+    if (n[0] === 'class') return 'class';
+    if (n[0] === 'for-in' || n[0] === 'for-of' || n[0] === 'for-as') return 'loop';
+    if (isComprehensionNode(n)) return 'comprehension';
+    if (n[0] === 'try') return 'try';
+    return null;
+  }
+
+  // ---- Reference planning (single-evaluation captures) -------------
+  //
+  // Optional assignments and synthesized compounds re-manifest parts
+  // of their target (guard + write; read + write), so every part that
+  // is not repeat-safe must bind to a temp the enclosing scope hoists.
+  // Planning happens during the scope's hoist collection — the only
+  // moment that both knows the scope's names and precedes the hoist
+  // line — and emission consumes the stored plan verbatim. Temps are
+  // hoisted `let`s (never an IIFE parameter), so `yield`, `await`,
+  // and the optional guard's short-circuit all stay in the source
+  // function's own control context.
+  //
+  // Plan shape: { recv, obj, key } — each a minted temp name or null.
+  //   recv  the optional link's receiver (evaluates before the guard)
+  //   obj   the object the final target link reads from and writes to
+  //   key   the final link's computed index key
+  // A null slot means that part is repeat-safe and respells directly.
+  static planNeedsFor(node) {
+    if (!isNode(node) || node.length !== 3) return null;
+    const h = node[0];
+    const synth = h === '//=' || h === '%%=';
+    if (!synth && !ASSIGNS.has(h)) return null;
+    const optLink = Emitter.optionalGuard(node[1]);
+    if (optLink === null && !synth) return null;
+    if (optLink === null && !(isNode(node[1]) && (node[1][0] === '.' || node[1][0] === '[]') && node[1].length === 3)) return null;
+    return { synth, optLink };
+  }
+
+  planReferenceTemps(nodes, known) {
+    const entries = [];
+    const mint = (base) => {
+      const name = this.loopTempName(base);
+      this.temps.used.add(name);
+      return name;
+    };
+    const plan = (n, need, extra) => {
+      // hoistTargets can run twice for one scope (a names-only
+      // lookahead precedes the emitting call) — an existing plan
+      // re-contributes its entries instead of allocating again, the
+      // same idempotence chainTemp gets from its byNode memo.
+      const existing = this.refPlans.get(n);
+      if (existing !== undefined) {
+        for (const name of [existing.recv, existing.obj, existing.key]) {
+          if (name !== null) entries.push([name, n, '$self']);
+        }
+        return;
+      }
+      const safe = (x) => this.repeatSafeValue(x, extra) || known.has(x);
+      const p = { recv: null, obj: null, key: null };
+      if (need.optLink !== null && !safe(need.optLink[1])) p.recv = mint('_ref');
+      if (need.synth) {
+        const t = node1AfterRecv(n, need, p);
+        // The final link's object: everything below it re-reads on
+        // write-back, so anything but a repeat-safe name (or the
+        // receiver temp itself) binds once inside the guard.
+        const objE = t[1];
+        if (!(typeof objE === 'string' && (objE === p.recv || safe(objE)))) p.obj = mint('_o');
+        if ((t[0] === '[]' || t[0] === 'optindex') && !safe(t[2])) p.key = mint('_k');
+      }
+      if (p.recv === null && p.obj === null && p.key === null) return;
+      this.refPlans.set(n, p);
+      for (const name of [p.recv, p.obj, p.key]) {
+        if (name !== null) entries.push([name, n, '$self']);
+      }
+    };
+    // The final target link once the receiver substitution is applied:
+    // when the optional link IS the final link, its object slot is the
+    // receiver (temp or original); otherwise the spine above it.
+    const node1AfterRecv = (n, need, p) => {
+      const t = n[1];
+      if (need.optLink !== null && t === need.optLink) {
+        return [t[0], p.recv ?? t[1], t[2]];
+      }
+      return t;
+    };
+    // The descent mirrors hoistTargets' scope boundaries exactly:
+    // nested functions, defs, components, effect bodies, and
+    // multi-statement computed blocks plan inside their OWN scope's
+    // hoist collection, never here. Loop variables, comprehension
+    // clause names, and catch bindings are repeat-safe within their
+    // construct and track through `extra`.
+    const walk = (n, extra) => {
+      const boundary = this.scopeBoundary(n);
+      if (boundary === 'skip' || boundary === 'effect') return;
+      if (boundary === 'reactive') {
+        if (!(n[0] === 'computed' && isBlock(n[2]) && n[2].length > 2)) walk(n[2], extra);
+        return;
+      }
+      if (boundary === 'readonly') {
+        walk(n[2], extra);
+        return;
+      }
+      if (boundary === 'class') {
+        if (n[2] != null) walk(n[2], extra);
+        const body = n[3];
+        if (isBlock(body)) {
+          for (const stmt of body.slice(1)) {
+            if (isNode(stmt) && ASSIGNS.has(stmt[0]) && stmt.length === 3) walk(stmt[2], extra);
+            else if (!Emitter.isTypedWrapper(stmt)) walk(stmt, extra);
+          }
+        }
+        return;
+      }
+      if (boundary === 'loop') {
+        const inner = new Set(extra);
+        for (const name of this.patternNames(n[1], [], true)) inner.add(name);
+        for (const el of n.slice(2)) walk(el, inner);
+        return;
+      }
+      if (boundary === 'comprehension') {
+        const inner = new Set(extra);
+        for (const clause of n[2] ?? []) {
+          for (const name of this.patternNames(clause[1], [], true)) inner.add(name);
+        }
+        walk(n[1], inner);
+        for (const clause of n[2] ?? []) walk(clause[2], inner);
+        for (const g of n[3] ?? []) walk(g, inner);
+        return;
+      }
+      if (boundary === 'try') {
+        for (const part of n.slice(2)) {
+          if (isNode(part) && part.length === 2 && Emitter.isPattern(part[0])) {
+            const inner = new Set(extra);
+            for (const name of this.patternNames(part[0])) inner.add(name);
+            walk(part[1], inner);
+            continue;
+          }
+          walk(part, extra);
+        }
+        walk(n[1], extra);
+        return;
+      }
+      const need = Emitter.planNeedsFor(n);
+      if (need !== null) plan(n, need, extra);
+      for (const el of n) walk(el, extra);
+    };
+    for (const n of nodes) walk(n, new Set());
+    return entries;
   }
 
   // Assignment through an optional chain: statement position guards
   // with `if (guard != null) …`; value position lowers to a ternary
   // yielding undefined when the guard is nullish. The guard emission
   // is a second generated manifestation of the optional link's
-  // `object` role, so
-  // leaf guards map exactly.
+  // `object` role, so leaf guards map exactly.
   //
-  // A receiver the guard cannot cheaply re-read (pureChain false)
-  // binds as an IIFE parameter instead: the guard and the write then
-  // see the SAME object, and the receiver evaluates exactly once. The
-  // rest of the target re-emits with the parameter standing in at the
-  // optional link's object slot.
+  // Single evaluation: every target part that is not repeat-safe
+  // binds to a hoisted temp from the node's reference plan — the
+  // receiver INSIDE the guard's own parens (`(_ref = recv()) != null`,
+  // so the null check and the write see the SAME object), the final
+  // link's object and computed key as leading sequence assignments
+  // inside the successful branch. Only the receiver evaluates before
+  // the guard; a nullish receiver produces zero key/value evaluations.
+  // Hoisted temps (never an IIFE parameter) keep `yield`, `await`,
+  // and every control transfer in the source function's own context.
   optionalAssign(node, optLink, context) {
     const op = node[0];
-    if (!Emitter.pureChain(optLink[1])) {
-      const p = this.loopTempName('_ref');
-      const subst = (x) => {
-        if (x === optLink) return [x[0], p, x[2]];
-        return isNode(x) ? x.map(subst) : x;
-      };
-      const clonedTarget = subst(node[1]);
-      const target = () => this.mark(node, 'target', () => this.withTarget(() => this.withDeopt(() => this.expr(clonedTarget))));
-      const value = () => this.mark(node, 'value', () => this.withExpression(() => this.expr(node[2])));
-      const emitAssign = () => {
-        if (op === '//=') {
-          target(); this.b.emit(' = Math.floor('); target(); this.b.emit(' / '); value(); this.b.emit(')');
-        } else if (op === '%%=') {
-          target(); this.b.emit(' = ' + Emitter.MODULO + '('); target(); this.b.emit(', '); value(); this.b.emit(')');
-        } else {
-          target(); this.b.emit(' ');
-          this.mark(node, 'operator', () => this.b.emit(op));
-          this.b.emit(' '); value();
-        }
-      };
-      this.mark(node, '$self', () => {
-        const asyncy = Emitter.containsAwait(node);
-        this.b.emit(asyncy ? `await (async (${p}) => ` : `((${p}) => `);
-        if (context === 'statement') {
-          this.b.emit(`{ if (${p} != null) `);
-          emitAssign();
-          this.b.emit('; })(');
-        } else {
-          this.b.emit(`${p} != null ? (`);
-          emitAssign();
-          this.b.emit(') : undefined)(');
-        }
+    const synth = op === '//=' || op === '%%=';
+    const plan = this.refPlans.get(node) ?? { recv: null, obj: null, key: null };
+    if (plan.recv === null && !this.repeatSafeValue(optLink[1])) {
+      throw this.positionedError(node, 'emitter: reference plan missing for an optional assignment with an impure receiver — a capture site the planner walk did not reach');
+    }
+    // Clones alias to their originals' ids, so every re-manifested
+    // segment keeps its source mapping (the clone IS a second
+    // generated manifestation of the same construct).
+    const subst = (x) => {
+      if (x === optLink) return this.stores.alias([x[0], plan.recv ?? x[1], x[2]], x);
+      return isNode(x) ? this.stores.alias(x.map(subst), x) : x;
+    };
+    const target1 = subst(node[1]);
+    // The temp scaffolding stays OUTSIDE the object mark, so the
+    // receiver keeps its exact source mapping; the parens and temp are
+    // covered by the node's $self row.
+    const guard = () => {
+      if (plan.recv !== null) {
+        this.b.emit(`(${plan.recv} = `);
         this.mark(optLink, 'object', () => this.withExpression(() => this.expr(optLink[1])));
         this.b.emit(')');
-      });
-      return;
-    }
-    const guard = () => this.mark(optLink, 'object', () => this.expr(optLink[1]));
-    const target = () => this.mark(node, 'target', () => this.withTarget(() => this.withDeopt(() => this.expr(node[1]))));
-    const value = () => this.mark(node, 'value', () => this.withExpression(() => this.expr(node[2])));
-    const emitAssign = () => {
-      if (op === '//=') {
-        target();
-        this.b.emit(' = Math.floor(');
-        target();
-        this.b.emit(' / ');
-        value();
-        this.b.emit(')');
-      } else if (op === '%%=') {
-        target();
-        this.b.emit(' = ' + Emitter.MODULO + '(');
-        target();
-        this.b.emit(', ');
-        value();
-        this.b.emit(')');
       } else {
+        this.mark(optLink, 'object', () => this.expr(optLink[1]));
+      }
+    };
+    const value = () => this.mark(node, 'value', () => this.withExpression(() => this.expr(node[2])));
+    // The successful branch: obj/key setup (when captured), then the
+    // assignment. Comma-sequenced, so both positions stay a single
+    // expression and setup runs only past the guard.
+    const emitBranch = () => {
+      if (!synth) {
+        const target = () => this.mark(node, 'target', () => this.withTarget(() => this.withDeopt(() => this.expr(target1))));
         target();
         this.b.emit(' ');
         this.mark(node, 'operator', () => this.b.emit(op));
         this.b.emit(' ');
         value();
+        return;
       }
+      // Synthesized compound: the target manifests twice (read +
+      // write), so its object/key spell through the captured temps.
+      let objText = null;
+      if (plan.obj !== null) {
+        this.b.emit(`${plan.obj} = `);
+        this.mark(node, 'target', () => this.withDeopt(() => this.expr(target1[1])));
+        this.b.emit(', ');
+        objText = plan.obj;
+      }
+      if (plan.key !== null) {
+        this.b.emit(`${plan.key} = `);
+        this.mark(node, 'target', () => this.withExpression(() => this.expr(target1[2])));
+        this.b.emit(', ');
+      }
+      const ref = ['[]', '.'].includes(target1[0]) || target1[0] === '?.' || target1[0] === 'optindex'
+        ? this.stores.alias([target1[0], objText ?? target1[1], plan.key ?? target1[2]], node[1])
+        : target1;
+      const target = () => this.mark(node, 'target', () => this.withTarget(() => this.withDeopt(() => this.expr(ref))));
+      target();
+      this.b.emit(op === '//=' ? ' = Math.floor(' : ' = ' + Emitter.MODULO + '(');
+      target();
+      this.b.emit(op === '//=' ? ' / ' : ', ');
+      this.operand(node, 'value', node[2]);
+      this.b.emit(')');
     };
     this.mark(node, '$self', () => {
       if (context === 'statement') {
         this.b.emit('if (');
         guard();
         this.b.emit(' != null) ');
-        emitAssign();
+        emitBranch();
       } else {
         // Bare ternary — the node keeps its assign tier, so operand
         // positions group it through needsGrouping like any assignment.
         guard();
         this.b.emit(' != null ? (');
-        emitAssign();
+        emitBranch();
         this.b.emit(') : undefined');
       }
     });
@@ -5323,12 +5541,6 @@ class Emitter {
     if (target === '__effect') {
       throw this.positionedError(node, `emitter: '__effect ~> …' would bind the very runtime name its own lowering calls (const __effect = __effect(…) — a TDZ self-reference); rename the handle`);
     }
-    // The runtime calls the effect function — a generator frame would
-    // never run its body. Nested functions keep
-    // their own yields.
-    if (Emitter.containsYield(body)) {
-      throw this.positionedError(node, "emitter: an effect ('~>') body cannot yield — the runtime calls the effect function (make the generator a named function the effect calls)");
-    }
     this.mark(node, 'annotation', () => this.mark(node, '$self', () => {
       if (target !== null) {
         this.b.emit('const ');
@@ -5352,7 +5564,33 @@ class Emitter {
   // disposer). `markOp` marks the operator role over the emitted
   // `__effect` name (the bare form; the bound form's operator is its
   // `=`).
+  // A render body's expressions embed inside synchronous generated
+  // scopes — _create, updater effects, event listeners, and their
+  // __batch windows — none of which is async or a generator. A
+  // function VALUE (an event handler arrow) passes through untouched
+  // and owns its own control context, so only a bare await/yield in a
+  // render expression is illegal. Returns the first offending node.
+  static findRenderControl(n) {
+    if (!isNode(n)) return null;
+    const head = n[0];
+    if (head === 'await' || head === 'dammit!' || head === 'yield' || head === 'yield-from') return n;
+    if (head === 'for-as' && n[3] === true) return n;
+    if (head === '->' || head === '=>' || isDefHead(head) || head === 'class') return null;
+    for (const el of n) {
+      const hit = Emitter.findRenderControl(el);
+      if (hit !== null) return hit;
+    }
+    return null;
+  }
+
   effectValue(node, body, ind, markOp) {
+    // The runtime calls the effect function — a generator frame would
+    // never run its body. The check lives HERE, the one funnel every
+    // effect position (statement, expression, tail, component body)
+    // emits through. Nested functions keep their own yields.
+    if (!isFunc(body) && Emitter.containsYield(body)) {
+      throw this.positionedError(node, "emitter: an effect ('~>') body cannot yield — the runtime calls the effect function (make the generator a named function the effect calls)");
+    }
     const emitName = () => {
       if (markOp) this.mark(node, 'operator', () => this.b.emit('__effect'));
       else this.b.emit('__effect');
@@ -5593,6 +5831,13 @@ class Emitter {
           throw this.positionedError(stmt,
             'emitter: duplicate render block — a component takes exactly one', node);
         }
+        const ctrl = Emitter.findRenderControl(stmt);
+        if (ctrl !== null) {
+          throw this.positionedError(ctrl,
+            "emitter: a render body evaluates synchronously — 'await'/'yield' cannot appear in a render expression " +
+            "(text, attributes, props, and event listeners emit into non-async generated scopes); compute the value " +
+            "into a member (a state written by an effect), or make the handler a function ('-> await ...')", stmt);
+        }
         renderNode = stmt;
         return;
       }
@@ -5643,6 +5888,13 @@ class Emitter {
           throw this.positionedError(stmt,
             `emitter: a bound effect ('${typeof stmt[1] === 'string' ? stmt[1] : '…'} ~> …') has no component-body reading — ` +
             'the handle would bind nothing; use a bare `~> …` effect, or bind the handle inside a method', node);
+        }
+        // Same contract as every other effect position: the runtime
+        // calls the effect function, so a generator body would never
+        // run. Component effects emit outside effectValue's funnel,
+        // so the check must live here too.
+        if (Emitter.containsYield(stmt[2])) {
+          throw this.positionedError(stmt, "emitter: an effect ('~>') body cannot yield — the runtime calls the effect function (make the generator a named function the effect calls)", stmt);
         }
         effects.push(stmt);
         return;
@@ -7299,7 +7551,7 @@ class Emitter {
       const evUsed = new Set();
       Emitter.collectLeafNames(value, evUsed);
       const ev = Emitter.mintName('e', evUsed);
-      this.renderLine(pair, () => {
+            this.renderLine(pair, () => {
         this.b.emit(`if (${instVar}) ${elVar}.addEventListener('${event}', (${ev}) => __batch(() => (`);
         this.tsHandlerCast(() => this.withExpression(() => this.expr(value)));
         this.b.emit(`)(${ev})))`);
@@ -7406,7 +7658,7 @@ class Emitter {
         const evUsed = new Set();
         Emitter.collectLeafNames(value, evUsed);
         const ev = Emitter.mintName('e', evUsed);
-        this.renderLine(pair, () => {
+                this.renderLine(pair, () => {
           const self = this.renderSelf ?? 'this';
           this.b.emit(`${el}.addEventListener('${eventName}', (${ev}) => __batch(() => `);
           if (typeof value === 'string' && this.renderVarKind(value) === null &&
@@ -8358,7 +8610,7 @@ class Emitter {
     const evUsed = new Set();
     Emitter.collectLeafNames(value, evUsed);
     const ev = Emitter.mintName('e', evUsed);
-    this.renderLine(pair, () => {
+        this.renderLine(pair, () => {
       this.b.emit(`${el}.addEventListener('${event}', (${ev}) => { `);
       this.withExpression(() => this.expr(value));
       this.b.emit(` = ${ev}.${accessor};`);
@@ -9717,7 +9969,7 @@ class Emitter {
     }
     this.mark(node, '$self', () => {
       const src = node[2];
-      const ref = Emitter.pureChain(src) ? null : this.loopTempName('_ref');
+      const ref = this.repeatSafeValue(src) ? null : this.loopTempName('_ref');
       if (ref !== null) {
         // A scope-level const claims its name for the whole compile
         // (unlike a for-header temp, which block-scopes per loop).
@@ -10409,6 +10661,11 @@ class Emitter {
   // operands once and normalizes the sign to the divisor's.
   static MODULO = '((n, d) => { n = +n; d = +d; return (n % d + d) % d; })';
 
+  // Identifier-shaped spellings that are language literals, not
+  // bindings: reading them repeatedly is free of user code.
+  // (undefined/NaN/Infinity are non-configurable globals in ES.)
+  static LITERAL_WORDS = new Set(['true', 'false', 'null', 'undefined', 'NaN', 'Infinity']);
+
   // Membership dispatch as a call, for containers whose evaluation
   // must happen exactly once (the inline ternary form re-reads the
   // container; a plain-name container keeps it — bytes and behavior
@@ -10499,20 +10756,23 @@ class Emitter {
   // single-evaluation contract. Returns the node the READ spelling
   // embeds. Minted names come from the used-name registry.
   compoundTarget(node, target, ind) {
-    if (typeof target === 'string' || Emitter.pureChain(target)) {
+    if (this.repeatSafeValue(target)) {
       this.mark(node, 'target', () => this.withTarget(() => this.expr(target)));
       return target;
     }
     if (isNode(target) && (target[0] === '.' || target[0] === '[]') && target.length === 3) {
-      const base = this.loopTempName('_ref');
-      this.temps.used.add(base);
-      this.b.emit(`const ${base} = `);
-      this.expr(target[1]);
-      this.b.emit(`;\n${'  '.repeat(ind)}`);
+      let base = target[1];
+      if (!this.repeatSafeValue(base)) {
+        base = this.loopTempName('_ref');
+        this.temps.used.add(base);
+        this.b.emit(`const ${base} = `);
+        this.expr(target[1]);
+        this.b.emit(`;\n${'  '.repeat(ind)}`);
+      }
       let read;
       if (target[0] === '[]') {
         let key = target[2];
-        if (!(typeof key === 'string') && !Emitter.pureChain(key)) {
+        if (!this.repeatSafeValue(key)) {
           const k = this.loopTempName('_key');
           this.temps.used.add(k);
           this.b.emit(`const ${k} = `);
@@ -10718,24 +10978,46 @@ class Emitter {
   // base (and key) bind as IIFE parameters instead, so a
   // side-effecting base evaluates exactly once (the native compounds'
   // single-evaluation contract).
+  // Native compound-assignment order — base, key, target read, RHS,
+  // write, each exactly once — comes from direct respelling:
+  // `t = open t mid v close` reads the property once (in the RHS) and
+  // writes it once (the LHS ref). A target whose object or computed
+  // key is not repeat-safe spells both manifestations through the
+  // node's plan temps, bound in a leading comma sequence. Hoisted
+  // temps (never an IIFE parameter) keep `yield`, `await`, and every
+  // control transfer in the source function's own context.
   synthCompound(node, open, mid, close) {
     const t = node[1];
     if (isNode(t) && (t[0] === '.' || t[0] === '[]') && t.length === 3) {
+      const plan = this.refPlans.get(node) ?? { recv: null, obj: null, key: null };
+      if (plan.obj === null && !this.repeatSafeValue(t[1])) {
+        throw this.positionedError(node, 'emitter: reference plan missing for a compound target with an impure object — a capture site the planner walk did not reach');
+      }
+      if (plan.key === null && t[0] === '[]' && !this.repeatSafeValue(t[2])) {
+        throw this.positionedError(node, 'emitter: reference plan missing for a compound target with an impure key — a capture site the planner walk did not reach');
+      }
       this.mark(node, '$self', () => {
-        const asyncy = Emitter.containsAwait(node);
-        const indexy = t[0] === '[]';
-        const prop = indexy ? '[_k]' : `.${t[2]}`;
-        this.b.emit(asyncy ? 'await (async (' : '((');
-        this.b.emit(indexy ? '_o, _k, _v' : '_o, _v');
-        this.b.emit(`) => _o${prop} = ${open}_o${prop}${mid}_v${close})(`);
-        this.mark(node, 'target', () => this.expr(t[1]));
-        if (indexy) {
+        const seq = plan.obj !== null || plan.key !== null;
+        if (seq) this.b.emit('(');
+        if (plan.obj !== null) {
+          this.b.emit(`${plan.obj} = `);
+          this.mark(node, 'target', () => this.withExpression(() => this.expr(t[1])));
           this.b.emit(', ');
-          this.mark(node, 'target', () => this.expr(t[2]));
         }
-        this.b.emit(', ');
-        this.mark(node, 'value', () => this.expr(node[2]));
-        this.b.emit(')');
+        if (plan.key !== null) {
+          this.b.emit(`${plan.key} = `);
+          this.mark(node, 'target', () => this.withExpression(() => this.expr(t[2])));
+          this.b.emit(', ');
+        }
+        const ref = this.stores.alias([t[0], plan.obj ?? t[1], plan.key ?? t[2]], t);
+        const target = () => this.mark(node, 'target', () => this.withTarget(() => this.expr(ref)));
+        target();
+        this.b.emit(` = ${open}`);
+        target();
+        this.b.emit(mid);
+        this.operand(node, 'value', node[2]);
+        this.b.emit(close);
+        if (seq) this.b.emit(')');
       });
       return;
     }
@@ -10745,7 +11027,7 @@ class Emitter {
       this.b.emit(` = ${open}`);
       target();
       this.b.emit(mid);
-      this.mark(node, 'value', () => this.expr(node[2]));
+      this.operand(node, 'value', node[2]);
       this.b.emit(close);
     });
   }

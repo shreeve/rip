@@ -100,9 +100,9 @@ test "for-of closure captures per iteration", '''
   ''', ["a=1", "b=2", "c=3"]
 
 # Code generation
-code "for-of loop", "for k, v of obj\n  v", "for (let k in obj) {\nlet v = obj[k];\nv;\n}"
-code "for own", "for own k of obj\n  k", "for (let k in obj) {\nif (!Object.hasOwn(obj, k)) continue;\nk;\n}"
-code "for own with value", "for own k, v of obj\n  v", "for (let k in obj) {\nif (!Object.hasOwn(obj, k)) continue;\nlet v = obj[k];\nv;\n}"
+code "for-of loop", "for k, v of obj\n  v", "const _ref = obj;\nfor (let k in _ref) {\nlet v = _ref[k];\nv;\n}"
+code "for own", "for own k of obj\n  k", "const _ref = obj;\nfor (let k in _ref) {\nif (!Object.hasOwn(_ref, k)) continue;\nk;\n}"
+code "for own with value", "for own k, v of obj\n  v", "const _ref = obj;\nfor (let k in _ref) {\nif (!Object.hasOwn(_ref, k)) continue;\nlet v = _ref[k];\nv;\n}"
 
 # ==============================================================================
 # While Loops: "while"
@@ -381,8 +381,8 @@ code 'reverse iteration generates countdown', '''
   for x in arr by -1
     console.log x
   ''', '''
-  for (let _i = arr.length - 1; _i >= 0; _i--) {
-    let x = arr[_i];
+  for (let _ref = arr, _i = _ref.length - 1; _i >= 0; _i--) {
+    let x = _ref[_i];
     console.log(x);
   }
 '''
@@ -484,7 +484,8 @@ test "an impure range bound evaluates once", '''
   [calls, out]
 ''', [1, [1, 2, 3]]
 
-code "a plain-name indexed source keeps its bytes", "for x, i in xs\n  x", '''
+code "a bound plain-name indexed source keeps its bytes", "xs = []\nfor x, i in xs\n  x", '''
+  let xs = [];
   for (let i = 0; i < xs.length; i++) {
     let x = xs[i];
     x;
@@ -546,3 +547,44 @@ test 'plain loop stays infinite until break', '''
     break if i is 4
   i
   ''', 4
+
+# ==============================================================================
+# Loop sources that the lowering rereads evaluate exactly once: getter-backed
+# range endpoints, loop-n counts, and indexed for-in sources bind a ref.
+# ==============================================================================
+
+test 'range endpoint getter reads once', '''
+  n = 0
+  o = {}
+  Object.defineProperty o, 'limit', get: ->
+    n += 1
+    3
+  out = []
+  for i in [0...o.limit]
+    out.push i
+  [out, n]
+  ''', [[0, 1, 2], 1]
+
+test 'loop-n count getter reads once', '''
+  n = 0
+  o = {}
+  Object.defineProperty o, 'count', get: ->
+    n += 1
+    2
+  hits = 0
+  loop o.count
+    hits += 1
+  [hits, n]
+  ''', [2, 1]
+
+test 'indexed for-in source getter reads once', '''
+  n = 0
+  o = {}
+  Object.defineProperty o, 'xs', get: ->
+    n += 1
+    [10, 20]
+  total = 0
+  for x, i in o.xs
+    total += x + i
+  [total, n]
+  ''', [31, 1]

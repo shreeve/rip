@@ -122,11 +122,16 @@ test 'assignment with explicit if instead of postfix unless', '''
 # Optional Chain Assignment
 # ==============================================================================
 
-code 'optional chain assign: x?.prop = val', 'gc?.scrollTop = 0', 'if (gc != null) gc.scrollTop = 0'
-code 'optional chain assign: deep', 'a?.b.c = 0', 'if (a != null) a.b.c = 0'
-code 'optional chain assign: inner', 'a.b?.c = 0', 'if (a.b != null) a.b.c = 0'
-code 'optional chain assign: bracket', 'x?[0] = 1', 'if (x != null) x[0] = 1'
-code 'optional chain assign: compound', 'x?.prop += 5', 'if (x != null) x.prop += 5'
+# An optional receiver that is not repeat-safe — a member chain (getters are
+# observable) or an unresolved name (globalThis may expose an accessor) —
+# captures once inside the guard's own parens, so the null check and the
+# write see the SAME object. A bound plain name keeps the plain guard.
+code 'optional chain assign: x?.prop = val', 'gc?.scrollTop = 0', 'if ((_ref = gc) != null) _ref.scrollTop = 0'
+code 'optional chain assign: bound receiver keeps the plain guard', 'gc = null\ngc?.scrollTop = 0', 'let gc = null;\nif (gc != null) gc.scrollTop = 0;'
+code 'optional chain assign: deep', 'a?.b.c = 0', 'if ((_ref = a) != null) _ref.b.c = 0'
+code 'optional chain assign: inner', 'a.b?.c = 0', 'if ((_ref = a.b) != null) _ref.c = 0'
+code 'optional chain assign: bracket', 'x?[0] = 1', 'if ((_ref = x) != null) _ref[0] = 1'
+code 'optional chain assign: compound', 'x?.prop += 5', 'if ((_ref = x) != null) _ref.prop += 5'
 
 test 'optional chain assign: sets when present', '''
   obj = { x: 10 }
@@ -194,9 +199,9 @@ test 'optional chain assign: inner chain skips', '''
   obj.a
   ''', null
 
-code 'optional chain assign: style pattern', 'el?.style.display = "none"', 'if (el != null) el.style.display = "none"'
-code 'optional chain assign: value pattern', '@_input?.value = ""', 'if (this._input != null) this._input.value = ""'
-code 'optional chain assign: subtract', 'x?.y -= 1', 'if (x != null) x.y -= 1'
+code 'optional chain assign: style pattern', 'el?.style.display = "none"', 'if ((_ref = el) != null) _ref.style.display = "none"'
+code 'optional chain assign: value pattern', '@_input?.value = ""', 'if ((_ref = this._input) != null) _ref.value = ""'
+code 'optional chain assign: subtract', 'x?.y -= 1', 'if ((_ref = x) != null) _ref.y -= 1'
 
 # ==============================================================================
 # Destructuring binding-pattern validation
@@ -240,3 +245,13 @@ test 'middle rest evaluates its source once', '''
   ''', [7, [8], 9, 1]
 
 fail 'middle rest takes plain names', '[a, ...[m], b] = xs', 'plain names'
+
+test 'middle rest reads a getter source once', '''
+  n = 0
+  o = {}
+  Object.defineProperty o, 'xs', get: ->
+    n += 1
+    [1, 2, 3, 4]
+  [a, ...mid, b] = o.xs
+  [a, mid, b, n]
+  ''', [1, [2, 3], 4, 1]

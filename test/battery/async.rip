@@ -643,8 +643,9 @@ test "object comprehension with await resolves values", '''
 code "object comprehension await emits async IIFE", "x = {k: fetch!(v) for k, v of obj}", '''
   let x = await (async () => {
     const result = {};
-    for (let k in obj) {
-      let v = obj[k];
+    const _ref = obj;
+    for (let k in _ref) {
+      let v = _ref[k];
       result[k] = await fetch(v);
     }
     return result;

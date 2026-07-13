@@ -460,4 +460,88 @@ test 'not base of power', '''
   ''', 1
 
 code 'prototype compiles to .prototype.', 'String::trim', 'String.prototype.trim'
-code 'method assign chain compiles', 'a.b .= trim()', 'a.b = a.b.trim();'
+code 'method assign chain compiles', 'a.b .= trim()', 'const _ref = a;\n_ref.b = _ref.b.trim();'
+code 'method assign with a bound base keeps its bytes', 'a = {b: " x "}\na.b .= trim()', 'let a = {b: " x "};\na.b = a.b.trim();'
+
+# ==============================================================================
+# Synthesized compounds (//=, %%=) preserve native compound order:
+# base, key, target read, RHS, write — each operand exactly once.
+# ==============================================================================
+
+test 'floor-div assign reads target before RHS', '''
+  log = []
+  handler = {}
+  handler.get = (o, k) -> (log.push('get'); o[k])
+  handler.set = (o, k, v) -> (log.push('set'); o[k] = v; true)
+  target = {x: 9}
+  obj = new Proxy target, handler
+  rhs = -> (log.push('rhs'); 2)
+  obj.x //= rhs()
+  [target.x, log]
+  ''', [4, ['get', 'rhs', 'set']]
+
+test 'modulo assign reads target before RHS', '''
+  log = []
+  handler = {}
+  handler.get = (o, k) -> (log.push('get'); o[k])
+  handler.set = (o, k, v) -> (log.push('set'); o[k] = v; true)
+  target = {x: 9}
+  obj = new Proxy target, handler
+  rhs = -> (log.push('rhs'); 7)
+  obj.x %%= rhs()
+  [target.x, log]
+  ''', [2, ['get', 'rhs', 'set']]
+
+test 'floor-div assign evaluates an impure base once', '''
+  n = 0
+  get = -> (n += 1; {x: 9})
+  get().x //= 2
+  n
+  ''', 1
+
+test 'floor-div assign evaluates a computed key once in order', '''
+  log = []
+  o = {}
+  o[3] = 9
+  key = -> (log.push('key'); 3)
+  rhs = -> (log.push('rhs'); 2)
+  o[key()] //= rhs()
+  [o[3], log]
+  ''', [4, ['key', 'rhs']]
+
+test 'floor-div assign value position yields the written value', '''
+  o = {x: 9}
+  r = (o.x //= 2)
+  [r, o.x]
+  ''', [4, 4]
+
+test 'floor-div assign preserves yield in the value', '''
+  f = ->
+    o = {x: 9}
+    o.x //= yield 3
+    o.x
+  g = f()
+  first = g.next().value
+  [first, g.next(3).value]
+  ''', [3, 3]
+
+test 'floor-div assign preserves await in the value', '''
+  o = {x: 9}
+  o.x //= await Promise.resolve(2)
+  o.x
+  ''', 4
+
+test 'floor-div assign composes with the dammit operator', '''
+  o = {x: 9}
+  o.x //= Promise.resolve!(2)
+  o.x
+  ''', 4
+
+test 'synth compound temps dodge user bindings', '''
+  _o = 'mine'
+  _k = 'mine too'
+  _t = 'and mine'
+  obj = {x: 9}
+  obj.x //= 2
+  [_o, _k, _t, obj.x]
+  ''', ['mine', 'mine too', 'and mine', 4]
