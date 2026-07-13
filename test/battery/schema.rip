@@ -2826,9 +2826,9 @@ test ":model.where.all issues SELECT with WHERE clause", modelHeader + '''
   User = schema :model
     name! string
   adapter.canned.__default = {columns: [{name: "id"}, {name: "name"}], data: [[1, "A"], [2, "B"]], rows: 2}
-  results = User.where(active: true).all!
+  results = User.where(name: "A").all!
   [results.length, adapter.calls[0].sql.includes("WHERE"), adapter.calls[0].params[0]]
-''', [2, true, true]
+''', [2, true, "A"]
 
 # -- hooks: beforeSave normalizes before validation is re-read; afterCreate fires --
 
