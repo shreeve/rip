@@ -1,6 +1,7 @@
 import { test, expect } from 'bun:test';
 import { BasicEmail, lifecycle } from './fixtures/basic-email.rip';
 import { toEmail, toHTML, toText } from '../email/render.rip';
+import { _renderComponent } from '../shared/render.rip';
 
 test('email SSR mounts, serializes, disposes, and restores globals', () => {
   const hadDocument = Object.hasOwn(globalThis, 'document');
@@ -32,5 +33,78 @@ test('email SSR rejects nested render ownership', () => {
   } finally {
     if (hadDocument) globalThis.document = previousDocument;
     else delete globalThis.document;
+  }
+});
+
+test('email SSR restores exact globals when teardown throws', () => {
+  const keys = ['document', 'Node', 'SVGElement'];
+  const before = new Map(keys.map((key) => [
+    key,
+    Object.getOwnPropertyDescriptor(globalThis, key),
+  ]));
+
+  class BadCleanup {
+    constructor() {
+      this._state = 'new';
+    }
+
+    mount() {
+      this._state = 'mounted';
+    }
+
+    unmount() {
+      throw new Error('cleanup boom');
+    }
+  }
+
+  expect(() => _renderComponent(BadCleanup, {}, () => 'unused'))
+    .toThrow('cleanup boom');
+  for (const key of keys) {
+    expect(Object.getOwnPropertyDescriptor(globalThis, key)).toEqual(before.get(key));
+  }
+});
+
+test('email SSR rolls back partially installed globals', () => {
+  const keys = ['document', 'Node', 'SVGElement'];
+  const before = new Map(keys.map((key) => [
+    key,
+    Object.getOwnPropertyDescriptor(globalThis, key),
+  ]));
+  const sentinel = {};
+  Object.defineProperty(globalThis, 'Node', {
+    configurable: true,
+    enumerable: false,
+    get: () => sentinel,
+    set: () => {
+      throw new Error('Node assignment blocked');
+    },
+  });
+  const expected = Object.getOwnPropertyDescriptor(globalThis, 'Node');
+
+  class Clean {
+    constructor() {
+      this._state = 'new';
+    }
+
+    mount() {
+      this._state = 'mounted';
+    }
+
+    unmount() {
+      this._state = 'unmounted';
+    }
+  }
+
+  try {
+    expect(_renderComponent(Clean, {}, () => 'done')).toBe('done');
+    expect(Object.getOwnPropertyDescriptor(globalThis, 'Node')).toEqual(expected);
+    expect(Object.getOwnPropertyDescriptor(globalThis, 'document')).toEqual(before.get('document'));
+    expect(Object.getOwnPropertyDescriptor(globalThis, 'SVGElement')).toEqual(before.get('SVGElement'));
+  } finally {
+    for (const key of keys) {
+      const descriptor = before.get(key);
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
   }
 });
