@@ -1,0 +1,18 @@
+import {
+  Email, Head, Body, Preview, Container,
+  Heading, Text, Link
+} from '@rip-lang/ui/email'
+
+export WelcomeEmail = component
+  @name: string =! 'friend'
+
+  render
+    Email
+      Head
+      Preview text: "Welcome, #{@name}"
+      Body
+        Container
+          Heading "Welcome, #{@name}!"
+          Text 'Thanks for joining.'
+          Link href: 'https://example.com'
+            'Get started'

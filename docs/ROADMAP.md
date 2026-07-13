@@ -13,18 +13,7 @@ and package behavior. Every row must continue to fail. When
 implementation makes a row pass, that row moves into `test/battery/`
 in the same change.
 
-Two groups remain:
-
-### Email package — 75 rows
-
-`pending-email.rip` specifies `packages/ui/email`:
-
-- DOM shim and serializer;
-- client-compatibility behavior;
-- email components and rendering.
-
-The rows move when the package lands; they do not justify partial
-compiler syntax in isolation.
+One group remains:
 
 ### App/router gates — 8 rows
 
@@ -46,7 +35,7 @@ open work.
 
 ### Package substrate
 
-Before packages accumulate, define one package contract:
+New packages follow one package contract:
 
 - package layout, exports, and named-only public APIs;
 - direct package test commands through the Rip loader;
@@ -59,12 +48,6 @@ Before packages accumulate, define one package contract:
 The substrate is a prerequisite for publishing and cross-package imports,
 but it must not block direct-path package implementation and tests.
 
-The UI Tailwind boundary may depend on exactly pinned `tailwindcss` and
-`css-tree` packages. `packages/ui/tailwind` is their sole owner; email
-and browser components consume its internal API rather than importing
-those dependencies directly. The compiler root remains dependency- and
-workspace-free.
-
 ### Application foundation
 
 - **App:** stash, resources, timing helpers, component registry,
@@ -73,13 +56,11 @@ workspace-free.
   coercer registration.
 - **Server:** routing, middleware, sessions, OpenAPI, static/app serving,
   worker management, TLS/proxy support, and development watch transport.
-- **UI:** shared rendering/styles, browser widgets, email components,
-  and Tailwind integration.
+- **UI:** browser widgets and browser-side Tailwind integration.
 - **Database:** database client, embedding/adapter surfaces, and CLI.
 
 The app framework precedes render gates because it owns the stash and
-router consumer. Validate precedes server. Shared UI rendering precedes
-email components.
+router consumer. Validate precedes server.
 
 ### Independent libraries and tools
 
