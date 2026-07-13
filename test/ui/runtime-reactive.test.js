@@ -343,6 +343,54 @@ describe('computed: laziness, caching, invalidation', () => {
     ]);
   });
 
+  test('a state written before its first dependency read rejects; same-value writes are no-ops', () => {
+    const outcome = both((rt) => {
+      const changed = rt.__state(1);
+      const impure = rt.__computed(() => {
+        changed.value = 2;
+        return changed.value;
+      });
+      const unchanged = rt.__state(1);
+      const same = rt.__computed(() => {
+        unchanged.value = 1;
+        return unchanged.value;
+      });
+      return [caught(() => impure.value), changed.read(), same.value];
+    });
+    expect(outcome).toEqual([
+      ['throw', 'Error',
+        'reactive runtime: computed dependency changed during evaluation — computed functions must derive without writing or touching a dependency'],
+      2,
+      1,
+    ]);
+  });
+
+  test('nested computed evaluation carries writes to the outer purity frame and restores after rejection', () => {
+    const outcome = both((rt) => {
+      const source = rt.__state(0);
+      const inner = rt.__computed(() => source.value + 10);
+      const outer = rt.__computed(() => {
+        source.value = 1;
+        return inner.value;
+      });
+      const first = caught(() => outer.value);
+      const clean = rt.__computed(() => source.value + 1);
+      return [first[0], source.read(), clean.value];
+    });
+    expect(outcome).toEqual(['throw', 1, 2]);
+  });
+
+  test('a computed may write state it never reads', () => {
+    expect(both((rt) => {
+      const side = rt.__state(0);
+      const value = rt.__computed(() => {
+        side.value = 2;
+        return 7;
+      });
+      return [value.value, side.read()];
+    })).toEqual([7, 2]);
+  });
+
   test('a throwing self-invalidating computed publishes no stale value to an effect subscriber', () => {
     const outcome = both((rt) => {
       const source = rt.__state(1);

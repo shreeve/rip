@@ -2091,6 +2091,16 @@ const INDEXABLE = new Set([...CALLABLE, 'BOOL', 'NULL', 'UNDEFINED', '}', 'PICK_
 // Unicode BMP letters and astral surrogate pairs are identifier text.
 const IDENT_START = /[$A-Za-z_\x7f-\uffff]/;
 const IDENT_PART = /[$\w\x7f-\uffff]/;
+
+// The scanner's identifier vocabulary, exposed for compiler passes
+// that must distinguish identifier atoms from literal spellings.
+export function isIdentifierName(value) {
+  if (typeof value !== 'string' || value.length === 0 || !IDENT_START.test(value[0])) return false;
+  for (let i = 1; i < value.length; i++) {
+    if (!IDENT_PART.test(value[i])) return false;
+  }
+  return true;
+}
 const DIGIT = /[0-9]/;
 
 // The numeric-literal matcher: binary/octal/hex with optional

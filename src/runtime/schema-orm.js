@@ -167,12 +167,12 @@ const __SCHEMA_MODEL_DIRECTIVES = {
 // originally-loaded row even if `inst[pk]` is reassigned in memory.
 function __schemaSnapshot(norm, inst) {
   const snap = Object.create(null);
-  snap[norm.primaryKey] = inst[norm.primaryKey];
-  for (const [n] of norm.fields) snap[n] = inst[n];
+  snap[norm.primaryKey] = __schemaSnapshotValue(inst[norm.primaryKey]);
+  for (const [n] of norm.fields) snap[n] = __schemaSnapshotValue(inst[n]);
   for (const [, rel] of norm.relations) {
     if (rel.kind !== 'belongsTo') continue;
     const fkCamel = __schemaCamel(rel.foreignKey);
-    snap[fkCamel] = inst[fkCamel];
+    snap[fkCamel] = __schemaSnapshotValue(inst[fkCamel]);
   }
   return snap;
 }
@@ -200,6 +200,69 @@ function __schemaPersistedIdentity(def, inst, operation) {
 // the DB does not distinguish them.
 function __schemaSameValue(a, b) {
   return a === b || (a !== a && b !== b);
+}
+
+// Persistence snapshots own their values: an object mutated while SQL
+// awaits cannot advance the committed snapshot. Containers retain their
+// value semantics; custom instances flatten only enumerable data, so
+// model bookkeeping and prototypes never enter persistence state.
+function __schemaSnapshotValue(value, seen = new Map()) {
+  if (value == null || typeof value !== 'object') return value;
+  if (seen.has(value)) return seen.get(value);
+  if (value instanceof Date) return new Date(value.getTime());
+  if (Array.isArray(value)) {
+    const out = [];
+    seen.set(value, out);
+    for (const item of value) out.push(__schemaSnapshotValue(item, seen));
+    return out;
+  }
+  if (value instanceof Map) {
+    const out = new Map();
+    seen.set(value, out);
+    for (const [key, item] of value) {
+      out.set(__schemaSnapshotValue(key, seen), __schemaSnapshotValue(item, seen));
+    }
+    return out;
+  }
+  if (value instanceof Set) {
+    const out = new Set();
+    seen.set(value, out);
+    for (const item of value) out.add(__schemaSnapshotValue(item, seen));
+    return out;
+  }
+  const out = Object.create(Object.getPrototypeOf(value) === null ? null : Object.prototype);
+  seen.set(value, out);
+  for (const key of Object.keys(value)) out[key] = __schemaSnapshotValue(value[key], seen);
+  return out;
+}
+
+function __schemaSnapshotEqual(a, b, seen = new Map()) {
+  if (__schemaSameValue(a, b)) return true;
+  if (a == null || b == null || typeof a !== 'object' || typeof b !== 'object') return false;
+  let paired = seen.get(a);
+  if (paired) return paired === b;
+  seen.set(a, b);
+  if (a instanceof Date || b instanceof Date) {
+    return a instanceof Date && b instanceof Date && a.getTime() === b.getTime();
+  }
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return Array.isArray(a) && Array.isArray(b) && a.length === b.length &&
+      a.every((item, i) => __schemaSnapshotEqual(item, b[i], seen));
+  }
+  if (a instanceof Map || b instanceof Map) {
+    if (!(a instanceof Map) || !(b instanceof Map) || a.size !== b.size) return false;
+    const aa = [...a], bb = [...b];
+    return aa.every(([ak, av], i) =>
+      __schemaSnapshotEqual(ak, bb[i][0], seen) && __schemaSnapshotEqual(av, bb[i][1], seen));
+  }
+  if (a instanceof Set || b instanceof Set) {
+    if (!(a instanceof Set) || !(b instanceof Set) || a.size !== b.size) return false;
+    const aa = [...a], bb = [...b];
+    return aa.every((item, i) => __schemaSnapshotEqual(item, bb[i], seen));
+  }
+  const ak = Object.keys(a), bk = Object.keys(b);
+  return ak.length === bk.length && ak.every((key, i) =>
+    key === bk[i] && __schemaSnapshotEqual(a[key], b[key], seen));
 }
 
 // Relation memo — {identity, value} per instance and accessor,
@@ -1049,25 +1112,36 @@ async function __schemaPreload(def, instances, specs) {
     if (!target) throw new Error('schema: unknown relation target "' + rel.target + '" from ' + (def.name || 'anon'));
     const targetNorm = __schemaValidateRelationTarget(def, rel, target);
     const children = [];
+    // Capture the cache request before any await. Reload/absorption bumps
+    // the generation, and mutable FKs can change identity independently;
+    // either change makes this preload result ineligible for memoization.
+    const requests = new Map();
+    for (const inst of instances) {
+      requests.set(inst, {
+        generation: inst._relGeneration,
+        identity: __schemaRelationIdentity(def, inst, rel),
+      });
+    }
+    const current = (inst, request) =>
+      inst._relGeneration === request.generation &&
+      __schemaSameValue(__schemaRelationIdentity(def, inst, rel), request.identity);
     if (rel.kind === 'belongsTo') {
-      const fkCamel = __schemaCamel(rel.foreignKey);
-      const ids = [...new Set(instances.map((i) => i[fkCamel]).filter((v) => v != null))];
+      const ids = [...new Set(
+        [...requests.values()].map((request) => request.identity).filter((v) => v != null),
+      )];
       const rows = ids.length ? await target.findMany(ids) : [];
       const pk = targetNorm.primaryKey;
       const byId = new Map(rows.map((r) => [r[pk], r]));
       for (const inst of instances) {
-        const identity = inst[fkCamel];
-        const v = identity != null ? (byId.get(identity) ?? null) : null;
-        __schemaRelMemoSet(inst, spec.name, identity, v);
+        const request = requests.get(inst);
+        if (!current(inst, request)) continue;
+        const v = request.identity != null ? (byId.get(request.identity) ?? null) : null;
+        __schemaRelMemoSet(inst, spec.name, request.identity, v);
         if (v && !children.includes(v)) children.push(v);
       }
     } else {
       const fkCamel = __schemaCamel(rel.foreignKey);
-      const identities = new Map();
-      for (const inst of instances) {
-        identities.set(inst, __schemaPersistedIdentity(def, inst, 'preload ' + spec.name));
-      }
-      const ids = [...new Set(identities.values())];
+      const ids = [...new Set([...requests.values()].map((request) => request.identity))];
       let rows = [];
       if (ids.length) {
         rows = await new __SchemaQuery(target)
@@ -1082,10 +1156,11 @@ async function __schemaPreload(def, instances, specs) {
         children.push(r);
       }
       for (const inst of instances) {
-        const identity = identities.get(inst);
-        const g = groups.get(identity) || [];
+        const request = requests.get(inst);
+        if (!current(inst, request)) continue;
+        const g = groups.get(request.identity) || [];
         __schemaRelMemoSet(
-          inst, spec.name, identity,
+          inst, spec.name, request.identity,
           rel.kind === 'hasOne' ? (g[0] ?? null) : g);
       }
     }
@@ -1263,18 +1338,21 @@ async function __schemaSave(def, inst) {
     const snap = inst._snapshot;
     const dirty = inst._dirty;
     const changes = inst.savedChanges;
+    const dirtyVersions = new Map();
     let nextSnap = null;
     for (const [n, f] of norm.fields) {
       const cur = inst[n];
       const isDirty = dirty && dirty.has(n);
-      const changed = !snap || !Object.prototype.hasOwnProperty.call(snap, n) || !__schemaSameValue(snap[n], cur);
+      const changed = !snap || !Object.prototype.hasOwnProperty.call(snap, n) || !__schemaSnapshotEqual(snap[n], cur);
       if (!isDirty && !changed) continue;
       if (!nextSnap) nextSnap = Object.assign(Object.create(null), snap || {});
+      const written = __schemaSnapshotValue(cur);
       sets.push(__schemaQuoteIdent(__schemaSnake(n), norm.callerWritableColumns, 'update column') + ' = ?');
-      values.push(__schemaSerialize(cur, f));
-      nextSnap[n] = cur;
+      values.push(__schemaSerialize(written, f));
+      nextSnap[n] = written;
       const old = snap && Object.prototype.hasOwnProperty.call(snap, n) ? snap[n] : null;
-      changes.set(n, [old, cur]);
+      changes.set(n, [old, written]);
+      if (isDirty) dirtyVersions.set(n, inst._dirtyVersions.get(n));
     }
     // belongsTo FK columns: same machinery; the SQL column name is
     // already snake_case and FKs are scalar IDs (no serialize).
@@ -1283,14 +1361,16 @@ async function __schemaSave(def, inst) {
       const fkCamel = __schemaCamel(rel.foreignKey);
       const cur = inst[fkCamel];
       const isDirty = dirty && dirty.has(fkCamel);
-      const changed = !snap || !Object.prototype.hasOwnProperty.call(snap, fkCamel) || !__schemaSameValue(snap[fkCamel], cur);
+      const changed = !snap || !Object.prototype.hasOwnProperty.call(snap, fkCamel) || !__schemaSnapshotEqual(snap[fkCamel], cur);
       if (!isDirty && !changed) continue;
       if (!nextSnap) nextSnap = Object.assign(Object.create(null), snap || {});
+      const written = __schemaSnapshotValue(cur);
       sets.push(__schemaQuoteIdent(rel.foreignKey, norm.callerWritableColumns, 'update column') + ' = ?');
-      values.push(cur);
-      nextSnap[fkCamel] = cur;
+      values.push(written);
+      nextSnap[fkCamel] = written;
       const old = snap && Object.prototype.hasOwnProperty.call(snap, fkCamel) ? snap[fkCamel] : null;
-      changes.set(fkCamel, [old, cur]);
+      changes.set(fkCamel, [old, written]);
+      if (isDirty) dirtyVersions.set(fkCamel, inst._dirtyVersions.get(fkCamel));
     }
     // @timestamps: bump updated_at iff this UPDATE will actually emit
     // SQL — never on a no-op save. The column is not in _snapshot (it
@@ -1313,9 +1393,11 @@ async function __schemaSave(def, inst) {
         __schemaQuoteIdent(pk, norm.columns, 'primary key') + ' = ?';
       await __schemaRunSQL(def, sql, values);
       inst._snapshot = nextSnap;
+      for (const [name, version] of dirtyVersions) {
+        if (inst._dirtyVersions.get(name) === version) inst._dirty.delete(name);
+      }
     }
   }
-  inst._dirty.clear();
 
   if (isNew) await __schemaRunHook(def, inst, 'afterCreate');
   else       await __schemaRunHook(def, inst, 'afterUpdate');
@@ -1361,6 +1443,10 @@ function __schemaValidateAdapterRow(columns, row, operation) {
 // INSERT path, upsert, and hydrate's column loop below.
 function __schemaAbsorbRow(inst, columns, row, operation = 'row absorption') {
   __schemaValidateAdapterRow(columns, row, operation);
+  if (typeof inst._relGeneration === 'number') {
+    inst._relGeneration++;
+    if (inst._relMemo) inst._relMemo.clear();
+  }
   for (let i = 0; i < columns.length; i++) {
     const snake = columns[i].name;
     const key = __schemaCamel(snake);
@@ -1422,6 +1508,9 @@ async function __schemaRestore(def, inst) {
 async function __schemaReload(def, inst) {
   const norm = def._normalize();
   const identity = __schemaPersistedIdentity(def, inst, 'reload()');
+  // Invalidate every relation request that began against the old
+  // instance image before the reload crosses its await boundary.
+  inst._relGeneration++;
   const sql = 'SELECT * FROM ' + __schemaQuoteIdent(norm.tableName, null, 'table') +
     ' WHERE ' + __schemaQuoteIdent(norm.primaryKey, norm.columns, 'primary key') + ' = ?';
   const res = await __schemaRunSQL(def, sql, [identity]);
@@ -1961,9 +2050,12 @@ __SchemaDef.prototype._getClass = function () {
       // Internal state is non-enumerable so Object.keys(inst) lists
       // only declared fields that received a value.
       Object.defineProperty(this, '_dirty', { value: new Set(), enumerable: false, writable: false, configurable: true });
+      Object.defineProperty(this, '_dirtyVersions', { value: new Map(), enumerable: false, writable: false, configurable: true });
+      Object.defineProperty(this, '_dirtyVersion', { value: 0, enumerable: false, writable: true, configurable: true });
       Object.defineProperty(this, '_persisted', { value: persisted === true, enumerable: false, writable: true, configurable: true });
       Object.defineProperty(this, '_snapshot', { value: null, enumerable: false, writable: true, configurable: true });
       Object.defineProperty(this, '_saving', { value: false, enumerable: false, writable: true, configurable: true });
+      Object.defineProperty(this, '_relGeneration', { value: 0, enumerable: false, writable: true, configurable: true });
       // Mirrors the most recent save()'s field-level diff: INSERT
       // yields [null, newValue] per written field, UPDATE
       // [oldValue, newValue] per changed field; empty after a no-op.
@@ -1978,13 +2070,17 @@ __SchemaDef.prototype._getClass = function () {
       enumerable: false, configurable: true,
       value: async function (opts) {
         const identity = __schemaRelationIdentity(def, this, rel);
+        const generation = this._relGeneration;
         const memo = this._relMemo && this._relMemo.get(acc);
         if (!(opts && opts.reload === true) && memo &&
             __schemaSameValue(memo.identity, identity)) {
           return memo.value;
         }
         const v = await __schemaResolveRelation(def, rel, identity);
-        __schemaRelMemoSet(this, acc, identity, v);
+        if (this._relGeneration === generation &&
+            __schemaSameValue(__schemaRelationIdentity(def, this, rel), identity)) {
+          __schemaRelMemoSet(this, acc, identity, v);
+        }
         return v;
       },
     });
@@ -2041,6 +2137,7 @@ __SchemaDef.prototype._getClass = function () {
           "schema: markDirty('" + name + "') — '" + n + "' is not a declared field or belongs_to FK on " + (def.name || 'anon'));
       }
       this._dirty.add(n);
+      this._dirtyVersions.set(n, ++this._dirtyVersion);
       return this;
     },
   });

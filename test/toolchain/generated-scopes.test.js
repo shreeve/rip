@@ -18,8 +18,8 @@ import { join } from 'node:path';
 
 const src = readFileSync(join(import.meta.dir, '../../src/emitter.js'), 'utf8');
 
-// sig: a byte-exact slice of the emission line. count: how many times
-// it appears. policy: how source control flow is kept legal.
+// sig: a byte-exact slice of the emission statement. count: how many
+// times it appears. policy: how source control flow is kept legal.
 const INVENTORY = [
   { sig: "? 'await (async () => {\\n' : '(() => {\\n'", count: 2,
     site: 'comprehension statement body; array/object comprehension',
@@ -78,7 +78,168 @@ const INVENTORY = [
   { sig: '((${p}) =>', count: 2,
     site: 'pick with a single-evaluation source (plain and optional forms, one ternary)',
     policy: 'pick defaults reject both yield and await positioned when the source needs the arrow' },
+  { sig: '((s, e) => Array.from({length:', count: 2,
+    site: 'range value helpers (inclusive and exclusive)',
+    policy: 'emitter-owned callbacks receive already-evaluated source operands; no source body or control transfer is embedded' },
+  { sig: "static MODULO = '((n, d) =>", count: 1,
+    site: 'true-modulo helper',
+    policy: 'emitter-owned helper receives source operands as evaluated call arguments; no source body or control transfer is embedded' },
+  { sig: 'static MEMBER_IN = "((k, c) =>', count: 1,
+    site: 'single-read membership helper',
+    policy: 'emitter-owned helper receives source operands as evaluated call arguments; no source body or control transfer is embedded' },
+  { sig: 'builder.emit(` = (() => {\\n${unit.body}', count: 1,
+    site: 'inline runtime unit wrapper',
+    policy: 'wraps repository runtime text, not a source expression; the runtime unit has its own authored function contexts' },
 ];
+
+// Collect JavaScript string/template literals without depending on line
+// numbers or a JavaScript parser package. Template expressions are scanned
+// recursively, while their dynamic text normalizes to `${…}` in the owning
+// template's signature. Comments and regular-expression bodies are skipped.
+// The result is a source-level structural gate: every literal that spells a
+// function scope is classified below, including diagnostics and source-function
+// emission sites that are deliberately outside the generated-scope inventory.
+function scopeLiterals(source, { outputOnly = true } = {}) {
+  const found = [];
+  let i = 0;
+
+  const quoted = (quote) => {
+    const start = i++;
+    while (i < source.length) {
+      if (source[i] === '\\') { i += 2; continue; }
+      if (source[i++] === quote) break;
+    }
+    found.push({ literal: source.slice(start, i), start });
+  };
+
+  const regex = () => {
+    i++;
+    let inClass = false;
+    while (i < source.length) {
+      const ch = source[i++];
+      if (ch === '\\') { i++; continue; }
+      if (ch === '[') inClass = true;
+      else if (ch === ']') inClass = false;
+      else if (ch === '/' && !inClass) break;
+    }
+    while (/[A-Za-z]/.test(source[i] ?? '')) i++;
+  };
+
+  const code = (stopAtBrace = false) => {
+    let braces = stopAtBrace ? 1 : 0;
+    while (i < source.length) {
+      const ch = source[i];
+      if (ch === "'" || ch === '"') { quoted(ch); continue; }
+      if (ch === '`') { template(); continue; }
+      if (ch === '/' && source[i + 1] === '/') {
+        i += 2;
+        while (i < source.length && source[i] !== '\n') i++;
+        continue;
+      }
+      if (ch === '/' && source[i + 1] === '*') {
+        i += 2;
+        while (i < source.length && !(source[i] === '*' && source[i + 1] === '/')) i++;
+        i += 2;
+        continue;
+      }
+      if (ch === '/') {
+        const prev = source.slice(0, i).match(/\S(?=\s*$)/)?.[0] ?? '';
+        if (prev === '' || /[({\[=,:;!?&|]/.test(prev)) { regex(); continue; }
+      }
+      if (stopAtBrace && ch === '{') braces++;
+      if (stopAtBrace && ch === '}' && --braces === 0) { i++; return; }
+      i++;
+    }
+  };
+
+  const template = () => {
+    const start = i;
+    const parts = ['`'];
+    i++;
+    while (i < source.length) {
+      const ch = source[i];
+      if (ch === '\\') {
+        parts.push(source.slice(i, i + 2));
+        i += 2;
+      } else if (ch === '`') {
+        parts.push('`');
+        i++;
+        found.push({ literal: parts.join(''), start });
+        return;
+      } else if (ch === '$' && source[i + 1] === '{') {
+        parts.push('${…}');
+        i += 2;
+        code(true);
+      } else {
+        parts.push(ch);
+        i++;
+      }
+    }
+    found.push({ literal: parts.join(''), start });
+  };
+
+  code();
+  // Include partial arrow/function tokens as well as complete spellings.
+  // A scope assembled across several emit() calls must still expose either
+  // its `=>` fragment or its `function` keyword to this classification.
+  const scopeSpelling = /=>|\bfunction\*?\b/;
+  const outputLiteral = ({ start }) => {
+    const lineStart = source.lastIndexOf('\n', start - 1) + 1;
+    const lineEnd = source.indexOf('\n', start);
+    const line = source.slice(lineStart, lineEnd === -1 ? source.length : lineEnd);
+    return /\.emit\s*\(/.test(line) ||
+      /\bstatic\s+(?:MODULO|MEMBER_IN)\s*=/.test(line) ||
+      /[?:]\s*['"]\(\(s,\s*e\)\s*=>/.test(line);
+  };
+  const scoped = found
+    .filter(({ literal }) => scopeSpelling.test(literal.slice(1, -1)))
+    .map((item) => ({ ...item, output: outputLiteral(item) }));
+  return scoped
+    .filter((item) => !outputOnly || item.output)
+    .reduce((counts, { literal }) => counts.set(literal, (counts.get(literal) ?? 0) + 1), new Map());
+}
+
+const generated = (literal, count, policy) => ({ literal, count, kind: 'generated', policy });
+const excluded = (literal, count, reason) => ({ literal, count, kind: 'excluded', reason });
+
+const LITERAL_CLASSIFICATION = [
+  generated("' = __computed(() => '", 1, 'component computed body rejects await and yield'),
+  generated("'__batch(() => '", 1, 'emitter-owned render batch window'),
+  generated("'__effect(() => { '", 1, 'render control is rejected before updater emission'),
+  generated("'(() => '", 2, 'effect bodies reject yield and carry await on the async spelling'),
+  generated("'(() => { '", 4, 'value lowerings reject captured control; class fields reject await and yield'),
+  generated("'(() => { throw '", 1, 'value throw rejects captured control'),
+  generated("'(() => {\\n'", 2, 'comprehensions reject captured control'),
+  generated("'((n, d) => { n = +n; d = +d; return (n % d + d) % d; })'", 1, 'helper receives evaluated operands as parameters'),
+  generated("'((s, e) => Array.from({length: Math.abs(e - s) + 1}, (_, i) => s + (i * (s <= e ? 1 : -1))))'", 1, 'range helper receives evaluated endpoints as parameters'),
+  generated("'((s, e) => Array.from({length: Math.max(0, Math.abs(e - s))}, (_, i) => s + (i * (s <= e ? 1 : -1))))'", 1, 'range helper receives evaluated endpoints as parameters'),
+  generated("'() => '", 1, 'computed body rejects await and yield'),
+  generated("'(async () => '", 2, 'effect bodies carry source await on the async spelling'),
+  generated("'await (async () => { '", 3, 'value lowerings carry source await and reject captured control'),
+  generated("'await (async () => { throw '", 1, 'value throw carries source await and rejects captured control'),
+  generated("'await (async () => {\\n'", 2, 'comprehensions carry source await and reject captured control'),
+  excluded("'function '", 2, 'source def emission, including the TS signature face'),
+  excluded("'function'", 1, 'source thin-function emission'),
+  excluded("'function* '", 1, 'source generator-def emission'),
+  excluded("'function*'", 1, 'source generator-function emission'),
+  excluded("'=>'", 1, 'source fat-arrow emission'),
+  generated(`"((k, c) => Array.isArray(c) || typeof c === 'string' ? c.includes(k) : k in c)"`, 1, 'helper receives evaluated operands as parameters'),
+  generated("` = (() => {\\n${…}\\nreturn { ${…} };\\n})();\\n`", 1, 'repository runtime text is wrapped, not a source expression'),
+  generated("`((${…}) => ({`", 1, 'pick defaults reject await and yield before capture'),
+  generated("`((${…}) => ${…} == null ? undefined : ({`", 1, 'optional pick defaults reject await and yield before capture'),
+  generated("`(${…}, ${…}) => `", 1, 'render key expression is synchronously validated before emission'),
+  generated("`(this._refCleanups ??= []).push(() => __detachRef(this.${…}, ${…}))`", 1, 'emitter-owned ref cleanup'),
+  excluded("`) satisfies () => ${…}`", 1, 'TypeScript function type, erased from generated JavaScript'),
+  generated("`${…}  if (${…}._t) { __transition(${…}._first, ${…}._t, 'leave', () => ${…}.d(true)); }\\n`", 1, 'emitter-owned transition callback'),
+  generated("`${…}__batch(() => {\\n`", 1, 'emitter-owned render batch window'),
+  generated("`${…}__effect(() => {\\n`", 2, 'render control is rejected before reconciler emission'),
+  generated("`${…}__ownerFrame().add(() => { for (const ${…} of ${…}.blocks) { try { ${…}.d(true); } catch {} } ${…}.blocks = []; ${…}.keys = []; ${…}.items = []; });\\n`", 1, 'emitter-owned loop cleanup'),
+  generated("`${…}__ownerFrame().add(() => { if (${…}) { ${…}.d(true); ${…} = null; } });\\n`", 1, 'emitter-owned conditional cleanup'),
+  generated("`${…}.addEventListener('${…}', (${…}) => __batch(() => `", 1, 'render handler control is validated before listener emission'),
+  generated("`${…}.addEventListener('${…}', (${…}) => { `", 1, 'binding target control is validated before listener emission'),
+  generated("`${…}if (detaching) __batch(() => {\\n`", 1, 'emitter-owned detach batch window'),
+  generated("`if (${…}) ${…}.addEventListener('${…}', (${…}) => __batch(() => (`", 1, 'render handler control is validated before listener emission'),
+].sort((a, b) => a.literal.localeCompare(b.literal));
 
 describe('generated-scope inventory', () => {
   for (const row of INVENTORY) {
@@ -87,14 +248,45 @@ describe('generated-scope inventory', () => {
     });
   }
 
-  test('the inventory covers the whole population', () => {
-    // The population total. A generated-scope site added, removed, or
-    // reshaped moves its sig count above and this sum with it — both
-    // failures say: re-audit the site's control policy first, then
-    // update the row. (A brand-new site spelled unlike every existing
-    // sig is caught by review and the lowering doctrine, which
-    // requires registering here — string-counting compiler source
-    // cannot distinguish emitted arrows from the emitter's own.)
-    expect(INVENTORY.reduce((n, r) => n + r.count, 0)).toBe(27);
+  test('every scope-like emitter literal has an auditable classification', () => {
+    const discovered = [...scopeLiterals(src)]
+      .map(([literal, count]) => ({ literal, count }))
+      .sort((a, b) => a.literal.localeCompare(b.literal));
+    expect(discovered).toEqual(LITERAL_CLASSIFICATION.map(({ literal, count }) => ({ literal, count })));
+    for (const row of LITERAL_CLASSIFICATION) {
+      if (row.kind === 'generated') expect(row.policy.length).toBeGreaterThan(0);
+      else expect(row.reason).toMatch(/source|TypeScript/);
+    }
+  });
+
+  test('indirect scope-like literals cannot bypass the output-site collector', () => {
+    const all = scopeLiterals(src, { outputOnly: false });
+    const output = scopeLiterals(src);
+    const nonOutput = [...all].flatMap(([literal, count]) => {
+      const left = count - (output.get(literal) ?? 0);
+      return left > 0 ? [{ literal, count: left }] : [];
+    });
+    const categories = { diagnostic: 0, semantic: 0, type: 0 };
+    const unknown = [];
+    for (const row of nonOutput) {
+      const text = row.literal.slice(1, -1);
+      if (row.literal === "'function'" || row.literal === "'=>'" ||
+          row.literal === "'(function() {})'" || row.literal === "'(function('" ||
+          /^\`\(\$\{…\}function\$\{…\}\(\`$/.test(row.literal)) {
+        categories.semantic += row.count;
+      }
+      else if (/emitter:|schema: failed|requires a function|function target|make the handler|into a member/.test(text)) {
+        categories.diagnostic += row.count;
+      } else if (/factory function/.test(text)) {
+        categories.diagnostic += row.count;
+      } else if (/=>/.test(text) &&
+          /(?:\bany\b|:\s*(?:number|string|never|void|T\b)|=>\s*void|<T>|Promise<|AbortSignal|readonly value)/.test(text)) {
+        categories.type += row.count;
+      } else {
+        unknown.push(row);
+      }
+    }
+    expect(unknown).toEqual([]);
+    expect(categories).toEqual({ diagnostic: 36, semantic: 20, type: 25 });
   });
 });

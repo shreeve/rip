@@ -63,6 +63,7 @@ if (globalThis[__RIP_REACTIVE_SENTINEL]) {
 globalThis[__RIP_REACTIVE_SENTINEL] = true;
 
 let __currentEffect = null;        // the effect/computed currently evaluating
+const __computingStack = [];       // active computeds, outermost to innermost
 const __pendingEffects = new Set(); // effects queued to run
 let __batching = false;            // inside __batch()?
 let __currentOwner = null;         // the owner frame effects register on
@@ -122,6 +123,9 @@ function __state(initialValue) {
         'computed functions must derive without writing or touching a dependency');
     }
   };
+  const recordComputedMutation = () => {
+    for (const computed of __computingStack) computed.writtenSignals.add(subscribers);
+  };
 
   // Notify subscribers of a change: computeds mark dirty (invalidation
   // propagates without recomputation), effects queue for the flush.
@@ -146,6 +150,12 @@ function __state(initialValue) {
   const state = {
     get value() {
       if (dead) return value;
+      if (__currentEffect?.writtenSignals &&
+          __computingStack.some((computed) => computed.writtenSignals.has(subscribers))) {
+        throw new Error(
+          'reactive runtime: computed dependency changed during evaluation — ' +
+          'computed functions must derive without writing or touching a dependency');
+      }
       if (__currentEffect) {
         subscribers.add(__currentEffect);
         __currentEffect.dependencies.add(subscribers);
@@ -157,6 +167,7 @@ function __state(initialValue) {
       if (dead || locked || newValue === value) return;
       rejectComputedDependencyMutation();
       if (notifying) return;
+      recordComputedMutation();
       value = newValue;
       notify();
     },
@@ -166,6 +177,7 @@ function __state(initialValue) {
       if (dead) return;
       rejectComputedDependencyMutation();
       if (notifying) return;
+      recordComputedMutation();
       notify();
     },
     lock() { locked = true; return state; },
@@ -187,6 +199,7 @@ function __computed(fn) {
 
   const computed = {
     dependencies: new Set(),
+    writtenSignals: new Set(),
 
     markDirty() {
       if (dead || locked) return;
@@ -221,13 +234,17 @@ function __computed(fn) {
         for (const dep of computed.dependencies) dep.delete(computed);
         computed.dependencies.clear();
         const prev = __currentEffect;
+        computed.writtenSignals.clear();
         __currentEffect = computed;
+        __computingStack.push(computed);
         computing = true;
         try {
           value = fn();
           dirty = false;
         } finally {
           computing = false;
+          __computingStack.pop();
+          computed.writtenSignals.clear();
           __currentEffect = prev;
         }
       }
