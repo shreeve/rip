@@ -272,6 +272,42 @@ describe('schema-orm: paired reference — dirty tracking and save', () => {
     });
   });
 
+  test('mutations marked during an awaited UPDATE remain dirty and persist on the next save', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^SELECT/, rows(['id', 'meta'], [1, { items: [1] }]));
+      let release = null;
+      let updates = 0;
+      adapter.on(/^UPDATE/, () => {
+        updates++;
+        if (updates === 1) {
+          return new Promise((resolve) => {
+            release = () => resolve({ columns: [], data: [], rowCount: 1 });
+          });
+        }
+        return { columns: [], data: [], rowCount: 1 };
+      });
+      const Doc = k.__schema(model('FlightDoc', field('meta', 'json')));
+      const doc = await Doc.first();
+      doc.meta.items.push(2);
+      doc.markDirty('meta');
+      const first = doc.save();
+      while (release === null) await Promise.resolve();
+      doc.meta.items.push(3);
+      doc.markDirty('meta');
+      release();
+      await first;
+      const dirtyAfterFirst = doc._dirty.has('meta');
+      await doc.save();
+      return { dirtyAfterFirst, dirtyAfterSecond: doc._dirty.has('meta') };
+    });
+    const updates = r.calls.filter((c) => c.sql.startsWith('UPDATE'));
+    expect(updates.map((c) => c.params[0])).toEqual([
+      '{"items":[1,2]}',
+      '{"items":[1,2,3]}',
+    ]);
+    expect(r.value).toEqual({ dirtyAfterFirst: true, dirtyAfterSecond: false });
+  });
+
   test('the UPDATE WHERE targets the snapshot PK, not a reassigned in-memory id', async () => {
     const r = await paired(async (k, adapter) => {
       adapter.on(/^SELECT/, rows(['id', 'name'], [1, 'A']));
@@ -512,6 +548,69 @@ describe('schema-orm: paired reference — relations and eager loading', () => {
     });
     expect(r.value.memoFree).toBe(true);
     expect(r.value.reloadQueries).toBe(true);
+  });
+
+  test('a relation request resolved after reload returns to its caller but cannot repopulate the memo', async () => {
+    const r = await paired(async (k, adapter) => {
+      let orderReads = 0;
+      adapter.on(/FROM "race_orders"/, () =>
+        rows(['id', 'race_user_id'], [10, orderReads++ === 0 ? 1 : 2]));
+      let release = null;
+      adapter.on(/FROM "race_users"/, (_sql, params) => {
+        if (params[0] === 1) {
+          return new Promise((resolve) => {
+            release = () => resolve(rows(['id', 'name'], [1, 'old']));
+          });
+        }
+        return rows(['id', 'name'], [2, 'fresh']);
+      });
+      k.__schema(model('RaceUser', field('name')));
+      const Order = k.__schema(model('RaceOrder',
+        dir('belongs_to', { target: 'RaceUser', optional: false })));
+      const order = await Order.first();
+      const pending = order.raceUser();
+      while (release === null) await Promise.resolve();
+      await order.reload();
+      release();
+      const old = await pending;
+      const fresh = await order.raceUser();
+      return { names: [old.name, fresh.name], identity: order.raceUserId };
+    });
+    expect(r.value).toEqual({ names: ['old', 'fresh'], identity: 2 });
+    expect(r.calls.filter((c) => c.sql.includes('FROM "race_users"')).map((c) => c.params[0]))
+      .toEqual([1, 2]);
+  });
+
+  test('an eager preload resolved after reload cannot repopulate the relation memo', async () => {
+    const r = await paired(async (k, adapter) => {
+      let exposed = null;
+      let orderReads = 0;
+      adapter.on(/FROM "race_eager_orders"/, () =>
+        rows(['id', 'race_eager_user_id'], [10, orderReads++ === 0 ? 1 : 2]));
+      let release = null;
+      let userQueries = 0;
+      adapter.on(/FROM "race_eager_users"/, (_sql, params) => {
+        userQueries++;
+        if (params[0] === 1) {
+          return new Promise((resolve) => {
+            release = () => resolve(rows(['id', 'name'], [1, 'stale']));
+          });
+        }
+        return rows(['id', 'name'], [2, 'fresh']);
+      });
+      k.__schema(model('RaceEagerUser', field('name')));
+      const Order = k.__schema(model('RaceEagerOrder',
+        dir('belongs_to', { target: 'RaceEagerUser', optional: false }),
+        { tag: 'derived', name: 'exposed', fn() { exposed = this; return true; } }));
+      const pending = Order.includes('raceEagerUser').all();
+      while (release === null) await Promise.resolve();
+      await exposed.reload();
+      release();
+      await pending;
+      const fresh = await exposed.raceEagerUser();
+      return { name: fresh.name, userQueries };
+    });
+    expect(r.value).toEqual({ name: 'fresh', userQueries: 2 });
   });
 
   test('belongsTo memos are keyed by the exact current FK, including cached null and string/number IDs', async () => {

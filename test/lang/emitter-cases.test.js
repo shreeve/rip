@@ -2,6 +2,7 @@
 // nullish-chain line continuation, loop-binding rejections,
 // statement-only arrow bodies, and loop-temporary naming.
 import { describe, test, expect } from 'bun:test';
+import { spawnSync } from 'node:child_process';
 import parser from '../../src/parser.js';
 import { makeParserLexer } from '../../src/lexer.js';
 import { emit } from '../../src/emitter.js';
@@ -159,5 +160,75 @@ describe('object-comprehension intrinsic delivery', () => {
 
   test('a program without an object comprehension carries no intrinsic runtime', () => {
     expect(compileDelivered('out = {a: 1}', 'inline')).toBe('let out = {a: 1};');
+  });
+
+  test('generated helper aliases dodge module, parameter, and loop bindings in every delivery mode', () => {
+    const moduleSource = [
+      '__toPropertyKey = 10',
+      '__defineOwnDataProperty = 20',
+      'Reflect = 30',
+      'Object = 40',
+      'globalThis = 50',
+      'out = {k: v for k, v of {a: 9}}',
+    ].join('\n');
+    const localSource = [
+      'build = (__toPropertyKey, Reflect, Object, globalThis) ->',
+      '  out = null',
+      '  for __defineOwnDataProperty in [1]',
+      '    out = {k: v for k, v of {a: 9}}',
+      '  out',
+      'result = build 1, 2, 3, 4',
+    ].join('\n');
+
+    for (const source of [moduleSource, localSource]) {
+      for (const mode of ['none', 'import', 'inline']) {
+        const code = compileDelivered(source, mode);
+        expect(code).toMatch(/__toPropertyKey[_\d]+\(/);
+        expect(code).toMatch(/__defineOwnDataProperty[_\d]+\(/);
+        expect(code).not.toMatch(/const _k = __toPropertyKey\(/);
+        expect(code).not.toMatch(/\n\s*__defineOwnDataProperty\(/);
+        if (mode === 'import') {
+          expect(code).toMatch(/__toPropertyKey as __toPropertyKey[_\d]+/);
+          expect(code).toMatch(/__defineOwnDataProperty as __defineOwnDataProperty[_\d]+/);
+        }
+        if (mode === 'inline') {
+          const value = new Function(`${code}\nreturn typeof out === "undefined" ? result.a : out.a;`)();
+          expect(value).toBe(9);
+        }
+      }
+    }
+  });
+
+  test('schema callable sub-emitters inherit minted intrinsic aliases', () => {
+    const source = [
+      'S = schema :shape',
+      '  items! json',
+      '  build: (__toPropertyKey) ->',
+      '    __defineOwnDataProperty = 20',
+      '    {k: v for k, v of @items}',
+      's = S.parse({items: {a: 9}})',
+      'result = s.build(1)',
+    ].join('\n');
+    for (const mode of ['none', 'import', 'inline']) {
+      const code = compileDelivered(source, mode);
+      expect(code).toMatch(/const _k = __toPropertyKey[_\d]+\(k\)/);
+      expect(code).toMatch(/__defineOwnDataProperty[_\d]+\(result/);
+      expect(code).not.toContain('const _k = __toPropertyKey(k)');
+      if (mode === 'import') {
+        expect(code).toMatch(/__toPropertyKey as __toPropertyKey[_\d]+/);
+        expect(code).toMatch(/__defineOwnDataProperty as __defineOwnDataProperty[_\d]+/);
+      }
+      if (mode === 'inline') {
+        expect(code).toMatch(/__toPropertyKey:\s*__toPropertyKey[_\d]+/);
+        expect(code).toMatch(/__defineOwnDataProperty:\s*__defineOwnDataProperty[_\d]+/);
+      }
+      if (mode === 'inline') {
+        const run = spawnSync('bun', ['-e', `${code}\nconsole.log(result.a);`], {
+          encoding: 'utf8',
+        });
+        expect(run.status).toBe(0);
+        expect(run.stdout.trim()).toBe('9');
+      }
+    }
   });
 });

@@ -873,8 +873,8 @@ describe('schema: stores and mappings', () => {
 });
 
 // ════════════════════════════════════════════════════════════════════
-// Wave D — the canonical validation pipeline: one value-returning
-// pipeline behind every entry point; nested schemas run their FULL
+// The canonical validation pipeline: one value-returning pipeline
+// behind every entry point; nested schemas run their FULL
 // contract and their normalized values flow into the parent; array
 // length bounds are enforced; async status is transitive.
 // ════════════════════════════════════════════════════════════════════
