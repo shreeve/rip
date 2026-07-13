@@ -150,31 +150,68 @@ function __schemaRegisterCoercer(name, fn, opts) {
   return fn;
 }
 
+// A field type that resolves to a schema with its OWN pipeline —
+// nested shapes, inputs, models, and unions. These validate through
+// the child's full contract and return normalized values; enums and
+// primitives validate inline.
+function __schemaNestedDef(typeName) {
+  if (__schemaTypes[typeName]) return null;
+  const d = __SchemaRegistry.get(typeName);
+  return d && (d.kind === 'shape' || d.kind === 'input' || d.kind === 'model' || d.kind === 'union') ? d : null;
+}
+
+// Nested field validation runs the child's FULL sync pipeline —
+// structure, transforms, coercions, defaults, dates, fields,
+// refinements — and returns the child's NORMALIZED value so the
+// parent writes it back (a parent must never retain raw input its
+// child's own schema would transform). Returns { value } on success,
+// { errors } on failure; issues arrive unprefixed and the caller
+// prefixes once at the field boundary.
 function __schemaValidateValue(v, typeName) {
   const prim = __schemaTypes[typeName];
   if (prim) {
-    return prim(v) ? null : [{ field: '', error: 'type', message: 'must be ' + typeName }];
+    return prim(v) ? { value: v } : { errors: [{ field: '', error: 'type', message: 'must be ' + typeName }] };
   }
   const subDef = __SchemaRegistry.get(typeName);
-  if (!subDef) return null;
+  if (!subDef) return { value: v };
   if (subDef.kind === 'enum') {
     const errs = subDef._validateEnum(v, true);
-    return errs.length ? [{ field: '', error: 'enum', message: errs[0].message }] : null;
+    return errs.length
+      ? { errors: [{ field: '', error: 'enum', message: errs[0].message }] }
+      : { value: subDef._materializeEnum(v) };
   }
   if (subDef.kind === 'mixin') {
-    return [{ field: '', error: 'type', message: ':mixin ' + typeName + ' is not usable as a field type' }];
+    return { errors: [{ field: '', error: 'type', message: ':mixin ' + typeName + ' is not usable as a field type' }] };
   }
   if (subDef.kind === 'union') {
     const r = subDef._unionResolve(v);
-    if (r.issue) return [r.issue];
-    const memberErrs = r.def._validateFields(v, true);
-    return memberErrs.length ? memberErrs : null;
+    if (r.issue) return { errors: [r.issue] };
+    const res = r.def._runSync(v, { materialize: false });
+    return res.ok ? { value: res.value } : { errors: res.errors };
   }
   if (v === null || typeof v !== 'object' || Array.isArray(v)) {
-    return [{ field: '', error: 'type', message: 'must be a ' + typeName + ' object' }];
+    return { errors: [{ field: '', error: 'type', message: 'must be a ' + typeName + ' object' }] };
   }
-  const subErrs = subDef._validateFields(v, true);
-  return subErrs.length ? subErrs : null;
+  const res = subDef._runSync(v, { materialize: false });
+  return res.ok ? { value: res.value } : { errors: res.errors };
+}
+
+// The async twin: nested children await their own async pipelines, so
+// an @ensure! at any depth is awaited, never silently accepted.
+async function __schemaValidateValueAsync(v, typeName) {
+  const subDef = __schemaNestedDef(typeName);
+  if (subDef === null) return __schemaValidateValue(v, typeName);
+  if (subDef.kind === 'union') {
+    const r = subDef._unionResolve(v);
+    if (r.issue) return { errors: [r.issue] };
+    const res = await r.def._runAsync(v, { materialize: false });
+    return res.ok ? { value: res.value } : { errors: res.errors };
+  }
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) {
+    return { errors: [{ field: '', error: 'type', message: 'must be a ' + typeName + ' object' }] };
+  }
+  const res = await subDef._runAsync(v, { materialize: false });
+  return res.ok ? { value: res.value } : { errors: res.errors };
 }
 
 function __schemaJoinField(head, child) {
@@ -235,11 +272,18 @@ function __schemaSignature(def) {
   return parts.join('|');
 }
 
+// Registry generation: bumped on every registration or scope swap.
+// Transitive async-status memos key on it, so a schema that becomes
+// reachable-async through a LATER registration is re-planned on next
+// use rather than trusting a stale answer.
+let __schemaRegistryGen = 0;
+
 const __SchemaRegistry = {
   _entries: new Map(),
   replace: false,
   register(def) {
     if (!def.name) return;
+    __schemaRegistryGen++;
     const existing = this._entries.get(def.name);
     if (existing && existing.def !== def && !this.replace) {
       if (__schemaSignature(existing.def) !== __schemaSignature(def)) {
@@ -265,13 +309,14 @@ const __SchemaRegistry = {
     return entry && entry.kind === kind ? entry.def : null;
   },
   has(name) { return this._entries.has(name); },
-  reset() { this._entries.clear(); },
+  reset() { this._entries.clear(); __schemaRegistryGen++; },
   // Run `fn` against a fresh, empty registry; restore afterward
   // (success, throw, or async rejection) — the test-scoping seam.
   scope(fn) {
     const saved = this._entries;
     this._entries = new Map();
-    const restore = () => { this._entries = saved; };
+    __schemaRegistryGen++;
+    const restore = () => { this._entries = saved; __schemaRegistryGen++; };
     try {
       const r = fn();
       if (r && typeof r.then === 'function') return r.finally(restore);
@@ -594,18 +639,50 @@ class __SchemaDef {
     return results.map((r) => r.issue);
   }
 
-  // A schema with ≥1 @ensure! is async-validating: sync entry points
-  // refuse loudly rather than sometimes-returning a promise.
+  // Transitive async status: can this schema REACH a schema with an
+  // async refinement — through nested fields, array element types, or
+  // union constituents? Reachability over a possibly-cyclic, mutable
+  // graph: a revisited node contributes "not proven async" (the root's
+  // DFS still visits every reachable node, so the root's answer is
+  // exact), and only the queried root memoizes, keyed on the registry
+  // generation — a later registration invalidates every memo, so a
+  // schema that becomes reachable-async re-plans on next use.
+  _transitiveAsync() {
+    if (this._taGen === __schemaRegistryGen) return this._taCache;
+    const seen = new Set();
+    const walk = (def) => {
+      if (seen.has(def)) return false;
+      seen.add(def);
+      const norm = def._normalize();
+      if (norm.hasAsyncEnsures) return true;
+      if (def.kind === 'union') {
+        for (const name of norm.unionMembers) {
+          const m = __SchemaRegistry.get(name);
+          if (m && walk(m)) return true;
+        }
+        return false;
+      }
+      for (const f of norm.fields.values()) {
+        const child = __schemaNestedDef(f.typeName);
+        if (child && walk(child)) return true;
+      }
+      return false;
+    };
+    this._taCache = walk(this);
+    this._taGen = __schemaRegistryGen;
+    return this._taCache;
+  }
+
+  // A schema that can reach ≥1 @ensure! is async-validating: sync
+  // entry points refuse loudly rather than sometimes-returning a
+  // promise or silently accepting an unawaited refinement.
   _assertSyncValidatable(api) {
-    const async = this.kind === 'union'
-      ? this._unionPlan().hasAsyncEnsures
-      : this._normalize().hasAsyncEnsures;
-    if (async) {
-      throw new Error(
-        "schema '" + (this.name || 'anon') + "' has async refinements (@ensure!" +
-        (this.kind === 'union' ? ' in a constituent' : '') + '); ' +
-        '.' + api + '() is sync. Use parseAsync/safeAsync/okAsync instead.');
-    }
+    if (!this._transitiveAsync()) return;
+    const own = this.kind !== 'union' && this._normalize().hasAsyncEnsures;
+    throw new Error(
+      "schema '" + (this.name || 'anon') + "' has async refinements (@ensure!" +
+      (own ? '' : ' in a nested or constituent schema') + '); ' +
+      '.' + api + '() is sync. Use parseAsync/safeAsync/okAsync instead.');
   }
 
   _getClass() {
@@ -672,7 +749,15 @@ class __SchemaDef {
     }
   }
 
-  _validateFields(data, collect, skip) {
+  // Field validation, and — because nested values validate through
+  // the child schema's FULL pipeline — nested normalization: on
+  // success the child's normalized value writes back into `data`
+  // (always a replacement, never an in-place write, since `data` is a
+  // working copy whose array/object values are still shared with
+  // caller input). `opts.deferNested` skips the value validation of
+  // nested/union-typed fields (structure and length bounds still run)
+  // so the async pipeline can await those children instead.
+  _validateFields(data, collect, skip, opts) {
     const norm = this._normalize();
     const errors = collect ? [] : null;
     for (const [n, f] of norm.fields) {
@@ -691,13 +776,29 @@ class __SchemaDef {
           errors.push({ field: n, error: 'type', message: n + ' must be an array' });
           continue;
         }
+        // Length bounds apply after array structure succeeds — the same
+        // min/max the JSON Schema face advertises as minItems/maxItems.
+        const ac = f.constraints;
+        if (ac) {
+          if (ac.min != null && v.length < ac.min) {
+            if (!collect) return false;
+            errors.push({ field: n, error: 'min', message: n + ' must have at least ' + ac.min + ' items' });
+          }
+          if (ac.max != null && v.length > ac.max) {
+            if (!collect) return false;
+            errors.push({ field: n, error: 'max', message: n + ' must have at most ' + ac.max + ' items' });
+          }
+        }
+        if (opts?.deferNested && __schemaNestedDef(f.typeName)) continue;
         let bad = false;
+        let changed = false;
+        const out = new Array(v.length);
         for (let i = 0; i < v.length; i++) {
-          const issues = __schemaValidateValue(v[i], f.typeName);
-          if (issues) {
+          const res = __schemaValidateValue(v[i], f.typeName);
+          if (res.errors) {
             if (!collect) return false;
             const head = n + '[' + i + ']';
-            for (const e of issues) {
+            for (const e of res.errors) {
               const joined = __schemaJoinField(head, e.field);
               errors.push({
                 field: joined,
@@ -706,9 +807,13 @@ class __SchemaDef {
               });
             }
             bad = true;
+          } else {
+            out[i] = res.value;
+            if (res.value !== v[i]) changed = true;
           }
         }
         if (bad) continue;
+        if (changed) data[n] = out;
       } else if (f.typeName === 'literal-union') {
         if (!f.literals.includes(v)) {
           if (!collect) return false;
@@ -716,10 +821,11 @@ class __SchemaDef {
           continue;
         }
       } else {
-        const issues = __schemaValidateValue(v, f.typeName);
-        if (issues) {
+        if (opts?.deferNested && __schemaNestedDef(f.typeName)) continue;
+        const res = __schemaValidateValue(v, f.typeName);
+        if (res.errors) {
           if (!collect) return false;
-          for (const e of issues) {
+          for (const e of res.errors) {
             const joined = __schemaJoinField(n, e.field);
             errors.push({
               field: joined,
@@ -729,6 +835,7 @@ class __SchemaDef {
           }
           continue;
         }
+        if (res.value !== v) data[n] = res.value;
       }
       const c = f.constraints;
       if (c) {
@@ -838,29 +945,38 @@ class __SchemaDef {
     return data;
   }
 
-  // The canonical parse pipeline, per field in declaration order:
-  //   1. transform(raw) | raw[name]   2. coerce   3. default
-  //   4. required check   5. type validation   6. constraints
-  //   7. assign   8. eager-derived pass
-  parse(data) {
-    if (this.kind === 'mixin') {
-      throw new Error(":mixin schema '" + (this.name || 'anon') + "' is not instantiable");
-    }
+  // ── the canonical validation pipeline ───────────────────────────────
+  //
+  // ONE value-returning pipeline (sync and its async twin) behind
+  // every entry point, per field in declaration order:
+  //   1. structure check          2. copy into a working value
+  //   3. transforms               4. coercions
+  //   5. defaults                 6. date normalization
+  //   7. field validation         8. nested normalization/write-back
+  //   9. refinements             10. materialization + eager-derived
+  // Returns { ok: true, value } | { ok: false, errors } — plus
+  // `from` (the union member that produced the errors, so throwing
+  // wrappers attribute correctly) and `thrown` (an eager-derived
+  // throw, which parse propagates raw and safe reports as an issue).
+  // `materialize: false` stops after stage 9: answering a boolean or
+  // normalizing a nested child never constructs instances or runs
+  // eager-derived behavior. Stages 7–8 run fused inside
+  // _validateFields: a nested value validates through the child's
+  // full pipeline exactly once, and that same run's normalized value
+  // writes back into the parent working value.
+  _runSync(data, opts) {
     if (this.kind === 'union') {
-      const plan = this._unionPlan();
-      if (plan.hasAsyncEnsures) this._assertSyncValidatable('parse');
       const r = this._unionResolve(data);
-      if (r.issue) throw new SchemaError([r.issue], this.name, this.kind);
-      return r.def.parse(data);
+      if (r.issue) return { ok: false, errors: [r.issue] };
+      const res = r.def._runSync(data, opts);
+      return res.ok ? res : { ...res, from: res.from || r.def };
     }
     if (this.kind === 'enum') {
       const errs = this._validateEnum(data, true);
-      if (errs.length) throw new SchemaError(errs, this.name, this.kind);
-      return this._materializeEnum(data);
+      return errs.length ? { ok: false, errors: errs } : { ok: true, value: this._materializeEnum(data) };
     }
-    this._assertSyncValidatable('parse');
     const objIssue = __schemaObjectIssue(data);
-    if (objIssue) throw new SchemaError([objIssue], this.name, this.kind);
+    if (objIssue) return { ok: false, errors: [objIssue] };
     const raw = data;
     const working = { ...raw };
     const failed = new Set();
@@ -869,13 +985,105 @@ class __SchemaDef {
     this._applyDefaults(working);
     this._coerceDates(working);
     const errs = transformErrors.concat(coerceErrors, this._validateFields(working, true, failed));
-    if (errs.length) throw new SchemaError(errs, this.name, this.kind);
+    if (errs.length) return { ok: false, errors: errs };
     const ensureErrs = this._applyEnsures(working);
-    if (ensureErrs.length) throw new SchemaError(ensureErrs, this.name, this.kind);
-    const klass = this._getClass();
-    const inst = new klass(working);
-    this._applyEagerDerived(inst);
-    return inst;
+    if (ensureErrs.length) return { ok: false, errors: ensureErrs };
+    if (!opts?.materialize) return { ok: true, value: working };
+    const inst = new (this._getClass())(working);
+    try { this._applyEagerDerived(inst); }
+    catch (e) { return { ok: false, errors: null, thrown: e }; }
+    return { ok: true, value: inst };
+  }
+
+  // Async twin: identical stages, but nested/union-typed fields are
+  // DEFERRED out of stage 7 and awaited here through the children's
+  // async pipelines — an @ensure! at any depth is awaited, never
+  // silently accepted — and refinements await per _applyEnsuresAsync.
+  async _runAsync(data, opts) {
+    if (this.kind === 'union') {
+      const r = this._unionResolve(data);
+      if (r.issue) return { ok: false, errors: [r.issue] };
+      const res = await r.def._runAsync(data, opts);
+      return res.ok ? res : { ...res, from: res.from || r.def };
+    }
+    if (this.kind === 'enum') return this._runSync(data, opts);
+    const objIssue = __schemaObjectIssue(data);
+    if (objIssue) return { ok: false, errors: [objIssue] };
+    const raw = data;
+    const working = { ...raw };
+    const failed = new Set();
+    const transformErrors = this._applyTransforms(raw, working);
+    const coerceErrors = this._applyCoercions(working, failed);
+    this._applyDefaults(working);
+    this._coerceDates(working);
+    const fieldErrs = this._validateFields(working, true, failed, { deferNested: true });
+    const nestedErrs = await this._normalizeNestedAsync(working, failed);
+    const errs = transformErrors.concat(coerceErrors, fieldErrs, nestedErrs);
+    if (errs.length) return { ok: false, errors: errs };
+    const ensureErrs = await this._applyEnsuresAsync(working);
+    if (ensureErrs.length) return { ok: false, errors: ensureErrs };
+    if (!opts?.materialize) return { ok: true, value: working };
+    const inst = new (this._getClass())(working);
+    try { this._applyEagerDerived(inst); }
+    catch (e) { return { ok: false, errors: null, thrown: e }; }
+    return { ok: true, value: inst };
+  }
+
+  // Stage 8 for the async pipeline: every nested/union-typed field
+  // (and every element of an array of them) runs the child's async
+  // pipeline; normalized values write back, issues prefix once at the
+  // field boundary, declaration order preserved.
+  async _normalizeNestedAsync(working, failed) {
+    const norm = this._normalize();
+    const errors = [];
+    for (const [n, f] of norm.fields) {
+      if (failed && failed.has(n)) continue;
+      if (!__schemaNestedDef(f.typeName)) continue;
+      const v = working[n];
+      if (v === undefined || v === null) continue;
+      if (f.array) {
+        if (!Array.isArray(v)) continue;
+        const out = new Array(v.length);
+        let bad = false;
+        for (let i = 0; i < v.length; i++) {
+          const res = await __schemaValidateValueAsync(v[i], f.typeName);
+          if (res.errors) {
+            bad = true;
+            const head = n + '[' + i + ']';
+            for (const e of res.errors) {
+              const joined = __schemaJoinField(head, e.field);
+              errors.push({ field: joined, error: e.error, message: __schemaRewriteMessage(joined, e.field, e.message) });
+            }
+          } else {
+            out[i] = res.value;
+          }
+        }
+        if (!bad) working[n] = out;
+      } else {
+        const res = await __schemaValidateValueAsync(v, f.typeName);
+        if (res.errors) {
+          for (const e of res.errors) {
+            const joined = __schemaJoinField(n, e.field);
+            errors.push({ field: joined, error: e.error, message: __schemaRewriteMessage(joined, e.field, e.message) });
+          }
+        } else {
+          working[n] = res.value;
+        }
+      }
+    }
+    return errors;
+  }
+
+  parse(data) {
+    if (this.kind === 'mixin') {
+      throw new Error(":mixin schema '" + (this.name || 'anon') + "' is not instantiable");
+    }
+    this._assertSyncValidatable('parse');
+    const r = this._runSync(data, { materialize: true });
+    if (r.ok) return r.value;
+    if (r.thrown) throw r.thrown;
+    const src = r.from || this;
+    throw new SchemaError(r.errors, src.name, src.kind);
   }
 
   // Array combinator: `Schema.array` is a list-of-this schema with the
@@ -939,123 +1147,49 @@ class __SchemaDef {
     if (this.kind === 'mixin') {
       return { ok: false, value: null, errors: [{ field: '', error: 'mixin', message: 'not instantiable' }] };
     }
-    if (this.kind === 'union') {
-      const plan = this._unionPlan();
-      if (plan.hasAsyncEnsures) this._assertSyncValidatable('safe');
-      const r = this._unionResolve(data);
-      if (r.issue) return { ok: false, value: null, errors: [r.issue] };
-      return r.def.safe(data);
-    }
-    if (this.kind === 'enum') {
-      const errs = this._validateEnum(data, true);
-      if (errs.length) return { ok: false, value: null, errors: errs };
-      return { ok: true, value: this._materializeEnum(data), errors: null };
-    }
     this._assertSyncValidatable('safe');
-    const objIssue = __schemaObjectIssue(data);
-    if (objIssue) return { ok: false, value: null, errors: [objIssue] };
-    const raw = data;
-    const working = { ...raw };
-    const failed = new Set();
-    const transformErrors = this._applyTransforms(raw, working);
-    const coerceErrors = this._applyCoercions(working, failed);
-    this._applyDefaults(working);
-    this._coerceDates(working);
-    const errs = transformErrors.concat(coerceErrors, this._validateFields(working, true, failed));
-    if (errs.length) return { ok: false, value: null, errors: errs };
-    const ensureErrs = this._applyEnsures(working);
-    if (ensureErrs.length) return { ok: false, value: null, errors: ensureErrs };
-    const klass = this._getClass();
-    const inst = new klass(working);
-    try { this._applyEagerDerived(inst); }
-    catch (e) {
-      return { ok: false, value: null, errors: [{ field: '', error: 'derived', message: e?.message || String(e) }] };
+    const r = this._runSync(data, { materialize: true });
+    if (r.ok) return { ok: true, value: r.value, errors: null };
+    if (r.thrown) {
+      return { ok: false, value: null, errors: [{ field: '', error: 'derived', message: r.thrown?.message || String(r.thrown) }] };
     }
-    return { ok: true, value: inst, errors: null };
+    return { ok: false, value: null, errors: r.errors };
   }
 
   ok(data) {
     if (this.kind === 'mixin') return false;
-    if (this.kind === 'union') {
-      const plan = this._unionPlan();
-      if (plan.hasAsyncEnsures) this._assertSyncValidatable('ok');
-      const r = this._unionResolve(data);
-      return r.issue ? false : r.def.ok(data);
-    }
-    if (this.kind === 'enum') return this._validateEnum(data, false);
     this._assertSyncValidatable('ok');
-    if (__schemaObjectIssue(data)) return false;
-    const raw = data;
-    const working = { ...raw };
-    const failed = new Set();
-    if (this._applyTransforms(raw, working).length) return false;
-    if (this._applyCoercions(working, failed).length) return false;
-    this._applyDefaults(working);
-    this._coerceDates(working);
-    if (!this._validateFields(working, false)) return false;
-    return this._applyEnsures(working).length === 0;
+    return this._runSync(data, { materialize: false }).ok;
   }
 
   // Async entry points — work on EVERY schema (sync-only ones resolve
-  // immediately); REQUIRED when @ensure! refinements exist.
-  async _runPipelineAsync(data) {
-    const objIssue = __schemaObjectIssue(data);
-    if (objIssue) return { errors: [objIssue] };
-    const raw = data;
-    const working = { ...raw };
-    const failed = new Set();
-    const transformErrors = this._applyTransforms(raw, working);
-    const coerceErrors = this._applyCoercions(working, failed);
-    this._applyDefaults(working);
-    this._coerceDates(working);
-    const errs = transformErrors.concat(coerceErrors, this._validateFields(working, true, failed));
-    if (errs.length) return { errors: errs };
-    const ensureErrs = await this._applyEnsuresAsync(working);
-    if (ensureErrs.length) return { errors: ensureErrs };
-    return { working };
-  }
-
+  // immediately); REQUIRED when @ensure! refinements are reachable.
   async parseAsync(data) {
     if (this.kind === 'mixin') {
       throw new Error(":mixin schema '" + (this.name || 'anon') + "' is not instantiable");
     }
-    if (this.kind === 'union') {
-      const r = this._unionResolve(data);
-      if (r.issue) throw new SchemaError([r.issue], this.name, this.kind);
-      return r.def.parseAsync(data);
-    }
-    if (this.kind === 'enum') return this.parse(data);
-    const r = await this._runPipelineAsync(data);
-    if (r.errors) throw new SchemaError(r.errors, this.name, this.kind);
-    const klass = this._getClass();
-    const inst = new klass(r.working);
-    this._applyEagerDerived(inst);
-    return inst;
+    const r = await this._runAsync(data, { materialize: true });
+    if (r.ok) return r.value;
+    if (r.thrown) throw r.thrown;
+    const src = r.from || this;
+    throw new SchemaError(r.errors, src.name, src.kind);
   }
 
   async safeAsync(data) {
     if (this.kind === 'mixin') {
       return { ok: false, value: null, errors: [{ field: '', error: 'mixin', message: 'not instantiable' }] };
     }
-    if (this.kind === 'union') {
-      const r = this._unionResolve(data);
-      if (r.issue) return { ok: false, value: null, errors: [r.issue] };
-      return r.def.safeAsync(data);
+    const r = await this._runAsync(data, { materialize: true });
+    if (r.ok) return { ok: true, value: r.value, errors: null };
+    if (r.thrown) {
+      return { ok: false, value: null, errors: [{ field: '', error: 'derived', message: r.thrown?.message || String(r.thrown) }] };
     }
-    if (this.kind === 'enum') return this.safe(data);
-    const r = await this._runPipelineAsync(data);
-    if (r.errors) return { ok: false, value: null, errors: r.errors };
-    const klass = this._getClass();
-    const inst = new klass(r.working);
-    try { this._applyEagerDerived(inst); }
-    catch (e) {
-      return { ok: false, value: null, errors: [{ field: '', error: 'derived', message: e?.message || String(e) }] };
-    }
-    return { ok: true, value: inst, errors: null };
+    return { ok: false, value: null, errors: r.errors };
   }
 
   async okAsync(data) {
-    return (await this.safeAsync(data)).ok;
+    if (this.kind === 'mixin') return false;
+    return (await this._runAsync(data, { materialize: false })).ok;
   }
 
   // ── projection algebra ──────────────────────────────────────────────
