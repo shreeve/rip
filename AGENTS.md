@@ -70,8 +70,10 @@ the Rip compiler: language, toolchain, runtimes, and editor support.
 
 - **Minted names dodge user identifiers.** Every temporary the emitter
   introduces is drawn from the used-name registry for the scope it
-  lands in — never a fixed string. A user program may legally use any
-  identifier the emitter is fond of.
+  lands in — never a fixed string. Runtime identifiers spelled by a
+  lowering use module aliases minted against source bindings; direct
+  source references retain the public runtime spelling. A user program
+  may legally use any identifier the emitter is fond of.
 - **Operands evaluate exactly once.** A lowering that must read a
   value twice (compound assignment, membership, optional assignment,
   ranges, loop sources) binds a non-repeat-safe operand to a single

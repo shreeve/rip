@@ -2003,6 +2003,18 @@ class Emitter {
     return name;
   }
 
+  // Every runtime identifier the compiler itself emits is registered
+  // in RUNTIME_TABLE.generatedNames before emission begins. Source
+  // bindings may keep the public spelling for their own references;
+  // generated calls always use the collision-free module alias.
+  runtimeName(name) {
+    const alias = this.runtimeAliases.get(name);
+    if (alias === undefined) {
+      throw new Error(`emitter invariant: generated runtime name '${name}' is not registered`);
+    }
+    return alias;
+  }
+
   // Each hoisted name is a second generated manifestation of its first
   // assignment's `target` role, so declaration
   // positions map with zero heuristics. Chain temps carry '$self' —
@@ -3825,7 +3837,7 @@ class Emitter {
         // evaluates, without resolving capturable source bindings.
         const kt = this.loopTempName('_k');
         const vt = this.loopTempName('_v');
-        this.b.emit(`${inner}const ${kt} = ${this.runtimeAliases.get('__toPropertyKey') ?? '__toPropertyKey'}(`);
+        this.b.emit(`${inner}const ${kt} = ${this.runtimeName('__toPropertyKey')}(`);
         // A string key is an identifier read (it routes through expr,
         // so a reactive key unwraps — `result[count.value]`;
         // loop variables are frame-bound and stay bare); a node
@@ -3851,7 +3863,7 @@ class Emitter {
         emitValue();
         if (wrap) this.b.emit(')');
         this.b.emit(';\n');
-        this.b.emit(`${inner}${this.runtimeAliases.get('__defineOwnDataProperty') ?? '__defineOwnDataProperty'}(${acc}, ${kt}, ${vt});\n`);
+        this.b.emit(`${inner}${this.runtimeName('__defineOwnDataProperty')}(${acc}, ${kt}, ${vt});\n`);
       }
       if (guards.length > 0) this.b.emit(`${pad}    }\n`);
       this.b.emit(`${pad}  }\n`);
@@ -5458,7 +5470,7 @@ class Emitter {
       // maps to the author's `: T`.
       const enforce = this.ts ? this.annotationText(node) : null;
       if (head === 'state') {
-        this.b.emit('__state(');
+        this.b.emit(`${this.runtimeName('__state')}(`);
         // The initializer is an operand position (value context:
         // compounds group — `__state((1 + 2))`).
         this.mark(node, 'value', () => this.withExpression(() => {
@@ -5470,7 +5482,7 @@ class Emitter {
         if (enforce !== null) this.b.tsOnly(() => this.mark(node, 'annotation', () => this.b.emit(` satisfies ${enforce}`)));
         this.b.emit(')');
       } else {
-        this.b.emit('__computed(');
+        this.b.emit(`${this.runtimeName('__computed')}(`);
         if (enforce !== null) this.b.tsOnly(() => this.b.emit('('));
         this.b.emit('() => ');
         this.mark(node, 'value', () => this.withExpression(() => this.computedBody(node, value, ind)));
@@ -5630,8 +5642,9 @@ class Emitter {
       throw this.positionedError(node, "emitter: an effect ('~>') body cannot yield — the runtime calls the effect function (make the generator a named function the effect calls)");
     }
     const emitName = () => {
-      if (markOp) this.mark(node, 'operator', () => this.b.emit('__effect'));
-      else this.b.emit('__effect');
+      const name = this.runtimeName('__effect');
+      if (markOp) this.mark(node, 'operator', () => this.b.emit(name));
+      else this.b.emit(name);
     };
     // Arrow-valued bodies pass through AS the effect function; the
     // arrow's own emission carries async when its body awaits. `->`
@@ -6106,7 +6119,7 @@ class Emitter {
         const tp = this._componentTypeParams;
         this.b.tsOnly(() => this.b.emit(tp));
       }
-      this.b.emit(' extends __Component {\n');
+      this.b.emit(` extends ${this.runtimeName('__Component')} {\n`);
       if (tsInfo !== null) this.tsComponentMemberDeclares(tsInfo, pad);
       if (declaredProps.length > 0) {
         this.b.emit(`${pad}static __props = [${declaredProps.map((n) => `'${n}'`).join(', ')}];\n`);
@@ -6186,13 +6199,13 @@ class Emitter {
         const stmt = seen.get(name);
         initLine(stmt, () => {
           memberName(stmt, name, 'name');
-          this.b.emit(` = getContext('${name}')`);
+          this.b.emit(` = ${this.runtimeName('getContext')}('${name}')`);
         });
       };
       const emitState = (m) => {
         initLine(m.node, () => {
           memberName(m.node, m.name, m.value === undefined ? 'property' : 'target');
-          this.b.emit(' = __state(');
+          this.b.emit(` = ${this.runtimeName('__state')}(`);
           if (m.isPublic && (m.required || m.value === undefined)) {
             this.b.emit(`props.__bind_${m.name}__ ?? props.${m.name}`);
           } else if (m.isPublic) {
@@ -6207,7 +6220,7 @@ class Emitter {
       const emitComputed = (m) => {
         initLine(m.node, () => {
           memberName(m.node, m.name);
-          this.b.emit(' = __computed(() => ');
+          this.b.emit(` = ${this.runtimeName('__computed')}(() => `);
           this.mark(m.node, 'value', () => this.withExpression(() => this.computedBody(m.node, m.value, ind + 2)));
           this.b.emit(')');
         });
@@ -6233,7 +6246,7 @@ class Emitter {
       ].sort((a, b) => a.at - b.at);
       for (const vm of valueMembers) vm.run();
       for (const name of offeredVars) {
-        initLine(seen.get(name), () => this.b.emit(`setContext('${name}', this.${name})`));
+        initLine(seen.get(name), () => this.b.emit(`${this.runtimeName('setContext')}('${name}', this.${name})`));
       }
       // Component-body effects register on the instance's owner frame
       // (the runtime pushes it around _init — the runtime seam). The
@@ -6248,7 +6261,7 @@ class Emitter {
         const isAsync = Emitter.containsAwait(bodyNode);
         this.b.emit(ipad);
         this.mark(eff, '$self', () => {
-          this.mark(eff, 'operator', () => this.b.emit('__effect'));
+          this.mark(eff, 'operator', () => this.b.emit(this.runtimeName('__effect')));
           this.b.emit(isAsync ? '(async () => ' : '(() => ');
           if (isBlock(bodyNode) && bodyNode.length > 2) {
             this.mark(eff, 'value', () => this.withExpression(() => {
@@ -6523,7 +6536,7 @@ class Emitter {
         this.renderDirectives(s.node, pad);
         this.b.emit(pad);
         const emitIt = () => {
-          this.b.emit('__effect(() => { ');
+          this.b.emit(`${this.runtimeName('__effect')}(() => { `);
           s.fn();
           this.b.emit(' })');
         };
@@ -6959,7 +6972,8 @@ class Emitter {
       } else {
         const merged = R.pendingClassArgs.slice(1);
         this.renderEffect(node, () => {
-          this.b.emit(isSvg ? `${el}.setAttribute('class', __clsx('${classes.join(' ')}', ` : `${el}.className = __clsx('${classes.join(' ')}', `);
+          const clsx = this.runtimeName('__clsx');
+          this.b.emit(isSvg ? `${el}.setAttribute('class', ${clsx}('${classes.join(' ')}', ` : `${el}.className = ${clsx}('${classes.join(' ')}', `);
           merged.forEach((fn, i) => {
             if (i > 0) this.b.emit(', ');
             fn();
@@ -7008,7 +7022,8 @@ class Emitter {
     const parts = R.pendingClassArgs;
     if (parts.length > 0) {
       this.renderEffect(node, () => {
-        this.b.emit(isSvg ? `${el}.setAttribute('class', __clsx(` : `${el}.className = __clsx(`);
+        const clsx = this.runtimeName('__clsx');
+        this.b.emit(isSvg ? `${el}.setAttribute('class', ${clsx}(` : `${el}.className = ${clsx}(`);
         parts.forEach((p, i) => {
           if (i > 0) this.b.emit(', ');
           if (typeof p === 'string') this.b.emit(p);
@@ -7535,7 +7550,7 @@ class Emitter {
 
     const line = (fn) => this.renderLine(markNode, fn, false);
     const self = () => this.renderSelf ?? 'this';
-    line(() => this.b.emit(`{ const ${prevV} = __pushComponent(${self()}); try {`));
+    line(() => this.b.emit(`{ const ${prevV} = ${this.runtimeName('__pushComponent')}(${self()}); try {`));
     line(() => this.b.emit('try {'));
     line(() => {
       this.b.emit(`${instVar} = new `);
@@ -7596,7 +7611,7 @@ class Emitter {
     line(() => this.b.emit(`  ${instVar} = null;`));
     line(() => this.b.emit(`  ${elVar} = document.createComment('rip:child-error: ${name}');`));
     line(() => this.b.emit('}'));
-    line(() => this.b.emit(`} finally { __popComponent(${prevV}); } }`));
+    line(() => this.b.emit(`} finally { ${this.runtimeName('__popComponent')}(${prevV}); } }`));
 
     // Event bindings on the child's root; the listener
     // param mints against the handler's reads.
@@ -7605,7 +7620,7 @@ class Emitter {
       Emitter.collectLeafNames(value, evUsed);
       const ev = Emitter.mintName('e', evUsed);
             this.renderLine(pair, () => {
-        this.b.emit(`if (${instVar}) ${elVar}.addEventListener('${event}', (${ev}) => __batch(() => (`);
+        this.b.emit(`if (${instVar}) ${elVar}.addEventListener('${event}', (${ev}) => ${this.runtimeName('__batch')}(() => (`);
         this.tsHandlerCast(() => this.withExpression(() => this.expr(value)));
         this.b.emit(`)(${ev})))`);
       });
@@ -7723,7 +7738,7 @@ class Emitter {
         const ev = Emitter.mintName('e', evUsed);
                 this.renderLine(pair, () => {
           const self = this.renderSelf ?? 'this';
-          this.b.emit(`${el}.addEventListener('${eventName}', (${ev}) => __batch(() => `);
+          this.b.emit(`${el}.addEventListener('${eventName}', (${ev}) => ${this.runtimeName('__batch')}(() => `);
           if (typeof value === 'string' && this.renderVarKind(value) === null &&
               this.cframes[this.cframes.length - 1].members.has(value)) {
             if (this.ts) this.b.tsOnly(() => this.b.emit('('));
@@ -7771,7 +7786,8 @@ class Emitter {
         } else if (this.renderReactive(value)) {
           const isSvg = R.svgDepth > 0;
           this.renderEffect(pair, () => {
-            this.b.emit(isSvg ? `${el}.setAttribute('class', __clsx(` : `${el}.className = __clsx(`);
+            const clsx = this.runtimeName('__clsx');
+            this.b.emit(isSvg ? `${el}.setAttribute('class', ${clsx}(` : `${el}.className = ${clsx}(`);
             this.renderExpr(value);
             this.b.emit(isSvg ? '));' : ');');
           }, value);
@@ -7780,7 +7796,7 @@ class Emitter {
           const compound = isNode(value);
           this.renderLine(pair, () => {
             this.b.emit(isSvg ? `${el}.setAttribute('class', ` : `${el}.className = `);
-            if (compound) this.b.emit('__clsx(');
+            if (compound) this.b.emit(`${this.runtimeName('__clsx')}(`);
             this.renderExpr(value);
             if (compound) this.b.emit(')');
           });
@@ -8349,12 +8365,13 @@ class Emitter {
     const show = Emitter.mintName('show', used);
     const want = Emitter.mintName('want', used);
     const leaving = Emitter.mintName('leaving', used);
+    const transition = this.runtimeName('__transition');
     const armLines = (rec) => {
       this.b.emit(`${p3}  ${cur} = ${self}.${rec.name}(${self}${outerExtra});\n`);
       this.b.emit(`${p3}  ${cur}.c();\n`);
       this.b.emit(`${p3}  if (${anchor}.parentNode) ${cur}.m(${anchor}.parentNode, ${anchor}.nextSibling);\n`);
       this.b.emit(`${p3}  ${cur}.p(${self}${outerExtra});\n`);
-      this.b.emit(`${p3}  if (${cur}._t) __transition(${cur}._first, ${cur}._t, 'enter', undefined);\n`);
+      this.b.emit(`${p3}  if (${cur}._t) ${transition}(${cur}._first, ${cur}._t, 'enter', undefined);\n`);
     };
     const emitBody = () => {
       this.b.emit(`${pad}{\n`);
@@ -8365,10 +8382,10 @@ class Emitter {
       this.b.emit(`${p2}let ${showing}`);
       this.tsScaffoldAny();
       this.b.emit(' = null;\n');
-      this.b.emit(`${p2}__effect(() => {\n`);
+      this.b.emit(`${p2}${this.runtimeName('__effect')}(() => {\n`);
       // A dynamic ref inside a branch writes its cell in m(): batch
       // the whole swap so observers see only the final cell value.
-      if (hasRef) this.b.emit(`${p3}__batch(() => {\n`);
+      if (hasRef) this.b.emit(`${p3}${this.runtimeName('__batch')}(() => {\n`);
       this.b.emit(`${p3}const ${show} = !!(`);
       // $self fallback: a SWITCH lowers through this path with
       // markNode = the switch node, which has no 'condition' role —
@@ -8381,7 +8398,7 @@ class Emitter {
       this.b.emit(`${p3}if (${want} === ${showing}) return;\n`);
       this.b.emit(`${p3}if (${cur}) {\n`);
       this.b.emit(`${p3}  const ${leaving} = ${cur};\n`);
-      this.b.emit(`${p3}  if (${leaving}._t) { __transition(${leaving}._first, ${leaving}._t, 'leave', () => ${leaving}.d(true)); }\n`);
+      this.b.emit(`${p3}  if (${leaving}._t) { ${transition}(${leaving}._first, ${leaving}._t, 'leave', () => ${leaving}.d(true)); }\n`);
       this.b.emit(`${p3}  else { ${leaving}.d(true); }\n`);
       this.b.emit(`${p3}  ${cur} = null;\n`);
       this.b.emit(`${p3}}\n`);
@@ -8396,7 +8413,7 @@ class Emitter {
       }
       if (hasRef) this.b.emit(`${p3}});\n`);
       this.b.emit(`${p2}});\n`);
-      this.b.emit(`${p2}__ownerFrame().add(() => { if (${cur}) { ${cur}.d(true); ${cur} = null; } });\n`);
+      this.b.emit(`${p2}${this.runtimeName('__ownerFrame')}().add(() => { if (${cur}) { ${cur}.d(true); ${cur} = null; } });\n`);
       this.b.emit(`${pad}}\n`);
     };
     this.mark(markNode, '$self', emitBody);
@@ -8423,10 +8440,10 @@ class Emitter {
       this.b.emit(`${p2}const ${state}`);
       this.tsScaffoldAny();
       this.b.emit(' = { blocks: [], keys: [] };\n');
-      this.b.emit(`${p2}__effect(() => {\n`);
+      this.b.emit(`${p2}${this.runtimeName('__effect')}(() => {\n`);
       this.b.emit(p3);
-      if (hasRef) this.b.emit('__batch(() => ');
-      this.b.emit(`__reconcile(${anchorVar}, ${state}, `);
+      if (hasRef) this.b.emit(`${this.runtimeName('__batch')}(() => `);
+      this.b.emit(`${this.runtimeName('__reconcile')}(${anchorVar}, ${state}, `);
       this.withExpression(() => this.expr(iter));
       this.b.emit(`, ${self}, ${self}.${rec.name}, `);
       if (keyExpr !== null) {
@@ -8444,7 +8461,7 @@ class Emitter {
       if (hasRef) this.b.emit(')');
       this.b.emit(';\n');
       this.b.emit(`${p2}});\n`);
-      this.b.emit(`${p2}__ownerFrame().add(() => { for (const ${each} of ${state}.blocks) { try { ${each}.d(true); } catch {} } ${state}.blocks = []; ${state}.keys = []; ${state}.items = []; });\n`);
+      this.b.emit(`${p2}${this.runtimeName('__ownerFrame')}().add(() => { for (const ${each} of ${state}.blocks) { try { ${each}.d(true); } catch {} } ${state}.blocks = []; ${state}.keys = []; ${state}.items = []; });\n`);
       this.b.emit(`${pad}}\n`);
     });
   }
@@ -8526,10 +8543,10 @@ class Emitter {
         }
         if (hasFrame) {
           this.b.emit(`${p4}if (${frameVar}) ${frameVar}.dispose();\n`);
-          this.b.emit(`${p4}const ${ownerVar} = __pushOwner(${frameVar} = __ownerFrame());\n`);
+          this.b.emit(`${p4}const ${ownerVar} = ${this.runtimeName('__pushOwner')}(${frameVar} = ${this.runtimeName('__ownerFrame')}());\n`);
           this.b.emit(`${p4}try {\n`);
           this.replaySetups(rec, p4 + '  ');
-          this.b.emit(`${p4}} finally { __popOwner(${ownerVar}); }\n`);
+          this.b.emit(`${p4}} finally { ${this.runtimeName('__popOwner')}(${ownerVar}); }\n`);
         }
         this.b.emit(`${p3}},\n`);
         // d(): child components unmount FIRST (the order — the child
@@ -8544,18 +8561,18 @@ class Emitter {
         }
         if (hasFrame) this.b.emit(`${p4}if (${frameVar}) { ${frameVar}.dispose(); ${frameVar} = null; }\n`);
         if (rec.refs.length > 0) {
-          this.b.emit(`${p4}if (detaching) __batch(() => {\n`);
+          this.b.emit(`${p4}if (detaching) ${this.runtimeName('__batch')}(() => {\n`);
           for (const r of rec.refs) {
-            this.b.emit(`${p4}  __detachRef(${self}.${r.name}, ${r.elVar});\n`);
+            this.b.emit(`${p4}  ${this.runtimeName('__detachRef')}(${self}.${r.name}, ${r.elVar});\n`);
           }
           this.b.emit(`${p4}});\n`);
         }
         if (fragChildren !== undefined) {
           for (const child of fragChildren) {
-            this.b.emit(`${p4}if (detaching) __detach(${child});\n`);
+            this.b.emit(`${p4}if (detaching) ${this.runtimeName('__detach')}(${child});\n`);
           }
         } else {
-          this.b.emit(`${p4}if (detaching) __detach(${rec.root});\n`);
+          this.b.emit(`${p4}if (detaching) ${this.runtimeName('__detach')}(${rec.root});\n`);
         }
         this.b.emit(`${p3}}\n`);
         this.b.emit(`${p2}};\n`);
@@ -8630,7 +8647,7 @@ class Emitter {
           this.b.tsOnly(() => this.b.emit(` as ${map}['${tag}'] | null`));
         }
       });
-      this.renderLine(pair, () => this.b.emit(`(this._refCleanups ??= []).push(() => __detachRef(this.${refName}, ${el}))`));
+      this.renderLine(pair, () => this.b.emit(`(this._refCleanups ??= []).push(() => ${this.runtimeName('__detachRef')}(this.${refName}, ${el}))`));
     } else {
       this.rstate.sink.refs.push({ name: refName, elVar: el, node: pair });
     }
@@ -11380,6 +11397,7 @@ const RUNTIME_TABLE = [
     key: 'reactive',
     names: ['__state', '__computed', '__effect', '__batch', '__readonly',
             '__setErrorHandler', '__handleError', '__catchErrors', 'getEffectSignal'],
+    generatedNames: ['__state', '__computed', '__effect', '__batch'],
     url: new URL('./runtime/reactive.js', import.meta.url),
     triggers: (sexpr, preds) => containsReactive(sexpr, preds.isTrigger),
     types: {
@@ -11434,6 +11452,10 @@ const RUNTIME_TABLE = [
             // re-exported by the components module so reactive-only
             // programs' injected bytes stay untouched.
             '__ownerFrame', '__pushOwner', '__popOwner', '__detachRef'],
+    generatedNames: ['setContext', 'getContext', '__Component',
+                     '__pushComponent', '__popComponent', '__clsx', '__reconcile',
+                     '__transition', '__detach', '__ownerFrame', '__pushOwner',
+                     '__popOwner', '__detachRef'],
     url: new URL('./runtime/components.js', import.meta.url),
     requires: 'reactive',
     triggers: (sexpr, preds) => containsComponentDecl(sexpr, preds.isComponent),
@@ -11585,6 +11607,72 @@ const deliveryTrees = (emitter, sexpr) => {
   return trees;
 };
 
+// Every source binding that can shadow a compiler-generated runtime
+// reference, across every emitted tree and nested scope. References do
+// not belong here: a source call to `__state(…)` must keep the public
+// spelling and bind the delivered public name. The union is deliberately
+// scope-insensitive — a binding in an unrelated scope may advance an alias
+// by one suffix, which is harmless; missing a binding would be a capture.
+const runtimeAliasBindings = (emitter, trees) => {
+  const names = new Set();
+  const addPattern = (pattern) => {
+    for (const name of emitter.patternNames(pattern, [], true)) names.add(name);
+  };
+  const walk = (x, isDecl) => {
+    if (!isNode(x)) return;
+    const [head] = x;
+    if (emitter.isModuleImport(x)) {
+      for (const name of Emitter.importedNames([x])) names.add(name);
+      return;
+    }
+    if (isFunc(x)) {
+      if (isNode(x[1])) for (const param of x[1]) addPattern(param);
+      walk(x[2], isDecl);
+      return;
+    }
+    if (isDefHead(head) && x.length === 4) {
+      if (typeof x[1] === 'string') names.add(x[1]);
+      if (isNode(x[2])) for (const param of x[2]) addPattern(param);
+      walk(x[3], isDecl);
+      return;
+    }
+    if (head === 'class') {
+      if (typeof x[1] === 'string') names.add(x[1]);
+      for (const part of x.slice(2)) walk(part, isDecl);
+      return;
+    }
+    if (head === 'enum') {
+      if (typeof x[1] === 'string') names.add(x[1]);
+      for (const part of x.slice(2)) walk(part, isDecl);
+      return;
+    }
+    if (isDecl(x)) {
+      if (typeof x[1] === 'string') names.add(x[1]);
+      else if (isNode(x[1])) addPattern(x[1]);
+      walk(x[2], isDecl);
+      return;
+    }
+    if ((ASSIGNS.has(head) || head === 'void-assign') && x.length >= 2) {
+      if (typeof x[1] === 'string') names.add(x[1]);
+      else if (Emitter.isPattern(x[1])) addPattern(x[1]);
+    }
+    if ((head === 'for-in' || head === 'for-of' || head === 'for-as') && isNode(x[1])) {
+      for (const pattern of x[1]) addPattern(pattern);
+    }
+    if (head === 'try') {
+      for (const part of x.slice(2)) {
+        if (isNode(part) && part.length === 2 && Emitter.isPattern(part[0])) addPattern(part[0]);
+      }
+    }
+    for (const part of x) walk(part, isDecl);
+  };
+  for (const { tree, atoms, isDecl } of trees) {
+    walk(tree, isDecl);
+    for (const atom of atoms) addPattern(atom);
+  }
+  return names;
+};
+
 // The program-scope binding set — EVERY name module-level emission
 // declares: hoisted `let` targets, import bindings, and the
 // statement forms that bind without hoisting (class declarations,
@@ -11676,13 +11764,15 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
     collectAtoms(tree);
     collectAtoms(atoms);
   }
+  const aliasUsed = runtimeAliasBindings(emitter, trees);
   // Runtime names spelled only by generated output get one module-level
-  // alias minted against every source atom. The default alias is the
-  // public runtime name, preserving bytes; a source collision receives a
-  // suffix and delivery imports/destructures into that alias.
+  // alias minted against every source binding. The default alias is the
+  // public runtime name, preserving bytes and source-spelled references;
+  // a binding collision receives a suffix and delivery imports/destructures
+  // into that alias.
   for (const rt of RUNTIME_TABLE) {
     for (const name of rt.generatedNames ?? []) {
-      emitter.runtimeAliases.set(name, Emitter.mintName(name, emitter.temps.used));
+      emitter.runtimeAliases.set(name, Emitter.mintName(name, aliasUsed));
     }
   }
   const bound = programScopeNames(emitter, parseResult.sexpr);

@@ -1179,7 +1179,8 @@ describe('runtime delivery: the reactive runtime', () => {
 
   test('program-scope shadowing suppresses injection per name; all bound → nothing injects', () => {
     const a = compile('__state = (v) => v\nn = __state(1)\nd = __effect(-> n)', { runtimeDelivery: 'import' });
-    expect(a.code.split('\n')[0]).toMatch(/^import \{ __computed, __effect, __batch, __readonly, __setErrorHandler, __handleError, __catchErrors, getEffectSignal \} from/);
+    expect(a.code.split('\n')[0]).toMatch(/^import \{ __state as __state_, __computed, __effect, __batch, __readonly, __setErrorHandler, __handleError, __catchErrors, getEffectSignal \} from/);
+    expect(a.code).toContain('let n = __state(1);');
     const allBound = ['__state', '__computed', '__effect', '__batch', '__readonly', '__setErrorHandler', '__handleError', '__catchErrors', 'getEffectSignal']
       .map((n) => `${n} = 1`).join('\n') + '\nx = __state';
     const b = compile(allBound, { runtimeDelivery: 'import' });
@@ -1187,9 +1188,46 @@ describe('runtime delivery: the reactive runtime', () => {
     expect([...b.runtimes]).toEqual([]);
   });
 
+  test('source-spelled calls keep their bindings while reactive sugar uses collision-free aliases', () => {
+    const src = [
+      'log = []',
+      '__state = (v) -> "bad-state"',
+      '__computed = (fn) -> "bad-computed"',
+      '__effect = (fn) -> log.push("user"); "bad-effect"',
+      'explicit = __state(9)',
+      'x := 1',
+      'y ~= x * 2',
+      '~> log.push("effect:" + y)',
+      'console.log JSON.stringify([explicit, x, y, log])',
+    ].join('\n');
+
+    for (const mode of ['none', 'import', 'inline']) {
+      const { code, mappings } = compile(src, { runtimeDelivery: mode });
+      expect(code).toContain('let explicit = __state(9);');
+      expect(code).toMatch(/const x = __state[_\d]+\(1\)/);
+      expect(code).toMatch(/const y = __computed[_\d]+\(\(\) =>/);
+      expect(code).toMatch(/__effect[_\d]+\(\(\) =>/);
+      if (mode !== 'none') {
+        const run = spawnSync('bun', ['-e', code], { encoding: 'utf8' });
+        expect(run.status).toBe(0);
+        expect(run.stdout.trim()).toBe('["bad-state",1,2,["effect:2"]]');
+      }
+
+      const effectOperator = mappings.rows.find((row) =>
+        row.role === 'operator' &&
+        src.slice(row.sourceStart, row.sourceEnd) === '~>');
+      expect(effectOperator).toBeDefined();
+      expect(code.slice(effectOperator.generatedStart, effectOperator.generatedEnd))
+        .toMatch(/^__effect[_\d]+$/);
+      expect(mappings.rows.filter((row) => row.role === 'runtime')
+        .every((row) => row.mappingKind === 'synthetic')).toBe(true);
+    }
+  });
+
   test('function-scope shadowing does NOT suppress module-level injection', () => {
     const { code } = compile('f = ->\n  __state = 1\n  __state\nn = __state(2)', { runtimeDelivery: 'import' });
-    expect(code.split('\n')[0]).toMatch(REACTIVE_IMPORT);
+    expect(code.split('\n')[0]).toMatch(/^import \{ __state as __state_, __computed, __effect, __batch/);
+    expect(code).toContain('let n = __state(2);');
   });
 
   test('NAME occurrences that are not references never trigger', () => {

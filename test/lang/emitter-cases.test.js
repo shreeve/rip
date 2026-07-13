@@ -3,6 +3,7 @@
 // statement-only arrow bodies, and loop-temporary naming.
 import { describe, test, expect } from 'bun:test';
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import parser from '../../src/parser.js';
 import { makeParserLexer } from '../../src/lexer.js';
 import { emit } from '../../src/emitter.js';
@@ -231,6 +232,94 @@ describe('object-comprehension intrinsic delivery', () => {
         });
         expect(run.status).toBe(0);
         expect(run.stdout.trim()).toBe('9');
+      }
+    }
+  });
+});
+
+describe('compiler-generated runtime aliases', () => {
+  const REACTIVE_GENERATED = ['__state', '__computed', '__effect', '__batch'];
+  const COMPONENT_GENERATED = [
+    'setContext', 'getContext', '__Component', '__pushComponent', '__popComponent',
+    '__clsx', '__reconcile', '__transition', '__detach', '__ownerFrame',
+    '__pushOwner', '__popOwner', '__detachRef',
+  ];
+
+  test('reactive sugar dodges module bindings in every delivery mode and runs through the real runtime', () => {
+    const source = [
+      'log = []',
+      '__state = (v) -> "bad-state"',
+      '__computed = (fn) -> "bad-computed"',
+      '__effect = (fn) -> log.push("user"); "bad-effect"',
+      'x := 1',
+      'y ~= x * 2',
+      '~> log.push("effect:" + y)',
+      'console.log JSON.stringify([x, y, log])',
+    ].join('\n');
+    for (const mode of ['none', 'import', 'inline']) {
+      const code = compileDelivered(source, mode);
+      for (const name of ['__state', '__computed', '__effect']) {
+        expect(code).toMatch(new RegExp(`${name.replaceAll('$', '\\$&')}[_\\d]+\\(`));
+      }
+      if (mode === 'import') {
+        for (const name of ['__state', '__computed', '__effect']) {
+          expect(code).toMatch(new RegExp(`${name} as ${name}[_\\d]+`));
+        }
+      }
+      if (mode === 'inline') {
+        for (const name of ['__state', '__computed', '__effect']) {
+          expect(code).toMatch(new RegExp(`${name}:\\s*${name}[_\\d]+`));
+        }
+      }
+      if (mode !== 'none') {
+        const run = spawnSync('bun', ['-e', code], { encoding: 'utf8' });
+        expect(run.status).toBe(0);
+        expect(run.stdout.trim()).toBe('[1,2,["effect:2"]]');
+      }
+    }
+  });
+
+  test('schema callable sub-emitters inherit reactive aliases', () => {
+    const source = [
+      'S = schema :shape',
+      '  n! integer',
+      '  value: (__state, __computed, __effect) ->',
+      '    local := @n',
+      '    doubled ~= local * 2',
+      '    ~> doubled',
+      '    doubled',
+    ].join('\n');
+    for (const mode of ['none', 'import', 'inline']) {
+      const code = compileDelivered(source, mode);
+      expect(code).toMatch(/const local = __state[_\d]+\(this\.n\)/);
+      expect(code).toMatch(/const doubled = __computed[_\d]+\(\(\) =>/);
+      expect(code).toMatch(/__effect[_\d]+\(\(\) =>/);
+    }
+  });
+
+  test('the complete component lowering surface dodges source bindings in every delivery mode', () => {
+    const componentCorpus = readFileSync(new URL('../corpus/components.rip', import.meta.url), 'utf8');
+    const shadows = [...REACTIVE_GENERATED, ...COMPONENT_GENERATED]
+      .map((name) => `${name} = null`)
+      .join('\n');
+    const context = [
+      'ContextChild = component',
+      '  accept theme',
+      'ContextParent = component',
+      '  offer theme := "dark"',
+    ].join('\n');
+    const source = `${shadows}\n${context}\n${componentCorpus}`;
+
+    for (const mode of ['none', 'import', 'inline']) {
+      const code = compileDelivered(source, mode);
+      for (const name of [...REACTIVE_GENERATED, ...COMPONENT_GENERATED]) {
+        expect(code).toContain(`${name}_`);
+        if (mode === 'import') expect(code).toMatch(new RegExp(`${name} as ${name}[_\\d]+`));
+        if (mode === 'inline') expect(code).toMatch(new RegExp(`${name}:\\s*${name}[_\\d]+`));
+      }
+      if (mode === 'inline') {
+        const run = spawnSync('bun', ['-e', code], { encoding: 'utf8' });
+        expect(run.status).toBe(0);
       }
     }
   });
