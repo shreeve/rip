@@ -3,6 +3,15 @@
 Standing rules for any agent (AI or human) working in this repository —
 the Rip compiler: language, toolchain, runtimes, and editor support.
 
+Permanent documentation:
+
+- [README.md](README.md) — repository orientation and entry points.
+- [PROCESS.md](PROCESS.md) — planning, review, and merge protocol.
+- [docs/SYNTAX.md](docs/SYNTAX.md) — context-sensitive language syntax.
+- [docs/TYPES.md](docs/TYPES.md) — type and editor architecture.
+- [docs/HMR.md](docs/HMR.md) — HMR design and acceptance contract.
+- [docs/ROADMAP.md](docs/ROADMAP.md) — current open product work.
+
 ## The Rules
 
 1. **Reject loudly; never tolerate silently.** Invalid grammar
