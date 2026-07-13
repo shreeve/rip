@@ -104,7 +104,7 @@ async function loadProjectConfigReader() {
       return (await import(candidate.href)).readProjectConfig;
     }
   }
-  return () => ({ strict: false, checkAll: false, noCheck: [], _configDir: null });
+  return () => ({ strict: false, noCheck: [], _configDir: null });
 }
 
 const connection = createConnection(ProposedFeatures.all);
