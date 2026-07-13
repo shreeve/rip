@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     "./email/dom": "./email/dom.rip",
-    "./email/compat": "./email/compat.rip"
+    "./email/compat": "./email/compat.rip",
+    "./email/render": "./email/render.rip"
   },
   "scripts": {
     "test": "bun test --timeout 15000"

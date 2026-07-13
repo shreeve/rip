@@ -1,0 +1,15 @@
+export lifecycle = []
+
+export BasicEmail = component
+  @message =! 'hello'
+
+  ~>
+    lifecycle.push 'effect'
+    -> lifecycle.push 'cleanup'
+
+  render
+    html
+      body
+        h1 'Title'
+        p
+          = @message

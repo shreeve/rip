@@ -1,0 +1,22 @@
+import { _renderComponent } from '../shared/render.rip'
+import { serializeChildren, toPlainText } from './dom.rip'
+
+export type EmailOutput =
+  html: string
+  text: string
+
+DOCTYPE =! '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">'
+
+export toHTML = (ComponentClass: any, props: Record<string, any> = {}): string ->
+  root = _renderComponent ComponentClass, props
+  "#{DOCTYPE}#{serializeChildren(root)}"
+
+export toText = (ComponentClass: any, props: Record<string, any> = {}): string ->
+  root = _renderComponent ComponentClass, props
+  toPlainText root
+
+export toEmail = (ComponentClass: any, props: Record<string, any> = {}): EmailOutput ->
+  root = _renderComponent ComponentClass, props
+  html = serializeChildren root
+  text = toPlainText root
+  { html: "#{DOCTYPE}#{html}", text }
