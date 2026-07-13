@@ -47,7 +47,9 @@ let doubled = (() => {
   const result = {};
   for (let k in src) {
     let v = src[k];
-    result[k] = (v * 2);
+    const _k = k, _v = (v * 2);
+    if (_k === '__proto__') Object.defineProperty(result, _k, { value: _v, enumerable: true, configurable: true, writable: true });
+    else result[_k] = _v;
   }
   return result;
 })();
