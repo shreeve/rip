@@ -90,12 +90,14 @@ test "deep object destructuring", "obj = {a: {b: {c: 5}}}; {a: {b: {c: value}}} 
 test "mixed destructuring", "data = {items: [1, 2, 3], count: 3}; {items: [first], count} = data; first + count", 4
 
 # String key destructuring
+
 test "string key destructuring", '''
   {'foo-bar': value} = {'foo-bar': 42}
   value
   ''', 42
 
 # Computed property destructuring
+
 test "computed property destructuring", '''
   key = 'prop'
   {[key]: value} = {prop: 100}
@@ -206,7 +208,6 @@ code 'optional chain assign: subtract', 'x?.y -= 1', 'if (x != null) x.y -= 1'
 # the codegen or producing broken JS.
 
 fail 'destructure: arithmetic expression as target', '[a + b] = src'
-
 fail 'destructure: function call as target', '[fn()] = src'
 
 fail 'destructure: comprehension as target',
@@ -219,6 +220,7 @@ fail 'destructure: comprehension as target',
 test "nullish assignment null", "a = null\na ?= 5\na", 5
 test "nullish assignment value", "a = 10\na ?= 5\na", 10
 test "nullish assignment keeps falsy non-nullish", "c = 0\nc ?= 9\nc", 0
+
 code "nullish assignment compiles to ??=", "a = 1\na ?= 5", "let a = 1;\n\na ??= 5;"
 
 # ==============================================================================
@@ -229,6 +231,7 @@ code "nullish assignment compiles to ??=", "a = 1\na ?= 5", "let a = 1;\n\na ??=
 test 'array rest in middle', '[first, ...middle, last] = [1, 2, 3, 4, 5]; [first, middle, last]', [1, [2, 3, 4], 5]
 test 'array rest in middle two after', '[a, ...mid, b, c] = [1, 2, 3, 4, 5]; [a, mid, b, c]', [1, [2, 3], 4, 5]
 test 'array rest in middle empty', '[a, ...b, c] = [1, 2]; [a, b, c]', [1, [], 2]
+
 test 'middle rest evaluates its source once', '''
   n = 0
   g = -> (n += 1; [7, 8, 9])

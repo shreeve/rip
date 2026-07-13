@@ -51,6 +51,7 @@ code "array index with or", "arr[(len or 1)]", "arr[len || 1];"
 # ==============================================================================
 
 code "object literal in call", "fn(({x: 1}))", "fn({x: 1});"
+
 test "object literal statement", "({x: 1})", {x: 1}
 
 # ==============================================================================
@@ -58,6 +59,7 @@ test "object literal statement", "({x: 1})", {x: 1}
 # ==============================================================================
 
 test "arithmetic with or preserves parens", "x = 5 - (3 || 2)\nx", 2
+
 code "arithmetic mixed precedence", "x = a - (b || c)", "let x = a - (b || c);"
 
 # ==============================================================================
@@ -77,4 +79,5 @@ test "postfix if fails", "isEmpty = true; isValid = true; x = 5 if !isEmpty && i
 # ==============================================================================
 
 code "comparison with logical", "if (x > 5) && (y < 10) then z", "if ((x > 5) && (y < 10)) {\n  z;\n}"
+
 test "comparison with logical execution", "x = 6; y = 8; result = 'yes' if (x > 5) && (y < 10); result", "yes"

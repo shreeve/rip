@@ -12,7 +12,6 @@ import { test, code, fail, type } from '../support/testing.js'
 skip = { skipPreamble: true }
 
 code "state creation", "count := 0", "const count = __state(0)", skip
-
 code "state with string", 'name := "Rip"', 'const name = __state("Rip")', skip
 
 code "state update", '''

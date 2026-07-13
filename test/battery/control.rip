@@ -101,6 +101,7 @@ test "switch no discriminant", "x = 15; result = switch\n  when x < 10 then 'low
 test "switch with block", "x = 2; result = switch x\n  when 1\n    'one'\n  when 2\n    'two'\n  else\n    'other'\nresult", "two"
 
 # Switch when body can be an inline if/else expression
+
 test "switch when with nested inline if", '''
   mode = "hero"
   screen = "home"
@@ -112,6 +113,7 @@ test "switch when with nested inline if", '''
 ''', "hero-home"
 
 # Switch without discriminant in statement context (loop)
+
 test "switch in loop for side effects", '''
   count = 0
   for x in [1, 2, 3]
@@ -127,6 +129,7 @@ test "switch in loop for side effects", '''
 
 # Code generation
 code "switch", "switch x\n  when 1 then 'one'\n  else 'other'", "switch (x) {\n  case 1:\n    'one';\n    break;\n  default:\n    'other';\n    break;\n}"
+
 code "switch when with nested inline if", '''
     switch screen
       when "home" then if mode is "hero" then "hero-home" else "simple-home"
@@ -145,6 +148,7 @@ code "switch when with nested inline if", '''
       break;
   }
 '''
+
 fail "switch when cannot mix inline and block body", '''
   switch x
     when 1 then if true then "a" else "b"
@@ -188,6 +192,7 @@ test "async do", "x = do -> await Promise.resolve(42)\nx", 42
 
 # Code generation
 code "do expression", "do -> 42", "(function() { return 42; })()"
+
 code "do block", '''
   do ->
     x = 5
@@ -207,6 +212,7 @@ code "or throw assignment rewrites as an if-guard", "  data = fetchData() or thr
 
 # Return guards rewrite as statements — the one lowering that keeps
 # the return's function target (an IIFE would capture it)
+
 code "or return assignment lowers to an if-guard", "f = (x) ->\n  y = x or return 'no'\n  y", '''
   let f;
 
@@ -216,11 +222,13 @@ code "or return assignment lowers to an if-guard", "f = (x) ->\n  y = x or retur
     return y;
   };
 '''
+
 test "or return returns the guard value on falsy", "f = (x) ->\n  y = x or return 'no'\n  y\nf(0)", "no"
 test "or return passes the value through on truthy", "f = (x) ->\n  y = x or return 'no'\n  y\nf(5)", 5
 test "?? return fires on nullish only", "f = (x) ->\n  y = x ?? return 'nil'\n  y\n[f(null), f(0)]", ["nil", 0]
 test "and return fires on truthy", "f = (x) ->\n  x and return 'yes'\n  'fell'\n[f(1), f(0)]", ["yes", "fell"]
 test "bare or return with no value returns undefined", "f = (x) ->\n  x or return\n  'ok'\n[f(0), f(1)]", [null, "ok"]
+
 fail "a return guard rejects in value position", "f = (x) ->\n  g(x or return 1)", "a return guard is a statement"
 fail "a return guard rejects at the top level", "x or return 1", "'return' outside a function"
 fail "a return guard rejects inside a comprehension", "f = (xs) ->\n  ys = for x in xs\n    x or return 'bad'\n  ys", "cannot cross the IIFE boundary"
@@ -239,11 +247,11 @@ code "standalone and throw rewrites as an if-guard", "  isError and throw new Er
 # ==============================================================================
 
 code "?? throw assignment rewrites with a nullish check", "  data = getValue() ?? throw new Error 'Missing'", "let data;\n\nif ((data = getValue()) == null) throw new Error(\"Missing\");"
-
 code "standalone ?? throw rewrites with a nullish check", "  getValue() ?? throw new Error 'Not found'", "if (getValue() == null) throw new Error(\"Not found\");"
 
 # The short-circuit SEMANTICS, executed: the arm only throws when the
 # left side demands it.
+
 test "or throw passes a truthy left through", '''
   fetchData = -> 42
   d = fetchData() or throw new Error "No data"
@@ -814,7 +822,6 @@ test "timing returns undefined when condition false", '''
 # ==============================================================================
 
 test "postfix if else basic", '"yes" if true else "no"', "yes"
-
 test "postfix if else false branch", '"yes" if false else "no"', "no"
 
 test "postfix if else with variable", '''
@@ -846,6 +853,7 @@ code "postfix if else compiles to ternary", '''
 # parenthesized `=` nodes with a flag the codegen ternary-hoist consults, so
 # `(x = "a") if cond else "b"` keeps its conditional-assign meaning instead
 # of being hoisted into an unconditional `x = (cond ? "a" : "b")`.
+
 test "parenthesized assignment in ternary only assigns when cond is true", '''
   cond = false
   x = "before"

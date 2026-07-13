@@ -53,6 +53,7 @@ code "function expression", "f = -> 42", '''
     return 42;
   };
   '''
+
 code "class expression", "C = class Foo", '''
   let C = class Foo {
   };

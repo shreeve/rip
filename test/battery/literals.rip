@@ -109,5 +109,7 @@ test "%w empty", '%w[]', []
 test "%w escaped space", '%w[foo\\ bar baz]', ["foo bar", "baz"]
 test "%w chains like any array", '%w[a b].length', 2
 test "modulo with a spaced w binding stays arithmetic", 'w = [9]\n10 % w[0]', 1
+
 code "%w generates array", '%w[a b c]', '["a", "b", "c"];'
+
 fail "%w rejects an unclosed literal", 'x = %w[a b', "unclosed %w["

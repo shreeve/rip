@@ -54,6 +54,7 @@ test "nested string in interpolation", 'name = "World"\n"Hello #{"Mr. " + name}"
 # ==============================================================================
 
 # Basic heredoc
+
 test 'simple heredoc', '''
   x = """
     hello
@@ -63,6 +64,7 @@ test 'simple heredoc', '''
   ''', 'hello\nworld'
 
 # Heredoc with indentation stripping
+
 test 'heredoc indent strip', '''
   x = """
       line 1
@@ -73,6 +75,7 @@ test 'heredoc indent strip', '''
   ''', 'line 1\nline 2\n  extra indent'
 
 # Heredoc with interpolation
+
 test 'heredoc interpolation', '''
   name = 'Alice'
   msg = """
@@ -95,6 +98,7 @@ test 'heredoc newlines only', 'x = """\n\n\n"""\nx', '\n'
 # When closing delimiter has ONLY whitespace before it, use its column as baseline
 
 # Closing at column 0 - preserve all indentation
+
 test 'heredoc closing at column 0', '''
   x = \'\'\'
     line 1
@@ -104,6 +108,7 @@ test 'heredoc closing at column 0', '''
   ''', '  line 1\n    line 2'
 
 # Closing at column 2 - strip 2 spaces
+
 test 'heredoc closing at column 2', '''
   x = \'\'\'
     line 1
@@ -113,6 +118,7 @@ test 'heredoc closing at column 2', '''
   ''', 'line 1\n  line 2'
 
 # Closing at column 4 - strip 4 spaces
+
 test 'heredoc closing at column 4', '''
   x = \'\'\'
       line 1
@@ -123,6 +129,7 @@ test 'heredoc closing at column 4', '''
   ''', 'line 1\n  line 2\nline 3'
 
 # Closing inline (non-whitespace before) - fallback to minimum behavior
+
 test 'heredoc closing inline fallback', '''
   x = \'\'\'
     line 1
@@ -132,6 +139,7 @@ test 'heredoc closing inline fallback', '''
   ''', 'line 1\n  line 2'
 
 # Empty heredoc with closing at column 2 (just whitespace content)
+
 test 'heredoc empty with closing indent', '''
   x = \'\'\'
 
@@ -140,6 +148,7 @@ test 'heredoc empty with closing indent', '''
   ''', ''
 
 # Code generation use case - preserve base indent
+
 test 'heredoc compiler preserve indent', '''
   generateCode = ->
     \'\'\'
@@ -151,6 +160,7 @@ test 'heredoc compiler preserve indent', '''
   ''', '  if (x) {\n    return y;\n  }'
 
 # Code generation use case - strip to flush left (closing at content level)
+
 test 'heredoc compiler strip indent', '''
   generateCode = ->
     \'\'\'
@@ -162,6 +172,7 @@ test 'heredoc compiler strip indent', '''
   ''', 'if (x) {\n  return y;\n}'
 
 # Mixed indentation levels
+
 test 'heredoc mixed indentation', '''
   x = \'\'\'
       deep
@@ -172,6 +183,7 @@ test 'heredoc mixed indentation', '''
   ''', '  deep\nshallow\n  deep again'
 
 # Double-quote heredoc - closing at column 2
+
 test 'double-quote heredoc closing at column 2', '''
   x = """
     line 1
@@ -181,6 +193,7 @@ test 'double-quote heredoc closing at column 2', '''
   ''', 'line 1\n  line 2'
 
 # Double-quote heredoc - closing at column 0 (preserve indent)
+
 test 'double-quote heredoc closing at column 0', '''
   x = """
     line 1
@@ -194,6 +207,7 @@ test 'double-quote heredoc closing at column 0', '''
 # ==============================================================================
 
 # Basic heregex - whitespace stripped
+
 test 'heregex whitespace strip', '''
   pattern = ///
     \\d+
@@ -203,6 +217,7 @@ test 'heregex whitespace strip', '''
   ''', true
 
 # Heregex with comments removed
+
 test 'heregex with comments', '''
   pattern = ///
     ^ \\d+    # starts with digits
@@ -214,6 +229,7 @@ test 'heregex with comments', '''
   ''', true
 
 # Heregex with case-insensitive flag
+
 test 'heregex with flags', '''
   pattern = ///
     HELLO
@@ -222,6 +238,7 @@ test 'heregex with flags', '''
   ''', true
 
 # Heregex with global flag
+
 test 'heregex global flag', '''
   pattern = ///
     \\d+
@@ -230,6 +247,7 @@ test 'heregex global flag', '''
   ''', 3
 
 # Heregex with multiple flags
+
 test 'heregex multiple flags', '''
   pattern = ///
     ^HELLO$
@@ -238,6 +256,7 @@ test 'heregex multiple flags', '''
   ''', true
 
 # Heregex character classes preserved
+
 test 'heregex char class', '''
   pattern = ///
     [ \\t]+    # spaces and tabs INSIDE char class
@@ -246,6 +265,7 @@ test 'heregex char class', '''
   ''', true
 
 # Heregex with escaped hash
+
 test 'heregex escaped hash', '''
   pattern = ///
     \\#
@@ -254,6 +274,7 @@ test 'heregex escaped hash', '''
   ''', true
 
 # Heregex with escaped metacharacters
+
 test 'heregex escaped metacharacters', '''
   pattern = ///
     \\.        # escaped dot
@@ -265,6 +286,7 @@ test 'heregex escaped metacharacters', '''
   ''', true
 
 # Heregex with literal brackets
+
 test 'heregex literal brackets', '''
   pattern = ///
     \\[        # literal [
@@ -275,6 +297,7 @@ test 'heregex literal brackets', '''
   ''', true
 
 # Heregex with capture groups
+
 test 'heregex capture groups', '''
   pattern = ///
     (\\w+)     # capture group
@@ -285,6 +308,7 @@ test 'heregex capture groups', '''
   ''', 'hello'
 
 # Heregex with non-capture groups
+
 test 'heregex non-capture groups', '''
   pattern = ///
     (?:foo|bar)  # non-capture alternation
@@ -294,6 +318,7 @@ test 'heregex non-capture groups', '''
   ''', true
 
 # Heregex with quantifiers
+
 test 'heregex quantifiers', '''
   pattern = ///
     \\d{2,5}   # 2 to 5 digits
@@ -302,6 +327,7 @@ test 'heregex quantifiers', '''
   ''', true
 
 # Heregex with negated character class
+
 test 'heregex negated class', '''
   pattern = ///
     [^\\]]+    # not a closing bracket
@@ -310,6 +336,7 @@ test 'heregex negated class', '''
   ''', true
 
 # Heregex with all flags
+
 test 'heregex all flags', '''
   pattern = ///
     ^HELLO$
@@ -318,6 +345,7 @@ test 'heregex all flags', '''
   ''', 'string'
 
 # Heregex stress test - kitchen sink pattern
+
 test 'heregex stress test', '''
   p = ///
     ^                # anchor start
@@ -338,24 +366,28 @@ test 'heregex stress test', '''
 # ==============================================================================
 
 # Single quote in double-quoted string (no escape)
+
 test 'single quote in string', '''
   x = "don't"
   x
   ''', "don't"
 
 # Double quote in single-quoted string (no escape)
+
 test 'double quote in string', '''
   x = 'say "hello"'
   x
   ''', 'say "hello"'
 
 # Mixed quotes
+
 test 'mixed quotes', '''
   x = "it's a test"
   x
   ''', "it's a test"
 
 # Backtick in string
+
 test 'backtick in string', '''
   x = 'template `literal`'
   x
@@ -407,36 +439,42 @@ test 'empty string double', '""', ''
 test 'empty string single', "''", ''
 
 # String with only whitespace
+
 test 'whitespace string', '''
   x = '   '
   x
   ''', '   '
 
 # String with unicode
+
 test 'unicode string', '''
   x = 'Hello 世界'
   x
   ''', 'Hello 世界'
 
 # String with emoji
+
 test 'emoji string', '''
   x = 'Hello 👋'
   x
   ''', 'Hello 👋'
 
 # String concatenation
+
 test 'string concat', '''
   x = 'a' + 'b' + 'c' + 'd' + 'e'
   x
   ''', 'abcde'
 
 # String with special chars
+
 test 'special chars', '''
   x = '!@#$%^&*()'
   x
   ''', '!@#$%^&*()'
 
 # Long string length
+
 test 'long string length', '''
   x = 'The quick brown fox jumps over the lazy dog'
   x.length
@@ -447,6 +485,7 @@ test 'long string length', '''
 # ==============================================================================
 
 # Heregex generates regex literal with whitespace removed
+
 code "heregex compiler", '''
   pattern = ///
     d+
@@ -454,6 +493,7 @@ code "heregex compiler", '''
   ''', "let pattern = /d+/;"
 
 # Heregex with flags in output
+
 code "heregex flags compiler", '''
   pattern = ///
     test
@@ -461,6 +501,7 @@ code "heregex flags compiler", '''
   ''', "let pattern = /test/gi;"
 
 # Heregex with comments completely removed
+
 code "heregex comment removal", '''
   pattern = ///
     d+  # digit
@@ -468,6 +509,7 @@ code "heregex comment removal", '''
   ''', "let pattern = /d+/;"
 
 # Heregex character class preserved
+
 code "heregex char class compiler", '''
   pattern = ///
     [ 	]+
@@ -478,6 +520,7 @@ code "heregex char class compiler", '''
 code 'interpolation compiler', '"Hello #{name}"', '`Hello ${name}`'
 
 # Heredoc generates template literal
+
 code "heredoc compiler", '''
   x = """
     line1
@@ -492,11 +535,13 @@ code "heredoc compiler", '''
 test 'dollar sign interpolation', '"x = ${5}"', 'x = 5'
 test 'dollar sign with variable', 'x = 42; "value: ${x}"', 'value: 42'
 test 'dollar sign with expression', 'x = 5; "result: ${x * 2}"', 'result: 10'
+
 test 'dollar sign with function call', '''
   upper = (s) -> s.toUpperCase()
   result = "name: ${upper("alice")}"
   result
   ''', 'name: ALICE'
+
 test 'mixed hash and dollar', 'x = 1; y = 2; "hash #{x} dollar ${y}"', 'hash 1 dollar 2'
 
 code 'dollar interpolation compiler', '"Value: ${x}"', '`Value: ${x}`'
@@ -514,6 +559,7 @@ test 'literal backtick in interpolated string', 'x = 1; "a `b` #{x}"', 'a `b` 1'
 # Both interpolation forms must coexist with a literal backtick.
 test 'literal backtick with ${} interpolation', 'x = 1; "a `b` ${x}"', 'a `b` 1'
 test 'literal backtick with both #{} and ${}', 'x = 1; y = 2; "`#{x}` and `${y}`"', '`1` and `2`'
+
 test 'literal backtick in interpolated heredoc', '''x = 2
 """tick `t` #{x}"""''', 'tick `t` 2'
 
@@ -583,9 +629,6 @@ test '$ tagged template no interpolation', '''
 ''', 'static'
 
 test 'tagged template on a member', 'obj = {t: (s) -> s[0]}\nobj.t"m"', 'm'
-
 test 'tagged template on a call result', 'mk = -> (s) -> s[0]\nmk()"z"', 'z'
-
 test 'tagged template raw preserves escapes', 'tag = (s) -> s.raw[0]\ntag"a\\nb"', 'a\\nb'
-
 test 'a SPACED string stays an implicit call', 'f = (x) -> x\nf "spaced"', 'spaced'

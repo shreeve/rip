@@ -22,6 +22,7 @@ test "bare single"         , "o = {a: 1}; o.{a}"                         , {a: 1
 test "bare multi"          , "o = {a: 1, b: 2, c: 3}; o.{a, b}"          , {a: 1, b: 2}
 test "missing key → undef" , "o = {a: 1}; r = o.{a, b}; [r.a, r.b]"      , [1, undefined]
 test "bare from literal"   , "({a: 1, b: 2}).{a, b}"                     , {a: 1, b: 2}
+
 test "bare this"           , """
   obj = {x: 1, y: 2}
   obj.{x, y}
@@ -255,6 +256,7 @@ test "reserved: rename dest"        , "o = {x: 9}; o.{x: default}"              
 test "reserved: with regular key"   , "o = {a: 1, class: 'c'}; o.{a, class}"             , {a: 1, class: 'c'}
 test "reserved: optpick"            , "o = null; o?.{default, class}"                    , undefined
 test "reserved: optpick present"    , "o = {class: 'c'}; o?.{class}"                     , {class: 'c'}
+
 test "reserved: multiline"          , '''
 o = {default: 1, class: 'c', delete: true, new: 2}
 o.{
@@ -264,6 +266,7 @@ o.{
   new
 }
 ''', {default: 1, class: 'c', delete: true, new: 2}
+
 test "reserved: default value ok"   , "o = {}; o.{role = 'u', class: c = 'btn'}"         , {role: 'u', c: 'btn'}
 
 test "a pick default reads the user's own underscore binding", '''
