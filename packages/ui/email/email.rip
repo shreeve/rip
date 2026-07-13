@@ -16,6 +16,14 @@ safeCssIdentifier = (value: unknown, name: string): string ->
     throw new Error "email Font received unsafe #{name}"
   text
 
+safeFontWeight = (value: unknown): number ->
+  unless typeof value is 'number' and Number.isFinite(value) and 1 <= value <= 1000
+    throw new Error 'email Font received invalid fontWeight'
+  value
+
+unsafeUrlText = (value: string): boolean ->
+  /[\u0000-\u001F\u007F-\u009F]/.test(value) or value.startsWith('//') or value.startsWith('\\')
+
 export Email = component
   @class: string := ''
   @lang: string := 'en'
@@ -64,14 +72,15 @@ export Font = component
   @webFontFormat: string := 'woff2'
   _family: string ~= safeCssString(@google or @fontFamily, 'fontFamily')
   _fontStyle: string ~= safeCssIdentifier @fontStyle, 'fontStyle'
+  _fontWeight: number ~= safeFontWeight @fontWeight
   _display: string ~= safeCssIdentifier @display, 'display'
   _webFontUrl: string ~= safeCssString @webFontUrl, 'webFontUrl'
   _webFontFormat: string ~= safeCssIdentifier @webFontFormat, 'webFontFormat'
   _googleFamily: string ~= encodeURIComponent(_family).replace(/%20/g, '+')
   _googleSpec: string ~= if _fontStyle is 'italic'
-    "#{_googleFamily}:ital,wght@1,#{@fontWeight}"
+    "#{_googleFamily}:ital,wght@1,#{_fontWeight}"
   else
-    "#{_googleFamily}:wght@#{@fontWeight}"
+    "#{_googleFamily}:wght@#{_fontWeight}"
   _googleUrl: string ~= if @google then "https://fonts.googleapis.com/css2?family=#{_googleSpec}&display=#{_display}" else ''
   _source: string ~= if _webFontUrl then "src: url('#{_webFontUrl}') format('#{_webFontFormat}');" else ''
   _fallback: string[] ~= if Array.isArray(@fallbackFontFamily)
@@ -88,7 +97,7 @@ export Font = component
     @font-face {
       font-family: '#{_family}';
       font-style: #{_fontStyle};
-      font-weight: #{@fontWeight};
+      font-weight: #{_fontWeight};
       mso-font-alt: '#{_fallback[0]}';
       #{_source}
     }
@@ -284,6 +293,7 @@ escapeAttribute = (text: unknown): string ->
 safeHref = (href: unknown): string ->
   value = String(href ?? '').trim()
   return '' unless value
+  return '#' if unsafeUrlText value
   lower = value.toLowerCase()
   return value if lower.startsWith('http://')
   return value if lower.startsWith('https://')
@@ -295,6 +305,7 @@ safeHref = (href: unknown): string ->
 safeImageSrc = (src: unknown): string ->
   value = String(src ?? '').trim()
   return '' unless value
+  return '' if unsafeUrlText value
   lower = value.toLowerCase()
   return value if lower.startsWith('http://')
   return value if lower.startsWith('https://')
@@ -335,10 +346,10 @@ parseMarkdown = (source: string): string ->
         output.push "</#{list}>"
         list = null
       continue
-    if stripped[0] is '#'
-      level = 0
-      level++ while stripped[level] is '#' and level < 6
-      text = stripped.slice(level).trim()
+    heading = stripped.match /^(\#{1,6})\s+(.+)$/
+    if heading
+      level = heading[1].length
+      text = heading[2]
       output.push "<h#{level}>#{inlineMarkdown(text)}</h#{level}>"
       continue
     if (stripped[0] is '-' or stripped[0] is '*') and stripped[1] is ' '
@@ -407,12 +418,13 @@ export CodeInline = component
     '''
   _primaryClass: string ~= [@class, 'cino'].filter(Boolean).join ' '
   _fallbackClass: string ~= [@class, 'cio'].filter(Boolean).join ' '
+  _fallbackStyle: string ~= joinStyles _style, 'display:none'
   _content: string ~= if typeof @children is 'string' then @children else @children?.textContent ?? ''
   render
     style innerHTML: _orangeCss
     code class: _primaryClass, style: _style
       = _content
-    span class: _fallbackClass, style: "display:none;#{_style}"
+    span class: _fallbackClass, style: _fallbackStyle
       = _content
 
 export Tailwind = component

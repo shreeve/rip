@@ -39,6 +39,36 @@ test('curated email components neutralize unsafe URL and style inputs', () => {
   expect(() => email.toHTML(email.Font, {
     fontFamily: 'x</style><img src=x onerror=1><style>',
   })).toThrow(/unsafe fontFamily/);
+  expect(() => email.toHTML(email.Font, {
+    fontFamily: 'Demo',
+    webFontUrl: 'https://example.com/font.woff2',
+    fontWeight: '1}*{color:red',
+  })).toThrow(/invalid fontWeight/);
+});
+
+test('curated URLs reject control-prefixed and protocol-relative schemes', () => {
+  for (const href of [
+    '\u0001javascript:alert(1)',
+    'java\nscript:alert(1)',
+    '//evil.example/path',
+  ]) {
+    expect(email.toHTML(email.Link, { href, children: 'unsafe' }))
+      .toContain('href="#"');
+  }
+  expect(email.toHTML(email.Image, {
+    src: '\u0001data:text/html,<script>alert(1)</script>',
+    alt: 'unsafe',
+  })).not.toContain(' src=');
+  expect(email.toHTML(email.Image, {
+    src: '//evil.example/image.png',
+    alt: 'unsafe',
+  })).not.toContain(' src=');
+
+  const markdown = email.toHTML(email.Markdown, {
+    text: '[unsafe](\u0001javascript:alert(1))',
+  });
+  expect(markdown).toContain('href="#"');
+  expect(markdown).not.toContain('javascript:');
 });
 
 test('Markdown escapes URLs once and inline code preserves slot content', () => {
@@ -47,9 +77,19 @@ test('Markdown escapes URLs once and inline code preserves slot content', () => 
   });
   expect(markdown).toContain('href="https://example.com?a=1&amp;b=2"');
   expect(markdown).not.toContain('&amp;amp;');
+  expect(email.toHTML(email.Markdown, { text: '#######not-a-heading' }))
+    .toContain('<p>#######not-a-heading</p>');
 
   const code = email.toHTML(email.CodeInline, { children: 'hello' });
   expect(code.match(/hello/g)).toHaveLength(2);
+});
+
+test('CodeInline keeps its fallback hidden despite caller display styles', () => {
+  const html = email.toHTML(email.CodeInline, {
+    children: 'hello',
+    style: 'display:inline-block',
+  });
+  expect(html).toMatch(/<span class="cio" style="[^"]*display:none[^"]*">/);
 });
 
 test('optional image dimensions remain absent', () => {
