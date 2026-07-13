@@ -349,3 +349,38 @@ test 'styleToString handles MSO properties', '''
   { styleToString } = emailCompat
   styleToString({ msoPaddingAlt: '0px', msoTextRaise: '12' })
 ''', 'mso-padding-alt:0px;mso-text-raise:12'
+
+test 'toHTML returns string with doctype', '''
+  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
+  { toHTML } = emailRender
+  TestEmail = component
+    render
+      html
+        body
+          p "hello"
+  result = toHTML(TestEmail)
+  result.includes('<!DOCTYPE') and result.includes('<p>hello</p>')
+''', true
+
+test 'toText returns plain text string', '''
+  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
+  { toText } = emailRender
+  TestEmail = component
+    render
+      div
+        p "hello world"
+  result = toText(TestEmail)
+  result.includes('hello world')
+''', true
+
+test 'toEmail returns html and text', '''
+  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
+  { toEmail } = emailRender
+  TestEmail = component
+    render
+      div
+        h1 "Title"
+        p "Body"
+  { html, text } = toEmail(TestEmail)
+  html.includes('<h1>Title</h1>') and text.includes('Title') and text.includes('Body')
+''', true

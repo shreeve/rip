@@ -1,0 +1,42 @@
+import { Node, Document } from '../email/dom.rip'
+
+class SVGElementStub extends Node
+
+restoreGlobal = (host: any, key: string, present: boolean, value: any) ->
+  if present then host[key] = value else delete host[key]
+
+export _renderComponent = (ComponentClass: any, props: Record<string, any> = {}, after: any = null): Node ->
+  host = globalThis as any
+  if host.document?.__ripRenderActive
+    throw new Error 'nested or concurrent Rip SSR is not supported — complete the active synchronous render first'
+
+  hadDocument = Object.prototype.hasOwnProperty.call host, 'document'
+  hadNode = Object.prototype.hasOwnProperty.call host, 'Node'
+  hadSvg = Object.prototype.hasOwnProperty.call host, 'SVGElement'
+  previousDocument = host.document
+  previousNode = host.Node
+  previousSvg = host.SVGElement
+
+  document = Document.new()
+  document.__ripRenderActive = true
+  host.document = document
+  host.Node = Node
+  host.SVGElement = SVGElementStub
+
+  instance = null
+  root = document.createElement '__root'
+  try
+    instance = ComponentClass.new props
+    instance.mount root
+    unless instance._state is 'mounted'
+      throw new Error "#{ComponentClass.name ?? 'component'} did not complete synchronous SSR mount"
+    if after
+      result = after root
+      if result and typeof result.then is 'function'
+        throw new Error 'Rip SSR post-render hooks must be synchronous'
+    root
+  finally
+    instance.unmount(removeDOM: false) if instance? and instance._state is 'mounted'
+    restoreGlobal host, 'document', hadDocument, previousDocument
+    restoreGlobal host, 'Node', hadNode, previousNode
+    restoreGlobal host, 'SVGElement', hadSvg, previousSvg

@@ -15,9 +15,9 @@
 // illegal inside an already-ambient `declare module` block (TS1038) —
 // wrapping would force stripping `declare` from the artifact under
 // validation, a transform the gate must not have.
-import { mkdtempSync, writeFileSync, rmSync } from 'fs';
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'fs';
 import { spawnSync } from 'child_process';
-import { join } from 'path';
+import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 
 // files: { name: text }. Returns { status, byFile: Map<name, [line]>,
@@ -29,7 +29,11 @@ export function tscBatch(tsc, files, extraArgs = []) {
   const dir = mkdtempSync(join(tmpdir(), 'rip-tsc-batch-'));
   try {
     const names = Object.keys(files);
-    for (const name of names) writeFileSync(join(dir, name), files[name]);
+    for (const name of names) {
+      const path = join(dir, name);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, files[name]);
+    }
     const r = spawnSync(tsc, ['--noEmit', '--target', 'es2022', '--lib', 'es2022,dom', ...extraArgs, ...names], {
       cwd: dir,
       encoding: 'utf8',
