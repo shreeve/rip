@@ -33,11 +33,7 @@ test "bare this"           , """
 
 test "rename single"       , "o = {firstName: 'Alice'}; o.{firstName: fn}" , {fn: 'Alice'}
 test "rename mixed"        , "o = {a: 1, b: 2}; o.{a: x, b}"              , {x: 1, b: 2}
-# Reserved-word keys like `default`, `class`, `delete` aren't supported in
-# the PickKey slot in v1 — the lexer tokenizes them as keyword tokens, not
-# PROPERTY tokens. Use an explicit object literal for those cases:
-#   result = { default: whom.default }
-# Can revisit with a lexer retag inside pick bodies if it becomes common.
+# Reserved-word keys use the same pick-key reading as ordinary properties.
 
 # ==============================================================================
 # Runtime — default (`name = expr`) — nullish semantics

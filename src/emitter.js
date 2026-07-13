@@ -24,7 +24,7 @@ import { CodeBuilder } from './builder.js';
 import { descriptorSegments, paramNamesOf, splitTopLevelByComma } from './schema.js';
 import { buildSchemaTypeStory, isModuleShaped, SchemaTypeError } from './schema-types.js';
 import { Parser } from './parser.js';
-import { applyInsertionPass, implicitBlocks, implicitObjects, implicitCalls, tagPostfixConditionals, rewriteTypes } from './lexer.js';
+import { applyInsertionPass, implicitBlocks, implicitObjects, implicitCalls, tagPostfixConditionals, rewriteTypes, isIdentifierName } from './lexer.js';
 import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams } from './typetext.js';
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, knownBareAttribute } from './dom-vocab.js';
 import {
@@ -288,6 +288,10 @@ class Emitter {
     // captured token array's identity — the descriptor carries one
     // stable array per body.
     this.subParses = new Map();
+    // Generated runtime calls use aliases minted against every source
+    // atom. Delivery fills this before emission; ordinary programs keep
+    // the runtime's public spelling and therefore preserve their bytes.
+    this.runtimeAliases = new Map();
     // Chained-comparison temps: a chain's middle operand with
     // a node shape (any compound — re-evaluation is observable, down
     // to valueOf/toString coercion) caches in a fresh `_ref` hoisted
@@ -2684,9 +2688,7 @@ class Emitter {
       }
       // Transforms see the whole raw input as the explicit `it`
       // parameter.
-      const params = e.tag === 'field'
-        ? ['it']
-        : paramNamesOf(e.paramTokens ?? [], e.tag === 'ensure' ? '@ensure' : `'${e.name}'`, Emitter.schemaFail);
+      const params = Emitter.schemaBodyParams(e);
       fns.set(i, this.schemaFnCode(params, tokens));
     }
     // The schema type story (face only): callable bodies gain
@@ -2739,6 +2741,16 @@ class Emitter {
       out.push({ entry: { tag: 'adapter' }, index: 'adapter', tokens: descriptor.adapterTokens, value: true });
     }
     return out;
+  }
+
+  static schemaBodyParams(entry) {
+    if (entry.tag === 'adapter') return [];
+    if (entry.tag === 'field') return ['it'];
+    return paramNamesOf(
+      entry.paramTokens ?? [],
+      entry.tag === 'ensure' ? '@ensure' : `'${entry.name}'`,
+      Emitter.schemaFail,
+    );
   }
 
   // Compile a captured schema-body token slice to a parenthesized
@@ -2831,6 +2843,10 @@ class Emitter {
     // draw from the same name pool as the parent's (both emit into
     // the same output module).
     sub.temps = this.temps;
+    // Generated runtime helpers are delivered and aliased at module
+    // scope. Callable bodies must spell the parent's minted aliases,
+    // never the public helper names a parameter/local may shadow.
+    sub.runtimeAliases = this.runtimeAliases;
     // One sub-parse cache per module: a nested schema inside a
     // callable body parses once whether the delivery walk or a
     // deeper sub-emitter reaches it first.
@@ -3809,7 +3825,7 @@ class Emitter {
         // evaluates, without resolving capturable source bindings.
         const kt = this.loopTempName('_k');
         const vt = this.loopTempName('_v');
-        this.b.emit(`${inner}const ${kt} = __toPropertyKey(`);
+        this.b.emit(`${inner}const ${kt} = ${this.runtimeAliases.get('__toPropertyKey') ?? '__toPropertyKey'}(`);
         // A string key is an identifier read (it routes through expr,
         // so a reactive key unwraps — `result[count.value]`;
         // loop variables are frame-bound and stay bare); a node
@@ -3835,7 +3851,7 @@ class Emitter {
         emitValue();
         if (wrap) this.b.emit(')');
         this.b.emit(';\n');
-        this.b.emit(`${inner}__defineOwnDataProperty(${acc}, ${kt}, ${vt});\n`);
+        this.b.emit(`${inner}${this.runtimeAliases.get('__defineOwnDataProperty') ?? '__defineOwnDataProperty'}(${acc}, ${kt}, ${vt});\n`);
       }
       if (guards.length > 0) this.b.emit(`${pad}    }\n`);
       this.b.emit(`${pad}  }\n`);
@@ -4912,7 +4928,7 @@ class Emitter {
     // A regex spelling is a MATCH (it assigns `_`), never repeat-safe.
     if (x[0] === '/') return false;
     // Non-identifier spellings are literals: numbers, quoted strings.
-    if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(x)) return true;
+    if (!isIdentifierName(x)) return true;
     if (Emitter.LITERAL_WORDS.has(x)) return true;
     if (extra !== null && extra.has(x)) return true;
     return this.lexicallyBound(x);
@@ -11336,6 +11352,7 @@ const RUNTIME_TABLE = [
   {
     key: 'intrinsics',
     names: ['__toPropertyKey', '__defineOwnDataProperty'],
+    generatedNames: ['__toPropertyKey', '__defineOwnDataProperty'],
     url: new URL('./runtime/intrinsics.js', import.meta.url),
     triggers: (sexpr, preds) => containsObjectComprehension(sexpr),
   },
@@ -11535,7 +11552,7 @@ const referencesNames = (sexpr, names, isDecl = () => false) => {
 // method). Nested schemas inside callable bodies recurse.
 const deliveryTrees = (emitter, sexpr) => {
   const trees = [];
-  const visit = (tree, stores) => {
+  const visit = (tree, stores, atoms = []) => {
     // Two predicates, one distinction: every declaration's
     // target is a BINDING in the reference walk (isDecl — readonly
     // included), but only the constructs whose emission CALLS a
@@ -11544,13 +11561,19 @@ const deliveryTrees = (emitter, sexpr) => {
     const isDecl = (x) => Emitter.isReactiveDeclIn(stores, x) || Emitter.isEffectDeclIn(stores, x) || Emitter.isReadonlyDeclIn(stores, x);
     const isTrigger = (x) => Emitter.isReactiveDeclIn(stores, x) || Emitter.isEffectDeclIn(stores, x);
     const isComponent = (x) => Emitter.isComponentDeclIn(stores, x);
-    trees.push({ tree, isDecl, isTrigger, isComponent });
+    trees.push({ tree, atoms, isDecl, isTrigger, isComponent });
     const walk = (x) => {
       if (!isNode(x)) return;
       if (x[0] === 'schema' && x.length === 2 && x[1] && typeof x[1] === 'object' && Array.isArray(x[1].entries)) {
-        for (const { tokens } of Emitter.schemaBodies(x[1])) {
+        for (const { entry, tokens, value } of Emitter.schemaBodies(x[1])) {
           const sub = emitter.subParse(tokens);
-          if (sub.stmts.length) visit(['program', ...sub.stmts], sub.stores);
+          if (sub.stmts.length) {
+            visit(
+              ['program', ...sub.stmts],
+              sub.stores,
+              value ? [] : Emitter.schemaBodyParams(entry),
+            );
+          }
         }
         return;
       }
@@ -11649,7 +11672,19 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
     if (typeof x === 'string') emitter.temps.used.add(x);
     else if (isNode(x)) for (const el of x) collectAtoms(el);
   };
-  for (const { tree } of trees) collectAtoms(tree);
+  for (const { tree, atoms } of trees) {
+    collectAtoms(tree);
+    collectAtoms(atoms);
+  }
+  // Runtime names spelled only by generated output get one module-level
+  // alias minted against every source atom. The default alias is the
+  // public runtime name, preserving bytes; a source collision receives a
+  // suffix and delivery imports/destructures into that alias.
+  for (const rt of RUNTIME_TABLE) {
+    for (const name of rt.generatedNames ?? []) {
+      emitter.runtimeAliases.set(name, Emitter.mintName(name, emitter.temps.used));
+    }
+  }
   const bound = programScopeNames(emitter, parseResult.sexpr);
   const runtimes = new Set();
   for (const rt of RUNTIME_TABLE) {
@@ -11673,33 +11708,36 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
     const active = RUNTIME_TABLE.filter((rt) => runtimes.has(rt.key));
     const units = [];
     if (runtimeDelivery === 'import') {
-      for (const rt of active) units.push({ names: rt.names, imp: rt.url.pathname });
+      for (const rt of active) units.push({ runtimes: [rt], names: rt.names, imp: rt.url.pathname });
     } else {
       const fused = new Set(active.filter((rt) => rt.requires).map((rt) => rt.requires));
       for (const rt of active) {
         if (fused.has(rt.key)) continue;
         if (rt.requires) {
           const dep = RUNTIME_TABLE.find((d) => d.key === rt.requires);
-          units.push({ names: [...dep.names, ...rt.names], body: runtimeText(dep) + '\n' + runtimeText(rt) });
+          units.push({ runtimes: [dep, rt], names: [...dep.names, ...rt.names], body: runtimeText(dep) + '\n' + runtimeText(rt) });
         } else {
-          units.push({ names: rt.names, body: runtimeText(rt), types: rt.types });
+          units.push({ runtimes: [rt], names: rt.names, body: runtimeText(rt), types: rt.types });
         }
       }
     }
     const programId = stores.idOf(parseResult.sexpr);
     for (const unit of units) {
-      const unboundNames = unit.names.filter((n) => !bound.has(n));
-      if (unboundNames.length === 0) continue;
+      const generated = new Set(unit.runtimes.flatMap((rt) => rt.generatedNames ?? []));
+      const bindings = unit.names
+        .filter((name) => generated.has(name) || !bound.has(name))
+        .map((name) => ({ name, local: generated.has(name) ? emitter.runtimeAliases.get(name) : name }));
+      if (bindings.length === 0) continue;
       const start = builder.offset;
       if (unit.imp) {
-        builder.emit(`import { ${unboundNames.join(', ')} } from ${JSON.stringify(unit.imp)};\n`);
+        builder.emit(`import { ${bindings.map(({ name, local }) => name === local ? name : `${name} as ${local}`).join(', ')} } from ${JSON.stringify(unit.imp)};\n`);
       } else {
-        builder.emit(`const { ${unboundNames.join(', ')} }`);
+        builder.emit(`const { ${bindings.map(({ name, local }) => name === local ? name : `${name}: ${local}`).join(', ')} }`);
         // Precise stdlib types on the TS face (the STDLIB_TYPE_DECLS
         // as a destructure annotation): the checker sees the declared
         // signatures instead of inferring anys through the IIFE.
         if (face === 'ts' && unit.types) {
-          const members = unboundNames.filter((n) => unit.types[n]).map((n) => `${n}: ${unit.types[n]}`);
+          const members = bindings.filter(({ name }) => unit.types[name]).map(({ local, name }) => `${local}: ${unit.types[name]}`);
           if (members.length > 0) builder.tsOnly(() => builder.emit(`: { ${members.join('; ')} }`));
         }
         builder.emit(` = (() => {\n${unit.body}\nreturn { ${unit.names.join(', ')} };\n})();\n`);
