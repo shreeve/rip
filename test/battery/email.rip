@@ -1,395 +1,10 @@
+# Public email authoring surface.
+
 import { test, code, fail, type } from '../support/testing.js'
 
-test 'createElement creates element with tag', '''
-  emailDom = import!("#{process.cwd()}/packages/ui/email/dom.rip")
-  { Document } = emailDom
-  doc = Document.new()
-  doc.createElement('div').tag
-''', 'div'
-
-test 'createTextNode creates text with data', '''
-  emailDom = import!("#{process.cwd()}/packages/ui/email/dom.rip")
-  { Document } = emailDom
-  Document.new().createTextNode('hello').data
-''', 'hello'
-
-test 'createComment creates comment with data', '''
-  emailDom = import!("#{process.cwd()}/packages/ui/email/dom.rip")
-  { Document } = emailDom
-  Document.new().createComment('test').data
-''', 'test'
-
-test 'appendChild adds child and sets parentNode', '''
-  emailDom = import!("#{process.cwd()}/packages/ui/email/dom.rip")
-  { Document } = emailDom
-  doc = Document.new()
-  parent = doc.createElement('div')
-  child = doc.createElement('span')
-  parent.appendChild(child)
-  child.parentNode is parent and parent.childNodes.length is 1
-''', true
-
-test 'appendChild chains nextSibling', '''
-  emailDom = import!("#{process.cwd()}/packages/ui/email/dom.rip")
-  { Document } = emailDom
-  doc = Document.new()
-  parent = doc.createElement('div')
-  a = doc.createElement('span')
-  b = doc.createElement('span')
-  parent.appendChild(a)
-  parent.appendChild(b)
-  a.nextSibling is b and b.previousSibling is a
-''', true
-
-test 'insertBefore inserts before reference', '''
-  emailDom = import!("#{process.cwd()}/packages/ui/email/dom.rip")
-  { Document } = emailDom
-  doc = Document.new()
-  parent = doc.createElement('div')
-  a = doc.createElement('a')
-  c2 = doc.createElement('c')
-  parent.appendChild(a)
-  parent.appendChild(c2)
-  b = doc.createElement('b')
-  parent.insertBefore(b, c2)
-  parent.childNodes.map((n) -> n.tag).join(',')
-''', 'a,b,c'
-
-test 'removeChild removes and clears parentNode', '''
-  emailDom = import!("#{process.cwd()}/packages/ui/email/dom.rip")
-  { Document } = emailDom
-  doc = Document.new()
-  parent = doc.createElement('div')
-  child = doc.createElement('span')
-  parent.appendChild(child)
-  parent.removeChild(child)
-  parent.childNodes.length is 0 and child.parentNode is null
-''', true
-
-test 'fragment children flatten on appendChild', '''
-  emailDom = import!("#{process.cwd()}/packages/ui/email/dom.rip")
-  { Document } = emailDom
-  doc = Document.new()
-  parent = doc.createElement('div')
-  frag = doc.createDocumentFragment()
-  frag.appendChild(doc.createElement('a'))
-  frag.appendChild(doc.createElement('b'))
-  parent.appendChild(frag)
-  parent.childNodes.map((n) -> n.tag).join(',')
-''', 'a,b'
-
-test 'setAttribute style string parses', '''
-  emailDom = import!("#{process.cwd()}/packages/ui/email/dom.rip")
-  { Document } = emailDom
-  doc = Document.new()
-  el = doc.createElement('div')
-  el.setAttribute('style', 'color:red;font-size:14px')
-  el.style.color is 'red' and el.style.fontSize is '14px'
-''', true
-
-test 'textContent sets text child', '''
-  emailDom = import!("#{process.cwd()}/packages/ui/email/dom.rip")
-  { Document } = emailDom
-  doc = Document.new()
-  el = doc.createElement('p')
-  el.textContent = 'hello world'
-  el.childNodes.length is 1 and el.childNodes[0].data is 'hello world'
-''', true
-
-test 'remove removes self from parent', '''
-  emailDom = import!("#{process.cwd()}/packages/ui/email/dom.rip")
-  { Document } = emailDom
-  doc = Document.new()
-  parent = doc.createElement('div')
-  child = doc.createElement('span')
-  parent.appendChild(child)
-  child.remove()
-  parent.childNodes.length
-''', 0
-
-test 'className sets class attribute', '''
-  emailDom = import!("#{process.cwd()}/packages/ui/email/dom.rip")
-  { Document } = emailDom
-  doc = Document.new()
-  el = doc.createElement('div')
-  el.className = 'card active'
-  el.attributes.get('class')
-''', 'card active'
-
-test 'setAttribute style object merges into style', '''
-  emailDom = import!("#{process.cwd()}/packages/ui/email/dom.rip")
-  { Document } = emailDom
-  doc = Document.new()
-  el = doc.createElement('div')
-  el.setAttribute('style', { color: 'blue', fontWeight: 'bold' })
-  el.style.color is 'blue' and el.style.fontWeight is 'bold'
-''', true
-
-test 'serialize element with text', '''
-  emailDom = import!("#{process.cwd()}/packages/ui/email/dom.rip")
-  { Document, serialize } = emailDom
-  doc = Document.new()
-  el = doc.createElement('p')
-  el.appendChild(doc.createTextNode('hello'))
-  serialize(el)
-''', '<p>hello</p>'
-
-test 'serialize void element', '''
-  emailDom = import!("#{process.cwd()}/packages/ui/email/dom.rip")
-  { Document, serialize } = emailDom
-  serialize(Document.new().createElement('br'))
-''', '<br />'
-
-test 'serialize element with style object', '''
-  emailDom = import!("#{process.cwd()}/packages/ui/email/dom.rip")
-  { Document, serialize } = emailDom
-  doc = Document.new()
-  el = doc.createElement('p')
-  el.style.fontSize = '14px'
-  el.style.lineHeight = '24px'
-  serialize(el)
-''', '<p style="font-size:14px;line-height:24px"></p>'
-
-test 'serialize escapes HTML in text', '''
-  emailDom = import!("#{process.cwd()}/packages/ui/email/dom.rip")
-  { Document, serialize } = emailDom
-  doc = Document.new()
-  el = doc.createElement('p')
-  el.appendChild(doc.createTextNode('a < b & c > d'))
-  serialize(el)
-''', '<p>a &lt; b &amp; c &gt; d</p>'
-
-test 'serialize suppresses framework anchor comments', '''
-  emailDom = import!("#{process.cwd()}/packages/ui/email/dom.rip")
-  { Document, serialize } = emailDom
-  doc = Document.new()
-  parent = doc.createElement('div')
-  parent.appendChild(doc.createComment('if'))
-  parent.appendChild(doc.createComment('for'))
-  parent.appendChild(doc.createComment(''))
-  serialize(parent)
-''', '<div></div>'
-
-test 'serialize passes through MSO comments', '''
-  emailDom = import!("#{process.cwd()}/packages/ui/email/dom.rip")
-  { Document, serialize } = emailDom
-  doc = Document.new()
-  parent = doc.createElement('div')
-  parent.appendChild(doc.createComment('[if mso]><i>test</i><![endif]'))
-  serialize(parent)
-''', '<div><!--[if mso]><i>test</i><![endif]--></div>'
-
-test 'serialize innerHTML outputs verbatim', '''
-  emailDom = import!("#{process.cwd()}/packages/ui/email/dom.rip")
-  { Document, serialize } = emailDom
-  doc = Document.new()
-  el = doc.createElement('span')
-  el.innerHTML = '<b>hi</b>'
-  serialize(el)
-''', '<span><b>hi</b></span>'
-
-test 'serialize nested structure', '''
-  emailDom = import!("#{process.cwd()}/packages/ui/email/dom.rip")
-  { Document, serialize } = emailDom
-  doc = Document.new()
-  table = doc.createElement('table')
-  body = doc.createElement('tbody')
-  row = doc.createElement('tr')
-  cell = doc.createElement('td')
-  cell.appendChild(doc.createTextNode('cell'))
-  row.appendChild(cell)
-  body.appendChild(row)
-  table.appendChild(body)
-  serialize(table)
-''', '<table><tbody><tr><td>cell</td></tr></tbody></table>'
-
-test 'toPlainText paragraph', '''
-  emailDom = import!("#{process.cwd()}/packages/ui/email/dom.rip")
-  { Document, toPlainText } = emailDom
-  doc = Document.new()
-  root = doc.createElement('__root')
-  paragraph = doc.createElement('p')
-  paragraph.appendChild(doc.createTextNode('Hello world'))
-  root.appendChild(paragraph)
-  toPlainText(root)
-''', 'Hello world'
-
-test 'toPlainText link with different href', '''
-  emailDom = import!("#{process.cwd()}/packages/ui/email/dom.rip")
-  { Document, toPlainText } = emailDom
-  doc = Document.new()
-  root = doc.createElement('__root')
-  link = doc.createElement('a')
-  link.setAttribute('href', 'https://example.com')
-  link.appendChild(doc.createTextNode('Click here'))
-  root.appendChild(link)
-  toPlainText(root)
-''', 'Click here (https://example.com)'
-
-test 'toPlainText hr becomes ---', '''
-  emailDom = import!("#{process.cwd()}/packages/ui/email/dom.rip")
-  { Document, toPlainText } = emailDom
-  doc = Document.new()
-  root = doc.createElement('__root')
-  root.appendChild(doc.createElement('hr'))
-  toPlainText(root).trim()
-''', '---'
-
-test 'toPlainText skips data-skip-in-text elements', '''
-  emailDom = import!("#{process.cwd()}/packages/ui/email/dom.rip")
-  { Document, toPlainText } = emailDom
-  doc = Document.new()
-  root = doc.createElement('__root')
-  hidden = doc.createElement('div')
-  hidden.setAttribute('data-skip-in-text', 'true')
-  hidden.appendChild(doc.createTextNode('hidden'))
-  root.appendChild(hidden)
-  paragraph = doc.createElement('p')
-  paragraph.appendChild(doc.createTextNode('visible'))
-  root.appendChild(paragraph)
-  toPlainText(root).trim()
-''', 'visible'
-
-test 'toPlainText skips style tags', '''
-  emailDom = import!("#{process.cwd()}/packages/ui/email/dom.rip")
-  { Document, toPlainText } = emailDom
-  doc = Document.new()
-  root = doc.createElement('__root')
-  style = doc.createElement('style')
-  style.appendChild(doc.createTextNode('body { color: red }'))
-  root.appendChild(style)
-  paragraph = doc.createElement('p')
-  paragraph.appendChild(doc.createTextNode('content'))
-  root.appendChild(paragraph)
-  toPlainText(root).trim()
-''', 'content'
-
-test 'pxToPt converts correctly', '''
-  emailCompat = import!("#{process.cwd()}/packages/ui/email/compat.rip")
-  { pxToPt } = emailCompat
-  pxToPt(16)
-''', 12
-
-test 'convertToPx handles px', '''
-  emailCompat = import!("#{process.cwd()}/packages/ui/email/compat.rip")
-  { convertToPx } = emailCompat
-  convertToPx('16px')
-''', 16
-
-test 'convertToPx handles em', '''
-  emailCompat = import!("#{process.cwd()}/packages/ui/email/compat.rip")
-  { convertToPx } = emailCompat
-  convertToPx('1em')
-''', 16
-
-test 'computeMsoPadding returns zero for zero', '''
-  emailCompat = import!("#{process.cwd()}/packages/ui/email/compat.rip")
-  { computeMsoPadding } = emailCompat
-  computeMsoPadding(0)
-''', [0, 0]
-
-test 'previewPadding pads to max length', '''
-  emailCompat = import!("#{process.cwd()}/packages/ui/email/compat.rip")
-  { previewPadding } = emailCompat
-  previewPadding('short').length
-''', 1015
-
-test 'styleToString converts object', '''
-  emailCompat = import!("#{process.cwd()}/packages/ui/email/compat.rip")
-  { styleToString } = emailCompat
-  styleToString({ fontSize: '14px', color: 'red' })
-''', 'font-size:14px;color:red'
-
-test 'msoConditional wraps in comments', '''
-  emailCompat = import!("#{process.cwd()}/packages/ui/email/compat.rip")
-  { msoConditional } = emailCompat
-  msoConditional('<b>hi</b>')
-''', '<!--[if mso]><b>hi</b><![endif]-->'
-
-test 'pxToPt returns undefined for non-number', '''
-  emailCompat = import!("#{process.cwd()}/packages/ui/email/compat.rip")
-  { pxToPt } = emailCompat
-  pxToPt(undefined)
-''', undefined
-
-test 'convertToPx handles number', '''
-  emailCompat = import!("#{process.cwd()}/packages/ui/email/compat.rip")
-  { convertToPx } = emailCompat
-  convertToPx(42)
-''', 42
-
-test 'convertToPx returns 0 for null', '''
-  emailCompat = import!("#{process.cwd()}/packages/ui/email/compat.rip")
-  { convertToPx } = emailCompat
-  convertToPx(null)
-''', 0
-
-test 'parsePadding shorthand single value', '''
-  emailCompat = import!("#{process.cwd()}/packages/ui/email/compat.rip")
-  { parsePadding } = emailCompat
-  result = parsePadding({ padding: '10px' })
-  result.paddingTop is 10 and result.paddingRight is 10 and result.paddingBottom is 10 and result.paddingLeft is 10
-''', true
-
-test 'parsePadding individual overrides shorthand', '''
-  emailCompat = import!("#{process.cwd()}/packages/ui/email/compat.rip")
-  { parsePadding } = emailCompat
-  result = parsePadding({ padding: '10px', paddingLeft: '5px' })
-  result.paddingLeft
-''', 5
-
-test 'previewPadding returns empty for long text', '''
-  emailCompat = import!("#{process.cwd()}/packages/ui/email/compat.rip")
-  { previewPadding } = emailCompat
-  previewPadding('x'.repeat(200))
-''', ''
-
-test 'styleToString handles MSO properties', '''
-  emailCompat = import!("#{process.cwd()}/packages/ui/email/compat.rip")
-  { styleToString } = emailCompat
-  styleToString({ msoPaddingAlt: '0px', msoTextRaise: '12' })
-''', 'mso-padding-alt:0px;mso-text-raise:12'
-
-test 'toHTML returns string with doctype', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  { toHTML } = emailRender
-  TestEmail = component
-    render
-      html
-        body
-          p "hello"
-  result = toHTML(TestEmail)
-  result.includes('<!DOCTYPE') and result.includes('<p>hello</p>')
-''', true
-
-test 'toText returns plain text string', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  { toText } = emailRender
-  TestEmail = component
-    render
-      div
-        p "hello world"
-  result = toText(TestEmail)
-  result.includes('hello world')
-''', true
-
-test 'toEmail returns html and text', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  { toEmail } = emailRender
-  TestEmail = component
-    render
-      div
-        h1 "Title"
-        p "Body"
-  { html, text } = toEmail(TestEmail)
-  html.includes('<h1>Title</h1>') and text.includes('Title') and text.includes('Body')
-''', true
-
 test 'Email renders html tag with lang and dir', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")
-  { toHTML } = emailRender
-  { Email } = emailPkg
+  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML, Email } = email
   E = component
     render
       Email
@@ -398,10 +13,8 @@ test 'Email renders html tag with lang and dir', '''
 ''', true
 
 test 'Head renders meta tags', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")
-  { toHTML } = emailRender
-  { Email, Head } = emailPkg
+  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML, Email, Head } = email
   E = component
     render
       Email
@@ -411,10 +24,8 @@ test 'Head renders meta tags', '''
 ''', true
 
 test 'Body renders table wrapper', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")
-  { toHTML } = emailRender
-  { Email, Body } = emailPkg
+  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML, Email, Body } = email
   E = component
     render
       Email
@@ -425,10 +36,8 @@ test 'Body renders table wrapper', '''
 ''', true
 
 test 'Preview renders hidden div with padding', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")
-  { toHTML } = emailRender
-  { Preview } = emailPkg
+  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML, Preview } = email
   E = component
     render
       Preview text: "Hello preview"
@@ -437,10 +46,8 @@ test 'Preview renders hidden div with padding', '''
 ''', true
 
 test 'Container renders centered table', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")
-  { toHTML } = emailRender
-  { Container } = emailPkg
+  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML, Container } = email
   E = component
     render
       Container
@@ -450,10 +57,8 @@ test 'Container renders centered table', '''
 ''', true
 
 test 'Section renders full-width table', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")
-  { toHTML } = emailRender
-  { Section } = emailPkg
+  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML, Section } = email
   E = component
     render
       Section
@@ -463,10 +68,8 @@ test 'Section renders full-width table', '''
 ''', true
 
 test 'Row renders table row', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")
-  { toHTML } = emailRender
-  { Row } = emailPkg
+  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML, Row } = email
   E = component
     render
       Row
@@ -476,10 +79,8 @@ test 'Row renders table row', '''
 ''', true
 
 test 'Column renders td', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")
-  { toHTML } = emailRender
-  { Column } = emailPkg
+  email = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML, Column } = email
   E = component
     render
       table
@@ -491,9 +92,8 @@ test 'Column renders td', '''
 ''', true
 
 test 'Heading renders h1 by default', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")
-  { toHTML } = emailRender
+  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML } = emailPkg
   { Heading } = emailPkg
   E = component
     render
@@ -503,9 +103,8 @@ test 'Heading renders h1 by default', '''
 ''', true
 
 test 'Heading renders h1 with style', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")
-  { toHTML } = emailRender
+  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML } = emailPkg
   { Heading } = emailPkg
   E = component
     render
@@ -515,9 +114,8 @@ test 'Heading renders h1 with style', '''
 ''', true
 
 test 'Heading renders h2 with as prop', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")
-  { toHTML } = emailRender
+  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML } = emailPkg
   { Heading } = emailPkg
   E = component
     render
@@ -527,9 +125,8 @@ test 'Heading renders h2 with as prop', '''
 ''', true
 
 test 'Text renders p with defaults', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")
-  { toHTML } = emailRender
+  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML } = emailPkg
   { Text } = emailPkg
   E = component
     render
@@ -540,9 +137,8 @@ test 'Text renders p with defaults', '''
 ''', true
 
 test 'Link renders anchor with defaults', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")
-  { toHTML } = emailRender
+  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML } = emailPkg
   { Link } = emailPkg
   E = component
     render
@@ -553,9 +149,8 @@ test 'Link renders anchor with defaults', '''
 ''', true
 
 test 'Image renders img with safe defaults', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")
-  { toHTML } = emailRender
+  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML } = emailPkg
   { Image } = emailPkg
   E = component
     render
@@ -565,9 +160,8 @@ test 'Image renders img with safe defaults', '''
 ''', true
 
 test 'Divider renders hr with border', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")
-  { toHTML } = emailRender
+  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML } = emailPkg
   { Divider } = emailPkg
   E = component
     render
@@ -577,9 +171,8 @@ test 'Divider renders hr with border', '''
 ''', true
 
 test 'Button renders anchor with MSO conditionals', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")
-  { toHTML } = emailRender
+  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML } = emailPkg
   { Button } = emailPkg
   E = component
     render
@@ -590,9 +183,8 @@ test 'Button renders anchor with MSO conditionals', '''
 ''', true
 
 test 'Markdown renders paragraphs', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")
-  { toHTML } = emailRender
+  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML } = emailPkg
   { Markdown } = emailPkg
   E = component
     render
@@ -601,9 +193,8 @@ test 'Markdown renders paragraphs', '''
 ''', true
 
 test 'Markdown renders bold and italic', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")
-  { toHTML } = emailRender
+  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML } = emailPkg
   { Markdown } = emailPkg
   E = component
     render
@@ -613,9 +204,8 @@ test 'Markdown renders bold and italic', '''
 ''', true
 
 test 'Markdown renders headings', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")
-  { toHTML } = emailRender
+  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML } = emailPkg
   { Markdown } = emailPkg
   E = component
     render
@@ -624,9 +214,8 @@ test 'Markdown renders headings', '''
 ''', true
 
 test 'Markdown renders links', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")
-  { toHTML } = emailRender
+  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML } = emailPkg
   { Markdown } = emailPkg
   E = component
     render
@@ -635,9 +224,8 @@ test 'Markdown renders links', '''
 ''', true
 
 test 'Markdown renders unordered lists', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")
-  { toHTML } = emailRender
+  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML } = emailPkg
   { Markdown } = emailPkg
   E = component
     render
@@ -647,9 +235,8 @@ test 'Markdown renders unordered lists', '''
 ''', true
 
 test 'CodeBlock renders pre with code', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")
-  { toHTML } = emailRender
+  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML } = emailPkg
   { CodeBlock } = emailPkg
   E = component
     render
@@ -659,9 +246,8 @@ test 'CodeBlock renders pre with code', '''
 ''', true
 
 test 'CodeBlock escapes HTML in code', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")
-  { toHTML } = emailRender
+  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML } = emailPkg
   { CodeBlock } = emailPkg
   E = component
     render
@@ -671,9 +257,8 @@ test 'CodeBlock escapes HTML in code', '''
 ''', true
 
 test 'CodeInline renders code with Orange.fr workaround', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")
-  { toHTML } = emailRender
+  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML } = emailPkg
   { CodeInline } = emailPkg
   E = component
     render
@@ -684,9 +269,8 @@ test 'CodeInline renders code with Orange.fr workaround', '''
 ''', true
 
 test 'Tailwind injects generated CSS for raw HTML tag classes', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")
-  { toHTML } = emailRender
+  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML } = emailPkg
   { Email, Head, Tailwind } = emailPkg
   E = component
     render
@@ -700,9 +284,8 @@ test 'Tailwind injects generated CSS for raw HTML tag classes', '''
 ''', true
 
 test 'Tailwind injects generated CSS for PascalCase component classes', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")
-  { toHTML } = emailRender
+  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML } = emailPkg
   { Email, Head, Tailwind, Text, Button } = emailPkg
   E = component
     render
@@ -718,9 +301,8 @@ test 'Tailwind injects generated CSS for PascalCase component classes', '''
 ''', true
 
 test 'Tailwind keeps unsupported classes', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")
-  { toHTML } = emailRender
+  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML } = emailPkg
   { Email, Head, Tailwind } = emailPkg
   E = component
     render
@@ -734,9 +316,8 @@ test 'Tailwind keeps unsupported classes', '''
 ''', true
 
 test 'full email renders correctly', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")
-  { toHTML } = emailRender
+  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toHTML } = emailPkg
   { Email, Head, Body, Preview, Container, Heading, Text, Link, Divider } = emailPkg
   WelcomeEmail = component
     @name =! "World"
@@ -757,9 +338,8 @@ test 'full email renders correctly', '''
 ''', true
 
 test 'full email plain text', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")
-  { toText } = emailRender
+  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toText } = emailPkg
   { Email, Head, Body, Container, Heading, Text, Link, Divider } = emailPkg
   WelcomeEmail = component
     @name =! "World"
@@ -777,8 +357,8 @@ test 'full email plain text', '''
 ''', true
 
 test 'toEmail with conditional', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  { toEmail } = emailRender
+  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toEmail } = emailPkg
   TestEmail = component
     @show =! true
     render
@@ -790,8 +370,8 @@ test 'toEmail with conditional', '''
 ''', true
 
 test 'toEmail with nested native tags', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  { toEmail } = emailRender
+  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toEmail } = emailPkg
   TestEmail = component
     render
       table role: "presentation", border: "0", cellpadding: "0", cellspacing: "0"
@@ -804,8 +384,8 @@ test 'toEmail with nested native tags', '''
 ''', true
 
 test 'toEmail plain text output', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  { toEmail } = emailRender
+  emailPkg = import!("#{process.cwd()}/packages/ui/email/email.rip")
+  { toEmail } = emailPkg
   TestEmail = component
     render
       div

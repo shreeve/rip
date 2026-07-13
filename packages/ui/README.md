@@ -11,6 +11,40 @@ The package is organized by ownership:
 Public APIs use named exports. Package dependencies are isolated here;
 the Rip compiler root remains dependency- and workspace-free.
 
+## Email
+
+Applications import the component catalog and renderers from the single public
+entry point:
+
+```coffee
+import {
+  toHTML
+  Email, Head, Body, Preview, Container
+  Heading, Text, Link, Divider
+} from '@rip-lang/ui/email'
+
+WelcomeEmail = component
+  @name =! 'World'
+  render
+    Email
+      Head
+      Preview text: 'Welcome aboard'
+      Body
+        Container
+          Heading "Welcome, #{@name}!"
+          Text 'Thanks for signing up.'
+          Link href: 'https://example.com'
+            'Get started'
+          Divider
+          Text 'See you soon.'
+
+html = toHTML WelcomeEmail, name: 'Alice'
+```
+
+`@rip-lang/ui/email/dom`, `/compat`, and `/render` expose focused substrate
+APIs for framework and tooling code. Application email templates should use
+`@rip-lang/ui/email`.
+
 ## Test
 
 ```sh
