@@ -5,6 +5,11 @@ repository's pull requests.
 
 ## Unreleased
 
+- Email compatibility helpers normalize units and padding, generate
+  preview spacing, serialize styles, and emit MSO conditionals. The UI
+  package now validates every TypeScript face and declaration under
+  strict `tsc`; fourteen contracts joined the permanent battery (#61)
+
 - Email rendering foundation: `packages/ui` now owns a typed synchronous
   DOM, deterministic HTML serialization, and plain-text conversion.
   Twenty-six email contracts moved from the pending lane into the
