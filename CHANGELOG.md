@@ -12,7 +12,9 @@ repository's pull requests.
   and isolates closure-backed configurations. URL normalization, font style
   generation, and fallback rendering reject control-character bypasses
   and fail closed on ambiguous scheme prefixes; shared compatibility CSS emits
-  once per message (#66, #67, #68, #69, #70, #71)
+  once per message. Plain-text projections, empty attributes, Tailwind bytes,
+  and Tailwind declarations are deterministic across every public path
+  (#66, #67, #68, #69, #70, #71, #72)
 
 - Email support is complete: full HTML/text rendering, dynamic blocks,
   native table trees, package self-imports, and a typed welcome example
