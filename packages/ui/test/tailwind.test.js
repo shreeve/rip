@@ -24,7 +24,7 @@ test('Tailwind inlines simple classes and preserves unsupported classes', () => 
 });
 
 test('email modules do not import Tailwind dependencies directly', () => {
-  for (const file of ['components.rip', 'render.rip', 'dom.rip', 'compat.rip']) {
+  for (const file of ['email.rip', 'render.rip', 'dom.rip', 'compat.rip']) {
     const source = readFileSync(new URL(`../email/${file}`, import.meta.url), 'utf8');
     expect(source).not.toMatch(/from ['"](?:tailwindcss|css-tree)['"]/);
   }
