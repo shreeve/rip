@@ -5,6 +5,12 @@ repository's pull requests.
 
 ## Unreleased
 
+- The email package now has one public authoring entry, separate substrate
+  contracts, transactional SSR global restoration, validated DOM structure and
+  curated content boundaries. Tailwind output resolves standalone values,
+  follows stylesheet and inline cascade precedence, scopes residual CSS once,
+  and isolates closure-backed configurations (#66, #67, #68, #69)
+
 - Email support is complete: full HTML/text rendering, dynamic blocks,
   native table trees, package self-imports, and a typed welcome example
   now run through the public `@rip-lang/ui/email` surface. The final five

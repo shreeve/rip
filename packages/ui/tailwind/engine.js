@@ -35,19 +35,33 @@ async function createCompiler(config = {}) {
   });
 }
 
+const identityKeys = new WeakMap();
+const symbolKeys = new Map();
+let nextIdentityKey = 1;
+
+function identityKey(value) {
+  const store = typeof value === 'symbol' ? symbolKeys : identityKeys;
+  if (!store.has(value)) store.set(value, nextIdentityKey++);
+  return store.get(value);
+}
+
 function stableSerialize(value, seen = new WeakSet()) {
   if (value === null) return 'null';
   const type = typeof value;
   if (type === 'string') return JSON.stringify(value);
   if (type === 'number' || type === 'boolean' || type === 'bigint') return String(value);
   if (type === 'undefined') return 'undefined';
-  if (type === 'symbol') return value.toString();
-  if (type === 'function') return `[Function:${value.toString()}]`;
+  if (type === 'symbol') return `[Symbol:${identityKey(value)}]`;
+  if (type === 'function') return `[Function:${identityKey(value)}]`;
   if (Array.isArray(value)) {
     return `[${value.map((entry) => stableSerialize(entry, seen)).join(',')}]`;
   }
   if (type === 'object') {
-    if (seen.has(value)) return '[Circular]';
+    if (seen.has(value)) return `[Circular:${identityKey(value)}]`;
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      return `[${value.constructor?.name ?? 'Object'}:${identityKey(value)}]`;
+    }
     seen.add(value);
     const entries = Object.keys(value)
       .sort()
