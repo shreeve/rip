@@ -45,4 +45,6 @@ jobs:
 
       - name: UI package suite (packages/ui — its own suite, its own boundary)
         working-directory: packages/ui
-        run: bun run test
+        run: |
+          bun install --frozen-lockfile
+          bun run test

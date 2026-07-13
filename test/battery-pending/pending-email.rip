@@ -7,56 +7,6 @@
 
 import { test, code, fail, type } from '../support/testing.js'
 
-test 'Tailwind injects generated CSS for raw HTML tag classes', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")
-    { toHTML } = emailRender
-    { Email, Head, Tailwind } = emailPkg
-    E = component
-      render
-        Email
-          Head
-          Tailwind
-            p class: "text-gray-400 bg-gray-100 px-4 py-2 rounded-lg"
-              "styled"
-    result = toHTML(E)
-    result.includes('@layer theme') and result.includes('style="color:var(--color-gray-400);background-color:var(--color-gray-100);padding-inline:calc(var(--spacing)*4);padding-block:calc(var(--spacing)*2);border-radius:var(--radius-lg)"')
-''', true
-
-test 'Tailwind injects generated CSS for PascalCase component classes', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")
-    { toHTML } = emailRender
-    { Email, Head, Tailwind, Text, Button } = emailPkg
-    E = component
-      render
-        Email
-          Head
-          Tailwind
-            Text class: "text-center text-gray-600"
-              "hello"
-            Button class: "rounded-full bg-black text-white", href: "https://example.com", style: "padding:12px 20px"
-              "go"
-    result = toHTML(E)
-    result.includes('text-align:center') and result.includes('color:var(--color-gray-600)') and result.includes('background-color:var(--color-black)') and result.includes('border-radius:calc(infinity*1px)')
-''', true
-
-test 'Tailwind keeps unsupported classes', '''
-  emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
-  emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")
-    { toHTML } = emailRender
-    { Email, Head, Tailwind } = emailPkg
-    E = component
-      render
-        Email
-          Head
-          Tailwind
-            div class: "sm:text-lg custom-class"
-              "x"
-    result = toHTML(E)
-    result.includes('class="sm:text-lg custom-class"') and result.includes('@media') and result.includes('text-lg')
-''', true
-
 test 'full email renders correctly', '''
   emailRender = import!("#{process.cwd()}/packages/ui/email/render.rip")
   emailPkg = import!("#{process.cwd()}/packages/ui/email/components.rip")

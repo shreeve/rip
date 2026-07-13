@@ -11,6 +11,13 @@ const sources = {
   'email/email.rip': readFileSync(new URL('../email/email.rip', import.meta.url), 'utf8'),
   'shared/render.rip': readFileSync(new URL('../shared/render.rip', import.meta.url), 'utf8'),
   'shared/styles.rip': readFileSync(new URL('../shared/styles.rip', import.meta.url), 'utf8'),
+  'tailwind/tailwind.rip': readFileSync(new URL('../tailwind/tailwind.rip', import.meta.url), 'utf8'),
+};
+
+const supportDeclarations = {
+  'tailwind/engine.d.ts': readFileSync(new URL('../tailwind/engine.d.ts', import.meta.url), 'utf8'),
+  'tailwind/inline.d.ts': readFileSync(new URL('../tailwind/inline.d.ts', import.meta.url), 'utf8'),
+  'tailwind/serve.d.ts': readFileSync(new URL('../tailwind/serve.d.ts', import.meta.url), 'utf8'),
 };
 
 test('email package TypeScript faces and declarations are valid', () => {
@@ -23,6 +30,7 @@ test('email package TypeScript faces and declarations are valid', () => {
       'declare const __detach: any, __detachRef: any;',
       'declare const setContext: any, getContext: any;',
     ].join('\n'),
+    ...supportDeclarations,
   };
   for (const [name, source] of Object.entries(sources)) {
     const result = compile(source, {

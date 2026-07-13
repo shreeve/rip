@@ -37,3 +37,13 @@ test('packages/vscode stays inside the dependency budget, exact pins only', () =
   }
   expect(pkg.devDependencies ?? null).toBeNull();
 });
+
+test('packages/ui isolates an exact Tailwind dependency budget', () => {
+  const pkg = JSON.parse(readFileSync(join(import.meta.dir, '../../packages/ui/package.json'), 'utf8'));
+  const deps = pkg.dependencies ?? {};
+  expect(Object.keys(deps).sort()).toEqual(['css-tree', 'tailwindcss']);
+  for (const version of Object.values(deps)) expect(version).toMatch(/^\d+\.\d+\.\d+$/);
+  for (const field of ['devDependencies', 'peerDependencies', 'optionalDependencies']) {
+    expect(pkg[field]).toBeUndefined();
+  }
+});

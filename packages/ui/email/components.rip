@@ -1,5 +1,6 @@
 import { previewPadding, computeMsoPadding, pxToPt, parsePadding } from './compat.rip'
 import { joinStyles, withMargin } from '../shared/styles.rip'
+import { registerEmailTailwindRoot } from '../tailwind/tailwind.rip'
 
 export Email = component
   @class: string := ''
@@ -398,3 +399,12 @@ export CodeInline = component
       = _content
     span class: _fallbackClass, style: "display:none;#{_style}"
       = _content
+
+export Tailwind = component
+  @config: Record<string, any> := {}
+
+  mounted: ->
+    registerEmailTailwindRoot this, @config
+
+  render
+    slot
