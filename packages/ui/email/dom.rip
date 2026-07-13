@@ -1,5 +1,15 @@
 # Synchronous DOM subset for server-side email rendering.
 
+VALID_ELEMENT_NAME =! /^(?:__root|[A-Za-z][A-Za-z0-9:_-]*)$/
+VALID_ATTRIBUTE_NAME =! /^[^\s"'/>=]+$/
+
+validateInsertion = (parent: Node, child: Node) ->
+  throw new Error 'email DOM cannot insert a node into itself' if child is parent
+  cursor: Node | null = parent
+  while cursor
+    throw new Error 'email DOM cannot insert an ancestor into its descendant' if cursor is child
+    cursor = cursor.parentNode
+
 export class Node
   nodeType: number = 0
   parentNode: Node | null = null
@@ -8,12 +18,13 @@ export class Node
   _previous: Node | null = null
 
   appendChild: (child: Node): Node ->
-    child.remove() if child.parentNode
+    validateInsertion this, child
     if child instanceof Fragment
       for nested in [...child.childNodes]
         @appendChild nested
       return child
 
+    child.remove() if child.parentNode
     previous = @childNodes[-1] ?? null
     previous._next = child if previous
     child._previous = previous
@@ -24,14 +35,19 @@ export class Node
 
   insertBefore: (child: Node, reference: Node | null): Node ->
     return @appendChild(child) unless reference
-    child.remove() if child.parentNode
+    unless reference.parentNode is this
+      throw new Error 'email DOM insertBefore reference is not a child of this node'
+    return child if child is reference
+    validateInsertion this, child
     if child instanceof Fragment
       for nested in [...child.childNodes]
         @insertBefore nested, reference
       return child
 
+    child.remove() if child.parentNode
     index = @childNodes.indexOf reference
-    return @appendChild(child) if index is -1
+    unless index >= 0
+      throw new Error 'email DOM insertBefore reference is not a child of this node'
 
     previous = reference._previous
     previous._next = child if previous
@@ -75,6 +91,7 @@ Object.defineProperty Node.prototype, 'previousSibling',
 Object.defineProperty Node.prototype, 'textContent',
   get: -> (@childNodes.map (child: Node) -> _textContent(child)).join('')
   set: (value: any) ->
+    @_innerHTML = null if this instanceof Element
     for child in @childNodes
       child.parentNode = null
       child._previous = null
@@ -92,10 +109,19 @@ export class Element extends Node
 
   constructor: (tag: string) ->
     super()
+    throw new Error "email DOM invalid element name '#{tag}'" unless VALID_ELEMENT_NAME.test tag
     @tag = tag
 
   setAttribute!: (key: string, value: any) ->
+    throw new Error "email DOM invalid attribute name '#{key}'" unless VALID_ATTRIBUTE_NAME.test key
+    if value is null or value is undefined or value is false
+      @removeAttribute key
+      return
+    if value is true
+      @attributes.set key, ''
+      return
     if key is 'style'
+      @style = {}
       if value isnt null and typeof value is 'object'
         Object.assign @style, value
       else
@@ -104,9 +130,14 @@ export class Element extends Node
       @attributes.set key, String(value)
 
   getAttribute: (key: string): string | null ->
+    return styleText(@style) if key is 'style' and Object.keys(@style).length
     @attributes.get(key) ?? null
 
   removeAttribute: (key: string): boolean ->
+    if key is 'style'
+      present = Object.keys(@style).length > 0
+      @style = {}
+      return present
     @attributes.delete key
 
   toggleAttribute: (key: string, force?: boolean): boolean ->
@@ -150,7 +181,13 @@ Object.defineProperty Element.prototype, 'className',
 
 Object.defineProperty Element.prototype, 'innerHTML',
   get: -> @_innerHTML
-  set: (value: any) -> @_innerHTML = String(value)
+  set: (value: any) ->
+    for child in @childNodes
+      child.parentNode = null
+      child._previous = null
+      child._next = null
+    @childNodes = []
+    @_innerHTML = String(value)
   enumerable: true
 
 Object.defineProperty Element.prototype, 'innerText',
@@ -228,7 +265,7 @@ escapeAttribute = (value: any): string ->
 styleText = (style: Record<string, any>): string ->
   declarations: string[] = []
   for key, value of style
-    continue unless value?
+    continue unless value? and value isnt ''
     property = key.replace /[A-Z]/g, (letter) -> "-#{letter.toLowerCase()}"
     declarations.push "#{property}:#{value}"
   declarations.join ';'
@@ -258,6 +295,8 @@ export serialize = (node: Node): string ->
 
   if node instanceof Comment
     return '' if node.data is '' or node.data is 'if' or node.data is 'for' or node.data is 'unknown'
+    if node.data.includes('--') or node.data.endsWith('-')
+      throw new Error 'email DOM invalid comment data — comments cannot contain "--" or end with "-"'
     return "<!--#{node.data}-->"
 
   return serializeChildren(node) if node instanceof Fragment
@@ -265,8 +304,11 @@ export serialize = (node: Node): string ->
   if node instanceof Element
     return serializeChildren(node) if node.tag is '__root'
     attributes = serializeAttributes node
+    if VOID_TAGS.has node.tag
+      throw new Error "email DOM void element '#{node.tag}' cannot have innerHTML" if node._innerHTML?
+      throw new Error "email DOM void element '#{node.tag}' cannot contain children" if node.childNodes.length
+      return "<#{node.tag}#{attributes} />"
     return "<#{node.tag}#{attributes}>#{node._innerHTML}</#{node.tag}>" if node._innerHTML?
-    return "<#{node.tag}#{attributes} />" if VOID_TAGS.has node.tag
     return "<#{node.tag}#{attributes}>#{serializeChildren(node)}</#{node.tag}>"
 
   ''
