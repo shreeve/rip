@@ -273,3 +273,33 @@ test "a pick default reads the user's own underscore binding", '''
 ''', {a: 42}
 
 test 'nested default with map literal', 'o = {}; o.{cfg = *{k: 1}}; true', true
+
+# ==============================================================================
+# Picks materialize destination keys as OWN data properties — a '__proto__'
+# destination (picked or renamed-to) never mutates the result's prototype.
+# ==============================================================================
+
+test 'pick preserves an own __proto__ key', '''
+  src = JSON.parse '{"__proto__": {"polluted": true}}'
+  out = src.{__proto__}
+  [Object.keys(out), Object.hasOwn(out, '__proto__'), out.polluted is undefined, Object.getPrototypeOf(out) is Object.prototype]
+  ''', [['__proto__'], true, true, true]
+
+test 'pick rename onto __proto__ stays an own key', '''
+  src = {a: {m: 3}}
+  out = src.{a: __proto__}
+  d = Object.getOwnPropertyDescriptor(out, '__proto__')
+  [d.value.m, d.enumerable, d.writable, d.configurable, Object.getPrototypeOf(out) is Object.prototype]
+  ''', [3, true, true, true, true]
+
+test 'pick constructor and prototype keys stay ordinary', '''
+  src = {constructor: 1, prototype: 2}
+  out = src.{constructor, prototype}
+  [out.constructor, out.prototype]
+  ''', [1, 2]
+
+test 'optional pick preserves an own __proto__ key', '''
+  get = -> JSON.parse '{"__proto__": {"polluted": true}}'
+  out = get()?.{__proto__}
+  [Object.hasOwn(out, '__proto__'), Object.getPrototypeOf(out).polluted is undefined]
+  ''', [true, true]

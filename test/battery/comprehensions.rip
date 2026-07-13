@@ -137,7 +137,7 @@ test 'object comprehension key-value', '''
   ''', {x: 'x', y: 'y'}
 
 # Code generation
-code "object comprehension", "{k: v * 2 for k, v of obj}", "((() => {\n  const result = {};\n  const _ref = obj;\n  for (let k in _ref) {\n    let v = _ref[k];\n    result[k] = (v * 2);\n  }\n  return result;\n})());"
+code "object comprehension", "{k: v * 2 for k, v of obj}", "((() => {\n  const result = {};\n  const _ref = obj;\n  for (let k in _ref) {\n    let v = _ref[k];\n    const _k = k, _v = (v * 2);\n    if (_k === '__proto__') Object.defineProperty(result, _k, { value: _v, enumerable: true, configurable: true, writable: true });\n    else result[_k] = _v;\n  }\n  return result;\n})());"
 
 # ==============================================================================
 # Function-Local Comprehension Assignment (direct array building, no IIFE)
@@ -389,3 +389,56 @@ code 'ranged by literal compiles inline', '''
   '''
 
 fail 'ranged by zero literal rejects', 'x = (i for i in [0..4] by 0)', 'never advances'
+
+# ==============================================================================
+# Object comprehensions materialize every dynamic key as an OWN data property:
+# a '__proto__' key from source DATA never mutates the result's prototype, and
+# key/value evaluation order and last-write-wins hold for every key.
+# ==============================================================================
+
+test 'object comprehension preserves an own __proto__ key', '''
+  src = Object.create(null)
+  src['__proto__'] = {marker: 7}
+  out = {k: v for k, v of src}
+  d = Object.getOwnPropertyDescriptor(out, '__proto__')
+  [d.value.marker, d.enumerable, d.writable, d.configurable, Object.getPrototypeOf(out) is Object.prototype, out.marker is undefined]
+  ''', [7, true, true, true, true, true]
+
+test 'object comprehension __proto__ from ordinary source', '''
+  src = JSON.parse '{"__proto__": {"polluted": true}, "ok": 1}'
+  out = {k: v for k, v of src}
+  [Object.hasOwn(out, '__proto__'), out.polluted is undefined, out.ok]
+  ''', [true, true, 1]
+
+test 'object comprehension constructor and prototype keys stay ordinary', '''
+  src = Object.create(null)
+  src.constructor = 1
+  src.prototype = 2
+  out = {k: v for k, v of src}
+  [out.constructor, out.prototype]
+  ''', [1, 2]
+
+test 'object comprehension dynamic keys collide last-write', '''
+  out = {[k[0]]: v for k, v of {ab: 1, ax: 2}}
+  out.a
+  ''', 2
+
+test 'object comprehension dynamic __proto__ collision last-write', '''
+  src = {u: {m: 1}, v: {m: 9}}
+  out = {['__proto__']: x for k, x of src}
+  [Object.getOwnPropertyDescriptor(out, '__proto__').value.m, Object.getPrototypeOf(out) is Object.prototype]
+  ''', [9, true]
+
+test 'object comprehension carries a symbol key', '''
+  s = Symbol('tag')
+  out = {[s]: v for k, v of {a: 5}}
+  out[s]
+  ''', 5
+
+test 'object comprehension evaluates key before value', '''
+  log = []
+  kf = (x) -> (log.push('k'); 'x' + x)
+  vf = (x) -> (log.push('v'); x)
+  out = {[kf(v)]: vf(v * 10) for k, v of {a: 1, b: 2}}
+  [out.x1, out.x2, log]
+  ''', [10, 20, ['k', 'v', 'k', 'v']]
