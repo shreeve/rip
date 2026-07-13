@@ -75,3 +75,15 @@ test('email DOM rejects markup delimiters in structural names and comments', () 
   comment.data = 'x--><script>';
   expect(() => serialize(comment)).toThrow(/invalid comment data/);
 });
+
+test('email DOM distinguishes empty values from boolean attributes', () => {
+  const document = new Document();
+  const anchor = document.createElement('a');
+  anchor.setAttribute('href', '');
+  anchor.setAttribute('aria-label', '');
+  expect(serialize(anchor)).toBe('<a href="" aria-label=""></a>');
+
+  const input = document.createElement('input');
+  input.setAttribute('disabled', true);
+  expect(serialize(input)).toBe('<input disabled />');
+});

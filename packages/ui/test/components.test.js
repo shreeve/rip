@@ -98,7 +98,7 @@ test('CodeInline keeps its fallback hidden despite caller display styles', () =>
     children: 'hello',
     style: 'display:inline-block',
   });
-  expect(html).toMatch(/<span class="cio" style="[^"]*display:none[^"]*">/);
+  expect(html).toMatch(/<span class="cio" style="[^"]*display:none[^"]*"[^>]*>/);
 });
 
 test('email rendering emits shared CodeInline CSS once', () => {
@@ -106,6 +106,12 @@ test('email rendering emits shared CodeInline CSS once', () => {
   expect(html.match(/meta ~ \.cino/g)).toHaveLength(1);
   expect(html).toContain('>first</code>');
   expect(html).toContain('>second</code>');
+});
+
+test('raw-HTML components preserve one plain-text representation', () => {
+  expect(email.toEmail(email.Markdown, { text: '# Hello' }).text).toBe('Hello');
+  expect(email.toEmail(email.CodeBlock, { code: 'let x = 1' }).text).toBe('let x = 1');
+  expect(email.toEmail(email.CodeInline, { children: 'inline' }).text).toBe('inline');
 });
 
 test('optional image dimensions remain absent', () => {

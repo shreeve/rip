@@ -253,7 +253,7 @@ export Image = component
   @width?: string | number := undefined
   @height?: string | number := undefined
   @style: string := ''
-  _src: string ~= safeImageSrc @src
+  _src: string | undefined ~= safeImageSrc @src
   _style: string ~= joinStyles 'display:block;outline:none;border:none;text-decoration:none', @style
   render
     img class: @class, src: _src, alt: @alt, width: @width, height: @height, style: _style
@@ -310,16 +310,16 @@ safeHref = (href: unknown): string ->
   return '#' if hasSchemeLikePrefix value
   value
 
-safeImageSrc = (src: unknown): string ->
+safeImageSrc = (src: unknown): string | undefined ->
   value = String(src ?? '').trim()
-  return '' unless value
-  return '' if unsafeUrlText value
+  return undefined unless value
+  return undefined if unsafeUrlText value
   lower = value.toLowerCase()
   return value if lower.startsWith('http://')
   return value if lower.startsWith('https://')
   return value if lower.startsWith('cid:')
   return value if /^data:image\/(?:gif|jpeg|png|webp);base64,[a-z0-9+/=\s]+$/i.test value
-  return '' if hasSchemeLikePrefix value
+  return undefined if hasSchemeLikePrefix value
   value
 
 formatInlineText = (text: string): string ->
@@ -342,6 +342,21 @@ inlineMarkdown = (text: string): string ->
     cursor = pattern.lastIndex
   output.push formatInlineText text.slice cursor
   output.join ''
+
+markdownPlainText = (source: string): string ->
+  lines: string[] = []
+  for raw in source.split '\n'
+    line = raw.trim()
+    heading = line.match /^(\#{1,6})\s+(.+)$/
+    line = heading[2] if heading
+    line = line.replace /^(?:[-*]|\d+\.)\s+/, ''
+    line = line.replace /^>\s*/, ''
+    line = line.replace /\[(.+?)\]\((.+?)\)/g, (_, label, href) ->
+      safe = safeHref href
+      if safe and safe isnt '#' and safe isnt label then "#{label} (#{safe})" else label
+    line = line.replace /[*_`]/g, ''
+    lines.push line
+  lines.join('\n').trim()
 
 parseMarkdown = (source: string): string ->
   return '' unless source
@@ -390,8 +405,9 @@ export Markdown = component
   @text: string := ''
   @style: string := ''
   _html: string ~= parseMarkdown @text
+  _plainText: string ~= markdownPlainText @text
   render
-    div class: @class, style: @style, innerHTML: _html
+    div class: @class, style: @style, 'data-rip-plain-text': _plainText, innerHTML: _html
 
 export CodeBlock = component
   @class: string := ''
@@ -412,7 +428,7 @@ export CodeBlock = component
         output.push escaped
     output.join '\n'
   render
-    pre class: @class, style: _style
+    pre class: @class, style: _style, 'data-rip-plain-text': @code
       code innerHTML: _html
 
 export CodeInline = component
@@ -432,7 +448,7 @@ export CodeInline = component
     style 'data-email-style': 'code-inline', innerHTML: _orangeCss
     code class: _primaryClass, style: _style
       = _content
-    span class: _fallbackClass, style: _fallbackStyle
+    span class: _fallbackClass, style: _fallbackStyle, 'data-skip-in-text': 'true'
       = _content
 
 export Tailwind = component

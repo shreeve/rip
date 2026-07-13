@@ -2,10 +2,30 @@ import * as engine from './engine.js'
 import * as inline from './inline.js'
 import * as serve from './serve.js'
 
-export compile = engine.compile
-export prepareConfig = (config: Record<string, unknown> = {}) -> engine.prepareConfig config
+export type TailwindCompilation =
+  css: string
+  styleSheet: unknown
+
+export type InlineEmailResult =
+  unsupported: string[]
+  headCss: string
+
+export compile = (classes: string[] = [], config: Record<string, unknown> = {}): TailwindCompilation ->
+  engine.compile classes, config
+
+export prepareConfig = (config: Record<string, unknown> = {}): Promise<unknown> ->
+  engine.prepareConfig config
+
 export configKey = (config: Record<string, unknown> = {}): string -> engine.configCacheKey config
-export inlineEmailTree = inline.inlineEmailTree
-export registerEmailTailwindRoot = inline.registerEmailTailwindRoot
-export takeEmailTailwindRoots = inline.takeEmailTailwindRoots
-export generateBrowserCss = serve.generateBrowserCss
+
+export inlineEmailTree = (root: any, config: Record<string, unknown> = {}): InlineEmailResult ->
+  inline.inlineEmailTree root, config
+
+export registerEmailTailwindRoot = (rootComponent: any, config: Record<string, unknown> = {}): void ->
+  inline.registerEmailTailwindRoot rootComponent, config
+
+export takeEmailTailwindRoots = (): Array<{ root: any, config: Record<string, unknown> }> ->
+  inline.takeEmailTailwindRoots()
+
+export generateBrowserCss = (classes: string[] = [], config: Record<string, unknown> = {}): string ->
+  serve.generateBrowserCss classes, config

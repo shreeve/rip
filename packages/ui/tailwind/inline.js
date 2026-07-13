@@ -158,7 +158,7 @@ function classifyRules(styleSheet, classes) {
     enter(atrule) {
       if (atrule.name !== 'layer' || !atrule.block) return;
       const name = generate(atrule.prelude).trim();
-      if (name === 'theme' || name === 'base') {
+      if (name === 'base') {
         const block = generate(atrule.block);
         global.push(block.slice(1, -1));
       }

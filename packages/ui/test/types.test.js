@@ -59,4 +59,15 @@ test('email package TypeScript faces and declarations are valid', () => {
   expect(checked.status).toBe(0);
   expect(checked.unattributed).toEqual([]);
   expect([...checked.byFile.values()].flat()).toEqual([]);
+  for (const name of [
+    'compile',
+    'prepareConfig',
+    'configKey',
+    'inlineEmailTree',
+    'registerEmailTailwindRoot',
+    'takeEmailTailwindRoots',
+    'generateBrowserCss',
+  ]) {
+    expect(files['tailwind/tailwind.d.ts']).toContain(`function ${name}`);
+  }
 });
