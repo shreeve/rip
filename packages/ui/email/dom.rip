@@ -246,6 +246,12 @@ export class Document
   createDocumentFragment: (): Fragment -> Fragment.new()
 
 VOID_TAGS: Set<string> =! new Set %w[area base br col embed hr img input link meta source track wbr]
+BOOLEAN_ATTRIBUTES: Set<string> =! new Set [
+  'allowfullscreen', 'async', 'autofocus', 'autoplay', 'checked', 'controls',
+  'default', 'defer', 'disabled', 'formnovalidate', 'hidden', 'inert', 'ismap',
+  'itemscope', 'loop', 'multiple', 'muted', 'nomodule', 'novalidate', 'open',
+  'playsinline', 'readonly', 'required', 'reversed', 'selected'
+]
 BLOCK_TAGS: Set<string> =! new Set %w[p div td li dt dd blockquote figcaption address]
 HEADING_TAGS: Set<string> =! new Set %w[h1 h2 h3 h4 h5 h6]
 SKIP_TEXT_TAGS: Set<string> =! new Set %w[style script head]
@@ -282,8 +288,8 @@ serializeAttributes = (element: Element): string ->
   parts.push " style=\"#{escapeAttribute(inlineStyle)}\"" if inlineStyle
 
   for [key, value] in element.attributes
-    continue if key is 'id' or key is 'class'
-    if value is ''
+    continue if key is 'id' or key is 'class' or key is 'data-rip-plain-text'
+    if value is '' and BOOLEAN_ATTRIBUTES.has key.toLowerCase()
       parts.push " #{key}"
     else
       parts.push " #{key}=\"#{escapeAttribute(value)}\""
@@ -335,6 +341,10 @@ def walkText!(node: Node, parts: string[])
   return unless node instanceof Element
   return if SKIP_TEXT_TAGS.has node.tag
   return if node.attributes.get('data-skip-in-text') is 'true'
+  plainText = node.attributes.get 'data-rip-plain-text'
+  if plainText?
+    parts.push plainText
+    return
   return if node._innerHTML?
 
   if node.tag is 'br'

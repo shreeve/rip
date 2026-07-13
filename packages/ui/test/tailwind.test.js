@@ -87,6 +87,13 @@ test('Tailwind cache keys distinguish closure-backed configs', () => {
   expect(configKey(red)).not.toBe(configKey(blue));
 });
 
+test('Tailwind output is independent of earlier renders', () => {
+  inlineEmailTree(emailTree('sm:text-lg').root);
+  const isolated = inlineEmailTree(emailTree('text-red-500').root);
+  expect(isolated.headCss).not.toContain('text-lg');
+  expect(isolated.headCss).not.toContain('@media');
+});
+
 test('email modules do not import Tailwind dependencies directly', () => {
   for (const file of ['email.rip', 'render.rip', 'dom.rip', 'compat.rip']) {
     const source = readFileSync(new URL(`../email/${file}`, import.meta.url), 'utf8');
