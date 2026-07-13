@@ -30,8 +30,12 @@ import { makeParserLexer, tokenize } from '../../src/lexer.js';
 import { emit } from '../../src/emitter.js';
 import { compile as fullCompile } from '../../src/compile.js';
 import { installRecordingDOM, serialize } from '../support/recording-dom.js';
+import * as reactiveRuntime from '../../src/runtime/reactive.js';
+import * as componentRuntime from '../../src/runtime/components.js';
 
 parser.lexer = makeParserLexer();
+installRecordingDOM();
+const RT = { ...reactiveRuntime, ...componentRuntime };
 
 const compile = (src, opts = {}) => {
   const r = parser.parse(src);
@@ -1288,24 +1292,18 @@ describe('child components: the instantiation protocol', () => {
     expect(code).toContain('this._inst1 = new Kid({ label: "x" });');
     expect(code).toContain('if (this._inst1 && this._inst1._initFailed) {');
     expect(code).toContain("this._el2 = document.createComment('rip:child-init-failed: Kid');");
-    // The child's frame AND the component both push around _create —
-    // its render effects land on ITS frame, never the parent's.
-    expect(code).toContain('{ const __cprev = __pushComponent(this._inst1); const __co = __pushOwner(this._inst1._frame); try {');
-    expect(code).toContain('this._el2 = this._inst1._root = this._inst1._create();');
-    expect(code).toContain('} finally { __popOwner(__co); __popComponent(__cprev); } }');
+    expect(code).toContain('} else if (this._inst1._mountCreate()) {');
+    expect(code).toContain('this._el2 = this._inst1._root;');
     expect(code).toContain('(this._children || (this._children = [])).push(this._inst1);');
     expect(code).toContain("console.error('[Rip] Kid construction failed:', __childErr);");
     expect(code).toContain("this._el2 = document.createComment('rip:child-error: Kid');");
     expect(code).toContain('} finally { __popComponent(__prev); } }');
     expect(code).toContain('this._el0.appendChild(this._el2);');
-    // The lifecycle latch in _setup: beforeMount → _setup → mounted,
-    // once, with the child current on BOTH stacks.
     expect(code).toContain(
- 'if (this._inst1 && !this._inst1._isSetup) { this._inst1._isSetup = true; ' +
- 'const __cprev = __pushComponent(this._inst1); const __co = __pushOwner(this._inst1._frame); try { ' +
- 'try { if (this._inst1.beforeMount) this._inst1.beforeMount(); if (this._inst1._setup) this._inst1._setup(); ' +
- 'if (this._inst1.mounted) this._inst1.mounted(); } catch (__e) { __handleComponentError(__e, this._inst1); } ' +
- '} finally { __popOwner(__co); __popComponent(__cprev); } }');
+      "if (this._inst1 && this._inst1._state === 'mounting') {\n" +
+      "      this._el2 = this._inst1._mountSetup(document.createComment('rip:child-error: Kid'));\n" +
+      '    }',
+    );
     expect(() => new Function(code)).not.toThrow();
   });
 
@@ -1328,13 +1326,81 @@ describe('child components: the instantiation protocol', () => {
  'for (const __c of _factoryChildren) { try { __c.unmount?.({removeDOM: detaching}); } catch (__e) { ' +
       "console.error('[Rip] factory child unmount error:', __e); } }");
     expect(code).toContain('_factoryChildren = [];');
-    // The latch rides p() (under the patch-frame push), so a
-    // child-bearing block is never static.
-    expect(code).toMatch(/p\(ctx\) \{\n\s+if \(__fr\) __fr\.dispose\(\);[\s\S]*?_inst2\._isSetup/);
+    expect(code).toMatch(/p\(ctx\) \{\n\s+if \(__fr\) __fr\.dispose\(\);[\s\S]*?_inst2\._mountSetup/);
+    expect(code).toMatch(/_el3 = _inst2\._mountSetup[\s\S]*?this\._first = _el3/);
     expect(code).not.toMatch(/_s: true[\s\S]*?_factoryChildren\.push/);
     // d() unmounts kids FIRST, then disposes the frame.
     expect(code).toMatch(/d\(detaching\) \{\n\s+for \(const __c of _factoryChildren\)[\s\S]{0,220}__fr\.dispose\(\)/);
     expect(() => new Function(code)).not.toThrow();
+  });
+
+  test('failed factory children transfer ownership to their placeholders across keyed moves, removal, and branch replacement', () => {
+    const source = `failedRoots = []
+Bad = component
+  mounted = ->
+    failedRoots.push @_root
+    throw new Error("setup boom")
+  render
+    i "failed"
+Good = component
+  render
+    strong "good"
+App = component
+  items := [{id: "a"}, {id: "b"}]
+  show := true
+  onError = -> null
+  render
+    div
+      if show
+        Bad
+      else
+        Good
+      for item in items
+        Bad key: item.id
+`;
+    const { code } = compile(source, { runtimeDelivery: 'none' });
+    const names = Object.keys(RT);
+    const { App, failedRoots } = new Function(
+      ...names,
+      `${code}\nreturn { App, failedRoots };`,
+    )(...names.map((name) => RT[name]));
+    const target = document.createElement('main');
+    const app = new App({});
+    const prior = console.error;
+    console.error = () => {};
+    try {
+      app.mount(target);
+      const root = app._root;
+      const branchPlaceholder = root.childNodes[4];
+      const rowA = root.childNodes[1];
+      const rowB = root.childNodes[2];
+      expect(serialize(target)).toBe(
+        '<main><div data-part="App"><!--if--><!--rip:child-error: Bad--><!--rip:child-error: Bad--><!--for--><!--rip:child-error: Bad--></div></main>',
+      );
+
+      app.items.value = [{ id: 'b' }, { id: 'a' }];
+      expect(root.childNodes).toEqual([root.childNodes[0], rowB, rowA, root.childNodes[3], branchPlaceholder]);
+
+      app.items.value = [{ id: 'b' }];
+      expect(root.childNodes).toEqual([root.childNodes[0], rowB, root.childNodes[2], branchPlaceholder]);
+      expect(rowA.parentNode).toBeNull();
+
+      app.show.value = false;
+      expect(branchPlaceholder.parentNode).toBeNull();
+      expect(serialize(target)).toBe(
+        '<main><div data-part="App"><!--if--><!--rip:child-error: Bad--><!--for--><strong data-part="Good">good</strong></div></main>',
+      );
+      for (const failedRoot of failedRoots) expect(failedRoot.parentNode).toBeNull();
+
+      app.items.value = [];
+      expect(rowB.parentNode).toBeNull();
+      expect(serialize(target)).toBe(
+        '<main><div data-part="App"><!--if--><!--for--><strong data-part="Good">good</strong></div></main>',
+      );
+    } finally {
+      console.error = prior;
+      app.unmount();
+    }
   });
 
   test('the constructor reference resolves: module binding bare, member through the instance (#149 graduated), loop variable bare (dynamic components)', () => {

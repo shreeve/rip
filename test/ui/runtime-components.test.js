@@ -77,13 +77,9 @@ const defineComponent = (api, spec = {}) => {
   return cls;
 };
 
-// The child-instantiation protocol — the shape each side's emission
-// wraps child construction in. the is replicated from its emitted
-// code (parent push, _initFailed / construction-failure placeholders,
-// _children registration); the is the same protocol over the owner
-// seam (the child's frame pushed around _create, exactly what 
-// emission does). Both report construction failures through
-// console.error and continue — the pinned contract.
+// The child-instantiation protocol mirrors generated output: parent
+// scope around construction, runtime-owned mount creation/setup, and
+// the established placeholders on failure.
 const childCreate = (api, parent, Cls, props = {}) => {
   let inst = null, el = null;
   const prev = api.__pushComponent(parent);
@@ -91,23 +87,17 @@ const childCreate = (api, parent, Cls, props = {}) => {
     try {
       inst = new Cls(props);
       if (inst && inst._initFailed) {
-        try { inst.unmount({ removeDOM: false }); } catch (ue) { console.error('[Rip] partial-init unmount error:', ue); }
         inst = null;
         el = document.createComment(`rip:child-init-failed: ${Cls.name}`);
-      } else {
-        const cprev = api.__pushComponent(inst);
-        const oprev = api.isLive ? api.__pushOwner(inst._frame) : null;
-        try {
-          el = inst._root = inst._create();
-        } finally {
-          if (api.isLive) api.__popOwner(oprev);
-          api.__popComponent(cprev);
-        }
+      } else if (inst._mountCreate()) {
+        el = inst._root;
         (parent._children || (parent._children = [])).push(inst);
+      } else {
+        inst = null;
+        el = document.createComment(`rip:child-error: ${Cls.name}`);
       }
     } catch (childErr) {
       console.error(`[Rip] ${Cls.name} construction failed:`, childErr);
-      if (inst) { try { inst.unmount({ removeDOM: false }); } catch (ue) { console.error('[Rip] partial-child unmount error:', ue); } }
       inst = null;
       el = document.createComment(`rip:child-error: ${Cls.name}`);
     }
@@ -116,20 +106,8 @@ const childCreate = (api, parent, Cls, props = {}) => {
 };
 
 const childSetup = (api, inst) => {
-  if (inst && !inst._isSetup) {
-    inst._isSetup = true;
-    const cprev = api.__pushComponent(inst);
-    const oprev = api.isLive ? api.__pushOwner(inst._frame) : null;
-    try {
-      try {
-        if (inst.beforeMount) inst.beforeMount();
-        if (inst._setup) inst._setup();
-        if (inst.mounted) inst.mounted();
-      } catch (e) { api.__handleComponentError(e, inst); }
-    } finally {
-      if (api.isLive) api.__popOwner(oprev);
-      api.__popComponent(cprev);
-    }
+  if (inst && inst._state === 'mounting') {
+    inst._mountSetup(document.createComment(`rip:child-error: ${inst.constructor.name}`));
   }
 };
 
@@ -311,6 +289,221 @@ describe('construction and mount lifecycle', () => {
  '<main></main>',
     ]);
   });
+
+  test('mount state is single-use across the same and different targets', () => {
+    const C = defineComponent(RT, {
+      name: 'SingleMount',
+      create() { return document.createElement('p'); },
+    });
+    const first = document.createElement('main');
+    const second = document.createElement('aside');
+    const inst = new C({});
+    expect(inst._state).toBe('new');
+    inst.mount(first);
+    expect(inst._state).toBe('mounted');
+    expect(() => inst.mount(first)).toThrow('cannot mount an already-mounted instance');
+    expect(() => inst.mount(second)).toThrow('cannot mount an already-mounted instance');
+    expect(serialize(first)).toBe('<main><p></p></main>');
+    expect(serialize(second)).toBe('<aside></aside>');
+    inst.unmount();
+    expect(inst._state).toBe('unmounted');
+    expect(() => inst.mount(first)).toThrow('cannot mount an unmounted instance');
+  });
+
+  test('root mount failure matrix rolls every phase to the same clean terminal state', () => {
+    const phases = ['create', 'append', 'beforeMount', 'setup', 'mounted', 'ref', 'multi-root'];
+    const run = (phase, handled) => {
+      const source = RT.__state(0);
+      const log = [];
+      let refValue = null;
+      const C = defineComponent(RT, {
+        name: `Fail_${phase}_${handled}`,
+        create(a) {
+          if (phase === 'create') throw new Error(`boom:${phase}`);
+          let root;
+          if (phase === 'multi-root') {
+            root = document.createDocumentFragment();
+            const firstNode = document.createElement('i');
+            const secondNode = document.createElement('b');
+            root.appendChild(firstNode);
+            root.appendChild(secondNode);
+            this._nodes = [firstNode, secondNode];
+          } else {
+            root = document.createElement('section');
+          }
+          if (phase === 'ref') {
+            refValue = root;
+            this._refCleanups = [() => { refValue = null; }];
+          }
+          RT.__effect(() => { source.value; log.push('effect'); });
+          return root;
+        },
+        setup() {
+          if (phase === 'setup' || phase === 'ref') throw new Error(`boom:${phase}`);
+        },
+        hooks: {
+          beforeMount() {
+            if (phase === 'beforeMount') throw new Error(`boom:${phase}`);
+          },
+          mounted() {
+            if (phase === 'mounted' || phase === 'multi-root') throw new Error(`boom:${phase}`);
+          },
+          beforeUnmount() { log.push('beforeUnmount'); },
+          unmounted() { log.push('unmounted'); },
+          ...(handled ? { onError(error) { log.push(error.message); } } : {}),
+        },
+      });
+      const target = document.createElement('main');
+      if (phase === 'append') {
+        const append = target.appendChild;
+        target.appendChild = function (node) {
+          append.call(this, node);
+          throw new Error('boom:append');
+        };
+      }
+      const inst = new C({});
+      let thrown = null;
+      try { inst.mount(target); } catch (error) { thrown = error; }
+      const runs = log.filter((x) => x === 'effect').length;
+      source.value = 1;
+      expect(log.filter((x) => x === 'effect')).toHaveLength(runs);
+      expect(inst._state).toBe('failed');
+      expect(inst._frame.disposed).toBe(true);
+      expect(inst._target).toBeNull();
+      expect(inst._root).toBeNull();
+      expect(inst._nodes).toBeNull();
+      expect(inst._children ?? null).toBeNull();
+      expect(inst._refCleanups ?? null).toBeNull();
+      expect(inst._restWriters ?? null).toBeNull();
+      expect(inst._restHandlers ?? null).toBeNull();
+      expect(refValue).toBeNull();
+      expect(serialize(target)).toBe('<main></main>');
+      expect(log).not.toContain('beforeUnmount');
+      expect(log).not.toContain('unmounted');
+      expect(Boolean(thrown)).toBe(!handled);
+      if (thrown) expect(thrown.message).toBe(`boom:${phase}`);
+      expect(() => inst.mount(target)).toThrow('cannot mount a failed instance');
+    };
+    for (const phase of phases) {
+      run(phase, true);
+      run(phase, false);
+    }
+  });
+
+  test('rollback preserves the mount error when cleanup also fails', () => {
+    const C = defineComponent(RT, {
+      name: 'CleanupFailure',
+      create() { return document.createElement('div'); },
+      setup() { throw new Error('primary'); },
+    });
+    const inst = new C({});
+    const dispose = inst._frame.dispose.bind(inst._frame);
+    inst._frame.dispose = () => { dispose(); throw new Error('secondary'); };
+    const prior = console.error;
+    console.error = () => {};
+    try {
+      expect(() => inst.mount(document.createElement('main'))).toThrow('primary');
+    } finally {
+      console.error = prior;
+    }
+    expect(inst._state).toBe('failed');
+  });
+
+  test('setup rollback reports a throwing ref-subscriber flush, preserves the mount error, and finishes teardown', () => {
+    const ref = RT.__state(null);
+    let armed = false;
+    const stop = RT.__effect(() => {
+      const value = ref.value;
+      if (armed && value === null) throw new Error('secondary ref subscriber');
+    });
+    const C = defineComponent(RT, {
+      name: 'RefFlushFailure',
+      create() {
+        const root = document.createElement('div');
+        ref.value = root;
+        this._refCleanups = [() => RT.__detachRef(ref, root)];
+        return root;
+      },
+      setup() {
+        armed = true;
+        throw new Error('primary mount failure');
+      },
+    });
+    const target = document.createElement('main');
+    const inst = new C({});
+    const reports = [];
+    const prior = console.error;
+    console.error = (label, error) => reports.push([String(label), error?.message]);
+    try {
+      expect(() => inst.mount(target)).toThrow('primary mount failure');
+    } finally {
+      console.error = prior;
+      stop();
+    }
+    expect(reports).toEqual([
+      ['[Rip] ref cleanup batch flush error:', 'secondary ref subscriber'],
+    ]);
+    expect(ref.read()).toBeNull();
+    expect(serialize(target)).toBe('<main></main>');
+    expect(inst._state).toBe('failed');
+    for (const field of [
+      '_target', '_root', '_nodes', '_children', '_refCleanups',
+      '_restWriters', '_restHandlers', '_inheritedEl',
+    ]) expect(inst[field]).toBeNull();
+  });
+
+  test('unmount before mount terminally disposes init resources without mounted-only hooks', () => {
+    const source = RT.__state(0);
+    const log = [];
+    const C = defineComponent(RT, {
+      name: 'NeverMounted',
+      init(props, api) {
+        api.__effect(() => { source.value; log.push('effect'); });
+      },
+      hooks: {
+        beforeUnmount() { log.push('beforeUnmount'); },
+        unmounted() { log.push('unmounted'); },
+      },
+    });
+    const inst = new C({});
+    expect(log).toEqual(['effect']);
+    inst.unmount();
+    expect(inst._state).toBe('unmounted');
+    expect(inst._frame.disposed).toBe(true);
+    expect(log).toEqual(['effect']);
+    source.value = 1;
+    expect(log).toEqual(['effect']);
+    expect(() => inst.mount(document.createElement('main'))).toThrow('cannot mount an unmounted instance');
+  });
+
+  test('failed rollback removes rest writers and handlers', () => {
+    const value = RT.__state('live');
+    const calls = [];
+    let inherited = null;
+    const C = defineComponent(RT, {
+      name: 'RestFailure',
+      create() {
+        inherited = document.createElement('button');
+        this._inheritedEl = inherited;
+        this._applyInheritedProp(inherited, 'title', value);
+        this._applyInheritedProp(inherited, '@click', () => calls.push('click'));
+        return inherited;
+      },
+      setup() { throw new Error('rest failure'); },
+      hooks: { onError() {} },
+    });
+    const target = document.createElement('main');
+    const inst = new C({});
+    inst.mount(target);
+    expect(inst._state).toBe('failed');
+    expect(inst._restWriters).toBeNull();
+    expect(inst._restHandlers).toBeNull();
+    inherited.dispatchEvent({ type: 'click', target: inherited, bubbles: false });
+    value.value = 'dead';
+    expect(calls).toEqual([]);
+    expect(inherited.getAttribute('title')).toBe('live');
+    expect(serialize(target)).toBe('<main></main>');
+  });
 });
 
 // ════════════════════════════════════════════════════════════════════
@@ -455,6 +648,77 @@ describe('composition and error boundaries', () => {
     ]);
   });
 
+  test('child create and setup failures roll back nested resources and leave placeholders', () => {
+    for (const phase of ['create', 'setup']) {
+      const source = RT.__state(0);
+      const log = [];
+      let child = null;
+      let grandchild = null;
+      const Grandchild = defineComponent(RT, {
+        name: 'Grandchild',
+        create() { return document.createElement('small'); },
+        setup() { RT.__effect(() => { source.value; log.push('grand-effect'); }); },
+        hooks: {
+          beforeUnmount() { log.push('grand-beforeUnmount'); },
+          unmounted() { log.push('grand-unmounted'); },
+        },
+      });
+      const Broken = defineComponent(RT, {
+        name: `Broken_${phase}`,
+        create() {
+          const root = document.createElement('article');
+          const nested = childCreate(RT, this, Grandchild, {});
+          grandchild = nested.inst;
+          root.appendChild(nested.el);
+          if (phase === 'create') throw new Error(`child:${phase}`);
+          return root;
+        },
+        setup() {
+          childSetup(RT, grandchild);
+          RT.__effect(() => { source.value; log.push('child-effect'); });
+          if (phase === 'setup') throw new Error(`child:${phase}`);
+        },
+        hooks: {
+          beforeUnmount() { log.push('child-beforeUnmount'); },
+          unmounted() { log.push('child-unmounted'); },
+        },
+      });
+      const Parent = defineComponent(RT, {
+        name: 'BoundaryParent',
+        create() {
+          const root = document.createElement('div');
+          const nested = childCreate(RT, this, Broken, {});
+          child = nested.inst;
+          root.appendChild(nested.el);
+          return root;
+        },
+        setup() { childSetup(RT, child); },
+        hooks: { onError(error) { log.push(`caught:${error.message}`); } },
+      });
+      const target = document.createElement('main');
+      const parent = new Parent({});
+      parent.mount(target);
+      expect(parent._state).toBe('mounted');
+      expect(serialize(target)).toBe(
+        `<main><div><!--rip:child-error: Broken_${phase}--></div></main>`,
+      );
+      if (child) {
+        expect(child._state).toBe('failed');
+        expect(child._root).toBeNull();
+        expect(child._children ?? null).toBeNull();
+      }
+      if (grandchild) expect(grandchild._state).toBe(phase === 'setup' ? 'unmounted' : 'failed');
+      const runs = log.filter((x) => x.endsWith('effect')).length;
+      source.value = 1;
+      expect(log.filter((x) => x.endsWith('effect'))).toHaveLength(runs);
+      expect(log).not.toContain('child-beforeUnmount');
+      expect(log).not.toContain('child-unmounted');
+      expect(log).not.toContain('grand-beforeUnmount');
+      expect(log).not.toContain('grand-unmounted');
+      expect(log).toContain(`caught:child:${phase}`);
+    }
+  });
+
   test('__handleComponentError walks to the NEAREST boundary; a throwing boundary passes to the next; the root rethrows', () => {
     expect(both((api) => {
       const log = [];
@@ -480,6 +744,108 @@ describe('composition and error boundaries', () => {
       const rethrow = caught(() => api.__handleComponentError(new Error('unhandled'), bare));
       return [log, rethrow];
     })).toEqual([['mid-throws', 'top:boom'], ['throw', 'Error']]);
+  });
+
+  test('mount failure dispatches after stack restoration so boundary-created children and effects stay parent-owned and live', () => {
+    const source = RT.__state(0);
+    const log = [];
+    let failed = null;
+    let rescue = null;
+    const Rescue = defineComponent(RT, {
+      name: 'Rescue',
+      create() { return document.createElement('strong'); },
+      setup(api) { api.__effect(() => { source.value; log.push('rescue-effect'); }); },
+    });
+    const Broken = defineComponent(RT, {
+      name: 'Broken',
+      create() { return document.createElement('i'); },
+      setup(api) {
+        api.__effect(() => { source.value; log.push('failed-effect'); });
+        throw new Error('broken setup');
+      },
+    });
+    const Boundary = defineComponent(RT, {
+      name: 'Boundary',
+      create() {
+        const root = document.createElement('div');
+        const child = childCreate(RT, this, Broken, {});
+        failed = child.inst;
+        root.appendChild(child.el);
+        return root;
+      },
+      setup() { childSetup(RT, failed); },
+      hooks: {
+        onError(error, component) {
+          log.push(`caught:${error.message}`);
+          RT.__effect(() => { source.value; log.push('boundary-effect'); });
+          rescue = new Rescue({});
+          expect(rescue._parent).toBe(this);
+          expect(rescue._mountCreate()).toBe(true);
+          this._root.appendChild(rescue._root);
+          (this._children || (this._children = [])).push(rescue);
+          rescue._mountSetup();
+          expect(component).toBe(failed);
+        },
+      },
+    });
+    const target = document.createElement('main');
+    const boundary = new Boundary({});
+    boundary.mount(target);
+    expect(failed._state).toBe('failed');
+    expect(failed._frame.disposed).toBe(true);
+    expect(rescue._state).toBe('mounted');
+    expect(serialize(target)).toBe('<main><div><!--rip:child-error: Broken--><strong></strong></div></main>');
+    source.value = 1;
+    expect(log).toEqual([
+      'failed-effect', 'caught:broken setup', 'boundary-effect', 'rescue-effect',
+      'boundary-effect', 'rescue-effect',
+    ]);
+    boundary.unmount();
+    source.value = 2;
+    expect(log).toHaveLength(6);
+  });
+
+  test('a delayed child failure invokes its parent-chain boundary under the boundary owner stacks', () => {
+    const source = RT.__state(0);
+    const log = [];
+    let rescue = null;
+    const Rescue = defineComponent(RT, {
+      name: 'DelayedRescue',
+      create() { return document.createElement('strong'); },
+    });
+    const Boundary = defineComponent(RT, {
+      name: 'DelayedBoundary',
+      create() { return document.createElement('div'); },
+      hooks: {
+        onError(error) {
+          log.push(`caught:${error.message}`);
+          RT.__effect(() => { source.value; log.push('boundary-effect'); });
+          rescue = new Rescue({});
+        },
+      },
+    });
+    const Broken = defineComponent(RT, {
+      name: 'DelayedBroken',
+      create() { return document.createElement('i'); },
+      setup() { throw new Error('delayed boom'); },
+    });
+    const boundary = new Boundary({});
+    boundary.mount(document.createElement('main'));
+    const prev = RT.__pushComponent(boundary);
+    const child = new Broken({});
+    RT.__popComponent(prev);
+
+    expect(() => child.mount(document.createElement('aside'))).not.toThrow();
+    expect(child._state).toBe('failed');
+    expect(rescue._parent).toBe(boundary);
+    expect(boundary._frame.size).toBeGreaterThan(0);
+    source.value = 1;
+    expect(log).toEqual([
+      'caught:delayed boom', 'boundary-effect', 'boundary-effect',
+    ]);
+    boundary.unmount();
+    source.value = 2;
+    expect(log).toHaveLength(3);
   });
 
   test('a corrupted (cyclic) parent chain terminates the boundary walk instead of hanging', () => {
@@ -638,7 +1004,7 @@ describe('render helpers', () => {
       await tick();                             // first rAF
       await tick();                             // second rAF
       stages.push(cls());                       // from swapped for to
-      el.dispatchEvent({ type: 'transitionend', bubbles: false });
+      el.dispatchEvent({ type: 'transitionend', target: el, bubbles: false });
       stages.push(cls(), done);
       return stages;
     })).toEqual([
@@ -646,6 +1012,39 @@ describe('render helpers', () => {
  'fade-enter-active,fade-enter-to',
  '', true,
     ]);
+  });
+
+  test('__transition accepts only the element own event and completes once without a timeout', async () => {
+    const el = document.createElement('div');
+    const child = document.createElement('span');
+    el.appendChild(child);
+    let done = 0;
+    RT.__transition(el, 'fade', 'enter', () => { done++; });
+    await tick();
+    await tick();
+
+    child.dispatchEvent({ type: 'transitionend', target: child, bubbles: true });
+    el.dispatchEvent({ type: 'transitionend', bubbles: false });
+    await tick();
+    expect(done).toBe(0);
+    expect(el.classList.contains('fade-enter-active')).toBe(true);
+    expect(el.classList.contains('fade-enter-to')).toBe(true);
+
+    el.dispatchEvent({ type: 'transitionend', target: el, bubbles: false });
+    el.dispatchEvent({ type: 'transitionend', target: el, bubbles: false });
+    expect(done).toBe(1);
+    expect(el.classList.contains('fade-enter-active')).toBe(false);
+    expect(el.classList.contains('fade-enter-to')).toBe(false);
+
+    const absent = document.createElement('div');
+    let absentDone = false;
+    RT.__transition(absent, 'slide', 'leave', () => { absentDone = true; });
+    await tick();
+    await tick();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(absentDone).toBe(false);
+    absent.dispatchEvent({ type: 'transitionend', target: absent, bubbles: false });
+    expect(absentDone).toBe(true);
   });
 
   test('the transition CSS presets inject into document.head once per runtime', async () => {
@@ -896,6 +1295,7 @@ describe('a throwing _init disposes the frame', () => {
     const kid = new Broken({});        // the boundary handles; the constructor returns
     RT.__popComponent(prev);
     expect(kid._initFailed).toBe(true);
+    expect(kid._state).toBe('failed');
     expect(kid._frame.disposed).toBe(true);
     s.value = 1;                       // the pre-throw effect must be dead
     expect(log).toEqual(['run', 'caught:init boom']);

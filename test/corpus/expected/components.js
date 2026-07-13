@@ -494,18 +494,17 @@ let Deck = class extends __Component {
     try {
     this._inst1 = new Chip({ label: this.name });
     if (this._inst1 && this._inst1._initFailed) {
-      try { this._inst1.unmount({removeDOM: false}); } catch (__ue) { console.error('[Rip] partial-init unmount error:', __ue); }
       this._inst1 = null;
       this._el2 = document.createComment('rip:child-init-failed: Chip');
-    } else {
-      { const __cprev = __pushComponent(this._inst1); const __co = __pushOwner(this._inst1._frame); try {
-        this._el2 = this._inst1._root = this._inst1._create();
-      } finally { __popOwner(__co); __popComponent(__cprev); } }
+    } else if (this._inst1._mountCreate()) {
+      this._el2 = this._inst1._root;
       (this._children || (this._children = [])).push(this._inst1);
+    } else {
+      this._inst1 = null;
+      this._el2 = document.createComment('rip:child-error: Chip');
     }
     } catch (__childErr) {
       console.error('[Rip] Chip construction failed:', __childErr);
-      if (this._inst1) { try { this._inst1.unmount({removeDOM: false}); } catch (__ue) { console.error('[Rip] partial-child unmount error:', __ue); } }
       this._inst1 = null;
       this._el2 = document.createComment('rip:child-error: Chip');
     }
@@ -515,18 +514,17 @@ let Deck = class extends __Component {
     try {
     this._inst3 = new Chip({ label: "static", compact: true });
     if (this._inst3 && this._inst3._initFailed) {
-      try { this._inst3.unmount({removeDOM: false}); } catch (__ue) { console.error('[Rip] partial-init unmount error:', __ue); }
       this._inst3 = null;
       this._el4 = document.createComment('rip:child-init-failed: Chip');
-    } else {
-      { const __cprev = __pushComponent(this._inst3); const __co = __pushOwner(this._inst3._frame); try {
-        this._el4 = this._inst3._root = this._inst3._create();
-      } finally { __popOwner(__co); __popComponent(__cprev); } }
+    } else if (this._inst3._mountCreate()) {
+      this._el4 = this._inst3._root;
       (this._children || (this._children = [])).push(this._inst3);
+    } else {
+      this._inst3 = null;
+      this._el4 = document.createComment('rip:child-error: Chip');
     }
     } catch (__childErr) {
       console.error('[Rip] Chip construction failed:', __childErr);
-      if (this._inst3) { try { this._inst3.unmount({removeDOM: false}); } catch (__ue) { console.error('[Rip] partial-child unmount error:', __ue); } }
       this._inst3 = null;
       this._el4 = document.createComment('rip:child-error: Chip');
     }
@@ -537,18 +535,17 @@ let Deck = class extends __Component {
     try {
     this._inst5 = new Chip({ label: (this.name.value + "!") });
     if (this._inst5 && this._inst5._initFailed) {
-      try { this._inst5.unmount({removeDOM: false}); } catch (__ue) { console.error('[Rip] partial-init unmount error:', __ue); }
       this._inst5 = null;
       this._el6 = document.createComment('rip:child-init-failed: Chip');
-    } else {
-      { const __cprev = __pushComponent(this._inst5); const __co = __pushOwner(this._inst5._frame); try {
-        this._el6 = this._inst5._root = this._inst5._create();
-      } finally { __popOwner(__co); __popComponent(__cprev); } }
+    } else if (this._inst5._mountCreate()) {
+      this._el6 = this._inst5._root;
       (this._children || (this._children = [])).push(this._inst5);
+    } else {
+      this._inst5 = null;
+      this._el6 = document.createComment('rip:child-error: Chip');
     }
     } catch (__childErr) {
       console.error('[Rip] Chip construction failed:', __childErr);
-      if (this._inst5) { try { this._inst5.unmount({removeDOM: false}); } catch (__ue) { console.error('[Rip] partial-child unmount error:', __ue); } }
       this._inst5 = null;
       this._el6 = document.createComment('rip:child-error: Chip');
     }
@@ -558,18 +555,17 @@ let Deck = class extends __Component {
     try {
     this._inst7 = new Chip({ __bind_label__: this.name });
     if (this._inst7 && this._inst7._initFailed) {
-      try { this._inst7.unmount({removeDOM: false}); } catch (__ue) { console.error('[Rip] partial-init unmount error:', __ue); }
       this._inst7 = null;
       this._el8 = document.createComment('rip:child-init-failed: Chip');
-    } else {
-      { const __cprev = __pushComponent(this._inst7); const __co = __pushOwner(this._inst7._frame); try {
-        this._el8 = this._inst7._root = this._inst7._create();
-      } finally { __popOwner(__co); __popComponent(__cprev); } }
+    } else if (this._inst7._mountCreate()) {
+      this._el8 = this._inst7._root;
       (this._children || (this._children = [])).push(this._inst7);
+    } else {
+      this._inst7 = null;
+      this._el8 = document.createComment('rip:child-error: Chip');
     }
     } catch (__childErr) {
       console.error('[Rip] Chip construction failed:', __childErr);
-      if (this._inst7) { try { this._inst7.unmount({removeDOM: false}); } catch (__ue) { console.error('[Rip] partial-child unmount error:', __ue); } }
       this._inst7 = null;
       this._el8 = document.createComment('rip:child-error: Chip');
     }
@@ -583,11 +579,19 @@ let Deck = class extends __Component {
     return this._el0;
   }
   _setup() {
-    if (this._inst1 && !this._inst1._isSetup) { this._inst1._isSetup = true; const __cprev = __pushComponent(this._inst1); const __co = __pushOwner(this._inst1._frame); try { try { if (this._inst1.beforeMount) this._inst1.beforeMount(); if (this._inst1._setup) this._inst1._setup(); if (this._inst1.mounted) this._inst1.mounted(); } catch (__e) { __handleComponentError(__e, this._inst1); } } finally { __popOwner(__co); __popComponent(__cprev); } }
-    if (this._inst3 && !this._inst3._isSetup) { this._inst3._isSetup = true; const __cprev = __pushComponent(this._inst3); const __co = __pushOwner(this._inst3._frame); try { try { if (this._inst3.beforeMount) this._inst3.beforeMount(); if (this._inst3._setup) this._inst3._setup(); if (this._inst3.mounted) this._inst3.mounted(); } catch (__e) { __handleComponentError(__e, this._inst3); } } finally { __popOwner(__co); __popComponent(__cprev); } }
-    if (this._inst5 && !this._inst5._isSetup) { this._inst5._isSetup = true; const __cprev = __pushComponent(this._inst5); const __co = __pushOwner(this._inst5._frame); try { try { if (this._inst5.beforeMount) this._inst5.beforeMount(); if (this._inst5._setup) this._inst5._setup(); if (this._inst5.mounted) this._inst5.mounted(); } catch (__e) { __handleComponentError(__e, this._inst5); } } finally { __popOwner(__co); __popComponent(__cprev); } }
+    if (this._inst1 && this._inst1._state === 'mounting') {
+      this._el2 = this._inst1._mountSetup(document.createComment('rip:child-error: Chip'));
+    }
+    if (this._inst3 && this._inst3._state === 'mounting') {
+      this._el4 = this._inst3._mountSetup(document.createComment('rip:child-error: Chip'));
+    }
+    if (this._inst5 && this._inst5._state === 'mounting') {
+      this._el6 = this._inst5._mountSetup(document.createComment('rip:child-error: Chip'));
+    }
     __effect(() => { if (this._inst5) this._inst5._updateProp('label', (this.name.value + "!")); });
-    if (this._inst7 && !this._inst7._isSetup) { this._inst7._isSetup = true; const __cprev = __pushComponent(this._inst7); const __co = __pushOwner(this._inst7._frame); try { try { if (this._inst7.beforeMount) this._inst7.beforeMount(); if (this._inst7._setup) this._inst7._setup(); if (this._inst7.mounted) this._inst7.mounted(); } catch (__e) { __handleComponentError(__e, this._inst7); } } finally { __popOwner(__co); __popComponent(__cprev); } }
+    if (this._inst7 && this._inst7._state === 'mounting') {
+      this._el8 = this._inst7._mountSetup(document.createComment('rip:child-error: Chip'));
+    }
     {
       const __s = { blocks: [], keys: [] };
       __effect(() => {
@@ -606,18 +610,17 @@ let Deck = class extends __Component {
         try {
         _inst11 = new Chip({ label: item });
         if (_inst11 && _inst11._initFailed) {
-          try { _inst11.unmount({removeDOM: false}); } catch (__ue) { console.error('[Rip] partial-init unmount error:', __ue); }
           _inst11 = null;
           _el12 = document.createComment('rip:child-init-failed: Chip');
-        } else {
-          { const __cprev = __pushComponent(_inst11); const __co = __pushOwner(_inst11._frame); try {
-            _el12 = _inst11._root = _inst11._create();
-          } finally { __popOwner(__co); __popComponent(__cprev); } }
+        } else if (_inst11._mountCreate()) {
+          _el12 = _inst11._root;
           _factoryChildren.push(_inst11);
+        } else {
+          _inst11 = null;
+          _el12 = document.createComment('rip:child-error: Chip');
         }
         } catch (__childErr) {
           console.error('[Rip] Chip construction failed:', __childErr);
-          if (_inst11) { try { _inst11.unmount({removeDOM: false}); } catch (__ue) { console.error('[Rip] partial-child unmount error:', __ue); } }
           _inst11 = null;
           _el12 = document.createComment('rip:child-error: Chip');
         }
@@ -632,7 +635,10 @@ let Deck = class extends __Component {
         if (__fr) __fr.dispose();
         const __o = __pushOwner(__fr = __ownerFrame());
         try {
-          if (_inst11 && !_inst11._isSetup) { _inst11._isSetup = true; const __cprev = __pushComponent(_inst11); const __co = __pushOwner(_inst11._frame); try { try { if (_inst11.beforeMount) _inst11.beforeMount(); if (_inst11._setup) _inst11._setup(); if (_inst11.mounted) _inst11.mounted(); } catch (__e) { __handleComponentError(__e, _inst11); } } finally { __popOwner(__co); __popComponent(__cprev); } }
+          if (_inst11 && _inst11._state === 'mounting') {
+            _el12 = _inst11._mountSetup(document.createComment('rip:child-error: Chip'));
+            this._first = _el12;
+          }
         } finally { __popOwner(__o); }
       },
       d(detaching) {
@@ -667,18 +673,17 @@ let Holder = class extends __Component {
     try {
     this._inst0 = new Frame({ children: this._el2 });
     if (this._inst0 && this._inst0._initFailed) {
-      try { this._inst0.unmount({removeDOM: false}); } catch (__ue) { console.error('[Rip] partial-init unmount error:', __ue); }
       this._inst0 = null;
       this._el1 = document.createComment('rip:child-init-failed: Frame');
-    } else {
-      { const __cprev = __pushComponent(this._inst0); const __co = __pushOwner(this._inst0._frame); try {
-        this._el1 = this._inst0._root = this._inst0._create();
-      } finally { __popOwner(__co); __popComponent(__cprev); } }
+    } else if (this._inst0._mountCreate()) {
+      this._el1 = this._inst0._root;
       (this._children || (this._children = [])).push(this._inst0);
+    } else {
+      this._inst0 = null;
+      this._el1 = document.createComment('rip:child-error: Frame');
     }
     } catch (__childErr) {
       console.error('[Rip] Frame construction failed:', __childErr);
-      if (this._inst0) { try { this._inst0.unmount({removeDOM: false}); } catch (__ue) { console.error('[Rip] partial-child unmount error:', __ue); } }
       this._inst0 = null;
       this._el1 = document.createComment('rip:child-error: Frame');
     }
@@ -686,7 +691,9 @@ let Holder = class extends __Component {
     return this._el1;
   }
   _setup() {
-    if (this._inst0 && !this._inst0._isSetup) { this._inst0._isSetup = true; const __cprev = __pushComponent(this._inst0); const __co = __pushOwner(this._inst0._frame); try { try { if (this._inst0.beforeMount) this._inst0.beforeMount(); if (this._inst0._setup) this._inst0._setup(); if (this._inst0.mounted) this._inst0.mounted(); } catch (__e) { __handleComponentError(__e, this._inst0); } } finally { __popOwner(__co); __popComponent(__cprev); } }
+    if (this._inst0 && this._inst0._state === 'mounting') {
+      this._el1 = this._inst0._mountSetup(document.createComment('rip:child-error: Frame'));
+    }
   }
 };
 let FancyBtn = class extends __Component {
