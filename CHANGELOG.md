@@ -5,6 +5,11 @@ repository's pull requests.
 
 ## Unreleased
 
+- Email rendering foundation: `packages/ui` now owns a typed synchronous
+  DOM, deterministic HTML serialization, and plain-text conversion.
+  Twenty-six email contracts moved from the pending lane into the
+  permanent battery, with an independent package CI boundary (#60)
+
 - Compiler and runtime correctness: lowerings preserve evaluation,
   control, bindings, and RFC-12 mappings; schema/ORM paths validate
   structure and stable identity; reactive/component lifecycles stay
