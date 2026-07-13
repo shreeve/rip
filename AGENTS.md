@@ -55,9 +55,12 @@ the Rip compiler: language, toolchain, runtimes, and editor support.
 8. **Small, honest commits — always through branches and PRs.** Nothing
    commits to `main` directly. PRs squash-merge by default: linear
    history, one commit per PR, subject "Title (#N)", the PR body as
-   the commit body. A campaign branch whose commits are each one
-   complete, honestly-named feature may rebase-merge instead — owner
-   approval required, linearity preserved, no merge commits.
+   the commit body. A campaign PR whose commits are each one complete,
+   honestly named, and useful as review provenance rebase-merges when
+   the owner approves preserving that sequence. Before merge, rebase
+   the campaign branch onto current `main`; never merge `main` into
+   the branch. The resulting `main` history stays linear and contains
+   no merge commit.
    Commits and PRs carry **no AI attribution** — no Co-Authored-By
    trailers, no "generated with" footers; authorship is the owner's.
    Merge only after CI check CONCLUSIONS are observed: poll the check
