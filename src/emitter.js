@@ -3760,16 +3760,18 @@ class Emitter {
   // keyExpr distinguishes the two accumulator shapes: null builds
   // an array (`result.push(expr)`), non-null builds an object
   // (`result[key] = expr` — the object-comprehension form).
-  comprehension(node, ind, keyExpr = null) {
-    this.withBindings(this.loopBindingNames(node), () => this.comprehensionCore(node, ind, keyExpr));
+  comprehension(node, ind, keySpec = null) {
+    this.withBindings(this.loopBindingNames(node), () => this.comprehensionCore(node, ind, keySpec));
   }
 
-  comprehensionCore(node, ind, keyExpr) {
-    this.inCtrl(() => this.comprehensionCoreCtrl(node, ind, keyExpr));
+  comprehensionCore(node, ind, keySpec) {
+    this.inCtrl(() => this.comprehensionCoreCtrl(node, ind, keySpec));
   }
 
-  comprehensionCoreCtrl(node, ind, keyExpr) {
+  comprehensionCoreCtrl(node, ind, keySpec) {
     const [, expr, [clause], guards] = node;
+    const emitValue = () => this.mark(node, 'value', () => this.expr(expr));
+    const keyExpr = keySpec?.expr ?? keySpec;
     const pad = '  '.repeat(ind);
     this.rejectYieldInIIFE(node);
     this.mark(node, '$self', () => {
@@ -3796,36 +3798,44 @@ class Emitter {
         // The pushed expression is an operand position (compounds group).
         const wrap = Emitter.needsGrouping(expr, 'operand') || isUpdate(expr);
         if (wrap) this.b.emit('(');
-        this.expr(expr);
+        emitValue();
         if (wrap) this.b.emit(')');
         this.b.emit(');\n');
       } else {
         // Every dynamic key materializes as an OWN data property: a
-        // '__proto__' key from source data must create a key, never
-        // mutate the accumulator's prototype. Key and value bind once
-        // (key first — native object-literal order), then the one
-        // hazardous key routes through defineProperty; every other
-        // key keeps the plain assignment (measured ~18x faster than
-        // uniform defineProperty, with identical pinned behavior).
+        // '__proto__' key or inherited setter must never intercept the
+        // write. The intrinsic seam performs ToPropertyKey exactly once
+        // and yields the resulting string or symbol before the value
+        // evaluates, without resolving capturable source bindings.
         const kt = this.loopTempName('_k');
         const vt = this.loopTempName('_v');
-        this.b.emit(`${inner}const ${kt} = `);
+        this.b.emit(`${inner}const ${kt} = __toPropertyKey(`);
         // A string key is an identifier read (it routes through expr,
         // so a reactive key unwraps — `result[count.value]`;
         // loop variables are frame-bound and stay bare); a node
         // key is the dynamicKey's inner expression.
         const wrapKey = isNode(keyExpr) && (Emitter.needsGrouping(keyExpr, 'operand') || isUpdate(keyExpr));
-        if (wrapKey) this.b.emit('(');
-        this.expr(keyExpr);
-        if (wrapKey) this.b.emit(')');
-        this.b.emit(`, ${vt} = `);
+        const emitKey = () => {
+          if (wrapKey) this.b.emit('(');
+          this.expr(keyExpr);
+          if (wrapKey) this.b.emit(')');
+        };
+        if (keySpec?.pair !== undefined) {
+          if (keySpec.keyNode !== null) {
+            this.mark(keySpec.pair, 'key', () =>
+              this.mark(keySpec.keyNode, '$self', () =>
+                this.mark(keySpec.keyNode, 'key', emitKey)));
+          } else {
+            this.mark(keySpec.pair, 'key', emitKey);
+          }
+        } else emitKey();
+        this.b.emit(`), ${vt} = `);
         const wrap = Emitter.needsGrouping(expr, 'operand') || isUpdate(expr);
         if (wrap) this.b.emit('(');
-        this.expr(expr);
+        emitValue();
         if (wrap) this.b.emit(')');
         this.b.emit(';\n');
-        this.b.emit(`${inner}if (${kt} === '__proto__') Object.defineProperty(${acc}, ${kt}, { value: ${vt}, enumerable: true, configurable: true, writable: true });\n`);
-        this.b.emit(`${inner}else ${acc}[${kt}] = ${vt};\n`);
+        this.b.emit(`${inner}__defineOwnDataProperty(${acc}, ${kt}, ${vt});\n`);
       }
       if (guards.length > 0) this.b.emit(`${pad}    }\n`);
       this.b.emit(`${pad}  }\n`);
@@ -5063,13 +5073,10 @@ class Emitter {
       }
       if (boundary === 'class') {
         if (n[2] != null) walk(n[2], extra);
-        const body = n[3];
-        if (isBlock(body)) {
-          for (const stmt of body.slice(1)) {
-            if (isNode(stmt) && ASSIGNS.has(stmt[0]) && stmt.length === 3) walk(stmt[2], extra);
-            else if (!Emitter.isTypedWrapper(stmt)) walk(stmt, extra);
-          }
-        }
+        // Field initializers execute once per class evaluation/instance.
+        // Their reference captures are therefore planned at classMember,
+        // where a per-evaluation scope can own the temps; planning them in
+        // the enclosing scope lets recursive construction clobber them.
         return;
       }
       if (boundary === 'loop') {
@@ -5170,13 +5177,13 @@ class Emitter {
       let objText = null;
       if (plan.obj !== null) {
         this.b.emit(`${plan.obj} = `);
-        this.mark(node, 'target', () => this.withDeopt(() => this.expr(target1[1])));
+        this.mark(target1, 'object', () => this.withDeopt(() => this.expr(target1[1])));
         this.b.emit(', ');
         objText = plan.obj;
       }
       if (plan.key !== null) {
         this.b.emit(`${plan.key} = `);
-        this.mark(node, 'target', () => this.withExpression(() => this.expr(target1[2])));
+        this.mark(target1, 'key', () => this.withExpression(() => this.expr(target1[2])));
         this.b.emit(', ');
       }
       const ref = ['[]', '.'].includes(target1[0]) || target1[0] === '?.' || target1[0] === 'optindex'
@@ -5184,11 +5191,16 @@ class Emitter {
         : target1;
       const target = () => this.mark(node, 'target', () => this.withTarget(() => this.withDeopt(() => this.expr(ref))));
       target();
-      this.b.emit(op === '//=' ? ' = Math.floor(' : ' = ' + Emitter.MODULO + '(');
-      target();
-      this.b.emit(op === '//=' ? ' / ' : ', ');
-      this.operand(node, 'value', node[2]);
-      this.b.emit(')');
+      this.b.emit(' ');
+      this.mark(node, 'operator', () => this.b.emit('='));
+      this.b.emit(' ');
+      this.mark(node, 'operator', () => {
+        this.b.emit(op === '//=' ? 'Math.floor(' : Emitter.MODULO + '(');
+        target();
+        this.b.emit(op === '//=' ? ' / ' : ', ');
+        this.operand(node, 'value', node[2]);
+        this.b.emit(')');
+      });
     };
     this.mark(node, '$self', () => {
       if (context === 'statement') {
@@ -5598,7 +5610,7 @@ class Emitter {
     // never run its body. The check lives HERE, the one funnel every
     // effect position (statement, expression, tail, component body)
     // emits through. Nested functions keep their own yields.
-    if (!isFunc(body) && Emitter.containsYield(body)) {
+    if (Emitter.effectBodyYields(body)) {
       throw this.positionedError(node, "emitter: an effect ('~>') body cannot yield — the runtime calls the effect function (make the generator a named function the effect calls)");
     }
     const emitName = () => {
@@ -5662,6 +5674,10 @@ class Emitter {
     this.b.emit('; })');
     this.scopes.pop();
     this.rframes.pop();
+  }
+
+  static effectBodyYields(body) {
+    return isFunc(body) ? Emitter.containsYield(body[2]) : Emitter.containsYield(body);
   }
 
   // ── Components: declarations, the member model, the static
@@ -5903,7 +5919,7 @@ class Emitter {
         // calls the effect function, so a generator body would never
         // run. Component effects emit outside effectValue's funnel,
         // so the check must live here too.
-        if (Emitter.containsYield(stmt[2])) {
+        if (Emitter.effectBodyYields(stmt[2])) {
           throw this.positionedError(stmt, "emitter: an effect ('~>') body cannot yield — the runtime calls the effect function (make the generator a named function the effect calls)", stmt);
         }
         effects.push(stmt);
@@ -6230,7 +6246,15 @@ class Emitter {
             }));
           } else {
             const single = isBlock(bodyNode) ? bodyNode[1] : bodyNode;
-            this.b.emit('{ return ');
+            const { entries, names } = this.scopedHoist([single], []);
+            this.scopes.push(names);
+            this.rframes.push({ reactive: new Set(), bound: names });
+            this.b.emit('{ ');
+            if (entries.length) {
+              this.hoistLine(entries);
+              this.b.emit(' ');
+            }
+            this.b.emit('return ');
             this.mark(eff, 'value', () => this.withExpression(() => {
               const wrap = Emitter.needsGrouping(single, 'operand') || isObject(single);
               if (wrap) this.b.emit('(');
@@ -6238,6 +6262,8 @@ class Emitter {
               if (wrap) this.b.emit(')');
             }));
             this.b.emit('; }');
+            this.scopes.pop();
+            this.rframes.pop();
           }
           this.b.emit(')');
         });
@@ -9459,7 +9485,13 @@ class Emitter {
     const comp = !this.inPattern && Emitter.objectComprehension(node);
     // A dynamicKey comprehension key accumulates through its inner
     // expression (`result[k] = v`).
-    if (comp) return this.comprehension(comp[2], this.ind, isNode(comp[1]) ? comp[1][1] : comp[1]);
+    if (comp) {
+      const keyNode = isNode(comp[1]) ? comp[1] : null;
+      const keySpec = { expr: keyNode !== null ? keyNode[1] : comp[1], pair: comp, keyNode };
+      return this.mark(node, '$self', () => this.mark(node, 'pairs', () =>
+        this.mark(comp, '$self', () => this.mark(comp, 'value', () =>
+          this.comprehension(comp[2], this.ind, keySpec)))));
+    }
     const pairs = node.slice(1);
     // Capture the statement indent ONCE: emitting an earlier pair's
     // method body mutates this.ind.
@@ -9782,6 +9814,30 @@ class Emitter {
     }
   }
 
+  classFieldValue(value) {
+    if (Emitter.containsAwait(value)) {
+      throw this.positionedError(value,
+        'emitter: a class field initializer cannot await — JavaScript evaluates class fields synchronously');
+    }
+    if (Emitter.containsYield(value)) {
+      throw this.positionedError(value,
+        'emitter: a class field initializer cannot yield — class field evaluation is not a generator context');
+    }
+    const entries = this.planReferenceTemps([value], new Set());
+    if (entries.length === 0) {
+      this.expr(value);
+      return;
+    }
+    // A fresh arrow activation owns every capture for one field
+    // evaluation. Arrow lexicality preserves this/super; the checks
+    // above keep await/yield from crossing the generated boundary.
+    this.b.emit('(() => { ');
+    this.hoistLine(entries);
+    this.b.emit(' return ');
+    this.expr(value);
+    this.b.emit('; })()');
+  }
+
   classMember(stmt, body, ind, pad, { memberName, isStaticKey, bound }) {
     {
       // A nested `class @Name` is a STATIC member class:
@@ -9922,7 +9978,7 @@ class Emitter {
           this.b.emit(' ');
           this.mark(stmt, 'operator', () => this.b.emit('='));
           this.b.emit(' ');
-          this.mark(stmt, 'value', () => this.withExpression(() => this.expr(stmt[2])));
+          this.mark(stmt, 'value', () => this.withExpression(() => this.classFieldValue(stmt[2])));
         }));
         this.b.emit(';\n');
         return;
@@ -11025,22 +11081,27 @@ class Emitter {
         if (seq) this.b.emit('(');
         if (plan.obj !== null) {
           this.b.emit(`${plan.obj} = `);
-          this.mark(node, 'target', () => this.withExpression(() => this.expr(t[1])));
+          this.mark(t, 'object', () => this.withExpression(() => this.expr(t[1])));
           this.b.emit(', ');
         }
         if (plan.key !== null) {
           this.b.emit(`${plan.key} = `);
-          this.mark(node, 'target', () => this.withExpression(() => this.expr(t[2])));
+          this.mark(t, 'key', () => this.withExpression(() => this.expr(t[2])));
           this.b.emit(', ');
         }
         const ref = this.stores.alias([t[0], plan.obj ?? t[1], plan.key ?? t[2]], t);
         const target = () => this.mark(node, 'target', () => this.withTarget(() => this.expr(ref)));
         target();
-        this.b.emit(` = ${open}`);
-        target();
-        this.b.emit(mid);
-        this.operand(node, 'value', node[2]);
-        this.b.emit(close);
+        this.b.emit(' ');
+        this.mark(node, 'operator', () => this.b.emit('='));
+        this.b.emit(' ');
+        this.mark(node, 'operator', () => {
+          this.b.emit(open);
+          target();
+          this.b.emit(mid);
+          this.operand(node, 'value', node[2]);
+          this.b.emit(close);
+        });
         if (seq) this.b.emit(')');
       });
       return;
@@ -11048,11 +11109,16 @@ class Emitter {
     this.mark(node, '$self', () => {
       const target = () => this.mark(node, 'target', () => this.withTarget(() => this.expr(node[1])));
       target();
-      this.b.emit(` = ${open}`);
-      target();
-      this.b.emit(mid);
-      this.operand(node, 'value', node[2]);
-      this.b.emit(close);
+      this.b.emit(' ');
+      this.mark(node, 'operator', () => this.b.emit('='));
+      this.b.emit(' ');
+      this.mark(node, 'operator', () => {
+        this.b.emit(open);
+        target();
+        this.b.emit(mid);
+        this.operand(node, 'value', node[2]);
+        this.b.emit(close);
+      });
     });
   }
 
@@ -11204,6 +11270,15 @@ const containsComponentDecl = (sexpr, isComponent) => {
   return sexpr.some((el) => containsComponentDecl(el, isComponent));
 };
 
+// Structural trigger for compiler-only intrinsic operations: an object
+// comprehension emits the key-coercion and own-data-property seam even
+// though the source never spells either helper name.
+const containsObjectComprehension = (sexpr) => {
+  if (!isNode(sexpr)) return false;
+  if (sexpr[0] === 'object' && Emitter.objectComprehension(sexpr) !== null) return true;
+  return sexpr.some(containsObjectComprehension);
+};
+
 // The delivered-runtime table — one entry per feature runtime. Each
 // entry carries the runtime's public names (the trigger set AND the
 // injected binding set), its module URL, and an optional structural
@@ -11247,6 +11322,12 @@ const containsComponentDecl = (sexpr, isComponent) => {
 //               emission is what makes one exist; until then delivery
 //               triggers on references alone.
 const RUNTIME_TABLE = [
+  {
+    key: 'intrinsics',
+    names: ['__toPropertyKey', '__defineOwnDataProperty'],
+    url: new URL('./runtime/intrinsics.js', import.meta.url),
+    triggers: (sexpr, preds) => containsObjectComprehension(sexpr),
+  },
   {
     key: 'schema',
     names: ['__schema', 'SchemaError', 'registerCoercer'],

@@ -22,7 +22,7 @@ import { Mappings } from './stores.js';
 
 const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 const B64_INDEX = new Map([...B64].map((c, i) => [c, i]));
-const IDENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+const IDENT = /^[$_\p{ID_Start}][$\u200C\u200D_\p{ID_Continue}]*$/u;
 
 export function encodeVLQ(value) {
   let vlq = value < 0 ? ((-value) << 1) | 1 : value << 1;

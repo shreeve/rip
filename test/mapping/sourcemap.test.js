@@ -220,7 +220,7 @@ describe('source map format validity over the corpus', () => {
       expect(parsed.sources).toEqual(['input.rip']);
       expect(parsed.sourcesContent).toEqual([src]);
       expect(Array.isArray(parsed.names)).toBe(true);
-      for (const n of parsed.names) expect(n).toMatch(/^[A-Za-z_$][A-Za-z0-9_$]*$/);
+      for (const n of parsed.names) expect(n).toMatch(/^[$_\p{ID_Start}][$\u200C\u200D_\p{ID_Continue}]*$/u);
       // All VLQ decodes; every position is in-bounds on both sides.
       const segs = decodeMappings(parsed.mappings);
       const genFile = new SourceFile(code);

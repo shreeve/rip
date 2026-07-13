@@ -2736,7 +2736,7 @@ test ":model toSQL emits CREATE TABLE", modelHeader + '''
     email! email @unique
     @timestamps
   sql = User.toSQL()
-  [sql.includes("CREATE TABLE users"), sql.includes("VARCHAR(100)"), sql.includes("UNIQUE"), sql.includes("created_at"), sql.includes("updated_at")]
+  [sql.includes('CREATE TABLE "users"'), sql.includes("VARCHAR(100)"), sql.includes("UNIQUE"), sql.includes("created_at"), sql.includes("updated_at")]
 ''', [true, true, true, true, true]
 
 test ":model toSQL emits belongs_to FK", modelHeader + '''
@@ -2745,7 +2745,7 @@ test ":model toSQL emits belongs_to FK", modelHeader + '''
   Order = schema :model
     @belongs_to User
   sql = Order.toSQL()
-  [sql.includes("user_id INTEGER NOT NULL REFERENCES users(id)")]
+  [sql.includes('"user_id" INTEGER NOT NULL REFERENCES "users"("id")')]
 ''', [true]
 
 test ":model toSQL marks optional belongs_to as nullable", modelHeader + '''
@@ -2754,7 +2754,7 @@ test ":model toSQL marks optional belongs_to as nullable", modelHeader + '''
   Order = schema :model
     @belongs_to User?
   sql = Order.toSQL()
-  hasFK = sql.match(/user_id INTEGER REFERENCES users\\(id\\)/)?
+  hasFK = sql.match(/"user_id" INTEGER REFERENCES "users"\\("id"\\)/)?
   hasFK
 ''', true
 
@@ -2767,28 +2767,28 @@ test ":model toSQL marks optional belongs_to as nullable", modelHeader + '''
 test ":model toSQL defaults sequence to START 1", modelHeader + '''
   User = schema :model
     name! string
-  User.toSQL().includes("CREATE SEQUENCE users_seq START 1;")
+  User.toSQL().includes('CREATE SEQUENCE "users_seq" START 1;')
 ''', true
 
 test ":model toSQL honors @idStart directive", modelHeader + '''
   User = schema :model
     name! string
     @idStart 10001
-  User.toSQL().includes("CREATE SEQUENCE users_seq START 10001;")
+  User.toSQL().includes('CREATE SEQUENCE "users_seq" START 10001;')
 ''', true
 
 test ":model toSQL option idStart overrides @idStart directive", modelHeader + '''
   User = schema :model
     name! string
     @idStart 10001
-  User.toSQL(idStart: 50000).includes("CREATE SEQUENCE users_seq START 50000;")
+  User.toSQL(idStart: 50000).includes('CREATE SEQUENCE "users_seq" START 50000;')
 ''', true
 
 test ":model toSQL accepts negative @idStart", modelHeader + '''
   User = schema :model
     name! string
     @idStart -5
-  User.toSQL().includes("CREATE SEQUENCE users_seq START -5;")
+  User.toSQL().includes('CREATE SEQUENCE "users_seq" START -5;')
 ''', true
 
 fail "@idStart rejects non-integer literal", '''
@@ -3618,30 +3618,18 @@ test "belongs_to relation resolves from registry", modelHeader + '''
 ''', ["Alice", 42]
 
 test "has_many relation resolves from registry", modelHeader + '''
-  User = schema :model
-    name! string
-  Order = schema :model
-    @belongs_to User
-  adapter.query = (sql, params) ->
-    adapter.calls.push {sql, params}
-    if sql.match /FROM "orders"/
-      {columns: [{name: "id"}, {name: "user_id"}], data: [[10, 1], [11, 1]], rows: 2}
-    else
-      {columns: [{name: "id"}, {name: "name"}], data: [[1, "Alice"]], rows: 1}
-  User.entries = User._desc.entries.concat [{tag: "directive", name: "has_many", args: [{target: "Order"}]}]
-  # Re-register the enriched descriptor so relations pick it up.
-  User2 = schema :model
+  Account = schema :model
     name! string
     @has_many Order
-  __SchemaRegistry.register User2
-  adapter.calls = []
+  Order = schema :model
+    @belongs_to Account
   adapter.query = (sql, params) ->
     adapter.calls.push {sql, params}
     if sql.match /FROM "orders"/
-      {columns: [{name: "id"}, {name: "user_id"}], data: [[10, 1], [11, 1]], rows: 2}
+      {columns: [{name: "id"}, {name: "account_id"}], data: [[10, 1], [11, 1]], rows: 2}
     else
       {columns: [{name: "id"}, {name: "name"}], data: [[1, "Alice"]], rows: 1}
-  u = User2.find! 1
+  u = Account.find! 1
   orders = u.orders!
   orders.length
 ''', 2
@@ -3651,7 +3639,7 @@ test "self-referential :model — Category @belongs_to Category?", modelHeader +
     name! string
     @belongs_to Category?
   sql = Category.toSQL()
-  [sql.includes("category_id INTEGER REFERENCES categories(id)"), Category.kind]
+  [sql.includes('"category_id" INTEGER REFERENCES "categories"("id")'), Category.kind]
 ''', [true, "model"]
 
 test ".toSQL() with circular @belongs_to / @has_many doesn't loop", modelHeader + '''
@@ -3661,7 +3649,7 @@ test ".toSQL() with circular @belongs_to / @has_many doesn't loop", modelHeader 
   Order = schema :model
     total integer
     @belongs_to User
-  [User.toSQL().includes("CREATE TABLE users"), Order.toSQL().includes("user_id INTEGER NOT NULL REFERENCES users(id)")]
+  [User.toSQL().includes('CREATE TABLE "users"'), Order.toSQL().includes('"user_id" INTEGER NOT NULL REFERENCES "users"("id")')]
 ''', [true, true]
 
 # -- namespace collisions --

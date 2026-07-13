@@ -391,6 +391,15 @@ describe('names resolve identifiers against the source text', () => {
       expect(named).toBeGreaterThan(0);
     });
   }
+
+  test('hardening mappings name source identifiers, including Unicode, and never minted temps', () => {
+    const src = 'obj()[clé()] //= rhs()\nout = {[clé()]: väl() for clé, väl of source}';
+    const { map } = compile(src);
+    for (const name of ['obj', 'clé', 'rhs', 'out', 'väl']) {
+      expect(map.names).toContain(name);
+    }
+    expect(map.names.some(name => /^_(?:o|k|ref|v)\d*$/.test(name))).toBe(false);
+  });
 });
 
 describe('map skeleton fields', () => {

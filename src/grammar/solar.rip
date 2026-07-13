@@ -345,13 +345,12 @@ class Generator
       labels.push {name, position: i + 1}
     [symbols, labels]
 
-  # Classify an action as a flat array construction template and extract its
+  # Classify an action as an array construction template and extract its
   # elements, one entry per element in template order: position refs as
   # {grammarRef, childSlot, spread}, literals as {literal, childSlot} where
-  # literal is the raw literal text (e.g. '"="' or 'true'). Returns null
-  # when the action is not a flat array template (pass-through numbers,
-  # executable JS with $n refs, nested arrays) — such actions cannot carry
-  # an annotation.
+  # literal is the raw literal text (e.g. '"="' or 'true'), and nested array
+  # scaffolds as {structural, childSlot}. Returns null for pass-through
+  # numbers and executable JS with $n refs.
   #
   # childSlot is the index in the produced s-expression array where the
   # element's value lands. It is null for any element that follows a spread,
@@ -361,7 +360,7 @@ class Generator
   # The template is scanned structurally (string literals may contain commas
   # and brackets); it is split into top-level elements only at commas that
   # sit outside quotes.
-  _templateElements: (action) ->
+  _templateElements: (action, allowNested = false) ->
     return null unless typeof action is 'string'
     s = action.trim()
     return null unless s.startsWith('[') and s.endsWith(']')
@@ -370,6 +369,7 @@ class Generator
     parts = []
     cur   = ''
     quote = null
+    depth = 0
     i     = 0
     while i < inner.length
       ch = inner[i]
@@ -383,15 +383,22 @@ class Generator
       else if ch is '"' or ch is "'"
         quote = ch
         cur += ch
-      else if ch is '[' or ch is ']'
-        return null
-      else if ch is ','
+      else if ch is '['
+        return null unless allowNested
+        depth++
+        cur += ch
+      else if ch is ']'
+        return null unless allowNested
+        return null if depth is 0
+        depth--
+        cur += ch
+      else if ch is ',' and depth is 0
         parts.push cur
         cur = ''
       else
         cur += ch
       i++
-    return null if quote
+    return null if quote or depth isnt 0
     parts.push cur
 
     elements = []
@@ -418,6 +425,10 @@ class Generator
         elements.push {literal: t, childSlot}
       else if t is 'true' or t is 'false' or t is 'null'
         elements.push {literal: t, childSlot}
+      else if t.startsWith('[') and t.endsWith(']')
+        nested = @_templateElements t, true
+        return null unless nested?
+        elements.push {structural: t, childSlot, elements: nested}
       else
         return null
     elements
@@ -445,8 +456,17 @@ class Generator
     kind  = (if colon >= 0 then annotation[...colon] else annotation).trim()
     fail "invalid semantic kind '#{kind}'" unless kind and ident.test(kind)
 
-    elements = @_templateElements action
+    elements = @_templateElements action, true
     fail "only flat array construction templates can be annotated (action: #{JSON.stringify action})" unless elements?
+
+    templateRefs = []
+    collectTemplateRefs = (els) ->
+      for el in els
+        templateRefs.push el if el.grammarRef?
+        collectTemplateRefs el.elements if el.elements?
+    collectTemplateRefs elements
+    for el in templateRefs
+      fail "position ref #{el.grammarRef} out of range (pattern has #{symbols.length} symbol(s))" unless el.grammarRef >= 1 and el.grammarRef <= symbols.length
 
     # Pattern labels → side-band roles, appended after the template's
     # roles in pattern order. Name syntax was validated at strip time
@@ -454,9 +474,9 @@ class Generator
     # CARRIED position — an element with a tree slot, named in the
     # annotation string — rejects.
     applyLabels = (roles, seen) =>
-      templateRefs = new Set(el.grammarRef for el in elements when el.grammarRef?)
+      carriedRefs = new Set(el.grammarRef for el in templateRefs)
       for label in labels
-        if templateRefs.has label.position
+        if carriedRefs.has label.position
           fail "pattern label '[#{label.name}]' sits on '#{symbols[label.position - 1]}' (position #{label.position}), which the template carries — name it in the annotation string"
         fail "duplicate role '#{label.name}'" if seen.has(label.name)
         seen.add label.name
@@ -484,6 +504,10 @@ class Generator
         fail "position ref #{el.grammarRef} requires a real role name, not '_'" if name is '_'
         fail "spread ref ...#{el.grammarRef} requires spread role '...#{name}'" if el.spread and not spread
         fail "role '...#{name}' is marked spread but ref #{el.grammarRef} is not a spread" if spread and not el.spread
+      else if el.structural?
+        fail "nested structural element cannot take a spread role '...#{name}'" if spread
+        fail "nested structural element must be named '_'" unless name is '_'
+        continue
       else
         fail "literal element #{el.literal} cannot take a spread role '...#{name}'" if spread
         continue if name is '_'
@@ -494,7 +518,6 @@ class Generator
       seen.add name
 
       if el.grammarRef?
-        fail "position ref #{el.grammarRef} out of range (pattern has #{symbols.length} symbol(s))" unless el.grammarRef >= 1 and el.grammarRef <= symbols.length
         roles.push {name, grammarRef: el.grammarRef, childSlot: el.childSlot, spread: el.spread}
       else
         roles.push {name, grammarRef: null, childSlot: el.childSlot, literal: @_literalValue el.literal}
@@ -527,6 +550,8 @@ class Generator
       args = for el in els[1..]
         if el.grammarRef?
           if el.spread then "...#{ref el.grammarRef}" else ref el.grammarRef
+        else if el.structural?
+          el.structural
         else
           el.literal
       @accumulators[ruleId] = true

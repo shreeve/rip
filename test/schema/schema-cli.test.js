@@ -162,7 +162,7 @@ describe('rip schema: the verb workflow end-to-end (file-backed adapter, separat
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('[safe] create-table users');
     expect(r.stdout).toContain('[safe] create-table orders');
-    expect(r.stdout).toContain('CREATE UNIQUE INDEX idx_users_email');
+    expect(r.stdout).toContain('CREATE UNIQUE INDEX "idx_users_email"');
     expect(r.stdout.indexOf('create-table users')).toBeLessThan(r.stdout.indexOf('create-table orders'));
     expect(r.stdout).toContain('2 safe');
   });
@@ -178,7 +178,7 @@ describe('rip schema: the verb workflow end-to-end (file-backed adapter, separat
     expect(make.stdout).toContain('wrote ' + join('migrations', '0001_init.sql'));
     const body = readFileSync(join(dir, 'migrations/0001_init.sql'), 'utf8');
     expect(body).toContain('-- [safe] create-table users');
-    expect(body).toContain('CREATE TABLE users');
+    expect(body).toContain('CREATE TABLE "users"');
 
     const migrate = rip(['schema', 'migrate', 'models.rip']);
     expect(migrate.status).toBe(0);
@@ -186,8 +186,8 @@ describe('rip schema: the verb workflow end-to-end (file-backed adapter, separat
     expect(migrate.stderr).toContain('WITHOUT transactions'); // the loud posture (no begin())
     const state = dbState();
     expect(state.history.map((h) => h.version)).toEqual(['0001']);
-    expect(state.log.some((s) => s.includes('CREATE TABLE users'))).toBe(true);
-    expect(state.log.some((s) => s.includes('CREATE TABLE orders'))).toBe(true);
+    expect(state.log.some((s) => s.includes('CREATE TABLE "users"'))).toBe(true);
+    expect(state.log.some((s) => s.includes('CREATE TABLE "orders"'))).toBe(true);
 
     const again = rip(['schema', 'migrate', 'models.rip']);
     expect(again.status).toBe(0);
@@ -275,7 +275,7 @@ describe('rip schema: the verb workflow end-to-end (file-backed adapter, separat
     expect(allow.status).toBe(0);
     expect(allow.stdout).toContain('wrote ' + join('gated-migrations', '0001_cleanup.sql'));
     const body = readFileSync(join(dir, 'gated-migrations/0001_cleanup.sql'), 'utf8');
-    expect(body).toContain('ALTER TABLE users DROP COLUMN legacy;');
+    expect(body).toContain('ALTER TABLE "users" DROP COLUMN "legacy";');
   });
 
   test('entry auto-discovery: a cwd models.rip is found without naming it', () => {
