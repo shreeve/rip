@@ -5,6 +5,12 @@ repository's pull requests.
 
 ## Unreleased
 
+- Tailwind email support is isolated behind `packages/ui/tailwind`,
+  with exact package-scoped `tailwindcss` and `css-tree` dependencies.
+  Supported classes inline, responsive CSS stays in the head, and
+  unsupported classes remain intact; three contracts joined the battery
+  (#64)
+
 - The typed email catalog adds document, layout, typography, button,
   markdown, code, and font components through a named-only barrel.
   Dynamic blocks serialize before lifecycle disposal, and twenty-four
