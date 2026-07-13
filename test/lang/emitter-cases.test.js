@@ -180,7 +180,10 @@ describe('object-comprehension intrinsic delivery', () => {
       'result = build 1, 2, 3, 4',
     ].join('\n');
 
-    for (const source of [moduleSource, localSource]) {
+    for (const [source, resultExpr] of [
+      [moduleSource, 'out.a'],
+      [localSource, 'result.a'],
+    ]) {
       for (const mode of ['none', 'import', 'inline']) {
         const code = compileDelivered(source, mode);
         expect(code).toMatch(/__toPropertyKey[_\d]+\(/);
@@ -192,7 +195,7 @@ describe('object-comprehension intrinsic delivery', () => {
           expect(code).toMatch(/__defineOwnDataProperty as __defineOwnDataProperty[_\d]+/);
         }
         if (mode === 'inline') {
-          const value = new Function(`${code}\nreturn typeof out === "undefined" ? result.a : out.a;`)();
+          const value = new Function(`${code}\nreturn ${resultExpr};`)();
           expect(value).toBe(9);
         }
       }
