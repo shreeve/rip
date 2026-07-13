@@ -157,7 +157,7 @@ describe('migrate: the differ — step kinds and classes', () => {
     expect(r.map((s) => s.kind + ':' + s.class + ':' + s.table)).toEqual([
       'create-table:safe:users', 'create-table:safe:orders',
     ]);
-    expect(r[1].sql.join('\n')).toContain('user_id INTEGER NOT NULL REFERENCES users(id)');
+    expect(r[1].sql.join('\n')).toContain('"user_id" INTEGER NOT NULL REFERENCES "users"("id")');
   });
 
   test('matching database plans nothing (round-trip clean, unique fold included)', async () => {
@@ -192,10 +192,10 @@ describe('migrate: the differ — step kinds and classes', () => {
       return mig.plan();
     });
     const byCol = {};
-    for (const s of r) byCol[s.sql[0].match(/ADD COLUMN (\w+)/)[1]] = s;
-    expect(byCol.bio.sql).toEqual(['ALTER TABLE users ADD COLUMN bio TEXT;']);
+    for (const s of r) byCol[s.sql[0].match(/ADD COLUMN "([^"]+)"/)[1]] = s;
+    expect(byCol.bio.sql).toEqual(['ALTER TABLE "users" ADD COLUMN "bio" TEXT;']);
     expect(byCol.bio.class).toBe('safe');
-    expect(byCol.plan.sql[0]).toBe("ALTER TABLE users ADD COLUMN plan VARCHAR DEFAULT 'free';");
+    expect(byCol.plan.sql[0]).toBe("ALTER TABLE \"users\" ADD COLUMN \"plan\" VARCHAR DEFAULT 'free';");
     expect(byCol.plan.class).toBe('safe');
     // Required with a DEFAULT: the executable SET NOT NULL is sound
     // (the default backfilled existing rows) and the step stays safe.
@@ -205,12 +205,12 @@ describe('migrate: the differ — step kinds and classes', () => {
     // manual step is stated, not executed.
     expect(byCol.code.class).toBe('lossy');
     expect(byCol.code.sql).toEqual([
-      'ALTER TABLE users ADD COLUMN code VARCHAR;',
+      'ALTER TABLE "users" ADD COLUMN "code" VARCHAR;',
       '-- REQUIRED with no default: backfill users.code, then apply: ALTER TABLE users ALTER COLUMN code SET NOT NULL;',
     ]);
     expect(byCol.code.notes[0]).toContain('the SET NOT NULL is withheld');
     expect(mig.splitStatements(byCol.code.sql.join('\n')).some((s) => s.trimStart().startsWith('ALTER TABLE users ALTER COLUMN'))).toBe(false);
-    expect(byCol.tag.sql).toContain('CREATE UNIQUE INDEX idx_users_tag ON users ("tag");');
+    expect(byCol.tag.sql).toContain('CREATE UNIQUE INDEX "idx_users_tag" ON "users" ("tag");');
     expect(r.every((s) => s.kind === 'add-column')).toBe(true);
   });
 
@@ -239,14 +239,14 @@ describe('migrate: the differ — step kinds and classes', () => {
       'drop-not-null:safe', 'drop-table:destructive', 'set-not-null:lossy',
     ]);
     const dropTable = r.find((s) => s.kind === 'drop-table');
-    expect(dropTable.sql).toEqual(['DROP TABLE ghosts;']);
+    expect(dropTable.sql).toEqual(['DROP TABLE "ghosts";']);
     const dropUnique = await run4(async (deployedRef) => {
       K4.__schema(model('User', field('tag', 'string', { optional: true })));
       deployedRef.value = { tables: [table('users', [col('tag', 'VARCHAR', { unique: true })])] };
       return mig.plan();
     });
     expect(dropUnique.map((s) => s.kind + ':' + s.class)).toEqual(['drop-unique:safe']);
-    expect(dropUnique[0].sql).toEqual(['DROP INDEX IF EXISTS idx_users_tag;']);
+    expect(dropUnique[0].sql).toEqual(['DROP INDEX IF EXISTS "idx_users_tag";']);
   });
 
   test('index diffs: composite create, definition change (drop + recreate), stray drop', async () => {
@@ -266,10 +266,10 @@ describe('migrate: the differ — step kinds and classes', () => {
     });
     expect(r.map((s) => s.kind)).toEqual(['create-index', 'drop-index']);
     expect(r[0].sql).toEqual([
-      'DROP INDEX idx_users_a_b;',
-      'CREATE INDEX idx_users_a_b ON users ("a", "b");',
+      'DROP INDEX "idx_users_a_b";',
+      'CREATE INDEX "idx_users_a_b" ON "users" ("a", "b");',
     ]);
-    expect(r[1].sql).toEqual(['DROP INDEX idx_users_stray;']);
+    expect(r[1].sql).toEqual(['DROP INDEX "idx_users_stray";']);
   });
 
   test('rename column and rename table ride the explicit signals', async () => {
@@ -279,9 +279,9 @@ describe('migrate: the differ — step kinds and classes', () => {
       return mig.plan();
     });
     expect(r.map((s) => s.kind)).toEqual(['rename-table', 'rename-column']);
-    expect(r[0].sql).toEqual(['ALTER TABLE users RENAME TO members;']);
+    expect(r[0].sql).toEqual(['ALTER TABLE "users" RENAME TO "members";']);
     expect(r[0].notes[0]).toContain('@tableWas users can be removed');
-    expect(r[1].sql).toEqual(['ALTER TABLE members RENAME COLUMN first_name TO given_name;']);
+    expect(r[1].sql).toEqual(['ALTER TABLE "members" RENAME COLUMN "first_name" TO "given_name";']);
     expect(r[1].notes[0]).toContain('can be removed once this migration lands');
   });
 
@@ -517,6 +517,96 @@ describe('migrate: the differ — determinism and ordering', () => {
   });
 });
 
+describe('migrate: identifier ownership', () => {
+  test('DDL quotes embedded punctuation in table, column, index, sequence, and FK identifiers', () => {
+    const spec = {
+      name: 'odd" table',
+      sequence: { name: 'odd" sequence', start: 4 },
+      primaryKey: 'id',
+      columns: [
+        { ...pkCol('odd" sequence'), name: 'id' },
+        col('value"name', 'VARCHAR'),
+        col('owner"id', 'INTEGER'),
+      ],
+      indexes: [{ name: 'idx" value', columns: ['value"name'], unique: false }],
+      foreignKeys: [{ column: 'owner"id', refTable: 'owner" table', refColumn: 'key"id' }],
+      notes: [],
+      tableWas: null,
+    };
+    const sql = orm4.__schemaRenderCreate(spec).join('\n');
+    expect(sql).toContain('CREATE SEQUENCE "odd"" sequence" START 4;');
+    expect(sql).toContain('CREATE TABLE "odd"" table"');
+    expect(sql).toContain('"value""name" VARCHAR');
+    expect(sql).toContain('REFERENCES "owner"" table"("key""id")');
+    expect(sql).toContain('CREATE INDEX "idx"" value" ON "odd"" table" ("value""name");');
+  });
+
+  test('deployed rename identifiers quote safely and reject controls', () => {
+    const declared = { tables: [{
+      ...table('new" table', [col('new" column')]),
+      tableWas: 'old" table',
+    }] };
+    declared.tables[0].columns[1].was = 'old" column';
+    const deployed = { tables: [table('old" table', [col('old" column')])] };
+    const steps = mig.diffSchemas(declared, deployed);
+    expect(steps.find((s) => s.kind === 'rename-table').sql).toEqual([
+      'ALTER TABLE "old"" table" RENAME TO "new"" table";',
+    ]);
+    expect(steps.find((s) => s.kind === 'rename-column').sql).toEqual([
+      'ALTER TABLE "new"" table" RENAME COLUMN "old"" column" TO "new"" column";',
+    ]);
+
+    const badCreate = { ...declared.tables[0], name: 'bad\nname', tableWas: null };
+    expect(() => orm4.__schemaRenderCreate(badCreate)).toThrow(/control characters/);
+    const badRename = {
+      tables: [{ ...declared.tables[0], tableWas: 'bad\u0000name' }],
+    };
+    expect(() => mig.diffSchemas(badRename, {
+      tables: [table('bad\u0000name', [col('old" column')])],
+    })).toThrow(/control characters/);
+  });
+
+  test('NOTE identifiers reject controls before statement splitting can expose injected SQL', () => {
+    const injected = '\nDROP TABLE audit; --';
+    const cases = [
+      () => {
+        const declared = { tables: [table('users', [col('name')], {
+          sequence: { name: 'users_seq' + injected, start: 2 },
+        })] };
+        return mig.diffSchemas(declared, { tables: [table('users', [col('name')], { sequence: null })] });
+      },
+      () => {
+        const deployed = table('users', [col('name')], {
+          sequence: { name: 'users_seq' + injected, start: 1 },
+        });
+        return mig.diffSchemas(
+          { tables: [table('users', [col('name')], { start: 2 })] },
+          { tables: [deployed] },
+        );
+      },
+      ...['name', 'column', 'refTable', 'refColumn'].map((part) => () => {
+        const fk = { column: 'user_id', refTable: 'users', refColumn: 'id' };
+        const child = table('orders', [col('user_id', 'INTEGER')], { foreignKeys: [fk] });
+        if (part === 'name') child.name += injected;
+        else fk[part] += injected;
+        return mig.diffSchemas(
+          { tables: [child, table('users', [col('name')])] },
+          { tables: [table('orders', [col('user_id', 'INTEGER')]), table('users', [col('name')])] },
+        );
+      }),
+    ];
+
+    for (const build of cases) {
+      let statements = [];
+      expect(() => {
+        const rendered = mig.renderPlan(build());
+        statements = mig.splitStatements(rendered);
+      }).toThrow(/control characters/);
+      expect(statements.some((sql) => /DROP TABLE audit/.test(sql))).toBe(false);
+    }
+  });
+});
+
 describe('migrate: rename-signal rejections — ambiguity is loud, never a silent add/drop', () => {
   const plan4 = (declare, deployedTables) => K4.scope(async () => {
     K4.setAdapter(migrateAdapter({ tables: deployedTables }));
@@ -668,7 +758,7 @@ describe('migrate: make — gates, numbering, deterministic bytes', () => {
       expect(out.file).toBe(join(mdir, '0008_add_users.sql'));
       const content = readFileSync(out.file, 'utf8');
       expect(content).toContain('-- 0008_add_users.sql');
-      expect(content).toContain('CREATE TABLE users');
+      expect(content).toContain('CREATE TABLE "users"');
       expect(content).toContain('-- [safe] create-table users');
     });
   });
@@ -755,8 +845,8 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
       // The file's header comments attach to the FIRST statement (the
       // splitter's design: a leading TODO is visible in errors), so
       // the sequence statement carries them as a prefix.
-      expect(adapter.calls.some((c) => c.sql.startsWith('CREATE TABLE users'))).toBe(true);
-      expect(adapter.calls.some((c) => c.sql.includes('CREATE SEQUENCE users_seq'))).toBe(true);
+      expect(adapter.calls.some((c) => c.sql.startsWith('CREATE TABLE "users"'))).toBe(true);
+      expect(adapter.calls.some((c) => c.sql.includes('CREATE SEQUENCE "users_seq"'))).toBe(true);
     });
   });
 

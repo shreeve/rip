@@ -52,6 +52,9 @@ const field = (name, typeName = 'string', opts = {}) => ({
   ...(opts.unique ? { unique: true } : {}),
   ...(opts.literals ? { literals: opts.literals } : {}),
   ...(opts.constraints ? { constraints: opts.constraints } : {}),
+  ...(opts.coerce ? { coerce: true } : {}),
+  ...(opts.coercer ? { coerce: true, coercer: opts.coercer } : {}),
+  ...(opts.transform ? { transform: opts.transform } : {}),
 });
 const dir = (name, ...args) => ({ tag: 'directive', name, args });
 const hook = (name, fn) => ({ tag: 'hook', name, fn });
@@ -687,6 +690,311 @@ describe('schema-orm: refinements guard every persistence path (R9)', () => {
   });
 });
 
+describe('schema-orm: defensive structured SQL and canonical persistence', () => {
+  test('create/upsert/insertMany share the caller-writable key policy before hooks or SQL', async () => {
+    const r = await paired(async (k, adapter) => {
+      k.__schema(model('Owner', field('name')));
+      const hooks = [];
+      const Account = k.__schema(model('Account',
+        field('firstName'),
+        field('email', 'email', { unique: true }),
+        dir('timestamps'),
+        dir('softDelete'),
+        dir('belongs_to', { target: 'Owner', optional: false }),
+        hook('beforeValidation', () => hooks.push('hook'))));
+      const inputs = [
+        { typo: 'x', firstName: 'Ada', email: 'a@b.co' },
+        { id: 1, firstName: 'Ada', email: 'a@b.co' },
+        { createdAt: 'x', firstName: 'Ada', email: 'a@b.co' },
+        { created_at: 'x', firstName: 'Ada', email: 'a@b.co' },
+        { updatedAt: 'x', firstName: 'Ada', email: 'a@b.co' },
+        { deleted_at: 'x', firstName: 'Ada', email: 'a@b.co' },
+        { firstName: 'Ada', first_name: 'Grace', email: 'a@b.co' },
+        { first_name: 'Grace', firstName: 'Ada', email: 'a@b.co' },
+      ];
+      const apis = [
+        ['create', (data) => Account.create(data)],
+        ['upsert', (data) => Account.upsert(data, { on: 'email' })],
+        ['insertMany', (data) => Account.insertMany([data])],
+      ];
+      const rejected = [];
+      for (const [api, call] of apis) {
+        for (const data of inputs) {
+          try { await call(data); }
+          catch (error) {
+            rejected.push([api, error.issues?.[0]?.field, error.issues?.[0]?.error]);
+          }
+        }
+      }
+      return { rejected, hooks, calls: adapter.calls.length };
+    });
+    expect(r.value.rejected.length).toBe(24);
+    for (const api of ['create', 'upsert', 'insertMany']) {
+      const rows = r.value.rejected.filter(([name]) => name === api);
+      expect(rows.map((x) => x[2])).toEqual([
+        'unknown', 'pk', 'managed', 'managed', 'managed', 'managed', 'alias', 'alias',
+      ]);
+      expect(rows[6][1].replace(/^\[0\]\./, '')).toBe('firstName');
+      expect(rows[7][1].replace(/^\[0\]\./, '')).toBe('firstName');
+    }
+    expect(r.value.hooks).toEqual([]);
+    expect(r.value.calls).toBe(0);
+  });
+
+  test('all persistence insert APIs accept belongsTo FKs in canonical camel or snake spelling', async () => {
+    const r = await paired(async (k, adapter) => {
+      let id = 0;
+      adapter.on(/^INSERT/, (_sql, params) =>
+        row(['id', 'name', 'email', 'owner_id'], [++id, params[0], params[1], params[2]]));
+      k.__schema(model('Owner', field('name')));
+      const Account = k.__schema(model('Account',
+        field('name'),
+        field('email', 'email', { unique: true }),
+        dir('belongs_to', { target: 'Owner', optional: false })));
+      for (const [suffix, fk] of [['camel', { ownerId: 7 }], ['snake', { owner_id: 8 }]]) {
+        await Account.create({ name: suffix, email: suffix + '1@x.co', ...fk });
+        await Account.upsert({ name: suffix, email: suffix + '2@x.co', ...fk }, { on: 'email' });
+        await Account.insertMany([{ name: suffix, email: suffix + '3@x.co', ...fk }]);
+      }
+      return adapter.calls.map((call) => ({ sql: call.sql, params: call.params }));
+    });
+    expect(r.value.length).toBe(6);
+    expect(r.value.every((call) => call.sql.includes('"owner_id"'))).toBe(true);
+    expect(r.value.map((call) => call.params[2])).toEqual([7, 7, 7, 8, 8, 8]);
+  });
+
+  test('updateAll validates writable columns before SQL; empty is a zero-row no-op', async () => {
+    const r = await paired(async (k, adapter) => {
+      const U = k.__schema(model('User', field('name'), dir('timestamps')));
+      const empty = await U.where({}).updateAll({});
+      const rejected = [];
+      for (const values of [
+        { 'name" = 1; DROP TABLE users; --': 'x' },
+        { 'bad\nname': 'x' },
+        { typo: 'x' },
+        { id: 9 },
+        { updatedAt: 'x' },
+      ]) {
+        try { await U.where({}).updateAll(values); } catch { rejected.push(true); }
+      }
+      await U.where({}).updateAll({ name: 'Ada' });
+      return { empty, rejected, calls: adapter.calls.length };
+    });
+    expect(r.value).toEqual({ empty: 0, rejected: [true, true, true, true, true], calls: 1 });
+    expect(r.calls[0]).toMatchObject({
+      sql: 'UPDATE "users" SET "name" = ?, "updated_at" = ?',
+    });
+  });
+
+  test('order is trusted-string-only and upsert targets reject empty/coercible objects before hooks or SQL', async () => {
+    const r = await paired(async (k) => {
+      const ran = [];
+      const U = k.__schema(model('User',
+        field('email', 'email', { unique: true }),
+        hook('beforeValidation', () => ran.push('hook'))));
+      const rejected = [];
+      for (const action of [
+        () => U.where({}).order({ toString: () => 'email' }).all(),
+        () => U.upsert({ email: 'a@b.co' }, { on: [] }),
+        () => U.upsert({ email: 'a@b.co' }, { on: { toString: () => 'email' } }),
+      ]) {
+        try { await action(); } catch { rejected.push(true); }
+      }
+      return { rejected, ran };
+    });
+    expect(r.value).toEqual({ rejected: [true, true, true], ran: [] });
+    expect(r.calls).toEqual([]);
+  });
+
+  test('derived inverse relation keys must exist on the target before resolve or preload SQL', async () => {
+    const r = await paired(async (k, adapter) => {
+      adapter.on(/^SELECT \* FROM "users"/, rows(['id', 'name'], [1, 'A']));
+      const User = k.__schema(model('User', field('name'), dir('has_many', { target: 'Order', optional: false })));
+      k.__schema(model('Order', field('total', 'integer')));
+      const u = await User.first();
+      const before = adapter.calls.length;
+      const rejected = [];
+      try { await u.orders(); } catch { rejected.push('resolve'); }
+      try { await User.includes('orders').all(); } catch { rejected.push('preload'); }
+      return { rejected, extra: adapter.calls.length - before };
+    });
+    expect(r.value).toEqual({ rejected: ['resolve', 'preload'], extra: 0 });
+    // Includes validates its whole relation tree before the root
+    // query, so no adapter call occurs for an impossible preload.
+    expect(r.calls.filter((c) => c.sql.includes('"user_id"')).length).toBe(0);
+  });
+
+  test('create/upsert/insertMany share transforms, coercions, defaults, dates, and normalized SQL params', async () => {
+    const r = await paired(async (k, adapter) => {
+      let transforms = 0;
+      const entries = [
+        field('name', 'string', { transform: (raw) => { transforms++; return raw.name.trim(); } }),
+        field('age', 'integer', { coerce: true }),
+        field('when', 'date'),
+        field('role', 'string', { constraints: { default: 'reader' } }),
+        field('email', 'email', { unique: true }),
+      ];
+      const U = k.__schema(model('User', ...entries));
+      adapter.on(/^INSERT INTO "users".*ON CONFLICT/, row(
+        ['id', 'name', 'age', 'when', 'role', 'email'],
+        [2, 'Bob', 8, new Date('2026-01-02'), 'reader', 'b@b.co']));
+      adapter.on(/^INSERT INTO "users"/, row(
+        ['id', 'name', 'age', 'when', 'role', 'email'],
+        [1, 'Ada', 7, new Date('2026-01-01'), 'reader', 'a@b.co']));
+      await U.create({ name: ' Ada ', age: '7', when: '2026-01-01', email: 'a@b.co' });
+      await U.upsert({ name: ' Bob ', age: '8', when: '2026-01-02', email: 'b@b.co' }, { on: 'email' });
+      await U.insertMany([{ name: ' Cid ', age: '9', when: '2026-01-03', email: 'c@b.co' }]);
+      return { transforms, params: adapter.calls.map((c) => c.params) };
+    });
+    expect(r.value.transforms).toBe(3);
+    for (const params of r.value.params) {
+      expect(params.some((v) => typeof v === 'string' && /^\s|\s$/.test(v))).toBe(false);
+      expect(params.some((v) => v === '7' || v === '8' || v === '9')).toBe(false);
+      expect(params.some((v) => v instanceof Date)).toBe(true);
+      expect(params).toContain('reader');
+    }
+  });
+
+  test('failed save stages nested async normalization atomically and runs no post hooks or SQL', async () => {
+    const r = await paired(async (k, adapter) => {
+      let transforms = 0;
+      const Child = k.__schema({
+        kind: 'shape', name: 'Child', entries: [
+          field('name', 'string', { transform: (raw) => { transforms++; return raw.name.trim(); } }),
+          field('n', 'integer', { coerce: true }),
+          ensure('even', async (v) => v.n % 2 === 0, { async: true, field: 'n' }),
+        ],
+      });
+      void Child;
+      const ran = [];
+      const U = k.__schema(model('User',
+        field('child', 'Child'),
+        hook('afterValidation', () => ran.push('afterValidation')),
+        hook('beforeSave', () => ran.push('beforeSave'))));
+      adapter.on(/^SELECT/, rows(['id', 'child'], [1, { name: 'Ada', n: 2 }]));
+      const inst = await U.first();
+      inst.child = { name: '  Ada  ', n: '3' };
+      const before = structuredClone(inst.child);
+      const calls = adapter.calls.length;
+      let issue;
+      try { await inst.save(); } catch (e) { issue = e.issues[0]; }
+      return {
+        transforms,
+        before,
+        after: inst.child,
+        issue: [issue.field, issue.error],
+        extra: adapter.calls.length - calls,
+        ran,
+      };
+    });
+    expect(r.value).toEqual({
+      transforms: 0,
+      before: { name: '  Ada  ', n: '3' },
+      after: { name: '  Ada  ', n: '3' },
+      issue: ['child.n', 'type'],
+      extra: 0,
+      ran: [],
+    });
+  });
+
+  test('failed save runs no nested eager-derived side effect before the whole graph validates', async () => {
+    const r = await paired(async (k, adapter) => {
+      let derived = 0;
+      k.__schema({
+        kind: 'shape', name: 'Child', entries: [
+          field('n', 'integer'),
+          { tag: 'derived', name: 'doubled', fn() { derived++; return this.n * 2; } },
+        ],
+      });
+      const U = k.__schema(model('User', field('child', 'Child'), field('later', 'integer')));
+      adapter.on(/^SELECT/, rows(['id', 'child', 'later'], [1, { n: 1 }, 1]));
+      const inst = await U.first();
+      inst.child = { n: 2 };
+      inst.later = 'bad';
+      const before = structuredClone(inst.child);
+      const calls = adapter.calls.length;
+      let issue = null;
+      try { await inst.save(); } catch (error) { issue = error.issues[0]; }
+      return {
+        derived,
+        before,
+        after: inst.child,
+        issue: [issue.field, issue.error],
+        extra: adapter.calls.length - calls,
+      };
+    });
+    expect(r.value).toEqual({
+      derived: 0,
+      before: { n: 2 },
+      after: { n: 2 },
+      issue: ['later', 'type'],
+      extra: 0,
+    });
+  });
+
+  test('nested async refinements reject create/upsert/insertMany before SQL or hooks', async () => {
+    const r = await paired(async (k) => {
+      k.__schema({
+        kind: 'shape', name: 'Child', entries: [
+          field('n', 'integer'),
+          ensure('even', async (v) => v.n % 2 === 0, { async: true, field: 'n' }),
+        ],
+      });
+      const ran = [];
+      const U = k.__schema(model('User',
+        field('child', 'Child'),
+        field('email', 'email', { unique: true }),
+        hook('beforeSave', () => ran.push('beforeSave'))));
+      const issues = [];
+      for (const action of [
+        () => U.create({ child: { n: 3 }, email: 'a@b.co' }),
+        () => U.upsert({ child: { n: 3 }, email: 'a@b.co' }, { on: 'email' }),
+        () => U.insertMany([{ child: { n: 3 }, email: 'a@b.co' }]),
+      ]) {
+        try { await action(); } catch (e) { issues.push(e.issues.map((i) => [i.field, i.error])); }
+      }
+      return { issues, ran };
+    });
+    expect(r.value).toEqual({
+      issues: [
+        [['child.n', 'ensure']],
+        [['child.n', 'ensure']],
+        [['[0].child.n', 'ensure']],
+      ],
+      ran: [],
+    });
+    expect(r.calls).toEqual([]);
+  });
+
+  test('nested enum normalization reaches persistence params and normalized nested no-op saves stay no-op', async () => {
+    const r = await paired(async (k, adapter) => {
+      k.__schema({
+        kind: 'enum', name: 'State', entries: [
+          { tag: 'enum-member', name: 'ready', value: 7 },
+        ],
+      });
+      k.__schema({
+        kind: 'shape', name: 'Child', entries: [
+          field('name'),
+          field('state', 'State'),
+        ],
+      });
+      const U = k.__schema(model('User', field('child', 'Child')));
+      adapter.on(/^INSERT/, row(['id', 'child'], [1, { name: 'Ada', state: 7 }]));
+      await U.create({ child: { name: 'Ada', state: 'ready' } });
+      adapter.on(/^SELECT/, rows(['id', 'child'], [2, { name: 'Bob', state: 7 }]));
+      const loaded = await U.first();
+      const before = adapter.calls.length;
+      await loaded.save();
+      return {
+        persistedState: adapter.calls[0].params[0].state,
+        noOpCalls: adapter.calls.length - before,
+      };
+    });
+    expect(r.value).toEqual({ persistedState: 7, noOpCalls: 0 });
+  });
+});
+
 describe('schema-orm: paired reference — transactions', () => {
   test('ambient join: BEGIN once, statements ride the handle, COMMIT, block value returned', async () => {
     const r = await paired(async (k, adapter) => {
@@ -782,13 +1090,13 @@ describe('schema-orm: paired reference — DDL', () => {
       ));
       return { sql: T.toSQL(), dropped: T.toSQL({ dropFirst: true, idStart: 9000 }) };
     });
-    expect(r.value.sql).toContain('CREATE SEQUENCE trades_seq START 5000;');
-    expect(r.value.sql).toContain('name VARCHAR(100) NOT NULL');
-    expect(r.value.sql).toContain('user_id INTEGER NOT NULL REFERENCES users(id)');
-    expect(r.value.sql).toContain('coupon_id INTEGER REFERENCES coupons(id)');
-    expect(r.value.sql).toContain('CREATE UNIQUE INDEX idx_trades_email ON trades ("email");');
-    expect(r.value.sql).toContain('CREATE UNIQUE INDEX idx_trades_name_email ON trades ("name", "email");');
-    expect(r.value.dropped).toContain('DROP TABLE IF EXISTS trades CASCADE;');
+    expect(r.value.sql).toContain('CREATE SEQUENCE "trades_seq" START 5000;');
+    expect(r.value.sql).toContain('"name" VARCHAR(100) NOT NULL');
+    expect(r.value.sql).toContain('"user_id" INTEGER NOT NULL REFERENCES "users"("id")');
+    expect(r.value.sql).toContain('"coupon_id" INTEGER REFERENCES "coupons"("id")');
+    expect(r.value.sql).toContain('CREATE UNIQUE INDEX "idx_trades_email" ON "trades" ("email");');
+    expect(r.value.sql).toContain('CREATE UNIQUE INDEX "idx_trades_name_email" ON "trades" ("name", "email");');
+    expect(r.value.dropped).toContain('DROP TABLE IF EXISTS "trades" CASCADE;');
     expect(r.value.dropped).toContain('START 9000');
   });
 
@@ -1606,9 +1914,9 @@ describe('schema-orm: runtime delivery', () => {
       expect(spec.tableWas).toBe('legacy_people');
       expect(spec.columns.find((c) => c.name === 'first_name').was).toBe('given_name');
       const sql = P.toSQL();
-      expect(sql).toContain('CREATE SEQUENCE ps_seq START 5000;');
-      expect(sql).toContain('CREATE UNIQUE INDEX idx_ps_email ON ps ("email");');
-      expect(sql).toContain('CREATE UNIQUE INDEX idx_ps_first_name_email ON ps ("first_name", "email");');
+      expect(sql).toContain('CREATE SEQUENCE "ps_seq" START 5000;');
+      expect(sql).toContain('CREATE UNIQUE INDEX "idx_ps_email" ON "ps" ("email");');
+      expect(sql).toContain('CREATE UNIQUE INDEX "idx_ps_first_name_email" ON "ps" ("first_name", "email");');
     });
   });
 });

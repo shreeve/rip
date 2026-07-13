@@ -409,6 +409,23 @@ fail 'effect in tail position cannot yield', '''
     ~> yield 1
   ''', 'cannot yield'
 
+fail 'statement effect cannot take a generator callback', '''
+  ~> -> yield 1
+  ''', 'cannot yield'
+
+fail 'expression effect cannot take a generator callback', '''
+  x = ~> -> yield 1
+  ''', 'cannot yield'
+
+fail 'tail effect cannot take a generator callback', '''
+  f = ->
+    ~> -> yield 1
+  ''', 'cannot yield'
+
+fail 'exported effect cannot take a generator callback', '''
+  export stop ~> -> yield 1
+  ''', 'cannot yield'
+
 test 'effect may call a named generator', '''
   out := 0
   g = ->
@@ -416,3 +433,11 @@ test 'effect may call a named generator', '''
   ~> out = [...g()][0]
   out + 0
   ''', 7
+
+test 'ordinary effect callback may contain a nested generator', '''
+  out := 0
+  ~> ->
+    g = -> yield 9
+    out = g().next().value
+  out + 0
+  ''', 9

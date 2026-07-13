@@ -33,6 +33,9 @@ const INVENTORY = [
   { sig: "this.b.emit('() => ');", count: 1,
     site: "computed ('~=') lowering",
     policy: 'the computed body rejects both yield and await with its own positioned errors (computeds evaluate synchronously)' },
+  { sig: "this.b.emit('(() => { ');", count: 1,
+    site: 'class field per-evaluation reference captures',
+    policy: 'classFieldValue rejects await/yield before the lexical arrow; each field evaluation owns a fresh activation' },
   { sig: "isAsync ? '(async () => ' : '(() => '", count: 2,
     site: 'effectValue (the statement/expression/tail effect funnel); component-body effects',
     policy: 'await rides the async form; yield rejects — in effectValue for every effect position, and again at component collection (the one path that bypasses the funnel)' },
@@ -69,6 +72,9 @@ const INVENTORY = [
   { sig: '(${ev}) => { ', count: 1,
     site: 'two-way binding write-back listener',
     policy: 'binding targets are covered by findRenderControl' },
+  { sig: 'this.b.emit(`(${itemVar}, ${indexVar}) => `);', count: 1,
+    site: 'keyed render reconciliation callback',
+    policy: 'the key expression is covered by render-wide findRenderControl before the synchronous callback emits' },
   { sig: '((${p}) =>', count: 2,
     site: 'pick with a single-evaluation source (plain and optional forms, one ternary)',
     policy: 'pick defaults reject both yield and await positioned when the source needs the arrow' },
@@ -89,6 +95,6 @@ describe('generated-scope inventory', () => {
     // sig is caught by review and the lowering doctrine, which
     // requires registering here — string-counting compiler source
     // cannot distinguish emitted arrows from the emitter's own.)
-    expect(INVENTORY.reduce((n, r) => n + r.count, 0)).toBe(25);
+    expect(INVENTORY.reduce((n, r) => n + r.count, 0)).toBe(27);
   });
 });

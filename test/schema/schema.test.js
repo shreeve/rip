@@ -993,3 +993,166 @@ describe('schema pipeline: transitive async status (E2)', () => {
     expect(bad.errors[0].field).toBe('kids[1]');
   });
 });
+
+describe('schema pipeline: defensive async and materialization parity', () => {
+  test('nested async issues keep declaration and array order', async () => {
+    const src =
+      'Child = schema :shape\n  n! integer\n  @ensure! "even", (c) -> Promise.resolve(c.n % 2 is 0)\n' +
+      'Parent = schema :shape\n  before! integer\n  child! Child\n  coerced! ~integer\n  middle! string\n  kids! Child[]\n  after! boolean';
+    const r = await run(src,
+      'return Parent.safeAsync({before: "x", child: {n: 3}, coerced: "no", middle: 4, kids: [{n: 5}, {n: "x"}], after: 1});');
+    expect(r.errors.map((e) => [e.field, e.error])).toEqual([
+      ['before', 'type'],
+      ['child', 'ensure'],
+      ['coerced', 'coerce'],
+      ['middle', 'type'],
+      ['kids[0]', 'ensure'],
+      ['kids[1].n', 'type'],
+      ['after', 'type'],
+    ]);
+  });
+
+  test('nested parse materializes the exact child class, methods, eager values, and enum values', () => {
+    const out = run(
+      'State = schema :enum\n  :ready 7\n' +
+      'Child = schema :shape\n  name! string\n  state! State\n  upper: -> @name.toUpperCase()\n  size: !> @name.length\n' +
+      'Parent = schema :shape\n  child! Child',
+      `const direct = Child.parse({name: "ada", state: "ready"});
+       const nested = Parent.parse({child: {name: "ada", state: "ready"}}).child;
+       return [
+         nested.constructor === direct.constructor,
+         nested.upper(),
+         nested.size,
+         nested.state,
+         Object.keys(nested).sort(),
+       ];`,
+    );
+    expect(out).toEqual([true, 'ADA', 3, 7, ['name', 'size', 'state']]);
+  });
+
+  test('nested eager-derived waits for the complete graph to pass stages 1–9', async () => {
+    const src =
+      'hits = 0\n' +
+      'explode = ->\n  hits += 1\n  throw Error("child derived")\n' +
+      'Child = schema :shape\n  n! integer\n  boom: !> explode()\n' +
+      'Parent = schema :shape\n  child! Child\n  later! integer';
+    const sync = run(src, `let parsed = null;
+      try { Parent.parse({child: {n: 1}, later: "bad"}); } catch (e) { parsed = [e.constructor.name, e.issues?.[0]?.field]; }
+      const safe = Parent.safe({child: {n: 1}, later: "bad"});
+      return [hits, parsed, safe.errors.map((e) => [e.field, e.error])];`);
+    expect(sync).toEqual([
+      0,
+      ['SchemaError', 'later'],
+      [['later', 'type']],
+    ]);
+
+    const asyncOut = await run(src, `return (async () => {
+      let parsed = null;
+      try { await Parent.parseAsync({child: {n: 1}, later: "bad"}); }
+      catch (e) { parsed = [e.constructor.name, e.issues?.[0]?.field]; }
+      const safe = await Parent.safeAsync({child: {n: 1}, later: "bad"});
+      return [hits, parsed, safe.errors.map((e) => [e.field, e.error])];
+    })();`);
+    expect(asyncOut).toEqual([
+      0,
+      ['SchemaError', 'later'],
+      [['later', 'type']],
+    ]);
+  });
+
+  test('successful sync and async nested parses materialize children only after validation', async () => {
+    const src =
+      'hits = 0\n' +
+      'derive = (n) ->\n  hits += 1\n  n * 2\n' +
+      'Child = schema :shape\n  n! integer\n  doubled: !> derive @n\n' +
+      'Parent = schema :shape\n  child! Child\n  later! integer';
+    const sync = run(src,
+      'out = Parent.parse({child: {n: 3}, later: 1}); return [out.child.constructor.name, out.child.doubled, hits];');
+    expect(sync).toEqual(['Child', 6, 1]);
+    const asyncOut = await run(src,
+      'return Parent.parseAsync({child: {n: 4}, later: 1}).then((out) => [out.child.constructor.name, out.child.doubled, hits]);');
+    expect(asyncOut).toEqual(['Child', 8, 1]);
+  });
+
+  test('array parse rethrows eager-derived failures while safe reports indexed derived issues', async () => {
+    const src = 'Item = schema :shape\n  n! integer\n  boom: !> throw Error("derived boom")';
+    const sync = run(src, `let raw = null;
+      let scalarRaw = null;
+      try { Item.parse({n: 1}); } catch (e) { scalarRaw = [e.constructor.name, e.message]; }
+      try { Item.array.parse([{n: 1}]); } catch (e) { raw = [e.constructor.name, e.message]; }
+      return [
+        scalarRaw,
+        Item.safe({n: 1}).errors.map((e) => [e.field, e.error]),
+        raw,
+        Item.array.safe([{n: 1}]).errors.map((e) => [e.field, e.error]),
+      ];`);
+    expect(sync).toEqual([
+      ['Error', 'derived boom'],
+      [['', 'derived']],
+      ['Error', 'derived boom'], [[
+      '[0]', 'derived',
+      ]],
+    ]);
+    const asyncOut = await run(src, `return (async () => {
+      let scalarRaw = null;
+      try { await Item.parseAsync({n: 1}); } catch (e) { scalarRaw = [e.constructor.name, e.message]; }
+      let raw = null;
+      try { await Item.array.parseAsync([{n: 1}]); } catch (e) { raw = [e.constructor.name, e.message]; }
+      const scalarSafe = await Item.safeAsync({n: 1});
+      const safe = await Item.array.safeAsync([{n: 1}]);
+      return [
+        scalarRaw,
+        scalarSafe.errors.map((e) => [e.field, e.error]),
+        raw,
+        safe.errors.map((e) => [e.field, e.error]),
+      ];
+    })();`);
+    expect(asyncOut).toEqual([
+      ['Error', 'derived boom'],
+      [['', 'derived']],
+      ['Error', 'derived boom'], [[
+      '[0]', 'derived',
+      ]],
+    ]);
+  });
+
+  test('a warmed union follows registry replacement on all six entry points', async () => {
+    const shape = (max, asyncEnsure) => __schema({
+      kind: 'shape',
+      name: 'Click',
+      entries: [
+        { tag: 'field', name: 'kind', modifiers: ['!'], typeName: 'literal-union', literals: ['click'], array: false },
+        { tag: 'field', name: 'x', modifiers: ['!'], typeName: 'integer', array: false, constraints: { max } },
+        ...(asyncEnsure ? [{ tag: 'ensure', message: 'even', field: 'x', async: true, fn: async (v) => v.x % 2 === 0 }] : []),
+      ],
+    });
+    shape(10, false);
+    __schema({
+      kind: 'shape',
+      name: 'Scroll',
+      entries: [
+        { tag: 'field', name: 'kind', modifiers: ['!'], typeName: 'literal-union', literals: ['scroll'], array: false },
+        { tag: 'field', name: 'y', modifiers: ['!'], typeName: 'integer', array: false },
+      ],
+    });
+    const Event = __schema({
+      kind: 'union',
+      name: 'Event',
+      entries: [
+        { tag: 'directive', name: 'on', args: [{ field: 'kind' }] },
+        { tag: 'union-member', name: 'Click' },
+        { tag: 'union-member', name: 'Scroll' },
+      ],
+    });
+    expect(Event.parse({ kind: 'click', x: 8 }).x).toBe(8);
+    __SchemaRegistry.replace = true;
+    try { shape(5, true); } finally { __SchemaRegistry.replace = false; }
+    const input = { kind: 'click', x: 7 };
+    expect(() => Event.parse(input)).toThrow(/async refinements/);
+    expect(() => Event.safe(input)).toThrow(/async refinements/);
+    expect(() => Event.ok(input)).toThrow(/async refinements/);
+    await expect(Event.parseAsync(input)).rejects.toBeInstanceOf(SchemaError);
+    expect((await Event.safeAsync(input)).errors.map((e) => e.error)).toEqual(['max']);
+    expect(await Event.okAsync(input)).toBe(false);
+  });
+});

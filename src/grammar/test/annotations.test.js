@@ -168,9 +168,54 @@ describe('annotation validation', () => {
       .toThrow(/only flat array construction templates can be annotated/);
   });
 
-  test('rejects annotation on nested-array action', () => {
+  test('nested-array scaffolds annotate as structural slots', () => {
+    expect(() => new Generator(g(['IF ID ID', '["if", 2, [3]]', 'if: _, condition, _'])))
+      .not.toThrow();
+  });
+
+  test('deeper nested-array scaffolds retain generator output', () => {
+    const gen = new Generator(g(['IF ID', '["if", [["wrap", 2]]]', 'if: _, _']));
+    expect(gen.semantics[1]).toEqual({ kind: 'if', roles: [] });
+    expect(gen.ruleActions).toContain('return ["if", [["wrap", $[$0]]]];');
+  });
+
+  test('nested-array scaffolds cannot claim a mapping role', () => {
     expect(() => new Generator(g(['IF ID ID', '["if", 2, [3]]', 'if: _, condition, then'])))
-      .toThrow(/only flat array construction templates can be annotated/);
+      .toThrow(/nested structural element must be named '_'/);
+  });
+
+  test('a label on a reference carried inside a nested scaffold rejects', () => {
+    expect(() => new Generator(g(['IF ID[x]', '["if", [2]]', 'if: _, _'])))
+      .toThrow(/pattern label '\[x\]' sits on 'ID' \(position 2\), which the template carries — name it in the annotation string/);
+  });
+
+  test('a label on a deeply nested carried reference rejects', () => {
+    expect(() => new Generator(g(['IF ID[x]', '["if", [[["branch", 2]]]]', 'if: _, _'])))
+      .toThrow(/pattern label '\[x\].*position 2.*template carries/);
+  });
+
+  test('quoted digits and brackets inside nested scaffolds are not references', () => {
+    const gen = new Generator(g(['IF ID[x]', '["if", [["literal [2]"]]]', 'if: _, _']));
+    expect(gen.semantics[1].roles).toEqual([
+      { name: 'x', grammarRef: 2, childSlot: null, spread: false },
+    ]);
+  });
+
+  test('a nested spread reference is still template-carried', () => {
+    expect(() => new Generator(g(['IF ID[x]', '["if", [[...2]]]', 'if: _, _'])))
+      .toThrow(/pattern label '\[x\].*position 2.*template carries/);
+  });
+
+  test('quoted spread-shaped text is not a reference', () => {
+    const gen = new Generator(g(['IF ID[x]', '["if", [["...2"]]]', 'if: _, _']));
+    expect(gen.semantics[1].roles.at(-1)).toEqual(
+      { name: 'x', grammarRef: 2, childSlot: null, spread: false }
+    );
+  });
+
+  test('a nested position ref is range-checked', () => {
+    expect(() => new Generator(g(['IF ID', '["if", [[3]]]', 'if: _, _'])))
+      .toThrow(/position ref 3 out of range \(pattern has 2 symbol\(s\)\)/);
   });
 
   test('rejects position ref out of range', () => {

@@ -467,6 +467,33 @@ test 'floor-div assign evaluates an impure base once', '''
   n
   ''', 1
 
+test 'class field reference captures are private to each recursive construction', '''
+  reads = 0
+  firstValue = null
+  secondValue = null
+  first = {}
+  second = {}
+  Object.defineProperty first, 'x',
+    configurable: true
+    get: ->
+      reads += 1
+      Box.new() if reads is 1
+      8
+    set: (v) -> firstValue = v
+  Object.defineProperty second, 'x',
+    configurable: true
+    get: -> 8
+    set: (v) -> secondValue = v
+  calls = 0
+  get = ->
+    calls += 1
+    if calls is 1 then first else second
+  class Box
+    value = get().x //= 2
+  Box.new()
+  [firstValue, secondValue, calls]
+  ''', [4, 4, 2]
+
 test 'floor-div assign evaluates a computed key once in order', '''
   log = []
   o = {}

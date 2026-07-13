@@ -137,7 +137,7 @@ test 'object comprehension key-value', '''
   ''', {x: 'x', y: 'y'}
 
 # Code generation
-code "object comprehension", "{k: v * 2 for k, v of obj}", "((() => {\n  const result = {};\n  const _ref = obj;\n  for (let k in _ref) {\n    let v = _ref[k];\n    const _k = k, _v = (v * 2);\n    if (_k === '__proto__') Object.defineProperty(result, _k, { value: _v, enumerable: true, configurable: true, writable: true });\n    else result[_k] = _v;\n  }\n  return result;\n})());"
+code "object comprehension", "{k: v * 2 for k, v of obj}", "((() => {\n  const result = {};\n  const _ref = obj;\n  for (let k in _ref) {\n    let v = _ref[k];\n    const _k = __toPropertyKey(k), _v = (v * 2);\n    __defineOwnDataProperty(result, _k, _v);\n  }\n  return result;\n})());"
 
 # ==============================================================================
 # Function-Local Comprehension Assignment (direct array building, no IIFE)
@@ -442,3 +442,64 @@ test 'object comprehension evaluates key before value', '''
   out = {[kf(v)]: vf(v * 10) for k, v of {a: 1, b: 2}}
   [out.x1, out.x2, log]
   ''', [10, 20, ['k', 'v', 'k', 'v']]
+
+test 'object comprehension coerces a key once before evaluating its value', '''
+  log = []
+  key = {}
+  key.toString = -> (log.push('key'); '__proto__')
+  value = (x) -> (log.push('value'); x)
+  out = {[key]: value(v) for k, v of {a: 7}}
+  d = Object.getOwnPropertyDescriptor(out, '__proto__')
+  [d.value, d.enumerable, d.writable, d.configurable, Object.getPrototypeOf(out) is Object.prototype, log]
+  ''', [7, true, true, true, true, ['key', 'value']]
+
+test 'object comprehension uses exact Symbol.toPrimitive key coercion', '''
+  log = []
+  sym = Symbol 'key'
+  key = {}
+  key[Symbol.toPrimitive] = (hint) -> (log.push "key:#{hint}"; sym)
+  value = -> (log.push 'value'; 8)
+  out = {[key]: value() for k of {a: 1}}
+  [out[sym], log]
+  ''', [8, ['key:string', 'value']]
+
+test 'object comprehension bypasses inherited setters with an own data property', '''
+  calls = 0
+  Object.defineProperty Object.prototype, '__hardeningSetter',
+    configurable: true
+    set: -> calls += 1
+  out = {['__hardeningSetter']: v for k, v of {a: 5}}
+  d = Object.getOwnPropertyDescriptor(out, '__hardeningSetter')
+  Reflect.deleteProperty Object.prototype, '__hardeningSetter'
+  [calls, d.value, d.enumerable, d.writable, d.configurable, Object.getPrototypeOf(out) is Object.prototype]
+  ''', [0, 5, true, true, true, true]
+
+test 'object comprehension intrinsics dodge module bindings', '''
+  Reflect = null
+  Object = null
+  globalThis = null
+  _toPropertyKey = null
+  _defineOwnDataProperty = null
+  out = {k: v for k, v of {a: 4}}
+  out.a
+  ''', 4
+
+test 'object comprehension intrinsics dodge function-local bindings', '''
+  build = (Reflect, Object, globalThis, _toPropertyKey, _defineOwnDataProperty) ->
+    {k: v for k, v of {a: 5}}
+  build null, null, null, null, null
+  ''', {a: 5}
+
+test 'object comprehension intrinsics dodge loop bindings', '''
+  a = {Object: v for Object, v of {x: 6}}
+  b = {Reflect: v for Reflect, v of {y: 7}}
+  c = {globalThis: v for globalThis, v of {z: 8}}
+  [a.x, b.y, c.z]
+  ''', [6, 7, 8]
+
+test 'object comprehension handles a large accumulated result', '''
+  src = {}
+  src[i] = i for i in [0...2000]
+  out = {k: v for k, v of src}
+  [Object.keys(out).length, out['1999']]
+  ''', [2000, 1999]
