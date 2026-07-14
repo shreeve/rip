@@ -12,7 +12,7 @@
 //
 // Three independent audits:
 //
-// A · THE TYPE AUDIT — a per-fixture grid over five dimensions:
+// A · THE TYPE AUDIT — a per-fixture grid over six dimensions:
 //   1 compiles     rip --ts produces a face           (else: compiler-coverage gap)
 //   2 directives   face carries all @ts-expect-error  (else: face-emission bug)
 //   3 verdict      the editor server publishes ZERO Error-severity
@@ -23,6 +23,43 @@
 //                                                     (else: behavioral divergence)
 //   5 twin         the .ts/.tsx companion type-checks under the strict
 //                  tsconfig                           (else: reference twin invalid)
+//   6 strict       `rip check` under rip.strict reports ZERO errors —
+//                  i.e. the face carries no implicit `any`
+//                                                     (else: implicit-any hole)
+//
+// WHY 6 IS NOT A DUPLICATE OF 3. Dimension 3 already runs under the strict
+// TSCONFIG (tsgo defaults strict:true). `rip.strict` is a different switch:
+// it stops rip SUPPRESSING the implicit-any family (SUPPRESSED_TS_CODES,
+// finding #1). tsgo emits those diagnostics today and mapTsDiagnostic drops
+// them — so an unchecked `any` region is invisible to 3 and to `rip check`,
+// and reads as a clean pass. Dimension 6 is the only gauge that can go red
+// for it (finding #20: every render branch/loop body is typed through an
+// untyped `ctx`, so its whole interior is unchecked).
+//
+// THIS DIMENSION IS EXPECTED RED, and that is the point — it is a progress
+// gauge, not a gate. Do not "fix" it by suppressing: green here means the
+// implicit-any holes are gone, which is the end goal (rip.strict everywhere),
+// not a scoreboard to be groomed. (No ratio is quoted in this comment on
+// purpose — the run PRINTS the live one, and a hardcoded count goes stale the
+// day a fixture is added, while the dimension has not changed.)
+//
+// READ THE FAILURES, NOT THE RATIO — they have two different roots, and only
+// one is rip's fault:
+//
+//   · COMPILER-EMITTED (a real hole — the author cannot annotate their way
+//     out). 09-components: `ctx` and the render scaffolding (`_el2`, `__fr`)
+//     — finding #20, whose whole interior is therefore unchecked.
+//     10-validation: `it`, the implicit lambda parameter a `schema` block
+//     injects. The user never wrote these names and cannot type them.
+//   · AUTHOR-ANNOTATABLE (working as designed). 06-functions `title?` is an
+//     untyped optional param the author simply did not annotate — gradual
+//     typing permitting exactly what it promises, and strict correctly
+//     asking for the annotation. Annotating it is a fixture edit, not a
+//     compiler fix.
+//
+// So a rising score here means two different things and the note under each
+// failure says which. Annotating 06 would move the number without closing a
+// single hole — do not mistake that for progress.
 //
 // B · THE HOVER AUDIT (--hover / --all) — hover every top-level
 //   declaration through the editor server and judge each answer against
@@ -123,7 +160,7 @@ const ARGV = process.argv.slice(2);
 const AUDITS = [
   {
     key: 'main', flag: null, name: 'Type Audit',
-    blurb: 'five dimensions per fixture: compiles, directives, verdict, runtime, twin',
+    blurb: 'six dimensions per fixture: compiles, directives, verdict, runtime, twin, strict',
     judge: 'the fixtures themselves — a `# @ts-expect-error` marks a line that MUST error,\n'
          + 'so a clean verdict means every marker fired and nothing else did',
   },
@@ -307,12 +344,12 @@ async function dimCompiles(ripPath) {
 
 // ── dimension 5: twin type-check — run tsgo ONCE over the fixtures
 // under tsconfig.json (strict), then attribute errors per twin.
-function runTwinTsc() {
+async function runTwinTsc() {
   // The preflight guarantees tsgo resolves; if it somehow does not, that
   // is a real broken state — let it throw loudly rather than skip.
   const tsc = tsgoBinaryPath();
   let out = '';
-  try { out = execFileSync(tsc, ['--noEmit', '-p', path.join(HERE, 'tsconfig.json')], { encoding: 'utf8', timeout: 120000, stdio: ['ignore', 'pipe', 'pipe'] }); }
+  try { out = (await execFileP(tsc, ['--noEmit', '-p', path.join(HERE, 'tsconfig.json')], { encoding: 'utf8', timeout: 120000 })).stdout; }
   catch (err) { out = (err.stdout || '').toString() + (err.stderr || '').toString(); } // tsc exits non-zero when it finds errors
   const byFile = new Map();
   for (const line of out.split('\n')) {
@@ -331,6 +368,80 @@ function dimTwin(twinBase, byFile) {
   return errs.length === 0
     ? { status: 'pass' }
     : { status: 'fail', detail: `${errs.length} type error(s)`, errs };
+}
+
+// ── dimension 6: strict — run `rip check` ONCE over the whole corpus with
+// rip.strict ON, then attribute Error-severity diagnostics per fixture.
+// Same shape as runTwinTsc: one batch pass, attributed, never per-fixture
+// spawns.
+//
+// The workspace is built rather than reused because rip.strict is read from
+// package.json#rip (nearest wins), and the audit's own package.json must NOT
+// carry it — that would flip `rip check` to strict for anyone working in this
+// directory, which is a different decision from measuring it here.
+//
+// node_modules is symlinked, not copied: the fixtures' dependency sandbox
+// (react/zod and their @types) lives in THIS directory, and a fixture that
+// imports react must resolve it exactly as dimension 5 does. It changes
+// nothing today (driven: same 188 diagnostics either way) — it is here so a
+// future react-importing fixture cannot silently degrade into a resolution
+// error that reads as an implicit-any hole.
+// The implicit-any family — the ONLY codes `rip.strict` un-suppresses
+// (SUPPRESSED_TS_CODES, finding #1). A strict failure outside this family is
+// therefore NOT an implicit-any hole; it is something else that slipped past
+// the other dimensions (a compile cascade — 07 imports 06 — is the known
+// class), and calling it one would be the exact misattribution this
+// dimension's header warns against.
+const IMPLICIT_ANY = (code) => code >= 7000 && code < 7100;
+async function runStrictCheck() {
+  const dir = mkTemp(path.join(os.tmpdir(), 'rip-audit-strict-'));
+  for (const f of fs.readdirSync(FIX)) if (f.endsWith('.rip')) fs.copyFileSync(path.join(FIX, f), path.join(dir, f));
+  const tscfg = JSON.parse(fs.readFileSync(path.join(HERE, 'tsconfig.json'), 'utf8'));
+  tscfg.include = ['.'];   // the fixtures are flat here, not under fixtures/
+  fs.writeFileSync(path.join(dir, 'tsconfig.json'), JSON.stringify(tscfg, null, 2));
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ rip: { strict: true } }, null, 2));
+  try { fs.symlinkSync(path.join(HERE, 'node_modules'), path.join(dir, 'node_modules'), 'dir'); } catch { /* absent → preflight already spoke */ }
+
+  let out = '';
+  // `rip check` exits 1 when it finds errors — which is the expected case
+  // here — so the throw carries the payload.
+  try { out = (await execFileP(RIP, ['check', dir, '--json'], { encoding: 'utf8', timeout: 180000, maxBuffer: 32 * 1024 * 1024 })).stdout; }
+  catch (err) { out = (err.stdout || '').toString(); }
+
+  let diags;
+  // A `rip check` that timed out, crashed, or printed anything but JSON is a
+  // BROKEN HARNESS, not a corpus full of holes. Returning per-fixture failures
+  // here would paint 12 red rows that read as findings — so hand the caller a
+  // reason and let it abort(), the same contract the preflight has.
+  try { diags = JSON.parse(out); }
+  catch { return { broken: `rip check --json produced no parseable output (${out.length} bytes; ${out.slice(0, 120).trim() || 'empty'})` }; }
+
+  const byFile = new Map();
+  for (const d of diags) {
+    // Errors AND warnings — `rip check`'s own gate is `severity <= 2`, and a
+    // warning-severity implicit-any is still an implicit-any. Only the fade
+    // classes (info/hint) are out of scope.
+    if (d.severity !== 'error' && d.severity !== 'warning') continue;
+    const base = path.basename(d.file);
+    if (!byFile.has(base)) byFile.set(base, []);
+    byFile.get(base).push(d);
+  }
+  return { byFile };
+}
+function dimStrict(ripBase, byFile) {
+  const errs = byFile.get(ripBase) ?? [];
+  if (errs.length === 0) return { status: 'pass' };
+  // Name what is ACTUALLY there. All-70xx is the implicit-any hole this
+  // dimension exists to measure; anything else is a different animal and must
+  // not borrow its label.
+  const anys = errs.filter((e) => IMPLICIT_ANY(e.code));
+  const other = errs.length - anys.length;
+  const detail = other === 0
+    ? `${anys.length} implicit-any error(s)`
+    : anys.length === 0
+      ? `${other} strict error(s), NONE implicit-any — not this dimension's class, triage it`
+      : `${anys.length} implicit-any + ${other} other strict error(s) — the ${other} are not this dimension's class`;
+  return { status: 'fail', detail, errs };
 }
 
 // ── dimension 4: runtime parity (run .rip via rip, the twin via bun,
@@ -738,7 +849,7 @@ const pad = (s, n) => String(s).padEnd(n);
 // two independently chosen widths agree only by luck, and stop agreeing the
 // moment a column moves.
 const NAME_W = 18;
-const DIMS = [['compiles', 10], ['directives', 12], ['verdict', 10], ['runtime', 9], ['twin', 8]];
+const DIMS = [['compiles', 10], ['directives', 12], ['verdict', 10], ['runtime', 9], ['twin', 8], ['strict', 8]];
 const RULE_W = NAME_W + 1 + DIMS.reduce((a, [, w]) => a + w, 0) + (DIMS.length - 1);
 
 // Four sections scroll past in one `--all` run, so each needs a seam that
@@ -808,7 +919,14 @@ if (RUN_MAIN) {
   console.log('  ' + dim(pad('fixture', NAME_W) + ' ' + dims.map(([d, w]) => pad(d, w)).join(' ')));
   console.log('  ' + dim('─'.repeat(RULE_W)));
 
-  const twinByFile = runTwinTsc(); // one strict tsc pass over all twins
+  // Both batch passes are independent of each other AND of the per-fixture
+  // lanes, so they are KICKED OFF here and awaited inside the row that first
+  // needs them: a fixture's compile + runtime spawns overlap the tsc and
+  // `rip check` passes instead of queueing behind them. Serially these two
+  // added a dead stare at a bare header before the first row could print,
+  // which is precisely what the streaming grid exists to avoid.
+  const twinP = runTwinTsc();        // one strict tsc pass over all twins
+  const strictP = runStrictCheck();  // one rip.strict `rip check` pass over all fixtures
 
   // Fixtures run a few at a time — each row is mostly waiting (a compiler spawn,
   // the server's program build, two runtime spawns). Rows still PRINT in fixture
@@ -842,11 +960,18 @@ if (RUN_MAIN) {
       row.diags = ds;
       row.runtime = rt.status;
       row.runtimeDetail = rt.detail;
+
+      const strict = await strictP;
+      if (strict.broken) await abort('The strict dimension could not run', [strict.broken]);
+      const st = dimStrict(f, strict.byFile);
+      row.strict = st.status;
+      row.strictDetail = st.detail;
+      row.strictErrs = st.errs;
     } else {
-      row.directives = row.verdict = row.runtime = '—';
+      row.directives = row.verdict = row.runtime = row.strict = '—';
     }
 
-    const tw = twinBase ? dimTwin(twinBase, twinByFile) : { status: 'n/a', detail: 'no twin' };
+    const tw = twinBase ? dimTwin(twinBase, await twinP) : { status: 'n/a', detail: 'no twin' };
     row.twin = tw.status;
     row.twinDetail = tw.detail;
     row.twinErrs = tw.errs;
@@ -868,6 +993,10 @@ if (RUN_MAIN) {
     if (r.verdict === 'fail') notes.push([red('type-face divergence'), r.verdictDetail]);
     if (r.runtime === 'fail') notes.push([red('behavioral divergence'), r.runtimeDetail]);
     if (r.twin === 'fail') notes.push([red('reference twin invalid'), r.twinDetail]);
+    // Neutral category — the DETAIL names the class. The label must not claim
+    // "implicit-any" when dimStrict just finished reporting that none of the
+    // errors are; that contradiction is the misattribution in miniature.
+    if (r.strict === 'fail') notes.push([yellow('fails under rip.strict'), r.strictDetail]);
     if (notes.length) {
       any = true;
       console.log(`    ${bold(r.name)}`);
@@ -875,6 +1004,26 @@ if (RUN_MAIN) {
       // A failure always shows its evidence — no flag needed to learn WHY.
       if (r.diags?.length) for (const d of r.diags) console.log(dim(`          ${d.range.start.line}:${d.range.start.character} [TS${d.code}] ${d.message}`));
       if (r.twinErrs?.length) for (const e of r.twinErrs) console.log(dim(`          twin: ${e}`));
+      // The implicit-any evidence is bulky and REPETITIVE by nature: ONE
+      // untyped `ctx` fans out into a diagnostic per member access, all
+      // reported at the SAME source position. Showing the first N raw rows
+      // therefore spends every line on one site and teaches the reader nothing
+      // about the spread — so collapse by position first, and say both what
+      // was collapsed and what was elided. Never silently truncate.
+      if (r.strictErrs?.length) {
+        const sites = new Map();   // "line:column" → the diagnostics reported there
+        for (const e of r.strictErrs) {
+          const k = `${e.line}:${e.column}`;
+          if (!sites.has(k)) sites.set(k, []);
+          sites.get(k).push(e);
+        }
+        for (const [at, es] of [...sites].slice(0, 4)) {
+          const more = es.length > 1 ? dim(` (+${es.length - 1} more here)`) : '';
+          console.log(dim(`          strict: ${at} [TS${es[0].code}] ${es[0].message}`) + more);
+        }
+        const rest = sites.size - Math.min(sites.size, 4);
+        if (rest > 0) console.log(dim(`          strict: … and ${rest} more site${rest === 1 ? '' : 's'} (see \`rip check\` under rip.strict)`));
+      }
     }
   }
   if (!any) console.log('    ' + green('none'));
@@ -1258,17 +1407,26 @@ if (RUN_TOKENS) {
 await Promise.all(pool.map((s) => s.stop()));
 
 // ── combined totals
+//
+// EVERY LINE NAMES ITS AUDIT. Under --all these three lines print together at
+// the very end, directly beneath the LAST audit's section — so an unlabelled
+// "3 failing" reads as belonging to whatever section happens to sit above it.
+// That is not hypothetical: the Type Audit's failures were read as the Token
+// Audit's, which was reporting all-green two lines lower. A totals line that
+// can be misattributed is worse than no totals line.
+const TOTAL_W = 12;
+const totalLine = (audit, text) => console.log('    ' + dim(pad(audit, TOTAL_W)) + text);
 console.log(`\n  ${bold('Totals')}`);
-if (RUN_MAIN) console.log('    ' + (fails === 0
+if (RUN_MAIN) totalLine('Type', (fails === 0
   ? green(`${totalApplicable} dimension checks: all passing`)
   : `${totalApplicable} dimension checks: ${green(totalPass + ' passing')}, ${red(fails + ' failing')}`));
-if (hp) console.log('    ' + `${hp.probed} hover probes: `
+if (hp) totalLine('Hover', `${hp.probed} hover probes: `
   + (hp.gap === 0 && hp.snapChanged === 0 && hp.violations.length === 0
     ? green('twin parity + expected clean')
     : `${hp.gap ? yellow(hp.gap + ' twin gap' + (hp.gap === 1 ? '' : 's')) : green('0 twin gaps')}, ${hp.snapChanged ? red(hp.snapChanged + ' expected change' + (hp.snapChanged === 1 ? '' : 's')) : green('expected clean')}${hp.violations.length ? `, ${red(hp.violations.length + ' invariant hit' + (hp.violations.length === 1 ? '' : 's'))}` : ''}`));
 if (tk) {
   const bad = tk.missing.length + tk.badType.length + tk.badReadonly.length;
-  console.log('    ' + `${tk.probed} token probes: `
+  totalLine('Token', `${tk.probed} token probes: `
     + (bad === 0 ? green('all invariants hold')
       : red(`${bad} invariant violation${bad === 1 ? '' : 's'}`)
         + dim(` (${[[tk.missing, 'missing'], [tk.badType, 'wrong type'], [tk.badReadonly, 'wrong readonly']].filter(([r]) => r.length).map(([r, l]) => `${r.length} ${l}`).join(', ')})`)));

@@ -25,6 +25,7 @@
 | [17](#17-a-directive-swallows-the-unused-local-fade) | A directive swallows the unused-local fade | Diagnostic DX | ✅ Verified | `editor-features` (TS directives reach the editor) |
 | [18](#18-a-directive-blinds-the-whole-indented-block) | A directive blinds the whole indented block | Silent safety hole | ⬜ **Open** | **none** (over-suppression is what makes `verdict` pass) |
 | [19](#19-a-directive-inside-a-render-block-never-reaches-the-face) | Inline render-block directive lost from the face | Loud correctness | ⬜ **Open** | **none** (audit `directives` would catch it — no fixture uses the shape) |
+| [20](#20-everything-inside-a-render-branch-is-unchecked) | Render branch/loop bodies are unchecked (`ctx: any`) | Silent safety hole | ⬜ **Open** | audit `strict` — **red by design** until it closes |
 
 ## How to read this ledger
 
@@ -390,6 +391,46 @@ Also driven straight against the tsgo binary, bypassing rip: **not a single toke
 
 **vs v3** — **regression** (driven, above). v3 classifies in-process through the JS TypeScript LanguageService (`getEncodedSemanticClassifications`), which canonicalizes correctly, so the same code on the same machine gets the bit. Same tsgo/LSP-broker root as #1–#10. It surfaced late because the modifier surface is only half-watched: #15 gated `readonly`, and nothing asserts `defaultLibrary` — or any modifier on a *library* symbol, since both #15's gate and the token audit probe rip's own declarations.
 
+## Render blocks — the unchecked interior
+
+### 20. Everything inside a render branch is unchecked
+
+Move an expression one level inside any `if` / `for` / `switch` in a render block and TypeScript stops seeing it. Same expression, same component, one indent apart:
+
+```rip
+render                              render
+  div                                 div
+    span count.toUpperCase()            if label
+                                          span count.toUpperCase()
+
+→ TS2339, caught                    → SILENT
+```
+
+`count` is a `number`. At render top level the bad member access is a hard error; inside a branch body it is invisible — to the editor and to `rip check` alike.
+
+**Status.** ⬜ **Open** — no fix, but **gated as of 2026-07-14: the audit's sixth dimension, `strict`** (`bun run type-audit`), which runs `rip check` over the corpus with `rip.strict` on and demands zero errors. It is **red by design** and names this finding in its evidence — `09-components.rip … [TS7006] Parameter 'ctx' implicitly has an 'any' type` — and it goes green exactly when the hole closes. *(The live ratio is what the run prints; quoting one here would go stale the day a fixture is added.)*
+
+That dimension exists because nothing else could see this. `verdict` demands zero Error-severity diagnostics, so an unchecked region is indistinguishable from a clean one — *silence is what passing looks like* — and `verdict` already runs under the strict **tsconfig**, which is a different switch entirely: tsgo emits the `TS7006` today and `mapTsDiagnostic` **drops** it (`SUPPRESSED_TS_CODES`, #1). **The two holes compound: #1 hides the symptom that would have exposed #20**, and un-suppressing it is the whole content of the new dimension.
+
+**Read its failures, not its ratio — they have two roots and only one is rip's fault.** *Compiler-emitted* (a real hole; the author cannot annotate their way out): `09-components`'s `ctx` and render scaffolding, and — surfaced by the same dimension — `10-validation`'s `it`, the implicit lambda parameter a `schema` block injects (`id! -> it.Id`), which is the same class as `ctx` and is untracked by any other finding. *Author-annotatable* (working as designed): `06-functions`'s `title?`, an optional param the author simply left untyped — gradual typing permitting exactly what it promises. Annotating `06` would raise the score without closing a single hole; do not mistake that for progress.
+
+**Driven** (2026-07-14), one expression relocated, everything else held fixed:
+
+| where `count.toUpperCase()` sits | `rip check` |
+| --- | --- |
+| render top level | **caught** — `TS2339` |
+| inside an `if` branch | **silent** |
+| inside a `for` row | **silent** |
+| inside a `switch` arm | **silent** |
+
+**Root (code).** A branch/loop body lowers to a **fragment**, and the fragment's context parameter is emitted **untyped** — [emitter.js](../../src/emitter.js), the fragment record's `self` (minted `ctx`) and the `p(ctx)` / factory signatures built from it. The face reads `p(ctx) { __effect(() => { _t0.data = ctx.count.value.toUpperCase() }) }`, so `ctx` is an implicit `any` and every member access through it is unchecked. The diagnostics that would have said so are exactly the implicit-any family rip suppresses (#1): under `rip.strict` the face reports `TS7005`/`TS7006` — complaints about the *implicitness*, never the `TS2339` underneath. **The two holes compound:** #1 hides the symptom that would have exposed #20.
+
+**Scope.** Conditions, discriminants and iterables ARE checked — `if labelz`, `switch statusz`, `for item in itemsz` all fire (they are emitted in component scope, not through `ctx`), which is why [09-components.rip](fixtures/09-components.rip)'s typo directives are genuinely used. It is the **bodies** that go dark. So the checked/unchecked boundary runs straight through the middle of a render block, exactly where a reader would assume it does not.
+
+**Why the suite missed it.** [09-components.rip](fixtures/09-components.rip) `RenderCondTest` tests every branch form — and every body it puts inside them is a string literal (`span 'label'`, `span 'ready'`, `span 'list'`), which cannot carry a type error. The fixture proves the *conditions* are checked and says nothing about the bodies, while its section header claims render-block expressions are type-checked generally. **A fixture that cannot fail a dimension is not covering it.**
+
+**vs v3** — **not established.** v3 is re-drivable (3.17.5, `~/Code/shreeve/rip-lang`); nobody has put a bad expression inside a v3 render branch. Worth settling before assuming this is inherited rather than v4 drift.
+
 ## `=` hoisting: the shared root of #4, #5 and #9
 
 **Status.** ✅ **Addressed** (2026-07-12). Declare-in-place shipped as the evolving-`let` tiers. #4, #5 and #9 each close through it and are verified above; the excess-property case rides the same mechanism (12-cast passes `verdict` and `twin`). *This is not a gap — it is the one root the three findings share, and the residue the fix left behind. Read it when touching the hoist.*
@@ -434,7 +475,7 @@ Over the three scaling rows, the curves have opposite shapes. **v3** ≈ ~730 ms
 
 ## Triaged — the rest of the audit (not new gaps)
 
-Everything the runner surfaces (five dimensions plus the hover audit) is accounted for above. The remaining raw signal was triaged and adds no new findings:
+Everything the runner surfaces (six dimensions plus the hover audit) is accounted for above. The remaining raw signal was triaged and adds no new findings:
 
 - **Verdict divergences** — all promoted or explained: reactive-annotation-not-enforced (#3), evolving-`let` reassignment (#4), `typeof`→`undefined` (#5), directive-loss (#6); the `12-cast` excess-property case folds into the hoisting note; and `07-integration`'s six divergences are a **cascade** of compiler-gap C1 — its `import … from './06-functions.rip'` can't resolve (06 doesn't compile), so the imported calls become `any` and their five guards report unused.
 - **Hover sweep** — the reactive-cell leak is now #10. The rest is not-a-gap: **benign** union-member reordering (v4 sorts literals, v3 keeps source order — same type); **v4 more precise than v3** (nullable/optional unions preserved where v3 flattened to a bare type; branch-only assignment reads `T | undefined`, sound, vs v3's flat `T`); and the evolving-`let` hover shapes on 11-inference (a reassigned binding hovers its later-write type) are the display face of #4/#9, not a separate gap.
