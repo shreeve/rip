@@ -8843,6 +8843,7 @@ class Emitter {
     this.stores = stores;
     this.b = builder;
     this.script = script;
+    this.importSpans = [];
     this.pins = pins;
     this.pinnables = [];
     this.strict = strict;
@@ -10268,7 +10269,11 @@ class Emitter {
         }
       });
       this.b.emit(" from ");
-      this.mark(node, "source", () => this.b.emit(this.moduleSource(source)));
+      {
+        const specStart = this.b.offset;
+        this.mark(node, "source", () => this.b.emit(this.moduleSource(source)));
+        this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(source) });
+      }
     });
     this.b.emit(`;
 `);
@@ -10281,7 +10286,11 @@ class Emitter {
     this.mark(node, "$self", () => {
       if (head === "export-all") {
         this.b.emit("export * from ");
-        this.mark(node, "source", () => this.b.emit(this.moduleSource(node[1])));
+        {
+          const specStart = this.b.offset;
+          this.mark(node, "source", () => this.b.emit(this.moduleSource(node[1])));
+          this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(node[1]) });
+        }
         this.b.emit(";");
       } else if (head === "export-from") {
         this.b.emit("export ");
@@ -10293,7 +10302,11 @@ class Emitter {
           this.b.emit(" }");
         }
         this.b.emit(" from ");
-        this.mark(node, "source", () => this.b.emit(this.moduleSource(node[2])));
+        {
+          const specStart = this.b.offset;
+          this.mark(node, "source", () => this.b.emit(this.moduleSource(node[2])));
+          this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(node[2]) });
+        }
         this.b.emit(";");
       } else if (head === "export-default") {
         this.b.emit("export default ");
@@ -18027,7 +18040,11 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
         continue;
       const start = builder.offset;
       if (unit.imp) {
-        builder.emit(`import { ${bindings.map(({ name, local }) => name === local ? name : `${name} as ${local}`).join(", ")} } from ${JSON.stringify(unit.imp)};
+        builder.emit(`import { ${bindings.map(({ name, local }) => name === local ? name : `${name} as ${local}`).join(", ")} } from `);
+        const specStart = builder.offset;
+        builder.emit(JSON.stringify(unit.imp));
+        emitter.importSpans.push({ start: specStart, end: builder.offset, specifier: JSON.stringify(unit.imp) });
+        builder.emit(`;
 `);
       } else {
         builder.emit(`const { ${bindings.map(({ name, local }) => name === local ? name : `${name}: ${local}`).join(", ")} }`);
@@ -18142,7 +18159,7 @@ export {};
       valueGen: [valueRow.generatedStart, valueRow.generatedEnd]
     });
   }
-  return { code: builder.code, mappings: builder.rows, stores, runtimes, tsRegions: builder.tsRegions, pinnables };
+  return { code: builder.code, mappings: builder.rows, stores, runtimes, tsRegions: builder.tsRegions, pinnables, imports: emitter.importSpans };
 }
 
 // src/sourcemap.js
@@ -18706,6 +18723,7 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
     runtimes: emitted.runtimes,
     tsRegions: emitted.tsRegions,
     pinnables: emitted.pinnables,
+    imports: emitted.imports,
     trivia: result.trivia ?? [],
     get declarations() {
       if (declarations === null) {
@@ -21940,6 +21958,142 @@ ${compiled.code}
   }
   return { count: active.length, executed, failures };
 }
+// src/browser-modules.js
+var RUNTIME_MODULES = { intrinsics: exports_intrinsics, stdlib: exports_stdlib, schema: exports_schema, reactive: exports_reactive, components: exports_components };
+var RUNTIME_RE = /(?:^|\/)src\/runtime\/(intrinsics|stdlib|schema|reactive|components)\.js$/;
+var BRIDGE_KEY = "__ripRuntimeBridge";
+var unquote = (specifier) => specifier.slice(1, -1);
+var joinPath = (from, relative) => {
+  const parts = from.split("/").slice(0, -1);
+  for (const piece of relative.split("/")) {
+    if (piece === "" || piece === ".")
+      continue;
+    if (piece === "..") {
+      if (!parts.length)
+        return null;
+      parts.pop();
+    } else {
+      parts.push(piece);
+    }
+  }
+  return parts.join("/");
+};
+var toObjectUrl = (code) => {
+  if (typeof URL !== "undefined" && typeof URL.createObjectURL === "function" && typeof Blob !== "undefined") {
+    return URL.createObjectURL(new Blob([code], { type: "text/javascript" }));
+  }
+  return `data:text/javascript;base64,${btoa(unescape(encodeURIComponent(code)))}`;
+};
+function createModuleLoader({ components: registry, packages = {} } = {}) {
+  if (!registry || typeof registry.read !== "function") {
+    throw new TypeError("rip: createModuleLoader requires a component registry");
+  }
+  const urls = new Map;
+  const namespaces = new Map;
+  const bridges = new Map;
+  const bridgeFor = (name) => {
+    if (bridges.has(name))
+      return bridges.get(name);
+    const namespace = RUNTIME_MODULES[name];
+    globalThis[BRIDGE_KEY] ??= {};
+    const existing = globalThis[BRIDGE_KEY][name];
+    if (existing && existing !== namespace) {
+      throw new Error(`rip: two copies of the Rip runtime are bridging '${name}' on one page`);
+    }
+    globalThis[BRIDGE_KEY][name] = namespace;
+    const lines = [`const ns = globalThis['${BRIDGE_KEY}']['${name}'];`];
+    for (const key of Object.keys(namespace)) {
+      if (!/^[A-Za-z_$][\w$]*$/.test(key)) {
+        throw new Error(`rip: runtime '${name}' exports '${key}', which cannot cross the module bridge`);
+      }
+      lines.push(`export const ${key} = ns['${key}'];`);
+    }
+    const url = toObjectUrl(lines.join(`
+`));
+    bridges.set(name, url);
+    return url;
+  };
+  const resolvePath = (specifier, from) => {
+    const spec = unquote(specifier);
+    const runtime = spec.match(RUNTIME_RE);
+    if (runtime)
+      return { bridge: runtime[1] };
+    const inBundle = (path) => {
+      try {
+        return registry.exists(path);
+      } catch {
+        return false;
+      }
+    };
+    const hint = spec.endsWith(".rip") ? "" : ` — did you mean '${spec}.rip'?`;
+    if (spec.startsWith("./") || spec.startsWith("../")) {
+      const joined = joinPath(from, spec);
+      if (!joined || !inBundle(joined)) {
+        throw new Error(`rip: '${from}' imports '${spec}', which is not in the bundle${hint}`);
+      }
+      return { path: joined };
+    }
+    if (spec.startsWith("_pkg/")) {
+      if (!inBundle(spec)) {
+        throw new Error(`rip: '${from}' imports '${spec}', which is not in the bundle${hint}`);
+      }
+      return { path: spec };
+    }
+    const bare = spec.match(/^@rip-lang\/([\w-]+)(?:\/(.+))?$/);
+    if (bare) {
+      const entry = packages[`@rip-lang/${bare[1]}`];
+      if (!entry) {
+        throw new Error(`rip: '${from}' imports '${spec}', but the bundle carries no such package — ` + "only packages declaring browser safety travel to the browser");
+      }
+      const sub = bare[2] ? entry.exports?.[`./${bare[2]}`] ?? (bare[2].endsWith(".rip") ? bare[2] : `${bare[2]}.rip`) : entry.entry;
+      const path = `${entry.root}/${sub}`;
+      if (!inBundle(path)) {
+        throw new Error(`rip: '${from}' imports '${spec}', but '${path}' is not in the bundle`);
+      }
+      return { path };
+    }
+    throw new Error(`rip: '${from}' imports '${spec}', which is not loadable in a browser — ` + "server-only and unknown modules never travel to the browser");
+  };
+  const load = (path, chain) => {
+    if (chain.includes(path)) {
+      throw new Error(`rip: import cycle through '${path}' (${chain.join(" -> ")} -> ${path})`);
+    }
+    if (urls.has(path))
+      return urls.get(path);
+    const promise = (async () => {
+      const source = registry.read(path);
+      if (source === undefined) {
+        throw new Error(`rip: '${path}' is not in the bundle`);
+      }
+      const compiled = compile(source, { path, runtimeDelivery: "import" });
+      let code = compiled.code;
+      for (const span of [...compiled.imports].reverse()) {
+        const target = resolvePath(span.specifier, path);
+        const url = target.bridge ? bridgeFor(target.bridge) : await load(target.path, [...chain, path]);
+        code = `${code.slice(0, span.start)}${JSON.stringify(url)}${code.slice(span.end)}`;
+      }
+      return toObjectUrl(code);
+    })();
+    urls.set(path, promise);
+    promise.catch(() => urls.delete(path));
+    return promise;
+  };
+  return {
+    async import(path) {
+      if (namespaces.has(path))
+        return namespaces.get(path);
+      const url = await load(path, []);
+      const namespace = await import(url);
+      namespaces.set(path, namespace);
+      registry.setCompiled(path, { ...namespace });
+      return namespace;
+    },
+    invalidate(path) {
+      urls.delete(path);
+      namespaces.delete(path);
+    }
+  };
+}
 // src/browser.js
 function compileToJS(source, options = {}) {
   if (options.runtimeDelivery !== undefined && options.runtimeDelivery !== "none") {
@@ -21950,6 +22104,7 @@ function compileToJS(source, options = {}) {
 export {
   runtimes,
   processRipScripts,
+  createModuleLoader,
   compileToJS,
   compile
 };

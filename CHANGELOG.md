@@ -5,6 +5,20 @@ repository's pull requests.
 
 ## Unreleased
 
+- The browser package graph exists: the emitter records every emitted
+  module-specifier span — static imports, re-exports, and
+  delivery-injected runtime imports; generated text is never scanned —
+  and `createModuleLoader` compiles bundle modules on demand, splices
+  resolved specifiers by exact offset, and loads them as real ES
+  modules through object URLs, bridging `src/runtime/*` imports to the
+  page's one runtime copy. Concurrent imports of a shared dependency
+  join one load; true cycles reject with the requesting chain; unknown,
+  server-only, traversal, and extensionless specifiers reject naming
+  the importer. `assembleBundle` walks recorded spans to collect
+  `_pkg/<name>/` modules for packages declaring `rip.browser`, carries
+  manifest subpath exports, and rejects server-only imports and
+  `:model` schemas at assembly (#92)
+
 - `<script type="text/rip">` loads: data-src bundles, inline text, and
   src fetches concatenate into ONE program compiled in the compiler's
   new script mode and run as one async closure — the page's scripts

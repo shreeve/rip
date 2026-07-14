@@ -13,6 +13,7 @@ import { runtimes } from './browser-runtimes.js';
 export { compile };
 export { runtimes };
 export { processRipScripts } from './browser-scripts.js';
+export { createModuleLoader } from './browser-modules.js';
 
 // The compiler call browser loaders make: JavaScript out, runtimes by
 // scope, original-position diagnostics carried on the thrown error.
