@@ -1,0 +1,5 @@
+# @rip-lang/server — the HTTP server framework, assembled unit by
+# unit. Server-only by design: this package never declares browser
+# safety and never travels in an application bundle.
+
+export { createMatcher, parseQuery } from './router.rip'
