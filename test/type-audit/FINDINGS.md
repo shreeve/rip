@@ -1,36 +1,6 @@
 # Type-audit findings — gaps in rip's typed-editor story
 
-> **Trust the Status line, not the body.** Each finding's body is the original audit snapshot — present-tense and pre-fix, even where a fix has since landed. The **Status** line under each heading is the current truth, and records only what someone actually ran.
->
-> **No line numbers.** Code is cited by file and symbol name — greppable, and survives an edit above it. When a cited symbol is deleted, say so at the citation; a name that greps to nothing is the same dead end a stale line number is.
->
-> The **vs v3** comparisons throughout were established by driving v3 (the rip-lang repo) — historical snapshots, but v3 (3.17.5) is still reachable at `~/Code/shreeve/rip-lang` and can be re-driven, as the [performance-crossover note](#rip-check-vs-v3-the-performance-crossover-measured) below does. This repo is **v4, cleaned up**; the bodies' "v4" means the code here.
-
-**Evidence: ✅ Verified means a named gate runs and passes.** Nothing else earns it — not a code reading, not a scratch script, not a plausible argument. Every finding names its gate in the table below, and a finding with no gate cannot be Verified, however obviously fixed it looks.
-
-Every finding here is reachable that way, because each is a compiler output or a server payload and LSP carries all of them: diagnostics, hovers, completions, watched-file notifications. A `textDocument/hover` response *is* the text VS Code renders; a completion response *is* the candidate list it shows. Nothing in this ledger is settled by a human squinting at a window — and beware the reflex to call a claim "editor-only," which is usually an unwritten test rather than an unreachable one.
-
-> **Beyond this ledger.** The editor surface at large is covered by the extension's own suite (`packages/vscode/test/`, run separately in CI) — completions, definition, references, rename, code actions, semantic tokens, inlay hints, all driven over real LSP. The **activation contract** — that `activationEvents`, the `rip` language contribution, `main`, and the `src/server.js` the entry point spawns all still line up — is pinned by `packages/vscode/test/activation.test.js`. That gate exists because every other test imports `server.js` directly: rename the file or drop the trigger and they all stay green while the shipped extension launches nothing.
->
-> What remains for a human is only the paint: does VS Code render the squiggle. And note that an editor-path change is not live until `bun run install-vscode` has been run from `packages/vscode/` — the running extension is the installed `.vsix`, not the working tree.
-
-**What the runner reaches.** It drives the real server, so hovers and diagnostics are genuinely instrumented — a green run there is real evidence, not theater. Hovers are settled two ways: by the **twin oracle** (tsgo hovering the hand-written `.ts` twin, which is TypeScript's own answer) wherever a symbol is TS-modelable, and by [hover-pins.json](hover-pins.json) for the rip-native remainder the twin cannot express — reactive bindings, schema types, components. The pinned values were certified against the v3 oracle in a full reviewed sweep; they are the declared correct answers, not a snapshot of whatever the server happened to say.
-
-**The pin file's one hazard is procedural.** `--update-hovers` re-photographs it from the server, so re-pinning without reading the diff would silently launder a regression into the baseline. Re-pin only after reviewing what changed and why.
-
-The runner issues no completion request and never notifies a watched-file change, so the three session-shaped findings get two dedicated LSP gates over the same server ([lsp-session.js](../support/lsp-session.js)): [config-reactivity.test.js](../toolchain/config-reactivity.test.js) (#11, #12) and [auto-import.test.js](../toolchain/auto-import.test.js) (#8). A claim about the *session* — "config re-governs an open document, with no reload" — is expressible as a test: *open once, never re-open, mutate the file, notify, observe*.
-
-**Statuses** — ✅ **Verified** (a gate runs and passes) · 🟡 **Fix landed, unverified** (the code is in; no gate watches it — write one) · ⬜ **Open** (no fix).
-
-**Re-driving this ledger.** `bun run test:all` — green as of 2026-07-14. It sets `RIP_EXTENDED=1` itself, the tier in which the tsc-backed gates spawn tsc; that tsc is the repo's pinned TypeScript, resolved from the workspace install ([tsc.js](../support/tsc.js) `resolveTsc`) rather than PATH, and a missing install throws loudly instead of skipping.
-
-*A gate is cited here by name and by whether it is green — never by its pass count.* Counts (`36/36`, `12/12`) drift whenever a test or fixture is added, so a status pinned to one goes stale while the finding it describes has not changed.
-
-**Positions** are LSP coordinates — **1-based line, 0-based column** — because that is what the gates assert and what the editor consumes. `rip check` prints 1-based/1-based, so the same diagnostic reads one column higher at the CLI: #1's `TS7006` at `1:9` here is `1:10` from `rip check`. Same defect, different origin convention.
-
-## Summary
-
-**Fourteen of sixteen are closed. Every regression is among them** — what remains open is two capability gaps: #8 (still gated: the gap is held as an expected-failure, so it turns red the day it is fixed) and **#13, the only finding in this ledger with no gate at all.**
+✅ **Verified** (a named gate runs and passes) · 🟡 **Fix landed, unverified** (the code is in; no gate watches it — write one) · ⬜ **Open** (no fix). **The Gate column is the load-bearing one:** a finding with no gate cannot be Verified, however obviously fixed it looks.
 
 | # | Finding | Class | Status | Gate |
 | --- | --- | --- | --- | --- |
@@ -50,6 +20,23 @@ The runner issues no completion request and never notifies a watched-file change
 | [12](#12-nocheck-parsed-but-never-applied) | `rip.noCheck` parsed but never applied | Config surface | ✅ Verified | `config-reactivity` |
 | [13](#13-single-rooted-tsconfig--no-per-project-resolution) | Single-rooted tsconfig — no monorepo support | Config surface | ⬜ **Open** | **none** |
 | [14](#14-unused-ts-expect-error-silently-swallowed) | Unused `@ts-expect-error` silently swallowed | Loud correctness | ✅ Verified | `check` |
+| [15](#15-reactive-state-bindings-carry-readonly) | Reactive `:=` bindings tagged `readonly` | Token DX | ⬜ **Open** | `semantic-tokens` (gap = expected-failure) |
+
+## How to read this ledger
+
+**Trust the Status line, not the body.** Each finding's body is the original audit snapshot — present-tense and pre-fix, even where the fix has landed. The **Status** line is the current truth, and records only what someone actually ran.
+
+**✅ Verified means a named gate runs and passes.** Nothing else earns it — not a code reading, not a scratch script, not a plausible argument. Every claim here *is* reachable that way, because each is a compiler output or a server payload and LSP carries all of them — a `textDocument/hover` response *is* the text VS Code renders. Beware the reflex to call a claim "editor-only": that is usually an unwritten test, not an unreachable one.
+
+**What the evidence is worth.** The runner drives the real server (`bun run type-audit`; `--hover`, `--token`, `--all`, and `--help` for what each audit is judged against). Hovers are settled by the **twin oracle** — tsgo hovering the hand-written `.ts` twin, which is TypeScript's own answer — and, for the rip-native remainder the twin cannot express, by [hover-pins.json](hover-pins.json). *That file is a baseline, and `--update-hovers` re-photographs it from the server: re-pin without reading the diff and you launder a regression into the record.* The token audit carries no such hazard — its expectations come from the `.rip` source itself, so it cannot self-confirm.
+
+**Conventions.** Code is cited by file and symbol, **never by line number** — greppable, and survives an edit above it; when a cited symbol is deleted, say so at the citation. Gates are cited by name and by whether they are green, **never by pass count** — counts drift when a fixture is added, going stale while the finding has not changed. **Positions** are LSP coordinates (**1-based line, 0-based column**), what the gates assert and the editor consumes; `rip check` prints 1-based/1-based, so the same diagnostic reads one column higher there.
+
+**vs v3.** Every **vs v3** line below was established by driving v3 — still reachable (3.17.5, `~/Code/shreeve/rip-lang`) and re-drivable, as the [performance-crossover note](#rip-check-vs-v3-the-performance-crossover-measured) does. This repo is **v4, cleaned up**; the bodies' "v4" means the code here.
+
+**Re-driving.** `bun run test:all` — green as of 2026-07-14. It sets `RIP_EXTENDED=1` itself, the tier where the tsc-backed gates spawn the repo's pinned TypeScript, resolved from the workspace install ([tsc.js](../support/tsc.js) `resolveTsc`) rather than PATH, throwing loudly rather than skipping when it is missing. An editor-path change is not live in VS Code until `bun run install-vscode` from `packages/vscode/` — the running extension is the installed `.vsix`, not the working tree.
+
+**Beyond this ledger.** The wider editor surface is covered by the extension's own suite (`packages/vscode/test/`) — completions, definition, references, rename, code actions, semantic tokens, inlay hints, all over real LSP. *But driven is not fully asserted:* those semantic-token tests check spans and never a **modifier**, which is exactly where #15 sat, in plain sight of a green suite.
 
 ## Compiler-coverage gaps — file won't compile (hard blockers)
 
@@ -305,6 +292,20 @@ An `@ts-expect-error` that catches nothing must raise `TS2578` — tsc's contrac
 **Root (code).** Not the mapping — tsgo's `TS2578` maps cleanly onto the source directive line. [diagnostics.js](../../packages/vscode/src/diagnostics.js) `applyRipDirectives` marked a directive used on ANY diagnostic in its range, then dropped the mapped `TS2578` via `used.has(...)`. A throwaway binding leaves an unused-local hint (`TS6133`, severity 4 — a fade, not an error) in that range, so the directive looked used. Fix: only an error/warning (`severity <= 2`) marks a directive used; a hint does not (the finding-#6 leaked-error path, severity 1, is unaffected).
 
 **vs v3** — v3 checked the shadow in-process, where the directive sits in the real source, so tsc flagged it natively. Same machinery as #6, inverse failure: #6 is a *used* directive dropped from a multi-line face; #14 an *unused* one that should stay loud but was silenced.
+
+## Semantic tokens — the modifier surface
+
+### 15. Reactive state bindings carry `readonly`
+
+`:=` is the one rip binding form you are *meant* to assign to — `clicks = 5` compiles, lowering to `clicks.value = 5` — yet the editor tags it `readonly` and VS Code paints it as a constant (`variable.other.constant`). The editor denies you the write on the only reactive form that allows one. Third face of the reactive-cell root: #3 is the *checking* failure, #10 the *hover* one, this the *token* one.
+
+**Status.** ⬜ **Open** (no fix). Gate: [semantic-tokens.test.js](../toolchain/semantic-tokens.test.js), which holds the gap as an **expected-failure** — it asserts today's wrong behavior on purpose, so the day `ripSemanticTokens` clears the bit the test goes red: that is the cue to invert it and close this finding. It is not `test.failing` (under which a dead tsgo would pass), and the immutable forms are positive controls demanding the `readonly` bit and getting it, so the probe demonstrably reads modifiers and cannot pass vacuously. Breadth comes from the token audit (`bun run type-audit --token`), which probes every top-level declaration in the fixtures: **every violation is a `:=` binding; no other form violates.** Confirmed live: *Inspect Editor Tokens and Scopes* on `clicks := 0` shows `modifiers: declaration readonly`. Both take their expectations from rip's own syntax — a binding's form fixes what its modifier must be — so unlike the hover pins there is no baseline to launder. Scope: declaration sites; locals, parameters and *use* sites are unprobed.
+
+**Why (code).** [server.js](../../packages/vscode/src/server.js) `ripSemanticTokens` forwards tsgo's tokens verbatim — spans remapped, type and modifier bits untouched. The face emits `const clicks: { value: number; read(): number } = __state(0)`; TypeScript classifies a `const` as `readonly`; the bit rides through. **`:=` is the only form where that pass-through lies:** every other const-emitting form (`=!`, `~=`, `~>`) really is immutable and the compiler rejects writes to it, which is why forwarding is right everywhere else (the runner's header carries the form table, certified by compiling each form against a reassignment). #10 was fixable because the cell's *shape* sits in the hover payload to key off; a token carries only a bit, so this needs a reactive-kind signal from the compile that `ripSemanticTokens` never receives — which is why it did not close alongside #10.
+
+**Why the suite missed it.** `editor-features.test.js` does drive `semanticTokens/full` over real LSP, but only for span fidelity — tokens land on Rip spans, hoist duplicates dedup. No test has ever asserted a **modifier**. The surface was watched for position and unwatched for meaning.
+
+**vs v3 — not a regression.** v3's shadow emits the identical `const clicks = __state(0)` (driven), and v3's token handler bridges TypeScript's classification back to `.rip` the same way: same lowering, same pass-through, same bit. (Unestablished: v3's live token payload; its LSP is re-drivable.) **Not v4 drift — an original hole in the reactive story, inherited.** The only finding here with that shape.
 
 ## `=` hoisting: the shared root of #4, #5 and #9
 
