@@ -1,0 +1,146 @@
+# The `rip server` CLI — argv parsing and command dispatch, pure and
+# host-free. The bin reads the argv, exits with a code, and writes to
+# the terminal; here we only decide what should happen, so the whole
+# dispatch table tests without spawning anything.
+#
+# Grammar: `rip server <command> [args…] [--flags]`. The first bare
+# word is the command; remaining bare words are its arguments. A flag
+# is `--name value`, `--name=value`, a bare boolean `--name`, its
+# negation `--no-name`, or a short alias `-p 3000`. A number flag with
+# a non-numeric or missing value, and an unknown flag, reject loudly —
+# a typo'd invocation fails at the door, not deep in a handler.
+
+fail = (message) -> throw new Error "Rip Server: #{message}"
+
+FLAGS =
+  port: { type: 'number', alias: 'p' }
+  host: { type: 'string' }
+  workers: { type: 'number', alias: 'w' }
+  config: { type: 'string', alias: 'c' }
+  httpsPort: { type: 'number' }
+  https: { type: 'boolean' }
+  watch: { type: 'boolean' }
+  silent: { type: 'boolean' }
+
+COMMANDS = ['start', 'stop', 'restart', 'reload', 'status', 'list', 'help', 'version']
+
+aliasIndex = {}
+for own name, spec of FLAGS
+  aliasIndex[spec.alias] = name if spec.alias?
+
+flagSpec = (token) ->
+  # '--name' → name; '-p' → the aliased long name; else null (not a flag).
+  if token.startsWith '--'
+    body = token.slice 2
+    eq = body.indexOf '='
+    name = if eq >= 0 then body.slice(0, eq) else body
+    inline = if eq >= 0 then body.slice(eq + 1) else null
+    if name.startsWith 'no-'
+      { name: name.slice(3), negated: true, inline: null }
+    else
+      { name, negated: false, inline }
+  else if token.startsWith '-' and token.length > 1
+    { name: aliasIndex[token.slice(1)] ?? token.slice(1), negated: false, inline: null }
+  else
+    null
+
+coerce = (name, spec, raw) ->
+  if spec.type is 'number'
+    fail "flag --#{name} expects a number (got '#{raw}')" if raw is ''
+    n = Number raw
+    fail "flag --#{name} expects a number (got '#{raw}')" unless Number.isFinite n
+    n
+  else
+    raw
+
+export type ParsedArgs =
+  command: string
+  args: string[]
+  flags: Record<string, any>
+
+export def parseServerArgs(argv: string[]): ParsedArgs
+  command = null
+  args = []
+  flags: any = {}
+  tokens = argv ?? []
+  index = 0
+  while index < tokens.length
+    token = String tokens[index]
+    parsed = flagSpec token
+    if parsed?
+      spec = FLAGS[parsed.name]
+      fail "unknown flag --#{parsed.name}" unless spec?
+      if spec.type is 'boolean'
+        # A boolean is on, off (--no-), or absent — never a value.
+        fail "flag --#{parsed.name} does not take a value" if parsed.inline?
+        flags[parsed.name] = not parsed.negated
+      else
+        # --no- only negates a boolean; on a valued flag it is a
+        # mistake, not a silent drop.
+        fail "flag --#{parsed.name} is not a boolean and cannot be negated" if parsed.negated
+        if parsed.inline?
+          flags[parsed.name] = coerce parsed.name, spec, parsed.inline
+        else
+          value = tokens[index + 1]
+          fail "flag --#{parsed.name} expects a value" unless value? and not flagSpec(String value)?
+          flags[parsed.name] = coerce parsed.name, spec, String(value)
+          index += 1
+    else if command is null
+      command = token
+    else
+      args.push token
+    index += 1
+  { command: command ?? 'help', args, flags }
+
+export def serverUsage(): string
+  """
+  rip server — run and control a Rip application server
+
+  Usage: rip server <command> [path] [options]
+
+  Commands:
+    start [path]     start the server for an application
+    stop             stop the running server
+    restart          stop and start again
+    reload           reload configuration without dropping connections
+    status           report whether the server is running
+    list             list registered applications
+    help             show this message
+    version          print the server version
+
+  Options:
+    -p, --port N     listen on port N
+        --host H     bind to host H
+    -w, --workers N  run N worker processes
+    -c, --config F   load configuration from F
+        --https      terminate TLS
+        --httpsPort N  TLS port
+        --watch      reload on source changes
+        --silent     suppress startup output
+  """
+
+export type DispatchResult = { code: number, message?: string }
+
+# Run the parsed command against a handler table. help and version are
+# built in; the handler is awaited (control operations are inherently
+# async), a number return is its exit code, an object is passed
+# through, and a throw becomes a non-zero result rather than an
+# unhandled crash. An unknown command, or a known one with no handler
+# wired, returns the usage and a non-zero code.
+export def dispatchServer(parsed: ParsedArgs, handlers: Record<string, any>, opts: { version?: string } = {}): Promise<any>
+  command = parsed.command
+  return { code: 0, message: serverUsage() } if command is 'help'
+  return { code: 0, message: "rip server #{opts.version ?? '0.0.0'}" } if command is 'version'
+  unless COMMANDS.includes command
+    return { code: 1, message: "rip server: unknown command '#{command}'\n\n#{serverUsage()}" }
+  handler = handlers?[command]
+  unless typeof handler is 'function'
+    return { code: 1, message: "rip server: '#{command}' is not available here\n\n#{serverUsage()}" }
+  try
+    result = await handler parsed
+    if typeof result is 'number' then { code: result }
+    else if result? and typeof result is 'object' then result
+    else { code: 0 }
+  catch error
+    detail: any = error
+    { code: 1, message: "rip server: #{command} failed: #{detail?.message ?? detail}" }

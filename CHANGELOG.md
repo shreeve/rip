@@ -5,6 +5,18 @@ repository's pull requests.
 
 ## Unreleased
 
+- The `rip server` CLI's decision layer lands, pure and host-free:
+  `parseServerArgs(argv)` parses `rip server <command> [path]
+  [--flags]` — bare word as command, `--name value`/`--name=value`/
+  boolean/`--no-name`/short aliases — rejecting an unknown flag, a bad
+  or empty number, a boolean given a value, and a `--no-` on a valued
+  flag, all loudly. `dispatchServer(parsed, handlers)` awaits the
+  command against an injected handler table (control operations are
+  async), with `help`/`version` built in, a handler's number as its
+  exit code, and a throw — Error or not — becoming a non-zero result
+  rather than a crash; an unknown or unwired command returns the
+  usage. The bin owns the impure edges (#104)
+
 - The upstream proxy pool exists: `createUpstream({ targets })` is the
   proxy's decision core — target selection (round-robin, least-inflight,
   weighted), a per-target circuit breaker, health thresholds, and
