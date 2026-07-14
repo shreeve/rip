@@ -77,3 +77,43 @@ export function respond(
   handler: (this: Ctx, c: Ctx) => unknown,
   ctx: Ctx,
 ): Promise<Response>;
+
+export type Middleware = (c: Ctx, next: () => Promise<Response>) => unknown;
+export type BeforeFilter = (c: Ctx) => unknown;
+export type AfterFilter = (c: Ctx, response: Response) => unknown;
+
+export type Stack = {
+  use?: Middleware[];
+  before?: BeforeFilter[];
+  after?: AfterFilter[];
+  handler: (this: Ctx, c: Ctx) => unknown;
+};
+
+export function compose(stack: Stack): (c: Ctx) => Promise<Response>;
+
+export type CorsOpts = {
+  origin?: string | string[] | ((origin: string) => boolean);
+  methods?: string | string[];
+  headers?: string | string[];
+  credentials?: boolean;
+  maxAge?: number;
+  exposeHeaders?: string | string[];
+};
+
+export function cors(opts?: CorsOpts): Middleware;
+
+export type LogInfo = {
+  method: string;
+  path: string;
+  status: number;
+  ms: number;
+  time: string;
+};
+
+export type LoggerOpts = {
+  format?: 'tiny' | 'dev' | 'full' | ((info: LogInfo) => string);
+  skip?: (c: Ctx) => boolean;
+  stream?: { write: (line: string) => unknown };
+};
+
+export function logger(opts?: LoggerOpts): Middleware;
