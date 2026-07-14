@@ -8,12 +8,17 @@ test('public entry exposes named exports only', () => {
     'cors',
     'createContext',
     'createMatcher',
+    'csrf',
     'errorEnvelope',
+    'harden',
     'logger',
     'openapi',
     'parseQuery',
     'reading',
     'respond',
+    'secureHeaders',
+    'sessions',
+    'trustProxy',
     'withInput',
   ]);
   expect('default' in server).toBeFalse();
@@ -37,8 +42,14 @@ test('the package is server-only: browser safety is never declared', () => {
 });
 
 test('the pure modules use no host APIs', () => {
-  for (const module of ['router.rip', 'context.rip', 'middleware.rip', 'builtin.rip', 'input.rip', 'openapi.rip', 'index.rip']) {
+  for (const module of ['router.rip', 'context.rip', 'middleware.rip', 'builtin.rip', 'input.rip', 'openapi.rip', 'security.rip', 'index.rip']) {
     const source = readFileSync(new URL(`../${module}`, import.meta.url), 'utf8');
     expect(source).not.toMatch(/\bBun\.|node:|process\.|fetch\(/);
   }
+});
+
+test('the security module leans only on WebCrypto and web-standard globals', () => {
+  const source = readFileSync(new URL('../security.rip', import.meta.url), 'utf8');
+  expect(source).toContain('crypto.subtle');
+  expect(source).not.toMatch(/\brequire\(|import .* from|node:crypto/);
 });

@@ -145,3 +145,58 @@ export function openapi(
   routes: Route[],
   info?: Record<string, unknown>,
 ): Record<string, unknown>;
+
+export type SessionOpts = {
+  secret?: string;
+  encrypt?: boolean;
+  insecure?: boolean;
+  name?: string;
+  maxAge?: number;
+  secure?: boolean;
+  httpOnly?: boolean;
+  sameSite?: 'Strict' | 'Lax' | 'None';
+};
+
+export function sessions(opts?: SessionOpts): Middleware;
+
+export type CsrfOpts = {
+  secret?: string;
+  insecure?: boolean;
+  cookieName?: string;
+  headerName?: string;
+  secure?: boolean;
+  sameSite?: 'Strict' | 'Lax' | 'None';
+  exempt?: (c: Ctx) => boolean;
+};
+
+export function csrf(opts?: CsrfOpts): Middleware;
+
+export type SecureHeaderOpts = {
+  frameOptions?: string;
+  referrerPolicy?: string;
+  contentSecurityPolicy?: string;
+  hsts?: boolean;
+  hstsMaxAge?: number;
+};
+
+export function secureHeaders(opts?: SecureHeaderOpts): Middleware;
+
+export type TrustProxyOpts = {
+  trust?: boolean;
+  hops?: number;
+};
+
+export type ClientInfo = {
+  ip: string | null;
+  proto: string;
+  host: string;
+};
+
+export function trustProxy(opts?: TrustProxyOpts): Middleware;
+
+export type HardenOpts = {
+  maxUrl?: number;
+  methods?: string[];
+};
+
+export function harden(opts?: HardenOpts): Middleware;
