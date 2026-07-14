@@ -3,3 +3,4 @@
 # safety and never travels in an application bundle.
 
 export { createMatcher, parseQuery } from './router.rip'
+export { createContext, errorEnvelope, respond } from './context.rip'
