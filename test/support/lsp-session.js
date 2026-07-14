@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LspClient } from '../../packages/vscode/src/tsgo.js';
+import { LspClient, decodeSemanticTokens } from '../../packages/vscode/src/tsgo.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(HERE, '../..');
@@ -61,14 +61,20 @@ export async function openSession(files) {
   client.onServerRequest('client/unregisterCapability', () => null);
   client.onServerRequest('window/workDoneProgress/create', () => null);
 
-  await client.request('initialize', {
+  const init = await client.request('initialize', {
     processId: process.pid,
     rootUri: 'file://' + dir,
     capabilities: {
       workspace: { configuration: true, didChangeWatchedFiles: { dynamicRegistration: true } },
+      textDocument: { semanticTokens: { formats: ['relative'], tokenTypes: [], tokenModifiers: [], requests: { full: true } } },
     },
   });
   client.notify('initialized', {});
+
+  // The legend the SERVER advertised. Token indices mean nothing without it,
+  // so a gate that reads tokens must fail loudly when it is absent rather than
+  // decode against an empty legend and find nothing to assert.
+  const legend = init?.capabilities?.semanticTokensProvider?.legend ?? null;
 
   const uri = (name) => 'file://' + path.join(dir, name);
 
@@ -176,6 +182,26 @@ export async function openSession(files) {
         await sleep(every);
       }
       return labels;
+    },
+
+    // Semantic tokens for an open doc, decoded against the server's own legend
+    // into absolute rows on .rip source. Throws when the server advertised no
+    // legend: an empty token list would satisfy any "modifier is absent"
+    // assertion for free, so a gate must never reach that state quietly.
+    //
+    // Tokens ride the same async program build as hovers, so poll for a live
+    // list rather than sleeping a fixed interval.
+    async semanticTokens(name, { tries = 20, every = 300 } = {}) {
+      if (!legend) throw new Error('server advertised no semanticTokens legend — cannot decode tokens');
+      for (let i = 0; i < tries; i++) {
+        const r = await client.request('textDocument/semanticTokens/full', {
+          textDocument: { uri: uri(name) },
+        }).catch(() => null);
+        const rows = decodeSemanticTokens(r?.data ?? [], legend);
+        if (rows.length) return rows;
+        await sleep(every);
+      }
+      return [];
     },
 
     async close() {

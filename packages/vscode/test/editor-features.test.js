@@ -31,6 +31,7 @@ import { test, expect, describe } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { decodeSemanticTokens } from '../src/tsgo.js';
 
 let tsgoAvailable = false;
 try {
@@ -173,22 +174,9 @@ function applyEdits(text, edits) {
   return out;
 }
 
-// Decode a semantic-tokens data array into absolute {line, character,
-// length, type, modifiers} rows against a legend.
-function decodeTokens(data, legend) {
-  const out = [];
-  let line = 0, char = 0;
-  for (let i = 0; i + 4 < data.length; i += 5) {
-    line += data[i];
-    char = data[i] === 0 ? char + data[i + 1] : data[i + 1];
-    out.push({
-      line, character: char, length: data[i + 2],
-      type: legend.tokenTypes[data[i + 3]],
-      modifiers: data[i + 4],
-    });
-  }
-  return out;
-}
+// Semantic-token decoding is LSP wire format, shared from the tsgo client
+// (`decodeSemanticTokens`) rather than hand-rolled per consumer.
+const decodeTokens = decodeSemanticTokens;
 
 const UTIL = 'export def shout(s: string): string\n  s.toUpperCase()\nexport answer = 42\n';
 

@@ -19,6 +19,33 @@ import fs from 'node:fs';
 
 const require = createRequire(import.meta.url);
 
+// Decode an LSP semantic-tokens `data` array — a flat, DELTA-encoded stream of
+// 5-tuples (deltaLine, deltaStart, length, typeIndex, modifierBits) — into
+// absolute rows, resolving the indices through the legend the server
+// advertised. Lives here, beside the LSP client, because the wire format is
+// LSP's: every consumer that asks for tokens must undo the same encoding, and
+// a second hand-rolled copy is a second thing to get wrong.
+//
+// `modifiers` are the decoded NAMES; `modifierBits` keeps the raw mask for a
+// caller that wants to test it directly.
+export function decodeSemanticTokens(data, legend) {
+  const types = legend?.tokenTypes ?? [];
+  const mods = legend?.tokenModifiers ?? [];
+  const out = [];
+  let line = 0, char = 0;
+  for (let i = 0; i + 4 < (data?.length ?? 0); i += 5) {
+    line += data[i];
+    char = data[i] === 0 ? char + data[i + 1] : data[i + 1];
+    out.push({
+      line, character: char, length: data[i + 2],
+      type: types[data[i + 3]] ?? `#${data[i + 3]}`,
+      modifiers: mods.filter((_, b) => data[i + 4] & (1 << b)),
+      modifierBits: data[i + 4],
+    });
+  }
+  return out;
+}
+
 export function tsgoBinaryPath() {
   const pkgJson = require.resolve('typescript/package.json');
   const nodeModules = path.resolve(path.dirname(pkgJson), '..');
