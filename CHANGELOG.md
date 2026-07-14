@@ -5,6 +5,19 @@ repository's pull requests.
 
 ## Unreleased
 
+- `<script type="text/rip">` loads: data-src bundles, inline text, and
+  src fetches concatenate into ONE program compiled in the compiler's
+  new script mode and run as one async closure — the page's scripts
+  genuinely share a scope, re-spelling assigns instead of colliding,
+  and reactive state crosses scripts directly. Module forms reject at
+  their own positions (the compiler owns the judgment, so string
+  content that merely looks like a module form is never touched). A
+  failing script drops with its own label and local line while the
+  rest of the page recompiles and runs; duplicates reject loudly
+  across URL spellings; a CSP that blocks function construction gets
+  one loud unsafe-eval diagnostic while the page's own runtime errors
+  report as the page's own (#91)
+
 - The browser entry exists: `src/browser.js` exports the compiler
   surface (`compile`, `compileToJS` — scope delivery only, other modes
   reject by name) plus one copy of every browser-safe runtime as the

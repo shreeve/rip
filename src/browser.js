@@ -8,13 +8,11 @@
 // are structurally unreachable from this module; the bundle gate pins
 // that.
 import { compile } from './compile.js';
-import * as intrinsics from './runtime/intrinsics.js';
-import * as stdlib from './runtime/stdlib.js';
-import * as schema from './runtime/schema.js';
-import * as reactive from './runtime/reactive.js';
-import * as components from './runtime/components.js';
+import { runtimes } from './browser-runtimes.js';
 
 export { compile };
+export { runtimes };
+export { processRipScripts } from './browser-scripts.js';
 
 // The compiler call browser loaders make: JavaScript out, runtimes by
 // scope, original-position diagnostics carried on the thrown error.
@@ -28,15 +26,3 @@ export function compileToJS(source, options = {}) {
   }
   return compile(source, { ...options, runtimeDelivery: 'none' });
 }
-
-// One namespace holding every binding browser-delivered runtimes give
-// a compiled script: the scope a loader injects around evaluated
-// output. Server-only runtime names (persistence) are deliberately
-// absent.
-export const runtimes = Object.freeze({
-  ...intrinsics,
-  ...stdlib,
-  ...schema,
-  ...reactive,
-  ...components,
-});

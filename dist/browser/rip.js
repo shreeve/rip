@@ -8839,9 +8839,10 @@ function moduleSourceText(s) {
 }
 
 class Emitter {
-  constructor(stores, builder, { face = "js", pins = null, strict = false } = {}) {
+  constructor(stores, builder, { face = "js", pins = null, strict = false, script = false } = {}) {
     this.stores = stores;
     this.b = builder;
+    this.script = script;
     this.pins = pins;
     this.pinnables = [];
     this.strict = strict;
@@ -10244,6 +10245,9 @@ class Emitter {
     });
   }
   importStatement(node) {
+    if (this.script) {
+      throw this.positionedError(node, "emitter: module imports are not available in a script tag — script sources share one scope, and modules arrive with the package graph");
+    }
     const source = node[node.length - 1];
     const specs = node.slice(1, -1);
     this.mark(node, "$self", () => {
@@ -10270,6 +10274,9 @@ class Emitter {
 `);
   }
   exportStatement(node, ind) {
+    if (this.script) {
+      throw this.positionedError(node, "emitter: exports are not available in a script tag — drop the export keyword; script sources share one scope");
+    }
     const head = node[0];
     this.mark(node, "$self", () => {
       if (head === "export-all") {
@@ -17934,7 +17941,7 @@ var programScopeNames = (emitter, sexpr) => {
   }
   return names;
 };
-function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js", pins = null, strict = false, dataPayload = null } = {}) {
+function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js", pins = null, strict = false, script = false, dataPayload = null } = {}) {
   if (!parseResult.sexpr) {
     throw new Error("emitter: cannot emit a failed parse");
   }
@@ -17943,7 +17950,7 @@ function emit(parseResult, { source = "", runtimeDelivery = "none", face = "js",
   }
   const stores = new Stores(parseResult.stores);
   const builder = new CodeBuilder(stores, { source });
-  const emitter = new Emitter(stores, builder, { face, pins, strict });
+  const emitter = new Emitter(stores, builder, { face, pins, strict, script });
   emitter.dataPayload = dataPayload;
   if (runtimeDelivery !== "none" && runtimeDelivery !== "import" && runtimeDelivery !== "inline") {
     throw new Error(`emitter: unknown runtimeDelivery '${runtimeDelivery}' — expected 'none', 'import', or 'inline'`);
@@ -18638,7 +18645,7 @@ var positioned = (file, path, reason, start, end) => {
 ${excerpt(file, start)}`;
   return new CompileError(message, { path, start, end, line: line + 1, col: col + 1 });
 };
-function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", face = "js", pins = null, strict = false, foldProjections = false } = {}) {
+function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", face = "js", pins = null, strict = false, script = false, foldProjections = false } = {}) {
   if (typeof source !== "string") {
     const kind = source === null ? "null" : Array.isArray(source) ? "an array" : `a ${typeof source}`;
     throw new CompileError(`compile: source must be a string; got ${kind}`, { path });
@@ -18679,7 +18686,7 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
     foldDerivedSchemas(result.sexpr);
   let emitted;
   try {
-    emitted = emit(result, { source, runtimeDelivery, face, pins, strict, dataPayload });
+    emitted = emit(result, { source, runtimeDelivery, face, pins, strict, script, dataPayload });
   } catch (err) {
     if (typeof err.start === "number") {
       throw positioned(file, path, err.message, err.start, err.end);
@@ -21755,13 +21762,7 @@ class __Component {
   }
 }
 
-// src/browser.js
-function compileToJS(source, options = {}) {
-  if (options.runtimeDelivery !== undefined && options.runtimeDelivery !== "none") {
-    throw new Error(`rip: browser compilation delivers runtimes by scope; runtimeDelivery '${options.runtimeDelivery}' is not available here`);
-  }
-  return compile(source, { ...options, runtimeDelivery: "none" });
-}
+// src/browser-runtimes.js
 var runtimes = Object.freeze({
   ...exports_intrinsics,
   ...exports_stdlib,
@@ -21769,8 +21770,186 @@ var runtimes = Object.freeze({
   ...exports_reactive,
   ...exports_components
 });
+
+// src/browser-scripts.js
+var scopeNames = Object.keys(runtimes);
+var scopeValues = scopeNames.map((name) => runtimes[name]);
+var browserHost = () => {
+  if (typeof document === "undefined" || typeof document.querySelectorAll !== "function") {
+    throw new Error("rip: processRipScripts requires a browser or an injected host");
+  }
+  return {
+    scripts() {
+      return Array.from(document.querySelectorAll('script[type="text/rip"]')).map((node) => ({
+        src: node.getAttribute("src"),
+        text: node.textContent ?? ""
+      }));
+    },
+    async fetchText(url) {
+      const response = await fetch(url);
+      if (!response.ok)
+        throw new Error(`${response.status} ${response.statusText}`);
+      return response.text();
+    },
+    prepare(code, names) {
+      return new Function(...names, code);
+    },
+    async ready() {
+      if (document.readyState === "loading") {
+        await new Promise((resolve) => document.addEventListener("DOMContentLoaded", resolve, { once: true }));
+      }
+    },
+    report(error) {
+      console.error("[Rip]", error);
+    }
+  };
+};
+var dedent = (text) => {
+  const lines = text.split(`
+`);
+  let prefix = null;
+  for (const line of lines) {
+    if (!line.trim())
+      continue;
+    const lead = line.match(/^[ \t]*/)[0];
+    if (prefix === null) {
+      prefix = lead;
+      continue;
+    }
+    let shared = 0;
+    while (shared < prefix.length && shared < lead.length && prefix[shared] === lead[shared])
+      shared += 1;
+    prefix = prefix.slice(0, shared);
+    if (!prefix)
+      return text;
+  }
+  if (!prefix)
+    return text;
+  return lines.map((line) => line.trim() ? line.slice(prefix.length) : line).join(`
+`);
+};
+var claimKey = (label) => {
+  try {
+    return new URL(label, "https://rip.invalid/").href;
+  } catch {
+    return label;
+  }
+};
+async function processRipScripts(host = null) {
+  const h = host ?? browserHost();
+  await h.ready?.();
+  const sources = [];
+  const seen = new Set;
+  const claim = (label) => {
+    const key = claimKey(label);
+    if (seen.has(key)) {
+      throw new Error(`rip: script source '${label}' is listed more than once`);
+    }
+    seen.add(key);
+  };
+  for (const url of h.dataSrc?.() ?? []) {
+    claim(url);
+    sources.push({ label: url, text: null, url });
+  }
+  let ordinal = 0;
+  for (const script of h.scripts?.() ?? []) {
+    ordinal += 1;
+    if (script.src) {
+      claim(script.src);
+      sources.push({ label: script.src, text: null, url: script.src });
+    } else {
+      sources.push({ label: `<script:${ordinal}>`, text: dedent(script.text ?? "") });
+    }
+  }
+  const failures = [];
+  const report = (label, error) => {
+    failures.push({ label, error });
+    h.report?.(error);
+  };
+  const loaded = [];
+  for (const source of sources) {
+    if (source.text !== null) {
+      loaded.push(source);
+      continue;
+    }
+    if (typeof h.fetchText !== "function") {
+      throw new Error("rip: this host loads script sources by URL but provides no fetchText");
+    }
+    try {
+      loaded.push({ ...source, text: await h.fetchText(source.url) });
+    } catch (error) {
+      report(source.label, new Error(`rip: failed to load '${source.label}': ${error.message}`));
+    }
+  }
+  let active = loaded;
+  let compiled = null;
+  while (active.length) {
+    const offsets = [];
+    let line = 1;
+    const parts = [];
+    for (const source of active) {
+      offsets.push({ source, start: line });
+      const text = source.text.endsWith(`
+`) ? source.text.slice(0, -1) : source.text;
+      parts.push(text);
+      line += text.split(`
+`).length;
+    }
+    try {
+      compiled = compile(parts.join(`
+`), { path: "<scripts>", runtimeDelivery: "none", script: true });
+      break;
+    } catch (error) {
+      let owner = offsets[0];
+      for (const entry of offsets) {
+        if (typeof error.line === "number" && entry.start <= error.line)
+          owner = entry;
+      }
+      const local = typeof error.line === "number" ? error.line - owner.start + 1 : null;
+      const framed = new Error(`rip: ${owner.source.label}${local ? `:${local}` : ""} failed to compile: ${error.message}`);
+      framed.cause = error;
+      framed.line = local;
+      framed.col = error.col;
+      report(owner.source.label, framed);
+      active = active.filter((source) => source !== owner.source);
+      compiled = null;
+    }
+  }
+  let executed = false;
+  if (compiled) {
+    const program = `'use strict';
+return (async () => {
+${compiled.code}
+})();`;
+    let fn = null;
+    try {
+      fn = h.prepare(program, scopeNames);
+    } catch (error) {
+      const csp = new Error("rip: script evaluation is blocked by Content Security Policy — running Rip from script tags requires 'unsafe-eval' " + "(script-src). Serve precompiled JavaScript or relax the policy for this page.");
+      csp.cause = error;
+      report("<evaluate>", csp);
+    }
+    if (fn) {
+      try {
+        await fn(...scopeValues);
+        executed = true;
+      } catch (error) {
+        report("<runtime>", error);
+      }
+    }
+  }
+  return { count: active.length, executed, failures };
+}
+// src/browser.js
+function compileToJS(source, options = {}) {
+  if (options.runtimeDelivery !== undefined && options.runtimeDelivery !== "none") {
+    throw new Error(`rip: browser compilation delivers runtimes by scope; runtimeDelivery '${options.runtimeDelivery}' is not available here`);
+  }
+  return compile(source, { ...options, runtimeDelivery: "none" });
+}
 export {
   runtimes,
+  processRipScripts,
   compileToJS,
   compile
 };
