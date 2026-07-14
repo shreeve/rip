@@ -99,7 +99,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { LspClient, tsgoBinaryPath, startTsgo, decodeSemanticTokens } from '../../packages/vscode/src/tsgo.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -142,6 +143,7 @@ const AUDITS = [
 ];
 const FLAGS = [
   ['--all', 'all three audits'],
+  ['--serial', 'probe one fixture at a time — the control for the concurrent pass'],
   ['--v', '+ expected hover divergences and unasserted tokens, in full'],
   ['--update-hovers', 're-pin expected hovers (verify the change is correct FIRST)'],
   ['--help', '-h', 'this message'],
@@ -186,6 +188,11 @@ if (unknown.length) {
 }
 const VERBOSE = ARGV.includes('--v');
 const UPDATE_HOVERS = ARGV.includes('--update-hovers');
+// Fixtures probe a few at a time because the cost is waiting, not computing.
+// `--serial` collapses that to one lane: if a result ever looks wrong, run it
+// and see whether concurrency was the cause. The two must agree — and if they
+// ever do not, the concurrent path is the bug, not the answer.
+const LANES = ARGV.includes('--serial') ? 1 : 4;
 // Which audits this run covers — computed once, ON the table, so no other site
 // can disagree with it. `--update-hovers` implies the Hover Audit (it re-pins
 // from a live run); a named audit suppresses the default one; `--all` runs
@@ -199,6 +206,38 @@ const RUN_MAIN = ranAudit('main');
 const RUN_HOVER = ranAudit('hover');
 const RUN_TOKENS = ranAudit('token');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const execFileP = promisify(execFile);
+// A face carries the whole reactive-runtime prelude, so it outgrows execFile's
+// 1MB default; a truncated face would read as a compile failure.
+const MAX_FACE = 32 * 1024 * 1024;
+
+// Run `work` over `items` a few at a time, resolving results IN ORDER so a
+// caller can stream them as they land. Every audit's cost is dominated by
+// waiting — on a server, on a spawned process — not by CPU, so the width buys
+// wall-clock without contending for anything.
+async function lanes(items, work, { width = 4, onDone = null } = {}) {
+  const out = new Array(items.length);
+  const gate = items.map(() => { let go; return { done: new Promise((r) => { go = r; }), go }; });
+  const queue = items.map((it, i) => [it, i]);
+  // Each runner carries its LANE INDEX, and every lane owns its own server. That
+  // is what makes a concurrent run equivalent to a serial one by construction:
+  // no server ever sees a second document, so no probe is ever answered by a
+  // program a serial run would not have built.
+  const runners = Array.from({ length: Math.min(width, items.length) }, async (_, lane) => {
+    for (let job = queue.shift(); job; job = queue.shift()) {
+      const [it, i] = job;
+      out[i] = await work(it, i, lane);
+      gate[i].go();
+    }
+  });
+  // The printer walks the results IN INDEX ORDER, so output stays in fixture
+  // order even though the work finishes out of order.
+  const printer = (async () => {
+    for (let i = 0; i < items.length; i++) { await gate[i].done; onDone?.(out[i], i); }
+  })();
+  await Promise.all([...runners, printer]);
+  return out;
+}
 
 // Temp workspaces are removed by each server's stop(); this registry is
 // the backstop — it clears them on normal exit, an uncaught error, or
@@ -238,12 +277,29 @@ process.on('SIGINT', () => { cleanupTemp(); process.exit(130); });
 // not a directive in either surface).
 const countDirectives = (text) => (text.match(/^[ \t]*(?:#|\/\/)[ \t]*@ts-expect-error(?=\s|$)/gm) ?? []).length;
 
+// Does a fixture produce a face? One answer per file per run, shared by every
+// audit that asks — the answer cannot change within a run.
+//
+// The map holds the PROMISE, not the boolean, so two lanes asking at once share
+// one compile instead of racing two. Every spawn on this path is async: a
+// synchronous one blocks the event loop, freezing every other lane's in-flight
+// LSP request and serializing exactly the work the lanes exist to overlap.
+const compiled = new Map();   // ripPath → Promise<boolean>
+const compiles = (ripPath) => {
+  if (!compiled.has(ripPath)) {
+    compiled.set(ripPath, execFileP('bun', [RIP, '--ts', ripPath], { timeout: 30000, maxBuffer: MAX_FACE }).then(() => true, () => false));
+  }
+  return compiled.get(ripPath);
+};
+
 // ── dimension 1: compiles (+ capture the face for dimension 2)
-function dimCompiles(ripPath) {
+async function dimCompiles(ripPath) {
   try {
-    const face = execFileSync('bun', [RIP, '--ts', ripPath], { encoding: 'utf8', timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'] });
+    const { stdout: face } = await execFileP('bun', [RIP, '--ts', ripPath], { encoding: 'utf8', timeout: 30000, maxBuffer: MAX_FACE });
+    compiled.set(ripPath, Promise.resolve(true));
     return { ok: true, face };
   } catch (err) {
+    compiled.set(ripPath, Promise.resolve(false));
     const msg = (err.stderr || err.stdout || err.message || '').toString().split('\n').find((l) => l.trim()) ?? 'compile failed';
     return { ok: false, detail: msg.trim() };
   }
@@ -285,14 +341,23 @@ function dimTwin(twinBase, byFile) {
 // error is not an environment gap — it is a real regression (rip crashed
 // on code it compiled, or the reference twin is broken) and FAILS loudly,
 // never a silent skip that would drop the check from the denominator.
-function runOut(cmd, file) {
-  try { return { ok: true, out: execFileSync(cmd[0], [...cmd.slice(1), file], { encoding: 'utf8', timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'] }) }; }
-  catch (err) { return { ok: false, out: (err.stdout || '').toString(), detail: (err.stderr || err.message || '').toString().split('\n')[0] }; }
+// ASYNC spawn, not execFileSync: this runs while fixtures are probed in
+// parallel, and a synchronous spawn blocks the event loop — stalling every
+// in-flight LSP request and serializing the very work the lanes exist to
+// overlap.
+async function runOut(cmd, file) {
+  try {
+    const { stdout } = await execFileP(cmd[0], [...cmd.slice(1), file], { encoding: 'utf8', timeout: 30000 });
+    return { ok: true, out: stdout };
+  } catch (err) {
+    return { ok: false, out: (err.stdout || '').toString(), detail: (err.stderr || err.message || '').toString().split('\n')[0] };
+  }
 }
-function dimRuntime(ripPath, tsPath) {
+async function dimRuntime(ripPath, tsPath) {
   if (!tsPath) return { status: 'n/a', detail: 'no twin' };
-  const r = runOut(['bun', RIP], ripPath);
-  const t = runOut(['bun'], tsPath);
+  // The two runs are independent — the .rip through rip, the twin through bun —
+  // so run them together rather than back to back.
+  const [r, t] = await Promise.all([runOut(['bun', RIP], ripPath), runOut(['bun'], tsPath)]);
   if (!r.ok || !t.ok) return { status: 'fail', detail: `run error (${r.ok ? 'ts' : 'rip'}): ${(r.detail || t.detail || '').slice(0, 80)}` };
   return { status: r.out === t.out ? 'pass' : 'fail', detail: r.out === t.out ? '' : 'stdout differs' };
 }
@@ -360,7 +425,35 @@ function tsDeclsOf(src) {
 // real name (cross-file imports resolve; idle siblings never join the
 // program, so they don't collide).
 class EditorServer {
-  constructor() { this.diags = new Map(); this.dir = mkTemp(path.join(os.tmpdir(), 'rip-audit-')); }
+  constructor() { this.diags = new Map(); this.dir = mkTemp(path.join(os.tmpdir(), 'rip-audit-')); this.open = null; }
+
+  // ── THE INVARIANT THAT MAKES CONCURRENCY SAFE ────────────────────────────
+  //
+  // At most ONE .rip document is open on a server at any moment. That is
+  // precisely the condition a serial run satisfies, so enforcing it means every
+  // probe is answered by a program of the same SHAPE it would have had serially
+  // — concurrency lives between server processes, never inside one program.
+  //
+  // This is not fussiness. The open-document set genuinely changes what the
+  // server answers: finding #8 records that the auto-import candidate set IS the
+  // open program. Hovers and tokens happen not to depend on it for this corpus,
+  // but "happen not to" is an observation, not a guarantee, and observations are
+  // what this runner exists to distrust.
+  //
+  // So it throws. A future edit that probes two documents through one server
+  // fails loudly here instead of quietly answering from a program the serial run
+  // never had.
+  claim(uri) {
+    if (this.open && this.open !== uri) {
+      throw new Error(
+        `EditorServer: ${path.basename(uri)} opened while ${path.basename(this.open)} is still open.\n`
+        + `  A server must hold at most one document — that is what makes a concurrent run\n`
+        + `  equivalent to a serial one. Give each lane its own server (see the pool below).`,
+      );
+    }
+    this.open = uri;
+  }
+  release(uri) { if (this.open === uri) this.open = null; }
   async start() {
     for (const f of fs.readdirSync(FIX)) if (f.endsWith('.rip')) fs.copyFileSync(path.join(FIX, f), path.join(this.dir, f));
     const tscfg = path.join(HERE, 'tsconfig.json');
@@ -397,38 +490,81 @@ class EditorServer {
   // settle after the first publish is enough for the verdict.
   async verdict(base, src) {
     const uri = 'file://' + path.join(this.dir, base);
-    this.diags.delete(uri);
-    this.client.notify('textDocument/didOpen', { textDocument: { uri, languageId: 'rip', version: 1, text: src } });
-    for (let i = 0; i < 60 && !this.diags.has(uri); i++) await sleep(100);
-    await sleep(500);
-    const ds = this.diags.get(uri) ?? [];
-    this.client.notify('textDocument/didClose', { textDocument: { uri } });
-    await sleep(300);
-    return ds;
-  }
-  // Hovers need a LONGER settle than the verdict: evolving `let`s type
-  // through an async pass, so an early hover answers `any`.
-  async openForHover(base, src) {
-    const uri = 'file://' + path.join(this.dir, base);
-    this.diags.delete(uri);
-    this.client.notify('textDocument/didOpen', { textDocument: { uri, languageId: 'rip', version: 1, text: src } });
-    for (let i = 0; i < 60 && !this.diags.has(uri); i++) await sleep(100);
-    await sleep(1800);
-    return uri;
-  }
-  // Hover; if `any`, re-hover after a pause. A timing `any` resolves; a
-  // genuine write-only `any` stays. Separates the two without bias.
-  async hover(uri, pos) {
-    let h = await this.client.request('textDocument/hover', { textDocument: { uri }, position: pos }).catch(() => null);
-    if (/(?:^|:\s*)any$/.test(normHover(h) ?? '')) {
-      await sleep(1200);
-      h = await this.client.request('textDocument/hover', { textDocument: { uri }, position: pos }).catch(() => null);
+    this.claim(uri);
+    try {
+      this.diags.delete(uri);
+      this.client.notify('textDocument/didOpen', { textDocument: { uri, languageId: 'rip', version: 1, text: src } });
+      for (let i = 0; i < 60 && !this.diags.has(uri); i++) await sleep(100);
+      await sleep(500);
+      const ds = this.diags.get(uri) ?? [];
+      this.client.notify('textDocument/didClose', { textDocument: { uri } });
+      await sleep(300);
+      return ds;
+    } finally {
+      this.release(uri);   // a throw must not strand the server as "open"
     }
-    return normHover(h);
+  }
+
+  // Open a document, hand it to `fn`, and close it — the ONLY way the probe pass
+  // holds a document. claim/release and open/close are paired in `finally`, so a
+  // throw anywhere inside cannot leave a server marked open: were that possible,
+  // the lane's NEXT fixture would fail the one-document invariant and report a
+  // violation that never happened, hiding the error that actually occurred.
+  async withDoc(base, src, probe, fn) {
+    const uri = await this.openForHover(base, src, probe);
+    try { return await fn(uri); }
+    finally { await this.close(uri); }
+  }
+
+  // Open, then WAIT FOR READINESS rather than sleeping a fixed interval.
+  //
+  // Hovers need a longer settle than the verdict: evolving `let`s type through
+  // an async pass, so a hover taken before the program is built answers `any`.
+  // `probe` is a declaration whose hover CANNOT legitimately be `any` (an
+  // annotated or keyword declaration — see `readyProbe`), so "it answered a
+  // type" is a true readiness signal. Probing an arbitrary declaration would
+  // conflate a program that is not built yet with a binding that is genuinely
+  // `any`, and burn the whole timeout on the latter.
+  async openForHover(base, src, probe = null) {
+    const uri = 'file://' + path.join(this.dir, base);
+    this.claim(uri);
+    try {
+      this.diags.delete(uri);
+      this.client.notify('textDocument/didOpen', { textDocument: { uri, languageId: 'rip', version: 1, text: src } });
+      for (let i = 0; i < 60 && !this.diags.has(uri); i++) await sleep(100);
+      if (!probe) { await sleep(400); return uri; }
+      for (let i = 0; i < 40; i++) {
+        const h = normHover(await this.client.request('textDocument/hover', {
+          textDocument: { uri }, position: { line: probe.line, character: probe.character },
+        }).catch(() => null));
+        if (h && !/(?:^|:\s*)any$/.test(h)) return uri;   // typed: the program is built
+        await sleep(100);
+      }
+      return uri;
+    } catch (err) {
+      this.release(uri);
+      throw err;
+    }
+  }
+  // An `any` here is either TIMING (the enrichment pass has not reached this
+  // position) or GENUINE (a write-only local — finding #9's class). Re-ask to
+  // separate them: a timing `any` clears within a poll or two, a genuine one
+  // survives every retry and is reported as `any`, which is the truth.
+  async hover(uri, pos) {
+    const ask = async () => normHover(await this.client.request('textDocument/hover', {
+      textDocument: { uri }, position: pos,
+    }).catch(() => null));
+    let h = await ask();
+    for (let i = 0; i < 8 && /(?:^|:\s*)any$/.test(h ?? ''); i++) {
+      await sleep(150);
+      h = await ask();
+    }
+    return h;
   }
   async close(uri) {
     this.client.notify('textDocument/didClose', { textDocument: { uri } });
     await sleep(300);
+    this.release(uri);
   }
   async stop() { await this.client.stop().catch(() => {}); fs.rmSync(this.dir, { recursive: true, force: true }); }
 }
@@ -472,6 +608,17 @@ class TwinOracle {
   }
   async stop() { await this.client.stop().catch(() => {}); }
 }
+
+// The declaration to poll for READINESS: one whose hover cannot legitimately be
+// `any`, so "it answered a type" means the program is built and nothing else.
+// A keyword declaration (`def`/`class`/`interface`/`enum`/`type`) or an
+// annotated binding qualifies; a bare `x = …` does not, because a write-only
+// local genuinely hovers `any` (finding #9) and polling it would wait out the
+// full timeout on a correct answer. `null` when a fixture offers neither.
+const readyProbe = (decls) =>
+  decls.find((d) => d.keyword)
+  ?? decls.find((d) => new RegExp(`^${d.name}\\s*:`).test(d.code))
+  ?? null;
 
 // ── token machinery: what a declaration's token MUST be, derived from
 // rip source syntax alone.
@@ -585,36 +732,94 @@ const green = (s) => paint('32', s);
 const red = (s) => paint('31', s);
 const yellow = (s) => paint('33', s);
 const pad = (s, n) => String(s).padEnd(n);
-const auditBanner = (title, subtitle) =>
-  console.log(`\n  ${paint('36', '❯')} ${bold(title)}${subtitle ? '   ' + dim(subtitle) : ''}`);
+// The Type Audit's grid is the widest thing this runner prints, so its natural
+// width — the fixture column plus every dimension column — IS the report's
+// width, and every rule derives from it. No rule carries a hand-picked number:
+// two independently chosen widths agree only by luck, and stop agreeing the
+// moment a column moves.
+const NAME_W = 18;
+const DIMS = [['compiles', 10], ['directives', 12], ['verdict', 10], ['runtime', 9], ['twin', 8]];
+const RULE_W = NAME_W + 1 + DIMS.reduce((a, [, w]) => a + w, 0) + (DIMS.length - 1);
 
-const editor = new EditorServer();
-await editor.start();
+// Four sections scroll past in one `--all` run, so each needs a seam that
+// survives the wall of rows above it. The title rides in a reverse-video chip
+// (legible without spending colour, which is reserved for status), the subtitle
+// sits beside it, and a dotted rule CLOSES the header block: the break belongs
+// between title and content, which is where the eye needs it, not between one
+// section and the last.
+//
+// `1;7` is bold INSIDE the chip. Bold-under-reverse is terminal-dependent (some
+// render a heavier glyph; others implement bold as a brighter foreground, which
+// reverse swaps into a brighter background), so if this reads thin, the fix is
+// an explicit pair like `1;30;47` — bold black on white, never using reverse.
+const auditBanner = (title, subtitle) => {
+  console.log(`\n\n  ${paint('1;7', ` ${title} `)}${subtitle ? '  ' + dim(subtitle) : ''}`);
+  console.log(`  ${dim('┈'.repeat(RULE_W))}\n`);
+};
+
+// ── the server pool: ONE EDITOR SERVER PER LANE.
+//
+// This is the determinism argument, and it is worth stating plainly.
+//
+// A server holds at most one open document — `EditorServer.claim` throws
+// otherwise — so a document is only ever probed ALONE. Serial satisfies that
+// with one server; concurrent satisfies it with N. Every probe therefore runs
+// against a program of the same SHAPE either way, and the concurrent result
+// cannot differ from the serial one. Concurrency lives BETWEEN servers, never
+// inside a program.
+//
+// That distinction is load-bearing, not pedantry: the open-document set really
+// does change what a server answers — finding #8 records that the auto-import
+// candidate set IS the open program. A pool shared across lanes would put four
+// documents in one program and make the equivalence an empirical accident, to be
+// re-established by diffing outputs. Here it is a property of the code.
+//
+// The cost is N server processes. That is the price of the guarantee, and the
+// lanes pay it out of time they would otherwise spend idle.
+const pool = await Promise.all(Array.from({ length: LANES }, async () => {
+  const s = new EditorServer();
+  await s.start();
+  return s;
+}));
+
+// A coverage shortfall is not a low score — it means the audit did not run over
+// what it claims to cover, and every ratio below it is a fraction of the wrong
+// denominator. That must never print green, so it exits non-zero before any
+// score is reported.
+async function abort(headline, reasons) {
+  await Promise.all(pool.map((s) => s.stop()));
+  console.error(`\n✗ ${headline} — nothing it reports would be trustworthy:`);
+  for (const r of reasons) console.error(`  • ${r}`);
+  console.error(`\n  Every score is a ratio of what was CHECKED, so a missing fixture reads as full marks.`);
+  console.error(`  Re-run with --serial to rule out the concurrent pass.\n`);
+  process.exit(1);
+}
 
 // ── the Type Audit (dims 1–5) — the default; skipped by --hover
 let totalPass = 0, totalApplicable = 0, fails = 0;
 if (RUN_MAIN) {
   const glyph = { pass: ['✓', green('✓')], fail: ['✗', red('✗')], skip: ['skip', yellow('skip')], '—': ['·', dim('·')], 'n/a': ['·', dim('·')] };
   const cell = (s, n) => { const [v, col] = glyph[s] ?? [String(s), dim(String(s))]; return col + ' '.repeat(Math.max(0, n - v.length)); };
-  const dims = [['compiles', 10], ['directives', 12], ['verdict', 10], ['runtime', 9], ['twin', 8]];
-  const ruleW = 18 + 1 + dims.reduce((a, [, w]) => a + w, 0) + (dims.length - 1);
+  const dims = DIMS;
 
   // Print the header immediately, then stream each fixture's row as it
   // is computed, so the report fills in live.
   auditBanner('TYPE AUDIT', `${fixtures.length} fixtures × ${dims.length} dimensions`);
-  console.log('');
-  console.log('  ' + dim(pad('fixture', 18) + ' ' + dims.map(([d, w]) => pad(d, w)).join(' ')));
-  console.log('  ' + dim('─'.repeat(ruleW)));
+  console.log('  ' + dim(pad('fixture', NAME_W) + ' ' + dims.map(([d, w]) => pad(d, w)).join(' ')));
+  console.log('  ' + dim('─'.repeat(RULE_W)));
 
   const twinByFile = runTwinTsc(); // one strict tsc pass over all twins
 
-  const rows = [];
-  for (const f of fixtures) {
+  // Fixtures run a few at a time — each row is mostly waiting (a compiler spawn,
+  // the server's program build, two runtime spawns). Rows still PRINT in fixture
+  // order: `lanes` resolves in index order, so the grid fills top-to-bottom even
+  // though the work finishes out of order.
+  const rows = await lanes(fixtures, async (f, _i, lane) => {
     const ripPath = path.join(FIX, f);
     const twinBase = ['.tsx', '.ts'].map((e) => f.replace(/\.rip$/, e)).find((b) => fs.existsSync(path.join(FIX, b)));
     const src = fs.readFileSync(ripPath, 'utf8');
 
-    const c = dimCompiles(ripPath);
+    const c = await dimCompiles(ripPath);
     const row = { name: f, compiles: c.ok ? 'pass' : 'fail', compileDetail: c.detail };
 
     if (c.ok) {
@@ -625,12 +830,16 @@ if (RUN_MAIN) {
       // Count ERROR-severity only. Unused-local and deprecation arrive
       // as Hint severity (fade/strikethrough, not a type error) and are
       // expected on the fixtures' intentionally-unused bindings.
-      const ds = (await editor.verdict(f, src)).filter((d) => (d.severity ?? 1) <= 2);
+      //
+      // The verdict and the runtime dimension do not touch each other — one
+      // asks the server, the other spawns two processes — so overlap them.
+      const [ds, rt] = await Promise.all([
+        pool[lane].verdict(f, src).then((all) => all.filter((d) => (d.severity ?? 1) <= 2)),
+        dimRuntime(ripPath, twinBase ? path.join(FIX, twinBase) : null),
+      ]);
       row.verdict = ds.length === 0 ? 'pass' : 'fail';
       row.verdictDetail = ds.length === 0 ? '0 errors' : `${ds.length} unexpected`;
       row.diags = ds;
-
-      const rt = dimRuntime(ripPath, twinBase ? path.join(FIX, twinBase) : null);
       row.runtime = rt.status;
       row.runtimeDetail = rt.detail;
     } else {
@@ -641,10 +850,14 @@ if (RUN_MAIN) {
     row.twin = tw.status;
     row.twinDetail = tw.detail;
     row.twinErrs = tw.errs;
+    return row;
+  }, { width: LANES, onDone: (row) => console.log(`  ${pad(row.name, NAME_W)} ${dims.map(([d, w]) => cell(row[d], w)).join(' ')}`) });
 
-    console.log(`  ${pad(row.name, 18)} ${dims.map(([d, w]) => cell(row[d], w)).join(' ')}`); // stream the row live
-    rows.push(row);
-  }
+  // COVERAGE, for the same reason the probe pass has one: the Score below is a
+  // ratio of the rows this loop produced. A fixture that fell out of the lanes
+  // would make it read "11 / 11 — all passing" over a corpus one short.
+  const missed = fixtures.filter((f, i) => !rows[i] || rows[i].name !== f);
+  if (missed.length) await abort('The Type Audit did not score every fixture', missed.map((f) => `${f}: no row produced`));
 
   console.log(`\n  ${bold('Failures')} ${dim('(categorized)')}`);
   let any = false;
@@ -677,51 +890,109 @@ if (RUN_MAIN) {
   fails = totalApplicable - totalPass;
 }
 
-// ── the shared probe pass. The Hover and Token audits ask DIFFERENT questions
-// of the SAME open document, so opening it twice pays the server's settle twice
-// for nothing. Open each fixture once, take whatever the running audits need,
-// close. Compilation is memoized for the same reason: a fixture's face does not
-// change between audits, so `rip --ts` runs at most once per file per run.
-const compiled = new Map();
-const compiles = (full) => {
-  if (!compiled.has(full)) {
-    try { execFileSync('bun', [RIP, '--ts', full], { timeout: 30000, stdio: 'ignore' }); compiled.set(full, true); }
-    catch { compiled.set(full, false); }
-  }
-  return compiled.get(full);
-};
-
 const PROBES = new Map();   // file → { decls, hovers, tokens, tmap }
 let hskip = 0;
 if (RUN_HOVER || RUN_TOKENS) {
-  let twin = null;
+  // The Hover and Token audits ask DIFFERENT questions of the SAME open
+  // document, so this pass opens each fixture once and takes whatever the
+  // running audits need. It is also the slow part of the run — the server has
+  // to build a program per document — so it STREAMS: a silent two-minute stall
+  // followed by a finished report is indistinguishable from a hang.
+  const wants = [RUN_HOVER && 'hovers', RUN_TOKENS && 'tokens'].filter(Boolean).join(' + ');
+  auditBanner('PROBE PASS', `${wants} · one open per fixture · ${fixtures.length} files`);
+
+  // One twin oracle PER LANE, for the same reason as the editor servers: a
+  // shared tsgo would hold several twin documents open at once, which a serial
+  // run never does. Same guarantee, applied to the oracle as well as the
+  // subject — an oracle answering from a different program shape is no oracle.
+  let twins = [];
   if (RUN_HOVER) {
-    try { twin = new TwinOracle(); await twin.start(); } catch { twin = null; }
-    if (!twin) console.log(`    ${dim('tsgo unavailable — twin oracle skipped; hover-pins comparison still runs')}`);
+    try {
+      twins = await Promise.all(Array.from({ length: LANES }, async () => { const t = new TwinOracle(); await t.start(); return t; }));
+    } catch { twins = []; }
+    if (!twins.length) console.log(`    ${dim('tsgo unavailable — twin oracle skipped; hover-pins comparison still runs')}`);
   }
 
-  for (const f of fixtures) {
+  const t0 = Date.now();
+
+  const probeOne = async (f, _i, lane = 0) => {
     const full = path.join(FIX, f);
     const src = fs.readFileSync(full, 'utf8');
-    if (!compiles(full)) { console.log(`    ${dim(`skip ${f} — does not compile (no face to probe)`)}`); hskip++; continue; }
+    if (!await compiles(full)) { hskip++; return { file: f, probe: null, line: `    ${yellow('skip')} ${pad(f, 20)} ${dim('does not compile — no face to probe')}` }; }
 
-    // Probe the editor server and the tsgo twin concurrently — they are
-    // independent servers, so the twin's settle overlaps the editor's.
+    // This lane's own server and own oracle — never a neighbour's.
+    const srv = pool[lane];
+    const twin = twins[lane] ?? null;
+
+    const started = Date.now();
     const twinBase = twin ? ['.tsx', '.ts'].map((e) => f.replace(/\.rip$/, e)).find((b) => fs.existsSync(path.join(FIX, b))) : null;
     const decls = declsOf(src);
-    const [uri, tmap] = await Promise.all([
-      editor.openForHover(f, src),
+
+    // The editor server and the tsgo twin are separate processes, so the twin's
+    // settle overlaps the editor's.
+    const [probe, tmap] = await Promise.all([
+      srv.withDoc(f, src, readyProbe(decls), async (uri) => {
+        // Hovers CONCURRENTLY: independent reads of ONE settled document,
+        // answered from the same built program. This is concurrency within a
+        // document, which a serial run does too — it cannot change the program's
+        // shape, which is the property the per-lane servers exist to hold.
+        const hovers = RUN_HOVER
+          ? await Promise.all(decls.map((d) => srv.hover(uri, { line: d.line, character: d.character })))
+          : [];
+        const tokens = RUN_TOKENS ? await srv.tokens(uri) : null;
+        return { decls, hovers, tokens };
+      }),
       twinBase ? twin.hoverTwin(path.join(FIX, twinBase)).catch(() => null) : Promise.resolve(null),
     ]);
-    const hovers = [];
-    if (RUN_HOVER) for (const d of decls) hovers.push(await editor.hover(uri, { line: d.line, character: d.character }));
-    const tokens = RUN_TOKENS ? await editor.tokens(uri) : null;
-    await editor.close(uri);
 
-    PROBES.set(f, { decls, hovers, tokens, tmap });
+    const took = `${((Date.now() - started) / 1000).toFixed(1)}s`;
+    return {
+      file: f,
+      probe: { ...probe, tmap },
+      line: `    ${green('✓')} ${pad(f, 20)} ${dim(`${pad(decls.length + ' decls', 10)}${RUN_TOKENS ? pad(probe.tokens.length + ' tokens', 12) : ''}${took}`)}`,
+    };
+  };
+
+  // Fixtures probe a few at a time; each one's cost is waiting on its server, not
+  // CPU. Equivalence with a serial run rests on the per-lane servers (each lane
+  // probes into its own program, never a shared one), NOT on the oracles noticing
+  // cross-talk afterwards. Results land in fixture order.
+  const probed = await lanes(fixtures, probeOne, { width: LANES, onDone: (r) => r && console.log(r.line) });
+  for (const r of probed) if (r?.probe) PROBES.set(r.file, r.probe);
+
+  console.log(`\n    ${dim(`probed ${PROBES.size} file(s) in ${((Date.now() - t0) / 1000).toFixed(1)}s`)}`);
+  await Promise.all(twins.map((t) => t.stop()));
+
+  // ── COVERAGE. Every ratio this runner prints is relative to WHAT IT PROBED.
+  // A fixture that silently fell out of the pass — a dropped lane, a swallowed
+  // error — would leave every score reading full marks over a smaller corpus:
+  // "300 / 300 typed hovers", green, with 36 declarations never checked. That is
+  // the same failure as a gate that never ran, and it must never read green.
+  //
+  // So the run is checked against the SOURCE, not against itself: the corpus
+  // fixes how many fixtures should be probed and how many declarations each
+  // holds, and any shortfall is fatal. This is the check that makes the
+  // concurrency above safe to trust — not the gauge, which is a quality
+  // measure, not a completeness one.
+  const want = [];
+  for (const f of fixtures) if (await compiles(path.join(FIX, f))) want.push(f);
+  const gaps = [];
+  for (const f of want) {
+    const p = PROBES.get(f);
+    if (!p) { gaps.push(`${f}: compiles, but was never probed`); continue; }
+    const decls = declsOf(fs.readFileSync(path.join(FIX, f), 'utf8'));
+    if (p.decls.length !== decls.length) gaps.push(`${f}: probed ${p.decls.length} declarations, source has ${decls.length}`);
+    // A hover that answered NOTHING is a failed probe, not a typed one. The
+    // gauge below only tests for `any`, so a null would sail through it.
+    if (RUN_HOVER) {
+      if (p.hovers.length !== p.decls.length) gaps.push(`${f}: ${p.decls.length} declarations but ${p.hovers.length} hover answers`);
+      const dead = p.hovers.filter((h) => h == null).length;
+      if (dead) gaps.push(`${f}: ${dead} hover probe(s) returned no answer at all`);
+    }
+    if (RUN_TOKENS && (!p.tokens || !p.tokens.length)) gaps.push(`${f}: no semantic tokens returned`);
   }
-
-  if (twin) await twin.stop();
+  if (gaps.length) await abort('The probe pass did not cover the corpus', gaps);
+  console.log(`    ${green('✓')} ${dim(`coverage: ${want.length} compiling fixture(s), ${want.reduce((n, f) => n + PROBES.get(f).decls.length, 0)} declarations — all probed, all answered`)}`);
 }
 
 // ── the Hover Audit: twin oracle (correctness) + expected hovers (baseline)
@@ -739,7 +1010,12 @@ if (RUN_HOVER) {
       const k = occ.get(d.name) ?? 0; occ.set(d.name, k + 1);
       allRows.push({ ...d, hover: hovers[i], ts: tmap ? (tmap.get(`${d.name}#${k}`) ?? null) : null, file: f });
       probeCount++;
-      if (/(?:^|:\s*)any$/.test(hovers[i] ?? '')) anyCount++;
+      // `any` OR no answer at all. A null hover is a probe that FAILED, never a
+      // typed one — testing `hovers[i] ?? ''` against the `any` pattern would
+      // score it as a real type and let the gauge read full while probes were
+      // silently dying. The coverage gate rejects nulls outright; the gauge
+      // counts them here so the two cannot disagree about what "typed" means.
+      if (hovers[i] == null || /(?:^|:\s*)any$/.test(hovers[i])) anyCount++;
     });
   }
 
@@ -881,17 +1157,20 @@ if (RUN_HOVER) {
 let tk = null;
 if (RUN_TOKENS) {
   auditBanner('TOKEN AUDIT', `source-derived invariants · ${fixtures.length} files`);
-  // No legend, no audit. Token indices are meaningless without it, so decoding
-  // anyway yields zero probes and zero violations — which the Totals line would
-  // print GREEN, exactly the "a gate that never ran reads like a gate that
-  // passed" failure the unknown-flag guard exists to prevent. Die loudly, like
-  // the preflight, rather than pass vacuously.
-  if (!editor.legend) {
-    await editor.stop();
-    console.error(`\n✗ The token audit cannot run — the server advertised no semanticTokens legend.`);
-    console.error(`  Its capability comes from tsgo at startup (server.js \`semanticTokensLegend\`);`);
-    console.error(`  a missing one means the broker never came up. Nothing was checked.\n`);
-    process.exit(1);
+  // No legend, no audit. Token indices are meaningless without one: decoding
+  // anyway yields type names like `#3` and empty modifier lists, which surface as
+  // violations REPORTED AGAINST RIP rather than as a dead server.
+  //
+  // EVERY server is checked, not just one. A fixture is probed by whichever lane
+  // took it, so a single legend-less server in the pool corrupts exactly the
+  // fixtures that landed on it while the rest look fine — the worst shape a
+  // failure can take, because it is quiet and partial.
+  const blind = pool.filter((s) => !s.legend);
+  if (blind.length) {
+    await abort(
+      `The token audit cannot run — ${blind.length} of ${pool.length} server(s) advertised no semanticTokens legend`,
+      [`the capability comes from tsgo at startup (server.js \`semanticTokensLegend\`); a missing one means that broker never came up`],
+    );
   }
   {
     const missing = [], badType = [], badReadonly = [], unasserted = [];
@@ -976,7 +1255,7 @@ if (RUN_TOKENS) {
   }
 }
 
-await editor.stop();
+await Promise.all(pool.map((s) => s.stop()));
 
 // ── combined totals
 console.log(`\n  ${bold('Totals')}`);
