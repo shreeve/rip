@@ -5,6 +5,21 @@ repository's pull requests.
 
 ## Unreleased
 
+- TLS material resolution and SNI matching land, pure over injected
+  adapters — no certificate or private key is ever committed. Material
+  resolves by precedence (an explicit cert/key, then ACME, then a
+  local dev CA); production requires real material, so a missing
+  certificate is a startup failure, never silent plaintext and never a
+  development cert. SNI is exact-over-wildcard-over-catch-all: a
+  wildcard covers exactly one deeper label — never the apex or a
+  two-level subdomain — and matching is case-insensitive with port and
+  trailing dot normalized away, hardened against null-byte,
+  fullwidth-dot, and port-strip smuggling. An SNI-only config is TLS
+  (never a silent plaintext verdict), an entry missing its cert or key
+  is dropped rather than served half-formed, and every malformed
+  config fails loudly naming the fault. Key material is never logged
+  (#102)
+
 - The server gains its worker pool: `createPool({ spawn })` schedules
   jobs across a fixed worker set with bounded concurrency, a bounded
   queue (rejecting loudly at capacity and on a wait-timeout), a
