@@ -256,3 +256,30 @@ export type Watch = {
 export function createWatch(): Watch;
 
 export function watchClient(opts?: { path?: string }): string;
+
+export type PoolStats = {
+  size: number;
+  inflight: number;
+  queued: number;
+  recycled: number;
+};
+
+export type Pool = {
+  submit(job: unknown): Promise<unknown>;
+  shutdown(): Promise<void>;
+  stats(): PoolStats;
+};
+
+export type PoolOpts = {
+  spawn(): { handle(job: unknown): Promise<unknown> };
+  size?: number;
+  concurrency?: number;
+  queueLimit?: number;
+  timeout?: number;
+  maxRequests?: number;
+  maxAge?: number;
+  now?(): number;
+  schedule?(fn: () => void, ms: number): () => void;
+};
+
+export function createPool(opts: PoolOpts): Pool;

@@ -5,6 +5,20 @@ repository's pull requests.
 
 ## Unreleased
 
+- The server gains its worker pool: `createPool({ spawn })` schedules
+  jobs across a fixed worker set with bounded concurrency, a bounded
+  queue (rejecting loudly at capacity and on a wait-timeout), a
+  recycle policy, and graceful shutdown — host-free and deterministic
+  because the worker body, clock, and timer are injected. A worker
+  retires when its request budget or age is spent; its replacement
+  spawns at once so there is no capacity gap, and it leaves only after
+  its in-flight jobs drain, so a recycle never drops a request. A
+  synchronous throw from a handle is caught and normalized (a
+  misbehaving worker never wedges the pool), a removed worker is
+  disposed through an optional `close()`, and non-finite config can't
+  defeat the size floor. Defaults follow the operational profile:
+  concurrency 1, queue 512 / 30 s, recycle at 10000 req / 3600 s (#101)
+
 - The development watch transport lands as SSE, host-free over
   web-standard streams: `createWatch()` fans one revisioned event to
   every open connection. `reload()`, `css(hrefs)`, and `error(payload)`

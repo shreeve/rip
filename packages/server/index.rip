@@ -12,3 +12,4 @@ export { csrf, harden, secureHeaders, sessions, trustProxy } from './security.ri
 export { appServer, appShell, mimeType, serveStatic } from './serving.rip'
 export { diskHost } from './host.rip'
 export { createWatch, watchClient } from './watch.rip'
+export { createPool } from './pool.rip'
