@@ -5,6 +5,15 @@ repository's pull requests.
 
 ## Unreleased
 
+- The app renderer integrates with navigation: a staying navigation
+  keeps the mounted page's identity and calls `load(params, query)`;
+  an unchanged layout chain survives page swaps without re-gating,
+  rebuilding whenever a keyed gate retargets; and gate failures route
+  to the nearest already-gated ancestor with `onError` — boundary
+  chains construct against fully populated gate values, reused chains
+  route to the living instance, and failures without a boundary retain
+  the previous screen (#85)
+
 - `@rip-lang/app` owns navigation: `createRouter` runs a reactive state
   machine over the route manifest with history, URL, and scroll behind
   an injectable adapter (`browserAdapter()` is the History-API

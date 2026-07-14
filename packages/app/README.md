@@ -147,11 +147,23 @@ are not component props.
 Layouts construct as a real outer-to-inner ancestry chain. Browser roots
 compose through the first `#content` found in top-level root order, falling
 back to the first layout root when no explicit slot exists. Replacement is
-transactional: the full chain mounts into staging, commits only after every
-constructor and mount succeeds, then tears down the old route.
+transactional: whatever mounts — the full chain, or only the page when the
+layout chain stays — goes into staging first and commits only after every
+constructor and mount succeeds, then the outgoing instances tear down.
 
-Gate failures reject `renderer.mount(info)` and reach `onError` as an `Error`
-carrying `status`, `path`, `file`, and the original `error`. This package does
+Navigation reuses what it can. A staying navigation (same page, same params,
+same chain, query-only change) keeps the mounted page's identity and calls
+its `load(params, query)`; an unchanged layout chain survives page swaps
+without re-gating — unless a keyed gate now addresses a different cell,
+which always rebuilds. Every other visit constructs a fresh instance.
+
+A gate failure routes to the nearest already-gated ancestor whose class
+defines `onError`: the boundary chain renders (or the living chain keeps
+standing) and the failure becomes control flow — `mount` resolves null and
+the global `onError` stays quiet. Without a boundary, the previous screen is
+retained and the failure rejects `renderer.mount(info)` and reaches
+`onError` as an `Error` carrying `status`, `path`, `file`, and the original
+`error`. This package does
 not provide source compilation, launch, or browser delivery.
 
 ## Test

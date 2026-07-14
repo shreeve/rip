@@ -70,6 +70,16 @@ export def createRenderer(opts: RendererOpts): Renderer
   current = null
   generation = 0
   disposeRoute = null
+  mountedEntries: any[] = []
+  pageMountPoint: any = null
+  lastRoute: any = null
+
+  shallowEqual = (a, b) ->
+    keysA = Object.keys a
+    keysA.length is Object.keys(b).length and keysA.every (key) -> a[key] is b[key]
+
+  sameChain = (a, b) ->
+    a.length is b.length and a.every (file, index) -> b[index] is file
 
   resolveGateCell = (path) ->
     value = unwrapStash app.data
@@ -85,9 +95,30 @@ export def createRenderer(opts: RendererOpts): Renderer
     cause = error ?? new Error(message)
     failureFor path, file, cause, message
 
+  # A staying navigation may keep its mounted page only while every
+  # query-keyed gate still addresses the cell it was constructed with;
+  # a retargeted key means new data ownership and a fresh instance.
+  queryKeyedRetargets = (entriesToCheck, params, query) ->
+    for entry in entriesToCheck
+      gates = entry.cls.__gates
+      continue unless Array.isArray gates
+      for gate, index in gates
+        keyFn = if typeof gate is 'string' then null else gate?.key
+        continue unless typeof keyFn is 'function'
+        binding = entry.bindings?[index]
+        return true unless binding
+        resolved = resolveGateCell binding.path
+        return true unless resolved and _isSourceFamily resolved.cell
+        try
+          cell = resolved.cell.cellFor keyFn(params, query)
+        catch error
+          return true
+        return true unless cell is binding.cell
+    false
+
   gateJobs = (entries, params, query) ->
     jobs = new Map()
-    for entry in entries
+    for entry, entryIndex in entries
       gates = entry.cls.__gates
       entry.bindings = []
       continue unless gates?
@@ -120,30 +151,42 @@ export def createRenderer(opts: RendererOpts): Renderer
 
         entry.bindings[gateIndex] = { cell, tail: resolved.tail, path, file: entry.file }
         unless jobs.has cell
-          jobs.set cell, { cell, path, file: entry.file }
+          jobs.set cell, { cell, path, file: entry.file, entryIndex }
     Array.from jobs.values()
 
   ensureGates = (entries, params, query, mine) ->
     jobs = gateJobs entries, params, query
     results = await Promise.allSettled (job.cell.ensure() for job in jobs)
     return false if mine isnt generation
+    # Failures are collected, not thrown mid-scan: the SHALLOWEST failing
+    # entry decides the boundary, and every entry below it still gets its
+    # binding values populated so a boundary chain constructs against the
+    # full render-gate contract.
+    failing: any = null
+    consider = (failure: any, entryIndex) ->
+      failure.entryIndex = entryIndex
+      failing = failure if not failing? or entryIndex < failing.entryIndex
+      return
     for result, index in results
       job = jobs[index]
       if result.status is 'rejected'
-        throw failureFor job.path, job.file, result.reason
-      unless result.value?
-        throw gateFailure job.path, job.file,
-          "Rip App: gate '#{job.path}' resolved to #{result.value}; gated sources must resolve to a non-null value"
-    for entry in entries
+        consider failureFor(job.path, job.file, result.reason), job.entryIndex
+      else unless result.value?
+        consider gateFailure(job.path, job.file,
+          "Rip App: gate '#{job.path}' resolved to #{result.value}; gated sources must resolve to a non-null value"), job.entryIndex
+    for entry, entryIndex in entries
+      break if failing? and entryIndex >= failing.entryIndex
       for binding in entry.bindings
         value = binding.cell.peek()
         for segment in binding.tail
           break unless value?
           value = value[segment]
         unless value?
-          throw gateFailure binding.path, binding.file,
-            "Rip App: gate '#{binding.path}' resolved to #{value}; every gated subpath must exist and be non-null"
+          consider gateFailure(binding.path, binding.file,
+            "Rip App: gate '#{binding.path}' resolved to #{value}; every gated subpath must exist and be non-null"), entryIndex
+          break
         binding.value = value
+    throw failing if failing?
     true
 
   construct = (entry, parent) ->
@@ -166,6 +209,9 @@ export def createRenderer(opts: RendererOpts): Renderer
     oldInstances = instances
     instances = []
     current = null
+    mountedEntries = []
+    pageMountPoint = null
+    lastRoute = null
     errors = cleanup oldInstances
     throw errors[0] if errors.length
     return
@@ -181,11 +227,11 @@ export def createRenderer(opts: RendererOpts): Renderer
         node
     }
 
-  commitStaging = (staging) ->
+  commitStaging = (staging, into = target) ->
     if staging.nodeType is 11
-      target.appendChild staging
+      into.appendChild staging
     else
-      target.appendChild node for node in staging.children
+      into.appendChild node for node in staging.children
     return
 
   layoutMountPoint = (instance, fallback) ->
@@ -197,6 +243,76 @@ export def createRenderer(opts: RendererOpts): Renderer
       return slot if slot
     roots.find((root) -> root?) ?? fallback
 
+  # A gate failure below the chain root routes to the nearest already
+  # gated ancestor that defines onError — the boundary chain mounts and
+  # the failure becomes control flow. Without a boundary the previous
+  # screen is retained and the failure propagates.
+  mountBoundary = (prefixEntries, failure, mine) ->
+    return false unless prefixEntries.some (entry) -> typeof entry.cls.prototype?.onError is 'function'
+    staging = stagingTarget()
+    mountPoint = staging
+    built = []
+    try
+      for entry, index in prefixEntries
+        parent = built[built.length - 1] ?? null
+        instance = construct entry, parent
+        built.push instance
+        entry.instance = instance
+        instance.mount?(mountPoint)
+        if instance._state is 'failed'
+          cleanup built
+          return false
+        mountPoint = layoutMountPoint instance, mountPoint
+      if mine isnt generation
+        cleanup built
+        return false
+      handler = null
+      for instance in built by -1
+        if typeof instance.onError is 'function'
+          handler = instance
+          break
+      commitStaging staging
+    catch error
+      console.error '[Rip] boundary chain failed to mount:', error
+      cleanup built
+      return false
+    old = instances
+    instances = built
+    current = built[built.length - 1] ?? null
+    mountedEntries = prefixEntries
+    pageMountPoint = mountPoint
+    lastRoute = null
+    try
+      handler.onError failure
+    catch error
+      console.error '[Rip] boundary onError error:', error
+    for error in cleanup old
+      console.error '[Rip] boundary teardown error:', error
+    true
+
+  # The reused-chain variant: the boundary ancestors are already mounted
+  # and gated, so the failure routes to the nearest living onError and
+  # only the outgoing page tears down.
+  boundaryOnMounted = (prefixEntries, failure) ->
+    handler = null
+    for entry in prefixEntries by -1
+      if typeof entry.instance?.onError is 'function'
+        handler = entry.instance
+        break
+    return false unless handler
+    oldPage = instances.slice prefixEntries.length
+    instances = prefixEntries.map (entry) -> entry.instance
+    current = instances[instances.length - 1] ?? null
+    mountedEntries = prefixEntries
+    lastRoute = null
+    try
+      handler.onError failure
+    catch error
+      console.error '[Rip] boundary onError error:', error
+    for error in cleanup oldPage
+      console.error '[Rip] boundary teardown error:', error
+    true
+
   performMount = (info, mine) ->
     route = info?.route
     unless route?.file
@@ -207,37 +323,83 @@ export def createRenderer(opts: RendererOpts): Renderer
     unless Array.isArray layoutFiles
       throw new Error 'Rip App: renderer route state layouts must be an array'
 
-    entries = []
-    for file in [...layoutFiles, route.file]
-      entries.push { file, cls: componentFrom(components, file) }
+    # Staying navigation: same page, same params, same layout chain,
+    # only the query moved — the mounted instance keeps its identity and
+    # receives load(params, query), unless a query-keyed gate now
+    # addresses a different cell.
+    mountedFiles = mountedEntries.map (entry) -> entry.file
+    if current? and lastRoute? and route.file is lastRoute.file
+      if sameChain([...layoutFiles, route.file], mountedFiles) and shallowEqual(params, lastRoute.params)
+        unless shallowEqual(query, lastRoute.query) or queryKeyedRetargets(mountedEntries, params, query)
+          await current.load params, query if typeof current.load is 'function'
+          return null if mine isnt generation
+          lastRoute = { file: route.file, params, query }
+          return current
 
-    ready = await ensureGates entries, params, query, mine
-    return null unless ready
+    # Reuse demands a completed page mount behind it (lastRoute survives
+    # only those), an identical layout chain, and kept layouts whose
+    # keyed gates still address their constructed cells.
+    reusableLayouts = lastRoute? and layoutFiles.length > 0 and
+      mountedEntries.length is layoutFiles.length + 1 and
+      sameChain(layoutFiles, mountedFiles.slice(0, -1)) and
+      not queryKeyedRetargets(mountedEntries.slice(0, -1), params, query)
+
+    entries = []
+    firstNew = if reusableLayouts then layoutFiles.length else 0
+    for file, index in [...layoutFiles, route.file]
+      if index < firstNew
+        entries.push mountedEntries[index]
+      else
+        entries.push { file, cls: componentFrom(components, file) }
+    fresh = entries.slice firstNew
+
+    try
+      ready = await ensureGates fresh, params, query, mine
+      return null unless ready
+    catch caught
+      failure: any = caught
+      return null if mine isnt generation
+      if failure?.name is 'GateFailure' and typeof failure.entryIndex is 'number'
+        boundaryIndex = failure.entryIndex + firstNew
+        if boundaryIndex > 0
+          handled = if reusableLayouts
+            boundaryOnMounted entries.slice(0, boundaryIndex), failure
+          else
+            mountBoundary entries.slice(0, boundaryIndex), failure, mine
+          return null if handled
+      throw failure
 
     staging = stagingTarget()
     mountPoint = staging
     built = []
+    keptParent = if firstNew > 0 then entries[firstNew - 1].instance else null
     try
-      for entry, index in entries
-        parent = built[-1] ?? null
+      for entry, index in entries.slice(firstNew)
+        parent = built[built.length - 1] ?? keptParent
         instance = construct entry, parent
         built.push instance
+        entry.instance = instance
         instance.mount?(mountPoint)
         if instance._state is 'failed'
           throw new Error "Rip App: component '#{entry.file}' failed during mount"
-        if index < entries.length - 1
+        if firstNew + index < entries.length - 1
           mountPoint = layoutMountPoint instance, mountPoint
       if mine isnt generation
         cleanup built
         return null
-      commitStaging staging
+      commitStaging staging, (if reusableLayouts then pageMountPoint ?? target else target)
     catch error
       cleanup built
       throw error
 
-    oldInstances = instances
-    instances = built
-    current = built[-1] ?? null
+    oldInstances = if reusableLayouts then instances.slice(firstNew) else instances
+    keptInstances = if reusableLayouts then instances.slice(0, firstNew) else []
+    instances = [...keptInstances, ...built]
+    current = built[built.length - 1] ?? null
+    unless reusableLayouts
+      pageMountPoint = if entries.length > 1 then mountPoint else null
+    mountedEntries = entries
+    lastRoute = { file: route.file, params, query }
     teardownErrors = cleanup oldInstances
     if teardownErrors.length
       throw failureFor '<teardown>', '<renderer>', teardownErrors[0]
