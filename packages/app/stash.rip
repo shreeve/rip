@@ -9,8 +9,16 @@ export type Stash<D extends Record<string, any> = Record<string, any>> = D & Sta
 RAW =! Symbol 'rip.app.stash.raw'
 SIGNALS =! Symbol 'rip.app.stash.signals'
 KEYS =! Symbol 'rip.app.stash.keys'
+DEFAULTS =! Symbol 'rip.app.stash.defaults'
+PURGE =! Symbol.for 'rip.app.stash.purge'
 PROXIES =! new WeakMap()
 keysVersion = 0
+
+# One write-version signal across every stash: persistence debounces on
+# it instead of subscribing to each key.
+export _stashVersion = __state 0
+
+touchVersion = -> _stashVersion.value++
 
 signalFor = (target, prop) ->
   signals = target[SIGNALS]
@@ -64,6 +72,7 @@ writeLiteral = (target, prop, value) ->
         for index in [Math.min(oldLength, newLength)...Math.max(oldLength, newLength)]
           raw[SIGNALS].get(String(index))?.value = raw[index]
       touchKeys raw
+      touchVersion()
     return value
 
   current = raw[prop]
@@ -75,9 +84,15 @@ writeLiteral = (target, prop, value) ->
 
   unwrapped = if value?[RAW] then value[RAW] else value
   had = Object.prototype.hasOwnProperty.call raw, prop
-  raw[prop] = unwrapped
+  # '__proto__' assigns through the prototype setter; a data property
+  # keeps hostile bundle or wire keys from rewriting the stash's chain.
+  if prop is '__proto__'
+    Object.defineProperty raw, prop, { value: unwrapped, writable: true, enumerable: true, configurable: true }
+  else
+    raw[prop] = unwrapped
   raw[SIGNALS]?.get(prop)?.value = unwrapped
   touchKeys raw unless had
+  touchVersion()
   value
 
 pathParts = (path) ->
@@ -192,6 +207,70 @@ resetSources = (value, seen) ->
   seen.add raw
   resetSources nested, seen for own key, nested of raw when key isnt SIGNALS
 
+# The declared baseline: plain values snapshotted deeply, source cells
+# skipped (they reset to unloaded, not to a value).
+snapshotDefaults = (value) ->
+  return value unless plainObject value
+  raw = if value[RAW] then value[RAW] else value
+  if Array.isArray raw
+    return (snapshotDefaults item for item in raw when not _isSourceCell(item))
+  out = {}
+  for own key, nested of raw
+    continue if _isSourceCell nested
+    out[key] = snapshotDefaults nested
+  out
+
+# Stamp a stash with its current plain-value shape so reset() can
+# restore it. launch() stamps after seeding, so reset returns to the
+# server-seeded baseline, never to persisted user state.
+export def _stampDefaults(stash: any): void
+  raw = if stash?[RAW] then stash[RAW] else stash
+  return unless raw? and typeof raw is 'object'
+  Object.defineProperty raw, DEFAULTS, { value: snapshotDefaults(raw), configurable: true }
+  return
+
+# Merge plain values into the stash, at every depth, without ever
+# touching a live source: cells are skipped wherever they sit, plain
+# subtrees merge per key instead of replacing their containers, and an
+# array whose live value holds a cell is left alone. Values clone on
+# the way in so no caller-owned object aliases into the stash. Both
+# seeding and persistence restore are this one walk.
+export def _mergePlain(proxy: any, values: any): void
+  return unless proxy? and typeof proxy is 'object'
+  return unless values? and typeof values is 'object'
+  raw: any = if proxy[RAW] then proxy[RAW] else proxy
+  for own key, value of values
+    # An own read only: '__proto__' and friends must never walk the
+    # prototype chain into a mergeable-looking host object.
+    current = if Object.prototype.hasOwnProperty.call(raw, key) then raw[key] else undefined
+    continue if _isSourceCell current
+    if Array.isArray(current) and current.some((item) -> _isSourceCell item)
+      continue
+    currentPlain = current? and typeof current is 'object' and not Array.isArray(current)
+    valuePlain = value? and typeof value is 'object' and not Array.isArray(value)
+    if currentPlain and valuePlain
+      _mergePlain proxy[key], value
+    else
+      proxy[key] = snapshotDefaults value
+  return
+
+restoreDefaults = (proxy, raw) ->
+  defaults = raw[DEFAULTS]
+  return unless defaults
+  prune = (proxyLevel, rawLevel, defaultsLevel) ->
+    for own key of rawLevel
+      current = rawLevel[key]
+      continue if _isSourceCell current
+      unless defaultsLevel? and Object.prototype.hasOwnProperty.call defaultsLevel, key
+        delete proxyLevel[key]
+        continue
+      if current? and typeof current is 'object' and not Array.isArray(current)
+        prune proxyLevel[key], current, defaultsLevel[key]
+    return
+  prune proxy, raw, defaults
+  _mergePlain proxy, defaults
+  return
+
 makeProxy = (target) ->
   proxy = null
   handler =
@@ -205,7 +284,9 @@ makeProxy = (target) ->
         return (path) -> peekPath raw, path
       if prop is 'reset'
         return ->
+          restoreDefaults proxy, raw
           resetSources raw, new WeakSet()
+          raw[PURGE]?()
           return
       return readPath(proxy, prop) if isPathKey prop
 
@@ -223,7 +304,9 @@ makeProxy = (target) ->
       had = Object.prototype.hasOwnProperty.call raw, prop
       deleted = delete raw[prop]
       raw[SIGNALS]?.get(prop)?.value = undefined
-      touchKeys raw if had
+      if had
+        touchKeys raw
+        touchVersion()
       deleted
 
     ownKeys: (raw) ->

@@ -5,6 +5,18 @@ repository's pull requests.
 
 ## Unreleased
 
+- `launch()` is the one application boot path: it assembles the stash
+  (seed data merges around live sources at every depth and the result
+  stamps the reset baseline), loads the component registry, derives the
+  route manifest, and wires router and renderer before installing
+  `__ripApp`/`__ripRouter`. A second launch or malformed bundle rejects
+  loudly, a start-time failure tears down instead of wedging the
+  process, and `destroy()` restores every global. `persistStash`
+  projects plain stash keys into Web Storage around live cells, saves
+  on a stash-wide write version (deletes included), and `reset()`
+  purges the snapshot and stays purged. Hostile `__proto__` keys in
+  seeds or snapshots become inert own data (#88)
+
 - `@rip-lang/validate` is certified complete: browser safety is declared
   and test-enforced (`rip.browser`, zero host APIs, an import-free
   vocabulary), the public surface carries exactly one documented `any`,
