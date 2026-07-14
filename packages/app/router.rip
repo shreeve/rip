@@ -1,0 +1,261 @@
+# Router state machine — reactive navigation over a route manifest,
+# with every host concern behind an injectable adapter so the whole
+# machine tests under Node. The adapter owns history entries, URL
+# reads, and scroll primitives; the router owns resolution, state,
+# navigation policy, and callback dispatch.
+#
+# `current` bundles the resolved route, layout chain, params, query,
+# and hash into one reactive dependency — the renderer tracks a single
+# signal. Params and query keep their object identity across
+# navigations that do not change them.
+
+import { parseQuery } from './routes.rip'
+
+export type RouterAdapter =
+  read: () => string
+  readState?: () => unknown
+  push: (url: string, state: unknown) => void
+  replace: (url: string, state: unknown) => void
+  go: (delta: number) => void
+  listen: (fn: () => void) => () => void
+  scroll?: Record<string, any>
+
+export type RouterOpts =
+  routes: Record<string, any> | (() => Record<string, any>)
+  adapter: RouterAdapter
+  base?: string
+  hash?: boolean
+  onError?: (failure: { status: number, path: string }) => void
+
+export type Router =
+  init: () => Router
+  push: (url: string, opts?: { noScroll?: boolean }) => boolean
+  replace: (url: string, opts?: { noScroll?: boolean }) => boolean
+  back: () => void
+  forward: () => void
+  match: (url: string) => Record<string, any> | null
+  onNavigate: (fn: (info: Record<string, any>) => void) => () => void
+  rebuild: () => void
+  destroy: () => void
+  navigating: boolean
+  readonly current: Record<string, any> | null
+
+splitUrl = (url) ->
+  hashAt = url.indexOf '#'
+  hash = if hashAt >= 0 then url.slice(hashAt + 1) else ''
+  rest = if hashAt >= 0 then url.slice(0, hashAt) else url
+  queryAt = rest.indexOf '?'
+  query = if queryAt >= 0 then rest.slice(queryAt + 1) else ''
+  path = if queryAt >= 0 then rest.slice(0, queryAt) else rest
+  { path, query, hash }
+
+# A record keeps its identity when the next resolve produces the same
+# flat string values, so navigations that do not change params or
+# query never look like changes to downstream effects.
+stableRecord = (previous, next) ->
+  keys = Object.keys next
+  same = keys.length is Object.keys(previous).length and keys.every (key) -> previous[key] is next[key]
+  if same then previous else next
+
+validManifest = (manifest) ->
+  unless manifest? and typeof manifest.match is 'function' and Array.isArray(manifest.routes)
+    throw new TypeError 'Rip App: createRouter requires a route manifest'
+  manifest
+
+validBase = (base) ->
+  return '' if base is '' or not base?
+  unless typeof base is 'string' and base.startsWith('/') and not base.endsWith('/')
+    throw new TypeError "Rip App: invalid router base '#{base}'"
+  base
+
+export def createRouter(opts: RouterOpts): Router
+  { routes, adapter, onError } = opts ?? {}
+  unless routes? and (typeof routes is 'function' or (typeof routes.match is 'function' and Array.isArray(routes.routes)))
+    throw new TypeError 'Rip App: createRouter requires a route manifest or manifest thunk'
+  for method in ['read', 'push', 'replace', 'go', 'listen']
+    unless typeof adapter?[method] is 'function'
+      throw new TypeError "Rip App: router adapter requires a #{method} function"
+  base = validBase opts?.base
+  hashMode = opts?.hash is true
+  if base and hashMode
+    throw new TypeError 'Rip App: a base path does not apply in hash mode'
+
+  activeManifest = if typeof routes is 'function' then validManifest routes() else validManifest routes
+  callbacks: Set<any> = new Set()
+  unlisten: any = null
+
+  _path = __state null
+  _route = __state null
+  _params = __state {}
+  _query = __state {}
+  _hash = __state ''
+  _navigating = __state false
+  # The hash is deliberately absent: a fragment-only navigation must not
+  # look like a route change to the renderer. `router.hash` tracks it.
+  _current = __computed ->
+    route: any = _route.value
+    return null unless route
+    { route, layouts: route.layouts, params: _params.value, query: _query.value }
+
+  stripBase = (path) ->
+    return path unless base
+    return '/' if path is base
+    return path.slice base.length if path.startsWith base + '/'
+    null
+
+  addBase = (path) ->
+    return path unless base
+    if path is '/' then base else base + path
+
+  externalFor = (url) ->
+    if hashMode then adapter.read().split('#')[0] + '#' + url else addBase url
+
+  miss = (path) ->
+    onError?({ status: 404, path })
+    false
+
+  # Navigations initiated from inside onNavigate dispatch are legal (the
+  # redirect pattern), but an unconditional redirect would recurse
+  # forever, stacking history entries as it unwound — so depth rejects
+  # loudly well before that.
+  depth = 0
+
+  # Match without committing, so push and replace can order history
+  # writes BEFORE state and callback dispatch — a navigation started
+  # inside onNavigate (the redirect pattern) then supersedes an already
+  # coherent history instead of stacking a stale entry over itself.
+  attempt = (path) ->
+    activeManifest.match path
+
+  commit = (hit, path, queryString, hash) ->
+    params = stableRecord _params.value, hit.params
+    query = stableRecord _query.value, parseQuery(queryString)
+    __batch ->
+      _path.value = path
+      _route.value = hit.route
+      _params.value = params
+      _query.value = query
+      _hash.value = hash
+    info = { path, route: hit.route, params, query, hash }
+    depth += 1
+    try
+      for callback in Array.from(callbacks)
+        try
+          callback info
+        catch error
+          console.error '[Rip] router onNavigate error:', error
+    finally
+      depth -= 1
+    true
+
+  guardLoop = ->
+    throw new Error 'Rip App: navigation loop — ten nested navigations from onNavigate' if depth >= 10
+
+  handleExternal = ->
+    external = adapter.read()
+    if hashMode
+      at = external.indexOf '#'
+      inner = if at >= 0 then external.slice(at + 1) else '/'
+      inner = '/' if inner is ''
+      { path, query, hash } = splitUrl inner
+    else
+      { path, query, hash } = splitUrl external
+      path = stripBase path
+      return miss splitUrl(external).path unless path?
+    hit = attempt path
+    return miss path unless hit
+    commit hit, path, query, hash
+
+  router: any =
+    init: ->
+      return router if unlisten
+      handleExternal()
+      unlisten = adapter.listen ->
+        return unless handleExternal()
+        state: any = adapter.readState?()
+        adapter.scroll?.restore?(state?.__ripScroll ?? null)
+      router
+
+    push: (url, opts: { noScroll?: boolean } = {}) ->
+      guardLoop()
+      { path, query, hash } = splitUrl url
+      hit = attempt path
+      return miss path unless hit
+      position = adapter.scroll?.save?() ?? null
+      state: any = adapter.readState?() ?? {}
+      adapter.replace adapter.read(), { ...state, __ripScroll: position }
+      adapter.push externalFor(url), null
+      commit hit, path, query, hash
+      adapter.scroll?.top?() unless opts.noScroll
+      true
+
+    replace: (url, opts: { noScroll?: boolean } = {}) ->
+      guardLoop()
+      { path, query, hash } = splitUrl url
+      hit = attempt path
+      return miss path unless hit
+      state: any = adapter.readState?() ?? {}
+      adapter.replace externalFor(url), { ...state, __ripScroll: null }
+      commit hit, path, query, hash
+      adapter.scroll?.top?() unless opts.noScroll
+      true
+
+    back: -> adapter.go -1
+    forward: -> adapter.go 1
+
+    match: (url) ->
+      { path, query, hash } = splitUrl url
+      hit = activeManifest.match path
+      return null unless hit
+      { route: hit.route, params: hit.params, query: parseQuery(query), hash }
+
+    onNavigate: (fn) ->
+      unless typeof fn is 'function'
+        throw new TypeError 'Rip App: onNavigate expects a function'
+      callbacks.add fn
+      -> callbacks.delete fn
+
+    rebuild: ->
+      activeManifest = if typeof routes is 'function' then validManifest routes() else activeManifest
+      handleExternal() if unlisten
+      return
+
+    destroy: ->
+      unlisten?()
+      unlisten = null
+      return
+
+  Object.defineProperty router, 'current', { get: -> _current.value }
+  Object.defineProperty router, 'path', { get: -> _path.value }
+  Object.defineProperty router, 'hash', { get: -> _hash.value }
+  Object.defineProperty router, 'params', { get: -> _params.value }
+  Object.defineProperty router, 'query', { get: -> _query.value }
+  Object.defineProperty router, 'navigating',
+    get: -> _navigating.value
+    set: (value) -> _navigating.value = value
+  router
+
+# The one browser-backed adapter: History API entries, location reads,
+# popstate, and manual scroll ownership. Construction outside a browser
+# rejects loudly.
+export def browserAdapter(): RouterAdapter
+  if typeof window is 'undefined' or not window.history? or not window.location?
+    throw new Error 'Rip App: browserAdapter requires a browser environment'
+  window.history.scrollRestoration = 'manual'
+  read: -> window.location.pathname + window.location.search + window.location.hash
+  readState: -> window.history.state
+  push: (url, state) -> window.history.pushState state, '', url
+  replace: (url, state) -> window.history.replaceState state, '', url
+  go: (delta) -> window.history.go delta
+  listen: (fn) ->
+    window.addEventListener 'popstate', fn
+    -> window.removeEventListener 'popstate', fn
+  scroll:
+    save: -> { x: window.scrollX, y: window.scrollY }
+    # A traversal entry without a saved position keeps the browser's own
+    # placement (an in-page anchor jump survives), so restore(null) is a
+    # deliberate no-op; fresh navigations scroll via top().
+    restore: (position: any) ->
+      window.scrollTo(position.x or 0, position.y or 0) if position?
+      return
+    top: -> window.scrollTo 0, 0

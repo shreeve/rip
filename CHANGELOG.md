@@ -5,6 +5,17 @@ repository's pull requests.
 
 ## Unreleased
 
+- `@rip-lang/app` owns navigation: `createRouter` runs a reactive state
+  machine over the route manifest with history, URL, and scroll behind
+  an injectable adapter (`browserAdapter()` is the History-API
+  implementation), so the whole machine tests under Node. `current`
+  bundles route, layouts, params, and query into one reactive
+  dependency with identity-stable params/query; fragment-only
+  navigation never looks like a route change. History writes land
+  before state and callbacks, so onNavigate redirects supersede a
+  coherent history, and redirect loops cut loudly at depth ten.
+  Unmatched URLs report structured 404s and change nothing (#84)
+
 - `@rip-lang/validate/coercers` bridges the validation vocabulary into
   schema coercion: importing it registers every validator — current and
   later-registered — as a `~:name` coercer, with raw validators

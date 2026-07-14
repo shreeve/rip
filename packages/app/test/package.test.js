@@ -4,9 +4,11 @@ import * as app from '@rip-lang/app';
 
 test('public entry exposes named substrate exports only', () => {
   expect(Object.keys(app).sort()).toEqual([
+    'browserAdapter',
     'buildRoutes',
     'createComponents',
     'createRenderer',
+    'createRouter',
     'createStash',
     'parseQuery',
     'source',

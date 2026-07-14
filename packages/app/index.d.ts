@@ -189,6 +189,66 @@ export function buildRoutes(
 
 export function parseQuery(search: string): Record<string, string>;
 
+export type RouterAdapter = {
+  read(): string;
+  readState?(): unknown;
+  push(url: string, state: unknown): void;
+  replace(url: string, state: unknown): void;
+  go(delta: number): void;
+  listen(fn: () => void): () => void;
+  scroll?: {
+    save?(): unknown;
+    restore?(position: unknown): void;
+    top?(): void;
+  };
+};
+
+export type RouteInfo = {
+  route: Route;
+  params: Record<string, string>;
+  query: Record<string, string>;
+  hash: string;
+};
+
+export type NavigationInfo = RouteInfo & { path: string };
+
+export type RouterCurrent = {
+  route: Route;
+  layouts: readonly string[];
+  params: Record<string, string>;
+  query: Record<string, string>;
+};
+
+export type NavOpts = { noScroll?: boolean };
+
+export type Router = {
+  init(): Router;
+  push(url: string, opts?: NavOpts): boolean;
+  replace(url: string, opts?: NavOpts): boolean;
+  back(): void;
+  forward(): void;
+  match(url: string): RouteInfo | null;
+  onNavigate(fn: (info: NavigationInfo) => void): () => void;
+  rebuild(): void;
+  destroy(): void;
+  navigating: boolean;
+  readonly current: RouterCurrent | null;
+  readonly path: string | null;
+  readonly hash: string;
+  readonly params: Record<string, string>;
+  readonly query: Record<string, string>;
+};
+
+export function createRouter(opts: {
+  routes: RouteManifest | (() => RouteManifest);
+  adapter: RouterAdapter;
+  base?: string;
+  hash?: boolean;
+  onError?: (failure: { status: number; path: string }) => void;
+}): Router;
+
+export function browserAdapter(): RouterAdapter;
+
 export type GateDescriptor =
   | string
   | {

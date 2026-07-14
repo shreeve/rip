@@ -3,13 +3,13 @@ import { readFileSync } from 'node:fs';
 import { compile } from '../../../src/compile.js';
 import { tscBatch } from '../../../test/support/tscbatch.js';
 
-const moduleNames = ['source', 'stash', 'components', 'routes', 'renderer', 'index'];
+const moduleNames = ['source', 'stash', 'components', 'routes', 'router', 'renderer', 'index'];
 
 test('app package TypeScript faces and declarations are valid', () => {
   const files = {
     'index.d.ts': readFileSync(new URL('../index.d.ts', import.meta.url), 'utf8'),
     'consumer.ts': [
-      "import { buildRoutes, createComponents, createRenderer, createStash, parseQuery, source, unwrapStash } from './index';",
+      "import { browserAdapter, buildRoutes, createComponents, createRenderer, createRouter, createStash, parseQuery, source, unwrapStash } from './index';",
       "const user = source({ fetch: async () => ({ name: 'Ada' }) });",
       "const order = source({ fetch: async (id: string) => ({ id }) });",
       "const signaled = source({ kind: 'singleton', fetch: async (signal?: AbortSignal) => ({ ok: !signal?.aborted }) });",
@@ -45,6 +45,14 @@ test('app package TypeScript faces and declarations are valid', () => {
       '// @ts-expect-error source fetch supports only [] or [K]',
       'source({ fetch: async (first: string, second: number) => ({ first, second }) });',
       "const routesManifest = buildRoutes(['_route/index.rip']);",
+      "const fake = { read: () => '/', push(u: string, s: unknown) {}, replace(u: string, s: unknown) {}, go(d: number) {}, listen: (fn: () => void) => () => {} };",
+      'const router = createRouter({ routes: routesManifest, adapter: fake });',
+      "const pushed: boolean = router.init().push('/', { noScroll: true });",
+      'const currentFile: string | undefined = router.current?.route.file;',
+      'router.navigating = true;',
+      '// @ts-expect-error current is read-only',
+      'router.current = null;',
+      'void browserAdapter;',
       "const routeFile: string | undefined = routesManifest.match('/')?.route.file;",
       "const query: Record<string, string> = parseQuery('?a=1');",
       '// @ts-expect-error manifest routes are read-only',
@@ -53,7 +61,7 @@ test('app package TypeScript faces and declarations are valid', () => {
       "components.write('app.rip', 'export App = component');",
       "const renderer = createRenderer({ router: { current: null }, app: { data }, components, target: { appendChild: node => node }, onError: failure => { const status: number = failure.status; void status; } });",
       "const mounted: Promise<unknown> = renderer.mount({ route: { file: 'app.rip' } });",
-      'void maybeUser; void id; void maybeSignaled; void maybeKeyedSignaled; void ensured; void preloaded; void refetched; void peeked; void orderRead; void routeFile; void query; void components; void mounted;',
+      'void maybeUser; void id; void maybeSignaled; void maybeKeyedSignaled; void ensured; void preloaded; void refetched; void peeked; void orderRead; void routeFile; void query; void pushed; void currentFile; void components; void mounted;',
     ].join('\n'),
   };
 
@@ -91,4 +99,6 @@ test('app package TypeScript faces and declarations are valid', () => {
   expect(files['index.d.ts']).toContain('function createRenderer');
   expect(files['index.d.ts']).toContain('function buildRoutes');
   expect(files['index.d.ts']).toContain('function parseQuery');
+  expect(files['index.d.ts']).toContain('function createRouter');
+  expect(files['index.d.ts']).toContain('function browserAdapter');
 });
