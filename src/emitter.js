@@ -12112,6 +12112,8 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
 // text), ascending and disjoint by construction. The strip gate
 // (test/tsface.test.js) holds this equal to the JS-mode emission
 // byte-for-byte across the corpus.
+export const _runtimeTable = () => RUNTIME_TABLE;
+
 export function stripFace(code, tsRegions) {
   let out = '';
   let cursor = 0;

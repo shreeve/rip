@@ -1,5 +1,8 @@
 node_modules/
-dist/
+dist/*
+!dist/browser
+dist/browser/*
+!dist/browser/rip.js
 
 .DS_Store
 *.log
