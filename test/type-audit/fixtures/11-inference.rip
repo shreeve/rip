@@ -126,6 +126,12 @@ expectNum(matches)
 
 console.log(out, matches)
 
+# Write-only: assigned once, never read anywhere. With no read site there is
+# nothing to probe, so declare-in-place alone has to carry the type. Every
+# other binding here is read somewhere, and one read is all it takes to leave
+# this class — so without this line the corpus holds no instance of it.
+neverRead = filterBy('z')
+
 # ──────────────────────────────────────────────────
 # Block-confined inside functions
 # ──────────────────────────────────────────────────

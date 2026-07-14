@@ -96,13 +96,17 @@ const at = (ds, code) => ds.find((d) => d.code === code)?.range?.start;
 describeExtended('rip.strict: the diagnostic posture is differential', () => {
   test('DEFAULT — the implicit-any family is suppressed and the `!` hides use-before-assign', async () => {
     const ds = await diagnose(null);
-    // The permissive contract: unannotated code is legal rip, so the
-    // implicit-any family never fires. A regression here is as bad as a
-    // regression in the strict direction — it would put noise on every
-    // unannotated binding in a language that permits them.
+    // The permissive contract, asserted WHOLE: this source is legal rip,
+    // so a default-mode run publishes NOTHING. Asserting only the absence
+    // of 7006/2454 would let any other diagnostic through, and noise on
+    // legal unannotated code is exactly the regression this half exists
+    // to catch — so the assertion is the empty list, not two absences.
+    expect(ds.map((d) => `${d.code} ${d.message}`)).toEqual([]);
+    // Named explicitly, because these two are the ones under test: unannotated
+    // params never fire the implicit-any family, and the typed forward's
+    // `let y!: number` suppresses TS2454 — the accepted cost of the governing
+    // principle that annotations add checking, never noise on legal patterns.
     expect(has(ds, 7006)).toBe(false);
-    // The typed forward emits `let y!: number`, whose definite-assignment
-    // assertion suppresses TS2454. That is the documented cost of D39.
     expect(has(ds, 2454)).toBe(false);
   }, 30_000);
 

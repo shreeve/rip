@@ -131,6 +131,34 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
+  // The class the single-line cases above cannot reach: a statement whose FACE
+  // emits as more than one line — any arrow assigned to a typed binding — where
+  // the error lands on the head line the directive governs. An earlier rule
+  // probed the emission and declined to place a directive on any multi-line
+  // statement, which silently deleted the author's escape hatch and leaked an
+  // acknowledged error. A statement directive now always places on the head
+  // line, so this must absorb and exit 0. The negative control (same source, no
+  // directive) proves the error is real, so a green run means "absorbed", not
+  // "nothing fired".
+  test('a used @ts-expect-error absorbs an error on a MULTI-LINE emission', () => {
+    // The directive must sit DIRECTLY above the arrow assignment — it
+    // governs the next statement, and the type alias is a statement too.
+    const alias = 'type Comparator = (a: number, b: number) => number\n';
+    const stmt = "badSorter: Comparator = (a, b) -> 'nope'\nconsole.log badSorter\n";
+    const guarded = workspace({ 'm.rip': alias + '# @ts-expect-error — wrong return type, acknowledged\n' + stmt });
+    const bare = workspace({ 'm.rip': alias + stmt });
+    try {
+      expect(check(guarded).status).toBe(0);   // directive survives the multi-line emit and absorbs
+
+      const b = check(bare);                   // control: the error is genuinely there
+      expect(b.status).toBe(1);
+      expect(b.stdout).toContain('TS2322');
+    } finally {
+      fs.rmSync(guarded, { recursive: true, force: true });
+      fs.rmSync(bare, { recursive: true, force: true });
+    }
+  }, 90_000);
+
   // The inverse of the pin-parity guard: a directive that absorbs NOTHING
   // must stay loud (TS2578), exactly tsc's contract — an unused escape
   // hatch that rots silently hides the bug it was meant to guard. The
