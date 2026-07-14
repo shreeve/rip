@@ -290,6 +290,27 @@ case-insensitive with the port and trailing dot normalized away. The
 result — `{ mode, material, sni, serverNames }` — is what the serving
 layer hands the socket; key material is never logged.
 
+## Upstream proxy pool
+
+`createUpstream({ targets })` is the proxy's decision core — target
+selection, a per-target circuit breaker, health thresholds, and
+retry/backoff — pure over an injected `now` and `random`, so the whole
+state machine is deterministic (the actual fetch and health-poll loop
+are the serving layer's wiring). `pick()` returns the next eligible
+target by strategy (`round-robin`, `least-inflight`, `weighted`) or
+`null` when everything is down; `begin`/`end` bracket a request for
+inflight accounting; `record(target, { ok, status })` drives health
+and the circuit. A target's circuit is a three-state machine: `closed`
+flows until a full window's error rate crosses the threshold, `open`
+skips the target through a jittered cooldown then half-opens for one
+probe, and the probe's outcome closes or reopens it. Eligibility is a
+pure check — only the target `pick()` actually routes to transitions
+to half-open, so a scan never strands the others — and a probe that is
+never recorded (a crashed fetch) re-arms after `probeTimeoutMs` rather
+than dropping the upstream forever. `shouldRetry`
+honors the retryable statuses and idempotent methods up to the attempt
+cap; `backoff(attempt)` grows exponentially with jitter.
+
 `errorEnvelope(err)` is the one deterministic error translation:
 `notice` and `issues` are explicitly user-facing and always shown, a
 plain message shows only for 4xx, and 5xx or raw throws mask to the

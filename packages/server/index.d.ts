@@ -317,3 +317,40 @@ export type TlsResolution = {
 };
 
 export function resolveTls(opts: TlsOpts, adapters: TlsAdapters): TlsResolution;
+
+export type Target = {
+  url: string;
+  weight: number;
+  healthy: boolean;
+  inflight: number;
+  fails: number;
+  passes: number;
+  history: boolean[];
+  circuit: 'closed' | 'open' | 'half-open';
+  openedAt: number;
+  cooldown: number;
+  probeAt: number;
+};
+
+export type Upstream = {
+  pick(): Target | null;
+  begin(target: Target): void;
+  end(target: Target): void;
+  record(target: Target, result: { ok: boolean; status?: number }): void;
+  shouldRetry(method: string, status: number, attempt: number): boolean;
+  backoff(attempt: number): number;
+  targets(): Target[];
+  stats(): Array<{ url: string; healthy: boolean; inflight: number; circuit: string }>;
+};
+
+export type UpstreamOpts = {
+  targets?: Array<string | { url: string; weight?: number }>;
+  strategy?: 'round-robin' | 'least-inflight' | 'weighted';
+  health?: { unhealthyThreshold?: number; healthyThreshold?: number };
+  circuit?: { minRequests?: number; errorThreshold?: number; cooldownMs?: number; jitter?: number; probeTimeoutMs?: number };
+  retry?: { attempts?: number; statuses?: number[]; methods?: string[]; baseDelayMs?: number; jitter?: number; maxDelayMs?: number };
+  now?: () => number;
+  random?: () => number;
+};
+
+export function createUpstream(opts?: UpstreamOpts): Upstream;

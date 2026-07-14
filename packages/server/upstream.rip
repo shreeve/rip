@@ -1,0 +1,213 @@
+# The upstream pool — target selection, per-target circuit breaker,
+# health thresholds, and retry/backoff. Pure over an injected clock
+# (`now`) and RNG (`random`), so the whole state machine is
+# deterministic; the actual fetch to an upstream and the health-poll
+# loop are the serving layer's wiring, driven by pick()/record().
+#
+# A target is eligible when it is healthy and its circuit is not
+# holding it out. The circuit is a per-target three-state machine:
+#
+#   closed     requests flow; a sliding window of recent results, and
+#              once the window is full an error rate at or above the
+#              threshold OPENS the circuit
+#   open       requests skip the target until the (jittered) cooldown
+#              elapses, then it HALF-OPENS for a single probe
+#   half-open  one probe is allowed; its success CLOSES the circuit
+#              (fresh window), its failure OPENS it again
+#
+# Health is separate and simpler: consecutive failures past a
+# threshold mark a target unhealthy, consecutive successes restore it.
+
+DEFAULT_HEALTH = { unhealthyThreshold: 3, healthyThreshold: 2 }
+DEFAULT_CIRCUIT = { minRequests: 20, errorThreshold: 0.5, cooldownMs: 30000, jitter: 0.2, probeTimeoutMs: 10000 }
+DEFAULT_RETRY = { attempts: 2, statuses: [502, 503, 504], methods: ['GET', 'HEAD', 'OPTIONS'], baseDelayMs: 100, jitter: 0.5, maxDelayMs: 30000 }
+
+posInt = (value, fallback) ->
+  n = Math.floor Number(value)
+  if Number.isFinite(n) and n > 0 then n else fallback
+
+nonNeg = (value, fallback) ->
+  n = Number value
+  if Number.isFinite(n) and n >= 0 then n else fallback
+
+# An error threshold is a fraction in (0, 1]: 0 would open on zero
+# failures, above 1 would never open — both defeat the breaker.
+ratio = (value, fallback) ->
+  n = Number value
+  if Number.isFinite(n) and n > 0 and n <= 1 then n else fallback
+
+export type Target =
+  url: string
+  weight: number
+  healthy: boolean
+  inflight: number
+  fails: number
+  passes: number
+  history: boolean[]
+  circuit: 'closed' | 'open' | 'half-open'
+  openedAt: number
+  cooldown: number
+  probeAt: number
+
+export type Upstream =
+  pick: () => Target | null
+  begin: (target: Target) => void
+  end: (target: Target) => void
+  record: (target: Target, result: { ok: boolean, status?: number }) => void
+  shouldRetry: (method: string, status: number, attempt: number) => boolean
+  backoff: (attempt: number) => number
+  targets: () => Target[]
+  stats: () => any[]
+
+export def createUpstream(opts: any = {}): Upstream
+  now = opts.now ?? (-> Date.now())
+  random = opts.random ?? (-> Math.random())
+  strategy = opts.strategy ?? 'round-robin'
+  hcfg = opts.health ?? {}
+  ccfg = opts.circuit ?? {}
+  rcfg = opts.retry ?? {}
+  health =
+    unhealthyThreshold: posInt(hcfg.unhealthyThreshold, DEFAULT_HEALTH.unhealthyThreshold)
+    healthyThreshold: posInt(hcfg.healthyThreshold, DEFAULT_HEALTH.healthyThreshold)
+  circuit =
+    minRequests: posInt(ccfg.minRequests, DEFAULT_CIRCUIT.minRequests)
+    errorThreshold: ratio(ccfg.errorThreshold, DEFAULT_CIRCUIT.errorThreshold)
+    cooldownMs: posInt(ccfg.cooldownMs, DEFAULT_CIRCUIT.cooldownMs)
+    jitter: nonNeg(ccfg.jitter, DEFAULT_CIRCUIT.jitter)
+    probeTimeoutMs: posInt(ccfg.probeTimeoutMs, DEFAULT_CIRCUIT.probeTimeoutMs)
+  retry =
+    attempts: posInt(rcfg.attempts, DEFAULT_RETRY.attempts)
+    statuses: rcfg.statuses ?? DEFAULT_RETRY.statuses
+    methods: rcfg.methods ?? DEFAULT_RETRY.methods
+    baseDelayMs: posInt(rcfg.baseDelayMs, DEFAULT_RETRY.baseDelayMs)
+    jitter: nonNeg(rcfg.jitter, DEFAULT_RETRY.jitter)
+    maxDelayMs: posInt(rcfg.maxDelayMs, DEFAULT_RETRY.maxDelayMs)
+  retryStatuses = new Set(retry.statuses.map((s) -> Number(s)))
+  retryMethods = new Set(retry.methods.map((m) -> String(m).toUpperCase()))
+
+  targets: Target[] = for entry, index in (opts.targets ?? [])
+    spec = if typeof entry is 'string' then { url: entry } else entry
+    target: Target =
+      url: spec.url
+      weight: posInt(spec.weight, 1)
+      healthy: true
+      inflight: 0
+      fails: 0
+      passes: 0
+      history: []
+      circuit: 'closed'
+      openedAt: 0
+      cooldown: 0
+      probeAt: 0
+    target
+
+  cursor = 0
+
+  # Time since a stamp, never negative — a clock that steps backward
+  # keeps a circuit closed to recovery rather than opening it early.
+  elapsed = (at) -> Math.max 0, now() - at
+
+  # A PURE eligibility predicate — no state mutation, so scanning every
+  # target to build the pool never strands the ones not chosen. An open
+  # circuit is reachable once its cooldown elapses; a half-open circuit
+  # is reachable again only if its outstanding probe has timed out (a
+  # crashed probe re-arms instead of stranding the target forever).
+  circuitReady = (target) ->
+    switch target.circuit
+      when 'closed' then true
+      when 'open' then elapsed(target.openedAt) >= target.cooldown
+      when 'half-open' then elapsed(target.probeAt) >= circuit.probeTimeoutMs
+
+  eligible = -> (target for target in targets when target.healthy and circuitReady(target))
+
+  weightedPick = (pool) ->
+    total = pool.reduce(((sum, target) -> sum + target.weight), 0)
+    threshold = random() * total
+    running = 0
+    for target in pool
+      running += target.weight
+      return target if threshold < running
+    pool[pool.length - 1]
+
+  select = (pool) ->
+    switch strategy
+      when 'least-inflight'
+        pool.reduce (best, target) -> if target.inflight < best.inflight then target else best
+      when 'weighted'
+        weightedPick pool
+      else
+        chosen = pool[0]
+        for offset in [0...targets.length]
+          index = (cursor + offset) % targets.length
+          candidate = targets[index]
+          if pool.includes candidate
+            chosen = candidate
+            cursor = (index + 1) % targets.length
+            break
+        chosen
+
+  # Selection is pure; the open→half-open transition commits ONLY on
+  # the chosen target, so a scan never strands the others.
+  pick = ->
+    pool = eligible()
+    return null if pool.length is 0
+    chosen = select pool
+    if chosen.circuit isnt 'closed'
+      chosen.circuit = 'half-open'
+      chosen.probeAt = now()
+    chosen
+
+  begin = (target) -> target.inflight += 1
+  end = (target) -> target.inflight = Math.max(0, target.inflight - 1)
+
+  openCircuit = (target) ->
+    target.circuit = 'open'
+    target.openedAt = now()
+    target.cooldown = Math.round circuit.cooldownMs + circuit.cooldownMs * circuit.jitter * random()
+
+  record = (target, result) ->
+    return unless target? and Array.isArray target.history
+    ok = result?.ok is true
+    # Health tracking: consecutive runs each reset the other's counter.
+    if ok
+      target.fails = 0
+      target.passes += 1
+      target.healthy = true if target.passes >= health.healthyThreshold
+    else
+      target.passes = 0
+      target.fails += 1
+      target.healthy = false if target.fails >= health.unhealthyThreshold
+
+    # Circuit tracking: a probe result decides a half-open circuit; a
+    # closed circuit accumulates a windowed error rate.
+    if target.circuit is 'half-open'
+      if ok
+        target.circuit = 'closed'
+        target.history = []
+      else
+        openCircuit target
+    else if target.circuit is 'closed'
+      target.history.push ok
+      target.history.shift() while target.history.length > circuit.minRequests
+      if target.history.length >= circuit.minRequests
+        failures = target.history.filter((entry) -> not entry).length
+        openCircuit target if failures / target.history.length >= circuit.errorThreshold
+    return
+
+  # Status normalizes to a number so a string '503' matches the
+  # configured set, mirroring the method's case normalization.
+  shouldRetry = (method, status, attempt) ->
+    attempt < retry.attempts and retryMethods.has(String(method).toUpperCase()) and retryStatuses.has(Number(status))
+
+  # Exponential with jitter, clamped to maxDelayMs so a large attempt
+  # can never produce an Infinity delay.
+  backoff = (attempt) ->
+    base = Math.min retry.maxDelayMs, retry.baseDelayMs * Math.pow(2, Math.max(0, attempt))
+    Math.round Math.min(retry.maxDelayMs, base + base * retry.jitter * random())
+
+  stats = -> ({ url: t.url, healthy: t.healthy, inflight: t.inflight, circuit: t.circuit } for t in targets)
+
+  # targets() hands back the LIVE targets — you record() against the
+  # one pick() returned, and the health-poll iterates them. stats() is
+  # the read-only snapshot for reporting.
+  { pick, begin, end, record, shouldRetry, backoff, targets: (-> targets), stats }

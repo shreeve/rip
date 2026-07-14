@@ -5,6 +5,20 @@ repository's pull requests.
 
 ## Unreleased
 
+- The upstream proxy pool exists: `createUpstream({ targets })` is the
+  proxy's decision core — target selection (round-robin, least-inflight,
+  weighted), a per-target circuit breaker, health thresholds, and
+  retry/backoff — pure over an injected clock and RNG, so the whole
+  state machine is deterministic (the fetch and health-poll loop are
+  the serving layer's wiring). The circuit is a three-state machine
+  whose eligibility check is pure: only the target `pick()` routes to
+  transitions to half-open, so a scan never strands the others, and a
+  probe that is never recorded re-arms after a timeout rather than
+  dropping a recovered upstream forever. Circuit and retry config is
+  validated (a zero or NaN threshold can't defeat the breaker), backoff
+  is clamped so it never returns Infinity, retry statuses match across
+  string and number, and `record` tolerates malformed input (#103)
+
 - TLS material resolution and SNI matching land, pure over injected
   adapters — no certificate or private key is ever committed. Material
   resolves by precedence (an explicit cert/key, then ACME, then a
