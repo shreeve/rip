@@ -160,9 +160,13 @@ export function moduleSourceText(s) {
 }
 
 class Emitter {
-  constructor(stores, builder, { face = 'js', pins = null, strict = false } = {}) {
+  constructor(stores, builder, { face = 'js', pins = null, strict = false, script = false } = {}) {
     this.stores = stores;
     this.b = builder;
+    // Script-target emission: <script type="text/rip"> sources share one
+    // page scope and are not modules, so every module form rejects at
+    // its own position instead of emitting bytes new Function cannot take.
+    this.script = script;
     // Tier 3 pins (TS face only): Map of `${name}@${valueHash}` → type
     // text, supplied by the editor's probe pass. Names the scan reports
     // as pinnable (still hoisted + nested occurrence) collect in
@@ -2351,6 +2355,9 @@ class Emitter {
   // (spaced braces, single-quoted source, a trailing newline that
   // leaves a blank line before the code that follows).
   importStatement(node) {
+    if (this.script) {
+      throw this.positionedError(node, 'emitter: module imports are not available in a script tag — script sources share one scope, and modules arrive with the package graph');
+    }
     const source = node[node.length - 1];
     const specs = node.slice(1, -1);
     this.mark(node, '$self', () => {
@@ -2373,6 +2380,9 @@ class Emitter {
   }
 
   exportStatement(node, ind) {
+    if (this.script) {
+      throw this.positionedError(node, 'emitter: exports are not available in a script tag — drop the export keyword; script sources share one scope');
+    }
     const head = node[0];
     this.mark(node, '$self', () => {
       if (head === 'export-all') {
@@ -11867,7 +11877,7 @@ const programScopeNames = (emitter, sexpr) => {
   return names;
 };
 
-export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, dataPayload = null } = {}) {
+export function emit(parseResult, { source = '', runtimeDelivery = 'none', face = 'js', pins = null, strict = false, script = false, dataPayload = null } = {}) {
   if (!parseResult.sexpr) {
     throw new Error('emitter: cannot emit a failed parse');
   }
@@ -11876,7 +11886,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
   }
   const stores = new Stores(parseResult.stores);
   const builder = new CodeBuilder(stores, { source });
-  const emitter = new Emitter(stores, builder, { face, pins, strict });
+  const emitter = new Emitter(stores, builder, { face, pins, strict, script });
   emitter.dataPayload = dataPayload;
 
   if (runtimeDelivery !== 'none' && runtimeDelivery !== 'import' && runtimeDelivery !== 'inline') {

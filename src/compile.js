@@ -93,7 +93,7 @@ const positioned = (file, path, reason, start, end) => {
 // (`V = User.pick("id")`) into self-contained schema literals — the
 // browser-bundle extractor's option; OFF by default so every other
 // path keeps the runtime algebra and its `_sourceModel` back-pointer.
-export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inline', face = 'js', pins = null, strict = false, foldProjections = false } = {}) {
+export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inline', face = 'js', pins = null, strict = false, script = false, foldProjections = false } = {}) {
   // One stable identifying error for a non-string source — without
   // it, malformed input fails in whichever subsystem dereferences it
   // first, with an incidental TypeError.
@@ -148,7 +148,7 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
 
   let emitted;
   try {
-    emitted = emit(result, { source, runtimeDelivery, face, pins, strict, dataPayload });
+    emitted = emit(result, { source, runtimeDelivery, face, pins, strict, script, dataPayload });
   } catch (err) {
     // Emitter rejections carry the offending node's offset span
     // (Emitter#positionedError) and format like every other
