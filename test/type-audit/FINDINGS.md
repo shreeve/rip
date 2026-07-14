@@ -23,6 +23,8 @@
 | [15](#15-reactive-state-bindings-carry-readonly) | Reactive `:=` bindings tagged `readonly` | Token DX | ✅ Verified | `semantic-tokens`, token audit's `readonly` invariant |
 | [16](#16-library-globals-lose-the-defaultlibrary-modifier) | Library globals lose `defaultLibrary` | Token DX | ⬜ **Open** | **none** (upstream; a naive gate is platform-dependent) |
 | [17](#17-a-directive-swallows-the-unused-local-fade) | A directive swallows the unused-local fade | Diagnostic DX | ✅ Verified | `editor-features` (TS directives reach the editor) |
+| [18](#18-a-directive-blinds-the-whole-indented-block) | A directive blinds the whole indented block | Silent safety hole | ⬜ **Open** | **none** (over-suppression is what makes `verdict` pass) |
+| [19](#19-a-directive-inside-a-render-block-never-reaches-the-face) | Inline render-block directive lost from the face | Loud correctness | ⬜ **Open** | **none** (audit `directives` would catch it — no fixture uses the shape) |
 
 ## How to read this ledger
 
@@ -313,6 +315,39 @@ Both carry a negative control (read the binding / drop the directive), so green 
 **Why the suite missed it.** The audit's `verdict` dimension counts **Error-severity** diagnostics only, so a swallowed hint scores clean — the audit stayed green through both the bug and the fix, and could not have gone red for either. `rip check` cannot see it either: the batch surface filters `severity <= 2` by design ([check.js](../../src/check.js)), the fade classes being no one's build failure. The bug lived in the one gap between them — an editor-only, presentation-only payload — and was found by *looking at the editor* beside its twin. **The `verdict` dimension is a floor, not a description of the diagnostic set;** the hint classes on top of it are still largely unwatched (`TS6138`, `TS6196`, the deprecation strike).
 
 **vs v3** — **not established.** v3 checked the shadow in-process, where the directive sits in the real source and tsc's own suppression applies natively — so the fade would have survived for free, since v3 never had a range-suppression pass to get wrong. That is a code reading, not a driven result: v3's live diagnostic payload was not pulled, and the ledger's own rule is that a reading does not settle a **vs v3** line. v3 is re-drivable (3.17.5, `~/Code/shreeve/rip-lang`) if this is worth settling.
+
+### 18. A directive blinds the whole indented block
+
+`ripDirectiveLines` governs the next statement **plus its entire indented block**. tsc governs the next **line**. So one `# @ts-expect-error` above a `def` silently absorbs every error in that function body — including bugs written later that the directive never contemplated. It is the same disease as #17 (rip's directive stronger than the thing it emulates), one level up: #17 swallowed a fade, this swallows *errors*.
+
+**Status.** ⬜ **Open** — no fix, by decision (2026-07-14): the divergence is characterized and scoped, the semantics change is not made. **Gate: none.** The audit cannot see this at all — `verdict` demands zero Error-severity diagnostics, and over-suppression is what makes a fixture *pass*.
+
+**Driven** (2026-07-14) — same program down both paths, the `.rip` through the editor server and a hand-written `.ts` twin through tsgo:
+
+| | rip | tsc |
+| --- | --- | --- |
+| directive above a `def`, two unrelated bugs in the body | **silent** | `TS2322` ×2 + `TS2578` |
+| directive above a `def`, one bug in the body | **silent** | `TS2322` + `TS2578` |
+| directive above an `if`, bug inside the branch | **silent** | `TS2322` + `TS2578` |
+| directive over a single-line statement *(the intended use)* | silent | silent — **match** |
+
+Note what tsc says in every divergent row: **`TS2578`, unused directive** — its verdict is not merely "the error stays loud" but "your marker did nothing, delete it." Rip claims the directive used and eats the error.
+
+**Why it is this way, and why that reason does not hold.** The rule's comment justifies block scope by the render case: a marker above a render element must absorb an error on the element's bind/prop lines *inside* it. Driven: that is a convenience, not a necessity. A directive placed **on the offending prop line itself** already suppresses (`Input` / `# @ts-expect-error` / `value <=> count` — the error goes), which is exactly the idiom TSX forces, since TS will not let you cover a JSX attribute from above the element either. The hatch exists without block scope. **But it is not free — see #19, which is the prerequisite.**
+
+**Blast radius — measured, and it is one line.** medlabs uses **zero** directives, so nothing outside this repo is touched. Inside it, 129 directives across 11 files (all fixtures/tests): 124 are head-line-only; 5 govern real block content; and narrowing the rule to head-line-only for real breaks **exactly one site** — [09-components.rip](fixtures/09-components.rip), a `# @ts-expect-error` above an `Input` whose error is on the `value <=> count` bind line. The other four (`if labelz`, `unless loadingz`, `switch statusz`, `for item in itemsz`) carry their error on the head line and survive narrowing untouched. Moving that one directive onto the bind line restores `verdict` to 12/12. *(Counting trap: the range rule extends across **blank** lines too, so a one-line statement followed by a blank line looks block-scoped — a naive count says 61, and 56 of those are blank-line padding.)*
+
+**What a fix costs.** The rule change is two lines in `ripDirectiveLines` (stop extending past the head) plus one fixture line. It must land **with #19**, not before: narrowing makes the inline-prop directive the only render-block hatch, and that hatch currently works only through rip's own suppression pass, because the face never receives it.
+
+### 19. A directive inside a render block never reaches the face
+
+Place `# @ts-expect-error` on a bind/prop line *inside* a render block and the compiler drops it: the face is emitted without it. The error is still suppressed in the editor and in `rip check` — but only because `applyRipDirectives` catches it over **rip** positions. TypeScript itself never sees the directive, so the suppression rests entirely on rip's fallback pass rather than on the face.
+
+**Status.** ⬜ **Open** — no fix. **Gate: none today, but the audit *would* catch it:** the `directives` dimension counts directives in source vs face, and the moment a fixture places one inline it goes red (`directives src=32 face=31 (lost 1)` — driven 2026-07-14, by moving [09-components.rip](fixtures/09-components.rip)'s `Input` directive onto its bind line). It is green now only because **no fixture uses the inline form** — the dimension is watching a shape nobody writes.
+
+**Driven, and independent of #18** (2026-07-14). Reproduced with block-scoping left fully intact and only the fixture edited, so it is not an artifact of narrowing the range rule: same `directives src=32 face=31`. This is #6's class — a directive lost in emission — surviving in a corner #6's fix did not reach: #6 taught a **statement** directive to place on the head line of its lowering; a directive *interior* to a render block has no such placement and is dropped.
+
+**Why it matters now.** On its own it is latent — nobody writes the inline form, and rip's own pass would cover them if they did. It becomes load-bearing the moment #18 lands: narrowing the range makes the inline directive the *only* way to acknowledge an error inside a render element, and it would then be a hatch that works by accident. **Fix this first, then #18.**
 
 ## Semantic tokens — the modifier surface
 
