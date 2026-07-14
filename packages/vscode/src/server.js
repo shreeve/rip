@@ -989,6 +989,10 @@ async function refresh(document) {
     mappings: result.mappings,
     stores: result.stores,
     trivia: result.trivia,
+    // Generated spans of `:=` state names — writable in rip though the face
+    // binds their cell `const`. Semantic tokens clear TypeScript's `readonly`
+    // on exactly these.
+    mutables: result.mutables,
     srcLineStarts,
     genLineStarts: lineStartsOf(result.code),
     strict: state.strict === true, // rides the compile it governed
@@ -1827,8 +1831,24 @@ connection.onSignatureHelp(async (params) => {
 // mapped tokens DEDUP by source span — modifiers union, the
 // declaration modifier from the hoist line survives on the merged
 // token.
+//
+// Reactive STATE (`:=`) is the one form where TypeScript's modifiers lie. Its
+// lowering binds a cell with `const`, so tsgo classifies the identifier
+// `readonly` — true of the container, false of the name: `clicks = 5` is legal
+// rip and lowers to `clicks.value = 5`. Forwarded as-is, the editor paints the
+// only reactive form you may assign to as a constant. The compile reports the
+// generated span of each state name (`mutables`), and the bit is cleared there
+// and nowhere else — `=!`, `~=` and `~>` also emit `const` and really ARE
+// immutable, so they keep it.
 function ripSemanticTokens(ctx, data) {
   const mapSpan = exactSpanMapper(ctx.good.mappings);
+  const roIndex = semanticTokensLegend?.tokenModifiers?.indexOf('readonly') ?? -1;
+  const roBit = roIndex < 0 ? 0 : (1 << roIndex);
+  // Keyed by START offset: a state name's span IS the token, so the token's
+  // generated start equals the span's exactly. A set lookup per token, rather
+  // than a scan of every span for every token on a surface that fires on each
+  // edit.
+  const mutableStarts = new Set((ctx.good.mutables ?? []).map(([s]) => s));
   const tokens = new Map(); // start → { start, length, type, modifiers }
   let line = 0, char = 0;
   for (let i = 0; i + 4 < data.length; i += 5) {
@@ -1843,12 +1863,16 @@ function ripSemanticTokens(ctx, data) {
     const curStart = ctx.align.toCurrent(srcStart);
     const curEnd = ctx.align.toCurrent(srcStart + length, { exclusiveEnd: true });
     if (curStart === null || curEnd !== curStart + length) continue;
+    // Cleared BEFORE the dedup union below, or a second generated manifestation
+    // of the same name would put the bit straight back.
+    let modifiers = data[i + 4];
+    if (roBit && mutableStarts.has(genStart)) modifiers &= ~roBit;
     const key = curStart * 0x100000 + length;
     const existing = tokens.get(key);
     if (existing && existing.type === data[i + 3]) {
-      existing.modifiers |= data[i + 4];
+      existing.modifiers |= modifiers;
     } else if (!existing) {
-      tokens.set(key, { start: curStart, length, type: data[i + 3], modifiers: data[i + 4] });
+      tokens.set(key, { start: curStart, length, type: data[i + 3], modifiers });
     }
   }
   const builder = new SemanticTokensBuilder();

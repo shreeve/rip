@@ -182,6 +182,9 @@ export function compile(source, { path = '<anonymous>', runtimeDelivery = 'inlin
     runtimes: emitted.runtimes,
     tsRegions: emitted.tsRegions,
     pinnables: emitted.pinnables,
+    // Generated spans of `:=` state names — writable in rip, `const` in the
+    // face. The editor clears TypeScript's `readonly` token modifier on these.
+    mutables: emitted.mutables,
     // Emitted module-specifier spans, recorded at emission — the
     // browser module loader splices resolved specifiers by offset.
     imports: emitted.imports,

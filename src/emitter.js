@@ -177,6 +177,14 @@ class Emitter {
     // `pinnables` for the emit() result, whatever face is running.
     this.pins = pins;
     this.pinnables = [];
+    // Generated `[start, end]` spans of `:=` state names. The face binds the
+    // CELL with `const`, but rip lets you assign to the NAME (`clicks = 5` →
+    // `clicks.value = 5`), so TypeScript's `readonly` classification describes
+    // the container, not the binding the author writes to. Only the emitter can
+    // tell them apart — `=!`, `~=` and `~>` also emit `const` and really are
+    // immutable — so it reports the state names and the editor clears the
+    // modifier on those alone.
+    this.mutables = [];
     // rip.strict (presentation-only, E): typed forwards and pins emit
     // WITHOUT the `!` definite-assignment assertion, so use-before-
     // assign is checked (TS2454) instead of silenced. TS-only glyphs
@@ -5482,7 +5490,13 @@ class Emitter {
     // mark() is a no-op for the untyped rows.
     this.mark(node, 'annotation', () => this.mark(node, '$self', () => {
       this.b.emit('const ');
+      // The name's generated span, recorded as it is written. A `:=` name is
+      // WRITABLE in rip (`clicks = 5` → `clicks.value = 5`) though the cell it
+      // binds is `const`; a `~=` name is not. `export count := 0` routes through
+      // here too, so exports record identically.
+      const nameStart = this.b.offset;
       this.mark(node, 'target', () => this.b.emit(target));
+      if (head === 'state' && this.ts) this.mutables.push([nameStart, this.b.offset]);
       // TS face: a typed reactive declaration types its CONTAINER —
       // the annotation names the `.value` slot (the dts convention;
       // a computed's container is read-only from the outside), and
@@ -12153,7 +12167,11 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
       valueGen: [valueRow.generatedStart, valueRow.generatedEnd],
     });
   }
-  return { code: builder.code, mappings: builder.rows, stores, runtimes, tsRegions: builder.tsRegions, pinnables, imports: emitter.importSpans };
+  // `mutables` — the generated span of every `:=` state name, recorded where it
+  // was written (reactiveDecl) rather than reconstructed by scanning rows: the
+  // emitter knows the offset as it emits, so no lookup, and no ambiguity about
+  // which row is the name's.
+  return { code: builder.code, mappings: builder.rows, stores, runtimes, tsRegions: builder.tsRegions, pinnables, mutables: emitter.mutables, imports: emitter.importSpans };
 }
 
 // The strip transform: delete the recorded TS-only regions from a
