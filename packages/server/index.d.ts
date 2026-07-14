@@ -243,3 +243,16 @@ export type AppServerOpts = {
 };
 
 export function appServer(opts: AppServerOpts): Middleware;
+
+export type Watch = {
+  handler(c: Ctx): Response;
+  reload(): void;
+  css(hrefs: string[]): void;
+  error(payload: Record<string, unknown>): void;
+  revision(): number;
+  clientCount(): number;
+};
+
+export function createWatch(): Watch;
+
+export function watchClient(opts?: { path?: string }): string;

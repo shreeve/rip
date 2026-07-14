@@ -5,6 +5,21 @@ repository's pull requests.
 
 ## Unreleased
 
+- The development watch transport lands as SSE, host-free over
+  web-standard streams: `createWatch()` fans one revisioned event to
+  every open connection. `reload()`, `css(hrefs)`, and `error(payload)`
+  push to all clients; a client reconnecting with a stale
+  `Last-Event-ID` is reloaded at once (last-known-good), a compile
+  error is sticky and takes precedence over the behind-reload so a
+  client never reloads into a broken build, and `css()` is the fast
+  path — the one bundled `watchClient` swaps only the named
+  stylesheets, no reload, no lost state. Hostile input is contained:
+  payloads serialize single-line (no SSE frame injection), the client
+  path is `JSON.stringify`'d (no script injection), a non-serializable
+  error becomes a safe note instead of wedging the endpoint, malformed
+  payloads normalize before the client, a closed connection drops its
+  client at once, and the endpoint is GET-only (#100)
+
 - Static and application serving arrives, pure over an injected
   filesystem host: `serveStatic({ root, host })` refuses every `..`
   climb above the root (403) and re-checks the resolved realpath
