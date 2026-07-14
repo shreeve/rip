@@ -44,3 +44,18 @@ test 'pr handles non-interned symbol', "(try (pr Symbol(\'local\'); 'ok') catch 
 test 'pr handles function', "(try (pr (-> 42); 'ok') catch then 'threw')", 'ok'
 test 'pr handles null', "(try (pr null; 'ok') catch then 'threw')", 'ok'
 test 'pr handles undefined', "(try (pr undefined; 'ok') catch then 'threw')", 'ok'
+
+test 'pr falls back when a nested value has no faithful Rip literal', '''
+  value = {events: [new Date(0)]}
+  calls = []
+  oldLog = console.log
+  oldDir = console.dir
+  try
+    console.log = (v) -> calls.push ['log', v]
+    console.dir = (v) -> calls.push ['dir', v]
+    pr value
+  finally
+    console.log = oldLog
+    console.dir = oldDir
+  [calls[0][0], calls[0][1] is value]
+''', ['dir', true]

@@ -38,7 +38,9 @@ const pr = (() => {
     if (Array.isArray(v)) {
       if (v.length === 0) return '[]';
       const pad = '  '.repeat(d + 1), end = '  '.repeat(d);
-      return '[\n' + pad + v.map((x) => fmt(x, d + 1) ?? 'null').join('\n' + pad) + '\n' + end + ']';
+      const parts = v.map((x) => fmt(x, d + 1));
+      if (parts.some((x) => x === null)) return null;
+      return '[\n' + pad + parts.join('\n' + pad) + '\n' + end + ']';
     }
     if (t === 'object') {
       const proto = Object.getPrototypeOf(v);
@@ -46,7 +48,12 @@ const pr = (() => {
       const keys = Object.keys(v);
       if (keys.length === 0) return '{}';
       const pad = '  '.repeat(d + 1), end = '  '.repeat(d);
-      return '{\n' + pad + keys.map((k) => ks(k) + ': ' + (fmt(v[k], d + 1) ?? 'null')).join('\n' + pad) + '\n' + end + '}';
+      const parts = keys.map((k) => {
+        const value = fmt(v[k], d + 1);
+        return value === null ? null : ks(k) + ': ' + value;
+      });
+      if (parts.some((x) => x === null)) return null;
+      return '{\n' + pad + parts.join('\n' + pad) + '\n' + end + '}';
     }
     return null;
   };
