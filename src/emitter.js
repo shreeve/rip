@@ -1162,28 +1162,29 @@ class Emitter {
   // A whole-line Rip comment spelling a TypeScript directive —
   // `# @ts-expect-error …`, `# @ts-ignore …`, or the file-level
   // `# @ts-nocheck` — reaches the TS face as a TS-only comment line
-  // (`// @ts-…`) under the PLACE-OR-DECLINE rule: the directive
-  // places only where its suppression is PRECISE — where the governed
-  // statement's diagnostics land exactly on the one face line beneath
-  // the directive (TypeScript's next-line semantics). Everywhere else
-  // it DECLINES: the comment stays an ordinary Rip comment, the error
-  // stays visible, and no spurious TS2578 appears. Placements:
-  //   - a live statement whose face emission is a SINGLE line — its
-  //     own body line (an annotated declaration's violation fires on
-  //     the assignment, not the hoist line). Single-line is decided
-  //     by the builder PROBE (checkpoint → emit → inspect), never by
-  //     re-deriving lowering shapes: a multi-line emission
-  //     (comprehension/switch/try IIFEs, block-bodied function
-  //     values, defs, classes) declines uniformly — errors inside a
-  //     lowering land on inner lines the directive cannot govern;
-  //   - the scope's hoist line for a bare typed forward, ONLY when
-  //     that line declares a single name (their only manifestation —
-  //     `let a!: T`); a multi-name hoist line declines, because one
-  //     directive would silently suppress the sibling names'
-  //     unrelated errors;
-  //   - the scope-top cluster line for a SINGLE-LINE type
-  //     declaration; multi-line rendered bodies (object aliases,
-  //     interfaces) decline;
+  // (`// @ts-…`) under a PLACE-OR-DECLINE rule: a directive places only
+  // where TypeScript's line-granular suppression is PRECISE — where the
+  // governed thing's diagnostics land on the one face line beneath the
+  // directive. Where they cannot, it declines: the comment stays an
+  // ordinary Rip comment, the error stays visible, and no spurious
+  // TS2578 appears. Placements, and what still declines:
+  //   - a live statement — ALWAYS, on its own head line, however many
+  //     lines the statement emits (`withTsDirectives`). A multi-line
+  //     emission used to decline here, which silently deleted the
+  //     author's escape hatch on the dominant case (an arrow assigned
+  //     to a typed binding, whose error lands on the head line the
+  //     directive governs). An error that lands on an INNER line of a
+  //     lowering is simply not suppressed, and surfaces as TS2578
+  //     (unused) — visible and actionable, not a silent drop;
+  //   - the scope's hoist line for a bare typed forward, ONLY when that
+  //     line declares a single name (their only manifestation —
+  //     `let a!: T`). A multi-name hoist line DECLINES (`hoistLine`):
+  //     one directive would also swallow the sibling names' unrelated
+  //     errors;
+  //   - the scope-top cluster line for a type declaration, ONLY when the
+  //     rendered declaration is a single line. A multi-line body (object
+  //     alias, interface) DECLINES (`tsTypeDeclLine`): its errors land
+  //     on inner lines the directive cannot govern;
   //   - the overload row for def-sig signatures (always one line).
   // Sourced from the lexer's trivia channel — never from
   // generated text. The directive must sit on the line DIRECTLY above
