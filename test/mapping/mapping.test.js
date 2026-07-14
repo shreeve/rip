@@ -431,13 +431,12 @@ describe('implicit-call spans stay honest', () => {
     expect(compile('f(1, 2,)').code).toBe('f(1, 2);');
   });
 
-  test('logicalKeep is exactly one atom or bracket group wide: wider operands close the call', () => {
-    // `-y` after `&&` is two tokens — the call closes at the operator,
-    // making the trailing `, z` a syntax error. A wider lookahead would
-    // silently accept these programs.
-    for (const src of ['f x && -y, z', 'f a && b.c, d']) {
-      expect(parser.parse(src).sexpr).toBeNull();
-    }
+  test('a logical operator continues the implicit-call argument, whatever its operand', () => {
+    // `&&`/`||`/`??` bind their operand into the argument exactly like
+    // `+` — the call never closes at the operator — so a wider operand
+    // (`-y`, `b.c`) and further arguments after it all stay inside the call.
+    expect(compile('f x && -y, z').code).toBe('f(x && (-y), z);');
+    expect(compile('f a && b.c, d').code).toBe('f(a && b.c, d);');
   });
 
   test('implicit calls evaluate correctly', () => {

@@ -6103,27 +6103,9 @@ function implicitCalls(tokens, mintId) {
       stack.pop();
     }
     if (IMPLICIT_END.has(k) || (k === "." || k === "?.") && t.newLine) {
-      const isLogical = k === "||" || k === "&&" || k === "??";
-      let keep = false;
-      if (isLogical) {
-        let j = i + 1;
-        let o = tokens[j]?.kind;
-        if (o === "(" || o === "[" || o === "{") {
-          for (let d = 1;++j < tokens.length && d > 0; ) {
-            if (ops.on)
-              ops.n++;
-            o = tokens[j].kind;
-            if (o === "(" || o === "[" || o === "{")
-              d++;
-            else if (o === ")" || o === "]" || o === "}")
-              d--;
-          }
-        } else if (o && o !== "TERMINATOR" && o !== "OUTDENT" && o !== ",") {
-          j++;
-        }
-        keep = tokens[j]?.kind === ",";
-      }
-      if (!keep && tokens[i - 1]?.kind !== ",") {
+      if (k === "||" || k === "&&" || k === "??")
+        continue;
+      if (tokens[i - 1]?.kind !== ",") {
         while (stack[stack.length - 1] === "call" || k === "TERMINATOR" && stack[stack.length - 1] === "CONTROL_CLASS") {
           if (stack[stack.length - 1] === "call")
             closeCall(i);

@@ -3741,9 +3741,9 @@ export function implicitBlocks(tokens, mintId) {
 // IMPLICIT_CALL-able token opens a call — plus the unspaced +/- form
 // (`f -1` calls, `f - 1` subtracts). End rule: an implicit call closes
 // at IMPLICIT_END tokens (statement/guard boundaries; logical operators
-// keep the call open when a comma follows their operand — the
-// logicalKeep rule), at any enclosing closer, at INDENT unless the
-// previous
+// are the exception — like `+` they continue the argument and never
+// close the call, so `f a, b or c` reads `f(a, b or c)`), at any
+// enclosing closer, at INDENT unless the previous
 // token can carry a block argument, and at end of tape. Control-flow
 // constructs opening INSIDE an implicit call (CONTROL_IN_IMPLICIT)
 // push a CONTROL frame so their block INDENT never closes the call —
@@ -4227,28 +4227,12 @@ export function implicitCalls(tokens, mintId) {
     // binds the completed call as its receiver (`f x` + `.g y` line
     // reads `f(x).g(y)`).
     if (IMPLICIT_END.has(k) || ((k === '.' || k === '?.') && t.newLine)) {
-      const isLogical = k === '||' || k === '&&' || k === '??';
-      let keep = false;
-      if (isLogical) {
-        // logicalKeep: the call stays open when a comma directly
-        // follows the operand after the logical operator (one atom, or
-        // one balanced bracket group) — anything wider
-        // would silently accept programs the language rejects.
-        let j = i + 1;
-        let o = tokens[j]?.kind;
-        if (o === '(' || o === '[' || o === '{') {
-          for (let d = 1; ++j < tokens.length && d > 0;) {
-            if (ops.on) ops.n++;
-            o = tokens[j].kind;
-            if (o === '(' || o === '[' || o === '{') d++;
-            else if (o === ')' || o === ']' || o === '}') d--;
-          }
-        } else if (o && o !== 'TERMINATOR' && o !== 'OUTDENT' && o !== ',') {
-          j++;
-        }
-        keep = tokens[j]?.kind === ',';
-      }
-      if (!keep && tokens[i - 1]?.kind !== ',') {
+      // Logical operators never close an implicit call — the operator
+      // binds its operand into the argument (`f a, b or c` reads
+      // `f(a, b or c)`), exactly as they bind a pair's value in the
+      // object pass. They are ordinary continuing operators like `+`.
+      if (k === '||' || k === '&&' || k === '??') continue;
+      if (tokens[i - 1]?.kind !== ',') {
         // A CONTROL frame on top shields the call: the boundary token
         // belongs to the control construct, not the call — except
         // a bodiless class's frame at a statement boundary, which was
