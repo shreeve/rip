@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { compile } from '../../../src/compile.js';
 import { tscBatch } from '../../../test/support/tscbatch.js';
 
-const moduleNames = ['source', 'stash', 'components', 'mutation', 'timing', 'routes', 'router', 'renderer', 'persist', 'launch', 'index'];
+const moduleNames = ['source', 'stash', 'components', 'mutation', 'timing', 'routes', 'router', 'renderer', 'persist', 'launch', 'aria', 'index'];
 
 test('app package TypeScript faces and declarations are valid', () => {
   const files = {
@@ -11,6 +11,8 @@ test('app package TypeScript faces and declarations are valid', () => {
     'consumer.ts': [
       "import { browserAdapter, buildRoutes, createComponents, createMutation, createRenderer, createRouter, createStash, debounce, delay, hold, launch, parseQuery, persistStash, source, throttle, unwrapStash } from './index';",
       'void launch; void persistStash;',
+      "import { ariaCurrent, ownsAnchor } from './index';",
+      'void ariaCurrent; void ownsAnchor;',
       "const saveUser = createMutation(async (name: string) => ({ name }), { onSuccess: r => { const s: string = r.name; void s; } });",
       "const saved: Promise<{ name: string } | undefined> = saveUser('Ada');",
       'const busy: boolean = saveUser.pending;',

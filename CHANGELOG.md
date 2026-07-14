@@ -5,6 +5,15 @@ repository's pull requests.
 
 ## Unreleased
 
+- Route-aware accessibility completes the App foundation: `ariaCurrent`
+  keeps `aria-current` truthful across owned anchors (exact page,
+  ancestor true, walker marks cleaned when unearned and at dispose;
+  application-managed marks never touched), and `ownsAnchor` is the one
+  ownership predicate, resolving document hrefs through the router's
+  new `claims(url)` — base-aware, hash-aware, and immune to
+  protocol-relative and backslashed spellings even under catch-all
+  routes, which the router itself now also refuses to navigate (#89)
+
 - `launch()` is the one application boot path: it assembles the stash
   (seed data merges around live sources at every depth and the result
   stamps the reset baseline), loads the component registry, derives the

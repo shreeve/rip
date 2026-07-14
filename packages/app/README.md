@@ -12,6 +12,7 @@ The package currently provides:
 - `createMutation` for the write-side action primitive
 - `delay`, `debounce`, `throttle`, and `hold` timing signals
 - `launch` for the one application boot path, with `persistStash`
+- `ariaCurrent` and `ownsAnchor` route-aware accessibility helpers
 - `createRenderer` for precompiled route/layout construction with render gates
 
 Only named exports are supported:
@@ -188,6 +189,24 @@ stash into Web Storage: plain keys persist, source keys are skipped at
 every depth, restore merges around live cells, saving debounces on the
 stash write-version and flushes on dispose and page unload, and
 `reset()` purges the snapshot so signing out leaves nothing behind.
+
+## Route-aware accessibility
+
+`ariaCurrent(router, host?)` keeps `aria-current` truthful across every
+anchor the router owns — `"page"` on the exact route, `"true"` on an
+ancestor path, removed everywhere else — re-running on navigation and
+on DOM mutations, and never touching a mark it did not set itself. The
+DOM arrives through an injectable host (`anchors()` + `observe()`), so
+the walker tests under Node; the browser default walks `document`.
+`ownsAnchor(router, anchor)` is the one shared ownership predicate, so
+current-marking, preloading, and click interception can never disagree
+about which links belong to the router. It resolves the anchor's
+document href through `router.claims(url)` — base paths strip, hash
+mode reads the fragment, and protocol-relative or backslashed
+spellings are never owned, catch-all routes included. Marks the
+application manages itself are never set over and never removed, and a
+walker's own marks are cleaned when the anchor stops earning them and
+when the walker disposes.
 
 ## Test
 
