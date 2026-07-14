@@ -8,15 +8,24 @@
 //   '_pkg/<name>/…'         a bundled package module, absolute
 //   '@rip-lang/<name>[/…]'  a bundled package entry from the packages
 //                           table — only packages the bundle carries
-//   …/src/runtime/<m>.js    the page's ONE runtime copy, through a
-//                           bridge module — never a second evaluation
+//   …/runtime/<m>.js        the page's ONE runtime copy, through a
+//                           bridge module — never a second evaluation;
+//                           matched by the emitter's own delivery
+//                           pathname or the …/src/runtime/… spelling
 //
 // Anything else is server-only or unknown and rejects loudly, naming
 // the module that asked. Cycles reject with the requesting chain.
 // Dynamic import() specifiers are expressions and stay unrewritten —
 // inside an object-URL module they fail with the browser's own
-// resolution error. invalidate() forgets one module's compilation;
-// dependent-graph invalidation belongs to hot replacement.
+// resolution error. invalidate() forgets a module's compilation AND
+// every importer that reached it, transitively: an importer's code
+// splices its dependency's URL, so an importer left cached would keep
+// running the OLD dependency. Finer-grained propagation belongs to
+// hot replacement.
+//
+// `debug` appends an inline source map to every compiled module, so
+// devtools show the .rip source. Off by default: maps are a
+// development affordance and never ship in production boots.
 import { compile } from './compile.js';
 import * as intrinsics from './runtime/intrinsics.js';
 import * as stdlib from './runtime/stdlib.js';
@@ -25,6 +34,16 @@ import * as reactive from './runtime/reactive.js';
 import * as components from './runtime/components.js';
 
 const RUNTIME_MODULES = { intrinsics, stdlib, schema, reactive, components };
+// Runtime imports arrive in two spellings. The emitter's delivery
+// imports spell each runtime as './runtime/<m>.js' resolved against
+// its own module URL — and this module always travels WITH the
+// emitter (side by side in src/ under Node, one concatenated file in
+// the browser bundle), so resolving the same relative path here
+// reproduces the emitter's spelling exactly, wherever the build put
+// it. Package sources spell the repository path (…/src/runtime/…).
+const RUNTIME_PATHS = new Map(Object.keys(RUNTIME_MODULES).map(
+  name => [new URL(`./runtime/${name}.js`, import.meta.url).pathname, name],
+));
 const RUNTIME_RE = /(?:^|\/)src\/runtime\/(intrinsics|stdlib|schema|reactive|components)\.js$/;
 const BRIDGE_KEY = '__ripRuntimeBridge';
 
@@ -51,7 +70,7 @@ const toObjectUrl = code => {
   return `data:text/javascript;base64,${btoa(unescape(encodeURIComponent(code)))}`;
 };
 
-export function createModuleLoader({ components: registry, packages = {} } = {}) {
+export function createModuleLoader({ components: registry, packages = {}, debug = false } = {}) {
   if (!registry || typeof registry.read !== 'function') {
     throw new TypeError('rip: createModuleLoader requires a component registry');
   }
@@ -59,6 +78,7 @@ export function createModuleLoader({ components: registry, packages = {} } = {})
   const urls = new Map();
   const namespaces = new Map();
   const bridges = new Map();
+  const dependents = new Map();
 
   // The page's one runtime copy crosses into module space through a
   // generated bridge: named re-exports reading a global handle, so the
@@ -86,8 +106,8 @@ export function createModuleLoader({ components: registry, packages = {} } = {})
 
   const resolvePath = (specifier, from) => {
     const spec = unquote(specifier);
-    const runtime = spec.match(RUNTIME_RE);
-    if (runtime) return { bridge: runtime[1] };
+    const runtime = RUNTIME_PATHS.get(spec) ?? spec.match(RUNTIME_RE)?.[1];
+    if (runtime) return { bridge: runtime };
     const inBundle = path => {
       try {
         return registry.exists(path);
@@ -150,8 +170,19 @@ export function createModuleLoader({ components: registry, packages = {} } = {})
       let code = compiled.code;
       for (const span of [...compiled.imports].reverse()) {
         const target = resolvePath(span.specifier, path);
+        if (target.path) {
+          let importers = dependents.get(target.path);
+          if (!importers) dependents.set(target.path, importers = new Set());
+          importers.add(path);
+        }
         const url = target.bridge ? bridgeFor(target.bridge) : await load(target.path, [...chain, path]);
         code = `${code.slice(0, span.start)}${JSON.stringify(url)}${code.slice(span.end)}`;
+      }
+      if (debug) {
+        // compile()'s map precedes the splices: a spliced URL carries
+        // no newline, so line positions — all a debugger needs — hold.
+        const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(compiled.map))));
+        code += `\n//# sourceMappingURL=data:application/json;charset=utf-8;base64,${b64}`;
       }
       return toObjectUrl(code);
     })();
@@ -170,8 +201,16 @@ export function createModuleLoader({ components: registry, packages = {} } = {})
       return namespace;
     },
     invalidate(path) {
-      urls.delete(path);
-      namespaces.delete(path);
+      const queue = [path];
+      const seen = new Set();
+      while (queue.length) {
+        const at = queue.pop();
+        if (seen.has(at)) continue;
+        seen.add(at);
+        urls.delete(at);
+        namespaces.delete(at);
+        for (const importer of dependents.get(at) ?? []) queue.push(importer);
+      }
     },
   };
 }

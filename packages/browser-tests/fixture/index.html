@@ -1,0 +1,11 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>rip certification</title>
+<div id="app"></div>
+<script type="module">
+  import { bootApp } from '/dist/browser/rip.js';
+  const debug = new URLSearchParams(location.search).has('debug');
+  globalThis.__bootResult = bootApp({ url: '/bundle.json', debug })
+    .then(result => { globalThis.__rip = result; return 'ok'; })
+    .catch(error => { console.error('[Rip]', String(error)); return 'failed: ' + error.message; });
+</script>

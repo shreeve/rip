@@ -176,7 +176,10 @@ not provide source compilation, launch, or browser delivery.
 (seed data overlays plain keys and never overwrites a source cell,
 then the result is stamped as the reset baseline), loads the component
 registry, derives the route manifest, and wires router and renderer
-together before starting. It installs `__ripApp` and `__ripRouter`; a
+together before starting. The application declares its stash in the
+bundle module `_app/stash.rip` through its `appStash` export — a stash
+module without the export rejects loudly — and the `stash` option
+overrides it for tests and embedding hosts. It installs `__ripApp` and `__ripRouter`; a
 second launch rejects loudly, as does a malformed bundle, and
 `destroy()` tears down in reverse and restores every global. Bundles
 arrive as objects — fetching, compiling, and watch transports belong

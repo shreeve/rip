@@ -14,11 +14,15 @@
 #   data       seed values overlaid onto the stash — a seed never
 #              overwrites a source cell
 #
+# The application declares its stash in the bundle module
+# `_app/stash.rip` through its `appStash` export; the `stash` option
+# overrides it for tests and embedding hosts.
+#
 # A second launch while one is live rejects loudly, as does a malformed
 # bundle. destroy() tears down in reverse and restores every global it
 # installed.
 
-import { createStash, _stampDefaults, _mergePlain } from './stash.rip'
+import { createStash, _cloneSeed, _stampDefaults, _mergePlain } from './stash.rip'
 import { createComponents } from './components.rip'
 import { buildRoutes } from './routes.rip'
 import { createRouter, browserAdapter } from './router.rip'
@@ -75,7 +79,20 @@ export def launch(opts: LaunchOpts): LaunchResult
   target = opts.target ?? defaultTarget()
   adapter: any = opts.adapter ?? browserAdapter()
 
-  app: any = createStash { data: (opts.stash ?? {}) }
+  # The stash: an explicit option wins; otherwise the bundle's
+  # `_app/stash.rip` module provides it through its `appStash` export.
+  # A stash module without the export is a named mistake, never a
+  # silently empty application.
+  stashModule = bundle.compiled?['_app/stash.rip']
+  seed: any = opts.stash ?? stashModule?.appStash
+  if not seed? and stashModule?
+    fail "the bundle's '_app/stash.rip' module must export 'appStash'"
+  if seed? and (typeof seed isnt 'object' or Array.isArray(seed))
+    fail "the application stash must be a plain object"
+  # The seed clones on the way in (cells by reference): the declaration
+  # object outlives this launch, and its next launch must start from
+  # the declared baseline, not this session's writes.
+  app: any = createStash { data: _cloneSeed(seed ?? {}) }
 
   # Seed overlay: bundle data merges onto plain keys at every depth; a
   # live source — singleton or keyed family, top-level or nested — is

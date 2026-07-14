@@ -58,6 +58,14 @@ const bundle = (extra = {}) => ({
   ...extra,
 });
 
+const withStash = module => bundle({
+  compiled: {
+    '_route/index.rip': { Home },
+    '_route/about.rip': { About },
+    '_app/stash.rip': module,
+  },
+});
+
 const running = [];
 const boot = opts => {
   const result = launch({
@@ -127,6 +135,38 @@ describe('launch', () => {
     expect(fetches).toBe(0);
   });
 
+  test('the stash arrives from the bundle stash module', () => {
+    let fetches = 0;
+    const result = boot({
+      bundle: withStash({
+        appStash: {
+          user: source({ fetch: async () => { fetches += 1; return { name: 'live' }; } }),
+          theme: 'dark',
+        },
+      }),
+    });
+    const raw = unwrapStash(result.app.data);
+    expect(typeof raw.user.read).toBe('function');
+    expect(result.app.data.theme).toBe('dark');
+    expect(fetches).toBe(0);
+  });
+
+  test('an explicit stash option overrides the bundle stash module', () => {
+    const result = boot({
+      stash: { theme: 'light' },
+      bundle: withStash({ appStash: { theme: 'dark' } }),
+    });
+    expect(result.app.data.theme).toBe('light');
+  });
+
+  test('a stash module without appStash and a malformed stash reject loudly', () => {
+    expect(() => boot({ bundle: withStash({ helpers: 1 }) }))
+      .toThrow(/'_app\/stash\.rip' module must export 'appStash'/);
+    expect(() => boot({ bundle: withStash({ appStash: ['not', 'a', 'stash'] }) }))
+      .toThrow(/stash must be a plain object/);
+    expect(globalThis.__ripApp).toBeUndefined();
+  });
+
   test('reset returns to the seeded baseline', () => {
     const result = boot({ bundle: bundle({ data: { count: 5 } }) });
     result.app.data.count = 99;
@@ -168,6 +208,22 @@ describe('launch reconciliation', () => {
     expect(typeof raw.settings.user.read).toBe('function');
     expect(result.app.data.settings.theme).toBe('light');
     expect(fetches).toBe(0);
+  });
+
+  test('relaunch from a shared stash declaration starts from the declared baseline', () => {
+    const cell = source({ fetch: async () => ({ id: 1 }) });
+    const declaration = { appStash: { user: cell, theme: 'dark', profile: { name: 'anon' } } };
+    const first = boot({ bundle: withStash(declaration) });
+    first.app.data.theme = 'light';
+    first.app.data.profile.name = 'steve';
+    first.destroy();
+    const second = boot({ bundle: withStash(declaration) });
+    expect(second.app.data.theme).toBe('dark');
+    expect(second.app.data.profile.name).toBe('anon');
+    expect(unwrapStash(second.app.data).user).toBe(cell);
+    second.app.data.theme = 'blue';
+    second.app.data.reset();
+    expect(second.app.data.theme).toBe('dark');
   });
 
   test('a __proto__ seed key becomes inert own data', () => {

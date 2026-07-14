@@ -5,6 +5,37 @@ repository's pull requests.
 
 ## Unreleased
 
+- Applications boot through the browser entry: `bootApp` fetches the
+  bundle with ETag revalidation against session storage (a 304 serves
+  the cached body; a bodyless revalidation rejects loudly), stands up
+  the module graph, compiles the app package and every `_route`/`_app`
+  module up front — a module that fails to compile rejects the boot at
+  its own path and line — and hands `launch()` a fully compiled
+  bundle. The application declares its stash in `_app/stash.rip`
+  through its `appStash` export (a stash module without the export
+  rejects; the `stash` option still overrides for tests and embedding
+  hosts), so render gates prefetch through boot — and the seed clones
+  on the way in, cells by reference, so a relaunch starts from the
+  declared baseline instead of the last session's writes. The graph
+  caches per app fingerprint, honoring the renderer's one-per-page
+  render-gate claim, and each reboot syncs it to its own bundle:
+  loader invalidation is transitive through importers, modules a
+  bundle no longer carries stop resolving, and the packages table
+  follows the bundle. A poisoned bundle cache self-heals with one
+  unconditional refetch, a fresh body caches only once it parsed, and
+  the bundle cache (`bundleStorage`) never collides with the persist
+  backend. `debug` compiles every module with an inline source map and
+  ships nothing in production boots. The loader now recognizes the
+  emitter's runtime delivery imports by their exact pathnames wherever
+  the build puts them (the bundled emitter emits `/dist/browser/…`
+  paths, not `src/…`), script-tag diagnostics survive Firefox's
+  console serialization, and every bundle carries `@rip-lang/app` as
+  its boot substrate. Real-browser certification runs under Playwright
+  in `packages/browser-tests` — an isolated dependency boundary —
+  driving boot, navigation, render gates, ETag reload, debug source
+  maps (over CDP), and script-tag scope/diagnostics in Chromium,
+  Firefox, and WebKit, wired into CI (#93)
+
 - The browser package graph exists: the emitter records every emitted
   module-specifier span — static imports, re-exports, and
   delivery-injected runtime imports; generated text is never scanned —

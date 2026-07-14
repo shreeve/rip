@@ -48,7 +48,9 @@ const browserHost = () => {
       }
     },
     report(error) {
-      console.error('[Rip]', error);
+      // The diagnostic lives in the message TEXT: some consoles
+      // (Firefox) render an Error argument as its class name alone.
+      console.error('[Rip]', String(error));
     },
   };
 };

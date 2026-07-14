@@ -27,3 +27,4 @@ export function compileToJS(source, options = {}) {
   }
   return compile(source, { ...options, runtimeDelivery: 'none' });
 }
+export { bootApp, fetchBundle } from './browser-boot.js';

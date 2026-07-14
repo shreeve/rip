@@ -229,6 +229,22 @@ export def _stampDefaults(stash: any): void
   Object.defineProperty raw, DEFAULTS, { value: snapshotDefaults(raw), configurable: true }
   return
 
+# Clone a stash seed: source cells carry by reference — their identity
+# is the data contract — and plain subtrees clone deeply, so launching
+# from a shared declaration (a module's `appStash` export) never lets
+# one session's writes leak into the next launch's baseline. Keys land
+# as own data properties so a '__proto__' key stays inert.
+export def _cloneSeed(value: any): any
+  return value if _isSourceCell value
+  return value unless plainObject value
+  raw = if value[RAW] then value[RAW] else value
+  if Array.isArray raw
+    return (_cloneSeed item for item in raw)
+  out = {}
+  for own key, nested of raw
+    Object.defineProperty out, key, { value: _cloneSeed(nested), writable: true, enumerable: true, configurable: true }
+  out
+
 # Merge plain values into the stash, at every depth, without ever
 # touching a live source: cells are skipped wherever they sit, plain
 # subtrees merge per key instead of replacing their containers, and an

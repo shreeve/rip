@@ -3,11 +3,17 @@
 // loud server-only rejection, cycles, and assembly's browser-safety
 // gate.
 import { describe, expect, test } from 'bun:test';
-import { dirname, resolve } from 'node:path';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createModuleLoader } from '../../src/browser-modules.js';
 import { assembleBundle } from '../../src/bundle.js';
-import { createComponents } from '../../packages/app/index.rip';
+// The store comes from its own module, not the package entry: the
+// entry evaluates renderer.rip, which claims the process's one
+// render-gate construction capability — and that claim belongs to the
+// browser-boot suite's module graph in this test process.
+import { createComponents } from '../../packages/app/components.rip';
 import { compile } from '../../src/compile.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -99,6 +105,33 @@ describe('createModuleLoader', () => {
     await loader.import('_route/page.rip');
     expect(registry.getCompiled('_route/page.rip').Page).toBe(42);
   });
+
+  test('invalidation is transitive through importers', async () => {
+    const registry = registryOf({
+      '_app/util.rip': "export tag = 'one'",
+      '_route/page.rip': "import { tag } from '../_app/util.rip'\nexport Page = -> tag",
+    });
+    const loader = createModuleLoader({ components: registry });
+    const first = await loader.import('_route/page.rip');
+    expect(first.Page()).toBe('one');
+    registry.write('_app/util.rip', "export tag = 'two'");
+    loader.invalidate('_app/util.rip');
+    const second = await loader.import('_route/page.rip');
+    expect(second.Page()).toBe('two');
+    expect(registry.getCompiled('_route/page.rip').Page()).toBe('two');
+  });
+
+  test('a debug loader appends inline source maps without disturbing the module', async () => {
+    const loader = createModuleLoader({
+      components: registryOf({
+        '_app/util.rip': 'export base = 2',
+        '_route/page.rip': "import { base } from '../_app/util.rip'\nexport Page = base + 40",
+      }),
+      debug: true,
+    });
+    const page = await loader.import('_route/page.rip');
+    expect(page.Page).toBe(42);
+  });
 });
 
 describe('assembleBundle', () => {
@@ -122,10 +155,26 @@ describe('assembleBundle', () => {
   });
 
   test('a package without browser safety is refused by name', () => {
-    expect(() => assembleBundle({
-      modules: { '_route/index.rip': "import { launch } from '@rip-lang/app'" },
-      packagesDir: resolve(root, 'packages'),
-    })).toThrow(/does not declare browser safety/);
+    const dir = mkdtempSync(join(tmpdir(), 'rip-pkg-'));
+    try {
+      // The stand-in packages dir carries the app package (every
+      // bundle's boot substrate) and one package with no browser flag.
+      for (const name of ['app', 'serveronly']) {
+        mkdirSync(join(dir, name));
+        writeFileSync(join(dir, name, 'package.json'), JSON.stringify({
+          name: `@rip-lang/${name}`,
+          main: 'index.rip',
+          rip: name === 'app' ? { browser: true } : {},
+        }));
+        writeFileSync(join(dir, name, 'index.rip'), 'export ok = 1');
+      }
+      expect(() => assembleBundle({
+        modules: { '_route/index.rip': "import { x } from '@rip-lang/serveronly'" },
+        packagesDir: dir,
+      })).toThrow(/'@rip-lang\/serveronly', which does not declare browser safety/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test('end to end: assembled validate package loads in the browser graph', async () => {
