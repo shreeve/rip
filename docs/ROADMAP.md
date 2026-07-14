@@ -36,9 +36,6 @@ but it must not block direct-path package implementation and tests.
 
 ### Application foundation
 
-- **App:** the stash, sources, component registry, render gates, the
-  route manifest and router, renderer navigation integration, mutations,
-  and timing helpers are present. Launch and ARIA helpers remain.
 - **Server:** routing, middleware, sessions, OpenAPI, static/app serving,
   worker management, TLS/proxy support, nginx/caddy configuration
   generation, mDNS, and development watch transport.
@@ -57,10 +54,8 @@ types; implementations are reconsidered rather than copied mechanically.
 
 The browser product needs:
 
-- a browser entry and self-contained bundle;
 - `<script type="text/rip">` compilation/loading;
 - module and browser-safe package graph handling;
-- bundle freshness and forbidden-dependency gates;
 - integration with the app framework and development server.
 
 This delivery layer is distinct from compiler runtime `inline`/`import`

@@ -15,9 +15,12 @@
 // handed (the rule — the strict, throwing serializer is the separate
 // importable `stringify`, deliberately NOT a stdlib global).
 
-const abort = (msg) => { if (msg) console.error(msg); process.exit(1); };
+// abort/exit end the PROCESS where one exists; in a browser there is
+// no process to end, so both throw with their own names instead of a
+// bare ReferenceError.
+const abort = (msg) => { if (msg) console.error(msg); if (typeof process !== 'undefined') process.exit(1); throw new Error(msg || 'abort'); };
 const assert = (v, msg) => { if (!v) throw new Error(msg || 'Assertion failed'); };
-const exit = (code) => process.exit(code || 0);
+const exit = (code) => { if (typeof process !== 'undefined') process.exit(code || 0); throw new Error(`exit(${code || 0}) outside a process`); };
 const kind = (v) => v != null ? (v.constructor?.name || Object.prototype.toString.call(v).slice(8, -1)).toLowerCase() : String(v);
 const noop = () => {};
 const p = console.log;

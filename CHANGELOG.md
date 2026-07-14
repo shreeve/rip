@@ -5,6 +5,18 @@ repository's pull requests.
 
 ## Unreleased
 
+- The browser entry exists: `src/browser.js` exports the compiler
+  surface (`compile`, `compileToJS` — scope delivery only, other modes
+  reject by name) plus one copy of every browser-safe runtime as the
+  `runtimes` scope namespace, with every delivered name pinned present
+  and overlapping re-exports pinned identical. A deterministic bundle
+  builds under a pinned Bun into the committed `dist/browser/rip.js`
+  (byte-gated in CI, which now pins the toolchain), and structural
+  gates parse the real import graph so no server-only module or
+  unstubbed builtin can ever reach the browser. stdlib's `abort`/`exit`
+  end the process where one exists and throw by name where none does
+  (#90)
+
 - Route-aware accessibility completes the App foundation: `ariaCurrent`
   keeps `aria-current` truthful across owned anchors (exact page,
   ancestor true, walker marks cleaned when unearned and at dispose;
