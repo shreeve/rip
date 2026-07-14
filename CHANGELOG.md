@@ -20,7 +20,7 @@ repository's pull requests.
 - Email support is complete: full HTML/text rendering, dynamic blocks,
   native table trees, package self-imports, and a typed welcome example
   now run through the public `@rip-lang/ui/email` surface. The final five
-  contracts joined the battery and only router gates remain pending (#65)
+  contracts joined the battery and only render-gate contracts remain pending (#65)
 
 - Tailwind email support is isolated behind `packages/ui/tailwind`,
   with exact package-scoped `tailwindcss` and `css-tree` dependencies.

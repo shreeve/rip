@@ -1,8 +1,8 @@
-# Pending rows for the @app/router subsystem — render gates
-# (`user <~ @app.data.user`), the router's data-prefetch contract:
-# static __gates read by the router, __gateBind seeding members from
-# the app stash. These rows come along when @app/router is
-# implemented. Every row here FAILS today; when the feature revives
+# Pending rows for render gates and app data prefetch
+# (`user <~ @app.data.user`): static __gates read by the app renderer,
+# __gateBind seeding members from the app stash. These rows come along
+# when the app data consumer is implemented. Every row here FAILS today;
+# when the feature revives
 # one, MOVE the row into test/battery/ in the same change (the lane
 # asserts still-failing).
 

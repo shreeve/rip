@@ -15,16 +15,16 @@ in the same change.
 
 One group remains:
 
-### App/router gates — 8 rows
+### Render gates and app data prefetch — 8 rows
 
-`pending-router.rip` specifies component render gates:
+`pending-render-gates.rip` specifies component render gates:
 
 ```rip
 user <~ @app.data.user
 ```
 
-The complete contract includes router prefetch metadata, stash-backed
-member binding, keyed gate families, and the app/router consumer.
+The complete contract includes renderer prefetch metadata, stash-backed
+member binding, keyed gate families, and the app data consumer.
 Gate syntax lands with that subsystem, not as an unread metadata stub.
 
 ## Package and application portfolio
