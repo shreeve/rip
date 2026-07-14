@@ -70,6 +70,10 @@ jobs:
         working-directory: packages/server
         run: bun run test
 
+      - name: Database package suite (packages/db — protocol tests; live tests gated on a harbor endpoint)
+        working-directory: packages/db
+        run: bun run test
+
       - name: Real-browser suite (packages/browser-tests — Playwright in Chromium/Firefox/WebKit)
         working-directory: packages/browser-tests
         run: |
