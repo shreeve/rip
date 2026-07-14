@@ -1,0 +1,213 @@
+# The worker pool — bounded concurrency across a fixed set of workers,
+# a bounded queue with a per-job wait timeout (backpressure), a
+# recycle policy, and graceful shutdown. The worker body and the clock
+# are injected, so the whole lifecycle is host-free and deterministic:
+# `spawn()` builds a worker with a `handle(job) → Promise`, `now()`
+# reads the clock, and `schedule(fn, ms) → cancel` arms a timer. The
+# real deployment passes process-backed workers and wall-clock timers;
+# a test passes controllable ones.
+#
+# Defaults follow the product's operational profile: workers cores/2
+# at concurrency 1, a queue of 512 with a 30 s wait timeout, and a
+# worker recycled after 10000 requests or 3600 s.
+#
+# A worker retires when its request budget or age is spent; it takes
+# no new work and is replaced once its in-flight jobs drain, so a
+# recycle never drops a request. Shutdown stops intake, cancels the
+# queue, and resolves once every worker is idle.
+
+fail = (message) -> throw new Error "Rip Server: #{message}"
+
+# A finite number or the fallback — NaN and non-numbers can't defeat a
+# floor the way `NaN ?? default` would leave NaN in place.
+finite = (value, fallback) ->
+  if typeof value is 'number' and Number.isFinite(value) then value else fallback
+
+DEFAULTS =
+  concurrency: 1
+  queueLimit: 512
+  timeout: 30000
+  maxRequests: 10000
+  maxAge: 3600000
+
+export type PoolStats =
+  size: number
+  inflight: number
+  queued: number
+  recycled: number
+
+export type Pool =
+  submit: (job: any) => Promise<any>
+  shutdown: () => Promise<void>
+  stats: () => PoolStats
+
+export type PoolOpts =
+  spawn: () => { handle: (job: any) => Promise<any> }
+  size?: number
+  concurrency?: number
+  queueLimit?: number
+  timeout?: number
+  maxRequests?: number
+  maxAge?: number
+  now?: () => number
+  schedule?: (fn: () => void, ms: number) => (() => void)
+
+export def createPool(opts: PoolOpts): Pool
+  fail 'createPool requires a spawn function' unless typeof opts?.spawn is 'function'
+  size = Math.max 1, Math.floor(finite(opts.size, 1))
+  concurrency = Math.max 1, Math.floor(finite(opts.concurrency, DEFAULTS.concurrency))
+  queueLimit = Math.max 0, Math.floor(finite(opts.queueLimit, DEFAULTS.queueLimit))
+  timeout = finite(opts.timeout, DEFAULTS.timeout)
+  maxRequests = finite(opts.maxRequests, DEFAULTS.maxRequests)
+  maxAge = finite(opts.maxAge, DEFAULTS.maxAge)
+  now = opts.now ?? (-> Date.now())
+  schedule = opts.schedule ?? ((fn, ms) -> id = setTimeout(fn, ms); (-> clearTimeout id))
+
+  workers = []
+  queue = []
+  recycled = 0
+  draining = false
+  shutdownResolve = null
+
+  spawnWorker = ->
+    raw = opts.spawn()
+    { handle: raw.handle, raw, inflight: 0, served: 0, bornAt: now(), retiring: false }
+
+  # A removed worker (recycled or shut down) is disposed if it offers a
+  # close() — a process-backed worker terminates rather than orphaning.
+  closeWorker = (worker) ->
+    try
+      worker.raw?.close?()
+    catch
+      null
+    return
+
+  # The pool maintains `size` NON-retiring workers, so a worker
+  # draining its last jobs never blocks its replacement — a recycle
+  # keeps full available capacity.
+  fillPool = ->
+    while not draining and workers.filter((worker) -> not worker.retiring).length < size
+      workers.push spawnWorker()
+    return
+
+  spent = (worker) ->
+    worker.served >= maxRequests or (now() - worker.bornAt) >= maxAge
+
+  # Reconcile the pool: mark every spent worker retiring so it stops
+  # taking work, remove those that have drained (counting the
+  # recycle), and refill to `size` — a recycled worker is replaced the
+  # instant its in-flight jobs finish, so the pool never runs short.
+  reconcile = ->
+    for worker in workers
+      worker.retiring = true if not worker.retiring and spent(worker)
+    for worker in [...workers] when worker.retiring and worker.inflight is 0
+      index = workers.indexOf worker
+      if index >= 0
+        workers.splice index, 1
+        recycled += 1
+        closeWorker worker
+    fillPool() unless draining
+    return
+
+  # A worker is available when it is not retiring and under its
+  # concurrency limit.
+  pick = ->
+    workers.find (worker) -> not worker.retiring and worker.inflight < concurrency
+
+  settleShutdown = ->
+    return unless draining and shutdownResolve?
+    idle = workers.every (worker) -> worker.inflight is 0
+    if idle and queue.length is 0
+      # Every worker is drained: dispose them so no process is left
+      # running past the pool.
+      closeWorker worker for worker in [...workers]
+      workers.length = 0
+      resolve = shutdownResolve
+      shutdownResolve = null
+      resolve()
+    return
+
+  # A handle that throws SYNCHRONOUSLY (a serialize/validate before it
+  # returns, or a dead worker with no method) is caught here and turned
+  # into a rejection, so inflight is always decremented, the job always
+  # settles, and the pool keeps draining — the handle still runs
+  # synchronously, only its failure is normalized.
+  runOn = (worker, entry) ->
+    worker.inflight += 1
+    worker.served += 1
+    settled = null
+    try
+      settled = Promise.resolve worker.handle(entry.job)
+    catch error
+      settled = Promise.reject error
+    settled.then(
+      (value) ->
+        worker.inflight -= 1
+        entry.resolve value
+        pump()
+        return
+      (error) ->
+        worker.inflight -= 1
+        entry.reject error
+        pump()
+        return
+    )
+    return
+
+  # Drain: reconcile, hand queued jobs to available workers, reconcile
+  # again (a job just finished may have spent its worker), then check
+  # whether a shutdown can complete.
+  pump = ->
+    reconcile()
+    while queue.length
+      worker = pick()
+      break unless worker
+      runOn worker, queue.shift()
+    reconcile()
+    settleShutdown()
+    return
+
+  submit = (job) ->
+    return Promise.reject(new Error 'Rip Server: the pool is shutting down') if draining
+    reconcile()
+    worker = pick()
+    if worker
+      new Promise (resolve, reject) ->
+        runOn worker, { job, resolve, reject }
+        return
+    else if queue.length >= queueLimit
+      Promise.reject(new Error "Rip Server: the request queue is at capacity (#{queueLimit})")
+    else
+      new Promise (resolve, reject) ->
+        entry: any = { job, resolve, reject, cancelTimer: null }
+        entry.cancelTimer = schedule (->
+          index = queue.indexOf entry
+          if index >= 0
+            queue.splice index, 1
+            reject new Error "Rip Server: the request timed out in queue after #{timeout}ms"
+          return
+        ), timeout
+        wrappedResolve = resolve
+        entry.resolve = (value) -> entry.cancelTimer?(); wrappedResolve value
+        wrappedReject = reject
+        entry.reject = (error) -> entry.cancelTimer?(); wrappedReject error
+        queue.push entry
+        return
+
+  shutdown = (): Promise<void> ->
+    return Promise.resolve() if draining
+    draining = true
+    new Promise (resolve: () => void) ->
+      shutdownResolve = resolve
+      pending = [...queue]
+      queue.length = 0
+      entry.reject(new Error 'Rip Server: the pool is shutting down') for entry in pending
+      settleShutdown()
+      return
+
+  stats = ->
+    inflight = workers.reduce(((sum, worker) -> sum + worker.inflight), 0)
+    { size: workers.length, inflight, queued: queue.length, recycled }
+
+  fillPool()
+  { submit, shutdown, stats }

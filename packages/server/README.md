@@ -248,6 +248,30 @@ watch.error { file, line, message }  # a build broke
 inline under watch: it connects, reloads, swaps stylesheets, and shows
 a compile-error overlay that clears on the next good build.
 
+## The worker pool
+
+`createPool({ spawn })` schedules jobs across a fixed set of workers
+with bounded concurrency, a bounded queue, a recycle policy, and
+graceful shutdown — all deterministic, because the worker body and
+the clock are injected. `spawn()` builds a worker exposing
+`handle(job) → Promise` (and an optional `close()` the pool calls when
+it disposes the worker); `submit(job)` dispatches to a free worker or
+queues, rejecting loudly once the queue is at capacity and rejecting a
+job that waits past the timeout. A synchronous throw from `handle` is
+caught and becomes a normal rejection — a misbehaving worker never
+wedges the pool. A worker retires when its request budget or age is
+spent; its replacement spawns at once (the pool keeps `size`
+non-retiring workers, so there is no capacity gap) and the retiring
+worker leaves only after its in-flight jobs drain, so a recycle never
+drops a request. `shutdown()` stops intake,
+cancels the queue, and resolves once every worker is idle. `stats()`
+reports `size`/`inflight`/`queued`/`recycled`.
+
+Defaults follow the product's operational profile: concurrency 1, a
+queue of 512 with a 30 s wait timeout, and recycle after 10000
+requests or 3600 s (the real deployment sizes the pool at `cores/2`
+and passes process-backed workers and wall-clock timers).
+
 `errorEnvelope(err)` is the one deterministic error translation:
 `notice` and `issues` are explicitly user-facing and always shown, a
 plain message shows only for 4xx, and 5xx or raw throws mask to the
