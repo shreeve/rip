@@ -50,3 +50,7 @@ jobs:
       - name: UI package suite (packages/ui — its own suite, its own boundary)
         working-directory: packages/ui
         run: bun run test
+
+      - name: App package suite (packages/app — its own suite, its own boundary)
+        working-directory: packages/app
+        run: bun run test

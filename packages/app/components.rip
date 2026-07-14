@@ -1,0 +1,126 @@
+export type ComponentEvent = 'create' | 'change' | 'delete'
+
+export type ComponentsStore =
+  read: (path: string) => string | undefined
+  write: (path: string, content: string) => void
+  del: (path: string) => void
+  exists: (path: string) => boolean
+  size: () => number
+  list: (dir?: string) => string[]
+  listAll: (dir?: string) => string[]
+  load: (sources: Record<string, string>) => void
+  watch: (fn: (event: ComponentEvent, path: string) => void) => () => void
+  getCompiled: (path: string) => Record<string, unknown> | undefined
+  setCompiled: (path: string, module: Record<string, unknown>) => void
+
+validPath = (path) ->
+  unless typeof path is 'string' and path.length > 0
+    throw new TypeError 'Rip App: component path must be a non-empty string'
+  segments = path.split '/'
+  invalidSegment = segments.some (segment) -> not segment or segment is '.' or segment is '..'
+  filename = segments[-1]
+  fileAsDirectory = segments.slice(0, -1).some (segment) -> segment.endsWith '.rip'
+  if path.includes('\\') or invalidSegment or fileAsDirectory or filename is '.rip' or not filename.endsWith('.rip')
+    throw new TypeError "Rip App: invalid component path '#{path}'"
+  path
+
+validContent = (content) ->
+  unless typeof content is 'string'
+    throw new TypeError 'Rip App: component source must be a string'
+  content
+
+validDirectory = (dir) ->
+  return '' if dir is '' or not dir?
+  unless typeof dir is 'string'
+    throw new TypeError 'Rip App: component directory must be a string'
+  segments = dir.split '/'
+  if dir.includes('\\') or segments.some((segment) -> not segment or segment is '.' or segment is '..')
+    throw new TypeError "Rip App: invalid component directory '#{dir}'"
+  dir
+
+export def createComponents(): ComponentsStore
+  files = new Map()
+  compiled = new Map()
+  watchers = new Set()
+
+  notify = (event, path) ->
+    for watcher in Array.from(watchers)
+      try
+        watcher event, path
+      catch error
+        console.error '[Rip] component watcher error:', error
+
+  store =
+    read: (path) ->
+      files.get validPath(path)
+
+    write: (path, content) ->
+      path = validPath path
+      content = validContent content
+      event = if files.has(path) then 'change' else 'create'
+      files.set path, content
+      compiled.delete path
+      notify event, path
+      return
+
+    del: (path) ->
+      path = validPath path
+      files.delete path
+      compiled.delete path
+      notify 'delete', path
+      return
+
+    exists: (path) ->
+      files.has validPath(path)
+
+    size: -> files.size
+
+    list: (dir = '') ->
+      dir = validDirectory dir
+      prefix = if dir then dir + '/' else ''
+      result = []
+      for [path] in files
+        if path.startsWith prefix
+          rest = path.slice prefix.length
+          result.push path unless rest.includes '/'
+      result
+
+    listAll: (dir = '') ->
+      dir = validDirectory dir
+      prefix = if dir then dir + '/' else ''
+      result = []
+      result.push path for [path] in files when path.startsWith(prefix)
+      result
+
+    load: (sources) ->
+      unless sources? and typeof sources is 'object' and not Array.isArray(sources)
+        throw new TypeError 'Rip App: component load expects a source object'
+      for own path, content of sources
+        path = validPath path
+        content = validContent content
+        files.set path, content
+        compiled.delete path
+      return
+
+    watch: (fn) ->
+      unless typeof fn is 'function'
+        throw new TypeError 'Rip App: component watch expects a function'
+      watchers.add fn
+      disposed = false
+      ->
+        return if disposed
+        disposed = true
+        watchers.delete fn
+        return
+
+    getCompiled: (path) ->
+      compiled.get validPath(path)
+
+    setCompiled: (path, module) ->
+      path = validPath path
+      unless module? and typeof module is 'object' and not Array.isArray(module)
+        throw new TypeError 'Rip App: compiled component module must be an object'
+      compiled.set path, module
+      return
+
+  store

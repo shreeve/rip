@@ -1,0 +1,270 @@
+export type NonNullSourceValue = object | string | number | boolean | symbol | bigint
+
+export type Duration = number | string
+
+export type SourceArgs = [] | [unknown]
+
+export type SourceOpts<T extends NonNullSourceValue, A extends SourceArgs> =
+  kind?: undefined
+  fetch: (...args: A) => Promise<T>
+  staleTime?: Duration | 'forever'
+
+export type SingletonSourceOpts<T extends NonNullSourceValue> =
+  kind: 'singleton'
+  fetch: (signal?: AbortSignal) => Promise<T>
+  staleTime?: Duration | 'forever'
+
+export type KeyedSourceOpts<T extends NonNullSourceValue, K> =
+  kind: 'keyed'
+  fetch: (key: K, signal?: AbortSignal) => Promise<T>
+  staleTime?: Duration | 'forever'
+
+export type SourceCell<T> =
+  readonly loading: boolean
+  readonly error: unknown
+  read: () => T | null
+  peek: () => T | null
+  ensure: () => Promise<T | undefined>
+  write: (value: T | null) => T | null
+  reset: () => void
+  refetch: () => Promise<T | undefined>
+  preload: () => Promise<T | null | undefined>
+
+export type SourceFamily<T, K> = ((key: K) => T | null) & { cellFor: (key: K) => SourceCell<T>, reset: () => void }
+export type SourceValue<T, A extends SourceArgs> = A extends [] ? T | null : A extends [infer K] ? SourceFamily<T, K> : never
+export type SourceDeclaration<T, A extends SourceArgs> = { readonly __ripSource: { value: T, args: A } }
+
+SOURCE =! Symbol.for 'rip.source'
+SOURCE_FAMILY =! Symbol.for 'rip.source.family'
+SOURCE_FAMILY_CAP =! 64
+PRELOAD_FRESH_MS =! 30_000
+DURATION_RE =! /^(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*(s|sec|second|seconds|m|min|minute|minutes|h|hr|hour|hours|d|day|days|w|week|weeks|y|year|years)$/i
+
+export def _isSourceCell(value: any): boolean
+  value? and (typeof value is 'object' or typeof value is 'function') and
+    (value[SOURCE] is true or value[SOURCE_FAMILY] is true)
+
+export def _isSourceFamily(value: any): boolean
+  value? and typeof value is 'function' and value[SOURCE_FAMILY] is true
+
+parseStaleTime = (value: any) ->
+  return 0 unless value?
+  if typeof value is 'number'
+    unless Number.isFinite(value) and value >= 0
+      throw new TypeError 'Rip App: source staleTime must be a non-negative finite number, a duration string, or "forever"'
+    return value
+  if typeof value is 'string'
+    return Infinity if value is 'forever'
+    return +value if /^\d+$/.test(value)
+    parts = value.match DURATION_RE
+    if parts
+      amount = parseFloat parts[1]
+      return switch parts[2][0].toLowerCase()
+        when 's' then amount * 1000
+        when 'm' then amount * 60000
+        when 'h' then amount * 3600000
+        when 'd' then amount * 86400000
+        when 'w' then amount * 604800000
+        when 'y' then amount * 31536000000
+  throw new TypeError 'Rip App: source staleTime must be a non-negative number, a duration such as "5 min", or "forever"'
+
+makeSourceCell = (fetchFn, staleTime, onSettle = null) ->
+  data = __state null
+  loading = __state false
+  failure = __state null
+  generation = 0
+  controller = null
+  inflight = null
+  inflightPreload = false
+  preloadConsumed = false
+  loaded = false
+  loadedAt = 0
+  freshUntil = 0
+
+  load = (background = false, preload = false) ->
+    controller?.abort()
+    controller = if typeof AbortController isnt 'undefined' then new AbortController() else null
+    mine = ++generation
+    loading.value = true unless background
+    wasLoaded = loaded
+    try
+      pending = fetchFn controller?.signal
+      unless pending? and typeof pending.then is 'function'
+        throw new TypeError 'Rip App: source fetch must return a Promise'
+      result = await pending
+      return result if mine isnt generation
+      failure.value = null
+      data.value = result
+      loaded = true
+      loadedAt = Date.now()
+      freshUntil = if preload and not preloadConsumed then loadedAt + PRELOAD_FRESH_MS else 0
+      result
+    catch error
+      return if mine isnt generation
+      return if error?.name is 'AbortError'
+      failure.value = error
+      unless wasLoaded
+        loaded = false
+        loadedAt = 0
+        throw error
+      return
+    finally
+      if mine is generation
+        loading.value = false
+        inflight = null
+        inflightPreload = false
+        preloadConsumed = false
+        onSettle?()
+
+  start = (background = false, preload = false) ->
+    pending = load background, preload
+    inflight = pending
+    inflightPreload = preload
+    preloadConsumed = false
+    pending
+
+  isFresh = ->
+    staleTime is Infinity or Date.now() - loadedAt < staleTime or Date.now() < freshUntil
+
+  cell: Record<PropertyKey, any> = {}
+  cell[SOURCE] = true
+
+  cell.read = ->
+    value = data.value
+    start().catch(-> null) unless loaded or inflight
+    value
+
+  cell.peek = -> data.read()
+
+  cell.ensure = ->
+    value = data.read()
+    if loaded
+      preloadConsumed = true if inflightPreload
+      stale = not isFresh()
+      freshUntil = 0
+      start(true).catch(-> null) if stale and not inflight
+      return Promise.resolve(value)
+    if inflight
+      if inflightPreload
+        preloadConsumed = true
+        return inflight.finally(-> freshUntil = 0)
+      return inflight
+    start()
+
+  cell.preload = ->
+    value = data.read()
+    if loaded
+      start(true, true).catch(-> null) if not isFresh() and not inflight
+      return Promise.resolve(value)
+    return inflight if inflight
+    start false, true
+
+  cell.write = (value) ->
+    generation++
+    controller?.abort()
+    controller = null
+    inflight = null
+    inflightPreload = false
+    preloadConsumed = false
+    loading.value = false
+    failure.value = null
+    data.value = value
+    loaded = value?
+    loadedAt = if loaded then Date.now() else 0
+    freshUntil = 0
+    onSettle?()
+    value
+
+  cell.reset = ->
+    generation++
+    controller?.abort()
+    controller = null
+    inflight = null
+    inflightPreload = false
+    preloadConsumed = false
+    loading.value = false
+    failure.value = null
+    data.value = null
+    loaded = false
+    loadedAt = 0
+    freshUntil = 0
+    onSettle?()
+    return
+
+  cell.refetch = -> start()
+
+  Object.defineProperty cell, 'loading', get: -> loading.value
+  Object.defineProperty cell, 'error', get: -> failure.value
+  cell
+
+normalizeKey = (key) ->
+  if key? and typeof key is 'object'
+    try
+      encoded = JSON.stringify key
+    catch
+      throw new TypeError 'Rip App: keyed source object keys must be JSON-serializable'
+    throw new TypeError 'Rip App: keyed source object keys must be JSON-serializable' unless encoded?
+    return encoded
+  key
+
+makeSourceFamily = (fetchFn, staleTime) ->
+  cells = new Map()
+
+  prune = (protectedKey = undefined) ->
+    while cells.size > SOURCE_FAMILY_CAP
+      removed = false
+      for [oldestKey, oldest] in cells
+        continue if oldestKey is protectedKey
+        continue if oldest.loading
+        cells.delete oldestKey
+        oldest.reset()
+        removed = true
+        break
+      break unless removed
+    return
+
+  cellFor = (key) ->
+    throw new TypeError 'Rip App: keyed source requires a key' unless key?
+    normalized = normalizeKey key
+    cell = cells.get normalized
+    if cell
+      cells.delete normalized
+      cells.set normalized, cell
+      return cell
+
+    cell = makeSourceCell ((signal) -> fetchFn(key, signal)), staleTime, prune
+    cells.set normalized, cell
+    prune normalized
+    cell
+
+  family = (key) -> cellFor(key).read()
+  family[SOURCE_FAMILY] = true
+  family.cellFor = cellFor
+  family.reset = ->
+    existing = Array.from cells.values()
+    cells.clear()
+    cell.reset() for cell in existing
+    return
+  family
+
+export def source<T extends NonNullSourceValue, A extends SourceArgs>(opts: SourceOpts<T, A> | SingletonSourceOpts<T> | KeyedSourceOpts<T, any>): SourceDeclaration<T, A>
+  unless opts? and typeof opts is 'object' and not Array.isArray(opts)
+    throw new TypeError 'Rip App: source expects an options object'
+  unless typeof opts.fetch is 'function'
+    throw new TypeError 'Rip App: source options require a fetch function'
+  staleTime = parseStaleTime opts.staleTime
+  hasKind = Object.prototype.hasOwnProperty.call opts, 'kind'
+  if hasKind
+    unless opts.kind is 'singleton' or opts.kind is 'keyed'
+      throw new TypeError "Rip App: source kind must be 'singleton' or 'keyed'"
+    if opts.kind is 'singleton'
+      if opts.fetch.length > 1
+        throw new TypeError "Rip App: singleton source fetch accepts at most one AbortSignal parameter"
+      return makeSourceCell opts.fetch, staleTime
+    if opts.fetch.length < 1 or opts.fetch.length > 2
+      throw new TypeError "Rip App: keyed source fetch requires a key parameter and accepts one optional AbortSignal parameter"
+    return makeSourceFamily opts.fetch, staleTime
+
+  if opts.fetch.length > 1
+    throw new TypeError 'Rip App: inferred source fetch accepts no parameters for a singleton or one key parameter for a keyed family'
+  if opts.fetch.length is 1 then makeSourceFamily(opts.fetch, staleTime) else makeSourceCell(opts.fetch, staleTime)
