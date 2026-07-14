@@ -219,8 +219,9 @@ ALL THREE in the same change.
   (run `bun install` in the package first).
 - `bun run parser` — regenerate `src/parser.js` from the grammar.
 - `bun run corpus-expected` — regenerate the corpus expected outputs.
-- `bun run type-audit` — the typed-editor scoreboard
-  (test/type-audit/README.md has the full surface).
+- `bun run type-audit` — the typed-editor scoreboard. Three audits (type,
+  hover, token); the default runs only the first. `--help` is the full
+  surface — what each audit measures, and what it is judged against.
 - `bun run ext` — build and install the VS Code extension.
 
 ## When Blocked
