@@ -167,6 +167,10 @@ class Emitter {
     // page scope and are not modules, so every module form rejects at
     // its own position instead of emitting bytes new Function cannot take.
     this.script = script;
+    // Emitted module-specifier spans, RECORDED at emission (never
+    // rediscovered by scanning output): the browser module loader
+    // splices resolved specifiers by these exact offsets.
+    this.importSpans = [];
     // Tier 3 pins (TS face only): Map of `${name}@${valueHash}` → type
     // text, supplied by the editor's probe pass. Names the scan reports
     // as pinnable (still hoisted + nested occurrence) collect in
@@ -2374,7 +2378,11 @@ class Emitter {
         }
       });
       this.b.emit(' from ');
-      this.mark(node, 'source', () => this.b.emit(this.moduleSource(source)));
+      {
+        const specStart = this.b.offset;
+        this.mark(node, 'source', () => this.b.emit(this.moduleSource(source)));
+        this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(source) });
+      }
     });
     this.b.emit(';\n');
   }
@@ -2387,7 +2395,11 @@ class Emitter {
     this.mark(node, '$self', () => {
       if (head === 'export-all') {
         this.b.emit('export * from ');
-        this.mark(node, 'source', () => this.b.emit(this.moduleSource(node[1])));
+        {
+          const specStart = this.b.offset;
+          this.mark(node, 'source', () => this.b.emit(this.moduleSource(node[1])));
+          this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(node[1]) });
+        }
         this.b.emit(';');
       } else if (head === 'export-from') {
         this.b.emit('export ');
@@ -2398,7 +2410,11 @@ class Emitter {
           this.b.emit(' }');
         }
         this.b.emit(' from ');
-        this.mark(node, 'source', () => this.b.emit(this.moduleSource(node[2])));
+        {
+          const specStart = this.b.offset;
+          this.mark(node, 'source', () => this.b.emit(this.moduleSource(node[2])));
+          this.importSpans.push({ start: specStart, end: this.b.offset, specifier: moduleSourceText(node[2]) });
+        }
         this.b.emit(';');
       } else if (head === 'export-default') {
         this.b.emit('export default ');
@@ -11990,7 +12006,11 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
       if (bindings.length === 0) continue;
       const start = builder.offset;
       if (unit.imp) {
-        builder.emit(`import { ${bindings.map(({ name, local }) => name === local ? name : `${name} as ${local}`).join(', ')} } from ${JSON.stringify(unit.imp)};\n`);
+        builder.emit(`import { ${bindings.map(({ name, local }) => name === local ? name : `${name} as ${local}`).join(', ')} } from `);
+        const specStart = builder.offset;
+        builder.emit(JSON.stringify(unit.imp));
+        emitter.importSpans.push({ start: specStart, end: builder.offset, specifier: JSON.stringify(unit.imp) });
+        builder.emit(';\n');
       } else {
         builder.emit(`const { ${bindings.map(({ name, local }) => name === local ? name : `${name}: ${local}`).join(', ')} }`);
         // Precise stdlib types on the TS face (the STDLIB_TYPE_DECLS
@@ -12113,7 +12133,7 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
       valueGen: [valueRow.generatedStart, valueRow.generatedEnd],
     });
   }
-  return { code: builder.code, mappings: builder.rows, stores, runtimes, tsRegions: builder.tsRegions, pinnables };
+  return { code: builder.code, mappings: builder.rows, stores, runtimes, tsRegions: builder.tsRegions, pinnables, imports: emitter.importSpans };
 }
 
 // The strip transform: delete the recorded TS-only regions from a
