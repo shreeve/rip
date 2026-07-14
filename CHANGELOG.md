@@ -5,6 +5,12 @@ repository's pull requests.
 
 ## Unreleased
 
+- Render gates (`member <~ @app.data.source`) now carry RFC-12 roles and
+  mappings, bind before component initialization, and reject direct or embedded
+  construction. The app renderer prefetches singleton/keyed sources exactly
+  once, validates addressed subpaths, constructs layout ancestry transactionally,
+  and reports structured failures; the pending lane is empty (#78)
+
 - The private dependency-free `@rip-lang/app` substrate now provides reactive
   stash data, singleton and keyed source cells, honest public declarations,
   and an in-memory component registry behind its own package and CI boundary
