@@ -50,8 +50,9 @@ but it must not block direct-path package implementation and tests.
 
 ### Application foundation
 
-- **App:** stash, resources, timing helpers, component registry,
-  file-based router, renderer, launch, and ARIA helpers.
+- **App:** the dependency-free stash, singleton/keyed sources, and component
+  registry are present. Resources, timing helpers, the file-based router,
+  renderer, launch, and ARIA helpers remain.
 - **Validate:** the shared `read()`/normalization vocabulary and schema
   coercer registration.
 - **Server:** routing, middleware, sessions, OpenAPI, static/app serving,
