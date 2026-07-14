@@ -93,25 +93,31 @@ let __currentComponent = null;
 const __GATE_CONSTRUCTION_BRAND = {};
 let __pendingGateConstruction = null;
 const __gateMetadata = new WeakMap();
+let __gateConstructorClaimed = false;
 
-// Module-private renderer seam: @rip-lang/app imports this file directly,
-// but the compiler never delivers this name to user programs. The pending
-// record carries an unforgeable closure brand and is consumed once by the
-// matching constructor.
-function __constructGateComponent(Component, metadata) {
-  const previous = __pendingGateConstruction;
-  __pendingGateConstruction = {
-    brand: __GATE_CONSTRUCTION_BRAND,
-    component: Component,
-    gates: metadata.gates,
-    parent: metadata.parent ?? null,
-    used: false,
-  };
-  try {
-    return new Component({});
-  } finally {
-    __pendingGateConstruction = previous;
+// The private app renderer claims the construction capability exactly
+// once at module initialization. The compiler never delivers this name,
+// and no supported package surface re-exports the returned closure.
+function __claimGateConstructor() {
+  if (__gateConstructorClaimed) {
+    throw new Error('[Rip] the render-gate construction capability is already claimed');
   }
+  __gateConstructorClaimed = true;
+  return (Component, metadata) => {
+    const previous = __pendingGateConstruction;
+    __pendingGateConstruction = {
+      brand: __GATE_CONSTRUCTION_BRAND,
+      component: Component,
+      gates: metadata.gates,
+      parent: metadata.parent ?? null,
+      used: false,
+    };
+    try {
+      return new Component({});
+    } finally {
+      __pendingGateConstruction = previous;
+    }
+  };
 }
 
 // Remove a node from the DOM, tolerant of what it actually is. A
@@ -489,7 +495,15 @@ function __gateBind(self, index) {
     );
   }
   let last = binding.value;
+  let prefetched = true;
   return __computed(() => {
+    if (prefetched) {
+      prefetched = false;
+      // Track the source cell without traversing the addressed tail a
+      // second time: the renderer already validated/captured that value.
+      binding.cell.read();
+      return last;
+    }
     let value = binding.cell.read();
     for (const segment of binding.tail) {
       if (value == null) break;
@@ -924,4 +938,4 @@ class __Component {
 // so they ride the COMPONENTS delivered-name table — the reactive
 // table (and every reactive-only program's injected bytes) stays
 // untouched.
-export { __Component, __pushComponent, __popComponent, setContext, getContext, hasContext, __clsx, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach, __ownerFrame, __pushOwner, __popOwner, __detachRef, __constructGateComponent };
+export { __Component, __pushComponent, __popComponent, setContext, getContext, hasContext, __clsx, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach, __ownerFrame, __pushOwner, __popOwner, __detachRef, __claimGateConstructor };

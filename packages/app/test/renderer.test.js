@@ -4,10 +4,12 @@ import {
   createRenderer,
   createStash,
   source,
+  unwrapStash,
 } from '@rip-lang/app';
 import { __state } from '../../../src/runtime/reactive.js';
 import {
   __Component,
+  __claimGateConstructor,
   __gateBind,
   __popComponent,
   __pushComponent,
@@ -71,6 +73,10 @@ const registry = entries => {
 };
 
 describe('renderer render gates', () => {
+  test('the renderer owns the one gate-construction capability', () => {
+    expect(() => __claimGateConstructor()).toThrow('already claimed');
+  });
+
   test('dedupes nearest-source subpath gates and constructs only after ensure', async () => {
     const pending = deferred();
     let calls = 0;
@@ -340,6 +346,53 @@ describe('renderer render gates', () => {
     expect(binding.value).toBe(42);
     expect(binding.value).toBe(42);
     expect(keyCalls).toBe(1);
+    unwrapStash(app.data).order.cellFor('o1').write({ detail: { total: 43 } });
+    expect(binding.value).toBe(43);
+    expect(keyCalls).toBe(1);
+  });
+
+  test('prefetched subpath getters evaluate once before initial binding', async () => {
+    let reads = 0;
+    let seen;
+    let profile;
+    class Page extends __Component {
+      static __gates = ['user.profile'];
+      _init() {
+        this.profile = __gateBind(this, 0);
+        profile = this.profile;
+        seen = this.profile.value.name;
+      }
+      _create() { return null; }
+    }
+    const app = {
+      data: createStash({
+        user: source({
+          fetch: async () => ({
+            get profile() {
+              reads++;
+              return { name: 'Ada' };
+            },
+          }),
+        }),
+      }),
+    };
+    const renderer = createRenderer({
+      router: { current: null },
+      app,
+      components: registry({ 'page.rip': { Page } }),
+      target: target(),
+    });
+    await renderer.mount(route('page.rip'));
+    expect(reads).toBe(1);
+    expect(seen).toBe('Ada');
+    unwrapStash(app.data).user.write({
+      get profile() {
+        reads++;
+        return { name: 'Grace' };
+      },
+    });
+    expect(profile.value.name).toBe('Grace');
+    expect(reads).toBe(2);
   });
 
   test('reserved stash paths bind through renderer-resolved raw cells', async () => {
