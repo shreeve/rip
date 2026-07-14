@@ -1,11 +1,3 @@
-# Pending rows for render gates and app data prefetch
-# (`user <~ @app.data.user`): static __gates read by the app renderer,
-# __gateBind seeding members from the app stash. These rows come along
-# when the app data consumer is implemented. Every row here FAILS today;
-# when the feature revives
-# one, MOVE the row into test/battery/ in the same change (the lane
-# asserts still-failing).
-
 import { test, code, fail, type } from '../support/testing.js'
 
 code 'gate: hoists static __gates and binds via __gateBind', '''
@@ -17,13 +9,17 @@ code 'gate: hoists static __gates and binds via __gateBind', '''
   export const A = class extends __Component {
     static __gates = ['user'];
     _init(props) {
-      this.user = __gateBind(this, 'user');
+      this.user = __gateBind(this, 0);
     }
     _create() {
       this._el0 = document.createElement('div');
-      this._t0 = document.createTextNode(String(this.user.value.name));
+      this._el0.setAttribute('data-part', 'A');
+      this._t0 = document.createTextNode('');
       this._el0.appendChild(this._t0);
       return this._el0;
+    }
+    _setup() {
+      __effect(() => { this._t0.data = this.user.value.name; });
     }
   };
 '''
@@ -36,7 +32,7 @@ code 'gate: keyed source hoists (path, key fn) pair', '''
   export const A = class extends __Component {
     static __gates = [{ path: 'order', key: (params, query) => params.id }];
     _init(props) {
-      this.order = __gateBind(this, 'order', (params, query) => params.id);
+      this.order = __gateBind(this, 0);
     }
     _create() {
       return null;
@@ -52,7 +48,7 @@ code 'gate: @params key form normalizes to bare params', '''
   export const A = class extends __Component {
     static __gates = [{ path: 'order', key: (params, query) => params.id }];
     _init(props) {
-      this.order = __gateBind(this, 'order', (params, query) => params.id);
+      this.order = __gateBind(this, 0);
     }
     _create() {
       return null;
@@ -68,7 +64,7 @@ code 'gate: subpath binds the nested path string', '''
   export const A = class extends __Component {
     static __gates = ['settings.theme'];
     _init(props) {
-      this.theme = __gateBind(this, 'settings.theme');
+      this.theme = __gateBind(this, 0);
     }
     _create() {
       return null;
@@ -85,7 +81,7 @@ code 'gate: binds before state so initializers consume the value', '''
   export const A = class extends __Component {
     static __gates = ['user'];
     _init(props) {
-      this.user = __gateBind(this, 'user');
+      this.user = __gateBind(this, 0);
       this.form = __state({...this.user.value});
     }
     _create() {
@@ -94,27 +90,15 @@ code 'gate: binds before state so initializers consume the value', '''
   };
 '''
 
-test 'gate: binding reads seeded stash value at construction', '''
-  globalThis.__ripApp = { data: { user: { name: 'Ada' } } }
+test 'gate: direct construction rejects without renderer metadata', '''
   A = component
     user <~ @app.data.user
     render null
-  a = A.new()
-  name = a.user.value.name
-  globalThis.__ripApp = undefined
-  name
-''', 'Ada'
-
-test 'gate: keyed binding calls the family with the params key', '''
-  globalThis.__ripApp = { data: { order: (id) -> { id: id, total: 42 } } }
-  A = component
-    order <~ @app.data.order(params.id)
-    render null
-  a = A.new({ params: { id: 'o1' } })
-  id = a.order.value.id
-  globalThis.__ripApp = undefined
-  id
-''', 'o1'
+  try
+    A.new()
+  catch e
+    e.message.includes 'cannot be constructed directly'
+''', true
 
 test 'gate: embedded child with gates throws at construction', '''
   globalThis.__ripApp = { data: { user: { name: 'Ada' } } }
@@ -123,14 +107,47 @@ test 'gate: embedded child with gates throws at construction', '''
     render null
   Parent = component
     render null
-  p = Parent.new()
+  parent = Parent.new()
   err = null
-  prev = globalThis.__ripComponent.__pushComponent(p)
+  prev = __pushComponent parent
   try
     Child.new()
   catch e
     err = e.message
-  globalThis.__ripComponent.__popComponent(prev)
+  __popComponent prev
   globalThis.__ripApp = undefined
   err?.includes('render gates') ?? false
 ''', true
+
+fail 'gate: <~ outside a component body is a compile error', '''
+  user <~ @app.data.user
+''', "render gate ('<~') can only be used as a direct component body line"
+
+fail 'gate: non-literal path is a compile error', '''
+  C = component
+    user <~ someVar.user
+    render null
+''', "'<~' requires a literal @app.data.<path>"
+
+fail 'gate: key referencing a local is a compile error', '''
+  C = component
+    order <~ @app.data.order(someLocal)
+    render null
+''', 'key may only be a literal or a params/query path'
+
+type 'gate: annotated value is a non-null readonly computed container', '''
+  export UserCard = component
+    user: { name: string } <~ @app.data.user
+    render null
+''', '''
+  export interface UserCard {
+    user: { readonly value: { name: string }; read(): { name: string } };
+    children?: any;
+    mount(target?: any): UserCard;
+    unmount(options?: { removeDOM?: boolean }): void;
+    emit(name: string, detail?: any): void;
+  }
+  export declare let UserCard: {
+    readonly prototype: UserCard;
+  };
+'''

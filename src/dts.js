@@ -296,11 +296,17 @@ export function emitDeclarations({ sexpr, stores, source }) {
   const componentDecl = (node, name, exported) => {
     const info = componentTypeInfo(stores, source, node);
     const optional = propsParamOptional(info);
+    const gated = info.members.some((m) => m.kind === 'gate');
     const exp = exported ? 'export ' : '';
     lines.push(`${exp}interface ${name} {`);
     for (const l of rendered(() => instanceTypeLines(info, name))) lines.push(`  ${l}`);
     lines.push('}');
     lines.push(`${exp}declare let ${name}: {`);
+    if (gated) {
+      lines.push(`  readonly prototype: ${name};`);
+      lines.push('};');
+      return;
+    }
     lines.push(`  new (props${optional ? '?' : ''}: ${propsTypeText(info)}): ${name};`);
     // The static mount mirror constructs with NO props (`new this()`
     // in the runtime), so a component with a REQUIRED prop must not
@@ -392,7 +398,7 @@ export function emitDeclarations({ sexpr, stores, source }) {
   const STMT_HEADS = new Set([
     '=', 'void-assign', 'class', 'enum', 'type-decl', 'typed-var',
     'def', 'void-def', 'def-sig', 'state', 'computed', 'effect',
-    'readonly', 'component', 'schema',
+    'readonly', 'gate', 'component', 'schema',
   ]);
   const isIdent = (s) => typeof s === 'string' && /^[A-Za-z_$][\w$]*$/.test(s);
   const isExportList = (x) =>

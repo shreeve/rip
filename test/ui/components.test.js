@@ -4,7 +4,7 @@
 //   - the grammar/lexer surface: COMPONENT/RENDER keywords, the
 //     context-sensitive offer/accept classification, the render-block
 //     scan context and rewrite pass
-//   - the member model: the seven spellings lowering into _init(props)
+//   - the member model: declaration spellings lowering into _init(props)
 //     in the order, member unwrap (the (1) component-scope twin),
 //     lifecycle hooks, owner-frame effects
 //   - the parse-time defect layer: #121 (uncategorized body
@@ -358,7 +358,7 @@ describe('the member model: _init lowering and member unwrap', () => {
     div "x"
 `;
 
-  test('the full seven-spelling lowering: source-order init, offers next, effects last, static __props', () => {
+  test('the core seven-spelling lowering: source-order init, offers next, effects last, static __props', () => {
     const { code } = compile(SRC);
     expect(code).toContain("static __props = ['label', 'opt', 'step'];");
     const init = code.slice(code.indexOf('_init(props) {'), code.indexOf('onClick(e)'));
@@ -497,9 +497,6 @@ describe('the defect layer: every silent  class rejects loudly, positioned', () 
     expect('C = component\n  42\n  render\n    div "x"'.slice(err2.start, err2.end)).toBe('42');
     emitFails('C = component\n  if true\n    console.log "x"\n  render\n    div "x"', /matches no category/);
     emitFails('C = component\n  import "./x.js"\n  render\n    div "x"', /matches no category/);
-    // The reserved gate spelling parses as a comparison — a bare
-    // expression line, loudly rejected .
-    emitFails('C = component\n  user <~ @app.data.user\n  render\n    div "x"', /matches no category/);
     // Type declarations have no member reading either.
     emitFails('C = component\n  type T = number\n  render\n    div "x"', /matches no category/);
   });
@@ -517,6 +514,15 @@ describe('the defect layer: every silent  class rejects loudly, positioned', () 
     emitFails('C = component\n  x := 0\n  accept x\n  render\n    div "x"', /duplicate component member 'x'/);
     emitFails('C = component\n  @flag\n  flag = 1\n  render\n    div "x"', /duplicate component member 'flag'/);
     emitFails('C = component\n  mounted = -> 1\n  mounted = -> 2\n  render\n    div "x"', /duplicate component member 'mounted'/);
+  });
+
+  test('runtime-owned instance fields reject across member kinds while helper names stay legal', () => {
+    for (const name of ['_state', '_frame', '_parent', '_children', '_root', '_nodes']) {
+      emitFails(`C = component\n  ${name} := 1\n  render null`, /collides with component runtime state/);
+    }
+    emitFails('C = component\n  _root <~ @app.data.root\n  render null', /collides with component runtime state/);
+    expect(compile('C = component\n  _style = -> "ok"\n  render null').code)
+      .toContain('_style()');
   });
 
   test('the generated-lifecycle namespace: a member named _init/_create/_setup/create_block_N rejects', () => {

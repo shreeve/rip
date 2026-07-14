@@ -165,3 +165,51 @@ export type ComponentsStore = {
 };
 
 export function createComponents(): ComponentsStore;
+
+export type GateDescriptor =
+  | string
+  | {
+      path: string;
+      key: (params: Record<string, string>, query: Record<string, string>) => unknown;
+    };
+
+export type GateFailure = Error & {
+  status: number;
+  path: string;
+  file: string;
+  error: unknown;
+};
+
+export type RendererRouteState = {
+  route: { file: string };
+  layouts?: string[];
+  params?: Record<string, string>;
+  query?: Record<string, string>;
+};
+
+export type RendererRouter = {
+  readonly current: RendererRouteState | null;
+  navigating?: boolean;
+  init?(): void;
+};
+
+export type RendererTarget = {
+  appendChild(node: unknown): unknown;
+};
+
+export type RendererOptions = {
+  router: RendererRouter;
+  app: { data: object };
+  components: ComponentsStore;
+  target: RendererTarget;
+  onError?: (failure: GateFailure) => void;
+};
+
+export type Renderer = {
+  readonly current: unknown;
+  mount(info: RendererRouteState): Promise<unknown>;
+  start(): Renderer;
+  stop(): void;
+};
+
+export function createRenderer(options: RendererOptions): Renderer;

@@ -152,6 +152,31 @@ Widget["app-name"]
 Dot access is available only for legal identifiers. Bracket access
 works for every property name.
 
+## Render gates
+
+A render gate binds a private component member to app data that the app
+renderer loads before constructing the component:
+
+```rip
+Profile = component
+  user <~ @app.data.user
+  order <~ @app.data.order(params.id)
+
+  form := { ...user }
+
+  render
+    h1 user.name
+```
+
+`<~` is legal only as a direct component body line. Its right-hand side is a
+literal `@app.data` path, optionally addressed by one literal or `params` /
+`query` path. Gates bind before ordinary member initializers, so `form` above
+sees the prefetched non-null value.
+
+Gated components are route-level components. They can only be constructed by
+the `@rip-lang/app` renderer; direct construction and embedded-child use reject
+loudly.
+
 ## Render naming
 
 Inside `render`:

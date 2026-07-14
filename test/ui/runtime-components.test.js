@@ -119,9 +119,9 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
 // ════════════════════════════════════════════════════════════════════
 
 describe('module shape', () => {
-  test('named exports are exactly the delivered set', () => {
+  test('named exports are the delivered set plus the private renderer construction seam', () => {
     expect(Object.keys(v4c).sort()).toEqual([
- '__Component', '__clsx', '__detach', '__detachRef', '__handleComponentError', '__lis',
+ '__Component', '__clsx', '__constructGateComponent', '__detach', '__detachRef', '__gateBind', '__handleComponentError', '__lis',
  '__ownerFrame', '__popComponent', '__popOwner', '__pushComponent', '__pushOwner',
  '__reconcile', '__transition',
  'getContext', 'hasContext', 'setContext',
@@ -1703,9 +1703,9 @@ describe('the extends rest seam (runtime-owned;  re-emits it per class — /#165
 // ════════════════════════════════════════════════════════════════════
 
 const REACTIVE_IMPORT = /^import \{ __state, __computed, __effect, __batch, __readonly, __setErrorHandler, __handleError, __catchErrors, getEffectSignal \} from ".*src\/runtime\/reactive\.js";$/;
-const COMPONENTS_IMPORT = /^import \{ setContext, getContext, hasContext, __Component, __pushComponent, __popComponent, __clsx, __lis, __reconcile, __transition, __handleComponentError, __detach, __ownerFrame, __pushOwner, __popOwner, __detachRef \} from ".*src\/runtime\/components\.js";$/;
+const COMPONENTS_IMPORT = /^import \{ setContext, getContext, hasContext, __Component, __pushComponent, __popComponent, __clsx, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach, __ownerFrame, __pushOwner, __popOwner, __detachRef \} from ".*src\/runtime\/components\.js";$/;
 const ALL_COMPONENT_NAMES = ['setContext', 'getContext', 'hasContext', '__Component', '__pushComponent',
- '__popComponent', '__clsx', '__lis', '__reconcile', '__transition', '__handleComponentError', '__detach',
+ '__popComponent', '__clsx', '__lis', '__reconcile', '__transition', '__handleComponentError', '__gateBind', '__detach',
  '__ownerFrame', '__pushOwner', '__popOwner', '__detachRef'];
 
 // A program that exercises the runtime for real without the language
@@ -1751,7 +1751,7 @@ describe('runtime delivery: the components runtime', () => {
     expect(/^import /m.test(code)).toBe(false);
     expect(code.startsWith(
  'const { __state, __computed, __effect, __batch, __readonly, __setErrorHandler, __handleError, __catchErrors, getEffectSignal, ' +
- 'setContext, getContext, hasContext, __Component, __pushComponent, __popComponent, __clsx, __lis, __reconcile, __transition, __handleComponentError, __detach, __ownerFrame, __pushOwner, __popOwner, __detachRef } = (() => {',
+ 'setContext, getContext, hasContext, __Component, __pushComponent, __popComponent, __clsx, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach, __ownerFrame, __pushOwner, __popOwner, __detachRef } = (() => {',
     )).toBe(true);
     expect(code).toContain('__RIP_REACTIVE_SENTINEL');
     expect(code).toContain('__RIP_COMPONENTS_SENTINEL');
@@ -2039,7 +2039,8 @@ describe('the component language surface (M12-B graduated boundary)', () => {
     expect(compile('offer console.log("hi")').code).toBe('offer(console.log("hi"));');
   });
 
-  test('`x <~ e` keeps its comparison parse — the gate spelling is RESERVED', () => {
-    expect(compile('x <~ load()').code).toBe('x < (~load());');
+  test('tight `<~` is the gate token while spaced `< ~` remains comparison', () => {
+    expect(() => compile('x <~ @app.data.x')).toThrow(/render gate.*direct component body line/);
+    expect(compile('x < ~load()').code).toBe('x < (~load());');
   });
 });

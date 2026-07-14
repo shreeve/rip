@@ -454,7 +454,7 @@
       "beginCaptures": {
         "1": { "name": "keyword.operator.type-annotation.rip" }
       },
-      "end": "(?=\\s*(?:=(?![>=])|:=|~=|~>|=!|<=>|\\)|->))|$|(?=#)",
+      "end": "(?=\\s*(?:=(?![>=])|:=|~=|~>|<~|=!|<=>|\\)|->))|$|(?=#)",
       "contentName": "meta.type.rip",
       "patterns": [{ "include": "#type_expression" }]
     },
@@ -480,7 +480,7 @@
         "3": { "name": "variable.other.readwrite.rip" },
         "4": { "name": "keyword.operator.type-annotation.rip" }
       },
-      "end": "(?=\\s*(?:=(?![>=])|:=|~=|~>|=!|<=>|\\)|->))|$|(?=#)",
+      "end": "(?=\\s*(?:=(?![>=])|:=|~=|~>|<~|=!|<=>|\\)|->))|$|(?=#)",
       "contentName": "meta.type.rip",
       "patterns": [{ "include": "#type_expression" }]
     },
@@ -502,6 +502,13 @@
     },
     {
       "match": "([a-zA-Z$_][\\w$]*)\\s*(~>)",
+      "captures": {
+        "1": { "name": "variable.other.readwrite.rip" },
+        "2": { "name": "keyword.operator.assignment.reactive.rip" }
+      }
+    },
+    {
+      "match": "([a-zA-Z$_][\\w$]*)\\s*(<~)",
       "captures": {
         "1": { "name": "variable.other.readwrite.rip" },
         "2": { "name": "keyword.operator.assignment.reactive.rip" }
@@ -540,8 +547,8 @@
     {"comment": "=== TWO-WAY BINDING (before comparison to prevent <=> matching <= then >) ==="},
     { "match": "<=>", "name": "keyword.control.bind.rip" },
 
-    {"comment": "=== COMPUTED / REACTIVE ARROW (before comparison and bitwise so ~> / !> don't split into ~ + > or ! + >) ==="},
-    { "match": "[~!]>", "name": "keyword.operator.assignment.reactive.rip" },
+    {"comment": "=== COMPUTED / REACTIVE OPERATORS (before comparison and bitwise) ==="},
+    { "match": "[~!]>|<~", "name": "keyword.operator.assignment.reactive.rip" },
 
     {"comment": "=== COMPARISON (before assignment to prevent == matching =) ==="},
     { "match": "===|!==|==|!=|<=|>=", "name": "keyword.operator.comparison.rip" },
