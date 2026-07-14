@@ -68,6 +68,10 @@ export function assembleBundle({ modules, packagesDir, data = null }) {
     }
   };
 
+  // The application package is the boot substrate: every bundle
+  // carries it, imported or not.
+  if (packagesDir) claimPackage('@rip-lang/app', '<boot>');
+
   const queue = Object.keys(bundle.modules);
   const seen = new Set();
   while (queue.length) {

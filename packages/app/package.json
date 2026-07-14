@@ -16,5 +16,8 @@
     "*.rip",
     "*.d.ts",
     "README.md"
-  ]
+  ],
+  "rip": {
+    "browser": true
+  }
 }

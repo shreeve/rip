@@ -1,0 +1,19 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>rip script tags</title>
+<div id="out"></div>
+<script type="text/rip">
+count := 20
+double ~= count * 2
+</script>
+<script type="text/rip">
+count = 21
+document.getElementById('out').textContent = "value: #{double}"
+</script>
+<script type="text/rip">
+x = ((
+</script>
+<script type="module">
+  import { processRipScripts } from '/dist/browser/rip.js';
+  globalThis.__scriptsResult = processRipScripts();
+</script>

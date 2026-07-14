@@ -21818,7 +21818,7 @@ var browserHost = () => {
       }
     },
     report(error) {
-      console.error("[Rip]", error);
+      console.error("[Rip]", String(error));
     }
   };
 };
@@ -21960,6 +21960,7 @@ ${compiled.code}
 }
 // src/browser-modules.js
 var RUNTIME_MODULES = { intrinsics: exports_intrinsics, stdlib: exports_stdlib, schema: exports_schema, reactive: exports_reactive, components: exports_components };
+var RUNTIME_PATHS = new Map(Object.keys(RUNTIME_MODULES).map((name) => [new URL(`./runtime/${name}.js`, import.meta.url).pathname, name]));
 var RUNTIME_RE = /(?:^|\/)src\/runtime\/(intrinsics|stdlib|schema|reactive|components)\.js$/;
 var BRIDGE_KEY = "__ripRuntimeBridge";
 var unquote = (specifier) => specifier.slice(1, -1);
@@ -21984,13 +21985,14 @@ var toObjectUrl = (code) => {
   }
   return `data:text/javascript;base64,${btoa(unescape(encodeURIComponent(code)))}`;
 };
-function createModuleLoader({ components: registry, packages = {} } = {}) {
+function createModuleLoader({ components: registry, packages = {}, debug = false } = {}) {
   if (!registry || typeof registry.read !== "function") {
     throw new TypeError("rip: createModuleLoader requires a component registry");
   }
   const urls = new Map;
   const namespaces = new Map;
   const bridges = new Map;
+  const dependents = new Map;
   const bridgeFor = (name) => {
     if (bridges.has(name))
       return bridges.get(name);
@@ -22015,9 +22017,9 @@ function createModuleLoader({ components: registry, packages = {} } = {}) {
   };
   const resolvePath = (specifier, from) => {
     const spec = unquote(specifier);
-    const runtime = spec.match(RUNTIME_RE);
+    const runtime = RUNTIME_PATHS.get(spec) ?? spec.match(RUNTIME_RE)?.[1];
     if (runtime)
-      return { bridge: runtime[1] };
+      return { bridge: runtime };
     const inBundle = (path) => {
       try {
         return registry.exists(path);
@@ -22069,8 +22071,19 @@ function createModuleLoader({ components: registry, packages = {} } = {}) {
       let code = compiled.code;
       for (const span of [...compiled.imports].reverse()) {
         const target = resolvePath(span.specifier, path);
+        if (target.path) {
+          let importers = dependents.get(target.path);
+          if (!importers)
+            dependents.set(target.path, importers = new Set);
+          importers.add(path);
+        }
         const url = target.bridge ? bridgeFor(target.bridge) : await load(target.path, [...chain, path]);
         code = `${code.slice(0, span.start)}${JSON.stringify(url)}${code.slice(span.end)}`;
+      }
+      if (debug) {
+        const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(compiled.map))));
+        code += `
+//# sourceMappingURL=data:application/json;charset=utf-8;base64,${b64}`;
       }
       return toObjectUrl(code);
     })();
@@ -22089,10 +22102,148 @@ function createModuleLoader({ components: registry, packages = {} } = {}) {
       return namespace;
     },
     invalidate(path) {
-      urls.delete(path);
-      namespaces.delete(path);
+      const queue = [path];
+      const seen = new Set;
+      while (queue.length) {
+        const at = queue.pop();
+        if (seen.has(at))
+          continue;
+        seen.add(at);
+        urls.delete(at);
+        namespaces.delete(at);
+        for (const importer of dependents.get(at) ?? [])
+          queue.push(importer);
+      }
     }
   };
+}
+// src/browser-boot.js
+var APP_PACKAGE = "@rip-lang/app";
+var bootGraphs = new Map;
+var browserFetchText = async (url, etag) => {
+  const headers = etag ? { "If-None-Match": etag } : {};
+  const response = await fetch(url, { headers });
+  if (response.status === 304)
+    return { fresh: false };
+  if (!response.ok)
+    throw new Error(`rip: failed to fetch bundle '${url}': ${response.status} ${response.statusText}`);
+  return { fresh: true, text: await response.text(), etag: response.headers.get("ETag") };
+};
+var browserStorage = () => {
+  try {
+    return typeof sessionStorage !== "undefined" ? sessionStorage : null;
+  } catch {
+    return null;
+  }
+};
+async function fetchBundle(url, { fetchText = browserFetchText, storage = browserStorage() } = {}) {
+  if (!url)
+    throw new Error("rip: fetchBundle requires a url");
+  const etagKey = `__rip_bundle_etag:${url}`;
+  const bodyKey = `__rip_bundle_body:${url}`;
+  const attempt = async (conditional) => {
+    const knownTag = conditional ? storage?.getItem(etagKey) ?? null : null;
+    const cached = knownTag ? storage?.getItem(bodyKey) ?? null : null;
+    const result = await fetchText(url, cached ? knownTag : null);
+    if (!result.fresh) {
+      if (!cached)
+        throw new Error(`rip: bundle '${url}' revalidated with no cached body`);
+      try {
+        return JSON.parse(cached);
+      } catch {
+        try {
+          storage?.removeItem?.(etagKey);
+          storage?.removeItem?.(bodyKey);
+        } catch {}
+        return;
+      }
+    }
+    let bundle;
+    try {
+      bundle = JSON.parse(result.text);
+    } catch (error) {
+      throw new Error(`rip: bundle '${url}' is not valid JSON: ${error.message}`);
+    }
+    if (result.etag && storage) {
+      try {
+        storage.setItem(etagKey, result.etag);
+        storage.setItem(bodyKey, result.text);
+      } catch {}
+    }
+    return bundle;
+  };
+  return await attempt(true) ?? await attempt(false);
+}
+async function bootApp(opts = {}) {
+  if (!opts.bundle && !opts.url) {
+    throw new Error("rip: bootApp requires a bundle or a url");
+  }
+  const fetchOpts = {};
+  if (opts.fetchText)
+    fetchOpts.fetchText = opts.fetchText;
+  if ("bundleStorage" in opts)
+    fetchOpts.storage = opts.bundleStorage;
+  const bundle = opts.bundle ?? await fetchBundle(opts.url, fetchOpts);
+  if (!bundle || typeof bundle !== "object") {
+    throw new Error("rip: bootApp requires a bundle or a url");
+  }
+  const appEntry = bundle.packages?.[APP_PACKAGE];
+  if (!appEntry) {
+    throw new Error(`rip: the bundle carries no '${APP_PACKAGE}' package — assemble the application with its packages`);
+  }
+  const debug = opts.debug === true;
+  const appPaths = Object.keys(bundle.modules ?? {}).filter((path) => path.startsWith(`${appEntry.root}/`)).sort();
+  const fingerprint = `${debug}:${JSON.stringify(appPaths.map((path) => [path, bundle.modules[path]]))}`;
+  let graph = bootGraphs.get(fingerprint);
+  if (!graph) {
+    const files2 = new Map;
+    const compiledStore = new Map;
+    const registry = {
+      read: (path) => files2.get(path),
+      exists: (path) => files2.has(path),
+      getCompiled: (path) => compiledStore.get(path),
+      setCompiled: (path, module) => void compiledStore.set(path, module)
+    };
+    const packages2 = {};
+    graph = { files: files2, packages: packages2, loader: createModuleLoader({ components: registry, packages: packages2, debug }) };
+    bootGraphs.set(fingerprint, graph);
+  }
+  const { files, packages, loader } = graph;
+  for (const name of Object.keys(packages)) {
+    if (!(name in (bundle.packages ?? {})))
+      delete packages[name];
+  }
+  Object.assign(packages, bundle.packages ?? {});
+  const modules = bundle.modules ?? {};
+  for (const path of [...files.keys()]) {
+    if (modules[path] === undefined) {
+      files.delete(path);
+      loader.invalidate(path);
+    }
+  }
+  for (const [path, source] of Object.entries(modules)) {
+    if (files.get(path) !== source) {
+      files.set(path, source);
+      loader.invalidate(path);
+    }
+  }
+  const app = await loader.import(`${appEntry.root}/${appEntry.entry}`);
+  const compiled = {};
+  for (const path of Object.keys(bundle.modules ?? {})) {
+    if (path.startsWith("_route/") || path.startsWith("_app/")) {
+      compiled[path] = { ...await loader.import(path) };
+    }
+  }
+  return app.launch({
+    bundle: { modules: bundle.modules, compiled, data: bundle.data },
+    target: opts.target,
+    adapter: opts.adapter,
+    base: opts.base,
+    hash: opts.hash,
+    persist: opts.persist,
+    storage: opts.storage,
+    onError: opts.onError
+  });
 }
 // src/browser.js
 function compileToJS(source, options = {}) {
@@ -22104,7 +22255,9 @@ function compileToJS(source, options = {}) {
 export {
   runtimes,
   processRipScripts,
+  fetchBundle,
   createModuleLoader,
   compileToJS,
-  compile
+  compile,
+  bootApp
 };
