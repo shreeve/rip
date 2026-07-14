@@ -11195,7 +11195,7 @@ class Emitter {
   regexIndex(node, obj, regex, capture) {
     const multiline = /^\/(?:[^\\/]|\\.)*\/[a-z]*m[a-z]*$/.test(regex);
     this.mark(node, '$self', () => {
-      this.b.emit('((_ = toMatchable(');
+      this.b.emit(`((_ = ${this.runtimeName('toMatchable')}(`);
       this.mark(node, 'object', () => this.expr(obj));
       this.b.emit(multiline ? ', true).match(' : ').match(');
       this.mark(node, 'key', () => this.b.emit(regex));
@@ -11219,7 +11219,7 @@ class Emitter {
     const r = node[2];
     const multiline = typeof r === 'string' && /^\/(?:[^\\/]|\\.)*\/[a-z]*m[a-z]*$/.test(r);
     this.mark(node, '$self', () => {
-      this.b.emit('(_ = toMatchable(');
+      this.b.emit(`(_ = ${this.runtimeName('toMatchable')}(`);
       this.mark(node, 'left', () => this.expr(node[1]));
       this.b.emit(multiline ? ', true).match(' : ').match(');
       this.mark(node, 'right', () => this.expr(r));
@@ -11465,6 +11465,18 @@ const containsObjectComprehension = (sexpr) => {
   return sexpr.some(containsObjectComprehension);
 };
 
+// Structural trigger for the match seam: `text =~ /re/` and
+// `text[/re/]` / `text[/re/, n]` spell the stdlib's `toMatchable` in
+// generated output even though the source never references it. The
+// three shapes mirror the `_`-hoist walker's clauses exactly.
+const containsMatchRead = (sexpr) => {
+  if (!isNode(sexpr)) return false;
+  if (sexpr[0] === '=~' && sexpr.length === 3) return true;
+  if (sexpr[0] === 'regex-index' && sexpr.length === 4) return true;
+  if (sexpr[0] === '[]' && sexpr.length === 3 && typeof sexpr[2] === 'string' && sexpr[2][0] === '/') return true;
+  return sexpr.some(containsMatchRead);
+};
+
 // The delivered-runtime table — one entry per feature runtime. Each
 // entry carries the runtime's public names (the trigger set AND the
 // injected binding set), its module URL, and an optional structural
@@ -11556,16 +11568,21 @@ const RUNTIME_TABLE = [
   },
   {
     // The stdlib: p, sleep, zip and friends
-    // — reference-triggered only (no structural trigger), so a program
-    // that never spells a helper name carries zero stdlib bytes,
-    // and a user binding of the same name suppresses delivery. `types`
+    // — reference-triggered, plus the match-seam structural trigger:
+    // `=~` and regex-index lowerings spell `toMatchable` in generated
+    // output, so those constructs deliver (and alias) it even though
+    // the source never references it. A program that never spells a
+    // helper name and never matches carries zero stdlib bytes, and a
+    // user binding of a helper name suppresses its delivery. `types`
     // annotates the inline destructure on the TS face (member
     // signatures, the STDLIB_TYPE_DECLS): the checker sees precise
     // types without inferring through the IIFE.
     key: 'stdlib',
     names: ['abort', 'assert', 'exit', 'kind', 'noop', 'p', 'pp', 'pj', 'pr',
             'raise', 'rand', 'sleep', 'toMatchable', 'todo', 'warn', 'zip'],
+    generatedNames: ['toMatchable'],
     url: new URL('./runtime/stdlib.js', import.meta.url),
+    triggers: (sexpr, preds) => containsMatchRead(sexpr),
     types: {
       abort: '(msg?: string) => never',
       assert: '(v: any, msg?: string) => void',
