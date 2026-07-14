@@ -36,18 +36,14 @@ but it must not block direct-path package implementation and tests.
 
 ### Application foundation
 
-- **App:** the dependency-free stash, singleton/keyed sources, and component
-  registry are present. Component render gates and the precompiled renderer
-  consume stash-backed prefetch metadata end to end. Resources, timing helpers,
-  the file-based router, launch, and ARIA helpers remain.
-- **Validate:** the shared `read()`/normalization vocabulary and schema
-  coercer registration.
+- **App:** the stash, sources, component registry, render gates, the
+  route manifest and router, renderer navigation integration, mutations,
+  and timing helpers are present. Launch and ARIA helpers remain.
 - **Server:** routing, middleware, sessions, OpenAPI, static/app serving,
-  worker management, TLS/proxy support, and development watch transport.
+  worker management, TLS/proxy support, nginx/caddy configuration
+  generation, mDNS, and development watch transport.
 - **UI:** browser widgets and browser-side Tailwind integration.
 - **Database:** database client, embedding/adapter surfaces, and CLI.
-
-Validate precedes server.
 
 ### Independent libraries and tools
 

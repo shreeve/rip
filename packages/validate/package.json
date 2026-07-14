@@ -16,6 +16,9 @@
   "scripts": {
     "test": "bun test --timeout 15000"
   },
+  "rip": {
+    "browser": true
+  },
   "files": [
     "*.rip",
     "*.d.ts",

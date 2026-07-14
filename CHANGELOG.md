@@ -5,6 +5,12 @@ repository's pull requests.
 
 ## Unreleased
 
+- `@rip-lang/validate` is certified complete: browser safety is declared
+  and test-enforced (`rip.browser`, zero host APIs, an import-free
+  vocabulary), the public surface carries exactly one documented `any`,
+  every validator and registration path is pinned, and the roadmap
+  reflects the finished capability (#87)
+
 - `@rip-lang/app` gains the write-side and timing primitives:
   `createMutation` wraps an async action with reactive
   pending/succeeded/error flags where the newest invocation owns the
