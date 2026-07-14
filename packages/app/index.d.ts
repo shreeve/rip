@@ -334,3 +334,45 @@ export type Renderer = {
 };
 
 export function createRenderer(options: RendererOptions): Renderer;
+
+export function persistStash(
+  app: { data: Record<string, any> },
+  opts?: {
+    local?: boolean;
+    key?: string;
+    debounce?: number;
+    storage?: {
+      getItem(key: string): string | null;
+      setItem(key: string, value: string): void;
+      removeItem(key: string): void;
+    };
+  },
+): () => void;
+
+export type LaunchResult = {
+  app: { data: Record<string, any> };
+  components: ComponentsStore;
+  router: Router;
+  renderer: Renderer;
+  destroy(): void;
+};
+
+export function launch(opts: {
+  bundle: {
+    modules?: Record<string, string>;
+    compiled?: Record<string, Record<string, unknown>>;
+    data?: Record<string, unknown>;
+  };
+  target?: RendererTarget;
+  adapter?: RouterAdapter;
+  base?: string;
+  hash?: boolean;
+  stash?: Record<string, unknown>;
+  persist?: boolean | 'local' | 'session';
+  storage?: {
+    getItem(key: string): string | null;
+    setItem(key: string, value: string): void;
+    removeItem(key: string): void;
+  };
+  onError?: (failure: { status: number; path: string }) => void;
+}): LaunchResult;

@@ -1,0 +1,89 @@
+# Stash persistence — a projection of the one store into Web Storage.
+#
+# Plain keys persist; source keys are skipped at every depth (server
+# data is refetchable — gates reload it on restore). Restore merges
+# into subtrees that contain source cells so live cells survive, and
+# skips any saved key whose current value is a source. Saving debounces
+# on the stash write-version signal, flushes on dispose and page
+# unload, and registers the purge hook reset() invokes — signing out
+# never leaves the previous principal's snapshot behind.
+
+import { unwrapStash, _stashVersion, _mergePlain } from './stash.rip'
+import { _isSourceCell } from './source.rip'
+
+PERSISTED =! Symbol.for 'rip.app.stash.persisted'
+PURGE =! Symbol.for 'rip.app.stash.purge'
+
+sourceReplacer = (key, value) ->
+  if _isSourceCell value then undefined else value
+
+resolveStorage = (opts) ->
+  return opts.storage if opts.storage?
+  unless typeof window isnt 'undefined' and window.localStorage?
+    throw new Error 'Rip App: persistStash requires a browser or an injected storage'
+  if opts.local then window.localStorage else window.sessionStorage
+
+export def persistStash(app: any, opts: { local?: boolean, key?: string, debounce?: number, storage?: any } = {}): () => void
+  target: any = unwrapStash(app) or app
+  return (-> null) if target[PERSISTED]
+  target[PERSISTED] = true
+  storage = resolveStorage opts
+  storageKey = opts.key or '__rip_app'
+  wait = opts.debounce ?? 2000
+
+  try
+    saved = storage.getItem storageKey
+    _mergePlain app.data, JSON.parse(saved) if saved
+  catch error
+    null
+
+  pending: any = null
+  save = ->
+    pending = null
+    try
+      storage.setItem storageKey, JSON.stringify(unwrapStash(app.data), sourceReplacer)
+    catch error
+      null
+    return
+
+  # The effect's first run is subscription, not a mutation — nothing
+  # schedules until a write bumps the version.
+  primed = false
+  disposeEffect = __effect ->
+    _stashVersion.value
+    unless primed
+      primed = true
+      return
+    clearTimeout pending if pending?
+    pending = setTimeout save, wait
+    -> clearTimeout pending if pending?
+
+  window.addEventListener 'beforeunload', save if typeof window isnt 'undefined'
+
+  # Purge cancels any pending debounced save, so reset()'s own baseline
+  # writes cannot re-create the snapshot one debounce later.
+  dataRaw: any = unwrapStash app.data
+  if dataRaw? and typeof dataRaw is 'object'
+    Object.defineProperty dataRaw, PURGE,
+      value: ->
+        if pending?
+          clearTimeout pending
+          pending = null
+        try
+          storage.removeItem storageKey
+        catch error
+          null
+        return
+      configurable: true
+      writable: true
+
+  disposed = false
+  ->
+    return if disposed
+    disposed = true
+    disposeEffect?()
+    window.removeEventListener 'beforeunload', save if typeof window isnt 'undefined'
+    save()
+    dataRaw[PURGE] = null if dataRaw? and typeof dataRaw is 'object'
+    target[PERSISTED] = false
+    return

@@ -11,6 +11,7 @@ The package currently provides:
 - `createRouter` and `browserAdapter` for reactive navigation state
 - `createMutation` for the write-side action primitive
 - `delay`, `debounce`, `throttle`, and `hold` timing signals
+- `launch` for the one application boot path, with `persistStash`
 - `createRenderer` for precompiled route/layout construction with render gates
 
 Only named exports are supported:
@@ -167,6 +168,26 @@ retained and the failure rejects `renderer.mount(info)` and reaches
 `onError` as an `Error` carrying `status`, `path`, `file`, and the original
 `error`. This package does
 not provide source compilation, launch, or browser delivery.
+
+## Launch
+
+`launch({ bundle, ... })` is the one boot path: it builds the stash
+(seed data overlays plain keys and never overwrites a source cell,
+then the result is stamped as the reset baseline), loads the component
+registry, derives the route manifest, and wires router and renderer
+together before starting. It installs `__ripApp` and `__ripRouter`; a
+second launch rejects loudly, as does a malformed bundle, and
+`destroy()` tears down in reverse and restores every global. Bundles
+arrive as objects — fetching, compiling, and watch transports belong
+to browser delivery. Every host concern (target, router adapter,
+storage) is an option with the browser default applied only when
+omitted, so launch tests under Node.
+
+`persistStash(app, { local?, key?, debounce?, storage? })` projects the
+stash into Web Storage: plain keys persist, source keys are skipped at
+every depth, restore merges around live cells, saving debounces on the
+stash write-version and flushes on dispose and page unload, and
+`reset()` purges the snapshot so signing out leaves nothing behind.
 
 ## Test
 

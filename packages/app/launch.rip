@@ -1,0 +1,139 @@
+# Launch — the one supported application boot path.
+#
+# launch() receives a bundle OBJECT and assembles the app: stash with
+# seed data, component registry, route manifest, router, and renderer,
+# wired together and started. Fetching bundles, compiling sources, and
+# watch transports belong to browser delivery; launch stays
+# Node-testable by taking every host concern as an option with the
+# browser default applied only when omitted.
+#
+# The bundle shape:
+#
+#   modules    route/app sources keyed by store path (registry text)
+#   compiled   precompiled module objects keyed by store path
+#   data       seed values overlaid onto the stash — a seed never
+#              overwrites a source cell
+#
+# A second launch while one is live rejects loudly, as does a malformed
+# bundle. destroy() tears down in reverse and restores every global it
+# installed.
+
+import { createStash, _stampDefaults, _mergePlain } from './stash.rip'
+import { createComponents } from './components.rip'
+import { buildRoutes } from './routes.rip'
+import { createRouter, browserAdapter } from './router.rip'
+import { createRenderer } from './renderer.rip'
+import { persistStash } from './persist.rip'
+
+export type LaunchOpts =
+  bundle: Record<string, any>
+  target?: Record<string, any>
+  adapter?: Record<string, any>
+  base?: string
+  hash?: boolean
+  stash?: Record<string, any>
+  persist?: boolean | 'local' | 'session'
+  storage?: Record<string, any>
+  onError?: (failure: Record<string, any>) => void
+
+export type LaunchResult =
+  app: Record<string, any>
+  components: Record<string, any>
+  router: Record<string, any>
+  renderer: Record<string, any>
+  destroy: () => void
+
+ROUTE_ROOT = '_route'
+
+fail = (message) -> throw new Error "Rip App: #{message}"
+
+validBundle = (bundle) ->
+  fail 'launch requires a bundle object' unless bundle? and typeof bundle is 'object' and not Array.isArray(bundle)
+  for key in ['modules', 'compiled']
+    section = bundle[key]
+    continue unless section?
+    unless typeof section is 'object' and not Array.isArray(section)
+      fail "launch bundle #{key} must be an object of store paths"
+  if bundle.data? and (typeof bundle.data isnt 'object' or Array.isArray(bundle.data))
+    fail 'launch bundle data must be an object'
+  bundle
+
+defaultTarget = ->
+  unless typeof document isnt 'undefined' and typeof document.querySelector is 'function'
+    fail 'launch requires a target outside the browser'
+  found = document.querySelector '#app'
+  unless found
+    found = document.createElement 'div'
+    found.id = 'app'
+    document.body.appendChild found
+  found
+
+export def launch(opts: LaunchOpts): LaunchResult
+  fail 'launch requires an options object' unless opts? and typeof opts is 'object'
+  fail 'an application is already launched; destroy it first' if globalThis.__ripApp?
+  bundle = validBundle opts.bundle
+  target = opts.target ?? defaultTarget()
+  adapter: any = opts.adapter ?? browserAdapter()
+
+  app: any = createStash { data: (opts.stash ?? {}) }
+
+  # Seed overlay: bundle data merges onto plain keys at every depth; a
+  # live source — singleton or keyed family, top-level or nested — is
+  # never touched by a JSON seed.
+  _mergePlain app.data, bundle.data ?? {}
+  _stampDefaults app.data
+
+  components = createComponents()
+  components.load bundle.modules if bundle.modules?
+  if bundle.compiled?
+    for own path, module of bundle.compiled
+      components.write path, '' unless components.exists path
+      components.setCompiled path, module
+
+  router = createRouter
+    routes: -> buildRoutes components.listAll(ROUTE_ROOT), ROUTE_ROOT
+    adapter: adapter
+    base: opts.base
+    hash: opts.hash
+    onError: opts.onError
+
+  renderer = createRenderer
+    router: router
+    app: app
+    components: components
+    target: target
+    onError: opts.onError
+
+  unwatch = components.watch (_event, path) ->
+    router.rebuild() if path.startsWith(ROUTE_ROOT + '/')
+
+  disposePersist = null
+  if opts.persist
+    disposePersist = persistStash app,
+      local: opts.persist is 'local'
+      key: '__rip_app'
+      storage: opts.storage
+
+  destroyed = false
+  destroy = ->
+    return if destroyed
+    destroyed = true
+    renderer.stop()
+    router.destroy()
+    unwatch()
+    disposePersist?()
+    delete globalThis.__ripApp if globalThis.__ripApp is app
+    delete globalThis.__ripRouter if globalThis.__ripRouter is router
+    return
+
+  # A failing start must not wedge the process: teardown runs before the
+  # failure propagates, so the globals never outlive a dead launch.
+  globalThis.__ripApp = app
+  globalThis.__ripRouter = router
+  try
+    renderer.start()
+  catch error
+    destroy()
+    throw error
+
+  { app, components, router, renderer, destroy }
