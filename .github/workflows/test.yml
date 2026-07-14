@@ -66,6 +66,10 @@ jobs:
         working-directory: packages/validate
         run: bun run test
 
+      - name: Server package suite (packages/server — its own suite, its own boundary)
+        working-directory: packages/server
+        run: bun run test
+
       - name: Real-browser suite (packages/browser-tests — Playwright in Chromium/Firefox/WebKit)
         working-directory: packages/browser-tests
         run: |

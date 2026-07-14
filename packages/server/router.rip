@@ -1,0 +1,169 @@
+# @rip-lang/server — the pure request matcher.
+#
+# This is the HTTP router's core, and it is not the App SPA router:
+# routes register in order, the FIRST match wins, and an exact
+# method+pattern duplicate rejects loudly at registration. No I/O
+# lives here — every behavior is a function of (registrations,
+# method, pathname), so the whole surface tests without a socket.
+#
+# Pattern grammar, per '/'-separated segment:
+#
+#   users          static — compared literally, as written
+#   :id            param — one segment, percent-decoded
+#   :id{\d+}       constrained param — the regex judges the DECODED
+#                  segment and may not capture
+#   *rest  /  *    catch-all — the final segment only; captures the
+#                  remaining segments (at least one), each decoded
+#
+# Matching tolerates one trailing slash. An EMPTY path segment never
+# satisfies a param or a catch-all piece, and a segment that fails to
+# percent-decode matches nothing — a malformed escape is not routable
+# data. Decoded captures are DATA, nothing more: '%2F' decodes to '/'
+# inside one param and '%2e%2e' to '..' inside a catch-all, so a
+# consumer building file paths from params owns its own containment
+# (the serving units do). Query strings parse with WHATWG semantics:
+# duplicate keys keep the last value, '+' decodes to a space, and a
+# '__proto__' key lands as inert own data.
+
+export type Handler = unknown
+
+export type Route =
+  method: string
+  pattern: string
+  handler: Handler
+
+export type RouteMatch =
+  handler: Handler
+  params: Record<string, string>
+  route: Route
+
+export type Matcher =
+  add: (method: string, pattern: string, handler: Handler) => void
+  match: (method: string, pathname: string) => RouteMatch | null
+  routes: () => Route[]
+
+fail = (message) -> throw new Error "Rip Server: #{message}"
+
+decode = (segment) ->
+  try
+    decodeURIComponent segment
+  catch
+    null
+
+# One pattern → an array of segment matchers. Loud on every malformed
+# spelling: the route table is configuration, and configuration errors
+# surface at startup, never at request time.
+compilePattern = (pattern) ->
+  unless typeof pattern is 'string' and pattern.startsWith '/'
+    fail "route pattern must start with '/' (got #{JSON.stringify pattern})"
+  return [] if pattern is '/'
+  names = new Set()
+  if pattern.endsWith '/'
+    fail "route pattern '#{pattern}' ends with '/' — register the canonical spelling; matching already tolerates a trailing slash"
+  tokens = pattern.slice(1).split '/'
+  segments = for token, index in tokens
+    fail "route pattern '#{pattern}' has an empty segment" if token is ''
+    if token.startsWith ':'
+      body = token.slice 1
+      brace = body.indexOf '{'
+      name = if brace is -1 then body else body.slice 0, brace
+      unless /^\w+$/.test name
+        fail "route pattern '#{pattern}' has a malformed param '#{token}'"
+      fail "route pattern '#{pattern}' repeats the duplicate param '#{name}'" if names.has name
+      names.add name
+      constraint = null
+      if brace isnt -1
+        inner = body.slice brace + 1, -1
+        unless body.endsWith '}'
+          fail "route pattern '#{pattern}' has an unbalanced constraint in '#{token}'"
+        fail "route pattern '#{pattern}' has an empty constraint in '#{token}'" unless inner
+        try
+          constraint = new RegExp "^(?:#{inner})$"
+        catch error
+          detail: any = error
+          fail "route pattern '#{pattern}' has an invalid constraint in '#{token}': #{detail.message}"
+        # Groups counted from the compiled regex itself — text-sniffing
+        # misreads '\(' and '[(]' as captures and misses '(?<name>…)'.
+        if (new RegExp("(?:#{inner})|").exec('')?.length ?? 1) > 1
+          fail "route pattern '#{pattern}' has a capturing constraint in '#{token}' — use (?:…)"
+      { kind: 'param', name, constraint }
+    else if token.startsWith '*'
+      name = if token is '*' then '*' else token.slice 1
+      unless token is '*' or /^\w+$/.test name
+        fail "route pattern '#{pattern}' has a malformed catch-all '#{token}'"
+      unless index is tokens.length - 1
+        fail "route pattern '#{pattern}' puts a catch-all before its final segment"
+      fail "route pattern '#{pattern}' repeats the duplicate param '#{name}'" if names.has name
+      names.add name
+      { kind: 'wild', name }
+    else
+      { kind: 'static', text: token }
+  segments
+
+# Walk one compiled route against the path's raw segments. Params
+# decode; statics compare as written; the catch-all takes at least one
+# segment and re-joins its decoded pieces.
+matchSegments = (segments, parts) ->
+  wild = segments[segments.length - 1]?.kind is 'wild'
+  if wild
+    return null if parts.length < segments.length
+  else
+    return null unless parts.length is segments.length
+  params = {}
+  claim = (name, value) ->
+    Object.defineProperty params, name, { value, writable: true, enumerable: true, configurable: true }
+  for segment, index in segments
+    part = parts[index]
+    switch segment.kind
+      when 'static'
+        return null unless part is segment.text
+      when 'param'
+        return null if part is ''
+        value = decode part
+        return null unless value?
+        return null if segment.constraint and not segment.constraint.test value
+        claim segment.name, value
+      when 'wild'
+        rest = []
+        for piece in parts.slice index
+          return null if piece is ''
+          decoded = decode piece
+          return null unless decoded?
+          rest.push decoded
+        claim segment.name, rest.join '/'
+  params
+
+export def createMatcher(): Matcher
+  table = []
+  seen = new Set()
+
+  add = (method, pattern, handler) ->
+    unless typeof method is 'string' and /^[A-Za-z]+$/.test method
+      fail "route method must be an HTTP method token (got #{JSON.stringify method})"
+    fail 'a route requires a handler' unless handler?
+    verb = method.toUpperCase()
+    segments = compilePattern pattern
+    key = "#{verb} #{pattern}"
+    fail "#{key} is already registered" if seen.has key
+    seen.add key
+    table.push { method: verb, pattern, handler, segments }
+    return
+
+  match = (method, pathname) ->
+    return null unless typeof pathname is 'string' and pathname.startsWith '/'
+    verb = String(method).toUpperCase()
+    path = if pathname.length > 1 and pathname.endsWith '/' then pathname.slice 0, -1 else pathname
+    parts = if path is '/' then [] else path.slice(1).split '/'
+    for route in table
+      continue unless route.method is verb or route.method is 'ALL'
+      params = matchSegments route.segments, parts
+      continue unless params?
+      return { handler: route.handler, params, route: { method: route.method, pattern: route.pattern, handler: route.handler } }
+    null
+
+  routes = -> ({ method, pattern, handler } for { method, pattern, handler } in table)
+
+  { add, match, routes }
+
+export def parseQuery(search: string = ''): Record<string, string>
+  Object.fromEntries new URLSearchParams(search ?? '')

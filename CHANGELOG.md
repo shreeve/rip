@@ -5,6 +5,20 @@ repository's pull requests.
 
 ## Unreleased
 
+- The server stage opens with `@rip-lang/server` and its pure request
+  matcher: `createMatcher` routes in registration order, first match
+  wins, with `:name` params (percent-decoded, never empty),
+  `:name{re}` constraints judging the decoded segment (capturing
+  groups — named ones included — reject), and `*rest` catch-alls in
+  final position taking at least one non-empty segment. Every
+  malformed spelling rejects loudly at registration naming the
+  pattern, as do exact method+pattern duplicates; `match()` and
+  `parseQuery()` are total functions over arbitrary request strings.
+  Decoded captures are data, never path-safe; query parsing is WHATWG
+  (duplicate keys keep last, `+` is a space, `__proto__` lands inert).
+  The package is server-only by design — browser safety is never
+  declared, and the package suite enforces it (#94)
+
 - Applications boot through the browser entry: `bootApp` fetches the
   bundle with ETag revalidation against session storage (a 304 serves
   the cached body; a bodyless revalidation rejects loudly), stands up
