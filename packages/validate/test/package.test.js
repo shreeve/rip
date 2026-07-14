@@ -28,6 +28,18 @@ test('package has no dependency fields', () => {
   }
 });
 
+test('the package declares browser safety and earns it', () => {
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  expect(pkg.rip).toEqual({ browser: true });
+});
+
+test('the public surface carries exactly one documented any', () => {
+  const dts = readFileSync(new URL('../index.d.ts', import.meta.url), 'utf8');
+  const anys = dts.match(/\bany\b/g) ?? [];
+  expect(anys.length).toBe(1);
+  expect(dts).toContain('export type Validator = (v: any) => unknown;');
+});
+
 test('the vocabulary uses no host APIs', () => {
   for (const module of ['registry.rip', 'index.rip']) {
     const source = readFileSync(new URL(`../${module}`, import.meta.url), 'utf8');

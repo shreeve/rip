@@ -68,7 +68,9 @@ Order = schema
 Raw validators register raw, so their coercers receive values
 untouched. Registering a coercer name twice, or registering an async or
 generator function, rejects loudly — including at the bridge import
-itself when a name is already claimed. The two call sites prepare input
+itself when a name is already claimed. The bridge resolves the schema
+runtime inside this repository; the package is private and ships with
+the compiler. The two call sites prepare input
 differently: schema coercion trims non-raw wire input before the
 validator runs; `check()` passes the string form untouched. A coerced
 `false` is a value (`~:bool` accepts falsy tokens), never a miss.
