@@ -4,3 +4,5 @@
 
 export { createMatcher, parseQuery } from './router.rip'
 export { createContext, errorEnvelope, respond } from './context.rip'
+export { compose } from './middleware.rip'
+export { cors, logger } from './builtin.rip'

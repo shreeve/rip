@@ -87,6 +87,43 @@ revalidation (304 on `If-None-Match`); there is no default host —
 this package never touches a filesystem, and the serving units own
 the real host alongside its containment policy.
 
+## The pipeline
+
+`compose({ use, before, after, handler })` builds the middleware
+pipeline as an onion — every stage a pure function of the context:
+
+```rip
+run = compose
+  use:     [logger(), cors(origin: 'https://app.example')]
+  before:  [requireUser]           # a returned Response short-circuits
+  after:   [stampVersion]          # observes (and may replace) every response
+  handler: show
+
+response = await run createContext(request, params: hit.params)
+```
+
+Middleware receives `(c, next)`; `next()` returns the downstream
+`Response` for inspection or replacement. Returning a `Response`
+short-circuits; returning nothing *without* calling `next` is a loud
+mistake, never a silent hang; calling `next` twice rejects. Before
+filters guard the handler; after filters run at the center of the
+onion — on guard responses and handler envelopes alike — so a
+wrapping logger sees the final truth. A throw in any stage translates
+through the error envelope. An aborted request stops the pipeline
+with 499 and skips everything downstream. `c.locals` is the
+request-local bag, owned by one request across all stages.
+
+`cors()` reflects any origin as `*` by default and scopes by string,
+list, or predicate — a scoped policy always emits `Vary: Origin`, on
+allow and deny alike. A true preflight (`OPTIONS` carrying
+`Access-Control-Request-Method`) answers 204 before the handler; any
+other `OPTIONS` is an ordinary request. Credentials never ride a
+wildcard or the literal `null` origin. `logger()` writes one line per
+request to an injected stream — the status logged is the status sent,
+envelopes included, and a broken sink loses a log line, never the
+response. Security middleware (sessions, CSRF, secure headers)
+arrives with its own dedicated unit and review.
+
 `errorEnvelope(err)` is the one deterministic error translation:
 `notice` and `issues` are explicitly user-facing and always shown, a
 plain message shows only for 4xx, and 5xx or raw throws mask to the

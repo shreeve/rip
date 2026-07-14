@@ -1,0 +1,114 @@
+# The core middleware — cross-cutting concerns every service wants,
+# each one an ordinary `(c, next)` middleware for compose(). Security
+# middleware (sessions, CSRF, secure headers) arrives with its own
+# dedicated unit and review.
+
+export type CorsOpts =
+  origin?: string | string[] | ((origin: string) => boolean)
+  methods?: string | string[]
+  headers?: string | string[]
+  credentials?: boolean
+  maxAge?: number
+  exposeHeaders?: string | string[]
+
+export type LogInfo =
+  method: string
+  path: string
+  status: number
+  ms: number
+  time: string
+
+export type LoggerOpts =
+  format?: 'tiny' | 'dev' | 'full' | ((info: LogInfo) => string)
+  skip?: (c: any) => boolean
+  stream?: { write: (line: string) => any }
+
+listOf = (value) -> if Array.isArray(value) then value.join(',') else value
+
+# CORS. The default policy reflects any origin as '*'; a string, list,
+# or predicate scopes it. A scoped policy always emits 'Vary: Origin'
+# — allowed AND denied answers differ by origin, and a shared cache
+# must never serve one origin's answer to another. Credentials never
+# ride a wildcard OR the literal 'null' origin (every sandboxed
+# document shares 'null'; granting it credentials grants them all).
+# A preflight OPTIONS — the kind carrying Access-Control-Request-
+# Method — answers 204 right here; any other OPTIONS is an ordinary
+# request and reaches its handler.
+export def cors(opts: CorsOpts = {}): any
+  origin = opts.origin ?? '*'
+  methods = listOf(opts.methods ?? 'GET,POST,PUT,PATCH,DELETE,OPTIONS')
+  headers = listOf(opts.headers ?? 'Content-Type,Authorization,X-Requested-With')
+  exposeHeaders = listOf(opts.exposeHeaders ?? '')
+  maxAge = opts.maxAge ?? 86400
+
+  allowedFor = (requestOrigin) ->
+    if typeof origin is 'function'
+      if origin(requestOrigin) then requestOrigin else null
+    else if Array.isArray origin
+      if origin.includes(requestOrigin) then requestOrigin else null
+    else if origin is '*'
+      '*'
+    else
+      origin
+
+  (c, next) ->
+    requestOrigin = c.req.header 'Origin'
+    return next() unless requestOrigin
+    c.header 'Vary', 'Origin', { append: true } unless origin is '*'
+    allowed = allowedFor requestOrigin
+    return next() unless allowed?
+    c.header 'Access-Control-Allow-Origin', allowed
+    c.header 'Access-Control-Allow-Methods', methods
+    c.header 'Access-Control-Allow-Headers', headers
+    if opts.credentials and allowed isnt '*' and allowed isnt 'null'
+      c.header 'Access-Control-Allow-Credentials', 'true'
+    c.header 'Access-Control-Expose-Headers', exposeHeaders if exposeHeaders
+    if c.req.method is 'OPTIONS' and c.req.header('Access-Control-Request-Method')?
+      c.header 'Access-Control-Max-Age', String(maxAge)
+      return c.body null, 204
+    next()
+
+FORMATTERS =
+  tiny: (info) -> "#{info.method} #{info.path} #{info.status} - #{info.ms}ms"
+  dev: (info) ->
+    color = if info.status >= 500 then '\x1b[31m'
+    else if info.status >= 400 then '\x1b[33m'
+    else if info.status >= 300 then '\x1b[36m'
+    else '\x1b[32m'
+    "#{info.method} #{info.path} #{color}#{info.status}\x1b[0m - #{info.ms}ms"
+  full: (info) -> "[#{info.time}] #{info.method} #{info.path} #{info.status} - #{info.ms}ms"
+
+consoleStream =
+  write: (line) -> console.log(line.trimEnd())
+
+# Request logging. The line goes to the injected stream (console by
+# default), formatted by name or by a function over the request info.
+# The logged status is whatever actually goes out — envelopes included,
+# because the handler stage translates its own throws. The logger
+# contains its own faults: a broken sink, format, or skip predicate
+# loses a log line, never the client's response.
+export def logger(opts: LoggerOpts = {}): any
+  format = opts.format ?? 'dev'
+  stream = opts.stream ?? consoleStream
+
+  (c, next) ->
+    skipped = false
+    try
+      skipped = opts.skip?(c) is true
+    catch
+      skipped = false
+    return next() if skipped
+    start = Date.now()
+    response = await next()
+    try
+      info =
+        method: c.req.method
+        path: c.req.path
+        status: response.status
+        ms: Date.now() - start
+        time: new Date().toISOString()
+      line = if typeof format is 'function' then format(info) else (FORMATTERS[format] ?? FORMATTERS.dev)(info)
+      stream.write "#{line}\n"
+    catch
+      null # the line is gone; the response is not
+    response

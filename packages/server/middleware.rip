@@ -1,0 +1,121 @@
+# Middleware composition — the pipeline between a matched route and
+# its response. One stack: onion middlewares around before filters,
+# the handler, and after filters, every stage a pure function of the
+# request context.
+#
+#   use      (c, next) -> … — wraps everything downstream; next()
+#            returns the downstream Response for inspection or
+#            replacement. Returning a Response short-circuits;
+#            returning nothing WITHOUT calling next is a loud mistake,
+#            never a silent hang. Calling next twice rejects.
+#   before   (c) -> … — guards; a returned Response skips the
+#            remaining filters and the handler.
+#   after    (c, response) -> … — observers; run on every outgoing
+#            response (short-circuits and envelopes included) and may
+#            return a replacement Response.
+#   handler  the route handler, driven through respond() — its throws
+#            envelope at its own stage, so wrapping middleware (a
+#            logger) sees the enveloped status.
+#
+# A throw anywhere else translates through the same envelope at the
+# pipeline boundary. An aborted request stops the pipeline with 499
+# (client closed request) — remaining stages never run. `c.locals` is
+# the request-local bag: owned by this request, alive across every
+# stage, gone with the context.
+import { errorEnvelope, respond } from './context.rip'
+
+export type Middleware = (c: any, next: () => Promise<Response>) => any
+export type BeforeFilter = (c: any) => any
+export type AfterFilter = (c: any, response: Response) => any
+
+export type Stack =
+  use?: Middleware[]
+  before?: BeforeFilter[]
+  after?: AfterFilter[]
+  handler: any
+
+fail = (message) -> throw new Error "Rip Server: #{message}"
+
+CLIENT_CLOSED = 499
+
+aborted = (c) -> c.req?.raw?.signal?.aborted is true
+
+stageList = (name, list) ->
+  unless Array.isArray(list) and list.every((fn) -> typeof fn is 'function')
+    fail "compose #{name} must be an array of functions"
+  list
+
+export def compose(stack: Stack): (c: any) => Promise<Response>
+  fail 'compose requires a handler' unless stack?.handler?
+  middlewares = stageList 'use', (stack.use ?? [])
+  befores = stageList 'before', (stack.before ?? [])
+  afters = stageList 'after', (stack.after ?? [])
+  handler = stack.handler
+
+  (c) ->
+    c.locals ??= {}
+    settled = false
+
+    # After observers run at the CENTER of the onion: wrapping
+    # middleware (a logger) sees the response after any replacement.
+    applyAfters = (response) ->
+      for filter in afters
+        replacement = await filter c, response
+        response = replacement if replacement instanceof Response
+      response
+
+    # The core dispatch: middlewares as an onion, then guards, the
+    # handler, and the after observers at the center. The abort signal
+    # is checked at every stage BOUNDARY (middleware entry, each
+    # guard, pre-handler) — a stage already in flight completes, and
+    # the after observers always run over what was computed.
+    dispatch = (index) ->
+      return new Response null, { status: CLIENT_CLOSED } if aborted c
+      if index < middlewares.length
+        called = 0
+        pending: any = null
+        next = ->
+          fail 'next() called after the pipeline settled' if settled
+          called += 1
+          fail 'next() called more than once in one middleware' if called > 1
+          pending = dispatch index + 1
+          pending
+        result = await middlewares[index] c, next
+        return result if result instanceof Response
+        fail 'a middleware returned nothing and never called next()' if called is 0
+        # The middleware delegated: its downstream response stands —
+        # awaited HERE, so a fire-and-forget next() still resolves to
+        # the real response instead of a null racing the microtasks.
+        return await pending
+      response: any = null
+      for filter in befores
+        return new Response null, { status: CLIENT_CLOSED } if aborted c
+        guard = await filter c
+        if guard instanceof Response
+          response = guard
+          break
+      unless response?
+        return new Response null, { status: CLIENT_CLOSED } if aborted c
+        response = await respond handler, c
+      applyAfters response
+
+    response = await respondThrough dispatch, c
+    # A next() held past this point is a stale capability: calling it
+    # after the response left rejects loudly instead of silently
+    # re-running the pipeline for nobody.
+    settled = true
+    response
+
+# Drive the dispatch with the same total error posture respond gives
+# handlers: a throw becomes its envelope; an error hostile to its own
+# envelope still becomes a bare 500.
+respondThrough = (dispatch, c) ->
+  try
+    await dispatch 0
+  catch err
+    try
+      { status, error } = errorEnvelope err
+      c.json { error }, status
+    catch
+      new Response '{"error":{"message":"Internal Server Error"}}',
+        { status: 500, headers: { 'Content-Type': 'application/json; charset=utf-8' } }

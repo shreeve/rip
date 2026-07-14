@@ -4,9 +4,12 @@ import * as server from '@rip-lang/server';
 
 test('public entry exposes named exports only', () => {
   expect(Object.keys(server).sort()).toEqual([
+    'compose',
+    'cors',
     'createContext',
     'createMatcher',
     'errorEnvelope',
+    'logger',
     'parseQuery',
     'respond',
   ]);
@@ -31,7 +34,7 @@ test('the package is server-only: browser safety is never declared', () => {
 });
 
 test('the pure modules use no host APIs', () => {
-  for (const module of ['router.rip', 'context.rip', 'index.rip']) {
+  for (const module of ['router.rip', 'context.rip', 'middleware.rip', 'builtin.rip', 'index.rip']) {
     const source = readFileSync(new URL(`../${module}`, import.meta.url), 'utf8');
     expect(source).not.toMatch(/\bBun\.|node:|process\.|fetch\(/);
   }

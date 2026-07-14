@@ -5,6 +5,23 @@ repository's pull requests.
 
 ## Unreleased
 
+- The server pipeline exists: `compose({ use, before, after, handler })`
+  builds the middleware onion — `next()` returns the downstream
+  Response for inspection or replacement, a fire-and-forget `next()`
+  still resolves to the real response, a `next()` held past the
+  response throws loudly, and silent drops or double calls are loud
+  500s, never hangs. Before filters guard; after observers run at the
+  onion's center on guards and envelopes alike and may replace the
+  response; a throw in any stage translates through the hardened error
+  envelope; aborted requests exit 499 at stage boundaries; `c.locals`
+  is the request-local bag, proven isolated under concurrent requests.
+  Core middleware ship alongside: `cors()` (scoped policies always
+  `Vary: Origin`; exact preflight detection via
+  Access-Control-Request-Method; credentials never ride a wildcard or
+  the literal `null` origin) and `logger()` (logs the status actually
+  sent, envelopes included, and contains its own faults — a broken
+  sink loses a log line, never the response) (#96)
+
 - The server gains its request context: `createContext` wraps one
   web-standard Request into the handler surface — params, query
   (last-wins on both faces, like `parseQuery`), case-insensitive
