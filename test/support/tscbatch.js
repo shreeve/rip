@@ -39,7 +39,7 @@ export function tscBatch(tsc, files, extraArgs = []) {
       encoding: 'utf8',
     });
     if (r.error) {
-      throw new Error(`cannot run tsc at ${tsc} (${r.error.message}) — fix RIP_TSC or PATH`);
+      throw new Error(`cannot run tsc at ${tsc} (${r.error.message}) — try re-running \`bun install\``);
     }
     const byFile = new Map(names.map((n) => [n, []]));
     const unattributed = [];

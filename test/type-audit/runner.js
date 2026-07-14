@@ -88,6 +88,30 @@ const cleanupTemp = () => { for (const d of TEMP_DIRS) { try { fs.rmSync(d, { re
 process.on('exit', cleanupTemp);
 process.on('SIGINT', () => { cleanupTemp(); process.exit(130); });
 
+// Preflight: the audit is a COMPLETENESS check, so a run missing its
+// tools must fail loudly and up front, never let dimensions skip into a
+// green subset (the twin dimension type-checks fixtures against the
+// React/zod corpus; tsgo comes from the root install). "60/60" must
+// always mean the whole audit ran.
+{
+  const missing = [];
+  try { tsgoBinaryPath(); }
+  catch { missing.push('tsgo — run `bun install` at the repository root'); }
+  // Both the runtime libs AND their @types/* dev deps: the twin type-check
+  // (dimension 5) needs the type declarations, and it now FAILS rather
+  // than skips, so a missing @types would read as a false twin error.
+  const auditPkg = JSON.parse(fs.readFileSync(path.join(HERE, 'package.json'), 'utf8'));
+  const corpus = [...Object.keys(auditPkg.dependencies ?? {}), ...Object.keys(auditPkg.devDependencies ?? {})];
+  const gone = corpus.filter((d) => !fs.existsSync(path.join(HERE, 'node_modules', d, 'package.json')));
+  if (gone.length) missing.push(`the fixture corpus (${gone.join(', ')}) — run \`bun install\` in test/type-audit/`);
+  if (missing.length) {
+    console.error('\n✗ The type audit cannot run — dependencies are missing:');
+    for (const m of missing) console.error(`  • ${m}`);
+    console.error('\nInstall them, then re-run `bun run type-audit`.\n');
+    process.exit(1);
+  }
+}
+
 // Count REAL directives only — comment-start position, the emitter's
 // own rule (a prose comment that merely MENTIONS "@ts-expect-error" is
 // not a directive in either surface).
@@ -107,8 +131,9 @@ function dimCompiles(ripPath) {
 // ── dimension 5: twin type-check — run tsgo ONCE over the fixtures
 // under tsconfig.json (strict), then attribute errors per twin.
 function runTwinTsc() {
-  let tsc;
-  try { tsc = tsgoBinaryPath(); } catch { return null; } // no tsgo installed
+  // The preflight guarantees tsgo resolves; if it somehow does not, that
+  // is a real broken state — let it throw loudly rather than skip.
+  const tsc = tsgoBinaryPath();
   let out = '';
   try { out = execFileSync(tsc, ['--noEmit', '-p', path.join(HERE, 'tsconfig.json')], { encoding: 'utf8', timeout: 120000, stdio: ['ignore', 'pipe', 'pipe'] }); }
   catch (err) { out = (err.stdout || '').toString() + (err.stderr || '').toString(); } // tsc exits non-zero when it finds errors
@@ -122,18 +147,23 @@ function runTwinTsc() {
   return byFile;
 }
 function dimTwin(twinBase, byFile) {
-  if (byFile === null) return { status: 'skip', detail: 'tsgo not found — bun install in packages/vscode' };
+  // Missing tools can no longer reach here — the preflight fails the run
+  // up front — so a twin outcome is only ever pass or fail, never a
+  // silent skip that would shrink "60/60" into a green subset.
   const errs = byFile.get(twinBase) ?? [];
-  if (errs.length === 0) return { status: 'pass' };
-  if (errs.some((e) => /Cannot find module '(react|react-dom|dayjs|zod|zustand)/.test(e)))
-    return { status: 'skip', detail: 'needs deps (bun install in test/type-audit/)' };
-  return { status: 'fail', detail: `${errs.length} type error(s)`, errs };
+  return errs.length === 0
+    ? { status: 'pass' }
+    : { status: 'fail', detail: `${errs.length} type error(s)`, errs };
 }
 
 // ── dimension 4: runtime parity (run .rip via rip, the twin via bun,
 // diff stdout). bun executes .ts and .tsx alike — a .tsx twin's JSX is
 // define-only at module scope (nothing renders without a DOM), so both
 // modules must load, run their top level, and print identical bytes.
+// This dimension only runs for a fixture that already COMPILED, so a run
+// error is not an environment gap — it is a real regression (rip crashed
+// on code it compiled, or the reference twin is broken) and FAILS loudly,
+// never a silent skip that would drop the check from the denominator.
 function runOut(cmd, file) {
   try { return { ok: true, out: execFileSync(cmd[0], [...cmd.slice(1), file], { encoding: 'utf8', timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'] }) }; }
   catch (err) { return { ok: false, out: (err.stdout || '').toString(), detail: (err.stderr || err.message || '').toString().split('\n')[0] }; }
@@ -142,7 +172,7 @@ function dimRuntime(ripPath, tsPath) {
   if (!tsPath) return { status: 'n/a', detail: 'no twin' };
   const r = runOut(['bun', RIP], ripPath);
   const t = runOut(['bun'], tsPath);
-  if (!r.ok || !t.ok) return { status: 'skip', detail: `run error (${r.ok ? 'ts' : 'rip'}): ${(r.detail || t.detail || '').slice(0, 80)}` };
+  if (!r.ok || !t.ok) return { status: 'fail', detail: `run error (${r.ok ? 'ts' : 'rip'}): ${(r.detail || t.detail || '').slice(0, 80)}` };
   return { status: r.out === t.out ? 'pass' : 'fail', detail: r.out === t.out ? '' : 'stdout differs' };
 }
 

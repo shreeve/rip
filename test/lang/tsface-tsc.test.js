@@ -1,10 +1,9 @@
-// The TS face's TypeScript-validity gate : the INDEPENDENT
-// verification that face output is real TypeScript — `tsc` under the
-// external-tool exception (the RIP_TSC pattern, exactly as
-// test/dts-tsc.test.js runs the declaration gate; RIP_REQUIRE_TSC=1
-// makes a missing tsc a FAILURE and the extended-tier script —
-// `bun run test:all`, where these tsc-spawning tiers live —
-// sets it).
+// The TS face's TypeScript-validity gate: the INDEPENDENT
+// verification that face output is real TypeScript — `tsc` is the
+// repository's pinned TypeScript (test/support/tsc.js resolveTsc),
+// exactly as test/toolchain/dts-tsc.test.js runs the declaration gate.
+// These tsc-spawning tiers run under the extended-tier script
+// (`bun run test:all`); a missing install throws (loud), never skips.
 //
 // Two tiers, because the corpus is a COMPILATION fixture set, not a
 // type-correct program set (files reference undefined names, mix types
@@ -20,7 +19,7 @@
 //   2. CLEAN rows: self-contained typed programs must check with ZERO
 //      diagnostics — annotations engage the checker for real — and a
 //      deliberate violation must FAIL, so the gate has teeth.
-import { describe, test, expect } from 'bun:test';
+import { test, expect } from 'bun:test';
 import { mkdtempSync, writeFileSync, rmSync, readdirSync, readFileSync } from 'fs';
 import { spawnSync } from 'child_process';
 import { join } from 'path';
@@ -28,28 +27,13 @@ import { tmpdir } from 'os';
 import { compile } from '../../src/compile.js';
 import { describeExtended, EXTENDED } from '../support/extended.js';
 import { tscBatch } from '../support/tscbatch.js';
+import { resolveTsc } from '../support/tsc.js';
 
-const TSC = process.env.RIP_TSC ?? Bun.which('tsc');
+// tsc is the repository's pinned TypeScript (resolveTsc), resolved only
+// in the extended tier that spawns it. A missing install throws here —
+// loud, a broken environment — never a silent skip.
+const TSC = EXTENDED ? resolveTsc() : null;
 const TSC_TIMEOUT = 120_000;
-
-if (!TSC && !process.env.RIP_REQUIRE_TSC) {
-  console.warn(
- '\n⚠ RIP_TSC is not set and no `tsc` is on PATH — the M10-B TS-face validity ' +
- 'gate is SKIPPED. Install TypeScript or point RIP_TSC at a tsc executable to run it.\n',
-  );
-}
-
-describe('the tsc floor (never skipped)', () => {
-  test('RIP_REQUIRE_TSC=1 makes a missing tsc a FAILURE here too', () => {
-    if (process.env.RIP_REQUIRE_TSC && !TSC) {
-      throw new Error(
- 'RIP_REQUIRE_TSC is set but no tsc was found (set RIP_TSC or put tsc on PATH) — ' +
- 'the TS-face validity gate cannot run in a required-validation environment',
-      );
-    }
-    expect(Boolean(TSC) || !process.env.RIP_REQUIRE_TSC).toBe(true);
-  });
-});
 
 // The feature-runtime names (set — reactive, schema, and the
 // M12 component family), ambient-declared: faces compile under
@@ -84,7 +68,7 @@ const tscRun = (files) => {
       encoding: 'utf8',
     });
     if (r.error) {
-      throw new Error(`cannot run tsc at ${TSC} (${r.error.message}) — fix RIP_TSC or PATH`);
+      throw new Error(`cannot run tsc at ${TSC} (${r.error.message}) — try re-running \`bun install\``);
     }
     return { status: r.status, output: `${r.stdout ?? ''}${r.stderr ?? ''}` };
   } finally {
@@ -95,10 +79,10 @@ const tscRun = (files) => {
 const corpusDir = join(import.meta.dir, '../corpus');
 const corpusFiles = readdirSync(corpusDir).filter((f) => f.endsWith('.rip')).sort();
 
-// The rows run in the EXTENDED tier only ,
-// and only with a tsc located; absence stays loud under
-// RIP_REQUIRE_TSC through the floor test above.
-const describeTscExtended = TSC ? describeExtended : describe.skipIf(true);
+// The rows run in the EXTENDED tier only; tsc is the repo's pinned
+// TypeScript, so absence is a loud install error (resolveTsc throws),
+// never a silent skip.
+const describeTscExtended = describeExtended;
 
 describeTscExtended('tier 1: every corpus TS face parses as TypeScript (no TS1xxx diagnostics)', () => {
   test('the whole corpus, one tsc program', () => {

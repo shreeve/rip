@@ -1,16 +1,13 @@
 //  tsc validation harness: the generated declarations must be
-// VALID TypeScript, asserted by the real validator. `tsc` is an
-// external TOOL, deliberately never a dependency: located by the
-// RIP_TSC environment variable or PATH
-// discovery, never a package in the dependency graph.
+// VALID TypeScript, asserted by the real validator. `tsc` is the
+// repository's pinned TypeScript (test/support/tsc.js resolveTsc),
+// provisioned by `bun install` — the same version CI pins, never a tsc
+// floating on PATH. The compiler core itself ships no TypeScript
+// (test/toolchain/dependencies.test.js proves src/ imports no package).
 //
-// The floor policy : with tsc absent these
-// tests SKIP with a loud notice — casual local runs never fail on a
-// missing external tool — but RIP_REQUIRE_TSC=1 turns absence into a
-// FAILURE, and the extended-tier script (`bun run test:all`, the contract —
-// this file's rows are extended-tier, the loop that spawns tsc) sets
-// it, so the validation environment can never go quietly toothless.
-// The floor test below is NEVER skipped.
+// These rows are extended-tier (`bun run test:all`, which sets
+// RIP_EXTENDED). tsc resolves only in that tier; a missing install
+// throws (loud — a broken environment), never a silent skip.
 //
 // Corpus-driven: every corpus file whose compile yields declarations
 // contributes its .d.ts — the artifact under validation — to ONE tsc
@@ -21,46 +18,30 @@
 // configuration is deliberate: it reports implicit-any in declaration
 // files (TS7006/TS7010), which is exactly the defect class (#67) this
 // harness guards against.
-import { describe, test, expect } from 'bun:test';
+import { test, expect } from 'bun:test';
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { compile } from '../../src/compile.js';
 import { describeExtended, EXTENDED } from '../support/extended.js';
 import { tscBatch } from '../support/tscbatch.js';
+import { resolveTsc } from '../support/tsc.js';
 
-const TSC = process.env.RIP_TSC ?? Bun.which('tsc');
+// tsc is the repository's pinned TypeScript (resolveTsc), resolved only
+// in the extended tier that spawns it. A missing install throws here —
+// loud, a broken environment — never a silent skip.
+const TSC = EXTENDED ? resolveTsc() : null;
 
 // The batch-spawning test carries its own timeout: a cold tsc start
 // under machine load can exceed the suite's per-test default.
 const TSC_TIMEOUT = 60_000;
-if (!TSC && !process.env.RIP_REQUIRE_TSC) {
-  console.warn(
-    '\n⚠ RIP_TSC is not set and no `tsc` is on PATH — the declaration-validity ' +
-    'gate is SKIPPED. Install TypeScript or point RIP_TSC at a tsc executable to run it.\n',
-  );
-}
-
-describe('the tsc floor (never skipped)', () => {
-  test('RIP_REQUIRE_TSC=1 makes a missing tsc a FAILURE — the extended-tier script sets it', () => {
-    if (process.env.RIP_REQUIRE_TSC && !TSC) {
-      throw new Error(
-        'RIP_REQUIRE_TSC is set but no tsc was found (set RIP_TSC or put tsc on PATH) — ' +
-        'the declaration-validity gate cannot run in a required-validation environment',
-      );
-    }
-    // Absent the requirement, absence skips (the loud notice above) —
-    // asserted so the policy itself cannot drift silently.
-    expect(Boolean(TSC) || !process.env.RIP_REQUIRE_TSC).toBe(true);
-  });
-});
 
 const corpusDir = join(import.meta.dir, '../corpus');
 const corpusFiles = readdirSync(corpusDir).filter((f) => f.endsWith('.rip')).sort();
 
-// The rows run in the EXTENDED tier only ,
-// and only with a tsc located; absence stays loud under
-// RIP_REQUIRE_TSC through the floor test above.
-const describeTscExtended = TSC ? describeExtended : describe.skipIf(true);
+// The rows run in the EXTENDED tier only; tsc is the repo's pinned
+// TypeScript, so absence is a loud install error (resolveTsc throws),
+// never a silent skip.
+const describeTscExtended = describeExtended;
 
 const HAND_ROWS = [
   // exported forms, overloads, classes with the full member mix

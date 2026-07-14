@@ -22,7 +22,7 @@
 //      (rule 5); an unknown face rejects at the API boundary.
 //
 // The face's TypeScript VALIDITY is gated separately in
-// test/tsface-tsc.test.js (the RIP_TSC external-tool pattern).
+// test/lang/tsface-tsc.test.js (against the repo's pinned TypeScript).
 import { describe, test, expect } from 'bun:test';
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
