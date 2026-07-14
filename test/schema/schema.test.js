@@ -102,6 +102,13 @@ describe('schema runtime: the validation pipeline', () => {
       .toThrow(/no coercer registered for '~:nosuch'/);
   });
 
+  test('coercer registration rejects duplicates and non-synchronous functions', () => {
+    registerCoercer('dupe_pin', (v) => v);
+    expect(() => registerCoercer('dupe_pin', (v) => v)).toThrow(/'~:dupe_pin' is already registered/);
+    expect(() => registerCoercer('async_pin', async (v) => v)).toThrow(/must be a plain synchronous function/);
+    expect(() => registerCoercer('gen_pin', function* (v) { yield v; })).toThrow(/must be a plain synchronous function/);
+  });
+
   test('transforms see the whole raw input as `it`', () => {
     const out = run(
       'S = schema :shape\n  full! string, -> it.first + " " + it.last',

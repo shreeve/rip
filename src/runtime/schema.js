@@ -137,14 +137,23 @@ function __schemaObjectIssue(data) {
 }
 
 // Named-coercer registry for the `~:name` field syntax. A coercer is a
-// function (wireValue) → coercedValue, where null/undefined/false
-// means "didn't convert" → {error: 'coerce'}. `opts.raw` passes the
-// value through un-stringified (coercers over arrays/objects).
+// function (wireValue) → coercedValue, where null/undefined means
+// "didn't convert" → {error: 'coerce'}. `false` is a legitimate
+// coerced value (a boolean vocabulary must produce it). `opts.raw`
+// passes the value through un-stringified (coercers over
+// arrays/objects).
 const __schemaNamedCoercers = new Map();
 
 function __schemaRegisterCoercer(name, fn, opts) {
   if (typeof name !== 'string' || typeof fn !== 'function') {
     throw new Error('registerCoercer(name, fn, opts?): name string and fn required');
+  }
+  const tag = Object.prototype.toString.call(fn);
+  if (tag === '[object AsyncFunction]' || tag === '[object GeneratorFunction]' || tag === '[object AsyncGeneratorFunction]') {
+    throw new Error("registerCoercer: coercer '~:" + name + "' must be a plain synchronous function");
+  }
+  if (__schemaNamedCoercers.has(name)) {
+    throw new Error("registerCoercer: coercer '~:" + name + "' is already registered");
   }
   __schemaNamedCoercers.set(name, { fn, raw: opts?.raw === true });
   return fn;
@@ -1022,7 +1031,7 @@ class __SchemaDef {
         const input = entry.raw ? v : String(v).trim();
         let out;
         try { out = entry.fn(input); } catch { out = null; }
-        if (out === null || out === undefined || out === false) {
+        if (out === null || out === undefined) {
           errors.push({ field: n, error: 'coerce', message: n + ' is not a valid ' + f.coercer });
           failed.add(n);
         } else {

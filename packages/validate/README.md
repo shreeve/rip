@@ -51,6 +51,28 @@ Contracts worth knowing:
 - Identical inputs validate identically, always — validators hold no
   state.
 
+## Schema coercion
+
+Importing the bridge registers the whole vocabulary as `~:name` schema
+coercers — one vocabulary serving both call sites — and keeps later
+`registerValidator` additions registered as they arrive:
+
+```coffee
+import '@rip-lang/validate/coercers'
+
+Order = schema
+  total! ~:money
+  placed! ~:date
+```
+
+Raw validators register raw, so their coercers receive values
+untouched. Registering a coercer name twice, or registering an async or
+generator function, rejects loudly — including at the bridge import
+itself when a name is already claimed. The two call sites prepare input
+differently: schema coercion trims non-raw wire input before the
+validator runs; `check()` passes the string form untouched. A coerced
+`false` is a value (`~:bool` accepts falsy tokens), never a miss.
+
 ## API
 
 - `check(value, type)` — apply a validator to a value in hand; an

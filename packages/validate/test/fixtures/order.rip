@@ -1,0 +1,12 @@
+import '@rip-lang/validate/coercers'
+
+export Order = schema
+  total! ~:money
+  placed! ~:date
+  ssn? ~:ssn
+  meta? ~:json
+  flag? ~:bool
+  qty? ~:int
+
+export Tick = schema
+  n! ~:evenCents

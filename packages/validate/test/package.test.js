@@ -28,8 +28,10 @@ test('package has no dependency fields', () => {
   }
 });
 
-test('package uses no host APIs', () => {
-  const source = readFileSync(new URL('../index.rip', import.meta.url), 'utf8');
-  expect(source).not.toMatch(/\bimport\b/);
-  expect(source).not.toMatch(/\bBun\.|node:|process\.|globalThis/);
+test('the vocabulary uses no host APIs', () => {
+  for (const module of ['registry.rip', 'index.rip']) {
+    const source = readFileSync(new URL(`../${module}`, import.meta.url), 'utf8');
+    expect(source).not.toMatch(/\bimport\b/);
+    expect(source).not.toMatch(/\bBun\.|node:|process\.|globalThis/);
+  }
 });
