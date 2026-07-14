@@ -8,6 +8,7 @@ The package currently provides:
 - `source` for lazy singleton and keyed server-backed values
 - `createComponents` for in-memory component source and compiled-module storage
 - `buildRoutes` and `parseQuery` for the pure file-route manifest and matcher
+- `createRouter` and `browserAdapter` for reactive navigation state
 - `createRenderer` for precompiled route/layout construction with render gates
 
 Only named exports are supported:
@@ -79,6 +80,43 @@ and a `%2F` inside a dynamic segment yields a param containing `/`; a segment
 that fails to decode matches nothing. `parseQuery` turns a search string into
 a plain object with `URLSearchParams` semantics: last value wins per key and
 `+` reads as a space.
+
+## Router
+
+`createRouter` runs the navigation state machine over a route manifest,
+with every host concern behind an injectable adapter — history entries,
+URL reads, and scroll primitives — so the machine tests under Node and
+`browserAdapter()` supplies the one History-API implementation:
+
+```coffee
+router = createRouter
+  routes: buildRoutes components.listAll('_route')
+  adapter: browserAdapter()
+  onError: (failure) -> console.error failure.status, failure.path
+
+router.init()
+router.push '/users/7?tab=posts'
+```
+
+`current` bundles the resolved route, layout chain, params, and query
+into one reactive dependency, exactly the shape the renderer consumes;
+the fragment lives on `router.hash`, so an in-page anchor navigation
+never looks like a route change. Params and query keep their identity
+across navigations that do not change them. `push`/`replace` take
+app-relative URLs (`base` joins on write and strips on read);
+`hash: true` routes through the fragment. History writes land before
+state commits and callback dispatch, so a redirect from `onNavigate`
+supersedes a coherent history — and an unconditional redirect loop is
+cut loudly after ten nested navigations. A push saves the outgoing
+scroll position into the outgoing entry under `__ripScroll`, merging
+with any host state; traversal restores the saved position and leaves
+entries without one alone. An unmatched push reports
+`{ status: 404, path }` to `onError` and changes nothing; a traversal
+to a URL the manifest no longer claims reports 404 and keeps the prior
+state while the address bar owns the dead URL. `onNavigate` callbacks
+receive each successful navigation and cannot break it — or each
+other — by throwing. `navigating` is a writable flag the renderer owns
+during mounts.
 
 ## Renderer
 
