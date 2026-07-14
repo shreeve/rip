@@ -223,6 +223,31 @@ gets the shell — `appShell({ title, state })` — with the bundle's
 text and neutralizes a state payload that tries to close its `<script>`
 block, so neither can break out into markup.
 
+## Development watch
+
+`createWatch()` is the SSE development transport — one client
+implementation, web-standard streams, no socket of its own. Its
+`handler` opens a `text/event-stream` that fans one event to every
+open connection, each tagged with a monotonic revision as its SSE id;
+`reload()`, `css(hrefs)`, and `error(payload)` push to whoever is
+connected. A client that reconnects with a stale `Last-Event-ID` is
+reloaded at once (last-known-good), a compile `error` is sticky so a
+client entering a broken build still sees it (and the next `reload`
+clears it), and `css()` is the fast path — the client swaps only the
+named stylesheets, no reload, no lost application state.
+
+```rip
+watch = createWatch()
+# the file watcher (with the CLI) calls these:
+watch.css ['/style.css']          # a stylesheet changed
+watch.reload()                    # a source module changed
+watch.error { file, line, message }  # a build broke
+```
+
+`watchClient({ path })` is that one client, emitted as a string to
+inline under watch: it connects, reloads, swaps stylesheets, and shows
+a compile-error overlay that clears on the next good build.
+
 `errorEnvelope(err)` is the one deterministic error translation:
 `notice` and `issues` are explicitly user-facing and always shown, a
 plain message shows only for 4xx, and 5xx or raw throws mask to the
