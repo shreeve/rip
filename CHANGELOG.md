@@ -5,6 +5,19 @@ repository's pull requests.
 
 ## Unreleased
 
+- The database client layers result ownership over the adapter:
+  `createClient(adapter)` materializes the adapter's `{ columns, data }`
+  into row objects and projects them — `query` (rows + metadata),
+  `rows`, `one` (first row or null), `value` (first scalar or null).
+  `transaction(fn)` begins a session, commits on return, and rolls back
+  on any throw — with the commit OUTSIDE the try so a failed commit
+  propagates on its own rather than triggering a rollback against an
+  already-dropped session, and a failed rollback never masks the
+  original error. A nested transaction joins the outer session (no
+  savepoints). Cancellation is a `{ signal }` race: an aborted signal
+  rejects with a `CancelledError` before dispatch or in flight, and the
+  abort listener is always cleaned up (#108)
+
 - The database stage opens with `@rip-lang/db` — the one adapter
   contract (`query`, `begin`, `introspect`, `capabilities`) and its
   single shipped adapter, DuckDB reached over HTTP by an external

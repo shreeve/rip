@@ -60,3 +60,33 @@ with `isDbError(err)` (or `err instanceof DbError`):
 Configuration is `url` (defaulting to the local harbor
 `http://127.0.0.1:9494`), an optional bearer `token`, and the
 injectable `fetch`.
+
+## The query client
+
+`createClient(adapter)` layers result ownership over any adapter: it
+materializes the adapter's `{ columns, data }` into row objects and
+projects them.
+
+```rip
+db = createClient harborAdapter(url: env.RIP_DB_URL)
+
+people   = await db.rows  'SELECT id, name FROM users WHERE active = ?', [true]
+ada      = await db.one   'SELECT * FROM users WHERE id = ?', [1]   # first row or null
+howMany  = await db.value 'SELECT count(*) FROM users'              # scalar
+
+newId = await db.transaction (tx) ->
+  row = await tx.one 'INSERT INTO users (name) VALUES (?) RETURNING id', ['Ada']
+  row.id
+```
+
+- **`query`** returns `{ rows, columns, rowCount }`; **`rows`**,
+  **`one`** (first row or `null`), and **`value`** (first scalar) are
+  the projections.
+- **`transaction(fn)`** begins a session, hands `fn` a client bound to
+  it, and commits on return or rolls back on any throw. A nested
+  `tx.transaction` JOINS the outer one — there are no savepoints, so
+  the inner call reuses the session rather than opening a second.
+- **Cancellation**: pass a `{ signal }` `AbortSignal`. An
+  already-aborted signal rejects before dispatch; an abort in flight
+  rejects the caller with a `CancelledError` at once (the request may
+  still finish on the server).
