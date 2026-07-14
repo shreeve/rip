@@ -34,37 +34,22 @@ parsePaddingValue = (value: unknown): Padding ->
   return emptyPadding() unless value?
 
   if typeof value is 'number'
-    return {
-      paddingTop: value
-      paddingRight: value
-      paddingBottom: value
-      paddingLeft: value
-    }
+    values = [value]
+  else
+    text = String(value).trim()
+    return emptyPadding() unless text
+    values = text.split /\s+/
 
-  values = String(value).trim().split /\s+/
-  result = emptyPadding()
-  switch values.length
-    when 1
-      result.paddingTop = convertToPx values[0]
-      result.paddingRight = convertToPx values[0]
-      result.paddingBottom = convertToPx values[0]
-      result.paddingLeft = convertToPx values[0]
-    when 2
-      result.paddingTop = convertToPx values[0]
-      result.paddingRight = convertToPx values[1]
-      result.paddingBottom = convertToPx values[0]
-      result.paddingLeft = convertToPx values[1]
-    when 3
-      result.paddingTop = convertToPx values[0]
-      result.paddingRight = convertToPx values[1]
-      result.paddingBottom = convertToPx values[2]
-      result.paddingLeft = convertToPx values[1]
-    when 4
-      result.paddingTop = convertToPx values[0]
-      result.paddingRight = convertToPx values[1]
-      result.paddingBottom = convertToPx values[2]
-      result.paddingLeft = convertToPx values[3]
-  result
+  return emptyPadding() unless values.length >= 1 and values.length <= 4
+
+  [a, b = a, c = a, d = b] = values
+
+  {
+    paddingTop:    convertToPx a
+    paddingRight:  convertToPx b
+    paddingBottom: convertToPx c
+    paddingLeft:   convertToPx d
+  }
 
 styleObject = (style: unknown): Record<string, unknown> ->
   return {} unless style?
