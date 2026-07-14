@@ -324,3 +324,57 @@ describe('compiler-generated runtime aliases', () => {
     }
   });
 });
+
+describe('match reads deliver the stdlib runtime', () => {
+  test('`=~` delivers toMatchable in both modes', () => {
+    const src = 'm = "x42" =~ /x(\\d+)/\nconsole.log _[1]';
+    expect(compileDelivered(src, 'import')).toMatch(/import \{[^}]*toMatchable[^}]*\} from/);
+    expect(compileDelivered(src, 'inline')).toMatch(/const \{[^}]*toMatchable[^}]*\}/);
+  });
+
+  test('a regex index delivers toMatchable in both modes', () => {
+    const src = 'id = "1234"[/^([1-9]\\d*)$/, 1]';
+    expect(compileDelivered(src, 'import')).toMatch(/import \{[^}]*toMatchable[^}]*\} from/);
+    expect(compileDelivered(src, 'inline')).toMatch(/const \{[^}]*toMatchable[^}]*\}/);
+  });
+
+  test('a bare regex index delivers toMatchable in both modes', () => {
+    const src = 'hit = "abc"[/b/]';
+    expect(compileDelivered(src, 'import')).toMatch(/import \{[^}]*toMatchable[^}]*\} from/);
+    expect(compileDelivered(src, 'inline')).toMatch(/const \{[^}]*toMatchable[^}]*\}/);
+  });
+
+  test('a program-scope toMatchable binding gets a minted alias', () => {
+    const src = 'toMatchable = 1\nm = "a1" =~ /(\\d)/\nconsole.log toMatchable, _[1]';
+    const code = compileDelivered(src, 'inline');
+    expect(code).toMatch(/toMatchable: toMatchable_/);
+    expect(code).toContain('(_ = toMatchable_(');
+    expect(code).toContain('let toMatchable = 1;');
+    expect(compileDelivered(src, 'import')).toMatch(/import \{[^}]*toMatchable as toMatchable_[^}]*\} from/);
+  });
+
+  test('a compiled match-op program runs standalone', () => {
+    const src = [
+      'v = "x42"',
+      'console.log v[/^x(\\d+)$/, 1]',
+      'console.log v[/x\\d+/]',
+      'console.log(("y7" =~ /(\\d)/) and _[1])',
+      'toMatchable = "shadow"',
+      'console.log toMatchable',
+    ].join('\n');
+    const { mkdtempSync, writeFileSync, rmSync } = require('node:fs');
+    const { tmpdir } = require('node:os');
+    const { join } = require('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'rip-match-'));
+    try {
+      const file = join(dir, 'probe.rip');
+      writeFileSync(file, src);
+      const run = spawnSync('bun', ['bin/rip', file], { encoding: 'utf8' });
+      expect(run.stderr).toBe('');
+      expect(run.stdout).toBe('42\nx42\n7\nshadow\n');
+      expect(run.status).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

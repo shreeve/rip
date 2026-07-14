@@ -5,6 +5,14 @@ repository's pull requests.
 
 ## Unreleased
 
+- Match reads deliver their runtime: `text =~ /re/`, `text[/re/]`, and
+  `text[/re/, n]` structurally trigger delivery of the stdlib's
+  `toMatchable` helper their lowerings spell — in both inline and import
+  modes — and a program-scope `toMatchable` binding mints an alias the
+  lowering spells instead. A compiled match-op program ran only where the
+  test harness injected the helper by hand; under real delivery it threw
+  ReferenceError (#81)
+
 - Render gates (`member <~ @app.data.source`) now carry RFC-12 roles and
   mappings, bind before component initialization, and reject direct or embedded
   construction. The app renderer prefetches singleton/keyed sources exactly
