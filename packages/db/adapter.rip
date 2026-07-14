@@ -1,0 +1,186 @@
+# @rip-lang/db — the database adapter contract and the harbor adapter.
+#
+# Database access goes through one adapter contract: `query(sql,
+# params)` returns `{ columns, data, rowCount }` and is the floor;
+# `begin()` pins a transaction, `introspect()` reads the schema, and
+# `capabilities` declares what the engine supports. Exactly one
+# adapter ships — DuckDB reached over HTTP by a `duckdb-harbor`
+# endpoint; the harbor server is external and never vendored.
+#
+# The adapter is pure over an injected `fetch`, so every protocol
+# behavior tests without a server. `query` POSTs `/sql`; `begin` opens
+# a session (`POST /sql/sessions/new`), carries its sessionId on each
+# statement, and drops it after COMMIT or ROLLBACK. Errors are one
+# typed hierarchy: a QueryError carries the engine's code, details,
+# and the offending SQL; a ConnectionError is a transport or HTTP
+# failure — both are DbError, so a caller can catch the family.
+
+# The typed error hierarchy. Extra fields — httpStatus on any DbError,
+# and code/details/sql on a QueryError — are stamped on the instance
+# at the throw site and declared on the public types in index.d.ts.
+export class DbError extends Error
+  constructor: (message) ->
+    super message
+    @name = 'DbError'
+
+export class ConnectionError extends DbError
+  constructor: (message) ->
+    super message
+    @name = 'ConnectionError'
+
+export class QueryError extends DbError
+  constructor: (message) ->
+    super message
+    @name = 'QueryError'
+
+export def isDbError(value: any): boolean
+  value instanceof DbError
+
+export type QueryResult =
+  columns: string[]
+  data: any[][]
+  rowCount: number
+
+export type Transaction =
+  query: (sql: string, params?: any[]) => Promise<QueryResult>
+  commit: () => Promise<void>
+  rollback: () => Promise<void>
+
+export type Capabilities =
+  tx: boolean
+  ddlTransactional: boolean
+
+export type Adapter =
+  query: (sql: string, params?: any[]) => Promise<QueryResult>
+  begin: (options?: any) => Promise<Transaction>
+  introspect: () => Promise<any>
+  capabilities: Capabilities
+
+export type HarborOpts =
+  url?: string
+  token?: string
+  fetch?: typeof fetch
+
+DEFAULT_URL = 'http://127.0.0.1:9494'
+
+export def harborAdapter(opts: HarborOpts = {}): Adapter
+  base = String(opts.url ?? DEFAULT_URL).replace(/\/+$/, '')
+  fetchFn = opts.fetch ?? fetch
+  headers = ->
+    h: any = { 'Content-Type': 'application/json', 'Accept': 'application/json' }
+    h['Authorization'] = "Bearer #{opts.token}" if opts.token
+    h
+
+  # One POST to harbor: a transport failure is a ConnectionError, an
+  # HTTP or engine error is classified from the response body, and a
+  # success returns the parsed JSON. The offending SQL rides into a
+  # QueryError so a caller sees what failed.
+  post = (path: string, body: any, sql: any = null) ->
+    response = null
+    try
+      response = await fetchFn "#{base}#{path}",
+        method: 'POST'
+        headers: headers()
+        body: JSON.stringify body
+    catch cause
+      detail: any = cause
+      error = new ConnectionError "db: harbor at #{base} is unreachable: #{detail.message}"
+      error.cause = cause
+      throw error
+    data: any = {}
+    try
+      data = await response.json()
+    catch
+      data = {}
+    if not response.ok or data.ok is false or data.error?
+      message = (data.error or "db request failed: #{response.status} #{response.statusText ?? ''}").trim()
+      # Classify by DOMAIN, not by whether SQL was present: the engine
+      # rejecting a statement carries an errorCode (a QueryError), while
+      # an HTTP failure with no engine code is an availability problem
+      # (a ConnectionError) — so a caller's retry loop keyed on
+      # ConnectionError catches a 5xx during a query.
+      error: any = if data.errorCode?
+        e: any = new QueryError message
+        e.code = data.errorCode
+        e.details = data.errorDetails if data.errorDetails?
+        e
+      else if not response.ok
+        new ConnectionError message
+      else
+        new QueryError message
+      error.sql = sql if sql?
+      error.httpStatus = response.status
+      throw error
+    data
+
+  query = (sql: string, params: any = null): Promise<QueryResult> ->
+    post '/sql', (if params?.length then { sql, params } else { sql }), sql
+
+  begin = (options: any = {}): Promise<Transaction> ->
+    session = await post '/sql/sessions/new', {}
+    sessionId = session.sessionId
+    # No session id means no isolation — refuse loudly rather than run
+    # BEGIN/COMMIT as independent autocommit statements on the pool.
+    throw new DbError 'db: harbor returned no session id for the transaction' unless sessionId?
+    run = (sql: string, params: any = null): Promise<QueryResult> ->
+      body = if params?.length then { sql, params, sessionId } else { sql, sessionId }
+      post '/sql', body, sql
+    drop = ->
+      # Best-effort: harbor's idle TTL reaps an abandoned session, so a
+      # failed DELETE only delays cleanup, never leaks a transaction.
+      try
+        await fetchFn "#{base}/sql/sessions/#{sessionId}", { method: 'DELETE', headers: headers() }
+      catch
+        null
+      return
+    # A failed BEGIN would otherwise orphan the freshly-created session
+    # with no handle for the caller to clean up — drop it here.
+    try
+      await run 'BEGIN'
+    catch error
+      await drop()
+      throw error
+    {
+      query: run
+      commit: ->
+        # drop in a finally, mirroring rollback: a failed COMMIT still
+        # releases the open transaction now, not at the idle TTL.
+        try
+          await run 'COMMIT'
+        finally
+          await drop()
+        return
+      rollback: ->
+        try
+          await run 'ROLLBACK'
+        finally
+          await drop()
+        return
+    }
+
+  # DuckDB's information_schema, shaped into { tables: [{ schema, name,
+  # columns: [{ name, type }] }] } — the one introspection surface the
+  # ORM and the migration runner read. System schemas are excluded, and
+  # a table is keyed by schema+name so two schemas' same-named tables
+  # never merge their columns.
+  introspect = ->
+    result = await query "SELECT table_schema, table_name, column_name, data_type FROM information_schema.columns WHERE table_schema NOT IN ('information_schema', 'pg_catalog') ORDER BY table_schema, table_name, ordinal_position"
+    tables: any = {}
+    order = []
+    for row in result.data
+      [schema, tableName, columnName, dataType] = row
+      key = "#{schema}.#{tableName}"
+      unless tables[key]?
+        tables[key] = { schema, name: tableName, columns: [] }
+        order.push key
+      tables[key].columns.push { name: columnName, type: dataType }
+    { tables: (tables[key] for key in order) }
+
+  {
+    query
+    begin
+    introspect
+    # DuckDB rolls DDL back with the transaction, so the migration
+    # runner may claim a whole-file rollback.
+    capabilities: { tx: true, ddlTransactional: true }
+  }

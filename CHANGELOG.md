@@ -5,6 +5,20 @@ repository's pull requests.
 
 ## Unreleased
 
+- The database stage opens with `@rip-lang/db` — the one adapter
+  contract (`query`, `begin`, `introspect`, `capabilities`) and its
+  single shipped adapter, DuckDB reached over HTTP by an external
+  `duckdb-harbor` endpoint that is never vendored. The adapter is pure
+  over an injected `fetch`, so every protocol behavior tests without a
+  server (live integration is a separate endpoint-gated tier). Errors
+  are one typed hierarchy classified by domain: a `QueryError` (engine
+  rejection, carrying its code, details, and SQL) and a
+  `ConnectionError` (transport or HTTP availability failure, including
+  a 5xx during a query) both under `DbError`. Transactions pin one
+  session, drop it in a `finally` so a failed COMMIT still releases the
+  open transaction, drop an orphaned session on a failed BEGIN, and
+  refuse a session response that carries no id (#107)
+
 - mDNS `.local` advertising and the rip.local dashboard complete the
   server stage, pure and host-free: `lanIP(interfaces)` picks the first
   routable IPv4 (skipping loopback, IPv6, and link-local), skipping

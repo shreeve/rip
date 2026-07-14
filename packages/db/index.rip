@@ -1,0 +1,4 @@
+# @rip-lang/db — the one database adapter contract and its single
+# shipped adapter (DuckDB over a duckdb-harbor HTTP endpoint).
+
+export { harborAdapter, DbError, ConnectionError, QueryError, isDbError } from './adapter.rip'
