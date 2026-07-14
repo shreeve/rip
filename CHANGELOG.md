@@ -5,6 +5,11 @@ repository's pull requests.
 
 ## Unreleased
 
+- The private dependency-free `@rip-lang/app` substrate now provides reactive
+  stash data, singleton and keyed source cells, honest public declarations,
+  and an in-memory component registry behind its own package and CI boundary
+  (#77)
+
 - The email package now has one public authoring entry, separate substrate
   contracts, transactional SSR global restoration, validated DOM structure and
   curated content boundaries. Tailwind output resolves standalone values,

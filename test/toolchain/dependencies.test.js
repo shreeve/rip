@@ -47,3 +47,10 @@ test('packages/ui isolates an exact Tailwind dependency budget', () => {
     expect(pkg[field]).toBeUndefined();
   }
 });
+
+test('packages/app remains dependency-free', () => {
+  const pkg = JSON.parse(readFileSync(join(import.meta.dir, '../../packages/app/package.json'), 'utf8'));
+  for (const field of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
+    expect(pkg[field]).toBeUndefined();
+  }
+});

@@ -1,0 +1,245 @@
+import { _isSourceCell, _isSourceFamily } from './source.rip'
+
+export type StashMethods =
+  peek: (path?: string) => unknown
+  reset: () => void
+
+export type Stash<D extends Record<string, any> = Record<string, any>> = D & StashMethods
+
+RAW =! Symbol 'rip.app.stash.raw'
+SIGNALS =! Symbol 'rip.app.stash.signals'
+KEYS =! Symbol 'rip.app.stash.keys'
+PROXIES =! new WeakMap()
+keysVersion = 0
+
+signalFor = (target, prop) ->
+  signals = target[SIGNALS]
+  unless signals
+    signals = new Map()
+    Object.defineProperty target, SIGNALS, value: signals
+  signal = signals.get prop
+  unless signal
+    signal = __state target[prop]
+    signals.set prop, signal
+  signal
+
+keysSignal = (target) -> signalFor target, KEYS
+
+touchKeys = (target) ->
+  keysSignal(target).value = ++keysVersion
+  return
+
+plainObject = (value) ->
+  return false unless value? and typeof value is 'object'
+  proto = Object.getPrototypeOf value
+  proto is Object.prototype or proto is null or Array.isArray(value)
+
+wrap = (value) ->
+  return value unless plainObject value
+  existing = PROXIES.get value
+  return existing if existing
+  makeProxy value
+
+readLiteral = (value, prop) ->
+  raw = value?[RAW]
+  return value[prop] unless raw
+  current = raw[prop]
+  if _isSourceCell current
+    return current if _isSourceFamily current
+    return wrap current.read()
+  wrap signalFor(raw, prop).value
+
+writeLiteral = (target, prop, value) ->
+  raw = target?[RAW]
+  unless raw
+    target[prop] = value
+    return value
+
+  if Array.isArray(raw) and prop is 'length'
+    oldLength = raw.length
+    newLength = +value
+    raw.length = newLength
+    if newLength isnt oldLength
+      if raw[SIGNALS]
+        for index in [Math.min(oldLength, newLength)...Math.max(oldLength, newLength)]
+          raw[SIGNALS].get(String(index))?.value = raw[index]
+      touchKeys raw
+    return value
+
+  current = raw[prop]
+  if _isSourceCell(current) and not _isSourceCell(value)
+    if _isSourceFamily current
+      throw new TypeError "Rip App: cannot assign a value to keyed source '#{String(prop)}'; use cellFor(key).write(value)"
+    current.write if value?[RAW] then value[RAW] else value
+    return value
+
+  unwrapped = if value?[RAW] then value[RAW] else value
+  had = Object.prototype.hasOwnProperty.call raw, prop
+  raw[prop] = unwrapped
+  raw[SIGNALS]?.get(prop)?.value = unwrapped
+  touchKeys raw unless had
+  value
+
+pathParts = (path) ->
+  unless typeof path is 'string' and path.length > 0
+    throw new TypeError 'Rip App: stash path must be a non-empty string'
+  parts = []
+  index = 0
+
+  unless path[0] is '['
+    start = index
+    index++ while index < path.length and path[index] isnt '.' and path[index] isnt '/' and path[index] isnt '['
+    part = path.slice start, index
+    if not part or /\s/.test(part)
+      throw new TypeError "Rip App: malformed stash path '#{path}'"
+    parts.push part
+
+  while index < path.length
+    marker = path[index]
+    if marker is '.' or marker is '/'
+      index++
+      start = index
+      index++ while index < path.length and path[index] isnt '.' and path[index] isnt '/' and path[index] isnt '['
+      part = path.slice start, index
+      if not part or /\s/.test(part)
+        throw new TypeError "Rip App: malformed stash path '#{path}'"
+      parts.push part
+    else if marker is '['
+      index++
+      if path[index] is '"' or path[index] is "'"
+        quote = path[index]
+        index++
+        start = index
+        index++ while index < path.length and path[index] isnt quote
+        if index >= path.length or index is start
+          throw new TypeError "Rip App: malformed stash path '#{path}'"
+        part = path.slice start, index
+        index++
+        unless path[index] is ']'
+          throw new TypeError "Rip App: malformed stash path '#{path}'"
+        index++
+        parts.push part
+      else
+        start = index
+        index++ while index < path.length and path[index] isnt ']'
+        part = path.slice start, index
+        unless /^[-+]?\d+$/.test(part) and path[index] is ']'
+          throw new TypeError "Rip App: malformed stash path '#{path}'"
+        index++
+        parts.push +part
+    else
+      throw new TypeError "Rip App: malformed stash path '#{path}'"
+
+  parts
+
+isPathKey = (prop) ->
+  typeof prop is 'string' and (prop.includes('.') or prop.includes('/') or prop.includes('['))
+
+resolvePart = (part, target) ->
+  if typeof part is 'number' and part < 0 and Array.isArray(target)
+    target.length + part
+  else
+    part
+
+readPath = (proxy, path) ->
+  value = proxy
+  for part in pathParts(path)
+    return undefined unless value?
+    value = readLiteral value, resolvePart(part, value)
+  value
+
+writePath = (proxy, path, value) ->
+  parts = pathParts path
+  target = proxy
+  for part, index in parts
+    part = resolvePart part, target
+    if index is parts.length - 1
+      writeLiteral target, part, value
+    else
+      nested = readLiteral target, part
+      unless nested?
+        nextPart = parts[index + 1]
+        writeLiteral target, part, (if typeof nextPart is 'number' then [] else {})
+        nested = readLiteral target, part
+      unless nested? and typeof nested is 'object'
+        throw new TypeError "Rip App: cannot write through non-object stash path segment '#{part}'"
+      target = nested
+  value
+
+peekPath = (target, path) ->
+  value = target
+  return value unless path?
+  for part in pathParts(path)
+    return undefined unless value?
+    if _isSourceCell value
+      return undefined if _isSourceFamily value
+      value = value.peek()
+      return undefined unless value?
+    value = value[resolvePart(part, value)]
+  if _isSourceCell value
+    if _isSourceFamily(value) then undefined else value.peek()
+  else
+    value
+
+resetSources = (value, seen) ->
+  return unless value? and (typeof value is 'object' or typeof value is 'function')
+  if _isSourceCell value
+    value.reset()
+    return
+  return unless plainObject value
+  raw = if value[RAW] then value[RAW] else value
+  return if seen.has raw
+  seen.add raw
+  resetSources nested, seen for own key, nested of raw when key isnt SIGNALS
+
+makeProxy = (target) ->
+  proxy = null
+  handler =
+    get: (raw, prop) ->
+      return raw if prop is RAW
+      return Reflect.get(raw, prop) if typeof prop is 'symbol'
+      if prop is 'length' and Array.isArray(raw)
+        keysSignal(raw).value
+        return raw.length
+      if prop is 'peek'
+        return (path) -> peekPath raw, path
+      if prop is 'reset'
+        return ->
+          resetSources raw, new WeakSet()
+          return
+      return readPath(proxy, prop) if isPathKey prop
+
+      readLiteral proxy, prop
+
+    set: (raw, prop, value) ->
+      if isPathKey prop
+        writePath proxy, prop, value
+        return true
+
+      writeLiteral proxy, prop, value
+      true
+
+    deleteProperty: (raw, prop) ->
+      had = Object.prototype.hasOwnProperty.call raw, prop
+      deleted = delete raw[prop]
+      raw[SIGNALS]?.get(prop)?.value = undefined
+      touchKeys raw if had
+      deleted
+
+    ownKeys: (raw) ->
+      keysSignal(raw).value
+      Reflect.ownKeys raw
+
+  proxy = new Proxy target, handler
+  PROXIES.set target, proxy
+  proxy
+
+export def createStash<D extends Record<string, any>>(data: D = {}): Stash<D>
+  unless data? and typeof data is 'object' and not Array.isArray(data)
+    throw new TypeError 'Rip App: createStash expects a plain object'
+  unless Object.getPrototypeOf(data) is Object.prototype or Object.getPrototypeOf(data) is null
+    throw new TypeError 'Rip App: createStash expects a plain object'
+  makeProxy data
+
+export def unwrapStash<D extends Record<string, any>>(stash: Stash<D>): D
+  if stash? and stash[RAW] then stash[RAW] else stash
