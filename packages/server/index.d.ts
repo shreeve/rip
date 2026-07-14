@@ -354,3 +354,21 @@ export type UpstreamOpts = {
 };
 
 export function createUpstream(opts?: UpstreamOpts): Upstream;
+
+export type ParsedArgs = {
+  command: string;
+  args: string[];
+  flags: Record<string, unknown>;
+};
+
+export function parseServerArgs(argv: string[]): ParsedArgs;
+
+export function serverUsage(): string;
+
+export type DispatchResult = { code: number; message?: string };
+
+export function dispatchServer(
+  parsed: ParsedArgs,
+  handlers: Record<string, (parsed: ParsedArgs) => number | DispatchResult | void | Promise<number | DispatchResult | void>>,
+  opts?: { version?: string },
+): Promise<DispatchResult>;

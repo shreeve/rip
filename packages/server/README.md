@@ -311,6 +311,23 @@ than dropping the upstream forever. `shouldRetry`
 honors the retryable statuses and idempotent methods up to the attempt
 cap; `backoff(attempt)` grows exponentially with jitter.
 
+## The `rip server` CLI
+
+`parseServerArgs(argv)` and `dispatchServer(parsed, handlers)` are the
+CLI's decision layer — pure and host-free, so the whole dispatch table
+tests without spawning a process. Parsing follows
+`rip server <command> [path] [--flags]`: the first bare word is the
+command, a flag is `--name value` / `--name=value` / a bare boolean /
+`--no-name` / a short alias, and a number flag with a bad or missing
+value, or an unknown flag, rejects loudly. `dispatchServer` awaits the
+command against an injected handler table (`help` and `version` are
+built in; control operations are async), turning a handler's number
+into an exit code and a thrown error into a non-zero result rather
+than an unhandled crash; an unknown command or an unwired one returns
+the usage. `serverUsage()` is that
+help text. The bin owns the impure edges — reading the argv, exiting
+with a code, and writing to the terminal.
+
 `errorEnvelope(err)` is the one deterministic error translation:
 `notice` and `issues` are explicitly user-facing and always shown, a
 plain message shows only for 4xx, and 5xx or raw throws mask to the
