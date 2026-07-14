@@ -5,6 +5,17 @@ repository's pull requests.
 
 ## Unreleased
 
+- `@rip-lang/validate` owns the dependency-free validation and
+  normalization vocabulary: 37 pure synchronous validators (numbers,
+  money-as-integer-cents, lossless decimals, strings, US names and
+  addresses, calendar-true dates, times, booleans, identity, network,
+  and structured forms) behind a frozen Map registry. Registration
+  rejects duplicates, async/generator functions, and invalid names;
+  `check` rejects unknown type names; date validity is computed from
+  written components before any `Date` exists and normalizes to
+  `YYYY-MM-DD`; money requires grouped thousands; the package suite
+  runs as its own CI boundary (#82)
+
 - Match reads deliver their runtime: `text =~ /re/`, `text[/re/]`, and
   `text[/re/, n]` structurally trigger delivery of the stdlib's
   `toMatchable` helper their lowerings spell — in both inline and import

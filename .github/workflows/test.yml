@@ -54,3 +54,7 @@ jobs:
       - name: App package suite (packages/app — its own suite, its own boundary)
         working-directory: packages/app
         run: bun run test
+
+      - name: Validate package suite (packages/validate — its own suite, its own boundary)
+        working-directory: packages/validate
+        run: bun run test
