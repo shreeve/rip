@@ -5,6 +5,14 @@ repository's pull requests.
 
 ## Unreleased
 
+- `@rip-lang/validate/coercers` bridges the validation vocabulary into
+  schema coercion: importing it registers every validator — current and
+  later-registered — as a `~:name` coercer, with raw validators
+  registering raw. The schema runtime's coercer registration rejects
+  duplicate names and async or generator functions loudly, and a
+  coerced `false` is now a legitimate value rather than a miss, so a
+  boolean vocabulary can say no (#83)
+
 - `@rip-lang/validate` owns the dependency-free validation and
   normalization vocabulary: 37 pure synchronous validators (numbers,
   money-as-integer-cents, lossless decimals, strings, US names and

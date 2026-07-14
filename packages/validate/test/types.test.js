@@ -25,13 +25,15 @@ test('validate package TypeScript face and declarations are valid', () => {
     ].join('\n'),
   };
 
-  const source = readFileSync(new URL('../index.rip', import.meta.url), 'utf8');
-  const result = compile(source, {
-    path: 'index.rip',
-    face: 'ts',
-    runtimeDelivery: 'none',
-  });
-  expect(result.code.length).toBeGreaterThan(0);
+  for (const module of ['registry.rip', 'index.rip', 'coercers.rip']) {
+    const source = readFileSync(new URL(`../${module}`, import.meta.url), 'utf8');
+    const result = compile(source, {
+      path: module,
+      face: 'ts',
+      runtimeDelivery: 'none',
+    });
+    expect(result.code.length).toBeGreaterThan(0);
+  }
 
   const checked = tscBatch(process.env.RIP_TSC ?? 'tsc', files, [
     '--module',

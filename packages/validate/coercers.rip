@@ -1,0 +1,19 @@
+# The schema-coercer bridge: importing this module registers the whole
+# validation vocabulary as `~:name` schema coercers and keeps later
+# `registerValidator` additions registered as they arrive. Raw
+# validators register raw, so their coercers receive values untouched.
+#
+# One evaluation per process (the module cache owns idempotence). A
+# name collision with an already-registered coercer rejects the import
+# loudly, naming the coercer — a program must not swallow that error.
+# The runtime import resolves inside this repository; the package is
+# private and ships with the compiler.
+#
+# The two call sites prepare input differently by design: schema
+# coercion trims non-raw wire input before the validator runs, while
+# `check()` passes the string form untouched.
+
+import { _eachValidator } from './registry.rip'
+import { registerCoercer } from '../../src/runtime/schema.js'
+
+_eachValidator (name, fn, raw) -> registerCoercer name, fn, { raw }

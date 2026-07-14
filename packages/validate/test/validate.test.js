@@ -30,6 +30,7 @@ const rows = [
   ['int', '0', 0],
   ['int', '007', null],
   ['int', '1.5', null],
+  ['int', ' 42 ', null],
   ['whole', '0', 0],
   ['whole', '42', 42],
   ['whole', '-1', null],
@@ -228,11 +229,28 @@ describe('the vocabulary', () => {
     expect(check('', 'phone')).toBe('');
   });
 
-  test('the vocabulary holds exactly its 37 names, sorted', () => {
+  test('every built-in name is present and the list is sorted', () => {
+    const builtins = [
+      'address', 'array', 'bool', 'cents', 'color', 'date', 'decimal',
+      'email', 'falsy', 'float', 'hash', 'id', 'ids', 'int', 'ip', 'json',
+      'mac', 'money', 'money_even', 'name', 'phone', 'semver', 'sex',
+      'slug', 'ssn', 'state', 'string', 'text', 'time', 'time12', 'truthy',
+      'url', 'username', 'uuid', 'whole', 'zip', 'zipplus4',
+    ];
+    expect(builtins.length).toBe(37);
     const names = validatorNames();
-    expect(names.length).toBe(37);
+    for (const name of builtins) expect(names).toContain(name);
     expect(names).toEqual([...names].sort());
-    expect(names).toContain('money_even');
+  });
+
+  test('a fresh registry holds exactly the 37 built-ins', () => {
+    const run = Bun.spawnSync(
+      ['bun', '-e', "const v = await import('./index.rip'); console.log(v.validatorNames().length);"],
+      { cwd: new URL('..', import.meta.url).pathname },
+    );
+    expect(run.stderr.toString()).toBe('');
+    expect(run.exitCode).toBe(0);
+    expect(run.stdout.toString().trim()).toBe('37');
   });
 });
 
