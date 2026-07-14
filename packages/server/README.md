@@ -160,6 +160,42 @@ deterministic: paths and methods sort, identical schemas deduplicate
 into `components/schemas` under their own names, and the same route
 table is the same bytes whatever order registration ran in.
 
+## Security
+
+`sessions({ secret })` decodes `c.session` before the handler and
+writes it back as one cookie afterward, only when it changed — an
+emptied session expires its cookie, and a 5xx response commits no
+change (a half-applied mutation from a failed handler never reaches
+the client). Signed (HMAC-SHA256) by default: tamper-proof, but the
+payload is client-readable, so never store secrets in a signed
+session. `encrypt: true` seals it with AES-256-GCM (key derived from
+the secret). A missing, blank, or too-short secret is a startup
+failure — no environment sniffing; a deployment that truly wants
+unsigned dev sessions writes `insecure: true` in its own words. Cookie
+defaults are `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/` (`Secure`
+is opt-out for plaintext dev; `SameSite=None` requires it). A tampered
+or foreign cookie is a fresh empty session, never a throw.
+
+`csrf({ secret })` is header-only double-submit: safe requests mint a
+readable `csrf_token` cookie; every unsafe request must echo it in
+`X-CSRF-Token`, compared in constant time. There is no form-field
+fallback. The cookie carries an HMAC binding, so a planted cookie
+fails without the server key — a secretless double-submit is forgeable
+and so, like sessions, needs an explicit `insecure: true`.
+
+`secureHeaders()` sets the modern set — `X-Content-Type-Options`,
+`X-Frame-Options`, `Referrer-Policy`, and `X-XSS-Protection: 0` (the
+legacy filter it once enabled caused more injection than it stopped).
+CSP and HSTS are explicit opt-ins. `trustProxy()` reads `X-Forwarded-*`
+only when you opt in — `trust: true` or a `hops` count — because
+trusting those headers in front of a directly-exposed app hands the
+client control of its own attested `ip`/`proto`/`host`; a forwarded
+host is accepted only in bare `hostname[:port]` shape. It resolves
+`c.locals.client` from the trusted hop. `harden()` is the cheap
+pre-handler gate on already-parsed values: 414 over-long URLs, 405
+unknown methods. Real body-size limits read the stream at the socket
+layer, not a client-declared `Content-Length`.
+
 `errorEnvelope(err)` is the one deterministic error translation:
 `notice` and `issues` are explicitly user-facing and always shown, a
 plain message shows only for 4xx, and 5xx or raw throws mask to the

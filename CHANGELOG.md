@@ -5,6 +5,22 @@ repository's pull requests.
 
 ## Unreleased
 
+- The server security boundary lands, all over WebCrypto: `sessions()`
+  HMAC-signs by default (AES-256-GCM opt-in), decodes `c.session`
+  before the handler and writes one cookie after only on change — an
+  emptied session expires its cookie and a 5xx commits nothing. A
+  missing, blank, or too-short secret is a startup failure, not a
+  runtime crash; cookies are `HttpOnly`, `Secure`, `SameSite=Lax` by
+  default; a tampered or foreign cookie is a fresh empty session,
+  never a throw. `csrf()` is header-only double-submit held to the
+  same secret standard (constant-time compare, HMAC-bound cookie, no
+  form fallback). `secureHeaders()` ships the modern set with
+  `X-XSS-Protection: 0` and opt-in CSP/HSTS; `trustProxy()` reads
+  `X-Forwarded-*` only on explicit opt-in and accepts a forwarded host
+  only in bare `hostname[:port]` shape; `harden()` gates URL length
+  and method on already-parsed values. Every piece is an ordinary
+  compose() middleware and the package stays server-only (#98)
+
 - Route input speaks the validate vocabulary: `reading()` parses the
   body once and installs `c.read` over body ∪ query ∪ params (params
   win, own data only — never a prototype member, and a scalar met
