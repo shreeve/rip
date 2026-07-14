@@ -5,6 +5,21 @@ repository's pull requests.
 
 ## Unreleased
 
+- Static and application serving arrives, pure over an injected
+  filesystem host: `serveStatic({ root, host })` refuses every `..`
+  climb above the root (403) and re-checks the resolved realpath
+  against the root's realpath, so a symlink pointing outside is
+  refused too; the trailing-slash redirect is rebuilt from normalized
+  segments (never scheme-relative, query preserved). Files carry a
+  content type and a weak ETag with 304 revalidation; GET/HEAD only.
+  `appServer({ root, host, bundle })` is the app-serving preset —
+  `secureHeaders` opt-out, the bundle at `/bundle.json` with ETag
+  revalidation, and an HTML navigation gets the shell with boot state
+  injected. `appShell` escapes a hostile title into text and
+  neutralizes state that tries to close its `<script>` block.
+  `diskHost()` is the Bun-backed default and the package's one
+  filesystem seam — everything else stays host-free (#99)
+
 - The server security boundary lands, all over WebCrypto: `sessions()`
   HMAC-signs by default (AES-256-GCM opt-in), decodes `c.session`
   before the handler and writes one cookie after only on change — an

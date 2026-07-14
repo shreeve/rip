@@ -196,6 +196,33 @@ pre-handler gate on already-parsed values: 414 over-long URLs, 405
 unknown methods. Real body-size limits read the stream at the socket
 layer, not a client-declared `Content-Length`.
 
+## Static and application serving
+
+`serveStatic({ root, host })` serves files under `root` and falls
+through to the next handler on a miss (`spa: true` instead serves the
+root `index.html` for HTML navigations). Containment is the whole
+game: a request path is decoded, every `..` resolved, and any climb
+above the root refused (`403`) — then the resolved path's realpath is
+re-checked against the root's realpath, so a symlink pointing outside
+is refused too. Files carry their content type and a weak ETag with
+`304` revalidation; `maxAge`/`immutable` set `Cache-Control`. The
+filesystem arrives through an injected `host` — `diskHost()` is the
+Bun-backed default; a test passes an in-memory host of the same shape,
+so the containment policy is exercised without a disk. Content types
+follow the file extension, so a static root must never point at a
+user-upload directory — an uploaded `x.html` would serve as
+`text/html` in your origin. Serve untrusted uploads from a separate
+origin.
+
+`appServer({ root, host, bundle })` is the app-serving preset:
+`secureHeaders` ride every response (opt out with `secure: false`),
+the bundle serves at `/bundle.json` with ETag revalidation, static
+assets serve from `root`, and an HTML navigation that matched no asset
+gets the shell — `appShell({ title, state })` — with the bundle's
+`data` injected as boot state. `appShell` escapes a hostile title into
+text and neutralizes a state payload that tries to close its `<script>`
+block, so neither can break out into markup.
+
 `errorEnvelope(err)` is the one deterministic error translation:
 `notice` and `issues` are explicitly user-facing and always shown, a
 plain message shows only for 4xx, and 5xx or raw throws mask to the

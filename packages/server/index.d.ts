@@ -200,3 +200,46 @@ export type HardenOpts = {
 };
 
 export function harden(opts?: HardenOpts): Middleware;
+
+export type FileHost = {
+  stat(path: string): { isFile: boolean; isDirectory: boolean; size: number; mtimeMs: number } | null;
+  read(path: string): unknown;
+  realpath(path: string): string;
+};
+
+export function diskHost(): FileHost;
+
+export function mimeType(path: string): string;
+
+export type StaticOpts = {
+  root: string;
+  host: FileHost;
+  spa?: boolean;
+  index?: string;
+  maxAge?: number;
+  immutable?: boolean;
+};
+
+export function serveStatic(opts: StaticOpts): Middleware;
+
+export type ShellOpts = {
+  title?: string;
+  state?: unknown;
+  html?: string;
+};
+
+export function appShell(opts?: ShellOpts): string;
+
+export type AppServerOpts = {
+  root: string;
+  host: FileHost;
+  bundle: unknown;
+  title?: string;
+  state?: unknown;
+  bundlePath?: string;
+  index?: string;
+  maxAge?: number;
+  secure?: boolean;
+};
+
+export function appServer(opts: AppServerOpts): Middleware;

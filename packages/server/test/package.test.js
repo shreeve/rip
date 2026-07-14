@@ -4,19 +4,24 @@ import * as server from '@rip-lang/server';
 
 test('public entry exposes named exports only', () => {
   expect(Object.keys(server).sort()).toEqual([
+    'appServer',
+    'appShell',
     'compose',
     'cors',
     'createContext',
     'createMatcher',
     'csrf',
+    'diskHost',
     'errorEnvelope',
     'harden',
     'logger',
+    'mimeType',
     'openapi',
     'parseQuery',
     'reading',
     'respond',
     'secureHeaders',
+    'serveStatic',
     'sessions',
     'trustProxy',
     'withInput',
@@ -42,10 +47,18 @@ test('the package is server-only: browser safety is never declared', () => {
 });
 
 test('the pure modules use no host APIs', () => {
-  for (const module of ['router.rip', 'context.rip', 'middleware.rip', 'builtin.rip', 'input.rip', 'openapi.rip', 'security.rip', 'index.rip']) {
+  // serving.rip is pure over an injected host; host.rip is the ONE
+  // module allowed to touch the filesystem.
+  for (const module of ['router.rip', 'context.rip', 'middleware.rip', 'builtin.rip', 'input.rip', 'openapi.rip', 'security.rip', 'serving.rip', 'index.rip']) {
     const source = readFileSync(new URL(`../${module}`, import.meta.url), 'utf8');
     expect(source).not.toMatch(/\bBun\.|node:|process\.|fetch\(/);
   }
+});
+
+test('host.rip is the sole filesystem seam', () => {
+  const source = readFileSync(new URL('../host.rip', import.meta.url), 'utf8');
+  expect(source).toMatch(/node:fs/);
+  expect(source).toMatch(/Bun\.file/);
 });
 
 test('the security module leans only on WebCrypto and web-standard globals', () => {
