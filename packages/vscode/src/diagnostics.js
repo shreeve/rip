@@ -121,15 +121,19 @@ export function applyRipDirectives(good, mapped) {
     const line = m.range.start.line;
     if (!is2578(m)) {
       const r = ranges.find((g) => line >= g.start && line <= g.end);
-      // A directive suppresses everything in its range, but only a genuine
-      // ERROR (or warning) marks it USED. An `@ts-expect-error` promises an
-      // error; a mere suggestion-class hint that happens to fall in the
-      // range — an unused-local fade (TS6133) on a throwaway test binding
-      // is the common one — is NOT the error the directive claimed, so it
-      // must not count. Without this guard, tsgo's own "unused directive"
-      // TS2578 (which maps fine onto the directive comment) is dropped just
-      // below by `used.has(...)`, and the escape hatch rots silently.
-      if (r) { if ((m.severity ?? 1) <= 2) used.add(r.line); continue; }
+      // A directive absorbs the ERRORS (and warnings) in its range, and only
+      // those mark it USED. A suggestion-class hint in the range — an
+      // unused-local fade (TS6133) on a throwaway test binding is the common
+      // one — is not the error an `@ts-expect-error` promised, so it does
+      // neither. Two independent rules, one condition:
+      //
+      //   · a hint must not mark it used — or tsgo's own "unused directive"
+      //     TS2578 (which maps fine onto the directive comment) is dropped
+      //     just below by `used.has(...)`, and the escape hatch rots silently
+      //   · a hint must not be absorbed — tsc's directives govern errors,
+      //     never the fade classes, so a suppressed line still dims its
+      //     unused binding, exactly as the .ts twin does
+      if (r && (m.severity ?? 1) <= 2) { used.add(r.line); continue; }
     }
     survivors.push(m);
   }

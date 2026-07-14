@@ -22,6 +22,7 @@
 | [14](#14-unused-ts-expect-error-silently-swallowed) | Unused `@ts-expect-error` silently swallowed | Loud correctness | ✅ Verified | `check` |
 | [15](#15-reactive-state-bindings-carry-readonly) | Reactive `:=` bindings tagged `readonly` | Token DX | ✅ Verified | `semantic-tokens`, token audit's `readonly` invariant |
 | [16](#16-library-globals-lose-the-defaultlibrary-modifier) | Library globals lose `defaultLibrary` | Token DX | ⬜ **Open** | **none** (upstream; a naive gate is platform-dependent) |
+| [17](#17-a-directive-swallows-the-unused-local-fade) | A directive swallows the unused-local fade | Diagnostic DX | ✅ Verified | `editor-features` (TS directives reach the editor) |
 
 ## How to read this ledger
 
@@ -282,7 +283,7 @@ Both the editor and `rip check` generate ONE tsconfig at the mirror root that `e
 
 **vs v3** — not established. v3 *is* re-runnable (3.17.5, at `~/Code/shreeve/rip-lang`), so this could be settled either way; nobody has driven a monorepo through it. Framed as a missing capability, not a driven v3 regression.
 
-## Directive handling — unused `@ts-expect-error`
+## Directive handling — what an `@ts-expect-error` absorbs, and what must survive it
 
 ### 14. Unused `@ts-expect-error` silently swallowed
 
@@ -293,6 +294,25 @@ An `@ts-expect-error` that catches nothing must raise `TS2578` — tsc's contrac
 **Root (code).** Not the mapping — tsgo's `TS2578` maps cleanly onto the source directive line. [diagnostics.js](../../packages/vscode/src/diagnostics.js) `applyRipDirectives` marked a directive used on ANY diagnostic in its range, then dropped the mapped `TS2578` via `used.has(...)`. A throwaway binding leaves an unused-local hint (`TS6133`, severity 4 — a fade, not an error) in that range, so the directive looked used. Fix: only an error/warning (`severity <= 2`) marks a directive used; a hint does not (the finding-#6 leaked-error path, severity 1, is unaffected).
 
 **vs v3** — v3 checked the shadow in-process, where the directive sits in the real source, so tsc flagged it natively. Same machinery as #6, inverse failure: #6 is a *used* directive dropped from a multi-line face; #14 an *unused* one that should stay loud but was silenced.
+
+### 17. A directive swallows the unused-local fade
+
+A `@ts-expect-error` suppressed **everything** on the line it governs, not just the error it promised. So `# @ts-expect-error` / `badCount: number = 'oops'` — the shape every negative fixture in this corpus uses — lost its `TS6133` fade too: VS Code left `badCount` undimmed and gave no "declared but its value is never read" hover, while the `.ts` twin two panes over showed both. The user sees a suppressed line as *fully* clean, when tsc says only its error is.
+
+**Status.** ✅ **Verified** (2026-07-14). [editor-features.test.js](../../packages/vscode/test/editor-features.test.js), `TS directives reach the editor` — two cases, split by **where the error is absorbed**, because only one of them reaches the changed code at all:
+
+- *single-line* (`# @ts-expect-error` / `badCount: number = 'oops'`) — the face directive sits directly above the one emitted statement, so **tsgo** absorbs the `TS2322` at the face and `applyRipDirectives` only ever sees the hint. The `TS6133` survives at severity 4 with `tags: [1]` (Unnecessary — the bit VS Code fades on) on the binding's Rip span. Same for `@ts-ignore`, which takes the same range path and which nothing else pinned.
+- *block-bodied* (a directive over a `def` whose body holds the error) — the face directive governs only its next FACE line, so the error **leaks** past it (#6's class) and reaches `applyRipDirectives` over rip positions. This is the only path that exercises the changed branch end to end: the leaked error is absorbed, absorbing it marks the directive **used**, tsgo's now-spurious `TS2578` drops — and the hint in the same range still rides through.
+
+Both carry a negative control (read the binding / drop the directive), so green means *absorbed* and *survived*, not *nothing fired*. Both watched fail before the fix (the diagnostic set came back empty). **The guard that a hint alone must NOT mark a directive used — #14 — is pinned separately** by `check.test.js`'s *an unused `@ts-expect-error` stays loud*, where a hint is the only thing in range and the `TS2578` survives; neither case here can stand in for it.
+
+**Root (code).** [diagnostics.js](../../packages/vscode/src/diagnostics.js) `applyRipDirectives` dropped every diagnostic in a directive's range unconditionally (`if (r) { …; continue; }`); the severity test governed only whether the directive counted as **used**, never whether the diagnostic *survived*. Fix: only an error/warning (`severity <= 2`) is both absorbed and marks the directive used — a hint does neither. Not the mapping layer: the `TS6133` maps `exact` onto the `.rip` identifier and clears the tagged-span gate in `mapTsDiagnostic` (that gate, the first suspect, is innocent).
+
+**The reference.** tsc's directives govern **errors**, never the suggestion classes. Driven against tsgo itself on a plain `.ts` module (the engine rip brokers, no rip in the loop): under `// @ts-expect-error` the `TS2322` is suppressed and the `TS6133` still arrives, `severity 4`, `tags [1]` — and `// @ts-ignore` behaves identically. Rip's directive was strictly *stronger* than the thing it emulates, and the fade was collateral. *(A `.ts` probe must be a **module** — an unused top-level binding in a script is a global, which TypeScript never calls unused, and a script-shaped probe reports nothing and looks like a clean pass.)*
+
+**Why the suite missed it.** The audit's `verdict` dimension counts **Error-severity** diagnostics only, so a swallowed hint scores clean — the audit stayed green through both the bug and the fix, and could not have gone red for either. `rip check` cannot see it either: the batch surface filters `severity <= 2` by design ([check.js](../../src/check.js)), the fade classes being no one's build failure. The bug lived in the one gap between them — an editor-only, presentation-only payload — and was found by *looking at the editor* beside its twin. **The `verdict` dimension is a floor, not a description of the diagnostic set;** the hint classes on top of it are still largely unwatched (`TS6138`, `TS6196`, the deprecation strike).
+
+**vs v3** — **not established.** v3 checked the shadow in-process, where the directive sits in the real source and tsc's own suppression applies natively — so the fade would have survived for free, since v3 never had a range-suppression pass to get wrong. That is a code reading, not a driven result: v3's live diagnostic payload was not pulled, and the ledger's own rule is that a reading does not settle a **vs v3** line. v3 is re-drivable (3.17.5, `~/Code/shreeve/rip-lang`) if this is worth settling.
 
 ## Semantic tokens — the modifier surface
 

@@ -986,6 +986,84 @@ describe.skipIf(!tsgoAvailable)('TS directives reach the editor (directive inher
       expect(diags[0].range.start.line).toBe(1);
     });
   }, 30000);
+
+  // tsc's directives govern ERRORS, never the suggestion classes: a
+  // suppressed line still dims its unused binding (driven against tsgo on a
+  // plain .ts module — the TS2322 goes, the TS6133 stays, for BOTH directive
+  // spellings). Rip must not be stronger than the thing it emulates.
+  //
+  // The two cases below differ in WHERE the error is absorbed, which is the
+  // whole reason both exist:
+  //
+  //   · single-line — the face directive sits directly above the one emitted
+  //     statement, so TSGO absorbs the error at the face. applyRipDirectives
+  //     never sees it; only the hint reaches the range check.
+  //   · block-bodied — the face directive governs only its next FACE line, so
+  //     an error deeper in the block LEAKS past it (finding #6's class) and
+  //     reaches applyRipDirectives over rip positions. That is the only path
+  //     on which the range check absorbs a real error, marks the directive
+  //     used, and drops tsgo's now-spurious TS2578 — so it is the only case
+  //     that exercises those branches.
+  test('a directive absorbs the ERROR, never the unused-local fade (TS6133 survives, tagged)', async () => {
+    await inWorkspace({}, async (api) => {
+      await api.open('app.rip', '# @ts-expect-error\nbadCount: number = "oops"\n');
+      const diags = api.diagnostics('app.rip');
+
+      // The TS2322 is gone (tsgo absorbed it at the face); the fade is not.
+      expect(diags).toHaveLength(1);
+      expect(diags[0].code).toBe(6133);
+      expect(diags[0].severity).toBe(4);
+      expect(diags[0].tags).toEqual([1]);      // Unnecessary — VS Code fades it
+      expect(diags[0].range.start.line).toBe(1);
+
+      // Negative control: read the binding and the fade goes. A green run
+      // above therefore means the hint SURVIVED the directive, not that
+      // TS6133 fires unconditionally.
+      await api.change('app.rip', '# @ts-expect-error\nbadCount: number = "oops"\nconsole.log badCount\n');
+      expect(api.diagnostics('app.rip')).toEqual([]);
+
+      // `@ts-ignore` takes the SAME range path (ripDirectiveLines matches
+      // both spellings), and tsc treats it the same way — so the fade must
+      // survive it too. Nothing else pins this.
+      await api.change('app.rip', '# @ts-ignore\nbadCount: number = "oops"\n');
+      const ignored = api.diagnostics('app.rip');
+      expect(ignored).toHaveLength(1);
+      expect(ignored[0].code).toBe(6133);
+      expect(ignored[0].tags).toEqual([1]);
+    });
+  }, 30000);
+
+  test('a LEAKED error (block body) is absorbed over rip positions and marks the directive used — the fade still survives', async () => {
+    await inWorkspace({}, async (api) => {
+      // `y: string = x` is inside the def body, so its TS2322 lands on a face
+      // line the face directive does not govern: it leaks, and only rip-side
+      // suppression can absorb it. `f` is never called, so an unused-local
+      // hint sits in the SAME directive range — all three behaviors at once.
+      await api.open('app.rip', '# @ts-expect-error\ndef f(x: number)\n  y: string = x\n  y\n');
+      const diags = api.diagnostics('app.rip');
+
+      // The leaked TS2322 is absorbed (it is the error the directive
+      // promised) — and absorbing it marked the directive USED, so tsgo's
+      // spurious face-level TS2578 drops. The hint alone would NOT have
+      // marked it used: that is finding #14's guard, pinned by check.test.js
+      // ('an unused @ts-expect-error stays loud'), where a hint is the only
+      // thing in range and the TS2578 survives.
+      expect(diags.map((d) => d.code)).not.toContain(2322);
+      expect(diags.map((d) => d.code)).not.toContain(2578);
+
+      // ...and the fade rides through the same suppression that ate the error.
+      expect(diags).toHaveLength(1);
+      expect(diags[0].code).toBe(6133);
+      expect(diags[0].severity).toBe(4);
+      expect(diags[0].tags).toEqual([1]);
+      expect(diags[0].range.start.line).toBe(1);   // `f`, on the def line
+
+      // Control: drop the directive and the leaked error is REAL and loud —
+      // so the green assertions above mean "absorbed", not "nothing fired".
+      await api.change('app.rip', 'def f(x: number)\n  y: string = x\n  y\n');
+      expect(api.diagnostics('app.rip').map((d) => d.code)).toContain(2322);
+    });
+  }, 30000);
 });
 
 describe.skipIf(!tsgoAvailable)('write-site hover enrichment across files', () => {
