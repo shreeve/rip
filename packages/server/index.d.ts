@@ -117,3 +117,31 @@ export type LoggerOpts = {
 };
 
 export function logger(opts?: LoggerOpts): Middleware;
+
+export type ReadType = string | RegExp | Array<string | number | null>;
+
+export type ReadingCtx = Ctx & {
+  read(name?: string, type?: ReadType, miss?: unknown): unknown;
+};
+
+export function reading(): Middleware;
+
+export type InputSchema = {
+  name?: string | null;
+  safeAsync(data: unknown): Promise<{ ok: boolean; value?: unknown; errors?: unknown[] }>;
+  toJSONSchema(): Record<string, unknown>;
+};
+
+export type InputHandler = ((this: Ctx, c: Ctx & { input: unknown }) => unknown) & {
+  inputSchema?: InputSchema;
+};
+
+export function withInput(
+  schema: InputSchema,
+  handler: (this: Ctx, c: Ctx & { input: unknown }) => unknown,
+): InputHandler;
+
+export function openapi(
+  routes: Route[],
+  info?: Record<string, unknown>,
+): Record<string, unknown>;

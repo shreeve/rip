@@ -124,6 +124,42 @@ envelopes included, and a broken sink loses a log line, never the
 response. Security middleware (sessions, CSRF, secure headers)
 arrives with its own dedicated unit and review.
 
+## Input validation and OpenAPI
+
+`reading()` parses the body once and installs `c.read` — the
+zero-ceremony reader over body ∪ query ∪ params (params win), speaking
+the `@rip-lang/validate` vocabulary:
+
+```rip
+create = (c) ->
+  email = @read 'email', 'email!'          # required — missing is a 400
+  phone = @read 'phone', 'phone'           # optional — miss answers null
+  role  = @read 'role', ['admin', 'user'], 'user'
+  age   = @read 'age', [18, 120]
+  first = @read 'patient.name.first'       # dotted paths walk the body
+  @json { email, phone, role, age, first }
+```
+
+An unknown validator name rejects loudly — a vocabulary typo is a
+configuration mistake, not an empty read.
+
+`withInput(schema, handler)` validates the JSON body through a schema
+before the handler runs: the parsed, defaulted, coerced value is
+`c.input`, and a failing body — invalid JSON included — is a
+structured 400 carrying `{field, error, message}` issues. The wrapped
+handler carries its schema, which is how the OpenAPI document knows
+the route table:
+
+```rip
+routes.add 'POST', '/orders', withInput(CreateOrder, create)
+doc = openapi routes.routes(), title: 'Orders API', version: '1.0.0'
+```
+
+`openapi(routes, info)` is derived, never registered, and
+deterministic: paths and methods sort, identical schemas deduplicate
+into `components/schemas` under their own names, and the same route
+table is the same bytes whatever order registration ran in.
+
 `errorEnvelope(err)` is the one deterministic error translation:
 `notice` and `issues` are explicitly user-facing and always shown, a
 plain message shows only for 4xx, and 5xx or raw throws mask to the

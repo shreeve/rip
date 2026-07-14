@@ -5,6 +5,24 @@ repository's pull requests.
 
 ## Unreleased
 
+- Route input speaks the validate vocabulary: `reading()` parses the
+  body once and installs `c.read` over body ∪ query ∪ params (params
+  win, own data only — never a prototype member, and a scalar met
+  mid-path is a miss, not a value). Absence routes to the miss path
+  before any validator runs: a required field that is missing or
+  blank is a 400 saying so, a present-but-invalid one is a 400 saying
+  THAT, and `!` always outranks a miss default. Unknown validator
+  names and ambiguous numeric enumerations reject loudly.
+  `withInput(schema, handler)` validates the JSON body through a
+  schema before the handler runs — the coerced value is `c.input`,
+  failures are structured 400s with `{field, error, message}` issues,
+  and a bodyless method is a loud mistake. `openapi(routes, info)`
+  derives the deterministic document from the route table: sorted
+  paths and methods, identical schemas deduplicated into components
+  under their own names, first-registered-wins when constraint
+  variants template to one path, and the same table is the same bytes
+  in any registration order (#97)
+
 - The server pipeline exists: `compose({ use, before, after, handler })`
   builds the middleware onion — `next()` returns the downstream
   Response for inspection or replacement, a fire-and-forget `next()`
