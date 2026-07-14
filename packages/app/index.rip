@@ -8,6 +8,8 @@ export type GateFailure =
 
 export { source } from './source.rip'
 export { createStash, unwrapStash } from './stash.rip'
+export { createMutation } from './mutation.rip'
+export { delay, debounce, throttle, hold } from './timing.rip'
 export { createComponents } from './components.rip'
 export { buildRoutes, parseQuery } from './routes.rip'
 export { createRouter, browserAdapter } from './router.rip'

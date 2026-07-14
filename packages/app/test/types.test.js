@@ -3,13 +3,26 @@ import { readFileSync } from 'node:fs';
 import { compile } from '../../../src/compile.js';
 import { tscBatch } from '../../../test/support/tscbatch.js';
 
-const moduleNames = ['source', 'stash', 'components', 'routes', 'router', 'renderer', 'index'];
+const moduleNames = ['source', 'stash', 'components', 'mutation', 'timing', 'routes', 'router', 'renderer', 'index'];
 
 test('app package TypeScript faces and declarations are valid', () => {
   const files = {
     'index.d.ts': readFileSync(new URL('../index.d.ts', import.meta.url), 'utf8'),
     'consumer.ts': [
-      "import { browserAdapter, buildRoutes, createComponents, createRenderer, createRouter, createStash, parseQuery, source, unwrapStash } from './index';",
+      "import { browserAdapter, buildRoutes, createComponents, createMutation, createRenderer, createRouter, createStash, debounce, delay, hold, parseQuery, source, throttle, unwrapStash } from './index';",
+      "const saveUser = createMutation(async (name: string) => ({ name }), { onSuccess: r => { const s: string = r.name; void s; } });",
+      "const saved: Promise<{ name: string } | undefined> = saveUser('Ada');",
+      'const busy: boolean = saveUser.pending;',
+      "const delayed = delay(100, { value: false });",
+      'const shown: boolean = delayed.value;',
+      'delayed.dispose();',
+      "const settled = debounce(100, () => 'q');",
+      "const held = hold(100, { value: true });",
+      "held.value = true;",
+      "const smooth = throttle(100, () => 0);",
+      '// @ts-expect-error a function-source timed signal is read-only',
+      'smooth.value = 1;',
+      'void saved; void busy; void shown; void settled; void held; void smooth;',
       "const user = source({ fetch: async () => ({ name: 'Ada' }) });",
       "const order = source({ fetch: async (id: string) => ({ id }) });",
       "const signaled = source({ kind: 'singleton', fetch: async (signal?: AbortSignal) => ({ ok: !signal?.aborted }) });",
@@ -101,4 +114,6 @@ test('app package TypeScript faces and declarations are valid', () => {
   expect(files['index.d.ts']).toContain('function parseQuery');
   expect(files['index.d.ts']).toContain('function createRouter');
   expect(files['index.d.ts']).toContain('function browserAdapter');
+  expect(files['index.d.ts']).toContain('function createMutation');
+  expect(files['index.d.ts']).toContain('function delay');
 });

@@ -1,0 +1,67 @@
+# Mutation — the write-side primitive.
+#
+# Reads are per-key (source); writes are per-action. createMutation
+# wraps an async action and exposes reactive pending / succeeded /
+# error while running onSuccess / onError. Read and write meet at
+# exactly one point: a mutation's onSuccess assigns the stash key(s) it
+# affects, so a successful write updates every reader in place — no
+# refetch.
+#
+# The mutation IS the action — invoke it directly with the payload
+# (`updateUser(form)`); there is no .mutate method. Callbacks are plain
+# options on a runtime call — nothing binds their `this`; use `=>` to
+# capture a component lexically.
+
+export type Mutation<R> =
+  (...args: any[]) => Promise<R | undefined>
+
+export def createMutation<R>(fn: (...args: any[]) => Promise<R> | R, opts: { onSuccess?: (r: R) => void, onError?: (e: unknown) => unknown } = {}): Mutation<R>
+  unless typeof fn is 'function'
+    throw new TypeError 'Rip App: createMutation expects a function'
+  _pending   = __state false
+  _succeeded = __state false
+  _error     = __state(null as any)
+  generation = 0
+
+  # `any` because the callable + reactive-flags intersection is
+  # assembled at runtime — TS cannot see the flags on the function.
+  mutation: any = (...args) ->
+    me = ++generation
+    __batch ->
+      _pending.value = true
+      _succeeded.value = false
+      _error.value = null
+    r: R
+    try
+      r = await fn(...args)
+    catch e
+      # Only a request (fn) rejection is a mutation failure. A
+      # superseded call must not flip flags or run a callback — the
+      # newer call owns even the dropped error. Pending clears in a
+      # guarded finally so it stays true through onError and a newer
+      # in-flight call keeps its spinner, symmetric with onSuccess.
+      return unless me is generation
+      _error.value = e
+      try
+        if opts.onError then return await opts.onError(e) else throw e
+      finally
+        _pending.value = false if me is generation
+    # fn resolved. A superseded success is dropped silently — its
+    # onSuccess must not clobber the newer call's stash write.
+    return unless me is generation
+    # onSuccess runs OUTSIDE the failure catch: the request already
+    # succeeded, so a throw here is a programming error, not a mutation
+    # failure — it surfaces, never masquerading as onError. Awaited so
+    # pending stays true through its work and async rejections surface
+    # rather than floating unhandled.
+    try
+      _succeeded.value = true
+      await opts.onSuccess?(r)
+      r
+    finally
+      _pending.value = false if me is generation
+
+  Object.defineProperty mutation, 'pending',   { get: -> _pending.value }
+  Object.defineProperty mutation, 'succeeded', { get: -> _succeeded.value }
+  Object.defineProperty mutation, 'error',     { get: -> _error.value }
+  mutation

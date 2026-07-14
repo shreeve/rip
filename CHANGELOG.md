@@ -5,6 +5,17 @@ repository's pull requests.
 
 ## Unreleased
 
+- `@rip-lang/app` gains the write-side and timing primitives:
+  `createMutation` wraps an async action with reactive
+  pending/succeeded/error flags where the newest invocation owns the
+  outcome — superseded calls flip nothing, run no callbacks, and
+  resolve undefined, and a throw in onSuccess surfaces instead of
+  masquerading as a failure. `delay`, `debounce`, `throttle`, and
+  `hold` derive timed signals from signal or function sources; timers
+  die with their effect, signal sources keep a write-through wrapper,
+  and function sources are read-only. Construction costs measure ~0.5µs
+  per mutation and ~1µs per timed signal (#86)
+
 - The app renderer integrates with navigation: a staying navigation
   keeps the mounted page's identity and calls `load(params, query)`;
   an unchanged layout chain survives page swaps without re-gating,

@@ -189,6 +189,44 @@ export function buildRoutes(
 
 export function parseQuery(search: string): Record<string, string>;
 
+export type Mutation<R> = {
+  (...args: any[]): Promise<R | undefined>;
+  readonly pending: boolean;
+  readonly succeeded: boolean;
+  readonly error: unknown;
+};
+
+export function createMutation<R>(
+  fn: (...args: any[]) => Promise<R> | R,
+  opts?: {
+    onSuccess?: (r: R) => void | Promise<void>;
+    onError?: (e: unknown) => unknown;
+  },
+): Mutation<R>;
+
+export type TimingSource<T> = { value: T } | (() => T);
+
+export type TimedSignal<T> = {
+  value: T;
+  read(): T;
+  dispose(): void;
+};
+
+export type ReadonlyTimedSignal<T> = {
+  readonly value: T;
+  read(): T;
+  dispose(): void;
+};
+
+export function delay(ms: number, source: () => unknown): ReadonlyTimedSignal<boolean>;
+export function delay(ms: number, source: { value: unknown }): TimedSignal<boolean>;
+export function debounce<T>(ms: number, source: () => T): ReadonlyTimedSignal<T>;
+export function debounce<T>(ms: number, source: { value: T }): TimedSignal<T>;
+export function throttle<T>(ms: number, source: () => T): ReadonlyTimedSignal<T>;
+export function throttle<T>(ms: number, source: { value: T }): TimedSignal<T>;
+export function hold(ms: number, source: () => unknown): ReadonlyTimedSignal<boolean>;
+export function hold(ms: number, source: { value: unknown }): TimedSignal<boolean>;
+
 export type RouterAdapter = {
   read(): string;
   readState?(): unknown;
