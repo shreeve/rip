@@ -20,6 +20,8 @@
 > **Driven 2026-07-12** against this code: `bun run test:all` (5261 pass / 0 fail, with `RIP_EXTENDED=1 RIP_REQUIRE_TSC=1` and a real tsc), `bun run type-audit --all` (60/60 dimensions, 335/335 hover probes), and `test/toolchain/strict-modes.test.js` — a two-mode gate written for #1, which was found to be exercised by nothing at all. **Nine findings verify.** Four remain: #10 (rip-native hovers, no oracle), #11 and #12 (no harness coverage), #8 (open, no fix).
 >
 > **Driven 2026-07-13:** #7 now closes — `rip check` exists, a headless CLI that runs the editor's faces→mirror→tsgo→map-back pipeline in **batch**: one tsgo session over the whole mirror, **pin-probed like the editor** (so evolving-`any` closure reads resolve, not just a bare `tsc --noEmit`), diagnostics pulled per file and mapped onto `.rip` source. The drift-sensitive core (mapping/strict/noCheck/directives, and the mirror+tsconfig+closure) was extracted from `server.js` into shared `diagnostics.js` / `mirror.js`, so checker and editor are one implementation. Driven by `test/toolchain/check.test.js` (clean / type-error at the mapped `.rip` position / `rip.strict` differential / `rip.noCheck` / `@ts-expect-error` / cross-file / `--json`) and over the 12 audit fixtures (`bin/rip check fixtures` → 12/12 clean, matching the runner's verdict dimension — pin-dependent case included). **Ten findings now verify;** the five that remain are #8 (open, no fix), #10 (rip-native hovers, no oracle), #11 and #12 (no harness coverage), and #13 (newly filed — single-rooted tsconfig, no monorepo support; the fix approach is driven-feasible but unbuilt).
+>
+> **Driven 2026-07-14:** #14 filed and fixed — an unused `@ts-expect-error` was silently swallowed (a stale escape hatch that rots invisibly and can later absorb a genuine new error). tsgo's `TS2578` maps fine onto the directive; the drop was `applyRipDirectives` counting a suggestion-class hint (`TS6133`) as "directive used." Now only a real error marks it used. Driven by a new `check.test.js` case (unused expect-error → `TS2578` at the directive; `@ts-ignore` exempt; used single/multi-line clean), fixtures 12/12, audit 60/60. **Eleven findings now verify.**
 
 ## Summary
 
@@ -42,6 +44,7 @@
 | [11](#11-config-changes-required-a-reload) | Config changes required a reload | Config surface | 🟡 Fix landed, unverified | **editor** — no harness coverage |
 | [12](#12-nocheck-parsed-but-never-applied) | `rip.noCheck` parsed but never applied | Config surface | 🟡 Fix landed, unverified | **editor** — no harness coverage |
 | [13](#13-single-rooted-tsconfig--no-per-project-resolution) | Single-rooted tsconfig — no monorepo support | Config surface | ⬜ Open | **driven** — code + real tsgo |
+| [14](#14-unused-ts-expect-error-silently-swallowed) | Unused `@ts-expect-error` silently swallowed | Loud correctness | ✅ Verified · [driven] | — |
 
 ## Compiler-coverage gaps — file won't compile (hard blockers)
 
@@ -268,6 +271,18 @@ Both the editor and `rip check` generate ONE tsconfig at the mirror root that `e
 **Blast radius.** Shared: generalize `generatedTsconfig` + add a `nearestTsconfig(dir, anchor)` walk in `mirror.js`. `rip check` ([src/check.js](../../src/check.js)): after materialization, emit one wrapper per distinct owning tsconfig — small, self-contained. Editor ([server.js](../../packages/vscode/src/server.js)): larger — emit/refresh wrappers during closure materialization and on `tsconfig.json` (or extends-chain) changes via the existing watcher; no session multiplexing. The pin pass and single-session architecture are untouched.
 
 **vs v3** — not established (v3 is retired; not re-runnable). Framed as a missing capability, not a driven v3 regression.
+
+## Directive handling — unused `@ts-expect-error`
+
+### 14. Unused `@ts-expect-error` silently swallowed
+
+An `@ts-expect-error` that catches nothing must raise `TS2578` — tsc's contract, and the self-cleaning property that makes it safer than `@ts-ignore`. v4 swallowed it: over a throwaway binding (`# @ts-expect-error` / `badCount = 'oops'`, no annotation) the directive governs nothing yet the check reads clean, so a stale escape hatch rots invisibly and can later absorb a genuine new error on that line.
+
+**Status.** ✅ **Verified · [driven]** (2026-07-14) — a `test/toolchain/check.test.js` case: an unused `@ts-expect-error` reports `TS2578` at the directive and exits 1; used single- and multi-line directives stay clean; an unused `@ts-ignore` stays silent (tsc never flags it). Fixtures 12/12, audit 60/60. The editor shares the fixed core, so the squiggle now appears there too (`[editor]`-unverified, identical path).
+
+**Root (code).** Not the mapping — tsgo's `TS2578` maps cleanly onto the source directive line. [diagnostics.js](../../packages/vscode/src/diagnostics.js) `applyRipDirectives` marked a directive used on ANY diagnostic in its range, then dropped the mapped `TS2578` via `used.has(...)`. A throwaway binding leaves an unused-local hint (`TS6133`, severity 4 — a fade, not an error) in that range, so the directive looked used. Fix: only an error/warning (`severity <= 2`) marks a directive used; a hint does not (the finding-#6 leaked-error path, severity 1, is unaffected).
+
+**vs v3** — v3 checked the shadow in-process, where the directive sits in the real source, so tsc flagged it natively. Same machinery as #6, inverse failure: #6 is a *used* directive dropped from a multi-line face; #14 an *unused* one that should stay loud but was silenced.
 
 ## `=` hoisting: four type regressions and a bounded fix (owner's call)
 

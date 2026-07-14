@@ -121,10 +121,23 @@ export function applyRipDirectives(good, mapped) {
     const line = m.range.start.line;
     if (!is2578(m)) {
       const r = ranges.find((g) => line >= g.start && line <= g.end);
-      if (r) { used.add(r.line); continue; }
+      // A directive suppresses everything in its range, but only a genuine
+      // ERROR (or warning) marks it USED. An `@ts-expect-error` promises an
+      // error; a mere suggestion-class hint that happens to fall in the
+      // range — an unused-local fade (TS6133) on a throwaway test binding
+      // is the common one — is NOT the error the directive claimed, so it
+      // must not count. Without this guard, tsgo's own "unused directive"
+      // TS2578 (which maps fine onto the directive comment) is dropped just
+      // below by `used.has(...)`, and the escape hatch rots silently.
+      if (r) { if ((m.severity ?? 1) <= 2) used.add(r.line); continue; }
     }
     survivors.push(m);
   }
+  // tsgo's TS2578 ("unused '@ts-expect-error'") maps onto the directive
+  // comment and arrives here as a normal diagnostic. Drop it only when the
+  // directive is genuinely used — an ERROR fell in its range (a mis-governed
+  // multi-line face directive whose leaked error we suppressed over rip
+  // positions, finding #6). Otherwise it survives: unused stays loud.
   return survivors.filter((m) => !(is2578(m) && used.has(m.range.start.line)));
 }
 

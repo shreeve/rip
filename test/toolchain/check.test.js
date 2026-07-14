@@ -131,6 +131,32 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
+  // The inverse of the pin-parity guard: a directive that absorbs NOTHING
+  // must stay loud (TS2578), exactly tsc's contract — an unused escape
+  // hatch that rots silently hides the bug it was meant to guard. The
+  // trap: tsgo's TS2578 maps cleanly onto the directive comment, but the
+  // governed statement here is a throwaway binding, so an unused-local
+  // HINT (TS6133) lands in the directive's range. That hint must NOT mark
+  // the directive "used" — only a real error does — or the TS2578 is
+  // wrongly suppressed. `@ts-ignore` is exempt: tsc never flags it unused.
+  test('an unused @ts-expect-error stays loud (TS2578); @ts-ignore is exempt', () => {
+    const expectErr = workspace({ 'u.rip': "# @ts-expect-error — nothing wrong here\nbadCount = 'oops'\n" });
+    const ignore = workspace({ 'i.rip': "# @ts-ignore — nothing wrong here\nbadCount = 'oops'\n" });
+    try {
+      const e = check(expectErr);
+      expect(e.status).toBe(1);
+      expect(e.stdout).toContain('TS2578');
+      expect(e.stdout).toContain('u.rip:1:1 - error'); // on the directive itself
+
+      const i = check(ignore);
+      expect(i.status).toBe(0);              // an unused @ts-ignore is never flagged
+      expect(i.stdout).not.toContain('TS2578');
+    } finally {
+      fs.rmSync(expectErr, { recursive: true, force: true });
+      fs.rmSync(ignore, { recursive: true, force: true });
+    }
+  }, 90_000);
+
   test('cross-file: a misused typed export reports at the call site', () => {
     const dir = workspace({
       'util.rip': 'export shout = (s: string): string -> s.toUpperCase()\n',
