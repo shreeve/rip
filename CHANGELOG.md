@@ -9,7 +9,9 @@ repository's pull requests.
   mappings, bind before component initialization, and reject direct or embedded
   construction. The app renderer prefetches singleton/keyed sources exactly
   once, validates addressed subpaths, constructs layout ancestry transactionally,
-  and reports structured failures; the pending lane is empty (#78)
+  and reports structured failures. Its private construction capability is
+  single-owner, and prefetched bindings subscribe to later source writes without
+  rereading addressed getters; the pending lane is empty (#78, #79)
 
 - The private dependency-free `@rip-lang/app` substrate now provides reactive
   stash data, singleton and keyed source cells, honest public declarations,

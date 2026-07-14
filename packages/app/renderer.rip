@@ -1,6 +1,8 @@
 import { unwrapStash } from './stash.rip'
 import { _isSourceCell, _isSourceFamily } from './source.rip'
-import { __constructGateComponent } from '../../src/runtime/components.js'
+import { __claimGateConstructor } from '../../src/runtime/components.js'
+
+constructGateComponent = __claimGateConstructor()
 
 export type GateFailure =
   name: string
@@ -145,7 +147,7 @@ export def createRenderer(opts: RendererOpts): Renderer
     true
 
   construct = (entry, parent) ->
-    __constructGateComponent entry.cls, { gates: entry.bindings, parent }
+    constructGateComponent entry.cls, { gates: entry.bindings, parent }
 
   cleanup = (list) ->
     errors = []

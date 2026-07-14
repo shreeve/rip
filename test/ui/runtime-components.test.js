@@ -121,7 +121,7 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
 describe('module shape', () => {
   test('named exports are the delivered set plus the private renderer construction seam', () => {
     expect(Object.keys(v4c).sort()).toEqual([
- '__Component', '__clsx', '__constructGateComponent', '__detach', '__detachRef', '__gateBind', '__handleComponentError', '__lis',
+ '__Component', '__claimGateConstructor', '__clsx', '__detach', '__detachRef', '__gateBind', '__handleComponentError', '__lis',
  '__ownerFrame', '__popComponent', '__popOwner', '__pushComponent', '__pushOwner',
  '__reconcile', '__transition',
  'getContext', 'hasContext', 'setContext',
