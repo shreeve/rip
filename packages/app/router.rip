@@ -124,7 +124,11 @@ export def createRouter(opts: RouterOpts): Router
   # writes BEFORE state and callback dispatch — a navigation started
   # inside onNavigate (the redirect pattern) then supersedes an already
   # coherent history instead of stacking a stale entry over itself.
+  # Protocol-relative spellings and backslashes never match: a browser
+  # reads '//host/x' as cross-origin and normalizes '\' to '/', so a
+  # catch-all must not claim either.
   attempt = (path) ->
+    return null if typeof path isnt 'string' or path.startsWith('//') or path.includes('\\')
     activeManifest.match path
 
   commit = (hit, path, queryString, hash) ->
@@ -205,9 +209,31 @@ export def createRouter(opts: RouterOpts): Router
 
     match: (url) ->
       { path, query, hash } = splitUrl url
-      hit = activeManifest.match path
+      hit = attempt path
       return null unless hit
       { route: hit.route, params: hit.params, query: parseQuery(query), hash }
+
+    # Resolve an EXTERNAL href — the spelling a document actually
+    # carries — against this router's mode: hash mode requires and
+    # parses the fragment, path mode requires a leading '/' and strips
+    # the base. No state is written; this is the one ownership seam
+    # aria-current, preloading, and click interception share.
+    claims: (url) ->
+      return null unless typeof url is 'string' and url.length > 0
+      if hashMode
+        at = url.indexOf '#'
+        return null if at < 0
+        inner = url.slice at + 1
+        inner = '/' if inner is ''
+        { path, query, hash } = splitUrl inner
+      else
+        return null unless url.startsWith '/'
+        { path, query, hash } = splitUrl url
+        path = stripBase path
+        return null unless path?
+      hit = attempt path
+      return null unless hit
+      { path, route: hit.route, params: hit.params, query: parseQuery(query), hash }
 
     onNavigate: (fn) ->
       unless typeof fn is 'function'

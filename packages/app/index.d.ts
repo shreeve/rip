@@ -266,6 +266,7 @@ export type Router = {
   back(): void;
   forward(): void;
   match(url: string): RouteInfo | null;
+  claims(url: string): NavigationInfo | null;
   onNavigate(fn: (info: NavigationInfo) => void): () => void;
   rebuild(): void;
   destroy(): void;
@@ -286,6 +287,16 @@ export function createRouter(opts: {
 }): Router;
 
 export function browserAdapter(): RouterAdapter;
+
+export function ownsAnchor(router: Router, anchor: unknown): boolean;
+
+export function ariaCurrent(
+  router: Router,
+  host?: {
+    anchors(): unknown[];
+    observe?(fn: () => void): () => void;
+  },
+): () => void;
 
 export type GateDescriptor =
   | string

@@ -1,0 +1,115 @@
+# Route-aware accessibility — the app-owned helpers navigation needs.
+#
+# `ariaCurrent` keeps `aria-current` truthful across every anchor the
+# router owns: the exact route gets `"page"`, an ancestor path gets
+# `"true"`, and a mark this walker set is removed the moment its anchor
+# stops earning it — including an href rewritten to somewhere the
+# router no longer claims. A mark the application manages itself is
+# never set over and never removed. The DOM arrives through an
+# injectable host, so the walker tests under Node; the browser default
+# walks `document` and re-runs on childList and link-attribute
+# mutations.
+#
+# `ownsAnchor` is the one shared predicate for anchor ownership —
+# `aria-current`, link preloading, and click interception must never
+# disagree about which links belong to the router. It resolves the
+# anchor's EXTERNAL href through `router.claims`, so base paths and
+# hash mode follow the router's own reading.
+
+excluded = (anchor) ->
+  return true if anchor.hasAttribute?('data-router-ignore')
+  return true if anchor.hasAttribute?('download')
+  targetAttr = anchor.getAttribute?('target')
+  return true if targetAttr and targetAttr.toLowerCase() isnt '_self'
+  false
+
+hrefish = (anchor) ->
+  href = anchor.getAttribute?('href') ?? anchor.href
+  return null unless typeof href is 'string' and href.length > 0
+  if /^[a-z][a-z0-9+.-]*:/i.test href
+    origin = if typeof location isnt 'undefined' then location.origin else null
+    return null unless origin? and href.startsWith(origin)
+    href = href.slice origin.length
+  # A protocol-relative or backslashed spelling reads as cross-origin
+  # in a browser; it is never ours.
+  return null if href.startsWith('//') or href.includes('\\')
+  href
+
+export def ownsAnchor(router: any, anchor: any): boolean
+  return false unless anchor?
+  return false if excluded anchor
+  href = hrefish anchor
+  return false unless href?
+  router.claims(href)?
+
+browserHost = ->
+  unless typeof document isnt 'undefined' and typeof document.querySelectorAll is 'function'
+    throw new Error 'Rip App: ariaCurrent requires a browser or an injected host'
+  anchors: -> Array.from document.querySelectorAll('a[href]')
+  observe: (fn) ->
+    scheduled = false
+    observer = new MutationObserver ->
+      return if scheduled
+      scheduled = true
+      requestAnimationFrame ->
+        scheduled = false
+        fn()
+    observer.observe (document.documentElement ?? document.body),
+      childList: true
+      subtree: true
+      attributes: true
+      attributeFilter: ['href', 'target', 'download', 'data-router-ignore']
+    -> observer.disconnect()
+
+export def ariaCurrent(router: any, host: { anchors: () => any[], observe?: (fn: () => void) => () => void } = null): () => void
+  unless router? and typeof router.claims is 'function'
+    throw new TypeError 'Rip App: ariaCurrent requires a router'
+  host: any = host ?? browserHost()
+  owned = new WeakSet()
+
+  markCurrent = ->
+    current = router.path
+    for anchor in host.anchors()
+      hit = if excluded(anchor) then null else router.claims(hrefish(anchor) ?? '')
+      state = if not hit? or not current? then null
+      else if hit.path is current then 'page'
+      else if hit.path isnt '/' and current.startsWith(hit.path + '/') then 'true'
+      else null
+      if state?
+        # Never set over a mark the application manages itself.
+        continue if not owned.has(anchor) and anchor.getAttribute?('aria-current')?
+        anchor.setAttribute 'aria-current', state unless anchor.getAttribute?('aria-current') is state
+        owned.add anchor
+      else if owned.has anchor
+        anchor.removeAttribute 'aria-current'
+        owned.delete anchor
+    return
+
+  # A host failure must never abort the navigation that triggered the
+  # walk — the router's dispatch owns that moment.
+  walk = ->
+    try
+      markCurrent()
+    catch error
+      console.error '[Rip] aria-current walk failed:', error
+    return
+
+  disposeEffect = __effect ->
+    router.path
+    walk()
+  unobserve = host.observe?(walk) ?? null
+  disposed = false
+  ->
+    return if disposed
+    disposed = true
+    disposeEffect()
+    unobserve?()
+    # Marks must not outlive their walker.
+    try
+      for anchor in host.anchors()
+        if owned.has anchor
+          anchor.removeAttribute 'aria-current'
+          owned.delete anchor
+    catch error
+      null
+    return

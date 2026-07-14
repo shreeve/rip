@@ -4,6 +4,7 @@ import * as app from '@rip-lang/app';
 
 test('public entry exposes named substrate exports only', () => {
   expect(Object.keys(app).sort()).toEqual([
+    'ariaCurrent',
     'browserAdapter',
     'buildRoutes',
     'createComponents',
@@ -15,6 +16,7 @@ test('public entry exposes named substrate exports only', () => {
     'delay',
     'hold',
     'launch',
+    'ownsAnchor',
     'parseQuery',
     'persistStash',
     'source',
