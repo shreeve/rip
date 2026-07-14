@@ -1,0 +1,154 @@
+# nginx and Caddy configuration generation from a normalized site
+# config — pure string generation, host-free, and deterministic: the
+# same config is always the same bytes, whatever order routes or sites
+# arrive in.
+#
+# The load-bearing property is injection safety. Every value that
+# reaches a directive — a host name, a proxy target, a filesystem
+# path, a route prefix — is validated against a strict shape first, so
+# a value carrying a newline, a brace, or a stray directive is refused
+# at generation time rather than written into a config that a web
+# server will then execute. Generating a config never quietly produces
+# a dangerous one.
+#
+# Config shape:
+#   { sites: [ { host, tls?: { certPath, keyPath }, routes: [
+#       { path, proxy } | { path, static, spa? } ] } ] }
+
+fail = (message) -> throw new Error "Rip Server: #{message}"
+
+# A DNS host name or a single-label wildcard — letters, digits, dots,
+# hyphens, and an optional leading '*.'. Anything else (whitespace,
+# braces, semicolons, newlines) is refused.
+HOST_RE = /^(\*\.)?[A-Za-z0-9]([A-Za-z0-9\-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9\-]*[A-Za-z0-9])?)*$/
+
+# A filesystem path with no config-breaking characters: no whitespace,
+# quotes, braces, semicolons, or newlines.
+PATH_RE = /^[A-Za-z0-9._\-\/]+$/
+
+# A route prefix: a leading slash and path-safe characters only.
+ROUTE_RE = /^\/[A-Za-z0-9._\-\/]*$/
+
+validHost = (host) ->
+  fail "invalid host name #{JSON.stringify host}" unless typeof host is 'string' and HOST_RE.test host
+  host
+
+validPath = (path, what) ->
+  fail "invalid #{what} #{JSON.stringify path}" unless typeof path is 'string' and PATH_RE.test path
+  path
+
+validRoute = (path) ->
+  fail "invalid route path #{JSON.stringify path}" unless typeof path is 'string' and ROUTE_RE.test path
+  path
+
+# A proxy target must be an http(s) URL — parsed, its hostname and
+# port validated against strict shapes (the URL parser is lenient and
+# will keep a ';' or newline inside a hostname), then rebuilt from
+# those validated pieces so nothing from the input reaches the
+# directive verbatim.
+validProxy = (target) ->
+  fail "invalid proxy target #{JSON.stringify target}" unless typeof target is 'string'
+  url: any = null
+  try
+    url = new URL target
+  catch
+    fail "invalid proxy target URL #{JSON.stringify target}"
+  fail "proxy target must be http or https #{JSON.stringify target}" unless url.protocol is 'http:' or url.protocol is 'https:'
+  host = url.hostname
+  fail "proxy target has an invalid host #{JSON.stringify target}" unless host and HOST_RE.test host
+  fail "proxy target has an invalid port #{JSON.stringify target}" unless url.port is '' or /^\d+$/.test url.port
+  port = if url.port then ":#{url.port}" else ''
+  "#{url.protocol}//#{host}#{port}"
+
+# Normalize a route: exactly one of proxy or static, validated.
+normalizeRoute = (route) ->
+  path = validRoute(route.path ?? '/')
+  if route.proxy?
+    { kind: 'proxy', path, proxy: validProxy(route.proxy) }
+  else if route.static?
+    { kind: 'static', path, root: validPath(route.static, 'static root'), spa: route.spa is true }
+  else
+    fail "route #{JSON.stringify path} is neither a proxy nor a static mount"
+
+# Canonical keys make the sort a valid, total order — so the output
+# is byte-identical whatever order routes and sites arrive in, even
+# when two share a host or a path.
+routeKey = (route) -> "#{route.kind}|#{route.path}|#{route.proxy ?? route.root}|#{route.spa ?? false}"
+siteKey = (site) -> "#{site.host}|#{site.tls?.certPath ?? ''}|#{(routeKey(r) for r in site.routes).join ','}"
+
+byString = (a, b) -> if a < b then -1 else if a > b then 1 else 0
+
+# A validated site: routes sorted by descending prefix length (the
+# most specific matches first), ties broken by canonical key; sites
+# sorted by host, ties by canonical key.
+normalizeSite = (site) ->
+  host = validHost site.host
+  tls = if site.tls?
+    { certPath: validPath(site.tls.certPath, 'cert path'), keyPath: validPath(site.tls.keyPath, 'key path') }
+  else
+    null
+  routes = (normalizeRoute(route) for route in (site.routes ?? []))
+  routes.sort (a, b) ->
+    if b.path.length isnt a.path.length then b.path.length - a.path.length else byString(routeKey(a), routeKey(b))
+  { host, tls, routes }
+
+normalizeSites = (config) ->
+  sites = (normalizeSite(site) for site in (config?.sites ?? []))
+  sites.sort (a, b) -> if a.host isnt b.host then byString(a.host, b.host) else byString(siteKey(a), siteKey(b))
+  sites
+
+export def generateNginx(config: any): string
+  blocks = for site in normalizeSites(config)
+    server = []
+    if site.tls?
+      server.push "server {"
+      server.push "    listen 443 ssl;"
+      server.push "    server_name #{site.host};"
+      server.push "    ssl_certificate #{site.tls.certPath};"
+      server.push "    ssl_certificate_key #{site.tls.keyPath};"
+    else
+      server.push "server {"
+      server.push "    listen 80;"
+      server.push "    server_name #{site.host};"
+    for route in site.routes
+      if route.kind is 'proxy'
+        server.push "    location #{route.path} {"
+        server.push "        proxy_pass #{route.proxy};"
+        server.push "        proxy_set_header Host $host;"
+        server.push "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;"
+        server.push "        proxy_set_header X-Forwarded-Proto $scheme;"
+        server.push "    }"
+      else
+        server.push "    location #{route.path} {"
+        server.push "        root #{route.root};"
+        server.push "        try_files $uri /index.html;" if route.spa
+        server.push "    }"
+    server.push "}"
+    if site.tls?
+      redirect = ["server {", "    listen 80;", "    server_name #{site.host};", "    return 301 https://$host$request_uri;", "}"]
+      "#{redirect.join '\n'}\n#{server.join '\n'}"
+    else
+      server.join '\n'
+  blocks.join '\n\n'
+
+export def generateCaddy(config: any): string
+  blocks = for site in normalizeSites(config)
+    lines = ["#{site.host} {"]
+    lines.push "    tls #{site.tls.certPath} #{site.tls.keyPath}" if site.tls?
+    # Each route is its own path-scoped handle block, so a sub-path
+    # static mount stays scoped (matching nginx's location) instead of
+    # becoming a global document root. Caddy orders handle blocks by
+    # specificity, so the most specific route wins.
+    for route in site.routes
+      matcher = if route.path is '/' then '/*' else "#{route.path}*"
+      lines.push "    handle #{matcher} {"
+      if route.kind is 'proxy'
+        lines.push "        reverse_proxy #{route.proxy}"
+      else
+        lines.push "        root * #{route.root}"
+        lines.push "        try_files {path} /index.html" if route.spa
+        lines.push "        file_server"
+      lines.push "    }"
+    lines.push "}"
+    lines.join '\n'
+  blocks.join '\n\n'

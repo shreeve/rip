@@ -328,6 +328,21 @@ the usage. `serverUsage()` is that
 help text. The bin owns the impure edges — reading the argv, exiting
 with a code, and writing to the terminal.
 
+## nginx and Caddy config generation
+
+`generateNginx(config)` and `generateCaddy(config)` emit a web-server
+configuration from a normalized site config (`{ sites: [{ host, tls?,
+routes: [{ path, proxy } | { path, static, spa? }] }] }`). Output is
+deterministic — routes sort by descending prefix length, sites by
+host, so the same config is always the same bytes. The load-bearing
+property is **injection safety**: every value that reaches a directive
+— host, proxy target, filesystem path, route prefix — is validated
+against a strict shape first (a proxy target is parsed and rebuilt
+from its validated pieces, since the URL parser will keep a `;` or
+newline inside a hostname), so a value carrying a newline, a brace, or
+a stray directive is refused at generation time rather than written
+into a config the web server would then execute.
+
 `errorEnvelope(err)` is the one deterministic error translation:
 `notice` and `issues` are explicitly user-facing and always shown, a
 plain message shows only for 4xx, and 5xx or raw throws mask to the

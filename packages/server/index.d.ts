@@ -365,6 +365,21 @@ export function parseServerArgs(argv: string[]): ParsedArgs;
 
 export function serverUsage(): string;
 
+export type CompatRoute =
+  | { path: string; proxy: string }
+  | { path: string; static: string; spa?: boolean };
+
+export type CompatSite = {
+  host: string;
+  tls?: { certPath: string; keyPath: string };
+  routes: CompatRoute[];
+};
+
+export type CompatConfig = { sites?: CompatSite[] };
+
+export function generateNginx(config: CompatConfig): string;
+export function generateCaddy(config: CompatConfig): string;
+
 export type DispatchResult = { code: number; message?: string };
 
 export function dispatchServer(

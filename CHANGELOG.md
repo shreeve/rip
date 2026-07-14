@@ -5,6 +5,19 @@ repository's pull requests.
 
 ## Unreleased
 
+- nginx and Caddy configuration generation lands, pure and
+  deterministic: `generateNginx(config)` and `generateCaddy(config)`
+  emit a web-server config from a normalized site model (host,
+  optional TLS, proxy/static/SPA routes), byte-identical whatever
+  order routes and sites arrive in. The load-bearing property is
+  injection safety — every value reaching a directive is validated
+  against a strict shape first, and a proxy target is parsed and
+  rebuilt from its validated pieces (the URL parser will keep a `;` or
+  newline inside a hostname), so no host, target, or path can smuggle
+  a directive into a config the web server would then execute. Caddy
+  static routes are path-scoped `handle` blocks, matching nginx's
+  `location` semantics (#105)
+
 - The `rip server` CLI's decision layer lands, pure and host-free:
   `parseServerArgs(argv)` parses `rip server <command> [path]
   [--flags]` — bare word as command, `--name value`/`--name=value`/
