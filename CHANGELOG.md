@@ -5,6 +5,19 @@ repository's pull requests.
 
 ## Unreleased
 
+- mDNS `.local` advertising and the rip.local dashboard complete the
+  server stage, pure and host-free: `lanIP(interfaces)` picks the first
+  routable IPv4 (skipping loopback, IPv6, and link-local), skipping
+  malformed entries and only ever returning a string;
+  `mdnsService(host, opts)` builds the `dns-sd` service descriptor for
+  a `.local` host (a non-`.local` host is not advertised, a malformed
+  host or bad port rejects); and `renderDashboard({ apps, title })`
+  renders the page served at `rip.local` — every value escaped, and a
+  URL rendered as a live link only once proven `http(s)`, so a hostile
+  app name or `javascript:` URL is inert text, never markup. The
+  interface enumeration and the `dns-sd` spawn are the serving layer's
+  host concerns (#106)
+
 - nginx and Caddy configuration generation lands, pure and
   deterministic: `generateNginx(config)` and `generateCaddy(config)`
   emit a web-server config from a normalized site model (host,
