@@ -10,8 +10,11 @@ test('public entry exposes named exports only', () => {
     'createMatcher',
     'errorEnvelope',
     'logger',
+    'openapi',
     'parseQuery',
+    'reading',
     'respond',
+    'withInput',
   ]);
   expect('default' in server).toBeFalse();
 });
@@ -34,7 +37,7 @@ test('the package is server-only: browser safety is never declared', () => {
 });
 
 test('the pure modules use no host APIs', () => {
-  for (const module of ['router.rip', 'context.rip', 'middleware.rip', 'builtin.rip', 'index.rip']) {
+  for (const module of ['router.rip', 'context.rip', 'middleware.rip', 'builtin.rip', 'input.rip', 'openapi.rip', 'index.rip']) {
     const source = readFileSync(new URL(`../${module}`, import.meta.url), 'utf8');
     expect(source).not.toMatch(/\bBun\.|node:|process\.|fetch\(/);
   }
