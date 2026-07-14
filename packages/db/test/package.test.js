@@ -4,9 +4,11 @@ import * as db from '@rip-lang/db';
 
 test('public entry exposes named exports only', () => {
   expect(Object.keys(db).sort()).toEqual([
+    'CancelledError',
     'ConnectionError',
     'DbError',
     'QueryError',
+    'createClient',
     'harborAdapter',
     'isDbError',
   ]);
@@ -25,8 +27,11 @@ test('the adapter is server-only: browser safety is never declared', () => {
   expect(pkg.rip).toBeUndefined();
 });
 
-test('the adapter reaches the harbor only through the injectable fetch', () => {
-  const source = readFileSync(new URL('../adapter.rip', import.meta.url), 'utf8');
-  // No hard-coded host runtime — fetch is injected, nothing else touches the network.
-  expect(source).not.toMatch(/\bBun\.|node:|import .* from/);
+test('the package modules touch no host runtime beyond the injectable fetch', () => {
+  for (const module of ['adapter.rip', 'client.rip', 'index.rip']) {
+    const source = readFileSync(new URL(`../${module}`, import.meta.url), 'utf8');
+    expect(source).not.toMatch(/\bBun\.|node:/);
+  }
+  // adapter.rip is self-contained; client.rip imports only from the package itself.
+  expect(readFileSync(new URL('../adapter.rip', import.meta.url), 'utf8')).not.toMatch(/import .* from/);
 });

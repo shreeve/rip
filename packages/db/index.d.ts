@@ -50,3 +50,25 @@ export type HarborOpts = {
 };
 
 export function harborAdapter(opts?: HarborOpts): Adapter;
+
+export class CancelledError extends Error {}
+
+export type QueryOptions = { signal?: AbortSignal };
+
+export type Row = Record<string, unknown>;
+
+export type MaterializedResult = {
+  rows: Row[];
+  columns: string[];
+  rowCount: number;
+};
+
+export type Client = {
+  query(sql: string, params?: unknown[], opts?: QueryOptions): Promise<MaterializedResult>;
+  rows(sql: string, params?: unknown[], opts?: QueryOptions): Promise<Row[]>;
+  one(sql: string, params?: unknown[], opts?: QueryOptions): Promise<Row | null>;
+  value(sql: string, params?: unknown[], opts?: QueryOptions): Promise<unknown>;
+  transaction<T>(fn: (tx: Client) => Promise<T> | T): Promise<T>;
+};
+
+export function createClient(adapter: Adapter): Client;
