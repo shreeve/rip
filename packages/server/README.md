@@ -343,6 +343,20 @@ newline inside a hostname), so a value carrying a newline, a brace, or
 a stray directive is refused at generation time rather than written
 into a config the web server would then execute.
 
+## mDNS and the rip.local dashboard
+
+`lanIP(interfaces)` selects the first routable IPv4 from an injected
+network-interface map, skipping loopback, IPv6, and link-local
+`169.254/16`. `mdnsService(host, { port, ip, https })` builds the
+service descriptor the serving layer hands to `dns-sd`: a non-`.local`
+host is simply not advertised (`null`), and a malformed `.local` host
+or a bad port rejects loudly. `renderDashboard({ apps, title })` is
+the page served at `rip.local` — one row per registered app, every
+value escaped, and a URL rendered as a live link only once it is
+proven `http(s)` (a `javascript:` or `data:` url renders as inert
+text). The interface enumeration and the `dns-sd` advertisement are
+the serving layer's host concerns.
+
 `errorEnvelope(err)` is the one deterministic error translation:
 `notice` and `issues` are explicitly user-facing and always shown, a
 plain message shows only for 4xx, and 5xx or raw throws mask to the

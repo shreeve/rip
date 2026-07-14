@@ -380,6 +380,27 @@ export type CompatConfig = { sites?: CompatSite[] };
 export function generateNginx(config: CompatConfig): string;
 export function generateCaddy(config: CompatConfig): string;
 
+export function lanIP(interfaces: Record<string, Array<{ family: string; address: string; internal: boolean }>> | null): string | null;
+
+export type MdnsService = {
+  serviceName: string;
+  serviceType: string;
+  domain: string;
+  host: string;
+  port: number;
+  ip: string;
+};
+
+export function mdnsService(
+  host: string,
+  opts?: { port?: number; ip?: string; https?: boolean },
+): MdnsService | null;
+
+export type DashboardApp = { name: string; url: string; status: string };
+export type DashboardModel = { apps: DashboardApp[]; title?: string };
+
+export function renderDashboard(model: DashboardModel): string;
+
 export type DispatchResult = { code: number; message?: string };
 
 export function dispatchServer(
