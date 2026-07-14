@@ -21,6 +21,7 @@
 | [13](#13-single-rooted-tsconfig--no-per-project-resolution) | Single-rooted tsconfig — no monorepo support | Config surface | ⬜ **Open** | **none** |
 | [14](#14-unused-ts-expect-error-silently-swallowed) | Unused `@ts-expect-error` silently swallowed | Loud correctness | ✅ Verified | `check` |
 | [15](#15-reactive-state-bindings-carry-readonly) | Reactive `:=` bindings tagged `readonly` | Token DX | ✅ Verified | `semantic-tokens`, token audit's `readonly` invariant |
+| [16](#16-library-globals-lose-the-defaultlibrary-modifier) | Library globals lose `defaultLibrary` | Token DX | ⬜ **Open** | **none** (upstream; a naive gate is platform-dependent) |
 
 ## How to read this ledger
 
@@ -312,6 +313,27 @@ The fix had to reach the **compiler**, which is why it did not close alongside #
 **Why the suite missed it.** `editor-features.test.js` does drive `semanticTokens/full` over real LSP, but only for span fidelity — tokens land on Rip spans, hoist duplicates dedup. No test has ever asserted a **modifier**. The surface was watched for position and unwatched for meaning.
 
 **vs v3 — not a regression.** v3's shadow emits the identical `const clicks = __state(0)` (driven), and v3's token handler bridges TypeScript's classification back to `.rip` the same way: same lowering, same pass-through, same bit. (Unestablished: v3's live token payload; its LSP is re-drivable.) **Not v4 drift — an original hole in the reactive story, inherited.** The only finding here with that shape.
+
+### 16. Library globals lose the `defaultLibrary` modifier
+
+Symbols declared in `lib.*.d.ts` reach the editor with **no `defaultLibrary` modifier**, so VS Code falls back to `variable.other.readwrite` / `entity.name.function` instead of the `support.*` scopes themes reserve for the standard library. Token *types* are correct; only the modifier is missing. Driven on `console`, `Math`, `parseInt` and `isNaN`, and true of the whole class — the lookup that sets the bit never consults the symbol, and **not one token** in the fixture carries it. The mirror of #15 — that modifier is wrongly present, this one wrongly absent — and the only finding here whose cause is outside rip.
+
+**Status.** ⬜ **Open** (2026-07-14). **Upstream, in tsgo**: rip cannot fix it in `ripSemanticTokens` because the bit never arrives to forward. Filed as [microsoft/typescript-go#4635](https://github.com/microsoft/typescript-go/issues/4635).
+
+**Driven** — both editor servers over real LSP, same machine, same fixture lineage:
+
+| server | library globals carrying `defaultLibrary` |
+| --- | --- |
+| v3 — in-process TS 6.0.3 LanguageService, on v3's `test/types/06-functions.rip` (v3 is reachable at `~/Code/shreeve/rip-lang`) | **every one** |
+| v4 — tsgo broker, on [06-functions.rip](fixtures/06-functions.rip) | **none** |
+
+Also driven straight against the tsgo binary, bypassing rip: **not a single token** on the `.ts` twin, under both the native-preview extension and the released `typescript@7.0.2`. The engine, not rip's remapping.
+
+**Why (code)** — tsgo's classifier (`internal/ls/semantictokens.go`, `collectSemanticTokensInRange`) passes a declaration's **raw** `FileName()` to `IsSourceFileDefaultLibrary`, a lookup in a map keyed by **canonical** paths. Canonicalization lowercases on a case-insensitive filesystem, so `/Users/…` never matches its key `/users/…` and the lookup always misses; every other caller in tsgo passes `sourceFile.Path()`. Causally confirmed: copy tsgo's lib dir to an all-lowercase path, change nothing else, and every library global gets its modifier back — same binary, same file, same client.
+
+**Platform-conditional — the gating hazard.** On a case-SENSITIVE filesystem the canonicalization is the identity function and the bug does not occur, so a gate asserting `console` carries `defaultLibrary` **fails on macOS/Windows and passes on Linux**. Reporting differently by platform is worse than no gate, and the expected-failure device (#8) does not fit — an expected failure that passes on half the platforms is not one. Hence Gate **none**. **Never close this by asserting the modifier's ABSENCE:** that pins an upstream bug into the suite and certifies it correct. The honest gate becomes writable the day #4635 lands.
+
+**vs v3** — **regression** (driven, above). v3 classifies in-process through the JS TypeScript LanguageService (`getEncodedSemanticClassifications`), which canonicalizes correctly, so the same code on the same machine gets the bit. Same tsgo/LSP-broker root as #1–#10. It surfaced late because the modifier surface is only half-watched: #15 gated `readonly`, and nothing asserts `defaultLibrary` — or any modifier on a *library* symbol, since both #15's gate and the token audit probe rip's own declarations.
 
 ## `=` hoisting: the shared root of #4, #5 and #9
 
