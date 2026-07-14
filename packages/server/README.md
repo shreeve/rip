@@ -272,6 +272,24 @@ queue of 512 with a 30 s wait timeout, and recycle after 10000
 requests or 3600 s (the real deployment sizes the pool at `cores/2`
 and passes process-backed workers and wall-clock timers).
 
+## TLS
+
+No certificate or private key is committed to this repository, so
+`resolveTls(opts, adapters)` is pure over injected host adapters —
+`load(path)` reads a PEM pair, `acme(domain)` fetches an ACME-managed
+pair, `devCert(host)` mints a local development certificate. The
+policy is the surface it enforces: material resolves by precedence
+(an explicit cert/key, inline or by path, then ACME, then the dev CA),
+**production requires real material** — a missing certificate is a
+startup failure, never a silent plaintext fallback and never a
+development cert — and a per-host cert map resolves most-specific
+first. `certSpecificity`, `orderCerts`, and `matchCert` are the SNI
+primitives: a wildcard `*.example.com` covers exactly one deeper label,
+never the apex or a two-level subdomain, and matching is
+case-insensitive with the port and trailing dot normalized away. The
+result — `{ mode, material, sni, serverNames }` — is what the serving
+layer hands the socket; key material is never logged.
+
 `errorEnvelope(err)` is the one deterministic error translation:
 `notice` and `issues` are explicitly user-facing and always shown, a
 plain message shows only for 4xx, and 5xx or raw throws mask to the

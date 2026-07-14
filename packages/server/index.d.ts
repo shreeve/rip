@@ -283,3 +283,37 @@ export type PoolOpts = {
 };
 
 export function createPool(opts: PoolOpts): Pool;
+
+export type CertMaterial = { cert: string; key: string };
+export type OrderedCert = CertMaterial & { serverName: string; specificity: number };
+
+export function certSpecificity(serverName: unknown): number;
+export function orderCerts(certMap: Record<string, CertMaterial>): OrderedCert[];
+export function matchCert(ordered: OrderedCert[], hostname: unknown): CertMaterial | null;
+
+export type TlsAdapters = {
+  load(path: string): CertMaterial;
+  acme?(domain: string): CertMaterial | null;
+  devCert?(host: string): CertMaterial;
+};
+
+export type TlsOpts = {
+  cert?: string;
+  key?: string;
+  certPath?: string;
+  keyPath?: string;
+  certs?: Record<string, { cert?: string; key?: string; certPath?: string; keyPath?: string }>;
+  acme?: { domain: string };
+  dev?: boolean;
+  host?: string;
+  production?: boolean;
+};
+
+export type TlsResolution = {
+  mode: 'explicit' | 'acme' | 'dev' | 'none';
+  material: CertMaterial | null;
+  sni: OrderedCert[];
+  serverNames: string[];
+};
+
+export function resolveTls(opts: TlsOpts, adapters: TlsAdapters): TlsResolution;
