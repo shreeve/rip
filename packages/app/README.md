@@ -9,6 +9,8 @@ The package currently provides:
 - `createComponents` for in-memory component source and compiled-module storage
 - `buildRoutes` and `parseQuery` for the pure file-route manifest and matcher
 - `createRouter` and `browserAdapter` for reactive navigation state
+- `createMutation` for the write-side action primitive
+- `delay`, `debounce`, `throttle`, and `hold` timing signals
 - `createRenderer` for precompiled route/layout construction with render gates
 
 Only named exports are supported:

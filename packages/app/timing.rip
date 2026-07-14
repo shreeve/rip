@@ -1,0 +1,101 @@
+# Timing — reactive timing primitives.
+#
+# Each takes a duration (ms) and a reactive source (signal or
+# function) and returns a signal derived from the source with a
+# time-based transformation. A pending timer belongs to the effect
+# that scheduled it, so effect disposal clears it — `dispose()` is the
+# escape hatch app-level lifecycle code uses to halt every reactive
+# timer at shutdown.
+
+export type TimingSource<T> = { value: T } | (() => T)
+
+export type TimedSignal<T> =
+  value: T
+  read: () => T
+  dispose: () => void
+
+export type ReadonlyTimedSignal<T> =
+  readonly value: T
+  read: () => T
+  dispose: () => void
+
+toFn = (source) ->
+  if typeof source is 'function' then source else -> source.value
+
+# A signal source keeps its writability: the wrapper's `.value` setter
+# writes through to the source, while reads see the timed output. A
+# function source has no write path, so its wrapper is getter-only.
+wrap = (out, source, disposer) ->
+  obj: any = { read: -> out.read() }
+  descriptor: any = { get: -> out.value }
+  descriptor.set = ((v) -> source.value = v) if typeof source isnt 'function'
+  Object.defineProperty obj, 'value', descriptor
+  obj.dispose = -> disposer?()
+  obj
+
+# delay(ms, source) — truthy waits ms, falsy is immediate. Any tracked
+# notification restarts the window, so a non-boolean source whose value
+# churns while staying truthy keeps postponing the rise until it fires;
+# once risen it stays up without rescheduling.
+export def delay(ms: number, source: TimingSource<unknown>): TimedSignal<boolean>
+  fn = toFn source
+  out = __state !!fn()
+  eff = __effect ->
+    if fn()
+      return if out.read()
+      t = setTimeout (-> out.value = true), ms
+      return -> clearTimeout t
+    out.value = false
+    return
+  wrap out, source, eff
+
+# debounce(ms, source) — waits ms after the last change, then
+# propagates. The value is captured at change time: any later tracked
+# change re-runs the effect and replaces the timer, so the captured
+# value is always the last one — and no user code runs inside a timer.
+export def debounce(ms: number, source: TimingSource<unknown>): TimedSignal<unknown>
+  fn = toFn source
+  out = __state fn()
+  eff = __effect ->
+    val = fn()
+    t = setTimeout (-> out.value = val), ms
+    -> clearTimeout t
+  wrap out, source, eff
+
+# throttle(ms, source) — propagates at most once per ms. Construction
+# propagates the initial value and consumes the leading slot, so a
+# change inside the first window coalesces to the trailing edge; a
+# quiet window restores the immediate edge.
+export def throttle(ms: number, source: TimingSource<unknown>): TimedSignal<unknown>
+  fn = toFn source
+  out = __state fn()
+  last = 0
+  eff = __effect ->
+    val = fn()
+    now = Date.now()
+    remaining = ms - (now - last)
+    if remaining <= 0
+      out.value = val
+      last = now
+      return
+    t = setTimeout (->
+      out.value = fn()
+      last = Date.now()
+    ), remaining
+    -> clearTimeout t
+  wrap out, source, eff
+
+# hold(ms, source) — once truthy, stays true at least ms past the fall.
+# A falsy notification restarts the fall window; while already down,
+# nothing schedules.
+export def hold(ms: number, source: TimingSource<unknown>): TimedSignal<boolean>
+  fn = toFn source
+  out = __state !!fn()
+  eff = __effect ->
+    if fn()
+      out.value = true
+      return
+    return unless out.read()
+    t = setTimeout (-> out.value = false), ms
+    -> clearTimeout t
+  wrap out, source, eff

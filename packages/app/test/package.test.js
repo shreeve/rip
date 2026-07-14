@@ -7,11 +7,16 @@ test('public entry exposes named substrate exports only', () => {
     'browserAdapter',
     'buildRoutes',
     'createComponents',
+    'createMutation',
     'createRenderer',
     'createRouter',
     'createStash',
+    'debounce',
+    'delay',
+    'hold',
     'parseQuery',
     'source',
+    'throttle',
     'unwrapStash',
   ]);
   expect('default' in app).toBeFalse();
