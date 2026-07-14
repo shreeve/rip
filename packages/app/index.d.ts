@@ -166,6 +166,29 @@ export type ComponentsStore = {
 
 export function createComponents(): ComponentsStore;
 
+export type Route = {
+  readonly pattern: string;
+  readonly file: string;
+  readonly layouts: readonly string[];
+};
+
+export type RouteMatch = {
+  route: Route;
+  params: Record<string, string>;
+};
+
+export type RouteManifest = {
+  readonly routes: readonly Route[];
+  match(path: string): RouteMatch | null;
+};
+
+export function buildRoutes(
+  files: readonly string[],
+  root?: string,
+): RouteManifest;
+
+export function parseQuery(search: string): Record<string, string>;
+
 export type GateDescriptor =
   | string
   | {

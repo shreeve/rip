@@ -7,6 +7,7 @@ The package currently provides:
 - `createStash` and `unwrapStash` for source-aware application data
 - `source` for lazy singleton and keyed server-backed values
 - `createComponents` for in-memory component source and compiled-module storage
+- `buildRoutes` and `parseQuery` for the pure file-route manifest and matcher
 - `createRenderer` for precompiled route/layout construction with render gates
 
 Only named exports are supported:
@@ -54,6 +55,31 @@ const order = source({
 Without `kind`, the declaration accepts only `[]` or `[K]`, matching runtime
 arity inference for idiomatic Rip. Kind and callback arity must agree.
 
+## Routes
+
+`buildRoutes(files, root = '_route')` compiles route files into a frozen,
+deterministic manifest with no browser dependency:
+
+```coffee
+manifest = buildRoutes components.listAll('_route')
+manifest.match '/users/7'   # { route: { pattern, file, layouts }, params: { id: '7' } }
+```
+
+Route files map to URLs by convention: `index.rip` is `/`, `[id]` captures a
+segment, `[[page]]` is optional, `[...rest]` captures the remaining path, and
+a `(group)` directory adds no URL segment while contributing its
+`_layout.rip`. Underscore-prefixed files and directories are not routable.
+Precedence is decided per segment, left to right — static before dynamic
+before optional before catch-all — and two files claiming the same URL shape
+reject at build time.
+
+`match` takes a URL pathname without query or hash. Segments are
+percent-decoded before comparison, so an encoded spelling reaches its route
+and a `%2F` inside a dynamic segment yields a param containing `/`; a segment
+that fails to decode matches nothing. `parseQuery` turns a search string into
+a plain object with `URLSearchParams` semantics: last value wins per key and
+`+` reads as a space.
+
 ## Renderer
 
 `createRenderer` is the Node-testable render-gate consumer. It accepts an
@@ -88,7 +114,7 @@ constructor and mount succeeds, then tears down the old route.
 
 Gate failures reject `renderer.mount(info)` and reach `onError` as an `Error`
 carrying `status`, `path`, `file`, and the original `error`. This package does
-not provide file routing, source compilation, launch, or browser delivery.
+not provide source compilation, launch, or browser delivery.
 
 ## Test
 

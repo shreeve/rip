@@ -1,0 +1,249 @@
+# Route manifest — pure file-to-URL routing with no browser dependency.
+#
+# Route files map to URL patterns by a filesystem convention:
+#
+#   index.rip            /
+#   about.rip            /about
+#   users/[id].rip       /users/:id       one segment, captured
+#   docs/[[page]].rip    /docs/:page?     present or absent
+#   files/[...rest].rip  /files/*rest     the remaining path
+#   (admin)/users.rip    /users           group: no URL segment, shares _layout.rip
+#
+# Files and directories whose name starts with `_` are not routable;
+# `_layout.rip` files form each route's layout chain, outermost first.
+# Markers claim whole segments and a catch-all must be the final segment.
+# Matching compares percent-decoded path segments, so an encoded segment
+# reaches its route and a `%2F` inside a dynamic segment yields a param
+# containing `/`. Precedence is per segment — static before dynamic
+# before optional before catch-all — and two files claiming the same URL
+# shape reject at build time.
+
+export type Route =
+  readonly pattern: string
+  readonly file: string
+  readonly layouts: readonly string[]
+
+export type RouteMatch =
+  route: Route
+  params: Record<string, string>
+
+export type RouteManifest =
+  readonly routes: readonly Route[]
+  match: (path: string) => RouteMatch | null
+
+NAME = /^\w+$/
+RANKS = { static: 0, dynamic: 1, optional: 2, catchall: 3 }
+OPTIONAL_LIMIT = 8
+
+fail = (message) -> throw new Error "Rip App: #{message}"
+
+decodeSegment = (segment) ->
+  try
+    decodeURIComponent segment
+  catch error
+    null
+
+validRoot = (root) ->
+  return '' if root is ''
+  unless typeof root is 'string'
+    throw new TypeError 'Rip App: route root must be a string'
+  segments = root.split '/'
+  if root.includes('\\') or segments.some((segment) -> not segment or segment is '.' or segment is '..')
+    throw new TypeError "Rip App: invalid route root '#{root}'"
+  root
+
+parseSegment = (segment, rel) ->
+  if m = /^\[\[(.+)\]\]$/.exec segment
+    fail "invalid optional segment '#{segment}' in '#{rel}'" unless NAME.test m[1]
+    { kind: 'optional', name: m[1] }
+  else if m = /^\[\.\.\.(.+)\]$/.exec segment
+    fail "invalid catch-all segment '#{segment}' in '#{rel}'" unless NAME.test m[1]
+    { kind: 'catchall', name: m[1] }
+  else if segment.startsWith '[...'
+    fail "invalid catch-all segment '#{segment}' in '#{rel}'"
+  else if m = /^\[(.+)\]$/.exec segment
+    fail "invalid dynamic segment '#{segment}' in '#{rel}'" unless NAME.test m[1]
+    { kind: 'dynamic', name: m[1] }
+  else if /^\(.+\)$/.test segment
+    { kind: 'group' }
+  else if segment.includes('[') or segment.includes(']')
+    fail "invalid segment '#{segment}' in '#{rel}': markers claim a whole segment"
+  else
+    { kind: 'static', text: segment }
+
+# Compile one route file into its pattern, matchable parts, per-segment
+# precedence ranks, and the URL shapes it claims. Every shape the route
+# can expose (optionals present or absent) is enumerated with parameter
+# names erased, so ambiguity is detected against the full claim — two
+# routes differing only by capture name still collide, and a route whose
+# optionals make it ambiguous with itself rejects on its own.
+compile = (rel) ->
+  parsed = (parseSegment(segment, rel) for segment in rel.slice(0, -4).split('/'))
+  fail "route file name cannot be a group segment: '#{rel}'" if parsed[parsed.length - 1].kind is 'group'
+  kept = parsed.filter (part) -> part.kind isnt 'group'
+  for part, i in kept when part.kind is 'catchall' and i isnt kept.length - 1
+    fail "catch-all segment must be last in '#{rel}'"
+  final = kept[kept.length - 1]
+  kept.pop() if kept.length and final.kind is 'static' and final.text is 'index'
+
+  names = []
+  optionals = 0
+  for part in kept when part.name?
+    fail "duplicate parameter name '#{part.name}' in '#{rel}'" if names.includes part.name
+    names.push part.name
+    optionals += 1 if part.kind is 'optional'
+  fail "more than #{OPTIONAL_LIMIT} optional segments in '#{rel}'" if optionals > OPTIONAL_LIMIT
+
+  pattern = ''
+  ranks = []
+  expansions = [{ shape: '', display: '' }]
+  for part in kept
+    ranks.push RANKS[part.kind]
+    switch part.kind
+      when 'static'
+        piece = '/' + part.text
+        pattern += piece
+        expansions = expansions.map (e) -> { shape: e.shape + piece, display: e.display + piece }
+      when 'dynamic'
+        pattern += "/:#{part.name}"
+        expansions = expansions.map (e) -> { shape: e.shape + '/:', display: "#{e.display}/:#{part.name}" }
+      when 'optional'
+        pattern += "/:#{part.name}?"
+        expansions = expansions.flatMap (e) ->
+          [e, { shape: e.shape + '/:', display: "#{e.display}/:#{part.name}" }]
+      when 'catchall'
+        pattern += "/*#{part.name}"
+        expansions = expansions.map (e) -> { shape: e.shape + '/*', display: "#{e.display}/*#{part.name}" }
+
+  pattern = '/' if pattern is ''
+  shapes = new Set(expansions.map (e) -> e.shape or '/')
+  fail "route '#{rel}' is ambiguous with itself" if shapes.size < expansions.length
+  { pattern, parts: kept, ranks, expansions }
+
+# Match decoded path segments against a route's parts, backtracking
+# through optional segments. Returns captured [name, value] pairs, or
+# null when the route does not claim the path. A segment that fails to
+# percent-decode never matches.
+matchParts = (parts, segments) ->
+  walk = (pi, si) ->
+    if pi is parts.length
+      return if si is segments.length then [] else null
+    part = parts[pi]
+    switch part.kind
+      when 'static'
+        return null unless si < segments.length
+        return null unless decodeSegment(segments[si]) is part.text
+        walk pi + 1, si + 1
+      when 'dynamic'
+        return null unless si < segments.length and segments[si] isnt ''
+        value = decodeSegment segments[si]
+        return null unless value?
+        rest = walk pi + 1, si + 1
+        return null unless rest
+        [[part.name, value], ...rest]
+      when 'optional'
+        skipped = walk pi + 1, si
+        return skipped if skipped
+        return null unless si < segments.length and segments[si] isnt ''
+        value = decodeSegment segments[si]
+        return null unless value?
+        rest = walk pi + 1, si + 1
+        return null unless rest
+        [[part.name, value], ...rest]
+      when 'catchall'
+        # A catch-all owns the slash that introduces it, so a bare prefix
+        # ('/docs' against docs/[...rest].rip) is not a match — except at
+        # the root, where the path's own slash introduces the capture.
+        return null if si is segments.length and si isnt 0
+        pieces = []
+        for segment in segments.slice si
+          value = decodeSegment segment
+          return null unless value?
+          pieces.push value
+        [[part.name, pieces.join '/']]
+  walk 0, 0
+
+layoutChain = (rel, layouts) ->
+  chain = []
+  chain.push layouts.get('') if layouts.has ''
+  segments = rel.split '/'
+  dir = ''
+  for segment, i in segments when i < segments.length - 1
+    dir = if dir then "#{dir}/#{segment}" else segment
+    chain.push layouts.get(dir) if layouts.has dir
+  chain
+
+export def buildRoutes(files: string[], root: string = '_route'): RouteManifest
+  unless Array.isArray files
+    throw new TypeError 'Rip App: buildRoutes expects an array of file paths'
+  root = validRoot root
+  prefix = if root then root + '/' else ''
+
+  layouts = new Map()
+  entries = []
+
+  for file in files
+    unless typeof file is 'string'
+      throw new TypeError 'Rip App: route file paths must be strings'
+    continue unless file.startsWith(prefix) and file.length > prefix.length
+    rel = file.slice prefix.length
+    segments = rel.split '/'
+    invalid = segments.some (segment) -> not segment or segment is '.' or segment is '..'
+    if rel.includes('\\') or invalid or segments[-1] is '.rip'
+      throw new TypeError "Rip App: invalid route file path '#{file}'"
+    if segments[-1] is '_layout.rip'
+      layouts.set segments.slice(0, -1).join('/'), file
+      continue
+    continue if segments.some (segment) -> segment.startsWith '_'
+    unless rel.endsWith '.rip'
+      throw new TypeError "Rip App: route files must be .rip sources: '#{file}'"
+    entries.push { ...compile(rel), rel, file }
+
+  # Ambiguity check runs in rel order so the rejection is deterministic
+  # regardless of file enumeration order.
+  seen = new Map()
+  for entry in [...entries].sort((a, b) -> if a.rel < b.rel then -1 else 1)
+    for expansion in entry.expansions
+      shape = expansion.shape or '/'
+      display = expansion.display or '/'
+      if existing = seen.get shape
+        fail "route '#{entry.rel}' is listed more than once" if existing.rel is entry.rel
+        [first, second] = [existing.rel, entry.rel].sort()
+        fail "'#{first}' and '#{second}' both resolve to '#{existing.display}'"
+      seen.set shape, { rel: entry.rel, display }
+
+  # Per-segment precedence, code-unit pattern order breaking ties, so
+  # route order never depends on host locale or enumeration order.
+  entries.sort (a, b) ->
+    for i in [0...Math.max(a.ranks.length, b.ranks.length)]
+      ra = a.ranks[i] ?? -1
+      rb = b.ranks[i] ?? -1
+      return ra - rb if ra isnt rb
+    return -1 if a.pattern < b.pattern
+    return 1 if a.pattern > b.pattern
+    0
+
+  compiled = entries.map (entry) ->
+    route = Object.freeze
+      pattern: entry.pattern
+      file: entry.file
+      layouts: Object.freeze layoutChain(entry.rel, layouts)
+    { route, parts: entry.parts }
+
+  match = (path) ->
+    unless typeof path is 'string'
+      throw new TypeError 'Rip App: route match expects a path string'
+    return null unless path.startsWith '/'
+    segments = if path is '/' then [] else path.slice(1).split '/'
+    for entry in compiled
+      pairs = matchParts entry.parts, segments
+      continue unless pairs
+      return { route: entry.route, params: Object.fromEntries pairs }
+    null
+
+  Object.freeze { routes: Object.freeze(compiled.map (c) -> c.route), match }
+
+export def parseQuery(search: string): Record<string, string>
+  unless typeof search is 'string'
+    throw new TypeError 'Rip App: parseQuery expects a query string'
+  Object.fromEntries new URLSearchParams(search)

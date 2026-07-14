@@ -9,4 +9,5 @@ export type GateFailure =
 export { source } from './source.rip'
 export { createStash, unwrapStash } from './stash.rip'
 export { createComponents } from './components.rip'
+export { buildRoutes, parseQuery } from './routes.rip'
 export { createRenderer } from './renderer.rip'
