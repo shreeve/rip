@@ -5,6 +5,24 @@ repository's pull requests.
 
 ## Unreleased
 
+- The server gains its request context: `createContext` wraps one
+  web-standard Request into the handler surface — params, query
+  (last-wins on both faces, like `parseQuery`), case-insensitive
+  headers, and `parseBody` dispatching on content type, total over
+  hostile input. Response helpers build JSON/text/HTML/redirect/file
+  responses from staged headers (set once, land on every later
+  response — 304s, redirects, and error envelopes included; per-call
+  headers override without leaking across responses), `cache()`
+  stages RFC-integer freshness loudly, and `send()` serves through an
+  injected synchronous file host with weak-ETag revalidation — no
+  default host exists, and a host without freshness numbers serves
+  without a validator rather than minting a shared bogus ETag.
+  `errorEnvelope` is the one deterministic error translation (`notice`
+  and `issues` user-facing, 4xx messages shown, 5xx and raw throws
+  masked), and `respond()` drives any handler result to a Response
+  with a guarantee that is total: an error hostile to its own envelope
+  still comes back as a bare 500, never a rejection (#95)
+
 - The server stage opens with `@rip-lang/server` and its pure request
   matcher: `createMatcher` routes in registration order, first match
   wins, with `:name` params (percent-decoded, never empty),

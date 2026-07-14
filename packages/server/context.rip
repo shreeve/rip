@@ -1,0 +1,222 @@
+# Request context and response helpers — the request-scoped surface a
+# route handler works with. Everything is a pure function of the
+# web-standard Request plus the matcher's params: reading (params,
+# query, headers, body) never touches a socket, and every response
+# helper returns a web-standard Response. Files arrive ONLY through an
+# injected host — this package never touches a filesystem; the serving
+# units own the real host alongside its containment policy.
+#
+# Response headers stage on the context: `header(name, value)` before
+# any helper runs lands on every later response — body helpers,
+# redirects, 304s, and 204s alike — per-call headers override staged
+# ones, and one response's per-call headers never leak into the next.
+# The one exception is the last-resort envelope respond() emits when
+# an error refuses even to serialize; it is deliberately bare.
+#
+# The error envelope is the framework's one deterministic error
+# translation: `notice` and `issues` are explicitly user-facing and
+# always shown; a plain message shows only for 4xx; 5xx and raw throws
+# mask to a generic status message so internal details never leak.
+
+export type CtxReq =
+  raw: Request
+  method: string
+  url: string
+  path: string
+  param: (key?: string) => any
+  query: (key?: string) => any
+  header: (key?: string) => any
+  json: () => Promise<any>
+  text: () => Promise<string>
+  formData: () => Promise<FormData>
+  parseBody: () => Promise<any>
+
+export type Ctx =
+  req: CtxReq
+  json: (data: any, status?: number, headers?: Record<string, string>) => Response
+  text: (body: string, status?: number, headers?: Record<string, string>) => Response
+  html: (body: string, status?: number, headers?: Record<string, string>) => Response
+  body: (data: BodyInit | null, status?: number, headers?: Record<string, string>) => Response
+  redirect: (location: string, status?: number) => Response
+  send: (path: string, type?: string) => Response
+  header: (name: string, value?: string, opts?: { append?: boolean }) => any
+  cache: (duration: number | string) => void
+
+export type FileMeta =
+  body?: unknown
+  size?: number
+  lastModified?: number
+  type?: string
+  exists: boolean
+
+export type FilesHost = (path: string) => FileMeta
+
+export type ApiError = { message?: string, notice?: string, issues?: unknown[] }
+
+fail = (message) -> throw new Error "Rip Server: #{message}"
+
+STATUS_TEXT: Record<number, string> =
+  400: 'Bad Request'
+  401: 'Unauthorized'
+  403: 'Forbidden'
+  404: 'Not Found'
+  409: 'Conflict'
+  422: 'Unprocessable Entity'
+  429: 'Too Many Requests'
+  500: 'Internal Server Error'
+  502: 'Bad Gateway'
+  503: 'Service Unavailable'
+
+DURATION_UNITS = { s: 1, m: 60, h: 3600, d: 86400, w: 604800, y: 31536000 }
+
+# '2 hours' → 7200. Delta-seconds is a non-negative integer by RFC, so
+# numbers floor; a spelling that parses as neither seconds nor a
+# duration phrase — or a number no header can carry — rejects loudly.
+durationSeconds = (duration) ->
+  if typeof duration is 'number' and Number.isSafeInteger(Math.floor(duration)) and duration >= 0
+    return Math.floor duration
+  if typeof duration is 'string'
+    parts = duration.match /^(\d+)\s*(s|sec|seconds?|m|min|minutes?|h|hr|hours?|d|days?|w|weeks?|y|years?)$/i
+    return parseInt(parts[1], 10) * DURATION_UNITS[parts[2][0].toLowerCase()] if parts
+  fail "cache duration #{String duration} is not seconds or a phrase like '2 hours'"
+
+export def errorEnvelope(err: any): { status: number, error: ApiError }
+  raw = err?.status
+  status = if Number.isInteger(raw) and 400 <= raw <= 599 then raw else 500
+  error =
+    if err?.issues
+      { message: err.message or 'Validation failed', issues: err.issues }
+    else if err?.notice
+      { notice: err.notice }
+    else if status < 500
+      { message: err.message or STATUS_TEXT[status] or 'Error' }
+    else
+      { message: STATUS_TEXT[status] or 'Internal Server Error' }
+  { status, error }
+
+export def createContext(request: Request, opts: { params?: Record<string, string>, files?: FilesHost | null } = {}): Ctx
+  fail 'createContext requires a web-standard Request' unless request?.url? and request?.headers?
+  url = null
+  try
+    url = new URL request.url
+  catch
+    fail "createContext requires a request with a valid absolute URL (got #{JSON.stringify request.url})"
+  params = { ...(opts.params ?? {}) }
+  files = opts.files ?? null
+  staged = new Headers()
+
+  # One response's headers: staged first, the helper's content type,
+  # then per-call headers — later wins, and nothing mutates `staged`.
+  build = (type: string | null, status: number, headers: Record<string, string> | null, data: any) ->
+    out = new Headers staged
+    out.set 'Content-Type', type if type?
+    out.set name, value for name, value of headers ?? {}
+    new Response data, { status, headers: out }
+
+  req =
+    raw: request
+    method: request.method
+    url: request.url
+    path: url.pathname
+    # An own read only — param('constructor') must answer undefined,
+    # never a prototype member.
+    param: (key) ->
+      if key? then (if Object.hasOwn(params, key) then params[key] else undefined)
+      else { ...params }
+    # Last-wins for duplicates on both faces — the same judgment
+    # parseQuery makes, where get() alone would answer first-wins.
+    query: (key) ->
+      if key? then url.searchParams.getAll(key).at(-1) ?? undefined
+      else Object.fromEntries url.searchParams
+    header: (key) ->
+      if key? then request.headers.get(key) ?? undefined
+      else Object.fromEntries request.headers
+    json: -> request.json()
+    text: -> request.text()
+    formData: -> request.formData()
+    # Total over hostile input: a body that fails to parse as what its
+    # content type claims is null, a type with no parse is {}. The
+    # caller never wears a throw for someone else's header.
+    parseBody: ->
+      type = request.headers.get('content-type') or ''
+      if /json/i.test type
+        try
+          await request.json()
+        catch
+          null
+      else if /form/i.test type
+        try
+          Object.fromEntries await request.formData()
+        catch
+          null
+      else
+        {}
+
+  ctx: any =
+    req: req
+    json: (data, status = 200, headers = null) ->
+      build 'application/json; charset=utf-8', status, headers, JSON.stringify(data)
+    text: (body, status = 200, headers = null) ->
+      build 'text/plain; charset=utf-8', status, headers, body
+    html: (body, status = 200, headers = null) ->
+      build 'text/html; charset=utf-8', status, headers, body
+    body: (data, status = 200, headers = null) ->
+      build null, status, headers, data
+    redirect: (location, status = 302) ->
+      build null, status, { Location: String(location) }, null
+    header: (name, value, opts: { append?: boolean } = {}) ->
+      if value?
+        if opts.append then staged.append(name, value) else staged.set(name, value)
+        return
+      staged.get(name) ?? undefined
+    cache: (duration) ->
+      seconds = durationSeconds duration
+      staged.set 'Cache-Control', "public, max-age=#{seconds}, immutable"
+      staged.set 'Expires', new Date(Date.now() + seconds * 1000).toUTCString()
+      return
+    send: (path, type: string | null = null) ->
+      fail 'send() requires a file host — pass files to createContext' unless files?
+      meta: any = files path
+      fail 'send() requires a synchronous file host — it returned a Promise' if typeof meta?.then is 'function'
+      return build 'text/plain; charset=utf-8', 404, null, 'not found' unless meta?.exists
+      headers: any = {}
+      headers['Cache-Control'] = 'no-cache' unless staged.has 'Cache-Control'
+      # The validator exists only when the host supplied real numbers:
+      # a meta without them serves fresh every time, because a made-up
+      # ETag shared across files would 304 the WRONG content.
+      etag = if typeof meta.lastModified is 'number' and typeof meta.size is 'number'
+        "W/\"#{meta.lastModified}-#{meta.size}\""
+      else
+        null
+      if etag?
+        headers['ETag'] = etag
+        if request.headers.get('if-none-match') is etag
+          return build null, 304, headers, null
+      build (type ?? meta.type ?? 'application/octet-stream'), 200, headers, meta.body
+
+  ctx
+
+# The one translation from a handler's return value to a Response: a
+# Response passes through, an object becomes JSON, a string becomes
+# text or html by its shape, numbers and booleans become text, and
+# nothing becomes 204. A throw becomes its error envelope as JSON —
+# and the guarantee is total: a thrown value hostile enough to break
+# its own envelope (a throwing getter, a cyclic issues array) still
+# comes back as a bare 500, never as a rejection that leaks it.
+export def respond(handler: any, ctx: Ctx): Promise<Response>
+  try
+    result = await handler.call ctx, ctx
+    return result if result instanceof Response
+    return ctx.json result if result? and typeof result is 'object'
+    if typeof result is 'string'
+      kind = if result.trimStart().startsWith('<') then 'html' else 'text'
+      return ctx[kind] result
+    return ctx.text String(result) if typeof result is 'number' or typeof result is 'boolean'
+    ctx.body null, 204
+  catch err
+    try
+      { status, error } = errorEnvelope err
+      ctx.json { error }, status
+    catch
+      new Response '{"error":{"message":"Internal Server Error"}}',
+        { status: 500, headers: { 'Content-Type': 'application/json; charset=utf-8' } }

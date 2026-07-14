@@ -61,3 +61,36 @@ duplicate keys keep the last value, `+` decodes to a space, and a
 `routes()` returns an ordered snapshot of `{ method, pattern, handler }`
 — the seam later units (OpenAPI generation, the app-serving preset)
 read instead of reaching into the table.
+
+## The request context
+
+`createContext(request, { params, files })` wraps one web-standard
+`Request` into the surface a handler works with — reading never
+touches a socket, and every helper returns a web-standard `Response`:
+
+```rip
+show = (c) ->
+  id   = c.req.param 'id'         # one param, or param() for all
+  sort = c.req.query 'sort'       # last value wins, like parseQuery
+  body = await c.req.parseBody()  # dispatches on content type
+  c.json { id, sort, body }       # or text/html/body/redirect/send
+```
+
+Response headers stage on the context: `c.header 'Vary', 'Accept'`
+lands on every later response (`append: true` to accumulate), per-call
+headers override staged ones, and one response's per-call headers
+never leak into the next. `c.cache 60` (or `'2 hours'`) stages
+`Cache-Control`; an unparseable duration rejects loudly.
+
+`send(path)` serves through the injected `files` host with weak-ETag
+revalidation (304 on `If-None-Match`); there is no default host —
+this package never touches a filesystem, and the serving units own
+the real host alongside its containment policy.
+
+`errorEnvelope(err)` is the one deterministic error translation:
+`notice` and `issues` are explicitly user-facing and always shown, a
+plain message shows only for 4xx, and 5xx or raw throws mask to the
+generic status text so internals never leak. `respond(handler, ctx)`
+drives a handler to a `Response` — a `Response` passes through, an
+object becomes JSON, a string becomes text or HTML by its shape,
+`null`/`undefined` become 204, and a throw becomes its envelope.

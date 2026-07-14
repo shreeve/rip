@@ -4,8 +4,11 @@ import * as server from '@rip-lang/server';
 
 test('public entry exposes named exports only', () => {
   expect(Object.keys(server).sort()).toEqual([
+    'createContext',
     'createMatcher',
+    'errorEnvelope',
     'parseQuery',
+    'respond',
   ]);
   expect('default' in server).toBeFalse();
 });
@@ -27,8 +30,8 @@ test('the package is server-only: browser safety is never declared', () => {
   expect(pkg.rip).toBeUndefined();
 });
 
-test('the matcher uses no host APIs', () => {
-  for (const module of ['router.rip', 'index.rip']) {
+test('the pure modules use no host APIs', () => {
+  for (const module of ['router.rip', 'context.rip', 'index.rip']) {
     const source = readFileSync(new URL(`../${module}`, import.meta.url), 'utf8');
     expect(source).not.toMatch(/\bBun\.|node:|process\.|fetch\(/);
   }
