@@ -336,7 +336,7 @@ const RUN_CLOSERS = new Set([')', 'CALL_END', 'PARAM_END', ']', 'INDEX_END', '}'
 // `h: Function ~> body`); `->` is the arrow
 // operator (a function TYPE spells `=>`, which stops only in
 // arrow-return position).
-const RUN_STOPS = new Set(['TERMINATOR', 'INDENT', 'OUTDENT', ',', '=', 'COMPOUND_ASSIGN', 'REACTIVE_ASSIGN', 'COMPUTED_ASSIGN', 'READONLY_ASSIGN', 'EFFECT', '->']);
+const RUN_STOPS = new Set(['TERMINATOR', 'INDENT', 'OUTDENT', ',', '=', 'COMPOUND_ASSIGN', 'REACTIVE_ASSIGN', 'COMPUTED_ASSIGN', 'READONLY_ASSIGN', 'GATE', 'EFFECT', '->']);
 
 // Extra depth-0 stops for the cast's type run: the postfix cast lives
 // inside a larger expression, so any binary/relational/ternary operator
@@ -975,7 +975,7 @@ const typedDeclEq = (tokens, i) => {
     } else if (depth === 0) {
       if (kd === 'TERMINATOR' || kd === 'INDENT' || kd === 'OUTDENT' || kd === '->') return -1;
       if (kd === '=>') sawFatArrow = true;
-      else if (kd === '=' || kd === 'REACTIVE_ASSIGN' || kd === 'COMPUTED_ASSIGN' || kd === 'READONLY_ASSIGN' || kd === 'EFFECT') {
+      else if (kd === '=' || kd === 'REACTIVE_ASSIGN' || kd === 'COMPUTED_ASSIGN' || kd === 'READONLY_ASSIGN' || kd === 'GATE' || kd === 'EFFECT') {
         if (!sawFatArrow || isCompleteTypeExpr(tokens, i + 1, j)) return j;
       }
     }
@@ -1070,7 +1070,7 @@ const bareDeclLineEnd = (tokens, i) => {
     } else if (depth === 0) {
       if (kd === 'TERMINATOR') return j;
       if (kd === 'INDENT' || kd === 'OUTDENT' || kd === '=' || kd === 'COMPOUND_ASSIGN' ||
-          kd === 'REACTIVE_ASSIGN' || kd === 'COMPUTED_ASSIGN' || kd === 'READONLY_ASSIGN' || kd === 'EFFECT') return -1;
+          kd === 'REACTIVE_ASSIGN' || kd === 'COMPUTED_ASSIGN' || kd === 'READONLY_ASSIGN' || kd === 'GATE' || kd === 'EFFECT') return -1;
     }
   }
   return -1;
@@ -1720,7 +1720,7 @@ export function rewriteTypes(tokens, mintId, text, fail) {
           } else if (depth === 0) {
             if (t2 === 'TERMINATOR' || t2 === 'OUTDENT') { end = j; break; }
             if (t2 === 'INDENT' || t2 === '=' || t2 === 'COMPOUND_ASSIGN' ||
-                t2 === 'REACTIVE_ASSIGN' || t2 === 'COMPUTED_ASSIGN' || t2 === 'READONLY_ASSIGN' || t2 === 'EFFECT') break;
+                t2 === 'REACTIVE_ASSIGN' || t2 === 'COMPUTED_ASSIGN' || t2 === 'READONLY_ASSIGN' || t2 === 'GATE' || t2 === 'EFFECT') break;
           }
         }
         if (end > i + 1 && isCompleteTypeExpr(tokens, i + 1, end)) {
@@ -2022,6 +2022,10 @@ const OPS2 = {
   // reading (a bare `: =` or `~ =` run is a parse error), so the
   // claim can never change a program's meaning.
   ':=': 'REACTIVE_ASSIGN', '~=': 'COMPUTED_ASSIGN',
+  // Render-ready gate: only the ADJACENT pair is one token. A spaced
+  // `< ~` run keeps the ordinary comparison followed by unary bitwise
+  // negation, so existing programs retain that reading.
+  '<~': 'GATE',
   // Readonly: ADJACENT `=!` is one token,
   // spacing around the pair free (`x =! 5`,
   // `x =!5`, `x=!5` all declare; only whitespace BETWEEN the two

@@ -715,3 +715,13 @@ let FancyBtn = class extends __Component {
     __effect(() => { this._t0.data = String(this.label.value); });
   }
 };
+let GatedOrder = class extends __Component {
+  static __gates = [{ path: 'orders', key: (params, query) => params.id }];
+  _init(props) {
+    this.order = __gateBind(this, 0);
+    this.snapshot = __state(this.order.value);
+  }
+  _create() {
+    return null;
+  }
+};

@@ -18,6 +18,7 @@
 //                               key REJECTS loudly (hasContext is the
 //                               optional-use probe)
 //   hasContext(key)           - is a provider in reach?
+//   __gateBind(c, path, key?) - computed last-good app-data binding
 //   __clsx(...args)           - flatten strings/arrays/objects to a
 //                               class string
 //   __lis(arr)                - longest increasing subsequence indices
@@ -75,7 +76,7 @@
 // context and error boundaries would silently break. Loading a second
 // copy therefore rejects LOUDLY with instructions.
 
-import { __batch, __state, __effect, __ownerFrame, __pushOwner, __popOwner, __detachRef } from './reactive.js';
+import { __batch, __state, __computed, __effect, __ownerFrame, __pushOwner, __popOwner, __detachRef } from './reactive.js';
 
 const __RIP_COMPONENTS_SENTINEL = Symbol.for('rip.runtime.components');
 if (globalThis[__RIP_COMPONENTS_SENTINEL]) {
@@ -89,6 +90,29 @@ if (globalThis[__RIP_COMPONENTS_SENTINEL]) {
 globalThis[__RIP_COMPONENTS_SENTINEL] = true;
 
 let __currentComponent = null;
+const __GATE_CONSTRUCTION_BRAND = {};
+let __pendingGateConstruction = null;
+const __gateMetadata = new WeakMap();
+
+// Module-private renderer seam: @rip-lang/app imports this file directly,
+// but the compiler never delivers this name to user programs. The pending
+// record carries an unforgeable closure brand and is consumed once by the
+// matching constructor.
+function __constructGateComponent(Component, metadata) {
+  const previous = __pendingGateConstruction;
+  __pendingGateConstruction = {
+    brand: __GATE_CONSTRUCTION_BRAND,
+    component: Component,
+    gates: metadata.gates,
+    parent: metadata.parent ?? null,
+    used: false,
+  };
+  try {
+    return new Component({});
+  } finally {
+    __pendingGateConstruction = previous;
+  }
+}
 
 // Remove a node from the DOM, tolerant of what it actually is. A
 // DocumentFragment (a multi-root component's _root) is skipped: it is
@@ -451,12 +475,54 @@ function __checkDeclaredProps(ctor, instance) {
   __validatedProps.add(ctor);
 }
 
+// A gate is a computed container over route-prefetched app data. It
+// retains the last non-null value for the mounted instance: a source
+// reset invalidates ordinary stash readers without tearing loaded data
+// out from under an already-constructed route component.
+function __gateBind(self, index) {
+  const metadata = __gateMetadata.get(self);
+  const binding = metadata?.gates?.[index];
+  if (!binding?.cell) {
+    throw new Error(
+      `[Rip] render gate ${index} has no renderer-resolved source binding — ` +
+      'gated components may only be constructed by @rip-lang/app createRenderer()',
+    );
+  }
+  let last = binding.value;
+  return __computed(() => {
+    let value = binding.cell.read();
+    for (const segment of binding.tail) {
+      if (value == null) break;
+      value = value[segment];
+    }
+    if (value != null) last = value;
+    return last;
+  });
+}
+
 // Last-applied style-object keys per element (the replacement diff).
 const __styleKeys = new WeakMap();
 
 class __Component {
   constructor(props = {}) {
     this._state = 'new';
+    const gates = this.constructor.__gates;
+    const mount = __pendingGateConstruction;
+    const rendererAuthorized =
+      mount?.brand === __GATE_CONSTRUCTION_BRAND &&
+      mount.component === this.constructor &&
+      mount.used !== true;
+    if (rendererAuthorized) mount.used = true;
+    if (gates?.length && !rendererAuthorized) {
+      throw new Error(
+        '[Rip] component declares render gates (<~) and cannot be constructed directly or as an ' +
+        'embedded child; render gates are honored only by @rip-lang/app createRenderer()',
+      );
+    }
+    if (rendererAuthorized) {
+      __gateMetadata.set(this, mount);
+      if (mount.parent) this._parent = mount.parent;
+    }
     __checkDeclaredProps(this.constructor, this);
     const declared = this.constructor.__props ?? [];
     const extendsTag = this.constructor.__extends ?? null;
@@ -858,4 +924,4 @@ class __Component {
 // so they ride the COMPONENTS delivered-name table — the reactive
 // table (and every reactive-only program's injected bytes) stays
 // untouched.
-export { __Component, __pushComponent, __popComponent, setContext, getContext, hasContext, __clsx, __lis, __reconcile, __transition, __handleComponentError, __detach, __ownerFrame, __pushOwner, __popOwner, __detachRef };
+export { __Component, __pushComponent, __popComponent, setContext, getContext, hasContext, __clsx, __lis, __reconcile, __transition, __handleComponentError, __gateBind, __detach, __ownerFrame, __pushOwner, __popOwner, __detachRef, __constructGateComponent };

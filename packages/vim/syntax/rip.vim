@@ -120,7 +120,7 @@ syn match  ripSymbol        /\%(\w\)\@<!:[a-zA-Z_$][a-zA-Z0-9_$]*/
 syn match  ripArrow         /[=-]>/
 
 " Reactive (high priority)
-syn match  ripReactive      /<=>\|:=\|\~=\|\~>\|=!/
+syn match  ripReactive      /<=>\|<\~\|:=\|\~=\|\~>\|=!/
 
 " Prototype access: String::trim (`::` is prototype access only —
 " `:` is the sole type-annotation operator. Type names after a `:`

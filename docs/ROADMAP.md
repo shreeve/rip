@@ -11,21 +11,7 @@ resolved before implementation depends on them.
 `test/battery-pending/` is the source of truth for deferred language
 and package behavior. Every row must continue to fail. When
 implementation makes a row pass, that row moves into `test/battery/`
-in the same change.
-
-One group remains:
-
-### Render gates and app data prefetch — 8 rows
-
-`pending-render-gates.rip` specifies component render gates:
-
-```rip
-user <~ @app.data.user
-```
-
-The complete contract includes renderer prefetch metadata, stash-backed
-member binding, keyed gate families, and the app data consumer.
-Gate syntax lands with that subsystem, not as an unread metadata stub.
+in the same change. The lane is currently empty.
 
 ## Package and application portfolio
 
@@ -51,8 +37,9 @@ but it must not block direct-path package implementation and tests.
 ### Application foundation
 
 - **App:** the dependency-free stash, singleton/keyed sources, and component
-  registry are present. Resources, timing helpers, the file-based router,
-  renderer, launch, and ARIA helpers remain.
+  registry are present. Component render gates and the precompiled renderer
+  consume stash-backed prefetch metadata end to end. Resources, timing helpers,
+  the file-based router, launch, and ARIA helpers remain.
 - **Validate:** the shared `read()`/normalization vocabulary and schema
   coercer registration.
 - **Server:** routing, middleware, sessions, OpenAPI, static/app serving,
@@ -60,8 +47,7 @@ but it must not block direct-path package implementation and tests.
 - **UI:** browser widgets and browser-side Tailwind integration.
 - **Database:** database client, embedding/adapter surfaces, and CLI.
 
-The app framework precedes render gates because it owns the stash and
-router consumer. Validate precedes server.
+Validate precedes server.
 
 ### Independent libraries and tools
 

@@ -1402,8 +1402,6 @@ describe('the reactive language surface is not reachable', () => {
   test('FLIPPED: adjacent `=!` is the readonly declaration; spaced `= !` keeps assignment-of-negation', () => {
     expect(compile('x =! 5').code).toBe('const x = 5;');
     expect(compile('x = !5').code).toBe('let x = !5;');
-    // `<~` is a comparison against bitwise-not — the components-era
-    // gate wave owns any re-lexing.
-    expect(compile('x <~ load()').code).toBe('x < (~load());');
+    expect(compile('x < ~load()').code).toBe('x < (~load());');
   });
 });

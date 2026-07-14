@@ -1,5 +1,5 @@
 # Components: declarations, the member model, the static
-# render DSL. The seven member spellings lower into _init(props) in
+# render DSL. Component member declarations lower into _init(props) in
 # fixed order; render lowers to _create()/_setup() with one __effect
 # per dynamic binding.
 
@@ -145,3 +145,8 @@ FancyBtn = component extends button
   render
     button
       = @label
+
+GatedOrder = component
+  order: { id: string } <~ @app.data.orders(params.id)
+  snapshot := order
+  render null

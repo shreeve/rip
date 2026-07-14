@@ -1,0 +1,291 @@
+import { unwrapStash } from './stash.rip'
+import { _isSourceCell, _isSourceFamily } from './source.rip'
+import { __constructGateComponent } from '../../src/runtime/components.js'
+
+export type GateFailure =
+  name: string
+  message: string
+  status: number
+  path: string
+  file: string
+  error: unknown
+
+export type Renderer =
+  mount: (info: Record<string, any>) => Promise<any>
+  start: () => Renderer
+  stop: () => void
+  readonly current: any
+
+export type RendererOpts =
+  router: Record<string, any>
+  app: Record<string, any>
+  components: Record<string, any>
+  target: Record<string, any>
+  onError?: (failure: GateFailure) => void
+
+failureFor = (path: string, file: string, error: any, message: string | null = null): GateFailure ->
+  text = message ?? error?.message ?? String(error)
+  failure: any = new Error text
+  failure.name = 'GateFailure'
+  failure.status = error?.status ?? error?.response?.status ?? 500
+  failure.path = path
+  failure.file = file
+  failure.error = error
+  failure
+
+componentFrom = (components, file) ->
+  module = components.getCompiled file
+  unless module? and typeof module is 'object'
+    throw new Error "Rip App: no precompiled component module for '#{file}'"
+  isComponent = (value) ->
+    typeof value is 'function' and typeof value.prototype?.mount is 'function'
+  return module.default if isComponent module.default
+  found = []
+  for key, value of module
+    continue if key is 'default'
+    if isComponent value
+      found.push value
+  unless found.length is 1
+    throw new Error "Rip App: precompiled module '#{file}' must export exactly one component class"
+  found[0]
+
+export def createRenderer(opts: RendererOpts): Renderer
+  unless opts? and typeof opts is 'object'
+    throw new TypeError 'Rip App: createRenderer expects an options object'
+  { router, app, components, target, onError } = opts
+  unless router? and typeof router is 'object'
+    throw new TypeError 'Rip App: createRenderer requires a router object'
+  unless app?.data?
+    throw new TypeError 'Rip App: createRenderer requires app.data'
+  unless components? and typeof components.getCompiled is 'function'
+    throw new TypeError 'Rip App: createRenderer requires a component registry'
+  unless target? and typeof target.appendChild is 'function'
+    throw new TypeError 'Rip App: createRenderer requires a target with appendChild()'
+  if onError? and typeof onError isnt 'function'
+    throw new TypeError 'Rip App: createRenderer onError must be a function'
+
+  instances = []
+  current = null
+  generation = 0
+  disposeRoute = null
+
+  resolveGateCell = (path) ->
+    value = unwrapStash app.data
+    segments = path.split '.'
+    for segment, index in segments
+      return null unless value? and (typeof value is 'object' or typeof value is 'function')
+      value = value[segment]
+      if _isSourceCell value
+        return { cell: value, tail: segments.slice(index + 1) }
+    null
+
+  gateFailure = (path: string, file: string, message: string, error: any = null): GateFailure ->
+    cause = error ?? new Error(message)
+    failureFor path, file, cause, message
+
+  gateJobs = (entries, params, query) ->
+    jobs = new Map()
+    for entry in entries
+      gates = entry.cls.__gates
+      entry.bindings = []
+      continue unless gates?
+      unless Array.isArray gates
+        throw gateFailure '<static>', entry.file, "Rip App: #{entry.file} static __gates must be an array"
+      for gate, gateIndex in gates
+        path = if typeof gate is 'string' then gate else gate?.path
+        keyFn = if typeof gate is 'string' then null else gate?.key
+        unless typeof path is 'string' and path.length > 0
+          throw gateFailure String(path), entry.file, "Rip App: #{entry.file} has a malformed render gate path"
+        if keyFn? and typeof keyFn isnt 'function'
+          throw gateFailure path, entry.file, "Rip App: gate '#{path}' has a non-function key"
+
+        resolved = resolveGateCell path
+        unless resolved
+          throw gateFailure path, entry.file, "Rip App: gate '#{path}' does not resolve to a source"
+        cell = resolved.cell
+
+        if _isSourceFamily cell
+          unless keyFn
+            throw gateFailure path, entry.file, "Rip App: gate '#{path}' is keyed and requires a key function"
+          try
+            key = keyFn params, query
+            cell = cell.cellFor key
+          catch caught
+            error = caught as any
+            throw failureFor path, entry.file, error, "Rip App: gate '#{path}' key failed: #{error.message}"
+        else if keyFn
+          throw gateFailure path, entry.file, "Rip App: gate '#{path}' is a singleton and does not accept a key function"
+
+        entry.bindings[gateIndex] = { cell, tail: resolved.tail, path, file: entry.file }
+        unless jobs.has cell
+          jobs.set cell, { cell, path, file: entry.file }
+    Array.from jobs.values()
+
+  ensureGates = (entries, params, query, mine) ->
+    jobs = gateJobs entries, params, query
+    results = await Promise.allSettled (job.cell.ensure() for job in jobs)
+    return false if mine isnt generation
+    for result, index in results
+      job = jobs[index]
+      if result.status is 'rejected'
+        throw failureFor job.path, job.file, result.reason
+      unless result.value?
+        throw gateFailure job.path, job.file,
+          "Rip App: gate '#{job.path}' resolved to #{result.value}; gated sources must resolve to a non-null value"
+    for entry in entries
+      for binding in entry.bindings
+        value = binding.cell.peek()
+        for segment in binding.tail
+          break unless value?
+          value = value[segment]
+        unless value?
+          throw gateFailure binding.path, binding.file,
+            "Rip App: gate '#{binding.path}' resolved to #{value}; every gated subpath must exist and be non-null"
+        binding.value = value
+    true
+
+  construct = (entry, parent) ->
+    __constructGateComponent entry.cls, { gates: entry.bindings, parent }
+
+  cleanup = (list) ->
+    errors = []
+    for instance in list by -1
+      try
+        instance.unmount?()
+      catch error
+        errors.push error
+        try
+          instance._teardown?({ state: 'unmounted', hooks: false, removeDOM: true })
+        catch fallbackError
+          errors.push fallbackError
+    errors
+
+  unmount = ->
+    oldInstances = instances
+    instances = []
+    current = null
+    errors = cleanup oldInstances
+    throw errors[0] if errors.length
+    return
+
+  stagingTarget = ->
+    if typeof document isnt 'undefined' and typeof document.createDocumentFragment is 'function'
+      return document.createDocumentFragment()
+    children = []
+    {
+      children
+      appendChild: (node) ->
+        children.push node
+        node
+    }
+
+  commitStaging = (staging) ->
+    if staging.nodeType is 11
+      target.appendChild staging
+    else
+      target.appendChild node for node in staging.children
+    return
+
+  layoutMountPoint = (instance, fallback) ->
+    roots = instance._nodes ?? [instance._root]
+    for root in roots
+      continue unless root
+      return root if root.matches?('#content')
+      slot = root.querySelector?('#content')
+      return slot if slot
+    roots.find((root) -> root?) ?? fallback
+
+  performMount = (info, mine) ->
+    route = info?.route
+    unless route?.file
+      throw new Error 'Rip App: renderer route state requires route.file'
+    params = info.params ?? {}
+    query = info.query ?? {}
+    layoutFiles = info.layouts ?? []
+    unless Array.isArray layoutFiles
+      throw new Error 'Rip App: renderer route state layouts must be an array'
+
+    entries = []
+    for file in [...layoutFiles, route.file]
+      entries.push { file, cls: componentFrom(components, file) }
+
+    ready = await ensureGates entries, params, query, mine
+    return null unless ready
+
+    staging = stagingTarget()
+    mountPoint = staging
+    built = []
+    try
+      for entry, index in entries
+        parent = built[-1] ?? null
+        instance = construct entry, parent
+        built.push instance
+        instance.mount?(mountPoint)
+        if instance._state is 'failed'
+          throw new Error "Rip App: component '#{entry.file}' failed during mount"
+        if index < entries.length - 1
+          mountPoint = layoutMountPoint instance, mountPoint
+      if mine isnt generation
+        cleanup built
+        return null
+      commitStaging staging
+    catch error
+      cleanup built
+      throw error
+
+    oldInstances = instances
+    instances = built
+    current = built[-1] ?? null
+    teardownErrors = cleanup oldInstances
+    if teardownErrors.length
+      throw failureFor '<teardown>', '<renderer>', teardownErrors[0]
+    current
+
+  mount = (info) ->
+    mine = ++generation
+    router.navigating = true if 'navigating' in router
+    try
+      await performMount info, mine
+    catch caught
+      error = caught as any
+      return null if mine isnt generation
+      failure: GateFailure = if error?.name is 'GateFailure'
+        error
+      else
+        file = info?.route?.file ?? '<route>'
+        failureFor (error?.path ?? file), file, error
+      onError?(failure)
+      throw failure
+    finally
+      router.navigating = false if mine is generation and 'navigating' in router
+
+  renderer = null
+  renderer =
+    current: null
+    mount: mount
+    start: ->
+      return renderer if disposeRoute
+      router.init?()
+      disposeRoute = __effect ->
+        info = router.current
+        mount(info).catch(-> null) if info?.route
+        return
+      renderer
+    stop: ->
+      # Bump first so every in-flight mount becomes stale; stop owns the
+      # navigating reset, while each stale mount's finally leaves it alone.
+      generation++
+      disposeRoute?()
+      disposeRoute = null
+      router.navigating = false if 'navigating' in router
+      try
+        unmount()
+      catch caught
+        error = caught as any
+        failure = failureFor '<teardown>', '<renderer>', error
+        onError?(failure)
+        throw failure
+      return
+
+  Object.defineProperty renderer, 'current', get: -> current
+  renderer

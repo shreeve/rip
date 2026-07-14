@@ -15,7 +15,7 @@ Full-featured Vim plugin for the [Rip](https://github.com/shreeve/rip) programmi
 - **Assignment variables** — `x = 5` highlights the variable name
 - **Function definitions** — `def name`, `name = ->`, and `name: ->`
 - **Class / enum / interface** — name and extends capture
-- **Reactive operators** — `:=`, `~=`, `~>`, `<=>`, `=!`
+- **Reactive operators** — `:=`, `~=`, `~>`, `<~`, `<=>`, `=!`
 - **Type annotations** — single-colon `name: Type` and `type Name =` (`::` is prototype access, e.g. `String::trim`)
 - **Regular expressions** — `/regex/` and `///heregex///` with interpolation
 - **Auto-indentation** — indent/dedent for offside-rule blocks

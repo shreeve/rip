@@ -3,13 +3,13 @@ import { readFileSync } from 'node:fs';
 import { compile } from '../../../src/compile.js';
 import { tscBatch } from '../../../test/support/tscbatch.js';
 
-const moduleNames = ['source', 'stash', 'components', 'index'];
+const moduleNames = ['source', 'stash', 'components', 'renderer', 'index'];
 
 test('app package TypeScript faces and declarations are valid', () => {
   const files = {
     'index.d.ts': readFileSync(new URL('../index.d.ts', import.meta.url), 'utf8'),
     'consumer.ts': [
-      "import { createComponents, createStash, source, unwrapStash } from './index';",
+      "import { createComponents, createRenderer, createStash, source, unwrapStash } from './index';",
       "const user = source({ fetch: async () => ({ name: 'Ada' }) });",
       "const order = source({ fetch: async (id: string) => ({ id }) });",
       "const signaled = source({ kind: 'singleton', fetch: async (signal?: AbortSignal) => ({ ok: !signal?.aborted }) });",
@@ -46,7 +46,9 @@ test('app package TypeScript faces and declarations are valid', () => {
       'source({ fetch: async (first: string, second: number) => ({ first, second }) });',
       'const components = createComponents();',
       "components.write('app.rip', 'export App = component');",
-      'void maybeUser; void id; void maybeSignaled; void maybeKeyedSignaled; void ensured; void preloaded; void refetched; void peeked; void orderRead; void components;',
+      "const renderer = createRenderer({ router: { current: null }, app: { data }, components, target: { appendChild: node => node }, onError: failure => { const status: number = failure.status; void status; } });",
+      "const mounted: Promise<unknown> = renderer.mount({ route: { file: 'app.rip' } });",
+      'void maybeUser; void id; void maybeSignaled; void maybeKeyedSignaled; void ensured; void preloaded; void refetched; void peeked; void orderRead; void components; void mounted;',
     ].join('\n'),
   };
 
@@ -81,4 +83,5 @@ test('app package TypeScript faces and declarations are valid', () => {
   expect(files['index.d.ts']).toContain('function createStash');
   expect(files['index.d.ts']).toContain('function unwrapStash');
   expect(files['index.d.ts']).toContain('function createComponents');
+  expect(files['index.d.ts']).toContain('function createRenderer');
 });

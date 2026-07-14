@@ -287,6 +287,26 @@ describeTscExtended('component declarations: consumer programs check against the
     expect(ok.status).toBe(0);
   }, TSC_TIMEOUT);
 
+  test('gated components expose neither direct construction nor static mount', () => {
+    const dts = compile([
+      'export Page = component',
+      '  user: { name: string } <~ @app.data.user',
+      '  render null',
+    ].join('\n')).declarations;
+    expect(dts).not.toContain('new (');
+    expect(dts.split('export declare let Page:')[1]).not.toContain('mount(target');
+    const consumer = [
+      "import { Page } from './page';",
+      'new Page();',
+      "Page.mount('#app');",
+      'export {};',
+      '',
+    ].join('\n');
+    const { status, byFile } = tscBatch(TSC, { 'page.d.ts': dts, 'consumer.ts': consumer });
+    expect(status).not.toBe(0);
+    expect(byFile.get('consumer.ts').length).toBeGreaterThanOrEqual(2);
+  }, TSC_TIMEOUT);
+
   test('a declared @children prop checks in consumer programs — no duplicate keys (the GPT addendum, F1)', () => {
     const dts = compile('export Child = component\n  @children: string\n  render\n    div "x"\n').declarations;
     const consumer = [

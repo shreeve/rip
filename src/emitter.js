@@ -28,7 +28,7 @@ import { applyInsertionPass, implicitBlocks, implicitObjects, implicitCalls, tag
 import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams } from './typetext.js';
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, knownBareAttribute } from './dom-vocab.js';
 import {
-  COMPONENT_HOOKS, componentTypeInfo, memberDeclareSegments, isDeclarableMember,
+  COMPONENT_HOOKS, COMPONENT_RUNTIME_FIELDS, componentTypeInfo, memberDeclareSegments, isDeclarableMember,
   propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType,
   syntacticLiteralType,
 } from './component-types.js';
@@ -356,6 +356,16 @@ class Emitter {
     const id = stores.idOf(x);
     const kind = id !== null ? stores.node(id)?.semanticKind : null;
     return kind === 'state' || kind === 'computed';
+  }
+
+  isGateDecl(x) {
+    return Emitter.isGateDeclIn(this.stores, x);
+  }
+
+  static isGateDeclIn(stores, x) {
+    if (!isNode(x) || x[0] !== 'gate' || x.length < 3) return false;
+    const id = stores.idOf(x);
+    return (id !== null ? stores.node(id)?.semanticKind : null) === 'gate';
   }
 
   // A REAL effect — same discrimination as the reactive
@@ -1092,6 +1102,13 @@ class Emitter {
   // (inline runtime — TS2417 otherwise); only bottom is both
   // assignable and uncallable.
   tsComponentCtor(info, pad) {
+    if (info.members.some((m) => m.kind === 'gate')) {
+      this.b.tsOnly(() => {
+        this.b.emit(`${pad}declare static mount: never;\n`);
+        this.b.emit(`${pad}private constructor() { super(); }\n`);
+      });
+      return;
+    }
     if (!propsParamOptional(info)) {
       this.b.tsOnly(() => this.b.emit(`${pad}declare static mount: never;\n`));
     }
@@ -4826,6 +4843,10 @@ class Emitter {
       const op = head === 'state' ? ':=' : '~=';
       throw this.positionedError(node, `emitter: a reactive declaration ('${typeof node[1] === 'string' ? node[1] : '…'} ${op} …') is a statement — it lowers to a const declaration, which has no expression form`);
     }
+    if (this.isGateDecl(node)) {
+      throw this.positionedError(node,
+        "emitter: a render gate ('<~') can only be used as a direct component body line");
+    }
     // A readonly declaration is the same class: it lowers to a const
     // declaration, which has no expression form. A user CALL impersonating the head passes
     // through to call emission.
@@ -5712,7 +5733,7 @@ class Emitter {
   // ── Components: declarations, the member model, the static
   // render DSL ────────────────────────────────────────────────────────
   // A component declaration lowers to an anonymous class extending the
-  // runtime's __Component: members categorize into the seven-spelling
+  // runtime's __Component: members categorize into the declaration
   // model; value members initialize in SOURCE ORDER inside
   // _init(props), offers register next, and effects start last (a
   // reaction never fires against a half-built instance); methods and the
@@ -5771,6 +5792,47 @@ class Emitter {
     return null;
   }
 
+  static gateChain(node) {
+    const segments = [];
+    let current = node;
+    while (isNode(current) && current[0] === '.' && current.length === 3 && typeof current[2] === 'string') {
+      segments.unshift(current[2]);
+      current = current[1];
+    }
+    if (typeof current !== 'string') return null;
+    segments.unshift(current);
+    return segments;
+  }
+
+  // Pure analysis of the source-only gate descriptor. Nothing here
+  // consults generated text: path and key policy are facts of the tree.
+  static gateSource(node) {
+    const pathNode = node[2];
+    const keys = node.slice(3);
+    if (keys.length > 1) return { error: 'arity', node };
+    const key = keys[0] ?? null;
+    const segments = Emitter.gateChain(pathNode);
+    if (segments === null || segments.length < 4 ||
+        segments[0] !== 'this' || segments[1] !== 'app' || segments[2] !== 'data') {
+      return { error: 'path', node: pathNode };
+    }
+    const path = segments.slice(3).join('.');
+    if (key === null) return { path, pathNode, key: null, keyCode: null };
+
+    if (typeof key === 'string' &&
+        (/^-?(?:\d+(?:\.\d+)?|\.\d+)$/.test(key.replace(/_/g, '')) ||
+         /^["'][^]*["']$/.test(key) || key === 'true' || key === 'false')) {
+      return { path, pathNode, key, keyCode: key };
+    }
+    const keySegments = Emitter.gateChain(key);
+    if (keySegments === null) return { error: 'key', node: key };
+    if (keySegments[0] === 'this') keySegments.shift();
+    if ((keySegments[0] !== 'params' && keySegments[0] !== 'query') || keySegments.length < 2) {
+      return { error: 'key', node: key };
+    }
+    return { path, pathNode, key, keyCode: keySegments.join('.') };
+  }
+
   // ["component", parent, ["block", …]] — the declaration. Expression
   // position (the value of `Card = component …`); statement position
   // groups like a class expression.
@@ -5798,6 +5860,7 @@ class Emitter {
     const plainVars = [];
     const stateVars = [];
     const derivedVars = [];
+    const gateVars = [];
     const methods = [];
     const hooks = [];
     const effects = [];
@@ -5813,6 +5876,11 @@ class Emitter {
         throw this.positionedError(stmt,
           `emitter: duplicate component member '${name}' — it is already declared in this component body; ` +
           `duplicates clobber silently across kinds`, node);
+      }
+      if (COMPONENT_RUNTIME_FIELDS.has(name)) {
+        throw this.positionedError(stmt,
+          `emitter: component member '${name}' collides with component runtime state — ` +
+          'the runtime owns this exact instance field; rename the member', node);
       }
       // The generated-lifecycle namespace: the lowering emits these
       // very method names into the same class body, so a same-named
@@ -5878,6 +5946,14 @@ class Emitter {
       }
       throw this.positionedError(stmt, msg, node);
     };
+    const gateError = (stmt, role, at, message) => {
+      const id = this.stores.idOf(stmt);
+      const row = id !== null ? this.stores.role(id, role) : null;
+      if (row?.sourceStart != null) {
+        throw this.positionedErrorAt(row.sourceStart, row.sourceEnd, message);
+      }
+      throw this.positionedError(at, message, stmt, node);
+    };
 
     const categorize = (stmt, offered) => {
       if (this.isRenderNode(stmt)) {
@@ -5900,6 +5976,34 @@ class Emitter {
         if (offered) rejectOffer(stmt);
         declare(stmt[1], 'accept', stmt, true);
         acceptedVars.push(stmt[1]);
+        return;
+      }
+      if (this.isGateDecl(stmt)) {
+        if (offered) rejectOffer(stmt);
+        const target = Emitter.memberTarget(stmt[1]);
+        if (target === null) {
+          gateError(stmt, 'target', stmt[1],
+            "emitter: a render gate ('<~') target must be one private component name — patterns and member chains cannot name a gate");
+        }
+        if (target.isPublic) {
+          gateError(stmt, 'target', stmt[1],
+            `emitter: render gate '${target.name}' must be private — '@${target.name} <~ …' would expose route-prefetched state as a caller prop; remove '@' and pass an explicit prop where public input is intended`);
+        }
+        const source = Emitter.gateSource(stmt);
+        if (source.error === 'arity') {
+          gateError(stmt, 'key', source.node,
+            "emitter: a keyed render gate takes exactly one key argument — use @app.data.name(params.id)");
+        }
+        if (source.error === 'path') {
+          gateError(stmt, 'rhs', source.node,
+            "emitter: '<~' requires a literal @app.data.<path> on the right-hand side, optionally called with one key");
+        }
+        if (source.error === 'key') {
+          gateError(stmt, 'key', source.node,
+            "emitter: a keyed render gate key may only be a literal or a params/query path (for example params.id or @query.tab)");
+        }
+        declare(target.name, 'gate', stmt, true);
+        gateVars.push({ name: target.name, ...source, node: stmt });
         return;
       }
       if (this.isReactiveDecl(stmt)) {
@@ -6045,7 +6149,6 @@ class Emitter {
       }
       categorize(stmt, false);
     }
-
     // Declared props — the names a parent may pass; the runtime's
     // constructor validates incoming keys against this set (the
     // compile half of that validation).
@@ -6121,6 +6224,30 @@ class Emitter {
       }
       this.b.emit(` extends ${this.runtimeName('__Component')} {\n`);
       if (tsInfo !== null) this.tsComponentMemberDeclares(tsInfo, pad);
+      if (gateVars.length > 0) {
+        // This source-ordered array is the gate ABI: the same gateVars
+        // order emits each _init __gateBind index below, and the app
+        // renderer fills its addressed binding array by this static index.
+        this.b.emit(`${pad}static __gates = [`);
+        gateVars.forEach((gate, index) => {
+          if (index > 0) this.b.emit(', ');
+          this.mark(gate.node, '$self', () => {
+            this.mark(gate.node, 'operator', () => {});
+            this.mark(gate.node, 'rhs', () => {
+              if (gate.key === null) {
+                this.b.emit(`'${gate.path}'`);
+              } else {
+                this.b.emit(`{ path: '${gate.path}', key: (params, query) => `);
+                this.mark(gate.node, 'key', () => {
+                  this.mark(gate.key, '$self', () => this.b.emit(gate.keyCode));
+                });
+                this.b.emit(' }');
+              }
+            });
+          });
+        });
+        this.b.emit('];\n');
+      }
       if (declaredProps.length > 0) {
         this.b.emit(`${pad}static __props = [${declaredProps.map((n) => `'${n}'`).join(', ')}];\n`);
       }
@@ -6225,6 +6352,17 @@ class Emitter {
           this.b.emit(')');
         });
       };
+      const emitGate = (gate, index) => {
+        initLine(gate.node, () => {
+          memberName(gate.node, gate.name);
+          this.b.emit(` = ${this.runtimeName('__gateBind')}(`);
+          this.mark(gate.node, 'operator', () => {});
+          this.mark(gate.node, 'rhs', () => {
+            this.b.emit(`this, ${index}`);
+          });
+          this.b.emit(')');
+        });
+      };
       // Value members initialize in SOURCE ORDER — the lowering never
       // reorders observable initializer effects (a plain member reads
       // a state declared above it, a trace logs in the written
@@ -6244,6 +6382,10 @@ class Emitter {
         ...stateVars.map((m) => ({ at: orderAt.get(m.node) ?? 0, run: () => emitState(m) })),
         ...derivedVars.map((m) => ({ at: orderAt.get(m.node) ?? 0, run: () => emitComputed(m) })),
       ].sort((a, b) => a.at - b.at);
+      // Gates are route-prefetched prerequisites: every gate binds
+      // first, in its own source order, before any ordinary member
+      // initializer can consume the loaded values.
+      for (const [index, gate] of gateVars.entries()) emitGate(gate, index);
       for (const vm of valueMembers) vm.run();
       for (const name of offeredVars) {
         initLine(seen.get(name), () => this.b.emit(`${this.runtimeName('setContext')}('${name}', this.${name})`));
@@ -11447,14 +11589,14 @@ const RUNTIME_TABLE = [
     key: 'components',
     names: ['setContext', 'getContext', 'hasContext', '__Component',
             '__pushComponent', '__popComponent', '__clsx', '__lis', '__reconcile',
-            '__transition', '__handleComponentError', '__detach',
+            '__transition', '__handleComponentError', '__gateBind', '__detach',
             // The owner-seam names factory emission spells —
             // re-exported by the components module so reactive-only
             // programs' injected bytes stay untouched.
             '__ownerFrame', '__pushOwner', '__popOwner', '__detachRef'],
     generatedNames: ['setContext', 'getContext', '__Component',
                      '__pushComponent', '__popComponent', '__clsx', '__reconcile',
-                     '__transition', '__detach', '__ownerFrame', '__pushOwner',
+                     '__transition', '__gateBind', '__detach', '__ownerFrame', '__pushOwner',
                      '__popOwner', '__detachRef'],
     url: new URL('./runtime/components.js', import.meta.url),
     requires: 'reactive',
@@ -11580,7 +11722,8 @@ const deliveryTrees = (emitter, sexpr) => {
     // included), but only the constructs whose emission CALLS a
     // runtime name are structural triggers (isTrigger — readonly
     // excluded: its lowering is a plain const).
-    const isDecl = (x) => Emitter.isReactiveDeclIn(stores, x) || Emitter.isEffectDeclIn(stores, x) || Emitter.isReadonlyDeclIn(stores, x);
+    const isDecl = (x) => Emitter.isReactiveDeclIn(stores, x) || Emitter.isEffectDeclIn(stores, x) ||
+      Emitter.isReadonlyDeclIn(stores, x) || Emitter.isGateDeclIn(stores, x);
     const isTrigger = (x) => Emitter.isReactiveDeclIn(stores, x) || Emitter.isEffectDeclIn(stores, x);
     const isComponent = (x) => Emitter.isComponentDeclIn(stores, x);
     trees.push({ tree, atoms, isDecl, isTrigger, isComponent });
