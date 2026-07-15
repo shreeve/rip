@@ -10,6 +10,7 @@
 # navigations that do not change them.
 
 import { parseQuery } from './routes.rip'
+import { delay } from './timing.rip'
 
 export type RouterAdapter =
   read: () => string
@@ -89,7 +90,11 @@ export def createRouter(opts: RouterOpts): Router
   _params = __state {}
   _query = __state {}
   _hash = __state ''
-  _navigating = __state false
+  # The renderer writes this flag around every mount; the 100 ms grace
+  # keeps a navigation that finishes inside the window from ever
+  # flashing a spinner, while a slow one rises once and drops the
+  # moment it completes.
+  _navigating = delay 100, __state false
   # The hash is deliberately absent: a fragment-only navigation must not
   # look like a route change to the renderer. `router.hash` tracks it.
   _current = __computed ->
@@ -170,6 +175,20 @@ export def createRouter(opts: RouterOpts): Router
     return miss path unless hit
     commit hit, path, query, hash
 
+  # Keep the current entry's saved position fresh while the user
+  # scrolls (throttled — only the latest position matters), so
+  # departures the router cannot intercept (back/forward) still find
+  # where the user was. Push-time saves stay exact; this covers the
+  # traversal case.
+  saveTimer: any = null
+  unwatchScroll: any = null
+  saveScrollNow = ->
+    saveTimer = null
+    state: any = adapter.readState?() ?? {}
+    adapter.replace adapter.read(), { ...state, __ripScroll: adapter.scroll?.save?() ?? null }
+  saveScroll = ->
+    saveTimer = setTimeout saveScrollNow, 100 unless saveTimer
+
   router: any =
     init: ->
       return router if unlisten
@@ -178,6 +197,7 @@ export def createRouter(opts: RouterOpts): Router
         return unless handleExternal()
         state: any = adapter.readState?()
         adapter.scroll?.restore?(state?.__ripScroll ?? null)
+      unwatchScroll = adapter.scroll?.watch?(saveScroll) ?? null
       router
 
     push: (url, opts: { noScroll?: boolean } = {}) ->
@@ -249,6 +269,10 @@ export def createRouter(opts: RouterOpts): Router
     destroy: ->
       unlisten?()
       unlisten = null
+      unwatchScroll?()
+      unwatchScroll = null
+      clearTimeout saveTimer if saveTimer
+      saveTimer = null
       return
 
   Object.defineProperty router, 'current', { get: -> _current.value }
@@ -268,6 +292,11 @@ export def browserAdapter(): RouterAdapter
   if typeof window is 'undefined' or not window.history? or not window.location?
     throw new Error 'Rip App: browserAdapter requires a browser environment'
   window.history.scrollRestoration = 'manual'
+  # requestAnimationFrame must be invoked with `window` as receiver or
+  # browsers throw "Illegal invocation".
+  frame = (fn) ->
+    if window.requestAnimationFrame then window.requestAnimationFrame(fn) else setTimeout fn, 16
+  restoring = 0
   read: -> window.location.pathname + window.location.search + window.location.hash
   readState: -> window.history.state
   push: (url, state) -> window.history.pushState state, '', url
@@ -280,8 +309,27 @@ export def browserAdapter(): RouterAdapter
     save: -> { x: window.scrollX, y: window.scrollY }
     # A traversal entry without a saved position keeps the browser's own
     # placement (an in-page anchor jump survives), so restore(null) is a
-    # deliberate no-op; fresh navigations scroll via top().
+    # deliberate no-op; fresh navigations scroll via top(). Routes mount
+    # asynchronously, so on arrival the page can still be too short to
+    # reach `y` — retry across frames until the document accommodates it,
+    # giving up after 20. A newer restore or top() supersedes the loop.
     restore: (position: any) ->
-      window.scrollTo(position.x or 0, position.y or 0) if position?
+      return unless position?
+      ticket = ++restoring
+      x = position.x or 0
+      y = position.y or 0
+      attempts = 0
+      step = ->
+        return unless ticket is restoring
+        maxY = Math.max 0, (window.document?.documentElement?.scrollHeight or 0) - window.innerHeight
+        window.scrollTo x, Math.min(y, maxY)
+        attempts += 1
+        frame step if y > maxY and attempts < 20
+      frame step
       return
-    top: -> window.scrollTo 0, 0
+    top: ->
+      restoring += 1
+      window.scrollTo 0, 0
+    watch: (fn) ->
+      window.addEventListener 'scroll', fn, { passive: true }
+      -> window.removeEventListener 'scroll', fn

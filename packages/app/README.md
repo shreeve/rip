@@ -113,14 +113,20 @@ state commits and callback dispatch, so a redirect from `onNavigate`
 supersedes a coherent history — and an unconditional redirect loop is
 cut loudly after ten nested navigations. A push saves the outgoing
 scroll position into the outgoing entry under `__ripScroll`, merging
-with any host state; traversal restores the saved position and leaves
-entries without one alone. An unmatched push reports
+with any host state, and a throttled watch keeps the current entry's
+position fresh between navigations, so a departure the router cannot
+intercept (back/forward) still preserves it; traversal restores the
+saved position — retrying across frames while the destination is still
+mounting — and leaves entries without one alone. An unmatched push
+reports
 `{ status: 404, path }` to `onError` and changes nothing; a traversal
 to a URL the manifest no longer claims reports 404 and keeps the prior
 state while the address bar owns the dead URL. `onNavigate` callbacks
 receive each successful navigation and cannot break it — or each
 other — by throwing. `navigating` is a writable flag the renderer owns
-during mounts.
+during mounts, read through a 100 ms grace: a navigation that finishes
+inside the window never shows as navigating, so fast pages don't flash
+a spinner.
 
 ## Renderer
 

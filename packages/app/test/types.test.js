@@ -61,7 +61,7 @@ test('app package TypeScript faces and declarations are valid', () => {
       '// @ts-expect-error source fetch supports only [] or [K]',
       'source({ fetch: async (first: string, second: number) => ({ first, second }) });',
       "const routesManifest = buildRoutes(['_route/index.rip']);",
-      "const fake = { read: () => '/', push(u: string, s: unknown) {}, replace(u: string, s: unknown) {}, go(d: number) {}, listen: (fn: () => void) => () => {} };",
+      "const fake = { read: () => '/', push(u: string, s: unknown) {}, replace(u: string, s: unknown) {}, go(d: number) {}, listen: (fn: () => void) => () => {}, scroll: { save: () => ({ y: 0 }), watch: (fn: () => void) => () => {} } };",
       'const router = createRouter({ routes: routesManifest, adapter: fake });',
       "const pushed: boolean = router.init().push('/', { noScroll: true });",
       'const currentFile: string | undefined = router.current?.route.file;',
