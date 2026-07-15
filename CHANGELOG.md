@@ -53,7 +53,7 @@ repository's pull requests.
   1:1 with added coverage for tcp, connect, ssh URL parsing (driven
   through a stub `ssh` subprocess seam), multiplexer dispatch, and
   timeout behavior — 61 tests, every expectation verified byte-for-byte
-  against v3 as the oracle (#136)
+  against v3 as the oracle (#140)
 
 - `@rip-lang/x12` joins the libraries lane: the X12 EDI parser,
   editor, and query engine (270/271, 835, 837, ...) with path-based
