@@ -193,6 +193,17 @@ The active architecture and phased acceptance contract live in
 then module delivery, narrow remount, patch, state migration, and
 transactional graph polish.
 
+## Rip-native hypermedia
+
+The active architecture and phased acceptance contract live in
+[HTMX.md](HTMX.md). Hypermedia is a parallel interaction mode beside
+the reactive SPA path: a `Frame` component owns declarative requests,
+targets, and swaps; fragments are inert first and managed later; and
+committed responses invalidate stash and source state. It does not
+embed `htmx.js` inside Rip-owned trees. Work begins after
+browser-delivery and app/server foundations can host inert fragment
+swaps.
+
 ## Roadmap hygiene
 
 - One owner and one acceptance contract per item.
