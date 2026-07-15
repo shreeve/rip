@@ -1,9 +1,12 @@
 {
   "name": "rip",
-  "version": "0.0.0",
+  "version": "4.0.0",
   "private": true,
   "type": "module",
   "description": "Zero-build, full-stack language for reactive UI, schemas, ORM, and server logic.",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "parser": "bun src/grammar/solar.rip -o src/parser.js src/grammar/grammar.rip",
     "corpus-expected": "bun scripts/corpus-expected.mjs",
