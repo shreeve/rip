@@ -5,4 +5,4 @@
 export type Validator = (v: any) => unknown
 
 export { isBlank, toName, toPhone, formatMoney } from './registry.rip'
-export { registerValidator, getValidator, validatorNames, check } from './registry.rip'
+export { registerValidator, getValidator, isRawType, validatorNames, check } from './registry.rip'

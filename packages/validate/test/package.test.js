@@ -8,6 +8,7 @@ test('public entry exposes named exports only', () => {
     'formatMoney',
     'getValidator',
     'isBlank',
+    'isRawType',
     'registerValidator',
     'toName',
     'toPhone',

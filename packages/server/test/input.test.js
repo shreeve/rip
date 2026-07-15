@@ -5,6 +5,9 @@
 // a matcher's routes.
 import { describe, expect, test } from 'bun:test';
 import { compose, createContext, createMatcher, openapi, reading, withInput } from '@rip-lang/server';
+// The same registry instance input.rip consults — sibling packages
+// resolve by direct path through the Rip loader.
+import { registerValidator } from '../../validate/registry.rip';
 import { CreateOrder, Rename } from './fixtures/schemas.rip';
 
 const request = (path = '/x', opts = {}) => new Request(`http://test.local${path}`, opts);
@@ -76,6 +79,51 @@ describe('reading', () => {
       jsonRequest('/x', { role: 'admin', age: '42', young: '11', code: 'ABC' }),
     );
     expect(await res.json()).toEqual({ role: 'admin', age: 42, tooYoung: null, code: 'ABC' });
+  });
+
+  test('the raw set reads body values untouched; everything else reads strings', async () => {
+    const res = await run(
+      c => ({
+        tags: c.read('tags', 'array'),
+        meta: c.read('meta', 'hash'),
+        doc: c.read('doc', 'json'),
+        notArray: c.read('meta', 'array'),
+        n: c.read('n', 'int'),
+      }),
+      jsonRequest('/x', { tags: ['a', 'b'], meta: { a: 1 }, doc: '{"b":2}', n: 42 }),
+    );
+    expect(await res.json()).toEqual({
+      tags: ['a', 'b'],
+      meta: { a: 1 },
+      doc: { b: 2 },
+      notArray: null,
+      n: 42,
+    });
+  });
+
+  test('a registered raw validator receives the raw value, never a stringified one', async () => {
+    const seen = [];
+    registerValidator('pairOf', v => {
+      seen.push(v);
+      return Array.isArray(v) && v.length === 2 ? v : null;
+    }, { raw: true });
+    const res = await run(
+      c => ({ pair: c.read('pair', 'pairOf'), miss: c.read('meta', 'pairOf') }),
+      jsonRequest('/x', { pair: [3, 4], meta: { a: 1 } }),
+    );
+    expect(await res.json()).toEqual({ pair: [3, 4], miss: null });
+    expect(seen).toEqual([[3, 4], { a: 1 }]);
+  });
+
+  test('a registered plain validator receives the string form', async () => {
+    const seen = [];
+    registerValidator('sawString', v => {
+      seen.push(v);
+      return v;
+    });
+    const res = await run(c => ({ n: c.read('n', 'sawString') }), jsonRequest('/x', { n: 42 }));
+    expect(await res.json()).toEqual({ n: '42' });
+    expect(seen).toEqual(['42']);
   });
 
   test('an unreadable body still reads query and params', async () => {

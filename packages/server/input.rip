@@ -19,11 +19,10 @@
 #
 # An unknown validator name rejects loudly — vocabulary typos are
 # configuration mistakes, not empty reads.
-import { getValidator } from '../validate/registry.rip'
+import { getValidator, isRawType } from '../validate/registry.rip'
 
 fail = (message) -> throw new Error "Rip Server: #{message}"
 
-RAW_TYPES = ['array', 'hash', 'json']
 BODY_METHODS = ['POST', 'PUT', 'PATCH']
 
 # One body parse per request, shared by read and withInput through
@@ -57,7 +56,7 @@ applyType = (value, type) ->
   if typeof type is 'string'
     validator = getValidator type
     fail "read() does not know the validator '#{type}'" unless validator
-    value = String(value ?? '') unless RAW_TYPES.includes type
+    value = String(value ?? '') unless isRawType type
     validator value
   else if type instanceof RegExp
     String(value ?? '').match(type)?[0] ?? null
