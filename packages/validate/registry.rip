@@ -267,6 +267,11 @@ export def registerValidator(name: string, fn: Validator, opts: { raw?: boolean 
 export def getValidator(name: string): Validator | undefined
   registry.get(name)?.fn
 
+# Whether a validator takes its value untouched — the seam callers
+# consult instead of hardcoding the raw set. Unknown names answer false.
+export def isRawType(name: string): boolean
+  registry.get(name)?.raw is true
+
 export def validatorNames(): string[]
   Array.from(registry.keys()).sort()
 

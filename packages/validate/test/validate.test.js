@@ -4,6 +4,7 @@ import {
   formatMoney,
   getValidator,
   isBlank,
+  isRawType,
   registerValidator,
   toName,
   toPhone,
@@ -217,6 +218,12 @@ describe('the vocabulary', () => {
     expect(check(42, 'json')).toBeNull();
   });
 
+  test('isRawType answers the raw flag; unknown names answer false', () => {
+    for (const raw of ['array', 'hash', 'json']) expect(isRawType(raw)).toBeTrue();
+    for (const plain of ['int', 'string', 'phone']) expect(isRawType(plain)).toBeFalse();
+    expect(isRawType('nope')).toBeFalse();
+  });
+
   test('non-raw validators receive the string form', () => {
     expect(check(42, 'int')).toBe(42);
     expect(check(null, 'string')).toBe('');
@@ -266,6 +273,8 @@ describe('registration', () => {
     registerValidator('pair', v => (Array.isArray(v) && v.length === 2 ? v : null), { raw: true });
     expect(check([1, 2], 'pair')).toEqual([1, 2]);
     expect(check([1], 'pair')).toBeNull();
+    expect(isRawType('pair')).toBeTrue();
+    expect(isRawType('even')).toBeFalse();
   });
 
   test('registering an existing name rejects', () => {

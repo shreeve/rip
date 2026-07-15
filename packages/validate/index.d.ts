@@ -19,6 +19,8 @@ export function registerValidator(
 
 export function getValidator(name: string): Validator | undefined;
 
+export function isRawType(name: string): boolean;
+
 export function validatorNames(): string[];
 
 export function check(value: unknown, type: string): unknown;
