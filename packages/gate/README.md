@@ -153,6 +153,8 @@ Traefik's `forwardAuth` and Envoy's `ext_authz` behave like Caddy (Gate's `302` 
 - `GET /_gate/logout` — renders a tiny "Sign out as X" confirmation form (side-effect free).
 - `POST /_gate/logout` — deletes the session's token file server-side (CSRF-required).
 
+The `/_gate/` namespace is **reserved**: anything else under it (unknown path or unmatched method) is a `404` from gate itself and never reaches the app, authenticated or not.
+
 ## Security model
 
 What actually guards the app, and what doesn't:

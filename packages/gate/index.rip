@@ -411,15 +411,17 @@ export gate = (opts = {}) ->
     'GET /_gate/logout':  logoutForm
     'POST /_gate/logout': logout
 
-  # The middleware for compose(). /_gate/* dispatches to the endpoints above
-  # (an unknown /_gate path falls through, as it fell through to v3's router);
+  # The middleware for compose(). /_gate/* dispatches to the endpoints above;
   # everything else passes unless the request is unauthenticated AND
-  # `protect: 'all'` is configured.
+  # `protect: 'all'` is configured. The /_gate namespace is RESERVED: anything
+  # under it that isn't one of the endpoints is a 404, never a pass-through
+  # (v3 next()'d unknown /_gate paths to its router — an app with a catch-all
+  # route would have served them anonymously).
   (c, next) ->
     if c.req.path.startsWith('/_gate/')
       handler = endpoints["#{c.req.method} #{c.req.path}"]
       return await handler(c) if handler
-      return await next()
+      return new Response 'not found', { status: 404, headers: { 'Cache-Control': 'no-store' } }
     return await next() if lookup(parseCookies(c.req.header('cookie'))[cookie])
     return await next() unless protect is 'all'
     accept = c.req.header('accept') or ''
