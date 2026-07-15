@@ -21,6 +21,18 @@ repository's pull requests.
   shipped with no tests; the whole contract is pinned here — 49 tests,
   the behavior suite end-to-end against a live Bun.serve fixture (#132)
 
+- `@rip-lang/time` joins the libraries lane: a tiny, immutable,
+  US-English date/time package — one file of Rip, zero runtime
+  dependencies. Parsing (ISO, US `MM/DD/YYYY`, timestamps, explicit
+  formats via `time.parse`), full format tokens (`Do`, `Q`, `z`/`zzz`,
+  bracket literals included), arithmetic with symbol or string units,
+  `startOf`/`endOf`/`diff`, comparisons, relative time, `calendar()`,
+  UTC mode, DST-aware IANA timezones with US short aliases
+  (`tz`/`toZone`/`asZone`/`asUTC`, backed by `Intl`), first-class
+  ISO-8601 `Duration`, and birthday-aware `age()`. The suite runs the
+  295 v3 parity cases against upstream `dayjs` (a test-only, exact-pinned
+  dependency) plus package-surface and declaration pins (#134)
+
 - The database client layers result ownership over the adapter:
   `createClient(adapter)` materializes the adapter's `{ columns, data }`
   into row objects and projects them — `query` (rows + metadata),

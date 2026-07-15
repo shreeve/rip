@@ -1,0 +1,27 @@
+{
+  "name": "@rip-lang/time",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./time.rip"
+    }
+  },
+  "scripts": {
+    "test": "bun test --timeout 15000",
+    "demo": "../../bin/rip demo.rip"
+  },
+  "rip": {
+    "browser": true
+  },
+  "files": [
+    "time.rip",
+    "index.d.ts",
+    "README.md"
+  ],
+  "devDependencies": {
+    "dayjs": "1.11.20"
+  }
+}

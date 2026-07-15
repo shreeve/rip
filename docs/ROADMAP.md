@@ -48,7 +48,7 @@ but it must not block direct-path package implementation and tests.
 
 ### Independent libraries and tools
 
-The remaining first-party portfolio includes CSV, time, decimal, XML,
+The remaining first-party portfolio includes CSV, decimal, XML,
 X12, worker-swarm, interactive scripting, source printing, AI/MCP,
 authentication gate, and host provisioning packages. Each package earns
 its place through an independently runnable contract and current Rip

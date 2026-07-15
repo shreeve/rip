@@ -74,6 +74,12 @@ jobs:
         working-directory: packages/db
         run: bun run test
 
+      - name: Time package suite (packages/time — its own suite, its own boundary; dayjs is the parity oracle)
+        working-directory: packages/time
+        run: |
+          bun install --frozen-lockfile
+          bun run test
+
       - name: Real-browser suite (packages/browser-tests — Playwright in Chromium/Firefox/WebKit)
         working-directory: packages/browser-tests
         run: |
