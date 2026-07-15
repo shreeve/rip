@@ -701,6 +701,45 @@ describe('the static render DSL: emission pins', () => {
     emitFails('P = component\n  render\n    div claas\n', /not a known attribute of <div>/);
   });
 
+  test('own-line bare boolean flag sets the attribute on the enclosing element (v3 semantics, restored)', () => {
+    // A bare word on its own line naming a known HTML boolean
+    // attribute is a flag of the ENCLOSING element — never a bogus
+    // `<disabled>` child element (the silent v3-port mis-compile).
+    const { code } = compile('P = component\n  render\n    button\n      disabled\n      "Save"\n');
+    expect(code).toContain(`this._el0.setAttribute('disabled', '')`);
+    expect(code).not.toContain(`createElement('disabled')`);
+    expect(code).toContain('createTextNode("Save")');
+    // The whole v3 list carries the rule (spot the non-obvious ones).
+    expect(compile('P = component\n  render\n    form\n      novalidate\n').code)
+      .toContain(`setAttribute('novalidate', '')`);
+    // (`loop` alone is unreachable — the keyword claims the line at
+    // parse; it takes the colon form, exactly as in v3.)
+    const video = compile('P = component\n  render\n    video\n      muted\n      autoplay\n').code;
+    expect(video).toContain(`setAttribute('muted', '')`);
+    expect(video).toContain(`setAttribute('autoplay', '')`);
+    expect(compile('P = component\n  render\n    details\n      open\n').code)
+      .toContain(`setAttribute('open', '')`);
+    // The boundary: a bare word NOT on the boolean list keeps its
+    // element reading (custom elements stay spellable).
+    const el = compile('P = component\n  render\n    div\n      spacer\n').code;
+    expect(el).toContain(`createElement('spacer')`);
+    expect(el).not.toContain(`setAttribute('spacer'`);
+    // An in-scope value shadows the flag reading — the same
+    // precedence the inline shorthand carries (a member named `open`
+    // stays a live text read).
+    const shadowed = compile('P = component\n  open := true\n  render\n    div\n      open\n').code;
+    expect(shadowed).toContain('this._t0.data = this.open.value;');
+    expect(shadowed).not.toContain(`setAttribute('open'`);
+    // The colon form is untouched by the flag rule (static and
+    // reactive lowerings pinned in the boolean-attributes fork above).
+    expect(compile('P = component\n  render\n    button disabled: true\n').code)
+      .toContain(`if (true) this._el0.setAttribute('disabled', '')`);
+    // RFC 12: the TypeScript face lowers identically (the added type
+    // bytes ride tsOnly regions; the flag line itself is face-neutral).
+    expect(compile('P = component\n  render\n    button\n      disabled\n', { face: 'ts' }).code)
+      .toContain(`this._el0.setAttribute('disabled', '')`);
+  });
+
   test('bare `@click` validates: DOM event + method existence (#124 middle); explicit bindings stay unvalidated', () => {
     // Bare: unknown event.
     emitFails('P = component\n  render\n    button @clack\n', /`@clack` is not a DOM event/);

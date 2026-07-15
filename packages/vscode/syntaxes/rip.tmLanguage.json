@@ -364,6 +364,13 @@
             "1": { "name": "entity.other.attribute-name.rip" }
           }
         },
+        {
+          "comment": "Own-line bare boolean flag — a line holding only a known HTML boolean-attribute name compiles as a flag of the enclosing element, never a child element. Mirrors BOOLEAN_ATTRS in src/emitter.js minus `loop` (the keyword claims that line at parse, exactly as the compiler does); the lockstep test pins the list.",
+          "match": "^[ \\t]+(disabled|hidden|readonly|required|checked|selected|autofocus|autoplay|controls|muted|multiple|novalidate|open|reversed|defer|async|formnovalidate|allowfullscreen|inert)(?=[ \\t]*(?:#|$))",
+          "captures": {
+            "1": { "name": "entity.other.attribute-name.rip" }
+          }
+        },
         { "include": "$self" }
       ]
     },

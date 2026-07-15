@@ -78,6 +78,19 @@ export const DOM_EVENTS = new Set([
   'wheel',
 ]);
 
+// The HTML BOOLEAN attributes — presence is truth (the WHATWG boolean
+// attributes). The render DSL's colon form forks on this set
+// (toggleAttribute / guarded empty-string setAttribute), and a bare
+// word on its own line naming one of these sets it on the ENCLOSING
+// element (v3's bare-flag semantics). The VS Code grammar paints the
+// same list; its lockstep test pins the two together.
+export const BOOLEAN_ATTRS = new Set([
+  'disabled', 'hidden', 'readonly', 'required', 'checked', 'selected',
+  'autofocus', 'autoplay', 'controls', 'loop', 'muted', 'multiple',
+  'novalidate', 'open', 'reversed', 'defer', 'async', 'formnovalidate',
+  'allowfullscreen', 'inert',
+]);
+
 // The HTML GLOBAL attributes (the WHATWG "Global attributes" list).
 const GLOBAL_ATTRS = new Set([
   'accesskey', 'autocapitalize', 'autocorrect', 'autofocus', 'class',
