@@ -11,3 +11,6 @@ dist/browser/*
 .env
 .env.*
 !.env.example
+
+# Stray scratch/export files
+tmp-*
