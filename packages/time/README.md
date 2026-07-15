@@ -2,13 +2,19 @@
 
 # Rip Time - @rip-lang/time
 
-> **Tiny, immutable, US-English date/time library with full US timezone support and first-class durations — zero dependencies.**
+> **Tiny, immutable, US-English date/time library with timezones and durations — zero runtime dependencies.**
 
 A pure-Rip date/time toolkit inspired by [dayjs](https://day.js.org/),
 scoped down to US English and expanded to bake in the most useful pieces
 (UTC mode, arbitrary IANA timezones with DST, custom parse formats,
 relative time, calendar, durations) so you never reach for an
 `.extend()` plugin. One file of Rip, zero runtime deps.
+
+## Quick Start
+
+```bash
+bun add @rip-lang/time
+```
 
 ```coffee
 import time from '@rip-lang/time'
@@ -271,23 +277,16 @@ If you need multi-locale support, use the upstream `dayjs` package.
 ## Demo
 
 ```bash
-cd packages/time
 bun run demo
 ```
 
-## Tests
+## Test
 
 ```bash
-cd packages/time
-bun install
 bun run test
 ```
 
 The suite compares output against upstream `dayjs` (a test-only
-dependency) for 295 cases covering construction, formatting, arithmetic,
-`startOf`/`endOf`, `diff`, comparisons, relative time, calendar,
-timezones, and durations, plus package-surface and declaration pins.
-
-## License
-
-MIT
+dependency) for construction, formatting, arithmetic, `startOf`/`endOf`,
+`diff`, comparisons, relative time, calendar, timezones, and durations,
+plus package-surface pins.

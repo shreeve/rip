@@ -1,6 +1,8 @@
-# @rip-lang/csv
+<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" style="width:50px" /> <br>
 
-Fast, flexible CSV parsing and writing for Rip.
+# Rip CSV - @rip-lang/csv
+
+> **Fast, flexible CSV parser and writer — indexOf ratchet, auto-detect, zero dependencies.**
 
 The parser is an indexOf ratchet: the JavaScript engine's native
 `indexOf` jumps directly to the next delimiter, newline, or quote, so
@@ -13,6 +15,12 @@ leading-zero protection, and reusable writer instances. One `.rip`
 file, zero dependencies. `read`/`write` are pure string work;
 `load`/`save` and the CLI use Bun file APIs, so the package does not
 claim browser safety.
+
+## Quick Start
+
+```bash
+bun add @rip-lang/csv
+```
 
 ```coffee
 import { CSV } from '@rip-lang/csv'
@@ -143,6 +151,6 @@ If output is omitted, the converted CSV is written to stdout.
 
 ## Test
 
-```sh
+```bash
 bun run test
 ```
