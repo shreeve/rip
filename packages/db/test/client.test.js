@@ -169,6 +169,32 @@ describe('cancellation', () => {
     await expect(pending).rejects.toBeInstanceOf(CancelledError);
   });
 
+  test('an abort mid-flight also hands the signal to the adapter — a real abort, not just a race', async () => {
+    const seen = { signal: null };
+    const adapter = {
+      query: (sql, params, opts) => { seen.signal = opts?.signal ?? null; return new Promise(() => {}); },
+      capabilities: {},
+    };
+    const controller = new AbortController();
+    const pending = createClient(adapter).query('SELECT pg_sleep(10)', [], { signal: controller.signal });
+    controller.abort();
+    await expect(pending).rejects.toBeInstanceOf(CancelledError);
+    expect(seen.signal).toBe(controller.signal); // threaded through, so the adapter can abort the wire
+    expect(seen.signal.aborted).toBe(true);
+  });
+
+  test('over the harbor adapter, cancellation aborts the underlying fetch', async () => {
+    const { harborAdapter } = await import('@rip-lang/db');
+    let fetchSignal = null;
+    const fetch = (url, init) => { fetchSignal = init?.signal ?? null; return new Promise(() => {}); };
+    const controller = new AbortController();
+    const pending = createClient(harborAdapter({ url: 'http://h', fetch }))
+      .query('SELECT 1', [], { signal: controller.signal });
+    controller.abort();
+    await expect(pending).rejects.toBeInstanceOf(CancelledError);
+    expect(fetchSignal?.aborted).toBe(true); // the socket-level request was cancelled
+  });
+
   test('a completed query is unaffected by a later abort', async () => {
     const adapter = fakeAdapter([{ columns: [{ name: 'n' }], data: [[1]], rowCount: 1 }]);
     const controller = new AbortController();

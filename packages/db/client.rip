@@ -5,10 +5,11 @@
 # objects, projects them (rows/one/value), and runs a callback inside a
 # transaction that commits on return and rolls back on throw.
 #
-# Cancellation is a client-level race: an AbortSignal that fires before
-# or during a query rejects the caller's promise with a CancelledError.
-# The underlying request may still finish on the server, but the caller
-# is released at once.
+# Cancellation is a race PLUS a real abort: an AbortSignal that fires
+# before or during a query rejects the caller's promise with a
+# CancelledError at once, and the same signal is threaded down to the
+# adapter so an in-flight harbor request is actually aborted rather
+# than left to finish on its own.
 
 fail = (message) -> throw new Error "Rip DB: #{message}"
 
@@ -31,8 +32,10 @@ materialize = (result) ->
   { rows, columns: names, rowCount: result?.rowCount ?? rows.length }
 
 # Race a query against an abort signal. An already-aborted signal
-# rejects before dispatch; an abort mid-flight rejects the caller while
-# the request finishes on its own.
+# rejects before dispatch; an abort mid-flight rejects the caller with
+# a CancelledError immediately — the adapter, handed the same signal,
+# aborts the wire request in parallel (its own typed rejection loses
+# the race and is absorbed here).
 raceAbort = (signal, run) ->
   return run() unless signal?
   if signal.aborted
@@ -47,13 +50,14 @@ raceAbort = (signal, run) ->
     run().then settle(resolve), settle(reject)
     return
 
-# One executor over a `run(sql, params) → Promise<rawResult>` — the
-# top-level client binds it to adapter.query, a transaction binds it to
-# the session's query, and both get identical materialization and
-# projection.
+# One executor over a `run(sql, params, signal) → Promise<rawResult>` —
+# the top-level client binds it to adapter.query, a transaction binds it
+# to the session's query, and both get identical materialization and
+# projection. The caller's signal rides along so the adapter can abort
+# the underlying request.
 makeSurface = (run, beginTx) ->
   query = (sql: string, params: any = null, opts: { signal?: any } = {}): Promise<any> ->
-    raw = await raceAbort opts.signal, -> run(sql, params)
+    raw = await raceAbort opts.signal, -> run(sql, params, opts.signal)
     materialize raw
   rows = (sql, params = null, opts = {}) ->
     (await query(sql, params, opts)).rows
@@ -76,7 +80,7 @@ export def createClient(adapter: any): any
     tx = await adapter.begin()
     joined = null
     join = (inner) -> inner joined
-    joined = makeSurface(((sql, params) -> tx.query sql, params), join)
+    joined = makeSurface(((sql, params, signal) -> tx.query sql, params, { signal }), join)
     result = null
     try
       result = await fn joined
@@ -94,4 +98,4 @@ export def createClient(adapter: any): any
     await tx.commit()
     result
 
-  makeSurface(((sql, params) -> adapter.query sql, params), transaction)
+  makeSurface(((sql, params, signal) -> adapter.query sql, params, { signal }), transaction)

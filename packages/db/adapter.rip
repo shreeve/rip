@@ -17,6 +17,12 @@
 # typed hierarchy: a QueryError carries the engine's code, details,
 # and the offending SQL; a ConnectionError is a transport or HTTP
 # failure — both are DbError, so a caller can catch the family.
+#
+# Every request runs under a deadline (`timeoutMs`, default 30s, `0`
+# disables) and honors a caller's AbortSignal, so a hung harbor never
+# hangs the app: a tripped deadline is a ConnectionError with code
+# 'TIMEOUT', a caller abort one with code 'ABORTED', and either
+# actually aborts the in-flight fetch.
 
 # The typed error hierarchy. Extra fields — httpStatus on any DbError,
 # and code/details/sql on a QueryError — are stamped on the instance
@@ -53,8 +59,11 @@ export type QueryResult =
   data: any[][]
   rowCount: number
 
+export type QueryOpts =
+  signal?: AbortSignal
+
 export type Transaction =
-  query: (sql: string, params?: any[]) => Promise<QueryResult>
+  query: (sql: string, params?: any[], opts?: QueryOpts) => Promise<QueryResult>
   commit: () => Promise<void>
   rollback: () => Promise<void>
 
@@ -63,7 +72,7 @@ export type Capabilities =
   ddlTransactional: boolean
 
 export type Adapter =
-  query: (sql: string, params?: any[]) => Promise<QueryResult>
+  query: (sql: string, params?: any[], opts?: QueryOpts) => Promise<QueryResult>
   begin: (options?: any) => Promise<Transaction>
   capabilities: Capabilities
 
@@ -71,12 +80,30 @@ export type HarborOpts =
   url?: string
   token?: string
   fetch?: typeof fetch
+  timeoutMs?: number
 
 DEFAULT_URL = 'http://127.0.0.1:9494'
+DEFAULT_TIMEOUT_MS = 30_000
+
+# Await a promise while honoring an AbortSignal: reject with the abort
+# reason the moment it fires, even when the injected fetch ignores its
+# signal — a hung socket can never outlive the deadline.
+abortable = (signal: any, promise: any) ->
+  new Promise (resolve, reject) ->
+    onAbort = -> reject signal.reason
+    signal.addEventListener 'abort', onAbort, { once: true }
+    settle = (fn) ->
+      (value) ->
+        signal.removeEventListener 'abort', onAbort
+        fn value
+    promise.then settle(resolve), settle(reject)
+    onAbort() if signal.aborted
+    return
 
 export def harborAdapter(opts: HarborOpts = {}): Adapter
   base = String(opts.url ?? DEFAULT_URL).replace(/\/+$/, '')
   fetchFn = opts.fetch ?? fetch
+  timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
   headers = ->
     h: any = { 'Content-Type': 'application/json', 'Accept': 'application/json' }
     h['Authorization'] = "Bearer #{opts.token}" if opts.token
@@ -85,44 +112,75 @@ export def harborAdapter(opts: HarborOpts = {}): Adapter
   # One POST to harbor: a transport failure is a ConnectionError, an
   # HTTP or engine error is classified from the response body, and a
   # success returns the parsed JSON. The offending SQL rides into a
-  # QueryError so a caller sees what failed.
-  post = (path: string, body: any, sql: any = null) ->
-    response = null
+  # QueryError so a caller sees what failed. Every request runs under
+  # one AbortController: the timeoutMs deadline arms a timer, and the
+  # caller's signal (when given) is relayed in — either aborts the
+  # in-flight fetch for real, not just the caller's promise.
+  post = (path: string, body: any, sql: any = null, signal: any = null) ->
+    ctrl = new AbortController()
+    timedOut = false
+    timer: any = null
+    if timeoutMs > 0
+      timer = setTimeout (->
+        timedOut = true
+        ctrl.abort()
+      ), timeoutMs
+    relay = -> ctrl.abort signal.reason
+    if signal
+      if signal.aborted then relay() else signal.addEventListener 'abort', relay, { once: true }
     try
-      response = await fetchFn "#{base}#{path}",
-        method: 'POST'
-        headers: headers()
-        body: JSON.stringify body
-    catch cause
-      detail: any = cause
-      error = new ConnectionError "db: harbor at #{base} is unreachable: #{detail.message}"
-      error.cause = cause
-      throw error
-    data: any = {}
-    try
-      data = await response.json()
-    catch
-      data = {}
-    if not response.ok or data.ok is false or data.error?
-      message = (data.error or "db request failed: #{response.status} #{response.statusText ?? ''}").trim()
-      # Classify by DOMAIN, not by whether SQL was present: the engine
-      # rejecting a statement carries an errorCode (a QueryError), while
-      # an HTTP failure with no engine code is an availability problem
-      # (a ConnectionError) — so a caller's retry loop keyed on
-      # ConnectionError catches a 5xx during a query.
-      error: any = if data.errorCode?
-        e: any = new QueryError message
-        e.code = data.errorCode
-        e.details = data.errorDetails if data.errorDetails?
-        e
-      else if not response.ok
-        new ConnectionError message
-      else
-        new QueryError message
-      error.sql = sql if sql?
-      error.httpStatus = response.status
-      throw error
-    data
+      response: any = null
+      try
+        response = await abortable ctrl.signal, fetchFn "#{base}#{path}",
+          method: 'POST'
+          headers: headers()
+          body: JSON.stringify body
+          signal: ctrl.signal
+      catch cause
+        detail: any = cause
+        # Classify the failure: our own timer fired (TIMEOUT), the
+        # caller's signal fired (ABORTED), or the transport itself
+        # failed (DNS, refused, reset, …). All are ConnectionError so
+        # a retry loop catches the family; `code` tells them apart.
+        error: any = null
+        if timedOut
+          error = new ConnectionError "db: harbor at #{base} timed out after #{timeoutMs}ms"
+          error.code = 'TIMEOUT'
+        else if signal?.aborted
+          error = new ConnectionError 'db: harbor request aborted by the caller'
+          error.code = 'ABORTED'
+        else
+          error = new ConnectionError "db: harbor at #{base} is unreachable: #{detail.message}"
+        error.cause = cause
+        throw error
+      data: any = {}
+      try
+        data = await response.json()
+      catch
+        data = {}
+      if not response.ok or data.ok is false or data.error?
+        message = (data.error or "db request failed: #{response.status} #{response.statusText ?? ''}").trim()
+        # Classify by DOMAIN, not by whether SQL was present: the engine
+        # rejecting a statement carries an errorCode (a QueryError), while
+        # an HTTP failure with no engine code is an availability problem
+        # (a ConnectionError) — so a caller's retry loop keyed on
+        # ConnectionError catches a 5xx during a query.
+        error: any = if data.errorCode?
+          e: any = new QueryError message
+          e.code = data.errorCode
+          e.details = data.errorDetails if data.errorDetails?
+          e
+        else if not response.ok
+          new ConnectionError message
+        else
+          new QueryError message
+        error.sql = sql if sql?
+        error.httpStatus = response.status
+        throw error
+      data
+    finally
+      clearTimeout timer if timer?
+      signal?.removeEventListener 'abort', relay
 
   # harbor's success envelope → the public QueryResult. Each column is
   # normalized to a `{ name, type }` object (aliasing `duckdbType`) with
@@ -136,8 +194,8 @@ export def harborAdapter(opts: HarborOpts = {}): Adapter
     columns: any = (env?.columns ?? []).map toColumn
     { columns, data: env?.data ?? [], rowCount: env?.rowCount ?? (env?.data?.length ?? 0) }
 
-  query = (sql: string, params: any = null): Promise<QueryResult> ->
-    toResult await post '/sql', (if params?.length then { sql, params } else { sql }), sql
+  query = (sql: string, params: any = null, opts: any = {}): Promise<QueryResult> ->
+    toResult await post '/sql', (if params?.length then { sql, params } else { sql }), sql, opts?.signal
 
   begin = (options: any = {}): Promise<Transaction> ->
     session = await post '/sql/sessions/new', {}
@@ -145,14 +203,24 @@ export def harborAdapter(opts: HarborOpts = {}): Adapter
     # No session id means no isolation — refuse loudly rather than run
     # BEGIN/COMMIT as independent autocommit statements on the pool.
     throw new DbError 'db: harbor returned no session id for the transaction' unless sessionId?
-    run = (sql: string, params: any = null): Promise<QueryResult> ->
+    run = (sql: string, params: any = null, opts: any = {}): Promise<QueryResult> ->
       body = if params?.length then { sql, params, sessionId } else { sql, sessionId }
-      toResult await post '/sql', body, sql
+      toResult await post '/sql', body, sql, opts?.signal
     drop = ->
       # Best-effort: harbor's idle TTL reaps an abandoned session, so a
       # failed DELETE only delays cleanup, never leaks a transaction.
+      # The same deadline applies — a hung harbor must not wedge the
+      # finally block of a COMMIT that already timed out.
       try
-        await fetchFn "#{base}/sql/sessions/#{sessionId}", { method: 'DELETE', headers: headers() }
+        ctrl = new AbortController()
+        timer = if timeoutMs > 0 then setTimeout (-> ctrl.abort()), timeoutMs else null
+        try
+          await abortable ctrl.signal, fetchFn "#{base}/sql/sessions/#{sessionId}",
+            method: 'DELETE'
+            headers: headers()
+            signal: ctrl.signal
+        finally
+          clearTimeout timer if timer?
       catch
         null
       return

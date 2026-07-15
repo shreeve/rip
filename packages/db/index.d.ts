@@ -5,7 +5,11 @@ export class DbError extends Error {
   cause?: unknown;
 }
 
-export class ConnectionError extends DbError {}
+export class ConnectionError extends DbError {
+  /** 'TIMEOUT' when the adapter's deadline fired, 'ABORTED' when the
+   *  caller's AbortSignal did; absent for plain transport failures. */
+  code?: 'TIMEOUT' | 'ABORTED';
+}
 
 export class QueryError extends DbError {
   code?: string;
@@ -27,7 +31,7 @@ export type QueryResult = {
 };
 
 export type Transaction = {
-  query(sql: string, params?: unknown[]): Promise<QueryResult>;
+  query(sql: string, params?: unknown[], opts?: QueryOptions): Promise<QueryResult>;
   commit(): Promise<void>;
   rollback(): Promise<void>;
 };
@@ -38,7 +42,7 @@ export type Capabilities = {
 };
 
 export type Adapter = {
-  query(sql: string, params?: unknown[]): Promise<QueryResult>;
+  query(sql: string, params?: unknown[], opts?: QueryOptions): Promise<QueryResult>;
   begin(options?: unknown): Promise<Transaction>;
   capabilities: Capabilities;
 };
@@ -47,6 +51,8 @@ export type HarborOpts = {
   url?: string;
   token?: string;
   fetch?: typeof fetch;
+  /** Per-request deadline in milliseconds; default 30_000, 0 disables. */
+  timeoutMs?: number;
 };
 
 export function harborAdapter(opts?: HarborOpts): Adapter;
