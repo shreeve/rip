@@ -341,7 +341,9 @@ const relationsOf = (descriptor) => {
 
 // A :model's implicitly-managed columns as Data properties: the `id`
 // pk, belongsTo FK columns, and the @timestamps/@softDelete columns.
-// Timestamp columns are `string` — the runtime writes ISO strings
+// Timestamp columns are `Date` — the adapter decodes temporal columns
+// to real Date objects at the wire, and the runtime manages them as
+// Dates (matching the `Date` a declared date/datetime field renders).
 const modelImplicitProps = (descriptor) => {
   const props = ['id: number'];
   for (const rel of relationsOf(descriptor)) {
@@ -349,8 +351,8 @@ const modelImplicitProps = (descriptor) => {
     props.push(`${fkCamel(rel.target)}: number${rel.optional ? ' | null' : ''}`);
   }
   const has = (n) => descriptor.entries.some((e) => e.tag === 'directive' && e.name === n);
-  if (has('timestamps')) props.push('createdAt: string', 'updatedAt: string');
-  if (has('softDelete')) props.push('deletedAt: string | null');
+  if (has('timestamps')) props.push('createdAt: Date', 'updatedAt: Date');
+  if (has('softDelete')) props.push('deletedAt: Date | null');
   return props;
 };
 

@@ -110,11 +110,12 @@ describe('schema declarations: the per-kind shapes', () => {
       '  @scope :live, -> @where(name: "a")',
     ].join('\n'));
     // Data: declared fields + id/FK/timestamps/deletedAt — timestamp
-    // columns are ISO STRINGS per the runtime.
+    // columns are real `Date`s per the runtime (the adapter decodes
+    // temporal columns at the wire; owner ruling on PORT-AUDIT D2).
     // `posted` stays REQUIRED in Data (the `!` is the validation
     // contract; the default applies at parse) while Create relaxes it.
     expect(d).toContain('type MData = { name: string; code?: string; posted: boolean } & ' +
-      '{ id: number; orgId: number | null; createdAt: string; updatedAt: string; deletedAt: string | null };');
+      '{ id: number; orgId: number | null; createdAt: Date; updatedAt: Date; deletedAt: Date | null };');
     // Create: `!` without default required; a DEFAULTED required
     // field is optional at insert; optional FK rides `| null`
     expect(d).toContain('type MCreate = { name: string; code?: string; posted?: boolean; orgId?: number | null };');
@@ -488,7 +489,7 @@ describe('naming drift gates: renderer copies vs the runtime\'s installed names'
     });
   });
 
-  test('the timestamp columns the renderer types as string ARE strings at the runtime', async () => {
+  test('the timestamp columns the renderer types as Date ARE Dates at the runtime', async () => {
     await rt4.__SchemaRegistry.scope(async () => {
       const orm = await import('../../src/runtime/schema-orm.js');
       const calls = [];
@@ -513,7 +514,9 @@ describe('naming drift gates: renderer copies vs the runtime\'s installed names'
       await inst.save();
       const update = calls.find((c) => c.sql.startsWith('UPDATE'));
       expect(update.sql).toContain('"updated_at" = ?');
-      expect(typeof inst.updatedAt).toBe('string'); // ISO string, never a Date
+      // A real Date, never an ISO string — the declared `Date` is
+      // truthful (owner ruling on PORT-AUDIT D2: Date at the wire).
+      expect(inst.updatedAt instanceof Date).toBe(true);
     });
   });
 });

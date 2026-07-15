@@ -7770,9 +7770,9 @@ var modelImplicitProps = (descriptor) => {
   }
   const has = (n) => descriptor.entries.some((e) => e.tag === "directive" && e.name === n);
   if (has("timestamps"))
-    props.push("createdAt: string", "updatedAt: string");
+    props.push("createdAt: Date", "updatedAt: Date");
   if (has("softDelete"))
-    props.push("deletedAt: string | null");
+    props.push("deletedAt: Date | null");
   return props;
 };
 var modelCreateProps = (descriptor, known) => {

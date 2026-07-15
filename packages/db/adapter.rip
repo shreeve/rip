@@ -23,6 +23,10 @@
 # hangs the app: a tripped deadline is a ConnectionError with code
 # 'TIMEOUT', a caller abort one with code 'ABORTED', and either
 # actually aborts the in-flight fetch.
+#
+# Temporal values cross this wire as real JS `Date` objects: temporal
+# columns decode on the way in, `Date` parameters encode to ISO-8601
+# UTC on the way out (see "Temporal values at the wire" below).
 
 # The typed error hierarchy. Extra fields — httpStatus on any DbError,
 # and code/details/sql on a QueryError — are stamped on the instance
@@ -84,6 +88,85 @@ export type HarborOpts =
 
 DEFAULT_URL = 'http://127.0.0.1:9494'
 DEFAULT_TIMEOUT_MS = 30_000
+
+# ── Temporal values at the wire ─────────────────────────────────────
+#
+# DuckDB temporal columns decode to real JS `Date` objects at this
+# seam — the ONE decode seam, so raw adapter results, the client's
+# materializers, and the schema ORM's hydration all agree. The wire
+# form is actively wrong for `new Date()`: a naive TIMESTAMP arrives
+# with no `Z`/offset (e.g. `2024-03-15T10:30:00`), so `new Date(value)`
+# in app code would read it as LOCAL and every read would shift by the
+# host's UTC offset. We define naive TIMESTAMP as UTC wall-clock and
+# decode it (plus DATE / TIMESTAMPTZ) here, keyed by the column's
+# duckdbType. Only `YYYY-MM-DD[...]`-shaped strings decode; anything
+# else (DuckDB's `infinity`/`-infinity` sentinels, an unexpected
+# format) passes through untouched, so one odd cell can't crash a
+# whole result set.
+#
+# Symmetrically, an outbound `Date` parameter encodes to an explicit
+# ISO-8601 UTC string rather than riding JSON.stringify's implicit
+# `Date.toJSON`: DuckDB CASTs it to TIMESTAMP by dropping the `Z` and
+# storing the UTC wall-clock — exactly matching the read convention —
+# or to TIMESTAMPTZ by honoring the offset. Arrays and plain objects
+# are walked so a `Date` nested in a JSON-column value is normalized
+# too. An Invalid Date is a caller bug; it throws loudly here instead
+# of letting JSON silently turn it into `null`.
+
+ISO_SHAPE = /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}:\d{2}(\.\d+)?)?([Zz]|[+-]\d{2}:?\d{2})?$/
+HAS_ZONE  = /([Zz]|[+-]\d{2}:?\d{2})$/
+
+# How a DuckDB type's string value becomes an instant:
+#   'utc'     naive wall-clock we define as UTC        -> append `Z`, then parse
+#   'instant' already carries `Z`/offset (TIMESTAMPTZ) -> parse as-is
+#   'civil'   date-only                                -> parse as-is (UTC midnight)
+#   null      not a type we decode (TIME, INTERVAL, scalars, nested) -> leave
+# Type strings are trimmed + upper-cased so casing variants still match.
+temporalKind = (duckdbType: any) ->
+  switch String(duckdbType ?? '').trim().toUpperCase()
+    when 'TIMESTAMP', 'TIMESTAMP_S', 'TIMESTAMP_MS', 'TIMESTAMP_NS', 'DATETIME' then 'utc'
+    when 'TIMESTAMP WITH TIME ZONE', 'TIMESTAMPTZ' then 'instant'
+    when 'DATE' then 'civil'
+    else null
+
+# Decode one cell. Null, non-strings, non-ISO shapes, and anything that
+# fails to parse return unchanged, so a column's type stays stable
+# except for genuine temporal values. Sub-millisecond precision is not
+# preserved (JS `Date` is millisecond-grained).
+decodeTemporal = (value: any, kind: any) ->
+  return value unless kind and typeof value is 'string' and ISO_SHAPE.test(value)
+  # Canonicalize to ISO 8601 so parsing is engine-independent: ` ` ->
+  # `T` date/time separator, a bare `±HHMM` offset -> `±HH:MM`.
+  iso = value.replace(' ', 'T').replace(/([+-]\d{2})(\d{2})$/, '$1:$2')
+  iso = "#{iso}Z" if kind is 'utc' and not HAS_ZONE.test(iso)
+  date = new Date(iso)
+  if Number.isNaN(date.getTime()) then value else date
+
+# Decode every temporal cell of a result in one pass. Fast path: when
+# no column is temporal the rows are returned untouched (no row copy).
+# Keyed by the normalized column `type` (aliased from duckdbType);
+# `lossless` rides along untouched and never gates the decode.
+decodeRows = (columns: any, rows: any) ->
+  kinds = columns.map (c) -> temporalKind c.type
+  return rows unless kinds.some (k) -> k?
+  rows.map (row) ->
+    row.map (v, i) -> if kinds[i] then decodeTemporal(v, kinds[i]) else v
+
+isPlainObject = (v: any) ->
+  v? and typeof v is 'object' and (Object.getPrototypeOf(v) is Object.prototype or Object.getPrototypeOf(v) is null)
+
+encodeParam = (v: any) ->
+  if v instanceof Date
+    throw new TypeError 'db: cannot bind an Invalid Date as a query parameter' if Number.isNaN v.getTime()
+    return v.toISOString()
+  return v.map(encodeParam) if Array.isArray v
+  if isPlainObject v
+    out: any = {}
+    out[k] = encodeParam(val) for own k, val of v
+    return out
+  v
+
+encodeParams = (params: any) -> params.map encodeParam
 
 # Await a promise while honoring an AbortSignal: reject with the abort
 # reason the moment it fires, even when the injected fetch ignores its
@@ -185,17 +268,19 @@ export def harborAdapter(opts: HarborOpts = {}): Adapter
   # harbor's success envelope → the public QueryResult. Each column is
   # normalized to a `{ name, type }` object (aliasing `duckdbType`) with
   # harbor's per-column extras preserved; a bare-string column degrades
-  # to `{ name }` rather than spreading into char indices; `data`/
-  # `rowCount` pass through. A write with no result set arrives as empty
-  # columns and data.
+  # to `{ name }` rather than spreading into char indices; temporal
+  # cells decode to `Date` per the column type; `rowCount` passes
+  # through. A write with no result set arrives as empty columns and
+  # data.
   toColumn = (c: any) ->
     if typeof c is 'string' then { name: c } else { ...c, type: c.duckdbType ?? c.type }
   toResult = (env: any): QueryResult ->
     columns: any = (env?.columns ?? []).map toColumn
-    { columns, data: env?.data ?? [], rowCount: env?.rowCount ?? (env?.data?.length ?? 0) }
+    { columns, data: decodeRows(columns, env?.data ?? []), rowCount: env?.rowCount ?? (env?.data?.length ?? 0) }
 
   query = (sql: string, params: any = null, opts: any = {}): Promise<QueryResult> ->
-    toResult await post '/sql', (if params?.length then { sql, params } else { sql }), sql, opts?.signal
+    body = if params?.length then { sql, params: encodeParams params } else { sql }
+    toResult await post '/sql', body, sql, opts?.signal
 
   begin = (options: any = {}): Promise<Transaction> ->
     session = await post '/sql/sessions/new', {}
@@ -204,7 +289,7 @@ export def harborAdapter(opts: HarborOpts = {}): Adapter
     # BEGIN/COMMIT as independent autocommit statements on the pool.
     throw new DbError 'db: harbor returned no session id for the transaction' unless sessionId?
     run = (sql: string, params: any = null, opts: any = {}): Promise<QueryResult> ->
-      body = if params?.length then { sql, params, sessionId } else { sql, sessionId }
+      body = if params?.length then { sql, params: encodeParams(params), sessionId } else { sql, sessionId }
       toResult await post '/sql', body, sql, opts?.signal
     drop = ->
       # Best-effort: harbor's idle TTL reaps an abandoned session, so a

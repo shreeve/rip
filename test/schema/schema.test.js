@@ -832,7 +832,7 @@ describe('schema: stores and mappings', () => {
     expect(result.declarations).toContain('interface Schema<Out, In = unknown> {');
     expect(result.declarations).not.toContain('interface ModelSchema'); // no :model → no persistence tier
     const model = fullCompile('M = schema :model\n  a! string\n  @timestamps');
-    expect(model.declarations).toContain('type MData = { a: string } & { id: number; createdAt: string; updatedAt: string };');
+    expect(model.declarations).toContain('type MData = { a: string } & { id: number; createdAt: Date; updatedAt: Date };');
     expect(model.declarations).toContain('declare const M: ModelSchema<M, MData, number, MCreate>;');
   });
 
