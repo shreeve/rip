@@ -34,8 +34,16 @@ export type VerifyHook = (
 ) => unknown | Promise<unknown>;
 
 export type GateOptions = {
-  /** Required. HMAC key for the CSRF token (32+ characters). */
-  secret: string;
+  /**
+   * HMAC key for the CSRF token, 32+ characters. Required unless
+   * `insecure: true`. A shorter secret throws at construction.
+   */
+  secret?: string;
+  /**
+   * Opt out of requiring a secret (dev only); gate mints a random
+   * per-boot key instead. Never excuses a weak `secret`.
+   */
+  insecure?: boolean;
   /** `{ username: argon2id-hash }` map. Required unless `verify` is set. */
   users?: Record<string, string>;
   /** Custom credential backend; overrides `users`. */

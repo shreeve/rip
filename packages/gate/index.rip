@@ -110,6 +110,21 @@ defaultLogin = ({ csrfToken, error, returnTo, host }) ->
   <button type="submit">Sign in</button></form></body></html>
   """
 
+# A secret is present-and-strong, or absent-with-explicit-insecure — there is
+# no middle. Same contract as the server's security.rip: a weak secret is a
+# CONSTRUCTION failure, not a warning, and a deployment that truly wants a
+# throwaway CSRF key says `insecure: true` in its own words (gate then mints
+# a random per-boot key — a restart merely invalidates in-flight login forms).
+MIN_SECRET_LENGTH = 32
+validatedSecret = (given, insecure) ->
+  if given?
+    unless typeof given is 'string' and given.trim().length >= MIN_SECRET_LENGTH
+      throw new Error "gate: secret must be a string of at least #{MIN_SECRET_LENGTH} characters. Generate one with 'openssl rand -base64 32'."
+    return given
+  unless insecure
+    throw new Error "gate: requires a secret — a dev deployment without one must pass insecure: true in its own words"
+  null
+
 # Default session dir. /tmp is the right home for disposable auth sessions:
 # no root needed, and a reboot simply forces re-login (a feature, not a loss).
 defaultSessionDir = ->
@@ -143,7 +158,10 @@ formReader = (c) ->
 # ------------------------------------------------------------------------------
 #
 # Options:
-#   secret        Required. HMAC key for the CSRF token.
+#   secret        HMAC key for the CSRF token, 32+ chars. Required unless
+#                 `insecure: true`, which mints a random per-boot key instead.
+#   insecure      Opt out of requiring a secret (dev only). A weak secret is
+#                 never accepted — omit it entirely or make it strong.
 #   users         { username: argon2id-hash } map. Required unless `verify` is set.
 #   verify        async (username, password) -> truthy on success. Overrides `users`.
 #   template      ({ csrfToken, error, returnTo, host }) -> HTML for the login page.
@@ -157,8 +175,7 @@ formReader = (c) ->
 #                 /tmp/rip-gate. Overridable via GATE_SESSION_DIR.
 
 export gate = (opts = {}) ->
-  throw new Error 'gate: `secret` is required' unless opts.secret
-  secret   = opts.secret
+  secret   = validatedSecret(opts.secret, opts.insecure is true) or randomBytes(32).toString('base64url')
   users    = opts.users or {}
   verify   = opts.verify or null
   template = opts.template or defaultLogin
@@ -175,8 +192,6 @@ export gate = (opts = {}) ->
     throw new Error "gate: protect must be 'all' or 'none', got #{JSON.stringify(protect)}"
   unless Number.isInteger(ttl) and ttl > 0
     throw new Error "gate: ttl must be a positive integer (seconds), got #{JSON.stringify(ttl)}"
-  if typeof secret isnt 'string' or secret.length < 32
-    warn "gate: secret should be at least 32 characters (got #{secret?.length or 0}). Generate one with 'openssl rand -base64 32'."
 
   # --- session store (random token + file) ---
 

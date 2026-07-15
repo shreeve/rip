@@ -268,6 +268,21 @@ describe('config validation (fail-closed)', () => {
   test('missing secret throws', () => {
     expect(() => gate({ users: {}, sessionDir: freshDir() })).toThrow(/secret/);
   });
+
+  test('weak secret throws (fail-hard, as in the server security middleware)', () => {
+    for (const secret of ['hunter2-weak', '   ', 'x'.repeat(31), 42]) {
+      expect(() => gate({ secret, users: {}, sessionDir: freshDir() }))
+        .toThrow(/at least 32 characters/);
+    }
+  });
+
+  test('insecure: true excuses only an ABSENT secret, never a weak one', () => {
+    // The opt-out: no secret + insecure: true constructs (random per-boot key).
+    expect(() => gate({ insecure: true, users: {}, sessionDir: freshDir() })).not.toThrow();
+    // No middle ground: a weak secret still throws even with insecure: true.
+    expect(() => gate({ secret: 'hunter2-weak', insecure: true, users: {}, sessionDir: freshDir() }))
+      .toThrow(/at least 32 characters/);
+  });
 });
 
 describe('file-backed session store', () => {

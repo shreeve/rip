@@ -5,8 +5,9 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { gate } from '@rip-lang/gate';
 import {
-  absorb, cookieHeader, csrfOf, login, setup, sweepDirs,
+  absorb, cookieHeader, csrfOf, freshDir, login, setup, sweepDirs,
 } from './harness.js';
 
 afterAll(sweepDirs);
@@ -287,24 +288,26 @@ describe('template safety', () => {
 });
 
 describe('secret handling', () => {
-  test('a short secret warns without printing the secret; a strong one is silent', () => {
-    const probe = (secretExpr) => Bun.spawnSync({
-      cmd: ['bun', '-e', `
-        import { gate } from './index.rip';
-        import { mkdtempSync } from 'node:fs';
-        import { join } from 'node:path';
-        import { tmpdir } from 'node:os';
-        gate({ secret: ${secretExpr}, users: {}, sessionDir: mkdtempSync(join(tmpdir(), 'gate-w-')) });
-      `],
-      cwd: new URL('..', import.meta.url).pathname,
-    });
-    const weak = probe("'hunter2-weak'");
-    expect(weak.exitCode).toBe(0);
-    const err = weak.stderr.toString();
-    expect(err).toInclude('at least 32 characters');
-    expect(err).not.toInclude('hunter2-weak'); // never echo the secret
-    const strong = probe("'gate-test-secret-32-chars-or-longer'");
-    expect(strong.stderr.toString()).not.toInclude('at least 32 characters');
+  test('a weak secret fails construction without echoing the secret', () => {
+    let thrown = null;
+    try {
+      gate({ secret: 'hunter2-weak', users: {}, sessionDir: freshDir() });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).not.toBeNull();
+    expect(thrown.message).toInclude('at least 32 characters');
+    expect(thrown.message).not.toInclude('hunter2-weak'); // never echo the secret
+    expect(thrown.message).not.toInclude('12');           // nor even its length
+  });
+
+  test('insecure: true (no secret) still yields a working CSRF key', async () => {
+    // The per-boot random key must sign and verify a real login round trip.
+    const app = setup({ secret: undefined, insecure: true });
+    const { jar, res } = await login(app);
+    expect(res.status).toBe(303);
+    const chk = await app('/_gate/check', { headers: { Cookie: cookieHeader(jar) } });
+    expect(chk.status).toBe(204);
   });
 });
 

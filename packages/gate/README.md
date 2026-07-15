@@ -15,7 +15,7 @@ On login, gate mints an unguessable 22-char base64url token and writes a file na
 - **Sliding idle timeout** — each authed request bumps the file's mtime, so active users stay in; idle ones past `ttl` read as expired and are swept lazily.
 - **Ephemeral by default** — sessions live in `/tmp/rip-gate`, so a reboot simply forces re-login (a feature for an auth gate, and no root needed).
 
-The single `secret` is used **only** to HMAC-sign the login/logout CSRF token. It encrypts nothing.
+The single `secret` is used **only** to HMAC-sign the login/logout CSRF token. It encrypts nothing. It is present-and-strong (32+ chars) or absent-with-explicit-`insecure: true` — the same fail-hard contract as the server's `security.rip`; a weak secret throws at construction, and the `insecure` opt-out mints a random per-boot key (dev only — a restart invalidates in-flight login forms).
 
 ## Usage
 
@@ -132,7 +132,8 @@ Traefik's `forwardAuth` and Envoy's `ext_authz` behave like Caddy (Gate's `302` 
 
 | Option       | Default                                | Notes                                                                                  |
 | ------------ | -------------------------------------- | -------------------------------------------------------------------------------------- |
-| `secret`     | (required)                             | CSRF signing key (32+ chars)                                                           |
+| `secret`     | (required)                             | CSRF signing key, 32+ chars — anything shorter **throws at construction**              |
+| `insecure`   | `false`                                | Opt out of requiring a secret (dev only): gate mints a random per-boot key. Never excuses a weak `secret`. |
 | `users`      | `{}`                                   | `{ username: argon2id-hash }` map                                                      |
 | `verify`     | -                                      | `async (user, pass) -> {user, ...} \| null` — overrides `users` for custom backends    |
 | `template`   | built-in HTML form                     | `({csrfToken, error, returnTo, host}) -> HTML` — bring your own login page             |
