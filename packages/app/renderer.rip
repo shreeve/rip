@@ -217,6 +217,40 @@ export def createRenderer(opts: RendererOpts): Renderer
     throw errors[0] if errors.length
     return
 
+  # A mid-session unhandled failure retains the previous screen (see
+  # mount), but the very first mount has no screen to retain — an
+  # unhandled boot failure renders a self-contained error card into the
+  # target instead of leaving a blank page. Inline styles only: the card
+  # is the fallback for when the app itself is broken, so it depends on
+  # no app CSS. It shows the failure's stack or message (matching v3's
+  # fatal-error display), and the next successful commit clears it.
+  fatalCard: any = null
+
+  clearFatalCard = ->
+    fatalCard?.remove?.()
+    fatalCard = null
+    return
+
+  showFatalCard = (failure) ->
+    clearFatalCard()
+    text = failure.error?.stack ?? failure.stack ?? failure.message ?? String(failure)
+    fatalCard = if typeof document isnt 'undefined' and typeof document.createElement is 'function'
+      card = document.createElement 'pre'
+      card.style.cssText = 'margin:2rem;padding:1rem 1.25rem;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere'
+      card.textContent = text
+      card
+    else
+      card: any = { nodeName: 'PRE', textContent: text }
+      card.remove = ->
+        siblings = card.parentNode?.children
+        index = siblings?.indexOf(card) ?? -1
+        siblings.splice index, 1 if index >= 0
+        card.parentNode = null
+        return
+      card
+    target.appendChild fatalCard
+    return
+
   stagingTarget = ->
     if typeof document isnt 'undefined' and typeof document.createDocumentFragment is 'function'
       return document.createDocumentFragment()
@@ -229,6 +263,7 @@ export def createRenderer(opts: RendererOpts): Renderer
     }
 
   commitStaging = (staging, into = target) ->
+    clearFatalCard()
     if staging.nodeType is 11
       into.appendChild staging
     else
@@ -446,6 +481,7 @@ export def createRenderer(opts: RendererOpts): Renderer
         file = info?.route?.file ?? '<route>'
         failureFor (error?.path ?? file), file, error
       onError?(failure)
+      showFatalCard failure unless current?
       throw failure
     finally
       router.navigating = false if mine is generation and 'navigating' in router
