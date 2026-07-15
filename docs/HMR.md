@@ -292,18 +292,34 @@ Automated tests cover:
 Browser-level behavior requires a real browser harness; pure graph and
 signature decisions remain deterministic unit tests.
 
-## Open decisions
+## Resolved decisions
 
-- WebSocket versus revisioned SSE.
-- Vite-compatible `import.meta.hot` versus a Rip-native API.
-- Computed-container identity during patch.
-- Type-fingerprint change: reset a slot or remount.
-- Route/layout boundary identity.
-- Stash and schema-registry replacement semantics.
-- Inline update payload versus hash-addressed HTTP fetch.
-- Browser bundle versus unbundled ESM development layout.
+Decided at stage entry, before implementation depends on them:
 
-Decisions are recorded here before implementation depends on them.
+- **Transport: WebSocket, unified.** One dev transport carries both
+  file-watch reloads and HMR updates. The existing SSE watch transport
+  migrates to WS — SSE's HTTP/1.1 six-connection-per-origin ceiling
+  starves the app's own requests once a few dev tabs are open, and a
+  bidirectional channel is wanted for targeted updates and client→server
+  error/state reporting. Reconnection carries a revision cursor so a
+  reconnecting client resumes from its last-applied revision.
+- **API: Rip-native, no `import.meta.hot` shim.** Rip owns its dev
+  server and runtime and replaces Vite rather than running under it, so
+  there is no external API to be compatible with. The HMR API keeps
+  Rip's ownership and effect-cleanup semantics honest.
+- **Container identity during patch: owner-frame + declared key**, never
+  positional (honors "state never migrates by positional guesswork").
+- **Type-fingerprint change: remount.** A changed fingerprint remounts;
+  a stable fingerprint patches in place.
+- **Route/layout boundary identity: reuse the App stage's** layout-chain
+  identity (route id + layout key), the same identity navigation uses.
+- **Stash / schema-registry replacement: replace-and-revalidate.** The
+  registry is replaced and revalidated; live stash values are preserved
+  by key and orphaned keys are dropped loudly.
+- **Update payload: inline** over the bidirectional WS (no separate
+  hash-addressed fetch channel).
+- **Dev module layout: unbundled ESM** in development (fast narrow
+  updates); the deterministic bundle remains the production output.
 
 ## Architectural constraints
 
