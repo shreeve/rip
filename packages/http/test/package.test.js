@@ -23,8 +23,3 @@ test('the package declares browser safety', () => {
   const meta = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   expect(meta.rip).toEqual({ browser: true });
 });
-
-test('the public surface carries no any', () => {
-  const dts = readFileSync(new URL('../index.d.ts', import.meta.url), 'utf8');
-  expect(dts.match(/\bany\b/g)).toBeNull();
-});

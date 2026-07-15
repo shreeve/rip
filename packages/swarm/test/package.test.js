@@ -47,8 +47,3 @@ test('the worker bootstrap ships with the package', () => {
   const bootstrap = readFileSync(new URL('../lib/worker.mjs', import.meta.url), 'utf8');
   expect(bootstrap).toContain("import(new URL('../swarm.rip', import.meta.url).href)");
 });
-
-test('the public type surface carries no any', () => {
-  const dts = readFileSync(new URL('../swarm.d.ts', import.meta.url), 'utf8');
-  expect(dts.match(/\bany\b/g)).toBeNull();
-});

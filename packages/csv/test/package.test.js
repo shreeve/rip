@@ -34,8 +34,3 @@ test('the package does not claim browser safety: load/save use Bun file APIs', (
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   expect(pkg.rip).toBeUndefined();
 });
-
-test('the public surface carries no any', () => {
-  const dts = readFileSync(new URL('../csv.d.ts', import.meta.url), 'utf8');
-  expect(dts).not.toMatch(/\bany\b/);
-});

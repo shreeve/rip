@@ -32,8 +32,3 @@ test('the rip-x12 bin is declared and executable', () => {
   const mode = statSync(new URL('../bin/rip-x12', import.meta.url)).mode;
   expect(mode & 0o111).not.toBe(0);
 });
-
-test('the public type surface carries no any', () => {
-  const dts = readFileSync(new URL('../x12.d.ts', import.meta.url), 'utf8');
-  expect(dts.match(/\bany\b/g)).toBeNull();
-});

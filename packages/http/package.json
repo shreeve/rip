@@ -4,10 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": {
-      "types": "./index.d.ts",
-      "default": "./index.rip"
-    }
+    ".": "./index.rip"
   },
   "scripts": {
     "test": "bun test --timeout 15000"
@@ -17,7 +14,6 @@
   },
   "files": [
     "*.rip",
-    "*.d.ts",
     "README.md"
   ]
 }

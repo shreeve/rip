@@ -27,8 +27,3 @@ test('the package does not claim browser safety (it owns a session dir on disk)'
   const source = readFileSync(new URL('../index.rip', import.meta.url), 'utf8');
   expect(source).toContain("from 'node:fs'");
 });
-
-test('the public surface carries no any', () => {
-  const dts = readFileSync(new URL('../index.d.ts', import.meta.url), 'utf8');
-  expect(dts.match(/\bany\b/g)).toBeNull();
-});

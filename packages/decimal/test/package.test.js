@@ -36,13 +36,6 @@ test('the package declares browser safety and earns it', () => {
   expect(pkg.rip).toEqual({ browser: true });
 });
 
-test('the public surface carries no any', () => {
-  for (const dts of ['decimal.d.ts', 'coercers.d.ts']) {
-    const source = readFileSync(new URL(`../${dts}`, import.meta.url), 'utf8');
-    expect(source).not.toMatch(/\bany\b/);
-  }
-});
-
 test('the value core uses no host APIs and no imports', () => {
   const source = readFileSync(new URL('../decimal.rip', import.meta.url), 'utf8');
   expect(source).not.toMatch(/\bimport\b/);

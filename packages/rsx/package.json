@@ -5,10 +5,7 @@
   "description": "Rip Style XML - small, safe XML parser/serializer that yields plain Rip objects",
   "type": "module",
   "exports": {
-    ".": {
-      "types": "./rsx.d.ts",
-      "default": "./rsx.rip"
-    }
+    ".": "./rsx.rip"
   },
   "scripts": {
     "test": "bun test --timeout 15000"
@@ -18,7 +15,6 @@
   },
   "files": [
     "rsx.rip",
-    "rsx.d.ts",
     "README.md"
   ]
 }

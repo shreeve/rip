@@ -4,10 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": {
-      "types": "./index.d.ts",
-      "default": "./time.rip"
-    }
+    ".": "./time.rip"
   },
   "scripts": {
     "test": "bun test --timeout 15000",
@@ -18,7 +15,6 @@
   },
   "files": [
     "time.rip",
-    "index.d.ts",
     "README.md"
   ],
   "devDependencies": {

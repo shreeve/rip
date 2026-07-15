@@ -26,8 +26,3 @@ test('the package declares browser safety and earns it', () => {
   expect(source).not.toMatch(/\bimport\b/);
   expect(source).not.toMatch(/\bBun\.|node:|process\.|globalThis/);
 });
-
-test('the public surface carries no any', () => {
-  const dts = readFileSync(new URL('../rsx.d.ts', import.meta.url), 'utf8');
-  expect(dts.match(/\bany\b/g)).toBeNull();
-});

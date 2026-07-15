@@ -4,10 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": {
-      "types": "./swarm.d.ts",
-      "default": "./swarm.rip"
-    }
+    ".": "./swarm.rip"
   },
   "bin": {
     "swarm": "./bin/swarm"
@@ -17,7 +14,6 @@
   },
   "files": [
     "*.rip",
-    "*.d.ts",
     "lib/",
     "bin/",
     "README.md"
