@@ -2,30 +2,32 @@
 
 ✅ **Verified** (a named gate runs and passes) · 🟡 **Fix landed, unverified** (the code is in; no gate watches it — write one) · ⬜ **Open** (no fix). **The Gate column is the load-bearing one:** a finding with no gate cannot be Verified, however obviously fixed it looks.
 
-| # | Finding | Class | Status | Gate |
+**Numbers are IDs, not order** — assigned once, cited in commits, code, and each other, never reused or renumbered. The **Tags** column groups by root: `compiler` (parser/emitter) · `strict` (implicit-any & safety) · `hoist` · `reactive` (the `:=` cell) · `directive` · `config` · `editor` (hover/token surfaces) · `capability`. They are **labels, not partitions** — a finding that shares a fix with two roots carries both, which is where the cross-cutting relationships live (a fix on the reactive cell touches #3, #10, and #15; #20 is a `compiler` hole the `strict` gate exposes).
+
+| # | Finding | Tags | Status | Gate |
 | --- | --- | --- | --- | --- |
-| [C1](#c1-optional-marker-rejected) | Optional `?` marker rejected | Compiler blocker | ✅ Verified | `dts-tsc`, audit `compiles` |
-| [C2](#c2-method-shorthand-in-type-body-rejected) | Method-shorthand in type body rejected | Compiler blocker | ✅ Verified | `dts-tsc`, audit `compiles` |
-| [1](#1-implicit-any-suppressed-with-no-opt-out) | Implicit-any suppressed, no opt-out | Silent safety hole | ✅ Verified | `strict-modes` |
-| [2](#2-use-before-assign-hidden-on-annotated-forwards) | Use-before-assign hidden by `!` | Silent safety hole | ✅ Verified | `strict-modes`, `tiers` |
-| [3](#3-reactive-binding-annotations-not-enforced) | Reactive annotations not enforced | Silent safety hole | ✅ Verified | audit `verdict` |
-| [4](#4-evolving-let-reassignment-not-caught) | Evolving-`let` reassignment not caught | Silent safety hole | ✅ Verified | audit `verdict` |
-| [5](#5-typeof-on-an-unannotated-value-resolves-to-undefined) | `typeof` unannotated → `undefined` | Loud correctness | ✅ Verified | audit `verdict`/`twin`, `tsface-tsc` |
-| [6](#6-ts-expect-error-dropped-on-multi-line-emit) | `@ts-expect-error` dropped on multi-line | Loud correctness | ✅ Verified | audit `directives`, `check` |
-| [7](#7-no-headless-type-checker-rip-check) | No headless `rip check` | Missing capability | ✅ Verified | `check` |
-| [8](#8-auto-import-is-closure-scoped) | Auto-import closure-scoped | Missing capability | ⬜ **Open** | `auto-import` (gap = expected-failure) |
-| [9](#9-write-only-unannotated-locals-hover-any) | Write-only locals hover `any` | Hover DX | ✅ Verified | hover audit's not-`any` invariant |
-| [10](#10-reactive-bindings-hover-as-their-cell-wrapper) | Reactive bindings hover cell wrapper | Hover DX | ✅ Verified | hover audit + `hover-pins.json` |
-| [11](#11-config-changes-required-a-reload) | Config changes required a reload | Config surface | ✅ Verified | `config-reactivity` |
-| [12](#12-nocheck-parsed-but-never-applied) | `rip.noCheck` parsed but never applied | Config surface | ✅ Verified | `config-reactivity` |
-| [13](#13-single-rooted-tsconfig--no-per-project-resolution) | Single-rooted tsconfig — no monorepo support | Config surface | ⬜ **Open** | **none** |
-| [14](#14-unused-ts-expect-error-silently-swallowed) | Unused `@ts-expect-error` silently swallowed | Loud correctness | ✅ Verified | `check` |
-| [15](#15-reactive-state-bindings-carry-readonly) | Reactive `:=` bindings tagged `readonly` | Token DX | ✅ Verified | `semantic-tokens`, token audit's `readonly` invariant |
-| [16](#16-library-globals-lose-the-defaultlibrary-modifier) | Library globals lose `defaultLibrary` | Token DX | ⬜ **Open** | **none** (upstream; a naive gate is platform-dependent) |
-| [17](#17-a-directive-swallows-the-unused-local-fade) | A directive swallows the unused-local fade | Diagnostic DX | ✅ Verified | `editor-features` (TS directives reach the editor) |
-| [18](#18-a-directive-blinds-the-whole-indented-block) | A directive blinds the whole indented block | Silent safety hole | ⬜ **Open** | **none** (over-suppression is what makes `verdict` pass) |
-| [19](#19-a-directive-inside-a-render-block-never-reaches-the-face) | Inline render-block directive lost from the face | Loud correctness | ⬜ **Open** | **none** (audit `directives` would catch it — no fixture uses the shape) |
-| [20](#20-everything-inside-a-render-branch-is-unchecked) | Render branch/loop bodies are unchecked (`ctx: any`) | Silent safety hole | ⬜ **Open** | audit `strict` — **red by design** until it closes |
+| [C1](#c1-optional-marker-rejected) | Optional `?` marker rejected | `compiler` | ✅ Verified | `dts-tsc`, audit `compiles` |
+| [C2](#c2-method-shorthand-in-type-body-rejected) | Method-shorthand in type body rejected | `compiler` | ✅ Verified | `dts-tsc`, audit `compiles` |
+| [1](#1-implicit-any-suppressed-with-no-opt-out) | Implicit-any suppressed, no opt-out | `strict` | ✅ Verified | `strict-modes` |
+| [2](#2-use-before-assign-hidden-on-annotated-forwards) | Use-before-assign hidden by `!` | `strict` | ✅ Verified | `strict-modes`, `tiers` |
+| [3](#3-reactive-binding-annotations-not-enforced) | Reactive annotations not enforced | `reactive` | ✅ Verified | audit `verdict` |
+| [4](#4-evolving-let-reassignment-not-caught) | Evolving-`let` reassignment not caught | `hoist` | ✅ Verified | audit `verdict` |
+| [5](#5-typeof-on-an-unannotated-value-resolves-to-undefined) | `typeof` unannotated → `undefined` | `hoist` | ✅ Verified | audit `verdict`/`twin`, `tsface-tsc` |
+| [6](#6-ts-expect-error-dropped-on-multi-line-emit) | `@ts-expect-error` dropped on multi-line | `directive` | ✅ Verified | audit `directives`, `check` |
+| [7](#7-no-headless-type-checker-rip-check) | No headless `rip check` | `capability` | ✅ Verified | `check` |
+| [8](#8-auto-import-is-closure-scoped) | Auto-import closure-scoped | `capability` | ⬜ **Open** | `auto-import` (gap = expected-failure) |
+| [9](#9-write-only-unannotated-locals-hover-any) | Write-only locals hover `any` | `hoist`, `editor` | ✅ Verified | hover audit's not-`any` invariant |
+| [10](#10-reactive-bindings-hover-as-their-cell-wrapper) | Reactive bindings hover cell wrapper | `reactive`, `editor` | ✅ Verified | hover audit + `hover-pins.json` |
+| [11](#11-config-changes-required-a-reload) | Config changes required a reload | `config` | ✅ Verified | `config-reactivity` |
+| [12](#12-nocheck-parsed-but-never-applied) | `rip.noCheck` parsed but never applied | `config` | ✅ Verified | `config-reactivity` |
+| [13](#13-single-rooted-tsconfig--no-per-project-resolution) | Single-rooted tsconfig — no monorepo support | `config` | ⬜ **Open** | **none** |
+| [14](#14-unused-ts-expect-error-silently-swallowed) | Unused `@ts-expect-error` silently swallowed | `directive` | ✅ Verified | `check` |
+| [15](#15-reactive-state-bindings-carry-readonly) | Reactive `:=` bindings tagged `readonly` | `reactive`, `editor` | ✅ Verified | `semantic-tokens`, token audit's `readonly` invariant |
+| [16](#16-library-globals-lose-the-defaultlibrary-modifier) | Library globals lose `defaultLibrary` | `editor` | ⬜ **Open** | **none** (upstream; a naive gate is platform-dependent) |
+| [17](#17-a-directive-swallows-the-unused-local-fade) | A directive swallows the unused-local fade | `directive` | ✅ Verified | `editor-features` (TS directives reach the editor) |
+| [18](#18-a-directive-blinds-the-whole-indented-block) | A directive blinds the whole indented block | `directive` | ⬜ **Open** | **none** (over-suppression is what makes `verdict` pass) |
+| [19](#19-a-directive-inside-a-render-block-never-reaches-the-face) | Inline render-block directive lost from the face | `directive`, `compiler` | ⬜ **Open** | **none** (audit `directives` would catch it — no fixture uses the shape) |
+| [20](#20-everything-inside-a-render-branch-is-unchecked) | Render branch/loop bodies are unchecked (`ctx: any`) | `strict`, `compiler` | ⬜ **Open** | audit `strict` — **red by design** until it closes |
 
 ## How to read this ledger
 
@@ -43,9 +45,12 @@
 
 **Beyond this ledger.** The wider editor surface is covered by the extension's own suite (`packages/vscode/test/`) — completions, definition, references, rename, code actions, semantic tokens, inlay hints, all over real LSP. *Driven is not the same as asserted:* its semantic-token tests check that tokens land on Rip spans and dedup, and assert no **modifier** at all — a token can be in the right place and still say the wrong thing about the code. Modifiers are gated separately ([semantic-tokens.test.js](../toolchain/semantic-tokens.test.js), #15) and swept by the token audit. A green suite bounds only what its assertions reach.
 
-## Compiler-coverage gaps — file won't compile (hard blockers)
+## Findings
 
-More severe than every editor-layer regression below: these produce **no face at all**, so the file is dark to the whole typed-editor pipeline (no diagnostics, hover, or completion — there is nothing downstream to run). All four affected fixtures are v3's own `test/types` files, ported verbatim; **v3 compiles all four** (`bin/rip -c` → EXIT 0 each, driven against v3), so each is a straight regression. Two nameable parser holes account for all four.
+In ID order — the grouping is the **Tags** column above, not the layout here. Two things ID order does not show, worth stating once:
+
+- **C1 and C2 are compiler blockers, a class apart.** They produce **no face at all**, so the file is dark to the whole pipeline — no diagnostics, hover, or completion, nothing downstream to run. All four affected fixtures are v3's own `test/types` files ported verbatim, and **v3 compiles all four** (driven, `bin/rip -c` → EXIT 0 each); two parser holes account for them.
+- **Where v4 trails v3, the root is almost always one thing:** the tsgo/LSP broker and the strip-gated face replacing v3's in-process LanguageService and its free-form type-checking shadow. The gaps were driven against rip-v4; the fix statuses re-driven against this code. (#11 and #12 are a different root — config-surface defects found while verifying #1.)
 
 ### C1. Optional marker rejected
 
@@ -85,10 +90,6 @@ $ bin/rip --ts test/type-audit/fixtures/09-components.rip
 ```
 
 **vs v3** — compiles it (EXIT 0) and preserves the shorthand as a real method signature in its `.d.ts` — `addItem(item: CartItem): void;` (driven against v3). The `.tsx` twin ([09-components.tsx](fixtures/09-components.tsx)) declares the member with the *same* method shorthand, so the twin is a direct check on this grammar, not a paraphrase of it.
-
-## Regressions vs v3 (v4 behind v3)
-
-v4 is behind v3 here — consequences of the tsgo/LSP broker and the strip-gated face replacing v3's in-process LanguageService and its free-form type-checking shadow. The *gaps* below were driven against rip-v4; the fix statuses were re-driven against this code. **Ordered most-severe first:** silent, no-opt-out safety holes a strict project can't recover (1–4) → loud correctness breaks on valid typed code (5–6) → missing/degraded capabilities (7–8) → hover DX degradations (9–10).
 
 ### 1. Implicit-any suppressed with no opt-out
 
@@ -246,10 +247,6 @@ Because reactive bindings are rip-native, the twin oracle cannot judge them and 
 
 **vs v3** — v3's in-process checker resolved each reactive binding to its value type (`clicks: number`, `clicksDoubled: number`, `clickLogger: () => void`) — the type the developer reads and writes. v4's broker sees only the emitted cell object.
 
-## Config surface — rip.strict / rip.noCheck
-
-Two defects found while verifying finding #1: `package.json#rip` config was not reactive, and `rip.noCheck` (v3's `exclude`) was parsed but never applied. Fixes for both have landed.
-
 ### 11. Config changes required a reload
 
 Editing `package.json#rip` — e.g. toggling `strict` — did not update already-open `.rip` docs; the editor kept the old posture until you edited the `.rip` file or reloaded the window. The server re-read config only inside `refresh()`, and its watched-file globs covered `**/*.rip` and `**/tsconfig.json` but not `**/package.json`, so a config edit fired nothing.
@@ -286,8 +283,6 @@ Both the editor and `rip check` generate ONE tsconfig at the mirror root that `e
 
 **vs v3** — not established. v3 *is* re-runnable (3.17.5, at `~/Code/shreeve/rip-lang`), so this could be settled either way; nobody has driven a monorepo through it. Framed as a missing capability, not a driven v3 regression.
 
-## Directive handling — what an `@ts-expect-error` absorbs, and what must survive it
-
 ### 14. Unused `@ts-expect-error` silently swallowed
 
 An `@ts-expect-error` that catches nothing must raise `TS2578` — tsc's contract, and the self-cleaning property that makes it safer than `@ts-ignore`. v4 swallowed it: over a throwaway binding (`# @ts-expect-error` / `badCount = 'oops'`, no annotation) the directive governs nothing yet the check reads clean, so a stale escape hatch rots invisibly and can later absorb a genuine new error on that line.
@@ -297,6 +292,45 @@ An `@ts-expect-error` that catches nothing must raise `TS2578` — tsc's contrac
 **Root (code).** Not the mapping — tsgo's `TS2578` maps cleanly onto the source directive line. [diagnostics.js](../../packages/vscode/src/diagnostics.js) `applyRipDirectives` marked a directive used on ANY diagnostic in its range, then dropped the mapped `TS2578` via `used.has(...)`. A throwaway binding leaves an unused-local hint (`TS6133`, severity 4 — a fade, not an error) in that range, so the directive looked used. Fix: only an error/warning (`severity <= 2`) marks a directive used; a hint does not (the finding-#6 leaked-error path, severity 1, is unaffected).
 
 **vs v3** — v3 checked the shadow in-process, where the directive sits in the real source, so tsc flagged it natively. Same machinery as #6, inverse failure: #6 is a *used* directive dropped from a multi-line face; #14 an *unused* one that should stay loud but was silenced.
+
+### 15. Reactive state bindings carry `readonly`
+
+`:=` is the one rip binding form you are *meant* to assign to — `clicks = 5` compiles, lowering to `clicks.value = 5` — yet the editor tags it `readonly` and VS Code paints it as a constant (`variable.other.constant`). The editor denies you the write on the only reactive form that allows one. Third face of the reactive-cell root: #3 is the *checking* failure, #10 the *hover* one, this the *token* one.
+
+**Status.** ✅ **Verified** (2026-07-14). The compile reports the generated span of every `:=` state name (`mutables`), and [server.js](../../packages/vscode/src/server.js) `ripSemanticTokens` clears the `readonly` bit on exactly those. Presentation-only: the emitted JS is byte-identical.
+
+Two gates. [semantic-tokens.test.js](../toolchain/semantic-tokens.test.js) pins the rule per binding form, and separately pins every path a `:=` name reaches the face by — bare, exported, nested in a `def`, and a component member (which lowers to a `declare` field, so TypeScript never calls it readonly and there is nothing to clear). The token audit's `readonly` invariant (`bun run type-audit --token`) sweeps every top-level declaration in the fixtures and is green.
+
+**Read the audit's polarity breakdown, not its score.** A blanket strip of the modifier would score green too. What rules that out is that `=!`, `~=` and `~>` each still *demand* the bit and get it, while `plain` and `state` demand its absence: **the clearing is surgical, and `:=` is the only form that moved.** Both gates take their expectations from rip's own syntax, so unlike the hover pins there is no baseline to launder. Scope: declaration sites; locals, parameters and *use* sites are unprobed.
+
+**Why (code).** `ripSemanticTokens` forwards tsgo's tokens verbatim — spans remapped, type and modifier bits untouched — and that is right wherever the face's declaration keyword agrees with rip's semantics. `:=` is the sole form where it does not: the lowering binds a `const` CELL whose value is mutable (`clicks = 5` compiles, becoming `clicks.value = 5`), so TypeScript's `readonly` describes the container, not the name. Every other const-emitting form (`=!`, `~=`, `~>`) really is immutable — the compiler rejects writes to them — so the pass-through stays correct there.
+
+The fix had to reach the **compiler**, which is why it did not close alongside #10: a hover payload carries the cell's *shape* to key off (`presentReactiveCellHover`), but a token carries only a bit, and nothing downstream can tell a `:=` `const` from a `~=` one. The emitter alone knows, so it now exports each state name's generated span — the same seam `pinnables` already uses to hand the editor a span-keyed fact ([emitter.js](../../src/emitter.js) `mutables` → [compile.js](../../src/compile.js) → the server's `lastGood`).
+
+**Why the suite missed it.** `editor-features.test.js` does drive `semanticTokens/full` over real LSP, but only for span fidelity — tokens land on Rip spans, hoist duplicates dedup. No test has ever asserted a **modifier**. The surface was watched for position and unwatched for meaning.
+
+**vs v3 — not a regression.** v3's shadow emits the identical `const clicks = __state(0)` (driven), and v3's token handler bridges TypeScript's classification back to `.rip` the same way: same lowering, same pass-through, same bit. (Unestablished: v3's live token payload; its LSP is re-drivable.) **Not v4 drift — an original hole in the reactive story, inherited.** The only finding here with that shape.
+
+### 16. Library globals lose the `defaultLibrary` modifier
+
+Symbols declared in `lib.*.d.ts` reach the editor with **no `defaultLibrary` modifier**, so VS Code falls back to `variable.other.readwrite` / `entity.name.function` instead of the `support.*` scopes themes reserve for the standard library. Token *types* are correct; only the modifier is missing. Driven on `console`, `Math`, `parseInt` and `isNaN`, and true of the whole class — the lookup that sets the bit never consults the symbol, and **not one token** in the fixture carries it. The mirror of #15 — that modifier is wrongly present, this one wrongly absent — and the only finding here whose cause is outside rip.
+
+**Status.** ⬜ **Open** (2026-07-14). **Upstream, in tsgo**: rip cannot fix it in `ripSemanticTokens` because the bit never arrives to forward. Filed as [microsoft/typescript-go#4635](https://github.com/microsoft/typescript-go/issues/4635).
+
+**Driven** — both editor servers over real LSP, same machine, same fixture lineage:
+
+| server | library globals carrying `defaultLibrary` |
+| --- | --- |
+| v3 — in-process TS 6.0.3 LanguageService, on v3's `test/types/06-functions.rip` (v3 is reachable at `~/Code/shreeve/rip-lang`) | **every one** |
+| v4 — tsgo broker, on [06-functions.rip](fixtures/06-functions.rip) | **none** |
+
+Also driven straight against the tsgo binary, bypassing rip: **not a single token** on the `.ts` twin, under both the native-preview extension and the released `typescript@7.0.2`. The engine, not rip's remapping.
+
+**Why (code)** — tsgo's classifier (`internal/ls/semantictokens.go`, `collectSemanticTokensInRange`) passes a declaration's **raw** `FileName()` to `IsSourceFileDefaultLibrary`, a lookup in a map keyed by **canonical** paths. Canonicalization lowercases on a case-insensitive filesystem, so `/Users/…` never matches its key `/users/…` and the lookup always misses; every other caller in tsgo passes `sourceFile.Path()`. Causally confirmed: copy tsgo's lib dir to an all-lowercase path, change nothing else, and every library global gets its modifier back — same binary, same file, same client.
+
+**Platform-conditional — the gating hazard.** On a case-SENSITIVE filesystem the canonicalization is the identity function and the bug does not occur, so a gate asserting `console` carries `defaultLibrary` **fails on macOS/Windows and passes on Linux**. Reporting differently by platform is worse than no gate, and the expected-failure device (#8) does not fit — an expected failure that passes on half the platforms is not one. Hence Gate **none**. **Never close this by asserting the modifier's ABSENCE:** that pins an upstream bug into the suite and certifies it correct. The honest gate becomes writable the day #4635 lands.
+
+**vs v3** — **regression** (driven, above). v3 classifies in-process through the JS TypeScript LanguageService (`getEncodedSemanticClassifications`), which canonicalizes correctly, so the same code on the same machine gets the bit. Same tsgo/LSP-broker root as #1–#10. It surfaced late because the modifier surface is only half-watched: #15 gated `readonly`, and nothing asserts `defaultLibrary` — or any modifier on a *library* symbol, since both #15's gate and the token audit probe rip's own declarations.
 
 ### 17. A directive swallows the unused-local fade
 
@@ -349,49 +383,6 @@ Place `# @ts-expect-error` on a bind/prop line *inside* a render block and the c
 **Driven, and independent of #18** (2026-07-14). Reproduced with block-scoping left fully intact and only the fixture edited, so it is not an artifact of narrowing the range rule: same `directives src=32 face=31`. This is #6's class — a directive lost in emission — surviving in a corner #6's fix did not reach: #6 taught a **statement** directive to place on the head line of its lowering; a directive *interior* to a render block has no such placement and is dropped.
 
 **Why it matters now.** On its own it is latent — nobody writes the inline form, and rip's own pass would cover them if they did. It becomes load-bearing the moment #18 lands: narrowing the range makes the inline directive the *only* way to acknowledge an error inside a render element, and it would then be a hatch that works by accident. **Fix this first, then #18.**
-
-## Semantic tokens — the modifier surface
-
-### 15. Reactive state bindings carry `readonly`
-
-`:=` is the one rip binding form you are *meant* to assign to — `clicks = 5` compiles, lowering to `clicks.value = 5` — yet the editor tags it `readonly` and VS Code paints it as a constant (`variable.other.constant`). The editor denies you the write on the only reactive form that allows one. Third face of the reactive-cell root: #3 is the *checking* failure, #10 the *hover* one, this the *token* one.
-
-**Status.** ✅ **Verified** (2026-07-14). The compile reports the generated span of every `:=` state name (`mutables`), and [server.js](../../packages/vscode/src/server.js) `ripSemanticTokens` clears the `readonly` bit on exactly those. Presentation-only: the emitted JS is byte-identical.
-
-Two gates. [semantic-tokens.test.js](../toolchain/semantic-tokens.test.js) pins the rule per binding form, and separately pins every path a `:=` name reaches the face by — bare, exported, nested in a `def`, and a component member (which lowers to a `declare` field, so TypeScript never calls it readonly and there is nothing to clear). The token audit's `readonly` invariant (`bun run type-audit --token`) sweeps every top-level declaration in the fixtures and is green.
-
-**Read the audit's polarity breakdown, not its score.** A blanket strip of the modifier would score green too. What rules that out is that `=!`, `~=` and `~>` each still *demand* the bit and get it, while `plain` and `state` demand its absence: **the clearing is surgical, and `:=` is the only form that moved.** Both gates take their expectations from rip's own syntax, so unlike the hover pins there is no baseline to launder. Scope: declaration sites; locals, parameters and *use* sites are unprobed.
-
-**Why (code).** `ripSemanticTokens` forwards tsgo's tokens verbatim — spans remapped, type and modifier bits untouched — and that is right wherever the face's declaration keyword agrees with rip's semantics. `:=` is the sole form where it does not: the lowering binds a `const` CELL whose value is mutable (`clicks = 5` compiles, becoming `clicks.value = 5`), so TypeScript's `readonly` describes the container, not the name. Every other const-emitting form (`=!`, `~=`, `~>`) really is immutable — the compiler rejects writes to them — so the pass-through stays correct there.
-
-The fix had to reach the **compiler**, which is why it did not close alongside #10: a hover payload carries the cell's *shape* to key off (`presentReactiveCellHover`), but a token carries only a bit, and nothing downstream can tell a `:=` `const` from a `~=` one. The emitter alone knows, so it now exports each state name's generated span — the same seam `pinnables` already uses to hand the editor a span-keyed fact ([emitter.js](../../src/emitter.js) `mutables` → [compile.js](../../src/compile.js) → the server's `lastGood`).
-
-**Why the suite missed it.** `editor-features.test.js` does drive `semanticTokens/full` over real LSP, but only for span fidelity — tokens land on Rip spans, hoist duplicates dedup. No test has ever asserted a **modifier**. The surface was watched for position and unwatched for meaning.
-
-**vs v3 — not a regression.** v3's shadow emits the identical `const clicks = __state(0)` (driven), and v3's token handler bridges TypeScript's classification back to `.rip` the same way: same lowering, same pass-through, same bit. (Unestablished: v3's live token payload; its LSP is re-drivable.) **Not v4 drift — an original hole in the reactive story, inherited.** The only finding here with that shape.
-
-### 16. Library globals lose the `defaultLibrary` modifier
-
-Symbols declared in `lib.*.d.ts` reach the editor with **no `defaultLibrary` modifier**, so VS Code falls back to `variable.other.readwrite` / `entity.name.function` instead of the `support.*` scopes themes reserve for the standard library. Token *types* are correct; only the modifier is missing. Driven on `console`, `Math`, `parseInt` and `isNaN`, and true of the whole class — the lookup that sets the bit never consults the symbol, and **not one token** in the fixture carries it. The mirror of #15 — that modifier is wrongly present, this one wrongly absent — and the only finding here whose cause is outside rip.
-
-**Status.** ⬜ **Open** (2026-07-14). **Upstream, in tsgo**: rip cannot fix it in `ripSemanticTokens` because the bit never arrives to forward. Filed as [microsoft/typescript-go#4635](https://github.com/microsoft/typescript-go/issues/4635).
-
-**Driven** — both editor servers over real LSP, same machine, same fixture lineage:
-
-| server | library globals carrying `defaultLibrary` |
-| --- | --- |
-| v3 — in-process TS 6.0.3 LanguageService, on v3's `test/types/06-functions.rip` (v3 is reachable at `~/Code/shreeve/rip-lang`) | **every one** |
-| v4 — tsgo broker, on [06-functions.rip](fixtures/06-functions.rip) | **none** |
-
-Also driven straight against the tsgo binary, bypassing rip: **not a single token** on the `.ts` twin, under both the native-preview extension and the released `typescript@7.0.2`. The engine, not rip's remapping.
-
-**Why (code)** — tsgo's classifier (`internal/ls/semantictokens.go`, `collectSemanticTokensInRange`) passes a declaration's **raw** `FileName()` to `IsSourceFileDefaultLibrary`, a lookup in a map keyed by **canonical** paths. Canonicalization lowercases on a case-insensitive filesystem, so `/Users/…` never matches its key `/users/…` and the lookup always misses; every other caller in tsgo passes `sourceFile.Path()`. Causally confirmed: copy tsgo's lib dir to an all-lowercase path, change nothing else, and every library global gets its modifier back — same binary, same file, same client.
-
-**Platform-conditional — the gating hazard.** On a case-SENSITIVE filesystem the canonicalization is the identity function and the bug does not occur, so a gate asserting `console` carries `defaultLibrary` **fails on macOS/Windows and passes on Linux**. Reporting differently by platform is worse than no gate, and the expected-failure device (#8) does not fit — an expected failure that passes on half the platforms is not one. Hence Gate **none**. **Never close this by asserting the modifier's ABSENCE:** that pins an upstream bug into the suite and certifies it correct. The honest gate becomes writable the day #4635 lands.
-
-**vs v3** — **regression** (driven, above). v3 classifies in-process through the JS TypeScript LanguageService (`getEncodedSemanticClassifications`), which canonicalizes correctly, so the same code on the same machine gets the bit. Same tsgo/LSP-broker root as #1–#10. It surfaced late because the modifier surface is only half-watched: #15 gated `readonly`, and nothing asserts `defaultLibrary` — or any modifier on a *library* symbol, since both #15's gate and the token audit probe rip's own declarations.
-
-## Render blocks — the unchecked interior
 
 ### 20. Everything inside a render branch is unchecked
 
