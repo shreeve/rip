@@ -94,9 +94,18 @@ type StashRawValue<V> =
         ? { [K in keyof V]: StashRawValue<V[K]> }
         : V;
 
+export type SourceHandle<T = unknown> = {
+  value: T | null;
+  readonly loading: boolean;
+  readonly error: unknown;
+  refetch(): Promise<T | undefined>;
+  reset(): void;
+};
+
 export type StashMethods = {
   peek(path?: string): unknown;
   reset(): void;
+  source(path: string, key?: unknown): SourceHandle;
 };
 
 export type Stash<D extends Record<string, any>> = {

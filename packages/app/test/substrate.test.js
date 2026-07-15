@@ -366,6 +366,114 @@ describe('stash structure', () => {
   });
 });
 
+describe('stash source handles', () => {
+  test('handle members reflect the cell lifecycle, reactively', async () => {
+    let mode = 'ok';
+    let calls = 0;
+    const stash = createStash({
+      stats: source({
+        fetch: async () => {
+          calls++;
+          if (mode === 'fail') throw new Error('boom');
+          return { n: calls };
+        },
+      }),
+    });
+    const handle = stash.source('stats');
+    const spinner = [];
+    const stopSpinner = __effect(() => spinner.push(handle.loading));
+
+    expect(handle.value).toBeNull(); // kicks the lazy load
+    expect(handle.loading).toBeTrue();
+    await Bun.sleep(0);
+    expect(handle.value.n).toBe(1);
+    expect(handle.loading).toBeFalse();
+    expect(handle.error).toBeNull();
+    expect(spinner).toEqual([false, true, false]);
+
+    mode = 'fail';
+    await handle.refetch().catch(() => {});
+    expect(handle.error).toBeInstanceOf(Error);
+    expect(handle.value.n).toBe(1); // a failed refetch keeps last-good
+    stopSpinner();
+  });
+
+  test('refetch triggers a new fetch and reset restores baseline', async () => {
+    let calls = 0;
+    const stash = createStash({
+      stats: source({
+        fetch: async () => ({ n: ++calls }),
+        staleTime: 'forever',
+      }),
+    });
+    const handle = stash.source('stats');
+
+    await unwrapStash(stash).stats.ensure();
+    expect(handle.value.n).toBe(1);
+    await handle.refetch();
+    expect(handle.value.n).toBe(2);
+    handle.reset();
+    expect(unwrapStash(stash).stats.peek()).toBeNull();
+    expect(calls).toBe(2);
+  });
+
+  test('keyed handles address one family member', async () => {
+    const stash = createStash({
+      order: source({ fetch: async id => ({ id }) }),
+    });
+
+    expect(() => stash.source('order')).toThrow('requires a key');
+    const handle = stash.source('order', 'o1');
+    handle.value = { id: 'seeded' };
+    expect(stash.order('o1').id).toBe('seeded');
+    expect(unwrapStash(stash).order.cellFor('o2').peek()).toBeNull();
+    handle.reset();
+    expect(unwrapStash(stash).order.cellFor('o1').peek()).toBeNull();
+  });
+
+  test('nested paths resolve the nearest source cell', async () => {
+    const stash = createStash({
+      session: {
+        user: source({ fetch: async () => ({ name: 'Ada' }), staleTime: 'forever' }),
+      },
+    });
+
+    await unwrapStash(stash).session.user.ensure();
+    expect(stash.source('session.user').value.name).toBe('Ada');
+  });
+
+  test('non-source paths and misplaced keys are loud errors', () => {
+    const stash = createStash({
+      plain: 1,
+      user: source({ fetch: async () => ({ name: 'Ada' }) }),
+    });
+
+    expect(() => stash.source('plain')).toThrow('does not resolve to a source key');
+    expect(() => stash.source('missing')).toThrow('does not resolve to a source key');
+    expect(() => stash.source('user', 'k')).toThrow('is not keyed');
+  });
+
+  test('source is reserved and shadows a data key, like peek and reset', () => {
+    const stash = createStash({ source: 'plain data' });
+
+    expect(typeof stash.source).toBe('function');
+    expect(typeof stash.peek).toBe('function');
+    expect(typeof stash.reset).toBe('function');
+    expect(stash.peek('source')).toBe('plain data');
+  });
+
+  test("medlabs smoke: stash.source('user').reset() unloads a loaded user", async () => {
+    const stash = createStash({
+      user: source({ fetch: async () => ({ name: 'Ada' }), staleTime: 'forever' }),
+    });
+
+    await unwrapStash(stash).user.ensure();
+    expect(stash.peek('user')).toEqual({ name: 'Ada' });
+    stash.source('user').reset();
+    expect(stash.peek('user')).toBeNull();
+  });
+});
+
 describe('component registry', () => {
   test('writes and reads source and compiled modules', () => {
     const components = createComponents();

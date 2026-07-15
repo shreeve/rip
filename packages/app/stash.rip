@@ -1,8 +1,16 @@
 import { _isSourceCell, _isSourceFamily } from './source.rip'
 
+export type SourceHandle =
+  value: unknown
+  readonly loading: boolean
+  readonly error: unknown
+  refetch: () => Promise<unknown>
+  reset: () => void
+
 export type StashMethods =
   peek: (path?: string) => unknown
   reset: () => void
+  source: (path: string, key?: unknown) => SourceHandle
 
 export type Stash<D extends Record<string, any> = Record<string, any>> = D & StashMethods
 
@@ -196,6 +204,34 @@ peekPath = (target, path) ->
   else
     value
 
+# Per-cell handle: { value, loading, error, refetch(), reset() } — all
+# reactive. Resolves the nearest source cell along the path; a
+# non-source path is a dev-time error (deterministic — every call site
+# hits it). Keyed cells take the key as a second argument.
+sourceHandle = (raw, path, key) ->
+  cell = null
+  value = raw
+  for part in pathParts(path)
+    break unless value? and typeof value is 'object'
+    value = value[resolvePart(part, value)]
+    if _isSourceCell value
+      cell = value
+      break
+  unless cell
+    throw new Error "Rip App: source('#{path}') does not resolve to a source key — declare it with source() in _app/stash.rip"
+  if _isSourceFamily cell
+    throw new Error "Rip App: keyed source('#{path}') requires a key — source('#{path}', key)" unless key?
+    cell = cell.cellFor key
+  else if key?
+    throw new Error "Rip App: source('#{path}') is not keyed — drop the key argument"
+  handle = { refetch: cell.refetch, reset: cell.reset }
+  Object.defineProperty handle, 'value',
+    get: -> cell.read()
+    set: (v) -> cell.write(v)
+  Object.defineProperty handle, 'loading', get: -> cell.loading
+  Object.defineProperty handle, 'error',   get: -> cell.error
+  handle
+
 resetSources = (value, seen) ->
   return unless value? and (typeof value is 'object' or typeof value is 'function')
   if _isSourceCell value
@@ -304,6 +340,8 @@ makeProxy = (target) ->
           resetSources raw, new WeakSet()
           raw[PURGE]?()
           return
+      if prop is 'source'
+        return (path, key) -> sourceHandle raw, path, key
       return readPath(proxy, prop) if isPathKey prop
 
       readLiteral proxy, prop
