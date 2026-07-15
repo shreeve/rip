@@ -109,8 +109,8 @@ VS Code ── vscode-languageclient ── src/extension.js   (thin shell, CJS)
 - Positions translate through MappingStore in both directions
   (`src/translate.js`): requests map Rip → generated TS (three flavors
   — lenient for hover, exact for symbol requests like
-  definition/rename, cursor for completions/signature help — the design
-  the settled rule), and results map back generated → Rip. Results and diagnostics
+  definition/rename, cursor for completions/signature help — the settled
+  design), and results map back generated → Rip. Results and diagnostics
   whose generated span has no honest source mapping (injected runtime
   code) are dropped, never pinned to unrelated source. Results landing
   in files you never opened get their mappings by recompiling that
@@ -130,7 +130,7 @@ VS Code ── vscode-languageclient ── src/extension.js   (thin shell, CJS)
   diagnostic family stays suppressed per-code (`SUPPRESSED_TS_CODES`)
   because unannotated Rip is legal and idiomatic — with the face in
   place the suppression covers exactly that class and nothing else.
-- Suggestion-class rendering (the the rendering seam): the broker declares
+- Suggestion-class rendering (the rendering seam): the broker declares
   tagSupport in the pull-diagnostics slot, so tsgo delivers its own
   diagnostic tags — unused-declaration hints (TS6133 family) carry
   `Unnecessary` (VS Code fades the name, plain-TS rendering) and
@@ -153,7 +153,7 @@ VS Code ── vscode-languageclient ── src/extension.js   (thin shell, CJS)
 
 - **Bun** on PATH (the server runs on Bun — the settled rule).
 - Dependencies installed in this package: `bun install` in
-  `packages/vscode` (the the dependency budget: `typescript` 7.x pinned,
+  `packages/vscode` (the dependency budget: `typescript` 7.x pinned,
   `vscode-languageclient`, `vscode-languageserver`,
   `vscode-languageserver-textdocument`).
 
@@ -196,7 +196,7 @@ workspace's.
 
 ## What to expect (manual verification shape)
 
-Cross-file (the the settled rule project model): open only `app.rip` from a folder
+Cross-file (the settled project model): open only `app.rip` from a folder
 that also contains `util.rip` (`export answer = 42`):
 
 ```coffee
@@ -231,7 +231,7 @@ bad = count.toUpperCase()
 - Hover `count` inside `count.toUpperCase()` → `let count: number`
   (the declared type, on Rip source). Hovering the DECLARATION/write
   site (`count` on line 2) also reads `let count: number` — the TS
-  face types the hoisted declaration from the annotation (the the settled scope
+  face types the hoisted declaration from the annotation (the
   hoisted-`any` gap, closed). Unannotated declarations still read
   their evolving-`let` inference at use sites and `any` at the write
   site — Rip knows no type there and the face never invents one.
@@ -248,12 +248,17 @@ bad = count.toUpperCase()
 
 ## Grammar note (the old runtime port)
 
-`syntaxes/` is ported whole from the old runtime, including constructs the compiler does not
-compile yet — `component`/`render` blocks and the `|>` pipe operator
-stay highlighted on purpose (they are planned the compiler phases: components/
-render is a named milestone option, `|>` is the settled rule-deferred). Highlighting
-them costs nothing and keeps the old runtime source readable; deleting them from the
-grammar would be churn against known-coming waves. The the old runtime
+`syntaxes/` is ported whole from the old runtime. `component`/`render`
+blocks compile for real now (the render gates landed), and the editor
+face covers them: component members type at every site (hover answers
+on props, state, computed, and `accept` members), a real violation
+inside a render block diagnoses on the user's own expression span, and
+prop completions and prop-key hover work at a child-component call
+site — all exercised by this package's tests. The `|>` pipe operator
+is the one highlighted construct the compiler does not compile yet
+(deliberately deferred); it stays in the grammar on purpose —
+highlighting costs nothing, keeps old-runtime source readable, and
+deleting it would be churn against a known-coming wave. The old runtime's
 `semanticTokenTypes`/`semanticTokenScopes` manifest contributions are
 deliberately NOT ported: the server's semantic-tokens legend is tsgo's
 own, and every type in it is a standard VS Code token type — themes
@@ -273,7 +278,7 @@ runs the two suites as separate steps.
 The extension keeps the marketplace identity `rip-lang.vscode-rip`, display
 name "Rip Language": this is the next major
 version of the same product, so existing users auto-upgrade with
-settings intact. Version 1.0.0 opens the the compiler major line above the old runtime's
+settings intact. Version 4.0.0 opens the compiler's major line above the old runtime's
 0.8.x. Publishing is not scheduled in this phase; per-platform
 packaging (the vsix embeds the platform tsgo binary) is the
 remaining publish-time work.
