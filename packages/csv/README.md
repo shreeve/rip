@@ -8,13 +8,11 @@ The parser is an indexOf ratchet: the JavaScript engine's native
 `indexOf` jumps directly to the next delimiter, newline, or quote, so
 bulk content is skipped in single native calls — no per-character
 scanning and no regex in the hot loop. A probe of the first ~8KB
-auto-detects the delimiter, quoting, escaping, BOM, and line endings.
-Reading supports excel mode, relax mode, headers, comments, and
-row-callback streaming; writing supports compact/full quoting,
-leading-zero protection, and reusable writer instances. One `.rip`
-file, zero dependencies. `read`/`write` are pure string work;
-`load`/`save` and the CLI use Bun file APIs, so the package does not
-claim browser safety.
+auto-detects the CSV dialect, so most files parse with zero
+configuration.
+
+**Runtime:** not browser-safe — `load`/`save` and the CLI use Bun file
+APIs (`read`/`write` are pure string work). One `.rip` file.
 
 ## Quick Start
 
@@ -43,6 +41,19 @@ str = CSV.write [['a','b'], ['1','2']]
 # Write to file
 CSV.save! 'out.csv', rows
 ```
+
+## Features
+
+- indexOf ratchet engine — bulk content skipped in single native calls, no regex in the hot loop
+- Auto-detects delimiter, quoting, escaping, BOM, and line endings from an ~8KB probe
+- Honors Excel's `sep=` header line; user options always win over probed values
+- `headers: true` — first row as keys, rows returned as objects
+- `each` callback — row-by-row streaming without building an array; return `false` to halt early
+- Excel mode — `="01"` literals preserve leading zeros
+- Relax mode — recovers stray/unmatched quotes common in enterprise exports (Labcorp-style files, legacy Excel)
+- Comments, whitespace stripping, and blank-line handling
+- Writing: compact/full quoting, leading-zero protection (`zeros`), reusable `Writer` instances
+- CLI file converter built in (`bun csv.rip in.csv out.csv`)
 
 ## Reading
 
@@ -154,3 +165,6 @@ If output is omitted, the converted CSV is written to stdout.
 ```bash
 bun run test
 ```
+
+The suite pins parsing, writing, Labcorp/excel/relax modes, late-quote
+probe behavior, and round-trips.

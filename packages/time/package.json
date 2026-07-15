@@ -3,7 +3,7 @@
   "version": "4.0.0",
   "private": true,
   "type": "module",
-  "description": "Tiny immutable US-English date/time library with timezones and durations — zero runtime dependencies",
+  "description": "Tiny, immutable, US-English date/time library with timezones and durations — zero runtime dependencies",
   "exports": {
     ".": "./time.rip"
   },

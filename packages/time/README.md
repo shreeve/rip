@@ -4,11 +4,13 @@
 
 > **Tiny, immutable, US-English date/time library with timezones and durations — zero runtime dependencies.**
 
-A pure-Rip date/time toolkit inspired by [dayjs](https://day.js.org/),
-scoped down to US English and expanded to bake in the most useful pieces
+A pure-Rip toolkit inspired by [dayjs](https://day.js.org/), scoped
+down to US English and expanded to bake in the most useful pieces
 (UTC mode, arbitrary IANA timezones with DST, custom parse formats,
 relative time, calendar, durations) so you never reach for an
-`.extend()` plugin. One file of Rip, zero runtime deps.
+`.extend()` plugin.
+
+**Runtime:** browser-safe (`rip.browser: true`). One `.rip` file.
 
 ## Quick Start
 
@@ -286,7 +288,6 @@ bun run demo
 bun run test
 ```
 
-The suite compares output against upstream `dayjs` (a test-only
-dependency) for construction, formatting, arithmetic, `startOf`/`endOf`,
-`diff`, comparisons, relative time, calendar, timezones, and durations,
-plus package-surface pins.
+The suite compares against upstream `dayjs` (test-only) for
+construction, formatting, arithmetic, timezones, and durations, plus
+package-surface pins.
