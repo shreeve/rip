@@ -28,6 +28,7 @@
 | [18](#18-a-directive-blinds-the-whole-indented-block) | A directive blinds the whole indented block | `directive` | ⬜ **Open** | **none** (over-suppression is what makes `verdict` pass) |
 | [19](#19-a-directive-inside-a-render-block-never-reaches-the-face) | Inline render-block directive lost from the face | `directive`, `compiler` | ⬜ **Open** | **none** (audit `directives` would catch it — no fixture uses the shape) |
 | [20](#20-everything-inside-a-render-branch-is-unchecked) | Render branch/loop bodies are unchecked (`ctx: any`) | `strict`, `compiler` | ⬜ **Open** | audit `strict` — **red by design** until it closes |
+| [21](#21-tokens-drop-past-a-face-rewrite-on-a-cover-row) | Tokens drop past a face rewrite on a cover row | `editor`, `compiler` | ⬜ **Open** | audit `member` + `survival` — **red by design** until the mapping fix lands |
 
 ## How to read this ledger
 
@@ -421,6 +422,51 @@ That dimension exists because nothing else could see this. `verdict` demands zer
 **Why the suite missed it.** [09-components.rip](fixtures/09-components.rip) `RenderCondTest` tests every branch form — and every body it puts inside them is a string literal (`span 'label'`, `span 'ready'`, `span 'list'`), which cannot carry a type error. The fixture proves the *conditions* are checked and says nothing about the bodies, while its section header claims render-block expressions are type-checked generally. **A fixture that cannot fail a dimension is not covering it.**
 
 **vs v3** — **not established.** v3 is re-drivable (3.17.5, `~/Code/shreeve/rip-lang`); nobody has put a bad expression inside a v3 render branch. Worth settling before assuming this is inherited rather than v4 drift.
+
+### 21. Tokens drop past a face rewrite on a cover row
+
+A name loses its semantic token — no classification, no modifiers — whenever it rides a coarse cover row whose byte-for-byte correspondence to the face breaks *before* it. The token surface only: types, checking, and compiled JS are unaffected. VS Code falls back to the TextMate scope (e.g. `variable.parameter.type.rip`, an ordinary variable) instead of the `property`/`variable` the semantic token would have named — whatever the theme paints each. The fourth face of the tsgo/broker root (#15 the modifier wrongly present, #16 wrongly absent, this one a token wholly absent).
+
+**Two surfaces, one root.** It drops **type-body members** (a property in a `type`/`interface` body — found first, gated first) and **use sites** (every identifier read right of the divergence — a `console.log('x:', x)` argument, a reactive `:=` read). Uses outnumber declarations, so the use-site surface is larger and the one no source enumeration reaches. Two triggers put a divergence before the name: an inline **quote rewrite** (`'circle'` → `"circle"` in `type Circle = { kind: 'circle', radius: number }`, dropping every member after it — likewise `'total:'` left of `total`), and a **block reflow** (`interface Identifiable` / `  id` → `interface Identifiable { id }`, whose inserted `{` drops *every* member, nothing preceding it).
+
+**Status.** ⬜ **Open** (2026-07-15) — no fix, but now **gated red by design** on both surfaces, by two invariants that flip green together the day the mapping fix lands:
+
+- **`member`** ([runner.js](../../test/type-audit/runner.js) `typeMembersOf`) — enumerates type-body members from SOURCE and asserts each gets a token. Presence only.
+- **`survival`** ([runner.js](../../test/type-audit/runner.js) `FaceOracle` / `faceSurvival`) — the OTHER direction: it asks tsgo for the compiled face's tokens, runs each through the server's own remap, and flags any naming a verbatim source identifier the remap DROPS. The only invariant that reaches use sites and rip-native names — the face is its own oracle, needing no twin and no source enumeration.
+
+Both are token twins of the #20 `strict` gauge — red rows retired the day the fix lands. Platform-independent (a token lands or it does not), so unlike #16 they carry none of that finding's gating hazard. Each asserts the CORRECT behavior (a name *should* classify), never the bug's absence — the direction #16 warns against.
+
+**Driven — type-body members** — the real server over LSP (`session.semanticTokens`, the #15 harness), every compiling fixture: **4 of 52 type-body members carry a token.** The 4 survivors are the two `kind`s in [04-unions.rip](fixtures/04-unions.rip) (ahead of their `'…'` literal) and the two members of `type TOptionShape = string | { value: string, label: string }` in [09-components.rip](fixtures/09-components.rip) (a `{…}` arm the face leaves byte-for-byte intact). The other 48 — every block member across 03/05/06/09/12 and `radius`/`width`/`height` in 04 — drop. The discriminated-union block alone:
+
+| name | position | token |
+| --- | --- | --- |
+| `kind` — before `'circle'` | 23:16 | `property` ✓ |
+| `radius` — after `'circle'` | 23:32 | **absent** |
+| `kind` — before `'rect'` | 24:14 | `property` ✓ |
+| `width` / `height` — after `'rect'` | 24:28 / 24:43 | **absent** |
+
+Control — `type P = { a: number, b: string }`, no literal to rewrite and no block reflow: **both** `a` and `b` classify `property`. So the trigger is the divergence, not member position; leave the body verbatim and the whole line maps.
+
+**Driven — use sites** — the `survival` oracle, every compiling fixture: of the face tokens that name a verbatim source identifier, **64 across 9 fixtures are dropped by the remap** (survivors + drops = 1737; the ratio is the gauge). Each was confirmed absent from the real server's `session.semanticTokens`, and the reimplemented remap matches the server token-for-token where no span dedup applies (01, 08). The shape is the same root, seen at reads rather than declarations:
+
+- **The `console.log('x:', x)` family** — the argument name drops because the single-quoted label to its left is quote-normalized on the call's coarse cover row. The bulk of 01/02/03/05 and both drops in 07 (`point`, `total`).
+- **Rip-native reactive reads** — [08-reactive.rip](fixtures/08-reactive.rip) drops all 7 reads (`clicks` twice, plus `username`, `enabled`, `clicksDoubled`, `greeting`, `hasTags`): `:=`/`~=` names lowered to `.value` cells, with no column-0 declaration and **no TS twin** — the surface only a face→source oracle can see.
+- **Union arms and component reads** — 04's tag/value reads (`status`, `method`, `circle`, …), 09's property/element reads (`inputEl`, `divEl`, `anyEl`, …).
+
+The gauges are **not disjoint** — a member that also rides the arithmetic (04's `radius`/`width`/`height`, 09's `label`/`variant`) counts in both, which is why they retire together, not one then the other. A length-≥2 floor drops single-char coincidental matches (09's four `T`s, `i`, `e`, `c`); the gauge is expected-red regardless, so the seven forgone drops don't matter.
+
+**Why (code).** A type declaration emits ONE coarse `typedecl` **cover** row over its whole span, no per-identifier rows (verified with `rip --explain --face ts`): `type Circle …` is source `23:1-23:49` → face `5:1-5:50`; `interface Identifiable …` is source `[62,97)` → face `[0,40)`. So every member maps through the cover fallback, [generatedEditSpanToSource](../../packages/vscode/src/translate.js) (called by [ripSemanticTokens](../../packages/vscode/src/server.js) via `exactSpanMapper`'s miss path), whose rule is a **verbatim prefix check from the cover's start**: a token `[s,e)` maps only where source and face agree byte-for-byte from the cover start through `e`. The first divergence ends the prefix — for the inline case the quote at source `23:22`, for the block case the ` {` inserted right after `Identifiable`. Every member past that point fails the slice comparison, `generatedEditSpanToSource` returns null, and the token is dropped; it falls through to the grammar's `variable.parameter.type.rip` scope, the `property` classification simply missing rather than overridden.
+
+**The general shape.** Any face difference — quote normalization, block→brace reflow, added `;`, stripped indentation — before a name on a construct carried by a single coarse cover row truncates the verbatim prefix and drops every later token on it. The remap verifier itself is correct — it refuses to guess past a divergence, exactly the strictness edits and auto-import (#14, #8) depend on — so the fix belongs upstream at the mapping seam: emit per-name exact rows (names no longer ride a cover prefix), or narrow the face rewrites (leave literals un-normalized, keep the intervening bytes verbatim). Either flips **both** the `member` and `survival` gauges green — they share this one root, so neither closes alone.
+
+**Why the suite missed it.** Every token gate was source-enumerated at declarations — `declsOf` (column-0), plus [semantic-tokens.test.js](../toolchain/semantic-tokens.test.js) (#15) and the `readonly` sweep on column-0 `:=`/`=!`/`~=` names, and [editor-features.test.js](../../packages/vscode/test/editor-features.test.js) on span fidelity. `Circle` and `total`'s *declaration* get tokens, so every gate passed while `radius` and `total`'s *use* were never in any set. The two surfaces then needed two different moves: a **wider enumeration** (`typeMembersOf`) for members, but use sites have no column-0 anchor and rip-native reads no twin, so they needed the **opposite direction** — the `survival` oracle, starting from the face's tokens and checking which survive. Source→token cannot see a use; face→source can.
+
+**vs v3 — established (driven both sides, 2026-07-15).** v3 compiles to TS, runs `getEncodedSemanticClassifications`, and remaps the spans back (rip-lang 3.17.5 `packages/vscode/src/lsp.js`) — it is not remap-free, so a token surviving is a property of its remap, not of classifying on raw source. Driven on the real v3 LSP against the v4 server, the verdict **splits by surface**:
+
+- **Type-body members — regression.** `type Circle = { kind: 'circle', radius: number }`: v3 classifies `radius` `property`, v4 drops it. The `member` gauge tracks a genuine v4 loss — v3's remap survives the quote rewrite where v4's cover-prefix does not.
+- **Use sites — mostly inherited, causes inverted.** `console.log('total:', total)`: both drop the use, so no outcome change on the common single-quoted form. But the cause is opposite — v4 drops it to quote-normalization (`console.log("total:", total)` **rescues** it in v4), while v3 drops it to the call-argument context regardless of quotes (double-quoting does **not** rescue it in v3). A bare `x = total` and a minimal reactive read (`x = clicks` off `clicks := 0`) classify in **both**. So the `console.log`-argument drops — the bulk of the `survival` count — are v3-inherited, not v4 drift.
+
+Unsettled: 08's reactive reads drop in v4 only in render/component context (the minimal read survives both); that exact context was not reproduced on v3. Net: the **member** surface is the established v4 regression; the **use-site** surface is largely a shared, pre-existing limitation.
 
 ## `=` hoisting: the shared root of #4, #5 and #9
 
