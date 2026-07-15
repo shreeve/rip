@@ -1,0 +1,20 @@
+{
+  "name": "@rip-lang/csv",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./csv.d.ts",
+      "default": "./csv.rip"
+    }
+  },
+  "scripts": {
+    "test": "bun test --timeout 15000"
+  },
+  "files": [
+    "*.rip",
+    "*.d.ts",
+    "README.md"
+  ]
+}
