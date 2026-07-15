@@ -1,0 +1,19 @@
+#!/usr/bin/env bun
+//
+// rip-x12 — the CLI for @rip-lang/x12. The command logic lives in
+// ../x12.rip behind its `import.meta.main` guard, so this wrapper runs
+// the module as a main script under the repository's .rip loader and
+// forwards the argv and exit status untouched.
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const x12Rip = join(here, '..', 'x12.rip');
+const loader = join(here, '..', '..', '..', 'src', 'loader.js');
+
+try {
+  execFileSync(process.execPath, ['--preload', loader, x12Rip, ...process.argv.slice(2)], { stdio: 'inherit' });
+} catch (e) {
+  process.exit(e.status ?? 1);
+}
