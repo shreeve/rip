@@ -181,7 +181,10 @@ standing) and the failure becomes control flow — `mount` resolves null and
 the global `onError` stays quiet. Without a boundary, the previous screen is
 retained and the failure rejects `renderer.mount(info)` and reaches
 `onError` as an `Error` carrying `status`, `path`, `file`, and the original
-`error`. This package does
+`error`. When nothing has committed yet — a failed boot — there is no screen
+to retain, so a self-contained error card (inline styles, no app CSS)
+renders into the target instead of a blank page; the next successful mount
+clears it. This package does
 not provide source compilation, launch, or browser delivery.
 
 ## Launch

@@ -1268,7 +1268,8 @@ describe('renderer boundary reconciliation', () => {
     });
     await expect(renderer.mount(route('page.rip', { layouts: ['layout.rip'] }))).rejects.toMatchObject({ path: 'broken' });
     expect(failures.length).toBe(1);
-    expect(host.children).toEqual([]);
+    // Unhandled with nothing committed yet: the boot error card, not a blank page.
+    expect(host.children.map(child => child.nodeName)).toEqual(['PRE']);
   });
 
   test('an identical navigation constructs a fresh instance', async () => {
@@ -1334,6 +1335,97 @@ describe('renderer boundary reconciliation', () => {
     await expect(renderer.mount(route('page.rip', { query: { a: '2' } }))).rejects.toMatchObject({ name: 'GateFailure' });
     expect(failures.length).toBe(1);
     expect(renderer.current).toBe(first);
+  });
+});
+
+describe('renderer boot failure card', () => {
+  const failingSource = () =>
+    source({ fetch: async () => { throw Object.assign(new Error('boot down'), { status: 503 }); } });
+
+  const brokenPage = () => {
+    class Page extends __Component {
+      static __gates = ['broken'];
+      _init() { this.broken = __gateBind(this, 0); }
+      _create() { return node('page'); }
+    }
+    return Page;
+  };
+
+  test('an unhandled boot failure renders a self-contained error card', async () => {
+    const host = node('host');
+    const failures = [];
+    const renderer = createRenderer({
+      router: { current: null },
+      app: { data: createStash({ broken: failingSource() }) },
+      components: registry({ 'page.rip': { Page: brokenPage() } }),
+      target: host,
+      onError: failure => failures.push(failure),
+    });
+    await expect(renderer.mount(route('page.rip'))).rejects.toMatchObject({ path: 'broken', status: 503 });
+    expect(failures.length).toBe(1);
+    expect(host.children.map(child => child.nodeName)).toEqual(['PRE']);
+    expect(host.children[0].textContent).toContain('boot down');
+    expect(renderer.current).toBeNull();
+  });
+
+  test('a boot failure handled by a layout onError shows no card', async () => {
+    const host = node('host');
+    const layoutRoot = node('layout');
+    let handled = null;
+    class Layout extends __Component {
+      _create() { return layoutRoot; }
+      onError(failure) { handled = failure; }
+    }
+    const renderer = createRenderer({
+      router: { current: null },
+      app: { data: createStash({ broken: failingSource() }) },
+      components: registry({ 'layout.rip': { Layout }, 'page.rip': { Page: brokenPage() } }),
+      target: host,
+    });
+    const result = await renderer.mount(route('page.rip', { layouts: ['layout.rip'] }));
+    expect(result).toBeNull();
+    expect(handled.path).toBe('broken');
+    expect(host.children).toEqual([layoutRoot]);
+  });
+
+  test('a mid-session unhandled failure retains the previous screen without a card', async () => {
+    const host = node('host');
+    const failures = [];
+    class Home extends __Component { _create() { return node('home'); } }
+    const renderer = createRenderer({
+      router: { current: null },
+      app: { data: createStash({ broken: failingSource() }) },
+      components: registry({ 'home.rip': { Home }, 'page.rip': { Page: brokenPage() } }),
+      target: host,
+      onError: failure => failures.push(failure),
+    });
+    const home = await renderer.mount(route('home.rip'));
+    await expect(renderer.mount(route('page.rip'))).rejects.toMatchObject({ path: 'broken' });
+    expect(failures.length).toBe(1);
+    expect(host.children.map(child => child.name)).toEqual(['home']);
+    expect(renderer.current).toBe(home);
+  });
+
+  test('a successful mount after a boot card clears the card', async () => {
+    const host = node('host');
+    let attempts = 0;
+    const data = createStash({
+      broken: source({ fetch: async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error('boot down');
+        return { ok: true };
+      } }),
+    });
+    const renderer = createRenderer({
+      router: { current: null },
+      app: { data },
+      components: registry({ 'page.rip': { Page: brokenPage() } }),
+      target: host,
+    });
+    await expect(renderer.mount(route('page.rip'))).rejects.toMatchObject({ path: 'broken' });
+    expect(host.children.map(child => child.nodeName)).toEqual(['PRE']);
+    await renderer.mount(route('page.rip'));
+    expect(host.children.map(child => child.name)).toEqual(['page']);
   });
 });
 
