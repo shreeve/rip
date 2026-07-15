@@ -36,9 +36,10 @@ PRIVATE_HOST_PATTERNS =! [
   /^192\.168\./
   /^169\.254\./
   /^172\.(1[6-9]|2[0-9]|3[0-1])\./
-  /^::1$/
-  /^fe80:/i
-  /^f[cd][0-9a-f]{2}:/i
+  /^::$/                    # unspecified (IPv6 0.0.0.0)
+  /^::1$/                   # loopback
+  /^fe[89ab][0-9a-f]:/i     # link-local fe80::/10
+  /^f[cd][0-9a-f]{2}:/i     # unique-local fc00::/7
 ]
 
 # ==============================================================================
@@ -68,13 +69,37 @@ hashBytes = (bytes) ->
 # URL safety
 # ==============================================================================
 
+# URL.hostname keeps IPv6 brackets ('[::1]') while the patterns test bare
+# forms, so normalize before matching: strip the brackets, lowercase, and
+# drop any zone id ('fe80::1%en0' — WHATWG URL rejects these at parse time,
+# but the strip is kept as defense in depth).
+normalizeHost = (host) ->
+  h = String(host or '').toLowerCase()
+  h = h.slice(1, -1) if h.startsWith('[') and h.endsWith(']')
+  h.split('%')[0]
+
+# IPv4-mapped IPv6 (::ffff:0:0/96) — extract the embedded IPv4 so it is
+# re-checked against the IPv4 rules. WHATWG URL serializes the mapped range
+# as hex pairs ('::ffff:7f00:1'); the dotted form is handled too in case a
+# hostname arrives without passing through the URL parser.
+mappedIPv4 = (h) ->
+  m = h.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/)
+  return m[1] if m
+  m = h.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/)
+  return null unless m
+  hi = parseInt(m[1], 16)
+  lo = parseInt(m[2], 16)
+  "#{hi >> 8}.#{hi & 0xff}.#{lo >> 8}.#{lo & 0xff}"
+
 validateUrl = (str) ->
   parsed = (try new URL(str)) or raise "invalid URL: #{str}"
   unless parsed.protocol is 'http:' or parsed.protocol is 'https:'
     raise "URL must be http or https: #{str}"
   host = parsed.hostname
+  h = normalizeHost(host)
+  h = mappedIPv4(h) or h
   for re in PRIVATE_HOST_PATTERNS
-    raise "URL host #{host} is in a private/reserved range" if re.test(host)
+    raise "URL host #{host} is in a private/reserved range" if re.test(h)
   parsed
 
 # ==============================================================================
