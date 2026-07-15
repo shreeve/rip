@@ -26,7 +26,7 @@ import { buildSchemaTypeStory, isModuleShaped, SchemaTypeError } from './schema-
 import { Parser } from './parser.js';
 import { applyInsertionPass, implicitBlocks, implicitObjects, implicitCalls, tagPostfixConditionals, rewriteTypes, isIdentifierName } from './lexer.js';
 import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams } from './typetext.js';
-import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, knownBareAttribute } from './dom-vocab.js';
+import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute } from './dom-vocab.js';
 import {
   COMPONENT_HOOKS, COMPONENT_RUNTIME_FIELDS, componentTypeInfo, memberDeclareSegments, isDeclarableMember,
   propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType,
@@ -5774,13 +5774,9 @@ class Emitter {
   static COMPONENT_HOOKS = COMPONENT_HOOKS;
 
   // Boolean HTML attributes the render DSL toggles as properties of
-  // presence.
-  static BOOLEAN_ATTRS = new Set([
-    'disabled', 'hidden', 'readonly', 'required', 'checked', 'selected',
-    'autofocus', 'autoplay', 'controls', 'loop', 'muted', 'multiple',
-    'novalidate', 'open', 'reversed', 'defer', 'async', 'formnovalidate',
-    'allowfullscreen', 'inert',
-  ]);
+  // presence — src/dom-vocab.js is the single source (the VS Code
+  // grammar's own-line flag rule reads the same set).
+  static BOOLEAN_ATTRS = BOOLEAN_ATTRS;
 
   static SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -7244,15 +7240,17 @@ class Emitter {
           for (const child of block.slice(1)) {
             if (isObject(child)) {
               this.renderAttributes(el, child);
-            } else {
+            } else if (!this.renderBareFlag(el, child)) {
               const v = this.renderNode(child);
               if (v == null) continue;
               this.renderLine(null, () => this.b.emit(`${el}.appendChild(${v})`));
             }
           }
         } else if (block) {
-          const v = this.renderNode(block);
-          if (v != null) this.renderLine(null, () => this.b.emit(`${el}.appendChild(${v})`));
+          if (!this.renderBareFlag(el, block)) {
+            const v = this.renderNode(block);
+            if (v != null) this.renderLine(null, () => this.b.emit(`${el}.appendChild(${v})`));
+          }
         }
         continue;
       }
@@ -7346,6 +7344,23 @@ class Emitter {
   // (var names are allocation-ordered; the frame records tags).
   renderTagOf(el) {
     return this.rstate.tags?.get(el) ?? 'div';
+  }
+
+  // The own-line bare-flag rule (v3's semantics, restored): a bare
+  // word CHILD naming a known HTML boolean attribute (the
+  // BOOLEAN_ATTRS list) that resolves to nothing in scope sets that
+  // attribute on the enclosing element — never a `<disabled>` child
+  // element (the silent mis-compile ported v3 sources hit). Any other
+  // bare word keeps its element/component reading, and an in-scope
+  // value keeps its text reading (the same shadowing precedence the
+  // inline shorthand carries). Emits the empty-string serialization —
+  // exactly what the static colon form (`disabled: true`) sets.
+  renderBareFlag(el, child) {
+    if (typeof child !== 'string' || !Emitter.BOOLEAN_ATTRS.has(child)) return false;
+    if (this.renderVarKind(child, child) !== null) return false;
+    if (this.resolveBareRead(child) !== null || this.inScope(child)) return false;
+    this.renderLine(null, () => this.b.emit(`${el}.setAttribute('${child}', '')`));
+    return true;
   }
 
   // `slot` — children projection: the parent's emission passed its
