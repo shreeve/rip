@@ -1,0 +1,20 @@
+{
+  "name": "@rip-lang/script",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./script.d.ts",
+      "default": "./script.rip"
+    }
+  },
+  "scripts": {
+    "test": "bun test --timeout 15000"
+  },
+  "files": [
+    "script.rip",
+    "script.d.ts",
+    "README.md"
+  ]
+}
