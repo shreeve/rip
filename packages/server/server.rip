@@ -1,0 +1,323 @@
+# The runnable serving layer — the module that turns a resolved
+# configuration into a listening server. This is deliberately the
+# host-touching composition of the certified cores: serveStatic and
+# appServer answer requests, compose builds each site's pipeline,
+# createWatch carries the dev SSE transport, createPool bounds
+# concurrency, resolveTls judges the certificate policy, and Bun.serve
+# holds the socket. Nothing here re-decides what a core already
+# decided.
+#
+# The listener behavior is v3's: the preferred port is tried, an
+# EADDRINUSE walks forward through a 100-port window, and an EACCES on
+# a privileged port falls back to 3000 (3443 under TLS) and scans from
+# there. Requests dispatch through the worker pool — S1 runs ONE
+# process, so the pool's workers are in-process handlers; the pool
+# still enforces the operational envelope (workers × concurrency in
+# flight, a bounded queue with a wait timeout) so the seam the process
+# workers will fill in S2 is already load-bearing. The SSE watch
+# endpoint bypasses the pool: a held-open stream is not a unit of work
+# and must never starve request capacity.
+#
+# stop() is the graceful shutdown: the listener stops accepting, the
+# pool drains its in-flight work (queued jobs reject), and then the
+# remaining held-open connections (SSE watchers) are closed.
+
+import { cpus } from 'node:os'
+import { readFileSync } from 'node:fs'
+
+import { createContext } from './context.rip'
+import { compose } from './middleware.rip'
+import { appServer, serveStatic } from './serving.rip'
+import { diskHost } from './host.rip'
+import { createWatch } from './watch.rip'
+import { createPool } from './pool.rip'
+import { resolveTls } from './tls.rip'
+
+fail = (message) -> throw new Error "Rip Server: #{message}"
+
+WATCH_PATH = '/_rip/watch'
+PORT_SCAN_WINDOW = 100
+
+# A PEM file as the tls core's load adapter sees it: the text is the
+# certificate when it carries one, and the key when it carries one —
+# a combined PEM answers both, so a cert/key pair may share a file.
+pemLoad = (path) ->
+  text = readFileSync path, 'utf8'
+  entry: any = {}
+  entry.cert = text if text.includes 'CERTIFICATE'
+  entry.key = text if text.includes 'PRIVATE KEY'
+  entry
+
+# The v3 listener scan: try the preferred port; EADDRINUSE walks
+# forward through the window; EACCES on a privileged port falls back
+# to the unprivileged default (3000 http / 3443 tls) and scans from
+# there; anything else is a real startup failure. `attempt(port)`
+# binds and returns the live server (injected, so the policy tests
+# without racing real sockets).
+export def scanListen(preferred: number, attempt: (port: number) => any, opts: any = {}): any
+  base = preferred
+  port = preferred
+  while port < base + PORT_SCAN_WINDOW
+    try
+      return attempt port
+    catch error
+      detail: any = error
+      if detail?.code is 'EACCES' and port < 1024
+        fallback = if opts.tls then 3443 else 3000
+        console.warn "rip-server: port #{port} requires elevated privileges, falling back to #{fallback}" unless opts.quiet
+        port = fallback
+        base = fallback
+        continue
+      throw error unless detail?.code is 'EADDRINUSE'
+      port++
+  fail "no available port found (tried #{base}–#{base + PORT_SCAN_WINDOW - 1})"
+
+# ── site pipelines ────────────────────────────────────────────────────
+
+notFound = (c) -> c.text 'Not Found', 404
+
+# Host matching, v3's route-table judgment: exact beats wildcard beats
+# the '*' catch-all; a wildcard covers exactly one deeper label.
+hostRank = (pattern, host) ->
+  return 3 if pattern is host
+  if typeof pattern is 'string' and pattern.startsWith '*.'
+    suffix = pattern.slice 1
+    if host.endsWith(suffix)
+      label = host.slice 0, host.length - suffix.length
+      return 2 if label.length > 0 and not label.includes('.')
+  return 1 if pattern is '*'
+  0
+
+# One site's routes: the longest mount path that prefixes the request
+# wins (v3's path score). A mounted route sees the request with its
+# mount prefix stripped, so a serveStatic root composed at '/docs'
+# serves '/docs/a.css' as '/a.css'.
+mountMatches = (mountPath, pathname) ->
+  return true if mountPath is '/'
+  pathname is mountPath or pathname.startsWith "#{mountPath}/"
+
+stripMount = (request, mountPath) ->
+  return request if mountPath is '/'
+  url = new URL request.url
+  url.pathname = url.pathname.slice(mountPath.length) or '/'
+  new Request url.toString(), request
+
+# Only Strict-Transport-Security, and only when TLS is live — the v3
+# judgment: HSTS is an opt-in header on a listener that can honor it,
+# never a header a plaintext listener teaches a browser.
+hstsWare = (c, next) ->
+  response = await next()
+  response.headers.set 'Strict-Transport-Security', 'max-age=31536000; includeSubDomains' unless response.headers.has 'Strict-Transport-Security'
+  response
+
+buildRoute = (route, host, hsts) ->
+  use = []
+  use.push hstsWare if hsts
+  if route.bundle?
+    use.push appServer {
+      root: route.root
+      host: host
+      bundle: route.bundle
+      title: route.title
+      state: route.state
+      bundlePath: route.bundlePath
+      index: route.index
+      maxAge: route.maxAge
+      secure: route.secure
+    }
+  else
+    fail 'a serve route requires a static root or a bundle' unless route.root
+    use.push serveStatic { root: route.root, host: host, spa: route.spa is true, index: route.index, maxAge: route.maxAge }
+  {
+    mountPath: route.mountPath ?? '/'
+    run: compose { use, handler: notFound }
+  }
+
+buildSite = (site, host, hsts) ->
+  routes = ((buildRoute route, host, hsts) for route in (site.routes ?? []))
+  routes.sort (a, b) -> b.mountPath.length - a.mountPath.length
+  { host: String(site.host ?? '*').toLowerCase(), routes }
+
+# ── TLS resolution ────────────────────────────────────────────────────
+
+resolveMaterial = (opts) ->
+  return null unless opts.tls?
+  resolution = resolveTls {
+    cert: opts.tls.cert
+    key: opts.tls.key
+    certPath: opts.tls.certPath
+    keyPath: opts.tls.keyPath
+    production: opts.production is true
+  }, { load: pemLoad }
+  fail 'https requires explicit certificate material in S1 — pass cert/key paths (ACME and the dev CA arrive with S5)' unless resolution.mode is 'explicit'
+  resolution.material
+
+# ── the server ────────────────────────────────────────────────────────
+
+export type ServeHandle =
+  port: number
+  hostname: string
+  url: string
+  server: any
+  watch: any
+  pool: any
+  fetchHandler: (req: Request) => Promise<Response>
+  stop: () => Promise<void>
+
+export type ServeOpts =
+  sites?: any[]
+  root?: string
+  bundle?: any
+  title?: string
+  state?: any
+  spa?: boolean
+  httpPort?: number
+  httpsPort?: number | null
+  tls?: any
+  watch?: boolean
+  watchPath?: string
+  workers?: number
+  concurrency?: number
+  maxQueue?: number
+  queueTimeoutMs?: number
+  maxRequestsPerWorker?: number
+  maxSecondsPerWorker?: number
+  idleTimeoutSec?: number
+  hsts?: boolean
+  hostname?: string
+  quiet?: boolean
+  production?: boolean
+  host?: any
+  serve?: (options: any) => any
+
+export def startServer(opts: ServeOpts = {}): ServeHandle
+  host = opts.host ?? diskHost()
+  serveFn = opts.serve ?? ((options) -> Bun.serve options)
+
+  # A single root (or bundle) is the one-site shorthand the CLI uses;
+  # `sites` is the serve.rip shape. Either way the result is an
+  # ordered site list with composed pipelines.
+  siteConfigs = if opts.sites?.length
+    opts.sites
+  else if opts.root? or opts.bundle?
+    [{
+      host: '*'
+      routes: [{
+        mountPath: '/'
+        root: opts.root
+        bundle: opts.bundle
+        title: opts.title
+        state: opts.state
+        spa: opts.spa
+      }]
+    }]
+  else
+    fail 'startServer requires a root, a bundle, or sites'
+
+  useTls = opts.tls?
+  material = resolveMaterial opts
+  hsts = opts.hsts is true and useTls
+  sites = ((buildSite site, host, hsts) for site in siteConfigs)
+
+  watch = if opts.watch is true then createWatch() else null
+  watchPath = opts.watchPath ?? WATCH_PATH
+
+  cores = cpus().length
+  workers = Math.max 1, Math.floor(opts.workers ?? Math.max(1, Math.floor(cores / 2)))
+  pool = createPool
+    spawn: -> { handle: (job) -> job() }
+    size: workers
+    concurrency: opts.concurrency ?? 1
+    queueLimit: opts.maxQueue ?? 512
+    timeout: opts.queueTimeoutMs ?? 30000
+    maxRequests: opts.maxRequestsPerWorker ?? 10000
+    maxAge: (opts.maxSecondsPerWorker ?? 3600) * 1000
+
+  siteFor = (hostname) ->
+    best = null
+    bestRank = 0
+    for site in sites
+      rank = hostRank site.host, hostname
+      if rank > bestRank
+        best = site
+        bestRank = rank
+    best
+
+  answer = (request) ->
+    url = new URL request.url
+    site = siteFor url.hostname.toLowerCase()
+    return new Response('Not Found', { status: 404 }) unless site?
+    for route in site.routes
+      if mountMatches route.mountPath, url.pathname
+        scoped = stripMount request, route.mountPath
+        return route.run createContext(scoped)
+    new Response 'Not Found', { status: 404 }
+
+  # Pool failures translate to the v3 status vocabulary: a full queue
+  # is 503 Server busy, a queue wait past its timeout is 504, and a
+  # draining server answers 503 to whoever raced the shutdown.
+  overloaded = (error) ->
+    message = String(error?.message ?? error)
+    return new Response('Queue timeout', { status: 504 }) if message.includes 'timed out in queue'
+    return new Response('Server busy', { status: 503 }) if message.includes 'queue is at capacity'
+    return new Response('Server shutting down', { status: 503 }) if message.includes 'shutting down'
+    throw error
+
+  fetchHandler = (request) ->
+    if watch? and new URL(request.url).pathname is watchPath
+      return watch.handler createContext(request)
+    try
+      await pool.submit -> answer request
+    catch error
+      overloaded error
+
+  listenOpts: any =
+    idleTimeout: Math.max 0, Math.floor(opts.idleTimeoutSec ?? 30)
+    fetch: fetchHandler
+  listenOpts.hostname = opts.hostname if opts.hostname?
+  listenOpts.tls = { cert: material.cert, key: material.key } if material?
+
+  # An absent port takes the protocol default; an EXPLICIT 0 is the
+  # OS-assigned ephemeral port (the CLI layer resolves v3's "0 means
+  # unspecified" before it gets here).
+  preferred = if useTls then (opts.httpsPort ?? 443) else (opts.httpPort ?? 80)
+  server = scanListen preferred, ((port) -> serveFn { ...listenOpts, port }), { tls: useTls, quiet: opts.quiet is true }
+
+  # The HTTP→HTTPS redirect listener, v3's: best effort on port 80
+  # with a short idle timeout — a machine that refuses the bind gets a
+  # warning, never a failed start.
+  redirectServer = null
+  if useTls and opts.redirectHttp is true
+    httpsPort = server.port
+    try
+      redirectServer = serveFn
+        port: 80
+        idleTimeout: 8
+        fetch: (req) ->
+          url = new URL req.url
+          new Response null, { status: 301, headers: { Location: "https://#{url.hostname}:#{httpsPort}#{url.pathname}#{url.search}" } }
+    catch
+      console.warn 'rip-server: could not bind port 80 for HTTP→HTTPS redirect' unless opts.quiet is true
+
+  stopped = null
+  stop = ->
+    stopped ??= do ->
+      server.stop()          # stop accepting; in-flight requests finish
+      try redirectServer?.stop(true) catch then null
+      await pool.shutdown()  # drain workers, reject the queue
+      server.stop true       # close what remains held open (SSE watchers)
+      return
+    stopped
+
+  protocol = if useTls then 'https' else 'http'
+  hostname = opts.hostname ?? 'localhost'
+  {
+    port: server.port
+    hostname
+    url: "#{protocol}://#{hostname}:#{server.port}"
+    server
+    watch
+    pool
+    fetchHandler
+    stop
+  }

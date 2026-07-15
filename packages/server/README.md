@@ -313,20 +313,70 @@ cap; `backoff(attempt)` grows exponentially with jitter.
 
 ## The `rip server` CLI
 
-`parseServerArgs(argv)` and `dispatchServer(parsed, handlers)` are the
-CLI's decision layer — pure and host-free, so the whole dispatch table
-tests without spawning a process. Parsing follows
-`rip server <command> [path] [--flags]`: the first bare word is the
-command, a flag is `--name value` / `--name=value` / a bare boolean /
-`--no-name` / a short alias, and a number flag with a bad or missing
-value, or an unknown flag, rejects loudly. `dispatchServer` awaits the
-command against an injected handler table (`help` and `version` are
-built in; control operations are async), turning a handler's number
-into an exit code and a thrown error into a non-zero result rather
-than an unhandled crash; an unknown command or an unwired one returns
-the usage. `serverUsage()` is that
-help text. The bin owns the impure edges — reading the argv, exiting
-with a code, and writing to the terminal.
+The CLI speaks v3's token grammar, not conventional `--name value`
+flags: `w:4` workers, `c:2` per-worker concurrency, `r:500,60s`
+restart policy, `http` / `http:8080` / `https` / `https:443` / a bare
+`8080` for the listeners, an app token (`myapp`, `./path`,
+`./path@alias1,alias2`), and a small set of `--long` flags for the
+rest (`rip server --help` lists everything). `RIP_*` environment
+variables back the tokens, and the precedence is pinned: token >
+environment > serve.rip file > default.
+
+`parseServerFlags(argv)` resolves one invocation into a flags object
+(it reads the real filesystem — whether a token is an app path is a
+question about the disk, by v3's design); `resolveServerAction(flags)`
+names the one action asked for; `dispatchServer(argv, handlers)`
+drives it against an injected handler table (`--help`/`--version`
+answer before any parse), turning a handler's number into an exit
+code and a thrown error into a non-zero result rather than an
+unhandled crash. Two loud departures from v3's parser (never its
+documented grammar): an option-shaped token is always an option
+(`rip server w:4` configures workers instead of naming an app
+"w:4"), and an unknown `--flag` or a missing app path rejects
+instead of being silently absorbed.
+
+## The serve.rip config loader
+
+A `serve.rip` file is a Rip module exporting a plain object — `sites`
+name hostnames, `apps` bind site names (with `@/mount` paths and
+`spa`/`browse` flags) to a local directory, an `http(s)://` proxy, or
+a `tcp://` passthrough; `ssl` names a directory of cert/key pairs
+matched to hosts by SAN; `server` carries cert/key, hsts, acme,
+timeouts, and the verify policy. `loadConfig(path)` imports and
+normalizes it with positioned `E_*` diagnostics — every problem in
+the file reports in one pass (`formatConfigErrors` prints them), and
+a file with any error never half-loads. `rip server -c` validates and
+exits; `--nginx`/`--caddy` translate a loaded config through
+`compatConfig` into the generators above. `assertServable` is the
+separate serving judgment: a valid file naming a feature this server
+has not grown yet (proxying, streams, managed apps, ACME, ssl-dir
+SNI) refuses loudly, by stage, instead of silently dropping routes.
+
+## The runnable server
+
+`startServer(opts)` turns a resolved configuration into a listening
+Bun.serve server and returns the handle: `{ port, url, watch, pool,
+fetchHandler, stop }`. It serves a static `root`, an App `bundle`
+through the preset, or `sites` (host-routed, longest mount wins, the
+mount prefix stripped). The listener behavior is v3's: the preferred
+port is tried, EADDRINUSE walks a 100-port window, EACCES on a
+privileged port falls back to 3000 (3443 under TLS). TLS terminates
+from an explicit cert/key pair via `resolveTls`; `hsts: true` adds
+Strict-Transport-Security only when TLS is live; `redirectHttp`
+starts the best-effort port-80 redirect listener. Requests dispatch
+through the worker pool (in-process handlers today, the seam process
+workers fill next), so workers × concurrency, the bounded queue, and
+its wait timeout are already enforced — a full queue answers 503, a
+stale queue wait 504. `watch: true` serves the SSE transport at
+`/_rip/watch` (bypassing the pool — a held-open stream is not a unit
+of work). `stop()` is graceful: stop accepting, drain the pool, then
+close what remains held open.
+
+`bin/rip-server` (also `rip server` through the repository CLI) wires
+it all: `runServe` resolves serve.rip, merges it with the flags
+(`buildServeOptions` — where the precedence table is decided), starts
+the server, writes the PID file `--stop` signals, and shuts down
+gracefully on SIGINT/SIGTERM.
 
 ## nginx and Caddy config generation
 

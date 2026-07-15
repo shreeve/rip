@@ -1,0 +1,199 @@
+# The rip-server composition — where the parsed token grammar, the
+# serve.rip config, and the runnable serving layer meet. Every action
+# is a handler in the dispatch table (the seam cli.rip defines), so
+# the whole surface drives from tests without a terminal; the bin owns
+# only process.argv, stdout/stderr, signals, and the exit code.
+#
+# The serve action pins the precedence the CLI documents: a token
+# beats its RIP_* environment variable (cli.rip resolves those two),
+# and a resolved flag beats the serve.rip file, which beats the
+# default — cert/key and hsts are the fields both sides can name, and
+# buildServeOptions is where that merge is decided and tested.
+
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+
+import { dispatchServer, getPidFilePath } from './cli.rip'
+import { assertServable, checkConfigFile, compatConfig, formatConfigErrors, loadConfig, resolveConfigSource } from './config.rip'
+import { generateCaddy, generateNginx } from './compat.rip'
+import { startServer } from './server.rip'
+
+serverVersion = ->
+  try
+    JSON.parse(readFileSync(join(import.meta.dir, 'package.json'), 'utf8')).version
+  catch
+    'unknown'
+
+configFailure = (error) ->
+  detail: any = error
+  if detail?.validationErrors
+    { code: 1, message: formatConfigErrors('serve.rip', detail.validationErrors) }
+  else
+    { code: 1, message: "rip-server: #{detail?.message ?? detail}" }
+
+# --check-config: validate the file and report its shape, v3's output.
+export def runCheck(flags: any): Promise<any>
+  source = resolveConfigSource flags.appEntry, flags.configPath
+  return { code: 1, message: 'rip-server: no serve.rip found to validate' } unless source?.path
+  try
+    checked = await checkConfigFile source.path
+    counts = checked.summary.counts
+    lines = [
+      'rip-server: serve.rip OK'
+      "  path: #{checked.summary.path}"
+      "  apps: #{counts.apps}  proxies: #{counts.proxies}  hosts: #{counts.hosts}  routes: #{counts.routes}"
+    ]
+    lines.push "  version: #{checked.summary.version}" if checked.summary.version?
+    { code: 0, message: lines.join('\n') }
+  catch error
+    configFailure error
+
+compatAction = (flags, what, generate) ->
+  source = resolveConfigSource flags.appEntry, flags.configPath
+  return { code: 1, message: "rip-server: no serve.rip found for #{what} generation" } unless source?.path
+  try
+    config = await loadConfig source.path, { lenient: true }
+    { code: 0, message: generate compatConfig(config) }
+  catch error
+    configFailure error
+
+export def runNginx(flags: any): Promise<any>
+  compatAction flags, 'nginx', generateNginx
+
+export def runCaddy(flags: any): Promise<any>
+  compatAction flags, 'Caddyfile', generateCaddy
+
+# --stop: SIGTERM by PID file — the running server wrote it at start
+# and removes it as it exits.
+export def runStop(flags: any, proc: any = process): any
+  pidFile = getPidFilePath flags.socketPrefix
+  return { code: 1, message: "rip-server: no PID file found at #{pidFile}" } unless existsSync pidFile
+  pid = parseInt readFileSync(pidFile, 'utf8').trim()
+  return { code: 1, message: "rip-server: PID file #{pidFile} does not name a process" } unless Number.isFinite(pid) and pid > 0
+  proc.kill pid, 'SIGTERM'
+  { code: 0, message: "rip-server: sent SIGTERM to process #{pid}" }
+
+# The serve-time merge of the parsed flags with a loaded serve.rip.
+# Pure over its inputs, so the precedence table pins in tests.
+export def buildServeOptions(flags: any, loaded: any = null): any
+  assertServable loaded if loaded?
+
+  opts: any =
+    watch: flags.reload is true
+    workers: flags.workers
+    concurrency: flags.workerConcurrency
+    maxQueue: flags.maxQueue
+    queueTimeoutMs: flags.queueTimeoutMs
+    maxRequestsPerWorker: flags.maxRequestsPerWorker
+    maxSecondsPerWorker: flags.maxSecondsPerWorker
+    idleTimeoutSec: flags.idleTimeoutSec
+    quiet: flags.quiet is true
+    production: flags.envOverride is 'production' or (not flags.envOverride and process.env.NODE_ENV is 'production')
+
+  # What serves: serve.rip sites when the file declares any, else the
+  # app path — an App bundle directory serves through the app preset,
+  # a plain directory serves statically, and a Rip entry file is the
+  # S2 boundary, refused loudly rather than half-run.
+  sites = []
+  if loaded?
+    for host, site of (loaded.sites or {})
+      routes = for route in (site.routes or [])
+        { mountPath: route.mountPath, root: route.root, spa: route.spa is true }
+      sites.push { host, routes }
+  if sites.length > 0
+    opts.sites = sites
+  else
+    entry = flags.appEntry
+    if /\.(rip|ts)$/.test(entry) and existsSync(entry)
+      err: any = new Error 'rip-server: this directory holds a Rip application (index.rip) — running Rip apps arrives with S2 (process workers); v4 serves static directories, App bundles, and serve.rip static sites today'
+      err.exitCode = 1
+      throw err
+    bundleFile = join flags.appBaseDir, 'bundle.json'
+    if existsSync bundleFile
+      opts.root = flags.appBaseDir
+      opts.bundle = JSON.parse readFileSync(bundleFile, 'utf8')
+      opts.title = flags.appName
+    else
+      opts.root = flags.appBaseDir
+
+  # TLS: tokens beat the file. https asked for BY NAME with no
+  # material is a loud startup failure (v4 ships no certificate, by
+  # decision); https merely defaulted falls back to plaintext until
+  # the dev CA arrives (S5).
+  certPath = flags.certPath or loaded?.server?.cert or null
+  keyPath = flags.keyPath or loaded?.server?.key or null
+  httpsWanted = flags.httpsPort?
+  if httpsWanted and certPath and keyPath
+    opts.tls = { certPath, keyPath }
+    opts.httpsPort = flags.httpsPort or 443  # v3: 0 means unspecified → 443
+    opts.redirectHttp = flags.redirectHttp is true
+  else if httpsWanted and flags.httpsExplicit
+    err: any = new Error 'rip-server: https requires certificate material — pass --cert/--key or set server.cert/server.key in serve.rip (v4 ships no certificate; ACME and the dev CA arrive with S5), or serve plaintext with http'
+    err.exitCode = 1
+    throw err
+  else
+    opts.httpPort = flags.httpPort or 80
+    opts.downgradedFromHttps = httpsWanted
+
+  opts.hsts = flags.hsts is true or loaded?.server?.hsts is true
+  opts
+
+# The serve action: resolve the config, build the options, start the
+# real server. Host edges (pid file, signals, printing) live in
+# main(); this returns the running handle so tests drive it directly.
+export def runServe(flags: any): Promise<any>
+  source = resolveConfigSource flags.appEntry, flags.configPath
+  loaded = if source?.path then await loadConfig(source.path) else null
+  opts = buildServeOptions flags, loaded
+  handle = startServer opts
+  handle.configPath = source?.path or null
+  handle.downgradedFromHttps = opts.downgradedFromHttps is true
+  handle
+
+FORCED_EXIT_MS = 35000
+
+# The bin's whole body: dispatch, print, exit — except serve, which
+# starts the server, writes the PID file, installs shutdown handlers,
+# and stays resident.
+export def main(argv: string[], proc: any = process): Promise<void>
+  handlers =
+    check: runCheck
+    nginx: runNginx
+    caddy: runCaddy
+    stop: (flags) -> runStop flags, proc
+    info: -> { code: 1, message: 'rip-server: --info is not yet available in v4 — the control plane arrives with S2' }
+    list: -> { code: 1, message: 'rip-server: --list is not yet available in v4 — the control plane arrives with S2' }
+    reload: -> { code: 1, message: 'rip-server: --reload is not yet available in v4 — the control plane arrives with S2' }
+    restart: -> { code: 1, message: 'rip-server: --restart is not yet available in v4 — the control plane arrives with S2' }
+    serve: (flags) ->
+      handle = await runServe flags
+
+      pidFile = getPidFilePath flags.socketPrefix
+      writeFileSync pidFile, String(proc.pid)
+
+      cleanedUp = false
+      cleanup = ->
+        return if cleanedUp
+        cleanedUp = true
+        console.log 'rip-server: shutting down...' unless flags.quiet
+        forced = setTimeout (-> proc.exit 1), FORCED_EXIT_MS
+        forced.unref?()
+        await handle.stop()
+        try unlinkSync(pidFile) catch then null
+        proc.exit 0
+      proc.on 'SIGINT', cleanup
+      proc.on 'SIGTERM', cleanup
+
+      unless flags.quiet
+        console.log "rip-server v#{serverVersion()}"
+        console.log 'rip-server: no TLS material configured — serving http (v4 ships no certificate; the dev CA arrives with S5)' if handle.downgradedFromHttps
+        console.log "rip-server: #{handle.url}"
+        console.log "rip-server: config #{handle.configPath}" if handle.configPath
+        console.log "rip-server: watch #{handle.url}/_rip/watch" if handle.watch?
+      { code: null }  # stay resident; the listener holds the process open
+
+  result = await dispatchServer argv, handlers, { version: serverVersion() }
+  return unless result?.code?
+  stream = if result.code is 0 then proc.stdout else proc.stderr
+  stream.write "#{result.message}\n" if result.message
+  proc.exit result.code

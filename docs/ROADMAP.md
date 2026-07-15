@@ -41,10 +41,18 @@ but it must not block direct-path package implementation and tests.
 - **Server:** the decision cores — routing, middleware, sessions,
   OpenAPI, static/app serving, worker pool policy, TLS policy, proxy
   policy, nginx/caddy configuration generation, mDNS, and development
-  watch transport — are merged (#94–#106). The runnable serving/bin
-  layer (listener, process workers, proxy execution, file watcher,
-  ACME/dev-CA, config loader, rate/body limits, `rip server` bin)
-  remains open, pending owner scheduling and a CLI-grammar ruling.
+  watch transport — are merged (#94–#106), and S1 of the runnable
+  layer makes `rip server` actually serve: the listener (port
+  scan/EACCES fallback, explicit-cert TLS, graceful shutdown), the
+  v3 token-grammar bin (owner ruling 2026-07-15: `w:4 c:2 https:443
+  app@alias` tokens and `RIP_*` env vars, not `--flags`), the
+  serve.rip config loader with `E_*` diagnostics and `--check-config`,
+  in-process pool dispatch, and the dev SSE watch endpoint. Remaining
+  stages, pending: process workers and the control plane (S2), proxy
+  and stream execution (S3), rate/body limits (S4), ACME/dev-CA and
+  SNI TLS automation (S5), the file watcher driving live reload (S6),
+  and the rest of the v3 operational surface — realtime transport,
+  mDNS advertisement, structured startup reporting (S7).
 - **UI:** browser widgets and browser-side Tailwind integration.
 - **Database:** database client, embedding/adapter surfaces, and CLI.
 
