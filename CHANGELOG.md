@@ -20,6 +20,23 @@ repository's pull requests.
   pins the observed v3 contract — 18 tests over a real serve-fetch-exit
   cycle, with v3/v4 output verified byte-identical across every mode
   (timestamps aside) (#137)
+- `@rip-lang/swarm` joins the libraries lane: the parallel job runner
+  with worker threads — setup once, swarm many. Tasks are files
+  (`.swarm/todo/` moves to `done/` or `died/` by atomic rename),
+  `setup()` runs once in the main thread and its plain-data context is
+  cloned to N worker threads, workers process tasks over IPC and are
+  respawned on crash (the in-flight task counts as died), failures
+  append to `.swarm/errors.log`, `retry()` requeues only the died
+  tasks, and the main thread renders live ANSI progress bars (`-q` for
+  a one-line summary). The v3 source ported with a single environment
+  adaptation — the worker-preload loader candidates now point at v4's
+  `src/loader.js`. v3 shipped a demo script with zero assertions; the
+  contract observed by running v3 as the oracle is pinned here — 27
+  tests driving real subprocess runs with real worker threads
+  (deterministic fixtures, no timing races): batch runs, context
+  cloning, failure/retry/crash recovery, every CLI flag and error
+  path, the ANSI frame, `args()` stripping, the file queue, and the
+  real v3 consumer pattern (the labcorp downloader scripts) (#139)
 
 - `@rip-lang/x12` joins the libraries lane: the X12 EDI parser,
   editor, and query engine (270/271, 835, 837, ...) with path-based

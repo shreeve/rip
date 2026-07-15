@@ -1,0 +1,25 @@
+{
+  "name": "@rip-lang/swarm",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./swarm.d.ts",
+      "default": "./swarm.rip"
+    }
+  },
+  "bin": {
+    "swarm": "./bin/swarm"
+  },
+  "scripts": {
+    "test": "bun test --timeout 15000"
+  },
+  "files": [
+    "*.rip",
+    "*.d.ts",
+    "lib/",
+    "bin/",
+    "README.md"
+  ]
+}
