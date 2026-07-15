@@ -33,6 +33,14 @@ until the value lands. `unwrapStash(data)` exposes source cells to framework
 code that must call `ensure`, `peek`, `refetch`, or `reset` without triggering
 an ordinary read.
 
+`data.source(path, key?)` returns a per-cell handle
+`{ value, loading, error, refetch, reset }` for application code — signing out
+is `data.source('user').reset()`. It resolves the nearest source cell along
+the path (a keyed family takes the key as the second argument); `value`,
+`loading`, and `error` are reactive reads, assigning `value` seeds the cell,
+and a path that does not reach a source key throws. `peek`, `reset`, and
+`source` are reserved stash methods and shadow data keys of the same name.
+
 Source kind follows JavaScript runtime arity exactly:
 
 - `fetch: -> ...` is a singleton.
