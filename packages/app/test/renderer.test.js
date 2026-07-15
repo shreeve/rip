@@ -1336,3 +1336,146 @@ describe('renderer boundary reconciliation', () => {
     expect(renderer.current).toBe(first);
   });
 });
+
+describe('renderer link-intent preloading', () => {
+  test('preload warms an unmounted chain once and the navigation reuses it', async () => {
+    let fetches = 0;
+    const data = createStash({
+      user: source({ fetch: async () => ({ version: ++fetches }) }),
+    });
+    class Page extends __Component {
+      static __gates = ['user'];
+      _init() { this.user = __gateBind(this, 0); }
+      _create() { return node('page'); }
+    }
+    const renderer = createRenderer({
+      router: { current: null },
+      app: { data },
+      components: registry({ 'page.rip': { Page } }),
+      target: target(),
+    });
+    renderer.preload(route('page.rip'));
+    await Bun.sleep(0);
+    expect(fetches).toBe(1);
+    await renderer.mount(route('page.rip'));
+    await Bun.sleep(0);
+    expect(fetches).toBe(1);
+    expect(renderer.current).toBeInstanceOf(Page);
+  });
+
+  test('a destination already fully mounted warms nothing', async () => {
+    let fetches = 0;
+    const data = createStash({
+      user: source({ fetch: async () => ({ version: ++fetches }) }),
+    });
+    class Page extends __Component {
+      static __gates = ['user'];
+      _init() { this.user = __gateBind(this, 0); }
+      _create() { return node('page'); }
+    }
+    const renderer = createRenderer({
+      router: { current: null },
+      app: { data },
+      components: registry({ 'page.rip': { Page } }),
+      target: target(),
+    });
+    await renderer.mount(route('page.rip'));
+    expect(fetches).toBe(1);
+    renderer.preload(route('page.rip'));
+    await Bun.sleep(0);
+    expect(fetches).toBe(1);
+  });
+
+  test('an unchanged layout chain warms only the page', async () => {
+    const layoutRoot = node('layout');
+    const content = node('layout-content');
+    layoutRoot.content = content;
+    layoutRoot.appendChild(content);
+    let navFetches = 0;
+    let userFetches = 0;
+    const data = createStash({
+      nav: source({ fetch: async () => { navFetches += 1; return { ok: true }; } }),
+      user: source({ fetch: async () => { userFetches += 1; return { name: 'Ada' }; } }),
+    });
+    class Layout extends __Component {
+      static __gates = ['nav'];
+      _init() { this.nav = __gateBind(this, 0); }
+      _create() { return layoutRoot; }
+    }
+    class A extends __Component { _create() { return node('a'); } }
+    class B extends __Component {
+      static __gates = ['user'];
+      _init() { this.user = __gateBind(this, 0); }
+      _create() { return node('b'); }
+    }
+    const renderer = createRenderer({
+      router: { current: null },
+      app: { data },
+      components: registry({ 'layout.rip': { Layout }, 'a.rip': { A }, 'b.rip': { B } }),
+      target: node('host'),
+    });
+    await renderer.mount(route('a.rip', { layouts: ['layout.rip'] }));
+    expect(navFetches).toBe(1);
+    renderer.preload(route('b.rip', { layouts: ['layout.rip'] }));
+    await Bun.sleep(0);
+    expect(userFetches).toBe(1);
+    expect(navFetches).toBe(1);
+  });
+
+  test('an unmounted layout chain warms layouts and page together', async () => {
+    const layoutRoot = node('layout');
+    let navFetches = 0;
+    let userFetches = 0;
+    const data = createStash({
+      nav: source({ fetch: async () => { navFetches += 1; return { ok: true }; } }),
+      user: source({ fetch: async () => { userFetches += 1; return { name: 'Ada' }; } }),
+    });
+    class Layout extends __Component {
+      static __gates = ['nav'];
+      _init() { this.nav = __gateBind(this, 0); }
+      _create() { return layoutRoot; }
+    }
+    class B extends __Component {
+      static __gates = ['user'];
+      _init() { this.user = __gateBind(this, 0); }
+      _create() { return node('b'); }
+    }
+    const renderer = createRenderer({
+      router: { current: null },
+      app: { data },
+      components: registry({ 'layout.rip': { Layout }, 'b.rip': { B } }),
+      target: node('host'),
+    });
+    renderer.preload(route('b.rip', { layouts: ['layout.rip'] }));
+    await Bun.sleep(0);
+    expect(navFetches).toBe(1);
+    expect(userFetches).toBe(1);
+  });
+
+  test('a preload failure never surfaces', async () => {
+    const data = createStash({
+      user: source({ fetch: async () => { throw new Error('down'); } }),
+    });
+    class Page extends __Component {
+      static __gates = ['user'];
+      _init() { this.user = __gateBind(this, 0); }
+      _create() { return node('page'); }
+    }
+    class Bare extends __Component {
+      static __gates = ['missing.cell'];
+      _init() { this.value = __gateBind(this, 0); }
+      _create() { return node('bare'); }
+    }
+    const renderer = createRenderer({
+      router: { current: null },
+      app: { data },
+      components: registry({ 'page.rip': { Page }, 'bare.rip': { Bare } }),
+      target: target(),
+    });
+    expect(() => renderer.preload(route('page.rip'))).not.toThrow();
+    expect(() => renderer.preload(route('bare.rip'))).not.toThrow();
+    expect(() => renderer.preload(route('unregistered.rip'))).not.toThrow();
+    await Bun.sleep(0);
+    expect(unwrapStash(data).user.error).toBeInstanceOf(Error);
+  });
+});

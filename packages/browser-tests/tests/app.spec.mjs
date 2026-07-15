@@ -3,7 +3,21 @@
 // diagnostics — the contracts the Node suites pinned, alive in a page.
 import { expect, test } from '@playwright/test';
 
-test('boots, renders the route, and navigates with render gates', async ({ page }) => {
+test('boots, renders the route, and a plain link click is an SPA navigation', async ({ page }) => {
+  await page.goto('/');
+  await expect.poll(() => page.evaluate(() => globalThis.__bootResult)).toBe('ok');
+  await expect(page.locator('#title')).toHaveText('home');
+
+  // A sentinel on window survives the navigation only if the click was
+  // intercepted — a full page load would wipe it.
+  await page.evaluate(() => { globalThis.__spaSentinel = 'alive'; });
+  await page.click('a[href="/profile"]');
+  await expect(page.locator('#title')).toHaveText('Ada Lovelace');
+  expect(await page.evaluate(() => location.pathname)).toBe('/profile');
+  expect(await page.evaluate(() => globalThis.__spaSentinel)).toBe('alive');
+});
+
+test('programmatic push and back drive navigation with render gates', async ({ page }) => {
   await page.goto('/');
   await expect.poll(() => page.evaluate(() => globalThis.__bootResult)).toBe('ok');
   await expect(page.locator('#title')).toHaveText('home');

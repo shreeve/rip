@@ -23,7 +23,10 @@ excluded = (anchor) ->
   return true if targetAttr and targetAttr.toLowerCase() isnt '_self'
   false
 
-hrefish = (anchor) ->
+# Package-internal: the one reading of an anchor's EXTERNAL href —
+# `links.rip` resolves the same spelling `ownsAnchor` judged, so the
+# href a click navigates is the href ownership approved.
+export def _anchorHref(anchor: any): string | null
   href = anchor.getAttribute?('href') ?? anchor.href
   return null unless typeof href is 'string' and href.length > 0
   if /^[a-z][a-z0-9+.-]*:/i.test href
@@ -38,7 +41,7 @@ hrefish = (anchor) ->
 export def ownsAnchor(router: any, anchor: any): boolean
   return false unless anchor?
   return false if excluded anchor
-  href = hrefish anchor
+  href = _anchorHref anchor
   return false unless href?
   router.claims(href)?
 
@@ -70,7 +73,7 @@ export def ariaCurrent(router: any, host: { anchors: () => any[], observe?: (fn:
   markCurrent = ->
     current = router.path
     for anchor in host.anchors()
-      hit = if excluded(anchor) then null else router.claims(hrefish(anchor) ?? '')
+      hit = if excluded(anchor) then null else router.claims(_anchorHref(anchor) ?? '')
       state = if not hit? or not current? then null
       else if hit.path is current then 'page'
       else if hit.path isnt '/' and current.startsWith(hit.path + '/') then 'true'

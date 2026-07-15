@@ -217,6 +217,24 @@ application manages itself are never set over and never removed, and a
 walker's own marks are cleaned when the anchor stops earning them and
 when the walker disposes.
 
+## Owned links
+
+`interceptClicks(router, host?)` turns a plain left-click on an owned
+same-origin `<a href>` into an SPA navigation: the claim's own URL
+reading is pushed (query and fragment intact), and
+`data-router-noscroll` keeps the scroll position. Any click
+`ownsAnchor` declines — non-self target, `download`,
+`data-router-ignore`, cross-origin, out-of-base, unmatched — falls
+through to the browser untouched, as does every modified or non-left
+click. `preloadLinks(router, renderer, host?)` warms a hovered or
+focused owned link's render gates after a 50 ms settle (a pointer
+brushing past never fires; the same href re-preloads only after a
+3 s window) through `renderer.preload(info)`, whose cells'
+freshness floor bridges the hover into the navigation without a
+double fetch. Both delegate on `document` by default and accept an
+injectable host (`listen(type, fn)`), so they test under Node;
+`launch()` installs both and its teardown removes every listener.
+
 ## Test
 
 ```sh

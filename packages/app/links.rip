@@ -1,0 +1,117 @@
+# Router-owned links — the two document-level consumers of the
+# `ownsAnchor` ownership seam. `interceptClicks` turns a plain
+# left-click on an owned same-origin `<a href>` into an SPA navigation;
+# `preloadLinks` warms a hovered or focused owned link's render gates
+# before the click lands. Ownership is never re-derived here: any click
+# `ownsAnchor` declines — non-self target, `download`,
+# `data-router-ignore`, cross-origin, out-of-base, unmatched — falls
+# through to the browser untouched, as does every modified or non-left
+# click. Events arrive through an injectable host, so both installers
+# test under Node; the browser default delegates on `document`.
+
+import { ownsAnchor, _anchorHref } from './aria.rip'
+
+export type LinkHost =
+  listen: (type: string, fn: (event: any) => void, opts?: Record<string, any>) => () => void
+
+# Only a pointer resting on (or focus holding) a link for the settle
+# window preloads — brushing past never fires — and re-visiting the
+# same href re-preloads only after the repeat window; freshness stays
+# the cells' job either way. Both are v3's established thresholds for
+# deliberate intent, implementation details rather than knobs.
+SETTLE_MS = 50
+REPEAT_MS = 3000
+
+browserHost = ->
+  unless typeof document isnt 'undefined' and typeof document.addEventListener is 'function'
+    throw new Error 'Rip App: link listeners require a browser or an injected host'
+  listen: (type, fn, opts = null) ->
+    document.addEventListener type, fn, opts ?? false
+    -> document.removeEventListener type, fn, opts ?? false
+
+# Delegation walk: the click usually lands on markup inside the anchor.
+anchorFrom = (node) ->
+  node = node.parentElement while node? and node.tagName isnt 'A'
+  node ?? null
+
+export def interceptClicks(router: any, host: LinkHost = null): () => void
+  unless router? and typeof router.claims is 'function' and typeof router.push is 'function'
+    throw new TypeError 'Rip App: interceptClicks requires a router'
+  host: any = host ?? browserHost()
+
+  onClick = (event) ->
+    return if event.defaultPrevented
+    return if event.button isnt 0 or event.metaKey or event.ctrlKey or event.shiftKey or event.altKey
+    anchor = anchorFrom event.target
+    return unless anchor? and ownsAnchor(router, anchor)
+    hit = router.claims _anchorHref(anchor)
+    return unless hit?
+    event.preventDefault()
+    router.push hit.url, { noScroll: anchor.hasAttribute?('data-router-noscroll') is true }
+    return
+
+  remove = host.listen 'click', onClick
+  disposed = false
+  ->
+    return if disposed
+    disposed = true
+    remove()
+    return
+
+export def preloadLinks(router: any, renderer: any, host: LinkHost = null): () => void
+  unless router? and typeof router.claims is 'function'
+    throw new TypeError 'Rip App: preloadLinks requires a router'
+  unless renderer? and typeof renderer.preload is 'function'
+    throw new TypeError 'Rip App: preloadLinks requires a renderer with preload()'
+  host: any = host ?? browserHost()
+
+  settleTimer: any = null
+  settleAnchor: any = null
+  last = { href: null, at: 0 }
+
+  cancelSettle = ->
+    clearTimeout settleTimer if settleTimer?
+    settleTimer = null
+    settleAnchor = null
+    return
+
+  onIntent = (event) ->
+    anchor = anchorFrom event.target
+    return unless anchor? and ownsAnchor(router, anchor)
+    # Already settling on this same anchor — let it land.
+    return if anchor is settleAnchor
+    cancelSettle()
+    settleAnchor = anchor
+    href = _anchorHref anchor
+    settleTimer = setTimeout (->
+      settleTimer = null
+      settleAnchor = null
+      now = Date.now()
+      return if href is last.href and now - last.at < REPEAT_MS
+      last.href = href
+      last.at = now
+      hit = router.claims href
+      renderer.preload hit if hit?
+    ), SETTLE_MS
+    return
+
+  # The pointer (or focus) left the settling anchor before it landed.
+  onIntentCancel = (event) ->
+    return unless settleAnchor?
+    related = event.relatedTarget
+    cancelSettle() unless related? and settleAnchor.contains?(related)
+    return
+
+  removers = [
+    host.listen('pointerover', onIntent, { passive: true })
+    host.listen('focusin', onIntent, { passive: true })
+    host.listen('pointerout', onIntentCancel, { passive: true })
+    host.listen('focusout', onIntentCancel, { passive: true })
+  ]
+  disposed = false
+  ->
+    return if disposed
+    disposed = true
+    cancelSettle()
+    remove() for remove in removers
+    return
