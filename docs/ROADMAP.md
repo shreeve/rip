@@ -196,7 +196,7 @@ transactional graph polish.
 ## Rip-native hypermedia
 
 The active architecture and phased acceptance contract live in
-[HTMX.md](HTMX.md). Hypermedia is a parallel interaction mode beside
+[FRAME.md](FRAME.md). Hypermedia is a parallel interaction mode beside
 the reactive SPA path: a `Frame` component owns declarative requests,
 targets, and swaps; fragments are inert first and managed later; and
 committed responses invalidate stash and source state. It does not
