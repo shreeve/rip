@@ -147,7 +147,7 @@ output = w.rows(records)    # complete string
 
 The module doubles as a file converter when run directly:
 
-```sh
+```bash
 bun csv.rip [options] <input> [output]
 
 #  -r, --relax     Recover from stray/malformed quotes
