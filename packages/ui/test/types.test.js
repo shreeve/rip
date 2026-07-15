@@ -8,6 +8,7 @@ const sources = {
   'email/compat.rip': readFileSync(new URL('../email/compat.rip', import.meta.url), 'utf8'),
   'email/render.rip': readFileSync(new URL('../email/render.rip', import.meta.url), 'utf8'),
   'email/email.rip': readFileSync(new URL('../email/email.rip', import.meta.url), 'utf8'),
+  'email/components.rip': readFileSync(new URL('../email/components.rip', import.meta.url), 'utf8'),
   'shared/render.rip': readFileSync(new URL('../shared/render.rip', import.meta.url), 'utf8'),
   'shared/styles.rip': readFileSync(new URL('../shared/styles.rip', import.meta.url), 'utf8'),
   'tailwind/tailwind.rip': readFileSync(new URL('../tailwind/tailwind.rip', import.meta.url), 'utf8'),

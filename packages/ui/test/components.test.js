@@ -1,5 +1,6 @@
 import { test, expect } from 'bun:test';
 import * as email from '../email/email.rip';
+import * as components from '../email/components.rip';
 import { DoubleCodeInline } from './fixtures/double-code-inline.rip';
 
 test('email public barrel exposes the curated named component surface', () => {
@@ -9,6 +10,20 @@ test('email public barrel exposes the curated named component surface', () => {
     'Markdown', 'Preview', 'Row', 'Section', 'Tailwind', 'Text',
     'toEmail', 'toHTML', 'toText',
   ]);
+});
+
+test('components module backs the barrel with identical component identities', () => {
+  const names = [
+    'Body', 'Button', 'CodeBlock', 'CodeInline', 'Column', 'Container',
+    'Divider', 'Email', 'Font', 'Head', 'Heading', 'Image', 'Link',
+    'Markdown', 'Preview', 'Row', 'Section', 'Tailwind', 'Text',
+  ];
+  expect(Object.keys(components).sort()).toEqual(names);
+  for (const name of names) {
+    expect(components[name]).toBe(email[name]);
+  }
+  expect(email.toHTML(components.Heading, { as: 'h2', children: 'Hi' }))
+    .toMatch(/<h2[^>]*>Hi<\/h2>/);
 });
 
 test('curated components render through the public barrel', () => {
