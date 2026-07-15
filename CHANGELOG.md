@@ -19,7 +19,7 @@ repository's pull requests.
   consumes this grammar" claim true. v3 shipped zero tests; the suite
   pins the observed v3 contract — 18 tests over a real serve-fetch-exit
   cycle, with v3/v4 output verified byte-identical across every mode
-  (timestamps aside) (#136)
+  (timestamps aside) (#137)
 
 - `@rip-lang/x12` joins the libraries lane: the X12 EDI parser,
   editor, and query engine (270/271, 835, 837, ...) with path-based
