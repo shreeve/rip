@@ -1164,7 +1164,7 @@ def makeTime(): TimeFactory
       toTimeList(args).reduce (a, b) -> if a.valueOf() > b.valueOf() then a else b
 
     # Version exposed for callers.
-    version: '1.0.0'
+    version: '4.0.0'
 
 # age(dob, asOf = now) — completed years from dob to asOf, birthday-aware
 # (subtract a year if asOf falls before this year's birthday). Accepts anything

@@ -1,7 +1,8 @@
-# @rip-lang/time
+<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" style="width:50px" /> <br>
 
-Tiny, immutable, US-English date/time library with full US timezone
-support and first-class durations — zero dependencies.
+# Rip Time - @rip-lang/time
+
+> **Tiny, immutable, US-English date/time library with full US timezone support and first-class durations — zero dependencies.**
 
 A pure-Rip date/time toolkit inspired by [dayjs](https://day.js.org/),
 scoped down to US English and expanded to bake in the most useful pieces

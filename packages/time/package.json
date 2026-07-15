@@ -1,13 +1,14 @@
 {
   "name": "@rip-lang/time",
-  "version": "0.0.0",
+  "version": "4.0.0",
   "private": true,
   "type": "module",
+  "description": "Tiny immutable US-English date/time library with timezones and durations — zero runtime dependencies",
   "exports": {
     ".": "./time.rip"
   },
   "scripts": {
-    "test": "bun test --timeout 15000",
+    "test": "../../bin/rip test.rip",
     "demo": "../../bin/rip demo.rip"
   },
   "rip": {
@@ -18,6 +19,7 @@
     "README.md"
   ],
   "devDependencies": {
+    "@rip-lang/testing": "workspace:*",
     "dayjs": "1.11.20"
   }
 }
