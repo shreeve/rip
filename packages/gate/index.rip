@@ -284,6 +284,44 @@ export gate = (opts = {}) ->
     ok = await verifyMatches(pass, hash)
     if ok then { user: name } else null
 
+  # --- login throttling (fixed window, in-memory) ---
+  #
+  # THROTTLE_MAX failed attempts per IP+username within THROTTLE_WINDOW
+  # seconds, then 429 + Retry-After until the window lapses; a successful
+  # login clears the key. This bounds both password brute force and the
+  # Argon2id CPU burn per key (the throttle check runs BEFORE the verify).
+  # In-memory is deliberate — like the session files, throttle state is
+  # disposable: a restart forgives, the right bias for a bouncer that must
+  # never lock the operator out. The IP half comes from x-forwarded-for's
+  # first hop; when that header is absent the username half still throttles,
+  # so a spoofed or missing IP never unlocks a targeted account.
+  THROTTLE_MAX    = 5
+  THROTTLE_WINDOW = 900
+
+  failures = new Map()  # key -> { count, resetAt }
+
+  throttleKey = (c, user) ->
+    ip = String(c.req.header('x-forwarded-for') or '').split(',')[0].trim()
+    "#{ip}|#{user.toLowerCase()}"
+
+  # Seconds until the key unblocks, or 0 when the attempt may proceed.
+  retryAfter = (key) ->
+    entry = failures.get(key)
+    return 0 unless entry
+    if Date.now() >= entry.resetAt
+      failures.delete key
+      return 0
+    if entry.count >= THROTTLE_MAX then Math.ceil((entry.resetAt - Date.now()) / 1000) else 0
+
+  recordFailure = (key) ->
+    now = Date.now()
+    # Swept lazily, like the session files: lapsed windows go whenever a
+    # failure is recorded, so the map never outgrows the live attacker set.
+    failures.forEach (entry, k) -> failures.delete(k) if now >= entry.resetAt
+    entry = failures.get(key) or { count: 0, resetAt: now + THROTTLE_WINDOW * 1000 }
+    entry.count += 1
+    failures.set key, entry
+
   # --- shared response bits ---
 
   setCookie = (name, value, maxAge) ->
@@ -341,16 +379,26 @@ export gate = (opts = {}) ->
 
     rawUser = String(read('user') or '').trim()
     pass    = String(read('password') or '')
-    # Cheap caps before Argon2id — gate does no rate limiting of its own.
+    # Cheap caps before Argon2id, so no attempt buys an unbounded hash.
     if rawUser.length > 256 or pass.length > 1024
       return new Response 'invalid credentials', { status: 400, headers: { 'Cache-Control': 'no-store' } }
 
+    # Throttle BEFORE the verify: a blocked key pays no Argon2id at all.
+    key  = throttleKey(c, rawUser)
+    wait = retryAfter(key)
+    if wait > 0
+      return new Response 'too many attempts',
+        status: 429
+        headers: { 'Retry-After': String(wait), 'Cache-Control': 'no-store' }
+
     identity = await doVerify(rawUser, pass)
     unless identity
+      recordFailure key
       submitted = String(read('_csrf') or '')
       return new Response template({ csrfToken: submitted, error: 'Invalid credentials', returnTo: rt, host: hostOf(c) }),
         status: 401
         headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': 'no-store' }
+    failures.delete key  # a successful login resets the window
 
     # Custom `verify` returns are user-supplied — `user` must be a non-empty
     # header-safe string before it lands in a file and later on Remote-User.

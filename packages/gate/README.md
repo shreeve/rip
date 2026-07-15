@@ -164,14 +164,14 @@ What actually guards the app, and what doesn't:
 
 This is deliberately **not** the server's header-only `csrf()` middleware: the login page is a plain HTML form with no script to copy a cookie into a header, so the form-field double-submit stays. Compose gate **before** `csrf()` — gate answers `/_gate/*` itself, so the header-only rule never sees those POSTs — and gate's session is likewise independent of the server's `sessions()` cookie (same `HttpOnly`/`SameSite=Lax`/`Path=/`/`Secure` posture, different job).
 
-Other defenses: server-enforced mtime TTL (a stolen-but-idle cookie expires server-side regardless of the browser), `Remote-User` is ASCII-validated before it's emitted, `return_to` is sanitized to a same-origin path, and unknown users cost the same Argon2id time as a wrong password (no timing enumeration).
+Other defenses: server-enforced mtime TTL (a stolen-but-idle cookie expires server-side regardless of the browser), `Remote-User` is ASCII-validated before it's emitted, `return_to` is sanitized to a same-origin path, unknown users cost the same Argon2id time as a wrong password (no timing enumeration), and failed logins are throttled per IP+username (see Notes).
 
 ## Notes
 
 - **`Remote-User` trust:** the reverse proxy MUST strip any client-supplied `Remote-User` before the auth subrequest (the Caddy/nginx configs above do). Gate itself never reads that request header — identity only ever travels on gate's own `/_gate/check` *response* — and in middleware mode the gated app must not read it either.
 - **Logout revokes server-side** — `POST /_gate/logout` deletes the token file, so a copy of the cookie captured beforehand stops working immediately. (A stolen cookie still works until *its* file is removed or expires — short `ttl` plus `rm` are your controls.)
 - **Multi-user hosts:** `/tmp` is world-writable, so gate creates the session dir `0700` and refuses one it doesn't own (defeats symlink/pre-create tricks). On a dedicated server this is moot.
-- Gate doesn't throttle login attempts — put it behind CrowdSec or Caddy `rate_limit` if you're exposed to the public internet.
+- **Login throttling:** 5 failed attempts per IP+username within 15 minutes, then `429` with a `Retry-After` header until the window lapses; a successful login resets the counter. The check runs *before* the Argon2id verify, so a blocked key burns no CPU. The IP is `X-Forwarded-For`'s first hop; without that header the username half still throttles, so a spoofed or missing IP never unlocks a targeted account. State is in-memory and per-process — a restart forgives (the same disposable bias as the session files), and it is not shared across workers. This bounds per-key brute force, not distributed abuse: still front with CrowdSec or Caddy `rate_limit` if you're exposed to the public internet.
 
 ## Files
 

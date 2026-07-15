@@ -2,7 +2,7 @@
 // spoofing, session fixation, CSRF forgery, open redirects, username
 // enumeration, cookie attributes, and secret handling. Every case pins the
 // v3 semantics — the findings themselves live in the PR's review section.
-import { afterAll, describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, setSystemTime, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gate } from '@rip-lang/gate';
@@ -196,6 +196,64 @@ describe('open redirect (login flow)', () => {
     const app = setup();
     const { res } = await login(app, 'alice', 'hunter2', `&return_to=${encodeURIComponent('/deep/link?x=1&y=2')}`);
     expect(res.headers.get('location')).toBe('/deep/link?x=1&y=2');
+  });
+});
+
+describe('login throttling', () => {
+  test('five failures block the key: 429 + Retry-After, even for the right password', async () => {
+    const app = setup();
+    for (let i = 0; i < 5; i++) {
+      const { res } = await login(app, 'alice', 'nope');
+      expect(res.status).toBe(401);
+    }
+    const blocked = await login(app, 'alice', 'hunter2'); // correct password, still blocked
+    expect(blocked.res.status).toBe(429);
+    expect(await blocked.res.text()).toBe('too many attempts');
+    expect(blocked.res.headers.get('cache-control')).toBe('no-store');
+    const retry = Number(blocked.res.headers.get('retry-after'));
+    expect(retry).toBeGreaterThan(0);
+    expect(retry).toBeLessThanOrEqual(900);
+    expect(blocked.jar.rip_gate).toBeUndefined(); // no session was minted
+  });
+
+  test('the window lapses: after 15 minutes the key is forgiven', async () => {
+    const app = setup();
+    try {
+      for (let i = 0; i < 5; i++) await login(app, 'alice', 'nope');
+      expect((await login(app, 'alice', 'hunter2')).res.status).toBe(429);
+      setSystemTime(new Date(Date.now() + 901 * 1000));
+      expect((await login(app, 'alice', 'hunter2')).res.status).toBe(303);
+    } finally {
+      setSystemTime(); // restore the real clock
+    }
+  });
+
+  test('a successful login resets the counter', async () => {
+    const app = setup();
+    for (let i = 0; i < 4; i++) await login(app, 'alice', 'nope');
+    // Attempt five, correct password: under the limit, so it lands — and resets.
+    expect((await login(app, 'alice', 'hunter2')).res.status).toBe(303);
+    // Fresh window: four more failures are plain 401s, not 429s...
+    for (let i = 0; i < 4; i++) {
+      const { res } = await login(app, 'alice', 'nope');
+      expect(res.status).toBe(401);
+    }
+    // ...and a fifth failure re-arms the block.
+    await login(app, 'alice', 'nope');
+    expect((await login(app, 'alice', 'hunter2')).res.status).toBe(429);
+  });
+
+  test('the key is IP+username: another address or account is unaffected', async () => {
+    const app = setup();
+    const attacker = { 'X-Forwarded-For': '203.0.113.9' };
+    for (let i = 0; i < 5; i++) await login(app, 'alice', 'nope', '', attacker);
+    expect((await login(app, 'alice', 'hunter2', '', attacker)).res.status).toBe(429);
+    // The same account from another address still gets in...
+    const otherIp = await login(app, 'alice', 'hunter2', '', { 'X-Forwarded-For': '198.51.100.7' });
+    expect(otherIp.res.status).toBe(303);
+    // ...and a different account from the blocked address is untouched.
+    const bob = await login(app, 'bob', 'nope', '', attacker);
+    expect(bob.res.status).toBe(401);
   });
 });
 
