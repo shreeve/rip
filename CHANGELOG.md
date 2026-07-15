@@ -36,7 +36,7 @@ repository's pull requests.
   (deterministic fixtures, no timing races): batch runs, context
   cloning, failure/retry/crash recovery, every CLI flag and error
   path, the ANSI frame, `args()` stripping, the file queue, and the
-  real v3 consumer pattern (the labcorp downloader scripts) (#138)
+  real v3 consumer pattern (the labcorp downloader scripts) (#139)
 
 - `@rip-lang/x12` joins the libraries lane: the X12 EDI parser,
   editor, and query engine (270/271, 835, 837, ...) with path-based
