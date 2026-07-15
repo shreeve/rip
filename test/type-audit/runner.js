@@ -153,9 +153,15 @@
 // repository root's — the preflight below names what is missing.
 //
 // The verdict (dim 3) runs under STRICT because tsgo (TS7) defaults
-// strict:true ON. The runner still copies tsconfig.json into the editor
-// workspace to PIN that posture explicitly and add the fixtures' other
-// options (moduleDetection/jsx/skipLibCheck), and to drive dim 5.
+// strict:true ON — the posture rides that default, and the audit's
+// tsconfig does not restate it. The runner copies tsconfig.json into the
+// editor workspace for the fixtures' other options
+// (moduleDetection/jsx/skipLibCheck/noFallthroughCasesInSwitch — the
+// last IS pinned there, unlike strict: it sits outside the strict
+// family, so no default supplies it, and it guards the hand-written
+// twins against switch fallthrough; a comment cannot live in the
+// tsconfig itself because this runner JSON.parses it), and to drive
+// dim 5.
 //
 // The fixtures self-check: a `# @ts-expect-error` marks a line that
 // MUST error. If the face + tsgo satisfy every marker and add none,
@@ -169,7 +175,7 @@ import { execFileSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { LspClient, tsgoBinaryPath, startTsgo, decodeSemanticTokens } from '../../packages/vscode/src/tsgo.js';
 import { compile } from '../../src/compile.js';
-import { lineStartsOf } from '../../packages/vscode/src/translate.js';
+import { lineStartsOf, SUPPRESSED_TS_CODES } from '../../packages/vscode/src/translate.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '../..');
@@ -374,7 +380,8 @@ async function dimCompiles(ripPath) {
 }
 
 // ── dimension 5: twin type-check — run tsgo ONCE over the fixtures
-// under tsconfig.json (strict), then attribute errors per twin.
+// under tsconfig.json (strict via tsgo's default; the file itself pins
+// only the non-defaulted options), then attribute errors per twin.
 async function runTwinTsc() {
   // The preflight guarantees tsgo resolves; if it somehow does not, that
   // is a real broken state — let it throw loudly rather than skip.
@@ -417,13 +424,15 @@ function dimTwin(twinBase, byFile) {
 // nothing today (driven: same 188 diagnostics either way) — it is here so a
 // future react-importing fixture cannot silently degrade into a resolution
 // error that reads as an implicit-any hole.
-// The implicit-any family — the ONLY codes `rip.strict` un-suppresses
-// (SUPPRESSED_TS_CODES, finding #1). A strict failure outside this family is
-// therefore NOT an implicit-any hole; it is something else that slipped past
-// the other dimensions (a compile cascade — 07 imports 06 — is the known
-// class), and calling it one would be the exact misattribution this
-// dimension's header warns against.
-const IMPLICIT_ANY = (code) => code >= 7000 && code < 7100;
+// The implicit-any family — the ONLY codes `rip.strict` un-suppresses —
+// judged against SUPPRESSED_TS_CODES itself (finding #1), never a 70xx
+// range: that block also holds codes outside the family (7027 unreachable,
+// 7028 unused label, 7029 fallthrough), and a range would mislabel them.
+// A strict failure outside the set is therefore NOT an implicit-any hole;
+// it is something else that slipped past the other dimensions (a compile
+// cascade — 07 imports 06 — is the known class), and calling it one would
+// be the exact misattribution this dimension's header warns against.
+const IMPLICIT_ANY = (code) => SUPPRESSED_TS_CODES.has(code);
 async function runStrictCheck() {
   const dir = mkTemp(path.join(os.tmpdir(), 'rip-audit-strict-'));
   for (const f of fs.readdirSync(FIX)) if (f.endsWith('.rip')) fs.copyFileSync(path.join(FIX, f), path.join(dir, f));

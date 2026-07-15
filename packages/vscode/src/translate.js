@@ -46,6 +46,7 @@ export const SUPPRESSED_TS_CODES = new Set([
   7044, // parameter implicitly any — inferable suggestion
   7045, // member implicitly any — inferable suggestion
   7053, // element implicitly any (no index signature)
+  7057, // `yield` implicitly any (generator lacking return-type annotation)
 ]);
 
 // TypeScript classifies diagnostics for rendering — reportsUnnecessary

@@ -22,8 +22,9 @@ const ROOT = path.join(HERE, '../..');
 const BIN = path.join(ROOT, 'bin/rip');
 const TSCONFIG = path.join(ROOT, 'test/type-audit/tsconfig.json');
 
-// A fresh workspace: the fixtures' strict tsconfig (so tsgo runs the
-// same posture the audit does) plus whatever files/config the case needs.
+// A fresh workspace: the fixtures' tsconfig (so tsgo runs the same
+// posture the audit does — strictness riding tsgo's strict-by-default)
+// plus whatever files/config the case needs.
 function workspace(files, ripConfig = null) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-check-'));
   fs.copyFileSync(TSCONFIG, path.join(dir, 'tsconfig.json'));
@@ -101,6 +102,28 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       expect(s.status).toBe(1);
       expect(s.stdout).toContain('TS7006');
       expect(s.stdout).toContain('a.rip:1:10 - error'); // the `name` parameter
+    } finally {
+      fs.rmSync(loose, { recursive: true, force: true });
+      fs.rmSync(strict, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  test('a yield read in an unannotated generator is permissive by default, strict under rip.strict', () => {
+    // TS7057 fires on `yield` whose generator lacks a return-type annotation —
+    // the same demands-an-annotation class as TS7006, discovered leaking as a
+    // hard error on a two-line legal generator (the set is an enumeration, so
+    // an omitted family member surfaces loudly rather than over-suppressing).
+    const src = 'gen = ->\n  got = yield 1\n  console.log got\n';
+    const loose = workspace({ 'g.rip': src }, null);
+    const strict = workspace({ 'g.rip': src }, { strict: true });
+    try {
+      const l = check(loose);
+      expect(l.status).toBe(0); // an unannotated generator is legal rip
+
+      const s = check(strict);
+      expect(s.status).toBe(1);
+      expect(s.stdout).toContain('TS7057');
+      expect(s.stdout).toContain('g.rip:2:9 - error'); // the `yield` expression
     } finally {
       fs.rmSync(loose, { recursive: true, force: true });
       fs.rmSync(strict, { recursive: true, force: true });
