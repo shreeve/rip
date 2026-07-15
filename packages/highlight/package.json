@@ -1,0 +1,19 @@
+{
+  "name": "@rip-lang/highlight",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./hljs-rip.js"
+  },
+  "scripts": {
+    "test": "bun test --timeout 15000"
+  },
+  "files": [
+    "hljs-rip.js",
+    "README.md"
+  ],
+  "devDependencies": {
+    "highlight.js": "11.11.1"
+  }
+}
