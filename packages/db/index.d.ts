@@ -15,8 +15,13 @@ export class QueryError extends DbError {
 
 export function isDbError(value: unknown): value is DbError;
 
+export type Column = {
+  name: string;
+  type?: string;
+};
+
 export type QueryResult = {
-  columns: string[];
+  columns: Column[];
   data: unknown[][];
   rowCount: number;
 };

@@ -8,7 +8,10 @@ injected `fetch`, so every protocol behavior tests without a server.
 ## The adapter contract
 
 An adapter implements four members. `query(sql, params)` returning
-`{ columns, data, rowCount }` is the floor; the rest layer on top:
+`{ columns, data, rowCount }` is the floor; the rest layer on top. Each
+`columns` entry is a `{ name, type }` object (harbor's own per-column
+shape, with `type` aliased from its `duckdbType`), and `data` is an
+array of positional row arrays — the shape the schema ORM hydrates from:
 
 ```rip
 import { harborAdapter } from '@rip-lang/db'

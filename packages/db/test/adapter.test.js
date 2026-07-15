@@ -43,10 +43,23 @@ describe('config', () => {
 });
 
 describe('query', () => {
-  test('returns { columns, data, rowCount } from the harbor response', async () => {
-    const fetch = fetchDouble({ '/sql': { json: { columns: ['id', 'name'], data: [[1, 'Ada']], rowCount: 1 } } });
+  test('returns { columns, data, rowCount } from the harbor response, with columns as { name, type } objects', async () => {
+    // harbor sends per-column objects { name, duckdbType, lossless };
+    // the adapter aliases duckdbType to a stable `type` and preserves
+    // the extras, so the ORM can hydrate rows by column.name.
+    const fetch = fetchDouble({ '/sql': { json: {
+      columns: [{ name: 'id', duckdbType: 'INTEGER', lossless: true }, { name: 'name', duckdbType: 'VARCHAR', lossless: true }],
+      data: [[1, 'Ada']], rowCount: 1,
+    } } });
     const result = await harborAdapter({ url: 'http://h', fetch }).query('SELECT id, name FROM users');
-    expect(result).toEqual({ columns: ['id', 'name'], data: [[1, 'Ada']], rowCount: 1 });
+    expect(result).toEqual({
+      columns: [
+        { name: 'id', duckdbType: 'INTEGER', lossless: true, type: 'INTEGER' },
+        { name: 'name', duckdbType: 'VARCHAR', lossless: true, type: 'VARCHAR' },
+      ],
+      data: [[1, 'Ada']],
+      rowCount: 1,
+    });
     expect(fetch.calls[0].body).toEqual({ sql: 'SELECT id, name FROM users' });
   });
 
@@ -168,7 +181,7 @@ describe('error taxonomy', () => {
 describe('introspect and capabilities', () => {
   test('introspect returns the harbor schema metadata, keyed by schema+table', async () => {
     const fetch = fetchDouble({ '/sql': { json: {
-      columns: ['table_schema', 'table_name', 'column_name', 'data_type'],
+      columns: [{ name: 'table_schema' }, { name: 'table_name' }, { name: 'column_name' }, { name: 'data_type' }],
       data: [['main', 'users', 'id', 'INTEGER'], ['main', 'users', 'name', 'VARCHAR'], ['other', 'users', 'x', 'INTEGER']],
       rowCount: 3,
     } } });
