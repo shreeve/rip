@@ -5,6 +5,22 @@ repository's pull requests.
 
 ## Unreleased
 
+- `@rip-lang/http` opens the libraries lane: the zero-dependency HTTP
+  client, a ky-inspired convenience layer over native fetch. Method
+  shortcuts (`get`/`post`/`put`/`patch`/`del`/`head`), a `json:` body
+  convenience (`json: null` sends the literal body `"null"`; an absent
+  or `undefined` `json` sends none), auto-throw on non-2xx as
+  `HTTPError` carrying the response, request, and options, retries with
+  exponential backoff, jitter, and `Retry-After` support (seconds or
+  HTTP date), timeouts as `TimeoutError` — distinct from a caller
+  abort, which rethrows its own `AbortError` — lifecycle hooks
+  (`beforeRequest` can replace the request or short-circuit with a
+  response; `afterResponse` can replace the response; `beforeRetry`;
+  `beforeError`), and reusable instances via `create`/`extend` with
+  merged headers and parent-first hook concatenation. The v3 package
+  shipped with no tests; the whole contract is pinned here — 49 tests,
+  the behavior suite end-to-end against a live Bun.serve fixture (#132)
+
 - The database client layers result ownership over the adapter:
   `createClient(adapter)` materializes the adapter's `{ columns, data }`
   into row objects and projects them — `query` (rows + metadata),
