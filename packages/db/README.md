@@ -65,8 +65,12 @@ with `isDbError(err)` (or `err instanceof DbError`):
   whenever there was one.
 
 Configuration is `url` (defaulting to the local harbor
-`http://127.0.0.1:9494`), an optional bearer `token`, and the
-injectable `fetch`.
+`http://127.0.0.1:9494`), an optional bearer `token`, the injectable
+`fetch`, and `timeoutMs` — a per-request deadline (default 30s; `0`
+disables) that actually aborts a hung request and surfaces as a
+`ConnectionError` with `code: 'TIMEOUT'`. `query` also accepts a
+`{ signal }` AbortSignal; a caller abort cancels the in-flight fetch
+and surfaces as `code: 'ABORTED'`.
 
 ## The query client
 
@@ -95,8 +99,9 @@ newId = await db.transaction (tx) ->
   the inner call reuses the session rather than opening a second.
 - **Cancellation**: pass a `{ signal }` `AbortSignal`. An
   already-aborted signal rejects before dispatch; an abort in flight
-  rejects the caller with a `CancelledError` at once (the request may
-  still finish on the server).
+  rejects the caller with a `CancelledError` at once AND aborts the
+  underlying harbor request — the signal is threaded through to the
+  adapter's fetch.
 
 ## Operational surfaces
 

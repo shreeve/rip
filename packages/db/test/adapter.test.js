@@ -4,7 +4,8 @@
 // server. Live integration against a real harbor is a separate,
 // endpoint-gated extended-tier suite.
 import { describe, expect, test } from 'bun:test';
-import { DbError, QueryError, harborAdapter, isDbError } from '@rip-lang/db';
+import { readFileSync } from 'node:fs';
+import { ConnectionError, DbError, QueryError, harborAdapter, isDbError } from '@rip-lang/db';
 
 // A fetch double: each call is recorded, and responses are scripted by
 // URL suffix so a test can assert exactly what the adapter posted.
@@ -175,6 +176,81 @@ describe('error taxonomy', () => {
     const err = await harborAdapter({ url: 'http://h', fetch }).query('SELECT 1').catch(e => e);
     expect(err instanceof ConnectionError).toBe(true); // retryable, distinct from a bad query
     expect(err.sql).toBe('SELECT 1'); // context still attached
+  });
+});
+
+describe('timeouts and cancellation', () => {
+  // A hung harbor: the fetch never settles on its own, but records the
+  // signal it was handed so a test can observe the real abort.
+  const hangingFetch = () => {
+    const seen = { signal: null };
+    const fetch = (url, init) => {
+      seen.signal = init?.signal ?? null;
+      return new Promise(() => {}); // a hung socket: never resolves
+    };
+    fetch.seen = seen;
+    return fetch;
+  };
+
+  test('a hung harbor rejects with a TIMEOUT ConnectionError at the deadline', async () => {
+    const fetch = hangingFetch();
+    const err = await harborAdapter({ url: 'http://h', fetch, timeoutMs: 25 }).query('SELECT 1').catch(e => e);
+    expect(err instanceof ConnectionError).toBe(true);
+    expect(err.code).toBe('TIMEOUT');
+    expect(err.message).toContain('25ms');
+    expect(fetch.seen.signal?.aborted).toBe(true); // the wire request was aborted, not abandoned
+  });
+
+  test('a caller signal aborts the in-flight request with an ABORTED ConnectionError', async () => {
+    const fetch = hangingFetch();
+    const controller = new AbortController();
+    const pending = harborAdapter({ url: 'http://h', fetch, timeoutMs: 0 })
+      .query('SELECT 1', [], { signal: controller.signal }).catch(e => e);
+    controller.abort();
+    const err = await pending;
+    expect(err instanceof ConnectionError).toBe(true);
+    expect(err.code).toBe('ABORTED');
+    expect(fetch.seen.signal?.aborted).toBe(true); // threaded through to the fetch
+  });
+
+  test('an already-aborted signal never reaches a hung harbor for long', async () => {
+    const fetch = hangingFetch();
+    const controller = new AbortController();
+    controller.abort();
+    const err = await harborAdapter({ url: 'http://h', fetch, timeoutMs: 0 })
+      .query('SELECT 1', [], { signal: controller.signal }).catch(e => e);
+    expect(err.code).toBe('ABORTED');
+  });
+
+  test('a transaction statement honors the caller signal too', async () => {
+    const seen = { signal: null };
+    const fetch = (url, init) => {
+      if (url.endsWith('/sql/sessions/new')) return Promise.resolve({ ok: true, status: 200, json: async () => ({ sessionId: 'sx' }) });
+      const sql = init?.body ? JSON.parse(init.body).sql : null;
+      if (sql === 'BEGIN') return Promise.resolve({ ok: true, status: 200, json: async () => ({ columns: [], data: [], rowCount: 0 }) });
+      seen.signal = init?.signal ?? null;
+      return new Promise(() => {}); // the statement hangs
+    };
+    const tx = await harborAdapter({ url: 'http://h', fetch, timeoutMs: 0 }).begin();
+    const controller = new AbortController();
+    const pending = tx.query('SELECT 1', [], { signal: controller.signal }).catch(e => e);
+    controller.abort();
+    const err = await pending;
+    expect(err.code).toBe('ABORTED');
+    expect(seen.signal?.aborted).toBe(true);
+  });
+
+  test('a fast response is untouched by the deadline', async () => {
+    const fetch = fetchDouble({ '/sql': { json: { columns: [], data: [], rowCount: 0 } } });
+    const result = await harborAdapter({ url: 'http://h', fetch, timeoutMs: 25 }).query('SELECT 1');
+    expect(result.rowCount).toBe(0);
+  });
+
+  test('the default deadline is 30 seconds, matching v3 and mcp.rip', () => {
+    // 30s is unobservable in a unit test without fake timers; pin the
+    // constant in the source instead, next to its mcp.rip twin.
+    const src = readFileSync(new URL('../adapter.rip', import.meta.url), 'utf8');
+    expect(src).toMatch(/DEFAULT_TIMEOUT_MS = 30_000/);
   });
 });
 
