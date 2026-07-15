@@ -90,6 +90,18 @@ export default function(hljs) {
     relevance: 0,
   };
 
+  // %w[foo bar baz] — word arrays; paired delimiters nest, symmetric repeat
+  const WORD_ARRAY = {
+    className: 'string',
+    variants: [
+      { begin: /%w\[/, end: /\]/ },
+      { begin: /%w\(/, end: /\)/ },
+      { begin: /%w\{/, end: /\}/ },
+      { begin: /%w</, end: />/ },
+      { match: /%w([^\s\w([{<])(?:\\.|(?!\1).)*\1/ },
+    ],
+  };
+
   const BLOCK_COMMENT = {
     className: 'comment',
     begin: '###', end: '###',
@@ -182,19 +194,6 @@ export default function(hljs) {
     begin: /\b(?:number|string|boolean|void|any|never|unknown|object|symbol|bigint)\b/,
   };
 
-  
-  // %w[foo bar baz] — word arrays; paired delimiters nest, symmetric repeat
-  const WORD_ARRAY = {
-    className: 'string',
-    variants: [
-      { begin: /%w\[/, end: /\]/ },
-      { begin: /%w\(/, end: /\)/ },
-      { begin: /%w\{/, end: /\}/ },
-      { begin: /%w</, end: />/ },
-      { match: /%w([^\s\w([{<])(?:\\.|(?!\1).)*\1/ },
-    ],
-  };
-
   return {
     name: 'Rip',
     aliases: ['rip'],
@@ -212,6 +211,8 @@ export default function(hljs) {
       STRING_SINGLE,
       HEREGEX,
       REGEX,
+      WORD_ARRAY,
+      SYMBOL_LIT,
       COMPONENT_DEF,
       FUNCTION_DEF,
       METHOD_DEF,
