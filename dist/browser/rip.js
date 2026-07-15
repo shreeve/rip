@@ -2132,6 +2132,28 @@ var DOM_EVENTS = new Set([
   "webkittransitionend",
   "wheel"
 ]);
+var BOOLEAN_ATTRS = new Set([
+  "disabled",
+  "hidden",
+  "readonly",
+  "required",
+  "checked",
+  "selected",
+  "autofocus",
+  "autoplay",
+  "controls",
+  "loop",
+  "muted",
+  "multiple",
+  "novalidate",
+  "open",
+  "reversed",
+  "defer",
+  "async",
+  "formnovalidate",
+  "allowfullscreen",
+  "inert"
+]);
 var GLOBAL_ATTRS = new Set([
   "accesskey",
   "autocapitalize",
@@ -13023,28 +13045,7 @@ ${pad ?? ""}`);
     return isFunc2(body) ? Emitter.containsYield(body[2]) : Emitter.containsYield(body);
   }
   static COMPONENT_HOOKS = COMPONENT_HOOKS;
-  static BOOLEAN_ATTRS = new Set([
-    "disabled",
-    "hidden",
-    "readonly",
-    "required",
-    "checked",
-    "selected",
-    "autofocus",
-    "autoplay",
-    "controls",
-    "loop",
-    "muted",
-    "multiple",
-    "novalidate",
-    "open",
-    "reversed",
-    "defer",
-    "async",
-    "formnovalidate",
-    "allowfullscreen",
-    "inert"
-  ]);
+  static BOOLEAN_ATTRS = BOOLEAN_ATTRS;
   static SVG_NS = "http://www.w3.org/2000/svg";
   isComponentDecl(x) {
     return Emitter.isComponentDeclIn(this.stores, x);
@@ -14253,7 +14254,7 @@ ${pad ?? ""}`);
           for (const child of block.slice(1)) {
             if (isObject(child)) {
               this.renderAttributes(el, child);
-            } else {
+            } else if (!this.renderBareFlag(el, child)) {
               const v = this.renderNode(child);
               if (v == null)
                 continue;
@@ -14261,9 +14262,11 @@ ${pad ?? ""}`);
             }
           }
         } else if (block) {
-          const v = this.renderNode(block);
-          if (v != null)
-            this.renderLine(null, () => this.b.emit(`${el}.appendChild(${v})`));
+          if (!this.renderBareFlag(el, block)) {
+            const v = this.renderNode(block);
+            if (v != null)
+              this.renderLine(null, () => this.b.emit(`${el}.appendChild(${v})`));
+          }
         }
         continue;
       }
@@ -14345,6 +14348,16 @@ ${pad ?? ""}`);
   }
   renderTagOf(el) {
     return this.rstate.tags?.get(el) ?? "div";
+  }
+  renderBareFlag(el, child) {
+    if (typeof child !== "string" || !Emitter.BOOLEAN_ATTRS.has(child))
+      return false;
+    if (this.renderVarKind(child, child) !== null)
+      return false;
+    if (this.resolveBareRead(child) !== null || this.inScope(child))
+      return false;
+    this.renderLine(null, () => this.b.emit(`${el}.setAttribute('${child}', '')`));
+    return true;
   }
   renderSlot(node, args) {
     const R = this.rstate;
