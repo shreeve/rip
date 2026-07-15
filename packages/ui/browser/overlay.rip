@@ -1,0 +1,150 @@
+# Native top-layer binding -- sync a reactive `open` boolean with the
+# browser's own overlay elements: the Popover API and `<dialog>`. No portal
+# machinery; the platform owns the top layer, light-dismiss, and modality.
+
+import { getRef } from './core.rip'
+
+# A once-installed focusin tracker: `document.activeElement` is often
+# `<body>` at the moment a popover/dialog opens (the trigger already blurred
+# through the platform's own machinery), so we remember the last real focus
+# target to restore to on close.
+globalThis.__ariaLastFocusedEl ??= null
+if typeof document isnt 'undefined' and not globalThis.__ariaFocusTrackerBound
+  document.addEventListener 'focusin', ((e) -> globalThis.__ariaLastFocusedEl = e.target), true
+  globalThis.__ariaFocusTrackerBound = true
+
+_currentFocus = (): any ->
+  active = document.activeElement
+  return active if active and active isnt document.body
+  last = globalThis.__ariaLastFocusedEl
+  return last if last?.isConnected isnt false
+  null
+
+# Mirror `hidden`/`inert`/`aria-hidden` to the open state so an overlay in
+# the layout (not yet promoted to the top layer) is inert and unspoken.
+_syncHidden = (el: any, isOpen: boolean): void ->
+  if isOpen
+    el.hidden = false
+    try el.inert = false
+    catch then null
+    el.removeAttribute 'aria-hidden'
+  else
+    try el.inert = true
+    catch then null
+    el.setAttribute 'aria-hidden', 'true'
+    el.hidden = true
+  return
+
+# Restore focus to `target`, retrying across a few frames because the
+# platform may still be settling focus as the overlay tears down.
+_restoreFocus = (target: any): void ->
+  return unless target?.focus?
+  attempt = (tries: number = 6) ->
+    return unless target.isConnected isnt false
+    try target.focus({ preventScroll: true })
+    catch then target.focus()
+    return if document.activeElement is target or tries <= 1
+    setTimeout (-> attempt(tries - 1)), 16
+    return
+  requestAnimationFrame -> attempt()
+  return
+
+# bindPopover -- sync reactive open state with the native Popover API.
+#
+# open:     reactive boolean
+# popover:  element or lazy getter (the `popover` element)
+# setOpen:  called with the actual native open state on every toggle
+# source:   optional invoker element/getter (anchors focus restore)
+#
+# Idempotent for the same reason as popupDismiss: the widget re-invokes this
+# on every `open` change, so any prior `toggle` listener stored on the
+# element is removed before a new one is attached.
+export def bindPopover(open: boolean, popover: any, setOpen: (open: boolean) => void, source: any = null): any
+  el: any = getRef(popover)
+  return unless el
+  return unless Object.hasOwn(HTMLElement.prototype, 'togglePopover')
+  restoreEl: any = null
+
+  if el.__ariaBindPopover
+    el.removeEventListener 'toggle', el.__ariaBindPopover
+    el.__ariaBindPopover = null
+
+  onToggle = (e: any) ->
+    isOpen = e.newState is 'open'
+    if isOpen
+      restoreEl = getRef(source) or _currentFocus()
+      _syncHidden el, true
+    else
+      _syncHidden el, false
+      target = restoreEl; restoreEl = null
+      _restoreFocus target
+    setOpen?(isOpen)
+    return
+  el.addEventListener 'toggle', onToggle
+  el.__ariaBindPopover = onToggle
+
+  shown = el.matches(':popover-open')
+  desired = !!open
+  if shown isnt desired
+    src = getRef(source)
+    if desired
+      restoreEl = src or _currentFocus()
+      _syncHidden el, true
+    opts = if src and desired then { force: desired, source: src } else { force: desired }
+    try el.togglePopover(opts)
+    catch then null    # detached, etc. -- effect retries next reactive pass
+  else
+    _syncHidden el, desired
+
+  ->
+    el.removeEventListener 'toggle', onToggle
+    el.__ariaBindPopover = null if el.__ariaBindPopover is onToggle
+    return
+
+# bindDialog -- sync reactive open state with a native `<dialog>` via
+# `showModal()`. `dismissable = false` cancels Esc/backdrop close.
+#
+# The native `cancel`/`close` events are the SOLE close-emission path: the
+# widget's own key handler must not also call setOpen, or `close` doubles.
+export def bindDialog(open: boolean, dialog: any, setOpen: (open: boolean) => void, dismissable: boolean = true): any
+  el: any = getRef(dialog)
+  return unless el?.showModal?
+  restoreEl: any = null
+
+  if el.__ariaBindDialog
+    [prevCancel, prevClose] = el.__ariaBindDialog
+    el.removeEventListener 'cancel', prevCancel
+    el.removeEventListener 'close', prevClose
+    el.__ariaBindDialog = null
+
+  onCancel = (e: any) ->
+    unless dismissable
+      e.preventDefault()
+      return
+    setOpen?(false)
+    return
+  onClose = ->
+    setOpen?(false)
+    _syncHidden el, false
+    target = restoreEl; restoreEl = null
+    _restoreFocus target
+    return
+  el.addEventListener 'cancel', onCancel
+  el.addEventListener 'close', onClose
+  el.__ariaBindDialog = [onCancel, onClose]
+
+  if open and not el.open
+    restoreEl = _currentFocus() unless restoreEl
+    _syncHidden el, true
+    try el.showModal()
+    catch then null
+  else if not open and el.open
+    el.close()
+  else
+    _syncHidden el, !!open
+
+  ->
+    el.removeEventListener 'cancel', onCancel
+    el.removeEventListener 'close', onClose
+    el.__ariaBindDialog = null if el.__ariaBindDialog?[0] is onCancel
+    return

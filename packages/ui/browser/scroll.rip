@@ -1,0 +1,64 @@
+# Scroll lock -- a shared, reference-counted body scroll lock so overlapping
+# modals (a Dialog opening over an AlertDialog) do not race on lock/unlock.
+# The bookkeeping is a pure stack behind `createScrollLock`; the shipped
+# `lockScroll`/`unlockScroll` bind it to real body-style writes.
+
+
+# The DOM effects the lock drives, injected so the bookkeeping is testable
+# without a document.
+export type ScrollLockIo =
+  scrollY: () => number
+  freeze: (scrollY: number) => void
+  release: (scrollY: number) => void
+
+export type ScrollLock =
+  lock: (instance: unknown) => void
+  unlock: (instance: unknown) => void
+  size: () => number
+
+# createScrollLock -- reference-counted lock bookkeeping. `freeze` fires only
+# when the first instance locks; `release` only when the last unlocks,
+# restoring the scroll position captured by that first lock. Unlocking an
+# unknown instance is a no-op. Pure aside from the injected `io`.
+export def createScrollLock(io: ScrollLockIo): ScrollLock
+  stack: Array<{ instance: unknown, scrollY: number }> = []
+  {
+    lock: (instance: unknown) ->
+      scrollY = io.scrollY()
+      stack.push { instance, scrollY }
+      io.freeze(scrollY) if stack.length is 1
+      return
+    unlock: (instance: unknown) ->
+      idx = stack.findIndex (m) -> m.instance is instance
+      return if idx < 0
+      first = stack[0].scrollY
+      stack.splice idx, 1
+      io.release(first) unless stack.length
+      return
+    size: -> stack.length
+  }
+
+_browserIo: ScrollLockIo =
+  scrollY: -> window.scrollY
+  freeze: (scrollY: number) ->
+    document.body.style.position = 'fixed'
+    document.body.style.top = "-#{scrollY}px"
+    document.body.style.width = '100%'
+    return
+  release: (scrollY: number) ->
+    document.body.style.position = ''
+    document.body.style.top = ''
+    document.body.style.width = ''
+    window.scrollTo 0, scrollY
+    return
+
+_lock =! createScrollLock(_browserIo)
+
+# lockScroll(instance) -- lock body scroll for `instance`.
+export def lockScroll(instance: unknown): void
+  _lock.lock instance
+
+# unlockScroll(instance) -- release `instance`'s lock; restores scroll when
+# the last lock clears.
+export def unlockScroll(instance: unknown): void
+  _lock.unlock instance

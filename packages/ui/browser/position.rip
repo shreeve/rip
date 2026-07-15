@@ -1,0 +1,168 @@
+# Positioning -- place a floating element against its trigger, using CSS
+# anchor positioning where the browser supports it and a manual
+# `getBoundingClientRect` fallback otherwise. The placement math is factored
+# into pure functions (parsePlacement, computePlacement, belowPosition) that
+# take plain rects and a viewport, so it is testable without a real DOM.
+
+
+# parsePlacement -- translate a friendly `"<side> <align>"` placement into a
+# VALID CSS `position-area` grid keyword plus the matching self-alignment.
+# The grid keywords are span-based -- `bottom start`/`bottom end` are not
+# valid values -- so align maps to a span and the cross-axis edge is pinned
+# with justify-self/align-self. Pure; no DOM.
+export def parsePlacement(placement: string = 'bottom start'): any
+  [side, align] = (placement or 'bottom start').split(' ')
+  align ??= 'start'
+  vertical = side is 'bottom' or side is 'top'
+  areaAlign = switch align
+    when 'center' then 'center'
+    when 'end'    then (if vertical then 'span-left' else 'span-top')
+    else (if vertical then 'span-right' else 'span-bottom')
+  { side, align, vertical, areaAlign, positionArea: "#{side} #{areaAlign}" }
+
+# computePlacement -- the manual fallback math. Given the trigger rect and
+# the viewport, return the fixed-position style props that place a floating
+# element on `side` aligned to `align`. Pure; no DOM.
+export def computePlacement(trigger: any, viewport: any, opts: any = {}): any
+  side = opts.side ?? 'bottom'
+  align = opts.align ?? 'start'
+  offset = opts.offset ?? 4
+  matchWidth = opts.matchWidth ?? false
+  styles: any = { position: 'fixed', inset: 'auto', margin: '0' }
+  switch side
+    when 'bottom' then styles.top = "#{trigger.bottom + offset}px"
+    when 'top'    then styles.bottom = "#{viewport.height - trigger.top + offset}px"
+    when 'left'   then styles.right = "#{viewport.width - trigger.left + offset}px"
+    when 'right'  then styles.left = "#{trigger.right + offset}px"
+  if side is 'bottom' or side is 'top'
+    switch align
+      when 'start'  then styles.left = "#{trigger.left}px"
+      when 'center'
+        styles.left = "#{trigger.left + trigger.width / 2}px"
+        styles.transform = 'translateX(-50%)'
+      when 'end'    then styles.right = "#{viewport.width - trigger.right}px"
+  else
+    switch align
+      when 'start'  then styles.top = "#{trigger.top}px"
+      when 'center'
+        styles.top = "#{trigger.top + trigger.height / 2}px"
+        styles.transform = 'translateY(-50%)'
+      when 'end'    then styles.bottom = "#{viewport.height - trigger.bottom}px"
+  styles.minWidth = "#{trigger.width}px" if matchWidth
+  styles
+
+# belowPosition -- the flip math for `positionBelow`. `floating` is the
+# floating rect MEASURED after an initial placement directly below the
+# trigger; if it overflows the viewport bottom it flips above, and if it
+# overflows the right edge it shifts left. Pure; no DOM.
+export def belowPosition(trigger: any, floating: any, viewport: any, gap: number = 4): any
+  result: any = { left: trigger.left, top: trigger.bottom + gap, minWidth: trigger.width }
+  result.top = trigger.top - floating.height - gap if floating.bottom > viewport.height
+  result.left = viewport.width - floating.width - gap if floating.right > viewport.width
+  result
+
+# hasAnchor -- feature-detect CSS anchor positioning. Lazy and body-aware: a
+# probe before `<body>` exists must NOT memoize `false`, or a later call on
+# a capable browser would keep returning it. Only a real probe flips the
+# memo.
+_anchorChecked = false
+_anchorSupported = false
+export def hasAnchor(): boolean
+  return _anchorSupported if _anchorChecked
+  return false unless typeof document isnt 'undefined' and document.body
+  try
+    anchor = document.createElement('div')
+    floating = document.createElement('div')
+    anchor.style.cssText = 'position:fixed;top:100px;left:100px;width:10px;height:10px;anchor-name:--probe'
+    # A VALID `position-area` grid keyword: `bottom start` is not valid, so
+    # a capable browser would ignore it and the probe would read `false`.
+    floating.style.cssText = 'position:fixed;inset:auto;margin:0;position-anchor:--probe;position-area:bottom span-right;width:10px;height:10px'
+    document.body.appendChild(anchor)
+    document.body.appendChild(floating)
+    rect = floating.getBoundingClientRect()
+    anchor.remove()
+    floating.remove()
+    _anchorSupported = rect.top > 50
+    _anchorChecked = true
+    _anchorSupported
+  catch
+    _anchorChecked = true      # genuine probe failure -- memoize as unsupported
+    _anchorSupported = false
+
+_OWNED = ['position', 'inset', 'top', 'right', 'bottom', 'left',
+  'margin', 'marginTop', 'marginRight', 'marginBottom', 'marginLeft',
+  'transform', 'minWidth', 'justifySelf', 'alignSelf',
+  'positionAnchor', 'positionArea', 'positionTry', 'positionVisibility']
+
+_resetStyles = (el: any): void ->
+  style: any = el.style
+  for prop in _OWNED
+    style[prop] = ''
+  return
+
+# position -- place `floating` against `trigger` per `opts.placement`
+# (`"<side> <align>"`, default `"bottom start"`), `opts.offset`, and
+# `opts.matchWidth`. Uses CSS anchor positioning when the browser both
+# supports it and accepts the translated `position-area`; otherwise falls
+# through to the manual fallback (computePlacement).
+export def position(trigger: any, floating: any, opts: any = {}): void
+  return unless trigger and floating
+  fl: any = floating
+  tr: any = trigger
+  { side, align, vertical, areaAlign, positionArea } = parsePlacement(opts.placement ?? 'bottom start')
+  offset = opts.offset ?? 4
+  matchWidth = opts.matchWidth ?? false
+  _resetStyles fl
+  canAnchor = hasAnchor() and typeof CSS isnt 'undefined' and CSS.supports('position-area', positionArea)
+  if canAnchor
+    name = "--anchor-#{fl.id or Math.random().toString(36).slice(2, 8)}"
+    # If this floating element was previously paired with a different
+    # trigger, clear the OLD trigger's anchor-name so no stale CSS anchor
+    # reference lingers on a now-unrelated element.
+    prevTrigger = fl.__ariaPrevTrigger
+    if prevTrigger and prevTrigger isnt tr
+      try prevTrigger.style.anchorName = ''
+      catch then null
+    fl.__ariaPrevTrigger = tr
+    tr.style.anchorName = name
+    fl.style.positionAnchor = name
+    fl.style.position = 'fixed'
+    fl.style.inset = 'auto'
+    fl.style.margin = '0'
+    fl.style.positionArea = positionArea
+    if vertical then fl.style.justifySelf = align else fl.style.alignSelf = align
+    fl.style.positionTry = 'flip-block, flip-inline, flip-block flip-inline'
+    fl.style.positionVisibility = 'anchors-visible'
+    switch side
+      when 'bottom' then fl.style.marginTop = "#{offset}px"
+      when 'top'    then fl.style.marginBottom = "#{offset}px"
+      when 'left'   then fl.style.marginRight = "#{offset}px"
+      when 'right'  then fl.style.marginLeft = "#{offset}px"
+    fl.style.minWidth = 'anchor-size(width)' if matchWidth
+  else
+    rect = tr.getBoundingClientRect()
+    viewport = { width: window.innerWidth, height: window.innerHeight }
+    styles = computePlacement(rect, viewport, { side, align, offset, matchWidth })
+    for prop, value of styles
+      fl.style[prop] = value
+  return
+
+# positionBelow -- place a fixed popup directly below its trigger, flipping
+# above (or shifting left) when it would overflow the viewport. `gap` is the
+# pixel gap; `setVisible` reveals it via `visibility:visible` once placed.
+export def positionBelow(trigger: any, popup: any, gap: number = 4, setVisible: boolean = true): void
+  return unless trigger and popup
+  tr: any = trigger
+  pop: any = popup
+  rect = tr.getBoundingClientRect()
+  pop.style.position = 'fixed'
+  pop.style.left = "#{rect.left}px"
+  pop.style.top = "#{rect.bottom + gap}px"
+  pop.style.minWidth = "#{rect.width}px"
+  fl = pop.getBoundingClientRect()
+  viewport = { width: window.innerWidth, height: window.innerHeight }
+  { left, top } = belowPosition(rect, fl, viewport, gap)
+  pop.style.top = "#{top}px"
+  pop.style.left = "#{left}px"
+  pop.style.visibility = 'visible' if setVisible
+  return

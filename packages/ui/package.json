@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./browser": {
+      "types": "./browser/browser.d.ts",
+      "default": "./browser/browser.rip"
+    },
     "./email": "./email/email.rip",
     "./email/components": "./email/components.rip",
     "./email/dom": "./email/dom.rip",
@@ -15,6 +19,7 @@
     "test": "rip test"
   },
   "files": [
+    "browser/",
     "email/",
     "shared/",
     "tailwind/",
