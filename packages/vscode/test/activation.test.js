@@ -1,16 +1,17 @@
 // The activation contract: the chain VS Code walks to get from "user opened a
 // .rip file" to "the language server is running."
 //
-//   manifest.activationEvents  →  onLanguage:rip
 //   manifest.contributes.languages  →  the id `rip`, bound to `.rip`
+//     (VS Code >= 1.74 auto-generates the onLanguage:rip activation event
+//      from this contribution — no explicit activationEvents entry needed)
 //   manifest.main  →  extension.js, exporting activate()
 //   activate()  →  spawns src/server.js on bun, over stdio, for rip documents
 //
 // Every OTHER test in this package imports `server.js` directly, so a broken
 // link anywhere in that chain is invisible to all of them: the server can be
 // perfect, every editor feature green, and the extension still dead on arrival
-// because the manifest names a file that moved, the language id drifted, or
-// activationEvents lost its trigger.
+// because the manifest names a file that moved or the language id drifted (the
+// contribution VS Code derives the activation event from).
 //
 // activate() is RUN here, against a stubbed extension host, and the values it
 // hands the language client are inspected. Grepping its source instead would
@@ -66,8 +67,13 @@ function loadExtension() {
 }
 
 describe('the extension activation contract', () => {
-  test('activationEvents fire on the rip language', () => {
-    expect(pkg.activationEvents).toContain('onLanguage:rip');
+  test('activation is auto-generated from the language contribution — no redundant onLanguage:rip', () => {
+    // VS Code (>= 1.74; we require ^1.80) generates the `onLanguage:rip`
+    // activation event from the `contributes.languages` entry below, so an
+    // explicit `onLanguage:rip` in `activationEvents` is redundant and the
+    // manifest linter flags it. This guards that specific entry from creeping
+    // back; other activation events, if ever genuinely needed, stay fine.
+    expect(pkg.activationEvents ?? []).not.toContain('onLanguage:rip');
   });
 
   test('the rip language is contributed and bound to .rip', () => {

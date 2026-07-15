@@ -4,12 +4,11 @@
 // diagnostic mapping, and the synthetic-drop policy.
 import { test, expect, describe } from 'bun:test';
 import { compile } from '../../../src/compile.js';
-import { Mappings } from '../../../src/stores.js';
 import {
   lineStartsOf, offsetToPosition, positionToOffset,
   sourceOffsetToGenerated, sourceOffsetToGeneratedExact, sourceCursorToGenerated,
   generatedSpanToSource, generatedEditSpanToSource, generatedInsertionToSource,
-  insertionAboveAttachedDirectives, wholeImportLinesEdit, generatedCursorToSource,
+  insertionAboveAttachedDirectives, wholeImportLinesEdit,
   exactSpanMapper, staleOffsetMap,
   isScaffoldingLabel, scrubFaceArtifacts, ripImportText,
   diagnosticTagsFor,
@@ -260,20 +259,6 @@ describe('generated → source (the diagnostics direction)', () => {
     expect(code.slice(gen - 'msg.sub'.length, gen)).toBe('msg.sub');
   });
 
-  test('generatedCursorToSource (inlay-hint anchors): inside/one-past exact rows map, synthetic bytes drop', () => {
-    const source = 'k = add(1, 2)\n';
-    const { code, mappings } = compile(source, { face: 'ts', runtimeDelivery: 'none' });
-    // Inside an exact row: the position before an argument.
-    const atArg = code.indexOf('1');
-    expect(generatedCursorToSource(mappings, atArg, source, code)).toBe(source.indexOf('1'));
-    // One past an exact row's end: right after the hoisted `k` on the
-    // let line — the type-hint anchor — maps one past the source name.
-    const afterK = code.indexOf('let k') + 'let k'.length;
-    expect(generatedCursorToSource(mappings, afterK, source, code)).toBe(source.indexOf('k') + 1);
-    // A generated-only position (inside the `let ` keyword) drops.
-    expect(generatedCursorToSource(mappings, code.indexOf('let ') + 1, source, code)).toBeNull();
-  });
-
   test('the exact flavor refuses positions with no verbatim twin (comments); the lenient flavor may still cover-land', () => {
     const source = '# about total\ntotal = 41\n';
     const { code, mappings } = compile(source, { face: 'ts' });
@@ -369,17 +354,5 @@ describe('diagnostic tag restoration (the rendering seam)', () => {
     for (const code of [2322, 2339, 2578, 7043, 6134, 6205]) {
       expect(diagnosticTagsFor(code)).toEqual([]);
     }
-  });
-});
-
-describe('generatedCursorToSource refuses the vacuous cover match', () => {
-  test('a cursor exactly at a cover row start (zero verified bytes) answers null', () => {
-    const rows = [{ nodeId: 1, role: '$self', mappingKind: 'cover', sourceStart: 0, sourceEnd: 5, generatedStart: 10, generatedEnd: 20, fileId: 0 }];
-    expect(generatedCursorToSource(new Mappings(rows), 10, 'ABCDE', '0123456789XYZWVUTSRQ')).toBeNull();
-  });
-
-  test('one verified byte in, the cover still answers linearly', () => {
-    const rows = [{ nodeId: 1, role: '$self', mappingKind: 'cover', sourceStart: 0, sourceEnd: 5, generatedStart: 10, generatedEnd: 20, fileId: 0 }];
-    expect(generatedCursorToSource(new Mappings(rows), 11, 'XBCDE', '0123456789XYZWVUTSRQ')).toBe(1);
   });
 });

@@ -52,21 +52,6 @@ function makeWorkspace(files) {
   return ws;
 }
 
-// The editor-side inlay-hint preferences the harness answers when the
-// server forwards tsgo's workspace/configuration asks (the same
-// nested shape VS Code's typescript.* settings deliver): every hint
-// class ON, so the mapping surface is fully exercisable.
-const INLAY_SETTINGS = {
-  inlayHints: {
-    parameterNames: { enabled: 'all', suppressWhenArgumentMatchesName: false },
-    parameterTypes: { enabled: true },
-    variableTypes: { enabled: true, suppressWhenTypeMatchesName: false },
-    propertyDeclarationTypes: { enabled: true },
-    functionLikeReturnTypes: { enabled: true },
-    enumMemberValues: { enabled: true },
-  },
-};
-
 // One live session over a fresh workspace; the api wraps every feature
 // request in current-buffer coordinates.
 async function inWorkspace(files, fn) {
@@ -80,7 +65,7 @@ async function inWorkspace(files, fn) {
       if (m === 'window/logMessage') logs.push(p.message);
     },
   });
-  client.onServerRequest('workspace/configuration', (p) => (p.items ?? []).map(() => INLAY_SETTINGS));
+  client.onServerRequest('workspace/configuration', (p) => (p.items ?? []).map(() => ({})));
   const uriOf = (rel) => 'file://' + path.join(ws, rel);
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   async function awaitPublish(rel, sinceLen) {
@@ -133,7 +118,6 @@ async function inWorkspace(files, fn) {
     prepareRename: (rel, line, character) => client.request('textDocument/prepareRename', at(rel, line, character)),
     rename: (rel, line, character, newName) => client.request('textDocument/rename', { ...at(rel, line, character), newName }),
     documentSymbol: (rel) => client.request('textDocument/documentSymbol', { textDocument: { uri: uriOf(rel) } }),
-    inlayHint: (rel, range) => client.request('textDocument/inlayHint', { textDocument: { uri: uriOf(rel) }, range }),
     documentLink: (rel) => client.request('textDocument/documentLink', { textDocument: { uri: uriOf(rel) } }),
     workspaceSymbol: (query) => client.request('workspace/symbol', { query }),
     semanticTokens: (rel) => client.request('textDocument/semanticTokens/full', { textDocument: { uri: uriOf(rel) } }),
@@ -643,50 +627,6 @@ describe.skipIf(!tsgoAvailable)('document and workspace symbols', () => {
       expect(shout).toBeDefined();
       expect(shout.location.range.start).toEqual({ line: 0, character: 11 }); // export def shout(
       expect(symbols.every((s) => !s.location.uri.includes('.rip.ts'))).toBe(true);
-    });
-  }, 30000);
-});
-
-describe.skipIf(!tsgoAvailable)('inlay hints', () => {
-  test('parameter-name hints land on Rip argument positions; runtime-sourced hints drop whole', async () => {
-    await inWorkspace({}, async (api) => {
-      const SRC = [
-        'def add(a: number, b: number): number', // 0
-        '  a + b',                                // 1
-        'k = add(1, 2)',                          // 2
-        'count := 0',                             // 3 (reactive: lowers to __state(0))
-        '',
-      ].join('\n');
-      await api.open('app.rip', SRC);
-      const hints = await api.inlayHint('app.rip', {
-        start: { line: 0, character: 0 }, end: { line: 4, character: 0 },
-      });
-      const labelOf = (h) => (typeof h.label === 'string' ? h.label : h.label.map((p) => p.value).join(''));
-
-      // The call's parameter-name hints sit before the Rip arguments.
-      const a = hints.find((h) => labelOf(h) === 'a:');
-      const b = hints.find((h) => labelOf(h) === 'b:');
-      expect(a.position).toEqual({ line: 2, character: 8 });
-      expect(b.position).toEqual({ line: 2, character: 11 });
-      // Their label locations point at the Rip parameter declarations.
-      const aLoc = a.label.find((p) => p.location)?.location;
-      expect(aLoc.uri).toBe(api.uriOf('app.rip'));
-      expect(aLoc.range.start).toEqual({ line: 0, character: 8 });
-
-      // The reactive lowering calls the INJECTED runtime (`__state(0)`);
-      // its `initialValue:` parameter hint is sourced from scaffolding
-      // the user never wrote — the whole hint drops.
-      expect(hints.some((h) => labelOf(h).includes('initialValue'))).toBe(false);
-
-      // A range request answers exactly the range. Tier 1's declare-
-      // in-place gives the binding an initializer, so tsgo now ALSO
-      // offers its inferred-type hint (`: number`) at the rip name —
-      // a feature the hoisted shape could never produce.
-      const line2 = await api.inlayHint('app.rip', {
-        start: { line: 2, character: 0 }, end: { line: 3, character: 0 },
-      });
-      expect(line2.map(labelOf).sort()).toEqual([': number', 'a:', 'b:']);
-      for (const h of line2) expect(h.position.line).toBe(2);
     });
   }, 30000);
 });

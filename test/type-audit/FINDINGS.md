@@ -29,6 +29,7 @@
 | [19](#19-a-directive-inside-a-render-block-never-reaches-the-face) | Inline render-block directive lost from the face | `directive`, `compiler` | ⬜ **Open** | **none** (audit `directives` would catch it — no fixture uses the shape) |
 | [20](#20-everything-inside-a-render-branch-is-unchecked) | Render branch/loop bodies are unchecked (`ctx: any`) | `strict`, `compiler` | ⬜ **Open** | audit `strict` — **red by design** until it closes |
 | [21](#21-tokens-drop-past-a-face-rewrite-on-a-cover-row) | Tokens drop past a face rewrite on a cover row | `editor`, `compiler` | ⬜ **Open** | audit `member` + `survival` — **red by design** until the mapping fix lands |
+| [22](#22-completion-and-signature-help-fail-on-an-incomplete-expression) | Completion & signature help fail on an incomplete expression | `editor`, `compiler` | ⬜ **Open** | **none** (a completion + signature-help content audit would catch both — neither built) |
 
 ## How to read this ledger
 
@@ -44,7 +45,7 @@
 
 **Re-driving.** `bun run test:all` — green as of 2026-07-14. It sets `RIP_EXTENDED=1` itself, the tier where the tsc-backed gates spawn the repo's pinned TypeScript, resolved from the workspace install ([tsc.js](../support/tsc.js) `resolveTsc`) rather than PATH, throwing loudly rather than skipping when it is missing. An editor-path change is not live in VS Code until `bun run install-vscode` from `packages/vscode/` — the running extension is the installed `.vsix`, not the working tree.
 
-**Beyond this ledger.** The wider editor surface is covered by the extension's own suite (`packages/vscode/test/`) — completions, definition, references, rename, code actions, semantic tokens, inlay hints, all over real LSP. *Driven is not the same as asserted:* its semantic-token tests check that tokens land on Rip spans and dedup, and assert no **modifier** at all — a token can be in the right place and still say the wrong thing about the code. Modifiers are gated separately ([semantic-tokens.test.js](../toolchain/semantic-tokens.test.js), #15) and swept by the token audit. A green suite bounds only what its assertions reach.
+**Beyond this ledger.** The wider editor surface is covered by the extension's own suite (`packages/vscode/test/`) — completions, definition, references, rename, code actions, semantic tokens, all over real LSP. *Driven is not the same as asserted:* its semantic-token tests check that tokens land on Rip spans and dedup, and assert no **modifier** at all — a token can be in the right place and still say the wrong thing about the code. Modifiers are gated separately ([semantic-tokens.test.js](../toolchain/semantic-tokens.test.js), #15) and swept by the token audit. A green suite bounds only what its assertions reach.
 
 ## Findings
 
@@ -465,6 +466,44 @@ The two gauges target different surfaces — `member` on type-body presence, `su
 - **Use sites — mostly inherited, causes inverted.** `console.log('total:', total)`: both drop the use, so no outcome change on the common single-quoted form. But the cause is opposite — v4 drops it to quote-normalization (`console.log("total:", total)` **rescues** it in v4), while v3 drops it to the call-argument context regardless of quotes (double-quoting does **not** rescue it in v3). A bare `x = total` and a minimal reactive read (`x = clicks` off `clicks := 0`) classify in **both**. So the `console.log`-argument drops — the bulk of the `survival` count — are v3-inherited, not v4 drift.
 
 Unsettled: 08's reactive reads drop in v4 only in render/component context (the minimal read survives both); that exact context was not reproduced on v3. Net: the **member** surface is the established v4 regression; the **use-site** surface is largely a shared, pre-existing limitation.
+
+### 22. Completion and signature help fail on an incomplete expression
+
+The broker builds its TypeScript face from a **successful** compile, so it can serve a request only where the source parses — but the two features whose trigger is an *incomplete* expression fire precisely where it does not. The trigger byte is the same byte that breaks the parse: type a member-access dot and pause (`items.‸`), or sit inside an open call (`add(‸`), and the buffer no longer parses, so no face carries the member-access / call context and the request has nothing to map into. rip's compiler throws where TypeScript's error-tolerant parser recovers — which is why the hand-written twin serves the correct answer on the identical incomplete text and the broker does not. What you actually get instead is nothing, or (for completion) the wrong list; the popup works only once the expression is complete enough to parse, which is backwards from how these features are used.
+
+**Two surfaces, one root.** Member completion at a bare dot and signature help inside an open call. Both are un-parseable at the cursor (`bin/rip --ts` on `items.` → `Unexpected end of input — expected PROPERTY`; on `add(` and `add(1,` → a parse error at the `(`), so neither has a face. They differ only in fallback: completion has a statement-context one (it serves *something* wrong), signature help has none (it serves plain null).
+
+**Status.** ⬜ **Open** (2026-07-15) — no fix, no gate. A completion content audit (twin-oracled on the item set + resolved `detail`) and a signature-help audit (on the label + `activeParameter`) would catch the two surfaces and, sharing this root, retire together the day the parse gap closes — but both are unbuilt, and the extension tests exercise only the parseable form of each (below), which is why the suite is green.
+
+**Driven — member completion** (2026-07-15), the real server (`server.js --stdio`, `onCompletion`) against tsgo on the twin, `items` typed `number[]`, completion right after the dot:
+
+| buffer at the dot | server | result |
+| --- | --- | --- |
+| `x = items.` — fresh buffer, never compiled | rip broker | **empty** — no items |
+| `x = items.` — after a good compile, dot just typed | rip broker | **stale scope list** — in-scope names + ambient globals (`items`, `count`, `Date`, `Map`, …), **no members** |
+| `x = items.map` — parseable | rip broker | **correct** — `map`, `filter`, `join`, … |
+| `let x = items.` — same trailing dot | tsgo (twin) | **correct** — the same members |
+
+The two broker symptoms are the two branches of the staleness guard — [onCompletion](../../packages/vscode/src/server.js) maps the cursor into the **last good face** (the version before the dot, plain statement context → the in-scope identifier list) or, on a buffer that never compiled, nothing at all. Neither is the member list; make the expression parse (`items.map`) and a real face exists, member completion then matching the twin exactly.
+
+**Driven — signature help** (2026-07-15), the real server (`onSignatureHelp`) against the twin, `add` typed `(a: number, b: number): number`, cursor inside the call:
+
+| call state at the cursor | server | result |
+| --- | --- | --- |
+| `r = add(` — unclosed, fresh | rip broker | **null** |
+| `r = add(1, ` — unclosed mid-args, fresh | rip broker | **null** |
+| `r = add(1, 2)` — closed, cursor inside the 2nd arg | rip broker | ✅ `add(a: number, b: number): number`, activeParameter 1 |
+| closed, then backspaced to `r = add(1, ` | rip broker | **null** (no fallback) |
+| `let r = add(1, ` — unclosed mid-args | tsgo (twin) | ✅ same label, activeParameter 1 |
+
+Signature help is the harsher surface: with no statement-context fallback, every open-paren state returns plain null, prior compile or not. It works only on the **closed** call `add(1, 2)` — exactly when it is no longer needed — where the response passes through correctly (signatures / activeParameter untouched, the design the bodiless-overload note in `onSignatureHelp` relies on).
+
+**Why the suite missed it.** Both tests use the **already-complete** form — the one state that has a face. Member completion is tested at `msg.sub‸` (a complete member expression; [editor-features.test.js](../../packages/vscode/test/editor-features.test.js) "member completion serves with resolve-lazy detail") and signature help at a closed `pick(1, 2)` ("active parameter indices hold across bodiless overload rows"). `msg.sub` and `pick(1, 2)` parse; `msg.` and `pick(` do not. Exercising a feature only at the position it works, never at the position it is used, is the sharpest form of *driven is not the same as asserted* — the twin proves the correct answer was reachable on the identical incomplete text the whole time.
+
+**vs v3 — established (driven both surfaces, 2026-07-15).** v3 (3.17.5, `~/Code/shreeve/rip-lang`) type-checks in-process through the JS TypeScript LanguageService; driven on the real v3 LSP, the verdict **splits by surface**:
+
+- **Member completion — v4 regression.** v3 serves the correct members at the bare dot — driven, fresh `x = items.` → the full `number[]` member list (40 items, `map`/`filter`/…), no prior good compile needed. Its `onCompletion` (rip-lang 3.17.5, `packages/vscode/src/lsp.js`) rewrites `word.` → `word.__rip__` before compiling, so the compiler sees a real member access, recompiling that fixed-up text on the fly (`catch {}` on failure). v4 has no such rewrite, so the dot never yields a face — the whole of the regression.
+- **Signature help — split.** *Fresh* open paren is **inherited**: v3 has no equivalent open-paren fixup, so `r = add(` and `r = add(1,` compile-error (`missing )`) and return null in both. But the common interactive case — a call that *was* valid, now mid-edit — is a **v4 regression**: v3 falls back to the last good compile and `getSignatureHelpItems` still resolves the call (driven: closed `add(1, 2)` → backspace to `add(1, ` → `add(a: number, b: number): number`, activeParameter 1), where v4's stale path returns null.
 
 ## `=` hoisting: the shared root of #4, #5 and #9
 
