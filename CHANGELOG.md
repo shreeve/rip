@@ -54,6 +54,30 @@ repository's pull requests.
   through a stub `ssh` subprocess seam), multiplexer dispatch, and
   timeout behavior — 61 tests, every expectation verified byte-for-byte
   against v3 as the oracle (#140)
+- `@rip-lang/ai` joins the libraries lane (security-reviewed, held for
+  owner review): the persistent multi-model AI consultation MCP stdio
+  server — `chat`, `discuss`, `panel`, `fresh_review`, conversation
+  management (list/get/delete/export/redact), content-hashed
+  attachments with change detection, latest-flagship autodetect
+  (`gpt`/`claude` resolved live from each provider's `/models` API,
+  cached 12h), per-call cost accounting with preflight/post-hoc caps,
+  and a SQLite store with corruption quarantine. Ported with v3's
+  public API as the owner-approved contract; the seven `lib/` modules
+  are v3-identical except one declared fix — v3 crashed whenever
+  discuss's change detection actually fired (`changeNote` read a
+  `prev_sha256` the adapters never supplied), so the loaded attachment
+  now carries it and the peer receives the documented before/after
+  hash note. Parity was proven by running one probe against both
+  toolchains over the same local provider double: byte-identical
+  output across all 11 tools, both adapters, and the JSON-RPC wire
+  (55 KB normalized), differing only on the fixed path. v3 shipped
+  zero tests; 95 here — everything network-facing runs against a
+  Bun.serve double with fake keys and a fetch shim that fails loudly
+  on any unexpected host, and the suite pins the security posture:
+  keys never in results, errors, or on disk; SSRF blocklist behavior
+  (including the documented IPv6-literal gap, pinned not fixed);
+  0700/0600 file modes; parameterized SQL; and a malicious model
+  response staying inert data (#PR)
 
 - `@rip-lang/x12` joins the libraries lane: the X12 EDI parser,
   editor, and query engine (270/271, 835, 837, ...) with path-based

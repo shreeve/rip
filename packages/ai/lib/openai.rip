@@ -1,0 +1,98 @@
+# ==============================================================================
+# openai.rip — OpenAI provider adapter
+#
+# Wraps /v1/chat/completions and /v1/models. Returns the normalized adapter
+# shape: { provider, listModels, chat }. Pricing and capability metadata are
+# applied in providers.rip; this module only handles HTTP and message shape.
+# ==============================================================================
+
+import * as cred from './credentials.rip'
+import * as att  from './attachments.rip'
+
+API =! 'https://api.openai.com/v1'
+
+export provider =! 'openai'
+
+requireKey = ->
+  key = cred.get('OPENAI_API_KEY')
+  raise "OPENAI_API_KEY not set" unless key
+  key
+
+headers = ->
+  'authorization': "Bearer #{requireKey()}"
+  'content-type': 'application/json'
+
+# ==============================================================================
+# Live model listing
+# ==============================================================================
+
+export listModels = ->
+  res = fetch! "#{API}/models", { headers: headers() }
+  raise "OpenAI /models returned HTTP #{res.status}" unless res.ok
+  data = res.json!
+  rows = data?.data or []
+  for row in rows
+    provider_model: row.id
+    id: "openai:#{row.id}"
+    created_at: row.created and new Date(row.created * 1000).toISOString()
+    raw: { owned_by: row.owned_by }
+
+# ==============================================================================
+# Chat
+# ==============================================================================
+
+renderUserContent = (text, attachments) ->
+  parts = []
+  parts.push { type: 'text', text } if text
+  block = att.renderText(attachments, { changed: attachments.filter((a) -> a.changed_since_last_view) }) if attachments?.length
+  parts.push { type: 'text', text: block } if block
+  parts
+
+buildMessages = ({ system, messages, attachments }) ->
+  out = []
+  out.push { role: 'system', content: system } if system
+  for msg, idx in messages
+    if msg.role is 'user' and idx is messages.length - 1 and attachments?.length
+      out.push { role: 'user', content: renderUserContent(msg.text, attachments) }
+    else
+      out.push { role: msg.role, content: msg.text }
+  out
+
+export chat = ({ model, system, messages, attachments, max_tokens }) ->
+  body =
+    model: model
+    messages: buildMessages({ system, messages, attachments })
+  body.max_completion_tokens = max_tokens if max_tokens
+
+  res = fetch! "#{API}/chat/completions",
+    method: 'POST'
+    headers: headers()
+    body: JSON.stringify(body)
+
+  data = res.json!
+  if data?.error
+    raise "OpenAI: #{data.error.message or JSON.stringify(data.error)}"
+  raise "OpenAI returned HTTP #{res.status}" unless res.ok
+
+  choice = data.choices?[0]
+  text = choice?.message?.content or ''
+  usage = data.usage or {}
+  finish = choice?.finish_reason or null
+
+  # Reasoning models spend `max_completion_tokens` on hidden reasoning before any
+  # visible output. Too small a cap and reasoning eats the whole budget, leaving
+  # finish_reason 'length' with empty content. Fail loud instead of returning ''.
+  if not text and finish is 'length'
+    reasoning = usage.completion_tokens_details?.reasoning_tokens or 0
+    detail = if reasoning then " — #{reasoning} reasoning tokens consumed the entire budget" else ''
+    raise "OpenAI returned no visible output: hit the token limit#{detail}. Reasoning models count hidden reasoning against max_tokens — raise it substantially or omit it to use the model default."
+
+  {
+    text
+    tokens_in:  usage.prompt_tokens     or 0
+    tokens_out: usage.completion_tokens or 0
+    reasoning_tokens: usage.completion_tokens_details?.reasoning_tokens or 0
+    cached_tokens:    usage.prompt_tokens_details?.cached_tokens or 0
+    finish_reason: finish
+    raw: data
+  }
