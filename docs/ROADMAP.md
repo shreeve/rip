@@ -48,10 +48,12 @@ but it must not block direct-path package implementation and tests.
 
 ### Independent libraries and tools
 
-The remaining first-party portfolio includes CSV, decimal, XML,
-authentication gate, and host provisioning packages. Each package earns
-its place through an independently runnable contract and current Rip
-types; implementations are reconsidered rather than copied mechanically.
+The first-party library portfolio is ported: CSV, decimal, XML (rsx),
+X12, HTTP, time, worker-swarm, interactive scripting, source printing,
+AI/MCP, and the authentication gate all ship with converted or new test
+suites. Host provisioning (stamp) is not ported by owner ruling. Each
+package earns its place through an independently runnable contract and
+current Rip types.
 
 ### Browser delivery
 
