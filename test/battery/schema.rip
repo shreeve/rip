@@ -2586,7 +2586,7 @@ type "derived schema emits a bare projection type", '''
     insertMany(rows: Create[]): Promise<Instance[]>;
     toSQL(options?: { dropFirst?: boolean; header?: string; idStart?: number }): string;
   }
-  type UserData = { firstName: string; lastName: string } & { id: number; createdAt: string; updatedAt: string };
+  type UserData = { firstName: string; lastName: string } & { id: number; createdAt: Date; updatedAt: Date };
   type UserCreate = { firstName: string; lastName: string };
   type User = UserData & { save(): Promise<User>; destroy(opts?: { hard?: boolean }): Promise<User>; ok(): boolean; errors(): SchemaIssue[]; markDirty(name: string): User; savedChanges: Map<string, [unknown, unknown]>; toJSON(): UserData };
   declare const User: ModelSchema<User, UserData, number, UserCreate>;
@@ -2661,7 +2661,7 @@ type "chained + exported derived schema emits one bare type each", '''
     insertMany(rows: Create[]): Promise<Instance[]>;
     toSQL(options?: { dropFirst?: boolean; header?: string; idStart?: number }): string;
   }
-  type UserData = { firstName: string; lastName: string } & { id: number; createdAt: string; updatedAt: string };
+  type UserData = { firstName: string; lastName: string } & { id: number; createdAt: Date; updatedAt: Date };
   type UserCreate = { firstName: string; lastName: string };
   type User = UserData & { save(): Promise<User>; destroy(opts?: { hard?: boolean }): Promise<User>; ok(): boolean; errors(): SchemaIssue[]; markDirty(name: string): User; savedChanges: Map<string, [unknown, unknown]>; toJSON(): UserData };
   declare const User: ModelSchema<User, UserData, number, UserCreate>;
@@ -3253,14 +3253,15 @@ test "@timestamps UPDATE bumps updated_at when fields change", modelHeader + '''
   vals = updates[0]?.params or []
   # The updated_at value lives at vals[length - 2] — last SET param
   # before the WHERE-clause id. Asserting on the exact position (and
-  # checking the value parses as an ISO string) catches both "wrong
-  # column" and "right column, garbage value" regressions, even if
-  # someone later reorders the SET clauses.
+  # checking the value is a real, VALID Date — the runtime manages
+  # temporals as Dates; the wire adapter encodes them to ISO-Z) catches
+  # both "wrong column" and "right column, garbage value" regressions,
+  # even if someone later reorders the SET clauses.
   tsVal = vals[vals.length - 2]
-  isIso = typeof tsVal is "string" and /^\\d{4}-\\d{2}-\\d{2}T/.test(tsVal)
+  isDate = tsVal instanceof Date and not Number.isNaN(tsVal.getTime())
   [
     sql.includes("\\"updated_at\\" = ?")
-    isIso
+    isDate
     tsVal isnt "T2"            # actually changed
     u.updatedAt is tsVal       # mirrored onto the instance
     u.savedChanges.get("updatedAt")?[0]

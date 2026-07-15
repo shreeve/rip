@@ -26,6 +26,9 @@ export type Column = {
 
 export type QueryResult = {
   columns: Column[];
+  /** Positional rows. Temporal columns (the TIMESTAMP family,
+   *  TIMESTAMPTZ, DATE — keyed by duckdbType) arrive decoded to real
+   *  `Date` objects; TIME and everything else pass through verbatim. */
   data: unknown[][];
   rowCount: number;
 };

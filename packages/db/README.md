@@ -43,6 +43,24 @@ catch error
   DDL back with the transaction, so the migration runner may claim a
   whole-file rollback.
 
+### Temporal values cross the wire as `Date`
+
+DuckDB temporal columns (the TIMESTAMP family, TIMESTAMPTZ, DATE —
+keyed by each column's `duckdbType`) decode to real JS `Date` objects
+at the adapter seam. The wire form is actively wrong for `new Date()`:
+a naive TIMESTAMP arrives with no `Z`/offset (`2024-03-15T10:30:00`),
+so parsing it in app code reads it as LOCAL and shifts every value by
+the host's UTC offset. Naive TIMESTAMP is defined as UTC wall-clock and
+decoded here — the ONE decode seam — so raw query results, the client's
+materializers, and the schema ORM's hydration all agree. TIME stays a
+string (it has no date component), and odd values (DuckDB's
+`infinity` sentinels, unexpected formats) pass through untouched.
+
+Symmetrically, a `Date` parameter encodes to an explicit ISO-8601 UTC
+string — nested Dates inside array/object params included — and an
+Invalid Date throws a `TypeError` instead of letting JSON silently
+serialize it to `null`.
+
 There is deliberately no `introspect()` method. Schema introspection for
 the migration runner reads DuckDB's own catalog directly through
 `query` (`information_schema`, `duckdb_constraints()`, `duckdb_indexes()`,

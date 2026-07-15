@@ -7,8 +7,13 @@
 // now, not at the idle TTL), a failed BEGIN drops its freshly-created
 // session instead of orphaning it, and a session response missing its
 // id refuses loudly rather than running BEGIN/COMMIT as independent
-// autocommit statements on the pool. The adapter reads the global
-// fetch, so each test swaps in a scripted double and restores it.
+// autocommit statements on the pool. It must also carry the same
+// temporal wire behavior (owner ruling on PORT-AUDIT D2): the design
+// is ONE decode seam at the wire, and both adapters are wire seams, so
+// temporal columns decode to real Date objects and Date params encode
+// to ISO-Z identically here — pinned below against packages/db's
+// temporal suite. The adapter reads the global fetch, so each test
+// swaps in a scripted double and restores it.
 import { test, expect, describe } from 'bun:test';
 
 const orm = await import('../../src/runtime/schema-orm.js');
@@ -110,5 +115,69 @@ describe('default adapter transactions (session lifecycle)', () => {
     });
     // Refused before BEGIN: nothing ever ran unisolated on the pool.
     expect(fetch.calls.filter(c => c.url.endsWith('/sql')).length).toBe(0);
+  });
+});
+
+describe('default adapter temporal wire (decodes identically to packages/db harborAdapter)', () => {
+  const UTC = Date.UTC(2024, 2, 15, 10, 30, 0);
+  const envelope = (columns, data) => ({
+    '/sql': { json: { ok: true, columns, data, rowCount: data.length } },
+  });
+
+  test('temporal columns decode to real Date objects, keyed by duckdbType', async () => {
+    const fetch = fetchDouble(envelope(
+      [
+        { name: 'id', duckdbType: 'INTEGER', lossless: true },
+        { name: 'ts', duckdbType: 'TIMESTAMP', lossless: true },
+        { name: 'tz', duckdbType: 'TIMESTAMP WITH TIME ZONE', lossless: true },
+        { name: 'd', duckdbType: 'DATE', lossless: true },
+        { name: 't', duckdbType: 'TIME', lossless: true },
+      ],
+      [[7, '2024-03-15T10:30:00', '2024-03-15T10:30:00Z', '2024-03-15', '10:30:00']]));
+    const { data } = await withFetch(fetch, () => adapter().query('SELECT * FROM t'));
+    const [id, ts, tz, d, t] = data[0];
+    expect(id).toBe(7); // non-temporal untouched
+    expect(ts instanceof Date).toBe(true);
+    expect(ts.getTime()).toBe(UTC); // naive TIMESTAMP is UTC wall-clock — no host-offset shift
+    expect(tz.getTime()).toBe(UTC);
+    expect(d.getUTCDate()).toBe(15); // DATE stays civil (UTC midnight)
+    expect(t).toBe('10:30:00'); // TIME has no date component: stays a string
+  });
+
+  test('odd values pass through; a no-temporal result is untouched', async () => {
+    const fetch = fetchDouble(envelope(
+      [{ name: 'ts', duckdbType: 'TIMESTAMP', lossless: true }], [['infinity'], [null]]));
+    const { data } = await withFetch(fetch, () => adapter().query('SELECT ts FROM t'));
+    expect(data).toEqual([['infinity'], [null]]);
+  });
+
+  test('Date params encode to ISO-Z, nested values included; Invalid Date throws loudly', async () => {
+    const fetch = fetchDouble(envelope([], []));
+    await withFetch(fetch, () => adapter().query(
+      'INSERT INTO t VALUES (?, ?, ?)', [new Date(UTC), { at: new Date(0) }, 'x']));
+    expect(fetch.calls[0].body.params).toEqual(
+      ['2024-03-15T10:30:00.000Z', { at: '1970-01-01T00:00:00.000Z' }, 'x']);
+    await withFetch(fetch, async () => {
+      await expect(adapter().query('INSERT INTO t VALUES (?)', [new Date('nope')]))
+        .rejects.toThrow(/Invalid Date/);
+    });
+  });
+
+  test('transaction statements ride the same seam', async () => {
+    const fetch = fetchDouble({
+      '/sql/sessions/new': { json: { sessionId: 'sess-t' } },
+      '/sql': { json: { ok: true, columns: [{ name: 'ts', duckdbType: 'TIMESTAMP', lossless: true }], data: [['2024-03-15T10:30:00']], rowCount: 1 } },
+    });
+    const { decodedCell } = await withFetch(fetch, async () => {
+      const tx = await adapter().begin();
+      await tx.query('INSERT INTO t VALUES (?)', [new Date(UTC)]);
+      const res = await tx.query('SELECT ts FROM t');
+      await tx.commit();
+      return { decodedCell: res.data[0][0] };
+    });
+    const insert = fetch.calls.find(c => c.body?.sql?.startsWith('INSERT'));
+    expect(insert.body.params).toEqual(['2024-03-15T10:30:00.000Z']);
+    expect(decodedCell instanceof Date).toBe(true);
+    expect(decodedCell.getTime()).toBe(UTC);
   });
 });
