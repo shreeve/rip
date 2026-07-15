@@ -1,16 +1,20 @@
 {
   "name": "@rip-lang/csv",
-  "version": "0.0.0",
+  "version": "4.0.0",
   "private": true,
   "type": "module",
+  "description": "Fast, flexible CSV parser and writer — indexOf ratchet, auto-detect, zero dependencies",
   "exports": {
     ".": "./csv.rip"
   },
   "scripts": {
-    "test": "bun test --timeout 15000"
+    "test": "../../bin/rip test.rip"
   },
   "files": [
-    "*.rip",
+    "csv.rip",
     "README.md"
-  ]
+  ],
+  "devDependencies": {
+    "@rip-lang/testing": "workspace:*"
+  }
 }

@@ -1,0 +1,75 @@
+# ==============================================================================
+# @rip-lang/testing — shared helpers for package test.rip files
+#
+#   import { test, eq, ok, throws } from '@rip-lang/testing'
+#
+#   test "does the thing", ->
+#     eq CSV.read("a,b\n"), [['a','b']]
+#
+# The tally prints automatically when the process exits. A failed case
+# sets process.exitCode so CI sees a non-zero status.
+#
+# Keep this file tiny. Package tests should read like Rip, not like a
+# framework. The language battery keeps its own harness
+# (test/support/testing.js) — test/code/fail/type over compiler snippets.
+# ==============================================================================
+
+RESET =! "\x1b[0m"
+BOLD  =! "\x1b[1m"
+GREEN =! "\x1b[32m"
+RED   =! "\x1b[31m"
+DIM   =! "\x1b[2m"
+
+# Color when stdout is a TTY (or FORCE_COLOR), unless NO_COLOR is set.
+useColor =! if process.env.NO_COLOR?
+  false
+else if process.env.FORCE_COLOR? and "#{process.env.FORCE_COLOR}" isnt '0'
+  true
+else
+  !!process.stdout.isTTY
+
+paint = (code, text) ->
+  if useColor then "#{code}#{text}#{RESET}" else text
+
+pass = 0
+fail = 0
+_reported = false
+
+report = ->
+  return if _reported
+  _reported = true
+  total = pass + fail
+  passed = paint(GREEN, "#{pass} passed")
+  failed = paint((if fail > 0 then RED else DIM), "#{fail} failed")
+  console.log "\n#{paint(BOLD, "#{total} tests")}: #{passed}, #{failed}\n"
+
+process.on 'exit', report
+
+export def test(name, fn)
+  try
+    fn()
+    pass++
+    console.log "  #{paint(GREEN, '✓')} #{name}"
+  catch e
+    fail++
+    process.exitCode = 1
+    console.log "  #{paint(RED, '✗')} #{name}: #{e.message}"
+
+# Deep equality via JSON — good enough for the value shapes packages pin
+# (arrays, plain objects, strings, numbers, null). Not for BigInt/Map/cycles.
+export def eq(a, b)
+  ja = JSON.stringify(a)
+  jb = JSON.stringify(b)
+  unless ja is jb
+    throw new Error "expected #{jb}, got #{ja}"
+
+export def ok(cond, message = 'assertion failed')
+  throw new Error(message) unless cond
+
+export def throws(fn, errType = null)
+  threw = false
+  try
+    fn()
+  catch e
+    threw = if errType? then e instanceof errType else true
+  throw new Error('expected throw') unless threw

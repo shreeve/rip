@@ -1,13 +1,15 @@
-# @rip-lang/csv — fast, flexible CSV parser and writer.
+# ==============================================================================
+# csv — Fast, flexible CSV parser and writer for Rip
 #
-# The engine is an indexOf ratchet: the JS engine's native indexOf jumps
-# to the next delimiter, newline, or quote, skipping bulk content in a
-# single native call — no regex in the hot loop. A probe of the first
-# ~8KB auto-detects delimiter, quoting, escaping, BOM, and line endings.
-# Reading supports excel mode, relax mode, headers, comments, and
-# streaming via row callback; writing supports compact/full quoting,
-# leading-zero protection, and reusable writer instances. `read`/`write`
-# are pure string work; `load`/`save` and the CLI use Bun file APIs.
+# Author: Steve Shreeve (steve.shreeve@gmail.com)
+#   Date: February 6, 2026
+#
+# Engine: indexOf ratchet — SIMD-accelerated scanning via the JS engine's
+#         native indexOf, skipping bulk content in a single call. No regex
+#         in the hot loop. Auto-detects delimiter, quoting, escaping, BOM,
+#         and line endings. Supports excel mode, relax mode, headers, comments,
+#         streaming via row callback, and reusable writer instances.
+# ==============================================================================
 
 # ==[ Constants ]==
 

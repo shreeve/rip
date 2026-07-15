@@ -1,0 +1,14 @@
+{
+  "name": "@rip-lang/testing",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Tiny Rip harness for first-party package test.rip files (test, eq, ok, throws)",
+  "exports": {
+    ".": "./testing.rip"
+  },
+  "files": [
+    "testing.rip",
+    "README.md"
+  ]
+}
