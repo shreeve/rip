@@ -49,7 +49,6 @@ but it must not block direct-path package implementation and tests.
 ### Independent libraries and tools
 
 The remaining first-party portfolio includes CSV, decimal, XML,
-AI/MCP,
 authentication gate, and host provisioning packages. Each package earns
 its place through an independently runnable contract and current Rip
 types; implementations are reconsidered rather than copied mechanically.
