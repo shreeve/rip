@@ -29,7 +29,6 @@ const fakeAdapter = (replies = []) => {
         async rollback() { state.rolledBack = true; },
       };
     },
-    introspect: async () => ({ tables: [] }),
     capabilities: { tx: true, ddlTransactional: true },
   };
 };

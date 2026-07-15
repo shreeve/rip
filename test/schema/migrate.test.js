@@ -76,8 +76,66 @@ const table = (name, cols, opts = {}) => ({
 function migrateAdapter(deployed, opts = {}) {
   const history = [];
   const calls = [];
+  // The single-row migration lock, PK-guarded: a second acquire while
+  // held raises the duplicate-key error the runner classifies as
+  // "lock held"; release clears it; --force deletes then re-acquires.
+  const lock = { held: false };
+  // Faithfully answer the DuckDB catalog queries the runner's
+  // introspect() issues, synthesizing them from the canonical `deployed`
+  // spec — exactly what real DuckDB returns over harbor, so the runner's
+  // parse/rebuild round-trips through the same path the live adapter uses.
+  const res = (names, rows) => ({ columns: names.map((name) => ({ name })), data: rows, rowCount: rows.length });
+  const catalogAnswer = (sql) => {
+    const tables = deployed.tables || [];
+    if (sql.includes('information_schema.tables')) {
+      return res(['table_name'], tables.map((t) => [t.name]));
+    }
+    if (sql.includes('information_schema.columns')) {
+      const rows = [];
+      for (const t of tables) for (const c of t.columns) {
+        rows.push([t.name, c.name, c.type, c.notNull ? 'NO' : 'YES', c.default ?? null]);
+      }
+      return res(['table_name', 'column_name', 'data_type', 'is_nullable', 'column_default'], rows);
+    }
+    if (sql.includes('duckdb_constraints()')) {
+      const rows = [];
+      for (const t of tables) {
+        if (t.primaryKey) rows.push([t.name, 'PRIMARY KEY', [t.primaryKey], 'PRIMARY KEY (' + t.primaryKey + ')']);
+        for (const c of t.columns) if (c.unique) rows.push([t.name, 'UNIQUE', [c.name], 'UNIQUE (' + c.name + ')']);
+        for (const fk of t.foreignKeys || []) {
+          rows.push([t.name, 'FOREIGN KEY', [fk.column],
+            'FOREIGN KEY (' + fk.column + ') REFERENCES ' + fk.refTable + '(' + fk.refColumn + ')']);
+        }
+      }
+      return res(['table_name', 'constraint_type', 'constraint_column_names', 'constraint_text'], rows);
+    }
+    if (sql.includes('duckdb_indexes()')) {
+      const rows = [];
+      for (const t of tables) for (const ix of t.indexes || []) {
+        rows.push([t.name, ix.name, ix.unique === true, ix.columns]);
+      }
+      return res(['table_name', 'index_name', 'is_unique', 'expressions'], rows);
+    }
+    if (sql.includes('duckdb_sequences()')) {
+      const rows = [];
+      for (const t of tables) if (t.sequence) rows.push([t.sequence.name, t.sequence.start]);
+      return res(['sequence_name', 'start_value'], rows);
+    }
+    return null;
+  };
   const answer = (sql, params, staged) => {
     if (opts.failOn && opts.failOn.test(sql)) throw new Error(opts.failMessage || ('injected failure: ' + sql));
+    const catalog = catalogAnswer(sql);
+    if (catalog) return catalog;
+    if (sql.startsWith('DELETE FROM _rip_migration_lock')) {
+      lock.held = false;
+      return { columns: [], data: [], rowCount: 1 };
+    }
+    if (sql.startsWith('INSERT INTO _rip_migration_lock')) {
+      if (lock.held) throw new Error('Duplicate key "id: 1" violates primary key constraint');
+      lock.held = true;
+      return { columns: [], data: [], rowCount: 1 };
+    }
     if (sql.startsWith('SELECT version')) {
       return {
         columns: ['version', 'name', 'checksum', 'applied_at'].map((n) => ({ name: n })),
@@ -101,8 +159,7 @@ function migrateAdapter(deployed, opts = {}) {
     return { columns: [], data: [], rowCount: 0 };
   };
   const adapter = {
-    history, calls,
-    introspect: async () => deployed,
+    history, calls, lock,
     async query(sql, params = []) {
       calls.push({ sql, params });
       return answer(sql, params, null);
@@ -884,7 +941,9 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
       const r = await scoped(adapter, () => mig.migrate({ dir: mdir }));
       expect(r.ran).toEqual(['0001_a', '0002_b']);
       expect(r.transactional).toBe(true);
-      const stream = adapter.calls.map((c) => (c.sql.startsWith('<') ? c.sql : (c.tx ? 'stmt' : 'main')));
+      const stream = adapter.calls
+        .filter((c) => !/_rip_migration_lock/.test(c.sql)) // lock acquire/release is orthogonal infrastructure
+        .map((c) => (c.sql.startsWith('<') ? c.sql : (c.tx ? 'stmt' : 'main')));
       // ensure-table + applied-select on main, then two clean transactions.
       expect(stream.join(' ')).toBe('main main <BEGIN> stmt stmt <COMMIT> <BEGIN> stmt stmt <COMMIT>');
       expect(adapter.history.length).toBe(2);
@@ -1012,6 +1071,56 @@ describe('migrate: migrate — history, checksums, conflicts, idempotence', () =
     await K4.scope(async () => {
       K4.setAdapter(migrateAdapter({ tables: [] }));
       await expect(mig.plan()).rejects.toThrow(/no :model schemas are registered/);
+    });
+  });
+
+  describe('the migration lock', () => {
+    const lockCalls = (adapter) => adapter.calls.map((c) => c.sql).filter((s) => /_rip_migration_lock/.test(s));
+
+    test('migrate acquires the lock and releases it after applying', async () => {
+      await withDir(async (mdir) => {
+        writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
+        const adapter = migrateAdapter({ tables: [] });
+        await scoped(adapter, () => mig.migrate({ dir: mdir }));
+        expect(lockCalls(adapter).some((s) => s.startsWith('INSERT INTO _rip_migration_lock'))).toBe(true);
+        expect(lockCalls(adapter).some((s) => s.startsWith('DELETE FROM _rip_migration_lock'))).toBe(true);
+        expect(adapter.lock.held).toBe(false); // released
+      });
+    });
+
+    test('the lock is released even when a migration file fails', async () => {
+      await withDir(async (mdir) => {
+        writeFileSync(join(mdir, '0001_bad.sql'), 'CREATE BROKEN;\n');
+        const adapter = migrateAdapter({ tables: [] }, { failOn: /BROKEN/ });
+        await scoped(adapter, async () => {
+          await expect(mig.migrate({ dir: mdir })).rejects.toThrow(/0001_bad failed/);
+        });
+        expect(adapter.lock.held).toBe(false); // released in the finally, not left stuck
+      });
+    });
+
+    test('a held lock makes a concurrent migrate fail fast with a named remedy', async () => {
+      await withDir(async (mdir) => {
+        writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
+        const adapter = migrateAdapter({ tables: [] });
+        adapter.lock.held = true; // a peer run holds it
+        await scoped(adapter, async () => {
+          await expect(mig.migrate({ dir: mdir })).rejects.toThrow(/migration lock is held.*--force/s);
+        });
+        // it never touched the migration files while locked out
+        expect(adapter.calls.some((c) => /CREATE TABLE a/.test(c.sql))).toBe(false);
+      });
+    });
+
+    test('--force takes over a stale lock and applies', async () => {
+      await withDir(async (mdir) => {
+        writeFileSync(join(mdir, '0001_a.sql'), 'CREATE TABLE a (x INTEGER);\n');
+        const adapter = migrateAdapter({ tables: [] });
+        adapter.lock.held = true; // a crashed run left it behind
+        const r = await scoped(adapter, () => mig.migrate({ dir: mdir, force: true }));
+        expect(r.ran).toEqual(['0001_a']);
+        expect(adapter.lock.held).toBe(false); // cleared, applied, released
+      });
     });
   });
 });

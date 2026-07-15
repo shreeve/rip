@@ -178,21 +178,7 @@ describe('error taxonomy', () => {
   });
 });
 
-describe('introspect and capabilities', () => {
-  test('introspect returns the harbor schema metadata, keyed by schema+table', async () => {
-    const fetch = fetchDouble({ '/sql': { json: {
-      columns: [{ name: 'table_schema' }, { name: 'table_name' }, { name: 'column_name' }, { name: 'data_type' }],
-      data: [['main', 'users', 'id', 'INTEGER'], ['main', 'users', 'name', 'VARCHAR'], ['other', 'users', 'x', 'INTEGER']],
-      rowCount: 3,
-    } } });
-    const meta = await harborAdapter({ url: 'http://h', fetch }).introspect();
-    // same-named tables in different schemas do not merge their columns
-    expect(meta.tables.length).toBe(2);
-    expect(meta.tables[0]).toEqual({ schema: 'main', name: 'users', columns: [{ name: 'id', type: 'INTEGER' }, { name: 'name', type: 'VARCHAR' }] });
-    expect(meta.tables[1].schema).toBe('other');
-    expect(fetch.calls[0].body.sql).toContain("table_schema NOT IN");
-  });
-
+describe('capabilities', () => {
   test('capabilities declare transactional DDL', () => {
     const adapter = harborAdapter({ url: 'http://h', fetch: fetchDouble({}) });
     expect(adapter.capabilities).toEqual({ tx: true, ddlTransactional: true });
@@ -200,10 +186,11 @@ describe('introspect and capabilities', () => {
 });
 
 describe('contract shape', () => {
-  test('the adapter implements the four-method contract', () => {
+  test('the adapter implements the query + begin contract with capabilities (no introspect)', () => {
     const adapter = harborAdapter({ url: 'http://h', fetch: fetchDouble({}) });
-    for (const method of ['query', 'begin', 'introspect']) expect(typeof adapter[method]).toBe('function');
+    for (const method of ['query', 'begin']) expect(typeof adapter[method]).toBe('function');
     expect(typeof adapter.capabilities).toBe('object');
+    expect('introspect' in adapter).toBe(false); // introspection is the runner's job, via query
   });
 
   test('the error types form a hierarchy under DbError', () => {
