@@ -24,11 +24,15 @@ Rip compiles to TypeScript, and this extension puts the full TypeScript language
 
 ## Configuration
 
-Both are optional; the extension works out of the box.
+None needed — the extension works out of the box. Two files tune it, and both are optional.
 
-**`tsconfig.json`** governs lib, target, and strict-mode checks on your typed code, exactly as it would for `.ts` files. Without one, sensible defaults apply.
+### `tsconfig.json`
 
-A `rip` block in **`package.json`** tunes the checker itself:
+Governs lib, target, and strict-mode checks on your typed code, exactly as it would for `.ts` files. Without one, sensible defaults apply.
+
+### `package.json`
+
+A `rip` block tunes the checker itself:
 
 ```json
 {
@@ -39,5 +43,6 @@ A `rip` block in **`package.json`** tunes the checker itself:
 }
 ```
 
-- **`strict`** (default `false`) — report missing type annotations. Rip is gradually typed, so unannotated code is allowed by default; turn this on to flag it. It never weakens checking of code you *have* annotated.
-- **`noCheck`** (default `[]`) — a glob, or list of globs, whose type errors are silenced. The matched files stay in the program, so their exports still resolve for everything that imports them — the project-wide form of a per-file `# @ts-nocheck`. Handy for quieting untyped or legacy paths.
+**`strict`** (default `false`) reports missing type annotations. Rip is gradually typed, so unannotated code is legal by default; turn this on to flag it. Code you *have* annotated is checked fully either way.
+
+**`noCheck`** (default `[]`) silences type errors in files matching a glob, or a list of globs. Matched files stay in the program, so their exports still resolve for everything that imports them — the project-wide form of a per-file `# @ts-nocheck`. Handy for quieting untyped or legacy paths.
