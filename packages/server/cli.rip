@@ -39,7 +39,7 @@ flagSpec = (token) ->
       { name: name.slice(3), negated: true, inline: null }
     else
       { name, negated: false, inline }
-  else if token.startsWith '-' and token.length > 1
+  else if token.startsWith('-') and token.length > 1
     { name: aliasIndex[token.slice(1)] ?? token.slice(1), negated: false, inline: null }
   else
     null
