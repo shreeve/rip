@@ -36,8 +36,17 @@ export class QueryError extends DbError
 export def isDbError(value: any): boolean
   value instanceof DbError
 
+# A result column is an object, never a bare name: harbor sends
+# `{ name, duckdbType, lossless }` per column, and the ORM's row
+# hydration reads `column.name`. `type` is aliased from `duckdbType` so
+# the ORM and migration runner read a stable field; harbor's own extras
+# ride along untouched.
+export type Column =
+  name: string
+  type?: string
+
 export type QueryResult =
-  columns: string[]
+  columns: Column[]
   data: any[][]
   rowCount: number
 
@@ -113,8 +122,20 @@ export def harborAdapter(opts: HarborOpts = {}): Adapter
       throw error
     data
 
+  # harbor's success envelope → the public QueryResult. Each column is
+  # normalized to a `{ name, type }` object (aliasing `duckdbType`) with
+  # harbor's per-column extras preserved; a bare-string column degrades
+  # to `{ name }` rather than spreading into char indices; `data`/
+  # `rowCount` pass through. A write with no result set arrives as empty
+  # columns and data.
+  toColumn = (c: any) ->
+    if typeof c is 'string' then { name: c } else { ...c, type: c.duckdbType ?? c.type }
+  toResult = (env: any): QueryResult ->
+    columns: any = (env?.columns ?? []).map toColumn
+    { columns, data: env?.data ?? [], rowCount: env?.rowCount ?? (env?.data?.length ?? 0) }
+
   query = (sql: string, params: any = null): Promise<QueryResult> ->
-    post '/sql', (if params?.length then { sql, params } else { sql }), sql
+    toResult await post '/sql', (if params?.length then { sql, params } else { sql }), sql
 
   begin = (options: any = {}): Promise<Transaction> ->
     session = await post '/sql/sessions/new', {}
@@ -124,7 +145,7 @@ export def harborAdapter(opts: HarborOpts = {}): Adapter
     throw new DbError 'db: harbor returned no session id for the transaction' unless sessionId?
     run = (sql: string, params: any = null): Promise<QueryResult> ->
       body = if params?.length then { sql, params, sessionId } else { sql, sessionId }
-      post '/sql', body, sql
+      toResult await post '/sql', body, sql
     drop = ->
       # Best-effort: harbor's idle TTL reaps an abandoned session, so a
       # failed DELETE only delays cleanup, never leaks a transaction.

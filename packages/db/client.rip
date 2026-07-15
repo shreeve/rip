@@ -17,16 +17,18 @@ export class CancelledError extends Error
     super message
     @name = 'CancelledError'
 
-# columns + row-arrays → row objects. A duplicate column name keeps the
-# last value, matching the SQL engine's own projection.
+# The adapter's `{ columns, data }` → row objects. Each adapter column
+# is a `{ name, type }` object (harbor's shape), so a row array keys by
+# `column.name`; the materialized result reports the column names. A
+# duplicate name keeps the last value, matching the engine's projection.
 materialize = (result) ->
-  columns = result?.columns ?? []
+  names = (result?.columns ?? []).map (column) -> column.name
   data = result?.data ?? []
   rows = for row in data
     obj: any = {}
-    obj[columns[i]] = value for value, i in row
+    obj[names[i]] = value for value, i in row
     obj
-  { rows, columns, rowCount: result?.rowCount ?? rows.length }
+  { rows, columns: names, rowCount: result?.rowCount ?? rows.length }
 
 # Race a query against an abort signal. An already-aborted signal
 # rejects before dispatch; an abort mid-flight rejects the caller while

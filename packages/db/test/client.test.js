@@ -36,7 +36,7 @@ const fakeAdapter = (replies = []) => {
 
 describe('materialization', () => {
   test('query returns rows as objects keyed by column, with metadata', async () => {
-    const adapter = fakeAdapter([{ columns: ['id', 'name'], data: [[1, 'Ada'], [2, 'Bo']], rowCount: 2 }]);
+    const adapter = fakeAdapter([{ columns: [{ name: 'id' }, { name: 'name' }], data: [[1, 'Ada'], [2, 'Bo']], rowCount: 2 }]);
     const result = await createClient(adapter).query('SELECT id, name FROM u');
     expect(result.rows).toEqual([{ id: 1, name: 'Ada' }, { id: 2, name: 'Bo' }]);
     expect(result.columns).toEqual(['id', 'name']);
@@ -45,10 +45,10 @@ describe('materialization', () => {
 
   test('rows/one/value are the convenience projections', async () => {
     const adapter = fakeAdapter([
-      { columns: ['id'], data: [[7], [8]], rowCount: 2 },
-      { columns: ['id'], data: [[7]], rowCount: 1 },
-      { columns: ['n'], data: [[42]], rowCount: 1 },
-      { columns: ['id'], data: [], rowCount: 0 },
+      { columns: [{ name: 'id' }], data: [[7], [8]], rowCount: 2 },
+      { columns: [{ name: 'id' }], data: [[7]], rowCount: 1 },
+      { columns: [{ name: 'n' }], data: [[42]], rowCount: 1 },
+      { columns: [{ name: 'id' }], data: [], rowCount: 0 },
     ]);
     const db = createClient(adapter);
     expect(await db.rows('SELECT id FROM u')).toEqual([{ id: 7 }, { id: 8 }]);
@@ -74,7 +74,7 @@ describe('materialization', () => {
 describe('transactions', () => {
   test('a returning callback commits and yields its value', async () => {
     const adapter = fakeAdapter([
-      { columns: ['id'], data: [[1]], rowCount: 1 },
+      { columns: [{ name: 'id' }], data: [[1]], rowCount: 1 },
     ]);
     const result = await createClient(adapter).transaction(async tx => {
       const row = await tx.one('INSERT INTO u (name) VALUES (?) RETURNING id', ['Ada']);
@@ -101,7 +101,7 @@ describe('transactions', () => {
   });
 
   test('the tx client materializes exactly like the top-level client', async () => {
-    const adapter = fakeAdapter([{ columns: ['id', 'name'], data: [[1, 'Ada']], rowCount: 1 }]);
+    const adapter = fakeAdapter([{ columns: [{ name: 'id' }, { name: 'name' }], data: [[1, 'Ada']], rowCount: 1 }]);
     const rows = await createClient(adapter).transaction(tx => tx.rows('SELECT id, name FROM u'));
     expect(rows).toEqual([{ id: 1, name: 'Ada' }]);
   });
@@ -139,7 +139,7 @@ describe('transactions', () => {
   });
 
   test('a nested transaction joins the outer one — no second begin', async () => {
-    const adapter = fakeAdapter([{ columns: ['id'], data: [[1]], rowCount: 1 }]);
+    const adapter = fakeAdapter([{ columns: [{ name: 'id' }], data: [[1]], rowCount: 1 }]);
     let beginCount = 0;
     const wrapped = { ...adapter, begin: async (...a) => { beginCount += 1; return adapter.begin(...a); } };
     await createClient(wrapped).transaction(async tx => {
@@ -171,7 +171,7 @@ describe('cancellation', () => {
   });
 
   test('a completed query is unaffected by a later abort', async () => {
-    const adapter = fakeAdapter([{ columns: ['n'], data: [[1]], rowCount: 1 }]);
+    const adapter = fakeAdapter([{ columns: [{ name: 'n' }], data: [[1]], rowCount: 1 }]);
     const controller = new AbortController();
     const result = await createClient(adapter).query('SELECT 1', [], { signal: controller.signal });
     controller.abort();
