@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { buildRoutes, createRouter } from '@rip-lang/app';
+import { browserAdapter, buildRoutes, createRouter } from '@rip-lang/app';
 import { __effect } from '../../../src/runtime/reactive.js';
 
 const FILES = [
@@ -14,8 +14,10 @@ const manifest = () => buildRoutes(FILES);
 
 const fakeAdapter = (initial = '/') => {
   const listeners = new Set();
+  const watchers = new Set();
   const entries = [{ url: initial, state: null }];
   let index = 0;
+  let position = { y: 7 };
   const calls = { push: [], replace: [], saves: 0, restores: [], tops: 0 };
   return {
     read: () => entries[index].url,
@@ -41,13 +43,16 @@ const fakeAdapter = (initial = '/') => {
       return () => listeners.delete(fn);
     },
     scroll: {
-      save() { calls.saves += 1; return { y: 7 }; },
-      restore(position) { calls.restores.push(position); },
+      save() { calls.saves += 1; return { ...position }; },
+      restore(saved) { calls.restores.push(saved); },
       top() { calls.tops += 1; },
+      watch(fn) { watchers.add(fn); return () => watchers.delete(fn); },
     },
+    setScroll(y) { position = { y }; for (const fn of [...watchers]) fn(); },
     calls,
     entries,
     listeners,
+    watchers,
   };
 };
 
@@ -203,6 +208,44 @@ describe('history traversal', () => {
   });
 });
 
+describe('continuous scroll save', () => {
+  test('a traversal departure preserves the position reached after arrival', async () => {
+    const { adapter, router } = makeRouter();
+    router.init();
+    router.push('/about');
+    adapter.setScroll(42);
+    await Bun.sleep(120);
+    expect(adapter.entries[1].state).toEqual({ __ripScroll: { y: 42 } });
+    adapter.go(-1);
+    adapter.go(1);
+    expect(adapter.calls.restores.at(-1)).toEqual({ y: 42 });
+  });
+
+  test('the save is throttled — a burst coalesces to one trailing write of the latest position', async () => {
+    const { adapter, router } = makeRouter();
+    router.init();
+    const writes = adapter.calls.replace.length;
+    adapter.setScroll(10);
+    adapter.setScroll(20);
+    adapter.setScroll(30);
+    await Bun.sleep(120);
+    expect(adapter.calls.replace.length).toBe(writes + 1);
+    expect(adapter.entries[0].state).toEqual({ __ripScroll: { y: 30 } });
+  });
+
+  test('destroy stops the watch and cancels a pending save; init re-subscribes', async () => {
+    const { adapter, router } = makeRouter();
+    router.init();
+    adapter.setScroll(9);
+    router.destroy();
+    await Bun.sleep(120);
+    expect(adapter.entries[0].state).toBeNull();
+    expect(adapter.watchers.size).toBe(0);
+    router.init();
+    expect(adapter.watchers.size).toBe(1);
+  });
+});
+
 describe('onNavigate', () => {
   test('callbacks receive a navigation snapshot after each successful resolve', () => {
     const { router } = makeRouter();
@@ -340,11 +383,30 @@ describe('stability and reactivity', () => {
     dispose();
   });
 
-  test('navigating is a writable flag', () => {
+  test('navigating is a writable flag behind a 100 ms grace', async () => {
     const { router } = makeRouter();
     expect('navigating' in router).toBeTrue();
     router.navigating = true;
+    expect(router.navigating).toBeFalse();
+    await Bun.sleep(120);
     expect(router.navigating).toBeTrue();
+  });
+
+  test('a navigation that finishes inside the grace never shows navigating', async () => {
+    const { router } = makeRouter();
+    router.navigating = true;
+    router.navigating = false;
+    await Bun.sleep(120);
+    expect(router.navigating).toBeFalse();
+  });
+
+  test('a slow navigation shows navigating and clears immediately on completion', async () => {
+    const { router } = makeRouter();
+    router.navigating = true;
+    await Bun.sleep(120);
+    expect(router.navigating).toBeTrue();
+    router.navigating = false;
+    expect(router.navigating).toBeFalse();
   });
 });
 
@@ -430,6 +492,82 @@ describe('minimal adapters', () => {
     router.push('/about');
     router.back();
     expect(router.current.route.file).toBe('_route/index.rip');
+  });
+});
+
+describe('browserAdapter scroll restore', () => {
+  // A fake window with a hand-cranked frame scheduler: tick() runs the
+  // frames queued so far, so each retry is observable in isolation.
+  const fakeBrowser = () => {
+    const frames = [];
+    const scrolls = [];
+    const win = {
+      history: { scrollRestoration: 'auto', state: null, pushState() {}, replaceState() {}, go() {} },
+      location: { pathname: '/', search: '', hash: '' },
+      innerHeight: 100,
+      scrollX: 0,
+      scrollY: 0,
+      document: { documentElement: { scrollHeight: 100 } },
+      requestAnimationFrame(fn) { frames.push(fn); },
+      scrollTo(x, y) { scrolls.push({ x, y }); win.scrollX = x; win.scrollY = y; },
+      addEventListener() {},
+      removeEventListener() {},
+    };
+    const tick = () => { for (const fn of frames.splice(0)) fn(); };
+    return { win, scrolls, tick };
+  };
+
+  const withWindow = (win, run) => {
+    globalThis.window = win;
+    try { return run(browserAdapter()); } finally { delete globalThis.window; }
+  };
+
+  test('restore retries across frames until the content height allows the target', () => {
+    const { win, scrolls, tick } = fakeBrowser();
+    withWindow(win, adapter => {
+      adapter.scroll.restore({ x: 0, y: 500 });
+      expect(scrolls).toEqual([]);
+      tick();
+      expect(scrolls.at(-1)).toEqual({ x: 0, y: 0 });
+      win.document.documentElement.scrollHeight = 700;
+      tick();
+      expect(scrolls.at(-1)).toEqual({ x: 0, y: 500 });
+      tick();
+      expect(scrolls.length).toBe(2);
+    });
+  });
+
+  test('restore gives up cleanly after 20 frames', () => {
+    const { win, scrolls, tick } = fakeBrowser();
+    withWindow(win, adapter => {
+      adapter.scroll.restore({ x: 0, y: 500 });
+      for (let i = 0; i < 30; i += 1) tick();
+      expect(scrolls.length).toBe(20);
+      expect(scrolls.every(s => s.y === 0)).toBeTrue();
+    });
+  });
+
+  test('a newer restore or top() supersedes a pending retry loop', () => {
+    const { win, scrolls, tick } = fakeBrowser();
+    withWindow(win, adapter => {
+      adapter.scroll.restore({ x: 0, y: 500 });
+      tick();
+      expect(scrolls.length).toBe(1);
+      adapter.scroll.top();
+      expect(scrolls.at(-1)).toEqual({ x: 0, y: 0 });
+      tick();
+      tick();
+      expect(scrolls.length).toBe(2);
+    });
+  });
+
+  test('restore(null) stays a no-op', () => {
+    const { win, scrolls, tick } = fakeBrowser();
+    withWindow(win, adapter => {
+      adapter.scroll.restore(null);
+      tick();
+      expect(scrolls).toEqual([]);
+    });
   });
 });
 

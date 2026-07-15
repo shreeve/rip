@@ -238,6 +238,7 @@ export type RouterAdapter = {
     save?(): unknown;
     restore?(position: unknown): void;
     top?(): void;
+    watch?(fn: () => void): () => void;
   };
 };
 
