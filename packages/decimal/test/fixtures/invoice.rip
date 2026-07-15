@@ -1,0 +1,10 @@
+import '@rip-lang/decimal/coercers'
+
+export Invoice = schema
+  amount! ~:Decimal
+  tip? ~:Decimal
+
+# Coercer names resolve lazily at parse time, so ~:Dec2 may register
+# after this module loads (the coercers test does exactly that).
+export Custom = schema
+  n! ~:Dec2
