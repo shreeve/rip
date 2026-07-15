@@ -37,6 +37,23 @@ repository's pull requests.
   cloning, failure/retry/crash recovery, every CLI flag and error
   path, the ANSI frame, `args()` stripping, the file queue, and the
   real v3 consumer pattern (the labcorp downloader scripts) (#139)
+- `@rip-lang/script` joins the libraries lane: the homoiconic
+  interaction engine that automates stateful conversations with remote
+  systems (PTY spawn via `Bun.Terminal`, SSH through the system `ssh`,
+  raw TCP, and a dry-run trace mode). Nested arrays of patterns and
+  responses are the program: strings/numbers alternate expect and send,
+  regexes match with captures, objects and Maps multiplex prompts
+  (first match wins, `:else` falls back after the fast window), arrays
+  nest sub-scripts (`[boolean, ...]` conditionals, `[:pure, ...]` raw
+  sends), functions inject dynamic behavior, and `:redo`/`:skip`/
+  `:this` steer control flow. The v3 source ported with one declared
+  fix — v3's `Script.tcp` awaited its ready promise as a call and threw
+  unconditionally — plus the `prompts`/`replace`/`quote`/`enter`
+  helpers, a typed surface, and a suite converting both v3 test files
+  1:1 with added coverage for tcp, connect, ssh URL parsing (driven
+  through a stub `ssh` subprocess seam), multiplexer dispatch, and
+  timeout behavior — 61 tests, every expectation verified byte-for-byte
+  against v3 as the oracle (#136)
 
 - `@rip-lang/x12` joins the libraries lane: the X12 EDI parser,
   editor, and query engine (270/271, 835, 837, ...) with path-based
