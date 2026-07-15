@@ -267,8 +267,9 @@ color them without custom contributions.
 ## Tests
 
 Extension tests live ONLY in this package (the owner-ratified test
-boundary): `bun run test` here runs them with RIP_REQUIRE_TSGO armed
-(a missing tsgo fails — run `bun install` first). The repository
+boundary): `bun run test` here runs a preflight first that fails loudly
+if the tsgo binary is missing (run `bun install`), then the suite —
+which gates each live tsgo test on availability. The repository
 root's suite excludes `packages/**` mechanically (root
 `bunfig.toml`), so the compiler's fast loop never absorbs them; CI
 runs the two suites as separate steps.

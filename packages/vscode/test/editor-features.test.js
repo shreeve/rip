@@ -25,8 +25,8 @@
 //   CODE ACTIONS: the auto-import quickfix maps its edit onto Rip source.
 //
 // Same availability guard as the other live suites: dependencies absent →
-// loud skip; RIP_REQUIRE_TSGO (the package's canonical test script) makes
-// absence fail (tsgo-broker.test.js owns the loud notice).
+// skip; the package's `bun run test` preflight turns a missing tsgo into a
+// hard failure first (tsgo-broker.test.js owns the loud skip notice).
 import { test, expect, describe } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
