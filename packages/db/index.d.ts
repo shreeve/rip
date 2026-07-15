@@ -37,14 +37,9 @@ export type Capabilities = {
   ddlTransactional: boolean;
 };
 
-export type IntrospectedColumn = { name: string; type: string };
-export type IntrospectedTable = { schema: string; name: string; columns: IntrospectedColumn[] };
-export type Introspection = { tables: IntrospectedTable[] };
-
 export type Adapter = {
   query(sql: string, params?: unknown[]): Promise<QueryResult>;
   begin(options?: unknown): Promise<Transaction>;
-  introspect(): Promise<Introspection>;
   capabilities: Capabilities;
 };
 

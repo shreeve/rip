@@ -2,10 +2,13 @@
 #
 # Database access goes through one adapter contract: `query(sql,
 # params)` returns `{ columns, data, rowCount }` and is the floor;
-# `begin()` pins a transaction, `introspect()` reads the schema, and
-# `capabilities` declares what the engine supports. Exactly one
-# adapter ships — DuckDB reached over HTTP by a `duckdb-harbor`
-# endpoint; the harbor server is external and never vendored.
+# `begin()` pins a transaction, and `capabilities` declares what the
+# engine supports. Schema introspection is NOT an adapter method — the
+# migration runner reads DuckDB's own catalog directly through `query`,
+# which carries the rich metadata (constraints, indexes, sequences) a
+# diff needs and a thin adapter surface cannot. Exactly one adapter
+# ships — DuckDB reached over HTTP by a `duckdb-harbor` endpoint; the
+# harbor server is external and never vendored.
 #
 # The adapter is pure over an injected `fetch`, so every protocol
 # behavior tests without a server. `query` POSTs `/sql`; `begin` opens
@@ -62,7 +65,6 @@ export type Capabilities =
 export type Adapter =
   query: (sql: string, params?: any[]) => Promise<QueryResult>
   begin: (options?: any) => Promise<Transaction>
-  introspect: () => Promise<any>
   capabilities: Capabilities
 
 export type HarborOpts =
@@ -179,28 +181,9 @@ export def harborAdapter(opts: HarborOpts = {}): Adapter
         return
     }
 
-  # DuckDB's information_schema, shaped into { tables: [{ schema, name,
-  # columns: [{ name, type }] }] } — the one introspection surface the
-  # ORM and the migration runner read. System schemas are excluded, and
-  # a table is keyed by schema+name so two schemas' same-named tables
-  # never merge their columns.
-  introspect = ->
-    result = await query "SELECT table_schema, table_name, column_name, data_type FROM information_schema.columns WHERE table_schema NOT IN ('information_schema', 'pg_catalog') ORDER BY table_schema, table_name, ordinal_position"
-    tables: any = {}
-    order = []
-    for row in result.data
-      [schema, tableName, columnName, dataType] = row
-      key = "#{schema}.#{tableName}"
-      unless tables[key]?
-        tables[key] = { schema, name: tableName, columns: [] }
-        order.push key
-      tables[key].columns.push { name: columnName, type: dataType }
-    { tables: (tables[key] for key in order) }
-
   {
     query
     begin
-    introspect
     # DuckDB rolls DDL back with the transaction, so the migration
     # runner may claim a whole-file rollback.
     capabilities: { tx: true, ddlTransactional: true }

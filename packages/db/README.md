@@ -39,11 +39,15 @@ catch error
   and a session response with no id refuses to run rather than execute
   a fake, unisolated transaction. A failed drop itself is best-effort —
   harbor's idle TTL reaps it — so it never masks the outcome.
-- **`introspect()`** reads DuckDB's `information_schema` into
-  `{ tables: [{ name, columns: [{ name, type }] }] }`.
 - **`capabilities`** declares `{ tx, ddlTransactional }` — DuckDB rolls
   DDL back with the transaction, so the migration runner may claim a
   whole-file rollback.
+
+There is deliberately no `introspect()` method. Schema introspection for
+the migration runner reads DuckDB's own catalog directly through
+`query` (`information_schema`, `duckdb_constraints()`, `duckdb_indexes()`,
+`duckdb_sequences()`) — the rich metadata a diff needs, which a thin
+adapter surface cannot carry.
 
 ## Errors
 

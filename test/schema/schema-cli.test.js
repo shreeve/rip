@@ -34,18 +34,52 @@ const rip = (args, opts = {}) => {
 };
 
 // The file-backed Contract-v2 fake. State: { deployed, history, log }.
+// It answers the runner's DuckDB catalog queries from the stored
+// canonical `deployed` spec — the same shape real DuckDB reports over
+// harbor — since introspection is no longer an adapter method.
 const FILEDB = `import { readFileSync, writeFileSync, existsSync } from 'fs';
 export function fileDB(path) {
   const load = () => existsSync(path)
     ? JSON.parse(readFileSync(path, 'utf8'))
     : { deployed: { tables: [] }, history: [], log: [] };
   const save = (s) => writeFileSync(path, JSON.stringify(s));
+  const res = (names, rows) => ({ columns: names.map((name) => ({ name })), data: rows, rowCount: rows.length });
+  const catalog = (sql, tables) => {
+    if (sql.includes('information_schema.tables')) return res(['table_name'], tables.map((t) => [t.name]));
+    if (sql.includes('information_schema.columns')) {
+      const rows = [];
+      for (const t of tables) for (const c of t.columns) rows.push([t.name, c.name, c.type, c.notNull ? 'NO' : 'YES', c.default ?? null]);
+      return res(['table_name', 'column_name', 'data_type', 'is_nullable', 'column_default'], rows);
+    }
+    if (sql.includes('duckdb_constraints()')) {
+      const rows = [];
+      for (const t of tables) {
+        if (t.primaryKey) rows.push([t.name, 'PRIMARY KEY', [t.primaryKey], 'PRIMARY KEY (' + t.primaryKey + ')']);
+        for (const c of t.columns) if (c.unique) rows.push([t.name, 'UNIQUE', [c.name], 'UNIQUE (' + c.name + ')']);
+        for (const fk of t.foreignKeys || []) rows.push([t.name, 'FOREIGN KEY', [fk.column],
+          'FOREIGN KEY (' + fk.column + ') REFERENCES ' + fk.refTable + '(' + fk.refColumn + ')']);
+      }
+      return res(['table_name', 'constraint_type', 'constraint_column_names', 'constraint_text'], rows);
+    }
+    if (sql.includes('duckdb_indexes()')) {
+      const rows = [];
+      for (const t of tables) for (const ix of t.indexes || []) rows.push([t.name, ix.name, ix.unique === true, ix.columns]);
+      return res(['table_name', 'index_name', 'is_unique', 'expressions'], rows);
+    }
+    if (sql.includes('duckdb_sequences()')) {
+      const rows = [];
+      for (const t of tables) if (t.sequence) rows.push([t.sequence.name, t.sequence.start]);
+      return res(['sequence_name', 'start_value'], rows);
+    }
+    return null;
+  };
   return {
-    introspect: async () => load().deployed,
     async query(sql, params = []) {
       const s = load();
       s.log.push(sql);
       if (/FAIL_NOW/.test(sql)) { save(s); throw new Error('Parser Error: FAIL_NOW tripped'); }
+      const cat = catalog(sql, (s.deployed && s.deployed.tables) || []);
+      if (cat) { save(s); return cat; }
       let out = { columns: [], data: [], rowCount: 0 };
       if (sql.startsWith('SELECT version')) {
         out = {
@@ -106,6 +140,11 @@ describe('rip schema: usage surface', () => {
     const misplaced = rip(['schema', 'plan', '--repair']);
     expect(misplaced.status).toBe(2);
     expect(misplaced.stderr).toContain('--repair only applies to migrate');
+
+    const forceMisplaced = rip(['schema', 'status', '--force']);
+    expect(forceMisplaced.status).toBe(2);
+    expect(forceMisplaced.stderr).toContain('--force only applies to migrate');
+    expect(help.stdout).toContain('--force'); // documented in the usage
   });
 
   test('the top-level rip help names the schema subcommand', () => {

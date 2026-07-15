@@ -46,6 +46,12 @@ import {
 } from './runtime/schema-orm.js';
 
 const MIGRATIONS_TABLE = '_rip_migrations';
+const LOCK_TABLE = '_rip_migration_lock';
+
+// The runner's own state tables — history and lock — are never part of
+// the schema under management, so they must never reach a diff (where
+// "not declared" would read as drop-table).
+const RUNNER_TABLES = new Set([MIGRATIONS_TABLE, LOCK_TABLE]);
 
 export { __schemaAdapterConfigured as adapterConfigured };
 
@@ -63,18 +69,17 @@ function migrateRows(res) {
 // ── introspection ─────────────────────────────────────────────────────
 
 // Build the DeployedSchema — an array of canonical table specs in the
-// same shape `_tableSpec()` produces — from the live database. Uses
-// the adapter's `introspect()` capability when present (Contract v2);
-// otherwise falls back to DuckDB catalog queries through `query()`.
+// same shape `_tableSpec()` produces — from the live database by
+// querying DuckDB's own catalog directly. This is the migration
+// differ's single source of truth: an adapter's optional `introspect()`
+// is a thin, portable capability (bare column names/types) and is
+// deliberately NOT trusted here — a diff needs notNull, defaults,
+// uniqueness, indexes, foreign keys, and sequences, which only the
+// catalog carries. The queries route through the same `query()` seam
+// (over harbor's /sql for the shipped DuckDB adapter), so no adapter or
+// harbor change is needed. The `_rip_migrations` history table is the
+// runner's own state and is filtered out below.
 export async function introspect() {
-  const adapter = __schemaAdapterFor(null);
-  if (typeof adapter.introspect === 'function') {
-    // The history table is the runner's own state, never part of the
-    // schema under management — an adapter reporting it must not put
-    // it in the diff (where "not declared" reads as drop-table).
-    const raw = await adapter.introspect();
-    return { ...raw, tables: (raw.tables || []).filter((t) => t.name !== MIGRATIONS_TABLE) };
-  }
   const q = (sql) => __schemaRunSQL(null, sql, []);
   const tablesRes = await q("SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' AND table_type = 'BASE TABLE'");
   const columnsRes = await q("SELECT table_name, column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_schema = 'main' ORDER BY table_name, ordinal_position");
@@ -84,7 +89,7 @@ export async function introspect() {
 
   const tables = new Map();
   for (const r of migrateRows(tablesRes)) {
-    if (r.table_name === MIGRATIONS_TABLE) continue;
+    if (RUNNER_TABLES.has(r.table_name)) continue;
     tables.set(r.table_name, {
       name: r.table_name,
       sequence: null,
@@ -382,12 +387,12 @@ export function diffSchemas(declared, deployed) {
   // tables.
   const dRaw = new Map(declaredSorted.map((t) => [t.name, t]));
   const dTables = new Map(declaredSorted.map((t) => [t.name, foldSpec(t)]));
-  // Belt and suspenders with introspect()'s filter: the history table
-  // must never enter the diff from ANY caller — a plan proposing
-  // `drop-table _rip_migrations` is the data-loss cousin of a silent
-  // acceptance.
+  // Belt and suspenders with introspect()'s filter: the runner's own
+  // state tables (history and lock) must never enter the diff from ANY
+  // caller — a plan proposing `drop-table _rip_migrations` is the
+  // data-loss cousin of a silent acceptance.
   const pTables = new Map(deployed.tables
-    .filter((t) => t.name !== MIGRATIONS_TABLE)
+    .filter((t) => !RUNNER_TABLES.has(t.name))
     .map((t) => [t.name, foldSpec(t)]));
 
   // Rename-signal validation, BEFORE anything consumes them: a
@@ -801,6 +806,54 @@ async function ensureMigrationsTable() {
     ' (version VARCHAR PRIMARY KEY, name VARCHAR, checksum VARCHAR, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)', []);
 }
 
+// ── the migration lock ────────────────────────────────────────────────
+//
+// A single-row lock table serializes concurrent `migrate` runs so two
+// processes never both compute "pending" and apply the same files. The
+// PRIMARY KEY on the lone id=1 row is the atomic gate: exactly one
+// racer's INSERT succeeds, the rest hit the constraint and fail fast
+// with a named remedy rather than racing. A crashed run leaves the row
+// behind — `--force` clears a stale lock before acquiring. Applies run
+// UNDER the lock; status/plan are read-only and take none.
+async function ensureLockTable() {
+  await __schemaRunSQL(null,
+    'CREATE TABLE IF NOT EXISTS ' + LOCK_TABLE +
+    ' (id INTEGER PRIMARY KEY, acquired_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, owner VARCHAR)', []);
+}
+
+async function acquireMigrationLock(opts = {}) {
+  await ensureLockTable();
+  // --force takes over a lock a crashed run never released. It deletes
+  // unconditionally, so it also steals a LIVE peer's lock — the CLI
+  // documents it as safe only when no migration is running.
+  if (opts.force) await __schemaRunSQL(null, 'DELETE FROM ' + LOCK_TABLE, []);
+  const owner = (typeof process !== 'undefined' && process.pid) ? 'pid:' + process.pid : 'rip-schema';
+  try {
+    await __schemaRunSQL(null, 'INSERT INTO ' + LOCK_TABLE + ' (id, owner) VALUES (1, ?)', [owner]);
+  } catch (e) {
+    if (/violates (unique|primary key) constraint|already taken|Duplicate key/i.test(e?.message || '')) {
+      const err = new Error(
+        'schema.migrate: the migration lock is held — another `rip schema migrate` is running, ' +
+        'or a previous run crashed before releasing it. If no migration is running, clear the stale ' +
+        'lock and retry with `rip schema migrate --force`.');
+      err.cause = e;
+      throw err;
+    }
+    throw e;
+  }
+}
+
+async function releaseMigrationLock() {
+  // Best-effort: a failed release (e.g. the connection dropped after a
+  // successful apply) leaves a stale lock the next run clears with
+  // --force; it must never mask the migration's own outcome.
+  try {
+    await __schemaRunSQL(null, 'DELETE FROM ' + LOCK_TABLE + ' WHERE id = 1', []);
+  } catch {
+    // swallowed on purpose — see above
+  }
+}
+
 // Split a migration file into statements: ';' terminates, except
 // inside single-quoted strings, double-quoted identifiers
 //, `--` line comments, `/* … */` block comments
@@ -980,6 +1033,21 @@ export async function migrate(opts = {}) {
   const files = await migrationFiles(dir);
   rejectDuplicateVersions(files, 'schema.migrate');
   await ensureMigrationsTable();
+  // Applies run under the migration lock; it is released even when a
+  // file fails, so a stuck lock always means a crashed process, not a
+  // caught error.
+  await acquireMigrationLock(opts);
+  try {
+    return await migrateApply(opts, files);
+  } finally {
+    await releaseMigrationLock();
+  }
+}
+
+// Verify history integrity, then apply each pending file in order —
+// transactionally when the adapter supports begin() — recording its
+// history row. Runs under the migration lock held by migrate().
+async function migrateApply(opts, files) {
   const applied = await appliedMigrations();
   const appliedByVersion = new Map(applied.map((a) => [a.version, a]));
 

@@ -40,13 +40,15 @@ Usage:
   rip schema make <name> [entry.rip] [--dir DIR]    write migrations/NNNN_<name>.sql from the diff
                      [--allow-lossy] [--allow-destructive]
   rip schema migrate [entry.rip] [--dir DIR]        apply pending migration files in order
-                     [--repair]
+                     [--repair] [--force]
 
 entry.rip       file that declares/imports every :model (default: ${ENTRY_CANDIDATES.join(' | ')})
 --dir DIR       migrations directory (default: migrations)
 --allow-lossy   include steps that may lose data on existing rows (type changes, SET NOT NULL)
 --allow-destructive   include DROP TABLE / DROP COLUMN steps
 --repair        re-record checksums for applied migrations whose files changed
+--force         take over the migration lock — use ONLY when no migration is running;
+                it steals the lock even from a live run, so a concurrent migrate is unsafe
 
 Connection: the entry's schema.setAdapter()/connect() call, or RIP_DB_URL / RIP_DB_TOKEN.`;
 
@@ -72,6 +74,7 @@ const flags = {
   allowLossy: false,
   allowDestructive: false,
   repair: false,
+  force: false,
 };
 const positional = [];
 for (let i = 0; i < rest.length; i++) {
@@ -83,12 +86,14 @@ for (let i = 0; i < rest.length; i++) {
   else if (a === '--allow-lossy') flags.allowLossy = true;
   else if (a === '--allow-destructive') flags.allowDestructive = true;
   else if (a === '--repair') flags.repair = true;
+  else if (a === '--force') flags.force = true;
   else if (a.startsWith('-')) die(`unknown flag: ${a}\n\n${USAGE}`, 2);
   else positional.push(a);
 }
 if (flags.allowLossy && cmd !== 'make') die('--allow-lossy only applies to make', 2);
 if (flags.allowDestructive && cmd !== 'make') die('--allow-destructive only applies to make', 2);
 if (flags.repair && cmd !== 'migrate') die('--repair only applies to migrate', 2);
+if (flags.force && cmd !== 'migrate') die('--force only applies to migrate', 2);
 
 // `make` takes a migration name first; every command takes an
 // optional models entry. Disambiguate by file existence: a
@@ -189,7 +194,7 @@ try {
         'rip schema: warning — the adapter has no begin(): migrations apply WITHOUT transactions, ' +
         'so an interrupted run leaves partial state (the failure report will say exactly what applied).');
     }
-    const out = await evolution.migrate({ dir: flags.dir, repair: flags.repair });
+    const out = await evolution.migrate({ dir: flags.dir, repair: flags.repair, force: flags.force });
     if (!out.ran.length) console.log('no pending migrations');
     else for (const r of out.ran) console.log(`applied ${r}`);
   }
