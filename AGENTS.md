@@ -10,7 +10,7 @@ Permanent documentation:
 - [docs/SYNTAX.md](docs/SYNTAX.md) — context-sensitive language syntax.
 - [docs/TYPES.md](docs/TYPES.md) — type and editor architecture.
 - [docs/HMR.md](docs/HMR.md) — HMR design and acceptance contract.
-- [docs/HTMX.md](docs/HTMX.md) — Rip-native hypermedia design and acceptance contract.
+- [docs/FRAME.md](docs/FRAME.md) — Rip-native hypermedia design and acceptance contract.
 - [docs/ROADMAP.md](docs/ROADMAP.md) — current open product work.
 
 ## The Rules
