@@ -1,0 +1,543 @@
+# ==============================================================================
+# rip-print — Syntax-highlighted source code printer
+#
+# Author: Steve Shreeve (steve.shreeve@gmail.com)
+#   Date: Feb 9, 2026
+#
+# Highlights source code using highlight.js (190+ languages) and serves
+# the result in the browser for viewing and printing. Serves once and exits.
+# ==============================================================================
+
+import hljs from 'highlight.js'
+import ripLanguage from '../highlight/hljs-rip.js'
+import { existsSync, readdirSync, readFileSync, statSync } from 'fs'
+import { basename, extname, join, relative } from 'path'
+import { execSync } from 'child_process'
+
+# ==============================================================================
+# Markdown rendering (single-file mode — matches static.rip styling exactly)
+# ==============================================================================
+
+def escMdHtml(s)
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
+def renderSingleMarkdown(filePath, forceDark = false)
+  md = readFileSync filePath, 'utf-8'
+  body = Bun.markdown.html(md)
+  name = escMdHtml basename(filePath)
+
+  # Force-dark override: apply dark values at :root and drop the media query.
+  # Otherwise: use the exact styling from static.rip (light + prefers-color-scheme).
+  rootVars = if forceDark
+    ':root { --bg: #0a0a0c; --text: #e4e4e7; --muted: #71717a; --link: #60a5fa; --code-bg: #1e1e22; --border: #2a2a2e; --pre-bg: #161618; }'
+  else
+    ':root { --bg: #fff; --text: #1a1d21; --muted: #6b7280; --link: #2563eb; --code-bg: #f4f4f5; --border: #e2e5e9; --pre-bg: #fafafa; }\n  @media (prefers-color-scheme: dark) { :root { --bg: #0a0a0c; --text: #e4e4e7; --muted: #71717a; --link: #60a5fa; --code-bg: #1e1e22; --border: #2a2a2e; --pre-bg: #161618; } }'
+
+  """
+  <!DOCTYPE html>
+  <html lang="en">
+  <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>#{name}</title>
+  <style>
+  #{rootVars}
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+    font-size: 16px; line-height: 1.7; color: var(--text); background: var(--bg);
+    max-width: 720px; margin: 0 auto; padding: 3rem 1.5rem;
+    -webkit-font-smoothing: antialiased; }
+  h1, h2, h3, h4 { margin: 1.75em 0 .5em; line-height: 1.3; }
+  h1 { font-size: 1.75rem; } h2 { font-size: 1.375rem; } h3 { font-size: 1.125rem; }
+  p, ul, ol, blockquote, pre, table { margin: 0 0 1em; }
+  a { color: var(--link); text-decoration: none; } a:hover { text-decoration: underline; }
+  code { font-family: 'SF Mono', 'Fira Code', monospace; font-size: .875em; background: var(--code-bg); padding: 2px 5px; border-radius: 4px; }
+  pre { background: var(--pre-bg); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; overflow-x: auto; }
+  pre code { background: none; padding: 0; font-size: .8125rem; }
+  blockquote { border-left: 3px solid var(--border); padding-left: 1rem; color: var(--muted); }
+  img { max-width: 100%; border-radius: 6px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { padding: .5rem .75rem; border: 1px solid var(--border); text-align: left; font-size: .875rem; }
+  th { font-weight: 600; background: var(--pre-bg); }
+  hr { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
+  @page { margin: 0.5in; }
+  @media print {
+    body { background: #fff; color: #1a1a1a; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    pre { background: #f4f4f5; box-shadow: inset 0 0 0 1000px #f4f4f5; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    code { background: #f0f0f2; box-shadow: inset 0 0 0 1000px #f0f0f2; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    pre code { background: none; box-shadow: none; }
+    th { background: #f6f8fa; box-shadow: inset 0 0 0 1000px #f6f8fa; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    a { color: #2563eb; }
+  }
+  </style>
+  </head>
+  <body>#{body}</body>
+  </html>
+  """
+
+# Register Rip language with highlight.js
+hljs.registerLanguage 'rip', ripLanguage
+
+# ==============================================================================
+# CLI argument parsing
+# ==============================================================================
+
+args = process.argv.slice(2)
+
+if args.includes('-v') or args.includes('--version')
+  console.log "rip-print 1.1.59"
+  process.exit(0)
+
+if args.includes('-h') or args.includes('--help')
+  console.log """
+    usage: rip-print [options] <paths ...>
+
+    Options:
+      -b, --bypass     Strip leading comment blocks from files
+      -d, --dark       Use dark theme (default: light)
+      -h, --help       Show this help message
+      -v, --version    Show version and quit
+      -x <exts>        Comma list of extensions to exclude
+
+    Examples:
+      rip-print src/              # Print all source files in src/
+      rip-print *.rip             # Print all .rip files
+      rip-print -d src/           # Dark theme
+      rip-print -b src/           # Strip top comments
+      rip-print -x lock,map src/  # Exclude .lock and .map files
+    """
+  process.exit(0)
+
+dark   = args.includes('-d') or args.includes('--dark')
+bypass = args.includes('-b') or args.includes('--bypass')
+
+# Extract -x excludes
+excludeExts = new Set()
+for arg, i in args
+  if arg is '-x' and args[i + 1]
+    for ext in args[i + 1].split(',')
+      excludeExts.add ext.toLowerCase().replace(/^\./, '')
+
+# Filter out flags, get paths
+xIdx = args.indexOf('-x')
+paths = args.filter (a, i) -> not a.startsWith('-') and (xIdx < 0 or i isnt xIdx + 1)
+paths = ['.'] if paths.length is 0
+
+# Default exclusions (binary, generated, etc.)
+defaultExclude = new Set [
+  'css', 'gif', 'ico', 'jpg', 'jpeg', 'png', 'svg', 'pdf', 'webp',
+  'otf', 'ttf', 'eot', 'woff', 'woff2',
+  'o', 'a', 'dylib', 'so', 'dll',
+  'gem', 'gz', 'zip', 'tar', 'br',
+  'lock', 'db', 'sqlite3', 'sqlite',
+  'map', 'min.js', 'min.css',
+  'vsix', 'DS_Store'
+]
+
+for ext in excludeExts
+  defaultExclude.add ext
+
+# ==============================================================================
+# File discovery
+# ==============================================================================
+
+skipDirs = new Set ['.git', 'node_modules', '.rip-cache', '.zig-cache', 'zig-out', 'dist', 'misc']
+
+def walkDir(dir, base = dir)
+  files = []
+  try
+    entries = readdirSync dir
+  catch
+    return files
+  for entry in entries
+    full = join dir, entry
+    try
+      stat = statSync full
+    catch
+      continue
+    if stat.isDirectory()
+      continue if entry.startsWith('.') or skipDirs.has(entry)
+      files = files.concat walkDir(full, base)
+    else if stat.isFile()
+      ext = entry.split('.').pop()?.toLowerCase() or ''
+      continue if defaultExclude.has(ext)
+      continue if entry.startsWith('.')
+      files.push relative(base, full) or full
+  files.sort()
+
+allFiles = []
+for p in paths
+  if not existsSync(p)
+    console.error "Not found: #{p}"
+    continue
+  stat = statSync p
+  if stat.isDirectory()
+    allFiles = allFiles.concat walkDir(p, p).map (f) -> join(p, f)
+  else if stat.isFile()
+    allFiles.push p
+
+if allFiles.length is 0
+  console.error "No files found"
+  process.exit(1)
+
+console.log "#{allFiles.length} file#{if allFiles.length > 1 then 's' else ''}"
+
+# ==============================================================================
+# Single-markdown-file fast path: render the document instead of its source
+# ==============================================================================
+
+singleMarkdown = allFiles.length is 1 and allFiles[0].toLowerCase().endsWith('.md')
+
+console.log "  #{allFiles[0]} (rendering as markdown)" if singleMarkdown
+
+# ==============================================================================
+# Language detection
+# ==============================================================================
+
+extToLang =
+  rip:    'rip'
+  coffee: 'coffeescript'
+  js:     'javascript'
+  mjs:    'javascript'
+  cjs:    'javascript'
+  ts:     'typescript'
+  mts:    'typescript'
+  cts:    'typescript'
+  jsx:    'jsx'
+  tsx:    'tsx'
+  rb:     'ruby'
+  py:     'python'
+  rs:     'rust'
+  go:     'go'
+  sh:     'bash'
+  bash:   'bash'
+  zsh:    'bash'
+  fish:   'fish'
+  yml:    'yaml'
+  yaml:   'yaml'
+  json:   'json'
+  jsonc:  'jsonc'
+  md:     'markdown'
+  html:   'html'
+  htm:    'html'
+  xml:    'xml'
+  css:    'css'
+  scss:   'scss'
+  sass:   'sass'
+  less:   'less'
+  sql:    'sql'
+  c:      'c'
+  h:      'c'
+  cpp:    'cpp'
+  hpp:    'cpp'
+  zig:    'zig'
+  toml:   'toml'
+  ini:    'ini'
+  dockerfile: 'dockerfile'
+  makefile:   'makefile'
+
+def getLang(file)
+  base = basename(file).toLowerCase()
+  return 'makefile'   if base is 'makefile' or base is 'gnumakefile'
+  return 'dockerfile' if base is 'dockerfile'
+  return 'yaml'       if base is '.prettierrc' or base is '.eslintrc'
+  return 'json'       if base is '.babelrc'
+  return 'bash'       if base is '.bashrc' or base is '.zshrc' or base is '.profile'
+  return 'toml'       if base is 'bunfig.toml'
+
+  ext = extname(file).slice(1).toLowerCase()
+  lang = extToLang[ext]
+  return lang if lang and hljs.getLanguage(lang)
+  return 'plaintext'
+
+# ==============================================================================
+# Highlight and build HTML
+# ==============================================================================
+
+def stripTopComments(code)
+  lines = code.split('\n')
+  i = 0
+  i++ while i < lines.length and (lines[i].startsWith('#') or lines[i].trim() is '')
+  return code if i is 0
+  lines.slice(i).join('\n')
+
+def escapeHtml(str)
+  str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+def rehighlightRipScripts(html)
+  html.replace /(&quot;text\/rip&quot;[\s\S]*?&gt;<\/span>)<span class="language-\w+">([\s\S]*?)<\/span>(<span class="hljs-tag">)/g, (match, before, inner, after) ->
+    plain = inner.replace(/<\/?span[^>]*>/g, '').replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
+    rip = hljs.highlight(plain, { language: 'rip' }).value
+    "#{before}<span class=\"language-rip\">#{rip}</span>#{after}"
+
+def highlightCode(code, lang)
+  highlighted = null
+  try
+    if lang isnt 'plaintext'
+      result = hljs.highlight code, { language: lang }
+      highlighted = result.value
+  catch then null # fall through
+  highlighted ?= escapeHtml code
+  highlighted = rehighlightRipScripts(highlighted) if lang is 'html' or lang is 'xml'
+
+  lines = highlighted.split('\n')
+  numbered = lines.map (line, i) ->
+    num = String(i + 1).padStart(4)
+    cls = if i is 0 then 'line-num first' else 'line-num'
+    "<span class=\"#{cls}\">#{num}</span>  #{line}"
+  numbered.join('\n')
+
+sections = []
+for file in allFiles
+  try
+    code = readFileSync file, 'utf-8'
+  catch
+    console.error "  Skipping: #{file} (unreadable)"
+    continue
+  code = code.replace /\t/g, '  '
+  code = code.replace /\r\n?/g, '\n'
+  code = stripTopComments(code) if bypass
+  lang = getLang file
+  lineCount = code.split('\n').length
+  mtime = statSync(file).mtime
+  timestamp = mtime.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) + ' at ' + mtime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).toLowerCase()
+  console.log "  #{file} (#{lineCount} lines) [#{lang}]"
+  highlighted = highlightCode code, lang
+  html = "<pre><code class=\"hljs\">#{highlighted}</code></pre>"
+  sections.push { file, lineCount, lang, timestamp, html }
+
+# ==============================================================================
+# HTML template
+# ==============================================================================
+
+bgColor    = if dark then '#0d1117' else '#ffffff'
+textColor  = if dark then '#e6edf3' else '#1f2328'
+headerBg   = if dark then '#161b22' else '#f6f8fa'
+borderColor = if dark then '#30363d' else '#d0d7de'
+
+toc = ''
+if sections.length > 1
+  toc = """
+    <div class="toc">
+      <h2>Files (#{sections.length})</h2>
+      <ol>
+    """
+  for section in sections
+    toc += """
+          <li><a href="##{section.file}">#{section.file}</a> <span class="meta">(#{section.lineCount} lines)</span></li>
+      """
+  toc += """
+      </ol>
+    </div>
+    """
+
+fileSections = ''
+count = sections.length
+for section, i in sections
+  prev = sections[(i - 1 + count) % count]
+  next = sections[(i + 1) % count]
+  nav = ""
+  nav += "<a href=\"##{prev.file}\">prev</a> " if count > 1
+  nav += "<a href=\"##{next.file}\">next</a> " if count > 1
+  nav += "<a href=\"#top\">&uarr; top</a>"
+  fileSections += """
+    <div class="file-section">
+      <div class="file-header" id="#{section.file}">
+        <span>#{section.file} <span class="meta">(#{section.lineCount} lines) [#{section.lang}] on #{section.timestamp}</span></span>
+        <span class="nav">#{nav}</span>
+      </div>
+      <div class="code-container">
+        #{section.html}
+      </div>
+    </div>
+
+    """
+
+# Load highlight.js theme CSS files
+hljsMain = import.meta.resolve 'highlight.js'
+hljsDir = join hljsMain.replace('file://', '').replace(/\/[^/]+$/, ''), '..', 'styles'
+
+themes = [
+  { id: 'github',              name: 'GitHub Light',       dark: false }
+  { id: 'atom-one-light',      name: 'Atom One Light',     dark: false }
+  { id: 'vs',                  name: 'Visual Studio',      dark: false }
+  { id: 'xcode',               name: 'Xcode',              dark: false }
+  { id: 'intellij-light',      name: 'IntelliJ Light',     dark: false }
+  { id: 'stackoverflow-light', name: 'Stack Overflow',     dark: false }
+  { id: 'default',             name: 'Default Light',      dark: false }
+  { id: 'github-dark',         name: 'GitHub Dark',        dark: true }
+  { id: 'atom-one-dark',       name: 'Atom One Dark',      dark: true }
+  { id: 'monokai',             name: 'Monokai',            dark: true }
+  { id: 'nord',                name: 'Nord',               dark: true }
+  { id: 'vs2015',              name: 'VS 2015 Dark',       dark: true }
+  { id: 'tokyo-night-dark',    name: 'Tokyo Night',        dark: true }
+  { id: 'night-owl',           name: 'Night Owl',          dark: true }
+]
+
+defaultTheme = if dark then 'github-dark' else 'github'
+
+# Load all theme CSS into a JS object for runtime switching
+defaultCss = readFileSync join(hljsDir, "#{defaultTheme}.css"), 'utf-8'
+themeEntries = []
+themeOptions = ''
+for theme in themes
+  css = readFileSync join(hljsDir, "#{theme.id}.css"), 'utf-8'
+  encoded = Buffer.from(css).toString('base64')
+  themeEntries.push "'#{theme.id}':{d:#{theme.dark},c:atob('#{encoded}')}"
+  selected = if theme.id is defaultTheme then ' selected' else ''
+  themeOptions += "<option value=\"#{theme.id}\" data-dark=\"#{theme.dark}\"#{selected}>#{theme.name}</option>\n"
+themeData = themeEntries.join(",\n    ")
+
+html = """
+  <!DOCTYPE html>
+  <html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Printed on #{new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })} at #{new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).toLowerCase()}</title>
+    <link rel="icon" href="data:,">
+    <style id="hljs-theme">#{defaultCss}</style>
+    <style>
+      :root { --bg: #{bgColor}; --fg: #{textColor}; --hdr: #{headerBg}; --brd: #{borderColor}; --gut: #{if dark then '#161b22' else '#f4f4f4'}; --act: #{if dark then '#30363d' else '#e0e0e0'}; }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--fg); }
+
+      .toolbar { padding: 8px 16px; border-bottom: 1px solid var(--brd); text-align: right; font-size: 13px; }
+      .toolbar select { font-size: 13px; padding: 4px 8px; border-radius: 3px; border: 1px solid var(--brd); background: var(--bg); color: var(--fg); }
+      .toolbar label { color: #888; margin-left: 16px; }
+      .size-group { display: inline-flex; vertical-align: middle; margin-left: 4px; }
+      .size-btn { font-size: 13px; width: 32px; height: 28px; border: 1px solid var(--brd); background: var(--bg); color: #888; cursor: pointer; margin: 0; padding: 0; }
+      .size-btn:first-child { border-radius: 3px 0 0 3px; }
+      .size-btn:last-child { border-radius: 0 3px 3px 0; }
+      .size-btn + .size-btn { margin-left: -1px; }
+      .size-btn.active { background: var(--act); color: var(--fg); font-weight: 600; }
+      .toc { padding: 20px 30px; border-bottom: 1px solid var(--brd); }
+      .toc h2 { font-size: 18px; margin-bottom: 10px; }
+      .toc ol { padding-left: 24px; columns: 2; column-gap: 40px; }
+      .toc li { font-size: 13px; line-height: 1.8; }
+      .toc a { color: var(--fg); text-decoration: none; }
+      .toc a:hover { text-decoration: underline; }
+      .meta { color: #888; font-size: 12px; }
+
+      .file-section { margin-bottom: 0; margin-top: -1px; }
+      .file-header {
+        background: var(--hdr); padding: 10px 16px 10px 5.85em; font-size: 13px; font-weight: 600;
+        border-top: 1px solid var(--brd); border-bottom: 1px solid var(--brd);
+        display: flex; justify-content: space-between; align-items: center;
+      }
+      .nav { font-weight: normal; font-size: 12px; }
+      .nav a { color: #888; text-decoration: none; padding: 6px 10px; border-radius: 3px; }
+      .nav a:hover { color: var(--fg); background: var(--act); }
+
+      .code-container { overflow-x: auto; border-bottom: 1px solid var(--brd); }
+      .code-container pre { margin: 0; border-radius: 0; }
+      .code-container code { font-size: var(--code-size, 13px); line-height: 1.5; padding: 0 !important; display: block; }
+      .line-num { color: #aaa; background: var(--gut); user-select: none; display: inline-block; min-width: 2em; text-align: right; padding: 0 0.7em; margin-right: 0.7em; border-right: 1px solid var(--brd); }
+      .line-num.first { padding-top: 4px; }
+
+      @media print {
+        .file-header { background: #333 !important; color: #fff !important; box-shadow: inset 0 0 0 1000px #333; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        .file-header .meta { color: #ccc !important; }
+        .toolbar { display: none; }
+        .nav { display: none; }
+        body { background: white !important; color: black !important; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="toolbar">
+      <label>Size: <span class="size-group">
+        <button class="size-btn" data-size="11">S</button>
+        <button class="size-btn active" data-size="13">M</button>
+        <button class="size-btn" data-size="15">L</button>
+      </span></label>
+      <label>Theme: <select id="theme-picker">
+        <optgroup label="Light">#{themeOptions.split('\n').filter((o) -> o.includes('data-dark="false"')).join('')}</optgroup>
+        <optgroup label="Dark">#{themeOptions.split('\n').filter((o) -> o.includes('data-dark="true"')).join('')}</optgroup>
+      </select></label>
+    </div>
+    <a name="top"></a>
+    #{toc}
+    #{fileSections}
+    <script>
+      var themes = {
+        #{themeData}
+      };
+      document.getElementById('theme-picker').addEventListener('change', function(e) {
+        var id = e.target.value;
+        localStorage.setItem('rip-print-theme', id);
+        var t = themes[id];
+        if (!t) return;
+        document.getElementById('hljs-theme').textContent = t.c;
+        var d = t.d;
+        var r = document.documentElement.style;
+        r.setProperty('--bg',  d ? '#0d1117' : '#ffffff');
+        r.setProperty('--fg',  d ? '#e6edf3' : '#1f2328');
+        r.setProperty('--hdr', d ? '#161b22' : '#f6f8fa');
+        r.setProperty('--brd', d ? '#30363d' : '#d0d7de');
+        r.setProperty('--gut', d ? '#161b22' : '#f4f4f4');
+        r.setProperty('--act', d ? '#30363d' : '#e0e0e0');
+      });
+      // Restore saved theme
+      var saved = localStorage.getItem('rip-print-theme');
+      if (saved && themes[saved]) {
+        document.getElementById('theme-picker').value = saved;
+        document.getElementById('theme-picker').dispatchEvent(new Event('change'));
+      }
+
+      // Font size buttons
+      document.querySelectorAll('.size-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          var size = btn.getAttribute('data-size') + 'px';
+          document.documentElement.style.setProperty('--code-size', size);
+          document.querySelectorAll('.size-btn').forEach(function(b) { b.classList.remove('active'); });
+          btn.classList.add('active');
+          localStorage.setItem('rip-print-size', btn.getAttribute('data-size'));
+        });
+      });
+      // Restore saved size
+      var savedSize = localStorage.getItem('rip-print-size');
+      if (savedSize) {
+        var sizeBtn = document.querySelector('.size-btn[data-size="' + savedSize + '"]');
+        if (sizeBtn) sizeBtn.click();
+      }
+    </script>
+  </body>
+  </html>
+  """
+
+# Single-markdown-file mode: replace the source-view HTML with a rendered document.
+# (The source-view was built above and is discarded here — negligible work for 1 file.)
+html = renderSingleMarkdown allFiles[0], dark if singleMarkdown
+
+# ==============================================================================
+# Serve and open browser
+# ==============================================================================
+
+served = false
+
+server = Bun.serve
+  port: 9111
+  fetch: ->
+    served = true
+    new Response html, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }
+
+console.log "\nOpening browser..."
+
+try
+  if process.platform is 'darwin'
+    execSync "open 'http://localhost:#{server.port}/'"
+  else if process.platform is 'linux'
+    execSync "xdg-open 'http://localhost:#{server.port}/'"
+  else
+    execSync "start 'http://localhost:#{server.port}/'"
+catch
+  console.log "Visit: http://localhost:#{server.port}/"
+
+poll = setInterval ->
+  if served
+    clearInterval(poll)
+    setTimeout ->
+      server.stop()
+      process.exit(0)
+    , 500
+, 200

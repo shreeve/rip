@@ -1,0 +1,4 @@
+preload = ["../../src/loader.js"]
+
+[test]
+preload = ["../../src/loader.js"]

@@ -1,0 +1,20 @@
+{
+  "name": "@rip-lang/print",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "rip-print": "./bin/rip-print"
+  },
+  "scripts": {
+    "test": "bun test --timeout 15000"
+  },
+  "files": [
+    "print.rip",
+    "bin/",
+    "README.md"
+  ],
+  "dependencies": {
+    "highlight.js": "11.11.1"
+  }
+}

@@ -1,0 +1,7 @@
+# Top comment block
+# second line
+
+def greet(name)
+  "hello, #{name}!"
+
+console.log greet('world')
