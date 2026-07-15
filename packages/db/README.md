@@ -97,3 +97,50 @@ newId = await db.transaction (tx) ->
   already-aborted signal rejects before dispatch; an abort in flight
   rejects the caller with a `CancelledError` at once (the request may
   still finish on the server).
+
+## Operational surfaces
+
+Three tools ride the same harbor `/sql` wire. None starts the database —
+harbor's lifecycle is external.
+
+### `rip-db` — snapshot, restore, checkpoint
+
+```
+rip-db dump [ARCHIVE.tar.gz | DIRECTORY]   # EXPORT DATABASE → a .tar.gz
+rip-db load ARCHIVE.tar.gz                 # IMPORT DATABASE (into an empty DB)
+rip-db checkpoint [--force]                # flush the WAL into the DB file
+```
+
+`dump` auto-names `<db>-YYYYMMDD-HHMMSS.tar.gz` and refuses to overwrite;
+`load` refuses a non-empty target and screens the archive for traversal
+paths (it is for archives you trust). `checkpoint` fails while other
+writers are active; `--force` preempts them. The command logic lives in
+`cli.rip` behind an injected host seam, so it tests without a server;
+`bin/rip-db` supplies the real `fetch`/filesystem/tar seam.
+
+### `@rip-lang/db/embed` — a boot reachability probe
+
+```rip
+import { assertReachable } from '@rip-lang/db/embed'
+await assertReachable 'http://127.0.0.1:9494'   # throws if harbor isn't answering
+```
+
+Hits harbor's unauthenticated `/ready` probe with a 5s timeout, so an app
+fails loudly at boot instead of on its first mysterious query 500.
+
+### `@rip-lang/db/mcp` — an MCP server
+
+A line-delimited JSON-RPC stdio server exposing three tools —
+`execute_query`, `list_tables`, `list_columns` — to AI assistants:
+
+```json
+{ "mcpServers": { "duckdb": {
+  "command": "rip",
+  "args": ["packages/db/mcp.rip", "--url", "http://127.0.0.1:9494"],
+  "env": { "RIP_DB_TOKEN": "<token>" }
+} } }
+```
+
+Results are truncated past 1024 rows or 50KB. `createMcpServer({ sql })`
+is the protocol core, pure over an injected runner, so every method and
+tool tests without stdio or a server.
