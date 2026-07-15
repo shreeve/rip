@@ -6,9 +6,11 @@ Bring the traditional Rip packages from **rip-lang** (Rip v3) into **rip** (Rip 
 
 Rip v3 had a cobbled-together types/IDE stack that was brittle. Rip v4 rearchitected that around TypeScript 7 and a much more efficient source↔editor mapping. Typing will be re-applied later as a separate step — this upgrade is about the **Rip source** itself.
 
+**Types are out of scope for this pass.** Hand-written `.d.ts` companions have already been removed from v4 packages. Do not bring types over from v3. When comparing, strip inline `: Type` annotations and `type`/`interface` decls from both sides and judge **Rip logic only**.
+
 ### Scope for this pass
 
-Start with these eight packages (simple, mostly pure Rip):
+These seven packages (simple, mostly pure Rip) still need the compare→strip→judge loop and the Rip test roll:
 
 1. `x12`
 2. `validate`
@@ -17,16 +19,17 @@ Start with these eight packages (simple, mostly pure Rip):
 5. `http`
 6. `gate`
 7. `decimal`
-8. `csv`
+
+**Done (model):** `@rip-lang/csv` — root `test.rip`, `@rip-lang/testing`, `../../bin/rip`, version `4.0.0`. Copy that shape.
 
 **Out of scope (do not bring over):** `util`, `stamp`.
 
 ### Method (per package)
 
-1. **Compare head-on** — v3 (`rip-lang/packages/<name>`) vs v4 (`rip/packages/<name>`): layout, entry points, Rip source, tests, and any accompanying `.d.ts` / type surface.
-2. **Strip types from both sides** — remove type annotations from the Rip source and set aside the `.d.ts` / type-only files (typing comes later). What remains should be essentially Rip→Rip.
-3. **Diff the stripped Rip** — how close is v4 to v3 after types are gone? Ideal outcome: nearly identical logic and structure.
-4. **Judge intentional improvements** — if v4 genuinely fixes bugs, simplifies, or optimizes in a way worth keeping, call that out with the reason. If the diff is just remapping noise, file splits without payoff, or incidental churn, prefer the clean v3→v4 shape (or restore v3 Rip and drop the noise).
+1. **Compare head-on** — v3 (`rip-lang/packages/<name>`) vs v4 (`rip/packages/<name>`): layout, entry points, Rip source, tests, packaging.
+2. **Strip types from both sides** — ignore annotations and any type-only files. What remains should be essentially Rip→Rip.
+3. **Diff the stripped Rip** — how close is v4 to v3? Ideal outcome: nearly identical logic and structure.
+4. **Judge intentional improvements** — if v4 genuinely fixes bugs, simplifies, or optimizes in a way worth keeping, call that out. If the diff is remapping noise, file splits without payoff, or incidental churn, prefer the clean v3→v4 shape (or restore v3 Rip and drop the noise).
 
 ### Decision rule
 
@@ -38,28 +41,27 @@ Start with these eight packages (simple, mostly pure Rip):
 
 ### Deliverable
 
-This file grows as the analysis lands: one section per package with comparison findings, what stripping types reveals, and a keep / restore / merge recommendation.
+This file: one section per remaining package with comparison findings and a keep / restore / merge recommendation.
 
 ---
 
 ## Executive summary
 
-After comparing all eight packages head-on (v3 Rip ↔ v4 Rip, types mentally stripped, `.d.ts` treated as droppable for this pass):
+Re-run after `.d.ts` removal. Compared Rip logic only.
 
 | Package | Stripped Rip vs v3 | Verdict | Why |
 | --- | --- | --- | --- |
-| **x12** | Identical | **KEEP_V4** | Same Rip; v4 adds tests + `.d.ts` + packaging |
+| **x12** | Byte-identical | **KEEP_V4** | Same Rip; v4 adds tests + loader-aware CLI |
 | **validate** | Real redesign | **KEEP_V4** | Calendar-true dates, stricter validators, Map registry, opt-in coercers |
-| **time** | Identical | **KEEP_V4** | Same Rip; v4 adds tests + `.d.ts` |
-| **rsx** | Identical + 1 fix | **KEEP_V4** | DOCTYPE `or` parentheses — required under v4 compiler |
-| **http** | Identical | **KEEP_V4** | Same Rip (entry renamed); tests + `.d.ts` |
+| **time** | Byte-identical | **KEEP_V4** | Same Rip; v4 adds Bun/dayjs tests |
+| **rsx** | Identical + 1 fix | **KEEP_V4** | DOCTYPE `or` parentheses required under v4 compiler |
+| **http** | Identical (entry renamed) | **KEEP_V4** | Same Rip; tests + `rip.browser` |
 | **gate** | Substantially improved | **KEEP_V4** | Fail-closed secrets, login throttle, reserved `/_gate` 404, self-contained middleware |
 | **decimal** | Core identical; coercer split | **KEEP_V4** | Math stays browser-safe; schema bridge is opt-in |
-| **csv** | Identical | **KEEP_V4** | Banner-only Rip diff; tests + `.d.ts` |
 
-**None of these eight warrant restoring v3 Rip.** The packages that already lived in v4 were either byte-equal ports with packaging/tests bolted on, or deliberate upgrades (validate, gate, decimal coercers, rsx DOCTYPE). Next typing pass can strip inline annotations and rely on (or regenerate) the `.d.ts` surfaces — that work is separate from this Rip-logic judgment.
+**None of these seven warrant restoring v3 Rip.** Do not reintroduce `.d.ts` or type annotations as part of this upgrade.
 
-Cross-cutting v4 packaging (all eight): `private: true`, `version: 0.0.0`, `exports` with `"types"` + `"default"`, `bunfig.toml`, Bun test suites under `test/`. Those are monorepo/layout, not language semantics.
+Cross-cutting v4 packaging (not logic): `private: true`, `exports` pointing at `.rip` only (no `"types"`); root Bun workspaces (`packages/*`, hoisted linker) so `@rip-lang/*` resolves in-tree; package tests via `../../bin/rip test.rip` + `@rip-lang/testing` (model: `packages/csv`) or `bun --preload=../../src/loader.js test` (JS suites still migrating). No per-package `bunfig.toml`.
 
 ---
 
@@ -71,18 +73,16 @@ Cross-cutting v4 packaging (all eight): `private: true`, `version: 0.0.0`, `expo
 
 | | v3 | v4 |
 | --- | --- | --- |
-| Main | `x12.rip` (692 lines) | `x12.rip` (692 lines, **byte-identical**) |
-| CLI | `bin/rip-x12` | `bin/rip-x12` (loader wiring for v4) |
-| Types | none | `x12.d.ts` |
+| Main | `x12.rip` (692 lines) | `x12.rip` — **`cmp` identical** |
+| CLI | `bin/rip-x12` | `bin/rip-x12` (v4 loader preload) |
+| Types | none | none |
 | Tests | none | `test/{x12,cli,consumers,package}.test.js`, fixture `270.x12` |
 
-**Strip types:** `x12.rip` has no type annotations in either tree. `.d.ts` is companion-only.
+**Strip types:** Neither side has annotations. Rip logic is identical — same `X12` class, selectors, `get`/`set`/`find`/`show`, CLI.
 
-**Logic:** Identical — same `X12` class, selectors, `get`/`set`/`find`/`show`, CLI.
+**Worth keeping:** Test suite; CLI wiring for v4 loader.
 
-**Worth keeping in v4:** Test suite that pins observed behavior; v4 loader preload in the CLI bin.
-
-**Noise:** package.json private/version shape; `.d.ts` (defer to typing pass).
+**Noise:** package.json private/version shape.
 
 **Recommendation: KEEP_V4** — confidence high.
 
@@ -97,17 +97,17 @@ Cross-cutting v4 packaging (all eight): `private: true`, `version: 0.0.0`, `expo
 | Entry | `validate.rip` (all-in-one, 248 lines) | `index.rip` (re-exports only) |
 | Logic | inside `validate.rip` | `registry.rip` (291 lines) |
 | Coercers | auto-register on import via `globalThis.__ripSchema` | `coercers.rip` → `@rip-lang/validate/coercers` (opt-in) |
-| Types | inline annotations | inline + `index.d.ts`, `coercers.d.ts` |
-| Tests | `test.rip` | `test/{validate,coercers,types,package}.test.js` |
+| Types | inline annotations (ignore) | inline annotations (ignore); `.d.ts` gone |
+| Tests | `test.rip` | `test/{validate,coercers,package}.test.js` (+ skipped types test) |
 
-**Strip types:** Annotations peel off cleanly; **real logic divergence remains**.
+**Strip types:** Annotations peel off; **real logic divergence remains**. Same 37 builtin validator keys.
 
 **Behavioral deltas (verified)**
 
 | Area | v3 | v4 |
 | --- | --- | --- |
 | Public `validators` object | Exported, mutable | **Gone** — private Map; use `check` / `getValidator` / `validatorNames` |
-| `check` unknown type | Returns `undefined` | **Throws** `unknown validator '…'` |
+| `check` unknown type | Returns `undefined` | **Throws** |
 | `date` | Regex only; returns input spelling | Calendar-true + leap years; always `YYYY-MM-DD` |
 | `zip` | `/^(\d{5})/` accepts trailing junk | Anchored; optional `+4` |
 | `money` | Loose `[\d,]+` (accepts `1,00`) | Proper thousands groups |
@@ -118,11 +118,11 @@ Cross-cutting v4 packaging (all eight): `private: true`, `version: 0.0.0`, `expo
 | Coercer bridge | Side effect of package import | Opt-in `/coercers` entry |
 | Misc fixes | — | `toName` Mac regex, `formatMoney` finite check, `toPhone` keeps `ext` |
 
-**Worth keeping:** All of the above. Calendar-true `date` matches runtime doctrine (no Date normalization). Stricter money/zip/float/semver fix real validation holes. Map registry + loud reject matches “reject loudly.” File split is load-bearing: browser-safe vocabulary stays free of schema/`globalThis` side effects (`package.test.js` asserts that).
+**Worth keeping:** All of the above. Calendar-true `date` matches runtime doctrine. File split is load-bearing: browser-safe vocabulary stays free of schema/`globalThis` side effects.
 
-**Migration notes (not reasons to roll back):** callers of `validators.foo`, silent unknown `check`, compact date return shapes, and auto-`~:name` registration need the `/coercers` import.
+**Migration notes (not rollback reasons):** callers of `validators.foo`, silent unknown `check`, compact date return shapes, and auto-`~:name` registration need the `/coercers` import.
 
-**Recommendation: KEEP_V4** — confidence high. Do not restore the single-file v3 shape.
+**Recommendation: KEEP_V4** — confidence high. Do not restore the single-file v3 shape. Do not add types yet.
 
 ---
 
@@ -132,16 +132,16 @@ Cross-cutting v4 packaging (all eight): `private: true`, `version: 0.0.0`, `expo
 
 | | v3 | v4 |
 | --- | --- | --- |
-| Main | `time.rip` (1182 lines) | `time.rip` (**byte-identical**) |
-| Types | dense inline `type`/`interface` | same + `index.d.ts` |
-| Tests | `test/test.rip` | `test/{time,types,package}.test.js` |
-| Other | `demo.rip` | `demo.rip`, `bunfig.toml` |
+| Main | `time.rip` (1182 lines) | **`cmp` identical** |
+| Types | dense inline (ignore) | same bytes; `.d.ts` gone |
+| Tests | `test/test.rip` | `test/{time,package}.test.js` (+ skipped types test) |
+| Other | `demo.rip` | `demo.rip`, dayjs `1.11.20` as test oracle |
 
-**Strip types:** After peeling annotations / type decls, runtime is the same `time` / `Time` / `Duration` / `age` surface. `diff` on the `.rip` file is empty even *with* types still present.
+**Strip types:** Full-file `diff` is empty even *with* annotations present. Same `time` / `Time` / `Duration` / `age` / default factory.
 
-**Worth keeping:** Bun/dayjs parity tests; `exports.types` wiring; `rip.browser: true`.
+**Worth keeping:** Bun/dayjs parity suite; `rip.browser: true`.
 
-**Noise:** Dual type surface (inline + `.d.ts`) until the later typing pass consolidates.
+**Noise:** Inline types still live in `.rip` until a later typing pass — leave them for now or strip separately; do not restore a `.d.ts`.
 
 **Recommendation: KEEP_V4** — confidence high.
 
@@ -154,29 +154,29 @@ Cross-cutting v4 packaging (all eight): `private: true`, `version: 0.0.0`, `expo
 | | v3 | v4 |
 | --- | --- | --- |
 | Main | `rsx.rip` | `rsx.rip` |
-| Types | none | `rsx.d.ts` |
-| Tests | none | `test/{rsx,types,package}.test.js` |
+| Types | none | none |
+| Tests | none | `test/{rsx,package}.test.js` (+ skipped types test) |
 | Flag | no `rip.browser` | `rip.browser: true` |
 
-**Strip types:** Implementation was already untyped. Diff is header cleanup plus **one logic line**.
+**Strip types:** Already untyped. Diff is banner cleanup plus **one logic line**.
 
 **The real fix — DOCTYPE `or` precedence**
 
 ```rip
-# v3 (ambiguous under v4 emitter):
+# v3 (hazard under v4 emitter):
 if @xml.startsWith '<!DOCTYPE', @pos or @xml.startsWith '<!doctype', @pos
 
 # v4 (correct):
 if @xml.startsWith('<!DOCTYPE', @pos) or @xml.startsWith('<!doctype', @pos)
 ```
 
-Under the v4 compiler, the unparenthesized form miscompiles to `startsWith("<!DOCTYPE", pos || startsWith(...))` — a silent wrong program. Parentheses are required. Keep them.
+Under the v4 compiler, the unparenthesized form miscompiles (`pos || startsWith(...)`). Parentheses are required.
 
 **Worth keeping:** Parentheses fix; DOCTYPE tests; `rip.browser: true`.
 
-**Noise:** Banner rewrite that drops “legacy csex” wording.
+**Noise:** Banner rewrite.
 
-**Recommendation: KEEP_V4** — confidence high.
+**Recommendation: KEEP_V4** — confidence high. Restoring v3 Rip would reintroduce a silent miscompile.
 
 ---
 
@@ -187,14 +187,14 @@ Under the v4 compiler, the unparenthesized form miscompiles to `startsWith("<!DO
 | | v3 | v4 |
 | --- | --- | --- |
 | Entry | `http.rip` | `index.rip` (rename only) |
-| Types | dense inline | inline + `index.d.ts` |
-| Tests | none | `test/{http,types,package}.test.js` |
+| Types | dense inline (ignore) | same; `.d.ts` gone |
+| Tests | none | `test/{http,package}.test.js` (+ skipped types test) |
 
-**Strip types:** From `RETRY_METHODS` through `export http = makeInstance()`, logic is the same — `buildUrl`, merge helpers, retry/backoff, `request`, `makeInstance` / `create` / `extend`, method shortcuts. File diff is banner-only once types are ignored (types themselves are still duplicated in `.rip` + `.d.ts`).
+**Strip types:** After dropping the leading banner, bodies are **byte-identical** (including annotations). From `RETRY_METHODS` through `export http = makeInstance()`: same helpers, retry/backoff, `request`, `makeInstance` / `create` / `extend`, method shortcuts.
 
-**Worth keeping:** Live Bun.serve test battery (retries, Retry-After, hooks, timeout/abort); `rip.browser: true`; entry rename is fine packaging.
+**Worth keeping:** Live Bun.serve test battery; `rip.browser: true`; entry rename is fine packaging.
 
-**Noise:** Banner trim; type duplication until typing pass.
+**Noise:** Banner trim.
 
 **Recommendation: KEEP_V4** — confidence high.
 
@@ -208,21 +208,21 @@ Under the v4 compiler, the unparenthesized form miscompiles to `startsWith("<!DO
 | --- | --- | --- |
 | Entry | `index.rip` (~425 lines) | `index.rip` (~479 lines) |
 | Deps | ambient `@rip-lang/server` (`get`/`post`/`use`/`read`/`start`) | **none** — self-contained middleware |
-| Types | none | `index.d.ts` |
+| Types | none | none |
 | Tests | `test.rip` | `test/{gate,security,package}.test.js` + `harness.js` |
-| Standalone | `GATE_*` env + `start()` bootstrap | **removed** (no runnable layer yet) |
+| Standalone | `GATE_*` env + `start()` bootstrap | **removed** (known gap) |
 
-**Strip types:** Core session/CSRF/Argon2id/`safeReturnTo`/cookie attrs/`protect` modes are shared. Real deltas:
+**Strip types:** Shared core: session/CSRF/Argon2id/`safeReturnTo`/cookie attrs/`protect` modes. Real deltas:
 
-1. **Endpoints inside middleware** — handlers keyed as `'GET /_gate/check'` etc.; compose-compatible `(c, next)`. No ambient router registration.
-2. **`/_gate/*` reserved** — unknown path/method → **404**. v3 `next!()`’d unknown `/_gate` paths (catch-alls could see them anonymously).
+1. **Endpoints inside middleware** — handlers keyed as `'GET /_gate/check'` etc.; compose-compatible `(c, next)`.
+2. **`/_gate/*` reserved** — unknown path/method → **404**. v3 `next!()`’d unknown `/_gate` paths.
 3. **Fail-closed secrets** — `validatedSecret` + `MIN_SECRET_LENGTH = 32`: weak secret **throws**; `insecure: true` only when secret is absent (mints random key). v3 only warned.
 4. **Login throttle** — 5 failures / 15 min per `ip|user` → 429 + Retry-After before Argon2id.
 5. **Local `formReader`** — stand-in for v3 server `read()`.
 6. **No `GATE_*` standalone bootstrap** — known gap, not accidental deletion.
 7. **Hash CLI** gated on `import.meta.main`.
 
-**Worth keeping:** Fail-closed secrets, throttle, reserved `/_gate` 404, self-contained middleware (fits v4 server/compose), security test matrix.
+**Worth keeping:** Fail-closed secrets, throttle, reserved `/_gate` 404, self-contained middleware, security tests.
 
 **Optional later MERGE (not a rollback):** restore a v3-style env-driven standalone bootstrap once v4 has a runnable serving story — **without** restoring weak-secret warn or `/_gate` pass-through.
 
@@ -238,55 +238,37 @@ Under the v4 compiler, the unparenthesized form miscompiles to `startsWith("<!DO
 | --- | --- | --- |
 | Core | `decimal.rip` (math + auto coercer at end) | `decimal.rip` (core only) |
 | Coercer | `registerDecimalCoercer()` on import via `globalThis.__ripSchema` | `coercers.rip` + `./coercers` export |
-| Types | inline | inline + `decimal.d.ts`, `coercers.d.ts` |
-| Tests | `test/test.rip` | `test/{decimal,coercers,types,package}.test.js` + fixture |
+| Types | inline (ignore) | inline (ignore); `.d.ts` gone |
+| Tests | `test/test.rip` | `test/{decimal,coercers,package}.test.js` + fixture |
 
-**Strip types:** Core from `LIMITS` through `export D` is the same arithmetic API. Diff is banner, `RoundingMode` formatting, and **removal of the trailing auto-register block** (moved to `coercers.rip`).
+**Strip types:** Core from `LIMITS` through `export D` is the same arithmetic API. Diff is banner, `RoundingMode` formatting, and removal of the trailing auto-register block (moved to `coercers.rip`).
 
 | Coercer | v3 | v4 |
 | --- | --- | --- |
 | When | auto on main import | only on `import '@rip-lang/decimal/coercers'` |
-| Collision | soft / silent if runtime absent | **throws** `already registered` |
+| Collision | soft / silent if runtime absent | loud reject on duplicate |
 | Registration | `globalThis.__ripSchema?.…` | `registerCoercer` from schema runtime |
 
-**Worth keeping:** Browser-safe math package without schema side effects; loud collision; explicit opt-in. Same pattern as validate.
+**Worth keeping:** Browser-safe math without schema side effects; loud collision; explicit opt-in. Same pattern as validate.
 
-**Noise:** Author/GPT header removal; type formatting.
-
-**Recommendation: KEEP_V4** — confidence high.
-
----
-
-### 8. `csv`
-
-**Inventory**
-
-| | v3 | v4 |
-| --- | --- | --- |
-| Entry | `csv.rip` (458 lines) | `csv.rip` (456 lines) |
-| Types | none | `csv.d.ts` |
-| Tests | `test/test.rip`, `csv.test.mjs`, `bench.rip` | `test/{csv,quoting,types,package}.test.js` |
-
-**Strip types:** `.rip` has no annotations either side. Full file diff is **banner comment only** — `DELIMITERS` through EOF is identical (`probe`, `makeEmitter`, `readFull`, `Writer`, `CSV.read`/`write`/`load`/`save`/`writer`/`formatRow`, CLI).
-
-**Worth keeping:** `.d.ts`; Bun test suite (including Labcorp/late-quote cases in `quoting.test.js`); correctly **no** `rip.browser` (Bun file APIs).
-
-**Noise:** Dropped `bench.rip` (perf harness, not behavior); test port Rip→JS.
+**Noise:** Header rewrite; type formatting (ignore until typing pass).
 
 **Recommendation: KEEP_V4** — confidence high.
 
 ---
 
-## Cross-cutting notes for the later typing pass
+## Cross-cutting notes
 
-1. **`.d.ts` files are scaffolding, not Rip logic.** Safe to treat as the type surface once inline annotations are stripped from `.rip` sources (`time`, `http`, `decimal`, `validate` still carry dense inline types today).
-2. **Opt-in `/coercers` entries** (`validate`, `decimal`) are intentional module-boundary improvements — keep them when bringing remaining packages that touch schema.
-3. **v4 test harnesses** (Bun `test/*.test.js`) are strictly better than v3’s ad-hoc `test.rip` files for these packages; keep them.
-4. **Only intentional Rip-logic keepers among the eight:** validate (redesign), gate (security + middleware shape), rsx (DOCTYPE parens), decimal (coercer split). Everything else is “v3 Rip + packaging/tests.”
+1. **No `.d.ts` in these packages** — confirmed. Do not bring type files over from v3. Package `exports` point at `.rip` only.
+2. **Inline annotations** still exist in some `.rip` sources (`time`, `http`, `decimal`, `validate`). They are ignored for this upgrade judgment. A later typing pass can strip or regenerate them; that is separate work.
+3. **Opt-in `/coercers` entries** (`validate`, `decimal`) are intentional module-boundary improvements — keep them.
+4. **Package tests are Rip.** Shared helpers live in [`@rip-lang/testing`](testing/) (`test`, `eq`, `ok`, `throws`). The tally prints on process exit; failures set `process.exitCode`. Each pure library package gets a root `test.rip` that imports them and runs via `"test": "../../bin/rip test.rip"` — mirror `packages/csv`. Host-heavy suites (server, db, vscode) may stay on Bun until they have a natural Rip shape — that is the exception, not the default. The language battery keeps its own harness (`test/support/testing.js`).
+5. **Only intentional Rip-logic keepers among the seven:** validate (redesign), gate (security + middleware shape), rsx (DOCTYPE parens), decimal (coercer split). Everything else is “v3 Rip + packaging/tests.”
 
 ## Suggested next steps
 
-1. Accept KEEP_V4 for all eight (no Rip restores).
-2. Typing pass: strip inline annotations from `time` / `http` / `decimal` / `validate` Rip; leave or regenerate `.d.ts`.
-3. Continue the same compare→strip→judge loop for the remaining packages to bring over (`server`, `app`, `db`, `ui`, `swarm`, `print`, `script`, `ai`, …) — still excluding `util` and `stamp`.
+1. Accept **KEEP_V4** for all seven (no Rip restores; no type reintroduction).
+2. Roll root `test.rip` + `@rip-lang/testing` across the remaining packages (`validate`, `time`, `rsx`, `http`, `decimal`, `x12`, then `gate` where security tests fit).
+3. Continue the compare→strip→judge loop for remaining packages (`server`, `app`, `db`, `ui`, `swarm`, `print`, `script`, `ai`, …) — still excluding `util` and `stamp`, still without bringing types.
 4. Optional follow-up: gate standalone `GATE_*` bootstrap once v4 serving story is ready.
+5. Typing pass (separate): strip or regenerate types.
