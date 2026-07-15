@@ -125,15 +125,18 @@
 //
 //   And ONE more, the OTHER direction — over the FACE, not the source (see
 //   FaceOracle / faceSurvival):
-//     · survival   every token tsgo emits for the compiled face is run through
-//                  the server's remap; a token naming a VERBATIM source
-//                  identifier that the remap DROPS is a use-site regression.
-//                  This is the only invariant that reaches USE sites and
-//                  rip-native names (a reactive read has no column-0
-//                  declaration and no TS twin) — the face is its own oracle.
-//                  Also EXPECTED RED (finding #21): the same coarse-cover-row
-//                  root as `member`, so both flip green on the mapping fix.
-//                  A length-≥2 floor drops coincidental single-char matches.
+//     · survival   a classified source identifier the server DROPS. Counted,
+//                  not position-mapped: a dropped token's source offset is
+//                  unrecoverable (it sits past a byte divergence, where the map
+//                  collapses to the cover-row start), so per classified name
+//                  compare source code occurrences to what the server delivered
+//                  — the deficit is the drop. The only invariant that reaches
+//                  USE sites and rip-native names (a reactive read has no
+//                  column-0 declaration and no TS twin). EXPECTED RED (finding
+//                  #21): the same coarse-cover-row root as `member`, so both
+//                  flip green on the mapping fix. A length-≥2 floor plus a rip
+//                  declaration-keyword denylist and a `delivered >= 1` gate keep
+//                  keywords and synthetic tokens out of the count.
 //
 //   SCOPE: top-level DECLARATION sites (the reach of `declsOf`, a column-0
 //   heuristic) and type-body MEMBERS carry the source-enumerated invariants
@@ -166,7 +169,7 @@ import { execFileSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { LspClient, tsgoBinaryPath, startTsgo, decodeSemanticTokens } from '../../packages/vscode/src/tsgo.js';
 import { compile } from '../../src/compile.js';
-import { lineStartsOf, positionToOffset, exactSpanMapper, generatedEditSpanToSource } from '../../packages/vscode/src/translate.js';
+import { lineStartsOf } from '../../packages/vscode/src/translate.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '../..');
@@ -805,16 +808,13 @@ class TwinOracle {
 // audit's `present`/`member` invariants enumerate SOURCE names (declarations,
 // type-body members) and ask whether each got a token — a source→token check
 // that structurally cannot reach USE sites or rip-native names (a reactive
-// `:=` read in a render block has no column-0 declaration and no TS twin). This
-// oracle runs the OTHER direction: it asks tsgo for the tokens of the compiled
-// FACE — every name TypeScript classifies — then runs each through the SAME
-// remap the server uses (`ripSemanticTokens`: exactSpanMapper, else the cover
-// fallback generatedEditSpanToSource) and counts the ones the remap DROPS. A
-// dropped face token is a real use-site regression IFF the face bytes at its
-// span equal the source bytes at its arithmetic cover-row position — a verbatim
-// source identifier lost purely in remapping. Synthetic face names (an injected
-// `let`, a `.value` unwrap, the inlined runtime) fail that text-equality test
-// and are excluded, so the face itself is the oracle — no twin, rip-native
+// `:=` read in a render block has no column-0 declaration and no TS twin).
+// `faceSurvival` reaches them by comparing three oracles by COUNT (see its
+// header for why position correspondence is impossible for a dropped token):
+// tsgo on the compiled FACE supplies the SET of names TypeScript classifies,
+// the source supplies each classified name's code occurrences, and the real
+// server (session.semanticTokens) supplies what was delivered — the deficit is
+// the drop. The face is the classified-name oracle here; no twin, rip-native
 // covered.
 //
 // Faces live in ONE shared dir named `<base>.rip.ts`, so a cross-file import
@@ -879,51 +879,105 @@ class FaceOracle {
   async stop() { await this.client.stop().catch(() => {}); }
 }
 
-// The tightest cover row containing [genStart, genEnd) — atGenerated is
-// innermost-first — and the naive arithmetic source offset it implies. This is
-// what generatedEditSpanToSource resolves to WITHOUT its verbatim-prefix guard;
-// the text-equality test in faceSurvival re-imposes the guard at the token.
-function arithmeticCoverSource(mappings, genStart, genEnd) {
-  for (const row of mappings.atGenerated(genStart)) {
-    if (row.mappingKind === 'cover' && genEnd <= row.generatedEnd) {
-      return row.sourceStart + (genStart - row.generatedStart);
-    }
-  }
-  return null;
-}
-
-// FACE-SURVIVAL for one fixture: run each raw face token through the server's
-// remap and split the drops into REAL (a verbatim source identifier lost) and
-// SYNTHETIC (runtime / `.value` / injected `let`, no source name). The name
-// FLOOR — length ≥ 2 — drops single-letter matches (`T`, `i`, `e`), where
-// text-equality against the arithmetic position is coincidental, not
-// evidential; a few genuine single-char drops go unreported, which only
-// UNDER-counts a gauge that is expected-red regardless.
+// FACE-SURVIVAL for one fixture — COUNT-BASED, no position correspondence.
+//
+// A dropped token's source position is UNRECOVERABLE: it drops precisely
+// because it sits past a byte divergence on a cover row, and there both map
+// directions collapse to the row's start (the `total` use maps to the `(`
+// before its string, not the name). So any position-based classifier fails —
+// arithmetic under-counts, cover-span over-counts. Do not correspond by
+// position at all. Instead compare COUNTS, with the real server as the delivery
+// oracle (no remap is reimplemented, so there is nothing to drift):
+//   · classified   the SET of names tsgo tokenizes on the face — position-free,
+//                   just "does TS ever classify this name" (excludes keywords).
+//   · realOcc(n)   source CODE occurrences of a classified name (codeMask
+//                   blanks string LITERALS but keeps `#{…}` interpolation reads,
+//                   across lines, so only real code positions count).
+//   · delivered(n) tokens the SERVER actually shipped for that name
+//                   (session.semanticTokens — the ground truth for #21).
+//   drop(n) = max(0, realOcc(n) - delivered(n)); a synthetic face token (a
+//   `.value` unwrap, a generic re-instantiation) never adds a source occurrence,
+//   so it cannot inflate the count. Name FLOOR (length >= 2) as before.
+//
+// A silent DRIFT guard rides along: `delivered ⊆ classified` holds by
+// construction (the server derives its tokens from tsgo classifying the same
+// face), so it is near-tautological — its only teeth are catching THIS
+// standalone FaceOracle's tsgo drifting from the server's. `unclassified`
+// counts violators; it surfaces only if nonzero, never as an always-ok line.
 const FACE_IDENT = /^[A-Za-z_$][\w$]*$/;
-function faceSurvival(src, code, mappings, decoded) {
+// Whole-source code mask for the occurrence scan: blank STRING-LITERAL bytes
+// but KEEP `#{…}` interpolation expressions (a read inside an interpolation is
+// real code), track string state ACROSS lines (a multi-line template's body
+// stays blanked), and cut comments — all offset-preserving. Unlike the per-line
+// `codeOf`, which cannot see a multi-line string and blanks interpolations
+// wholesale. Single-quoted strings do not interpolate, so `#{` inside one is
+// literal. Interpolation depth is tracked per string on a stack, so nested
+// strings/braces inside `#{…}` resolve correctly.
+function codeMask(src) {
+  const out = [];
+  const stack = [];   // string contexts: { delim, interp, brace } — brace>0 ⇒ inside its #{…}
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    const top = stack[stack.length - 1];
+    if (top && top.brace === 0) {                              // inside a string LITERAL
+      if (c === '\\') { out.push(' '); if (i + 1 < src.length) { out.push(' '); i++; } continue; }
+      if (c === top.delim) { stack.pop(); out.push(c); continue; }
+      if (top.interp && c === '#' && src[i + 1] === '{') { top.brace = 1; out.push(' ', ' '); i++; continue; }
+      out.push(c === '\n' ? '\n' : ' ');                       // literal content — blank, keep newlines
+      continue;
+    }
+    if (top && top.brace > 0) {                                // interpolation code — track its braces
+      if (c === '{') { top.brace++; out.push(c); continue; }
+      if (c === '}') { top.brace--; out.push(top.brace === 0 ? ' ' : c); continue; }
+    }
+    if (!stack.length && c === '#' && src[i + 1] !== '{') {    // comment (top-level only)
+      while (i < src.length && src[i] !== '\n') { out.push(' '); i++; }
+      i--; continue;                                           // leave the newline for the loop
+    }
+    if (c === "'" || c === '"' || c === '`') { stack.push({ delim: c, interp: c !== "'", brace: 0 }); out.push(c); continue; }
+    out.push(c);
+  }
+  return out.join('');
+}
+// rip DECLARATION keywords whose spelling is ALSO a common property name, so a
+// source-word count cannot tell the keyword from the identifier (`type X =` vs
+// `type: 'a'`). Excluded wholesale — a few genuine property-`type` drops are
+// forgone rather than count every `type`/`interface`/`class` header as one. The
+// OPERATOR keywords (`is`/`for`/`in`/`when`/…) need no list: the editor never
+// tokens them, so the `delivered >= 1` gate below drops them for free.
+const RIP_KEYWORDS = new Set(['type', 'interface', 'class', 'enum', 'def', 'component', 'schema', 'render', 'extends', 'implements', 'import', 'export', 'namespace', 'module']);
+function faceSurvival(src, code, faceDecoded, serverTokens) {
   const genStarts = lineStartsOf(code);
   const srcStarts = lineStartsOf(src);
-  const mapSpan = exactSpanMapper(mappings);   // STATEFUL — decoded is ascending
-  let survived = 0, syntheticDrop = 0;
-  const drops = [];
-  for (const t of decoded) {
-    const genStart = positionToOffset(genStarts, code.length, { line: t.line, character: t.character });
-    const genEnd = genStart + t.length;
-    const src0 = mapSpan(genStart, genEnd)
-      ?? generatedEditSpanToSource(mappings, genStart, genEnd, src, code)?.[0]
-      ?? null;
-    if (src0 !== null) { survived++; continue; }
-    const arith = arithmeticCoverSource(mappings, genStart, genEnd);
-    const faceSlice = code.slice(genStart, genEnd);
-    if (arith !== null && faceSlice.length >= 2 && FACE_IDENT.test(faceSlice) && src.slice(arith, arith + t.length) === faceSlice) {
-      let line = 0;
-      while (line + 1 < srcStarts.length && srcStarts[line + 1] <= arith) line++;
-      drops.push({ name: faceSlice, type: t.type, line, character: arith - srcStarts[line] });
-    } else {
-      syntheticDrop++;
-    }
+  const classified = new Set();
+  for (const t of faceDecoded) {
+    const nm = code.slice(genStarts[t.line] + t.character, genStarts[t.line] + t.character + t.length);
+    if (FACE_IDENT.test(nm) && nm.length >= 2 && !RIP_KEYWORDS.has(nm)) classified.add(nm);
   }
-  return { faceTokens: decoded.length, survived, syntheticDrop, drops };
+  const delivered = new Map();
+  let unclassified = 0;
+  for (const t of (serverTokens ?? [])) {
+    const nm = src.slice(srcStarts[t.line] + t.character, srcStarts[t.line] + t.character + t.length);
+    if (!FACE_IDENT.test(nm) || nm.length < 2 || RIP_KEYWORDS.has(nm)) continue;
+    if (!classified.has(nm)) unclassified++;   // server shipped a name TS never classifies
+    delivered.set(nm, (delivered.get(nm) ?? 0) + 1);
+  }
+  const realOcc = new Map();
+  for (const nm of codeMask(src).match(/[A-Za-z_$][\w$]*/g) ?? []) {
+    if (nm.length >= 2 && classified.has(nm)) realOcc.set(nm, (realOcc.get(nm) ?? 0) + 1);
+  }
+  let survived = 0;
+  const drops = [];   // { name, count } — a name the editor colors somewhere that loses tokens at some uses
+  for (const [nm, occ] of realOcc) {
+    const got = delivered.get(nm) ?? 0;
+    survived += Math.min(occ, got);
+    // A use-site drop is a COLORED identifier losing its token at a use; if the
+    // editor never tokens the name (got 0) there is no use-site token to lose —
+    // it is a keyword or a fully-dropped decl (the `member` gauge's job).
+    if (occ > got && got > 0) drops.push({ name: nm, count: occ - got });
+  }
+  const dropCount = drops.reduce((n, d) => n + d.count, 0);
+  return { survived, dropCount, drops, unclassified };
 }
 
 // The declaration to poll for READINESS: one whose hover cannot legitimately be
@@ -1349,8 +1403,9 @@ if (RUN_HOVER || RUN_TOKENS) {
     let survival = null;
     if (RUN_TOKENS && faces[lane] && FACES.has(f)) {
       const dec = await faces[lane].faceTokens(f);
-      const { code, mappings } = FACES.get(f);
-      survival = faceSurvival(src, code, mappings, dec);
+      const { code } = FACES.get(f);
+      // probe.tokens is the REAL server's delivered output — the survival oracle.
+      survival = faceSurvival(src, code, dec, probe.tokens);
     }
 
     const took = `${((Date.now() - started) / 1000).toFixed(1)}s`;
@@ -1403,7 +1458,7 @@ if (RUN_HOVER || RUN_TOKENS) {
       // oracle answered empty (a build that never settled within the poll).
       if (facesAvailable) {
         if (FACE_ERRORS.has(f)) gaps.push(`${f}: bin/rip --ts passed but the in-process face:'ts' compile threw — ${FACE_ERRORS.get(f)}`);
-        else if (!p.survival || p.survival.faceTokens === 0) gaps.push(`${f}: face-survival oracle answered no face tokens (build never settled within the poll)`);
+        else if (!p.survival || (p.survival.survived === 0 && p.survival.dropCount === 0)) gaps.push(`${f}: face-survival oracle classified no identifiers (build never settled within the poll)`);
       }
     }
     // A hover that answered NOTHING is a failed probe, not a typed one. The
@@ -1606,9 +1661,11 @@ if (RUN_TOKENS) {
     // EXPECTED RED until the mapping fix lands (per-name rows for members,
     // or literals left un-normalized in the face), then flips green.
     const memberMissing = []; let memberProbed = 0;
-    // Face-survival accumulators (finding #21 use sites): survivors that name a
-    // real source identifier, and the drops that don't survive the remap.
-    const survDrops = []; let survSurvived = 0;
+    // Face-survival accumulators (finding #21 use sites): survivors, the dropped
+    // classified names ({name, count} per fixture), and `unclassified` — server
+    // tokens whose name tsgo never classifies (the sanity check; must be 0, or
+    // the server and face oracles disagree and the gauge is untrustworthy).
+    const survDrops = []; let survSurvived = 0, survUnclassified = 0;
     let probed = 0;
     const tskip = fixtures.length - PROBES.size;
     // Each invariant reports against the rows it ACTUALLY asserted — a
@@ -1627,6 +1684,7 @@ if (RUN_TOKENS) {
       // invariants below — it is keyed on the FACE, not on `decls`.
       if (survival) {
         survSurvived += survival.survived;
+        survUnclassified += survival.unclassified;
         for (const d of survival.drops) survDrops.push({ ...d, file: f });
       }
       // Members carry the SAME keying — a present member's token starts at
@@ -1686,17 +1744,23 @@ if (RUN_TOKENS) {
       console.log(`    ${pad('member', 12)} ${(gaps ? red : green)(String(memberProbed - gaps).padStart(3))} ${dim('/')} ${dim(String(memberProbed).padStart(3))}   ${note}`);
     }
     // Face-survival — USE-SITE token drops (finding #21), the direction the
-    // source-enumerated invariants above cannot see: a face token TS emits for a
-    // real source identifier that the remap drops, covering use sites AND
-    // rip-native names with no twin. EXPECTED RED like `member`; green means the
-    // mapping fix has landed. Denominator is real-identifier face tokens
-    // (survivors + drops), so the ratio reads as remap FIDELITY.
+    // source-enumerated invariants above cannot see: a classified source
+    // identifier the server drops, covering use sites AND rip-native names with
+    // no twin. EXPECTED RED like `member`; green means the mapping fix has
+    // landed. Denominator is classified source identifiers (survivors + drops),
+    // so the ratio reads as delivery FIDELITY.
     if (facesAvailable) {
-      const gaps = survDrops.length;
-      const den = survSurvived + gaps;
-      const note = gaps ? yellow(`${gaps} drop${gaps === 1 ? '' : 's'}`) + '   ' + dim('face tokens lost in remap — finding #21 use sites (expected red until the mapping fix)')
-                        : dim('use-site face tokens — finding #21 appears CLOSED; retire this gauge');
-      console.log(`    ${pad('survival', 12)} ${(gaps ? red : green)(String(survSurvived).padStart(3))} ${dim('/')} ${dim(String(den).padStart(3))}   ${note}`);
+      const dropTotal = survDrops.reduce((n, d) => n + d.count, 0);
+      const den = survSurvived + dropTotal;
+      const note = dropTotal ? yellow(`${dropTotal} drop${dropTotal === 1 ? '' : 's'}`) + '   ' + dim('classified source identifiers the server drops — finding #21 use sites (expected red until the mapping fix)')
+                             : dim('use-site tokens — finding #21 appears CLOSED; retire this gauge');
+      console.log(`    ${pad('survival', 12)} ${(dropTotal ? red : green)(String(survSurvived).padStart(3))} ${dim('/')} ${dim(String(den).padStart(3))}   ${note}`);
+      // Silent guard (surfaces only on failure): count-based uses the server's
+      // tokens directly, so `delivered ⊆ classified` holds by construction —
+      // EXCEPT if this standalone FaceOracle's tsgo drifts from the server's.
+      // Nothing else would catch that, so flag it, but don't print an always-ok
+      // line for a near-tautology.
+      if (survUnclassified) console.log(`    ${pad('  ↳ drift', 12)} ${red(`${survUnclassified} unclassified`)}   ${dim('server shipped a name tsgo never classifies — face oracle drifted, distrust the survival count')}`);
     }
 
     show(missing, 'No token — the name gets no semantic color', () => {});
@@ -1709,31 +1773,30 @@ if (RUN_TOKENS) {
       console.log(`          ${dim('actual  ')} ${yellow(fmt(r.got))}`);
     });
     // Finding #21's expected-red evidence, kept apart from the regression
-    // sections above: these are known-open holes, not surprises. Grouped by
-    // fixture, and — unless --v — collapsed to a count per file, since the
-    // list is long by nature (every block-type member drops).
-    if (memberMissing.length) {
-      console.log(`\n    ${bold('Type-body members with no token')} ${dim('— finding #21, expected red')}`);
-      const byFile = new Map();
-      for (const r of memberMissing) { if (!byFile.has(r.file)) byFile.set(r.file, []); byFile.get(r.file).push(r); }
-      for (const [file, rows] of byFile) {
-        if (VERBOSE) for (const r of rows) console.log(`      ${red('✗')} ${bold(r.name)} ${dim(`@ ${file}:${r.line + 1}:${r.character}`)} ${dim(`(${r.form})`)}`);
-        else console.log(`      ${red('✗')} ${pad(file, 20)} ${dim(`${rows.length} member${rows.length === 1 ? '' : 's'} — ${rows.map((r) => r.name).join(', ')}`)}`);
+    // sections above: these are known-open holes, not surprises. The name lists
+    // are long by nature, so each fixture's names WRAP with a hanging indent
+    // aligned under the fixture column (adapting to terminal width) — every name
+    // visible by default, but never soft-wrapped into a jumble.
+    const byFileOf = (rows) => { const m = new Map(); for (const r of rows) { if (!m.has(r.file)) m.set(r.file, []); m.get(r.file).push(r); } return m; };
+    const COL = 6 + 18 + 1 + 3 + 3;                                  // leading + filename + sp + count + gap = name column
+    const WRAP = Math.max(80, process.stdout.columns || 120) - 2;
+    const dropSection = (title, byFile, tally, nameOf) => {
+      console.log(`\n    ${bold(title)} ${dim('— #21, expected red')}`);
+      for (const [file, entries] of byFile) {
+        // filename stays plain (the terminal linkifies it) and full — never
+        // dimmed and never stripped of `.rip`, so the click target survives.
+        const head = `      ${pad(file, 18)} ${dim(String(tally(entries)).padStart(3))}   `;
+        const rows = []; let line = '';
+        for (const n of entries.map(nameOf)) {
+          const next = line ? `${line}, ${n}` : n;
+          if (COL + next.length > WRAP && line) { rows.push(line); line = n; } else line = next;
+        }
+        if (line) rows.push(line);
+        rows.forEach((r, i) => console.log((i === 0 ? head : ' '.repeat(COL)) + dim(r)));
       }
-    }
-    // Finding #21 USE-SITE drops — expected red, kept apart from the regression
-    // sections. Grouped by fixture; collapsed to a per-file count unless --v
-    // (the list is long by nature — every `console.log` arg after a rewritten
-    // literal, every rip-native read off a coarse cover row).
-    if (survDrops.length) {
-      console.log(`\n    ${bold('Use-site tokens lost in remap')} ${dim('— finding #21, expected red')}`);
-      const byFile = new Map();
-      for (const r of survDrops) { if (!byFile.has(r.file)) byFile.set(r.file, []); byFile.get(r.file).push(r); }
-      for (const [file, rows] of byFile) {
-        if (VERBOSE) for (const r of rows) console.log(`      ${red('✗')} ${bold(r.name)} ${dim(`@ ${file}:${r.line + 1}:${r.character}`)} ${dim(`(${r.type})`)}`);
-        else console.log(`      ${red('✗')} ${pad(file, 20)} ${dim(`${rows.length} drop${rows.length === 1 ? '' : 's'} — ${[...new Set(rows.map((r) => r.name))].join(', ')}`)}`);
-      }
-    }
+    };
+    if (memberMissing.length) dropSection('Type-body members with no token', byFileOf(memberMissing), (e) => e.length, (r) => r.name);
+    if (survDrops.length) dropSection('Use-site tokens lost in remap', byFileOf(survDrops), (e) => e.reduce((n, r) => n + r.count, 0), (r) => r.count > 1 ? `${r.name}×${r.count}` : r.name);
     // Both polarities, per binding form — a vacuity check on the readonly
     // invariant above, not decoration.
     if (byForm.size) {
@@ -1748,7 +1811,7 @@ if (RUN_TOKENS) {
       for (const r of unasserted) console.log(`      ${dim('•')} ${bold(r.name)} ${dim(`@ ${r.file}:${r.line + 1}`)}  ${dim(`(${r.text}) → ${fmt(r.got)}`)}`);
     }
 
-    tk = { probed, missing, badType, badReadonly, memberProbed, memberMissing, survSurvived, survDrops };
+    tk = { probed, missing, badType, badReadonly, memberProbed, memberMissing, survSurvived, survDrops, survUnclassified };
   }
 }
 
@@ -1785,11 +1848,14 @@ if (tk) {
   // Face-survival rides the same expected-red logic as the member clause: its
   // own segment so use-site drops never read as fresh invariant regressions.
   // Absent entirely when the face oracle did not run (no survDrops key set).
+  const survDropTotal = (tk.survDrops ?? []).reduce((n, d) => n + d.count, 0);
   const survivalClause = !facesAvailable
     ? ''
-    : tk.survDrops.length
-      ? dim(' · ') + yellow(`${tk.survDrops.length} use-site drop${tk.survDrops.length === 1 ? '' : 's'}`) + ' ' + dim('tracking #21 (expected)')
-      : dim(' · ') + green('use-site tokens clean') + ' ' + dim('— #21 may be closed');
+    : tk.survUnclassified
+      ? dim(' · ') + red(`${tk.survUnclassified} unclassified`) + ' ' + dim('— server/face oracles disagree, distrust the survival gauge')
+      : survDropTotal
+        ? dim(' · ') + yellow(`${survDropTotal} use-site drop${survDropTotal === 1 ? '' : 's'}`) + ' ' + dim('tracking #21 (expected)')
+        : dim(' · ') + green('use-site tokens clean') + ' ' + dim('— #21 may be closed');
   totalLine('Token', `${tk.probed} token probes: `
     + (bad === 0 ? green('all invariants hold')
       : red(`${bad} invariant violation${bad === 1 ? '' : 's'}`)
