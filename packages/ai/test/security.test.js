@@ -6,8 +6,9 @@
 //       error messages, or the on-disk store
 //   S2  SSRF guard: non-http(s) schemes, private/reserved IPv4 hosts,
 //       and redirects into them are refused before any fetch
-//   S3  KNOWN GAP (documented finding): IPv6 literal hosts bypass the
-//       private-range blocklist — pinned, not fixed (owner decides)
+//   S3  SSRF guard covers IPv6 literals: loopback/link-local/ULA/mapped-
+//       IPv4 hosts and redirects into them are refused; public IPv6
+//       still passes (remediation of PR #141 review finding S3)
 //   S4  on-disk artifacts are private: dirs 0700, files 0600
 //   S5  SQL is parameterized end-to-end; hostile text is inert
 //   S6  a malicious model response is DATA: stored and returned
@@ -111,15 +112,51 @@ describe('S2 — SSRF guard (refused before any network)', () => {
   });
 });
 
-describe('S3 — KNOWN GAP: IPv6 literals bypass the blocklist (review finding, pinned not fixed)', () => {
-  test('URL.hostname keeps brackets, so the ::1/fe80/fc00 patterns never match', async () => {
-    // These SHOULD be refused like their IPv4 counterparts, but v3's
-    // patterns test '::1' while the hostname is '[::1]'. The request
-    // therefore proceeds to fetch — here the test shim intercepts it,
-    // proving validateUrl let it through. See the PR's security review
-    // (finding S3) for the proposed remediation; behavior is kept
-    // v3-identical pending the owner's ruling.
-    for (const url of ['http://[::1]/x', 'http://[fe80::1]/x', 'http://[fd00::1]/x']) {
+describe('S3 — SSRF guard covers IPv6 literals (PR #141 review finding S3, remediated)', () => {
+  // v3's patterns tested bare forms ('::1') while URL.hostname keeps the
+  // brackets ('[::1]'), so IPv6 literals sailed through to fetch. The guard
+  // now normalizes the hostname (brackets/case/zone id) and re-checks
+  // IPv4-mapped IPv6 against the IPv4 rules, so these are refused before
+  // any network — the shim's 'test fetch blocked' error would betray a fetch.
+  const reject = async (url) => (await caught(() => att.load(store, null, [{ type: 'url', url }]))).message;
+
+  test('IPv6 loopback, unspecified, link-local, and ULA literals are refused', async () => {
+    expect(await reject('http://[::1]/x')).toBe('URL host [::1] is in a private/reserved range');
+    expect(await reject('http://[::]/x')).toBe('URL host [::] is in a private/reserved range');
+    expect(await reject('http://[fe80::1]/x')).toBe('URL host [fe80::1] is in a private/reserved range');
+    expect(await reject('http://[febf::1]/x')).toBe('URL host [febf::1] is in a private/reserved range'); // fe80::/10 upper edge
+    expect(await reject('http://[fc00::1]/x')).toBe('URL host [fc00::1] is in a private/reserved range');
+    expect(await reject('http://[fd00::1]/x')).toBe('URL host [fd00::1] is in a private/reserved range');
+  });
+
+  test('case and zero-compression variants cannot dodge the normalization', async () => {
+    expect(await reject('http://[FE80::1]/x')).toBe('URL host [fe80::1] is in a private/reserved range');
+    expect(await reject('http://[0:0:0:0:0:0:0:1]/x')).toBe('URL host [::1] is in a private/reserved range');
+  });
+
+  test('IPv4-mapped IPv6 is re-checked against the IPv4 rules', async () => {
+    // WHATWG URL serializes the mapped range as hex pairs: ::ffff:7f00:1 = 127.0.0.1
+    expect(await reject('http://[::ffff:127.0.0.1]/x')).toBe('URL host [::ffff:7f00:1] is in a private/reserved range');
+    expect(await reject('http://[::ffff:7f00:1]/x')).toBe('URL host [::ffff:7f00:1] is in a private/reserved range');
+    expect(await reject('http://[::ffff:10.1.2.3]/x')).toBe('URL host [::ffff:a01:203] is in a private/reserved range');
+    expect(await reject('http://[::ffff:192.168.1.1]/x')).toBe('URL host [::ffff:c0a8:101] is in a private/reserved range');
+    expect(await reject('http://[::ffff:169.254.169.254]/x')).toBe('URL host [::ffff:a9fe:a9fe] is in a private/reserved range');
+    expect(await reject('http://[::ffff:172.16.0.1]/x')).toBe('URL host [::ffff:ac10:1] is in a private/reserved range');
+  });
+
+  test('zone-id forms are refused (WHATWG URL rejects them at parse time)', async () => {
+    expect(await reject('http://[fe80::1%25en0]/x')).toBe('invalid URL: http://[fe80::1%25en0]/x');
+    expect(await reject('http://[fe80::1%en0]/x')).toBe('invalid URL: http://[fe80::1%en0]/x');
+  });
+
+  test('a redirect into an IPv6 literal is refused mid-chain', async () => {
+    expect(await reject('http://fixture.test/fixture/evil6')).toBe('URL host [::1] is in a private/reserved range');
+  });
+
+  test('public IPv6 literals and mapped-public IPv4 still pass the guard', async () => {
+    // validateUrl lets these proceed to fetch; the test shim then blocks
+    // the unknown host, proving the guard did NOT refuse them.
+    for (const url of ['http://[2606:4700::6810:84e5]/x', 'http://[2001:4860:4860::8888]/x', 'http://[::ffff:8.8.8.8]/x']) {
       const err = await caught(() => att.load(store, null, [{ type: 'url', url }]));
       expect(err.message).toStartWith('test fetch blocked unexpected host:');
     }

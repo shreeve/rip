@@ -110,6 +110,7 @@ export const server = Bun.serve({
     if (path === '/fixture/hop1') return new Response(null, { status: 302, headers: { location: 'http://fixture.test/fixture/hop2' } });
     if (path === '/fixture/hop2') return new Response(null, { status: 302, headers: { location: '/fixture/doc.txt' } });
     if (path === '/fixture/evil') return new Response(null, { status: 302, headers: { location: 'http://127.0.0.1:9/secret' } });
+    if (path === '/fixture/evil6') return new Response(null, { status: 302, headers: { location: 'http://[::1]:9/secret' } });
     if (path === '/fixture/loop') return new Response(null, { status: 302, headers: { location: '/fixture/loop' } });
     if (path === '/fixture/big') return new Response(BIG, { headers: { 'content-type': 'text/plain' } });
     if (path === '/fixture/binary') return new Response(new Uint8Array([1, 0, 2, 3, 0, 4]), { headers: { 'content-type': 'application/octet-stream' } });
