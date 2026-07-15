@@ -35,11 +35,31 @@ describe("protect: 'all' (default, middleware mode)", () => {
     expect(res.status).toBe(401);
   });
 
-  test('an unknown /_gate/* path falls through to the app (v3: fell to the router)', async () => {
+  test('the /_gate namespace is reserved: unknown paths are 404, never a pass-through', async () => {
+    // v3 next()'d these to its router; now nothing under /_gate/ reaches the
+    // app — with or without a session (PR #138 finding M-2).
     const app = setup();
-    const res = await app('/_gate/nope');
-    expect(res.status).toBe(200);
-    expect(await res.text()).toBe('top secret');
+    for (const path of ['/_gate/nope', '/_gate/login/extra', '/_gate/']) {
+      const res = await app(path);
+      expect(res.status).toBe(404);
+      expect(res.headers.get('cache-control')).toBe('no-store');
+    }
+    const { jar } = await login(app);
+    const authed = await app('/_gate/nope', { headers: { Cookie: cookieHeader(jar) } });
+    expect(authed.status).toBe(404);
+  });
+
+  test('an unmatched method on a real /_gate endpoint is 404 too', async () => {
+    const app = setup();
+    expect((await app('/_gate/check', { method: 'POST' })).status).toBe(404);
+    expect((await app('/_gate/login', { method: 'DELETE' })).status).toBe(404);
+  });
+
+  test('the three real endpoints still answer, unaffected by the closed namespace', async () => {
+    const app = setup();
+    expect((await app('/_gate/check')).status).toBe(401);  // anonymous probe
+    expect((await app('/_gate/login')).status).toBe(200);  // form renders
+    expect((await app('/_gate/logout')).status).toBe(302); // anonymous → login
   });
 });
 
@@ -267,6 +287,21 @@ describe('config validation (fail-closed)', () => {
 
   test('missing secret throws', () => {
     expect(() => gate({ users: {}, sessionDir: freshDir() })).toThrow(/secret/);
+  });
+
+  test('weak secret throws (fail-hard, as in the server security middleware)', () => {
+    for (const secret of ['hunter2-weak', '   ', 'x'.repeat(31), 42]) {
+      expect(() => gate({ secret, users: {}, sessionDir: freshDir() }))
+        .toThrow(/at least 32 characters/);
+    }
+  });
+
+  test('insecure: true excuses only an ABSENT secret, never a weak one', () => {
+    // The opt-out: no secret + insecure: true constructs (random per-boot key).
+    expect(() => gate({ insecure: true, users: {}, sessionDir: freshDir() })).not.toThrow();
+    // No middle ground: a weak secret still throws even with insecure: true.
+    expect(() => gate({ secret: 'hunter2-weak', insecure: true, users: {}, sessionDir: freshDir() }))
+      .toThrow(/at least 32 characters/);
   });
 });
 

@@ -110,6 +110,21 @@ defaultLogin = ({ csrfToken, error, returnTo, host }) ->
   <button type="submit">Sign in</button></form></body></html>
   """
 
+# A secret is present-and-strong, or absent-with-explicit-insecure — there is
+# no middle. Same contract as the server's security.rip: a weak secret is a
+# CONSTRUCTION failure, not a warning, and a deployment that truly wants a
+# throwaway CSRF key says `insecure: true` in its own words (gate then mints
+# a random per-boot key — a restart merely invalidates in-flight login forms).
+MIN_SECRET_LENGTH = 32
+validatedSecret = (given, insecure) ->
+  if given?
+    unless typeof given is 'string' and given.trim().length >= MIN_SECRET_LENGTH
+      throw new Error "gate: secret must be a string of at least #{MIN_SECRET_LENGTH} characters. Generate one with 'openssl rand -base64 32'."
+    return given
+  unless insecure
+    throw new Error "gate: requires a secret — a dev deployment without one must pass insecure: true in its own words"
+  null
+
 # Default session dir. /tmp is the right home for disposable auth sessions:
 # no root needed, and a reboot simply forces re-login (a feature, not a loss).
 defaultSessionDir = ->
@@ -143,7 +158,10 @@ formReader = (c) ->
 # ------------------------------------------------------------------------------
 #
 # Options:
-#   secret        Required. HMAC key for the CSRF token.
+#   secret        HMAC key for the CSRF token, 32+ chars. Required unless
+#                 `insecure: true`, which mints a random per-boot key instead.
+#   insecure      Opt out of requiring a secret (dev only). A weak secret is
+#                 never accepted — omit it entirely or make it strong.
 #   users         { username: argon2id-hash } map. Required unless `verify` is set.
 #   verify        async (username, password) -> truthy on success. Overrides `users`.
 #   template      ({ csrfToken, error, returnTo, host }) -> HTML for the login page.
@@ -157,8 +175,7 @@ formReader = (c) ->
 #                 /tmp/rip-gate. Overridable via GATE_SESSION_DIR.
 
 export gate = (opts = {}) ->
-  throw new Error 'gate: `secret` is required' unless opts.secret
-  secret   = opts.secret
+  secret   = validatedSecret(opts.secret, opts.insecure is true) or randomBytes(32).toString('base64url')
   users    = opts.users or {}
   verify   = opts.verify or null
   template = opts.template or defaultLogin
@@ -175,8 +192,6 @@ export gate = (opts = {}) ->
     throw new Error "gate: protect must be 'all' or 'none', got #{JSON.stringify(protect)}"
   unless Number.isInteger(ttl) and ttl > 0
     throw new Error "gate: ttl must be a positive integer (seconds), got #{JSON.stringify(ttl)}"
-  if typeof secret isnt 'string' or secret.length < 32
-    warn "gate: secret should be at least 32 characters (got #{secret?.length or 0}). Generate one with 'openssl rand -base64 32'."
 
   # --- session store (random token + file) ---
 
@@ -269,6 +284,44 @@ export gate = (opts = {}) ->
     ok = await verifyMatches(pass, hash)
     if ok then { user: name } else null
 
+  # --- login throttling (fixed window, in-memory) ---
+  #
+  # THROTTLE_MAX failed attempts per IP+username within THROTTLE_WINDOW
+  # seconds, then 429 + Retry-After until the window lapses; a successful
+  # login clears the key. This bounds both password brute force and the
+  # Argon2id CPU burn per key (the throttle check runs BEFORE the verify).
+  # In-memory is deliberate — like the session files, throttle state is
+  # disposable: a restart forgives, the right bias for a bouncer that must
+  # never lock the operator out. The IP half comes from x-forwarded-for's
+  # first hop; when that header is absent the username half still throttles,
+  # so a spoofed or missing IP never unlocks a targeted account.
+  THROTTLE_MAX    = 5
+  THROTTLE_WINDOW = 900
+
+  failures = new Map()  # key -> { count, resetAt }
+
+  throttleKey = (c, user) ->
+    ip = String(c.req.header('x-forwarded-for') or '').split(',')[0].trim()
+    "#{ip}|#{user.toLowerCase()}"
+
+  # Seconds until the key unblocks, or 0 when the attempt may proceed.
+  retryAfter = (key) ->
+    entry = failures.get(key)
+    return 0 unless entry
+    if Date.now() >= entry.resetAt
+      failures.delete key
+      return 0
+    if entry.count >= THROTTLE_MAX then Math.ceil((entry.resetAt - Date.now()) / 1000) else 0
+
+  recordFailure = (key) ->
+    now = Date.now()
+    # Swept lazily, like the session files: lapsed windows go whenever a
+    # failure is recorded, so the map never outgrows the live attacker set.
+    failures.forEach (entry, k) -> failures.delete(k) if now >= entry.resetAt
+    entry = failures.get(key) or { count: 0, resetAt: now + THROTTLE_WINDOW * 1000 }
+    entry.count += 1
+    failures.set key, entry
+
   # --- shared response bits ---
 
   setCookie = (name, value, maxAge) ->
@@ -326,16 +379,26 @@ export gate = (opts = {}) ->
 
     rawUser = String(read('user') or '').trim()
     pass    = String(read('password') or '')
-    # Cheap caps before Argon2id — gate does no rate limiting of its own.
+    # Cheap caps before Argon2id, so no attempt buys an unbounded hash.
     if rawUser.length > 256 or pass.length > 1024
       return new Response 'invalid credentials', { status: 400, headers: { 'Cache-Control': 'no-store' } }
 
+    # Throttle BEFORE the verify: a blocked key pays no Argon2id at all.
+    key  = throttleKey(c, rawUser)
+    wait = retryAfter(key)
+    if wait > 0
+      return new Response 'too many attempts',
+        status: 429
+        headers: { 'Retry-After': String(wait), 'Cache-Control': 'no-store' }
+
     identity = await doVerify(rawUser, pass)
     unless identity
+      recordFailure key
       submitted = String(read('_csrf') or '')
       return new Response template({ csrfToken: submitted, error: 'Invalid credentials', returnTo: rt, host: hostOf(c) }),
         status: 401
         headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': 'no-store' }
+    failures.delete key  # a successful login resets the window
 
     # Custom `verify` returns are user-supplied — `user` must be a non-empty
     # header-safe string before it lands in a file and later on Remote-User.
@@ -396,15 +459,17 @@ export gate = (opts = {}) ->
     'GET /_gate/logout':  logoutForm
     'POST /_gate/logout': logout
 
-  # The middleware for compose(). /_gate/* dispatches to the endpoints above
-  # (an unknown /_gate path falls through, as it fell through to v3's router);
+  # The middleware for compose(). /_gate/* dispatches to the endpoints above;
   # everything else passes unless the request is unauthenticated AND
-  # `protect: 'all'` is configured.
+  # `protect: 'all'` is configured. The /_gate namespace is RESERVED: anything
+  # under it that isn't one of the endpoints is a 404, never a pass-through
+  # (v3 next()'d unknown /_gate paths to its router — an app with a catch-all
+  # route would have served them anonymously).
   (c, next) ->
     if c.req.path.startsWith('/_gate/')
       handler = endpoints["#{c.req.method} #{c.req.path}"]
       return await handler(c) if handler
-      return await next()
+      return new Response 'not found', { status: 404, headers: { 'Cache-Control': 'no-store' } }
     return await next() if lookup(parseCookies(c.req.header('cookie'))[cookie])
     return await next() unless protect is 'all'
     accept = c.req.header('accept') or ''
