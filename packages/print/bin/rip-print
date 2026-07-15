@@ -1,0 +1,19 @@
+#!/usr/bin/env bun
+//
+// rip-print — the CLI for @rip-lang/print. The whole program lives in
+// ../print.rip (it is a pure CLI script, not a library), so this
+// wrapper runs the module as a main script under the repository's
+// .rip loader and forwards the argv and exit status untouched.
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const printRip = join(here, '..', 'print.rip');
+const loader = join(here, '..', '..', '..', 'src', 'loader.js');
+
+try {
+  execFileSync(process.execPath, ['--preload', loader, printRip, ...process.argv.slice(2)], { stdio: 'inherit' });
+} catch (e) {
+  process.exit(e.status ?? 1);
+}

@@ -5,6 +5,22 @@ repository's pull requests.
 
 ## Unreleased
 
+- `@rip-lang/print` joins the libraries lane: the syntax-highlighted
+  source printer (`rip-print`), which highlights files via
+  highlight.js, serves the result once on localhost:9111, opens the
+  browser, and exits. Line numbers, table of contents, prev/next
+  navigation, a 14-theme switcher and font sizing persisted in
+  localStorage, print CSS, `-b` comment stripping, `-x` exclusions,
+  directory walks with dotfile/generated-tree/binary skips,
+  `text/rip` script re-highlighting inside HTML, and single-`.md`
+  document rendering (`-d` force-dark). Rip highlighting now flows
+  through the shared `@rip-lang/highlight` grammar instead of v3's
+  embedded (older) copy — making the highlight README's "Rip Print
+  consumes this grammar" claim true. v3 shipped zero tests; the suite
+  pins the observed v3 contract — 18 tests over a real serve-fetch-exit
+  cycle, with v3/v4 output verified byte-identical across every mode
+  (timestamps aside) (#136)
+
 - `@rip-lang/x12` joins the libraries lane: the X12 EDI parser,
   editor, and query engine (270/271, 835, 837, ...) with path-based
   selector addressing (`EB(3)-4(2).1`, `(?)` counts, `(*)` collection,
