@@ -599,6 +599,12 @@ function __schemaDefaultAdapter(overrides) {
     async begin(options) {
       const session = await post('/sql/sessions/new', {});
       const sessionId = session.sessionId;
+      // No session id means no isolation — refuse loudly rather than
+      // run BEGIN/COMMIT as independent autocommit statements on the
+      // pool.
+      if (sessionId == null) {
+        throw new Error('db: harbor returned no session id for the transaction');
+      }
       const run = (sql, params) =>
         post('/sql', params && params.length ? { sql, params, sessionId } : { sql, sessionId });
       const drop = async () => {
@@ -609,10 +615,23 @@ function __schemaDefaultAdapter(overrides) {
           await fetch(base() + '/sql/sessions/' + sessionId, { method: 'DELETE', headers: headers() });
         } catch {}
       };
-      await run('BEGIN');
+      // A failed BEGIN would otherwise orphan the freshly-created
+      // session with no handle for the caller to clean up — drop it
+      // here.
+      try {
+        await run('BEGIN');
+      } catch (error) {
+        await drop();
+        throw error;
+      }
       return {
         query: run,
-        async commit() { await run('COMMIT'); await drop(); },
+        async commit() {
+          // drop in a finally, mirroring rollback: a failed COMMIT
+          // still releases the open transaction now, not at the idle
+          // TTL.
+          try { await run('COMMIT'); } finally { await drop(); }
+        },
         async rollback() {
           try { await run('ROLLBACK'); } finally { await drop(); }
         },
@@ -1996,9 +2015,9 @@ __SchemaDef.prototype._hydrate = function (columns, row) {
   // DB rows are trusted: hydrate into a class instance without
   // transforms, defaults, constraints, or refinements. Column names
   // arrive snake_case; properties live under camelCase with
-  // non-enumerable snake aliases. Temporal values arrive already
-  // decoded by the adapter — hydrate stores them verbatim (one decode
-  // seam, at the wire).
+  // non-enumerable snake aliases. Values are stored verbatim as
+  // delivered by the wire — the adapter does no temporal decoding, so
+  // temporals arrive as ISO strings and stay strings here.
   const data = {};
   for (let i = 0; i < columns.length; i++) {
     data[__schemaCamel(columns[i].name)] = row[i];
