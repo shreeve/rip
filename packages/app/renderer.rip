@@ -14,6 +14,7 @@ export type GateFailure =
 
 export type Renderer =
   mount: (info: Record<string, any>) => Promise<any>
+  preload: (info: Record<string, any>) => void
   start: () => Renderer
   stop: () => void
   readonly current: any
@@ -405,6 +406,32 @@ export def createRenderer(opts: RendererOpts): Renderer
       throw failureFor '<teardown>', '<renderer>', teardownErrors[0]
     current
 
+  # Link-intent preloading: warm the gate cells that navigating to
+  # `info` would construct, through cell.preload() — its freshness
+  # floor bridges the hover into the navigation's own ensure() without
+  # a double fetch. Warm only what a navigation would actually
+  # (re)construct: a layout chain that stays mounted keeps its live
+  # gate bindings, so only the page warms then; a destination already
+  # fully mounted warms nothing. A preload never surfaces a failure —
+  # the cell records it and the navigation's gate retries and reports.
+  preload = (info) ->
+    route = info?.route
+    return unless route?.file
+    params = info.params ?? {}
+    query = info.query ?? {}
+    layoutFiles = info.layouts ?? route.layouts ?? []
+    mountedFiles = mountedEntries.map (entry) -> entry.file
+    layoutsStay = lastRoute? and sameChain(layoutFiles, mountedFiles.slice(0, -1))
+    return if layoutsStay and route.file is lastRoute.file and shallowEqual(params, lastRoute.params)
+    files = if layoutsStay then [route.file] else [...layoutFiles, route.file]
+    try
+      entries = ({ file, cls: componentFrom(components, file) } for file in files)
+      jobs = gateJobs entries, params, query
+    catch error
+      return
+    job.cell.preload().catch(-> null) for job in jobs
+    return
+
   mount = (info) ->
     mine = ++generation
     router.navigating = true if 'navigating' in router
@@ -427,6 +454,7 @@ export def createRenderer(opts: RendererOpts): Renderer
   renderer =
     current: null
     mount: mount
+    preload: preload
     start: ->
       return renderer if disposeRoute
       router.init?()

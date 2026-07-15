@@ -27,6 +27,7 @@ import { createComponents } from './components.rip'
 import { buildRoutes } from './routes.rip'
 import { createRouter, browserAdapter } from './router.rip'
 import { createRenderer } from './renderer.rip'
+import { interceptClicks, preloadLinks } from './links.rip'
 import { persistStash } from './persist.rip'
 
 export type LaunchOpts =
@@ -36,6 +37,7 @@ export type LaunchOpts =
   base?: string
   hash?: boolean
   stash?: Record<string, any>
+  links?: { listen: (type: string, fn: (event: any) => void, opts?: Record<string, any>) => () => void }
   persist?: boolean | 'local' | 'session'
   storage?: Record<string, any>
   onError?: (failure: Record<string, any>) => void
@@ -124,6 +126,20 @@ export def launch(opts: LaunchOpts): LaunchResult
   unwatch = components.watch (_event, path) ->
     router.rebuild() if path.startsWith(ROUTE_ROOT + '/')
 
+  # Same-origin `<a>` clicks navigate the router and hovered or focused
+  # owned links preload their render gates — both delegate ownership to
+  # `ownsAnchor` and both delegate on the document. Under Node there is
+  # no document to delegate on, so without an injected `links` host the
+  # listeners simply do not install.
+  disposeLinks = null
+  if opts.links? or (typeof document isnt 'undefined' and typeof document.addEventListener is 'function')
+    removeClicks = interceptClicks router, opts.links
+    removePreload = preloadLinks router, renderer, opts.links
+    disposeLinks = ->
+      removeClicks()
+      removePreload()
+      return
+
   disposePersist = null
   if opts.persist
     disposePersist = persistStash app,
@@ -135,6 +151,7 @@ export def launch(opts: LaunchOpts): LaunchResult
   destroy = ->
     return if destroyed
     destroyed = true
+    disposeLinks?()
     renderer.stop()
     router.destroy()
     unwatch()

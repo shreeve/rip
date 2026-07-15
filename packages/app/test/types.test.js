@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { compile } from '../../../src/compile.js';
 import { tscBatch } from '../../../test/support/tscbatch.js';
 
-const moduleNames = ['source', 'stash', 'components', 'mutation', 'timing', 'routes', 'router', 'renderer', 'persist', 'launch', 'aria', 'index'];
+const moduleNames = ['source', 'stash', 'components', 'mutation', 'timing', 'routes', 'router', 'renderer', 'persist', 'launch', 'aria', 'links', 'index'];
 
 test('app package TypeScript faces and declarations are valid', () => {
   const files = {
@@ -13,6 +13,7 @@ test('app package TypeScript faces and declarations are valid', () => {
       'void launch; void persistStash;',
       "import { ariaCurrent, ownsAnchor } from './index';",
       'void ariaCurrent; void ownsAnchor;',
+      "import { interceptClicks, preloadLinks } from './index';",
       "const saveUser = createMutation(async (name: string) => ({ name }), { onSuccess: r => { const s: string = r.name; void s; } });",
       "const saved: Promise<{ name: string } | undefined> = saveUser('Ada');",
       'const busy: boolean = saveUser.pending;',
@@ -77,6 +78,11 @@ test('app package TypeScript faces and declarations are valid', () => {
       "components.write('app.rip', 'export App = component');",
       "const renderer = createRenderer({ router: { current: null }, app: { data }, components, target: { appendChild: node => node }, onError: failure => { const status: number = failure.status; void status; } });",
       "const mounted: Promise<unknown> = renderer.mount({ route: { file: 'app.rip' } });",
+      "const linkHost = { listen: (type: string, fn: (event: unknown) => void) => () => {} };",
+      'const stopClicks: () => void = interceptClicks(router, linkHost);',
+      'const stopPreload: () => void = preloadLinks(router, renderer, linkHost);',
+      "const claimedUrl: string | undefined = router.claims('/')?.url;",
+      'void stopClicks; void stopPreload; void claimedUrl;',
       'void maybeUser; void id; void maybeSignaled; void maybeKeyedSignaled; void ensured; void preloaded; void refetched; void peeked; void orderRead; void routeFile; void query; void pushed; void currentFile; void components; void mounted;',
     ].join('\n'),
   };

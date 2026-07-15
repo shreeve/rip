@@ -251,6 +251,8 @@ export type RouteInfo = {
 
 export type NavigationInfo = RouteInfo & { path: string };
 
+export type ClaimedRoute = NavigationInfo & { url: string };
+
 export type RouterCurrent = {
   route: Route;
   layouts: readonly string[];
@@ -267,7 +269,7 @@ export type Router = {
   back(): void;
   forward(): void;
   match(url: string): RouteInfo | null;
-  claims(url: string): NavigationInfo | null;
+  claims(url: string): ClaimedRoute | null;
   onNavigate(fn: (info: NavigationInfo) => void): () => void;
   rebuild(): void;
   destroy(): void;
@@ -341,11 +343,28 @@ export type RendererOptions = {
 export type Renderer = {
   readonly current: unknown;
   mount(info: RendererRouteState): Promise<unknown>;
+  preload(info: RendererRouteState): void;
   start(): Renderer;
   stop(): void;
 };
 
 export function createRenderer(options: RendererOptions): Renderer;
+
+export type LinkHost = {
+  listen(
+    type: string,
+    fn: (event: unknown) => void,
+    opts?: Record<string, unknown>,
+  ): () => void;
+};
+
+export function interceptClicks(router: Router, host?: LinkHost): () => void;
+
+export function preloadLinks(
+  router: Router,
+  renderer: Renderer,
+  host?: LinkHost,
+): () => void;
 
 export function persistStash(
   app: { data: Record<string, any> },
@@ -380,6 +399,7 @@ export function launch(opts: {
   base?: string;
   hash?: boolean;
   stash?: Record<string, unknown>;
+  links?: LinkHost;
   persist?: boolean | 'local' | 'session';
   storage?: {
     getItem(key: string): string | null;

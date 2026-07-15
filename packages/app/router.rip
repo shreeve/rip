@@ -237,7 +237,10 @@ export def createRouter(opts: RouterOpts): Router
     # carries — against this router's mode: hash mode requires and
     # parses the fragment, path mode requires a leading '/' and strips
     # the base. No state is written; this is the one ownership seam
-    # aria-current, preloading, and click interception share.
+    # aria-current, preloading, and click interception share. `url` is
+    # the claim re-spelled internally — exactly what push and replace
+    # accept — so an intercepted click navigates the reading ownership
+    # approved, query string and fragment intact.
     claims: (url) ->
       return null unless typeof url is 'string' and url.length > 0
       if hashMode
@@ -253,7 +256,8 @@ export def createRouter(opts: RouterOpts): Router
         return null unless path?
       hit = attempt path
       return null unless hit
-      { path, route: hit.route, params: hit.params, query: parseQuery(query), hash }
+      internal = path + (if query then '?' + query else '') + (if hash then '#' + hash else '')
+      { path, url: internal, route: hit.route, params: hit.params, query: parseQuery(query), hash }
 
     onNavigate: (fn) ->
       unless typeof fn is 'function'
