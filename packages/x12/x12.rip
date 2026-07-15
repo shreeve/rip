@@ -1,0 +1,692 @@
+# ==============================================================================
+# x12.rip: X12 EDI parser, editor, and query engine
+#
+# Author: Steve Shreeve <steve.shreeve@gmail.com>
+#   Date: Feb 9, 2026
+#
+# License: MIT
+# ==============================================================================
+
+import { existsSync, readdirSync, readFileSync, statSync } from 'fs'
+import { basename, join } from 'path'
+
+# ==[ Helpers ]=================================================================
+
+escRe = (s) -> s.replace /[.*+?^${}()|[\]\\]/g, '\\$&'
+
+ISA_WIDTHS = [3, 2, 10, 2, 10, 2, 15, 2, 15, 6, 4, 1, 5, 9, 1, 1]
+
+SELECTOR = /^(..[^-.(]?)(?:\((\d*|[+!?*]?)\))?[-.]?(\d+)?(?:\((\d*|[+!?*]?)\))?[-.]?(\d+)?$/
+
+isaWidthsStr = (str) ->
+  sep = str[3]
+  return str unless sep
+  parts = str.split sep
+  for part, i in parts
+    len = ISA_WIDTHS[i]
+    # ISA elements are fixed-width: pad even when empty (skip only the
+    # trailing component-sep + terminator, which has no width entry).
+    if len? and part.length isnt len
+      parts[i] = part.padEnd(len).slice 0, len
+  parts.join sep
+
+ansiColor = (str, fg, bgc) ->
+  m = fg.match /^([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$/
+  return str unless m
+  r = parseInt m[1], 16
+  g = parseInt m[2], 16
+  b = parseInt m[3], 16
+  pre = "\x1b[38;2;#{r};#{g};#{b}m"
+  post = "\x1b[39m"
+  pre + str + post
+
+# ==[ X12 Class ]===============================================================
+
+class X12
+  constructor: (obj) ->
+    # Initialize from input type
+    if typeof obj is 'string'
+      if obj.length > 0
+        @str = obj
+    else if obj instanceof X12
+      @str = obj.toString()
+
+    # Default ISA template
+    @str or= isaWidthsStr "ISA*00**00**ZZ**ZZ****^*00501**0*P*:~"
+
+    # Detect separators from ISA header
+    m = @str.match /^ISA(.).{78}(.).{21}(.)(.)/
+    throw new Error "malformed X12" unless m
+    @fld = m[1]
+    @rep = m[2]
+    @com = m[3]
+    @seg = m[4]
+    @rep = "^" if @rep is "U"
+
+    # Parse based on input type
+    if typeof obj is 'string' or not obj?
+      @toArray()
+      @str = null
+    else if Array.isArray obj
+      arr = obj.slice 0
+      while arr.length >= 2
+        p = arr.shift()
+        v = arr.shift()
+        @set p, v
+    else if typeof obj is 'object'
+      for own key, val of obj
+        @set key, val if val?
+
+    @toString() unless @str
+
+  # ==[ Serialization ]=========================================================
+
+  toArray: ->
+    return @ary if @ary
+    re = new RegExp "[#{escRe @seg}\\r\\n]+", 'g'
+    @ary = @str.trim().split(re).map (s) => s.split @fld, -1
+    @ary
+
+  toString: ->
+    return @str if @str
+    @str = @ary.map((seg) => seg.join(@fld) + @seg).join("\n")
+    if @str.endsWith "\n"
+      @str = @str.slice 0, -1
+    @str
+
+  raw: -> @toString().replace(/\n/g, '').toUpperCase()
+
+  # ==[ ISA field widths ]======================================================
+
+  isaWidths: (row) ->
+    for was, i in row
+      len = ISA_WIDTHS[i]
+      continue unless len?
+      cur = was ?? ''
+      row[i] = cur.padEnd(len).slice 0, len if cur.length isnt len
+    row
+
+  # ==[ Display ]===============================================================
+
+  show: (...opts) ->
+    full = opts.includes 'full'
+    deep = opts.includes 'deep'
+    down = opts.includes 'down'
+    asList = opts.includes 'list'
+    hide = opts.includes 'hide'
+    only = opts.includes 'only'
+    useAnsi = opts.includes 'ansi'
+    left = 15
+
+    out = if full then [@toString()] else []
+
+    unless hide
+      out.push "" if full
+      nums = {}
+      segs = @toArray()
+      for flds in segs
+        seg = if down then flds[0].toLowerCase() else flds[0].toUpperCase()
+        nums[seg] = (nums[seg] or 0) + 1
+        num = nums[seg]
+        for fld, j in flds
+          continue if j is 0
+          continue if not fld or fld.length is 0
+          if deep
+            reps = fld.split @rep
+            if reps.length > 1
+              for item, k in reps
+                suffix = if num > 1 and not only then "(#{num})" else ""
+                tag = "#{seg}#{suffix}-#{j}(#{k + 1})"
+                out.push tag.padEnd(left) + item
+              continue
+          suffix = if num > 1 and not only then "(#{num})" else ""
+          tag = "#{seg}#{suffix}-#{j}"
+          val = if useAnsi then ansiColor(fld, "ffffff", "") else fld
+          out.push tag.padEnd(left) + val
+
+    if asList then out else console.log out.join "\n"
+
+  # ==[ Normalize ]=============================================================
+
+  normalize: (obj) ->
+    if Array.isArray obj
+      for elt, i in obj
+        str = if typeof elt is 'string' then elt else String elt
+        obj[i] = str.toUpperCase()
+    else
+      str = if typeof obj is 'string' then obj else String obj
+      str.toUpperCase()
+
+  # ==[ Data access — unified get/set ]=========================================
+
+  data: (...args) ->
+    len = args.length
+    return @update args if len > 2
+    pos = args[0]
+    return @str unless pos?
+    val = args[1]
+
+    # Parse the selector
+    m = pos.match SELECTOR
+    throw new Error "bad selector '#{pos}'" unless m
+    seg = m[1]
+    wantPat = "^#{seg}[^#{escRe @seg}\\r\\n]*"
+    want = new RegExp wantPat, 'i'
+    wantG = new RegExp wantPat, 'gim'
+
+    numStr = m[2] or ""
+    isDigit = /^\d+$/
+    num = if numStr.length > 0 and isDigit.test numStr then parseInt numStr else null
+    newNum = numStr is "+"
+    askNum = numStr is "?"
+    allNum = numStr is "*"
+
+    fldStr = m[3]
+    fld = if fldStr? then parseInt fldStr else null
+    throw new Error "zero index on field" if len > 1 and fld is 0
+
+    repStr = m[4] or ""
+    rep = if repStr.length > 0 and isDigit.test repStr then parseInt repStr else null
+    newRep = repStr is "+"
+    askRep = repStr is "?"
+    allRep = repStr is "*"
+
+    comStr = m[5]
+    com = if comStr? then parseInt comStr else null
+    throw new Error "zero index on component" if len > 1 and com is 0
+
+    if len <= 1  # GET
+      @toString() unless @str
+      matches = @str.match(wantG) or []
+
+      if askNum and not askRep
+        return matches.length
+
+      if allNum
+        result = []
+        for match in matches
+          out = match
+          if fld?
+            out = out.split(@fld)[fld]
+            continue unless out?
+          if askRep
+            result.push out.split(@rep).length
+            continue
+          if rep? or (com? and not rep?)
+            rep ?= 1
+            out = out.split(@rep)[rep - 1]
+            continue unless out?
+          if com?
+            out = out.split(@com)[com - 1]
+            continue unless out?
+          result.push out
+        return result
+
+      num ?= 1
+      out = matches[num - 1]
+      return "" unless out?
+
+      if fld?
+        out = out.split(@fld)[fld]
+        return "" unless out?
+
+      if askRep
+        return out.split(@rep).length
+
+      if rep? or (com? and not rep?)
+        rep ?= 1
+        out = out.split(@rep)[rep - 1]
+        return "" unless out?
+
+      if com?
+        out = out.split(@com)[com - 1]
+        return "" unless out?
+
+      return out
+
+    else  # SET
+      @toArray() unless @ary
+      @str = null
+
+      our = @ary.filter (now) -> want.test now[0]
+
+      unless allNum
+        # No occurrence given: target the first existing segment, or fall
+        # through to num=0 (create) when none exist / this is an append (+).
+        num ?= if not newNum and our.length > 0 then 1 else 0
+        row = our[num - 1]
+        pad = if row then 0 else num - our.length
+        pad = 1 if (num is 0 and our.length is 0) or newNum
+        if pad > 0
+          for _i in [1..pad]
+            row = [seg.toUpperCase()]
+            @ary.push row
+        if newNum and val is 'num'
+          val = our.length + pad
+        our = [row]
+
+      # Prepare the value
+      val ?= ""
+      how = null
+
+      if not rep? and not com?
+        # replace fields
+        val = val.join(@fld) if Array.isArray val
+        val = String(val).split @fld, -1
+        how = 'fld'
+      else if fld? and rep? and not com?
+        # replace repeats
+        val = val.join(@rep) if Array.isArray val
+        val = String(val).split @rep, -1
+        how = 'rep'
+      else if fld? and com?
+        # replace components
+        val = val.join(@com) if Array.isArray val
+        val = String(val).split @com, -1
+        how = 'com'
+
+      throw new Error "invalid fld/rep/com: [#{fld}, #{rep}, #{com}]" unless how
+
+      val = [""] if val.length is 0
+
+      # Replace the target in each matching row
+      for row in our
+        if how is 'fld'
+          if fld?
+            pad = fld - row.length
+            if pad > 0
+              for _i in [1..pad]
+                row.push ""
+            row.splice fld, val.length, ...val
+          else
+            row.splice 1, row.length - 1, ...val
+
+        else if how is 'rep'
+          row[fld] ?= ""
+          was = row[fld]
+          if was.length is 0
+            newVal = ""
+            if rep > 1
+              newVal = @rep.repeat(rep - 1)
+            newVal += val.join @rep
+            row[fld] = newVal
+          else
+            ufr = was.split @rep, -1
+            pad = rep - ufr.length
+            if newRep or (rep is 0 and ufr.length is 0)
+              pad = 1
+            if pad > 0
+              for _i in [1..pad]
+                ufr.push ""
+            ufr.splice rep - 1, val.length, ...val
+            row[fld] = ufr.join @rep
+
+        else if how is 'com'
+          rep ?= 0
+          row[fld] ?= ""
+          one = row[fld]
+
+          if one.length is 0
+            newVal = ""
+            if rep > 1
+              newVal = @rep.repeat(rep - 1)
+            if com > 1
+              newVal += @com.repeat(com - 1)
+            newVal += val.join @com
+            row[fld] = newVal
+          else
+            ufr = one.split @rep, -1
+            pad = rep - ufr.length
+            if newRep or (rep is 0 and ufr.length is 0)
+              pad = 1
+            if pad > 0
+              for _i in [1..pad]
+                ufr.push ""
+
+            two = ufr[rep - 1] or ""
+            if two.length is 0
+              newVal = ""
+              if com > 1
+                newVal = @com.repeat(com - 1)
+              newVal += val.join @com
+              ufr[rep - 1] = newVal
+            else
+              ucr = two.split @com, -1
+              pad = com - ucr.length
+              if pad > 0
+                for _i in [1..pad]
+                  ucr.push ""
+              ucr.splice com - 1, val.length, ...val
+              ufr[rep - 1] = ucr.join @com
+
+            row[fld] = ufr.join @rep
+
+      # Enforce ISA field widths
+      if seg =~ /isa/i
+        @isaWidths row
+
+      null
+
+  get: (pos) -> @data pos
+  set: (pos, val) -> @data pos, val
+
+  # ==[ Update ]================================================================
+
+  update: (etc) ->
+    if Array.isArray etc
+      i = 0
+      while i < etc.length - 1
+        @data etc[i], etc[i + 1] if etc[i + 1]?
+        i += 2
+    else if typeof etc is 'object' and etc?
+      for own pos, val of etc
+        @data pos, val if val?
+    this
+
+  # ==[ Iteration ]=============================================================
+
+  each: (seg, fn) ->
+    if typeof seg is 'function'
+      fn = seg
+      seg = null
+    for row in @toArray()
+      if seg?
+        if typeof seg is 'string'
+          continue unless row[0].toUpperCase() is seg.toUpperCase()
+        else
+          continue unless seg.test row[0]
+      fn row
+    this
+
+  grep: (seg) ->
+    result = []
+    for row in @toArray()
+      if typeof seg is 'string'
+        result.push row if row[0].toUpperCase() is seg.toUpperCase()
+      else
+        result.push row if seg.test row[0]
+    result
+
+  # ==[ Find (multi-query) ]====================================================
+
+  find: (...ask) ->
+    return undefined if ask.length is 0
+
+    str = @toString()
+    say = []
+
+    for pos in ask
+      unless pos?
+        say.push null
+        continue
+
+      m = pos.match SELECTOR
+      throw new Error "bad selector '#{pos}'" unless m
+      seg = m[1]
+      wantPat = "^#{seg}[^#{escRe @seg}\\r\\n]*"
+      wantG = new RegExp wantPat, 'gim'
+
+      numStr = m[2] or ""
+      isDigit = /^\d+$/
+      num = if numStr.length > 0 and isDigit.test numStr then parseInt numStr else null
+      askNum = numStr is "?"
+      allNum = numStr is "*"
+
+      fldStr = m[3]
+      fld = if fldStr? then parseInt fldStr else null
+
+      repStr = m[4] or ""
+      rep = if repStr.length > 0 and isDigit.test repStr then parseInt repStr else null
+      askRep = repStr is "?"
+
+      comStr = m[5]
+      com = if comStr? then parseInt comStr else null
+
+      matches = str.match(wantG) or []
+
+      if allNum
+        throw new Error "multi query allows only one selector" if ask.length > 1
+        result = []
+        for match in matches
+          out = match
+          if fld?
+            out = out.split(@fld)[fld]
+            continue unless out?
+          if askRep
+            result.push out.split(@rep).length
+            continue
+          if rep? or (com? and not rep?)
+            rep ?= 1
+            out = out.split(@rep)[rep - 1]
+            continue unless out?
+          if com?
+            out = out.split(@com)[com - 1]
+            continue unless out?
+          result.push out
+        return result
+
+      if askNum and not askRep
+        say.push matches.length
+        continue
+
+      num ?= 1
+      out = matches[num - 1]
+      unless out?
+        say.push ""
+        continue
+
+      if fld?
+        out = out.split(@fld)[fld]
+        unless out?
+          say.push ""
+          continue
+
+      if askRep
+        say.push out.split(@rep).length
+        continue
+
+      if rep? or (com? and not rep?)
+        rep ?= 1
+        out = out.split(@rep)[rep - 1]
+        unless out?
+          say.push ""
+          continue
+
+      if com?
+        out = out.split(@com)[com - 1]
+        unless out?
+          say.push ""
+          continue
+
+      say.push out
+
+    if say.length > 1 then say else say[0]
+
+X12.load = (file) ->
+  try
+    str = readFileSync file, 'utf-8'
+  catch
+    throw new Error "unreadable file: #{file}"
+  new X12 str
+
+export { X12, ISA_WIDTHS, SELECTOR }
+
+# ==[ CLI ]=====================================================================
+
+if import.meta.main
+
+  args = process.argv.slice 2
+
+  if args.includes('-v') or args.includes('--version')
+    console.log "rip-x12 0.1.0"
+    process.exit 0
+
+  if args.includes('-h') or args.includes('--help')
+    console.log """
+      usage: rip-x12 [options] <file> <file> ...
+
+      Options:
+        -a, --after <date>   After date (YYYYMMDD)
+            --ansi           ANSI color output
+        -c, --count          Count messages
+        -d, --dive           Recursive directory scan
+        -f, --fields         Show fields
+        -F, --fields-only    Fields only, no repeat indicators
+        -h, --help           Show help
+        -i, --ignore         Skip malformed files
+        -l, --lower          Lowercase segment names
+        -m, --message        Show message body
+        -p, --path           Show file path
+        -q, --query <val>    Query specific values
+        -s, --spacer         Blank line between messages
+        -t, --tsv            Tab-delimited output
+        -v, --version        Show version
+      """
+    process.exit 0
+
+  # Parse options
+  opts = {}
+  paths = []
+  i = 0
+  while i < args.length
+    arg = args[i]
+    if arg is '-a' or arg is '--after'
+      i++
+      opts.after = args[i]
+    else if arg is '--ansi'
+      opts.ansi = true
+    else if arg is '-c' or arg is '--count'
+      opts.count = true
+    else if arg is '-d' or arg is '--dive'
+      opts.dive = true
+    else if arg is '-f' or arg is '--fields'
+      opts.fields = true
+    else if arg is '-F' or arg is '--fields-only'
+      opts.fields = true
+      opts.only = true
+    else if arg is '-i' or arg is '--ignore'
+      opts.ignore = true
+    else if arg is '-l' or arg is '--lower'
+      opts.lower = true
+    else if arg is '-m' or arg is '--message'
+      opts.message = true
+    else if arg is '-p' or arg is '--path'
+      opts.path = true
+    else if arg is '-q' or arg is '--query'
+      i++
+      opts.query = args[i]
+    else if arg is '-s' or arg is '--spacer'
+      opts.spacer = true
+    else if arg is '-t' or arg is '--tsv'
+      opts.tsv = true
+    else
+      paths.push arg
+    i++
+
+  if paths.length is 0
+    console.error "usage: rip-x12 [options] <file> <file> ..."
+    process.exit 1
+
+  # Build show args
+  showArgs = []
+  showArgs.push 'ansi' if opts.ansi
+  showArgs.push 'down' if opts.lower
+  noOpts = Object.keys(opts).length is 0
+  showArgs.push 'full' if opts.message or noOpts
+  showArgs.push 'hide' unless opts.fields
+  showArgs.push 'only' if opts.only
+
+  # Query setup
+  quer = null
+  seps = if opts.tsv then "\t" else "|"
+  if opts.query
+    quer = opts.query.split(',').map (s) -> s.trim()
+
+  # After date filter
+  afterTime = null
+  if opts.after
+    d = opts.after
+    iso = "#{d.slice(0,4)}-#{d.slice(4,6)}-#{d.slice(6,8)}"
+    afterTime = new Date iso
+
+  # File discovery
+  skipDirs = new Set ['.git', 'node_modules', '.rip-cache']
+
+  walkDir = (dir) ->
+    files = []
+    try
+      entries = readdirSync dir
+    catch
+      return files
+    for entry in entries
+      full = join dir, entry
+      try
+        stat = statSync full
+      catch
+        continue
+      if stat.isDirectory()
+        continue if entry.startsWith('.') or skipDirs.has entry
+        if opts.dive
+          files = files.concat walkDir full
+      else if stat.isFile()
+        if afterTime
+          files.push full if stat.mtime > afterTime
+        else
+          files.push full
+    files.sort()
+
+  # Build file list
+  list = []
+  for p in paths
+    unless existsSync p
+      console.error "unknown: #{p}"
+      continue
+    stat = statSync p
+    if stat.isDirectory()
+      list = list.concat walkDir p
+    else if stat.isFile()
+      if afterTime
+        list.push p if stat.mtime > afterTime
+      else
+        list.push p
+    else
+      console.error "unknown: #{p}"
+
+  # Process files
+  msgs = 0
+
+  for file in list
+    console.log() if opts.spacer and msgs > 0
+
+    if opts.path
+      if quer and quer.length is 1
+        process.stdout.write "#{file}:"
+      else
+        console.log "\n==[ #{file} ]==\n"
+
+    try
+      str = readFileSync file, 'utf-8'
+    catch
+      console.error "ERROR: unable to read: \"#{file}\""
+      continue
+
+    try
+      x12 = new X12 str
+    catch e
+      unless opts.ignore
+        console.error "ERROR: malformed X12: \"#{file}\" (#{e.message})"
+      continue
+
+    if quer
+      hits = x12.find ...quer
+      hits = [hits] unless Array.isArray hits
+      hits.unshift file if opts.path
+      console.log hits.join seps
+      console.log() if opts.path
+      continue
+
+    x12.show ...showArgs
+    msgs += 1
+
+  if opts.count and msgs > 0
+    console.log "\nTotal messages: #{msgs}"

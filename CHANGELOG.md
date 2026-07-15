@@ -5,6 +5,17 @@ repository's pull requests.
 
 ## Unreleased
 
+- `@rip-lang/x12` joins the libraries lane: the X12 EDI parser,
+  editor, and query engine (270/271, 835, 837, ...) with path-based
+  selector addressing (`EB(3)-4(2).1`, `(?)` counts, `(*)` collection,
+  `(+)` appends), separator auto-detection from the ISA header, ISA
+  fixed-width enforcement, envelope building, multi-query `find`, and
+  the `rip-x12` CLI. The v3 implementation ported byte-identical and
+  gained the test suite it never had — 91 tests pinning the contract
+  observed by running v3 as the oracle, including the real consumer
+  patterns (eligibility 270/271 mirroring, dental 837/835 build and
+  posting-data parse) and declared warts (#135)
+
 - `@rip-lang/http` opens the libraries lane: the zero-dependency HTTP
   client, a ky-inspired convenience layer over native fetch. Method
   shortcuts (`get`/`post`/`put`/`patch`/`del`/`head`), a `json:` body
