@@ -36,9 +36,13 @@ but it must not block direct-path package implementation and tests.
 
 ### Application foundation
 
-- **Server:** routing, middleware, sessions, OpenAPI, static/app serving,
-  worker management, TLS/proxy support, nginx/caddy configuration
-  generation, mDNS, and development watch transport.
+- **Server:** the decision cores — routing, middleware, sessions,
+  OpenAPI, static/app serving, worker pool policy, TLS policy, proxy
+  policy, nginx/caddy configuration generation, mDNS, and development
+  watch transport — are merged (#94–#106). The runnable serving/bin
+  layer (listener, process workers, proxy execution, file watcher,
+  ACME/dev-CA, config loader, rate/body limits, `rip server` bin)
+  remains open, pending owner scheduling and a CLI-grammar ruling.
 - **UI:** browser widgets and browser-side Tailwind integration.
 - **Database:** database client, embedding/adapter surfaces, and CLI.
 
@@ -179,6 +183,14 @@ and pin one contract: surface the diagnostic, or render an explicit
 The editor currently materializes the import closure of open files.
 Workspace-wide references, rename, and auto-import may expand that
 closure lazily; the feature that requests the expansion owns its cost.
+
+### Render-DSL intelligence
+
+The TypeScript face currently lowers render-block attributes to string
+literals, leaving no typed position for the language service. Editor
+intelligence for render blocks returns through typed attribute
+positions in the face, so completion and checking are tsgo-native.
+Scheduled with the UI stage.
 
 ### Derived schema declarations
 
