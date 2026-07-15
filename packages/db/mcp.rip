@@ -1,0 +1,220 @@
+# @rip-lang/db/mcp — an MCP stdio server exposing a duckdb-harbor
+# database to AI assistants (Cursor, Claude Desktop, …).
+#
+# It speaks line-delimited JSON-RPC 2.0 over stdin/stdout and proxies
+# three tools to harbor's `/sql`: execute_query, list_tables, and
+# list_columns. Zero dependencies — pure Rip over native fetch.
+#
+#   rip packages/db/mcp.rip                        # http://127.0.0.1:9494
+#   rip packages/db/mcp.rip --url http://harbor:9494
+#
+# The protocol core is `createMcpServer({ sql })` — pure over an injected
+# `sql(query, params?)` runner — so every method and tool tests without a
+# server or stdio. The module auto-starts the stdio loop only when run
+# directly.
+
+VERSION = '2.1.0'
+MAX_ROWS = 1024
+MAX_CHARS = 50000
+SQL_TIMEOUT_MS = 30_000
+
+INSTRUCTIONS = '''
+  DuckDB SQL over duckdb-harbor. Use DuckDB's dialect: standard SQL plus
+  list/struct/map types, QUALIFY, GROUP BY ALL, SELECT * EXCLUDE/REPLACE,
+  and functions like list_aggregate, strftime, and epoch_ms. Explore with
+  list_tables and list_columns before querying; execute_query runs any
+  statement. Results are truncated past 1024 rows or 50KB.
+'''
+
+TOOLS = [
+  {
+    name: 'execute_query'
+    description: 'Execute a SQL query on the DuckDB database. Use DuckDB SQL dialect.'
+    inputSchema: { type: 'object', properties: { sql: { type: 'string', description: 'SQL query to execute' } }, required: ['sql'] }
+    annotations: { readOnlyHint: false, destructiveHint: true }
+  }
+  {
+    name: 'list_tables'
+    description: 'List all tables and views in the database with their types and comments.'
+    inputSchema: { type: 'object', properties: {} }
+    annotations: { readOnlyHint: true, destructiveHint: false }
+  }
+  {
+    name: 'list_columns'
+    description: 'List all columns of a table with their types, nullability, and comments.'
+    inputSchema: { type: 'object', properties: { table: { type: 'string', description: 'Table or view name' } }, required: ['table'] }
+    annotations: { readOnlyHint: true, destructiveHint: false }
+  }
+]
+
+# columns[i].name → row[i], one object per row.
+rowsToObjects = (columns, data) ->
+  names = (columns ?? []).map (c) -> c.name
+  for row in (data ?? [])
+    obj: any = {}
+    obj[names[i]] = value for value, i in row
+    obj
+
+# ── the protocol core ─────────────────────────────────────────────────
+
+export def createMcpServer(deps: { sql: any }): { dispatch: (msg: any) => Promise<string | null> }
+  { sql } = deps
+
+  # execute_query: run arbitrary SQL, shape the result, and truncate to
+  # stay within the row and byte budgets an assistant can consume.
+  executeQuery = (params) ->
+    query = params?.sql
+    return { success: false, error: 'Missing sql parameter' } unless query
+    try
+      result = await sql query
+      return { success: false, error: result.error, errorCode: result.errorCode } if result?.ok is false
+      columns = (result.columns ?? []).map (c) -> c.name
+      columnTypes = (result.columns ?? []).map (c) -> c.duckdbType ?? c.type
+      rows = result.data ?? []
+      truncated = false
+      warning = null
+      if rows.length > MAX_ROWS
+        rows = rows.slice 0, MAX_ROWS
+        truncated = true
+        warning = "Results limited to #{MAX_ROWS} rows."
+      output: any = { success: true, columns, columnTypes, rows, rowCount: rows.length }
+      # Shrink by ~10% per pass until the serialized result fits the byte
+      # budget (or one row remains).
+      while JSON.stringify(output).length > MAX_CHARS and output.rows.length > 1
+        cut = Math.max 1, Math.floor(output.rows.length / 10)
+        output.rows = output.rows.slice 0, output.rows.length - cut
+        output.rowCount = output.rows.length
+        truncated = true
+        warning = "Results limited to #{output.rows.length} rows due to 50KB output size limit."
+      # A single row that alone blows the budget can't be shrunk further —
+      # return it, but say so rather than silently exceeding the cap.
+      if JSON.stringify(output).length > MAX_CHARS
+        truncated = true
+        warning = "A single row exceeds the 50KB output budget; returned in full."
+      output.truncated = truncated if truncated
+      output.warning = warning if warning
+      output
+    catch err
+      { success: false, error: err.message, errorType: err.constructor?.name or 'Error' }
+
+  listTables = ->
+    try
+      result = await sql '''
+        SELECT schema_name AS schema, table_name AS name, 'table' AS type, comment
+        FROM duckdb_tables() WHERE database_name = current_database() AND NOT internal
+        UNION ALL
+        SELECT schema_name AS schema, view_name AS name, 'view' AS type, comment
+        FROM duckdb_views() WHERE database_name = current_database() AND NOT internal
+        ORDER BY schema, type, name
+      '''
+      return { success: false, error: result.error, errorCode: result.errorCode } if result?.ok is false
+      tables = rowsToObjects result.columns, result.data
+      { success: true, tables, tableCount: (tables.filter (t) -> t.type is 'table').length, viewCount: (tables.filter (t) -> t.type is 'view').length }
+    catch err
+      { success: false, error: err.message, errorType: err.constructor?.name or 'Error' }
+
+  listColumns = (params) ->
+    table = params?.table
+    return { success: false, error: 'Missing table parameter' } unless table
+    try
+      [stmt, bindings] = if table.includes '.'
+        parts = table.split '.'
+        schemaName = parts[0]
+        tableName = parts.slice(1).join '.'
+        [
+          '''
+            SELECT column_name AS name, data_type AS type, is_nullable = 'YES' AS nullable, comment
+            FROM duckdb_columns() WHERE database_name = current_database() AND schema_name = ? AND table_name = ? ORDER BY column_index
+          '''
+          [schemaName, tableName]
+        ]
+      else
+        [
+          '''
+            SELECT column_name AS name, data_type AS type, is_nullable = 'YES' AS nullable, comment
+            FROM duckdb_columns() WHERE database_name = current_database() AND table_name = ? ORDER BY column_index
+          '''
+          [table]
+        ]
+      result = await sql stmt, bindings
+      return { success: false, error: result.error, errorCode: result.errorCode } if result?.ok is false
+      columns = rowsToObjects result.columns, result.data
+      { success: true, table, columns, columnCount: columns.length }
+    catch err
+      { success: false, error: err.message, errorType: err.constructor?.name or 'Error' }
+
+  respond = (id, result) -> JSON.stringify { jsonrpc: '2.0', id, result }
+  respondError = (id, code, message) -> JSON.stringify { jsonrpc: '2.0', id, error: { code, message } }
+
+  callTool = (params) ->
+    name = params?.name
+    args = params?.arguments or {}
+    result = switch name
+      when 'execute_query' then await executeQuery args
+      when 'list_tables' then await listTables()
+      when 'list_columns' then await listColumns args
+      else { success: false, error: "Unknown tool: #{name}" }
+    { content: [{ type: 'text', text: JSON.stringify result }], isError: not result.success }
+
+  # One JSON-RPC message → the string to write (or null for a
+  # notification that produces no reply).
+  dispatch = (msg) ->
+    { id, method, params } = msg
+    switch method
+      when 'initialize'
+        respond id,
+          protocolVersion: '2024-11-05'
+          capabilities: { tools: {} }
+          serverInfo: { name: 'rip-db-mcp', version: VERSION }
+          instructions: INSTRUCTIONS
+      when 'notifications/initialized' then null
+      when 'tools/list' then respond id, { tools: TOOLS }
+      when 'tools/call' then respond id, await callTool(params)
+      else
+        if id? then respondError id, -32601, "Unknown method: #{method}" else null
+
+  { dispatch }
+
+# ── harbor sql runner ─────────────────────────────────────────────────
+
+# A `sql(query, params?)` runner over harbor's /sql with a request
+# timeout, returning the parsed envelope (callers read `ok`/`error`).
+export makeSql = (opts: any = {}) ->
+  base = String(opts.url or 'http://127.0.0.1:9494').replace(/\/+$/, '')
+  token = opts.token
+  fetchFn = opts.fetch ?? fetch
+  (query, params = null) ->
+    headers: any = { 'Content-Type': 'application/json', 'Accept': 'application/json' }
+    headers['Authorization'] = "Bearer #{token}" if token
+    body = if params? then { sql: query, params } else { sql: query }
+    ctrl = new AbortController()
+    timer = setTimeout (-> ctrl.abort()), SQL_TIMEOUT_MS
+    try
+      res = await fetchFn "#{base}/sql", { method: 'POST', headers, body: JSON.stringify(body), signal: ctrl.signal }
+      await res.json()
+    finally
+      clearTimeout timer
+
+# ── stdio entry (only when run directly) ──────────────────────────────
+
+export def startStdio(options: any = {}): void
+  { createInterface } = await import('node:readline')
+  argv = process.argv.slice 2
+  flagIdx = argv.indexOf '--url'
+  url = (if flagIdx >= 0 then argv[flagIdx + 1] else null) or process.env.RIP_DB_URL or 'http://127.0.0.1:9494'
+  token = process.env.RIP_DB_TOKEN or null
+  log = (...args) -> console.warn '[mcp-duckdb]', ...args
+  log "harbor requests will be rejected with MISSING_CREDENTIAL — set RIP_DB_TOKEN" unless token
+  { dispatch } = createMcpServer sql: makeSql({ url, token })
+  rl = createInterface input: process.stdin
+  log "Starting (harbor at #{url})"
+  rl.on 'line', (line) ->
+    return unless line.trim()
+    try
+      reply = await dispatch JSON.parse(line)
+      process.stdout.write reply + '\n' if reply?
+    catch err
+      log 'dispatch error:', err?.message or err
+    return
+
+startStdio() if import.meta.main

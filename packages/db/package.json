@@ -7,7 +7,15 @@
     ".": {
       "types": "./index.d.ts",
       "default": "./index.rip"
-    }
+    },
+    "./embed": {
+      "types": "./embed.d.ts",
+      "default": "./embed.rip"
+    },
+    "./mcp": "./mcp.rip"
+  },
+  "bin": {
+    "rip-db": "./bin/rip-db"
   },
   "scripts": {
     "test": "bun test --timeout 15000"
@@ -15,6 +23,7 @@
   "files": [
     "*.rip",
     "*.d.ts",
+    "bin/",
     "README.md"
   ]
 }

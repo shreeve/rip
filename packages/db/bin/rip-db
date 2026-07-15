@@ -1,0 +1,142 @@
+#!/usr/bin/env bun
+//
+// rip-db — the operational CLI for @rip-lang/db. Talks to a RUNNING
+// duckdb-harbor over /sql; it never starts the server. This is a thin
+// host wrapper: argv parsing plus the real fetch/filesystem/tar/clock
+// seam handed to the command logic in ../cli.rip (which holds every
+// decision and is unit-tested without a server).
+//
+//   rip-db dump [ARCHIVE.tar.gz | DIRECTORY]   snapshot the database
+//   rip-db load ARCHIVE.tar.gz                 restore from a snapshot
+//   rip-db checkpoint [--force]                flush the WAL
+//
+// Environment: RIP_DB_URL (default http://127.0.0.1:9494), RIP_DB_TOKEN
+// (only when harbor was started with a token).
+import '../../../src/loader.js'; // registers the .rip Bun loader plugin
+import { existsSync, statSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+
+const cli = await import('../cli.rip');
+
+const USAGE = `\
+rip-db — CLI for @rip-lang/db (talks to a running duckdb-harbor).
+
+Usage:
+  rip-db dump [ARCHIVE.tar.gz | DIRECTORY]   Snapshot the running database.
+  rip-db load ARCHIVE.tar.gz                 Restore from a snapshot (empty DB).
+  rip-db checkpoint [--force]                Flush the WAL into the DB file.
+  rip-db <subcommand> --help                 Subcommand-specific help.
+  rip-db --help / -h                         This message.
+  rip-db --version / -v                      Print version.
+
+This CLI does not start a database server. Run your duckdb-harbor
+instance separately and point RIP_DB_URL at it.
+
+Environment:
+  RIP_DB_URL    Harbor base URL (default http://127.0.0.1:9494)
+  RIP_DB_TOKEN  Harbor bearer token (only when harbor requires one)
+`;
+
+const HELP = {
+  dump: `\
+Usage: rip-db dump [ARCHIVE.tar.gz | DIRECTORY]
+
+Export the running harbor database to a single .tar.gz archive.
+  (omitted)            write <db>-YYYYMMDD-HHMMSS.tar.gz in the cwd
+  existing directory   write the auto-named archive INSIDE that directory
+  *.tar.gz / *.tgz     use the literal filename
+Refuses to overwrite an existing archive.
+`,
+  load: `\
+Usage: rip-db load ARCHIVE.tar.gz
+
+Restore a tar.gz produced by \`rip-db dump\` into the harbor database.
+Refuses to load unless the target database is empty. Screens the archive
+for traversal paths — load only archives you trust.
+`,
+  checkpoint: `\
+Usage: rip-db checkpoint [--force]
+
+Issue CHECKPOINT to flush the WAL into the main DB file. Plain CHECKPOINT
+fails if other writers are active; --force preempts them (and can lose
+their uncommitted writes).
+`,
+};
+
+const die = (msg) => { process.stderr.write(`rip-db: ${msg}\n`); process.exit(1); };
+
+const version = () => {
+  try {
+    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+    return `rip-db v${pkg.version}`;
+  } catch { return 'rip-db (version unavailable)'; }
+};
+
+// A tar runner over the system `tar`; each op throws on a nonzero exit.
+const run = (args, opts = {}) => {
+  const r = spawnSync('tar', args, { encoding: 'utf8', ...opts });
+  if (r.error) throw r.error;
+  if (r.status !== 0) throw new Error(`tar ${args.join(' ')} exited ${r.status}: ${(r.stderr || '').trim()}`);
+  return r.stdout || '';
+};
+
+// The real host seam handed to the command logic.
+const makeDeps = () => {
+  const staged = [];
+  const cleanup = () => { for (const d of staged.splice(0)) { try { rmSync(d, { recursive: true, force: true }); } catch {} } };
+  process.on('exit', cleanup);
+  process.on('SIGINT', () => { cleanup(); process.exit(130); });
+  process.on('SIGTERM', () => { cleanup(); process.exit(143); });
+  return {
+    sql: cli.makeSql({ url: process.env.RIP_DB_URL, token: process.env.RIP_DB_TOKEN || null }),
+    fs: {
+      exists: (p) => existsSync(p),
+      isDir: (p) => { try { return statSync(p).isDirectory(); } catch { return false; } },
+      statSize: (p) => statSync(p).size,
+      rm: (p) => { try { rmSync(p, { recursive: true, force: true }); } catch {} },
+    },
+    tar: {
+      create: (archive, dir) => run(['-czf', archive, '-C', dir, '.'], { stdio: ['ignore', 'inherit', 'inherit'] }),
+      extract: (archive, dir) => run(['-xzf', archive, '-C', dir], { stdio: ['ignore', 'inherit', 'inherit'] }),
+      list: (archive) => run(['-tzf', archive]).split(/\r?\n/).filter(Boolean),
+    },
+    tmp: () => { const d = mkdtempSync(join(tmpdir(), 'ripdb-')); staged.push(d); return d; },
+    now: () => new Date(),
+    join,
+  };
+};
+
+const args = process.argv.slice(2);
+const cmd = args[0];
+
+try {
+  if (cmd === undefined || cmd === '--help' || cmd === '-h') {
+    process.stdout.write(USAGE);
+  } else if (cmd === '--version' || cmd === '-v') {
+    process.stdout.write(version() + '\n');
+  } else if (cmd === 'dump') {
+    if (args.includes('--help') || args.includes('-h')) { process.stdout.write(HELP.dump); }
+    else if (args.length > 2) die('usage: rip-db dump [ARCHIVE.tar.gz | DIRECTORY]');
+    else console.log(await cli.dump(args[1] ?? null, makeDeps()));
+  } else if (cmd === 'load') {
+    if (args.includes('--help') || args.includes('-h')) { process.stdout.write(HELP.load); }
+    else if (args.length !== 2) die('usage: rip-db load ARCHIVE.tar.gz');
+    else console.log(await cli.load(args[1], makeDeps()));
+  } else if (cmd === 'checkpoint') {
+    const extra = args.slice(1);
+    if (extra.includes('--help') || extra.includes('-h')) { process.stdout.write(HELP.checkpoint); }
+    else {
+      const force = extra.includes('--force');
+      for (const a of extra) if (a !== '--force') die(`unknown argument: ${a}`);
+      console.log(await cli.checkpoint(force, makeDeps()));
+    }
+  } else {
+    process.stderr.write(`rip-db: unknown subcommand '${cmd}'\n\n`);
+    process.stdout.write(USAGE);
+    process.exit(1);
+  }
+} catch (e) {
+  die(e?.message || String(e));
+}

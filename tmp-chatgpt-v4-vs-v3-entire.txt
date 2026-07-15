@@ -1,0 +1,1989 @@
+===== MESSAGE 1 (USER) =====
+Deeply analyze:
+
+GitHub.com/shreeve/rip
+
+And
+
+GitHub.com/shreeve/rip-lang
+
+The former is new (v4) and the latter is the original (v3).
+
+After you review these (v4 has robust bidirectional tracking between Rip code and Typescript and Rip and JavaScript). The original did not have that good tracking but it had a little simpler approach. As we have upgraded to v4 I am trying to maintain robustness but also maintain simplicity. I don’t want v4 to “blow up” and lose the key succinctness and cleanliness of  v3.
+
+First, analyze these two.
+Show less
+
+===== MESSAGE 2 (ASSISTANT) =====
+Executive assessment
+
+v4 is not merely v3 with better source maps. It is a change in compiler philosophy.
+
+v3 is essentially a compact, pragmatic language compiler:
+
+parse an S-expression, emit good JavaScript, preserve enough token metadata to provide useful diagnostics, source maps, declarations, and editor behavior.
+
+v4 is becoming a source-correspondence engine:
+
+every meaningful source construct has identity; every grammatical role has an authoritative span; every emitted manifestation records exactly which source construct and role produced it; JavaScript and TypeScript are two rigorously related projections of the same Rip program.
+
+That is a substantial architectural improvement. It gives Rip a foundation that v3 could never reliably acquire through incremental patching.
+
+But your concern is valid: v4 is already close to the point where correctness machinery can begin dominating the compiler rather than supporting it. The answer is not to retreat to v3’s metadata model. The answer is to preserve v4’s architecture while sharply containing its conceptual surface area.
+
+My overall judgment:
+
+Keep v4. Do not simplify it by weakening the NodeStore/RoleStore/MappingStore model. Simplify it by making that model disappear behind a much smaller emission interface.
+
+1. What v3 really is
+
+The v3 repository describes Rip as a self-hosting, zero-dependency compiler of roughly 11,000 lines, inspired by CoffeeScript, emitting modern JavaScript and providing optional types, reactivity, schemas, components, and numerous convenience operators.
+
+Architecturally, v3 says exactly what it is:
+
+Lexer → Parser → CodeEmitter → JavaScript
+
+Its metadata bridge works by storing token metadata in .data objects and then reconstructing boxed String objects so that locations travel through the S-expression tree. Two helpers, meta() and str(), isolate awareness of those boxed strings.
+
+That is clever and economical.
+
+The main compiler file is also enormous—over 5,000 lines—and contains a large dispatch table mapping S-expression heads to emitter methods.
+
+Why v3 feels clean
+
+v3’s cleanliness comes from several related qualities.
+
+The tree is the program
+
+The compiler mostly manipulates ordinary S-expression arrays and primitive values. There is no separate semantic identity system that the ordinary emitter author must constantly consider.
+
+An emitter method receives something like:
+
+JavaScript
+['+', left, right]
+
+and produces JavaScript.
+
+The mental model is immediate.
+
+Most features are local
+
+To add a construct, one generally:
+
+adds grammar support;
+
+adds an S-expression shape;
+
+adds an emitter method;
+
+perhaps adds type/declaration handling;
+
+adds tests.
+
+There are fewer cross-cutting invariants.
+
+Metadata is opportunistic
+
+Locations are attached where useful, but source correspondence is not treated as an independent semantic product.
+
+That means ordinary compilation remains the center of gravity.
+
+Its implementation favors directness
+
+The large dispatch table is not theoretically elegant, but it is readable. You can see the language’s major forms in one place. A contributor can follow a construct from its S-expression head directly to its emitter.
+
+This is an important part of Rip’s character. The implementation resembles the language: compact, direct, and unsurprising.
+
+2. Where v3’s simplicity is deceptive
+
+Some of v3’s simplicity comes from not solving problems that v4 intends to solve completely.
+
+Source maps are positional samples, not semantic correspondence
+
+v3’s SourceMapGenerator records generated line/column to original line/column points. It also retains raw pairs for a reverse lookup.
+
+Its higher-level bidirectional map is primarily line-oriented:
+
+JavaScript
+srcToGen
+genToSrc
+srcColToGen
+
+It uses the first generated entry for a source line as the principal source-to-generated location and maps generated lines back to a source line.
+
+That is useful for:
+
+diagnostics;
+
+basic editor navigation;
+
+conventional source maps;
+
+associating generated TypeScript errors with approximate Rip locations.
+
+It is not sufficient for robust structural editing or precise bidirectional language tooling.
+
+It cannot authoritatively answer questions such as:
+
+Which generated identifier corresponds to the assignment target rather than another occurrence on the same source line?
+
+Did this generated fragment come from an exact source token, a transformed construct, or synthesized scaffolding?
+
+One Rip source role emitted in two places—what are all its manifestations?
+
+This Rip construct emitted nothing—where should a source-side query resolve?
+
+This TypeScript-only annotation has no JavaScript equivalent—how is parity proven?
+
+Which generated span corresponds to the property name rather than the enclosing member expression?
+
+Those are not implementation gaps in sourcemaps.js. They require a richer model.
+
+Boxed-string metadata is fragile
+
+The new String() approach avoids fat AST objects, but it overloads primitive-looking values with hidden identity and metadata semantics.
+
+It can work well while the compiler mostly walks the original tree. It becomes harder when the compiler:
+
+clones or rewrites nodes;
+
+emits one source construct more than once;
+
+erases constructs;
+
+folds or lowers syntax;
+
+needs multiple independently named source spans inside one node;
+
+supports structural refactoring;
+
+generates both JavaScript and typed TypeScript faces.
+
+The two helper functions make awareness local syntactically, but they do not make the underlying model complete.
+
+The monolith hides coupling
+
+v3’s large compiler.js centralizes behavior, which makes individual features easy to find—but it also combines:
+
+source metadata handling;
+
+semantic lowering;
+
+scope analysis;
+
+hoisting;
+
+JavaScript emission;
+
+runtime feature discovery;
+
+source-map recording;
+
+language dispatch;
+
+some type-related integration.
+
+This is simple in file topology but not necessarily simple in responsibility.
+
+So v3 has low visible architecture but substantial implicit coupling.
+
+3. What v4 changes
+
+v4 explicitly says that precise bidirectional mappings between Rip and generated artifacts are a core repository responsibility alongside the compiler, runtimes, editor integrations, and tests.
+
+The principal architecture is:
+
+Source text
+   ↓
+tokens with offset spans
+   ↓
+parser
+   ├── S-expression tree
+   ├── NodeStore
+   └── RoleStore
+   ↓
+emitter through CodeBuilder
+   ├── JavaScript or TypeScript face
+   └── MappingStore
+   ↓
+source map / declarations / editor / explain / diagnostics
+
+The compile result exposes not just generated code and a conventional source map, but also the parsed stores, mapping query layer, TS-only regions, import spans, declarations, trivia, and other tooling surfaces.
+
+This is a fundamentally stronger design.
+
+4. The three-store architecture
+NodeStore
+
+Every constructed parser node receives a stable nodeId and a row containing:
+
+file identity;
+
+semantic kind;
+
+rule identity;
+
+source start;
+
+source end.
+
+The node’s $self role is represented by the NodeStore row itself rather than another role row.
+
+This gives every source construct stable identity independent of its array shape or object identity.
+
+That matters when:
+
+a node is lowered;
+
+the same construct has multiple emitted manifestations;
+
+a clone must remain semantically associated with the original;
+
+mappings need to join parser information with emission information.
+
+The Stores.alias() method explicitly registers a lowering clone under the original node’s ID.
+
+That is an excellent feature. It recognizes that semantic identity and JavaScript object identity are not the same thing.
+
+RoleStore
+
+A node can have named grammatical roles such as:
+
+target;
+
+value;
+
+operator;
+
+condition;
+
+body;
+
+member;
+
+annotation;
+
+source;
+
+parameters.
+
+A role can be:
+
+a reference role with a source span and child node;
+
+a spread role covering several children;
+
+a literal role whose value is known from the grammar but has no independent source span.
+
+This is the most important architectural improvement over v3.
+
+Node-level source spans are insufficient for good language tooling. The compiler needs to know not just “this expression came from these characters” but:
+
+“these generated bytes represent the target role of node 81.”
+
+That is what enables accurate bidirectional correspondence.
+
+MappingStore
+
+During emission, every meaningful emitted span records:
+
+node ID;
+
+role;
+
+mapping kind;
+
+source span;
+
+generated span;
+
+file identity.
+
+The model supports three important distinctions:
+
+exact — generated text equals its source slice;
+
+cover — generated text represents the source construct but is transformed;
+
+synthetic — generated text was introduced and is anchored to a source construct.
+
+That is far richer than a conventional source map.
+
+5. CodeBuilder is the architectural center of v4
+
+The emitter cannot simply concatenate strings wherever it pleases. Every emitted character flows through CodeBuilder, allowing mappings to be recorded during construction rather than reconstructed afterward.
+
+The core interface is conceptually small:
+
+JavaScript
+builder.emit(text)
+
+builder.mark(nodeId, role, () => {
+  // emit generated representation
+})
+
+At the end of a mark, CodeBuilder compares the generated span against the original source slice and determines whether the mapping is exact or cover automatically.
+
+This is exceptionally sound.
+
+It avoids one of the most dangerous failure modes in compiler tooling:
+
+emitter authors claiming that a mapping is exact when it is not.
+
+Exactness is derived from bytes, not asserted by convention.
+
+The emitter’s own contract reinforces this:
+
+every emitted node gets a $self row;
+
+inserted grouping parentheses sit outside child role marks;
+
+spread roles get a covering mapping while individual children retain their mappings;
+
+punctuation and indentation that belong to generated layout remain outside semantic marks.
+
+This is careful, principled work.
+
+6. Why v4’s bidirectional tracking is genuinely valuable
+
+This is not gold-plating. It unlocks capabilities that align unusually well with Rip.
+
+Accurate TypeScript projection
+
+v4 has a JavaScript face and a TypeScript editor face. The TS face is defined as the same emission plus recorded TS-only regions. Removing those regions must reproduce the JavaScript output byte-for-byte.
+
+CodeBuilder.tsOnly() records those added regions during emission.
+
+That gives you a powerful invariant:
+
+stripTSOnly(emitTS(source)) === emitJS(source)
+
+This is far better than maintaining separate JS and TS emitters or approximately translating Rip into TypeScript.
+
+Precise diagnostic reversal
+
+The mapping query layer supports queries from either generated or source offsets and returns innermost mappings first. It distinguishes direct mappings from contextual covers.
+
+This means a TypeScript diagnostic can be resolved to the narrowest meaningful Rip source role rather than merely the nearest line.
+
+One-to-many emission
+
+A Rip assignment may emit both a hoisted declaration and a later assignment. v4 explicitly supports multiple mapping rows for the same node and role, ordered by generated location.
+
+That is difficult to model cleanly with a classic source map alone.
+
+Erased syntax
+
+A type declaration or annotation may emit no JavaScript. v4 can represent an erased source span as a zero-width mapping or contextual cover without inventing a false generated location. The repository rules explicitly prohibit fake locations.
+
+Structural editing and rewriting
+
+Because mappings are tied to node identities and named roles, tooling can reason about constructs rather than character coincidences.
+
+That creates a path toward:
+
+rename;
+
+go-to-definition;
+
+precise hover ranges;
+
+structured formatting;
+
+Rip-aware code actions;
+
+source-preserving refactors;
+
+visualization of generated output;
+
+eventual round-trip or synchronized editing.
+
+v3’s mapping model could support portions of this, but not robustly.
+
+7. Where v4 is becoming too complicated
+
+The problem is not the stores themselves. The problem is the amount of machinery now accumulating around them.
+
+A. The architecture has become doctrinal
+
+AGENTS.md is 234 lines of invariants covering:
+
+compiler rejection policy;
+
+lowering semantics;
+
+source-shape preservation;
+
+mapping architecture;
+
+generated-scope inventories;
+
+runtime correctness;
+
+testing tiers;
+
+source-map behavior;
+
+emitted byte drift;
+
+commit and PR policy.
+
+Much of this doctrine is excellent. But its size is also a signal.
+
+A contributor should ideally be able to add a straightforward operator without mastering a miniature body of constitutional law. Right now, v4 increasingly requires understanding:
+
+node identity;
+
+roles;
+
+mapping exactness;
+
+source covers;
+
+generated scopes;
+
+repeat safety;
+
+name minting;
+
+TS-face parity;
+
+emitted corpus drift;
+
+parser regeneration drift;
+
+runtime delivery modes;
+
+declaration emission;
+
+source-map serialization policy.
+
+Some of this is inherent to a production compiler. Some is accidental exposure.
+
+B. Ordinary emission knows too much about tooling
+
+The top of emitter.js already imports or coordinates:
+
+stores;
+
+CodeBuilder;
+
+schema analysis;
+
+schema typing;
+
+parser access;
+
+lexer rewriting;
+
+type-text handling;
+
+DOM vocabularies;
+
+component type generation.
+
+The emitter constructor also knows about:
+
+JavaScript versus TypeScript faces;
+
+pinning;
+
+strict typed forwards;
+
+import span recording;
+
+TS directives;
+
+pending hoist annotations;
+
+component typing;
+
+runtime delivery concerns.
+
+This is the largest warning sign.
+
+The mapping architecture itself is disciplined. The emitter is becoming the integration point for every subsystem.
+
+That is how v4 could “blow up.”
+
+C. The public compile result is very wide
+
+The result of compile() includes:
+
+code;
+
+source map;
+
+stores;
+
+mappings;
+
+runtimes;
+
+TS-only regions;
+
+pinnables;
+
+import spans;
+
+trivia;
+
+lazy declarations.
+
+Internally, that richness is justified. As the primary compilation abstraction, it risks turning compile() into a clearinghouse for every tool.
+
+The danger is that each new feature adds another channel rather than fitting into a small number of coherent compiler products.
+
+D. Mapping correctness has created secondary complexity
+
+The MappingStore query layer now includes:
+
+lazily built interval trees for both source and generated spans;
+
+stable ordering rules;
+
+exact/cover policies;
+
+serialization selection rules;
+
+special treatment for zero-width mappings;
+
+one-to-many tie-breaking.
+
+This is defensible infrastructure, especially for large-file editor performance. But it demonstrates that mapping is now a product in its own right.
+
+You need to prevent that product’s internal sophistication from infecting language-feature code.
+
+E. CodeBuilder itself is becoming more than a code builder
+
+The clean core is:
+
+JavaScript
+emit()
+mark()
+
+But it also includes:
+
+TS-only regions;
+
+explicit begin/end marks for iterative deep-chain emission;
+
+exactness memoization;
+
+caller-supplied-span allowlists;
+
+checkpoint/probe/rollback emission;
+
+source byte comparison;
+
+bridging exact ranges.
+
+These features may each be justified. Together they indicate that CodeBuilder is becoming:
+
+output buffer + mapping recorder + TS-delta recorder + speculative emitter + performance optimizer + protocol validator.
+
+That is manageable today, but it needs a firm boundary.
+
+8. v3 versus v4 by dimension
+Dimension	v3	v4
+Core mental model	S-expression → JavaScript	Source identity → semantic roles → projected artifacts
+Metadata	Attached to boxed string values	Normalized side tables keyed by node ID
+Source correspondence	Mapping points and line/column reversal	Span-based, role-aware, bidirectional relationships
+Multiple generated manifestations	Awkward/approximate	Native
+Erased syntax	Weakly represented	Explicit zero-width/cover representation
+TS integration	Related but comparatively separate	TS face is a provable superset of JS face
+Emitter simplicity	Direct but monolithic	More principled, but highly cross-cutting
+Extensibility	Easy until tooling becomes sophisticated	Strong foundation, higher feature tax
+Failure risk	Imprecise tooling and hidden metadata loss	Architecture inflation and invariant overload
+Long-term ceiling	Good language compiler	Full language platform
+Key virtue	Immediacy	Correctness
+Key danger	Fragility	Bureaucracy
+9. The most important distinction: essential versus accidental complexity
+Essential v4 complexity
+
+These should be preserved:
+
+Stable node identity.
+
+Named grammatical roles.
+
+Source spans represented as offsets.
+
+Emission-time mapping capture.
+
+Exact/cover/synthetic distinction.
+
+One-to-many mapping support.
+
+JS/TS byte-parity invariant.
+
+Side tables rather than fat mutable AST nodes.
+
+Precise positioned rejection instead of silent repair.
+
+Source-map serialization as a view over richer internal mappings.
+
+This is v4’s real advance.
+
+Accidental complexity
+
+These areas deserve aggressive scrutiny:
+
+Type-system details leaking into ordinary JavaScript emission.
+
+Hoisting, diagnostics, editor projection, pinning, and directives all accumulating in the same emitter class.
+
+Every subsystem extending the compile() result.
+
+Special-case mapping protocols added for individual features.
+
+Comments that require paragraphs to explain local code paths.
+
+Multiple pre-walks over the tree with subtly different scope rules.
+
+Feature implementations needing direct knowledge of MappingStore internals.
+
+Builder behavior growing beyond emission and mapping.
+
+Tests encoding implementation shape where semantic behavior would suffice.
+
+Repository process becoming more elaborate than the language architecture.
+
+10. Is v4 already “blown up”?
+
+No—but it is approaching a critical architectural threshold.
+
+The good news is that the foundational choices remain sound:
+
+the AST is still lightweight;
+
+metadata remains in side tables;
+
+generated text flows through one builder;
+
+mappings are recorded by construction;
+
+source offsets remain canonical;
+
+the JavaScript output remains a first-class target;
+
+the repository still has zero ordinary package dependencies.
+
+This is not an enterprise compiler framework full of abstract visitor factories and dozens of IR layers.
+
+The bad news is that the implementation is beginning to express too many independent concerns through the emitter.
+
+So I would characterize v4 as:
+
+Architecturally strong, locally overburdened.
+
+That is fixable without abandoning anything important.
+
+11. The deepest lesson to carry from v3
+
+The most valuable thing to preserve from v3 is not its metadata technique.
+
+It is this property:
+
+A language feature should still look like a small grammar rule, an obvious tree shape, and a compact emitter implementation.
+
+In v3, the dispatch table makes the language visible.
+
+In a healthy v4, adding an ordinary expression should still feel approximately like:
+
+JavaScript
+emitBinary(node) {
+  return this.node(node, () => {
+    this.role(node, 'left', () => this.emitExpr(left))
+    this.text(' + ')
+    this.role(node, 'right', () => this.emitExpr(right))
+  })
+}
+
+The author should not have to manually reason about:
+
+generated offsets;
+
+exactness;
+
+source-map rows;
+
+mapping-kind selection;
+
+line/column calculations;
+
+interval indexes;
+
+TypeScript stripping;
+
+mapping serialization.
+
+Those are framework concerns.
+
+The architecture is successful only when its sophistication makes individual features simpler, not more complicated.
+
+12. My preliminary verdict
+v3
+
+v3 is an impressive compact compiler with a very high feature-to-code ratio. Its design is productive and understandable. But its source tracking is fundamentally ancillary: useful metadata is carried through syntax values and eventually reduced into source-map points and line-oriented reverse maps.
+
+It is an excellent language compiler architecture.
+
+It is not an adequate long-term architecture for the precise Rip↔JavaScript↔TypeScript correspondence you now want.
+
+v4
+
+v4 introduces the correct conceptual model:
+
+source construct identity
++ named source roles
++ emitted manifestations
+= robust bidirectional language tooling
+
+That is the right foundation.
+
+The stores and CodeBuilder are not the bloat. They are the part worth protecting.
+
+The growing complexity lies above them:
+
+an emitter that coordinates too many policies;
+
+type/editor concerns entering ordinary lowering;
+
+proliferating result channels and pre-passes;
+
+local code burdened by global invariants.
+
+Recommendation at this stage
+
+Do not merge v3’s implementation style back into v4 wholesale.
+
+Instead:
+
+Use v3 as the simplicity benchmark and v4 as the correctness foundation.
+
+Every v4 feature should be judged by two simultaneous tests:
+
+Does it preserve the complete mapping and semantic invariants?
+
+Is its feature implementation nearly as obvious as the equivalent v3 implementation?
+
+Where the second answer is no, the remedy should usually be a better internal abstraction—not weaker tracking.
+
+My present architectural conclusion is:
+
+v4 has the right bones. The next major work should be simplification through encapsulation, decomposition, and removal of cross-cutting emitter state—not removal of the bidirectional mapping system.
+
+===== MESSAGE 3 (ASSISTANT) =====
+Yes—and that requirement strongly supports keeping v4’s robust identity and mapping architecture.
+
+But there is an important distinction:
+
+Vite is the gold standard for the HMR development substrate. It is not, by itself, the gold standard for preserving application state.
+
+Vite provides exceptionally fast module delivery, graph invalidation, update propagation, CSS replacement, browser transport, error handling, and framework integration points. React Fast Refresh, Vue HMR, Svelte HMR, and similar framework plugins provide most of the state-preserving component behavior developers associate with “Vite HMR.”
+
+Rip owns both halves:
+
+the Vite-like module substrate;
+
+the framework-aware state-preserving refresh layer.
+
+That gives Rip an opportunity not merely to reproduce Vite, but to offer a more unified and reliable version.
+
+What Vite actually does
+
+Vite maintains a graph for each development module containing:
+
+imported modules;
+
+importers;
+
+accepted HMR dependencies;
+
+accepted exports;
+
+imported bindings;
+
+whether the module accepts itself;
+
+cached transformation output;
+
+invalidation timestamps and state.
+
+When a file changes, Vite walks upward through its importers until it finds an HMR boundary.
+
+Its propagation logic roughly says:
+
+changed module
+    │
+    ├─ self-accepting? ───────────────► update itself
+    │
+    ├─ accepted exports sufficient? ──► stop propagation
+    │
+    ├─ importer accepts dependency? ──► update through importer
+    │
+    └─ otherwise ─────────────────────► continue upward
+                                            │
+                                            └─ no boundary → reload page
+
+This is implemented in propagateUpdate(). It supports:
+
+self-accepting modules;
+
+dependency-accepting importers;
+
+export-level acceptance;
+
+unloaded modules;
+
+propagation through importers;
+
+circular-import detection;
+
+full-reload fallback.
+
+The resulting server message identifies both:
+
+TypeScript
+path         // the accepting boundary
+acceptedPath // the changed dependency accepted by that boundary
+
+and includes circular-import and invalidation information.
+
+That propagation model is the heart of Vite HMR.
+
+Vite’s browser-side HMR model
+
+Vite gives every module an import.meta.hot context with:
+
+accept();
+
+acceptExports();
+
+dispose();
+
+prune();
+
+invalidate();
+
+persistent data;
+
+custom event on(), off(), and send().
+
+The client keeps several maps:
+
+module → acceptance callbacks
+module → dispose callback
+module → prune callback
+module → persistent HMR data
+module → custom event listeners
+
+When an update arrives, Vite:
+
+identifies the qualifying callbacks;
+
+invokes the old module’s disposer;
+
+dynamically imports the revised module;
+
+invokes the accepting callbacks with the new namespace.
+
+It also queues related updates so HTTP timing does not reorder them.
+
+That is compact, effective, and battle-tested.
+
+What Vite does not inherently provide
+
+Vite itself does not generally know:
+
+whether a React hook layout changed;
+
+whether a Vue component’s local state remains structurally compatible;
+
+whether a Svelte component can migrate an existing instance;
+
+which component instances are alive;
+
+which DOM subtree should be remounted;
+
+which effects belong to which component;
+
+whether named state slots can be added or removed safely.
+
+Those decisions belong to framework integrations.
+
+Vite is intentionally generic. It knows modules, imports, update boundaries, and callbacks—not the semantics of the application framework.
+
+Rip is different.
+
+The Rip compiler knows:
+
+which declarations are components;
+
+component identities;
+
+named states;
+
+computeds;
+
+effects;
+
+lifecycle methods;
+
+props;
+
+render structures;
+
+offers and accepts;
+
+source roles;
+
+generated manifestations.
+
+That means Rip should use Vite as the substrate model, not copy its entire generic architecture indiscriminately.
+
+Your current HMR specification is conceptually very strong
+
+The existing docs/HMR.md already divides HMR correctly:
+
+Layer A — development substrate
+
+watch → graph → notify → fetch/evaluate → CSS → overlay
+
+Layer B — framework refresh
+
+identity → signature → patch/migrate/remount → effects → DOM
+
+This is exactly the right decomposition.
+
+Your proposed module records also correspond closely to Vite:
+
+stable module ID;
+
+hash and revision;
+
+dependencies;
+
+importers;
+
+accepted dependencies;
+
+self-acceptance;
+
+dispose/prune callbacks;
+
+last successful namespace.
+
+The important difference is the final field:
+
+last successful namespace
+
+That points toward a stronger transactional model than ordinary Vite HMR.
+
+Rip can potentially exceed Vite in failure handling
+
+Vite calls the existing module’s disposer before importing the new revision. If importing fails, Vite warns about the failed update, but the old revision may already have disposed resources.
+
+That is a pragmatic design, but not a true transaction.
+
+Your Rip specification instead says:
+
+compile
+→ stage new namespaces
+→ validate
+→ dispose outgoing revision
+→ activate
+→ commit or roll back
+
+and promises restoration of previous namespaces, definitions, effects, and DOM after activation failure.
+
+That is more ambitious than Vite.
+
+It would mean:
+
+a syntax error never destroys the working app;
+
+a module-evaluation error never partially activates a revision;
+
+one failure in a multi-file update does not leave mixed old/new modules;
+
+effect teardown and setup are owned by a transaction;
+
+the previous component definitions remain recoverable;
+
+the DOM can be restored or left untouched until commit.
+
+This is genuinely world-class behavior.
+
+However, true rollback can become extraordinarily complicated. I would distinguish two levels.
+
+Level 1: staged activation
+
+The revised module is fetched and evaluated in isolation before touching live module or component state.
+
+If compilation or evaluation fails:
+
+do nothing to the current application
+
+This is achievable and highly valuable.
+
+Level 2: complete mutation rollback
+
+After dispose callbacks and component patching begin, arbitrary user code may perform irreversible actions:
+
+send a network request;
+
+modify global state;
+
+mutate browser APIs;
+
+write to storage;
+
+create an untracked timer;
+
+alter a third-party object.
+
+A general system cannot guarantee perfect rollback of arbitrary JavaScript side effects.
+
+Therefore, Rip’s honest contract should be:
+
+All compiler-owned and runtime-owned state updates are transactional. Arbitrary user side effects are rollback-safe only when registered through Rip’s ownership APIs.
+
+That preserves the strong model without making an impossible promise.
+
+v4 is better positioned than v3 for world-class HMR
+
+The v4 architecture provides something Vite generally has to discover through transformed JavaScript:
+
+stable parser identities;
+
+declaration roles;
+
+exact source spans;
+
+recorded import spans;
+
+compiler-owned structural facts;
+
+explicit generated manifestations.
+
+Vite even contains a specialized lexer to scan generated source around import.meta.hot.accept() and recover accepted dependency strings.
+
+Rip should never need that.
+
+The compiler can emit HMR metadata directly:
+
+JavaScript
+registerModule({
+  id: "/src/counter.rip",
+  imports: ["/src/button.rip"],
+  exports: ["Counter"],
+  accepts: [],
+  components: [
+    {
+      id: "/src/counter.rip#Counter",
+      signature: "...",
+    },
+  ],
+})
+
+No generated-JavaScript scanning. No heuristic transform analysis. No fragile pattern matching.
+
+That is precisely where v4’s robust compiler architecture earns its keep.
+
+But HMR metadata should not pollute the shipping emitter
+
+This is where the simplicity concern returns.
+
+You do not want every ordinary emitter method to become something like:
+
+JavaScript
+emitComponent(node, {
+  collectHmrSignature: true,
+  registerDefinitionCell: true,
+  trackStateMigration: true,
+  emitDevMetadata: this.dev,
+  preserveMappingRoles: true,
+  recordEffectOwnership: true,
+})
+
+That would make HMR destroy the succinctness you are trying to preserve.
+
+Instead, HMR should consume a compiler-owned semantic summary.
+
+For example:
+
+compile(source)
+   ├── code
+   ├── mappings
+   ├── declarations
+   └── manifest
+         ├── imports
+         ├── exports
+         ├── components
+         ├── state signatures
+         ├── effect ownership
+         └── HMR boundaries
+
+The HMR manifest should be data, not a growing set of emitter conditionals.
+
+Production compilation can discard the manifest or omit its runtime serialization. Development compilation can serialize only the necessary fields.
+
+Recommended Rip HMR architecture
+1. Copy Vite’s graph semantics
+
+Rip should implement essentially the same concepts:
+
+JavaScript
+class ModuleNode {
+  id
+  url
+  revision
+  hash
+
+  imports
+  importers
+  acceptedDependencies
+  acceptedExports
+  selfAccepting
+
+  dispose
+  prune
+  data
+
+  activeNamespace
+  stagedNamespace
+}
+
+Its boundary propagation should behave predictably like Vite:
+
+stop at self-acceptance;
+
+stop when an importer explicitly accepts the changed dependency;
+
+support export acceptance;
+
+propagate otherwise;
+
+detect graph dead ends;
+
+remount or reload honestly when no safe boundary exists;
+
+handle circular-import boundaries conservatively.
+
+Do not invent a radically different graph model merely because Rip controls the language.
+
+2. Use revision IDs, not timestamps as authority
+
+Vite uses timestamps heavily for cache-busting and ordering. Rip’s specification already discusses ordered revisions and stale-client detection.
+
+Prefer:
+
+sessionId
+graphRevision
+moduleRevision
+contentHash
+
+For example:
+
+JSON
+{
+  "type": "update",
+  "session": "dev-9f3c",
+  "fromRevision": 41,
+  "toRevision": 42,
+  "modules": [...]
+}
+
+This lets the client say:
+
+revision 42 is valid after 41;
+
+revision 40 is stale;
+
+revision 44 means updates were missed;
+
+a changed server session means the graph must be reconstructed.
+
+Timestamps can remain cache-busting values, but not the logical consistency mechanism.
+
+3. Serve unbundled ESM during development
+
+Rip’s no-build philosophy is highly compatible with Vite-style development delivery.
+
+Each .rip file should be served as its own compiled ESM module:
+
+/src/app.rip
+    ↓ request
+compile on demand
+    ↓
+/src/app.rip?rip-rev=42
+
+The browser imports each source module separately. The dev server:
+
+compiles on demand;
+
+caches by content hash;
+
+records imports;
+
+rewrites module specifiers;
+
+appends revision identifiers only where invalidation requires them.
+
+This gives you:
+
+startup proportional to requested modules;
+
+no development bundle;
+
+granular invalidation;
+
+native browser module caching;
+
+direct source correspondence.
+
+That is not a contradiction with “zero build.” It is precisely the Vite model: transform and serve modules on demand rather than producing a bundle before development starts.
+
+4. Add stable definition cells
+
+Compiled component references should resolve through stable cells:
+
+JavaScript
+const Counter = hot.definition(
+  "/src/counter.rip#Counter",
+  signature,
+  implementation,
+)
+
+Internally:
+
+JavaScript
+DefinitionCell {
+  id
+  signature
+  implementation
+  instances
+  revision
+}
+
+Existing instances retain the cell. An update changes the cell’s implementation rather than requiring every importer to capture a new class/function identity.
+
+This is the bridge from module HMR to framework refresh.
+
+Your HMR specification already identifies this model.
+
+5. Use named state, never positional state
+
+Rip has a major advantage over React Fast Refresh.
+
+React hooks are positional, so changing their order or count creates difficult compatibility questions. Rip state declarations have source-level names.
+
+A signature can describe:
+
+JavaScript
+{
+  state: {
+    count: "number",
+    query: "string",
+    selected: "User|null"
+  },
+  computed: ["filtered"],
+  effects: ["fetchResults"],
+  props: ["initialCount"],
+  root: "div"
+}
+
+Then migration is deterministic:
+
+same named state + compatible contract → retain container
+new named state                    → initialize
+removed named state                → dispose ownership
+changed incompatible contract      → reset slot or remount
+
+That can be substantially better than React Fast Refresh.
+
+6. Make effects owned resources
+
+Every effect must be registered against an owner:
+
+module
+component instance
+state slot
+route
+render branch
+
+The owner tracks:
+
+cleanup callback;
+
+timers;
+
+subscriptions;
+
+event listeners;
+
+abort controllers;
+
+nested effects.
+
+During refresh:
+
+stage replacement effect definitions;
+
+run outgoing cleanup exactly once;
+
+activate incoming effects;
+
+roll back compiler-owned resources on failure.
+
+This requirement is already present in the specification.
+
+It is essential. State preservation without effect correctness is not high-quality HMR.
+
+7. Separate patching from reconciliation
+
+There are two distinct changes:
+
+definition patch: change methods, computed bodies, render function, lifecycle code;
+
+render reconciliation: apply the new render result to existing DOM.
+
+Do not force a remount merely because render code changed.
+
+For compatible components:
+
+existing instance
+existing state containers
+existing definition cell
+existing root DOM identity
+new render implementation
+new methods/effects
+
+Then run a renderer update using the existing instance and DOM anchors.
+
+8. Preserve browser interaction explicitly
+
+After a refresh transaction, preserve:
+
+focus;
+
+text selection;
+
+input composition where possible;
+
+document and container scroll;
+
+expanded <details>;
+
+route;
+
+stash;
+
+retained keyed nodes.
+
+Your current specification includes focus, selection, scroll, routes, stash, and refs.
+
+I would treat this as framework-refresh behavior, not generic module HMR.
+
+What to adopt directly from Vite
+
+Adopt these nearly wholesale as concepts:
+
+importer/importee module graph;
+
+self-accept boundaries;
+
+accepted dependency boundaries;
+
+accepted export boundaries;
+
+dispose and prune distinction;
+
+persistent module-local HMR data;
+
+custom HMR events;
+
+queued update ordering;
+
+CSS as an independent update channel;
+
+full reload on graph dead ends;
+
+conservative circular-import handling;
+
+unloaded-module handling;
+
+error overlay and last good app;
+
+on-demand ESM delivery.
+
+What not to copy blindly
+
+Do not inherit Vite complexity that exists because Vite must support arbitrary languages, bundler plugins, and frameworks:
+
+generic transform-plugin pipelines;
+
+Rollup/Rolldown compatibility layers;
+
+scanning JavaScript to discover HMR declarations;
+
+multiple historical HMR APIs;
+
+legacy compatibility behavior;
+
+environment abstraction beyond Rip’s real requirements;
+
+arbitrary plugin mutation of the update graph;
+
+timestamp-only coherence;
+
+framework semantics encoded in external transforms.
+
+Rip controls the parser, compiler, runtime, renderer, and server. Use that control.
+
+The right public API
+
+I would provide Vite-compatible semantics, but not necessarily require users to write import.meta.hot for ordinary Rip components.
+
+Low-level module API
+
+Supporting this is valuable:
+
+JavaScript
+if import.meta.hot
+  import.meta.hot.accept()
+  import.meta.hot.dispose (data) ->
+    data.connection = connection
+
+Compatibility makes the ecosystem understandable and allows JavaScript modules to participate.
+
+Rip-native framework behavior
+
+Normal Rip component code should need no HMR boilerplate:
+
+coffee
+component Counter
+  count := 0
+
+  increment: ->
+    count++
+
+  render
+    button on.click=increment
+      = count
+
+The compiler knows this is a hot-refresh boundary and generates the registration automatically in development mode.
+
+Therefore:
+
+Use Vite-compatible import.meta.hot as the low-level protocol, while making Rip components automatically refreshable through compiler-generated metadata.
+
+That gives you compatibility without making Vite’s API the user-facing center of Rip HMR.
+
+How v4 should be simplified in light of HMR
+
+World-class HMR makes the v4 identity system more necessary, but also increases the urgency of containing complexity.
+
+I would establish four strict boundaries:
+
+Parser
+  produces syntax + stores
+
+Semantic inventory
+  produces module/component/HMR manifests
+
+Emitter
+  produces JS/TS through CodeBuilder
+
+Dev runtime
+  consumes manifests and controls refresh
+
+The emitter should not decide whether a component can migrate. It should emit the implementation and registration call.
+
+The semantic inventory should compute the signature.
+
+The HMR runtime should compare old and new signatures and select:
+
+patch
+migrate
+remount
+reload
+
+The development server should perform graph propagation.
+
+That keeps each concern intelligible.
+
+Final conclusion
+
+The Vite goal changes my earlier assessment in an important way:
+
+v4’s robust source identity and role tracking are not optional sophistication. They are strategic infrastructure for a first-class HMR system.
+
+But world-class HMR does not mean importing Vite’s entire internal architecture or pushing more logic into emitter.js.
+
+The best Rip design is:
+
+Vite-quality module substrate
+        +
+compiler-generated semantic manifests
+        +
+stable component definition cells
+        +
+named-state migration
+        +
+owned effects
+        +
+transactional runtime activation
+        =
+HMR potentially better than Vite-framework combinations
+
+Vite should be the behavioral baseline for module graph handling and developer responsiveness. Rip can exceed it in component identity, deterministic state migration, precise diagnostics, and last-known-good activation because Rip controls the entire stack.
+
+===== MESSAGE 4 (USER) =====
+React uses React Fast Refresh, VueJS uses it's own also... in Rip, we own the WHOLE STACK so we should be able to do this better than anyone!
+
+===== MESSAGE 5 (ASSISTANT) =====
+Exactly. Rip’s biggest HMR advantage is not merely speed—it is semantic authority.
+
+React Fast Refresh has to preserve state through React’s hook and component model. Vue has to preserve state through component options, setup functions, proxies, and compiler/runtime coordination. Vite itself only delivers changed modules and finds update boundaries.
+
+Rip controls:
+
+the language syntax;
+
+parser and semantic identities;
+
+compiler and generated code;
+
+module graph;
+
+reactive state containers;
+
+component lifecycle;
+
+effects and cleanup ownership;
+
+renderer and DOM reconciliation;
+
+router and application stash;
+
+development server;
+
+TypeScript projection and diagnostics.
+
+That means Rip does not have to infer whether an update is safe. It can know.
+
+Rip’s ideal HMR model
+
+A Rip component should compile into two distinct things:
+
+stable identity cell
+        +
+replaceable implementation revision
+
+The stable cell survives edits. Living instances refer to that cell rather than permanently capturing the original generated class or function.
+
+JavaScript
+cell = {
+  id: "/src/counter.rip#Counter",
+  revision: 17,
+  definition: currentDefinition,
+  signature: currentSignature,
+  instances: Set(...)
+}
+
+When the source changes, Rip compiles a new candidate definition and signature without touching the live application.
+
+Then the runtime compares old and new semantics.
+
+same compatible shape
+    → patch implementation
+
+compatible named-state changes
+    → migrate state, then patch
+
+incompatible component contract
+    → remount only that subtree
+
+unsafe module-graph change
+    → propagate to boundary or reload
+
+The developer writes no HMR boilerplate.
+
+Where Rip can beat React Fast Refresh
+
+React’s state model is heavily positional:
+
+JavaScript
+useState(...)
+useEffect(...)
+useMemo(...)
+
+Moving, inserting, or conditionally changing hooks can invalidate state preservation. Fast Refresh uses component-family identity and signatures, but it must remain conservative because JavaScript and hooks provide limited static guarantees.
+
+Rip can use named declarations:
+
+coffee
+component Search
+  query := ""
+  results := []
+  selected := null
+
+  filtered ~= results.filter -> it.matches query
+
+  ~> loadResults query
+
+The compiler knows that:
+
+query, results, and selected are state slots;
+
+filtered is computed;
+
+the effect depends on query;
+
+cleanup belongs to the effect and component instance;
+
+the component’s render structure and methods changed independently of state.
+
+An edit adding:
+
+coffee
+loading := false
+
+can deterministically preserve the existing three slots and initialize only loading.
+
+No positional guessing is required.
+
+Where Rip can beat Vue HMR
+
+Vue has excellent compiler/runtime cooperation, but it still operates within JavaScript’s module model and Vue’s component abstractions.
+
+Rip can carry identity directly from source declarations through compilation:
+
+module identity
+component declaration identity
+member identity
+state identity
+effect identity
+render-node identity
+
+The same IDs can be shared by:
+
+compiler mappings;
+
+editor tooling;
+
+HMR signatures;
+
+renderer anchors;
+
+state ownership;
+
+diagnostics.
+
+That unification is powerful. A render node does not need to be rediscovered from generated JavaScript or approximated by runtime order. The compiler already knows what it is.
+
+The decisive feature: transactional staging
+
+Rip should never activate code immediately after it compiles.
+
+Use:
+
+compile candidate
+→ evaluate candidate in staging
+→ validate module graph
+→ compare signatures
+→ prepare migrations and cleanup
+→ activate atomically
+→ commit
+
+Until commit, the current application remains authoritative.
+
+A syntax error, type-projection failure, missing import, or module-evaluation exception should produce an overlay while the current app continues running.
+
+For runtime-controlled resources, activation can be transactional:
+
+definition cells;
+
+state registries;
+
+effect ownership;
+
+component instances;
+
+DOM reconciliation;
+
+CSS modules;
+
+routes and stash references.
+
+Arbitrary user side effects cannot always be reversed, so Rip should encourage side effects through owned APIs—effects, subscriptions, timers, fetch cancellation, event bindings—where cleanup can be guaranteed.
+
+Stable identity should not depend on line numbers
+
+IDs should survive ordinary edits.
+
+Bad:
+
+/src/app.rip:42
+
+Better:
+
+module-id + declaration path + explicit/stable compiler identity
+
+For example:
+
+/src/app.rip#Dashboard
+/src/app.rip#Dashboard.state.query
+/src/app.rip#Dashboard.effect.loadResults
+
+For anonymous or repeated constructs, use structural declaration paths and compiler-maintained identity matching rather than raw offsets.
+
+Offsets are excellent for mappings, but poor persistent identities because adding a comment moves them.
+
+HMR signatures should be semantic, not one giant hash
+
+Do not reduce the entire component to one opaque fingerprint. Produce a structured manifest:
+
+JavaScript
+{
+  id: "/src/search.rip#Search",
+
+  contract: {
+    props: { initialQuery: "string?" },
+    accepts: [],
+    offers: ["selection"]
+  },
+
+  state: {
+    query: { type: "string", initializer: "..." },
+    results: { type: "User[]", initializer: "..." },
+    selected: { type: "User|null", initializer: "..." }
+  },
+
+  computed: {
+    filtered: { dependencies: ["query", "results"] }
+  },
+
+  effects: {
+    loadResults: {
+      dependencies: ["query"],
+      cleanupOwned: true
+    }
+  },
+
+  render: {
+    rootKind: "div",
+    structureHash: "...",
+    implementationHash: "..."
+  },
+
+  inheritance: null
+}
+
+Then compatibility is a readable decision, not merely:
+
+oldHash === newHash
+
+This improves diagnostics:
+
+Preserved query and results; initialized new state loading; recreated effect loadResults; remounted ResultList because its root contract changed.
+
+That would be significantly better developer feedback than most existing HMR systems.
+
+Renderer identity is the other half
+
+State preservation alone is insufficient. Rip should also preserve DOM identity where semantics allow it.
+
+The compiler can assign stable render-site identities:
+
+coffee
+ul
+  for user in users
+    UserRow key=user.id user=user
+
+The renderer knows:
+
+component identity;
+
+keyed child identity;
+
+render-site identity;
+
+DOM ownership;
+
+event-handler ownership.
+
+A changed render function can therefore reconcile against living nodes rather than replacing the subtree.
+
+The runtime can preserve:
+
+focused elements;
+
+cursor and text selection;
+
+form values;
+
+scroll positions;
+
+media playback where appropriate;
+
+keyed component children;
+
+route state.
+
+The four honest refresh outcomes
+
+Rip should expose a clear hierarchy:
+
+1. Patch
+
+Implementation changed but semantic shape is compatible.
+
+Preserve:
+
+component instance;
+
+state containers;
+
+DOM;
+
+refs;
+
+parent/child identity.
+
+Replace:
+
+methods;
+
+render implementation;
+
+computed implementations;
+
+lifecycle implementations.
+
+2. Migrate
+
+Named state or owned-resource shape changed compatibly.
+
+Examples:
+
+add a state slot;
+
+remove a state slot;
+
+add an effect;
+
+remove an effect;
+
+update a computed definition.
+
+Preserve compatible members and explicitly initialize/dispose the rest.
+
+3. Remount
+
+Component semantics changed incompatibly.
+
+Examples:
+
+incompatible inheritance;
+
+incompatible prop contract;
+
+root ownership model changed;
+
+state type changed without a migration rule;
+
+renderer cannot prove DOM compatibility.
+
+Remount only the narrowest component subtree.
+
+4. Reload
+
+The graph or runtime cannot be safely repaired.
+
+Examples:
+
+runtime ABI changed;
+
+no accepting boundary;
+
+unsafe circular evaluation;
+
+dev runtime itself changed;
+
+revision sequence was lost;
+
+transaction restoration failed.
+
+Full reload should be rare and clearly explained.
+
+Keep the implementation simple
+
+Owning the whole stack can tempt Rip to build one enormous HMR brain. Avoid that.
+
+Use four compact systems:
+
+ModuleGraph
+  determines what must update
+
+HmrManifest
+  describes semantic structure
+
+RefreshPlanner
+  compares old/new manifests and produces a plan
+
+RefreshRuntime
+  executes patch/migrate/remount transactionally
+
+A plan might look like:
+
+JavaScript
+{
+  action: "migrate",
+  preserveState: ["query", "results"],
+  addState: ["loading"],
+  removeState: [],
+  replaceMethods: ["search"],
+  recreateComputeds: ["filtered"],
+  recreateEffects: ["loadResults"],
+  reconcileRender: true
+}
+
+This is testable without a browser and keeps comparison policy out of the emitter.
+
+The product promise Rip should target
+
+Not merely:
+
+“Changes appear instantly.”
+
+But:
+
+Edit freely. Rip preserves everything it can, remounts only what it must, and never destroys the last working application because a new revision failed.
+
+That is a stronger and more precise standard than “Fast Refresh.”
+
+And yes: because Rip owns the language, compiler, runtime, renderer, and server, it has a credible path to doing this better than anyone—provided the design uses that semantic control to remove guesswork rather than to accumulate special cases.
+
+===== MESSAGE 6 (USER) =====
+{ action: "migrate", preserveState: ["query", "results"], addState: ["loading"], removeState: [], replaceMethods: ["search"], recreateComputeds: ["filtered"], recreateEffects: ["loadResults"], reconcileRender: true }
+
+Convert to writing block
+
+===== MESSAGE 7 (ASSISTANT) =====
+Here is that example in a reusable writing block.
+
+Edit
+{
+  action: "migrate",
+  preserveState: ["query", "results"],
+  addState: ["loading"],
+  removeState: [],
+  replaceMethods: ["search"],
+  recreateComputeds: ["filtered"],
+  recreateEffects: ["loadResults"],
+  reconcileRender: true
+}
