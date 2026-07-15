@@ -1,0 +1,24 @@
+{
+  "name": "@rip-lang/rsx",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Rip Style XML - small, safe XML parser/serializer that yields plain Rip objects",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./rsx.d.ts",
+      "default": "./rsx.rip"
+    }
+  },
+  "scripts": {
+    "test": "bun test --timeout 15000"
+  },
+  "rip": {
+    "browser": true
+  },
+  "files": [
+    "rsx.rip",
+    "rsx.d.ts",
+    "README.md"
+  ]
+}
