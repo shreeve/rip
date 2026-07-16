@@ -26,6 +26,9 @@
     "packages/csv": {
       "name": "@rip-lang/csv",
       "version": "4.0.0",
+      "bin": {
+        "rip-csv": "./csv.rip",
+      },
       "devDependencies": {
         "@rip-lang/testing": "workspace:*",
       },

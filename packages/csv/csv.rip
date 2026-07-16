@@ -1,4 +1,5 @@
 #!/usr/bin/env rip
+
 # ==============================================================================
 # csv — Fast, flexible CSV parser and writer for Rip
 #
@@ -11,6 +12,8 @@
 #         and line endings. Supports excel mode, relax mode, headers, comments,
 #         streaming via row callback, and reusable writer instances.
 # ==============================================================================
+
+import { readFileSync } from 'fs'
 
 # ==[ Constants ]==
 
@@ -451,7 +454,7 @@ export CSV =
 # ==============================================================================
 
 if import.meta.main
-  VERSION = Bun.file(import.meta.dir + "/package.json").json!.version
+  VERSION = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf-8')).version
 
   args      = process.argv.slice(2)
   readOpts  = {relax: false, excel: false, strip: false}

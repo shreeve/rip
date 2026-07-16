@@ -53,7 +53,7 @@ CSV.save! 'out.csv', rows
 - Relax mode — recovers stray/unmatched quotes common in enterprise exports (Labcorp-style files, legacy Excel)
 - Comments, whitespace stripping, and blank-line handling
 - Writing: compact/full quoting, leading-zero protection (`zeros`), reusable `Writer` instances
-- CLI file converter built in (`bun csv.rip in.csv out.csv`)
+- CLI file converter built in (`rip-csv in.csv out.csv`)
 
 ## How It Works
 
@@ -280,24 +280,27 @@ CSV.formatRow(row, opts)       # format single row -> string
 
 ## CLI
 
-The library doubles as a command-line tool for converting CSV files:
+The library doubles as a command-line tool for converting CSV files.
+There is no wrapper script: `csv.rip` is itself the `rip-csv` binary
+(first line `#!/usr/bin/env rip`), so the command works wherever `rip`
+is installed. In-repo, `rip csv.rip ...` is the same thing.
 
 ```bash
 # Clean up a malformed Labcorp file
-bun csv.rip -r -e input.csv output.csv
+rip-csv -r -e input.csv output.csv
 
 # Protect leading zeros for Google Sheets / Excel
-bun csv.rip -r -e -z input.csv output.csv
+rip-csv -r -e -z input.csv output.csv
 
 # Pipe to stdout
-bun csv.rip -r -e input.csv
+rip-csv -r -e input.csv
 
 # Show version
-bun csv.rip -v
+rip-csv -v
 ```
 
 ```
-Usage: bun csv.rip [options] <input> [output]
+Usage: rip-csv [options] <input> [output]
 
 Read options:
   -r, --relax     Recover from stray/malformed quotes

@@ -522,12 +522,12 @@ export { X12, ISA_WIDTHS, SELECTOR }
 # ==[ CLI ]=====================================================================
 
 if import.meta.main
+  VERSION = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf-8')).version
 
   args = process.argv.slice 2
 
   if args.includes('-v') or args.includes('--version')
-    version = JSON.parse(readFileSync(join(import.meta.dir, 'package.json'), 'utf-8')).version
-    console.log "rip-x12 #{version}"
+    console.log "rip-x12 #{VERSION}"
     process.exit 0
 
   if args.includes('-h') or args.includes('--help')

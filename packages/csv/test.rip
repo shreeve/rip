@@ -2,9 +2,11 @@
 # csv tests — parsing and writing
 # ==============================================================================
 
-import { test, eq } from '@rip-lang/testing'
+import { test, eq, ok } from '@rip-lang/testing'
 import { CSV } from '@rip-lang/csv'
 import * as mod from '@rip-lang/csv'
+import { readFileSync, statSync } from 'fs'
+import { join } from 'path'
 
 # ==[ Package surface ]==
 
@@ -18,6 +20,14 @@ test "module exports CSV and nothing else", ->
   eq typeof CSV.save, 'function'
   eq typeof CSV.writer, 'function'
   eq typeof CSV.formatRow, 'function'
+
+test "the rip-csv bin is csv.rip itself, shebang'd and executable", ->
+  pkg = JSON.parse(readFileSync(join(import.meta.dir, 'package.json'), 'utf8'))
+  eq pkg.bin, { 'rip-csv': './csv.rip' }
+  source = readFileSync join(import.meta.dir, 'csv.rip'), 'utf8'
+  ok source.startsWith('#!/usr/bin/env rip\n')
+  mode = statSync(join(import.meta.dir, 'csv.rip')).mode
+  ok (mode & 0o111) isnt 0
 
 # ==[ Reading: Basic ]==
 

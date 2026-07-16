@@ -7,6 +7,9 @@
   "exports": {
     ".": "./csv.rip"
   },
+  "bin": {
+    "rip-csv": "./csv.rip"
+  },
   "scripts": {
     "test": "rip test.rip",
     "bench": "rip bench.rip"
