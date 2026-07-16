@@ -4,7 +4,6 @@ import * as swarm from '@rip-lang/swarm';
 
 test('public entry exposes named exports only', () => {
   expect(Object.keys(swarm).sort()).toEqual([
-    '_getPerform',
     'args',
     'init',
     'retry',
@@ -43,9 +42,9 @@ test('the swarm bin is swarm.rip itself, shebanged and executable', () => {
   expect(mode & 0o111).not.toBe(0);
 });
 
-test('the worker bootstrap ships with the package', () => {
+test('swarm.rip is its own worker entry — no bootstrap file ships', () => {
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-  expect(pkg.files).toContain('lib/');
-  const bootstrap = readFileSync(new URL('../lib/worker.mjs', import.meta.url), 'utf8');
-  expect(bootstrap).toContain("import(new URL('../swarm.rip', import.meta.url).href)");
+  expect(pkg.files).toEqual(['swarm.rip', 'README.md']);
+  const source = readFileSync(new URL('../swarm.rip', import.meta.url), 'utf8');
+  expect(source).toContain('if not isMainThread and workerData?.scriptPath?');
 });

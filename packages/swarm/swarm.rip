@@ -20,7 +20,7 @@
 #   swarm { setup, perform }
 # ==============================================================================
 
-import { isMainThread } from 'worker_threads'
+import { isMainThread, parentPort, workerData } from 'worker_threads'
 import { existsSync, mkdirSync, readdirSync, renameSync, writeFileSync, rmSync } from 'fs'
 import { join, resolve, dirname } from 'path'
 import { pathToFileURL } from 'url'
@@ -147,9 +147,10 @@ draw = (state) ->
 # Worker orchestration
 # ==============================================================================
 
-# Worker mode: register perform function for the worker bootstrap
+# Worker mode: swarm() registers the perform function here, and the
+# worker-entry block at the bottom of this file reads it back — same
+# module instance, no bridge.
 _workerPerform = null
-export _getPerform = -> _workerPerform
 
 export swarm = (opts = {}) ->
   unless isMainThread
@@ -200,9 +201,9 @@ export swarm = (opts = {}) ->
 
   jobs = tasks.length
 
-  # resolve paths
-  swarmDir   = dirname(new URL(import.meta.url).pathname)
-  workerPath = join(swarmDir, 'lib', 'worker.mjs')
+  # resolve paths — each worker thread runs THIS file as its entry (the
+  # worker block at the bottom), so there is no separate bootstrap file
+  workerPath = new URL(import.meta.url).pathname
   scriptPath = resolve(process.argv[1] or '')
 
   # Workers must compile .rip imports themselves: a worker thread gets
@@ -398,9 +399,10 @@ export args = ->
 # job script exactly as `rip <script.rip> [options]` would. The argv is
 # rewritten first so the script observes itself as the program — swarm()
 # and args() read the script path and flags from there, and both entries
-# see the identical shape.
+# see the identical shape. (In a worker thread this file is the ENTRY,
+# so import.meta.main is true there too — hence the isMainThread guard.)
 
-if import.meta.main
+if import.meta.main and isMainThread
   script = process.argv[2]
   unless script
     console.error 'usage: swarm <script.rip> [options]'
@@ -411,3 +413,32 @@ if import.meta.main
     exit(1)
   process.argv = [process.argv[0], path, ...process.argv.slice(3)]
   import!(pathToFileURL(path).href)
+
+# ==============================================================================
+# Worker entry
+# ==============================================================================
+#
+# Each worker thread runs THIS file as its entry: it imports the user's
+# job script — whose swarm() call registers perform in this same module
+# instance — then processes tasks over IPC until shutdown.
+
+if not isMainThread and workerData?.scriptPath?
+  perform = null
+  try
+    import!(pathToFileURL(workerData.scriptPath).href)
+    throw new Error('No perform() function provided to swarm()') unless typeof _workerPerform is 'function'
+    perform = _workerPerform
+  catch err
+    parentPort.postMessage { type: 'error', error: err.message }
+
+  parentPort.postMessage { type: 'ready' }
+
+  parentPort.on 'message', (msg) ->
+    if msg.type is 'task'
+      try
+        await perform(msg.taskPath, workerData.context)
+        parentPort.postMessage { type: 'done', taskPath: msg.taskPath }
+      catch err
+        parentPort.postMessage { type: 'failed', taskPath: msg.taskPath, error: err.message }
+    else if msg.type is 'shutdown'
+      exit(0)

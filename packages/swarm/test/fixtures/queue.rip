@@ -1,7 +1,7 @@
 # The file-based task queue, exercised directly (no workers): init(),
-# todo() payload forms, every retry() branch, and the main-thread value
-# of _getPerform(). Prints one line per observation for exact matching.
-import { init, todo, retry, _getPerform } from '@rip-lang/swarm'
+# todo() payload forms, and every retry() branch.
+# Prints one line per observation for exact matching.
+import { init, todo, retry } from '@rip-lang/swarm'
 import { readFileSync, readdirSync, renameSync } from 'fs'
 
 init()
@@ -35,6 +35,4 @@ todo('x')
 init()
 console.log 'after-reinit:', JSON.stringify(readdirSync('.swarm/todo'))
 
-# no perform is registered in the main thread
-console.log 'getPerform:', _getPerform()
 process.exit(0)

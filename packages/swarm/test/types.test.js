@@ -7,7 +7,7 @@ test.skip('swarm package TypeScript face and declarations are valid (deferred: p
   const files = {
     'swarm.d.ts': readFileSync(new URL('../swarm.d.ts', import.meta.url), 'utf8'),
     'consumer.ts': [
-      "import { swarm, init, retry, todo, args, _getPerform, type SwarmOptions, type Context, type Perform } from './swarm';",
+      "import { swarm, init, retry, todo, args, type SwarmOptions, type Context, type Perform } from './swarm';",
       'init();',
       'const queued: boolean = retry();',
       "todo('task-1');",
@@ -20,7 +20,6 @@ test.skip('swarm package TypeScript face and declarations are valid (deferred: p
       '};',
       "const opts: SwarmOptions = { perform, setup: () => ({ token: 'x' }), workers: 4, bar: 30, char: '#' };",
       'const running: Promise<void> = swarm(opts);',
-      'const registered: Perform | null = _getPerform();',
       '// @ts-expect-error perform is required',
       'const bad: SwarmOptions = { setup: () => null };',
       '// @ts-expect-error a task name is a string or number',

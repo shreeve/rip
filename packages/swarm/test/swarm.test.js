@@ -199,7 +199,7 @@ describe('args()', () => {
 
 // ==[ task queue ]============================================================
 
-describe('task queue (init / todo / retry / _getPerform)', () => {
+describe('task queue (init / todo / retry)', () => {
   test('the whole file-based queue contract, pinned line for line', () => {
     const dir = fresh();
     const r = run(dir, 'queue.rip');
@@ -215,7 +215,6 @@ describe('task queue (init / todo / retry / _getPerform)', () => {
       '[]',
       'retry-empty: false', // nothing anywhere -> false
       'after-reinit: []', // init() clears the queue
-      'getPerform: null', // no perform registered on the main thread
       '',
     ]);
   });

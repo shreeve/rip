@@ -14,7 +14,6 @@
   },
   "files": [
     "swarm.rip",
-    "lib/",
     "README.md"
   ]
 }
