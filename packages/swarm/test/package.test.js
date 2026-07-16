@@ -34,10 +34,12 @@ test('the package does not claim browser safety (it spawns worker threads and mo
   expect(source).toContain("from 'fs'");
 });
 
-test('the swarm bin is declared and executable', () => {
+test('the swarm bin is swarm.rip itself, shebanged and executable', () => {
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-  expect(pkg.bin).toEqual({ swarm: './bin/swarm' });
-  const mode = statSync(new URL('../bin/swarm', import.meta.url)).mode;
+  expect(pkg.bin).toEqual({ swarm: './swarm.rip' });
+  const source = readFileSync(new URL('../swarm.rip', import.meta.url), 'utf8');
+  expect(source.startsWith('#!/usr/bin/env rip\n')).toBeTrue();
+  const mode = statSync(new URL('../swarm.rip', import.meta.url)).mode;
   expect(mode & 0o111).not.toBe(0);
 });
 

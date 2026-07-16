@@ -1,3 +1,4 @@
+#!/usr/bin/env rip
 # ==============================================================================
 # @rip-lang/swarm — Parallel job runner with worker threads
 #
@@ -22,6 +23,7 @@
 import { isMainThread } from 'worker_threads'
 import { existsSync, mkdirSync, readdirSync, renameSync, writeFileSync, rmSync } from 'fs'
 import { join, resolve, dirname } from 'path'
+import { pathToFileURL } from 'url'
 import { cpus } from 'os'
 
 # ==============================================================================
@@ -203,14 +205,16 @@ export swarm = (opts = {}) ->
   workerPath = join(swarmDir, 'lib', 'worker.mjs')
   scriptPath = resolve(process.argv[1] or '')
 
-  # find the .rip loader for workers — derive from swarm's own location
-  #   linked install: node_modules/@rip-lang/swarm/ → node_modules/rip/src/loader.js
-  #   source repo:    packages/swarm/             → ../../src/loader.js
-  loaderCandidates = [
-    join(swarmDir, '..', '..', 'rip', 'src', 'loader.js')
-    join(swarmDir, '..', '..', 'src', 'loader.js')
-  ]
-  loaderPath = loaderCandidates.find(existsSync) ?? null
+  # Workers must compile .rip imports themselves: a worker thread gets
+  # neither the parent's preloads nor bunfig's (verified — the inherited
+  # execArgv even SHOWS the flag, inert). The main thread already knows
+  # the exact loader compiling THIS process: its own --preload flag. No
+  # loader means the user script's workers cannot load at all, so its
+  # absence rejects here, named, instead of as per-worker startup noise.
+  loaderPath = process.execArgv.find((a) -> a.startsWith('--preload='))?.slice('--preload='.length)
+  unless loaderPath
+    console.error 'error: swarm needs the rip loader for its workers — run via `swarm <script.rip>` or `rip <script.rip>`'
+    exit(1)
 
   # state
   live     = 0
@@ -269,7 +273,7 @@ export swarm = (opts = {}) ->
       info[slot] ?= 0
 
       wopts = { workerData: { scriptPath, context } }
-      wopts.preload = [loaderPath] if loaderPath
+      wopts.preload = [loaderPath]
       w = new Worker(workerPath, wopts)
       allWorkers.push(w)
 
@@ -385,3 +389,25 @@ export args = ->
       continue
     result.push(arg)
   result
+
+# ==============================================================================
+# The `swarm` command
+# ==============================================================================
+#
+# swarm.rip is itself the bin: `swarm <script.rip> [options]` runs the
+# job script exactly as `rip <script.rip> [options]` would. The argv is
+# rewritten first so the script observes itself as the program — swarm()
+# and args() read the script path and flags from there, and both entries
+# see the identical shape.
+
+if import.meta.main
+  script = process.argv[2]
+  unless script
+    console.error 'usage: swarm <script.rip> [options]'
+    exit(1)
+  path = resolve(script)
+  unless existsSync(path)
+    console.error "error: no such script: #{script}"
+    exit(1)
+  process.argv = [process.argv[0], path, ...process.argv.slice(3)]
+  import!(pathToFileURL(path).href)

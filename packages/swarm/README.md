@@ -52,10 +52,15 @@ swarm { setup, perform }
 Run it:
 
 ```bash
-rip jobs.rip                # workers default to CPU count
-rip jobs.rip -w 10          # 10 workers
-rip jobs.rip -w 40          # 40 workers for I/O-heavy jobs
+swarm jobs.rip              # workers default to CPU count
+swarm jobs.rip -w 10        # 10 workers
+swarm jobs.rip -w 40        # 40 workers for I/O-heavy jobs
 ```
+
+There is no wrapper script: `swarm.rip` is itself the `swarm` binary
+(first line `#!/usr/bin/env rip`), so the command works wherever `rip`
+is installed. `rip jobs.rip` runs the same script identically — the
+`swarm` command adds the from-anywhere name and a usage message.
 
 ## How It Works
 

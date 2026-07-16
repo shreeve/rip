@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 
 const pkgDir = fileURLToPath(new URL('..', import.meta.url));
 const ripBin = join(pkgDir, '..', '..', 'bin', 'rip');
-const binPath = join(pkgDir, 'bin', 'swarm');
+const binPath = join(pkgDir, 'swarm.rip');
 const fixture = (name) => join(pkgDir, 'test', 'fixtures', name);
 
 const run = (dir, script, ...flags) =>
@@ -221,25 +221,34 @@ describe('task queue (init / todo / retry / _getPerform)', () => {
   });
 });
 
-// ==[ bin/swarm wrapper ]=====================================================
+// ==[ the swarm command (swarm.rip run as the bin) ]==========================
 
-describe('bin/swarm', () => {
+describe('the swarm command', () => {
   test('without a script prints usage and exits 1', () => {
-    const r = spawnSync(process.execPath, [binPath], { encoding: 'utf8', timeout: 12000 });
+    const r = spawnSync(process.execPath, [ripBin, binPath], { encoding: 'utf8', timeout: 12000 });
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain('usage: swarm [options] <script.rip>');
+    expect(r.stderr).toContain('usage: swarm <script.rip> [options]');
+  });
+
+  test('a missing script is a named error', () => {
+    const r = spawnSync(process.execPath, [ripBin, binPath, 'no-such-job.rip'], {
+      encoding: 'utf8',
+      timeout: 12000,
+    });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('error: no such script: no-such-job.rip');
   });
 
   test('runs a job script, forwarding flags and exit status', () => {
     const dir = fresh();
-    const ok = spawnSync(process.execPath, [binPath, fixture('basic.rip'), '-w', '2', '-q'], {
+    const ok = spawnSync(process.execPath, [ripBin, binPath, fixture('basic.rip'), '-w', '2', '-q'], {
       cwd: dir,
       encoding: 'utf8',
       timeout: 12000,
     });
     expect(ok.status).toBe(0);
     expect(ok.stdout).toMatch(summary(12, 2));
-    const bad = spawnSync(process.execPath, [binPath, fixture('noperform.rip'), '-q'], {
+    const bad = spawnSync(process.execPath, [ripBin, binPath, fixture('noperform.rip'), '-q'], {
       cwd: dir,
       encoding: 'utf8',
       timeout: 12000,
