@@ -230,6 +230,28 @@ ALL THREE in the same change.
   loudly if any `@rip-lang/*` name resolves outside this repo (e.g.
   shadowed by a sibling checkout's global links).
 
+## Landing
+
+"Land it" (or "land #N" for an existing PR) is the one verb for taking
+work to `main`. It means, in order:
+
+1. The diff lives on a branch, never on `main`.
+2. A PR exists with an honest summary (created now if landing local
+   work; verified if landing an existing PR).
+3. CI check CONCLUSIONS are observed — an explicit pass, never inferred
+   from a watcher exiting (rule 8).
+4. Merge per rule 8: squash by default (one commit, subject
+   "Title (#N)", the PR body as the commit body); a campaign branch
+   whose commits are each complete, honestly named, and useful as
+   review provenance may rebase-merge instead. State which was chosen
+   and why.
+5. Confirm the commit is on `main`, then delete the branch — but only
+   a branch this work created. A remote-only branch, or another
+   contributor's branch (Philip's, say), is theirs to delete.
+
+Steps already satisfied are verified, not redone. There is no second
+verb: landing someone else's PR is still landing.
+
 ## When Blocked
 
 - Missing decision → present options with a recommendation; ask. Do not
