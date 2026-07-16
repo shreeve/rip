@@ -177,8 +177,11 @@ describe('under a non-UTC host TZ (subprocess pinned to America/Los_Angeles, lik
       "if (d.getUTCFullYear() !== 2024 || d.getUTCMonth() !== 2 || d.getUTCDate() !== 15) fail('DATE drifted off its civil day: ' + d.toISOString());",
       "console.log('ok');",
     ].join('\n');
+    // The child is a bare `bun -e` importing a .rip entry, which compiles
+    // only where a bunfig preload is visible: spawn from the repo root
+    // (per-package bunfigs are gone; the root's is the one loader config).
     const run = Bun.spawnSync(['bun', '-e', script], {
-      cwd: new URL('..', import.meta.url).pathname,
+      cwd: new URL('../../..', import.meta.url).pathname,
       env: { ...process.env, TZ: 'America/Los_Angeles' },
     });
     expect(run.stderr.toString()).toBe('');
