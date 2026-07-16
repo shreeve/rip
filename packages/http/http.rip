@@ -10,76 +10,6 @@
 # instances with prefixUrl and default headers — all in pure Rip, zero deps.
 # ==============================================================================
 
-# ==[ Public API types ]==
-#
-# These types describe the consumer-facing contract — what to pass to
-# `http.create({...})`, what hooks receive, what fields HTTPError carries.
-# Internal helpers and locals rely on inference; the type system here
-# documents how to USE this package, not how it's implemented.
-
-export type RetryConfig =
-  limit?: number
-  methods?: string[]
-  statusCodes?: number[]
-  backoffLimit?: number
-  delay?: (attempt: number) => number
-
-export type RetryOption = number | RetryConfig | false
-
-export type BeforeRetryInfo =
-  request: Request
-  options: HttpOptions
-  error: Error | null
-  retryCount: number
-
-export type BeforeRequestHook = (request: Request, options: HttpOptions) => Request | Response | void | Promise<Request | Response | void>
-export type AfterResponseHook = (request: Request, options: HttpOptions, response: Response) => Response | void | Promise<Response | void>
-export type BeforeRetryHook   = (info: BeforeRetryInfo) => void | Promise<void>
-export type BeforeErrorHook   = (error: HTTPError) => HTTPError | Promise<HTTPError>
-
-export type Hooks =
-  beforeRequest?: BeforeRequestHook[]
-  afterResponse?: AfterResponseHook[]
-  beforeRetry?: BeforeRetryHook[]
-  beforeError?: BeforeErrorHook[]
-
-export type HttpOptions =
-  method?: string
-  json?: unknown
-  body?: BodyInit | null
-  headers?: HeadersInit
-  prefixUrl?: string
-  searchParams?: URLSearchParams | string | Record<string, unknown>
-  timeout?: number | false
-  retry?: RetryOption
-  throwHttpErrors?: boolean
-  hooks?: Hooks
-  mode?: RequestMode
-  credentials?: RequestCredentials
-  cache?: RequestCache
-  redirect?: RequestRedirect
-  referrer?: string
-  referrerPolicy?: ReferrerPolicy
-  integrity?: string
-  keepalive?: boolean
-  signal?: AbortSignal | null
-
-type CallFn = (input: string | URL, opts?: HttpOptions) => Promise<Response>
-
-type HttpInstanceMembers =
-  get: CallFn
-  post: CallFn
-  put: CallFn
-  patch: CallFn
-  del: CallFn
-  head: CallFn
-  create: (opts?: HttpOptions) => HttpInstance
-  extend: (opts?: HttpOptions) => HttpInstance
-  HTTPError: typeof HTTPError
-  TimeoutError: typeof TimeoutError
-
-export type HttpInstance = CallFn & HttpInstanceMembers
-
 # ==[ Defaults ]==
 
 RETRY_METHODS =! ['GET', 'PUT', 'HEAD', 'DELETE', 'OPTIONS', 'TRACE']
@@ -91,30 +21,22 @@ TIMEOUT_MS    =! 10000
 # ==[ Error Classes ]==
 
 export class HTTPError extends Error
-  constructor: (response: Response, request: Request, options: HttpOptions) ->
+  constructor: (response, request, options) ->
     super("Request failed with status #{response.status}")
     @response = response
     @request  = request
     @options  = options
     @name     = 'HTTPError'
 
-export interface HTTPError
-  response: Response
-  request: Request
-  options: HttpOptions
-
 export class TimeoutError extends Error
-  constructor: (request: Request) ->
+  constructor: (request) ->
     super('Request timed out')
     @request = request
     @name    = 'TimeoutError'
 
-export interface TimeoutError
-  request: Request
-
 # ==[ Helpers ]==
 
-def buildUrl(input, opts: HttpOptions = {})
+def buildUrl(input, opts = {})
   base = opts.prefixUrl
   origin = globalThis.location?.origin or null
   # In the browser, default `base` to the current page origin so callers
@@ -144,21 +66,21 @@ def buildUrl(input, opts: HttpOptions = {})
 
   url
 
-def mergeHeaders(a?: HeadersInit, b?: HeadersInit)
+def mergeHeaders(a, b)
   result = new Headers(a ?? {})
   if b
     h = new Headers(b)
     h.forEach (v, k) -> result.set(k, v)
   result
 
-def mergeHooks(a: Hooks = {}, b: Hooks = {})
+def mergeHooks(a = {}, b = {})
   return
     beforeRequest: [...(a.beforeRequest ?? []), ...(b.beforeRequest ?? [])]
     afterResponse: [...(a.afterResponse ?? []), ...(b.afterResponse ?? [])]
     beforeRetry:   [...(a.beforeRetry   ?? []), ...(b.beforeRetry   ?? [])]
     beforeError:   [...(a.beforeError   ?? []), ...(b.beforeError   ?? [])]
 
-def mergeOptions(defaults: HttpOptions = {}, overrides: HttpOptions = {})
+def mergeOptions(defaults = {}, overrides = {})
   opts = { ...defaults, ...overrides }
   if defaults.headers or overrides.headers
     opts.headers = mergeHeaders(defaults.headers, overrides.headers)
@@ -202,7 +124,7 @@ def retryDelay(attempt, res, cfg)
 
 # ==[ Core Request ]==
 
-def request(input, opts: HttpOptions = {})
+def request(input, opts = {})
   method          = (opts.method ?? 'GET').toUpperCase()
   timeout         = opts.timeout ?? TIMEOUT_MS
   throwHttpErrors = opts.throwHttpErrors ?? true
@@ -223,8 +145,7 @@ def request(input, opts: HttpOptions = {})
     headers.set('content-type', 'application/json') unless headers.has('content-type')
 
   # Compose the fetch signal so caller aborts and our timeout are both
-  # honored. Computed in one shot so TS infers a sensible union type
-  # without needing typed-local annotations.
+  # honored.
   fetchSignal = if opts.signal and timeout and timeout isnt Infinity
     AbortSignal.any [opts.signal, AbortSignal.timeout(timeout)]
   else if timeout and timeout isnt Infinity
@@ -260,7 +181,7 @@ def request(input, opts: HttpOptions = {})
   # Retry loop
   retryCount = 0
   loop
-    res: Response | null = null
+    res = null
 
     try
       res = fetch!(req.clone())
@@ -315,16 +236,14 @@ def request(input, opts: HttpOptions = {})
 
 # ==[ Instance Factory ]==
 #
-# `Object.assign(call, members)` is the idiomatic TypeScript pattern for
-# building a callable-with-properties (function plus methods/fields). The
-# `:: HttpInstance` return type on `makeInstance` is the one annotation
-# that earns its keep here — it lets TypeScript validate the assembled
-# shape against the public `HttpInstance` contract.
+# `Object.assign(call, members)` builds the callable-with-properties
+# shape: a function that also carries the method shortcuts, instance
+# builders, and error classes.
 
 def buildMethod(call, method)
   (input, opts = {}) -> call(input, { ...opts, method })
 
-def makeInstance(defaults: HttpOptions = {}): HttpInstance
+def makeInstance(defaults = {})
   call = (input, opts = {}) -> request(input, mergeOptions(defaults, opts))
   Object.assign call,
     get:          buildMethod(call, 'GET')

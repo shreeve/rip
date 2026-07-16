@@ -315,7 +315,7 @@ the same core feature set in a fraction of the code.
 | | ky | @rip-lang/http |
 |---|---|---|
 | Source files | 24 | 1 |
-| Runtime code | ~1,200 lines | ~340 lines (types included) |
+| Runtime code | ~1,200 lines | ~260 lines |
 | Dependencies | 0 | 0 |
 | Method shortcuts | yes | yes |
 | JSON convenience | yes | yes |
