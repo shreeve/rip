@@ -1,3 +1,4 @@
+#!/usr/bin/env rip
 # ==============================================================================
 # csv — Fast, flexible CSV parser and writer for Rip
 #
@@ -459,12 +460,12 @@ if import.meta.main
 
   for arg in args
     switch arg
-      when '-v', '--version' then (p "csv #{VERSION}"; exit 0)
+      when '-v', '--version' then (p "rip-csv #{VERSION}"; exit 0)
       when '-h', '--help'
         p """
-          csv #{VERSION} — Fast, flexible CSV parser and writer
+          rip-csv #{VERSION} — Fast, flexible CSV parser and writer
 
-          Usage: bun csv.rip [options] <input> [output]
+          Usage: rip-csv [options] <input> [output]
 
           Read options:
             -r, --relax     Recover from stray/malformed quotes

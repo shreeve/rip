@@ -1,3 +1,5 @@
+#!/usr/bin/env rip
+
 # ==============================================================================
 # x12.rip: X12 EDI parser, editor, and query engine
 #
@@ -16,7 +18,7 @@ escRe = (s) -> s.replace /[.*+?^${}()|[\]\\]/g, '\\$&'
 
 ISA_WIDTHS = [3, 2, 10, 2, 10, 2, 15, 2, 15, 6, 4, 1, 5, 9, 1, 1]
 
-SELECTOR = /^(..[^-.(]?)(?:\((\d*|[+!?*]?)\))?[-.]?(\d+)?(?:\((\d*|[+!?*]?)\))?[-.]?(\d+)?$/
+SELECTOR = /^([A-Za-z0-9]{2}[A-Za-z0-9]?)(?:\((\d*|[+!?*]?)\))?[-.]?(\d+)?(?:\((\d*|[+!?*]?)\))?[-.]?(\d+)?$/
 
 isaWidthsStr = (str) ->
   sep = str[3]
@@ -63,8 +65,10 @@ class X12
     @seg = m[4]
     @rep = "^" if @rep is "U"
 
-    # Parse based on input type
-    if typeof obj is 'string' or not obj?
+    # Parse based on input type. An X12 instance rides the string path
+    # (its serialized form was captured above), so a clone is exact and
+    # its own properties are never mistaken for selector/value entries.
+    if typeof obj is 'string' or not obj? or obj instanceof X12
       @toArray()
       @str = null
     else if Array.isArray obj
@@ -84,7 +88,11 @@ class X12
   toArray: ->
     return @ary if @ary
     re = new RegExp "[#{escRe @seg}\\r\\n]+", 'g'
-    @ary = @str.trim().split(re).map (s) => s.split @fld, -1
+    rows = @str.trim().split re
+    # The terminator after the last segment splits off one empty tail;
+    # drop it so 17 segments parse to 17 rows and raw() never emits "~~".
+    rows.pop() if rows.length > 0 and rows[-1] is ''
+    @ary = rows.map (s) => s.split @fld, -1
     @ary
 
   toString: ->
@@ -157,7 +165,7 @@ class X12
       str = if typeof obj is 'string' then obj else String obj
       str.toUpperCase()
 
-  # ==[ Data access — unified get/set ]=========================================
+  # ==[ Data access: unified get/set ]==========================================
 
   data: (...args) ->
     len = args.length
@@ -322,7 +330,7 @@ class X12
             row[fld] = ufr.join @rep
 
         else if how is 'com'
-          rep ?= 0
+          rep ?= 1
           row[fld] ?= ""
           one = row[fld]
 
@@ -361,9 +369,9 @@ class X12
 
             row[fld] = ufr.join @rep
 
-      # Enforce ISA field widths
-      if seg =~ /isa/i
-        @isaWidths row
+        # Enforce ISA field widths
+        if seg =~ /isa/i
+          @isaWidths row
 
       null
 
@@ -518,7 +526,8 @@ if import.meta.main
   args = process.argv.slice 2
 
   if args.includes('-v') or args.includes('--version')
-    console.log "rip-x12 0.1.0"
+    version = JSON.parse(readFileSync(join(import.meta.dir, 'package.json'), 'utf-8')).version
+    console.log "rip-x12 #{version}"
     process.exit 0
 
   if args.includes('-h') or args.includes('--help')

@@ -1,14 +1,26 @@
-# @rip-lang/x12
+<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
 
-X12 EDI parser, editor, and query engine. Parse, query, and build X12
-transactions (270/271, 835, 837, …) through a path-based addressing
-system; field, repetition, component, and segment separators are
-auto-detected from the ISA header. Zero dependencies; server-side only
-(the module reads files for `X12.load` and the CLI).
+# Rip X12 - @rip-lang/x12
 
-## Library
+> **X12 EDI parser, editor, and query engine — path-based addressing over auto-detected separators, zero dependencies.**
 
-```rip
+Parse, query, edit, and build X12 transactions (270/271, 835, 837, …)
+through one selector grammar: `seg(num)-fld(rep).com` addresses any
+value in a message, for both reads and writes. The four delimiter
+levels are auto-detected from the ISA header, ISA elements are held to
+their official fixed widths on every write, and a message round-trips
+byte-for-byte between its string and segment-array forms.
+
+**Runtime:** not browser-safe — `X12.load` and the CLI read the
+filesystem (`fs`). One `.rip` file.
+
+## Quick Start
+
+```bash
+bun add @rip-lang/x12
+```
+
+```coffee
 import { X12 } from '@rip-lang/x12'
 
 # Parse an X12 message
@@ -41,11 +53,26 @@ x12.each 'EB', (row) -> console.log row
 output = x12.raw()
 ```
 
-`new X12()` accepts a raw string, another `X12` instance, an array of
-`selector, value` pairs, or an object of `selector: value` entries; the
-latter three start from the default fixed-width ISA template. `X12.load
-path` reads a file. ISA elements are fixed-width: every `set` against
-`ISA` pads or truncates the element to its official width.
+`new X12()` accepts a raw string, another `X12` instance (an exact
+clone), an array of `selector, value` pairs, or an object of
+`selector: value` entries; the latter two start from the default
+fixed-width ISA template. `X12.load path` reads a file.
+
+## Features
+
+- **One selector grammar** — the same `seg(num)-fld(rep).com` path
+  reads and writes fields, repetitions, and components
+- **Separator auto-detection** — field, repetition, component, and
+  segment delimiters come from the ISA header, never configuration
+- **ISA fixed widths** — every write against `ISA` pads or truncates
+  the element to its official width
+- **Occurrence operators** — `(n)` nth, `(?)` count, `(*)` all,
+  `(+)` append
+- **Editor semantics** — writes splice in place, pad skipped
+  positions, and invalidate the cached string form
+- **Multi-query `find`** — several selectors in one call, answers in
+  order
+- **CLI** — query, list, and filter `.x12` files and directories
 
 ## Path addressing
 
@@ -69,6 +96,10 @@ seg      — Segment name (2-3 chars): ISA, GS, EB, CLP, …
 | `EB(3)-4(2)`   | 3rd EB, field 4, 2nd repetition     |
 | `EB(3)-4(2).1` | 3rd EB, field 4, 2nd rep, component |
 
+Dot and dash are interchangeable position separators: `NM1.3` and
+`NM1-3` address the same value. A component write with no explicit
+repetition goes through repetition 1, exactly like the matching read.
+
 ## Separators
 
 X12 uses four delimiter levels, auto-detected from the ISA header and
@@ -85,6 +116,10 @@ An ISA-11 of `U` (the pre-5010 "U.S. EDI community" marker) falls back
 to `^` as the repetition separator.
 
 ## CLI
+
+There is no wrapper script: `x12.rip` is itself the `rip-x12` binary
+(first line `#!/usr/bin/env rip`), so the command works wherever `rip`
+is installed. In-repo, `rip x12.rip ...` is the same thing.
 
 ```bash
 rip-x12 -f message.x12              # show fields
@@ -110,3 +145,14 @@ rip-x12 -d -f /path/to/edi/         # recursive directory scan
 | `-s, --spacer`       | Blank line between messages              |
 | `-t, --tsv`          | Tab-delimited query output               |
 | `-v, --version`      | Show version                             |
+
+## Test
+
+```bash
+bun run test
+```
+
+The suite pins the selector grammar, construction forms, get/set
+through fields, repetitions, and components, ISA width enforcement,
+iteration, multi-query `find`, `show` formatting, the CLI as a real
+subprocess, and the 270/271 and 835/837 consumer patterns.
