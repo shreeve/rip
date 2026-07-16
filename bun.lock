@@ -101,6 +101,9 @@
       "bin": {
         "swarm": "./swarm.rip",
       },
+      "devDependencies": {
+        "@rip-lang/testing": "workspace:*",
+      },
     },
     "packages/testing": {
       "name": "@rip-lang/testing",

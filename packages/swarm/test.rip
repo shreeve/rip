@@ -1,0 +1,283 @@
+# ==============================================================================
+# swarm tests: batch runs, CLI flags, progress, args(), the queue, the command
+#
+# Every expectation traces to the running v3 implementation (rip-lang),
+# the port's behavioral oracle. The fixtures/ job scripts are
+# deterministic (no random sleeps, no random failures), so worker
+# scheduling never changes an outcome; the spawnSync timeout is the only
+# clock in play, a generous bound rather than a race. Every case runs
+# swarm as a real subprocess through this repository's rip.
+# ==============================================================================
+
+import { test, eq, ok, throws } from '@rip-lang/testing'
+import * as mod from '@rip-lang/swarm'
+import { spawnSync } from 'child_process'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs'
+import { cpus, tmpdir } from 'os'
+import { join } from 'path'
+
+pkg      =! JSON.parse(readFileSync(join(import.meta.dir, 'package.json'), 'utf8'))
+ripCli   =! join(import.meta.dir, '..', '..', 'bin', 'rip')
+swarmRip =! join(import.meta.dir, 'swarm.rip')
+fixture  =  (name) -> join(import.meta.dir, 'fixtures', name)
+
+run = (dir, script, ...flags) ->
+  spawnSync process.execPath, [ripCli, fixture(script), ...flags], { cwd: dir, encoding: 'utf8', timeout: 12000 }
+
+fresh = -> mkdtempSync join(tmpdir(), 'swarm-')
+
+names = (dir, sub) ->
+  readdirSync(join(dir, '.swarm', sub)).sort (a, b) -> Number(a) - Number(b)
+
+# The -q summary: "0.07 secs for 12 jobs by 3 workers @ 160.00 jobs/sec"
+summary = (jobs, workers) ->
+  new RegExp("^\\d+\\.\\d{2} secs for #{jobs} jobs by #{workers} workers( @ \\d+\\.\\d{2} jobs/sec)?\\n$")
+
+# ==[ Package surface ]==
+
+console.log "\nPackage"
+
+test "public entry exposes named exports only", ->
+  eq Object.keys(mod).sort(), ['args', 'init', 'retry', 'swarm', 'todo']
+  ok not ('default' of mod), 'no default export'
+
+test "no runtime deps; testing harness is the only devDependency", ->
+  for field in ['dependencies', 'peerDependencies', 'optionalDependencies']
+    eq pkg[field], undefined
+  eq pkg.devDependencies, { '@rip-lang/testing': 'workspace:*' }
+
+test "does not claim browser safety (it spawns worker threads and moves files)", ->
+  eq pkg.rip, undefined
+  source = readFileSync swarmRip, 'utf8'
+  ok source.includes("from 'worker_threads'")
+  ok source.includes("from 'fs'")
+
+test "the swarm bin is swarm.rip itself, shebanged and executable", ->
+  eq pkg.bin, { swarm: './swarm.rip' }
+  source = readFileSync swarmRip, 'utf8'
+  ok source.startsWith('#!/usr/bin/env rip\n')
+  ok (statSync(swarmRip).mode & 0o111) isnt 0
+
+test "swarm.rip is its own worker entry; fixtures never ship", ->
+  eq pkg.files, ['swarm.rip', 'README.md']
+  source = readFileSync swarmRip, 'utf8'
+  ok source.includes('if not isMainThread and workerData?.scriptPath?')
+
+# ==[ swarm() batch runs ]==
+
+console.log "\nBatch runs"
+
+test "processes every task across workers and reports a summary", ->
+  dir = fresh()
+  r = run dir, 'basic.rip', '-w', '3', '-q'
+  eq r.status, 0
+  ok summary(12, 3).test(r.stdout)
+  eq names(dir, 'done'), ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']
+  eq names(dir, 'todo'), []
+  eq names(dir, 'died'), []
+
+test "setup() context is cloned to every worker call, with safe: false by default", ->
+  dir = fresh()
+  run dir, 'basic.rip', '-w', '3', '-q'
+  lines = readFileSync(join(dir, 'out.log'), 'utf8').trim().split('\n').map (l) -> JSON.parse(l)
+  eq lines.length, 12
+  eq lines.map((l) -> l.name).sort((a, b) -> a - b), ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']
+  for line in lines
+    eq line.token, 'abc123'
+    eq line.deep, [1, 2, 3]
+    eq line.safe, false
+
+test "-s/--safe flips safe: true on the worker context", ->
+  dir = fresh()
+  run dir, 'basic.rip', '-w', '2', '-q', '-s'
+  lines = readFileSync(join(dir, 'out.log'), 'utf8').trim().split('\n').map (l) -> JSON.parse(l)
+  ok lines.every (l) -> l.safe is true
+
+test "failed tasks move to died/ and their errors append to errors.log", ->
+  dir = fresh()
+  r = run dir, 'fail.rip', '-w', '2', '-q'
+  eq r.status, 0   # died tasks do not fail the run
+  ok summary(10, 2).test(r.stdout)
+  eq names(dir, 'done'), ['1', '2', '4', '5', '6', '8', '9', '10']
+  eq names(dir, 'died'), ['3', '7']
+  log = readFileSync join(dir, '.swarm', 'errors.log'), 'utf8'
+  ok log.includes('3: boom 3\n')
+  ok log.includes('7: boom 7\n')
+
+test "a second run retries only the died tasks and they can complete", ->
+  dir = fresh()
+  run dir, 'flaky.rip', '-w', '2', '-q'
+  eq names(dir, 'died'), ['3', '7']
+  r = run dir, 'flaky.rip', '-w', '2', '-q'
+  eq r.status, 0
+  ok summary(2, 2).test(r.stdout)   # only the retried tasks run
+  eq names(dir, 'done'), ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']
+  eq names(dir, 'died'), []
+
+test "deterministic failures stay died across a retry run", ->
+  dir = fresh()
+  run dir, 'fail.rip', '-w', '2', '-q'
+  r = run dir, 'fail.rip', '-w', '2', '-q'
+  ok summary(2, 2).test(r.stdout)
+  eq names(dir, 'done'), ['1', '2', '4', '5', '6', '8', '9', '10']
+  eq names(dir, 'died'), ['3', '7']
+
+test "a worker crash moves the in-flight task to died/, respawns, and the batch completes", ->
+  dir = fresh()
+  r = run dir, 'crash.rip', '-w', '2', '-q'
+  eq r.status, 0
+  ok summary(6, 2).test(r.stdout)
+  eq names(dir, 'done'), ['1', '2', '3', '4', '6']
+  eq names(dir, 'died'), ['5']
+  log = readFileSync join(dir, '.swarm', 'errors.log'), 'utf8'
+  ok /worker \d+ exited with code 7/.test(log)
+
+# ==[ CLI flags ]==
+
+console.log "\nCLI flags"
+
+test "-r/--reset removes the .swarm directory and quits", ->
+  dir = fresh()
+  mkdirSync join(dir, '.swarm', 'todo'), { recursive: true }
+  r = run dir, 'basic.rip', '-r'
+  eq r.status, 0
+  eq r.stdout, 'removed .swarm directory\n'
+  ok not existsSync(join(dir, '.swarm'))
+
+test "long-form --workers=N is honored", ->
+  dir = fresh()
+  r = run dir, 'basic.rip', '--workers=4', '-q'
+  eq r.status, 0
+  ok summary(12, 4).test(r.stdout)
+
+test "negative workers is an error", ->
+  dir = fresh()
+  r = run dir, 'basic.rip', '-w', '-2', '-q'
+  eq r.status, 1
+  ok r.stderr.includes('error: workers must be at least 1')
+
+test "-w 0 silently falls back to the CPU count (v3 wart: 0 is falsy, so the <1 guard never sees it)", ->
+  dir = fresh()
+  r = run dir, 'basic.rip', '-w', '0', '-q'
+  eq r.status, 0
+  ok summary(12, cpus().length).test(r.stdout)
+
+test "missing perform() is an error", ->
+  dir = fresh()
+  r = run dir, 'noperform.rip', '-q'
+  eq r.status, 1
+  ok r.stderr.includes('error: perform() function is required')
+
+test "missing .swarm/todo is an error", ->
+  dir = fresh()
+  r = run dir, 'notodo.rip', '-q'
+  eq r.status, 1
+  ok r.stderr.includes('error: no .swarm/todo directory found (did setup run?)')
+
+test "an empty queue is a clean no-op", ->
+  dir = fresh()
+  r = run dir, 'empty.rip', '-q'
+  eq r.status, 0
+  eq r.stdout, 'no tasks to process\n'
+
+# ==[ Progress display ]==
+
+console.log "\nProgress display"
+
+test "non-quiet runs render the ANSI frame, bars, and summary", ->
+  dir = fresh()
+  r = run dir, 'basic.rip', '-w', '2', '-b', '10', '-c', '#'
+  eq r.status, 0
+  out = r.stdout
+  ok out.includes("\x1b[2J"),   'clear screen'
+  ok out.includes("\x1b[?25l"), 'hide cursor'
+  ok out.includes("\x1b[?25h"), 'restore cursor'
+  ok out.includes('╭────────────╮'), 'frame: bar width 10 + 2'
+  ok out.includes('╰────────────╯')
+  ok out.includes('##########'), '-c character fills the bars'
+  ok out.includes('100.0%')
+  ok out.includes('12/12 done')
+  ok /[ ]jobs @ [\d.]+\/sec/.test(out), 'per-worker stats'
+  ok /\d+\.\d{2} secs for 12 jobs by 2 workers @ [\d.]+ jobs\/sec/.test(out)
+
+# ==[ args() ]==
+
+console.log "\nargs()"
+
+test "strips swarm flags (short, long, =-joined, standalone) and keeps the rest", ->
+  dir = fresh()
+  r = run dir, 'args.rip', 'foo', '-w', '5', 'bar', '--bar=30', '-c', '*', 'baz', '-q', '--reset', '-x', 'qux'
+  eq r.status, 0
+  eq JSON.parse(r.stdout), ['foo', 'bar', 'baz', '-x', 'qux']
+
+# ==[ Task queue ]==
+
+console.log "\nTask queue"
+
+test "the whole file-based queue contract, pinned line for line", ->
+  dir = fresh()
+  r = run dir, 'queue.rip'
+  eq r.status, 0
+  eq r.stdout.split('\n'), [
+    '["0","42","empty","obj","str"]'   # String(name) filenames, sorted
+    '""'                               # todo(name) writes an empty file
+    '"hello"'                          # string data as-is
+    '"{\\"a\\":1,\\"b\\":[2,3]}"'      # object data JSON.stringify'd
+    'retry-with-todo: true'            # died empty but todo queued -> true
+    'retry-moves: true'                # died/* renamed back to todo/
+    '["0","42","empty","obj","str"]'
+    '[]'
+    'retry-empty: false'               # nothing anywhere -> false
+    'after-reinit: []'                 # init() clears the queue
+    ''
+  ]
+
+# ==[ The swarm command (swarm.rip run as the bin) ]==
+
+console.log "\nThe swarm command"
+
+test "without a script prints usage and exits 1", ->
+  r = spawnSync process.execPath, [ripCli, swarmRip], { encoding: 'utf8', timeout: 12000 }
+  eq r.status, 1
+  ok r.stderr.includes('usage: swarm <script.rip> [options]')
+
+test "a missing script is a named error", ->
+  r = spawnSync process.execPath, [ripCli, swarmRip, 'no-such-job.rip'], { encoding: 'utf8', timeout: 12000 }
+  eq r.status, 1
+  ok r.stderr.includes('error: no such script: no-such-job.rip')
+
+test "runs a job script, forwarding flags and exit status", ->
+  dir = fresh()
+  good = spawnSync process.execPath, [ripCli, swarmRip, fixture('basic.rip'), '-w', '2', '-q'], { cwd: dir, encoding: 'utf8', timeout: 12000 }
+  eq good.status, 0
+  ok summary(12, 2).test(good.stdout)
+  bad = spawnSync process.execPath, [ripCli, swarmRip, fixture('noperform.rip'), '-q'], { cwd: dir, encoding: 'utf8', timeout: 12000 }
+  eq bad.status, 1
+
+# ==[ Consumer pattern ]==
+#
+# The real v3 call sites this package serves — labcorp downloader
+# scripts — share one shape, pinned end-to-end: an isMainThread guard
+# around the positional args() read, one task per input line, and an
+# idempotent perform() that skips outputs already on disk.
+
+console.log "\nConsumer pattern"
+
+test "the downloader pattern: args() input, tasks from lines, idempotent perform", ->
+  dir = mkdtempSync join(tmpdir(), 'swarm-consumer-')
+  writeFileSync join(dir, 'codes.txt'), 'alpha\nbeta\n\ngamma \n'
+  mkdirSync join(dir, 'out')
+  writeFileSync join(dir, 'out', 'beta.json'), 'SENTINEL'   # already downloaded
+
+  r = spawnSync process.execPath, [ripCli, fixture('consumer.rip'), 'codes.txt', '-w', '2', '-q'], { cwd: dir, encoding: 'utf8', timeout: 12000 }
+  eq r.status, 0
+  ok /^\d+\.\d{2} secs for 3 jobs by 2 workers/.test(r.stdout)
+
+  # blank line skipped, 'gamma ' trimmed, every task done
+  eq readdirSync(join(dir, '.swarm', 'done')).sort(), ['alpha', 'beta', 'gamma']
+  eq readdirSync(join(dir, '.swarm', 'todo')), []
+
+  # fresh outputs written; the existing one left untouched
+  eq readdirSync(join(dir, 'out')).sort(), ['alpha.json', 'beta.json', 'gamma.json']
+  eq JSON.parse(readFileSync(join(dir, 'out', 'alpha.json'), 'utf8')), { code: 'alpha' }
+  eq readFileSync(join(dir, 'out', 'beta.json'), 'utf8'), 'SENTINEL'

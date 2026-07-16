@@ -10,10 +10,13 @@
     "swarm": "./swarm.rip"
   },
   "scripts": {
-    "test": "rip test"
+    "test": "rip test.rip"
   },
   "files": [
     "swarm.rip",
     "README.md"
-  ]
+  ],
+  "devDependencies": {
+    "@rip-lang/testing": "workspace:*"
+  }
 }
