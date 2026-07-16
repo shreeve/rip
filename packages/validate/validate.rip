@@ -1,20 +1,30 @@
-# @rip-lang/validate — the validation and normalization vocabulary.
+# ==============================================================================
+# @rip-lang/validate: the validation and normalization vocabulary
 #
 # One registry of pure, synchronous normalizers. Every validator takes a
 # value and returns its normalized form, or null on miss. All of them
-# are plain string/regex/arithmetic functions — no host APIs, no
-# filesystem — so the same vocabulary runs in the browser and on the
+# are plain string/regex/arithmetic functions (no host APIs, no
+# filesystem), so the same vocabulary runs in the browser and on the
 # server. The vocabulary is US-English: phone numbers are NANP, zip and
 # state are US-shaped, and name/address casing follows US conventions.
 #
 # The registry accepts new entries only through `registerValidator`;
 # registering an existing name, a non-function, or an async function
 # rejects loudly. `check(value, type)` applies a validator to a value in
-# hand and rejects an unknown type name — string input is expected for
+# hand and rejects an unknown type name. String input is expected for
 # every validator except the raw set (array, hash, json), which receives
 # the value untouched.
+#
+# Importing this package also registers the whole vocabulary as `~:name`
+# schema coercers, and `registerValidator` keeps later additions bridged
+# as they arrive. One evaluation per process (the module cache owns
+# idempotence); a name collision with an already-registered coercer
+# rejects loudly at the site, leaving the validator registry unchanged.
+# The two call sites prepare input differently by design: schema
+# coercion trims non-raw wire input before the validator runs, while
+# `check()` passes the string form untouched.
 
-export type Validator = (v: any) => unknown
+import { registerCoercer } from '../../src/runtime/schema.js'
 
 fail = (message) -> throw new Error "Rip Validate: #{message}"
 
@@ -22,7 +32,7 @@ fail = (message) -> throw new Error "Rip Validate: #{message}"
 # Utilities
 # ==============================================================================
 
-export def isBlank(obj: unknown): boolean
+export def isBlank(obj)
   return true unless obj?
   return true if obj is false
   return true if typeof obj is 'string' and /^\s*$/.test obj
@@ -53,7 +63,7 @@ toMoney = (value, even = false) ->
 
 # US-English title casing for names and addresses. The optional flags
 # enable the name-specific and address-specific rule packs.
-export def toName(str: unknown, ...type: string[]): string
+export def toName(str, ...type)
   s = String(str)
   s = s.toLowerCase().replace(/\s+/g, ' ').trim()
   s = s.replace /(^|(?<=\P{L}))(\p{L})/gu, (m, pre, ch) -> pre + ch.toUpperCase()
@@ -79,7 +89,7 @@ export def toName(str: unknown, ...type: string[]): string
 
 # NANP phone normalizer with extension parsing; a `+`-prefixed number
 # with enough digits passes through as international.
-export def toPhone(str: unknown): string | null
+export def toPhone(str)
   return "" if isBlank(str)
   num = String(str).replace(/\s+/g, ' ').trim()
   [num, ext] = num.split(/\s*(?:, ?)?(?:ext?\.?|x|#|:|,)\s*/i, 2)
@@ -102,7 +112,7 @@ export def toPhone(str: unknown): string | null
 # Format integer cents for display: 129222 -> "$1,292.22". Rounds
 # defensively so a stray float still renders; a nullish amount renders
 # as "$0.00" instead of "$NaN.NaN".
-export def formatMoney(cents?: number | null, opts: { symbol?: string, commas?: boolean } = {}): string
+export def formatMoney(cents, opts = {})
   fail 'formatMoney expects finite cents' unless not cents? or Number.isFinite(cents)
   symbol  = opts.symbol ?? '$'
   commas  = opts.commas ?? true
@@ -118,8 +128,8 @@ export def formatMoney(cents?: number | null, opts: { symbol?: string, commas?: 
 # Calendar
 # ==============================================================================
 
-# Validity comes from the written components — pure calendar math, leap
-# years included, no Date construction — so an impossible date can never
+# Validity comes from the written components: pure calendar math, leap
+# years included, no Date construction, so an impossible date can never
 # normalize itself into a neighboring real one.
 MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 
@@ -139,7 +149,7 @@ BUILTIN =
   whole:      (v) -> v[/^(0|[1-9]\d{0,14})$/]          and parseInt(_[1])
   float:      (v) -> v[/^([-+]?(?:\d+(?:\.\d*)?|\.\d+))$/] and parseFloat(_[1])
 
-  # Money — input is DOLLARS, output is INTEGER CENTS. `money` rounds
+  # Money: input is DOLLARS, output is INTEGER CENTS. `money` rounds
   # half-up; `money_even` rounds half-to-even. `cents` takes a value
   # ALREADY in cents (a whole number) and returns it unchanged.
   money:      (v) -> v[/^([-+]? ?\$? ?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d*)?|\.\d+))$/] and toMoney(_[1])
@@ -151,7 +161,7 @@ BUILTIN =
     return null unless Number.isSafeInteger(n)
     if n is 0 then 0 else n
 
-  # Lossless arbitrary-scale decimal as a STRING — no $/commas, no
+  # Lossless arbitrary-scale decimal as a STRING: no $/commas, no
   # rounding; preserves fractional scale, canonicalizes sign and leading
   # integer zeros.
   decimal:    (v) ->
@@ -171,7 +181,7 @@ BUILTIN =
   name:       (v) -> v = v.replace(/\s+/g, ' ') and toName v, 'name'
   address:    (v) -> v = v.replace(/\s+/g, ' ') and toName v, 'address'
 
-  # Date & time — a date must exist on the real calendar, and it
+  # Date & time: a date must exist on the real calendar, and it
   # normalizes to its canonical `YYYY-MM-DD` spelling.
   date:      (v) ->
     m = v[/^(\d{4})(-?)(\d{2})\2(\d{2})$/]
@@ -208,7 +218,7 @@ BUILTIN =
   uuid:      (v) -> v[/^([0-9a-f]{8})-?([0-9a-f]{4})-?([0-9a-f]{4})-?([0-9a-f]{4})-?([0-9a-f]{12})$/i] and "#{_[1]}-#{_[2]}-#{_[3]}-#{_[4]}-#{_[5]}".toLowerCase()
   semver:    (v) -> v[/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*))?(?:\+([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*))?$/] and _[0]
 
-  # Collections & structured — the raw set: these receive the value
+  # Collections & structured: the raw set. These receive the value
   # untouched instead of a string.
   array:     (v) -> Array.isArray(v) and v or null
   hash:      (v) -> (v? and typeof v is 'object' and not Array.isArray(v)) and v or null
@@ -243,49 +253,40 @@ registry = new Map()
 
 SYNC_ONLY = new Set ['[object AsyncFunction]', '[object GeneratorFunction]', '[object AsyncGeneratorFunction]']
 
-watchers = []
-
-# Watchers run before the entry commits, so a rejecting watcher (a
-# coercer-name collision, say) leaves the registry unchanged — the two
-# tables never disagree about a name.
+# Every definition lands in BOTH vocabularies: the validator registry
+# and the `~:name` schema-coercer table. The coercer registers first,
+# so a coercer-name collision rejects loudly and leaves the validator
+# registry unchanged; the two tables never disagree about a name.
 define = (name, fn, raw) ->
   fail "invalid validator name '#{name}'" unless typeof name is 'string' and NAME.test name
   fail "validator '#{name}' is already registered" if registry.has name
   fail "validator '#{name}' must be a function" unless typeof fn is 'function'
   fail "validator '#{name}' must be a plain synchronous function" if SYNC_ONLY.has Object.prototype.toString.call(fn)
-  watcher name, fn, raw for watcher in watchers
+  registerCoercer name, fn, { raw }
   registry.set name, { fn, raw }
   fn
 
 define name, fn, RAW.has(name) for own name, fn of BUILTIN
 
-export def registerValidator(name: string, fn: Validator, opts: { raw?: boolean } = {}): Validator
+export def registerValidator(name, fn, opts = {})
   unless opts.raw is undefined or typeof opts.raw is 'boolean'
     fail "validator '#{name}' raw flag must be boolean"
   define name, fn, opts.raw is true
 
-export def getValidator(name: string): Validator | undefined
+export def getValidator(name)
   registry.get(name)?.fn
 
-# Whether a validator takes its value untouched — the seam callers
+# Whether a validator takes its value untouched: the seam callers
 # consult instead of hardcoding the raw set. Unknown names answer false.
-export def isRawType(name: string): boolean
+export def isRawType(name)
   registry.get(name)?.raw is true
 
-export def validatorNames(): string[]
+export def validatorNames()
   Array.from(registry.keys()).sort()
 
 # Apply a validator to a value in hand. Raw validators receive the value
 # untouched; every other validator receives its string form.
-export def check(value: unknown, type: string): unknown
+export def check(value, type)
   entry = registry.get type
   fail "unknown validator '#{type}'" unless entry
   entry.fn if entry.raw then value else String(value ?? '')
-
-# Package-internal seams for the coercer bridge — not part of the
-# public entry. `_eachValidator` replays the current table into `fn`
-# and keeps calling it for every later registration.
-export def _eachValidator(fn: (name: string, v: Validator, raw: boolean) => void): void
-  fn name, entry.fn, entry.raw for [name, entry] in registry
-  watchers.push fn
-  return

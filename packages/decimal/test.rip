@@ -434,6 +434,10 @@ test "the bridge registers under any name", ->
   ok Decimal.isDecimal(row.n)
   eq row.n.toString(), '0.125'
 
-test "name collisions reject loudly", ->
+test "foreign name claims reject loudly; identical re-registration is idempotent", ->
+  # A different definition under a bridged name is a genuine collision.
   throws (-> registerCoercer('Decimal', (v) -> v)), 'already registered'
-  throws (-> registerDecimalCoercer('Dec2')), 'already registered'
+  # Re-registering the SAME bridge (a reboot re-evaluating the module)
+  # is tolerated — the schema registry's reload policy, applied to coercers.
+  registerDecimalCoercer('Dec2')
+  eq Custom.parse({ n: '0.5' }).n.toString(), '0.5'

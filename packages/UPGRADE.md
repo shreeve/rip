@@ -10,12 +10,12 @@ Rip v3 had a cobbled-together types/IDE stack that was brittle. Rip v4 rearchite
 
 ### Scope for this pass
 
-These two packages (simple, mostly pure Rip) still need the compare→strip→judge loop and the Rip test roll:
+One package still needs the compare→strip→judge loop and the Rip test roll:
 
-1. `validate`
-2. `gate`
+1. `gate`
 
-(`x12` completed both passes — see its section below.)
+(`x12`, `validate`, and `print` completed both passes — see their
+sections below.)
 
 **Package contract:** layout, package.json key order, README mold, and test rules are codified in [AGENTS.md](AGENTS.md) — follow it.
 
@@ -49,7 +49,7 @@ Re-run after `.d.ts` removal. Compared Rip logic only.
 | Package | Stripped Rip vs v3 | Verdict | Why |
 | --- | --- | --- | --- |
 | **x12** | Identical + 4 judged fixes | **KEEP_V4 (done)** | v3 Rip plus loud/exact fixes (clone, trailing row, silent component loss, selector reject); Rip test roll + frame conformance complete |
-| **validate** | Real redesign | **KEEP_V4** | Calendar-true dates, stricter validators, Map registry, opt-in coercers |
+| **validate** | Real redesign | **KEEP_V4 (done)** | Calendar-true dates, stricter validators, Map registry; coercer split merged back into ONE file (owner decision); Rip test roll + frame complete |
 | **gate** | Substantially improved | **KEEP_V4** | Fail-closed secrets, login throttle, reserved `/_gate` 404, self-contained middleware |
 
 **None of these three warrant restoring v3 Rip.** Do not reintroduce `.d.ts` or type annotations as part of this upgrade.
@@ -117,11 +117,10 @@ the CLI is exercised as a real subprocess through both the repo's
 
 | | v3 | v4 |
 | --- | --- | --- |
-| Entry | `validate.rip` (all-in-one, 248 lines) | `index.rip` (re-exports only) |
-| Logic | inside `validate.rip` | `registry.rip` (291 lines) |
-| Coercers | auto-register on import via `globalThis.__ripSchema` | `coercers.rip` → `@rip-lang/validate/coercers` (opt-in) |
-| Types | inline annotations (ignore) | inline annotations (ignore); `.d.ts` gone |
-| Tests | `test.rip` | `test/{validate,coercers,package}.test.js` (+ skipped types test) |
+| Entry | `validate.rip` (all-in-one, 248 lines) | `validate.rip` (all-in-one, ~300 lines) |
+| Coercers | auto-register on import via `globalThis.__ripSchema` | auto-register on import via a REAL `registerCoercer` import (loud collisions) |
+| Types | inline annotations (ignore) | stripped (typing is a later pass) |
+| Tests | `test.rip` | root `test.rip` (34 cases, 152-row vocabulary table) |
 
 **Strip types:** Annotations peel off; **real logic divergence remains**. Same 37 builtin validator keys.
 
@@ -138,14 +137,31 @@ the CLI is exercised as a real subprocess through both the repo's
 | `float` | Sign only on first alt — `-.5` fails | Sign applies to `.5` form |
 | `semver` | Leading zeros OK (`01.0.0`) | `(0\|[1-9]\d*)` integers |
 | Registry | Plain object overwrite | Map; reject duplicate / non-fn / async |
-| Coercer bridge | Side effect of package import | Opt-in `/coercers` entry |
+| Coercer bridge | Side effect of package import (soft no-op without runtime) | Side effect of package import via real `registerCoercer` import — loud collisions, atomic with the validator registry |
 | Misc fixes | — | `toName` Mac regex, `formatMoney` finite check, `toPhone` keeps `ext` |
 
-**Worth keeping:** All of the above. Calendar-true `date` matches runtime doctrine. File split is load-bearing: browser-safe vocabulary stays free of schema/`globalThis` side effects.
+**Worth keeping:** All of the above. Calendar-true `date` matches runtime doctrine.
 
-**Migration notes (not rollback reasons):** callers of `validators.foo`, silent unknown `check`, compact date return shapes, and auto-`~:name` registration need the `/coercers` import.
+**The merge (owner decision, cross-cutting note 3 executed):** the v4
+`index.rip`/`registry.rip`/`coercers.rip` split collapsed back into ONE
+`validate.rip` — v3's shape with v4's logic. Coercers ride the main
+import: `define()` registers the `~:name` coercer FIRST, so a collision
+rejects loudly and leaves the validator registry unchanged (the
+watcher/`_eachValidator` machinery this replaced is deleted). The
+browser story survives the merge because the schema-runtime import
+bridges to the page's one runtime copy — pinned end-to-end by the
+toolchain browser tests.
 
-**Recommendation: KEEP_V4** — confidence high. Do not restore the single-file v3 shape. Do not add types yet.
+**Runtime change that fell out:** `registerCoercer` now tolerates
+IDENTICAL re-registration (same source text, same raw flag) — the
+schema-name registry's reload policy applied to coercers — because a
+browser reboot re-evaluates package modules into the same process
+table. Different definitions still reject loudly. Bundle assembly also
+stopped shipping root verb files (`test.rip`/`demo.rip`/`bench.rip`)
+and `bench/` into browser bundles.
+
+**Recommendation: KEEP_V4 (done)** — v4 logic in v3's single-file
+shape; frame, README, and 34-case root `test.rip` complete.
 
 ---
 
@@ -241,7 +257,7 @@ is a devDependency test oracle only.
 
 1. **No `.d.ts` in these packages** — confirmed. Do not bring type files over from v3. Package `exports` point at `.rip` only.
 2. **Inline annotations** still exist in some `.rip` sources (`validate`). They are ignored for this upgrade judgment. A later typing pass can strip or regenerate them; that is separate work.
-3. **Schema coercers auto-register on the main import** (owner decision, reversing the v4 `/coercers` split — decimal already converted): importing the package registers its `~:name` coercers, collisions reject loudly, and `register<X>Coercer(name)` covers custom names. Apply the same merge to `validate` when it migrates.
+3. **Schema coercers auto-register on the main import** (owner decision, reversing the v4 `/coercers` split): importing the package registers its `~:name` coercers, collisions reject loudly, and `register<X>Coercer(name)` covers custom names. Applied to `decimal` and `validate` (both done).
 4. **Package tests are Rip.** Shared helpers live in [`@rip-lang/testing`](testing/) (`test`, `eq`, `ok`, `throws`). The tally prints on process exit; failures set `process.exitCode`. Each pure library package gets a root `test.rip` that imports them and runs via `"test": "rip test.rip"` — per the contract in [AGENTS.md](AGENTS.md). Host-heavy suites (server, db, vscode) may stay on Bun until they have a natural Rip shape — that is the exception, not the default. The language battery keeps its own harness (`test/support/testing.js`).
 5. **Only intentional Rip-logic keepers among the three:** validate (redesign), gate (security + middleware shape). Everything else is “v3 Rip + packaging/tests.”
 

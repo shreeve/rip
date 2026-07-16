@@ -1,20 +1,23 @@
 {
   "name": "@rip-lang/validate",
-  "version": "0.0.0",
+  "version": "4.0.0",
   "private": true,
   "type": "module",
+  "description": "The validation and normalization vocabulary — 37 pure US-English normalizers, one registry, doubling as ~:name schema coercers",
   "exports": {
-    ".": "./index.rip",
-    "./coercers": "./coercers.rip"
+    ".": "./validate.rip"
   },
   "scripts": {
-    "test": "rip test"
+    "test": "rip test.rip"
   },
   "rip": {
     "browser": true
   },
   "files": [
-    "*.rip",
+    "validate.rip",
     "README.md"
-  ]
+  ],
+  "devDependencies": {
+    "@rip-lang/testing": "workspace:*"
+  }
 }
