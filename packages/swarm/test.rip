@@ -46,6 +46,10 @@ test "no runtime deps; testing harness is the only devDependency", ->
     eq pkg[field], undefined
   eq pkg.devDependencies, { '@rip-lang/testing': 'workspace:*' }
 
+test "the description is the README pitch, byte for byte", ->
+  readme = readFileSync join(import.meta.dir, 'README.md'), 'utf8'
+  ok readme.includes("> **#{pkg.description}.**")
+
 test "does not claim browser safety (it spawns worker threads and moves files)", ->
   eq pkg.rip, undefined
   source = readFileSync swarmRip, 'utf8'

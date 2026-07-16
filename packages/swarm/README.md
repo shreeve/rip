@@ -1,12 +1,33 @@
-# @rip-lang/swarm
+<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
 
-> **Parallel job runner with worker threads — setup once, swarm many**
+# Rip Swarm - @rip-lang/swarm
+
+> **Parallel job runner with worker threads — setup once, swarm many.**
 
 Swarm is a high-performance batch job engine for Rip. Give it a list of
 tasks and a function to process each one, and it fans out across worker
 threads with real-time progress bars, automatic retries, and a clean
 summary when done. No database, no message broker, no dependencies —
 just files, threads, and message passing.
+
+**Runtime:** not browser-safe — it spawns worker threads and moves
+files. One `.rip` file, which is itself the `swarm` binary (first line
+`#!/usr/bin/env rip`) and its own worker entry.
+
+## Features
+
+- **Tasks are files** — a directory listing *is* the queue; inspect,
+  add, or remove tasks with basic shell commands
+- **State is a file move** — `todo/ → done/` is one atomic rename;
+  crash-safe restarts pick up where they left off
+- **Workers are threads** — setup runs once, context clones to N
+  workers by message passing; no shared mutable state
+- **Real-time progress** — per-worker ANSI bars, live stats, a
+  one-line summary (or `-q` for just the summary)
+- **Retries built in** — failed tasks land in `died/`; `retry()` moves
+  them back and only they reprocess
+- **Crash recovery** — a dead worker's in-flight task is counted,
+  logged, and the worker respawns
 
 ## Why This Approach?
 
@@ -30,6 +51,10 @@ The result: ~330 lines of Rip, zero dependencies, and it handles
 thousands of tasks reliably. Boring infrastructure, rock solid.
 
 ## Quick Start
+
+```bash
+bun add @rip-lang/swarm
+```
 
 Create a job script:
 
@@ -231,6 +256,18 @@ add this to your VS Code or Cursor settings:
 ```json
 "terminal.integrated.minimumContrastRatio": 1
 ```
+
+## Test
+
+```bash
+bun run test
+```
+
+The suite pins batch runs across workers (context cloning, failures,
+retries, crash recovery), every CLI flag and error path, the ANSI
+progress rendering, `args()` stripping, the file-based queue contract
+line for line, and the `swarm` command itself — each case running the
+fixtures/ job scripts as real subprocesses.
 
 This disables the contrast adjustment and lets ANSI colors render as
 intended. The progress display works correctly in standard terminals
