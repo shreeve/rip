@@ -10,11 +10,12 @@ Rip v3 had a cobbled-together types/IDE stack that was brittle. Rip v4 rearchite
 
 ### Scope for this pass
 
-These three packages (simple, mostly pure Rip) still need the compare→strip→judge loop and the Rip test roll:
+These two packages (simple, mostly pure Rip) still need the compare→strip→judge loop and the Rip test roll:
 
-1. `x12`
-2. `validate`
-3. `gate`
+1. `validate`
+2. `gate`
+
+(`x12` completed both passes — see its section below.)
 
 **Package contract:** layout, package.json key order, README mold, and test rules are codified in [AGENTS.md](AGENTS.md) — follow it.
 
@@ -47,7 +48,7 @@ Re-run after `.d.ts` removal. Compared Rip logic only.
 
 | Package | Stripped Rip vs v3 | Verdict | Why |
 | --- | --- | --- | --- |
-| **x12** | Byte-identical | **KEEP_V4** | Same Rip; v4 adds tests + loader-aware CLI |
+| **x12** | Identical + 4 judged fixes | **KEEP_V4 (done)** | v3 Rip plus loud/exact fixes (clone, trailing row, silent component loss, selector reject); Rip test roll + frame conformance complete |
 | **validate** | Real redesign | **KEEP_V4** | Calendar-true dates, stricter validators, Map registry, opt-in coercers |
 | **gate** | Substantially improved | **KEEP_V4** | Fail-closed secrets, login throttle, reserved `/_gate` 404, self-contained middleware |
 
@@ -59,24 +60,54 @@ Cross-cutting v4 packaging (not logic): `private: true`, `exports` pointing at `
 
 ## Analysis
 
-### 1. `x12`
+### 1. `x12` — DONE
 
 **Inventory**
 
 | | v3 | v4 |
 | --- | --- | --- |
-| Main | `x12.rip` (692 lines) | `x12.rip` — **`cmp` identical** |
-| CLI | `bin/rip-x12` | `bin/rip-x12` (v4 loader preload) |
+| Main | `x12.rip` (692 lines) | `x12.rip` — v3 logic + 4 judged fixes |
+| CLI | `bin/rip-x12` wrapper | none — `x12.rip` IS the bin (`#!/usr/bin/env rip`); version read from package.json |
 | Types | none | none |
-| Tests | none | `test/{x12,cli,consumers,package}.test.js`, fixture `270.x12` |
+| Tests | none | root `test.rip` (91 cases) on `@rip-lang/testing` |
 
-**Strip types:** Neither side has annotations. Rip logic is identical — same `X12` class, selectors, `get`/`set`/`find`/`show`, CLI.
+**Strip types:** Neither side has annotations. The port started `cmp`
+identical to v3; the initial v4 JS test suite pinned three v3 warts as
+observed behavior. This pass fixed them (the pins now assert the CORRECT
+behavior, per doctrine) and rolled the suite to the package contract.
 
-**Worth keeping:** Test suite; CLI wiring for v4 loader.
+**Judged fixes (all verified by pins):**
 
-**Noise:** package.json private/version shape.
+1. **Clone corruption** — `new X12(instance)` fell through to the
+   object branch and re-applied the instance's own properties as
+   selectors, appending junk `STR/FLD/REP/COM/SEG/ARY` segments to the
+   output. An X12 instance now rides the string-parse path; a clone is
+   exact.
+2. **Trailing empty row** — the terminator after the last segment
+   split off an 18th empty row, so `raw()` emitted a double `~~` and
+   consumers filtered it by hand. `toArray` drops the empty tail;
+   17 segments parse to 17 rows and `raw()` round-trips byte-exact.
+3. **Silent component loss** — a component SET with no explicit repeat
+   defaulted the repeat to 0, resolved to array index −1, and the write
+   vanished. It now writes through repeat 1, matching the GET default.
+4. **Selector rejection is loud and typed** — `SELECTOR` constrains the
+   segment ID to 2–3 alphanumerics, so garbage like `***` rejects as
+   `bad selector` instead of leaking a regex-construction error. Also:
+   ISA width enforcement moved inside the per-row loop, so `ISA(*)` sets
+   pad every occurrence (previously only the loop-leaked last row).
 
-**Recommendation: KEEP_V4** — confidence high.
+**Frame conformance:** root `test.rip` (JS `test/` dir removed; the 270
+fixture is inlined and written to a temp dir for `X12.load`/CLI cases);
+package.json in contract key order (`4.0.0`, description = README
+pitch, `rip test.rip`, `@rip-lang/testing`); README on the mold
+(server-only Runtime line — `X12.load` and the CLI read the
+filesystem). No `bin/` wrapper: `x12.rip` is itself the `rip-x12` bin
+(`#!/usr/bin/env rip` shebang + executable bit — the one blessed bin
+shape, now codified in AGENTS.md). Every v3-oracle test case landed;
+the CLI is exercised as a real subprocess through both the repo's
+`bin/rip` and the shebang.
+
+**Recommendation: KEEP_V4** — done; confidence high.
 
 ---
 
@@ -159,7 +190,7 @@ Cross-cutting v4 packaging (not logic): `private: true`, `exports` pointing at `
 ## Suggested next steps
 
 1. Accept **KEEP_V4** for all six (no Rip restores; no type reintroduction).
-2. Roll root `test.rip` + `@rip-lang/testing` across the remaining packages (`validate`, `x12`, then `gate` where security tests fit).
+2. Roll root `test.rip` + `@rip-lang/testing` across the remaining packages (`validate`, then `gate` where security tests fit) — `x12` is done.
 3. Continue the compare→strip→judge loop for remaining packages (`server`, `app`, `db`, `ui`, `swarm`, `print`, `script`, `ai`, …) — still excluding `util` and `stamp`, still without bringing types.
 4. Optional follow-up: gate standalone `GATE_*` bootstrap once v4 serving story is ready.
 5. Typing pass (separate): strip or regenerate types.

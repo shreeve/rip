@@ -64,6 +64,15 @@ subcommand (`rip test`, `rip schema`). A directory appears only for a
 structural reason (its own package.json quarantining bench-only deps),
 never as an invocation convenience.
 
+Package binaries have exactly ONE shape: the entry `.rip` file IS the
+bin. Its first line is `#!/usr/bin/env rip`, it is executable, the CLI
+logic sits behind `import.meta.main`, and package.json maps the command
+name to it (`"bin": { "rip-<name>": "./<name>.rip" }`). No `bin/`
+directory, no wrapper scripts (sh or JS). This assumes `rip` is on
+PATH; inside the repo, `bun run` contexts resolve it to THIS checkout
+via the root postinstall link, and `rip <name>.rip` always works
+regardless. The reference is `packages/x12`.
+
 Do NOT add: per-package `bunfig.toml`, `bun.lock`, `.d.ts` files,
 `test/` directories, or JS test files for pure library packages.
 Types are a later, separate pass.
