@@ -2,9 +2,46 @@
 
 Rules for first-party `@rip-lang/*` packages in this directory. The
 reference implementations are **`packages/csv`** (server-side, has a
-CLI) and **`packages/time`** (browser-safe, has a demo and a test
-oracle). New and migrated packages copy their shape exactly; the two
-differ only where their content honestly differs.
+CLI and benches) and **`packages/time`** (browser-safe, has a demo and
+a test oracle); `rsx` and `decimal` follow the same mold. New and
+migrated packages copy their shape exactly; packages differ only where
+their content honestly differs.
+
+## Style — the values that generate the rules
+
+Every rule below falls out of a few ranked values. When a case the
+rules don't cover comes up, decide with these, in this order:
+
+1. **Loud beats everything.** No silent failure, no soft fallback, no
+   registration that quietly didn't happen. If two designs tie, the
+   one whose failure mode is an immediate, named error wins.
+2. **Simple beats pure.** A single file that takes one honest import
+   beats a pristine two-file split (decimal's coercer merge). Flat
+   layout until structure is *earned* — a directory exists only for a
+   structural reason (dependency quarantine), never as invocation
+   sugar or symmetry.
+3. **POLS — the principle of least surprise.** `rip test.rip` cannot
+   be shadowed by a future CLI subcommand; a boring top-left logo
+   renders identically everywhere; automatic where the user should
+   not have to remember (coercers ride the main import), explicit
+   where they must decide (rounding modes, relax/excel flags).
+4. **Fast is a feature, and measured.** Hot paths get profiled and
+   benched, not guessed. A performance claim in a README exists only
+   with the bench that reproduces it (`bun run bench`); stale or
+   unverified numbers are deleted, not caveated.
+5. **Lightweight forever.** Zero runtime dependencies. External
+   packages appear only as test oracles (dayjs) or quarantined bench
+   competitors. The shared harness stays tiny (~100 lines, four
+   exports) and grows only when a concrete test cannot be written
+   without it.
+6. **Cookie-cutter edges, honest middles.** The frame (layout,
+   package.json key order, README skeleton, test anatomy) is
+   byte-conformant across packages — a script can verify it. The
+   content between the edges is whatever the domain truly needs; no
+   section is stamped on for symmetry.
+7. **Claims are verified.** README examples run against the real
+   implementation before they are written down. Test parity with a
+   prior generation is diffed mechanically, not declared.
 
 ## Layout
 
@@ -73,9 +110,17 @@ Keys in exactly this order (omit what does not apply):
 
 Set `"rip": { "browser": true }` ONLY when the entry runs in a browser:
 no `Bun.*`, `node:*`, `process.*`, or `globalThis` in the source, and
-no imports. Absence of the flag means server-only — never write
-`"browser": false`. When claimed, pin it in `test.rip` (see time's
-"declares browser safety and earns it").
+imports only of browser-safe modules (the schema runtime qualifies —
+decimal imports it for coercer registration). Absence of the flag means
+server-only — never write `"browser": false`. When claimed, pin it in
+`test.rip` (see time's "declares browser safety and earns it").
+
+Schema coercers register AUTOMATICALLY on the package's main import
+(user decision, reversing the v4 `/coercers` split): pulling in the
+package makes its `~:name` coercers work with no bridge import. The
+collision policy stays loud — the only way the import can throw is a
+genuine foreign claim on the name. Export a `register<X>Coercer(name)`
+for custom names.
 
 ## README.md
 

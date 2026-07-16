@@ -39,7 +39,10 @@
     },
     "packages/decimal": {
       "name": "@rip-lang/decimal",
-      "version": "0.0.0",
+      "version": "4.0.0",
+      "devDependencies": {
+        "@rip-lang/testing": "workspace:*",
+      },
     },
     "packages/gate": {
       "name": "@rip-lang/gate",
@@ -68,7 +71,10 @@
     },
     "packages/rsx": {
       "name": "@rip-lang/rsx",
-      "version": "0.0.0",
+      "version": "4.0.0",
+      "devDependencies": {
+        "@rip-lang/testing": "workspace:*",
+      },
     },
     "packages/script": {
       "name": "@rip-lang/script",

@@ -8,9 +8,12 @@
 # resource limits so a pathological exponent gap (e.g. `1e1000000000 + 1`) is
 # rejected at preflight instead of allocating a multi-gigabyte BigInt.
 #
-# See README.md for the design rationale. The `~:Decimal` schema-coercer
-# bridge is the separate `@rip-lang/decimal/coercers` entry.
+# See README.md for the design rationale. Importing this module also
+# registers the `~:Decimal` schema coercer (bottom of file) — pulling in
+# decimal makes `amount! ~:Decimal` work with no further setup.
 # ==============================================================================
+
+import { registerCoercer } from '../../src/runtime/schema.js'
 
 # ==[ Resource limits ]=========================================================
 #
@@ -159,11 +162,15 @@ export class Decimal
   # arguments were already validated/preflighted.
   constructor: (@coef: bigint, @exp: number) ->
 
-  # ── Construction ───────────────────────────────────────────────────────────
+  # ── Construction ────────────────────────────────────────────────────────────
 
   @isDecimal: (v: unknown): boolean -> v instanceof Decimal
 
-  @config: (opts: { maxInputLength?: number, maxDigits?: number, maxAbsExponent?: number, maxOutputLength?: number }): void ->
+  # With an argument: set limits (unknown keys and non-positive values
+  # reject). With no argument: return a snapshot of the current limits —
+  # a copy, so mutating it changes nothing.
+  @config: (opts?: { maxInputLength?: number, maxDigits?: number, maxAbsExponent?: number, maxOutputLength?: number }): { maxInputLength: number, maxDigits: number, maxAbsExponent: number, maxOutputLength: number } | undefined ->
+    return { ...LIMITS } unless opts?
     for own k, val of opts
       throw new DecimalInvalidOperationError "unknown config key: #{k}" unless LIMIT_KEYS.has(k)
       throw new DecimalInvalidOperationError "config #{k} must be a positive integer" unless Number.isInteger(val) and val > 0
@@ -319,7 +326,7 @@ export class Decimal
     coef      = if sign < 0 then -numerator else numerator
     new Decimal coef, exp
 
-  # ── Rounding / scale ─────────────────────────────────────────────────────────
+  # ── Rounding / scale ────────────────────────────────────────────────────────
 
   # Round to a fixed number of fractional digits (target exponent -scale).
   quantizeToScale: (scale: number, mode: RoundingMode): Decimal ->
@@ -332,13 +339,12 @@ export class Decimal
       shift = @exp - targetExp
       throw new DecimalResourceLimitError "quantize would exceed maxDigits (#{LIMITS.maxDigits})" if digitCount(@coef) + shift > LIMITS.maxDigits
       return new Decimal(@coef * pow10(shift), targetExp)
-    # Round off (targetExp - @exp) low digits.
+    # Round off (targetExp - @exp) low digits. (@coef is non-zero here —
+    # the zero case returned above.)
     drop = targetExp - @exp
     sign = if @coef < 0n then -1 else 1
     a    = absBig @coef
-    if a is 0n
-      new Decimal 0n, targetExp
-    else if drop >= digitCount(a) + 1
+    if drop >= digitCount(a) + 1
       # Value is strictly less than half a ulp at the target scale: q is 0,
       # remainder is non-zero. Decide with a tiny surrogate (1 of 100).
       q = if shouldRoundUp(1n, 100n, 0n, sign, mode) then 1n else 0n
@@ -462,3 +468,29 @@ export class Decimal
 export D = (strings: TemplateStringsArray, ...values: unknown[]): Decimal ->
   throw new DecimalParseError 'D"..." takes a single string literal (no interpolation); use Decimal.parse for dynamic values' if values.length > 0 or strings.length isnt 1
   Decimal.parse strings[0]
+
+# ==[ ~:Decimal schema coercer ]================================================
+#
+# Importing this package registers a `~:Decimal` coercer that hydrates a
+# wire string/number into a Decimal (scale preserved; a value that does
+# not parse is a structured coerce issue). This is additive — the
+# lowercase `~:decimal` from @rip-lang/validate, which returns a
+# lossless STRING, is untouched.
+#
+# One evaluation per process (the module cache owns idempotence). A name
+# collision with an already-registered coercer rejects the import loudly,
+# naming the coercer — the only way `import '@rip-lang/decimal'` can
+# throw is a genuine foreign claim on `~:Decimal`, which must not be
+# swallowed. Apps can register the same hydration under other names via
+# registerDecimalCoercer.
+
+export registerDecimalCoercer = (name: string = 'Decimal'): void ->
+  coerce = (v) ->
+    try
+      Decimal.from v
+    catch
+      null
+  registerCoercer name, coerce
+  return
+
+registerDecimalCoercer()

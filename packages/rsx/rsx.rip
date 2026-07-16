@@ -1,4 +1,10 @@
-# @rip-lang/rsx — Rip Style XML (XML ⇄ Rip object)
+# ==============================================================================
+# rsx.rip — Rip Style XML (XML ⇄ Rip object)
+#
+# Author: Steve Shreeve <steve.shreeve@gmail.com>
+#   Date: April 28, 2026
+#  Legal: MIT License
+# ==============================================================================
 #
 # RSX is a small forgiving XML parser and serializer for the cases where
 # you want a Rip object, not a DOM. It is built around a real
@@ -23,6 +29,7 @@
 #     opaque labels.
 #   * Round-trip mixed content (text and elements interleaved) unless the
 #     caller passes preserveChildren: true.
+# ==============================================================================
 
 # ==[ Constants ]===============================================================
 

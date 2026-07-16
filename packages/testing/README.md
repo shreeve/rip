@@ -2,7 +2,7 @@
 
 # Rip Testing - @rip-lang/testing
 
-> **Tiny Rip harness for first-party package `test.rip` files (`test`, `eq`, `ok`, `throws`).**
+> **Tiny Rip harness for first-party package test.rip files (test, eq, ok, throws).**
 
 Shared helpers for package suites. The tally prints on process exit;
 failures set `process.exitCode = 1`. This is **not** the language

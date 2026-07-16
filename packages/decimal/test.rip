@@ -1,0 +1,439 @@
+# ==============================================================================
+# decimal tests — parsing, exact arithmetic, rounding, limits, coercers
+# ==============================================================================
+
+import { test, eq, ok, throws } from '@rip-lang/testing'
+import {
+  Decimal, D, registerDecimalCoercer,
+  DecimalError, DecimalParseError, DecimalDivisionByZeroError,
+  DecimalNonTerminatingError, DecimalInvalidOperationError, DecimalRangeError,
+  DecimalResourceLimitError, DecimalInexactError, DecimalUnsafeConversionError,
+} from '@rip-lang/decimal'
+import * as mod from '@rip-lang/decimal'
+import { registerCoercer } from '../../src/runtime/schema.js'
+import { readFileSync } from 'fs'
+
+dec  = (s) -> Decimal.parse(s)
+show = (s) -> Decimal.parse(s).toString()
+
+# Coercer names resolve lazily at parse time, so ~:Dec2 may register
+# after this module loads (the coercer section does exactly that).
+Invoice = schema
+  amount! ~:Decimal
+  tip? ~:Decimal
+
+Custom = schema
+  n! ~:Dec2
+
+# ==[ Package surface ]==
+
+console.log "\nPackage"
+
+test "public entry exposes named exports only", ->
+  eq Object.keys(mod).sort(), [
+    'D', 'Decimal', 'DecimalDivisionByZeroError', 'DecimalError',
+    'DecimalInexactError', 'DecimalInvalidOperationError',
+    'DecimalNonTerminatingError', 'DecimalParseError', 'DecimalRangeError',
+    'DecimalResourceLimitError', 'DecimalUnsafeConversionError',
+    'registerDecimalCoercer',
+  ]
+  ok not ('default' of mod), 'no default export'
+
+test "no runtime deps; testing harness is the only devDependency", ->
+  pkg = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf8'))
+  for field in ['dependencies', 'peerDependencies', 'optionalDependencies']
+    eq pkg[field], undefined
+  eq pkg.devDependencies, { '@rip-lang/testing': 'workspace:*' }
+
+test "declares browser safety; the source imports only the schema runtime, no host APIs", ->
+  pkg = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf8'))
+  eq pkg.rip, { browser: true }
+  source = readFileSync("#{import.meta.dir}/decimal.rip", 'utf8')
+  imports = source.match(/^import .*$/mg) ?? []
+  eq imports, ["import { registerCoercer } from '../../src/runtime/schema.js'"]
+  eq /\bBun\.|node:|process\.|globalThis/.test(source), false
+
+# ==[ Errors ]==
+
+console.log "\nErrors"
+
+test "error subclasses carry their own names", ->
+  # the one-line `X = class extends DecimalError` style relies on JS
+  # name inference reaching @constructor.name — pin it
+  eq new DecimalParseError('x').name, 'DecimalParseError'
+  eq new DecimalInexactError('x').name, 'DecimalInexactError'
+  err = try dec('bogus') catch e then e
+  eq err.name, 'DecimalParseError'
+
+# ==[ Parsing ]==
+
+console.log "\nParsing"
+
+test "valid forms", ->
+  eq show('123'),      '123'
+  eq show('1.23'),     '1.23'
+  eq show('+1.5'),     '1.5'
+  eq show('.5'),       '0.5'
+  eq show('5.'),       '5'
+  eq show('001.2300'), '1.2300'
+  eq show('1.230'),    '1.230'
+  eq show('-0.00'),    '0.00'
+  eq show('1.5e3'),    '1500'
+  eq show('1.23e-2'),  '0.0123'
+  eq show('0'),        '0'
+  eq show('0.00'),     '0.00'
+
+test "exponent spellings", ->
+  eq show('1e+5'),    '100000'
+  eq show('1E5'),     '100000'
+  eq show('.5e1'),    '5'
+  eq show('5.e1'),    '50'
+  eq show('0e99999'), '0'
+
+test "rejected forms", ->
+  for bad in ['', ' 1.2', '1.2 ', '1_000', '1,000', '$1.00', 'NaN', 'Infinity', '--1', '.', 'e10']
+    throws (-> dec(bad)), DecimalParseError
+
+# ==[ Construction ]==
+
+console.log "\nConstruction"
+
+test "from and fromScaledInteger", ->
+  eq Decimal.from(42n).toString(), '42'
+  eq Decimal.from(42).toString(),  '42'
+  eq Decimal.fromScaledInteger(12345n, 2).toString(), '123.45'
+  eq Decimal.fromScaledInteger(12345, 2).toString(),  '123.45'
+  throws (-> Decimal.from(0.1)), DecimalUnsafeConversionError
+  throws (-> Decimal.from(9007199254740993)), DecimalUnsafeConversionError
+
+test "fromParts renders plain strings at any exponent", ->
+  eq Decimal.fromParts(123n, -1).toString(), '12.3'
+  eq show('1e5'),  '100000'
+  eq show('1e-7'), '0.0000001'
+
+test "fromScaledInteger accepts a negative scale (whole tens)", ->
+  eq Decimal.fromScaledInteger(12n, -2).toString(), '1200'
+
+# ==[ Canonical string and key ]==
+
+console.log "\nCanonical string and key"
+
+test "canonical form strips insignificant zeros", ->
+  eq dec('1.00').toCanonicalString(), '1'
+  eq dec('1.50').toCanonicalString(), '1.5'
+  eq dec('1.0').canonicalKey(), dec('1.00').canonicalKey()
+  eq dec('1.20').toJSON(), '1.20'
+
+test "every zero shares one canonical key", ->
+  eq dec('0.00').canonicalKey(), '0e0'
+  eq dec('-0').canonicalKey(), '0e0'
+
+test "canonical string of a scaled zero", ->
+  eq dec('0.00').toCanonicalString(), '0'
+  eq dec('-0.000').toCanonicalString(), '0'
+
+# ==[ Exact arithmetic ]==
+
+console.log "\nExact arithmetic"
+
+test "add/sub/mul scale rules", ->
+  eq dec('1.20').add('3.4').toString(),  '4.60'
+  eq dec('1.00').sub('1.0').toString(),  '0.00'
+  eq dec('1.20').mul('3.0').toString(),  '3.600'
+  eq dec('0.1').add('0.2').toString(),   '0.3'
+  eq dec('2.5').mul(4n).toString(),      '10.0'
+  eq dec('1.5').neg().toString(),        '-1.5'
+  eq dec('-1.5').abs().toString(),       '1.5'
+  eq dec('1').sub('3').toString(),       '-2'
+
+test "carry propagates across the whole coefficient", ->
+  eq dec('9.999').add('0.001').toString(), '10.000'
+  eq dec('0.95').quantizeToScale(1, 'HALF_UP').toString(), '1.0'
+  eq dec('9.99').quantizeToScale(1, 'HALF_UP').toString(), '10.0'
+  eq dec('99.995').quantizeToScale(2, 'HALF_UP').toString(), '100.00'
+
+test "there is no negative zero", ->
+  eq dec('0').neg().toString(),        '0'
+  eq dec('0.00').neg().toString(),     '0.00'
+  eq dec('1.0').sub('1.00').toString(),'0.00'
+  eq dec('-0').toString(),             '0'
+  eq dec('-0.00').signum(),            0
+
+# ==[ Division: divExact ]==
+
+console.log "\nDivision — divExact"
+
+test "terminating quotients are exact", ->
+  eq dec('1').divExact('2').toString(),     '0.5'
+  eq dec('1').divExact('4').toString(),     '0.25'
+  eq dec('1').divExact('5').toString(),     '0.2'
+  eq dec('1').divExact('8').toString(),     '0.125'
+  eq dec('1').divExact('20').toString(),    '0.05'
+  eq dec('10').divExact('40').toString(),   '0.25'
+  eq dec('1').divExact('1024').toString(),  '0.0009765625'
+  eq dec('1').divExact('625').toString(),   '0.0016'
+  eq dec('-3').divExact('8').toString(),    '-0.375'
+  eq dec('7').divExact('7').toString(),     '1'
+  eq dec('22').divExact('11').toString(),   '2'
+  eq dec('1.5').divExact('0.3').toString(), '5'
+
+test "non-terminating and zero divisors throw", ->
+  throws (-> dec('1').divExact('3')), DecimalNonTerminatingError
+  throws (-> dec('2').divExact('6')), DecimalNonTerminatingError
+  throws (-> dec('1').divExact('0')), DecimalDivisionByZeroError
+
+# ==[ Division: divToScale ]==
+
+console.log "\nDivision — divToScale"
+
+test "rounded quotients", ->
+  eq dec('1').divToScale('3', 2, 'HALF_UP').toString(),    '0.33'
+  eq dec('2').divToScale('3', 4, 'HALF_EVEN').toString(),  '0.6667'
+  eq dec('10').divToScale('3', 0, 'FLOOR').toString(),     '3'
+  eq dec('-1').divToScale('3', 2, 'HALF_UP').toString(),   '-0.33'
+  throws (-> dec('1').divToScale('0', 2, 'HALF_UP')), DecimalDivisionByZeroError
+
+test "negative operands round on the absolute remainder", ->
+  modes = { UP: '-4', DOWN: '-3', CEILING: '-3', FLOOR: '-4', HALF_UP: '-4', HALF_DOWN: '-3', HALF_EVEN: '-4' }
+  for [mode, want] in Object.entries(modes)
+    eq dec('-7').divToScale('2', 0, mode).toString(), want
+    eq dec('7').divToScale('-2', 0, mode).toString(), want
+  eq dec('-1').divToScale('-3', 3, 'HALF_UP').toString(), '0.333'
+
+test "HALF_EVEN ties on the quotient parity", ->
+  eq dec('5').divToScale('2', 0, 'HALF_EVEN').toString(), '2'
+  eq dec('7').divToScale('2', 0, 'HALF_EVEN').toString(), '4'
+
+test "UNNECESSARY divides exactly or throws", ->
+  eq dec('1').divToScale('4', 2, 'UNNECESSARY').toString(), '0.25'
+  throws (-> dec('1').divToScale('3', 2, 'UNNECESSARY')), DecimalInexactError
+
+test "negative scales round to whole tens", ->
+  eq dec('1234').divToScale('1', -2, 'HALF_UP').toString(), '1200'
+
+# ==[ Rounding matrix ]==
+
+console.log "\nRounding matrix (scale 2)"
+
+q = (s, mode) -> dec(s).quantizeToScale(2, mode).toString()
+
+test "directed and half modes", ->
+  eq q('1.234', 'UP'),        '1.24'
+  eq q('1.239', 'DOWN'),      '1.23'
+  eq q('1.231', 'CEILING'),   '1.24'
+  eq q('-1.239', 'CEILING'),  '-1.23'
+  eq q('1.239', 'FLOOR'),     '1.23'
+  eq q('-1.231', 'FLOOR'),    '-1.24'
+  eq q('1.235', 'HALF_UP'),   '1.24'
+  eq q('1.235', 'HALF_DOWN'), '1.23'
+  eq q('1.225', 'HALF_EVEN'), '1.22'
+  eq q('1.235', 'HALF_EVEN'), '1.24'
+
+test "negative ties round on the absolute remainder", ->
+  eq dec('-0.005').quantizeToScale(2, 'HALF_EVEN').toString(), '0.00'
+  eq dec('-0.005').quantizeToScale(2, 'HALF_UP').toString(),   '-0.01'
+  eq dec('0.005').quantizeToScale(2, 'HALF_EVEN').toString(),  '0.00'
+  eq dec('-0.005').toCentsNumber('HALF_EVEN'), 0
+  eq dec('-0.005').toCentsNumber('HALF_UP'),   -1
+  eq dec('0.005').toCentsNumber('HALF_UP'),    1
+  eq dec('0.005').toCentsNumber('HALF_EVEN'),  0
+
+test "UNNECESSARY asserts exactness", ->
+  eq dec('1.5').quantizeToScale(2, 'UNNECESSARY').toString(), '1.50'
+  throws (-> dec('1.555').quantizeToScale(2, 'UNNECESSARY')), DecimalInexactError
+
+test "negative scales quantize to whole tens", ->
+  eq dec('1234').quantizeToScale(-2, 'HALF_UP').toString(),    '1200'
+  eq dec('1250').quantizeToScale(-2, 'HALF_EVEN').toString(),  '1200'
+  eq dec('1350').quantizeToScale(-2, 'HALF_EVEN').toString(),  '1400'
+  eq dec('-1250').quantizeToScale(-2, 'HALF_EVEN').toString(), '-1200'
+
+test "magnitudes below half an ulp round as a tiny remainder", ->
+  eq dec('0.0001').quantizeToScale(2, 'HALF_UP').toString(),   '0.00'
+  eq dec('0.0001').quantizeToScale(2, 'UP').toString(),        '0.01'
+  eq dec('0.0001').quantizeToScale(2, 'CEILING').toString(),   '0.01'
+  eq dec('-0.0001').quantizeToScale(2, 'FLOOR').toString(),    '-0.01'
+  eq dec('-0.0001').quantizeToScale(2, 'CEILING').toString(),  '0.00'
+  throws (-> dec('0.0001').quantizeToScale(2, 'UNNECESSARY')), DecimalInexactError
+
+# ==[ Cents interop ]==
+
+console.log "\nCents interop with @rip-lang/validate"
+
+test "toCentsNumber matches the cents convention", ->
+  # validate `money` is HALF_UP, `money_even` is HALF_EVEN; both return
+  # integer cents. A bare integer is dollars: "129222" -> 12922200 cents.
+  eq dec('1234.50').toCentsNumber('HALF_UP'),  123450
+  eq dec('129222').toCentsNumber('HALF_UP'),   12922200
+  eq dec('1.235').toCentsNumber('HALF_UP'),    124
+  eq dec('1.225').toCentsNumber('HALF_UP'),    123
+  eq dec('1.225').toCentsNumber('HALF_EVEN'),  122
+  eq dec('1.235').toCentsNumber('HALF_EVEN'),  124
+  eq dec('1.23').toScaledInteger(2, 'HALF_UP'), 123n
+
+test "toScaledInteger keeps the sign through ties", ->
+  eq dec('-1.235').toScaledInteger(2, 'HALF_EVEN'), -124n
+  eq dec('-1.235').toScaledInteger(2, 'HALF_UP'),   -124n
+
+# ==[ Comparison ]==
+
+console.log "\nComparison"
+
+test "scale never affects equality or order", ->
+  ok dec('1.0').eq('1.00')
+  ok dec('1.1').lt('1.2')
+  ok dec('-1').gt('-2')
+  eq dec('2.50').cmp('2.5'),   0
+  eq dec('1').cmp('2'),        -1
+  eq dec('3').cmp('2'),        1
+  eq dec('1.00').cmp('1'),     0
+  eq dec('-1.10').cmp('-1.1'), 0
+  eq dec('0.00').cmp('-0'),    0
+  eq dec('9.9').cmp('10'),     -1
+  eq dec('-9.9').cmp('-10'),   1
+
+test "a huge exponent gap compares without allocating", ->
+  eq Decimal.fromParts(1n, 90000).cmp(Decimal.fromParts(1n, 0)), 1
+  eq Decimal.fromParts(1n, 0).cmp(Decimal.fromParts(1n, 90000)), -1
+
+test "predicates and remaining comparators", ->
+  ok dec('0.00').isZero()
+  ok not dec('0.01').isZero()
+  ok Decimal.isDecimal(dec('1'))
+  ok not Decimal.isDecimal('1')
+  ok dec('1').lte('1.0')
+  ok dec('1').lte('2')
+  ok dec('2').gte('2.00')
+  ok dec('3').gte('2')
+
+# ==[ DuckDB DECIMAL(p, s) fit ]==
+
+console.log "\nDuckDB DECIMAL(p, s) fit"
+
+test "fitsDecimal checks scale loss and precision", ->
+  ok dec('123.45').fitsDecimal(5, 2)
+  ok not dec('123.45').fitsDecimal(4, 2)
+  ok not dec('123.45').fitsDecimal(5, 1)
+  ok dec('0.00').fitsDecimal(1, 0)
+  ok dec('1.20').fitsDecimal(2, 1)
+  ok dec('-123.45').fitsDecimal(5, 2)
+  eq dec('1.2').toFixed(3, 'HALF_EVEN'),   '1.200'
+  eq dec('1.2').toFixed(4, 'UNNECESSARY'), '1.2000'
+
+test "fitsDecimal validates its DECIMAL(p, s) metadata", ->
+  throws (-> dec('1.5').fitsDecimal(0, 0)), DecimalInvalidOperationError
+  throws (-> dec('1.5').fitsDecimal(2, 3)), DecimalInvalidOperationError
+
+# ==[ Resource limits ]==
+
+console.log "\nResource limits"
+
+test "pathological inputs are rejected up front", ->
+  throws (-> dec('1e1000000000')), DecimalRangeError
+  throws (-> Decimal.fromParts(1n, 50000).add(Decimal.fromParts(1n, 0))), DecimalResourceLimitError
+  throws (-> Decimal.fromParts(1n, 100000).toString()), DecimalResourceLimitError
+
+test "results at the digit cap are exact; one past it throws", ->
+  eq Decimal.parse('9'.repeat(999)).add('1').toString().length, 1000
+  throws (-> Decimal.parse('9'.repeat(1000)).add('1')), DecimalResourceLimitError
+
+test "the product exponent must stay in range", ->
+  throws (-> Decimal.fromParts(1n, 50000).mul(Decimal.fromParts(1n, 50001))), DecimalRangeError
+
+test "zero never trips false limits at huge exponents", ->
+  eq Decimal.fromParts(0n, 100000).add('1').toString(), '1'
+  eq Decimal.fromParts(0n, 0).mul(Decimal.parse('9'.repeat(1000))).toString(), '0'
+  eq Decimal.fromParts(0n, 100000).quantizeToScale(100000, 'HALF_EVEN').exp, -100000
+  eq Decimal.fromParts(0n, 100000).toString(), '0'
+  eq Decimal.fromParts(0n, 5).mul(Decimal.fromParts(3n, 5)).exp, 10
+  throws (-> Decimal.fromParts(0n, 100000).divExact(Decimal.fromParts(1n, -100000))), DecimalRangeError
+
+test "divToScale short-circuits a tiny quotient without allocating", ->
+  eq Decimal.fromParts(1n, -100000).divToScale('1', 2, 'HALF_UP').toString(), '0.00'
+  eq Decimal.fromParts(1n, -100000).divToScale('1', 2, 'UP').toString(),      '0.01'
+
+# ==[ D"..." tagged constructor ]==
+
+console.log "\nD tagged constructor"
+
+test "parses a single literal", ->
+  eq D"19.99".toString(), '19.99'
+  eq D"-0.00".toString(), '0.00'
+  throws (-> D""), DecimalParseError
+  throws (-> D"x#{1}y"), DecimalParseError
+
+# ==[ Invariant enforcement ]==
+
+console.log "\nInvariant enforcement"
+
+test "construction obeys the limits", ->
+  throws (-> Decimal.from(10n ** 1000n)), DecimalResourceLimitError
+  throws (-> Decimal.fromParts(10n ** 1000n, 0)), DecimalResourceLimitError
+  throws (-> Decimal.config({ maxDigit: 2000 })), DecimalInvalidOperationError
+
+test "an invalid mode throws even when no rounding is needed", ->
+  throws (-> dec('1.50').quantizeToScale(2, 'BOGUS')), DecimalInvalidOperationError
+  throws (-> dec('1.5').quantizeToScale(2, 'BOGUS')),  DecimalInvalidOperationError
+  throws (-> dec('1').divToScale('2', 1, 'BOGUS')),    DecimalInvalidOperationError
+
+test "config reads back a snapshot copy", ->
+  limits = Decimal.config()
+  eq limits, { maxInputLength: 4096, maxDigits: 1000, maxAbsExponent: 100000, maxOutputLength: 100000 }
+  limits.maxDigits = 1
+  eq dec('12345').toString(), '12345'   # mutating the snapshot changed nothing
+
+test "config changes take effect and restore", ->
+  saved = Decimal.config()
+  Decimal.config({ maxDigits: 4 })
+  try
+    throws (-> dec('12345')), DecimalResourceLimitError
+    eq dec('1234').toString(), '1234'
+  finally
+    Decimal.config(saved)
+  eq dec('12345').toString(), '12345'
+
+# ==[ Conversion ]==
+
+console.log "\nConversion"
+
+test "toNumber is explicit and finite", ->
+  eq Decimal.fromParts(1n, 308).toNumber(), 1e308
+  eq Decimal.fromParts(1n, -400).toNumber(), 0
+  throws (-> Decimal.fromParts(1n, 309).toNumber()), DecimalUnsafeConversionError
+
+test "valueOf blocks implicit coercion", ->
+  throws (-> dec('1').valueOf()), DecimalError
+
+# ==[ The ~:Decimal schema coercer ]==
+#
+# Registered automatically by importing '@rip-lang/decimal' — no bridge
+# import, no setup call.
+
+console.log "\nSchema coercer (~:Decimal)"
+
+test "hydrates a wire string into a Decimal, scale preserved", ->
+  inv = Invoice.parse({ amount: '19.990' })
+  ok Decimal.isDecimal(inv.amount)
+  eq inv.amount.toString(), '19.990'
+
+test "a wire number arrives through the string pipeline", ->
+  inv = Invoice.parse({ amount: 5, tip: '0.50' })
+  eq inv.amount.toString(), '5'
+  eq inv.tip.toString(), '0.50'
+
+test "a coercion miss is a structured coerce issue", ->
+  for amount in ['abc', '$1.00', '1,000', 'NaN']
+    bad = Invoice.safe({ amount })
+    eq bad.ok, false
+    eq bad.errors[0].field, 'amount'
+    eq bad.errors[0].error, 'coerce'
+
+test "the bridge registers under any name", ->
+  registerDecimalCoercer('Dec2')
+  row = Custom.parse({ n: '0.125' })
+  ok Decimal.isDecimal(row.n)
+  eq row.n.toString(), '0.125'
+
+test "name collisions reject loudly", ->
+  throws (-> registerCoercer('Decimal', (v) -> v)), 'already registered'
+  throws (-> registerDecimalCoercer('Dec2')), 'already registered'

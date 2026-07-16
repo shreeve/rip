@@ -1,20 +1,23 @@
 {
   "name": "@rip-lang/decimal",
-  "version": "0.0.0",
+  "version": "4.0.0",
   "private": true,
   "type": "module",
+  "description": "Zero-dependency, BigInt-backed arbitrary-precision exact decimals — with explicit rounding and hard resource limits",
   "exports": {
-    ".": "./decimal.rip",
-    "./coercers": "./coercers.rip"
+    ".": "./decimal.rip"
   },
   "scripts": {
-    "test": "rip test"
+    "test": "rip test.rip"
   },
   "rip": {
     "browser": true
   },
   "files": [
-    "*.rip",
+    "decimal.rip",
     "README.md"
-  ]
+  ],
+  "devDependencies": {
+    "@rip-lang/testing": "workspace:*"
+  }
 }

@@ -58,21 +58,47 @@ export def test(name, fn)
     process.exitCode = 1
     console.log "  #{paint(RED, '✗')} #{name}: #{e.message}"
 
-# Deep equality via JSON — good enough for the value shapes packages pin
-# (arrays, plain objects, strings, numbers, null). Not for BigInt/Map/cycles.
+# Structural deep equality — arrays ordered, object keys unordered,
+# scalars by identity. Not for BigInt/Map/cycles.
+deepEq = (a, b) ->
+  return true if a is b
+  return false unless a? and b?
+  return false if typeof a isnt typeof b
+  if Array.isArray(a)
+    return false unless Array.isArray(b) and a.length is b.length
+    for v, i in a
+      return false unless deepEq(v, b[i])
+    return true
+  if typeof a is 'object'
+    ka = Object.keys(a)
+    return false unless ka.length is Object.keys(b).length
+    for k in ka
+      return false unless Object.hasOwn(b, k) and deepEq(a[k], b[k])
+    return true
+  false
+
 export def eq(a, b)
-  ja = JSON.stringify(a)
-  jb = JSON.stringify(b)
-  unless ja is jb
-    throw new Error "expected #{jb}, got #{ja}"
+  unless deepEq(a, b)
+    throw new Error "expected #{JSON.stringify(b)}, got #{JSON.stringify(a)}"
 
 export def ok(cond, message = 'assertion failed')
   throw new Error(message) unless cond
 
-export def throws(fn, errType = null)
-  threw = false
+# `expected` refines the assertion: an Error class checks instanceof,
+# a string checks message containment, and both can be given in order.
+export def throws(fn, ...expected)
+  caught = null
+  threw  = false
   try
     fn()
   catch e
-    threw = if errType? then e instanceof errType else true
+    caught = e
+    threw  = true
   throw new Error('expected throw') unless threw
+  for want in expected
+    if typeof want is 'string'
+      unless String(caught?.message).includes(want)
+        throw new Error "expected message containing #{JSON.stringify(want)}, got #{JSON.stringify(caught?.message)}"
+    else
+      unless caught instanceof want
+        throw new Error "expected #{want?.name ?? 'error class'}, got #{caught?.constructor?.name}"
