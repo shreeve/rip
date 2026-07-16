@@ -5,11 +5,11 @@ import { swarm, init, retry, todo } from '@rip-lang/swarm'
 setup = ->
   unless retry()
     init()
-    for i in [1..10] then todo(i)
+    todo i for i in [1..10]
   null
 
 perform = (task, ctx) ->
   name = task.split('/').pop()
-  throw new Error("boom #{name}") if name is '3' or name is '7'
+  raise "boom #{name}" if name in ['3', '7']
 
 swarm { setup, perform }
