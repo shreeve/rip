@@ -86,7 +86,7 @@ export function mapTsDiagnostic(good, d) {
 //
 // The broker owns this over RIP positions because a FACE-level directive
 // governs only its immediate next FACE line, which multi-line lowerings
-// structurally defeat (finding #6): an error whose mapped line sits under
+// structurally defeat: an error whose mapped line sits under
 // a source directive suppresses (directive used), and a USED directive's
 // spurious face-level TS2578 drops. A directive that rescues nothing
 // keeps its TS2578 — unused stays loud, exactly tsc's contract.
@@ -141,7 +141,7 @@ export function applyRipDirectives(good, mapped) {
   // comment and arrives here as a normal diagnostic. Drop it only when the
   // directive is genuinely used — an ERROR fell in its range (a mis-governed
   // multi-line face directive whose leaked error we suppressed over rip
-  // positions, finding #6). Otherwise it survives: unused stays loud.
+  // positions). Otherwise it survives: unused stays loud.
   return survivors.filter((m) => !(is2578(m) && used.has(m.range.start.line)));
 }
 

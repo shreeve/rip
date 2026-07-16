@@ -1,4 +1,4 @@
-// `rip check` — the headless type-checker (finding #7). The editor
+// `rip check` — the headless type-checker. The editor
 // server is the only place type diagnostics are computed; `rip check`
 // drives that same server in batch, so this gate spawns the REAL CLI
 // against real temp workspaces and asserts the mapped-back diagnostics,

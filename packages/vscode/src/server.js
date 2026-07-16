@@ -1493,13 +1493,22 @@ function reorderUnionHover(ctx, contents) {
   return { ...contents, value: reordered };
 }
 
-// Reactive-cell hovers present the VALUE type (finding #10): the
+// Reactive-cell hovers present the VALUE type: the
 // author reads `clicks := 0` as a number, not as its container. A
 // hover whose type is EXACTLY the cell shape `{ value: T; read(): T }`
 // (both Ts equal — the brand doctrine keeps user literals out of this
 // shape) rewrites to `let N: T` for a state (mutable value, the old runtime's
 // spelling) or `const N: T` for a computed (readonly). Anything else
 // passes through untouched.
+//
+// ONE RULE, UNIFORMLY APPLIED: infer when unannotated, honor the annotation
+// when present. The pass-through above is where the second half is enacted,
+// so it is deliberate and not a gap — an annotated effect
+// (`clickLogger: Function ~> …`) hovers `Function` and is left alone, never
+// narrowed to `() => void`. An annotation is the author's statement of the
+// type and the hover shows it back; whether it is a GOOD annotation is the
+// author's business. The editor's job is to be honest about what the source
+// says, not to second-guess it.
 function presentReactiveCellHover(contents) {
   const value = contents?.value;
   if (typeof value !== 'string') return null;

@@ -939,7 +939,7 @@ describe.skipIf(!tsgoAvailable)('TS directives reach the editor (directive inher
   //     statement, so TSGO absorbs the error at the face. applyRipDirectives
   //     never sees it; only the hint reaches the range check.
   //   · block-bodied — the face directive governs only its next FACE line, so
-  //     an error deeper in the block LEAKS past it (finding #6's class) and
+  //     an error deeper in the block LEAKS past it and
   //     reaches applyRipDirectives over rip positions. That is the only path
   //     on which the range check absorbs a real error, marks the directive
   //     used, and drops tsgo's now-spurious TS2578 — so it is the only case
@@ -985,7 +985,7 @@ describe.skipIf(!tsgoAvailable)('TS directives reach the editor (directive inher
       // The leaked TS2322 is absorbed (it is the error the directive
       // promised) — and absorbing it marked the directive USED, so tsgo's
       // spurious face-level TS2578 drops. The hint alone would NOT have
-      // marked it used: that is finding #14's guard, pinned by check.test.js
+      // marked it used: that guard is pinned by check.test.js
       // ('an unused @ts-expect-error stays loud'), where a hint is the only
       // thing in range and the TS2578 survives.
       expect(diags.map((d) => d.code)).not.toContain(2322);

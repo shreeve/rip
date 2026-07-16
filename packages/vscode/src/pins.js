@@ -14,6 +14,15 @@
 // requests open rip mirrors), exports nothing new, and is deleted
 // after the probe round.
 //
+// WHY MORE TIER 1 CANNOT RETIRE THIS. The two sets are disjoint by
+// construction: captureScan records a declare-in-place site only for a
+// TOP-LEVEL `=`, while a binding is pinnable only if it STAYED hoisted and
+// is read from inside a closure. Widening declare-in-place therefore reaches
+// none of the remainder — it shrinks this pass's input without touching its
+// reason, and cannot shrink it to nothing. Retiring the probe round takes a
+// DIFFERENT mechanism: inferring the first-write type statically onto the
+// hoist line, in-face, so no manufactured site is needed at all.
+//
 // Every failure path lands on the status quo: an unparseable hover, a
 // truncated type (`...`), or a bare `any` caches as null (no pin, no
 // retry until the defining expression changes — the pin key hashes the

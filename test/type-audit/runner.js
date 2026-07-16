@@ -29,37 +29,46 @@
 //
 // WHY 6 IS NOT A DUPLICATE OF 3. Dimension 3 already runs under the strict
 // TSCONFIG (tsgo defaults strict:true). `rip.strict` is a different switch:
-// it stops rip SUPPRESSING the implicit-any family (SUPPRESSED_TS_CODES,
-// finding #1). tsgo emits those diagnostics today and mapTsDiagnostic drops
-// them — so an unchecked `any` region is invisible to 3 and to `rip check`,
-// and reads as a clean pass. Dimension 6 is the only gauge that can go red
-// for it (finding #20: every render branch/loop body is typed through an
-// untyped `ctx`, so its whole interior is unchecked).
+// it stops rip SUPPRESSING the implicit-any family (SUPPRESSED_TS_CODES).
+// tsgo emits those diagnostics today and mapTsDiagnostic drops them — so an
+// unchecked `any` region is invisible to 3 and to `rip check`, and reads as
+// a clean pass. Dimension 6 is the only gauge that can go red for it: every
+// render branch/loop body is typed through an untyped `ctx`, so its whole
+// interior is unchecked.
 //
 // THIS DIMENSION IS EXPECTED RED, and that is the point — it is a progress
-// gauge, not a gate. Do not "fix" it by suppressing: green here means the
-// implicit-any holes are gone, which is the end goal (rip.strict everywhere),
-// not a scoreboard to be groomed. (No ratio is quoted in this comment on
-// purpose — the run PRINTS the live one, and a hardcoded count goes stale the
-// day a fixture is added, while the dimension has not changed.)
+// gauge, not a gate. Do not "fix" it by suppressing. But do not read it as
+// distance to a fix either: GREEN IS A SUPERSET OF THE HOLES. It requires the
+// generated scaffolding to be typed and 06 to be annotated, and neither of
+// those closes a hole. Green implies the holes are gone; the holes being gone
+// does NOT imply green. (No ratio is quoted here on purpose — the run PRINTS
+// the live one, and a hardcoded count goes stale the day a fixture is added,
+// while the dimension has not changed.)
 //
-// READ THE FAILURES, NOT THE RATIO — they have two different roots, and only
-// one is rip's fault:
+// READ THE FAILURES, NOT THE RATIO — THREE roots, and only two are holes
+// (counts driven 2026-07-16, `rip check` under rip.strict, per fixture):
 //
-//   · COMPILER-EMITTED (a real hole — the author cannot annotate their way
-//     out). 09-components: `ctx` and the render scaffolding (`_el2`, `__fr`)
-//     — finding #20, whose whole interior is therefore unchecked.
-//     10-validation: `it`, the implicit lambda parameter a `schema` block
-//     injects. The user never wrote these names and cannot type them.
-//   · AUTHOR-ANNOTATABLE (working as designed). 06-functions `title?` is an
-//     untyped optional param the author simply did not annotate — gradual
-//     typing permitting exactly what it promises, and strict correctly
-//     asking for the annotation. Annotating it is a fixture edit, not a
-//     compiler fix.
+//   · A HOLE — a compiler-emitted name that USER EXPRESSIONS type through, so
+//     everything reached by it is unchecked and the author cannot annotate
+//     their way out. 09-components `ctx` (30 of its 184), the render
+//     fragment's context parameter: every branch/loop body is typed through
+//     it. 10-validation `it` (2 of its 2), the implicit lambda parameter a
+//     `schema` block injects. These are the two that matter.
+//   · GENERATED SCAFFOLDING — compiler-emitted, but NOT a hole. 09's
+//     `_elN`/`_tN`/`__fr`/`target`/`anchor`/`detaching`/`i`: 154 of its 184.
+//     No user expression types through them, so typing `_el2` checks nothing
+//     anyone wrote; it only moves this number. (~50 are `let _el2, _t0;`
+//     declared-then-assigned — evolving-`let` hoist split in our OWN output,
+//     the shape declare-in-place already solved for user code.)
+//   · AUTHOR-ANNOTATABLE (working as designed). 06-functions `title?`/`asOf`
+//     are untyped optional params the author simply did not annotate —
+//     gradual typing permitting exactly what it promises, and strict
+//     correctly asking for the annotation. A fixture edit, not a fix.
 //
-// So a rising score here means two different things and the note under each
-// failure says which. Annotating 06 would move the number without closing a
-// single hole — do not mistake that for progress.
+// So a rising score means three different things and the note under each
+// failure says which. Annotating 06, or typing the scaffolding, would move
+// the number without closing a single hole — do not mistake that for
+// progress. Conversely: type `ctx` tomorrow and 09 still reports 154.
 //
 // B · THE HOVER AUDIT (--hover / --all) — hover every top-level
 //   declaration through the editor server and judge each answer against
@@ -114,12 +123,12 @@
 //   And ONE more, over TYPE-BODY MEMBERS (see typeMembersOf):
 //     · member     a property name inside a `type`/`interface` body gets a
 //                  token — presence only, same oracle (rip source names the
-//                  member, so it must classify). This is EXPECTED RED: it
-//                  reproduces finding #21 (members ride one coarse cover row
-//                  and map only where verbatim from its start, so a
+//                  member, so it must classify). This is EXPECTED RED —
+//                  the mapping gap: members ride one coarse cover row and
+//                  map only where verbatim from its start, so a
 //                  quote-normalized literal or a block body's inserted `{`
-//                  truncates the prefix and drops every later member token).
-//                  The token twin of the #20 `strict` gauge — a red row that
+//                  truncates the prefix and drops every later member token.
+//                  The token twin of the `strict` gauge — a red row that
 //                  goes green the day the mapping fix lands, at which point
 //                  the gauge is retired.
 //
@@ -132,8 +141,8 @@
 //                  compare source code occurrences to what the server delivered
 //                  — the deficit is the drop. The only invariant that reaches
 //                  USE sites and rip-native names (a reactive read has no
-//                  column-0 declaration and no TS twin). EXPECTED RED (finding
-//                  #21): the same coarse-cover-row root as `member`, so both
+//                  column-0 declaration and no TS twin). EXPECTED RED —
+//                  the same coarse-cover-row root as `member`, so both
 //                  flip green on the mapping fix. A length-≥2 floor plus a rip
 //                  declaration-keyword denylist and a `delivered >= 1` gate keep
 //                  keywords and synthetic tokens out of the count.
@@ -425,7 +434,7 @@ function dimTwin(twinBase, byFile) {
 // future react-importing fixture cannot silently degrade into a resolution
 // error that reads as an implicit-any hole.
 // The implicit-any family — the ONLY codes `rip.strict` un-suppresses —
-// judged against SUPPRESSED_TS_CODES itself (finding #1), never a 70xx
+// judged against SUPPRESSED_TS_CODES itself, never a 70xx
 // range: that block also holds codes outside the family (7027 unreachable,
 // 7028 unused label, 7029 fallthrough), and a range would mislabel them.
 // A strict failure outside the set is therefore NOT an implicit-any hole;
@@ -562,7 +571,7 @@ function declsOf(src) {
 // cleanly — method shorthand (`foo():`, no `:` right after the name),
 // index signatures / mapped types (start with `[`), a union `| 'x'` arm,
 // or an inline body carrying a nested bracket a naive comma-split would
-// mangle. Feeds the PRESENCE invariant ONLY (finding #21) — never type or
+// mangle. Feeds the PRESENCE invariant ONLY — never type or
 // readonly, which a type-body member does not pin here. Crying wolf is the
 // one failure it must avoid: a bogus member position never receives a
 // token, so it would sit red forever and never flip on the fix.
@@ -639,8 +648,8 @@ class EditorServer {
   // — concurrency lives between server processes, never inside one program.
   //
   // This is not fussiness. The open-document set genuinely changes what the
-  // server answers: finding #8 records that the auto-import candidate set IS the
-  // open program. Hovers and tokens happen not to depend on it for this corpus,
+  // server answers: the auto-import candidate set IS the open program.
+  // Hovers and tokens happen not to depend on it for this corpus,
   // but "happen not to" is an observation, not a guarantee, and observations are
   // what this runner exists to distrust.
   //
@@ -751,7 +760,8 @@ class EditorServer {
     }
   }
   // An `any` here is either TIMING (the enrichment pass has not reached this
-  // position) or GENUINE (a write-only local — finding #9's class). Re-ask to
+  // position) or GENUINE (a write-only local, which has no read to infer
+  // from and truthfully hovers `any`). Re-ask to
   // separate them: a timing `any` clears within a poll or two, a genuine one
   // survives every retry and is reported as `any`, which is the truth.
   async hover(uri, pos) {
@@ -813,7 +823,7 @@ class TwinOracle {
   async stop() { await this.client.stop().catch(() => {}); }
 }
 
-// ── the face-survival oracle (finding #21, USE-SITE surface). The token
+// ── the face-survival oracle (the mapping gap's USE-SITE surface). The token
 // audit's `present`/`member` invariants enumerate SOURCE names (declarations,
 // type-body members) and ask whether each got a token — a source→token check
 // that structurally cannot reach USE sites or rip-native names (a reactive
@@ -903,7 +913,7 @@ class FaceOracle {
 //                   blanks string LITERALS but keeps `#{…}` interpolation reads,
 //                   across lines, so only real code positions count).
 //   · delivered(n) tokens the SERVER actually shipped for that name
-//                   (session.semanticTokens — the ground truth for #21).
+//                   (session.semanticTokens — the ground truth for drops).
 //   drop(n) = max(0, realOcc(n) - delivered(n)); a synthetic face token (a
 //   `.value` unwrap, a generic re-instantiation) never adds a source occurrence,
 //   so it cannot inflate the count. Name FLOOR (length >= 2) as before.
@@ -993,7 +1003,7 @@ function faceSurvival(src, code, faceDecoded, serverTokens) {
 // `any`, so "it answered a type" means the program is built and nothing else.
 // A keyword declaration (`def`/`class`/`interface`/`enum`/`type`) or an
 // annotated binding qualifies; a bare `x = …` does not, because a write-only
-// local genuinely hovers `any` (finding #9) and polling it would wait out the
+// local genuinely hovers `any` and polling it would wait out the
 // full timeout on a correct answer. `null` when a fixture offers neither.
 const readyProbe = (decls) =>
   decls.find((d) => d.keyword)
@@ -1149,8 +1159,8 @@ const auditBanner = (title, subtitle) => {
 // inside a program.
 //
 // That distinction is load-bearing, not pedantry: the open-document set really
-// does change what a server answers — finding #8 records that the auto-import
-// candidate set IS the open program. A pool shared across lanes would put four
+// does change what a server answers — the auto-import candidate set IS the
+// open program. A pool shared across lanes would put four
 // documents in one program and make the equivalence an empirical accident, to be
 // re-established by diffing outputs. Here it is a property of the code.
 //
@@ -1331,7 +1341,7 @@ if (RUN_HOVER || RUN_TOKENS) {
     if (!twins.length) console.log(`    ${dim('tsgo unavailable — twin oracle skipped; hover-pins comparison still runs')}`);
   }
 
-  // The face-survival oracle (finding #21 use sites). Compile every compiling
+  // The face-survival oracle (the mapping gap's use sites). Compile every compiling
   // fixture to its TS face ONCE into a shared dir where sibling faces resolve
   // each other's imports (07 → 06), then start one oracle PER LANE — the same
   // one-document contract as the editor servers and twins. The faces are the
@@ -1366,7 +1376,7 @@ if (RUN_HOVER || RUN_TOKENS) {
       faces = await Promise.all(Array.from({ length: LANES }, async () => { const o = new FaceOracle(); await o.start(); return o; }));
     } catch { faces = []; }
     facesAvailable = faces.length > 0;
-    if (!facesAvailable) console.log(`    ${dim('tsgo unavailable — face-survival oracle skipped (finding #21 use-site gauge)')}`);
+    if (!facesAvailable) console.log(`    ${dim('tsgo unavailable — face-survival oracle skipped (the use-site token gauge)')}`);
   }
 
   const t0 = Date.now();
@@ -1384,7 +1394,7 @@ if (RUN_HOVER || RUN_TOKENS) {
     const twinBase = twin ? ['.tsx', '.ts'].map((e) => f.replace(/\.rip$/, e)).find((b) => fs.existsSync(path.join(FIX, b))) : null;
     const decls = declsOf(src);
     // Type-body members ride alongside the declarations — the token audit's
-    // PRESENCE invariant probes both (finding #21). Computed here so the
+    // PRESENCE invariant probes both. Computed here so the
     // coverage check below can hold the count against source, same as decls.
     const members = RUN_TOKENS ? typeMembersOf(src) : [];
 
@@ -1405,7 +1415,7 @@ if (RUN_HOVER || RUN_TOKENS) {
       twinBase ? twin.hoverTwin(path.join(FIX, twinBase)).catch(() => null) : Promise.resolve(null),
     ]);
 
-    // Face-survival (finding #21 use sites): raw face tokens run through the
+    // Face-survival (the mapping gap's use sites): raw face tokens run through the
     // server's remap; the drops naming a verbatim source identifier are the
     // real use-site regressions. Its own tsgo, so it neither shares nor
     // perturbs the editor read above.
@@ -1662,7 +1672,7 @@ if (RUN_TOKENS) {
   }
   {
     const missing = [], badType = [], badReadonly = [], unasserted = [];
-    // Type-body member PRESENCE (finding #21). A property in a type/interface
+    // Type-body member PRESENCE. A property in a type/interface
     // body must get a token; it rides one coarse cover row and maps only
     // where verbatim from that row's start, so any face rewrite before it —
     // a quote-normalized literal on an inline line, the `{`/reflow of a
@@ -1670,7 +1680,7 @@ if (RUN_TOKENS) {
     // EXPECTED RED until the mapping fix lands (per-name rows for members,
     // or literals left un-normalized in the face), then flips green.
     const memberMissing = []; let memberProbed = 0;
-    // Face-survival accumulators (finding #21 use sites): survivors, the dropped
+    // Face-survival accumulators (the mapping gap's use sites): survivors, the dropped
     // classified names ({name, count} per fixture), and `unclassified` — server
     // tokens whose name tsgo never classifies (the sanity check; must be 0, or
     // the server and face oracles disagree and the gauge is untrustworthy).
@@ -1742,17 +1752,17 @@ if (RUN_TOKENS) {
     irow('present', missing.length, probed, 'a declared name gets a token');
     irow('type', badType.length, typeAsserted, `token type matches the declaring form${unasserted.length ? ` · ${unasserted.length} unasserted` : ''}`);
     irow('readonly', badReadonly.length, roAsserted, `readonly IFF the binding is immutable in rip${probed - roAsserted ? ` · ${probed - roAsserted} n/a` : ''}`);
-    // Type-body member presence — EXPECTED RED (finding #21), the token twin
-    // of the #20 `strict` gauge. Its own line so the wording is "gap" (a
+    // Type-body member presence — EXPECTED RED (the mapping gap), the token
+    // twin of the `strict` gauge. Its own line so the wording is "gap" (a
     // known-open hole), not "violation" (a fresh regression), and green means
-    // the mapping fix has landed. Zero gaps here should prompt closing #21.
+    // the mapping fix has landed and this gauge should be retired.
     {
       const gaps = memberMissing.length;
-      const note = gaps ? yellow(`${gaps} gap${gaps === 1 ? '' : 's'}`) + '   ' + dim('type-body member tokens drop — finding #21 (expected red until the mapping fix)')
-                        : dim('type-body member tokens — finding #21 appears CLOSED; retire this gauge');
+      const note = gaps ? yellow(`${gaps} gap${gaps === 1 ? '' : 's'}`) + '   ' + dim('type-body member tokens drop — expected red until the mapping fix')
+                        : dim('type-body member tokens — the mapping fix appears to have landed; retire this gauge');
       console.log(`    ${pad('member', 12)} ${(gaps ? red : green)(String(memberProbed - gaps).padStart(3))} ${dim('/')} ${dim(String(memberProbed).padStart(3))}   ${note}`);
     }
-    // Face-survival — USE-SITE token drops (finding #21), the direction the
+    // Face-survival — USE-SITE token drops (the mapping gap), the direction the
     // source-enumerated invariants above cannot see: a classified source
     // identifier the server drops, covering use sites AND rip-native names with
     // no twin. EXPECTED RED like `member`; green means the mapping fix has
@@ -1761,8 +1771,8 @@ if (RUN_TOKENS) {
     if (facesAvailable) {
       const dropTotal = survDrops.reduce((n, d) => n + d.count, 0);
       const den = survSurvived + dropTotal;
-      const note = dropTotal ? yellow(`${dropTotal} drop${dropTotal === 1 ? '' : 's'}`) + '   ' + dim('classified source identifiers the server drops — finding #21 use sites (expected red until the mapping fix)')
-                             : dim('use-site tokens — finding #21 appears CLOSED; retire this gauge');
+      const note = dropTotal ? yellow(`${dropTotal} drop${dropTotal === 1 ? '' : 's'}`) + '   ' + dim('classified source identifiers the server drops at use sites — expected red until the mapping fix')
+                             : dim('use-site tokens — the mapping fix appears to have landed; retire this gauge');
       console.log(`    ${pad('survival', 12)} ${(dropTotal ? red : green)(String(survSurvived).padStart(3))} ${dim('/')} ${dim(String(den).padStart(3))}   ${note}`);
       // Silent guard (surfaces only on failure): count-based uses the server's
       // tokens directly, so `delivered ⊆ classified` holds by construction —
@@ -1781,7 +1791,7 @@ if (RUN_TOKENS) {
       console.log(`          ${dim('expected')} ${green(`${r.want.type}${r.want.readonly ? ' readonly' : ''}`)} ${dim(`— a \`${r.want.form}\` binding is ${r.want.readonly ? 'immutable' : 'WRITABLE'} in rip`)}`);
       console.log(`          ${dim('actual  ')} ${yellow(fmt(r.got))}`);
     });
-    // Finding #21's expected-red evidence, kept apart from the regression
+    // The mapping gap's expected-red evidence, kept apart from the regression
     // sections above: these are known-open holes, not surprises. The name lists
     // are long by nature, so each fixture's names WRAP with a hanging indent
     // aligned under the fixture column (adapting to terminal width) — every name
@@ -1790,7 +1800,7 @@ if (RUN_TOKENS) {
     const COL = 6 + 18 + 1 + 3 + 3;                                  // leading + filename + sp + count + gap = name column
     const WRAP = Math.max(80, process.stdout.columns || 120) - 2;
     const dropSection = (title, byFile, tally, nameOf) => {
-      console.log(`\n    ${bold(title)} ${dim('— #21, expected red')}`);
+      console.log(`\n    ${bold(title)} ${dim('— the mapping gap, expected red')}`);
       for (const [file, entries] of byFile) {
         // filename stays plain (the terminal linkifies it) and full — never
         // dimmed and never stripped of `.rip`, so the click target survives.
@@ -1847,13 +1857,13 @@ if (hp) totalLine('Hover', `${hp.probed} hover probes: `
 if (tk) {
   const bad = tk.missing.length + tk.badType.length + tk.badReadonly.length;
   // The member gauge is reported SEPARATELY from the invariant total: it is
-  // expected red (finding #21), so folding it in would read as N fresh
+  // expected red (the mapping gap), so folding it in would read as N fresh
   // regressions. Its own clause keeps the real-regression signal clean.
   // Each segment paints itself — never dim() wrapping a yellow()/green(), or
   // ANSI faint stacks onto the color and the count renders washed-out.
   const memberClause = tk.memberMissing.length
-    ? dim(' · ') + yellow(`${tk.memberMissing.length}/${tk.memberProbed} type-body member gap${tk.memberMissing.length === 1 ? '' : 's'}`) + ' ' + dim('tracking #21 (expected)')
-    : dim(' · ') + green('type-body members clean') + ' ' + dim('— #21 may be closed');
+    ? dim(' · ') + yellow(`${tk.memberMissing.length}/${tk.memberProbed} type-body member gap${tk.memberMissing.length === 1 ? '' : 's'}`) + ' ' + dim('tracking the mapping gap (expected)')
+    : dim(' · ') + green('type-body members clean') + ' ' + dim('— the mapping gap may be closed');
   // Face-survival rides the same expected-red logic as the member clause: its
   // own segment so use-site drops never read as fresh invariant regressions.
   // Absent entirely when the face oracle did not run (no survDrops key set).
@@ -1863,8 +1873,8 @@ if (tk) {
     : tk.survUnclassified
       ? dim(' · ') + red(`${tk.survUnclassified} unclassified`) + ' ' + dim('— server/face oracles disagree, distrust the survival gauge')
       : survDropTotal
-        ? dim(' · ') + yellow(`${survDropTotal} use-site drop${survDropTotal === 1 ? '' : 's'}`) + ' ' + dim('tracking #21 (expected)')
-        : dim(' · ') + green('use-site tokens clean') + ' ' + dim('— #21 may be closed');
+        ? dim(' · ') + yellow(`${survDropTotal} use-site drop${survDropTotal === 1 ? '' : 's'}`) + ' ' + dim('tracking the mapping gap (expected)')
+        : dim(' · ') + green('use-site tokens clean') + ' ' + dim('— the mapping gap may be closed');
   totalLine('Token', `${tk.probed} token probes: `
     + (bad === 0 ? green('all invariants hold')
       : red(`${bad} invariant violation${bad === 1 ? '' : 's'}`)

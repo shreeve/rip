@@ -60,9 +60,9 @@ const REGION_SHAPES = [
   /^constructor\(props\??: \{ .*\{ super\(props\); \}$/su, // the component props ctor (M12-E)
   /^as any\)?$/u,                                          // scaffold/handler quieting casts (M12-E)
   /^\) as any$/u,                                          // handler cast's TS-only close (arrow-safe grouping)
-  /^satisfies \S/u,                                        // reactive value enforcement (finding #3): `v satisfies T`
+  /^satisfies \S/u,                                        // reactive value enforcement: `v satisfies T`
   /^\($/u,                                                 // computed-lambda wrap opener for `) satisfies () => T`
-  /^\) satisfies \(\) => \S/su,                            // computed return enforcement (finding #3)
+  /^\) satisfies \(\) => \S/su,                            // computed return enforcement
   new RegExp(String.raw`^(export )?type ${ID}`, 'u'),      // alias / enum companion / schema alias
   new RegExp(String.raw`^(export )?interface ${ID}`, 'u'), // interface / schema intrinsic block
   new RegExp(String.raw`^function ${ID}\(.*\): [^;]+;$`, 'su'), // overload signature
@@ -297,7 +297,7 @@ describe('TS-face emission pins', () => {
   test('reactive containers type as the branded { value: T; read(): T } (computed readonly); readonly/effect handles as T', () => {
     const code = ts('count: number := 0\ntotal: number ~= count * 2\nro: string =! "s"\nh: Function ~> console.log(count)\n').code;
     // Annotated reactives also ENFORCE the value via face-only
-    // `satisfies` (finding #3).
+    // `satisfies`.
     expect(code).toContain('const count: { value: number; read(): number } = __state(0 satisfies number);');
     expect(code).toContain('const total: { readonly value: number; read(): number } = __computed((() => (count.value * 2)) satisfies () => number);');
     expect(code).toContain('const ro: string = "s";');
@@ -533,7 +533,7 @@ describe('TS directive comments', () => {
     );
   });
 
-  test('multi-line lowered values PLACE — the directive governs the statement head line (finding #6: never silently dropped)', () => {
+  test('multi-line lowered values PLACE — the directive governs the statement head line, never silently dropped', () => {
     // Comprehension value: the directive rides above the IIFE head.
     pin(
  'items = [1, 2]\n# @ts-expect-error\ndoubled = (x * 2 for x in items)\ndoubled = []\n',

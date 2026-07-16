@@ -110,11 +110,11 @@ describeExtended('rip.strict: the diagnostic posture is differential', () => {
     expect(has(ds, 2454)).toBe(false);
   }, 30_000);
 
-  test('STRICT — rip.strict surfaces implicit-any (#1) and checks use-before-assign (#2)', async () => {
+  test('STRICT — rip.strict surfaces implicit-any and checks use-before-assign', async () => {
     const ds = await diagnose({ strict: true });
-    // #1: the suppression is gated on !good.strict, so the family fires.
+    // The implicit-any suppression is gated on !good.strict, so the family fires.
     expect(has(ds, 7006)).toBe(true);
-    // #2: the emitter drops the `!`, so TS2454 reaches the user. The
+    // The emitter drops the `!`, so TS2454 reaches the user. The
     // emitter half is pinned in tiers.test.js; THIS is the half that
     // proves the diagnostic actually surfaces.
     expect(has(ds, 2454)).toBe(true);
@@ -134,8 +134,8 @@ describeExtended('rip.strict: the diagnostic posture is differential', () => {
     // disappears under strict, the gate is filtering, not enforcing.
     for (const c of new Set(codes(loose))) expect(codes(strict)).toContain(c);
     // And it must actually add something — an empty delta would mean the
-    // flag is inert, which is precisely the state finding #1 was in
-    // (fix present in source, never exercised by any harness).
+    // flag is inert (wired in source, never exercised by any harness),
+    // which is the defect this gate exists to catch.
     const added = new Set(codes(strict).filter((c) => !codes(loose).includes(c)));
     expect(added.size).toBeGreaterThan(0);
   }, 60_000);

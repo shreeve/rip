@@ -1,4 +1,4 @@
-// Finding #15 — a `:=` state binding must NOT be tagged `readonly`.
+// A `:=` state binding must NOT be tagged `readonly`.
 //
 // The editor forwards tsgo's semantic tokens over the FACE, remapping spans
 // back to .rip. TypeScript's modifiers are truthful wherever the face's
@@ -61,7 +61,7 @@ const PATHS = [
 // The token that STARTS at a declaration's name.
 const at = (tokens, line, character) => tokens.find((t) => t.line === line && t.character === character);
 
-describeExtended('semantic tokens — the readonly modifier (#15)', () => {
+describeExtended('semantic tokens — the readonly modifier', () => {
   test('`readonly` is set IFF the binding is immutable in rip — `:=` is not', async () => {
     const session = await openSession({ 'app.rip': SRC });
     try {
@@ -85,7 +85,7 @@ describeExtended('semantic tokens — the readonly modifier (#15)', () => {
       expect(plain).toBeDefined();
       expect(plain.modifiers).not.toContain('readonly');
 
-      // #15. `state := 3` is assignable in rip — `state = 9` compiles, lowering
+      // `state := 3` is assignable in rip — `state = 9` compiles, lowering
       // to `state.value = 9` — so the editor must not paint it as a constant.
       // The bit is cleared for this form and no other; the controls above prove
       // the clearing is surgical rather than a blanket strip.
