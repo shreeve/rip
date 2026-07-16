@@ -12,3 +12,9 @@ pathIgnorePatterns = ["packages/**"]
 # The per-test timeout lives in package.json's test script as a CLI
 # flag (`bun test --timeout 15000`): Bun ignores a bunfig [test]
 # timeout key — a key here would be dead config.
+
+# Workspace packages must land in node_modules/@rip-lang/* so in-tree
+# imports resolve here instead of falling through to ~/node_modules
+# (which may still point at a sibling rip-lang checkout).
+[install]
+linker = "hoisted"

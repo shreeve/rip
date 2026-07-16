@@ -10,17 +10,16 @@ Rip v3 had a cobbled-together types/IDE stack that was brittle. Rip v4 rearchite
 
 ### Scope for this pass
 
-These seven packages (simple, mostly pure Rip) still need the compare→strip→judge loop and the Rip test roll:
+These six packages (simple, mostly pure Rip) still need the compare→strip→judge loop and the Rip test roll:
 
 1. `x12`
 2. `validate`
-3. `time`
-4. `rsx`
-5. `http`
-6. `gate`
-7. `decimal`
+3. `rsx`
+4. `http`
+5. `gate`
+6. `decimal`
 
-**Done (model):** `@rip-lang/csv` — root `test.rip`, `@rip-lang/testing`, `../../bin/rip`, version `4.0.0`. Copy that shape.
+**Package contract:** layout, package.json key order, README mold, and test rules are codified in [AGENTS.md](AGENTS.md) — follow it.
 
 **Out of scope (do not bring over):** `util`, `stamp`.
 
@@ -53,15 +52,14 @@ Re-run after `.d.ts` removal. Compared Rip logic only.
 | --- | --- | --- | --- |
 | **x12** | Byte-identical | **KEEP_V4** | Same Rip; v4 adds tests + loader-aware CLI |
 | **validate** | Real redesign | **KEEP_V4** | Calendar-true dates, stricter validators, Map registry, opt-in coercers |
-| **time** | Byte-identical | **KEEP_V4** | Same Rip; v4 adds Bun/dayjs tests |
 | **rsx** | Identical + 1 fix | **KEEP_V4** | DOCTYPE `or` parentheses required under v4 compiler |
 | **http** | Identical (entry renamed) | **KEEP_V4** | Same Rip; tests + `rip.browser` |
 | **gate** | Substantially improved | **KEEP_V4** | Fail-closed secrets, login throttle, reserved `/_gate` 404, self-contained middleware |
 | **decimal** | Core identical; coercer split | **KEEP_V4** | Math stays browser-safe; schema bridge is opt-in |
 
-**None of these seven warrant restoring v3 Rip.** Do not reintroduce `.d.ts` or type annotations as part of this upgrade.
+**None of these six warrant restoring v3 Rip.** Do not reintroduce `.d.ts` or type annotations as part of this upgrade.
 
-Cross-cutting v4 packaging (not logic): `private: true`, `exports` pointing at `.rip` only (no `"types"`); root Bun workspaces (`packages/*`, hoisted linker) so `@rip-lang/*` resolves in-tree; package tests via `../../bin/rip test.rip` + `@rip-lang/testing` (model: `packages/csv`) or `bun --preload=../../src/loader.js test` (JS suites still migrating). No per-package `bunfig.toml`.
+Cross-cutting v4 packaging (not logic): `private: true`, `exports` pointing at `.rip` only (no `"types"`); root Bun workspaces (`packages/*`, hoisted linker) so `@rip-lang/*` resolves in-tree; package tests via `rip test.rip` + `@rip-lang/testing` (per [AGENTS.md](AGENTS.md)) or `rip test` (Bun JS suites still migrating — the subcommand wraps `bun test` with the loader preloaded). No per-package `bunfig.toml`.
 
 ---
 
@@ -126,28 +124,7 @@ Cross-cutting v4 packaging (not logic): `private: true`, `exports` pointing at `
 
 ---
 
-### 3. `time`
-
-**Inventory**
-
-| | v3 | v4 |
-| --- | --- | --- |
-| Main | `time.rip` (1182 lines) | **`cmp` identical** |
-| Types | dense inline (ignore) | same bytes; `.d.ts` gone |
-| Tests | `test/test.rip` | `test/{time,package}.test.js` (+ skipped types test) |
-| Other | `demo.rip` | `demo.rip`, dayjs `1.11.20` as test oracle |
-
-**Strip types:** Full-file `diff` is empty even *with* annotations present. Same `time` / `Time` / `Duration` / `age` / default factory.
-
-**Worth keeping:** Bun/dayjs parity suite; `rip.browser: true`.
-
-**Noise:** Inline types still live in `.rip` until a later typing pass — leave them for now or strip separately; do not restore a `.d.ts`.
-
-**Recommendation: KEEP_V4** — confidence high.
-
----
-
-### 4. `rsx`
+### 3. `rsx`
 
 **Inventory**
 
@@ -180,7 +157,7 @@ Under the v4 compiler, the unparenthesized form miscompiles (`pos || startsWith(
 
 ---
 
-### 5. `http`
+### 4. `http`
 
 **Inventory**
 
@@ -200,7 +177,7 @@ Under the v4 compiler, the unparenthesized form miscompiles (`pos || startsWith(
 
 ---
 
-### 6. `gate`
+### 5. `gate`
 
 **Inventory**
 
@@ -230,7 +207,7 @@ Under the v4 compiler, the unparenthesized form miscompiles (`pos || startsWith(
 
 ---
 
-### 7. `decimal`
+### 6. `decimal`
 
 **Inventory**
 
@@ -260,15 +237,15 @@ Under the v4 compiler, the unparenthesized form miscompiles (`pos || startsWith(
 ## Cross-cutting notes
 
 1. **No `.d.ts` in these packages** — confirmed. Do not bring type files over from v3. Package `exports` point at `.rip` only.
-2. **Inline annotations** still exist in some `.rip` sources (`time`, `http`, `decimal`, `validate`). They are ignored for this upgrade judgment. A later typing pass can strip or regenerate them; that is separate work.
+2. **Inline annotations** still exist in some `.rip` sources (`http`, `decimal`, `validate`). They are ignored for this upgrade judgment. A later typing pass can strip or regenerate them; that is separate work.
 3. **Opt-in `/coercers` entries** (`validate`, `decimal`) are intentional module-boundary improvements — keep them.
-4. **Package tests are Rip.** Shared helpers live in [`@rip-lang/testing`](testing/) (`test`, `eq`, `ok`, `throws`). The tally prints on process exit; failures set `process.exitCode`. Each pure library package gets a root `test.rip` that imports them and runs via `"test": "../../bin/rip test.rip"` — mirror `packages/csv`. Host-heavy suites (server, db, vscode) may stay on Bun until they have a natural Rip shape — that is the exception, not the default. The language battery keeps its own harness (`test/support/testing.js`).
-5. **Only intentional Rip-logic keepers among the seven:** validate (redesign), gate (security + middleware shape), rsx (DOCTYPE parens), decimal (coercer split). Everything else is “v3 Rip + packaging/tests.”
+4. **Package tests are Rip.** Shared helpers live in [`@rip-lang/testing`](testing/) (`test`, `eq`, `ok`, `throws`). The tally prints on process exit; failures set `process.exitCode`. Each pure library package gets a root `test.rip` that imports them and runs via `"test": "rip test.rip"` — per the contract in [AGENTS.md](AGENTS.md). Host-heavy suites (server, db, vscode) may stay on Bun until they have a natural Rip shape — that is the exception, not the default. The language battery keeps its own harness (`test/support/testing.js`).
+5. **Only intentional Rip-logic keepers among the six:** validate (redesign), gate (security + middleware shape), rsx (DOCTYPE parens), decimal (coercer split). Everything else is “v3 Rip + packaging/tests.”
 
 ## Suggested next steps
 
-1. Accept **KEEP_V4** for all seven (no Rip restores; no type reintroduction).
-2. Roll root `test.rip` + `@rip-lang/testing` across the remaining packages (`validate`, `time`, `rsx`, `http`, `decimal`, `x12`, then `gate` where security tests fit).
+1. Accept **KEEP_V4** for all six (no Rip restores; no type reintroduction).
+2. Roll root `test.rip` + `@rip-lang/testing` across the remaining packages (`validate`, `rsx`, `http`, `decimal`, `x12`, then `gate` where security tests fit).
 3. Continue the compare→strip→judge loop for remaining packages (`server`, `app`, `db`, `ui`, `swarm`, `print`, `script`, `ai`, …) — still excluding `util` and `stamp`, still without bringing types.
 4. Optional follow-up: gate standalone `GATE_*` bootstrap once v4 serving story is ready.
 5. Typing pass (separate): strip or regenerate types.

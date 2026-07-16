@@ -34,8 +34,8 @@ Keys in exactly this order (omit what does not apply):
   "description": "<pitch — byte-identical to the README blockquote>",
   "exports": { ".": "./<name>.rip" },
   "scripts": {
-    "test": "../../bin/rip test.rip",
-    "demo": "../../bin/rip demo.rip"
+    "test": "rip test.rip",
+    "demo": "rip demo.rip"
   },
   "rip": { "browser": true },
   "files": ["<name>.rip", "README.md"],
@@ -46,9 +46,13 @@ Keys in exactly this order (omit what does not apply):
 ```
 
 - `exports` points at `.rip` sources only — no `"types"`, no `"main"`.
-- `"test"` uses the repo-relative `../../bin/rip` pin: PATH `rip` may
-  resolve to a different checkout. Do not use `bun test` for `.rip`
-  suites — it never sees them.
+- Scripts invoke bare `rip`. The root `postinstall` links
+  `node_modules/.bin/rip` → `bin/rip`, and `bun run` puts the workspace
+  root's `.bin` first on PATH — so `rip` inside a script is always THIS
+  repo's compiler, even when the shell's global `rip` points at another
+  checkout. Always run suites via `bun run test` (a bare `rip` typed in
+  a shell may be a different checkout). Do not use `bun test` for
+  `.rip` suites — it never sees them.
 - In-repo deps use `workspace:*` (root workspaces + hoisted linker
   resolve them); external deps are test oracles only (e.g. dayjs).
 - No `keywords`, `license`, `repository`, `author` while
@@ -99,4 +103,7 @@ All shell fences use `bash`. No `## License` footer.
   before declaring parity.
 - Run with `bun run test` from the package directory. Host-heavy suites
   (server, db, vscode) may stay on Bun test until they have a natural
-  Rip shape — that is the exception.
+  Rip shape — that is the exception. Their script is `"test": "rip test"`
+  — the CLI subcommand wraps `bun test` with the `.rip` loader preloaded
+  and a 15000ms default timeout (pass `--timeout`/files to override) —
+  never a hand-written `--preload` flag.

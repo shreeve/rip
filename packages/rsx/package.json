@@ -8,7 +8,7 @@
     ".": "./rsx.rip"
   },
   "scripts": {
-    "test": "bun test --timeout 15000"
+    "test": "rip test"
   },
   "rip": {
     "browser": true

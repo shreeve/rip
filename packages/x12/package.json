@@ -10,7 +10,7 @@
     "rip-x12": "./bin/rip-x12"
   },
   "scripts": {
-    "test": "bun test --timeout 15000"
+    "test": "rip test"
   },
   "files": [
     "*.rip",

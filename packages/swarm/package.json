@@ -10,7 +10,7 @@
     "swarm": "./bin/swarm"
   },
   "scripts": {
-    "test": "bun test --timeout 15000"
+    "test": "rip test"
   },
   "files": [
     "*.rip",

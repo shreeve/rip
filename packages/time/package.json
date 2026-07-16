@@ -8,8 +8,8 @@
     ".": "./time.rip"
   },
   "scripts": {
-    "test": "../../bin/rip test.rip",
-    "demo": "../../bin/rip demo.rip"
+    "test": "rip test.rip",
+    "demo": "rip demo.rip"
   },
   "rip": {
     "browser": true

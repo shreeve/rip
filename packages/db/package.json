@@ -12,7 +12,7 @@
     "rip-db": "./bin/rip-db"
   },
   "scripts": {
-    "test": "bun test --timeout 15000"
+    "test": "rip test"
   },
   "files": [
     "*.rip",

@@ -8,6 +8,7 @@
     "packages/*"
   ],
   "scripts": {
+    "postinstall": "mkdir -p node_modules/.bin && ln -sf ../../bin/rip node_modules/.bin/rip",
     "parser": "bun src/grammar/solar.rip -o src/parser.js src/grammar/grammar.rip",
     "corpus-expected": "bun scripts/corpus-expected.mjs",
     "browser-bundle": "bun scripts/browser-bundle.mjs",

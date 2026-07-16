@@ -8,7 +8,7 @@
     ".": "./csv.rip"
   },
   "scripts": {
-    "test": "../../bin/rip test.rip"
+    "test": "rip test.rip"
   },
   "files": [
     "csv.rip",
