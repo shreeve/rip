@@ -13,8 +13,9 @@ packages/<name>/
   <name>.rip      # public entry (or index.rip when the name is taken)
   test.rip        # the whole suite, at package root — not test/
   demo.rip        # optional runnable tour (time has one)
-  bench/          # optional benches (csv: bench.rip self-bench, compare.rip
-                  # head-to-head — competitor deps live in bench/package.json)
+  bench/          # optional benches (csv: index.rip self-bench, compare.rip
+                  # head-to-head — competitor deps live in bench/package.json;
+                  # `rip bench` runs the directory's index.rip)
   package.json
   README.md
 ```
@@ -38,7 +39,7 @@ Keys in exactly this order (omit what does not apply):
   "scripts": {
     "test": "rip test.rip",
     "demo": "rip demo.rip",
-    "bench": "rip bench/bench.rip"
+    "bench": "rip bench"
   },
   "rip": { "browser": true },
   "files": ["<name>.rip", "README.md"],

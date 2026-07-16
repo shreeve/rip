@@ -230,6 +230,21 @@ describe('cli: run surface (loader end-to-end)', () => {
     expect(r.stdout).toBe('42\n');
   });
 
+  test('a directory input runs its index.rip; one without rejects precisely', () => {
+    const sub = join(dir, 'dir-entry');
+    mkdirSync(sub, { recursive: true });
+    writeFileSync(join(sub, 'index.rip'), 'console.log "from index: #{process.argv[2]}"\n');
+    const ok = rip(['dir-entry', 'arg1']);
+    expect(ok.status).toBe(0);
+    expect(ok.stdout).toBe('from index: arg1\n');
+
+    const empty = join(dir, 'dir-empty');
+    mkdirSync(empty, { recursive: true });
+    const bad = rip(['dir-empty']);
+    expect(bad.status).toBe(1);
+    expect(bad.stderr).toContain('directory with no index.rip');
+  });
+
   test('`rip test` runs bun test with the .rip loader preloaded', () => {
     const sub = join(dir, 'test-subcommand');
     mkdirSync(sub, { recursive: true });

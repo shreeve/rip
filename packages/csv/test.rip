@@ -4,12 +4,14 @@
 
 import { test, eq } from '@rip-lang/testing'
 import { CSV } from '@rip-lang/csv'
+import * as mod from '@rip-lang/csv'
 
 # ==[ Package surface ]==
 
 console.log "\nPackage"
 
-test "named export CSV only", ->
+test "module exports CSV and nothing else", ->
+  eq Object.keys(mod).sort(), ['CSV']
   eq typeof CSV.read, 'function'
   eq typeof CSV.write, 'function'
   eq typeof CSV.load, 'function'
@@ -338,3 +340,17 @@ test "dx_codes round-trip", ->
   rows = CSV.read raw, excel: true, relax: true, strip: true
   eq rows[1][1], 'Z00.00, Z11.3'
   eq CSV.read(CSV.write(rows))[1][1], 'Z00.00, Z11.3'
+
+# ==[ File I/O ]==
+
+console.log "\nFile I/O"
+
+test! "save then load round-trips through a real file", ->
+  path = "#{import.meta.dir}/.test-io-#{Date.now()}.csv"
+  rows = [['name','note'], ['Alice', 'likes, commas'], ['Bob', 'say "hi"']]
+  try
+    CSV.save! path, rows
+    eq CSV.load!(path), rows
+    eq CSV.load!(path, headers: true), [{name: 'Alice', note: 'likes, commas'}, {name: 'Bob', note: 'say "hi"'}]
+  finally
+    try (await import('fs')).unlinkSync(path)

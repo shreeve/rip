@@ -1,13 +1,14 @@
 # ==============================================================================
 # csv bench — read throughput on synthesized workloads or real files
 #
-#   bun run bench                             # from packages/csv or bench/
-#   rip bench/bench.rip big.csv other.csv     # your own files
+#   bun run bench                    # from packages/csv or bench/
+#   rip bench big.csv other.csv      # your own files (dir runs index.rip)
 #
 # Each workload parses with relax+excel enabled (the heuristics cost
 # nothing until a stray quote appears, so this is the honest ceiling).
-# Warm-up pass first, then best of three timed runs. The head-to-head
-# against other JS parsers is compare.rip (`bun run compare` in bench/).
+# Warm-up pass first, then best of three timed runs. When the competitor
+# parsers are installed (`bun install` in bench/), the head-to-head
+# (compare.rip) runs automatically after the self workloads.
 # ==============================================================================
 
 import { CSV } from '@rip-lang/csv'
@@ -55,3 +56,21 @@ else
     '',
     '04003497,72359435,"DAVIS, DAKOTA ""JAMIE"",=""03/13/2022",207394404660,="001453",Hemoglobin A1c,4.00\n',
     10 * MB)
+
+  # bulk-skip path — long unquoted fields where indexOf's SIMD scan shines
+  longCell = 'x'.repeat(300)
+  measure 'long fields (SIMD)', synthesize(
+    "a,b,c\n",
+    "#{longCell},#{longCell},#{longCell}\n",
+    25 * MB)
+
+  # head-to-head vs uDSV/PapaParse/d3-dsv/csv-parse — runs when the
+  # competitor parsers are installed; they are quarantined in bench/
+  # so @rip-lang/csv itself stays dependency-free
+  try
+    await import('./compare.rip')
+  catch e
+    if /find|resolve/i.test(e.message ?? '')
+      p "\nhead-to-head skipped — run `bun install` in bench/ to add the competitor parsers"
+    else
+      throw e

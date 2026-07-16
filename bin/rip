@@ -24,6 +24,7 @@ const HELP = `rip ${packageJson.version} — ${packageJson.description}
 
 Usage:
   rip [options] file.rip [args...]   Run a .rip file (its .rip imports compile transitively)
+  rip [options] dir [args...]        Run dir/index.rip
   rip [options]                      Read source from stdin
   rip schema <verb> [args...]        Schema evolution: status | plan | make | migrate
                                      (run 'rip schema --help' for the full surface)
@@ -249,7 +250,18 @@ if (explainDirection !== null) {
 }
 
 const compileMode = showCompiled || showTokens || showSexpr || withMap || outputFile !== null || wantDts;
-const inputFile = fileIndex === -1 ? null : args[fileIndex];
+let inputFile = fileIndex === -1 ? null : args[fileIndex];
+
+// A directory input resolves to its index.rip — the same convention as
+// directory imports. A directory without one rejects with the precise
+// reason, not a generic "file not found".
+if (inputFile !== null && existsSync(inputFile) && statSync(inputFile).isDirectory()) {
+  const indexPath = join(inputFile, 'index.rip');
+  if (!existsSync(indexPath) || !statSync(indexPath).isFile()) {
+    fail(`rip: ${inputFile} is a directory with no index.rip`);
+  }
+  inputFile = indexPath;
+}
 
 // Declarations on STDOUT must be the only stream: without an output
 // file there is nowhere else to put the JS, and interleaving two

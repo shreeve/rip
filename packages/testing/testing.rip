@@ -45,9 +45,12 @@ report = ->
 
 process.on 'exit', report
 
+# An async body works too: invoke as `test! "name", -> ...` so the
+# file awaits it in place and output stays ordered.
 export def test(name, fn)
   try
-    fn()
+    r = fn()
+    await r if r?.then?
     pass++
     console.log "  #{paint(GREEN, '✓')} #{name}"
   catch e

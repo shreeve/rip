@@ -317,7 +317,7 @@ If output is omitted, writes to stdout.
 ## Performance
 
 ```bash
-bun run bench                  # synthesized workloads, or pass file paths
+bun run bench                  # workloads + head-to-head, or pass file paths
 ```
 
 Measured on Apple Silicon under Bun (warm-up pass, best of three):
@@ -339,8 +339,9 @@ appears: recovery mode runs at full speed on clean data.
 ### Head-to-head
 
 Same strings, same protocol, every parser producing rows of string
-arrays (`bun install && bun run compare` in `bench/`, which quarantines
-the competitor parsers away from this package's zero dependencies):
+arrays. Runs automatically after the workloads above once the
+competitor parsers are installed (`bun install` in `bench/`, which
+quarantines them away from this package's zero dependencies):
 
 | Parser | Plain | Quoted | Malformation recovery |
 |--------|-------|--------|----------------------|
