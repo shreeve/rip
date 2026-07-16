@@ -1,0 +1,76 @@
+# ==============================================================================
+# csv bench — read throughput on synthesized workloads or real files
+#
+#   bun run bench                        # synthesized workloads + head-to-head
+#   rip bench.rip big.csv other.csv      # your own files
+#
+# Each workload parses with relax+excel enabled (the heuristics cost
+# nothing until a stray quote appears, so this is the honest ceiling).
+# Warm-up pass first, then best of three timed runs. When the competitor
+# parsers are installed (`bun install` in bench/), the head-to-head
+# (bench/compare.rip) runs automatically after the self workloads.
+# ==============================================================================
+
+import { CSV } from '@rip-lang/csv'
+import { basename } from 'path'
+
+MB =! 1048576
+
+def measure(name, str)
+  CSV.read(str, relax: true, excel: true)
+  best = Infinity
+  rows = null
+  loop 3
+    t0 = performance.now()
+    rows = CSV.read(str, relax: true, excel: true)
+    t1 = performance.now()
+    best = Math.min(best, t1 - t0)
+  mb = str.length / MB
+  speed = mb / (best / 1000)
+  p "#{name.padEnd(20)} #{(mb.toFixed(1) + ' MB').padStart(8)}  #{rows.length.toLocaleString().padStart(10)} rows  #{best.toFixed(0).padStart(5)}ms  #{speed.toFixed(0).padStart(4)} MB/s"
+
+def synthesize(header, row, bytes)
+  header + row.repeat(Math.ceil(bytes / row.length))
+
+files = process.argv.slice(2)
+
+if files.length
+  for path in files
+    str = Bun.file(path).text!
+    measure basename(path), str
+else
+  # fast path — no quotes anywhere
+  measure 'plain (fast path)', synthesize(
+    "id,name,city,st,zip,phone,role,date,status,amt\n",
+    "1042,Alice Johnson,Seattle,WA,98101,2065551234,engineer,2026-01-15,active,4415.22\n",
+    25 * MB)
+
+  # full path — quoted fields with embedded commas on every row
+  measure 'quoted (full path)', synthesize(
+    "id,name,loc,zip,role,date,status,amt\n",
+    '1042,"Johnson, Alice","Seattle, WA",98101,"engineer, sr",2026-01-15,"active",4415.22\n',
+    25 * MB)
+
+  # recovery path — stray quotes and ="" literals, Labcorp-style
+  measure 'labcorp (recovery)', synthesize(
+    '',
+    '04003497,72359435,"DAVIS, DAKOTA ""JAMIE"",=""03/13/2022",207394404660,="001453",Hemoglobin A1c,4.00\n',
+    10 * MB)
+
+  # bulk-skip path — long unquoted fields where indexOf's SIMD scan shines
+  longCell = 'x'.repeat(300)
+  measure 'long fields (SIMD)', synthesize(
+    "a,b,c\n",
+    "#{longCell},#{longCell},#{longCell}\n",
+    25 * MB)
+
+  # head-to-head vs uDSV/PapaParse/d3-dsv/csv-parse — runs when the
+  # competitor parsers are installed; they are quarantined in bench/
+  # so @rip-lang/csv itself stays dependency-free
+  try
+    await import('./bench/compare.rip')
+  catch e
+    if /find|resolve/i.test(e.message ?? '')
+      p "\nhead-to-head skipped — run `bun install` in bench/ to add the competitor parsers"
+    else
+      throw e

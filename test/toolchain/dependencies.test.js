@@ -11,9 +11,10 @@ test('package.json declares no dependencies of any kind', () => {
   for (const field of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
     expect(pkg[field]).toBeUndefined();
   }
-  // The compiler package is also not a workspace root: packages/vscode is
-  // standalone, never hoisted into the compiler's dependency graph.
-  expect(pkg.workspaces).toBeUndefined();
+  // The root IS the packages/* workspace root (owner decision: in-tree
+  // @rip-lang/* resolution, hoisted linker) — but the workspace brings
+  // the compiler itself no dependencies: the fields above stay empty.
+  expect(pkg.workspaces).toEqual(['packages/*']);
 });
 
 // The editor-integration package carries a minimal, pinned,

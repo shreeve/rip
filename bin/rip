@@ -24,9 +24,12 @@ const HELP = `rip ${packageJson.version} — ${packageJson.description}
 
 Usage:
   rip [options] file.rip [args...]   Run a .rip file (its .rip imports compile transitively)
+  rip [options] dir [args...]        Run dir/index.rip
   rip [options]                      Read source from stdin
   rip schema <verb> [args...]        Schema evolution: status | plan | make | migrate
                                      (run 'rip schema --help' for the full surface)
+  rip test [args...]                 Run \`bun test\` with the .rip loader preloaded
+                                     (default --timeout 15000; extra args pass through)
 
 Options:
   -c, --compile        Print compiled JavaScript to stdout
@@ -95,6 +98,23 @@ const args = process.argv.slice(2);
 if (args[0] === 'schema') {
   const schemaCliPath = join(dirname(fileURLToPath(import.meta.url)), '../src/schema-cli.js');
   const r = spawnSync('bun', [`--preload=${loaderPath}`, schemaCliPath, ...args.slice(1)], {
+    stdio: 'inherit',
+    env: process.env,
+  });
+  process.exit(r.status ?? 1);
+}
+
+// `rip test [bun-test args...]` — Bun's test runner with the .rip
+// loader preloaded, so suites that import .rip modules need no
+// per-package preload config. Dispatched like `schema`: the word
+// `test` in first position is the subcommand, never an input file —
+// run a file literally named `test` as `rip ./test`. A default
+// per-test timeout of 15000ms applies unless the caller passes one.
+if (args[0] === 'test') {
+  const rest = args.slice(1);
+  const hasTimeout = rest.some((a) => a === '--timeout' || a.startsWith('--timeout='));
+  const testArgs = hasTimeout ? rest : ['--timeout', '15000', ...rest];
+  const r = spawnSync('bun', [`--preload=${loaderPath}`, 'test', ...testArgs], {
     stdio: 'inherit',
     env: process.env,
   });
@@ -230,7 +250,18 @@ if (explainDirection !== null) {
 }
 
 const compileMode = showCompiled || showTokens || showSexpr || withMap || outputFile !== null || wantDts;
-const inputFile = fileIndex === -1 ? null : args[fileIndex];
+let inputFile = fileIndex === -1 ? null : args[fileIndex];
+
+// A directory input resolves to its index.rip — the same convention as
+// directory imports. A directory without one rejects with the precise
+// reason, not a generic "file not found".
+if (inputFile !== null && existsSync(inputFile) && statSync(inputFile).isDirectory()) {
+  const indexPath = join(inputFile, 'index.rip');
+  if (!existsSync(indexPath) || !statSync(indexPath).isFile()) {
+    fail(`rip: ${inputFile} is a directory with no index.rip`);
+  }
+  inputFile = indexPath;
+}
 
 // Declarations on STDOUT must be the only stream: without an output
 // file there is nowhere else to put the JS, and interleaving two

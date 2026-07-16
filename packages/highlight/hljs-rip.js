@@ -14,7 +14,7 @@ export default function(hljs) {
     'delete', 'typeof', 'instanceof', 'new', 'super',
     'and', 'or', 'not', 'is', 'isnt',
     // Declarations
-    'class', 'def', 'enum', 'interface', 'type', 'extends', 'own',
+    'class', 'def', 'enum', 'interface', 'type', 'extends', 'own', 'schema',
     // Iteration
     'in', 'of', 'by', 'as',
     // Component system
@@ -183,9 +183,17 @@ export default function(hljs) {
     ],
   };
 
+  // *{...} map literal sigil. Distinctively Rip, so unlike the general
+  // operator rule it carries relevance and boosts language auto-detection.
+  const MAP_LITERAL = {
+    className: 'operator',
+    begin: /\*(?=\{)/,
+    relevance: 5,
+  };
+
   const OPERATORS = {
     className: 'operator',
-    begin: /::|:=|~=|~>|<~|<=>|\.=|\*>|\*(?=\{)|\?=|\$(?=['"])|=!|!\?|\?!|=~|\?\?=|\?\?|\?\.|\.\.\.|\.\.|=>|->|\*\*|\/\/|%%|===|!==|==|!=|<=|>=|&&|\|\||[+\-*\/%&|^~<>=!?]/,
+    begin: /::|:=|~=|~>|<~|<=>|\.=|\*>|\?=|\$(?=['"])|=!|!\?|\?!|=~|\?\?=|\?\?|\?\.|\.\.\.|\.\.|=>|->|\*\*|\/\/|%%|===|!==|==|!=|<=|>=|&&|\|\||[+\-*\/%&|^~<>=!?]/,
     relevance: 0,
   };
 
@@ -221,6 +229,7 @@ export default function(hljs) {
       INSTANCE_VAR,
       SIGIL_ATTR,
       TYPE_KEYWORDS,
+      MAP_LITERAL,
       OPERATORS,
       { // inline JS (backtick)
         className: 'string',

@@ -8,7 +8,7 @@
 # Each line shows a real call and its output. The base instant is fixed so the
 # tour is deterministic; only the `relative` example reads "now".
 
-import time, { age } from './time.rip'
+import time, { age } from '@rip-lang/time'
 
 show = (label, value) -> console.log "  #{String(label).padEnd(28)} #{value}"
 head = (title)        -> console.log "\n#{title}"

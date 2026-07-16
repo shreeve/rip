@@ -18,8 +18,8 @@ test('package has no dependency fields (bun:sqlite and fetch are built in)', () 
   }
 });
 
-test('the entry is the MCP server module with its type surface', () => {
-  expect(pkg.exports).toEqual({ '.': { types: './mcp.d.ts', default: './mcp.rip' } });
+test('the entry is the MCP server module', () => {
+  expect(pkg.exports).toEqual({ '.': './mcp.rip' });
 });
 
 test('the package does not claim browser safety (filesystem, sqlite, stdio)', () => {
@@ -30,11 +30,6 @@ test('the rip-ai bin is declared and executable', () => {
   expect(pkg.bin).toEqual({ 'rip-ai': './bin/rip-ai' });
   const mode = statSync(new URL('../bin/rip-ai', import.meta.url)).mode;
   expect(mode & 0o111).not.toBe(0);
-});
-
-test('the public type surface carries no any', () => {
-  const dts = readFileSync(new URL('../mcp.d.ts', import.meta.url), 'utf8');
-  expect(dts.match(/\bany\b/g)).toBeNull();
 });
 
 test('importing the entry as a module starts nothing and exports nothing', async () => {

@@ -1,0 +1,677 @@
+# ==============================================================================
+# x12 tests: selectors, construction, get/set, iteration, find, show, CLI
+#
+# Every expectation here traces to the running v3 implementation (rip-lang),
+# the port's behavioral oracle, except three v3 defects fixed in v4, whose
+# pins assert the CORRECT behavior: cloning an instance is exact (v3 appended
+# junk STR/FLD/REP/COM/SEG/ARY rows), the terminator after the last segment
+# is not an extra empty row (v3 rendered a trailing "~~"), and a component
+# set with no explicit repeat writes through repeat 1 like GET (v3 silently
+# dropped the write).
+# ==============================================================================
+
+import { test, eq, ok, throws } from '@rip-lang/testing'
+import { X12, ISA_WIDTHS, SELECTOR } from '@rip-lang/x12'
+import * as mod from '@rip-lang/x12'
+import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
+import { spawnSync } from 'child_process'
+
+X270 =! [
+  'ISA*00*          *00*          *ZZ*OFFALLY        *ZZ*PAYER          *260428*1234*^*00501*100000001*0*P*:~'
+  'GS*HS*OFFALLY*PAYER*20260428*1234*100000001*X*005010X279A1~'
+  'ST*270*0001*005010X279A1~'
+  'BHT*0022*13*8675309*20260428*1234~'
+  'HL*1**20*1~'
+  'NM1*PR*2*EXAMPLE HEALTH PLAN*****PI*12345~'
+  'HL*2*1*21*1~'
+  'NM1*1P*2*EXAMPLE CLINIC*****XX*1234567893~'
+  'HL*3*2*22*0~'
+  'TRN*1*8675309-001*9OFFALLY~'
+  'NM1*IL*1*DOE*JOHN****MI*M0000001~'
+  'DMG*D8*19850615*M~'
+  'DTP*291*D8*20260428~'
+  'EQ*30~'
+  'SE*13*0001~'
+  'GE*1*100000001~'
+  'IEA*1*100000001~'
+].join('')
+
+ISA_DEFAULT =! 'ISA*00*          *00*          *ZZ*               *ZZ*               *      *    *^*00501*         *0*P*:'
+
+pkg =! JSON.parse(readFileSync(join(import.meta.dir, 'package.json'), 'utf8'))
+
+# On-disk fixture for X12.load and the CLI, minted fresh per run.
+tmp     =! mkdtempSync join(tmpdir(), 'x12-')
+fixture =! join tmp, '270.x12'
+writeFileSync fixture, X270
+
+# ==[ Package surface ]==
+
+console.log "\nPackage"
+
+test "public entry exposes named exports only", ->
+  eq Object.keys(mod).sort(), ['ISA_WIDTHS', 'SELECTOR', 'X12']
+  ok not ('default' of mod), 'no default export'
+
+test "no runtime deps; testing harness is the only devDependency", ->
+  for field in ['dependencies', 'peerDependencies', 'optionalDependencies']
+    eq pkg[field], undefined
+  eq pkg.devDependencies, { '@rip-lang/testing': 'workspace:*' }
+
+test "does not claim browser safety (it reads the filesystem)", ->
+  eq pkg.rip, undefined
+  source = readFileSync join(import.meta.dir, 'x12.rip'), 'utf8'
+  ok source.includes("from 'fs'")
+
+test "the rip-x12 bin is x12.rip itself, shebang'd and executable", ->
+  eq pkg.bin, { 'rip-x12': './x12.rip' }
+  source = readFileSync join(import.meta.dir, 'x12.rip'), 'utf8'
+  ok source.startsWith('#!/usr/bin/env rip\n')
+  mode = statSync(join(import.meta.dir, 'x12.rip')).mode
+  ok (mode & 0o111) isnt 0
+
+test "ISA_WIDTHS carries the official element widths", ->
+  eq ISA_WIDTHS, [3, 2, 10, 2, 10, 2, 15, 2, 15, 6, 4, 1, 5, 9, 1, 1]
+
+test "SELECTOR is the selector grammar regexp", ->
+  ok SELECTOR instanceof RegExp
+  eq 'EB(3)-4(2).1'.match(SELECTOR).slice(1), ['EB', '3', '4', '2', '1']
+  eq 'NM1(?)'.match(SELECTOR).slice(1), ['NM1', '?', undefined, undefined, undefined]
+  eq 'REF(+)-1'.match(SELECTOR).slice(1), ['REF', '+', '1', undefined, undefined]
+
+# ==[ Construction and separator detection ]==
+
+console.log "\nConstruction"
+
+test "no argument seeds the fixed-width ISA template", ->
+  x = new X12()
+  eq x.toString(), "#{ISA_DEFAULT}~"
+  eq x.raw(), "#{ISA_DEFAULT}~"
+  eq x.toString().length, 106
+  eq x.toArray().length, 1
+
+test "empty string also seeds the template", ->
+  eq new X12('').toString(), new X12().toString()
+
+test "separators are read from the ISA header", ->
+  x = new X12 X270
+  eq [x.fld, x.rep, x.com, x.seg], ['*', '^', ':', '~']
+
+test "alternate separators are detected", ->
+  raw = 'ISA|00|          |00|          |ZZ|A              |ZZ|B              |260428|1234|^|00501|000000001|0|P|:!REF|X!'
+  x = new X12 raw
+  eq [x.fld, x.rep, x.com, x.seg], ['|', '^', ':', '!']
+  eq x.get('REF-1'), 'X'
+  eq x.toArray().length, 2
+
+test "an ISA-11 of U falls back to ^ for repetition", ->
+  raw = X270.replace '*1234*^*', '*1234*U*'
+  eq new X12(raw).rep, '^'
+
+test "an X12 instance clones exactly through its string form", ->
+  a = new X12 X270
+  b = new X12 a
+  eq b.toString(), a.toString()
+  eq b.toArray(), a.toArray()
+  eq b.get('TRN-2'), '8675309-001'
+  eq b.get('NM1(?)'), 3
+
+test "an array seeds the template and applies selector/value pairs", ->
+  x = new X12 ['ISA-6', 'SNDR', 'GS(+)-1', ['HB', 'A', 'B']]
+  eq x.get('ISA-6'), 'SNDR           '
+  eq x.toArray()[-1], ['GS', 'HB', 'A', 'B']
+
+test "an object seeds the template and applies entries, skipping nullish values", ->
+  x = new X12 { 'ISA-6': 'SNDR', 'ISA-8': null }
+  eq x.get('ISA-6'), 'SNDR           '
+  eq x.get('ISA-8'), '               '
+
+test "malformed input throws", ->
+  throws (-> new X12 'FOO*1~'), 'malformed X12'
+  throws (-> new X12 'ISA*00~'), 'malformed X12'
+  # The header match is case-sensitive: a lowercase isa is rejected.
+  throws (-> new X12 X270.replace(/^ISA/, 'isa')), 'malformed X12'
+
+# ==[ Serialization ]==
+
+console.log "\nSerialization"
+
+test "toArray splits segments and fields, one row per segment", ->
+  rows = new X12(X270).toArray()
+  eq rows.length, 17
+  eq rows[-1], ['IEA', '1', '100000001']
+  eq rows[0][0], 'ISA'
+  eq rows[2], ['ST', '270', '0001', '005010X279A1']
+  eq rows[10], ['NM1', 'IL', '1', 'DOE', 'JOHN', '', '', '', 'MI', 'M0000001']
+
+test "toString renders one segment per line and round-trips", ->
+  x = new X12 X270
+  eq x.toString().split('\n').length, 17
+  eq x.toString().replace(/\n/g, ''), X270
+  eq new X12(x.toString()).toArray(), x.toArray()
+
+test "raw() is the uppercased single-line wire form", ->
+  x = new X12 X270.replace('DOE*JOHN', 'Doe*John')
+  eq x.raw(), X270
+
+test "newlines and CRLF between segments are absorbed", ->
+  eq new X12(X270.replace(/~/g, '~\n')).toArray().length, 17
+  eq new X12(X270.replace(/~/g, '~\r\n')).toArray().length, 17
+
+# ==[ Get ]==
+
+console.log "\nGet"
+
+x270 =! new X12 X270
+
+test "addresses fields within the first matching segment", ->
+  eq x270.get('GS-2'), 'OFFALLY'
+  eq x270.get('ST-1'), '270'
+  eq x270.get('TRN-2'), '8675309-001'
+
+test "ISA elements come back at their fixed widths", ->
+  eq x270.get('ISA-6'), 'OFFALLY        '
+  eq x270.get('ISA-8'), 'PAYER          '
+
+test "segment names match case-insensitively", ->
+  eq x270.get('nm1-3'), 'EXAMPLE HEALTH PLAN'
+
+test "(n) selects the nth occurrence", ->
+  eq x270.get('NM1-3'), 'EXAMPLE HEALTH PLAN'
+  eq x270.get('NM1(2)-3'), 'EXAMPLE CLINIC'
+  eq x270.get('NM1(3)-9'), 'M0000001'
+
+test "(?) counts occurrences", ->
+  eq x270.get('NM1(?)'), 3
+  eq x270.get('HL(?)'), 3
+  eq x270.get('ZZZ(?)'), 0
+
+test "(*) collects from every occurrence", ->
+  eq x270.get('NM1(*)-3'), ['EXAMPLE HEALTH PLAN', 'EXAMPLE CLINIC', 'DOE']
+  eq x270.get('NM1(*)-1'), ['PR', '1P', 'IL']
+  eq x270.get('HL(*)'), ['HL*1**20*1', 'HL*2*1*21*1', 'HL*3*2*22*0']
+
+test "a bare segment name returns the whole segment", ->
+  eq x270.get('TRN'), 'TRN*1*8675309-001*9OFFALLY'
+
+test "dot and dash are interchangeable position separators", ->
+  eq x270.get('NM1.3'), x270.get('NM1-3')
+
+test "missing segments and fields return the empty string", ->
+  eq x270.get('ZZZ-1'), ''
+  eq x270.get('NM1-20'), ''
+  eq x270.get('NM1(9)-3'), ''
+
+test "no selector returns the serialized message", ->
+  eq x270.get(), x270.toString()
+
+test "a selector that cannot form a segment pattern throws", ->
+  throws (-> x270.get('***')), 'bad selector'
+
+console.log "\nGet: repeats and components"
+
+xrep =! new X12 'ISA*00*          *00*          *ZZ*A              *ZZ*B              *260428*1234*^*00501*000000001*0*P*:~SVC*AD:D1110*95*76~LQ*HE*N1^N2^N3~'
+
+test ".n addresses components", ->
+  eq xrep.get('SVC-1.1'), 'AD'
+  eq xrep.get('SVC-1.2'), 'D1110'
+  eq xrep.get('SVC-1-2'), 'D1110'   # dash form
+
+test "(n) after a field addresses repetitions", ->
+  eq xrep.get('LQ-2(1)'), 'N1'
+  eq xrep.get('LQ-2(2)'), 'N2'
+  eq xrep.get('LQ-2(3)'), 'N3'
+  eq xrep.get('LQ-2(9)'), ''
+
+test "(?) after a field counts repetitions", ->
+  eq xrep.get('LQ-2(?)'), 3
+
+test "repetition and component combine", ->
+  eq xrep.get('LQ-2(2).1'), 'N2'
+
+# ==[ Set ]==
+
+console.log "\nSet"
+
+test "ISA elements are padded/truncated to their fixed widths", ->
+  x = new X12()
+  x.set 'ISA-6', 'SENDER'
+  eq x.toArray()[0][6], 'SENDER         '
+  x.set 'ISA-13', '42'
+  eq x.toArray()[0][13], '42       '
+  x.set 'ISA-6', 'WAY-TOO-LONG-FOR-FIFTEEN'
+  eq x.toArray()[0][6], 'WAY-TOO-LONG-FO'
+
+test "set invalidates the cached string", ->
+  x = new X12()
+  before = x.toString()
+  x.set 'ISA-8', 'RCVR'
+  ok x.toString() isnt before
+  eq x.get('ISA-8'), 'RCVR           '
+
+test "(+) appends a new segment occurrence", ->
+  x = new X12()
+  x.set 'GS(+)-1', ['HB', 'S', 'R']
+  eq x.toArray()[-1], ['GS', 'HB', 'S', 'R']
+  x.set 'REF(+)-1', 'A'
+  x.set 'REF(+)-1', 'B'
+  eq x.get('REF(1)-1'), 'A'
+  eq x.get('REF(2)-1'), 'B'
+  eq x.get('REF(?)'), 2
+
+test "setting a missing segment creates it, padding skipped fields", ->
+  x = new X12()
+  x.set 'BHT-3', 'TRACE'
+  eq x.toArray().find((r) -> r[0] is 'BHT'), ['BHT', '', '', 'TRACE']
+
+test "the literal value 'num' on a (+) append writes the occurrence number", ->
+  x = new X12()
+  x.set 'LX(+)-1', 'num'
+  x.set 'LX(+)-1', 'num'
+  eq x.get('LX(*)-1'), ['1', '2']
+
+test "an array value joins on the field separator", ->
+  x = new X12()
+  x.set 'SV3-1', ['AD', 'D1110']
+  eq x.toArray().find((r) -> r[0] is 'SV3'), ['SV3', 'AD', 'D1110']
+
+test "a bare segment selector replaces every field", ->
+  x = new X12()
+  x.set 'DMG', ['D8', '19850615', 'M']
+  eq x.toArray().find((r) -> r[0] is 'DMG'), ['DMG', 'D8', '19850615', 'M']
+
+test "components write through rep 1 when the rep is explicit", ->
+  x = new X12()
+  x.set 'CLM-5(1).1', '11'
+  x.set 'CLM-5(1).3', '1'
+  eq x.toArray().find((r) -> r[0] is 'CLM').join('*'), 'CLM*****11::1'
+
+test "a component set with no rep also writes through repeat 1", ->
+  # v3 resolved the missing rep to index -1 and silently dropped the
+  # write; the fixed pin matches the GET default.
+  x = new X12()
+  x.set 'CLM-5.1', '11'
+  x.set 'CLM-5.3', '1'
+  eq x.toArray().find((r) -> r[0] is 'CLM').join('*'), 'CLM*****11::1'
+  eq x.get('CLM-5.3'), '1'
+
+test "repetitions pad out and splice in place", ->
+  x = new X12()
+  x.set 'LQ-2(2)', 'X2'
+  x.set 'LQ-2(1)', 'X1'
+  eq x.toArray().find((r) -> r[0] is 'LQ')[2], 'X1^X2'
+  eq x.get('LQ-2(?)'), 2
+
+test "(*) sets every occurrence", ->
+  x = new X12 X270
+  x.set 'NM1(*)-1', 'XX'
+  eq x.get('NM1(*)-1'), ['XX', 'XX', 'XX']
+
+test "ISA(*) enforces widths on every occurrence", ->
+  x = new X12 X270 + X270   # two concatenated interchanges
+  x.set 'ISA(*)-6', 'A'
+  eq x.get('ISA(*)-6'), ['A              ', 'A              ']
+
+test "a missing value writes the empty string", ->
+  x = new X12()
+  x.set 'REF-1'
+  eq x.toArray().find((r) -> r[0] is 'REF'), ['REF', '']
+
+test "created segment names are uppercased", ->
+  x = new X12()
+  x.set 'ref(+)-1', 'lower'
+  eq x.toArray()[-1], ['REF', 'lower']
+
+test "zero indexes are rejected", ->
+  x = new X12()
+  throws (-> x.set('NM1-0', 'x')), 'zero index on field'
+  throws (-> x.set('NM1-1.0', 'x')), 'zero index on component'
+
+# ==[ Data / update ]==
+
+console.log "\nData and update"
+
+test "update applies selector/value pairs from an array", ->
+  x = new X12()
+  eq x.update(['ISA-6', 'A', 'ISA-8', 'B']), x
+  eq x.get('ISA-6'), 'A              '
+  eq x.get('ISA-8'), 'B              '
+
+test "update applies entries from an object and skips nullish values", ->
+  x = new X12()
+  x.update { 'ISA-6': 'A', 'ISA-8': null }
+  eq x.get('ISA-6'), 'A              '
+  eq x.get('ISA-8'), '               '
+
+test "data with three or more arguments routes to update", ->
+  x = new X12()
+  x.data 'ISA-6', 'A', 'ISA-8', 'B'
+  eq x.get('ISA-6'), 'A              '
+  eq x.get('ISA-8'), 'B              '
+
+test "data with one argument gets, with two sets", ->
+  x = new X12()
+  x.data 'ISA-6', 'A'
+  eq x.data('ISA-6'), 'A              '
+
+# ==[ Iteration ]==
+
+console.log "\nIteration"
+
+test "each visits every row", ->
+  names = []
+  eq x270.each((r) -> names.push r[0]), x270
+  eq names, [
+    'ISA', 'GS', 'ST', 'BHT', 'HL', 'NM1', 'HL', 'NM1', 'HL', 'TRN',
+    'NM1', 'DMG', 'DTP', 'EQ', 'SE', 'GE', 'IEA',
+  ]
+
+test "each filters by name, case-insensitively", ->
+  got = []
+  x270.each 'nm1', (r) -> got.push r[3]
+  eq got, ['EXAMPLE HEALTH PLAN', 'EXAMPLE CLINIC', 'DOE']
+
+test "each filters by regexp", ->
+  got = []
+  x270.each /^G[SE]$/, (r) -> got.push r[0]
+  eq got, ['GS', 'GE']
+
+test "grep collects matching rows", ->
+  eq x270.grep('hl').length, 3
+  eq x270.grep(/^N/).map((r) -> r[0]), ['NM1', 'NM1', 'NM1']
+
+# ==[ Find ]==
+
+console.log "\nFind"
+
+test "a single selector returns its value directly", ->
+  eq x270.find('TRN-2'), '8675309-001'
+  eq x270.find('NM1(?)'), 3
+  eq x270.find('NM1(*)-1'), ['PR', '1P', 'IL']
+
+test "several selectors return an array in order", ->
+  eq x270.find('ISA-6', 'GS-2', 'ST-1'), ['OFFALLY        ', 'OFFALLY', '270']
+
+test "nullish selectors produce null slots; missing values produce the empty string", ->
+  eq x270.find('TRN-2', null, 'ST-1'), ['8675309-001', null, '270']
+  eq x270.find('ZZZ-1', 'TRN-2'), ['', '8675309-001']
+
+test "a (*) selector must be the only one", ->
+  throws (-> x270.find('NM1(*)-1', 'TRN-2')), 'multi query allows only one selector'
+
+test "no selectors returns undefined", ->
+  eq x270.find(), undefined
+
+# ==[ Show ]==
+
+console.log "\nShow"
+
+test "'list' returns padded tag/value lines", ->
+  eq x270.show('list').slice(0, 3), [
+    'ISA-1          00',
+    'ISA-2                    ',
+    'ISA-3          00',
+  ]
+
+test "'full' prepends the serialized message", ->
+  out = x270.show 'list', 'full'
+  eq out[0], x270.toString()
+  eq out[1], ''
+
+test "'down' lowercases the segment tags", ->
+  eq x270.show('list', 'down')[0], 'isa-1          00'
+
+test "repeated segments are numbered unless only is set", ->
+  tags = x270.show('list').filter (l) -> l.startsWith('NM1')
+  eq tags[0], 'NM1-1          PR'
+  ok x270.show('list').some (l) -> l.startsWith('HL(2)')
+  ok not x270.show('list', 'only').some (l) -> l.includes('(')
+
+test "'deep' expands repetitions", ->
+  raw = 'ISA*00*          *00*          *ZZ*A              *ZZ*B              *260428*1234*^*00501*000000001*0*P*:~LQ*HE*N1^N2^N3~'
+  eq new X12(raw).show('list', 'deep').filter((l) -> l.startsWith('LQ')), [
+    'LQ-1           HE',
+    'LQ-2(1)        N1',
+    'LQ-2(2)        N2',
+    'LQ-2(3)        N3',
+  ]
+
+test "'hide' suppresses the field listing", ->
+  eq x270.show('list', 'hide'), []
+  eq x270.show('list', 'hide', 'full'), [x270.toString()]
+
+# ==[ Helpers ]==
+
+console.log "\nHelpers"
+
+test "normalize uppercases scalars and arrays in place", ->
+  x = new X12()
+  eq x.normalize('abc'), 'ABC'
+  eq x.normalize(42), '42'
+  arr = ['a', 1]
+  x.normalize arr
+  eq arr, ['A', '1']
+
+test "isaWidths pads a split ISA row to the official widths", ->
+  x = new X12()
+  row = ['ISA', '00', '', '00', '', 'ZZ', 'ABC', 'ZZ', 'B', '260428', '1234', '^', '00501', '1', '0', 'P', ':']
+  eq x.isaWidths(row), [
+    'ISA', '00', '          ', '00', '          ', 'ZZ', 'ABC            ', 'ZZ',
+    'B              ', '260428', '1234', '^', '00501', '1        ', '0', 'P', ':',
+  ]
+
+# ==[ Load ]==
+
+console.log "\nLoad"
+
+test "X12.load reads and parses a file", ->
+  x = X12.load fixture
+  eq x.get('TRN-2'), '8675309-001'
+  eq x.toArray().length, 17
+
+test "an unreadable file throws", ->
+  throws (-> X12.load('/nonexistent/nope.x12')), 'unreadable file: /nonexistent/nope.x12'
+
+# ==[ CLI ]==
+
+console.log "\nCLI"
+
+x12Rip =! join(import.meta.dir, 'x12.rip')
+ripCli =! join(import.meta.dir, '..', '..', 'bin', 'rip')
+
+# run: x12.rip under THIS repo's rip CLI (hermetic). bin: x12.rip executed
+# directly, resolving `rip` through its shebang exactly as installed bins do.
+run = (...args) -> spawnSync process.execPath, [ripCli, x12Rip, ...args], encoding: 'utf8'
+bin = (...args) -> spawnSync x12Rip, args, encoding: 'utf8'
+
+test "-v prints the version from package.json", ->
+  r = run '-v'
+  eq r.status, 0
+  eq r.stdout, "rip-x12 #{pkg.version}\n"
+
+test "-h prints usage", ->
+  r = run '-h'
+  eq r.status, 0
+  ok r.stdout.includes('usage: rip-x12 [options] <file> <file> ...')
+  ok r.stdout.includes('-q, --query <val>')
+
+test "no files is an error", ->
+  r = run()
+  eq r.status, 1
+  ok r.stderr.includes('usage: rip-x12')
+
+test "-q queries selectors, pipe-separated", ->
+  r = run '-q', 'TRN-2,NM1-3', fixture
+  eq r.status, 0
+  eq r.stdout, '8675309-001|EXAMPLE HEALTH PLAN\n'
+
+test "-q with -t emits tab-separated values", ->
+  r = run '-q', 'TRN-2, ST-1', '-t', fixture
+  eq r.stdout, '8675309-001\t270\n'
+
+test "-f lists fields", ->
+  r = run '-f', fixture
+  eq r.status, 0
+  lines = r.stdout.split '\n'
+  eq lines[0], 'ISA-1          00'
+  ok lines.includes('TRN-2          8675309-001')
+  ok lines.includes('NM1(3)-3       DOE')
+
+test "-F lists fields without occurrence indicators", ->
+  r = run '-F', fixture
+  ok not r.stdout.includes('NM1(3)')
+  ok r.stdout.includes('NM1-3          DOE')
+
+test "no options shows the full message body", ->
+  r = run fixture
+  eq r.status, 0
+  ok /^ISA\*00\*/.test r.stdout.split('\n')[0]
+  ok r.stdout.includes('IEA*1*100000001~')
+
+test "-l lowercases segment tags", ->
+  r = run '-f', '-l', fixture
+  eq r.stdout.split('\n')[0], 'isa-1          00'
+
+test "-c appends a message count", ->
+  r = run '-f', '-c', fixture
+  ok r.stdout.includes('\nTotal messages: 1\n')
+
+test "a malformed file reports an error, silenced by -i", ->
+  bad = join tmp, 'bad.x12'
+  writeFileSync bad, 'NOT X12 AT ALL'
+  loud = run '-f', bad
+  ok loud.stderr.includes('malformed X12')
+  quiet = run '-f', '-i', bad
+  eq quiet.stderr, ''
+
+test "a missing path reports unknown and continues", ->
+  r = run '-q', 'TRN-2', '/nonexistent/nope.x12', fixture
+  ok r.stderr.includes('unknown: /nonexistent/nope.x12')
+  eq r.stdout, '8675309-001\n'
+
+test "executing x12.rip directly (the bin) forwards argv and stdout", ->
+  r = bin '-q', 'TRN-2,GS-2', fixture
+  eq r.status, 0
+  eq r.stdout, '8675309-001|OFFALLY\n'
+
+test "executing x12.rip directly (the bin) forwards the exit status", ->
+  eq bin().status, 1
+
+# ==[ Consumer patterns ]==
+#
+# The v3 package's real call sites (an eligibility responder, a dental
+# 837/835 demo) shipped without package tests. These pin the exact usage
+# patterns those consumers rely on.
+
+console.log "\nConsumer patterns"
+
+test "270 segment walk with HL loop tracking finds the subscriber", ->
+  x = new X12 X270
+  current = null
+  subscriber = null
+  trace = null
+  for row in x.toArray()
+    seg = String(row[0]).toUpperCase()
+    if seg is 'HL'
+      current = String(row[3] ?? '')
+    else if seg is 'TRN' and not trace?
+      trace = String(row[2] ?? '')
+    else if seg is 'NM1' and row[1] is 'IL' and current is '22'
+      subscriber = { lastName: row[3], firstName: row[4], memberId: row[9] }
+  eq trace, '8675309-001'
+  eq subscriber, { lastName: 'DOE', firstName: 'JOHN', memberId: 'M0000001' }
+
+test "envelope mirroring reads ISA ids and reuses the inbound separators", ->
+  inbound = new X12 X270
+  isaSender   = String(inbound.get('ISA-8')).trim()
+  isaReceiver = String(inbound.get('ISA-6')).trim()
+  eq isaSender, 'PAYER'
+  eq isaReceiver, 'OFFALLY'
+
+  # A 271 response renders plain segment arrays with the inbound
+  # delimiters and re-parses the result to prove it is well-formed.
+  segs = [
+    ['ISA', '00', '          ', '00', '          ', 'ZZ', isaSender.padEnd(15), 'ZZ', isaReceiver.padEnd(15), '260428', '1234', '^', '00501', '000000042', '0', 'P', ':']
+    ['GS', 'HB', isaSender, isaReceiver, '20260428', '1234', '000000042', 'X', '005010X279A1']
+    ['ST', '271', '0001', '005010X279A1']
+    ['NM1', 'IL', '1', 'DOE', 'JOHN', '', '', '', 'MI', 'M0000001']
+    ['SE', '3', '0001']
+    ['GE', '1', '000000042']
+    ['IEA', '1', '000000042']
+  ]
+  x271 = segs.map((row) -> row.join(inbound.fld) + inbound.seg).join('').toUpperCase()
+
+  out = new X12 x271
+  eq out.get('ST-1'), '271'
+  eq out.get('NM1-9'), 'M0000001'
+  eq out.get('ISA-8').trim(), 'OFFALLY'
+  eq out.show('list', 'down')[0], 'isa-1          00'
+
+test "a fresh X12 seeds a valid fixed-width ISA envelope for 837 headers", ->
+  x = new X12()
+  x.set 'ISA-6', 'SMILEDENTAL'
+  x.set 'ISA-8', 'DELTADENTAL'
+  x.set 'ISA-9', '260625'
+  x.set 'ISA-10', '1200'
+  x.set 'ISA-13', '000000001'
+  isa = x.toArray()[0].join('*')
+  eq isa.length, 105   # 106-char ISA line, less the ~ terminator
+  eq isa, 'ISA*00*          *00*          *ZZ*SMILEDENTAL    *ZZ*DELTADENTAL    *260625*1200*^*00501*000000001*0*P*:'
+
+test "an 835 accretes through (+) appends and exports cleanly", ->
+  x = new X12()
+  x.set 'ISA-6', 'DELTADENTAL'
+  x.set 'ISA-13', '000000002'
+  add = (name, fields) -> x.set "#{name}(+)-1", fields.map (f) -> String(f ?? '')
+
+  add 'GS',  ['HP', 'DELTA', 'NPI', '20260625', '1200', '1', 'X', '005010X221A1']
+  add 'ST',  ['835', '0001']
+  add 'TRN', ['1', 'CHK0001', 'DELTA']
+  add 'CLP', ['CLAIM001', '1', '190.00', '152.00', '19.00', 'CI', 'PAY001', '11']
+  add 'SVC', ['AD:D1110', '95.00', '76.00', '', '1']
+  add 'CAS', ['CO', '45', '9.50']
+  add 'SE',  ['7', '0001']
+  add 'IEA', ['1', '000000002']
+
+  era = x.raw()
+  ok era.startsWith('ISA*00*')
+  ok era.includes('~CLP*CLAIM001*1*190.00*152.00*19.00*CI*PAY001*11~')
+  ok era.endsWith('IEA*1*000000002~')
+  eq new X12(era).toArray(), x.toArray()
+
+test "an 835 parses into structured posting data", ->
+  era =
+    'ISA*00*          *00*          *ZZ*DELTADENTAL    *ZZ*1234567893     *260625*1200*^*00501*000000002*0*P*:~' +
+    'GS*HP*DELTA*NPI*20260625*1200*1*X*005010X221A1~ST*835*0001~BPR*I*152.00*C*ACH~' +
+    'TRN*1*CHK12345*1512345678~N1*PR*DELTA DENTAL~N1*PE*SMILE DENTAL*XX*1234567893~LX*1~' +
+    'CLP*CLAIM001*1*190.00*152.00*19.00*CI*PAY001*11~NM1*QC*1*DOE*JANE~' +
+    'SVC*AD:D1110*95.00*76.00**1~DTM*472*20260625~CAS*CO*45*9.50~CAS*PR*2*9.50~' +
+    'SVC*AD:D0120*95.00*76.00**1~CAS*CO*45*9.50~CAS*PR*2*9.50~' +
+    'SE*16*0001~GE*1*1~IEA*1*000000002~'
+  x = new X12 era
+  toCents = (amt) -> Math.round(parseFloat(amt or '0') * 100)
+
+  eq x.get('TRN-2'), 'CHK12345'
+
+  claims = []
+  claim = null
+  svc = null
+  for row in x.toArray()
+    switch row[0]?.toUpperCase()
+      when 'CLP'
+        claim = { patientControl: row[1], paidCents: toCents(row[4]), lines: [] }
+        claims.push claim
+        svc = null
+      when 'SVC'
+        svc = { code: (row[1] or '').split(':')[1] or row[1], paidCents: toCents(row[3]), writeoffCents: 0 }
+        claim?.lines.push svc
+      when 'CAS'
+        (svc ?? claim).writeoffCents += toCents(row[3]) if row[1] is 'CO'
+
+  eq claims.length, 1
+  eq claims[0].patientControl, 'CLAIM001'
+  eq claims[0].paidCents, 15200
+  eq claims[0].lines.map((l) -> l.code), ['D1110', 'D0120']
+  eq claims[0].lines.map((l) -> l.writeoffCents), [950, 950]

@@ -1,20 +1,24 @@
 {
   "name": "@rip-lang/print",
-  "version": "0.0.0",
+  "version": "4.0.0",
   "private": true,
   "type": "module",
+  "description": "Syntax-highlighted source code printer — 190+ languages via highlight.js, served once to your browser, print-ready",
   "bin": {
-    "rip-print": "./bin/rip-print"
+    "rip-print": "./print.rip"
   },
   "scripts": {
-    "test": "bun test --timeout 15000"
+    "test": "rip test.rip"
   },
   "files": [
     "print.rip",
-    "bin/",
     "README.md"
   ],
   "dependencies": {
+    "@rip-lang/highlight": "workspace:*",
     "highlight.js": "11.11.1"
+  },
+  "devDependencies": {
+    "@rip-lang/testing": "workspace:*"
   }
 }

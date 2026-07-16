@@ -14,17 +14,23 @@ const RUNTIME_RE = /(?:^|\/)src\/runtime\/(intrinsics|stdlib|schema|reactive|com
 
 const unquote = specifier => specifier.slice(1, -1);
 
+// Runnable package verbs (the packages/AGENTS.md contract: root-level
+// test.rip / demo.rip / bench.rip) are dev files, never importable
+// surface — they and the dev-only directories stay out of the bundle.
+const VERB_FILES = new Set(['test.rip', 'demo.rip', 'bench.rip']);
+const SKIP_DIRS = new Set(['node_modules', 'test', 'bench']);
+
 const ripFilesUnder = dir => {
   const out = [];
-  const walk = at => {
+  const walk = (at, depth) => {
     for (const entry of readdirSync(at, { withFileTypes: true })) {
-      if (entry.name === 'node_modules' || entry.name === 'test') continue;
+      if (SKIP_DIRS.has(entry.name)) continue;
       const full = join(at, entry.name);
-      if (entry.isDirectory()) walk(full);
-      else if (entry.name.endsWith('.rip')) out.push(full);
+      if (entry.isDirectory()) walk(full, depth + 1);
+      else if (entry.name.endsWith('.rip') && !(depth === 0 && VERB_FILES.has(entry.name))) out.push(full);
     }
   };
-  walk(dir);
+  walk(dir, 0);
   return out;
 };
 

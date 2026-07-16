@@ -143,7 +143,9 @@ describe('assembleBundle', () => {
       packagesDir: resolve(root, 'packages'),
     });
     expect(bundle.packages['@rip-lang/validate'].root).toBe('_pkg/validate');
-    expect(bundle.modules['_pkg/validate/index.rip']).toContain('registry.rip');
+    expect(bundle.modules['_pkg/validate/validate.rip']).toContain('registerValidator');
+    // Runnable verb files (root test.rip etc.) are dev-only, never bundled.
+    expect(bundle.modules['_pkg/validate/test.rip']).toBeUndefined();
     expect(() => assembleBundle({
       modules: { '_route/index.rip': "import { x } from '@rip-lang/nope'" },
       packagesDir: resolve(root, 'packages'),
@@ -259,10 +261,29 @@ describe('package graph reconciliation', () => {
   });
 
   test('assembled subpath exports travel into the packages table', () => {
-    const bundle = assembleBundle({
-      modules: { '_route/p.rip': "import '@rip-lang/validate/coercers'" },
-      packagesDir: resolve(root, 'packages'),
-    });
-    expect(bundle.packages['@rip-lang/validate'].exports['./coercers']).toBe('coercers.rip');
+    // A synthetic package: no first-party package ships a subpath
+    // export today (validate's /coercers merged into its main entry).
+    const dir = mkdtempSync(join(tmpdir(), 'rip-pkg-'));
+    try {
+      for (const name of ['app', 'demo']) {
+        mkdirSync(join(dir, name));
+        writeFileSync(join(dir, name, 'package.json'), JSON.stringify({
+          name: `@rip-lang/${name}`,
+          exports: name === 'demo'
+            ? { '.': './index.rip', './tools': './deep.rip' }
+            : { '.': './index.rip' },
+          rip: { browser: true },
+        }));
+        writeFileSync(join(dir, name, 'index.rip'), 'export ok = 1');
+      }
+      writeFileSync(join(dir, 'demo', 'deep.rip'), 'export d = 2');
+      const bundle = assembleBundle({
+        modules: { '_route/p.rip': "import { d } from '@rip-lang/demo/tools'" },
+        packagesDir: dir,
+      });
+      expect(bundle.packages['@rip-lang/demo'].exports['./tools']).toBe('deep.rip');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

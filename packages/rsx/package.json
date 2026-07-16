@@ -1,24 +1,23 @@
 {
   "name": "@rip-lang/rsx",
-  "version": "0.0.0",
+  "version": "4.0.0",
   "private": true,
-  "description": "Rip Style XML - small, safe XML parser/serializer that yields plain Rip objects",
   "type": "module",
+  "description": "Rip Style XML — XML ⇄ Rip object, with security defaults that match what you want for SOAP and EDI envelopes",
   "exports": {
-    ".": {
-      "types": "./rsx.d.ts",
-      "default": "./rsx.rip"
-    }
+    ".": "./rsx.rip"
   },
   "scripts": {
-    "test": "bun test --timeout 15000"
+    "test": "rip test.rip"
   },
   "rip": {
     "browser": true
   },
   "files": [
     "rsx.rip",
-    "rsx.d.ts",
     "README.md"
-  ]
+  ],
+  "devDependencies": {
+    "@rip-lang/testing": "workspace:*"
+  }
 }

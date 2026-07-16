@@ -4,20 +4,16 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": {
-      "types": "./swarm.d.ts",
-      "default": "./swarm.rip"
-    }
+    ".": "./swarm.rip"
   },
   "bin": {
     "swarm": "./bin/swarm"
   },
   "scripts": {
-    "test": "bun test --timeout 15000"
+    "test": "rip test"
   },
   "files": [
     "*.rip",
-    "*.d.ts",
     "lib/",
     "bin/",
     "README.md"

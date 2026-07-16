@@ -30,19 +30,13 @@ describe('public surface', () => {
     expect(Object.keys(mcp).sort()).toEqual(['createMcpServer', 'makeSql', 'startStdio']);
   });
 
-  test('every public entry ships type declarations', () => {
+  test('every public entry is a Rip module', () => {
     const pkg = JSON.parse(read('package.json'));
-    for (const [entry, decl] of [['.', 'index.d.ts'], ['./embed', 'embed.d.ts'], ['./mcp', 'mcp.d.ts']]) {
-      expect(pkg.exports[entry].types).toBe(`./${decl}`);
-      expect(() => read(decl)).not.toThrow();
-    }
-  });
-
-  test('the public types carry no `any` — the wire surface is typed with `unknown`', () => {
-    for (const dts of ['index.d.ts', 'embed.d.ts', 'mcp.d.ts']) {
-      const src = read(dts).replace(/\/\/[^\n]*/g, ''); // strip line comments
-      expect(src).not.toMatch(/\bany\b/);
-    }
+    expect(pkg.exports).toEqual({
+      '.': './index.rip',
+      './embed': './embed.rip',
+      './mcp': './mcp.rip',
+    });
   });
 });
 

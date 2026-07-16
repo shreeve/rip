@@ -230,6 +230,45 @@ describe('cli: run surface (loader end-to-end)', () => {
     expect(r.stdout).toBe('42\n');
   });
 
+  test('a directory input runs its index.rip; one without rejects precisely', () => {
+    const sub = join(dir, 'dir-entry');
+    mkdirSync(sub, { recursive: true });
+    writeFileSync(join(sub, 'index.rip'), 'console.log "from index: #{process.argv[2]}"\n');
+    const ok = rip(['dir-entry', 'arg1']);
+    expect(ok.status).toBe(0);
+    expect(ok.stdout).toBe('from index: arg1\n');
+
+    const empty = join(dir, 'dir-empty');
+    mkdirSync(empty, { recursive: true });
+    const bad = rip(['dir-empty']);
+    expect(bad.status).toBe(1);
+    expect(bad.stderr).toContain('directory with no index.rip');
+  });
+
+  test('`rip test` runs bun test with the .rip loader preloaded', () => {
+    const sub = join(dir, 'test-subcommand');
+    mkdirSync(sub, { recursive: true });
+    writeFileSync(join(sub, 'triple.rip'), 'export def triple(x)\n  x * 3\n');
+    writeFileSync(
+      join(sub, 'triple.test.js'),
+      [
+        "import { test, expect } from 'bun:test';",
+        "import { triple } from './triple.rip';",
+        "test('triple', () => { expect(triple(7)).toBe(21); });",
+        '',
+      ].join('\n'),
+    );
+    const r = spawnSync('bun', [BIN, 'test'], { cwd: sub, encoding: 'utf8' });
+    expect(r.status).toBe(0);
+    expect(`${r.stdout}${r.stderr}`).toContain('1 pass');
+  });
+
+  test('`rip test` forwards extra args — a filter that matches nothing fails', () => {
+    const sub = join(dir, 'test-subcommand');
+    const r = spawnSync('bun', [BIN, 'test', 'no-such-suite'], { cwd: sub, encoding: 'utf8' });
+    expect(r.status).not.toBe(0);
+  });
+
   test('multi-module .rip import chain with top-level await', () => {
     write('util.rip', 'export def double(x)\n  x * 2\n');
     write('lib.rip', 'import {double} from "./util.rip"\nexport base = await Promise.resolve(double(10))\n');

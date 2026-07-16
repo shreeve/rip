@@ -1,0 +1,387 @@
+# ==============================================================================
+# rsx tests — parse, stringify, security defaults, round trips
+# ==============================================================================
+
+import { test, eq, ok, throws } from '@rip-lang/testing'
+import { RsxError, parse, stringify } from '@rip-lang/rsx'
+import * as mod from '@rip-lang/rsx'
+import { readFileSync } from 'fs'
+
+# ==[ Package surface ]==
+
+console.log "\nPackage"
+
+test "module exports parse, stringify, RsxError and nothing else", ->
+  eq Object.keys(mod).sort(), ['RsxError', 'parse', 'stringify']
+  ok not ('default' of mod), 'no default export'
+
+test "no runtime deps; testing harness is the only devDependency", ->
+  pkg = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf8'))
+  for field in ['dependencies', 'peerDependencies', 'optionalDependencies']
+    eq pkg[field], undefined
+  eq pkg.devDependencies, { '@rip-lang/testing': 'workspace:*' }
+
+test "declares browser safety and earns it", ->
+  pkg = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf8'))
+  eq pkg.rip, { browser: true }
+  source = readFileSync("#{import.meta.dir}/rsx.rip", 'utf8')
+  eq /\bimport\b/.test(source), false
+  eq /\bBun\.|node:|process\.|globalThis/.test(source), false
+
+# ==[ Parse: tree shape ]==
+
+console.log "\nParse — tree shape"
+
+test "text-only element collapses to a scalar string", ->
+  eq parse('<a>x</a>'), { a: 'x' }
+
+test "nested elements become nested objects", ->
+  eq parse('<a><b>1</b><c>2</c></a>'), { a: { b: '1', c: '2' } }
+  eq parse('<a><b><c>deep</c></b></a>'), { a: { b: { c: 'deep' } } }
+
+test "repeated sibling tags collapse into arrays", ->
+  eq parse('<l><i>a</i><i>b</i></l>'), { l: { i: ['a', 'b'] } }
+  eq parse('<l><i>a</i><i>b</i><i>c</i></l>'), { l: { i: ['a', 'b', 'c'] } }
+
+test "attributes group under @attrs; text joins as #text", ->
+  eq parse('<a id="1" name="n">x</a>'), { a: { '@attrs': { id: '1', name: 'n' }, '#text': 'x' } }
+
+test "attribute-bearing element with no text keeps object form without #text", ->
+  eq parse('<a id="1"></a>'), { a: { '@attrs': { id: '1' } } }
+
+test "self-closing: bare becomes empty string, with attrs keeps object form", ->
+  eq parse('<a/>'), { a: '' }
+  eq parse('<a />'), { a: '' }
+  eq parse('<a id="1"/>'), { a: { '@attrs': { id: '1' } } }
+
+test "empty element collapses to empty string", ->
+  eq parse('<a></a>'), { a: '' }
+  eq parse('<a>   </a>'), { a: '' }
+
+test "multiple root elements all land on the result object", ->
+  eq parse('<a>1</a><b>2</b>'), { a: '1', b: '2' }
+  eq parse('<a>1</a><a>2</a>'), { a: ['1', '2'] }
+
+test "empty input yields an empty object", ->
+  eq parse(''), {}
+
+test "mixed content: text around child elements is dropped by default", ->
+  eq parse('<a>hi<b>x</b>bye</a>'), { a: { b: 'x' } }
+
+test "text outside the root element is ignored", ->
+  eq parse('junk<a>x</a>'), { a: 'x' }
+  eq parse('<a>x</a>trailing'), { a: 'x' }
+
+# ==[ Parse: text and whitespace ]==
+
+console.log "\nParse — text and whitespace"
+
+test "trimText collapses interior whitespace by default", ->
+  eq parse('<a>  hello   world \n</a>'), { a: 'hello world' }
+
+test "trimText: false preserves text verbatim", ->
+  eq parse('<a>  hello   world \n</a>', trimText: false), { a: '  hello   world \n' }
+
+test "coerceNumbers / coerceBooleans never coerce — text stays text", ->
+  eq parse('<a>42</a>', coerceNumbers: true, coerceBooleans: true), { a: '42' }
+  eq parse('<a>true</a>'), { a: 'true' }
+
+# ==[ Parse: entities ]==
+
+console.log "\nParse — entities"
+
+test "the five built-in entities decode in text", ->
+  eq parse('<a>&amp;&lt;&gt;&quot;&apos;</a>'), { a: '&<>"\'' }
+
+test "numeric character references decode, decimal and hex, up to astral planes", ->
+  eq parse('<a>&#65;&#x41;&#x1F600;</a>'), { a: "AA\u{1F600}" }
+
+test "unknown named entities pass through untouched", ->
+  eq parse('<a>&foo; &copy;</a>'), { a: '&foo; &copy;' }
+
+test "out-of-range numeric references pass through untouched", ->
+  eq parse('<a>&#x110000;</a>'), { a: '&#x110000;' }
+
+test "bare ampersands survive", ->
+  eq parse('<a>a & b</a>'), { a: 'a & b' }
+
+test "entities decode inside attribute values", ->
+  eq parse('<a t="&lt;&amp;&#65;">x</a>'), { a: { '@attrs': { t: '<&A' }, '#text': 'x' } }
+
+# ==[ Parse: CDATA ]==
+
+console.log "\nParse — CDATA"
+
+test "CDATA content is verbatim — no trim, no entity decode", ->
+  eq parse('<a><![CDATA[  <raw> & stuff  ]]></a>'), { a: '  <raw> & stuff  ' }
+  eq parse('<a><![CDATA[&amp;]]></a>'), { a: '&amp;' }
+
+test "CDATA concatenates with surrounding (trimmed) text", ->
+  eq parse('<a> hi <![CDATA[ raw ]]> bye </a>'), { a: 'hi raw bye' }
+
+test "empty CDATA collapses to empty string", ->
+  eq parse('<a><![CDATA[]]></a>'), { a: '' }
+
+test "unterminated CDATA throws", ->
+  throws (-> parse('<a><![CDATA[oops</a>')), 'unterminated CDATA'
+
+# ==[ Parse: comments, PIs, DOCTYPE ]==
+
+console.log "\nParse — comments, PIs, DOCTYPE"
+
+test "comments are skipped", ->
+  eq parse('<a><!-- hi -->x</a>'), { a: 'x' }
+
+test "unterminated comment throws", ->
+  throws (-> parse('<a><!-- oops</a>')), 'unterminated comment'
+
+test "processing instructions are skipped by default", ->
+  eq parse('<?xml version="1.0"?><a>x</a>'), { a: 'x' }
+
+test "allowProcessingInstructions: false rejects PIs", ->
+  throws (-> parse('<?xml?><a>x</a>', allowProcessingInstructions: false)), 'processing instructions are not allowed'
+
+test "unterminated processing instruction throws", ->
+  throws (-> parse('<?xml <a>x</a>')), 'unterminated processing instruction'
+
+test "DOCTYPE is rejected by default (no XXE)", ->
+  throws (-> parse('<!DOCTYPE html><a>x</a>')), 'DOCTYPE declarations are not allowed'
+
+test "allowDoctype: true skips the declaration, upper- or lowercase", ->
+  eq parse('<!DOCTYPE html><a>x</a>', allowDoctype: true), { a: 'x' }
+  eq parse('<!doctype html><a>x</a>', allowDoctype: true), { a: 'x' }
+
+test "custom entity declarations are never honored", ->
+  throws (-> parse('<!DOCTYPE a [<!ENTITY xxe "boom">]><a>&xxe;</a>')), RsxError
+
+test "unknown '<!' constructs throw", ->
+  throws (-> parse('<!ELEMENT foo><a>x</a>')), "unexpected '<!' construct"
+
+# ==[ Parse: namespaces ]==
+
+console.log "\nParse — namespaces"
+
+test "namespace prefixes strip from tags and attributes by default", ->
+  eq parse('<ns:a x:id="1"><ns2:b>x</ns2:b></ns:a>'), { a: { '@attrs': { id: '1' }, b: 'x' } }
+
+test "stripNamespaces: false preserves prefixes verbatim", ->
+  eq parse('<ns:a x:id="1"><ns2:b>x</ns2:b></ns:a>', stripNamespaces: false),
+    { 'ns:a': { '@attrs': { 'x:id': '1' }, 'ns2:b': 'x' } }
+
+test "close tags match on the stripped name — prefixes are opaque labels", ->
+  eq parse('<ns:a>x</other:a>'), { a: 'x' }
+
+# ==[ Parse: attribute forms ]==
+
+console.log "\nParse — attribute forms"
+
+test "double-quoted, single-quoted, unquoted, and valueless attributes", ->
+  eq parse("<a t='v'>x</a>").a['@attrs'], { t: 'v' }
+  eq parse('<a t=v>x</a>').a['@attrs'], { t: 'v' }
+  eq parse('<a checked>x</a>').a['@attrs'], { checked: '' }
+
+test "a quoted '>' inside an attribute value does not end the tag", ->
+  eq parse('<a t="a>b">x</a>').a['@attrs'], { t: 'a>b' }
+
+test "whitespace around = and newlines inside tags are tolerated", ->
+  eq parse('<a  t = "v"  u="w" >x</a>').a['@attrs'], { t: 'v', u: 'w' }
+  eq parse('<a\n  t="v"\n>x</a>').a['@attrs'], { t: 'v' }
+
+test "duplicate attributes: last one wins", ->
+  eq parse('<a t="1" t="2">x</a>').a['@attrs'], { t: '2' }
+
+# ==[ Parse: forceArray ]==
+
+console.log "\nParse — forceArray"
+
+test "accepts an array, a Set, or a predicate function", ->
+  eq parse('<l><i>a</i></l>', forceArray: ['i']), { l: { i: ['a'] } }
+  eq parse('<l><i>a</i></l>', forceArray: new Set(['i'])), { l: { i: ['a'] } }
+  eq parse('<l><i>a</i></l>', forceArray: (n) -> n is 'i'), { l: { i: ['a'] } }
+
+test "applies to self-closing elements too", ->
+  eq parse('<l><i/></l>', forceArray: ['i']), { l: { i: [''] } }
+
+test "non-listed tags still collapse to scalars", ->
+  eq parse('<l><j>a</j></l>', forceArray: ['i']), { l: { j: 'a' } }
+
+# ==[ Parse: preserveChildren ]==
+
+console.log "\nParse — preserveChildren"
+
+test "@children records text and self-closed children in document order", ->
+  eq parse('<a>hi<b>x</b>bye<c/></a>', preserveChildren: true),
+    { a: { b: 'x', c: '', '@children': ['hi', 'bye', { name: 'c', value: '' }] } }
+
+test "text-only elements still collapse to scalars", ->
+  eq parse('<a>hi</a>', preserveChildren: true), { a: 'hi' }
+
+# ==[ Parse: custom keys ]==
+
+console.log "\nParse — custom keys"
+
+test "attrsKey and textKey rename the grouped keys", ->
+  eq parse('<a id="1">x</a>', attrsKey: '$a', textKey: '$t'), { a: { $a: { id: '1' }, $t: 'x' } }
+
+# ==[ Parse: errors and limits ]==
+
+console.log "\nParse — errors and limits"
+
+test "non-string input throws RsxError", ->
+  throws (-> parse(42)), RsxError, 'XML source must be a string'
+  throws (-> parse(null)), RsxError
+
+test "maxBytes caps input length, with offset 0", ->
+  err = null
+  try
+    parse('<a>xxxxx</a>', maxBytes: 4)
+  catch e
+    err = e
+  ok err instanceof RsxError
+  eq err.message, 'input exceeds maxBytes (4)'
+  eq err.offset, 0
+
+test "default maxBytes admits ordinary documents", ->
+  big = "<l>#{'<i>x</i>'.repeat(10000)}</l>"
+  eq parse(big).l.i.length, 10000
+
+test "mismatched close tags throw with both names in the message", ->
+  throws (-> parse('<a><b>x</c></a>')), 'mismatched close tag: expected </b>, got </c>'
+  throws (-> parse('<a>x</a></b>')), 'mismatched close tag: expected </>, got </b>'
+
+test "unclosed elements at EOF do not throw; buffered text is dropped", ->
+  eq parse('<a><b>x'), { a: { b: {} } }
+
+test "unterminated markup throws with a scan offset", ->
+  cases = [
+    ['<a',       'unterminated start tag', 0]
+    ['<a>x</a',  'unterminated end tag',   4]
+    ['< >x</ >', 'missing tag name',       3]
+  ]
+  for [xml, msg, offset] in cases
+    err = null
+    try
+      parse(xml)
+    catch e
+      err = e
+    ok err instanceof RsxError, "no throw for #{JSON.stringify(xml)}"
+    eq err.message, msg
+    eq err.offset, offset
+
+test "RsxError is a proper Error subclass", ->
+  err = new RsxError('boom', 7)
+  ok err instanceof Error
+  eq err.name, 'RsxError'
+  eq err.message, 'boom'
+  eq err.offset, 7
+
+test "caller option objects are never mutated", ->
+  opts = { forceArray: ['i'] }
+  parse('<l><i>a</i></l>', opts)
+  eq opts, { forceArray: ['i'] }
+
+# ==[ Stringify: scalars and structure ]==
+
+console.log "\nStringify — scalars and structure"
+
+test "scalars emit as escaped text", ->
+  eq stringify('a', 'x'), '<a>x</a>'
+  eq stringify('a', 42), '<a>42</a>'
+  eq stringify('a', true), '<a>true</a>'
+  eq stringify('a', ''), '<a></a>'
+
+test "null, undefined, and empty objects emit self-closing tags", ->
+  eq stringify('a', null), '<a/>'
+  eq stringify('a', undefined), '<a/>'
+  eq stringify('a', {}), '<a/>'
+  eq stringify('a', { '#text': '' }), '<a/>'
+  eq stringify('a', { b: null }), '<a><b/></a>'
+
+test "nested objects and arrays", ->
+  eq stringify('a', { b: '1', c: '2' }), '<a><b>1</b><c>2</c></a>'
+  eq stringify('l', { i: ['a', 'b'] }), '<l><i>a</i><i>b</i></l>'
+  eq stringify('l', { i: [] }), '<l></l>'
+
+test "@attrs and #text render as attributes and text", ->
+  eq stringify('a', { '@attrs': { id: '1' }, '#text': 'x' }), '<a id="1">x</a>'
+  eq stringify('a', { '@attrs': { id: '1' } }), '<a id="1"/>'
+  eq stringify('a', { '@attrs': { id: '1' }, b: 'x' }), '<a id="1"><b>x</b></a>'
+
+test "#text is dropped when child elements are present", ->
+  eq stringify('a', { '@attrs': { id: '1' }, '#text': 'T', b: 'x' }), '<a id="1"><b>x</b></a>'
+
+test "@children is never serialized", ->
+  eq stringify('a', { '@children': ['hi'], b: 'x' }), '<a><b>x</b></a>'
+
+test "custom attrsKey / textKey", ->
+  eq stringify('a', { $a: { id: '1' }, $t: 'x' }, attrsKey: '$a', textKey: '$t'), '<a id="1">x</a>'
+
+# ==[ Stringify: escaping ]==
+
+console.log "\nStringify — escaping"
+
+test "text escapes & < > but not quotes", ->
+  eq stringify('a', 'a & <b> "q" \'s\''), '<a>a &amp; &lt;b&gt; "q" \'s\'</a>'
+
+test "attribute values escape & < \" but not > or single quotes", ->
+  eq stringify('a', { '@attrs': { t: 'a & <b> "q" \'s\'' } }),
+    '<a t="a &amp; &lt;b> &quot;q&quot; \'s\'"/>'
+
+# ==[ Stringify: indentation ]==
+
+console.log "\nStringify — indentation"
+
+test "numeric indent expands to spaces with newlines", ->
+  eq stringify('a', { b: { c: 'x' } }, indent: 2), '<a>\n  <b>\n    <c>x</c>\n  </b>\n</a>'
+
+test "string indent is used verbatim", ->
+  eq stringify('a', { b: 'x' }, indent: '\t'), '<a>\n\t<b>x</b>\n</a>'
+
+test "custom newline overrides the indent-implied one", ->
+  eq stringify('a', { b: 'x' }, indent: 2, newline: '|'), '<a>|  <b>x</b>|</a>'
+
+test "indented arrays of attribute nodes", ->
+  eq stringify('l', { i: [{ '@attrs': { n: '1' } }, 'b'] }, indent: 2),
+    '<l>\n  <i n="1"/>\n  <i>b</i>\n</l>'
+
+# ==[ Stringify: CDATA ]==
+
+console.log "\nStringify — CDATA"
+
+test "cdata option wraps listed tag content, array or Set", ->
+  eq stringify('a', { p: 'raw <x> & y' }, cdata: ['p']), '<a><p><![CDATA[raw <x> & y]]></p></a>'
+  eq stringify('a', { p: 'z' }, cdata: new Set(['p'])), '<a><p><![CDATA[z]]></p></a>'
+  eq stringify('p', 7, cdata: ['p']), '<p><![CDATA[7]]></p>'
+
+test "']]>' inside CDATA content splits into two sections", ->
+  eq stringify('a', { p: 'x]]>y' }, cdata: ['p']), '<a><p><![CDATA[x]]]]><![CDATA[>y]]></p></a>'
+
+# ==[ Round trips ]==
+
+console.log "\nRound trips"
+
+test "attribute/array documents survive parse -> stringify", ->
+  xml = '<order id="7"><item sku="a">1</item><item sku="b">2</item><note>hi</note></order>'
+  eq stringify('order', parse(xml).order), xml
+
+test "SOAP-shaped envelope: parse, address payload, re-serialize with CDATA", ->
+  xml = [
+    '<?xml version="1.0" encoding="UTF-8"?>'
+    '<soapenv:Envelope soapenv:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">'
+    '<soapenv:Body>'
+    '<ns1:COREEnvelopeRealTimeRequest>'
+    '<PayloadType>X12_270_Request_005010X279A1</PayloadType>'
+    '<Payload><![CDATA[ISA*00*  &raw& *]]></Payload>'
+    '</ns1:COREEnvelopeRealTimeRequest>'
+    '</soapenv:Body>'
+    '</soapenv:Envelope>'
+  ].join('')
+  doc = parse(xml)
+  req = doc.Envelope.Body.COREEnvelopeRealTimeRequest
+  eq req.PayloadType, 'X12_270_Request_005010X279A1'
+  eq req.Payload, 'ISA*00*  &raw& *'
+  eq stringify('Payload', req.Payload, cdata: ['Payload']), '<Payload><![CDATA[ISA*00*  &raw& *]]></Payload>'
+
+test "CDATA split round trips through parse", ->
+  emitted = stringify('p', 'x]]>y', cdata: ['p'])
+  eq parse(emitted, trimText: false), { p: 'x]]>y' }

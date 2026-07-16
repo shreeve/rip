@@ -25,8 +25,10 @@ New packages follow one package contract:
 
 - package layout, exports, and named-only public APIs;
 - direct package test commands through the Rip loader;
-- package-specific dependency budgets without adding dependencies or
-  workspace behavior to the compiler root;
+- Bun workspaces at the repo root (`packages/*`, `install.linker =
+  "hoisted"`) so `@rip-lang/*` lands in `node_modules/@rip-lang/` and
+  resolves in-tree; package-specific dependency budgets stay on the
+  packages that need them — the compiler itself remains dependency-free;
 - browser-safe metadata and bundle discovery;
 - CLI subcommand discovery for package-provided tools;
 - declaration, strict-check, and public-surface audit gates.

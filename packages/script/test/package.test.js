@@ -39,8 +39,3 @@ test('the package does not claim browser safety (it spawns PTYs and sockets)', (
   expect(source).toContain('Bun.spawn');
   expect(source).toContain('Bun.connect');
 });
-
-test('the public type surface carries no any', () => {
-  const dts = readFileSync(new URL('../script.d.ts', import.meta.url), 'utf8');
-  expect(dts.match(/\bany\b/g)).toBeNull();
-});
