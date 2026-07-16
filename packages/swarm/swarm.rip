@@ -15,7 +15,7 @@
 #     { startedAt: Date.now() }
 #
 #   perform = (task, ctx) ->
-#     await Bun.sleep(Math.random() * 1000)
+#     Bun.sleep!(Math.random() * 1000)
 #
 #   swarm { setup, perform }
 # ==============================================================================
