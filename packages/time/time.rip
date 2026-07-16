@@ -21,40 +21,6 @@
 # No locale registry, no plugin system — one file, zero deps, batteries in.
 # ==============================================================================
 
-# ==[ Public API types ]==
-
-# A unit is either a symbol (`:year`) or a string (`'year'`, `'years'`, `'y'`).
-type UnitInput = string | symbol
-
-type TimeInput = string | number | Date | Time | null | undefined
-
-type TimeOptions =
-  utc?: boolean
-  format?: string
-
-type TimeConfig =
-  utc?: boolean
-  zone?: string | null
-  fromInstance?: Date
-  input?: TimeInput
-  format?: string
-
-# Per-bucket calendar() overrides — a literal format string or a function
-# that receives the current instant and returns the formatted string.
-type CalendarFormats = Record<string, string | ((this: Time, now: Time) => string)>
-
-type DurationComponents =
-  years?: number
-  months?: number
-  weeks?: number
-  days?: number
-  hours?: number
-  minutes?: number
-  seconds?: number
-  milliseconds?: number
-
-type DurationInput = number | string | DurationComponents | Duration | undefined
-
 # ==[ US Timezone Aliases ]==
 
 # Short US zone names → IANA zone names. Accept both common abbreviations and
@@ -240,8 +206,8 @@ def zoneFormatter(zone)
       minute: '2-digit'
       second: '2-digit'
 
-def zonedParts(date, zone): Record<string, string>
-  out: Record<string, string> = {}
+def zonedParts(date, zone)
+  out = {}
   for { type, value } in zoneFormatter(zone).formatToParts(date)
     out[type] = value
   # Some platforms report midnight as 24:00:00 in en-US; normalize.
@@ -271,7 +237,7 @@ def zoneAbbreviation(date, zone, long = false)
 
 # time's month-diff algorithm, kept bit-for-bit so diff(:month) and
 # diff(:year) results match the reference implementation.
-def monthDiff(a, b): number
+def monthDiff(a, b)
   return -monthDiff(b, a) if a.date() < b.date()
   whole   = ((b.year() - a.year()) * 12) + (b.month() - a.month())
   anchor  = a.clone().add(whole, :month)
@@ -418,29 +384,13 @@ def parseDate(input, utc = false)
 
 IS_TIME_TAG =! '$isTimeObject'
 
-export def isTime(x: unknown): boolean
+export def isTime(x)
   x instanceof Time or !!(x and x[IS_TIME_TAG])
 
 # `$d` is the backing native Date; `$y…$ms` are the cached wall-clock
 # components in the instance's mode/zone.
-export interface Time
-  $u:   boolean
-  $z:   string | null
-  $d:   Date
-  $fmt: string | undefined
-  $y:   number
-  $M:   number
-  $D:   number
-  $W:   number
-  $H:   number
-  $m:   number
-  $s:   number
-  $ms:  number
-  weekday(): number
-  weekday(input: number): Time
-
 export class Time
-  constructor: (cfg: TimeConfig = {}) ->
+  constructor: (cfg = {}) ->
     @$u     = !!cfg.utc
     @$z     = cfg.zone ?? null          # IANA zone name, or null for local/UTC
     @$d     = if cfg.fromInstance then cfg.fromInstance else parseDate(cfg.input, @$u)
@@ -506,7 +456,7 @@ export class Time
     Math.floor((here.getTime() - start.getTime()) / MS_DAY) + 1
 
   # ISO-ish week-of-year with configurable Sunday start (US default).
-  weekOfYear: (startDow: number = 0) ->
+  weekOfYear: (startDow = 0) ->
     # move to the first day of this week
     gap    = (@$W - startDow + 7) % 7
     start  = @subtract(gap, :day).startOf(:day)
@@ -516,7 +466,7 @@ export class Time
     Math.round((start.valueOf() - anchor.valueOf()) / MS_WEEK) + 1
 
   # ---- Generic get / set ----
-  get: (u: UnitInput) ->
+  get: (u) ->
     switch prettyUnit(u)
       when :year        then @$y
       when :month       then @$M
@@ -529,11 +479,11 @@ export class Time
       when :quarter     then @quarter()
       else undefined
 
-  set: (u: UnitInput, v: number) ->
+  set: (u, v) ->
     @clone()._mutSet(prettyUnit(u), v)
 
   # In-place setter used after clone(). Never call on an instance you don't own.
-  _mutSet: (unit: symbol, int: number) ->
+  _mutSet: (unit, int) ->
     utcPad = @$u ? 'setUTC' : 'set'
     methodName = switch unit
       when :year        then "#{utcPad}FullYear"
@@ -569,7 +519,7 @@ export class Time
     this
 
   # ---- Arithmetic ----
-  add: (amount: number | Duration, u?: UnitInput) ->
+  add: (amount, u) ->
     # Accept a Duration as a single argument: d.add(dur)
     if amount instanceof Duration
       return applyDuration(this, amount, 1)
@@ -595,7 +545,7 @@ export class Time
     ms = @$d.getTime() + (number * step)
     new Time({ fromInstance: new Date(ms), utc: @$u })
 
-  _addDays: (n: number) ->
+  _addDays: (n) ->
     d = @clone()
     if @$u
       d.$d.setUTCDate(d.$D + Math.round(n))
@@ -603,15 +553,15 @@ export class Time
       d.$d.setDate(d.$D + Math.round(n))
     d._refresh()
 
-  subtract: (n: number | Duration, u?: UnitInput) ->
+  subtract: (n, u) ->
     return applyDuration(this, n, -1) if n instanceof Duration
     @add(-n, u)
 
   # ---- startOf / endOf ----
-  startOf: (u: UnitInput, isStartOf: boolean = true) -> @_bound(prettyUnit(u), isStartOf)
-  endOf:   (u: UnitInput) -> @_bound(prettyUnit(u), false)
+  startOf: (u, isStartOf = true) -> @_bound(prettyUnit(u), isStartOf)
+  endOf:   (u) -> @_bound(prettyUnit(u), false)
 
-  _bound: (unit: symbol, isStart: boolean) ->
+  _bound: (unit, isStart) ->
     make = (y, m, d) =>
       stamp = @$u ? Date.UTC(y, m, d) : new Date(y, m, d).getTime()
       ins = new Time({ fromInstance: new Date(stamp), utc: @$u })
@@ -641,7 +591,7 @@ export class Time
 
   _endOfDay: -> @_setClock([23, 59, 59, 999])
 
-  _setClock: (hms: [number, number, number, number]) ->
+  _setClock: (hms) ->
     d = @clone()
     if @$u
       d.$d.setUTCHours(...hms)
@@ -650,21 +600,21 @@ export class Time
     d._refresh()
 
   # ---- Comparison ----
-  isSame: (that: TimeInput, u?: UnitInput) ->
+  isSame: (that, u) ->
     other = time(that)
     unit  = u ?? :millisecond
     @startOf(unit) <= other and other <= @endOf(unit)
 
-  isBefore: (that: TimeInput, u?: UnitInput) ->
+  isBefore: (that, u) ->
     unit = u ?? :millisecond
     time(that) > @endOf(unit)
 
-  isAfter: (that: TimeInput, u?: UnitInput) ->
+  isAfter: (that, u) ->
     unit = u ?? :millisecond
     time(that) < @startOf(unit)
 
-  isSameOrBefore: (that: TimeInput, u?: UnitInput) -> @isSame(that, u) or @isBefore(that, u)
-  isSameOrAfter:  (that: TimeInput, u?: UnitInput) -> @isSame(that, u) or @isAfter(that, u)
+  isSameOrBefore: (that, u) -> @isSame(that, u) or @isBefore(that, u)
+  isSameOrAfter:  (that, u) -> @isSame(that, u) or @isAfter(that, u)
 
   isToday:     -> @format('YYYY-MM-DD') is time().format('YYYY-MM-DD')
   isYesterday: -> @format('YYYY-MM-DD') is time().subtract(1, :day).format('YYYY-MM-DD')
@@ -673,14 +623,14 @@ export class Time
   # Day of week relative to Sunday (US week start). As a getter this is a
   # direct alias for `.day()`; as a setter it moves to day-of-week `input`
   # within the current week (0=Sun, 1=Mon, ..., 6=Sat).
-  weekday: (input?: number) ->
+  weekday: (input) ->
     return @$W unless input?
     @subtract(@$W, :day).add(input, :day)
 
   # Humanize a datetime relative to a reference (default: now).
   # Uses the same buckets as moment.js calendar(): yesterday, today, tomorrow,
   # last/next week, or a plain MM/DD/YYYY fallback.
-  calendar: (reference?: TimeInput, formats: CalendarFormats = {}) ->
+  calendar: (reference, formats = {}) ->
     ref  = (if reference? then time(reference) else time()).startOf(:day)
     diff = @diff(ref, :day, true)
     bucket = switch
@@ -696,7 +646,7 @@ export class Time
     @format(fmt)
 
   # inclusivity: '()' exclusive, '[]' inclusive, '[)' / '(]' mixed
-  isBetween: (from: TimeInput, to: TimeInput, u?: UnitInput, inc?: string) ->
+  isBetween: (from, to, u, inc) ->
     unit  = u ?? :millisecond
     range = inc ?? '()'
     a = time(from)
@@ -707,7 +657,7 @@ export class Time
     leftOk and rightOk
 
   # ---- Diff ----
-  diff: (input: TimeInput, u?: UnitInput, float: boolean = false) ->
+  diff: (input, u, float = false) ->
     unit  = prettyUnit(u)
     that  = time(input)
     zDelt = (that.utcOffset() - @utcOffset()) * MS_MINUTE
@@ -727,7 +677,7 @@ export class Time
     if float then result else absFloor(result)
 
   # ---- UTC / timezone mode ----
-  utc: (keepLocalTime: boolean = false) ->
+  utc: (keepLocalTime = false) ->
     ins = new Time({ fromInstance: new Date(@$d.getTime()), utc: true })
     keepLocalTime ? ins.add(@utcOffset(), :minute) : ins
 
@@ -739,7 +689,7 @@ export class Time
   # Convert this instant into `zone` for display purposes. The underlying UTC
   # timestamp is preserved unless `keepLocalTime` is true, in which case the
   # wall-clock numbers are preserved and the instant shifts.
-  tz: (zone: string, keepLocalTime: boolean = false) ->
+  tz: (zone, keepLocalTime = false) ->
     iana = resolveZone(zone)
     ins  = new Time({ fromInstance: new Date(@$d.getTime()), zone: iana })
     return ins unless keepLocalTime
@@ -758,8 +708,8 @@ export class Time
   # keepLocalTime flag), mirroring the `zones` gem's to/as distinction:
   #   toZone — CONVERT: same instant, shown in `zone` (the wall-clock changes)
   #   asZone — REINTERPRET: same wall-clock numbers, now in `zone` (the instant changes)
-  toZone: (zone: string) -> @tz(zone)
-  asZone: (zone: string) -> @tz(zone, true)
+  toZone: (zone) -> @tz(zone)
+  asZone: (zone) -> @tz(zone, true)
 
   # Reinterpret this instance's wall-clock as UTC — keep the numbers, label them
   # UTC (the instant shifts). The inverse — show this instant in UTC — is utc().
@@ -784,13 +734,13 @@ export class Time
   toString:    -> @$d.toUTCString()
 
   # ---- Relative time (English, fixed thresholds) ----
-  fromNow: (withoutSuffix?: boolean) -> @from(time(), withoutSuffix)
-  toNow:   (withoutSuffix?: boolean) -> @to(time(), withoutSuffix)
-  from:    (input: TimeInput, withoutSuffix?: boolean) -> fromToBase(input, withoutSuffix, this, false)
-  to:      (input: TimeInput, withoutSuffix?: boolean) -> fromToBase(input, withoutSuffix, this, true)
+  fromNow: (withoutSuffix) -> @from(time(), withoutSuffix)
+  toNow:   (withoutSuffix) -> @to(time(), withoutSuffix)
+  from:    (input, withoutSuffix) -> fromToBase(input, withoutSuffix, this, false)
+  to:      (input, withoutSuffix) -> fromToBase(input, withoutSuffix, this, true)
 
   # ---- Format ----
-  format: (fmtStr?: string) ->
+  format: (fmtStr) ->
     return INVALID_DATE unless @isValid()
     str  = fmtStr ?? (@$u ? UTC_FORMAT : ISO_FORMAT)
     zone = tzOffsetString(this)
@@ -886,17 +836,13 @@ def durationUnit(u)
 DURATION_REGEX_PARSE  =! /^(-|\+)?P(?:([-+]?[0-9,.]*)Y)?(?:([-+]?[0-9,.]*)M)?(?:([-+]?[0-9,.]*)W)?(?:([-+]?[0-9,.]*)D)?(?:T(?:([-+]?[0-9,.]*)H)?(?:([-+]?[0-9,.]*)M)?(?:([-+]?[0-9,.]*)S)?)?$/
 DURATION_REGEX_FORMAT =! /\[([^\]]+)\]|YYYY|YY|Y|MM|M|DD|D|HH|H|mm|m|ss|s|SSS/g
 
-export def isDuration(x: unknown): boolean
+export def isDuration(x)
   x instanceof Duration
 
 # `$ms` is the total signed magnitude in milliseconds; `$d` is the normalized
 # component map (years…milliseconds).
-export interface Duration
-  $ms: number
-  $d:  Record<string, number | undefined>
-
 export class Duration
-  constructor: (input?: DurationInput, unit?: UnitInput) ->
+  constructor: (input, unit) ->
     @$d = {}
 
     # Undefined input → zero duration
@@ -961,7 +907,7 @@ export class Duration
 
   # Component getter — e.g., `.hours()` returns the hour component (0..23)
   # after normalization. Use `.asHours()` for the total duration in hours.
-  get: (unit: UnitInput) ->
+  get: (unit) ->
     key = durationUnit(unit)
     if key is 'milliseconds'
       @$ms % 1000
@@ -972,16 +918,16 @@ export class Duration
       @$d[key] ?? 0
 
   # Total duration expressed in `unit`
-  as: (unit: UnitInput) -> @$ms / UNIT_TO_MS[durationUnit(unit)]
+  as: (unit) -> @$ms / UNIT_TO_MS[durationUnit(unit)]
 
-  add: (input: DurationInput, unit?: UnitInput) ->
+  add: (input, unit) ->
     other = switch
       when input instanceof Duration then input.$ms
       when unit?                     then Number(input) * UNIT_TO_MS[durationUnit(unit)]
       else new Duration(input).$ms
     new Duration(@$ms + other)
 
-  subtract: (input: DurationInput, unit?: UnitInput) ->
+  subtract: (input, unit) ->
     other = switch
       when input instanceof Duration then input.$ms
       when unit?                     then Number(input) * UNIT_TO_MS[durationUnit(unit)]
@@ -1035,7 +981,7 @@ export class Duration
 
   toJSON: -> @toISOString()
 
-  format: (fmtStr: string = 'YYYY-MM-DDTHH:mm:ss') ->
+  format: (fmtStr = 'YYYY-MM-DDTHH:mm:ss') ->
     parts =
       Y:    String(@$d.years ?? 0)
       YY:   pad(@$d.years ?? 0, 2)
@@ -1056,13 +1002,13 @@ export class Duration
 
   # English humanize: '2 hours', 'a day', 'a few seconds'. With `withSuffix`:
   # 'in 2 hours' or '2 hours ago' depending on sign.
-  humanize: (withSuffix: boolean = false) ->
+  humanize: (withSuffix = false) ->
     now = time()
     other = now.add(@$ms, :millisecond)
     other.from(now, not withSuffix)
 
 # Apply a Duration to a Time instance (used by Time#add/subtract).
-def applyDuration(date, dur, sign): Time
+def applyDuration(date, dur, sign)
   date
     .add(sign * (dur.$d.years ?? 0),        :year)
     .add(sign * (dur.$d.months ?? 0),       :month)
@@ -1078,43 +1024,21 @@ def applyDuration(date, dur, sign): Time
 # The `time` factory is a callable (parse/construct a Time) that also carries
 # static helpers (`time.utc`, `time.parse`, `time.tz`, …).
 
-type TimeFn = (input?: TimeInput, opts?: TimeOptions) => Time
-
-type TzMembers =
-  guess:   () => string
-  aliases: Record<string, string>
-type TzFn = ((input: TimeInput, zone: string) => Time) & TzMembers
-
-type TimeFactoryMembers =
-  utc:        (input?: TimeInput) => Time
-  parse:      (input: string, fmt: string, utc?: boolean) => Time
-  tz:         TzFn
-  unix:       (secs: number) => Time
-  isTime:     (x: unknown) => boolean
-  isDuration: (x: unknown) => boolean
-  duration:   (input?: DurationInput, unit?: UnitInput) => Duration
-  Duration:   typeof Duration
-  Time:       typeof Time
-  min:        (...args: Array<Time | Time[]>) => Time
-  max:        (...args: Array<Time | Time[]>) => Time
-  version:    string
-type TimeFactory = TimeFn & TimeFactoryMembers
-
 # Narrow a value already known (via isTime) to be a Time.
-def asTime(x: any): Time
+def asTime(x)
   x
 
 # Normalize min()/max() args — a Time list or a single array of them — to Time[].
-def toTimeList(args): Time[]
+def toTimeList(args)
   if Array.isArray(args[0]) then args[0] else args
 
 # The callable, exported by name as `time`. `makeTime()` augments it with the
-# static members and is exported as the package default (the full `TimeFactory`).
-export def time(input?: TimeInput, opts: TimeOptions = {}): Time
+# static members and is exported as the package default (the full factory).
+export def time(input, opts = {})
   return asTime(input).clone() if isTime(input)
   new Time({ input, utc: !!opts.utc, format: opts.format })
 
-def makeTime(): TimeFactory
+def makeTime()
   Object.assign time,
     utc: (input) ->
       new Time({ input, utc: true })
@@ -1170,7 +1094,7 @@ def makeTime(): TimeFactory
 # (subtract a year if asOf falls before this year's birthday). Accepts anything
 # time() accepts (ISO string, Date, Time); returns null for a blank/invalid dob
 # or asOf. Compares wall-clock calendar dates in the instances' zone.
-export def age(dob: TimeInput, asOf?: TimeInput): number | null
+export def age(dob, asOf)
   return null unless dob?
   born = time(dob)
   ref  = if asOf? then time(asOf) else time()
