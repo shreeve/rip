@@ -238,7 +238,9 @@ work to `main`. It means, in order:
    whose commits are each complete, honestly named, and useful as
    review provenance may rebase-merge instead. State which was chosen
    and why.
-5. Confirm the commit is on `main`, then delete the branch.
+5. Confirm the commit is on `main`, then delete the branch — but only
+   a branch this work created. A remote-only branch, or another
+   contributor's branch (Philip's, say), is theirs to delete.
 
 Steps already satisfied are verified, not redone. There is no second
 verb: landing someone else's PR is still landing.
