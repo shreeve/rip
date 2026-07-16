@@ -28,6 +28,9 @@ Usage:
   rip [options]                      Read source from stdin
   rip schema <verb> [args...]        Schema evolution: status | plan | make | migrate
                                      (run 'rip schema --help' for the full surface)
+  rip server [tokens...]             The application server: serve static sites, App
+                                     bundles, and serve.rip configs
+                                     (run 'rip server --help' for the token grammar)
   rip test [args...]                 Run \`bun test\` with the .rip loader preloaded
                                      (default --timeout 15000; extra args pass through)
 
@@ -98,6 +101,20 @@ const args = process.argv.slice(2);
 if (args[0] === 'schema') {
   const schemaCliPath = join(dirname(fileURLToPath(import.meta.url)), '../src/schema-cli.js');
   const r = spawnSync('bun', [`--preload=${loaderPath}`, schemaCliPath, ...args.slice(1)], {
+    stdio: 'inherit',
+    env: process.env,
+  });
+  process.exit(r.status ?? 1);
+}
+
+// `rip server [tokens…]` — the application server subcommand,
+// dispatched like `schema` (the word `server` in first position is
+// the subcommand, never an input file — run a file literally named
+// `server` as `rip ./server`). The server bin registers the loader
+// itself and owns the whole token grammar (`rip server --help`).
+if (args[0] === 'server') {
+  const serverBinPath = join(dirname(fileURLToPath(import.meta.url)), '../packages/server/bin/rip-server');
+  const r = spawnSync('bun', [serverBinPath, ...args.slice(1)], {
     stdio: 'inherit',
     env: process.env,
   });

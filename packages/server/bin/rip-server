@@ -1,0 +1,18 @@
+#!/usr/bin/env bun
+//
+// rip-server — the runnable Rip server. This is the thin host edge:
+// it registers the .rip loader, hands process.argv to the composition
+// in ../main.rip, and stays resident while the listener runs. Every
+// decision — the token grammar, the serve.rip config, TLS policy,
+// the listener itself — lives in the Rip modules, where it is tested
+// without a terminal.
+//
+//   rip-server                    serve ./ (static site or App bundle)
+//   rip-server ./site http:8080  serve a directory over HTTP on 8080
+//   rip-server -c                validate serve.rip and exit
+//   rip-server -s                stop the running server
+//   rip-server --help            the full token grammar
+import '../../../src/loader.js'; // registers the .rip Bun loader plugin
+
+const { main } = await import('../main.rip');
+await main(process.argv, process);

@@ -6,11 +6,15 @@
   "exports": {
     ".": "./index.rip"
   },
+  "bin": {
+    "rip-server": "./bin/rip-server"
+  },
   "scripts": {
     "test": "rip test"
   },
   "files": [
     "*.rip",
+    "bin/",
     "README.md"
   ]
 }
