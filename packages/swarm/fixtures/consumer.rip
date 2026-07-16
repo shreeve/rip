@@ -9,16 +9,16 @@ import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs'
 import { join, resolve } from 'path'
 
 INPUT = null
-if isMainThread
-  INPUT = args()[0]
+INPUT = args()[0] if isMainThread
 
 setup = ->
   unless retry()
     init()
-    lines = readFileSync(INPUT, 'utf-8').trim().split('\n')
-    for code in lines then todo(code.trim()) if code.trim()
+    for line in readFileSync(INPUT, 'utf-8').trim().split('\n')
+      code = line.trim()
+      todo code if code
   outDir = resolve('out')
-  mkdirSync(outDir, { recursive: true })
+  mkdirSync outDir, { recursive: true }
   { outDir }
 
 perform = (task, ctx) ->

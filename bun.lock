@@ -97,9 +97,12 @@
     },
     "packages/swarm": {
       "name": "@rip-lang/swarm",
-      "version": "0.0.0",
+      "version": "4.0.0",
       "bin": {
-        "swarm": "./bin/swarm",
+        "swarm": "./swarm.rip",
+      },
+      "devDependencies": {
+        "@rip-lang/testing": "workspace:*",
       },
     },
     "packages/testing": {

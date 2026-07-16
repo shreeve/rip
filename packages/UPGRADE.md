@@ -51,6 +51,7 @@ Re-run after `.d.ts` removal. Compared Rip logic only.
 | **x12** | Identical + 4 judged fixes | **KEEP_V4 (done)** | v3 Rip plus loud/exact fixes (clone, trailing row, silent component loss, selector reject); Rip test roll + frame conformance complete |
 | **validate** | Real redesign | **KEEP_V4 (done)** | Calendar-true dates, stricter validators, Map registry; coercer split merged back into ONE file (owner decision); Rip test roll + frame complete |
 | **gate** | Substantially improved | **KEEP_V4** | Fail-closed secrets, login throttle, reserved `/_gate` 404, self-contained middleware |
+| **swarm** | Identical core + 3 judged deltas | **KEEP_V4 (done)** | Loader from the live `--preload` flag (loud); wrapper and worker bootstrap folded into swarm.rip; Rip test roll + frame complete |
 
 **None of these three warrant restoring v3 Rip.** Do not reintroduce `.d.ts` or type annotations as part of this upgrade.
 
@@ -253,6 +254,50 @@ hljs surface had broken editor-grammar lockstep). The old JS `test/`
 dir, per-package `bun.lock`, and `node_modules` are gone; highlight.js
 is a devDependency test oracle only.
 
+### 6. `swarm` — DONE
+
+**Inventory**
+
+| | v3 | v4 |
+| --- | --- | --- |
+| Main | `swarm.rip` (387 lines) | `swarm.rip` (444) — core line-for-line identical |
+| Worker entry | `lib/worker.mjs` bootstrap + `_getPerform` bridge export | none — swarm.rip is its own worker entry (same module instance, no bridge) |
+| CLI | `bin/swarm` wrapper | none — `swarm.rip` IS the bin (`#!/usr/bin/env rip` + runner block) |
+| Loader for workers | two hardcoded path candidates, `?? null` (silent degradation) | the main thread's own `--preload` flag from `process.execArgv`; loud, named rejection when absent |
+| Tests | none (`example.rip` only) | root `test.rip` (27 cases) + `fixtures/` job-script corpus |
+
+**Strip types:** No annotations on either side (the deferred `.d.ts`
+face test was deleted). Diffing the Rip head-on: everything outside
+three regions is byte-identical — the ANSI rendering, the queue
+(`init`/`todo`/`retry`), dispatch, crash recovery, `args()`.
+
+**Judged deltas (all verified by pins):**
+
+1. **Worker loader resolution** — verified that a worker thread gets
+   neither the parent's preloads nor bunfig's (the inherited `execArgv`
+   even shows the flag, inert), so `Worker({preload})` is genuinely
+   required; the loader path now comes from the main thread's own
+   `--preload` flag — the exact loader compiling the process — instead
+   of two guessed filesystem layouts with a silent `?? null` fallback.
+2. **One file, three roles** — the `bin/swarm` wrapper and
+   `lib/worker.mjs` bootstrap both folded into swarm.rip, split by
+   `import.meta.main` and `isMainThread` guards (in a worker the entry's
+   `import.meta.main` is ALSO true — the guard matters). Folding the
+   worker entry removed the `_getPerform` bridge export and the
+   module-identity subtlety it existed for (the bootstrap's file-URL
+   import had to dedupe against the script's bare-specifier import).
+3. **`fixtures/` is an earned directory** — the suite's corpus is ten
+   real runnable job programs (crash simulators, retry loops) spawned
+   as subprocesses; inlining them as strings would fight the quoting
+   sharp edges. Same justification class as csv's `bench/`.
+
+**Frame:** contract package.json (description = README pitch, pinned
+byte-for-byte by a test), README on the mold (server-only Runtime
+line), `rip test.rip` with the standard package-surface opener. The
+v3 wart of `-w 0` silently meaning CPU-count is pinned as observed.
+
+**Recommendation: KEEP_V4** — done; confidence high.
+
 ## Cross-cutting notes
 
 1. **No `.d.ts` in these packages** — confirmed. Do not bring type files over from v3. Package `exports` point at `.rip` only.
@@ -264,7 +309,7 @@ is a devDependency test oracle only.
 ## Suggested next steps
 
 1. Accept **KEEP_V4** for all six (no Rip restores; no type reintroduction).
-2. Roll root `test.rip` + `@rip-lang/testing` across the remaining packages (`validate`, then `gate` where security tests fit) — `x12` is done.
-3. Continue the compare→strip→judge loop for remaining packages (`server`, `app`, `db`, `ui`, `swarm`, `script`, `ai`, …) — `print` is done; still excluding `util` and `stamp`, still without bringing types.
+2. Roll root `test.rip` + `@rip-lang/testing` across the remaining packages (`gate` where security tests fit) — `x12`, `validate`, and `swarm` are done.
+3. Continue the compare→strip→judge loop for remaining packages (`server`, `app`, `db`, `ui`, `script`, `ai`, …) — `print` and `swarm` are done; still excluding `util` and `stamp`, still without bringing types.
 4. Optional follow-up: gate standalone `GATE_*` bootstrap once v4 serving story is ready.
 5. Typing pass (separate): strip or regenerate types.

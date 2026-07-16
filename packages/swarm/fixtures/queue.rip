@@ -1,0 +1,36 @@
+# The file-based task queue, exercised directly (no workers): init(),
+# todo() payload forms, and every retry() branch.
+# Prints one line per observation for exact matching.
+import { init, todo, retry } from '@rip-lang/swarm'
+import { readFileSync, readdirSync, renameSync } from 'fs'
+
+init()
+todo 'empty'
+todo 'str', 'hello'
+todo 'obj', { a: 1, b: [2, 3] }
+todo 42
+todo 0
+
+p JSON.stringify(readdirSync('.swarm/todo').sort())
+p JSON.stringify(readFileSync('.swarm/todo/empty', 'utf8'))
+p JSON.stringify(readFileSync('.swarm/todo/str', 'utf8'))
+p JSON.stringify(readFileSync('.swarm/todo/obj', 'utf8'))
+
+# died empty, todo non-empty -> true (work is already queued)
+p 'retry-with-todo:', retry()
+
+# move everything to died, then retry moves it all back
+for f in readdirSync('.swarm/todo')
+  renameSync ".swarm/todo/#{f}", ".swarm/died/#{f}"
+p 'retry-moves:', retry()
+p JSON.stringify(readdirSync('.swarm/todo').sort())
+p JSON.stringify(readdirSync('.swarm/died').sort())
+
+# both empty -> false
+init()
+p 'retry-empty:', retry()
+
+# init() clears any existing queue
+todo 'x'
+init()
+p 'after-reinit:', JSON.stringify(readdirSync('.swarm/todo'))

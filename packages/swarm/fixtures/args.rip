@@ -1,4 +1,4 @@
 # args() — process.argv with swarm's own flags stripped.
 import { args } from '@rip-lang/swarm'
-console.log JSON.stringify(args())
-process.exit(0)
+
+p JSON.stringify(args())

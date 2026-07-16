@@ -6,11 +6,10 @@ import { swarm, init, retry, todo } from '@rip-lang/swarm'
 setup = ->
   unless retry()
     init()
-    for i in [1..6] then todo(i)
+    todo i for i in [1..6]
   null
 
 perform = (task, ctx) ->
-  name = task.split('/').pop()
-  process.exit(7) if name is '5'
+  exit 7 if task.split('/').pop() is '5'
 
 swarm { setup, perform }
