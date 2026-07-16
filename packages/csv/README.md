@@ -114,7 +114,8 @@ count = CSV.read str, each: (row, index) ->
 
 # Early halt by returning false
 CSV.read str, each: (row) ->
-  return false if row[0] is 'STOP'
+  if row[0] is 'STOP'
+    return false
   process(row)
 ```
 
@@ -193,7 +194,7 @@ line = CSV.formatRow ['Alice', 'New York, NY', '30']
 ### Reusable Writer
 
 ```coffee
-w = CSV.writer(sep: '\t')
+w = CSV.writer(sep: '\t', excel: true)
 
 for record in records
   line = w.row(record)
@@ -290,36 +291,74 @@ bun csv.rip -r -e -z input.csv output.csv
 
 # Pipe to stdout
 bun csv.rip -r -e input.csv
+
+# Show version
+bun csv.rip -v
 ```
 
 ```
 Usage: bun csv.rip [options] <input> [output]
 
+Read options:
   -r, --relax     Recover from stray/malformed quotes
   -e, --excel     Handle Excel ="..." literals on input
   -s, --strip     Strip whitespace from fields
+
+Write options:
   -z, --zeros     Protect leading zeros with ="0123"
+
+General:
   -v, --version   Show version
   -h, --help      Show this help
 
 If output is omitted, writes to stdout.
 ```
 
-## Bench
+## Performance
 
 ```bash
 bun run bench                  # synthesized workloads, or pass file paths
 ```
 
-Throughput lands in the 300–500 MB/s tier (Apple Silicon, Bun): ~300+
-MB/s on plain data, ~450 MB/s on quoted data, ~400 MB/s on Labcorp-style
-recovery. On quoted data — the hard case — it measures within a few
-percent of uDSV, the fastest JS CSV parser, while being the only parser
-in its tier with relax/excel malformation recovery. Competitor
-comparisons run from `bench/` (`bun install && bun run bench` there),
-which quarantines the competitor parsers away from this package's zero
-dependencies. Numbers are workload- and machine-sensitive — measure on
-your own data.
+Measured on Apple Silicon under Bun (warm-up pass, best of three):
+
+| Workload | Size | Rows | Time | Throughput |
+|----------|------|------|------|-----------|
+| Plain (no quotes) | 25 MB | 319,689 | 43ms | **577 MB/s** |
+| Quoted (embedded commas) | 25 MB | 308,406 | 32ms | **793 MB/s** |
+| Labcorp-style recovery (relax+excel) | 10 MB | 103,820 | 13ms | **797 MB/s** |
+| Long fields (300-char cells) | 25 MB | 29,032 | 5ms | **4.6 GB/s** |
+
+The hybrid engine is why the numbers hold across shapes: a JIT'd
+`charCodeAt` walk wins on short fields where native-call overhead
+dominates, and `indexOf`'s SIMD bulk-skip takes over on long spans —
+so wide medical exports and 300-character text cells both stay fast.
+The relax+excel heuristics cost nothing until a stray quote actually
+appears: recovery mode runs at full speed on clean data.
+
+### Head-to-head
+
+Same strings, same protocol, every parser producing rows of string
+arrays (`bun install && bun run compare` in `bench/`, which quarantines
+the competitor parsers away from this package's zero dependencies):
+
+| Parser | Plain | Quoted | Malformation recovery |
+|--------|-------|--------|----------------------|
+| **Rip CSV** | **578 MB/s** | **814 MB/s** | **~800 MB/s** |
+| d3-dsv | 537 MB/s | 362 MB/s | — |
+| uDSV | 432 MB/s | 461 MB/s | — |
+| PapaParse | 289 MB/s | 206 MB/s | — |
+| csv-parse | 57 MB/s | 68 MB/s | — |
+
+On quoted data — the case that actually separates CSV parsers — Rip
+CSV is **1.8× uDSV** (the acknowledged fastest JS parser), **2.2×
+d3-dsv**, **4× PapaParse**, and **12× csv-parse**. On plain data it
+beats d3-dsv in most runs, trading the lead within noise. And it is
+the only parser in the field with relax/excel malformation recovery
+at all — the others throw or silently mis-parse the enterprise
+exports this package was built for.
+
+Numbers are workload- and machine-sensitive — measure on your own data.
 
 ## Test
 

@@ -3,7 +3,7 @@
 #
 #   cd packages/csv/bench
 #   bun install          # competitor parsers live HERE, not in @rip-lang/csv
-#   bun run bench
+#   bun run compare
 #
 # Every parser gets the same in-memory string and the same protocol:
 # one warm-up parse, then best of three timed runs, all producing rows

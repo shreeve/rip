@@ -1,12 +1,13 @@
 # ==============================================================================
 # csv bench — read throughput on synthesized workloads or real files
 #
-#   bun run bench                       # three synthesized workloads
-#   rip bench.rip big.csv other.csv     # your own files
+#   bun run bench                             # from packages/csv or bench/
+#   rip bench/bench.rip big.csv other.csv     # your own files
 #
 # Each workload parses with relax+excel enabled (the heuristics cost
 # nothing until a stray quote appears, so this is the honest ceiling).
-# Warm-up pass first, then best of three timed runs.
+# Warm-up pass first, then best of three timed runs. The head-to-head
+# against other JS parsers is compare.rip (`bun run compare` in bench/).
 # ==============================================================================
 
 import { CSV } from '@rip-lang/csv'
