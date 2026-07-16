@@ -19,7 +19,7 @@
 #
 # An unknown validator name rejects loudly — vocabulary typos are
 # configuration mistakes, not empty reads.
-import { getValidator, isRawType } from '../validate/registry.rip'
+import { getValidator, isRawType } from '../validate/validate.rip'
 
 fail = (message) -> throw new Error "Rip Server: #{message}"
 
