@@ -1,0 +1,138 @@
+# ==============================================================================
+# highlight tests: the shared Rip grammar, exercised through highlight.js
+# ==============================================================================
+
+import { test, eq, ok } from '@rip-lang/testing'
+import ripLanguage from '@rip-lang/highlight'
+import * as mod from '@rip-lang/highlight'
+import hljs from 'highlight.js/lib/core'
+import { readFileSync } from 'fs'
+import { join } from 'path'
+
+hljs.registerLanguage 'rip', ripLanguage
+
+hl = (src) -> hljs.highlight(src, { language: 'rip' }).value
+
+span = (cls, text) -> "<span class=\"hljs-#{cls}\">#{text}</span>"
+
+# ==[ Package surface ]==
+
+console.log "\nPackage"
+
+test "module exports the grammar function as default", ->
+  eq Object.keys(mod), ['default']
+  eq typeof ripLanguage, 'function'
+  grammar = ripLanguage(hljs)
+  eq grammar.name, 'Rip'
+
+test "no runtime deps; highlight.js is the test oracle only", ->
+  pkg = JSON.parse(readFileSync(join(import.meta.dir, 'package.json'), 'utf8'))
+  for field in ['dependencies', 'peerDependencies', 'optionalDependencies']
+    eq pkg[field], undefined
+  eq pkg.devDependencies, { '@rip-lang/testing': 'workspace:*', 'highlight.js': '11.11.1' }
+
+test "declares browser safety and earns it", ->
+  pkg = JSON.parse(readFileSync(join(import.meta.dir, 'package.json'), 'utf8'))
+  eq pkg.rip, { browser: true }
+  # The grammar names host globals as STRINGS to highlight ('import',
+  # 'globalThis', ...), so scan for actual statements and API touches,
+  # not word mentions: no imports/requires, no host property access.
+  source = readFileSync join(import.meta.dir, 'hljs-rip.js'), 'utf8'
+  eq /^\s*(import|export)\s.*from\s/m.test(source), false
+  eq /\brequire\s*\(|\bBun\.|\bprocess\.|\bglobalThis\./.test(source), false
+
+# ==[ Keywords and declarations ]==
+
+console.log "\nKeywords"
+
+test "control flow, declarations, and word operators", ->
+  ok hl('if x then y else z').includes span('keyword', 'if')
+  ok hl('x is y and a isnt b').includes span('keyword', 'is')
+  ok hl('class Foo extends Bar').includes span('keyword', 'class')
+  ok hl('User = schema :model').includes span('keyword', 'schema')
+
+test "def highlights with its function name", ->
+  out = hl 'def greet(name)\n  name\n'
+  ok out.includes span('keyword', 'def')
+  ok out.includes '<span class="hljs-title function_">greet</span>'
+
+test "components and their lifecycle words", ->
+  ok hl('component App').includes span('keyword', 'component')
+  ok hl('App = component').includes span('keyword', 'component')
+  ok hl('render ->').includes span('keyword', 'render')
+
+test "literals and built-ins", ->
+  ok hl('x = true').includes span('literal', 'true')
+  ok hl('String::trim').includes span('built_in', 'String')
+  ok hl('p 42').includes span('built_in', 'p')
+
+# ==[ Strings ]==
+
+console.log "\nStrings"
+
+test "double-quoted strings interpolate", ->
+  out = hl 's = "hi #{name}!"'
+  ok out.includes '<span class="hljs-string">'
+  ok out.includes '<span class="hljs-subst">'
+
+test "heredocs interpolate across lines", ->
+  out = hl 'h = """\nline #{x}\n"""'
+  ok out.includes '<span class="hljs-subst">'
+
+test "single-quoted strings do not interpolate", ->
+  out = hl "s = 'hi \#{name}!'"
+  ok not out.includes('<span class="hljs-subst">')
+
+test "word arrays across delimiter variants", ->
+  ok hl('tags = %w[alpha beta]').includes span('string', '%w[alpha beta]')
+  ok hl('tags = %w(a b)').includes span('string', '%w(a b)')
+  ok hl('tags = %w{a b}').includes span('string', '%w{a b}')
+
+test "symbol literals", ->
+  ok hl('k = :redo').includes span('symbol', ':redo')
+  # a plain ternary colon is not a symbol
+  ok not hl('x = a ? b : c').includes('hljs-symbol')
+
+# ==[ Regexes, numbers, comments ]==
+
+console.log "\nRegexes, numbers, comments"
+
+test "regex literals", ->
+  ok hl('r = /ab+c/').includes span('regexp', '/ab+c/')
+
+test "numbers in decimal and hex", ->
+  ok hl('x = 42').includes span('number', '42')
+  ok hl('x = 0xff').includes span('number', '0xff')
+
+test "comments", ->
+  ok hl('# a comment').includes '<span class="hljs-comment"># a comment</span>'
+
+# ==[ Rip operators ]==
+
+console.log "\nOperators"
+
+test "reactive and assignment operators", ->
+  for op in [':=', '~=', '.=', '=!', '*>', '::']
+    src = switch op
+      when ':=' then 'count := 0'
+      when '~=' then 'doubled ~= count * 2'
+      when '.=' then 'x .= trim()'
+      when '=!' then 'MAX =! 100'
+      when '*>' then '*>obj = {a: 1}'
+      when '::' then 'String::trim'
+    ok hl(src).includes(span('operator', op.replace('>', '&gt;').replace('<', '&lt;'))), "operator #{op}"
+
+test "two-way bind and dammit", ->
+  ok hl('value <=> name').includes span('operator', '&lt;=&gt;')
+  ok hl('fetchData!').includes span('operator', '!')
+
+test "map literal sigil highlights and boosts auto-detection", ->
+  ok hl('m = *{a: 1}').includes span('operator', '*') + '{'
+  # relevance 5 on *{ makes bare map-literal code auto-detect as Rip
+  detected = hljs.highlightAuto('m = *{/pat/: 1, a: 2}', ['rip', 'javascript']).language
+  eq detected, 'rip'
+
+test "tagged template dollar", ->
+  out = hl 'sh $"cmd #{x}"'
+  ok out.includes span('operator', '$')
+  ok out.includes '<span class="hljs-subst">'

@@ -1,19 +1,24 @@
 {
   "name": "@rip-lang/highlight",
-  "version": "0.0.0",
+  "version": "4.0.0",
   "private": true,
   "type": "module",
+  "description": "The highlight.js grammar for Rip — one shared definition consumed by Rip Print and the print editor extension",
   "exports": {
     ".": "./hljs-rip.js"
   },
   "scripts": {
-    "test": "rip test"
+    "test": "rip test.rip"
+  },
+  "rip": {
+    "browser": true
   },
   "files": [
     "hljs-rip.js",
     "README.md"
   ],
   "devDependencies": {
+    "@rip-lang/testing": "workspace:*",
     "highlight.js": "11.11.1"
   }
 }

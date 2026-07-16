@@ -3,8 +3,8 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@rip-lang/highlight",
-      "devDependencies": {
+      "name": "print",
+      "dependencies": {
         "highlight.js": "11.11.1",
       },
     },

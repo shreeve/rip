@@ -1,5 +1,6 @@
+#!/usr/bin/env rip
 # ==============================================================================
-# rip-print — Syntax-highlighted source code printer
+# rip-print: Syntax-highlighted source code printer
 #
 # Author: Steve Shreeve (steve.shreeve@gmail.com)
 #   Date: Feb 9, 2026
@@ -9,13 +10,19 @@
 # ==============================================================================
 
 import hljs from 'highlight.js'
-import ripLanguage from '../highlight/hljs-rip.js'
+import ripLanguage from '@rip-lang/highlight'
 import { existsSync, readdirSync, readFileSync, statSync } from 'fs'
 import { basename, extname, join, relative } from 'path'
 import { execSync } from 'child_process'
 
+# A pure CLI with no library surface: importing this module is always a
+# mistake, so it rejects loudly instead of silently running the program.
+throw new Error('@rip-lang/print is a CLI, not a library; run print.rip (rip-print)') unless import.meta.main
+
+VERSION = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf-8')).version
+
 # ==============================================================================
-# Markdown rendering (single-file mode — matches static.rip styling exactly)
+# Markdown rendering (single-file mode; matches static.rip styling exactly)
 # ==============================================================================
 
 def escMdHtml(s)
@@ -85,7 +92,7 @@ hljs.registerLanguage 'rip', ripLanguage
 args = process.argv.slice(2)
 
 if args.includes('-v') or args.includes('--version')
-  console.log "rip-print 1.1.59"
+  console.log "rip-print #{VERSION}"
   process.exit(0)
 
 if args.includes('-h') or args.includes('--help')
@@ -276,7 +283,6 @@ def highlightCode(code, lang)
     if lang isnt 'plaintext'
       result = hljs.highlight code, { language: lang }
       highlighted = result.value
-  catch then null # fall through
   highlighted ?= escapeHtml code
   highlighted = rehighlightRipScripts(highlighted) if lang is 'html' or lang is 'xml'
 
@@ -506,7 +512,7 @@ html = """
   """
 
 # Single-markdown-file mode: replace the source-view HTML with a rendered document.
-# (The source-view was built above and is discarded here — negligible work for 1 file.)
+# (The source-view was built above and is discarded here; negligible work for 1 file.)
 html = renderSingleMarkdown allFiles[0], dark if singleMarkdown
 
 # ==============================================================================

@@ -179,6 +179,64 @@ the CLI is exercised as a real subprocess through both the repo's
 
 ---
 
+### 4. `print` — DONE
+
+**Inventory**
+
+| | v3 | v4 |
+| --- | --- | --- |
+| Main | `print.rip` (embedded `hljs-rip.js` copy) | `print.rip` — same program; grammar from `@rip-lang/highlight` |
+| CLI | `bin/rip-print` wrapper | none — `print.rip` IS the bin (`#!/usr/bin/env rip`) |
+| Deps | `highlight.js` | `highlight.js` + `@rip-lang/highlight` (workspace) |
+| Tests | none | root `test.rip` (22 cases), CLI as a real subprocess |
+| Editor | `vscode/` extension (embedded grammar copy, no tests) | `vscode/` extension — grammar GENERATED from `packages/highlight` via `rip sync.rip` (byte-gated), own `test.rip` (17 cases) |
+
+**Strip types:** No annotations on either side. v4 Rip is v3's program
+with judged deltas:
+
+1. **Shared grammar** — v3 embedded its own (older) `hljs-rip.js`; v4
+   imports `@rip-lang/highlight`, so `%w[]` and `:symbol` highlighting
+   land and the grammar stays in lockstep with the editor surfaces.
+2. **Import guard** — a pure CLI with no export surface now throws on
+   `import` instead of silently running the program at import time.
+3. **Version from package.json** — v3 hard-coded `rip-print 1.1.59`
+   (which had drifted from its own manifest, 1.1.127); v4 reads
+   `VERSION` from package.json with the standard line.
+4. **Frame** — shebang bin (wrapper deleted), contract package.json
+   (4.0.0, description = README pitch, `rip test.rip`), README on the
+   mold, JS `test/` dir replaced by root `test.rip` with every case
+   ported (fixtures generated into a temp tree; browser opener stubbed
+   via PATH). Per-package `bun.lock` removed — the workspace owns
+   dependency resolution.
+5. **Editor extension carried over** — `vscode/` ships the same printer
+   as `rip-lang.print` for VS Code/Cursor. Upgrades over v3: the CJS
+   grammar copy is GENERATED from `packages/highlight` by `rip sync.rip`
+   and byte-gated in tests (v3 hand-carried a drifted copy — the
+   editor-grammar lockstep rule, mechanized); repo URL updated; exact
+   `highlight.js` pin; and a 17-case `test.rip` covering the manifest,
+   grammar gate, and printer core (v3 shipped untested). The extension
+   stays a standalone sub-package (own lockfile and node_modules — the
+   vsix must embed highlight.js), like `packages/vscode`.
+
+**Recommendation: KEEP_V4** — done; confidence high.
+
+---
+
+### 5. `highlight` — DONE (v4-native)
+
+No v3 counterpart (v3 embedded grammar copies inside print and its
+extension). The shared-grammar package now carries the full contract:
+version 4.0.0, description = README pitch, `rip.browser: true` (earned
+and pinned — the grammar file has zero imports and touches no host
+APIs), root `test.rip` (18 cases driving the grammar through
+highlight.js: keywords, strings/interpolation rules, word arrays,
+symbols, regexes, operators), README on the mold with a consumers
+table. Fix that fell out of writing the suite: `schema` was missing
+from the keyword list (the TextMate grammar already had it — the
+hljs surface had broken editor-grammar lockstep). The old JS `test/`
+dir, per-package `bun.lock`, and `node_modules` are gone; highlight.js
+is a devDependency test oracle only.
+
 ## Cross-cutting notes
 
 1. **No `.d.ts` in these packages** — confirmed. Do not bring type files over from v3. Package `exports` point at `.rip` only.
@@ -191,6 +249,6 @@ the CLI is exercised as a real subprocess through both the repo's
 
 1. Accept **KEEP_V4** for all six (no Rip restores; no type reintroduction).
 2. Roll root `test.rip` + `@rip-lang/testing` across the remaining packages (`validate`, then `gate` where security tests fit) — `x12` is done.
-3. Continue the compare→strip→judge loop for remaining packages (`server`, `app`, `db`, `ui`, `swarm`, `print`, `script`, `ai`, …) — still excluding `util` and `stamp`, still without bringing types.
+3. Continue the compare→strip→judge loop for remaining packages (`server`, `app`, `db`, `ui`, `swarm`, `script`, `ai`, …) — `print` is done; still excluding `util` and `stamp`, still without bringing types.
 4. Optional follow-up: gate standalone `GATE_*` bootstrap once v4 serving story is ready.
 5. Typing pass (separate): strip or regenerate types.
