@@ -8,7 +8,9 @@
     "packages/*"
   ],
   "scripts": {
-    "postinstall": "mkdir -p node_modules/.bin && ln -sf ../../bin/rip node_modules/.bin/rip",
+    "postinstall": "mkdir -p node_modules/.bin && ln -sf ../../bin/rip node_modules/.bin/rip && bun scripts/link-check.mjs --quiet",
+    "link-check": "bun scripts/link-check.mjs",
+    "link-global": "bun scripts/link-global.mjs",
     "parser": "bun src/grammar/solar.rip -o src/parser.js src/grammar/grammar.rip",
     "corpus-expected": "bun scripts/corpus-expected.mjs",
     "browser-bundle": "bun scripts/browser-bundle.mjs",
