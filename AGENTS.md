@@ -222,6 +222,13 @@ ALL THREE in the same change.
 - `bun run type-audit` — the typed-editor scoreboard
   (test/type-audit/README.md has the full surface).
 - `bun run ext` — build and install the VS Code extension.
+- `bun run link-global` — make THIS checkout the machine's global rip:
+  symlinks `rip` and every package bin into `~/.bun`, and points
+  `~/node_modules/@rip-lang/*` here. Run once per machine (idempotent);
+  running another checkout's link-global flips ownership back.
+- `bun run link-check` — guardrail (also runs on postinstall): fails
+  loudly if any `@rip-lang/*` name resolves outside this repo (e.g.
+  shadowed by a sibling checkout's global links).
 
 ## When Blocked
 
