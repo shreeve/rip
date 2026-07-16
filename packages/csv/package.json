@@ -8,7 +8,8 @@
     ".": "./csv.rip"
   },
   "scripts": {
-    "test": "rip test.rip"
+    "test": "rip test.rip",
+    "bench": "rip bench.rip"
   },
   "files": [
     "csv.rip",

@@ -1,0 +1,59 @@
+# ==============================================================================
+# csv compare — head-to-head against other JS CSV parsers, for real
+#
+#   cd packages/csv/bench
+#   bun install          # competitor parsers live HERE, not in @rip-lang/csv
+#   bun run bench
+#
+# Every parser gets the same in-memory string and the same protocol:
+# one warm-up parse, then best of three timed runs, all producing rows
+# of string arrays. Rip CSV runs with defaults (no relax/excel) so the
+# comparison is strictly apples-to-apples — none of the others attempt
+# malformation recovery at all.
+# ==============================================================================
+
+import { CSV } from '@rip-lang/csv'
+import Papa from 'papaparse'
+import { csvParseRows } from 'd3-dsv'
+import { parse as csvParse } from 'csv-parse/sync'
+import { inferSchema, initParser } from 'udsv'
+
+MB =! 1048576
+
+PARSERS =! [
+  ['Rip CSV',   (str) -> CSV.read(str)]
+  ['uDSV',      (str) -> initParser(inferSchema(str)).stringArrs(str)]
+  ['PapaParse', (str) -> Papa.parse(str).data]
+  ['d3-dsv',    (str) -> csvParseRows(str)]
+  ['csv-parse', (str) -> csvParse(str)]
+]
+
+def synthesize(header, row, bytes)
+  header + row.repeat(Math.ceil(bytes / row.length))
+
+def bench(title, str)
+  p "\n#{title} — #{(str.length / MB).toFixed(1)} MB"
+  results = []
+  for [name, fn] in PARSERS
+    rows = fn(str)
+    best = Infinity
+    loop 3
+      t0 = performance.now()
+      rows = fn(str)
+      t1 = performance.now()
+      best = Math.min(best, t1 - t0)
+    speed = (str.length / MB) / (best / 1000)
+    results.push { name, rows: rows.length, best, speed }
+  results.sort (a, b) -> b.speed - a.speed
+  for r in results
+    p "  #{r.name.padEnd(12)} #{r.best.toFixed(0).padStart(5)}ms  #{r.speed.toFixed(0).padStart(4)} MB/s  (#{r.rows.toLocaleString()} rows)"
+
+bench 'plain (no quotes)', synthesize(
+  "id,name,city,st,zip,phone,role,date,status,amt\n",
+  "1042,Alice Johnson,Seattle,WA,98101,2065551234,engineer,2026-01-15,active,4415.22\n",
+  10 * MB)
+
+bench 'quoted (embedded commas)', synthesize(
+  "id,name,loc,zip,role,date,status,amt\n",
+  '1042,"Johnson, Alice","Seattle, WA",98101,"engineer, sr",2026-01-15,"active",4415.22\n',
+  10 * MB)

@@ -1,0 +1,16 @@
+{
+  "name": "csv-bench",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Head-to-head CSV parser comparison — competitor deps are quarantined here, never in @rip-lang/csv",
+  "scripts": {
+    "bench": "rip compare.rip"
+  },
+  "dependencies": {
+    "csv-parse": "7.0.1",
+    "d3-dsv": "3.0.1",
+    "papaparse": "5.5.4",
+    "udsv": "0.7.3"
+  }
+}

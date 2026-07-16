@@ -12,7 +12,8 @@ differ only where their content honestly differs.
 packages/<name>/
   <name>.rip      # public entry (or index.rip when the name is taken)
   test.rip        # the whole suite, at package root — not test/
-  demo.rip        # optional runnable tour (time has one; csv does not)
+  demo.rip        # optional runnable tour (time has one)
+  bench.rip       # optional throughput bench, self-contained (csv has one)
   package.json
   README.md
 ```
@@ -35,7 +36,8 @@ Keys in exactly this order (omit what does not apply):
   "exports": { ".": "./<name>.rip" },
   "scripts": {
     "test": "rip test.rip",
-    "demo": "rip demo.rip"
+    "demo": "rip demo.rip",
+    "bench": "rip bench.rip"
   },
   "rip": { "browser": true },
   "files": ["<name>.rip", "README.md"],

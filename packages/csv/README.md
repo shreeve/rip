@@ -55,33 +55,173 @@ CSV.save! 'out.csv', rows
 - Writing: compact/full quoting, leading-zero protection (`zeros`), reusable `Writer` instances
 - CLI file converter built in (`bun csv.rip in.csv out.csv`)
 
+## How It Works
+
+The parser uses an **indexOf ratchet** — a technique where the JavaScript
+engine's native `indexOf` (backed by SIMD instructions in V8 and JSC) does
+the heavy lifting. Instead of inspecting every character, the parser calls
+`indexOf` to jump directly to the next delimiter, newline, or quote. Each
+call can skip hundreds of bytes in a single native operation.
+
+```
+Source string:  "Alice,30,New York\nBob,25,Chicago\n..."
+                 ↑     ↑  ↑         ↑
+                 │     │  │         └── indexOf('\n') jumps here
+                 │     │  └── indexOf(',') jumps here
+                 │     └── indexOf(',') jumps here
+                 └── start
+
+Each indexOf call skips bulk content via SIMD — no per-byte scanning in JS.
+```
+
+The parser has two code paths, selected at startup by probing the first ~8KB:
+
+- **Fast path** — no quotes detected: pure indexOf for separators and newlines
+- **Full path** — quotes present: indexOf ratchet with quote/escape handling
+
 ## Reading
 
-```coffee
-# Explicit separator (otherwise `,` `\t` `|` `;` are auto-detected)
-rows = CSV.read str, sep: ';'
+### Basic Parsing
 
-# Row-by-row processing without building an array; returns the row count
+```coffee
+# Auto-detects delimiter, quoting, line endings
+rows = CSV.read str
+
+# Tab-separated, pipe-separated — auto-detected
+rows = CSV.read "a\tb\tc\n1\t2\t3\n"
+rows = CSV.read "a|b|c\n1|2|3\n"
+
+# Explicit separator
+rows = CSV.read str, sep: ';'
+```
+
+### Headers Mode
+
+```coffee
+# First row becomes object keys
+users = CSV.read str, headers: true
+# [{name: 'Alice', age: '30'}, ...]
+
+console.log users[0].name  # "Alice"
+```
+
+### Row-by-Row Processing
+
+```coffee
+# Process rows one at a time without building an array; returns the row count
 count = CSV.read str, each: (row, index) ->
-  process(row)
+  console.log "Row #{index}: #{row}"
 
 # Early halt by returning false
 CSV.read str, each: (row) ->
   return false if row[0] is 'STOP'
   process(row)
+```
 
-# Excel mode: ="01" literals preserve leading zeros
-rows = CSV.read '="01",hello\n', excel: true    # [['01', 'hello']]
+### File I/O
 
-# Relax mode: recover from stray/unmatched quotes instead of throwing
+```coffee
+# Read a file (async)
+rows = CSV.load! 'data.csv'
+rows = CSV.load! 'data.csv', headers: true, strip: true
+
+# Row-by-row file processing
+CSV.load! 'huge.csv', each: (row) -> db.insert!(row)
+```
+
+### Excel Mode
+
+```coffee
+# Handles ="01" literals (preserves leading zeros)
+rows = CSV.read '="01",hello\n', excel: true
+# [['01', 'hello']]
+```
+
+### Relax Mode
+
+```coffee
+# Recovers from stray/unmatched quotes instead of throwing
 rows = CSV.read str, relax: true
 ```
 
-With `relax: true` and `excel: true` together the parser recovers the
-malformations common in enterprise exports (Labcorp-style files, legacy
-Excel): stray quotes inside quoted fields, unescaped embedded quotes,
-doubled quotes at `="..."` boundaries, and bare formulas. The relax
-heuristics only fire when a stray quote is actually encountered.
+## Special Cases (Relax + Excel)
+
+When `relax: true` and `excel: true` are both enabled, the parser recovers
+from common real-world CSV malformations — stray quotes, unescaped embedded
+quotes, and Excel `="..."` literals. These patterns appear frequently in
+exports from systems like Labcorp, legacy Excel, and other enterprise tools.
+The relax heuristics only fire when a stray quote is actually encountered.
+
+| Input | Fields | Key behavior |
+|-------|--------|-------------|
+| `"AAA "BBB",CCC,"DDD"` | 3 | Stray quotes recovered (relax) |
+| `"CHUI, LOK HANG "BENNY",…,=""` | 5 | Stray quotes + excel empty |
+| `"Don",="007",10,"Ed"` | 4 | Excel literal preserves leading zero |
+| `Charlie or "Chuck",=B2 + B3,9` | 3 | Unquoted stray quotes + bare formula |
+| `A,B,C",D` | 4 | Trailing stray quote preserved |
+| `123,"CHO, JOELLE "JOJO"",456` | 3 | Stray quotes (relax) |
+| `123,"CHO, JOELLE ""JOJO""",456` | 3 | Properly doubled quotes — same result |
+| `=,=x,x=,="x",="","","=",…` | 11 | Full excel + quoting matrix |
+
+```coffee
+# Parse messy real-world CSV with both modes enabled
+rows = CSV.read str, relax: true, excel: true
+
+# Load a Labcorp file
+rows = CSV.load! 'labcorp.csv', relax: true, excel: true, headers: true
+```
+
+## Writing
+
+### Basic Writing
+
+```coffee
+str = CSV.write [['name','age'], ['Alice','30']]
+# "name,age\nAlice,30\n"
+
+# Write to file (async)
+CSV.save! 'out.csv', rows
+```
+
+### Format a Single Row
+
+```coffee
+line = CSV.formatRow ['Alice', 'New York, NY', '30']
+# 'Alice,"New York, NY",30'
+```
+
+### Reusable Writer
+
+```coffee
+w = CSV.writer(sep: '\t')
+
+for record in records
+  line = w.row(record)
+  stream.write "#{line}\n"
+
+# Or format all at once
+output = w.rows(records)
+```
+
+### Writer Modes
+
+```coffee
+# Compact (default): quote only when necessary
+CSV.write rows, mode: 'compact'
+
+# Full: quote every field
+CSV.write rows, mode: 'full'
+
+# Protect leading zeros for spreadsheets
+CSV.write rows, zeros: true    # ="0123",hello
+
+# Drop trailing empty columns
+CSV.write rows, drop: true
+```
+
+## Options Reference
+
+### Reader Options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
@@ -97,30 +237,7 @@ heuristics only fire when a stray quote is actually encountered.
 | `row` | string | auto | Line ending override (`\n`, `\r\n`, `\r`) |
 | `each` | function | `null` | `(row, index) ->` callback per row |
 
-The probe also strips a UTF-8 BOM and honors Excel's `sep=` header
-line. User options always win over probed values.
-
-## Writing
-
-```coffee
-# Compact (default): quote only when necessary
-CSV.write rows
-
-# Full: quote every field
-CSV.write rows, mode: 'full'
-
-# Protect leading zeros for spreadsheets
-CSV.write rows, zeros: true    # ="0123",hello
-
-# Format a single row (no trailing newline)
-line = CSV.formatRow ['Alice', 'New York, NY', '30']
-# 'Alice,"New York, NY",30'
-
-# Reusable writer
-w = CSV.writer(sep: '\t')
-line   = w.row(record)      # one line
-output = w.rows(records)    # complete string
-```
+### Writer Options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
@@ -132,33 +249,77 @@ output = w.rows(records)    # complete string
 | `drop` | boolean | `false` | Drop trailing empty columns |
 | `rowsep` | string | `'\n'` | Row separator |
 
-## API
+> **Note:** The writer defaults to doubled-quote escaping (`""`). Pass
+> `escape: '\\'` for backslash style.
 
-- `CSV.read(str, opts)` — parse a string into row arrays, objects
-  (`headers: true`), or a row count (`each` callback).
-- `CSV.load!(path, opts)` — read and parse a file (async).
-- `CSV.write(rows, opts)` — format row arrays into a CSV string.
-- `CSV.save!(path, rows, opts)` — write rows to a file (async).
-- `CSV.writer(opts)` — a reusable `Writer` with `row(data)` and
-  `rows(data)`.
-- `CSV.formatRow(row, opts)` — format a single row.
+## Auto-Detection
+
+When you call `CSV.read(str)` with no options, the probe function scans the
+first ~8KB to automatically detect:
+
+- **BOM** — strips UTF-8 BOM if present
+- **`sep=` header** — Excel convention for declaring delimiter
+- **Delimiter** — tries `,` `\t` `|` `;`, picks the most frequent
+- **Quote character** — detects if `"` appears in the sample
+- **Escape style** — `\"` (backslash) vs `""` (doubled quote)
+- **Line endings** — `\r\n`, `\n`, or `\r`
+
+User options override any probed value.
+
+## API Summary
+
+```coffee
+CSV.read(str, opts)            # parse string -> rows or objects
+CSV.load!(path, opts)          # parse file (async)
+CSV.write(rows, opts)          # format rows -> CSV string
+CSV.save!(path, rows, opts)    # write to file (async)
+CSV.writer(opts)               # create reusable Writer instance
+CSV.formatRow(row, opts)       # format single row -> string
+```
 
 ## CLI
 
-The module doubles as a file converter when run directly:
+The library doubles as a command-line tool for converting CSV files:
 
 ```bash
-bun csv.rip [options] <input> [output]
+# Clean up a malformed Labcorp file
+bun csv.rip -r -e input.csv output.csv
 
-#  -r, --relax     Recover from stray/malformed quotes
-#  -e, --excel     Handle Excel ="..." literals on input
-#  -s, --strip     Strip whitespace from fields
-#  -z, --zeros     Protect leading zeros with ="0123"
-#  -v, --version   Show version
-#  -h, --help      Show this help
+# Protect leading zeros for Google Sheets / Excel
+bun csv.rip -r -e -z input.csv output.csv
+
+# Pipe to stdout
+bun csv.rip -r -e input.csv
 ```
 
-If output is omitted, the converted CSV is written to stdout.
+```
+Usage: bun csv.rip [options] <input> [output]
+
+  -r, --relax     Recover from stray/malformed quotes
+  -e, --excel     Handle Excel ="..." literals on input
+  -s, --strip     Strip whitespace from fields
+  -z, --zeros     Protect leading zeros with ="0123"
+  -v, --version   Show version
+  -h, --help      Show this help
+
+If output is omitted, writes to stdout.
+```
+
+## Bench
+
+```bash
+bun run bench                  # synthesized workloads, or pass file paths
+```
+
+Throughput lands in the 300–500 MB/s tier (Apple Silicon, Bun): ~300+
+MB/s on plain data, ~450 MB/s on quoted data, ~400 MB/s on Labcorp-style
+recovery. On quoted data — the hard case — it measures within a few
+percent of uDSV, the fastest JS CSV parser, while being the only parser
+in its tier with relax/excel malformation recovery. Competitor
+comparisons run from `bench/` (`bun install && bun run bench` there),
+which quarantines the competitor parsers away from this package's zero
+dependencies. Numbers are workload- and machine-sensitive — measure on
+your own data.
 
 ## Test
 
