@@ -5,7 +5,6 @@
   "type": "module",
   "description": "Head-to-head CSV parser comparison — competitor deps are quarantined here, never in @rip-lang/csv",
   "scripts": {
-    "bench": "rip index.rip",
     "compare": "rip compare.rip"
   },
   "dependencies": {

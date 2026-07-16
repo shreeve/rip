@@ -13,12 +13,19 @@ packages/<name>/
   <name>.rip      # public entry (or index.rip when the name is taken)
   test.rip        # the whole suite, at package root — not test/
   demo.rip        # optional runnable tour (time has one)
-  bench/          # optional benches (csv: index.rip self-bench, compare.rip
-                  # head-to-head — competitor deps live in bench/package.json;
-                  # `rip bench` runs the directory's index.rip)
+  bench.rip       # optional self-bench, zero deps (csv has one)
+  bench/          # only when a bench needs quarantined deps (csv:
+                  # compare.rip head-to-head — competitor parsers live
+                  # in bench/package.json, never in the package itself)
   package.json
   README.md
 ```
+
+Runnable package verbs are root-level `<verb>.rip` files invoked as
+`rip <verb>.rip` — the extension can never collide with a CLI
+subcommand (`rip test`, `rip schema`). A directory appears only for a
+structural reason (its own package.json quarantining bench-only deps),
+never as an invocation convenience.
 
 Do NOT add: per-package `bunfig.toml`, `bun.lock`, `.d.ts` files,
 `test/` directories, or JS test files for pure library packages.
@@ -39,7 +46,7 @@ Keys in exactly this order (omit what does not apply):
   "scripts": {
     "test": "rip test.rip",
     "demo": "rip demo.rip",
-    "bench": "rip bench"
+    "bench": "rip bench.rip"
   },
   "rip": { "browser": true },
   "files": ["<name>.rip", "README.md"],

@@ -44,20 +44,19 @@ d = time.parse('Apr 19, 2026', 'MMM D, YYYY')
 - `weekday()` getter and setter (Sunday-start US)
 - `utc()` / `local()` / `isUTC()` / `utcOffset()`
 - `.tz('HT')` / `.tz('Pacific/Honolulu')` — arbitrary IANA zones with DST-aware offsets (backed by `Intl`)
-- `.toZone(zone)` / `.asZone(zone)` / `.asUTC()` — legible *convert* vs *reinterpret* (à la the `zones` gem): `toZone` keeps the instant and changes the clock; `asZone`/`asUTC` keep the wall-clock numbers and change the zone (the instant shifts) — the latter is how you treat a naive timestamp that is really UTC
+- `.toZone(zone)` / `.asZone(zone)` / `.asUTC()` — legible *convert* vs *reinterpret*
 - Short aliases for every US zone: `ET CT MT PT AKT HT AZ AST ChST SST`
 - `daysInMonth` / `isLeapYear` / `quarter` / `dayOfYear` / `weekOfYear`
 - `time.parse(input, format)` — explicit format parsing built in
 - `time.min(...)` / `time.max(...)`
 - `time.duration(input, unit?)` — first-class `Duration` with ISO-8601 parse/format, `as*()` / `humanize()` / `format()`; usable directly in `.add()` / `.subtract()`
-- `age(dob, asOf?)` — completed years from a date of birth to `asOf` (default: now), birthday-aware; `null` for blank/invalid input
+- `age(dob, asOf?)` — completed years from a date of birth, birthday-aware; `null` for blank/invalid input
 
-## Usage
+## Accessors
+
+### Getters
 
 ```coffee
-import time from '@rip-lang/time'
-
-# Accessors
 d.year()          # 2026
 d.month()         # 0..11
 d.date()          # 1..31
@@ -72,13 +71,29 @@ d.weekOfYear()
 d.daysInMonth()
 d.isLeapYear()
 d.isValid()
+```
 
-# Generic get / set with symbols or strings
+### Generic Get / Set
+
+```coffee
+# Symbols or strings — set returns a new instance
 d.get(:year)
 d.set(:year, 2027)
 d.get('month')
 d.set('month', 5)
+```
 
+### Weekday
+
+```coffee
+# Sunday-start, US
+a.weekday()                   # 0..6, same as .day()
+a.weekday(1)                  # new instance at Monday of same week
+```
+
+## Arithmetic
+
+```coffee
 # Math (returns new instance)
 d.add(1, :day)
 d.subtract(2, :week)
@@ -86,7 +101,30 @@ d.add(3, 'months')
 d.startOf(:month)
 d.endOf(:week)
 
-# Comparison
+# Diff
+a.diff(b)                     # milliseconds
+a.diff(b, :day)               # integer days
+a.diff(b, :hour, true)        # floating-point hours
+```
+
+Any unit spelling resolves to the same unit — use whichever reads best:
+
+| Canonical | Aliases |
+| --- | --- |
+| `:year` | `'year'`, `'years'`, `'y'`, `'yr'`, `'yrs'` |
+| `:quarter` | `'quarter'`, `'quarters'`, `'Q'`, `'q'` |
+| `:month` | `'month'`, `'months'`, `'M'`, `'mo'` |
+| `:week` | `'week'`, `'weeks'`, `'w'`, `'wk'` |
+| `:day` | `'day'`, `'days'`, `'d'` |
+| `:date` | `'date'`, `'dates'`, `'D'`, `'dt'` |
+| `:hour` | `'hour'`, `'hours'`, `'h'`, `'hr'` |
+| `:minute` | `'minute'`, `'minutes'`, `'m'`, `'min'` |
+| `:second` | `'second'`, `'seconds'`, `'s'`, `'sec'` |
+| `:millisecond` | `'millisecond'`, `'milliseconds'`, `'ms'`, `'msec'` |
+
+## Comparison
+
+```coffee
 a.isBefore(b)
 a.isAfter(b)
 a.isSame(b)
@@ -99,86 +137,22 @@ a.isToday()
 a.isYesterday()
 a.isTomorrow()
 
-# Weekday (Sunday-start, US)
-a.weekday()                   # 0..6, same as .day()
-a.weekday(1)                  # new instance at Monday of same week
+# Statics
+time.isTime(x)
+time.min(a, b, c)
+time.max([a, b, c])
+```
 
-# Calendar (English)
-a.calendar()                  # "Today at 3:45 PM", "Yesterday at 10:00 AM",
-                              # "Last Wednesday at 2:15 PM", or "04/19/2026"
-a.calendar(null, { sameDay: '[Today!]' })   # override any bucket
+## Formatting
 
-# Diff
-a.diff(b)                     # milliseconds
-a.diff(b, :day)               # integer days
-a.diff(b, :hour, true)        # floating-point hours
-
-# Format
+```coffee
 d.format()                                # ISO
 d.format('YYYY-MM-DD')
 d.format('MM/DD/YYYY')
 d.format('MMM D, YYYY')
 d.format('dddd, MMMM Do YYYY, h:mm:ss A')
 d.format('[Year:] YYYY')
-
-# Relative time (English, fixed thresholds)
-a.fromNow()                   # "2 hours ago"
-a.from(b)                     # "a day ago"
-a.to(b)                       # "in 3 minutes"
-
-# UTC / local
-d.utc()                       # convert to UTC mode
-d.local()                     # convert to local mode
-d.isUTC()
-d.utcOffset()                 # minutes from UTC
-
-# Arbitrary timezones — short aliases or IANA names
-result = time.utc('2026-04-19T18:30:00Z')
-result.tz('HT').format('ddd h:mm A z')        # Sun 8:30 AM HST
-result.tz('ET').format('ddd h:mm A z')        # Sun 2:30 PM EDT
-result.tz('AZ').format('ddd h:mm A z')        # Sun 11:30 AM MST (AZ never switches)
-result.tz('AKT').format('zzz')                # Alaska Daylight Time
-
-# Parse a wall-clock time *as if* in a given zone
-time.tz('2026-04-20 09:00', 'HT')             # Hawaii 9 AM → UTC 19:00
-time.tz.guess()                               # 'America/Denver' (runtime zone)
-time.tz.aliases                               # { ET, CT, MT, PT, HT, ... } table
-
-# Output
-d.toDate()                    # native Date
-d.toISOString()
-d.toJSON()
-d.toString()                  # UTC string
-d.unix()                      # seconds
-d.valueOf()                   # milliseconds
-
-# Statics
-time.isTime(x)
-time.min(a, b, c)
-time.max([a, b, c])
-
-# Duration
-time.duration(5000)                       # 5 seconds
-time.duration(90, :minute)
-time.duration({ hours: 1, minutes: 30 })
-time.duration('PT1H30M')                  # ISO-8601
-time.duration('P7Y')                      # 7 years
-
-d = time.duration(reported.diff(ordered))
-d.asHours()                               # 6.58 (total)
-d.hours()                                 # 6 (component)
-d.format('H [hr] m [min]')                # "6 hr 35 min"
-d.toISOString()                           # "PT6H35M"
-d.humanize()                              # "7 hours"
-d.humanize(true)                          # "in 7 hours" / "7 hours ago"
-
-later   = ordered.add(time.duration({ hours: 2, minutes: 30 }))
-expires = reported.add(time.duration('P7Y'))   # HIPAA retention
-
-time.isDuration(d)
 ```
-
-## Format tokens
 
 | Token | Output | Example |
 | --- | --- | --- |
@@ -201,24 +175,49 @@ time.isDuration(d)
 | `zzz` | long zone name | `Eastern Daylight Time` |
 | `[xyz]` | literal | `xyz` |
 
-## Accepted units
+### Relative Time
 
-Any of these resolve to the same unit — use whichever reads best:
+```coffee
+# English, fixed thresholds
+a.fromNow()                   # "2 hours ago"
+a.from(b)                     # "a day ago"
+a.to(b)                       # "in 3 minutes"
+```
 
-| Canonical | Aliases |
-| --- | --- |
-| `:year` | `'year'`, `'years'`, `'y'`, `'yr'`, `'yrs'` |
-| `:quarter` | `'quarter'`, `'quarters'`, `'Q'`, `'q'` |
-| `:month` | `'month'`, `'months'`, `'M'`, `'mo'` |
-| `:week` | `'week'`, `'weeks'`, `'w'`, `'wk'` |
-| `:day` | `'day'`, `'days'`, `'d'` |
-| `:date` | `'date'`, `'dates'`, `'D'`, `'dt'` |
-| `:hour` | `'hour'`, `'hours'`, `'h'`, `'hr'` |
-| `:minute` | `'minute'`, `'minutes'`, `'m'`, `'min'` |
-| `:second` | `'second'`, `'seconds'`, `'s'`, `'sec'` |
-| `:millisecond` | `'millisecond'`, `'milliseconds'`, `'ms'`, `'msec'` |
+### Calendar
 
-## US timezone aliases
+```coffee
+a.calendar()                  # "Today at 3:45 PM", "Yesterday at 10:00 AM",
+                              # "Last Wednesday at 2:15 PM", or "04/19/2026"
+a.calendar(null, { sameDay: '[Today!]' })   # override any bucket
+```
+
+## Timezones
+
+```coffee
+# UTC / local
+d.utc()                       # convert to UTC mode
+d.local()                     # convert to local mode
+d.isUTC()
+d.utcOffset()                 # minutes from UTC
+
+# Arbitrary timezones — short aliases or IANA names
+result = time.utc('2026-04-19T18:30:00Z')
+result.tz('HT').format('ddd h:mm A z')        # Sun 8:30 AM HST
+result.tz('ET').format('ddd h:mm A z')        # Sun 2:30 PM EDT
+result.tz('AZ').format('ddd h:mm A z')        # Sun 11:30 AM MST (AZ never switches)
+result.tz('AKT').format('zzz')                # Alaska Daylight Time
+
+# Parse a wall-clock time *as if* in a given zone
+time.tz('2026-04-20 09:00', 'HT')             # Hawaii 9 AM → UTC 19:00
+time.tz.guess()                               # 'America/Denver' (runtime zone)
+time.tz.aliases                               # { ET, CT, MT, PT, HT, ... } table
+
+# Convert vs reinterpret (à la the `zones` gem)
+d.toZone('ET')                # same instant, new clock
+d.asZone('ET')                # same clock, new zone (instant shifts)
+d.asUTC()                     # label the wall-clock as UTC
+```
 
 Pass any of these short names to `.tz(zone)` or `time.tz(input, zone)`; raw
 IANA names (anything containing a `/`) are passed through as-is.
@@ -257,7 +256,69 @@ for zone in ['HT', 'PT', 'MT', 'AZ', 'CT', 'ET', 'AKT']
 # AKT: Sun 10:30 AM AKDT
 ```
 
-## Design notes
+## Durations
+
+```coffee
+# Construction
+time.duration(5000)                       # 5 seconds
+time.duration(90, :minute)
+time.duration({ hours: 1, minutes: 30 })
+time.duration('PT1H30M')                  # ISO-8601
+time.duration('P7Y')                      # 7 years
+
+# Totals vs normalized components
+d = time.duration(reported.diff(ordered))
+d.asHours()                               # 6.58 (total)
+d.hours()                                 # 6 (component)
+d.format('H [hr] m [min]')                # "6 hr 35 min"
+d.toISOString()                           # "PT6H35M"
+d.humanize()                              # "7 hours"
+d.humanize(true)                          # "in 7 hours" / "7 hours ago"
+
+# Durations plug straight into time arithmetic
+later   = ordered.add(time.duration({ hours: 2, minutes: 30 }))
+expires = reported.add(time.duration('P7Y'))   # HIPAA retention
+
+time.isDuration(d)
+```
+
+## Age
+
+```coffee
+# Completed years from a date of birth, birthday-aware
+age('2000-06-26', '2026-06-26')   # 26 (on the birthday)
+age('2000-06-27', '2026-06-26')   # 25 (day before)
+age('2000-01-01')                 # asOf defaults to now
+age('not-a-date')                 # null
+```
+
+## Output
+
+```coffee
+d.toDate()                    # native Date
+d.toISOString()
+d.toJSON()
+d.toString()                  # UTC string
+d.unix()                      # seconds
+d.valueOf()                   # milliseconds
+```
+
+## API Summary
+
+```coffee
+time(input?, opts?)            # construct (ISO, US, Date, timestamp, Time)
+time.utc(input?)               # construct in UTC mode
+time.unix(seconds)             # construct from unix seconds
+time.parse(input, format)      # construct with an explicit format
+time.tz(input, zone)           # construct wall-clock time in a zone
+time.min(...) / time.max(...)  # earliest / latest of several instants
+time.duration(input, unit?)    # first-class Duration
+time.isTime(x)                 # Time predicate
+time.isDuration(x)             # Duration predicate
+age(dob, asOf?)                # completed years, birthday-aware
+```
+
+## Design Notes
 
 This is a deliberate US/English library — not a drop-in `dayjs` replacement:
 
@@ -281,6 +342,10 @@ If you need multi-locale support, use the upstream `dayjs` package.
 ```bash
 bun run demo
 ```
+
+A deterministic tour of the API — parsing, formatting, zone conversion,
+arithmetic, durations, and `age()`, each line showing a real call and
+its output.
 
 ## Test
 
