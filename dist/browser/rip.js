@@ -7476,31 +7476,6 @@ class CodeBuilder {
     fn();
     this.endMark();
   }
-  checkpoint() {
-    return {
-      length: this.length,
-      chunks: this.chunks.length,
-      rows: this.rows.length,
-      tsRegions: this.tsRegions.length,
-      marks: this.markStack.length
-    };
-  }
-  multiLineSince(cp) {
-    const text = this.chunks.slice(cp.chunks).join("");
-    return (text.endsWith(`
-`) ? text.slice(0, -1) : text).includes(`
-`);
-  }
-  rollback(cp) {
-    if (this.markStack.length !== cp.marks) {
-      throw new Error("builder: rollback across an open-mark boundary — probe emission must be mark-balanced");
-    }
-    this.chunks.length = cp.chunks;
-    this.length = cp.length;
-    this.rows.length = cp.rows;
-    this.tsRegions.length = cp.tsRegions;
-    this.exactRanges.clear();
-  }
   matchesSource(f) {
     if (this.source === null)
       return false;
@@ -8318,8 +8293,15 @@ var renderTarget = (target, type, optional) => {
   const name = renderPattern(target);
   return `${name}${optional ? "?" : ""}: ${tidyType(type)}`;
 };
+var optionalReader = (stores) => (p) => {
+  const id = stores.idOf(p);
+  return id !== null && !!stores.role(id, "optionalMarker");
+};
 var renderParam = (p, isOptional) => {
-  const opt = isOptional?.(p) ?? false;
+  if (typeof isOptional !== "function") {
+    throw new TypeTextError("renderParam: an optionality reader is required (use optionalReader(stores)) — " + "omitting it silently drops every `?` marker, which type-checks and so cannot be caught downstream");
+  }
+  const opt = isOptional(p);
   if (typeof p === "string")
     return `${p}${opt ? "?" : ""}: any`;
   if (isTypedWrapper(p)) {
@@ -8571,7 +8553,8 @@ function componentTypeInfo(stores, source, node) {
   return {
     extendsTag,
     members,
-    roleText
+    roleText,
+    isOptionalParam: optionalReader(stores)
   };
 }
 var segmentsText = (segs) => segs.map((s) => s.text).join("");
@@ -8752,7 +8735,7 @@ function instanceTypeLines(info, selfType) {
       const declared = info.roleText(m.func, "returnType");
       const base = declared ?? (m.isVoid ? "void" : "any");
       const ret = awaitsIn(m.func[2]) && !/^Promise\s*</.test(base) ? `Promise<${base}>` : base;
-      lines.push(`${m.name}${renderParams(m.func[1])}: ${ret};`);
+      lines.push(`${m.name}${renderParams(m.func[1], info.isOptionalParam)}: ${ret};`);
       continue;
     }
     lines.push(`${m.kind === "readonly" ? "readonly " : ""}${m.name}${segmentsText(memberTypeSegments(m, ": "))};`);
@@ -8850,6 +8833,7 @@ class Emitter {
     this.importSpans = [];
     this.pins = pins;
     this.pinnables = [];
+    this.mutables = [];
     this.strict = strict;
     this.ts = face === "ts";
     this.pendingHoistTypes = new Map;
@@ -9543,7 +9527,7 @@ class Emitter {
     if (!sigs)
       return;
     for (const sig of sigs) {
-      const params = this.tsRendered(sig, () => renderParams(sig[2]));
+      const params = this.tsRendered(sig, () => renderParams(sig[2], optionalReader(this.stores)));
       const directives = this.tsDirectiveMap.get(sig);
       if (directives !== undefined) {
         this.tsDirectiveMap.delete(sig);
@@ -12852,7 +12836,10 @@ ${pad ?? ""}`);
     }
     this.mark(node, "annotation", () => this.mark(node, "$self", () => {
       this.b.emit("const ");
+      const nameStart = this.b.offset;
       this.mark(node, "target", () => this.b.emit(target));
+      if (head === "state" && this.ts)
+        this.mutables.push([nameStart, this.b.offset]);
       if (this.ts && this.annotationText(node) !== null) {
         const ro = head === "computed" ? "readonly " : "";
         this.tsAnnotate(node, "annotation", containerType(this.annotationText(node), ro));
@@ -18154,7 +18141,7 @@ export {};
       valueGen: [valueRow.generatedStart, valueRow.generatedEnd]
     });
   }
-  return { code: builder.code, mappings: builder.rows, stores, runtimes, tsRegions: builder.tsRegions, pinnables, imports: emitter.importSpans };
+  return { code: builder.code, mappings: builder.rows, stores, runtimes, tsRegions: builder.tsRegions, pinnables, mutables: emitter.mutables, imports: emitter.importSpans };
 }
 
 // src/sourcemap.js
@@ -18272,10 +18259,7 @@ function emitDeclarations({ sexpr, stores, source }) {
       return null;
     return normalizeTypeText(source.slice(row.sourceStart, row.sourceEnd).replace(/^\s*:\s*/, ""));
   };
-  const isOptionalParam = (node) => {
-    const id = stores.idOf(node);
-    return id !== null && !!stores.role(id, "optionalMarker");
-  };
+  const isOptionalParam = optionalReader(stores);
   const typeParamsOf = (node) => {
     const id = stores.idOf(node);
     if (id === null)
@@ -18718,6 +18702,7 @@ function compile(source, { path = "<anonymous>", runtimeDelivery = "inline", fac
     runtimes: emitted.runtimes,
     tsRegions: emitted.tsRegions,
     pinnables: emitted.pinnables,
+    mutables: emitted.mutables,
     imports: emitted.imports,
     trivia: result.trivia ?? [],
     get declarations() {
