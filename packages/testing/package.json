@@ -7,6 +7,9 @@
   "exports": {
     ".": "./testing.rip"
   },
+  "scripts": {
+    "test": "rip test.rip"
+  },
   "files": [
     "testing.rip",
     "README.md"

@@ -1,5 +1,5 @@
 # ==============================================================================
-# @rip-lang/testing — shared helpers for package test.rip files
+# @rip-lang/testing: shared helpers for package test.rip files
 #
 #   import { test, eq, ok, throws } from '@rip-lang/testing'
 #
@@ -11,7 +11,7 @@
 #
 # Keep this file tiny. Package tests should read like Rip, not like a
 # framework. The language battery keeps its own harness
-# (test/support/testing.js) — test/code/fail/type over compiler snippets.
+# (test/support/testing.js): test/code/fail/type over compiler snippets.
 # ==============================================================================
 
 RESET =! "\x1b[0m"
@@ -58,7 +58,7 @@ export def test(name, fn)
     process.exitCode = 1
     console.log "  #{paint(RED, '✗')} #{name}: #{e.message}"
 
-# Structural deep equality — arrays ordered, object keys unordered,
+# Structural deep equality: arrays ordered, object keys unordered,
 # scalars by identity. Not for BigInt/Map/cycles.
 deepEq = (a, b) ->
   return true if a is b
@@ -70,6 +70,7 @@ deepEq = (a, b) ->
       return false unless deepEq(v, b[i])
     return true
   if typeof a is 'object'
+    return false if Array.isArray(b)   # {} never equals []
     ka = Object.keys(a)
     return false unless ka.length is Object.keys(b).length
     for k in ka
