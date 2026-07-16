@@ -1,8 +1,14 @@
-# @rip-lang/http — zero-dependency HTTP client: a ky-inspired
-# convenience layer over native fetch. Method shortcuts, JSON
+# ==============================================================================
+# @rip-lang/http — Zero-dependency HTTP client for Rip
+#
+# Author: Steve Shreeve (steve.shreeve@gmail.com)
+#   Date: February 18, 2026
+#
+# A ky-inspired convenience layer over native fetch. Method shortcuts, JSON
 # body/response handling, auto error throwing on non-2xx, retries with
-# exponential backoff and jitter, timeouts, lifecycle hooks, and
-# reusable instances with prefixUrl and default headers.
+# exponential backoff and jitter, timeouts, lifecycle hooks, and reusable
+# instances with prefixUrl and default headers — all in pure Rip, zero deps.
+# ==============================================================================
 
 # ==[ Public API types ]==
 #
