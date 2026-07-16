@@ -1,4 +1,4 @@
-<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" style="width:50px" /> <br>
+<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
 
 # Rip CSV - @rip-lang/csv
 
@@ -324,8 +324,6 @@ Measured on Apple Silicon under Bun (warm-up pass, best of three):
 
 | Workload | Size | Rows | Time | Throughput |
 |----------|------|------|------|-----------|
-| Plain (no quotes) | 25 MB | 319,689 | 43ms | **577 MB/s** |
-| Quoted (embedded commas) | 25 MB | 308,406 | 32ms | **793 MB/s** |
 | Labcorp-style recovery (relax+excel) | 10 MB | 103,820 | 13ms | **797 MB/s** |
 | Long fields (300-char cells) | 25 MB | 29,032 | 5ms | **4.6 GB/s** |
 

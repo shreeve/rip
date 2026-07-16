@@ -74,21 +74,30 @@ no imports. Absence of the flag means server-only — never write
 
 Same mold for every package, top to bottom:
 
-1. rip.png banner: `<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" style="width:50px" /> <br>`
-2. `# Rip <Name> - @rip-lang/<name>`
-3. `> **<pitch>**` — byte-identical to the `package.json` description
-4. One paragraph on how it works — new information, never a restatement
+1. rip.png banner at top-left, its own paragraph, then the title:
+
+   ```
+   <img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
+
+   # Rip <Name> - @rip-lang/<name>
+   ```
+
+   (`alt`/`width` ATTRIBUTES, never `style` — GitHub strips `style`.
+   No `align` tricks: floats and inline-in-heading placements render
+   inconsistently across GitHub and editor previews.)
+2. `> **<pitch>**` — byte-identical to the `package.json` description
+3. One paragraph on how it works — new information, never a restatement
    of the pitch
-5. A `**Runtime:**` line stating browser safety in one sentence:
+4. A `**Runtime:**` line stating browser safety in one sentence:
    - browser-safe: `**Runtime:** browser-safe (\`rip.browser: true\`). One \`.rip\` file.`
    - server-only: `**Runtime:** not browser-safe — <which APIs and why>. One \`.rip\` file.`
-6. `## Quick Start` — `bun add @rip-lang/<name>` in a `bash` fence,
+5. `## Quick Start` — `bun add @rip-lang/<name>` in a `bash` fence,
    then a `coffee` example
-7. `## Features` — bullet list
-8. Domain sections (whatever the package needs)
-9. `## Demo` — only if `demo.rip` exists
-10. `## Test` — `bun run test` in a `bash` fence, plus one sentence on
-    what the suite covers
+6. `## Features` — bullet list
+7. Domain sections (whatever the package needs)
+8. `## Demo` — only if `demo.rip` exists
+9. `## Test` — `bun run test` in a `bash` fence, plus one sentence on
+   what the suite covers
 
 All shell fences use `bash`. No `## License` footer.
 
