@@ -1,0 +1,78 @@
+# Keyboard navigation -- the WAI-ARIA key patterns for popup lists and
+# inline composites.
+#
+#   listNav(e, handlers)                -- popup lists (listbox, menu, combobox)
+#   rovingNav(e, handlers, orientation) -- inline composites (radiogroup, tabs, toolbar)
+#
+# Both dispatchers:
+#   - guard against IME composition (`e.isComposing`, CJK input)
+#   - call preventDefault + stopPropagation for a handled key, and only
+#     when a handler for it is provided (every key is optional)
+#   - alias PageUp/PageDown to first/last (fn+Up/Down on macOS)
+#   - forward a single printable key to `char` for typeahead
+#
+# APG gaps stay per-component (submenu Arrow, grid 2D nav, F2 edit) -- they
+# depend on component state a shared dispatcher cannot see.
+
+
+# navAction -- map a key + orientation to a semantic navigation action, or
+# null when the key is not a navigation key. Pure; no DOM. `Tab` is NOT a
+# navigation action (listNav forwards it without preventing default so
+# focus moves naturally), so it resolves to null here.
+export def navAction(key: string, orientation: string = 'vertical'): string | null
+  vert = orientation isnt 'horizontal'
+  horz = orientation isnt 'vertical'
+  switch key
+    when 'ArrowDown'        then (if vert then 'next' else null)
+    when 'ArrowUp'          then (if vert then 'prev' else null)
+    when 'ArrowRight'       then (if horz then 'next' else null)
+    when 'ArrowLeft'        then (if horz then 'prev' else null)
+    when 'Home', 'PageUp'   then 'first'
+    when 'End', 'PageDown'  then 'last'
+    when 'Enter', ' '       then 'select'
+    when 'Escape'           then 'dismiss'
+    else (if key.length is 1 then 'char' else null)
+
+# rovingIndex -- the wraparound index math for a roving-tabindex list.
+# Pure; no DOM. `next`/`prev` wrap by default (`wrap`), first/last jump to
+# the ends. A non-positive length or a non-movement action returns `from`
+# unchanged, so a sentinel `-1` (nothing highlighted) is safe to pass.
+export def rovingIndex(from: number, action: string, length: number, wrap: boolean = true): number
+  return from unless length > 0
+  switch action
+    when 'first' then 0
+    when 'last'  then length - 1
+    when 'next'  then (if wrap then (from + 1) %% length else Math.min(from + 1, length - 1))
+    when 'prev'  then (if wrap then (from - 1) %% length else Math.max(from - 1, 0))
+    else from
+
+_dispatch = (e: KeyboardEvent, h: any, action: string | null): void ->
+  return unless action
+  if action is 'char'
+    h.char?(e.key)      # typeahead: no preventDefault
+    return
+  fn = h[action]
+  return unless fn      # unhandled key keeps its default behavior
+  e.preventDefault()
+  e.stopPropagation()
+  fn()
+  return
+
+# listNav -- vertical popup-list navigation. Down/Up move, Home/End jump,
+# Enter/Space select, Escape dismisses, a printable key types ahead, and
+# Tab is forwarded to `h.tab` WITHOUT preventDefault so the browser's own
+# focus movement (and thus popup dismissal) proceeds.
+export def listNav(e: KeyboardEvent, h: any): void
+  return if e.isComposing
+  if e.key is 'Tab'
+    h.tab?()
+    return
+  _dispatch e, h, navAction(e.key, 'vertical')
+
+# rovingNav -- orientation-aware navigation for inline composites. Arrow
+# keys follow `orientation` (vertical, horizontal, or both); Home/End,
+# Enter/Space, Escape and typeahead behave as in listNav. Tab is left
+# entirely to the browser.
+export def rovingNav(e: KeyboardEvent, h: any, orientation: string = 'vertical'): void
+  return if e.isComposing
+  _dispatch e, h, navAction(e.key, orientation)

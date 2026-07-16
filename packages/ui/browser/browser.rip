@@ -1,0 +1,21 @@
+# @rip-lang/ui/browser -- the browser interaction primitives the headless
+# widgets are built on: keyboard navigation, popup dismissal and lifecycle,
+# native top-layer binding, positioning, focus management, and scroll lock.
+#
+# Every primitive is a typed named export -- nothing is published on a
+# global. The pure building blocks (navAction, rovingIndex, outsideElements,
+# parsePlacement, computePlacement, belowPosition, focusTrapMove,
+# createScrollLock) sit alongside the DOM-bound primitives so widgets and
+# tests can reach the logic directly.
+#
+# Overlays use the platform's own top layer (Popover API and `<dialog>`);
+# widgets ship zero CSS and expose their state through data attributes.
+
+export { getRef, combine } from './core.rip'
+export { navAction, rovingIndex, listNav, rovingNav } from './nav.rip'
+export { outsideElements, popupDismiss, popupGuard } from './dismiss.rip'
+export { bindPopover, bindDialog } from './overlay.rip'
+export { parsePlacement, computePlacement, belowPosition, hasAnchor, position, positionBelow } from './position.rip'
+export { focusTrapMove, trapFocus, wireAria } from './focus.rip'
+export { createScrollLock, lockScroll, unlockScroll } from './scroll.rip'
+
