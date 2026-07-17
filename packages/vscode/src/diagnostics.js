@@ -77,12 +77,12 @@ export function mapTsDiagnostic(good, d) {
   };
 }
 
-// A `# @ts-expect-error` directive governs the next SOURCE STATEMENT —
-// including its indented block (rip's statement unit): a marker above a
-// render element must absorb an error on the element's bind/prop lines
-// inside it. The governed range runs from the directive's next non-blank
-// line through the last consecutive line indented DEEPER than that first
-// line. One directive absorbs only within its own statement.
+// A `# @ts-expect-error` directive governs the next non-blank SOURCE
+// LINE only — tsc's next-line rule. Errors on deeper indented body
+// lines stay loud; put the marker on the offending line (including a
+// render bind/prop line — the face emits that form). Blank lines
+// between the directive and its target are skipped when locating the
+// head; they do not extend the range past it.
 //
 // The broker owns this over RIP positions because a FACE-level directive
 // governs only its immediate next FACE line, which multi-line lowerings
@@ -93,18 +93,13 @@ export function mapTsDiagnostic(good, d) {
 export function ripDirectiveLines(good) {
   if (good._directiveRanges === undefined) {
     const src = good.source.split('\n');
-    const indentOf = (l) => /^[ \t]*/.exec(l)[0].length;
     const ranges = [];
     src.forEach((l, i) => {
       if (!/^[ \t]*#[ \t]*@ts-(expect-error|ignore)(\s|$)/.test(l)) return;
       let start = i + 1;
       while (start < src.length && src[start].trim() === '') start++;
       if (start >= src.length) return;
-      const head = indentOf(src[start]);
-      let end = start;
-      while (end + 1 < src.length &&
-             (src[end + 1].trim() === '' || indentOf(src[end + 1]) > head)) end++;
-      ranges.push({ line: i, start, end });
+      ranges.push({ line: i, start, end: start });
     });
     good._directiveRanges = ranges;
   }
