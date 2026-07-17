@@ -239,6 +239,10 @@ class Emitter {
     // the first bare parameter receives `HTMLElementEventMap['event']`.
     // Cleared after the handler expression.
     this.pendingEventType = null;
+    // Face-only anchored scan for primitive identifier READs that have
+    // no NodeStore row (call args, type-text internals). When set,
+    // emitReadName records an exact `read` markSpan row.
+    this.readScan = null;
     // Module-scope component binding names → their component node
     // (BOTH modes): a name bound to a second component rejects — the
     // rebinding clobbers the first class silently, and the typed
@@ -799,6 +803,209 @@ class Emitter {
     return this.cframes.length > 0;
   }
 
+  // Start an anchored read-scan over the innermost open mark's source
+  // span (the call's `args` role, a type-decl declaration, …). Face only.
+  beginReadScan(ownerNode) {
+    if (!this.ts || this.b.source == null) return null;
+    const m = this.b.currentMark;
+    const id = isNode(ownerNode) ? this.stores.idOf(ownerNode) : null;
+    if (m === null || id === null || m.sourceStart == null || m.sourceEnd == null) return null;
+    return { nodeId: id, start: m.sourceStart, end: m.sourceEnd, at: m.sourceStart };
+  }
+
+  withReadScan(ownerNode, fn) {
+    if (!this.ts) return fn();
+    const prev = this.readScan;
+    this.readScan = this.beginReadScan(ownerNode);
+    try {
+      return fn();
+    } finally {
+      this.readScan = prev;
+    }
+  }
+
+  // Skip commas / whitespace / open-parens so the next take/advance
+  // lands on an argument or type token.
+  skipReadScanTrivia() {
+    const s = this.readScan;
+    if (s == null || s.at == null || this.b.source == null) return;
+    const src = this.b.source;
+    let i = s.at;
+    while (i < s.end && /[\s,(]/.test(src[i])) i++;
+    s.at = i;
+  }
+
+  // Advance the cursor past a non-identifier argument (quoted literal
+  // or registered node). Honest null when the cursor cannot consume it.
+  advanceReadScan(arg) {
+    const s = this.readScan;
+    if (s == null || s.at == null || this.b.source == null) return;
+    this.skipReadScanTrivia();
+    if (s.at == null) return;
+    if (isNode(arg)) {
+      const id = this.stores.idOf(arg);
+      const sp = id !== null ? this.stores.selfSpan(id) : null;
+      s.at = sp !== null ? Math.max(s.at, sp[1]) : null;
+      return;
+    }
+    if (typeof arg === 'string' && arg.length >= 2 && (arg[0] === '"' || arg[0] === "'")) {
+      const src = this.b.source;
+      let i = s.at;
+      if (i >= s.end || (src[i] !== '"' && src[i] !== "'")) {
+        s.at = null;
+        return;
+      }
+      const q = src[i++];
+      while (i < s.end && src[i] !== q) {
+        if (src[i] === '\\') i++;
+        i++;
+      }
+      s.at = i < s.end ? i + 1 : null;
+      return;
+    }
+    if (typeof arg === 'string') {
+      const at = this.b.source.indexOf(arg, s.at);
+      s.at = at >= 0 && at + arg.length <= s.end ? at + arg.length : null;
+      return;
+    }
+    s.at = null;
+  }
+
+  // Next word-boundary match of `name` inside the scan window; advances
+  // the cursor. Null + kills the scan when the name cannot be anchored.
+  takeReadSpan(name) {
+    const s = this.readScan;
+    if (s == null || s.at == null || this.b.source == null) return null;
+    this.skipReadScanTrivia();
+    if (s.at == null) return null;
+    const re = new RegExp(`(?<![\\w$])${name.replace(/\$/g, '\\$&')}(?![\\w$])`, 'g');
+    re.lastIndex = s.at;
+    const m = re.exec(this.b.source);
+    if (m === null || m.index + name.length > s.end) {
+      s.at = null;
+      return null;
+    }
+    s.at = m.index + name.length;
+    return [m.index, m.index + name.length];
+  }
+
+  // Emit an identifier READ.
+  //
+  //   1. Open mark's source span IS the name, and either the mark has
+  //      already emitted leading bytes (paren-less call's inserted `(`)
+  //      or `unwrap` (reactive `.value` / member `this.` prefix) — re-mark
+  //      the same (nodeId, role) around the bare name for an exact row
+  //      nested inside the cover. A plain target/operand mark that emits
+  //      ONLY the name must not re-mark (that would duplicate the row).
+  //   2. Else a live readScan — face-only `read` markSpan from the
+  //      anchored cursor (multi-arg lists, quote-normalized args).
+  //   3. Else the open mark is WIDER than the name (ternary `else x`,
+  //      annotation leftovers) — last word-boundary hit inside that
+  //      mark, face-only `read` row. Honest null when unanchorable.
+  //   4. Else emit unmarked.
+  emitReadName(name, { unwrap = false } = {}) {
+    const m = this.b.currentMark;
+    const src = this.b.source;
+    const markIsName = m !== null && src !== null
+      && src.slice(m.sourceStart, m.sourceEnd) === name;
+    if (markIsName && (unwrap || m.generatedStart < this.b.length)) {
+      this.b.mark(m.nodeId, m.role, () => this.b.emit(name));
+      return;
+    }
+    if (this.ts) {
+      let span = null;
+      let ownerId = null;
+      if (this.readScan != null) {
+        span = this.takeReadSpan(name);
+        ownerId = this.readScan.nodeId;
+      } else if (!markIsName && m !== null && src !== null
+          && m.sourceStart != null && m.sourceEnd != null && m.nodeId != null) {
+        const re = new RegExp(`(?<![\\w$])${name.replace(/\$/g, '\\$&')}(?![\\w$])`, 'g');
+        re.lastIndex = m.sourceStart;
+        let hit = null;
+        let sm;
+        while ((sm = re.exec(src)) !== null && sm.index + name.length <= m.sourceEnd) {
+          hit = sm;
+        }
+        if (hit !== null) {
+          span = [hit.index, hit.index + name.length];
+          ownerId = m.nodeId;
+        }
+      }
+      if (span != null && ownerId != null) {
+        this.b.markSpan(ownerId, 'read', span[0], span[1], () => this.b.emit(name));
+        return;
+      }
+    }
+    this.b.emit(name);
+  }
+
+  // Type-syntax keywords — not identifier reads. Primitive type names
+  // (`string`/`number`/…) are NOT in this set: they top the at-risk
+  // census and need exact `read` rows like any other type-internal name.
+  static TYPE_READ_KEYWORDS = new Set([
+    'type', 'export', 'interface', 'extends', 'implements', 'readonly',
+    'unique', 'infer', 'keyof', 'typeof', 'in', 'out', 'as', 'is',
+    'asserts', 'from', 'of', 'void', 'null', 'undefined', 'any',
+    'unknown', 'never', 'true', 'false', 'const', 'enum', 'new',
+  ]);
+
+  // Emit `text` with a face-only exact `read` row on every non-keyword
+  // identifier, anchored by forward search in [scanStart, scanEnd).
+  // Renderer respacing / inserted braces stay honest: a name the scan
+  // cannot find emits unmarked; a wrong guess is never invented.
+  emitIdentifiedText(ownerId, scanStart, scanEnd, text) {
+    if (!this.ts || ownerId == null || this.b.source == null || text == null
+        || scanStart == null || scanEnd == null) {
+      this.b.emit(text);
+      return;
+    }
+    let at = scanStart;
+    let last = 0;
+    const re = /[A-Za-z_$][\w$]*/g;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      if (Emitter.TYPE_READ_KEYWORDS.has(m[0])) continue;
+      if (m.index > last) this.b.emit(text.slice(last, m.index));
+      const wordRe = new RegExp(`(?<![\\w$])${m[0].replace(/\$/g, '\\$&')}(?![\\w$])`, 'g');
+      wordRe.lastIndex = at;
+      const sm = wordRe.exec(this.b.source);
+      if (sm !== null && sm.index + m[0].length <= scanEnd) {
+        this.b.markSpan(ownerId, 'read', sm.index, sm.index + m[0].length, () => this.b.emit(m[0]));
+        at = sm.index + m[0].length;
+      } else {
+        this.b.emit(m[0]);
+      }
+      last = m.index + m[0].length;
+    }
+    if (last < text.length) this.b.emit(text.slice(last));
+  }
+
+  // Call-argument list: open `(…)` and scan each arg so bare identifier
+  // reads record exact `read` rows. Face-only.
+  emitCallArgs(ownerNode, args, emitOne = (a) => this.callArg(a)) {
+    this.b.emit('(');
+    this.withReadScan(ownerNode, () => {
+      args.forEach((arg, i) => {
+        if (i > 0) this.b.emit(', ');
+        this.emitScannedArg(arg, emitOne);
+      });
+    });
+    this.b.emit(')');
+  }
+
+  emitScannedArg(arg, emitOne) {
+    // Bare identifier — emitReadName takes the next word from the scan.
+    if (typeof arg === 'string' && isIdentifierName(arg)) {
+      emitOne(arg);
+      return;
+    }
+    // Everything else: advance past the source item, then emit. Nested
+    // withReadScan (inner calls) save/restore the outer cursor.
+    if (this.readScan != null) this.advanceReadScan(arg);
+    emitOne(arg);
+  }
+
   // Emit an unwrapped reactive read: `count` → `count.value`. When the
   // innermost open mark's SOURCE SPAN is exactly this identifier (the
   // operand/value/target role of the read site), the bare identifier
@@ -807,34 +1014,20 @@ class Emitter {
   // (one-to-many; serialization prefers the exact row, so a
   // breakpoint on the read lands on the identifier). Any other
   // enclosing span (a spread args role, a lowered construct's $self)
-  // gains no inner row — re-marking it around the identifier would
-  // serialize a name row whose source text is not the identifier.
+  // gains a face-only `read` row when a readScan is live.
   reactiveRead(name) {
-    const m = this.b.currentMark;
-    const src = this.b.source;
-    if (m !== null && src !== null && src.slice(m.sourceStart, m.sourceEnd) === name) {
-      this.b.mark(m.nodeId, m.role, () => this.b.emit(name));
-    } else {
-      this.b.emit(name);
-    }
+    this.emitReadName(name, { unwrap: true });
     this.b.emit('.value');
   }
 
   // Emit a component-member read/write: `count` → `this.count.value`
   // (reactive) / `note` → `this.note` (plain) — the reactive member rewrite's
-  // component-scope twin. The mark strategy mirrors reactiveRead: when
-  // the innermost open mark's source span is exactly this identifier,
-  // the name re-marks the same (nodeId, role) — an exact row on the
-  // read site inside the role's cover row over the lowered form.
+  // component-scope twin. The mark strategy mirrors reactiveRead: the
+  // `this.` prefix is emitted first so emitReadName sees leading bytes
+  // on a name-span mark and re-marks the bare identifier.
   memberRead(name, reactive) {
-    const m = this.b.currentMark;
-    const src = this.b.source;
     this.b.emit((this.renderSelf ?? 'this') + '.');
-    if (m !== null && src !== null && src.slice(m.sourceStart, m.sourceEnd) === name) {
-      this.b.mark(m.nodeId, m.role, () => this.b.emit(name));
-    } else {
-      this.b.emit(name);
-    }
+    this.emitReadName(name, { unwrap: true });
     if (reactive) this.b.emit('.value');
   }
 
@@ -952,7 +1145,26 @@ class Emitter {
   // the emitted bytes equal the recorded span verbatim, cover
   // otherwise — the builder decides, never a declaration).
   tsAnnotate(node, role, text) {
-    this.b.tsOnly(() => this.mark(node, role, () => this.b.emit(`: ${text}`)));
+    this.b.tsOnly(() => this.mark(node, role, () => {
+      if (text == null || this.b.source == null) {
+        this.b.emit(`: ${text}`);
+        return;
+      }
+      const m = this.b.currentMark;
+      const id = this.stores.idOf(node);
+      this.b.emit(': ');
+      // Annotation role spans include the `:`; scan type names after it.
+      let at = m?.sourceStart ?? null;
+      if (at != null) {
+        const src = this.b.source;
+        while (at < m.sourceEnd && /\s/.test(src[at])) at++;
+        if (at < m.sourceEnd && src[at] === ':') {
+          at++;
+          while (at < m.sourceEnd && /\s/.test(src[at])) at++;
+        }
+      }
+      this.emitIdentifiedText(id, at, m?.sourceEnd ?? null, text);
+    }));
   }
 
   // A function's TS-face return annotation, emitted after its param
@@ -1033,7 +1245,14 @@ class Emitter {
     this.b.tsOnly(() => {
       this.b.emit(pad);
       this.mark(s, '$self', () => this.mark(s, 'declaration', () => {
-        this.b.emit(lines.join('\n' + pad));
+        const id = this.stores.idOf(s);
+        const m = this.b.currentMark;
+        const text = lines.join('\n' + pad);
+        if (id != null && m?.sourceStart != null) {
+          this.emitIdentifiedText(id, m.sourceStart, m.sourceEnd, text);
+        } else {
+          this.b.emit(text);
+        }
       }));
       this.b.emit('\n');
     });
@@ -2375,11 +2594,21 @@ class Emitter {
   }
 
   // A specifier list entry: a plain name, `default`, or [name, alias].
+  // Face-only `read` rows on each identifier (quote-normalized `from`
+  // paths make the import $self a cover — without these the names
+  // inherit that cover and drop tokens).
   emitSpecifiers(list) {
     list.forEach((s, i) => {
       if (i > 0) this.b.emit(', ');
-      if (isNode(s)) this.b.emit(`${s[0]} as ${s[1]}`);
-      else this.b.emit(s);
+      if (isNode(s)) {
+        this.emitReadName(s[0]);
+        this.b.emit(' as ');
+        this.emitReadName(s[1]);
+      } else if (typeof s === 'string' && isIdentifierName(s)) {
+        this.emitReadName(s);
+      } else {
+        this.b.emit(s);
+      }
     });
   }
 
@@ -2395,16 +2624,22 @@ class Emitter {
     const specs = node.slice(1, -1);
     this.mark(node, '$self', () => {
       this.b.emit('import ');
-      specs.forEach((spec, i) => {
-        if (i > 0) this.b.emit(', ');
-        if (spec === '{}') this.b.emit('{}');
-        else if (typeof spec === 'string') this.b.emit(spec);
-        else if (spec[0] === '*') this.b.emit(`* as ${spec[1]}`);
-        else {
-          this.b.emit('{ ');
-          this.emitSpecifiers(spec);
-          this.b.emit(' }');
-        }
+      this.withReadScan(node, () => {
+        specs.forEach((spec, i) => {
+          if (i > 0) this.b.emit(', ');
+          if (spec === '{}') this.b.emit('{}');
+          else if (typeof spec === 'string') {
+            if (isIdentifierName(spec)) this.emitReadName(spec);
+            else this.b.emit(spec);
+          } else if (spec[0] === '*') {
+            this.b.emit('* as ');
+            this.emitReadName(spec[1]);
+          } else {
+            this.b.emit('{ ');
+            this.emitSpecifiers(spec);
+            this.b.emit(' }');
+          }
+        });
       });
       this.b.emit(' from ');
       {
@@ -4815,6 +5050,10 @@ class Emitter {
         // `@member` chains) is the ctx parameter — the factory methods
         // run unbound, so a literal `this` would be the block handle.
         if (node === 'this' && this.renderSelf !== null) return this.b.emit(this.renderSelf);
+        // A bare identifier READ — exact by open-mark re-mark when the
+        // role span IS the name; otherwise an anchored `read` row when
+        // a readScan is live (call args).
+        if (isIdentifierName(node)) return this.emitReadName(node);
       }
       if ((node === 'break' || node === 'continue') && this.ctrlDepth === 0) {
         const err = this.positionedError(node, `emitter: '${node}' outside a loop${node === 'break' ? ' or switch' : ''}`);
@@ -9375,24 +9614,14 @@ class Emitter {
       } else if (f.kind === 'optcall') {
         this.b.emit('?.');
         this.mark(n, 'args', () => {
-          this.b.emit('(');
-          n.slice(2).forEach((arg, i) => {
-            if (i > 0) this.b.emit(', ');
-            // Optional-call arguments do NOT unwrap a pick's parens:
-            // `h?.(({a: o.a}))` — the double parens are valid JS and
-            // the byte battery pins the spelling.
-            this.expr(arg);
-          });
-          this.b.emit(')');
+          // Optional-call arguments do NOT unwrap a pick's parens:
+          // `h?.(({a: o.a}))` — the double parens are valid JS and
+          // the byte battery pins the spelling.
+          this.emitCallArgs(n, n.slice(2), (arg) => this.expr(arg));
         });
       } else {
         this.mark(n, 'args', () => {
-          this.b.emit('(');
-          n.slice(1).forEach((arg, i) => {
-            if (i > 0) this.b.emit(', ');
-            this.callArg(arg);
-          });
-          this.b.emit(')');
+          this.emitCallArgs(n, n.slice(1));
         });
       }
       this.endMark(f.self);
@@ -10519,10 +10748,13 @@ class Emitter {
     }
     this.mark(node, '$self', () => {
       this.b.emit(this.methodName === 'constructor' ? 'super(' : `super.${this.methodName}(`);
+      // Args role covers the list only (parens already written).
       this.mark(node, 'args', () => {
-        node.slice(1).forEach((arg, i) => {
-          if (i > 0) this.b.emit(', ');
-          this.callArg(arg);
+        this.withReadScan(node, () => {
+          node.slice(1).forEach((arg, i) => {
+            if (i > 0) this.b.emit(', ');
+            this.emitScannedArg(arg, (a) => this.callArg(a));
+          });
         });
       });
       this.b.emit(')');
@@ -11084,12 +11316,7 @@ class Emitter {
         this.b.emit('await ');
         this.mark(node[0], '$self', () => this.head(node[0], 'target', node[0][1]));
         this.mark(node, 'args', () => {
-          this.b.emit('(');
-          node.slice(1).forEach((arg, i) => {
-            if (i > 0) this.b.emit(', ');
-            this.callArg(arg);
-          });
-          this.b.emit(')');
+          this.emitCallArgs(node, node.slice(1));
         });
       });
       return;
@@ -11114,12 +11341,7 @@ class Emitter {
           } else this.expr(ctor);
         });
         this.mark(node, 'args', () => {
-          this.b.emit('(');
-          node.slice(1).forEach((arg, i) => {
-            if (i > 0) this.b.emit(', ');
-            this.callArg(arg);
-          });
-          this.b.emit(')');
+          this.emitCallArgs(node, node.slice(1));
         });
       });
       return;
