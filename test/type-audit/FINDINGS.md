@@ -37,7 +37,6 @@ Ordered by **how many rip users a gap reaches**, then by how badly the editor mi
 | --- | --- | --- | --- |
 | [21](#21-an-identifier-read-carries-no-source-span) | Identifier reads carry no source span — hover, definition, diagnostics, tokens | `editor`, `compiler` | `census` — **red by design**, the root all four surfaces share; `member` + `survival` on the token surface |
 | [8](#8-auto-import-is-closure-scoped) | Auto-import closure-scoped | `capability` | `auto-import` — the gap is an **expected failure** |
-| [18](#18-a-directive-blinds-the-whole-indented-block) | A directive blinds the whole indented block | `directive` | **none** — over-suppression is what makes `verdict` pass |
 | [13](#13-single-rooted-tsconfig--no-per-project-resolution) | Single-rooted tsconfig — no monorepo support | `config` | **none** |
 | [23](#23-the-tier-3-pin-probe-cannot-be-retired-by-more-declare-in-place) | Pin probe can't be retired by more declare-in-place | `hoist` | **none while the probe stands** — nothing fails; one open question could hand it a gate |
 | [16](#16-library-globals-lose-the-defaultlibrary-modifier) | Library globals lose `defaultLibrary` | `editor` | **none, and none is honest** — upstream; a naive gate is platform-dependent |
@@ -46,34 +45,9 @@ Ordered by **how many rip users a gap reaches**, then by how badly the editor mi
 
 **Within that band the axis is *silently wrong* over *visibly missing*.** #21 ranks first — it never lets a bug through (the check is sound; only the answer's *position* is wrong), but hover names the wrong symbol without hedging, which is silent in the same way, and it reaches 31% of medlabs' identifier reads. #8 fails visibly and harmlessly.
 
-**Below #8 the audience collapses.** #18 eats real errors, but only for someone writing directives — medlabs writes zero. #13 mis-resolves config, but only in a monorepo. #23 reaches nobody: the probe is correct and the editor is right. **#16 is blocked**, not deprioritized — it sits last because no amount of work here moves it, not because it matters least.
-
-**The forced edge for #18:** narrowing the directive's range assumes the inline render-block hatch reaches the face (closed — gate `tsface` + audit `directives`).
+**Below #8 the audience collapses.** #13 mis-resolves config, but only in a monorepo. #23 reaches nobody: the probe is correct and the editor is right. **#16 is blocked**, not deprioritized — it sits last because no amount of work here moves it, not because it matters least.
 
 ## Findings
-
-### 18. A directive blinds the whole indented block
-
-`ripDirectiveLines` governs the next statement **plus its entire indented block**. tsc governs the next **line**. So one `# @ts-expect-error` above a `def` silently absorbs every error in that function body — including bugs written later that the directive never contemplated. It is rip's directive being stronger than the thing it emulates, at the level that matters: it swallows *errors*.
-
-**Status.** ⬜ **Open** — no fix, by decision (2026-07-14): the divergence is characterized and scoped, the semantics change is not made. **Gate: none.** The audit cannot see this at all — `verdict` demands zero Error-severity diagnostics, and over-suppression is what makes a fixture *pass*.
-
-**Driven** (2026-07-14) — same program down both paths, the `.rip` through the editor server and a hand-written `.ts` twin through tsgo:
-
-| | rip | tsc |
-| --- | --- | --- |
-| directive above a `def`, two unrelated bugs in the body | **silent** | `TS2322` ×2 + `TS2578` |
-| directive above a `def`, one bug in the body | **silent** | `TS2322` + `TS2578` |
-| directive above an `if`, bug inside the branch | **silent** | `TS2322` + `TS2578` |
-| directive over a single-line statement *(the intended use)* | silent | silent — **match** |
-
-Note what tsc says in every divergent row: **`TS2578`, unused directive** — its verdict is not merely "the error stays loud" but "your marker did nothing, delete it." Rip claims the directive used and eats the error.
-
-**Why it is this way, and why that reason does not hold.** The rule's comment justifies block scope by the render case: a marker above a render element must absorb an error on the element's bind/prop lines *inside* it. Driven: that is a convenience, not a necessity. A directive placed **on the offending prop line itself** already suppresses (`Input` / `# @ts-expect-error` / `value <=> count` — the error goes), which is exactly the idiom TSX forces, since TS will not let you cover a JSX attribute from above the element either. The hatch exists without block scope — and the face now receives that inline form (closed).
-
-**Blast radius — measured, and it is one line.** medlabs uses **zero** directives, so nothing outside this repo is touched. Inside it, 129 directives across 11 files (all fixtures/tests): 124 are head-line-only; 5 govern real block content; and narrowing the rule to head-line-only for real breaks **exactly one site** that the fixture already moved onto the bind line ([09-components.rip](fixtures/09-components.rip)). The other four (`if labelz`, `unless loadingz`, `switch statusz`, `for item in itemsz`) carry their error on the head line and survive narrowing untouched. *(Counting trap: the range rule extends across **blank** lines too, so a one-line statement followed by a blank line looks block-scoped — a naive count says 61, and 56 of those are blank-line padding.)*
-
-**What a fix costs.** The rule change is two lines in `ripDirectiveLines` (stop extending past the head). The face hatch is already in place.
 
 ### 13. Single-rooted tsconfig — no per-project resolution
 
@@ -235,3 +209,4 @@ Verified, and gone. **The gate is the record** — each row's constraint is stat
 | 25 | Event handler parameters get no event type | `untyped-params` |
 | 22 | Completion & signature help fail on an incomplete expression | `incomplete-expressions` |
 | 19 | Inline render-block directive lost from the face | `tsface`, audit `directives` |
+| 18 | A directive blinds the whole indented block | `directive-range` |
