@@ -123,14 +123,10 @@
 //   And ONE more, over TYPE-BODY MEMBERS (see typeMembersOf):
 //     · member     a property name inside a `type`/`interface` body gets a
 //                  token — presence only, same oracle (rip source names the
-//                  member, so it must classify). This is EXPECTED RED —
-//                  the mapping gap: members ride one coarse cover row and
-//                  map only where verbatim from its start, so a
-//                  quote-normalized literal or a block body's inserted `{`
-//                  truncates the prefix and drops every later member token.
-//                  The token twin of the `strict` gauge — a red row that
-//                  goes green the day the mapping fix lands, at which point
-//                  the gauge is retired.
+//                  member, so it must classify). Was EXPECTED RED while
+//                  type-body names rode one coarse cover row; the emit-time
+//                  `read` markSpan fix made it green — keep the gauge as a
+//                  regression lock.
 //
 //   And ONE more, the OTHER direction — over the FACE, not the source (see
 //   FaceOracle / faceSurvival):
@@ -141,9 +137,10 @@
 //                  compare source code occurrences to what the server delivered
 //                  — the deficit is the drop. The only invariant that reaches
 //                  USE sites and rip-native names (a reactive read has no
-//                  column-0 declaration and no TS twin). EXPECTED RED —
-//                  the same coarse-cover-row root as `member`, so both
-//                  flip green on the mapping fix. A length-≥2 floor plus a rip
+//                  column-0 declaration and no TS twin). Call-arg / annotation /
+//                  type-decl reads are covered by `identifier-reads` + `member`;
+//                  remaining drops are mostly schema synthetic aliases and
+//                  render/HTML names. A length-≥2 floor plus a rip
 //                  declaration-keyword denylist and a `delivered >= 1` gate keep
 //                  keywords and synthetic tokens out of the count.
 //
@@ -1677,13 +1674,12 @@ if (RUN_TOKENS) {
     // where verbatim from that row's start, so any face rewrite before it —
     // a quote-normalized literal on an inline line, the `{`/reflow of a
     // block body — truncates the prefix and drops it. This invariant is
-    // EXPECTED RED until the mapping fix lands (per-name rows for members,
-    // or literals left un-normalized in the face), then flips green.
+    // Type-body member presence accumulators (regression lock).
     const memberMissing = []; let memberProbed = 0;
-    // Face-survival accumulators (the mapping gap's use sites): survivors, the dropped
-    // classified names ({name, count} per fixture), and `unclassified` — server
-    // tokens whose name tsgo never classifies (the sanity check; must be 0, or
-    // the server and face oracles disagree and the gauge is untrustworthy).
+    // Face-survival accumulators: survivors, the dropped classified names
+    // ({name, count} per fixture), and `unclassified` — server tokens whose
+    // name tsgo never classifies (the sanity check; must be 0, or the server
+    // and face oracles disagree and the gauge is untrustworthy).
     const survDrops = []; let survSurvived = 0, survUnclassified = 0;
     let probed = 0;
     const tskip = fixtures.length - PROBES.size;
@@ -1752,27 +1748,24 @@ if (RUN_TOKENS) {
     irow('present', missing.length, probed, 'a declared name gets a token');
     irow('type', badType.length, typeAsserted, `token type matches the declaring form${unasserted.length ? ` · ${unasserted.length} unasserted` : ''}`);
     irow('readonly', badReadonly.length, roAsserted, `readonly IFF the binding is immutable in rip${probed - roAsserted ? ` · ${probed - roAsserted} n/a` : ''}`);
-    // Type-body member presence — EXPECTED RED (the mapping gap), the token
-    // twin of the `strict` gauge. Its own line so the wording is "gap" (a
-    // known-open hole), not "violation" (a fresh regression), and green means
-    // the mapping fix has landed and this gauge should be retired.
+    // Type-body member presence — regression lock for emit-time `read` rows
+    // on TYPE_DECL internals. Green since that fix; red is a fresh regression.
     {
       const gaps = memberMissing.length;
-      const note = gaps ? yellow(`${gaps} gap${gaps === 1 ? '' : 's'}`) + '   ' + dim('type-body member tokens drop — expected red until the mapping fix')
-                        : dim('type-body member tokens — the mapping fix appears to have landed; retire this gauge');
+      const note = gaps ? yellow(`${gaps} gap${gaps === 1 ? '' : 's'}`) + '   ' + dim('type-body member tokens drop')
+                        : dim('type-body member tokens');
       console.log(`    ${pad('member', 12)} ${(gaps ? red : green)(String(memberProbed - gaps).padStart(3))} ${dim('/')} ${dim(String(memberProbed).padStart(3))}   ${note}`);
     }
-    // Face-survival — USE-SITE token drops (the mapping gap), the direction the
-    // source-enumerated invariants above cannot see: a classified source
-    // identifier the server drops, covering use sites AND rip-native names with
-    // no twin. EXPECTED RED like `member`; green means the mapping fix has
-    // landed. Denominator is classified source identifiers (survivors + drops),
-    // so the ratio reads as delivery FIDELITY.
+    // Face-survival — USE-SITE token drops the source-enumerated invariants
+    // above cannot see. Call-arg / annotation / type-decl reads are gated by
+    // identifier-reads + member; residual drops are mostly schema synthetic
+    // aliases and render/HTML names. Denominator is classified source
+    // identifiers (survivors + drops), so the ratio reads as delivery FIDELITY.
     if (facesAvailable) {
       const dropTotal = survDrops.reduce((n, d) => n + d.count, 0);
       const den = survSurvived + dropTotal;
-      const note = dropTotal ? yellow(`${dropTotal} drop${dropTotal === 1 ? '' : 's'}`) + '   ' + dim('classified source identifiers the server drops at use sites — expected red until the mapping fix')
-                             : dim('use-site tokens — the mapping fix appears to have landed; retire this gauge');
+      const note = dropTotal ? yellow(`${dropTotal} drop${dropTotal === 1 ? '' : 's'}`) + '   ' + dim('classified source identifiers the server drops at use sites (schema/render residue)')
+                             : dim('use-site tokens');
       console.log(`    ${pad('survival', 12)} ${(dropTotal ? red : green)(String(survSurvived).padStart(3))} ${dim('/')} ${dim(String(den).padStart(3))}   ${note}`);
       // Silent guard (surfaces only on failure): count-based uses the server's
       // tokens directly, so `delivered ⊆ classified` holds by construction —
@@ -1791,16 +1784,16 @@ if (RUN_TOKENS) {
       console.log(`          ${dim('expected')} ${green(`${r.want.type}${r.want.readonly ? ' readonly' : ''}`)} ${dim(`— a \`${r.want.form}\` binding is ${r.want.readonly ? 'immutable' : 'WRITABLE'} in rip`)}`);
       console.log(`          ${dim('actual  ')} ${yellow(fmt(r.got))}`);
     });
-    // The mapping gap's expected-red evidence, kept apart from the regression
-    // sections above: these are known-open holes, not surprises. The name lists
-    // are long by nature, so each fixture's names WRAP with a hanging indent
-    // aligned under the fixture column (adapting to terminal width) — every name
-    // visible by default, but never soft-wrapped into a jumble.
+    // Residual survival/member evidence, kept apart from the regression
+    // sections above. The name lists are long by nature, so each fixture's
+    // names WRAP with a hanging indent aligned under the fixture column
+    // (adapting to terminal width) — every name visible by default, but never
+    // soft-wrapped into a jumble.
     const byFileOf = (rows) => { const m = new Map(); for (const r of rows) { if (!m.has(r.file)) m.set(r.file, []); m.get(r.file).push(r); } return m; };
     const COL = 6 + 18 + 1 + 3 + 3;                                  // leading + filename + sp + count + gap = name column
     const WRAP = Math.max(80, process.stdout.columns || 120) - 2;
     const dropSection = (title, byFile, tally, nameOf) => {
-      console.log(`\n    ${bold(title)} ${dim('— the mapping gap, expected red')}`);
+      console.log(`\n    ${bold(title)} ${dim('— residual use-site / member drops')}`);
       for (const [file, entries] of byFile) {
         // filename stays plain (the terminal linkifies it) and full — never
         // dimmed and never stripped of `.rip`, so the click target survives.
@@ -1856,25 +1849,24 @@ if (hp) totalLine('Hover', `${hp.probed} hover probes: `
     : `${hp.gap ? yellow(hp.gap + ' twin gap' + (hp.gap === 1 ? '' : 's')) : green('0 twin gaps')}, ${hp.snapChanged ? red(hp.snapChanged + ' expected change' + (hp.snapChanged === 1 ? '' : 's')) : green('expected clean')}${hp.violations.length ? `, ${red(hp.violations.length + ' invariant hit' + (hp.violations.length === 1 ? '' : 's'))}` : ''}`));
 if (tk) {
   const bad = tk.missing.length + tk.badType.length + tk.badReadonly.length;
-  // The member gauge is reported SEPARATELY from the invariant total: it is
-  // expected red (the mapping gap), so folding it in would read as N fresh
-  // regressions. Its own clause keeps the real-regression signal clean.
-  // Each segment paints itself — never dim() wrapping a yellow()/green(), or
+  // The member gauge is reported SEPARATELY from the invariant total so a
+  // type-body gap never inflates the declaration-invariant count. Each
+  // segment paints itself — never dim() wrapping a yellow()/green(), or
   // ANSI faint stacks onto the color and the count renders washed-out.
   const memberClause = tk.memberMissing.length
-    ? dim(' · ') + yellow(`${tk.memberMissing.length}/${tk.memberProbed} type-body member gap${tk.memberMissing.length === 1 ? '' : 's'}`) + ' ' + dim('tracking the mapping gap (expected)')
-    : dim(' · ') + green('type-body members clean') + ' ' + dim('— the mapping gap may be closed');
-  // Face-survival rides the same expected-red logic as the member clause: its
-  // own segment so use-site drops never read as fresh invariant regressions.
-  // Absent entirely when the face oracle did not run (no survDrops key set).
+    ? dim(' · ') + yellow(`${tk.memberMissing.length}/${tk.memberProbed} type-body member gap${tk.memberMissing.length === 1 ? '' : 's'}`)
+    : dim(' · ') + green('type-body members clean');
+  // Face-survival rides its own segment so use-site drops never read as
+  // fresh declaration-invariant regressions. Absent entirely when the face
+  // oracle did not run (no survDrops key set).
   const survDropTotal = (tk.survDrops ?? []).reduce((n, d) => n + d.count, 0);
   const survivalClause = !facesAvailable
     ? ''
     : tk.survUnclassified
       ? dim(' · ') + red(`${tk.survUnclassified} unclassified`) + ' ' + dim('— server/face oracles disagree, distrust the survival gauge')
       : survDropTotal
-        ? dim(' · ') + yellow(`${survDropTotal} use-site drop${survDropTotal === 1 ? '' : 's'}`) + ' ' + dim('tracking the mapping gap (expected)')
-        : dim(' · ') + green('use-site tokens clean') + ' ' + dim('— the mapping gap may be closed');
+        ? dim(' · ') + yellow(`${survDropTotal} use-site drop${survDropTotal === 1 ? '' : 's'}`) + ' ' + dim('(schema/render residue)')
+        : dim(' · ') + green('use-site tokens clean');
   totalLine('Token', `${tk.probed} token probes: `
     + (bad === 0 ? green('all invariants hold')
       : red(`${bad} invariant violation${bad === 1 ? '' : 's'}`)
