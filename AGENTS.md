@@ -62,27 +62,14 @@ Permanent documentation:
    path by regressing another is not an optimization until the
    trade-off is measured and accepted.
 
-8. **Small, honest commits — always through branches and PRs.** Nothing
-   commits to `main` directly. PRs squash-merge by default: linear
-   history, one commit per PR, subject "Title (#N)", the PR body as
-   the commit body. A campaign PR whose commits are each one complete,
-   honestly named, and useful as review provenance rebase-merges when
-   the owner approves preserving that sequence. Before merge, rebase
-   the campaign branch onto current `main`; never merge `main` into
-   the branch. The resulting `main` history stays linear and contains
-   no merge commit.
-   Commits and PRs carry **no AI attribution** — no Co-Authored-By
+8. **Raw git, no ceremony — for now.** Work commits directly with
+   plain git and the plain CLI; no required branch/PR/merge protocol.
+   Verify locally (the affected suites) before committing, report
+   failures as failures, and never describe skipped or partial work as
+   complete. Commits carry **no AI attribution** — no Co-Authored-By
    trailers, no "generated with" footers; authorship is the owner's.
-   The merge gate is LOCAL verification: run the affected package
-   suites (or the fast loop / `test:all` for broad changes) and merge
-   on green. Do not wait for remote CI — it runs on the PR and on
-   `main` regardless, and its failures are triaged when they surface.
-   Waiting for CI conclusions is OPT-IN, done only when explicitly
-   requested (a deploy, a risky change); when watching, require an
-   explicit pass — never chain a watch command into a merge, and never
-   infer success from a watcher exiting.
-   Report failures as failures; never describe skipped or partial work
-   as complete.
+   (The branch/PR/landing/CI protocol was deliberately retired and may
+   return later.)
 
 ## Lowering Doctrine (rule 2, in full)
 
@@ -234,31 +221,6 @@ ALL THREE in the same change.
 - `bun run link-check` — guardrail (also runs on postinstall): fails
   loudly if any `@rip-lang/*` name resolves outside this repo (e.g.
   shadowed by a sibling checkout's global links).
-
-## Landing
-
-"Land it" (or "land #N" for an existing PR) is the one verb for taking
-work to `main`. It means, in order:
-
-1. The diff lives on a branch, never on `main`.
-2. A PR exists with an honest summary (created now if landing local
-   work; verified if landing an existing PR).
-3. The change is verified LOCALLY — the affected package suites, or
-   the fast loop / `test:all` for broad changes. Waiting for remote CI
-   is not part of landing; it is opt-in, only when explicitly
-   requested (a deploy, a risky change), and then per rule 8's
-   observed-conclusions discipline.
-4. Merge per rule 8: squash by default (one commit, subject
-   "Title (#N)", the PR body as the commit body); a campaign branch
-   whose commits are each complete, honestly named, and useful as
-   review provenance may rebase-merge instead. State which was chosen
-   and why.
-5. Confirm the commit is on `main`, then delete the branch — but only
-   a branch this work created. A remote-only branch, or another
-   contributor's branch (Philip's, say), is theirs to delete.
-
-Steps already satisfied are verified, not redone. There is no second
-verb: landing someone else's PR is still landing.
 
 ## When Blocked
 
