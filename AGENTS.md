@@ -73,9 +73,14 @@ Permanent documentation:
    no merge commit.
    Commits and PRs carry **no AI attribution** — no Co-Authored-By
    trailers, no "generated with" footers; authorship is the owner's.
-   Merge only after CI check CONCLUSIONS are observed: poll the check
-   states and require an explicit pass — never chain a watch command
-   into a merge, and never infer success from a watcher exiting.
+   The merge gate is LOCAL verification: run the affected package
+   suites (or the fast loop / `test:all` for broad changes) and merge
+   on green. Do not wait for remote CI — it runs on the PR and on
+   `main` regardless, and its failures are triaged when they surface.
+   Waiting for CI conclusions is OPT-IN, done only when explicitly
+   requested (a deploy, a risky change); when watching, require an
+   explicit pass — never chain a watch command into a merge, and never
+   infer success from a watcher exiting.
    Report failures as failures; never describe skipped or partial work
    as complete.
 
@@ -238,8 +243,11 @@ work to `main`. It means, in order:
 1. The diff lives on a branch, never on `main`.
 2. A PR exists with an honest summary (created now if landing local
    work; verified if landing an existing PR).
-3. CI check CONCLUSIONS are observed — an explicit pass, never inferred
-   from a watcher exiting (rule 8).
+3. The change is verified LOCALLY — the affected package suites, or
+   the fast loop / `test:all` for broad changes. Waiting for remote CI
+   is not part of landing; it is opt-in, only when explicitly
+   requested (a deploy, a risky change), and then per rule 8's
+   observed-conclusions discipline.
 4. Merge per rule 8: squash by default (one commit, subject
    "Title (#N)", the PR body as the commit body); a campaign branch
    whose commits are each complete, honestly named, and useful as
