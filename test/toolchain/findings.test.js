@@ -113,10 +113,10 @@ test('every gate the ledger names resolves — a renamed gate cannot rot in the 
   const dims = [...(/const DIMS = \[(.+?)\];/s.exec(runner)?.[1] ?? '').matchAll(/'([a-z-]+)'/g)].map((m) => m[1]);
   expect(dims.length, 'could not read DIMS out of runner.js — the parse below is stale').toBe(6);
 
-  // The token audit's invariants are not in DIMS (that table is the type
-  // audit's). Listed here, but each is asserted to still appear in the runner,
-  // so a rename fails rather than rotting.
-  const invariants = ['present', 'type', 'readonly', 'member', 'survival'];
+  // The token audit's invariants and the mapping audit's census are not in DIMS
+  // (that table is the type audit's). Listed here, but each is asserted to still
+  // appear in the runner, so a rename fails rather than rotting.
+  const invariants = ['present', 'type', 'readonly', 'member', 'survival', 'census'];
   for (const name of invariants) {
     expect(runner.includes(`'${name}'`), `runner.js no longer mentions the '${name}' invariant`).toBe(true);
   }

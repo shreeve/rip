@@ -6,11 +6,12 @@
 //   bun run type-audit                  # the Type Audit (dims 1–5), the default
 //   bun run type-audit --hover          # the Hover Audit ONLY (slower; drives LSP servers)
 //   bun run type-audit --token          # the Token Audit ONLY (drives the editor server)
-//   bun run type-audit --all            # all three audits
+//   bun run type-audit --map            # the Mapping Audit ONLY (compiler output; no server)
+//   bun run type-audit --all            # all four audits
 //   bun run type-audit --v              # + list expected hover divergences / unasserted tokens
 //   bun run type-audit --update-hovers  # re-pin expected hovers (verify the change first)
 //
-// Three independent audits:
+// Four independent audits:
 //
 // A · THE TYPE AUDIT — a per-fixture grid over six dimensions:
 //   1 compiles     rip --ts produces a face           (else: compiler-coverage gap)
@@ -155,6 +156,44 @@
 //   carry the same bogus `readonly` as its declaration, and nothing verifies
 //   the modifier there). A clean run is a statement about those sites.
 //
+// D · THE MAPPING AUDIT (--map / --all) — the one audit that starts no
+//   server and asks no oracle: it reads the compiler's OWN mapping rows
+//   and checks, for every identifier in the source, that it maps to a
+//   generated position holding the same text. The three audits above all
+//   probe DECLARATIONS or type verdicts; none asks, of an identifier at a
+//   USE site, where it maps and whether that is the right place. This one
+//   does, and it does it from `compile()` alone — the same rows the editor
+//   server remaps every hover, definition, and edit through.
+//
+//   Two invariants per read, INDEPENDENT by construction (each catches a
+//   root the other cannot — see the partition note at the audit itself):
+//     · placed   the PRECISE map (sourceOffsetToGeneratedExact — the same
+//                resolver definition/rename ride) resolves the read's start
+//                to a generated offset. It REFUSES on a rewrite: the cover's
+//                verbatim prefix breaks at a re-rendered string literal and
+//                no exact position survives.
+//     · text     that resolved position holds the read's own bytes. It
+//                ANSWERS WRONG on mark-width: a paren-less call or a
+//                brace-lowered body maps the read onto its cover's inserted
+//                glyph (`(tota…` for `total`), so a position resolves but to
+//                the wrong symbol — the use-site mapping hazard.
+//
+//   Each failure is classified by the ROW it fell to (its role: `args`,
+//   `$self`, `body`, `value`, …) and by ROOT — synthetic-inclusion (the
+//   dominant class: the mark carries glyphs its source span does not) or
+//   string-rewrite (smaller: a literal re-rendered double-quoted). The run
+//   PRINTS the live counts; none is frozen here. One structural invariant
+//   backs the lot: EVERY flagged read has a containing row (the spans exist,
+//   they are just wrong) — a read with none would be a genuinely missing
+//   span, a new class, and the run says so loudly if it ever appears.
+//
+//   No oracle backs the walk on a per-run basis — and it needs none TO RUN.
+//   Trusting the LOGIC, though, is a one-time act: it was validated against the
+//   real editor once (2026-07-17, driven — see ROADMAP.md "M1"), then the
+//   server-driven scaffolds were retired. The audit ships STANDALONE under every
+//   flag; re-validation, if the mapping internals change, recovers that
+//   cross-check from git rather than wiring a server into every run.
+//
 // Layout: fixtures/ holds typed programs 01–12, each `.rip` beside a
 // hand-written `.ts`/`.tsx` twin; hover-pins.json is the Hover Audit's
 // baseline for symbols the twin cannot judge. The fixtures' dependency
@@ -184,7 +223,7 @@ import { execFileSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { LspClient, tsgoBinaryPath, startTsgo, decodeSemanticTokens } from '../../packages/vscode/src/tsgo.js';
 import { compile } from '../../src/compile.js';
-import { lineStartsOf, SUPPRESSED_TS_CODES } from '../../packages/vscode/src/translate.js';
+import { lineStartsOf, SUPPRESSED_TS_CODES, sourceOffsetToGeneratedExact, offsetToPosition } from '../../packages/vscode/src/translate.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '../..');
@@ -223,11 +262,22 @@ const AUDITS = [
     judge: 'the .rip SOURCE ITSELF — a binding\'s form fixes what its token must be, so no\n'
          + 'twin and no baseline are involved and the check cannot self-confirm',
   },
+  {
+    key: 'map', flag: '--map', name: 'Mapping Audit',
+    // The only audit that touches no server: it reads the compiler's own
+    // mapping rows, so it is the one whose "drives the editor server" the usage
+    // line below must NOT claim (see `runs`).
+    runs: 'compiler output only',
+    blurb: 'every source identifier maps to a generated position holding the same text',
+    judge: 'the COMPILER OUTPUT alone — no server, no tsgo, no twin. A read is `placed`\n'
+         + 'when the precise map resolves it and `text`-true when that position holds its\n'
+         + 'own bytes; each failure is classified by the mapping row it fell to',
+  },
 ];
 const FLAGS = [
-  ['--all', 'all three audits'],
+  ['--all', 'all four audits'],
   ['--serial', 'probe one fixture at a time — the control for the concurrent pass'],
-  ['--v', '+ expected hover divergences and unasserted tokens, in full'],
+  ['--v', '+ expected hover divergences, unasserted tokens, and every flagged mapping read, in full'],
   ['--update-hovers', 're-pin expected hovers (verify the change is correct FIRST)'],
   ['--help', '-h', 'this message'],
 ];
@@ -245,10 +295,10 @@ const usage = () => [
   'Usage: bun run type-audit [flag]',
   '',
   `  ${'(no flag)'.padEnd(16)} the Type Audit only — fast, the default`,
-  ...AUDITS.filter((a) => a.flag).map((a) => `  ${a.flag.padEnd(16)} the ${a.name} only (drives the editor server)`),
+  ...AUDITS.filter((a) => a.flag).map((a) => `  ${a.flag.padEnd(16)} the ${a.name} only (${a.runs ?? 'drives the editor server'})`),
   ...FLAGS.map((row) => `  ${row.slice(0, -1).join(', ').padEnd(16)} ${row.at(-1)}`),
   '',
-  'The three audits, and what each is judged against:',
+  'The four audits, and what each is judged against:',
   '',
   ...AUDITS.flatMap((a) => [
     `  ${a.name} (${a.flag ?? 'default'}) — ${a.blurb}`,
@@ -288,6 +338,13 @@ const ranAudit = (key) => AUDITS.find((a) => a.key === key).ran;
 const RUN_MAIN = ranAudit('main');
 const RUN_HOVER = ranAudit('hover');
 const RUN_TOKENS = ranAudit('token');
+const RUN_MAP = ranAudit('map');
+// The Mapping Audit reads the compiler's own mapping rows and touches no
+// server, so a run covering ONLY it needs neither the editor-server pool nor
+// tsgo. Everything else does. This gates both the pool construction and the
+// tsgo half of the preflight, so `bun run type-audit --map` is honest about
+// running from compiler output alone — it works with tsgo absent entirely.
+const NEED_SERVER = RUN_MAIN || RUN_HOVER || RUN_TOKENS;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const execFileP = promisify(execFile);
 // A face carries the whole reactive-runtime prelude, so it outgrows execFile's
@@ -338,15 +395,24 @@ process.on('SIGINT', () => { cleanupTemp(); process.exit(130); });
 // always mean the whole audit ran.
 {
   const missing = [];
-  try { tsgoBinaryPath(); }
-  catch { missing.push('tsgo — run `bun install` at the repository root'); }
+  // The Mapping Audit needs no tsgo (it never starts a server), so a --map-only
+  // run must not fail here for a missing binary — that is the whole point of its
+  // "compiler output alone" contract.
+  if (NEED_SERVER) {
+    try { tsgoBinaryPath(); }
+    catch { missing.push('tsgo — run `bun install` at the repository root'); }
+  }
   // Both the runtime libs AND their @types/* dev deps: the twin type-check
   // (dimension 5) needs the type declarations, and it now FAILS rather
-  // than skips, so a missing @types would read as a false twin error.
-  const auditPkg = JSON.parse(fs.readFileSync(path.join(HERE, 'package.json'), 'utf8'));
-  const corpus = [...Object.keys(auditPkg.dependencies ?? {}), ...Object.keys(auditPkg.devDependencies ?? {})];
-  const gone = corpus.filter((d) => !fs.existsSync(path.join(HERE, 'node_modules', d, 'package.json')));
-  if (gone.length) missing.push(`the fixture corpus (${gone.join(', ')}) — run \`bun install\` in test/type-audit/`);
+  // than skips, so a missing @types would read as a false twin error. The
+  // Mapping Audit type-checks nothing — it never resolves an import — so a
+  // --map-only run does not need the corpus present either.
+  if (NEED_SERVER) {
+    const auditPkg = JSON.parse(fs.readFileSync(path.join(HERE, 'package.json'), 'utf8'));
+    const corpus = [...Object.keys(auditPkg.dependencies ?? {}), ...Object.keys(auditPkg.devDependencies ?? {})];
+    const gone = corpus.filter((d) => !fs.existsSync(path.join(HERE, 'node_modules', d, 'package.json')));
+    if (gone.length) missing.push(`the fixture corpus (${gone.join(', ')}) — run \`bun install\` in test/type-audit/`);
+  }
   if (missing.length) {
     console.error('\n✗ The type audit cannot run — dependencies are missing:');
     for (const m of missing) console.error(`  • ${m}`);
@@ -1111,6 +1177,110 @@ const invariantHit = (r) =>
   /^(?:export\s+)?[A-Za-z_$][\w$]*\s*=\s*\S/.test(r.text) && !/:\s*any\b/.test(r.text)
   && /(?:^|:\s*)any$/.test(r.hover ?? '');
 
+// ── mapping machinery (the Mapping Audit): walk every source identifier and
+// ask the compiler's own rows where it lands.
+//
+// Reserved words are excluded WHOLESALE. A keyword-spelled property read
+// (`x.type`, `promise.then`) is forgone rather than count every `if`/`for`/
+// `type` header as a use site — the same trade `faceSurvival`'s RIP_KEYWORDS
+// makes, one step wider (it needs only declaration heads; this walk also meets
+// control-flow and operator keywords). The cost is a handful of false
+// NEGATIVES, never a false positive: a real read that happens to be spelled
+// like a keyword is skipped, but nothing correct is ever flagged.
+const MAP_RESERVED = new Set([
+  'if', 'unless', 'else', 'elif', 'for', 'in', 'of', 'while', 'until', 'loop',
+  'switch', 'when', 'then', 'return', 'throw', 'try', 'catch', 'finally',
+  'break', 'continue', 'new', 'typeof', 'instanceof', 'delete', 'void', 'await',
+  'yield', 'do', 'import', 'export', 'from', 'as', 'default', 'let', 'const',
+  'var', 'function', 'class', 'extends', 'implements', 'interface', 'enum',
+  'type', 'namespace', 'module', 'def', 'component', 'schema', 'render', 'and',
+  'or', 'not', 'is', 'isnt', 'true', 'false', 'null', 'undefined', 'this',
+  'super', 'with', 'case', 'by',
+]);
+
+// Every identifier in real CODE, as { name, offset }. `codeMask` blanks string
+// LITERALS and comments (offset-preserving) while KEEPING `#{…}` interpolation
+// reads, so a name inside a template's `#{…}` counts and a keyword inside a
+// comment does not. Reserved words are dropped here so the caller never sees
+// them.
+function* identReads(src) {
+  const masked = codeMask(src);
+  const re = /[A-Za-z_$][\w$]*/g;
+  let m;
+  while ((m = re.exec(masked))) {
+    if (MAP_RESERVED.has(m[0])) continue;
+    yield { name: m[0], offset: m.index };
+  }
+}
+
+// The scan for one fixture. For each read: `placed` is whether the PRECISE map
+// (the definition/rename resolver) answers at the read's start; `text` is
+// whether the position it answers holds the read's own bytes. A read is healthy
+// iff both hold. Every failure is tagged with the ROW it fell to (bestAtSource,
+// which for a failing read is always the innermost COVER — a direct row would
+// have placed it) and a ROOT:
+//   · rewrite    a string literal sits between the cover's start and the read.
+//                The compiler re-renders every literal double-quoted with
+//                escapes recomputed, so the cover's verbatim prefix breaks at
+//                that quote and the precise map refuses. (`text` never fails
+//                this way — an unplaced read has no resolved position to be
+//                wrong about — so rewrite is an `unplaced`-only root.)
+//   · synthetic  everything else: the mark's generated span carries glyphs its
+//                source span does not (an inserted `(`, a brace-lowered `{`, a
+//                `.value` unwrap), so byte arithmetic lands on the wrong text.
+//                The dominant class.
+// The rewrite test is a source predicate (a quote in the cover prefix), not a
+// diff of the two texts — coarse, but it reproduces the split the prototype
+// found and never misfires on a read with no literal before it.
+//
+// A read with NO containing row at all is the pathological third case, and it
+// is routed to `missingRows`, NOT `rows`: it is worse than at-risk (no span,
+// not merely no exact one), a class the prototype never saw, so it is counted
+// apart and never folded into the census or the unplaced/mistext tallies, which
+// speak about reads that HAVE a span. The audit proves the class empty afresh
+// each run.
+function mappingScan(src, code, mappings) {
+  const rows = [];         // flagged reads WITH a containing row (unplaced/mistext)
+  const missingRows = [];  // flagged reads with NO row at all — counted apart
+  let total = 0, census = 0, byLuck = 0;
+  for (const { name, offset } of identReads(src)) {
+    total++;
+    const g = sourceOffsetToGeneratedExact(mappings, offset, src, code);
+    const placed = g !== null;
+    const text = g === null ? true : code.slice(g, g + name.length) === name;
+    const flagged = !(placed && text);
+    // One source-tree stab, reused for every question below — the missing check,
+    // the census, and the cover row — rather than a `bestAtSource` plus a
+    // separate `atSource`. `at` is empty iff nothing contains the offset, which
+    // is exactly what `bestAtSource` returns null for.
+    const at = mappings.atSource(offset);
+    if (at.length === 0) { missingRows.push({ name, offset, placed }); continue; }   // no span ⟹ flagged; kept out of census
+    // The CENSUS — #21's at-risk population: reads with no EXACT row. Byte
+    // arithmetic is verbatim only inside an exact row; everything else resolves
+    // today only while a cover prefix stays verbatim through it, one face rewrite
+    // from breaking. The count is MITIGATION-PROOF: only real source spans reduce
+    // it, never a downstream resolver tweak. A flagged read is ALWAYS in the
+    // census, by construction — an exact row containing the offset WOULD have
+    // resolved it (synthetic rows are zero-width on the SOURCE side, so they
+    // never enter `at` and `directAtSource` returns only exact rows) — so
+    // census ≥ flagged and byLuck = census − flagged. The audit checks that
+    // identity after the run rather than trusting it (see the census guard).
+    const noExact = !at.some((r) => r.mappingKind === 'exact');
+    if (noExact) { census++; if (!flagged) byLuck++; }
+    if (!flagged) continue;
+    // The innermost containing row — and for a flagged read this IS bestAtSource,
+    // since no direct row applies here (an exact one would have resolved the read,
+    // and synthetic rows are zero-width source, so `at` holds only covers).
+    const row = at[0];
+    const root = /['"`]/.test(src.slice(row.sourceStart, offset)) ? 'rewrite' : 'synthetic';
+    // `gen`/`hit` make the failure self-describing under --v: where the precise
+    // map landed (null if it refused) and the bytes actually sitting there — for
+    // a mistext, the wrong text a hover at this read would answer about.
+    rows.push({ name, offset, placed, text, role: row.role, root, gen: g, hit: g === null ? null : code.slice(g, g + name.length) });
+  }
+  return { total, rows, missingRows, census, byLuck };
+}
+
 // ── run
 const fixtures = fs.readdirSync(FIX).filter((f) => f.endsWith('.rip')).sort();
 // ── shared presentation helpers
@@ -1166,11 +1336,17 @@ const auditBanner = (title, subtitle) => {
 //
 // The cost is N server processes. That is the price of the guarantee, and the
 // lanes pay it out of time they would otherwise spend idle.
-const pool = await Promise.all(Array.from({ length: LANES }, async () => {
-  const s = new EditorServer();
-  await s.start();
-  return s;
-}));
+// Skipped entirely when the only audit is the Mapping one — it reads compiler
+// output and never opens a document, so paying for N server processes (and
+// requiring tsgo to start them) would break its "compiler output alone"
+// contract for no gain.
+const pool = NEED_SERVER
+  ? await Promise.all(Array.from({ length: LANES }, async () => {
+      const s = new EditorServer();
+      await s.start();
+      return s;
+    }))
+  : [];
 
 // A coverage shortfall is not a low score — it means the audit did not run over
 // what it claims to cover, and every ratio below it is a fraction of the wrong
@@ -1316,6 +1492,153 @@ if (RUN_MAIN) {
     console.log(`    ${pad(d, 12)} ${pass === applicable ? green(ratio) : pass === 0 ? red(ratio) : yellow(ratio)}`);
   }
   fails = totalApplicable - totalPass;
+}
+
+// ── the Mapping Audit (--map / --all): use-site identifier coverage, from the
+// compiler's own rows. No server, no tsgo, no twin — so it runs here, before
+// the probe pass spins up any of them.
+let mp = null;
+if (RUN_MAP) {
+  auditBanner('MAPPING AUDIT', `use-site identifier coverage · compiler output only · ${fixtures.length} files`);
+
+  const perFile = [];
+  const byRootRole = { synthetic: new Map(), rewrite: new Map() };
+  let totReads = 0, totFlag = 0, unplaced = 0, mistext = 0, missing = 0, census = 0, byLuck = 0;
+  const missingRows = [];   // flagged reads with no containing row — the pathological class
+  const skips = [];
+
+  for (const f of fixtures) {
+    const full = path.join(FIX, f);
+    const src = fs.readFileSync(full, 'utf8');
+    let scan;
+    try {
+      // The SAME compile the server's `faceOf` and the survival oracle use, so
+      // the rows walked here are the exact rows the editor remaps through.
+      const { code, mappings } = compile(src, { path: full, runtimeDelivery: 'inline', face: 'ts' });
+      scan = mappingScan(src, code, mappings);
+    } catch (e) {
+      // A fixture that will not compile has no face to walk. Surfaced, never
+      // silent: a shrinking denominator is exactly what the coverage line below
+      // exists to make visible.
+      skips.push(f);
+      console.log(`    ${yellow('skip')} ${pad(f, 20)} ${dim('does not compile — no face to walk: ' + ((e && e.message) || e))}`);
+      continue;
+    }
+    // Only `starts` is kept for the --v listing; `src` is not retained (nothing
+    // reads it back), and `walked` is just `perFile.length`.
+    perFile.push({ f, ...scan, starts: lineStartsOf(src) });
+    totReads += scan.total;
+    totFlag += scan.rows.length;
+    census += scan.census;
+    byLuck += scan.byLuck;
+    for (const r of scan.rows) {
+      if (r.placed) mistext++; else unplaced++;
+      const roleKey = r.role ?? 'NONE';
+      byRootRole[r.root].set(roleKey, (byRootRole[r.root].get(roleKey) ?? 0) + 1);
+    }
+    // Missing-span reads are their own class — counted here alone, never in the
+    // unplaced/mistext/census tallies above.
+    missing += scan.missingRows.length;
+    for (const r of scan.missingRows) missingRows.push({ f, ...r });
+    const flagged = scan.rows.length;
+    console.log(`    ${flagged === 0 ? green('✓') : yellow('•')} ${pad(f, 20)} ${dim(pad(scan.total + ' reads', 12))}`
+      + (flagged === 0 ? green('all placed') : yellow(`${flagged} unmapped`)));
+  }
+
+  console.log(`\n    ${green('✓')} ${dim(`coverage: ${perFile.length} of ${fixtures.length} fixture(s) walked${skips.length ? `, ${skips.length} skipped (no face)` : ''}, ${totReads} reads`)}`);
+
+  // ── the two invariants. Every failure is one or the other, never both: a
+  // rewrite REFUSES (no resolved position to hold wrong text), mark-width
+  // RESOLVES to the wrong bytes — so `unplaced` and `mistext` partition the
+  // flagged set, and each is the root the other cannot catch.
+  console.log(`\n  ${bold('Invariants')} ${dim(`(${totFlag} of ${totReads} reads unmapped — every position from the compiler's own rows)`)}`);
+  const invLine = (label, n, note) =>
+    console.log(`    ${pad(label, 10)} ${(n === 0 ? green : yellow)(String(n).padStart(4))}   ${dim(note)}`);
+  invLine('unplaced', unplaced, '`placed` fails — the precise map REFUSES, a rewrite breaks the cover\'s verbatim prefix');
+  invLine('mistext', mistext, '`text` fails — resolves, but to the WRONG bytes: mark-width, so a hover at the use site names the wrong symbol');
+
+  // ── the CENSUS — the gate the ledger's identifier-read finding asks for:
+  // reads with no exact row, the at-risk population, and the MITIGATION-PROOF
+  // one. `unplaced`/`mistext` count the reads broken TODAY; the census is the
+  // superset that also holds the ones resolving today only by a verbatim cover
+  // prefix (byLuck), each one face rewrite from breaking. Only giving reads real
+  // source spans drives it to zero — no downstream resolver tweak can — which is
+  // why THIS number is the gate, not the symptom count. Same mapping rows, no
+  // server, no oracle.
+  console.log(`\n  ${bold('Census')} ${dim('(reads with no exact row — the mitigation-proof at-risk population)')}`);
+  console.log(`    ${pad('census', 10)} ${(census === 0 ? green : yellow)(String(census).padStart(4))}   ${dim(`of ${totReads} reads — ${totFlag} broken today (flagged above) + ${byLuck} resolving by luck (one face rewrite from breaking)`)}`);
+  // The decomposition is exact BY CONSTRUCTION — a flagged read always lacks an
+  // exact row (see mappingScan) — so census === broken-today + by-luck. Checked,
+  // not assumed: it rests on the compiler keeping synthetic rows zero-width on
+  // the source side, and if that ever changed a flagged read could fall inside
+  // an exact row and the split would silently misreport. Surface the drift.
+  if (census !== totFlag + byLuck) {
+    console.log(`    ${red('✗')} ${dim(`census decomposition off: ${census} ≠ ${totFlag} broken + ${byLuck} by-luck — a flagged read sits in an exact row (a compiler-invariant regression, not a corpus change)`)}`);
+  }
+
+  // ── the two roots, each with the roles it bit (the row every failure fell
+  // to). The counts are live and the ordering is by weight, so the dominant
+  // class names itself.
+  const roleBreak = (m) => [...m.entries()].sort((a, b) => b[1] - a[1]).map(([role, n]) => `${role} ${n}`).join(', ') || '—';
+  const rootTotal = (m) => [...m.values()].reduce((a, b) => a + b, 0);
+  console.log(`\n  ${bold('Roots')} ${dim('(classified from the mapping row each read fell to)')}`);
+  console.log(`    ${pad('synthetic', 10)} ${yellow(String(rootTotal(byRootRole.synthetic)).padStart(4))}   ${dim('a mark carries glyphs its source span does not')}`);
+  console.log(`    ${' '.repeat(15)}${dim(roleBreak(byRootRole.synthetic))}`);
+  console.log(`    ${pad('rewrite', 10)} ${yellow(String(rootTotal(byRootRole.rewrite)).padStart(4))}   ${dim('a string literal re-rendered double-quoted')}`);
+  console.log(`    ${' '.repeat(15)}${dim(roleBreak(byRootRole.rewrite))}`);
+
+  // ── the one structural invariant that IS load-bearing: no flagged read may
+  // lack a containing row. Every failure above is a span that EXISTS and is
+  // wrong; a read with no span would be a genuinely missing mapping — a class
+  // the prototype never saw. This is a gauge, not a gate, so a nonzero count
+  // does not abort — but it prints red and names every offender, because it
+  // would be a NEW finding, not a known one.
+  if (missing === 0) {
+    console.log(`\n  ${green('✓')} ${dim(`every flagged read has a containing row — no genuinely missing span`)}`);
+  } else {
+    console.log(`\n  ${red('✗')} ${bold(`${missing} flagged read(s) with NO containing row`)} ${dim('— a missing span, a new class not seen before:')}`);
+    for (const r of missingRows.slice(0, 10)) console.log(`      ${red('·')} ${bold(r.name)} ${dim(`@ ${r.f} offset ${r.offset}`)}`);
+    if (missingRows.length > 10) console.log(`      ${dim(`… ${missingRows.length - 10} more`)}`);
+  }
+
+  // ── --v: every flagged read, per fixture, made self-describing so it can be
+  // verified by hand. Each row names the invariant it broke (`unplaced` = the
+  // precise map refused; `mistext` = it resolved to the wrong bytes), the root,
+  // the mapping row's role, and — for a mistext — the face bytes it landed on,
+  // which is exactly what a hover at that position would answer about. Cross-
+  // check any row against the real editor by hovering `line:col` in the fixture.
+  if (VERBOSE && totFlag) {
+    console.log(`\n  ${bold('Flagged reads')} ${dim('(--v — every one, so each can be checked against the editor at its line:col)')}`);
+    for (const pf of perFile) {
+      if (!pf.rows.length) continue;
+      console.log(`\n    ${bold(pf.f)} ${dim(`(${pf.rows.length})`)}`);
+      for (const r of pf.rows) {
+        const { line, character } = offsetToPosition(pf.starts, r.offset);
+        const where = dim(`${String(line + 1).padStart(3)}:${String(character).padEnd(3)}`);
+        const inv = r.placed ? yellow('mistext ') : yellow('unplaced');
+        const detail = r.placed
+          ? dim(`maps onto ${JSON.stringify(r.hit)}`)               // the wrong bytes a hover would read
+          : dim('the precise map refuses');
+        console.log(`      ${where} ${bold(pad(r.name, 16))} ${inv} ${dim(pad(r.root, 10))} ${dim(pad(r.role ?? '—', 12))} ${detail}`);
+      }
+    }
+  }
+
+  // Exactly what the combined-totals line reads — no dead fields carried on the
+  // signal object (perFile, byLuck, skips, walked were all retained for nothing).
+  mp = { totReads, totFlag, unplaced, mistext, missing, census,
+         synthetic: rootTotal(byRootRole.synthetic), rewrite: rootTotal(byRootRole.rewrite) };
+
+  // No calibration runs here, and that is deliberate: trusting the instrument is
+  // a ONE-TIME act, not a per-run one. The walk's logic was validated against
+  // the real editor once (2026-07-17, driven — see ROADMAP.md "M1"), and the
+  // code doesn't drift on its own. So the audit ships STANDALONE — no server,
+  // ever, under any flag. If the mapping internals it reads change (codeMask,
+  // the skip list, or translate.js's precise resolver), RE-VALIDATE by
+  // recovering that driven cross-check from git rather than paying for a wired
+  // server dependency on every run. Standalone is the whole identity of this
+  // audit; a permanent server tie-in — even a cheap one — would blur it for a
+  // check the manual gauge fires only when someone runs it anyway.
 }
 
 const PROBES = new Map();   // file → { decls, hovers, tokens, tmap }
@@ -1850,6 +2173,15 @@ console.log(`\n  ${bold('Totals')}`);
 if (RUN_MAIN) totalLine('Type', (fails === 0
   ? green(`${totalApplicable} dimension checks: all passing`)
   : `${totalApplicable} dimension checks: ${green(totalPass + ' passing')}, ${red(fails + ' failing')}`));
+// The Mapping Audit's flagged reads are EXPECTED red (the mapping gap), so
+// they read as a gauge, never a regression count: the total is the census, and
+// the missing-span clause is the only part that would signal something new.
+if (mp) totalLine('Mapping', `${mp.totReads} reads: `
+  + (mp.totFlag === 0
+    ? green('all placed, all truthful')
+    : `${yellow(`${mp.totFlag} unmapped`)} ${dim(`(${mp.unplaced} unplaced, ${mp.mistext} mis-texted · ${mp.synthetic} synthetic, ${mp.rewrite} rewrite)`)} ${dim('tracking the mapping gap (expected)')}`)
+  + dim(` · ${mp.census} at-risk (census: no exact row)`)
+  + (mp.missing ? ` · ${red(`${mp.missing} missing span${mp.missing === 1 ? '' : 's'}`)} ${dim('— a new class')}` : ''));
 if (hp) totalLine('Hover', `${hp.probed} hover probes: `
   + (hp.gap === 0 && hp.snapChanged === 0 && hp.violations.length === 0
     ? green('twin parity + expected clean')
@@ -1882,7 +2214,7 @@ if (tk) {
     + memberClause + survivalClause);
 }
 
-// ── what this run did NOT cover. The default runs one of three audits, so say
+// ── what this run did NOT cover. The default runs one of four audits, so say
 // so on the way out: an audit nobody knows about is an audit nobody runs. Reads
 // `ran` straight off AUDITS, so EVERY audit can appear here — including the
 // default one, which a `--hover`/`--token` run silently skips.
@@ -1892,7 +2224,7 @@ if (tk) {
   if (skipped.length) {
     console.log(`\n  ${dim('Not run')} ${dim(`(this run: ${covered})`)}`);
     for (const a of skipped) console.log(`    ${dim('·')} ${bold(a.name)} ${dim(`— ${a.blurb}`)}\n      ${dim(`bun run type-audit${a.flag ? ' ' + a.flag : ''}`)}`);
-    console.log(`    ${dim('·')} ${dim('all three:')} ${dim('bun run type-audit --all')}   ${dim('· full flag list:')} ${dim('--help')}`);
+    console.log(`    ${dim('·')} ${dim('all four:')} ${dim('bun run type-audit --all')}   ${dim('· full flag list:')} ${dim('--help')}`);
   }
 }
 console.log('');

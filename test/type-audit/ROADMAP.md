@@ -4,15 +4,16 @@ Internal build plan for the instrument. Runner: `runner.js`. Findings: `FINDINGS
 
 ## Built
 
-Three audits, each judged by a different reference so they can't all fail the same way.
+Four audits, each judged by a different reference so they can't all fail the same way.
 
 | audit | flag | probes | judged against |
 | --- | --- | --- | --- |
 | Type Audit | *(default)* | six dimensions per fixture: compiles, directives, verdict, runtime, twin, strict | the fixtures — a `# @ts-expect-error` marks a line that must error |
 | Hover Audit | `--hover` | hover every top-level declaration through the editor server | the hand-written `.ts/.tsx` twin, falling back to `hover-pins.json` |
 | Token Audit | `--token` | semantic token + modifiers on every top-level declaration | the `.rip` source itself — no twin, no baseline, cannot self-confirm |
+| Mapping Audit | `--map` | every source identifier maps to a generated position holding the same text | the compiler output alone — no server, no tsgo, no twin (its logic validated against the editor once, then the scaffold retired) |
 
-The shared gap: all three probe declarations or type verdicts. None asks, of an identifier at a *use* site: where does it map, and is that the right place?
+The first three probe declarations or type verdicts. None asks, of an identifier at a *use* site: where does it map, and is that the right place? The Mapping Audit does — from the compiler's own rows, so it needs no server. It closed the gap below.
 
 ## Why the gap bites
 
@@ -25,25 +26,11 @@ The row is self-consistent and wrong, and no built audit visits that use site.
 
 ## M1 — Mapping audit
 
-*Prototyped; not built.*
+*Built.* `bun run type-audit --map`. Walks every source identifier and checks it maps to a generated position holding the same text — from the compiler's own rows, so no server, tsgo, or twin, under any flag. Two invariants partition the failures: `placed` (the precise resolver refuses — a rewrite) and `text` (it resolves to the wrong bytes — mark-width, the #21 hazard). Each is classified by the row it fell to and by root (synthetic-inclusion dominant, string-rewrite smaller); the run prints the live counts. It also proves each pass that no flagged read lacks a containing row — a genuinely missing span would be a new class.
 
-`bun run type-audit --map`. Walks every identifier in the source, checks it maps to a generated position holding the same text. No server, no tsgo, no twin — it runs from the compiler output alone.
+**Standalone by design.** The audit has no oracle and needs none to run; trusting its *logic* is a one-time act, so the logic was validated against the real editor once (2026-07-17, driven — the hand-countable 01-basic set and a full-corpus hover sweep, both in git) and the server-driven scaffolds were then removed rather than wired in. A later change to the mapping internals it reads (`codeMask`, the skip list, translate.js's precise resolver) re-validates by recovering that drive from git — not by a permanent server tie-in a manual gauge would fire only when run. The one finding worth carrying: the walk counts the *at-risk* population (reads with no exact row), larger than what currently misleads the editor — some reads resolve today only because they sit at their cover's start, one face rewrite from breaking.
 
-Two invariants, neither catching the other's cases:
-
-- **`placed`** — an exact position resolves. Catches rewrites, where the map refuses.
-- **`text`** — that position holds the identifier. Catches mark-width, where the map answers wrong.
-
-Each failure is classified by root, from the row it fell to. The classification is the output — the run prints the live counts; they don't belong frozen here.
-
-The prototype's failures all fall to two roots, and none is a genuinely missing span (the classifier finds no identifier without a containing row — the spans exist, they're just wrong):
-
-1. **A mark includes synthetic text its source span doesn't.** The dominant class. It bites type-body members (`$self`), paren-less calls (`args`), and schema fields (`body`): the row degrades to a cover and byte arithmetic dies. `operator` roles already emit punctuation as zero-width synthetic rows, leaving operands `exact` — the precedent exists.
-2. **A rewrite inside a span.** A smaller, distinct class: string literals are unconditionally re-rendered double-quoted with escapes recomputed. TypeScript accepts `'x:'`, so the divergence isn't required.
-
-**Calibration gate, before any run is trusted:** 01-basic's `console.log('…:', value)` lines are a hand-countable set of use-site identifiers; the ones the audit flags there must match an independent LSP hover sweep of the same positions. No oracle means nothing else contradicts a wrong mask, skip list, or classifier — that agreement is the only outside evidence the instrument gets.
-
-**Overlap sub-step:** whether the Token Audit's `member` / `survival` invariants are red for reasons M1 also catches is unverified. Compare the failure sets. If subsumed, they revert to guarding token *delivery*, which M1 structurally can't see.
+**Overlap — settled.** The Token Audit's `member` invariant is fully subsumed by M1 (the same failures, from compiler output alone); `survival` is root-subsumed but also checks the server *delivers* a token, which M1 can't see. So when the mapping gap closes, `member` reverts to guarding delivery and `survival` keeps only its delivery half.
 
 Depends on nothing. Produces: use-site position coverage and the root classifier.
 
