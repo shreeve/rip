@@ -1,7 +1,7 @@
 #!/usr/bin/env rip
 
 # ==============================================================================
-# @rip-lang/swarm — Parallel job runner with worker threads
+# @rip-lang/swarm - Parallel job runner with worker threads
 #
 # Author: Steve Shreeve (steve.shreeve@gmail.com)
 #   Date: January 18, 2026
@@ -21,7 +21,7 @@
 #   swarm { setup, perform }
 # ==============================================================================
 
-import { isMainThread, parentPort, workerData } from 'worker_threads'
+import { Worker, isMainThread, parentPort, workerData } from 'worker_threads'
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync, rmSync } from 'fs'
 import { join, resolve } from 'path'
 import { pathToFileURL } from 'url'
@@ -40,31 +40,30 @@ _died = join(_dir, 'died')
 # Task queue (file-based)
 # ==============================================================================
 
-export init = ->
+export init! = ->
   rmSync(_dir, { recursive: true, force: true })
-  mkdirSync(_todo, { recursive: true })
-  mkdirSync(_done, { recursive: true })
-  mkdirSync(_died, { recursive: true })
+  mkdirSync(dir, { recursive: true }) for dir in [_todo, _done, _died]
 
 export retry = ->
   return false unless existsSync(_died) and existsSync(_todo)
   died = readdirSync(_died)
   todo = readdirSync(_todo)
   return todo.length > 0 if died.length is 0
-  for file in died
-    renameSync(join(_died, file), join(_todo, file))
+  renameSync(join(_died, file), join(_todo, file)) for file in died
   true
 
-export todo = (name, data) ->
-  path = join(_todo, String(name))
-  if data?
-    writeFileSync(path, if typeof data is 'string' then data else JSON.stringify(data))
-  else
-    writeFileSync(path, '')
+export todo! = (name, data) ->
+  data ?= ''
+  data = JSON.stringify(data) unless kind(data) is 'string'
+  writeFileSync(join(_todo, String(name)), data)
 
-move = (path, dest) ->
-  try renameSync(path, join(dest, path.split('/').pop()))
-  catch then null
+base = (path) -> path.split('/').pop()
+
+move! = (path, dest) ->
+  try renameSync(path, join(dest, base(path)))
+
+logError! = (msg) ->
+  writeFileSync(join(_dir, 'errors.log'), "#{msg}\n", { flag: 'a' }) if existsSync(_dir)
 
 # ==============================================================================
 # ANSI terminal
@@ -72,9 +71,9 @@ move = (path, dest) ->
 
 STDOUT = process.stdout
 
-write  = (s) -> STDOUT.write(s)
-clear  = (line) -> if line then "\x1b[K" else "\x1b[2J"
-cursor = (show) -> write(if show then "\x1b[?25h" else "\x1b[?25l")
+write!  = (s) -> STDOUT.write(s)
+clear   = (line) -> "\x1b[K" if line else "\x1b[2J"
+cursor! = (show) -> write("\x1b[?25h" if show else "\x1b[?25l")
 go     = (r = 1, c = 1) -> "\x1b[#{r};#{c}H"
 
 _hex = {}
@@ -84,14 +83,10 @@ hex = (str) ->
   s = str.replace(/^#/, '')
   m = s.match(/^([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i) or s.match(/^([0-9a-f])([0-9a-f])([0-9a-f])$/i)
   return '' unless m
-  result = if m[1].length is 1
-    [parseInt(m[1]+m[1], 16), parseInt(m[2]+m[2], 16), parseInt(m[3]+m[3], 16)].join(';')
-  else
-    [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)].join(';')
-  _hex[str] = result
+  _hex[str] = m.slice(1).map((c) -> parseInt((c + c if c.length is 1 else c), 16)).join(';')
 
-fg  = (rgb) -> if rgb then "\x1b[38;2;#{hex(rgb)}m" else "\x1b[39m"
-bg  = (rgb) -> if rgb then "\x1b[48;2;#{hex(rgb)}m" else "\x1b[49m"
+fg  = (rgb) -> "\x1b[38;2;#{hex(rgb)}m" if rgb else "\x1b[39m"
+bg  = (rgb) -> "\x1b[48;2;#{hex(rgb)}m" if rgb else "\x1b[49m"
 fgw =! fg("fff")
 
 # ==============================================================================
@@ -100,7 +95,7 @@ fgw =! fg("fff")
 
 char = wide = len = null
 
-drawFrame = (workers) ->
+drawFrame! = (workers) ->
   len = String(workers).length
   write clear()
   write go(2 + workers, len + 3) + "╰" + "─".repeat(wide + 2) + "╯"
@@ -111,20 +106,20 @@ drawFrame = (workers) ->
     write " #{label} │ " + " ".repeat(wide) + " │"
   write go(workers + 3, len + 3) + "│ " + " ".repeat(wide) + " │"
 
-draw = (state) ->
+draw! = (state) ->
   { live, done, died, jobs, workers, info } = state
 
   ppct = (done + died) / jobs
   most = Math.max(...Object.values(info), 1)
 
-  # worker bars — set colors once, just move cursor per row
+  # worker bars: set colors once, just move cursor per row
   write fgw + bg("5383ec")
   for slot, count of info
     tpct = count / most
     cols = Math.floor(ppct * tpct * wide)
     write go(parseInt(slot) + 1, len + 5) + char.repeat(cols)
 
-  # summary bar — one atomic write
+  # summary bar: one atomic write
   dpct = done / jobs
   lpct = live / jobs
   gcol = Math.floor(dpct * wide)
@@ -149,16 +144,14 @@ draw = (state) ->
 # ==============================================================================
 
 # Worker mode: swarm() registers the perform function here, and the
-# worker-entry block at the bottom of this file reads it back — same
+# worker-entry block at the bottom of this file reads it back: same
 # module instance, no bridge.
 _workerPerform = null
 
-export swarm = (opts = {}) ->
+export swarm! = (opts = {}) ->
   unless isMainThread
     _workerPerform = opts.perform
     return
-
-  { Worker } = import!('worker_threads')
 
   # parse CLI options
   args    = process.argv.slice(2)
@@ -169,54 +162,46 @@ export swarm = (opts = {}) ->
   dosafe  = args.includes('-s') or args.includes('--safe')
   quiet   = args.includes('-q') or args.includes('--quiet')
 
-  if workers < 1
-    console.error 'error: workers must be at least 1'
-    exit(1)
+  abort 'error: workers must be at least 1' if workers < 1
 
   if doreset
     rmSync(_dir, { recursive: true, force: true })
-    console.log 'removed .swarm directory'
+    p 'removed .swarm directory'
     exit(0)
 
   # run setup
-  unless typeof opts.perform is 'function'
-    console.error 'error: perform() function is required'
-    exit(1)
+  abort 'error: perform() function is required' unless kind(opts.perform) is 'function'
 
   context = {}
-  if typeof opts.setup is 'function'
+  if kind(opts.setup) is 'function'
     result = await opts.setup()
     context = result if result? and typeof result is 'object'
   context.safe = dosafe
 
   # read task list
-  unless existsSync(_todo)
-    console.error 'error: no .swarm/todo directory found (did setup run?)'
-    exit(1)
+  abort 'error: no .swarm/todo directory found (did setup run?)' unless existsSync(_todo)
 
   tasks = readdirSync(_todo).sort().map (f) -> join(_todo, f)
 
-  if tasks.length is 0
-    console.log 'no tasks to process'
+  unless tasks.length
+    p 'no tasks to process'
     exit(0)
 
   jobs = tasks.length
 
-  # resolve paths — each worker thread runs THIS file as its entry (the
+  # resolve paths: each worker thread runs THIS file as its entry (the
   # worker block at the bottom), so there is no separate bootstrap file
   workerPath = new URL(import.meta.url).pathname
   scriptPath = resolve(process.argv[1] or '')
 
   # Workers must compile .rip imports themselves: a worker thread gets
-  # neither the parent's preloads nor bunfig's (verified — the inherited
+  # neither the parent's preloads nor bunfig's (verified: the inherited
   # execArgv even SHOWS the flag, inert). The main thread already knows
   # the exact loader compiling THIS process: its own --preload flag. No
   # loader means the user script's workers cannot load at all, so its
   # absence rejects here, named, instead of as per-worker startup noise.
   loaderPath = process.execArgv.find((a) -> a.startsWith('--preload='))?.slice('--preload='.length)
-  unless loaderPath
-    console.error 'error: swarm needs the rip loader for its workers — run via `swarm <script.rip>` or `rip <script.rip>`'
-    exit(1)
+  abort 'error: swarm needs the rip loader for its workers: run via `swarm <script.rip>` or `rip <script.rip>`' unless loaderPath
 
   # state
   live     = 0
@@ -225,18 +210,21 @@ export swarm = (opts = {}) ->
   info     = {}
   taskIdx  = 0
   fatal    = false
-  inflight = {}  # slot → taskPath (track in-flight tasks for crash recovery)
-  lastTask = {}  # slot → last completed task name (for display)
+  inflight = {}  # slot -> taskPath (track in-flight tasks for crash recovery)
+  lastTask = {}  # slot -> last completed task name (for display)
+
+  redraw! = -> draw({ live, done, died, jobs, workers, info }) unless quiet
 
   # signal handlers
   process.on 'SIGINT', ->
-    cursor(true) unless quiet
-    write go(workers + 5, 1) + "\n" unless quiet
+    unless quiet
+      cursor(true)
+      write go(workers + 5, 1) + "\n"
     exit(1)
   unless quiet
     process.on 'SIGWINCH', ->
       drawFrame(workers)
-      draw({ live, done, died, jobs, workers, info })
+      redraw()
 
   # draw initial frame
   startTime = Date.now()
@@ -250,72 +238,69 @@ export swarm = (opts = {}) ->
   await new Promise (resolveAll) ->
 
     finished = false
-    checkDone = ->
+    checkDone! = ->
       if not finished and done + died >= jobs
         finished = true
         for wk in allWorkers
           try wk.unref()
-          catch then null
         resolveAll()
 
-    dispatchNext = (worker, slot) ->
+    dispatchNext! = (worker, slot) ->
       if taskIdx < tasks.length
         taskPath = tasks[taskIdx++]
         inflight[slot] = taskPath
         live++
         unless quiet
-          write go(slot + 1, len + 5 + wide + 3) + " " + taskPath.split('/').pop() + clear(true)
-          draw({ live, done, died, jobs, workers, info })
+          write go(slot + 1, len + 5 + wide + 3) + " " + base(taskPath) + clear(true)
+          redraw()
         worker.postMessage { type: 'task', taskPath }
       else
         inflight[slot] = null
         checkDone()
 
-    spawnWorker = (slot) ->
+    spawnWorker! = (slot) ->
       info[slot] ?= 0
 
-      wopts = { workerData: { scriptPath, context } }
-      wopts.preload = [loaderPath]
-      w = new Worker(workerPath, wopts)
+      w = new Worker(workerPath, { workerData: { scriptPath, context }, preload: [loaderPath] })
       allWorkers.push(w)
 
       w.on 'message', (msg) ->
         switch msg.type
           when 'error'
-            writeFileSync('.swarm/errors.log', "worker #{slot} startup: #{msg.error}\n", { flag: 'a' }) if existsSync(_dir)
+            logError "worker #{slot} startup: #{msg.error}"
             unless fatal
               fatal = true
-              cursor(true) unless quiet
-              write go(workers + 5, 1) unless quiet
-              console.error "\nswarm: #{msg.error}"
-              exit(1)
+              unless quiet
+                cursor(true)
+                write go(workers + 5, 1)
+              abort "\nswarm: #{msg.error}"
           when 'ready'
             dispatchNext(w, slot)
           when 'done'
             move(msg.taskPath, _done)
-            lastTask[slot] = msg.taskPath.split('/').pop()
+            lastTask[slot] = base(msg.taskPath)
             inflight[slot] = null
             live--
             done++
             info[slot]++
-            draw({ live, done, died, jobs, workers, info }) unless quiet
+            redraw()
             dispatchNext(w, slot)
           when 'failed'
             move(msg.taskPath, _died)
-            lastTask[slot] = msg.taskPath.split('/').pop()
-            writeFileSync('.swarm/errors.log', "#{msg.taskPath.split('/').pop()}: #{msg.error or 'unknown'}\n", { flag: 'a' }) if existsSync(_dir)
+            lastTask[slot] = base(msg.taskPath)
+            logError "#{base(msg.taskPath)}: #{msg.error or 'unknown'}"
             inflight[slot] = null
             live--
             died++
             info[slot]++
-            draw({ live, done, died, jobs, workers, info }) unless quiet
+            redraw()
             dispatchNext(w, slot)
 
       w.on 'error', (err) ->
-        writeFileSync('.swarm/errors.log', "worker #{slot} error: #{err.message}\n", { flag: 'a' }) if existsSync(_dir)
+        logError "worker #{slot} error: #{err.message}"
 
       w.on 'exit', (code) ->
-        writeFileSync('.swarm/errors.log', "worker #{slot} exited with code #{code}, inflight: #{inflight[slot]}\n", { flag: 'a' }) if existsSync(_dir)
+        logError "worker #{slot} exited with code #{code}, inflight: #{inflight[slot]}"
         # if worker crashed mid-task, count the in-flight task as died
         if inflight[slot]
           move(inflight[slot], _died)
@@ -323,7 +308,7 @@ export swarm = (opts = {}) ->
           live--
           died++
           info[slot]++
-          draw({ live, done, died, jobs, workers, info }) unless quiet
+          redraw()
         # respawn if there's still work to do
         if done + died < jobs
           spawnWorker(slot)
@@ -331,20 +316,16 @@ export swarm = (opts = {}) ->
           checkDone()
 
     # spawn worker pool
-    count = Math.min(workers, jobs)
-    for slot in [1..count]
-      spawnWorker(slot)
+    spawnWorker(slot) for slot in [1..Math.min(workers, jobs)]
 
   # summary
   secs = (Date.now() - startTime) / 1000
   if quiet
-    p "#{secs.toFixed(2)} secs for #{jobs} jobs by #{workers} workers" + (if secs > 0 then " @ #{(jobs / secs).toFixed(2)} jobs/sec" else "")
+    p "#{secs.toFixed(2)} secs for #{jobs} jobs by #{workers} workers" + (" @ #{(jobs / secs).toFixed(2)} jobs/sec" if secs > 0 else "")
   else
-    for slot of info
-      s = parseInt(slot)
-      n = info[slot]
-      rate = if secs > 0 then (n / secs).toFixed(1) else '—'
-      write go(s + 1, len + 5) + fgw + bg("5383ec") + char.repeat(wide) + fg() + bg() + " │ #{n} jobs @ #{rate}/sec" + clear(true)
+    for slot, n of info
+      rate = (n / secs).toFixed(1) if secs > 0 else '-'
+      write go(parseInt(slot) + 1, len + 5) + fgw + bg("5383ec") + char.repeat(wide) + fg() + bg() + " │ #{n} jobs @ #{rate}/sec" + clear(true)
     draw({ live: 0, done, died, jobs, workers, info })
     cursor(true)
     write go(workers + 5, 1)
@@ -365,30 +346,23 @@ _flagsAlone     = %w[-r --reset -s --safe -q --quiet -h --help -v --version]
 
 findArg = (args, short, long) ->
   for arg, i in args
-    if arg is short or arg is long
-      return args[i + 1] if args[i + 1]?
-    if arg.startsWith("#{long}=")
-      return arg.split('=')[1]
-    if arg.startsWith("#{short}=")
-      return arg.split('=')[1]
+    return args[i + 1] if arg in [short, long] and args[i + 1]?
+    return arg.split('=')[1] if arg.startsWith("#{short}=") or arg.startsWith("#{long}=")
   null
 
-# return process.argv with swarm's flags stripped — only your args remain
+# return process.argv with swarm's flags stripped: only your args remain
 export args = ->
   result = []
-  list = process.argv.slice(2)
   skip = false
-  for arg in list
+  for arg in process.argv.slice(2)
     if skip
       skip = false
       continue
     if arg in _flagsWithValue
       skip = true
       continue
-    if arg in _flagsAlone
-      continue
-    if _flagsWithValue.some((f) -> arg.startsWith("#{f}="))
-      continue
+    continue if arg in _flagsAlone
+    continue if _flagsWithValue.some (f) -> arg.startsWith("#{f}=")
     result.push(arg)
   result
 
@@ -398,10 +372,10 @@ export args = ->
 #
 # swarm.rip is itself the bin: `swarm <script.rip> [options]` runs the
 # job script exactly as `rip <script.rip> [options]` would. The argv is
-# rewritten first so the script observes itself as the program — swarm()
+# rewritten first so the script observes itself as the program: swarm()
 # and args() read the script path and flags from there, and both entries
 # see the identical shape. (In a worker thread this file is the ENTRY,
-# so import.meta.main is true there too — hence the isMainThread guard.)
+# so import.meta.main is true there too; hence the isMainThread guard.)
 
 if import.meta.main and isMainThread
   VERSION = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf-8')).version
@@ -414,7 +388,7 @@ if import.meta.main and isMainThread
 
   if script in ['-h', '--help']
     p """
-      swarm #{VERSION} — parallel job runner with worker threads
+      swarm #{VERSION} - parallel job runner with worker threads
 
       usage: swarm <script.rip> [options]
 
@@ -433,13 +407,11 @@ if import.meta.main and isMainThread
       """
     exit(0)
 
-  unless script
-    console.error 'usage: swarm <script.rip> [options]'
-    exit(1)
+  abort 'usage: swarm <script.rip> [options]' unless script
+
   path = resolve(script)
-  unless existsSync(path)
-    console.error "error: no such script: #{script}"
-    exit(1)
+  abort "error: no such script: #{script}" unless existsSync(path)
+
   process.argv = [process.argv[0], path, ...process.argv.slice(3)]
   import!(pathToFileURL(path).href)
 
@@ -448,14 +420,14 @@ if import.meta.main and isMainThread
 # ==============================================================================
 #
 # Each worker thread runs THIS file as its entry: it imports the user's
-# job script — whose swarm() call registers perform in this same module
-# instance — then processes tasks over IPC until shutdown.
+# job script (whose swarm() call registers perform in this same module
+# instance), then processes tasks over IPC until shutdown.
 
 if not isMainThread and workerData?.scriptPath?
   perform = null
   try
     import!(pathToFileURL(workerData.scriptPath).href)
-    throw new Error('No perform() function provided to swarm()') unless typeof _workerPerform is 'function'
+    raise 'No perform() function provided to swarm()' unless kind(_workerPerform) is 'function'
     perform = _workerPerform
   catch err
     parentPort.postMessage { type: 'error', error: err.message }
@@ -463,11 +435,12 @@ if not isMainThread and workerData?.scriptPath?
   parentPort.postMessage { type: 'ready' }
 
   parentPort.on 'message', (msg) ->
-    if msg.type is 'task'
-      try
-        await perform(msg.taskPath, workerData.context)
-        parentPort.postMessage { type: 'done', taskPath: msg.taskPath }
-      catch err
-        parentPort.postMessage { type: 'failed', taskPath: msg.taskPath, error: err.message }
-    else if msg.type is 'shutdown'
-      exit(0)
+    switch msg.type
+      when 'task'
+        try
+          await perform(msg.taskPath, workerData.context)
+          parentPort.postMessage { type: 'done', taskPath: msg.taskPath }
+        catch err
+          parentPort.postMessage { type: 'failed', taskPath: msg.taskPath, error: err.message }
+      when 'shutdown'
+        exit(0)
