@@ -22,7 +22,7 @@
 # ==============================================================================
 
 import { isMainThread, parentPort, workerData } from 'worker_threads'
-import { existsSync, mkdirSync, readdirSync, renameSync, writeFileSync, rmSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync, rmSync } from 'fs'
 import { join, resolve } from 'path'
 import { pathToFileURL } from 'url'
 import { cpus } from 'os'
@@ -404,7 +404,35 @@ export args = ->
 # so import.meta.main is true there too — hence the isMainThread guard.)
 
 if import.meta.main and isMainThread
+  VERSION = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf-8')).version
+
   script = process.argv[2]
+
+  if script in ['-v', '--version']
+    p "swarm #{VERSION}"
+    exit(0)
+
+  if script in ['-h', '--help']
+    p """
+      swarm #{VERSION} — parallel job runner with worker threads
+
+      usage: swarm <script.rip> [options]
+
+      Options:
+        -w, --workers <n>     Number of workers (default: CPU count)
+        -b, --bar <width>     Progress bar width (default: 20)
+        -c, --char <ch>       Bar character (default: •)
+        -r, --reset           Remove .swarm directory and quit
+        -s, --safe            Set safe: true on the worker context
+        -q, --quiet           No progress display, one summary line
+        -h, --help            Show this help
+        -v, --version         Show version
+
+      The script runs exactly as `rip <script.rip>` would; remaining
+      arguments after swarm's flags are yours (read them via args()).
+      """
+    exit(0)
+
   unless script
     console.error 'usage: swarm <script.rip> [options]'
     exit(1)

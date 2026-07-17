@@ -173,9 +173,12 @@ swarm { setup, perform, workers: 8, bar: 30, char: '█' }
 -r, --reset           Remove .swarm directory and quit
 -s, --safe            Set safe: true on the worker context
 -q, --quiet           No progress display, one summary line
+-h, --help            Show help (bare `swarm` command only)
+-v, --version         Show version (bare `swarm` command only)
 ```
 
-CLI flags override options passed to `swarm()`.
+CLI flags override options passed to `swarm()`. The version is read
+from package.json at runtime, so it can never drift.
 
 ### args()
 
