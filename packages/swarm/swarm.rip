@@ -1,4 +1,5 @@
 #!/usr/bin/env rip
+
 # ==============================================================================
 # @rip-lang/swarm — Parallel job runner with worker threads
 #
@@ -22,7 +23,7 @@
 
 import { isMainThread, parentPort, workerData } from 'worker_threads'
 import { existsSync, mkdirSync, readdirSync, renameSync, writeFileSync, rmSync } from 'fs'
-import { join, resolve, dirname } from 'path'
+import { join, resolve } from 'path'
 import { pathToFileURL } from 'url'
 import { cpus } from 'os'
 

@@ -3,6 +3,7 @@
 # under an isMainThread guard, one task per input line (blank lines
 # skipped, names trimmed), and a perform() that skips work already on
 # disk and writes one output file per task.
+
 import { swarm, args, init, retry, todo } from '@rip-lang/swarm'
 import { isMainThread } from 'worker_threads'
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs'
