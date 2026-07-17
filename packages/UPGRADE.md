@@ -298,6 +298,46 @@ v3 wart of `-w 0` silently meaning CPU-count is pinned as observed.
 
 **Recommendation: KEEP_V4** — done; confidence high.
 
+### 7. `script` — DONE
+
+**Inventory**
+
+| | v3 | v4 (before) | v4 (after) |
+| --- | --- | --- | --- |
+| Main | `script.rip` (500 lines) | byte-identical except one line | unchanged |
+| Tests | `test/basic.rip`, `test/ssh.rip` (live drivers, no assertions) | `test/*.test.js` — 60 Bun-test cases + `ssh-driver.mjs` | root `test.rip` (61 cases) + `fixtures/ssh-driver.rip` |
+| Manifest | 1.0.0, npm metadata | 0.0.0, `"test": "rip test"` | contract (4.0.0, pitch = description, `rip test.rip`) |
+
+**Source:** one judged fix, otherwise untouched. The engine, three
+transports, and helpers were already a clean line-for-line port (the
+one prior v4 delta, `transport.ready!` → `await transport.ready`, is
+correct: `ready` is a Promise property, not a method — the dammit form
+compiled to a `.ready()` CALL, which throws). No annotations to strip.
+The fix: `read()`'s timeout sentinels were the STRINGS `'fast'`/`'slow'`
+while a successful read returns the new buffer contents — also a
+string — so a buffer that spelled exactly `fast` was misread as a
+fast-timeout and fired `:else` spuriously. The sentinels are now the
+symbols `:fast`/`:slow` (collision-proof; internal-only, no API
+change). Both behaviors are pinned, and the collision pin was verified
+to FAIL against the string-sentinel code before landing.
+
+**Tests:** the 60-case Bun suite (itself a faithful conversion of v3's
+live drivers, plus added tcp/connect/dispatch/timeout coverage) ported
+1:1 into root `test.rip` on the shared harness; case parity diffed by
+name (the 61st case is the added description-pitch pin). The ssh flow
+keeps its subprocess seam — Bun.spawn resolves PATH at process start,
+so the stub-ssh conversation runs in `fixtures/ssh-driver.rip` (now
+Rip, was `.mjs`). The v3 warts stay pinned: `enter()` ignores its
+value argument, and single-colon `spawn:` URLs are unknown schemes.
+
+**Frame:** contract package.json and README on the mold (logo header,
+pitch blockquote, server-only Runtime line absorbing the old
+Requirements section, Features, Test section replacing the License
+footer). `export default Script` stays — published-API churn is not
+this pass (same call as time's default).
+
+**Recommendation: KEEP_V4** — done; confidence high.
+
 ## Cross-cutting notes
 
 1. **No `.d.ts` in these packages** — confirmed. Do not bring type files over from v3. Package `exports` point at `.rip` only.
@@ -310,6 +350,6 @@ v3 wart of `-w 0` silently meaning CPU-count is pinned as observed.
 
 1. Accept **KEEP_V4** for all six (no Rip restores; no type reintroduction).
 2. Roll root `test.rip` + `@rip-lang/testing` across the remaining packages (`gate` where security tests fit) — `x12`, `validate`, and `swarm` are done.
-3. Continue the compare→strip→judge loop for remaining packages (`server`, `app`, `db`, `ui`, `script`, `ai`, …) — `print` and `swarm` are done; still excluding `util` and `stamp`, still without bringing types.
+3. Continue the compare→strip→judge loop for remaining packages (`server`, `app`, `db`, `ui`, `ai`, …) — `print`, `swarm`, and `script` are done; still excluding `util` and `stamp`, still without bringing types.
 4. Optional follow-up: gate standalone `GATE_*` bootstrap once v4 serving story is ready.
 5. Typing pass (separate): strip or regenerate types.

@@ -1,16 +1,20 @@
 {
   "name": "@rip-lang/script",
-  "version": "0.0.0",
+  "version": "4.0.0",
   "private": true,
   "type": "module",
+  "description": "Homoiconic interaction engine — the nested data structure IS the program, driving PTY, SSH, and TCP conversations",
   "exports": {
     ".": "./script.rip"
   },
   "scripts": {
-    "test": "rip test"
+    "test": "rip test.rip"
   },
   "files": [
     "script.rip",
     "README.md"
-  ]
+  ],
+  "devDependencies": {
+    "@rip-lang/testing": "workspace:*"
+  }
 }
