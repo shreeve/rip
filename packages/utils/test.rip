@@ -1,0 +1,258 @@
+# ==============================================================================
+# utils tests: package surface + rip-curl (the one utility so far)
+#
+# curl.rip is a pure CLI: every case runs it as a real subprocess through
+# this repository's rip. Live HTTP hits a Bun.serve echo server started
+# for the suite; .auth/.env priority cases use a fresh temp cwd.
+#
+# HTTP cases MUST use Bun.spawn (not spawnSync): spawnSync blocks the
+# event loop, so an in-process Bun.serve cannot answer → deadlock.
+# ==============================================================================
+
+import { test, eq, ok } from '@rip-lang/testing'
+import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
+import { spawnSync } from 'child_process'
+
+pkg     =! JSON.parse(readFileSync(join(import.meta.dir, 'package.json'), 'utf8'))
+curlRip =! join(import.meta.dir, 'curl.rip')
+ripCli  =! join(import.meta.dir, '..', '..', 'bin', 'rip')
+
+# ==[ Echo server ]==
+
+server =! Bun.serve
+  port: 0
+  fetch: (req) ->
+    method  = req.method
+    headers = Object.fromEntries(req.headers.entries())
+    body    = req.text!
+    path = new URL(req.url).pathname
+    if path is '/plain'
+      return new Response('hello plain', { status: 200 })
+    if path is '/json'
+      return new Response(JSON.stringify({ ok: true, n: 1 }), {
+        status: 200
+        headers: { 'content-type': 'application/json' }
+      })
+    new Response(JSON.stringify({ method, path, headers, body }), {
+      status: 200
+      headers: { 'content-type': 'application/json' }
+    })
+
+base =! "http://127.0.0.1:#{server.port}"
+process.on 'exit', -> server.stop()
+
+# ==[ Harness ]==
+
+fresh = -> mkdtempSync join(tmpdir(), 'utils-curl-')
+
+# Async so the in-process echo server can serve while the child runs.
+def run(args, opts = {})
+  cwd = opts.cwd ?? import.meta.dir
+  env = { ...process.env, ...(opts.env ?? {}) }
+  # Drop ambient auth noise so priority pins are deterministic.
+  delete env.token unless opts.env?.token?
+  proc = Bun.spawn [process.execPath, ripCli, curlRip, ...args], {
+    cwd
+    env
+    stdout: 'pipe'
+    stderr: 'pipe'
+    stdin: if opts.input? then 'pipe' else 'ignore'
+  }
+  if opts.input?
+    proc.stdin.write opts.input
+    proc.stdin.end()
+  status = await proc.exited
+  # Split assignments: `new Response(x).text!` trips the compiler.
+  outRes = new Response(proc.stdout)
+  errRes = new Response(proc.stderr)
+  stdout = outRes.text!
+  stderr = errRes.text!
+  { status, stdout, stderr }
+
+# ==[ Package surface ]==
+
+console.log "\nPackage"
+
+test "a multi-bin collection: no library exports", ->
+  eq pkg.exports, undefined
+  eq pkg.bin, { 'rip-curl': './curl.rip' }
+  eq pkg.files, ['curl.rip', 'README.md']
+
+test "no runtime deps; testing harness is the only devDependency", ->
+  for field in ['dependencies', 'peerDependencies', 'optionalDependencies']
+    eq pkg[field], undefined
+  eq pkg.devDependencies, { '@rip-lang/testing': 'workspace:*' }
+
+test "the description is the README pitch, byte for byte", ->
+  readme = readFileSync join(import.meta.dir, 'README.md'), 'utf8'
+  ok readme.includes("> **#{pkg.description}.**")
+
+test "does not claim browser safety (curl reads fs/env/network)", ->
+  eq pkg.rip, undefined
+  source = readFileSync curlRip, 'utf8'
+  ok source.includes("from 'fs'")
+  ok source.includes('fetch!')
+
+test "the rip-curl bin is curl.rip itself, shebang'd and executable", ->
+  source = readFileSync curlRip, 'utf8'
+  ok source.startsWith('#!/usr/bin/env rip\n')
+  ok (statSync(curlRip).mode & 0o111) isnt 0
+
+test "importing curl.rip rejects loudly", ->
+  dir = fresh()
+  guard = join dir, 'guard.rip'
+  writeFileSync guard, [
+    'try'
+    "  await import('#{curlRip}')"
+    "  p 'no-throw'"
+    'catch e'
+    '  p "guarded: #{e.message}"'
+  ].join('\n') + '\n'
+  r = spawnSync process.execPath, [ripCli, guard], { encoding: 'utf8' }
+  ok r.stdout.includes('guarded: @rip-lang/utils/curl is a CLI, not a library')
+
+# ==[ CLI flags ]==
+
+console.log "\nCLI"
+
+test! "-v prints the version from package.json and exits 0", ->
+  r = run! ['-v']
+  eq r.status, 0
+  eq r.stdout, "rip-curl #{pkg.version}\n"
+
+test! "--version matches -v", ->
+  r = run! ['--version']
+  eq r.status, 0
+  eq r.stdout, "rip-curl #{pkg.version}\n"
+
+test! "-h prints usage and exits 0", ->
+  r = run! ['-h']
+  eq r.status, 0
+  ok r.stdout.includes('usage: rip-curl [key=val ...]')
+  ok r.stdout.includes('-v, --version')
+
+test! "empty stdin reports usage and exits 1", ->
+  r = run! [], { input: '' }
+  eq r.status, 1
+  ok r.stderr.includes('Usage: rip-curl')
+
+test! "undefined variable exits 1 with a named error", ->
+  r = run! ["GET #{base}/echo\nX: " + '${missing}']
+  eq r.status, 1
+  ok r.stderr.includes("rip-curl: undefined 'missing'")
+
+test "executing curl.rip directly (the bin) forwards argv and exit status", ->
+  r = spawnSync curlRip, ['-v'], { encoding: 'utf8', env: process.env }
+  eq r.status, 0
+  eq r.stdout, "rip-curl #{pkg.version}\n"
+
+# ==[ Variable resolution ]==
+
+console.log "\nVariables"
+
+test! "CLI key=val interpolates dollar-brace and hash-brace forms", ->
+  r = run! [
+    'token=secret'
+    "GET #{base}/echo\nAuthorization: Bearer " + '${token}' + "\nX-Alt: " + '#{token}'
+  ]
+  eq r.status, 0
+  body = JSON.parse(r.stdout)
+  eq body.headers.authorization, 'Bearer secret'
+  eq body.headers['x-alt'], 'secret'
+
+test! "CLI wins over .auth, .auth wins over .env, .env wins over process.env", ->
+  dir = fresh()
+  writeFileSync join(dir, '.auth'), "token=from-auth\nother=auth-only\n"
+  writeFileSync join(dir, '.env'), "token=from-env\nenvonly=from-env\n"
+  env = { token: 'from-process', processonly: 'from-process' }
+
+  r1 = run! ["GET #{base}/echo\nX: " + '${token}'], { cwd: dir, env }
+  eq JSON.parse(r1.stdout).headers.x, 'from-auth'
+
+  r2 = run! ['token=from-cli', "GET #{base}/echo\nX: " + '${token}'], { cwd: dir, env }
+  eq JSON.parse(r2.stdout).headers.x, 'from-cli'
+
+  r3 = run! ["GET #{base}/echo\nX: " + '${envonly}'], { cwd: dir, env }
+  eq JSON.parse(r3.stdout).headers.x, 'from-env'
+
+  r4 = run! ["GET #{base}/echo\nX: " + '${processonly}'], { cwd: dir, env }
+  eq JSON.parse(r4.stdout).headers.x, 'from-process'
+
+test! ".auth and .env skip comments and blank lines", ->
+  dir = fresh()
+  writeFileSync join(dir, '.auth'), "# comment\n\ntoken=ok\n"
+  r = run! ["GET #{base}/echo\nX: " + '${token}'], { cwd: dir }
+  eq r.status, 0
+  eq JSON.parse(r.stdout).headers.x, 'ok'
+
+# ==[ Request parsing ]==
+
+console.log "\nRequest"
+
+test! "bare URL defaults to GET", ->
+  r = run! ["#{base}/echo"]
+  eq r.status, 0
+  body = JSON.parse(r.stdout)
+  eq body.method, 'GET'
+  eq body.path, '/echo'
+
+test! "body without METHOD defaults to POST", ->
+  r = run! ["#{base}/echo\n\n{\"a\":1}"]
+  eq r.status, 0
+  body = JSON.parse(r.stdout)
+  eq body.method, 'POST'
+  eq body.body, '{"a":1}'
+
+test! "explicit METHOD wins over body default", ->
+  r = run! ["PUT #{base}/echo\n\n{\"a\":1}"]
+  eq r.status, 0
+  body = JSON.parse(r.stdout)
+  eq body.method, 'PUT'
+  eq body.body, '{"a":1}'
+
+test! "headers parse until a blank line or body start", ->
+  r = run! ["""
+    POST #{base}/echo
+    Content-Type: application/json
+    X-Foo: bar
+
+    {"n":2}
+  """]
+  eq r.status, 0
+  body = JSON.parse(r.stdout)
+  eq body.method, 'POST'
+  eq body.headers['content-type'], 'application/json'
+  eq body.headers['x-foo'], 'bar'
+  eq body.body, '{"n":2}'
+
+test! "array body also starts the body section", ->
+  r = run! ["#{base}/echo\n[1,2]"]
+  eq r.status, 0
+  body = JSON.parse(r.stdout)
+  eq body.method, 'POST'
+  eq body.body, '[1,2]'
+
+test! "heredoc/stdin payload works the same as an argument", ->
+  r = run! [], { input: "GET #{base}/echo\nX-Via: stdin\n" }
+  eq r.status, 0
+  body = JSON.parse(r.stdout)
+  eq body.method, 'GET'
+  eq body.headers['x-via'], 'stdin'
+
+# ==[ Response formatting ]==
+
+console.log "\nResponse"
+
+test! "JSON responses are pretty-printed", ->
+  r = run! ["#{base}/json"]
+  eq r.status, 0
+  eq r.stdout, '{\n  "ok": true,\n  "n": 1\n}\n'
+
+test! "plain text responses pass through", ->
+  r = run! ["#{base}/plain"]
+  eq r.status, 0
+  eq r.stdout, 'hello plain\n'
+
+server.stop()
