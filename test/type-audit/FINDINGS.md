@@ -192,3 +192,4 @@ Verified, and gone. **The gate is the record** — each row's constraint is stat
 | 19 | Inline render-block directive lost from the face | `tsface`, audit `directives` |
 | 18 | A directive blinds the whole indented block | `directive-range` |
 | 13 | Single-rooted tsconfig — no per-project resolution | `per-project-tsconfig` |
+| 8 | Auto-import is closure-scoped | `auto-import`, `export-index` |
