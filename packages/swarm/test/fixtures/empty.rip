@@ -1,3 +1,0 @@
-# swarm() with an initialized but empty queue — nothing to do.
-import { swarm, init } from '@rip-lang/swarm'
-swarm { setup: (-> init(); null), perform: -> }

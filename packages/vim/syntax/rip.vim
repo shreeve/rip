@@ -33,17 +33,12 @@ syn region ripInterpBraces  start=/{/ end=/}/ transparent contained contains=TOP
 
 syn region ripInlineJS      start=/`/  end=/`/  oneline
 
-" --- Regular Expressions ----------------------------------------------------
-
-syn region ripHeregex       start=/\/\/\//  end=/\/\/\/[gimsuy]*/  contains=ripInterpolation,ripComment,ripEscape
-syn region ripRegex         matchgroup=ripRegexDelim start=+\%(^\s*\|[=(:,;\[!&|?{]\s*\)\@<=/\%([/*]\)\@!+ skip=+\\/+ end=+/[gimsuy]*+ oneline contains=ripEscape
-
 " --- Numbers ----------------------------------------------------------------
 
 syn match  ripNumber        /\<0x[0-9a-fA-F]\%(_\?[0-9a-fA-F]\)*n\?\>/
 syn match  ripNumber        /\<0o[0-7]\%(_\?[0-7]\)*n\?\>/
 syn match  ripNumber        /\<0b[01]\%(_\?[01]\)*n\?\>/
-syn match  ripNumber        /\<\d[\d_]*\%(\.\d[\d_]*\)\?\%([eE][+-]\?\d\+\)\?n\?\>/
+syn match  ripNumber        /\<\d[0-9_]*\%(\.\d[0-9_]*\)\?\%([eE][+-]\?\d[0-9_]*\)\?n\?\>/
 
 " --- Keywords ---------------------------------------------------------------
 
@@ -56,8 +51,10 @@ syn keyword ripKeyword      import export from default
 syn keyword ripKeyword      delete typeof instanceof new super
 syn keyword ripKeyword      debugger use own extends
 syn keyword ripKeyword      in of by as
-syn keyword ripKeyword      class def enum interface type component render
+syn keyword ripKeyword      class def enum interface type schema
+syn keyword ripKeyword      component render slot offer accept
 syn keyword ripKeyword      and or not is isnt
+syn keyword ripKeyword      it
 
 " --- Booleans ---------------------------------------------------------------
 
@@ -76,9 +73,21 @@ syn keyword ripType         number string boolean void any never unknown object 
 
 syn keyword ripBuiltin      console process require module exports
 syn keyword ripBuiltin      setTimeout setInterval clearTimeout clearInterval
+syn keyword ripBuiltin      requestAnimationFrame cancelAnimationFrame
 syn keyword ripBuiltin      Promise Array Object String Number Boolean
-syn keyword ripBuiltin      Math Date RegExp Error JSON Map Set
-syn keyword ripBuiltin      Symbol Buffer Bun
+syn keyword ripBuiltin      Math Date RegExp Error TypeError RangeError
+syn keyword ripBuiltin      JSON Map Set WeakMap WeakSet
+syn keyword ripBuiltin      Symbol Proxy Reflect Buffer Bun
+syn keyword ripBuiltin      document window globalThis navigator
+syn keyword ripBuiltin      fetch URL URLSearchParams FormData
+syn keyword ripBuiltin      Event CustomEvent EventSource
+syn keyword ripBuiltin      HTMLElement Node NodeList Element
+syn keyword ripBuiltin      DocumentFragment MutationObserver ResizeObserver
+syn keyword ripBuiltin      IntersectionObserver
+
+" Rip stdlib (injected globals)
+syn keyword ripBuiltin      p pp pj pr abort assert exit kind noop
+syn keyword ripBuiltin      raise rand sleep todo warn zip
 
 " --- Instance Variables -----------------------------------------------------
 
@@ -136,6 +145,15 @@ syn region ripWordArray     matchgroup=ripWordDelim start=/%w{/  end=/}/
 syn region ripWordArray     matchgroup=ripWordDelim start=/%w</  end=/>/
 syn region ripWordArray     matchgroup=ripWordDelim start=/%w\z([^ \t[:alnum:]([{<]\)/ end=/\z1/
 
+" --- Regular Expressions ----------------------------------------------------
+"
+" Defined AFTER the operator matches: at the same start column the
+" last-defined item wins, so /// must outrank the // operator and
+" /regex/ must outrank the / operator.
+
+syn region ripHeregex       start=/\/\/\//  end=/\/\/\/[gimsuy]*/  contains=ripInterpolation,ripComment,ripEscape
+syn region ripRegex         matchgroup=ripRegexDelim start=+\%(^\s*\|[=(:,;\[!&|?{]\s*\)\@<=/\%([/*]\)\@!+ skip=+\\/+ end=+/[gimsuy]*+ oneline contains=ripEscape
+
 " --- Object Keys ------------------------------------------------------------
 
 " Object keys: name: or name?: (but not :: or :=); compound chains
@@ -150,8 +168,9 @@ syn match  ripFuncCall      /\<[a-zA-Z_$][a-zA-Z0-9_$]*\ze\s*(/
 " Method calls: .name(
 syn match  ripMethodCall    /\.\zs[a-zA-Z_$][a-zA-Z0-9_$]*\ze\s*(/
 
-" Dammit calls: name! (await shorthand)
-syn match  ripDammitCall    /\<[a-zA-Z_$][a-zA-Z0-9_$]*\ze!/
+" Dammit calls: name! (await shorthand) — but a!=b is inequality, and
+" a!== is strict inequality, so ! followed by = does not count
+syn match  ripDammitCall    /\<[a-zA-Z_$][a-zA-Z0-9_$]*\ze!=\@!/
 
 " --- Assignments ------------------------------------------------------------
 

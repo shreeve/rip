@@ -1,0 +1,92 @@
+# Browser interaction primitives — shared types and cross-cutting helpers.
+#
+# These primitives are the WAI-ARIA keyboard and popup-lifecycle patterns
+# the headless widgets consume. In v3 they lived on `globalThis.ARIA`; here
+# they are ordinary typed named exports of `@rip-lang/ui/browser`. Nothing
+# is published on a global.
+#
+# The pure logic (key->action mapping, roving index math, dismissal
+# predicates, positioning math, focus-trap decisions, scroll-lock
+# bookkeeping) is factored into its own exports so it is unit-testable
+# without a real DOM. The DOM-bound wiring reaches `document`/`window`
+# directly, the same way it did in v3, and is exercised in a browser
+# harness.
+#
+# ARIA APG: https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/
+
+# An element (or absent one) a primitive operates on.
+export type AriaEl = HTMLElement | null | undefined
+
+# Either an element, or a lazy getter that resolves one on demand. Widgets
+# pass getters (`=> @listRef`) because a ref is null until the node mounts.
+export type AriaElRef = AriaEl | (() => AriaEl)
+
+# Navigation axis for `rovingNav`.
+export type AriaOrientation = 'vertical' | 'horizontal' | 'both'
+
+# A cleanup function returned by the lifecycle primitives.
+export type Disposer = () => void
+
+# The semantic navigation actions `navAction` resolves a key into.
+export type NavAction =
+  'next' | 'prev' | 'first' | 'last' | 'select' | 'dismiss' | 'char'
+
+# Keyboard handler map for listNav/rovingNav -- every key is optional; a
+# handler only runs if provided. `char` receives the printable key for
+# typeahead.
+export type AriaNavHandlers =
+  next?: () => void
+  prev?: () => void
+  first?: () => void
+  last?: () => void
+  select?: () => void
+  dismiss?: () => void
+  tab?: () => void
+  char?: (key: string) => void
+
+export type AriaPositionOptions =
+  placement?: string
+  offset?: number
+  matchWidth?: boolean
+
+# Per-component reopen suppression handle returned by `popupGuard`.
+export type AriaPopupGuard =
+  block: (ms?: number) => void
+  canOpen: () => boolean
+
+# A plain rectangle -- the fields the positioning math reads off a
+# `getBoundingClientRect()` result.
+export type Rect =
+  top: number
+  right: number
+  bottom: number
+  left: number
+  width: number
+  height: number
+
+# The viewport bounds the positioning math flips against.
+export type Viewport =
+  width: number
+  height: number
+
+# getRef -- resolve an `AriaElRef` to a concrete element (or absent one).
+export def getRef(x: AriaElRef): AriaEl
+  if typeof x is 'function' then x() else x
+
+# combine -- fold N disposers into one, invoked in registration order. Use
+# this in a `~>` effect when more than one primitive is wired, so the
+# effect's implicit-return cleanup disposes ALL of them; without it only
+# the last primitive's disposer is returned and the earlier ones leak
+# their listeners on every re-run.
+#
+#   ~>
+#     return combine(
+#       bindPopover  open, ...
+#       popupDismiss open, ...
+#     )
+export def combine(...disposers: Array<Disposer | null | undefined>): Disposer
+  ->
+    for d in disposers
+      try d?()
+      catch then null
+    return

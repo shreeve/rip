@@ -7,7 +7,7 @@ import { describe, expect, test } from 'bun:test';
 import { compose, createContext, createMatcher, openapi, reading, withInput } from '@rip-lang/server';
 // The same registry instance input.rip consults — sibling packages
 // resolve by direct path through the Rip loader.
-import { registerValidator } from '../../validate/registry.rip';
+import { registerValidator } from '../../validate/validate.rip';
 import { CreateOrder, Rename } from './fixtures/schemas.rip';
 
 const request = (path = '/x', opts = {}) => new Request(`http://test.local${path}`, opts);

@@ -1,3 +1,0 @@
-# swarm() without a perform function — a usage error.
-import { swarm } from '@rip-lang/swarm'
-swarm {}

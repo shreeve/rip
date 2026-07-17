@@ -513,16 +513,20 @@ code ":shape + @mixin is allowed (field sharing)", '''
 # Remaining named-coercer coverage
 # ==============================================================================
 
+# Fixture coercer names are battery-local (id9, ssn9, state2, …): the
+# plain vocabulary names (id, ssn, money, …) belong to @rip-lang/validate,
+# which registers them into this same process table when browser-graph
+# tests evaluate its entry.
 test '~:name resolves through the registry; output validates and constrains', '''
-    registerCoercer "id", (v) ->
+    registerCoercer "id9", (v) ->
       m = v.match(/^([1-9]\\d{0,14})$/)
       if m then parseInt(m[1]) else null
-    registerCoercer "ssn", (v) ->
+    registerCoercer "ssn9", (v) ->
       m = v.match(/^(\\d{3})-?(\\d{2})-?(\\d{4})$/)
       if m then m[1] + m[2] + m[3] else null
     X = schema
-      chart! ~:id, 1..99999
-      ssn?   ~:ssn
+      chart! ~:id9, 1..99999
+      ssn?   ~:ssn9
     a = X.parse {chart: "42", ssn: "123-45-6789"}
     r1 = X.safe {chart: "0"}
     r2 = X.safe {chart: "999999999"}

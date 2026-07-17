@@ -1,0 +1,22 @@
+# First-attempt failures: tasks 3 and 7 throw the first time they are
+# tried (a marker file records the attempt) and succeed on retry — the
+# full died/ -> retry() -> done/ recovery loop.
+
+import { swarm, init, retry, todo } from '@rip-lang/swarm'
+import { existsSync, writeFileSync } from 'fs'
+
+setup = ->
+  unless retry()
+    init()
+    todo i for i in [1..10]
+  null
+
+perform = (task, ctx) ->
+  name = task.split('/').pop()
+  return unless name in ['3', '7']
+  marker = "attempted-#{name}"
+  unless existsSync(marker)
+    writeFileSync marker, ''
+    raise "first attempt #{name}"
+
+swarm { setup, perform }

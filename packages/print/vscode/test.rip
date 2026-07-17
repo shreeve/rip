@@ -1,0 +1,159 @@
+# ==============================================================================
+# vscode extension tests: manifest, grammar sync gate, printer core
+#
+# The extension host (src/extension.js) needs a live VS Code API and is
+# pinned by source shape only. Everything else is pure Node and is tested
+# directly: printer.js (highlighting, discovery, HTML generation) and the
+# generated CJS grammar, which is byte-gated against sync.rip so it can
+# never drift from packages/highlight.
+# ==============================================================================
+
+import { test, eq, ok } from '@rip-lang/testing'
+import { generate } from './sync.rip'
+import { generatePrintHtml, generateMarkdownHtml, walkDir, getLang } from './src/printer.js'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
+
+pkg =! JSON.parse(readFileSync(join(import.meta.dir, 'package.json'), 'utf8'))
+
+# ==[ Manifest ]==
+
+console.log "\nManifest"
+
+test "identity, entry, and engine pins", ->
+  eq pkg.name, 'print'
+  eq pkg.publisher, 'rip-lang'
+  eq pkg.displayName, 'Rip Print'
+  eq pkg.main, './src/extension.js'
+  eq pkg.engines, { vscode: '^1.80.0' }
+  eq pkg.repository, { type: 'git', url: 'https://github.com/shreeve/rip.git', directory: 'packages/print/vscode' }
+
+test "highlight.js is an exact pin and the only dependency", ->
+  eq pkg.dependencies, { 'highlight.js': '11.11.1' }
+  eq pkg.devDependencies, undefined
+
+test "both commands are contributed with their three menu placements", ->
+  eq pkg.contributes.commands.map((c) -> c.command), ['rip-print.printFile', 'rip-print.printFolder']
+  eq pkg.contributes.menus['explorer/context'].map((m) -> m.command), ['rip-print.printFolder', 'rip-print.printFile']
+  eq pkg.contributes.menus['editor/context'].map((m) -> m.command), ['rip-print.printFile']
+
+test ".vscodeignore ships src, lib, icon, and the highlight.js essentials", ->
+  ignore = readFileSync join(import.meta.dir, '.vscodeignore'), 'utf8'
+  for keep in ['!package.json', '!src/**', '!lib/**', '!icon.png', '!README.md', '!node_modules/highlight.js/lib/**', '!node_modules/highlight.js/styles/*.css']
+    ok ignore.includes(keep), "missing #{keep}"
+
+# ==[ Grammar sync gate ]==
+
+console.log "\nGrammar"
+
+test "lib/hljs-rip.js is byte-identical to sync.rip's output", ->
+  shipped = readFileSync join(import.meta.dir, 'lib', 'hljs-rip.js'), 'utf8'
+  eq shipped is generate(), true
+
+test "extension code loads the generated CJS copy, never the ESM grammar", ->
+  printer = readFileSync join(import.meta.dir, 'src', 'printer.js'), 'utf8'
+  ok printer.includes("require('../lib/hljs-rip')")
+  ok not printer.includes('packages/highlight')
+
+test "extension.js registers exactly the contributed commands", ->
+  source = readFileSync join(import.meta.dir, 'src', 'extension.js'), 'utf8'
+  ok source.includes("registerCommand('rip-print.printFile'")
+  ok source.includes("registerCommand('rip-print.printFolder'")
+
+# ==[ Language detection ]==
+
+console.log "\nLanguage detection"
+
+test "extensions and special filenames map to hljs languages", ->
+  eq getLang('app.rip'), 'rip'
+  eq getLang('x.tsx'), 'typescript'
+  eq getLang('x.jsx'), 'javascript'
+  eq getLang('Makefile'), 'makefile'
+  eq getLang('Dockerfile'), 'dockerfile'
+  eq getLang('bunfig.toml'), 'toml'
+  eq getLang('.zshrc'), 'bash'
+  eq getLang('data.xyzzy'), 'plaintext'
+
+# ==[ File discovery ]==
+
+console.log "\nFile discovery"
+
+test "walkDir skips dotfiles, skip-dirs, and binary extensions; sorted result", ->
+  dir = mkdtempSync join(tmpdir(), 'print-ext-')
+  write = (rel) ->
+    file = join dir, rel
+    mkdirSync join(file, '..'), { recursive: true }
+    writeFileSync file, 'x'
+  write 'src/keep.rb'
+  write 'src/Makefile'
+  write 'src/skip.png'
+  write 'src/skip.lock'
+  write 'src/.dotfile'
+  write 'src/node_modules/nope.js'
+  write 'src/dist/nope.js'
+  eq walkDir(join(dir, 'src')), ['Makefile', 'keep.rb']
+
+# ==[ HTML generation ]==
+
+console.log "\nHTML generation"
+
+RIP_SRC =! 'tags = %w[alpha beta]\nkind = :friendly\ndef greet(name)\n  "hi #{name}"\n'
+
+test "two files: TOC, headers, nav, line numbers, theme switcher, print button", ->
+  html = generatePrintHtml [
+    { file: 'hello.rip', code: RIP_SRC, mtime: new Date('2026-01-02T15:04:00') }
+    { file: 'util.js', code: 'export const add = (a, b) => a + b;\n' }
+  ]
+  ok html.includes('<div class="toc">')
+  ok html.includes('<h2>Files (2)</h2>')
+  ok html.includes('<div class="file-header" id="hello.rip">')
+  ok html.includes('[rip] on Jan 2, 2026 at 3:04 pm')
+  ok html.includes('<span class="nav"><a href="#util.js">prev</a> <a href="#util.js">next</a> <a href="#top">&uarr; top</a></span>')
+  ok html.includes('<span class="line-num first">   1</span>')
+  eq html.match(/<option value="/g).length, 14
+  ok html.includes('id="print-btn"')
+  ok html.includes(':root { --bg: #ffffff;')
+
+test "dark mode flips the palette and default theme", ->
+  html = generatePrintHtml [{ file: 'a.js', code: 'let x = 1;\n' }], { dark: true }
+  ok html.includes(':root { --bg: #0d1117;')
+  ok html.includes("<option value=\"github-dark\" selected>")
+
+test "a single file gets no TOC and a top-only nav", ->
+  html = generatePrintHtml [{ file: 'a.js', code: 'let x = 1;\n' }]
+  ok not html.includes('<div class="toc">')
+  ok html.includes('<span class="nav"><a href="#top">&uarr; top</a></span>')
+
+test "bypass strips the leading comment block", ->
+  html = generatePrintHtml [{ file: 'a.rip', code: '# top comment\n\nx = 1\n' }], { bypass: true }
+  ok not html.includes('top comment')
+
+test "the shared grammar highlights word arrays and symbol literals", ->
+  html = generatePrintHtml [{ file: 'gram.rip', code: RIP_SRC }]
+  ok html.includes('<span class="hljs-string">%w[alpha beta]</span>')
+  ok html.includes('<span class="hljs-symbol">:friendly</span>')
+  ok html.includes('<span class="hljs-keyword">def</span>')
+
+test '<script type="text/rip"> inside HTML re-highlights as Rip', ->
+  page = '<html>\n<body>\n<script type="text/rip">\ndef greet(name)\n  "hi #{name}"\n</script>\n</body>\n</html>\n'
+  html = generatePrintHtml [{ file: 'page.html', code: page }]
+  ok html.includes('&quot;text/rip&quot;')
+  ok html.includes('class="language-rip"')
+
+# ==[ Markdown mode ]==
+
+console.log "\nMarkdown mode"
+
+test "renders a markdown document with the static.rip styling", ->
+  html = generateMarkdownHtml 'notes.md', '# Title\n\nSome *markdown* with `code`.\n'
+  ok html.includes('<title>notes.md</title>')
+  ok html.includes('<body><h1>Title</h1>')
+  ok html.includes('<p>Some <em>markdown</em> with <code>code</code>.</p>')
+  ok html.includes(':root { --bg: #fff;')
+  ok html.includes('@media (prefers-color-scheme: dark)')
+
+test "dark mode force-darkens and drops the media query", ->
+  html = generateMarkdownHtml 'notes.md', '# T\n', { dark: true }
+  ok html.includes(':root { --bg: #0a0a0c;')
+  ok not html.includes('@media (prefers-color-scheme: dark)')

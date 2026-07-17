@@ -1,14 +1,17 @@
-# @rip-lang/script
+<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
 
-Homoiconic interaction engine — automate stateful conversations with
-remote systems using nested data structures.
+# Rip Script - @rip-lang/script
+
+> **Homoiconic interaction engine — the nested data structure IS the program, driving PTY, SSH, and TCP conversations.**
 
 Rip Script turns arrays of patterns and responses into fully automated
 interactive sessions. It connects to a system via PTY, SSH, or TCP, then
 walks a nested data structure — matching output, sending input,
-branching on patterns, and recursing into sub-scripts. The data
-structure IS the program. Zero dependencies; server-side only (it
-spawns PTYs and opens sockets).
+branching on patterns, and recursing into sub-scripts.
+
+**Runtime:** not browser-safe — it spawns PTYs via `Bun.Terminal`
+(Bun 1.3.5+) and opens sockets via `Bun.connect`; SSH sessions exec the
+`ssh` binary on PATH. One `.rip` file.
 
 ## Quick Start
 
@@ -24,6 +27,15 @@ result = chat! [
 
 chat.disconnect!
 ```
+
+## Features
+
+- **Type-dispatching interpreter** — strings expect/send, regexes capture, objects/Maps branch, arrays nest, functions inject behavior
+- **Three transports** — PTY spawn (`Bun.Terminal`), SSH (your `~/.ssh/config`, keys, and agent), raw TCP
+- **Trace mode** — dry-run any script without connecting
+- **Control-flow symbols** — `:redo`, `:skip`, `:else`, `:this`, `:pure`
+- **Session hooks** — `onSend`, `onRecv`, `onMatch` observe the conversation
+- **Zero dependencies** — one file, nothing to install but the package
 
 ## What It Does
 
@@ -411,11 +423,15 @@ The `chat!` callable is an async function with utility methods attached.
 `Script.ssh!` et al. create a transport, wrap it in an engine, and return
 the callable — so the variable name itself becomes the verb.
 
-## Requirements
+## Test
 
-- **Bun** 1.3.5+ (for native PTY support via `Bun.Terminal`)
-- **ssh** binary on PATH (for SSH connections)
+```bash
+bun run test
+```
 
-## License
-
-MIT
+The suite pins the helper functions, control symbols, trace-mode
+transcripts, and the chat API, then drives real conversations: bash
+under a PTY (expect/send, captures, multiplexers, conditionals,
+sub-scripts, hooks, timeouts), a raw TCP login dance against a local
+listener, and the SSH flow through a stub `ssh` on PATH — including the
+`:pure` raw-escape send and `ssh://` URL parsing.

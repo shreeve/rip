@@ -1,0 +1,58 @@
+# Popup dismissal -- outside-click and scroll dismissal, plus the pointer
+# reopen guard.
+
+import { getRef } from './core.rip'
+
+# outsideElements -- true when `target` is contained by none of `els`. Pure
+# predicate behind `popupDismiss`'s outside-click test; a null/absent
+# element in the list simply never contains the target.
+export def outsideElements(target: any, els: any[]): boolean
+  not els.some (el) -> el?.contains?(target)
+
+# popupDismiss -- dismiss a popup on an outside mousedown, and reposition
+# (or close) on scroll.
+#
+# open:  reactive boolean
+# popup: element or lazy getter
+# close: called to dismiss
+# els:   extra elements (or getters) that count as "inside" (e.g. trigger)
+# repos: on scroll, if given it is called to reposition; otherwise close()
+#
+# Idempotent by design: a widget re-invokes this on every `open` change, so
+# the first thing each call does is tear down any listeners a prior call
+# stored on the popup element, then conditionally re-attach. This plugs the
+# two leak vectors from v3: (1) a `~>` effect compiles its implicit-return
+# cleanup to void, dropping the returned disposer, and (2) a stale
+# open=true pair would otherwise survive an open->false->true cycle.
+export def popupDismiss(open: boolean, popup: any, close: () => void, els: any[] = [], repos: (() => void) | null = null): any
+  pop: any = getRef(popup)
+  if pop and pop.__ariaPopupDismiss
+    pop.__ariaPopupDismiss()
+    pop.__ariaPopupDismiss = null
+  return unless open and pop
+  onDown = (e) -> close() if outsideElements(e.target, [pop, ...els.map(getRef)])
+  onScroll = (e) ->
+    return if pop?.contains(e.target)
+    if repos then repos() else close()
+  document.addEventListener 'mousedown', onDown
+  window.addEventListener 'scroll', onScroll, true
+  cleanup = ->
+    document.removeEventListener 'mousedown', onDown
+    window.removeEventListener 'scroll', onScroll, true
+    return
+  pop.__ariaPopupDismiss = cleanup
+  cleanup
+
+# popupGuard -- per-component reopen suppression for pointer-driven closes.
+# The same gesture that closes a popup can refocus/reclick its trigger and
+# reopen it on the tail of the sequence; `block()` opens a short window in
+# which `canOpen()` reports false. Pure (time-based); no DOM.
+export def popupGuard(delay: number = 250): any
+  blockedUntil = 0
+  {
+    block: (ms: number = delay) ->
+      blockedUntil = Date.now() + ms
+      return
+    canOpen: ->
+      Date.now() >= blockedUntil
+  }

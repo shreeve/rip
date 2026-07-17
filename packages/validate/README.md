@@ -1,25 +1,63 @@
-# @rip-lang/validate
+<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
 
-The validation and normalization vocabulary for Rip.
+# Rip Validate - @rip-lang/validate
 
-One registry of pure, synchronous normalizers. Every validator takes a
+> **The validation and normalization vocabulary — 37 pure US-English normalizers, one registry, doubling as ~:name schema coercers.**
+
+One registry of pure, synchronous normalizers: every validator takes a
 value and returns its normalized form, or `null` on miss. The functions
 are plain string/regex/arithmetic — no host APIs — so the same
-vocabulary runs in the browser and on the server. The vocabulary is
-US-English: phones are NANP, `zip`/`state` are US-shaped, and
-name/address casing follows US conventions.
+vocabulary runs in the browser and on the server. Importing the package
+also registers every validator as a `~:name` schema coercer, so
+`amount! ~:money` works with no further setup, and `registerValidator`
+extends both vocabularies at once. US-English throughout: phones are
+NANP, `zip`/`state` are US-shaped, name/address casing follows US
+conventions.
+
+**Runtime:** browser-safe (`rip.browser: true`). One `.rip` file; its
+only import is the schema runtime, which the browser bundler bridges to
+the page's single copy.
+
+## Quick Start
+
+```bash
+bun add @rip-lang/validate
+```
 
 ```coffee
 import { check, registerValidator } from '@rip-lang/validate'
 
-check '2024-02-29', 'date'      # '2024-02-29' — calendar-true, leap years included
-check '$1,292.22', 'money'      # 129222 — dollars in, integer cents out
+check '2024-02-29', 'date'       # '2024-02-29' — calendar-true, leap years included
+check '$1,292.22', 'money'       # 129222 — dollars in, integer cents out
 check 'FOO@Example.COM', 'email' # 'foo@example.com'
 
+# The same names work as schema coercers, no bridge import:
+Order = schema
+  total! ~:money
+  placed! ~:date
+
+# One registration extends both vocabularies
 registerValidator 'even', (v) ->
   n = parseInt(v, 10)
   if Number.isInteger(n) and n % 2 is 0 then n else null
 ```
+
+## Features
+
+- **37 built-in normalizers** across numbers, money, strings,
+  names/addresses, dates, booleans, identity, network, and structured
+  data
+- **Calendar-true dates** — pure calendar math with leap years; an
+  impossible date can never normalize into a neighboring real one
+- **Money as integer cents** — dollars in, cents out, half-up
+  (`money`) or half-to-even (`money_even`) at the third fractional
+  digit
+- **One import, both vocabularies** — the same table powers `check()`
+  and `~:name` schema coercion; collisions reject loudly at the site
+- **Loud registry** — duplicate names, non-functions, and async
+  functions reject; `check` on an unknown type throws
+- **Raw set** — `array` / `hash` / `json` receive values untouched;
+  everything else gets the string form
 
 ## The vocabulary (37 names)
 
@@ -36,65 +74,43 @@ registerValidator 'even', (v) ->
 
 Contracts worth knowing:
 
-- `money`/`money_even` take **dollars** and return **integer cents**
-  (half-up / half-to-even, computed on the magnitude, so ties round
-  away from zero); commas must group thousands (`1,00` misses);
+- `money`/`money_even` take **dollars** and return **integer cents**;
   `cents` takes a value already in cents; `decimal` is a lossless
-  arbitrary-scale string.
-- Blank input is not a miss for the string family: `string`, `text`,
-  `name`, `address`, and `phone` normalize `''` to `''`.
-- `date` validity comes from the written components — pure calendar
-  math, leap years included, no `Date` construction — and normalizes to
-  `YYYY-MM-DD`.
-- `array`, `hash`, and `json` are the raw set: they receive the value
-  untouched. Every other validator receives its string form.
-- Identical inputs validate identically, always — validators hold no
-  state.
+  arbitrary-scale **string**
+- `date` requires a real calendar date and always answers the
+  canonical `YYYY-MM-DD` spelling
+- `id` is a positive integer with no leading zero, at most 15 digits
+  (safe-integer territory); `ids` parses, dedupes, and sorts a list of
+  them
+- `phone` normalizes NANP numbers to `(nnn) nnn-nnnn` with extension
+  parsing; `+`-international passes through digits-only
+- The two call sites prepare input differently by design: schema
+  coercion trims non-raw wire input before the validator runs, while
+  `check()` passes the string form untouched
 
-## Schema coercion
-
-Importing the bridge registers the whole vocabulary as `~:name` schema
-coercers — one vocabulary serving both call sites — and keeps later
-`registerValidator` additions registered as they arrive:
+## The registry
 
 ```coffee
-import '@rip-lang/validate/coercers'
-
-Order = schema
-  total! ~:money
-  placed! ~:date
+registerValidator name, fn            # string in, normalized-or-null out
+registerValidator name, fn, raw: true # receives values untouched
+getValidator name                     # the function, or undefined
+isRawType name                        # raw flag; unknown names answer false
+validatorNames()                      # sorted list
+check value, type                     # apply by name; unknown type throws
 ```
 
-Raw validators register raw, so their coercers receive values
-untouched. Registering a coercer name twice, or registering an async or
-generator function, rejects loudly — including at the bridge import
-itself when a name is already claimed. The bridge resolves the schema
-runtime inside this repository; the package is private and ships with
-the compiler. The two call sites prepare input
-differently: schema coercion trims non-raw wire input before the
-validator runs; `check()` passes the string form untouched. A coerced
-`false` is a value (`~:bool` accepts falsy tokens), never a miss.
-
-## API
-
-- `check(value, type)` — apply a validator to a value in hand; an
-  unknown type name rejects loudly.
-- `getValidator(name)` — the validator function, or `undefined`.
-- `registerValidator(name, fn, { raw? })` — add to the vocabulary.
-  Registering an existing name, a non-function, or an async function
-  rejects loudly.
-- `validatorNames()` — the sorted vocabulary.
-- `isBlank(obj)` — nullish, `false`, whitespace-only string, empty
-  array, or empty object.
-- `toName(str, ...packs)` — US-English title casing; packs `'name'` and
-  `'address'` enable their rule sets.
-- `toPhone(str)` — NANP normalization with extension parsing; `""` for
-  blank input, `null` on miss.
-- `formatMoney(cents, { symbol?, commas? })` — display formatting for
-  integer cents.
+Registration is atomic across both vocabularies: the `~:name` coercer
+registers first, so a coercer-name collision rejects loudly and leaves
+the validator registry unchanged — the two tables never disagree about
+a name.
 
 ## Test
 
-```sh
+```bash
 bun run test
 ```
+
+The suite pins all 37 validators row by row (152 contracts), the
+registry's rejection paths, the utility functions, and the schema
+bridge — including fresh-process registration and collision loudness as
+real subprocesses.

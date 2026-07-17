@@ -1,0 +1,321 @@
+# ==============================================================================
+# print tests: flags, discovery, served page, markdown mode, shared grammar
+#
+# print.rip is a pure CLI: it highlights the requested files, serves the
+# result ONCE on http://localhost:9111/, opens a browser, and exits after
+# the first request. Every case runs it as a real subprocess through this
+# repository's rip, with a stub open/xdg-open/start first on PATH so no
+# browser ever launches. Expected values were pinned from the running v3
+# implementation (the port's behavioral oracle); the declared divergences
+# are the shared @rip-lang/highlight grammar and the package.json-sourced
+# version.
+# ==============================================================================
+
+import { test, eq, ok } from '@rip-lang/testing'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
+import { spawnSync } from 'child_process'
+
+pkg      =! JSON.parse(readFileSync(join(import.meta.dir, 'package.json'), 'utf8'))
+printRip =! join(import.meta.dir, 'print.rip')
+ripCli   =! join(import.meta.dir, '..', '..', 'bin', 'rip')
+
+# ==[ Harness ]==
+
+# A PATH prefix whose `open` (and friends) are no-ops.
+stubDir =! mkdtempSync join(tmpdir(), 'print-stub-')
+for name in ['open', 'xdg-open', 'start']
+  writeFileSync join(stubDir, name), '#!/bin/sh\nexit 0\n'
+  chmodSync join(stubDir, name), 0o755
+env =! { ...process.env, PATH: "#{stubDir}:#{process.env.PATH}" }
+
+# Fixture tree (byte-for-byte the v3-era test fixtures).
+fixtures =! mkdtempSync join(tmpdir(), 'print-fixtures-')
+
+write = (dir, rel, lines) ->
+  file = join dir, rel
+  mkdirSync join(file, '..'), { recursive: true }
+  writeFileSync file, (if typeof lines is 'string' then lines else lines.join('\n') + '\n')
+  file
+
+write fixtures, 'hello.rip', [
+  '# Top comment block'
+  '# second line'
+  ''
+  'def greet(name)'
+  '  "hello, #{name}!"'
+  ''
+  "console.log greet('world')"
+]
+write fixtures, 'notes.md', [
+  '# Title'
+  ''
+  'Some *markdown* with `code`.'
+  ''
+  '- one'
+  '- two'
+]
+write fixtures, 'page.html', [
+  '<html>'
+  '<body>'
+  '<script type="text/rip">'
+  'def greet(name)'
+  '  "hi #{name}"'
+  '</script>'
+  '</body>'
+  '</html>'
+]
+write fixtures, 'util.js', ['export const add = (a, b) => a + b;']
+
+scratch = -> mkdtempSync join(tmpdir(), 'print-tree-')
+
+# Run the CLI to completion for non-serving paths (-v, -h, errors).
+run = (args, cwd = fixtures) ->
+  spawnSync process.execPath, [ripCli, printRip, ...args], { cwd, env, encoding: 'utf8' }
+
+# Run the CLI, fetch the served page, and wait for the self-exit.
+serve = (args, cwd = fixtures) ->
+  proc = Bun.spawn [process.execPath, ripCli, printRip, ...args], { cwd, env, stdout: 'pipe', stderr: 'pipe' }
+  html = null
+  headers = null
+  for _i in [0...200]
+    try
+      res = fetch! 'http://localhost:9111/'
+      headers = res.headers
+      html = res.text!
+      break
+    catch
+      sleep! 50
+  exitCode = await proc.exited
+  # Split assignments: `new Response(x).text!` trips the compiler (the
+  # dammit operator misparses inside a `new` member chain).
+  outRes = new Response(proc.stdout)
+  errRes = new Response(proc.stderr)
+  stdout = outRes.text!
+  stderr = errRes.text!
+  { html, headers, stdout, stderr, exitCode }
+
+# ==[ Package surface ]==
+
+console.log "\nPackage"
+
+test "a pure CLI: importing the module rejects loudly", ->
+  guard = write scratch(), 'guard.rip', [
+    'try'
+    "  await import('#{printRip}')"
+    "  p 'no-throw'"
+    'catch e'
+    '  p "guarded: #{e.message}"'
+  ]
+  r = spawnSync process.execPath, [ripCli, guard], { env, encoding: 'utf8' }
+  ok r.stdout.includes('guarded: @rip-lang/print is a CLI, not a library')
+
+test "the rip-print bin is print.rip itself, shebang'd and executable", ->
+  eq pkg.bin, { 'rip-print': './print.rip' }
+  source = readFileSync printRip, 'utf8'
+  ok source.startsWith('#!/usr/bin/env rip\n')
+  mode = statSync(printRip).mode
+  ok (mode & 0o111) isnt 0
+
+test "dependency posture: highlight.js and the shared grammar, nothing else", ->
+  eq pkg.dependencies, { '@rip-lang/highlight': 'workspace:*', 'highlight.js': '11.11.1' }
+  eq pkg.devDependencies, { '@rip-lang/testing': 'workspace:*' }
+  for field in ['peerDependencies', 'optionalDependencies']
+    eq pkg[field], undefined
+
+test "does not claim browser safety (it serves and reads the filesystem)", ->
+  eq pkg.rip, undefined
+  eq pkg.files, ['print.rip', 'README.md']
+
+# ==[ CLI flags and error paths ]==
+
+console.log "\nCLI"
+
+test "-v prints the version from package.json and exits 0", ->
+  r = run ['-v']
+  eq r.status, 0
+  eq r.stdout, "rip-print #{pkg.version}\n"
+
+test "--version matches -v", ->
+  r = run ['--version']
+  eq r.stdout, "rip-print #{pkg.version}\n"
+
+test "-h prints usage and exits 0", ->
+  r = run ['-h']
+  eq r.status, 0
+  ok r.stdout.includes('usage: rip-print [options] <paths ...>')
+  ok r.stdout.includes('-b, --bypass     Strip leading comment blocks from files')
+  ok r.stdout.includes('-d, --dark       Use dark theme (default: light)')
+  ok r.stdout.includes('-x <exts>        Comma list of extensions to exclude')
+  ok r.stdout.includes('rip-print -x lock,map src/  # Exclude .lock and .map files')
+
+test "a missing path reports Not found and exits 1", ->
+  r = run ['/nonexistent-path-zzz']
+  eq r.status, 1
+  ok r.stderr.includes('Not found: /nonexistent-path-zzz')
+  ok r.stderr.includes('No files found')
+
+test "executing print.rip directly (the bin) forwards argv and exit status", ->
+  v = spawnSync printRip, ['-v'], { env, encoding: 'utf8' }
+  eq v.status, 0
+  eq v.stdout, "rip-print #{pkg.version}\n"
+  nf = spawnSync printRip, ['/nonexistent-path-zzz'], { cwd: fixtures, env, encoding: 'utf8' }
+  eq nf.status, 1
+  ok nf.stderr.includes('Not found: /nonexistent-path-zzz')
+
+# ==[ Source view ]==
+
+console.log "\nSource view"
+
+test! "two files: TOC, headers, nav, highlighting, light theme", ->
+  { html, headers, stdout, exitCode } = serve! ['hello.rip', 'util.js']
+  eq exitCode, 0
+
+  # Console progress report
+  ok stdout.includes('2 files\n')
+  ok stdout.includes('  hello.rip (8 lines) [rip]\n')
+  ok stdout.includes('  util.js (2 lines) [javascript]\n')
+  ok stdout.includes('Opening browser...')
+
+  # Serving posture
+  eq headers.get('content-type'), 'text/html; charset=utf-8'
+  eq headers.get('cache-control'), 'no-store'
+
+  # Page chrome
+  ok html.includes('<title>Printed on ')
+  ok html.includes('<div class="toc">')
+  ok html.includes('<h2>Files (2)</h2>')
+  ok html.includes('<li><a href="#hello.rip">hello.rip</a> <span class="meta">(8 lines)</span></li>')
+  ok html.includes('<div class="file-header" id="hello.rip">')
+  ok /<span>hello\.rip <span class="meta">\(8 lines\) \[rip\] on /.test(html)
+  ok html.includes('<span class="nav"><a href="#util.js">prev</a> <a href="#util.js">next</a> <a href="#top">&uarr; top</a></span>')
+
+  # Line numbers and highlighting
+  ok html.includes('<span class="line-num first">   1</span>')
+  ok html.includes('<span class="hljs-keyword">def</span>')
+  ok html.includes('<span class="hljs-title function_">greet</span>')
+
+  # Light theme defaults with the full switcher inventory
+  ok html.includes(':root { --bg: #ffffff; --fg: #1f2328; --hdr: #f6f8fa; --brd: #d0d7de; --gut: #f4f4f4; --act: #e0e0e0; }')
+  ok html.includes('value="github" data-dark="false" selected')
+  eq html.match(/<option value="/g).length, 14
+  ok html.includes('<optgroup label="Light">')
+  ok html.includes('<optgroup label="Dark">')
+  ok html.includes("localStorage.getItem('rip-print-theme')")
+  ok html.includes("localStorage.getItem('rip-print-size')")
+
+test! "a single file gets no TOC and a top-only nav", ->
+  { html, stdout } = serve! ['hello.rip']
+  ok stdout.includes('1 file\n')
+  ok not html.includes('<div class="toc">')
+  ok html.includes('<span class="nav"><a href="#top">&uarr; top</a></span>')
+
+test! "-d selects the dark palette and theme", ->
+  { html } = serve! ['-d', 'hello.rip']
+  ok html.includes(':root { --bg: #0d1117; --fg: #e6edf3; --hdr: #161b22; --brd: #30363d; --gut: #161b22; --act: #30363d; }')
+  ok html.includes('value="github-dark" data-dark="true" selected')
+
+test! "-b strips the leading comment block and blank lines", ->
+  { html, stdout } = serve! ['-b', 'hello.rip']
+  ok stdout.includes('  hello.rip (5 lines) [rip]\n')
+  ok not html.includes('Top comment block')
+  ok /line-num first">   1<\/span>  <span class="hljs-function"><span class="hljs-keyword">def<\/span>/.test(html)
+
+test! "tabs become two spaces and CRLF normalizes to LF", ->
+  dir = scratch()
+  write dir, 'tabs.py', 'a\tb\r\nc\n'
+  { html, stdout } = serve! ['tabs.py'], dir
+  # The per-file line always says "lines" (pinned v3 wart family);
+  # "a\tb\r\nc\n" counts as 3 (trailing newline).
+  ok stdout.includes('  tabs.py (3 lines) [python]\n')
+  ok html.includes('a  b')
+  ok not html.includes('\t')
+
+test! "multiple files including .md stay in source view", ->
+  { html, stdout } = serve! ['.']
+  ok stdout.includes('4 files\n')
+  ok not stdout.includes('rendering as markdown')
+  ok stdout.includes('  notes.md (7 lines) [markdown]\n')
+  ok html.includes('<h2>Files (4)</h2>')
+
+test! '<script type="text/rip"> in HTML is re-highlighted as Rip', ->
+  { html, stdout } = serve! ['page.html']
+  ok stdout.includes('  page.html (9 lines) [html]\n')
+  ok html.includes('&quot;text/rip&quot;')
+  ok html.includes('class="language-rip"')
+
+# ==[ File discovery ]==
+
+console.log "\nFile discovery"
+
+test! "walks directories; skips dotfiles, skip-dirs, and binary extensions", ->
+  dir = scratch()
+  write dir, 'src/keep.rb', 'x'
+  write dir, 'src/Makefile', 'x'
+  write dir, 'src/Dockerfile', 'x'
+  write dir, 'src/skip.png', 'x'
+  write dir, 'src/skip.lock', 'x'
+  write dir, 'src/.dotfile', 'x'
+  write dir, 'src/node_modules/nope.js', 'x'
+  write dir, 'src/dist/nope.js', 'x'
+  write dir, 'src/.hidden/nope.js', 'x'
+  { stdout, exitCode } = serve! ['src'], dir
+  eq exitCode, 0
+  # Sorted walk; filename-based language detection; the "(1 lines)"
+  # singular is a pinned v3 wart.
+  ok stdout.includes('3 files\n')
+  ok stdout.includes('  src/Dockerfile (1 lines) [dockerfile]\n')
+  ok stdout.includes('  src/Makefile (1 lines) [makefile]\n')
+  ok stdout.includes('  src/keep.rb (1 lines) [ruby]\n')
+  ok not stdout.includes('skip.')
+  ok not stdout.includes('nope.js')
+  ok not stdout.includes('.dotfile')
+
+test! "-x adds extensions to the exclusion set", ->
+  { stdout } = serve! ['-x', 'js,html', '.']
+  ok stdout.includes('2 files\n')
+  ok stdout.includes('  hello.rip (8 lines) [rip]\n')
+  ok stdout.includes('  notes.md (7 lines) [markdown]\n')
+  ok not stdout.includes('util.js')
+  ok not stdout.includes('page.html')
+
+test! "unknown extensions fall back to plaintext", ->
+  dir = scratch()
+  write dir, 'data.xyzzy', 'plain text\n'
+  { stdout } = serve! ['data.xyzzy'], dir
+  ok stdout.includes('  data.xyzzy (2 lines) [plaintext]\n')
+
+# ==[ Single-markdown mode ]==
+
+console.log "\nSingle-markdown mode"
+
+test! "renders the document instead of its source", ->
+  { html, stdout } = serve! ['notes.md']
+  ok stdout.includes('  notes.md (rendering as markdown)\n')
+  ok stdout.includes('  notes.md (7 lines) [markdown]\n')
+  ok html.includes('<title>notes.md</title>')
+  ok html.includes('<body><h1>Title</h1>')
+  ok html.includes('<p>Some <em>markdown</em> with <code>code</code>.</p>')
+  ok not html.includes('line-num')
+  # Light root variables plus the dark media query
+  ok html.includes(':root { --bg: #fff;')
+  ok html.includes('@media (prefers-color-scheme: dark)')
+
+test! "-d force-darkens the document and drops the media query", ->
+  { html } = serve! ['-d', 'notes.md']
+  ok html.includes(':root { --bg: #0a0a0c;')
+  ok not html.includes('@media (prefers-color-scheme: dark)')
+
+# ==[ Shared Rip grammar (@rip-lang/highlight) ]==
+
+console.log "\nShared grammar"
+
+test! "word arrays and symbol literals highlight", ->
+  # These two behaviors exist only in the shared grammar: the declared
+  # divergence from v3, whose embedded copy left %w[] and :symbols plain.
+  dir = scratch()
+  write dir, 'gram.rip', 'tags = %w[alpha beta]\nkind = :friendly\n'
+  { html } = serve! ['gram.rip'], dir
+  ok html.includes('<span class="hljs-string">%w[alpha beta]</span>')
+  ok html.includes('<span class="hljs-symbol">:friendly</span>')

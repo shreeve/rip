@@ -35,8 +35,9 @@ test('root declares no runtime dependencies; TypeScript lives once in the worksp
   expect(pkg.devDependencies.typescript).toBe('catalog:');
   // The version — the ONE place it is spelled — is an exact pin.
   expect(pkg.catalog?.typescript).toMatch(/^\d/); // no range sigils
-  // A workspace, so one `bun install` at the root provisions every member.
-  expect(Array.isArray(pkg.workspaces)).toBe(true);
+  // The root IS the packages/* workspace root (owner decision: in-tree
+  // @rip-lang/* resolution, hoisted linker).
+  expect(pkg.workspaces).toEqual(['packages/*']);
 });
 
 test('packages/vscode stays inside the dependency budget; every pin is exact or the catalog', () => {

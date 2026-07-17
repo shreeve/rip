@@ -4,16 +4,19 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./browser": "./browser/browser.rip",
     "./email": "./email/email.rip",
+    "./email/components": "./email/components.rip",
     "./email/dom": "./email/dom.rip",
     "./email/compat": "./email/compat.rip",
     "./email/render": "./email/render.rip",
     "./tailwind": "./tailwind/tailwind.rip"
   },
   "scripts": {
-    "test": "bun test --timeout 15000"
+    "test": "rip test"
   },
   "files": [
+    "browser/",
     "email/",
     "shared/",
     "tailwind/",

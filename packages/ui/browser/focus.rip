@@ -1,0 +1,53 @@
+# Focus management and labelling -- trap Tab inside a panel and auto-wire a
+# panel's accessible name/description from its own headings.
+
+
+# The tabbable selector: interactive elements not disabled and not removed
+# from the tab order.
+_FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'
+
+# focusTrapMove -- given the visible focusables (in DOM order), the active
+# element, and whether Shift is held, decide which element to focus next and
+# whether to preventDefault. A wrap only happens at an edge: Tab off the
+# last returns to the first, Shift+Tab off the first goes to the last; every
+# interior move is left to the browser. Pure; no DOM.
+export def focusTrapMove(focusables: any[], active: any, shiftKey: boolean): any
+  return { focus: null, prevent: false } unless focusables.length
+  first = focusables[0]
+  last = focusables[focusables.length - 1]
+  if shiftKey
+    if active is first then { focus: last, prevent: true } else { focus: null, prevent: false }
+  else
+    if active is last then { focus: first, prevent: true } else { focus: null, prevent: false }
+
+# trapFocus -- keep Tab focus cycling inside `panel` (wraps first<->last).
+# Returns a disposer; call it when the panel closes. Only currently visible
+# focusables (non-null offsetParent) participate.
+export def trapFocus(panel: Element): any
+  handler = (e: any) ->
+    return unless e.key is 'Tab'
+    nodes = panel.querySelectorAll(_FOCUSABLE)
+    list = Array.from(nodes).filter (f: any) -> f.offsetParent isnt null
+    { focus, prevent } = focusTrapMove(list, document.activeElement, e.shiftKey)
+    if prevent
+      e.preventDefault()
+      focus?.focus()
+    return
+  panel.addEventListener 'keydown', handler
+  -> panel.removeEventListener 'keydown', handler
+
+# wireAria -- auto-label a panel from its first heading (aria-labelledby)
+# and first paragraph (aria-describedby), assigning ids as needed. A panel
+# that already carries the attribute is left as-is.
+export def wireAria(panel: any, id: string): void
+  return unless panel
+  el: any = panel
+  heading = el.querySelector('h1,h2,h3,h4,h5,h6')
+  if heading
+    heading.id ??= "#{id}-title"
+    el.setAttribute 'aria-labelledby', heading.id
+  desc = el.querySelector('p')
+  if desc
+    desc.id ??= "#{id}-desc"
+    el.setAttribute 'aria-describedby', desc.id
+  return

@@ -1,0 +1,596 @@
+# ==============================================================================
+# script tests: helpers, control symbols, trace mode, the chat API, spawn
+# integration, multiplexer dispatch, timeouts, tcp, connect, and ssh
+#
+# A 1:1 port of the v3 suites (basic.rip, ssh.rip) plus the added v4
+# coverage (Script.tcp, Script.connect, multiplexer value dispatch,
+# timeout behavior). Every expected value traces to a real run, never a
+# guess. The spawn cases drive a real bash under a PTY; the ssh cases
+# drive a stub `ssh` on PATH through a subprocess (Bun.spawn resolves
+# PATH from the process's startup environment, so the conversation runs
+# in fixtures/ssh-driver.rip with the stub directory on its PATH).
+# ==============================================================================
+
+import { test, eq, ok, throws } from '@rip-lang/testing'
+import Script, { prompts, replace, quote, enter } from '@rip-lang/script'
+import * as mod from '@rip-lang/script'
+import { spawnSync } from 'child_process'
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
+
+pkg    =! JSON.parse(readFileSync(join(import.meta.dir, 'package.json'), 'utf8'))
+ripCli =! join(import.meta.dir, '..', '..', 'bin', 'rip')
+driver =! join(import.meta.dir, 'fixtures', 'ssh-driver.rip')
+
+# -- helpers ------------------------------------------------------------------
+
+withChat = (fn, opts = {}) ->
+  chat = Script.spawn! 'bash', ['--noprofile', '--norc'],
+    { line: '\n', live: false, slow: 5, ...opts }
+  try
+    await fn(chat)
+  finally
+    chat.disconnect()
+
+# TraceTransport and the trace-mode engine print through
+# process.stdout.write; capture it to pin the dry-run transcript.
+captureStdout = (fn) ->
+  orig = process.stdout.write
+  buf = ''
+  process.stdout.write = (chunk) ->
+    buf += chunk
+    true
+  try
+    await fn()
+  finally
+    process.stdout.write = orig
+  buf
+
+# ==[ Package surface ]==
+
+console.log "\nPackage"
+
+test "public entry exposes the pinned surface", ->
+  eq Object.keys(mod).sort(), ['Script', 'default', 'enter', 'prompts', 'quote', 'replace']
+
+test "the default export is the Script class carrying the factories", ->
+  eq mod.default, mod.Script
+  for name in ['spawn', 'ssh', 'tcp', 'connect', 'trace']
+    eq typeof Script[name], 'function'
+
+test "no runtime deps; testing harness is the only devDependency", ->
+  for field in ['dependencies', 'peerDependencies', 'optionalDependencies']
+    eq pkg[field], undefined
+  eq pkg.devDependencies, { '@rip-lang/testing': 'workspace:*' }
+
+test "the description is the README pitch, byte for byte", ->
+  readme = readFileSync join(import.meta.dir, 'README.md'), 'utf8'
+  ok readme.includes("> **#{pkg.description}.**")
+
+test "does not claim browser safety (it spawns PTYs and sockets)", ->
+  eq pkg.rip, undefined
+  source = readFileSync join(import.meta.dir, 'script.rip'), 'utf8'
+  ok source.includes('Bun.spawn')
+  ok source.includes('Bun.connect')
+
+# ==[ Helper functions ]==
+
+console.log "\nHelpers"
+
+test "quote wraps in double quotes", ->
+  eq quote('hello'), '"hello"'
+  eq quote('SMITH,JOHN'), '"SMITH,JOHN"'
+  eq quote(''), '""'
+
+test "replace returns a 3-entry Map", ->
+  m = replace('newvalue')
+  ok m instanceof Map
+  eq m.size, 3
+
+test "prompts passes through object", ->
+  obj = prompts { 'KEY:': ['val'], 'DATE:': '' }
+  eq obj['KEY:'][0], 'val'
+  eq obj['DATE:'], ''
+
+test "prompts preserves all keys", ->
+  obj = prompts { 'A:': '1', 'B:': '2', 'C:': '3' }
+  eq Object.keys(obj).length, 3
+
+test "replace Map has expected keys", ->
+  keys = [...replace('val').keys()]
+  eq keys.length, 3
+  eq typeof keys[0], 'string'
+  eq typeof keys[1], 'string'
+  ok keys[2] is :else
+
+test "replace Map entries carry the editing dance", ->
+  m = replace('VAL')
+  entries = [...m.entries()]
+  eq entries[0], ['Replace ', ['...', ' With ', 'VAL', '  Replace ', '']]
+  eq entries[1], ['// ', 'VAL']
+  ok entries[2][0] is :else
+  eq entries[2][1], 'VAL'
+
+test "enter returns a Map with 'Are you adding' key", ->
+  m = enter('test')
+  ok m instanceof Map
+  ok m.has('Are you adding')
+
+test "enter merges extra entries", ->
+  m = enter('test', { 'Confirm:': 'Y' })
+  ok m instanceof Map
+  ok m.has('Are you adding')
+  ok m.has('Confirm:')
+  eq m.get('Confirm:'), 'Y'
+
+# v3 wart, pinned: enter() never uses its `value` argument; the Map
+# carries only the "Are you adding" confirmation (plus any extras).
+test "enter ignores its value argument (v3 wart)", ->
+  m = enter('test')
+  eq m.size, 1
+  eq m.get('Are you adding'), ['Y']
+  eq enter('test', { 'Confirm:': 'Y' }).size, 2
+
+# ==[ Control symbols ]==
+
+console.log "\nControl symbols"
+
+test "control symbols are unique", ->
+  for sym in [:redo, :skip, :else, :this, :pure]
+    eq typeof sym, 'symbol'
+  ok :redo isnt :skip
+  ok :skip isnt :else
+  ok :else isnt :this
+  ok :this isnt :pure
+
+test "symbols are interned", ->
+  ok Symbol.for('redo') is :redo
+
+test "symbol descriptions match", ->
+  eq :redo.description, 'redo'
+  eq :skip.description, 'skip'
+  eq :else.description, 'else'
+
+# ==[ Multiplexer maps ]==
+
+console.log "\nMultiplexer maps"
+
+test "a Map multiplexer holds string keys", ->
+  m = *{ a: 1, b: 2 }
+  ok m instanceof Map
+  eq m.get('a'), 1
+  eq m.get('b'), 2
+
+test "a Map multiplexer supports regex keys", ->
+  m = *{ /^test/: 'found', :else: 'fallback' }
+  ok m instanceof Map
+  eq m.size, 2
+
+test "a Map multiplexer supports symbol keys", ->
+  m = *{ :else: 'fallback', :redo: 'retry' }
+  ok m instanceof Map
+  eq m.get(:else), 'fallback'
+  eq m.get(:redo), 'retry'
+
+# ==[ Trace mode ]==
+
+console.log "\nTrace mode"
+
+test "trace mode creates a callable", ->
+  eq typeof Script.trace(), 'function'
+
+test! "trace mode returns null for empty list", ->
+  chat = Script.trace()
+  back = chat! []
+  eq back, null
+
+test! "trace mode logs expect/send pairs", ->
+  chat = Script.trace()
+  out = captureStdout! -> chat ['prompt>', 'hello', 'result:', 'world']
+  eq out, 'EXPECT: "prompt>"\n  SEND: "hello\\r"\nEXPECT: "result:"\n  SEND: "world\\r"\n'
+
+test! "trace mode handles objects", ->
+  chat = Script.trace()
+  out = captureStdout! -> chat ['prompt>', 'test', { 'option1:': 'a', 'option2:': 'b' }]
+  eq out, 'EXPECT: "prompt>"\n  SEND: "test\\r"\nBRANCH: [option1:, option2:]\n'
+
+test! "trace mode handles conditionals", ->
+  chat = Script.trace()
+  out = captureStdout! -> chat [[true, 'prompt>', 'yes'], [false, 'prompt>', 'no']]
+  eq out, 'EXPECT: "prompt>"\n  SEND: "yes\\r"\n'
+
+test! "trace mode handles nested arrays", ->
+  chat = Script.trace()
+  out = captureStdout! -> chat ['prompt>', 'start', ['inner>', 'nested']]
+  eq out, 'EXPECT: "prompt>"\n  SEND: "start\\r"\nEXPECT: "inner>"\n  SEND: "nested\\r"\n'
+
+test! "trace mode handles functions", ->
+  called = false
+  chat = Script.trace()
+  captureStdout! -> chat ['prompt>', 'test', -> called = true]
+  ok called
+
+# ==[ The chat API ]==
+
+console.log "\nChat API"
+
+test "chat exposes buffer property", ->
+  chat = Script.trace()
+  eq typeof chat.buffer, 'string'
+  eq chat.buffer, ''
+
+test "chat exposes last property", ->
+  chat = Script.trace()
+  eq chat.last, null
+
+test! "chat exposes send method", ->
+  chat = Script.trace()
+  eq typeof chat.send, 'function'
+  sent = captureStdout! ->
+    back = chat.send! 'hello'
+    eq back, 'hello'
+  eq sent, '  SEND: "hello\\r"\n'
+
+test "chat exposes read method", ->
+  eq typeof Script.trace().read, 'function'
+
+test "chat exposes disconnect method", ->
+  eq typeof Script.trace().disconnect, 'function'
+
+# ==[ Spawn integration ]==
+
+console.log "\nSpawn integration"
+
+test! "spawn and basic expect/send", ->
+  withChat! (chat) ->
+    chat! [/\$\s*/, 'echo RIPTEST123', 'RIPTEST123', '']
+
+test! "spawn captures regex groups", ->
+  withChat! (chat) ->
+    chat! [/\$\s*/, 'echo VERSION=42', /VERSION=(\d+)\n/]
+    eq chat.last, '42'
+
+test! "spawn captures multiple regex groups", ->
+  withChat! (chat) ->
+    chat! [/\$\s*/, 'echo NAME=Alice AGE=30', /NAME=(\w+) AGE=(\d+)\n/]
+    eq chat.last, 'Alice'
+
+test! "spawn with function callback", ->
+  withChat! (chat) ->
+    captured = null
+    chat! [
+      /\$\s*/, 'echo DATA=hello'
+      /DATA=(\w+)\n/, (...args) ->
+        captured = args[1]
+        true
+    ]
+    eq captured, 'hello'
+
+test! "spawn with conditional array (true)", ->
+  withChat! (chat) ->
+    chat! [
+      /\$\s*/, 'echo START'
+      'START', ''
+      [true
+        /\$\s*/, 'echo EXTRA'
+        'EXTRA', '']
+      /\$\s*/, 'echo DONE'
+      'DONE', ''
+    ]
+
+test! "spawn with conditional array (false skips)", ->
+  withChat! (chat) ->
+    chat! [
+      /\$\s*/, 'echo ONLY'
+      'ONLY', ''
+      [false
+        /\$\s*/, 'echo NEVER'
+        'NEVER', '']
+      /\$\s*/, 'echo END'
+      'END', ''
+    ]
+
+test! "spawn with object multiplexer", ->
+  withChat! (chat) ->
+    chat! [
+      /\$\s*/, 'echo TESTMUX'
+      { TESTMUX: null }
+      /\$\s*/, 'echo DONE'
+      'DONE', ''
+    ]
+
+test! "spawn with multi-key multiplexer", ->
+  withChat! (chat) ->
+    chat! [
+      /\$\s*/, 'echo BRAVO'
+      { ALPHA: 'got-alpha', BRAVO: 'got-bravo' }
+    ]
+
+test! "spawn multi-step conversation", ->
+  withChat! (chat) ->
+    chat! [
+      /\$\s*/, 'echo STEP1'
+      'STEP1', ''
+      /\$\s*/, 'echo STEP2'
+      'STEP2', ''
+      /\$\s*/, 'echo STEP3'
+      'STEP3', ''
+    ]
+
+test! "spawn with sub-script array", ->
+  withChat! (chat) ->
+    chat! [
+      /\$\s*/, 'echo OUTER'
+      'OUTER', ''
+      [/\$\s*/, 'echo INNER'
+        'INNER', '']
+      /\$\s*/, 'echo AFTER'
+      'AFTER', ''
+    ]
+
+test! "spawn buffer clears after match", ->
+  withChat! (chat) ->
+    chat! [/\$\s*/, 'echo AAA; echo BBB', 'AAA', '']
+    eq chat.buffer.includes('AAA'), false
+
+test! "spawn with numeric send", ->
+  withChat! (chat) ->
+    chat! [/\$\s*/, 'cat', null, 42, null, /42\n/]
+
+test! "spawn with regex key in Map multiplexer", ->
+  withChat! (chat) ->
+    chat! [
+      /\$\s*/, 'echo ITEM=hello'
+      *{ /ITEM=(\w+)\n/: null }
+      /\$\s*/, 'echo DONE'
+      'DONE', ''
+    ]
+
+test! "spawn with :skip stops current list", ->
+  withChat! (chat) ->
+    back = chat! [
+      /\$\s*/, 'echo A'
+      'A', ''
+      /\$\s*/, 'echo B'
+      'B', -> :skip
+    ]
+    ok back is :skip
+
+test! "spawn with boolean true continues", ->
+  withChat! (chat) ->
+    chat! [
+      /\$\s*/, 'echo OK'
+      'OK', ''
+      true
+      /\$\s*/, 'echo DONE'
+      'DONE', ''
+    ]
+
+test! "spawn with explicit null mode toggle", ->
+  withChat! (chat) ->
+    chat! [
+      /\$\s*/, 'echo TOGGLE_TEST'
+      'TOGGLE_TEST'
+      null
+      ''
+      null
+      /\$\s*/, 'echo DONE'
+      'DONE', ''
+    ]
+
+test! "spawn with onMatch callback", ->
+  matches = []
+  run = (chat) -> chat! [/\$\s*/, 'echo TRACK', 'TRACK', '']
+  withChat! run, { onMatch: (pattern) -> matches.push(pattern) }
+  ok matches.length > 0
+
+test! "spawn with onSend callback", ->
+  sent = []
+  run = (chat) -> chat! [/\$\s*/, 'echo TRACED', 'TRACED', '']
+  withChat! run, { onSend: (text) -> sent.push(text) }
+  ok 'echo TRACED' in sent
+
+test! "spawn with onRecv callback", ->
+  chunks = []
+  run = (chat) -> chat! [/\$\s*/, 'echo RECV_TEST', 'RECV_TEST', '']
+  withChat! run, { onRecv: (data) -> chunks.push(data) }
+  ok chunks.length > 0
+
+# ==[ Multiplexer dispatch ]==
+
+console.log "\nMultiplexer dispatch"
+
+test! ":else fires when nothing matches within the fast window", ->
+  withChat! (chat) ->
+    hit = null
+    back = chat! [
+      /\$\s*/, 'echo ZZZ'
+      *{
+        NOMATCH: 'x'
+        :else: ->
+          hit = 'else'
+          true
+      }
+    ]
+    eq hit, 'else'
+    ok back is :else
+
+test! ":this returns the matched text itself", ->
+  withChat! (chat) ->
+    back = chat! [
+      /\$\s*/, 'echo THISTEST'
+      { THISTEST: :this }
+    ]
+    eq back, 'echo THISTEST'
+
+test! "a string multiplexer value is sent to the stream", ->
+  withChat! (chat) ->
+    back = chat! [
+      /\$\s*/, 'cat'
+      { cat: 'MUXSEND' }
+      /MUXSEND\n/
+    ]
+    eq back, ['\nMUXSEND\n']
+
+# ==[ Timeouts ]==
+
+console.log "\nTimeouts"
+
+test! "bomb: true throws on timeout with the buffer attached", ->
+  run = (chat) ->
+    err = null
+    try
+      chat! ['NEVER_APPEARS_XYZ']
+    catch e
+      err = e
+    ok err?
+    ok err.message.startsWith('Timeout waiting for data')
+    ok err.message.includes('Buffer:')
+  withChat! run, { slow: 0.3 }
+
+test! "timeout sentinels are symbols, not strings", ->
+  # A successful read returns the buffer (a string), so the sentinels
+  # must live outside the string domain entirely.
+  chat = Script.trace()
+  back = chat.read! true
+  ok back is :fast
+
+test! "a buffer spelling 'fast' is not mistaken for the fast-timeout sentinel", ->
+  # The remote sends the literal text `fast`, then the real answer.
+  # A string sentinel would read that buffer as a timeout and fire
+  # :else; the symbol sentinel keeps listening and matches the key.
+  server = Bun.listen
+    hostname: '127.0.0.1'
+    port: 0
+    socket:
+      open: (s) ->
+        s.write 'fast'
+        setTimeout (-> s.write 'MATCHME'), 200
+      data: ->
+  try
+    chat = Script.tcp! '127.0.0.1', server.port, { live: false, slow: 5, fast: 2 }
+    back = chat! [
+      *{ MATCHME: :this, :else: 'nope' }
+    ]
+    eq back, 'fastMATCHME'
+    chat.disconnect()
+  finally
+    server.stop(true)
+
+# ==[ Script.tcp ]==
+
+console.log "\nScript.tcp"
+
+test! "tcp connects and converses over a raw socket", ->
+  server = Bun.listen
+    hostname: '127.0.0.1'
+    port: 0
+    socket:
+      open: (s) -> s.write 'login: '
+      data: (s, d) ->
+        t = d.toString()
+        if t.includes('alice')
+          s.write 'password: '
+        else if t.includes('secret')
+          s.write 'welcome> '
+  try
+    chat = Script.tcp! '127.0.0.1', server.port, { live: false, slow: 5 }
+    back = chat! [
+      'login: ', 'alice'
+      'password: ', 'secret'
+      /welcome(>)/
+    ]
+    eq back, ['welcome>', '>']
+    eq chat.last, '>'
+    chat.disconnect()
+  finally
+    server.stop(true)
+
+# ==[ Script.connect ]==
+
+console.log "\nScript.connect"
+
+test! "spawn:// URLs spawn the command", ->
+  chat = Script.connect! 'spawn://bash', { line: '\n', live: false, slow: 5 }
+  try
+    chat! [/[$#]\s*/, 'echo CONNECT_OK']
+    chat! ['CONNECT_OK', '']
+  finally
+    chat.disconnect()
+
+# v3 wart, pinned: the README once showed `Script.connect 'spawn:bash'`,
+# but connect() splits on '://', so the single-colon form is an unknown
+# scheme.
+test! "single-colon spawn: URLs are rejected (v3 wart)", ->
+  err = null
+  try
+    Script.connect! 'spawn:bash'
+  catch e
+    err = e
+  ok err?.message.includes('Unknown scheme: spawn:bash')
+
+test! "unknown schemes are rejected", ->
+  err = null
+  try
+    Script.connect! 'foo://bar'
+  catch e
+    err = e
+  ok err?.message.includes('Unknown scheme: foo')
+
+# ==[ Script.ssh ]==
+
+console.log "\nScript.ssh"
+
+# A stub `ssh` records its argv, plays the password prompt, reports the
+# PTY size, and echoes each exchange in a parseable form.
+STUB =! [
+  '#!/bin/bash'
+  "printf 'ARGS[%s]\\n' \"$*\""
+  'if [ "$1" = "-p" ]; then'
+  "  printf 'Password: '"
+  '  IFS= read -r pw'
+  "  printf 'PW[%s]\\n' \"$pw\""
+  'fi'
+  "printf 'SIZE[%s]\\n' \"$(stty size)\""
+  "printf '~> '"
+  'IFS= read -r cmd'
+  "printf 'CMD[%s]\\n' \"$cmd\""
+  "printf 'Hint: '"
+  "IFS= read -r -n 2 -d '' raw"
+  "printf 'RAW[%s]\\n' \"$(printf '%s' \"$raw\" | xxd -p)\""
+  "printf '~> '"
+  'IFS= read -r bye'
+  "printf 'BYE[%s]\\n' \"$bye\""
+].join('\n') + '\n'
+
+stubDir =! mkdtempSync join(tmpdir(), 'rip-script-ssh-')
+writeFileSync join(stubDir, 'ssh'), STUB
+chmodSync join(stubDir, 'ssh'), 0o755
+
+drive = (url, opts = {}) ->
+  r = spawnSync process.execPath, [ripCli, driver, url, JSON.stringify(opts)],
+    { encoding: 'utf8', cwd: import.meta.dir, env: { ...process.env, PATH: "#{stubDir}:#{process.env.PATH}" }, timeout: 20000 }
+  eq r.status, 0
+  JSON.parse(r.stdout)
+
+# The 1:1 conversion of v3's ssh.rip: a bare host alias, cols/rows
+# options, the mc/Hint/exit dance with a raw :pure escape send.
+test! "bare host alias: mc, :pure escape at Hint:, exit", ->
+  seen = drive 'trust', { cols: 120, rows: 32 }
+  ok seen.includes('ARGS[trust]')     # bare alias, no flags
+  ok seen.includes('SIZE[32 120]')    # rows cols from options
+  ok seen.includes('CMD[mc]')
+  ok seen.includes('RAW[1b30]')       # ESC + '0', no line terminator
+  ok seen.includes('BYE[exit]')
+
+# The ssh:// URL form: port, user, and password are parsed from the URL
+# (percent-decoded), and the password answers the Password prompt before
+# Script.ssh returns.
+test! "ssh:// URL form parses port, user, and password", ->
+  seen = drive 'ssh://user%40x:s3cret%21@myhost:2222'
+  ok seen.includes('ARGS[-p 2222 -l user@x myhost]')
+  ok seen.includes('PW[s3cret!]')     # percent-decoded password
+  ok seen.includes('CMD[mc]')
+  ok seen.includes('RAW[1b30]')
+  ok seen.includes('BYE[exit]')
