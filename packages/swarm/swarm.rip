@@ -359,9 +359,9 @@ export swarm = (opts = {}) ->
 # ==============================================================================
 
 # flags that swarm consumes (with value)
-_flagsWithValue = ['-w', '--workers', '-b', '--bar', '-c', '--char']
+_flagsWithValue = %w[-w --workers -b --bar -c --char]
 # flags that swarm consumes (standalone)
-_flagsAlone     = ['-r', '--reset', '-s', '--safe', '-q', '--quiet', '-h', '--help', '-v', '--version']
+_flagsAlone     = %w[-r --reset -s --safe -q --quiet -h --help -v --version]
 
 findArg = (args, short, long) ->
   for arg, i in args
