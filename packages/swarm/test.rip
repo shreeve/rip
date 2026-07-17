@@ -245,6 +245,18 @@ test "without a script prints usage and exits 1", ->
   eq r.status, 1
   ok r.stderr.includes('usage: swarm <script.rip> [options]')
 
+test "-v prints the version from package.json", ->
+  r = spawnSync process.execPath, [ripCli, swarmRip, '-v'], { encoding: 'utf8', timeout: 12000 }
+  eq r.status, 0
+  eq r.stdout, "swarm #{pkg.version}\n"
+
+test "-h prints usage and the flag table, exit 0", ->
+  r = spawnSync process.execPath, [ripCli, swarmRip, '--help'], { encoding: 'utf8', timeout: 12000 }
+  eq r.status, 0
+  ok r.stdout.includes('usage: swarm <script.rip> [options]')
+  ok r.stdout.includes('-w, --workers <n>')
+  ok r.stdout.includes('-r, --reset')
+
 test "a missing script is a named error", ->
   r = spawnSync process.execPath, [ripCli, swarmRip, 'no-such-job.rip'], { encoding: 'utf8', timeout: 12000 }
   eq r.status, 1
