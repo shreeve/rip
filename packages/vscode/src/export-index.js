@@ -288,7 +288,57 @@ export function createExportIndex({ workspaceRoot, log = () => {} } = {}) {
       }
     })(rootPath);
 
-    log(`[rip] discovered ${count} .rip file(s), ${projectRoots.size} project(s) in ${Date.now() - start}ms`);
+    indexNodeModulesRipDeps();
+    log(`[rip] discovered ${count} .rip file(s), ${projectRoots.size} project(s), ${bareSpecForEntry.size} package entrypoint(s) in ${Date.now() - start}ms`);
+  }
+
+  // Declared deps under node_modules that ship a `.rip` entry — workspace
+  // walk skips node_modules, so index them here (v3 indexNodeModulesRipDeps).
+  function indexNodeModulesRipDeps() {
+    if (!rootPath) return;
+    const seen = new Set();
+    for (const projRoot of [...projectRoots]) {
+      const deps = declaredDepsFor(projRoot);
+      if (!deps) continue;
+      for (const depName of deps) {
+        let dir = projRoot, pkgDir = null;
+        while (true) {
+          const cand = path.join(dir, 'node_modules', depName);
+          if (fs.existsSync(path.join(cand, 'package.json'))) { pkgDir = cand; break; }
+          const parent = path.dirname(dir);
+          if (parent === dir) break;
+          dir = parent;
+        }
+        // Keep the symlink path under rootPath so findProjectRoot resolves.
+        if (!pkgDir || !(pkgDir === rootPath || pkgDir.startsWith(rootPath + path.sep))) continue;
+        if (seen.has(pkgDir)) continue;
+        seen.add(pkgDir);
+        let real;
+        try { real = fs.realpathSync(pkgDir); } catch { real = pkgDir; }
+        // Skip workspace members already indexed via their real path.
+        if (real.startsWith(rootPath) && !real.includes(`${path.sep}node_modules${path.sep}`)) continue;
+        let depPkg;
+        try { depPkg = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8')); } catch { continue; }
+        const entryFiles = new Set();
+        const collect = (target) => {
+          if (target && typeof target !== 'string') target = target.default || target.import || target.require;
+          if (typeof target === 'string' && target.endsWith('.rip')) {
+            const full = path.resolve(pkgDir, target);
+            if (fs.existsSync(full)) entryFiles.add(full);
+          }
+        };
+        if (depPkg.exports && typeof depPkg.exports === 'object') {
+          for (const t of Object.values(depPkg.exports)) collect(t);
+        } else if (typeof depPkg.exports === 'string') collect(depPkg.exports);
+        else if (typeof depPkg.main === 'string') collect(depPkg.main);
+        if (!entryFiles.size) continue;
+        loadPackageJson(pkgDir);
+        for (const f of entryFiles) {
+          discoveredRipFiles.add(f);
+          if (exportIndexBuilt) updateFile(f);
+        }
+      }
+    }
   }
 
   function onRipChanged(fp, exists) {
@@ -377,6 +427,116 @@ export function createExportIndex({ workspaceRoot, log = () => {} } = {}) {
     return items;
   }
 
+  const AUTO_IMPORT_CODES = new Set([2304, 2552, 2503]);
+
+  // Quick fixes for unresolved names — Rip-source edits, never face-mapped.
+  // `diagnostics` = request-range diags; `allDiagnostics` = full-file (for
+  // "Add all missing imports"), defaults to `diagnostics`.
+  function codeActions({ source, fromFp, uri, diagnostics = [], allDiagnostics = null } = {}) {
+    if (!rootPath || !fromFp || !source || !uri) return [];
+    ensureBuilt();
+    const diags = diagnostics.filter((d) => {
+      const code = typeof d.code === 'string' ? Number(d.code) : d.code;
+      return AUTO_IMPORT_CODES.has(code);
+    });
+    if (!diags.length) return [];
+
+    const srcLines = source.split('\n');
+    const actions = [];
+    const pickTarget = (name) => {
+      const sources = exportIndex.get(name);
+      if (!sources) return null;
+      for (const targetFp of sources) {
+        if (targetFp === fromFp) continue;
+        const spec = resolveSpecForTarget(fromFp, targetFp);
+        if (spec) return { spec };
+      }
+      return null;
+    };
+
+    for (const diag of diags) {
+      const line = srcLines[diag.range.start.line] || '';
+      const name = line.slice(diag.range.start.character, diag.range.end.character).trim();
+      if (!name || !/^[A-Za-z_$][\w$]*$/.test(name)) continue;
+      const sources = exportIndex.get(name);
+      if (!sources) continue;
+      for (const targetFp of sources) {
+        if (targetFp === fromFp) continue;
+        const spec = resolveSpecForTarget(fromFp, targetFp);
+        if (!spec) continue;
+        const edit = buildImportEdit(source, spec, name);
+        if (!edit) continue;
+        const verb = edit.update ? 'Update' : 'Add';
+        const { update: _u, ...textEdit } = edit;
+        actions.push({
+          title: `${verb} import { ${name} } from "${spec}"`,
+          kind: 'quickfix',
+          diagnostics: [diag],
+          edit: { changes: { [uri]: [textEdit] } },
+        });
+      }
+    }
+
+    const allDiags = (allDiagnostics ?? diagnostics).filter((d) => {
+      const code = typeof d.code === 'string' ? Number(d.code) : d.code;
+      return AUTO_IMPORT_CODES.has(code);
+    });
+    if (allDiags.length >= 2) {
+      const seen = new Set();
+      const picks = [];
+      for (const d of allDiags) {
+        const ln = srcLines[d.range.start.line] || '';
+        const name = ln.slice(d.range.start.character, d.range.end.character).trim();
+        if (!name || !/^[A-Za-z_$][\w$]*$/.test(name)) continue;
+        if (seen.has(name)) continue;
+        seen.add(name);
+        const t = pickTarget(name);
+        if (!t) continue;
+        picks.push({ name, spec: t.spec });
+      }
+      if (picks.length >= 2) {
+        let working = source;
+        let mutated = false;
+        const posToOffset = (text, line, character) => {
+          let off = 0, ln = 0;
+          while (ln < line) {
+            const i = text.indexOf('\n', off);
+            if (i < 0) return text.length;
+            off = i + 1;
+            ln++;
+          }
+          return off + character;
+        };
+        for (const { name, spec } of picks) {
+          const edit = buildImportEdit(working, spec, name);
+          if (!edit) continue;
+          const start = posToOffset(working, edit.range.start.line, edit.range.start.character);
+          const end = posToOffset(working, edit.range.end.line, edit.range.end.character);
+          working = working.slice(0, start) + edit.newText + working.slice(end);
+          mutated = true;
+        }
+        if (mutated && working !== source) {
+          const endLine = srcLines.length - 1;
+          const endChar = (srcLines[endLine] || '').length;
+          actions.push({
+            title: 'Add all missing imports',
+            kind: 'quickfix',
+            diagnostics: allDiags,
+            edit: {
+              changes: {
+                [uri]: [{
+                  range: { start: { line: 0, character: 0 }, end: { line: endLine, character: endChar } },
+                  newText: working,
+                }],
+              },
+            },
+          });
+        }
+      }
+    }
+    return actions;
+  }
+
   return {
     setWorkspaceRoot,
     discover,
@@ -384,6 +544,7 @@ export function createExportIndex({ workspaceRoot, log = () => {} } = {}) {
     onPackageJsonChanged,
     ensureBuilt,
     augmentCompletions,
+    codeActions,
     resolveSpecForTarget,
     // test / diagnostics hooks
     get size() { return exportIndex.size; },
