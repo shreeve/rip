@@ -6,7 +6,6 @@ the Rip compiler: language, toolchain, runtimes, and editor support.
 Permanent documentation:
 
 - [README.md](README.md) — repository orientation and entry points.
-- [PROCESS.md](PROCESS.md) — planning, review, and merge protocol.
 - [docs/SYNTAX.md](docs/SYNTAX.md) — context-sensitive language syntax.
 - [docs/TYPES.md](docs/TYPES.md) — type and editor architecture.
 - [docs/HMR.md](docs/HMR.md) — HMR design and acceptance contract.
@@ -44,8 +43,8 @@ Permanent documentation:
 5. **Tests are the contract.** New behavior lands with tests (snapshot
    surfaces and negative tests). If a test fails, fix the code or (with
    justification) the test — never weaken an acceptance criterion to
-   pass. Every confirmed defect converts to a permanent pin before its
-   fix merges; a pin asserts the CORRECT behavior, never the bug.
+   pass. Every confirmed defect converts to a permanent pin in the same
+   commit as its fix; a pin asserts the CORRECT behavior, never the bug.
 
 6. **Emitted output never changes silently.** A change that alters the
    compiler's output bytes lands with its regenerated corpus snapshots
@@ -62,14 +61,10 @@ Permanent documentation:
    path by regressing another is not an optimization until the
    trade-off is measured and accepted.
 
-8. **Raw git, no ceremony — for now.** Work commits directly with
-   plain git and the plain CLI; no required branch/PR/merge protocol.
-   Verify locally (the affected suites) before committing, report
-   failures as failures, and never describe skipped or partial work as
-   complete. Commits carry **no AI attribution** — no Co-Authored-By
-   trailers, no "generated with" footers; authorship is the owner's.
-   (The branch/PR/landing/CI protocol was deliberately retired and may
-   return later.)
+8. **Plain git, verified locally.** Run the affected suites before
+   committing; report failures as failures. Commits carry **no AI
+   attribution** — no Co-Authored-By trailers, no "generated with"
+   footers; authorship is the owner's.
 
 ## Lowering Doctrine (rule 2, in full)
 

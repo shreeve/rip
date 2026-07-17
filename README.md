@@ -25,7 +25,6 @@ in [docs/ROADMAP.md](docs/ROADMAP.md).
 ## Documentation
 
 - [AGENTS.md](AGENTS.md) — mandatory repository rules and invariants
-- [PROCESS.md](PROCESS.md) — how changes are planned, reviewed, and merged
 - [docs/SYNTAX.md](docs/SYNTAX.md) — context-sensitive syntax reference
 - [docs/TYPES.md](docs/TYPES.md) — type-system and editor architecture
 - [docs/HMR.md](docs/HMR.md) — hot-module-replacement design
