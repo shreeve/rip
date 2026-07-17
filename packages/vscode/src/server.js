@@ -920,7 +920,7 @@ async function repullDiagnostics(uri) {
   if (!good || !state.tsOpen || !tsgo) return;
   // rip.noCheck: silenced here too — cross-file re-pulls must not
   // resurrect a no-check doc's diagnostics after refresh cleared them.
-  if (isNoCheck(uri, state)) { connection.sendDiagnostics({ uri, diagnostics: [] }); return; }
+  if (isNoCheck(uri, state)) { publishRipDiagnostics(uri, []); return; }
   if (documents.get(uri)?.getText() !== good.source) return;
   let pulled;
   try {
@@ -935,7 +935,7 @@ async function repullDiagnostics(uri) {
     const m = mapTsDiagnostic(good, d);
     if (m) mapped.push(m);
   }
-  connection.sendDiagnostics({ uri, diagnostics: applyRipDirectives(good, mapped) });
+  publishRipDiagnostics(uri, applyRipDirectives(good, mapped));
 }
 
 function repullOpenDocuments(exceptUri = null) {
@@ -1110,7 +1110,7 @@ async function refresh(document) {
       connection.console.log(`[rip] dropped unmappable TS diagnostic ${d.code}: ${d.message}`);
     }
   }
-  connection.sendDiagnostics({ uri: document.uri, diagnostics: applyRipDirectives(state.lastGood, mapped) });
+  publishRipDiagnostics(document.uri, applyRipDirectives(state.lastGood, mapped));
 
   // This buffer's new face can change what OTHER open buffers see
   // (cross-file type flow); their diagnostics re-pull without recompiling.
@@ -2487,6 +2487,14 @@ connection.onRenameRequest(async (params) => {
   return { changes };
 });
 
+// Last published Rip-coordinate diagnostics per uri — "Add all missing
+// imports" reads the full file, not only the request-range diags.
+const lastPublishedDiags = new Map();
+function publishRipDiagnostics(uri, diagnostics) {
+  lastPublishedDiags.set(uri, diagnostics);
+  connection.sendDiagnostics({ uri, diagnostics });
+}
+
 // ---- code actions: quickfix plus the source.* family (the
 // organizeImports/removeUnusedImports/sortImports rewrites land
 // through the whole-import-line mapping; fixAll's auto-imports
@@ -2494,10 +2502,29 @@ connection.onRenameRequest(async (params) => {
 // its diagnostics map Rip → TS; returned edits map back through the
 // same all-or-nothing WorkspaceEdit path as rename — an action whose
 // edit cannot land on Rip source is dropped, never shown broken.
+//
+// Cold `.rip`→`.rip` auto-import quick fixes come from the export index
+// (Rip-source edits, prepended) — tsgo never sees unimported orphans.
 connection.onCodeAction(async (params) => {
   await tsgoReady;
+  const document = documents.get(params.textDocument.uri);
+  let indexActions = [];
+  if (document) {
+    let fromFp = null;
+    if (document.uri.startsWith('file://')) {
+      try { fromFp = fileURLToPath(document.uri); } catch { /* */ }
+    }
+    indexActions = exportIndex.codeActions({
+      source: document.getText(),
+      fromFp,
+      uri: document.uri,
+      diagnostics: params.context?.diagnostics ?? [],
+      allDiagnostics: lastPublishedDiags.get(document.uri) ?? params.context?.diagnostics ?? [],
+    });
+  }
+
   const ctx = requestContext(params);
-  if (!ctx) return null;
+  if (!ctx) return indexActions.length ? indexActions : null;
   const toGen = (position, exclusiveEnd) => {
     const cur = positionToOffset(ctx.curLineStarts, ctx.currentText.length, position);
     const offset = ctx.align.toGood(cur, { exclusiveEnd });
@@ -2562,7 +2589,7 @@ connection.onCodeAction(async (params) => {
       edit: { changes },
     });
   }
-  return actions;
+  return indexActions.length ? indexActions.concat(actions) : actions;
 });
 
 documents.listen(connection);

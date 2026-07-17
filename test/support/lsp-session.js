@@ -189,6 +189,66 @@ export async function openSession(files) {
       return labels;
     },
 
+    // Full completion items (for additionalTextEdits / data assertions).
+    async completionItems(name, line, character, { tries = 20, every = 300 } = {}) {
+      for (let i = 0; i < tries; i++) {
+        const r = await client.request('textDocument/completion', {
+          textDocument: { uri: uri(name) }, position: { line, character },
+        }).catch(() => null);
+        const items = Array.isArray(r) ? r : (r?.items ?? []);
+        if (items.length) return items;
+        await sleep(every);
+      }
+      return [];
+    },
+
+    async completionItem(name, line, character, label, opts = {}) {
+      for (let i = 0; i < (opts.tries ?? 20); i++) {
+        const items = await this.completionItems(name, line, character, { tries: 1, every: 0 });
+        const hit = items.find((it) => it.label === label);
+        if (hit) return hit;
+        await sleep(opts.every ?? 300);
+      }
+      return null;
+    },
+
+    async codeActions(name, range, diagnostics, { tries = 20, every = 300 } = {}) {
+      let last = [];
+      for (let i = 0; i < tries; i++) {
+        last = await client.request('textDocument/codeAction', {
+          textDocument: { uri: uri(name) },
+          range,
+          context: { diagnostics },
+        }).catch(() => []);
+        if (Array.isArray(last) && last.length) return last;
+        await sleep(every);
+      }
+      return Array.isArray(last) ? last : [];
+    },
+
+    applyTextEdits(text, edits) {
+      const sorted = [...(edits ?? [])].sort((a, b) => {
+        if (a.range.start.line !== b.range.start.line) return b.range.start.line - a.range.start.line;
+        return b.range.start.character - a.range.start.character;
+      });
+      const lines = text.split('\n');
+      for (const edit of sorted) {
+        const { start, end } = edit.range;
+        if (start.line === end.line) {
+          const line = lines[start.line] ?? '';
+          lines[start.line] = line.slice(0, start.character) + edit.newText + line.slice(end.character);
+        } else {
+          const first = (lines[start.line] ?? '').slice(0, start.character);
+          const last = (lines[end.line] ?? '').slice(end.character);
+          const inserted = edit.newText.split('\n');
+          inserted[0] = first + inserted[0];
+          inserted[inserted.length - 1] = inserted[inserted.length - 1] + last;
+          lines.splice(start.line, end.line - start.line + 1, ...inserted);
+        }
+      }
+      return lines.join('\n');
+    },
+
     // Signature help at a position, or null. Polls briefly while tsgo
     // settles; a persistent null is returned as-is.
     async signatureHelp(name, line, character, { tries = 20, every = 300 } = {}) {
