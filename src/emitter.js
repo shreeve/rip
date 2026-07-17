@@ -1287,8 +1287,21 @@ class Emitter {
     walk(sexpr);
     elements.sort((a, b) => a.start - b.start || b.end - a.end);
     for (const d of directives) {
-      const target = elements.find((e) => e.start >= d.end);
-      if (target === undefined || lineOf(target.start) !== lineOf(d.start) + 1) continue;
+      const nextLine = lineOf(d.start) + 1;
+      let target = elements.find((e) => e.start >= d.end && lineOf(e.start) === nextLine);
+      if (target === undefined) continue;
+      // An attribute/prop bag (`object`) and its first `:` pair share a
+      // source span. Outermost-wins would attach to the object, which
+      // render never emits as a line — the directive vanished from the
+      // face. Prefer the pair: DOM attrs replay it via renderLine, class
+      // members via withTsDirectives(pair), child props via the ctor
+      // object (below).
+      if (target.el[0] === 'object') {
+        const pair = elements.find((e) =>
+          (e.el[0] === ':' || e.el[0] === 'void-pair')
+          && e.start >= d.end && lineOf(e.start) === nextLine);
+        if (pair !== undefined) target = pair;
+      }
       const attached = this.tsDirectiveMap.get(target.el) ?? [];
       attached.push({ t: d, nodeId: target.id });
       this.tsDirectiveMap.set(target.el, attached);
@@ -6728,8 +6741,12 @@ class Emitter {
     for (const { node, fn, semi } of rec.creates) {
       this.renderDirectives(node, pad);
       this.b.emit(pad);
-      if (node != null) this.mark(node, '$self', fn);
-      else fn();
+      // Pass pad so a create line that must break across lines (a child
+      // ctor object with an inline `@ts-expect-error` on one prop) can
+      // indent continuation lines; existing fns ignore the argument.
+      const run = () => fn(pad);
+      if (node != null) this.mark(node, '$self', run);
+      else run();
       this.b.emit(semi ? ';\n' : '\n');
     }
   }
@@ -7775,16 +7792,29 @@ class Emitter {
     const self = () => this.renderSelf ?? 'this';
     line(() => this.b.emit(`{ const ${prevV} = ${this.runtimeName('__pushComponent')}(${self()}); try {`));
     line(() => this.b.emit('try {'));
-    line(() => {
+    line((pad) => {
       this.b.emit(`${instVar} = new `);
       ctorRef();
       this.b.emit('(');
       if (props.length === 0) {
         this.b.emit('{}');
       } else {
-        this.b.emit('{ ');
+        // A `# @ts-expect-error` on a prop/bind line attaches to the
+        // pair; TypeScript's next-line rule needs that comment on its
+        // own line immediately above the property, so the ctor object
+        // becomes multi-line when any prop carries a directive.
+        const directed = this.ts && this.tsDirectivesArmed
+          && props.some((p) => p.pair != null && this.tsDirectiveMap.has(p.pair));
+        const propPad = pad + '  ';
+        if (directed) this.b.emit('{\n');
+        else this.b.emit('{ ');
         props.forEach((p, i) => {
-          if (i > 0) this.b.emit(', ');
+          if (directed) {
+            this.renderDirectives(p.pair, propPad);
+            this.b.emit(propPad);
+          } else if (i > 0) {
+            this.b.emit(', ');
+          }
           const emitPair = () => {
             // A boolean-shorthand key's derived span records a face
             // row (the builder's verbatim comparison makes it EXACT —
@@ -7804,8 +7834,9 @@ class Emitter {
           };
           if (p.pair !== null && this.stores.idOf(p.pair) !== null) this.mark(p.pair, '$self', emitPair);
           else emitPair();
+          if (directed) this.b.emit(i < props.length - 1 ? ',\n' : `\n${pad}`);
         });
-        this.b.emit(' }');
+        this.b.emit(directed ? '}' : ' }');
       }
       this.b.emit(');');
     });
