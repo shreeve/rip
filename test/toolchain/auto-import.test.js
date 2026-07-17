@@ -106,4 +106,32 @@ describeExtended('auto-import candidate scope', () => {
       expect(edits.some((e) => /orphanWidget/.test(e.newText) && /orphan\.rip/.test(e.newText))).toBe(true);
     } finally { await s.close(); }
   }, 90_000);
+
+  test('code action offers Add all missing imports for two cold orphans', async () => {
+    const s = await openSession({
+      'orphan.rip': 'export orphanWidget = (): string -> "widget"\n',
+      'other.rip': 'export otherThing = (): number -> 1\n',
+      'app.rip': 'a = orphanWidget\nb = otherThing\n',
+      'package.json': '{}\n',
+    });
+    try {
+      s.open('app.rip');
+      const diags = await s.diagnostics('app.rip');
+      const missing = diags.filter((d) => d.code === 2304);
+      expect(missing.length).toBeGreaterThanOrEqual(2);
+
+      // Request on one diagnostic's range — aggregate still uses the full
+      // published set (lastPublishedDiags), matching v3's lastDiagnostics.
+      const actions = await s.codeActions('app.rip', missing[0].range, [missing[0]]);
+      const addAll = actions.find((a) => a.title === 'Add all missing imports');
+      expect(addAll).toBeDefined();
+      expect(addAll.kind).toBe('quickfix');
+      const edits = addAll.edit.changes[s.uri('app.rip')];
+      expect(edits).toHaveLength(1);
+      expect(edits[0].newText).toMatch(/import \{ orphanWidget \} from ['"]\.\/orphan\.rip['"]/);
+      expect(edits[0].newText).toMatch(/import \{ otherThing \} from ['"]\.\/other\.rip['"]/);
+      expect(edits[0].newText).toContain('a = orphanWidget');
+      expect(edits[0].newText).toContain('b = otherThing');
+    } finally { await s.close(); }
+  }, 90_000);
 });
