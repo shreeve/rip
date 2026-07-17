@@ -125,6 +125,16 @@
         "tailwindcss": "4.3.2",
       },
     },
+    "packages/utils": {
+      "name": "@rip-lang/utils",
+      "version": "4.0.0",
+      "bin": {
+        "rip-curl": "./curl.rip",
+      },
+      "devDependencies": {
+        "@rip-lang/testing": "workspace:*",
+      },
+    },
     "packages/validate": {
       "name": "@rip-lang/validate",
       "version": "4.0.0",
@@ -189,6 +199,8 @@
     "@rip-lang/time": ["@rip-lang/time@workspace:packages/time"],
 
     "@rip-lang/ui": ["@rip-lang/ui@workspace:packages/ui"],
+
+    "@rip-lang/utils": ["@rip-lang/utils@workspace:packages/utils"],
 
     "@rip-lang/validate": ["@rip-lang/validate@workspace:packages/validate"],
 

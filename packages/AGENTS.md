@@ -73,6 +73,25 @@ PATH; inside the repo, `bun run` contexts resolve it to THIS checkout
 via the root postinstall link, and `rip <name>.rip` always works
 regardless. The reference is `packages/x12`.
 
+### Multi-bin collections (`utils`)
+
+A package may be a collection of standalone CLI scripts rather than a
+library. Shape:
+
+```
+packages/utils/
+  curl.rip        # each utility is its own bin
+  test.rip
+  package.json    # "bin" maps every utility; no "exports"
+  README.md
+```
+
+No library entry and no `exports`. Each utility follows the bin shape
+above (shebang, executable, loud reject unless `import.meta.main`) and
+reads its version from the package's `package.json`. Adding a utility
+is: drop the `.rip` file, add a `"bin"` entry, list it under `"files"`,
+document it in the README, and extend `test.rip`.
+
 Do NOT add: per-package `bunfig.toml`, `bun.lock`, `.d.ts` files,
 `test/` directories, or JS test files for pure library packages.
 Types are a later, separate pass.

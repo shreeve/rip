@@ -1,0 +1,20 @@
+{
+  "name": "@rip-lang/utils",
+  "version": "4.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Small single-script CLI utilities for common tasks — zero dependencies",
+  "bin": {
+    "rip-curl": "./curl.rip"
+  },
+  "scripts": {
+    "test": "rip test.rip"
+  },
+  "files": [
+    "curl.rip",
+    "README.md"
+  ],
+  "devDependencies": {
+    "@rip-lang/testing": "workspace:*"
+  }
+}

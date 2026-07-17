@@ -14,12 +14,12 @@ One package still needs the compare→strip→judge loop and the Rip test roll:
 
 1. `gate`
 
-(`x12`, `validate`, and `print` completed both passes — see their
-sections below.)
+(`x12`, `validate`, `print`, `swarm`, `script`, and `utils` completed
+both passes — see their sections below.)
 
 **Package contract:** layout, package.json key order, README mold, and test rules are codified in [AGENTS.md](AGENTS.md) — follow it.
 
-**Out of scope (do not bring over):** `util`, `stamp`.
+**Out of scope (do not bring over):** `stamp`.
 
 ### Method (per package)
 
@@ -52,8 +52,9 @@ Re-run after `.d.ts` removal. Compared Rip logic only.
 | **validate** | Real redesign | **KEEP_V4 (done)** | Calendar-true dates, stricter validators, Map registry; coercer split merged back into ONE file (owner decision); Rip test roll + frame complete |
 | **gate** | Substantially improved | **KEEP_V4** | Fail-closed secrets, login throttle, reserved `/_gate` 404, self-contained middleware |
 | **swarm** | Identical core + 3 judged deltas | **KEEP_V4 (done)** | Loader from the live `--preload` flag (loud); wrapper and worker bootstrap folded into swarm.rip; Rip test roll + frame complete |
+| **utils** | Identical curl + CLI hygiene | **KEEP_V4 (done)** | Multi-bin collection frame; `curl.rip` → `rip-curl` (version from package.json, import guard, documented 4-tier vars); Rip test roll complete |
 
-**None of these three warrant restoring v3 Rip.** Do not reintroduce `.d.ts` or type annotations as part of this upgrade.
+**None of these warrant restoring v3 Rip.** Do not reintroduce `.d.ts` or type annotations as part of this upgrade.
 
 Cross-cutting v4 packaging (not logic): `private: true`, `exports` pointing at `.rip` only (no `"types"`); root Bun workspaces (`packages/*`, hoisted linker) so `@rip-lang/*` resolves in-tree; package tests via `rip test.rip` + `@rip-lang/testing` (per [AGENTS.md](AGENTS.md)) or `rip test` (Bun JS suites still migrating — the subcommand wraps `bun test` with the loader preloaded). No per-package `bunfig.toml`.
 
@@ -338,6 +339,35 @@ this pass (same call as time's default).
 
 **Recommendation: KEEP_V4** — done; confidence high.
 
+### 8. `utils` — DONE
+
+**Inventory**
+
+| | v3 | v4 |
+| --- | --- | --- |
+| Layout | `README.md` + `curl.rip` (no package.json) | multi-bin collection: `curl.rip` + contract package.json + README mold |
+| CLI | shebang'd `curl.rip`, run as `rip curl.rip` | same file IS `rip-curl` (`#!/usr/bin/env rip`); version from package.json |
+| Vars | CLI > `.auth` > `.env` file > `Bun.env` (README under-documented) | same priority; README matches; `process.env` for the last tier |
+| Tests | none | root `test.rip` (package surface + curl: flags, vars, parse, live HTTP) |
+
+**Strip types:** No annotations on either side. v4 Rip is v3's program
+with judged CLI hygiene (the same class as print):
+
+1. **Import guard** — rejects loudly unless `import.meta.main` (v3 ran
+   the program on import).
+2. **Version from package.json** — v3 hard-coded `1.0.0`.
+3. **`process.argv` / `process.env`** — matches the other v4 CLIs.
+4. **`-h` / `--help`** — usage that documents the real four-tier
+   variable order (CLI → `.auth` → `.env` → process env).
+5. **`Bun.stdin.text!`** — replaces `readFileSync('/dev/stdin')`, which
+   EACCES-fails on an empty pipe under Bun.spawn on macOS.
+6. **Frame** — first package.json (4.0.0, description = README pitch,
+   `"bin": { "rip-curl": "./curl.rip" }`, no `exports`); README on the
+   mold with an "Adding a Utility" section; AGENTS.md documents the
+   multi-bin collection shape.
+
+**Recommendation: KEEP_V4** — done; confidence high.
+
 ## Cross-cutting notes
 
 1. **No `.d.ts` in these packages** — confirmed. Do not bring type files over from v3. Package `exports` point at `.rip` only.
@@ -348,8 +378,8 @@ this pass (same call as time's default).
 
 ## Suggested next steps
 
-1. Accept **KEEP_V4** for all six (no Rip restores; no type reintroduction).
-2. Roll root `test.rip` + `@rip-lang/testing` across the remaining packages (`gate` where security tests fit) — `x12`, `validate`, and `swarm` are done.
-3. Continue the compare→strip→judge loop for remaining packages (`server`, `app`, `db`, `ui`, `ai`, …) — `print`, `swarm`, and `script` are done; still excluding `util` and `stamp`, still without bringing types.
+1. Accept **KEEP_V4** for the finished set (no Rip restores; no type reintroduction).
+2. Roll root `test.rip` + `@rip-lang/testing` across the remaining packages (`gate` where security tests fit) — `x12`, `validate`, `swarm`, `print`, `script`, and `utils` are done.
+3. Continue the compare→strip→judge loop for remaining packages (`server`, `app`, `db`, `ui`, `ai`, …) — still excluding `stamp`, still without bringing types.
 4. Optional follow-up: gate standalone `GATE_*` bootstrap once v4 serving story is ready.
 5. Typing pass (separate): strip or regenerate types.
