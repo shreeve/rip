@@ -1453,11 +1453,13 @@ function findTopLevelArrowIdx(tokens) {
 // returns the literal as an ordered list of plain strings and
 // `{ts: text}` face-only pieces — a callable whose entry index
 // appears in `thisTypes` gains a `this: T` parameter as a face-only
-// segment, so the builder records it as a TS-only region and the
-// strip gate holds by construction. With `thisTypes` absent every
-// segment is plain — the JS emission joins them to the pinned literal.
+// segment, and a field transform whose index appears in `itTypes`
+// gains `it: NameRaw` the same way, so the builder
+// records both as TS-only regions and the strip gate holds by
+// construction. With those maps absent every segment is plain —
+// the JS emission joins them to the pinned literal.
 
-export function descriptorSegments(descriptor, schemaName, fns, adapterCode = null, thisTypes = null) {
+export function descriptorSegments(descriptor, schemaName, fns, adapterCode = null, thisTypes = null, itTypes = null) {
   const segs = [];
   const emit = (s) => {
     if (segs.length && typeof segs[segs.length - 1] === 'string') segs[segs.length - 1] += s;
@@ -1469,7 +1471,7 @@ export function descriptorSegments(descriptor, schemaName, fns, adapterCode = nu
   emit(`, entries: [`);
   descriptor.entries.forEach((e, i) => {
     if (i > 0) emit(', ');
-    entrySegments(e, fns.get(i), thisTypes?.get(i) ?? null, emit, emitTs);
+    entrySegments(e, fns.get(i), thisTypes?.get(i) ?? null, itTypes?.get(i) ?? null, emit, emitTs);
   });
   emit(']');
   // `schema :model, on: <expr>` — evaluated at declaration time in
@@ -1481,21 +1483,32 @@ export function descriptorSegments(descriptor, schemaName, fns, adapterCode = nu
 
 const fnText = (fnCode) => (typeof fnCode === 'string' ? fnCode : fnCode.code);
 
-// A compiled callable's code, with the face-only `this: T` parameter
-// inserted at the recorded parameter-list offset when the entry
-// carries a `this` type.
-function fnSegments(fnCode, thisType, emit, emitTs) {
-  if (thisType === null || typeof fnCode === 'string') {
+// A compiled callable/transform's code, with face-only parameter
+// annotations inserted at the recorded parameter-list offset:
+//   thisType → `this: T` (hooks/methods/scopes)
+//   itType   → `it: NameRaw` after the bare `it` param (field transforms)
+function fnSegments(fnCode, thisType, emit, emitTs, itType = null) {
+  if (fnCode === undefined || fnCode === null) return;
+  if (typeof fnCode === 'string' || (thisType === null && itType === null)) {
     emit(fnText(fnCode));
     return;
   }
   const { code, thisAt } = fnCode;
   emit(code.slice(0, thisAt));
-  emitTs(`this: ${thisType}${code[thisAt] === ')' ? '' : ', '}`);
-  emit(code.slice(thisAt));
+  let rest = code.slice(thisAt);
+  if (thisType !== null) {
+    emitTs(`this: ${thisType}${rest[0] === ')' ? '' : ', '}`);
+  }
+  if (itType !== null && /^it\b/.test(rest)) {
+    emit('it');
+    emitTs(`: ${itType}`);
+    emit(rest.slice(2));
+    return;
+  }
+  emit(rest);
 }
 
-function entrySegments(e, fnCode, thisType, emit, emitTs) {
+function entrySegments(e, fnCode, thisType, itType, emit, emitTs) {
   switch (e.tag) {
     case 'computed':
     case 'method':
@@ -1507,42 +1520,58 @@ function entrySegments(e, fnCode, thisType, emit, emitTs) {
       fnSegments(fnCode, thisType, emit, emitTs);
       emit('}');
       return;
+    case 'field':
+      // Transforms carry a face-only `it: NameRaw` via itTypes (#24);
+      // without itType the pinned JS literal path is unchanged.
+      if (itType !== null && fnCode !== undefined && typeof fnCode !== 'string') {
+        emit(`{${fieldEntryProps(e).join(', ')}, transform: `);
+        fnSegments(fnCode, null, emit, emitTs, itType);
+        emit('}');
+        return;
+      }
+      emit(entryLiteral(e, fnCode));
+      return;
     default:
       emit(entryLiteral(e, fnCode));
   }
+}
+
+function fieldEntryProps(e) {
+  const obj = [
+    `tag: "field"`,
+    `name: ${JSON.stringify(e.name)}`,
+    `modifiers: ${JSON.stringify(e.modifiers)}`,
+    `typeName: ${JSON.stringify(e.typeName)}`,
+    `array: ${e.array ? 'true' : 'false'}`,
+  ];
+  if (e.unique) obj.push('unique: true');
+  if (e.literals) obj.push(`literals: ${JSON.stringify(e.literals)}`);
+  if (e.coerce) {
+    obj.push('coerce: true');
+    if (e.coercer) obj.push(`coercer: ${JSON.stringify(e.coercer)}`);
+  }
+  if (e.constraints) {
+    const c = [];
+    if (e.constraints.min !== undefined) c.push(`min: ${serializeLiteral(e.constraints.min)}`);
+    if (e.constraints.max !== undefined) c.push(`max: ${serializeLiteral(e.constraints.max)}`);
+    if (e.constraints.default !== undefined) c.push(`default: ${serializeLiteral(e.constraints.default)}`);
+    if (e.constraints.regex !== undefined) c.push(`regex: ${e.constraints.regex.toString()}`);
+    if (c.length) obj.push(`constraints: {${c.join(', ')}}`);
+  }
+  if (e.attrs) {
+    // Attr keys serialize in SORTED order, never source order —
+    // descriptor diffs must reflect semantic change, not
+    // key reordering. (Byte-neutral while `was` is the only key.)
+    obj.push(`attrs: {${Object.keys(e.attrs).sort().map((k) => `${k}: ${serializeLiteral(e.attrs[k])}`).join(', ')}}`);
+  }
+  return obj;
 }
 
 function entryLiteral(e, fnCode) {
   if (fnCode !== undefined) fnCode = fnText(fnCode);
   switch (e.tag) {
     case 'field': {
-      const obj = [
-        `tag: "field"`,
-        `name: ${JSON.stringify(e.name)}`,
-        `modifiers: ${JSON.stringify(e.modifiers)}`,
-        `typeName: ${JSON.stringify(e.typeName)}`,
-        `array: ${e.array ? 'true' : 'false'}`,
-      ];
-      if (e.unique) obj.push('unique: true');
-      if (e.literals) obj.push(`literals: ${JSON.stringify(e.literals)}`);
-      if (e.coerce) {
-        obj.push('coerce: true');
-        if (e.coercer) obj.push(`coercer: ${JSON.stringify(e.coercer)}`);
-      }
-      if (e.constraints) {
-        const c = [];
-        if (e.constraints.min !== undefined) c.push(`min: ${serializeLiteral(e.constraints.min)}`);
-        if (e.constraints.max !== undefined) c.push(`max: ${serializeLiteral(e.constraints.max)}`);
-        if (e.constraints.default !== undefined) c.push(`default: ${serializeLiteral(e.constraints.default)}`);
-        if (e.constraints.regex !== undefined) c.push(`regex: ${e.constraints.regex.toString()}`);
-        if (c.length) obj.push(`constraints: {${c.join(', ')}}`);
-      }
-      if (e.attrs) {
-        // Attr keys serialize in SORTED order, never source order —
-        // descriptor diffs must reflect semantic change, not
-        // key reordering. (Byte-neutral while `was` is the only key.)
-        obj.push(`attrs: {${Object.keys(e.attrs).sort().map((k) => `${k}: ${serializeLiteral(e.attrs[k])}`).join(', ')}}`);
-      }
+      const obj = fieldEntryProps(e);
       if (fnCode) obj.push(`transform: ${fnCode}`);
       return `{${obj.join(', ')}}`;
     }

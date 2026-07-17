@@ -25,8 +25,10 @@
 //     the instance type for method/computed/derived/hook (the
 //     runtime binds `this` to the instance), the query type for
 //     scope/defaultScope (the runtime applies them to a builder);
-//     ensure predicates and field transforms are honestly absent
-//     (the runtime calls them unbound)
+//     ensure predicates stay unbound (no `this`); field transforms
+//     get `it: NameRaw` — the runtime passes the
+//     whole raw input, so Raw is the data shape plus transform-only
+//     wire keys, never the post-parse `In`/data alias alone
 //
 // Field types map through the intrinsic vocabulary below; a field
 // naming a schema declared in the SAME module renders that name (the
@@ -309,6 +311,61 @@ const fieldProps = (descriptor, known) => {
   return props;
 };
 
+// First-level `it.Prop` names in a field transform's token slice —
+// wire keys the Raw type must admit so remaps type-check. Nested
+// `.toLowerCase` etc. are PROPERTY after PROPERTY, not after `it`.
+const scanItProps = (tokens) => {
+  const keys = [];
+  if (!Array.isArray(tokens)) return keys;
+  for (let i = 0; i + 2 < tokens.length; i++) {
+    const a = tokens[i], b = tokens[i + 1], c = tokens[i + 2];
+    if (a?.kind === 'IDENTIFIER' && a.value === 'it' &&
+        b?.kind === '.' && c?.kind === 'PROPERTY' && typeof c.value === 'string') {
+      keys.push(c.value);
+    }
+  }
+  return keys;
+};
+
+// Wire input shape for field transforms: data field props plus
+// transform-only wire keys (typed as the owning field's value type so
+// method chains check; not `any`). Sibling field names already in the
+// data shape are not duplicated.
+const rawProps = (descriptor, known) => {
+  const props = fieldProps(descriptor, known);
+  const seen = new Set();
+  for (const e of descriptor.entries) {
+    if (e.tag === 'field') seen.add(e.name);
+  }
+  for (const e of descriptor.entries) {
+    if (e.tag !== 'field' || !e.transformTokens) continue;
+    const ft = fieldType(e, known);
+    for (const key of scanItProps(e.transformTokens)) {
+      if (seen.has(key)) continue;
+      seen.add(key);
+      props.push(`${key}: ${ft}`);
+    }
+  }
+  return props;
+};
+
+// When any field carries a transform, emit NameRaw and map each
+// transform entry index → that alias for face-only `it: NameRaw`.
+const withTransformRaw = (name, descriptor, known, story) => {
+  const itTypes = new Map();
+  descriptor.entries.forEach((e, i) => {
+    if (e.tag === 'field' && e.transformTokens) itTypes.set(i, `${name}Raw`);
+  });
+  if (itTypes.size === 0) return { ...story, itTypes };
+  const rawName = `${name}Raw`;
+  return {
+    ...story,
+    aliasLines: [`type ${rawName} = ${braced(rawProps(descriptor, known))};`, ...story.aliasLines],
+    typeNames: [...story.typeNames, rawName],
+    itTypes,
+  };
+};
+
 // `& Mixin` intersections for @mixin directives whose target is a
 // same-module :mixin schema (unknown targets contribute nothing —
 // the runtime resolves them late; the type surface stays honest
@@ -404,6 +461,7 @@ const braced = (props) => (props.length ? `{ ${props.join('; ')} }` : '{}');
 //                binding deliberately stays untyped (:mixin — its
 //                runtime value is not a user surface)
 //   thisTypes  — entry index → the callable's `this` type ()
+//   itTypes    — field-transform entry index → `NameRaw` (wire input)
 //   typeNames  — every type name these lines bind (collision fodder)
 export function schemaTypeStory(decl, byName, known) {
   const { name, descriptor } = decl;
@@ -427,6 +485,7 @@ export function schemaTypeStory(decl, byName, known) {
         `parseAsync(data: unknown): Promise<${name}>; safeAsync(data: unknown): Promise<SchemaSafeResult<${name}>>; ` +
         `okAsync(data: unknown): Promise<boolean>; toJSONSchema(): Record<string, unknown>; array: ArraySchema<${name}>; }`,
       thisTypes: new Map(),
+      itTypes: new Map(),
       typeNames: [name],
     };
   }
@@ -444,17 +503,18 @@ export function schemaTypeStory(decl, byName, known) {
         `parseAsync(data: unknown): Promise<${name}>; safeAsync(data: unknown): Promise<SchemaSafeResult<${name}>>; ` +
         `okAsync(data: unknown): Promise<boolean>; toJSONSchema(): Record<string, unknown>; array: ArraySchema<${name}>; }`,
       thisTypes: new Map(),
+      itTypes: new Map(),
       typeNames: [name],
     };
   }
 
   if (kind === 'mixin') {
-    return {
+    return withTransformRaw(name, descriptor, known, {
       aliasLines: [`type ${name} = ${intersect(braced(fieldProps(descriptor, known)), mixinRefs(descriptor, byName))};`],
       constType: null,
       thisTypes: new Map(),
       typeNames: [name],
-    };
+    });
   }
 
   // The fielded instance kinds. Behavior members split Out from In:
@@ -510,7 +570,7 @@ export function schemaTypeStory(decl, byName, known) {
     const thisTypes = new Map();
     for (const i of instanceIdx) thisTypes.set(i, name);
     for (const i of scopeIdx) thisTypes.set(i, queryType);
-    return { aliasLines, constType, thisTypes, typeNames };
+    return withTransformRaw(name, descriptor, known, { aliasLines, constType, thisTypes, typeNames });
   }
 
   // :input / :shape — collapse to one bare name when instance === data.
@@ -518,7 +578,7 @@ export function schemaTypeStory(decl, byName, known) {
   for (const i of instanceIdx) thisTypes.set(i, name);
   if (behavior.length) {
     const dataName = `${name}Data`;
-    return {
+    return withTransformRaw(name, descriptor, known, {
       aliasLines: [
         `type ${dataName} = ${dataType};`,
         `type ${name} = ${dataName} & ${braced(behavior)};`,
@@ -526,14 +586,14 @@ export function schemaTypeStory(decl, byName, known) {
       constType: `Schema<${name}, ${dataName}>`,
       thisTypes,
       typeNames: [dataName, name],
-    };
+    });
   }
-  return {
+  return withTransformRaw(name, descriptor, known, {
     aliasLines: [`type ${name} = ${dataType};`],
     constType: `Schema<${name}, ${name}>`,
     thisTypes,
     typeNames: [name],
-  };
+  });
 }
 
 // ── the module story ─────────────────────────────────────────────────
