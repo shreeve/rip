@@ -170,18 +170,37 @@ export async function openSession(files) {
     // So poll until the list is live (non-empty), and only then let the
     // caller judge membership. An empty result after the full wait is
     // returned as-is: that is a real answer, and a test may assert on it.
-    async completions(name, line, character, { tries = 20, every = 300 } = {}) {
+    //
+    // `poll: false` — single shot for probes where empty is a meaningful
+    // wrong answer (do not spin waiting for members that never arrive).
+    async completions(name, line, character, { tries = 20, every = 300, poll = true } = {}) {
       let labels = [];
-      for (let i = 0; i < tries; i++) {
+      const limit = poll ? tries : 1;
+      for (let i = 0; i < limit; i++) {
         const r = await client.request('textDocument/completion', {
           textDocument: { uri: uri(name) }, position: { line, character },
         }).catch(() => null);
         const items = Array.isArray(r) ? r : (r?.items ?? []);
         labels = items.map((it) => it.label);
         if (labels.length) return labels;
+        if (!poll) return labels;
         await sleep(every);
       }
       return labels;
+    },
+
+    // Signature help at a position, or null. Polls briefly while tsgo
+    // settles; a persistent null is returned as-is.
+    async signatureHelp(name, line, character, { tries = 20, every = 300 } = {}) {
+      let last = null;
+      for (let i = 0; i < tries; i++) {
+        last = await client.request('textDocument/signatureHelp', {
+          textDocument: { uri: uri(name) }, position: { line, character },
+        }).catch(() => null);
+        if (last?.signatures?.length) return last;
+        await sleep(every);
+      }
+      return last;
     },
 
     // Semantic tokens for an open doc, decoded against the server's own legend

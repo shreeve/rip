@@ -36,7 +36,6 @@ Ordered by **how many rip users a gap reaches**, then by how badly the editor mi
 | # | Finding | Tags | Gate |
 | --- | --- | --- | --- |
 | [21](#21-an-identifier-read-carries-no-source-span) | Identifier reads carry no source span — hover, definition, diagnostics, tokens | `editor`, `compiler` | `member` + `survival` — **red by design**, token surface only; the other three **unwatched** |
-| [22](#22-completion-and-signature-help-fail-on-an-incomplete-expression) | Completion & signature help fail on an incomplete expression | `editor`, `compiler` | **none** — a content audit for each would catch them; neither built |
 | [8](#8-auto-import-is-closure-scoped) | Auto-import closure-scoped | `capability` | `auto-import` — the gap is an **expected failure** |
 | [19](#19-a-directive-inside-a-render-block-never-reaches-the-face) | Inline render-block directive lost from the face | `directive`, `compiler` | **none** — the audit's `directives` would catch it; no fixture uses the shape |
 | [18](#18-a-directive-blinds-the-whole-indented-block) | A directive blinds the whole indented block | `directive` | **none** — over-suppression is what makes `verdict` pass |
@@ -46,51 +45,13 @@ Ordered by **how many rip users a gap reaches**, then by how badly the editor mi
 
 **Everything down to #8 reaches every rip user — including one who never annotates anything.** Permissive mode still infers, so `count := 0` is a `number` whether or not you asked for one, and the remaining holes above are mode-independent where they apply.
 
-**Within that band the axis is *silently wrong* over *visibly missing*.** #21 ranks first — it never lets a bug through (the check is sound; only the answer's *position* is wrong), but hover names the wrong symbol without hedging, which is silent in the same way, and it reaches 31% of medlabs' identifier reads. #22 is the most *felt*, wrong at every dot; #8 fails visibly and harmlessly.
+**Within that band the axis is *silently wrong* over *visibly missing*.** #21 ranks first — it never lets a bug through (the check is sound; only the answer's *position* is wrong), but hover names the wrong symbol without hedging, which is silent in the same way, and it reaches 31% of medlabs' identifier reads. #8 fails visibly and harmlessly.
 
 **Below #8 the audience collapses.** #19 and #18 eat real errors, but only for someone writing directives — medlabs writes zero. #13 mis-resolves config, but only in a monorepo. #23 reaches nobody: the probe is correct and the editor is right. **#16 is blocked**, not deprioritized — it sits last because no amount of work here moves it, not because it matters least.
 
 **The forced edge:** #19 lands before #18. Narrowing the directive's range (#18) makes the inline render-block directive the only way to acknowledge an error inside a render element, and today that hatch works only by accident — the face never receives it (#19). #19 ranks here on #18's severity, not its own; alone it is latent.
 
 ## Findings
-
-### 22. Completion and signature help fail on an incomplete expression
-
-The broker builds its TypeScript face from a **successful** compile, so it can serve a request only where the source parses — but the two features whose trigger is an *incomplete* expression fire precisely where it does not. The trigger byte is the same byte that breaks the parse: type a member-access dot and pause (`items.‸`), or sit inside an open call (`add(‸`), and the buffer no longer parses, so no face carries the member-access / call context and the request has nothing to map into. rip's compiler throws where TypeScript's error-tolerant parser recovers — which is why the hand-written twin serves the correct answer on the identical incomplete text and the broker does not. What you actually get instead is nothing, or (for completion) the wrong list; the popup works only once the expression is complete enough to parse, which is backwards from how these features are used.
-
-**Two surfaces, one root.** Member completion at a bare dot and signature help inside an open call. Both are un-parseable at the cursor (`bin/rip --ts` on `items.` → `Unexpected end of input — expected PROPERTY`; on `add(` and `add(1,` → a parse error at the `(`), so neither has a face. They differ only in fallback: completion has a statement-context one (it serves *something* wrong), signature help has none (it serves plain null).
-
-**Status.** ⬜ **Open** (2026-07-15) — no fix, no gate. A completion content audit (twin-oracled on the item set + resolved `detail`) and a signature-help audit (on the label + `activeParameter`) would catch the two surfaces and, sharing this root, retire together the day the parse gap closes — but both are unbuilt, and the extension tests exercise only the parseable form of each (below), which is why the suite is green.
-
-**Driven — member completion** (2026-07-15), the real server (`server.js --stdio`, `onCompletion`) against tsgo on the twin, `items` typed `number[]`, completion right after the dot:
-
-| buffer at the dot | server | result |
-| --- | --- | --- |
-| `x = items.` — fresh buffer, never compiled | rip broker | **empty** — no items |
-| `x = items.` — after a good compile, dot just typed | rip broker | **stale scope list** — in-scope names + ambient globals (`items`, `count`, `Date`, `Map`, …), **no members** |
-| `x = items.map` — parseable | rip broker | **correct** — `map`, `filter`, `join`, … |
-| `let x = items.` — same trailing dot | tsgo (twin) | **correct** — the same members |
-
-The two broker symptoms are the two branches of the staleness guard — [onCompletion](../../packages/vscode/src/server.js) maps the cursor into the **last good face** (the version before the dot, plain statement context → the in-scope identifier list) or, on a buffer that never compiled, nothing at all. Neither is the member list; make the expression parse (`items.map`) and a real face exists, member completion then matching the twin exactly.
-
-**Driven — signature help** (2026-07-15), the real server (`onSignatureHelp`) against the twin, `add` typed `(a: number, b: number): number`, cursor inside the call:
-
-| call state at the cursor | server | result |
-| --- | --- | --- |
-| `r = add(` — unclosed, fresh | rip broker | **null** |
-| `r = add(1, ` — unclosed mid-args, fresh | rip broker | **null** |
-| `r = add(1, 2)` — closed, cursor inside the 2nd arg | rip broker | **correct** — `add(a: number, b: number): number`, activeParameter 1 |
-| closed, then backspaced to `r = add(1, ` | rip broker | **null** (no fallback) |
-| `let r = add(1, ` — unclosed mid-args | tsgo (twin) | **correct** — same label, activeParameter 1 |
-
-Signature help is the harsher surface: with no statement-context fallback, every open-paren state returns plain null, prior compile or not. It works only on the **closed** call `add(1, 2)` — exactly when it is no longer needed — where the response passes through correctly (signatures / activeParameter untouched, the design the bodiless-overload note in `onSignatureHelp` relies on).
-
-**Why the suite missed it.** Both tests use the **already-complete** form — the one state that has a face. Member completion is tested at `msg.sub‸` (a complete member expression; [editor-features.test.js](../../packages/vscode/test/editor-features.test.js) "member completion serves with resolve-lazy detail") and signature help at a closed `pick(1, 2)` ("active parameter indices hold across bodiless overload rows"). `msg.sub` and `pick(1, 2)` parse; `msg.` and `pick(` do not. The twin proves the correct answer was reachable on the identical incomplete text the whole time.
-
-**vs v3 — established (driven both surfaces, 2026-07-15).** v3 type-checks in-process through the JS TypeScript LanguageService; the verdict **splits by surface**:
-
-- **Member completion — v4 regression.** v3 serves the correct members at the bare dot — driven, fresh `x = items.` → the full `number[]` member list (40 items, `map`/`filter`/…), no prior good compile needed. Its `onCompletion` (rip-lang 3.17.5, `packages/vscode/src/lsp.js`) rewrites `word.` → `word.__rip__` before compiling, so the compiler sees a real member access, recompiling that fixed-up text on the fly (`catch {}` on failure). v4 has no such rewrite, so the dot never yields a face — the whole of the regression.
-- **Signature help — split.** *Fresh* open paren is **inherited**: v3 has no equivalent open-paren fixup, so `r = add(` and `r = add(1,` compile-error (`missing )`) and return null in both. But the common interactive case — a call that *was* valid, now mid-edit — is a **v4 regression**: v3 falls back to the last good compile and `getSignatureHelpItems` still resolves the call (driven: closed `add(1, 2)` → backspace to `add(1, ` → `add(a: number, b: number): number`, activeParameter 1), where v4's stale path returns null.
 
 ### 19. A directive inside a render block never reaches the face
 
@@ -281,3 +242,4 @@ Verified, and gone. **The gate is the record** — each row's constraint is stat
 | 20 | Render branch/loop bodies unchecked (`ctx` / loop params) | `untyped-params` |
 | 24 | Schema block implicit `it` untyped | `untyped-params`, audit `strict` |
 | 25 | Event handler parameters get no event type | `untyped-params` |
+| 22 | Completion & signature help fail on an incomplete expression | `incomplete-expressions` |
