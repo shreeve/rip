@@ -34,7 +34,7 @@
 // joins the same segments as plain text — one assembly, two
 // consumers, no drift.
 
-import { tidyType, normalizeTypeText, renderParams, optionalReader } from './typetext.js';
+import { tidyType, normalizeTypeText, renderParam, renderParams, optionalReader } from './typetext.js';
 import { attributeNamesFor } from './dom-vocab.js';
 
 const isNode = (x) => Array.isArray(x);
@@ -76,11 +76,41 @@ const awaitsIn = (x) => {
 // member list the renderers consume. Statements that carry no type
 // story (render, effects) skip; anything unrecognized skips rather
 // than guessing (the JS emission is the rejection authority).
+// Pre-scan a component render for `@event: @method` / bare method-name
+// bindings so companion + .d.ts method params share the same
+// HTMLElementEventMap annotation the class method face injects (#25).
+export function scanEventMethodTypes(renderNode, methodNames) {
+  const map = new Map();
+  if (renderNode == null || !(methodNames instanceof Set) || methodNames.size === 0) {
+    return map;
+  }
+  const visit = (node) => {
+    if (!isNode(node)) return;
+    if ((node[0] === ':' || node[0] === 'void-pair') && node.length === 3) {
+      const [, key, value] = node;
+      if (isNode(key) && key[0] === '.' && key[1] === 'this' && typeof key[2] === 'string') {
+        const eventName = key[2];
+        let methodName = null;
+        if (isNode(value) && value[0] === '.' && value[1] === 'this' && typeof value[2] === 'string') {
+          methodName = value[2];
+        } else if (typeof value === 'string' && methodNames.has(value)) {
+          methodName = value;
+        }
+        if (methodName && !map.has(methodName)) map.set(methodName, eventName);
+      }
+    }
+    for (let i = 1; i < node.length; i++) visit(node[i]);
+  };
+  visit(renderNode);
+  return map;
+}
+
 export function componentTypeInfo(stores, source, node) {
   const [, parent, body] = node;
   const extendsTag = typeof parent === 'string' ? parent : null;
   const stmts = isBlock(body) ? body.slice(1) : [];
   const members = [];
+  let renderNode = null;
 
   const semantic = (n) => {
     if (!isNode(n)) return null;
@@ -107,7 +137,11 @@ export function componentTypeInfo(stores, source, node) {
 
   const classify = (stmt) => {
     const kind = semantic(stmt);
-    if (kind === 'render' || kind === 'effect') return;
+    if (kind === 'render') {
+      if (renderNode === null) renderNode = stmt;
+      return;
+    }
+    if (kind === 'effect') return;
     if (kind === 'offer') {
       classify(stmt[1]);
       return;
@@ -213,10 +247,14 @@ export function componentTypeInfo(stores, source, node) {
   // typeof).
   const siblings = new Set(members.map((m) => m.name));
   for (const m of members) m.siblings = siblings;
+  const methodNames = new Set(
+    members.filter((m) => m.kind === 'method').map((m) => m.name),
+  );
   return {
     extendsTag,
     members,
     roleText,
+    eventMethodTypes: scanEventMethodTypes(renderNode, methodNames),
     // The shared optionality reader, carried on `info` because BOTH
     // signature emitters render a component's instance type through
     // the same instanceTypeLines() — so a dropped `?` here is dropped
@@ -476,16 +514,32 @@ export const propsTypeText = (info) => segmentsText(propsTypeSegments(info));
 // call never draws TS2339), then the __Component API the runtime
 // provides (mount returns the instance; static mount mirrors it on
 // the constructor type).
+// Companion / .d.ts method params: the first bare (untyped) parameter of a
+// method bound to `@event: @method` in render types as HTMLElementEventMap
+// — same datum the class method face injects. Author
+// typed-var params keep renderParam's spelling.
+const renderParamsWithEvent = (params, isOptional, eventName) => {
+  if (!eventName || !Array.isArray(params) || params.length === 0) {
+    return renderParams(params, isOptional);
+  }
+  const first = params[0];
+  if (typeof first !== 'string') return renderParams(params, isOptional);
+  const rest = params.slice(1).map((p) => renderParam(p, isOptional));
+  return `(${first}: HTMLElementEventMap['${eventName}']${rest.length ? `, ${rest.join(', ')}` : ''})`;
+};
+
 export function instanceTypeLines(info, selfType) {
   const lines = [];
   let hasChildren = false;
+  const eventTypes = info.eventMethodTypes;
   for (const m of info.members) {
     if (m.name === 'children') hasChildren = true;
     if (m.kind === 'method' || m.kind === 'hook') {
       const declared = info.roleText(m.func, 'returnType');
       const base = declared ?? (m.isVoid ? 'void' : 'any');
       const ret = awaitsIn(m.func[2]) && !/^Promise\s*</.test(base) ? `Promise<${base}>` : base;
-      lines.push(`${m.name}${renderParams(m.func[1], info.isOptionalParam)}: ${ret};`);
+      const event = eventTypes instanceof Map ? eventTypes.get(m.name) : undefined;
+      lines.push(`${m.name}${renderParamsWithEvent(m.func[1], info.isOptionalParam, event)}: ${ret};`);
       continue;
     }
     lines.push(`${m.kind === 'readonly' ? 'readonly ' : ''}${m.name}${segmentsText(memberTypeSegments(m, ': '))};`);

@@ -208,10 +208,11 @@ describe('schema type story on the TS face', () => {
     expect(f.code).not.toContain('MQuery');
   });
 
-  test('field transforms stay uninjected (the runtime calls them unbound)', () => {
-    const f = face('S = schema :shape\n  a! string, -> it.trim()');
-    expect(f.code).toContain('transform: (function(it) {');
-    expect(f.code).not.toContain('this:');
+  test('field transforms get it: NameRaw (wire), never this (runtime calls them unbound)', () => {
+    const f = face('S = schema :shape\n  a! string, -> it.A.trim()');
+    expect(f.code).toContain('type SRaw = { a: string; A: string };');
+    expect(f.code).toContain('transform: (function(it: SRaw) {');
+    expect(f.code).not.toMatch(/transform: \(function\(this:/);
   });
 
   test('a :shape callable gets the instance this too', () => {

@@ -29,7 +29,7 @@ import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParam
 import { TEMPLATE_TAGS, SVG_ONLY_TAGS, DOM_EVENTS, BOOLEAN_ATTRS, knownBareAttribute } from './dom-vocab.js';
 import {
   COMPONENT_HOOKS, COMPONENT_RUNTIME_FIELDS, componentTypeInfo, memberDeclareSegments, isDeclarableMember,
-  propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType,
+  propsTypeSegments, propsTypeText, propsParamOptional, instanceTypeLines, containerType, scanEventMethodTypes,
   syntacticLiteralType,
 } from './component-types.js';
 
@@ -235,6 +235,10 @@ class Emitter {
     // one place the member model is authoritative), consumed by the
     // companion-interface emission after the binding statement.
     this.componentInfo = new Map();
+    // While emitting an inline `@event: (e) -> …` handler (TS face),
+    // the first bare parameter receives `HTMLElementEventMap['event']`.
+    // Cleared after the handler expression.
+    this.pendingEventType = null;
     // Module-scope component binding names → their component node
     // (BOTH modes): a name bound to a second component rejects — the
     // rebinding clobbers the first class silently, and the typed
@@ -664,6 +668,18 @@ class Emitter {
   // Does `name` read (or write) as a reactive container here?
   isReactiveName(name) {
     return this.resolveBareRead(name) === 'reactive';
+  }
+
+  // Can a loop iterable support a face `typeof …[number]` element
+  // annotation? Unresolved bare names (`itemsz`) must not — they
+  // already error at `__reconcile`, and a second `typeof itemsz` on
+  // the factory leaks past a single `@ts-expect-error`.
+  iterTypeable(iter) {
+    if (typeof iter === 'string') {
+      const r = this.resolveBareRead(iter);
+      return r === 'reactive' || r === 'member-reactive' || r === 'member';
+    }
+    return isNode(iter);
   }
 
   // The computed (`~=`) subset of the innermost frame that binds
@@ -2769,7 +2785,8 @@ class Emitter {
       this.b.emit('__schema(');
       this.mark(node, 'body', () => {
         const segments = descriptorSegments(
-          descriptor, schemaName, fns, fns.get('adapter') ?? null, story?.thisTypes ?? null);
+          descriptor, schemaName, fns, fns.get('adapter') ?? null,
+          story?.thisTypes ?? null, story?.itTypes ?? null);
         for (const seg of segments) {
           if (typeof seg === 'string') this.b.emit(seg);
           else this.b.tsOnly(() => this.b.emit(seg.ts));
@@ -6485,7 +6502,11 @@ class Emitter {
       this.scopes.pop();
       this.b.emit(`${pad}}\n`);
 
-      // Methods, then lifecycle hooks.
+      // Methods, then lifecycle hooks. `@event: @method` bindings were
+      // scanned into tsInfo.eventMethodTypes (componentTypeInfo) so the
+      // first bare param gets `HTMLElementEventMap['event']` (#25).
+      const eventMethodTypes = tsInfo?.eventMethodTypes ??
+        scanEventMethodTypes(renderNode, new Set(methods.map((m) => m.name)));
       const emitCallable = ({ name, func, isVoid, node: owner }) => {
         const [, params, block] = func;
         this.b.emit(pad);
@@ -6494,7 +6515,7 @@ class Emitter {
           if (Emitter.containsYield(block)) this.b.emit('*');
           this.mark(owner, 'target', () => this.mark(owner, 'key', () => this.b.emit(name)));
           this.b.emit('(');
-          this.emitParams(params);
+          this.emitParams(params, { eventType: eventMethodTypes.get(name) });
           this.b.emit(')');
           this.tsReturnAnnotation(func, Emitter.containsAwait(block), isVoid, owner);
           this.b.emit(' ');
@@ -7822,7 +7843,9 @@ class Emitter {
       Emitter.collectLeafNames(value, evUsed);
       const ev = Emitter.mintName('e', evUsed);
             this.renderLine(pair, () => {
-        this.b.emit(`if (${instVar}) ${elVar}.addEventListener('${event}', (${ev}) => ${this.runtimeName('__batch')}(() => (`);
+        this.b.emit(`if (${instVar}) ${elVar}.addEventListener('${event}', (`);
+        this.emitEventParam(ev, event);
+        this.b.emit(`) => ${this.runtimeName('__batch')}(() => (`);
         this.tsHandlerCast(() => this.withExpression(() => this.expr(value)));
         this.b.emit(`)(${ev})))`);
       });
@@ -7940,7 +7963,9 @@ class Emitter {
         const ev = Emitter.mintName('e', evUsed);
                 this.renderLine(pair, () => {
           const self = this.renderSelf ?? 'this';
-          this.b.emit(`${el}.addEventListener('${eventName}', (${ev}) => ${this.runtimeName('__batch')}(() => `);
+          this.b.emit(`${el}.addEventListener('${eventName}', (`);
+          this.emitEventParam(ev, eventName);
+          this.b.emit(`) => ${this.runtimeName('__batch')}(() => `);
           if (typeof value === 'string' && this.renderVarKind(value) === null &&
               this.cframes[this.cframes.length - 1].members.has(value)) {
             if (this.ts) this.b.tsOnly(() => this.b.emit('('));
@@ -7949,7 +7974,16 @@ class Emitter {
             this.b.emit(`(${ev})`);
           } else {
             this.b.emit('(');
-            this.tsHandlerCast(() => this.withExpression(() => this.expr(value)));
+            // Inline `@event: (e) -> …`: stamp the event name so emitParams
+            // annotates the first bare param. Author-typed
+            // params keep their own annotation.
+            const prevEvent = this.pendingEventType;
+            this.pendingEventType = eventName;
+            try {
+              this.tsHandlerCast(() => this.withExpression(() => this.expr(value)));
+            } finally {
+              this.pendingEventType = prevEvent;
+            }
             this.b.emit(`)(${ev})`);
           }
           this.b.emit('))');
@@ -8463,7 +8497,16 @@ class Emitter {
       this.checkSetupLocalRefs(keyExpr, node);
       this.checkCrossScopeLocals(keyExpr, node);
     }
-    const rec = this.walkFactory(body, 'loop', node, { itemVar, indexVar, reactiveSource });
+    // Stash `iter` on the loop entry so emitFactory can type `item` as
+    // an element of that iterable. Skip the
+    // typeof annotation when the iterable does not resolve — a typo
+    // iterable (`itemsz`) already errors at the reconcile site under
+    // `@ts-expect-error`; repeating `typeof itemsz` on the factory
+    // would leak a second diagnostic past the single directive.
+    const rec = this.walkFactory(body, 'loop', node, {
+      itemVar, indexVar, reactiveSource, iter,
+      iterTypeable: this.iterTypeable(iter),
+    });
     if (keyExpr !== null) {
       // The keyFn emits in the ENCLOSING setup scope with (item, i)
       // params — a render local declared inside the loop BODY does
@@ -8649,7 +8692,20 @@ class Emitter {
       this.withExpression(() => this.expr(iter));
       this.b.emit(`, ${self}, ${self}.${rec.name}, `);
       if (keyExpr !== null) {
-        this.b.emit(`(${itemVar}, ${indexVar}) => `);
+        // keyFn params mirror the loop factory's item/index types (#20),
+        // but only when the iterable resolves (same itemsz rule).
+        const typeItem = this.ts && rec.loopStack[rec.loopStack.length - 1]?.iterTypeable;
+        this.b.emit(`(${itemVar}`);
+        if (typeItem) {
+          this.b.tsOnly(() => {
+            this.b.emit(': NonNullable<typeof ');
+            this.withExpression(() => this.expr(iter));
+            this.b.emit('>[number]');
+          });
+        }
+        this.b.emit(`, ${indexVar}`);
+        if (this.ts) this.b.tsOnly(() => this.b.emit(': number'));
+        this.b.emit(') => ');
         this.withBindings([itemVar, indexVar], () => this.withExpression(() => {
           const wrap = Emitter.needsGrouping(keyExpr, 'operand') || isObject(keyExpr);
           if (wrap) this.b.emit('(');
@@ -8694,9 +8750,68 @@ class Emitter {
     const kidC = rec.kidsVar !== null ? Emitter.mintName('__c', used) : null;
     const kidE = rec.kidsVar !== null ? Emitter.mintName('__e', used) : null;
     const needsP = !rec.isStatic;
+    // Face-only types for factory params: `ctx` is the
+    // component instance (`this` at the call site). `p` shadows that
+    // name inside the returned handle, so a TS-only alias carries the
+    // type across — a JS capture would break stripFace. Loop `item` /
+    // `i` (and threaded outers) type from each loop entry's iterable
+    // and `number` respectively.
+    const selfTypeAlias = this.ts ? Emitter.mintName('__Self', used) : null;
+    // logical param → header type strategy. Element typeof appears only
+    // on the factory header (once); p() reuses `typeof headerParam`
+    // aliases so a typo iterable cannot multiply diagnostics.
+    const loopTypeByVar = new Map();
+    if (this.ts) {
+      for (const v of rec.loopStack) {
+        if (v.indexVar) loopTypeByVar.set(v.indexVar, { kind: 'number' });
+        if (v.itemVar && v.iter != null && v.iterTypeable) {
+          loopTypeByVar.set(v.itemVar, { kind: 'elem', iter: v.iter });
+        }
+      }
+    }
+    const emitFactoryParams = (names, { ctxType, phase }) => {
+      for (let i = 0; i < names.length; i++) {
+        if (i > 0) this.b.emit(', ');
+        this.b.emit(names[i]);
+        if (!this.ts) continue;
+        if (i === 0 && ctxType !== null) {
+          this.b.tsOnly(() => this.b.emit(`: ${ctxType}`));
+          continue;
+        }
+        const logical = i === 0 ? null : rec.paramNames[i - 1];
+        if (logical == null) continue;
+        const typed = loopTypeByVar.get(logical);
+        if (typed === undefined) continue;
+        this.b.tsOnly(() => {
+          if (typed.kind === 'number') {
+            this.b.emit(': number');
+          } else if (phase === 'p' && typed.alias) {
+            this.b.emit(`: ${typed.alias}`);
+          } else if (typed.kind === 'elem') {
+            this.b.emit(': NonNullable<typeof ');
+            this.withExpression(() => this.expr(typed.iter));
+            this.b.emit('>[number]');
+          }
+        });
+      }
+    };
     this.mark(renderNode, '$self', () => {
       this.withRecordContext(rec, () => {
-        this.b.emit(`${pad}${rec.name}(${headerParams.join(', ')}) {\n`);
+        this.b.emit(`${pad}${rec.name}(`);
+        emitFactoryParams(headerParams, { ctxType: 'this', phase: 'header' });
+        this.b.emit(`) {\n`);
+        if (selfTypeAlias !== null) {
+          this.b.tsOnly(() => this.b.emit(`${p2}type ${selfTypeAlias} = typeof ${self};\n`));
+        }
+        if (this.ts) {
+          for (const [logical, typed] of loopTypeByVar) {
+            if (typed.kind !== 'elem') continue;
+            const headerName = logical; // own/outer names are the header spellings
+            const alias = Emitter.mintName(`__T_${logical}`, used);
+            typed.alias = alias;
+            this.b.tsOnly(() => this.b.emit(`${p2}type ${alias} = typeof ${headerName};\n`));
+          }
+        }
         if (rec.vars.size > 0) this.b.emit(`${p2}let ${[...rec.vars].join(', ')};\n`);
         if (rec.kidsVar !== null) {
           this.b.emit(`${p2}let ${rec.kidsVar}`);
@@ -8739,7 +8854,12 @@ class Emitter {
         this.b.emit(`${p3}},\n`);
         // p(): re-bind the row, then dispose-and-recreate the patch
         // frame's effects under the owner push.
-        this.b.emit(`${p3}p(${(needsP ? pParams : headerParams).join(', ')}) {\n`);
+        this.b.emit(`${p3}p(`);
+        emitFactoryParams(needsP ? pParams : headerParams, {
+          ctxType: selfTypeAlias,
+          phase: 'p',
+        });
+        this.b.emit(`) {\n`);
         if (needsP && rec.paramNames.length > 0) {
           this.b.emit(`${p4}${rec.paramNames.map((n, i) => `${n} = ${pParams[i + 1]};`).join(' ')}\n`);
         }
@@ -8893,9 +9013,20 @@ class Emitter {
     Emitter.collectLeafNames(value, evUsed);
     const ev = Emitter.mintName('e', evUsed);
         this.renderLine(pair, () => {
-      this.b.emit(`${el}.addEventListener('${event}', (${ev}) => { `);
+      this.b.emit(`${el}.addEventListener('${event}', (`);
+      this.emitEventParam(ev, event);
+      this.b.emit(`) => { `);
       this.withExpression(() => this.expr(value));
-      this.b.emit(` = ${ev}.${accessor};`);
+      // `EventTarget` has no `.value` / `.checked` — cast `target` (not the
+      // whole chain: a trailing `as any` still typechecks the left side)
+      // so typing the listener param (#25) does not invent a bind-site error.
+      // accessor is always `target.<prop>` (see event/accessor matrix above).
+      const prop = accessor.replace(/^target\./, '');
+      this.b.emit(' = ');
+      if (this.ts) this.b.tsOnly(() => this.b.emit('('));
+      this.b.emit(`${ev}.target`);
+      if (this.ts) this.b.tsOnly(() => this.b.emit(' as any)'));
+      this.b.emit(`.${prop};`);
       if (touch !== null) {
         this.b.emit(' ');
         touch();
@@ -8903,6 +9034,15 @@ class Emitter {
       }
       this.b.emit(' })');
     });
+  }
+
+  // Face-only event type on a listener parameter — the
+  // synthetic outer `(e)` / `(e_)` and `<=>` input handlers share it.
+  emitEventParam(ev, eventName) {
+    this.b.emit(ev);
+    if (this.ts && eventName) {
+      this.b.tsOnly(() => this.b.emit(`: HTMLElementEventMap['${eventName}']`));
+    }
   }
 
   // The bind target's loudness fork: the target must be ASSIGNABLE and
@@ -10415,8 +10555,17 @@ class Emitter {
   // One parameter: a plain name, a rest (`...name`), a default
   // (`name = expr`), or an array/object pattern (emitted like the
   // matching literal — the pattern element cases live on object/array).
-  emitParam(p) {
-    if (typeof p === 'string') return this.b.emit(p);
+  // `eventType` (optional): when set on a bare first param, the TS face
+  // emits `: HTMLElementEventMap['event']`. Author
+  // typed-var annotations win — this path only runs for plain names.
+  emitParam(p, eventType = null) {
+    if (typeof p === 'string') {
+      this.b.emit(p);
+      if (this.ts && eventType) {
+        this.b.tsOnly(() => this.b.emit(`: HTMLElementEventMap['${eventType}']`));
+      }
+      return;
+    }
     // A typed parameter (["typed-var", target, "T"]) erases to its target;
     // the annotation role's cover row spans the emitted target — the
     // type's only generated manifestation. The TS face emits
@@ -10478,7 +10627,8 @@ class Emitter {
     };
   }
 
-  emitParams(params) {
+  emitParams(params, opts = {}) {
+    const eventType = opts.eventType ?? this.pendingEventType ?? null;
     Emitter.expansionSplit(params).list.forEach((p, i) => {
       // A promoted parameter reaching emission was NOT stripped by a
       // constructor — the shape belongs to constructors alone (there
@@ -10488,7 +10638,7 @@ class Emitter {
         throw this.positionedError(isNode(p) ? p : params, 'emitter: an @-parameter promotes only in a constructor (`constructor: (@name) ->`) — bind a plain parameter and assign it here');
       }
       if (i > 0) this.b.emit(', ');
-      this.emitParam(p);
+      this.emitParam(p, i === 0 ? eventType : null);
     });
   }
 
@@ -10541,16 +10691,22 @@ class Emitter {
         // before a return annotation (`x: T => …` does not parse);
         // the TS face adds them as TS-only bytes, so stripping
         // restores the bare-name JS spelling.
+        // Injected event types (pendingEventType) also force TS-only
+        // parens — `e: HTMLElementEventMap['click'] =>` is not valid TS.
+        const eventAnnotates =
+          this.ts && this.pendingEventType &&
+          params.length === 1 && typeof params[0] === 'string';
         const tsParens = this.ts &&
           params.length === 1 && typeof Emitter.paramCore(params[0]) === 'string' &&
-          (Emitter.isTypedWrapper(params[0]) || this.annotationText(node, 'returnType') !== null || isVoid);
+          (Emitter.isTypedWrapper(params[0]) || this.annotationText(node, 'returnType') !== null ||
+            isVoid || eventAnnotates);
         this.mark(node, 'params', () => {
           // Only a single PLAIN name drops its parens — patterns,
           // rests, and defaults keep them (JS requires it). A typed
           // single name erases to a plain one and drops them too.
           if (params.length === 1 && typeof Emitter.paramCore(params[0]) === 'string') {
             if (tsParens) this.b.tsOnly(() => this.b.emit('('));
-            this.emitParam(params[0]);
+            this.emitParam(params[0], eventAnnotates ? this.pendingEventType : null);
             if (tsParens) this.b.tsOnly(() => this.b.emit(')'));
           } else {
             this.b.emit('(');
