@@ -1751,12 +1751,126 @@ function ripCompletionItem(ctx, raw, index) {
   return item;
 }
 
-connection.onCompletion(async (params) => {
-  await tsgoReady;
-  const ctx = requestContext(params);
-  if (!ctx) return null;
-  const genCursor = ctx.genCursor ?? ctx.genExact;
-  if (genCursor === null) return null;
+// ── Incomplete-expression recovery (bare-dot / open-call) ──
+// The broker only advances lastGood on a successful compile. Member
+// completion at `items.` and signature help inside `add(1, ` fire on
+// text that throws CompileError, so requestContext has no member/call
+// face. Recovery compiles a REQUEST-LOCAL patched buffer, swaps it
+// into the tsgo virtual doc for one query, then restores lastGood —
+// never mutating lastGood, the mirror, or stripFace. Port of v3's
+// `word.` → `word.__rip__` rewrite (rip-lang lsp.js onCompletion).
+const RECOVERY_PROP = '__rip__';
+let recoveryChain = Promise.resolve();
+
+function patchTrailingDot(text, position) {
+  const lines = text.split('\n');
+  const line = lines[position.line] ?? '';
+  const before = line.slice(0, position.character);
+  if (!/\w\.\s*$/.test(before)) return null;
+  const patchedBefore = before.replace(/(\w)\.\s*$/, `$1.${RECOVERY_PROP}`);
+  lines[position.line] = patchedBefore + line.slice(position.character);
+  const dotAt = before.lastIndexOf('.');
+  return {
+    patched: lines.join('\n'),
+    position: { line: position.line, character: dotAt + 1 },
+  };
+}
+
+function patchOpenCall(text, position) {
+  const lines = text.split('\n');
+  const line = lines[position.line] ?? '';
+  const before = line.slice(0, position.character);
+  let depth = 0;
+  for (let i = 0; i < before.length; i++) {
+    const c = before[i];
+    if (c === '(') depth++;
+    else if (c === ')') depth--;
+  }
+  if (depth <= 0) return null;
+  // Close the call with a placeholder arg so the face parses and tsgo
+  // still sees the cursor inside the argument list.
+  const insert = /[(,]\s*$/.test(before) ? '0)' : ')';
+  lines[position.line] = before + insert + line.slice(position.character);
+  return {
+    patched: lines.join('\n'),
+    position: { line: position.line, character: position.character },
+  };
+}
+
+function compileRecoveryFace(patched, uri, state) {
+  if (!compile) return null;
+  try {
+    let pins = null;
+    for (const [key, type] of state.pinCache) {
+      if (type !== null) (pins ??= new Map()).set(key, type);
+    }
+    const result = compile(patched, {
+      path: uri, runtimeDelivery: 'inline', face: 'ts', pins, strict: state.strict,
+    });
+    return {
+      source: patched,
+      code: result.code,
+      mappings: result.mappings,
+      stores: result.stores,
+      trivia: result.trivia,
+      mutables: result.mutables,
+      srcLineStarts: lineStartsOf(patched),
+      genLineStarts: lineStartsOf(result.code),
+      strict: state.strict === true,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Serialize ephemeral virtual-doc swaps so concurrent requests cannot
+// leave tsgo on a patched face.
+async function withEphemeralFace(state, recoveredCode, fn) {
+  const prev = recoveryChain;
+  let release;
+  recoveryChain = new Promise((resolve) => { release = resolve; });
+  await prev;
+  const savedCode = state.lastGood?.code ?? null;
+  const openedEphemeral = !state.tsOpen;
+  try {
+    if (!tsgo) return null;
+    state.tsVersion += 1;
+    if (openedEphemeral) {
+      state.tsOpen = true;
+      tsgo.client.notify('textDocument/didOpen', {
+        textDocument: {
+          uri: state.tsUri, languageId: 'typescript',
+          version: state.tsVersion, text: recoveredCode,
+        },
+      });
+    } else {
+      tsgo.client.notify('textDocument/didChange', {
+        textDocument: { uri: state.tsUri, version: state.tsVersion },
+        contentChanges: [{ text: recoveredCode }],
+      });
+    }
+    return await fn();
+  } finally {
+    try {
+      if (tsgo) {
+        if (savedCode != null) {
+          state.tsVersion += 1;
+          tsgo.client.notify('textDocument/didChange', {
+            textDocument: { uri: state.tsUri, version: state.tsVersion },
+            contentChanges: [{ text: savedCode }],
+          });
+        } else if (openedEphemeral && state.tsOpen) {
+          tsgo.client.notify('textDocument/didClose', { textDocument: { uri: state.tsUri } });
+          state.tsOpen = false;
+        }
+      }
+    } finally {
+      release();
+    }
+  }
+}
+
+async function completionFromFace(ctx, genCursor, params) {
   const result = await tsgoRequest('textDocument/completion', {
     textDocument: { uri: ctx.state.tsUri },
     position: offsetToPosition(ctx.good.genLineStarts, genCursor),
@@ -1767,11 +1881,47 @@ connection.onCompletion(async (params) => {
   ctx.state.lastCompletion = rawItems;
   const items = [];
   for (let i = 0; i < rawItems.length; i++) {
-    if (isScaffoldingLabel(rawItems[i].label)) continue;
+    const label = rawItems[i].label;
+    if (isScaffoldingLabel(label) || label === RECOVERY_PROP) continue;
     const item = ripCompletionItem(ctx, rawItems[i], i);
     if (item) items.push(item);
   }
   return { isIncomplete: Array.isArray(result) ? false : !!result.isIncomplete, items };
+}
+
+connection.onCompletion(async (params) => {
+  await tsgoReady;
+  const document = documents.get(params.textDocument.uri);
+  const state = states.get(params.textDocument.uri);
+  if (!document || !state || !tsgo) return null;
+  const currentText = document.getText();
+
+  // Bare-dot recovery: patch `word.` → `word.__rip__`, compile a
+  // throwaway face, ask at the synthetic property, restore.
+  const dot = patchTrailingDot(currentText, params.position);
+  if (dot) {
+    const recovered = compileRecoveryFace(dot.patched, document.uri, state);
+    if (recovered) {
+      const srcOffset = positionToOffset(recovered.srcLineStarts, recovered.source.length, dot.position);
+      const genCursor = sourceCursorToGenerated(recovered.mappings, srcOffset)
+        ?? sourceOffsetToGeneratedExact(recovered.mappings, srcOffset, recovered.source, recovered.code);
+      if (genCursor != null) {
+        const ctx = {
+          state, good: recovered, document, currentText,
+          curLineStarts: lineStartsOf(currentText),
+          align: staleOffsetMap(currentText, recovered.source),
+        };
+        const out = await withEphemeralFace(state, recovered.code, () => completionFromFace(ctx, genCursor, params));
+        if (out?.items?.length) return out;
+      }
+    }
+  }
+
+  const ctx = requestContext(params);
+  if (!ctx) return null;
+  const genCursor = ctx.genCursor ?? ctx.genExact;
+  if (genCursor === null) return null;
+  return completionFromFace(ctx, genCursor, params);
 });
 
 connection.onCompletionResolve(async (item) => {
@@ -1803,12 +1953,7 @@ connection.onCompletionResolve(async (item) => {
 // keeps the indices correct across bodiless overload rows (the face
 // prints them adjacent to their implementation, and tsgo numbers the
 // overload list itself).
-connection.onSignatureHelp(async (params) => {
-  await tsgoReady;
-  const ctx = requestContext(params);
-  if (!ctx) return null;
-  const genCursor = ctx.genCursor ?? ctx.genExact;
-  if (genCursor === null) return null;
+async function signatureHelpFromFace(ctx, genCursor, params) {
   const result = await tsgoRequest('textDocument/signatureHelp', {
     textDocument: { uri: ctx.state.tsUri },
     position: offsetToPosition(ctx.good.genLineStarts, genCursor),
@@ -1822,6 +1967,43 @@ connection.onSignatureHelp(async (params) => {
       label: scrubFaceArtifacts(sig.label),
     })),
   };
+}
+
+connection.onSignatureHelp(async (params) => {
+  await tsgoReady;
+  const document = documents.get(params.textDocument.uri);
+  const state = states.get(params.textDocument.uri);
+  if (!document || !state || !tsgo) return null;
+  const currentText = document.getText();
+
+  // Open-call recovery: close with a placeholder arg so the call parses
+  // (`add(1, ` → `add(1, 0)`), ask at the original cursor, restore.
+  // Covers fresh open-paren AND mid-edit after a good closed compile —
+  // the response carries no positions, so a throwaway face is safe.
+  const call = patchOpenCall(currentText, params.position);
+  if (call) {
+    const recovered = compileRecoveryFace(call.patched, document.uri, state);
+    if (recovered) {
+      const srcOffset = positionToOffset(recovered.srcLineStarts, recovered.source.length, call.position);
+      const genCursor = sourceCursorToGenerated(recovered.mappings, srcOffset)
+        ?? sourceOffsetToGeneratedExact(recovered.mappings, srcOffset, recovered.source, recovered.code);
+      if (genCursor != null) {
+        const ctx = {
+          state, good: recovered, document, currentText,
+          curLineStarts: lineStartsOf(currentText),
+          align: staleOffsetMap(currentText, recovered.source),
+        };
+        const out = await withEphemeralFace(state, recovered.code, () => signatureHelpFromFace(ctx, genCursor, params));
+        if (out) return out;
+      }
+    }
+  }
+
+  const ctx = requestContext(params);
+  if (!ctx) return null;
+  const genCursor = ctx.genCursor ?? ctx.genExact;
+  if (genCursor === null) return null;
+  return signatureHelpFromFace(ctx, genCursor, params);
 });
 
 // ---- semantic tokens: tsgo's relative-encoded data decodes against
