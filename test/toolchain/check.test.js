@@ -347,8 +347,9 @@ describeExtended('rip check: type diagnostics over the real server', () => {
       const j = JSON.parse(check(dir, ['--json', 'use.rip', 'lib.rip']).stdout);
       const primary = j.find((d) => d.code === 2322);
       expect(primary).toBeDefined();
-      // The secondary note maps into the OTHER file (lib.rip), not the error site.
-      expect(primary.related?.[0]).toMatchObject({ file: 'lib.rip', line: 1 });
+      // The secondary note maps into the OTHER file (lib.rip), not the error
+      // site — onto `port` (line 3), the property whose type was violated.
+      expect(primary.related?.[0]).toMatchObject({ file: 'lib.rip', line: 3 });
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 });
