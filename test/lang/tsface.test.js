@@ -610,6 +610,24 @@ describe('TS directive comments', () => {
     // JS mode carries no directive rows — the channel is face-only.
     expect(js(src).mappings.rows.some((m) => m.role === 'tsDirective')).toBe(false);
   });
+
+  test('a directive on a render bind/prop line reaches the face (not only above the element)', () => {
+    // The attr/prop bag (`object`) and its `:` pair share a source span;
+    // attachment must prefer the pair so the face carries the comment
+    // above the diagnostic-bearing line (setAttribute / ctor prop).
+    const dom = ts(
+      'export C = component\n  render\n    div\n      span\n        # @ts-expect-error inline\n        title: 1\n',
+    );
+    expect(dom.code).toContain('// @ts-expect-error inline');
+    expect(dom.code).toMatch(/\/\/ @ts-expect-error inline\n\s*this\._el\d+\.setAttribute\('title'/);
+
+    const child = ts(
+      'export Kid = component\n  @value?: string := ""\n  render\n    div\n      = value\n\n'
+      + 'export C = component\n  count := 0\n  render\n    Kid\n      # @ts-expect-error bind\n      value <=> count\n',
+    );
+    expect(child.code).toContain('// @ts-expect-error bind');
+    expect(child.code).toMatch(/new Kid\(\{\n\s*\/\/ @ts-expect-error bind\n\s*__bind_value__/);
+  });
 });
 
 // ── 4. mapping pins ──────────────────────────────────────────────────
