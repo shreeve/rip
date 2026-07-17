@@ -44,7 +44,7 @@ export default function(hljs) {
     'DocumentFragment', 'MutationObserver', 'ResizeObserver',
     'IntersectionObserver',
     // Rip stdlib
-    'p', 'pp', 'abort', 'assert', 'exit', 'kind', 'noop',
+    'p', 'pp', 'pj', 'pr', 'abort', 'assert', 'exit', 'kind', 'noop',
     'raise', 'rand', 'sleep', 'todo', 'warn', 'zip',
   ];
 
@@ -116,7 +116,7 @@ export default function(hljs) {
       { begin: /0x[0-9a-fA-F](?:_?[0-9a-fA-F])*n?/ },
       { begin: /0o[0-7](?:_?[0-7])*n?/ },
       { begin: /0b[01](?:_?[01])*n?/ },
-      { begin: /\d[\d_]*(?:\.[\d][\d_]*)?(?:[eE][+-]?\d+)?n?/ },
+      { begin: /\d[\d_]*(?:\.[\d][\d_]*)?(?:[eE][+-]?\d[\d_]*)?n?/ },
     ],
     relevance: 0,
   };

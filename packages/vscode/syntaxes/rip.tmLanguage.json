@@ -542,6 +542,7 @@
     { "match": "\\*(?=\\{)", "name": "keyword.operator.map-literal.rip" },
 
     {"comment": "=== SPECIAL OPERATORS (before general operators) ==="},
+    { "match": "::",              "name": "keyword.operator.prototype.rip" },
     { "match": "!\\?",            "name": "keyword.operator.otherwise.rip" },
     { "match": "\\?!",            "name": "keyword.operator.presence.rip" },
     { "match": "\\?\\?",          "name": "keyword.operator.nullish.rip" },
@@ -571,7 +572,6 @@
     { "match": "\\.=|&&=|\\|\\|=|\\?\\?=|\\?=|\\+=|-=|\\*\\*=|\\*=|//=|%%=|/=|%=|<<=|>>>=|>>=|&=|\\|=|\\^=",
       "name": "keyword.operator.assignment.compound.rip" },
     { "match": "\\*>", "name": "keyword.operator.assignment.merge.rip" },
-    { "match": "\\*(?=\\{)", "name": "keyword.operator.map-literal.rip" },
     { "match": "\\$(?=[\"'])", "name": "keyword.operator.template-tag.rip" },
     { "match": "(?<![\\w$]):[a-zA-Z_$][\\w$]*", "name": "constant.other.symbol.rip" },
 
@@ -615,7 +615,7 @@
     { "match": "\\b0x[0-9a-fA-F](?:_?[0-9a-fA-F])*n?\\b", "name": "constant.numeric.hex.rip" },
     { "match": "\\b0o[0-7](?:_?[0-7])*n?\\b",               "name": "constant.numeric.octal.rip" },
     { "match": "\\b0b[01](?:_?[01])*n?\\b",                  "name": "constant.numeric.binary.rip" },
-    { "match": "\\b\\d[\\d_]*(?:\\.[\\d][\\d_]*)?(?:[eE][+-]?\\d+)?n?\\b", "name": "constant.numeric.decimal.rip" },
+    { "match": "\\b\\d[\\d_]*(?:\\.[\\d][\\d_]*)?(?:[eE][+-]?\\d[\\d_]*)?n?\\b", "name": "constant.numeric.decimal.rip" },
 
     {"comment": "=== METHOD CALLS (.method()) ==="},
     {
@@ -632,9 +632,9 @@
       "captures": { "1": { "name": "entity.name.function.rip" } }
     },
 
-    {"comment": "=== DAMMIT CALLS (name!) ==="},
+    {"comment": "=== DAMMIT CALLS (name!) — the bang must not head != or !== ==="},
     {
-      "match": "\\b([a-zA-Z_$]\\w*)(!)",
+      "match": "\\b([a-zA-Z_$]\\w*)(!)(?!=)",
       "captures": {
         "1": { "name": "entity.name.function.rip" },
         "2": { "name": "keyword.operator.dammit.rip" }

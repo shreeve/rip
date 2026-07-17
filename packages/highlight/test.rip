@@ -66,6 +66,10 @@ test "literals and built-ins", ->
   ok hl('String::trim').includes span('built_in', 'String')
   ok hl('p 42').includes span('built_in', 'p')
 
+test "all four print helpers are built-ins", ->
+  for helper in ['p', 'pp', 'pj', 'pr']
+    ok hl("#{helper} data").includes(span('built_in', helper)), helper
+
 # ==[ Strings ]==
 
 console.log "\nStrings"
@@ -103,6 +107,10 @@ test "regex literals", ->
 test "numbers in decimal and hex", ->
   ok hl('x = 42').includes span('number', '42')
   ok hl('x = 0xff').includes span('number', '0xff')
+
+test "numeric separators survive in every position, exponent included", ->
+  ok hl('x = 1_000').includes span('number', '1_000')
+  ok hl('x = 1_0.5_5e1_0').includes span('number', '1_0.5_5e1_0')
 
 test "comments", ->
   ok hl('# a comment').includes '<span class="hljs-comment"># a comment</span>'
