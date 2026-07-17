@@ -27,7 +27,7 @@ import { readProjectConfig } from './config.js';
 import { startTsgo } from '../packages/vscode/src/tsgo.js';
 import { buildProbe, parseProbeHover } from '../packages/vscode/src/pins.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from '../packages/vscode/src/diagnostics.js';
-import { generatedTsconfig, mirrorRelForFsPath, ripImportsOf } from '../packages/vscode/src/mirror.js';
+import { writeProjectTsconfigs, mirrorRelForFsPath, ripImportsOf } from '../packages/vscode/src/mirror.js';
 import { lineStartsOf, offsetToPosition, positionToOffset, generatedSpanToSource } from '../packages/vscode/src/translate.js';
 
 const HELP = `rip check — type-check .rip files headlessly (the tsc --noEmit of rip-land)
@@ -240,10 +240,7 @@ if (compiled.size > 0) {
     fs.mkdirSync(path.dirname(mirrorPath), { recursive: true });
     fs.writeFileSync(mirrorPath, entry.good.code);
   }
-  fs.writeFileSync(
-    path.join(mirrorRoot, 'tsconfig.json'),
-    JSON.stringify(generatedTsconfig({ workspaceRoot, mirrorRootIsFallback }), null, 2),
-  );
+  writeProjectTsconfigs([...compiled.keys()], { workspaceRoot, mirrorRoot, mirrorRootIsFallback });
 
   let session = null;
   try {

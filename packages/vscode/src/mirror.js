@@ -12,6 +12,8 @@ import { createRequire } from 'node:module';
 const stripJsonComments = (text) =>
   text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
 
+const toPosix = (p) => p.split(path.sep).join('/');
+
 // Resolve one `extends` specifier the way TS does, bounded: relative and
 // absolute paths get the exact / +.json / +/tsconfig.json attempts; bare
 // package specifiers resolve node-style from the extending config's
@@ -65,36 +67,77 @@ export function chainSetsTypes(configPath, chain, onUnresolved, visited = new Se
   });
 }
 
-// The generated mirror-root tsconfig. Overrides applied over the user's
-// config (or the defaults): noImplicitAny stays ON (it activates the
-// evolving-`let` inference; the implicit-any family is suppressed
-// per-code in translate.js), noEmit (the project never emits; also what
-// legalizes allowImportingTsExtensions), and rootDirs merging the mirror
-// tree with the real workspace (a .rip file importing a real .ts sibling
-// resolves). The mirror root MUST sit two levels below the workspace so
-// the `../../` reach-ups (extends, ambient d.ts, node_modules) resolve.
-export function generatedTsconfig({ workspaceRoot, mirrorRootIsFallback, chain = new Set(), onUnresolved } = {}) {
+// Walk up from `fromDir` looking for tsconfig.json, stopping at `anchor`
+// (inclusive). Null when none exists under the workspace root.
+export function nearestTsconfig(fromDir, anchor) {
+  if (!fromDir || !anchor) return null;
+  const root = path.resolve(anchor);
+  let dir = path.resolve(fromDir);
+  if (dir !== root && !dir.startsWith(root + path.sep)) return null;
+  while (true) {
+    const candidate = path.join(dir, 'tsconfig.json');
+    try {
+      if (fs.statSync(candidate).isFile()) return candidate;
+    } catch { /* absent */ }
+    if (dir === root) return null;
+    dir = path.dirname(dir);
+  }
+}
+
+// A generated WRAPPER tsconfig living at `mirrorDir`. When `sourceConfig`
+// is set it extends that workspace file (compilerOptions only — wrappers
+// own include/exclude so the source file set is not inherited). Reach-ups
+// use path.relative so the wrapper may sit at any depth under the mirror.
+//
+// Overrides: noImplicitAny stays ON (it activates the evolving-`let`
+// inference; the implicit-any family is suppressed per-code in
+// translate.js), noEmit (the project never emits; also what legalizes
+// allowImportingTsExtensions), and rootDirs merging the wrapper dir with
+// the real workspace (a .rip file importing a real .ts sibling resolves).
+export function generatedTsconfig({
+  workspaceRoot,
+  mirrorDir = null,
+  sourceConfig = null,
+  mirrorRootIsFallback,
+  chain = new Set(),
+  onUnresolved,
+} = {}) {
   const overrides = {
     noImplicitAny: true,
     noEmit: true,
     allowImportingTsExtensions: true,
   };
-  if (!mirrorRootIsFallback) overrides.rootDirs = ['.', '../..'];
+  const wrapperDir = mirrorDir
+    ?? (workspaceRoot ? path.join(workspaceRoot, '.rip', 'check') : '.');
+  const toWorkspace = (!mirrorRootIsFallback && workspaceRoot)
+    ? (toPosix(path.relative(wrapperDir, workspaceRoot)) || '.')
+    : null;
+  if (toWorkspace != null) overrides.rootDirs = ['.', toWorkspace];
+
   // Workspace AMBIENT declarations (`rip-env.d.ts` and kin) join the
   // program. An explicit `exclude` REPLACES the built-in defaults, so
-  // `node_modules` is restated alongside the `../../` reach-up.
+  // `node_modules` is restated alongside the reach-up.
   const include = ['**/*.ts'];
   const exclude = ['node_modules'];
-  if (!mirrorRootIsFallback) {
-    include.push('../../**/*.d.ts');
-    exclude.push('../../**/node_modules');
+  if (toWorkspace != null) {
+    include.push(`${toWorkspace}/**/*.d.ts`);
+    exclude.push(`${toWorkspace}/**/node_modules`);
   }
-  const userConfig = !mirrorRootIsFallback && workspaceRoot
-    ? path.join(workspaceRoot, 'tsconfig.json') : null;
+
+  const userConfig = sourceConfig
+    ?? ((!mirrorRootIsFallback && workspaceRoot && fs.existsSync(path.join(workspaceRoot, 'tsconfig.json')))
+      ? path.join(workspaceRoot, 'tsconfig.json')
+      : null);
+
   if (userConfig && fs.existsSync(userConfig)) {
     chain.clear();
     if (!chainSetsTypes(userConfig, chain, onUnresolved)) overrides.types = ['*'];
-    return { extends: '../../tsconfig.json', compilerOptions: overrides, include, exclude };
+    return {
+      extends: toPosix(path.relative(wrapperDir, userConfig)),
+      compilerOptions: overrides,
+      include,
+      exclude,
+    };
   }
   chain.clear();
   return {
@@ -106,6 +149,69 @@ export function generatedTsconfig({ workspaceRoot, mirrorRootIsFallback, chain =
     include,
     exclude,
   };
+}
+
+// Plan one wrapper per distinct owning project directory for the given
+// workspace source files. Returns [{ wrapperDir, sourceConfig, chain }].
+export function planProjectTsconfigs(sourceFiles, { workspaceRoot, mirrorRoot, mirrorRootIsFallback } = {}) {
+  if (mirrorRootIsFallback || !workspaceRoot) {
+    const chain = new Set();
+    return [{
+      wrapperDir: mirrorRoot,
+      sourceConfig: null,
+      chain,
+      config: generatedTsconfig({ workspaceRoot, mirrorDir: mirrorRoot, sourceConfig: null, mirrorRootIsFallback: true, chain }),
+    }];
+  }
+
+  const byWrapper = new Map(); // wrapperDir → sourceConfig|null
+  for (const fsPath of sourceFiles) {
+    const cfg = nearestTsconfig(path.dirname(fsPath), workspaceRoot);
+    const projectDir = cfg ? path.dirname(cfg) : workspaceRoot;
+    const rel = path.relative(workspaceRoot, projectDir);
+    const wrapperDir = (!rel || rel === '.') ? mirrorRoot : path.join(mirrorRoot, rel);
+    if (!byWrapper.has(wrapperDir)) byWrapper.set(wrapperDir, cfg);
+  }
+  // Root wrapper covers faces whose nearest config is the workspace root
+  // (and gives __external__/orphan faces a config to discover).
+  if (!byWrapper.has(mirrorRoot)) {
+    const rootCfg = path.join(workspaceRoot, 'tsconfig.json');
+    byWrapper.set(mirrorRoot, fs.existsSync(rootCfg) ? rootCfg : null);
+  }
+
+  const plans = [];
+  for (const [wrapperDir, sourceConfig] of byWrapper) {
+    const chain = new Set();
+    plans.push({
+      wrapperDir,
+      sourceConfig,
+      chain,
+      config: generatedTsconfig({
+        workspaceRoot,
+        mirrorDir: wrapperDir,
+        sourceConfig,
+        mirrorRootIsFallback: false,
+        chain,
+      }),
+    });
+  }
+  return plans;
+}
+
+// Write planned wrappers. `writeFile(path, content)` defaults to sync
+// write; the editor passes ensureOwnedFile for idempotent mtimes.
+export function writeProjectTsconfigs(sourceFiles, opts, writeFile = (p, c) => {
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, c);
+}) {
+  const plans = planProjectTsconfigs(sourceFiles, opts);
+  const written = [];
+  for (const plan of plans) {
+    const configPath = path.join(plan.wrapperDir, 'tsconfig.json');
+    writeFile(configPath, JSON.stringify(plan.config, null, 2));
+    written.push({ configPath, chain: plan.chain, wrapperDir: plan.wrapperDir });
+  }
+  return written;
 }
 
 // A workspace file's mirror path is RELATIVE to the mirror root: workspace

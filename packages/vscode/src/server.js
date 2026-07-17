@@ -71,7 +71,7 @@ import {
   SUPPRESSED_TS_CODES,
 } from './translate.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from './diagnostics.js';
-import { generatedTsconfig as buildGeneratedTsconfig, mirrorRelForFsPath, ripImportsOf } from './mirror.js';
+import { writeProjectTsconfigs, mirrorRelForFsPath, ripImportsOf } from './mirror.js';
 
 // The compiler: in-repo development resolves the repository's src/;
 // the staged .vsix carries a copy at compiler/src/ (scripts/package.js).
@@ -250,28 +250,40 @@ function loadCache() {
   cacheManifest = { compilerHash, entries: {} };
 }
 
-// JSONC → parseable JSON (comments stripped).
-// The user's resolved `extends` chain, recorded by generatedTsconfig
-// (below) so the watcher can re-govern when a chain member changes.
+// Every source tsconfig (and its extends chain) that a wrapper currently
+// extends — the watcher re-governs when any member changes.
 const userConfigChain = new Set();
 
-// The generated mirror-root tsconfig — the pure builder lives in
-// mirror.js (shared with the batch `rip check`); here it is fed the
-// server's workspace/fallback state and its config-chain set.
-function generatedTsconfig() {
-  return buildGeneratedTsconfig({
-    workspaceRoot, mirrorRootIsFallback, chain: userConfigChain,
-    onUnresolved: (spec) =>
-      connection.console.log(`[rip] tsconfig extends "${spec}" not resolvable — not injecting types:["*"]`),
-  });
+// Source .rip paths whose faces are in the program (open buffers +
+// materialized closure). Each owning project dir gets a wrapper tsconfig.
+function activeSourceFiles() {
+  const files = new Set();
+  for (const [uri] of states) {
+    if (!uri.startsWith('file://')) continue;
+    try { files.add(fileURLToPath(uri)); } catch { /* */ }
+  }
+  for (const file of materializedMirrors.keys()) files.add(file);
+  for (const file of Object.keys(cacheManifest?.entries ?? {})) files.add(file);
+  return [...files];
 }
 
-// Idempotent: an unchanged config never rewrites (no spurious mtime for
-// tsgo to reload on).
+// Per-project wrappers — pure planner in mirror.js (shared with
+// `rip check`). Idempotent per file via ensureOwnedFile (no spurious
+// mtime for tsgo). Returns the written wrapper paths.
 function writeGeneratedTsconfig() {
-  const configPath = path.join(mirrorRoot, 'tsconfig.json');
-  const content = JSON.stringify(generatedTsconfig(), null, 2);
-  ensureOwnedFile(configPath, content);
+  userConfigChain.clear();
+  const written = writeProjectTsconfigs(
+    activeSourceFiles(),
+    { workspaceRoot, mirrorRoot, mirrorRootIsFallback },
+    (configPath, content) => {
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      ensureOwnedFile(configPath, content);
+    },
+  );
+  for (const w of written) {
+    for (const c of w.chain) userConfigChain.add(c);
+  }
+  return written;
 }
 
 // A .rip uri's mirror path: workspace files keep their relative structure
@@ -618,6 +630,8 @@ function materializeClosure(seeds) {
       failed++; // CompileError: the last-compiled mirror (if any) keeps serving
     }
   }
+  // New project dirs may have entered the closure — emit their wrappers.
+  writeGeneratedTsconfig();
   return { compiled, cached, failed, touched };
 }
 
@@ -1207,10 +1221,14 @@ connection.onDidChangeWatchedFiles(async ({ changes }) => {
     try { fsPath = fileURLToPath(change.uri); } catch { continue; }
     if (fsPath.startsWith(mirrorRoot + path.sep)) continue; // our own writes
     if (path.basename(fsPath) === 'tsconfig.json') {
-      // The workspace's own tsconfig, or any tsconfig.json in its
-      // resolved extends chain, re-governs. (Chain members not named
-      // tsconfig.json are outside the watch glob — recorded limitation.)
-      if (workspaceRoot && (fsPath === path.join(workspaceRoot, 'tsconfig.json') || userConfigChain.has(fsPath))) {
+      // Any workspace tsconfig (nested packages included), or a member of
+      // a wrapper's resolved extends chain, re-governs. (Chain members
+      // not named tsconfig.json are outside the watch glob — recorded
+      // limitation.)
+      const underWorkspace = workspaceRoot
+        && (fsPath === workspaceRoot || fsPath.startsWith(workspaceRoot + path.sep))
+        && !fsPath.includes(`${path.sep}node_modules${path.sep}`);
+      if (underWorkspace || userConfigChain.has(fsPath)) {
         configChanged = true;
         forward.push({ uri: change.uri, type: change.type }); // tsgo re-reads the extends chain
       }
@@ -1258,8 +1276,10 @@ connection.onDidChangeWatchedFiles(async ({ changes }) => {
   if (configChanged && mirrorRootReady) {
     // A pre-materialization config change has nothing to re-govern; the
     // first materialization generates from the current user config.
-    writeGeneratedTsconfig();
-    forward.push({ uri: 'file://' + path.join(mirrorRoot, 'tsconfig.json'), type: FileChangeType.Changed });
+    const written = writeGeneratedTsconfig();
+    for (const w of written) {
+      forward.push({ uri: 'file://' + w.configPath, type: FileChangeType.Changed });
+    }
   }
   if (refreshAllForConfig) {
     // A package.json#rip edit re-governs every open doc's presentation
