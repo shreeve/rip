@@ -1,24 +1,23 @@
 {
   "name": "@rip-lang/x12",
-  "version": "0.0.0",
+  "version": "4.0.0",
   "private": true,
   "type": "module",
+  "description": "X12 EDI parser, editor, and query engine — path-based addressing over auto-detected separators, zero dependencies",
   "exports": {
-    ".": {
-      "types": "./x12.d.ts",
-      "default": "./x12.rip"
-    }
+    ".": "./x12.rip"
   },
   "bin": {
-    "rip-x12": "./bin/rip-x12"
+    "rip-x12": "./x12.rip"
   },
   "scripts": {
-    "test": "bun test --timeout 15000"
+    "test": "rip test.rip"
   },
   "files": [
-    "*.rip",
-    "*.d.ts",
-    "bin/",
+    "x12.rip",
     "README.md"
-  ]
+  ],
+  "devDependencies": {
+    "@rip-lang/testing": "workspace:*"
+  }
 }

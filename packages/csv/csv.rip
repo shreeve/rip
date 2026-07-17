@@ -1,13 +1,19 @@
-# @rip-lang/csv — fast, flexible CSV parser and writer.
+#!/usr/bin/env rip
+
+# ==============================================================================
+# csv — Fast, flexible CSV parser and writer for Rip
 #
-# The engine is an indexOf ratchet: the JS engine's native indexOf jumps
-# to the next delimiter, newline, or quote, skipping bulk content in a
-# single native call — no regex in the hot loop. A probe of the first
-# ~8KB auto-detects delimiter, quoting, escaping, BOM, and line endings.
-# Reading supports excel mode, relax mode, headers, comments, and
-# streaming via row callback; writing supports compact/full quoting,
-# leading-zero protection, and reusable writer instances. `read`/`write`
-# are pure string work; `load`/`save` and the CLI use Bun file APIs.
+# Author: Steve Shreeve (steve.shreeve@gmail.com)
+#   Date: February 6, 2026
+#
+# Engine: indexOf ratchet — SIMD-accelerated scanning via the JS engine's
+#         native indexOf, skipping bulk content in a single call. No regex
+#         in the hot loop. Auto-detects delimiter, quoting, escaping, BOM,
+#         and line endings. Supports excel mode, relax mode, headers, comments,
+#         streaming via row callback, and reusable writer instances.
+# ==============================================================================
+
+import { readFileSync } from 'fs'
 
 # ==[ Constants ]==
 
@@ -103,31 +109,40 @@ def makeEmitter(cfg)
   {headers, strip, each} = cfg
   ctx = {keys: null, rows: (each ? null : []), count: 0}
 
-  emit = (row) ->
-    row = row.map((c) -> c.trim()) if strip
+  # the overwhelmingly common configuration (no headers, no strip, no
+  # callback) gets a specialized emitter — a bare push with no per-row
+  # branching. Everything else takes the general path.
+  if not headers and not strip and not each
+    rows = ctx.rows
+    emit = (row) ->
+      rows.push row
+      true
+  else
+    emit = (row) ->
+      row = row.map((c) -> c.trim()) if strip
 
-    # first row becomes keys in headers mode
-    if headers and not ctx.keys
-      ctx.keys = row
-      return true
+      # first row becomes keys in headers mode
+      if headers and not ctx.keys
+        ctx.keys = row
+        return true
 
-    # zip with keys for object output
-    if ctx.keys
-      obj = {}
-      for key, i in ctx.keys
-        obj[key] = row[i] ?? ''
+      # zip with keys for object output
+      if ctx.keys
+        obj = {}
+        for key, i in ctx.keys
+          obj[key] = row[i] ?? ''
+        if each
+          ctx.count++
+          return each(obj, ctx.count - 1) isnt false
+        ctx.rows.push obj
+        return true
+
+      # plain array output
       if each
         ctx.count++
-        return each(obj, ctx.count - 1) isnt false
-      ctx.rows.push obj
-      return true
-
-    # plain array output
-    if each
-      ctx.count++
-      return each(row, ctx.count - 1) isnt false
-    ctx.rows.push row
-    true
+        return each(row, ctx.count - 1) isnt false
+      ctx.rows.push row
+      true
 
   result = -> each ? ctx.count : ctx.rows
 
@@ -156,11 +171,19 @@ def readFull(str, cfg)
   escCode   = escape.charCodeAt(0)
   nlChar    = rowDelim[0]               # '\n' or '\r' (for \r\n)
   nlCode    = nlChar.charCodeAt(0)
+  nlIsLF    = nlCode is LF              # '\n' rows never need the CRLF probe
   len       = str.length
   pos       = 0
 
-  row = []
+  width = 0
+  row = new Array(width)
+  fi  = 0
   atLineStart = true
+
+  # newline ratchet: position of the next row terminator at or after pos,
+  # or `len` when none remain. Computed once per ROW, not once per field —
+  # refreshed only after pos moves past it.
+  nlAt = -1
 
   while pos < len
     c = str.charCodeAt(pos)
@@ -190,8 +213,13 @@ def readFull(str, cfg)
 
       field = ''
       loop
-        # indexOf to jump to next quote — bulk skip over content
-        q = str.indexOf(quote, pos)
+        # hybrid scan to the next quote: charCode walk for short spans
+        # (call overhead beats SIMD there), native indexOf for long ones
+        q = pos
+        stop = if pos + 48 < len then pos + 48 else len
+        q++ while q < stop and str.charCodeAt(q) isnt quoteCode
+        if q >= stop
+          q = str.indexOf(quote, q)
 
         unless q >= 0
           # no closing quote found
@@ -245,7 +273,7 @@ def readFull(str, cfg)
         continue
 
       # push field and consume trailing delimiter
-      row.push field
+      row[fi++] = field
 
       if pos < len
         c2 = str.charCodeAt(pos)
@@ -253,49 +281,75 @@ def readFull(str, cfg)
           pos += sepLen
         else if c2 is nlCode
           pos += crlfLen(str, pos)
+          row.length = fi if fi < row.length
+          width = fi
           cont = emit(row)
-          row = []
+          row = new Array(width)
+          fi  = 0
           atLineStart = true
           break unless cont
 
     # === newline (end of row) ===
     else if c is nlCode
-      pos += crlfLen(str, pos)
+      pos += nlIsLF ? 1 : crlfLen(str, pos)
+      row.length = fi if fi < row.length
+      width = fi
       cont = emit(row)
-      row = []
+      row = new Array(width)
+      fi  = 0
       atLineStart = true
       break unless cont
 
     # === separator (empty field) ===
     else if c is sepCode
-      row.push ''
+      row[fi++] = ''
       pos += sepLen
-      row.push '' if pos >= len or str.charCodeAt(pos) is nlCode
+      row[fi++] = '' if pos >= len or str.charCodeAt(pos) is nlCode
 
     # === unquoted field ===
     else
-      # indexOf ratchet: find nearest sep or newline
-      s  = str.indexOf(sep, pos)
-      nl = str.indexOf(nlChar, pos)
+      # newline ratchet: cached per row, not re-scanned per field
+      if nlAt < pos
+        nlAt = str.indexOf(nlChar, pos)
+        nlAt = len if nlAt is -1
+
+      # single-char sep: hybrid scan — charCode walk for short fields
+      # (the JIT'd loop beats a native call's fixed cost), native indexOf
+      # once a field proves long (SIMD wins on bulk content)
+      if sepLen is 1
+        s = pos + 1
+        stop = if nlAt < pos + 48 then nlAt else pos + 48
+        s++ while s < stop and str.charCodeAt(s) isnt sepCode
+        if s is stop and s < nlAt
+          s = str.indexOf(sep, s)
+          s = nlAt if s is -1 or s > nlAt
+      else
+        s = str.indexOf(sep, pos)
+        s = nlAt if s is -1 or s > nlAt
 
       # take the nearer boundary
-      if s >= 0 and (nl is -1 or s < nl)
-        row.push str.slice(pos, s)
+      if s < nlAt
+        row[fi++] = str.slice(pos, s)
         pos = s + sepLen
-        row.push '' if pos >= len or str.charCodeAt(pos) is nlCode
-      else if nl >= 0
-        row.push str.slice(pos, nl)
-        pos = nl + crlfLen(str, nl)
+        row[fi++] = '' if pos is nlAt or pos >= len
+      else if nlAt < len
+        row[fi++] = str.slice(pos, nlAt)
+        pos = nlAt + (nlIsLF ? 1 : crlfLen(str, nlAt))
+        row.length = fi if fi < row.length
+        width = fi
         cont = emit(row)
-        row = []
+        row = new Array(width)
+        fi  = 0
         atLineStart = true
         break unless cont
       else
-        row.push str.slice(pos)
+        row[fi++] = str.slice(pos)
         pos = len
 
   # emit final row if pending
-  emit(row) if row.length > 0
+  if fi > 0
+    row.length = fi if fi < row.length
+    emit(row)
 
   result()
 
@@ -400,7 +454,7 @@ export CSV =
 # ==============================================================================
 
 if import.meta.main
-  VERSION = Bun.file(import.meta.dir + "/package.json").json!.version
+  VERSION = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf-8')).version
 
   args      = process.argv.slice(2)
   readOpts  = {relax: false, excel: false, strip: false}
@@ -409,12 +463,12 @@ if import.meta.main
 
   for arg in args
     switch arg
-      when '-v', '--version' then (p "csv #{VERSION}"; exit)
+      when '-v', '--version' then (p "rip-csv #{VERSION}"; exit 0)
       when '-h', '--help'
         p """
-          csv #{VERSION} — Fast, flexible CSV parser and writer
+          rip-csv #{VERSION} — Fast, flexible CSV parser and writer
 
-          Usage: bun csv.rip [options] <input> [output]
+          Usage: rip-csv [options] <input> [output]
 
           Read options:
             -r, --relax     Recover from stray/malformed quotes
@@ -430,7 +484,7 @@ if import.meta.main
 
           If output is omitted, writes to stdout.
           """
-        exit
+        exit 0
       when '-r', '--relax' then readOpts.relax  = true
       when '-e', '--excel' then readOpts.excel  = true
       when '-s', '--strip' then readOpts.strip  = true
@@ -444,9 +498,7 @@ if import.meta.main
   input  = files[0]
   output = files[1]
 
-  str = Bun.file(input).text!
-  cfg = probe(str, readOpts)
-  rows = readFull(cfg.str, cfg)
+  rows = CSV.read(Bun.file(input).text!, readOpts)
   writer = new Writer(writeOpts)
 
   if output

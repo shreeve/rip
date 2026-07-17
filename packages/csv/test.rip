@@ -1,0 +1,366 @@
+# ==============================================================================
+# csv tests — parsing and writing
+# ==============================================================================
+
+import { test, eq, ok } from '@rip-lang/testing'
+import { CSV } from '@rip-lang/csv'
+import * as mod from '@rip-lang/csv'
+import { readFileSync, statSync } from 'fs'
+import { join } from 'path'
+
+# ==[ Package surface ]==
+
+console.log "\nPackage"
+
+test "module exports CSV and nothing else", ->
+  eq Object.keys(mod).sort(), ['CSV']
+  eq typeof CSV.read, 'function'
+  eq typeof CSV.write, 'function'
+  eq typeof CSV.load, 'function'
+  eq typeof CSV.save, 'function'
+  eq typeof CSV.writer, 'function'
+  eq typeof CSV.formatRow, 'function'
+
+test "the rip-csv bin is csv.rip itself, shebang'd and executable", ->
+  pkg = JSON.parse(readFileSync(join(import.meta.dir, 'package.json'), 'utf8'))
+  eq pkg.bin, { 'rip-csv': './csv.rip' }
+  source = readFileSync join(import.meta.dir, 'csv.rip'), 'utf8'
+  ok source.startsWith('#!/usr/bin/env rip\n')
+  mode = statSync(join(import.meta.dir, 'csv.rip')).mode
+  ok (mode & 0o111) isnt 0
+
+# ==[ Reading: Basic ]==
+
+console.log "\nReading — basic"
+
+test "simple CSV", ->
+  eq CSV.read("a,b,c\n1,2,3\n"), [['a','b','c'],['1','2','3']]
+
+test "no trailing newline", ->
+  eq CSV.read("a,b\n1,2"), [['a','b'],['1','2']]
+
+test "single column", ->
+  eq CSV.read("a\nb\nc\n"), [['a'],['b'],['c']]
+
+test "empty string", ->
+  eq CSV.read(""), []
+
+test "empty fields", ->
+  eq CSV.read("a,,c\n,,\n"), [['a','','c'],['','','']]
+
+test "tab delimiter", ->
+  eq CSV.read("a\tb\tc\n1\t2\t3\n"), [['a','b','c'],['1','2','3']]
+
+test "pipe delimiter", ->
+  eq CSV.read("a|b|c\n1|2|3\n"), [['a','b','c'],['1','2','3']]
+
+test "semicolon delimiter", ->
+  eq CSV.read("a;b;c\n1;2;3\n"), [['a','b','c'],['1','2','3']]
+
+test "explicit separator", ->
+  eq CSV.read("a:b:c\n1:2:3\n", sep: ':'), [['a','b','c'],['1','2','3']]
+
+# ==[ Reading: Quoted ]==
+
+console.log "\nReading — quoted fields"
+
+test "simple quoted fields", ->
+  eq CSV.read('"a","b","c"\n"1","2","3"\n'), [['a','b','c'],['1','2','3']]
+
+test "quoted with commas", ->
+  eq CSV.read('"a,1","b,2"\n'), [['a,1','b,2']]
+
+test "quoted with newlines", ->
+  eq CSV.read('"line1\nline2",b\n'), [['line1\nline2','b']]
+
+test "escaped quotes (doubled)", ->
+  eq CSV.read('"say ""hello""",b\n'), [['say "hello"','b']]
+
+test "mixed quoted and unquoted", ->
+  eq CSV.read('a,"b,c",d\n'), [['a','b,c','d']]
+
+test "Mr. Bean example", ->
+  eq CSV.read('"Hello, ""Mr. Bean"" -- good to see you!",ok\n'), [['Hello, "Mr. Bean" -- good to see you!', 'ok']]
+
+test "empty quoted field", ->
+  eq CSV.read('"",b\n'), [['', 'b']]
+
+# ==[ Reading: Headers ]==
+
+console.log "\nReading — headers mode"
+
+test "headers: true", ->
+  rows = CSV.read "name,age\nAlice,30\nBob,25\n", headers: true
+  eq rows, [{name: 'Alice', age: '30'}, {name: 'Bob', age: '25'}]
+
+test "headers with quoted fields", ->
+  rows = CSV.read '"name","age"\n"Alice","30"\n', headers: true
+  eq rows, [{name: 'Alice', age: '30'}]
+
+# ==[ Reading: Options ]==
+
+console.log "\nReading — options"
+
+test "strip whitespace", ->
+  eq CSV.read(" a , b \n 1 , 2 \n", strip: true), [['a','b'],['1','2']]
+
+test "skip empty lines", ->
+  eq CSV.read("a,b\n\n1,2\n\n"), [['a','b'],['1','2']]
+
+test "keep empty lines", ->
+  rows = CSV.read "a,b\n\n1,2\n", skipBlanks: false
+  eq rows.length, 3
+
+test "comment lines", ->
+  eq CSV.read("a,b\n# skip me\n1,2\n", comments: '#'), [['a','b'],['1','2']]
+
+test "each callback", ->
+  collected = []
+  n = CSV.read "a,b\n1,2\n3,4\n", each: (row) -> collected.push row
+  eq n, 3
+  eq collected, [['a','b'],['1','2'],['3','4']]
+
+test "each with early halt", ->
+  collected = []
+  n = CSV.read "a\n1\n2\n3\n", each: (row) ->
+    collected.push row
+    if row[0] is '1'
+      return false
+  eq n, 2
+  eq collected, [['a'],['1']]
+
+# ==[ Reading: Relax mode ]==
+
+console.log "\nReading — relax mode"
+
+test "stray quote in relax mode", ->
+  rows = CSV.read 'a,"bad"quote",b\n', relax: true
+  eq rows, [['a', 'bad"quote"', 'b']]
+
+test "stray quotes — AAA BBB", ->
+  rows = CSV.read '"AAA "BBB",CCC,"DDD"\n', relax: true
+  eq rows, [['AAA "BBB"', 'CCC', 'DDD']]
+
+test "stray quotes — JOJO", ->
+  rows = CSV.read '123,"CHO, JOELLE "JOJO"",456\n', relax: true
+  eq rows, [['123', 'CHO, JOELLE "JOJO"', '456']]
+
+test "properly doubled quotes — JOJO", ->
+  rows = CSV.read '123,"CHO, JOELLE ""JOJO""",456\n'
+  eq rows, [['123', 'CHO, JOELLE "JOJO"', '456']]
+
+test "stray quotes — BENNY with excel", ->
+  rows = CSV.read '"CHUI, LOK HANG "BENNY",224325325610,="001453","Hemoglobin A1c",=""\n', relax: true, excel: true
+  eq rows, [['CHUI, LOK HANG "BENNY"', '224325325610', '001453', 'Hemoglobin A1c', '']]
+
+test "stray quotes — unquoted Chuck", ->
+  rows = CSV.read 'Charlie or "Chuck",=B2 + B3,9\n', relax: true, excel: true
+  eq rows, [['Charlie or "Chuck"', '=B2 + B3', '9']]
+
+test "stray quote — trailing C\"", ->
+  rows = CSV.read 'A,B,C",D\n', relax: true
+  eq rows, [['A', 'B', 'C"', 'D']]
+
+# ==[ Reading: Excel mode ]==
+
+console.log "\nReading — excel mode"
+
+test "excel literal =\"01\"", ->
+  rows = CSV.read '="01",b\n', excel: true
+  eq rows, [['01','b']]
+
+test "excel empty =\"\"", ->
+  rows = CSV.read '="",next\n', excel: true
+  eq rows, [['', 'next']]
+
+test "excel full matrix", ->
+  rows = CSV.read '=,=x,x=,="x",="","","=",123,0123,="123",="0123"\n', excel: true
+  eq rows, [['=', '=x', 'x=', 'x', '', '', '=', '123', '0123', '123', '0123']]
+
+# ==[ Reading: Relax + Excel (Labcorp patterns) ]==
+
+console.log "\nReading — relax + excel (Labcorp)"
+
+test "JAMIE pattern — doubled quotes at excel boundary", ->
+  rows = CSV.read '04003497,72359435,"DAVIS, DAKOTA ""JAMIE"",=""03/13/2022",207394404660,001453,Hemoglobin A1c,4.00\n', relax: true, excel: true
+  eq rows, [['04003497', '72359435', 'DAVIS, DAKOTA "JAMIE"', '03/13/2022', '207394404660', '001453', 'Hemoglobin A1c', '4.00']]
+
+test "JOJO pattern — doubled quotes at excel boundary", ->
+  rows = CSV.read '04003497,72359439,"CHO, JOELLE ""JOJO"",=""03/25/2022",208449441660,602989,Food Allergy Profile,66.00\n', relax: true, excel: true
+  eq rows, [['04003497', '72359439', 'CHO, JOELLE "JOJO"', '03/25/2022', '208449441660', '602989', 'Food Allergy Profile', '66.00']]
+
+test "=\"\" with content — extra quote skip", ->
+  rows = CSV.read 'simple,=""03/15/2022",after\n', relax: true, excel: true
+  eq rows, [['simple', '03/15/2022', 'after']]
+
+test "trailing separator — empty final field", ->
+  rows = CSV.read 'Name,Age,,,Shoe,,,\n', relax: true, excel: true
+  eq rows, [['Name', 'Age', '', '', 'Shoe', '', '', '']]
+
+test "trailing separator — 123,", ->
+  rows = CSV.read '123,\n', relax: true, excel: true
+  eq rows, [['123', '']]
+
+test "dx_codes field with comma", ->
+  raw = '''
+    Req,Control,Accession,Account,Name,DX,Fasting,Date
+    111,222,333,444,TestCo,"Z00.00, Z11.3",N,2026-02-09
+    555,666,777,888,OtherCo,D64.9,,2026-02-09
+    '''
+  rows = CSV.read raw + '\n', excel: true, relax: true, strip: true
+  eq rows[1][5], 'Z00.00, Z11.3'
+  eq rows[1].length, 8
+  eq rows[2][5], 'D64.9'
+
+# ==[ Reading: quotes beyond the 8KB probe ]==
+
+console.log "\nReading — quotes beyond probe sample"
+
+test "quoted field appears after 8KB of plain rows", ->
+  header = 'a,b,c,d\n'
+  plainRow = '1,2,3,4\n'
+  rowsNeeded = Math.ceil(8192 / plainRow.length) + 5
+  csv = header
+  loop rowsNeeded
+    csv += plainRow
+  csv += 'x,"hello, world",y,z\n'
+  rows = CSV.read csv
+  last = rows[-1]
+  eq last[1], 'hello, world'
+  eq last.length, 4
+
+test "same late-quote case with excel+relax+strip", ->
+  header = 'a,b,c,d\n'
+  plainRow = '1,2,3,4\n'
+  rowsNeeded = Math.ceil(8192 / plainRow.length) + 5
+  csv = header
+  loop rowsNeeded
+    csv += plainRow
+  csv += 'x,"hello, world",y,z\n'
+  rows = CSV.read csv, excel: true, relax: true, strip: true
+  last = rows[-1]
+  eq last[1], 'hello, world'
+  eq last.length, 4
+
+test "Labcorp wide header — late quoted DX after plain rows", ->
+  header = 'Req,Control,Accession,Account,Name,Last,First,DOB,Sex,Street,City,State,Zip,Phone,NPI,ProvLast,ProvFirst,Bill,DX,Fasting,Notes,ColDate,ColTime,RecDate,RecTime,RepDate,RepTime,TestCode,TestName,ResCode,ResName,Value,Units,Ref,Flag,Lab,Status\n'
+  plainRow = '111,222,333,444,TestCo,SMITH,JOHN,1990-01-01,M,123 Main St,Seattle,WA,98101,2065551234,1234567890,DOE,J,03,Z00.00,N,,2026-02-05,08:00:00,2026-02-06,03:00:00,2026-02-09,12:00:00,001321,Iron,001339,Iron,100,ug/dL,27-159,,PDLCA,F\n'
+  csv = header
+  loop 30
+    csv += plainRow
+  csv += '999,888,777,666,TestCo,DOE,JANE,1985-05-15,F,456 Oak Ave,Portland,OR,97201,5035551234,9876543210,WONG,K,03,"Z13.29, R79.89",,,2026-02-05,08:48:00,2026-02-06,03:01:00,2026-02-09,19:08:00,006684,Thyroid Antibodies,006706,Thyroglobulin Antibody,72.1,IU/mL,0.0-0.9,H,SPOWA,F\n'
+  rows = CSV.read csv, excel: true, relax: true, strip: true
+  last = rows[-1]
+  eq last[18], 'Z13.29, R79.89'
+  eq last.length, 37
+
+# ==[ Reading: BOM ]==
+
+console.log "\nReading — BOM"
+
+test "strip BOM", ->
+  eq CSV.read("\uFEFFa,b\n1,2\n"), [['a','b'],['1','2']]
+
+# ==[ Reading: Mixed line endings ]==
+
+console.log "\nReading — line endings"
+
+test "CRLF line endings", ->
+  eq CSV.read("a,b\r\n1,2\r\n"), [['a','b'],['1','2']]
+
+test "CR only line endings", ->
+  eq CSV.read("a,b\r1,2\r"), [['a','b'],['1','2']]
+
+# ==[ Writing ]==
+
+console.log "\nWriting — basic"
+
+test "simple write", ->
+  eq CSV.write([['a','b'],['1','2']]), "a,b\n1,2\n"
+
+test "write with quoting", ->
+  result = CSV.write([['a,b','c']])
+  eq result, '"a,b",c\n'
+
+test "write with escaped quotes", ->
+  result = CSV.write([['say "hi"','ok']])
+  eq result, '"say ""hi""",ok\n'
+
+test "write comma and quotes together", ->
+  eq CSV.write([['hello, "world"', 'ok']]), '"hello, ""world""",ok\n'
+
+test "write with newline", ->
+  eq CSV.write([['line1\nline2', 'ok']]), '"line1\nline2",ok\n'
+
+test "write full mode", ->
+  result = CSV.write([['a','b']], mode: 'full')
+  eq result, '"a","b"\n'
+
+test "write with tab separator", ->
+  result = CSV.write([['a','b']], sep: '\t')
+  eq result, "a\tb\n"
+
+test "write zeros mode", ->
+  result = CSV.write([['0123','hello']], zeros: true)
+  eq result, '="0123",hello\n'
+
+test "write drop trailing empties", ->
+  result = CSV.write([['a','','']], drop: true)
+  eq result, "a\n"
+
+test "formatRow convenience", ->
+  eq CSV.formatRow(['a','b,c','d']), 'a,"b,c",d'
+
+# ==[ Writer instance ]==
+
+console.log "\nWriting — writer instance"
+
+test "reusable writer", ->
+  w = CSV.writer(sep: '\t')
+  eq w.row(['a','b']), "a\tb"
+  eq w.row(['1','2']), "1\t2"
+
+test "writer rows", ->
+  w = CSV.writer()
+  eq w.rows([['a','b'],['1','2']]), "a,b\n1,2\n"
+
+# ==[ Round-trip ]==
+
+console.log "\nRound-trip"
+
+test "plain CSV", ->
+  input = "a,b,c\n1,2,3\n"
+  eq CSV.write(CSV.read(input)), input
+
+test "CSV with quoted fields", ->
+  input = 'name,desc,val\nAlice,"likes, commas",1\n'
+  rows = CSV.read input
+  eq rows[1][1], 'likes, commas'
+  eq CSV.read(CSV.write(rows))[1][1], 'likes, commas'
+
+test "CSV with escaped quotes", ->
+  rows = CSV.read '"say ""hello""",ok\n'
+  eq rows[0][0], 'say "hello"'
+  written = CSV.write rows
+  eq written, '"say ""hello""",ok\n'
+  eq CSV.read(written)[0][0], 'say "hello"'
+
+test "dx_codes round-trip", ->
+  raw = 'Req,DX,Date\n111,"Z00.00, Z11.3",2026-02-09\n'
+  rows = CSV.read raw, excel: true, relax: true, strip: true
+  eq rows[1][1], 'Z00.00, Z11.3'
+  eq CSV.read(CSV.write(rows))[1][1], 'Z00.00, Z11.3'
+
+# ==[ File I/O ]==
+
+console.log "\nFile I/O"
+
+test! "save then load round-trips through a real file", ->
+  path = "#{import.meta.dir}/.test-io-#{Date.now()}.csv"
+  rows = [['name','note'], ['Alice', 'likes, commas'], ['Bob', 'say "hi"']]
+  try
+    CSV.save! path, rows
+    eq CSV.load!(path), rows
+    eq CSV.load!(path, headers: true), [{name: 'Alice', note: 'likes, commas'}, {name: 'Bob', note: 'say "hi"'}]
+  finally
+    try (await import('fs')).unlinkSync(path)

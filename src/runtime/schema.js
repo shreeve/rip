@@ -152,10 +152,18 @@ function __schemaRegisterCoercer(name, fn, opts) {
   if (tag === '[object AsyncFunction]' || tag === '[object GeneratorFunction]' || tag === '[object AsyncGeneratorFunction]') {
     throw new Error("registerCoercer: coercer '~:" + name + "' must be a plain synchronous function");
   }
-  if (__schemaNamedCoercers.has(name)) {
+  const raw = opts?.raw === true;
+  const existing = __schemaNamedCoercers.get(name);
+  if (existing) {
+    // Same policy as schema names: a re-evaluation of the same module
+    // (browser reboot, hot reload) re-registers the same definition and
+    // is tolerated; a DIFFERENT definition is a genuine foreign claim
+    // and rejects loudly. Coercers are pure by contract, so identical
+    // source text means identical behavior.
+    if (existing.raw === raw && String(existing.fn) === String(fn)) return fn;
     throw new Error("registerCoercer: coercer '~:" + name + "' is already registered");
   }
-  __schemaNamedCoercers.set(name, { fn, raw: opts?.raw === true });
+  __schemaNamedCoercers.set(name, { fn, raw });
   return fn;
 }
 

@@ -1,5 +1,7 @@
 # Sibling packages resolve by direct path through the Rip loader.
-import '../../../validate/coercers.rip'
+# Importing validate registers its ~:name coercers (they ride the
+# main import).
+import '../../../validate/validate.rip'
 
 export CreateOrder = schema
   total! ~:money

@@ -1,8 +1,0 @@
-# @rip-lang/validate — public entry. The vocabulary and registry live
-# in registry.rip; the `~:name` schema-coercer bridge is the separate
-# `@rip-lang/validate/coercers` entry.
-
-export type Validator = (v: any) => unknown
-
-export { isBlank, toName, toPhone, formatMoney } from './registry.rip'
-export { registerValidator, getValidator, isRawType, validatorNames, check } from './registry.rip'

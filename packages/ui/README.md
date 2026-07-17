@@ -9,7 +9,8 @@ The package is organized by ownership:
 - `tailwind/` — the sole boundary for Tailwind compilation and CSS parsing
 
 Public APIs use named exports. Package dependencies are isolated here;
-the Rip compiler root remains dependency- and workspace-free.
+the Rip compiler itself remains dependency-free. Repo-root Bun workspaces
+wire `@rip-lang/*` for in-tree development.
 
 ## Email
 

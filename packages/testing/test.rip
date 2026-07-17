@@ -1,0 +1,178 @@
+# ==============================================================================
+# testing tests: the harness pinned by itself
+#
+# eq / ok / throws are pinned in-process (their failures are ordinary
+# throws). test()'s own behavior (check/cross output, the exit tally,
+# process.exitCode, colors) is observed from OUTSIDE: fixture suites run
+# as real subprocesses through this repository's rip.
+# ==============================================================================
+
+import { test, eq, ok, throws } from '@rip-lang/testing'
+import * as mod from '@rip-lang/testing'
+import { mkdtempSync, readFileSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
+import { spawnSync } from 'child_process'
+
+pkg =! JSON.parse(readFileSync(join(import.meta.dir, 'package.json'), 'utf8'))
+
+# ==[ Package surface ]==
+
+console.log "\nPackage"
+
+test "module exports the four helpers and nothing else", ->
+  eq Object.keys(mod).sort(), ['eq', 'ok', 'test', 'throws']
+  ok not ('default' of mod), 'no default export'
+  for name in ['test', 'eq', 'ok', 'throws']
+    eq typeof mod[name], 'function'
+
+test "no dependencies of any kind", ->
+  for field in ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']
+    eq pkg[field], undefined
+
+test "does not claim browser safety (it owns process exit hooks)", ->
+  eq pkg.rip, undefined
+  source = readFileSync join(import.meta.dir, 'testing.rip'), 'utf8'
+  ok source.includes("process.on 'exit'")
+
+test "the harness stays tiny", ->
+  lines = readFileSync(join(import.meta.dir, 'testing.rip'), 'utf8').split('\n').length
+  ok lines <= 120, "harness is #{lines} lines; the budget is ~100"
+
+# ==[ eq: structural deep equality ]==
+
+console.log "\neq"
+
+test "scalars compare by identity", ->
+  eq 1, 1
+  eq 'a', 'a'
+  eq true, true
+  eq null, null
+  eq undefined, undefined
+
+test "mismatched scalars throw with expected/got in the message", ->
+  throws (-> eq(1, 2)), 'expected 2, got 1'
+  throws (-> eq('a', 'b')), Error
+
+test "null and undefined are not equal to each other", ->
+  throws (-> eq(null, undefined))
+  throws (-> eq(undefined, null))
+
+test "arrays are ordered", ->
+  eq [1, [2, 3]], [1, [2, 3]]
+  throws (-> eq([1, 2], [2, 1]))
+  throws (-> eq([1, 2], [1, 2, 3]))
+
+test "object keys are unordered; extra or missing keys throw", ->
+  eq { a: 1, b: [2] }, { b: [2], a: 1 }
+  throws (-> eq({ a: 1 }, { a: 1, b: 2 }))
+  throws (-> eq({ a: 1, b: 2 }, { a: 1 }))
+
+test "an array never equals a plain object", ->
+  throws (-> eq([], {}))
+  throws (-> eq({}, []))
+
+test "nested structures compare deeply", ->
+  eq { rows: [['a', 'b'], ['1', '2']], n: 2 }, { n: 2, rows: [['a', 'b'], ['1', '2']] }
+
+# ==[ ok ]==
+
+console.log "\nok"
+
+test "truthy passes, falsy throws the default message", ->
+  ok 1
+  ok 'x'
+  throws (-> ok(false)), 'assertion failed'
+  throws (-> ok(0)), 'assertion failed'
+
+test "a custom message rides the throw", ->
+  throws (-> ok(false, 'boom')), 'boom'
+
+# ==[ throws ]==
+
+console.log "\nthrows"
+
+test "passes when the body throws, throws when it does not", ->
+  throws -> raise 'x'
+  throws (-> throws(-> null)), 'expected throw'
+
+test "an Error class refines by instanceof", ->
+  throws (-> throw new TypeError('t')), TypeError
+  throws (-> throws((-> throw new Error('e')), TypeError)), 'expected TypeError, got Error'
+
+test "a string refines by message containment", ->
+  throws (-> throw new Error('bad selector')), 'selector'
+  throws (-> throws((-> throw new Error('abc')), 'xyz')), 'expected message containing'
+
+test "class and message refine together", ->
+  throws (-> throw new RangeError('out of range')), RangeError, 'range'
+
+# ==[ test: async support, in-process ]==
+
+console.log "\ntest"
+
+order = []
+test! "an async body is awaited in place (test!)", ->
+  await new Promise (r) -> setTimeout r, 5
+  order.push 1
+test "async cases finish before later cases run", ->
+  eq order, [1]
+
+# ==[ test: output, tally, exit status (subprocess) ]==
+
+tmp    =! mkdtempSync join(tmpdir(), 'testing-')
+ripCli =! join(import.meta.dir, '..', '..', 'bin', 'rip')
+
+# Fixtures import the harness by absolute path: they run from the temp
+# dir, where bare @rip-lang/* specifiers have no node_modules to resolve
+# against.
+harness =! join(import.meta.dir, 'testing.rip')
+
+fixture = (name, source) ->
+  file = join tmp, name
+  writeFileSync file, source
+  file
+
+# NO_COLOR pins byte-exact output; the color case forces codes on.
+suite = (file, env = {}) ->
+  spawnSync process.execPath, [ripCli, file], { encoding: 'utf8', env: { ...process.env, NO_COLOR: '1', ...env } }
+
+mixed =! fixture 'mixed.rip', [
+  "import { test, eq } from '#{harness}'"
+  'test "adds", -> eq 1 + 1, 2'
+  'test "boom", -> eq 1, 2'
+].join('\n')
+
+passing =! fixture 'passing.rip', [
+  "import { test, ok } from '#{harness}'"
+  'test "fine", -> ok true'
+].join('\n')
+
+test "passing cases print a check and exit 0", ->
+  r = suite passing
+  eq r.status, 0
+  ok r.stdout.includes('  ✓ fine')
+  ok r.stdout.includes('1 tests: 1 passed, 0 failed')
+
+test "a failing case prints a cross with the reason and sets the exit code", ->
+  r = suite mixed
+  eq r.status, 1
+  ok r.stdout.includes('  ✓ adds')
+  ok r.stdout.includes('  ✗ boom: expected 2, got 1')
+
+test "the tally prints once, on exit", ->
+  r = suite mixed
+  eq r.stdout.split('tests:').length - 1, 1
+  ok r.stdout.includes('2 tests: 1 passed, 1 failed')
+
+test "NO_COLOR output carries no escape codes", ->
+  r = suite mixed
+  ok not r.stdout.includes('\x1b[')
+
+test "FORCE_COLOR paints; NO_COLOR still wins over it", ->
+  env = { ...process.env }
+  delete env.NO_COLOR
+  forced = spawnSync process.execPath, [ripCli, mixed], { encoding: 'utf8', env: { ...env, FORCE_COLOR: '1' } }
+  ok forced.stdout.includes('\x1b[32m')
+  both = suite mixed, { FORCE_COLOR: '1' }
+  ok not both.stdout.includes('\x1b[')

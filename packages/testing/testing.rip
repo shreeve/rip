@@ -1,0 +1,105 @@
+# ==============================================================================
+# @rip-lang/testing: shared helpers for package test.rip files
+#
+#   import { test, eq, ok, throws } from '@rip-lang/testing'
+#
+#   test "does the thing", ->
+#     eq CSV.read("a,b\n"), [['a','b']]
+#
+# The tally prints automatically when the process exits. A failed case
+# sets process.exitCode so CI sees a non-zero status.
+#
+# Keep this file tiny. Package tests should read like Rip, not like a
+# framework. The language battery keeps its own harness
+# (test/support/testing.js): test/code/fail/type over compiler snippets.
+# ==============================================================================
+
+RESET =! "\x1b[0m"
+BOLD  =! "\x1b[1m"
+GREEN =! "\x1b[32m"
+RED   =! "\x1b[31m"
+DIM   =! "\x1b[2m"
+
+# Color when stdout is a TTY (or FORCE_COLOR), unless NO_COLOR is set.
+useColor =! if process.env.NO_COLOR?
+  false
+else if process.env.FORCE_COLOR? and "#{process.env.FORCE_COLOR}" isnt '0'
+  true
+else
+  !!process.stdout.isTTY
+
+paint = (code, text) ->
+  if useColor then "#{code}#{text}#{RESET}" else text
+
+pass = 0
+fail = 0
+_reported = false
+
+report = ->
+  return if _reported
+  _reported = true
+  total = pass + fail
+  passed = paint(GREEN, "#{pass} passed")
+  failed = paint((if fail > 0 then RED else DIM), "#{fail} failed")
+  console.log "\n#{paint(BOLD, "#{total} tests")}: #{passed}, #{failed}\n"
+
+process.on 'exit', report
+
+# An async body works too: invoke as `test! "name", -> ...` so the
+# file awaits it in place and output stays ordered.
+export def test(name, fn)
+  try
+    r = fn()
+    await r if r?.then?
+    pass++
+    console.log "  #{paint(GREEN, '✓')} #{name}"
+  catch e
+    fail++
+    process.exitCode = 1
+    console.log "  #{paint(RED, '✗')} #{name}: #{e.message}"
+
+# Structural deep equality: arrays ordered, object keys unordered,
+# scalars by identity. Not for BigInt/Map/cycles.
+deepEq = (a, b) ->
+  return true if a is b
+  return false unless a? and b?
+  return false if typeof a isnt typeof b
+  if Array.isArray(a)
+    return false unless Array.isArray(b) and a.length is b.length
+    for v, i in a
+      return false unless deepEq(v, b[i])
+    return true
+  if typeof a is 'object'
+    return false if Array.isArray(b)   # {} never equals []
+    ka = Object.keys(a)
+    return false unless ka.length is Object.keys(b).length
+    for k in ka
+      return false unless Object.hasOwn(b, k) and deepEq(a[k], b[k])
+    return true
+  false
+
+export def eq(a, b)
+  unless deepEq(a, b)
+    throw new Error "expected #{JSON.stringify(b)}, got #{JSON.stringify(a)}"
+
+export def ok(cond, message = 'assertion failed')
+  throw new Error(message) unless cond
+
+# `expected` refines the assertion: an Error class checks instanceof,
+# a string checks message containment, and both can be given in order.
+export def throws(fn, ...expected)
+  caught = null
+  threw  = false
+  try
+    fn()
+  catch e
+    caught = e
+    threw  = true
+  throw new Error('expected throw') unless threw
+  for want in expected
+    if typeof want is 'string'
+      unless String(caught?.message).includes(want)
+        throw new Error "expected message containing #{JSON.stringify(want)}, got #{JSON.stringify(caught?.message)}"
+    else
+      unless caught instanceof want
+        throw new Error "expected #{want?.name ?? 'error class'}, got #{caught?.constructor?.name}"

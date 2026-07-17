@@ -1,25 +1,23 @@
 {
   "name": "@rip-lang/swarm",
-  "version": "0.0.0",
+  "version": "4.0.0",
   "private": true,
   "type": "module",
+  "description": "Parallel job runner with worker threads — setup once, swarm many",
   "exports": {
-    ".": {
-      "types": "./swarm.d.ts",
-      "default": "./swarm.rip"
-    }
+    ".": "./swarm.rip"
   },
   "bin": {
-    "swarm": "./bin/swarm"
+    "swarm": "./swarm.rip"
   },
   "scripts": {
-    "test": "bun test --timeout 15000"
+    "test": "rip test.rip"
   },
   "files": [
-    "*.rip",
-    "*.d.ts",
-    "lib/",
-    "bin/",
+    "swarm.rip",
     "README.md"
-  ]
+  ],
+  "devDependencies": {
+    "@rip-lang/testing": "workspace:*"
+  }
 }

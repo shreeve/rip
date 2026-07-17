@@ -1,0 +1,16 @@
+# Deterministic failures: tasks 3 and 7 always throw, the rest succeed.
+# A second run exercises retry() — only the died tasks reprocess.
+
+import { swarm, init, retry, todo } from '@rip-lang/swarm'
+
+setup = ->
+  unless retry()
+    init()
+    todo i for i in [1..10]
+  null
+
+perform = (task, ctx) ->
+  name = task.split('/').pop()
+  raise "boom #{name}" if name in ['3', '7']
+
+swarm { setup, perform }

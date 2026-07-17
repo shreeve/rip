@@ -19002,10 +19002,14 @@ function __schemaRegisterCoercer(name, fn, opts) {
   if (tag === "[object AsyncFunction]" || tag === "[object GeneratorFunction]" || tag === "[object AsyncGeneratorFunction]") {
     throw new Error("registerCoercer: coercer '~:" + name + "' must be a plain synchronous function");
   }
-  if (__schemaNamedCoercers.has(name)) {
+  const raw = opts?.raw === true;
+  const existing = __schemaNamedCoercers.get(name);
+  if (existing) {
+    if (existing.raw === raw && String(existing.fn) === String(fn))
+      return fn;
     throw new Error("registerCoercer: coercer '~:" + name + "' is already registered");
   }
-  __schemaNamedCoercers.set(name, { fn, raw: opts?.raw === true });
+  __schemaNamedCoercers.set(name, { fn, raw });
   return fn;
 }
 function __schemaNestedDef(typeName) {

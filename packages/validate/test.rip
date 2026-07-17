@@ -1,0 +1,463 @@
+# ==============================================================================
+# validate tests: the vocabulary, the registry, and the ~:name bridge
+#
+# One row per contract: [type, input, normalized-or-null]. check()
+# stringifies every input except the raw set, exactly like the schema
+# and server call sites. Coercers ride the main import, so the schemas
+# below need no bridge import.
+# ==============================================================================
+
+import { test, eq, ok, throws } from '@rip-lang/testing'
+import {
+  check, formatMoney, getValidator, isBlank, isRawType,
+  registerValidator, toName, toPhone, validatorNames,
+} from '@rip-lang/validate'
+import * as mod from '@rip-lang/validate'
+import { registerCoercer, SchemaError } from '../../src/runtime/schema.js'
+import { mkdtempSync, readFileSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
+import { spawnSync } from 'child_process'
+
+pkg =! JSON.parse(readFileSync(join(import.meta.dir, 'package.json'), 'utf8'))
+
+BUILTINS =! [
+  'address', 'array', 'bool', 'cents', 'color', 'date', 'decimal',
+  'email', 'falsy', 'float', 'hash', 'id', 'ids', 'int', 'ip', 'json',
+  'mac', 'money', 'money_even', 'name', 'phone', 'semver', 'sex',
+  'slug', 'ssn', 'state', 'string', 'text', 'time', 'time12', 'truthy',
+  'url', 'username', 'uuid', 'whole', 'zip', 'zipplus4',
+]
+
+# Schemas exercising the auto-registered coercers (names resolve lazily
+# at parse time, so `~:evenCents` may register later in this file).
+Order = schema
+  total! ~:money
+  placed! ~:date
+  ssn? ~:ssn
+  meta? ~:json
+  flag? ~:bool
+  qty? ~:int
+
+Tick = schema
+  n! ~:evenCents
+
+# ==[ Package surface ]==
+
+console.log "\nPackage"
+
+test "public entry exposes named exports only", ->
+  eq Object.keys(mod).sort(), [
+    'check', 'formatMoney', 'getValidator', 'isBlank', 'isRawType',
+    'registerValidator', 'toName', 'toPhone', 'validatorNames',
+  ]
+  ok not ('default' of mod), 'no default export'
+
+test "no runtime deps; testing harness is the only devDependency", ->
+  for field in ['dependencies', 'peerDependencies', 'optionalDependencies']
+    eq pkg[field], undefined
+  eq pkg.devDependencies, { '@rip-lang/testing': 'workspace:*' }
+
+test "declares browser safety and earns it", ->
+  eq pkg.rip, { browser: true }
+  # The one import is the schema runtime (itself browser-safe; the
+  # bundler bridges the …/src/runtime/… spelling). No host APIs.
+  source = readFileSync join(import.meta.dir, 'validate.rip'), 'utf8'
+  imports = source.match(/^import .*$/mg)
+  eq imports, ["import { registerCoercer } from '../../src/runtime/schema.js'"]
+  eq /\bBun\.|node:|process\.|globalThis/.test(source), false
+
+test "a fresh process holds exactly the 37 built-ins, all bridged", ->
+  dir = mkdtempSync join(tmpdir(), 'validate-')
+  probe = join dir, 'probe.rip'
+  writeFileSync probe, [
+    "import { validatorNames } from '#{join(import.meta.dir, 'validate.rip')}'"
+    "S = schema"
+    "  d! ~:date"
+    "p validatorNames().length"
+    "p S.parse({ d: '20240229' }).d"
+  ].join('\n')
+  r = spawnSync process.execPath, [join(import.meta.dir, '..', '..', 'bin', 'rip'), probe], { encoding: 'utf8' }
+  eq r.status, 0
+  eq r.stdout, '37\n2024-02-29\n'
+
+# ==[ The vocabulary, row by row ]==
+
+console.log "\nVocabulary"
+
+rows = [
+  # id: positive integer, no leading zero, at most 15 digits
+  ['id', '12345', 12345]
+  ['id', '999999999999999', 999999999999999]
+  ['id', '0', null]
+  ['id', '01', null]
+  ['id', '-5', null]
+  ['id', '1234567890123456', null]
+  ['id', 'x', null]
+
+  # int / whole / float
+  ['int', '42', 42]
+  ['int', '-42', -42]
+  ['int', '+7', 7]
+  ['int', '0', 0]
+  ['int', '007', null]
+  ['int', '1.5', null]
+  ['int', ' 42 ', null]
+  ['whole', '0', 0]
+  ['whole', '42', 42]
+  ['whole', '-1', null]
+  ['float', '3.14', 3.14]
+  ['float', '.5', 0.5]
+  ['float', '-.5', -0.5]
+  ['float', '-2.', -2]
+  ['float', '+1.25', 1.25]
+  ['float', 'x', null]
+
+  # money: dollars in, integer cents out, half-up
+  ['money', '$1,292.22', 129222]
+  ['money', '129222', 12922200]
+  ['money', '1,000', 100000]
+  ['money', '.5', 50]
+  ['money', '1.005', 101]
+  ['money', '1.0050', 101]
+  ['money', '-1.005', -101]
+  ['money', '-$0.01', -1]
+  ['money', '1,00', null]
+  ['money', ',5', null]
+  ['money', '1,2,3', null]
+  ['money', '$', null]
+  ['money', 'x', null]
+
+  # money_even: half-to-even at the third fractional digit
+  ['money_even', '1.005', 100]
+  ['money_even', '1.015', 102]
+  ['money_even', '1.0051', 101]
+
+  # cents: already cents, whole numbers only
+  ['cents', '123', 123]
+  ['cents', '-45', -45]
+  ['cents', '0', 0]
+  ['cents', '-0', 0]
+  ['cents', '1.23', null]
+  ['cents', '12345678901234567890', null]
+
+  # decimal: lossless string, canonical sign and leading zeros
+  ['decimal', '0', '0']
+  ['decimal', '.5', null]
+  ['decimal', '007', '7']
+  ['decimal', '+1.50', '1.50']
+  ['decimal', '-2.50', '-2.50']
+  ['decimal', '-0', '0']
+  ['decimal', '-0.00', '0.00']
+  ['decimal', '1,000', null]
+  ['decimal', '$5', null]
+
+  # string / text: whitespace collapse
+  ['string', 'a\t\tb  c', 'a b c']
+  ['text', 'a  b', 'a b']
+  ['text', 'a\tb', 'a\tb']
+
+  # name / address: US-English casing packs
+  ['name', 'JOHN   MCDONALD', 'John McDonald']
+  ['name', "o'brien", "O'Brien"]
+  ['address', '123 main st.', '123 Main St']
+  ['address', 'p.o. box 12', 'PO Box 12']
+
+  # date: calendar-true, canonical YYYY-MM-DD
+  ['date', '2024-02-29', '2024-02-29']
+  ['date', '20240215', '2024-02-15']
+  ['date', '2000-02-29', '2000-02-29']
+  ['date', '1900-02-29', null]
+  ['date', '2023-02-29', null]
+  ['date', '2024-02-30', null]
+  ['date', '2024-13-01', null]
+  ['date', '2024-00-10', null]
+  ['date', '2024-01-00', null]
+  ['date', '2024-01-32', null]
+  ['date', '2024-0215', null]
+  ['date', '2024-2-15', null]
+  ['date', '2024-02-15 ', null]
+  ['date', '99-01-01', null]
+
+  # time / time12
+  ['time', '00:30', '00:30']
+  ['time', '23:59', '23:59']
+  ['time', '7:05', '7:05']
+  ['time', '12:30:45', '12:30:45']
+  ['time', '24:00', null]
+  ['time', '12:60', null]
+  ['time12', '9:30 PM', '9:30 pm']
+  ['time12', '12:00am', '12:00am']
+  ['time12', '13:00 pm', null]
+  ['time12', '0:30 am', null]
+
+  # booleans
+  ['truthy', 'YES', true]
+  ['truthy', 'off', null]
+  ['falsy', 'off', true]
+  ['falsy', 'yes', null]
+  ['bool', 'T', true]
+  ['bool', 'Off', false]
+  ['bool', 'maybe', null]
+
+  # contact, geo, identity
+  ['email', 'Foo@Example.COM', 'foo@example.com']
+  ['email', 'a@b', null]
+  ['email', 'a b@c.com', null]
+  ['state', 'ca', 'CA']
+  ['state', 'xz', 'XZ']
+  ['state', 'c', null]
+  ['state', 'cal', null]
+  ['zip', '12345-6789', '12345']
+  ['zip', '1234', null]
+  ['zip', '123456', null]
+  ['zip', '12345abc', null]
+  ['zipplus4', '123456789', '12345-6789']
+  ['zipplus4', '12345-6789', '12345-6789']
+  ['zipplus4', '12345', null]
+  ['ssn', '123-45-6789', '123456789']
+  ['ssn', '123456789', '123456789']
+  ['ssn', '123-45-678', null]
+  ['sex', 'female', 'F']
+  ['sex', 'M', 'M']
+  ['sex', 'unspecified', 'U']
+  ['sex', 'x', null]
+
+  # phone: NANP normalization
+  ['phone', '502.758.8802', '(502) 758-8802']
+  ['phone', '1 (502) 758-8802', '(502) 758-8802']
+  ['phone', '5027588802 x12', '(502) 758-8802, ext. 12']
+  ['phone', '123-456-7890', null]
+  ['phone', '+44 20 7946 0958', '+442079460958']
+  ['phone', '+1 502 758 8802 x12', '(502) 758-8802, ext. 12']
+
+  # web & technical
+  ['username', 'Bob_Smith-1', 'bob_smith-1']
+  ['username', 'ab', null]
+  ['username', 'a'.repeat(21), null]
+  ['ip', '192.168.0.1', '192.168.0.1']
+  ['ip', '256.1.1.1', null]
+  ['ip', '1.2.3', null]
+  ['mac', 'AA:BB:CC:DD:EE:FF', 'aa:bb:cc:dd:ee:ff']
+  ['mac', 'aabbccddeeff', 'aa:bb:cc:dd:ee:ff']
+  ['mac', 'aa-bb-cc-dd-ee-ff', 'aa:bb:cc:dd:ee:ff']
+  ['mac', 'aa:bb-cc-dd:ee:ff', 'aa:bb:cc:dd:ee:ff']
+  ['mac', 'aabb', null]
+  ['url', 'https://x.com/path', 'https://x.com/path']
+  ['url', 'ftp://x.com', null]
+  ['url', 'https://', null]
+  ['color', 'AbC', '#abc']
+  ['color', '#a1b2c3', '#a1b2c3']
+  ['color', '#ab', null]
+  ['uuid', '123E4567E89B12D3A456426614174000', '123e4567-e89b-12d3-a456-426614174000']
+  ['uuid', '123e4567-e89b-12d3-a456-42661417400', null]
+  ['semver', '1.2.3', '1.2.3']
+  ['semver', '1.2.3-rc.1+build.5', '1.2.3-rc.1+build.5']
+  ['semver', '1.2', null]
+  ['semver', '01.2.3', null]
+
+  # slugs & id lists
+  ['slug', 'My-Page', 'my-page']
+  ['slug', 'a--b', null]
+  ['slug', '-a', null]
+  ['ids', '15 2 2 1', [1, 2, 15]]
+  ['ids', '3,4', [3, 4]]
+  ['ids', '999999999999999', [999999999999999]]
+  ['ids', '1234567890123456', null]
+  ['ids', '0 1', null]
+  ['ids', '1 x', null]
+  ['ids', '', null]
+]
+
+test "the row table: #{rows.length} contracts", ->
+  for [type, input, expected] in rows
+    got = check input, type
+    unless JSON.stringify(got) is JSON.stringify(expected)
+      throw new Error "#{type} #{JSON.stringify(input)}: expected #{JSON.stringify(expected)}, got #{JSON.stringify(got)}"
+
+test "the raw set receives values untouched", ->
+  eq check([1, 2], 'array'), [1, 2]
+  eq check('x', 'array'), null
+  eq check({ a: 1 }, 'hash'), { a: 1 }
+  eq check([], 'hash'), null
+  eq check(null, 'hash'), null
+  eq check('{"a":1}', 'json'), { a: 1 }
+  eq check('[1,2]', 'json'), [1, 2]
+  eq check({ b: 2 }, 'json'), { b: 2 }
+  eq check('nope', 'json'), null
+  eq check(42, 'json'), null
+
+test "isRawType answers the raw flag; unknown names answer false", ->
+  ok isRawType(raw) for raw in ['array', 'hash', 'json']
+  ok not isRawType(plain) for plain in ['int', 'string', 'phone']
+  ok not isRawType('nope')
+
+test "non-raw validators receive the string form", ->
+  eq check(42, 'int'), 42
+  eq check(null, 'string'), ''
+  eq check([12345], 'id'), 12345
+
+test "blank strings normalize to blank, not to a miss, in the string family", ->
+  eq check('', 'string'), ''
+  eq check('', 'text'), ''
+  eq check('', 'phone'), ''
+
+test "every built-in name is present and the list is sorted", ->
+  eq BUILTINS.length, 37
+  names = validatorNames()
+  ok names.includes(name) for name in BUILTINS
+  eq names, [...names].sort()
+
+# ==[ Registration ]==
+
+console.log "\nRegistration"
+
+test "a registered validator joins the vocabulary", ->
+  registerValidator 'even', (v) -> if Number(v) % 2 is 0 then Number(v) else null
+  eq check('4', 'even'), 4
+  eq check('3', 'even'), null
+  ok validatorNames().includes('even')
+
+test "a raw registration receives values untouched", ->
+  registerValidator 'pair', ((v) -> if Array.isArray(v) and v.length is 2 then v else null), { raw: true }
+  eq check([1, 2], 'pair'), [1, 2]
+  eq check([1], 'pair'), null
+  ok isRawType('pair')
+  ok not isRawType('even')
+
+test "registering an existing name rejects", ->
+  throws (-> registerValidator('id', (v) -> v)), 'already registered'
+  throws (-> registerValidator('even', (v) -> v)), 'already registered'
+
+test "async and generator validators reject", ->
+  throws (-> registerValidator('later', (v) -> await v)), 'synchronous'
+  throws (-> registerValidator('gen', (v) -> yield v)), 'synchronous'
+
+test "a non-boolean raw flag rejects", ->
+  throws (-> registerValidator('rawish', ((v) -> v), { raw: 1 })), 'raw flag'
+
+test "an invalid name or non-function rejects", ->
+  throws (-> registerValidator('a-b', (v) -> v)), 'invalid validator name'
+  throws (-> registerValidator('', (v) -> v)), 'invalid validator name'
+  throws (-> registerValidator('fine', 'not a function')), 'must be a function'
+
+test "getValidator answers softly; check rejects loudly", ->
+  eq typeof getValidator('id'), 'function'
+  eq getValidator('nope'), undefined
+  throws (-> check('x', 'nope')), "unknown validator 'nope'"
+
+# ==[ Utilities ]==
+
+console.log "\nUtilities"
+
+test "isBlank", ->
+  ok isBlank(blank) for blank in [null, undefined, false, '', '  \t ', [], {}]
+  ok not isBlank(present) for present in [0, 'x', [0], { a: 1 }, true]
+
+test "toName rule packs", ->
+  eq toName('JOHN SMITH'), 'John Smith'
+  eq toName('mcdonald', 'name'), 'McDonald'
+  eq toName("o'brien's", 'name'), "O'Brien's"
+  eq toName('main st', 'address'), 'Main St'
+  eq toName('WWW.EXAMPLE.COM'), 'www.example.com'
+
+test "toPhone", ->
+  eq toPhone(''), ''
+  eq toPhone(null), ''
+  eq toPhone('502-758-8802'), '(502) 758-8802'
+  eq toPhone('bogus'), null
+
+test "formatMoney", ->
+  eq formatMoney(129222), '$1,292.22'
+  eq formatMoney(-1), '-$0.01'
+  eq formatMoney(0), '$0.00'
+  eq formatMoney(null), '$0.00'
+  eq formatMoney(129222, { commas: false }), '$1292.22'
+  eq formatMoney(500, { symbol: '' }), '5.00'
+  throws (-> formatMoney(NaN)), 'finite'
+  throws (-> formatMoney(Infinity)), 'finite'
+
+test "identical inputs validate identically, repeatedly", ->
+  for _i in [1..3]
+    eq check('12345', 'id'), 12345
+    eq check('x', 'id'), null
+    eq check('2024-02-29', 'date'), '2024-02-29'
+
+# ==[ The ~:name schema bridge (rides the main import) ]==
+
+console.log "\nSchema bridge"
+
+test "named coercers normalize schema fields", ->
+  order = Order.parse { total: '$1,292.22', placed: '20240229', ssn: '123-45-6789' }
+  eq order.total, 129222
+  eq order.placed, '2024-02-29'
+  eq order.ssn, '123456789'
+
+test "a coercion miss is a structured coerce issue", ->
+  bad = Order.safe { total: '1,00', placed: '2023-02-29' }
+  ok not bad.ok
+  errors = Object.fromEntries bad.errors.map (e) -> [e.field, e.error]
+  eq errors, { total: 'coerce', placed: 'coerce' }
+
+test "a coerced false is a value, not a miss", ->
+  eq Order.parse({ total: '5', placed: '2024-01-01', flag: 'no' }).flag, false
+  eq Order.parse({ total: '5', placed: '2024-01-01', flag: 'YES' }).flag, true
+  eq Order.safe({ total: '5', placed: '2024-01-01', flag: 'maybe' }).errors[0].error, 'coerce'
+
+test "schema coercion trims wire input; check does not", ->
+  eq Order.parse({ total: '5', placed: '2024-01-01', qty: ' 42 ' }).qty, 42
+  eq check(' 42 ', 'int'), null
+
+test "raw coercers receive values untouched", ->
+  order = Order.parse { total: '5', placed: '2024-01-01', meta: { source: 'web' } }
+  eq order.meta, { source: 'web' }
+
+test "parse throws SchemaError carrying the coerce issue", ->
+  caught = null
+  try
+    Order.parse { total: 'x', placed: '2024-01-01' }
+  catch error
+    caught = error
+  ok caught instanceof SchemaError
+  eq caught.issues[0].field, 'total'
+  eq caught.issues[0].error, 'coerce'
+
+test "every vocabulary name is bridged", ->
+  for name in BUILTINS
+    throws (-> registerCoercer(name, (v) -> v)), 'already registered'
+
+test "a rejecting bridge leaves the validator registry unchanged", ->
+  registerCoercer 'preclaimed', (v) -> v
+  throws (-> registerValidator('preclaimed', (v) -> v)), 'already registered'
+  eq getValidator('preclaimed'), undefined
+
+test "validators registered after import join the coercer table", ->
+  registerValidator 'evenCents', (v) ->
+    n = parseInt String(v), 10
+    if Number.isInteger(n) and n % 2 is 0 then n else null
+  eq Tick.parse({ n: '42' }).n, 42
+  eq Tick.safe({ n: '41' }).errors[0].error, 'coerce'
+
+test "re-registering a bridged name rejects loudly", ->
+  throws (-> registerCoercer('money', (v) -> v)), 'already registered'
+
+test "an async coercer rejects loudly", ->
+  throws (-> registerCoercer('later2', (v) -> await v)), 'synchronous'
+
+test "a coercer-name collision rejects the package import, naming the coercer", ->
+  dir = mkdtempSync join(tmpdir(), 'validate-')
+  probe = join dir, 'collide.rip'
+  writeFileSync probe, [
+    "import { registerCoercer } from '#{join(import.meta.dir, '..', '..', 'src', 'runtime', 'schema.js')}'"
+    "registerCoercer 'money', (v) -> v"
+    "try"
+    "  await import('#{join(import.meta.dir, 'validate.rip')}')"
+    "  p 'imported'"
+    "catch e"
+    '  p "guarded: #{e.message}"'
+    "  exit 1"
+  ].join('\n')
+  r = spawnSync process.execPath, [join(import.meta.dir, '..', '..', 'bin', 'rip'), probe], { encoding: 'utf8' }
+  eq r.status, 1
+  ok r.stdout.includes('guarded:')
+  ok r.stdout.includes("'~:money' is already registered")

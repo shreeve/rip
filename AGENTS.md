@@ -6,7 +6,6 @@ the Rip compiler: language, toolchain, runtimes, and editor support.
 Permanent documentation:
 
 - [README.md](README.md) — repository orientation and entry points.
-- [PROCESS.md](PROCESS.md) — planning, review, and merge protocol.
 - [docs/SYNTAX.md](docs/SYNTAX.md) — context-sensitive language syntax.
 - [docs/TYPES.md](docs/TYPES.md) — type and editor architecture.
 - [docs/HMR.md](docs/HMR.md) — HMR design and acceptance contract.
@@ -44,8 +43,8 @@ Permanent documentation:
 5. **Tests are the contract.** New behavior lands with tests (snapshot
    surfaces and negative tests). If a test fails, fix the code or (with
    justification) the test — never weaken an acceptance criterion to
-   pass. Every confirmed defect converts to a permanent pin before its
-   fix merges; a pin asserts the CORRECT behavior, never the bug.
+   pass. Every confirmed defect converts to a permanent pin in the same
+   commit as its fix; a pin asserts the CORRECT behavior, never the bug.
 
 6. **Emitted output never changes silently.** A change that alters the
    compiler's output bytes lands with its regenerated corpus snapshots
@@ -62,22 +61,10 @@ Permanent documentation:
    path by regressing another is not an optimization until the
    trade-off is measured and accepted.
 
-8. **Small, honest commits — always through branches and PRs.** Nothing
-   commits to `main` directly. PRs squash-merge by default: linear
-   history, one commit per PR, subject "Title (#N)", the PR body as
-   the commit body. A campaign PR whose commits are each one complete,
-   honestly named, and useful as review provenance rebase-merges when
-   the owner approves preserving that sequence. Before merge, rebase
-   the campaign branch onto current `main`; never merge `main` into
-   the branch. The resulting `main` history stays linear and contains
-   no merge commit.
-   Commits and PRs carry **no AI attribution** — no Co-Authored-By
-   trailers, no "generated with" footers; authorship is the owner's.
-   Merge only after CI check CONCLUSIONS are observed: poll the check
-   states and require an explicit pass — never chain a watch command
-   into a merge, and never infer success from a watcher exiting.
-   Report failures as failures; never describe skipped or partial work
-   as complete.
+8. **Plain git, verified locally.** Run the affected suites before
+   committing; report failures as failures. Commits carry **no AI
+   attribution** — no Co-Authored-By trailers, no "generated with"
+   footers; authorship is the owner's.
 
 ## Lowering Doctrine (rule 2, in full)
 
@@ -223,6 +210,13 @@ ALL THREE in the same change.
   hover, token); the default runs only the first. `--help` is the full
   surface — what each audit measures, and what it is judged against.
 - `bun run ext` — build and install the VS Code extension.
+- `bun run link-global` — make THIS checkout the machine's global rip:
+  symlinks `rip` and every package bin into `~/.bun`, and points
+  `~/node_modules/@rip-lang/*` here. Run once per machine (idempotent);
+  running another checkout's link-global flips ownership back.
+- `bun run link-check` — guardrail (also runs on postinstall): fails
+  loudly if any `@rip-lang/*` name resolves outside this repo (e.g.
+  shadowed by a sibling checkout's global links).
 
 ## When Blocked
 

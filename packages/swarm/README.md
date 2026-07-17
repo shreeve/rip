@@ -1,12 +1,33 @@
-# @rip-lang/swarm
+<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
 
-> **Parallel job runner with worker threads — setup once, swarm many**
+# Rip Swarm - @rip-lang/swarm
+
+> **Parallel job runner with worker threads — setup once, swarm many.**
 
 Swarm is a high-performance batch job engine for Rip. Give it a list of
 tasks and a function to process each one, and it fans out across worker
 threads with real-time progress bars, automatic retries, and a clean
 summary when done. No database, no message broker, no dependencies —
 just files, threads, and message passing.
+
+**Runtime:** not browser-safe — it spawns worker threads and moves
+files. One `.rip` file, which is itself the `swarm` binary (first line
+`#!/usr/bin/env rip`) and its own worker entry.
+
+## Features
+
+- **Tasks are files** — a directory listing *is* the queue; inspect,
+  add, or remove tasks with basic shell commands
+- **State is a file move** — `todo/ → done/` is one atomic rename;
+  crash-safe restarts pick up where they left off
+- **Workers are threads** — setup runs once, context clones to N
+  workers by message passing; no shared mutable state
+- **Real-time progress** — per-worker ANSI bars, live stats, a
+  one-line summary (or `-q` for just the summary)
+- **Retries built in** — failed tasks land in `died/`; `retry()` moves
+  them back and only they reprocess
+- **Crash recovery** — a dead worker's in-flight task is counted,
+  logged, and the worker respawns
 
 ## Why This Approach?
 
@@ -31,6 +52,10 @@ thousands of tasks reliably. Boring infrastructure, rock solid.
 
 ## Quick Start
 
+```bash
+bun add @rip-lang/swarm
+```
+
 Create a job script:
 
 ```coffee
@@ -52,10 +77,15 @@ swarm { setup, perform }
 Run it:
 
 ```bash
-rip jobs.rip                # workers default to CPU count
-rip jobs.rip -w 10          # 10 workers
-rip jobs.rip -w 40          # 40 workers for I/O-heavy jobs
+swarm jobs.rip              # workers default to CPU count
+swarm jobs.rip -w 10        # 10 workers
+swarm jobs.rip -w 40        # 40 workers for I/O-heavy jobs
 ```
+
+There is no wrapper script: `swarm.rip` is itself the `swarm` binary
+(first line `#!/usr/bin/env rip`), so the command works wherever `rip`
+is installed. `rip jobs.rip` runs the same script identically — the
+`swarm` command adds the from-anywhere name and a usage message.
 
 ## How It Works
 
@@ -143,9 +173,12 @@ swarm { setup, perform, workers: 8, bar: 30, char: '█' }
 -r, --reset           Remove .swarm directory and quit
 -s, --safe            Set safe: true on the worker context
 -q, --quiet           No progress display, one summary line
+-h, --help            Show help (bare `swarm` command only)
+-v, --version         Show version (bare `swarm` command only)
 ```
 
-CLI flags override options passed to `swarm()`.
+CLI flags override options passed to `swarm()`. The version is read
+from package.json at runtime, so it can never drift.
 
 ### args()
 
@@ -226,6 +259,18 @@ add this to your VS Code or Cursor settings:
 ```json
 "terminal.integrated.minimumContrastRatio": 1
 ```
+
+## Test
+
+```bash
+bun run test
+```
+
+The suite pins batch runs across workers (context cloning, failures,
+retries, crash recovery), every CLI flag and error path, the ANSI
+progress rendering, `args()` stripping, the file-based queue contract
+line for line, and the `swarm` command itself — each case running the
+fixtures/ job scripts as real subprocesses.
 
 This disables the contrast adjustment and lets ANSI colors render as
 intended. The progress display works correctly in standard terminals

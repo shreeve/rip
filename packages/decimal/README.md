@@ -1,4 +1,6 @@
-# @rip-lang/decimal
+<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
+
+# Rip Decimal - @rip-lang/decimal
 
 > **Zero-dependency, BigInt-backed arbitrary-precision exact decimals — with explicit rounding and hard resource limits.**
 
@@ -11,15 +13,15 @@ operations **throw**. "Arbitrary precision" is bounded by configurable resource
 limits, so a pathological exponent gap (`1e1000000000 + 1`) is rejected at
 preflight instead of allocating a multi-gigabyte `BigInt`.
 
-Browser-safe and dependency-free.
+**Runtime:** browser-safe (`rip.browser: true`). One `.rip` file —
+importing it also registers the `~:Decimal` schema coercer, so
+`amount! ~:Decimal` works with no further setup.
 
-## Why not just use floats or `decimal.js`?
+## Quick Start
 
-- JS `number` is binary floating-point: `0.1 + 0.2 !== 0.3`. Unsafe for money.
-- `decimal.js`/`big.js` are dependencies — Rip is zero-dependency by principle.
-- `BigInt` is native and exact. A scaled `BigInt` *is* a decimal.
-
-## Quick start
+```bash
+bun add @rip-lang/decimal
+```
 
 ```coffee
 import { Decimal, D } from '@rip-lang/decimal'
@@ -28,12 +30,31 @@ price = D"19.99"                       # tagged literal
 qty   = Decimal.from(3)                # safe integers only (no floats)
 
 subtotal = price.mul(qty)              # 59.97  (exact)
-tax      = subtotal.divToScale(7n, 4, 'HALF_EVEN')   # explicit scale + mode
-total    = subtotal.add(tax)
+tax      = subtotal.divToScale(7n, 4, 'HALF_EVEN')   # 8.5671 — explicit scale + mode
+total    = subtotal.add(tax)           # 68.5371
 
-total.toFixed(2, 'HALF_EVEN')          # "65.53"
-total.toCentsNumber('HALF_EVEN')       # 6553  (integer cents)
+total.toFixed(2, 'HALF_EVEN')          # "68.54"
+total.toCentsNumber('HALF_EVEN')       # 6854  (integer cents)
 ```
+
+## Features
+
+- Exact `add` / `sub` / `mul` — scale-preserving, no hidden rounding anywhere
+- Division is explicit: `divExact` (exact or throws) and `divToScale(b, scale, mode)`
+- Full rounding matrix: `UP DOWN CEILING FLOOR HALF_UP HALF_DOWN HALF_EVEN UNNECESSARY`
+- Negative ties round on the absolute remainder; there is no negative zero
+- No IEEE specials — `NaN`, `Infinity`, and lossy coercion all throw
+- `valueOf()` throws, so `+d` and `d == 1` can't silently float-coerce
+- Resource limits preflight before allocating — hostile inputs can't OOM you
+- Integer-cents interop matching `@rip-lang/validate` (`money` / `money_even`)
+- DuckDB `DECIMAL(p, s)` fit checking and lossless round-trips
+- `~:Decimal` schema coercer registered automatically on import — collisions reject loudly
+
+## Why Not Floats or decimal.js?
+
+- JS `number` is binary floating-point: `0.1 + 0.2 !== 0.3`. Unsafe for money.
+- `decimal.js`/`big.js` are dependencies — Rip is zero-dependency by principle.
+- `BigInt` is native and exact. A scaled `BigInt` *is* a decimal.
 
 ## Construction
 
@@ -91,7 +112,7 @@ giant `BigInt` on a wide exponent gap. Because `1.0` and `1.00` are equal but
 distinct representations, a `Decimal` is not a reliable `Map`/`Set` key; use
 `canonicalKey()` for that.
 
-## Formatting & conversion
+## Formatting & Conversion
 
 | Method | Result |
 | --- | --- |
@@ -123,21 +144,24 @@ d.fitsDecimal(38, 2)                    # true if it fits DECIMAL(38, 2) lossles
 d.toFixed(2, 'UNNECESSARY')             # emit at the column scale (throws if lossy)
 ```
 
-**Rip Schema `~:Decimal`.** Importing `@rip-lang/decimal/coercers` registers a
-`~:Decimal` coercer that hydrates a wire string/number into a `Decimal`. The
-lowercase `~:decimal` from `@rip-lang/validate` (which returns a string) is
+**Rip Schema `~:Decimal`.** Importing `@rip-lang/decimal` registers a
+`~:Decimal` coercer that hydrates a wire string/number into a `Decimal` —
+no bridge import, no setup call. A name collision with an
+already-registered coercer rejects the import loudly. The lowercase
+`~:decimal` from `@rip-lang/validate` (which returns a string) is
 untouched. Register under another name with `registerDecimalCoercer(name)`.
 
 ```coffee
-import '@rip-lang/decimal/coercers'
+import { Decimal } from '@rip-lang/decimal'
 
 Invoice = schema
   amount! ~:Decimal
 ```
 
-## Resource limits
+## Resource Limits
 
-Defaults (browser-safe; configurable via `Decimal.config({...})`):
+Defaults (browser-safe; set via `Decimal.config({...})`, read back as a
+snapshot copy via `Decimal.config()`):
 
 | Limit | Default | Guards |
 | --- | --- | --- |
@@ -156,17 +180,13 @@ All extend `DecimalError`: `DecimalParseError`, `DecimalDivisionByZeroError`,
 `DecimalNonTerminatingError`, `DecimalInvalidOperationError`, `DecimalRangeError`,
 `DecimalResourceLimitError`, `DecimalInexactError`, `DecimalUnsafeConversionError`.
 
-## Tests
+## Test
 
 ```bash
-bun run --cwd packages/decimal test
+bun run test
 ```
 
-The full rounding matrix, negative-tie goldens, carry/signed-zero/negative-scale
-edge pins, OOM-preflight rejection, parse strictness, exact/rounded division,
-DuckDB fit, cents compatibility with `@rip-lang/validate`, the `~:Decimal`
-schema coercer, and the typed public surface.
-
-## License
-
-MIT
+The suite pins the full rounding matrix, negative-tie goldens,
+carry/signed-zero/negative-scale edges, OOM-preflight rejection, parse
+strictness, exact and rounded division, DuckDB fit, cents compatibility
+with `@rip-lang/validate`, and the `~:Decimal` schema coercer.

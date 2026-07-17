@@ -1,0 +1,26 @@
+# Subprocess driver for the ssh pins in test.rip: runs the v3 ssh.rip
+# conversation (mc, a :pure escape send at the Hint: prompt, exit)
+# against whatever `ssh` the inherited PATH provides, then prints the
+# received transcript as JSON. The suite spawns this with a stub ssh
+# on PATH.
+
+import Script from '@rip-lang/script'
+
+url  = process.argv[2]
+opts = JSON.parse(process.argv[3] ?? '{}')
+
+transcript = []
+chat = Script.ssh! url,
+  { live: false, slow: 5, ...opts, onRecv: (data) -> transcript.push(data) }
+
+try
+  chat! [
+    '~> ', 'mc'
+    'Hint:', [:pure, '\x1b0']
+    '~> ', 'exit'
+    /BYE\[\w+\]/    # wait for the stub's goodbye before disconnecting
+  ]
+finally
+  chat.disconnect()
+
+p JSON.stringify(transcript.join(''))

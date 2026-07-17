@@ -150,14 +150,18 @@ class Engine
     @trace = @transport instanceof TraceTransport
 
   # -- Read from transport, strip ANSI/CR, append to buffer --
+  #
+  # Timeout sentinels are symbols, not strings: a successful read
+  # returns the new buffer contents (a string), so a string sentinel
+  # could collide with real data that happens to spell it.
 
   read: (fast = false) ->
     timeout = if fast then @fast else @slow
     data = @transport.read! timeout
     unless data?
-      return 'fast' if fast
+      return :fast if fast
       raise "Timeout waiting for data\nBuffer: #{JSON.stringify(@buff)}" if @bomb
-      return 'slow'
+      return :slow
     process.stdout.write(data) if @live
     @opts.onRecv?(data)
     data .= replace /\r/g, '' if @nocr
@@ -363,7 +367,7 @@ class Engine
                 break
 
           unless matched
-            fast = @read!(hasElse) is 'fast'
+            fast = @read!(hasElse) is :fast
             done = false
           else
             fast = false

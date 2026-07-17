@@ -89,12 +89,15 @@ describe('schema runtime: the validation pipeline', () => {
   });
 
   test('~:name coercion resolves through the registry; missing registration is loud', () => {
-    registerCoercer('money', (v) => {
+    // A fixture-local name: 'money' belongs to @rip-lang/validate, whose
+    // entry registers the real vocabulary into this same process table
+    // when browser-graph tests evaluate it.
+    registerCoercer('usd_pin', (v) => {
       const n = Number(String(v).replace(/[$,]/g, ''));
       return Number.isFinite(n) ? Math.round(n * 100) : null;
     });
     const out = run(
-      'S = schema\n  price! ~:money',
+      'S = schema\n  price! ~:usd_pin',
       `return [S.parse({price: "$12.34"}).price, S.safe({price: "x"}).errors[0].error];`,
     );
     expect(out).toEqual([1234, 'coerce']);
@@ -102,9 +105,14 @@ describe('schema runtime: the validation pipeline', () => {
       .toThrow(/no coercer registered for '~:nosuch'/);
   });
 
-  test('coercer registration rejects duplicates and non-synchronous functions', () => {
+  test('coercer registration rejects foreign duplicates and non-synchronous functions', () => {
     registerCoercer('dupe_pin', (v) => v);
-    expect(() => registerCoercer('dupe_pin', (v) => v)).toThrow(/'~:dupe_pin' is already registered/);
+    // Identical re-registration (a reboot re-evaluating the same module)
+    // is idempotent — the schema-name registry's policy, applied here.
+    expect(typeof registerCoercer('dupe_pin', (v) => v)).toBe('function');
+    // A DIFFERENT definition is a genuine foreign claim and rejects.
+    expect(() => registerCoercer('dupe_pin', (v) => String(v))).toThrow(/'~:dupe_pin' is already registered/);
+    expect(() => registerCoercer('dupe_pin', (v) => v, { raw: true })).toThrow(/'~:dupe_pin' is already registered/);
     expect(() => registerCoercer('async_pin', async (v) => v)).toThrow(/must be a plain synchronous function/);
     expect(() => registerCoercer('gen_pin', function* (v) { yield v; })).toThrow(/must be a plain synchronous function/);
   });

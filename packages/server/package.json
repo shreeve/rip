@@ -4,17 +4,17 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": {
-      "types": "./index.d.ts",
-      "default": "./index.rip"
-    }
+    ".": "./index.rip"
+  },
+  "bin": {
+    "rip-server": "./bin/rip-server"
   },
   "scripts": {
-    "test": "bun test --timeout 15000"
+    "test": "rip test"
   },
   "files": [
     "*.rip",
-    "*.d.ts",
+    "bin/",
     "README.md"
   ]
 }

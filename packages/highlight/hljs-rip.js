@@ -14,7 +14,7 @@ export default function(hljs) {
     'delete', 'typeof', 'instanceof', 'new', 'super',
     'and', 'or', 'not', 'is', 'isnt',
     // Declarations
-    'class', 'def', 'enum', 'interface', 'type', 'extends', 'own',
+    'class', 'def', 'enum', 'interface', 'type', 'extends', 'own', 'schema',
     // Iteration
     'in', 'of', 'by', 'as',
     // Component system
@@ -44,7 +44,7 @@ export default function(hljs) {
     'DocumentFragment', 'MutationObserver', 'ResizeObserver',
     'IntersectionObserver',
     // Rip stdlib
-    'p', 'pp', 'abort', 'assert', 'exit', 'kind', 'noop',
+    'p', 'pp', 'pj', 'pr', 'abort', 'assert', 'exit', 'kind', 'noop',
     'raise', 'rand', 'sleep', 'todo', 'warn', 'zip',
   ];
 
@@ -116,7 +116,7 @@ export default function(hljs) {
       { begin: /0x[0-9a-fA-F](?:_?[0-9a-fA-F])*n?/ },
       { begin: /0o[0-7](?:_?[0-7])*n?/ },
       { begin: /0b[01](?:_?[01])*n?/ },
-      { begin: /\d[\d_]*(?:\.[\d][\d_]*)?(?:[eE][+-]?\d+)?n?/ },
+      { begin: /\d[\d_]*(?:\.[\d][\d_]*)?(?:[eE][+-]?\d[\d_]*)?n?/ },
     ],
     relevance: 0,
   };
@@ -183,9 +183,17 @@ export default function(hljs) {
     ],
   };
 
+  // *{...} map literal sigil. Distinctively Rip, so unlike the general
+  // operator rule it carries relevance and boosts language auto-detection.
+  const MAP_LITERAL = {
+    className: 'operator',
+    begin: /\*(?=\{)/,
+    relevance: 5,
+  };
+
   const OPERATORS = {
     className: 'operator',
-    begin: /::|:=|~=|~>|<~|<=>|\.=|\*>|\*(?=\{)|\?=|\$(?=['"])|=!|!\?|\?!|=~|\?\?=|\?\?|\?\.|\.\.\.|\.\.|=>|->|\*\*|\/\/|%%|===|!==|==|!=|<=|>=|&&|\|\||[+\-*\/%&|^~<>=!?]/,
+    begin: /::|:=|~=|~>|<~|<=>|\.=|\*>|\?=|\$(?=['"])|=!|!\?|\?!|=~|\?\?=|\?\?|\?\.|\.\.\.|\.\.|=>|->|\*\*|\/\/|%%|===|!==|==|!=|<=|>=|&&|\|\||[+\-*\/%&|^~<>=!?]/,
     relevance: 0,
   };
 
@@ -221,6 +229,7 @@ export default function(hljs) {
       INSTANCE_VAR,
       SIGIL_ATTR,
       TYPE_KEYWORDS,
+      MAP_LITERAL,
       OPERATORS,
       { // inline JS (backtick)
         className: 'string',

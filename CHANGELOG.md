@@ -5,6 +5,37 @@ repository's pull requests.
 
 ## Unreleased
 
+- `rip server` runs (S1 of the server runnable layer, held for owner
+  review): the certified decision cores gain a listener, a bin, and a
+  config loader. `startServer` wires a real Bun.serve listener with
+  v3's semantics — port scan on conflict, EACCES fallback to
+  3000/3443, idle timeout, explicit-cert TLS with HSTS and the
+  best-effort HTTP→HTTPS redirect, graceful drain-then-close shutdown
+  — and dispatches every request through the worker pool (in-process
+  in S1; the process workers of S2 fill the same seam). It serves
+  static directories with the certified containment policy, App
+  bundle directories through the appServer preset, and serve.rip
+  static-site configs; the dev SSE watch endpoint serves at
+  /_rip/watch. The CLI keeps v3's token grammar by owner ruling
+  (2026-07-15): `w:4 c:2 https:443 app@alias` tokens and `RIP_*` env
+  fallbacks with pinned precedence (token > env > serve.rip >
+  default) replace the v4 `--flags` spelling — a breaking change to
+  the cli module's parse surface (the dispatch seam stays). The
+  serve.rip loader ports v3's E_* diagnostic vocabulary in one-pass
+  multi-error form with `-c/--check-config`, and `--nginx`/`--caddy`
+  generate through the compat cores; what a valid file names but v4
+  cannot serve yet (proxies/streams S3, managed apps S2, ACME/SNI S5)
+  refuses loudly by stage, and rate/body limits are deliberately
+  absent until S4. Declared v3 divergences: no committed certificate
+  (explicit https without material fails loudly; the https DEFAULT
+  falls back to plaintext with a notice until the S5 dev CA),
+  option-shaped tokens always parse as options, and unknown flags or
+  missing paths reject instead of being silently absorbed. 87
+  new/updated tests — the full token parse table, the E_* diagnostic
+  table, real-listener e2e (containment on disk, bundle ETags, SSE
+  handshake + revision event, TLS with a test-generated cert, port
+  scan, graceful shutdown), and the bin as a subprocess serving a
+  real request and exiting on SIGTERM (#145)
 - `@rip-lang/print` joins the libraries lane: the syntax-highlighted
   source printer (`rip-print`), which highlights files via
   highlight.js, serves the result once on localhost:9111, opens the
