@@ -1,0 +1,138 @@
+#!/usr/bin/env rip
+
+# ==============================================================================
+# rip-curl: HTTP client with variable interpolation
+#
+# Inline mode (single-quoted argument):
+#   rip-curl [key=val ...] 'POST https://api.example.com/endpoint
+#   Authorization: Bearer ${token}
+#   Content-Type: application/json
+#
+#   { "body": "${key}" }'
+#
+# Heredoc mode (stdin):
+#   rip-curl [key=val ...] <<'EOF'
+#   POST https://api.example.com/endpoint
+#   Content-Type: application/json
+#
+#   { "body": "${key}" }
+#   EOF
+#
+# Variables (${name} or #{name}) resolve as:
+#   CLI args > .auth > .env > process environment
+# ==============================================================================
+
+import { readFileSync } from 'fs'
+
+# A pure CLI with no library surface: importing this module is always a
+# mistake, so it rejects loudly instead of silently running the program.
+throw new Error('@rip-lang/utils/curl is a CLI, not a library; run curl.rip (rip-curl)') unless import.meta.main
+
+VERSION = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf-8')).version
+
+args = process.argv.slice(2)
+
+if args.includes('-v') or args.includes('--version')
+  console.log "rip-curl #{VERSION}"
+  process.exit 0
+
+if args.includes('-h') or args.includes('--help')
+  # Single-quoted heredoc: ${name}/#{name} must print literally.
+  console.log '''
+    usage: rip-curl [key=val ...] 'METHOD URL\n...'  — or pipe/heredoc
+
+    Variables (${name} or #{name}) resolve as:
+      1. CLI arguments (key=val pairs before the request)
+      2. .auth file (key=value, one per line, # comments)
+      3. .env file (same format)
+      4. Process environment
+
+    Options:
+      -h, --help       Usage
+      -v, --version    Version (read from package.json)
+  '''
+  process.exit 0
+
+# Load key=value file into an object (skips comments and blank lines)
+load = (path) ->
+  file = Bun.file(path)
+  return {} unless file.exists!
+  content = file.text!
+  obj = {}
+  for raw in content.split('\n')
+    line = raw.trim()
+    continue unless line and not line.startsWith('#')
+    eq = line.indexOf('=')
+    obj[line.slice(0, eq)] = line.slice(eq + 1) if eq > 0
+  obj
+
+# Parse args: key=value pairs are vars, non-key=val arg is the payload
+cli = {}
+payload = null
+
+for arg in args
+  continue if arg in ['-v', '--version', '-h', '--help']
+  eq = arg.indexOf('=')
+  if eq > 0
+    cli[arg.slice(0, eq)] = arg.slice(eq + 1)
+  else
+    payload = arg
+
+# Fall back to stdin if piped/heredoc (not a TTY).
+# Bun.stdin — not readFileSync('/dev/stdin') — so piped empty input works
+# under Bun.spawn (macOS EACCES on /dev/stdin when the pipe is empty).
+unless payload
+  if process.stdin.isTTY
+    console.error "Usage: rip-curl [key=val ...] 'METHOD URL\\n...'  — or pipe/heredoc"
+    process.exit 1
+  payload = Bun.stdin.text!
+
+payload = payload.trim()
+
+unless payload
+  console.error "Usage: rip-curl [key=val ...] 'METHOD URL\\n...'  — or pipe/heredoc"
+  process.exit 1
+
+dotenv = load! '.env'
+auth   = load! '.auth'
+
+# Interpolate ${VAR} and #{VAR}
+text = payload.replace /[#$]\{([^}]+)\}/g, (_, name) ->
+  val = cli[name] ?? auth[name] ?? dotenv[name] ?? process.env[name]
+  unless val?
+    console.error "rip-curl: undefined '#{name}'"
+    process.exit 1
+  val
+
+# Parse: first line is [METHOD] URL, then headers until blank/{/[, then body
+lines = text.split('\n')
+first = lines[0].trim().split(/\s+/)
+
+METHODS = new Set ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']
+
+if first.length >= 2 and METHODS.has(first[0].toUpperCase())
+  method = first[0].toUpperCase()
+  url = first[1]
+else
+  url = first[0]
+  method = null
+
+headers = {}
+i = 1
+while i < lines.length
+  line = lines[i].trim()
+  break if line is '' or line[0] is '{' or line[0] is '['
+  colon = lines[i].indexOf(':')
+  headers[lines[i].slice(0, colon).trim()] = lines[i].slice(colon + 1).trim() if colon > 0
+  i++
+
+body = lines.slice(if lines[i]?.trim() is '' then i + 1 else i).join('\n').trim() or undefined
+method ?= if body then 'POST' else 'GET'
+
+# Fire
+res = fetch! url, { method, headers, body }
+out = res.text!
+try
+  console.log JSON.stringify(JSON.parse(out), null, 2)
+catch
+  console.log out
