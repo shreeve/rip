@@ -1,0 +1,26 @@
+#!/usr/bin/env rip
+# Minimal @rip-lang/db smoke — requires a running duckdb-harbor.
+#
+#   # Terminal A
+#   duckdb -init ~/.duckdb-harbor.rc my.duckdb
+#   # or: INSTALL/LOAD harbor; CALL harbor_serve(...)
+#
+#   # Terminal B
+#   export RIP_DB_URL=http://127.0.0.1:9494
+#   export RIP_DB_TOKEN=rip-token   # match harbor_serve
+#   rip examples/hello.rip
+
+import { connect, ensureRunning, query, findOne, Model } from '@rip-lang/db'
+
+ensureRunning!
+connect!
+
+row = findOne! 'SELECT 1 AS n, current_database() AS db'
+p row
+
+result = query! 'SELECT 40 + 2 AS answer'
+p result.rows
+
+# Lightweight table helper (pk defaults to "id")
+# User = Model 'users'
+# p User.find! 1

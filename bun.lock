@@ -38,9 +38,12 @@
     },
     "packages/db": {
       "name": "@rip-lang/db",
-      "version": "0.0.0",
+      "version": "4.0.0",
       "bin": {
-        "rip-db": "./bin/rip-db",
+        "rip-db": "./db.rip",
+      },
+      "devDependencies": {
+        "@rip-lang/testing": "workspace:*",
       },
     },
     "packages/decimal": {
