@@ -88,7 +88,7 @@ rip-db mcp                   # MCP stdio server for AI assistants
 Runnable smoke script (harbor already up):
 
 ```bash
-rip packages/db/examples/hello.rip
+rip packages/db/example.rip
 ```
 
 ## Features
