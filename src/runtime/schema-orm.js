@@ -2483,3 +2483,21 @@ const schema = {
 };
 
 export { schema, __schemaSetAdapter, __schemaTransaction, __schemaConnect, __schemaRunSQL, __schemaAdapterFor, __schemaAdapterConfigured, __schemaQuoteIdent, __schemaRenderCreate, __schemaRenderIndex };
+
+// Process doorbell for packages that must not hard-import this file
+// (e.g. @rip-lang/db). `connect()` sets `globalThis.__ripDbAdapter` and
+// calls `__ripSchema.__schemaSetAdapter` when we are already loaded;
+// if models load later, pick up that adapter here so order does not
+// matter.
+if (typeof globalThis !== 'undefined') {
+  const g = globalThis;
+  g.__ripSchema = g.__ripSchema || {};
+  g.__ripSchema.__schemaSetAdapter = __schemaSetAdapter;
+  if (g.__ripDbAdapter && !__schemaAdapterExplicit) {
+    try {
+      __schemaSetAdapter(g.__ripDbAdapter);
+    } catch {
+      // Invalid leftover — leave the default adapter in place.
+    }
+  }
+}

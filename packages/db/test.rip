@@ -1,0 +1,1720 @@
+# ==============================================================================
+# @rip-lang/db — unified test suite (adapter, client, temporal, CLI, MCP, probe)
+# ==============================================================================
+
+import { test, eq, ok, throws } from '@rip-lang/testing'
+import { readFileSync, mkdtempSync, rmSync, writeFileSync, statSync } from 'fs'
+import { spawnSync } from 'child_process'
+import { tmpdir } from 'os'
+import { join } from 'path'
+import * as db from '@rip-lang/db'
+import {
+  harborAdapter, createClient, connect, isDbError, DbError, ConnectionError, QueryError, CancelledError,
+  query, findOne, findAll, transaction, begin, Model, ident, materializeAll,
+  ping, assertReachable, ensureRunning,
+  resolveUrl, sqlString, safeFileStem, stamp, humanSize, unsafeTarPath,
+  makeSql, makeMcpSql, currentDatabase, assertEmptyDatabase, dump, load, checkpoint,
+  createMcpServer,
+} from '@rip-lang/db'
+import { __schema, __SchemaRegistry, SchemaError } from '../../src/runtime/schema.js'
+import { __schemaSetAdapter, __schemaTransaction } from '../../src/runtime/schema-orm.js'
+import * as mig from '../../src/migrate.js'
+
+caught = (promise) -> promise.then((-> null), ((e) -> e))
+trap = (fn) ->
+  new Promise (resolve) ->
+    try
+      r = fn()
+      if r?.then? then r.then((-> resolve null), resolve) else resolve null
+    catch e
+      resolve e
+UTC = Date.UTC(2024, 2, 15, 10, 30, 0)
+ROOT = join(import.meta.dir, '..', '..')
+DB_RIP = join(import.meta.dir, 'db.rip')
+RIP_CLI = join(ROOT, 'bin', 'rip')
+
+ROOT_EXPORTS = [
+  'CancelledError', 'ConnectionError', 'DbError', 'Model', 'QueryError',
+  'assertEmptyDatabase', 'assertReachable', 'begin', 'checkpoint', 'connect', 'createClient',
+  'createMcpServer', 'currentDatabase', 'dump', 'ensureRunning', 'findAll', 'findOne',
+  'harborAdapter', 'humanSize', 'ident', 'isDbError', 'load', 'makeMcpSql', 'makeSql',
+  'materializeAll', 'ping', 'query', 'resolveUrl', 'safeFileStem', 'sqlString', 'stamp',
+  'startStdio', 'transaction', 'unsafeTarPath',
+]
+
+# ── fetch doubles ────────────────────────────────────────────────────────────
+
+fetchDouble = (script) ->
+  calls = []
+  fetchFn = (url, init) ->
+    body = if init?.body? then JSON.parse init.body else null
+    calls.push { url, method: init?.method ?? 'GET', body, headers: init?.headers ?? {} }
+    key = Object.keys(script).find (suffix) -> url.endsWith suffix
+    reply = if key? then script[key] else { status: 404, json: { error: 'no route' } }
+    Promise.resolve
+      ok: (reply.status ?? 200) < 400
+      status: reply.status ?? 200
+      statusText: reply.statusText ?? ''
+      json: (-> reply.json ?? {})
+  fetchFn.calls = calls
+  fetchFn
+
+bySql = (replies) ->
+  dropped = false
+  fetchFn = (url, init) ->
+    if init?.method is 'DELETE'
+      dropped = true
+      return Promise.resolve { ok: true, status: 200, json: (-> {}) }
+    if url.endsWith '/sql/sessions/new'
+      return Promise.resolve { ok: true, status: 200, json: (-> { sessionId: 'sx' }) }
+    sql = if init?.body? then JSON.parse(init.body).sql else null
+    r = replies[sql] ?? { ok: true, json: {} }
+    Promise.resolve { ok: r.ok isnt false, status: r.status ?? 200, statusText: '', json: (-> r.json ?? {}) }
+  fetchFn.wasDropped = (-> dropped)
+  fetchFn
+
+hangingFetch = ->
+  seen = { signal: null }
+  fetchFn = (url, init) ->
+    seen.signal = init?.signal ?? null
+    new Promise (->)
+  fetchFn.seen = seen
+  fetchFn
+
+harborFetch = (columns, data) ->
+  calls = []
+  fetchFn = (url, init) ->
+    body = if init?.body? then JSON.parse init.body else null
+    calls.push { url, method: init?.method ?? 'GET', body }
+    if init?.method is 'DELETE'
+      return Promise.resolve { ok: true, status: 200, statusText: '', json: (-> {}) }
+    if url.endsWith '/sql/sessions/new'
+      return Promise.resolve { ok: true, status: 200, statusText: '', json: (-> { sessionId: 'sx' }) }
+    Promise.resolve
+      ok: true, status: 200, statusText: ''
+      json: (-> { ok: true, columns, data, rowCount: data.length })
+  fetchFn.calls = calls
+  fetchFn
+
+decoded = (duckdbType, value) ->
+  fetch = harborFetch [{ name: 'v', duckdbType, lossless: true }], [[value]]
+  result = harborAdapter!({ url: 'http://h', fetch }).query! 'SELECT v'
+  result.data[0][0]
+
+posted = (params) ->
+  fetch = harborFetch [], []
+  harborAdapter!({ url: 'http://h', fetch }).query! 'INSERT INTO t VALUES (?)', params
+  fetch.calls[0].body.params
+
+fakeAdapter = (replies = []) ->
+  log = []
+  state = { committed: false, rolledBack: false, began: false }
+  next = (sql, params) ->
+    log.push { sql, params }
+    reply = replies.shift() ?? { columns: [], data: [], rowCount: 0 }
+    if reply instanceof Error then Promise.reject reply else Promise.resolve reply
+  {
+    log, state
+    query: next
+    begin: ->
+      state.began = true
+      Promise.resolve
+        query: next
+        commit: (-> state.committed = true)
+        rollback: (-> state.rolledBack = true)
+    capabilities: { tx: true, ddlTransactional: true }
+  }
+
+sqlDouble = (rules = []) ->
+  calls = []
+  fetchFn = (url, init) ->
+    body = JSON.parse init.body
+    calls.push body.sql
+    rule = rules.find ([re]) -> re.test body.sql
+    reply = if rule? then rule[1] else { ok: true, columns: [], data: [], rowCount: 0 }
+    Promise.resolve { ok: reply.ok isnt false, status: (if reply.ok is false then 400 else 200), statusText: '', json: (-> reply) }
+  fetchFn.calls = calls
+  fetchFn
+
+hostDouble = ({ present = new Set(), dirs = new Set(), sizes = {}, tarEntries = ['schema.sql', 'load.sql'], staged = ['schema.sql', 'load.sql'] } = {}) ->
+  log = []
+  fs =
+    exists: (p) -> present.has p
+    isDir: (p) -> dirs.has p
+    statSize: (p) -> sizes[p] ?? 0
+    read: (-> ''), write: (->)
+    rm: (p) -> log.push "rm #{p}"
+  tar =
+    create: (archive, dir) -> log.push "tar.create #{archive}"; present.add archive
+    extract: (archive, dir) -> for e in staged then present.add "#{dir}/#{e}"
+    list: (-> tarEntries)
+  n = 0
+  tmpFn = ->
+    d = "/tmp/ripdb-#{n++}"
+    for e in staged then present.add "#{d}/#{e}"
+    d
+  { present, log, deps: (sql) -> { sql, fs, tar, tmp: tmpFn, now: (-> new Date(2026, 6, 14, 1, 2, 3)), join: (a, b) -> "#{a}/#{b}", log: (m) -> log.push m } }
+
+fakeSql = (rules = []) ->
+  (query) ->
+    rule = rules.find ([re]) -> re.test query
+    if rule? then rule[1] else { ok: true, columns: [], data: [] }
+
+parseJson = (s) -> JSON.parse s
+toolResult = (reply) -> JSON.parse(parseJson(reply).result.content[0].text)
+
+runDb = (...args) -> spawnSync process.execPath, [RIP_CLI, DB_RIP, ...args], encoding: 'utf8'
+binDb = (...args) -> spawnSync DB_RIP, args, encoding: 'utf8'
+
+# ==[ 1. Package surface ]====================================================
+
+p "\nPackage surface"
+
+test "public entry exposes named exports only", ->
+  eq Object.keys(db).sort(), ROOT_EXPORTS
+  ok not ('default' of db)
+
+test "no runtime deps; testing harness is the only devDependency", ->
+  pkg = JSON.parse readFileSync join(import.meta.dir, 'package.json'), 'utf8'
+  for field in ['dependencies', 'peerDependencies', 'optionalDependencies']
+    eq pkg[field], undefined
+  eq pkg.devDependencies, { '@rip-lang/testing': 'workspace:*' }
+
+test "server-only: browser safety is never declared", ->
+  pkg = JSON.parse readFileSync join(import.meta.dir, 'package.json'), 'utf8'
+  eq pkg.rip, undefined
+
+test "exports and bin point at db.rip", ->
+  pkg = JSON.parse readFileSync join(import.meta.dir, 'package.json'), 'utf8'
+  eq pkg.exports, { '.': './db.rip' }
+  eq pkg.bin, { 'rip-db': './db.rip' }
+
+test "package files ship the library, README, and examples — not misc/", ->
+  pkg = JSON.parse readFileSync join(import.meta.dir, 'package.json'), 'utf8'
+  eq pkg.files, ['db.rip', 'README.md', 'examples/']
+  ok not pkg.files.some (f) -> String(f).includes('misc')
+
+test "db.rip does not hard-import the schema runtime", ->
+  source = readFileSync DB_RIP, 'utf8'
+  ok not /schema-orm\.js|from ['"].*src\/runtime/.test source
+
+test "db.rip is shebang'd and executable", ->
+  source = readFileSync DB_RIP, 'utf8'
+  ok source.startsWith('#!/usr/bin/env rip\n')
+  ok (statSync(DB_RIP).mode & 0o111) isnt 0
+
+test "no certificate or private key is committed", ->
+  source = readFileSync DB_RIP, 'utf8'
+  ok not /BEGIN (RSA |EC )?PRIVATE KEY|BEGIN CERTIFICATE/.test source
+
+test "examples/hello.rip is a runnable smoke script", ->
+  hello = readFileSync join(import.meta.dir, 'examples', 'hello.rip'), 'utf8'
+  ok hello.startsWith('#!/usr/bin/env rip\n')
+  ok hello.includes("@rip-lang/db")
+  ok hello.includes('ensureRunning!')
+  ok hello.includes('connect!')
+
+# ==[ 1b. connect ]=============================================================
+
+p "\nconnect — app entry"
+
+test! "connect returns a client wired to harbor and exposes .adapter", ->
+  fetch = fetchDouble { '/sql': { json: { columns: [{ name: 'n', duckdbType: 'INTEGER' }], data: [[1]], rowCount: 1 } } }
+  client = connect { url: 'http://h:9494/', token: 'secret', fetch }
+  eq typeof client.query, 'function'
+  eq typeof client.one, 'function'
+  eq typeof client.adapter.query, 'function'
+  row = client.one! 'SELECT 1 AS n'
+  eq row, { n: 1 }
+  eq fetch.calls[0].url, 'http://h:9494/sql'
+  eq fetch.calls[0].headers.Authorization, 'Bearer secret'
+
+test! "connect(url) string form and connect() env form resolve the same way", ->
+  fetch = fetchDouble { '/sql': { json: { columns: [], data: [], rowCount: 0 } } }
+  connect('http://from-arg:9494', { fetch }).query! 'SELECT 1'
+  eq fetch.calls[0].url, 'http://from-arg:9494/sql'
+  prev = process.env.RIP_DB_URL
+  try
+    process.env.RIP_DB_URL = 'http://from-env:9494'
+    connect(null, { fetch }).query! 'SELECT 1'
+    eq fetch.calls[1].url, 'http://from-env:9494/sql'
+  finally
+    if prev is undefined then delete process.env.RIP_DB_URL else process.env.RIP_DB_URL = prev
+
+p "\nconnect — module-level default"
+
+test! "module-level query/findOne/findAll ride the connect() default", ->
+  fetch = fetchDouble
+    '/sql': { json: { columns: [{ name: 'id', duckdbType: 'INTEGER' }, { name: 'name', duckdbType: 'VARCHAR' }], data: [[1, 'Ada']], rowCount: 1 } }
+  connect { url: 'http://h', fetch }
+  result = query! 'SELECT id, name FROM u'
+  eq result.rows, [{ id: 1, name: 'Ada' }]
+  eq findOne!('SELECT id, name FROM u'), { id: 1, name: 'Ada' }
+  eq findAll!('SELECT id, name FROM u'), [{ id: 1, name: 'Ada' }]
+
+test! "a later connect() rewires module-level calls", ->
+  a = fetchDouble { '/sql': { json: { columns: [{ name: 'n', duckdbType: 'INTEGER' }], data: [[1]], rowCount: 1 } } }
+  b = fetchDouble { '/sql': { json: { columns: [{ name: 'n', duckdbType: 'INTEGER' }], data: [[2]], rowCount: 1 } } }
+  connect { url: 'http://a', fetch: a }
+  eq (findOne! 'SELECT 1').n, 1
+  connect { url: 'http://b', fetch: b }
+  eq (findOne! 'SELECT 1').n, 2
+  eq a.calls.length, 1
+  eq b.calls.length, 1
+
+test! "connect({ adapter }) installs a non-harbor wire for Model/query", ->
+  adapter = fakeAdapter [
+    { columns: [{ name: 'id' }, { name: 'name' }], data: [[7, 'Bo']], rowCount: 1 }
+    { columns: [{ name: 'id' }, { name: 'name' }], data: [[7, 'Bo']], rowCount: 1 }
+  ]
+  connect { adapter }
+  eq findOne!('SELECT * FROM users WHERE id = ?', [7]), { id: 7, name: 'Bo' }
+  User = Model 'users'
+  eq User.find!(7), { id: 7, name: 'Bo' }
+  eq adapter.log[1].sql, 'SELECT * FROM "users" WHERE "id" = ?'
+  eq adapter.log[1].params, [7]
+
+test! "ident quotes and doubles embedded quotes", ->
+  eq ident('users'), '"users"'
+  eq ident('weird"name'), '"weird""name"'
+
+test! "materializeAll turns an adapter envelope into row objects", ->
+  eq materializeAll({ columns: [{ name: 'id' }], data: [[1], [2]], rowCount: 2 }), [{ id: 1 }, { id: 2 }]
+
+p "\nModel — ActiveRecord helpers"
+
+test! "Model find/where/order/limit/all compose SQL over the default", ->
+  adapter = fakeAdapter [
+    { columns: [{ name: 'id' }, { name: 'name' }], data: [[1, 'Ada'], [2, 'Bo']], rowCount: 2 }
+  ]
+  connect { adapter }
+  User = Model 'users'
+  got = User.where(active: true).order('name').limit(20).all!
+  eq got, [{ id: 1, name: 'Ada' }, { id: 2, name: 'Bo' }]
+  eq adapter.log[0].sql, 'SELECT * FROM "users" WHERE "active" = ? ORDER BY name LIMIT 20'
+  eq adapter.log[0].params, [true]
+
+test! "Model insert/update/destroy round-trip through findOne shapes", ->
+  adapter = fakeAdapter [
+    { columns: [{ name: 'id' }, { name: 'name' }], data: [[1, 'Ada']], rowCount: 1 }
+    { columns: [{ name: 'id' }, { name: 'name' }], data: [[1, 'Ada Lovelace']], rowCount: 1 }
+    { columns: [{ name: 'id' }, { name: 'name' }], data: [[1, 'Ada Lovelace']], rowCount: 1 }
+  ]
+  connect { adapter }
+  User = Model 'users'
+  eq User.insert!({ name: 'Ada' }), { id: 1, name: 'Ada' }
+  eq User.update!(1, { name: 'Ada Lovelace' }), { id: 1, name: 'Ada Lovelace' }
+  eq User.destroy!(1), { id: 1, name: 'Ada Lovelace' }
+  ok adapter.log[0].sql.includes('INSERT INTO "users"')
+  ok adapter.log[1].sql.includes('UPDATE "users"')
+  ok adapter.log[2].sql.includes('DELETE FROM "users"')
+
+test! "Model pk defaults to id and accepts a custom pk", ->
+  adapter = fakeAdapter [
+    { columns: [{ name: 'id' }, { name: 'name' }], data: [[1, 'Ada']], rowCount: 1 }
+    { columns: [{ name: 'user_id' }, { name: 'name' }], data: [[9, 'Bo']], rowCount: 1 }
+    { columns: [{ name: 'user_id' }, { name: 'name' }], data: [[9, 'Bo']], rowCount: 1 }
+  ]
+  connect { adapter }
+  eq Model('users').find!(1), { id: 1, name: 'Ada' }
+  eq adapter.log[0].sql, 'SELECT * FROM "users" WHERE "id" = ?'
+  Account = Model 'accounts', { pk: 'user_id' }
+  eq Account.find!(9), { user_id: 9, name: 'Bo' }
+  eq adapter.log[1].sql, 'SELECT * FROM "accounts" WHERE "user_id" = ?'
+  eq Account.destroy!(9), { user_id: 9, name: 'Bo' }
+  eq adapter.log[2].sql, 'DELETE FROM "accounts" WHERE "user_id" = ? RETURNING *'
+
+test! "Model accepts database string or { database, pk } options", ->
+  adapter = fakeAdapter [
+    { columns: [{ name: 'id' }], data: [[1]], rowCount: 1 }
+    { columns: [{ name: 'uid' }], data: [[2]], rowCount: 1 }
+  ]
+  connect { adapter }
+  eq Model('users', 'analytics').find!(1), { id: 1 }
+  eq adapter.log[0].sql, 'SELECT * FROM "analytics"."users" WHERE "id" = ?'
+  eq Model('users', { database: 'analytics', pk: 'uid' }).find!(2), { uid: 2 }
+  eq adapter.log[1].sql, 'SELECT * FROM "analytics"."users" WHERE "uid" = ?'
+
+test! "Model.where().first and count use the builder", ->
+  adapter = fakeAdapter [
+    { columns: [{ name: 'id' }, { name: 'name' }], data: [[1, 'Ada']], rowCount: 1 }
+    { columns: [{ name: 'n' }], data: [[3]], rowCount: 1 }
+  ]
+  connect { adapter }
+  User = Model 'users'
+  eq User.where(role: 'admin').first!, { id: 1, name: 'Ada' }
+  eq adapter.log[0].sql, 'SELECT * FROM "users" WHERE "role" = ? LIMIT 1'
+  eq User.where(active: true).count!, 3
+  eq adapter.log[1].sql, 'SELECT COUNT(*) AS n FROM "users" WHERE "active" = ?'
+
+test! "module-level transaction commits through the default client", ->
+  adapter = fakeAdapter [{ columns: [{ name: 'id' }], data: [[9]], rowCount: 1 }]
+  connect { adapter }
+  id = transaction! (tx) ->
+    (tx.one! 'INSERT INTO u (name) VALUES (?) RETURNING id', ['Ada']).id
+  eq id, 9
+  eq adapter.state.committed, true
+
+test! "connect soft-wires the schema ORM via globalThis (no hard import)", ->
+  fetch = fetchDouble { '/sql': { json: { columns: [], data: [], rowCount: 0 } } }
+  connect { url: 'http://soft-wire', fetch }
+  eq typeof globalThis.__ripDbAdapter?.query, 'function'
+  eq typeof globalThis.__ripSchema?.__schemaSetAdapter, 'function'
+
+p "\nping / status"
+
+test! "ping returns ok + url + database when harbor is healthy", ->
+  fetch = fetchDouble
+    '/ready': { json: { ok: true } }
+    '/sql': { json: { columns: [{ name: 'current_database()', duckdbType: 'VARCHAR' }], data: [['medlabs']], rowCount: 1 } }
+  info = ping! { url: 'http://h:9494', fetch }
+  eq info, { ok: true, url: 'http://h:9494', database: 'medlabs' }
+
+test! "ping throws ConnectionError when /ready fails", ->
+  fetch = fetchDouble { '/ready': { status: 503, json: { ok: false } } }
+  err = trap! (-> ping { url: 'http://down', fetch })
+  ok err instanceof ConnectionError
+  ok /not reachable/.test err.message
+
+# ==[ 2. Adapter ]==============================================================
+
+p "\nAdapter — config"
+
+test! "the url comes from options, defaulting to the local harbor", ->
+  fetch = fetchDouble { '/sql': { json: { columns: [], data: [], rowCount: 0 } } }
+  harborAdapter!({ url: 'https://db.example:9494/', fetch }).query! 'SELECT 1'
+  eq fetch.calls[0].url, 'https://db.example:9494/sql'
+
+test! "omitted adapter url falls back to RIP_DB_URL then the local default", ->
+  fetch = fetchDouble { '/sql': { json: { columns: [], data: [], rowCount: 0 } } }
+  prev = process.env.RIP_DB_URL
+  try
+    process.env.RIP_DB_URL = 'http://env-adapter:9494/'
+    harborAdapter!({ fetch }).query! 'SELECT 1'
+    eq fetch.calls[0].url, 'http://env-adapter:9494/sql'
+    delete process.env.RIP_DB_URL
+    harborAdapter!({ fetch }).query! 'SELECT 1'
+    eq fetch.calls[1].url, 'http://127.0.0.1:9494/sql'
+  finally
+    if prev is undefined then delete process.env.RIP_DB_URL else process.env.RIP_DB_URL = prev
+
+test! "a token becomes a bearer authorization header", ->
+  fetch = fetchDouble { '/sql': { json: { columns: [], data: [], rowCount: 0 } } }
+  harborAdapter!({ url: 'http://h', token: 'secret', fetch }).query! 'SELECT 1'
+  eq fetch.calls[0].headers.Authorization, 'Bearer secret'
+  eq fetch.calls[0].headers['Content-Type'], 'application/json'
+
+p "\nAdapter — query"
+
+test! "returns columns as { name, type } objects with harbor extras", ->
+  fetch = fetchDouble { '/sql': { json: {
+    columns: [{ name: 'id', duckdbType: 'INTEGER', lossless: true }, { name: 'name', duckdbType: 'VARCHAR', lossless: true }]
+    data: [[1, 'Ada']], rowCount: 1
+  } } }
+  result = harborAdapter!({ url: 'http://h', fetch }).query! 'SELECT id, name FROM users'
+  eq result,
+    columns: [
+      { name: 'id', duckdbType: 'INTEGER', lossless: true, type: 'INTEGER' }
+      { name: 'name', duckdbType: 'VARCHAR', lossless: true, type: 'VARCHAR' }
+    ]
+    data: [[1, 'Ada']]
+    rowCount: 1
+  eq fetch.calls[0].body, { sql: 'SELECT id, name FROM users' }
+
+test! "parameters ride alongside sql, omitted when empty", ->
+  fetch = fetchDouble { '/sql': { json: { columns: [], data: [], rowCount: 0 } } }
+  adapter = harborAdapter { url: 'http://h', fetch }
+  adapter.query! 'SELECT * FROM u WHERE id = ?', [42]
+  eq fetch.calls[0].body, { sql: 'SELECT * FROM u WHERE id = ?', params: [42] }
+  adapter.query! 'SELECT 1', []
+  eq fetch.calls[1].body, { sql: 'SELECT 1' }
+
+p "\nAdapter — transactions"
+
+test! "begin pins a session, carries it per statement, and drops it on commit", ->
+  fetch = fetchDouble {
+    '/sql/sessions/new': { json: { sessionId: 'sess-1' } }
+    '/sql': { json: { columns: [], data: [], rowCount: 0 } }
+  }
+  tx = harborAdapter!({ url: 'http://h', fetch }).begin!()
+  tx.query! 'INSERT INTO u VALUES (?)', ['x']
+  tx.commit!()
+  bodies = fetch.calls.filter((c) -> c.url.endsWith('/sql')).map (c) -> c.body
+  eq bodies[0], { sql: 'BEGIN', sessionId: 'sess-1' }
+  eq bodies[1], { sql: 'INSERT INTO u VALUES (?)', params: ['x'], sessionId: 'sess-1' }
+  eq bodies[2], { sql: 'COMMIT', sessionId: 'sess-1' }
+  ok fetch.calls.some (c) -> c.method is 'DELETE' and c.url.endsWith('/sql/sessions/sess-1')
+
+test! "rollback issues ROLLBACK and still drops the session", ->
+  fetch = fetchDouble {
+    '/sql/sessions/new': { json: { sessionId: 'sess-2' } }
+    '/sql': { json: { columns: [], data: [], rowCount: 0 } }
+  }
+  tx = harborAdapter!({ url: 'http://h', fetch }).begin!()
+  tx.rollback!()
+  ok fetch.calls.some (c) -> c.body?.sql is 'ROLLBACK'
+  ok fetch.calls.some (c) -> c.method is 'DELETE'
+
+test! "a failed session drop never masks the transaction outcome", ->
+  fetch = fetchDouble {
+    '/sql/sessions/new': { json: { sessionId: 'sess-3' } }
+    '/sql': { json: { columns: [], data: [], rowCount: 0 } }
+    '/sql/sessions/sess-3': { status: 500, json: { error: 'gone' } }
+  }
+  tx = harborAdapter!({ url: 'http://h', fetch }).begin!()
+  tx.commit!()
+
+test! "a failed COMMIT still drops the session", ->
+  fetch = bySql { COMMIT: { ok: false, json: { ok: false, error: 'conflict', errorCode: 'SERIALIZATION' } } }
+  tx = harborAdapter!({ url: 'http://h', fetch }).begin!()
+  err = trap! (-> tx.commit!())
+  ok /conflict/.test err.message
+  ok fetch.wasDropped()
+
+test! "a session response missing its id refuses to run a fake transaction", ->
+  fetch = fetchDouble { '/sql/sessions/new': { json: {} }, '/sql': { json: { columns: [], data: [], rowCount: 0 } } }
+  err = trap! (-> harborAdapter({ url: 'http://h', fetch }).begin!())
+  ok /session id/i.test err.message
+
+test! "a failed BEGIN drops the orphaned session", ->
+  fetch = bySql { BEGIN: { ok: false, json: { ok: false, error: 'begin failed', errorCode: 'X' } } }
+  err = trap! (-> harborAdapter({ url: 'http://h', fetch }).begin!())
+  ok /begin failed/.test err.message
+  ok fetch.wasDropped()
+
+p "\nAdapter — errors"
+
+test! "an HTTP failure becomes a typed DbError carrying the status", ->
+  fetch = fetchDouble { '/sql': { status: 503, statusText: 'Service Unavailable', json: { error: 'harbor down' } } }
+  err = trap! (-> harborAdapter({ url: 'http://h', fetch }).query! 'SELECT 1')
+  ok isDbError err
+  ok err.message.includes 'harbor down'
+  eq err.httpStatus, 503
+
+test! "a harbor SQL error becomes a QueryError with code and details", ->
+  fetch = fetchDouble { '/sql': { json: { ok: false, error: 'syntax error at "FRM"', errorCode: 'PARSE_ERROR', errorDetails: { line: 1 } } } }
+  err = trap! (-> harborAdapter({ url: 'http://h', fetch }).query! 'SELECT * FRM u')
+  ok err instanceof QueryError
+  eq err.code, 'PARSE_ERROR'
+  eq err.details, { line: 1 }
+  eq err.sql, 'SELECT * FRM u'
+
+test! "a network failure surfaces as a DbError, not a raw fetch throw", ->
+  fetch = (-> throw new TypeError('fetch failed'))
+  err = trap! (-> harborAdapter({ url: 'http://h', fetch }).query! 'SELECT 1')
+  ok isDbError err
+  ok /unreachable|connect|fetch/i.test err.message
+
+test! "a 5xx during a query is a ConnectionError, not a QueryError", ->
+  fetch = fetchDouble { '/sql': { status: 503, json: { error: 'harbor down' } } }
+  err = trap! (-> harborAdapter({ url: 'http://h', fetch }).query! 'SELECT 1')
+  ok err instanceof ConnectionError
+  eq err.sql, 'SELECT 1'
+
+p "\nAdapter — timeout and abort"
+
+test! "a hung harbor rejects with a TIMEOUT ConnectionError at the deadline", ->
+  fetch = hangingFetch()
+  err = trap! (-> harborAdapter({ url: 'http://h', fetch, timeoutMs: 25 }).query! 'SELECT 1')
+  ok err instanceof ConnectionError
+  eq err.code, 'TIMEOUT'
+  ok err.message.includes '25ms'
+  eq fetch.seen.signal?.aborted, true
+
+test! "a caller signal aborts the in-flight request with ABORTED", ->
+  fetch = hangingFetch()
+  controller = new AbortController()
+  pending = harborAdapter({ url: 'http://h', fetch, timeoutMs: 0 }).query 'SELECT 1', [], { signal: controller.signal }
+  controller.abort()
+  err = caught! pending
+  ok err instanceof ConnectionError
+  eq err.code, 'ABORTED'
+  eq fetch.seen.signal?.aborted, true
+
+test! "an already-aborted signal never reaches a hung harbor for long", ->
+  fetch = hangingFetch()
+  controller = new AbortController()
+  controller.abort()
+  err = trap! (-> harborAdapter({ url: 'http://h', fetch, timeoutMs: 0 }).query! 'SELECT 1', [], { signal: controller.signal })
+  eq err.code, 'ABORTED'
+
+test! "a transaction statement honors the caller signal too", ->
+  seen = { signal: null }
+  fetch = (url, init) ->
+    if url.endsWith '/sql/sessions/new'
+      return Promise.resolve { ok: true, status: 200, json: (-> { sessionId: 'sx' }) }
+    sql = if init?.body? then JSON.parse(init.body).sql else null
+    if sql is 'BEGIN'
+      return Promise.resolve { ok: true, status: 200, json: (-> { columns: [], data: [], rowCount: 0 }) }
+    seen.signal = init?.signal ?? null
+    new Promise (->)
+  tx = harborAdapter!({ url: 'http://h', fetch, timeoutMs: 0 }).begin!()
+  controller = new AbortController()
+  pending = tx.query 'SELECT 1', [], { signal: controller.signal }
+  controller.abort()
+  err = caught! pending
+  eq err.code, 'ABORTED'
+  eq seen.signal?.aborted, true
+
+test! "a fast response is untouched by the deadline", ->
+  fetch = fetchDouble { '/sql': { json: { columns: [], data: [], rowCount: 0 } } }
+  result = harborAdapter!({ url: 'http://h', fetch, timeoutMs: 25 }).query! 'SELECT 1'
+  eq result.rowCount, 0
+
+test "the default deadline is 30 seconds", ->
+  source = readFileSync DB_RIP, 'utf8'
+  ok /DEFAULT_TIMEOUT_MS =!? 30_000/.test source
+
+p "\nAdapter — capabilities and contract"
+
+test "capabilities declare transactional DDL", ->
+  adapter = harborAdapter { url: 'http://h', fetch: fetchDouble({}) }
+  eq adapter.capabilities, { tx: true, ddlTransactional: true }
+
+test "the adapter implements query + begin with capabilities (no introspect)", ->
+  adapter = harborAdapter { url: 'http://h', fetch: fetchDouble({}) }
+  for method in ['query', 'begin']
+    eq typeof adapter[method], 'function'
+  eq typeof adapter.capabilities, 'object'
+  ok not ('introspect' of adapter)
+
+test "the error types form a hierarchy under DbError", ->
+  ok new QueryError('x') instanceof DbError
+  ok isDbError new DbError('x')
+  eq isDbError(new Error('x')), false
+
+# ==[ 3. Temporal ]=============================================================
+
+p "\nTemporal — read path"
+
+test! "naive TIMESTAMP is UTC wall-clock, decoded to a Date", ->
+  ts = decoded! 'TIMESTAMP', '2024-03-15T10:30:00'
+  ok ts instanceof Date
+  eq ts.getTime(), UTC
+
+test! "TIMESTAMP WITH TIME ZONE decodes as the instant", ->
+  tstz = decoded! 'TIMESTAMP WITH TIME ZONE', '2024-03-15T10:30:00Z'
+  ok tstz instanceof Date
+  eq tstz.getTime(), UTC
+  eq (decoded!('TIMESTAMPTZ', '2024-03-15T10:30:00Z')).getTime(), UTC
+
+test! "DATE is a civil date at UTC midnight", ->
+  d = decoded! 'DATE', '2024-03-15'
+  ok d instanceof Date
+  eq d.getUTCFullYear(), 2024
+  eq d.getUTCMonth(), 2
+  eq d.getUTCDate(), 15
+
+test! "space separator and bare ±HHMM offset normalize", ->
+  eq (decoded!('TIMESTAMP', '2024-03-15 10:30:00')).getTime(), UTC
+  eq (decoded!('TIMESTAMP WITH TIME ZONE', '2024-03-15T10:30:00-0700')).getTime(), Date.UTC(2024, 2, 15, 17, 30, 0)
+
+test! "duckdbType casing is tolerated", ->
+  eq (decoded!('timestamp', '2024-03-15T10:30:00')).getTime(), UTC
+
+test! "microseconds truncate to millisecond precision", ->
+  eq (decoded!('TIMESTAMP', '2024-03-15T10:30:00.123456')).getTime(), Date.UTC(2024, 2, 15, 10, 30, 0, 123)
+
+test! "TIME has no date component: stays a string", ->
+  eq decoded!('TIME', '10:30:00'), '10:30:00'
+
+test! "odd / unparseable values pass through unchanged", ->
+  eq decoded!('TIMESTAMP', 'infinity'), 'infinity'
+  eq decoded!('TIMESTAMP', null), null
+  eq decoded!('TIMESTAMP', 'not a date'), 'not a date'
+
+test! "non-temporal cells in a mixed row are untouched", ->
+  fetch = harborFetch(
+    [{ name: 'id', duckdbType: 'INTEGER', lossless: true }, { name: 'ts', duckdbType: 'TIMESTAMP', lossless: true }]
+    [[7, '2024-03-15T10:30:00']]
+  )
+  { data } = harborAdapter!({ url: 'http://h', fetch }).query! 'SELECT id, ts FROM t'
+  eq data[0][0], 7
+  ok data[0][1] instanceof Date
+
+test! "fast path: no temporal column keeps rows untouched", ->
+  fetch = harborFetch [{ name: 'n', duckdbType: 'INTEGER', lossless: true }], [[42]]
+  { data } = harborAdapter!({ url: 'http://h', fetch }).query! 'SELECT n'
+  eq data, [[42]]
+
+test! "decode is keyed by duckdbType alone — lossless never gates it", ->
+  fetch = harborFetch [{ name: 'ts', duckdbType: 'TIMESTAMP', lossless: false }], [['2024-03-15T10:30:00']]
+  result = harborAdapter!({ url: 'http://h', fetch }).query! 'SELECT ts'
+  ok result.data[0][0] instanceof Date
+  eq result.columns[0].lossless, false
+
+test! "a transaction statement decodes through the same seam", ->
+  fetch = harborFetch [{ name: 'ts', duckdbType: 'TIMESTAMP', lossless: true }], [['2024-03-15T10:30:00']]
+  tx = harborAdapter!({ url: 'http://h', fetch }).begin!()
+  { data } = tx.query! 'SELECT ts FROM t'
+  tx.commit!()
+  ok data[0][0] instanceof Date
+  eq data[0][0].getTime(), UTC
+
+p "\nTemporal — write path"
+
+test! "a Date param becomes ISO-Z; other scalars are untouched", ->
+  eq posted!([new Date(UTC), 'hello', 42, null]), ['2024-03-15T10:30:00.000Z', 'hello', 42, null]
+
+test! "a Date nested in array or plain object is normalized", ->
+  eq posted!([[new Date(0)], { at: new Date(0) }]), [['1970-01-01T00:00:00.000Z'], { at: '1970-01-01T00:00:00.000Z' }]
+
+test! "an Invalid Date param throws loudly", ->
+  fetch = harborFetch [], []
+  adapter = harborAdapter { url: 'http://h', fetch }
+  err = trap! (-> adapter.query! 'INSERT INTO t VALUES (?)', [new Date('nope')])
+  ok err instanceof TypeError
+  ok /Invalid Date/.test err.message
+
+test! "a transaction statement encodes through the same seam", ->
+  fetch = harborFetch [], []
+  tx = harborAdapter!({ url: 'http://h', fetch }).begin!()
+  tx.query! 'INSERT INTO t VALUES (?)', [new Date(UTC)]
+  tx.commit!()
+  insert = fetch.calls.find (c) -> c.body?.sql?.startsWith 'INSERT'
+  eq insert.body.params, ['2024-03-15T10:30:00.000Z']
+
+# Child is bare `bun -e` (JS): use await import, not Rip dammit.
+test "naive TIMESTAMP decodes off-UTC without host-offset shift (subprocess)", ->
+  script = """
+    const { harborAdapter } = await import('@rip-lang/db');
+    const fail = (msg) => { console.error(msg); process.exit(1); };
+    if (new Date('2024-03-15T10:30:00').getTimezoneOffset() === 0) fail('TZ pin did not take: offset is 0');
+    const fetch = async () => ({ ok: true, status: 200, statusText: '', json: async () => ({ ok: true,
+      columns: [{ name: 'ts', duckdbType: 'TIMESTAMP', lossless: true }, { name: 'd', duckdbType: 'DATE', lossless: true }],
+      data: [['2024-03-15T10:30:00', '2024-03-15']], rowCount: 1 }) });
+    const { data } = await harborAdapter({ url: 'http://h', fetch }).query('SELECT ts, d FROM t');
+    const [ts, d] = data[0];
+    if (!(ts instanceof Date)) fail('TIMESTAMP did not decode to a Date');
+    if (ts.getTime() !== Date.UTC(2024, 2, 15, 10, 30, 0)) fail('TIMESTAMP shifted: ' + ts.toISOString());
+    if (ts.getTime() === new Date('2024-03-15T10:30:00').getTime()) fail('decode matched naive local parse');
+    if (!(d instanceof Date)) fail('DATE did not decode to a Date');
+    if (d.getUTCFullYear() !== 2024 || d.getUTCMonth() !== 2 || d.getUTCDate() !== 15) fail('DATE drifted: ' + d.toISOString());
+    console.log('ok');
+  """
+  run = spawnSync process.execPath, ['-e', script], { cwd: ROOT, env: { ...process.env, TZ: 'America/Los_Angeles' }, encoding: 'utf8' }
+  eq run.stderr, ''
+  eq run.status, 0
+  eq run.stdout.trim(), 'ok'
+
+# ==[ 4. Client ]==============================================================
+
+p "\nClient — materialization"
+
+test! "query returns rows as objects keyed by column, with metadata", ->
+  adapter = fakeAdapter [{ columns: [{ name: 'id' }, { name: 'name' }], data: [[1, 'Ada'], [2, 'Bo']], rowCount: 2 }]
+  result = createClient!(adapter).query! 'SELECT id, name FROM u'
+  eq result.rows, [{ id: 1, name: 'Ada' }, { id: 2, name: 'Bo' }]
+  eq result.columns, ['id', 'name']
+  eq result.rowCount, 2
+
+test! "rows/one/value are the convenience projections", ->
+  adapter = fakeAdapter [
+    { columns: [{ name: 'id' }], data: [[7], [8]], rowCount: 2 }
+    { columns: [{ name: 'id' }], data: [[7]], rowCount: 1 }
+    { columns: [{ name: 'n' }], data: [[42]], rowCount: 1 }
+    { columns: [{ name: 'id' }], data: [], rowCount: 0 }
+  ]
+  client = createClient adapter
+  eq client.rows!('SELECT id FROM u'), [{ id: 7 }, { id: 8 }]
+  eq client.one!('SELECT id FROM u LIMIT 1'), { id: 7 }
+  eq client.value!('SELECT count(*) n FROM u'), 42
+  eq client.one!('SELECT id FROM u WHERE 0'), null
+
+test! "value returns null when there is no scalar", ->
+  adapter = fakeAdapter [{ columns: [], data: [[]], rowCount: 1 }, { columns: [], data: [], rowCount: 0 }]
+  client = createClient adapter
+  eq client.value!('SELECT'), null
+  eq client.value!('SELECT WHERE 0'), null
+
+test! "parameters pass straight through to the adapter", ->
+  adapter = fakeAdapter [{ columns: [], data: [], rowCount: 0 }]
+  createClient!(adapter).query! 'SELECT * FROM u WHERE id = ?', [42]
+  eq adapter.log[0], { sql: 'SELECT * FROM u WHERE id = ?', params: [42] }
+
+p "\nClient — transactions"
+
+test! "a returning callback commits and yields its value", ->
+  adapter = fakeAdapter [{ columns: [{ name: 'id' }], data: [[1]], rowCount: 1 }]
+  result = createClient!(adapter).transaction! (tx) ->
+    row = tx.one! 'INSERT INTO u (name) VALUES (?) RETURNING id', ['Ada']
+    row.id
+  eq result, 1
+  eq adapter.state.committed, true
+  eq adapter.state.rolledBack, false
+
+test! "a throwing callback rolls back and rethrows", ->
+  adapter = fakeAdapter []
+  err = trap! (-> createClient(adapter).transaction! (-> throw new Error('boom')))
+  ok /boom/.test err.message
+  eq adapter.state.committed, false
+  eq adapter.state.rolledBack, true
+
+test! "a failed statement inside the transaction rolls back", ->
+  adapter = fakeAdapter [Object.assign(new Error('constraint'), {})]
+  err = trap! (-> createClient(adapter).transaction! (tx) -> tx.query! 'INSERT ...')
+  ok /constraint/.test err.message
+  eq adapter.state.rolledBack, true
+
+test! "the tx client materializes exactly like the top-level client", ->
+  adapter = fakeAdapter [{ columns: [{ name: 'id' }, { name: 'name' }], data: [[1, 'Ada']], rowCount: 1 }]
+  rows = createClient!(adapter).transaction! (tx) -> tx.rows! 'SELECT id, name FROM u'
+  eq rows, [{ id: 1, name: 'Ada' }]
+
+test! "a failed COMMIT propagates and does not trigger rollback", ->
+  state = { rolledBack: false }
+  adapter =
+    query: (-> Promise.resolve { columns: [], data: [], rowCount: 0 })
+    begin: ->
+      Promise.resolve
+        query: (-> Promise.resolve { columns: [], data: [], rowCount: 0 })
+        commit: (-> throw new Error('COMMIT conflict'))
+        rollback: (-> state.rolledBack = true; throw new Error('ROLLBACK on dead session'))
+  err = trap! (-> createClient(adapter).transaction! (-> 'ok'))
+  ok /COMMIT conflict/.test err.message
+  eq state.rolledBack, false
+
+test! "a throwing rollback never masks the original callback error", ->
+  adapter =
+    query: (-> Promise.resolve { columns: [], data: [], rowCount: 0 })
+    begin: ->
+      Promise.resolve
+        query: (-> Promise.resolve { columns: [], data: [], rowCount: 0 })
+        commit: (->)
+        rollback: (-> throw new Error('rollback also failed'))
+  err = trap! (-> createClient(adapter).transaction! (-> throw new Error('the real cause')))
+  ok /the real cause/.test err.message
+
+test! "a nested transaction joins the outer one — no second begin", ->
+  adapter = fakeAdapter [{ columns: [{ name: 'id' }], data: [[1]], rowCount: 1 }]
+  beginCount = 0
+  origBegin = adapter.begin
+  wrapped =
+    log: adapter.log
+    state: adapter.state
+    query: adapter.query
+    capabilities: adapter.capabilities
+    begin: ->
+      beginCount += 1
+      origBegin.call adapter
+  createClient!(wrapped).transaction! (tx) ->
+    tx.transaction! (inner) -> inner.query! 'SELECT 1'
+  eq beginCount, 1
+
+p "\nClient — cancellation"
+
+test! "an already-aborted signal rejects before the query runs", ->
+  adapter = fakeAdapter [{ columns: [], data: [], rowCount: 0 }]
+  controller = new AbortController()
+  controller.abort()
+  err = trap! (-> createClient(adapter).query! 'SELECT 1', [], { signal: controller.signal })
+  ok err instanceof CancelledError
+  eq adapter.log.length, 0
+
+test! "an abort while in flight rejects with CancelledError", ->
+  controller = new AbortController()
+  adapter = { query: (-> new Promise (->)), capabilities: {} }
+  pending = createClient(adapter).query 'SELECT pg_sleep(10)', [], { signal: controller.signal }
+  controller.abort()
+  err = caught! pending
+  ok err instanceof CancelledError
+
+test! "an abort mid-flight hands the signal to the adapter", ->
+  seen = { signal: null }
+  adapter =
+    query: (sql, params, opts) -> seen.signal = opts?.signal ?? null; new Promise (->)
+    capabilities: {}
+  controller = new AbortController()
+  pending = createClient(adapter).query 'SELECT pg_sleep(10)', [], { signal: controller.signal }
+  controller.abort()
+  err = caught! pending
+  ok err instanceof CancelledError
+  eq seen.signal, controller.signal
+  eq seen.signal.aborted, true
+
+test! "over the harbor adapter, cancellation aborts the underlying fetch", ->
+  fetchSignal = null
+  fetch = (url, init) -> fetchSignal = init?.signal ?? null; new Promise (->)
+  controller = new AbortController()
+  pending = createClient(harborAdapter { url: 'http://h', fetch }).query 'SELECT 1', [], { signal: controller.signal }
+  controller.abort()
+  err = caught! pending
+  ok err instanceof CancelledError
+  eq fetchSignal?.aborted, true
+
+test! "a completed query is unaffected by a later abort", ->
+  adapter = fakeAdapter [{ columns: [{ name: 'n' }], data: [[1]], rowCount: 1 }]
+  controller = new AbortController()
+  result = createClient!(adapter).query! 'SELECT 1', [], { signal: controller.signal }
+  controller.abort()
+  eq result.rowCount, 1
+
+p "\nClient — shape"
+
+test "createClient requires an adapter with a query method", ->
+  throws (-> createClient null), 'adapter'
+  throws (-> createClient {}), 'adapter'
+
+test "CancelledError is a DbError with code ABORTED", ->
+  err = new CancelledError('x')
+  ok err instanceof Error
+  ok err instanceof DbError
+  ok isDbError err
+  eq err.name, 'CancelledError'
+  eq err.code, 'ABORTED'
+
+# ==[ 5. CLI helpers + dump/load/checkpoint ]===================================
+
+p "\nCLI — pure helpers"
+
+test "resolveUrl: explicit wins, then env, then default", ->
+  eq resolveUrl('http://h:9494/', {}), 'http://h:9494'
+  eq resolveUrl(null, { RIP_DB_URL: 'http://env:9494///' }), 'http://env:9494'
+  eq resolveUrl(null, {}), 'http://127.0.0.1:9494'
+
+test "sqlString: quotes and rejects NUL", ->
+  eq sqlString('/tmp/x'), "'/tmp/x'"
+  eq sqlString("a'b"), "'a''b'"
+  throws (-> sqlString('a\0b')), 'NUL'
+
+test "makeMcpSql is makeSql — one /sql wire", ->
+  eq makeMcpSql, makeSql
+
+test "safeFileStem: sanitizes and never empties", ->
+  eq safeFileStem('my db!'), 'my_db'
+  eq safeFileStem('///'), 'rip-db'
+  eq safeFileStem('ok.name-1'), 'ok.name-1'
+
+test "stamp: YYYYMMDD-HHMMSS from an injected date", ->
+  eq stamp(new Date(2026, 6, 14, 9, 5, 3)), '20260714-090503'
+
+test "humanSize: unit thresholds", ->
+  eq humanSize(512), '512 B'
+  eq humanSize(2048), '2.0 KB'
+  eq humanSize(5 * 1024 * 1024), '5.0 MB'
+
+test "unsafeTarPath: blocks absolute and traversal", ->
+  eq unsafeTarPath('schema.sql'), false
+  eq unsafeTarPath('./data/x.csv'), false
+  eq unsafeTarPath('/etc/passwd'), true
+  eq unsafeTarPath('..'), true
+  eq unsafeTarPath('../x'), true
+  eq unsafeTarPath('a/../../etc'), true
+
+p "\nCLI — /sql runner"
+
+test! "posts to /sql with bearer token and returns the envelope", ->
+  seen = null
+  fetch = (url, init) ->
+    seen = { url, headers: init.headers, body: JSON.parse init.body }
+    Promise.resolve { ok: true, status: 200, json: (-> { ok: true, data: [[1]] }) }
+  sql = makeSql { url: 'http://h:9494/', token: 'secret', fetch }
+  r = sql! 'SELECT 1'
+  eq seen.url, 'http://h:9494/sql'
+  eq seen.headers.Authorization, 'Bearer secret'
+  eq seen.body, { sql: 'SELECT 1' }
+  eq r.data, [[1]]
+
+test! "a harbor error envelope becomes a QueryError with the code", ->
+  fetch = sqlDouble [[/./, { ok: false, error: 'boom', errorCode: 'X' }]]
+  sql = makeSql { url: 'http://h', fetch }
+  err = trap! (-> sql! 'SELECT 1')
+  ok err instanceof QueryError
+  eq err.code, 'X'
+  ok /boom/.test err.message
+
+test! "a transport failure is a ConnectionError naming the harbor", ->
+  fetch = (-> throw new Error('ECONNREFUSED'))
+  sql = makeSql { url: 'http://h', fetch }
+  err = trap! (-> sql! 'SELECT 1')
+  ok err instanceof ConnectionError
+  ok /unreachable/.test err.message
+  ok /http:\/\/h/.test err.message
+
+p "\nCLI — prechecks"
+
+test! "currentDatabase reads the scalar, defaulting to rip-db", ->
+  sql = makeSql { url: 'http://h', fetch: sqlDouble [[/current_database/, { ok: true, data: [['shop']] }]] }
+  eq currentDatabase!(sql), 'shop'
+  empty = makeSql { url: 'http://h', fetch: sqlDouble [[/current_database/, { ok: true, data: [] }]] }
+  eq currentDatabase!(empty), 'rip-db'
+
+test! "assertEmptyDatabase throws when any user table/view exists", ->
+  nonEmpty = makeSql { url: 'http://h', fetch: sqlDouble [[/count/, { ok: true, data: [[3]] }]] }
+  err = trap! (-> assertEmptyDatabase nonEmpty)
+  ok /not empty \(3 user table/.test err.message
+  assertEmptyDatabase! makeSql { url: 'http://h', fetch: sqlDouble [[/count/, { ok: true, data: [[0]] }]] }
+
+p "\nCLI — dump"
+
+test! "auto-names archive, EXPORTs, and tars", ->
+  h = hostDouble { sizes: {} }
+  sql = makeSql { url: 'http://h', fetch: sqlDouble [[/current_database/, { ok: true, data: [['shop']] }]] }
+  msg = dump! null, h.deps(sql)
+  ok /^wrote shop-20260714-010203\.tar\.gz/.test msg
+  ok h.log.some (l) -> l.startsWith 'tar.create shop-20260714-010203.tar.gz'
+
+test! "refuses to overwrite an existing archive", ->
+  h = hostDouble { present: new Set(['out.tar.gz']) }
+  err = trap! (-> dump 'out.tar.gz', h.deps(makeSql { url: 'http://h', fetch: sqlDouble() }))
+  ok /refusing to overwrite/.test err.message
+
+test! "rejects a non-archive, non-directory path", ->
+  err = trap! (-> dump 'backup.zip', hostDouble().deps(makeSql { url: 'http://h', fetch: sqlDouble() }))
+  ok /must end in \.tar\.gz/.test err.message
+
+test! "fails loudly when harbor wrote its EXPORT elsewhere", ->
+  h = hostDouble { staged: [] }
+  err = trap! (-> dump 'out.tar.gz', h.deps(makeSql { url: 'http://h', fetch: sqlDouble [[/current_database/, { ok: true, data: [['s']] }]] }))
+  ok /expected DuckDB export files/.test err.message
+
+test! "cleans the staging dir even when EXPORT fails", ->
+  h = hostDouble()
+  sql = (-> throw new Error('could not reach harbor at http://h'))
+  err = trap! (-> dump 'out.tar.gz', h.deps(sql))
+  ok /could not reach harbor/.test err.message
+  ok h.log.some (l) -> l.startsWith 'rm /tmp/ripdb-'
+
+p "\nCLI — load"
+
+test! "extracts and IMPORTs into an empty database", ->
+  h = hostDouble { present: new Set(['snap.tar.gz']) }
+  sql = makeSql { url: 'http://h', fetch: sqlDouble [[/count/, { ok: true, data: [[0]] }]] }
+  eq load!('snap.tar.gz', h.deps(sql)), 'loaded snap.tar.gz'
+
+test! "refuses when the target database is not empty", ->
+  h = hostDouble { present: new Set(['snap.tar.gz']) }
+  err = trap! (-> load 'snap.tar.gz', h.deps(makeSql { url: 'http://h', fetch: sqlDouble [[/count/, { ok: true, data: [[2]] }]] }))
+  ok /not empty/.test err.message
+
+test! "rejects an archive containing a traversal path", ->
+  h = hostDouble { present: new Set(['evil.tar.gz']), tarEntries: ['schema.sql', '../../etc/passwd'] }
+  err = trap! (-> load 'evil.tar.gz', h.deps(makeSql { url: 'http://h', fetch: sqlDouble [[/count/, { ok: true, data: [[0]] }]] }))
+  ok /unsafe path in archive: \.\.\/\.\.\/etc\/passwd/.test err.message
+
+test! "rejects a missing archive", ->
+  err = trap! (-> load 'gone.tar.gz', hostDouble().deps(makeSql { url: 'http://h', fetch: sqlDouble() }))
+  ok /no such file/.test err.message
+
+p "\nCLI — checkpoint"
+
+clock = (-> new Date(2026, 0, 1, 0, 0, 0))
+
+test! "plain CHECKPOINT reports completion with elapsed time", ->
+  fetch = sqlDouble [[/CHECKPOINT/, { ok: true }]]
+  sql = makeSql { url: 'http://h', fetch }
+  eq checkpoint!(false, { sql, now: clock }), 'checkpoint complete (0 ms)'
+  eq fetch.calls, ['CHECKPOINT']
+
+test! "--force runs FORCE CHECKPOINT", ->
+  fetch = sqlDouble [[/CHECKPOINT/, { ok: true }]]
+  sql = makeSql { url: 'http://h', fetch }
+  eq checkpoint!(true, { sql, now: clock }), 'force checkpoint complete (0 ms)'
+  eq fetch.calls, ['FORCE CHECKPOINT']
+
+test! "a concurrent-writer failure escalates to a --force hint", ->
+  sql = makeSql { url: 'http://h', fetch: sqlDouble [[/CHECKPOINT/, { ok: false, error: 'Cannot CHECKPOINT: there is an active transaction' }]] }
+  err = trap! (-> checkpoint(false, { sql, now: clock }))
+  ok /Re-run with --force/.test err.message
+
+# ==[ 6. Embed probe ]==========================================================
+
+p "\nBoot probe — assertReachable"
+
+reply = (status, body) -> { ok: status >= 200 and status < 400, status, json: (-> body) }
+
+test! "a healthy /ready resolves to running", ->
+  hit = null
+  fetch = (url) -> hit = url; Promise.resolve reply(200, { ok: true })
+  eq assertReachable!('http://harbor:9494', { fetch }), 'running'
+  eq hit, 'http://harbor:9494/ready'
+
+test! "a 503 throws not-reachable", ->
+  err = trap! (-> assertReachable 'http://harbor:9494', { fetch: (-> Promise.resolve reply(503, { ok: false })) })
+  ok /not reachable at http:\/\/harbor:9494/.test err.message
+
+test! "a 200 body without ok:true is not reachable", ->
+  err = trap! (-> assertReachable 'http://harbor:9494', { fetch: (-> Promise.resolve reply(200, { ok: false })) })
+  ok /not reachable/.test err.message
+
+test! "a transport failure is caught and reported as not-reachable", ->
+  err = trap! (-> assertReachable 'http://harbor:9494', { fetch: (-> throw new TypeError('connection refused')) })
+  ok /not reachable/.test err.message
+
+test! "a trailing slash is trimmed from the resolved url", ->
+  hit = null
+  fetch = (url) -> hit = url; Promise.resolve reply(200, { ok: true })
+  assertReachable! 'http://harbor:9494///', { fetch }
+  eq hit, 'http://harbor:9494/ready'
+
+test! "an omitted url falls back to RIP_DB_URL then the local default", ->
+  hit = null
+  fetch = (url) -> hit = url; Promise.resolve reply(200, { ok: true })
+  prev = process.env.RIP_DB_URL
+  try
+    process.env.RIP_DB_URL = 'http://env-harbor:9494'
+    assertReachable! null, { fetch }
+    eq hit, 'http://env-harbor:9494/ready'
+    delete process.env.RIP_DB_URL
+    assertReachable! null, { fetch }
+    eq hit, 'http://127.0.0.1:9494/ready'
+  finally
+    if prev is undefined then delete process.env.RIP_DB_URL else process.env.RIP_DB_URL = prev
+
+p "\nBoot probe — ensureRunning"
+
+test! "ensureRunning is a reachability alias", ->
+  fetch = (-> Promise.resolve reply(200, { ok: true }))
+  eq ensureRunning!('http://harbor:9494', { fetch }), 'running'
+
+# ==[ 7. MCP protocol ]=========================================================
+
+p "\nMCP — JSON-RPC methods"
+
+test! "initialize returns protocol version, capabilities, and server info", ->
+  pkg = JSON.parse readFileSync join(import.meta.dir, 'package.json'), 'utf8'
+  { dispatch } = createMcpServer { sql: fakeSql() }
+  r = parseJson dispatch! { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }
+  eq r.result.protocolVersion, '2024-11-05'
+  eq r.result.capabilities, { tools: {} }
+  eq r.result.serverInfo, { name: 'rip-db-mcp', version: pkg.version }
+  eq typeof r.result.instructions, 'string'
+
+test! "tools/list returns the three tools with schemas", ->
+  { dispatch } = createMcpServer { sql: fakeSql() }
+  r = parseJson dispatch! { id: 2, method: 'tools/list' }
+  eq r.result.tools.map((t) -> t.name), ['execute_query', 'list_tables', 'list_columns']
+  eq r.result.tools[0].inputSchema.required, ['sql']
+
+test! "notifications/initialized produces no reply", ->
+  { dispatch } = createMcpServer { sql: fakeSql() }
+  eq dispatch!({ method: 'notifications/initialized' }), null
+
+test! "an unknown method with an id is -32601; without an id it is silent", ->
+  { dispatch } = createMcpServer { sql: fakeSql() }
+  r = parseJson dispatch! { id: 9, method: 'ping' }
+  eq r.error, { code: -32601, message: 'Unknown method: ping' }
+  eq dispatch!({ method: 'some/notification' }), null
+
+p "\nMCP — execute_query"
+
+callExecute = (dispatch, args) ->
+  dispatch! { id: 1, method: 'tools/call', params: { name: 'execute_query', arguments: args } }
+
+test! "shapes a successful result with columns, types, rows, and rowCount", ->
+  sql = fakeSql [[/SELECT/, { ok: true, columns: [{ name: 'id', duckdbType: 'INTEGER' }, { name: 'n', duckdbType: 'VARCHAR' }], data: [[1, 'a'], [2, 'b']] }]]
+  { dispatch } = createMcpServer { sql }
+  out = toolResult callExecute! dispatch, { sql: 'SELECT id, n FROM t' }
+  eq out.success, true
+  eq out.columns, ['id', 'n']
+  eq out.columnTypes, ['INTEGER', 'VARCHAR']
+  eq out.rows, [[1, 'a'], [2, 'b']]
+  eq out.rowCount, 2
+
+test! "missing sql parameter is a tool error", ->
+  { dispatch } = createMcpServer { sql: fakeSql() }
+  reply = parseJson callExecute! dispatch, {}
+  eq reply.result.isError, true
+  ok /Missing sql/.test toolResult(callExecute!(dispatch, {})).error
+
+test! "a harbor error envelope surfaces as a failed tool result", ->
+  sql = fakeSql [[/./, { ok: false, error: 'syntax error', errorCode: 'PARSE_ERROR' }]]
+  { dispatch } = createMcpServer { sql }
+  raw = callExecute! dispatch, { sql: 'SELCT 1' }
+  eq parseJson(raw).result.isError, true
+  eq toolResult(raw), { success: false, error: 'syntax error', errorCode: 'PARSE_ERROR' }
+
+test! "a result over the row cap is truncated with a warning", ->
+  data = Array.from { length: 2000 }, (_, i) -> [i]
+  sql = fakeSql [[/SELECT/, { ok: true, columns: [{ name: 'id' }], data }]]
+  { dispatch } = createMcpServer { sql }
+  out = toolResult callExecute! dispatch, { sql: 'SELECT id FROM big' }
+  eq out.rowCount, 1024
+  eq out.truncated, true
+  ok /limited to 1024 rows/.test out.warning
+
+test! "a result over the byte cap is shrunk until it fits", ->
+  wide = 'x'.repeat 500
+  data = Array.from { length: 500 }, (-> [wide])
+  sql = fakeSql [[/SELECT/, { ok: true, columns: [{ name: 'c' }], data }]]
+  { dispatch } = createMcpServer { sql }
+  out = toolResult callExecute! dispatch, { sql: 'SELECT c FROM wide' }
+  ok out.rowCount < 500
+  eq out.truncated, true
+  ok /50KB/.test out.warning
+
+test! "a single row exceeding the byte cap is returned but flagged truncated", ->
+  huge = 'x'.repeat 200000
+  sql = fakeSql [[/SELECT/, { ok: true, columns: [{ name: 'c' }], data: [[huge]] }]]
+  { dispatch } = createMcpServer { sql }
+  out = toolResult callExecute! dispatch, { sql: 'SELECT c FROM one' }
+  eq out.rowCount, 1
+  eq out.truncated, true
+  ok /single row exceeds/.test out.warning
+
+p "\nMCP — list_tables and list_columns"
+
+test! "list_tables maps rows to objects and counts tables vs views", ->
+  sql = fakeSql [[/duckdb_tables/, {
+    ok: true
+    columns: [{ name: 'schema' }, { name: 'name' }, { name: 'type' }, { name: 'comment' }]
+    data: [['main', 'users', 'table', null], ['main', 'active', 'view', 'a view']]
+  }]]
+  { dispatch } = createMcpServer { sql }
+  out = toolResult dispatch! { id: 1, method: 'tools/call', params: { name: 'list_tables' } }
+  eq out.tables, [{ schema: 'main', name: 'users', type: 'table', comment: null }, { schema: 'main', name: 'active', type: 'view', comment: 'a view' }]
+  eq out.tableCount, 1
+  eq out.viewCount, 1
+
+test! "list_columns requires a table and maps column rows", ->
+  sql = fakeSql [[/duckdb_columns/, {
+    ok: true
+    columns: [{ name: 'name' }, { name: 'type' }, { name: 'nullable' }, { name: 'comment' }]
+    data: [['id', 'INTEGER', false, null], ['email', 'VARCHAR', true, null]]
+  }]]
+  { dispatch } = createMcpServer { sql }
+  out = toolResult dispatch! { id: 1, method: 'tools/call', params: { name: 'list_columns', arguments: { table: 'users' } } }
+  eq out.success, true
+  eq out.table, 'users'
+  eq out.columnCount, 2
+  eq out.columns[0], { name: 'id', type: 'INTEGER', nullable: false, comment: null }
+  missing = toolResult dispatch! { id: 2, method: 'tools/call', params: { name: 'list_columns', arguments: {} } }
+  ok /Missing table/.test missing.error
+
+test! "list_columns splits schema.table and binds both parts", ->
+  boundTo = null
+  sql = (query, params) -> boundTo = params; Promise.resolve { ok: true, columns: [{ name: 'name' }], data: [] }
+  { dispatch } = createMcpServer { sql }
+  dispatch! { id: 1, method: 'tools/call', params: { name: 'list_columns', arguments: { table: 'analytics.events' } } }
+  eq boundTo, ['analytics', 'events']
+
+p "\nMCP — routing"
+
+test! "an unknown tool name is a failed result", ->
+  { dispatch } = createMcpServer { sql: fakeSql() }
+  raw = dispatch! { id: 1, method: 'tools/call', params: { name: 'nope' } }
+  eq parseJson(raw).result.isError, true
+  ok /Unknown tool: nope/.test toolResult(raw).error
+
+# ==[ 8. Bin / CLI spawn ]======================================================
+
+p "\nBin — db.rip host wrapper"
+
+test "--help prints usage and exits 0", ->
+  r = runDb '--help'
+  eq r.status, 0
+  ok r.stdout.includes 'rip-db dump'
+  ok r.stdout.includes 'checkpoint'
+  ok r.stdout.includes 'does not start or stop a database server'
+
+test "--version prints a version line", ->
+  r = runDb '--version'
+  eq r.status, 0
+  ok /^rip-db v/.test r.stdout
+
+test "an unknown subcommand exits 1 naming it, then prints usage", ->
+  r = runDb 'bogus'
+  eq r.status, 1
+  ok r.stderr.includes "unknown subcommand 'bogus'"
+  ok r.stdout.includes 'rip-db dump'
+
+test "dump rejects extra arguments before touching harbor", ->
+  r = runDb 'dump', 'a.tar.gz', 'b.tar.gz'
+  eq r.status, 1
+  ok r.stderr.includes 'usage: rip-db dump'
+
+test "checkpoint rejects an unknown flag", ->
+  r = runDb 'checkpoint', '--nope'
+  eq r.status, 1
+  ok r.stderr.includes 'unknown argument: --nope'
+
+test "each subcommand has its own --help that exits 0", ->
+  for [cmd, needle] in [
+    ['ping', 'Probe harbor']
+    ['status', 'Probe harbor']
+    ['dump', 'Export the running harbor']
+    ['load', 'Restore a tar.gz']
+    ['checkpoint', 'flush the WAL']
+  ]
+    r = runDb cmd, '--help'
+    eq r.status, 0
+    ok r.stdout.includes needle
+
+test "--help lists ping and status", ->
+  r = runDb '--help'
+  eq r.status, 0
+  ok r.stdout.includes 'rip-db ping'
+  ok r.stdout.includes 'rip-db status'
+
+test "executing db.rip directly forwards argv", ->
+  r = binDb '--version'
+  eq r.status, 0
+  ok /^rip-db v/.test r.stdout
+
+# ==[ 9. Certification / contract pins ]========================================
+
+p "\nCertification — adapter contract"
+
+harborFetchCert = (opts = {}) ->
+  { status = 200, reply = { ok: true, columns: [], data: [], rowCount: 0 }, onError } = opts
+  session = 0
+  calls = []
+  fetchFn = (url, init) ->
+    body = if init?.body? then JSON.parse init.body else null
+    calls.push { url, method: init?.method ?? 'GET', sql: body?.sql ?? null, sessionId: body?.sessionId ?? null }
+    if init?.method is 'DELETE'
+      return Promise.resolve { ok: true, status: 200, json: (-> {}) }
+    if url.endsWith '/sql/sessions/new'
+      session += 1
+      return Promise.resolve { ok: true, status: 200, json: (-> { sessionId: "sess-#{session}" }) }
+    if onError?
+      return onError body?.sql ?? ''
+    Promise.resolve { ok: status < 400, status, statusText: '', json: (-> reply) }
+  fetchFn.calls = calls
+  fetchFn
+
+test "harborAdapter implements query + begin + capabilities, not introspect", ->
+  a = harborAdapter { url: 'http://h', fetch: harborFetchCert() }
+  eq typeof a.query, 'function'
+  eq typeof a.begin, 'function'
+  eq a.capabilities, { tx: true, ddlTransactional: true }
+  ok not ('introspect' of a)
+
+test "the error taxonomy is one hierarchy under DbError", ->
+  ok new QueryError('x') instanceof db.DbError
+  ok new ConnectionError('x') instanceof db.DbError
+  ok new CancelledError('x') instanceof db.DbError
+  ok db.isDbError new QueryError('x')
+  ok db.isDbError new CancelledError('x')
+  eq db.isDbError(new Error('x')), false
+
+p "\nCertification — concurrency and failure"
+
+test! "two transactions each pin their own harbor session", ->
+  fetch = harborFetchCert()
+  adapter = harborAdapter { url: 'http://h', fetch }
+  [txA, txB] = await Promise.all [adapter.begin!(), adapter.begin!()]
+  txA.query! 'INSERT INTO a VALUES (1)'
+  txB.query! 'INSERT INTO b VALUES (2)'
+  sidA = fetch.calls.find((c) -> c.sql is 'INSERT INTO a VALUES (1)').sessionId
+  sidB = fetch.calls.find((c) -> c.sql is 'INSERT INTO b VALUES (2)').sessionId
+  ok sidA isnt sidB
+  txA.commit!()
+  txB.rollback!()
+  eq fetch.calls.filter((c) -> c.method is 'DELETE').length, 2
+
+test! "a 5xx during a query is a retryable ConnectionError", ->
+  fetch = harborFetchCert { status: 503, reply: { error: 'harbor down' } }
+  err = trap! (-> harborAdapter({ url: 'http://h', fetch }).query! 'SELECT 1')
+  ok err instanceof ConnectionError
+  eq err.httpStatus, 503
+
+test! "an engine error is a QueryError carrying code and sql", ->
+  fetch = harborFetchCert { reply: { ok: false, error: 'boom', errorCode: 'PARSE_ERROR' } }
+  err = trap! (-> harborAdapter({ url: 'http://h', fetch }).query! 'SELECT bad')
+  ok err instanceof QueryError
+  eq err.code, 'PARSE_ERROR'
+  eq err.sql, 'SELECT bad'
+
+test! "a transport failure surfaces as a typed DbError", ->
+  fetch = (-> throw new TypeError('ECONNREFUSED'))
+  err = trap! (-> harborAdapter({ url: 'http://h', fetch }).query! 'SELECT 1')
+  ok db.isDbError err
+
+test! "an in-flight cancellation rejects with CancelledError", ->
+  controller = new AbortController()
+  adapter = { query: (-> new Promise (->)), capabilities: {} }
+  pending = createClient(adapter).query 'SELECT pg_sleep(9)', [], { signal: controller.signal }
+  controller.abort()
+  err = caught! pending
+  ok err instanceof CancelledError
+
+# ==[ 10. ORM + migrate integration ]===========================================
+
+p "\nORM — contract compatibility"
+
+hcols = (names) -> names.map (name) -> { name, duckdbType: 'VARCHAR', lossless: true }
+hrows = (names, ...data) -> { ok: true, kind: 'select', columns: hcols(names), data, rowCount: data.length }
+hack = (rowCount = 1) -> { ok: true, kind: 'write', columns: [], data: [], rowCount }
+hfail = (error, errorCode) -> { ok: false, error, errorCode }
+
+harborDouble = (rules = []) ->
+  calls = []
+  fetchFn = (url, init) ->
+    method = init?.method ?? 'GET'
+    body = if init?.body? then JSON.parse init.body else null
+    calls.push { url, method, body, sql: body?.sql ?? null, params: body?.params ?? null, sessionId: body?.sessionId ?? null }
+    if method is 'DELETE'
+      return Promise.resolve { ok: true, status: 200, json: (-> {}) }
+    if url.endsWith '/sql/sessions/new'
+      return Promise.resolve { ok: true, status: 200, json: (-> { sessionId: 'sess-1' }) }
+    sql = body?.sql ?? ''
+    rule = rules.find ([re]) -> re.test sql
+    reply = if rule? then (if typeof rule[1] is 'function' then rule[1]() else rule[1]) else hrows([])
+    okFlag = reply.ok isnt false
+    Promise.resolve { ok: okFlag, status: (if okFlag then 200 else 400), statusText: '', json: (-> reply) }
+  fetchFn.calls = calls
+  fetchFn
+
+field = (name, typeName = 'string', opts = {}) ->
+  { tag: 'field', name, modifiers: (if opts.optional then ['?'] else ['!']), typeName, ...(if opts.unique then { unique: true } else {}) }
+dir = (name, ...args) -> { tag: 'directive', name, args }
+model = (name, ...entries) -> { kind: 'model', name, entries }
+
+withHarbor = (rules, scenario) ->
+  __SchemaRegistry.scope! ->
+    fetch = harborDouble rules
+    __schemaSetAdapter harborAdapter { url: 'http://harbor', fetch }
+    sqls = (-> fetch.calls.filter((c) -> c.url.endsWith('/sql')).map (c) -> c.sql)
+    scenario { define: (m) -> __schema(m), fetch, sqls }
+
+test "setAdapter accepts a harborAdapter", ->
+  adapter = harborAdapter { url: 'http://harbor', fetch: harborDouble() }
+  eq typeof adapter.query, 'function'
+  eq typeof adapter.begin, 'function'
+  __SchemaRegistry.scope (-> __schemaSetAdapter adapter)
+
+test! "connect installs the adapter for the schema ORM", ->
+  fetch = harborDouble [[/^SELECT/, hrows(['id'], [7])]]
+  connect { url: 'http://harbor', fetch }
+  __SchemaRegistry.scope! ->
+    User = __schema model 'User', field('name')
+    row = User.find! 7
+    eq row.id, 7
+    ok fetch.calls.some (c) -> c.sql? and /FROM "users"/.test(c.sql)
+
+p "\nORM — row hydration"
+
+test! "create() hydrates from INSERT ... RETURNING", ->
+  value = withHarbor! [[/^INSERT INTO "users"/, hrows(['id', 'name', 'email'], [1, 'Ada', 'a@b.c'])]], ({ define }) ->
+    User = define model 'User', field('name'), field('email')
+    u = User.create! { name: 'Ada', email: 'a@b.c' }
+    { id: u.id, name: u.name, email: u.email }
+  eq value, { id: 1, name: 'Ada', email: 'a@b.c' }
+
+test! "where().all() hydrates each row keyed by column.name", ->
+  value = withHarbor! [[/^SELECT \* FROM "users"/, hrows(['id', 'name'], [1, 'Ada'], [2, 'Bo'])]], ({ define, sqls }) ->
+    User = define model 'User', field('name')
+    found = User.where({ id: [1, 2] }).all!
+    { rows: found.map((u) -> { id: u.id, name: u.name }), sql: sqls().find (s) -> s.startsWith 'SELECT' }
+  eq value.rows, [{ id: 1, name: 'Ada' }, { id: 2, name: 'Bo' }]
+  eq value.sql, 'SELECT * FROM "users" WHERE "id" IN (?, ?)'
+
+test! "find(id) targets the primary key and hydrates the row", ->
+  value = withHarbor! [[/^SELECT \* FROM "users"/, hrows(['id', 'name'], [7, 'Ada'])]], ({ define, fetch }) ->
+    User = define model 'User', field('name')
+    u = User.find! 7
+    select = fetch.calls.find (c) -> c.sql?.startsWith 'SELECT'
+    { id: u.id, name: u.name, sql: select.sql, params: select.params }
+  eq value, { id: 7, name: 'Ada', sql: 'SELECT * FROM "users" WHERE "id" = ? LIMIT 1', params: [7] }
+
+p "\nORM — transactions"
+
+test! "a committing transaction opens a session, carries it, and drops it", ->
+  trace = withHarbor! [[/^INSERT INTO "users"/, hrows(['id', 'name'], [1, 'Ada'])]], ({ define, fetch }) ->
+    User = define model 'User', field('name')
+    id = __schemaTransaction! ->
+      u = User.create! { name: 'Ada' }
+      u.id
+    {
+      id
+      opened: fetch.calls.some (c) -> c.url.endsWith '/sql/sessions/new'
+      insertCarriedSession: fetch.calls.find((c) -> c.sql?.startsWith 'INSERT')?.sessionId
+      committed: fetch.calls.some (c) -> c.sql is 'COMMIT'
+      dropped: fetch.calls.some (c) -> c.method is 'DELETE' and c.url.endsWith '/sql/sessions/sess-1'
+    }
+  eq trace, { id: 1, opened: true, insertCarriedSession: 'sess-1', committed: true, dropped: true }
+
+test! "a throwing transaction rolls back and still drops the session", ->
+  trace = withHarbor! [[/^INSERT INTO "users"/, hrows(['id', 'name'], [1, 'Ada'])]], ({ define, fetch }) ->
+    User = define model 'User', field('name')
+    threw = false
+    try
+      __schemaTransaction! ->
+        User.create! { name: 'Ada' }
+        throw new Error 'boom'
+    catch
+      threw = true
+    {
+      threw
+      rolledBack: fetch.calls.some (c) -> c.sql is 'ROLLBACK'
+      committed: fetch.calls.some (c) -> c.sql is 'COMMIT'
+      dropped: fetch.calls.some (c) -> c.method is 'DELETE'
+    }
+  eq trace, { threw: true, rolledBack: true, committed: false, dropped: true }
+
+p "\nORM — eager loading"
+
+test! "include() loads a has_many relation with one IN query", ->
+  value = withHarbor! [
+    [/^SELECT \* FROM "users"/, hrows(['id', 'name'], [1, 'Ada'], [2, 'Bo'])]
+    [/^SELECT \* FROM "orders"/, hrows(['id', 'user_id'], [10, 1], [11, 1], [12, 2])]
+  ], ({ define, sqls }) ->
+    define model 'Order', field('total'), dir('belongs_to', { target: 'User', optional: false })
+    User = define model 'User', field('name'), dir('has_many', { target: 'Order', optional: false })
+    users = User.where({}).includes('orders').all!
+    counts = []
+    for u in users
+      counts.push (u.orders!()).length
+    {
+      counts
+      orderQuery: sqls().find (s) -> s.startsWith 'SELECT * FROM "orders"'
+      orderQueryCount: sqls().filter((s) -> s.startsWith 'SELECT * FROM "orders"').length
+    }
+  eq value.counts, [2, 1]
+  ok /^SELECT \* FROM "orders" WHERE "user_id" IN \(\?, \?\)/.test value.orderQuery
+  eq value.orderQueryCount, 1
+
+p "\nORM — constraint translation"
+
+test! "a unique violation becomes a SchemaError on the offending field", ->
+  outcome = withHarbor! [[/^INSERT INTO "users"/, (-> hfail('Duplicate key "email: a@b.c" violates unique constraint', 'CONSTRAINT'))]], ({ define }) ->
+    User = define model 'User', field('email', 'email', { unique: true })
+    try
+      User.create! { email: 'a@b.c' }
+      { threw: false }
+    catch e
+      {
+        isSchemaError: e instanceof SchemaError
+        issues: (e.issues or []).map (i) -> [i.field, i.error]
+        causeIsQueryError: e.cause instanceof QueryError
+      }
+  eq outcome.isSchemaError, true
+  eq outcome.issues, [['email', 'unique']]
+  eq outcome.causeIsQueryError, true
+
+p "\nORM — soft delete"
+
+test! "destroy() on a softDelete model sets deleted_at", ->
+  value = withHarbor! [
+    [/^SELECT \* FROM "posts"/, hrows(['id', 'title', 'deleted_at'], [1, 'Hi', null])]
+    [/^UPDATE "posts"/, hack(1)]
+  ], ({ define, sqls }) ->
+    Post = define model 'Post', field('title'), dir('softDelete')
+    post = Post.first!
+    post.destroy!
+    { update: sqls().find((s) -> s.startsWith 'UPDATE'), deletedNothing: sqls().every (s) -> not s.startsWith 'DELETE' }
+  ok /^UPDATE "posts" SET "deleted_at" = \? WHERE "id" = \?/.test value.update
+  eq value.deletedNothing, true
+
+p "\nORM — bulk operations"
+
+test! "insertMany issues a single multi-row INSERT", ->
+  value = withHarbor! [[/^INSERT INTO "users"/, hrows(['id', 'name'], [1, 'Ada'], [2, 'Bo'])]], ({ define, fetch }) ->
+    User = define model 'User', field('name')
+    User.insertMany! [{ name: 'Ada' }, { name: 'Bo' }]
+    inserts = fetch.calls.filter (c) -> c.sql?.startsWith 'INSERT'
+    { count: inserts.length, sql: inserts[0].sql, params: inserts[0].params }
+  eq value.count, 1
+  eq value.sql, 'INSERT INTO "users" ("name") VALUES (?), (?) RETURNING *'
+  eq value.params, ['Ada', 'Bo']
+
+test! "updateAll and deleteAll issue set-based statements", ->
+  value = withHarbor! [[/^(UPDATE|DELETE)/, hack(3)]], ({ define, sqls }) ->
+    User = define model 'User', field('name')
+    User.where({ name: 'x' }).updateAll! { name: 'y' }
+    User.where({ name: 'y' }).deleteAll!
+    { sqls: sqls() }
+  eq value.sqls, ['UPDATE "users" SET "name" = ? WHERE "name" = ?', 'DELETE FROM "users" WHERE "name" = ?']
+
+p "\nORM — transaction hooks"
+
+test! "afterCommit fires after COMMIT", ->
+  trace = withHarbor! [[/^INSERT INTO "users"/, hrows(['id', 'name'], [1, 'Ada'])]], ({ define, fetch }) ->
+    fired = []
+    User = define model 'User', field('name'), { tag: 'hook', name: 'afterCommit', fn: (-> fired.push 'afterCommit') }
+    __schemaTransaction! -> User.create! { name: 'Ada' }
+    { fired, committedBeforeHook: fetch.calls.some (c) -> c.sql is 'COMMIT' }
+  eq trace.fired, ['afterCommit']
+  eq trace.committedBeforeHook, true
+
+test! "afterRollback fires when the transaction throws", ->
+  trace = withHarbor! [[/^INSERT INTO "users"/, hrows(['id', 'name'], [1, 'Ada'])]], ({ define, fetch }) ->
+    fired = []
+    User = define model 'User', field('name'),
+      { tag: 'hook', name: 'afterCommit', fn: (-> fired.push 'afterCommit') }
+      { tag: 'hook', name: 'afterRollback', fn: (-> fired.push 'afterRollback') }
+    try
+      __schemaTransaction! ->
+        User.create! { name: 'Ada' }
+        throw new Error 'boom'
+    catch
+      null
+    { fired, rolledBack: fetch.calls.some (c) -> c.sql is 'ROLLBACK' }
+  eq trace.fired, ['afterRollback']
+  eq trace.rolledBack, true
+
+p "\nORM — createClient stack"
+
+test! "createClient materializes harbor object-columns by name", ->
+  fetch = harborDouble [[/^SELECT/, hrows(['id', 'name'], [1, 'Ada'], [2, 'Bo'])]]
+  client = createClient harborAdapter { url: 'http://harbor', fetch }
+  result = client.query! 'SELECT id, name FROM users'
+  eq result.rows, [{ id: 1, name: 'Ada' }, { id: 2, name: 'Bo' }]
+  eq result.columns, ['id', 'name']
+  eq client.value!('SELECT count(*) FROM users'), 1
+
+p "\nMigrate — harbor double and runner"
+
+harborMigrate = ({ catalog = { tables: [] }, failSql = null, lockHeld = false } = {}) ->
+  history = []
+  lock = { held: lockHeld }
+  res = (names, rows) -> { ok: true, columns: names.map((name) -> { name, duckdbType: 'VARCHAR' }), data: rows, rowCount: rows.length }
+  ack = { ok: true, columns: [], data: [], rowCount: 0 }
+
+  answerCatalog = (sql) ->
+    tables = catalog.tables or []
+    if sql.includes 'information_schema.tables'
+      return res ['table_name'], tables.map (t) -> [t.name]
+    if sql.includes 'information_schema.columns'
+      rows = []
+      for t in tables
+        for c in t.columns
+          rows.push [t.name, c.name, c.type, (if c.notNull then 'NO' else 'YES'), c.default ?? null]
+      return res ['table_name', 'column_name', 'data_type', 'is_nullable', 'column_default'], rows
+    if sql.includes 'duckdb_constraints()'
+      rows = []
+      for t in tables
+        if t.primaryKey
+          rows.push [t.name, 'PRIMARY KEY', [t.primaryKey], "PRIMARY KEY (#{t.primaryKey})"]
+        for fk in t.foreignKeys or []
+          rows.push [t.name, 'FOREIGN KEY', [fk.column], "FOREIGN KEY (#{fk.column}) REFERENCES #{fk.refTable}(#{fk.refColumn})"]
+      return res ['table_name', 'constraint_type', 'constraint_column_names', 'constraint_text'], rows
+    if sql.includes 'duckdb_indexes()'
+      rows = []
+      for t in tables
+        for ix in t.indexes or []
+          rows.push [t.name, ix.name, ix.unique is true, ix.columns]
+      return res ['table_name', 'index_name', 'is_unique', 'expressions'], rows
+    if sql.includes 'duckdb_sequences()'
+      rows = []
+      for t in tables
+        if t.sequence
+          rows.push [t.sequence.name, t.sequence.start]
+      return res ['sequence_name', 'start_value'], rows
+    null
+
+  answer = (sql, params) ->
+    if failSql? and failSql.test sql
+      return { ok: false, error: "Parser Error: #{sql.split('\n')[0]}", errorCode: 'PARSE_ERROR' }
+    cat = answerCatalog sql
+    return cat if cat?
+    if sql.startsWith 'DELETE FROM _rip_migration_lock'
+      lock.held = false
+      return ack
+    if sql.startsWith 'INSERT INTO _rip_migration_lock'
+      if lock.held
+        return { ok: false, error: 'Duplicate key "id: 1" violates primary key constraint', errorCode: 'CONSTRAINT' }
+      lock.held = true
+      return ack
+    if sql.startsWith 'SELECT version'
+      return res ['version', 'name', 'checksum', 'applied_at'], history.map (h) -> [h.version, h.name, h.checksum, null]
+    if sql.startsWith 'INSERT INTO _rip_migrations'
+      if history.some (h) -> h.version is params[0]
+        return { ok: false, error: "Duplicate key \"version: #{params[0]}\"", errorCode: 'CONSTRAINT' }
+      history.push { version: params[0], name: params[1], checksum: params[2] }
+      return ack
+    ack
+
+  calls = []
+  fetchFn = (url, init) ->
+    method = init?.method ?? 'GET'
+    body = if init?.body? then JSON.parse init.body else null
+    calls.push { url, method, sql: body?.sql ?? null, params: body?.params ?? null, sessionId: body?.sessionId ?? null }
+    if method is 'DELETE'
+      return Promise.resolve { ok: true, status: 200, statusText: '', json: (-> {}) }
+    if url.endsWith '/sql/sessions/new'
+      return Promise.resolve { ok: true, status: 200, statusText: '', json: (-> { sessionId: 'sess-1' }) }
+    reply = answer body?.sql ?? '', body?.params ?? []
+    Promise.resolve { ok: reply.ok isnt false, status: (if reply.ok is false then 400 else 200), statusText: '', json: (-> reply) }
+  fetchFn.calls = calls
+  fetchFn.history = history
+  fetchFn.lock = lock
+  fetchFn
+
+withRunner = (fetch, scenario) ->
+  __SchemaRegistry.scope! ->
+    __schemaSetAdapter harborAdapter { url: 'http://harbor', fetch }
+    scenario { define: (m) -> __schema(m) }
+
+withMigDir = (files, fn) ->
+  dir = mkdtempSync join(tmpdir(), 'rip-mig-live-')
+  for own name, content of files
+    writeFileSync join(dir, name), content
+  try
+    fn! dir
+  finally
+    rmSync dir, { recursive: true, force: true }
+
+test! "plan() reads the catalog through /sql and proposes a create", ->
+  fetch = harborMigrate { catalog: { tables: [] } }
+  steps = withRunner! fetch, ({ define }) ->
+    define model 'User', field('name')
+    mig.plan!
+  eq steps.map((s) -> "#{s.kind}:#{s.table}"), ['create-table:users']
+  sqls = fetch.calls.map((c) -> c.sql).filter Boolean
+  ok sqls.some (s) -> s.includes 'information_schema.columns'
+  ok sqls.some (s) -> s.includes 'duckdb_constraints()'
+
+test! "a deployed schema matching the model plans nothing", ->
+  usersDeployed =
+    tables: [{
+      name: 'users'
+      sequence: { name: 'users_seq', start: 1 }
+      primaryKey: 'id'
+      columns: [
+        { name: 'id', type: 'INTEGER', notNull: true, default: "nextval('users_seq')" }
+        { name: 'name', type: 'VARCHAR', notNull: true, default: null }
+        { name: 'email', type: 'VARCHAR', notNull: true, default: null }
+        { name: 'created_at', type: 'TIMESTAMP', notNull: false, default: 'CURRENT_TIMESTAMP' }
+        { name: 'updated_at', type: 'TIMESTAMP', notNull: false, default: 'now()' }
+      ]
+      indexes: [{ name: 'idx_users_email', columns: ['email'], unique: true }]
+      foreignKeys: []
+    }]
+  fetch = harborMigrate { catalog: usersDeployed }
+  steps = withRunner! fetch, ({ define }) ->
+    define model 'User', field('name'), field('email', 'email', { unique: true }), dir('timestamps')
+    mig.plan!
+  eq steps, []
+
+test! "a pending file is applied in one session with history row, then lock releases", ->
+  fetch = harborMigrate()
+  r = withMigDir! { '0001_users.sql': 'CREATE TABLE users (id INTEGER);\n' }, (dir) ->
+    withRunner fetch, (-> mig.migrate! { dir })
+  eq r.ran, ['0001_users']
+  eq r.transactional, true
+  ok fetch.calls.some (c) -> c.url.endsWith '/sql/sessions/new'
+  eq fetch.calls.find((c) -> c.sql is 'CREATE TABLE users (id INTEGER)')?.sessionId, 'sess-1'
+  ok fetch.calls.some (c) -> c.sql is 'COMMIT' and c.sessionId is 'sess-1'
+  ok fetch.calls.some (c) -> c.method is 'DELETE' and c.url.endsWith '/sql/sessions/sess-1'
+  eq fetch.history.map((h) -> h.version), ['0001']
+  ok fetch.calls.some (c) -> c.sql?.startsWith 'INSERT INTO _rip_migration_lock'
+  eq fetch.lock.held, false
+
+test! "a failing statement rolls back, drops session, records no history", ->
+  fetch = harborMigrate { failSql: /BROKEN/ }
+  error = null
+  withMigDir! { '0001_bad.sql': 'CREATE TABLE ok (id INTEGER);\nCREATE BROKEN;\n' }, (dir) ->
+    try
+      withRunner! fetch, (-> mig.migrate! { dir })
+    catch e
+      error = e
+  ok /0001_bad failed/.test error.message
+  ok /ROLLED BACK whole/.test error.message
+  ok fetch.calls.some (c) -> c.sql is 'ROLLBACK' and c.sessionId is 'sess-1'
+  ok fetch.calls.some (c) -> c.method is 'DELETE' and c.url.endsWith '/sql/sessions/sess-1'
+  eq fetch.history.length, 0
+  eq fetch.lock.held, false
+
+test! "a lock already held blocks migrate with the named remedy", ->
+  fetch = harborMigrate { lockHeld: true }
+  err = null
+  withMigDir! { '0001_users.sql': 'CREATE TABLE users (id INTEGER);\n' }, (dir) ->
+    try
+      withRunner! fetch, (-> mig.migrate! { dir })
+    catch e
+      err = e
+  ok /migration lock is held/s.test err.message
+  ok fetch.calls.every (c) -> c.sql isnt 'CREATE TABLE users (id INTEGER)'
+
