@@ -21,12 +21,39 @@ const pkgDir = path.resolve(__dirname, '..');
 const repoRoot = path.resolve(pkgDir, '..', '..');
 const pkgJson = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8'));
 
-if (!fs.existsSync(path.join(pkgDir, 'node_modules'))) {
-  console.error('node_modules missing — run `bun install` in packages/vscode first');
-  process.exit(1);
+// Prefer a package-local node_modules. Under the repo's hoisted Bun
+// workspaces, `bun install` in packages/vscode lands deps at the repo
+// root instead — materialize a standalone tree from this package's
+// lockfile so the staged .vsix stays self-contained and free of the
+// monorepo's unrelated packages.
+function resolveModulesRoot() {
+  const local = path.join(pkgDir, 'node_modules');
+  if (fs.existsSync(local)) return { root: local, cleanup: null };
+
+  const lock = path.join(pkgDir, 'bun.lock');
+  if (!fs.existsSync(lock)) {
+    console.error('node_modules missing — run `bun install` in packages/vscode (or the repo root) first');
+    process.exit(1);
+  }
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-vscode-deps-'));
+  fs.copyFileSync(path.join(pkgDir, 'package.json'), path.join(tmp, 'package.json'));
+  fs.copyFileSync(lock, path.join(tmp, 'bun.lock'));
+  console.log('→ materializing standalone node_modules for packaging (workspace install is hoisted)');
+  const r = spawnSync('bun', ['install', '--frozen-lockfile'], { cwd: tmp, stdio: 'inherit' });
+  if (r.status !== 0) {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    process.exit(r.status ?? 1);
+  }
+  return { root: path.join(tmp, 'node_modules'), cleanup: tmp };
 }
 
+const { root: modulesRoot, cleanup: modulesCleanup } = resolveModulesRoot();
 const stage = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-vscode-'));
+const cleanup = () => {
+  fs.rmSync(stage, { recursive: true, force: true });
+  if (modulesCleanup) fs.rmSync(modulesCleanup, { recursive: true, force: true });
+};
 
 // Extension sources.
 for (const name of ['README.md', 'icon.png', 'language-configuration.json', 'src', 'syntaxes']) {
@@ -42,9 +69,9 @@ fs.cpSync(path.join(repoRoot, 'src'), path.join(stage, 'compiler', 'src'), {
   recursive: true, dereference: true,
 });
 
-// Dependencies: the enumerated budget, dereferenced from this package's own
-// install (a standalone bun install — real directories, no store links).
-fs.cpSync(path.join(pkgDir, 'node_modules'), path.join(stage, 'node_modules'), {
+// Dependencies: the enumerated budget, dereferenced (real directories,
+// no store links) from the package-local or materialized install.
+fs.cpSync(modulesRoot, path.join(stage, 'node_modules'), {
   recursive: true, dereference: true,
 });
 
@@ -87,11 +114,11 @@ const result = spawnSync('bunx', ['@vscode/vsce', 'package', '--skip-license'], 
   cwd: stage,
   stdio: 'inherit',
 });
-if (result.status !== 0) process.exit(result.status ?? 1);
+if (result.status !== 0) { cleanup(); process.exit(result.status ?? 1); }
 
 const vsix = fs.readdirSync(stage).find((f) => f.endsWith('.vsix'));
-if (!vsix) { console.error('no .vsix produced'); process.exit(1); }
+if (!vsix) { console.error('no .vsix produced'); cleanup(); process.exit(1); }
 fs.rmSync(path.join(pkgDir, vsix), { force: true });
 fs.renameSync(path.join(stage, vsix), path.join(pkgDir, vsix));
-fs.rmSync(stage, { recursive: true, force: true });
+cleanup();
 console.log(`packaged ${vsix}`);
