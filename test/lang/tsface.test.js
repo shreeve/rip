@@ -67,6 +67,11 @@ const REGION_SHAPES = [
   new RegExp(String.raw`^(export )?interface ${ID}`, 'u'), // interface / schema intrinsic block
   new RegExp(String.raw`^function ${ID}\(.*\): [^;]+;$`, 'su'), // overload signature
   /^\/\/[ \t]*@ts-(expect-error|ignore|nocheck)(\s|$)/u,        // directive comment line
+  // Face-only identifier glyphs for suppressed DOM spellings: `ref:` /
+  // `slot` / loop `key:` never appear in JS, so the face anchors an
+  // exact `read` via `({ name: 0 })`.
+  /^\(\{ [A-Za-z_$][\w$]*: 0 \}\);$/u,
+  /^\(void \(\{ [A-Za-z_$][\w$]*: 0 \}\),$/u,
 ];
 
 describe('the strip gate: TS face minus recorded regions === JS mode, byte-for-byte', () => {
@@ -677,7 +682,11 @@ describe('TS-face mapping rows (the same mark protocol)', () => {
     const at = r.code.indexOf(': number') + 3; // inside `number` in the hoist line
     const row = r.mappings.bestAtGenerated(at);
     expect(row).not.toBeNull();
-    expect(src.slice(row.sourceStart, row.sourceEnd)).toBe(': number');
+    // Innermost exact row is the identifier `read` (type-internal
+    // name); the annotation cover `: number` still contains it.
+    expect(src.slice(row.sourceStart, row.sourceEnd)).toBe('number');
+    expect(row.role).toBe('read');
+    expect(row.mappingKind).toBe('exact');
   });
 });
 

@@ -408,6 +408,15 @@ function collapseSchemaAt(tokens, i, out, config, mintId, fail, text) {
     descriptor.adapterTokens = adapterTokens;
   descriptor.start = (kindTok ?? bodyTokens[0]).start;
   descriptor.end = bodyEnd;
+  if (kindTok) {
+    if (kindTok.kind === "SYMBOL") {
+      descriptor.kindStart = kindTok.start + 1;
+      descriptor.kindEnd = kindTok.start + 1 + kind.length;
+    } else {
+      descriptor.kindStart = kindTok.start;
+      descriptor.kindEnd = kindTok.end ?? kindTok.start + kindTok.value.length;
+    }
+  }
   out.push({
     id: mintId(),
     kind: "SCHEMA",
@@ -611,6 +620,8 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
   let coercer = null;
   let coercerArray = false;
   let typeConsumed = false;
+  let typeStart = null;
+  let typeEnd = null;
   let typeFirst = line[pos];
   if (typeFirst?.kind === "UNARY_MATH" && typeFirst.value === "~") {
     const sym = symWordAt(line, pos + 1);
@@ -632,6 +643,8 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
       }
       coerce = true;
       typeName = typeTok.value;
+      typeStart = typeTok.start;
+      typeEnd = typeTok.end ?? typeTok.start + typeTok.value.length;
       pos += 2;
     } else {
       fail(`'~' in the type slot marks coercion and needs a type name ('~integer', '~date', …) or a registered coercer symbol ('~:ssn', …)`, typeFirst.start);
@@ -639,6 +652,8 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
     typeConsumed = true;
   } else if (typeFirst?.kind === "IDENTIFIER") {
     typeName = typeFirst.value;
+    typeStart = typeFirst.start;
+    typeEnd = typeFirst.end ?? typeFirst.start + typeFirst.value.length;
     typeConsumed = true;
     pos++;
   } else if (typeFirst?.kind === "STRING" && typeFirst.value.startsWith('"')) {
@@ -795,7 +810,11 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
     transformTokens,
     unique: uniqueAttr,
     attrs,
-    start: first.start
+    start: first.start,
+    nameStart: first.start,
+    nameEnd: first.end ?? first.start + name.length,
+    typeStart,
+    typeEnd
   });
 }
 var SCHEMA_FIELD_ATTRS = new Set(["was"]);
@@ -1289,11 +1308,27 @@ function parseUnionLine(line, entries, fail) {
     }
     if (line.length > 4)
       fail(`@on takes exactly one :field symbol`, line[4].start);
-    entries.push({ tag: "directive", name: "on", args: [{ field: sym.value }], start: first.start });
+    const fieldStart = sym.kind === "SYMBOL" ? sym.start + 1 : sym.start;
+    entries.push({
+      tag: "directive",
+      name: "on",
+      args: [{ field: sym.value }],
+      start: first.start,
+      nameStart: nameTok.start,
+      nameEnd: nameTok.end ?? nameTok.start + nameTok.value.length,
+      fieldStart,
+      fieldEnd: fieldStart + sym.value.length
+    });
     return;
   }
   if (first.kind === "IDENTIFIER" && line.length === 1) {
-    entries.push({ tag: "union-member", name: first.value, start: first.start });
+    entries.push({
+      tag: "union-member",
+      name: first.value,
+      start: first.start,
+      nameStart: first.start,
+      nameEnd: first.end ?? first.start + first.value.length
+    });
     return;
   }
   fail(`:union bodies accept only '@on :field' and bare constituent schema names (one per line) — got ${first.kind}${line.length > 1 ? " followed by " + line[1].kind : ""}`, first.start);
@@ -7458,7 +7493,7 @@ class CodeBuilder {
     fn();
     this.endMark();
   }
-  static SPAN_ROLES = new Set(["tsDirective", "shorthandProp"]);
+  static SPAN_ROLES = new Set(["tsDirective", "shorthandProp", "read"]);
   markSpan(nodeId, role, sourceStart, sourceEnd, fn) {
     if (!CodeBuilder.SPAN_ROLES.has(role)) {
       throw new Error(`builder: markSpan role '${role}' is not in the TS-face trivia allowlist ` + `(${[...CodeBuilder.SPAN_ROLES].join(", ")}) — every other role resolves through RoleStore`);
@@ -8844,6 +8879,8 @@ class Emitter {
     this.pendingSigs = new WeakMap;
     this.pendingTypeDecls = [];
     this.componentInfo = new Map;
+    this.readScan = null;
+    this._componentTypeParamsOwner = null;
     this.moduleComponentNames = new Map;
     this.ind = 0;
     this.methodName = null;
@@ -9172,25 +9209,214 @@ class Emitter {
   inComponent() {
     return this.cframes.length > 0;
   }
-  reactiveRead(name) {
+  beginReadScan(ownerNode) {
+    if (!this.ts || this.b.source == null)
+      return null;
+    const m = this.b.currentMark;
+    const id = isNode4(ownerNode) ? this.stores.idOf(ownerNode) : null;
+    if (m === null || id === null || m.sourceStart == null || m.sourceEnd == null)
+      return null;
+    return { nodeId: id, start: m.sourceStart, end: m.sourceEnd, at: m.sourceStart };
+  }
+  withReadScan(ownerNode, fn) {
+    if (!this.ts)
+      return fn();
+    const prev = this.readScan;
+    this.readScan = this.beginReadScan(ownerNode);
+    try {
+      return fn();
+    } finally {
+      this.readScan = prev;
+    }
+  }
+  skipReadScanTrivia() {
+    const s = this.readScan;
+    if (s == null || s.at == null || this.b.source == null)
+      return;
+    const src = this.b.source;
+    let i = s.at;
+    while (i < s.end && /[\s,(]/.test(src[i]))
+      i++;
+    s.at = i;
+  }
+  advanceReadScan(arg) {
+    const s = this.readScan;
+    if (s == null || s.at == null || this.b.source == null)
+      return;
+    this.skipReadScanTrivia();
+    if (s.at == null)
+      return;
+    if (isNode4(arg)) {
+      const id = this.stores.idOf(arg);
+      const sp = id !== null ? this.stores.selfSpan(id) : null;
+      s.at = sp !== null ? Math.max(s.at, sp[1]) : null;
+      return;
+    }
+    if (typeof arg === "string" && arg.length >= 2 && (arg[0] === '"' || arg[0] === "'")) {
+      const src = this.b.source;
+      let i = s.at;
+      if (i >= s.end || src[i] !== '"' && src[i] !== "'") {
+        s.at = null;
+        return;
+      }
+      const q = src[i++];
+      while (i < s.end && src[i] !== q) {
+        if (src[i] === "\\")
+          i++;
+        i++;
+      }
+      s.at = i < s.end ? i + 1 : null;
+      return;
+    }
+    if (typeof arg === "string") {
+      const at = this.b.source.indexOf(arg, s.at);
+      s.at = at >= 0 && at + arg.length <= s.end ? at + arg.length : null;
+      return;
+    }
+    s.at = null;
+  }
+  takeReadSpan(name) {
+    const s = this.readScan;
+    if (s == null || s.at == null || this.b.source == null)
+      return null;
+    this.skipReadScanTrivia();
+    if (s.at == null)
+      return null;
+    const re = new RegExp(`(?<![\\w$])${name.replace(/\$/g, "\\$&")}(?![\\w$])`, "g");
+    re.lastIndex = s.at;
+    const m = re.exec(this.b.source);
+    if (m === null || m.index + name.length > s.end) {
+      s.at = null;
+      return null;
+    }
+    s.at = m.index + name.length;
+    return [m.index, m.index + name.length];
+  }
+  emitReadName(name, { unwrap = false } = {}) {
     const m = this.b.currentMark;
     const src = this.b.source;
-    if (m !== null && src !== null && src.slice(m.sourceStart, m.sourceEnd) === name) {
+    const markIsName = m !== null && src !== null && src.slice(m.sourceStart, m.sourceEnd) === name;
+    if (markIsName && (unwrap || m.generatedStart < this.b.length)) {
       this.b.mark(m.nodeId, m.role, () => this.b.emit(name));
-    } else {
-      this.b.emit(name);
+      return;
     }
+    if (this.ts) {
+      let span = null;
+      let ownerId = null;
+      if (this.readScan != null) {
+        span = this.takeReadSpan(name);
+        if (span != null)
+          ownerId = this.readScan.nodeId;
+      }
+      if (span == null && !markIsName && m !== null && src !== null && m.sourceStart != null && m.sourceEnd != null && m.nodeId != null) {
+        const re = new RegExp(`(?<![\\w$])${name.replace(/\$/g, "\\$&")}(?![\\w$])`, "g");
+        re.lastIndex = m.sourceStart;
+        let hit = null;
+        let sm;
+        while ((sm = re.exec(src)) !== null && sm.index + name.length <= m.sourceEnd) {
+          hit = sm;
+        }
+        if (hit !== null) {
+          span = [hit.index, hit.index + name.length];
+          ownerId = m.nodeId;
+        }
+      }
+      if (span != null && ownerId != null) {
+        this.b.markSpan(ownerId, "read", span[0], span[1], () => this.b.emit(name));
+        return;
+      }
+    }
+    this.b.emit(name);
+  }
+  static TYPE_READ_KEYWORDS = new Set([
+    "type",
+    "export",
+    "interface",
+    "extends",
+    "implements",
+    "unique",
+    "infer",
+    "keyof",
+    "typeof",
+    "in",
+    "out",
+    "as",
+    "is",
+    "asserts",
+    "from",
+    "of",
+    "void",
+    "null",
+    "undefined",
+    "any",
+    "never",
+    "true",
+    "false",
+    "const",
+    "enum",
+    "new"
+  ]);
+  emitIdentifiedText(ownerId, scanStart, scanEnd, text) {
+    if (!this.ts || ownerId == null || this.b.source == null || text == null || scanStart == null || scanEnd == null) {
+      this.b.emit(text);
+      return;
+    }
+    let at = scanStart;
+    let last = 0;
+    const re = /[A-Za-z_$][\w$]*/g;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      if (Emitter.TYPE_READ_KEYWORDS.has(m[0]))
+        continue;
+      if (m.index > last)
+        this.b.emit(text.slice(last, m.index));
+      const wordRe = new RegExp(`(?<![\\w$])${m[0].replace(/\$/g, "\\$&")}(?![\\w$])`, "g");
+      wordRe.lastIndex = at;
+      const sm = wordRe.exec(this.b.source);
+      if (sm !== null && sm.index + m[0].length <= scanEnd) {
+        this.b.markSpan(ownerId, "read", sm.index, sm.index + m[0].length, () => this.b.emit(m[0]));
+        at = sm.index + m[0].length;
+      } else {
+        this.b.emit(m[0]);
+      }
+      last = m.index + m[0].length;
+    }
+    if (last < text.length)
+      this.b.emit(text.slice(last));
+  }
+  emitCallArgs(ownerNode, args, emitOne = (a) => this.callArg(a)) {
+    this.b.emit("(");
+    this.withReadScan(ownerNode, () => {
+      args.forEach((arg, i) => {
+        if (i > 0)
+          this.b.emit(", ");
+        this.emitScannedArg(arg, emitOne);
+      });
+    });
+    this.b.emit(")");
+  }
+  emitScannedArg(arg, emitOne) {
+    if (typeof arg === "string" && isIdentifierName(arg)) {
+      emitOne(arg);
+      return;
+    }
+    if (this.readScan != null)
+      this.advanceReadScan(arg);
+    const prev = this.readScan;
+    this.readScan = null;
+    try {
+      emitOne(arg);
+    } finally {
+      this.readScan = prev;
+    }
+  }
+  reactiveRead(name) {
+    this.emitReadName(name, { unwrap: true });
     this.b.emit(".value");
   }
   memberRead(name, reactive) {
-    const m = this.b.currentMark;
-    const src = this.b.source;
     this.b.emit((this.renderSelf ?? "this") + ".");
-    if (m !== null && src !== null && src.slice(m.sourceStart, m.sourceEnd) === name) {
-      this.b.mark(m.nodeId, m.role, () => this.b.emit(name));
-    } else {
-      this.b.emit(name);
-    }
+    this.emitReadName(name, { unwrap: true });
     if (reactive)
       this.b.emit(".value");
   }
@@ -9263,7 +9489,27 @@ class Emitter {
     return normalizeTypeText(this.b.source.slice(row.sourceStart, row.sourceEnd).replace(/^\s*:\s*/, ""));
   }
   tsAnnotate(node, role, text) {
-    this.b.tsOnly(() => this.mark(node, role, () => this.b.emit(`: ${text}`)));
+    this.b.tsOnly(() => this.mark(node, role, () => {
+      if (text == null || this.b.source == null) {
+        this.b.emit(`: ${text}`);
+        return;
+      }
+      const m = this.b.currentMark;
+      const id = this.stores.idOf(node);
+      this.b.emit(": ");
+      let at = m?.sourceStart ?? null;
+      if (at != null) {
+        const src = this.b.source;
+        while (at < m.sourceEnd && /\s/.test(src[at]))
+          at++;
+        if (at < m.sourceEnd && src[at] === ":") {
+          at++;
+          while (at < m.sourceEnd && /\s/.test(src[at]))
+            at++;
+        }
+      }
+      this.emitIdentifiedText(id, at, m?.sourceEnd ?? null, text);
+    }));
   }
   tsReturnAnnotation(node, isAsync, isVoid, voidOwner = node) {
     if (!this.ts)
@@ -9310,8 +9556,15 @@ class Emitter {
     this.b.tsOnly(() => {
       this.b.emit(pad);
       this.mark(s, "$self", () => this.mark(s, "declaration", () => {
-        this.b.emit(lines.join(`
-` + pad));
+        const id = this.stores.idOf(s);
+        const m = this.b.currentMark;
+        const text = lines.join(`
+` + pad);
+        if (id != null && m?.sourceStart != null) {
+          this.emitIdentifiedText(id, m.sourceStart, m.sourceEnd, text);
+        } else {
+          this.b.emit(text);
+        }
       }));
       this.b.emit(`
 `);
@@ -10227,10 +10480,15 @@ class Emitter {
     list.forEach((s, i) => {
       if (i > 0)
         this.b.emit(", ");
-      if (isNode4(s))
-        this.b.emit(`${s[0]} as ${s[1]}`);
-      else
+      if (isNode4(s)) {
+        this.emitReadName(s[0]);
+        this.b.emit(" as ");
+        this.emitReadName(s[1]);
+      } else if (typeof s === "string" && isIdentifierName(s)) {
+        this.emitReadName(s);
+      } else {
         this.b.emit(s);
+      }
     });
   }
   importStatement(node) {
@@ -10241,20 +10499,26 @@ class Emitter {
     const specs = node.slice(1, -1);
     this.mark(node, "$self", () => {
       this.b.emit("import ");
-      specs.forEach((spec, i) => {
-        if (i > 0)
-          this.b.emit(", ");
-        if (spec === "{}")
-          this.b.emit("{}");
-        else if (typeof spec === "string")
-          this.b.emit(spec);
-        else if (spec[0] === "*")
-          this.b.emit(`* as ${spec[1]}`);
-        else {
-          this.b.emit("{ ");
-          this.emitSpecifiers(spec);
-          this.b.emit(" }");
-        }
+      this.withReadScan(node, () => {
+        specs.forEach((spec, i) => {
+          if (i > 0)
+            this.b.emit(", ");
+          if (spec === "{}")
+            this.b.emit("{}");
+          else if (typeof spec === "string") {
+            if (isIdentifierName(spec))
+              this.emitReadName(spec);
+            else
+              this.b.emit(spec);
+          } else if (spec[0] === "*") {
+            this.b.emit("* as ");
+            this.emitReadName(spec[1]);
+          } else {
+            this.b.emit("{ ");
+            this.emitSpecifiers(spec);
+            this.b.emit(" }");
+          }
+        });
       });
       this.b.emit(" from ");
       {
@@ -10349,17 +10613,21 @@ class Emitter {
             const prevSchemaName = this._schemaName;
             const prevComponentName = this._componentName;
             const prevComponentTypeParams = this._componentTypeParams;
+            const prevComponentTypeParamsOwner = this._componentTypeParamsOwner;
             this._componentTypeParams = null;
+            this._componentTypeParamsOwner = null;
             if (isNode4(spec[2]) && spec[2][0] === "schema")
               this._schemaName = spec[1];
             if (this.isComponentDecl(spec[2]) && typeof spec[1] === "string") {
               this._componentName = spec[1];
               this._componentTypeParams = this.annotationText(spec, "typeParams");
+              this._componentTypeParamsOwner = spec;
             }
             this.mark(spec, "value", () => this.withExpression(() => this.expr(spec[2])));
             this._schemaName = prevSchemaName;
             this._componentName = prevComponentName;
             this._componentTypeParams = prevComponentTypeParams;
+            this._componentTypeParamsOwner = prevComponentTypeParamsOwner;
           })));
           this.b.emit(";");
           if (this.ts && typeof spec[1] === "string" && this.componentInfo.has(spec[2])) {
@@ -10532,19 +10800,244 @@ class Emitter {
     this.mark(node, "$self", () => {
       this.b.emit("__schema(");
       this.mark(node, "body", () => {
-        const segments = descriptorSegments(descriptor, schemaName, fns, fns.get("adapter") ?? null, story?.thisTypes ?? null);
-        for (const seg of segments) {
-          if (typeof seg === "string")
-            this.b.emit(seg);
-          else
-            this.b.tsOnly(() => this.b.emit(seg.ts));
-        }
+        this.emitSchemaDescriptor(node, descriptor, schemaName, fns, fns.get("adapter") ?? null, story?.thisTypes ?? null);
       });
       this.b.emit(")");
       if (story !== null && story.constType !== null) {
         this.b.tsOnly(() => this.b.emit(` as unknown as ${story.constType}`));
       }
     });
+  }
+  emitQuotedDomName(name, pair = null) {
+    this.b.emit("'");
+    if (pair != null)
+      this.emitPairKeyRead(pair, name);
+    else
+      this.emitReadName(name);
+    this.b.emit("'");
+  }
+  emitExtendsTag(node, tag) {
+    if (!this.ts || this.b.source == null || !isIdentifierName(tag)) {
+      this.b.emit(tag);
+      return;
+    }
+    const id = this.stores.idOf(node);
+    const sp = id != null ? this.stores.selfSpan(id) : null;
+    if (sp == null) {
+      this.b.emit(tag);
+      return;
+    }
+    const region = this.b.source.slice(sp[0], sp[1]);
+    const re = new RegExp(`extends\\s+(${tag.replace(/\$/g, "\\$&")})\\b`);
+    const m = region.match(re);
+    if (m == null) {
+      this.b.emit(tag);
+      return;
+    }
+    const at = sp[0] + m.index + m[0].length - tag.length;
+    this.b.markSpan(id, "read", at, at + tag.length, () => this.b.emit(tag));
+  }
+  emitRenderTagName(node, tag) {
+    if (!this.ts || this.b.source == null || !isIdentifierName(tag) || !isNode4(node)) {
+      this.emitReadName(tag);
+      return;
+    }
+    const id = this.stores.idOf(node);
+    const callee = id != null ? this.stores.role(id, "callee") : null;
+    if (callee?.sourceStart != null && callee.sourceEnd != null && this.b.source.slice(callee.sourceStart, callee.sourceEnd) === tag) {
+      this.b.markSpan(id, "read", callee.sourceStart, callee.sourceEnd, () => this.b.emit(tag));
+      return;
+    }
+    this.emitReadName(tag);
+  }
+  emitPairKeyRead(pair, name) {
+    if (!this.ts || this.b.source == null || !isIdentifierName(name) || pair == null) {
+      this.emitReadName(name);
+      return;
+    }
+    const pid = this.stores.idOf(pair);
+    const keyRole = pid != null ? this.stores.role(pid, "key") : null;
+    if (keyRole?.sourceStart != null && keyRole.sourceEnd != null) {
+      const re = new RegExp(`(?<![\\w$])${name.replace(/\$/g, "\\$&")}(?![\\w$])`, "g");
+      re.lastIndex = keyRole.sourceStart;
+      const hit = re.exec(this.b.source);
+      if (hit !== null && hit.index + name.length <= keyRole.sourceEnd) {
+        this.b.markSpan(pid, "read", hit.index, hit.index + name.length, () => this.b.emit(name));
+        return;
+      }
+    }
+    this.emitReadName(name);
+  }
+  emitFaceOnlyRead(emitName) {
+    this.b.tsOnly(() => {
+      this.b.emit("({ ");
+      emitName();
+      this.b.emit(": 0 }); ");
+    });
+  }
+  emitRenderTextRead(tagNode, name) {
+    if (!this.ts || this.b.source == null || !isIdentifierName(name) || !isNode4(tagNode)) {
+      this.emitReadName(name, { unwrap: true });
+      return;
+    }
+    const id = this.stores.idOf(tagNode);
+    const sp = id != null ? this.stores.selfSpan(id) : null;
+    if (sp == null) {
+      this.emitReadName(name, { unwrap: true });
+      return;
+    }
+    const re = new RegExp(`(?<![\\w$])${name.replace(/\$/g, "\\$&")}(?![\\w$])`, "g");
+    re.lastIndex = sp[0];
+    let hit = null;
+    let sm;
+    while ((sm = re.exec(this.b.source)) !== null && sm.index + name.length <= sp[1]) {
+      hit = sm;
+    }
+    if (hit !== null) {
+      this.b.markSpan(id, "read", hit.index, hit.index + name.length, () => this.b.emit(name));
+      return;
+    }
+    this.emitReadName(name, { unwrap: true });
+  }
+  emitQuotedSchemaName(ownerId, name, start, end) {
+    this.b.emit('"');
+    if (this.ts && ownerId != null && start != null && end != null && this.b.source != null && this.b.source.slice(start, end) === name) {
+      this.b.markSpan(ownerId, "read", start, end, () => this.b.emit(name));
+    } else {
+      this.b.emit(name);
+    }
+    this.b.emit('"');
+  }
+  emitSchemaDescriptor(node, descriptor, schemaName, fns, adapterCode, thisTypes) {
+    const ownerId = this.stores.idOf(node);
+    this.b.emit("{kind: ");
+    this.emitQuotedSchemaName(ownerId, descriptor.kind, descriptor.kindStart, descriptor.kindEnd);
+    if (schemaName)
+      this.b.emit(`, name: ${JSON.stringify(schemaName)}`);
+    this.b.emit(", entries: [");
+    descriptor.entries.forEach((e, i) => {
+      if (i > 0)
+        this.b.emit(", ");
+      this.emitSchemaEntry(ownerId, e, fns.get(i), thisTypes?.get(i) ?? null);
+    });
+    this.b.emit("]");
+    if (adapterCode)
+      this.b.emit(`, adapter: ${adapterCode}`);
+    this.b.emit("}");
+  }
+  emitSchemaEntry(ownerId, e, fnCode, thisType) {
+    switch (e.tag) {
+      case "field": {
+        this.b.emit('{tag: "field", name: ');
+        this.emitQuotedSchemaName(ownerId, e.name, e.nameStart, e.nameEnd);
+        this.b.emit(`, modifiers: ${JSON.stringify(e.modifiers)}`);
+        this.b.emit(", typeName: ");
+        this.emitQuotedSchemaName(ownerId, e.typeName, e.typeStart, e.typeEnd);
+        this.b.emit(`, array: ${e.array ? "true" : "false"}`);
+        if (e.unique)
+          this.b.emit(", unique: true");
+        if (e.literals)
+          this.b.emit(`, literals: ${JSON.stringify(e.literals)}`);
+        if (e.coerce) {
+          this.b.emit(", coerce: true");
+          if (e.coercer)
+            this.b.emit(`, coercer: ${JSON.stringify(e.coercer)}`);
+        }
+        if (e.constraints) {
+          const c = [];
+          const { min, max, default: def, regex } = e.constraints;
+          if (min !== undefined)
+            c.push(`min: ${min}`);
+          if (max !== undefined)
+            c.push(`max: ${max}`);
+          if (def !== undefined)
+            c.push(`default: ${typeof def === "string" ? JSON.stringify(def) : def === null ? "null" : String(def)}`);
+          if (regex !== undefined)
+            c.push(`regex: ${regex.toString()}`);
+          if (c.length)
+            this.b.emit(`, constraints: {${c.join(", ")}}`);
+        }
+        if (e.attrs) {
+          const keys = Object.keys(e.attrs).sort();
+          this.b.emit(`, attrs: {${keys.map((k) => `${k}: ${JSON.stringify(e.attrs[k])}`).join(", ")}}`);
+        }
+        if (fnCode !== undefined) {
+          this.b.emit(", transform: ");
+          this.emitSchemaFn(ownerId, e.transformTokens, fnCode, thisType);
+        }
+        this.b.emit("}");
+        return;
+      }
+      case "computed":
+      case "method":
+      case "derived":
+      case "hook":
+      case "scope":
+      case "defaultScope": {
+        this.b.emit(`{tag: ${JSON.stringify(e.tag)}, name: `);
+        this.emitQuotedSchemaName(ownerId, e.name, e.nameStart ?? e.start, e.nameEnd ?? (e.start != null ? e.start + e.name.length : null));
+        this.b.emit(", fn: ");
+        this.emitSchemaFn(ownerId, e.bodyTokens, fnCode, thisType);
+        this.b.emit("}");
+        return;
+      }
+      case "union-member": {
+        this.b.emit('{tag: "union-member", name: ');
+        this.emitQuotedSchemaName(ownerId, e.name, e.nameStart, e.nameEnd);
+        this.b.emit("}");
+        return;
+      }
+      case "directive": {
+        if (e.name === "on" && e.args?.[0]?.field != null) {
+          this.b.emit('{tag: "directive", name: ');
+          this.emitQuotedSchemaName(ownerId, e.name, e.nameStart, e.nameEnd);
+          this.b.emit(", args: [{field: ");
+          this.emitQuotedSchemaName(ownerId, e.args[0].field, e.fieldStart, e.fieldEnd);
+          this.b.emit("}]}");
+          return;
+        }
+        this.b.emit(entryLiteral(e, fnCode));
+        return;
+      }
+      default: {
+        if (thisType !== null && typeof fnCode === "object" && fnCode != null) {
+          const segs = descriptorSegments({ kind: "input", entries: [e] }, null, new Map([[0, fnCode]]), null, new Map([[0, thisType]]));
+          const joined = segs.map((s) => typeof s === "string" ? s : s.ts).join("");
+          const open = joined.indexOf("entries: [") + "entries: [".length;
+          const close = joined.lastIndexOf("]}");
+          this.b.emit(joined.slice(open, close));
+        } else {
+          this.b.emit(entryLiteral(e, fnCode));
+        }
+        return;
+      }
+    }
+  }
+  emitSchemaFn(ownerId, tokens, fnCode, thisType) {
+    if (fnCode == null)
+      return;
+    const code = typeof fnCode === "string" ? fnCode : fnCode.code;
+    const start = tokens?.length ? tokens[0].start : null;
+    const end = tokens?.length ? tokens[tokens.length - 1].end ?? tokens[tokens.length - 1].start : null;
+    if (thisType !== null && typeof fnCode === "object" && fnCode.thisAt != null) {
+      const { thisAt } = fnCode;
+      const head = code.slice(0, thisAt);
+      const tail = code.slice(thisAt);
+      if (start != null && this.ts)
+        this.emitIdentifiedText(ownerId, start, end, head);
+      else
+        this.b.emit(head);
+      this.b.tsOnly(() => this.b.emit(`this: ${thisType}${code[thisAt] === ")" ? "" : ", "}`));
+      if (start != null && this.ts)
+        this.emitIdentifiedText(ownerId, start, end, tail);
+      else
+        this.b.emit(tail);
+      return;
+    }
+    if (start != null && this.ts)
+      this.emitIdentifiedText(ownerId, start, end, code);
+    else
+      this.b.emit(code);
   }
   static schemaFail(message, at) {
     const err = new Error(`schema: ${message}`);
@@ -11023,7 +11516,7 @@ class Emitter {
   }
   forInCore(node, vars, iter, step, guard, body, ind) {
     this.mark(node, "$self", () => {
-      const markVar = (v) => this.mark(node, "vars", () => typeof v === "string" ? this.b.emit(v) : this.withPattern(() => this.expr(v), true));
+      const markVar = (v) => this.mark(node, "vars", () => typeof v === "string" ? this.emitReadName(v) : this.withPattern(() => this.expr(v), true));
       if (isNode4(vars[0]) && (isRange(iter) || step !== null)) {
         throw this.positionedError(node, "emitter: pattern loop variables with ranges or BY steps are not supported yet");
       }
@@ -11175,7 +11668,7 @@ let `);
   }
   forOfCore(node, vars, obj, own, guard, body, ind) {
     this.mark(node, "$self", () => {
-      const markVar = (v) => this.mark(node, "vars", () => typeof v === "string" ? this.b.emit(v) : this.withPattern(() => this.expr(v), true));
+      const markVar = (v) => this.mark(node, "vars", () => typeof v === "string" ? this.emitReadName(v) : this.withPattern(() => this.expr(v), true));
       const rereads = own || vars.length === 2;
       const it = rereads && !this.singleReadIterable(obj) ? this.loopTempName("_ref") : null;
       if (it !== null) {
@@ -11303,7 +11796,7 @@ ${"  ".repeat(ind)}`);
     }
   }
   clauseHeader(node, kind, vars, iter, aux, pad = null) {
-    const markVar = (v) => this.mark(node, "vars", () => typeof v === "string" ? this.b.emit(v) : this.withPattern(() => this.expr(v), true));
+    const markVar = (v) => this.mark(node, "vars", () => typeof v === "string" ? this.emitReadName(v) : this.withPattern(() => this.expr(v), true));
     const setups = [];
     if (kind === "for-of") {
       this.checkForOfPatternKey(vars, aux === true);
@@ -12281,6 +12774,18 @@ ${pad ?? ""}`);
   exprCore(node) {
     if (!isNode4(node)) {
       if (typeof node === "string") {
+        if (node === "break" || node === "continue") {
+          if (this.ctrlDepth === 0) {
+            const err = this.positionedError(node, `emitter: '${node}' outside a loop${node === "break" ? " or switch" : ""}`);
+            if (typeof err.start !== "number" && this.b.currentMark) {
+              err.start = this.b.currentMark.sourceStart;
+              err.end = this.b.currentMark.sourceEnd;
+            }
+            throw err;
+          }
+          this.b.emit(node);
+          return;
+        }
         const rewrite = this.bareRewrite(node);
         if (rewrite === "reactive")
           return this.reactiveRead(node);
@@ -12290,14 +12795,8 @@ ${pad ?? ""}`);
           return this.memberRead(node, rewrite === "member-reactive");
         if (node === "this" && this.renderSelf !== null)
           return this.b.emit(this.renderSelf);
-      }
-      if ((node === "break" || node === "continue") && this.ctrlDepth === 0) {
-        const err = this.positionedError(node, `emitter: '${node}' outside a loop${node === "break" ? " or switch" : ""}`);
-        if (typeof err.start !== "number" && this.b.currentMark) {
-          err.start = this.b.currentMark.sourceStart;
-          err.end = this.b.currentMark.sourceEnd;
-        }
-        throw err;
+        if (isIdentifierName(node))
+          return this.emitReadName(node);
       }
       this.b.emit(node);
       return;
@@ -12762,13 +13261,25 @@ ${pad ?? ""}`);
         }
         if (this.moduleClassNames?.has(proto.head)) {
           if (this.ts)
-            this.b.tsOnly(() => this.mark(node, "annotation", () => this.b.emit(`interface ${proto.head} { ${proto.member}: ${text} }
-`)));
+            this.b.tsOnly(() => this.mark(node, "annotation", () => {
+              const id = this.stores.idOf(node);
+              const m = this.b.currentMark;
+              this.b.emit(`interface ${proto.head} { ${proto.member}: `);
+              this.emitIdentifiedText(id, m?.sourceStart ?? null, m?.sourceEnd ?? null, text);
+              this.b.emit(` }
+`);
+            }));
         } else if (!this.scopes[0].has(proto.head)) {
           const params = PROTO_GENERIC_PARAMS[proto.head] ?? "";
           if (this.ts)
-            this.b.tsOnly(() => this.mark(node, "annotation", () => this.b.emit(`declare global { interface ${proto.head}${params} { ${proto.member}: ${text} } }
-`)));
+            this.b.tsOnly(() => this.mark(node, "annotation", () => {
+              const id = this.stores.idOf(node);
+              const m = this.b.currentMark;
+              this.b.emit(`declare global { interface ${proto.head}${params} { ${proto.member}: `);
+              this.emitIdentifiedText(id, m?.sourceStart ?? null, m?.sourceEnd ?? null, text);
+              this.b.emit(` } }
+`);
+            }));
         } else {
           throw protoError(`emitter: the annotation on \`${proto.head}::${proto.member}\` cannot augment — ` + `\`${proto.head}\` is a module binding, not a class declaration, so the interface has ` + `nothing to merge with; declare \`class ${proto.head}\`, drop the annotation, or ` + "describe the member in a workspace .d.ts");
         }
@@ -12803,18 +13314,22 @@ ${pad ?? ""}`);
       const prevSchemaName = this._schemaName;
       const prevComponentName = this._componentName;
       const prevComponentTypeParams = this._componentTypeParams;
+      const prevComponentTypeParamsOwner = this._componentTypeParamsOwner;
       this._componentTypeParams = null;
+      this._componentTypeParamsOwner = null;
       if (isNode4(node[2]) && node[2][0] === "schema" && typeof node[1] === "string") {
         this._schemaName = node[1];
       }
       if (this.isComponentDecl(node[2]) && typeof node[1] === "string") {
         this._componentName = node[1];
         this._componentTypeParams = this.annotationText(node, "typeParams");
+        this._componentTypeParamsOwner = node;
       }
       this.mark(node, "value", () => this.withExpression(() => this.expr(node[2])));
       this._schemaName = prevSchemaName;
       this._componentName = prevComponentName;
       this._componentTypeParams = prevComponentTypeParams;
+      this._componentTypeParamsOwner = prevComponentTypeParamsOwner;
       if (wrapParens)
         this.b.emit(")");
     })));
@@ -13398,7 +13913,16 @@ ${pad ?? ""}`);
       this.b.emit("class");
       if (this.ts && this._componentTypeParams) {
         const tp = this._componentTypeParams;
-        this.b.tsOnly(() => this.b.emit(tp));
+        this.b.tsOnly(() => {
+          const owner = this._componentTypeParamsOwner;
+          const id = owner != null ? this.stores.idOf(owner) : null;
+          const role = id != null ? this.stores.role(id, "typeParams") : null;
+          if (role?.sourceStart != null && role.sourceEnd != null) {
+            this.emitIdentifiedText(id, role.sourceStart, role.sourceEnd, tp);
+          } else {
+            this.b.emit(tp);
+          }
+        });
       }
       this.b.emit(` extends ${this.runtimeName("__Component")} {
 `);
@@ -13432,7 +13956,9 @@ ${pad ?? ""}`);
 `);
       }
       if (extendsTag !== null) {
-        this.b.emit(`${pad}static __extends = '${extendsTag}';
+        this.b.emit(`${pad}static __extends = '`);
+        this.emitExtendsTag(node, extendsTag);
+        this.b.emit(`';
 `);
       }
       if (tsInfo !== null)
@@ -13613,7 +14139,7 @@ ${pad ?? ""}`);
             this.b.emit("*");
           this.mark(owner, "target", () => this.mark(owner, "key", () => this.b.emit(name)));
           this.b.emit("(");
-          this.emitParams(params);
+          this.mark(func, "params", () => this.emitParams(params));
           this.b.emit(")");
           this.tsReturnAnnotation(func, Emitter.containsAwait(block), isVoid, owner);
           this.b.emit(" ");
@@ -14122,7 +14648,9 @@ ${pad ?? ""}`);
     }
     const isSvg = R.svgDepth > 0 || SVG_ONLY_TAGS.has(tag);
     this.renderLine(node, () => {
-      this.b.emit(isSvg ? `${el} = document.createElementNS('${Emitter.SVG_NS}', '${tag}')` : `${el} = document.createElement('${tag}')`);
+      this.b.emit(isSvg ? `${el} = document.createElementNS('${Emitter.SVG_NS}', '` : `${el} = document.createElement('`);
+      this.emitRenderTagName(node, tag);
+      this.b.emit(`')`);
     });
     if (id)
       this.renderLine(node, () => this.b.emit(`${el}.id = '${id}'`));
@@ -14138,7 +14666,7 @@ ${pad ?? ""}`);
     }
     if (isSvg)
       R.svgDepth++;
-    this.renderChildren(el, args);
+    this.renderChildren(el, args, node);
     if (isSvg)
       R.svgDepth--;
     if (classes.length > 0) {
@@ -14171,7 +14699,9 @@ ${pad ?? ""}`);
     }
     const isSvg = R.svgDepth > 0 || SVG_ONLY_TAGS.has(tag);
     this.renderLine(node, () => {
-      this.b.emit(isSvg ? `${el} = document.createElementNS('${Emitter.SVG_NS}', '${tag}')` : `${el} = document.createElement('${tag}')`);
+      this.b.emit(isSvg ? `${el} = document.createElementNS('${Emitter.SVG_NS}', '` : `${el} = document.createElement('`);
+      this.emitRenderTagName(node, tag);
+      this.b.emit(`')`);
     });
     if (id)
       this.renderLine(node, () => this.b.emit(`${el}.id = '${id}'`));
@@ -14190,7 +14720,7 @@ ${pad ?? ""}`);
     R.pendingClassEl = el;
     if (isSvg)
       R.svgDepth++;
-    this.renderChildren(el, children);
+    this.renderChildren(el, children, node);
     if (isSvg)
       R.svgDepth--;
     const parts = R.pendingClassArgs;
@@ -14230,7 +14760,7 @@ ${pad ?? ""}`);
     }
     return this.walkChildStmts(stmts);
   }
-  renderChildren(el, args) {
+  renderChildren(el, args, tagNode = null) {
     for (const arg of args) {
       if (isFunc2(arg)) {
         if (isNode4(arg[1]) && arg[1].length > 0) {
@@ -14241,7 +14771,7 @@ ${pad ?? ""}`);
           for (const child of block.slice(1)) {
             if (isObject(child)) {
               this.renderAttributes(el, child);
-            } else if (!this.renderBareFlag(el, child)) {
+            } else if (!this.renderBareFlag(el, child, tagNode)) {
               const v = this.renderNode(child);
               if (v == null)
                 continue;
@@ -14249,7 +14779,7 @@ ${pad ?? ""}`);
             }
           }
         } else if (block) {
-          if (!this.renderBareFlag(el, block)) {
+          if (!this.renderBareFlag(el, block, tagNode)) {
             const v = this.renderNode(block);
             if (v != null)
               this.renderLine(null, () => this.b.emit(`${el}.appendChild(${v})`));
@@ -14268,10 +14798,48 @@ ${pad ?? ""}`);
           const t2 = this.newRenderText();
           if (scopeKind === "loop-reactive") {
             this.renderLine(null, () => this.b.emit(`${t2} = document.createTextNode('')`));
-            this.renderEffect(null, () => this.b.emit(`${t2}.data = ${arg};`));
+            this.renderEffect(tagNode, () => {
+              this.b.emit(`${t2}.data = `);
+              this.emitRenderTextRead(tagNode, arg);
+              this.b.emit(";");
+            });
           } else {
-            this.renderLine(null, () => this.b.emit(`${t2} = document.createTextNode(${arg})`));
+            this.renderLine(null, () => {
+              this.b.emit(`${t2} = document.createTextNode(`);
+              this.emitRenderTextRead(tagNode, arg);
+              this.b.emit(")");
+            });
           }
+          this.renderLine(null, () => this.b.emit(`${el}.appendChild(${t2})`));
+          continue;
+        }
+        const bareRead = base === arg ? this.resolveBareRead(arg) : null;
+        if (bareRead === "reactive" || bareRead === "member-reactive") {
+          const t2 = this.newRenderText();
+          this.renderLine(null, () => this.b.emit(`${t2} = document.createTextNode('')`));
+          this.renderEffect(tagNode, () => {
+            this.b.emit(`${t2}.data = `);
+            if (bareRead === "member-reactive") {
+              this.b.emit((this.renderSelf ?? "this") + ".");
+              this.emitRenderTextRead(tagNode, arg);
+              this.b.emit(".value");
+            } else {
+              this.emitRenderTextRead(tagNode, arg);
+              this.b.emit(".value");
+            }
+            this.b.emit(";");
+          });
+          this.renderLine(null, () => this.b.emit(`${el}.appendChild(${t2})`));
+          continue;
+        }
+        if (bareRead === "member") {
+          const t2 = this.newRenderText();
+          this.renderLine(null, () => {
+            this.b.emit(`${t2} = document.createTextNode(String(`);
+            this.b.emit((this.renderSelf ?? "this") + ".");
+            this.emitRenderTextRead(tagNode, arg);
+            this.b.emit("))");
+          });
           this.renderLine(null, () => this.b.emit(`${el}.appendChild(${t2})`));
           continue;
         }
@@ -14291,7 +14859,9 @@ ${pad ?? ""}`);
             throw this.positionedError(arg, `emitter: '${arg}' is not a known attribute of <${tag}> — bare-identifier shorthand sets a boolean ` + `attribute and validates against the standard vocabulary ` + "(a misspelling would silently set a boolean attribute); quote it, or spell `name: value`", this.rstate.node);
           }
           this.renderLine(null, () => {
-            this.b.emit(`${el}.setAttribute('${arg}', true`);
+            this.b.emit(`${el}.setAttribute(`);
+            this.emitQuotedDomName(arg);
+            this.b.emit(`, true`);
             if (this.ts)
               this.b.tsOnly(() => this.b.emit(" as any"));
             this.b.emit(")");
@@ -14303,23 +14873,42 @@ ${pad ?? ""}`);
           this.renderLine(null, () => this.b.emit(`${t} = document.createTextNode(${arg})`));
         } else {
           const r = this.resolveBareRead(arg);
+          const emitText = () => {
+            if (typeof arg === "string" && isIdentifierName(arg) && tagNode != null) {
+              if (r === "member" || r === "member-reactive") {
+                this.b.emit((this.renderSelf ?? "this") + ".");
+                this.emitRenderTextRead(tagNode, arg);
+                if (r === "member-reactive")
+                  this.b.emit(".value");
+                return;
+              }
+              if (r === "reactive") {
+                this.emitRenderTextRead(tagNode, arg);
+                this.b.emit(".value");
+                return;
+              }
+              this.emitRenderTextRead(tagNode, arg);
+              return;
+            }
+            this.expr(arg);
+          };
           if (r === "reactive" || r === "member-reactive") {
             this.renderLine(null, () => this.b.emit(`${t} = document.createTextNode('')`));
-            this.renderEffect(null, () => {
+            this.renderEffect(tagNode, () => {
               this.b.emit(`${t}.data = `);
-              this.expr(arg);
+              emitText();
               this.b.emit(";");
             });
           } else if (r === "member") {
             this.renderLine(null, () => {
               this.b.emit(`${t} = document.createTextNode(String(`);
-              this.expr(arg);
+              emitText();
               this.b.emit("))");
             });
           } else {
             this.renderLine(null, () => {
               this.b.emit(`${t} = document.createTextNode(`);
-              this.expr(arg);
+              emitText();
               this.b.emit(")");
             });
           }
@@ -14336,14 +14925,18 @@ ${pad ?? ""}`);
   renderTagOf(el) {
     return this.rstate.tags?.get(el) ?? "div";
   }
-  renderBareFlag(el, child) {
+  renderBareFlag(el, child, tagNode) {
     if (typeof child !== "string" || !Emitter.BOOLEAN_ATTRS.has(child))
       return false;
     if (this.renderVarKind(child, child) !== null)
       return false;
     if (this.resolveBareRead(child) !== null || this.inScope(child))
       return false;
-    this.renderLine(null, () => this.b.emit(`${el}.setAttribute('${child}', '')`));
+    this.renderLine(null, () => {
+      this.b.emit(`${el}.setAttribute('`);
+      this.emitRenderTextRead(tagNode, child);
+      this.b.emit("', '')");
+    });
     return true;
   }
   renderSlot(node, args) {
@@ -14361,6 +14954,8 @@ ${pad ?? ""}`);
     R.slotSeen = true;
     const v = this.newRenderVar("slot");
     this.renderLine(markNode, () => {
+      if (this.ts)
+        this.emitFaceOnlyRead(() => this.emitReadName("slot"));
       const s = this.renderSelf ?? "this";
       this.b.emit(`${v} = ${s}.children instanceof Node ? ${s}.children : (${s}.children != null ? ` + `document.createTextNode(String(${s}.children)) : document.createComment(''))`);
     });
@@ -14372,15 +14967,23 @@ ${pad ?? ""}`);
     const markNode = isNode4(node) ? node : null;
     let ctorRef;
     if (this.renderVarKind(name) !== null) {
-      ctorRef = () => this.b.emit(name);
+      ctorRef = () => this.emitReadName(name);
     } else {
       const r = this.resolveBareRead(name);
       if (r === "member" || r === "member-reactive") {
-        ctorRef = () => this.b.emit(`${this.renderSelf ?? "this"}.${name}${r === "member-reactive" ? ".value" : ""}`);
+        ctorRef = () => {
+          this.b.emit(`${this.renderSelf ?? "this"}.`);
+          this.emitReadName(name, { unwrap: true });
+          if (r === "member-reactive")
+            this.b.emit(".value");
+        };
       } else if (r === "reactive") {
-        ctorRef = () => this.b.emit(`${name}.value`);
+        ctorRef = () => {
+          this.emitReadName(name, { unwrap: true });
+          this.b.emit(".value");
+        };
       } else if (this.inScope(name) || this.moduleBound !== undefined && this.moduleBound.has(name)) {
-        ctorRef = () => this.b.emit(name);
+        ctorRef = () => this.emitReadName(name);
       } else {
         throw this.positionedError(markNode ?? node, `emitter: component '${name}' is not defined in this module — a child component must be a module binding, ` + "an import, or a component member (an undefined name would degrade to a comment placeholder at mount)", this.rstate.node);
       }
@@ -14610,6 +15213,24 @@ ${pad ?? ""}`);
               p.fn();
               return;
             }
+            if (this.ts && typeof p.key === "string" && p.key.startsWith("__bind_") && p.key.endsWith("__") && p.pair != null) {
+              const pid = this.stores.idOf(p.pair);
+              const keyRole = pid != null ? this.stores.role(pid, "key") : null;
+              const bound = p.key.slice(7, -2);
+              if (keyRole?.sourceStart != null && keyRole.sourceEnd != null && this.b.source?.slice(keyRole.sourceStart, keyRole.sourceEnd) === bound) {
+                this.b.emit("__bind_");
+                this.b.markSpan(pid, "read", keyRole.sourceStart, keyRole.sourceEnd, () => this.b.emit(bound));
+                this.b.emit("__: ");
+                p.fn();
+                return;
+              }
+            }
+            if (this.ts && typeof p.key === "string" && isIdentifierName(p.key)) {
+              this.emitPairKeyRead(p.pair, p.key);
+              this.b.emit(": ");
+              p.fn();
+              return;
+            }
             this.b.emit(`${p.key}: `);
             p.fn();
           };
@@ -14655,7 +15276,9 @@ ${pad ?? ""}`);
       Emitter.collectLeafNames(value, evUsed);
       const ev = Emitter.mintName("e", evUsed);
       this.renderLine(pair, () => {
-        this.b.emit(`if (${instVar}) ${elVar}.addEventListener('${event}', (${ev}) => ${this.runtimeName("__batch")}(() => (`);
+        this.b.emit(`if (${instVar}) ${elVar}.addEventListener(`);
+        this.emitQuotedDomName(event, pair);
+        this.b.emit(`, (${ev}) => ${this.runtimeName("__batch")}(() => (`);
         this.tsHandlerCast(() => this.withExpression(() => this.expr(value)));
         this.b.emit(`)(${ev})))`);
       });
@@ -14714,14 +15337,21 @@ ${pad ?? ""}`);
       if (this.renderVarKind(value) !== null)
         return null;
       const r = this.resolveBareRead(value);
-      if (r === "member-reactive")
-        return () => this.b.emit(`${this.renderSelf ?? "this"}.${value}`);
+      if (r === "member-reactive") {
+        return () => {
+          this.b.emit(`${this.renderSelf ?? "this"}.`);
+          this.emitReadName(value, { unwrap: true });
+        };
+      }
       if (r === "reactive")
-        return () => this.b.emit(value);
+        return () => this.emitReadName(value, { unwrap: true });
       return null;
     }
     if (isNode4(value) && value[0] === "." && value[1] === "this" && value.length === 3 && typeof value[2] === "string" && this.memberIsReactive(value[2])) {
-      return () => this.b.emit(`${this.renderSelf ?? "this"}.${value[2]}`);
+      return () => {
+        this.b.emit(`${this.renderSelf ?? "this"}.`);
+        this.emitReadName(value[2], { unwrap: true });
+      };
     }
     return null;
   }
@@ -14746,11 +15376,14 @@ ${pad ?? ""}`);
         const ev = Emitter.mintName("e", evUsed);
         this.renderLine(pair, () => {
           const self = this.renderSelf ?? "this";
-          this.b.emit(`${el}.addEventListener('${eventName}', (${ev}) => ${this.runtimeName("__batch")}(() => `);
+          this.b.emit(`${el}.addEventListener(`);
+          this.emitQuotedDomName(eventName, pair);
+          this.b.emit(`, (${ev}) => ${this.runtimeName("__batch")}(() => `);
           if (typeof value === "string" && this.renderVarKind(value) === null && this.cframes[this.cframes.length - 1].members.has(value)) {
             if (this.ts)
               this.b.tsOnly(() => this.b.emit("("));
-            this.b.emit(`${self}.${value}`);
+            this.b.emit(`${self}.`);
+            this.mark(pair, "value", () => this.emitReadName(value, { unwrap: true }));
             if (this.ts)
               this.b.tsOnly(() => this.b.emit(" as any)"));
             this.b.emit(`(${ev})`);
@@ -14812,7 +15445,9 @@ ${pad ?? ""}`);
       }
       if ((key === "value" || key === "checked") && this.renderReactive(value)) {
         this.renderEffect(pair, () => {
-          this.b.emit(`${el}.${key} = `);
+          this.b.emit(`${el}.`);
+          this.emitPairKeyRead(pair, key);
+          this.b.emit(" = ");
           this.renderExpr(value);
           this.b.emit(";");
         }, value);
@@ -14821,13 +15456,17 @@ ${pad ?? ""}`);
       if (key === "innerHTML" || key === "textContent" || key === "innerText") {
         if (this.renderReactive(value)) {
           this.renderEffect(pair, () => {
-            this.b.emit(`${el}.${key} = `);
+            this.b.emit(`${el}.`);
+            this.emitPairKeyRead(pair, key);
+            this.b.emit(" = ");
             this.renderExpr(value);
             this.b.emit(";");
           }, value);
         } else {
           this.renderLine(pair, () => {
-            this.b.emit(`${el}.${key} = `);
+            this.b.emit(`${el}.`);
+            this.emitPairKeyRead(pair, key);
+            this.b.emit(" = ");
             this.renderExpr(value);
           });
         }
@@ -14836,7 +15475,9 @@ ${pad ?? ""}`);
       if (Emitter.BOOLEAN_ATTRS.has(key)) {
         if (this.renderReactive(value)) {
           this.renderEffect(pair, () => {
-            this.b.emit(`${el}.toggleAttribute('${key}', !!`);
+            this.b.emit(`${el}.toggleAttribute(`);
+            this.emitQuotedDomName(key, pair);
+            this.b.emit(`, !!`);
             this.renderExpr(value);
             this.b.emit(");");
           }, value);
@@ -14844,7 +15485,9 @@ ${pad ?? ""}`);
           this.renderLine(pair, () => {
             this.b.emit("if (");
             this.withExpression(() => this.expr(value));
-            this.b.emit(`) ${el}.setAttribute('${key}', '')`);
+            this.b.emit(`) ${el}.setAttribute(`);
+            this.emitQuotedDomName(key, pair);
+            this.b.emit(`, '')`);
           });
         }
         continue;
@@ -14855,11 +15498,17 @@ ${pad ?? ""}`);
           this.renderEffect(pair, () => {
             this.b.emit("{ const __v = ");
             this.renderExpr(value);
-            this.b.emit(`; __v == null ? ${el}.removeAttribute('${key}') : ${el}.setAttribute('${key}', __v); }`);
+            this.b.emit(`; __v == null ? ${el}.removeAttribute(`);
+            this.emitQuotedDomName(key, pair);
+            this.b.emit(`) : ${el}.setAttribute(`);
+            this.emitQuotedDomName(key, pair);
+            this.b.emit(`, __v); }`);
           }, value);
         } else {
           this.renderEffect(pair, () => {
-            this.b.emit(`${el}.setAttribute('${key}', `);
+            this.b.emit(`${el}.setAttribute(`);
+            this.emitQuotedDomName(key, pair);
+            this.b.emit(`, `);
             this.renderExpr(value);
             if (this.ts)
               this.b.tsOnly(() => this.b.emit(" as any"));
@@ -14870,11 +15519,15 @@ ${pad ?? ""}`);
         this.renderLine(pair, () => {
           this.b.emit("{ const __v = ");
           this.renderExpr(value);
-          this.b.emit(`; if (__v != null) ${el}.setAttribute('${key}', __v); }`);
+          this.b.emit(`; if (__v != null) ${el}.setAttribute(`);
+          this.emitQuotedDomName(key, pair);
+          this.b.emit(`, __v); }`);
         }, false);
       } else {
         this.renderLine(pair, () => {
-          this.b.emit(`${el}.setAttribute('${key}', `);
+          this.b.emit(`${el}.setAttribute(`);
+          this.emitQuotedDomName(key, pair);
+          this.b.emit(`, `);
           this.renderExpr(value);
           if (this.ts)
             this.b.tsOnly(() => this.b.emit(" as any"));
@@ -15164,7 +15817,8 @@ ${pad ?? ""}`);
     const anchorVar = this.newRenderVar("anchor");
     this.renderLine(null, () => this.b.emit(`${anchorVar} = document.createComment('for')`));
     const reactiveSource = this.renderReactive(iter);
-    const keyExpr = this.extractLoopKey(body, node);
+    const keyInfo = this.extractLoopKey(body, node);
+    const keyExpr = keyInfo?.expr ?? null;
     if (keyExpr !== null) {
       this.checkSetupLocalRefs(keyExpr, node);
       this.checkCrossScopeLocals(keyExpr, node);
@@ -15184,7 +15838,7 @@ ${pad ?? ""}`);
     sink.setups.push({
       kind: "raw",
       node,
-      fn: (pad) => this.emitLoopSetup(pad, node, anchorVar, iter, rec, keyExpr, itemVar, indexVar, hasRef, outer)
+      fn: (pad) => this.emitLoopSetup(pad, node, anchorVar, iter, rec, keyInfo, itemVar, indexVar, hasRef, outer)
     });
     return anchorVar;
   }
@@ -15211,7 +15865,7 @@ ${pad ?? ""}`);
         const pair = obj[i];
         if (isNode4(pair) && pair.length === 3 && pair[0] === ":" && pair[1] === "key") {
           this.rstate.suppressedPairs.add(pair);
-          return pair[2];
+          return { expr: pair[2], pair };
         }
       }
       return null;
@@ -15323,7 +15977,9 @@ ${pad ?? ""}`);
     };
     this.mark(markNode, "$self", emitBody);
   }
-  emitLoopSetup(pad, node, anchorVar, iter, rec, keyExpr, itemVar, indexVar, hasRef, outer) {
+  emitLoopSetup(pad, node, anchorVar, iter, rec, keyInfo, itemVar, indexVar, hasRef, outer) {
+    const keyExpr = keyInfo?.expr ?? null;
+    const keyPair = keyInfo?.pair ?? null;
     const self = this.renderSelf ?? "this";
     const outerExtra = outer.length > 0 ? `, ${outer.join(", ")}` : "";
     const p2 = pad + "  ";
@@ -15352,12 +16008,21 @@ ${pad ?? ""}`);
       if (keyExpr !== null) {
         this.b.emit(`(${itemVar}, ${indexVar}) => `);
         this.withBindings([itemVar, indexVar], () => this.withExpression(() => {
+          if (this.ts && keyPair != null) {
+            this.b.tsOnly(() => {
+              this.b.emit("(void ({ ");
+              this.emitPairKeyRead(keyPair, "key");
+              this.b.emit(": 0 }), ");
+            });
+          }
           const wrap = Emitter.needsGrouping(keyExpr, "operand") || isObject(keyExpr);
           if (wrap)
             this.b.emit("(");
           this.expr(keyExpr);
           if (wrap)
             this.b.emit(")");
+          if (this.ts && keyPair != null)
+            this.b.tsOnly(() => this.b.emit(")"));
         }));
       } else {
         this.b.emit("null");
@@ -15374,6 +16039,24 @@ ${pad ?? ""}`);
       this.b.emit(`${pad}}
 `);
     });
+  }
+  emitFactoryParam(rec, name) {
+    if (!this.ts || !isIdentifierName(name) || rec.originNode == null || this.b.source == null) {
+      this.b.emit(name);
+      return;
+    }
+    const id = this.stores.idOf(rec.originNode);
+    const vars = id != null ? this.stores.role(id, "vars") : null;
+    if (vars?.sourceStart != null && vars.sourceEnd != null) {
+      const re = new RegExp(`(?<![\\w$])${name.replace(/\$/g, "\\$&")}(?![\\w$])`, "g");
+      re.lastIndex = vars.sourceStart;
+      const sm = re.exec(this.b.source);
+      if (sm !== null && sm.index + name.length <= vars.sourceEnd && this.b.source.slice(sm.index, sm.index + name.length) === name) {
+        this.b.markSpan(id, "read", sm.index, sm.index + name.length, () => this.b.emit(name));
+        return;
+      }
+    }
+    this.b.emit(name);
   }
   emitFactory(rec, ind, renderNode) {
     const pad = "  ".repeat(ind + 1);
@@ -15393,7 +16076,13 @@ ${pad ?? ""}`);
     const needsP = !rec.isStatic;
     this.mark(renderNode, "$self", () => {
       this.withRecordContext(rec, () => {
-        this.b.emit(`${pad}${rec.name}(${headerParams.join(", ")}) {
+        this.b.emit(`${pad}${rec.name}(`);
+        this.b.emit(self);
+        for (const n of rec.paramNames) {
+          this.b.emit(", ");
+          this.emitFactoryParam(rec, n);
+        }
+        this.b.emit(`) {
 `);
         if (rec.vars.size > 0)
           this.b.emit(`${p2}let ${[...rec.vars].join(", ")};
@@ -15535,15 +16224,32 @@ ${pad ?? ""}`);
     }
     if (this.rstate.sink.kind === "class") {
       this.renderLine(pair, () => {
-        this.b.emit(`this.${refName}.value = ${el}`);
+        if (this.ts)
+          this.emitFaceOnlyRead(() => this.emitPairKeyRead(pair, "ref"));
+        this.b.emit("this.");
+        this.emitReadName(refName, { unwrap: true });
+        this.b.emit(`.value = ${el}`);
         const tag = this.renderTagOf(el);
         if (this.ts && tag !== null && /^[a-z][a-z0-9-]*$/.test(tag)) {
           const map = this.rstate.svgDepth > 0 || SVG_ONLY_TAGS.has(tag) ? "SVGElementTagNameMap" : "HTMLElementTagNameMap";
-          this.b.tsOnly(() => this.b.emit(` as ${map}['${tag}'] | null`));
+          this.b.tsOnly(() => {
+            this.b.emit(` as ${map}[`);
+            this.emitQuotedDomName(tag);
+            this.b.emit("] | null");
+          });
         }
       });
-      this.renderLine(pair, () => this.b.emit(`(this._refCleanups ??= []).push(() => ${this.runtimeName("__detachRef")}(this.${refName}, ${el}))`));
+      this.renderLine(pair, () => {
+        this.b.emit(`(this._refCleanups ??= []).push(() => ${this.runtimeName("__detachRef")}(this.`);
+        this.emitReadName(refName, { unwrap: true });
+        this.b.emit(`, ${el}))`);
+      });
     } else {
+      if (this.ts) {
+        this.renderLine(pair, () => {
+          this.emitFaceOnlyRead(() => this.emitPairKeyRead(pair, "ref"));
+        });
+      }
       this.rstate.sink.refs.push({ name: refName, elVar: el, node: pair });
     }
   }
@@ -15567,7 +16273,9 @@ ${pad ?? ""}`);
       accessor = inputType === "number" || inputType === "range" ? "target.valueAsNumber" : "target.value";
     }
     this.renderEffect(pair, () => {
-      this.b.emit(`${el}.${prop} = `);
+      this.b.emit(`${el}.`);
+      this.emitPairKeyRead(pair, prop);
+      this.b.emit(" = ");
       this.withExpression(() => this.expr(value));
       this.b.emit(";");
     }, value);
@@ -15576,7 +16284,9 @@ ${pad ?? ""}`);
     Emitter.collectLeafNames(value, evUsed);
     const ev = Emitter.mintName("e", evUsed);
     this.renderLine(pair, () => {
-      this.b.emit(`${el}.addEventListener('${event}', (${ev}) => { `);
+      this.b.emit(`${el}.addEventListener(`);
+      this.emitQuotedDomName(event, pair);
+      this.b.emit(`, (${ev}) => { `);
       this.withExpression(() => this.expr(value));
       this.b.emit(` = ${ev}.${accessor};`);
       if (touch !== null) {
@@ -15848,23 +16558,11 @@ ${pad ?? ""}`);
       } else if (f.kind === "optcall") {
         this.b.emit("?.");
         this.mark(n, "args", () => {
-          this.b.emit("(");
-          n.slice(2).forEach((arg, i) => {
-            if (i > 0)
-              this.b.emit(", ");
-            this.expr(arg);
-          });
-          this.b.emit(")");
+          this.emitCallArgs(n, n.slice(2), (arg) => this.expr(arg));
         });
       } else {
         this.mark(n, "args", () => {
-          this.b.emit("(");
-          n.slice(1).forEach((arg, i) => {
-            if (i > 0)
-              this.b.emit(", ");
-            this.callArg(arg);
-          });
-          this.b.emit(")");
+          this.emitCallArgs(n, n.slice(1));
         });
       }
       this.endMark(f.self);
@@ -16721,10 +17419,12 @@ ${"  ".repeat(ind)}`);
     this.mark(node, "$self", () => {
       this.b.emit(this.methodName === "constructor" ? "super(" : `super.${this.methodName}(`);
       this.mark(node, "args", () => {
-        node.slice(1).forEach((arg, i) => {
-          if (i > 0)
-            this.b.emit(", ");
-          this.callArg(arg);
+        this.withReadScan(node, () => {
+          node.slice(1).forEach((arg, i) => {
+            if (i > 0)
+              this.b.emit(", ");
+            this.emitScannedArg(arg, (a) => this.callArg(a));
+          });
         });
       });
       this.b.emit(")");
@@ -16748,8 +17448,9 @@ ${"  ".repeat(ind)}`);
     });
   }
   emitParam(p) {
-    if (typeof p === "string")
-      return this.b.emit(p);
+    if (typeof p === "string") {
+      return isIdentifierName(p) ? this.emitReadName(p) : this.b.emit(p);
+    }
     if (p[0] === "typed-var") {
       this.mark(p, "$self", () => this.mark(p, "annotation", () => {
         this.mark(p, "target", () => this.emitParam(p[1]));
@@ -17124,13 +17825,7 @@ ${"  ".repeat(ind)}`);
         this.b.emit("await ");
         this.mark(node[0], "$self", () => this.head(node[0], "target", node[0][1]));
         this.mark(node, "args", () => {
-          this.b.emit("(");
-          node.slice(1).forEach((arg, i) => {
-            if (i > 0)
-              this.b.emit(", ");
-            this.callArg(arg);
-          });
-          this.b.emit(")");
+          this.emitCallArgs(node, node.slice(1));
         });
       });
       return;
@@ -17148,13 +17843,7 @@ ${"  ".repeat(ind)}`);
             this.expr(ctor);
         });
         this.mark(node, "args", () => {
-          this.b.emit("(");
-          node.slice(1).forEach((arg, i) => {
-            if (i > 0)
-              this.b.emit(", ");
-            this.callArg(arg);
-          });
-          this.b.emit(")");
+          this.emitCallArgs(node, node.slice(1));
         });
       });
       return;

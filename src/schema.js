@@ -384,6 +384,17 @@ function collapseSchemaAt(tokens, i, out, config, mintId, fail, text) {
   if (adapterTokens) descriptor.adapterTokens = adapterTokens;
   descriptor.start = (kindTok ?? bodyTokens[0]).start;
   descriptor.end = bodyEnd;
+  // Kind identifier span (`:shape` / `:union` / …) for face `read` rows.
+  // A minted SYMBOL covers `:shape`; the identifier starts after `:`.
+  if (kindTok) {
+    if (kindTok.kind === 'SYMBOL') {
+      descriptor.kindStart = kindTok.start + 1;
+      descriptor.kindEnd = kindTok.start + 1 + kind.length;
+    } else {
+      descriptor.kindStart = kindTok.start;
+      descriptor.kindEnd = kindTok.end ?? kindTok.start + kindTok.value.length;
+    }
+  }
 
   out.push({
     id: mintId(), kind: 'SCHEMA', value: 'schema',
@@ -601,6 +612,11 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
   let coercer = null;
   let coercerArray = false;
   let typeConsumed = false;
+  // Source span of the type IDENTIFIER when one was written (feeds
+  // face `read` rows). Null when the type defaulted to `string` or
+  // came from a named-coercer / literal-union with no bare type word.
+  let typeStart = null;
+  let typeEnd = null;
   let typeFirst = line[pos];
   if (typeFirst?.kind === 'UNARY_MATH' && typeFirst.value === '~') {
     const sym = symWordAt(line, pos + 1);
@@ -622,6 +638,8 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
       }
       coerce = true;
       typeName = typeTok.value;
+      typeStart = typeTok.start;
+      typeEnd = typeTok.end ?? typeTok.start + typeTok.value.length;
       pos += 2;
     } else {
       fail(`'~' in the type slot marks coercion and needs a type name ('~integer', '~date', …) or a registered coercer symbol ('~:ssn', …)`, typeFirst.start);
@@ -629,6 +647,8 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
     typeConsumed = true;
   } else if (typeFirst?.kind === 'IDENTIFIER') {
     typeName = typeFirst.value;
+    typeStart = typeFirst.start;
+    typeEnd = typeFirst.end ?? typeFirst.start + typeFirst.value.length;
     typeConsumed = true;
     pos++;
   } else if (typeFirst?.kind === 'STRING' && typeFirst.value.startsWith('"')) {
@@ -773,11 +793,16 @@ function parseFieldedLine(kind, line, entries, ctx, fail) {
   const constraints =
     c.min !== undefined || c.max !== undefined || c.default !== undefined || c.regex !== undefined ? c : null;
 
+  // nameStart/typeStart feed the face's exact `read` rows: the emitter marks each source identifier while emitting the
+  // JSON descriptor, so hover/def land on the field — not the body cover.
   entries.push({
     tag: 'field', name, modifiers, typeName, array,
     literals, coerce, coercer, constraints, transformTokens,
     unique: uniqueAttr, attrs,
     start: first.start,
+    nameStart: first.start,
+    nameEnd: first.end ?? first.start + name.length,
+    typeStart, typeEnd,
   });
 }
 
@@ -1279,11 +1304,25 @@ function parseUnionLine(line, entries, fail) {
       fail(`@on requires the discriminator field as a symbol — '@on :kind'`, (line[2] ?? nameTok).start);
     }
     if (line.length > 4) fail(`@on takes exactly one :field symbol`, line[4].start);
-    entries.push({ tag: 'directive', name: 'on', args: [{ field: sym.value }], start: first.start });
+    // nameStart/fieldStart feed face `read` rows on `on` and the
+    // discriminator field.
+    const fieldStart = sym.kind === 'SYMBOL' ? sym.start + 1 : sym.start;
+    entries.push({
+      tag: 'directive', name: 'on', args: [{ field: sym.value }],
+      start: first.start,
+      nameStart: nameTok.start,
+      nameEnd: nameTok.end ?? nameTok.start + nameTok.value.length,
+      fieldStart,
+      fieldEnd: fieldStart + sym.value.length,
+    });
     return;
   }
   if (first.kind === 'IDENTIFIER' && line.length === 1) {
-    entries.push({ tag: 'union-member', name: first.value, start: first.start });
+    entries.push({
+      tag: 'union-member', name: first.value, start: first.start,
+      nameStart: first.start,
+      nameEnd: first.end ?? first.start + first.value.length,
+    });
     return;
   }
   fail(`:union bodies accept only '@on :field' and bare constituent schema names (one per line) — got ${first.kind}${line.length > 1 ? ' followed by ' + line[1].kind : ''}`, first.start);
@@ -1512,7 +1551,7 @@ function entrySegments(e, fnCode, thisType, emit, emitTs) {
   }
 }
 
-function entryLiteral(e, fnCode) {
+export function entryLiteral(e, fnCode) {
   if (fnCode !== undefined) fnCode = fnText(fnCode);
   switch (e.tag) {
     case 'field': {

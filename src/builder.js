@@ -155,8 +155,10 @@ export class CodeBuilder {
   // RoleStore is the authority for every other role name): tsDirective
   // rows source their spans from the lexer's trivia channel;
   // shorthandProp rows from the render walk's anchored bare-word scan
-  // (a boolean-shorthand prop key is a primitive with no store row).
-  static SPAN_ROLES = new Set(['tsDirective', 'shorthandProp']);
+  // (a boolean-shorthand prop key is a primitive with no store row);
+  // read rows from the emitter's anchored identifier-read scan (a bare
+  // call-arg / type-internal name is a primitive with no store row).
+  static SPAN_ROLES = new Set(['tsDirective', 'shorthandProp', 'read']);
 
   // A mark whose source span is supplied by the CALLER — the channel
   // for trivia-sourced emission (TS directive comments), whose spans
