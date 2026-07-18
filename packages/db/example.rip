@@ -8,7 +8,7 @@
 #   # Terminal B
 #   export RIP_DB_URL=http://127.0.0.1:9494
 #   export RIP_DB_TOKEN=rip-token   # match harbor_serve
-#   rip examples/hello.rip
+#   rip example.rip
 
 import { connect, ensureRunning, query, findOne, Model } from '@rip-lang/db'
 

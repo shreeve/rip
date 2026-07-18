@@ -189,9 +189,9 @@ test "exports and bin point at db.rip", ->
   eq pkg.exports, { '.': './db.rip' }
   eq pkg.bin, { 'rip-db': './db.rip' }
 
-test "package files ship the library, README, and examples — not misc/", ->
+test "package files ship the library, README, and example — not misc/", ->
   pkg = JSON.parse readFileSync join(import.meta.dir, 'package.json'), 'utf8'
-  eq pkg.files, ['db.rip', 'README.md', 'examples/']
+  eq pkg.files, ['db.rip', 'README.md', 'example.rip']
   ok not pkg.files.some (f) -> String(f).includes('misc')
 
 test "db.rip does not hard-import the schema runtime", ->
@@ -207,12 +207,12 @@ test "no certificate or private key is committed", ->
   source = readFileSync DB_RIP, 'utf8'
   ok not /BEGIN (RSA |EC )?PRIVATE KEY|BEGIN CERTIFICATE/.test source
 
-test "examples/hello.rip is a runnable smoke script", ->
-  hello = readFileSync join(import.meta.dir, 'examples', 'hello.rip'), 'utf8'
-  ok hello.startsWith('#!/usr/bin/env rip\n')
-  ok hello.includes("@rip-lang/db")
-  ok hello.includes('ensureRunning!')
-  ok hello.includes('connect!')
+test "example.rip is a runnable smoke script", ->
+  example = readFileSync join(import.meta.dir, 'example.rip'), 'utf8'
+  ok example.startsWith('#!/usr/bin/env rip\n')
+  ok example.includes("@rip-lang/db")
+  ok example.includes('ensureRunning!')
+  ok example.includes('connect!')
 
 # ==[ 1b. connect ]=============================================================
 

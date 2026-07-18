@@ -16,7 +16,7 @@
   "files": [
     "db.rip",
     "README.md",
-    "examples/"
+    "example.rip"
   ],
   "devDependencies": {
     "@rip-lang/testing": "workspace:*"
