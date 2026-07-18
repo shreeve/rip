@@ -19,7 +19,7 @@ both passes — see their sections below.)
 
 **Package contract:** layout, package.json key order, README mold, and test rules are codified in [AGENTS.md](AGENTS.md) — follow it.
 
-**Out of scope (do not bring over):** `stamp`.
+**Out of scope (do not bring over):** none — `stamp` was the last holdout and is now ported (server-only, security-gated; see its section below).
 
 ### Method (per package)
 
@@ -53,6 +53,7 @@ Re-run after `.d.ts` removal. Compared Rip logic only.
 | **gate** | Substantially improved | **KEEP_V4** | Fail-closed secrets, login throttle, reserved `/_gate` 404, self-contained middleware |
 | **swarm** | Identical core + 3 judged deltas | **KEEP_V4 (done)** | Loader from the live `--preload` flag (loud); wrapper and worker bootstrap folded into swarm.rip; Rip test roll + frame complete |
 | **utils** | Identical curl + CLI hygiene | **KEEP_V4 (done)** | Multi-bin collection frame; `curl.rip` → `rip-curl` (version from package.json, import guard, documented 4-tier vars); Rip test roll complete |
+| **stamp** | Identical Rip + fold/frame | **KEEP_V4 (done)** | 4 src files folded into `stamp.rip` (bin); 14 directives + example stamps kept; injectable exec seam for hermetic tests; injection-safety battery; Rip test roll + frame complete |
 
 **None of these warrant restoring v3 Rip.** Do not reintroduce `.d.ts` or type annotations as part of this upgrade.
 
@@ -368,6 +369,73 @@ with judged CLI hygiene (the same class as print):
 
 **Recommendation: KEEP_V4** — done; confidence high.
 
+### 9. `stamp` — DONE
+
+**Inventory**
+
+| | v3 | v4 |
+| --- | --- | --- |
+| Entry | `src/{cli,engine,parser,helpers}.rip` (4 files) + `bin/stamp` bun-spawn wrapper | `stamp.rip` — the four src files folded into one, and it IS the `rip-stamp` bin (`#!/usr/bin/env rip`) |
+| Directives | `directives/` (14 handlers) | `directives/` (14 handlers, logic byte-identical) |
+| Examples | `stamps/` (basic/host/mac-install/mac-vm) | `stamps/` (kept as data assets; `host` drives a parser test) |
+| Types | none | none |
+| Tests | `test/runner.rip` (hand-rolled harness: parser + helpers) | root `test.rip` (51 cases) on `@rip-lang/testing` + an injected exec seam |
+| Manifest | 0.1.43, npm metadata, `bun --preload` test | contract (4.0.0, private, pitch = description, `rip test.rip`) |
+
+**Strip types:** No annotations on either side. The port is essentially
+v3 Rip → v4 Rip: the engine, parser, shell helpers, and all 14 directive
+handlers are line-for-line identical apart from the folding and the
+mechanical v4-parser adjustments below.
+
+**Judged deltas:**
+
+1. **Four `src/` files folded into `stamp.rip`** — cli + engine + parser
+   + helpers become one root entry (AGENTS.md "simple beats pure" — a
+   `src/` split that only mirrors the call graph is not an earned
+   directory). `directives/` stays: it is a genuine plugin-discovery
+   directory (drop a `.rip` and the engine resolves it). `stamps/` stays
+   as example DATA (one file drives a parser test).
+2. **Bin is the entry, not a wrapper** — v3's `bin/stamp` bun-spawn shim
+   is deleted; `stamp.rip` carries the shebang + executable bit and the
+   CLI runs behind `import.meta.main`. The command name is `rip-stamp`
+   per the contract (v3 shipped `stamp`).
+3. **Exec seam (`setExec`)** — the shell backend behind `run`/`sh`/`ok`
+   is a single swappable function, so the suite drives handlers
+   hermetically (record argv, return canned success) without
+   provisioning a host. Pure addition; the default spawn path is
+   unchanged.
+4. **v4-parser mechanics** — `import.meta.dir` parenthesized as a call
+   argument, and `import! x` → `import!(x)` (the keyword-collision paren
+   form, matching swarm). No logic change. Handler-resolution paths shift
+   up one directory level (the engine moved from `src/` to the root).
+5. **Frame** — contract package.json with all v3 publish metadata
+   stripped (author, repository, keywords, license, homepage, bugs,
+   `main`); README on the mold (server-only Runtime line, `bash` fences,
+   no License footer); root `test.rip` replacing `test/runner.rip`.
+
+**Test roll:** every v3 `test/runner.rip` case landed in `test.rip`
+(parser structure / variables / arrow / blocks / sub-blocks / plural /
+comments / use / quoting / tabs / packages-block / full-host-stamp, and
+the `sh`/`ok`/`run` string- and tagged-template helper cases). Added: the
+package-surface opener, the plugin contract (all 14 handlers export
+`name`/`check`/`apply`/`verify`), and an injection-safety battery driving
+every handler through the exec seam.
+
+**Security summary:** the `$"..."` tagged-template argv construction is
+the injection boundary, and it holds — pinned across all 14 directives
+plus the helper directly (no handler ever spawns `sh -c` from an
+interpolated value; a hostile `; rm -rf /` stays one argv element).
+Owner-facing residual notes, not blockers and unchanged from v3: `sh
+"string"` (untagged) still routes through `sh -c` (documented as
+literal-only); `use <url>` fetches and imports remote handler code
+(cached under `~/.stamp`, trust-on-first-use, no integrity pin); npm
+`@stamp/<name>` / `stamp-<name>` auto-resolution imports by convention.
+Full findings are in the PR security section.
+
+**Recommendation: KEEP_V4** — done; confidence high.
+
+---
+
 ## Cross-cutting notes
 
 1. **No `.d.ts` in these packages** — confirmed. Do not bring type files over from v3. Package `exports` point at `.rip` only.
@@ -380,6 +448,6 @@ with judged CLI hygiene (the same class as print):
 
 1. Accept **KEEP_V4** for the finished set (no Rip restores; no type reintroduction).
 2. Roll root `test.rip` + `@rip-lang/testing` across the remaining packages (`gate` where security tests fit) — `x12`, `validate`, `swarm`, `print`, `script`, and `utils` are done.
-3. Continue the compare→strip→judge loop for remaining packages (`server`, `app`, `db`, `ui`, `ai`, …) — still excluding `stamp`, still without bringing types.
+3. Continue the compare→strip→judge loop for remaining packages (`server`, `app`, `db`, `ui`, `ai`, …) — without bringing types (`stamp` is done; see its section).
 4. Optional follow-up: gate standalone `GATE_*` bootstrap once v4 serving story is ready.
 5. Typing pass (separate): strip or regenerate types.
