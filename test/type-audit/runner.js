@@ -1579,13 +1579,17 @@ if (RUN_MAP) {
   // ── the two roots, each with the roles it bit (the row every failure fell
   // to). The counts are live and the ordering is by weight, so the dominant
   // class names itself.
-  const roleBreak = (m) => [...m.entries()].sort((a, b) => b[1] - a[1]).map(([role, n]) => `${role} ${n}`).join(', ') || '—';
+  // Role breakdown only when a root bit something — empty maps used to print
+  // a lone "—" under each zero, which reads as noise once the census is clean.
+  const roleBreak = (m) => [...m.entries()].sort((a, b) => b[1] - a[1]).map(([role, n]) => `${role} ${n}`).join(', ');
   const rootTotal = (m) => [...m.values()].reduce((a, b) => a + b, 0);
   console.log(`\n  ${bold('Roots')} ${dim('(classified from the mapping row each read fell to)')}`);
-  console.log(`    ${pad('synthetic', 10)} ${yellow(String(rootTotal(byRootRole.synthetic)).padStart(4))}   ${dim('a mark carries glyphs its source span does not')}`);
-  console.log(`    ${' '.repeat(15)}${dim(roleBreak(byRootRole.synthetic))}`);
-  console.log(`    ${pad('rewrite', 10)} ${yellow(String(rootTotal(byRootRole.rewrite)).padStart(4))}   ${dim('a string literal re-rendered double-quoted')}`);
-  console.log(`    ${' '.repeat(15)}${dim(roleBreak(byRootRole.rewrite))}`);
+  const rootLine = (label, n, note, roles) => {
+    console.log(`    ${pad(label, 10)} ${(n === 0 ? green : yellow)(String(n).padStart(4))}   ${dim(note)}`);
+    if (roles) console.log(`    ${' '.repeat(15)}${dim(roles)}`);
+  };
+  rootLine('synthetic', rootTotal(byRootRole.synthetic), 'a mark carries glyphs its source span does not', roleBreak(byRootRole.synthetic));
+  rootLine('rewrite', rootTotal(byRootRole.rewrite), 'a string literal re-rendered double-quoted', roleBreak(byRootRole.rewrite));
 
   // ── the one structural invariant that IS load-bearing: no flagged read may
   // lack a containing row. Every failure above is a span that EXISTS and is
