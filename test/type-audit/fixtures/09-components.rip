@@ -206,6 +206,17 @@ export EventHandlerTest = component
       button @click: (e) -> p e.clientX, 'Inline'
       input @keydown: (e) -> p e.key
 
+# Mapping census probes for render spellings whose emitted names sit
+# under wider pair/tag covers.
+export MappingReadTest = component
+  title := 'mapped'
+  click: -> null
+
+  render
+    button title: title, @click: click
+    button
+      disabled
+
 # ── Generic components ──
 #
 # Components can be parameterized by type. A real-world Select uses

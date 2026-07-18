@@ -159,13 +159,15 @@ describe('explain: typed declaration (annotation cover row)', () => {
     expect(out).toContain('`: number`');
   });
 
-  test('face: "ts" reverse direction — a generated position inside the inline annotation resolves to the source annotation', () => {
+  test('face: "ts" reverse direction — a generated position inside the inline annotation resolves to the source type name', () => {
     // TS face line 1 is `let x: number = 42;` (typed forwards inline
     // their annotation at the declaring write) — column 8 sits inside
-    // `number`.
+    // `number`. The type-name `read` is innermost; the annotation
+    // exact row still contains the position (cover-row story above).
     const out = explainGenerated(src, { path, pos: { line: 1, col: 8 }, face: 'ts' });
     expect(out).toContain('  1 | let x: number = 42;');
-    expect(out).toMatch(/bestAtGenerated resolves to #\d+ assign\.annotation \(exact\) — source <typed>:1:2/);
+    expect(out).toMatch(/bestAtGenerated resolves to #\d+ assign\.read \(exact\) — source <typed>:1:4/);
+    expect(out).toMatch(/assign\.annotation\s+exact/);
   });
 });
 

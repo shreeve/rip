@@ -21,7 +21,7 @@
 import { readFileSync } from 'fs';
 import { Stores } from './stores.js';
 import { CodeBuilder } from './builder.js';
-import { descriptorSegments, paramNamesOf, splitTopLevelByComma } from './schema.js';
+import { descriptorSegments, entryLiteral, paramNamesOf, splitTopLevelByComma } from './schema.js';
 import { buildSchemaTypeStory, isModuleShaped, SchemaTypeError } from './schema-types.js';
 import { HOST_AMBIENTS } from './ambients.js';
 import { Parser } from './parser.js';
@@ -236,6 +236,13 @@ class Emitter {
     // one place the member model is authoritative), consumed by the
     // companion-interface emission after the binding statement.
     this.componentInfo = new Map();
+    // Face-only anchored scan for primitive identifier READs that have
+    // no NodeStore row (call args, type-text internals). When set,
+    // emitReadName records an exact `read` markSpan row.
+    this.readScan = null;
+    // Assign/export owning a generic component's TYPE_PARAMS role
+    // (text alone is not enough — emitIdentifiedText needs the span).
+    this._componentTypeParamsOwner = null;
     // Module-scope component binding names → their component node
     // (BOTH modes): a name bound to a second component rejects — the
     // rebinding clobbers the first class silently, and the typed
@@ -784,6 +791,222 @@ class Emitter {
     return this.cframes.length > 0;
   }
 
+  // Start an anchored read-scan over the innermost open mark's source
+  // span (the call's `args` role, a type-decl declaration, …). Face only.
+  beginReadScan(ownerNode) {
+    if (!this.ts || this.b.source == null) return null;
+    const m = this.b.currentMark;
+    const id = isNode(ownerNode) ? this.stores.idOf(ownerNode) : null;
+    if (m === null || id === null || m.sourceStart == null || m.sourceEnd == null) return null;
+    return { nodeId: id, start: m.sourceStart, end: m.sourceEnd, at: m.sourceStart };
+  }
+
+  withReadScan(ownerNode, fn) {
+    if (!this.ts) return fn();
+    const prev = this.readScan;
+    this.readScan = this.beginReadScan(ownerNode);
+    try {
+      return fn();
+    } finally {
+      this.readScan = prev;
+    }
+  }
+
+  // Skip commas / whitespace / open-parens so the next take/advance
+  // lands on an argument or type token.
+  skipReadScanTrivia() {
+    const s = this.readScan;
+    if (s == null || s.at == null || this.b.source == null) return;
+    const src = this.b.source;
+    let i = s.at;
+    while (i < s.end && /[\s,(]/.test(src[i])) i++;
+    s.at = i;
+  }
+
+  // Advance the cursor past a non-identifier argument (quoted literal
+  // or registered node). Honest null when the cursor cannot consume it.
+  advanceReadScan(arg) {
+    const s = this.readScan;
+    if (s == null || s.at == null || this.b.source == null) return;
+    this.skipReadScanTrivia();
+    if (s.at == null) return;
+    if (isNode(arg)) {
+      const id = this.stores.idOf(arg);
+      const sp = id !== null ? this.stores.selfSpan(id) : null;
+      s.at = sp !== null ? Math.max(s.at, sp[1]) : null;
+      return;
+    }
+    if (typeof arg === 'string' && arg.length >= 2 && (arg[0] === '"' || arg[0] === "'")) {
+      const src = this.b.source;
+      let i = s.at;
+      if (i >= s.end || (src[i] !== '"' && src[i] !== "'")) {
+        s.at = null;
+        return;
+      }
+      const q = src[i++];
+      while (i < s.end && src[i] !== q) {
+        if (src[i] === '\\') i++;
+        i++;
+      }
+      s.at = i < s.end ? i + 1 : null;
+      return;
+    }
+    if (typeof arg === 'string') {
+      const at = this.b.source.indexOf(arg, s.at);
+      s.at = at >= 0 && at + arg.length <= s.end ? at + arg.length : null;
+      return;
+    }
+    s.at = null;
+  }
+
+  // Next word-boundary match of `name` inside the scan window; advances
+  // the cursor. Null + kills the scan when the name cannot be anchored.
+  takeReadSpan(name) {
+    const s = this.readScan;
+    if (s == null || s.at == null || this.b.source == null) return null;
+    this.skipReadScanTrivia();
+    if (s.at == null) return null;
+    const re = new RegExp(`(?<![\\w$])${name.replace(/\$/g, '\\$&')}(?![\\w$])`, 'g');
+    re.lastIndex = s.at;
+    const m = re.exec(this.b.source);
+    if (m === null || m.index + name.length > s.end) {
+      s.at = null;
+      return null;
+    }
+    s.at = m.index + name.length;
+    return [m.index, m.index + name.length];
+  }
+
+  // Emit an identifier READ.
+  //
+  //   1. Open mark's source span IS the name, and either the mark has
+  //      already emitted leading bytes (paren-less call's inserted `(`)
+  //      or `unwrap` (reactive `.value` / member `this.` prefix) — re-mark
+  //      the same (nodeId, role) around the bare name for an exact row
+  //      nested inside the cover. A plain target/operand mark that emits
+  //      ONLY the name must not re-mark (that would duplicate the row).
+  //   2. Else a live readScan — face-only `read` markSpan from the
+  //      anchored cursor (multi-arg lists, quote-normalized args).
+  //   3. Else the open mark is WIDER than the name (ternary `else x`,
+  //      annotation leftovers) — last word-boundary hit inside that
+  //      mark, face-only `read` row. Honest null when unanchorable.
+  //   4. Else emit unmarked.
+  emitReadName(name, { unwrap = false } = {}) {
+    const m = this.b.currentMark;
+    const src = this.b.source;
+    const markIsName = m !== null && src !== null
+      && src.slice(m.sourceStart, m.sourceEnd) === name;
+    if (markIsName && (unwrap || m.generatedStart < this.b.length)) {
+      this.b.mark(m.nodeId, m.role, () => this.b.emit(name));
+      return;
+    }
+    if (this.ts) {
+      let span = null;
+      let ownerId = null;
+      // Path 2: live readScan. takeReadSpan null means this name is
+      // not the next scan item (nested emit under a complex arg) —
+      // fall through to path 3 rather than giving up.
+      if (this.readScan != null) {
+        span = this.takeReadSpan(name);
+        if (span != null) ownerId = this.readScan.nodeId;
+      }
+      if (span == null && !markIsName && m !== null && src !== null
+          && m.sourceStart != null && m.sourceEnd != null && m.nodeId != null) {
+        const re = new RegExp(`(?<![\\w$])${name.replace(/\$/g, '\\$&')}(?![\\w$])`, 'g');
+        re.lastIndex = m.sourceStart;
+        let hit = null;
+        let sm;
+        while ((sm = re.exec(src)) !== null && sm.index + name.length <= m.sourceEnd) {
+          hit = sm;
+        }
+        if (hit !== null) {
+          span = [hit.index, hit.index + name.length];
+          ownerId = m.nodeId;
+        }
+      }
+      if (span != null && ownerId != null) {
+        this.b.markSpan(ownerId, 'read', span[0], span[1], () => this.b.emit(name));
+        return;
+      }
+    }
+    this.b.emit(name);
+  }
+
+  // Type-syntax keywords — not identifier reads. Primitive type names
+  // (`string`/`number`/…) and modifiers the census still walks
+  // (`readonly`/`unknown`) are NOT in this set: they need exact `read`
+  // rows like any other type-internal name.
+  static TYPE_READ_KEYWORDS = new Set([
+    'type', 'export', 'interface', 'extends', 'implements',
+    'unique', 'infer', 'keyof', 'typeof', 'in', 'out', 'as', 'is',
+    'asserts', 'from', 'of', 'void', 'null', 'undefined', 'any',
+    'never', 'true', 'false', 'const', 'enum', 'new',
+  ]);
+
+  // Emit `text` with a face-only exact `read` row on every non-keyword
+  // identifier, anchored by forward search in [scanStart, scanEnd).
+  // Renderer respacing / inserted braces stay honest: a name the scan
+  // cannot find emits unmarked; a wrong guess is never invented.
+  emitIdentifiedText(ownerId, scanStart, scanEnd, text) {
+    if (!this.ts || ownerId == null || this.b.source == null || text == null
+        || scanStart == null || scanEnd == null) {
+      this.b.emit(text);
+      return;
+    }
+    let at = scanStart;
+    let last = 0;
+    const re = /[A-Za-z_$][\w$]*/g;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      if (Emitter.TYPE_READ_KEYWORDS.has(m[0])) continue;
+      if (m.index > last) this.b.emit(text.slice(last, m.index));
+      const wordRe = new RegExp(`(?<![\\w$])${m[0].replace(/\$/g, '\\$&')}(?![\\w$])`, 'g');
+      wordRe.lastIndex = at;
+      const sm = wordRe.exec(this.b.source);
+      if (sm !== null && sm.index + m[0].length <= scanEnd) {
+        this.b.markSpan(ownerId, 'read', sm.index, sm.index + m[0].length, () => this.b.emit(m[0]));
+        at = sm.index + m[0].length;
+      } else {
+        this.b.emit(m[0]);
+      }
+      last = m.index + m[0].length;
+    }
+    if (last < text.length) this.b.emit(text.slice(last));
+  }
+
+  // Call-argument list: open `(…)` and scan each arg so bare identifier
+  // reads record exact `read` rows. Face-only.
+  emitCallArgs(ownerNode, args, emitOne = (a) => this.callArg(a)) {
+    this.b.emit('(');
+    this.withReadScan(ownerNode, () => {
+      args.forEach((arg, i) => {
+        if (i > 0) this.b.emit(', ');
+        this.emitScannedArg(arg, emitOne);
+      });
+    });
+    this.b.emit(')');
+  }
+
+  emitScannedArg(arg, emitOne) {
+    // Bare identifier — emitReadName takes the next word from the scan.
+    if (typeof arg === 'string' && isIdentifierName(arg)) {
+      emitOne(arg);
+      return;
+    }
+    // Everything else: advance past the source item, then emit with
+    // the outer scan cleared so nested bare reads (arrow bodies,
+    // ternary else) use path-3 mark search instead of stealing the
+    // call's cursor.
+    if (this.readScan != null) this.advanceReadScan(arg);
+    const prev = this.readScan;
+    this.readScan = null;
+    try {
+      emitOne(arg);
+    } finally {
+      this.readScan = prev;
+    }
+  }
+
   // Emit an unwrapped reactive read: `count` → `count.value`. When the
   // innermost open mark's SOURCE SPAN is exactly this identifier (the
   // operand/value/target role of the read site), the bare identifier
@@ -792,16 +1015,9 @@ class Emitter {
   // (one-to-many; serialization prefers the exact row, so a
   // breakpoint on the read lands on the identifier). Any other
   // enclosing span (a spread args role, a lowered construct's $self)
-  // gains no inner row — re-marking it around the identifier would
-  // serialize a name row whose source text is not the identifier.
+  // gains a face-only `read` row when a readScan is live.
   reactiveRead(name) {
-    const m = this.b.currentMark;
-    const src = this.b.source;
-    if (m !== null && src !== null && src.slice(m.sourceStart, m.sourceEnd) === name) {
-      this.b.mark(m.nodeId, m.role, () => this.b.emit(name));
-    } else {
-      this.b.emit(name);
-    }
+    this.emitReadName(name, { unwrap: true });
     this.b.emit('.value');
   }
 
@@ -812,14 +1028,12 @@ class Emitter {
   // the name re-marks the same (nodeId, role) — an exact row on the
   // read site inside the role's cover row over the lowered form.
   memberRead(name, reactive) {
-    const m = this.b.currentMark;
-    const src = this.b.source;
+    // The `this.` prefix is emitted first so emitReadName sees leading
+    // bytes already written when the open mark's span IS the name —
+    // that arms the re-mark path (unwrap alone would be wrong here:
+    // a bare name mark with no prior bytes must not re-mark).
     this.b.emit((this.renderSelf ?? 'this') + '.');
-    if (m !== null && src !== null && src.slice(m.sourceStart, m.sourceEnd) === name) {
-      this.b.mark(m.nodeId, m.role, () => this.b.emit(name));
-    } else {
-      this.b.emit(name);
-    }
+    this.emitReadName(name, { unwrap: true });
     if (reactive) this.b.emit('.value');
   }
 
@@ -937,7 +1151,26 @@ class Emitter {
   // the emitted bytes equal the recorded span verbatim, cover
   // otherwise — the builder decides, never a declaration).
   tsAnnotate(node, role, text) {
-    this.b.tsOnly(() => this.mark(node, role, () => this.b.emit(`: ${text}`)));
+    this.b.tsOnly(() => this.mark(node, role, () => {
+      if (text == null || this.b.source == null) {
+        this.b.emit(`: ${text}`);
+        return;
+      }
+      const m = this.b.currentMark;
+      const id = this.stores.idOf(node);
+      this.b.emit(': ');
+      // Annotation role spans include the `:`; scan type names after it.
+      let at = m?.sourceStart ?? null;
+      if (at != null) {
+        const src = this.b.source;
+        while (at < m.sourceEnd && /\s/.test(src[at])) at++;
+        if (at < m.sourceEnd && src[at] === ':') {
+          at++;
+          while (at < m.sourceEnd && /\s/.test(src[at])) at++;
+        }
+      }
+      this.emitIdentifiedText(id, at, m?.sourceEnd ?? null, text);
+    }));
   }
 
   // A function's TS-face return annotation, emitted after its param
@@ -1018,7 +1251,14 @@ class Emitter {
     this.b.tsOnly(() => {
       this.b.emit(pad);
       this.mark(s, '$self', () => this.mark(s, 'declaration', () => {
-        this.b.emit(lines.join('\n' + pad));
+        const id = this.stores.idOf(s);
+        const m = this.b.currentMark;
+        const text = lines.join('\n' + pad);
+        if (id != null && m?.sourceStart != null) {
+          this.emitIdentifiedText(id, m.sourceStart, m.sourceEnd, text);
+        } else {
+          this.b.emit(text);
+        }
       }));
       this.b.emit('\n');
     });
@@ -2363,8 +2603,15 @@ class Emitter {
   emitSpecifiers(list) {
     list.forEach((s, i) => {
       if (i > 0) this.b.emit(', ');
-      if (isNode(s)) this.b.emit(`${s[0]} as ${s[1]}`);
-      else this.b.emit(s);
+      if (isNode(s)) {
+        this.emitReadName(s[0]);
+        this.b.emit(' as ');
+        this.emitReadName(s[1]);
+      } else if (typeof s === 'string' && isIdentifierName(s)) {
+        this.emitReadName(s);
+      } else {
+        this.b.emit(s);
+      }
     });
   }
 
@@ -2380,16 +2627,22 @@ class Emitter {
     const specs = node.slice(1, -1);
     this.mark(node, '$self', () => {
       this.b.emit('import ');
-      specs.forEach((spec, i) => {
-        if (i > 0) this.b.emit(', ');
-        if (spec === '{}') this.b.emit('{}');
-        else if (typeof spec === 'string') this.b.emit(spec);
-        else if (spec[0] === '*') this.b.emit(`* as ${spec[1]}`);
-        else {
-          this.b.emit('{ ');
-          this.emitSpecifiers(spec);
-          this.b.emit(' }');
-        }
+      this.withReadScan(node, () => {
+        specs.forEach((spec, i) => {
+          if (i > 0) this.b.emit(', ');
+          if (spec === '{}') this.b.emit('{}');
+          else if (typeof spec === 'string') {
+            if (isIdentifierName(spec)) this.emitReadName(spec);
+            else this.b.emit(spec);
+          } else if (spec[0] === '*') {
+            this.b.emit('* as ');
+            this.emitReadName(spec[1]);
+          } else {
+            this.b.emit('{ ');
+            this.emitSpecifiers(spec);
+            this.b.emit(' }');
+          }
+        });
       });
       this.b.emit(' from ');
       {
@@ -2497,7 +2750,9 @@ class Emitter {
             const prevSchemaName = this._schemaName;
             const prevComponentName = this._componentName;
             const prevComponentTypeParams = this._componentTypeParams;
+            const prevComponentTypeParamsOwner = this._componentTypeParamsOwner;
             this._componentTypeParams = null;
+            this._componentTypeParamsOwner = null;
             if (isNode(spec[2]) && spec[2][0] === 'schema') this._schemaName = spec[1];
             if (this.isComponentDecl(spec[2]) && typeof spec[1] === 'string') {
               this._componentName = spec[1];
@@ -2505,11 +2760,13 @@ class Emitter {
               // TYPE_PARAMS role rides to the lowered class, same
               // channel as the Assign path.
               this._componentTypeParams = this.annotationText(spec, 'typeParams');
+              this._componentTypeParamsOwner = spec;
             }
             this.mark(spec, 'value', () => this.withExpression(() => this.expr(spec[2])));
             this._schemaName = prevSchemaName;
             this._componentName = prevComponentName;
             this._componentTypeParams = prevComponentTypeParams;
+            this._componentTypeParamsOwner = prevComponentTypeParamsOwner;
           })));
           this.b.emit(';');
           if (this.ts && typeof spec[1] === 'string' && this.componentInfo.has(spec[2])) {
@@ -2769,18 +3026,280 @@ class Emitter {
     this.mark(node, '$self', () => {
       this.b.emit('__schema(');
       this.mark(node, 'body', () => {
-        const segments = descriptorSegments(
-          descriptor, schemaName, fns, fns.get('adapter') ?? null, story?.thisTypes ?? null);
-        for (const seg of segments) {
-          if (typeof seg === 'string') this.b.emit(seg);
-          else this.b.tsOnly(() => this.b.emit(seg.ts));
-        }
+        // Face: emit the same JSON descriptorSegments would, but wrap
+        // each source field/type name in an exact `read` markSpan so
+        // the Mapping Audit census does not count them against the
+        // synthetic `body` cover. JS mode is unchanged
+        // (emitReadName / markSpan no-op when !this.ts).
+        this.emitSchemaDescriptor(
+          node, descriptor, schemaName, fns, fns.get('adapter') ?? null, story?.thisTypes ?? null);
       });
       this.b.emit(')');
       if (story !== null && story.constType !== null) {
         this.b.tsOnly(() => this.b.emit(` as unknown as ${story.constType}`));
       }
     });
+  }
+
+  // Exact `read` anchored in a node's role (or `$self`). The shared
+  // anti-theft path for same-named identifiers under a wider cover:
+  // role-span first, then a documented fallback — never invent a span.
+  //
+  //   role     — store role name, or null for the node's $self
+  //   pick     — 'exact' (span bytes === name), 'first', or 'last'
+  //   after    — optional regex source matched before the name
+  //              (e.g. `extends\\s+` for component extends tags)
+  //   unwrap   — forwarded to emitReadName on the 'read' fallback
+  //   fallback — 'read' (emitReadName), 'bare' (unmarked emit)
+  emitRoleRead(owner, name, {
+    role = null,
+    pick = 'first',
+    after = null,
+    unwrap = false,
+    fallback = 'read',
+  } = {}) {
+    const emitFallback = () => {
+      if (fallback === 'bare') this.b.emit(name);
+      else this.emitReadName(name, { unwrap });
+    };
+    if (!this.ts || this.b.source == null || !isIdentifierName(name) || owner == null) {
+      emitFallback();
+      return;
+    }
+    const id = this.stores.idOf(owner);
+    if (id == null) {
+      emitFallback();
+      return;
+    }
+    let start = null;
+    let end = null;
+    if (role != null) {
+      const r = this.stores.role(id, role);
+      if (r?.sourceStart != null && r.sourceEnd != null) {
+        start = r.sourceStart;
+        end = r.sourceEnd;
+      }
+    } else {
+      const sp = this.stores.selfSpan(id);
+      if (sp != null) {
+        start = sp[0];
+        end = sp[1];
+      }
+    }
+    if (start == null || end == null) {
+      emitFallback();
+      return;
+    }
+    const src = this.b.source;
+    let at = null;
+    if (after != null) {
+      const re = new RegExp(`${after}(${name.replace(/\$/g, '\\$&')})(?![\\w$])`);
+      const m = src.slice(start, end).match(re);
+      if (m != null) at = start + m.index + m[0].length - name.length;
+    } else if (pick === 'exact') {
+      if (src.slice(start, end) === name) at = start;
+    } else {
+      const re = new RegExp(`(?<![\\w$])${name.replace(/\$/g, '\\$&')}(?![\\w$])`, 'g');
+      re.lastIndex = start;
+      let hit = null;
+      let sm;
+      while ((sm = re.exec(src)) !== null && sm.index + name.length <= end) {
+        hit = sm;
+        if (pick === 'first') break;
+      }
+      if (hit != null) at = hit.index;
+    }
+    if (at == null) {
+      emitFallback();
+      return;
+    }
+    this.b.markSpan(id, 'read', at, at + name.length, () => this.b.emit(name));
+  }
+
+  // Quoted DOM name ('tag' / 'attr' / 'event') with an exact `read` row.
+  // Pass `pair` for attr/event keys so path-3 cannot steal a same-named
+  // RHS (`title: title` → key must not last-hit the value).
+  emitQuotedDomName(name, pair = null) {
+    this.b.emit("'");
+    if (pair != null) this.emitPairKeyRead(pair, name);
+    else this.emitReadName(name);
+    this.b.emit("'");
+  }
+
+  // `extends <tag>` — first match after `extends` in the component $self
+  // (never a later same-named render tag).
+  emitExtendsTag(node, tag) {
+    this.emitRoleRead(node, tag, { after: 'extends\\s+', fallback: 'bare' });
+  }
+
+  // createElement('…') tag — callee role, exact (never a later same name).
+  emitRenderTagName(node, tag) {
+    this.emitRoleRead(node, tag, { role: 'callee', pick: 'exact' });
+  }
+
+  // Pair key (`value` in `value <=> …`, `ref` in `ref: …`) — key role.
+  emitPairKeyRead(pair, name) {
+    this.emitRoleRead(pair, name, { role: 'key' });
+  }
+
+  // Face-only glyph for a source identifier the JS lowering never
+  // spells (`ref:`, `slot`, suppressed `key:`). Parenthesized object
+  // so it is an expression statement, not a block/label.
+  emitFaceOnlyRead(emitName) {
+    this.b.tsOnly(() => {
+      this.b.emit('({ ');
+      emitName();
+      this.b.emit(': 0 }); ');
+    });
+  }
+
+  // Bare text child (`label label`) — last hit in the tag $self.
+  emitRenderTextRead(tagNode, name) {
+    this.emitRoleRead(tagNode, name, { pick: 'last', unwrap: true });
+  }
+
+  // Quoted JSON string whose interior is an exact `read` row when the
+  // parser recorded a source span for the identifier.
+  emitQuotedSchemaName(ownerId, name, start, end) {
+    this.b.emit('"');
+    if (this.ts && ownerId != null && start != null && end != null
+        && this.b.source != null
+        && this.b.source.slice(start, end) === name) {
+      this.b.markSpan(ownerId, 'read', start, end, () => this.b.emit(name));
+    } else {
+      this.b.emit(name);
+    }
+    this.b.emit('"');
+  }
+
+  // Byte-identical to descriptorSegments(...).join, with exact `read`
+  // rows on field names / type names (and identified text inside
+  // compiled callable bodies).
+  emitSchemaDescriptor(node, descriptor, schemaName, fns, adapterCode, thisTypes) {
+    const ownerId = this.stores.idOf(node);
+    this.b.emit('{kind: ');
+    this.emitQuotedSchemaName(ownerId, descriptor.kind, descriptor.kindStart, descriptor.kindEnd);
+    if (schemaName) this.b.emit(`, name: ${JSON.stringify(schemaName)}`);
+    this.b.emit(', entries: [');
+    descriptor.entries.forEach((e, i) => {
+      if (i > 0) this.b.emit(', ');
+      this.emitSchemaEntry(ownerId, e, fns.get(i), thisTypes?.get(i) ?? null);
+    });
+    this.b.emit(']');
+    if (adapterCode) this.b.emit(`, adapter: ${adapterCode}`);
+    this.b.emit('}');
+  }
+
+  emitSchemaEntry(ownerId, e, fnCode, thisType) {
+    switch (e.tag) {
+      case 'field': {
+        this.b.emit('{tag: "field", name: ');
+        this.emitQuotedSchemaName(ownerId, e.name, e.nameStart, e.nameEnd);
+        this.b.emit(`, modifiers: ${JSON.stringify(e.modifiers)}`);
+        this.b.emit(', typeName: ');
+        this.emitQuotedSchemaName(ownerId, e.typeName, e.typeStart, e.typeEnd);
+        this.b.emit(`, array: ${e.array ? 'true' : 'false'}`);
+        if (e.unique) this.b.emit(', unique: true');
+        if (e.literals) this.b.emit(`, literals: ${JSON.stringify(e.literals)}`);
+        if (e.coerce) {
+          this.b.emit(', coerce: true');
+          if (e.coercer) this.b.emit(`, coercer: ${JSON.stringify(e.coercer)}`);
+        }
+        if (e.constraints) {
+          const c = [];
+          const { min, max, default: def, regex } = e.constraints;
+          if (min !== undefined) c.push(`min: ${min}`);
+          if (max !== undefined) c.push(`max: ${max}`);
+          if (def !== undefined) c.push(`default: ${typeof def === 'string' ? JSON.stringify(def) : def === null ? 'null' : String(def)}`);
+          if (regex !== undefined) c.push(`regex: ${regex.toString()}`);
+          if (c.length) this.b.emit(`, constraints: {${c.join(', ')}}`);
+        }
+        if (e.attrs) {
+          const keys = Object.keys(e.attrs).sort();
+          this.b.emit(`, attrs: {${keys.map((k) => `${k}: ${JSON.stringify(e.attrs[k])}`).join(', ')}}`);
+        }
+        if (fnCode !== undefined) {
+          this.b.emit(', transform: ');
+          this.emitSchemaFn(ownerId, e.transformTokens, fnCode, thisType);
+        }
+        this.b.emit('}');
+        return;
+      }
+      case 'computed':
+      case 'method':
+      case 'derived':
+      case 'hook':
+      case 'scope':
+      case 'defaultScope': {
+        this.b.emit(`{tag: ${JSON.stringify(e.tag)}, name: `);
+        this.emitQuotedSchemaName(
+          ownerId, e.name, e.nameStart ?? e.start,
+          e.nameEnd ?? (e.start != null ? e.start + e.name.length : null));
+        this.b.emit(', fn: ');
+        this.emitSchemaFn(ownerId, e.bodyTokens, fnCode, thisType);
+        this.b.emit('}');
+        return;
+      }
+      case 'union-member': {
+        this.b.emit('{tag: "union-member", name: ');
+        this.emitQuotedSchemaName(ownerId, e.name, e.nameStart, e.nameEnd);
+        this.b.emit('}');
+        return;
+      }
+      case 'directive': {
+        if (e.name === 'on' && e.args?.[0]?.field != null) {
+          this.b.emit('{tag: "directive", name: ');
+          this.emitQuotedSchemaName(ownerId, e.name, e.nameStart, e.nameEnd);
+          this.b.emit(', args: [{field: ');
+          this.emitQuotedSchemaName(ownerId, e.args[0].field, e.fieldStart, e.fieldEnd);
+          this.b.emit('}]}');
+          return;
+        }
+        this.b.emit(entryLiteral(e, fnCode));
+        return;
+      }
+      default: {
+        // ensure / enum-member / other directives — shared literal
+        // until those tags grow recorded name spans.
+        if (thisType !== null && typeof fnCode === 'object' && fnCode != null) {
+          const segs = descriptorSegments(
+            { kind: 'input', entries: [e] }, null,
+            new Map([[0, fnCode]]), null, new Map([[0, thisType]]));
+          const joined = segs.map((s) => typeof s === 'string' ? s : s.ts).join('');
+          const open = joined.indexOf('entries: [') + 'entries: ['.length;
+          const close = joined.lastIndexOf(']}');
+          this.b.emit(joined.slice(open, close));
+        } else {
+          this.b.emit(entryLiteral(e, fnCode));
+        }
+        return;
+      }
+    }
+  }
+
+  emitSchemaFn(ownerId, tokens, fnCode, thisType) {
+    if (fnCode == null) return;
+    const code = typeof fnCode === 'string' ? fnCode : fnCode.code;
+    const start = tokens?.length ? tokens[0].start : null;
+    const end = tokens?.length
+      ? (tokens[tokens.length - 1].end ?? tokens[tokens.length - 1].start)
+      : null;
+    // Face-only `this: T` insert: emit the callable in pieces, but run
+    // emitIdentifiedText over BOTH sides so body identifiers (which
+    // sit AFTER the param list) still get exact `read` rows.
+    if (thisType !== null && typeof fnCode === 'object' && fnCode.thisAt != null) {
+      const { thisAt } = fnCode;
+      const head = code.slice(0, thisAt);
+      const tail = code.slice(thisAt);
+      if (start != null && this.ts) this.emitIdentifiedText(ownerId, start, end, head);
+      else this.b.emit(head);
+      this.b.tsOnly(() => this.b.emit(`this: ${thisType}${code[thisAt] === ')' ? '' : ', '}`));
+      if (start != null && this.ts) this.emitIdentifiedText(ownerId, start, end, tail);
+      else this.b.emit(tail);
+      return;
+    }
+    if (start != null && this.ts) this.emitIdentifiedText(ownerId, start, end, code);
+    else this.b.emit(code);
   }
 
   static schemaFail(message, at) {
@@ -3362,7 +3881,9 @@ class Emitter {
 
   forInCore(node, vars, iter, step, guard, body, ind) {
     this.mark(node, '$self', () => {
-      const markVar = (v) => this.mark(node, 'vars', () => (typeof v === 'string' ? this.b.emit(v) : this.withPattern(() => this.expr(v), true)));
+      const markVar = (v) => this.mark(node, 'vars', () => (typeof v === 'string'
+        ? this.emitReadName(v)
+        : this.withPattern(() => this.expr(v), true)));
       // Pattern loop variables emit in the plain of-loop and the
       // index-variable forms (both destructure); the range/step
       // lowerings iterate through the variable itself.
@@ -3520,7 +4041,9 @@ class Emitter {
 
   forOfCore(node, vars, obj, own, guard, body, ind) {
     this.mark(node, '$self', () => {
-      const markVar = (v) => this.mark(node, 'vars', () => (typeof v === 'string' ? this.b.emit(v) : this.withPattern(() => this.expr(v), true)));
+      const markVar = (v) => this.mark(node, 'vars', () => (typeof v === 'string'
+        ? this.emitReadName(v)
+        : this.withPattern(() => this.expr(v), true)));
       // An impure object the own-filter or value line would re-read
       // binds once ahead of the header.
       const rereads = own || vars.length === 2;
@@ -3663,7 +4186,9 @@ class Emitter {
   // belongs to an annotated loop node; comprehension clauses carry no
   // roles, so their marks fall back to plain emission.
   clauseHeader(node, kind, vars, iter, aux, pad = null) {
-    const markVar = (v) => this.mark(node, 'vars', () => (typeof v === 'string' ? this.b.emit(v) : this.withPattern(() => this.expr(v), true)));
+    const markVar = (v) => this.mark(node, 'vars', () => (typeof v === 'string'
+      ? this.emitReadName(v)
+      : this.withPattern(() => this.expr(v), true)));
     const setups = [];
     if (kind === 'for-of') {
       this.checkForOfPatternKey(vars, aux === true);
@@ -4791,6 +5316,20 @@ class Emitter {
       // the declaration target itself) emits through this.b directly
       // and never reaches this path — suppression by construction
       if (typeof node === 'string') {
+        // Bare `break`/`continue` are reserved control transfers, not
+        // identifier reads — legality before emitReadName would claim them.
+        if (node === 'break' || node === 'continue') {
+          if (this.ctrlDepth === 0) {
+            const err = this.positionedError(node, `emitter: '${node}' outside a loop${node === 'break' ? ' or switch' : ''}`);
+            if (typeof err.start !== 'number' && this.b.currentMark) {
+              err.start = this.b.currentMark.sourceStart;
+              err.end = this.b.currentMark.sourceEnd;
+            }
+            throw err;
+          }
+          this.b.emit(node);
+          return;
+        }
         const rewrite = this.bareRewrite(node);
         if (rewrite === 'reactive') return this.reactiveRead(node);
         if (rewrite === 'member') this.notePlainRenderRead(node);
@@ -4799,14 +5338,10 @@ class Emitter {
         // `@member` chains) is the ctx parameter — the factory methods
         // run unbound, so a literal `this` would be the block handle.
         if (node === 'this' && this.renderSelf !== null) return this.b.emit(this.renderSelf);
-      }
-      if ((node === 'break' || node === 'continue') && this.ctrlDepth === 0) {
-        const err = this.positionedError(node, `emitter: '${node}' outside a loop${node === 'break' ? ' or switch' : ''}`);
-        if (typeof err.start !== 'number' && this.b.currentMark) {
-          err.start = this.b.currentMark.sourceStart;
-          err.end = this.b.currentMark.sourceEnd;
-        }
-        throw err;
+        // A bare identifier READ — exact by open-mark re-mark when the
+        // role span IS the name; otherwise an anchored `read` row when
+        // a readScan is live (call args).
+        if (isIdentifierName(node)) return this.emitReadName(node);
       }
       this.b.emit(node);
       return;
@@ -5374,12 +5909,22 @@ class Emitter {
             'only at a module\'s top level; move the write there or drop the annotation');
         }
         if (this.moduleClassNames?.has(proto.head)) {
-          if (this.ts) this.b.tsOnly(() => this.mark(node, 'annotation', () =>
-            this.b.emit(`interface ${proto.head} { ${proto.member}: ${text} }\n`)));
+          if (this.ts) this.b.tsOnly(() => this.mark(node, 'annotation', () => {
+            const id = this.stores.idOf(node);
+            const m = this.b.currentMark;
+            this.b.emit(`interface ${proto.head} { ${proto.member}: `);
+            this.emitIdentifiedText(id, m?.sourceStart ?? null, m?.sourceEnd ?? null, text);
+            this.b.emit(' }\n');
+          }));
         } else if (!this.scopes[0].has(proto.head)) {
           const params = PROTO_GENERIC_PARAMS[proto.head] ?? '';
-          if (this.ts) this.b.tsOnly(() => this.mark(node, 'annotation', () =>
-            this.b.emit(`declare global { interface ${proto.head}${params} { ${proto.member}: ${text} } }\n`)));
+          if (this.ts) this.b.tsOnly(() => this.mark(node, 'annotation', () => {
+            const id = this.stores.idOf(node);
+            const m = this.b.currentMark;
+            this.b.emit(`declare global { interface ${proto.head}${params} { ${proto.member}: `);
+            this.emitIdentifiedText(id, m?.sourceStart ?? null, m?.sourceEnd ?? null, text);
+            this.b.emit(' } }\n');
+          }));
         } else {
           throw protoError(
             `emitter: the annotation on \`${proto.head}::${proto.member}\` cannot augment — ` +
@@ -5430,7 +5975,9 @@ class Emitter {
       const prevSchemaName = this._schemaName;
       const prevComponentName = this._componentName;
       const prevComponentTypeParams = this._componentTypeParams;
+      const prevComponentTypeParamsOwner = this._componentTypeParamsOwner;
       this._componentTypeParams = null;
+      this._componentTypeParamsOwner = null;
       if (isNode(node[2]) && node[2][0] === 'schema' && typeof node[1] === 'string') {
         this._schemaName = node[1];
       }
@@ -5440,11 +5987,13 @@ class Emitter {
         // the lowered class (componentExpr) through the same channel
         // as the name.
         this._componentTypeParams = this.annotationText(node, 'typeParams');
+        this._componentTypeParamsOwner = node;
       }
       this.mark(node, 'value', () => this.withExpression(() => this.expr(node[2])));
       this._schemaName = prevSchemaName;
       this._componentName = prevComponentName;
       this._componentTypeParams = prevComponentTypeParams;
+      this._componentTypeParamsOwner = prevComponentTypeParamsOwner;
       if (wrapParens) this.b.emit(')');
     })));
   }
@@ -6262,7 +6811,19 @@ class Emitter {
       // extends TOptionShape> extends __Component`), erased from JS.
       if (this.ts && this._componentTypeParams) {
         const tp = this._componentTypeParams;
-        this.b.tsOnly(() => this.b.emit(tp));
+        // Exact `read` rows on type-param names (`TOption`, bounds) —
+        // the TYPE_PARAMS role lives on the assign/export, not the
+        // component sexpr.
+        this.b.tsOnly(() => {
+          const owner = this._componentTypeParamsOwner;
+          const id = owner != null ? this.stores.idOf(owner) : null;
+          const role = id != null ? this.stores.role(id, 'typeParams') : null;
+          if (role?.sourceStart != null && role.sourceEnd != null) {
+            this.emitIdentifiedText(id, role.sourceStart, role.sourceEnd, tp);
+          } else {
+            this.b.emit(tp);
+          }
+        });
       }
       this.b.emit(` extends ${this.runtimeName('__Component')} {\n`);
       if (tsInfo !== null) this.tsComponentMemberDeclares(tsInfo, pad);
@@ -6297,8 +6858,12 @@ class Emitter {
         // The runtime's rest seam reads this: undeclared constructor
         // props collect into the reactive `rest` view and forward
         // onto the inherited element (the rest machinery lives on
-        // __Component).
-        this.b.emit(`${pad}static __extends = '${extendsTag}';\n`);
+        // __Component). Exact `read` on the extends tag — FIRST
+        // `extends <tag>` in the component span (path-3 last-hit
+        // would steal a later render-tag of the same name).
+        this.b.emit(`${pad}static __extends = '`);
+        this.emitExtendsTag(node, extendsTag);
+        this.b.emit(`';\n`);
       }
       if (tsInfo !== null) this.tsComponentCtor(tsInfo, pad);
       this.b.emit(`${pad}_init(props`);
@@ -6494,8 +7059,11 @@ class Emitter {
           if (Emitter.containsAwait(block)) this.b.emit('async ');
           if (Emitter.containsYield(block)) this.b.emit('*');
           this.mark(owner, 'target', () => this.mark(owner, 'key', () => this.b.emit(name)));
+          // Params mark (not the method $self): emitReadName path-3
+          // must not steal a later same-named body read (`(e) -> e…`,
+          // `(val = 'x') -> … val`).
           this.b.emit('(');
-          this.emitParams(params);
+          this.mark(func, 'params', () => this.emitParams(params));
           this.b.emit(')');
           this.tsReturnAnnotation(func, Emitter.containsAwait(block), isVoid, owner);
           this.b.emit(' ');
@@ -7131,8 +7699,12 @@ class Emitter {
     const isSvg = R.svgDepth > 0 || SVG_ONLY_TAGS.has(tag);
     this.renderLine(node, () => {
       this.b.emit(isSvg
-        ? `${el} = document.createElementNS('${Emitter.SVG_NS}', '${tag}')`
-        : `${el} = document.createElement('${tag}')`);
+        ? `${el} = document.createElementNS('${Emitter.SVG_NS}', '`
+        : `${el} = document.createElement('`);
+      // Exact `read` on the tag name inside the element's $self cover
+      // (render tags otherwise collapse to "thi"/"_el").
+      this.emitRenderTagName(node, tag);
+      this.b.emit(`')`);
     });
     if (id) this.renderLine(node, () => this.b.emit(`${el}.id = '${id}'`));
     this.bindInheritedTarget(node, tag, el);
@@ -7146,7 +7718,7 @@ class Emitter {
       R.pendingClassEl = el;
     }
     if (isSvg) R.svgDepth++;
-    this.renderChildren(el, args);
+    this.renderChildren(el, args, node);
     if (isSvg) R.svgDepth--;
     if (classes.length > 0) {
       if (R.pendingClassArgs.length === 1) {
@@ -7184,8 +7756,10 @@ class Emitter {
     const isSvg = R.svgDepth > 0 || SVG_ONLY_TAGS.has(tag);
     this.renderLine(node, () => {
       this.b.emit(isSvg
-        ? `${el} = document.createElementNS('${Emitter.SVG_NS}', '${tag}')`
-        : `${el} = document.createElement('${tag}')`);
+        ? `${el} = document.createElementNS('${Emitter.SVG_NS}', '`
+        : `${el} = document.createElement('`);
+      this.emitRenderTagName(node, tag);
+      this.b.emit(`')`);
     });
     if (id) this.renderLine(node, () => this.b.emit(`${el}.id = '${id}'`));
     this.bindInheritedTarget(node, tag, el);
@@ -7201,7 +7775,7 @@ class Emitter {
     ];
     R.pendingClassEl = el;
     if (isSvg) R.svgDepth++;
-    this.renderChildren(el, children);
+    this.renderChildren(el, children, node);
     if (isSvg) R.svgDepth--;
     const parts = R.pendingClassArgs;
     if (parts.length > 0) {
@@ -7242,7 +7816,10 @@ class Emitter {
   }
 
   // The shared child/attribute walk for element argument lists.
-  renderChildren(el, args) {
+  // `tagNode` is the call/tag owning these args — used so bare text
+  // children mark under the element's span (not the whole render
+  // $self, where path-3 last-hit would steal a later same name).
+  renderChildren(el, args, tagNode = null) {
     for (const arg of args) {
       if (isFunc(arg)) {
         // A PARAMETERIZED function has no render-child reading — the
@@ -7260,14 +7837,14 @@ class Emitter {
           for (const child of block.slice(1)) {
             if (isObject(child)) {
               this.renderAttributes(el, child);
-            } else if (!this.renderBareFlag(el, child)) {
+            } else if (!this.renderBareFlag(el, child, tagNode)) {
               const v = this.renderNode(child);
               if (v == null) continue;
               this.renderLine(null, () => this.b.emit(`${el}.appendChild(${v})`));
             }
           }
         } else if (block) {
-          if (!this.renderBareFlag(el, block)) {
+          if (!this.renderBareFlag(el, block, tagNode)) {
             const v = this.renderNode(block);
             if (v != null) this.renderLine(null, () => this.b.emit(`${el}.appendChild(${v})`));
           }
@@ -7288,10 +7865,51 @@ class Emitter {
           const t = this.newRenderText();
           if (scopeKind === 'loop-reactive') {
             this.renderLine(null, () => this.b.emit(`${t} = document.createTextNode('')`));
-            this.renderEffect(null, () => this.b.emit(`${t}.data = ${arg};`));
+            this.renderEffect(tagNode, () => {
+              this.b.emit(`${t}.data = `);
+              this.emitRenderTextRead(tagNode, arg);
+              this.b.emit(';');
+            });
           } else {
-            this.renderLine(null, () => this.b.emit(`${t} = document.createTextNode(${arg})`));
+            this.renderLine(null, () => {
+              this.b.emit(`${t} = document.createTextNode(`);
+              this.emitRenderTextRead(tagNode, arg);
+              this.b.emit(')');
+            });
           }
+          this.renderLine(null, () => this.b.emit(`${el}.appendChild(${t})`));
+          continue;
+        }
+        // Members/reactives shadow HTML tags (same order as renderNode)
+        // — otherwise `label label` would take isHtmlTag and lose the
+        // tag-anchored text read.
+        const bareRead = base === arg ? this.resolveBareRead(arg) : null;
+        if (bareRead === 'reactive' || bareRead === 'member-reactive') {
+          const t = this.newRenderText();
+          this.renderLine(null, () => this.b.emit(`${t} = document.createTextNode('')`));
+          this.renderEffect(tagNode, () => {
+            this.b.emit(`${t}.data = `);
+            if (bareRead === 'member-reactive') {
+              this.b.emit((this.renderSelf ?? 'this') + '.');
+              this.emitRenderTextRead(tagNode, arg);
+              this.b.emit('.value');
+            } else {
+              this.emitRenderTextRead(tagNode, arg);
+              this.b.emit('.value');
+            }
+            this.b.emit(';');
+          });
+          this.renderLine(null, () => this.b.emit(`${el}.appendChild(${t})`));
+          continue;
+        }
+        if (bareRead === 'member') {
+          const t = this.newRenderText();
+          this.renderLine(null, () => {
+            this.b.emit(`${t} = document.createTextNode(String(`);
+            this.b.emit((this.renderSelf ?? 'this') + '.');
+            this.emitRenderTextRead(tagNode, arg);
+            this.b.emit('))');
+          });
           this.renderLine(null, () => this.b.emit(`${el}.appendChild(${t})`));
           continue;
         }
@@ -7318,7 +7936,9 @@ class Emitter {
               '(a misspelling would silently set a boolean attribute); quote it, or spell `name: value`', this.rstate.node);
           }
           this.renderLine(null, () => {
-            this.b.emit(`${el}.setAttribute('${arg}', true`);
+            this.b.emit(`${el}.setAttribute(`);
+            this.emitQuotedDomName(arg);
+            this.b.emit(`, true`);
             if (this.ts) this.b.tsOnly(() => this.b.emit(' as any'));
             this.b.emit(')');
           });
@@ -7329,23 +7949,43 @@ class Emitter {
           this.renderLine(null, () => this.b.emit(`${t} = document.createTextNode(${arg})`));
         } else {
           const r = this.resolveBareRead(arg);
+          // Bare text: role-anchored last hit on the tag (never path-3
+          // under the render body — `label label` vs `opt.label`).
+          const emitText = () => {
+            if (typeof arg === 'string' && isIdentifierName(arg) && tagNode != null) {
+              if (r === 'member' || r === 'member-reactive') {
+                this.b.emit((this.renderSelf ?? 'this') + '.');
+                this.emitRenderTextRead(tagNode, arg);
+                if (r === 'member-reactive') this.b.emit('.value');
+                return;
+              }
+              if (r === 'reactive') {
+                this.emitRenderTextRead(tagNode, arg);
+                this.b.emit('.value');
+                return;
+              }
+              this.emitRenderTextRead(tagNode, arg);
+              return;
+            }
+            this.expr(arg);
+          };
           if (r === 'reactive' || r === 'member-reactive') {
             this.renderLine(null, () => this.b.emit(`${t} = document.createTextNode('')`));
-            this.renderEffect(null, () => {
+            this.renderEffect(tagNode, () => {
               this.b.emit(`${t}.data = `);
-              this.expr(arg);
+              emitText();
               this.b.emit(';');
             });
           } else if (r === 'member') {
             this.renderLine(null, () => {
               this.b.emit(`${t} = document.createTextNode(String(`);
-              this.expr(arg);
+              emitText();
               this.b.emit('))');
             });
           } else {
             this.renderLine(null, () => {
               this.b.emit(`${t} = document.createTextNode(`);
-              this.expr(arg);
+              emitText();
               this.b.emit(')');
             });
           }
@@ -7375,11 +8015,15 @@ class Emitter {
   // value keeps its text reading (the same shadowing precedence the
   // inline shorthand carries). Emits the empty-string serialization —
   // exactly what the static colon form (`disabled: true`) sets.
-  renderBareFlag(el, child) {
+  renderBareFlag(el, child, tagNode) {
     if (typeof child !== 'string' || !Emitter.BOOLEAN_ATTRS.has(child)) return false;
     if (this.renderVarKind(child, child) !== null) return false;
     if (this.resolveBareRead(child) !== null || this.inScope(child)) return false;
-    this.renderLine(null, () => this.b.emit(`${el}.setAttribute('${child}', '')`));
+    this.renderLine(null, () => {
+      this.b.emit(`${el}.setAttribute('`);
+      this.emitRenderTextRead(tagNode, child);
+      this.b.emit("', '')");
+    });
     return true;
   }
 
@@ -7413,6 +8057,9 @@ class Emitter {
     R.slotSeen = true;
     const v = this.newRenderVar('slot');
     this.renderLine(markNode, () => {
+      // Face-only exact `read` on `slot` — the lowering never spells
+      // the word in JS.
+      if (this.ts) this.emitFaceOnlyRead(() => this.emitReadName('slot'));
       const s = this.renderSelf ?? 'this';
       this.b.emit(`${v} = ${s}.children instanceof Node ? ${s}.children : (${s}.children != null ? ` +
         `document.createTextNode(String(${s}.children)) : document.createComment(''))`);
@@ -7453,15 +8100,22 @@ class Emitter {
     // placeholder at mount); module bindings and imports emit bare.
     let ctorRef;
     if (this.renderVarKind(name) !== null) {
-      ctorRef = () => this.b.emit(name);
+      ctorRef = () => this.emitReadName(name);
     } else {
       const r = this.resolveBareRead(name);
       if (r === 'member' || r === 'member-reactive') {
-        ctorRef = () => this.b.emit(`${this.renderSelf ?? 'this'}.${name}${r === 'member-reactive' ? '.value' : ''}`);
+        ctorRef = () => {
+          this.b.emit(`${this.renderSelf ?? 'this'}.`);
+          this.emitReadName(name, { unwrap: true });
+          if (r === 'member-reactive') this.b.emit('.value');
+        };
       } else if (r === 'reactive') {
-        ctorRef = () => this.b.emit(`${name}.value`);
+        ctorRef = () => {
+          this.emitReadName(name, { unwrap: true });
+          this.b.emit('.value');
+        };
       } else if (this.inScope(name) || (this.moduleBound !== undefined && this.moduleBound.has(name))) {
-        ctorRef = () => this.b.emit(name);
+        ctorRef = () => this.emitReadName(name);
       } else {
         throw this.positionedError(markNode ?? node,
           `emitter: component '${name}' is not defined in this module — a child component must be a module binding, ` +
@@ -7779,6 +8433,31 @@ class Emitter {
               p.fn();
               return;
             }
+            // `__bind_value__` from `value <=> …`: emit the bind chrome
+            // around an exact `read` on the source key (`value`).
+            if (this.ts && typeof p.key === 'string'
+                && p.key.startsWith('__bind_') && p.key.endsWith('__')
+                && p.pair != null) {
+              const pid = this.stores.idOf(p.pair);
+              const keyRole = pid != null ? this.stores.role(pid, 'key') : null;
+              const bound = p.key.slice(7, -2);
+              if (keyRole?.sourceStart != null && keyRole.sourceEnd != null
+                  && this.b.source?.slice(keyRole.sourceStart, keyRole.sourceEnd) === bound) {
+                this.b.emit('__bind_');
+                this.b.markSpan(pid, 'read', keyRole.sourceStart, keyRole.sourceEnd, () => this.b.emit(bound));
+                this.b.emit('__: ');
+                p.fn();
+                return;
+              }
+            }
+            // Key role, not path-3: `loading: loading` would otherwise
+            // map the key read onto the RHS.
+            if (this.ts && typeof p.key === 'string' && isIdentifierName(p.key)) {
+              this.emitPairKeyRead(p.pair, p.key);
+              this.b.emit(': ');
+              p.fn();
+              return;
+            }
             this.b.emit(`${p.key}: `);
             p.fn();
           };
@@ -7823,7 +8502,9 @@ class Emitter {
       Emitter.collectLeafNames(value, evUsed);
       const ev = Emitter.mintName('e', evUsed);
             this.renderLine(pair, () => {
-        this.b.emit(`if (${instVar}) ${elVar}.addEventListener('${event}', (${ev}) => ${this.runtimeName('__batch')}(() => (`);
+        this.b.emit(`if (${instVar}) ${elVar}.addEventListener(`);
+        this.emitQuotedDomName(event, pair);
+        this.b.emit(`, (${ev}) => ${this.runtimeName('__batch')}(() => (`);
         this.tsHandlerCast(() => this.withExpression(() => this.expr(value)));
         this.b.emit(`)(${ev})))`);
       });
@@ -7891,13 +8572,21 @@ class Emitter {
     if (typeof value === 'string') {
       if (this.renderVarKind(value) !== null) return null;
       const r = this.resolveBareRead(value);
-      if (r === 'member-reactive') return () => this.b.emit(`${this.renderSelf ?? 'this'}.${value}`);
-      if (r === 'reactive') return () => this.b.emit(value);
+      if (r === 'member-reactive') {
+        return () => {
+          this.b.emit(`${this.renderSelf ?? 'this'}.`);
+          this.emitReadName(value, { unwrap: true });
+        };
+      }
+      if (r === 'reactive') return () => this.emitReadName(value, { unwrap: true });
       return null;
     }
     if (isNode(value) && value[0] === '.' && value[1] === 'this' && value.length === 3 &&
         typeof value[2] === 'string' && this.memberIsReactive(value[2])) {
-      return () => this.b.emit(`${this.renderSelf ?? 'this'}.${value[2]}`);
+      return () => {
+        this.b.emit(`${this.renderSelf ?? 'this'}.`);
+        this.emitReadName(value[2], { unwrap: true });
+      };
     }
     return null;
   }
@@ -7939,13 +8628,16 @@ class Emitter {
         const evUsed = new Set();
         Emitter.collectLeafNames(value, evUsed);
         const ev = Emitter.mintName('e', evUsed);
-                this.renderLine(pair, () => {
+        this.renderLine(pair, () => {
           const self = this.renderSelf ?? 'this';
-          this.b.emit(`${el}.addEventListener('${eventName}', (${ev}) => ${this.runtimeName('__batch')}(() => `);
+          this.b.emit(`${el}.addEventListener(`);
+          this.emitQuotedDomName(eventName, pair);
+          this.b.emit(`, (${ev}) => ${this.runtimeName('__batch')}(() => `);
           if (typeof value === 'string' && this.renderVarKind(value) === null &&
               this.cframes[this.cframes.length - 1].members.has(value)) {
             if (this.ts) this.b.tsOnly(() => this.b.emit('('));
-            this.b.emit(`${self}.${value}`);
+            this.b.emit(`${self}.`);
+            this.mark(pair, 'value', () => this.emitReadName(value, { unwrap: true }));
             if (this.ts) this.b.tsOnly(() => this.b.emit(' as any)'));
             this.b.emit(`(${ev})`);
           } else {
@@ -8009,7 +8701,9 @@ class Emitter {
 
       if ((key === 'value' || key === 'checked') && this.renderReactive(value)) {
         this.renderEffect(pair, () => {
-          this.b.emit(`${el}.${key} = `);
+          this.b.emit(`${el}.`);
+          this.emitPairKeyRead(pair, key);
+          this.b.emit(' = ');
           this.renderExpr(value);
           this.b.emit(';');
         }, value);
@@ -8019,13 +8713,17 @@ class Emitter {
       if (key === 'innerHTML' || key === 'textContent' || key === 'innerText') {
         if (this.renderReactive(value)) {
           this.renderEffect(pair, () => {
-            this.b.emit(`${el}.${key} = `);
+            this.b.emit(`${el}.`);
+            this.emitPairKeyRead(pair, key);
+            this.b.emit(' = ');
             this.renderExpr(value);
             this.b.emit(';');
           }, value);
         } else {
           this.renderLine(pair, () => {
-            this.b.emit(`${el}.${key} = `);
+            this.b.emit(`${el}.`);
+            this.emitPairKeyRead(pair, key);
+            this.b.emit(' = ');
             this.renderExpr(value);
           });
         }
@@ -8035,7 +8733,9 @@ class Emitter {
       if (Emitter.BOOLEAN_ATTRS.has(key)) {
         if (this.renderReactive(value)) {
           this.renderEffect(pair, () => {
-            this.b.emit(`${el}.toggleAttribute('${key}', !!`);
+            this.b.emit(`${el}.toggleAttribute(`);
+            this.emitQuotedDomName(key, pair);
+            this.b.emit(`, !!`);
             this.renderExpr(value);
             this.b.emit(');');
           }, value);
@@ -8043,7 +8743,9 @@ class Emitter {
           this.renderLine(pair, () => {
             this.b.emit('if (');
             this.withExpression(() => this.expr(value));
-            this.b.emit(`) ${el}.setAttribute('${key}', '')`);
+            this.b.emit(`) ${el}.setAttribute(`);
+            this.emitQuotedDomName(key, pair);
+            this.b.emit(`, '')`);
           });
         }
         continue;
@@ -8055,11 +8757,17 @@ class Emitter {
           this.renderEffect(pair, () => {
             this.b.emit('{ const __v = ');
             this.renderExpr(value);
-            this.b.emit(`; __v == null ? ${el}.removeAttribute('${key}') : ${el}.setAttribute('${key}', __v); }`);
+            this.b.emit(`; __v == null ? ${el}.removeAttribute(`);
+            this.emitQuotedDomName(key, pair);
+            this.b.emit(`) : ${el}.setAttribute(`);
+            this.emitQuotedDomName(key, pair);
+            this.b.emit(`, __v); }`);
           }, value);
         } else {
           this.renderEffect(pair, () => {
-            this.b.emit(`${el}.setAttribute('${key}', `);
+            this.b.emit(`${el}.setAttribute(`);
+          this.emitQuotedDomName(key, pair);
+          this.b.emit(`, `);
             this.renderExpr(value);
             if (this.ts) this.b.tsOnly(() => this.b.emit(' as any'));
             this.b.emit(');');
@@ -8069,11 +8777,15 @@ class Emitter {
         this.renderLine(pair, () => {
           this.b.emit('{ const __v = ');
           this.renderExpr(value);
-          this.b.emit(`; if (__v != null) ${el}.setAttribute('${key}', __v); }`);
+          this.b.emit(`; if (__v != null) ${el}.setAttribute(`);
+          this.emitQuotedDomName(key, pair);
+          this.b.emit(`, __v); }`);
         }, false);
       } else {
         this.renderLine(pair, () => {
-          this.b.emit(`${el}.setAttribute('${key}', `);
+          this.b.emit(`${el}.setAttribute(`);
+          this.emitQuotedDomName(key, pair);
+          this.b.emit(`, `);
           this.renderExpr(value);
           // Rip DOM attributes are coercive by design (numbers,
           // booleans stringify); TS's string-only setAttribute view
@@ -8459,7 +9171,8 @@ class Emitter {
     const anchorVar = this.newRenderVar('anchor');
     this.renderLine(null, () => this.b.emit(`${anchorVar} = document.createComment('for')`));
     const reactiveSource = this.renderReactive(iter);
-    const keyExpr = this.extractLoopKey(body, node);
+    const keyInfo = this.extractLoopKey(body, node);
+    const keyExpr = keyInfo?.expr ?? null;
     if (keyExpr !== null) {
       this.checkSetupLocalRefs(keyExpr, node);
       this.checkCrossScopeLocals(keyExpr, node);
@@ -8493,7 +9206,7 @@ class Emitter {
     sink.setups.push({
       kind: 'raw',
       node, // a directive above the render loop rides its setup line
-      fn: (pad) => this.emitLoopSetup(pad, node, anchorVar, iter, rec, keyExpr, itemVar, indexVar, hasRef, outer),
+      fn: (pad) => this.emitLoopSetup(pad, node, anchorVar, iter, rec, keyInfo, itemVar, indexVar, hasRef, outer),
     });
     return anchorVar;
   }
@@ -8517,6 +9230,8 @@ class Emitter {
   // SUPPRESSED (never mutated out of the tree — the node-id join needs its
   // subtree reachable) so it never emits: keys are reconcile
   // identities, never DOM attributes.
+  // Returns `{ expr, pair }` so the suppressed `key:` can still land
+  // an exact face-only `read` row (the pair never emits as a DOM attr).
   extractLoopKey(body, loopNode) {
     const stmts = isBlock(body) ? body.slice(1) : [body];
     const first = stmts.find((s) => !this.isRenderBinding(s));
@@ -8526,7 +9241,7 @@ class Emitter {
         const pair = obj[i];
         if (isNode(pair) && pair.length === 3 && pair[0] === ':' && pair[1] === 'key') {
           this.rstate.suppressedPairs.add(pair);
-          return pair[2];
+          return { expr: pair[2], pair };
         }
       }
       return null;
@@ -8625,7 +9340,9 @@ class Emitter {
   // The loop reconcile block. `__s` holds the row state __reconcile
   // threads across runs; teardown destroys the live blocks on scope
   // close.
-  emitLoopSetup(pad, node, anchorVar, iter, rec, keyExpr, itemVar, indexVar, hasRef, outer) {
+  emitLoopSetup(pad, node, anchorVar, iter, rec, keyInfo, itemVar, indexVar, hasRef, outer) {
+    const keyExpr = keyInfo?.expr ?? null;
+    const keyPair = keyInfo?.pair ?? null;
     const self = this.renderSelf ?? 'this';
     const outerExtra = outer.length > 0 ? `, ${outer.join(', ')}` : '';
     const p2 = pad + '  ';
@@ -8652,10 +9369,19 @@ class Emitter {
       if (keyExpr !== null) {
         this.b.emit(`(${itemVar}, ${indexVar}) => `);
         this.withBindings([itemVar, indexVar], () => this.withExpression(() => {
+          // Face-only `read` on suppressed `key:` (never a DOM attr).
+          if (this.ts && keyPair != null) {
+            this.b.tsOnly(() => {
+              this.b.emit('(void ({ ');
+              this.emitPairKeyRead(keyPair, 'key');
+              this.b.emit(': 0 }), ');
+            });
+          }
           const wrap = Emitter.needsGrouping(keyExpr, 'operand') || isObject(keyExpr);
           if (wrap) this.b.emit('(');
           this.expr(keyExpr);
           if (wrap) this.b.emit(')');
+          if (this.ts && keyPair != null) this.b.tsOnly(() => this.b.emit(')'));
         }));
       } else {
         this.b.emit('null');
@@ -8667,6 +9393,12 @@ class Emitter {
       this.b.emit(`${p2}${this.runtimeName('__ownerFrame')}().add(() => { for (const ${each} of ${state}.blocks) { try { ${each}.d(true); } catch {} } ${state}.blocks = []; ${state}.keys = []; ${state}.items = []; });\n`);
       this.b.emit(`${pad}}\n`);
     });
+  }
+
+  // Factory header param: exact `read` from the loop's `vars` role when
+  // the name still matches source (own item/index; remapped outers skip).
+  emitFactoryParam(rec, name) {
+    this.emitRoleRead(rec.originNode, name, { role: 'vars', fallback: 'bare' });
   }
 
   // A block factory as a class method: `create_block_N(ctx, …)`
@@ -8697,7 +9429,13 @@ class Emitter {
     const needsP = !rec.isStatic;
     this.mark(renderNode, '$self', () => {
       this.withRecordContext(rec, () => {
-        this.b.emit(`${pad}${rec.name}(${headerParams.join(', ')}) {\n`);
+        this.b.emit(`${pad}${rec.name}(`);
+        this.b.emit(self);
+        for (const n of rec.paramNames) {
+          this.b.emit(', ');
+          this.emitFactoryParam(rec, n);
+        }
+        this.b.emit(`) {\n`);
         if (rec.vars.size > 0) this.b.emit(`${p2}let ${[...rec.vars].join(', ')};\n`);
         if (rec.kidsVar !== null) {
           this.b.emit(`${p2}let ${rec.kidsVar}`);
@@ -8838,7 +9576,12 @@ class Emitter {
     }
     if (this.rstate.sink.kind === 'class') {
       this.renderLine(pair, () => {
-        this.b.emit(`this.${refName}.value = ${el}`);
+        // Face-only exact `read` on the `ref` key — the lowering never
+        // spells `ref` in JS (`({ ref: 0 });` is a method-body expr).
+        if (this.ts) this.emitFaceOnlyRead(() => this.emitPairKeyRead(pair, 'ref'));
+        this.b.emit('this.');
+        this.emitReadName(refName, { unwrap: true });
+        this.b.emit(`.value = ${el}`);
         // Ref typing: the scaffold's _el fields are
         // any (the slot index signature), so the assignment casts
         // TS-only to the element's REAL tag type — and `| null`,
@@ -8847,11 +9590,24 @@ class Emitter {
         const tag = this.renderTagOf(el);
         if (this.ts && tag !== null && /^[a-z][a-z0-9-]*$/.test(tag)) {
           const map = (this.rstate.svgDepth > 0 || SVG_ONLY_TAGS.has(tag)) ? 'SVGElementTagNameMap' : 'HTMLElementTagNameMap';
-          this.b.tsOnly(() => this.b.emit(` as ${map}['${tag}'] | null`));
+          this.b.tsOnly(() => {
+            this.b.emit(` as ${map}[`);
+            this.emitQuotedDomName(tag);
+            this.b.emit('] | null');
+          });
         }
       });
-      this.renderLine(pair, () => this.b.emit(`(this._refCleanups ??= []).push(() => ${this.runtimeName('__detachRef')}(this.${refName}, ${el}))`));
+      this.renderLine(pair, () => {
+        this.b.emit(`(this._refCleanups ??= []).push(() => ${this.runtimeName('__detachRef')}(this.`);
+        this.emitReadName(refName, { unwrap: true });
+        this.b.emit(`, ${el}))`);
+      });
     } else {
+      if (this.ts) {
+        this.renderLine(pair, () => {
+          this.emitFaceOnlyRead(() => this.emitPairKeyRead(pair, 'ref'));
+        });
+      }
       this.rstate.sink.refs.push({ name: refName, elVar: el, node: pair });
     }
   }
@@ -8884,7 +9640,11 @@ class Emitter {
       accessor = inputType === 'number' || inputType === 'range' ? 'target.valueAsNumber' : 'target.value';
     }
     this.renderEffect(pair, () => {
-      this.b.emit(`${el}.${prop} = `);
+      this.b.emit(`${el}.`);
+      // Key role, not path-3: `value <=> value` would otherwise map
+      // the prop read onto the RHS.
+      this.emitPairKeyRead(pair, prop);
+      this.b.emit(' = ');
       this.withExpression(() => this.expr(value));
       this.b.emit(';');
     }, value);
@@ -8894,7 +9654,9 @@ class Emitter {
     Emitter.collectLeafNames(value, evUsed);
     const ev = Emitter.mintName('e', evUsed);
         this.renderLine(pair, () => {
-      this.b.emit(`${el}.addEventListener('${event}', (${ev}) => { `);
+      this.b.emit(`${el}.addEventListener(`);
+      this.emitQuotedDomName(event, pair);
+      this.b.emit(`, (${ev}) => { `);
       this.withExpression(() => this.expr(value));
       this.b.emit(` = ${ev}.${accessor};`);
       if (touch !== null) {
@@ -9236,24 +9998,14 @@ class Emitter {
       } else if (f.kind === 'optcall') {
         this.b.emit('?.');
         this.mark(n, 'args', () => {
-          this.b.emit('(');
-          n.slice(2).forEach((arg, i) => {
-            if (i > 0) this.b.emit(', ');
-            // Optional-call arguments do NOT unwrap a pick's parens:
-            // `h?.(({a: o.a}))` — the double parens are valid JS and
-            // the byte battery pins the spelling.
-            this.expr(arg);
-          });
-          this.b.emit(')');
+          // Optional-call arguments do NOT unwrap a pick's parens:
+          // `h?.(({a: o.a}))` — the double parens are valid JS and
+          // the byte battery pins the spelling.
+          this.emitCallArgs(n, n.slice(2), (arg) => this.expr(arg));
         });
       } else {
         this.mark(n, 'args', () => {
-          this.b.emit('(');
-          n.slice(1).forEach((arg, i) => {
-            if (i > 0) this.b.emit(', ');
-            this.callArg(arg);
-          });
-          this.b.emit(')');
+          this.emitCallArgs(n, n.slice(1));
         });
       }
       this.endMark(f.self);
@@ -10380,10 +11132,13 @@ class Emitter {
     }
     this.mark(node, '$self', () => {
       this.b.emit(this.methodName === 'constructor' ? 'super(' : `super.${this.methodName}(`);
+      // Args role covers the list only (parens already written).
       this.mark(node, 'args', () => {
-        node.slice(1).forEach((arg, i) => {
-          if (i > 0) this.b.emit(', ');
-          this.callArg(arg);
+        this.withReadScan(node, () => {
+          node.slice(1).forEach((arg, i) => {
+            if (i > 0) this.b.emit(', ');
+            this.emitScannedArg(arg, (a) => this.callArg(a));
+          });
         });
       });
       this.b.emit(')');
@@ -10417,7 +11172,9 @@ class Emitter {
   // (`name = expr`), or an array/object pattern (emitted like the
   // matching literal — the pattern element cases live on object/array).
   emitParam(p) {
-    if (typeof p === 'string') return this.b.emit(p);
+    if (typeof p === 'string') {
+      return isIdentifierName(p) ? this.emitReadName(p) : this.b.emit(p);
+    }
     // A typed parameter (["typed-var", target, "T"]) erases to its target;
     // the annotation role's cover row spans the emitted target — the
     // type's only generated manifestation. The TS face emits
@@ -10929,12 +11686,7 @@ class Emitter {
         this.b.emit('await ');
         this.mark(node[0], '$self', () => this.head(node[0], 'target', node[0][1]));
         this.mark(node, 'args', () => {
-          this.b.emit('(');
-          node.slice(1).forEach((arg, i) => {
-            if (i > 0) this.b.emit(', ');
-            this.callArg(arg);
-          });
-          this.b.emit(')');
+          this.emitCallArgs(node, node.slice(1));
         });
       });
       return;
@@ -10959,12 +11711,7 @@ class Emitter {
           } else this.expr(ctor);
         });
         this.mark(node, 'args', () => {
-          this.b.emit('(');
-          node.slice(1).forEach((arg, i) => {
-            if (i > 0) this.b.emit(', ');
-            this.callArg(arg);
-          });
-          this.b.emit(')');
+          this.emitCallArgs(node, node.slice(1));
         });
       });
       return;
