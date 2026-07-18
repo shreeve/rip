@@ -72,6 +72,7 @@ import {
 } from './translate.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from './diagnostics.js';
 import { writeProjectTsconfigs, mirrorRelForFsPath, ripImportsOf } from './mirror.js';
+import { createExportIndex } from './export-index.js';
 
 // The compiler: in-repo development resolves the repository's src/;
 // the staged .vsix carries a copy at compiler/src/ (scripts/package.js).
@@ -109,6 +110,12 @@ async function loadProjectConfigReader() {
 
 const connection = createConnection(ProposedFeatures.all);
 const documents = new TextDocuments(TextDocument);
+
+// Cold `.rip`→`.rip` auto-import: workspace export index (paths + regex),
+// not the tsgo program. Kept beside the demand-driven mirror closure.
+const exportIndex = createExportIndex({
+  log: (msg) => connection.console.log(msg),
+});
 
 let compile = null;
 let readProjectConfig = null;
@@ -798,6 +805,7 @@ connection.onInitialize(async (params) => {
   workspaceRoot = detectWorkspaceRoot(params);
   planMirrorRoot();
   loadCache();
+  exportIndex.setWorkspaceRoot(workspaceRoot);
   clientSupportsWatchers = !!params.capabilities?.workspace?.didChangeWatchedFiles?.dynamicRegistration;
   clientSupportsConfiguration = !!params.capabilities?.workspace?.configuration;
   // Awaited: the advertised trigger characters and semantic-tokens
@@ -912,7 +920,7 @@ async function repullDiagnostics(uri) {
   if (!good || !state.tsOpen || !tsgo) return;
   // rip.noCheck: silenced here too — cross-file re-pulls must not
   // resurrect a no-check doc's diagnostics after refresh cleared them.
-  if (isNoCheck(uri, state)) { connection.sendDiagnostics({ uri, diagnostics: [] }); return; }
+  if (isNoCheck(uri, state)) { publishRipDiagnostics(uri, []); return; }
   if (documents.get(uri)?.getText() !== good.source) return;
   let pulled;
   try {
@@ -927,7 +935,7 @@ async function repullDiagnostics(uri) {
     const m = mapTsDiagnostic(good, d);
     if (m) mapped.push(m);
   }
-  connection.sendDiagnostics({ uri, diagnostics: applyRipDirectives(good, mapped) });
+  publishRipDiagnostics(uri, applyRipDirectives(good, mapped));
 }
 
 function repullOpenDocuments(exceptUri = null) {
@@ -1102,7 +1110,7 @@ async function refresh(document) {
       connection.console.log(`[rip] dropped unmappable TS diagnostic ${d.code}: ${d.message}`);
     }
   }
-  connection.sendDiagnostics({ uri: document.uri, diagnostics: applyRipDirectives(state.lastGood, mapped) });
+  publishRipDiagnostics(document.uri, applyRipDirectives(state.lastGood, mapped));
 
   // This buffer's new face can change what OTHER open buffers see
   // (cross-file type flow); their diagnostics re-pull without recompiling.
@@ -1241,10 +1249,17 @@ connection.onDidChangeWatchedFiles(async ({ changes }) => {
       // is per-doc, so this is correct in a monorepo — every doc lands on
       // its own answer). Skip dependency churn: an install rewrites
       // node_modules/**/package.json and must not recompile the world.
-      if (!fsPath.includes(`${path.sep}node_modules${path.sep}`)) refreshAllForConfig = true;
+      if (!fsPath.includes(`${path.sep}node_modules${path.sep}`)) {
+        refreshAllForConfig = true;
+        exportIndex.onPackageJsonChanged();
+      }
       continue;
     }
     if (!fsPath.endsWith('.rip')) continue;
+    // Export index tracks every workspace .rip (cold auto-import), not
+    // only the mirror closure.
+    if (change.type === FileChangeType.Deleted) exportIndex.onRipChanged(fsPath, false);
+    else exportIndex.onRipChanged(fsPath, true);
     if (documents.get(change.uri)) continue; // open buffers own their mirrors
     const mirrorPath = mirrorPathOf(change.uri);
     if (change.type === FileChangeType.Deleted) {
@@ -1909,6 +1924,23 @@ async function completionFromFace(ctx, genCursor, params) {
   return { isIncomplete: Array.isArray(result) ? false : !!result.isIncomplete, items };
 }
 
+function withExportIndexAugment(document, params, out) {
+  if (!out) return out;
+  const items = out.items ?? (Array.isArray(out) ? out : null);
+  if (!items) return out;
+  let fromFp = null;
+  if (document.uri.startsWith('file://')) {
+    try { fromFp = fileURLToPath(document.uri); } catch { /* */ }
+  }
+  exportIndex.augmentCompletions({
+    source: document.getText(),
+    fromFp,
+    position: params.position,
+    items,
+  });
+  return Array.isArray(out) ? items : { ...out, items };
+}
+
 connection.onCompletion(async (params) => {
   await tsgoReady;
   const document = documents.get(params.textDocument.uri);
@@ -1932,19 +1964,32 @@ connection.onCompletion(async (params) => {
           align: staleOffsetMap(currentText, recovered.source),
         };
         const out = await withEphemeralFace(state, recovered.code, () => completionFromFace(ctx, genCursor, params));
-        if (out?.items?.length) return out;
+        if (out?.items?.length) return withExportIndexAugment(document, params, out);
       }
     }
   }
 
   const ctx = requestContext(params);
-  if (!ctx) return null;
+  if (!ctx) {
+    // No face (fresh incomplete / never compiled) — still offer workspace
+    // export auto-imports from the index alone.
+    const items = [];
+    withExportIndexAugment(document, params, { items });
+    return items.length ? { isIncomplete: false, items } : null;
+  }
   const genCursor = ctx.genCursor ?? ctx.genExact;
-  if (genCursor === null) return null;
-  return completionFromFace(ctx, genCursor, params);
+  if (genCursor === null) {
+    const items = [];
+    withExportIndexAugment(document, params, { items });
+    return items.length ? { isIncomplete: false, items } : null;
+  }
+  return withExportIndexAugment(document, params, await completionFromFace(ctx, genCursor, params));
 });
 
 connection.onCompletionResolve(async (item) => {
+  // Index-sourced import edits are already Rip-source TextEdits — never
+  // face-map or replace them with tsgo's additionalTextEdits.
+  const savedIndexEdits = item.data?.ripExportIndex ? item.additionalTextEdits : null;
   const { uri, index } = item.data ?? {};
   const state = uri === undefined ? null : states.get(uri);
   const raw = state?.lastCompletion?.[index];
@@ -1956,6 +2001,10 @@ connection.onCompletionResolve(async (item) => {
     item.documentation = typeof resolved.documentation === 'string'
       ? scrubFaceArtifacts(resolved.documentation)
       : { ...resolved.documentation, value: scrubFaceArtifacts(resolved.documentation.value ?? '') };
+  }
+  if (savedIndexEdits?.length) {
+    item.additionalTextEdits = savedIndexEdits;
+    return item;
   }
   if (resolved.additionalTextEdits?.length) {
     const ctx = requestContext({ textDocument: { uri } });
@@ -2438,6 +2487,14 @@ connection.onRenameRequest(async (params) => {
   return { changes };
 });
 
+// Last published Rip-coordinate diagnostics per uri — "Add all missing
+// imports" reads the full file, not only the request-range diags.
+const lastPublishedDiags = new Map();
+function publishRipDiagnostics(uri, diagnostics) {
+  lastPublishedDiags.set(uri, diagnostics);
+  connection.sendDiagnostics({ uri, diagnostics });
+}
+
 // ---- code actions: quickfix plus the source.* family (the
 // organizeImports/removeUnusedImports/sortImports rewrites land
 // through the whole-import-line mapping; fixAll's auto-imports
@@ -2445,10 +2502,29 @@ connection.onRenameRequest(async (params) => {
 // its diagnostics map Rip → TS; returned edits map back through the
 // same all-or-nothing WorkspaceEdit path as rename — an action whose
 // edit cannot land on Rip source is dropped, never shown broken.
+//
+// Cold `.rip`→`.rip` auto-import quick fixes come from the export index
+// (Rip-source edits, prepended) — tsgo never sees unimported orphans.
 connection.onCodeAction(async (params) => {
   await tsgoReady;
+  const document = documents.get(params.textDocument.uri);
+  let indexActions = [];
+  if (document) {
+    let fromFp = null;
+    if (document.uri.startsWith('file://')) {
+      try { fromFp = fileURLToPath(document.uri); } catch { /* */ }
+    }
+    indexActions = exportIndex.codeActions({
+      source: document.getText(),
+      fromFp,
+      uri: document.uri,
+      diagnostics: params.context?.diagnostics ?? [],
+      allDiagnostics: lastPublishedDiags.get(document.uri) ?? params.context?.diagnostics ?? [],
+    });
+  }
+
   const ctx = requestContext(params);
-  if (!ctx) return null;
+  if (!ctx) return indexActions.length ? indexActions : null;
   const toGen = (position, exclusiveEnd) => {
     const cur = positionToOffset(ctx.curLineStarts, ctx.currentText.length, position);
     const offset = ctx.align.toGood(cur, { exclusiveEnd });
@@ -2513,7 +2589,7 @@ connection.onCodeAction(async (params) => {
       edit: { changes },
     });
   }
-  return actions;
+  return indexActions.length ? indexActions.concat(actions) : actions;
 });
 
 documents.listen(connection);

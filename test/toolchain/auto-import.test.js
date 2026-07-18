@@ -1,26 +1,13 @@
-// Auto-import candidate scope: the candidate set is the tsgo program, and the
-// program is the mirror closure of the OPEN buffers — so a workspace `.rip`
-// that nothing open imports is not offered until you open or import it. The
-// headline case of auto-import (import from a file you have not opened) is
-// therefore defeated for `.rip` → `.rip`. npm/@types candidates are
-// unaffected: they arrive via node_modules, which the generated tsconfig
-// reaches.
-//
-// This is an OPEN gap, so the second test asserts the current, wrong behavior
-// on purpose — and says so. The day the scope is widened, `not.toContain`
-// goes red: that is the cue to invert this test and close the finding, not a
-// regression. Deliberately NOT written as an expected-failure: under
-// `test.failing` any throw counts as a pass, so a server that returned no
-// completions at all — tsgo dead, mapping broken — would be reported green,
-// indistinguishable from the gap it means to record. Every completion
-// assertion below is therefore paired with a liveness check, so an empty list
-// can only ever be a real failure.
+// Auto-import candidate scope: workspace `.rip` exports are offered from
+// cold via the Rip export index (walk + scanExports), while the tsgo
+// program stays the open-buffer mirror closure. v3 parity: completion
+// carries Rip import edits; TS2304 quick fix offers Add import for orphans.
 import { expect, test } from 'bun:test';
+import fs from 'node:fs';
+import path from 'node:path';
 import { openSession } from '../support/lsp-session.js';
 import { describeExtended } from '../support/extended.js';
 
-// app imports a, a imports util  →  `shout` is IN the closure.
-// orphan is imported by nothing  →  `orphanWidget` is OUT of it.
 const FILES = {
   'util.rip': 'export shout = (s: string): string -> s.toUpperCase()\n',
   'a.rip': "import { shout } from './util.rip'\nexport relay = (s: string): string -> shout(s)\n",
@@ -29,19 +16,9 @@ const FILES = {
   'package.json': '{}\n',
 };
 
-// Two completion sites, one per candidate, because tsgo filters auto-import
-// candidates BY PREFIX: asking at `sh` can never offer `orphanWidget`, no
-// matter what the program contains — a probe at the wrong prefix would read a
-// filtered-out name as an unreachable one and "reproduce" the gap against a
-// server that had it fixed. The site must also be an expression position: a
-// bare identifier statement does not map cleanly into the face and answers
-// with no completions at all.
 const SHOUT = { line: 2, col: 10 };          // `first = sh|`
 const ORPHAN = { line: 3, col: 13 };         // `second = orph|`
 
-// Every completion assertion goes through here: a list must be LIVE before its
-// membership means anything. An empty list satisfies any `not.toContain` for
-// free, which would make a scope test pass for the wrong reason.
 async function candidatesAt(session, pos) {
   const labels = await session.completions('app.rip', pos.line, pos.col);
   expect(labels.length).toBeGreaterThan(0);
@@ -54,27 +31,107 @@ describeExtended('auto-import candidate scope', () => {
     try {
       s.open('app.rip');
       await s.diagnostics('app.rip');
-      expect(await candidatesAt(s, SHOUT)).toContain('shout');   // app → a → util
+      expect(await candidatesAt(s, SHOUT)).toContain('shout');
     } finally { await s.close(); }
   }, 90_000);
 
-  // THE GAP, and the mechanism behind it in one test: an unimported file is
-  // absent from the candidate set, and OPENING it is what puts it there —
-  // which is precisely what proves the candidate set is the tsgo program (the
-  // mirror closure) rather than a workspace scan.
-  //
-  // When auto-import is widened to the whole workspace, the first assertion
-  // fails. That is the intended signal: invert it, and the gap is closed.
-  test('an UNIMPORTED workspace .rip is NOT offered until it is opened (the open gap)', async () => {
+  test('an UNIMPORTED workspace .rip IS offered from cold (export index)', async () => {
     const s = await openSession(FILES);
     try {
-      s.open('app.rip');                                          // orphan stays closed
+      s.open('app.rip');
       await s.diagnostics('app.rip');
-      expect(await candidatesAt(s, ORPHAN)).not.toContain('orphanWidget');
-
-      s.open('orphan.rip');                                       // now it joins the closure
-      await s.diagnostics('orphan.rip');
       expect(await candidatesAt(s, ORPHAN)).toContain('orphanWidget');
+    } finally { await s.close(); }
+  }, 90_000);
+
+  test('cold orphan completion carries additionalTextEdits that insert the import', async () => {
+    const s = await openSession(FILES);
+    try {
+      s.open('app.rip');
+      await s.diagnostics('app.rip');
+      const hit = await s.completionItem('app.rip', ORPHAN.line, ORPHAN.col, 'orphanWidget');
+      expect(hit).toBeDefined();
+      expect(hit.labelDetails?.description).toBe('./orphan.rip');
+      expect(hit.data?.ripExportIndex).toBe(true);
+      expect(hit.additionalTextEdits).toHaveLength(1);
+      const edit = hit.additionalTextEdits[0];
+      expect(edit.newText).toMatch(/import \{ orphanWidget \} from ['"]\.\/orphan\.rip['"]/);
+      expect(edit.newText).not.toContain('.rip.ts');
+      expect(edit.newText).not.toContain(';');
+      expect(edit.range.start).toEqual({ line: 1, character: 0 });
+    } finally { await s.close(); }
+  }, 90_000);
+
+  test('applying the cold orphan import edit clears TS2304 for that symbol', async () => {
+    const s = await openSession({
+      ...FILES,
+      'app.rip': "import { relay } from './a.rip'\nconsole.log relay('x')\nsecond = orphanWidget\n",
+    });
+    try {
+      s.open('app.rip');
+      const before = await s.diagnostics('app.rip');
+      expect(before.some((d) => d.code === 2304 && /orphanWidget/.test(d.message))).toBe(true);
+
+      const hit = await s.completionItem('app.rip', 2, 19, 'orphanWidget');
+      expect(hit?.additionalTextEdits?.length).toBeGreaterThan(0);
+      const src = fs.readFileSync(path.join(s.dir, 'app.rip'), 'utf8');
+      const next = s.applyTextEdits(src, hit.additionalTextEdits);
+      expect(next).toMatch(/import \{ orphanWidget \} from ['"]\.\/orphan\.rip['"]/);
+
+      s.forget('app.rip');
+      s.change('app.rip', next);
+      const after = await s.diagnostics('app.rip');
+      expect(after.some((d) => d.code === 2304 && /orphanWidget/.test(d.message))).toBe(false);
+    } finally { await s.close(); }
+  }, 90_000);
+
+  test('code action on TS2304 offers Add import for a cold orphan', async () => {
+    const s = await openSession({
+      ...FILES,
+      'app.rip': "import { relay } from './a.rip'\nconsole.log relay('x')\nsecond = orphanWidget\n",
+    });
+    try {
+      s.open('app.rip');
+      const diags = await s.diagnostics('app.rip');
+      const missing = diags.find((d) => d.code === 2304 && /orphanWidget/.test(d.message));
+      expect(missing).toBeDefined();
+
+      const actions = await s.codeActions('app.rip', missing.range, [missing]);
+      const fix = actions.find((a) => /import/i.test(a.title) && /orphan\.rip/.test(a.title));
+      expect(fix).toBeDefined();
+      expect(fix.kind).toBe('quickfix');
+      expect(fix.title).not.toContain('.rip.ts');
+      const edits = fix.edit.changes[s.uri('app.rip')];
+      expect(edits?.length).toBeGreaterThan(0);
+      expect(edits.some((e) => /orphanWidget/.test(e.newText) && /orphan\.rip/.test(e.newText))).toBe(true);
+    } finally { await s.close(); }
+  }, 90_000);
+
+  test('code action offers Add all missing imports for two cold orphans', async () => {
+    const s = await openSession({
+      'orphan.rip': 'export orphanWidget = (): string -> "widget"\n',
+      'other.rip': 'export otherThing = (): number -> 1\n',
+      'app.rip': 'a = orphanWidget\nb = otherThing\n',
+      'package.json': '{}\n',
+    });
+    try {
+      s.open('app.rip');
+      const diags = await s.diagnostics('app.rip');
+      const missing = diags.filter((d) => d.code === 2304);
+      expect(missing.length).toBeGreaterThanOrEqual(2);
+
+      // Request on one diagnostic's range — aggregate still uses the full
+      // published set (lastPublishedDiags), matching v3's lastDiagnostics.
+      const actions = await s.codeActions('app.rip', missing[0].range, [missing[0]]);
+      const addAll = actions.find((a) => a.title === 'Add all missing imports');
+      expect(addAll).toBeDefined();
+      expect(addAll.kind).toBe('quickfix');
+      const edits = addAll.edit.changes[s.uri('app.rip')];
+      expect(edits).toHaveLength(1);
+      expect(edits[0].newText).toMatch(/import \{ orphanWidget \} from ['"]\.\/orphan\.rip['"]/);
+      expect(edits[0].newText).toMatch(/import \{ otherThing \} from ['"]\.\/other\.rip['"]/);
+      expect(edits[0].newText).toContain('a = orphanWidget');
+      expect(edits[0].newText).toContain('b = otherThing');
     } finally { await s.close(); }
   }, 90_000);
 });
