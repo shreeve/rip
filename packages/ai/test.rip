@@ -7,8 +7,7 @@
 # a Bun.serve double stands in for api.openai.com / api.anthropic.com /
 # the fixture.test host. A fetch shim rewrites exactly those origins to
 # the local double and THROWS on any other host, so a test that would
-# reach the real network fails loudly. Every pinned expectation was
-# observed from v3 on these same fixtures.
+# reach the real network fails loudly.
 # ==============================================================================
 
 import { test, eq, ok } from '@rip-lang/testing'
@@ -173,8 +172,10 @@ test "the entry is the MCP server module", ->
 test "does not claim browser safety (filesystem, sqlite, stdio)", ->
   eq pkg.rip, undefined
 
-test "the rip-ai bin is the entry and is executable", ->
+test "the rip-ai bin is ai.rip itself, shebang'd and executable", ->
   eq pkg.bin, { 'rip-ai': './ai.rip' }
+  source = readFileSync(new URL('./ai.rip', import.meta.url), 'utf8')
+  ok source.startsWith('#!/usr/bin/env rip\n')
   mode = statSync(new URL('./ai.rip', import.meta.url)).mode
   ok (mode & 0o111) isnt 0, 'executable bit set'
 
@@ -242,7 +243,7 @@ test "parseModel: aliases are case-insensitive and provider-scoped", ->
 test "parseModel: concrete provider:model passes through", ->
   eq providers.parseModel('openai:gpt-4o'), { provider: 'openai', model: 'gpt-4o', id: 'openai:gpt-4o' }
 
-test! "parseModel: rejections, verbatim from v3", ->
+test! "parseModel: rejections", ->
   eq caught!(-> providers.parseModel('grok')).message, 'unknown model: grok'
   eq caught!(-> providers.parseModel('meta:llama')).message, 'unsupported provider: meta'
   eq caught!(-> providers.parseModel(':x')).message, 'unknown model: :x'

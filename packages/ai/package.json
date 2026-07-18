@@ -3,7 +3,7 @@
   "version": "4.0.0",
   "private": true,
   "type": "module",
-  "description": "Persistent multi-model AI consultation MCP — discuss, panel, fresh-review, content-hashed attachments, live model catalog",
+  "description": "Persistent multi-model AI consultation MCP — discuss, panel, fresh-review, content-hashed attachments, live model catalog.",
   "exports": {
     ".": "./ai.rip"
   },

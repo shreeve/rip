@@ -23,6 +23,19 @@ and calls provider APIs over the network. One `.rip` entry plus `lib/`.
 bun add @rip-lang/ai
 ```
 
+```coffee
+# Tool surface an assisting model drives through MCP:
+chat prompt: "Is this O(n²) or O(n)?", model: "claude"
+
+discuss message: "Should we use a B-tree or a hash here?"
+# → { conversation_id }; continue with:
+discuss conversation_id: "c_…", message: "What about cache locality?"
+
+panel prompt: "Critique this approach", models: ["gpt", "claude"], synthesize: true
+
+fresh_review artifact: "PLAN.md", prompt: "Be hostile. Find what's wrong.", exclude_models: ["claude"]
+```
+
 Register the server with your MCP client (e.g. `~/.cursor/mcp.json`):
 
 ```json
@@ -178,10 +191,10 @@ If a `model` is given and it's in `exclude_models`, the call fails fast. If no m
 
 All tools that send a prompt accept an `attachments` array:
 
-```js
+```coffee
 [
-  { type: "file", path: "src/compiler.js" },
-  { type: "url",  url:  "https://example.com/spec.txt" },
+  { type: "file", path: "src/compiler.js" }
+  { type: "url",  url:  "https://example.com/spec.txt" }
   { type: "blob", name: "snippet.rip", content: "x = 42\n" }
 ]
 ```

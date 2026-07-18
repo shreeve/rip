@@ -84,9 +84,9 @@ independenceWarnings = (conversation, attachments) ->
 export status = (ctx) ->
   store = ctx.store
   d = providers.defaults()
-  warn = cred.filePermissionsLooseWarning()
+  permWarn = cred.filePermissionsLooseWarning()
   warnings = []
-  warnings.push warn if warn
+  warnings.push permWarn if permWarn
   warnings.push "store recovered from corruption: #{store.recoveryError}" if store.recovered
   {
     server:
