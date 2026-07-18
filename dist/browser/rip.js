@@ -1446,7 +1446,7 @@ function findTopLevelArrowIdx(tokens) {
   }
   return -1;
 }
-function descriptorSegments(descriptor, schemaName, fns, adapterCode = null, thisTypes = null) {
+function descriptorSegments(descriptor, schemaName, fns, adapterCode = null, thisTypes = null, itTypes = null) {
   const segs = [];
   const emit = (s) => {
     if (segs.length && typeof segs[segs.length - 1] === "string")
@@ -1462,7 +1462,7 @@ function descriptorSegments(descriptor, schemaName, fns, adapterCode = null, thi
   descriptor.entries.forEach((e, i) => {
     if (i > 0)
       emit(", ");
-    entrySegments(e, fns.get(i), thisTypes?.get(i) ?? null, emit, emitTs);
+    entrySegments(e, fns.get(i), thisTypes?.get(i) ?? null, itTypes?.get(i) ?? null, emit, emitTs);
   });
   emit("]");
   if (adapterCode)
@@ -1471,17 +1471,28 @@ function descriptorSegments(descriptor, schemaName, fns, adapterCode = null, thi
   return segs;
 }
 var fnText = (fnCode) => typeof fnCode === "string" ? fnCode : fnCode.code;
-function fnSegments(fnCode, thisType, emit, emitTs) {
-  if (thisType === null || typeof fnCode === "string") {
+function fnSegments(fnCode, thisType, emit, emitTs, itType = null) {
+  if (fnCode === undefined || fnCode === null)
+    return;
+  if (typeof fnCode === "string" || thisType === null && itType === null) {
     emit(fnText(fnCode));
     return;
   }
   const { code, thisAt } = fnCode;
   emit(code.slice(0, thisAt));
-  emitTs(`this: ${thisType}${code[thisAt] === ")" ? "" : ", "}`);
-  emit(code.slice(thisAt));
+  let rest = code.slice(thisAt);
+  if (thisType !== null) {
+    emitTs(`this: ${thisType}${rest[0] === ")" ? "" : ", "}`);
+  }
+  if (itType !== null && /^it\b/.test(rest)) {
+    emit("it");
+    emitTs(`: ${itType}`);
+    emit(rest.slice(2));
+    return;
+  }
+  emit(rest);
 }
-function entrySegments(e, fnCode, thisType, emit, emitTs) {
+function entrySegments(e, fnCode, thisType, itType, emit, emitTs) {
   switch (e.tag) {
     case "computed":
     case "method":
@@ -1493,47 +1504,60 @@ function entrySegments(e, fnCode, thisType, emit, emitTs) {
       fnSegments(fnCode, thisType, emit, emitTs);
       emit("}");
       return;
+    case "field":
+      if (itType !== null && fnCode !== undefined && typeof fnCode !== "string") {
+        emit(`{${fieldEntryProps(e).join(", ")}, transform: `);
+        fnSegments(fnCode, null, emit, emitTs, itType);
+        emit("}");
+        return;
+      }
+      emit(entryLiteral(e, fnCode));
+      return;
     default:
       emit(entryLiteral(e, fnCode));
   }
+}
+function fieldEntryProps(e) {
+  const obj = [
+    `tag: "field"`,
+    `name: ${JSON.stringify(e.name)}`,
+    `modifiers: ${JSON.stringify(e.modifiers)}`,
+    `typeName: ${JSON.stringify(e.typeName)}`,
+    `array: ${e.array ? "true" : "false"}`
+  ];
+  if (e.unique)
+    obj.push("unique: true");
+  if (e.literals)
+    obj.push(`literals: ${JSON.stringify(e.literals)}`);
+  if (e.coerce) {
+    obj.push("coerce: true");
+    if (e.coercer)
+      obj.push(`coercer: ${JSON.stringify(e.coercer)}`);
+  }
+  if (e.constraints) {
+    const c = [];
+    if (e.constraints.min !== undefined)
+      c.push(`min: ${serializeLiteral(e.constraints.min)}`);
+    if (e.constraints.max !== undefined)
+      c.push(`max: ${serializeLiteral(e.constraints.max)}`);
+    if (e.constraints.default !== undefined)
+      c.push(`default: ${serializeLiteral(e.constraints.default)}`);
+    if (e.constraints.regex !== undefined)
+      c.push(`regex: ${e.constraints.regex.toString()}`);
+    if (c.length)
+      obj.push(`constraints: {${c.join(", ")}}`);
+  }
+  if (e.attrs) {
+    obj.push(`attrs: {${Object.keys(e.attrs).sort().map((k) => `${k}: ${serializeLiteral(e.attrs[k])}`).join(", ")}}`);
+  }
+  return obj;
 }
 function entryLiteral(e, fnCode) {
   if (fnCode !== undefined)
     fnCode = fnText(fnCode);
   switch (e.tag) {
     case "field": {
-      const obj = [
-        `tag: "field"`,
-        `name: ${JSON.stringify(e.name)}`,
-        `modifiers: ${JSON.stringify(e.modifiers)}`,
-        `typeName: ${JSON.stringify(e.typeName)}`,
-        `array: ${e.array ? "true" : "false"}`
-      ];
-      if (e.unique)
-        obj.push("unique: true");
-      if (e.literals)
-        obj.push(`literals: ${JSON.stringify(e.literals)}`);
-      if (e.coerce) {
-        obj.push("coerce: true");
-        if (e.coercer)
-          obj.push(`coercer: ${JSON.stringify(e.coercer)}`);
-      }
-      if (e.constraints) {
-        const c = [];
-        if (e.constraints.min !== undefined)
-          c.push(`min: ${serializeLiteral(e.constraints.min)}`);
-        if (e.constraints.max !== undefined)
-          c.push(`max: ${serializeLiteral(e.constraints.max)}`);
-        if (e.constraints.default !== undefined)
-          c.push(`default: ${serializeLiteral(e.constraints.default)}`);
-        if (e.constraints.regex !== undefined)
-          c.push(`regex: ${e.constraints.regex.toString()}`);
-        if (c.length)
-          obj.push(`constraints: {${c.join(", ")}}`);
-      }
-      if (e.attrs) {
-        obj.push(`attrs: {${Object.keys(e.attrs).sort().map((k) => `${k}: ${serializeLiteral(e.attrs[k])}`).join(", ")}}`);
-      }
+      const obj = fieldEntryProps(e);
       if (fnCode)
         obj.push(`transform: ${fnCode}`);
       return `{${obj.join(", ")}}`;
@@ -7732,6 +7756,54 @@ var fieldProps = (descriptor, known) => {
   }
   return props;
 };
+var scanItProps = (tokens) => {
+  const keys = [];
+  if (!Array.isArray(tokens))
+    return keys;
+  for (let i = 0;i + 2 < tokens.length; i++) {
+    const a = tokens[i], b = tokens[i + 1], c = tokens[i + 2];
+    if (a?.kind === "IDENTIFIER" && a.value === "it" && b?.kind === "." && c?.kind === "PROPERTY" && typeof c.value === "string") {
+      keys.push(c.value);
+    }
+  }
+  return keys;
+};
+var rawProps = (descriptor, known) => {
+  const props = fieldProps(descriptor, known);
+  const seen = new Set;
+  for (const e of descriptor.entries) {
+    if (e.tag === "field")
+      seen.add(e.name);
+  }
+  for (const e of descriptor.entries) {
+    if (e.tag !== "field" || !e.transformTokens)
+      continue;
+    const ft = fieldType(e, known);
+    for (const key of scanItProps(e.transformTokens)) {
+      if (seen.has(key))
+        continue;
+      seen.add(key);
+      props.push(`${key}: ${ft}`);
+    }
+  }
+  return props;
+};
+var withTransformRaw = (name, descriptor, known, story) => {
+  const itTypes = new Map;
+  descriptor.entries.forEach((e, i) => {
+    if (e.tag === "field" && e.transformTokens)
+      itTypes.set(i, `${name}Raw`);
+  });
+  if (itTypes.size === 0)
+    return { ...story, itTypes };
+  const rawName = `${name}Raw`;
+  return {
+    ...story,
+    aliasLines: [`type ${rawName} = ${braced(rawProps(descriptor, known))};`, ...story.aliasLines],
+    typeNames: [...story.typeNames, rawName],
+    itTypes
+  };
+};
 var mixinRefs = (descriptor, byName) => {
   const refs = [];
   for (const e of descriptor.entries) {
@@ -7812,6 +7884,7 @@ function schemaTypeStory(decl, byName, known) {
       aliasLines: [`type ${name} = ${union};`],
       constType: `{ parse(data: unknown): ${name}; safe(data: unknown): SchemaSafeResult<${name}>; ` + `ok(data: unknown): ${bare ? `data is ${name}` : "boolean"}; ` + `parseAsync(data: unknown): Promise<${name}>; safeAsync(data: unknown): Promise<SchemaSafeResult<${name}>>; ` + `okAsync(data: unknown): Promise<boolean>; toJSONSchema(): Record<string, unknown>; array: ArraySchema<${name}>; }`,
       thisTypes: new Map,
+      itTypes: new Map,
       typeNames: [name]
     };
   }
@@ -7823,16 +7896,17 @@ function schemaTypeStory(decl, byName, known) {
       aliasLines: [`type ${name} = ${union};`],
       constType: `{ parse(data: unknown): ${name}; safe(data: unknown): SchemaSafeResult<${name}>; ` + `ok(data: unknown): boolean; ` + `parseAsync(data: unknown): Promise<${name}>; safeAsync(data: unknown): Promise<SchemaSafeResult<${name}>>; ` + `okAsync(data: unknown): Promise<boolean>; toJSONSchema(): Record<string, unknown>; array: ArraySchema<${name}>; }`,
       thisTypes: new Map,
+      itTypes: new Map,
       typeNames: [name]
     };
   }
   if (kind === "mixin") {
-    return {
+    return withTransformRaw(name, descriptor, known, {
       aliasLines: [`type ${name} = ${intersect(braced(fieldProps(descriptor, known)), mixinRefs(descriptor, byName))};`],
       constType: null,
       thisTypes: new Map,
       typeNames: [name]
-    };
+    });
   }
   const dataType = intersect(braced(fieldProps(descriptor, known)), mixinRefs(descriptor, byName));
   const derived = [];
@@ -7893,14 +7967,14 @@ function schemaTypeStory(decl, byName, known) {
       thisTypes2.set(i, name);
     for (const i of scopeIdx)
       thisTypes2.set(i, queryType);
-    return { aliasLines, constType, thisTypes: thisTypes2, typeNames };
+    return withTransformRaw(name, descriptor, known, { aliasLines, constType, thisTypes: thisTypes2, typeNames });
   }
   const thisTypes = new Map;
   for (const i of instanceIdx)
     thisTypes.set(i, name);
   if (behavior.length) {
     const dataName = `${name}Data`;
-    return {
+    return withTransformRaw(name, descriptor, known, {
       aliasLines: [
         `type ${dataName} = ${dataType};`,
         `type ${name} = ${dataName} & ${braced(behavior)};`
@@ -7908,14 +7982,14 @@ function schemaTypeStory(decl, byName, known) {
       constType: `Schema<${name}, ${dataName}>`,
       thisTypes,
       typeNames: [dataName, name]
-    };
+    });
   }
-  return {
+  return withTransformRaw(name, descriptor, known, {
     aliasLines: [`type ${name} = ${dataType};`],
     constType: `Schema<${name}, ${name}>`,
     thisTypes,
     typeNames: [name]
-  };
+  });
 }
 function buildSchemaTypeStory(programSexpr) {
   const decls = collectSchemaDecls(programSexpr);
@@ -7957,6 +8031,66 @@ function buildSchemaTypeStory(programSexpr) {
     withModel
   };
 }
+
+// src/ambients.js
+var HOST_AMBIENTS = {
+  process: [
+    "declare var process: {",
+    "  env: Record<string, string | undefined>;",
+    "  argv: string[];",
+    "  argv0: string;",
+    "  execPath: string;",
+    "  platform: string;",
+    "  arch: string;",
+    "  pid: number;",
+    "  version: string;",
+    "  versions: Record<string, string>;",
+    "  exitCode: number | undefined;",
+    "  cwd(): string;",
+    "  chdir(directory: string): void;",
+    "  exit(code?: number): never;",
+    "  nextTick(callback: (...args: any[]) => void, ...args: any[]): void;",
+    "  on(event: string, listener: (...args: any[]) => void): void;",
+    "  hrtime: { (time?: [number, number]): [number, number]; bigint(): bigint };",
+    "  stdout: { write(chunk: string | Uint8Array): boolean };",
+    "  stderr: { write(chunk: string | Uint8Array): boolean };",
+    "  stdin: { on(event: string, listener: (...args: any[]) => void): void };",
+    "  [key: string]: any;",
+    "}"
+  ].join(`
+`),
+  Bun: [
+    "declare var Bun: {",
+    "  version: string;",
+    "  revision: string;",
+    "  main: string;",
+    "  argv: string[];",
+    "  env: Record<string, string | undefined>;",
+    "  file(path: string | URL, options?: { type?: string }): any;",
+    "  write(destination: any, input: any): Promise<number>;",
+    "  spawn(command: string[], options?: any): any;",
+    "  spawnSync(command: string[], options?: any): any;",
+    "  serve(options: any): any;",
+    "  listen(options: any): any;",
+    "  connect(options: any): Promise<any>;",
+    "  sleep(ms: number): Promise<void>;",
+    "  sleepSync(ms: number): void;",
+    "  which(command: string, options?: any): string | null;",
+    "  hash(input: string | Uint8Array, seed?: number): number | bigint;",
+    "  resolveSync(specifier: string, parent: string): string;",
+    "  fileURLToPath(url: string | URL): string;",
+    "  pathToFileURL(path: string): URL;",
+    "  inspect(value: any, options?: any): string;",
+    "  readableStreamToText(stream: any): Promise<string>;",
+    "  readableStreamToJSON(stream: any): Promise<any>;",
+    "  readableStreamToArrayBuffer(stream: any): Promise<ArrayBuffer>;",
+    "  nanoseconds(): number;",
+    "  $: any;",
+    "  [key: string]: any;",
+    "}"
+  ].join(`
+`)
+};
 
 // src/typetext.js
 class TypeTextError extends Error {
@@ -8375,11 +8509,40 @@ var awaitsIn = (x) => {
     return false;
   return x.some(awaitsIn);
 };
+function scanEventMethodTypes(renderNode, methodNames) {
+  const map = new Map;
+  if (renderNode == null || !(methodNames instanceof Set) || methodNames.size === 0) {
+    return map;
+  }
+  const visit = (node) => {
+    if (!isNode3(node))
+      return;
+    if ((node[0] === ":" || node[0] === "void-pair") && node.length === 3) {
+      const [, key, value] = node;
+      if (isNode3(key) && key[0] === "." && key[1] === "this" && typeof key[2] === "string") {
+        const eventName = key[2];
+        let methodName = null;
+        if (isNode3(value) && value[0] === "." && value[1] === "this" && typeof value[2] === "string") {
+          methodName = value[2];
+        } else if (typeof value === "string" && methodNames.has(value)) {
+          methodName = value;
+        }
+        if (methodName && !map.has(methodName))
+          map.set(methodName, eventName);
+      }
+    }
+    for (let i = 1;i < node.length; i++)
+      visit(node[i]);
+  };
+  visit(renderNode);
+  return map;
+}
 function componentTypeInfo(stores, source, node) {
   const [, parent, body] = node;
   const extendsTag = typeof parent === "string" ? parent : null;
   const stmts = isBlock(body) ? body.slice(1) : [];
   const members = [];
+  let renderNode = null;
   const semantic = (n) => {
     if (!isNode3(n))
       return null;
@@ -8404,7 +8567,12 @@ function componentTypeInfo(stores, source, node) {
   const nameMark = (stmt, t) => typeof t === "string" ? { nameNode: stmt, nameRole: "target" } : { nameNode: t, nameRole: "property" };
   const classify = (stmt) => {
     const kind = semantic(stmt);
-    if (kind === "render" || kind === "effect")
+    if (kind === "render") {
+      if (renderNode === null)
+        renderNode = stmt;
+      return;
+    }
+    if (kind === "effect")
       return;
     if (kind === "offer") {
       classify(stmt[1]);
@@ -8550,10 +8718,12 @@ function componentTypeInfo(stores, source, node) {
   const siblings = new Set(members.map((m) => m.name));
   for (const m of members)
     m.siblings = siblings;
+  const methodNames = new Set(members.filter((m) => m.kind === "method").map((m) => m.name));
   return {
     extendsTag,
     members,
     roleText,
+    eventMethodTypes: scanEventMethodTypes(renderNode, methodNames),
     isOptionalParam: optionalReader(stores)
   };
 }
@@ -8725,9 +8895,20 @@ function propsTypeSegments(info) {
   return segs;
 }
 var propsTypeText = (info) => segmentsText(propsTypeSegments(info));
+var renderParamsWithEvent = (params, isOptional, eventName) => {
+  if (!eventName || !Array.isArray(params) || params.length === 0) {
+    return renderParams(params, isOptional);
+  }
+  const first = params[0];
+  if (typeof first !== "string")
+    return renderParams(params, isOptional);
+  const rest = params.slice(1).map((p) => renderParam(p, isOptional));
+  return `(${first}: HTMLElementEventMap['${eventName}']${rest.length ? `, ${rest.join(", ")}` : ""})`;
+};
 function instanceTypeLines(info, selfType) {
   const lines = [];
   let hasChildren = false;
+  const eventTypes = info.eventMethodTypes;
   for (const m of info.members) {
     if (m.name === "children")
       hasChildren = true;
@@ -8735,7 +8916,8 @@ function instanceTypeLines(info, selfType) {
       const declared = info.roleText(m.func, "returnType");
       const base = declared ?? (m.isVoid ? "void" : "any");
       const ret = awaitsIn(m.func[2]) && !/^Promise\s*</.test(base) ? `Promise<${base}>` : base;
-      lines.push(`${m.name}${renderParams(m.func[1], info.isOptionalParam)}: ${ret};`);
+      const event = eventTypes instanceof Map ? eventTypes.get(m.name) : undefined;
+      lines.push(`${m.name}${renderParamsWithEvent(m.func[1], info.isOptionalParam, event)}: ${ret};`);
       continue;
     }
     lines.push(`${m.kind === "readonly" ? "readonly " : ""}${m.name}${segmentsText(memberTypeSegments(m, ": "))};`);
@@ -8844,6 +9026,7 @@ class Emitter {
     this.pendingSigs = new WeakMap;
     this.pendingTypeDecls = [];
     this.componentInfo = new Map;
+    this.pendingEventType = null;
     this.moduleComponentNames = new Map;
     this.ind = 0;
     this.methodName = null;
@@ -9072,6 +9255,13 @@ class Emitter {
   }
   isReactiveName(name) {
     return this.resolveBareRead(name) === "reactive";
+  }
+  iterTypeable(iter) {
+    if (typeof iter === "string") {
+      const r = this.resolveBareRead(iter);
+      return r === "reactive" || r === "member-reactive" || r === "member";
+    }
+    return isNode4(iter);
   }
   isComputedName(name) {
     for (let i = this.rframes.length - 1;i >= 0; i--) {
@@ -10532,7 +10722,7 @@ class Emitter {
     this.mark(node, "$self", () => {
       this.b.emit("__schema(");
       this.mark(node, "body", () => {
-        const segments = descriptorSegments(descriptor, schemaName, fns, fns.get("adapter") ?? null, story?.thisTypes ?? null);
+        const segments = descriptorSegments(descriptor, schemaName, fns, fns.get("adapter") ?? null, story?.thisTypes ?? null, story?.itTypes ?? null);
         for (const seg of segments) {
           if (typeof seg === "string")
             this.b.emit(seg);
@@ -13603,6 +13793,7 @@ ${pad ?? ""}`);
       this.scopes.pop();
       this.b.emit(`${pad}}
 `);
+      const eventMethodTypes = tsInfo?.eventMethodTypes ?? scanEventMethodTypes(renderNode, new Set(methods.map((m) => m.name)));
       const emitCallable = ({ name, func, isVoid, node: owner }) => {
         const [, params, block] = func;
         this.b.emit(pad);
@@ -13613,7 +13804,7 @@ ${pad ?? ""}`);
             this.b.emit("*");
           this.mark(owner, "target", () => this.mark(owner, "key", () => this.b.emit(name)));
           this.b.emit("(");
-          this.emitParams(params);
+          this.emitParams(params, { eventType: eventMethodTypes.get(name) });
           this.b.emit(")");
           this.tsReturnAnnotation(func, Emitter.containsAwait(block), isVoid, owner);
           this.b.emit(" ");
@@ -14655,7 +14846,9 @@ ${pad ?? ""}`);
       Emitter.collectLeafNames(value, evUsed);
       const ev = Emitter.mintName("e", evUsed);
       this.renderLine(pair, () => {
-        this.b.emit(`if (${instVar}) ${elVar}.addEventListener('${event}', (${ev}) => ${this.runtimeName("__batch")}(() => (`);
+        this.b.emit(`if (${instVar}) ${elVar}.addEventListener('${event}', (`);
+        this.emitEventParam(ev, event);
+        this.b.emit(`) => ${this.runtimeName("__batch")}(() => (`);
         this.tsHandlerCast(() => this.withExpression(() => this.expr(value)));
         this.b.emit(`)(${ev})))`);
       });
@@ -14746,7 +14939,9 @@ ${pad ?? ""}`);
         const ev = Emitter.mintName("e", evUsed);
         this.renderLine(pair, () => {
           const self = this.renderSelf ?? "this";
-          this.b.emit(`${el}.addEventListener('${eventName}', (${ev}) => ${this.runtimeName("__batch")}(() => `);
+          this.b.emit(`${el}.addEventListener('${eventName}', (`);
+          this.emitEventParam(ev, eventName);
+          this.b.emit(`) => ${this.runtimeName("__batch")}(() => `);
           if (typeof value === "string" && this.renderVarKind(value) === null && this.cframes[this.cframes.length - 1].members.has(value)) {
             if (this.ts)
               this.b.tsOnly(() => this.b.emit("("));
@@ -14756,7 +14951,13 @@ ${pad ?? ""}`);
             this.b.emit(`(${ev})`);
           } else {
             this.b.emit("(");
-            this.tsHandlerCast(() => this.withExpression(() => this.expr(value)));
+            const prevEvent = this.pendingEventType;
+            this.pendingEventType = eventName;
+            try {
+              this.tsHandlerCast(() => this.withExpression(() => this.expr(value)));
+            } finally {
+              this.pendingEventType = prevEvent;
+            }
             this.b.emit(`)(${ev})`);
           }
           this.b.emit("))");
@@ -15169,7 +15370,13 @@ ${pad ?? ""}`);
       this.checkSetupLocalRefs(keyExpr, node);
       this.checkCrossScopeLocals(keyExpr, node);
     }
-    const rec = this.walkFactory(body, "loop", node, { itemVar, indexVar, reactiveSource });
+    const rec = this.walkFactory(body, "loop", node, {
+      itemVar,
+      indexVar,
+      reactiveSource,
+      iter,
+      iterTypeable: this.iterTypeable(iter)
+    });
     if (keyExpr !== null) {
       if (rec.locals.size > 0 && referencesNames(keyExpr, rec.locals)) {
         throw this.positionedError(node, "emitter: a `key:` expression must be evaluable in the loop HEADER scope — it reads a render local declared " + "inside the loop body, which lives in the row factory (derive the key from the item inline: `key: item.id`)");
@@ -15350,7 +15557,19 @@ ${pad ?? ""}`);
       this.withExpression(() => this.expr(iter));
       this.b.emit(`, ${self}, ${self}.${rec.name}, `);
       if (keyExpr !== null) {
-        this.b.emit(`(${itemVar}, ${indexVar}) => `);
+        const typeItem = this.ts && rec.loopStack[rec.loopStack.length - 1]?.iterTypeable;
+        this.b.emit(`(${itemVar}`);
+        if (typeItem) {
+          this.b.tsOnly(() => {
+            this.b.emit(": NonNullable<typeof ");
+            this.withExpression(() => this.expr(iter));
+            this.b.emit(">[number]");
+          });
+        }
+        this.b.emit(`, ${indexVar}`);
+        if (this.ts)
+          this.b.tsOnly(() => this.b.emit(": number"));
+        this.b.emit(") => ");
         this.withBindings([itemVar, indexVar], () => this.withExpression(() => {
           const wrap = Emitter.needsGrouping(keyExpr, "operand") || isObject(keyExpr);
           if (wrap)
@@ -15391,10 +15610,68 @@ ${pad ?? ""}`);
     const kidC = rec.kidsVar !== null ? Emitter.mintName("__c", used) : null;
     const kidE = rec.kidsVar !== null ? Emitter.mintName("__e", used) : null;
     const needsP = !rec.isStatic;
+    const selfTypeAlias = this.ts ? Emitter.mintName("__Self", used) : null;
+    const loopTypeByVar = new Map;
+    if (this.ts) {
+      for (const v of rec.loopStack) {
+        if (v.indexVar)
+          loopTypeByVar.set(v.indexVar, { kind: "number" });
+        if (v.itemVar && v.iter != null && v.iterTypeable) {
+          loopTypeByVar.set(v.itemVar, { kind: "elem", iter: v.iter });
+        }
+      }
+    }
+    const emitFactoryParams = (names, { ctxType, phase }) => {
+      for (let i = 0;i < names.length; i++) {
+        if (i > 0)
+          this.b.emit(", ");
+        this.b.emit(names[i]);
+        if (!this.ts)
+          continue;
+        if (i === 0 && ctxType !== null) {
+          this.b.tsOnly(() => this.b.emit(`: ${ctxType}`));
+          continue;
+        }
+        const logical = i === 0 ? null : rec.paramNames[i - 1];
+        if (logical == null)
+          continue;
+        const typed = loopTypeByVar.get(logical);
+        if (typed === undefined)
+          continue;
+        this.b.tsOnly(() => {
+          if (typed.kind === "number") {
+            this.b.emit(": number");
+          } else if (phase === "p" && typed.alias) {
+            this.b.emit(`: ${typed.alias}`);
+          } else if (typed.kind === "elem") {
+            this.b.emit(": NonNullable<typeof ");
+            this.withExpression(() => this.expr(typed.iter));
+            this.b.emit(">[number]");
+          }
+        });
+      }
+    };
     this.mark(renderNode, "$self", () => {
       this.withRecordContext(rec, () => {
-        this.b.emit(`${pad}${rec.name}(${headerParams.join(", ")}) {
+        this.b.emit(`${pad}${rec.name}(`);
+        emitFactoryParams(headerParams, { ctxType: "this", phase: "header" });
+        this.b.emit(`) {
 `);
+        if (selfTypeAlias !== null) {
+          this.b.tsOnly(() => this.b.emit(`${p2}type ${selfTypeAlias} = typeof ${self};
+`));
+        }
+        if (this.ts) {
+          for (const [logical, typed] of loopTypeByVar) {
+            if (typed.kind !== "elem")
+              continue;
+            const headerName = logical;
+            const alias = Emitter.mintName(`__T_${logical}`, used);
+            typed.alias = alias;
+            this.b.tsOnly(() => this.b.emit(`${p2}type ${alias} = typeof ${headerName};
+`));
+          }
+        }
         if (rec.vars.size > 0)
           this.b.emit(`${p2}let ${[...rec.vars].join(", ")};
 `);
@@ -15446,7 +15723,12 @@ ${pad ?? ""}`);
         }
         this.b.emit(`${p3}},
 `);
-        this.b.emit(`${p3}p(${(needsP ? pParams : headerParams).join(", ")}) {
+        this.b.emit(`${p3}p(`);
+        emitFactoryParams(needsP ? pParams : headerParams, {
+          ctxType: selfTypeAlias,
+          phase: "p"
+        });
+        this.b.emit(`) {
 `);
         if (needsP && rec.paramNames.length > 0) {
           this.b.emit(`${p4}${rec.paramNames.map((n, i) => `${n} = ${pParams[i + 1]};`).join(" ")}
@@ -15576,9 +15858,18 @@ ${pad ?? ""}`);
     Emitter.collectLeafNames(value, evUsed);
     const ev = Emitter.mintName("e", evUsed);
     this.renderLine(pair, () => {
-      this.b.emit(`${el}.addEventListener('${event}', (${ev}) => { `);
+      this.b.emit(`${el}.addEventListener('${event}', (`);
+      this.emitEventParam(ev, event);
+      this.b.emit(`) => { `);
       this.withExpression(() => this.expr(value));
-      this.b.emit(` = ${ev}.${accessor};`);
+      const prop2 = accessor.replace(/^target\./, "");
+      this.b.emit(" = ");
+      if (this.ts)
+        this.b.tsOnly(() => this.b.emit("("));
+      this.b.emit(`${ev}.target`);
+      if (this.ts)
+        this.b.tsOnly(() => this.b.emit(" as any)"));
+      this.b.emit(`.${prop2};`);
       if (touch !== null) {
         this.b.emit(" ");
         touch();
@@ -15586,6 +15877,12 @@ ${pad ?? ""}`);
       }
       this.b.emit(" })");
     });
+  }
+  emitEventParam(ev, eventName) {
+    this.b.emit(ev);
+    if (this.ts && eventName) {
+      this.b.tsOnly(() => this.b.emit(`: HTMLElementEventMap['${eventName}']`));
+    }
   }
   checkBindTarget(pair, value) {
     const reject = (msg) => {
@@ -16747,9 +17044,14 @@ ${"  ".repeat(ind)}`);
       });
     });
   }
-  emitParam(p) {
-    if (typeof p === "string")
-      return this.b.emit(p);
+  emitParam(p, eventType = null) {
+    if (typeof p === "string") {
+      this.b.emit(p);
+      if (this.ts && eventType) {
+        this.b.tsOnly(() => this.b.emit(`: HTMLElementEventMap['${eventType}']`));
+      }
+      return;
+    }
     if (p[0] === "typed-var") {
       this.mark(p, "$self", () => this.mark(p, "annotation", () => {
         this.mark(p, "target", () => this.emitParam(p[1]));
@@ -16789,14 +17091,15 @@ ${"  ".repeat(ind)}`);
       extractions: trailing.map((name, i) => `const ${name} = _rest[_rest.length - ${trailing.length - i}];`)
     };
   }
-  emitParams(params) {
+  emitParams(params, opts = {}) {
+    const eventType = opts.eventType ?? this.pendingEventType ?? null;
     Emitter.expansionSplit(params).list.forEach((p, i) => {
       if (Emitter.atParamName(p) !== null || isNode4(p) && p[0] === "default" && Emitter.atParamName(p[1]) !== null) {
         throw this.positionedError(isNode4(p) ? p : params, "emitter: an @-parameter promotes only in a constructor (`constructor: (@name) ->`) — bind a plain parameter and assign it here");
       }
       if (i > 0)
         this.b.emit(", ");
-      this.emitParam(p);
+      this.emitParam(p, i === 0 ? eventType : null);
     });
   }
   func(node) {
@@ -16829,12 +17132,13 @@ ${"  ".repeat(ind)}`);
       } else {
         if (isAsync)
           this.b.emit("async ");
-        const tsParens = this.ts && params.length === 1 && typeof Emitter.paramCore(params[0]) === "string" && (Emitter.isTypedWrapper(params[0]) || this.annotationText(node, "returnType") !== null || isVoid);
+        const eventAnnotates = this.ts && this.pendingEventType && params.length === 1 && typeof params[0] === "string";
+        const tsParens = this.ts && params.length === 1 && typeof Emitter.paramCore(params[0]) === "string" && (Emitter.isTypedWrapper(params[0]) || this.annotationText(node, "returnType") !== null || isVoid || eventAnnotates);
         this.mark(node, "params", () => {
           if (params.length === 1 && typeof Emitter.paramCore(params[0]) === "string") {
             if (tsParens)
               this.b.tsOnly(() => this.b.emit("("));
-            this.emitParam(params[0]);
+            this.emitParam(params[0], eventAnnotates ? this.pendingEventType : null);
             if (tsParens)
               this.b.tsOnly(() => this.b.emit(")"));
           } else {
@@ -18114,6 +18418,33 @@ return { ${unit.names.join(", ")} };
           builder.emit(tail);
         });
       });
+    }
+  }
+  if (face === "ts") {
+    const ambients = Object.keys(HOST_AMBIENTS).filter((name) => {
+      if (bound.has(name))
+        return false;
+      const one = new Set([name]);
+      return trees.some(({ tree, isDecl }) => referencesNames(tree, one, isDecl));
+    });
+    if (ambients.length > 0) {
+      const programId = stores.idOf(parseResult.sexpr);
+      const start = builder.offset;
+      builder.tsOnly(() => builder.emit(ambients.map((name) => HOST_AMBIENTS[name]).join(`
+`) + `
+`));
+      if (programId !== null) {
+        builder.rows.push({
+          nodeId: programId,
+          role: "hostAmbients",
+          mappingKind: "synthetic",
+          sourceStart: 0,
+          sourceEnd: 0,
+          generatedStart: start,
+          generatedEnd: builder.offset,
+          fileId: 0
+        });
+      }
     }
   }
   emitter.tsDirectivesArmed = true;
