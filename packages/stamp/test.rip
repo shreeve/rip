@@ -1,0 +1,413 @@
+# ==============================================================================
+# stamp tests: parser, shell helpers, injection safety, and the directive plugin
+#
+# Every expectation traces to the running v3 implementation (rip-lang), the
+# port's behavioral oracle. Two classes of test are hermetic by construction:
+# the shell-helper cases run only harmless `echo`/`false`/`true`, and the
+# directive cases run through an INJECTED exec seam (setExec) that records the
+# argv a handler would spawn and returns a canned success — so a handler's
+# check/apply/verify never touches a real host. The injection-safety pins prove
+# the security claim directly: a hostile value lands as one argv element and no
+# handler ever spawns a shell.
+# ==============================================================================
+
+import { test, eq, ok, throws } from '@rip-lang/testing'
+import * as stamp from '@rip-lang/stamp'
+import { parse, sh, run, setExec, ok as shOk } from '@rip-lang/stamp'
+import { readFileSync } from 'fs'
+import { join } from 'path'
+import { pathToFileURL } from 'url'
+
+pkg = JSON.parse readFileSync(join(import.meta.dir, 'package.json'), 'utf8')
+
+DIR_NAMES = ['brew', 'container', 'dataset', 'ensure', 'firewall', 'group', 'incus', 'multipass', 'packages', 'pool', 'profile', 'service', 'ssh', 'user']
+
+# Pre-load every builtin directive (importing @rip-lang/stamp wired sh/ok/run
+# onto globalThis, which the handlers use). The exec seam is installed per test.
+directives = {}
+for name in DIR_NAMES
+  directives[name] = await import(pathToFileURL(join(import.meta.dir, 'directives', "#{name}.rip")).href)
+
+# Install a recording exec for the duration of `fn`, then restore the default.
+# Returns the list of argv arrays the body would have spawned.
+withCapture = (fn) ->
+  recorded = []
+  prev = setExec (argv) ->
+    recorded.push [...argv]
+    { exitCode: 0, stdout: Buffer.from(''), stderr: Buffer.from('') }
+  try
+    fn()
+  finally
+    setExec prev
+  recorded
+
+HOSTILE = '; rm -rf /'
+
+# ==[ Package surface ]==
+
+console.log "\nPackage surface"
+
+test "public entry exposes named exports only", ->
+  eq Object.keys(stamp).sort(), ['apply', 'execute', 'log', 'ok', 'parse', 'plan', 'run', 'setExec', 'sh', 'verify']
+  ok not ('default' of stamp), 'no default export'
+
+test "no runtime deps; testing harness is the only devDependency", ->
+  for field in ['dependencies', 'peerDependencies', 'optionalDependencies']
+    eq pkg[field], undefined
+  eq pkg.devDependencies, { '@rip-lang/testing': 'workspace:*' }
+
+test "the description is the README pitch, byte for byte", ->
+  readme = readFileSync join(import.meta.dir, 'README.md'), 'utf8'
+  ok readme.includes("> **#{pkg.description}.**")
+
+test "the stamp bin is stamp.rip itself, mapped as rip-stamp", ->
+  eq pkg.bin, { 'rip-stamp': './stamp.rip' }
+
+test "server-only: shells out, no browser flag", ->
+  eq pkg.rip, undefined
+  source = readFileSync join(import.meta.dir, 'stamp.rip'), 'utf8'
+  ok source.includes('Bun.spawnSync')
+
+# ==[ Parser: basic structure ]==
+
+console.log "\nParser: basic structure"
+
+test "inline packages directive", ->
+  result = parse "packages curl git jq"
+  eq result.directives.length, 1
+  eq result.directives[0].type, 'packages'
+  eq result.directives[0].name, null
+  eq result.directives[0].args, ['curl', 'git', 'jq']
+
+test "pool block with properties", ->
+  result = parse """
+  pool tank /dev/sdb
+    compression zstd
+    atime off
+  """
+  dir = result.directives[0]
+  eq dir.type, 'pool'
+  eq dir.name, 'tank'
+  eq dir.args, ['/dev/sdb']
+  eq dir.properties.compression[0].args, ['zstd']
+  eq dir.properties.atime[0].args, ['off']
+
+# ==[ Parser: variables ]==
+
+console.log "\nParser: variables"
+
+test "variable expansion in name and captured vars", ->
+  result = parse """
+  set NAME foo
+  set PATH /data
+
+  dataset $NAME
+  """
+  eq result.directives[0].name, 'foo'
+  eq result.vars.NAME, 'foo'
+  eq result.vars.PATH, '/data'
+
+test "dollar and brace expansion", ->
+  result = parse '''
+  set POOL tank
+  pool $POOL /dev/sdb
+  dataset ${POOL}/home
+  '''
+  eq result.directives[0].name, 'tank'
+  eq result.directives[1].name, 'tank/home'
+
+test "undefined var expands to empty", ->
+  result = parse 'dataset $UNDEFINED_VAR/data'
+  eq result.directives[0].name, '/data'
+
+# ==[ Parser: arrow operator ]==
+
+console.log "\nParser: arrow operator"
+
+test "arrow operator source, dest, and flags", ->
+  result = parse """
+  container web ubuntu/24.04
+    disk data /tank/web -> /data
+    disk logs /tank/logs -> /var/log readonly
+  """
+  dir = result.directives[0]
+  disk0 = dir.properties.disk[0]
+  disk1 = dir.properties.disk[1]
+  eq disk0.args, ['data']
+  eq disk0.source, '/tank/web'
+  eq disk0.dest, '/data'
+  eq disk0.flags, []
+  eq disk1.args, ['logs']
+  eq disk1.source, '/tank/logs'
+  eq disk1.dest, '/var/log'
+  eq disk1.flags, ['readonly']
+
+# ==[ Parser: block properties ]==
+
+console.log "\nParser: block properties"
+
+test "multi-valued properties and empty-arg flags", ->
+  result = parse """
+  container web ubuntu/24.04
+    profile trusted
+    profile hardened
+    user alice 1000:1000
+    user bob 1001:1001
+    start
+  """
+  dir = result.directives[0]
+  eq dir.properties.profile.length, 2
+  eq dir.properties.profile[0].args, ['trusted']
+  eq dir.properties.profile[1].args, ['hardened']
+  eq dir.properties.user.length, 2
+  eq dir.properties.start[0].args, []
+
+# ==[ Parser: expanded properties (sub-blocks) ]==
+
+console.log "\nParser: expanded properties (sub-blocks)"
+
+test "property with its own sub-block", ->
+  result = parse """
+  container web ubuntu/24.04
+    disk data
+      source /tank/web
+      path /data
+      readonly true
+  """
+  disk = result.directives[0].properties.disk[0]
+  eq disk.sub.source[0].args, ['/tank/web']
+  eq disk.sub.path[0].args, ['/data']
+  eq disk.sub.readonly[0].args, ['true']
+
+# ==[ Parser: plural expansion ]==
+
+console.log "\nParser: plural expansion"
+
+test "datasets plural expands to individual directives", ->
+  result = parse """
+  datasets
+    tank/home
+    tank/shared
+      owner 1001:1001
+      mode 2775
+  """
+  eq result.directives.length, 2
+  eq result.directives[0].name, 'tank/home'
+  eq result.directives[0].type, 'dataset'
+  eq result.directives[1].name, 'tank/shared'
+  eq result.directives[1].properties.owner[0].args, ['1001:1001']
+  eq result.directives[1].properties.mode[0].args, ['2775']
+
+test "users plural carries positional uid:gid and sub-properties", ->
+  result = parse """
+  users
+    alice 1000:1000
+      groups admin
+    bob 1001:1001
+  """
+  eq result.directives.length, 2
+  eq result.directives[0].type, 'user'
+  eq result.directives[0].name, 'alice'
+  eq result.directives[0].args, ['1000:1000']
+  eq result.directives[0].properties.groups[0].args, ['admin']
+  eq result.directives[1].type, 'user'
+  eq result.directives[1].name, 'bob'
+  eq result.directives[1].args, ['1001:1001']
+
+test "groups plural carries positional gid", ->
+  result = parse """
+  groups
+    trust 1101
+    jail 1002
+  """
+  eq result.directives.length, 2
+  eq result.directives[0].name, 'trust'
+  eq result.directives[0].args, ['1101']
+  eq result.directives[1].args, ['1002']
+
+# ==[ Parser: comments, use, quoting, tabs, blocks ]==
+
+console.log "\nParser: comments, use, quoting, tabs, blocks"
+
+test "comments and blank lines are stripped", ->
+  result = parse """
+  # This is a comment
+  packages curl
+
+  # Another comment
+    # Indented comment
+  user alice 1000:1000
+  """
+  eq result.directives.length, 2
+  eq result.directives[0].type, 'packages'
+  eq result.directives[1].type, 'user'
+
+test "use lines are collected, directives still parse", ->
+  result = parse """
+  use @stamp/postgres
+  use https://example.com/caddy.rip
+
+  packages curl
+  """
+  eq result.uses.length, 2
+  eq result.uses[0], '@stamp/postgres'
+  eq result.uses[1], 'https://example.com/caddy.rip'
+  eq result.directives.length, 1
+
+test "quoted strings become one token", ->
+  result = parse 'user "john doe" 1000:1000'
+  eq result.directives[0].name, 'john doe'
+
+test "tabs are rejected", ->
+  throws -> parse "\tpackages curl"
+
+test "packages block form keys each package as a property", ->
+  result = parse """
+  packages
+    curl
+    git jq
+    zfsutils-linux
+  """
+  dir = result.directives[0]
+  eq dir.type, 'packages'
+  ok dir.properties.curl?
+  ok dir.properties.git?
+  eq dir.properties.git[0].args, ['jq']
+  ok dir.properties['zfsutils-linux']?
+
+test "full host stamp parses to 18 directives", ->
+  source = readFileSync join(import.meta.dir, 'stamps', 'host'), 'utf8'
+  result = parse source
+  eq result.directives.length, 18
+  eq result.vars.POOL, 'tank'
+  eq result.directives[0].type, 'packages'
+  foo = result.directives.find (d) -> d.type == 'container' and d.name == 'foo'
+  ok foo?
+  eq foo.properties.disk.length, 2
+  eq foo.properties.user.length, 2
+  eq foo.properties.disk[0].source, '/tank/home/foo'
+  eq foo.properties.disk[0].dest, '/home'
+
+# ==[ Helpers: sh, ok, run (string mode, real echo) ]==
+
+console.log "\nHelpers: sh, ok, run"
+
+test "ok, sh, and run in string mode", ->
+  ok shOk "echo hello"
+  ok not shOk "false"
+  eq sh("echo hello"), 'hello'
+  out = run "echo hello"
+  ok out.ok
+  eq out.stdout, 'hello'
+  eq out.code, 0
+
+test "run reports failure without throwing", ->
+  out = run "false"
+  ok not out.ok
+  eq out.code, 1
+
+test "sh throws on non-zero exit", ->
+  throws -> sh "false"
+
+test "run captures stderr", ->
+  out = run "echo err >&2"
+  eq out.stderr, 'err'
+
+# ==[ Helpers: tagged template mode ($"...") ]==
+
+console.log "\nHelpers: tagged template mode"
+
+test "sh tagged returns stdout", ->
+  out = sh $"echo hello"
+  eq out, 'hello'
+
+test "ok tagged reflects exit code", ->
+  ok shOk $"true"
+  ok not shOk $"false"
+
+test "sh tagged interpolates a value", ->
+  name = "world"
+  out = sh $"echo #{name}"
+  eq out, 'world'
+
+test "run tagged returns the full picture", ->
+  out = run $"echo hello"
+  ok out.ok
+  eq out.stdout, 'hello'
+
+test "glued interpolation joins to the preceding token", ->
+  val = "zstd"
+  out = sh $"echo compression=#{val}"
+  eq out, 'compression=zstd'
+
+test "shell metacharacters in a value are literal", ->
+  danger = "; echo INJECTED"
+  out = sh $"echo #{danger}"
+  eq out, '; echo INJECTED'
+
+test "command substitution in a value is literal", ->
+  danger = "$(echo INJECTED)"
+  out = sh $"echo #{danger}"
+  eq out, '$(echo INJECTED)'
+
+test "sh tagged throws on non-zero exit", ->
+  throws -> sh $"false"
+
+# ==[ Injection safety: the argv seam ]==
+
+console.log "\nInjection safety (exec seam)"
+
+test "an interpolated value is exactly one argv element", ->
+  rec = withCapture -> shOk $"zfs list #{HOSTILE}"
+  eq rec.at(-1), ['zfs', 'list', HOSTILE]
+
+test "a glued interpolation still isolates the value", ->
+  rec = withCapture -> shOk $"prefix=#{HOSTILE}"
+  eq rec.at(-1), ['prefix=; rm -rf /']
+  ok rec.at(-1).length == 1
+
+test "an array-mode command passes its elements verbatim, no shell", ->
+  rec = withCapture -> shOk ['zfs', 'create', HOSTILE]
+  eq rec.at(-1), ['zfs', 'create', HOSTILE]
+  ok rec.at(-1)[0] isnt 'sh'
+
+# ==[ Directives: plugin contract ]==
+
+console.log "\nDirectives: plugin contract"
+
+test "every builtin directive exports name + check/apply/verify", ->
+  for name in DIR_NAMES
+    m = directives[name]
+    ok typeof m.name is 'string', "#{name} exports name"
+    ok typeof m.check is 'function', "#{name}.check"
+    ok typeof m.apply is 'function', "#{name}.apply"
+    ok typeof m.verify is 'function', "#{name}.verify"
+
+# ==[ Injection safety across every directive ]==
+
+console.log "\nInjection safety across directives"
+
+# Each case drives a handler's check with a hostile value and asserts the
+# handler NEVER spawns a shell (argv[0] is never 'sh') and the hostile string
+# survives as a single argv element rather than being parsed as shell code.
+INJECTION_CASES =
+  dataset:   -> directives.dataset.check(HOSTILE, {})
+  group:     -> directives.group.check(HOSTILE, {})
+  user:      -> directives.user.check(HOSTILE, {})
+  pool:      -> directives.pool.check(HOSTILE, {})
+  service:   -> directives.service.check(HOSTILE, {})
+  profile:   -> directives.profile.check(HOSTILE, {})
+  container: -> directives.container.check(HOSTILE, {})
+  multipass: -> directives.multipass.check(HOSTILE, {})
+  brew:      -> directives.brew.check(null, { args: [HOSTILE] })
+  packages:  -> directives.packages.check(null, { args: [HOSTILE] })
+  incus:     -> directives.incus.check(null, { storage: [{ args: [HOSTILE, 'zfs', 'src'] }] })
+  firewall:  -> directives.firewall.apply(null, { allow: [{ args: [HOSTILE] }] })
+  ensure:    -> directives.ensure.check('x', { check: [{ args: ['test', '-f', HOSTILE] }] })
+
+for own dname, drive of INJECTION_CASES
+  test "#{dname}: a hostile value never reaches a shell", ->
+    rec = withCapture drive
+    ok rec.length > 0, "#{dname} spawned at least one command"
+    ok rec.every((argv) -> argv[0] isnt 'sh'), "#{dname} never spawns a shell"
+    ok rec.some((argv) -> HOSTILE in argv), "#{dname} keeps the hostile value as one argv element"

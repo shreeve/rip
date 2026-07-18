@@ -1,0 +1,25 @@
+{
+  "name": "@rip-lang/stamp",
+  "version": "4.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Declarative host provisioning — no state file, no agent, no YAML",
+  "exports": {
+    ".": "./stamp.rip"
+  },
+  "bin": {
+    "rip-stamp": "./stamp.rip"
+  },
+  "scripts": {
+    "test": "rip test.rip"
+  },
+  "files": [
+    "stamp.rip",
+    "directives",
+    "stamps",
+    "README.md"
+  ],
+  "devDependencies": {
+    "@rip-lang/testing": "workspace:*"
+  }
+}
