@@ -1,21 +1,24 @@
 {
   "name": "@rip-lang/ai",
-  "version": "0.0.0",
+  "version": "4.0.0",
   "private": true,
   "type": "module",
+  "description": "Persistent multi-model AI consultation MCP — discuss, panel, fresh-review, content-hashed attachments, live model catalog",
   "exports": {
-    ".": "./mcp.rip"
+    ".": "./ai.rip"
   },
   "bin": {
-    "rip-ai": "./bin/rip-ai"
+    "rip-ai": "./ai.rip"
   },
   "scripts": {
-    "test": "rip test"
+    "test": "rip test.rip"
   },
   "files": [
-    "*.rip",
+    "ai.rip",
     "lib/",
-    "bin/",
     "README.md"
-  ]
+  ],
+  "devDependencies": {
+    "@rip-lang/testing": "workspace:*"
+  }
 }

@@ -86,10 +86,19 @@ if (!EXTENSIONS[name] || !editorArg || (editorArg !== 'both' && !EDITORS[editorA
 
 const pkgDir = path.join(repoRoot, EXTENSIONS[name]);
 
-// Dependencies first (the packaging script needs them and says so, but
-// installing from the committed lockfile is the obvious next step — do
-// it rather than instruct it).
-if (!fs.existsSync(path.join(pkgDir, 'node_modules'))) {
+// Dependencies first. Under hoisted Bun workspaces, `bun install` in a
+// package dir lands modules at the repo root — so a missing
+// packages/<ext>/node_modules is normal when the root install is present.
+// Packaging materializes a standalone tree from the package lockfile
+// when needed; we only install here when the deps are truly absent.
+function depsAvailable() {
+  if (fs.existsSync(path.join(pkgDir, 'node_modules'))) return true;
+  const pkg = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'utf8'));
+  const rootNm = path.join(repoRoot, 'node_modules');
+  return Object.keys(pkg.dependencies || {}).every((dep) =>
+    fs.existsSync(path.join(rootNm, ...dep.split('/'))));
+}
+if (!depsAvailable()) {
   console.log(`→ installing dependencies in ${EXTENSIONS[name]} (frozen lockfile)`);
   const r = spawnSync('bun', ['install', '--frozen-lockfile'], { cwd: pkgDir, stdio: 'inherit' });
   if (r.status !== 0) process.exit(r.status ?? 1);

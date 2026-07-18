@@ -8,9 +8,10 @@ The package is organized by ownership:
 - `shared/` — utilities genuinely shared by browser and email surfaces
 - `tailwind/` — the sole boundary for Tailwind compilation and CSS parsing
 
-Public APIs use named exports. Package dependencies are isolated here;
-the Rip compiler itself remains dependency-free. Repo-root Bun workspaces
-wire `@rip-lang/*` for in-tree development.
+Public APIs use named exports. This package's dependency budget
+(`css-tree`, `tailwindcss` — exact pins) lives in its `package.json`;
+the repo-root `bun.lock` owns resolution under the hoisted workspace.
+The Rip compiler itself remains dependency-free.
 
 ## Email
 

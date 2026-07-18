@@ -109,26 +109,25 @@ validateUrl = (str) ->
 guessMime = (name) ->
   ext = String(name or '').toLowerCase().split('.').pop()
   switch ext
-    when 'json'                            then 'application/json'
-    when 'md', 'markdown'                  then 'text/markdown'
-    when 'txt', 'log'                      then 'text/plain'
-    when 'js', 'mjs', 'cjs'                then 'text/javascript'
-    when 'ts'                              then 'text/typescript'
-    when 'rip', 'coffee'                   then 'text/x-rip'
-    when 'css'                             then 'text/css'
-    when 'html', 'htm'                     then 'text/html'
-    when 'yaml', 'yml'                     then 'application/yaml'
-    when 'xml'                             then 'application/xml'
-    when 'csv'                             then 'text/csv'
-    when 'sql'                             then 'application/sql'
+    when 'json'             then 'application/json'
+    when 'md', 'markdown'   then 'text/markdown'
+    when 'txt', 'log'       then 'text/plain'
+    when 'js', 'mjs', 'cjs' then 'text/javascript'
+    when 'ts'               then 'text/typescript'
+    when 'rip', 'coffee'    then 'text/x-rip'
+    when 'css'              then 'text/css'
+    when 'html', 'htm'      then 'text/html'
+    when 'yaml', 'yml'      then 'application/yaml'
+    when 'xml'              then 'application/xml'
+    when 'csv'              then 'text/csv'
+    when 'sql'              then 'application/sql'
     else 'application/octet-stream'
 
 asUtf8 = (bytes, mime) ->
   return null unless bytes
   return null if /^image\//.test(mime) or /^audio\//.test(mime) or /^video\//.test(mime)
   buf = if Buffer.isBuffer(bytes) then bytes else Buffer.from(bytes)
-  for i in [0...buf.length]
-    return null if buf[i] is 0
+  return null if buf.includes(0)   # a null byte means binary — send a metadata stub, not raw bytes
   buf.toString('utf-8')
 
 loadFile = (input) ->
@@ -142,37 +141,33 @@ loadFile = (input) ->
   cachePath = writeCached(sha, bytes)
   mime = input.mime or guessMime(path)
   text = asUtf8(bytes, mime)
-  {
-    kind: 'file'
-    name: input.name or basename(path)
-    source: path
-    mime: mime
-    sha256: sha
-    bytes: bytes.length
-    cache_path: cachePath
-    text: text
-    binary: not text?
-    mtime_ms: st.mtimeMs
-  }
+  kind: 'file'
+  name: input.name or basename(path)
+  source: path
+  mime: mime
+  sha256: sha
+  bytes: bytes.length
+  cache_path: cachePath
+  text: text
+  binary: not text?
+  mtime_ms: st.mtimeMs
 
 loadBlob = (input) ->
   raise "blob attachment requires .name and .content" unless input.name and (input.content?)
   buf = Buffer.from(String(input.content), 'utf-8')
-  raise "blob too large: #{input.name} (#{buf.length} bytes)" if buf.length > MAX_BYTES_PER_ATTACHMENT
+  raise "blob too large: #{input.name} (#{buf.length} bytes, max #{MAX_BYTES_PER_ATTACHMENT})" if buf.length > MAX_BYTES_PER_ATTACHMENT
   sha = hashBytes(buf)
   cachePath = writeCached(sha, buf)
   mime = input.mime or guessMime(input.name)
-  {
-    kind: 'blob'
-    name: input.name
-    source: null
-    mime: mime
-    sha256: sha
-    bytes: buf.length
-    cache_path: cachePath
-    text: buf.toString('utf-8')
-    binary: false
-  }
+  kind: 'blob'
+  name: input.name
+  source: null
+  mime: mime
+  sha256: sha
+  bytes: buf.length
+  cache_path: cachePath
+  text: buf.toString('utf-8')
+  binary: false
 
 fetchUrl = (rawUrl) ->
   validateUrl(rawUrl)
@@ -182,7 +177,7 @@ fetchUrl = (rawUrl) ->
     res = fetch! parsed.toString(),
       redirect: 'manual'
       signal: AbortSignal.timeout(URL_TIMEOUT_MS)
-      headers: { 'user-agent': 'rip-ai/1.0' }
+      headers: { 'user-agent': 'rip-ai' }
     if res.status >= 300 and res.status < 400 and res.headers.get('location')
       raise "too many redirects fetching #{rawUrl}" if hop is URL_MAX_REDIRECTS
       current = new URL(res.headers.get('location'), parsed).toString()
@@ -203,17 +198,15 @@ loadUrl = (input) ->
   cachePath = writeCached(sha, buf)
   mime = input.mime or res.headers.get('content-type')?.split(';')[0]?.trim() or guessMime(finalUrl)
   text = asUtf8(buf, mime)
-  {
-    kind: 'url'
-    name: input.name or finalUrl
-    source: finalUrl
-    mime: mime
-    sha256: sha
-    bytes: buf.length
-    cache_path: cachePath
-    text: text
-    binary: not text?
-  }
+  kind: 'url'
+  name: input.name or finalUrl
+  source: finalUrl
+  mime: mime
+  sha256: sha
+  bytes: buf.length
+  cache_path: cachePath
+  text: text
+  binary: not text?
 
 loadOne = (input) ->
   switch input.type
@@ -240,7 +233,7 @@ export load = (store, conversationId, inputs = []) ->
     raise "attachments exceed per-call cap (#{MAX_BYTES_PER_CALL} bytes)" if totalBytes > MAX_BYTES_PER_CALL
 
     record = store.recordAttachment(meta) if store
-    record ?= {
+    record ?=
       id: "sha256:#{meta.sha256}"
       sha256: meta.sha256
       kind: meta.kind
@@ -249,7 +242,6 @@ export load = (store, conversationId, inputs = []) ->
       mime: meta.mime
       bytes: meta.bytes
       cache_path: meta.cache_path
-    }
 
     changedSinceLast = false
     if store and conversationId and meta.source
@@ -266,7 +258,7 @@ export load = (store, conversationId, inputs = []) ->
     # adapters filter attachments by changed_since_last_view and hand
     # them to changeNote, which reads c.prev_sha256 — absent in v3, so
     # any turn that actually detected a change crashed the tool call.)
-    loaded.push {
+    loaded.push
       id: record.id
       sha256: record.sha256
       kind: record.kind
@@ -279,7 +271,6 @@ export load = (store, conversationId, inputs = []) ->
       binary: meta.binary
       changed_since_last_view: changedSinceLast
       prev_sha256: if changedSinceLast then prior.sha256 else null
-    }
 
   { attachments: loaded, totalBytes, warnings, changed }
 
@@ -325,17 +316,15 @@ export renderForAnthropic = (attachments, opts) ->
   [{ type: 'text', text }]
 
 export viewFor = (att) ->
-  {
-    id: att.id
-    sha256: att.sha256
-    kind: att.kind
-    name: att.name
-    source: att.source
-    mime: att.mime
-    bytes: att.bytes
-    binary: att.binary
-    changed_since_last_view: att.changed_since_last_view
-  }
+  id: att.id
+  sha256: att.sha256
+  kind: att.kind
+  name: att.name
+  source: att.source
+  mime: att.mime
+  bytes: att.bytes
+  binary: att.binary
+  changed_since_last_view: att.changed_since_last_view
 
 export viewsFor = (attachments) ->
   attachments.map(viewFor)

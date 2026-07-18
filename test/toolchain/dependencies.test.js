@@ -3,11 +3,14 @@
 // functionality is built in-repo, and external tools reviewers use
 // ephemerally never enter package.json.
 import { test, expect } from 'bun:test';
-import { readFileSync } from 'fs';
+import { existsSync, readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 
+const repoRoot = join(import.meta.dir, '../..');
+const packagesDir = join(repoRoot, 'packages');
+
 test('package.json declares no dependencies of any kind', () => {
-  const pkg = JSON.parse(readFileSync(join(import.meta.dir, '../../package.json'), 'utf8'));
+  const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'));
   for (const field of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
     expect(pkg[field]).toBeUndefined();
   }
@@ -15,6 +18,22 @@ test('package.json declares no dependencies of any kind', () => {
   // @rip-lang/* resolution, hoisted linker) — but the workspace brings
   // the compiler itself no dependencies: the fields above stay empty.
   expect(pkg.workspaces).toEqual(['packages/*']);
+});
+
+// Workspace packages must not carry a sibling bun.lock. Under
+// linker=hoisted, `bun install` from a package directory still resolves
+// against the ROOT lockfile — a package-local lock is not isolation, and
+// CI's frozen-lockfile gate is root-only. Nested quarantine trees that
+// are their own package (csv/bench, print/vscode) may keep a lock.
+test('workspace package roots do not carry a local bun.lock', () => {
+  const offenders = [];
+  for (const name of readdirSync(packagesDir)) {
+    const pkgJson = join(packagesDir, name, 'package.json');
+    if (!existsSync(pkgJson)) continue;
+    const lock = join(packagesDir, name, 'bun.lock');
+    if (existsSync(lock)) offenders.push(`packages/${name}/bun.lock`);
+  }
+  expect(offenders).toEqual([]);
 });
 
 // The editor-integration package carries a minimal, pinned,
@@ -29,7 +48,7 @@ const VSCODE_DEPENDENCY_BUDGET = new Set([
 ]);
 
 test('packages/vscode stays inside the dependency budget, exact pins only', () => {
-  const pkg = JSON.parse(readFileSync(join(import.meta.dir, '../../packages/vscode/package.json'), 'utf8'));
+  const pkg = JSON.parse(readFileSync(join(packagesDir, 'vscode/package.json'), 'utf8'));
   const deps = pkg.dependencies ?? {};
   const allowed = new Set(['typescript', 'vscode-languageclient', 'vscode-languageserver', 'vscode-languageserver-textdocument']);
   for (const [name, version] of Object.entries(deps)) {
@@ -40,7 +59,7 @@ test('packages/vscode stays inside the dependency budget, exact pins only', () =
 });
 
 test('packages/ui isolates an exact Tailwind dependency budget', () => {
-  const pkg = JSON.parse(readFileSync(join(import.meta.dir, '../../packages/ui/package.json'), 'utf8'));
+  const pkg = JSON.parse(readFileSync(join(packagesDir, 'ui/package.json'), 'utf8'));
   const deps = pkg.dependencies ?? {};
   expect(Object.keys(deps).sort()).toEqual(['css-tree', 'tailwindcss']);
   for (const version of Object.values(deps)) expect(version).toMatch(/^\d+\.\d+\.\d+$/);
@@ -50,7 +69,7 @@ test('packages/ui isolates an exact Tailwind dependency budget', () => {
 });
 
 test('packages/app remains dependency-free', () => {
-  const pkg = JSON.parse(readFileSync(join(import.meta.dir, '../../packages/app/package.json'), 'utf8'));
+  const pkg = JSON.parse(readFileSync(join(packagesDir, 'app/package.json'), 'utf8'));
   for (const field of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
     expect(pkg[field]).toBeUndefined();
   }

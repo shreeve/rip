@@ -203,7 +203,7 @@ ALL THREE in the same change.
   the extended tier. CI runs this, always. COMPLETION CLAIMS run
   against `bun run test:all`, not the fast loop.
 - `bun run test` FROM `packages/vscode` — the extension's own suite
-  (run `bun install` in the package first).
+  (deps come from the repo-root `bun install`; no package-local lock).
 - `bun run parser` — regenerate `src/parser.js` from the grammar.
 - `bun run corpus-expected` — regenerate the corpus expected outputs.
 - `bun run type-audit` — the typed-editor scoreboard
