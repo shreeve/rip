@@ -26,8 +26,13 @@ jobs:
       - name: Install TypeScript as an external tool (pinned; never a repository dependency)
         run: npm install -g typescript@7.0.2
 
-      - name: Install UI package dependencies (isolated exact budget)
-        working-directory: packages/ui
+      # Single frozen-lockfile gate. Bun workspaces + linker=hoisted mean
+      # `bun install` from a package directory still resolves against the
+      # ROOT bun.lock — a per-package frozen install is not isolation, and
+      # a stale root lock surfaces as a misleading package-step failure.
+      # Package budgets live in each package.json (see
+      # test/toolchain/dependencies.test.js); the root lock owns versions.
+      - name: Install workspace dependencies
         run: bun install --frozen-lockfile
 
       - name: Full suite, extended tier included
@@ -50,9 +55,7 @@ jobs:
 
       - name: Extension suite (packages/vscode — its own suite, its own boundary)
         working-directory: packages/vscode
-        run: |
-          bun install --frozen-lockfile
-          bun run test
+        run: bun run test
 
       - name: UI package suite (packages/ui — its own suite, its own boundary)
         working-directory: packages/ui
@@ -76,13 +79,10 @@ jobs:
 
       - name: Time package suite (packages/time — its own suite, its own boundary; dayjs is the parity oracle)
         working-directory: packages/time
-        run: |
-          bun install --frozen-lockfile
-          bun run test
+        run: bun run test
 
       - name: Real-browser suite (packages/browser-tests — Playwright in Chromium/Firefox/WebKit)
         working-directory: packages/browser-tests
         run: |
-          bun install --frozen-lockfile
           bunx playwright install --with-deps
           bun run test

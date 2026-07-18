@@ -108,7 +108,13 @@ former cli/engine/parser/helpers) folds into the root entry.
 
 Do NOT add: per-package `bunfig.toml`, `bun.lock`, `.d.ts` files,
 `test/` directories, or JS test files for pure library packages.
-Types are a later, separate pass.
+Types are a later, separate pass. A package-root `bun.lock` is not
+isolation under `linker = "hoisted"` — `bun install` from a package
+directory still resolves against the repo-root lockfile — and CI's
+frozen-lockfile gate is root-only (`test/toolchain/dependencies.test.js`
+rejects a sibling `bun.lock` next to each `packages/*/package.json`).
+Nested quarantine trees that are their own package (`csv/bench`,
+`print/vscode`) may keep a lock.
 
 ## package.json
 
