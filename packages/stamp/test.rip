@@ -11,9 +11,9 @@
 # handler ever spawns a shell.
 # ==============================================================================
 
-import { test, eq, ok, throws } from '@rip-lang/testing'
+import { test, eq, ok as testOk, throws } from '@rip-lang/testing'
 import * as stamp from '@rip-lang/stamp'
-import { parse, sh, run, setExec, ok as shOk } from '@rip-lang/stamp'
+import { parse, execute, sh, run, setExec, ok } from '@rip-lang/stamp'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { pathToFileURL } from 'url'
@@ -49,7 +49,7 @@ console.log "\nPackage surface"
 
 test "public entry exposes named exports only", ->
   eq Object.keys(stamp).sort(), ['apply', 'execute', 'log', 'ok', 'parse', 'plan', 'run', 'setExec', 'sh', 'verify']
-  ok not ('default' of stamp), 'no default export'
+  testOk not ('default' of stamp), 'no default export'
 
 test "no runtime deps; testing harness is the only devDependency", ->
   for field in ['dependencies', 'peerDependencies', 'optionalDependencies']
@@ -58,7 +58,7 @@ test "no runtime deps; testing harness is the only devDependency", ->
 
 test "the description is the README pitch, byte for byte", ->
   readme = readFileSync join(import.meta.dir, 'README.md'), 'utf8'
-  ok readme.includes("> **#{pkg.description}.**")
+  testOk readme.includes("> **#{pkg.description}.**")
 
 test "the stamp bin is stamp.rip itself, mapped as rip-stamp", ->
   eq pkg.bin, { 'rip-stamp': './stamp.rip' }
@@ -66,7 +66,7 @@ test "the stamp bin is stamp.rip itself, mapped as rip-stamp", ->
 test "server-only: shells out, no browser flag", ->
   eq pkg.rip, undefined
   source = readFileSync join(import.meta.dir, 'stamp.rip'), 'utf8'
-  ok source.includes('Bun.spawnSync')
+  testOk source.includes('Bun.spawnSync')
 
 # ==[ Parser: basic structure ]==
 
@@ -242,17 +242,53 @@ test "comments and blank lines are stripped", ->
   eq result.directives[0].type, 'packages'
   eq result.directives[1].type, 'user'
 
-test "use lines are collected, directives still parse", ->
+test "use lines are collected with optional integrity pins, directives still parse", ->
   result = parse """
   use @stamp/postgres
-  use https://example.com/caddy.rip
+  use https://example.com/caddy.rip sha256: ABC123
+  use https://example.com/redis.rip insecure: true
+  use https://example.com/nginx.rip
 
   packages curl
   """
-  eq result.uses.length, 2
-  eq result.uses[0], '@stamp/postgres'
-  eq result.uses[1], 'https://example.com/caddy.rip'
+  eq result.uses.length, 4
+  eq result.uses[0].source, '@stamp/postgres'
+  eq result.uses[1].source, 'https://example.com/caddy.rip'
+  eq result.uses[1].sha256, 'ABC123'
+  eq result.uses[2].source, 'https://example.com/redis.rip'
+  eq result.uses[2].insecure, true
+  eq result.uses[3].sha256, null       # a bare remote use carries no pin
+  eq result.uses[3].insecure, false
   eq result.directives.length, 1
+
+test! "a bare remote `use` is refused — no silent trust-on-first-use", ->
+  parsed = parse "use https://evil.example/handler.rip\npackages curl"
+  # execute() drives resolveHandlers, which rejects before any fetch/import.
+  threw = false
+  try
+    await execute 'plan', parsed, '/tmp'
+  catch
+    threw = true
+  testOk threw
+
+test! "a remote `use` with a mismatched sha256 pin is refused", ->
+  parsed = parse "use https://evil.example/handler.rip sha256: deadbeef\npackages curl"
+  prev = globalThis.fetch
+  globalThis.fetch = -> Promise.resolve { ok: true, status: 200, text: -> Promise.resolve "export name = 'handler'\n" }
+  threw = false
+  try
+    await execute 'plan', parsed, '/tmp'
+  catch
+    threw = true
+  finally
+    globalThis.fetch = prev
+  testOk threw
+
+test "sha256:<hash> attached and space forms both parse", ->
+  attached = parse "use https://x/y.rip sha256:aabbcc"
+  spaced   = parse "use https://x/y.rip sha256: aabbcc"
+  eq attached.uses[0].sha256, 'aabbcc'
+  eq spaced.uses[0].sha256, 'aabbcc'
 
 test "quoted strings become one token", ->
   result = parse 'user "john doe" 1000:1000'
@@ -270,10 +306,10 @@ test "packages block form keys each package as a property", ->
   """
   dir = result.directives[0]
   eq dir.type, 'packages'
-  ok dir.properties.curl?
-  ok dir.properties.git?
+  testOk dir.properties.curl?
+  testOk dir.properties.git?
   eq dir.properties.git[0].args, ['jq']
-  ok dir.properties['zfsutils-linux']?
+  testOk dir.properties['zfsutils-linux']?
 
 test "full host stamp parses to 18 directives", ->
   source = readFileSync join(import.meta.dir, 'stamps', 'host'), 'utf8'
@@ -282,7 +318,7 @@ test "full host stamp parses to 18 directives", ->
   eq result.vars.POOL, 'tank'
   eq result.directives[0].type, 'packages'
   foo = result.directives.find (d) -> d.type == 'container' and d.name == 'foo'
-  ok foo?
+  testOk foo?
   eq foo.properties.disk.length, 2
   eq foo.properties.user.length, 2
   eq foo.properties.disk[0].source, '/tank/home/foo'
@@ -293,17 +329,17 @@ test "full host stamp parses to 18 directives", ->
 console.log "\nHelpers: sh, ok, run"
 
 test "ok, sh, and run in string mode", ->
-  ok shOk "echo hello"
-  ok not shOk "false"
+  testOk ok "echo hello"
+  testOk not ok "false"
   eq sh("echo hello"), 'hello'
   out = run "echo hello"
-  ok out.ok
+  testOk out.ok
   eq out.stdout, 'hello'
   eq out.code, 0
 
 test "run reports failure without throwing", ->
   out = run "false"
-  ok not out.ok
+  testOk not out.ok
   eq out.code, 1
 
 test "sh throws on non-zero exit", ->
@@ -322,8 +358,8 @@ test "sh tagged returns stdout", ->
   eq out, 'hello'
 
 test "ok tagged reflects exit code", ->
-  ok shOk $"true"
-  ok not shOk $"false"
+  testOk ok $"true"
+  testOk not ok $"false"
 
 test "sh tagged interpolates a value", ->
   name = "world"
@@ -332,7 +368,7 @@ test "sh tagged interpolates a value", ->
 
 test "run tagged returns the full picture", ->
   out = run $"echo hello"
-  ok out.ok
+  testOk out.ok
   eq out.stdout, 'hello'
 
 test "glued interpolation joins to the preceding token", ->
@@ -358,18 +394,18 @@ test "sh tagged throws on non-zero exit", ->
 console.log "\nInjection safety (exec seam)"
 
 test "an interpolated value is exactly one argv element", ->
-  rec = withCapture -> shOk $"zfs list #{HOSTILE}"
+  rec = withCapture -> ok $"zfs list #{HOSTILE}"
   eq rec.at(-1), ['zfs', 'list', HOSTILE]
 
 test "a glued interpolation still isolates the value", ->
-  rec = withCapture -> shOk $"prefix=#{HOSTILE}"
+  rec = withCapture -> ok $"prefix=#{HOSTILE}"
   eq rec.at(-1), ['prefix=; rm -rf /']
-  ok rec.at(-1).length == 1
+  testOk rec.at(-1).length == 1
 
 test "an array-mode command passes its elements verbatim, no shell", ->
-  rec = withCapture -> shOk ['zfs', 'create', HOSTILE]
+  rec = withCapture -> ok ['zfs', 'create', HOSTILE]
   eq rec.at(-1), ['zfs', 'create', HOSTILE]
-  ok rec.at(-1)[0] isnt 'sh'
+  testOk rec.at(-1)[0] isnt 'sh'
 
 # ==[ Directives: plugin contract ]==
 
@@ -378,10 +414,10 @@ console.log "\nDirectives: plugin contract"
 test "every builtin directive exports name + check/apply/verify", ->
   for name in DIR_NAMES
     m = directives[name]
-    ok typeof m.name is 'string', "#{name} exports name"
-    ok typeof m.check is 'function', "#{name}.check"
-    ok typeof m.apply is 'function', "#{name}.apply"
-    ok typeof m.verify is 'function', "#{name}.verify"
+    testOk typeof m.name is 'string', "#{name} exports name"
+    testOk typeof m.check is 'function', "#{name}.check"
+    testOk typeof m.apply is 'function', "#{name}.apply"
+    testOk typeof m.verify is 'function', "#{name}.verify"
 
 # ==[ Injection safety across every directive ]==
 
@@ -408,6 +444,6 @@ INJECTION_CASES =
 for own dname, drive of INJECTION_CASES
   test "#{dname}: a hostile value never reaches a shell", ->
     rec = withCapture drive
-    ok rec.length > 0, "#{dname} spawned at least one command"
-    ok rec.every((argv) -> argv[0] isnt 'sh'), "#{dname} never spawns a shell"
-    ok rec.some((argv) -> HOSTILE in argv), "#{dname} keeps the hostile value as one argv element"
+    testOk rec.length > 0, "#{dname} spawned at least one command"
+    testOk rec.every((argv) -> argv[0] isnt 'sh'), "#{dname} never spawns a shell"
+    testOk rec.some((argv) -> HOSTILE in argv), "#{dname} keeps the hostile value as one argv element"
