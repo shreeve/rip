@@ -7,9 +7,12 @@
     },
     "packages/ai": {
       "name": "@rip-lang/ai",
-      "version": "0.0.0",
+      "version": "4.0.0",
       "bin": {
-        "rip-ai": "./bin/rip-ai",
+        "rip-ai": "./ai.rip",
+      },
+      "devDependencies": {
+        "@rip-lang/testing": "workspace:*",
       },
     },
     "packages/app": {
@@ -89,11 +92,27 @@
     },
     "packages/script": {
       "name": "@rip-lang/script",
-      "version": "0.0.0",
+      "version": "4.0.0",
+      "devDependencies": {
+        "@rip-lang/testing": "workspace:*",
+      },
     },
     "packages/server": {
       "name": "@rip-lang/server",
       "version": "0.0.0",
+      "bin": {
+        "rip-server": "./bin/rip-server",
+      },
+    },
+    "packages/stamp": {
+      "name": "@rip-lang/stamp",
+      "version": "4.0.0",
+      "bin": {
+        "rip-stamp": "./stamp.rip",
+      },
+      "devDependencies": {
+        "@rip-lang/testing": "workspace:*",
+      },
     },
     "packages/swarm": {
       "name": "@rip-lang/swarm",
@@ -191,6 +210,8 @@
     "@rip-lang/script": ["@rip-lang/script@workspace:packages/script"],
 
     "@rip-lang/server": ["@rip-lang/server@workspace:packages/server"],
+
+    "@rip-lang/stamp": ["@rip-lang/stamp@workspace:packages/stamp"],
 
     "@rip-lang/swarm": ["@rip-lang/swarm@workspace:packages/swarm"],
 

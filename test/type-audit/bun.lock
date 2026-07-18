@@ -3,7 +3,6 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "rip-type-audit",
       "dependencies": {
         "dayjs": "1.11.21",
         "react": "19.2.7",
