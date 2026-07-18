@@ -7958,66 +7958,6 @@ function buildSchemaTypeStory(programSexpr) {
   };
 }
 
-// src/ambients.js
-var HOST_AMBIENTS = {
-  process: [
-    "declare var process: {",
-    "  env: Record<string, string | undefined>;",
-    "  argv: string[];",
-    "  argv0: string;",
-    "  execPath: string;",
-    "  platform: string;",
-    "  arch: string;",
-    "  pid: number;",
-    "  version: string;",
-    "  versions: Record<string, string>;",
-    "  exitCode: number | undefined;",
-    "  cwd(): string;",
-    "  chdir(directory: string): void;",
-    "  exit(code?: number): never;",
-    "  nextTick(callback: (...args: any[]) => void, ...args: any[]): void;",
-    "  on(event: string, listener: (...args: any[]) => void): void;",
-    "  hrtime: { (time?: [number, number]): [number, number]; bigint(): bigint };",
-    "  stdout: { write(chunk: string | Uint8Array): boolean };",
-    "  stderr: { write(chunk: string | Uint8Array): boolean };",
-    "  stdin: { on(event: string, listener: (...args: any[]) => void): void };",
-    "  [key: string]: any;",
-    "}"
-  ].join(`
-`),
-  Bun: [
-    "declare var Bun: {",
-    "  version: string;",
-    "  revision: string;",
-    "  main: string;",
-    "  argv: string[];",
-    "  env: Record<string, string | undefined>;",
-    "  file(path: string | URL, options?: { type?: string }): any;",
-    "  write(destination: any, input: any): Promise<number>;",
-    "  spawn(command: string[], options?: any): any;",
-    "  spawnSync(command: string[], options?: any): any;",
-    "  serve(options: any): any;",
-    "  listen(options: any): any;",
-    "  connect(options: any): Promise<any>;",
-    "  sleep(ms: number): Promise<void>;",
-    "  sleepSync(ms: number): void;",
-    "  which(command: string, options?: any): string | null;",
-    "  hash(input: string | Uint8Array, seed?: number): number | bigint;",
-    "  resolveSync(specifier: string, parent: string): string;",
-    "  fileURLToPath(url: string | URL): string;",
-    "  pathToFileURL(path: string): URL;",
-    "  inspect(value: any, options?: any): string;",
-    "  readableStreamToText(stream: any): Promise<string>;",
-    "  readableStreamToJSON(stream: any): Promise<any>;",
-    "  readableStreamToArrayBuffer(stream: any): Promise<ArrayBuffer>;",
-    "  nanoseconds(): number;",
-    "  $: any;",
-    "  [key: string]: any;",
-    "}"
-  ].join(`
-`)
-};
-
 // src/typetext.js
 class TypeTextError extends Error {
   constructor(message) {
@@ -18174,33 +18114,6 @@ return { ${unit.names.join(", ")} };
           builder.emit(tail);
         });
       });
-    }
-  }
-  if (face === "ts") {
-    const ambients = Object.keys(HOST_AMBIENTS).filter((name) => {
-      if (bound.has(name))
-        return false;
-      const one = new Set([name]);
-      return trees.some(({ tree, isDecl }) => referencesNames(tree, one, isDecl));
-    });
-    if (ambients.length > 0) {
-      const programId = stores.idOf(parseResult.sexpr);
-      const start = builder.offset;
-      builder.tsOnly(() => builder.emit(ambients.map((name) => HOST_AMBIENTS[name]).join(`
-`) + `
-`));
-      if (programId !== null) {
-        builder.rows.push({
-          nodeId: programId,
-          role: "hostAmbients",
-          mappingKind: "synthetic",
-          sourceStart: 0,
-          sourceEnd: 0,
-          generatedStart: start,
-          generatedEnd: builder.offset,
-          fileId: 0
-        });
-      }
     }
   }
   emitter.tsDirectivesArmed = true;

@@ -23,7 +23,6 @@ import { Stores } from './stores.js';
 import { CodeBuilder } from './builder.js';
 import { descriptorSegments, paramNamesOf, splitTopLevelByComma } from './schema.js';
 import { buildSchemaTypeStory, isModuleShaped, SchemaTypeError } from './schema-types.js';
-import { HOST_AMBIENTS } from './ambients.js';
 import { Parser } from './parser.js';
 import { applyInsertionPass, implicitBlocks, implicitObjects, implicitCalls, tagPostfixConditionals, rewriteTypes, isIdentifierName } from './lexer.js';
 import { TypeTextError, normalizeTypeText, tidyType, renderTypeDecl, renderParams, optionalReader } from './typetext.js';
@@ -12132,36 +12131,6 @@ export function emit(parseResult, { source = '', runtimeDelivery = 'none', face 
           builder.emit(tail);
         });
       });
-    }
-  }
-
-  // Host ambient globals (face only). The runtime-provided globals
-  // (`process`, `Bun`) a program references but no @types package
-  // declares — injected so tsgo resolves them. Rides the schema
-  // intrinsic's rail: ONE TS-only region with a synthetic mapping row
-  // (injected text, no source). Delivered on the SAME rule as a
-  // RUNTIME_TABLE runtime — the name is referenced as a free identifier
-  // no program-scope binding supplies. Reference-gated so a file that
-  // never spells the name carries zero bytes (its face is unchanged),
-  // and a file that BINDS the name keeps its own (no false TS2451).
-  if (face === 'ts') {
-    const ambients = Object.keys(HOST_AMBIENTS).filter((name) => {
-      if (bound.has(name)) return false;
-      const one = new Set([name]);
-      return trees.some(({ tree, isDecl }) => referencesNames(tree, one, isDecl));
-    });
-    if (ambients.length > 0) {
-      const programId = stores.idOf(parseResult.sexpr);
-      const start = builder.offset;
-      builder.tsOnly(() => builder.emit(ambients.map((name) => HOST_AMBIENTS[name]).join('\n') + '\n'));
-      if (programId !== null) {
-        builder.rows.push({
-          nodeId: programId, role: 'hostAmbients', mappingKind: 'synthetic',
-          sourceStart: 0, sourceEnd: 0,
-          generatedStart: start, generatedEnd: builder.offset,
-          fileId: 0,
-        });
-      }
     }
   }
 

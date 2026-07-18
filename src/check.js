@@ -12,7 +12,7 @@
 // full parity with what VS Code shows, in one tsgo program instead of a
 // per-keystroke session. The drift-sensitive core is SHARED with the
 // server, not copied:
-//   · mirror.js       — generatedTsconfig, mirror naming, closure edges
+//   · mirror.js       — generatedMirror, mirror naming, closure edges
 //   · diagnostics.js  — mapTsDiagnostic, rip.strict gate, @ts-expect-error
 //                        (applyRipDirectives), rip.noCheck (isNoCheckPath)
 //   · pins.js         — buildProbe / parseProbeHover (Tier-3 pins)
@@ -27,7 +27,7 @@ import { readProjectConfig } from './config.js';
 import { startTsgo } from '../packages/vscode/src/tsgo.js';
 import { buildProbe, parseProbeHover } from '../packages/vscode/src/pins.js';
 import { mapTsDiagnostic, applyRipDirectives, isNoCheckPath, compileErrorInfo } from '../packages/vscode/src/diagnostics.js';
-import { generatedTsconfig, mirrorRelForFsPath, ripImportsOf } from '../packages/vscode/src/mirror.js';
+import { generatedMirror, HOST_FLOOR_NAME, mirrorRelForFsPath, ripImportsOf } from '../packages/vscode/src/mirror.js';
 import { lineStartsOf, offsetToPosition, positionToOffset, generatedSpanToSource } from '../packages/vscode/src/translate.js';
 
 const HELP = `rip check — type-check .rip files headlessly (the tsc --noEmit of rip-land)
@@ -240,10 +240,9 @@ if (compiled.size > 0) {
     fs.mkdirSync(path.dirname(mirrorPath), { recursive: true });
     fs.writeFileSync(mirrorPath, entry.good.code);
   }
-  fs.writeFileSync(
-    path.join(mirrorRoot, 'tsconfig.json'),
-    JSON.stringify(generatedTsconfig({ workspaceRoot, mirrorRootIsFallback }), null, 2),
-  );
+  const mirror = generatedMirror({ workspaceRoot, mirrorRootIsFallback });
+  fs.writeFileSync(path.join(mirrorRoot, 'tsconfig.json'), JSON.stringify(mirror.tsconfig, null, 2));
+  fs.writeFileSync(path.join(mirrorRoot, HOST_FLOOR_NAME), mirror.hostFloorDts);
 
   let session = null;
   try {

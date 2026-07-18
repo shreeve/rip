@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 
 const stripJsonComments = (text) =>
   text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
@@ -65,15 +66,114 @@ export function chainSetsTypes(configPath, chain, onUnresolved, visited = new Se
   });
 }
 
-// The generated mirror-root tsconfig. Overrides applied over the user's
-// config (or the defaults): noImplicitAny stays ON (it activates the
-// evolving-`let` inference; the implicit-any family is suppressed
-// per-code in translate.js), noEmit (the project never emits; also what
-// legalizes allowImportingTsExtensions), and rootDirs merging the mirror
-// tree with the real workspace (a .rip file importing a real .ts sibling
+// The zero-config host floor: the runtime-host globals (`process`,
+// `Bun`) declared by EXISTENCE only, as `any` — the permissive default
+// for a workspace that supplies no host types. A workspace with no
+// node_modules has nothing for tsgo's typeRoots walk-up to find, so the
+// names are unresolvable on every face; a floor (a one-line d.ts
+// shipped with the toolchain) resolves its name without claiming any
+// shape that could go stale or be wrong. GATED per name: a workspace
+// that installs the name's real declaration package (anywhere up its
+// ancestor chain — the same walk tsgo's default typeRoots performs)
+// never sees that floor; a second declaration beside the real one
+// would be a TS2403 conflict, and precision is the user's opt-in.
+// The probes walk the DISK, not module resolution: Bun's
+// `createRequire().resolve` falls back to the machine-global install
+// cache (`~/.bun/install/cache`), which tsgo's typeRoots walk never
+// consults — a resolve-based probe would false-positive on any machine
+// that ever installed the package.
+//
+// A strict project refuses every floor: `rip.strict` means MISSING
+// annotations get complained about (src/config.js), and a floor is
+// exactly a missing-annotation forgiveness — host globals as `any`. A
+// strict project gets the unresolved-name diagnostic (pointing at
+// @types/bun) until it declares real host types. The probe mirrors
+// readProjectConfig's boundary rule — walk UP to the FIRST package.json
+// and stop; unreadable answers false, like readProjectConfig's own
+// defaults — but stays local: mirror.js must remain layout-agnostic
+// (repo checkout vs staged vsix), so it cannot import the compiler.
+// The strictness read is the WORKSPACE root's: a floor joins the
+// program whole-or-not (one tsconfig include), so a nested project's
+// own package.json cannot govern it per-file the way the diagnostic
+// gate does.
+const workspaceIsStrict = (workspaceRoot) => {
+  for (let dir = workspaceRoot; ; dir = path.dirname(dir)) {
+    const pkgPath = path.join(dir, 'package.json');
+    if (fs.existsSync(pkgPath)) {
+      try { return JSON.parse(fs.readFileSync(pkgPath, 'utf8'))?.rip?.strict === true; }
+      catch { return false; }
+    }
+    if (path.dirname(dir) === dir) return false;
+  }
+};
+// One floor PER NAME, because the names' real-type suppliers differ:
+// @types/node declares `process` but not `Bun`. A workspace with only
+// @types/node keeps `process` at its installed truth and still floors
+// `Bun` (rip runs on Bun — the name is real in every rip program); a
+// workspace with @types/bun supplies both and floors nothing. The disk
+// probe governs only the no-`types`-field world, where the mirror's
+// `types:["*"]` makes @types presence and program inclusion the same
+// fact — which is also why bare `bun-types` is NOT probed: on disk it
+// is inert (outside the @types root) until a `types` entry names it,
+// and a chain that sets `types` refuses floors wholesale before any
+// probe runs (`userSetsTypes` below).
+//
+// The declarations are COMPILER-TOOLCHAIN DATA, not shipped .d.ts
+// assets: the text lives here and is emitted into the mirror root as a
+// generated file beside the generated tsconfig (the mirror's existing
+// `**/*.ts` include picks it up). A shipped asset would be one more
+// packaging surface (vsix staging, a future CLI `files` list) whose
+// omission fails SILENTLY — an existence-gated floor that simply never
+// materializes; text in this module ships wherever the toolchain does.
+const HOST_FLOORS = [
+  { text: 'declare var process: any;', suppliedBy: ['@types/node', '@types/bun'] },
+  { text: 'declare var Bun: any;', suppliedBy: ['@types/bun'] },
+];
+export const HOST_FLOOR_NAME = 'host-floor.d.ts';
+const ancestorHas = (fromDir, pkgs) => {
+  for (let dir = fromDir; ; dir = path.dirname(dir)) {
+    if (pkgs.some((p) => fs.existsSync(path.join(dir, 'node_modules', p)))) return true;
+    if (path.dirname(dir) === dir) return false;
+  }
+};
+// `userSetsTypes`: the resolved tsconfig chain sets
+// compilerOptions.types — the user's COMPLETE ambient manifest, the
+// same signal that already stops the `types:["*"]` injection. Floors
+// defer to it wholesale: an enumerated list means "these ambients and
+// no others", whether or not the named packages are even installed —
+// a floor beside an explicit manifest would clobber the narrowing
+// exactly like `["*"]` would. The generated file is written even when
+// every floor is refused (with the reason in its body) — an
+// always-present file with varying content, so the flip is a plain
+// Changed event and no caller carries a create/delete lifecycle.
+export function hostFloorDts(workspaceRoot, { userSetsTypes = false } = {}) {
+  const head = '// Generated by rip — the zero-config host floor. Do not edit.\n';
+  if (userSetsTypes) {
+    return head + '// Inactive: the tsconfig chain sets `types` — the complete ambient manifest.\n';
+  }
+  if (workspaceRoot && workspaceIsStrict(workspaceRoot)) {
+    return head + '// Inactive: rip.strict — missing host types are complaints, not `any`s.\n';
+  }
+  const active = HOST_FLOORS.filter(({ suppliedBy }) => !(workspaceRoot && ancestorHas(workspaceRoot, suppliedBy)));
+  if (active.length === 0) {
+    return head + '// Inactive: the workspace installs its own host types.\n';
+  }
+  return head + active.map(({ text }) => text + '\n').join('');
+}
+
+// The generated mirror-root files, built together because they share
+// one probe of the user's config chain: the tsconfig, and the host
+// floor's content (written as HOST_FLOOR_NAME beside it — the
+// tsconfig's own `**/*.ts` include picks it up). Tsconfig overrides
+// applied over the user's config (or the defaults): noImplicitAny
+// stays ON (it activates the evolving-`let` inference; the
+// implicit-any family is suppressed per-code in translate.js), noEmit
+// (the project never emits; also what legalizes
+// allowImportingTsExtensions), and rootDirs merging the mirror tree
+// with the real workspace (a .rip file importing a real .ts sibling
 // resolves). The mirror root MUST sit two levels below the workspace so
 // the `../../` reach-ups (extends, ambient d.ts, node_modules) resolve.
-export function generatedTsconfig({ workspaceRoot, mirrorRootIsFallback, chain = new Set(), onUnresolved } = {}) {
+export function generatedMirror({ workspaceRoot, mirrorRootIsFallback, chain = new Set(), onUnresolved } = {}) {
   const overrides = {
     noImplicitAny: true,
     noEmit: true,
@@ -89,22 +189,30 @@ export function generatedTsconfig({ workspaceRoot, mirrorRootIsFallback, chain =
     include.push('../../**/*.d.ts');
     exclude.push('../../**/node_modules');
   }
+  const floorRoot = mirrorRootIsFallback ? null : workspaceRoot;
   const userConfig = !mirrorRootIsFallback && workspaceRoot
     ? path.join(workspaceRoot, 'tsconfig.json') : null;
   if (userConfig && fs.existsSync(userConfig)) {
     chain.clear();
-    if (!chainSetsTypes(userConfig, chain, onUnresolved)) overrides.types = ['*'];
-    return { extends: '../../tsconfig.json', compilerOptions: overrides, include, exclude };
+    const setsTypes = chainSetsTypes(userConfig, chain, onUnresolved);
+    if (!setsTypes) overrides.types = ['*'];
+    return {
+      tsconfig: { extends: '../../tsconfig.json', compilerOptions: overrides, include, exclude },
+      hostFloorDts: hostFloorDts(floorRoot, { userSetsTypes: setsTypes }),
+    };
   }
   chain.clear();
   return {
-    compilerOptions: {
-      target: 'esnext', module: 'esnext', lib: ['esnext', 'dom'],
-      types: ['*'],
-      ...overrides,
+    tsconfig: {
+      compilerOptions: {
+        target: 'esnext', module: 'esnext', lib: ['esnext', 'dom'],
+        types: ['*'],
+        ...overrides,
+      },
+      include,
+      exclude,
     },
-    include,
-    exclude,
+    hostFloorDts: hostFloorDts(floorRoot),
   };
 }
 
