@@ -23,24 +23,34 @@ const pkgJson = JSON.parse(fs.readFileSync(path.join(pkgDir, 'package.json'), 'u
 
 // Prefer a package-local node_modules. Under the repo's hoisted Bun
 // workspaces, `bun install` in packages/vscode lands deps at the repo
-// root instead — materialize a standalone tree from this package's
-// lockfile so the staged .vsix stays self-contained and free of the
-// monorepo's unrelated packages.
+// root instead — materialize a standalone tree in a temp dir so the
+// staged .vsix stays self-contained and free of the monorepo's
+// unrelated packages. Use the package lockfile when present; otherwise
+// install from package.json (exact pins) — the workspace root lockfile
+// owns resolution and packages/vscode/bun.lock may be absent.
 function resolveModulesRoot() {
   const local = path.join(pkgDir, 'node_modules');
   if (fs.existsSync(local)) return { root: local, cleanup: null };
 
-  const lock = path.join(pkgDir, 'bun.lock');
-  if (!fs.existsSync(lock)) {
+  const deps = Object.keys(pkgJson.dependencies || {});
+  const rootNm = path.join(repoRoot, 'node_modules');
+  const rootHasDeps = deps.length > 0 && deps.every((dep) =>
+    fs.existsSync(path.join(rootNm, ...dep.split('/'))));
+  if (!rootHasDeps && deps.length > 0) {
     console.error('node_modules missing — run `bun install` in packages/vscode (or the repo root) first');
     process.exit(1);
   }
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rip-vscode-deps-'));
   fs.copyFileSync(path.join(pkgDir, 'package.json'), path.join(tmp, 'package.json'));
-  fs.copyFileSync(lock, path.join(tmp, 'bun.lock'));
+  const lock = path.join(pkgDir, 'bun.lock');
+  const installArgs = ['install'];
+  if (fs.existsSync(lock)) {
+    fs.copyFileSync(lock, path.join(tmp, 'bun.lock'));
+    installArgs.push('--frozen-lockfile');
+  }
   console.log('→ materializing standalone node_modules for packaging (workspace install is hoisted)');
-  const r = spawnSync('bun', ['install', '--frozen-lockfile'], { cwd: tmp, stdio: 'inherit' });
+  const r = spawnSync('bun', installArgs, { cwd: tmp, stdio: 'inherit' });
   if (r.status !== 0) {
     fs.rmSync(tmp, { recursive: true, force: true });
     process.exit(r.status ?? 1);
