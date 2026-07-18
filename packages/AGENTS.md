@@ -92,6 +92,20 @@ reads its version from the package's `package.json`. Adding a utility
 is: drop the `.rip` file, add a `"bin"` entry, list it under `"files"`,
 document it in the README, and extend `test.rip`.
 
+### Plugin directories (`stamp`)
+
+A package whose extension model is "drop a file in a directory and it
+resolves at runtime" earns that directory — it is a structural part of
+the program, not invocation sugar. `stamp` is the reference: its
+`directives/` holds one `<type>.rip` per handler, each exporting the
+`check`/`apply`/`verify` contract, and the engine resolves a directive's
+type to the matching file (built-in, then local, then installed). Inputs
+the package treats as DATA may share this shape — stamp's `stamps/`
+example Stampfiles live in a directory because code and tests reference
+them; they are assets, not modules. The flat-until-earned rule still
+holds for CODE: a `src/` split that only mirrors the call graph (stamp's
+former cli/engine/parser/helpers) folds into the root entry.
+
 Do NOT add: per-package `bunfig.toml`, `bun.lock`, `.d.ts` files,
 `test/` directories, or JS test files for pure library packages.
 Types are a later, separate pass.
