@@ -155,7 +155,7 @@ loadFile = (input) ->
 loadBlob = (input) ->
   raise "blob attachment requires .name and .content" unless input.name and (input.content?)
   buf = Buffer.from(String(input.content), 'utf-8')
-  raise "blob too large: #{input.name} (#{buf.length} bytes)" if buf.length > MAX_BYTES_PER_ATTACHMENT
+  raise "blob too large: #{input.name} (#{buf.length} bytes, max #{MAX_BYTES_PER_ATTACHMENT})" if buf.length > MAX_BYTES_PER_ATTACHMENT
   sha = hashBytes(buf)
   cachePath = writeCached(sha, buf)
   mime = input.mime or guessMime(input.name)

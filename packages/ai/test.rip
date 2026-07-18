@@ -793,7 +793,7 @@ test! "file: missing file / unknown type raise, verbatim", ->
   eq caught!(-> att.load(store, null, [{ type: 'zip', path: missing }])).message, 'unknown attachment type: zip'
 
 test! "caps: 2 MB per attachment, 8 MB per call", ->
-  eq caught!(-> att.load(store, null, [{ type: 'blob', name: 'big.txt', content: 'x'.repeat(2 * 1024 * 1024 + 1) }])).message, 'blob too large: big.txt (2097153 bytes)'
+  eq caught!(-> att.load(store, null, [{ type: 'blob', name: 'big.txt', content: 'x'.repeat(2 * 1024 * 1024 + 1) }])).message, 'blob too large: big.txt (2097153 bytes, max 2097152)'
   five = ['a', 'b', 'c', 'd', 'e'].map((c) -> { type: 'blob', name: "#{c}.txt", content: c.repeat(1_900_000) })
   eq caught!(-> att.load(store, null, five)).message, 'attachments exceed per-call cap (8388608 bytes)'
 
