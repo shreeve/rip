@@ -10808,6 +10808,76 @@ class Emitter {
       }
     });
   }
+  emitRoleRead(owner, name, {
+    role = null,
+    pick = "first",
+    after = null,
+    unwrap = false,
+    fallback = "read"
+  } = {}) {
+    const emitFallback = () => {
+      if (fallback === "bare")
+        this.b.emit(name);
+      else
+        this.emitReadName(name, { unwrap });
+    };
+    if (!this.ts || this.b.source == null || !isIdentifierName(name) || owner == null) {
+      emitFallback();
+      return;
+    }
+    const id = this.stores.idOf(owner);
+    if (id == null) {
+      emitFallback();
+      return;
+    }
+    let start = null;
+    let end = null;
+    if (role != null) {
+      const r = this.stores.role(id, role);
+      if (r?.sourceStart != null && r.sourceEnd != null) {
+        start = r.sourceStart;
+        end = r.sourceEnd;
+      }
+    } else {
+      const sp = this.stores.selfSpan(id);
+      if (sp != null) {
+        start = sp[0];
+        end = sp[1];
+      }
+    }
+    if (start == null || end == null) {
+      emitFallback();
+      return;
+    }
+    const src = this.b.source;
+    let at = null;
+    if (after != null) {
+      const re = new RegExp(`${after}(${name.replace(/\$/g, "\\$&")})(?![\\w$])`);
+      const m = src.slice(start, end).match(re);
+      if (m != null)
+        at = start + m.index + m[0].length - name.length;
+    } else if (pick === "exact") {
+      if (src.slice(start, end) === name)
+        at = start;
+    } else {
+      const re = new RegExp(`(?<![\\w$])${name.replace(/\$/g, "\\$&")}(?![\\w$])`, "g");
+      re.lastIndex = start;
+      let hit = null;
+      let sm;
+      while ((sm = re.exec(src)) !== null && sm.index + name.length <= end) {
+        hit = sm;
+        if (pick === "first")
+          break;
+      }
+      if (hit != null)
+        at = hit.index;
+    }
+    if (at == null) {
+      emitFallback();
+      return;
+    }
+    this.b.markSpan(id, "read", at, at + name.length, () => this.b.emit(name));
+  }
   emitQuotedDomName(name, pair = null) {
     this.b.emit("'");
     if (pair != null)
@@ -10817,56 +10887,13 @@ class Emitter {
     this.b.emit("'");
   }
   emitExtendsTag(node, tag) {
-    if (!this.ts || this.b.source == null || !isIdentifierName(tag)) {
-      this.b.emit(tag);
-      return;
-    }
-    const id = this.stores.idOf(node);
-    const sp = id != null ? this.stores.selfSpan(id) : null;
-    if (sp == null) {
-      this.b.emit(tag);
-      return;
-    }
-    const region = this.b.source.slice(sp[0], sp[1]);
-    const re = new RegExp(`extends\\s+(${tag.replace(/\$/g, "\\$&")})\\b`);
-    const m = region.match(re);
-    if (m == null) {
-      this.b.emit(tag);
-      return;
-    }
-    const at = sp[0] + m.index + m[0].length - tag.length;
-    this.b.markSpan(id, "read", at, at + tag.length, () => this.b.emit(tag));
+    this.emitRoleRead(node, tag, { after: "extends\\s+", fallback: "bare" });
   }
   emitRenderTagName(node, tag) {
-    if (!this.ts || this.b.source == null || !isIdentifierName(tag) || !isNode4(node)) {
-      this.emitReadName(tag);
-      return;
-    }
-    const id = this.stores.idOf(node);
-    const callee = id != null ? this.stores.role(id, "callee") : null;
-    if (callee?.sourceStart != null && callee.sourceEnd != null && this.b.source.slice(callee.sourceStart, callee.sourceEnd) === tag) {
-      this.b.markSpan(id, "read", callee.sourceStart, callee.sourceEnd, () => this.b.emit(tag));
-      return;
-    }
-    this.emitReadName(tag);
+    this.emitRoleRead(node, tag, { role: "callee", pick: "exact" });
   }
   emitPairKeyRead(pair, name) {
-    if (!this.ts || this.b.source == null || !isIdentifierName(name) || pair == null) {
-      this.emitReadName(name);
-      return;
-    }
-    const pid = this.stores.idOf(pair);
-    const keyRole = pid != null ? this.stores.role(pid, "key") : null;
-    if (keyRole?.sourceStart != null && keyRole.sourceEnd != null) {
-      const re = new RegExp(`(?<![\\w$])${name.replace(/\$/g, "\\$&")}(?![\\w$])`, "g");
-      re.lastIndex = keyRole.sourceStart;
-      const hit = re.exec(this.b.source);
-      if (hit !== null && hit.index + name.length <= keyRole.sourceEnd) {
-        this.b.markSpan(pid, "read", hit.index, hit.index + name.length, () => this.b.emit(name));
-        return;
-      }
-    }
-    this.emitReadName(name);
+    this.emitRoleRead(pair, name, { role: "key" });
   }
   emitFaceOnlyRead(emitName) {
     this.b.tsOnly(() => {
@@ -10876,28 +10903,7 @@ class Emitter {
     });
   }
   emitRenderTextRead(tagNode, name) {
-    if (!this.ts || this.b.source == null || !isIdentifierName(name) || !isNode4(tagNode)) {
-      this.emitReadName(name, { unwrap: true });
-      return;
-    }
-    const id = this.stores.idOf(tagNode);
-    const sp = id != null ? this.stores.selfSpan(id) : null;
-    if (sp == null) {
-      this.emitReadName(name, { unwrap: true });
-      return;
-    }
-    const re = new RegExp(`(?<![\\w$])${name.replace(/\$/g, "\\$&")}(?![\\w$])`, "g");
-    re.lastIndex = sp[0];
-    let hit = null;
-    let sm;
-    while ((sm = re.exec(this.b.source)) !== null && sm.index + name.length <= sp[1]) {
-      hit = sm;
-    }
-    if (hit !== null) {
-      this.b.markSpan(id, "read", hit.index, hit.index + name.length, () => this.b.emit(name));
-      return;
-    }
-    this.emitReadName(name, { unwrap: true });
+    this.emitRoleRead(tagNode, name, { pick: "last", unwrap: true });
   }
   emitQuotedSchemaName(ownerId, name, start, end) {
     this.b.emit('"');
@@ -16041,22 +16047,7 @@ ${pad ?? ""}`);
     });
   }
   emitFactoryParam(rec, name) {
-    if (!this.ts || !isIdentifierName(name) || rec.originNode == null || this.b.source == null) {
-      this.b.emit(name);
-      return;
-    }
-    const id = this.stores.idOf(rec.originNode);
-    const vars = id != null ? this.stores.role(id, "vars") : null;
-    if (vars?.sourceStart != null && vars.sourceEnd != null) {
-      const re = new RegExp(`(?<![\\w$])${name.replace(/\$/g, "\\$&")}(?![\\w$])`, "g");
-      re.lastIndex = vars.sourceStart;
-      const sm = re.exec(this.b.source);
-      if (sm !== null && sm.index + name.length <= vars.sourceEnd && this.b.source.slice(sm.index, sm.index + name.length) === name) {
-        this.b.markSpan(id, "read", sm.index, sm.index + name.length, () => this.b.emit(name));
-        return;
-      }
-    }
-    this.b.emit(name);
+    this.emitRoleRead(rec.originNode, name, { role: "vars", fallback: "bare" });
   }
   emitFactory(rec, ind, renderNode) {
     const pad = "  ".repeat(ind + 1);

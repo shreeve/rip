@@ -3040,6 +3040,81 @@ class Emitter {
     });
   }
 
+  // Exact `read` anchored in a node's role (or `$self`). The shared
+  // anti-theft path for same-named identifiers under a wider cover:
+  // role-span first, then a documented fallback — never invent a span.
+  //
+  //   role     — store role name, or null for the node's $self
+  //   pick     — 'exact' (span bytes === name), 'first', or 'last'
+  //   after    — optional regex source matched before the name
+  //              (e.g. `extends\\s+` for component extends tags)
+  //   unwrap   — forwarded to emitReadName on the 'read' fallback
+  //   fallback — 'read' (emitReadName), 'bare' (unmarked emit)
+  emitRoleRead(owner, name, {
+    role = null,
+    pick = 'first',
+    after = null,
+    unwrap = false,
+    fallback = 'read',
+  } = {}) {
+    const emitFallback = () => {
+      if (fallback === 'bare') this.b.emit(name);
+      else this.emitReadName(name, { unwrap });
+    };
+    if (!this.ts || this.b.source == null || !isIdentifierName(name) || owner == null) {
+      emitFallback();
+      return;
+    }
+    const id = this.stores.idOf(owner);
+    if (id == null) {
+      emitFallback();
+      return;
+    }
+    let start = null;
+    let end = null;
+    if (role != null) {
+      const r = this.stores.role(id, role);
+      if (r?.sourceStart != null && r.sourceEnd != null) {
+        start = r.sourceStart;
+        end = r.sourceEnd;
+      }
+    } else {
+      const sp = this.stores.selfSpan(id);
+      if (sp != null) {
+        start = sp[0];
+        end = sp[1];
+      }
+    }
+    if (start == null || end == null) {
+      emitFallback();
+      return;
+    }
+    const src = this.b.source;
+    let at = null;
+    if (after != null) {
+      const re = new RegExp(`${after}(${name.replace(/\$/g, '\\$&')})(?![\\w$])`);
+      const m = src.slice(start, end).match(re);
+      if (m != null) at = start + m.index + m[0].length - name.length;
+    } else if (pick === 'exact') {
+      if (src.slice(start, end) === name) at = start;
+    } else {
+      const re = new RegExp(`(?<![\\w$])${name.replace(/\$/g, '\\$&')}(?![\\w$])`, 'g');
+      re.lastIndex = start;
+      let hit = null;
+      let sm;
+      while ((sm = re.exec(src)) !== null && sm.index + name.length <= end) {
+        hit = sm;
+        if (pick === 'first') break;
+      }
+      if (hit != null) at = hit.index;
+    }
+    if (at == null) {
+      emitFallback();
+      return;
+    }
+    this.b.markSpan(id, 'read', at, at + name.length, () => this.b.emit(name));
+  }
+
   // Quoted DOM name ('tag' / 'attr' / 'event') with an exact `read` row.
   // Pass `pair` for attr/event keys so path-3 cannot steal a same-named
   // RHS (`title: title` → key must not last-hit the value).
@@ -3050,69 +3125,20 @@ class Emitter {
     this.b.emit("'");
   }
 
-  // The `extends <tag>` name: first match after `extends` inside the
-  // component's source span (never the last same-named render tag).
+  // `extends <tag>` — first match after `extends` in the component $self
+  // (never a later same-named render tag).
   emitExtendsTag(node, tag) {
-    if (!this.ts || this.b.source == null || !isIdentifierName(tag)) {
-      this.b.emit(tag);
-      return;
-    }
-    const id = this.stores.idOf(node);
-    const sp = id != null ? this.stores.selfSpan(id) : null;
-    if (sp == null) {
-      this.b.emit(tag);
-      return;
-    }
-    const region = this.b.source.slice(sp[0], sp[1]);
-    const re = new RegExp(`extends\\s+(${tag.replace(/\$/g, '\\$&')})\\b`);
-    const m = region.match(re);
-    if (m == null) {
-      this.b.emit(tag);
-      return;
-    }
-    const at = sp[0] + m.index + m[0].length - tag.length;
-    this.b.markSpan(id, 'read', at, at + tag.length, () => this.b.emit(tag));
+    this.emitRoleRead(node, tag, { after: 'extends\\s+', fallback: 'bare' });
   }
 
-  // Render tag name inside createElement('…'): prefer the call's
-  // `callee` role so emitReadName's last-hit path cannot steal a
-  // later same-named identifier under the call's wide $self cover
-  // (`div error`, `label label`).
+  // createElement('…') tag — callee role, exact (never a later same name).
   emitRenderTagName(node, tag) {
-    if (!this.ts || this.b.source == null || !isIdentifierName(tag) || !isNode(node)) {
-      this.emitReadName(tag);
-      return;
-    }
-    const id = this.stores.idOf(node);
-    const callee = id != null ? this.stores.role(id, 'callee') : null;
-    if (callee?.sourceStart != null && callee.sourceEnd != null
-        && this.b.source.slice(callee.sourceStart, callee.sourceEnd) === tag) {
-      this.b.markSpan(id, 'read', callee.sourceStart, callee.sourceEnd, () => this.b.emit(tag));
-      return;
-    }
-    this.emitReadName(tag);
+    this.emitRoleRead(node, tag, { role: 'callee', pick: 'exact' });
   }
 
-  // Pair-key identifier (`value` in `value <=> …`, `ref` in `ref: …`):
-  // exact `read` from the pair's `key` role — never path-3 last-hit,
-  // which would steal a same-named RHS under the pair $self cover.
+  // Pair key (`value` in `value <=> …`, `ref` in `ref: …`) — key role.
   emitPairKeyRead(pair, name) {
-    if (!this.ts || this.b.source == null || !isIdentifierName(name) || pair == null) {
-      this.emitReadName(name);
-      return;
-    }
-    const pid = this.stores.idOf(pair);
-    const keyRole = pid != null ? this.stores.role(pid, 'key') : null;
-    if (keyRole?.sourceStart != null && keyRole.sourceEnd != null) {
-      const re = new RegExp(`(?<![\\w$])${name.replace(/\$/g, '\\$&')}(?![\\w$])`, 'g');
-      re.lastIndex = keyRole.sourceStart;
-      const hit = re.exec(this.b.source);
-      if (hit !== null && hit.index + name.length <= keyRole.sourceEnd) {
-        this.b.markSpan(pid, 'read', hit.index, hit.index + name.length, () => this.b.emit(name));
-        return;
-      }
-    }
-    this.emitReadName(name);
+    this.emitRoleRead(pair, name, { role: 'key' });
   }
 
   // Face-only glyph for a source identifier the JS lowering never
@@ -3126,32 +3152,9 @@ class Emitter {
     });
   }
 
-  // Bare text child of a tag (`label label`): last hit inside the
-  // tag's own $self (after the callee). Path-3 under the render body
-  // would steal a later same-named member (`opt.label`).
+  // Bare text child (`label label`) — last hit in the tag $self.
   emitRenderTextRead(tagNode, name) {
-    if (!this.ts || this.b.source == null || !isIdentifierName(name) || !isNode(tagNode)) {
-      this.emitReadName(name, { unwrap: true });
-      return;
-    }
-    const id = this.stores.idOf(tagNode);
-    const sp = id != null ? this.stores.selfSpan(id) : null;
-    if (sp == null) {
-      this.emitReadName(name, { unwrap: true });
-      return;
-    }
-    const re = new RegExp(`(?<![\\w$])${name.replace(/\$/g, '\\$&')}(?![\\w$])`, 'g');
-    re.lastIndex = sp[0];
-    let hit = null;
-    let sm;
-    while ((sm = re.exec(this.b.source)) !== null && sm.index + name.length <= sp[1]) {
-      hit = sm;
-    }
-    if (hit !== null) {
-      this.b.markSpan(id, 'read', hit.index, hit.index + name.length, () => this.b.emit(name));
-      return;
-    }
-    this.emitReadName(name, { unwrap: true });
+    this.emitRoleRead(tagNode, name, { pick: 'last', unwrap: true });
   }
 
   // Quoted JSON string whose interior is an exact `read` row when the
@@ -9394,23 +9397,7 @@ class Emitter {
   // Factory header param: exact `read` from the loop's `vars` role when
   // the name still matches source (own item/index; remapped outers skip).
   emitFactoryParam(rec, name) {
-    if (!this.ts || !isIdentifierName(name) || rec.originNode == null || this.b.source == null) {
-      this.b.emit(name);
-      return;
-    }
-    const id = this.stores.idOf(rec.originNode);
-    const vars = id != null ? this.stores.role(id, 'vars') : null;
-    if (vars?.sourceStart != null && vars.sourceEnd != null) {
-      const re = new RegExp(`(?<![\\w$])${name.replace(/\$/g, '\\$&')}(?![\\w$])`, 'g');
-      re.lastIndex = vars.sourceStart;
-      const sm = re.exec(this.b.source);
-      if (sm !== null && sm.index + name.length <= vars.sourceEnd
-          && this.b.source.slice(sm.index, sm.index + name.length) === name) {
-        this.b.markSpan(id, 'read', sm.index, sm.index + name.length, () => this.b.emit(name));
-        return;
-      }
-    }
-    this.b.emit(name);
+    this.emitRoleRead(rec.originNode, name, { role: 'vars', fallback: 'bare' });
   }
 
   // A block factory as a class method: `create_block_N(ctx, …)`
