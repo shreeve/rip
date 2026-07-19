@@ -1,3 +1,5 @@
+#!/usr/bin/env rip
+
 # ==============================================================================
 # @rip-lang/server — Sinatra-style web framework for Rip
 # ==============================================================================
@@ -807,3 +809,14 @@ export read = (name?: string, type?: string | RegExp | any[] | Record<string, an
     return done(must)
 
   v
+
+# ==============================================================================
+# CLI — `rip server` / `rip-server`
+# ==============================================================================
+
+# Executed directly, this file is the manager bin. The manager loads
+# dynamically so DSL importers never pull in orchestration code; argv is
+# handed over unparsed.
+if import.meta.main
+  { main } = import!('./manager.rip')
+  main! process.argv.slice(2)

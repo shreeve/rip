@@ -28,9 +28,9 @@ Usage:
   rip [options]                      Read source from stdin
   rip schema <verb> [args...]        Schema evolution: status | plan | make | migrate
                                      (run 'rip schema --help' for the full surface)
-  rip server [tokens...]             The application server: serve static sites, App
-                                     bundles, and serve.rip configs
-                                     (run 'rip server --help' for the token grammar)
+  rip server [entry] [flags...]      Run a @rip-lang/server app under the worker-pool
+                                     manager behind Janus
+                                     (run 'rip server --help' for the flags)
   rip test [args...]                 Run \`bun test\` with the .rip loader preloaded
                                      (default --timeout 15000; extra args pass through)
   rip <name> [args...]               Run rip-<name>: sibling of this executable, repo
@@ -108,19 +108,6 @@ if (args[0] === 'schema') {
     env: process.env,
   });
   process.exit(r.status ?? 1);
-}
-
-// `rip server` — reserved. packages/server ships the DSL today; the
-// manager runtime (the `rip-server` executable this dispatches to)
-// lands next, per the Janus pool protocol.
-if (args[0] === 'server') {
-  console.error(
-    [
-      "rip server: @rip-lang/server ships the DSL only; the manager runtime has not landed yet.",
-      "Import { get, read, start } from '@rip-lang/server' and run your app directly: rip app.rip",
-    ].join('\n'),
-  );
-  process.exit(1);
 }
 
 // `rip test [bun-test args...]` — Bun's test runner with the .rip

@@ -1,0 +1,595 @@
+# ==============================================================================
+# @rip-lang/server — manager runtime (the `rip server` process)
+#
+# Implements the Rip Server half of the Janus pool coordination protocol
+# (janus: docs/20260719-002000-pool-protocol.md): register the app on /1.0,
+# heartbeat every 5s starting immediately, own the doorbell socket, spawn
+# worker pools on unique unix socket paths, and drive the dirty epoch —
+# saves settle, hash-gate, cut admission with a doorbell PUT, and boot on
+# demand when a ring arrives. The manager is the single writer of its
+# app's upstream list: every control call is awaited in order, and a
+# sockets PUT is acknowledged (200) before any held ring is answered 204.
+#
+# Never on the data path: client traffic flows Janus → worker socket.
+# ==============================================================================
+
+import { watch, readdirSync, readFileSync, existsSync, statSync, unlinkSync, mkdtempSync, rmSync } from 'node:fs'
+import { join, resolve, dirname, basename } from 'node:path'
+import { tmpdir } from 'node:os'
+
+# --- Tunables — env-overridable, defaults per the pool protocol ----------------
+
+envNum = (name, fallback) ->
+  n = parseInt(process.env[name] or '')
+  if Number.isFinite(n) and n > 0 then n else fallback
+
+SETTLE_MS        =! envNum 'RIP_SETTLE_MS', 150         # trailing settle after fs events
+DRAIN_MS         =! envNum 'RIP_DRAIN_MS', 2500         # flat grace before SIGTERM on retire
+KILL_MS          =! envNum 'RIP_KILL_MS', 5000          # SIGTERM → SIGKILL escalation
+HEARTBEAT_MS     =! envNum 'RIP_HEARTBEAT_MS', 5000     # heartbeat cadence
+HOLD_MS          =! envNum 'RIP_HOLD_MS', 15000         # ring hold cap, then 503
+BOOT_DEADLINE_MS =! envNum 'RIP_BOOT_DEADLINE_MS', 30000  # per-worker /ready deadline
+WAITER_CAP       =! envNum 'RIP_WAITER_CAP', 64         # held rings per app, then 503
+
+IGNORED_DIRS =! new Set ['node_modules', '.git', 'dist', 'coverage', 'tmp', '.rip-cache', '.cache']
+
+USAGE =! """
+rip server — run an app under a worker pool behind a Janus control plane
+
+Usage:
+  rip server [app-entry] [options]     app-entry defaults to ./app.rip, then ./index.rip
+
+Options:
+  --name <n>          App name for registration (default: the app directory's name)
+  --host <h>          Public host to claim; repeatable (default: the app name)
+  -w, --workers <n>   Worker processes (default: 2)
+  --watch             Watch app files and hot-reload (default ON unless RIP_ENV=production)
+  --no-watch          Disable the watcher
+  --allow-watch       Required to enable --watch when RIP_ENV=production
+  --eager             Boot the fresh pool at settle instead of waiting for a ring
+  --control <target>  Janus control endpoint: a unix socket path or an http(s) URL
+                      (or env JANUS_CONTROL); required, verified at startup
+
+Env knobs: RIP_SETTLE_MS, RIP_DRAIN_MS, RIP_KILL_MS, RIP_HEARTBEAT_MS,
+RIP_HOLD_MS, RIP_BOOT_DEADLINE_MS, RIP_WAITER_CAP
+"""
+
+# --- Module state ---------------------------------------------------------------
+
+cfg =
+  entry: null          # absolute path to the app entry
+  appDir: null         # directory the watcher covers
+  name: null
+  hosts: []
+  workers: 2
+  watch: false
+  eager: false
+  control: null
+
+state =
+  appId: null
+  controlUnix: null    # unix socket path to the control plane, or
+  controlBase: null    # http(s) base URL
+  loaderPath: null     # the rip loader compiling THIS process
+  runDir: null         # tmpdir holding the doorbell + worker sockets
+  bellPath: null
+  bell: null
+  watcher: null
+  settleTimer: null
+  hbTimer: null
+  lastHash: null       # content hash of the watched *.rip files
+  lastUpstreams: []    # the registry's current statement (re-PUT after re-register)
+  dirty: false         # files changed since the last upstreams PUT
+  doorbellPublished: false
+  bootFailure: null    # cached boot error; cleared only by a content-changing save
+  bootPromise: null    # the single in-flight boot, joined by concurrent rings
+  currentPool: null
+  poolCounter: 0
+  ringWaiters: 0
+  readyWhen: 1
+  shuttingDown: false
+
+# ==============================================================================
+# Control-plane client — single writer, every call awaited in order
+# ==============================================================================
+
+_chain = Promise.resolve()
+
+# Serialize control-plane work: no later control message is sent until the
+# previous one (including its retries) resolves.
+enqueue = (fn) ->
+  run = _chain.then -> fn()
+  _chain = run.catch -> null
+  run
+
+cfetch = (method, path, body = null) ->
+  opts = { method }
+  if body?
+    opts.body = JSON.stringify(body)
+    opts.headers = { 'content-type': 'application/json' }
+  if state.controlUnix?
+    fetch "http://janus#{path}", { ...opts, unix: state.controlUnix }
+  else
+    fetch "#{state.controlBase}#{path}", opts
+
+registerApp = ->
+  backoff = 200
+  loop
+    res = null
+    try
+      res = cfetch! 'POST', '/1.0/apps', { name: cfg.name, hosts: cfg.hosts }
+    if res?
+      if res.status is 201 or res.status is 200
+        body = res.json!
+        abort "rip-server: control returned no app id" unless body?.id?
+        state.appId = body.id
+        return
+      if res.status is 409
+        abort "rip-server: host already claimed at the control plane (409): #{cfg.hosts.join(', ')}"
+      warn "rip-server: register failed (#{res.status}); retrying"
+    else
+      warn "rip-server: control unreachable during register; retrying"
+    sleep! backoff
+    backoff = Math.min(backoff * 2, 5000)
+
+# Runs inside the writer chain. Retries with backoff; a 404 means the control
+# plane restarted and lost us — re-register, then re-send this same statement.
+putUpstreams = (list) ->
+  backoff = 200
+  attempts = 0
+  loop
+    attempts += 1
+    res = null
+    try
+      res = cfetch! 'PUT', "/1.0/apps/#{state.appId}/upstreams", { upstreams: list }
+    if res?
+      if res.status is 200
+        state.lastUpstreams = list
+        return
+      if res.status is 404
+        warn "rip-server: control lost the app; re-registering"
+        registerApp!()
+        continue
+      warn "rip-server: upstreams PUT failed (#{res.status}); retrying"
+    return if state.shuttingDown and attempts >= 3
+    sleep! backoff
+    backoff = Math.min(backoff * 2, 5000)
+
+heartbeatOnce = ->
+  return unless state.appId?
+  res = null
+  try
+    res = cfetch! 'POST', "/1.0/apps/#{state.appId}/heartbeat"
+  unless res?
+    warn "rip-server: heartbeat unreachable; retrying next tick"
+    return
+  if res.status is 404
+    warn "rip-server: heartbeat 404 — re-registering and re-publishing upstreams"
+    registerApp!()
+    putUpstreams! state.lastUpstreams
+
+deleteApp = ->
+  try cfetch! 'DELETE', "/1.0/apps/#{state.appId}"
+
+# ==============================================================================
+# Workers and pools
+# ==============================================================================
+
+workerPath =! join(import.meta.dir, 'worker.rip')
+
+spawnWorker = (pool) ->
+  pool.serial += 1
+  sock = join(state.runDir, "p#{pool.n}w#{pool.serial}.sock")
+  proc = Bun.spawn ['bun', "--preload=#{state.loaderPath}", workerPath],
+    stdout: 'inherit'
+    stderr: 'inherit'
+    stdin: 'ignore'
+    env: { ...process.env, APP_ENTRY: cfg.entry, SOCKET_PATH: sock, WORKER_ID: "#{pool.n}.#{pool.serial}" }
+  w = { sock, proc, ready: false }
+  monitorWorker pool, w
+  w
+
+# Crash respawn — outside reloads only: a retired or superseded pool's exits
+# are expected, and a pool that never published is the boot path's problem.
+monitorWorker = (pool, w) ->
+  do ->
+    code = await w.proc.exited
+    return if state.shuttingDown or pool.retired or pool isnt state.currentPool
+    warn "rip-server: worker exited (code #{code}); respawning"
+    w.ready = false
+    try unlinkSync w.sock
+    publishSocks pool             # crashed sock leaves the registry while down
+    sleep! 250
+    return if state.shuttingDown or pool.retired or pool isnt state.currentPool or state.dirty
+    fresh = spawnWorker(pool)
+    idx = pool.workers.indexOf(w)
+    pool.workers[idx] = fresh if idx >= 0
+    outcome = pollWorker! fresh
+    publishSocks pool if outcome.ok
+  null
+
+pollWorker = (w) ->
+  deadline = Date.now() + BOOT_DEADLINE_MS
+  lastBody = null
+  loop
+    if w.proc.exitCode?
+      return { ok: false, w, error: lastBody or "worker exited with code #{w.proc.exitCode} before ready" }
+    try
+      res = fetch! 'http://worker/ready', { unix: w.sock }
+      if res.status is 200
+        w.ready = true
+        return { ok: true, w }
+      lastBody = res.text!
+      # The worker marks a failed boot on /ready — no point waiting out
+      # the deadline for an import that already threw.
+      if res.headers.get('rip-boot-failed')?
+        return { ok: false, w, error: lastBody }
+    if Date.now() > deadline
+      return { ok: false, w, error: lastBody or 'worker boot deadline expired' }
+    sleep! 25
+
+spawnPool = ->
+  state.poolCounter += 1
+  pool = { n: state.poolCounter, serial: 0, workers: [], polls: [], retired: false }
+  for i in [0...cfg.workers]
+    pool.workers.push spawnWorker(pool)
+  pool.polls = pool.workers.map (w) -> pollWorker(w)
+  pool
+
+# Resolves when `need` workers are ready; throws when readiness is impossible.
+awaitReady = (pool, need) ->
+  if need >= pool.polls.length
+    outcomes = Promise.all! pool.polls
+    bad = outcomes.find (o) -> not o.ok
+    throw new Error(bad.error) if bad?
+    return
+  firstReady = new Promise (resolveReady, rejectReady) ->
+    remaining = pool.polls.length
+    firstError = null
+    settleOne = (o) ->
+      if o.ok
+        resolveReady(o)
+      else
+        firstError ?= o.error
+        remaining -= 1
+        rejectReady(new Error(firstError or 'no worker became ready')) if remaining is 0
+    for pr in pool.polls
+      pr.then settleOne
+  await firstReady
+  return
+
+readySocks = (pool) ->
+  out = []
+  for w in pool.workers
+    out.push({ path: w.sock }) if w.ready
+  out
+
+sameList = (a, b) -> JSON.stringify(a) is JSON.stringify(b)
+
+# Awaited full-list PUT for the current pool: late-ready workers join, crashed
+# workers leave. The dirty check applies to every publish.
+publishSocks = (pool) ->
+  enqueue ->
+    return if state.shuttingDown or pool.retired or pool isnt state.currentPool
+    return if state.dirty or state.doorbellPublished
+    list = readySocks(pool)
+    return if sameList(list, state.lastUpstreams)
+    putUpstreams! list
+
+# With readyWhen 1, workers still booting after the first publish each trigger
+# one more awaited full-list PUT as they come ready. A worker whose readiness
+# poll gave up gets killed so the crash monitor can respawn it.
+attachLateJoins = (pool) ->
+  return unless state.readyWhen < pool.workers.length
+  for pr in pool.polls
+    pr.then (o) ->
+      if o.ok
+        publishSocks pool
+      else unless o.w.proc.exitCode?
+        try o.w.proc.kill('SIGTERM')
+  return
+
+# Retire a pool: flat drain grace, SIGTERM, SIGKILL if needed, unlink after
+# exit. Returns the completion promise; callers that must not wait ignore it.
+retirePool = (pool, graceMs = DRAIN_MS) ->
+  return null unless pool? and not pool.retired
+  pool.retired = true
+  do ->
+    sleep! graceMs if graceMs > 0
+    for w in pool.workers
+      try w.proc.kill('SIGTERM')
+    hardKill = setTimeout ->
+      for w in pool.workers
+        try w.proc.kill('SIGKILL') unless w.proc.exitCode?
+    , KILL_MS
+    Promise.all! pool.workers.map (w) -> w.proc.exited
+    clearTimeout hardKill
+    for w in pool.workers
+      try unlinkSync w.sock
+    return
+
+scrapPool = (pool) -> retirePool pool, 0
+
+# ==============================================================================
+# The dirty epoch
+# ==============================================================================
+
+# Admission cut: publish the doorbell as the only upstream, then retire the
+# old pool in the background. Idempotent — one doorbell PUT per epoch.
+cutAdmission = ->
+  return if state.doorbellPublished
+  state.doorbellPublished = true
+  oldPool = state.currentPool
+  state.currentPool = null
+  enqueue ->
+    putUpstreams! [{ path: state.bellPath, doorbell: true }]
+    retirePool oldPool if oldPool?
+    null
+
+onContentChange = ->
+  state.bootFailure = null
+  state.dirty = true
+  cutAdmission()
+  kickBoot().catch(-> null) if cfg.eager
+
+# Single-flight: one boot per app at a time; concurrent demand joins it.
+kickBoot = ->
+  return state.bootPromise if state.bootPromise?
+  pr = bootLoop()
+  state.bootPromise = pr
+  # The cleanup chain must swallow the failure itself — `finally` passes a
+  # rejection through, and an unhandled one kills the process.
+  cleanup = pr.finally ->
+    state.bootPromise = null if state.bootPromise is pr
+  cleanup.catch -> null       # the failure is cached; rings read it as 503
+  pr
+
+# Boot from the latest files, scrap-at-publish when dirty again, publish via
+# an awaited PUT, repeat while saves keep landing.
+bootLoop = ->
+  loop
+    state.dirty = false
+    pool = spawnPool()
+    try
+      awaitReady! pool, state.readyWhen
+    catch err
+      scrapPool pool
+      continue if state.dirty        # files changed mid-boot; the failure may be stale
+      state.bootFailure = err?.message or String(err)
+      warn "rip-server: pool boot failed: #{state.bootFailure}"
+      throw err
+    if state.dirty                   # check at publish: never publish a stale pool
+      scrapPool pool
+      continue
+    # The dirty check above and this enqueue are synchronous — no save can
+    # interleave. The list is computed inside the writer chain so workers
+    # that came ready in the meantime ride the same PUT.
+    enqueue! -> putUpstreams! readySocks(pool)
+    state.currentPool = pool
+    state.doorbellPublished = false
+    attachLateJoins pool
+    if state.dirty                   # saved during the PUT flight — cut again, boot again
+      cutAdmission()
+      continue
+    return
+
+# ==============================================================================
+# The doorbell
+# ==============================================================================
+
+handleRing = ->
+  if state.bootFailure?
+    return new Response(state.bootFailure, { status: 503 })
+  if not state.dirty and not state.doorbellPublished and state.currentPool?
+    return new Response(null, { status: 204 })      # stray ring; pool already live
+  if state.ringWaiters >= WAITER_CAP
+    return new Response('too many held requests', { status: 503, headers: { 'Retry-After': '1' } })
+  state.ringWaiters += 1
+  try
+    outcome = holdBoot! kickBoot()
+    if outcome is 'ok'
+      new Response(null, { status: 204 })            # the sockets PUT's 200 already landed
+    else if outcome is 'timeout'
+      new Response('boot still in progress', { status: 503, headers: { 'Retry-After': '2' } })
+    else
+      new Response(state.bootFailure or outcome.error or 'boot failed', { status: 503 })
+  finally
+    state.ringWaiters -= 1
+
+holdBoot = (bootPr) ->
+  timer = null
+  hold = new Promise (resolveHold) ->
+    timer = setTimeout (-> resolveHold 'timeout'), HOLD_MS
+  outcome = Promise.race! [
+    bootPr.then((-> 'ok'), ((e) -> { error: e?.message or String(e) }))
+    hold
+  ]
+  clearTimeout timer
+  outcome
+
+startDoorbell = ->
+  state.bellPath = join(state.runDir, 'bell.sock')
+  state.bell = Bun.serve
+    unix: state.bellPath
+    fetch: (req) ->
+      url = new URL(req.url)
+      if req.method is 'GET' and url.pathname is '/ring'
+        return handleRing!()
+      new Response('Not Found', { status: 404 })
+
+# ==============================================================================
+# The watcher — allowlist *.rip, rename-safe via the content-hash gate
+# ==============================================================================
+
+# Editors save temp-then-rename, so event basenames are untrusted. Any
+# non-ignored event just arms the settle timer; the decision comes from
+# hashing the real *.rip files on disk — identical bytes cost nothing.
+ignoredPath = (rel) ->
+  return false unless rel?
+  for seg in rel.split('/')
+    return true if IGNORED_DIRS.has(seg)
+  false
+
+hashApp = ->
+  hasher = new Bun.CryptoHasher('sha256')
+  files = []
+  walk = (dir) ->
+    entries = []
+    try entries = readdirSync(dir, { withFileTypes: true })
+    for e in entries
+      continue if e.name.startsWith('.') or IGNORED_DIRS.has(e.name)
+      full = join(dir, e.name)
+      if e.isDirectory()
+        walk(full)
+      else if e.name.endsWith('.rip')
+        files.push(full)
+  walk cfg.appDir
+  files.sort()
+  for f in files
+    hasher.update f
+    try hasher.update readFileSync(f)
+  hasher.digest 'hex'
+
+settle = ->
+  state.settleTimer = null
+  h = hashApp()
+  return if h is state.lastHash
+  state.lastHash = h
+  onContentChange()
+
+startWatcher = ->
+  state.lastHash = hashApp()
+  state.watcher = watch cfg.appDir, { recursive: true }, (event, filename) ->
+    return if state.shuttingDown or ignoredPath(filename)
+    clearTimeout state.settleTimer if state.settleTimer?
+    state.settleTimer = setTimeout settle, SETTLE_MS
+
+# ==============================================================================
+# Startup and shutdown
+# ==============================================================================
+
+shutdown = ->
+  return if state.shuttingDown
+  state.shuttingDown = true
+  try state.watcher?.close()
+  clearTimeout state.settleTimer if state.settleTimer?
+  clearInterval state.hbTimer if state.hbTimer?
+  pool = state.currentPool
+  state.currentPool = null
+  enqueue! -> putUpstreams! []       # bare empty list: down on purpose
+  drained = retirePool(pool)
+  await drained if drained?
+  enqueue! -> deleteApp!()
+  try state.bell?.stop(true)
+  try rmSync state.runDir, { recursive: true, force: true }
+  exit 0
+
+parseArgs = (argv) ->
+  args = { entry: null, name: null, hosts: [], workers: 2, watch: null, allowWatch: false, eager: false, control: process.env.JANUS_CONTROL or null }
+  i = 0
+  while i < argv.length
+    a = argv[i]
+    nextValue = ->
+      i += 1
+      abort "rip-server: #{a} requires a value" if i >= argv.length
+      argv[i]
+    switch a
+      when '--name' then args.name = nextValue()
+      when '--host' then args.hosts.push nextValue()
+      when '--workers', '-w'
+        args.workers = parseInt(nextValue())
+        abort "rip-server: --workers takes a positive integer" unless Number.isFinite(args.workers) and args.workers >= 1
+      when '--watch' then args.watch = true
+      when '--no-watch' then args.watch = false
+      when '--allow-watch' then args.allowWatch = true
+      when '--eager' then args.eager = true
+      when '--control' then args.control = nextValue()
+      when '--help', '-h'
+        p USAGE
+        exit 0
+      else
+        abort "rip-server: unknown option #{a}\n\n#{USAGE}" if a.startsWith('-')
+        abort "rip-server: multiple app entries (#{args.entry} and #{a})" if args.entry?
+        args.entry = a
+    i += 1
+  args
+
+resolveEntry = (given) ->
+  if given?
+    full = resolve(given)
+    abort "rip-server: app entry not found: #{given}" unless existsSync(full)
+    if statSync(full).isDirectory()
+      for cand in ['app.rip', 'index.rip']
+        inner = join(full, cand)
+        return inner if existsSync(inner)
+      abort "rip-server: #{given} has no app.rip or index.rip"
+    return full
+  for cand in ['app.rip', 'index.rip']
+    full = resolve(cand)
+    return full if existsSync(full)
+  abort "rip-server: no app entry — pass one, or create ./app.rip or ./index.rip"
+
+export main = (argv) ->
+  args = parseArgs(argv)
+
+  cfg.entry = resolveEntry(args.entry)
+  cfg.appDir = dirname(cfg.entry)
+  cfg.name = args.name or basename(cfg.appDir)
+  cfg.workers = args.workers
+  cfg.eager = args.eager
+  cfg.control = args.control
+  if args.hosts.length > 0
+    cfg.hosts = args.hosts
+  else
+    cfg.hosts = [cfg.name]
+    p "rip-server: no --host given; claiming #{cfg.hosts[0]}"
+
+  prod = process.env.RIP_ENV is 'production'
+  cfg.watch = args.watch ?? (not prod)
+  if cfg.watch and prod
+    abort "rip-server: watch in production requires --allow-watch" unless args.allowWatch
+    warn "rip-server: WATCH ENABLED IN PRODUCTION — saves cut admission and retire live pools"
+  state.readyWhen = if prod then cfg.workers else 1
+
+  # Workers must compile .rip imports themselves; the loader compiling THIS
+  # process is the one to hand them (worker threads/processes inherit neither
+  # preloads nor bunfig).
+  state.loaderPath = process.execArgv.find((a) -> a.startsWith('--preload='))?.slice('--preload='.length)
+  abort "rip-server: the rip loader is missing from execArgv — run via `rip server`" unless state.loaderPath?
+
+  abort "rip-server: no control endpoint — pass --control <unix-path-or-url> or set JANUS_CONTROL" unless args.control?
+  if args.control.startsWith('http://') or args.control.startsWith('https://')
+    state.controlBase = args.control.replace(/\/+$/, '')
+  else
+    state.controlUnix = resolve(args.control)
+  try
+    cfetch! 'GET', '/1.0'          # any HTTP answer proves reachability
+  catch e
+    abort "rip-server: control endpoint unreachable at #{args.control}: #{e?.message or e}"
+
+  state.runDir = mkdtempSync(join(tmpdir(), 'rip-srv-'))
+  startDoorbell()
+
+  registerApp!()
+  enqueue heartbeatOnce            # heartbeats start immediately, before any worker
+  state.hbTimer = setInterval (-> enqueue heartbeatOnce), HEARTBEAT_MS
+
+  process.on 'SIGINT', shutdown
+  process.on 'SIGTERM', shutdown
+
+  if cfg.watch
+    # Doorbell first: requests arriving mid-boot ring and hold, as in reload.
+    state.dirty = true
+    cutAdmission()
+    startWatcher()
+    p "rip-server: #{cfg.name} registered (#{state.appId}) — #{cfg.workers} worker(s), watch on#{if cfg.eager then ', eager' else ''}"
+    kickBoot().catch(-> null)      # startup boot; failure caches, doorbell stays
+  else
+    state.dirty = true
+    p "rip-server: #{cfg.name} registered (#{state.appId}) — #{cfg.workers} worker(s), watch off"
+    try
+      kickBoot!()
+    catch e
+      warn "rip-server: startup boot failed: #{state.bootFailure or e?.message or e}"
+      exit 1
+    p "rip-server: #{cfg.name} up — #{cfg.workers} worker(s) published"

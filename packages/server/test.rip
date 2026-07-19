@@ -3,7 +3,8 @@
 # routing, smart responses, error envelopes, read() validation, request
 # context (session/ctx/mark/subrequest), input: schemas + OpenAPI, and the
 # built-in middleware (cors, sessions, csrf, secureHeaders, bodyLimit,
-# htmlJson) — no live socket needed
+# htmlJson) — no live socket needed — plus the worker and manager runtimes
+# driven as real subprocesses against a stub Janus /1.0 control socket
 # ==============================================================================
 
 import { test, eq, ok, throws } from '@rip-lang/testing'
@@ -13,7 +14,9 @@ import { get, post, put, patch, del, all, use, prefix, before, after, onError, n
          read, error, notice, bail, ctx, session, subrequest, mark,
          mimeType, errorEnvelope, openapi } from '@rip-lang/server'
 import { cors, logger, sessions, csrf, secureHeaders, bodyLimit, htmlJson } from '@rip-lang/server/middleware'
-import { readFileSync } from 'fs'
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs'
+import { join } from 'path'
+import { tmpdir } from 'os'
 
 req = (method, path, opts = {}) -> new Request("http://test.local#{path}", { method, ...opts })
 jreq = (method, path, body) ->
@@ -494,3 +497,295 @@ test "App resets globals and returns a fresh handler", ->
     get '/fresh' -> 'yes'
   ok typeof h is 'function'
   resetGlobals()
+
+# ==============================================================================
+# Worker + manager runtimes — real subprocesses over unix sockets, against a
+# stub Janus /1.0 control socket that records every call in order. Timing is
+# compressed via the documented env knobs (RIP_SETTLE_MS, RIP_DRAIN_MS, …).
+# ==============================================================================
+
+PRELOAD    = process.execArgv.find (a) -> a.startsWith('--preload=')
+WORKER_BIN = "#{import.meta.dir}/worker.rip"
+SERVER_BIN = "#{import.meta.dir}/server.rip"
+
+TEST_KNOBS =
+  RIP_ENV: 'development'
+  RIP_SETTLE_MS: '60'
+  RIP_HEARTBEAT_MS: '150'
+  RIP_DRAIN_MS: '100'
+  RIP_KILL_MS: '400'
+  RIP_HOLD_MS: '8000'
+  RIP_BOOT_DEADLINE_MS: '15000'
+  RIP_FAIL_LINGER_MS: '1500'
+
+uds = (sock, path, opts = {}) -> fetch("http://uds#{path}", { ...opts, unix: sock })
+
+# Poll until fn() is truthy (subprocess-heavy tests: deadlines, no bare sleeps)
+waitFor = (fn, timeout = 10000, every = 25) ->
+  deadline = Date.now() + timeout
+  loop
+    v = fn()
+    v = await v if v?.then?
+    return v if v
+    throw new Error 'waitFor: timed out' if Date.now() > deadline
+    sleep! every
+
+readyProbe = (sock) ->
+  try
+    res = fetch!('http://uds/ready', { unix: sock })
+    { status: res.status, body: (res.text!), failed: res.headers.get('rip-boot-failed')? }
+  catch
+    null
+
+appSource = (msg) -> """
+import { get, start } from '@rip-lang/server'
+get '/hi' -> '#{msg}'
+get '/slow' ->
+  sleep! 300
+  'done'
+start()
+"""
+
+BROKEN_SOURCE = '''
+import { get, start } from '@rip-lang/server'
+get '/hi' -> (((
+start()
+'''
+
+spawnWorkerProc = (entry, sock) ->
+  Bun.spawn [process.execPath, PRELOAD, WORKER_BIN],
+    stdin: 'ignore'
+    stdout: 'ignore'
+    stderr: 'inherit'
+    env: { ...process.env, ...TEST_KNOBS, APP_ENTRY: entry, SOCKET_PATH: sock, WORKER_ID: '1' }
+
+# ==[ Worker runtime ]==
+
+console.log "\nWorker runtime"
+
+test! "worker boots, /ready flips 200, and serves app routes over its socket", ->
+  dir = mkdtempSync join(import.meta.dir, 'tmp-worker-')
+  sock = join(tmpdir(), "rip-wt-#{Date.now()}-#{rand(1e6)}.sock")
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  proc = spawnWorkerProc join(dir, 'app.rip'), sock
+  try
+    waitFor! -> (readyProbe!(sock))?.status is 200
+    res = uds!(sock, '/hi')
+    eq res.status, 200
+    eq (res.text!), 'hi'
+  finally
+    proc.kill('SIGTERM')
+    await proc.exited
+    rmSync dir, { recursive: true, force: true }
+
+test! "worker SIGTERM finishes the in-flight request (c:1), then exits 0", ->
+  dir = mkdtempSync join(import.meta.dir, 'tmp-worker-')
+  sock = join(tmpdir(), "rip-wt-#{Date.now()}-#{rand(1e6)}.sock")
+  writeFileSync join(dir, 'app.rip'), appSource('hi')
+  proc = spawnWorkerProc join(dir, 'app.rip'), sock
+  try
+    waitFor! -> (readyProbe!(sock))?.status is 200
+    slow = uds(sock, '/slow')       # in flight...
+    sleep! 80
+    proc.kill('SIGTERM')            # ...when the drain starts
+    res = await slow
+    eq (res.text!), 'done'
+    code = await proc.exited
+    eq code, 0
+  finally
+    proc.kill('SIGKILL') unless proc.killed
+    await proc.exited
+    rmSync dir, { recursive: true, force: true }
+
+test! "a broken app surfaces its boot error on /ready and exits nonzero", ->
+  dir = mkdtempSync join(import.meta.dir, 'tmp-worker-')
+  sock = join(tmpdir(), "rip-wt-#{Date.now()}-#{rand(1e6)}.sock")
+  writeFileSync join(dir, 'app.rip'), BROKEN_SOURCE
+  proc = spawnWorkerProc join(dir, 'app.rip'), sock
+  try
+    st = waitFor! ->
+      s = readyProbe!(sock)
+      if s? and s.failed then s else null
+    eq st.status, 503
+    ok st.body.includes('app.rip'), 'boot error names the failing file'
+    code = await proc.exited
+    ok code isnt 0, 'exits nonzero after a failed boot'
+  finally
+    proc.kill('SIGKILL') unless proc.killed
+    await proc.exited
+    rmSync dir, { recursive: true, force: true }
+
+# ==[ Manager: stub Janus control plane ]==
+
+console.log "\nManager runtime"
+
+janusSock = join(tmpdir(), "rip-janus-#{Date.now()}-#{rand(1e6)}.sock")
+janusCalls = []
+janusSeq = { n: 0 }
+janusServer = Bun.serve
+  unix: janusSock
+  fetch: (req) ->
+    url = new URL(req.url)
+    # GETs are the manager's reachability probe — not control traffic
+    return new Response('janus', { status: 404 }) if req.method is 'GET'
+    body = null
+    if req.method is 'POST' or req.method is 'PUT'
+      body = try req.json! catch then null
+    janusCalls.push { method: req.method, path: url.pathname, body }
+    if req.method is 'POST' and url.pathname is '/1.0/apps'
+      janusSeq.n += 1
+      return Response.json { id: "app-#{janusSeq.n}" }, { status: 201 }
+    if req.method is 'PUT' and url.pathname.endsWith('/upstreams')
+      return Response.json { ok: true }
+    if req.method is 'POST' and url.pathname.endsWith('/heartbeat')
+      return new Response(null, { status: 204 })
+    if req.method is 'DELETE'
+      return new Response(null, { status: 204 })
+    new Response('nope', { status: 404 })
+
+allPuts  = -> janusCalls.filter (c) -> c.method is 'PUT'
+bellPuts = -> allPuts().filter (c) -> c.body?.upstreams?.some (u) -> u.doorbell
+sockPuts = -> allPuts().filter (c) -> c.body?.upstreams?.length and not c.body.upstreams.some (u) -> u.doorbell
+beats    = -> janusCalls.filter (c) -> c.path.endsWith('/heartbeat')
+latestSocks = ->
+  puts = sockPuts()
+  return [] unless puts.length
+  puts[puts.length - 1].body.upstreams.map (u) -> u.path
+
+mgrDir = mkdtempSync join(import.meta.dir, 'tmp-manager-')
+writeFileSync join(mgrDir, 'app.rip'), appSource('hi')
+mgrProc = Bun.spawn [process.execPath, PRELOAD, SERVER_BIN, '--control', janusSock, '--name', 'tapp', '-w', '2'],
+  cwd: mgrDir
+  stdin: 'ignore'
+  stdout: 'ignore'
+  stderr: 'inherit'
+  env: { ...process.env, ...TEST_KNOBS }
+live = { doorbell: null, oldSocks: [] }
+
+process.on 'exit', ->
+  try mgrProc.kill('SIGKILL')
+  try janusServer.stop(true)
+  try rmSync(mgrDir, { recursive: true, force: true })
+
+test! "manager registers the app, then publishes the doorbell before anything else", ->
+  waitFor! -> janusCalls.length > 0
+  eq janusCalls[0].method, 'POST'
+  eq janusCalls[0].path, '/1.0/apps'
+  eq janusCalls[0].body, { name: 'tapp', hosts: ['tapp'] }
+  waitFor! -> allPuts().length >= 1
+  first = allPuts()[0]
+  eq first.body.upstreams.length, 1
+  eq first.body.upstreams[0].doorbell, true
+  ok first.body.upstreams[0].path.endsWith('.sock')
+  live.doorbell = first.body.upstreams[0].path
+
+test! "startup boot publishes socks readyWhen:1 — first ready, late workers join", ->
+  waitFor! -> sockPuts().some (c) -> c.body.upstreams.length is 2
+  puts = sockPuts()
+  ok puts[0].body.upstreams.length >= 1, 'first sockets PUT ships the first ready worker'
+  socks = latestSocks()
+  eq new Set(socks).size, 2
+  for path in socks
+    ok path.endsWith('.sock')
+  live.oldSocks = socks
+
+test! "heartbeats tick against POST /1.0/apps/{id}/heartbeat", ->
+  base = beats().length
+  waitFor! -> beats().length >= base + 2
+  eq beats()[0].method, 'POST'
+
+test! "published worker sockets serve the app", ->
+  res = uds!(latestSocks()[0], '/hi')
+  eq res.status, 200
+  eq (res.text!), 'hi'
+
+test! "a save cuts admission: the doorbell PUT arrives first, and nothing boots", ->
+  putsAt = allPuts().length
+  writeFileSync join(mgrDir, 'app.rip'), appSource('v2')
+  waitFor! -> allPuts().length > putsAt
+  cut = allPuts()[putsAt]
+  eq cut.body.upstreams.length, 1
+  eq cut.body.upstreams[0].doorbell, true
+  sleep! 350   # saves are free: no spawn, no further control traffic before a ring
+  eq allPuts().length, putsAt + 1
+
+test! "a ring boots a fresh pool; 204 answers strictly after the socks PUT", ->
+  putsAt = sockPuts().length
+  res = uds!(live.doorbell, '/ring')
+  eq res.status, 204
+  ok sockPuts().length > putsAt, 'the socks PUT landed before the ring was answered'
+  fresh = latestSocks()
+  for path in fresh
+    ok not live.oldSocks.includes(path), 'socket paths are never reused across pools'
+  r2 = uds!(fresh[0], '/hi')
+  eq (r2.text!), 'v2'
+  waitFor! -> latestSocks().length is 2   # the late worker's join PUT
+  live.oldSocks = latestSocks()
+
+test! "rapid saves coalesce into one doorbell PUT; the ring serves the latest code", ->
+  putsAt = allPuts().length
+  writeFileSync join(mgrDir, 'app.rip'), appSource('v3a')
+  sleep! 15
+  writeFileSync join(mgrDir, 'app.rip'), appSource('v3b')
+  sleep! 15
+  writeFileSync join(mgrDir, 'app.rip'), appSource('v3')
+  waitFor! -> allPuts().length > putsAt
+  sleep! 350
+  eq allPuts().length, putsAt + 1
+  eq allPuts()[putsAt].body.upstreams[0].doorbell, true
+  res = uds!(live.doorbell, '/ring')
+  eq res.status, 204
+  r2 = uds!(latestSocks()[0], '/hi')
+  eq (r2.text!), 'v3'
+  waitFor! -> latestSocks().length is 2   # the late worker's join PUT
+  live.oldSocks = latestSocks()
+
+test! "a format-only save (identical bytes) is a no-op", ->
+  putsAt = allPuts().length
+  writeFileSync join(mgrDir, 'app.rip'), appSource('v3')   # same bytes
+  sleep! 350
+  eq allPuts().length, putsAt
+
+test! "a broken save answers rings 503 with the boot error and never respawns", ->
+  putsAt = allPuts().length
+  writeFileSync join(mgrDir, 'app.rip'), BROKEN_SOURCE
+  waitFor! -> allPuts().length > putsAt
+  eq allPuts()[putsAt].body.upstreams[0].doorbell, true
+  sBefore = sockPuts().length
+  r1 = uds!(live.doorbell, '/ring')
+  eq r1.status, 503
+  body = r1.text!
+  ok body.includes('app.rip'), 'the 503 carries the boot error'
+  # cached: the next ring answers immediately, with no new boot attempt
+  t0 = Date.now()
+  r2 = uds!(live.doorbell, '/ring')
+  eq r2.status, 503
+  ok Date.now() - t0 < 1000, 'cached failure answers without a respawn'
+  eq sockPuts().length, sBefore
+
+test! "fixing the file recovers on the next ring", ->
+  writeFileSync join(mgrDir, 'app.rip'), appSource('v5')
+  # a cached-failure ring is instant 503; once the settle clears the failure,
+  # the ring boots and answers 204
+  ok waitFor! ->
+    res = uds!(live.doorbell, '/ring')
+    res.status is 204
+  r2 = uds!(latestSocks()[0], '/hi')
+  eq (r2.text!), 'v5'
+  waitFor! -> latestSocks().length is 2   # fully published before shutdown
+
+test! "shutdown publishes [], drains, and deletes the app", ->
+  mgrProc.kill('SIGTERM')
+  code = await mgrProc.exited
+  eq code, 0
+  lastPut = allPuts()[allPuts().length - 1]
+  eq lastPut.body.upstreams, []
+  last = janusCalls[janusCalls.length - 1]
+  eq last.method, 'DELETE'
+  ok janusCalls.indexOf(lastPut) < janusCalls.indexOf(last), 'the empty PUT precedes the DELETE'
+
+# Unconditional teardown — a failed assertion above must not leave the stub
+# control server holding the event loop open (the tally would never print).
+try mgrProc.kill('SIGKILL')
+janusServer.stop(true)
+rmSync mgrDir, { recursive: true, force: true }

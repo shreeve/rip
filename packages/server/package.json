@@ -8,12 +8,17 @@
     ".": "./server.rip",
     "./middleware": "./middleware.rip"
   },
+  "bin": {
+    "rip-server": "./server.rip"
+  },
   "scripts": {
     "test": "rip test.rip"
   },
   "files": [
     "server.rip",
     "middleware.rip",
+    "worker.rip",
+    "manager.rip",
     "README.md"
   ],
   "dependencies": {

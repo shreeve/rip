@@ -1,0 +1,105 @@
+# ==============================================================================
+# @rip-lang/server — worker runtime
+#
+# One process, one unix socket. Spawned by manager.rip with:
+#
+#   bun --preload=<rip loader> worker.rip
+#   env: APP_ENTRY, SOCKET_PATH, WORKER_ID, RIP_ENV
+#
+# Imports the app entry, resolves its fetch handler (module default →
+# module.fetch → globalThis.__ripHandler — the handover seam start() uses
+# when it detects a worker environment), and serves it on SOCKET_PATH.
+# `GET /ready` answers 200 once the app module has fully loaded, 503
+# before — the manager polls it. SIGTERM finishes in-flight requests,
+# then exits clean.
+#
+# A failed import still binds the socket: /ready and every request answer
+# 503 carrying the boot error, and the process exits nonzero shortly after
+# so the manager caches the failure instead of waiting out its deadline.
+# ==============================================================================
+
+workerId   = process.env.WORKER_ID or '?'
+socketPath = process.env.SOCKET_PATH or abort "worker #{workerId}: SOCKET_PATH is required"
+appEntry   = process.env.APP_ENTRY or abort "worker #{workerId}: APP_ENTRY is required"
+
+# Window for the manager to read the boot-failure 503 before the exit
+failLinger = parseInt(process.env.RIP_FAIL_LINGER_MS or '')
+FAIL_LINGER_MS    =! if Number.isFinite(failLinger) and failLinger > 0 then failLinger else 1500
+DRAIN_DEADLINE_MS =! 30000     # max wait for in-flight requests on SIGTERM
+
+state =
+  ready: false
+  bootError: null
+  handler: null
+  inflight: 0
+  draining: false
+
+# --- Boot: import the app, resolve its fetch handler --------------------------
+
+boot = ->
+  try
+    mod = import!(appEntry)
+    Promise.resolve!   # let the module's top-level start() handover settle
+    fresh = mod?.default ?? mod
+    h = if typeof fresh is 'function' then fresh
+    else if typeof fresh?.fetch is 'function' then fresh.fetch.bind(fresh)
+    else globalThis.__ripHandler
+    unless typeof h is 'function'
+      throw new Error "no fetch handler in #{appEntry}: export a default function, export fetch, or call start()"
+    state.handler = h
+    state.ready = true
+  catch e
+    state.bootError = e?.message or String(e)
+    warn "[worker #{workerId}] boot failed: #{state.bootError}"
+    setTimeout (-> exit 1), FAIL_LINGER_MS
+
+# --- Serve — bind the socket first so /ready polls never dial into nothing ----
+
+server = Bun.serve
+  unix: socketPath
+  maxRequestBodySize: 100 * 1024 * 1024
+  fetch: (req) ->
+    url = new URL(req.url)
+    if url.pathname is '/ready' and req.method is 'GET'
+      return new Response('ok') if state.ready and not state.draining
+      # The rip-boot-failed marker lets the manager's poll tell a failed
+      # boot (cache the error, stop waiting) from one still in progress.
+      return new Response(state.bootError, { status: 503, headers: { 'rip-boot-failed': '1' } }) if state.bootError?
+      return new Response((if state.draining then 'draining' else 'not ready'), { status: 503 })
+
+    unless state.ready
+      return new Response(state.bootError or 'not ready', { status: 503 })
+
+    if state.draining
+      return new Response('draining', { status: 503, headers: { 'Retry-After': '0' } })
+
+    # c:1 — one request at a time; concurrent arrivals bounce so the
+    # edge's least_conn picks another worker.
+    if state.inflight >= 1
+      return new Response('busy', { status: 503, headers: { 'Retry-After': '0' } })
+
+    state.inflight++
+    try
+      res = state.handler!(req)
+      if res instanceof Response then res else new Response(String(res))
+    catch err
+      warn "[worker #{workerId}] request error:", err
+      new Response('Internal Server Error', { status: 500 })
+    finally
+      state.inflight = Math.max(0, state.inflight - 1)
+
+boot!
+
+# --- Drain on SIGTERM ----------------------------------------------------------
+
+shutdown = ->
+  return if state.draining
+  state.draining = true
+  deadline = Date.now() + DRAIN_DEADLINE_MS
+  while state.inflight > 0 and Date.now() < deadline
+    sleep! 10
+  try server.stop()
+  exit 0
+
+process.on 'SIGTERM', shutdown
+process.on 'SIGINT', shutdown

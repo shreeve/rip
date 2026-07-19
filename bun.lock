@@ -103,6 +103,9 @@
     "packages/server": {
       "name": "@rip-lang/server",
       "version": "4.0.0",
+      "bin": {
+        "rip-server": "./server.rip",
+      },
       "dependencies": {
         "@rip-lang/validate": "workspace:*",
       },
