@@ -298,8 +298,22 @@ Janus owns the edge. What remains is one package, three concepts:
 | Manager (the process you run) | `manager.rip` | v3 `control/{manager,workers,watchers,cli}` rewritten small: watch → doorbell → spawn → /1.0 client → heartbeats; NO data plane | ~350 |
 | Worker (UDS runtime) | `worker.rip` | v3 `control/worker.rip` minus busy-checkout (Janus least_conn + c:1 replaces it): load app, bind UDS, `/ready`, drain on SIGTERM | ~150 |
 
-Plus `middleware.rip` (cors/logger/serve), `bin/rip-server`,
-`test.rip`, README — per the packages mold.
+Plus `middleware.rip` (cors/logger/serve), `test.rip`, README — per
+the packages mold. **No `bin/` folder**: package.json declares
+`"bin": {"rip-server": "./server.rip"}` (x12/swarm pattern);
+`server.rip` opens `#!/usr/bin/env rip` and ends with an
+`if import.meta.main` block — library when imported, CLI when
+executed. The main-guard loads the manager **dynamically**
+(`import!('./manager.rip')`) so DSL importers never load manager code.
+
+**CLI dispatch:** v3 `bin/rip` had a 7-step `rip <name>` → `rip-<name>`
+cascade (sibling bin → repo bin/rip-<name> → repo bin/<name> →
+packages/*/bin → repo node_modules/.bin → nearest node_modules/.bin
+walking up from cwd → PATH → loud error). v4 `bin/rip` lacks it —
+only hardcoded `schema` + a reserved `server` error branch. Port the
+generic cascade (minus the packages/*/bin probe; `"bin"` entries land
+in node_modules/.bin via bun install), then delete the hardcoded
+`server` branch when the package lands.
 
 Key property: **the DSL doesn't know Janus exists.** `start()` inside
 a worker (env-detected) registers the fetch handler; standalone
