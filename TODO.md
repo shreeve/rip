@@ -116,9 +116,11 @@ fs events → settle (trailing ~100–150ms) → content-hash gate
           rings 204 (empty — pure wake-up) → Janus re-reads the app's
           socket list from its own registry, picks a worker, proxies
           the original request: normal, FIRST-time, streaming
-    saved mid-boot → scrap, loop once for latest files
-    boot failed → PUT [] ; answer rings 503 + boot error → Janus
-          forwards it to the client; next save or restart retries
+    saved mid-boot → scrap (never publish), boot again from latest;
+          repeat while saves land (clients bounded by their hold caps)
+    boot failed → doorbell STAYS published; cache error; rings get
+          503 + boot error immediately, NO respawn (no crash loops);
+          next content-changing save clears the failure
 ```
 
 **Socks travel ONLY on the PUT, never in the ring response.** The PUT is needed anyway (doorbell retirement, eager mode
