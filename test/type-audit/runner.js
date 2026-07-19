@@ -484,9 +484,14 @@ function dimTwin(twinBase, byFile) {
 // spawns.
 //
 // The workspace is built rather than reused because rip.strict is read from
-// package.json#rip (nearest wins), and the audit's own package.json must NOT
-// carry it — that would flip `rip check` to strict for anyone working in this
-// directory, which is a different decision from measuring it here.
+// package.json#rip (nearest wins) and the measurement must be
+// instrument-owned: this dimension writes its own package.json, so its
+// posture cannot ride whatever the audit directory happens to carry. The
+// audit's own package.json also carries rip.strict — strict-clean is the
+// corpus contract, so a fixture violation squiggles at authoring time
+// instead of surfacing here first — but that is an authoring affordance
+// layered on top, not part of the instrument, and removing it must not
+// change what this dimension reports.
 //
 // node_modules is symlinked, not copied: the fixtures' dependency sandbox
 // (react/zod and their @types) lives in THIS directory, and a fixture that

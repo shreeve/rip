@@ -104,6 +104,16 @@
         "rip-server": "./bin/rip-server",
       },
     },
+    "packages/stamp": {
+      "name": "@rip-lang/stamp",
+      "version": "4.0.0",
+      "bin": {
+        "rip-stamp": "./stamp.rip",
+      },
+      "devDependencies": {
+        "@rip-lang/testing": "workspace:*",
+      },
+    },
     "packages/swarm": {
       "name": "@rip-lang/swarm",
       "version": "4.0.0",
@@ -203,6 +213,8 @@
     "@rip-lang/script": ["@rip-lang/script@workspace:packages/script"],
 
     "@rip-lang/server": ["@rip-lang/server@workspace:packages/server"],
+
+    "@rip-lang/stamp": ["@rip-lang/stamp@workspace:packages/stamp"],
 
     "@rip-lang/swarm": ["@rip-lang/swarm@workspace:packages/swarm"],
 
