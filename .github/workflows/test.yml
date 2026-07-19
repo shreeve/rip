@@ -69,10 +69,6 @@ jobs:
         working-directory: packages/validate
         run: bun run test
 
-      - name: Server package suite (packages/server — its own suite, its own boundary)
-        working-directory: packages/server
-        run: bun run test
-
       - name: Database package suite (packages/db — protocol tests; live tests gated on a harbor endpoint)
         working-directory: packages/db
         run: bun run test

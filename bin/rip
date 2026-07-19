@@ -107,18 +107,18 @@ if (args[0] === 'schema') {
   process.exit(r.status ?? 1);
 }
 
-// `rip server [tokens…]` — the application server subcommand,
-// dispatched like `schema` (the word `server` in first position is
-// the subcommand, never an input file — run a file literally named
-// `server` as `rip ./server`). The server bin registers the loader
-// itself and owns the whole token grammar (`rip server --help`).
+// `rip server` — reserved. The v4 packages/server scaffolding was moved
+// to misc/server-v4-discarded/ and is not the product path. A Janus-era
+// @rip-lang/server will own this subcommand again when it lands.
 if (args[0] === 'server') {
-  const serverBinPath = join(dirname(fileURLToPath(import.meta.url)), '../packages/server/bin/rip-server');
-  const r = spawnSync('bun', [serverBinPath, ...args.slice(1)], {
-    stdio: 'inherit',
-    env: process.env,
-  });
-  process.exit(r.status ?? 1);
+  console.error(
+    [
+      "rip server: no active @rip-lang/server package in this checkout.",
+      "The v4 server scaffolding lives at misc/server-v4-discarded/ (discarded).",
+      "Use rip-lang's v3 server for the old product, or wait for the Janus-era rewrite.",
+    ].join('\n'),
+  );
+  process.exit(1);
 }
 
 // `rip test [bun-test args...]` — Bun's test runner with the .rip

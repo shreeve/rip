@@ -100,13 +100,6 @@
         "@rip-lang/testing": "workspace:*",
       },
     },
-    "packages/server": {
-      "name": "@rip-lang/server",
-      "version": "0.0.0",
-      "bin": {
-        "rip-server": "./bin/rip-server",
-      },
-    },
     "packages/stamp": {
       "name": "@rip-lang/stamp",
       "version": "4.0.0",
@@ -211,8 +204,6 @@
     "@rip-lang/rsx": ["@rip-lang/rsx@workspace:packages/rsx"],
 
     "@rip-lang/script": ["@rip-lang/script@workspace:packages/script"],
-
-    "@rip-lang/server": ["@rip-lang/server@workspace:packages/server"],
 
     "@rip-lang/stamp": ["@rip-lang/stamp@workspace:packages/stamp"],
 
