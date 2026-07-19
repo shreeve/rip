@@ -1,0 +1,720 @@
+# ==============================================================================
+# @rip-lang/server/middleware — Built-in Middleware
+# ==============================================================================
+#
+# Usage:
+#   import { cors, logger, compress, sessions, htmlJson } from '@rip-lang/server/middleware'
+#   import { session } from '@rip-lang/server'
+#
+#   use logger()
+#   use cors origin: 'https://myapp.com'
+#   use compress()
+#   use sessions()
+#   use htmlJson   # Pretty JSON for iOS mobile browsers
+#
+#   before ->
+#     session.userId = 123   # Works anywhere via AsyncLocalStorage
+#
+# Note: read() and session work automatically — no setup required!
+#
+# ==============================================================================
+
+import { setCorsPreflightPolicy } from './server.rip'
+
+# ==============================================================================
+# cors — Cross-Origin Resource Sharing
+# ==============================================================================
+#
+# Options:
+#   origin: '*' | string | string[] | (origin) -> boolean
+#   methods: 'GET,POST,...' | string[]
+#   headers: 'Content-Type,...' | string[]
+#   credentials: boolean
+#   maxAge: number (seconds)
+#   exposeHeaders: string | string[]
+#   preflight: boolean — handle OPTIONS before route matching (default: false)
+#
+
+export cors = (opts: {
+  origin?: string | string[] | ((origin: string) => boolean)
+  methods?: string | string[]
+  headers?: string | string[]
+  credentials?: boolean
+  maxAge?: number
+  exposeHeaders?: string | string[]
+  preflight?: boolean
+} = {}) ->
+  origin        = opts.origin or '*'
+  methods       = opts.methods or 'GET,POST,PUT,PATCH,DELETE,OPTIONS'
+  headers       = opts.headers or 'Content-Type,Authorization,X-Requested-With'
+  credentials   = opts.credentials or false
+  maxAge        = opts.maxAge or 86400
+  exposeHeaders = opts.exposeHeaders or ''
+
+  # Normalize arrays to comma-separated strings
+  methods       = methods.join(',')       if Array.isArray(methods)
+  headers       = headers.join(',')       if Array.isArray(headers)
+  exposeHeaders = exposeHeaders.join(',') if Array.isArray(exposeHeaders)
+
+  # Shared origin-validation logic. Used BOTH by this middleware (on
+  # actual requests) AND by the early-OPTIONS preflight handler, so
+  # the two code paths can never disagree about what's allowed.
+  resolveAllowedOrigin = (requestOrigin) ->
+    if typeof origin is 'function'
+      if origin(requestOrigin) then requestOrigin else null
+    else if Array.isArray(origin)
+      if origin.includes(requestOrigin) then requestOrigin else null
+    else if origin is '*'
+      '*'
+    else
+      origin
+
+  # Install the preflight policy so server.rip's early-OPTIONS handler uses
+  # the SAME origin validation. Without this, preflight would advertise
+  # a reflected-origin+credentials policy regardless of what the user
+  # configured here — a misleading posture.
+  if opts.preflight
+    setCorsPreflightPolicy (requestOrigin) ->
+      allowedOrigin: resolveAllowedOrigin(requestOrigin)
+      methods:       methods
+      headers:       headers
+      credentials:   credentials
+      maxAge:        maxAge
+
+  (c, next) ->
+    requestOrigin = c.req.header('Origin')
+    allowedOrigin = resolveAllowedOrigin(requestOrigin)
+    return next!() unless allowedOrigin
+
+    # Set CORS headers
+    c.header 'Access-Control-Allow-Origin', allowedOrigin
+    c.header 'Access-Control-Allow-Methods', methods
+    c.header 'Access-Control-Allow-Headers', headers
+
+    # Only emit credentials when allowed AND origin is specific (not '*').
+    # Credentials + wildcard is a browser-rejected misconfig; refuse to
+    # emit so the misconfig is loud, not silent.
+    if credentials and allowedOrigin isnt '*'
+      c.header 'Access-Control-Allow-Credentials', 'true'
+
+    if exposeHeaders
+      c.header 'Access-Control-Expose-Headers', exposeHeaders
+
+    # Handle preflight OPTIONS request
+    if c.req.method is 'OPTIONS'
+      c.header 'Access-Control-Max-Age', String(maxAge)
+      return c.body null, 204
+
+    await next()
+
+# ==============================================================================
+# logger — Request Logging
+# ==============================================================================
+#
+# Options:
+#   format: 'tiny' | 'short' | 'dev' | 'full' | (info) -> string
+#   skip: (c) -> boolean
+#   stream: { write: (msg) -> } (default: console)
+
+export logger = (opts: {
+  format?: 'tiny' | 'short' | 'dev' | 'full' | ((info: any) => string)
+  skip?: (c: any) => boolean
+  stream?: { write: (msg: string) => any }
+} = {}) ->
+  format = opts.format or 'dev'
+  skip = opts.skip or null
+  stream = opts.stream or { write: (msg) -> p msg.trim() }
+
+  markTail = (info) -> if info.mark then " [#{info.mark}]" else ''
+
+  formatters =
+    tiny: (info) -> "#{info.method} #{info.path} #{info.status} - #{info.ms}ms#{markTail(info)}"
+    short: (info) -> "#{info.method} #{info.path} #{info.status} #{info.size} - #{info.ms}ms#{markTail(info)}"
+    dev: (info) ->
+      color = if info.status >= 500 then '\x1b[31m'      # red
+      else if info.status >= 400 then '\x1b[33m'         # yellow
+      else if info.status >= 300 then '\x1b[36m'         # cyan
+      else '\x1b[32m'                                    # green
+      reset = '\x1b[0m'
+      "#{info.method} #{info.path} #{color}#{info.status}#{reset} - #{info.ms}ms#{markTail(info)}"
+    full: (info) -> "[#{info.time}] #{info.method} #{info.path} #{info.status} #{info.size} - #{info.ms}ms#{markTail(info)}"
+
+  (c, next) ->
+    return next!() if skip?(c)
+
+    start = Date.now()
+    await next()
+    ms = Date.now() - start
+
+    info =
+      method: c.req.method
+      path: c.req.path
+      status: c._response?.status or 200
+      ms: ms
+      size: c._response?.headers?.get('Content-Length') or '-'
+      time: new Date().toISOString()
+      mark: c.mark or null
+
+    msg = if typeof format is 'function' then format(info) else formatters[format]?(info) or formatters.dev(info)
+    stream.write "#{msg}\n"
+
+# ==============================================================================
+# compress — Response Compression (gzip, deflate)
+# ==============================================================================
+#
+# Options:
+#   threshold: number (min bytes to compress, default 1024)
+#   encodings: string[] (default ['gzip', 'deflate'])
+#
+# Note: Requires Bun's built-in compression support
+#
+
+export compress = (opts: { threshold?: number, encodings?: string[] } = {}) ->
+  threshold = opts.threshold or 1024
+  encodings = opts.encodings or ['gzip', 'deflate']
+
+  (c, next) ->
+    await next()
+
+    # Skip if no response body
+    response = c._response
+    return unless response?
+
+    # Check Accept-Encoding header
+    acceptEncoding = c.req.header('Accept-Encoding') or ''
+
+    # Find supported encoding
+    encoding = null
+    for enc in encodings
+      if acceptEncoding.includes(enc)
+        encoding = enc
+        break
+
+    return unless encoding
+
+    # Get body and check threshold
+    try
+      body = response.body
+      return unless body
+
+      # Clone to read the body
+      clone = response.clone()
+      text = clone.text!
+      return if text.length < threshold
+
+      # Compress using Bun's built-in CompressionStream
+      return unless encoding is 'gzip' or encoding is 'deflate'
+      compressed = new Response(text).body.pipeThrough(new CompressionStream(encoding))
+
+      # Create new response with compressed body
+      headers = new Headers(response.headers)
+      headers.set 'Content-Encoding', encoding
+      headers.delete 'Content-Length'  # Length changed
+
+      c._response = new Response compressed,
+        status: response.status
+        headers: headers
+    catch
+      # If compression fails, keep original response
+      return
+
+# ==============================================================================
+# sessions — Session Management
+# ==============================================================================
+#
+# Options:
+#   secret:   string   REQUIRED for production. Signing or encryption key.
+#   encrypt:  boolean  When true, session is AES-256-GCM encrypted (AEAD).
+#                      Default false → HMAC-SHA256 signed (tamper-proof,
+#                      but the payload is CLIENT-READABLE).
+#   name:     string   cookie name, default 'session'
+#   maxAge:   number   seconds, default 86400 (24h)
+#   secure:   boolean  Secure attribute (HTTPS only), default false
+#   httpOnly: boolean  default true
+#   sameSite: 'Strict' | 'Lax' | 'None', default 'Lax'
+#
+# Confidentiality vs. integrity
+# -----------------------------
+# The default (signed) session protects INTEGRITY: no client can tamper
+# with their session without the signature failing. But the payload is
+# just base64-encoded JSON — ANYONE with the cookie can read it. Do NOT
+# store secrets (access tokens, PII, internal identifiers) in signed
+# sessions.
+#
+# For confidentiality, pass `encrypt: true`. Sessions are then sealed
+# with AES-256-GCM (authenticated encryption): the client sees only an
+# opaque ciphertext and cannot read or modify the payload without the
+# key. The 256-bit key is derived from `secret` via SHA-256.
+#
+# Usage:
+#   import { session } from '@rip-lang/server'
+#   import { sessions } from '@rip-lang/server/middleware'
+#
+#   use sessions
+#     secret:  process.env.SESSION_SECRET
+#     encrypt: true             # enable AES-256-GCM confidentiality
+#
+#   before ->
+#     session.accessToken = '...'   # safe to store — client can't read
+#
+# Note: Self-contained — parses cookies directly from request headers.
+#
+
+# --- crypto helpers ---
+
+# HMAC-SHA256 signing helpers (used for the signed-only mode)
+hmacSign = (data, secret) ->
+  encoder = new TextEncoder()
+  key = crypto.subtle.importKey! 'raw', encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+  signature = crypto.subtle.sign! 'HMAC', key, encoder.encode(data)
+  Array.from(new Uint8Array(signature)).map((b) -> b.toString(16).padStart(2, '0')).join('')
+
+hmacVerify = (data, signature, secret) ->
+  expected = hmacSign! data, secret
+  # Constant-time comparison to prevent timing attacks
+  return false if expected.length isnt signature.length
+  result = 0
+  for i in [0...expected.length]
+    result |= expected.charCodeAt(i) ^ signature.charCodeAt(i)
+  result is 0
+
+# AES-256-GCM AEAD helpers. Derives a 32-byte key from `secret` via
+# SHA-256 (deterministic — same secret → same key). Cookie format is
+# base64url("v1." + nonce(12) + ciphertext || tag(16)). Version prefix
+# lets us migrate to future schemes without breaking old cookies.
+u8ToB64url = (u8) ->
+  bin = ''
+  bin += String.fromCharCode(b) for b in u8
+  btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+
+b64urlToU8 = (s) ->
+  s = s.replace(/-/g, '+').replace(/_/g, '/')
+  pad = s.length % 4
+  s += '='.repeat(4 - pad) if pad
+  bin = atob(s)
+  Uint8Array.from(bin, (c: string) -> c.charCodeAt(0))
+
+deriveAesKey = (secret) ->
+  encoder = new TextEncoder()
+  hash = crypto.subtle.digest! 'SHA-256', encoder.encode(secret)
+  crypto.subtle.importKey! 'raw', hash, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']
+
+aeadEncrypt = (data, secret) ->
+  key = deriveAesKey!(secret)
+  nonce = crypto.getRandomValues(new Uint8Array(12))
+  encoder = new TextEncoder()
+  plaintext = encoder.encode(JSON.stringify(data))
+  ciphertext = crypto.subtle.encrypt! { name: 'AES-GCM', iv: nonce }, key, plaintext
+  ct = new Uint8Array(ciphertext)
+  combined = new Uint8Array(nonce.length + ct.length)
+  combined.set(nonce, 0)
+  combined.set(ct, nonce.length)
+  "v1.#{u8ToB64url(combined)}"
+
+aeadDecrypt = (cookie, secret) ->
+  return {} unless cookie?.startsWith('v1.')
+  try
+    combined = b64urlToU8(cookie.slice(3))
+    return {} unless combined.length > 12
+    nonce = combined.slice(0, 12)
+    ct = combined.slice(12)
+    key = deriveAesKey!(secret)
+    plain = crypto.subtle.decrypt! { name: 'AES-GCM', iv: nonce }, key, ct
+    JSON.parse(new TextDecoder().decode(plain))
+  catch
+    {}
+
+encodeSession = (data, secret, encrypt) ->
+  if encrypt and secret
+    return aeadEncrypt!(data, secret)
+  json = JSON.stringify(data)
+  payload = btoa(unescape(encodeURIComponent(json)))
+  return payload unless secret
+  signature = hmacSign! payload, secret
+  "#{payload}--#{signature}"
+
+decodeSession = (cookie, secret, encrypt) ->
+  return {} unless cookie
+  if encrypt and secret
+    return aeadDecrypt!(cookie, secret)
+  try
+    if secret
+      [payload, signature] = cookie.split('--')
+      return {} unless payload and signature
+      return {} unless hmacVerify! payload, signature, secret
+      JSON.parse(decodeURIComponent(escape(atob(payload))))
+    else
+      JSON.parse(decodeURIComponent(escape(atob(cookie))))
+  catch
+    {}
+
+export sessions = (opts: {
+  secret?: string
+  encrypt?: boolean
+  name?: string
+  maxAge?: number
+  secure?: boolean
+  httpOnly?: boolean
+  sameSite?: 'Strict' | 'Lax' | 'None'
+} = {}) ->
+  secret     = opts.secret
+  encrypt    = opts.encrypt is true
+  cookieName = opts.name or 'session'
+  maxAge     = opts.maxAge or 86400
+  secure     = opts.secure or false
+  httpOnly   = opts.httpOnly ?? true
+  sameSite   = opts.sameSite or 'Lax'
+
+  # Warn if no secret in production (signed mode is tamper-resistant
+  # only with a secret; unsigned mode is strictly dev-only).
+  if not secret and process.env.NODE_ENV is 'production'
+    warn 'WARNING: sessions() without secret is insecure. Set secret option for production.'
+
+  # Encrypt mode requires a secret; fail loudly at middleware install
+  # rather than silently falling back to signed mode.
+  if encrypt and not secret
+    throw new Error('sessions({encrypt: true}) requires a secret for key derivation')
+
+  (c, next) ->
+    # Parse cookie header
+    cookieHeader = c.req.header('Cookie') or ''
+    cookies = {}
+    for pair in cookieHeader.split(';')
+      [key, val] = pair.trim().split('=')
+      cookies[key] = decodeURIComponent(val) if key and val
+
+    # Decode existing session
+    raw = cookies[cookieName]
+    c.session = decodeSession!(raw, secret, encrypt)
+
+    # Track original for change detection
+    original = JSON.stringify(c.session)
+
+    await next()
+
+    # Save session if changed
+    current = JSON.stringify(c.session)
+    if current isnt original and c._response?
+      encoded = encodeSession!(c.session, secret, encrypt)
+      parts = ["#{cookieName}=#{encodeURIComponent(encoded)}"]
+      parts.push "Path=/"
+      parts.push "Max-Age=#{maxAge}"
+      parts.push "HttpOnly" if httpOnly
+      parts.push "Secure" if secure
+      parts.push "SameSite=#{sameSite}"
+      cookie = parts.join('; ')
+
+      # Clone response with new header
+      headers = new Headers(c._response.headers)
+      headers.append 'Set-Cookie', cookie
+      c._response = new Response c._response.body,
+        status: c._response.status
+        headers: headers
+
+# ==============================================================================
+# csrf — Cross-Site Request Forgery protection (double-submit cookie)
+# ==============================================================================
+#
+# Options:
+#   cookieName: string   default 'csrf_token'
+#   headerName: string   default 'X-CSRF-Token'
+#   fieldName:  string   default '_csrf'        (for HTML form bodies)
+#   secret:     string   used to HMAC-sign the cookie (strongly recommended)
+#   secure:     boolean  Secure attribute, default false
+#   sameSite:   string   default 'Lax'
+#   exempt:     fn       (c) -> bool — skip CSRF for this request
+#
+# Pattern: double-submit cookie with HMAC binding.
+#   1. On any safe request (GET/HEAD/OPTIONS), issue a CSRF cookie if the
+#      client doesn't have one. The token is 16 random bytes hex-encoded.
+#   2. On any unsafe request (POST/PUT/PATCH/DELETE), require a matching
+#      token in either the configured header OR the form field, AND that
+#      token must match the cookie. If `secret` is set, the cookie also
+#      carries an HMAC so the server can detect a forged cookie alone.
+#
+# Why double-submit + HMAC?
+#   - Pure double-submit only needs the cookie to match a form/header
+#     value — an attacker with subdomain XSS can set cookies and plant
+#     forms. HMAC binding makes the cookie itself unforgeable without
+#     the server secret. For most apps this is strong enough.
+#   - Same-origin credentialed requests still send the cookie, so valid
+#     clients with the token in their header/form always pass.
+#
+# Use with sessions(): place csrf() AFTER sessions() in the middleware
+# chain. The two are independent — CSRF protects against cross-origin
+# request forgery; sessions protect against unauthenticated access.
+#
+# Token retrieval from the handler side:
+#   c.csrfToken    → raw token to embed in HTML forms / JS fetches
+#
+# ==============================================================================
+
+CSRF_TOKEN_BYTES = 16
+
+randomHexToken = ->
+  bytes = crypto.getRandomValues(new Uint8Array(CSRF_TOKEN_BYTES))
+  Array.from(bytes).map((b) -> b.toString(16).padStart(2, '0')).join('')
+
+# Build HMAC-signed cookie value: `<token>.<signature>`. The token is
+# transmitted separately (header/form) by valid clients; the signature
+# binds cookie integrity to the server secret so an attacker can't
+# fabricate a cookie+form pair.
+buildCsrfCookie = (token, secret) ->
+  return token unless secret
+  sig = hmacSign!(token, secret)
+  "#{token}.#{sig}"
+
+parseCsrfCookie = (cookie, secret) ->
+  return null unless cookie
+  unless secret
+    return cookie
+  [token, sig] = cookie.split('.')
+  return null unless token and sig
+  ok = hmacVerify!(token, sig, secret)
+  if ok then token else null
+
+# Constant-time string compare for the form/header token vs the cookie.
+# Prevents timing attacks leaking which prefix matched.
+tokensEqual = (a, b) ->
+  return false unless a and b
+  return false if a.length isnt b.length
+  result = 0
+  for i in [0...a.length]
+    result |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  result is 0
+
+SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
+
+export csrf = (opts: {
+  cookieName?: string
+  headerName?: string
+  fieldName?: string
+  secret?: string
+  secure?: boolean
+  sameSite?: 'Strict' | 'Lax' | 'None'
+  exempt?: (c: any) => boolean
+} = {}) ->
+  cookieName = opts.cookieName or 'csrf_token'
+  headerName = opts.headerName or 'X-CSRF-Token'
+  fieldName  = opts.fieldName  or '_csrf'
+  secret     = opts.secret
+  secure     = opts.secure or false
+  sameSite   = opts.sameSite or 'Lax'
+  exempt     = if typeof opts.exempt is 'function' then opts.exempt else (-> false)
+
+  # Require a secret for HMAC binding when NODE_ENV is production. The
+  # middleware still works without one (pure double-submit), but warn
+  # loudly so the operator can set SESSION/CSRF secrets on rollout.
+  if not secret and process.env.NODE_ENV is 'production'
+    warn 'WARNING: csrf() without secret falls back to double-submit only. Set secret for HMAC binding.'
+
+  (c, next) ->
+    return next!() if exempt(c)
+
+    method = c.req.method
+    safe = SAFE_METHODS.has(method)
+
+    # Pull current token out of the cookie jar.
+    cookieHeader = c.req.header('Cookie') or ''
+    cookies = {}
+    for pair in cookieHeader.split(';')
+      [key, val] = pair.trim().split('=')
+      cookies[key] = decodeURIComponent(val) if key and val
+    rawCookie = cookies[cookieName]
+    cookieToken = parseCsrfCookie!(rawCookie, secret)
+
+    # For unsafe methods, require a matching token from header OR form.
+    unless safe
+      submitted = c.req.header(headerName)
+      unless cookieToken and submitted and tokensEqual(submitted, cookieToken)
+        return new Response 'CSRF token mismatch',
+          status: 403
+          headers: { 'Content-Type': 'text/plain' }
+
+    # Ensure the client has a token for future unsafe requests. On safe
+    # requests without a valid cookie, mint a new one and set it.
+    emitCookie = false
+    if safe and not cookieToken
+      cookieToken = randomHexToken()
+      emitCookie = true
+
+    # Expose the token to handlers. Templates use it to populate hidden
+    # form inputs; fetch() callers send it in the header.
+    c.csrfToken = cookieToken if cookieToken
+
+    await next()
+
+    if emitCookie and c._response?
+      value = buildCsrfCookie!(cookieToken, secret)
+      parts = ["#{cookieName}=#{encodeURIComponent(value)}"]
+      parts.push "Path=/"
+      parts.push "Secure" if secure
+      parts.push "SameSite=#{sameSite}"
+      # CSRF token must be readable by JS to embed in fetch headers, so
+      # we deliberately DO NOT set HttpOnly here (unlike session cookies).
+      cookie = parts.join('; ')
+      headers = new Headers(c._response.headers)
+      headers.append 'Set-Cookie', cookie
+      c._response = new Response c._response.body,
+        status: c._response.status
+        headers: headers
+
+# ==============================================================================
+# secureHeaders — Security Headers
+# ==============================================================================
+#
+# Sets common security headers:
+#   X-Content-Type-Options: nosniff
+#   X-Frame-Options: DENY
+#   X-XSS-Protection: 1; mode=block
+#   Referrer-Policy: strict-origin-when-cross-origin
+#   Content-Security-Policy (optional)
+#
+
+export secureHeaders = (opts: {
+  frameOptions?: string
+  referrerPolicy?: string
+  contentSecurityPolicy?: string
+  hsts?: boolean
+  hstsMaxAge?: number
+} = {}) ->
+  (c, next) ->
+    c.header 'X-Content-Type-Options', 'nosniff'
+    c.header 'X-Frame-Options', opts.frameOptions or 'DENY'
+    c.header 'X-XSS-Protection', '1; mode=block'
+    c.header 'Referrer-Policy', opts.referrerPolicy or 'strict-origin-when-cross-origin'
+
+    if opts.contentSecurityPolicy
+      c.header 'Content-Security-Policy', opts.contentSecurityPolicy
+
+    if opts.hsts
+      maxAge = opts.hstsMaxAge or 31536000
+      c.header 'Strict-Transport-Security', "max-age=#{maxAge}; includeSubDomains"
+
+    await next()
+
+# ==============================================================================
+# timeout — Request Timeout
+# ==============================================================================
+#
+# Options:
+#   ms: number (timeout in milliseconds, default 30000)
+#   message: string (error message)
+#   status: number (status code, default 408)
+#
+
+export timeout = (opts: { ms?: number, message?: string, status?: number } = {}) ->
+  ms = opts.ms or 30000
+  message = opts.message or 'Request Timeout'
+  status = opts.status or 408
+
+  (c, next) ->
+    timer = null
+    timedOut = false
+
+    timeoutPromise = new Promise (_, reject) ->
+      timer = setTimeout ->
+        timedOut = true
+        reject new Error message
+      , ms
+
+    try
+      await Promise.race [next(), timeoutPromise]
+    catch err
+      if timedOut
+        return c.json { error: message }, status
+      throw err
+    finally
+      clearTimeout timer if timer
+
+# ==============================================================================
+# bodyLimit — Request Body Size Limit
+# ==============================================================================
+#
+# Options:
+#   maxSize: number (bytes, default 1MB)
+#   message: string (error message)
+#
+
+export bodyLimit = (opts: { maxSize?: number, message?: string } = {}) ->
+  maxSize = opts.maxSize or 1024 * 1024  # 1MB default
+  message = opts.message or 'Request body too large'
+
+  (c, next) ->
+    contentLength = parseInt(c.req.header('Content-Length') or '0')
+
+    if contentLength > maxSize
+      return c.json { error: message }, 413
+
+    await next()
+
+# ==============================================================================
+# htmlJson — Pretty JSON for iOS Mobile Browsers
+# ==============================================================================
+#
+# Renders JSON as syntax-highlighted HTML for iOS mobile browsers.
+# Solves the iOS Safari/Chrome "download" footer issue when viewing JSON.
+#
+# Usage:
+#   use htmlJson
+#
+# Only activates when:
+#   1. Request is from iOS (iPhone/iPad)
+#   2. Browser is directly viewing (Accept: text/html, not API call)
+#
+
+export htmlJson = (c, next) ->
+  originalJson = c.json.bind(c)
+
+  c.json = (data, status = 200, headers = {}) ->
+    if _shouldRenderHtmlJson(c.req.raw)
+      return _renderHtmlJson(data, status)
+    originalJson(data, status, headers)
+
+  next!
+
+_shouldRenderHtmlJson = (req) ->
+  ua = req.headers.get('user-agent') or ''
+  accept = req.headers.get('accept') or ''
+  dest = req.headers.get('sec-fetch-dest') or ''
+
+  isIOS = /iPhone|iPad|iPod/i.test(ua)
+  acceptsHtml = accept.includes('text/html')
+  isNavigation = dest is 'document' or (acceptsHtml and not accept.startsWith('application/json'))
+
+  isIOS and isNavigation
+
+_renderHtmlJson = (data, status) ->
+  json = JSON.stringify(data, null, 2)
+
+  # HTML escape then syntax highlight
+  escaped = json
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+
+  highlighted = escaped
+    .replace(/"([^"]+)":/g, '<span class="k">"$1"</span>:')
+    .replace(/: "([^"]*)"/g, ': <span class="s">"$1"</span>')
+    .replace(/: (-?\d+\.?\d*)/g, ': <span class="n">$1</span>')
+    .replace(/: (true|false)/g, ': <span class="b">$1</span>')
+    .replace(/: (null)/g, ': <span class="b">$1</span>')
+
+  html = """<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>JSON</title>
+<style>
+*{box-sizing:border-box}
+body{font:14px/1.5 ui-monospace,monospace;background:#1a1a2e;color:#e0e0e0;margin:0;padding:16px}
+pre{margin:0;white-space:pre-wrap;word-break:break-word}
+.k{color:#82aaff}.s{color:#c3e88d}.n{color:#f78c6c}.b{color:#89ddff}
+</style>
+</head><body><pre>#{highlighted}</pre></body></html>"""
+
+  new Response html, {
+    status: status
+    headers: new Headers({ 'content-type': 'text/html; charset=utf-8' })
+  }

@@ -110,15 +110,14 @@ if (args[0] === 'schema') {
   process.exit(r.status ?? 1);
 }
 
-// `rip server` — reserved. The v4 packages/server scaffolding was moved
-// to misc/server-v4-discarded/ and is not the product path. A Janus-era
-// @rip-lang/server will own this subcommand again when it lands.
+// `rip server` — reserved. packages/server ships the DSL today; the
+// manager runtime (the `rip-server` executable this dispatches to)
+// lands next, per the Janus pool protocol.
 if (args[0] === 'server') {
   console.error(
     [
-      "rip server: no active @rip-lang/server package in this checkout.",
-      "The v4 server scaffolding lives at misc/server-v4-discarded/ (discarded).",
-      "Use rip-lang's v3 server for the old product, or wait for the Janus-era rewrite.",
+      "rip server: @rip-lang/server ships the DSL only; the manager runtime has not landed yet.",
+      "Import { get, read, start } from '@rip-lang/server' and run your app directly: rip app.rip",
     ].join('\n'),
   );
   process.exit(1);

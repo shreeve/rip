@@ -1,0 +1,196 @@
+<img src="https://raw.githubusercontent.com/shreeve/rip-lang/main/docs/assets/rip.png" alt="Rip" width="50" />
+
+# Rip Server - @rip-lang/server
+
+> **Sinatra-style web framework — routes, smart responses, read() validation, and AsyncLocalStorage-powered request context**
+
+Handlers are plain functions bound to a request context: return an object
+and it ships as JSON, return a string and it ships as text (or HTML when it
+looks like markup), throw `error!`/`notice!` and a structured envelope goes
+out with the right status. `read()` pulls validated parameters from body,
+query, and path with one call, backed by the `@rip-lang/validate`
+vocabulary, and `AsyncLocalStorage` makes `session`, `read()`, and `ctx()`
+work anywhere in your call stack — no threading a context argument through
+your code. The same app file runs standalone on a port or under a worker
+pool behind [Janus](https://github.com/shreeve/janus).
+
+**Runtime:** not browser-safe — uses `Bun.serve`, `Bun.file`, and
+`node:async_hooks`. Two `.rip` files: the DSL (`server.rip`) and the
+middleware collection (`middleware.rip`).
+
+## Quick Start
+
+```bash
+bun add @rip-lang/server
+```
+
+```coffee
+import { get, post, read, error, start } from '@rip-lang/server'
+
+get '/' -> { message: 'Hello!' }
+
+get '/users/:id' ->
+  id = read 'id', 'id!'          # validated integer > 0, 400 if missing
+  { id, name: "User #{id}" }
+
+post '/signup' ->
+  email = read 'email', 'email!' # normalized, lowercased, 400 if invalid
+  error! 'taken', 409 if email is 'admin@example.com'
+  { ok: true, email }
+
+start port: 3000
+```
+
+## Features
+
+- **Sinatra-style routes** — `get`, `post`, `put`, `patch`, `del`, `all`,
+  with `:params`, wildcards, optional segments, and `prefix` grouping
+- **Smart responses** — return objects (JSON), strings (text/HTML),
+  numbers, `null` (204), or a raw `Response`
+- **`read()`** — one call to fetch and validate any input (body, query,
+  path), with 35+ named validators, regex/range/enum forms, dotted paths,
+  and a `!` suffix for required fields
+- **Error helpers** — `error!`, `notice!`, `bail!` halt the request with a
+  structured JSON envelope; 5xx internals are always masked
+- **Request context anywhere** — `session`, `ctx()`, `mark()`, and
+  `subrequest()` ride AsyncLocalStorage, so library code sees the current
+  request without plumbing
+- **`input:` schemas** — validate JSON bodies through a Rip `schema`
+  before the handler runs; `GET /openapi.json` generates itself
+- **Middleware** — Koa-style `use` composition plus a built-in set:
+  `cors`, `logger`, `compress`, `sessions` (signed or AES-256-GCM
+  encrypted), `csrf`, `secureHeaders`, `timeout`, `bodyLimit`, `htmlJson`
+- **Runs anywhere** — standalone `Bun.serve` on a port, or handed to a
+  worker pool via `startHandler()`
+
+## Routing
+
+```coffee
+get '/users/:id' -> { id: @req.param('id') }
+get '/files/*' -> @send "public/#{@req.path.slice(7)}"
+get '/reports/:year/:month?' -> @req.param()      # optional segment
+all '/webhook' -> @req.method
+
+prefix '/api/v1', ->
+  get '/ping' -> 'pong'                           # GET /api/v1/ping
+```
+
+Handlers receive the context as both `this` and the first argument, so
+`@req`, `@json()`, `@send()`, and `@session` all work. A handler's return
+value becomes the response: `Response` passes through, objects become
+JSON, strings become text (or HTML when they start with `<`), and
+`null`/`undefined` becomes 204.
+
+## read() — validated input, one call
+
+`read()` merges the parsed body, query string, and path params, then
+validates:
+
+```coffee
+post '/orders' ->
+  user  = read 'userId', 'id!'          # required positive integer
+  total = read 'total', 'money!'        # "$1,234.56" → 123456 cents
+  when_ = read 'date', 'date'           # real calendar dates only
+  size  = read 'size', ['S', 'M', 'L']  # enumeration
+  qty   = read 'qty', [1, 99]           # numeric range
+  note  = read 'note', /^[\w ]{0,80}$/  # regex extract
+  name  = read 'patient.firstName'      # dotted path into nested JSON
+  ...
+```
+
+A trailing `!` makes the field required (400 with the field name if
+absent). The third argument supplies a default (or a function to call) for
+missing values. The validator vocabulary — `id`, `int`, `money`, `email`,
+`date`, `phone`, `ssn`, `uuid`, and thirty more — lives in
+`@rip-lang/validate` and is re-exported here (`registerValidator` adds
+your own).
+
+## Error helpers
+
+```coffee
+get '/admin' ->
+  user = session.user or bail!          # 401, session cleared
+  error! 'forbidden', 403 unless user.admin
+  notice! 'Quota exceeded' if user.overQuota   # always user-facing
+  ...
+```
+
+Thrown errors become one JSON envelope: `{ error: { message, notice?,
+issues? } }`. Messages show for 4xx; 5xx and raw throws are masked to a
+generic status line so internals never leak.
+
+## input: schemas and OpenAPI
+
+```coffee
+Signup = schema :input
+  name! 2..50
+  age?  ~integer
+
+post '/signup', input: Signup, ->
+  { welcome: @input.name }    # parsed, coerced, defaulted
+```
+
+A bad body never reaches the handler — a 400 with structured
+`{field, error, message}` issues goes out instead. The first `input:`
+route turns on `GET /openapi.json`, generated from the route table and
+each schema's JSON Schema, always current.
+
+## Middleware
+
+```coffee
+import { use, before, session } from '@rip-lang/server'
+import { cors, logger, sessions, csrf, secureHeaders } from '@rip-lang/server/middleware'
+
+use logger()
+use cors origin: 'https://myapp.com', preflight: true
+use sessions secret: process.env.SESSION_SECRET, encrypt: true
+use csrf secret: process.env.SESSION_SECRET
+use secureHeaders()
+```
+
+`use` also takes custom Koa-style middleware — `(c, next) ->` — and
+path-scoped forms. `sessions` cookies are HMAC-signed by default or
+AES-256-GCM sealed with `encrypt: true`; `csrf` implements double-submit
+with HMAC binding.
+
+## Architecture
+
+The DSL in this package is one of three concepts in the Janus-era server
+stack — it is the only part an app ever imports:
+
+```text
+                     ┌──────────────────────────────┐
+/1.0 + doorbell ◄────┤  MANAGER   (manager.rip)     │  the process you run
+                     │  watch · spawn · heartbeat   │  never touches a request
+                     └──────────┬───────────────────┘
+                                │ Bun.spawn + env
+                     ┌──────────▼───────────────────┐
+Janus ──UDS─────────►│  WORKER    (worker.rip)      │  binds the unix socket
+                     │  bind UDS · /ready · drain   │  loads your app
+                     └──────────┬───────────────────┘
+                                │ import
+                     ┌──────────▼───────────────────┐
+                     │  YOUR APP  (app.rip)         │
+                     │  import { get, read, start } │
+                     │    from '@rip-lang/server'   │  ◄── the DSL (server.rip)
+                     └──────────────────────────────┘
+```
+
+The DSL ships today; the manager and worker runtimes land next, following
+the pool coordination protocol in the Janus repository
+(`docs/20260719-002000-pool-protocol.md`). The seam is already in place:
+`start()` detects a worker environment (`WORKER_ID`/`SOCKET_PATH`) and
+hands over its fetch handler instead of opening a port, so the same
+`app.rip` runs standalone on your laptop and pooled behind Janus in
+production, unchanged.
+
+## Test
+
+```bash
+bun run test
+```
+
+The suite drives the exported fetch handler end-to-end — routing, smart
+responses, error envelopes, the full `read()` vocabulary, session/context
+helpers, `input:` schema validation with the generated OpenAPI document,
+and every built-in middleware — with no live socket.

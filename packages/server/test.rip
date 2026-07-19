@@ -1,0 +1,496 @@
+# ==============================================================================
+# server tests — the behavior contract, end-to-end through the fetch handler:
+# routing, smart responses, error envelopes, read() validation, request
+# context (session/ctx/mark/subrequest), input: schemas + OpenAPI, and the
+# built-in middleware (cors, sessions, csrf, secureHeaders, bodyLimit,
+# htmlJson) — no live socket needed
+# ==============================================================================
+
+import { test, eq, ok, throws } from '@rip-lang/testing'
+import * as mod from '@rip-lang/server'
+import { get, post, put, patch, del, all, use, prefix, before, after, onError, notFound, raw,
+         fetch as handle, App, resetGlobals, requestContext, startHandler, start,
+         read, error, notice, bail, ctx, session, subrequest, mark,
+         mimeType, errorEnvelope, openapi } from '@rip-lang/server'
+import { cors, logger, sessions, csrf, secureHeaders, bodyLimit, htmlJson } from '@rip-lang/server/middleware'
+import { readFileSync } from 'fs'
+
+req = (method, path, opts = {}) -> new Request("http://test.local#{path}", { method, ...opts })
+jreq = (method, path, body) ->
+  req method, path, { body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } }
+
+# read() against a synthetic payload, outside any HTTP machinery
+rd = (was, ...args) -> requestContext.run { data: { v: was } }, -> read('v', ...args)
+
+# ==[ Package surface ]==
+
+console.log "\nPackage"
+
+test "public entry exposes the DSL surface, named exports only", ->
+  names = Object.keys(mod)
+  for name in ['get', 'post', 'put', 'patch', 'del', 'all', 'use', 'prefix',
+               'before', 'after', 'onError', 'notFound', 'raw',
+               'start', 'startHandler', 'fetch', 'App',
+               'read', 'error', 'notice', 'bail',
+               'ctx', 'session', 'env', 'subrequest', 'mark',
+               'mimeType', 'errorEnvelope', 'openapi', 'resetGlobals']
+    ok names.includes(name), "missing export: #{name}"
+  ok not ('default' of mod), 'no default export'
+
+test "validate vocabulary rides along", ->
+  for name in ['isBlank', 'toName', 'toPhone', 'formatMoney',
+               'registerValidator', 'getValidator', 'isRawType', 'validatorNames', 'check']
+    ok typeof mod[name] is 'function', "missing re-export: #{name}"
+
+test "only @rip-lang/validate as a runtime dep; testing as the only dev dep", ->
+  pkg = JSON.parse(readFileSync("#{import.meta.dir}/package.json", 'utf8'))
+  eq Object.keys(pkg.dependencies), ['@rip-lang/validate']
+  eq Object.keys(pkg.devDependencies), ['@rip-lang/testing']
+
+# ==[ Routing ]==
+
+console.log "\nRouting"
+
+resetGlobals()
+get '/hello' -> 'hi'
+get '/html' -> '<h1>yo</h1>'
+get '/num' -> 42
+get '/obj' -> { a: 1 }
+get '/none' -> null
+get '/users/:id' -> { id: @req.param('id') }
+get '/users/:id/books/:bid' -> @req.param()
+get '/files/*' -> @req.path
+get '/maybe/:id?' -> { id: @req.param('id') ?? 'none' }
+all '/any' -> @req.method
+prefix '/api', ->
+  get '/v1/ping' -> 'pong'
+
+test! "text handler returns 200 text", ->
+  res = handle! req('GET', '/hello')
+  eq res.status, 200
+  eq res.headers.get('content-type'), 'text/plain; charset=UTF-8'
+  eq (res.text!), 'hi'
+
+test! "a string starting with < is html", ->
+  res = handle! req('GET', '/html')
+  eq res.headers.get('content-type'), 'text/html; charset=UTF-8'
+
+test! "a number stringifies as text", ->
+  res = handle! req('GET', '/num')
+  eq (res.text!), '42'
+
+test! "an object serializes as JSON", ->
+  res = handle! req('GET', '/obj')
+  eq res.headers.get('content-type'), 'application/json'
+  eq (res.json!), { a: 1 }
+
+test! "null becomes 204 No Content", ->
+  res = handle! req('GET', '/none')
+  eq res.status, 204
+
+test! "path params bind and decode", ->
+  res = handle! req('GET', '/users/42')
+  eq (res.json!), { id: '42' }
+
+test! "multiple params bind by name", ->
+  res = handle! req('GET', '/users/7/books/9')
+  eq (res.json!), { id: '7', bid: '9' }
+
+test! "wildcard matches any depth", ->
+  res = handle! req('GET', '/files/a/b/c.txt')
+  eq (res.text!), '/files/a/b/c.txt'
+
+test! "optional param matches with and without", ->
+  eq ((handle! req('GET', '/maybe/9')).json!), { id: '9' }
+  eq ((handle! req('GET', '/maybe')).json!), { id: 'none' }
+
+test! "all matches every method", ->
+  eq ((handle! req('PUT', '/any')).text!), 'PUT'
+  eq ((handle! req('DELETE', '/any')).text!), 'DELETE'
+
+test! "prefix groups routes under a base path", ->
+  eq ((handle! req('GET', '/api/v1/ping')).text!), 'pong'
+
+test! "HEAD mirrors GET status and headers with no body", ->
+  res = handle! req('HEAD', '/hello')
+  eq res.status, 200
+  eq (res.text!), ''
+
+test! "unknown path is 404", ->
+  res = handle! req('GET', '/nope')
+  eq res.status, 404
+
+test! "trailing slash matches", ->
+  eq (handle! req('GET', '/hello/')).status, 200
+
+# ==[ Error helpers ]==
+
+console.log "\nErrors"
+
+resetGlobals()
+get '/teapot' -> error 'short and stout', 418
+get '/notice' -> notice 'Try again later'
+get '/bail' -> bail()
+get '/custom-404' -> 'x'
+notFound -> @text 'lost', 404
+
+test! "error! sets status and shows the 4xx message", ->
+  res = handle! req('GET', '/teapot')
+  eq res.status, 418
+  eq (res.json!), { error: { message: 'short and stout' } }
+
+test! "notice! is always user-facing", ->
+  res = handle! req('GET', '/notice')
+  eq res.status, 400
+  eq (res.json!), { error: { notice: 'Try again later' } }
+
+test! "bail! clears the session and returns 401", ->
+  res = handle! req('GET', '/bail')
+  eq res.status, 401
+
+test! "custom notFound handler runs", ->
+  res = handle! req('GET', '/definitely-missing')
+  eq res.status, 404
+  eq (res.text!), 'lost'
+
+test "errorEnvelope masks 5xx internals", ->
+  { status, error: e } = errorEnvelope(new Error('secret db string'))
+  eq status, 500
+  eq e, { message: 'Internal Server Error' }
+
+test "errorEnvelope shows 4xx messages and issues", ->
+  { status, error: e } = errorEnvelope(Object.assign(new Error('nope'), { status: 403 }))
+  eq [status, e.message], [403, 'nope']
+  withIssues = Object.assign(new Error('Validation failed'), { status: 400, issues: [{ field: 'x' }] })
+  eq errorEnvelope(withIssues).error.issues, [{ field: 'x' }]
+
+# ==[ Filters and middleware order ]==
+
+console.log "\nFilters"
+
+resetGlobals()
+trail = []
+use (c, next) ->
+  trail.push 'mw1'
+  await next()
+  trail.push 'mw1-out'
+before -> trail.push 'before'
+after -> trail.push 'after'
+get '/flow' ->
+  trail.push 'handler'
+  'ok'
+get '/blocked' -> 'never'
+
+test! "middleware wraps before/handler/after", ->
+  trail.length = 0
+  handle! req('GET', '/flow')
+  eq trail, ['mw1', 'before', 'handler', 'after', 'mw1-out']
+
+test! "a before filter returning a Response short-circuits", ->
+  resetGlobals()
+  before (c) -> c.text('halted', 403)
+  get '/blocked' -> 'never'
+  res = handle! req('GET', '/blocked')
+  eq res.status, 403
+  eq (res.text!), 'halted'
+
+# ==[ read() — Sinatra-style parameter reading ]==
+
+console.log "\nread()"
+
+test "no context rejects loudly", ->
+  throws (-> read('v')), 'no context for read()'
+
+test "value passthrough and trim", ->
+  eq rd('  x  '), 'x'
+  eq rd(undefined), null
+  eq rd(undefined, null, 'fallback'), 'fallback'
+
+test "required ! throws a 400 with the field name", ->
+  throws (-> rd(undefined, 'int!')), 'Missing required field: v'
+
+test "miss function is called for absent values", ->
+  eq rd(undefined, 'int', -> 'made'), 'made'
+
+test "numbers", ->
+  eq rd('42', 'id'), 42
+  eq rd('0', 'id'), null
+  eq rd('-7', 'int'), -7
+  eq rd('7', 'whole'), 7
+  eq rd('-1', 'whole'), null
+  eq rd('3.14', 'float'), 3.14
+
+test "money in dollars becomes integer cents", ->
+  eq rd('$1,234.56', 'money'), 123456
+  eq rd('2.005', 'money'), 201
+  eq rd('12', 'cents'), 12
+  eq rd('007.50', 'decimal'), '7.50'
+
+test "strings and names", ->
+  eq rd('a\t\tb', 'string'), 'a b'
+  eq rd('john  smith', 'name'), 'John Smith'
+
+test "calendar dates must exist for real", ->
+  eq rd('2024-02-29', 'date'), '2024-02-29'
+  eq rd('2023-02-29', 'date'), null
+  eq rd('20240229', 'date'), '2024-02-29'
+  eq rd('14:30', 'time'), '14:30'
+  eq rd('2:30 pm', 'time12'), '2:30 pm'
+
+test "booleans", ->
+  eq rd('yes', 'truthy'), true
+  eq rd('off', 'falsy'), true
+  eq rd('on', 'bool'), true
+  eq rd('no', 'bool'), false
+  eq rd('maybe', 'bool'), null
+
+test "contact and identity", ->
+  eq rd('A@B.CoM', 'email'), 'a@b.com'
+  eq rd('ut', 'state'), 'UT'
+  eq rd('84604-1234', 'zip'), '84604'
+  eq rd('84604-1234', 'zipplus4'), '84604-1234'
+  eq rd('123-45-6789', 'ssn'), '123456789'
+  eq rd('female', 'sex'), 'F'
+  eq rd('801-555-1212', 'phone'), '(801) 555-1212'
+
+test "web and technical", ->
+  eq rd('User_1', 'username'), 'user_1'
+  eq rd('10.0.0.1', 'ip'), '10.0.0.1'
+  eq rd('AA-BB-CC-DD-EE-FF', 'mac'), 'aa:bb:cc:dd:ee:ff'
+  eq rd('https://x.io/a', 'url'), 'https://x.io/a'
+  eq rd('FFF', 'color'), '#fff'
+  eq rd('1.2.3-rc.1', 'semver'), '1.2.3-rc.1'
+  eq rd('My-Post', 'slug'), 'my-post'
+  eq rd('3, 1, 2, 3', 'ids'), [1, 2, 3]
+
+test "raw collection validators take the value untouched", ->
+  eq rd([1, 2], 'array'), [1, 2]
+  eq rd('nope', 'array'), null
+  eq rd({ a: 1 }, 'hash'), { a: 1 }
+  eq rd('{"a":1}', 'json'), { a: 1 }
+  eq rd('not json', 'json'), null
+
+test "type 'raw' skips even the trim", ->
+  eq rd('  x  ', 'raw'), '  x  '
+
+test "regex type extracts the match", ->
+  eq rd('abc123', /\d+/), '123'
+  eq rd('abc', /\d+/), null
+
+test "[min, max] constrains numbers or lengths", ->
+  eq rd('5', [1, 10]), 5
+  eq rd('50', [1, 10]), null
+  eq rd('hello', [2, 8]), 'hello'
+  eq rd('toolongforthis', [2, 8]), null
+
+test "array of strings is an enumeration", ->
+  eq rd('red', ['red', 'blue']), 'red'
+  eq rd('green', ['red', 'blue']), null
+
+test "{min, max} and {start, end} objects", ->
+  eq rd('7', { min: 1, max: 10 }), 7
+  eq rd('11', { min: 1, max: 10 }), null
+  eq rd('5', { start: 5, end: 9 }), 5
+  eq rd('4', { start: 5, end: 9 }), null
+
+test "dotted paths walk nested bodies", ->
+  v = requestContext.run { data: { patient: { name: 'Amy' } } }, -> read('patient.name')
+  eq v, 'Amy'
+
+# ==[ Request context: session, ctx, mark, subrequest ]==
+
+console.log "\nContext"
+
+resetGlobals()
+get '/whoami' ->
+  session.user = 'amy'
+  { user: session.user }
+get '/marked' ->
+  @mark = 'corr-1'
+  'ok'
+get '/sub' ->
+  inner = subrequest!({ q: 'inner' }, -> read('q'))
+  { inner }
+
+test! "session proxy reads and writes through ALS", ->
+  res = handle! req('GET', '/whoami')
+  eq (res.json!), { user: 'amy' }
+
+test! "@mark lands on the internal rip-mark header", ->
+  res = handle! req('GET', '/marked')
+  eq res.headers.get('rip-mark'), 'corr-1'
+
+test! "subrequest swaps data but keeps the context", ->
+  res = handle! req('GET', '/sub')
+  eq (res.json!), { inner: 'inner' }
+
+test "ctx and mark are null outside a request", ->
+  eq ctx(), null
+  eq mark(), null
+
+test "start() under a worker env hands over the fetch handler", ->
+  process.env.WORKER_ID = '1'
+  try
+    h = start()
+    ok typeof h is 'function'
+    ok globalThis.__ripHandler is h
+  finally
+    delete process.env.WORKER_ID
+    delete globalThis.__ripHandler
+
+# ==[ Body parsing + input: schemas + OpenAPI ]==
+
+console.log "\nBodies and schemas"
+
+Signup = schema :input
+  name! 2..10
+  age? ~integer
+
+resetGlobals()
+post '/echo-body' -> { name: read('name') }
+post '/signup', input: Signup, -> { got: @input }
+put '/form' -> { a: read('a') }
+
+test! "JSON bodies pre-parse for read()", ->
+  res = handle! jreq('POST', '/echo-body', { name: 'Zed' })
+  eq (res.json!), { name: 'Zed' }
+
+test! "form bodies pre-parse for read()", ->
+  body = new URLSearchParams({ a: 'b' })
+  res = handle! req('PUT', '/form', { body, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })
+  eq (res.json!), { a: 'b' }
+
+test! "query params reach read() too", ->
+  res = handle! req('POST', '/echo-body?name=Query', { headers: { 'Content-Type': 'application/json' }, body: '{}' })
+  eq (res.json!), { name: 'Query' }
+
+test! "input: schema rejects a bad body with structured issues", ->
+  res = handle! jreq('POST', '/signup', { name: 'x' })
+  eq res.status, 400
+  body = res.json!
+  eq body.error.message, 'Validation failed'
+  ok Array.isArray(body.error.issues) and body.error.issues.length > 0
+
+test! "input: schema parses, coerces, and lands on @input", ->
+  res = handle! jreq('POST', '/signup', { name: 'Amy', age: '30' })
+  eq (res.json!), { got: { name: 'Amy', age: 30 } }
+
+test! "invalid JSON with input: schema is a clean 400", ->
+  res = handle! req('POST', '/signup', { body: '{oops', headers: { 'Content-Type': 'application/json' } })
+  eq res.status, 400
+
+test! "GET /openapi.json reflects input-validated routes", ->
+  res = handle! req('GET', '/openapi.json')
+  eq res.status, 200
+  doc = res.json!
+  eq doc.openapi, '3.1.0'
+  ok doc.paths['/signup']?.post?.requestBody?
+
+# ==[ Middleware: cors ]==
+
+console.log "\nMiddleware"
+
+test! "cors sets allow-origin on actual requests", ->
+  resetGlobals()
+  use cors origin: 'https://a.com'
+  get '/c' -> 'x'
+  res = handle! req('GET', '/c', { headers: { Origin: 'https://a.com' } })
+  eq res.headers.get('access-control-allow-origin'), 'https://a.com'
+
+test! "cors preflight answers early OPTIONS through the shared policy", ->
+  resetGlobals()
+  use cors origin: 'https://a.com', preflight: true
+  get '/c' -> 'x'
+  res = handle! req('OPTIONS', '/c', { headers: { Origin: 'https://a.com' } })
+  eq res.status, 204
+  eq res.headers.get('access-control-allow-origin'), 'https://a.com'
+
+test! "secureHeaders stamps the standard set", ->
+  resetGlobals()
+  use secureHeaders()
+  get '/s' -> 'x'
+  res = handle! req('GET', '/s')
+  eq res.headers.get('x-content-type-options'), 'nosniff'
+  eq res.headers.get('x-frame-options'), 'DENY'
+
+test! "signed sessions round-trip through the cookie", ->
+  resetGlobals()
+  use sessions secret: 'test-secret'
+  get '/login' ->
+    session.user = 'amy'
+    'ok'
+  get '/who' -> { user: session.user ?? null }
+  login = handle! req('GET', '/login')
+  cookie = login.headers.get('set-cookie')
+  ok cookie?.startsWith('session=')
+  who = handle! req('GET', '/who', { headers: { Cookie: cookie.split(';')[0] } })
+  eq (who.json!), { user: 'amy' }
+
+test! "a tampered session cookie decodes to an empty session", ->
+  resetGlobals()
+  use sessions secret: 'test-secret'
+  get '/who' -> { user: session.user ?? null }
+  res = handle! req('GET', '/who', { headers: { Cookie: 'session=dGFtcGVyZWQ%3D--deadbeef' } })
+  eq (res.json!), { user: null }
+
+test! "encrypted sessions ship opaque v1. ciphertext", ->
+  resetGlobals()
+  use sessions secret: 'test-secret', encrypt: true
+  get '/login' ->
+    session.token = 'sk-hidden'
+    'ok'
+  get '/who' -> { token: session.token ?? null }
+  login = handle! req('GET', '/login')
+  cookie = login.headers.get('set-cookie')
+  ok decodeURIComponent(cookie).includes('v1.')
+  who = handle! req('GET', '/who', { headers: { Cookie: cookie.split(';')[0] } })
+  eq (who.json!), { token: 'sk-hidden' }
+
+test "sessions with encrypt but no secret rejects at install", ->
+  throws (-> sessions(encrypt: true)), 'requires a secret'
+
+test! "csrf blocks unsafe requests without a token and issues one on GET", ->
+  resetGlobals()
+  use csrf secret: 'csrf-secret'
+  get '/page' -> 'x'
+  post '/act' -> 'did'
+  blocked = handle! req('POST', '/act')
+  eq blocked.status, 403
+  page = handle! req('GET', '/page')
+  cookie = page.headers.get('set-cookie')
+  ok cookie?.startsWith('csrf_token=')
+  rawValue = decodeURIComponent(cookie.split(';')[0].slice('csrf_token='.length))
+  token = rawValue.split('.')[0]
+  allowed = handle! req('POST', '/act', { headers: { Cookie: cookie.split(';')[0], 'X-CSRF-Token': token } })
+  eq allowed.status, 200
+
+test! "bodyLimit rejects oversize bodies with 413", ->
+  resetGlobals()
+  use bodyLimit maxSize: 10
+  post '/up' -> 'ok'
+  res = handle! req('POST', '/up', { body: 'x'.repeat(50), headers: { 'Content-Length': '50', 'Content-Type': 'text/plain' } })
+  eq res.status, 413
+
+test! "htmlJson renders JSON as html for iOS navigations only", ->
+  resetGlobals()
+  use htmlJson
+  get '/j' -> { a: 1 }
+  ios = handle! req('GET', '/j', { headers: { 'User-Agent': 'iPhone Safari', 'Accept': 'text/html' } })
+  ok ios.headers.get('content-type').includes('text/html')
+  api = handle! req('GET', '/j')
+  eq api.headers.get('content-type'), 'application/json'
+
+# ==[ Utilities ]==
+
+console.log "\nUtilities"
+
+test "mimeType maps extensions and defaults to octet-stream", ->
+  eq mimeType('a/b.html'), 'text/html; charset=UTF-8'
+  eq mimeType('x.wasm'), 'application/wasm'
+  eq mimeType('mystery.bin'), 'application/octet-stream'
+
+test "App resets globals and returns a fresh handler", ->
+  h = App ->
+    get '/fresh' -> 'yes'
+  ok typeof h is 'function'
+  resetGlobals()
