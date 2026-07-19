@@ -33,43 +33,38 @@
 // it stops rip SUPPRESSING the implicit-any family (SUPPRESSED_TS_CODES).
 // tsgo emits those diagnostics today and mapTsDiagnostic drops them — so an
 // unchecked `any` region is invisible to 3 and to `rip check`, and reads as
-// a clean pass. Dimension 6 is the only gauge that can go red for it: every
-// render branch/loop body is typed through an untyped `ctx`, so its whole
-// interior is unchecked.
+// a clean pass. Dimension 6 is the only gauge that can go red for it. The
+// compiler-emitted names user expressions type through — the render
+// fragment's context parameter and loop item/index params, event handler
+// params (inline casts, named-ref pre-scan annotation), the schema
+// transform's `it` — carry face types now, each gated where it is enforced
+// (check.test.js's branch-body/loop-row and handler cases;
+// schema-types.test.js's transform case), and this dimension is what
+// discovers the NEXT such name the day an emission grows one.
 //
-// THIS DIMENSION IS EXPECTED RED, and that is the point — it is a progress
-// gauge, not a gate. Do not "fix" it by suppressing. But do not read it as
-// distance to a fix either: GREEN IS A SUPERSET OF THE HOLES. It requires the
-// generated scaffolding to be typed and 06 to be annotated, and neither of
-// those closes a hole. Green implies the holes are gone; the holes being gone
-// does NOT imply green. (No ratio is quoted here on purpose — the run PRINTS
-// the live one, and a hardcoded count goes stale the day a fixture is added,
-// while the dimension has not changed.)
+// THIS DIMENSION RUNS CLEAN, AND CLEAN IS THE CONTRACT. Two curation
+// rules keep it that way without silencing anything:
 //
-// READ THE FAILURES, NOT THE RATIO — THREE roots, and only two are holes
-// (counts driven 2026-07-16, `rip check` under rip.strict, per fixture):
+//   · Author-annotatable shapes (bare optionals, unannotated params) are
+//     legal permissive rip that strict correctly asks annotations for —
+//     they live OUTSIDE this corpus rather than as permanent red
+//     (face-dts-agreement.test.js pins the bare-optional emission
+//     paths).
+//   · An uninferrable-by-construction param maps its implicit-any to the
+//     source line that OWNS it, where a directive can acknowledge it:
+//     09's `for item in itemsz` loops over a deliberate typo, so no
+//     element type exists to infer and the factory's item param stays
+//     honestly bare — but it marks with the LOOP node, so its TS7006
+//     lands on the loop line and rides the same `@ts-expect-error` that
+//     acknowledges the typo. Never a silencing `any` in the emitter.
 //
-//   · A HOLE — a compiler-emitted name that USER EXPRESSIONS type through, so
-//     everything reached by it is unchecked and the author cannot annotate
-//     their way out. 09-components `ctx` (30 of its 184), the render
-//     fragment's context parameter: every branch/loop body is typed through
-//     it. 10-validation `it` (2 of its 2), the implicit lambda parameter a
-//     `schema` block injects. These are the two that matter.
-//   · GENERATED SCAFFOLDING — compiler-emitted, but NOT a hole. 09's
-//     `_elN`/`_tN`/`__fr`/`target`/`anchor`/`detaching`/`i`: 154 of its 184.
-//     No user expression types through them, so typing `_el2` checks nothing
-//     anyone wrote; it only moves this number. (~50 are `let _el2, _t0;`
-//     declared-then-assigned — evolving-`let` hoist split in our OWN output,
-//     the shape declare-in-place already solved for user code.)
-//   · AUTHOR-ANNOTATABLE (working as designed). 06-functions `title?`/`asOf`
-//     are untyped optional params the author simply did not annotate —
-//     gradual typing permitting exactly what it promises, and strict
-//     correctly asking for the annotation. A fixture edit, not a fix.
-//
-// So a rising score means three different things and the note under each
-// failure says which. Annotating 06, or typing the scaffolding, would move
-// the number without closing a single hole — do not mistake that for
-// progress. Conversely: type `ctx` tomorrow and 09 still reports 154.
+// A red row here is therefore a DISCOVERY, not routine: a
+// compiler-emitted name user expressions type through wants a face type
+// at its emission seam (the closed class above), an uninferrable param
+// wants its diagnostic mapped to the line the author can govern, or a
+// fixture grew a legal-permissive shape that belongs outside the
+// corpus. Do not fix a red row by suppressing; read the failure's note,
+// which names what is actually there.
 //
 // B · THE HOVER AUDIT (--hover / --all) — hover every top-level
 //   declaration through the editor server and judge each answer against
@@ -1460,7 +1455,7 @@ if (RUN_MAIN) {
       if (r.diags?.length) for (const d of r.diags) console.log(dim(`          ${d.range.start.line}:${d.range.start.character} [TS${d.code}] ${d.message}`));
       if (r.twinErrs?.length) for (const e of r.twinErrs) console.log(dim(`          twin: ${e}`));
       // The implicit-any evidence is bulky and REPETITIVE by nature: ONE
-      // untyped `ctx` fans out into a diagnostic per member access, all
+      // untyped param fans out into a diagnostic per member access, all
       // reported at the SAME source position. Showing the first N raw rows
       // therefore spends every line on one site and teaches the reader nothing
       // about the spread — so collapse by position first, and say both what

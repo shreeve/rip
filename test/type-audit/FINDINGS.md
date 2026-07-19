@@ -6,19 +6,19 @@
 
 **Why this file exists at all.** `bun test` verifies rip against **rip**: every expectation in it was authored, so it can only ever check what its author already knew — which is why the suite was green through every finding recorded here, and why almost every body below carries a *"why the suite missed it"* paragraph. The type audit verifies rip against **TypeScript**, using oracles this repo does not control: the hand-written twin, whose answer *is* TypeScript's; the `.rip` source's own grammar; the fixtures' own `@ts-expect-error` markers. That is why it can discover, why it cannot be a pass/fail gate (a differential against an outside reference has legitimate divergences as well as real gaps), and why its output is a categorized score rather than a boolean. The findings are that diff, written down.
 
-**The Gate column is load-bearing, and it is the exit.** ✅ **Verified means a named gate runs and passes** — nothing else earns it, not a code reading, not a scratch script, not a plausible argument. Read in both directions that is the whole membership contract: a finding with no gate cannot be Verified however obviously fixed it looks, and a finding whose gate *is* green does not stay. **This file is the queue of constraints not yet expressible as a passing test.** Every claim here *is* reachable that way, because each is a compiler output or a server payload and LSP carries all of them — a `textDocument/hover` response *is* the text VS Code renders; the reflex to call a claim "editor-only" is usually an unwritten test, not an unreachable one. Some gates are red *by design* (#20, #24, #25, #21, #8) and their rows stay until they flip — read each row's Gate cell, because a red gate does not always track only its own finding (#20's does not). One row (#23) has no gate because nothing about it fails: its exit is a ruling rather than a green run, unless the open question in its body answers yes and hands it an ordinary gate.
+**The Gate column is load-bearing, and it is the exit.** ✅ **Verified means a named gate runs and passes** — nothing else earns it, not a code reading, not a scratch script, not a plausible argument. Read in both directions that is the whole membership contract: a finding with no gate cannot be Verified however obviously fixed it looks, and a finding whose gate *is* green does not stay. **This file is the queue of constraints not yet expressible as a passing test.** Every claim here *is* reachable that way, because each is a compiler output or a server payload and LSP carries all of them — a `textDocument/hover` response *is* the text VS Code renders; the reflex to call a claim "editor-only" is usually an unwritten test, not an unreachable one. Some gates are red *by design* (#21, #8) and their rows stay until they flip — read each row's Gate cell, because a red gate does not always track only its own finding. One row (#23) has no gate because nothing about it fails: its exit is a ruling rather than a green run, unless the open question in its body answers yes and hands it an ordinary gate.
 
 **A fix closes the root, and the test is where the datum lands** — into the **face**, where every consumer reads it, or into the one response. A gate cannot tell them apart: a mitigation makes its payload correct without supplying the datum that was missing. The Tier 3 probe (#23) feeds tsgo's answers back through `compile()` as pins, so **a query is not the tell** — across an out-of-process checker it is the only route to a type at all; `enrichEvolvingAnyHover` ([server.js](../../packages/vscode/src/server.js)) returns a reference's hover in place of an `any` and touches nothing else. Same shape, opposite verdicts. The other tell is scope: one root leaves four surfaces wrong in #21, so greening one closes nothing, and **a mitigation's residue is not the finding** — a row restated around what the workaround could not reach reads as progress, and is how a workaround becomes the architecture. Nor is the root always in the compiler (#13's is `generatedTsconfig`, #16's is inside tsgo): *upstream* is where to look, not the rule. Diagnose the root, state it in the body, and make the gate measure **that** — one aimed at a symptom can be satisfied by a patch, and eventually is.
 
 **IDs are doc-internal** — they name a row so another row can cite it, and nothing outside this file cites one: a row is engineered to disappear, so a pointer to it from code, which is permanent, is a reference built to rot. [findings.test.js](../toolchain/findings.test.js) enforces that and explains the rest when it fails. Never reused or renumbered — the commit that filed a finding is its durable provenance, and reusing a number makes that log lie rather than merely dangle.
 
-**Tags group by root** — `compiler` (parser/emitter) · `strict` (implicit-any & safety) · `directive` (the `@ts-expect-error` family) · `hoist` · `config` · `editor` · `capability`. They are **labels, not partitions**: a row that shares a fix with two roots carries both. #20 is an implicit-any complaint (`strict`) whose fix is an emitter seam (`compiler`), and would be torn in half by any scheme that filed each row in exactly one bucket. **Order is a signal, not a container.**
+**Tags group by root** — `compiler` (parser/emitter) · `strict` (implicit-any & safety) · `directive` (the `@ts-expect-error` family) · `hoist` · `config` · `editor` · `capability`. They are **labels, not partitions**: a row that shares a fix with two roots carries both. #19 is a directive complaint (`directive`) whose fix is an emitter placement seam (`compiler`), and would be torn in half by any scheme that filed each row in exactly one bucket. **Order is a signal, not a container.**
 
 **Conventions.** Code is cited by file and symbol, **never by line number** — greppable, and survives an edit above it; when a cited symbol is deleted, say so at the citation. Gates are cited by name and by whether they are green, **never by pass count** — counts drift when a fixture is added, going stale while the finding has not changed. **Positions** are LSP coordinates (**1-based line, 0-based column**), what the gates assert and the editor consumes; `rip check` prints 1-based/1-based, so the same diagnostic reads one column higher there.
 
 **vs v3.** A **vs v3** line records what the typed editor did before the tsgo/LSP broker replaced v3's in-process LanguageService — the root almost every gap here traces back to. Each was established by driving v3, still reachable at 3.17.5 (`~/Code/shreeve/rip-lang`). It survives on an open row because it argues about a fix not yet made; it dies with the body when the row closes. This repo is **v4, cleaned up**; "v4" in a body means the code here.
 
-**Re-driving.** `bun run test:all` — green as of 2026-07-16. It sets `RIP_EXTENDED=1` itself, the tier where the tsc-backed gates spawn the repo's pinned TypeScript, resolved from the workspace install ([tsc.js](../support/tsc.js) `resolveTsc`) rather than PATH, throwing loudly rather than skipping when it is missing. An editor-path change is not live in VS Code until `bun run install-vscode` from `packages/vscode/` — the running extension is the installed `.vsix`, not the working tree. The audit itself is `bun run type-audit` (`--help` for what each of its three audits is judged against, and for the one trap worth knowing before you touch `--update-hovers`). The wider editor surface — completions, definition, references, rename, code actions — is covered by the extension's own suite in `packages/vscode/test/`, not here.
+**Re-driving.** `bun run test:all` — green as of 2026-07-18. It sets `RIP_EXTENDED=1` itself, the tier where the tsc-backed gates spawn the repo's pinned TypeScript, resolved from the workspace install ([tsc.js](../support/tsc.js) `resolveTsc`) rather than PATH, throwing loudly rather than skipping when it is missing. An editor-path change is not live in VS Code until `bun run install-vscode` from `packages/vscode/` — the running extension is the installed `.vsix`, not the working tree. The audit itself is `bun run type-audit` (`--help` for what each of its three audits is judged against, and for the one trap worth knowing before you touch `--update-hovers`). The wider editor surface — completions, definition, references, rename, code actions — is covered by the extension's own suite in `packages/vscode/test/`, not here.
 
 **How gates go blind.** Every rule below was earned by a green suite sitting through a real defect. They are the failure modes to write a *new* gate against — the findings are their worked examples, not the other way round.
 
@@ -27,7 +27,7 @@
 - **Position fidelity is not content fidelity.** A gate can assert a payload lands in the right place and stay green through the entire life of a defect in what it *says*. The semantic-token surface was watched for position and unwatched for meaning; no test had ever asserted a modifier (#15).
 - **A floor is not a description.** `verdict` counts Error-severity diagnostics only, so everything above that floor — the hint and suggestion classes — is invisible to it, and its silence is a statement about what it counts rather than about the payload (#17).
 - **Driven is not asserted.** Exercising a feature only at the position where it works, never at the position where it is used, is the sharpest form of this: completion is tested at `msg.sub` and signature help at a closed `pick(1, 2)` — the two states that parse, and the two states nobody is in when they need the feature (#22).
-- **A fixture's prose is not a gate.** 09-components.rip carries two section headers asserting contracts nothing checks — that render-block expressions are type-checked (#20), and that event handler params are typed from `__RipEvents` (#25, whose mechanism does not exist in this repo at all). Both were ported from v3 and have been read as coverage ever since. A comment claiming a behavior is a claim to *test*, not evidence.
+- **A fixture's prose is not a gate.** 09-components.rip carried two section headers asserting contracts nothing checked — that render-block expressions were type-checked (#20), and that event handler params were typed from a `__RipEvents` mechanism that did not exist in this repo at all (#25). Both were ported from v3 and read as coverage for months, until the contracts were made real and gated in check.test.js. A comment claiming a behavior is a claim to *test*, not evidence.
 
 ## The road
 
@@ -35,9 +35,6 @@ Ordered by **how many rip users a gap reaches**, then by how badly the editor mi
 
 | # | Finding | Tags | Gate |
 | --- | --- | --- | --- |
-| [20](#20-everything-inside-a-render-branch-is-unchecked) | Render branch/loop bodies unchecked (`ctx: any`) | `strict`, `compiler` | audit `strict` — red, but **tracks more than this finding** |
-| [24](#24-a-schema-blocks-implicit-it-parameter-is-untyped) | A `schema` block's implicit `it` is untyped | `strict`, `compiler` | audit `strict` (10) — **red by design**, and 10's rows are exactly this |
-| [25](#25-event-handler-parameters-get-no-event-type) | Event handler parameters get no event type | `strict`, `compiler` | audit `strict` (09) — red; 9 of 09's rows |
 | [21](#21-an-identifier-read-carries-no-source-span) | Identifier reads carry no source span — hover, definition, diagnostics, tokens | `editor`, `compiler` | `census` — **red by design**, the root all four surfaces share; `member` + `survival` on the token surface |
 | [22](#22-completion-and-signature-help-fail-on-an-incomplete-expression) | Completion & signature help fail on an incomplete expression | `editor`, `compiler` | **none** — a content audit for each would catch them; neither built |
 | [8](#8-auto-import-is-closure-scoped) | Auto-import closure-scoped | `capability` | `auto-import` — the gap is an **expected failure** |
@@ -47,117 +44,17 @@ Ordered by **how many rip users a gap reaches**, then by how badly the editor mi
 | [23](#23-the-tier-3-pin-probe-cannot-be-retired-by-more-declare-in-place) | Pin probe can't be retired by more declare-in-place | `hoist` | **none while the probe stands** — nothing fails; one open question could hand it a gate |
 | [16](#16-library-globals-lose-the-defaultlibrary-modifier) | Library globals lose `defaultLibrary` | `editor` | **none, and none is honest** — upstream; a naive gate is platform-dependent |
 
-**Everything down to #8 reaches every rip user — including one who never annotates anything.** Permissive mode still infers, so `count := 0` is a `number` whether or not you asked for one, and every hole above is mode-independent: driven 2026-07-17 with no `rip.strict` and nothing annotated, a bad member access is caught at render top level and **silent** one indent deeper (#20), a garbage chain through a `schema` block's `it` (#24) or an event handler's `e` (#25) raises nothing at all. **The `strict` tag marks where a root is, not who it hurts** — it is there because the implicit-any dimension is the only instrument that can see these, not because only a strict project suffers them.
+**Everything down to #8 reaches every rip user — including one who never annotates anything.** Permissive mode still infers, so `count := 0` is a `number` whether or not you asked for one, and every gap above is mode-independent.
 
-**Within that band the axis is *silently wrong* over *visibly missing*.** #20, #24 and #25 rank first: they let code you wrote go unchecked while the editor looks clean — the worst thing an editor can do. #21 next — it never lets a bug through (the check is sound; only the answer's *position* is wrong), but hover names the wrong symbol without hedging, which is silent in the same way, and it reaches 31% of medlabs' identifier reads. #22 is the most *felt*, wrong at every dot; #8 fails visibly and harmlessly.
+**Within that band the axis is *silently wrong* over *visibly missing*.** #21 ranks first — it never lets a bug through (the check is sound; only the answer's *position* is wrong), but hover names the wrong symbol without hedging, the closest a sound checker gets to lying, and it reaches 31% of medlabs' identifier reads. #22 is the most *felt*, wrong at every dot; #8 fails visibly and harmlessly.
 
 **Below #8 the audience collapses.** #19 and #18 eat real errors, but only for someone writing directives — medlabs writes zero. #13 mis-resolves config, but only in a monorepo. #23 reaches nobody: the probe is correct and the editor is right. **#16 is blocked**, not deprioritized — it sits last because no amount of work here moves it, not because it matters least.
 
-**#20, #24 and #25 are not, together, "the distance to `rip.strict` running clean."** Of the 188 strict errors across the corpus, those three are 55; the rest are generated scaffolding (131) and two author-annotatable params in 06. Closing every hole here leaves the `strict` dimension red. See #20's table.
+**The audit's `strict` dimension runs clean, and clean is now its contract.** Author-annotatable shapes (bare optionals) are curated out of the corpus (face-dts-agreement pins their emission paths), and an uninferrable loop item's implicit-any maps to the loop line its author can govern with a directive — so a red row is a discovery, the *next* compiler-emitted untyped name, not routine residue. The runner's own header states the curation rules.
 
 **The forced edge:** #19 lands before #18. Narrowing the directive's range (#18) makes the inline render-block directive the only way to acknowledge an error inside a render element, and today that hatch works only by accident — the face never receives it (#19). #19 ranks here on #18's severity, not its own; alone it is latent.
 
-**#20, #24 and #25 are one class, split by root.** Each is a parameter the compiler emits untyped, with user expressions typing through it, so everything it reaches is unchecked. Separate rows because the roots and the fixes differ — the render fragment's context parameter and loop signature (#20), the schema block's injected lambda parameter (#24), the event handler's parameter (#25). #20 and #24 name something the author never wrote and cannot annotate; #25's `e` the author *did* write, but the fixture's own contract says they should not have to.
-
 ## Findings
-
-### 20. Everything inside a render branch is unchecked
-
-Move an expression one level inside any `if` / `for` / `switch` in a render block and TypeScript stops seeing it. Same expression, same component, one indent apart:
-
-```rip
-render                              render
-  div                                 div
-    span count.toUpperCase()            if label
-                                          span count.toUpperCase()
-
-→ TS2339, caught                    → SILENT
-```
-
-`count` is a `number`. At render top level the bad member access is a hard error; inside a branch body it is invisible — to the editor and to `rip check` alike.
-
-**Status.** ⬜ **Open** — no fix. **Gated, but the gate tracks more than this finding** (2026-07-14): the audit's sixth dimension, `strict` (`bun run type-audit`), runs `rip check` over the corpus with `rip.strict` on and demands zero errors. It names this in its evidence — `09-components.rip … [TS7006] Parameter 'ctx' implicitly has an 'any' type` — but **it will not go green when this closes**, and that is not a defect in the finding, it is the dimension's real scope. See the cost below.
-
-That dimension exists because nothing else could see this. `verdict` demands zero Error-severity diagnostics, so an unchecked region is indistinguishable from a clean one — *silence is what passing looks like* — and `verdict` already runs under the strict **tsconfig**, which is a different switch entirely: tsgo emits the `TS7006` today and `mapTsDiagnostic` **drops** it (`SUPPRESSED_TS_CODES`). **The two holes compound: the implicit-any suppression hides the symptom that would have exposed this**, and un-suppressing it is the whole content of the dimension.
-
-**Read its failures, not its ratio — four roots, and only two are this finding.** Driven 2026-07-16, `rip check` under `rip.strict`, counted per name:
-
-| root | where | count | is it a hole? |
-| --- | --- | --- | --- |
-| **the context parameter** | 09's `ctx` | **30** | **yes — this finding.** User expressions type through it |
-| **the loop factory's parameters** | 09's `item`/`opt`/`i`/`__item`/`__opt`/`__i` | **14** | **yes — this finding too**, and *not* costed below |
-| event handler parameters | 09's `e` | 9 | yes — #25, a different root |
-| generated scaffolding | 09's `__fr`/`_elN`/`_tN`/`target`/`anchor`/`detaching`/`e_` | 131 | **no.** Generated names in generated code; typing `_el2` checks nothing a user wrote |
-| the schema lambda | 10's `it` | 2 | yes — #24, a different root |
-| author-annotatable | 06's `title?`, `asOf` | 2 | no. Gradual typing permitting exactly what it promises |
-
-09 carries 184 (30 + 14 + 9 + 131), and the dimension goes green only when the scaffolding is typed *and* 06 is annotated — neither of which closes a hole. **Do not read the ratio as distance to this fix.**
-
-**The loop parameters are this finding's second half.** A loop block's factory is `create_block_0(ctx, item, i)` and its patch is `p(ctx, __item, __i)` — so `item`/`i` are the *generated signature's* parameters, which happen to carry the user's loop name. Same emitter seam as `ctx`, same untyped emission. They are a real hole: `for opt in options` over a declared `@options?: TOption[]` still leaves `opt` an implicit `any`, so every member access through it is unchecked. (`item` at 09's `for item in itemsz` is *not* evidence — `itemsz` is a deliberate typo the fixture covers with a directive, so nothing could infer an element type there. `opt` at `for opt in options` is the honest case.)
-
-*(Aside worth its own look: much of the 131 is `let _el2, _t0;` declared-then-assigned — evolving-`let` hoist split in the emitter's *own* output, the same shape declare-in-place already solved for user code.)*
-
-**Driven** (2026-07-14), one expression relocated, everything else held fixed:
-
-| where `count.toUpperCase()` sits | `rip check` |
-| --- | --- |
-| render top level | **caught** — `TS2339` |
-| inside an `if` branch | **silent** |
-| inside a `for` row | **silent** |
-| inside a `switch` arm | **silent** |
-
-**Root (code).** A branch/loop body lowers to a **fragment**, and the fragment's context parameter is emitted **untyped** — [emitter.js](../../src/emitter.js), the fragment record's `self` (minted `ctx`) and the `p(ctx)` / factory signatures built from it. The face reads `p(ctx) { __effect(() => { _t0.data = ctx.count.value.toUpperCase() }) }`, so `ctx` is an implicit `any` and every member access through it is unchecked. The diagnostics that would have said so are exactly the implicit-any family rip suppresses: under `rip.strict` the face reports `TS7005`/`TS7006` — complaints about the *implicitness*, never the `TS2339` underneath.
-
-**Scope.** Conditions, discriminants and iterables ARE checked — `if labelz`, `switch statusz`, `for item in itemsz` all fire (they are emitted in component scope, not through `ctx`), which is why [09-components.rip](fixtures/09-components.rip)'s typo directives are genuinely used. It is the **bodies** that go dark. So the checked/unchecked boundary runs straight through the middle of a render block, exactly where a reader would assume it does not.
-
-**Cost — for `ctx`, driven, and it is three lines of type syntax** (2026-07-16). **This prices the context parameter only.** The loop factory's `item`/`i` are the same seam but not the same problem: `ctx` has a type already sitting in scope, while `item` needs the *element type of the iterable*, inferred at the emitter from a collection expression that lives in a different scope. Not costed — do not read the number below as the price of the whole finding.
-
-`ctx` *is* the component instance: the face calls `this.create_block_0(this)` and `currentBlock.p(this)`. So the factory takes TypeScript's polymorphic `this` type, and a TS-only alias carries it across the object-literal boundary — necessary because `p` **shadows** the factory's parameter and sits inside a returned literal, where `this` would mean the block:
-
-```ts
-create_block_0(ctx: this) {
-  type __Self = typeof ctx;            // TS-only; a JS capture would break the strip gate
-  return { p(ctx: __Self) { … } }
-}
-```
-
-Driven against the pinned tsc on the minimal relocation case: the patched face reports `TS2339: Property 'toUpperCase' does not exist on type 'number'` where the unpatched face is clean — **the fix closes the `ctx` hole**. Re-driven on the loop shape (`p(ctx, __item, __i)`, where `ctx` routes through `__reconcile` as a value): same patch, same result. *Both probes read through `ctx`, never through `item` — so they establish the `ctx` half and say nothing about the loop parameters.* **No new machinery** — the emitter already emits TS-only annotations in this exact scaffolding (`let currentBlock: any = null`, `(this as any)._first`), and both shapes the fix needs (a param annotation, a whole `type` statement) are already in the recorded region vocabulary, so strip parity holds by construction. Scale: **15 block factories in the whole corpus, all in 09**, from the fragment emission site in [emitter.js](../../src/emitter.js) — one seam, not fifteen edits.
-
-**Why the suite missed it.** [09-components.rip](fixtures/09-components.rip) `RenderCondTest` tests every branch form — and every body it puts inside them is a string literal (`span 'label'`, `span 'ready'`, `span 'list'`), which cannot carry a type error. The fixture proves the *conditions* are checked and says nothing about the bodies, while its section header claims render-block expressions are type-checked generally.
-
-**vs v3** — **not established.** v3 is re-drivable (3.17.5, `~/Code/shreeve/rip-lang`); nobody has put a bad expression inside a v3 render branch. Worth settling before assuming this is inherited rather than v4 drift.
-
-### 24. A schema block's implicit `it` parameter is untyped
-
-A `schema` block injects an implicit lambda parameter `it` (`id! -> it.Id`) and emits it **untyped**, so every member access through it is an unchecked `any`. Same class as #20's `ctx`: a name the user never wrote, cannot see, and cannot annotate — so no amount of author diligence closes it.
-
-**Status.** ⬜ **Open** (2026-07-16) — no fix, **gated red by design** by the audit's `strict` dimension, which names it in its evidence: `10-validation.rip … [TS7006] Parameter 'it' implicitly has an 'any' type` (driven 2026-07-16, `bun run type-audit`). It goes green when the parameter carries a type.
-
-**One class with #20, two findings.** `ctx` is the render fragment's context parameter in the components lowering, `it` is the schema block's injected lambda parameter. Different roots, different fixes, different subsystems.
-
-**This row's gate is exact, unlike #20's.** 10-validation's *only* two strict errors are these two `it` sites, so for this fixture the dimension really does go green when the hole closes. That is a property of 10, not of the dimension — 09 carries 131 scaffolding errors that no finding will ever close. Same sentence, true here and false there; only counting per fixture told them apart.
-
-**Driven** (2026-07-17) — permissive mode, no `rip.strict`, nothing annotated: `id! -> it.Id.toUpperCase().nonsenseMethod()` type-checks **clean**. A garbage member chain through `it` raises nothing, so the region really is unchecked rather than merely un-annotated, and it is unchecked for every rip user — the `strict` tag marks this row's root, not its audience.
-
-### 25. Event handler parameters get no event type
-
-An event handler's parameter is emitted untyped, so `e` is an implicit `any` and every member access through it goes unchecked — `e.clientX` on a submit event raises nothing. [09-components.rip](fixtures/09-components.rip) documents the opposite contract, in its own comments:
-
-> `@click: (e) -> ...` — inline, contextual typing from `__RipEvents`
-> `@submit: @handleSubmit` — named, stub injects `HTMLElementEventMap` type
-> The stub pre-scans the render block for `@event: @method` bindings and annotates the first untyped parameter with the event type.
-
-**None of that machinery exists here** (driven 2026-07-16). `__RipEvents` appears nowhere in this repo *except those two comment lines*. `HTMLElementEventMap` appears nowhere in `src/` or `packages/*/src/`. And the face emits the opposite of the claim — the companion interface declares `handleSubmit(e: any): any` and the class method emits a bare `handleSubmit(e) {`, so the parameter is not merely un-inferred, it is explicitly widened.
-
-**Status.** ⬜ **Open** (2026-07-16) — no fix. **Gated** by the audit's `strict` dimension: 9 of 09's 184 rows are `Parameter 'e' implicitly has an 'any' type`, at the named-method definitions (`handleSubmit`, `handleClick`) and at the inline handlers alike. `e` is the one compiler-untyped name in 09 that the *user* wrote, which is what separates this row from #20.
-
-**The comment is v3's, ported verbatim.** `__RipEvents` is real in v3: rip-lang 3.17.5's `test/check.test.js` describes injecting "the event type (matching `__RipEvents`), rather than left to TS contextual typing," and v3's own `test/types/09-components.rip` carries these same comment lines. The fixture was ported; the mechanism was not. It has been asserting the contract by comment ever since.
-
-**Driven** (2026-07-17), permissive mode, no `rip.strict`: `(e) -> e.totallyNotAnEventProperty.deeper()` type-checks **clean**, so the parameter is unchecked for every rip user, not only a strict project. **And the author can annotate their way out** — `(e: SubmitEvent) -> e.totallyNotAnEventProperty` raises `TS2339`, while a real `SubmitEvent` member stays clean. That is what separates this row from #20 and #24 and why it ranks under them: a working escape hatch exists, so this is a missing convenience rather than a hole the author is trapped in. The fixture's own contract still says they should not need the hatch.
-
-**Not established** — whether v3 actually types `e` (its `check.test.js` says so; nobody has driven it). Re-drivable at 3.17.5 (`~/Code/shreeve/rip-lang`); worth settling before assuming this is v4 drift.
-
-**Why the suite missed it.** The same disease as #20, in the same fixture: a section header asserting a contract nothing tests. `verdict` cannot see it — an `any` parameter is legal TypeScript and produces no Error-severity diagnostic — and only `strict` reports it. **09-components.rip now has two false section headers**, this one and `RenderCondTest`'s, both inherited from v3, both claiming a contract the evidence contradicts. A fixture's prose is not a gate, and this corpus has been treating it as one.
 
 ### 22. Completion and signature help fail on an incomplete expression
 
@@ -261,7 +158,7 @@ An identifier READ gets no mapping row of its own — it inherits the **cover** 
 
 The diagnostics row needs a *bad* name — a resolving `total` raises nothing to mis-place — so it reads `totalz`; the other three need a resolving one. Same construct, same cover, same collapse.
 
-Checking itself is **sound** — the same diagnostics fire with the same codes, and the compiled JS is unaffected; only *where* an answer lands is wrong. That is what keeps this under #20: it misleads, it does not let a bug through.
+Checking itself is **sound** — the same diagnostics fire with the same codes, and the compiled JS is unaffected; only *where* an answer lands is wrong. It misleads, it does not let a bug through — which is what would rank it under any unchecked-code hole, and what still separates it from everything below it.
 
 **Two triggers, each sufficient alone** (driven, one variable at a time, same read):
 
@@ -385,3 +282,6 @@ Verified, and gone. **The gate is the record** — each row's constraint is stat
 | 14 | Unused `@ts-expect-error` silently swallowed | `check` |
 | 15 | Reactive `:=` bindings tagged `readonly` | `semantic-tokens`, token audit's `readonly` invariant |
 | 17 | A directive swallows the unused-local fade | `editor-features` |
+| 20 | Render branch/loop bodies unchecked (`ctx`, loop items) | `check`'s typed-factory-params case; audit `strict` (09's ctx/loop classes) |
+| 24 | A `schema` block's implicit `it` untyped | audit `strict` (10); `schema-types`' transform case |
+| 25 | Event handler parameters get no event type | `check`'s handler case; `dom-vocab-lib` |

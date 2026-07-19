@@ -90,6 +90,83 @@ describeExtended('rip check: type diagnostics over the real server', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
+  test('a render branch body and a loop row are type-checked through the typed factory params', () => {
+    // A branch/loop body lowers to a block factory; the face types the
+    // factory's self param `: this` (carried into the handle's p() by
+    // a face-only alias) and the loop item from the iterable's element
+    // type, so a bad member access INSIDE the branch or row reports
+    // exactly like one at render top level — in PERMISSIVE mode, on
+    // the user's own expression. The errors drive BARE, no directive:
+    // an inline `# @ts-expect-error` on an element line inside a
+    // render block never reaches the face, so a directive-covered
+    // fixture would pin rip's fallback suppression, not the checking.
+    const src = [
+      'type TOption = { id: number, label: string }',
+      '',
+      'export Gotcha = component',
+      '  @options?: TOption[]',
+      "  label := ''",
+      '  count := 42',
+      '',
+      '  render',
+      '    div',
+      '      if label',
+      '        span count.toUpperCase()',
+      '      for opt in options',
+      '        li opt.label.bogusMethod()',
+      '',
+    ].join('\n');
+    const dir = workspace({ 'c.rip': src });
+    try {
+      const r = check(dir);
+      expect(r.status).toBe(1);
+      expect(r.stdout).toContain('c.rip:11:20 - error'); // `toUpperCase`, inside the branch body
+      expect(r.stdout).toContain("Property 'toUpperCase' does not exist on type 'number'");
+      expect(r.stdout).toContain('c.rip:13:22 - error'); // `bogusMethod`, through the typed loop item
+      expect(r.stdout).toContain("Property 'bogusMethod' does not exist on type 'string'");
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
+  test('event handler params carry the event type — inline and named-method refs alike', () => {
+    // The face types both handler shapes from HTMLElementEventMap: a
+    // literal ≤1-param handler through the typed cast on the handler
+    // expression, and a `@event: @method` ref by annotating the
+    // METHOD's first bare param (the render tree is pre-scanned for
+    // the bindings). A garbage member through `e` reports in
+    // PERMISSIVE mode; the real event surface stays clean, `e.target`
+    // reads stay deliberately unchecked (`target: any` — the event
+    // may have bubbled from any descendant), and an author-annotated
+    // param is never overridden.
+    const src = [
+      'export Handlers = component',
+      '  count := 0',
+      '',
+      '  handleSubmit: (e) -> e.preventDefault()',
+      '  badNamed: (e) -> e.notAnEventProperty.deeper()',
+      '',
+      '  render',
+      '    form @submit: @handleSubmit',
+      "      button @click: @badNamed, 'bad'",
+      "      button @click: (e) -> console.log e.clientX, 'ok'",
+      '      input @input: (e) -> console.log e.target.value',
+      "      button @click: (e) -> e.alsoNotAnEventProperty, 'bad inline'",
+      "      button @click: (e: MouseEvent) -> console.log e.button, 'annotated'",
+      '',
+    ].join('\n');
+    const dir = workspace({ 'h.rip': src });
+    try {
+      const r = check(dir);
+      expect(r.status).toBe(1);
+      expect(r.stdout).toContain('h.rip:5:22 - error'); // named ref: at the method definition
+      expect(r.stdout).toContain("Property 'notAnEventProperty' does not exist");
+      expect(r.stdout).toContain('h.rip:12:31 - error'); // inline: on the handler body
+      expect(r.stdout).toContain("Property 'alsoNotAnEventProperty' does not exist");
+      // Exactly the two planted errors — preventDefault/clientX/
+      // target.value/annotated-param lines raise nothing.
+      expect(r.stdout).toContain('Found 2 errors');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 90_000);
+
   test('the implicit-any family is permissive by default, strict under rip.strict', () => {
     const src = 'greet = (name) -> name.toUpperCase()\nconsole.log greet("hi")\n';
     const loose = workspace({ 'a.rip': src }, null);

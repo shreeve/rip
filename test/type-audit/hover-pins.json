@@ -4,7 +4,7 @@
     "implicitAny@85": "let implicitAny: (x: any) => any"
   },
   "06-functions.rip": {
-    "String@326": "var String: StringConstructor Allows manipulation and formatting of text strings and determination and location of substrings within strings."
+    "String@305": "var String: StringConstructor Allows manipulation and formatting of text strings and determination and location of substrings within strings."
   },
   "08-reactive.rip": {
     "clicks@4": "let clicks: number",
@@ -28,24 +28,24 @@
     "PropTypeTests@76": "const PropTypeTests: typeof PropTypeTests",
     "BindingTypeTests@95": "const BindingTypeTests: typeof BindingTypeTests",
     "TypeTestComp@110": "const TypeTestComp: typeof TypeTestComp",
-    "RenderCondTest@139": "const RenderCondTest: typeof RenderCondTest",
-    "FilterGapTest@172": "const FilterGapTest: typeof FilterGapTest",
-    "EventHandlerTest@197": "const EventHandlerTest: typeof EventHandlerTest",
-    "Select@216": "const Select: typeof Select",
-    "GenericUsageTests@238": "const GenericUsageTests: typeof GenericUsageTests",
-    "cart@279": "let cart: Cart",
-    "CartDemo@285": "const CartDemo: typeof CartDemo",
-    "CartTypeTests@301": "const CartTypeTests: typeof CartTypeTests",
-    "DefaultedMethodParams@332": "const DefaultedMethodParams: typeof DefaultedMethodParams",
-    "DefaultedMethodParamsTests@347": "const DefaultedMethodParamsTests: typeof DefaultedMethodParamsTests",
-    "EqualsFormMethods@370": "const EqualsFormMethods: typeof EqualsFormMethods",
-    "EqualsFormMethodTests@380": "const EqualsFormMethodTests: typeof EqualsFormMethodTests",
-    "RefTests@399": "const RefTests: typeof RefTests",
-    "RefMismatchTests@415": "const RefMismatchTests: typeof RefMismatchTests",
-    "RefForwardChild@435": "const RefForwardChild: typeof RefForwardChild",
-    "RefForwardParent@441": "const RefForwardParent: typeof RefForwardParent",
-    "ConstMembers@456": "const ConstMembers: typeof ConstMembers",
-    "ConstMemberTests@465": "const ConstMemberTests: typeof ConstMemberTests"
+    "RenderCondTest@145": "const RenderCondTest: typeof RenderCondTest",
+    "FilterGapTest@178": "const FilterGapTest: typeof FilterGapTest",
+    "EventHandlerTest@208": "const EventHandlerTest: typeof EventHandlerTest",
+    "Select@227": "const Select: typeof Select",
+    "GenericUsageTests@249": "const GenericUsageTests: typeof GenericUsageTests",
+    "cart@290": "let cart: Cart",
+    "CartDemo@296": "const CartDemo: typeof CartDemo",
+    "CartTypeTests@312": "const CartTypeTests: typeof CartTypeTests",
+    "DefaultedMethodParams@343": "const DefaultedMethodParams: typeof DefaultedMethodParams",
+    "DefaultedMethodParamsTests@358": "const DefaultedMethodParamsTests: typeof DefaultedMethodParamsTests",
+    "EqualsFormMethods@381": "const EqualsFormMethods: typeof EqualsFormMethods",
+    "EqualsFormMethodTests@391": "const EqualsFormMethodTests: typeof EqualsFormMethodTests",
+    "RefTests@410": "const RefTests: typeof RefTests",
+    "RefMismatchTests@426": "const RefMismatchTests: typeof RefMismatchTests",
+    "RefForwardChild@446": "const RefForwardChild: typeof RefForwardChild",
+    "RefForwardParent@452": "const RefForwardParent: typeof RefForwardParent",
+    "ConstMembers@467": "const ConstMembers: typeof ConstMembers",
+    "ConstMemberTests@476": "const ConstMemberTests: typeof ConstMemberTests"
   },
   "10-validation.rip": {
     "User@43": "let User: Schema<User, User>",

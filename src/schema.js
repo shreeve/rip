@@ -1457,7 +1457,7 @@ function findTopLevelArrowIdx(tokens) {
 // strip gate holds by construction. With `thisTypes` absent every
 // segment is plain — the JS emission joins them to the pinned literal.
 
-export function descriptorSegments(descriptor, schemaName, fns, adapterCode = null, thisTypes = null) {
+export function descriptorSegments(descriptor, schemaName, fns, adapterCode = null, thisTypes = null, tsFace = false) {
   const segs = [];
   const emit = (s) => {
     if (segs.length && typeof segs[segs.length - 1] === 'string') segs[segs.length - 1] += s;
@@ -1469,7 +1469,7 @@ export function descriptorSegments(descriptor, schemaName, fns, adapterCode = nu
   emit(`, entries: [`);
   descriptor.entries.forEach((e, i) => {
     if (i > 0) emit(', ');
-    entrySegments(e, fns.get(i), thisTypes?.get(i) ?? null, emit, emitTs);
+    entrySegments(e, fns.get(i), thisTypes?.get(i) ?? null, emit, emitTs, tsFace);
   });
   emit(']');
   // `schema :model, on: <expr>` — evaluated at declaration time in
@@ -1495,7 +1495,7 @@ function fnSegments(fnCode, thisType, emit, emitTs) {
   emit(code.slice(thisAt));
 }
 
-function entrySegments(e, fnCode, thisType, emit, emitTs) {
+function entrySegments(e, fnCode, thisType, emit, emitTs, tsFace = false) {
   switch (e.tag) {
     case 'computed':
     case 'method':
@@ -1508,6 +1508,26 @@ function entrySegments(e, fnCode, thisType, emit, emitTs) {
       emit('}');
       return;
     default:
+      // A field transform's `it` — the whole RAW input, pre-validation
+      // — types face-only `any`, a declared boundary rather than an
+      // omission: the wire shape is what the transform exists to
+      // absorb, the DSL fixes the parameter list to `it` (nothing for
+      // an author to annotate), and `unknown` would reject the DSL's
+      // own idiom (`-> it.X`). The annotation splices as a ts segment
+      // so the strip gate holds by construction; the transform is the
+      // field literal's LAST property, so the splice offset is fixed
+      // arithmetic off thisAt (the params open right there, and a
+      // field's params are exactly `it` — schemaBodyParams).
+      if (tsFace && e.tag === 'field' && fnCode !== undefined && typeof fnCode !== 'string' &&
+          fnText(fnCode).startsWith('it', fnCode.thisAt)) {
+        const whole = entryLiteral(e, fnCode);
+        const fn = fnText(fnCode);
+        const cut = whole.length - 1 - fn.length + fnCode.thisAt + 'it'.length;
+        emit(whole.slice(0, cut));
+        emitTs(': any');
+        emit(whole.slice(cut));
+        return;
+      }
       emit(entryLiteral(e, fnCode));
   }
 }

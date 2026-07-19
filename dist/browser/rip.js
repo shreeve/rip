@@ -1446,7 +1446,7 @@ function findTopLevelArrowIdx(tokens) {
   }
   return -1;
 }
-function descriptorSegments(descriptor, schemaName, fns, adapterCode = null, thisTypes = null) {
+function descriptorSegments(descriptor, schemaName, fns, adapterCode = null, thisTypes = null, tsFace = false) {
   const segs = [];
   const emit = (s) => {
     if (segs.length && typeof segs[segs.length - 1] === "string")
@@ -1462,7 +1462,7 @@ function descriptorSegments(descriptor, schemaName, fns, adapterCode = null, thi
   descriptor.entries.forEach((e, i) => {
     if (i > 0)
       emit(", ");
-    entrySegments(e, fns.get(i), thisTypes?.get(i) ?? null, emit, emitTs);
+    entrySegments(e, fns.get(i), thisTypes?.get(i) ?? null, emit, emitTs, tsFace);
   });
   emit("]");
   if (adapterCode)
@@ -1481,7 +1481,7 @@ function fnSegments(fnCode, thisType, emit, emitTs) {
   emitTs(`this: ${thisType}${code[thisAt] === ")" ? "" : ", "}`);
   emit(code.slice(thisAt));
 }
-function entrySegments(e, fnCode, thisType, emit, emitTs) {
+function entrySegments(e, fnCode, thisType, emit, emitTs, tsFace = false) {
   switch (e.tag) {
     case "computed":
     case "method":
@@ -1494,6 +1494,15 @@ function entrySegments(e, fnCode, thisType, emit, emitTs) {
       emit("}");
       return;
     default:
+      if (tsFace && e.tag === "field" && fnCode !== undefined && typeof fnCode !== "string" && fnText(fnCode).startsWith("it", fnCode.thisAt)) {
+        const whole = entryLiteral(e, fnCode);
+        const fn = fnText(fnCode);
+        const cut = whole.length - 1 - fn.length + fnCode.thisAt + "it".length;
+        emit(whole.slice(0, cut));
+        emitTs(": any");
+        emit(whole.slice(cut));
+        return;
+      }
       emit(entryLiteral(e, fnCode));
   }
 }
@@ -9421,12 +9430,60 @@ class Emitter {
     if (this.ts)
       this.b.tsOnly(() => this.b.emit(`: any${suffix}`));
   }
-  tsHandlerCast(fn) {
+  capturedExprText(node) {
+    const prevB = this.b;
+    this.b = new CodeBuilder(this.stores, { source: prevB.source });
+    try {
+      this.withExpression(() => this.expr(node));
+      return this.b.code;
+    } finally {
+      this.b = prevB;
+    }
+  }
+  static isTypeofPathNode(x) {
+    if (typeof x === "string")
+      return isIdentifierName(x);
+    return isNode4(x) && x[0] === "." && x.length === 3 && typeof x[2] === "string" && isIdentifierName(x[2]) && Emitter.isTypeofPathNode(x[1]);
+  }
+  tsIterElementTypeText(iter, unsafeNames, resolvableRoots) {
+    if (!this.ts || iter === undefined || !Emitter.isTypeofPathNode(iter))
+      return null;
+    const leaves = new Set;
+    Emitter.collectLeafNames(iter, leaves);
+    for (const n of leaves)
+      if (unsafeNames.has(n))
+        return null;
+    const text = this.capturedExprText(iter);
+    if (!/^[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)*$/.test(text))
+      return null;
+    const root = text.split(".", 1)[0];
+    if (!resolvableRoots.has(root) && !this.scopes.some((s) => s.has(root)))
+      return null;
+    return `NonNullable<typeof ${text}> extends readonly (infer __E)[] ? __E : any`;
+  }
+  tsLoopItemTypeText(entry, rec, entryIndex) {
+    if (!this.ts || entry.iter === undefined)
+      return null;
+    const unsafe = new Set([rec.self, ...rec.renameHazardNames]);
+    for (let i = entryIndex;i < rec.loopStack.length; i++) {
+      unsafe.add(rec.loopStack[i].itemVar);
+      unsafe.add(rec.loopStack[i].indexVar);
+    }
+    return this.tsIterElementTypeText(entry.iter, unsafe, new Set([rec.self, ...rec.paramNames]));
+  }
+  tsEventTypeText(events) {
+    const known = events.filter((e) => DOM_EVENTS.has(e));
+    if (known.length === 0)
+      return null;
+    const map = known.map((e) => `HTMLElementEventMap['${e}']`).join(" | ");
+    return `${known.length > 1 ? `(${map})` : map} & { target: any; currentTarget: any }`;
+  }
+  tsHandlerCast(fn, evTypeText = null) {
     if (!this.ts)
       return fn();
     this.b.tsOnly(() => this.b.emit("("));
     fn();
-    this.b.tsOnly(() => this.b.emit(") as any"));
+    this.b.tsOnly(() => this.b.emit(evTypeText === null ? ") as any" : `) as (e: ${evTypeText}) => unknown`));
   }
   tsComponentCtor(info, pad) {
     if (info.members.some((m) => m.kind === "gate")) {
@@ -10592,7 +10649,7 @@ class Emitter {
     this.mark(node, "$self", () => {
       this.b.emit("__schema(");
       this.mark(node, "body", () => {
-        const segments = descriptorSegments(descriptor, schemaName, fns, fns.get("adapter") ?? null, story?.thisTypes ?? null);
+        const segments = descriptorSegments(descriptor, schemaName, fns, fns.get("adapter") ?? null, story?.thisTypes ?? null, this.ts);
         for (const seg of segments) {
           if (typeof seg === "string")
             this.b.emit(seg);
@@ -13663,8 +13720,29 @@ ${pad ?? ""}`);
       this.scopes.pop();
       this.b.emit(`${pad}}
 `);
+      const methodEventNames = new Map;
+      if (this.ts && renderNode !== null) {
+        const scanHandlers = (x) => {
+          if (!isNode4(x))
+            return;
+          if (x[0] === ":" && x.length === 3 && isNode4(x[1]) && x[1][0] === "." && x[1][1] === "this" && typeof x[1][2] === "string" && DOM_EVENTS.has(x[1][2])) {
+            const v = x[2];
+            const m = typeof v === "string" && members.has(v) ? v : isNode4(v) && v[0] === "." && v[1] === "this" && v.length === 3 && typeof v[2] === "string" && members.has(v[2]) ? v[2] : null;
+            if (m !== null) {
+              if (!methodEventNames.has(m))
+                methodEventNames.set(m, new Set);
+              methodEventNames.get(m).add(x[1][2]);
+            }
+          }
+          for (const el of x)
+            scanHandlers(el);
+        };
+        scanHandlers(renderNode);
+      }
       const emitCallable = ({ name, func, isVoid, node: owner }) => {
         const [, params, block] = func;
+        const evNames = methodEventNames.get(name);
+        const evParamType = evNames !== undefined ? this.tsEventTypeText([...evNames]) : null;
         this.b.emit(pad);
         this.mark(owner, "$self", () => {
           if (Emitter.containsAwait(block))
@@ -13673,7 +13751,7 @@ ${pad ?? ""}`);
             this.b.emit("*");
           this.mark(owner, "target", () => this.mark(owner, "key", () => this.b.emit(name)));
           this.b.emit("(");
-          this.emitParams(params);
+          this.emitParams(params, evParamType);
           this.b.emit(")");
           this.tsReturnAnnotation(func, Emitter.containsAwait(block), isVoid, owner);
           this.b.emit(" ");
@@ -13731,7 +13809,8 @@ ${pad ?? ""}`);
       forceNonStatic: false,
       root: null,
       params: null,
-      originNode: renderNode
+      originNode: renderNode,
+      renameHazardNames: new Set
     };
     this.rstate = {
       elCount: 0,
@@ -14715,7 +14794,9 @@ ${pad ?? ""}`);
       Emitter.collectLeafNames(value, evUsed);
       const ev = Emitter.mintName("e", evUsed);
       this.renderLine(pair, () => {
-        this.b.emit(`if (${instVar}) ${elVar}.addEventListener('${event}', (${ev}) => ${this.runtimeName("__batch")}(() => (`);
+        this.b.emit(`if (${instVar}) ${elVar}.addEventListener('${event}', (${ev}`);
+        this.tsScaffoldAny();
+        this.b.emit(`) => ${this.runtimeName("__batch")}(() => (`);
         this.tsHandlerCast(() => this.withExpression(() => this.expr(value)));
         this.b.emit(`)(${ev})))`);
       });
@@ -14806,7 +14887,9 @@ ${pad ?? ""}`);
         const ev = Emitter.mintName("e", evUsed);
         this.renderLine(pair, () => {
           const self = this.renderSelf ?? "this";
-          this.b.emit(`${el}.addEventListener('${eventName}', (${ev}) => ${this.runtimeName("__batch")}(() => `);
+          this.b.emit(`${el}.addEventListener('${eventName}', (${ev}`);
+          this.tsScaffoldAny();
+          this.b.emit(`) => ${this.runtimeName("__batch")}(() => `);
           if (typeof value === "string" && this.renderVarKind(value) === null && this.cframes[this.cframes.length - 1].members.has(value)) {
             if (this.ts)
               this.b.tsOnly(() => this.b.emit("("));
@@ -14815,8 +14898,9 @@ ${pad ?? ""}`);
               this.b.tsOnly(() => this.b.emit(" as any)"));
             this.b.emit(`(${ev})`);
           } else {
+            const evType = this.ts && isFunc2(value) && (value[1].length === 0 || value[1].length === 1 && typeof value[1][0] === "string") ? this.tsEventTypeText([eventName]) : null;
             this.b.emit("(");
-            this.tsHandlerCast(() => this.withExpression(() => this.expr(value)));
+            this.tsHandlerCast(() => this.withExpression(() => this.expr(value)), evType);
             this.b.emit(`)(${ev})`);
           }
           this.b.emit("))");
@@ -15060,6 +15144,7 @@ ${pad ?? ""}`);
     const headerSet = new Set(ownVars);
     const bodySpells = new Set;
     Emitter.collectLeafNames(part, bodySpells);
+    const renameHazardNames = new Set(parent.renameHazardNames ?? []);
     const remap = (n) => {
       if (!headerSet.has(n)) {
         headerSet.add(n);
@@ -15069,6 +15154,8 @@ ${pad ?? ""}`);
       while (headerSet.has(cand) || bodySpells.has(cand))
         cand += "_";
       headerSet.add(cand);
+      renameHazardNames.add(n);
+      renameHazardNames.add(cand);
       return cand;
     };
     const visibleOuter = parent.loopStack.map((v) => ({ ...v, itemVar: remap(v.itemVar), indexVar: remap(v.indexVar) }));
@@ -15096,7 +15183,8 @@ ${pad ?? ""}`);
       isStatic: false,
       originNode,
       hasKids: false,
-      kidsVar: null
+      kidsVar: null,
+      renameHazardNames
     };
     R.records.push(rec);
     const prevSlot = R.transitionSlot;
@@ -15229,7 +15317,7 @@ ${pad ?? ""}`);
       this.checkSetupLocalRefs(keyExpr, node);
       this.checkCrossScopeLocals(keyExpr, node);
     }
-    const rec = this.walkFactory(body, "loop", node, { itemVar, indexVar, reactiveSource });
+    const rec = this.walkFactory(body, "loop", node, { itemVar, indexVar, reactiveSource, iter, node });
     if (keyExpr !== null) {
       if (rec.locals.size > 0 && referencesNames(keyExpr, rec.locals)) {
         throw this.positionedError(node, "emitter: a `key:` expression must be evaluable in the loop HEADER scope — it reads a render local declared " + "inside the loop body, which lives in the row factory (derive the key from the item inline: `key: item.id`)");
@@ -15410,7 +15498,14 @@ ${pad ?? ""}`);
       this.withExpression(() => this.expr(iter));
       this.b.emit(`, ${self}, ${self}.${rec.name}, `);
       if (keyExpr !== null) {
-        this.b.emit(`(${itemVar}, ${indexVar}) => `);
+        const keyItemType = this.tsIterElementTypeText(iter, new Set([itemVar, indexVar, ...rec.renameHazardNames]), new Set([self, ...outer]));
+        this.b.emit(`(${itemVar}`);
+        if (keyItemType !== null)
+          this.b.tsOnly(() => this.b.emit(`: ${keyItemType}`));
+        this.b.emit(`, ${indexVar}`);
+        if (this.ts)
+          this.b.tsOnly(() => this.b.emit(": number"));
+        this.b.emit(") => ");
         this.withBindings([itemVar, indexVar], () => this.withExpression(() => {
           const wrap = Emitter.needsGrouping(keyExpr, "operand") || isObject(keyExpr);
           if (wrap)
@@ -15451,22 +15546,76 @@ ${pad ?? ""}`);
     const kidC = rec.kidsVar !== null ? Emitter.mintName("__c", used) : null;
     const kidE = rec.kidsVar !== null ? Emitter.mintName("__e", used) : null;
     const needsP = !rec.isStatic;
+    const ctxType = this.ts ? Emitter.mintName("__Ctx", used) : null;
+    const paramTypes = new Map;
+    const paramNodes = new Map;
+    rec.loopStack.forEach((entry) => {
+      if (entry.node !== undefined) {
+        paramNodes.set(entry.itemVar, entry.node);
+        paramNodes.set(entry.indexVar, entry.node);
+      }
+    });
+    if (this.ts) {
+      this.withRecordContext(rec, () => {
+        rec.loopStack.forEach((entry, i) => {
+          const t = this.tsLoopItemTypeText(entry, rec, i);
+          if (t !== null)
+            paramTypes.set(entry.itemVar, t);
+          paramTypes.set(entry.indexVar, "number");
+        });
+      });
+    }
+    const emitTypedParams = (names, selfType, typeOf) => {
+      names.forEach((n, i) => {
+        if (i > 0)
+          this.b.emit(", ");
+        const emitOne = () => {
+          this.b.emit(n);
+          if (!this.ts)
+            return;
+          const t = i === 0 ? selfType : typeOf(n, i);
+          if (t != null)
+            this.b.tsOnly(() => this.b.emit(`: ${t}`));
+        };
+        const owner = paramNodes.get(n);
+        if (owner !== undefined)
+          this.mark(owner, "$self", emitOne);
+        else
+          emitOne();
+      });
+    };
     this.mark(renderNode, "$self", () => {
       this.withRecordContext(rec, () => {
-        this.b.emit(`${pad}${rec.name}(${headerParams.join(", ")}) {
+        this.b.emit(`${pad}${rec.name}(`);
+        emitTypedParams(headerParams, "this", (n) => paramTypes.get(n));
+        this.b.emit(`) {
 `);
-        if (rec.vars.size > 0)
-          this.b.emit(`${p2}let ${[...rec.vars].join(", ")};
+        if (this.ts)
+          this.b.tsOnly(() => this.b.emit(`${p2}type ${ctxType} = typeof ${self};
+`));
+        if (rec.vars.size > 0) {
+          this.b.emit(`${p2}let `);
+          [...rec.vars].forEach((v, i) => {
+            if (i > 0)
+              this.b.emit(", ");
+            this.b.emit(v);
+            this.tsScaffoldAny();
+          });
+          this.b.emit(`;
 `);
+        }
         if (rec.kidsVar !== null) {
           this.b.emit(`${p2}let ${rec.kidsVar}`);
           this.tsScaffoldAny("[]");
           this.b.emit(` = [];
 `);
         }
-        if (hasFrame)
-          this.b.emit(`${p2}let ${frameVar};
+        if (hasFrame) {
+          this.b.emit(`${p2}let ${frameVar}`);
+          this.tsScaffoldAny();
+          this.b.emit(`;
 `);
+        }
         this.b.emit(`${p2}return {
 `);
         if (rec.isStatic)
@@ -15487,7 +15636,11 @@ ${pad ?? ""}`);
 `);
         this.b.emit(`${p3}},
 `);
-        this.b.emit(`${p3}m(target, anchor) {
+        this.b.emit(`${p3}m(target`);
+        this.tsScaffoldAny();
+        this.b.emit(", anchor");
+        this.tsScaffoldAny();
+        this.b.emit(`) {
 `);
         if (fragChildren !== undefined) {
           for (const child of fragChildren) {
@@ -15506,7 +15659,13 @@ ${pad ?? ""}`);
         }
         this.b.emit(`${p3}},
 `);
-        this.b.emit(`${p3}p(${(needsP ? pParams : headerParams).join(", ")}) {
+        this.b.emit(`${p3}p(`);
+        if (needsP) {
+          emitTypedParams(pParams, ctxType, (n, i) => `typeof ${rec.paramNames[i - 1]}`);
+        } else {
+          emitTypedParams(headerParams, ctxType, (n) => paramTypes.get(n));
+        }
+        this.b.emit(`) {
 `);
         if (needsP && rec.paramNames.length > 0) {
           this.b.emit(`${p4}${rec.paramNames.map((n, i) => `${n} = ${pParams[i + 1]};`).join(" ")}
@@ -15525,7 +15684,9 @@ ${pad ?? ""}`);
         }
         this.b.emit(`${p3}},
 `);
-        this.b.emit(`${p3}d(detaching) {
+        this.b.emit(`${p3}d(detaching`);
+        this.tsScaffoldAny();
+        this.b.emit(`) {
 `);
         if (rec.kidsVar !== null) {
           this.b.emit(`${p4}for (const ${kidC} of ${rec.kidsVar}) { try { ${kidC}.unmount?.({removeDOM: detaching}); } catch (${kidE}) { console.error('[Rip] factory child unmount error:', ${kidE}); } }
@@ -15636,7 +15797,9 @@ ${pad ?? ""}`);
     Emitter.collectLeafNames(value, evUsed);
     const ev = Emitter.mintName("e", evUsed);
     this.renderLine(pair, () => {
-      this.b.emit(`${el}.addEventListener('${event}', (${ev}) => { `);
+      this.b.emit(`${el}.addEventListener('${event}', (${ev}`);
+      this.tsScaffoldAny();
+      this.b.emit(") => { ");
       this.withExpression(() => this.expr(value));
       this.b.emit(` = ${ev}.${accessor};`);
       if (touch !== null) {
@@ -16849,7 +17012,7 @@ ${"  ".repeat(ind)}`);
       extractions: trailing.map((name, i) => `const ${name} = _rest[_rest.length - ${trailing.length - i}];`)
     };
   }
-  emitParams(params) {
+  emitParams(params, firstParamTypeText = null) {
     Emitter.expansionSplit(params).list.forEach((p, i) => {
       if (Emitter.atParamName(p) !== null || isNode4(p) && p[0] === "default" && Emitter.atParamName(p[1]) !== null) {
         throw this.positionedError(isNode4(p) ? p : params, "emitter: an @-parameter promotes only in a constructor (`constructor: (@name) ->`) — bind a plain parameter and assign it here");
@@ -16857,6 +17020,9 @@ ${"  ".repeat(ind)}`);
       if (i > 0)
         this.b.emit(", ");
       this.emitParam(p);
+      if (i === 0 && firstParamTypeText !== null && typeof p === "string" && this.ts) {
+        this.b.tsOnly(() => this.b.emit(`: ${firstParamTypeText}`));
+      }
     });
   }
   func(node) {
