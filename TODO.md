@@ -284,6 +284,34 @@ clobber each other. Cheap, language-correct, no ALS.
 
 ---
 
+## v4 @rip-lang/server architecture (three concepts, one package)
+
+v3 (~9k lines) maps mostly to **Janus**, not to Rip code:
+`server.rip` + `serving/*` + `streams/*` + `acme/*` + `compat/*`
+(~5.6k lines: TLS, listener, static, proxy, health, queue, rate
+limit, hub, mDNS, nginx/caddy compat) are **deleted as a concept** —
+Janus owns the edge. What remains is one package, three concepts:
+
+| Concept | File | Origin | Size |
+| --- | --- | --- | --- |
+| DSL (Sinatra surface) | `server.rip` (entry) | v3 `api.rip` ports ~verbatim; ALS ctx, `read()` via @rip-lang/validate, `error!/notice!/bail!`, OpenAPI | ~800 |
+| Manager (the process you run) | `manager.rip` | v3 `control/{manager,workers,watchers,cli}` rewritten small: watch → doorbell → spawn → /1.0 client → heartbeats; NO data plane | ~350 |
+| Worker (UDS runtime) | `worker.rip` | v3 `control/worker.rip` minus busy-checkout (Janus least_conn + c:1 replaces it): load app, bind UDS, `/ready`, drain on SIGTERM | ~150 |
+
+Plus `middleware.rip` (cors/logger/serve), `bin/rip-server`,
+`test.rip`, README — per the packages mold.
+
+Key property: **the DSL doesn't know Janus exists.** `start()` inside
+a worker (env-detected) registers the fetch handler; standalone
+(`bun app.rip`) serves a port directly. Same app file both ways.
+
+"Rip Server" = product/package name; in the protocol doc it means the
+manager process. Spawn mechanism stays v3's: `Bun.spawn ['bun',
+worker.rip]` with env (`APP_ENTRY`, `SOCKET_PATH`, `WORKER_ID`, …).
+
+Build order: DSL (+tests, standalone mode) → worker → manager →
+meet Janus Phase 8. Protocol: `janus/docs/20260719-002000-pool-protocol.md`.
+
 ## Related pointers
 
 - v3 reference (working product): `rip-lang/packages/server` (leave alone
