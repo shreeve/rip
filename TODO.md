@@ -6,6 +6,20 @@ moved into real docs/tests.
 
 ---
 
+## Possible emitter bug: if-expression on `=!` leaves an IIFE temp undeclared
+
+Reported 2026-07-20 while building the `-c` knob (worker env
+validation): a multi-line `if`-expression assigned to a `=!` readonly
+binding compiled to an IIFE whose inner temporary was left undeclared —
+output that throws under strict mode. The author flattened the code
+rather than ship the shape, so no repro was committed. This smells like
+the silent-miscompile class (rule 1 worst case).
+
+- [ ] Reconstruct the shape (multi-line `if` expression value on `=!`),
+      minimize, and check `rip -c` output for the undeclared temp.
+- [ ] If real: fix per emitter doctrine and pin in the battery; if not
+      reproducible, record what refuted it here and strike.
+
 ## Rip Server concurrency (`c:N`) and hot reload
 
 **Context:** Janus-era Rip Server will keep Unicorn-shaped workers
