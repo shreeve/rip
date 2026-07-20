@@ -69,8 +69,11 @@ server = Bun.serve
   unix: socketPath
   maxRequestBodySize: 100 * 1024 * 1024
   fetch: (req) ->
-    url = new URL(req.url)
-    if url.pathname is '/ready' and req.method is 'GET'
+    # /ready probe detection without a URL parse on the hot path: the cheap
+    # string test gates the parse, and the parse still confirms the pathname
+    # so an app route like /x/ready is never mistaken for the probe.
+    u = req.url
+    if req.method is 'GET' and (u.endsWith('/ready') or u.includes('/ready?')) and new URL(u).pathname is '/ready'
       return new Response('ok') if state.ready and not state.draining
       # The rip-boot-failed marker lets the manager's poll tell a failed
       # boot (cache the error, stop waiting) from one still in progress.
